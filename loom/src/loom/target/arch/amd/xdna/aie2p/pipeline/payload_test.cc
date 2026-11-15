@@ -94,6 +94,48 @@ TEST_F(PayloadTest, RepeatedPhysicalEndpointsKeepOneUnframedClass) {
   EXPECT_EQ(words[2], 5u);
 }
 
+TEST_F(PayloadTest, RepeatedPacketClassRetainsEachConstructionUse) {
+  constexpr auto none = IREE_HOST_SIZE_MAX;
+  const loom_pipeline_lifetime_t nodes[] = {
+      {LOOM_PIPELINE_LIFETIME_CONCURRENT, 0, none, 1, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 0, 0, none, 2},
+      {LOOM_PIPELINE_LIFETIME_SERIAL, 0, 0, 3, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 1, 2, none, 4},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 2, 2, none, 5},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 3, 2, none, none},
+  };
+  const iree_host_size_t owners[] = {1, 3, 4, 5};
+  loom_pipeline_invocation_t invocations[3] = {};
+  loom_pipeline_invocation_worker_t workers[3] = {};
+  for (size_t i = 0; i < 3; ++i) {
+    invocations[i].ordinal = i + 1;
+    workers[i].invocation = &invocations[i];
+    Ordinary(i, i == 1 ? 3 : 2, true);
+  }
+  realization_.invocations.workers = workers;
+  realization_.invocations.lifetimes = {
+      .nodes = nodes,
+      .count = IREE_ARRAYSIZE(nodes),
+      .owners = owners,
+      .has_serial = true,
+  };
+  IREE_ASSERT_OK(loom_pipeline_lifetimes_index(
+      &arena_, &realization_.invocations.lifetimes));
+  Form();
+  ASSERT_EQ(paths_[0].payload, paths_[2].payload);
+  ASSERT_NE(paths_[0].payload, paths_[1].payload);
+  // The repeated class is used before and after the other class. Its set
+  // must retain both uses, not just the first owner or their SERIAL ancestor.
+  for (size_t i = 0; i < 2; ++i) {
+    std::set<size_t> uses;
+    for (size_t use = paths_[i].payload->lifetime_head; use;
+         use = context_.route_lifetimes[use].next) {
+      uses.insert(context_.route_lifetimes[use].lifetime);
+    }
+    EXPECT_EQ(uses, i ? std::set<size_t>({4}) : std::set<size_t>({3, 5}));
+  }
+}
+
 TEST_F(PayloadTest, ShimPhasesShareOnePacketNamespace) {
   Ordinary(0, 2, true);
   Ordinary(1, 3, true);
@@ -210,8 +252,10 @@ TEST_F(PayloadTest, LaterPassthroughConstrainsAnEarlierShortIngress) {
         &context_, paths_[i].payload, nullptr, &next_source, &valid));
     ASSERT_TRUE(valid);
   }
-  const loom_aie2p_native_switch_input_t input = {.routing = &context_.routing,
-                                                  .routes = context_.routes};
+  const loom_aie2p_native_switch_input_t input = {
+      .routing = &context_.routing,
+      .routes = context_.routes,
+  };
   iree_string_view_t requirement = iree_string_view_empty();
   IREE_ASSERT_OK(loom_aie2p_native_switches_build(
       &input, &arena_, &context_.switches, &requirement));
@@ -383,6 +427,8 @@ class MulticastPayloadTest
     const loom_aie2p_native_switch_input_t input = {
         .routing = &context_.routing,
         .routes = context_.routes,
+        .lifetimes = &realization_.invocations.lifetimes,
+        .route_lifetimes = context_.route_lifetimes,
         .control_sources = context_.control_sources,
         .control_destination_sources = context_.control_destination_sources,
     };
@@ -557,6 +603,7 @@ TEST_P(MulticastPayloadTest, SerializedSourcesPreserveEveryPacketDestination) {
 
 TEST_P(MulticastPayloadTest, ConcurrentSourcesKeepIndependentReceiverQueues) {
   nodes_[2].kind = LOOM_PIPELINE_LIFETIME_CONCURRENT;
+  realization_.invocations.lifetimes.has_serial = false;
   const auto [sources, queries] = GetParam();
   // A core has two receive queues. More concurrent senders are rejected by
   // queue allocation before payload routing can consume those identities.

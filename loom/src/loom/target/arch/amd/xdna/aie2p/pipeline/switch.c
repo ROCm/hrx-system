@@ -7,12 +7,14 @@
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/switch.h"
 
 #include "iree/base/internal/math.h"
+#include "loom/analysis/pipeline/lifetimes.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
 
 typedef struct loom_aie2p_native_packet_group_t {
   // Complete multicast output set for one input packet filter.
   uint32_t masters;
-  // Next packet group on the same input, or UINT16_MAX at the end.
+  // Next group on the same input, then in the same output component after
+  // packet covering. UINT16_MAX marks the end of either list.
   uint16_t next;
   // Physical filter word assigned after complete multicast aggregation.
   uint16_t filter;
@@ -24,6 +26,10 @@ typedef struct loom_aie2p_native_packet_group_t {
   uint8_t component;
   // Destination-set ordinal within the component's arbiter selections.
   uint8_t selection;
+  // First contributing route plus one, or zero for scope-wide traffic.
+  iree_host_size_t first_use;
+  // Last contributing route plus one, used when covering several packet IDs.
+  iree_host_size_t last_use;
 } loom_aie2p_native_packet_group_t;
 
 typedef struct loom_aie2p_native_switch_admission_t {
@@ -50,6 +56,10 @@ typedef struct loom_aie2p_native_switch_admission_t {
   uint32_t completion_inputs;
   // Outputs carrying any traffic that can wait for payload or core progress.
   uint32_t blocking_masters;
+  // Retained physical routes and common lifetime facts for this build.
+  const loom_aie2p_native_switch_input_t* input;
+  // Next contributing route plus one, shared across this build's switches.
+  iree_host_size_t* next_uses;
 } loom_aie2p_native_switch_admission_t;
 
 static iree_status_t loom_aie2p_native_switch_initialize(
@@ -195,6 +205,7 @@ static bool loom_aie2p_native_switch_cover_input(
   uint32_t destinations[4] = {0};
   uint32_t packet_sets[4] = {0};
   uint16_t groups[32];
+  loom_aie2p_native_packet_group_t original[32];
   uint8_t group_count = 0;
   uint8_t set_count = 0;
   for (uint16_t i = state->first_groups[slave]; i != UINT16_MAX;
@@ -211,6 +222,7 @@ static bool loom_aie2p_native_switch_cover_input(
       destinations[set_count++] = group->masters;
     }
     packet_sets[set] |= UINT32_C(1) << group->packet;
+    original[group_count] = *group;
     groups[group_count++] = i;
   }
   uint8_t filter_count = 0;
@@ -235,6 +247,19 @@ static bool loom_aie2p_native_switch_cover_input(
           .filter = slave * state->filter_slot_count + filter_count,
           .packet = filters[j].packet,
           .mask = filters[j].mask};
+      for (uint8_t k = 0; k < group_count; ++k) {
+        const loom_aie2p_native_packet_group_t* use = &original[k];
+        if (use->masters != group->masters ||
+            ((use->packet ^ group->packet) & group->mask) || !use->first_use) {
+          continue;
+        }
+        if (group->last_use) {
+          state->next_uses[group->last_use - 1] = use->first_use;
+        } else {
+          group->first_use = use->first_use;
+        }
+        group->last_use = use->last_use;
+      }
       ++filter_count;
     }
   }
@@ -338,6 +363,67 @@ static uint8_t loom_aie2p_native_packet_component(uint8_t* parents,
   return master;
 }
 
+static bool loom_aie2p_native_packet_uses_exclusive(
+    const loom_aie2p_native_switch_admission_t* state,
+    const loom_aie2p_native_packet_group_t* first,
+    const loom_aie2p_native_packet_group_t* second) {
+  if (first->filter / state->filter_slot_count ==
+      second->filter / state->filter_slot_count) {
+    return true;
+  }
+  if (!first->first_use || !second->first_use) {
+    return false;
+  }
+  const loom_aie2p_native_switch_input_t* input = state->input;
+  for (iree_host_size_t a = first->first_use; a; a = state->next_uses[a - 1]) {
+    const iree_host_size_t head_a = input->routes[a - 1].lifetime_head;
+    if (!head_a) {
+      return false;
+    }
+    for (iree_host_size_t b = second->first_use; b;
+         b = state->next_uses[b - 1]) {
+      const iree_host_size_t head_b = input->routes[b - 1].lifetime_head;
+      if (!head_b || head_a == head_b) {
+        return false;
+      }
+      for (iree_host_size_t x = head_a; x; x = input->route_lifetimes[x].next) {
+        for (iree_host_size_t y = head_b; y;
+             y = input->route_lifetimes[y].next) {
+          const iree_host_size_t ancestor =
+              loom_pipeline_lifetimes_common_ancestor(
+                  input->lifetimes, input->route_lifetimes[x].lifetime,
+                  input->route_lifetimes[y].lifetime);
+          if (input->lifetimes->nodes[ancestor].kind !=
+              LOOM_PIPELINE_LIFETIME_SERIAL) {
+            return false;
+          }
+        }
+      }
+    }
+  }
+  return true;
+}
+
+static bool loom_aie2p_native_components_exclusive(
+    const loom_aie2p_native_switch_admission_t* state,
+    const uint16_t* group_heads, uint8_t component, uint32_t others) {
+  while (others) {
+    const uint8_t other = (uint8_t)iree_math_count_trailing_zeros_u32(others);
+    others &= others - 1;
+    for (uint16_t i = group_heads[component]; i != UINT16_MAX;
+         i = state->groups[i].next) {
+      for (uint16_t j = group_heads[other]; j != UINT16_MAX;
+           j = state->groups[j].next) {
+        if (!loom_aie2p_native_packet_uses_exclusive(state, &state->groups[i],
+                                                     &state->groups[j])) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 // Overlapping destination sets share one arbiter because each physical output
 // selects only one arbiter. An arbiter holds its grant for the whole packet,
 // including stalls: sharing it can prevent an otherwise independent input
@@ -345,7 +431,8 @@ static uint8_t loom_aie2p_native_packet_component(uint8_t* parents,
 // may share when both have the same single input, which already serializes
 // their packets. Complete register-command components can also share when their
 // inputs overlap: their finite packets retire independently of payload credits.
-// Disjoint inputs retain independent arbiters and potential concurrency.
+// Different inputs may also share when every payload use is in a disjoint
+// serial lifetime. Scope-wide traffic cannot establish that exclusion.
 // Identical sets reuse a selection across packet IDs and inputs.
 static bool loom_aie2p_native_switch_select_packets(
     const loom_xdna_tile_facts_t* facts,
@@ -354,7 +441,9 @@ static bool loom_aie2p_native_switch_select_packets(
   uint32_t component_inputs[32] = {0};
   uint32_t blocking_components = 0;
   uint8_t component_bases[32];
+  uint16_t group_heads[32];
   memset(component_bases, UINT8_MAX, sizeof(component_bases));
+  memset(group_heads, 0xFF, sizeof(group_heads));
   for (uint16_t i = 0; i < state->group_count; ++i) {
     loom_aie2p_native_packet_group_t* group = &state->groups[i];
     group->component = loom_aie2p_native_packet_component(
@@ -362,6 +451,8 @@ static bool loom_aie2p_native_switch_select_packets(
         (uint8_t)iree_math_count_trailing_zeros_u32(group->masters));
     component_inputs[group->component] |=
         UINT32_C(1) << (group->filter / state->filter_slot_count);
+    group->next = group_heads[group->component];
+    group_heads[group->component] = i;
     if (group->masters & state->blocking_masters) {
       blocking_components |= UINT32_C(1) << group->component;
     }
@@ -383,6 +474,7 @@ static bool loom_aie2p_native_switch_select_packets(
   }
   uint8_t arbiter_uses[8] = {0};
   uint32_t arbiter_inputs[8] = {0};
+  uint32_t arbiter_components[8] = {0};
   uint8_t command_arbiters = 0;
   for (uint16_t i = 0; i < state->group_count; ++i) {
     const uint8_t component = state->groups[i].component;
@@ -403,7 +495,9 @@ static bool loom_aie2p_native_switch_select_packets(
       if (arbiter_uses[arbiter] &&
           !(single_input && arbiter_inputs[arbiter] == inputs) &&
           !(register_commands && (command_arbiters & (1u << arbiter)) &&
-            (arbiter_inputs[arbiter] & inputs))) {
+            (arbiter_inputs[arbiter] & inputs)) &&
+          !loom_aie2p_native_components_exclusive(
+              state, group_heads, component, arbiter_components[arbiter])) {
         continue;
       }
       if (arbiter_uses[arbiter] + count <= facts->packet_master_select_count) {
@@ -415,6 +509,7 @@ static bool loom_aie2p_native_switch_select_packets(
         }
         arbiter_uses[arbiter] += count;
         arbiter_inputs[arbiter] |= inputs;
+        arbiter_components[arbiter] |= UINT32_C(1) << component;
         break;
       }
     }
@@ -457,6 +552,12 @@ iree_status_t loom_aie2p_native_switches_build(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, tile_count, sizeof(*switches), (void**)&switches));
   memset(switches, 0, tile_count * sizeof(*switches));
+  iree_host_size_t* next_uses = NULL;
+  if (input->route_lifetimes) {
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(arena, input->routing->route_count,
+                                  sizeof(*next_uses), (void**)&next_uses));
+  }
   loom_aie2p_native_switch_t* head = NULL;
   loom_aie2p_native_switch_t** tail = &head;
   for (iree_host_size_t i = 0; i < input->routing->route_count; ++i) {
@@ -473,6 +574,8 @@ iree_status_t loom_aie2p_native_switches_build(
     if (!state->desired) {
       IREE_RETURN_IF_ERROR(loom_aie2p_native_switch_initialize(
           input->routing, edge->coordinate, arena, state));
+      state->input = input;
+      state->next_uses = next_uses;
       *tail = state->desired;
       tail = &state->desired->next;
     }
@@ -556,6 +659,17 @@ iree_status_t loom_aie2p_native_switches_build(
       group = &state->groups[state->group_count++];
       *group = (loom_aie2p_native_packet_group_t){
           .next = UINT16_MAX, .packet = selected->packet, .mask = 31};
+    }
+    if (next_uses &&
+        (!group->last_use || input->routes[group->last_use - 1].lifetime_head !=
+                                 selected->lifetime_head)) {
+      next_uses[i] = 0;
+      if (group->last_use) {
+        next_uses[group->last_use - 1] = i + 1;
+      } else {
+        group->first_use = i + 1;
+      }
+      group->last_use = i + 1;
     }
     if (state->masters[master] == UINT8_MAX) {
       state->masters[master] = (uint8_t)master;

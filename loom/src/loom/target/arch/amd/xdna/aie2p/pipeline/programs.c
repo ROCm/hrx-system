@@ -139,6 +139,8 @@ static iree_status_t loom_aie2p_native_retain_plan(
       .tiles = tiles,
       .routing = context->routing,
       .routes = context->routes,
+      .route_lifetimes = context->route_lifetimes,
+      .route_lifetime_count = context->route_lifetime_count,
       .control_sources = context->control_sources,
       .control_destination_sources = context->control_destination_sources,
       .column_command_packets = context->column_command_packets,

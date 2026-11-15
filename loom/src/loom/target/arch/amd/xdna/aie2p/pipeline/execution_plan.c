@@ -31,6 +31,15 @@ iree_status_t loom_aie2p_execution_plan_copy_resources(
     target->routes[i] = source->routes[i];
     target->routes[i].edge = &target->routing.routes[i];
   }
+  target->route_lifetime_count = source->route_lifetime_count;
+  target->route_lifetimes = NULL;
+  if (source->route_lifetime_count) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, source->route_lifetime_count, sizeof(*target->route_lifetimes),
+        (void**)&target->route_lifetimes));
+    memcpy(target->route_lifetimes, source->route_lifetimes,
+           source->route_lifetime_count * sizeof(*target->route_lifetimes));
+  }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, tile_count * 2, sizeof(*target->control_sources),
       (void**)&target->control_sources));

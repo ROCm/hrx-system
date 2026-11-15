@@ -49,6 +49,15 @@ typedef struct loom_aie2p_native_control_path_t {
   uint32_t packets;
 } loom_aie2p_native_control_path_t;
 
+// One use of a physical packet class in the common construction lifetime tree.
+// Linked indices share complete use sets across every edge of a payload route.
+typedef struct loom_aie2p_native_route_lifetime_t {
+  // Construction lifetime in the retained common entry scope.
+  iree_host_size_t lifetime;
+  // Previous use, or zero at the end of the set.
+  iree_host_size_t next;
+} loom_aie2p_native_route_lifetime_t;
+
 // One physical route edge carrying the packet identity used during admission.
 typedef struct loom_aie2p_native_route_t {
   // Corresponding edge in the canonical route builder.
@@ -60,6 +69,8 @@ typedef struct loom_aie2p_native_route_t {
   bool register_command;
   // Retained control source, or UINT32_MAX for ordinary payload transport.
   uint32_t control_source;
+  // Head in route_lifetimes, or zero for traffic live throughout the scope.
+  iree_host_size_t lifetime_head;
 } loom_aie2p_native_route_t;
 
 typedef enum loom_aie2p_native_switch_bank_e {
@@ -173,6 +184,10 @@ typedef struct loom_aie2p_execution_plan_t {
   loom_aie2p_array_route_builder_t routing;
   // Packet identity paired one-for-one with routing.routes.
   loom_aie2p_native_route_t* routes;
+  // Sparse use sets retained by payload formation, with index zero reserved.
+  loom_aie2p_native_route_lifetime_t* route_lifetimes;
+  // Number of entries in the sparse use table; zero when no sets are retained.
+  iree_host_size_t route_lifetime_count;
   // Source ownership for each tile's core and tile-control outputs.
   loom_aie2p_native_control_source_t* control_sources;
   // Unique source per core/tile-control destination; UINT32_MAX means unused,

@@ -270,6 +270,8 @@ iree_status_t loom_aie2p_code_transport_finish(
   const loom_aie2p_native_switch_input_t input = {
       .routing = &plan->routing,
       .routes = plan->routes,
+      .lifetimes = &plan->base.lifetimes,
+      .route_lifetimes = plan->route_lifetimes,
       .control_sources = plan->control_sources,
       .control_destination_sources = plan->control_destination_sources};
   IREE_RETURN_IF_ERROR(loom_aie2p_native_switches_build(

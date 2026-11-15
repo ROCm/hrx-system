@@ -1443,6 +1443,8 @@ iree_status_t loom_aie2p_native_select_transfers(
     const loom_aie2p_native_switch_input_t input = {
         .routing = &context->routing,
         .routes = context->routes,
+        .lifetimes = &realization->invocations.lifetimes,
+        .route_lifetimes = context->route_lifetimes,
         .control_sources = context->control_sources,
         .control_destination_sources = context->control_destination_sources,
     };

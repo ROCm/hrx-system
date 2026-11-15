@@ -12,6 +12,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/analysis/pipeline/lifetimes.h"
 #include "loom/pass/types.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/route.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/connectivity.h"
@@ -59,7 +60,7 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
   void AddRoute(loom_xdna_stream_port_t source, uint8_t source_channel,
                 loom_xdna_stream_port_t destination,
                 uint8_t destination_channel, uint8_t packet,
-                bool register_command = false) {
+                bool register_command = false, size_t lifetime_head = 0) {
     const auto index = static_cast<uint32_t>(context_.routing.route_count);
     loom_aie2p_array_route_tree_t tree = {};
     ASSERT_TRUE(loom_aie2p_array_route_stream(
@@ -68,7 +69,7 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
     routes_.resize(context_.routing.route_count);
     for (size_t i = index; i < context_.routing.route_count; ++i) {
       routes_[i] = {&context_.routing.routes[i], packet, register_command,
-                    UINT32_MAX};
+                    UINT32_MAX, lifetime_head};
     }
   }
 
@@ -77,6 +78,8 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
     const loom_aie2p_native_switch_input_t input = {
         .routing = &context_.routing,
         .routes = context_.routes,
+        .lifetimes = &lifetimes_,
+        .route_lifetimes = uses_.empty() ? nullptr : uses_.data(),
         .control_sources = context_.control_sources,
         .control_destination_sources = context_.control_destination_sources,
     };
@@ -102,6 +105,34 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
                                              port)
                ->ordinal +
            channel;
+  }
+
+  void SerialLifetimes() {
+    constexpr auto none = IREE_HOST_SIZE_MAX;
+    nodes_ = {
+        {LOOM_PIPELINE_LIFETIME_CONCURRENT, 0, none, 1, none},
+        {LOOM_PIPELINE_LIFETIME_OWNER, 0, 0, none, 2},
+        {LOOM_PIPELINE_LIFETIME_SERIAL, 0, 0, 3, none},
+        {LOOM_PIPELINE_LIFETIME_OWNER, 1, 2, none, 4},
+        {LOOM_PIPELINE_LIFETIME_OWNER, 2, 2, none, none},
+    };
+    lifetimes_ = {
+        .nodes = nodes_.data(),
+        .count = nodes_.size(),
+        .owners = owners_,
+        .has_serial = true,
+    };
+    IREE_ASSERT_OK(loom_pipeline_lifetimes_index(&arena_, &lifetimes_));
+    uses_.push_back({});
+  }
+
+  size_t Uses(std::initializer_list<size_t> lifetimes) {
+    size_t head = 0;
+    for (size_t lifetime : lifetimes) {
+      uses_.push_back({lifetime, head});
+      head = uses_.size() - 1;
+    }
+    return head;
   }
 
   uint32_t Word(loom_aie2p_native_switch_bank_t bank, uint16_t ordinal) {
@@ -169,6 +200,14 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
   std::vector<loom_aie2p_native_tile_t> tiles_;
   // Packet identities attached to the physical route builder's edges.
   std::vector<loom_aie2p_native_route_t> routes_;
+  // Valid retained tree for phase-dependent packet admission.
+  std::vector<loom_pipeline_lifetime_t> nodes_;
+  // Indexed owner leaves in the serial fixture.
+  const iree_host_size_t owners_[3] = {1, 3, 4};
+  // Common ancestry index consumed by switch admission.
+  loom_pipeline_lifetimes_t lifetimes_ = {};
+  // Packet-class use sets; zero is reserved for scope-wide traffic.
+  std::vector<loom_aie2p_native_route_lifetime_t> uses_;
   // Interior column on the selected tile role's first row.
   loom_xdna_tile_coordinate_t coordinate_ = {};
   // Tile role selected by the parameterized packet tests or control fixture.
@@ -686,6 +725,130 @@ TEST_P(Aie2pSwitchTest, IndependentInputsKeepIndependentArbiters) {
   EXPECT_EQ(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, control) & 7,
             Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + 2) & 7);
   EXPECT_EQ(PacketDestinations(source, 1, 2), 1u << control);
+}
+
+TEST_P(Aie2pSwitchTest, SerialPayloadsShareWithoutLosingPacketDestinations) {
+  SerialLifetimes();
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  for (uint8_t input = 0; input < 2; ++input) {
+    const size_t use = Uses({size_t(3 + input)});
+    for (uint8_t packet = 0; packet < 2; ++packet) {
+      AddRoute(source, input, LOOM_XDNA_STREAM_PORT_NORTH, input * 2 + packet,
+               packet, false, use);
+    }
+  }
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  for (bool serial : {true, false}) {
+    SCOPED_TRACE(serial);
+    nodes_[2].kind = serial ? LOOM_PIPELINE_LIFETIME_SERIAL
+                            : LOOM_PIPELINE_LIFETIME_CONCURRENT;
+    lifetimes_.has_serial = serial;
+    ASSERT_NO_FATAL_FAILURE(Build(true));
+    EXPECT_EQ((Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north) & 7) ==
+                  (Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + 2) & 7),
+              serial);
+    for (uint8_t input = 0; input < 2; ++input) {
+      for (uint8_t packet = 0; packet < 2; ++packet) {
+        EXPECT_EQ(PacketDestinations(source, input, packet),
+                  1u << (north + input * 2 + packet));
+      }
+    }
+  }
+}
+
+TEST_P(Aie2pSwitchTest, EveryUseMustExcludeTheOtherInput) {
+  SerialLifetimes();
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  const size_t repeated = Uses({3, 4});
+  const size_t second = Uses({4});
+  // The first source is used in both phases. Its SERIAL common ancestor is
+  // insufficient: its second use overlaps the other input.
+  for (uint8_t packet = 0; packet < 2; ++packet) {
+    AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, packet, packet, false,
+             repeated);
+    AddRoute(source, 1, LOOM_XDNA_STREAM_PORT_NORTH, 2 + packet, packet, false,
+             second);
+  }
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  EXPECT_NE(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north) & 7,
+            Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + 2) & 7);
+}
+
+TEST_P(Aie2pSwitchTest, ScopeWideTrafficCannotClaimPhaseExclusion) {
+  SerialLifetimes();
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  const size_t phase = Uses({3});
+  for (uint8_t packet = 0; packet < 2; ++packet) {
+    AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, packet, packet);
+    AddRoute(source, 1, LOOM_XDNA_STREAM_PORT_NORTH, 2 + packet, packet, false,
+             phase);
+  }
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  EXPECT_NE(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north) & 7,
+            Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + 2) & 7);
+}
+
+TEST_P(Aie2pSwitchTest, MaskedPacketCoverRetainsAllLifetimes) {
+  SerialLifetimes();
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  const size_t first = Uses({3});
+  const size_t second = Uses({4});
+  // Five identities require a masked cover. Packet 3 shares the second input's
+  // lifetime even though the other IDs covered by its filter use phase one.
+  for (uint8_t packet = 0; packet < 5; ++packet) {
+    AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, packet == 4, packet, false,
+             packet == 3 ? second : first);
+  }
+  for (uint8_t packet = 0; packet < 2; ++packet) {
+    AddRoute(source, 1, LOOM_XDNA_STREAM_PORT_NORTH, 2 + packet, packet, false,
+             second);
+  }
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  EXPECT_NE(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north) & 7,
+            Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + 2) & 7);
+  for (uint8_t packet = 0; packet < 32; ++packet) {
+    EXPECT_EQ(PacketDestinations(source, 0, packet, packet < 5 ? 1 : 0),
+              packet < 5 ? 1u << (north + (packet == 4)) : 0);
+    EXPECT_EQ(PacketDestinations(source, 1, packet, packet < 2 ? 1 : 0),
+              packet < 2 ? 1u << (north + 2 + packet) : 0);
+  }
+}
+
+TEST_P(Aie2pSwitchTest, SerialSharingRetainsSelectionCapacity) {
+  SerialLifetimes();
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  const size_t first = Uses({3});
+  const size_t second = Uses({4});
+  for (uint8_t packet = 0; packet < 4; ++packet) {
+    AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, packet, packet, false,
+             first);
+  }
+  for (uint8_t packet = 0; packet < 2; ++packet) {
+    AddRoute(source, 1, LOOM_XDNA_STREAM_PORT_NORTH, 4 + packet, packet, false,
+             second);
+  }
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  EXPECT_NE(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north) & 7,
+            Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + 4) & 7);
 }
 
 TEST_P(Aie2pSwitchTest, MultipleInputComponentsCannotShareArbiters) {

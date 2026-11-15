@@ -20,6 +20,10 @@ typedef struct loom_aie2p_native_switch_input_t {
   const loom_aie2p_array_route_builder_t* routing;
   // Packet/control identity paired one-for-one with routing's edges.
   const loom_aie2p_native_route_t* routes;
+  // Common construction exclusion proof retained by the entry scope.
+  const loom_pipeline_lifetimes_t* lifetimes;
+  // Sparse packet-class uses indexed by each route's lifetime_head.
+  const loom_aie2p_native_route_lifetime_t* route_lifetimes;
   // Endpoint ownership of each core or tile-control sender.
   const loom_aie2p_native_control_source_t* control_sources;
   // Sole sender per destination; UINT32_MAX is unused, UINT32_MAX - 1 shared.
@@ -31,8 +35,9 @@ typedef struct loom_aie2p_native_switch_input_t {
 // Destination sets connected by a shared output require one arbiter. Disjoint
 // sets share when fed exclusively by the same input, or when their overlapping
 // inputs carry only complete register commands with independent progress.
-// Disjoint input sets retain independent arbiters. This does not prove
-// progress for dependencies already present in the selected routes.
+// Different inputs may share when every contributing packet use belongs to
+// disjoint serial lifetimes. This does not prove progress for dependencies
+// already present in the selected routes.
 // Allocation errors return a status. A resource conflict returns a static
 // |out_requirement| for the caller's source diagnostic; otherwise it is empty.
 // |out_switches| receives complete banks only when admission succeeds.

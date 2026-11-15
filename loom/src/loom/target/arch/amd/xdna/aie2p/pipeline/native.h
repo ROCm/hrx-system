@@ -873,6 +873,12 @@ typedef struct loom_aie2p_native_context_t {
   loom_aie2p_array_route_builder_t routing;
   // Packet identity for every physical route edge.
   loom_aie2p_native_route_t* routes;
+  // Sparse payload uses in the common lifetime tree, with index zero reserved.
+  loom_aie2p_native_route_lifetime_t* route_lifetimes;
+  // Number of retained entries, including the reserved entry when present.
+  iree_host_size_t route_lifetime_count;
+  // Allocation capacity while payload formation appends uses.
+  iree_host_size_t route_lifetime_capacity;
   // Complete source ownership per tile's core and tile-control output.
   loom_aie2p_native_control_source_t* control_sources;
   // Unique control source per core/tile-control endpoint. UINT32_MAX is

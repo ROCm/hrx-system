@@ -99,12 +99,17 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   context.control_connections = &connection;
   context.control_connection_count = 1;
   std::vector<loom_aie2p_native_route_t> routes(context.routing.route_count);
+  std::vector<loom_aie2p_native_route_lifetime_t> route_lifetimes = {
+      {}, {.lifetime = 1, .next = 0}};
   context.routes = routes.data();
   context.control_sources = sources.data();
   context.control_destination_sources = destinations.data();
   loom_aie2p_native_route_label(&context, 0, connection.packet, true, 4);
   loom_aie2p_native_route_label(&context, control_route_count, payload.packet,
                                 false, UINT32_MAX);
+  for (size_t i = control_route_count; i < routes.size(); ++i) {
+    routes[i].lifetime_head = 1;
+  }
   const loom_aie2p_native_switch_input_t input = {
       .routing = &context.routing,
       .routes = context.routes,
@@ -152,6 +157,8 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
       .tiles = occupancy.data(),
       .routing = context.routing,
       .routes = routes.data(),
+      .route_lifetimes = route_lifetimes.data(),
+      .route_lifetime_count = route_lifetimes.size(),
       .control_sources = sources.data(),
       .control_destination_sources = destinations.data(),
       .column_command_packets = command_packets.data(),
@@ -175,15 +182,20 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   EXPECT_NE(retained->connections.destinations,
             original->connections.destinations);
   EXPECT_NE(retained->column_command_packets, original->column_command_packets);
+  EXPECT_NE(retained->route_lifetimes, original->route_lifetimes);
   iree_arena_reset(&source_arena_);
   tiles.clear();
   routes.clear();
+  route_lifetimes.clear();
   sources.clear();
   destinations.clear();
   command_packets.clear();
   occupancy.clear();
 
   EXPECT_EQ(retained->base.lifetimes.owners[0], 1u);
+  ASSERT_EQ(retained->route_lifetime_count, 2u);
+  EXPECT_EQ(retained->route_lifetimes[1].lifetime, 1u);
+  EXPECT_EQ(retained->route_lifetimes[1].next, 0u);
   EXPECT_EQ(retained->tiles[2].memory_length, 2560u);
   EXPECT_EQ(retained->tiles[2].lock_count, 3u);
   EXPECT_EQ(retained->tiles[2].descriptor_counts[0], 2u);
@@ -200,6 +212,8 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
     EXPECT_EQ(retained->routes[i].register_command, i < control_route_count);
     EXPECT_EQ(retained->routes[i].control_source,
               i < control_route_count ? 4u : UINT32_MAX);
+    EXPECT_EQ(retained->routes[i].lifetime_head,
+              i < control_route_count ? 0u : 1u);
   }
   ASSERT_EQ(retained->connections.group_count, 2u);
   ASSERT_EQ(retained->connections.destination_count, 3u);
@@ -385,11 +399,13 @@ TEST_F(ExecutionPlanTest, CodeRequestsShareCommandsOnASaturatedColumn) {
     payload_source.classes = &payloads[i];
     payload_source.next = i == 0 ? &payload_sources[1] : nullptr;
     receivers[i] = {&tiles[0], static_cast<uint8_t>(i)};
-    payloads[i] = {.source = &payload_source,
-                   .destinations = &receivers[i],
-                   .destination_count = 1,
-                   .packet = UINT8_MAX,
-                   .routed = true};
+    payloads[i] = {
+        .source = &payload_source,
+        .destinations = &receivers[i],
+        .destination_count = 1,
+        .packet = UINT8_MAX,
+        .routed = true,
+    };
     const size_t first = context.routing.route_count;
     ASSERT_TRUE(loom_aie2p_array_route_egress(
         &context.routing, next_source++, &payload_source.tree,
@@ -405,7 +421,8 @@ TEST_F(ExecutionPlanTest, CodeRequestsShareCommandsOnASaturatedColumn) {
       .routing = &context.routing,
       .routes = context.routes,
       .control_sources = context.control_sources,
-      .control_destination_sources = context.control_destination_sources};
+      .control_destination_sources = context.control_destination_sources,
+  };
   iree_string_view_t requirement;
   IREE_ASSERT_OK(loom_aie2p_native_switches_build(
       &input, &source_arena_, &context.switches, &requirement));
@@ -423,7 +440,8 @@ TEST_F(ExecutionPlanTest, CodeRequestsShareCommandsOnASaturatedColumn) {
       .column_command_packets = context.column_command_packets,
       .control_paths = paths.data(),
       .switches = context.switches,
-      .connections = context.connections};
+      .connections = context.connections,
+  };
   loom_aie2p_code_transport_t transport;
   IREE_ASSERT_OK(loom_aie2p_code_transport_initialize(
       &selected, 4, &retained_arena_, &transport));

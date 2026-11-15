@@ -41,6 +41,8 @@ typedef struct loom_aie2p_native_payload_class_t {
   iree_host_size_t route_first;
   // Number of edges retained for this destination class.
   iree_host_size_t route_count;
+  // Complete sparse construction-use set, shared by this class's route edges.
+  iree_host_size_t lifetime_head;
   // Physical routes have been realized for this class.
   bool routed;
   // Every use is a distribution with a receiver-owned admission protocol.

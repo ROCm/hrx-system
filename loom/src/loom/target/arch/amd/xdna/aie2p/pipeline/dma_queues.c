@@ -9,6 +9,7 @@
 #include "iree/base/internal/math.h"
 #include "loom/analysis/pipeline/lifetime_layout.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/input.h"
+#include "loom/util/adaptive_sort.h"
 
 typedef struct loom_aie2p_native_dma_queue_binding_t {
   // Demand field receiving the lifetime allocator's logical queue index.
@@ -24,6 +25,47 @@ typedef struct loom_aie2p_native_shim_queue_t {
   // Queue index in the selected transfer direction.
   uint8_t engine;
 } loom_aie2p_native_shim_queue_t;
+
+typedef struct loom_aie2p_native_receive_queue_t {
+  // Receiver whose queue preference follows its physical sender.
+  loom_aie2p_native_distribution_endpoint_t* receiver;
+  // Independently allocated memory-to-stream endpoint.
+  const loom_aie2p_native_distribution_endpoint_t* sender;
+  // Construction owning this receive demand.
+  iree_host_size_t lifetime;
+  // Original distribution priority, preserving ties deterministically.
+  iree_host_size_t ordinal;
+} loom_aie2p_native_receive_queue_t;
+
+static bool loom_aie2p_native_receive_queue_before(
+    const loom_aie2p_native_receive_queue_t* a,
+    const loom_aie2p_native_receive_queue_t* b) {
+  if (a->receiver->tile != b->receiver->tile) {
+    return a->receiver->tile < b->receiver->tile;
+  }
+  const uint16_t column = a->receiver->tile->coordinate.column;
+  const uint16_t first = a->sender->tile->coordinate.column;
+  const uint16_t second = b->sender->tile->coordinate.column;
+  if ((first == column) != (second == column)) {
+    return first == column;
+  }
+  if (a->sender->engine != b->sender->engine) {
+    return a->sender->engine < b->sender->engine;
+  }
+  const uint16_t da = first > column ? first - column : column - first;
+  const uint16_t db = second > column ? second - column : column - second;
+  if (da != db) {
+    return da < db;
+  }
+  if (a->sender->tile != b->sender->tile) {
+    return a->sender->tile < b->sender->tile;
+  }
+  return a->ordinal < b->ordinal;
+}
+
+LOOM_DEFINE_ADAPTIVE_SORT(loom_aie2p_native_sort_receive_queues,
+                          loom_aie2p_native_receive_queue_t,
+                          loom_aie2p_native_receive_queue_before)
 
 // Shim placement is independent of the issuing core and local payload storage.
 // Preserve preferred-column demand before placing overflow, then use the
@@ -118,38 +160,18 @@ iree_status_t loom_aie2p_native_assign_dma_queues(
   const loom_pipeline_lifetimes_t* lifetimes =
       &realization->invocations.lifetimes;
   iree_host_size_t count = 0;
-  // Stable receive queues let ordered multicast phases reuse the same fanout
-  // without joining otherwise independent DMA outputs into one arbiter.
-  // The common lifetime allocator preserves these first-request preferences
-  // through concurrent subtrees while retaining all coexistence constraints.
-  for (iree_host_size_t d = 0; d < distribution_count; ++d) {
-    const iree_host_size_t i = distribution_workers[d];
-    loom_aie2p_native_worker_t* worker = &context->workers[i];
-    const iree_host_size_t lifetime =
-        lifetimes
-            ->owners[realization->invocations.workers[i].invocation->ordinal];
-    for (loom_aie2p_native_distribution_t* distribution =
-             worker->distribution_plan->geometries;
-         distribution; distribution = distribution->next_demand) {
-      if (distribution->path->first != distribution) {
-        continue;
-      }
-      for (iree_host_size_t j = 0; j < distribution->receiver_count; ++j) {
-        loom_aie2p_native_distribution_endpoint_t* receiver =
-            &distribution->receivers[j];
-        loom_aie2p_native_request_dma_queue(
-            context, lifetime, receiver->tile, true, &receiver->engine,
-            IREE_HOST_SIZE_MAX, requests, bindings, &count);
-      }
-    }
-  }
+  const iree_host_size_t tile_count =
+      loom_xdna_array_physical_tile_count(context->family);
+  const loom_pipeline_lifetime_extent_t* extents[2];
+  // Send and receive directions are independent allocation pools. Establish
+  // physical senders first, in producer order, so serial receivers can preserve
+  // source identity instead of connecting independent outputs through an
+  // arbiter merely because different phases enumerate their receivers alike.
   for (iree_host_size_t i = 0; i < realization->invocations.worker_count; ++i) {
     loom_aie2p_native_worker_t* worker = &context->workers[i];
     const iree_host_size_t lifetime =
         lifetimes
             ->owners[realization->invocations.workers[i].invocation->ordinal];
-    // Send queues retain producer order: prioritizing multicast senders would
-    // change source-tree ownership and can consume additional physical links.
     for (loom_aie2p_native_distribution_t* distribution =
              worker->distribution_plan ? worker->distribution_plan->geometries
                                        : NULL;
@@ -164,11 +186,9 @@ iree_status_t loom_aie2p_native_assign_dma_queues(
     for (loom_aie2p_native_dma_path_t* path = worker->transfer_paths; path;
          path = path->next_demand) {
       loom_aie2p_native_request_dma_queue(
-          context, lifetime, path->local, path->ingress, &path->local_engine,
-          IREE_HOST_SIZE_MAX, requests, bindings, &count);
-      loom_aie2p_native_request_dma_queue(
-          context, lifetime, path->shim, !path->ingress, &path->shim_engine,
-          worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_CORE
+          context, lifetime, path->ingress ? path->shim : path->local, false,
+          path->ingress ? &path->shim_engine : &path->local_engine,
+          path->ingress && worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_CORE
               ? context->core_engines[i]
               : IREE_HOST_SIZE_MAX,
           requests, bindings, &count);
@@ -179,9 +199,89 @@ iree_status_t loom_aie2p_native_assign_dma_queues(
           context, lifetime, input->path->shim, false,
           &input->path->input_engine, context->core_engines[input->controller],
           requests, bindings, &count);
-      const iree_host_size_t receiver_count =
+    }
+  }
+  const iree_host_size_t sender_count = count;
+  IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_layout(
+      lifetimes, requests, sender_count, tile_count * 2, context->pass->arena,
+      &extents[0]));
+  for (iree_host_size_t i = 0; i < tile_count; ++i) {
+    const loom_aie2p_native_tile_t* tile = &context->tiles[i];
+    if (tile->facts->kind != LOOM_XDNA_TILE_KIND_SHIM_NOC &&
+        extents[0][i * 2].length >
+            tile->facts->dma.channel_count_per_direction) {
+      return loom_aie2p_native_reject(
+          context, realization->function.op,
+          IREE_SV(
+              "available DMA queues for simultaneous construction lifetimes"));
+    }
+  }
+  for (iree_host_size_t i = 0; i < sender_count; ++i) {
+    // Shim overflow is placed below. On-chip senders are now fully assigned.
+    if (context->tiles[requests[i].pool / 2].facts->kind !=
+        LOOM_XDNA_TILE_KIND_SHIM_NOC) {
+      *bindings[i].engine = (uint8_t)requests[i].offset;
+    }
+  }
+  loom_aie2p_native_receive_queue_t* receivers;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->pass->arena, context->dma_queue_count - sender_count,
+      sizeof(*receivers), (void**)&receivers));
+  iree_host_size_t receiver_count = 0;
+  for (iree_host_size_t d = 0; d < distribution_count; ++d) {
+    const iree_host_size_t i = distribution_workers[d];
+    const iree_host_size_t lifetime =
+        lifetimes
+            ->owners[realization->invocations.workers[i].invocation->ordinal];
+    for (loom_aie2p_native_distribution_t* distribution =
+             context->workers[i].distribution_plan->geometries;
+         distribution; distribution = distribution->next_demand) {
+      if (distribution->path->first != distribution) {
+        continue;
+      }
+      for (iree_host_size_t j = 0; j < distribution->receiver_count; ++j) {
+        receivers[receiver_count] = (loom_aie2p_native_receive_queue_t){
+            .receiver = &distribution->receivers[j],
+            .sender = &distribution->sender,
+            .lifetime = lifetime,
+            .ordinal = receiver_count};
+        ++receiver_count;
+      }
+    }
+  }
+  // Prefer the local column's source queues, then crossing senders. Common
+  // lifetime layout preserves this preference while keeping concurrent users
+  // distinct. Unphased pipelines retain their original distribution priority.
+  if (lifetimes->has_serial) {
+    loom_aie2p_native_sort_receive_queues(receivers, receiver_count);
+  }
+  for (iree_host_size_t i = 0; i < receiver_count; ++i) {
+    loom_aie2p_native_distribution_endpoint_t* receiver = receivers[i].receiver;
+    loom_aie2p_native_request_dma_queue(
+        context, receivers[i].lifetime, receiver->tile, true, &receiver->engine,
+        IREE_HOST_SIZE_MAX, requests, bindings, &count);
+  }
+  for (iree_host_size_t i = 0; i < realization->invocations.worker_count; ++i) {
+    loom_aie2p_native_worker_t* worker = &context->workers[i];
+    const iree_host_size_t lifetime =
+        lifetimes
+            ->owners[realization->invocations.workers[i].invocation->ordinal];
+    for (loom_aie2p_native_dma_path_t* path = worker->transfer_paths; path;
+         path = path->next_demand) {
+      loom_aie2p_native_request_dma_queue(
+          context, lifetime, path->ingress ? path->local : path->shim, true,
+          path->ingress ? &path->local_engine : &path->shim_engine,
+          !path->ingress &&
+                  worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_CORE
+              ? context->core_engines[i]
+              : IREE_HOST_SIZE_MAX,
+          requests, bindings, &count);
+    }
+    loom_aie2p_native_input_t* input = worker->input;
+    if (input) {
+      const iree_host_size_t phase_count =
           input->window_capacity ? 1 : input->source->phase_count;
-      for (iree_host_size_t j = 0; j < receiver_count; ++j) {
+      for (iree_host_size_t j = 0; j < phase_count; ++j) {
         loom_aie2p_native_input_phase_t* phase = &input->phases[j];
         loom_aie2p_native_request_dma_queue(
             context, lifetime,
@@ -191,30 +291,27 @@ iree_status_t loom_aie2p_native_assign_dma_queues(
       }
     }
   }
-  const iree_host_size_t tile_count =
-      loom_xdna_array_physical_tile_count(context->family);
-  const loom_pipeline_lifetime_extent_t* extents;
-  IREE_RETURN_IF_ERROR(
-      loom_pipeline_lifetime_layout(lifetimes, requests, count, tile_count * 2,
-                                    context->pass->arena, &extents));
+  IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_layout(
+      lifetimes, requests + sender_count, count - sender_count, tile_count * 2,
+      context->pass->arena, &extents[1]));
   iree_host_size_t overflow_count = 0;
   for (iree_host_size_t i = 0; i < tile_count; ++i) {
     loom_aie2p_native_tile_t* tile = &context->tiles[i];
     const uint8_t capacity = tile->facts->dma.channel_count_per_direction;
     if (tile->facts->kind == LOOM_XDNA_TILE_KIND_SHIM_NOC) {
       for (unsigned direction = 0; direction < 2; ++direction) {
-        const uint64_t required = extents[i * 2 + direction].length;
+        const uint64_t required = extents[direction][i * 2 + direction].length;
         overflow_count += required > capacity ? required - capacity : 0;
       }
-    } else if (extents[i * 2].length > capacity ||
-               extents[i * 2 + 1].length > capacity) {
+    } else if (extents[1][i * 2 + 1].length > capacity) {
       return loom_aie2p_native_reject(
           context, realization->function.op,
           IREE_SV(
               "available DMA queues for simultaneous construction lifetimes"));
     }
-    tile->mm2s_count = (uint8_t)iree_min(extents[i * 2].length, capacity);
-    tile->s2mm_count = (uint8_t)iree_min(extents[i * 2 + 1].length, capacity);
+    tile->mm2s_count = (uint8_t)iree_min(extents[0][i * 2].length, capacity);
+    tile->s2mm_count =
+        (uint8_t)iree_min(extents[1][i * 2 + 1].length, capacity);
   }
   loom_aie2p_native_shim_queue_t** remaps = NULL;
   if (overflow_count) {
@@ -234,7 +331,8 @@ iree_status_t loom_aie2p_native_assign_dma_queues(
           context->tiles[tile_index].facts->dma.channel_count_per_direction;
       for (unsigned direction = 0; direction < 2; ++direction) {
         remaps[column * 2 + direction] = next;
-        const uint64_t required = extents[tile_index * 2 + direction].length;
+        const uint64_t required =
+            extents[direction][tile_index * 2 + direction].length;
         next += required > capacity ? required - capacity : 0;
       }
     }
@@ -284,7 +382,8 @@ iree_status_t loom_aie2p_native_assign_dma_queues(
           context->tiles[tile_index].facts->dma.channel_count_per_direction;
       for (unsigned direction = 0; direction < 2; ++direction) {
         next = remaps[column * 2 + direction];
-        const uint64_t required = extents[tile_index * 2 + direction].length;
+        const uint64_t required =
+            extents[direction][tile_index * 2 + direction].length;
         for (uint64_t engine = capacity; engine < required; ++engine) {
           loom_aie2p_native_tile_t* shim = loom_aie2p_native_find_shim_queue(
               context, column, direction != 0,

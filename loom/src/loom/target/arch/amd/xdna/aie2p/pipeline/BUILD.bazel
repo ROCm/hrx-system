@@ -171,6 +171,7 @@ loom_cc_library(
     visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p:implementation"],
     deps = [
         "//loom/src/loom/analysis/pipeline:entries",
+        "//loom/src/loom/analysis/pipeline:invocations",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",
         "//loom/src/loom/target/arch/amd/xdna/array:registers",
         "//runtime/src/iree/base",
@@ -394,6 +395,7 @@ loom_cc_test(
     deps = [
         ":execution_plan",
         ":native",
+        "//loom/src/loom/analysis/pipeline:invocations",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",
         "//loom/src/loom/target/arch/amd/xdna/array:facts",

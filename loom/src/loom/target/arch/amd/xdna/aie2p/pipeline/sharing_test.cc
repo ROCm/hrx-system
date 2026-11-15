@@ -77,10 +77,12 @@ class Aie2pSharingTest
         tiles_[receiver_index_].coordinate, 0, false));
     path_.routes.count = context_.routing.route_count;
     for (size_t i = 0; i < context_.routing.route_count; ++i) {
-      routes_.push_back({.edge = &context_.routing.routes[i],
-                         .packet = UINT8_MAX,
-                         .register_command = false,
-                         .control_source = UINT32_MAX});
+      routes_.push_back({
+          .edge = &context_.routing.routes[i],
+          .packet = UINT8_MAX,
+          .register_command = false,
+          .control_source = UINT32_MAX,
+      });
     }
     context_.routes = routes_.data();
   }

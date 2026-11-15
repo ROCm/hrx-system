@@ -169,6 +169,19 @@ class DistributionPathTest
   static constexpr size_t kStreams = kChildren * 2;
   static constexpr size_t kWorkers = 1 + kChildren * 5;
   static constexpr size_t kChannels = kStreams * 3;
+  // Root state coexists with three serial child constructions.
+  static constexpr auto none = IREE_HOST_SIZE_MAX;
+  // Complete retained lifetime tree consumed by queue and payload selection.
+  static constexpr loom_pipeline_lifetime_t lifetime_nodes_[] = {
+      {LOOM_PIPELINE_LIFETIME_CONCURRENT, 0, none, 1, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 0, 0, none, 2},
+      {LOOM_PIPELINE_LIFETIME_SERIAL, 0, 0, 3, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 1, 2, none, 4},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 2, 2, none, 5},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 3, 2, none, none},
+  };
+  // Construction ordinals map to these owner leaves.
+  static constexpr iree_host_size_t lifetime_owners_[] = {1, 3, 4, 5};
 
   static size_t Producer(size_t stream) { return 1 + (stream / 2) * 5; }
   static size_t Worker(size_t stream) {
@@ -213,7 +226,14 @@ class DistributionPathTest
     invocations.channel_order = channel_order_.data();
     invocations.workers = worker_owners_.data();
     invocations.worker_count = kWorkers;
-    invocations.lifetimes.has_serial = true;
+    invocations.lifetimes = {
+        .nodes = lifetime_nodes_,
+        .count = IREE_ARRAYSIZE(lifetime_nodes_),
+        .owners = lifetime_owners_,
+        .has_serial = true,
+    };
+    IREE_ASSERT_OK(
+        loom_pipeline_lifetimes_index(&arena_, &invocations.lifetimes));
     for (size_t i = 0; i < entries_.size(); ++i) {
       constructions_[i].ordinal = i;
       entries_[i] = &constructions_[i];
@@ -354,24 +374,6 @@ class DistributionPathTest
       EXPECT_EQ(tile->descriptor_counts[0], 0);
       EXPECT_EQ(tile->descriptor_counts[1], 0);
     }
-    const auto none = IREE_HOST_SIZE_MAX;
-    const loom_pipeline_lifetime_t nodes[] = {
-        {LOOM_PIPELINE_LIFETIME_CONCURRENT, 0, none, 1, none},
-        {LOOM_PIPELINE_LIFETIME_OWNER, 0, 0, none, 2},
-        {LOOM_PIPELINE_LIFETIME_SERIAL, 0, 0, 3, none},
-        {LOOM_PIPELINE_LIFETIME_OWNER, 1, 2, none, 4},
-        {LOOM_PIPELINE_LIFETIME_OWNER, 2, 2, none, 5},
-        {LOOM_PIPELINE_LIFETIME_OWNER, 3, 2, none, none},
-    };
-    const iree_host_size_t owners[] = {1, 3, 4, 5};
-    realization_.invocations.lifetimes = {
-        .nodes = nodes,
-        .count = IREE_ARRAYSIZE(nodes),
-        .owners = owners,
-        .has_serial = true,
-    };
-    IREE_ASSERT_OK(loom_pipeline_lifetimes_index(
-        &arena_, &realization_.invocations.lifetimes));
     bool valid = false;
     iree_host_size_t distribution_workers[kStreams];
     for (size_t i = 0; i < kStreams; ++i) {
