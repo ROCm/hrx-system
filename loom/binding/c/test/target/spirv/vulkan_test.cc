@@ -94,6 +94,23 @@ struct MockVulkanDevice {
   VkPhysicalDeviceShaderFmaFeaturesKHR shader_fma = {};
   // Whether the FMA feature struct may be queried.
   bool reports_shader_fma_extension = false;
+  // Explicit Workgroup layout support and independently supported widths.
+  VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR workgroup_layout =
+      {};
+  // Whether the Workgroup layout feature struct may be queried.
+  bool reports_workgroup_layout_extension = false;
+  // BF16 arithmetic and matrix support.
+  VkPhysicalDeviceShaderBfloat16FeaturesKHR bfloat16 = {};
+  // Whether the BF16 feature struct may be queried.
+  bool reports_bfloat16_extension = false;
+  // Integer dot-product support, independent of shaderInt8.
+  VkBool32 shader_integer_dot_product = VK_FALSE;
+  // Extension route for integer dot products before Vulkan 1.3.
+  bool reports_integer_dot_product_extension = false;
+  // Cooperative-vector inference and training support.
+  VkPhysicalDeviceCooperativeVectorFeaturesNV cooperative_vector = {};
+  // Whether the cooperative-vector feature struct may be queried.
+  bool reports_cooperative_vector_extension = false;
   // Per-instruction floating-point control support.
   VkBool32 shader_float_controls2 = VK_FALSE;
   // Whether FloatControls2 is exposed before its promotion to Vulkan 1.4.
@@ -366,6 +383,51 @@ void VKAPI_PTR MockGetPhysicalDeviceFeatures2(
             g_mock_vulkan_device->shader_fma.shaderFmaFloat64;
         break;
       }
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR: {
+        EXPECT_TRUE(g_mock_vulkan_device->reports_workgroup_layout_extension);
+        auto* layout = reinterpret_cast<
+            VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR*>(out);
+        layout->workgroupMemoryExplicitLayout =
+            g_mock_vulkan_device->workgroup_layout
+                .workgroupMemoryExplicitLayout;
+        layout->workgroupMemoryExplicitLayout8BitAccess =
+            g_mock_vulkan_device->workgroup_layout
+                .workgroupMemoryExplicitLayout8BitAccess;
+        layout->workgroupMemoryExplicitLayout16BitAccess =
+            g_mock_vulkan_device->workgroup_layout
+                .workgroupMemoryExplicitLayout16BitAccess;
+        break;
+      }
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR: {
+        EXPECT_TRUE(g_mock_vulkan_device->reports_bfloat16_extension);
+        auto* bfloat16 =
+            reinterpret_cast<VkPhysicalDeviceShaderBfloat16FeaturesKHR*>(out);
+        bfloat16->shaderBFloat16Type =
+            g_mock_vulkan_device->bfloat16.shaderBFloat16Type;
+        bfloat16->shaderBFloat16DotProduct =
+            g_mock_vulkan_device->bfloat16.shaderBFloat16DotProduct;
+        bfloat16->shaderBFloat16CooperativeMatrix =
+            g_mock_vulkan_device->bfloat16.shaderBFloat16CooperativeMatrix;
+        break;
+      }
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES:
+        EXPECT_TRUE(
+            g_mock_vulkan_device->api_version >= VK_API_VERSION_1_3 ||
+            g_mock_vulkan_device->reports_integer_dot_product_extension);
+        reinterpret_cast<VkPhysicalDeviceShaderIntegerDotProductFeatures*>(out)
+            ->shaderIntegerDotProduct =
+            g_mock_vulkan_device->shader_integer_dot_product;
+        break;
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_VECTOR_FEATURES_NV: {
+        EXPECT_TRUE(g_mock_vulkan_device->reports_cooperative_vector_extension);
+        auto* vector =
+            reinterpret_cast<VkPhysicalDeviceCooperativeVectorFeaturesNV*>(out);
+        vector->cooperativeVector =
+            g_mock_vulkan_device->cooperative_vector.cooperativeVector;
+        vector->cooperativeVectorTraining =
+            g_mock_vulkan_device->cooperative_vector.cooperativeVectorTraining;
+        break;
+      }
 #if defined(VK_KHR_cooperative_matrix)
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR:
         reinterpret_cast<VkPhysicalDeviceCooperativeMatrixFeaturesKHR*>(out)
@@ -380,6 +442,18 @@ void VKAPI_PTR MockGetPhysicalDeviceFeatures2(
 
 uint32_t MockDeviceExtensionCount(const MockVulkanDevice& device) {
   uint32_t extension_count = 0;
+  if (device.reports_workgroup_layout_extension) {
+    ++extension_count;
+  }
+  if (device.reports_bfloat16_extension) {
+    ++extension_count;
+  }
+  if (device.reports_integer_dot_product_extension) {
+    ++extension_count;
+  }
+  if (device.reports_cooperative_vector_extension) {
+    ++extension_count;
+  }
   if (device.reports_shader_fma_extension) {
     ++extension_count;
   }
@@ -507,6 +581,28 @@ VkResult VKAPI_PTR MockEnumerateDeviceExtensionProperties(
     MaybeWriteExtensionProperty(properties, capacity, &written_count,
                                 VK_KHR_SHADER_FMA_EXTENSION_NAME,
                                 VK_KHR_SHADER_FMA_SPEC_VERSION);
+  }
+  if (device.reports_workgroup_layout_extension) {
+    MaybeWriteExtensionProperty(
+        properties, capacity, &written_count,
+        VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME,
+        VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_SPEC_VERSION);
+  }
+  if (device.reports_bfloat16_extension) {
+    MaybeWriteExtensionProperty(properties, capacity, &written_count,
+                                VK_KHR_SHADER_BFLOAT16_EXTENSION_NAME,
+                                VK_KHR_SHADER_BFLOAT16_SPEC_VERSION);
+  }
+  if (device.reports_integer_dot_product_extension) {
+    MaybeWriteExtensionProperty(
+        properties, capacity, &written_count,
+        VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME,
+        VK_KHR_SHADER_INTEGER_DOT_PRODUCT_SPEC_VERSION);
+  }
+  if (device.reports_cooperative_vector_extension) {
+    MaybeWriteExtensionProperty(properties, capacity, &written_count,
+                                VK_NV_COOPERATIVE_VECTOR_EXTENSION_NAME,
+                                VK_NV_COOPERATIVE_VECTOR_SPEC_VERSION);
   }
   if (device.reports_shader_float_controls_extension) {
     MaybeWriteExtensionProperty(properties, capacity, &written_count,
@@ -778,6 +874,112 @@ TEST(TargetSpirvVulkanTest, ImportsFusedArithmeticByAdvertisedWidth) {
   }
 }
 
+TEST(TargetSpirvVulkanTest, ImportsWorkgroupLayoutAndBfloat16Families) {
+  const loomc_spirv_feature_t features[] = {
+      LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR,
+      LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS_KHR,
+      LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR,
+      LOOMC_SPIRV_FEATURE_BFLOAT16_TYPE_KHR,
+      LOOMC_SPIRV_FEATURE_BFLOAT16_DOT_PRODUCT_KHR,
+      LOOMC_SPIRV_FEATURE_BFLOAT16_COOPERATIVE_MATRIX_KHR,
+  };
+  auto environment = CreateSpirvTargetEnvironment();
+  for (bool advertised : {false, true}) {
+    for (uint32_t mask : {0u, 1u, 3u, 5u, 7u}) {
+      for (auto enumeration :
+           {ExtensionEnumeration::kEnabled, ExtensionEnumeration::kOmitted}) {
+        SCOPED_TRACE(::testing::Message() << advertised << ":" << mask);
+        MockVulkanDevice device;
+        device.reports_workgroup_layout_extension = advertised;
+        device.workgroup_layout.workgroupMemoryExplicitLayout = (mask & 1) != 0;
+        device.workgroup_layout.workgroupMemoryExplicitLayout8BitAccess =
+            (mask & 2) != 0;
+        device.workgroup_layout.workgroupMemoryExplicitLayout16BitAccess =
+            (mask & 4) != 0;
+        device.reports_bfloat16_extension = advertised;
+        device.bfloat16.shaderBFloat16Type = (mask & 1) != 0;
+        device.bfloat16.shaderBFloat16DotProduct = (mask & 2) != 0;
+        device.bfloat16.shaderBFloat16CooperativeMatrix = (mask & 4) != 0;
+        auto profile =
+            CreateVulkanProfile(environment.get(), device, enumeration);
+        for (uint32_t i = 0; i < 6; ++i) {
+          ExpectFeatureState(
+              profile.get(), features[i],
+              !advertised || enumeration == ExtensionEnumeration::kOmitted
+                  ? LOOMC_TARGET_FACT_STATE_UNKNOWN
+              : (mask & (1u << (i % 3))) ? LOOMC_TARGET_FACT_STATE_TRUE
+                                         : LOOMC_TARGET_FACT_STATE_FALSE);
+        }
+      }
+    }
+  }
+}
+
+TEST(TargetSpirvVulkanTest, ImportsIntegerDotFromCoreOrExtension) {
+  auto environment = CreateSpirvTargetEnvironment();
+  for (uint32_t version :
+       {VK_API_VERSION_1_1, VK_API_VERSION_1_2, VK_API_VERSION_1_3}) {
+    for (bool advertised : {false, true}) {
+      for (bool dot : {false, true}) {
+        for (bool int8 : {false, true}) {
+          SCOPED_TRACE(::testing::Message() << version << ":" << advertised
+                                            << ":" << dot << ":" << int8);
+          MockVulkanDevice device;
+          device.api_version = version;
+          device.reports_integer_dot_product_extension = advertised;
+          device.shader_integer_dot_product = dot;
+          device.shader_int8 = int8;
+          auto profile = CreateVulkanProfile(environment.get(), device);
+          const bool queried = version >= VK_API_VERSION_1_3 || advertised;
+          for (auto feature :
+               {LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT,
+                LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT_ALL,
+                LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT,
+                LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED}) {
+            const bool int8_unknown =
+                dot && version < VK_API_VERSION_1_2 &&
+                feature == LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT;
+            const bool enabled =
+                dot &&
+                (feature !=
+                     LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT ||
+                 int8);
+            ExpectFeatureState(profile.get(), feature,
+                               !queried || int8_unknown
+                                   ? LOOMC_TARGET_FACT_STATE_UNKNOWN
+                               : enabled ? LOOMC_TARGET_FACT_STATE_TRUE
+                                         : LOOMC_TARGET_FACT_STATE_FALSE);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(TargetSpirvVulkanTest, ImportsCooperativeVectorFamily) {
+  auto environment = CreateSpirvTargetEnvironment();
+  for (bool advertised : {false, true}) {
+    for (uint32_t mask : {0u, 1u, 3u}) {
+      SCOPED_TRACE(::testing::Message() << advertised << ":" << mask);
+      MockVulkanDevice device;
+      device.reports_cooperative_vector_extension = advertised;
+      device.cooperative_vector.cooperativeVector = (mask & 1) != 0;
+      device.cooperative_vector.cooperativeVectorTraining = (mask & 2) != 0;
+      auto profile = CreateVulkanProfile(environment.get(), device);
+      ExpectFeatureState(profile.get(),
+                         LOOMC_SPIRV_FEATURE_COOPERATIVE_VECTOR_NV,
+                         !advertised  ? LOOMC_TARGET_FACT_STATE_UNKNOWN
+                         : (mask & 1) ? LOOMC_TARGET_FACT_STATE_TRUE
+                                      : LOOMC_TARGET_FACT_STATE_FALSE);
+      ExpectFeatureState(profile.get(),
+                         LOOMC_SPIRV_FEATURE_COOPERATIVE_VECTOR_TRAINING_NV,
+                         !advertised  ? LOOMC_TARGET_FACT_STATE_UNKNOWN
+                         : (mask & 2) ? LOOMC_TARGET_FACT_STATE_TRUE
+                                      : LOOMC_TARGET_FACT_STATE_FALSE);
+    }
+  }
+}
+
 TEST(TargetSpirvVulkanTest, CreatesProfileFromRawVulkanDevice) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   MockVulkanDevice device;
@@ -1031,6 +1233,23 @@ TEST(TargetSpirvVulkanTest,
   ExpectFeatureState(profile.get(),
                      LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_16BIT_ACCESS,
                      LOOMC_TARGET_FACT_STATE_TRUE);
+  for (
+      auto feature : {
+          LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR,
+          LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS_KHR,
+          LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR,
+          LOOMC_SPIRV_FEATURE_BFLOAT16_TYPE_KHR,
+          LOOMC_SPIRV_FEATURE_BFLOAT16_DOT_PRODUCT_KHR,
+          LOOMC_SPIRV_FEATURE_BFLOAT16_COOPERATIVE_MATRIX_KHR,
+          LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT,
+          LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT_ALL,
+          LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT,
+          LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED,
+          LOOMC_SPIRV_FEATURE_COOPERATIVE_VECTOR_NV,
+          LOOMC_SPIRV_FEATURE_COOPERATIVE_VECTOR_TRAINING_NV,
+      }) {
+    ExpectFeatureState(profile.get(), feature, LOOMC_TARGET_FACT_STATE_UNKNOWN);
+  }
 #if defined(VK_KHR_cooperative_matrix)
   ExpectFeatureState(profile.get(), LOOMC_SPIRV_FEATURE_COOPERATIVE_MATRIX_KHR,
                      LOOMC_TARGET_FACT_STATE_UNKNOWN);

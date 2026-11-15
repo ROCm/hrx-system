@@ -1541,36 +1541,60 @@ TEST(TargetSpirvProfileTest, RefinesCooperativeRowsWithOwnedProvenance) {
   EXPECT_EQ(ToString(matrix_row.provenance), "base:matrix-row");
 }
 
-TEST(TargetSpirvProfileTest, PreservesKnownFalseFeatureFacts) {
+TEST(TargetSpirvProfileTest, PreservesKnownFalseFeaturesThroughRefinement) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
-  loomc_spirv_feature_fact_t facts[] = {
-      {
-          .feature = LOOMC_SPIRV_FEATURE_FLOAT64,
-          .state = LOOMC_TARGET_FACT_STATE_FALSE,
-          .provenance = loomc_make_cstring_view("vulkaninfo:shaderFloat64"),
-      },
-  };
-  loomc_spirv_profile_options_t options = {
-      .type = LOOMC_STRUCTURE_TYPE_SPIRV_PROFILE_OPTIONS,
-      .structure_size = sizeof(options),
-      .next = nullptr,
-      .identifier = loomc_make_cstring_view("partial-no-f64"),
-      .preset = LOOMC_SPIRV_PROFILE_PRESET_NONE,
-      .feature_facts = facts,
-      .feature_fact_count = 1,
-      .limit_facts = nullptr,
-      .limit_fact_count = 0,
-      .environment_facts = nullptr,
-      .environment_fact_count = 0,
-  };
-  TargetProfilePtr profile =
-      CreateSpirvProfile(target_environment.get(), &options);
+  for (uint32_t i = LOOMC_SPIRV_FEATURE_UNKNOWN + 1;
+       i < LOOMC_SPIRV_FEATURE_COUNT; ++i) {
+    SCOPED_TRACE(i);
+    loomc_spirv_feature_fact_t fact = {
+        .feature = static_cast<loomc_spirv_feature_t>(i),
+        .state = LOOMC_TARGET_FACT_STATE_FALSE,
+        .provenance = loomc_make_cstring_view("device:unsupported"),
+    };
+    loomc_spirv_profile_options_t options = {
+        .type = LOOMC_STRUCTURE_TYPE_SPIRV_PROFILE_OPTIONS,
+        .structure_size = sizeof(options),
+        .identifier = loomc_make_cstring_view("partial-profile"),
+        .feature_facts = &fact,
+        .feature_fact_count = 1,
+    };
+    TargetProfilePtr base_profile =
+        CreateSpirvProfile(target_environment.get(), &options);
+    TargetProfilePtr profile =
+        RefineSpirvProfile(base_profile.get(), /*options=*/nullptr);
+    base_profile.reset();
 
-  loomc_target_fact_state_t state = LOOMC_TARGET_FACT_STATE_UNKNOWN;
-  LOOMC_EXPECT_OK(loomc_spirv_target_profile_query_feature(
-      profile.get(), LOOMC_SPIRV_FEATURE_FLOAT64, &state));
-  EXPECT_EQ(state, LOOMC_TARGET_FACT_STATE_FALSE);
-  EXPECT_FALSE(ProfileHasCapability(profile.get(), kSpirvCapabilityFloat64));
+    for (uint32_t j = LOOMC_SPIRV_FEATURE_UNKNOWN + 1;
+         j < LOOMC_SPIRV_FEATURE_COUNT; ++j) {
+      loomc_target_fact_state_t state = LOOMC_TARGET_FACT_STATE_UNKNOWN;
+      LOOMC_ASSERT_OK(loomc_spirv_target_profile_query_feature(
+          profile.get(), static_cast<loomc_spirv_feature_t>(j), &state));
+      EXPECT_EQ(state, i == j ? LOOMC_TARGET_FACT_STATE_FALSE
+                              : LOOMC_TARGET_FACT_STATE_UNKNOWN);
+    }
+    EXPECT_FALSE(ProfileHasCapability(profile.get(), kSpirvCapabilityFloat64));
+
+    // A conflicting refinement retains the original observation's provenance
+    // after releasing the profile that first owned it.
+    fact.state = LOOMC_TARGET_FACT_STATE_TRUE;
+    fact.provenance = loomc_make_cstring_view("override:supported");
+    loomc_target_profile_t* conflicting_profile = nullptr;
+    loomc_result_t* result = nullptr;
+    LOOMC_ASSERT_OK(loomc_spirv_target_profile_refine(
+        profile.get(), &options, loomc_allocator_system(), &conflicting_profile,
+        &result));
+    TargetProfilePtr conflicting_profile_ptr(conflicting_profile);
+    ResultPtr result_ptr(result);
+    EXPECT_EQ(conflicting_profile, nullptr);
+    ExpectFailedResult(result_ptr.get(), "SPIRV/035");
+    const loomc_diagnostic_t* diagnostic =
+        loomc_result_diagnostic_at(result_ptr.get(), 0);
+    ASSERT_NE(diagnostic, nullptr);
+    EXPECT_THAT(ToString(diagnostic->message),
+                ::testing::HasSubstr("device:unsupported"));
+    EXPECT_THAT(ToString(diagnostic->message),
+                ::testing::HasSubstr("override:supported"));
+  }
 }
 
 TEST(TargetSpirvProfileTest, ReportsContradictoryFactsWithProvenance) {

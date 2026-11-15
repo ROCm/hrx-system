@@ -1196,6 +1196,46 @@ static loomc_status_t loomc_spirv_vulkaninfo_import_feature_properties(
 }
 
 static const loomc_spirv_vulkaninfo_feature_field_t
+    kLoomcSpirvVulkaninfoWorkgroupLayoutFields[] = {
+        {
+            .field_name = "workgroupMemoryExplicitLayout",
+            .feature = LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR,
+            .provenance = "vulkaninfo:workgroupMemoryExplicitLayout",
+        },
+        {
+            .field_name = "workgroupMemoryExplicitLayout8BitAccess",
+            .feature =
+                LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS_KHR,
+            .provenance = "vulkaninfo:workgroupMemoryExplicitLayout8BitAccess",
+        },
+        {
+            .field_name = "workgroupMemoryExplicitLayout16BitAccess",
+            .feature =
+                LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR,
+            .provenance = "vulkaninfo:workgroupMemoryExplicitLayout16BitAccess",
+        },
+};
+
+static const loomc_spirv_vulkaninfo_feature_field_t
+    kLoomcSpirvVulkaninfoBfloat16Fields[] = {
+        {
+            .field_name = "shaderBFloat16Type",
+            .feature = LOOMC_SPIRV_FEATURE_BFLOAT16_TYPE_KHR,
+            .provenance = "vulkaninfo:shaderBFloat16Type",
+        },
+        {
+            .field_name = "shaderBFloat16DotProduct",
+            .feature = LOOMC_SPIRV_FEATURE_BFLOAT16_DOT_PRODUCT_KHR,
+            .provenance = "vulkaninfo:shaderBFloat16DotProduct",
+        },
+        {
+            .field_name = "shaderBFloat16CooperativeMatrix",
+            .feature = LOOMC_SPIRV_FEATURE_BFLOAT16_COOPERATIVE_MATRIX_KHR,
+            .provenance = "vulkaninfo:shaderBFloat16CooperativeMatrix",
+        },
+};
+
+static const loomc_spirv_vulkaninfo_feature_field_t
     kLoomcSpirvVulkaninfoAtomicInt64Fields[] = {
         {
             .field_name = "shaderBufferInt64Atomics",
@@ -1348,6 +1388,16 @@ static loomc_status_t loomc_spirv_vulkaninfo_import_features_from_structs(
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_lookup_feature_struct(
       import, features, extended_features,
       IREE_SV("VkPhysicalDevice16BitStorageFeatures"), &storage16_features));
+  iree_string_view_t workgroup_layout_features = iree_string_view_empty();
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_lookup_feature_struct(
+      import, features, extended_features,
+      IREE_SV("VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR"),
+      &workgroup_layout_features));
+  iree_string_view_t bfloat16_features = iree_string_view_empty();
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_lookup_feature_struct(
+      import, features, extended_features,
+      IREE_SV("VkPhysicalDeviceShaderBfloat16FeaturesKHR"),
+      &bfloat16_features));
   iree_string_view_t bda_features = iree_string_view_empty();
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_lookup_feature_struct(
       import, features, extended_features,
@@ -1496,6 +1546,13 @@ static loomc_status_t loomc_spirv_vulkaninfo_import_features_from_structs(
       LOOMC_SPIRV_FEATURE_COOPERATIVE_VECTOR_TRAINING_NV,
       loomc_make_cstring_view("vulkaninfo:cooperativeVectorTraining")));
 
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fields(
+      import, workgroup_layout_features,
+      kLoomcSpirvVulkaninfoWorkgroupLayoutFields,
+      IREE_ARRAYSIZE(kLoomcSpirvVulkaninfoWorkgroupLayoutFields)));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fields(
+      import, bfloat16_features, kLoomcSpirvVulkaninfoBfloat16Fields,
+      IREE_ARRAYSIZE(kLoomcSpirvVulkaninfoBfloat16Fields)));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fields(
       import, vulkan12_features, kLoomcSpirvVulkaninfoAtomicInt64Fields,
       sizeof(kLoomcSpirvVulkaninfoAtomicInt64Fields) /

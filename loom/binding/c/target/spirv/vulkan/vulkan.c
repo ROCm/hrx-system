@@ -38,71 +38,48 @@ typedef struct loomc_spirv_vulkan_profile_facts_t {
   loomc_host_size_t environment_fact_count;
 } loomc_spirv_vulkan_profile_facts_t;
 
-typedef struct loomc_spirv_vulkan_float_width_controls_t {
-  // Whether the control is supported for F16.
-  VkBool32 f16;
-  // Whether the control is supported for F32.
-  VkBool32 f32;
-  // Whether the control is supported for F64.
-  VkBool32 f64;
-} loomc_spirv_vulkan_float_width_controls_t;
+enum {
+  LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_16 = 1u << 0,
+  LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_32 = 1u << 1,
+  LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_64 = 1u << 2,
+  LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_ALL = (1u << 3) - 1,
+};
 
 typedef struct loomc_spirv_vulkan_float_controls_t {
   // Widths whose denormal modes can be controlled independently.
   VkShaderFloatControlsIndependence denorm_independence;
-  // Per-width denormal-preservation support.
-  loomc_spirv_vulkan_float_width_controls_t denorm_preserve;
-  // Per-width signed-zero, infinity, and NaN preservation support.
-  loomc_spirv_vulkan_float_width_controls_t signed_zero_inf_nan_preserve;
   // Widths whose rounding modes can be controlled independently.
   VkShaderFloatControlsIndependence rounding_independence;
-  // Per-width round-to-nearest-even support.
-  loomc_spirv_vulkan_float_width_controls_t rounding_rte;
+  // Bitmask of widths supporting denormal preservation.
+  uint8_t denorm_preserve;
+  // Bitmask of widths supporting signed-zero, infinity, and NaN preservation.
+  uint8_t signed_zero_inf_nan_preserve;
+  // Bitmask of widths supporting round-to-nearest-even.
+  uint8_t rounding_rte;
 } loomc_spirv_vulkan_float_controls_t;
 
-typedef struct loomc_spirv_vulkan_extensions_t {
-  // VK_KHR_shader_float16_int8 is supported.
-  bool shader_float16_int8_khr;
-
-  // VK_KHR_shader_subgroup_extended_types is supported.
-  bool shader_subgroup_extended_types_khr;
-
-  // VK_KHR_8bit_storage is supported.
-  bool storage_8bit_khr;
-
-  // VK_KHR_16bit_storage is supported.
-  bool storage_16bit_khr;
-
-  // VK_KHR_buffer_device_address is supported.
-  bool buffer_device_address_khr;
-
-  // VK_KHR_shader_atomic_int64 is supported.
-  bool shader_atomic_int64_khr;
-
-  // VK_KHR_shader_fma is supported.
-  bool shader_fma_khr;
-
-  // VK_KHR_shader_float_controls2 is supported.
-  bool shader_float_controls2_khr;
-
-  // VK_KHR_shader_float_controls is supported.
-  bool shader_float_controls_khr;
-
-  // VK_KHR_vulkan_memory_model is supported.
-  bool vulkan_memory_model_khr;
-
-  // VK_EXT_shader_atomic_float is supported.
-  bool shader_atomic_float_ext;
-
-  // VK_EXT_shader_atomic_float2 is supported.
-  bool shader_atomic_float2_ext;
-
-  // VK_EXT_subgroup_size_control is supported.
-  bool subgroup_size_control_ext;
-
-  // VK_KHR_cooperative_matrix is supported.
-  bool cooperative_matrix_khr;
-} loomc_spirv_vulkan_extensions_t;
+// Advertised device extensions used while normalizing physical-device facts.
+typedef uint32_t loomc_spirv_vulkan_extensions_t;
+enum {
+  LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_FLOAT16_INT8_KHR = 1u << 0,
+  LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_SUBGROUP_EXTENDED_TYPES_KHR = 1u << 1,
+  LOOMC_SPIRV_VULKAN_EXTENSION_STORAGE_8BIT_KHR = 1u << 2,
+  LOOMC_SPIRV_VULKAN_EXTENSION_STORAGE_16BIT_KHR = 1u << 3,
+  LOOMC_SPIRV_VULKAN_EXTENSION_BUFFER_DEVICE_ADDRESS_KHR = 1u << 4,
+  LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_ATOMIC_INT64_KHR = 1u << 5,
+  LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_FMA_KHR = 1u << 6,
+  LOOMC_SPIRV_VULKAN_EXTENSION_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR = 1u << 7,
+  LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_BFLOAT16_KHR = 1u << 8,
+  LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_INTEGER_DOT_PRODUCT_KHR = 1u << 9,
+  LOOMC_SPIRV_VULKAN_EXTENSION_COOPERATIVE_VECTOR_NV = 1u << 10,
+  LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_FLOAT_CONTROLS2_KHR = 1u << 11,
+  LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_FLOAT_CONTROLS_KHR = 1u << 12,
+  LOOMC_SPIRV_VULKAN_EXTENSION_VULKAN_MEMORY_MODEL_KHR = 1u << 13,
+  LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_ATOMIC_FLOAT_EXT = 1u << 14,
+  LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_ATOMIC_FLOAT2_EXT = 1u << 15,
+  LOOMC_SPIRV_VULKAN_EXTENSION_SUBGROUP_SIZE_CONTROL_EXT = 1u << 16,
+  LOOMC_SPIRV_VULKAN_EXTENSION_COOPERATIVE_MATRIX_KHR = 1u << 17,
+};
 
 static loomc_status_t loomc_spirv_vulkan_validate_string_view(
     loomc_string_view_t value) {
@@ -222,19 +199,26 @@ static loomc_status_t loomc_spirv_vulkan_add_limit_fact(
   return loomc_ok_status();
 }
 
+static uint8_t loomc_spirv_vulkan_float_widths(VkBool32 f16, VkBool32 f32,
+                                               VkBool32 f64) {
+  return (uint8_t)((f16 ? LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_16 : 0) |
+                   (f32 ? LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_32 : 0) |
+                   (f64 ? LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_64 : 0));
+}
+
 static loomc_status_t loomc_spirv_vulkan_add_float_control_features(
     loomc_spirv_vulkan_profile_facts_t* facts,
     const loomc_spirv_vulkan_float_controls_t* controls) {
-  const bool denorm_all = controls->denorm_independence ==
-                              VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE &&
-                          controls->denorm_preserve.f16 &&
-                          controls->denorm_preserve.f32 &&
-                          controls->denorm_preserve.f64;
-  const bool denorm_pair = controls->denorm_preserve.f16 &&
-                           controls->denorm_preserve.f64 &&
-                           (controls->denorm_independence !=
-                                VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE ||
-                            denorm_all);
+  const bool denorm_all =
+      controls->denorm_independence ==
+          VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE &&
+      controls->denorm_preserve == LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_ALL;
+  const bool denorm_pair =
+      (controls->denorm_preserve & LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_16) &&
+      (controls->denorm_preserve & LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_64) &&
+      (controls->denorm_independence !=
+           VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE ||
+       denorm_all);
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
       facts, denorm_all, LOOMC_SPIRV_FEATURE_FLOAT_ALL_DENORM_PRESERVE,
       loomc_make_cstring_view("vulkan:float_all_denorm_preserve")));
@@ -243,7 +227,7 @@ static loomc_status_t loomc_spirv_vulkan_add_float_control_features(
       loomc_make_cstring_view("vulkan:float16_64_denorm_preserve")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
       facts,
-      controls->denorm_preserve.f32 &&
+      (controls->denorm_preserve & LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_32) &&
           (controls->denorm_independence !=
                VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE ||
            denorm_all),
@@ -251,28 +235,30 @@ static loomc_status_t loomc_spirv_vulkan_add_float_control_features(
       loomc_make_cstring_view("vulkan:float32_denorm_preserve")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
       facts,
-      denorm_pair || (controls->denorm_preserve.f16 &&
-                      controls->denorm_independence ==
-                          VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL),
+      denorm_pair ||
+          ((controls->denorm_preserve & LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_16) &&
+           controls->denorm_independence ==
+               VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL),
       LOOMC_SPIRV_FEATURE_FLOAT16_DENORM_PRESERVE,
       loomc_make_cstring_view("vulkan:float16_denorm_preserve")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
       facts,
-      denorm_pair || (controls->denorm_preserve.f64 &&
-                      controls->denorm_independence ==
-                          VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL),
+      denorm_pair ||
+          ((controls->denorm_preserve & LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_64) &&
+           controls->denorm_independence ==
+               VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL),
       LOOMC_SPIRV_FEATURE_FLOAT64_DENORM_PRESERVE,
       loomc_make_cstring_view("vulkan:float64_denorm_preserve")));
-  const bool rounding_all = controls->rounding_independence ==
-                                VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE &&
-                            controls->rounding_rte.f16 &&
-                            controls->rounding_rte.f32 &&
-                            controls->rounding_rte.f64;
-  const bool rounding_pair = controls->rounding_rte.f16 &&
-                             controls->rounding_rte.f64 &&
-                             (controls->rounding_independence !=
-                                  VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE ||
-                              rounding_all);
+  const bool rounding_all =
+      controls->rounding_independence ==
+          VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE &&
+      controls->rounding_rte == LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_ALL;
+  const bool rounding_pair =
+      (controls->rounding_rte & LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_16) &&
+      (controls->rounding_rte & LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_64) &&
+      (controls->rounding_independence !=
+           VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE ||
+       rounding_all);
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
       facts, rounding_all, LOOMC_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE,
       loomc_make_cstring_view("vulkan:float_all_rounding_rte")));
@@ -281,7 +267,7 @@ static loomc_status_t loomc_spirv_vulkan_add_float_control_features(
       loomc_make_cstring_view("vulkan:float16_64_rounding_rte")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
       facts,
-      controls->rounding_rte.f32 &&
+      (controls->rounding_rte & LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_32) &&
           (controls->rounding_independence !=
                VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_NONE ||
            rounding_all),
@@ -289,28 +275,36 @@ static loomc_status_t loomc_spirv_vulkan_add_float_control_features(
       loomc_make_cstring_view("vulkan:float32_rounding_rte")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
       facts,
-      rounding_pair || (controls->rounding_rte.f16 &&
-                        controls->rounding_independence ==
-                            VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL),
+      rounding_pair ||
+          ((controls->rounding_rte & LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_16) &&
+           controls->rounding_independence ==
+               VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL),
       LOOMC_SPIRV_FEATURE_FLOAT16_ROUNDING_RTE,
       loomc_make_cstring_view("vulkan:float16_rounding_rte")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
       facts,
-      rounding_pair || (controls->rounding_rte.f64 &&
-                        controls->rounding_independence ==
-                            VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL),
+      rounding_pair ||
+          ((controls->rounding_rte & LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_64) &&
+           controls->rounding_independence ==
+               VK_SHADER_FLOAT_CONTROLS_INDEPENDENCE_ALL),
       LOOMC_SPIRV_FEATURE_FLOAT64_ROUNDING_RTE,
       loomc_make_cstring_view("vulkan:float64_rounding_rte")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
-      facts, controls->signed_zero_inf_nan_preserve.f16,
+      facts,
+      (controls->signed_zero_inf_nan_preserve &
+       LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_16),
       LOOMC_SPIRV_FEATURE_FLOAT16_SIGNED_ZERO_INF_NAN_PRESERVE,
       loomc_make_cstring_view("vulkan:shaderSignedZeroInfNanPreserveFloat16")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
-      facts, controls->signed_zero_inf_nan_preserve.f32,
+      facts,
+      (controls->signed_zero_inf_nan_preserve &
+       LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_32),
       LOOMC_SPIRV_FEATURE_FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE,
       loomc_make_cstring_view("vulkan:shaderSignedZeroInfNanPreserveFloat32")));
   return loomc_spirv_vulkan_add_bool_feature(
-      facts, controls->signed_zero_inf_nan_preserve.f64,
+      facts,
+      (controls->signed_zero_inf_nan_preserve &
+       LOOMC_SPIRV_VULKAN_FLOAT_WIDTH_64),
       LOOMC_SPIRV_FEATURE_FLOAT64_SIGNED_ZERO_INF_NAN_PRESERVE,
       loomc_make_cstring_view("vulkan:shaderSignedZeroInfNanPreserveFloat64"));
 }
@@ -361,48 +355,64 @@ static void loomc_spirv_vulkan_record_extension(
     loomc_spirv_vulkan_extensions_t* out_extensions) {
   if (loomc_spirv_vulkan_extension_name_equal(
           extension, VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME)) {
-    out_extensions->shader_float16_int8_khr = true;
+    *out_extensions |= LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_FLOAT16_INT8_KHR;
   } else if (loomc_spirv_vulkan_extension_name_equal(
                  extension,
                  VK_KHR_SHADER_SUBGROUP_EXTENDED_TYPES_EXTENSION_NAME)) {
-    out_extensions->shader_subgroup_extended_types_khr = true;
+    *out_extensions |=
+        LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_SUBGROUP_EXTENDED_TYPES_KHR;
   } else if (loomc_spirv_vulkan_extension_name_equal(
                  extension, VK_KHR_8BIT_STORAGE_EXTENSION_NAME)) {
-    out_extensions->storage_8bit_khr = true;
+    *out_extensions |= LOOMC_SPIRV_VULKAN_EXTENSION_STORAGE_8BIT_KHR;
   } else if (loomc_spirv_vulkan_extension_name_equal(
                  extension, VK_KHR_16BIT_STORAGE_EXTENSION_NAME)) {
-    out_extensions->storage_16bit_khr = true;
+    *out_extensions |= LOOMC_SPIRV_VULKAN_EXTENSION_STORAGE_16BIT_KHR;
   } else if (loomc_spirv_vulkan_extension_name_equal(
                  extension, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME)) {
-    out_extensions->buffer_device_address_khr = true;
+    *out_extensions |= LOOMC_SPIRV_VULKAN_EXTENSION_BUFFER_DEVICE_ADDRESS_KHR;
   } else if (loomc_spirv_vulkan_extension_name_equal(
                  extension, VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME)) {
-    out_extensions->shader_atomic_int64_khr = true;
+    *out_extensions |= LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_ATOMIC_INT64_KHR;
   } else if (loomc_spirv_vulkan_extension_name_equal(
                  extension, VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME)) {
-    out_extensions->shader_float_controls_khr = true;
+    *out_extensions |= LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_FLOAT_CONTROLS_KHR;
   } else if (loomc_spirv_vulkan_extension_name_equal(
                  extension, VK_KHR_SHADER_FMA_EXTENSION_NAME)) {
-    out_extensions->shader_fma_khr = true;
+    *out_extensions |= LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_FMA_KHR;
+  } else if (loomc_spirv_vulkan_extension_name_equal(
+                 extension,
+                 VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME)) {
+    *out_extensions |=
+        LOOMC_SPIRV_VULKAN_EXTENSION_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR;
+  } else if (loomc_spirv_vulkan_extension_name_equal(
+                 extension, VK_KHR_SHADER_BFLOAT16_EXTENSION_NAME)) {
+    *out_extensions |= LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_BFLOAT16_KHR;
+  } else if (loomc_spirv_vulkan_extension_name_equal(
+                 extension, VK_KHR_SHADER_INTEGER_DOT_PRODUCT_EXTENSION_NAME)) {
+    *out_extensions |=
+        LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_INTEGER_DOT_PRODUCT_KHR;
+  } else if (loomc_spirv_vulkan_extension_name_equal(
+                 extension, VK_NV_COOPERATIVE_VECTOR_EXTENSION_NAME)) {
+    *out_extensions |= LOOMC_SPIRV_VULKAN_EXTENSION_COOPERATIVE_VECTOR_NV;
   } else if (loomc_spirv_vulkan_extension_name_equal(
                  extension, VK_KHR_SHADER_FLOAT_CONTROLS_2_EXTENSION_NAME)) {
-    out_extensions->shader_float_controls2_khr = true;
+    *out_extensions |= LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_FLOAT_CONTROLS2_KHR;
   } else if (loomc_spirv_vulkan_extension_name_equal(
                  extension, VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME)) {
-    out_extensions->vulkan_memory_model_khr = true;
+    *out_extensions |= LOOMC_SPIRV_VULKAN_EXTENSION_VULKAN_MEMORY_MODEL_KHR;
   } else if (loomc_spirv_vulkan_extension_name_equal(
                  extension, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME)) {
-    out_extensions->shader_atomic_float_ext = true;
+    *out_extensions |= LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_ATOMIC_FLOAT_EXT;
   } else if (loomc_spirv_vulkan_extension_name_equal(
                  extension, VK_EXT_SUBGROUP_SIZE_CONTROL_EXTENSION_NAME)) {
-    out_extensions->subgroup_size_control_ext = true;
+    *out_extensions |= LOOMC_SPIRV_VULKAN_EXTENSION_SUBGROUP_SIZE_CONTROL_EXT;
   } else if (loomc_spirv_vulkan_extension_name_equal(
                  extension, VK_EXT_SHADER_ATOMIC_FLOAT_2_EXTENSION_NAME)) {
-    out_extensions->shader_atomic_float2_ext = true;
+    *out_extensions |= LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_ATOMIC_FLOAT2_EXT;
 #if defined(VK_KHR_cooperative_matrix)
   } else if (loomc_spirv_vulkan_extension_name_equal(
                  extension, VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME)) {
-    out_extensions->cooperative_matrix_khr = true;
+    *out_extensions |= LOOMC_SPIRV_VULKAN_EXTENSION_COOPERATIVE_MATRIX_KHR;
 #endif  // defined(VK_KHR_cooperative_matrix)
   }
 }
@@ -411,7 +421,7 @@ static loomc_status_t loomc_spirv_vulkan_query_extensions(
     const loomc_spirv_vulkan_profile_options_t* options,
     loomc_allocator_t allocator,
     loomc_spirv_vulkan_extensions_t* out_extensions) {
-  *out_extensions = (loomc_spirv_vulkan_extensions_t){0};
+  *out_extensions = 0;
   if (options->functions->enumerate_device_extension_properties == NULL) {
     return loomc_ok_status();
   }
@@ -483,7 +493,7 @@ static void loomc_spirv_vulkan_link_out_struct(void** inout_chain,
 
 static loomc_status_t loomc_spirv_vulkan_query_properties(
     const loomc_spirv_vulkan_profile_options_t* options,
-    const loomc_spirv_vulkan_extensions_t* extensions,
+    loomc_spirv_vulkan_extensions_t extensions,
     loomc_spirv_vulkan_profile_facts_t* facts, uint32_t* out_api_version,
     uint32_t* out_subgroup_size,
     VkPhysicalDeviceSubgroupSizeControlProperties* out_subgroup_control) {
@@ -546,7 +556,8 @@ static loomc_status_t loomc_spirv_vulkan_query_properties(
   const bool has_vulkan_11 = *out_api_version >= VK_API_VERSION_1_1;
   const bool has_vulkan_12 = *out_api_version >= VK_API_VERSION_1_2;
   const bool query_float_controls_extension =
-      !has_vulkan_12 && extensions->shader_float_controls_khr;
+      !has_vulkan_12 &&
+      (extensions & LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_FLOAT_CONTROLS_KHR);
   if (!has_vulkan_11 && !query_float_controls_extension) {
     return loomc_ok_status();
   }
@@ -567,7 +578,7 @@ static loomc_status_t loomc_spirv_vulkan_query_properties(
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES,
   };
   if (*out_api_version >= VK_API_VERSION_1_3 ||
-      extensions->subgroup_size_control_ext) {
+      (extensions & LOOMC_SPIRV_VULKAN_EXTENSION_SUBGROUP_SIZE_CONTROL_EXT)) {
     loomc_spirv_vulkan_link_out_struct(&property_chain, out_subgroup_control);
   }
   if (query_float_controls_extension) {
@@ -642,28 +653,19 @@ static loomc_status_t loomc_spirv_vulkan_query_properties(
   if (has_vulkan_12) {
     const loomc_spirv_vulkan_float_controls_t controls = {
         .denorm_independence = vulkan12_properties.denormBehaviorIndependence,
-        .denorm_preserve =
-            {
-                .f16 = vulkan12_properties.shaderDenormPreserveFloat16,
-                .f32 = vulkan12_properties.shaderDenormPreserveFloat32,
-                .f64 = vulkan12_properties.shaderDenormPreserveFloat64,
-            },
-        .signed_zero_inf_nan_preserve =
-            {
-                .f16 =
-                    vulkan12_properties.shaderSignedZeroInfNanPreserveFloat16,
-                .f32 =
-                    vulkan12_properties.shaderSignedZeroInfNanPreserveFloat32,
-                .f64 =
-                    vulkan12_properties.shaderSignedZeroInfNanPreserveFloat64,
-            },
+        .denorm_preserve = loomc_spirv_vulkan_float_widths(
+            vulkan12_properties.shaderDenormPreserveFloat16,
+            vulkan12_properties.shaderDenormPreserveFloat32,
+            vulkan12_properties.shaderDenormPreserveFloat64),
+        .signed_zero_inf_nan_preserve = loomc_spirv_vulkan_float_widths(
+            vulkan12_properties.shaderSignedZeroInfNanPreserveFloat16,
+            vulkan12_properties.shaderSignedZeroInfNanPreserveFloat32,
+            vulkan12_properties.shaderSignedZeroInfNanPreserveFloat64),
         .rounding_independence = vulkan12_properties.roundingModeIndependence,
-        .rounding_rte =
-            {
-                .f16 = vulkan12_properties.shaderRoundingModeRTEFloat16,
-                .f32 = vulkan12_properties.shaderRoundingModeRTEFloat32,
-                .f64 = vulkan12_properties.shaderRoundingModeRTEFloat64,
-            },
+        .rounding_rte = loomc_spirv_vulkan_float_widths(
+            vulkan12_properties.shaderRoundingModeRTEFloat16,
+            vulkan12_properties.shaderRoundingModeRTEFloat32,
+            vulkan12_properties.shaderRoundingModeRTEFloat64),
     };
     return loomc_spirv_vulkan_add_float_control_features(facts, &controls);
   }
@@ -671,29 +673,20 @@ static loomc_status_t loomc_spirv_vulkan_query_properties(
     const loomc_spirv_vulkan_float_controls_t controls = {
         .denorm_independence =
             float_controls_properties.denormBehaviorIndependence,
-        .denorm_preserve =
-            {
-                .f16 = float_controls_properties.shaderDenormPreserveFloat16,
-                .f32 = float_controls_properties.shaderDenormPreserveFloat32,
-                .f64 = float_controls_properties.shaderDenormPreserveFloat64,
-            },
-        .signed_zero_inf_nan_preserve =
-            {
-                .f16 = float_controls_properties
-                           .shaderSignedZeroInfNanPreserveFloat16,
-                .f32 = float_controls_properties
-                           .shaderSignedZeroInfNanPreserveFloat32,
-                .f64 = float_controls_properties
-                           .shaderSignedZeroInfNanPreserveFloat64,
-            },
+        .denorm_preserve = loomc_spirv_vulkan_float_widths(
+            float_controls_properties.shaderDenormPreserveFloat16,
+            float_controls_properties.shaderDenormPreserveFloat32,
+            float_controls_properties.shaderDenormPreserveFloat64),
+        .signed_zero_inf_nan_preserve = loomc_spirv_vulkan_float_widths(
+            float_controls_properties.shaderSignedZeroInfNanPreserveFloat16,
+            float_controls_properties.shaderSignedZeroInfNanPreserveFloat32,
+            float_controls_properties.shaderSignedZeroInfNanPreserveFloat64),
         .rounding_independence =
             float_controls_properties.roundingModeIndependence,
-        .rounding_rte =
-            {
-                .f16 = float_controls_properties.shaderRoundingModeRTEFloat16,
-                .f32 = float_controls_properties.shaderRoundingModeRTEFloat32,
-                .f64 = float_controls_properties.shaderRoundingModeRTEFloat64,
-            },
+        .rounding_rte = loomc_spirv_vulkan_float_widths(
+            float_controls_properties.shaderRoundingModeRTEFloat16,
+            float_controls_properties.shaderRoundingModeRTEFloat32,
+            float_controls_properties.shaderRoundingModeRTEFloat64),
     };
     return loomc_spirv_vulkan_add_float_control_features(facts, &controls);
   }
@@ -702,7 +695,7 @@ static loomc_status_t loomc_spirv_vulkan_query_properties(
 
 static loomc_status_t loomc_spirv_vulkan_query_features(
     const loomc_spirv_vulkan_profile_options_t* options, uint32_t api_version,
-    const loomc_spirv_vulkan_extensions_t* extensions, uint32_t subgroup_size,
+    loomc_spirv_vulkan_extensions_t extensions, uint32_t subgroup_size,
     const VkPhysicalDeviceSubgroupSizeControlProperties* subgroup_control,
     loomc_spirv_vulkan_profile_facts_t* facts) {
   VkPhysicalDeviceSubgroupSizeControlFeatures subgroup_control_features = {
@@ -751,16 +744,51 @@ static loomc_status_t loomc_spirv_vulkan_query_features(
   };
 
   void* feature_chain = NULL;
+  VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR
+      workgroup_layout_features = {
+          .sType =
+              VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR,
+      };
+  if ((extensions &
+       LOOMC_SPIRV_VULKAN_EXTENSION_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR) !=
+      0) {
+    loomc_spirv_vulkan_link_out_struct(&feature_chain,
+                                       &workgroup_layout_features);
+  }
+  VkPhysicalDeviceShaderBfloat16FeaturesKHR bfloat16_features = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_BFLOAT16_FEATURES_KHR,
+  };
+  if ((extensions & LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_BFLOAT16_KHR) != 0) {
+    loomc_spirv_vulkan_link_out_struct(&feature_chain, &bfloat16_features);
+  }
+  VkPhysicalDeviceShaderIntegerDotProductFeatures integer_dot_features = {
+      .sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_INTEGER_DOT_PRODUCT_FEATURES,
+  };
+  const bool query_integer_dot =
+      api_version >= VK_API_VERSION_1_3 ||
+      (extensions &
+       LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_INTEGER_DOT_PRODUCT_KHR);
+  if (query_integer_dot) {
+    loomc_spirv_vulkan_link_out_struct(&feature_chain, &integer_dot_features);
+  }
+  VkPhysicalDeviceCooperativeVectorFeaturesNV cooperative_vector_features = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_VECTOR_FEATURES_NV,
+  };
+  if ((extensions & LOOMC_SPIRV_VULKAN_EXTENSION_COOPERATIVE_VECTOR_NV) != 0) {
+    loomc_spirv_vulkan_link_out_struct(&feature_chain,
+                                       &cooperative_vector_features);
+  }
   if (api_version >= VK_API_VERSION_1_4 ||
-      extensions->shader_float_controls2_khr) {
+      (extensions & LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_FLOAT_CONTROLS2_KHR)) {
     loomc_spirv_vulkan_link_out_struct(&feature_chain,
                                        &float_controls2_features);
   }
-  if (extensions->shader_fma_khr) {
+  if ((extensions & LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_FMA_KHR) != 0) {
     loomc_spirv_vulkan_link_out_struct(&feature_chain, &fma_features);
   }
   if (api_version >= VK_API_VERSION_1_3 ||
-      extensions->subgroup_size_control_ext) {
+      (extensions & LOOMC_SPIRV_VULKAN_EXTENSION_SUBGROUP_SIZE_CONTROL_EXT)) {
     loomc_spirv_vulkan_link_out_struct(&feature_chain,
                                        &subgroup_control_features);
   }
@@ -769,7 +797,7 @@ static loomc_status_t loomc_spirv_vulkan_query_features(
       .sType =
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR,
   };
-  if (extensions->cooperative_matrix_khr) {
+  if ((extensions & LOOMC_SPIRV_VULKAN_EXTENSION_COOPERATIVE_MATRIX_KHR) != 0) {
     loomc_spirv_vulkan_link_out_struct(&feature_chain,
                                        &cooperative_matrix_features);
   }
@@ -777,23 +805,33 @@ static loomc_status_t loomc_spirv_vulkan_query_features(
   const bool has_vulkan_11 = api_version >= VK_API_VERSION_1_1;
   const bool has_vulkan_12 = api_version >= VK_API_VERSION_1_2;
   const bool query_shader_float16_int8_extension =
-      !has_vulkan_12 && extensions->shader_float16_int8_khr;
+      !has_vulkan_12 &&
+      (extensions & LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_FLOAT16_INT8_KHR);
   const bool query_subgroup_type_extension =
-      !has_vulkan_12 && extensions->shader_subgroup_extended_types_khr;
+      !has_vulkan_12 &&
+      (extensions &
+       LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_SUBGROUP_EXTENDED_TYPES_KHR);
   const bool query_storage_8bit_extension =
-      !has_vulkan_12 && extensions->storage_8bit_khr;
+      !has_vulkan_12 &&
+      (extensions & LOOMC_SPIRV_VULKAN_EXTENSION_STORAGE_8BIT_KHR);
   const bool query_storage_16bit_features =
-      has_vulkan_11 || extensions->storage_16bit_khr;
+      has_vulkan_11 ||
+      (extensions & LOOMC_SPIRV_VULKAN_EXTENSION_STORAGE_16BIT_KHR);
   const bool query_buffer_device_address_extension =
-      !has_vulkan_12 && extensions->buffer_device_address_khr;
+      !has_vulkan_12 &&
+      (extensions & LOOMC_SPIRV_VULKAN_EXTENSION_BUFFER_DEVICE_ADDRESS_KHR);
   const bool query_atomic_int64_extension =
-      !has_vulkan_12 && extensions->shader_atomic_int64_khr;
+      !has_vulkan_12 &&
+      (extensions & LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_ATOMIC_INT64_KHR);
   const bool query_vulkan_memory_model_extension =
-      !has_vulkan_12 && extensions->vulkan_memory_model_khr;
-  if (extensions->shader_atomic_float2_ext) {
+      !has_vulkan_12 &&
+      (extensions & LOOMC_SPIRV_VULKAN_EXTENSION_VULKAN_MEMORY_MODEL_KHR);
+  if ((extensions & LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_ATOMIC_FLOAT2_EXT) !=
+      0) {
     loomc_spirv_vulkan_link_out_struct(&feature_chain, &atomic_float2_features);
   }
-  if (extensions->shader_atomic_float_ext) {
+  if ((extensions & LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_ATOMIC_FLOAT_EXT) !=
+      0) {
     loomc_spirv_vulkan_link_out_struct(&feature_chain, &atomic_float_features);
   }
   if (query_vulkan_memory_model_extension) {
@@ -830,6 +868,81 @@ static loomc_status_t loomc_spirv_vulkan_query_features(
                                                     &features2);
   IREE_LEAK_CHECK_DISABLE_POP();
 
+  if ((extensions &
+       LOOMC_SPIRV_VULKAN_EXTENSION_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR) !=
+      0) {
+    LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+        facts, workgroup_layout_features.workgroupMemoryExplicitLayout,
+        LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR,
+        loomc_make_cstring_view("vulkan:workgroupMemoryExplicitLayout")));
+    LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+        facts,
+        workgroup_layout_features.workgroupMemoryExplicitLayout8BitAccess,
+        LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS_KHR,
+        loomc_make_cstring_view(
+            "vulkan:workgroupMemoryExplicitLayout8BitAccess")));
+    LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+        facts,
+        workgroup_layout_features.workgroupMemoryExplicitLayout16BitAccess,
+        LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR,
+        loomc_make_cstring_view(
+            "vulkan:workgroupMemoryExplicitLayout16BitAccess")));
+  }
+  if ((extensions & LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_BFLOAT16_KHR) != 0) {
+    LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+        facts, bfloat16_features.shaderBFloat16Type,
+        LOOMC_SPIRV_FEATURE_BFLOAT16_TYPE_KHR,
+        loomc_make_cstring_view("vulkan:shaderBFloat16Type")));
+    LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+        facts, bfloat16_features.shaderBFloat16DotProduct,
+        LOOMC_SPIRV_FEATURE_BFLOAT16_DOT_PRODUCT_KHR,
+        loomc_make_cstring_view("vulkan:shaderBFloat16DotProduct")));
+    LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+        facts, bfloat16_features.shaderBFloat16CooperativeMatrix,
+        LOOMC_SPIRV_FEATURE_BFLOAT16_COOPERATIVE_MATRIX_KHR,
+        loomc_make_cstring_view("vulkan:shaderBFloat16CooperativeMatrix")));
+  }
+  if (query_integer_dot) {
+    static const loomc_spirv_feature_t dot_features[] = {
+        LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT,
+        LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT_ALL,
+        LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT,
+        LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED,
+    };
+    const bool int8_known =
+        has_vulkan_12 || query_shader_float16_int8_extension;
+    const bool int8_supported = has_vulkan_12
+                                    ? vulkan12_features.shaderInt8
+                                    : float16_int8_features.shaderInt8;
+    for (loomc_host_size_t i = 0;
+         i < sizeof(dot_features) / sizeof(dot_features[0]); ++i) {
+      loomc_target_fact_state_t state =
+          integer_dot_features.shaderIntegerDotProduct
+              ? LOOMC_TARGET_FACT_STATE_TRUE
+              : LOOMC_TARGET_FACT_STATE_FALSE;
+      if (state == LOOMC_TARGET_FACT_STATE_TRUE &&
+          dot_features[i] ==
+              LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT) {
+        state = !int8_known      ? LOOMC_TARGET_FACT_STATE_UNKNOWN
+                : int8_supported ? LOOMC_TARGET_FACT_STATE_TRUE
+                                 : LOOMC_TARGET_FACT_STATE_FALSE;
+      }
+      LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_feature_fact(
+          facts, dot_features[i], state,
+          loomc_make_cstring_view("vulkan:shaderIntegerDotProduct")));
+    }
+  }
+  if ((extensions & LOOMC_SPIRV_VULKAN_EXTENSION_COOPERATIVE_VECTOR_NV) != 0) {
+    LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+        facts, cooperative_vector_features.cooperativeVector,
+        LOOMC_SPIRV_FEATURE_COOPERATIVE_VECTOR_NV,
+        loomc_make_cstring_view("vulkan:cooperativeVector")));
+    LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
+        facts, cooperative_vector_features.cooperativeVectorTraining,
+        LOOMC_SPIRV_FEATURE_COOPERATIVE_VECTOR_TRAINING_NV,
+        loomc_make_cstring_view("vulkan:cooperativeVectorTraining")));
+  }
+
   if (has_vulkan_11) {
     const bool supports_compute_control =
         subgroup_control_features.subgroupSizeControl &&
@@ -861,15 +974,21 @@ static loomc_status_t loomc_spirv_vulkan_query_features(
       LOOMC_SPIRV_FEATURE_FLOAT_CONTROLS2,
       loomc_make_cstring_view("vulkan:shaderFloatControls2")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
-      facts, extensions->shader_fma_khr && fma_features.shaderFmaFloat16,
+      facts,
+      (extensions & LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_FMA_KHR) &&
+          fma_features.shaderFmaFloat16,
       LOOMC_SPIRV_FEATURE_FMA_FLOAT16,
       loomc_make_cstring_view("vulkan:shaderFmaFloat16")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
-      facts, extensions->shader_fma_khr && fma_features.shaderFmaFloat32,
+      facts,
+      (extensions & LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_FMA_KHR) &&
+          fma_features.shaderFmaFloat32,
       LOOMC_SPIRV_FEATURE_FMA_FLOAT32,
       loomc_make_cstring_view("vulkan:shaderFmaFloat32")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
-      facts, extensions->shader_fma_khr && fma_features.shaderFmaFloat64,
+      facts,
+      (extensions & LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_FMA_KHR) &&
+          fma_features.shaderFmaFloat64,
       LOOMC_SPIRV_FEATURE_FMA_FLOAT64,
       loomc_make_cstring_view("vulkan:shaderFmaFloat64")));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
@@ -975,7 +1094,8 @@ static loomc_status_t loomc_spirv_vulkan_query_features(
         loomc_make_cstring_view(
             "vulkan:vulkanMemoryModel+vulkanMemoryModelDeviceScope")));
   }
-  if (extensions->shader_atomic_float_ext) {
+  if ((extensions & LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_ATOMIC_FLOAT_EXT) !=
+      0) {
     LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
         facts, atomic_float_features.shaderBufferFloat32Atomics,
         LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_FLOAT32_ATOMICS,
@@ -1017,7 +1137,8 @@ static loomc_status_t loomc_spirv_vulkan_query_features(
         LOOMC_SPIRV_FEATURE_WORKGROUP_FLOAT64_ATOMIC_ADD,
         loomc_make_cstring_view("vulkan:shaderSharedFloat64AtomicAdd")));
   }
-  if (extensions->shader_atomic_float2_ext) {
+  if ((extensions & LOOMC_SPIRV_VULKAN_EXTENSION_SHADER_ATOMIC_FLOAT2_EXT) !=
+      0) {
     LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
         facts,
         (has_vulkan_12 ? vulkan12_features.shaderFloat16
@@ -1048,7 +1169,7 @@ static loomc_status_t loomc_spirv_vulkan_query_features(
         loomc_make_cstring_view("vulkan:shaderSharedFloat16AtomicAdd")));
   }
 #if defined(VK_KHR_cooperative_matrix)
-  if (extensions->cooperative_matrix_khr) {
+  if ((extensions & LOOMC_SPIRV_VULKAN_EXTENSION_COOPERATIVE_MATRIX_KHR) != 0) {
     return loomc_spirv_vulkan_add_bool_feature(
         facts, cooperative_matrix_features.cooperativeMatrix,
         LOOMC_SPIRV_FEATURE_COOPERATIVE_MATRIX_KHR,
@@ -1080,19 +1201,19 @@ loomc_status_t loomc_target_profile_create_spirv_vulkan(
   uint32_t api_version = 0;
   uint32_t subgroup_size = 0;
   VkPhysicalDeviceSubgroupSizeControlProperties subgroup_control = {0};
-  loomc_spirv_vulkan_extensions_t extensions = {0};
+  loomc_spirv_vulkan_extensions_t extensions = 0;
   IREE_LEAK_CHECK_DISABLE_PUSH();
   loomc_status_t status =
       loomc_spirv_vulkan_query_extensions(options, allocator, &extensions);
   if (loomc_status_is_ok(status)) {
-    status = loomc_spirv_vulkan_query_properties(options, &extensions, &facts,
+    status = loomc_spirv_vulkan_query_properties(options, extensions, &facts,
                                                  &api_version, &subgroup_size,
                                                  &subgroup_control);
   }
   if (loomc_status_is_ok(status)) {
-    status = loomc_spirv_vulkan_query_features(options, api_version,
-                                               &extensions, subgroup_size,
-                                               &subgroup_control, &facts);
+    status = loomc_spirv_vulkan_query_features(options, api_version, extensions,
+                                               subgroup_size, &subgroup_control,
+                                               &facts);
   }
   IREE_LEAK_CHECK_DISABLE_POP();
   LOOMC_RETURN_IF_ERROR(status);

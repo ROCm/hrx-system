@@ -666,6 +666,80 @@ TEST(TargetSpirvVulkaninfoTest, ImportsStorageFeatureStructFamily) {
   }
 }
 
+TEST(TargetSpirvVulkaninfoTest, ImportsWorkgroupLayoutAndBfloat16Families) {
+  struct FeatureField {
+    // Vulkan feature struct containing the field.
+    const char* structure;
+    // Vulkan field whose presence and value are varied independently.
+    const char* field;
+    // Other fields required by the feature's semantics.
+    const char* prerequisites;
+    // Corresponding compiler feature.
+    loomc_spirv_feature_t feature;
+  };
+  const FeatureField fields[] = {
+      {"WorkgroupMemoryExplicitLayoutFeaturesKHR",
+       "workgroupMemoryExplicitLayout", "",
+       LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR},
+      {"WorkgroupMemoryExplicitLayoutFeaturesKHR",
+       "workgroupMemoryExplicitLayout8BitAccess",
+       "\"workgroupMemoryExplicitLayout\":true,",
+       LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS_KHR},
+      {"WorkgroupMemoryExplicitLayoutFeaturesKHR",
+       "workgroupMemoryExplicitLayout16BitAccess",
+       "\"workgroupMemoryExplicitLayout\":true,",
+       LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR},
+      {"ShaderBfloat16FeaturesKHR", "shaderBFloat16Type", "",
+       LOOMC_SPIRV_FEATURE_BFLOAT16_TYPE_KHR},
+      {"ShaderBfloat16FeaturesKHR", "shaderBFloat16DotProduct",
+       "\"shaderBFloat16Type\":true,",
+       LOOMC_SPIRV_FEATURE_BFLOAT16_DOT_PRODUCT_KHR},
+      {"ShaderBfloat16FeaturesKHR", "shaderBFloat16CooperativeMatrix",
+       "\"shaderBFloat16Type\":true,",
+       LOOMC_SPIRV_FEATURE_BFLOAT16_COOPERATIVE_MATRIX_KHR},
+  };
+  auto environment = CreateSpirvTargetEnvironment();
+  for (const auto& field : fields) {
+    for (const std::string container :
+         {"features", "extended_features", "capabilities"}) {
+      for (const std::string value : {"true", "false", "null", ""}) {
+        SCOPED_TRACE(::testing::Message()
+                     << field.field << ":" << container << ":" << value);
+        std::string members = field.prerequisites;
+        if (!value.empty()) {
+          members += "\"" + std::string(field.field) + "\":" + value;
+        } else if (!members.empty()) {
+          members.pop_back();
+        }
+        const std::string features =
+            "{\"VkPhysicalDeviceCooperativeMatrixFeaturesKHR\":{"
+            "\"cooperativeMatrix\":true},\"VkPhysicalDevice" +
+            std::string(field.structure) + "\":{" + members + "}}";
+        const std::string json =
+            container == "capabilities"
+                ? "{\"capabilities\":{\"device\":{\"features\":" + features +
+                      "}}}"
+                : "{\"devices\":[{\"" + container + "\":" + features + "}]}";
+        auto source = CreateJsonSource("feature-family.json", json.c_str());
+        auto profile =
+            ImportVulkaninfoProfile(environment.get(), source.get(), nullptr);
+        ExpectFeatureState(profile.get(), field.feature,
+                           value == "true" ? LOOMC_TARGET_FACT_STATE_TRUE
+                           : value == "false"
+                               ? LOOMC_TARGET_FACT_STATE_FALSE
+                               : LOOMC_TARGET_FACT_STATE_UNKNOWN);
+      }
+    }
+  }
+  auto source = CreateJsonSource("older-device.json", kRawDevicesJson);
+  auto profile =
+      ImportVulkaninfoProfile(environment.get(), source.get(), nullptr);
+  for (const auto& field : fields) {
+    ExpectFeatureState(profile.get(), field.feature,
+                       LOOMC_TARGET_FACT_STATE_UNKNOWN);
+  }
+}
+
 TEST(TargetSpirvVulkaninfoTest, IntegerDotFeatureStructFamily) {
   TargetEnvironmentPtr environment = CreateSpirvTargetEnvironment();
   for (const std::string spelling :
