@@ -156,3 +156,86 @@ kernel.def retain target(@device) @__command_launch_counts_2() {
   view.store %10, %1[2] : i32, view<3xi32>
   kernel.return
 }
+
+// ====
+
+// Sampling both values before a write keeps the conditional read in the same
+// producer as its predicate. Both later consumers reuse that single sample.
+// RUN: emit command-program @conditional_observation kernels
+
+test.target<device> @device
+
+kernel.entry.decl target(@device) @overwrite(%storage: view<2xi32>)
+
+kernel.entry.decl target(@device) @consume()
+
+command.def public @conditional_observation() launch(%control: view<2xi32>) {
+  %c1 = index.constant 1 : index
+  %c0 = index.constant 0 : index
+  %c0_i32 = scalar.constant 0 : i32
+  %flag = view.load %control[0] : view<2xi32> -> i32
+  %active = scalar.cmpi ne, %flag, %c0_i32 : i32
+  %count = scf.if %active -> (index) {
+    %word = view.load %control[1] : view<2xi32> -> i32
+    %wide = scalar.extui %word : i32 to i64
+    %value = index.cast %wide : i64 to index
+    scf.yield %value : index
+  } else {
+    scf.yield %c0 : index
+  }
+  kernel.dispatch @overwrite[%c1](%control) : [index](view<2xi32>)
+  kernel.dispatch @consume[%count]() : [index]()
+  kernel.dispatch @consume[%count]() : [index]()
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 3, executable_count = 3, fixed_buffer_count = 0, rebindable_binding_count = 2}) @conditional_observation() asm {
+  %34 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %35 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %36 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %37 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %38 = resource<command_input> {index = 2, source_type = index} : reg<cmd.executable>
+  %39 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %40 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %41 = resource<command_input> {index = 2, source_type = index} : reg<cmd.entry>
+  %42 = cmd.constant.u64 0
+  %43 = cmd.constant.u64 -1
+  %44 = cmd.constant.u64 12
+  %45 = cmd.constant.u32 1
+  cmd.dispatch.direct<%36, %39>[%45, %45, %45](%34, %42, %43, %35, %42, %44)
+  cmd.dispatch.direct.barrier<%37, %40>[%45, %45, %45](%34, %42, %43)
+  %46 = cmd.buffer.ref.binding %35, %42, %44
+  cmd.dispatch.indirect.dynamic.barrier<%38, %41>[%46]()
+  %47 = cmd.buffer.ref.binding %35, %42, %44
+  cmd.dispatch.indirect.dynamic.barrier<%38, %41>[%47]()
+  return
+}
+test.target<device> @device
+
+kernel.def retain target(@device) @__command_launch_counts_0() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%control: view<2xi32>, %1: view<3xi32>) {
+  %c0_i32 = scalar.constant 0 : i32
+  %c0 = index.constant 0 : index
+  %flag = view.load %control[0] : view<2xi32> -> i32
+  %active = scalar.cmpi ne, %flag, %c0_i32 : i32
+  %count = scf.if %active -> (index) {
+    %word = view.load %control[1] : view<2xi32> -> i32
+    %wide = scalar.extui %word : i32 to i64
+    %value = index.cast %wide : i64 to index
+    scf.yield %value : index
+  } else {
+    scf.yield %c0 : index
+  }
+  %11 = index.cast %count : index to i32
+  view.store %11, %1[0] : i32, view<3xi32>
+  %12 = index.constant 1 : index
+  %13 = index.cast %12 : index to i32
+  view.store %13, %1[1] : i32, view<3xi32>
+  %14 = index.constant 1 : index
+  %15 = index.cast %14 : index to i32
+  view.store %15, %1[2] : i32, view<3xi32>
+  kernel.return
+}

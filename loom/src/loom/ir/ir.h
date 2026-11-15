@@ -957,6 +957,17 @@ static inline bool loom_traits_order_memory(loom_trait_flags_t traits) {
   return (traits & LOOM_TRAIT_MEMORY_FENCE) != 0;
 }
 
+// Returns true for semantic boundaries that an ordinary memory observation
+// cannot cross without a more specific storage or execution-order proof.
+static inline bool loom_traits_order_reads(loom_trait_flags_t traits) {
+  return loom_traits_may_write(traits) ||
+         iree_any_bit_set(
+             traits, LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_HINT |
+                         LOOM_TRAIT_POISON_BOUNDARY | LOOM_TRAIT_CONVERGENT |
+                         LOOM_TRAIT_OBSERVABLE_EFFECT |
+                         LOOM_TRAIT_UNIQUE_IDENTITY);
+}
+
 // Returns true when target-low emission must omit the op.
 static inline bool loom_traits_are_compile_time_only(
     loom_trait_flags_t traits) {
@@ -2241,6 +2252,9 @@ typedef struct loom_region_t {
   // zero/nonzero transitions propagate to the containing region, so building
   // or removing a subtree does not update every ancestor for every hint.
   uint32_t hint_source_count;
+  // Direct read-ordering boundaries plus nonempty immediate child regions.
+  // Only presence transitions propagate, as with hint_source_count.
+  uint32_t read_ordering_source_count;
   // Inline storage for the entry block.
   loom_block_t entry_block;
   // Ordered block pointer table. Points at inline_blocks for one-block regions.
@@ -2252,7 +2266,7 @@ typedef struct loom_region_t {
   loom_op_t* parent_op;
 } loom_region_t;
 
-static_assert(sizeof(loom_region_t) == (IREE_PTR_SIZE == 8 ? 184 : 148),
+static_assert(sizeof(loom_region_t) == (IREE_PTR_SIZE == 8 ? 184 : 152),
               "loom_region_t must retain its pointer-width layout");
 
 // Returns the operation that owns |region|, or NULL for the module body and
@@ -2392,6 +2406,12 @@ static inline bool loom_region_has_memory_accesses(
 // Returns true when any live op nested in |region| is a compiler hint.
 static inline bool loom_region_has_hints(const loom_region_t* region) {
   return region && region->hint_source_count != 0;
+}
+
+// Returns true when a nested semantic boundary prevents ordinary read motion.
+static inline bool loom_region_has_read_ordering_effects(
+    const loom_region_t* region) {
+  return region && region->read_ordering_source_count != 0;
 }
 
 // Returns true when any child region of |op| has a read-like effect.

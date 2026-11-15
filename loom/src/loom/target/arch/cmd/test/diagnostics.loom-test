@@ -34,6 +34,36 @@ command.def public @earlier_observation() launch(%storage: buffer, %output: buff
 
 // ====
 
+// RUN: emit command-program @conditional_observation
+
+kernel.entry.decl @overwrite(%storage: view<2xi32>)
+
+kernel.entry.decl @consume()
+
+command.def public @conditional_observation() launch(%control: view<2xi32>) {
+  %c1 = index.constant 1 : index
+  %c0 = index.constant 0 : index
+  %c0_i32 = scalar.constant 0 : i32
+  // The branch condition is an old observation, while its count is a new one.
+  // Cloning the entire conditional before the write would change the result.
+  // ERROR@+1: LOWERING/068 {kernel_name="consume"}
+  %flag = view.load %control[0] : view<2xi32> -> i32
+  %active = scalar.cmpi ne, %flag, %c0_i32 : i32
+  kernel.dispatch @overwrite[%c1](%control) : [index](view<2xi32>)
+  %count = scf.if %active -> (index) {
+    %word = view.load %control[1] : view<2xi32> -> i32
+    %wide = scalar.extui %word : i32 to i64
+    %value = index.cast %wide : i64 to index
+    scf.yield %value : index
+  } else {
+    scf.yield %c0 : index
+  }
+  kernel.dispatch @consume[%count]() : [index]()
+  command.return
+}
+
+// ====
+
 // RUN: emit command-program @unplaced_transient_view
 
 kernel.entry.decl @consume(%sample: view<1xi64>)

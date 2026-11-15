@@ -57,7 +57,8 @@ typedef struct loom_cmd_launch_count_value_change_t {
 typedef struct loom_cmd_launch_count_read_t {
   // Original memory observation retained by closure construction.
   const loom_op_t* operation;
-  // Reference read at that observation.
+  // Reference read at that observation, or INVALID for a structured subtree
+  // whose nested accesses have no single retained storage-confinement proof.
   loom_value_id_t reference;
 } loom_cmd_launch_count_read_t;
 
@@ -455,6 +456,11 @@ static iree_status_t loom_cmd_launch_count_visit_operation(
 
   const loom_trait_flags_t traits =
       loom_op_effective_traits(closure->module, operation);
+  if (operation->region_count != 0 &&
+      !loom_motion_read_can_cross_op(closure->module, operation)) {
+    closure->invalid_observation = operation;
+    return iree_ok_status();
+  }
   if (loom_traits_has_side_effects(traits) ||
       loom_traits_has_unique_identity(traits) ||
       iree_any_bit_set(traits, LOOM_TRAIT_COMMAND_EFFECT)) {
@@ -467,10 +473,11 @@ static iree_status_t loom_cmd_launch_count_visit_operation(
         (int)operation_name.size, operation_name.data);
   }
 
-  if (iree_any_bit_set(traits, LOOM_TRAIT_READS_MEMORY)) {
+  const bool structured_read = loom_op_regions_have_read_effects(operation);
+  if (iree_any_bit_set(traits, LOOM_TRAIT_READS_MEMORY) || structured_read) {
     bool can_move = false;
-    const bool ordinary =
-        loom_motion_op_is_ordinary_load(closure->module, operation);
+    const bool ordinary = structured_read || loom_motion_op_is_ordinary_load(
+                                                 closure->module, operation);
     if (ordinary) {
       if (*closure->read_barriers == NULL) {
         IREE_RETURN_IF_ERROR(loom_motion_read_barrier_table_allocate(
@@ -484,13 +491,15 @@ static iree_status_t loom_cmd_launch_count_visit_operation(
       return iree_ok_status();
     }
     closure->needs_source_placement |= !can_move;
-    const loom_memory_access_t access =
-        loom_memory_access_cast(closure->module, operation);
-    IREE_ASSERT(loom_memory_access_isa(access));
-    IREE_ASSERT_EQ(loom_memory_access_operation_kind(access),
-                   LOOM_MEMORY_ACCESS_OPERATION_LOAD);
-    const loom_value_id_t reference = loom_memory_access_view(access);
-    IREE_ASSERT_NE(reference, LOOM_VALUE_ID_INVALID);
+    loom_value_id_t reference = LOOM_VALUE_ID_INVALID;
+    if (!structured_read) {
+      const loom_memory_access_t access =
+          loom_memory_access_cast(closure->module, operation);
+      IREE_ASSERT(loom_memory_access_isa(access));
+      IREE_ASSERT_EQ(loom_memory_access_operation_kind(access),
+                     LOOM_MEMORY_ACCESS_OPERATION_LOAD);
+      reference = loom_memory_access_view(access);
+    }
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
         closure->arena, closure->read_reference_count,
         closure->read_reference_count + 1, sizeof(*closure->read_references),
@@ -872,6 +881,9 @@ static bool loom_cmd_launch_count_read_conflicts_with_writes(
     const loom_cmd_launch_count_cluster_t* cluster, loom_value_id_t reference) {
   if (!cluster->has_possible_writes) {
     return false;
+  }
+  if (reference == LOOM_VALUE_ID_INVALID) {
+    return true;
   }
   const loom_cmd_launch_count_storage_t storage =
       loom_cmd_launch_count_reference_storage(cluster->closure.facts,

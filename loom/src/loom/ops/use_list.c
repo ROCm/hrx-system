@@ -311,6 +311,7 @@ static void loom_region_reset_summaries(loom_region_t* region) {
   memset(region->read_space_counts, 0, sizeof(region->read_space_counts));
   memset(region->write_space_counts, 0, sizeof(region->write_space_counts));
   region->hint_source_count = 0;
+  region->read_ordering_source_count = 0;
   loom_block_t* block = NULL;
   loom_region_for_each_block(region, block) {
     block->parent_region = region;

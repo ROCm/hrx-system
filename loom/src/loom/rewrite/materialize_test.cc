@@ -1270,6 +1270,7 @@ TEST_F(MaterializeTest, HintPresenceTracksLastSourceAcrossRebuildAndErase) {
   EXPECT_EQ(outer_region->hint_source_count, 1u);
   EXPECT_EQ(source_->body->hint_source_count, 1u);
   EXPECT_TRUE(loom_op_regions_have_hints(outer));
+  EXPECT_EQ(source_->body->read_ordering_source_count, 1u);
   EXPECT_FALSE(loom_op_regions_have_hints(first_hint));
 
   loom_builder_restore(&source_builder_, outer_ip);
@@ -1287,6 +1288,7 @@ TEST_F(MaterializeTest, HintPresenceTracksLastSourceAcrossRebuildAndErase) {
     EXPECT_EQ(inner_region->hint_source_count, 1u);
     EXPECT_EQ(outer_region->hint_source_count, 2u);
     EXPECT_EQ(source_->body->hint_source_count, 1u);
+    EXPECT_EQ(source_->body->read_ordering_source_count, 1u);
   }
   IREE_ASSERT_OK(loom_op_erase(source_, last_hint));
   EXPECT_FALSE(loom_op_regions_have_hints(inner));
@@ -1295,6 +1297,7 @@ TEST_F(MaterializeTest, HintPresenceTracksLastSourceAcrossRebuildAndErase) {
   IREE_ASSERT_OK(loom_op_erase(source_, outer_hint));
   EXPECT_FALSE(loom_op_regions_have_hints(outer));
   EXPECT_FALSE(loom_region_has_hints(source_->body));
+  EXPECT_FALSE(loom_region_has_read_ordering_effects(source_->body));
 }
 
 TEST_F(MaterializeTest, ClonesNestedHintPresenceBeforeOwnerFinalization) {
@@ -1315,14 +1318,18 @@ TEST_F(MaterializeTest, ClonesNestedHintPresenceBeforeOwnerFinalization) {
   EXPECT_EQ(cloned_region->hint_source_count, 1u);
   EXPECT_EQ(loom_test_block_args_body(cloned_inner)->hint_source_count, 2u);
   EXPECT_EQ(target_->body->hint_source_count, 1u);
+  EXPECT_EQ(target_->body->read_ordering_source_count, 1u);
   IREE_ASSERT_OK(loom_op_erase(source_, outer));
   EXPECT_FALSE(loom_region_has_hints(source_->body));
+  EXPECT_FALSE(loom_region_has_read_ordering_effects(source_->body));
   EXPECT_TRUE(loom_op_regions_have_hints(clone));
   IREE_ASSERT_OK(loom_module_compute_uses(target_));
   EXPECT_EQ(cloned_region->hint_source_count, 1u);
   EXPECT_EQ(loom_test_block_args_body(cloned_inner)->hint_source_count, 2u);
+  EXPECT_EQ(target_->body->read_ordering_source_count, 1u);
   IREE_ASSERT_OK(loom_op_erase(target_, clone));
   EXPECT_FALSE(loom_region_has_hints(target_->body));
+  EXPECT_FALSE(loom_region_has_read_ordering_effects(target_->body));
 }
 
 TEST_F(MaterializeTest, MovesNestedAndWholeRegionHintSources) {
@@ -1348,6 +1355,8 @@ TEST_F(MaterializeTest, MovesNestedAndWholeRegionHintSources) {
   EXPECT_EQ(target_region->hint_source_count, 1u);
   EXPECT_EQ(source_->body->hint_source_count, 2u);
   EXPECT_EQ(loom_test_block_args_body(nested)->hint_source_count, 2u);
+  EXPECT_EQ(source_region->read_ordering_source_count, 1u);
+  EXPECT_EQ(target_region->read_ordering_source_count, 1u);
 
   loom_block_t* moved_entry = nullptr;
   IREE_ASSERT_OK(loom_rewriter_move_region_blocks(
@@ -1357,11 +1366,14 @@ TEST_F(MaterializeTest, MovesNestedAndWholeRegionHintSources) {
   EXPECT_EQ(target_region->hint_source_count, 2u);
   EXPECT_EQ(source_->body->hint_source_count, 1u);
   EXPECT_EQ(direct_hint->parent_block, moved_entry);
+  EXPECT_FALSE(loom_region_has_read_ordering_effects(source_region));
+  EXPECT_EQ(target_region->read_ordering_source_count, 2u);
   IREE_ASSERT_OK(loom_op_erase(source_, nested));
   EXPECT_EQ(target_region->hint_source_count, 1u);
   IREE_ASSERT_OK(loom_op_erase(source_, direct_hint));
   EXPECT_FALSE(loom_region_has_hints(target_region));
   EXPECT_FALSE(loom_region_has_hints(source_->body));
+  EXPECT_FALSE(loom_region_has_read_ordering_effects(source_->body));
   loom_rewriter_deinitialize(&rewriter);
 }
 
@@ -1385,7 +1397,9 @@ TEST_F(MaterializeTest, MovesHintSubtreeFromParentlessDetachedRegion) {
   IREE_ASSERT_OK(
       loom_rewriter_move_before(&rewriter, nested, insertion_target));
   EXPECT_FALSE(loom_region_has_hints(detached_region));
+  EXPECT_FALSE(loom_region_has_read_ordering_effects(detached_region));
   EXPECT_TRUE(loom_region_has_hints(source_->body));
+  EXPECT_EQ(source_->body->read_ordering_source_count, 1u);
   EXPECT_EQ(loom_test_block_args_body(nested)->hint_source_count, 1u);
   IREE_ASSERT_OK(loom_op_erase(source_, nested));
   EXPECT_FALSE(loom_region_has_hints(source_->body));

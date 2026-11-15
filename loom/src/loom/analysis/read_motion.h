@@ -17,8 +17,8 @@ extern "C" {
 
 // Returns true when sinking an ordinary read across |op| preserves source
 // ordering. This is a deliberately alias-independent predicate: any write,
-// fence, unknown effect, nested region, convergence, or retained semantic
-// boundary blocks motion.
+// fence, unknown effect, convergence, or retained semantic boundary blocks
+// motion. Nested regions use their maintained transitive effect summary.
 bool loom_motion_read_can_cross_op(const loom_module_t* module,
                                    const loom_op_t* op);
 
