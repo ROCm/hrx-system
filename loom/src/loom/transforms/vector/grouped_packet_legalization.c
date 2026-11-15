@@ -104,9 +104,11 @@ static iree_status_t loom_vector_grouped_packetize(
 
   const uint32_t packet_count =
       (expanded_lane_count - 1u) / packet_lane_count + 1u;
+  const iree_host_size_t packet_result_count =
+      (iree_host_size_t)packet_count * op->result_count;
   loom_value_id_t* packet_results = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      context->arena, packet_count * op->result_count, sizeof(*packet_results),
+      context->arena, packet_result_count, sizeof(*packet_results),
       (void**)&packet_results));
   loom_rewriter_t* rewriter = context->rewriter;
   loom_builder_t* builder = &rewriter->builder;
