@@ -189,6 +189,25 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
     control->destination = UINT32_MAX;
   }
   loom_aie2p_native_route_label(context, first, packet, source_index);
+  const uint16_t memory_row = loom_xdna_array_tile_kind_facts(
+                                  context->family, LOOM_XDNA_TILE_KIND_MEMORY)
+                                  ->first_row;
+  if (source_port == LOOM_XDNA_STREAM_PORT_CORE &&
+      destination_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL &&
+      source.column == destination.column && source.row > memory_row &&
+      destination.row <= memory_row && (!delivery || !delivery->sharing.used)) {
+    loom_aie2p_native_control_path_t* path =
+        &context->control_paths[source.column];
+    // The highest source provides the longest common downward suffix, so
+    // later senders can converge before the column's busiest lower switch.
+    if (!path->count ||
+        source.row > (path->source / 2) % context->family->row_count) {
+      *path = (loom_aie2p_native_control_path_t){
+          .first = first,
+          .count = context->routing.route_count - first,
+          .source = source_index};
+    }
+  }
   return true;
 }
 
@@ -1143,6 +1162,11 @@ iree_status_t loom_aie2p_native_select_transfers(
                                 (void**)&context->control_destination_sources));
   memset(context->control_destination_sources, 0xff,
          control_source_count * sizeof(*context->control_destination_sources));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, context->family->column_count, sizeof(*context->control_paths),
+      (void**)&context->control_paths));
+  memset(context->control_paths, 0,
+         context->family->column_count * sizeof(*context->control_paths));
   uint32_t next_source = 0;
   uint8_t* next_controller;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, context->family->column_count,

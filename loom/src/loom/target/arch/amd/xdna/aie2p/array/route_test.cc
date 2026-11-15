@@ -606,7 +606,8 @@ TEST(Aie2pRouteTest, ReceiverGrantSharesOnlyItsPayloadSuffix) {
   }
   loom_aie2p_array_route_sharing_t sharing;
   IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
-      &routing, 0, carrier_count, {0, 1}, &sharing));
+      &routing, 0, carrier_count, {0, 1},
+      LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &sharing));
   const loom_xdna_tile_coordinate_t control_sources[] = {{0, 4}, {1, 5}};
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(control_sources); ++i) {
     const uint32_t source = 4 + i;
@@ -660,7 +661,8 @@ TEST(Aie2pRouteTest, AvailableControlLaneKeepsPayloadUnshared) {
                                              {0, 1}, 0, false));
   loom_aie2p_array_route_sharing_t sharing;
   IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
-      &routing, 0, routing.route_count, {0, 1}, &sharing));
+      &routing, 0, routing.route_count, {0, 1},
+      LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &sharing));
   const size_t first = routing.route_count;
   ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 1, &trees[1], {0, 2},
                                              {0, 1}, &sharing));
@@ -693,7 +695,8 @@ TEST(Aie2pRouteTest, GrantedControlContinuesBeyondPayloadReceiver) {
     }
     loom_aie2p_array_route_sharing_t sharing;
     IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
-        &routing, 0, carrier_count, {0, 1}, &sharing));
+        &routing, 0, carrier_count, {0, 1},
+        LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &sharing));
     for (uint32_t i = 0; i < 2; ++i) {
       const uint16_t row = (i == 0) == shim_first ? 0 : 1;
       const size_t first = routing.route_count;
@@ -761,7 +764,8 @@ TEST(Aie2pRouteTest, GrantedControlRequiresFreeContinuationBeyondReceiver) {
   }
   loom_aie2p_array_route_sharing_t sharing;
   IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
-      &routing, 0, carrier_count, {0, 1}, &sharing));
+      &routing, 0, carrier_count, {0, 1},
+      LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &sharing));
   ASSERT_TRUE(loom_aie2p_array_route_stream(
       &routing, 4, &trees[4], {0, 1}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0,
       {0, 0}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, true));
@@ -796,7 +800,8 @@ TEST(Aie2pRouteTest, SharingIdentitySurvivesOwnerRetirement) {
   }
   loom_aie2p_array_route_sharing_t sharing;
   IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
-      &routing, 0, carrier_count, {0, 1}, &sharing));
+      &routing, 0, carrier_count, {0, 1},
+      LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &sharing));
   ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 4, &trees[4], {0, 2},
                                              {0, 1}, &sharing));
   ASSERT_TRUE(sharing.used);
@@ -804,7 +809,8 @@ TEST(Aie2pRouteTest, SharingIdentitySurvivesOwnerRetirement) {
   // Reusing the old record for a new domain cannot acquire the old prefix.
   // Domain identity belongs to the routing owner, not this record's address.
   IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
-      &routing, 0, carrier_count, {0, 1}, &sharing));
+      &routing, 0, carrier_count, {0, 1},
+      LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &sharing));
   EXPECT_NE(sharing.domain, retained.domain);
   iree_arena_allocator_t retained_arena;
   iree_arena_initialize(&blocks, &retained_arena);

@@ -182,6 +182,8 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
     destinations_.resize(endpoint_count, UINT32_MAX);
     context_.control_sources = sources_.data();
     context_.control_destination_sources = destinations_.data();
+    control_paths_.resize(context_.family->column_count);
+    context_.control_paths = control_paths_.data();
     routes_.resize(128);
     context_.routes = routes_.data();
     connections_.resize(128);
@@ -229,7 +231,8 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
       if (i == 0) {
         IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
             &context_.routing, first, context_.routing.route_count - first,
-            {0, 1}, &delivery->sharing));
+            {0, 1}, LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD,
+            &delivery->sharing));
       }
     }
     deliveries_.resize(tiles_.size());
@@ -273,6 +276,8 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
   std::vector<loom_aie2p_native_control_connection_t> connections_;
   // A destination stays private only while every use names the same source.
   std::vector<uint32_t> destinations_;
+  // Producer-selected intervals available to later hardware commands.
+  std::vector<loom_aie2p_native_control_path_t> control_paths_;
   // Eligible payload paths indexed by destination tile.
   std::vector<loom_aie2p_native_delivery_t*> deliveries_;
   // Canonical source identity for each route requested by this fixture.

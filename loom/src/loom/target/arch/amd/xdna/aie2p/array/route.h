@@ -25,16 +25,26 @@ typedef struct loom_aie2p_array_route_tree_t {
   iree_host_size_t root_index;
 } loom_aie2p_array_route_tree_t;
 
-// A unicast path whose producer admits each complete payload only after its
-// receiver has granted storage. Control delivery through that tile can borrow
-// its links without waiting behind a payload dependent on future computation.
-// The owner frames payloads with IDs disjoint from the sharing control stream.
+typedef enum loom_aie2p_array_route_carrier_e {
+  // Complete payloads have receiver credit. Free control lanes preserve
+  // payload bandwidth; admitted payload lanes can be borrowed when necessary.
+  LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD = 0,
+  // Bounded hardware-register commands have independent completion paths.
+  // Early convergence preserves lanes and avoids downstream arbiter fan-in.
+  LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND,
+} loom_aie2p_array_route_carrier_t;
+
+// An admitted unicast stream whose complete packets can retire independently
+// of the new control sender's progress. All participating sources own disjoint
+// packet identities, except identities naming the same complete destination.
 typedef struct loom_aie2p_array_route_sharing_t {
   // Builder-local nonzero identity shared by this contract's borrowed lanes.
   iree_host_size_t domain;
-  // Final payload receiver; control can continue beyond this tile.
+  // Carrier progress contract and its physical convergence policy.
+  loom_aie2p_array_route_carrier_t carrier;
+  // Granted payload receiver or hardware-command convergence tile.
   loom_xdna_tile_coordinate_t destination;
-  // At least one control route actually borrows this payload path.
+  // At least one control route actually borrows this carrier path.
   bool used;
 } loom_aie2p_array_route_sharing_t;
 
@@ -177,13 +187,14 @@ bool loom_aie2p_array_route_multicast(
 iree_status_t loom_aie2p_array_route_sharing_initialize(
     loom_aie2p_array_route_builder_t* builder, iree_host_size_t first,
     iree_host_size_t count, loom_xdna_tile_coordinate_t destination,
+    loom_aie2p_array_route_carrier_t carrier,
     loom_aie2p_array_route_sharing_t* out_sharing);
 
-// Routes core control packets through a granted payload's receiver. Free lanes
-// are preferred; occupied lanes may be borrowed only from |sharing|. Beyond
-// its receiver, the route uses free lanes or this domain's control
-// continuations. All participating sources share the caller-owned packet
-// namespace. The destination's route must pass through the granted receiver.
+// Routes core control packets through the carrier's convergence tile. Granted
+// payloads prefer free lanes; hardware commands converge as early as possible.
+// Occupied lanes may be borrowed only from |sharing|. Beyond the convergence
+// tile, free lanes or this domain's continuations remain available. All sources
+// share the caller-owned packet namespace.
 bool loom_aie2p_array_route_control(loom_aie2p_array_route_builder_t* builder,
                                     uint32_t channel_index,
                                     loom_aie2p_array_route_tree_t* tree,

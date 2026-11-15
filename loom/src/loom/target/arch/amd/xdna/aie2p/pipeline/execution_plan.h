@@ -26,6 +26,18 @@ typedef struct loom_aie2p_native_control_source_t {
   uint32_t packet_mask;
 } loom_aie2p_native_control_source_t;
 
+// A private downward command path through its column's SRAM tile. Hardware
+// register commands retire independently of payload consumers. Late senders
+// can share the retained interval with disjoint packet identities.
+typedef struct loom_aie2p_native_control_path_t {
+  // First edge in the original physical route inventory.
+  iree_host_size_t first;
+  // Number of edges; zero means that no eligible path was selected.
+  iree_host_size_t count;
+  // Original control source owning the path's packet namespace.
+  uint32_t source;
+} loom_aie2p_native_control_path_t;
+
 // One physical route edge carrying the packet identity used during admission.
 typedef struct loom_aie2p_native_route_t {
   // Corresponding edge in the canonical route builder.
@@ -152,6 +164,8 @@ typedef struct loom_aie2p_execution_plan_t {
   // Unique source per core/tile-control destination; UINT32_MAX means unused,
   // and UINT32_MAX - 1 means that different sources share the destination.
   uint32_t* control_destination_sources;
+  // Longest private downward hardware-command suffix per physical column.
+  loom_aie2p_native_control_path_t* control_paths;
   // Admitted switch register banks in first-use order.
   loom_aie2p_native_switch_t* switches;
   // Complete payload/control intent, independent of selected switch paths.

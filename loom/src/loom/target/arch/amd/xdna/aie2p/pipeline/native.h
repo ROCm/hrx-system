@@ -850,6 +850,8 @@ typedef struct loom_aie2p_native_context_t {
   // Unique control source per core/tile-control endpoint. UINT32_MAX is
   // unused; UINT32_MAX - 1 marks an endpoint shared by different sources.
   uint32_t* control_destination_sources;
+  // Exact private downward command intervals retained during route selection.
+  loom_aie2p_native_control_path_t* control_paths;
   // Optional receiver-granted payload path per destination tile. Allocated
   // only when resident task refill needs control routes.
   struct loom_aie2p_native_delivery_t** deliveries;

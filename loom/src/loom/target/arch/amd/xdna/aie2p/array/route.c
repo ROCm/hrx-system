@@ -471,11 +471,15 @@ static bool loom_aie2p_array_plan_route(
             builder->family, step->input, node->incoming_channel, step->output);
     const uint32_t free_channels = channels & ~*step->occupied;
     const uint32_t shared_channels = channels & step->shared;
-    // Serialized multicast members deliberately converge onto their domain's
-    // existing lanes. Granted control paths keep preferring an exclusive lane.
-    const uint32_t preferred = multicast && shared_channels ? shared_channels
-                               : free_channels              ? free_channels
-                                                            : channels;
+    // Control-only carriers and serialized multicast converge before scarce
+    // downstream switches. Granted payloads retain free-lane bandwidth.
+    const bool converge =
+        multicast ||
+        (sharing &&
+         sharing->carrier == LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND);
+    const uint32_t preferred = converge && shared_channels ? shared_channels
+                               : free_channels             ? free_channels
+                                                           : channels;
     const uint8_t channel = iree_math_count_trailing_zeros_u32(preferred);
     const bool borrowed = (*step->occupied & (UINT32_C(1) << channel)) != 0;
     *step->occupied |= UINT32_C(1) << channel;
@@ -682,8 +686,10 @@ bool loom_aie2p_array_route_multicast(
 iree_status_t loom_aie2p_array_route_sharing_initialize(
     loom_aie2p_array_route_builder_t* builder, iree_host_size_t first,
     iree_host_size_t count, loom_xdna_tile_coordinate_t destination,
+    loom_aie2p_array_route_carrier_t carrier,
     loom_aie2p_array_route_sharing_t* out_sharing) {
-  *out_sharing = (loom_aie2p_array_route_sharing_t){.destination = destination};
+  *out_sharing = (loom_aie2p_array_route_sharing_t){.carrier = carrier,
+                                                    .destination = destination};
   IREE_RETURN_IF_ERROR(
       loom_aie2p_array_route_domain_create(builder, &out_sharing->domain));
   uint32_t* links = builder->domains[out_sharing->domain - 1].links;

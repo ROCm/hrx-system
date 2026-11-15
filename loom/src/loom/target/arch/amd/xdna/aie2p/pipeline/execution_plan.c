@@ -42,6 +42,11 @@ iree_status_t loom_aie2p_execution_plan_copy_resources(
   memcpy(target->control_destination_sources,
          source->control_destination_sources,
          tile_count * 2 * sizeof(*target->control_destination_sources));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, family->column_count, sizeof(*target->control_paths),
+      (void**)&target->control_paths));
+  memcpy(target->control_paths, source->control_paths,
+         family->column_count * sizeof(*target->control_paths));
   target->switches = NULL;
   loom_aie2p_native_switch_t** tail = &target->switches;
   for (const loom_aie2p_native_switch_t* state = source->switches; state;

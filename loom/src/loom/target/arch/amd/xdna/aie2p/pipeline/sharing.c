@@ -148,7 +148,8 @@ iree_status_t loom_aie2p_native_prepare_sharing(
     const loom_aie2p_native_distribution_path_t* path = delivery->path;
     IREE_RETURN_IF_ERROR(loom_aie2p_array_route_sharing_initialize(
         &context->routing, path->routes.first, path->routes.count,
-        path->first->receivers[0].tile->coordinate, &delivery->sharing));
+        path->first->receivers[0].tile->coordinate,
+        LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &delivery->sharing));
     for (loom_aie2p_native_distribution_t* geometry = path->geometries;
          geometry; geometry = geometry->next_geometry) {
       loom_aie2p_native_grant_t* grant;

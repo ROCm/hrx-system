@@ -141,6 +141,7 @@ static iree_status_t loom_aie2p_native_retain_plan(
       .routes = context->routes,
       .control_sources = context->control_sources,
       .control_destination_sources = context->control_destination_sources,
+      .control_paths = context->control_paths,
       .switches = context->switches,
       .connections = context->connections,
   };

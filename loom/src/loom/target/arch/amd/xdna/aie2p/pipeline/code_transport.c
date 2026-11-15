@@ -18,6 +18,10 @@ typedef struct loom_aie2p_code_transport_sender_t {
   uint16_t engine;
   // Loaders sharing the queue, each with at most one incomplete request.
   uint8_t worker_count;
+  // Private hardware-command suffix available to this column's load requests.
+  loom_aie2p_array_route_sharing_t commands;
+  // Identities excluded by the carrier source and previous load requests.
+  uint32_t command_packets;
 } loom_aie2p_code_transport_sender_t;
 
 iree_status_t loom_aie2p_code_transport_initialize(
@@ -38,6 +42,24 @@ iree_status_t loom_aie2p_code_transport_initialize(
   memset(
       out_transport->senders, 0,
       source->routing.family->column_count * sizeof(*out_transport->senders));
+  const uint16_t memory_row =
+      loom_xdna_array_tile_kind_facts(source->routing.family,
+                                      LOOM_XDNA_TILE_KIND_MEMORY)
+          ->first_row;
+  for (uint16_t column = 0; column < source->routing.family->column_count;
+       ++column) {
+    const loom_aie2p_native_control_path_t* path = &plan->control_paths[column];
+    if (!path->count) {
+      continue;
+    }
+    loom_aie2p_code_transport_sender_t* sender =
+        &out_transport->senders[column];
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_route_sharing_initialize(
+        &plan->routing, path->first, path->count,
+        (loom_xdna_tile_coordinate_t){column, memory_row},
+        LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND, &sender->commands));
+    sender->command_packets = plan->control_sources[path->source].packet_mask;
+  }
   return iree_ok_status();
 }
 
@@ -52,7 +74,8 @@ static bool loom_aie2p_code_transport_route(
     loom_aie2p_code_transport_t* transport,
     loom_aie2p_native_connection_endpoint_t source,
     loom_aie2p_native_connection_endpoint_t destination, uint8_t packet,
-    loom_aie2p_array_route_tree_t* dma_tree) {
+    loom_aie2p_array_route_tree_t* dma_tree,
+    loom_aie2p_array_route_sharing_t* commands) {
   loom_aie2p_execution_plan_t* plan = &transport->plan;
   const loom_xdna_array_family_t* family = plan->routing.family;
   const uint32_t destination_index =
@@ -80,12 +103,22 @@ static bool loom_aie2p_code_transport_route(
     control->packet_mask |= UINT32_C(1) << packet;
   }
   const iree_host_size_t first = plan->routing.route_count;
-  if (!loom_aie2p_array_route_stream(
-          &plan->routing, (uint32_t)plan->connections.group_count, tree,
-          source.coordinate, source.port, source.channel,
-          destination.coordinate, destination.port, destination.channel,
-          true)) {
+  const bool routed =
+      commands ? loom_aie2p_array_route_control(
+                     &plan->routing, (uint32_t)plan->connections.group_count,
+                     tree, source.coordinate, destination.coordinate, commands)
+               : loom_aie2p_array_route_stream(
+                     &plan->routing, (uint32_t)plan->connections.group_count,
+                     tree, source.coordinate, source.port, source.channel,
+                     destination.coordinate, destination.port,
+                     destination.channel, true);
+  if (!routed) {
     return false;
+  }
+  if (commands && commands->used) {
+    plan->control_sources[source_index].destination = UINT32_MAX;
+    plan->control_sources[plan->control_paths[source.coordinate.column].source]
+        .destination = UINT32_MAX;
   }
   for (iree_host_size_t i = first; i < plan->routing.route_count; ++i) {
     plan->routes[i] =
@@ -131,8 +164,9 @@ void loom_aie2p_code_transport_bind(
           IREE_SV("a free SRAM memory-to-stream engine for code delivery");
       return;
     }
-    *sender =
-        (loom_aie2p_code_transport_sender_t){.engine = occupancy->mm2s_count++};
+    sender->tree = (loom_aie2p_array_route_tree_t){0};
+    sender->engine = occupancy->mm2s_count++;
+    sender->worker_count = 0;
   }
   const uint16_t engine = sender->engine;
   const uint16_t bank = engine & 1;
@@ -146,8 +180,8 @@ void loom_aie2p_code_transport_bind(
   occupancy->descriptor_counts[bank] += (uint16_t)descriptor_count;
   const uint32_t core_index =
       loom_xdna_array_physical_tile_index(family, compute) * 2;
-  const uint32_t queue_available =
-      ~plan->control_sources[core_index].packet_mask;
+  const uint32_t queue_available = ~(
+      plan->control_sources[core_index].packet_mask | sender->command_packets);
   const uint32_t reply_available =
       ~plan->control_sources[core_index + 1].packet_mask;
   if (!queue_available || !reply_available) {
@@ -160,6 +194,9 @@ void loom_aie2p_code_transport_bind(
   const uint8_t reply_packet =
       (uint8_t)iree_math_count_trailing_zeros_u32(reply_available);
   const uint8_t code_packet = sender->worker_count++;
+  if (sender->commands.domain) {
+    sender->command_packets |= UINT32_C(1) << queue_packet;
+  }
   const loom_aie2p_native_connection_endpoint_t core = {
       compute, LOOM_XDNA_STREAM_PORT_CORE, 0};
   const loom_aie2p_native_connection_endpoint_t control = {
@@ -168,12 +205,13 @@ void loom_aie2p_code_transport_bind(
       memory, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0};
   const loom_aie2p_native_connection_endpoint_t dma = {
       memory, LOOM_XDNA_STREAM_PORT_DMA, (uint8_t)engine};
-  if (!loom_aie2p_code_transport_route(transport, core, queue, queue_packet,
-                                       NULL) ||
+  if (!loom_aie2p_code_transport_route(
+          transport, core, queue, queue_packet, NULL,
+          sender->commands.domain ? &sender->commands : NULL) ||
       !loom_aie2p_code_transport_route(transport, dma, control, code_packet,
-                                       &sender->tree) ||
+                                       &sender->tree, NULL) ||
       !loom_aie2p_code_transport_route(transport, control, core, reply_packet,
-                                       NULL)) {
+                                       NULL, NULL)) {
     *out_requirement =
         IREE_SV("independent queue, code-delivery, and completion routes");
     return;
