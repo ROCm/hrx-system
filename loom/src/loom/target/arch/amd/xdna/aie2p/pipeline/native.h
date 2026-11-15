@@ -405,6 +405,9 @@ typedef struct loom_aie2p_native_distribution_endpoint_t {
   iree_host_size_t controller_engine;
   // Descriptor images, finite queued tasks, and invocation rewind state.
   loom_aie2p_native_dma_sequence_t sequence;
+  // Canonical endpoint owning this task's continuing hardware slot iterator,
+  // or NULL when this endpoint owns its descriptor state.
+  struct loom_aie2p_native_distribution_endpoint_t* iterator_owner;
   // Assigned private descriptor range, or NULL for resident geometry.
   struct loom_aie2p_native_endpoint_storage_t* storage;
   // Next geometry assigned to this range, finalized before boundary emission.

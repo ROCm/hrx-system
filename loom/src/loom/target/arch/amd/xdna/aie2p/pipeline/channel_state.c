@@ -268,6 +268,9 @@ static iree_status_t loom_aie2p_native_bind_endpoint_initializer(
     const loom_aie2p_native_distribution_endpoint_t* endpoint,
     const loom_pipeline_invocation_t* invocation,
     loom_aie2p_native_endpoint_initialization_t*** tail, bool* out_valid) {
+  if (endpoint->iterator_owner) {
+    return iree_ok_status();
+  }
   const loom_pipeline_invocations_t* invocations = &realization->invocations;
   const iree_host_size_t channel = endpoint->channel - context->channels;
   const loom_pipeline_invocation_t* owner =

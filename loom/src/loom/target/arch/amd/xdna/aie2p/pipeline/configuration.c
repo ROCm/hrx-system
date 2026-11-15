@@ -338,7 +338,8 @@ static iree_status_t loom_aie2p_native_config_descriptors(
 static iree_status_t loom_aie2p_native_config_endpoint(
     loom_aie2p_native_configuration_t* config,
     const loom_aie2p_native_distribution_endpoint_t* endpoint) {
-  if (endpoint->storage && endpoint->storage->first != endpoint) {
+  if (endpoint->iterator_owner ||
+      (endpoint->storage && endpoint->storage->first != endpoint)) {
     return iree_ok_status();
   }
   return loom_aie2p_native_config_descriptors(config, endpoint->tile,
@@ -601,7 +602,7 @@ static iree_status_t loom_aie2p_native_config_bindings(
            ++j) {
         const loom_aie2p_native_distribution_endpoint_t* endpoint =
             &worker->input->phases[j].receiver;
-        if (!endpoint->sequence.rewind_iteration ||
+        if (endpoint->iterator_owner || !endpoint->sequence.rewind_iteration ||
             (endpoint->storage && endpoint->storage->first != endpoint)) {
           continue;
         }
@@ -632,7 +633,7 @@ static iree_status_t loom_aie2p_native_config_bindings(
       for (iree_host_size_t j = 0; j <= distribution->receiver_count; ++j) {
         const loom_aie2p_native_distribution_endpoint_t* endpoint =
             j == 0 ? sender : &distribution->receivers[j - 1];
-        if (!endpoint->sequence.rewind_iteration ||
+        if (endpoint->iterator_owner || !endpoint->sequence.rewind_iteration ||
             (endpoint->storage && endpoint->storage->first != endpoint)) {
           continue;
         }

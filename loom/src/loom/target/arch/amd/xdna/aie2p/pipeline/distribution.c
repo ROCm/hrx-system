@@ -634,28 +634,68 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
     }
     const uint32_t ordinal = ordinals[i];
     const loom_aie2p_native_channel_t* receiver_channel = &context->channels[i];
-    if (((path ||
-          (transport->copy_stream ? distribution->invocation->ordinal != 0
-                                  : transport->batch_count > 1)) &&
-         totals[i] % receiver_channel->source->capacity) ||
-        (path && path->receivers[ordinal].sequence.terminal_slot)) {
-      return loom_aie2p_native_reject(
-          context, first->admission->op,
-          IREE_SV("complete destination-ring turns on the same packet path"));
-    }
     iree_string_view_t reason;
     bool valid = false;
-    IREE_RETURN_IF_ERROR(loom_aie2p_native_select_channel_endpoint(
-        context, &realization->invocations, distribution->invocation,
-        receiver_channel, LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY, totals[i],
-        1, 0, distribution->receivers[ordinal].engine,
-        path ? NULL : receiver_channel, &distribution->receivers[ordinal],
-        &reason, &valid));
+    loom_aie2p_native_distribution_endpoint_t* receiver =
+        &distribution->receivers[ordinal];
+    loom_aie2p_native_distribution_endpoint_t* previous =
+        path ? &path->receivers[ordinal] : NULL;
+    if (previous && previous->iterator_owner) {
+      previous = previous->iterator_owner;
+    }
+    const uint32_t capacity = receiver_channel->source->capacity;
+    const bool partial = totals[i] % capacity != 0;
+    const bool continuing = previous && previous->channel == receiver_channel &&
+                            previous->sequence.descriptor_count == 1 &&
+                            (partial || previous->sequence.rewind_iteration);
+    if (continuing) {
+      // Task counts vary independently of the one physical slot iterator.
+      // Reusing its descriptor preserves progress between retired batches.
+      loom_aie2p_native_dma_sequence_t sequence;
+      IREE_RETURN_IF_ERROR(loom_aie2p_native_build_sequence(
+          &previous->tile->facts->dma, previous->tile->memory_layout,
+          previous->sequence.descriptor, 1,
+          LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY, totals[i], capacity,
+          receiver_channel->byte_offset, receiver_channel->byte_stride, 1,
+          previous->sequence.words[0], context->pass->arena, &sequence, &reason,
+          &valid));
+      if (valid) {
+        sequence.words = previous->sequence.words;
+        previous->sequence.rewind_iteration |= sequence.rewind_iteration;
+        *receiver = (loom_aie2p_native_distribution_endpoint_t){
+            .channel = receiver_channel,
+            .tile = previous->tile,
+            .engine = previous->engine,
+            .sequence = sequence,
+            .iterator_owner = previous};
+      }
+    }
+    if (!valid && previous &&
+        (partial || previous->sequence.rewind_iteration)) {
+      return loom_aie2p_native_reject(
+          context, first->admission->op,
+          IREE_SV("a shared continuing receiver iterator within DMA task "
+                  "queue capacity"));
+    }
+    if (!valid) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_native_select_channel_endpoint(
+          context, &realization->invocations, distribution->invocation,
+          receiver_channel, LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY, totals[i],
+          1, 0, receiver->engine, path ? NULL : receiver_channel, receiver,
+          &reason, &valid));
+    }
     if (!valid) {
       return loom_aie2p_native_reject(context, first->admission->op, reason);
     }
-    loom_aie2p_native_distribution_endpoint_t* receiver =
-        &distribution->receivers[ordinal];
+    if (!path && partial &&
+        (transport->copy_stream ? distribution->invocation->ordinal != 0
+                                : transport->batch_count > 1) &&
+        !receiver->sequence.rewind_iteration) {
+      return loom_aie2p_native_reject(
+          context, first->admission->op,
+          IREE_SV("a continuing receiver iterator within DMA task queue "
+                  "capacity"));
+    }
     receiver->wait_for_idle = true;
     if (tile == receiver->tile &&
         (engine >= dma->loopback_channel_count || engine != receiver->engine)) {
