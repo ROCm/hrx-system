@@ -640,14 +640,19 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
           shim_dma ? LOOM_XDNA_STREAM_PORT_SOUTH : destination_port,
           shim_dma ? shim_channel : destination_channel, horizontal_row, packet,
           NULL, NULL)) {
-    // A saturated source column can still reach a relocated shim by crossing
-    // on the producing core's row. Both choices have the same hop count; the
-    // failed admission above leaves physical reservations unchanged.
-    if (!shim_dma || source_kind != LOOM_XDNA_TILE_KIND_COMPUTE ||
+    // The other orthogonal turn order may avoid a saturated row or column.
+    // Both choices have the same hop count; the failed admission above leaves
+    // physical reservations unchanged and discards tentative packet filters.
+    const uint16_t alternate_row = shim_dma ? source.row : destination.row;
+    if (source_kind != LOOM_XDNA_TILE_KIND_COMPUTE ||
+        (!shim_dma && destination_kind != LOOM_XDNA_TILE_KIND_COMPUTE) ||
         source.column == destination.column ||
-        !loom_aie2p_array_plan_route(builder, channel_index, root, destination,
-                                     LOOM_XDNA_STREAM_PORT_SOUTH, shim_channel,
-                                     source.row, packet, NULL, NULL)) {
+        horizontal_row == alternate_row ||
+        !loom_aie2p_array_plan_route(
+            builder, channel_index, root, destination,
+            shim_dma ? LOOM_XDNA_STREAM_PORT_SOUTH : destination_port,
+            shim_dma ? shim_channel : destination_channel, alternate_row,
+            packet, NULL, NULL)) {
       return false;
     }
   }
