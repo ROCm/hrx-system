@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/analysis/cfg_value_identity.h"
 #include "loom/analysis/condition_fact_scope.h"
 #include "loom/ir/intern_table.h"
@@ -33,8 +34,19 @@ typedef struct loom_conditioned_value_facts_region_t {
   struct loom_conditioned_value_facts_region_t* next;
 } loom_conditioned_value_facts_region_t;
 
+// The low two incidence bits retain which original endpoints need translation
+// to this update's canonical value. A zero mask keeps the direct relation path.
+enum {
+  LOOM_CONDITIONED_VALUE_FACTS_TRANSLATE_LEFT = 1u << 0,
+  LOOM_CONDITIONED_VALUE_FACTS_TRANSLATE_RIGHT = 1u << 1,
+  LOOM_CONDITIONED_VALUE_FACTS_TRANSLATE_MASK =
+      LOOM_CONDITIONED_VALUE_FACTS_TRANSLATE_LEFT |
+      LOOM_CONDITIONED_VALUE_FACTS_TRANSLATE_RIGHT,
+};
+
 typedef struct loom_conditioned_value_facts_active_update_t {
-  // Source relation index for a singleton, or first packed incidence index.
+  // Encoded relation/translation bits for a singleton, or packed incidence
+  // offset for an update with several relations.
   iree_host_size_t relation_index;
   // Number of relations applied to this value, in source order.
   uint32_t relation_count;
@@ -47,8 +59,8 @@ typedef struct loom_conditioned_value_facts_active_update_t {
 } loom_conditioned_value_facts_active_update_t;
 
 typedef struct loom_conditioned_value_facts_local_scope_t {
-  // Retained integer relations, or NULL for a structural placeholder.
-  loom_condition_fact_set_t* facts;
+  // Immutable relations with original provider IDs, or NULL for a placeholder.
+  const loom_condition_fact_set_t* facts;
   // Outer local condition scope, or NULL at the function root.
   struct loom_conditioned_value_facts_local_scope_t* parent;
   // One update per value, followed by packed indices for non-singleton updates.
@@ -430,6 +442,72 @@ static void loom_conditioned_value_facts_exit_local_scope(
   }
 }
 
+// Both summaries constrain the same integer value. Only numeric information
+// transfers; execution distribution, topology, and context-local extensions
+// remain owned by the destination. This lattice has no unreachable element,
+// so an empty intersection retains a conservative input.
+static void loom_conditioned_value_facts_apply_active_refinement(
+    const loom_value_facts_t* constraint, loom_value_facts_t* destination) {
+  loom_value_facts_t result = *destination;
+  result.range_lo = iree_max(result.range_lo, constraint->range_lo);
+  result.range_hi = iree_min(result.range_hi, constraint->range_hi);
+  if (result.range_lo > result.range_hi) {
+    return;
+  }
+  if (result.known_divisor == 1) {
+    result.known_divisor = constraint->known_divisor;
+  } else if (constraint->known_divisor != 1 &&
+             constraint->known_divisor != result.known_divisor) {
+    int64_t divisor = 0;
+    if (!iree_math_checked_lcm_i64(result.known_divisor,
+                                   constraint->known_divisor, &divisor)) {
+      // Either individual divisor remains valid if their joint divisor does
+      // not fit the compact numeric summary.
+      divisor = iree_max(result.known_divisor, constraint->known_divisor);
+    }
+    result.known_divisor = divisor;
+  }
+  const uint32_t predicates =
+      (result.flags | constraint->flags) &
+      (LOOM_VALUE_FACT_NON_ZERO | LOOM_VALUE_FACT_POWER_OF_TWO);
+  loom_value_facts_refine_divisible_range(&result);
+  if (result.range_lo == result.range_hi &&
+      (((predicates & LOOM_VALUE_FACT_NON_ZERO) && result.range_lo == 0) ||
+       ((predicates & LOOM_VALUE_FACT_POWER_OF_TWO) &&
+        (result.range_lo <= 0 ||
+         ((uint64_t)result.range_lo & ((uint64_t)result.range_lo - 1)))))) {
+    return;
+  }
+  loom_value_facts_recompute_flags(&result);
+  result.flags |= predicates;
+  *destination = result;
+}
+
+// Only original providers with a different numeric representative need
+// translation. Their current facts are consumed when entering this scope.
+IREE_ATTRIBUTE_NOINLINE static void
+loom_conditioned_value_facts_apply_provider_relation(
+    const loom_value_fact_table_t* table, loom_value_id_t value,
+    iree_host_size_t incidence,
+    const loom_condition_integer_relation_t* original,
+    loom_value_facts_t* facts) {
+  loom_condition_integer_relation_t relation = *original;
+  if (incidence & LOOM_CONDITIONED_VALUE_FACTS_TRANSLATE_LEFT) {
+    const loom_value_facts_t provider =
+        loom_value_fact_table_lookup(table, relation.left.value_id);
+    loom_conditioned_value_facts_apply_active_refinement(&provider, facts);
+    relation.left.value_id = value;
+  }
+  if (incidence & LOOM_CONDITIONED_VALUE_FACTS_TRANSLATE_RIGHT) {
+    const loom_value_facts_t provider =
+        loom_value_fact_table_lookup(table, relation.right.value_id);
+    loom_conditioned_value_facts_apply_active_refinement(&provider, facts);
+    relation.right.value_id = value;
+  }
+  (void)loom_condition_integer_relation_apply_to_value_facts(&relation, table,
+                                                             value, facts);
+}
+
 static void loom_conditioned_value_facts_enter_local_scope(
     loom_conditioned_value_facts_t* state,
     loom_conditioned_value_facts_local_scope_t* scope,
@@ -450,13 +528,19 @@ static void loom_conditioned_value_facts_enter_local_scope(
                         ? update->previous->facts
                         : loom_value_fact_table_lookup(table, value_id);
     for (uint32_t j = 0; j < update->relation_count; ++j) {
-      const iree_host_size_t relation_index =
+      const iree_host_size_t incidence =
           update->relation_count == 1
               ? update->relation_index
               : relation_indices[update->relation_index + j];
-      (void)loom_condition_integer_relation_apply_to_value_facts(
-          &scope->facts->integer_relations[relation_index], table, value_id,
-          &update->facts);
+      const loom_condition_integer_relation_t* relation =
+          &scope->facts->integer_relations[incidence >> 2];
+      if (incidence & LOOM_CONDITIONED_VALUE_FACTS_TRANSLATE_MASK) {
+        loom_conditioned_value_facts_apply_provider_relation(
+            table, value_id, incidence, relation, &update->facts);
+      } else {
+        (void)loom_condition_integer_relation_apply_to_value_facts(
+            relation, table, value_id, &update->facts);
+      }
     }
     state->active_updates[update->value_ordinal] = update;
   }
@@ -490,24 +574,6 @@ static void loom_conditioned_value_facts_transition_local_scope(
     current = entered;
   }
   state->active_scope = current;
-}
-
-static void loom_conditioned_value_facts_apply_active_refinement(
-    const loom_value_facts_t* active, loom_value_facts_t* inout_facts) {
-  inout_facts->range_lo = iree_max(inout_facts->range_lo, active->range_lo);
-  inout_facts->range_hi = iree_min(inout_facts->range_hi, active->range_hi);
-  // Comparison relations do not introduce divisibility. An exact relation can
-  // only strengthen a consistent existing divisor to one of its multiples.
-  if (active->known_divisor % inout_facts->known_divisor == 0) {
-    inout_facts->known_divisor = active->known_divisor;
-  }
-  // Both inputs constrain the same value. Their noncontiguous predicates
-  // remain true even when the intersected interval cannot express them.
-  const uint32_t retained_flags =
-      (active->flags | inout_facts->flags) &
-      (LOOM_VALUE_FACT_NON_ZERO | LOOM_VALUE_FACT_POWER_OF_TWO);
-  loom_value_facts_recompute_flags(inout_facts);
-  inout_facts->flags |= retained_flags;
 }
 
 static void loom_conditioned_value_facts_refine_canonical_value(
@@ -649,22 +715,6 @@ static const loom_value_id_t* loom_conditioned_value_facts_refine_operands(
   return state->numeric_operands ? state->numeric_operands : values;
 }
 
-static void loom_conditioned_value_facts_canonicalize_facts(
-    const loom_cfg_value_identity_table_t* identities,
-    loom_condition_fact_set_t* facts) {
-  for (iree_host_size_t i = 0; i < facts->integer_relation_count; ++i) {
-    loom_condition_integer_relation_t* relation = &facts->integer_relations[i];
-    if (relation->left.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE) {
-      relation->left.value_id = loom_cfg_value_identity_table_lookup(
-          identities, relation->left.value_id);
-    }
-    if (relation->right.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE) {
-      relation->right.value_id = loom_cfg_value_identity_table_lookup(
-          identities, relation->right.value_id);
-    }
-  }
-}
-
 // Composes the two exact-identity domains once before indexing conditions.
 // Both mappings select an available predecessor identity, so alternating them
 // reaches a fixed point. Reusing the CFG table storage keeps operand lookup
@@ -693,6 +743,10 @@ static void loom_conditioned_value_facts_compose_identities(
 static loom_value_ordinal_t loom_conditioned_value_facts_update_ordinal(
     const loom_conditioned_value_facts_t* state,
     loom_condition_integer_operand_t operand) {
+  if (operand.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE) {
+    operand.value_id = loom_cfg_value_identity_table_lookup(&state->identities,
+                                                            operand.value_id);
+  }
   if (operand.kind != LOOM_CONDITION_INTEGER_OPERAND_VALUE ||
       loom_value_facts_is_exact(
           loom_value_fact_table_lookup(state->table, operand.value_id))) {
@@ -704,17 +758,30 @@ static loom_value_ordinal_t loom_conditioned_value_facts_update_ordinal(
 static uint32_t loom_conditioned_value_facts_relation_update_ordinals(
     const loom_conditioned_value_facts_t* state,
     const loom_condition_integer_relation_t* relation,
-    loom_value_ordinal_t ordinals[2]) {
+    loom_value_ordinal_t ordinals[2], uint32_t translations[2]) {
   const loom_value_ordinal_t left =
       loom_conditioned_value_facts_update_ordinal(state, relation->left);
   const loom_value_ordinal_t right =
       loom_conditioned_value_facts_update_ordinal(state, relation->right);
   uint32_t count = 0;
   if (left != LOOM_VALUE_ORDINAL_INVALID) {
-    ordinals[count++] = left;
+    ordinals[count] = left;
+    translations[count++] =
+        relation->left.value_id == state->domain.value_ids[left]
+            ? 0
+            : LOOM_CONDITIONED_VALUE_FACTS_TRANSLATE_LEFT;
   }
-  if (right != LOOM_VALUE_ORDINAL_INVALID && right != left) {
-    ordinals[count++] = right;
+  if (right != LOOM_VALUE_ORDINAL_INVALID) {
+    const uint32_t translation =
+        relation->right.value_id == state->domain.value_ids[right]
+            ? 0
+            : LOOM_CONDITIONED_VALUE_FACTS_TRANSLATE_RIGHT;
+    if (right == left) {
+      translations[0] |= translation;
+    } else {
+      ordinals[count] = right;
+      translations[count++] = translation;
+    }
   }
   return count;
 }
@@ -723,8 +790,9 @@ static iree_status_t loom_conditioned_value_facts_prepare_single_relation(
     loom_conditioned_value_facts_t* state,
     loom_conditioned_value_facts_local_scope_t* scope) {
   loom_value_ordinal_t ordinals[2];
+  uint32_t translations[2];
   const uint32_t count = loom_conditioned_value_facts_relation_update_ordinals(
-      state, scope->facts->integer_relations, ordinals);
+      state, scope->facts->integer_relations, ordinals, translations);
   if (!count) {
     return iree_ok_status();
   }
@@ -733,7 +801,7 @@ static iree_status_t loom_conditioned_value_facts_prepare_single_relation(
   scope->update_count = count;
   for (uint32_t i = 0; i < count; ++i) {
     scope->updates[i] = (loom_conditioned_value_facts_active_update_t){
-        .relation_index = 0,
+        .relation_index = translations[i],
         .relation_count = 1,
         .value_ordinal = ordinals[i],
     };
@@ -747,7 +815,7 @@ static iree_status_t loom_conditioned_value_facts_prepare_single_relation(
 typedef struct loom_conditioned_value_facts_incidence_t {
   // Dense ordinal of the value refined by the relation.
   loom_value_ordinal_t value_ordinal;
-  // Original source order of the relation within the local condition.
+  // Relation index shifted by two, followed by left/right translation bits.
   iree_host_size_t relation_index;
 } loom_conditioned_value_facts_incidence_t;
 
@@ -781,14 +849,15 @@ static iree_status_t loom_conditioned_value_facts_prepare_local_scope(
   iree_host_size_t incidence_count = 0;
   for (iree_host_size_t i = 0; i < facts->integer_relation_count; ++i) {
     loom_value_ordinal_t ordinals[2];
+    uint32_t translations[2];
     const uint32_t count =
         loom_conditioned_value_facts_relation_update_ordinals(
-            state, &facts->integer_relations[i], ordinals);
+            state, &facts->integer_relations[i], ordinals, translations);
     for (uint32_t j = 0; j < count; ++j) {
       (*incidences)[incidence_count++] =
           (loom_conditioned_value_facts_incidence_t){
               .value_ordinal = ordinals[j],
-              .relation_index = i,
+              .relation_index = (i << 2) | translations[j],
           };
     }
   }
@@ -959,14 +1028,6 @@ static iree_status_t loom_conditioned_value_facts_solve(
   IREE_RETURN_IF_ERROR(loom_value_fact_table_for_each_integer_cast(
       state->table, loom_conditioned_value_facts_retain_cast, state));
   IREE_RETURN_IF_ERROR(loom_conditioned_value_facts_compose_casts(state));
-  for (loom_conditioned_value_facts_local_scope_t* local_scope =
-           state->local_scopes;
-       local_scope; local_scope = local_scope->next) {
-    if (local_scope->facts) {
-      loom_conditioned_value_facts_canonicalize_facts(&state->identities,
-                                                      local_scope->facts);
-    }
-  }
   if (state->local_condition_scope_count) {
     IREE_RETURN_IF_ERROR(
         loom_conditioned_value_facts_prepare_local_scopes(state));

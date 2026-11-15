@@ -1,0 +1,472 @@
+// RUN: pass unroll-scf-for,dce
+
+// Independent aliases contribute bounds, divisibility, and a nonzero predicate.
+// The outer branch matters: those providers do not execute on every path to
+// the outside observation, where the unconstrained input can still be zero.
+func.def @scoped_numeric_providers(%input: i32, %limit: i32, %floor: i32, %available: i1) {
+  %expected_lower = scalar.constant -6 : i64
+  %expected_upper = scalar.constant 18 : i64
+  %expected_divisor = scalar.constant 6 : i64
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %available {
+    %bounded = scalar.assume %input [range(%input, -11, 19), multiple_of(%input, 2)] : i32
+    %nonzero = scalar.assume %input [multiple_of(%input, 3), ne(%input, 0)] : i32
+    %below_limit = scalar.cmpi slt, %bounded, %limit : i32
+    %above_floor = scalar.cmpi sgt, %nonzero, %floor : i32
+    %selected = scalar.andi %below_limit, %above_floor : i1
+    scf.if %selected {
+      %lower = test.fact_range_lo %input : i32 -> i64
+      %upper = test.fact_range_hi %input : i32 -> i64
+      %divisor = test.fact_divisor %input : i32 -> i64
+      %not_zero = test.fact_non_zero %input : i32 -> i1
+      %lower_proven = scalar.cmpi eq, %lower, %expected_lower : i64
+      %upper_proven = scalar.cmpi eq, %upper, %expected_upper : i64
+      %divisor_proven = scalar.cmpi eq, %divisor, %expected_divisor : i64
+      %range_proven = scalar.andi %lower_proven, %upper_proven : i1
+      %numeric_proven = scalar.andi %range_proven, %divisor_proven : i1
+      %all_proven = scalar.andi %numeric_proven, %not_zero : i1
+      %count = index.cast %all_proven : i1 to index
+      scf.for %proof = [%begin to %count step %step] unroll {
+        test.use %proof : index
+      }
+    }
+  }
+  %outside_nonzero = test.fact_non_zero %input : i32 -> i1
+  %outside_count = index.cast %outside_nonzero : i1 to index
+  scf.for %outside = [%begin to %outside_count step %step] unroll {
+    test.use %outside : index
+  }
+  func.return
+}
+
+// ----
+func.def @scoped_numeric_providers(%input: i32, %limit: i32, %floor: i32, %available: i1) {
+  scf.if %available {
+    %bounded = scalar.assume %input [range(%input, -11, 19), multiple_of(%input, 2)] : i32
+    %nonzero = scalar.assume %input [multiple_of(%input, 3), ne(%input, 0)] : i32
+    %below_limit = scalar.cmpi slt, %bounded, %limit : i32
+    %above_floor = scalar.cmpi sgt, %nonzero, %floor : i32
+    %selected = scalar.andi %below_limit, %above_floor : i1
+    scf.if %selected {
+      %proof_0 = index.constant 0 : index
+      test.use %proof_0 : index
+    }
+  }
+  func.return
+}
+
+// ====
+
+// Full-width scalar providers carry an independent power-of-two predicate.
+func.def @scoped_power_provider(%input: i64, %limit: i64, %floor: i64, %available: i1) {
+  %expected_upper = scalar.constant 32 : i64
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %available {
+    %power = scalar.assume %input [power_of_two(%input)] : i64
+    %bounded = scalar.assume %input [le(%input, 32)] : i64
+    %below_limit = scalar.cmpi slt, %power, %limit : i64
+    %above_floor = scalar.cmpi sgt, %bounded, %floor : i64
+    %selected = scalar.andi %below_limit, %above_floor : i1
+    scf.if %selected {
+      %upper = test.fact_range_hi %input : i64 -> i64
+      %power_proven = test.fact_power_of_two %input : i64 -> i1
+      %upper_proven = scalar.cmpi eq, %upper, %expected_upper : i64
+      %both = scalar.andi %power_proven, %upper_proven : i1
+      %count = index.cast %both : i1 to index
+      scf.for %proof = [%begin to %count step %step] unroll {
+        test.use %proof : index
+      }
+    }
+  }
+  %outside_power = test.fact_power_of_two %input : i64 -> i1
+  %outside_count = index.cast %outside_power : i1 to index
+  scf.for %outside = [%begin to %outside_count step %step] unroll {
+    test.use %outside : index
+  }
+  func.return
+}
+
+// ----
+func.def @scoped_power_provider(%input: i64, %limit: i64, %floor: i64, %available: i1) {
+  scf.if %available {
+    %power = scalar.assume %input [power_of_two(%input)] : i64
+    %bounded = scalar.assume %input [le(%input, 32)] : i64
+    %below_limit = scalar.cmpi slt, %power, %limit : i64
+    %above_floor = scalar.cmpi sgt, %bounded, %floor : i64
+    %selected = scalar.andi %below_limit, %above_floor : i1
+    scf.if %selected {
+      %proof_0 = index.constant 0 : index
+      test.use %proof_0 : index
+    }
+  }
+  func.return
+}
+
+// ====
+
+// A single comparison can have two distinct providers of one CFG identity.
+// The direct path to the join carries no divisibility information.
+func.def @coincident_cfg_providers(%input: i32, %available: i1) {
+  %expected_divisor = scalar.constant 6 : i64
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  cfg.cond_br %available, ^providers, ^join
+^providers:
+  %even = scalar.assume %input [multiple_of(%input, 2)] : i32
+  %third = scalar.assume %input [multiple_of(%input, 3)] : i32
+  cfg.br ^body(%even: i32, %third: i32)
+^body(%left: i32, %right: i32):
+  %selected = scalar.cmpi sle, %left, %right : i32
+  cfg.cond_br %selected, ^selected, ^join
+^selected:
+  %divisor = test.fact_divisor %input : i32 -> i64
+  %proven = scalar.cmpi eq, %divisor, %expected_divisor : i64
+  %count = index.cast %proven : i1 to index
+  scf.for %proof = [%begin to %count step %step] unroll {
+    test.use %proof : index
+  }
+  cfg.br ^join
+^join:
+  %outside_divisor = test.fact_divisor %input : i32 -> i64
+  %outside_proven = scalar.cmpi eq, %outside_divisor, %expected_divisor : i64
+  %outside_count = index.cast %outside_proven : i1 to index
+  scf.for %outside = [%begin to %outside_count step %step] unroll {
+    test.use %outside : index
+  }
+  func.return
+}
+
+// ----
+func.def @coincident_cfg_providers(%input: i32, %available: i1) {
+  cfg.cond_br %available, ^providers, ^join
+^providers:
+  %even = scalar.assume %input [multiple_of(%input, 2)] : i32
+  %third = scalar.assume %input [multiple_of(%input, 3)] : i32
+  cfg.br ^body(%even: i32, %third: i32)
+^body(%left: i32, %right: i32):
+  %selected = scalar.cmpi sle, %left, %right : i32
+  cfg.cond_br %selected, ^selected, ^join
+^selected:
+  %proof_0 = index.constant 0 : index
+  test.use %proof_0 : index
+  cfg.br ^join
+^join:
+  func.return
+}
+
+// ====
+
+// The guard mentions middle and limit, but not the hidden alias. Closing the
+// path must preserve both the input's upper bound and hidden's lower bound.
+func.def @ambient_provider(%input: i32, %middle: i32, %hidden: i32, %limit: i32) {
+  %bounded_input = scalar.assume %input [ge(%input, 1)] : i32
+  %bounded_hidden = scalar.assume %hidden [lt(%hidden, %limit)] : i32
+  %bounded_middle = scalar.assume %middle [lt(%middle, %bounded_hidden)] : i32
+  %c8 = scalar.constant 8 : i32
+  %c7 = scalar.constant 7 : i64
+  %c2 = scalar.constant 2 : i64
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %before = scalar.cmpi slt, %bounded_input, %bounded_middle : i32
+  %limited = scalar.cmpi slt, %limit, %c8 : i32
+  %selected = scalar.andi %before, %limited : i1
+  scf.if %selected {
+    %upper = test.fact_range_hi %input : i32 -> i64
+    %upper_proved = scalar.cmpi sle, %upper, %c7 : i64
+    %upper_count = index.cast %upper_proved : i1 to index
+    scf.for %upper_iteration = [%c0 to %upper_count step %c1] unroll {
+      test.use %upper_iteration : index
+    }
+    %lower = test.fact_range_lo %hidden : i32 -> i64
+    %lower_proved = scalar.cmpi sge, %lower, %c2 : i64
+    %lower_count = index.cast %lower_proved : i1 to index
+    scf.for %lower_iteration = [%c0 to %lower_count step %c1] unroll {
+      test.use %lower_iteration : index
+    }
+  }
+  %outside_lower = test.fact_range_lo %hidden : i32 -> i64
+  %outside_proved = scalar.cmpi sge, %outside_lower, %c2 : i64
+  %outside_count = index.cast %outside_proved : i1 to index
+  scf.for %outside_iteration = [%c0 to %outside_count step %c1] unroll {
+    test.use %outside_iteration : index
+  }
+  func.return
+}
+
+// ----
+func.def @ambient_provider(%input: i32, %middle: i32, %hidden: i32, %limit: i32) {
+  %bounded_input = scalar.assume %input [ge(%input, 1)] : i32
+  %bounded_hidden = scalar.assume %hidden [lt(%hidden, %limit)] : i32
+  %bounded_middle = scalar.assume %middle [lt(%middle, %bounded_hidden)] : i32
+  %c8 = scalar.constant 8 : i32
+  %before = scalar.cmpi slt, %bounded_input, %bounded_middle : i32
+  %limited = scalar.cmpi slt, %limit, %c8 : i32
+  %selected = scalar.andi %before, %limited : i1
+  scf.if %selected {
+    %upper_iteration_0 = index.constant 0 : index
+    test.use %upper_iteration_0 : index
+    %lower_iteration_0 = index.constant 0 : index
+    test.use %lower_iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// Literal lower bounds separate ambient reachability from alias fact ownership.
+func.def @ambient_constant(%middle: i32, %hidden: i32, %limit: i32) {
+  %bounded_input = scalar.constant 1 : i32
+  %bounded_hidden = scalar.assume %hidden [lt(%hidden, %limit)] : i32
+  %bounded_middle = scalar.assume %middle [lt(%middle, %bounded_hidden)] : i32
+  %c8 = scalar.constant 8 : i32
+  %c7 = scalar.constant 7 : i64
+  %c2 = scalar.constant 2 : i64
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %before = scalar.cmpi slt, %bounded_input, %bounded_middle : i32
+  %limited = scalar.cmpi slt, %limit, %c8 : i32
+  %selected = scalar.andi %before, %limited : i1
+  scf.if %selected {
+    %upper = test.fact_range_hi %bounded_input : i32 -> i64
+    %upper_proved = scalar.cmpi sle, %upper, %c7 : i64
+    %upper_count = index.cast %upper_proved : i1 to index
+    scf.for %upper_iteration = [%c0 to %upper_count step %c1] unroll {
+      test.use %upper_iteration : index
+    }
+    %lower = test.fact_range_lo %hidden : i32 -> i64
+    %lower_proved = scalar.cmpi sge, %lower, %c2 : i64
+    %lower_count = index.cast %lower_proved : i1 to index
+    scf.for %lower_iteration = [%c0 to %lower_count step %c1] unroll {
+      test.use %lower_iteration : index
+    }
+  }
+  %outside_lower = test.fact_range_lo %hidden : i32 -> i64
+  %outside_proved = scalar.cmpi sge, %outside_lower, %c2 : i64
+  %outside_count = index.cast %outside_proved : i1 to index
+  scf.for %outside_iteration = [%c0 to %outside_count step %c1] unroll {
+    test.use %outside_iteration : index
+  }
+  func.return
+}
+
+// ----
+func.def @ambient_constant(%middle: i32, %hidden: i32, %limit: i32) {
+  %bounded_input = scalar.constant 1 : i32
+  %bounded_hidden = scalar.assume %hidden [lt(%hidden, %limit)] : i32
+  %bounded_middle = scalar.assume %middle [lt(%middle, %bounded_hidden)] : i32
+  %c8 = scalar.constant 8 : i32
+  %before = scalar.cmpi slt, %bounded_input, %bounded_middle : i32
+  %limited = scalar.cmpi slt, %limit, %c8 : i32
+  %selected = scalar.andi %before, %limited : i1
+  scf.if %selected {
+    %upper_iteration_0 = index.constant 0 : index
+    test.use %upper_iteration_0 : index
+    %lower_iteration_0 = index.constant 0 : index
+    test.use %lower_iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// A changing loop-carried bound reaches the same guard at each iteration.
+// The edge-local bound must be recomputed from that iteration's operand facts.
+func.def @loop_provider(%input: i32, %middle: i32, %limit: i32, %count: index) {
+  %unit = scalar.constant 1 : i32
+  %c8 = scalar.constant 8 : i32
+  %c7 = scalar.constant 7 : i64
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %final = scf.for %iteration = [%c0 to %count step %c1](%current = %limit : i32) -> (i32) {
+    %bounded_middle = scalar.assume %middle [lt(%middle, %current)] : i32
+    %before = scalar.cmpi slt, %input, %bounded_middle : i32
+    %limited = scalar.cmpi slt, %current, %c8 : i32
+    %selected = scalar.andi %before, %limited : i1
+    scf.if %selected {
+      %upper = test.fact_range_hi %input : i32 -> i64
+      %proved = scalar.cmpi sle, %upper, %c7 : i64
+      %proved_count = index.cast %proved : i1 to index
+      scf.for %proof = [%c0 to %proved_count step %c1] unroll {
+        test.use %proof : index
+      }
+    }
+    %outside_upper = test.fact_range_hi %input : i32 -> i64
+    %outside_proved = scalar.cmpi sle, %outside_upper, %c7 : i64
+    %outside_count = index.cast %outside_proved : i1 to index
+    scf.for %outside = [%c0 to %outside_count step %c1] unroll {
+      test.use %outside : index
+    }
+    %next = scalar.addi %current, %unit : i32
+    scf.yield %next : i32
+  }
+  func.return
+}
+
+// ----
+func.def @loop_provider(%input: i32, %middle: i32, %limit: i32, %count: index) {
+  %unit = scalar.constant 1 : i32
+  %c8 = scalar.constant 8 : i32
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %final = scf.for %iteration = [%c0 to %count step %c1](%current = %limit : i32) -> (i32) {
+    %bounded_middle = scalar.assume %middle [lt(%middle, %current)] : i32
+    %before = scalar.cmpi slt, %input, %bounded_middle : i32
+    %limited = scalar.cmpi slt, %current, %c8 : i32
+    %selected = scalar.andi %before, %limited : i1
+    scf.if %selected {
+      %proof_0 = index.constant 0 : index
+      test.use %proof_0 : index
+    }
+    %next = scalar.addi %current, %unit : i32
+    scf.yield %next : i32
+  }
+  func.return
+}
+
+// ====
+
+// Exact aliases remain useful when ordinary canonicalization replaces them
+// with a constant. The original source is exact only along the optional path.
+func.def @exact_alias_provider(%input: i32, %limit: i32, %available: i1) {
+  %expected = scalar.constant 5 : i64
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %available {
+    %known = scalar.assume %input [eq(%input, 5)] : i32
+    %selected = scalar.cmpi slt, %known, %limit : i32
+    scf.if %selected {
+      %lower = test.fact_range_lo %input : i32 -> i64
+      %upper = test.fact_range_hi %input : i32 -> i64
+      %lower_proven = scalar.cmpi eq, %lower, %expected : i64
+      %upper_proven = scalar.cmpi eq, %upper, %expected : i64
+      %proven = scalar.andi %lower_proven, %upper_proven : i1
+      %count = index.cast %proven : i1 to index
+      scf.for %proof = [%begin to %count step %step] unroll {
+        test.use %proof : index
+      }
+    }
+  }
+  %outside_upper = test.fact_range_hi %input : i32 -> i64
+  %outside_proven = scalar.cmpi eq, %outside_upper, %expected : i64
+  %outside_count = index.cast %outside_proven : i1 to index
+  scf.for %outside = [%begin to %outside_count step %step] unroll {
+    test.use %outside : index
+  }
+  func.return
+}
+
+// ----
+func.def @exact_alias_provider(%input: i32, %limit: i32, %available: i1) {
+  scf.if %available {
+    %known = scalar.assume %input [eq(%input, 5)] : i32
+    %selected = scalar.cmpi slt, %known, %limit : i32
+    scf.if %selected {
+      %proof_0 = index.constant 0 : index
+      test.use %proof_0 : index
+    }
+  }
+  func.return
+}
+
+// ====
+
+// RUN: pass canonicalize,unroll-scf-for,dce
+
+// Exact aliases remain useful when ordinary canonicalization replaces them
+// with a constant. The original source is exact only along the optional path.
+func.def @exact_alias_provider(%input: i32, %limit: i32, %available: i1) {
+  %expected = scalar.constant 5 : i64
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %available {
+    %known = scalar.assume %input [eq(%input, 5)] : i32
+    %selected = scalar.cmpi slt, %known, %limit : i32
+    scf.if %selected {
+      %lower = test.fact_range_lo %input : i32 -> i64
+      %upper = test.fact_range_hi %input : i32 -> i64
+      %lower_proven = scalar.cmpi eq, %lower, %expected : i64
+      %upper_proven = scalar.cmpi eq, %upper, %expected : i64
+      %proven = scalar.andi %lower_proven, %upper_proven : i1
+      %count = index.cast %proven : i1 to index
+      scf.for %proof = [%begin to %count step %step] unroll {
+        test.use %proof : index
+      }
+    }
+  }
+  %outside_upper = test.fact_range_hi %input : i32 -> i64
+  %outside_proven = scalar.cmpi eq, %outside_upper, %expected : i64
+  %outside_count = index.cast %outside_proven : i1 to index
+  scf.for %outside = [%begin to %outside_count step %step] unroll {
+    test.use %outside : index
+  }
+  func.return
+}
+
+// ----
+func.def @exact_alias_provider(%input: i32, %limit: i32, %available: i1) {
+  %begin = index.constant 0 : index
+  scf.if %available {
+    %known = scalar.constant 5 : i32
+    %selected = scalar.cmpi sgt, %limit, %known : i32
+    scf.if %selected {
+      test.use %begin : index
+    }
+  }
+  func.return
+}
+
+// ====
+
+// RUN: pass unroll-scf-for,dce
+
+// Index aliases combine non-coprime divisors and round the finite interval.
+// The bypass path leaves the original coordinate unconstrained at the join.
+func.def @index_providers(%input: index, %limit: index, %floor: index, %available: i1) {
+  %expected_upper = scalar.constant 96 : i64
+  %expected_divisor = scalar.constant 24 : i64
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %available {
+    %bounded = index.assume %input [range(%input, 0, 100), multiple_of(%input, 8)] : index
+    %aligned = index.assume %input [multiple_of(%input, 12)] : index
+    %below_limit = index.cmp slt, %bounded, %limit : index
+    %above_floor = index.cmp sgt, %aligned, %floor : index
+    %selected = scalar.andi %below_limit, %above_floor : i1
+    scf.if %selected {
+      %upper = test.fact_range_hi %input : index -> i64
+      %divisor = test.fact_divisor %input : index -> i64
+      %upper_proven = scalar.cmpi eq, %upper, %expected_upper : i64
+      %divisor_proven = scalar.cmpi eq, %divisor, %expected_divisor : i64
+      %proven = scalar.andi %upper_proven, %divisor_proven : i1
+      %count = index.cast %proven : i1 to index
+      scf.for %proof = [%begin to %count step %step] unroll {
+        test.use %proof : index
+      }
+    }
+  }
+  %outside_divisor = test.fact_divisor %input : index -> i64
+  %outside_proven = scalar.cmpi eq, %outside_divisor, %expected_divisor : i64
+  %outside_count = index.cast %outside_proven : i1 to index
+  scf.for %outside = [%begin to %outside_count step %step] unroll {
+    test.use %outside : index
+  }
+  func.return
+}
+
+// ----
+func.def @index_providers(%input: index, %limit: index, %floor: index, %available: i1) {
+  scf.if %available {
+    %bounded = index.assume %input [range(%input, 0, 100), multiple_of(%input, 8)] : index
+    %aligned = index.assume %input [multiple_of(%input, 12)] : index
+    %below_limit = index.cmp slt, %bounded, %limit : index
+    %above_floor = index.cmp sgt, %aligned, %floor : index
+    %selected = scalar.andi %below_limit, %above_floor : i1
+    scf.if %selected {
+      %proof_0 = index.constant 0 : index
+      test.use %proof_0 : index
+    }
+  }
+  func.return
+}
