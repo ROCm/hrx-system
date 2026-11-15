@@ -130,6 +130,14 @@ joining execution and ring retirement. The shader's mailbox value and interrupt
 context are independent queried operands. No host signal or command-processor
 event can satisfy the wake oracle.
 
+PM4 also keeps one publisher dispatch resident across all eight epochs. Each
+publication waits for host acquisition and acknowledgement before reusing the
+record, so a shader-exit interrupt cannot supply progress. A separate case stops
+the publisher after three acknowledgements and joins its final interrupt before
+releasing the event. Assertion cleanup releases the resident wait as well. These
+cases establish notification and record reuse; they do not measure idle wake
+latency or qualify an external I/O service.
+
 Each `encoding/` package has one plain host-test binary. Package policy removes
 the GPU execution requirement for these exact packages, so byte-layout checks
 run without a GPU and do not reserve a GPU slot. GPU-family build enablement

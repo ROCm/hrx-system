@@ -142,6 +142,20 @@ amdf_cts_test_suite(
 )
 
 amdf_cts_test_suite(
+    name = "file_notification",
+    srcs = ["file_notification_test.cc"],
+    target_compatible_with = _FILE_IO_COMPATIBILITY,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":file_io_fixture",
+        "//libamdf/cts/gpu/kernels:file_notification",
+        "//libamdf/cts/gpu/kernels:file_notification_kernels",
+        "//libamdf/cts/gpu/util:event_fixture",
+        "//third_party:google_test",
+    ],
+)
+
+amdf_cts_test_suite(
     name = "file_io_stress",
     srcs = [
         "file_exchange_fixture.h",

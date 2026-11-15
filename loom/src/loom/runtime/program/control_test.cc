@@ -169,7 +169,8 @@ class ControlTest
       IREE_EXPECT_OK(iree_hal_semaphore_signal(gate_, 2, nullptr));
     }
     if (execution_) {
-      IREE_EXPECT_OK(loom_runtime_execution_drain(execution_));
+      IREE_EXPECT_STATUS_IS(completion_status_,
+                            loom_runtime_execution_drain(execution_));
     }
     iree_hal_fence_release(produced_);
     iree_hal_fence_release(dependency_);
@@ -401,6 +402,8 @@ class ControlTest
   loom_runtime_execution_queues_t* execution_queues_ = nullptr;
   // Owned model execution capability.
   loom_runtime_execution_t* execution_ = nullptr;
+  // Expected terminal status when joining this case's model work at teardown.
+  iree_status_code_t completion_status_ = IREE_STATUS_OK;
   // Explicit external producer, released during teardown even after failure.
   iree_hal_semaphore_t* gate_ = nullptr;
   // Retained external dependency imported by the source controller.
@@ -891,6 +894,64 @@ TEST_P(ControlTest, FutureWorkFenceIsRejectedWithoutAdvancingTheTimeline) {
     iree_vm_variant_reset(&result);
     EXPECT_EQ(loom_runtime_execution_frontier(execution_).values[0], 0u);
   }
+}
+
+TEST_P(ControlTest, FailedExternalReadinessPreservesConsumerState) {
+  inputs_[0].control = {3, 17, 99};
+  inputs_[0].tokens.fill(29);
+  inputs_[0].progress.fill(-12345);
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(Upload(0, 0, 3, &completion));
+  IREE_ASSERT_OK(loom_runtime_execution_wait(execution_, completion));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &gate_));
+  IREE_ASSERT_OK(
+      iree_hal_fence_create_at(gate_, 1, host_allocator_, &dependency_));
+  iree_vm_function_t join = {};
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(process_, IREE_SV("runner"),
+                                                 IREE_SV("join"), &join));
+  auto argument =
+      iree_hal_fence_variant_from_ptr_borrowed(&types_, dependency_);
+  auto status = iree_vm_invoke(invocation_, join,
+                               iree_vm_variant_span_from_ptr(&argument, 1),
+                               iree_vm_variant_span_empty());
+  iree_vm_variant_reset(&argument);
+  IREE_ASSERT_OK(status);
+  IREE_ASSERT_OK(Invoke(1, buffers_[0], &completion));
+
+  // A file batch can fail after the VM has enqueued its dependent command.
+  // Failure must retire that command without running it or changing state.
+  completion_status_ = IREE_STATUS_OUT_OF_RANGE;
+  iree_hal_semaphore_fail(gate_, iree_status_from_code(completion_status_));
+  IREE_EXPECT_STATUS_IS(completion_status_,
+                        loom_runtime_execution_drain(execution_));
+  iree_hal_semaphore_release(gate_);
+  gate_ = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_NONE, &gate_));
+
+  // Inspect retained bytes after actual consumer retirement, independently of
+  // the failed model timeline. Checking only the failure status would miss a
+  // consumer that ran before the external read became ready.
+  std::array<iree_hal_transfer_operation_t, 3> downloads = {};
+  void* destinations[] = {outputs_[0].control.data(), outputs_[0].tokens.data(),
+                          outputs_[0].progress.data()};
+  for (size_t i = 0; i < downloads.size(); ++i) {
+    downloads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+    downloads[i].download.source_buffer = buffers_[0][i];
+    downloads[i].download.target = destinations[i];
+    downloads[i].download.length = kLengths[i];
+  }
+  uint64_t one = 1;
+  IREE_ASSERT_OK(iree_hal_queue_transfer(
+      SelectQueue(device_, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER), {},
+      {1, &gate_, &one}, downloads.size(), downloads.data(), nullptr));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(gate_, 1, iree_infinite_timeout(), 0));
+  EXPECT_EQ(outputs_[0].control, inputs_[0].control);
+  EXPECT_EQ(outputs_[0].tokens, inputs_[0].tokens);
+  EXPECT_EQ(outputs_[0].progress, inputs_[0].progress);
 }
 
 TEST_P(ControlTest, DeviceProducedCountsGateConcurrentContinuation) {

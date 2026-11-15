@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "iree/async/cts/file/native_file.h"
@@ -16,6 +17,12 @@
 #include "iree/async/operations/file.h"
 #include "iree/io/file_contents.h"
 #include "iree/testing/temp_file.h"
+
+#if defined(IREE_PLATFORM_LINUX) && \
+    !(defined(__ANDROID_API__) && __ANDROID_API__ < 30)
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 
 namespace iree::async::cts {
 namespace {
@@ -260,6 +267,43 @@ TEST_P(FileRequirementsTest, DirectOpenChangedRange) {
 TEST_P(FileRequirementsTest, DirectImportChangedRange) {
   ChangedRange(FileSource::kImport, IREE_ASYNC_FILE_FLAG_DIRECT);
 }
+
+#if defined(IREE_PLATFORM_LINUX) && \
+    !(defined(__ANDROID_API__) && __ANDROID_API__ < 30)
+TEST_P(FileRequirementsTest, DirectSharedMemoryIsByteGranular) {
+  const int descriptor = memfd_create("iree_direct_requirements", MFD_CLOEXEC);
+  ASSERT_GE(descriptor, 0);
+  // Reopen through shmem's file-open path, which admits O_DIRECT. The
+  // anonymous descriptor returned by memfd_create bypasses that open path.
+  const std::string path = "/proc/self/fd/" + std::to_string(descriptor);
+  auto status =
+      ImportNativeFile(proactor_, iree_make_cstring_view(path.c_str()),
+                       kNativeFileAccessRead | kNativeFileAccessWrite,
+                       IREE_ASYNC_FILE_FLAG_DIRECT, &file_);
+  close(descriptor);
+  IREE_ASSERT_OK(status);
+
+  iree_async_file_requirements_t requirements;
+  IREE_ASSERT_OK(iree_async_file_query_requirements(
+      file_->primitive, file_->flags, &requirements));
+  EXPECT_EQ(requirements.read.buffer_alignment, 1u);
+  EXPECT_EQ(requirements.read.offset_alignment, 1u);
+  EXPECT_EQ(requirements.read.length_alignment, 1u);
+  EXPECT_EQ(requirements.write.buffer_alignment, 1u);
+  EXPECT_EQ(requirements.write.offset_alignment, 1u);
+  EXPECT_EQ(requirements.write.length_alignment, 1u);
+
+  alignas(64) uint8_t data[] = "_0123456789";
+  ASSERT_NO_FATAL_FAILURE(Write(0, data + 1, 10));
+  std::memcpy(data + 1, "abc", 3);
+  ASSERT_NO_FATAL_FAILURE(Write(3, data + 1, 3));
+  std::memset(data + 1, 0, 10);
+  ASSERT_NO_FATAL_FAILURE(Read(1, data + 1, 9, 9));
+  EXPECT_EQ(std::memcmp(data + 1, "12abc6789", 9), 0);
+  EXPECT_EQ(data[0], '_');
+  ASSERT_NO_FATAL_FAILURE(Close());
+}
+#endif
 
 TEST_P(FileRequirementsTest, BufferedOpenShortEof) {
   ShortEof(FileSource::kAsyncOpen, IREE_ASYNC_FILE_FLAG_NONE);

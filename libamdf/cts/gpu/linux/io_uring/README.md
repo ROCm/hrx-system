@@ -20,6 +20,36 @@ and last-reader reuse across independent multi-workgroup dispatches. These
 integer ownership witnesses do not implement matmul, cancellation or a
 production cache scheduler.
 
+## Resident notification and idle admission
+
+[file_notification_test.cc](file_notification_test.cc) joins native shader
+interrupts with the file service. One resident invocation constructs each read,
+publishes the SQ tail, and signals a libamdf event. The host waits on that event
+when no I/O is pending, then services io_uring's own completion notification.
+Native wake counts are hints; SQ/CQ frontiers determine the available work.
+GPU-only admission uses neither a polling sleep nor command-processor
+completion. No helper dispatch advances the resident program.
+
+The shader sums every word of each returned page and derives the next source
+page from its first word. Eight causal reads reuse one payload page and a
+two-entry SQ. Exact CPU expectations check every consumed CQ ticket, source
+page, checksum, final payload, guard, argument, and native frontier. A terminal
+bit shares the generation's release publication so completion cannot be
+observed through an independently visible flag. Native queue retirement follows
+that publication before releasing the event, registrations, or caller pages.
+
+The payload uses an owned `HOST_FILE_IO` allocation with an explicit GPU access.
+Its concrete `FILE_IO`-to-`PROGRAM` pair qualifies the system acquire performed
+inside the shader after CQ publication. A queue acquire after the dispatch
+cannot make data visible to a consumer still running inside it. The payload
+owner outlives both GPU execution and the ring's native file-buffer references.
+
+Buffered and direct reads share this protocol. EOF preserves the untouched
+payload and transcript, and a host stop before admission retires the resident
+publisher without submitting its SQE. The same stop word releases the shader
+after a fatal fixture assertion. This establishes the native ownership chain;
+it does not measure throughput, idle CPU, or progress at full compute occupancy.
+
 ## One credit causal workload
 
 The file has a power-of-two bank of immutable input blocks followed by an

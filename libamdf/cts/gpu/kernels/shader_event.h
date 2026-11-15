@@ -25,13 +25,29 @@ static_assert(sizeof(Record) == 16);
 
 inline constexpr uint64_t kPayloadMask = UINT64_C(0x123456789abcdef0);
 
+// A single resident producer reuses its publication only after host
+// acquisition.
+struct ResidentRecord {
+  // Generation transformed by kPayloadMask, written before the release.
+  uint64_t payload;
+  // Shader release publication acquired by the host after a native wake.
+  uint64_t generation;
+  // Host release after consumption; UINT64_MAX stops the producer early.
+  uint64_t acknowledgement;
+  // Number of acknowledged publications, written before shader retirement.
+  uint64_t completed_epochs;
+};
+static_assert(sizeof(ResidentRecord) == 32);
+
+inline constexpr uint32_t kResidentEpochCount = 8;
+
 // The native mailbox value and interrupt context are independent operands.
 struct Arguments {
-  // Device address of the caller-owned Record.
+  // Device address of the entry point's Record or ResidentRecord.
   uint64_t record;
   // Device address of the eight-byte KFD signal mailbox.
   uint64_t mailbox;
-  // Authoritative generation, independent of the native event operands.
+  // Initial authoritative generation, independent of the native operands.
   uint64_t value;
   // Zero-extended native mailbox trigger, written as one eight-byte value.
   uint64_t trigger;

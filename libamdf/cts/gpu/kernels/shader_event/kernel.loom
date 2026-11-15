@@ -23,3 +23,47 @@ kernel.def export("shader_event") @shader_event() {
   template.apply<@shader_event_interrupt>(%context) : (i32) -> ()
   kernel.return
 }
+
+// The same dispatch publishes all eight generations. Only host acknowledgement
+// permits reuse; the stop sentinel also retires a failed host observation.
+kernel.def export("shader_event_resident") @shader_event_resident() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%record: buffer, %mailbox: buffer, %value: i64, %trigger: i64, %context: i32) {
+  %origin = index.constant 0 : offset
+  %result = buffer.view %record[%origin] : buffer -> view<4xi64>
+  %slot = buffer.view %mailbox[%origin] : buffer -> view<1xi64>
+  %zero = scalar.constant 0 : i64
+  %one = scalar.constant 1 : i64
+  %epoch_count = scalar.constant 8 : i64
+  %abort = scalar.constant -1 : i64
+  %true = scalar.constant true : i1
+  %mask = scalar.constant 1311768467463790320 : i64
+  %completed, %active = scf.while(%epoch = %zero : i64, %running = %true : i1) -> (i64, i1) {
+    %remaining = scalar.cmpi ult, %epoch, %epoch_count : i64
+    %continue = scalar.andi %remaining, %running : i1
+    scf.condition %continue, %epoch, %running : i1, i64, i1
+  } do(%epoch: i64, %running: i1) {
+    %generation = scalar.addi %value, %epoch : i64
+    %payload = scalar.xori %generation, %mask : i64
+    view.store %payload, %result[0] : i64, view<4xi64>
+    view.atomic.store %generation, %result[1] {ordering = release, scope = system} : i64, view<4xi64>
+    view.atomic.store %trigger, %slot[0] {ordering = release, scope = system} : i64, view<1xi64>
+    template.apply<@shader_event_interrupt>(%context) : (i32) -> ()
+    %acknowledged = scf.while(%seen = %zero : i64) -> (i64) {
+      %pending = scalar.cmpi ne, %seen, %generation : i64
+      %not_aborted = scalar.cmpi ne, %seen, %abort : i64
+      %waiting = scalar.andi %pending, %not_aborted : i1
+      scf.condition %waiting, %seen : i1, i64
+    } do(%seen: i64) {
+      %observed = view.atomic.load %result[2] {ordering = acquire, scope = system} : view<4xi64> -> i64
+      scf.yield %observed : i64
+    }
+    %keep_running = scalar.cmpi ne, %acknowledged, %abort : i64
+    %next = scalar.addi %epoch, %one : i64
+    %consumed = scf.select %keep_running, %next, %epoch : i64
+    scf.yield %consumed, %keep_running : i64, i1
+  }
+  view.store %completed, %result[3] : i64, view<4xi64>
+  kernel.return
+}

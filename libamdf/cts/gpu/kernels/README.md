@@ -80,6 +80,13 @@ check complete transcripts, payload guards, native error results and final
 file contents. The kernel uses system release/acquire for intermediate ring
 and payload handoffs; its outer PM4 stream owns startup and final completion.
 
+[file_notification.loom](file_notification.loom) combines that resident file
+ownership with native shader interrupts. The host sleeps for GPU admission
+and services native I/O without reading payloads. Returned page contents
+determine each successor and a complete-page checksum. Its
+[native cases](../linux/io_uring/file_notification_test.cc) verify finite slot
+reuse, EOF, host stop, and terminal publication before execution retirement.
+
 [file_gather.loom](file_gather.loom) extends that native boundary to three I/O
 credits, a key-based duplicate join and a delayed final reader. Two independent
 streams recycle their own slots while the shared source stays live; each
