@@ -62,7 +62,8 @@ uint16_t loom_value_facts_export_integer_refinements(
 
   if (count < capacity && proven_facts.known_divisor > 1 &&
       (loom_value_facts_is_float(inferred_facts) ||
-       inferred_facts.known_divisor % proven_facts.known_divisor != 0)) {
+       !loom_value_facts_divisible_by(inferred_facts,
+                                      proven_facts.known_divisor))) {
     predicates[count++] = (loom_predicate_t){
         .kind = LOOM_PREDICATE_MULTIPLE_OF,
         .arg_count = 2,
