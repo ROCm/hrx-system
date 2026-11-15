@@ -190,6 +190,37 @@ static iree_status_t iree_io_parameter_index_provider_resolve(
   return iree_ok_status();
 }
 
+IREE_API_EXPORT iree_status_t iree_io_parameter_index_provider_resolve_file(
+    iree_io_parameter_provider_t* base_provider, iree_hal_queue_t* queue,
+    iree_string_view_t key, iree_hal_file_t** out_file,
+    uint64_t* out_file_offset, uint64_t* out_length) {
+  *out_file = NULL;
+  *out_file_offset = 0;
+  *out_length = 0;
+  iree_io_parameter_index_provider_t* provider =
+      iree_io_parameter_index_provider_cast(base_provider);
+  iree_io_parameter_file_binding_t binding = {0};
+  const iree_io_parameter_index_entry_t* entry = NULL;
+  iree_hal_file_t* file = NULL;
+  iree_status_t status = iree_io_parameter_index_provider_resolve(
+      provider, iree_hal_queue_family_device(iree_hal_queue_family(queue)),
+      queue, &binding, provider->scope, key, IREE_HAL_MEMORY_ACCESS_READ,
+      &entry, &file);
+  iree_hal_file_release(binding.file);
+  if (!iree_status_is_ok(status)) {
+    return status;
+  }
+  if (!file) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "parameter '%.*s' has no backing file",
+                            (int)key.size, key.data);
+  }
+  *out_file = file;
+  *out_file_offset = entry->storage.file.offset;
+  *out_length = entry->length;
+  return iree_ok_status();
+}
+
 // Validates that the range specified by [offset, offset+length) is in bounds.
 static iree_status_t iree_io_validate_parameter_range(
     iree_hal_memory_access_t required_access,

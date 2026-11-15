@@ -37,6 +37,24 @@ IREE_API_EXPORT iree_status_t iree_io_parameter_index_provider_create(
     iree_host_size_t max_concurrent_operations, iree_allocator_t host_allocator,
     iree_io_parameter_provider_t** out_provider);
 
+// Resolves one indexed parameter to its complete imported HAL file for reading
+// and absolute byte range within that file. |provider| must have been created
+// by iree_io_parameter_index_provider_create. This cold lookup reuses the
+// provider's existing file cache and reads or allocates no payload storage.
+// Importing a previously unused file may allocate native handle metadata.
+// Synthetic entries without backing files return UNAVAILABLE.
+//
+// On success, the caller owns |out_file| independently of the provider/index;
+// its device and progress owner must outlive use, as for iree_hal_file_import.
+// Subsequent byte operations use that retained handle and do not resolve the
+// parameter again. Native transfer requirements come from the returned file;
+// the parameter origin itself need not satisfy those requirements. On failure,
+// all outputs are zero/null. Access is qualified for the queue's exact family.
+IREE_API_EXPORT iree_status_t iree_io_parameter_index_provider_resolve_file(
+    iree_io_parameter_provider_t* provider, iree_hal_queue_t* queue,
+    iree_string_view_t key, iree_hal_file_t** out_file,
+    uint64_t* out_file_offset, uint64_t* out_length);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

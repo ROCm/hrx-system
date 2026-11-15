@@ -1958,7 +1958,9 @@ func.def public @inspect(%owner: ref<@Buffer>, %pointer: ptr<@Buffer>) -> (i1) {
     assert "loom::detail::object_release(pointer);" in result
 
 
-@pytest.mark.parametrize("type_name", ["hal.buffer", "hal.buffer_view", "hal.fence"])
+@pytest.mark.parametrize(
+    "type_name", ["hal.buffer", "hal.buffer_view", "hal.fence", "hal.file"]
+)
 @pytest.mark.parametrize(
     "declaration",
     [

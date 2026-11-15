@@ -11,6 +11,7 @@
 #include "iree/hal/buffer.h"
 #include "iree/hal/buffer_view.h"
 #include "iree/hal/fence.h"
+#include "iree/hal/file.h"
 #include "iree/vm/environment.h"
 #include "iree/vm/variant.h"
 
@@ -27,8 +28,10 @@ enum iree_hal_vm_type_ordinal_e {
   IREE_HAL_VM_TYPE_BUFFER_VIEW = 1,
   // Exact HAL fence retaining the semaphores of its completion set.
   IREE_HAL_VM_TYPE_FENCE = 2,
+  // Exact imported HAL file, independent of any parameter entry within it.
+  IREE_HAL_VM_TYPE_FILE = 3,
   // Number of HAL types known by this consumer API version.
-  IREE_HAL_VM_TYPE_COUNT = 3,
+  IREE_HAL_VM_TYPE_COUNT = 4,
 };
 typedef uint32_t iree_hal_vm_type_ordinal_t;
 
@@ -43,6 +46,8 @@ typedef struct iree_hal_vm_types_t {
   iree_vm_ref_type_t buffer_view;
   // Canonical descriptor for an actual iree_hal_fence_t pointer.
   iree_vm_ref_type_t fence;
+  // Canonical descriptor for an actual iree_hal_file_t pointer.
+  iree_vm_ref_type_t file;
 } iree_hal_vm_types_t;
 
 static_assert(offsetof(iree_hal_vm_types_t, buffer) ==
@@ -57,6 +62,9 @@ static_assert(sizeof(iree_hal_vm_types_t) ==
 static_assert(offsetof(iree_hal_vm_types_t, fence) ==
                   IREE_HAL_VM_TYPE_FENCE * sizeof(iree_vm_ref_type_t),
               "HAL fence type must remain at ordinal two");
+static_assert(offsetof(iree_hal_vm_types_t, file) ==
+                  IREE_HAL_VM_TYPE_FILE * sizeof(iree_vm_ref_type_t),
+              "HAL file type must remain at ordinal three");
 
 // Registers this provider's complete canonical "hal" table and returns the
 // borrowed table in |out_table|. The hosting executable/library calls this once
@@ -66,7 +74,7 @@ static_assert(offsetof(iree_hal_vm_types_t, fence) ==
 //
 // Objects share their existing HAL intrusive owner count with VM references;
 // there is no wrapper allocation or second owner count. Final buffer release
-// follows HAL recycling; views and fences use their normal HAL destruction.
+// follows HAL recycling; views, fences, and files use normal HAL destruction.
 IREE_API_EXPORT iree_status_t
 iree_hal_vm_register_types(iree_vm_environment_t* environment,
                            const iree_vm_ref_type_table_t** out_table);
@@ -90,11 +98,13 @@ static inline iree_status_t iree_hal_vm_types_resolve(
       iree_vm_ref_type_storage_at(table->types, IREE_HAL_VM_TYPE_BUFFER),
       iree_vm_ref_type_storage_at(table->types, IREE_HAL_VM_TYPE_BUFFER_VIEW),
       iree_vm_ref_type_storage_at(table->types, IREE_HAL_VM_TYPE_FENCE),
+      iree_vm_ref_type_storage_at(table->types, IREE_HAL_VM_TYPE_FILE),
   };
   if (!iree_string_view_equal(types.buffer->type_name, IREE_SV("buffer")) ||
       !iree_string_view_equal(types.buffer_view->type_name,
                               IREE_SV("buffer_view")) ||
-      !iree_string_view_equal(types.fence->type_name, IREE_SV("fence"))) {
+      !iree_string_view_equal(types.fence->type_name, IREE_SV("fence")) ||
+      !iree_string_view_equal(types.file->type_name, IREE_SV("file"))) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "HAL type ordinal mismatch");
   }
@@ -108,6 +118,8 @@ IREE_VM_DEFINE_TYPE_ADAPTERS(iree_hal_buffer_view, iree_hal_vm_types_t,
                              buffer_view, iree_hal_buffer_view_t)
 IREE_VM_DEFINE_TYPE_ADAPTERS(iree_hal_fence, iree_hal_vm_types_t, fence,
                              iree_hal_fence_t)
+IREE_VM_DEFINE_TYPE_ADAPTERS(iree_hal_file, iree_hal_vm_types_t, file,
+                             iree_hal_file_t)
 
 #ifdef __cplusplus
 }  // extern "C"
