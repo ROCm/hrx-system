@@ -12,6 +12,7 @@
 #include "loom/analysis/cfg_condition_projection_cache.h"
 #include "loom/analysis/cfg_condition_relation_table.h"
 #include "loom/util/adaptive_sort.h"
+#include "loom/util/cfg_dominance.h"
 
 //===----------------------------------------------------------------------===//
 // Complete finite relation propagation
@@ -48,6 +49,12 @@ typedef struct loom_cfg_condition_matrix_state_t {
   // copied before modification.
   bool shared;
 } loom_cfg_condition_matrix_state_t;
+
+typedef uint8_t loom_cfg_condition_transport_flags_t;
+enum loom_cfg_condition_transport_flags_e {
+  // Source-entry operands remain available at target entry without renaming.
+  LOOM_CFG_CONDITION_TRANSPORT_PRESERVES_ENTRY = 1u << 0,
+};
 
 typedef struct loom_cfg_condition_edge_state_t {
   // Borrowed stable CFG edge metadata.
@@ -88,6 +95,9 @@ typedef struct loom_cfg_condition_edge_state_t {
 
   // True when the edge contribution aliases its single-predecessor target.
   bool shares_target_facts;
+
+  // Immutable transport properties established from retained CFG dominance.
+  loom_cfg_condition_transport_flags_t transport_flags;
 } loom_cfg_condition_edge_state_t;
 
 typedef struct loom_cfg_condition_block_state_t {
@@ -148,12 +158,22 @@ typedef struct loom_cfg_condition_event_queue_t {
 } loom_cfg_condition_event_queue_t;
 
 typedef struct loom_cfg_condition_relation_solver_t {
-  // Borrowed immutable compiler inputs.
+  // Borrowed module owning the analyzed values and CFG.
   const loom_module_t* module;
+
+  // Borrowed immutable CFG snapshot defining dense block and edge ordinals.
   const loom_cfg_graph_t* graph;
+
+  // Borrowed context-free numeric facts used when deriving edge assertions.
   const loom_value_fact_table_t* fact_table;
+
+  // Borrowed dominance result for the same immutable CFG topology.
   const loom_dominance_info_t* dominance;
+
+  // Borrowed local SSA domain retained through publication.
   loom_local_value_domain_t* value_domain;
+
+  // Borrowed canonical identities established by CFG value analysis.
   const loom_cfg_value_identity_table_t* identities;
 
   // Optional producer of semantic anchors for authored relation operands.
@@ -1252,6 +1272,10 @@ __attribute__((minsize))
 IREE_ATTRIBUTE_NOINLINE static iree_status_t
 loom_cfg_condition_relation_build_edges(
     loom_cfg_condition_relation_solver_t* solver) {
+  const loom_cfg_graph_t* dominance_graph = NULL;
+  const loom_cfg_dominance_t* dominance = NULL;
+  loom_dominance_info_lookup_cfg_region(
+      solver->dominance, solver->graph->region, &dominance_graph, &dominance);
   solver->projection_cache.arena = solver->scratch_arena;
   for (loom_cfg_edge_index_t edge_index = 0;
        edge_index < solver->graph->edge_count; ++edge_index) {
@@ -1261,6 +1285,17 @@ loom_cfg_condition_relation_build_edges(
     }
     IREE_RETURN_IF_ERROR(
         loom_cfg_condition_relation_initialize_payload_mapping(solver, edge));
+
+    // Incoming projection already established availability at source entry.
+    // Strict dominance extends that proof to target entry when no payload
+    // changes operand identity. Raw edge assertions can mention source-local
+    // definitions and still require their own projection below.
+    if (dominance && dominance->available && edge->source != edge->target &&
+        edge->payload_mapping.pair_count == 0 &&
+        loom_cfg_dominance_block_dominates(dominance, edge->source,
+                                           edge->target)) {
+      edge->transport_flags |= LOOM_CFG_CONDITION_TRANSPORT_PRESERVES_ENTRY;
+    }
 
     loom_condition_relation_matrix_builder_reset(&solver->matrix_builder);
     const loom_cfg_condition_edge_facts_t* facts =
@@ -1338,15 +1373,28 @@ static iree_status_t loom_cfg_condition_relation_project_contribution(
     loom_cfg_condition_matrix_state_t* source,
     loom_cfg_condition_matrix_state_t* out_contribution) {
   *out_contribution = (loom_cfg_condition_matrix_state_t){0};
+  const bool preserves_entry = iree_any_bit_set(
+      edge->transport_flags, LOOM_CFG_CONDITION_TRANSPORT_PRESERVES_ENTRY);
   if (edge->assertions.row_count == 0) {
+    if (preserves_entry) {
+      source->shared = true;
+      *out_contribution = *source;
+      return iree_ok_status();
+    }
     return loom_cfg_condition_relation_project_matrix(solver, edge, source,
                                                       out_contribution);
   }
   loom_condition_relation_matrix_builder_reset(&solver->matrix_builder);
   IREE_RETURN_IF_ERROR(loom_condition_relation_matrix_builder_add_matrix(
       &solver->matrix_builder, &edge->assertions));
-  IREE_RETURN_IF_ERROR(loom_cfg_condition_relation_project_matrix_into_builder(
-      solver, edge, &source->matrix));
+  if (preserves_entry) {
+    IREE_RETURN_IF_ERROR(loom_condition_relation_matrix_builder_add_matrix(
+        &solver->matrix_builder, &source->matrix));
+  } else {
+    IREE_RETURN_IF_ERROR(
+        loom_cfg_condition_relation_project_matrix_into_builder(
+            solver, edge, &source->matrix));
+  }
   IREE_RETURN_IF_ERROR(loom_cfg_condition_relation_build_matrix(
       solver, &out_contribution->matrix));
   return loom_cfg_condition_relation_drop_contradictions(
@@ -1358,6 +1406,12 @@ static iree_status_t loom_cfg_condition_relation_project_truth_contribution(
     const loom_cfg_condition_edge_state_t* edge,
     const loom_cfg_condition_truth_t* source,
     loom_cfg_condition_truth_t* out_contribution) {
+  if (iree_any_bit_set(edge->transport_flags,
+                       LOOM_CFG_CONDITION_TRANSPORT_PRESERVES_ENTRY)) {
+    *out_contribution = *source;
+    return loom_cfg_condition_truth_union_into(solver, out_contribution,
+                                               &edge->truth_assertions);
+  }
   if (edge->truth_assertions.values[0] == LOOM_CONDITION_RELATION_SET_EMPTY &&
       edge->truth_assertions.values[1] == LOOM_CONDITION_RELATION_SET_EMPTY) {
     return loom_cfg_condition_relation_project_truth(solver, edge, source,

@@ -830,3 +830,276 @@ func.def @record_translation_rejects_modular_wrap(%storage: buffer, %element_raw
 ^exit:
   func.return
 }
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// A guard remains valid through consecutive dominated block entries.
+func.def @dominated_guard_chain(%storage: buffer, %origin_raw: index, %bound_raw: index) {
+  %base = index.constant 0 : offset
+  %origin = index.assume %origin_raw [range(%origin_raw, 0, 63)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 64)] : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%bound]xi32>
+  %fits = index.cmp ult, %origin, %bound : index
+  cfg.cond_br %fits, ^guarded, ^exit
+^guarded:
+  cfg.br ^forward
+^forward:
+  cfg.br ^access
+^access:
+  %loaded = vector.load %view[%origin] : view<[%bound]xi32> -> vector<1xi32>
+  test.use %loaded : vector<1xi32>
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Separate incoming guards retain their shared relation after the join.
+func.def @joined_guards_preserve_common_relation(%storage: buffer, %origin_raw: index, %bound_raw: index, %choose: i1) {
+  %base = index.constant 0 : offset
+  %origin = index.assume %origin_raw [range(%origin_raw, 0, 63)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 64)] : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%bound]xi32>
+  cfg.cond_br %choose, ^left, ^right
+^left:
+  %fits_left = index.cmp ult, %origin, %bound : index
+  cfg.cond_br %fits_left, ^left_guarded, ^exit
+^left_guarded:
+  cfg.br ^join
+^right:
+  %fits_right = index.cmp ult, %origin, %bound : index
+  cfg.cond_br %fits_right, ^right_guarded, ^exit
+^right_guarded:
+  cfg.br ^join
+^join:
+  cfg.br ^access
+^access:
+  %loaded = vector.load %view[%origin] : view<[%bound]xi32> -> vector<1xi32>
+  test.use %loaded : vector<1xi32>
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Weakening a shared join state must neither erase its predecessor's proof
+// nor preserve that proof on the unguarded incoming path.
+func.def @join_weakening_keeps_predecessor_proof(%storage: buffer, %origin_raw: index, %bound_raw: index) {
+  %base = index.constant 0 : offset
+  %origin = index.assume %origin_raw [range(%origin_raw, 0, 63)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 64)] : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%bound]xi32>
+  %fits = index.cmp ult, %origin, %bound : index
+  cfg.cond_br %fits, ^guarded, ^join
+^guarded:
+  cfg.br ^checked
+^checked:
+  %safe = vector.load %view[%origin] : view<[%bound]xi32> -> vector<1xi32>
+  test.use %safe : vector<1xi32>
+  cfg.br ^join
+^join:
+  cfg.br ^access
+^access:
+  // ERROR@+1: SUBRANGE/011 {op_name="vector.load", vector_extent="1"}
+  %unproven = vector.load %view[%origin] : view<[%bound]xi32> -> vector<1xi32>
+  test.use %unproven : vector<1xi32>
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Forwarding the same coordinate preserves the guarded loop equation.
+func.def @loop_forwarding_keeps_guard(%storage: buffer, %origin_raw: index, %bound_raw: index, %repeat: i1) {
+  %base = index.constant 0 : offset
+  %origin = index.assume %origin_raw [range(%origin_raw, 0, 63)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 64)] : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%bound]xi32>
+  %fits = index.cmp ult, %origin, %bound : index
+  cfg.cond_br %fits, ^guarded, ^exit
+^guarded:
+  cfg.br ^header(%origin: index)
+^header(%position: index):
+  cfg.br ^access
+^access:
+  %loaded = vector.load %view[%position] : view<[%bound]xi32> -> vector<1xi32>
+  test.use %loaded : vector<1xi32>
+  cfg.cond_br %repeat, ^latch, ^exit
+^latch:
+  cfg.br ^header(%position: index)
+^exit:
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// A different backedge payload invalidates the initially guarded coordinate.
+// The body must observe that change after sharing the header's initial state.
+func.def @loop_rebinding_drops_entry_guard(%storage: buffer, %origin_raw: index, %bound_raw: index, %repeat: i1) {
+  %base = index.constant 0 : offset
+  %origin = index.assume %origin_raw [range(%origin_raw, 0, 63)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 64)] : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%bound]xi32>
+  %fits = index.cmp ult, %origin, %bound : index
+  cfg.cond_br %fits, ^guarded, ^exit
+^guarded:
+  cfg.br ^header(%origin: index)
+^header(%position: index):
+  cfg.br ^access
+^access:
+  // ERROR@+1: SUBRANGE/011 {op_name="vector.load", vector_extent="1"}
+  %unproven = vector.load %view[%position] : view<[%bound]xi32> -> vector<1xi32>
+  test.use %unproven : vector<1xi32>
+  cfg.cond_br %repeat, ^latch, ^exit
+^latch:
+  cfg.br ^header(%bound: index)
+^exit:
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Exact Boolean truth survives each dominated chain, but neither truth value
+// survives the join. The selected coordinate depends on that distinction.
+func.def @truth_chains_and_join(%storage: buffer, %left_raw: index, %right_raw: index, %choose_left: i1) {
+  %base = index.constant 0 : offset
+  %access_count = index.constant 1 : index
+  %left = index.assume %left_raw [range(%left_raw, 0, 63)] : index
+  %right = index.assume %right_raw [range(%right_raw, 0, 63)] : index
+  %left_bound = index.add %left, %access_count : index
+  %right_bound = index.add %right, %access_count : index
+  %left_view = buffer.view %storage[%base] : buffer -> view<[%left_bound]xi32>
+  %right_view = buffer.view %storage[%base] : buffer -> view<[%right_bound]xi32>
+  %selected = scf.select %choose_left, %left, %right : index
+  cfg.cond_br %choose_left, ^left_guarded, ^right_guarded
+^left_guarded:
+  cfg.br ^left_access
+^left_access:
+  %left_value = vector.load %left_view[%selected] : view<[%left_bound]xi32> -> vector<1xi32>
+  test.use %left_value : vector<1xi32>
+  cfg.br ^join
+^right_guarded:
+  cfg.br ^right_access
+^right_access:
+  %right_value = vector.load %right_view[%selected] : view<[%right_bound]xi32> -> vector<1xi32>
+  test.use %right_value : vector<1xi32>
+  cfg.br ^join
+^join:
+  cfg.br ^after_join
+^after_join:
+  // ERROR@+1: SUBRANGE/011 {op_name="vector.load", vector_extent="1"}
+  %unproven = vector.load %left_view[%selected] : view<[%left_bound]xi32> -> vector<1xi32>
+  test.use %unproven : vector<1xi32>
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// A rebound Boolean invalidates the initial selected coordinate. Its loss of
+// truth must reach the body after sharing the header's initial entry state.
+func.def @loop_rebinding_drops_entry_truth(%storage: buffer, %left_raw: index, %right_raw: index, %choose_left: i1, %repeat: i1) {
+  %base = index.constant 0 : offset
+  %access_count = index.constant 1 : index
+  %false = scalar.constant false : i1
+  %left = index.assume %left_raw [range(%left_raw, 0, 63)] : index
+  %right = index.assume %right_raw [range(%right_raw, 0, 63)] : index
+  %left_bound = index.add %left, %access_count : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%left_bound]xi32>
+  cfg.cond_br %choose_left, ^guarded, ^exit
+^guarded:
+  cfg.br ^header(%choose_left: i1)
+^header(%current_choice: i1):
+  cfg.br ^access
+^access:
+  %selected = scf.select %current_choice, %left, %right : index
+  // ERROR@+1: SUBRANGE/011 {op_name="vector.load", vector_extent="1"}
+  %unproven = vector.load %view[%selected] : view<[%left_bound]xi32> -> vector<1xi32>
+  test.use %unproven : vector<1xi32>
+  cfg.cond_br %repeat, ^latch, ^exit
+^latch:
+  cfg.br ^header(%false: i1)
+^exit:
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Different entry and backedge coordinates both satisfy the guard. The loop
+// argument needs the relation transported from both original providers.
+func.def @loop_distinct_forwarding_keeps_shared_guard(%storage: buffer, %first_raw: index, %next_raw: index, %bound_raw: index, %repeat: i1) {
+  %base = index.constant 0 : offset
+  %first = index.assume %first_raw [range(%first_raw, 0, 63)] : index
+  %next = index.assume %next_raw [range(%next_raw, 0, 63)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 64)] : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%bound]xi32>
+  %first_fits = index.cmp ult, %first, %bound : index
+  %next_fits = index.cmp ult, %next, %bound : index
+  %both_fit = scalar.andi %first_fits, %next_fits : i1
+  cfg.cond_br %both_fit, ^guarded, ^exit
+^guarded:
+  cfg.br ^header(%first: index)
+^header(%position: index):
+  cfg.br ^access
+^access:
+  %loaded = vector.load %view[%position] : view<[%bound]xi32> -> vector<1xi32>
+  test.use %loaded : vector<1xi32>
+  cfg.cond_br %repeat, ^latch, ^exit
+^latch:
+  cfg.br ^header(%next: index)
+^exit:
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Independent guards in the body cannot keep the initial access proof after
+// the backedge changes its coordinate. Weakening must traverse the entire
+// chain, including entries that add new relations between other values.
+func.def @loop_weakening_crosses_independent_guards(%storage: buffer, %origin_raw: index, %bound_raw: index, %first: index, %middle: index, %last: index) {
+  %base = index.constant 0 : offset
+  %origin = index.assume %origin_raw [range(%origin_raw, 0, 63)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 64)] : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%bound]xi32>
+  %fits = index.cmp ult, %origin, %bound : index
+  %first_ordered = index.cmp slt, %first, %middle : index
+  %last_ordered = index.cmp slt, %middle, %last : index
+  cfg.cond_br %fits, ^guarded, ^exit
+^guarded:
+  cfg.br ^header(%origin: index)
+^header(%position: index):
+  cfg.cond_br %first_ordered, ^first_guarded, ^exit
+^first_guarded:
+  cfg.br ^forward
+^forward:
+  cfg.cond_br %last_ordered, ^access, ^exit
+^access:
+  // ERROR@+1: SUBRANGE/011 {op_name="vector.load", vector_extent="1"}
+  %unproven = vector.load %view[%position] : view<[%bound]xi32> -> vector<1xi32>
+  test.use %unproven : vector<1xi32>
+  cfg.br ^latch
+^latch:
+  cfg.br ^header(%bound: index)
+^exit:
+  func.return
+}

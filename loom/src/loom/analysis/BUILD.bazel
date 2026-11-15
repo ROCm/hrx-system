@@ -523,6 +523,7 @@ loom_cc_library(
         "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:cfg_dominance",
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:dominance",
         "//loom/src/loom/util:fact_table",
