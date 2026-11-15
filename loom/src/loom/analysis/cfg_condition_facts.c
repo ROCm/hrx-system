@@ -9,8 +9,10 @@
 #include <string.h>
 
 #include "loom/analysis/cfg_condition_operand_domain.h"
+#include "loom/analysis/cfg_condition_projection_cache.h"
 #include "loom/analysis/cfg_condition_relation_table.h"
 #include "loom/util/adaptive_sort.h"
+#include "loom/util/cfg_dominance.h"
 
 //===----------------------------------------------------------------------===//
 // Complete finite relation propagation
@@ -41,12 +43,19 @@ typedef struct loom_cfg_condition_truth_t {
 
 typedef struct loom_cfg_condition_matrix_state_t {
   // Candidate rows, possibly shared with another propagation state.
+  // Initial states are compact; weakening after event indexing retains slots.
   loom_condition_relation_matrix_t matrix;
 
   // True when another state may observe the matrix storage. The rows must be
   // copied before modification.
   bool shared;
 } loom_cfg_condition_matrix_state_t;
+
+typedef uint8_t loom_cfg_condition_transport_flags_t;
+enum loom_cfg_condition_transport_flags_e {
+  // Source-entry operands remain available at target entry without renaming.
+  LOOM_CFG_CONDITION_TRANSPORT_PRESERVES_ENTRY = 1u << 0,
+};
 
 typedef struct loom_cfg_condition_edge_state_t {
   // Borrowed stable CFG edge metadata.
@@ -87,6 +96,9 @@ typedef struct loom_cfg_condition_edge_state_t {
 
   // True when the edge contribution aliases its single-predecessor target.
   bool shares_target_facts;
+
+  // Immutable transport properties established from retained CFG dominance.
+  loom_cfg_condition_transport_flags_t transport_flags;
 } loom_cfg_condition_edge_state_t;
 
 typedef struct loom_cfg_condition_block_state_t {
@@ -96,31 +108,6 @@ typedef struct loom_cfg_condition_block_state_t {
   // Current monotone exact-Boolean facts.
   loom_cfg_condition_truth_t truth;
 } loom_cfg_condition_block_state_t;
-
-typedef struct loom_cfg_condition_projection_cache_slot_t {
-  // Stable edge ordinal, or UINT32_MAX for an empty slot.
-  uint32_t edge;
-
-  // Source construction-set ID.
-  loom_condition_relation_set_id_t source;
-
-  // Projected construction-set ID.
-  loom_condition_relation_set_id_t target;
-} loom_cfg_condition_projection_cache_slot_t;
-
-typedef struct loom_cfg_condition_projection_cache_t {
-  // Scratch arena owning every slot-table generation.
-  iree_arena_allocator_t* arena;
-
-  // Open-addressed cache slots.
-  loom_cfg_condition_projection_cache_slot_t* slots;
-
-  // Power-of-two number of entries in slots.
-  uint32_t capacity;
-
-  // Number of populated entries.
-  uint32_t count;
-} loom_cfg_condition_projection_cache_t;
 
 typedef uint8_t loom_cfg_condition_event_kind_t;
 enum loom_cfg_condition_event_kind_e {
@@ -172,12 +159,22 @@ typedef struct loom_cfg_condition_event_queue_t {
 } loom_cfg_condition_event_queue_t;
 
 typedef struct loom_cfg_condition_relation_solver_t {
-  // Borrowed immutable compiler inputs.
+  // Borrowed module owning the analyzed values and CFG.
   const loom_module_t* module;
+
+  // Borrowed immutable CFG snapshot defining dense block and edge ordinals.
   const loom_cfg_graph_t* graph;
+
+  // Borrowed context-free numeric facts used when deriving edge assertions.
   const loom_value_fact_table_t* fact_table;
+
+  // Borrowed dominance result for the same immutable CFG topology.
   const loom_dominance_info_t* dominance;
+
+  // Borrowed local SSA domain retained through publication.
   loom_local_value_domain_t* value_domain;
+
+  // Borrowed canonical identities established by CFG value analysis.
   const loom_cfg_value_identity_table_t* identities;
 
   // Optional producer of semantic anchors for authored relation operands.
@@ -260,92 +257,6 @@ static bool loom_cfg_condition_i64_less(const int64_t* left,
 
 LOOM_DEFINE_ADAPTIVE_SORT(loom_cfg_condition_sort_i64, int64_t,
                           loom_cfg_condition_i64_less)
-
-static uint32_t loom_cfg_condition_projection_hash(
-    loom_cfg_edge_index_t edge, loom_condition_relation_set_id_t source) {
-  uint64_t value = ((uint64_t)edge << 32) | source;
-  value ^= value >> 30;
-  value *= UINT64_C(0xbf58476d1ce4e5b9);
-  value ^= value >> 27;
-  value *= UINT64_C(0x94d049bb133111eb);
-  value ^= value >> 31;
-  return (uint32_t)value;
-}
-
-static bool loom_cfg_condition_projection_cache_lookup(
-    const loom_cfg_condition_projection_cache_t* cache,
-    loom_cfg_edge_index_t edge, loom_condition_relation_set_id_t source,
-    loom_condition_relation_set_id_t* out_target) {
-  if (cache->capacity == 0) {
-    return false;
-  }
-  uint32_t slot =
-      loom_cfg_condition_projection_hash(edge, source) & (cache->capacity - 1);
-  while (cache->slots[slot].edge != UINT32_MAX) {
-    if (cache->slots[slot].edge == edge &&
-        cache->slots[slot].source == source) {
-      *out_target = cache->slots[slot].target;
-      return true;
-    }
-    slot = (slot + 1) & (cache->capacity - 1);
-  }
-  return false;
-}
-
-static iree_status_t loom_cfg_condition_projection_cache_reserve(
-    loom_cfg_condition_projection_cache_t* cache) {
-  uint32_t capacity = cache->capacity == 0 ? 64 : cache->capacity;
-  while ((uint64_t)(cache->count + 1) * 4 > (uint64_t)capacity * 3) {
-    if (capacity > UINT32_MAX / 2) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "condition projection cache exceeds uint32_t");
-    }
-    capacity *= 2;
-  }
-  if (capacity == cache->capacity) {
-    return iree_ok_status();
-  }
-
-  loom_cfg_condition_projection_cache_slot_t* slots = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      cache->arena, capacity, sizeof(*slots), (void**)&slots));
-  memset(slots, 0xFF, capacity * sizeof(*slots));
-  for (uint32_t i = 0; i < cache->capacity; ++i) {
-    const loom_cfg_condition_projection_cache_slot_t entry = cache->slots[i];
-    if (entry.edge == UINT32_MAX) {
-      continue;
-    }
-    uint32_t slot =
-        loom_cfg_condition_projection_hash(entry.edge, entry.source) &
-        (capacity - 1);
-    while (slots[slot].edge != UINT32_MAX) {
-      slot = (slot + 1) & (capacity - 1);
-    }
-    slots[slot] = entry;
-  }
-  cache->slots = slots;
-  cache->capacity = capacity;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_cfg_condition_projection_cache_insert(
-    loom_cfg_condition_projection_cache_t* cache, loom_cfg_edge_index_t edge,
-    loom_condition_relation_set_id_t source,
-    loom_condition_relation_set_id_t target) {
-  IREE_RETURN_IF_ERROR(loom_cfg_condition_projection_cache_reserve(cache));
-  uint32_t slot =
-      loom_cfg_condition_projection_hash(edge, source) & (cache->capacity - 1);
-  while (cache->slots[slot].edge != UINT32_MAX) {
-    slot = (slot + 1) & (cache->capacity - 1);
-  }
-  cache->slots[slot] = (loom_cfg_condition_projection_cache_slot_t){
-      .edge = edge,
-      .source = source,
-      .target = target,
-  };
-  ++cache->count;
-  return iree_ok_status();
-}
 
 static iree_status_t loom_cfg_condition_event_queue_initialize(
     uint16_t block_count, const loom_cfg_condition_block_state_t* blocks,
@@ -983,9 +894,13 @@ static iree_status_t loom_cfg_condition_relation_build_matrix(
   return status;
 }
 
-static iree_status_t loom_cfg_condition_relation_drop_contradictions(
+// Normalizes freshly built rows before they can be shared as an entry state.
+// The builder omits empty rows; removing contradictory exclusions can empty
+// another row, which is discarded before propagation assigns stable indices.
+static iree_status_t loom_cfg_condition_relation_normalize_matrix(
     loom_cfg_condition_relation_solver_t* solver,
     loom_condition_relation_matrix_t* matrix) {
+  uint32_t live_row_count = 0;
   for (uint32_t row_index = 0; row_index < matrix->row_count; ++row_index) {
     loom_condition_relation_matrix_row_t* row = &matrix->rows[row_index];
     loom_condition_relation_set_id_t contradiction =
@@ -995,16 +910,23 @@ static iree_status_t loom_cfg_condition_relation_drop_contradictions(
         &contradiction));
     IREE_RETURN_IF_ERROR(loom_condition_relation_set_builder_intersection(
         solver->set_builder, contradiction, row->excluded[2], &contradiction));
-    if (contradiction == LOOM_CONDITION_RELATION_SET_EMPTY) {
-      continue;
+    if (contradiction != LOOM_CONDITION_RELATION_SET_EMPTY) {
+      for (loom_integer_order_outcome_t outcome = 0;
+           outcome < LOOM_INTEGER_ORDER_OUTCOME_COUNT; ++outcome) {
+        IREE_RETURN_IF_ERROR(loom_condition_relation_set_builder_difference(
+            solver->set_builder, row->excluded[outcome], contradiction,
+            &row->excluded[outcome]));
+      }
+      if (loom_condition_relation_matrix_row_is_empty(row)) {
+        continue;
+      }
     }
-    for (loom_integer_order_outcome_t outcome = 0;
-         outcome < LOOM_INTEGER_ORDER_OUTCOME_COUNT; ++outcome) {
-      IREE_RETURN_IF_ERROR(loom_condition_relation_set_builder_difference(
-          solver->set_builder, row->excluded[outcome], contradiction,
-          &row->excluded[outcome]));
+    if (live_row_count != row_index) {
+      matrix->rows[live_row_count] = *row;
     }
+    ++live_row_count;
   }
+  matrix->row_count = live_row_count;
   return iree_ok_status();
 }
 
@@ -1216,7 +1138,8 @@ static bool loom_cfg_condition_relation_project_member(
   return iree_status_is_ok(visit->status);
 }
 
-static iree_status_t loom_cfg_condition_relation_project_set(
+IREE_ATTRIBUTE_NOINLINE static iree_status_t
+loom_cfg_condition_relation_project_set(
     loom_cfg_condition_relation_solver_t* solver,
     const loom_cfg_condition_edge_state_t* edge,
     loom_condition_relation_set_id_t source,
@@ -1338,8 +1261,8 @@ static iree_status_t loom_cfg_condition_relation_project_matrix(
       solver, edge, &source->matrix));
   IREE_RETURN_IF_ERROR(
       loom_cfg_condition_relation_build_matrix(solver, &out_state->matrix));
-  return loom_cfg_condition_relation_drop_contradictions(solver,
-                                                         &out_state->matrix);
+  return loom_cfg_condition_relation_normalize_matrix(solver,
+                                                      &out_state->matrix);
 }
 
 static iree_status_t loom_cfg_condition_relation_project_truth(
@@ -1361,6 +1284,10 @@ __attribute__((minsize))
 IREE_ATTRIBUTE_NOINLINE static iree_status_t
 loom_cfg_condition_relation_build_edges(
     loom_cfg_condition_relation_solver_t* solver) {
+  const loom_cfg_graph_t* dominance_graph = NULL;
+  const loom_cfg_dominance_t* dominance = NULL;
+  loom_dominance_info_lookup_cfg_region(
+      solver->dominance, solver->graph->region, &dominance_graph, &dominance);
   solver->projection_cache.arena = solver->scratch_arena;
   for (loom_cfg_edge_index_t edge_index = 0;
        edge_index < solver->graph->edge_count; ++edge_index) {
@@ -1370,6 +1297,17 @@ loom_cfg_condition_relation_build_edges(
     }
     IREE_RETURN_IF_ERROR(
         loom_cfg_condition_relation_initialize_payload_mapping(solver, edge));
+
+    // Incoming projection already established availability at source entry.
+    // Strict dominance extends that proof to target entry when no payload
+    // changes operand identity. Raw edge assertions can mention source-local
+    // definitions and still require their own projection below.
+    if (dominance && dominance->available && edge->source != edge->target &&
+        edge->payload_mapping.pair_count == 0 &&
+        loom_cfg_dominance_block_dominates(dominance, edge->source,
+                                           edge->target)) {
+      edge->transport_flags |= LOOM_CFG_CONDITION_TRANSPORT_PRESERVES_ENTRY;
+    }
 
     loom_condition_relation_matrix_builder_reset(&solver->matrix_builder);
     const loom_cfg_condition_edge_facts_t* facts =
@@ -1408,8 +1346,8 @@ loom_cfg_condition_relation_build_edges(
     loom_condition_relation_matrix_t raw_relations = {0};
     IREE_RETURN_IF_ERROR(
         loom_cfg_condition_relation_build_matrix(solver, &raw_relations));
-    IREE_RETURN_IF_ERROR(loom_cfg_condition_relation_drop_contradictions(
-        solver, &raw_relations));
+    IREE_RETURN_IF_ERROR(
+        loom_cfg_condition_relation_normalize_matrix(solver, &raw_relations));
 
     loom_cfg_condition_truth_t raw_truth = {0};
     for (uint32_t truth_index = 0; truth_index < facts->boolean_fact_count;
@@ -1447,18 +1385,31 @@ static iree_status_t loom_cfg_condition_relation_project_contribution(
     loom_cfg_condition_matrix_state_t* source,
     loom_cfg_condition_matrix_state_t* out_contribution) {
   *out_contribution = (loom_cfg_condition_matrix_state_t){0};
+  const bool preserves_entry = iree_any_bit_set(
+      edge->transport_flags, LOOM_CFG_CONDITION_TRANSPORT_PRESERVES_ENTRY);
   if (edge->assertions.row_count == 0) {
+    if (preserves_entry) {
+      source->shared = true;
+      *out_contribution = *source;
+      return iree_ok_status();
+    }
     return loom_cfg_condition_relation_project_matrix(solver, edge, source,
                                                       out_contribution);
   }
   loom_condition_relation_matrix_builder_reset(&solver->matrix_builder);
   IREE_RETURN_IF_ERROR(loom_condition_relation_matrix_builder_add_matrix(
       &solver->matrix_builder, &edge->assertions));
-  IREE_RETURN_IF_ERROR(loom_cfg_condition_relation_project_matrix_into_builder(
-      solver, edge, &source->matrix));
+  if (preserves_entry) {
+    IREE_RETURN_IF_ERROR(loom_condition_relation_matrix_builder_add_matrix(
+        &solver->matrix_builder, &source->matrix));
+  } else {
+    IREE_RETURN_IF_ERROR(
+        loom_cfg_condition_relation_project_matrix_into_builder(
+            solver, edge, &source->matrix));
+  }
   IREE_RETURN_IF_ERROR(loom_cfg_condition_relation_build_matrix(
       solver, &out_contribution->matrix));
-  return loom_cfg_condition_relation_drop_contradictions(
+  return loom_cfg_condition_relation_normalize_matrix(
       solver, &out_contribution->matrix);
 }
 
@@ -1467,6 +1418,12 @@ static iree_status_t loom_cfg_condition_relation_project_truth_contribution(
     const loom_cfg_condition_edge_state_t* edge,
     const loom_cfg_condition_truth_t* source,
     loom_cfg_condition_truth_t* out_contribution) {
+  if (iree_any_bit_set(edge->transport_flags,
+                       LOOM_CFG_CONDITION_TRANSPORT_PRESERVES_ENTRY)) {
+    *out_contribution = *source;
+    return loom_cfg_condition_truth_union_into(solver, out_contribution,
+                                               &edge->truth_assertions);
+  }
   if (edge->truth_assertions.values[0] == LOOM_CONDITION_RELATION_SET_EMPTY &&
       edge->truth_assertions.values[1] == LOOM_CONDITION_RELATION_SET_EMPTY) {
     return loom_cfg_condition_relation_project_truth(solver, edge, source,
@@ -1480,6 +1437,8 @@ static iree_status_t loom_cfg_condition_relation_project_truth_contribution(
                                              &projected);
 }
 
+// Initial meets have no event queue and compact inputs. Keep those states
+// compact before assigning event indices; later meets must retain row slots.
 static iree_status_t loom_cfg_condition_relation_intersect_block(
     loom_cfg_condition_relation_solver_t* solver, uint16_t block,
     const loom_condition_relation_matrix_t* contribution,
@@ -1487,6 +1446,7 @@ static iree_status_t loom_cfg_condition_relation_intersect_block(
   loom_cfg_condition_matrix_state_t* facts =
       &solver->blocks[block].integer_relations;
   uint32_t contribution_position = 0;
+  uint32_t live_row_count = 0;
   for (uint32_t row_index = 0; row_index < facts->matrix.row_count;
        ++row_index) {
     const loom_condition_relation_matrix_row_t* row =
@@ -1521,6 +1481,19 @@ static iree_status_t loom_cfg_condition_relation_intersect_block(
             event_queue, block, row_index, outcome));
       }
     }
+    if (event_queue == NULL && !loom_condition_relation_matrix_row_is_empty(
+                                   &facts->matrix.rows[row_index])) {
+      if (live_row_count != row_index) {
+        // An initial row can only become empty after a changed set made this
+        // state writable. Moving its successors cannot mutate a shared input.
+        IREE_ASSERT_TRUE(!facts->shared);
+        facts->matrix.rows[live_row_count] = facts->matrix.rows[row_index];
+      }
+      ++live_row_count;
+    }
+  }
+  if (event_queue == NULL) {
+    facts->matrix.row_count = live_row_count;
   }
   return iree_ok_status();
 }

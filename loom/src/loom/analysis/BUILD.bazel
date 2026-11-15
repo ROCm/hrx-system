@@ -502,6 +502,7 @@ loom_cc_library(
         "cfg_condition_derivation.c",
         "cfg_condition_facts.c",
         "cfg_condition_operand_domain.c",
+        "cfg_condition_projection_cache.c",
         "cfg_condition_relation_anchors.c",
         "cfg_condition_relation_table.c",
     ],
@@ -509,6 +510,7 @@ loom_cc_library(
         "cfg_condition_derivation.h",
         "cfg_condition_facts.h",
         "cfg_condition_operand_domain.h",
+        "cfg_condition_projection_cache.h",
         "cfg_condition_relation_anchors.h",
         "cfg_condition_relation_table.h",
     ],
@@ -521,6 +523,7 @@ loom_cc_library(
         "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:cfg_dominance",
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:dominance",
         "//loom/src/loom/util:fact_table",
@@ -540,6 +543,18 @@ loom_cc_library(
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "cfg_condition_projection_cache_test",
+    srcs = ["cfg_condition_projection_cache_test.cc"],
+    deps = [
+        ":cfg_condition_facts",
+        ":condition_relation_set",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
