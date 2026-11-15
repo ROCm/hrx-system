@@ -455,6 +455,28 @@ TEST(FactsApplyPredicate, BoundsRetainDivisibility) {
     EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(facts));
     EXPECT_EQ(loom_value_facts_is_exact(facts),
               test_case.lower == test_case.upper);
+    if (test_case.lower == test_case.upper) {
+      EXPECT_TRUE(loom_value_facts_divisible_by(facts, 64));
+      EXPECT_FALSE(loom_value_facts_divisible_by(facts, 3));
+    }
+  }
+}
+
+TEST(FactsApplyPredicate, SingletonRangeDivisibility) {
+  for (int64_t value :
+       {INT64_MIN, INT64_C(-42), INT64_C(0), INT64_C(42), INT64_MAX}) {
+    SCOPED_TRACE(value);
+    loom_value_facts_t facts = loom_value_facts_unknown();
+    const loom_predicate_t range = make_predicate_range(value, value);
+    loom_value_facts_apply_predicate(&facts, &range);
+    ASSERT_TRUE(loom_value_facts_is_exact(facts));
+    EXPECT_EQ(facts.known_divisor, 1);
+    for (int64_t divisor : {INT64_C(1), INT64_C(2), INT64_C(3), INT64_C(7),
+                            INT64_C(42), INT64_MAX}) {
+      SCOPED_TRACE(divisor);
+      EXPECT_EQ(loom_value_facts_divisible_by(facts, divisor),
+                value % divisor == 0);
+    }
   }
 }
 
