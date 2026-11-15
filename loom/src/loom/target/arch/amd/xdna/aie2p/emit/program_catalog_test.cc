@@ -33,6 +33,7 @@ TEST(Aie2pProgramCatalogTest, SharesRelocatedStreamsAndPreservesInvocation) {
       .first_descriptor = 24,
       .descriptor_count = 3,
       .queue_packet = 7,
+      .code_packet = 3,
       .reply_packet = 23,
   };
   uint8_t bytes[18];
@@ -91,7 +92,9 @@ TEST(Aie2pProgramCatalogTest, SharesRelocatedStreamsAndPreservesInvocation) {
   for (size_t i = 0; i < 2; ++i) {
     const auto* words = payload.words + i * 11;
     const uint32_t address = 0x20000u + (i == 0 ? 64 : 128);
-    EXPECT_EQ(words[0] & 31u, 0u);
+    EXPECT_EQ(words[0] & 31u, binding.code_packet);
+    EXPECT_EQ(words[6] & 31u, binding.code_packet);
+    EXPECT_EQ(words[9] & 31u, binding.code_packet);
     EXPECT_EQ(words[1] & 0xfffffu, address);
     EXPECT_EQ((words[1] >> 20) & 3u, 3u);
     EXPECT_EQ((words[1] >> 22) & 3u, 0u);

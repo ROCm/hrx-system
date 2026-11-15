@@ -150,7 +150,8 @@ iree_status_t loom_aie2p_program_catalog_build(
           iree_host_align(section->contents.data_length, 4);
       for (iree_host_size_t byte = 0; byte < length; byte += 16) {
         const iree_host_size_t count = iree_min(length - byte, 16) / 4;
-        words[position++] = loom_aie2p_control_packet_parity(0);
+        words[position++] =
+            loom_aie2p_control_packet_parity(binding->code_packet);
         words[position++] = loom_aie2p_control_packet_write(
             compute->memory.program_load_base + (uint32_t)section->address -
                 compute->memory.program_base + (uint32_t)byte,
@@ -164,7 +165,8 @@ iree_status_t loom_aie2p_program_catalog_build(
           words[position++] = iree_unaligned_load_le_u32(padded);
         }
       }
-      words[position++] = loom_aie2p_control_packet_parity(0);
+      words[position++] =
+          loom_aie2p_control_packet_parity(binding->code_packet);
       words[position++] = loom_aie2p_control_packet_read(status_address, 1,
                                                          binding->reply_packet);
     }

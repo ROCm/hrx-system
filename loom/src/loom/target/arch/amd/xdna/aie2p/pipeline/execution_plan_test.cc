@@ -205,26 +205,48 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   // retirement. Payload multicast and the original control delivery survive.
   loom_aie2p_code_transport_t code_transport;
   IREE_ASSERT_OK(loom_aie2p_code_transport_initialize(
-      retained, 1, &retained_arena_, &code_transport));
+      retained, 4, &retained_arena_, &code_transport));
   loom_aie2p_code_transport_binding_t binding;
-  loom_aie2p_code_transport_bind(&code_transport, {0, 2}, 2, &binding,
-                                 &requirement);
-  ASSERT_TRUE(iree_string_view_is_empty(requirement));
-  EXPECT_EQ(binding.engine, 1u);
-  EXPECT_EQ(binding.first_descriptor, 24u);
-  EXPECT_EQ(binding.descriptor_count, 2u);
-  EXPECT_EQ(binding.queue_packet, 0u);
-  EXPECT_EQ(binding.reply_packet, 0u);
+  for (uint16_t row = 2; row < 6; ++row) {
+    loom_aie2p_code_transport_bind(&code_transport, {0, row}, 2, &binding,
+                                   &requirement);
+    ASSERT_TRUE(iree_string_view_is_empty(requirement));
+    EXPECT_EQ(binding.engine, 1u);
+    EXPECT_EQ(binding.first_descriptor, 24u + 2u * (row - 2u));
+    EXPECT_EQ(binding.descriptor_count, 2u);
+    EXPECT_EQ(binding.queue_packet, 0u);
+    EXPECT_EQ(binding.code_packet, row - 2u);
+    EXPECT_EQ(binding.reply_packet, 0u);
+  }
   EXPECT_EQ(code_transport.plan.tiles[1].memory_length, 128u);
   EXPECT_EQ(code_transport.plan.tiles[1].mm2s_count, 2u);
-  EXPECT_EQ(code_transport.plan.tiles[1].descriptor_counts[1], 2u);
-  EXPECT_EQ(code_transport.plan.connections.group_count, 5u);
-  EXPECT_EQ(code_transport.plan.connections.destination_count, 6u);
+  EXPECT_EQ(code_transport.plan.tiles[1].descriptor_counts[1], 8u);
+  EXPECT_EQ(code_transport.plan.connections.group_count, 14u);
+  EXPECT_EQ(code_transport.plan.connections.destination_count, 15u);
   IREE_ASSERT_OK(loom_aie2p_code_transport_finish(
       &code_transport, &retained_arena_, &requirement));
   ASSERT_TRUE(iree_string_view_is_empty(requirement));
   EXPECT_EQ(retained->tiles[1].mm2s_count, 1u);
   EXPECT_EQ(retained->control_sources[4].packet_mask, 1u << connection.packet);
+
+  // Descriptor capacity can end a shared sender before its task queue fills.
+  // The next engine uses the other bank and a separate packet namespace.
+  IREE_ASSERT_OK(loom_aie2p_code_transport_initialize(
+      retained, 4, &retained_arena_, &code_transport));
+  for (uint16_t row = 2; row < 6; ++row) {
+    loom_aie2p_code_transport_bind(&code_transport, {0, row}, 7, &binding,
+                                   &requirement);
+    ASSERT_TRUE(iree_string_view_is_empty(requirement));
+    EXPECT_EQ(binding.engine, row == 5 ? 2u : 1u);
+    EXPECT_EQ(binding.first_descriptor, row == 5 ? 1u : 24u + 7u * (row - 2u));
+    EXPECT_EQ(binding.code_packet, row == 5 ? 0u : row - 2u);
+  }
+  EXPECT_EQ(code_transport.plan.tiles[1].mm2s_count, 3u);
+  EXPECT_EQ(code_transport.plan.tiles[1].descriptor_counts[0], 8u);
+  EXPECT_EQ(code_transport.plan.tiles[1].descriptor_counts[1], 21u);
+  IREE_ASSERT_OK(loom_aie2p_code_transport_finish(
+      &code_transport, &retained_arena_, &requirement));
+  ASSERT_TRUE(iree_string_view_is_empty(requirement));
 
   loom_aie2p_array_route_builder_t extended;
   IREE_ASSERT_OK(loom_aie2p_array_route_builder_clone(

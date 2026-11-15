@@ -6,8 +6,19 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/code_transport.h"
 
+#include <string.h>
+
 #include "iree/base/internal/math.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/connectivity.h"
+
+typedef struct loom_aie2p_code_transport_sender_t {
+  // Source-owned prefix shared by the sender's packet-discriminated routes.
+  loom_aie2p_array_route_tree_t tree;
+  // SRAM memory-to-stream channel; meaningful when worker_count is nonzero.
+  uint16_t engine;
+  // Loaders sharing the queue, each with at most one incomplete request.
+  uint8_t worker_count;
+} loom_aie2p_code_transport_sender_t;
 
 iree_status_t loom_aie2p_code_transport_initialize(
     const loom_aie2p_execution_plan_t* source, iree_host_size_t worker_capacity,
@@ -21,6 +32,12 @@ iree_status_t loom_aie2p_code_transport_initialize(
       (loom_aie2p_native_connection_t*)plan->connections.groups;
   out_transport->destinations =
       (loom_aie2p_native_connection_endpoint_t*)plan->connections.destinations;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, source->routing.family->column_count,
+      sizeof(*out_transport->senders), (void**)&out_transport->senders));
+  memset(
+      out_transport->senders, 0,
+      source->routing.family->column_count * sizeof(*out_transport->senders));
   return iree_ok_status();
 }
 
@@ -34,14 +51,14 @@ static uint32_t loom_aie2p_code_transport_endpoint(
 static bool loom_aie2p_code_transport_route(
     loom_aie2p_code_transport_t* transport,
     loom_aie2p_native_connection_endpoint_t source,
-    loom_aie2p_native_connection_endpoint_t destination, uint8_t packet) {
+    loom_aie2p_native_connection_endpoint_t destination, uint8_t packet,
+    loom_aie2p_array_route_tree_t* dma_tree) {
   loom_aie2p_execution_plan_t* plan = &transport->plan;
   const loom_xdna_array_family_t* family = plan->routing.family;
   const uint32_t destination_index =
       loom_aie2p_code_transport_endpoint(family, destination);
   uint32_t source_index = UINT32_MAX;
-  loom_aie2p_array_route_tree_t dma_tree = {0};
-  loom_aie2p_array_route_tree_t* tree = &dma_tree;
+  loom_aie2p_array_route_tree_t* tree = dma_tree;
   uint32_t* owner = &plan->control_destination_sources[destination_index];
   if (source.port == LOOM_XDNA_STREAM_PORT_DMA) {
     *owner = UINT32_MAX - 1;
@@ -101,13 +118,23 @@ void loom_aie2p_code_transport_bind(
   const loom_xdna_tile_coordinate_t memory = {compute.column, facts->first_row};
   loom_aie2p_execution_tile_t* occupancy =
       &plan->tiles[loom_xdna_array_physical_tile_index(family, memory)];
-  if (occupancy->mm2s_count == facts->dma.channel_count_per_direction) {
-    *out_requirement =
-        IREE_SV("a free SRAM memory-to-stream engine for code delivery");
-    return;
-  }
-  const uint16_t engine = occupancy->mm2s_count++;
   const uint16_t bank_capacity = facts->dma.buffer_descriptor_count / 2;
+  loom_aie2p_code_transport_sender_t* sender =
+      &transport->senders[compute.column];
+  if (!sender->worker_count ||
+      sender->worker_count == facts->dma.task_queue_depth ||
+      sender->worker_count == 32 ||
+      descriptor_count >
+          bank_capacity - occupancy->descriptor_counts[sender->engine & 1]) {
+    if (occupancy->mm2s_count == facts->dma.channel_count_per_direction) {
+      *out_requirement =
+          IREE_SV("a free SRAM memory-to-stream engine for code delivery");
+      return;
+    }
+    *sender =
+        (loom_aie2p_code_transport_sender_t){.engine = occupancy->mm2s_count++};
+  }
+  const uint16_t engine = sender->engine;
   const uint16_t bank = engine & 1;
   if (descriptor_count > bank_capacity - occupancy->descriptor_counts[bank]) {
     *out_requirement =
@@ -132,6 +159,7 @@ void loom_aie2p_code_transport_bind(
       (uint8_t)iree_math_count_trailing_zeros_u32(queue_available);
   const uint8_t reply_packet =
       (uint8_t)iree_math_count_trailing_zeros_u32(reply_available);
+  const uint8_t code_packet = sender->worker_count++;
   const loom_aie2p_native_connection_endpoint_t core = {
       compute, LOOM_XDNA_STREAM_PORT_CORE, 0};
   const loom_aie2p_native_connection_endpoint_t control = {
@@ -140,10 +168,12 @@ void loom_aie2p_code_transport_bind(
       memory, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0};
   const loom_aie2p_native_connection_endpoint_t dma = {
       memory, LOOM_XDNA_STREAM_PORT_DMA, (uint8_t)engine};
-  if (!loom_aie2p_code_transport_route(transport, core, queue, queue_packet) ||
-      !loom_aie2p_code_transport_route(transport, dma, control, 0) ||
-      !loom_aie2p_code_transport_route(transport, control, core,
-                                       reply_packet)) {
+  if (!loom_aie2p_code_transport_route(transport, core, queue, queue_packet,
+                                       NULL) ||
+      !loom_aie2p_code_transport_route(transport, dma, control, code_packet,
+                                       &sender->tree) ||
+      !loom_aie2p_code_transport_route(transport, control, core, reply_packet,
+                                       NULL)) {
     *out_requirement =
         IREE_SV("independent queue, code-delivery, and completion routes");
     return;
@@ -155,6 +185,7 @@ void loom_aie2p_code_transport_bind(
       .first_descriptor = first_descriptor,
       .descriptor_count = (uint16_t)descriptor_count,
       .queue_packet = queue_packet,
+      .code_packet = code_packet,
       .reply_packet = reply_packet};
 }
 

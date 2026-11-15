@@ -19,7 +19,7 @@ typedef struct loom_aie2p_code_transport_binding_t {
   loom_xdna_tile_coordinate_t compute;
   // SRAM tile holding this program's code catalog.
   loom_xdna_tile_coordinate_t memory;
-  // Memory-to-stream engine owned by this compute tile's sequential loader.
+  // Memory-to-stream engine shared by a bounded set of sequential loaders.
   uint16_t engine;
   // First descriptor in the engine's parity bank; one per non-root code group.
   uint16_t first_descriptor;
@@ -27,6 +27,8 @@ typedef struct loom_aie2p_code_transport_binding_t {
   uint16_t descriptor_count;
   // Core-sender packet identity addressing the SRAM queue.
   uint8_t queue_packet;
+  // DMA-sender packet identity selecting this compute tile's program memory.
+  uint8_t code_packet;
   // Tile-control reply identity addressing the same core's completion stream.
   uint8_t reply_packet;
 } loom_aie2p_code_transport_binding_t;
@@ -39,6 +41,8 @@ typedef struct loom_aie2p_code_transport_t {
   loom_aie2p_native_connection_t* connections;
   // Mutable flat receivers backing plan.connections.
   loom_aie2p_native_connection_endpoint_t* destinations;
+  // Current code sender per physical column, retaining its route prefix.
+  struct loom_aie2p_code_transport_sender_t* senders;
 } loom_aie2p_code_transport_t;
 
 // Reserves extension storage once for all potentially oversized workers in one
@@ -48,7 +52,10 @@ iree_status_t loom_aie2p_code_transport_initialize(
     const loom_aie2p_execution_plan_t* source, iree_host_size_t worker_capacity,
     iree_arena_allocator_t* arena, loom_aie2p_code_transport_t* out_transport);
 
-// Reserves one free SRAM sender, descriptor range, and queue/data/reply routes.
+// Reserves a descriptor range and queue/data/reply routes. Sequential loaders
+// share a SRAM sender up to its task-queue depth and packet namespace capacity;
+// each loader has at most one incomplete request. A full sender needs another
+// free engine. Payload engines and descriptor ranges remain independent.
 // Packet selection consumes the source producer's retained namespace. SRAM
 // catalog bytes are placed once exact linked code is available. A resource
 // rejection returns a static requirement and invalidates this whole selection.
