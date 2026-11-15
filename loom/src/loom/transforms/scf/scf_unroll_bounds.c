@@ -67,11 +67,13 @@ iree_status_t loom_scf_unroll_refine_indices(
   loom_type_t* types = &singleton_type;
   loom_predicate_t* predicates = prototype;
   if (group_capacity > 1) {
+    const iree_host_size_t predicate_capacity =
+        (iree_host_size_t)group_capacity * predicates_per_index;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         scratch_arena, group_capacity, sizeof(*types), (void**)&types));
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        scratch_arena, (iree_host_size_t)group_capacity * predicates_per_index,
-        sizeof(*predicates), (void**)&predicates));
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(scratch_arena, predicate_capacity,
+                                  sizeof(*predicates), (void**)&predicates));
     for (uint16_t i = 0; i < group_capacity; ++i) {
       types[i] = type;
     }
@@ -90,9 +92,11 @@ iree_status_t loom_scf_unroll_refine_indices(
       }
     }
     loom_op_t* assume = NULL;
-    status = loom_index_assume_build(
-        &rewriter->builder, indices + position, count, predicates,
-        count * predicates_per_index, types, count, location, &assume);
+    const iree_host_size_t predicate_count =
+        (iree_host_size_t)count * predicates_per_index;
+    status = loom_index_assume_build(&rewriter->builder, indices + position,
+                                     count, predicates, predicate_count, types,
+                                     count, location, &assume);
     if (iree_status_is_ok(status)) {
       const loom_value_slice_t results = loom_index_assume_results(assume);
       for (uint16_t i = 0; i < count && iree_status_is_ok(status); ++i) {

@@ -296,6 +296,23 @@ typedef struct loom_xdna_array_family_t {
   const char* register_database_version;
 } loom_xdna_array_family_t;
 
+// Returns the number of coordinates in the family's dense physical tile
+// table. Array dimensions are uint16_t, so their product fits host size on
+// every supported host when widened before multiplication.
+static inline iree_host_size_t loom_xdna_array_physical_tile_count(
+    const loom_xdna_array_family_t* family) {
+  return (iree_host_size_t)family->column_count * family->row_count;
+}
+
+// Returns the column-major dense-table index of an admitted physical
+// coordinate. Callers establish coordinate admission before indexing.
+static inline iree_host_size_t loom_xdna_array_physical_tile_index(
+    const loom_xdna_array_family_t* family,
+    loom_xdna_tile_coordinate_t coordinate) {
+  return (iree_host_size_t)coordinate.column * family->row_count +
+         coordinate.row;
+}
+
 // Returns the complete immutable NPU2 physical-array family.
 const loom_xdna_array_family_t* loom_xdna_npu2_array_family(void);
 

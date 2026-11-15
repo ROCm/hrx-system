@@ -76,8 +76,8 @@ static iree_status_t loom_aie2p_configuration_report_memory(
     loom_xdna_tile_coordinate_t coordinate,
     loom_aie2p_configuration_report_memory_t** out_memory) {
   loom_aie2p_configuration_report_memory_t* memory =
-      &report->memories[coordinate.column * report->family->row_count +
-                        coordinate.row];
+      &report->memories[loom_xdna_array_physical_tile_index(report->family,
+                                                            coordinate)];
   if (!memory->bank_bytes) {
     const loom_xdna_tile_facts_t* tile =
         loom_xdna_array_tile_facts(report->family, coordinate);
@@ -262,8 +262,10 @@ iree_status_t loom_aie2p_configuration_report_finish(
         &report->workers[i];
     const loom_target_compile_report_pipeline_memory_row_t* memory =
         &report
-             ->memories[worker->placement.x * report->family->row_count +
-                        worker->placement.y]
+             ->memories[loom_xdna_array_physical_tile_index(
+                 report->family,
+                 (loom_xdna_tile_coordinate_t){worker->placement.x,
+                                               worker->placement.y})]
              .row;
     worker->local_memory_byte_count = memory->high_water_byte_count;
     worker->local_memory_capacity_byte_count = memory->capacity_byte_count;

@@ -212,7 +212,7 @@ iree_status_t loom_aie2p_native_finalize_endpoints(
   // Receiver-granted framing may shorten a selected sequence. Finalize the
   // word union only after that producer has committed the physical geometry.
   const iree_host_size_t tile_count =
-      context->family->column_count * context->family->row_count;
+      loom_xdna_array_physical_tile_count(context->family);
   for (iree_host_size_t t = 0; t < tile_count; ++t) {
     for (iree_host_size_t bank = 0; bank < 2; ++bank) {
       for (const loom_aie2p_native_endpoint_storage_t* storage =

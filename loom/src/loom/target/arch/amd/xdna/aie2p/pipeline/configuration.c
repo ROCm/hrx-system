@@ -189,7 +189,8 @@ static iree_status_t loom_aie2p_native_config_set_lock(
   // write establishes its state without a redundant register read.
   const loom_xdna_register_field_id_t field =
       config->context
-          ->tiles[tile.column * config->context->family->row_count + tile.row]
+          ->tiles[loom_xdna_array_physical_tile_index(config->context->family,
+                                                      tile)]
           .memory_layout->lock_value;
   return loom_aie2p_native_config_write(
       config,
@@ -274,8 +275,7 @@ static iree_status_t loom_aie2p_native_config_queues(
     loom_aie2p_native_configuration_t* config, uint64_t* column_count) {
   const loom_aie2p_native_context_t* context = config->context;
   const iree_host_size_t tile_count =
-      (iree_host_size_t)context->family->column_count *
-      context->family->row_count;
+      loom_xdna_array_physical_tile_count(context->family);
   for (iree_host_size_t i = 0; i < tile_count; ++i) {
     const loom_aie2p_native_tile_t* tile = &context->tiles[i];
     const uint8_t counts[] = {tile->mm2s_count, tile->s2mm_count};

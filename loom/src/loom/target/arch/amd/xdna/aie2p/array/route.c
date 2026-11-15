@@ -72,7 +72,7 @@ iree_status_t loom_aie2p_array_route_builder_initialize(
       (void**)&out_builder->prefixes.nodes));
 
   const iree_host_size_t tile_count =
-      (iree_host_size_t)family->column_count * family->row_count;
+      loom_xdna_array_physical_tile_count(family);
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, tile_count, sizeof(*out_builder->tile_route_counts),
       (void**)&out_builder->tile_route_counts));
@@ -156,8 +156,8 @@ static void loom_aie2p_array_append_route(
           switch_kind == LOOM_AIE2P_ARRAY_SWITCH_KIND_STREAM_SWITCH &&
           destination_port == LOOM_XDNA_STREAM_PORT_DMA,
   };
-  ++builder->tile_route_counts[coordinate.column * builder->family->row_count +
-                               coordinate.row];
+  ++builder->tile_route_counts[loom_xdna_array_physical_tile_index(
+      builder->family, coordinate)];
 }
 
 static uint8_t loom_aie2p_array_dma_stream_channel(
@@ -236,8 +236,7 @@ static loom_aie2p_array_route_step_t loom_aie2p_array_route_step(
       builder, destination, LOOM_XDNA_STREAM_DIRECTION_SLAVE,
       inputs[direction]);
   const iree_host_size_t tile_count =
-      (iree_host_size_t)builder->family->column_count *
-      builder->family->row_count;
+      loom_xdna_array_physical_tile_count(builder->family);
   const uint32_t shared =
       sharing_links ? sharing_links[direction * tile_count + index] : 0;
   return (loom_aie2p_array_route_step_t){
@@ -279,8 +278,8 @@ static void loom_aie2p_array_discard_route_prefix(
   while (builder->route_count != first_route) {
     const loom_xdna_tile_coordinate_t tile =
         builder->routes[--builder->route_count].coordinate;
-    --builder->tile_route_counts[tile.column * builder->family->row_count +
-                                 tile.row];
+    --builder->tile_route_counts[loom_xdna_array_physical_tile_index(
+        builder->family, tile)];
   }
 }
 
@@ -592,8 +591,8 @@ iree_status_t loom_aie2p_array_route_multicast_initialize(
     iree_arena_allocator_t* arena,
     loom_aie2p_array_route_multicast_t* out_multicast) {
   const iree_host_size_t count =
-      (iree_host_size_t)builder->family->column_count *
-      builder->family->row_count * LOOM_AIE2P_ARRAY_ROUTE_DIRECTION_COUNT;
+      loom_xdna_array_physical_tile_count(builder->family) *
+      LOOM_AIE2P_ARRAY_ROUTE_DIRECTION_COUNT;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(arena, count, sizeof(*out_multicast->links),
                                 (void**)&out_multicast->links));
@@ -626,8 +625,7 @@ iree_status_t loom_aie2p_array_route_sharing_initialize(
     loom_aie2p_array_route_sharing_t* out_sharing) {
   *out_sharing = (loom_aie2p_array_route_sharing_t){.destination = destination};
   const iree_host_size_t tile_count =
-      (iree_host_size_t)builder->family->column_count *
-      builder->family->row_count;
+      loom_xdna_array_physical_tile_count(builder->family);
   const iree_host_size_t link_count =
       tile_count * LOOM_AIE2P_ARRAY_ROUTE_DIRECTION_COUNT;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, link_count,

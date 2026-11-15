@@ -2138,8 +2138,7 @@ static iree_status_t loom_aie2p_array_plan_channels(
 static iree_status_t loom_aie2p_array_initialize_tile_states(
     loom_aie2p_array_plan_builder_t* builder) {
   const iree_host_size_t tile_count =
-      (iree_host_size_t)builder->family->column_count *
-      builder->family->row_count;
+      loom_xdna_array_physical_tile_count(builder->family);
   IREE_RETURN_IF_ERROR(loom_aie2p_array_allocate_array(
       builder->arena, tile_count, sizeof(*builder->tile_states),
       (void**)&builder->tile_states));

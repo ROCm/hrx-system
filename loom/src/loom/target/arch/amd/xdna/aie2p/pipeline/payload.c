@@ -237,8 +237,7 @@ iree_status_t loom_aie2p_native_form_payloads(
     const loom_pipeline_realization_t* realization, bool* out_valid) {
   *out_valid = false;
   const iree_host_size_t tile_count =
-      (iree_host_size_t)context->family->column_count *
-      context->family->row_count;
+      loom_xdna_array_physical_tile_count(context->family);
   loom_aie2p_native_payload_inventory_t inventory = {
       .tail = &context->payload_sources,
       .has_serial = realization->invocations.lifetimes.has_serial};
