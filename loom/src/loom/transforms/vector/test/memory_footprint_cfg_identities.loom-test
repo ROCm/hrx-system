@@ -1103,3 +1103,83 @@ func.def @loop_weakening_crosses_independent_guards(%storage: buffer, %origin_ra
 ^exit:
   func.return
 }
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// Dropping unrelated rows at a join preserves the common access proof and
+// the predecessor state that supplied its initial rows.
+func.def @join_compacts_unrelated_rows(%storage: buffer, %left: index, %right: index, %origin_raw: index, %bound_raw: index) {
+  %base = index.constant 0 : offset
+  %origin = index.assume %origin_raw [range(%origin_raw, 0, 63)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 64)] : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%bound]xi32>
+  %fits = index.cmp ult, %origin, %bound : index
+  %ordered = index.cmp slt, %left, %right : index
+  cfg.cond_br %fits, ^guarded, ^exit
+^guarded:
+  cfg.cond_br %ordered, ^both, ^only_bounds
+^both:
+  %before_join = vector.load %view[%origin] : view<[%bound]xi32> -> vector<1xi32>
+  test.use %before_join : vector<1xi32>
+  cfg.br ^join
+^only_bounds:
+  cfg.br ^join
+^join:
+  cfg.br ^access
+^access:
+  %after_join = vector.load %view[%origin] : view<[%bound]xi32> -> vector<1xi32>
+  test.use %after_join : vector<1xi32>
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ====
+
+// RUN: pass vector-memory-footprint
+
+// A loop receives the compacted join state, then invalidates its coordinate
+// proof while an independent later row remains live. The changing row must
+// still reach the body through its event index without shifting the live row.
+func.def @compacted_join_reaches_changing_loop(%storage: buffer, %left: index, %right: index, %origin_raw: index, %bound_raw: index, %other_raw: index, %other_bound_raw: index, %alternate_raw: index, %repeat: i1) {
+  %base = index.constant 0 : offset
+  %origin = index.assume %origin_raw [range(%origin_raw, 0, 63)] : index
+  %bound = index.assume %bound_raw [range(%bound_raw, 1, 64)] : index
+  %other = index.assume %other_raw [range(%other_raw, 0, 63)] : index
+  %alternate = index.assume %alternate_raw [range(%alternate_raw, 0, 63)] : index
+  %other_bound = index.assume %other_bound_raw [range(%other_bound_raw, 1, 64)] : index
+  %view = buffer.view %storage[%base] : buffer -> view<[%bound]xi32>
+  %other_view = buffer.view %storage[%base] : buffer -> view<[%other_bound]xi32>
+  %fits = index.cmp ult, %origin, %bound : index
+  %other_fits = index.cmp ult, %other, %other_bound : index
+  %alternate_fits = index.cmp ult, %alternate, %other_bound : index
+  %ordered = index.cmp slt, %left, %right : index
+  cfg.cond_br %fits, ^other_guard, ^exit
+^other_guard:
+  cfg.cond_br %other_fits, ^alternate_guard, ^exit
+^alternate_guard:
+  cfg.cond_br %alternate_fits, ^guarded, ^exit
+^guarded:
+  cfg.cond_br %ordered, ^both, ^only_bounds
+^both:
+  cfg.br ^join
+^only_bounds:
+  cfg.br ^join
+^join:
+  cfg.br ^header(%origin: index, %other: index)
+^header(%position: index, %valid_position: index):
+  cfg.br ^access
+^access:
+  %proven = vector.load %other_view[%valid_position] : view<[%other_bound]xi32> -> vector<1xi32>
+  test.use %proven : vector<1xi32>
+  // ERROR@+1: SUBRANGE/011 {op_name="vector.load", vector_extent="1"}
+  %unproven = vector.load %view[%position] : view<[%bound]xi32> -> vector<1xi32>
+  test.use %unproven : vector<1xi32>
+  cfg.cond_br %repeat, ^latch, ^exit
+^latch:
+  cfg.br ^header(%bound: index, %alternate: index)
+^exit:
+  func.return
+}
