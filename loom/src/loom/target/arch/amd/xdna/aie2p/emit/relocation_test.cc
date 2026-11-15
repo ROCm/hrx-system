@@ -110,10 +110,10 @@ TEST_P(Aie2pCodeRelocationTest, KeepsTargetFixedWhenCallerSectionMoves) {
   const loom_native_object_fixup_t fixup = {
       .section_contribution_index = 0,
       .section_offset = 16,
-      .relocation_kind =
+      .relocation_kind = static_cast<uint32_t>(
           address ? LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_CODE_ADDRESS_ABSOLUTE
           : call  ? LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_CALL_ABSOLUTE
-                  : LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_BRANCH_ABSOLUTE,
+                  : LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_BRANCH_ABSOLUTE),
       .target_symbol_index = 0,
       .addend = 16,
   };
