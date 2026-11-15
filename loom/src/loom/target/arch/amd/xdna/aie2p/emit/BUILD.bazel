@@ -54,6 +54,7 @@ loom_check_test_suite(
 loom_check_test_suite(
     name = "program_test",
     srcs = [
+        "loop_minimum_extent.loom-test",
         "program_data.loom-test",
         "program_link_lifetime.loom-test",
         "program_report.loom-test",
