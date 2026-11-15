@@ -8,15 +8,15 @@
 
 #include <string.h>
 
-#include "loom/analysis/liveness_uses.h"
 #include "loom/analysis/motion.h"
 #include "loom/analysis/read_motion.h"
 #include "loom/analysis/symbol_facts.h"
 #include "loom/error/error_catalog.h"
 #include "loom/error/parameter.h"
+#include "loom/ir/ancestry.h"
 #include "loom/ir/context.h"
 #include "loom/ir/local_value_domain.h"
-#include "loom/ir/type_dependencies.h"
+#include "loom/ir/value_refs.h"
 #include "loom/link/linker.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/command/composition.h"
@@ -411,31 +411,23 @@ static bool loom_cmd_launch_count_is_reference_projection(
 static iree_status_t loom_cmd_launch_count_visit_value(
     loom_cmd_launch_count_closure_t* closure, loom_value_id_t value_id);
 
-static iree_status_t loom_cmd_launch_count_visit_value_callback(
-    void* user_data, loom_value_id_t value_id) {
-  return loom_cmd_launch_count_visit_value(
-      (loom_cmd_launch_count_closure_t*)user_data, value_id);
-}
+typedef struct loom_cmd_launch_count_capture_t {
+  // Closure receiving dependencies of the operation being cloned.
+  loom_cmd_launch_count_closure_t* closure;
+  // Defines the subtree whose local values are cloned with the operation.
+  const loom_op_t* operation;
+} loom_cmd_launch_count_capture_t;
 
-static iree_status_t loom_cmd_launch_count_visit_attribute_uses(
-    loom_cmd_launch_count_closure_t* closure, const loom_op_t* operation) {
-  const uint32_t* attribute_owners = loom_op_attribute_owners(operation);
-  for (uint8_t i = 0; i < operation->attribute_count; ++i) {
-    if (attribute_owners[i] == 0) {
-      continue;
-    }
-    loom_type_use_iterator_t dependencies;
-    loom_attribute_dependencies_begin(&closure->module->type_uses, operation, i,
-                                      &dependencies);
-    for (loom_value_id_t dependency =
-             loom_type_dependencies_next(&dependencies);
-         dependency != LOOM_VALUE_ID_INVALID;
-         dependency = loom_type_dependencies_next(&dependencies)) {
-      IREE_RETURN_IF_ERROR(
-          loom_cmd_launch_count_visit_value(closure, dependency));
-    }
+static iree_status_t loom_cmd_launch_count_visit_capture(
+    loom_value_id_t value_id, loom_value_id_t type_carrier, void* user_data) {
+  (void)type_carrier;
+  const loom_cmd_launch_count_capture_t* capture =
+      (const loom_cmd_launch_count_capture_t*)user_data;
+  if (loom_op_subtree_defines_value(capture->closure->module,
+                                    capture->operation, value_id)) {
+    return iree_ok_status();
   }
-  return iree_ok_status();
+  return loom_cmd_launch_count_visit_value(capture->closure, value_id);
 }
 
 static iree_status_t loom_cmd_launch_count_visit_operation(
@@ -512,12 +504,15 @@ static iree_status_t loom_cmd_launch_count_visit_operation(
 
   IREE_RETURN_IF_ERROR(loom_cmd_launch_count_set_value_state(
       closure, state_ordinal, LOOM_CMD_LAUNCH_COUNT_VALUE_VISITING));
-  IREE_RETURN_IF_ERROR(loom_liveness_for_each_op_use(
-      closure->module, operation,
-      loom_liveness_value_callback_make(
-          loom_cmd_launch_count_visit_value_callback, closure)));
-  IREE_RETURN_IF_ERROR(
-      loom_cmd_launch_count_visit_attribute_uses(closure, operation));
+  // Cloning requires all external references, including facts carried only by
+  // nested attributes. Runtime liveness alone is not a complete clone closure.
+  loom_cmd_launch_count_capture_t capture = {
+      .closure = closure,
+      .operation = operation,
+  };
+  IREE_RETURN_IF_ERROR(loom_op_walk_subtree_value_refs(
+      closure->module, operation, loom_cmd_launch_count_visit_capture,
+      &capture));
   IREE_RETURN_IF_ERROR(
       loom_cmd_launch_count_append_operation(closure, operation));
 

@@ -564,6 +564,77 @@ command.def public @root() launch(%count_storage: buffer, %first_output: buffer,
   loom_link_module_index_free(index);
 }
 
+TEST_F(CmdProgramPlanTest, CapturesNestedLaunchCountRefinements) {
+  ModulePtr source_module = ParseAndVerify(R"(
+test.target<device> @device
+kernel.entry.decl target(@device) @consume()
+
+command.def public @root() launch(%control: view<2xi32>) {
+  %zero = index.constant 0 : index
+  %limit = index.constant 64 : index
+  %flag = view.load %control[0] : view<2xi32> -> i32
+  %zero_word = scalar.constant 0 : i32
+  %active = scalar.cmpi ne, %flag, %zero_word : i32
+  %count = scf.if %active -> (index) {
+    %word = view.load %control[1] : view<2xi32> -> i32
+    %raw = index.cast %word : i32 to index
+    %bounded = index.assume %raw [ge(%raw, 0), lt(%raw, %limit)] : index
+    scf.yield %bounded : index
+  } else {
+    scf.yield %zero : index
+  }
+  kernel.dispatch @consume[%count]() : [index]()
+  kernel.dispatch @consume[%count]() : [index]()
+  command.return
+}
+)");
+  ASSERT_NE(source_module, nullptr);
+  const loom_symbol_ref_t root_ref =
+      FindSymbolRef(source_module.get(), IREE_SV("root"));
+  loom_link_plan_materialization_t materialization = {
+      .module = source_module.release(),
+  };
+  KernelRequestCapture request_capture = {
+      .block_pool = &block_pool_,
+  };
+  const loom_cmd_program_kernel_source_t kernel_source = {
+      .sink = {.publish = CaptureKernelRequest, .user_data = &request_capture},
+  };
+  loom_cmd_program_plan_t plan = {};
+  bool valid = false;
+  IREE_ASSERT_OK(loom_cmd_program_plan_build_from_materialization(
+      &materialization, &root_ref, /*program_count=*/1, &kernel_source,
+      /*live_kernel_entry_validator=*/nullptr, loom_pass_builtin_registry(),
+      loom_cleanup_configured_pattern_provider_set(),
+      /*diagnostic_emitter=*/{}, &block_pool_, iree_allocator_system(), &valid,
+      &plan));
+  ASSERT_TRUE(valid);
+  ASSERT_EQ(request_capture.requests.size(), 1u);
+  const CapturedKernelRequest& request = request_capture.requests.front();
+  EXPECT_EQ(request.kind, LOOM_CMD_PROGRAM_KERNEL_REQUEST_KIND_GENERATED);
+  ASSERT_NE(request.product.module, nullptr);
+  // The outlined source must independently own the predicate's limit as well
+  // as its runtime operands. A dangling source-module ID fails verification.
+  loom_verify_result_t verification = {};
+  IREE_ASSERT_OK(loom_verify_module(request.product.module, /*options=*/nullptr,
+                                    &verification));
+  EXPECT_EQ(verification.error_count, 0u);
+  ASSERT_EQ(plan.root_count, 1u);
+  EXPECT_EQ(plan.roots[0].transient.required_byte_length, 12u);
+  iree_byte_span_t data = iree_byte_span_empty();
+  IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(
+      &plan, 0, iree_allocator_system(), &data));
+  loom_cmd_program_t program = {};
+  IREE_ASSERT_OK(loom_cmd_program_parse(
+      iree_make_const_byte_span(data.data, data.data_length), &program));
+  EXPECT_EQ(program.commands.count, 3u);
+  iree_allocator_free(iree_allocator_system(), data.data);
+  loom_cmd_program_plan_deinitialize(&plan);
+  for (auto& captured : request_capture.requests) {
+    loom_kernel_class_product_deinitialize(&captured.product);
+  }
+}
+
 TEST_F(CmdProgramPlanTest, SplitsLaunchCountProducersAcrossPossibleWrites) {
   ModulePtr source_module = ParseAndVerify(R"(
 test.target<device> @device
