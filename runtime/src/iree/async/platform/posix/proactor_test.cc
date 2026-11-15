@@ -66,10 +66,12 @@ class PosixProactorTest : public ::testing::Test {
   }
 
   iree_status_t CreatePool(uint32_t node_id,
-                           iree_thread_affinity_t worker_affinity) {
+                           iree_thread_affinity_t worker_affinity,
+                           iree_bitmap_t processor_mask = {}) {
     auto options = iree_async_proactor_pool_options_default();
     options.proactor_create = iree_async_proactor_create_posix;
     options.proactor_options.worker_affinity = worker_affinity;
+    options.proactor_options.worker_processor_mask = processor_mask;
     options.runner = {};  // The test drives poll() on its own thread.
     return iree_async_proactor_pool_create(1, &node_id, options,
                                            iree_allocator_system(), &pool_);
@@ -132,15 +134,19 @@ TEST_F(PosixProactorTest, PoolNodeConstrainsBackendWorkersWithoutRunner) {
 }
 
 #if defined(IREE_PLATFORM_LINUX)
-TEST_F(PosixProactorTest, WorkerAffinityAppliesToFileOperations) {
+TEST_F(PosixProactorTest, RetainedBudgetAppliesToFileOperations) {
   int cpu = sched_getcpu();
   ASSERT_GE(cpu, 0);
   ASSERT_LT(cpu, CPU_SETSIZE);
-  iree_thread_affinity_t affinity = {
-      .id_assigned = 1,
-  };
-  affinity.id = cpu;
-  IREE_ASSERT_OK(CreatePool(UINT32_MAX, affinity));
+  iree_bitmap_t budget = {};
+  IREE_ASSERT_OK(
+      iree_thread_affinity_query_current(iree_allocator_system(), &budget));
+  iree_bitmap_reset_all(budget);
+  iree_bitmap_set(budget, cpu);
+  iree_status_t status = CreatePool(UINT32_MAX, {}, budget);
+  // Deferred entry construction must use the pool's owned copy.
+  iree_allocator_free(iree_allocator_system(), budget.words);
+  IREE_ASSERT_OK(status);
   IREE_ASSERT_OK(iree_async_proactor_pool_get(pool_, 0, &proactor_));
 
   // Every worker has its affinity before construction publishes the proactor.

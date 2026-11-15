@@ -135,7 +135,7 @@ class ImageServiceFixture : public ::testing::Test {
     *out_group = nullptr;
     loom_runtime_host_t* host = nullptr;
     iree_status_t status = loom_runtime_host_create(
-        worker_count, nullptr, iree_allocator_system(), &host);
+        worker_count, {}, nullptr, iree_allocator_system(), &host);
     iree_hal_driver_t* driver = nullptr;
     if (iree_status_is_ok(status)) {
       status = loom_runtime_test_driver_acquire(host, &driver);

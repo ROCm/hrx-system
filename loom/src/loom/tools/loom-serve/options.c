@@ -59,7 +59,8 @@ iree_status_t loom_serve_host_create_from_flags(
     const loom_runtime_compiler_options_t* compiler_options,
     iree_allocator_t host_allocator, loom_runtime_host_t** out_host) {
   return loom_runtime_host_create((iree_host_size_t)FLAG_workers,
-                                  compiler_options, host_allocator, out_host);
+                                  (iree_bitmap_t){0}, compiler_options,
+                                  host_allocator, out_host);
 }
 
 static iree_status_t loom_serve_device_configuration_initialize_options_impl(

@@ -58,7 +58,7 @@ void BM_TransitionBacking(benchmark::State& state) {
           ? iree_allocator_t{&traffic, AllocationTraffic::Control}
           : iree_allocator_system();
   loom_runtime_host_t* host = nullptr;
-  IREE_CHECK_OK(loom_runtime_host_create(1, nullptr, allocator, &host));
+  IREE_CHECK_OK(loom_runtime_host_create(1, {}, nullptr, allocator, &host));
   const loom_runtime_device_options_t options = {
       .driver = loom_runtime_host_task_driver(host),
       .uri = IREE_SV("task"),

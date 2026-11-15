@@ -54,8 +54,14 @@ typedef struct loom_runtime_compiler_options_t {
 // The host always owns a task driver backed by this exact executor; that
 // runtime capability is independent of optional native x86 compiler support.
 // compiler_options may be NULL when the host will never compile model sources.
+// processor_mask bounds the shared Task and I/O workers by native CPU ID. It is
+// borrowed only through creation. A zero bit_count captures the constructing
+// thread's effective affinity once on Linux/Android and retains that budget for
+// later I/O entry creation; other platforms use their default placement policy.
+// An explicit budget permits creation from a thread already pinned more
+// narrowly.
 iree_status_t loom_runtime_host_create(
-    iree_host_size_t worker_count,
+    iree_host_size_t worker_count, iree_bitmap_t processor_mask,
     const loom_runtime_compiler_options_t* compiler_options,
     iree_allocator_t host_allocator, loom_runtime_host_t** out_host);
 

@@ -100,7 +100,14 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
     iree_task_topology_node_id_t node_id,
     iree_task_topology_performance_level_t performance_level,
     iree_task_topology_distribution_t distribution,
-    iree_host_size_t max_core_count, iree_task_topology_t* out_topology) {
+    iree_host_size_t max_core_count, iree_bitmap_t processor_mask,
+    iree_task_topology_t* out_topology) {
+  if (processor_mask.bit_count) {
+    iree_task_topology_initialize(out_topology);
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "this platform does not expose CPU topology for "
+                            "an explicit processor budget");
+  }
   iree_task_topology_initialize_fallback(max_core_count, out_topology);
   return iree_ok_status();
 }

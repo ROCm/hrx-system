@@ -77,10 +77,12 @@ static void loom_runtime_host_proactor_failed(void* user_data,
 
 static iree_status_t loom_runtime_host_proactor_thread_create(
     void* user_data, iree_async_proactor_t* proactor, uint32_t node_id,
-    iree_allocator_t host_allocator, void** out_runner) {
+    iree_bitmap_t processor_mask, iree_allocator_t host_allocator,
+    void** out_runner) {
   iree_async_proactor_thread_options_t options =
       iree_async_proactor_thread_options_default();
   options.debug_name = IREE_SV("loom-io");
+  options.processor_mask = processor_mask;
   options.error_callback = (iree_async_proactor_thread_error_callback_t){
       loom_runtime_host_proactor_failed, NULL};
   if (node_id != UINT32_MAX) {
@@ -160,7 +162,7 @@ static iree_status_t loom_runtime_host_create_compiler_workspaces(
 }
 
 iree_status_t loom_runtime_host_create(
-    iree_host_size_t worker_count,
+    iree_host_size_t worker_count, iree_bitmap_t processor_mask,
     const loom_runtime_compiler_options_t* compiler_options,
     iree_allocator_t host_allocator, loom_runtime_host_t** out_host) {
   *out_host = NULL;
@@ -177,7 +179,14 @@ iree_status_t loom_runtime_host_create(
   iree_arena_block_pool_initialize(64 * 1024, host_allocator,
                                    &host->block_pool);
   iree_status_t status = iree_ok_status();
-  if (compiler_options) {
+  iree_bitmap_t captured_mask = {0};
+#if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_ANDROID)
+  if (!processor_mask.bit_count) {
+    status = iree_thread_affinity_query_current(host_allocator, &captured_mask);
+    processor_mask = captured_mask;
+  }
+#endif  // IREE_PLATFORM_LINUX || IREE_PLATFORM_ANDROID
+  if (iree_status_is_ok(status) && compiler_options) {
     host->target_provider_count = compiler_options->target_provider_count;
     status = iree_allocator_malloc_array(
         host_allocator, host->target_provider_count,
@@ -199,7 +208,8 @@ iree_status_t loom_runtime_host_create(
     status = iree_task_topology_initialize_from_physical_cores(
         IREE_TASK_TOPOLOGY_NODE_ID_ANY,
         IREE_TASK_TOPOLOGY_PERFORMANCE_LEVEL_ANY,
-        IREE_TASK_TOPOLOGY_DISTRIBUTION_SCATTER, worker_count, &topology);
+        IREE_TASK_TOPOLOGY_DISTRIBUTION_SCATTER, worker_count, processor_mask,
+        &topology);
   }
   if (iree_status_is_ok(status)) {
     iree_task_executor_options_t options;
@@ -233,6 +243,7 @@ iree_status_t loom_runtime_host_create(
   if (iree_status_is_ok(status)) {
     iree_async_proactor_pool_options_t options =
         iree_async_proactor_pool_options_default();
+    options.proactor_options.worker_processor_mask = processor_mask;
 #if !IREE_PLATFORM_WASM
     options.runner.create = loom_runtime_host_proactor_thread_create;
 #endif  // !IREE_PLATFORM_WASM
@@ -249,6 +260,7 @@ iree_status_t loom_runtime_host_create(
     status = iree_async_proactor_pool_create(
         node_count, node_ids, options, host_allocator, &host->proactor_pool);
   }
+  iree_allocator_free(host_allocator, captured_mask.words);
   if (iree_status_is_ok(status)) {
     *out_host = host;
   } else {
