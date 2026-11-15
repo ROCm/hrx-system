@@ -905,22 +905,27 @@ static iree_status_t loom_cmd_launch_count_new_reads_can_join(
     if (read->operation == before) {
       continue;
     }
-    if (read->operation->parent_block == before->parent_block &&
-        read->operation->block_ordinal < before->block_ordinal) {
-      // This observation precedes the producer. Later consumer writes cannot
-      // invalidate it; only effects between the read and producer matter.
+    if (read->operation->parent_block == before->parent_block) {
+      // Saved observations can lie on either side of the producer while
+      // preceding all consumers. Later consumer writes do not invalidate
+      // motion within that earlier effect-free interval.
       IREE_RETURN_IF_ERROR(loom_motion_read_barrier_table_can_cross(
           *closure->read_barriers, read->operation, before, out_can_join));
-    } else {
-      // A new observation after the producer must be safe both at its own
-      // consumer and across the writes crossed while hoisting it.
-      *out_can_join = !cluster->has_observation_barrier &&
-                      !loom_cmd_launch_count_read_conflicts_with_writes(
-                          root, cluster, read->reference);
       if (*out_can_join) {
-        IREE_RETURN_IF_ERROR(loom_motion_read_barrier_table_can_cross(
-            *closure->read_barriers, read->operation, consumer, out_can_join));
+        continue;
       }
+      if (read->operation->block_ordinal < before->block_ordinal) {
+        break;
+      }
+    }
+    // A fresh observation following consumers may cross their writes only
+    // when its storage is disjoint and no other ordering barrier intervenes.
+    *out_can_join = !cluster->has_observation_barrier &&
+                    !loom_cmd_launch_count_read_conflicts_with_writes(
+                        root, cluster, read->reference);
+    if (*out_can_join) {
+      IREE_RETURN_IF_ERROR(loom_motion_read_barrier_table_can_cross(
+          *closure->read_barriers, read->operation, consumer, out_can_join));
     }
   }
   return iree_ok_status();

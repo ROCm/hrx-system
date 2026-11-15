@@ -1,0 +1,158 @@
+// Independent observations sampled before a write share one count producer,
+// regardless of consumer order. A fresh observation after the write must keep
+// a separate producer. Exact output checks both the loads and their placement.
+// RUN: emit command-program @saved_observations,@fresh_observation kernels
+
+test.target<device> @device
+
+kernel.entry.decl target(@device) @overwrite(%storage: view<2xi32>)
+
+kernel.entry.decl target(@device) @consume()
+
+command.def public @saved_observations() launch(%control: view<2xi32>) {
+  %c1 = index.constant 1 : index
+  %a_word = view.load %control[0] : view<2xi32> -> i32
+  %a_wide = scalar.extui %a_word : i32 to i64
+  %a = index.cast %a_wide : i64 to index
+  %b_word = view.load %control[1] : view<2xi32> -> i32
+  %b_wide = scalar.extui %b_word : i32 to i64
+  %b = index.cast %b_wide : i64 to index
+  kernel.dispatch @overwrite[%c1](%control) : [index](view<2xi32>)
+  kernel.dispatch @consume[%a]() : [index]()
+  kernel.dispatch @consume[%b]() : [index]()
+  kernel.dispatch @consume[%a]() : [index]()
+  command.return
+}
+
+command.def public @fresh_observation() launch(%control: view<2xi32>) {
+  %c1 = index.constant 1 : index
+  %a_word = view.load %control[0] : view<2xi32> -> i32
+  %a_wide = scalar.extui %a_word : i32 to i64
+  %a = index.cast %a_wide : i64 to index
+  kernel.dispatch @overwrite[%c1](%control) : [index](view<2xi32>)
+  %b_word = view.load %control[1] : view<2xi32> -> i32
+  %b_wide = scalar.extui %b_word : i32 to i64
+  %b = index.cast %b_wide : i64 to index
+  kernel.dispatch @consume[%a]() : [index]()
+  kernel.dispatch @consume[%b]() : [index]()
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 3, executable_count = 3, fixed_buffer_count = 0, rebindable_binding_count = 2}) @saved_observations() asm {
+  %82 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %83 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %84 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %85 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %86 = resource<command_input> {index = 2, source_type = index} : reg<cmd.executable>
+  %87 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %88 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %89 = resource<command_input> {index = 2, source_type = index} : reg<cmd.entry>
+  %90 = cmd.constant.u64 0
+  %91 = cmd.constant.u64 -1
+  %92 = cmd.constant.u64 24
+  %93 = cmd.constant.u64 12
+  %94 = cmd.constant.u32 1
+  cmd.dispatch.direct<%84, %87>[%94, %94, %94](%82, %90, %91, %83, %90, %92)
+  cmd.dispatch.direct.barrier<%85, %88>[%94, %94, %94](%82, %90, %91)
+  %95 = cmd.buffer.ref.binding %83, %90, %93
+  cmd.dispatch.indirect.dynamic.barrier<%86, %89>[%95]()
+  %96 = cmd.buffer.ref.binding %83, %93, %93
+  cmd.dispatch.indirect.dynamic.barrier<%86, %89>[%96]()
+  %97 = cmd.buffer.ref.binding %83, %90, %93
+  cmd.dispatch.indirect.dynamic.barrier<%86, %89>[%97]()
+  return
+}
+
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 4, executable_count = 4, fixed_buffer_count = 0, rebindable_binding_count = 2}) @fresh_observation() asm {
+  %98 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %99 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %100 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %101 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %102 = resource<command_input> {index = 2, source_type = index} : reg<cmd.executable>
+  %103 = resource<command_input> {index = 3, source_type = index} : reg<cmd.executable>
+  %104 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %105 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %106 = resource<command_input> {index = 2, source_type = index} : reg<cmd.entry>
+  %107 = resource<command_input> {index = 3, source_type = index} : reg<cmd.entry>
+  %108 = cmd.constant.u64 0
+  %109 = cmd.constant.u64 -1
+  %110 = cmd.constant.u64 12
+  %111 = cmd.constant.u32 1
+  cmd.dispatch.direct<%100, %104>[%111, %111, %111](%98, %108, %109, %99, %108, %110)
+  cmd.dispatch.direct.barrier<%101, %105>[%111, %111, %111](%98, %108, %109)
+  cmd.dispatch.direct.barrier<%102, %106>[%111, %111, %111](%98, %108, %109, %99, %110, %110)
+  %112 = cmd.buffer.ref.binding %99, %108, %110
+  cmd.dispatch.indirect.dynamic.barrier<%103, %107>[%112]()
+  %113 = cmd.buffer.ref.binding %99, %110, %110
+  cmd.dispatch.indirect.dynamic.barrier<%103, %107>[%113]()
+  return
+}
+test.target<device> @device
+
+kernel.def retain target(@device) @__command_launch_counts_0() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%control: view<2xi32>, %1: view<6xi32>) {
+  %a_word = view.load %control[0] : view<2xi32> -> i32
+  %a_wide = scalar.extui %a_word : i32 to i64
+  %a = index.cast %a_wide : i64 to index
+  %b_word = view.load %control[1] : view<2xi32> -> i32
+  %b_wide = scalar.extui %b_word : i32 to i64
+  %b = index.cast %b_wide : i64 to index
+  %9 = index.cast %a : index to i32
+  view.store %9, %1[0] : i32, view<6xi32>
+  %10 = index.constant 1 : index
+  %11 = index.cast %10 : index to i32
+  view.store %11, %1[1] : i32, view<6xi32>
+  %12 = index.constant 1 : index
+  %13 = index.cast %12 : index to i32
+  view.store %13, %1[2] : i32, view<6xi32>
+  %14 = index.cast %b : index to i32
+  view.store %14, %1[3] : i32, view<6xi32>
+  %15 = index.constant 1 : index
+  %16 = index.cast %15 : index to i32
+  view.store %16, %1[4] : i32, view<6xi32>
+  %17 = index.constant 1 : index
+  %18 = index.cast %17 : index to i32
+  view.store %18, %1[5] : i32, view<6xi32>
+  kernel.return
+}
+test.target<device> @device
+
+kernel.def retain target(@device) @__command_launch_counts_1() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%control: view<2xi32>, %1: view<3xi32>) {
+  %a_word = view.load %control[0] : view<2xi32> -> i32
+  %a_wide = scalar.extui %a_word : i32 to i64
+  %a = index.cast %a_wide : i64 to index
+  %6 = index.cast %a : index to i32
+  view.store %6, %1[0] : i32, view<3xi32>
+  %7 = index.constant 1 : index
+  %8 = index.cast %7 : index to i32
+  view.store %8, %1[1] : i32, view<3xi32>
+  %9 = index.constant 1 : index
+  %10 = index.cast %9 : index to i32
+  view.store %10, %1[2] : i32, view<3xi32>
+  kernel.return
+}
+test.target<device> @device
+
+kernel.def retain target(@device) @__command_launch_counts_2() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%control: view<2xi32>, %1: view<3xi32>) {
+  %b_word = view.load %control[1] : view<2xi32> -> i32
+  %b_wide = scalar.extui %b_word : i32 to i64
+  %b = index.cast %b_wide : i64 to index
+  %6 = index.cast %b : index to i32
+  view.store %6, %1[0] : i32, view<3xi32>
+  %7 = index.constant 1 : index
+  %8 = index.cast %7 : index to i32
+  view.store %8, %1[1] : i32, view<3xi32>
+  %9 = index.constant 1 : index
+  %10 = index.cast %9 : index to i32
+  view.store %10, %1[2] : i32, view<3xi32>
+  kernel.return
+}

@@ -170,9 +170,9 @@ iree_status_t loom_motion_read_barrier_table_allocate(
 
 // Returns whether an ordinary read at |read_op| can move immediately before
 // |before_op| without crossing an ordering barrier. Both operations must be in
-// the same block with |read_op| ordered first. The query checks operations
-// strictly between the endpoints; callers separately classify the read and
-// account for effects of |before_op| itself.
+// the same block. Sinking checks operations strictly between the endpoints;
+// hoisting also crosses |before_op| itself. Callers separately classify the
+// read and prove that its inputs are available at the destination.
 iree_status_t loom_motion_read_barrier_table_can_cross(
     loom_motion_read_barrier_table_t* table, const loom_op_t* read_op,
     const loom_op_t* before_op, bool* out_can_cross);

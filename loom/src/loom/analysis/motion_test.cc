@@ -277,6 +277,13 @@ TEST_F(MotionTest, ReadBarrierTableIndexesStrictIntervals) {
   IREE_ASSERT_OK(loom_motion_read_barrier_table_can_cross(
       table, first_read_op, first_consumer_op, &can_cross));
   EXPECT_TRUE(can_cross);
+  IREE_ASSERT_OK(loom_motion_read_barrier_table_can_cross(
+      table, pure_gap_op, first_read_op, &can_cross));
+  EXPECT_TRUE(can_cross);
+  // The destination's effect is crossed when moving a later read backward.
+  IREE_ASSERT_OK(loom_motion_read_barrier_table_can_cross(
+      table, second_read_op, first_consumer_op, &can_cross));
+  EXPECT_FALSE(can_cross);
 
   const loom_builder_ip_t saved_ip = builder_.ip;
   loom_builder_set_before(&builder_, fence_op);
