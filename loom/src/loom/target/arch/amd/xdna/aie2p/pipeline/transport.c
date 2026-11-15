@@ -1043,7 +1043,8 @@ static iree_status_t loom_aie2p_native_reserve_transfer_bindings(
         &context->workers[context->execution.workers[context->core_engines[i]]];
     for (loom_aie2p_native_transfer_t* transfer = worker->transfers;
          iree_status_is_ok(status) && transfer; transfer = transfer->next) {
-      if (!transfer->shim_descriptor->address_dynamic) {
+      if (!transfer->shim_descriptor->address_dynamic &&
+          !transfer->shim_descriptor->storage) {
         continue;
       }
       status = loom_aie2p_native_reserve_binding(
@@ -1331,6 +1332,10 @@ iree_status_t loom_aie2p_native_select_transfers(
   }
   if (iree_status_is_ok(status) && valid) {
     status = loom_aie2p_native_refine_transfer_addresses(
+        context, realization->invocations.worker_count);
+  }
+  if (iree_status_is_ok(status) && valid) {
+    status = loom_aie2p_native_finalize_dma_storage(
         context, realization->invocations.worker_count);
   }
   if (iree_status_is_ok(status) && valid) {

@@ -1,0 +1,48 @@
+// Exact values, untouched tails, and guards cover descriptor reentry through
+// the ordinary source compiler and HAL, including repeated invocation bases.
+pipeline.decl<kernel> @descriptor_reentry() run(%input: buffer, %output: buffer)
+
+func.def @descriptor_reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<544xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<640xi32>
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %reentry_stride = index.constant 8 : index
+  %shape_count = index.constant 17 : index
+  %count = index.constant 20 : index
+  %stride = index.constant 32 : index
+  scf.for %phase = [%c0 to %count step %c1] {
+    %reentry = index.sub %phase, %shape_count : index
+    %repeated_shape = index.mul %reentry, %reentry_stride : index
+    %is_first_visit = index.cmp ult, %phase, %shape_count : index
+    %shape = scf.select %is_first_visit, %phase, %repeated_shape : index
+    %length = index.add %shape, %c1 : index
+    %bias = index.cast %length : index to i32
+    %input_base = index.mul %shape, %stride : index
+    %output_base = index.mul %phase, %stride : index
+    scf.for %i = [%c0 to %length step %c1] {
+      %input_position = index.add %input_base, %i : index
+      %output_position = index.add %output_base, %i : index
+      %value = view.load %source[%input_position] : view<544xi32> -> i32
+      %result = scalar.addi %value, %bias : i32
+      view.store %result, %destination[%output_position] : i32, view<640xi32>
+    }
+  }
+  func.return
+}
+
+check.scenario public @descriptor_geometry_reentry {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<576xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<672xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<576xi32> -> tensor<544xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<672xi32> -> tensor<640xi32>
+    check.compare<@descriptor_reentry, @descriptor_reference>(%input, %output) : (tensor<544xi32>, tensor<640xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<576xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<672xi32>
+    }
+  }
+  check.return
+}

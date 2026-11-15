@@ -30,6 +30,11 @@ void loom_aie2p_native_task_descriptor_words(
     const loom_aie2p_native_dma_descriptor_t* descriptor,
     const loom_aie2p_native_transfer_t* transfer, uint32_t out_words[8]);
 
+// Final register value, including the final segment's arrival-credit release.
+uint32_t loom_aie2p_native_descriptor_word(
+    const loom_aie2p_native_dma_descriptor_t* descriptor, uint16_t segment,
+    uint8_t word);
+
 // Selects a retired compatible sequence from the physical owner's inventory.
 // Local sequences retain their path and completion credit; shim sequences can
 // cross paths within one bank. Reusing a sequence at different addresses
@@ -63,6 +68,11 @@ iree_status_t loom_aie2p_native_select_task_descriptors(
 // addresses also retain a shared descriptor when specialization would split
 // an outlineable external patch body whose local patch remains required.
 iree_status_t loom_aie2p_native_refine_transfer_addresses(
+    loom_aie2p_native_context_t* context, iree_host_size_t worker_count);
+
+// Retains each worker's entry restoration and the physical storage's complete
+// changed-word union after address refinement has finalized its geometries.
+iree_status_t loom_aie2p_native_finalize_dma_storage(
     loom_aie2p_native_context_t* context, iree_host_size_t worker_count);
 
 // Groups final descriptor policies into submission bodies that fit the native

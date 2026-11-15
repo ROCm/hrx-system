@@ -276,6 +276,11 @@ typedef struct loom_aie2p_native_dma_descriptor_t {
   // Original admitted descriptor for a fixed variant, or NULL for the original.
   // It retains the shared route/geometry identity after addresses specialize.
   struct loom_aie2p_native_dma_descriptor_t* address_origin;
+  // Shared physical sequence across disjoint worker occurrences, or NULL for
+  // a sequence whose geometry remains fixed throughout the invocation.
+  struct loom_aie2p_native_dma_storage_t* storage;
+  // Next immutable geometry occupying the same physical sequence.
+  struct loom_aie2p_native_dma_descriptor_t* next_geometry;
   // Admitted engine pair and physical routes.
   loom_aie2p_native_dma_path_t* path;
   // First assigned copy, retaining the canonical immutable address variant.
@@ -301,6 +306,27 @@ typedef struct loom_aie2p_native_dma_descriptor_t {
   // this physical family, indexed by address_dynamic on the original only.
   loom_aie2p_native_dma_submit_t* submit_groups[2];
 } loom_aie2p_native_dma_descriptor_t;
+
+// Physical descriptor storage reused only at serial worker-entry boundaries.
+typedef struct loom_aie2p_native_dma_storage_t {
+  // First geometry, owning the physical capacity and initial configuration.
+  loom_aie2p_native_dma_descriptor_t* first;
+  // Immutable geometries sharing the first geometry's descriptor range.
+  loom_aie2p_native_dma_descriptor_t* geometries;
+  // Most recently selected geometry; its latest transfer owns retirement.
+  loom_aie2p_native_dma_descriptor_t* active;
+  // Union of differing register words, one bit mask per physical descriptor.
+  uint8_t* changed_words;
+  // Last worker for which finalization retained an entry initializer.
+  iree_host_size_t initializer_worker;
+} loom_aie2p_native_dma_storage_t;
+
+typedef struct loom_aie2p_native_dma_initializer_t {
+  // Next distinct physical sequence restored by this worker entry.
+  struct loom_aie2p_native_dma_initializer_t* next;
+  // Immutable geometry and finalized address policy for this entry.
+  const loom_aie2p_native_dma_descriptor_t* descriptor;
+} loom_aie2p_native_dma_initializer_t;
 
 typedef struct loom_aie2p_native_transfer_task_t
     loom_aie2p_native_transfer_task_t;
@@ -696,6 +722,8 @@ typedef struct loom_aie2p_native_worker_t {
   // Physical local/shim endpoints in first-use initialization order. Ordered
   // core occurrences retain these on their representative instruction worker.
   loom_aie2p_native_dma_descriptor_t* descriptors;
+  // Shared descriptor geometries restored once before this worker issues DMA.
+  loom_aie2p_native_dma_initializer_t* dma_initializers;
   // Physical arrival credits shared independently of descriptor geometry and
   // retained on the same representative as the descriptors they retire.
   loom_aie2p_native_dma_completion_t* dma_completions;

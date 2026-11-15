@@ -263,19 +263,21 @@ class DmaAddressVariantsTest
     path_.local_engine = memory ? 1 : 0;
     path_.ingress = std::get<1>(GetParam());
     path_.completion_tokens = memory ? 2 : path_.ingress ? 0 : 1;
-    worker_.execution = LOOM_AIE2P_NATIVE_EXECUTION_CORE;
-    worker_.channels.indices = &channel_index_;
-    worker_.channels.accesses = &access_;
-    worker_.channels.count = 1;
+    for (size_t i = 0; i < IREE_ARRAYSIZE(workers_); ++i) {
+      workers_[i].execution = LOOM_AIE2P_NATIVE_EXECUTION_CORE;
+      workers_[i].channels.indices = &channel_index_;
+      workers_[i].channels.accesses = &access_;
+      workers_[i].channels.count = 1;
+      task_tails_[i] = &workers_[i].transfer_tasks;
+    }
     access_.channel = &channel_;
     access_.window = &window_;
     context_.channels = &channel_;
-    context_.workers = &worker_;
-    context_.core_engines = &engine_;
+    context_.workers = workers_;
+    context_.core_engines = engines_;
     context_.execution.workers = &owner_;
-    descriptor_tail_ = &worker_.descriptors;
-    completion_tail_ = &worker_.dma_completions;
-    task_tail_ = &worker_.transfer_tasks;
+    descriptor_tail_ = &workers_[0].descriptors;
+    completion_tail_ = &workers_[0].dma_completions;
   }
 
   void TearDown() override {
@@ -284,7 +286,8 @@ class DmaAddressVariantsTest
   }
 
   void AddTask(uint32_t address, uint32_t count = 1, bool local_dynamic = false,
-               bool external_dynamic = false, uint32_t binding = 0) {
+               bool external_dynamic = false, uint32_t binding = 0,
+               uint32_t words = 1) {
     tasks_.emplace_back();
     auto& record = tasks_.back();
     const uint32_t position = static_cast<uint32_t>(tasks_.size() - 1) * 8;
@@ -302,6 +305,7 @@ class DmaAddressVariantsTest
       record.sources[i].request.op = &record.issues[i];
       record.external[i].begin_byte_offset.constant = address + i * 4;
       auto& transfer = record.transfers[i];
+      transfer.worker_index = worker_index_;
       transfer.source = &record.sources[i];
       transfer.completion = &record.completion;
       transfer.external_view = &record.external[i];
@@ -310,7 +314,7 @@ class DmaAddressVariantsTest
       transfer.task = &record.task;
       transfer.descriptor_ordinal = i;
       transfer.task_next = i + 1 == count ? nullptr : &record.transfers[i + 1];
-      transfer.local_words[0] = transfer.shim_words[0] = 1;
+      transfer.local_words[0] = transfer.shim_words[0] = words;
       transfer.local_words[local_.memory_layout->address_word] |=
           loom_xdna_register_field_encode(local_.memory_layout->address,
                                           address + i * 4);
@@ -321,16 +325,32 @@ class DmaAddressVariantsTest
     }
     bool valid = false;
     IREE_ASSERT_OK(loom_aie2p_native_select_task_descriptors(
-        &context_, &worker_, &worker_, &record.task, false, &descriptor_tail_,
-        &completion_tail_, &valid));
+        &context_, &workers_[worker_index_], &workers_[0], &record.task, false,
+        &descriptor_tail_, &completion_tail_, &valid));
     ASSERT_TRUE(valid);
-    *task_tail_ = &record.task;
-    task_tail_ = &record.task.next;
+    *task_tails_[worker_index_] = &record.task;
+    task_tails_[worker_index_] = &record.task.next;
   }
 
   void Refine() {
-    IREE_ASSERT_OK(loom_aie2p_native_refine_transfer_addresses(&context_, 1));
-    IREE_ASSERT_OK(loom_aie2p_native_group_submissions(&context_, 1));
+    IREE_ASSERT_OK(loom_aie2p_native_refine_transfer_addresses(
+        &context_, IREE_ARRAYSIZE(workers_)));
+    IREE_ASSERT_OK(loom_aie2p_native_finalize_dma_storage(
+        &context_, IREE_ARRAYSIZE(workers_)));
+    IREE_ASSERT_OK(loom_aie2p_native_group_submissions(
+        &context_, IREE_ARRAYSIZE(workers_)));
+  }
+
+  // Other physical owners have already reserved the bank's prefix. This
+  // owner's remaining slots still use the unmodified hardware capacity.
+  void LeaveDescriptors(uint16_t available) {
+    for (bool shim : {false, true}) {
+      uint16_t base, count;
+      uint16_t* used = loom_aie2p_native_descriptor_bank(
+          shim ? &shim_ : &local_,
+          shim ? path_.shim_engine : path_.local_engine, &base, &count);
+      *used = count - available;
+    }
   }
 
   uint16_t Used(bool shim) {
@@ -356,12 +376,14 @@ class DmaAddressVariantsTest
   loom_aie2p_native_tile_t shim_ = {};
   // One admitted route and engine pair shared by the ordered copies.
   loom_aie2p_native_dma_path_t path_ = {};
-  // Resident core owning descriptors, completion credits, and submissions.
-  loom_aie2p_native_worker_t worker_ = {};
-  // Canonical physical execution owner for this worker.
+  // Serial occurrences sharing one physical core and its resource inventory.
+  loom_aie2p_native_worker_t workers_[3] = {};
+  // Occurrence receiving the next authored transfer task.
+  iree_host_size_t worker_index_ = 0;
+  // Canonical physical execution owner for all three occurrences.
   iree_host_size_t owner_ = 0;
-  // Physical engine selected for the worker.
-  iree_host_size_t engine_ = 0;
+  // Same physical engine selected for each serial occurrence.
+  iree_host_size_t engines_[3] = {};
   // Channel inventory index used for core-local arrival selectors.
   uint32_t channel_index_ = 0;
   // Local channel identity whose completion credit is reused.
@@ -374,11 +396,111 @@ class DmaAddressVariantsTest
   loom_aie2p_native_dma_descriptor_t** descriptor_tail_ = nullptr;
   // Next append location in the required completion-credit inventory.
   loom_aie2p_native_dma_completion_t** completion_tail_ = nullptr;
-  // Next append location in the complete ordered task list.
-  loom_aie2p_native_transfer_task_t** task_tail_ = nullptr;
+  // Next append location in each occurrence's ordered task list.
+  loom_aie2p_native_transfer_task_t** task_tails_[3] = {};
   // Stable task/transfer addresses retained by the production planner.
   std::deque<Task> tasks_;
 };
+
+TEST_P(DmaAddressVariantsTest, ResidentGeometryAvoidsEntryRestoration) {
+  AddTask(0, 1, false, false, 0, 1);
+  worker_index_ = 1;
+  AddTask(16, 1, false, false, 0, 3);
+  Refine();
+  EXPECT_EQ(Used(false), 2u);
+  EXPECT_EQ(Used(true), 2u);
+  for (const auto& task : tasks_) {
+    EXPECT_EQ(task.task.local_descriptor->storage, nullptr);
+    EXPECT_EQ(task.task.shim_descriptor->storage, nullptr);
+  }
+  for (const auto& worker : workers_) {
+    EXPECT_EQ(worker.dma_initializers, nullptr);
+  }
+}
+
+TEST_P(DmaAddressVariantsTest, SerialReentryRestoresShortAndLongChains) {
+  LeaveDescriptors(2);
+  AddTask(0, 2, false, false, 0, 1);
+  worker_index_ = 1;
+  AddTask(16, 1, false, false, 1, 3);
+  worker_index_ = 2;
+  AddTask(0, 2, false, false, 0, 1);
+  Refine();
+  for (bool shim : {false, true}) {
+    const auto* first =
+        shim ? tasks_[0].task.shim_descriptor : tasks_[0].task.local_descriptor;
+    const auto* middle =
+        shim ? tasks_[1].task.shim_descriptor : tasks_[1].task.local_descriptor;
+    const auto* last =
+        shim ? tasks_[2].task.shim_descriptor : tasks_[2].task.local_descriptor;
+    ASSERT_NE(first->storage, nullptr);
+    EXPECT_EQ(first, last);
+    EXPECT_NE(first, middle);
+    EXPECT_EQ(first->storage, middle->storage);
+    EXPECT_EQ(first->sequence.descriptor, middle->sequence.descriptor);
+    const uint8_t chain_word = shim ? 7 : local_.memory_layout->chain.word;
+    EXPECT_NE(first->sequence.words[0][chain_word],
+              middle->sequence.words[0][chain_word]);
+    EXPECT_TRUE(first->storage->changed_words[0] & (1u << chain_word));
+    if (shim) {
+      EXPECT_EQ(first->storage->changed_words[0] & 6u, 6u);
+      EXPECT_EQ(first->storage->changed_words[1] & 6u, 6u);
+    }
+    uint32_t registers[2][8];
+    for (uint16_t segment = 0; segment < 2; ++segment) {
+      for (uint8_t word = 0; word < 8; ++word) {
+        registers[segment][word] =
+            loom_aie2p_native_descriptor_word(first, segment, word);
+      }
+    }
+    // Entry restoration must work in either direction, repeatedly. The short
+    // chain terminates before the untouched second slot; A restores its link.
+    for (size_t worker : {0u, 1u, 2u, 1u, 0u}) {
+      const auto* descriptor = worker == 1 ? middle : first;
+      const auto* initializer = workers_[worker].dma_initializers;
+      while (initializer && initializer->descriptor->shim != shim) {
+        initializer = initializer->next;
+      }
+      ASSERT_NE(initializer, nullptr);
+      EXPECT_EQ(initializer->descriptor, descriptor);
+      for (uint16_t segment = 0;
+           segment < descriptor->sequence.descriptor_count; ++segment) {
+        for (uint8_t word = 0; word < 8; ++word) {
+          const uint32_t expected =
+              loom_aie2p_native_descriptor_word(descriptor, segment, word);
+          if (descriptor->storage->changed_words[segment] & (1u << word)) {
+            registers[segment][word] = expected;
+          }
+          EXPECT_EQ(registers[segment][word], expected);
+        }
+      }
+    }
+  }
+}
+
+TEST_P(DmaAddressVariantsTest, OneEntryKeepsItsDifferentGeometriesDistinct) {
+  LeaveDescriptors(2);
+  for (worker_index_ = 0; worker_index_ < 3; ++worker_index_) {
+    const uint32_t length = worker_index_ == 1 ? 3 : 1;
+    AddTask(0, 1, false, true, 0, length);
+    AddTask(16, 1, true, true, 1, length + 1);
+  }
+  Refine();
+  for (size_t worker = 0; worker < 3; ++worker) {
+    const auto& first = tasks_[worker * 2].task;
+    const auto& second = tasks_[worker * 2 + 1].task;
+    EXPECT_NE(first.local_descriptor->sequence.descriptor,
+              second.local_descriptor->sequence.descriptor);
+    EXPECT_NE(first.shim_descriptor->sequence.descriptor,
+              second.shim_descriptor->sequence.descriptor);
+    size_t initializers = 0;
+    for (auto* initializer = workers_[worker].dma_initializers; initializer;
+         initializer = initializer->next) {
+      ++initializers;
+    }
+    EXPECT_EQ(initializers, 4u);
+  }
+}
 
 TEST_P(DmaAddressVariantsTest, RequiredChainsWinBeforeOptionalFixedAddresses) {
   for (uint32_t i = 0; i < 32; ++i) {

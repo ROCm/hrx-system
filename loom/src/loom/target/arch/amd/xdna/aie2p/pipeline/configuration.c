@@ -364,6 +364,9 @@ static iree_status_t loom_aie2p_native_config_transfers(
     for (const loom_aie2p_native_dma_descriptor_t* descriptor =
              worker->descriptors;
          descriptor; descriptor = descriptor->next) {
+      if (descriptor->storage && descriptor->storage->first != descriptor) {
+        continue;
+      }
       const loom_aie2p_native_tile_t* tile =
           descriptor->shim ? descriptor->path->shim : descriptor->path->local;
       uint32_t completion_release = 0;

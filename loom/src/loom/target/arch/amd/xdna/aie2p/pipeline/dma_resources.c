@@ -46,6 +46,24 @@ void loom_aie2p_native_task_descriptor_words(
                      loom_xdna_register_field_encode(enable, 1);
 }
 
+uint32_t loom_aie2p_native_descriptor_word(
+    const loom_aie2p_native_dma_descriptor_t* descriptor, uint16_t segment,
+    uint8_t word) {
+  uint32_t value = descriptor->sequence.words[segment][word];
+  if (descriptor->completion &&
+      segment + 1 == descriptor->sequence.descriptor_count) {
+    const loom_aie2p_native_memory_layout_t* layout =
+        descriptor->path->local->memory_layout;
+    if (word == layout->lock_word) {
+      value |= loom_xdna_register_field_encode(
+                   layout->locks.release_id,
+                   layout->local_lock_base + descriptor->completion->lock) |
+               loom_xdna_register_field_encode(layout->locks.release_value, 1);
+    }
+  }
+  return value;
+}
+
 static bool loom_aie2p_native_task_descriptor_matches(
     const loom_aie2p_native_transfer_task_t* task,
     const loom_aie2p_native_dma_descriptor_t* descriptor, uint32_t address_mask,
@@ -118,7 +136,9 @@ loom_aie2p_native_dma_descriptor_t* loom_aie2p_native_reusable_descriptor(
   }
   for (loom_aie2p_native_dma_descriptor_t* candidate = worker->descriptors;
        candidate; candidate = candidate->next) {
-    const loom_aie2p_native_transfer_t* previous = candidate->last_transfer;
+    const loom_aie2p_native_dma_descriptor_t* active =
+        candidate->storage ? candidate->storage->active : candidate;
+    const loom_aie2p_native_transfer_t* previous = active->last_transfer;
     bool address_differs;
     // Shim descriptors belong to the tile's shared bank. Direction and
     // completion routing belong to the issuing channel, so a retired sequence
@@ -127,6 +147,7 @@ loom_aie2p_native_dma_descriptor_t* loom_aie2p_native_reusable_descriptor(
     const bool same_bank = shim ? candidate->path->shim == task->path->shim
                                 : candidate->path == task->path;
     if (candidate->shim != shim || !same_bank ||
+        (active != candidate && previous->worker_index == worker_index) ||
         !loom_aie2p_native_transfer_retired(previous, worker_index, issue) ||
         (candidate->completion &&
          !loom_aie2p_native_transfer_retired(
@@ -135,6 +156,7 @@ loom_aie2p_native_dma_descriptor_t* loom_aie2p_native_reusable_descriptor(
             task, candidate, address_mask, &address_differs)) {
       continue;
     }
+    previous = candidate->last_transfer;
     candidate->address_required |=
         shim ? task->shim_address_dynamic : task->local_address_dynamic;
     if (shim) {
@@ -227,7 +249,35 @@ static iree_status_t loom_aie2p_native_allocate_task_descriptor(
   uint16_t descriptor_base, descriptor_count;
   uint16_t* next_descriptor = loom_aie2p_native_descriptor_bank(
       tile, engine, &descriptor_base, &descriptor_count);
-  if (task->transfer_count > descriptor_count - *next_descriptor) {
+  loom_aie2p_native_dma_descriptor_t* shared = NULL;
+  // Resident geometry avoids entry restoration while the bank has room. Once
+  // full, complete worker retirement lets a later serial occurrence restore
+  // another geometry without changing its per-copy submission path.
+  if (task->transfer_count > descriptor_count - *next_descriptor &&
+      worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_CORE) {
+    const loom_aie2p_native_transfer_t* next = task->first_transfer;
+    for (loom_aie2p_native_dma_descriptor_t* candidate =
+             resource_owner->descriptors;
+         candidate; candidate = candidate->next) {
+      const loom_aie2p_native_dma_storage_t* storage = candidate->storage;
+      const loom_aie2p_native_dma_descriptor_t* active =
+          storage ? storage->active : candidate;
+      if (candidate->shim != shim || (storage && storage->first != candidate) ||
+          (shim ? candidate->path->shim != task->path->shim
+                : candidate->path != task->path) ||
+          candidate->sequence.descriptor_count < task->transfer_count ||
+          active->last_transfer->worker_index == next->worker_index ||
+          (active->completion &&
+           !loom_aie2p_native_transfer_retired(
+               active->completion->last_transfer, next->worker_index,
+               next->source->request.op))) {
+        continue;
+      }
+      shared = candidate;
+      break;
+    }
+  }
+  if (!shared && task->transfer_count > descriptor_count - *next_descriptor) {
     return loom_aie2p_native_reject(
         context, task->first_transfer->source->request.op,
         shim ? IREE_SV("available native shim descriptors for one async group")
@@ -236,8 +286,30 @@ static iree_status_t loom_aie2p_native_allocate_task_descriptor(
   }
   loom_aie2p_native_dma_descriptor_t* descriptor;
   IREE_RETURN_IF_ERROR(loom_aie2p_native_create_task_descriptor(
-      context, task, shim, descriptor_base + *next_descriptor, &descriptor));
-  *next_descriptor += (uint16_t)task->transfer_count;
+      context, task, shim,
+      shared ? shared->sequence.descriptor : descriptor_base + *next_descriptor,
+      &descriptor));
+  if (shared) {
+    if (!shared->storage) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(
+          context->pass->arena,
+          sizeof(*shared->storage) + shared->sequence.descriptor_count,
+          (void**)&shared->storage));
+      *shared->storage = (loom_aie2p_native_dma_storage_t){
+          .first = shared,
+          .geometries = shared,
+          .active = shared,
+          .changed_words = (uint8_t*)(shared->storage + 1),
+          .initializer_worker = IREE_HOST_SIZE_MAX};
+      memset(shared->storage->changed_words, 0,
+             shared->sequence.descriptor_count);
+    }
+    descriptor->storage = shared->storage;
+    descriptor->next_geometry = shared->storage->geometries;
+    shared->storage->geometries = descriptor;
+  } else {
+    *next_descriptor += (uint16_t)task->transfer_count;
+  }
   if (!shim && task->path->ingress && !task->path->completion_tokens) {
     descriptor->completion = loom_aie2p_native_reusable_completion(
         resource_owner, tile, task->first_transfer);
@@ -351,6 +423,12 @@ iree_status_t loom_aie2p_native_select_task_descriptors(
   }
   task->local_descriptor->last_transfer = task->first_transfer;
   task->shim_descriptor->last_transfer = task->first_transfer;
+  if (task->local_descriptor->storage) {
+    task->local_descriptor->storage->active = task->local_descriptor;
+  }
+  if (task->shim_descriptor->storage) {
+    task->shim_descriptor->storage->active = task->shim_descriptor;
+  }
   task->local_descriptor->dynamic_external_use_count +=
       task->shim_address_dynamic;
   if (task->local_descriptor->completion) {
@@ -489,6 +567,70 @@ iree_status_t loom_aie2p_native_refine_transfer_addresses(
         loom_aie2p_native_task_descriptor_words(
             task, descriptor, transfer,
             descriptor->sequence.words[transfer->descriptor_ordinal]);
+      }
+    }
+  }
+  return status;
+}
+
+iree_status_t loom_aie2p_native_finalize_dma_storage(
+    loom_aie2p_native_context_t* context, iree_host_size_t worker_count) {
+  for (iree_host_size_t i = 0; i < worker_count; ++i) {
+    for (const loom_aie2p_native_dma_descriptor_t* descriptor =
+             context->workers[i].descriptors;
+         descriptor; descriptor = descriptor->next) {
+      loom_aie2p_native_dma_storage_t* storage = descriptor->storage;
+      if (!storage || storage->first != descriptor) {
+        continue;
+      }
+      const uint8_t word_count =
+          descriptor->shim
+              ? 8
+              : descriptor->path->local->memory_layout->descriptor_word_count;
+      for (const loom_aie2p_native_dma_descriptor_t* geometry =
+               storage->geometries;
+           geometry; geometry = geometry->next_geometry) {
+        for (uint16_t segment = 0;
+             segment < geometry->sequence.descriptor_count; ++segment) {
+          for (uint8_t word = 0; word < word_count; ++word) {
+            if (loom_aie2p_native_descriptor_word(geometry, segment, word) !=
+                loom_aie2p_native_descriptor_word(descriptor, segment, word)) {
+              storage->changed_words[segment] |= 1u << word;
+            }
+          }
+          // Caller bases are runtime relocations, so static register templates
+          // alone cannot prove the address pair survives another geometry.
+          if (descriptor->shim) {
+            storage->changed_words[segment] |= (1u << 1) | (1u << 2);
+          }
+        }
+      }
+    }
+  }
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < worker_count;
+       ++i) {
+    loom_aie2p_native_worker_t* worker = &context->workers[i];
+    loom_aie2p_native_dma_initializer_t** tail = &worker->dma_initializers;
+    for (const loom_aie2p_native_transfer_task_t* task = worker->transfer_tasks;
+         iree_status_is_ok(status) && task; task = task->next) {
+      const loom_aie2p_native_dma_descriptor_t* endpoints[] = {
+          task->local_descriptor, task->shim_descriptor};
+      for (uint8_t j = 0; iree_status_is_ok(status) && j < 2; ++j) {
+        loom_aie2p_native_dma_storage_t* storage = endpoints[j]->storage;
+        if (!storage || storage->initializer_worker == i) {
+          continue;
+        }
+        loom_aie2p_native_dma_initializer_t* initializer;
+        status = iree_arena_allocate(context->pass->arena, sizeof(*initializer),
+                                     (void**)&initializer);
+        if (iree_status_is_ok(status)) {
+          *initializer =
+              (loom_aie2p_native_dma_initializer_t){.descriptor = endpoints[j]};
+          *tail = initializer;
+          tail = &initializer->next;
+          storage->initializer_worker = i;
+        }
       }
     }
   }
