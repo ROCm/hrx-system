@@ -243,8 +243,12 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_set_profile(
   if (enabled && !queue->samples && iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_byte_storage_pool_allocate(
         queue->context, queue->options.memory,
-        (uint64_t)queue->options.retirement_capacity *
-            sizeof(iree_hal_amd_gpu_profile_sample_t),
+        // A power of two, as every byte-storage capacity; raw counter samples
+        // widen the per-dispatch stride beyond the timestamp pair.
+        iree_math_round_up_to_pow2_u64(
+            (uint64_t)queue->options.retirement_capacity *
+            (sizeof(iree_hal_amd_gpu_profile_sample_t) +
+             iree_hal_amd_gpu_profile_counter_sample_byte_length(profile))),
         queue->host_allocator, &queue->samples);
   }
   if (!enabled && iree_status_is_ok(status)) {
@@ -1707,9 +1711,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_dispatch(
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_executable_profile_dispatch(
           executable, token, &dispatch.geometry, flags, &operation->dispatch));
       operation->completion.count = 1;
+      // A direct dispatch carries the session's own counter samples.
       operation->completion.sample_stride =
           iree_hal_amd_gpu_profile_timestamps_dispatches(queue->profile)
-              ? sizeof(iree_hal_amd_gpu_profile_sample_t)
+              ? sizeof(iree_hal_amd_gpu_profile_sample_t) +
+                    iree_hal_amd_gpu_profile_counter_sample_byte_length(
+                        queue->profile)
               : 0;
     }
   }
@@ -2090,9 +2097,10 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_execute(
       operation->commands = submission->execute.program->profile;
       operation->completion.count =
           iree_hal_amd_gpu_profile_commands_count(operation->commands);
+      // A recording fixed its sample layout when it was recorded.
       operation->completion.sample_stride =
           iree_hal_amd_gpu_profile_timestamps_dispatches(queue->profile)
-              ? sizeof(iree_hal_amd_gpu_profile_sample_t)
+              ? submission->execute.program->sample_stride
               : 0;
     }
   }

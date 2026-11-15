@@ -197,11 +197,14 @@ typedef struct iree_hal_amd_gpu_device_t {
   iree_hal_amd_gpu_feedback_t feedback;
   // Optional profiling session, owned until externally serialized idle end.
   iree_hal_amd_gpu_profile_t* profile;
+  // Render-node owner holding the stable power state of a session that
+  // traces executables or samples counters; closed otherwise.
+  iree_hal_amd_gpu_perfmon_t perfmon;
+  // |perfmon| is open.
+  bool perfmon_active;
   // Native resources of a session that traces executables; inactive otherwise.
   // The session borrows |storage| from begin through end.
   struct {
-    // Render-node owner holding the stable power state.
-    iree_hal_amd_gpu_perfmon_t perfmon;
     // Target register table borrowed by |storage|.
     iree_hal_amd_gpu_pm4_thread_trace_profile_t registers;
     // Bracket and host views handed to the session.
@@ -214,6 +217,19 @@ typedef struct iree_hal_amd_gpu_device_t {
     // The resources above are prepared.
     bool active;
   } trace;
+  // Native resources of a session that samples hardware counters; inactive
+  // otherwise. The session borrows |storage| from begin through end, and
+  // recordings created meanwhile copy its selection.
+  struct {
+    // Target register table borrowed by |storage|.
+    iree_hal_amd_gpu_pm4_perf_counter_profile_t registers;
+    // Selection and host views handed to the session.
+    iree_hal_amd_gpu_profile_counter_storage_t storage;
+    // State words copied by every start sequence.
+    iree_hal_amd_fabric_memory_t state;
+    // The resources above are prepared.
+    bool active;
+  } counters;
   // Retained placement-local process infrastructure, independent of the pool.
   iree_async_proactor_pool_entry_t* proactor_entry;
   // Final public release closes queue admission before joining completion.
@@ -274,8 +290,47 @@ static void iree_hal_amd_gpu_device_trace_release(
     iree_hal_amd_fabric_memory_deinitialize(
         device->context->api, device->context->event_sink, &device->trace.info);
   }
-  iree_hal_amd_gpu_perfmon_close(&device->trace.perfmon);
   memset(&device->trace, 0, sizeof(device->trace));
+}
+
+// Returns the session's counter resources. The session has ended and every
+// queue is idle, so no sampled operation is in flight.
+static void iree_hal_amd_gpu_device_counter_release(
+    iree_hal_amd_gpu_device_t* device) {
+  if (!device->counters.active) {
+    return;
+  }
+  if (device->counters.state.handle) {
+    iree_hal_amd_fabric_memory_deinitialize(device->context->api,
+                                            device->context->event_sink,
+                                            &device->counters.state);
+  }
+  memset(&device->counters, 0, sizeof(device->counters));
+}
+
+// Opens the render-node owner shared by tracing and counting, once. The
+// kernel grants a stable power state to one context, so both use this one.
+static iree_status_t iree_hal_amd_gpu_device_perfmon_acquire(
+    iree_hal_amd_gpu_device_t* device) {
+  if (device->perfmon_active) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_perfmon_open(
+      &device->context->endpoint_info, &device->perfmon));
+  device->perfmon_active = true;
+  return iree_ok_status();
+}
+
+// Returns everything a tracing or counting session held and drops the power
+// state request.
+static void iree_hal_amd_gpu_device_profile_resources_release(
+    iree_hal_amd_gpu_device_t* device) {
+  iree_hal_amd_gpu_device_trace_release(device);
+  iree_hal_amd_gpu_device_counter_release(device);
+  if (device->perfmon_active) {
+    iree_hal_amd_gpu_perfmon_close(&device->perfmon);
+    device->perfmon_active = false;
+  }
 }
 
 static const iree_hal_device_vtable_t iree_hal_amd_gpu_device_vtable;
@@ -765,7 +820,7 @@ static bool iree_hal_amd_gpu_device_release_children(
       &device->memory.mappings);
   iree_status_t profile_status = iree_hal_amd_gpu_profile_end(device->profile);
   device->profile = NULL;
-  iree_hal_amd_gpu_device_trace_release(device);
+  iree_hal_amd_gpu_device_profile_resources_release(device);
   if (!iree_status_is_ok(profile_status)) {
     iree_hal_amd_gpu_context_report_status(
         device->context, (iree_hal_device_t*)device, profile_status);
@@ -1815,6 +1870,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_command_buffer(
       (uint32_t)
           device->context->target_info.compute.local_data_share_byte_length,
       device->scratch.profile.maximum_wave_byte_length, &profile,
+      device->counters.active ? &device->counters.storage.config : NULL,
       device->host_allocator, out_command_buffer);
 }
 
@@ -1856,15 +1912,14 @@ static iree_status_t iree_hal_amd_gpu_device_trace_prepare(
   }
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_thread_trace_profile_initialize(
       device->target.version, &device->trace.registers));
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_perfmon_open(
-      &device->context->endpoint_info, &device->trace.perfmon));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_device_perfmon_acquire(device));
   device->trace.active = true;
   iree_hal_amd_gpu_profile_trace_storage_t* storage = &device->trace.storage;
   *storage = (iree_hal_amd_gpu_profile_trace_storage_t){
       .config =
           {
               .profile = &device->trace.registers,
-              .engine_count = device->trace.perfmon.shader_engine_count,
+              .engine_count = device->perfmon.shader_engine_count,
               .workgroup_processor = options->target_compute_unit,
               .simd = options->simd_select,
               .buffer_length =
@@ -1875,7 +1930,7 @@ static iree_status_t iree_hal_amd_gpu_device_trace_prepare(
       .trace_limit = options->max_trace_count
                          ? options->max_trace_count
                          : IREE_HAL_AMD_GPU_DEVICE_TRACE_DEFAULT_LIMIT,
-      .stable_power_state = device->trace.perfmon.stable_power_state,
+      .stable_power_state = device->perfmon.stable_power_state,
   };
   iree_hal_amd_gpu_pm4_thread_trace_config_t* config = &storage->config;
   iree_status_t status = iree_ok_status();
@@ -1941,6 +1996,210 @@ static iree_status_t iree_hal_amd_gpu_device_trace_prepare(
   return status;
 }
 
+enum {
+  // Sampled dispatches per session when the caller names no bound. A sample
+  // pair costs two compute joins and a register copy per counter instance,
+  // so a session samples a bounded prefix of the matching dispatches.
+  IREE_HAL_AMD_GPU_DEVICE_COUNTER_DEFAULT_SAMPLE_LIMIT = 4096,
+};
+
+// Adds one event to the selection; an event already selected is kept once.
+static iree_status_t iree_hal_amd_gpu_device_counter_select(
+    iree_hal_amd_gpu_pm4_perf_counter_config_t* config,
+    const iree_hal_amd_gpu_pm4_perf_counter_event_t* event) {
+  const bool engine =
+      event->block == IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_BLOCK_ENGINE;
+  const iree_hal_amd_gpu_pm4_perf_counter_event_t** selected =
+      engine ? config->engine_counters : config->instance_counters;
+  uint32_t* count =
+      engine ? &config->engine_counter_count : &config->instance_counter_count;
+  const uint32_t capacity =
+      engine ? IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_MAX_ENGINE_COUNTERS
+             : IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_MAX_INSTANCE_COUNTERS;
+  for (uint32_t i = 0; i < *count; ++i) {
+    if (selected[i] == event) {
+      return iree_ok_status();
+    }
+  }
+  if (*count == capacity) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "GPU counter '%.*s' does not fit: the %.*s block samples at most %u "
+        "counters at once",
+        (int)event->name.size, event->name.data, (int)event->block_name.size,
+        event->block_name.data, capacity);
+  }
+  selected[(*count)++] = event;
+  return iree_ok_status();
+}
+
+// Resolves one requested name: an event of the target, or a named set. `sqg`
+// is the default set (waves by lane width, workitems and busy cycles per
+// shader engine); `instructions` is the per-workgroup-processor wave and
+// instruction counts.
+static iree_status_t iree_hal_amd_gpu_device_counter_select_name(
+    iree_hal_amd_gpu_pm4_perf_counter_config_t* config,
+    iree_string_view_t name) {
+  static const char* const sqg_names[] = {
+      "SQG_WAVES", "SQG_WAVES_32",    "SQG_WAVES_64",
+      "SQG_ITEMS", "SQG_BUSY_CYCLES",
+  };
+  static const char* const instruction_names[] = {
+      "SQ_WAVES",
+      "SQ_INSTS_VALU",
+      "SQ_INSTS_SALU",
+      "SQ_INSTS_ALL",
+  };
+  const char* const* set_names = NULL;
+  iree_host_size_t set_count = 0;
+  if (iree_string_view_equal(name, IREE_SV("sqg"))) {
+    set_names = sqg_names;
+    set_count = IREE_ARRAYSIZE(sqg_names);
+  } else if (iree_string_view_equal(name, IREE_SV("instructions"))) {
+    set_names = instruction_names;
+    set_count = IREE_ARRAYSIZE(instruction_names);
+  }
+  for (iree_host_size_t i = 0; i < set_count; ++i) {
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_device_counter_select(
+        config, iree_hal_amd_gpu_pm4_perf_counter_profile_find(
+                    config->profile, iree_make_cstring_view(set_names[i]))));
+  }
+  if (set_names) {
+    return iree_ok_status();
+  }
+  const iree_hal_amd_gpu_pm4_perf_counter_event_t* event =
+      iree_hal_amd_gpu_pm4_perf_counter_profile_find(config->profile, name);
+  if (!event) {
+    // UNAVAILABLE, as other devices report a counter they do not have: a
+    // device group can then drop the family for this device alone.
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "GPU counter '%.*s' is unavailable", (int)name.size,
+                            name.data);
+  }
+  return iree_hal_amd_gpu_device_counter_select(config, event);
+}
+
+// Resolves the session's counter selection and acquires its state words and
+// power state before any queue can publish a sample. Leaves nothing behind on
+// failure.
+static iree_status_t iree_hal_amd_gpu_device_counter_prepare(
+    iree_hal_amd_gpu_device_t* device,
+    const iree_hal_device_profiling_options_t* options) {
+  // Samples are published by the host on the primary PM4 ring.
+  if (device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL ||
+      device->queue_options.publication_mode !=
+          AMDF_QUEUE_PUBLICATION_MODE_USER) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "GPU counter samples require USER-published PM4 compute queues");
+  }
+  if (options->counter_set_count > 1) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "GPU counter samples use one counter set");
+  }
+  const iree_hal_profile_counter_set_selection_t* selection =
+      options->counter_set_count ? &options->counter_sets[0] : NULL;
+  if (selection && (selection->flags || (selection->counter_name_count &&
+                                         !selection->counter_names))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid GPU counter selection");
+  }
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_perf_counter_profile_initialize(
+      device->target.version, &device->counters.registers));
+  iree_hal_amd_gpu_profile_counter_storage_t* storage =
+      &device->counters.storage;
+  *storage = (iree_hal_amd_gpu_profile_counter_storage_t){
+      .config = {.profile = &device->counters.registers},
+      .sample_limit =
+          options->counter_samples.max_sample_count
+              ? options->counter_samples.max_sample_count
+              : IREE_HAL_AMD_GPU_DEVICE_COUNTER_DEFAULT_SAMPLE_LIMIT,
+  };
+  iree_hal_amd_gpu_pm4_perf_counter_config_t* config = &storage->config;
+  // Names are resolved before anything is acquired: an unknown one is a
+  // rejection that must leave no trace.
+  iree_status_t status = iree_ok_status();
+  if (!selection || !selection->counter_name_count) {
+    status =
+        iree_hal_amd_gpu_device_counter_select_name(config, IREE_SV("sqg"));
+  }
+  for (iree_host_size_t i = 0; selection && i < selection->counter_name_count &&
+                               iree_status_is_ok(status);
+       ++i) {
+    status = iree_hal_amd_gpu_device_counter_select_name(
+        config, selection->counter_names[i]);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_device_perfmon_acquire(device);
+  }
+  if (!iree_status_is_ok(status)) {
+    memset(&device->counters, 0, sizeof(device->counters));
+    return status;
+  }
+  device->counters.active = true;
+  storage->stable_power_state = device->perfmon.stable_power_state;
+  config->engine_count = device->perfmon.shader_engine_count;
+  if (config->engine_count >
+      IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_MAX_ENGINE_COUNT) {
+    status = iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "GPU reports %u shader engines; counter samples address at most %d",
+        config->engine_count,
+        IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_MAX_ENGINE_COUNT);
+  }
+  // Instance counters are read from every workgroup processor present: a pair
+  // of compute-unit bits in the kernel's per-array bitmap.
+  for (uint32_t engine = 0;
+       config->instance_counter_count && engine < config->engine_count &&
+       iree_status_is_ok(status);
+       ++engine) {
+    for (uint32_t array = 0;
+         array < iree_min(device->perfmon.shader_array_count, 4u) &&
+         iree_status_is_ok(status);
+         ++array) {
+      const uint32_t units = device->perfmon.compute_unit_bitmap[engine][array];
+      for (uint32_t i = 0; i < 16 && iree_status_is_ok(status); ++i) {
+        if (!(units & (3u << (2 * i)))) {
+          continue;
+        }
+        if (config->instance_count ==
+            IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_MAX_INSTANCE_COUNT) {
+          status = iree_make_status(
+              IREE_STATUS_UNIMPLEMENTED,
+              "GPU has more than %d workgroup processors; instance counters "
+              "cannot sample them all",
+              IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_MAX_INSTANCE_COUNT);
+          continue;
+        }
+        config->instances[config->instance_count++] =
+            iree_hal_amd_gpu_pm4_perf_counter_instance(engine, array, i);
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_pm4_perf_counter_config_validate(config);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_backing_allocate(
+        device->context, &device->memory.control, 4096, 4096,
+        &device->counters.state, &storage->state_address);
+  }
+  if (iree_status_is_ok(status)) {
+    uint32_t* words = (uint32_t*)device->counters.state.contents.data;
+    for (uint32_t i = 0; i < IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_STATE_WORD_COUNT;
+         ++i) {
+      ((volatile uint32_t*)words)[i] =
+          (uint32_t)IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_UNWRITTEN;
+    }
+    storage->state_words = words;
+    storage->signature =
+        iree_hal_amd_gpu_pm4_perf_counter_config_signature(config);
+  } else {
+    iree_hal_amd_gpu_device_counter_release(device);
+  }
+  return status;
+}
+
 static iree_status_t iree_hal_amd_gpu_device_profiling_begin(
     iree_hal_device_t* base, const iree_hal_device_profiling_options_t* options,
     iree_hal_profile_session_id_t session_id) {
@@ -1968,7 +2227,9 @@ static iree_status_t iree_hal_amd_gpu_device_profiling_begin(
     }
   }
   amdf_observation_clock_info_t clock = {0};
-  if (options->data_families & IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS) {
+  if (options->data_families &
+      (IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
+       IREE_HAL_DEVICE_PROFILING_DATA_COUNTER_SAMPLES)) {
     IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
         device->context->gpu->device_query_queue_clock_info(
             device->context->device,
@@ -1978,29 +2239,47 @@ static iree_status_t iree_hal_amd_gpu_device_profiling_begin(
   // Unsupported targets and queue protocols reject the family before the
   // sink session starts, like every other unsupported family.
   if (iree_hal_device_profiling_options_requests_executable_traces(options)) {
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_device_trace_prepare(
-        device, &options->executable_traces));
+    iree_status_t trace_status = iree_hal_amd_gpu_device_trace_prepare(
+        device, &options->executable_traces);
+    if (!iree_status_is_ok(trace_status)) {
+      iree_hal_amd_gpu_device_profile_resources_release(device);
+      return trace_status;
+    }
+  }
+  if (iree_hal_device_profiling_options_requests_counter_samples(options)) {
+    iree_status_t counter_status =
+        iree_hal_amd_gpu_device_counter_prepare(device, options);
+    if (!iree_status_is_ok(counter_status)) {
+      iree_hal_amd_gpu_device_profile_resources_release(device);
+      return counter_status;
+    }
   }
   iree_hal_amd_gpu_profile_t* profile = NULL;
   iree_status_t status = iree_hal_amd_gpu_profile_begin(
       options, session_id, device->queue_count, clock.frequency_hz,
       device->host_allocator, &profile);
   if (!iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_device_trace_release(device);
+    iree_hal_amd_gpu_device_profile_resources_release(device);
     return status;
   }
   if (device->trace.active) {
     iree_hal_amd_gpu_profile_set_trace_storage(profile, &device->trace.storage);
   }
-  status = iree_hal_amd_gpu_queue_membership_set_profile(&device->membership,
-                                                         profile);
+  if (device->counters.active) {
+    status = iree_hal_amd_gpu_profile_set_counter_storage(
+        profile, &device->counters.storage);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_queue_membership_set_profile(&device->membership,
+                                                           profile);
+  }
   if (iree_status_is_ok(status)) {
     device->profile = profile;
     device->memory.mappings.profile = profile;
   } else {
     // Membership has already cleared all queue borrows after a failed begin.
     status = iree_status_join(status, iree_hal_amd_gpu_profile_end(profile));
-    iree_hal_amd_gpu_device_trace_release(device);
+    iree_hal_amd_gpu_device_profile_resources_release(device);
   }
   return status;
 }
@@ -2021,7 +2300,7 @@ static iree_status_t iree_hal_amd_gpu_device_profiling_end(
       iree_hal_amd_gpu_queue_membership_set_profile(&device->membership, NULL);
   status = iree_status_join(status, iree_hal_amd_gpu_profile_end(profile));
   // The final flush has read the trace buffers; queues are idle.
-  iree_hal_amd_gpu_device_trace_release(device);
+  iree_hal_amd_gpu_device_profile_resources_release(device);
   return status;
 }
 

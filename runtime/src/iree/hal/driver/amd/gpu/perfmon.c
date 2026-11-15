@@ -54,6 +54,9 @@ iree_status_t iree_hal_amd_gpu_perfmon_open(
                             strerror(error));
   }
   out_perfmon->shader_engine_count = device.num_shader_engines;
+  out_perfmon->shader_array_count = device.num_shader_arrays_per_engine;
+  memcpy(out_perfmon->compute_unit_bitmap, device.cu_bitmap,
+         sizeof(out_perfmon->compute_unit_bitmap));
   union drm_amdgpu_ctx context = {
       .in = {.op = AMDGPU_CTX_OP_ALLOC_CTX},
   };

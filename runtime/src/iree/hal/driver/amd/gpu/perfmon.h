@@ -30,6 +30,11 @@ typedef struct iree_hal_amd_gpu_perfmon_t {
   bool stable_power_state;
   // Shader engines reported by the kernel driver.
   uint32_t shader_engine_count;
+  // Shader arrays per engine reported by the kernel driver.
+  uint32_t shader_array_count;
+  // Compute units present in each engine's arrays, one bit per unit. A
+  // workgroup processor on gfx10 and later is a pair of adjacent units.
+  uint32_t compute_unit_bitmap[4][4];
 } iree_hal_amd_gpu_perfmon_t;
 
 // Opens the endpoint's render node, reads the device geometry and requests a

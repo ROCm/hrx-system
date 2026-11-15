@@ -9,6 +9,7 @@
 
 #include "iree/hal/api.h"
 #include "iree/hal/driver/amd/gpu/image/image.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/perf_counters.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/thread_trace.h"
 
 #ifdef __cplusplus
@@ -73,6 +74,10 @@ typedef struct iree_hal_amd_gpu_profile_sample_t {
   uint64_t end;
 } iree_hal_amd_gpu_profile_sample_t;
 
+// A PM4 dispatch of a counter-capable owner extends its sample with two raw
+// counter samples, taken before the start tick and after the end tick. Their
+// layout belongs to the counter selection the owner was prepared with.
+
 // An independently retiring dispatch range. Its native owner keeps samples
 // alive until completion copies them into the bounded host stream. Chunked
 // publication stores this view in each retirement record, not the shared
@@ -81,6 +86,7 @@ typedef struct iree_hal_amd_gpu_profile_completion_t {
   // First timestamp pair, or NULL for metadata-only capture.
   const iree_hal_amd_gpu_profile_sample_t* samples;
   // Byte distance between timestamp pairs; zero for metadata-only capture.
+  // Bytes beyond the pair hold the dispatch's two raw counter samples.
   uint32_t sample_stride;
   // First dispatch in the immutable command metadata, or zero for direct work.
   uint32_t first;
@@ -131,6 +137,14 @@ typedef struct iree_hal_amd_gpu_profile_operation_t {
   // A claim for this operation was refused because the bracket was held. Set
   // once, so publication retries count one untraced operation, not several.
   bool trace_refused;
+  // This operation's publication starts, samples and stops the session's
+  // hardware counters; completion turns its raw samples into records.
+  bool counted;
+  // A counter claim for this operation was refused. Set once, like
+  // trace_refused.
+  bool counter_refused;
+  // Dispatches of this operation the session's sample bound still admits.
+  uint32_t counter_grant;
 } iree_hal_amd_gpu_profile_operation_t;
 
 // Device-owned native resources of the session's single thread-trace bracket.
@@ -179,11 +193,80 @@ iree_hal_amd_gpu_profile_trace_claim(
 // Returns an unpublished claim; the bracket and its budget are available again.
 void iree_hal_amd_gpu_profile_trace_cancel(iree_hal_amd_gpu_profile_t* profile);
 
+// Device-owned resources of a session that samples hardware counters. The
+// device prepares them before queues join the session and releases them after
+// the session ends.
+typedef struct iree_hal_amd_gpu_profile_counter_storage_t {
+  // Validated selection shared by every sequence and raw sample.
+  iree_hal_amd_gpu_pm4_perf_counter_config_t config;
+  // Layout identity of |config|; recordings prepared with another one are not
+  // sampled.
+  uint64_t signature;
+  // GPU address and host view of the STATE_WORD_COUNT words every start
+  // sequence copies. Host-initialized to the unwritten pattern once.
+  uint64_t state_address;
+  const uint32_t* state_words;
+  // Upper bound on sampled dispatches in the session.
+  uint64_t sample_limit;
+  // A stable device power state is held for the session.
+  bool stable_power_state;
+} iree_hal_amd_gpu_profile_counter_storage_t;
+
+// Installs the counter selection of a session that admitted counter samples
+// and allocates each registered queue's sample records. Called once, before
+// any queue borrows the session. The storage is borrowed until the session
+// ends. Without it the session samples nothing.
+iree_status_t iree_hal_amd_gpu_profile_set_counter_storage(
+    iree_hal_amd_gpu_profile_t* profile,
+    const iree_hal_amd_gpu_profile_counter_storage_t* storage);
+
+// True when the session admitted the counter-sample family.
+bool iree_hal_amd_gpu_profile_counts_dispatches(
+    const iree_hal_amd_gpu_profile_t* profile);
+
+// Bytes a directly published dispatch reserves after its timestamp pair: two
+// raw counter samples, or zero when the session samples no counters.
+uint32_t iree_hal_amd_gpu_profile_counter_sample_byte_length(
+    const iree_hal_amd_gpu_profile_t* profile);
+
+// Admits a captured operation about to be published into a sampled range.
+// Returns NULL when the session does not sample, the operation is not captured
+// or matches no predicate, the sample bound is reached, or another queue holds
+// the range. A recording passes the layout signature it was prepared with and
+// is refused unless that is the session's; a direct dispatch passes NULL.
+//
+// Counting is per queue but the registers are device-wide, so the range is
+// exclusive across queues: operations of the owning queue share it, because
+// one ring serializes them, and every other queue's operations run uncounted
+// until the owner's last sampled operation completes. That is what makes a
+// sample hold exactly its own dispatch among this device's queues.
+//
+// The publisher either publishes the start, sample and stop sequences around
+// the operation and sets operation->counted, or returns the claim with
+// counter_cancel. Performs no allocation, sink call or native call.
+const iree_hal_amd_gpu_profile_counter_storage_t*
+iree_hal_amd_gpu_profile_counter_claim(
+    iree_hal_amd_gpu_profile_t* profile,
+    iree_hal_amd_gpu_profile_operation_t* operation,
+    const uint64_t* recorded_signature);
+
+// Returns an unpublished claim: the range and the bound are available again.
+void iree_hal_amd_gpu_profile_counter_cancel(
+    iree_hal_amd_gpu_profile_t* profile,
+    iree_hal_amd_gpu_profile_operation_t* operation);
+
+// Reports a matching operation the publisher has to run unsampled for a
+// reason of its own, such as sample sequences its ring cannot hold. Counted
+// once per operation, like a refused claim.
+void iree_hal_amd_gpu_profile_counter_skip(
+    iree_hal_amd_gpu_profile_t* profile,
+    iree_hal_amd_gpu_profile_operation_t* operation);
+
 // Begins the requested capture and emits device/queue metadata. Unsupported
 // families fail before starting a sink session. An empty request returns NULL.
 // The filter pattern is copied and the sink remains retained until end.
-// Executable traces are admitted here and need set_trace_storage to produce
-// data.
+// Executable traces and counter samples are admitted here and need
+// set_trace_storage and set_counter_storage to produce data.
 iree_status_t iree_hal_amd_gpu_profile_begin(
     const iree_hal_device_profiling_options_t* options,
     iree_hal_profile_session_id_t session_id, uint32_t queue_count,

@@ -20,7 +20,10 @@ extern "C" {
 // The recording and its independently retainable program borrow the device.
 // The device-owned program pool provides placement and trim; native sealing
 // allocations run on the caller. UNRETAINED controls only the caller's direct
-// buffers/executables, not native program ownership.
+// buffers/executables, not native program ownership. A recording that keeps
+// profile metadata and is created while |counters| is non-NULL also brackets
+// each dispatch with that selection's sample sequences, disabled unless an
+// execution samples counters. The selection is copied.
 iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
     const iree_hal_queue_family_t* family,
     iree_hal_amd_gpu_pm4_program_pool_t* pool,
@@ -29,6 +32,7 @@ iree_status_t iree_hal_amd_gpu_pm4_command_buffer_create(
     uint32_t maximum_group_segment_byte_length,
     uint32_t maximum_scratch_wave_byte_length,
     const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
+    const iree_hal_amd_gpu_pm4_perf_counter_config_t* counters,
     iree_allocator_t host_allocator, iree_hal_command_buffer_t** out_buffer);
 
 // Separately retained cold recording facts read directly by publication. The
@@ -62,6 +66,15 @@ typedef struct iree_hal_amd_gpu_pm4_command_program_t {
   // Optional host-only dispatch attribution, independently retainable by a
   // sink.
   iree_hal_amd_gpu_profile_commands_t* profile;
+  // Layout identity of the counter selection whose sample sequences bracket
+  // each dispatch, or zero when the recording carries none.
+  uint64_t counter_signature;
+  // DWORDs of one sample sequence; an unsampled execution replaces each with
+  // a NOP of this extent.
+  uint32_t counter_sample_word_count;
+  // Bytes one dispatch occupies in an execution's sample storage: its
+  // timestamp pair followed by two raw counter samples when it carries them.
+  uint32_t sample_stride;
 } iree_hal_amd_gpu_pm4_command_program_t;
 
 // Retains/releases sealed native program state independently of the recording
@@ -110,11 +123,13 @@ void iree_hal_amd_gpu_pm4_command_invocation_deinitialize(
 // keeps values on the CPU and fills out_fixup_words; its values mapping is
 // NULL. Program emission independently fills actual builtin ABI arguments.
 // cooperative_address comes from the current queue, including after trim.
+// sample_counters enables the recording's counter sample sequences for this
+// execution; it requires a profile address and a recording that carries them.
 iree_status_t iree_hal_amd_gpu_pm4_command_invocation_write(
     const iree_hal_amd_gpu_pm4_command_invocation_t* invocation,
     uint32_t queue_ordinal, uint64_t cooperative_address, uint64_t dispatch_id,
-    uint64_t continuation, uint64_t profile_address, uint64_t* values,
-    uint32_t* out_fixup_words);
+    uint64_t continuation, uint64_t profile_address, bool sample_counters,
+    uint64_t* values, uint32_t* out_fixup_words);
 
 #ifdef __cplusplus
 }  // extern "C"
