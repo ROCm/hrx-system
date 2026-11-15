@@ -745,6 +745,7 @@ LOOM_DEFINE_SEGMENTED_OPERANDS(loom_vector_fragment_load_auxiliary, 5)
 LOOM_DEFINE_RESULT(loom_vector_fragment_load_result, 0)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_load_role, 0, loom_vector_role_t)
 LOOM_DEFINE_ATTR_DICT(loom_vector_fragment_load_auxiliary_names, 1)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_fragment_load_memory_flags)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_load_cache_scope, 2, loom_cache_scope_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_load_cache_temporal, 3, loom_cache_temporal_t)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_fragment_load_static_indices, 4)
@@ -758,6 +759,7 @@ iree_status_t loom_vector_fragment_load_build(
     loom_builder_t* builder,
     loom_vector_fragment_load_build_flags_t build_flags,
     loom_vector_role_t role,
+    uint8_t instance_flags,
     loom_may_consume loom_value_id_t view,
     const loom_value_id_t* indices,
     iree_host_size_t indices_count,
@@ -792,6 +794,7 @@ LOOM_DEFINE_SEGMENTED_OPTIONAL_OPERAND(loom_vector_fragment_store_blocks, 3)
 LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_store_rows, 4)
 LOOM_DEFINE_SEGMENTED_OPERAND(loom_vector_fragment_store_columns, 5)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_store_role, 0, loom_vector_role_t)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_fragment_store_memory_flags)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_store_cache_scope, 1, loom_cache_scope_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_fragment_store_cache_temporal, 2, loom_cache_temporal_t)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_fragment_store_static_indices, 3)
@@ -805,6 +808,7 @@ iree_status_t loom_vector_fragment_store_build(
     loom_builder_t* builder,
     loom_vector_fragment_store_build_flags_t build_flags,
     loom_vector_role_t role,
+    uint8_t instance_flags,
     loom_value_id_t value,
     loom_value_id_t view,
     const loom_value_id_t* indices,
@@ -905,6 +909,7 @@ LOOM_DEFINE_OPERAND(loom_vector_load_mask_mask, 1)
 LOOM_DEFINE_OPERAND(loom_vector_load_mask_passthrough, 2)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_vector_load_mask_indices, 3)
 LOOM_DEFINE_RESULT(loom_vector_load_mask_result, 0)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_load_mask_memory_flags)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_load_mask_cache_scope, 0, loom_cache_scope_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_load_mask_cache_temporal, 1, loom_cache_temporal_t)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_load_mask_static_indices, 2)
@@ -916,6 +921,7 @@ typedef uint32_t loom_vector_load_mask_build_flags_t;
 iree_status_t loom_vector_load_mask_build(
     loom_builder_t* builder,
     loom_vector_load_mask_build_flags_t build_flags,
+    uint8_t instance_flags,
     loom_may_consume loom_value_id_t view,
     const loom_value_id_t* indices,
     iree_host_size_t indices_count,
@@ -940,6 +946,7 @@ LOOM_DEFINE_OPERAND(loom_vector_store_mask_value, 0)
 LOOM_DEFINE_OPERAND(loom_vector_store_mask_view, 1)
 LOOM_DEFINE_OPERAND(loom_vector_store_mask_mask, 2)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_vector_store_mask_indices, 3)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_store_mask_memory_flags)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_store_mask_cache_scope, 0, loom_cache_scope_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_store_mask_cache_temporal, 1, loom_cache_temporal_t)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_store_mask_static_indices, 2)
@@ -951,6 +958,7 @@ typedef uint32_t loom_vector_store_mask_build_flags_t;
 iree_status_t loom_vector_store_mask_build(
     loom_builder_t* builder,
     loom_vector_store_mask_build_flags_t build_flags,
+    uint8_t instance_flags,
     loom_value_id_t value,
     loom_value_id_t view,
     const loom_value_id_t* indices,
@@ -974,6 +982,7 @@ LOOM_DEFINE_OPERAND(loom_vector_load_expand_mask, 1)
 LOOM_DEFINE_OPERAND(loom_vector_load_expand_passthrough, 2)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_vector_load_expand_indices, 3)
 LOOM_DEFINE_RESULT(loom_vector_load_expand_result, 0)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_load_expand_memory_flags)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_load_expand_cache_scope, 0, loom_cache_scope_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_load_expand_cache_temporal, 1, loom_cache_temporal_t)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_load_expand_static_indices, 2)
@@ -985,6 +994,7 @@ typedef uint32_t loom_vector_load_expand_build_flags_t;
 iree_status_t loom_vector_load_expand_build(
     loom_builder_t* builder,
     loom_vector_load_expand_build_flags_t build_flags,
+    uint8_t instance_flags,
     loom_may_consume loom_value_id_t view,
     const loom_value_id_t* indices,
     iree_host_size_t indices_count,
@@ -1008,6 +1018,7 @@ LOOM_DEFINE_OPERAND(loom_vector_store_compress_value, 0)
 LOOM_DEFINE_OPERAND(loom_vector_store_compress_view, 1)
 LOOM_DEFINE_OPERAND(loom_vector_store_compress_mask, 2)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_vector_store_compress_indices, 3)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_store_compress_memory_flags)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_store_compress_cache_scope, 0, loom_cache_scope_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_store_compress_cache_temporal, 1, loom_cache_temporal_t)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_store_compress_static_indices, 2)
@@ -1019,6 +1030,7 @@ typedef uint32_t loom_vector_store_compress_build_flags_t;
 iree_status_t loom_vector_store_compress_build(
     loom_builder_t* builder,
     loom_vector_store_compress_build_flags_t build_flags,
+    uint8_t instance_flags,
     loom_value_id_t value,
     loom_value_id_t view,
     const loom_value_id_t* indices,
@@ -1041,6 +1053,7 @@ LOOM_DEFINE_OPERAND(loom_vector_gather_view, 0)
 LOOM_DEFINE_OPERAND(loom_vector_gather_offsets, 1)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_vector_gather_indices, 2)
 LOOM_DEFINE_RESULT(loom_vector_gather_result, 0)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_gather_memory_flags)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_gather_cache_scope, 0, loom_cache_scope_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_gather_cache_temporal, 1, loom_cache_temporal_t)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_gather_static_indices, 2)
@@ -1052,6 +1065,7 @@ typedef uint32_t loom_vector_gather_build_flags_t;
 iree_status_t loom_vector_gather_build(
     loom_builder_t* builder,
     loom_vector_gather_build_flags_t build_flags,
+    uint8_t instance_flags,
     loom_may_consume loom_value_id_t view,
     const loom_value_id_t* indices,
     iree_host_size_t indices_count,
@@ -1075,6 +1089,7 @@ LOOM_DEFINE_OPERAND(loom_vector_scatter_value, 0)
 LOOM_DEFINE_OPERAND(loom_vector_scatter_view, 1)
 LOOM_DEFINE_OPERAND(loom_vector_scatter_offsets, 2)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_vector_scatter_indices, 3)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_scatter_memory_flags)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_scatter_cache_scope, 0, loom_cache_scope_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_scatter_cache_temporal, 1, loom_cache_temporal_t)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_scatter_static_indices, 2)
@@ -1086,6 +1101,7 @@ typedef uint32_t loom_vector_scatter_build_flags_t;
 iree_status_t loom_vector_scatter_build(
     loom_builder_t* builder,
     loom_vector_scatter_build_flags_t build_flags,
+    uint8_t instance_flags,
     loom_value_id_t value,
     loom_value_id_t view,
     const loom_value_id_t* indices,
@@ -1110,6 +1126,7 @@ LOOM_DEFINE_OPERAND(loom_vector_gather_mask_mask, 2)
 LOOM_DEFINE_OPERAND(loom_vector_gather_mask_passthrough, 3)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_vector_gather_mask_indices, 4)
 LOOM_DEFINE_RESULT(loom_vector_gather_mask_result, 0)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_gather_mask_memory_flags)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_gather_mask_cache_scope, 0, loom_cache_scope_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_gather_mask_cache_temporal, 1, loom_cache_temporal_t)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_gather_mask_static_indices, 2)
@@ -1121,6 +1138,7 @@ typedef uint32_t loom_vector_gather_mask_build_flags_t;
 iree_status_t loom_vector_gather_mask_build(
     loom_builder_t* builder,
     loom_vector_gather_mask_build_flags_t build_flags,
+    uint8_t instance_flags,
     loom_may_consume loom_value_id_t view,
     const loom_value_id_t* indices,
     iree_host_size_t indices_count,
@@ -1146,6 +1164,7 @@ LOOM_DEFINE_OPERAND(loom_vector_scatter_mask_view, 1)
 LOOM_DEFINE_OPERAND(loom_vector_scatter_mask_offsets, 2)
 LOOM_DEFINE_OPERAND(loom_vector_scatter_mask_mask, 3)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_vector_scatter_mask_indices, 4)
+LOOM_DEFINE_INSTANCE_FLAGS(loom_vector_scatter_mask_memory_flags)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_scatter_mask_cache_scope, 0, loom_cache_scope_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_vector_scatter_mask_cache_temporal, 1, loom_cache_temporal_t)
 LOOM_DEFINE_ATTR_I64_ARRAY(loom_vector_scatter_mask_static_indices, 2)
@@ -1157,6 +1176,7 @@ typedef uint32_t loom_vector_scatter_mask_build_flags_t;
 iree_status_t loom_vector_scatter_mask_build(
     loom_builder_t* builder,
     loom_vector_scatter_mask_build_flags_t build_flags,
+    uint8_t instance_flags,
     loom_value_id_t value,
     loom_value_id_t view,
     const loom_value_id_t* indices,

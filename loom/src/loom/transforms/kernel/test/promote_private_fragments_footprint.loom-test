@@ -13,7 +13,7 @@ func.def @promoted_fragment_preserves_assume_predicates(%input: buffer, %output:
   %end = index.constant 2 : index
   %step = index.constant 1 : index
   scf.for %lane = [%start to %end step %step] {
-    %copy = view.load %input_view[%row_in_bounds, %lane] : view<[%n_idx]x2xi32> -> i32
+    %copy = view.load<type_disjoint> %input_view[%row_in_bounds, %lane] : view<[%n_idx]x2xi32> -> i32
     view.store %copy, %fragment[%lane] : i32, view<2xi32>
   }
   %first_lane = index.constant 0 : index
@@ -32,7 +32,7 @@ func.def @promoted_fragment_preserves_assume_predicates(%input: buffer, %output:
   %input_view = buffer.view %input[%base] : buffer -> view<[%n_idx]x2xi32>
   %output_view = buffer.view %output[%base] : buffer -> view<[%n_idx]x4xf32>
   %row_in_bounds, %n_idx_assumed = index.assume %row, %n_idx [ge(%row, 0), lt(%row, %n_idx)] : index, index
-  %fragment_vector = vector.load %input_view[%row_in_bounds, 0] : view<[%n_idx]x2xi32> -> vector<2xi32>
+  %fragment_vector = vector.load<type_disjoint> %input_view[%row_in_bounds, 0] : view<[%n_idx]x2xi32> -> vector<2xi32>
   %first_lane = index.constant 0 : index
   %selected = vector.extract %fragment_vector[%first_lane] : vector<2xi32> -> i32
   %selected_bounded, %n_bounded = scalar.assume %selected, %n [lt(%selected, %n)] : i32, i32

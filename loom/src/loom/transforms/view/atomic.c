@@ -71,7 +71,9 @@ static iree_status_t loom_view_atomic_private_load(loom_builder_t* builder,
   loom_op_t* load = NULL;
   IREE_RETURN_IF_ERROR(loom_view_load_build(
       builder, flags,
-      loom_memory_access_flags(access) & LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS,
+      loom_memory_access_flags(access) &
+          (LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS |
+           LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT),
       loom_memory_access_view(access), indices.values, indices.count,
       static_indices.i64_array, static_indices.count, loom_attr_as_enum(scope),
       loom_attr_as_enum(temporal), type, access.op->location, &load));
@@ -97,7 +99,9 @@ static iree_status_t loom_view_atomic_private_store(loom_builder_t* builder,
   loom_op_t* store = NULL;
   return loom_view_store_build(
       builder, flags,
-      loom_memory_access_flags(access) & LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS,
+      loom_memory_access_flags(access) &
+          (LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS |
+           LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT),
       value, loom_memory_access_view(access), indices.values, indices.count,
       static_indices.i64_array, static_indices.count, loom_attr_as_enum(scope),
       loom_attr_as_enum(temporal), access.op->location, &store);
@@ -242,7 +246,9 @@ static iree_status_t loom_view_atomic_build_cmpxchg_before_region(
   loom_op_t* cmpxchg_op = NULL;
   IREE_RETURN_IF_ERROR(loom_view_atomic_cmpxchg_build(
       builder, build_flags,
-      loom_memory_access_flags(access) & LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS,
+      loom_memory_access_flags(access) &
+          (LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS |
+           LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT),
       expected, combined, loom_memory_access_view(access), indices.values,
       indices.count, static_indices.i64_array, static_indices.count,
       success_ordering, kAtomicRmwFailureOrderings[success_ordering],

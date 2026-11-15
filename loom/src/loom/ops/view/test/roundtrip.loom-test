@@ -19,10 +19,10 @@ func.def @typed_frame_arrays(%count: index, %pool: pool) {
 // ====
 
 func.def @atomic_observation_and_publication(%view: view<1xi32>, %value: i32) -> (i32, i32, i32) {
-  %relaxed = view.atomic.load %view[0] {ordering = relaxed, scope = system} : view<1xi32> -> i32
+  %relaxed = view.atomic.load<type_disjoint> %view[0] {ordering = relaxed, scope = system} : view<1xi32> -> i32
   %acquired = view.atomic.load %view[0] {ordering = acquire, scope = device} : view<1xi32> -> i32
   %sequential = view.atomic.load %view[0] {ordering = seq_cst, scope = system} : view<1xi32> -> i32
-  view.atomic.store %value, %view[0] {ordering = relaxed, scope = system} : i32, view<1xi32>
+  view.atomic.store<type_disjoint> %value, %view[0] {ordering = relaxed, scope = system} : i32, view<1xi32>
   view.atomic.store %value, %view[0] {ordering = release, scope = device} : i32, view<1xi32>
   view.atomic.store %value, %view[0] {ordering = seq_cst, scope = system} : i32, view<1xi32>
   func.return %relaxed, %acquired, %sequential : i32, i32, i32
@@ -112,8 +112,8 @@ func.def @refine_view(%buffer: buffer, %offset: offset, %m: index) {
 func.def @scalar_view_memory(%buffer: buffer, %offset: offset, %row: index, %col: index, %value: f32) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<8x16xf32, %layout>
-  %loaded = view.load %view[%row, %col] {cache_scope = device, cache_temporal = non_temporal} : view<8x16xf32, %layout> -> f32
-  view.store %value, %view[0, %col] {cache_scope = system, cache_temporal = writeback} : f32, view<8x16xf32, %layout>
+  %loaded = view.load<type_disjoint> %view[%row, %col] {cache_scope = device, cache_temporal = non_temporal} : view<8x16xf32, %layout> -> f32
+  view.store<type_disjoint> %value, %view[0, %col] {cache_scope = system, cache_temporal = writeback} : f32, view<8x16xf32, %layout>
   test.use %loaded : f32
   func.return
 }
@@ -137,11 +137,11 @@ func.def @scalar_view_atomics(%buffer: buffer, %offset: offset, %row: index, %co
   %layout = encoding.layout.dense : encoding<layout>
   %iview = buffer.view %buffer[%offset] : buffer -> view<8x16xi32, %layout>
   %fview = buffer.view %buffer[%offset] : buffer -> view<8x16xf32, %layout>
-  view.atomic.reduce<addi> %ivalue, %iview[%row, %col] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : i32, view<8x16xi32, %layout>
+  view.atomic.reduce<addi, type_disjoint> %ivalue, %iview[%row, %col] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : i32, view<8x16xi32, %layout>
   view.atomic.reduce<addf> %fvalue, %fview[%row, 0] {ordering = release, scope = device} : f32, view<8x16xf32, %layout>
   %oldi = view.atomic.rmw<xchgi> %ivalue, %iview[0, %col] {ordering = acq_rel, scope = system} : i32, view<8x16xi32, %layout> -> i32
   %oldf = view.atomic.rmw<addf> %fvalue, %fview[%row, %col] {ordering = seq_cst, scope = device} : f32, view<8x16xf32, %layout> -> f32
-  %cmp = view.atomic.cmpxchg %ivalue, %ivalue, %iview[%row, %col] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i32, view<8x16xi32, %layout> -> i32
+  %cmp = view.atomic.cmpxchg<type_disjoint> %ivalue, %ivalue, %iview[%row, %col] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i32, view<8x16xi32, %layout> -> i32
   %cmpf = view.atomic.cmpxchg %fvalue, %fvalue, %fview[%row, %col] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : f32, view<8x16xf32, %layout> -> f32
   test.use %oldi, %oldf, %cmp, %cmpf : i32, f32, i32, f32
   func.return

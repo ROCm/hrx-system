@@ -179,7 +179,7 @@ func.def @register_rectangle(%values: vector<2x4xi16>, %column: index) -> (vecto
 func.def @composed_load_origins(%input: buffer, %batch: index, %row: index, %column: index) -> (vector<1x2xi16>) {
   %base = index.constant 0 : offset
   %view = buffer.view %input[%base] : buffer -> view<3x8x12xi16>
-  %values = vector.load %view[%batch, %row, 2] {cache_scope = device, cache_temporal = non_temporal} : view<3x8x12xi16> -> vector<2x4xi16>
+  %values = vector.load<type_disjoint> %view[%batch, %row, 2] {cache_scope = device, cache_temporal = non_temporal} : view<3x8x12xi16> -> vector<2x4xi16>
   %result = vector.slice %values[1, %column] : vector<2x4xi16> -> vector<1x2xi16>
   func.return %result : vector<1x2xi16>
 }
@@ -192,7 +192,7 @@ func.def @composed_load_origins(%input: buffer, %batch: index, %row: index, %col
   %10 = index.add %row, %9 : index
   %11 = index.constant 2 : index
   %12 = index.add %column, %11 : index
-  %14 = vector.load %view[%batch, %10, %12] {cache_scope = device, cache_temporal = non_temporal} : view<3x8x12xi16> -> vector<2xi16>
+  %14 = vector.load<type_disjoint> %view[%batch, %10, %12] {cache_scope = device, cache_temporal = non_temporal} : view<3x8x12xi16> -> vector<2xi16>
   %result = vector.bitcast %14 : vector<2xi16> to vector<1x2xi16>
   func.return %result : vector<1x2xi16>
 }

@@ -1498,6 +1498,16 @@ loom_value_id_t loom_memory_access_view(loom_memory_access_t access) {
       access, vtable ? vtable->view_operand_index : LOOM_OPERAND_INDEX_NONE);
 }
 
+loom_scalar_type_t loom_memory_access_alias_type(const loom_module_t* module,
+                                                 loom_memory_access_t access) {
+  if (!iree_all_bits_set(loom_memory_access_flags(access),
+                         LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT)) {
+    return LOOM_SCALAR_TYPE_NONE;
+  }
+  return loom_type_element_type(
+      loom_module_value_type(module, loom_memory_access_view(access)));
+}
+
 loom_value_id_t loom_memory_access_byte_offset(loom_memory_access_t access) {
   const loom_memory_access_vtable_t* vtable = loom_memory_access_vtable(access);
   return loom_memory_access_operand(

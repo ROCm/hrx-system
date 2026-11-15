@@ -518,10 +518,11 @@ std::optional<Value> FragmentIntrinsic::call(
       auto build_flags =
           blocked ? LOOM_VECTOR_FRAGMENT_LOAD_BUILD_FLAG_HAS_BLOCKS : 0;
       check(loom_vector_fragment_load_build(
-          builder, build_flags, role_, view_component(arguments[0]),
-          indices.data(), dynamic_count, static_indices.data(),
-          view_->extents.size(), blocks, rows, columns, named_operands.data(),
-          named_operand_names_.size(), 0, 0, result_type_, location, &op));
+          builder, build_flags, role_, /*instance_flags=*/0,
+          view_component(arguments[0]), indices.data(), dynamic_count,
+          static_indices.data(), view_->extents.size(), blocks, rows, columns,
+          named_operands.data(), named_operand_names_.size(), 0, 0,
+          result_type_, location, &op));
       return Value(loom_op_results(op)[0]);
     }
     case Operation::Store: {
@@ -544,7 +545,7 @@ std::optional<Value> FragmentIntrinsic::call(
       auto build_flags =
           blocked ? LOOM_VECTOR_FRAGMENT_STORE_BUILD_FLAG_HAS_BLOCKS : 0;
       check(loom_vector_fragment_store_build(
-          builder, build_flags, role_, arguments[0].ssa(),
+          builder, build_flags, role_, /*instance_flags=*/0, arguments[0].ssa(),
           view_component(arguments[1]), indices.data(), dynamic_count,
           static_indices.data(), view_->extents.size(), blocks, rows, columns,
           0, 0, location, &op));

@@ -203,9 +203,12 @@ static iree_status_t loom_wasm_partial_memory_rewrite_load(
 
     const int64_t static_index = 0;
     loom_op_t* load_op = NULL;
+    const loom_memory_access_flags_t chunk_memory_flags =
+        loom_vector_load_memory_flags(op) &
+        ~LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT;
     IREE_RETURN_IF_ERROR(loom_view_load_build(
-        builder, cache_policy.build_flags, loom_vector_load_memory_flags(op),
-        chunk_view, /*indices=*/NULL, 0, &static_index,
+        builder, cache_policy.build_flags, chunk_memory_flags, chunk_view,
+        /*indices=*/NULL, 0, &static_index,
         /*static_indices_count=*/1, cache_policy.cache_scope,
         cache_policy.cache_temporal, loom_type_scalar(integer_type),
         op->location, &load_op));
@@ -297,8 +300,11 @@ static iree_status_t loom_wasm_partial_memory_rewrite_store(
     IREE_RETURN_IF_ERROR(loom_wasm_partial_memory_build_chunk_view(
         builder, window, plan, chunk, op->location, &chunk_view));
     loom_op_t* store_op = NULL;
+    const loom_memory_access_flags_t chunk_memory_flags =
+        loom_vector_store_memory_flags(op) &
+        ~LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT;
     IREE_RETURN_IF_ERROR(loom_view_store_build(
-        builder, cache_policy.build_flags, loom_vector_store_memory_flags(op),
+        builder, cache_policy.build_flags, chunk_memory_flags,
         loom_vector_extract_result(extract_op), chunk_view, /*indices=*/NULL, 0,
         &static_index, /*static_indices_count=*/1, cache_policy.cache_scope,
         cache_policy.cache_temporal, op->location, &store_op));

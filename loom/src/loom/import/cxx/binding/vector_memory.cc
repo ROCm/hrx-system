@@ -349,8 +349,8 @@ std::optional<Value> VectorMemoryIntrinsic::call(
       const auto build = operation_ == Operation::LoadMask
                              ? loom_vector_load_mask_build
                              : loom_vector_load_expand_build;
-      check(build(builder, 0, view, indices.data(), origin.size(),
-                  static_indices.data(), origin.size(), mask,
+      check(build(builder, 0, /*instance_flags=*/0, view, indices.data(),
+                  origin.size(), static_indices.data(), origin.size(), mask,
                   arguments[3].ssa(), 0, 0, vector_type_, location, &op));
       return Value(loom_op_results(op)[0]);
     }
@@ -360,9 +360,9 @@ std::optional<Value> VectorMemoryIntrinsic::call(
       const auto build = operation_ == Operation::StoreMask
                              ? loom_vector_store_mask_build
                              : loom_vector_store_compress_build;
-      check(build(builder, 0, arguments[0].ssa(), view, indices.data(),
-                  origin.size(), static_indices.data(), origin.size(), mask, 0,
-                  0, location, &op));
+      check(build(builder, 0, /*instance_flags=*/0, arguments[0].ssa(), view,
+                  indices.data(), origin.size(), static_indices.data(),
+                  origin.size(), mask, 0, 0, location, &op));
       return std::nullopt;
     }
   }

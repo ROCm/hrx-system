@@ -363,5 +363,16 @@ TEST(MemoryAccessHelpers, OperandIndexIsPayload) {
   EXPECT_TRUE(loom_memory_access_operand_index_is_payload(access, 2));
 }
 
+TEST(MemoryAccessHelpers, AliasTypesAreConservativelyComparable) {
+  EXPECT_TRUE(loom_memory_access_alias_types_may_alias(LOOM_SCALAR_TYPE_NONE,
+                                                       LOOM_SCALAR_TYPE_I32));
+  EXPECT_TRUE(loom_memory_access_alias_types_may_alias(LOOM_SCALAR_TYPE_F32,
+                                                       LOOM_SCALAR_TYPE_NONE));
+  EXPECT_TRUE(loom_memory_access_alias_types_may_alias(LOOM_SCALAR_TYPE_I32,
+                                                       LOOM_SCALAR_TYPE_I32));
+  EXPECT_FALSE(loom_memory_access_alias_types_may_alias(LOOM_SCALAR_TYPE_I32,
+                                                        LOOM_SCALAR_TYPE_F32));
+}
+
 }  // namespace
 }  // namespace loom

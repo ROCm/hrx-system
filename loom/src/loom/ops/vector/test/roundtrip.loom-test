@@ -618,11 +618,11 @@ func.def @fragment_memory(%buffer: buffer, %offset: offset, %row: index, %col: i
   %a = buffer.view %buffer[%offset] : buffer -> view<[%m]x[%k]xf16, %layout>
   %b = buffer.view %buffer[%offset] : buffer -> view<[%k]x[%n]xf16, %layout>
   %c = buffer.view %buffer[%offset] : buffer -> view<[%m]x[%n]xf32, %layout>
-  %lhs = vector.fragment.load<lhs> %a[%row, 0] shape [%m, %k] {cache_scope = device} : view<[%m]x[%k]xf16, %layout> -> vector<16xf16>
+  %lhs = vector.fragment.load<lhs, type_disjoint> %a[%row, 0] shape [%m, %k] {cache_scope = device} : view<[%m]x[%k]xf16, %layout> -> vector<16xf16>
   %rhs = vector.fragment.load<rhs> %b[0, %col] shape [%k, %n] using {sparsity = %metadata : vector<1xi32>} : view<[%k]x[%n]xf16, %layout> -> vector<16xf16>
   %init = vector.fragment.load<init> %c[%row, %col] shape [%m, %n] : view<[%m]x[%n]xf32, %layout> -> vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
-  vector.fragment.store<result> %result, %c[%row, %col] shape [%m, %n] {cache_scope = system} : vector<8xf32>, view<[%m]x[%n]xf32, %layout>
+  vector.fragment.store<result, type_disjoint> %result, %c[%row, %col] shape [%m, %n] {cache_scope = system} : vector<8xf32>, view<[%m]x[%n]xf32, %layout>
   func.return
 }
 
@@ -660,8 +660,8 @@ func.def @strided_memory(%buffer: buffer, %offset: offset, %row_stride: index, %
 func.def @masked_tail_memory(%buffer: buffer, %offset: offset, %row: index, %col: index, %m: index, %n: index, %old: vector<4x8xf32>, %mask: vector<4x8xi1>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<[%m]x[%n]xf32, %layout>
-  %loaded = vector.load.mask %view[%row, %col], %mask, %old : view<[%m]x[%n]xf32, %layout>, vector<4x8xi1>, vector<4x8xf32>
-  vector.store.mask %loaded, %view[%row, %col], %mask : vector<4x8xf32>, view<[%m]x[%n]xf32, %layout>, vector<4x8xi1>
+  %loaded = vector.load.mask<type_disjoint> %view[%row, %col], %mask, %old : view<[%m]x[%n]xf32, %layout>, vector<4x8xi1>, vector<4x8xf32>
+  vector.store.mask<type_disjoint> %loaded, %view[%row, %col], %mask : vector<4x8xf32>, view<[%m]x[%n]xf32, %layout>, vector<4x8xi1>
   func.return
 }
 
@@ -673,8 +673,8 @@ func.def @masked_tail_memory(%buffer: buffer, %offset: offset, %row: index, %col
 func.def @expanded_compressed_memory(%buffer: buffer, %offset: offset, %row: index, %col: index, %m: index, %n: index, %old: vector<4xf32>, %mask: vector<4xi1>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<[%m]x[%n]xf32, %layout>
-  %loaded = vector.load.expand %view[%row, %col], %mask, %old : view<[%m]x[%n]xf32, %layout>, vector<4xi1>, vector<4xf32>
-  vector.store.compress %loaded, %view[%row, %col], %mask : vector<4xf32>, view<[%m]x[%n]xf32, %layout>, vector<4xi1>
+  %loaded = vector.load.expand<type_disjoint> %view[%row, %col], %mask, %old : view<[%m]x[%n]xf32, %layout>, vector<4xi1>, vector<4xf32>
+  vector.store.compress<type_disjoint> %loaded, %view[%row, %col], %mask : vector<4xf32>, view<[%m]x[%n]xf32, %layout>, vector<4xi1>
   func.return
 }
 
@@ -686,10 +686,10 @@ func.def @expanded_compressed_memory(%buffer: buffer, %offset: offset, %row: ind
 func.def @gather_scatter(%buffer: buffer, %offset: offset, %row: index, %col: index, %m: index, %n: index, %offsets: vector<4xindex>, %i32_offsets: vector<4xi32>, %old: vector<4xf32>, %mask: vector<4xi1>) {
   %layout = encoding.layout.dense : encoding<layout>
   %view = buffer.view %buffer[%offset] : buffer -> view<[%m]x[%n]xf32, %layout>
-  %gathered = vector.gather %view[%row, %col][%offsets] {cache_scope = device, cache_temporal = non_temporal} : view<[%m]x[%n]xf32, %layout>, vector<4xindex> -> vector<4xf32>
-  vector.scatter %gathered, %view[%row, %col][%offsets] : vector<4xf32>, view<[%m]x[%n]xf32, %layout>, vector<4xindex>
-  %masked = vector.gather.mask %view[%row, %col][%i32_offsets], %mask, %old : view<[%m]x[%n]xf32, %layout>, vector<4xi32>, vector<4xi1>, vector<4xf32>
-  vector.scatter.mask %masked, %view[%row, %col][%i32_offsets], %mask : vector<4xf32>, view<[%m]x[%n]xf32, %layout>, vector<4xi32>, vector<4xi1>
+  %gathered = vector.gather<type_disjoint> %view[%row, %col][%offsets] {cache_scope = device, cache_temporal = non_temporal} : view<[%m]x[%n]xf32, %layout>, vector<4xindex> -> vector<4xf32>
+  vector.scatter<type_disjoint> %gathered, %view[%row, %col][%offsets] : vector<4xf32>, view<[%m]x[%n]xf32, %layout>, vector<4xindex>
+  %masked = vector.gather.mask<type_disjoint> %view[%row, %col][%i32_offsets], %mask, %old : view<[%m]x[%n]xf32, %layout>, vector<4xi32>, vector<4xi1>, vector<4xf32>
+  vector.scatter.mask<type_disjoint> %masked, %view[%row, %col][%i32_offsets], %mask : vector<4xf32>, view<[%m]x[%n]xf32, %layout>, vector<4xi32>, vector<4xi1>
   func.return
 }
 
@@ -701,11 +701,11 @@ func.def @atomic_memory(%buffer: buffer, %offset: offset, %row: index, %col: ind
   %layout = encoding.layout.dense : encoding<layout>
   %iview = buffer.view %buffer[%offset] : buffer -> view<[%m]x[%n]xi32, %layout>
   %fview = buffer.view %buffer[%offset] : buffer -> view<[%m]x[%n]xf32, %layout>
-  vector.atomic.reduce<addi> %iv, %iview[%row, %col][%offsets] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : vector<4xi32>, view<[%m]x[%n]xi32, %layout>, vector<4xindex>
-  vector.atomic.reduce.mask<addf> %fv, %fview[%row, %col][%i32_offsets], %mask {ordering = relaxed, scope = device} : vector<4xf32>, view<[%m]x[%n]xf32, %layout>, vector<4xi32>, vector<4xi1>
-  %oldi = vector.atomic.rmw<xchgi> %iv, %iview[%row, %col][%offsets] {ordering = acq_rel, scope = system} : vector<4xi32>, view<[%m]x[%n]xi32, %layout>, vector<4xindex>
-  %masked = vector.atomic.rmw.mask<addf> %fv, %fview[%row, %col][%i32_offsets], %mask, %oldf {ordering = seq_cst, scope = device} : vector<4xf32>, view<[%m]x[%n]xf32, %layout>, vector<4xi32>, vector<4xi1>, vector<4xf32>
-  %cmp = vector.atomic.cmpxchg %iv, %iv, %iview[%row, %col][%offsets] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : vector<4xi32>, view<[%m]x[%n]xi32, %layout>, vector<4xindex> -> vector<4xi32>
+  vector.atomic.reduce<addi, type_disjoint> %iv, %iview[%row, %col][%offsets] {cache_scope = device, cache_temporal = non_temporal, ordering = relaxed, scope = workgroup} : vector<4xi32>, view<[%m]x[%n]xi32, %layout>, vector<4xindex>
+  vector.atomic.reduce.mask<addf, type_disjoint> %fv, %fview[%row, %col][%i32_offsets], %mask {ordering = relaxed, scope = device} : vector<4xf32>, view<[%m]x[%n]xf32, %layout>, vector<4xi32>, vector<4xi1>
+  %oldi = vector.atomic.rmw<xchgi, type_disjoint> %iv, %iview[%row, %col][%offsets] {ordering = acq_rel, scope = system} : vector<4xi32>, view<[%m]x[%n]xi32, %layout>, vector<4xindex>
+  %masked = vector.atomic.rmw.mask<addf, type_disjoint> %fv, %fview[%row, %col][%i32_offsets], %mask, %oldf {ordering = seq_cst, scope = device} : vector<4xf32>, view<[%m]x[%n]xf32, %layout>, vector<4xi32>, vector<4xi1>, vector<4xf32>
+  %cmp = vector.atomic.cmpxchg<type_disjoint> %iv, %iv, %iview[%row, %col][%offsets] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : vector<4xi32>, view<[%m]x[%n]xi32, %layout>, vector<4xindex> -> vector<4xi32>
   %cmpf = vector.atomic.cmpxchg %fv, %fv, %fview[%row, %col][%offsets] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : vector<4xf32>, view<[%m]x[%n]xf32, %layout>, vector<4xindex> -> vector<4xf32>
   test.use %oldi, %masked, %cmp, %cmpf : vector<4xi32>, vector<4xf32>, vector<4xi32>, vector<4xf32>
   func.return

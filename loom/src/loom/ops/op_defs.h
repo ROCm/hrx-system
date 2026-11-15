@@ -1489,6 +1489,11 @@ enum loom_memory_access_flag_bits_e {
   // root. Logical view indices remain subject to ordinary footprint proof.
   // This is a source contract and has no target execution semantics.
   LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS = 1u << 3,
+  // Permits this observation to be proven disjoint from another observation
+  // carrying the same promise when their logical view element types differ.
+  // Omission is type-universal. This changes no accessed bytes or execution
+  // semantics and is consumed before physical Low memory flags are formed.
+  LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT = 1u << 4,
 };
 typedef uint8_t loom_memory_access_flags_t;
 
@@ -1529,6 +1534,20 @@ bool loom_memory_access_operand_index_is_payload(loom_memory_access_t access,
 
 // Returns the accessed view or memory-object operand.
 loom_value_id_t loom_memory_access_view(loom_memory_access_t access);
+
+// Returns the logical view element type used for type-disjoint aliasing, or
+// NONE when the access is type-universal. The operation and module are trusted
+// verified compiler state.
+loom_scalar_type_t loom_memory_access_alias_type(const loom_module_t* module,
+                                                 loom_memory_access_t access);
+
+// Returns whether two access alias types may describe overlapping storage.
+// NONE is universal; two concrete types may alias only when equal.
+static inline bool loom_memory_access_alias_types_may_alias(
+    loom_scalar_type_t left, loom_scalar_type_t right) {
+  return left == LOOM_SCALAR_TYPE_NONE || right == LOOM_SCALAR_TYPE_NONE ||
+         left == right;
+}
 
 // Returns the physical byte-offset operand, or INVALID for logical accesses.
 loom_value_id_t loom_memory_access_byte_offset(loom_memory_access_t access);
