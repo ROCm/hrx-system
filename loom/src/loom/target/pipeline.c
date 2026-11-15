@@ -612,23 +612,17 @@ static iree_status_t loom_target_pipeline_build_inlined_source_cleanup(
       &for_op);
 }
 
-static iree_status_t loom_target_pipeline_build_source_inlining(
-    loom_builder_t* builder, void* user_data, iree_string_view_t stage) {
-  IREE_RETURN_IF_ERROR(
-      loom_target_pipeline_build_inline_callables(builder, stage));
-  loom_op_t* if_changed_op = NULL;
-  return loom_pass_ir_build_if_changed(
-      builder, loom_target_pipeline_build_inlined_source_cleanup, user_data,
-      &if_changed_op);
-}
-
 static iree_status_t loom_target_pipeline_build_preparatory_source_inlining(
     loom_builder_t* builder, void* user_data) {
   // Remove boundaries without a target ABI before target legalization so
   // caller facts guide representation selection. A callable exit retains its
   // semantic boundary until target control flow has made completion legal.
-  return loom_target_pipeline_build_source_inlining(builder, user_data,
-                                                    IREE_SV("prepare"));
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_inline_callables(builder, IREE_SV("prepare")));
+  loom_op_t* inlining_changed_op = NULL;
+  return loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_inlined_source_cleanup, user_data,
+      &inlining_changed_op);
 }
 
 static iree_status_t
@@ -658,7 +652,7 @@ loom_target_pipeline_build_boundary_projection_cleanup_body(
 }
 
 static iree_status_t
-loom_target_pipeline_build_projected_legalization_cleanup_body(
+loom_target_pipeline_build_source_legalization_cleanup_body(
     loom_builder_t* builder, void* user_data) {
   const loom_target_pipeline_build_context_t* context =
       (const loom_target_pipeline_build_context_t*)user_data;
@@ -676,13 +670,48 @@ loom_target_pipeline_build_projected_legalization_cleanup_body(
   return loom_target_pipeline_build_cleanup(builder);
 }
 
-static iree_status_t loom_target_pipeline_build_projected_legalization_cleanup(
+static iree_status_t loom_target_pipeline_build_source_legalization_cleanup(
     loom_builder_t* builder, void* user_data) {
   loom_op_t* for_op = NULL;
   return loom_target_pipeline_build_for_target_functions(
       builder, IREE_SV("source"),
-      loom_target_pipeline_build_projected_legalization_cleanup_body, user_data,
+      loom_target_pipeline_build_source_legalization_cleanup_body, user_data,
       &for_op);
+}
+
+static iree_status_t loom_target_pipeline_build_resumed_source_relegalization(
+    loom_builder_t* builder, void* user_data) {
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_target_legalize(builder, IREE_SV("complete")));
+  // Target legalization can materialize structured source guards. Restore the
+  // selected target control-flow form only when it changed the source.
+  loom_op_t* legalization_changed_op = NULL;
+  return loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_source_legalization_cleanup,
+      user_data, &legalization_changed_op);
+}
+
+static iree_status_t loom_target_pipeline_build_resumed_source_cleanup(
+    loom_builder_t* builder, void* user_data) {
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_inlined_source_cleanup(builder, user_data));
+  // Deferred inlining merges source that complete target legalization already
+  // processed independently. Its cleanup can form new source operations, so
+  // reestablish target legality only when that cleanup changed the source.
+  loom_op_t* cleanup_changed_op = NULL;
+  return loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_resumed_source_relegalization,
+      user_data, &cleanup_changed_op);
+}
+
+static iree_status_t loom_target_pipeline_build_resumed_source_inlining(
+    loom_builder_t* builder, void* user_data) {
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_inline_callables(builder, IREE_SV("resume")));
+  loom_op_t* inlining_changed_op = NULL;
+  return loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_resumed_source_cleanup, user_data,
+      &inlining_changed_op);
 }
 
 static iree_status_t loom_target_pipeline_build_boundary_projection_cleanup(
@@ -700,7 +729,7 @@ static iree_status_t loom_target_pipeline_build_boundary_projection_cleanup(
       loom_target_pipeline_build_projected_target_legalize(builder));
   loom_op_t* legalization_changed_op = NULL;
   return loom_pass_ir_build_if_changed(
-      builder, loom_target_pipeline_build_projected_legalization_cleanup,
+      builder, loom_target_pipeline_build_source_legalization_cleanup,
       user_data, &legalization_changed_op);
 }
 
@@ -986,8 +1015,8 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
     // func.exit is now ordinary CFG control. Finish only the source call graph
     // that preparation recorded, before independent callee lowering can choose
     // representations incompatible with its callers.
-    IREE_RETURN_IF_ERROR(loom_target_pipeline_build_source_inlining(
-        builder, user_data, IREE_SV("resume")));
+    IREE_RETURN_IF_ERROR(
+        loom_target_pipeline_build_resumed_source_inlining(builder, user_data));
   }
   if (loom_target_pipeline_sanitizer_has_checks(
           context, LOOM_SANITIZER_CHECK_ACCESS | LOOM_SANITIZER_CHECK_VALUE |

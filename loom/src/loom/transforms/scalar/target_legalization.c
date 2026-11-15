@@ -1384,8 +1384,8 @@ static iree_status_t loom_scalar_legalize_narrow_cmpi(
 }
 
 // Native extrema contracts take precedence over this comparison/selection
-// decomposition. Ordinary cleanup preserves it because extrema formation is
-// restricted to the pre-legalization combine phase.
+// decomposition. Every source combine boundary precedes target legalization;
+// ordinary cleanup afterward preserves the selected representation.
 static iree_status_t loom_scalar_legalize_integer_extrema(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,

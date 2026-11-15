@@ -57,6 +57,8 @@ typedef struct PipelineRunCounts {
   int first_target_legalization_ordinal = 0;
   // First complete source-reference legalization, before boundary projection.
   int first_complete_target_legalization_ordinal = 0;
+  // Complete legalization restoring source changed by deferred inlining.
+  int resumed_target_legalization_ordinal = 0;
   // Last target legalization pass, after physical boundary projection.
   int last_target_legalization_ordinal = 0;
   // Projected-boundary target legalization pass.
@@ -268,6 +270,15 @@ iree_status_t InspectPipelineRun(void* user_data, loom_op_t* op,
                              IREE_SV("mode")),
             IREE_SV("complete"))) {
       counts->first_complete_target_legalization_ordinal =
+          count_context->current_run_ordinal;
+    }
+    if (counts->resumed_target_inlining_ordinal != 0 &&
+        counts->boundary_projection == 0 &&
+        iree_string_view_equal(
+            FindStringOption(count_context->module, loom_pass_run_options(op),
+                             IREE_SV("mode")),
+            IREE_SV("complete"))) {
+      counts->resumed_target_legalization_ordinal =
           count_context->current_run_ordinal;
     }
     if (iree_string_view_equal(
@@ -518,6 +529,8 @@ TEST_F(TargetPipelineTest, ZeroChecksStillMaterializesAuthoredAssertions) {
   EXPECT_LT(counts.first_scf_to_cfg_ordinal,
             counts.resumed_target_inlining_ordinal);
   EXPECT_LT(counts.resumed_target_inlining_ordinal,
+            counts.resumed_target_legalization_ordinal);
+  EXPECT_LT(counts.resumed_target_legalization_ordinal,
             counts.boundary_projection_ordinal);
   EXPECT_LT(counts.first_target_legalization_ordinal,
             counts.boundary_projection_ordinal);

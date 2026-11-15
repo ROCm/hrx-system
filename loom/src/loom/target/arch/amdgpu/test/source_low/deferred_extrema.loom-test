@@ -1,0 +1,108 @@
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
+
+func.def inline @late_extrema(%exit_early: i1, %lhs: i64, %rhs: i64) -> (i64, i64, i64, i64) {
+  func.exit %exit_early : i1 {
+    func.return %lhs, %lhs, %lhs, %lhs : i64, i64, i64, i64
+  }
+  %signed_minimum = scalar.minsi %lhs, %rhs : i64
+  %signed_maximum = scalar.maxsi %lhs, %rhs : i64
+  %unsigned_minimum = scalar.minui %lhs, %rhs : i64
+  %unsigned_maximum = scalar.maxui %lhs, %rhs : i64
+  func.return %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum : i64, i64, i64, i64
+}
+
+func.def public @late_extrema_caller(%exit_early: i1, %lhs: i64, %rhs: i64) -> (i64, i64, i64, i64) {
+  %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum = func.call @late_extrema(%exit_early, %lhs, %rhs) : (i1, i64, i64) -> (i64, i64, i64, i64)
+  func.return %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum : i64, i64, i64, i64
+}
+
+// ----
+low.func.def public target<amdgpu.rdna3_5.core> abi(hal_kernel) @late_extrema_caller(%exit_early: reg<amdgpu.sgpr x2>, %lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %65, %66 = s_and_saveexec_b64 %exit_early
+  low.cond_br %66, ^_bb1, ^_bb5 : reg<amdgpu.scc>
+^_bb1:
+  low.br ^_bb4(%lhs: reg<amdgpu.vgpr x2>)
+^_bb4(%signed_minimum$57: reg<amdgpu.vgpr x2>):
+  %97 = s_andn2_b64_exec %65, %exit_early
+  low.cond_br %97, ^_bb2, ^_bb6 : reg<amdgpu.scc>
+^_bb2:
+  %98 = v_cmp_lt_i64 %lhs, %rhs
+  %99 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %100 = slice %rhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %101 = v_cndmask_b32 %100, %99, %98
+  %102 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %103 = slice %rhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %104 = v_cndmask_b32 %103, %102, %98
+  %106 = v_cmp_gt_i64 %lhs, %rhs
+  %109 = v_cndmask_b32 %100, %99, %106
+  %112 = v_cndmask_b32 %103, %102, %106
+  %114 = v_cmp_lt_u64 %lhs, %rhs
+  %117 = v_cndmask_b32 %100, %99, %114
+  %120 = v_cndmask_b32 %103, %102, %114
+  %122 = v_cmp_gt_u64 %lhs, %rhs
+  %125 = v_cndmask_b32 %100, %99, %122
+  %128 = v_cndmask_b32 %103, %102, %122
+  s_mov_b64_exec %65
+  %70 = slice %signed_minimum$57[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %71 = v_cndmask_b32 %101, %70, %exit_early
+  %73 = slice %signed_minimum$57[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %74 = v_cndmask_b32 %104, %73, %exit_early
+  %75 = concat(%71, %74) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %78 = v_cndmask_b32 %109, %70, %exit_early
+  %81 = v_cndmask_b32 %112, %73, %exit_early
+  %82 = concat(%78, %81) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %85 = v_cndmask_b32 %117, %70, %exit_early
+  %88 = v_cndmask_b32 %120, %73, %exit_early
+  %89 = concat(%85, %88) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %92 = v_cndmask_b32 %125, %70, %exit_early
+  %95 = v_cndmask_b32 %128, %73, %exit_early
+  %96 = concat(%92, %95) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^_bb3(%75: reg<amdgpu.vgpr x2>, %82: reg<amdgpu.vgpr x2>, %89: reg<amdgpu.vgpr x2>, %96: reg<amdgpu.vgpr x2>)
+^_bb3(%signed_minimum$53: reg<amdgpu.vgpr x2>, %signed_maximum: reg<amdgpu.vgpr x2>, %unsigned_minimum: reg<amdgpu.vgpr x2>, %unsigned_maximum: reg<amdgpu.vgpr x2>):
+  return %signed_minimum$53, %signed_maximum, %unsigned_minimum, %unsigned_maximum
+^_bb5:
+  s_mov_b64_exec %65
+  %67 = v_mov_b32 0
+  %68 = concat(%67, %67) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^_bb4(%68: reg<amdgpu.vgpr x2>)
+^_bb6:
+  s_mov_b64_exec %65
+  low.br ^_bb3(%signed_minimum$57: reg<amdgpu.vgpr x2>, %signed_minimum$57: reg<amdgpu.vgpr x2>, %signed_minimum$57: reg<amdgpu.vgpr x2>, %signed_minimum$57: reg<amdgpu.vgpr x2>)
+}
+
+// ====
+// RUN: emit source-low output=none
+
+amdgpu.target<gfx1100> @gfx1100
+
+amdgpu.target<gfx1151> @gfx1151
+
+amdgpu.target<gfx1201> @gfx1201
+
+func.def inline @matrix_extrema(%exit_early: i1, %lhs: i64, %rhs: i64) -> (i64, i64, i64, i64) {
+  func.exit %exit_early : i1 {
+    func.return %lhs, %lhs, %lhs, %lhs : i64, i64, i64, i64
+  }
+  %signed_minimum = scalar.minsi %lhs, %rhs : i64
+  %signed_maximum = scalar.maxsi %lhs, %rhs : i64
+  %unsigned_minimum = scalar.minui %lhs, %rhs : i64
+  %unsigned_maximum = scalar.maxui %lhs, %rhs : i64
+  func.return %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum : i64, i64, i64, i64
+}
+
+func.def public target(@gfx1100) @gfx1100_extrema(%exit_early: i1, %lhs: i64, %rhs: i64) -> (i64, i64, i64, i64) {
+  %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum = func.call @matrix_extrema(%exit_early, %lhs, %rhs) : (i1, i64, i64) -> (i64, i64, i64, i64)
+  func.return %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum : i64, i64, i64, i64
+}
+
+func.def public target(@gfx1151) @gfx1151_extrema(%exit_early: i1, %lhs: i64, %rhs: i64) -> (i64, i64, i64, i64) {
+  %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum = func.call @matrix_extrema(%exit_early, %lhs, %rhs) : (i1, i64, i64) -> (i64, i64, i64, i64)
+  func.return %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum : i64, i64, i64, i64
+}
+
+func.def public target(@gfx1201) @gfx1201_extrema(%exit_early: i1, %lhs: i64, %rhs: i64) -> (i64, i64, i64, i64) {
+  %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum = func.call @matrix_extrema(%exit_early, %lhs, %rhs) : (i1, i64, i64) -> (i64, i64, i64, i64)
+  func.return %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum : i64, i64, i64, i64
+}
+
+// ----
