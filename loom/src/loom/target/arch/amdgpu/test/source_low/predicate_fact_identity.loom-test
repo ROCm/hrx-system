@@ -1,0 +1,97 @@
+// RUN: pass source-to-low,low-dce
+
+amdgpu.target<gfx1151> @target {subgroup_size = 32}
+
+kernel.def target(@target) @predicate_fact_identity_cycle() {
+  %unit = index.constant 1 : index
+  %size = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%size, %unit, %unit) : index
+} launch(%limit: i64, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %workgroup = kernel.workgroup.id<x> : index
+  %workgroup_word = index.cast %workgroup : index to i32
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %c0_i64 = scalar.constant 0 : i64
+  %c1_i64 = scalar.constant 1 : i64
+  %true = scalar.constant true : i1
+  cfg.br ^loop(%c0_i64: i64)
+^loop(%index: i64):
+  %refined_index, %refined_true = scalar.assume %index, %true [range(%index, 0, 9223372036854775807), eq(%true, 1)] : i64, i1
+  %condition = scalar.cmpi slt, %refined_index, %limit : i64
+  cfg.cond_br %condition, ^body, ^exit
+^body:
+  %next_index = scalar.addi %refined_index, %c1_i64 : i64
+  cfg.br ^loop(%next_index: i64)
+^exit:
+  %uniform_predicate = scalar.cmpi ne, %workgroup_word, %c0_i32 : i32
+  %false = scalar.constant false : i1
+  cfg.cond_br %uniform_predicate, ^predicate_true, ^predicate_false
+^predicate_true:
+  cfg.br ^predicate_merge(%uniform_predicate: i1)
+^predicate_false:
+  cfg.br ^predicate_merge(%false: i1)
+^predicate_merge(%predicate: i1):
+  %combined_predicate = scalar.xori %predicate, %true : i1
+  %word = scf.select %combined_predicate, %c1_i32, %c0_i32 : i32
+  %base = index.constant 0 : offset
+  %outputs = buffer.view %output[%base] : buffer -> view<64xi32>
+  view.store %word, %outputs[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+amdgpu.target<gfx1151> @target {subgroup_size = 32}
+
+low.kernel.def target<amdgpu.rdna3_5.core>(@target) abi_layout({constant_count = 2, direct_arg_count = 1, direct_arg_names = {arg0 = "limit"}, direct_arg_offsets = [0], direct_arg_parameter_indices = [0], direct_arg_sizes = [8], parameter_count = 2, resource_count = 1, resource_offsets = [8], resource_parameter_indices = [1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @predicate_fact_identity_cycle(%limit: reg<amdgpu.sgpr x2>) asm {
+  %workgroup_word = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %outputs = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %c0_i32 = s_mov_b32 0
+  %32 = s_mov_b32 0
+  %33 = s_mov_b32 0
+  %c0_i64 = concat(%32, %33) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %35 = s_mov_b32 1
+  %36 = s_mov_b32 0
+  %c1_i64 = concat(%35, %36) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^loop(%c0_i64: reg<amdgpu.sgpr x2>)
+^loop(%refined_index: reg<amdgpu.sgpr x2>):
+  %40 = slice %refined_index[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %41 = slice %refined_index[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %42 = slice %limit[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %43 = slice %limit[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %44 = s_xor_b32_lit %41, 2147483648
+  %45 = s_xor_b32_lit %43, 2147483648
+  %46 = s_cmp_lt_u32 %40, %42
+  %47, %condition = s_subb_u32 %44, %45, %46
+  low.cond_br %condition, ^body, ^exit : reg<amdgpu.scc>
+^body:
+  %49 = slice %refined_index[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %50 = slice %refined_index[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %51 = slice %c1_i64[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %52 = slice %c1_i64[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %53, %54 = s_add_co_u32 %49, %51
+  %55, %56 = s_addc_u32 %50, %52, %54
+  %next_index = concat(%53, %55) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^loop(%next_index: reg<amdgpu.sgpr x2>)
+^exit:
+  %58 = s_cmp_lg_i32 %workgroup_word, %c0_i32
+  %59 = s_mov_b32 0
+  %60 = s_mov_b32 1
+  %uniform_predicate = s_cselect_b32 %60, %59, %58
+  %62 = s_mov_b32 0
+  %false = s_cmp_lg_i32 %62, %62
+  low.br ^predicate_false
+^predicate_false:
+  %64 = s_mov_b32 0
+  %65 = s_mov_b32 1
+  %66 = s_cselect_b32 %65, %64, %false
+  low.br ^predicate_merge(%66: reg<amdgpu.sgpr>)
+^predicate_merge(%predicate: reg<amdgpu.sgpr>):
+  %73 = v_mov_b32 1
+  %74 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %74, %73, %outputs
+  return
+^predicate_true:
+  low.br ^predicate_merge(%uniform_predicate: reg<amdgpu.sgpr>)
+}

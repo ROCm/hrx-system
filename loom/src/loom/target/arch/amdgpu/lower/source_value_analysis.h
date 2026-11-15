@@ -85,6 +85,9 @@ typedef struct loom_amdgpu_source_value_analysis_t {
   loom_amdgpu_source_value_analysis_record_t* records;
   // Number of initialized records.
   iree_host_size_t record_count;
+  // Circular i1 fact-identity component links by local value ordinal.
+  // NULL when the active fact scope has no nontrivial i1 identities.
+  loom_value_ordinal_t* i1_identity_next_ordinals;
   // State shared by nested queries in the active cache transaction.
   struct {
     // Dense ordinals with one or more provisional cached bits.
@@ -169,6 +172,16 @@ void loom_amdgpu_source_value_analysis_end_bit(
     loom_value_id_t source_value_id,
     loom_amdgpu_source_value_analysis_bits_t bit,
     loom_amdgpu_source_value_analysis_query_token_t token, bool value);
+// Returns the canonical member of source_value_id's exact fact-identity
+// component in the active local value domain.
+loom_value_id_t loom_amdgpu_source_value_analysis_i1_identity_representative(
+    const loom_amdgpu_source_value_analysis_t* analysis,
+    loom_value_id_t source_value_id);
+// Returns the next member of source_value_id's exact fact-identity component.
+// Singleton components return source_value_id.
+loom_value_id_t loom_amdgpu_source_value_analysis_i1_identity_next(
+    const loom_amdgpu_source_value_analysis_t* analysis,
+    loom_value_id_t source_value_id);
 bool loom_amdgpu_source_value_analysis_cached_register_shape(
     loom_amdgpu_source_value_analysis_t* analysis,
     loom_value_id_t source_value_id, bool* out_has_shape,
