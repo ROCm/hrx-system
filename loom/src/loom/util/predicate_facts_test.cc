@@ -113,6 +113,63 @@ TEST(PredicateFactsExportTest, ExactAndUnknownStayMinimal) {
             0);
 }
 
+TEST(PredicateFactsExportTest, ExactInferredValuesImplyDivisibility) {
+  constexpr loom_value_id_t kValue = 7;
+  const int64_t values[] = {INT64_MIN, -64, -42, 0, 42, 64};
+  const int64_t divisors[] = {2, 3, 4, 7, 8, 16, 64};
+  for (int64_t value : values) {
+    loom_predicate_t range = {.kind = LOOM_PREDICATE_RANGE, .arg_count = 3};
+    range.arg_tags[0] = LOOM_PRED_ARG_VALUE;
+    range.arg_tags[1] = LOOM_PRED_ARG_CONST;
+    range.arg_tags[2] = LOOM_PRED_ARG_CONST;
+    range.args[0] = kValue;
+    range.args[1] = value;
+    range.args[2] = value;
+    loom_value_facts_t refined = loom_value_facts_unknown();
+    loom_value_facts_apply_predicate(&refined, &range);
+    ASSERT_TRUE(loom_value_facts_is_exact(refined));
+    ASSERT_EQ(refined.known_divisor, 1);
+    const loom_value_facts_t inferred[] = {loom_value_facts_exact_i64(value),
+                                           refined};
+    for (int64_t divisor : divisors) {
+      if (value % divisor != 0) {
+        continue;
+      }
+      SCOPED_TRACE(::testing::Message()
+                   << value << " divisible by " << divisor);
+      const loom_value_facts_t proven =
+          loom_value_facts_make(INT64_MIN, INT64_MAX, divisor);
+      for (loom_value_facts_t facts : inferred) {
+        loom_predicate_t
+            predicates[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY] = {};
+        EXPECT_EQ(
+            loom_value_facts_export_integer_refinements(
+                kValue, facts, proven, predicates, IREE_ARRAYSIZE(predicates)),
+            0);
+      }
+    }
+  }
+}
+
+TEST(PredicateFactsExportTest, RetainsStrongerNonExactDivisibility) {
+  constexpr loom_value_id_t kValue = 7;
+  const loom_value_facts_t proven =
+      loom_value_facts_make(INT64_MIN, INT64_MAX, 8);
+  for (int64_t divisor : {1, 2, 4}) {
+    loom_predicate_t predicates[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY] =
+        {};
+    const loom_value_facts_t inferred =
+        loom_value_facts_make(INT64_MIN, INT64_MAX, divisor);
+    ASSERT_EQ(
+        loom_value_facts_export_integer_refinements(
+            kValue, inferred, proven, predicates, IREE_ARRAYSIZE(predicates)),
+        1);
+    EXPECT_EQ(predicates[0].kind, LOOM_PREDICATE_MULTIPLE_OF);
+    EXPECT_EQ(predicates[0].args[0], kValue);
+    EXPECT_EQ(predicates[0].args[1], 8);
+  }
+}
+
 TEST_F(PredicateFactsTest, SmallListStaysAllocationFree) {
   loom_value_fact_table_t table = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 1));

@@ -11,6 +11,7 @@ loom_check_test_suite(
     srcs = [
         "conditioned_arithmetic.loom-test",
         "conditioned_predicates.loom-test",
+        "conditioned_providers.loom-test",
         "conditioned_value_facts.loom-test",
         "storage_calls.loom-test",
         "storage_cfg_instances.loom-test",

@@ -221,14 +221,12 @@ TEST_F(FactCastTest, SharedPayloadRelationsMatchConcreteBits) {
                                  INT64_MAX, UINT64_C(1) << 63,
                                  UINT64_MAX};
   for (const auto& value_cast : casts) {
-    IREE_ASSERT_OK(
-        loom_value_fact_table_define_integer_cast(&table_, 2, value_cast));
     for (const auto& source_cast : casts) {
       IREE_ASSERT_OK(
           loom_value_fact_table_define_integer_cast(&table_, 3, source_cast));
       loom_integer_cast_t relative;
       const bool found = loom_value_fact_table_query_integer_cast_from(
-          &table_, 2, 3, &relative);
+          &table_, value_cast, 3, &relative);
       ASSERT_EQ(found, value_cast.composed.bit_count <=
                            source_cast.composed.bit_count);
       if (!found) {
@@ -247,19 +245,21 @@ TEST_F(FactCastTest, IntermediatePayloadRebasesWithoutRecoveringHighBits) {
       &table_, 2, Cast(1, 16, LOOM_INTEGER_CAST_SIGNED)));
   IREE_ASSERT_OK(loom_value_fact_table_define_integer_cast(
       &table_, 3, Cast(1, 8, LOOM_INTEGER_CAST_UNSIGNED)));
+  const auto narrow = loom_value_fact_table_query_integer_cast(&table_, 3);
+  const auto wide = loom_value_fact_table_query_integer_cast(&table_, 2);
   loom_integer_cast_t relative;
-  ASSERT_TRUE(
-      loom_value_fact_table_query_integer_cast_from(&table_, 3, 2, &relative));
+  ASSERT_TRUE(loom_value_fact_table_query_integer_cast_from(&table_, narrow, 2,
+                                                            &relative));
   EXPECT_EQ(relative.source_value_id, 2u);
   EXPECT_EQ(relative.bit_count, 8);
   EXPECT_TRUE(loom_integer_cast_is_identity(&relative,
                                             loom_value_facts_make(1, 16, 1)));
   EXPECT_FALSE(loom_integer_cast_is_identity(
       &relative, loom_value_facts_make(-16, -1, 1)));
-  EXPECT_FALSE(
-      loom_value_fact_table_query_integer_cast_from(&table_, 2, 3, &relative));
-  EXPECT_FALSE(
-      loom_value_fact_table_query_integer_cast_from(&table_, 3, 4, &relative));
+  EXPECT_FALSE(loom_value_fact_table_query_integer_cast_from(&table_, wide, 3,
+                                                             &relative));
+  EXPECT_FALSE(loom_value_fact_table_query_integer_cast_from(&table_, narrow, 4,
+                                                             &relative));
 }
 
 }  // namespace

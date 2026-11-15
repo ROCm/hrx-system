@@ -558,3 +558,123 @@ func.def @merged_payloads(%input: i64, %other: i8, %choose: i1) {
   }
   func.return
 }
+
+// ====
+
+// Each scope refines the same value through several relations, including a
+// reversed comparison. Leaving the inner scope must restore the outer lower
+// endpoint; leaving both scopes must restore the unconstrained input.
+func.def @nested_relation_groups(%input: i32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c3 = scalar.constant 3 : i32
+  %c4 = scalar.constant 4 : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %positive = scalar.cmpi sgt, %input, %c0 : i32
+  %small = scalar.cmpi sge, %c4, %input : i32
+  %outer = scalar.andi %positive, %small : i1
+  scf.if %outer {
+    %above_one = scalar.cmpi sgt, %input, %c1 : i32
+    %below_three = scalar.cmpi sge, %c3, %input : i32
+    %inner = scalar.andi %above_one, %below_three : i1
+    scf.if %inner {
+      %inner_lower = test.fact_range_lo %input : i32 -> i64
+      %inner_count = index.cast %inner_lower : i64 to index
+      scf.for %inside = [%begin to %inner_count step %step] unroll {
+        test.use %inside : index
+      }
+    }
+    %outer_lower = test.fact_range_lo %input : i32 -> i64
+    %outer_count = index.cast %outer_lower : i64 to index
+    scf.for %restored = [%begin to %outer_count step %step] unroll {
+      test.use %restored : index
+    }
+  }
+  %outside_nonzero = test.fact_non_zero %input : i32 -> i1
+  %outside_count = index.cast %outside_nonzero : i1 to index
+  scf.for %outside = [%begin to %outside_count step %step] unroll {
+    test.use %outside : index
+  }
+  func.return
+}
+
+// ----
+func.def @nested_relation_groups(%input: i32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c3 = scalar.constant 3 : i32
+  %c4 = scalar.constant 4 : i32
+  %positive = scalar.cmpi sgt, %input, %c0 : i32
+  %small = scalar.cmpi sge, %c4, %input : i32
+  %outer = scalar.andi %positive, %small : i1
+  scf.if %outer {
+    %above_one = scalar.cmpi sgt, %input, %c1 : i32
+    %below_three = scalar.cmpi sge, %c3, %input : i32
+    %inner = scalar.andi %above_one, %below_three : i1
+    scf.if %inner {
+      %inside_0 = index.constant 0 : index
+      test.use %inside_0 : index
+      %inside_1 = index.constant 1 : index
+      test.use %inside_1 : index
+    }
+    %restored_0 = index.constant 0 : index
+    test.use %restored_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// Forwarding unifies the two payload identities. The shared update must apply
+// the lower and upper relations to either spelling, then disappear at the join.
+func.def @forwarded_relation_group(%input: i32) {
+  %c0 = scalar.constant 0 : i32
+  %c4 = scalar.constant 4 : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  cfg.br ^forward(%input: i32, %input: i32)
+^forward(%left: i32, %right: i32):
+  %positive = scalar.cmpi sgt, %left, %c0 : i32
+  %small = scalar.cmpi sge, %c4, %right : i32
+  %selected = scalar.andi %positive, %small : i1
+  cfg.cond_br %selected, ^body, ^join
+^body:
+  %lower = test.fact_range_lo %right : i32 -> i64
+  %upper = test.fact_range_hi %left : i32 -> i64
+  %distance = scalar.subi %upper, %lower : i64
+  %count = index.cast %distance : i64 to index
+  scf.for %inside = [%begin to %count step %step] unroll {
+    test.use %inside : index
+  }
+  cfg.br ^join
+^join:
+  %outside_nonzero = test.fact_non_zero %input : i32 -> i1
+  %outside_count = index.cast %outside_nonzero : i1 to index
+  scf.for %outside = [%begin to %outside_count step %step] unroll {
+    test.use %outside : index
+  }
+  func.return
+}
+
+// ----
+func.def @forwarded_relation_group(%input: i32) {
+  %c0 = scalar.constant 0 : i32
+  %c4 = scalar.constant 4 : i32
+  cfg.br ^forward(%input: i32, %input: i32)
+^forward(%left: i32, %right: i32):
+  %positive = scalar.cmpi sgt, %left, %c0 : i32
+  %small = scalar.cmpi sge, %c4, %right : i32
+  %selected = scalar.andi %positive, %small : i1
+  cfg.cond_br %selected, ^body, ^join
+^body:
+  %inside_0 = index.constant 0 : index
+  test.use %inside_0 : index
+  %inside_1 = index.constant 1 : index
+  test.use %inside_1 : index
+  %inside_2 = index.constant 2 : index
+  test.use %inside_2 : index
+  cfg.br ^join
+^join:
+  func.return
+}

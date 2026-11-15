@@ -438,6 +438,34 @@ TEST(FactsExactI64, Int64Max) {
   EXPECT_EQ(f.known_divisor, INT64_MAX);
 }
 
+TEST(FactsDivisibility, ExactIntegers) {
+  const int64_t values[] = {INT64_MIN, INT64_MIN + 1, -64, -42, -1, 0, 1, 42,
+                            64,        INT64_MAX};
+  const int64_t divisors[] = {
+      1, 2, 3, 6, 7, 16, 42, 64, INT64_C(1) << 62, INT64_MAX};
+  for (int64_t value : values) {
+    SCOPED_TRACE(value);
+    const loom_value_facts_t facts = loom_value_facts_exact_i64(value);
+    for (int64_t divisor : divisors) {
+      SCOPED_TRACE(divisor);
+      EXPECT_EQ(loom_value_facts_divisible_by(facts, divisor),
+                value % divisor == 0);
+    }
+  }
+}
+
+TEST(FactsDivisibility, NonExactAndFloatingValues) {
+  const loom_value_facts_t multiple = loom_value_facts_make(-64, 64, 4);
+  EXPECT_TRUE(loom_value_facts_divisible_by(multiple, 2));
+  EXPECT_TRUE(loom_value_facts_divisible_by(multiple, 4));
+  EXPECT_FALSE(loom_value_facts_divisible_by(multiple, 8));
+  EXPECT_FALSE(loom_value_facts_divisible_by(loom_value_facts_unknown(), 2));
+  EXPECT_FALSE(loom_value_facts_divisible_by(
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F64, 0.0), 2));
+  EXPECT_FALSE(loom_value_facts_divisible_by(
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F64, 42.0), 2));
+}
+
 TEST(FactsExactF64, Pi) {
   loom_value_facts_t f =
       loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F64, 3.14159265358979);

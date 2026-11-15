@@ -686,10 +686,14 @@ static inline bool loom_value_facts_as_exact_bool(loom_value_facts_t facts,
   return true;
 }
 
+// Returns whether every represented integer is divisible by positive |divisor|.
 static inline bool loom_value_facts_divisible_by(loom_value_facts_t facts,
                                                  int64_t divisor) {
-  // Exact zero's stored divisor of one does not constrain divisibility.
-  return loom_value_facts_is_zero(facts) || facts.known_divisor % divisor == 0;
+  // Exact values carry more information than a retained divisor summary,
+  // including zero and INT64_MIN whose canonical divisor is one.
+  int64_t multiple = facts.known_divisor;
+  loom_value_facts_as_exact_i64(facts, &multiple);
+  return multiple % divisor == 0;
 }
 
 // Returns true if all values described by |facts| fit in a signed integer with

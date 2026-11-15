@@ -48,6 +48,8 @@ loom_cc_library(
     hdrs = ["condition_relation_set.h"],
     deps = [
         "//loom/src/loom/ir",
+        "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
@@ -440,9 +442,11 @@ loom_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/index:cast",
+        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:dominance",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
