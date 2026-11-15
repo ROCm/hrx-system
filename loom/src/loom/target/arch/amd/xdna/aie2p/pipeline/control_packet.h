@@ -18,6 +18,7 @@ uint32_t loom_aie2p_control_packet_parity(uint32_t word);
 
 // Commands use a tile-relative 20-bit register address and 1..4 words. The
 // transport supplies TLAST on the final write payload or read command word.
+// A write's admitted register range stays within one 16-byte block.
 uint32_t loom_aie2p_control_packet_write(uint32_t address,
                                          iree_host_size_t word_count);
 uint32_t loom_aie2p_control_packet_read(uint32_t address,

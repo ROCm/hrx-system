@@ -232,16 +232,28 @@ iree_status_t loom_aie2p_worker_control_write(
     loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
     uint8_t packet_id, uint32_t register_offset, const loom_value_id_t* words,
     iree_host_size_t count) {
-  loom_value_id_t route, command;
+  loom_value_id_t route;
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
       context, builder, (int32_t)loom_aie2p_control_packet_parity(packet_id),
       &route));
-  IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
-      context, builder,
-      (int32_t)loom_aie2p_worker_control_write_command(register_offset, count),
-      &command));
-  return loom_aie2p_worker_control_write_packet(context, builder, route,
-                                                command, words, count);
+  // A control write stays within one 128-bit register block. In particular,
+  // descriptor geometry often starts at word three and continues in the next
+  // block; sending that range as one packet does not update the next block.
+  for (iree_host_size_t begin = 0; begin < count;) {
+    const uint32_t address =
+        register_offset + (uint32_t)(begin * sizeof(uint32_t));
+    const iree_host_size_t packet_count =
+        iree_min(count - begin, (16 - (address & 15u)) / sizeof(uint32_t));
+    loom_value_id_t command;
+    IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
+        context, builder,
+        (int32_t)loom_aie2p_worker_control_write_command(address, packet_count),
+        &command));
+    IREE_RETURN_IF_ERROR(loom_aie2p_worker_control_write_packet(
+        context, builder, route, command, words + begin, packet_count));
+    begin += packet_count;
+  }
+  return iree_ok_status();
 }
 
 uint32_t loom_aie2p_worker_control_write_command(uint32_t register_offset,

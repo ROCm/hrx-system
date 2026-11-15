@@ -5,7 +5,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // Seventeen serial transfer geometries exceed a tile's sixteen descriptors.
-// Reentering three earlier shapes must restore their lengths and addresses.
+// Reentering three earlier shapes restores lengths, addresses, and strides.
+// The strided rows require geometry words on both sides of a register block.
 #include <loomcxx/kernel.h>
 #include <loomcxx/pipeline.h>
 #include <loomcxx/target/aie2p.h>
@@ -13,42 +14,53 @@
 namespace t = loom::type;
 using Bytes = t::buffer<unsigned char>;
 template <t::size_type Count>
-using Stream = t::channel<t::tile<t::shape<Count>, int>>;
+using Stream = t::channel<t::tile<t::shape<2, Count>, int>>;
 
 template <t::size_type Count>
 [[loom::inline]] static Stream<Count> make_channel(t::pool memory) {
   auto storage = loom::buffer::root(
       loom::buffer::alloca<loom::memory_space::workgroup, 64>(
-          t::offset{Count * sizeof(int)}, memory));
+          t::offset{2 * Count * sizeof(int)}, memory));
   return loom::channel::bind<loom::channel::discipline::fifo>(
-      loom::buffer::view<1, Count>(loom::buffer::cast<int>(storage), {}),
+      loom::buffer::view<1, 2, Count>(loom::buffer::cast<int>(storage), {}),
       t::index{1});
 }
 
 template <t::size_type Count>
 [[loom::inline]] static void copy_phase(Stream<32> channel, Bytes input,
                                         Bytes output, t::offset destination) {
-  auto source = loom::buffer::view<Count>(loom::buffer::cast<int>(input),
-                                          t::offset{(Count - 1) * 128}, {});
+  auto layout =
+      loom::encoding::layout::strided(t::index{4 * Count + 1}, t::index{2});
+  auto source = loom::buffer::view<2, Count>(
+      loom::buffer::cast<int>(input), t::offset{(Count - 1) * 512}, {}, layout);
   auto write = loom::channel::reserve(channel);
-  for (unsigned i = 0; i < 32; ++i) {
-    loom::view::store(-9999, write.payload, t::index{i});
+  for (unsigned row = 0; row < 2; ++row) {
+    for (unsigned i = 0; i < 32; ++i) {
+      loom::view::store(-9999, write.payload, t::index{row}, t::index{i});
+    }
   }
-  auto incoming_values = loom::view::subview<Count>(write.payload, {0}, {});
+  auto local_layout =
+      loom::encoding::layout::strided(t::index{32}, t::index{1});
+  auto local =
+      loom::view::refine<t::view<t::shape<2, 32>, int, decltype(local_layout)>>(
+          write.payload, local_layout);
+  auto incoming_values = loom::view::subview<2, Count>(local, {0, 0}, {});
   auto incoming = loom::kernel::async::copy<
       loom::kernel::async::direction::global_to_workgroup,
       loom::cache::scope::workgroup, loom::cache::temporal::regular>(
       source, incoming_values);
   loom::kernel::async::wait<0>(loom::kernel::async::group(incoming));
-  for (unsigned i = 0; i < static_cast<unsigned>(Count); ++i) {
-    int value = loom::view::load(write.payload, t::index{i});
-    loom::view::store(value + static_cast<int>(Count), write.payload,
-                      t::index{i});
+  for (unsigned row = 0; row < 2; ++row) {
+    for (unsigned i = 0; i < static_cast<unsigned>(Count); ++i) {
+      int value = loom::view::load(write.payload, t::index{row}, t::index{i});
+      loom::view::store(value + static_cast<int>(Count), write.payload,
+                        t::index{row}, t::index{i});
+    }
   }
   loom::channel::publish(write.write);
   auto read = loom::channel::acquire(channel);
-  auto target =
-      loom::buffer::view<32>(loom::buffer::cast<int>(output), destination, {});
+  auto target = loom::buffer::view<2, 32>(loom::buffer::cast<int>(output),
+                                          destination, {});
   auto outgoing = loom::kernel::async::copy<
       loom::kernel::async::direction::workgroup_to_global,
       loom::cache::scope::workgroup, loom::cache::temporal::regular>(
@@ -82,7 +94,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<2>(two, input, output, t::offset{128});
+        copy_phase<2>(two, input, output, t::offset{256});
       }
     }
     [[loom::concurrent]] {
@@ -90,7 +102,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<3>(three, input, output, t::offset{2 * 128});
+        copy_phase<3>(three, input, output, t::offset{2 * 256});
       }
     }
     [[loom::concurrent]] {
@@ -98,7 +110,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<4>(four, input, output, t::offset{3 * 128});
+        copy_phase<4>(four, input, output, t::offset{3 * 256});
       }
     }
     [[loom::concurrent]] {
@@ -106,7 +118,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<5>(five, input, output, t::offset{4 * 128});
+        copy_phase<5>(five, input, output, t::offset{4 * 256});
       }
     }
     [[loom::concurrent]] {
@@ -114,7 +126,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<6>(six, input, output, t::offset{5 * 128});
+        copy_phase<6>(six, input, output, t::offset{5 * 256});
       }
     }
     [[loom::concurrent]] {
@@ -122,7 +134,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<7>(seven, input, output, t::offset{6 * 128});
+        copy_phase<7>(seven, input, output, t::offset{6 * 256});
       }
     }
     [[loom::concurrent]] {
@@ -130,7 +142,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<8>(eight, input, output, t::offset{7 * 128});
+        copy_phase<8>(eight, input, output, t::offset{7 * 256});
       }
     }
     [[loom::concurrent]] {
@@ -138,7 +150,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<9>(nine, input, output, t::offset{8 * 128});
+        copy_phase<9>(nine, input, output, t::offset{8 * 256});
       }
     }
     [[loom::concurrent]] {
@@ -146,7 +158,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<10>(ten, input, output, t::offset{9 * 128});
+        copy_phase<10>(ten, input, output, t::offset{9 * 256});
       }
     }
     [[loom::concurrent]] {
@@ -154,7 +166,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<11>(eleven, input, output, t::offset{10 * 128});
+        copy_phase<11>(eleven, input, output, t::offset{10 * 256});
       }
     }
     [[loom::concurrent]] {
@@ -162,7 +174,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<12>(twelve, input, output, t::offset{11 * 128});
+        copy_phase<12>(twelve, input, output, t::offset{11 * 256});
       }
     }
     [[loom::concurrent]] {
@@ -170,7 +182,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<13>(thirteen, input, output, t::offset{12 * 128});
+        copy_phase<13>(thirteen, input, output, t::offset{12 * 256});
       }
     }
     [[loom::concurrent]] {
@@ -178,7 +190,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<14>(fourteen, input, output, t::offset{13 * 128});
+        copy_phase<14>(fourteen, input, output, t::offset{13 * 256});
       }
     }
     [[loom::concurrent]] {
@@ -186,7 +198,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<15>(fifteen, input, output, t::offset{14 * 128});
+        copy_phase<15>(fifteen, input, output, t::offset{14 * 256});
       }
     }
     [[loom::concurrent]] {
@@ -194,7 +206,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<16>(sixteen, input, output, t::offset{15 * 128});
+        copy_phase<16>(sixteen, input, output, t::offset{15 * 256});
       }
     }
     [[loom::concurrent]] {
@@ -202,7 +214,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<17>(seventeen, input, output, t::offset{16 * 128});
+        copy_phase<17>(seventeen, input, output, t::offset{16 * 256});
       }
     }
     [[loom::concurrent]] {
@@ -210,7 +222,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<1>(one, input, output, t::offset{17 * 128});
+        copy_phase<1>(one, input, output, t::offset{17 * 256});
       }
     }
     [[loom::concurrent]] {
@@ -218,7 +230,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<9>(nine, input, output, t::offset{18 * 128});
+        copy_phase<9>(nine, input, output, t::offset{18 * 256});
       }
     }
     [[loom::concurrent]] {
@@ -226,7 +238,7 @@ void descriptor_reentry([[loom::launch]] Bytes input_arg, Bytes output_arg) {
       [[loom::strand(t::indices{t::index{0}, t::index{2}},
                      t::indices{t::index{1}, t::index{1}},
                      t::indices{t::index{1}, t::index{1}})]] {
-        copy_phase<17>(seventeen, input, output, t::offset{19 * 128});
+        copy_phase<17>(seventeen, input, output, t::offset{19 * 256});
       }
     }
   }
