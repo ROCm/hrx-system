@@ -281,6 +281,30 @@ TEST(SpirvFeaturesTest, PreparesCooperativeFeatureAtomsWithoutBda) {
       feature_set, LOOM_SPIRV_OP_COOPERATIVE_VECTOR_MATRIX_MUL_ADD_NV));
 }
 
+TEST(SpirvFeaturesTest, WorkgroupLayoutClosesOnlyRequiredNarrowAccess) {
+  const loom_spirv_feature_bits_t bits[] = {
+      LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR,
+      LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS_KHR,
+      LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR,
+  };
+  const uint32_t capabilities[] = {
+      LOOM_SPIRV_CAPABILITY_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR,
+      LOOM_SPIRV_CAPABILITY_WORKGROUP_MEMORY_EXPLICIT_LAYOUT8_BIT_ACCESS_KHR,
+      LOOM_SPIRV_CAPABILITY_WORKGROUP_MEMORY_EXPLICIT_LAYOUT16_BIT_ACCESS_KHR,
+  };
+  for (uint32_t i = 0; i < 3; ++i) {
+    loom_spirv_feature_set_t feature_set;
+    loom_spirv_feature_set_prepare(bits[i], &feature_set);
+    EXPECT_EQ(feature_set.minimum_spirv_version, UINT32_C(0x00010400));
+    EXPECT_TRUE(ContainsExtension(
+        feature_set, IREE_SV("SPV_KHR_workgroup_memory_explicit_layout")));
+    EXPECT_TRUE(ContainsCapability(feature_set, capabilities[0]));
+    for (uint32_t j = 1; j < 3; ++j) {
+      EXPECT_EQ(ContainsCapability(feature_set, capabilities[j]), i == j);
+    }
+  }
+}
+
 TEST(SpirvFeaturesTest, PreparesCooperativeVectorTrainingAtom) {
   loom_spirv_feature_set_t feature_set;
   loom_spirv_feature_set_prepare(

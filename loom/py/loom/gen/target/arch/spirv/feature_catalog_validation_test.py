@@ -135,6 +135,13 @@ class FeatureCatalogValidationTest(unittest.TestCase):
         with _raises_value_error(r"int16.*NOT_A_CAPABILITY.*no primary or alias spelling.*grammar"):
             self.validate(atoms=atoms)
 
+    def test_wrapped_demanded_isa_assignment(self) -> None:
+        wrapped_header = self.isa_header.replace(
+            "LOOM_SPIRV_CAPABILITY_INT16 = 22,",
+            "LOOM_SPIRV_CAPABILITY_INT16 =\n      22,",
+        )
+        self.validate(isa_header=wrapped_header)
+
     def test_nonliteral_demanded_isa_assignment_is_rejected(self) -> None:
         bad_header = self.isa_header.replace(
             "LOOM_SPIRV_CAPABILITY_INT16 = 22,",

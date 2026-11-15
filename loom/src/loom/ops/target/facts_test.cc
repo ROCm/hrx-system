@@ -254,6 +254,28 @@ target.generic<reference> @smaller_requirement {
       smaller_requirement, effective));
 }
 
+TEST_F(TargetFactsTest, FeatureMaskPreservesTheHighBit) {
+  ModulePtr module = ParseModule("target.generic<reference> @gpu\n");
+  const loom_symbol_id_t symbol_id = FindSymbol(module.get(), IREE_SV("gpu"));
+  loom_op_t* target_op = module->symbols.entries[symbol_id].defining_op;
+  IREE_ASSERT_OK(loom_target_generic_set_contract_feature_bits(
+      module.get(), target_op, loom_attr_i64(INT64_MIN)));
+  size_t diagnostic_count = 0;
+  const iree_diagnostic_emitter_t emitter = {
+      .fn =
+          [](void* user_data, const loom_diagnostic_emission_t*) {
+            ++*static_cast<size_t*>(user_data);
+            return iree_ok_status();
+          },
+      .user_data = &diagnostic_count,
+  };
+  IREE_ASSERT_OK(loom_target_record_verify(module.get(), target_op, emitter));
+  EXPECT_EQ(diagnostic_count, 0u);
+  EXPECT_EQ(LookupTarget(module.get(), IREE_SV("gpu"))
+                ->projection->storage.config.contract_feature_bits,
+            UINT64_C(1) << 63);
+}
+
 TEST_F(TargetFactsTest, InvalidSelectorProducesNoFacts) {
   ModulePtr module = ParseModule(R"(
 target.generic<reference> @gpu

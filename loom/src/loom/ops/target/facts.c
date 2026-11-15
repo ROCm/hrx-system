@@ -46,6 +46,7 @@ static void loom_target_symbol_fact_project_attr(
     case LOOM_TARGET_PROJECTION_VALUE_I64_TO_U32:
       *(uint32_t*)destination = (uint32_t)loom_attr_as_i64(attr);
       break;
+    case LOOM_TARGET_PROJECTION_VALUE_BITS64:
     case LOOM_TARGET_PROJECTION_VALUE_I64_TO_U64:
       *(uint64_t*)destination = (uint64_t)loom_attr_as_i64(attr);
       break;

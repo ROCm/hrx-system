@@ -20,7 +20,7 @@ extern "C" {
 #define IREE_HAL_VULKAN_QUEUE_FAMILY_INVALID UINT32_MAX
 
 // Maximum recognized device extension names enabled during VkDevice creation.
-#define IREE_HAL_VULKAN_MAX_DEVICE_EXTENSION_NAMES 11
+#define IREE_HAL_VULKAN_MAX_DEVICE_EXTENSION_NAMES 14
 
 // Selected physical Vulkan queue identity and queue-family capabilities for
 // one logical queue role.
@@ -138,6 +138,11 @@ typedef struct iree_hal_vulkan_device_plan_t {
 
   // Vulkan 1.3 features enabled during driver-owned VkDevice creation.
   VkPhysicalDeviceVulkan13Features enabled_features13;
+
+  // Explicit Workgroup layout and narrow access enabled during VkDevice
+  // creation.
+  VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR
+      enabled_workgroup_memory_features;
 
   // VK_KHR_cooperative_matrix features enabled during VkDevice creation.
   VkPhysicalDeviceCooperativeMatrixFeaturesKHR

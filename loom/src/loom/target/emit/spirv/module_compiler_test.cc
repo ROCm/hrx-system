@@ -382,7 +382,8 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @entry() asm {
     if (rejection == 2) {
       facts.storage.config.contract_feature_bits = 0;
     } else if (rejection == 1) {
-      facts.storage.config.contract_feature_bits |= UINT64_C(1) << 63;
+      facts.storage.config.contract_feature_bits |=
+          UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_UNKNOWN;
     } else {
       facts.storage.snapshot.artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF;
     }

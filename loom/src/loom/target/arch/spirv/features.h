@@ -147,8 +147,16 @@ typedef enum loom_spirv_feature_atom_e {
   // RoundingModeRTE requires the mode on all floating-point widths.
   LOOM_SPIRV_FEATURE_ATOM_FLOAT_ALL_ROUNDING_RTE = 60,
 
+  // Explicit byte layout of Workgroup storage.
+  LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR = 61,
+  // 8-bit storage in explicitly laid out Workgroup blocks.
+  LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS_KHR = 62,
+  // 16-bit storage in explicitly laid out Workgroup blocks.
+  LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR =
+      63,
+
   // Number of feature atom enum slots.
-  LOOM_SPIRV_FEATURE_ATOM_COUNT = 61,
+  LOOM_SPIRV_FEATURE_ATOM_COUNT = 64,
 } loom_spirv_feature_atom_t;
 
 // Bitset of loom_spirv_feature_atom_t values.
@@ -369,6 +377,20 @@ typedef enum loom_spirv_feature_bit_e {
 #define LOOM_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE \
   (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_FLOAT_ALL_ROUNDING_RTE)
 
+// Explicit byte layout of Workgroup storage.
+#define LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR \
+  (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR)
+
+// 8-bit storage in explicitly laid out Workgroup blocks.
+#define LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS_KHR \
+  (UINT64_C(1)                                                              \
+   << LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS_KHR)
+
+// 16-bit storage in explicitly laid out Workgroup blocks.
+#define LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR \
+  (UINT64_C(1)                                                               \
+   << LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR)
+
 // Feature bits known by the SPIR-V target package.
 #define LOOM_SPIRV_FEATURE_KNOWN_BITS                                         \
   (LOOM_SPIRV_FEATURE_VULKAN_SHADER |                                         \
@@ -425,7 +447,10 @@ typedef enum loom_spirv_feature_bit_e {
    LOOM_SPIRV_FEATURE_FLOAT16_ROUNDING_RTE |                                  \
    LOOM_SPIRV_FEATURE_FLOAT64_ROUNDING_RTE |                                  \
    LOOM_SPIRV_FEATURE_FLOAT_ALL_DENORM_PRESERVE |                             \
-   LOOM_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE)
+   LOOM_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE |                                \
+   LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR |                  \
+   LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS_KHR |      \
+   LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR)
 
 // Feature bits unconditionally required by Vulkan 1.3 BDA HAL modules.
 #define LOOM_SPIRV_FEATURE_MODULE_VULKAN_1_3_BDA_BASELINE \
@@ -438,9 +463,9 @@ typedef enum loom_spirv_feature_bit_e {
    LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM)
 
 // Maximum number of OpExtension rows emitted by all modeled atoms.
-#define LOOM_SPIRV_FEATURE_MAX_EXTENSION_COUNT 13
+#define LOOM_SPIRV_FEATURE_MAX_EXTENSION_COUNT 14
 // Maximum number of OpCapability rows emitted by all modeled atoms.
-#define LOOM_SPIRV_FEATURE_MAX_CAPABILITY_COUNT 37
+#define LOOM_SPIRV_FEATURE_MAX_CAPABILITY_COUNT 40
 // Maximum number of opcode rows exposed by all modeled atoms.
 #define LOOM_SPIRV_FEATURE_MAX_OPCODE_COUNT 38
 // Maximum number of storage-class rows exposed by all modeled atoms.

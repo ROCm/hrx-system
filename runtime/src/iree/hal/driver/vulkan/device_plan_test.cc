@@ -117,6 +117,23 @@ class PhysicalDeviceSnapshotBuilder {
         IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_MEMORY_BUDGET;
   }
 
+  void SetWorkgroupLayoutFeatures(uint32_t widths, bool base,
+                                  bool extension_available) {
+    if (extension_available) {
+      snapshot_.available_extensions |=
+          IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT;
+    }
+    snapshot_.workgroup_memory_features = {
+        .sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR,
+        .pNext = nullptr,
+        .workgroupMemoryExplicitLayout = base,
+        .workgroupMemoryExplicitLayoutScalarBlockLayout = VK_FALSE,
+        .workgroupMemoryExplicitLayout8BitAccess = (widths & 1) != 0,
+        .workgroupMemoryExplicitLayout16BitAccess = (widths & 2) != 0,
+    };
+  }
+
   void SetShaderFmaFeatures(uint32_t widths, bool extension_available = true) {
     if (extension_available) {
       snapshot_.available_extensions |=
@@ -663,6 +680,86 @@ TEST(DevicePlanTest, OwnedCreateEnablesMemoryBudgetWhenAvailable) {
                         IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_MEMORY_BUDGET));
   EXPECT_TRUE(PlanContainsExtension(
       plan, IREE_HAL_VULKAN_EXT_MEMORY_BUDGET_EXTENSION_NAME));
+}
+
+TEST(DevicePlanTest, WorkgroupLayoutRequiresAdvertisedAndEnabledFeatures) {
+  const auto base =
+      IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT;
+  const iree_hal_vulkan_general_features_t narrow[] = {
+      IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS,
+      IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS,
+  };
+  for (bool extension : {false, true}) {
+    for (bool supported : {false, true}) {
+      for (uint32_t widths = 0; widths < 4; ++widths) {
+        SCOPED_TRACE(::testing::Message()
+                     << extension << ":" << supported << ":" << widths);
+        PhysicalDeviceSnapshotBuilder builder;
+        builder.AddQueueFamily(VK_QUEUE_COMPUTE_BIT, 1);
+        builder.SetWorkgroupLayoutFeatures(widths, supported, extension);
+        auto options = DefaultDeviceOptions();
+        ScopedDevicePlan plan;
+        IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_create(
+            builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
+            NoFeatures(), &plan));
+        const bool available = extension && supported;
+        EXPECT_EQ(iree_all_bits_set(plan.enabled_features.general, base),
+                  available);
+        const auto& enabled = plan.enabled_workgroup_memory_features;
+        EXPECT_EQ(enabled.workgroupMemoryExplicitLayout != VK_FALSE, available);
+        const VkBool32 enabled_widths[] = {
+            enabled.workgroupMemoryExplicitLayout8BitAccess,
+            enabled.workgroupMemoryExplicitLayout16BitAccess,
+        };
+        for (uint32_t i = 0; i < 2; ++i) {
+          const bool width_available = available && (widths & (1u << i));
+          EXPECT_EQ(iree_all_bits_set(plan.enabled_features.general, narrow[i]),
+                    width_available);
+          EXPECT_EQ(enabled_widths[i] != VK_FALSE, width_available);
+          ScopedDevicePlan required;
+          auto status = iree_hal_vulkan_device_plan_initialize_for_create(
+              builder.snapshot(), &options, IREE_HAL_VULKAN_REQUEST_FLAG_NONE,
+              GeneralFeatures(base | narrow[i]), &required);
+          EXPECT_EQ(iree_status_is_ok(status), width_available);
+          iree_status_ignore(status);
+        }
+        iree_hal_vulkan_device_plan_t moved = plan;
+        VkDeviceCreateInfo create_info;
+        iree_hal_vulkan_device_plan_make_create_info(&moved, &create_info);
+        EXPECT_EQ(
+            moved.enabled_features13.pNext,
+            available ? &moved.enabled_workgroup_memory_features : nullptr);
+        auto params = DefaultExternalParams();
+        params.compute_queue_set.queue_family_index = 0;
+        params.compute_queue_set.queue_indices = 1;
+        // Physical support alone never implies an external VkDevice enabled it.
+        ScopedDevicePlan disabled;
+        IREE_ASSERT_OK(iree_hal_vulkan_device_plan_initialize_for_wrap(
+            builder.snapshot(), &options, &params, &disabled));
+        EXPECT_FALSE(iree_any_bit_set(disabled.enabled_features.general, base));
+        params.enabled_features.general |= base;
+        ScopedDevicePlan missing_extension;
+        IREE_EXPECT_STATUS_IS(
+            StatusCode::kFailedPrecondition,
+            iree_hal_vulkan_device_plan_initialize_for_wrap(
+                builder.snapshot(), &options, &params, &missing_extension));
+        if (!available) {
+          continue;
+        }
+        params.enabled_extensions |=
+            IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT;
+        for (uint32_t i = 0; i < 2; ++i) {
+          params.enabled_features.general =
+              IREE_HAL_VULKAN_FEATURE_REQUIRED_BASELINE | base | narrow[i];
+          ScopedDevicePlan wrapped;
+          auto status = iree_hal_vulkan_device_plan_initialize_for_wrap(
+              builder.snapshot(), &options, &params, &wrapped);
+          EXPECT_EQ(iree_status_is_ok(status), (widths & (1u << i)) != 0);
+          iree_status_ignore(status);
+        }
+      }
+    }
+  }
 }
 
 // Each width is independently advertised and enabled by Vulkan.

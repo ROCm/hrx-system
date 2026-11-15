@@ -151,6 +151,10 @@ typedef struct iree_hal_vulkan_physical_device_snapshot_t {
   // VK_KHR_push_descriptor properties, if the extension is available.
   VkPhysicalDevicePushDescriptorPropertiesKHR push_descriptor_properties;
 
+  // Explicit Workgroup byte layout and independent narrow storage access.
+  VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR
+      workgroup_memory_features;
+
   // VK_KHR_cooperative_matrix feature bits, if the extension is available.
   VkPhysicalDeviceCooperativeMatrixFeaturesKHR cooperative_matrix_features;
 

@@ -77,8 +77,9 @@ _CATALOG_FIELDS = (
 
 _ISA_DECLARATION_PATTERN = re.compile(r"^\s*(?P<symbol>LOOM_SPIRV_[A-Z0-9_]+)\b")
 _ISA_ASSIGNMENT_PATTERN = re.compile(
-    r"^\s*(?P<symbol>LOOM_SPIRV_[A-Z0-9_]+)\s*=\s*"
-    r"(?P<value>-?(?:0x[0-9A-Fa-f]+|[0-9]+))\s*,\s*(?://.*)?$"
+    r"\s*(?P<symbol>LOOM_SPIRV_[A-Z0-9_]+)\s*=\s*"
+    r"(?P<value>-?(?:0x[0-9A-Fa-f]+|[0-9]+))\s*,[^\S\n]*(?://[^\n]*)?$",
+    re.MULTILINE,
 )
 
 
@@ -211,7 +212,10 @@ def _parse_demanded_isa_assignments(
     if not isinstance(source, str) or not source:
         raise TypeError("SPIR-V ISA header source must be a non-empty string")
     assignments: dict[str, _IsaAssignment] = {}
-    for line_number, line in enumerate(contents.splitlines(), start=1):
+    next_offset = 0
+    for line_number, line in enumerate(contents.splitlines(keepends=True), start=1):
+        line_offset = next_offset
+        next_offset += len(line)
         declaration_match = _ISA_DECLARATION_PATTERN.match(line)
         if declaration_match is None:
             continue
@@ -219,7 +223,7 @@ def _parse_demanded_isa_assignments(
         if symbol not in demanded_symbols:
             continue
         origin = RegistryOrigin(source, f"line {line_number}")
-        assignment_match = _ISA_ASSIGNMENT_PATTERN.match(line)
+        assignment_match = _ISA_ASSIGNMENT_PATTERN.match(contents, line_offset)
         if assignment_match is None:
             raise ValueError(f"{origin}: demanded SPIR-V ISA symbol {symbol!r} must have a literal integer enum assignment")
         if symbol in assignments:

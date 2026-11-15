@@ -148,7 +148,17 @@ typedef enum iree_hal_vulkan_general_feature_bits_e {
   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT_CONTROLS2 = 1u << 30,
 } iree_hal_vulkan_general_feature_bits_t;
 
-typedef uint32_t iree_hal_vulkan_general_features_t;
+// Requests and reports explicit byte layout in Workgroup storage.
+#define IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT \
+  (UINT64_C(1) << 31)
+// Requests and reports 8-bit access in explicitly laid out Workgroup storage.
+#define IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS \
+  (UINT64_C(1) << 32)
+// Requests and reports 16-bit access in explicitly laid out Workgroup storage.
+#define IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS \
+  (UINT64_C(1) << 33)
+
+typedef uint64_t iree_hal_vulkan_general_features_t;
 
 // Required enabled logical-device feature set for the Vulkan HAL baseline.
 #define IREE_HAL_VULKAN_FEATURE_REQUIRED_BASELINE           \
@@ -159,32 +169,35 @@ typedef uint32_t iree_hal_vulkan_general_features_t;
    IREE_HAL_VULKAN_FEATURE_ENABLE_COMPUTE_FULL_SUBGROUPS)
 
 // Recognized feature bits accepted by public Vulkan HAL APIs.
-#define IREE_HAL_VULKAN_FEATURE_ALL_RECOGNIZED                         \
-  (IREE_HAL_VULKAN_FEATURE_ENABLE_ROBUST_BUFFER_ACCESS |               \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_BINDING |                     \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_RESIDENCY_ALIASED |           \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |            \
-   IREE_HAL_VULKAN_FEATURE_REQUIRED_BASELINE |                         \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SUBGROUP_SIZE_CONTROL |              \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_COOPERATIVE_MATRIX |                 \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_STORAGE_BUFFER_8BIT_ACCESS |         \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_STORAGE_BUFFER_16BIT_ACCESS |        \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16 |                     \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT64 |                     \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT8 |                        \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT16 |                       \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64 |                       \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INTEGER_DOT_PRODUCT |         \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL |                \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE |   \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_TYPE |               \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_DOT_PRODUCT |        \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_COOPERATIVE_MATRIX | \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SUBGROUP_EXTENDED_TYPES |     \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT16 |                 \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT32 |                 \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT64 |                 \
-   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT_CONTROLS2)
+#define IREE_HAL_VULKAN_FEATURE_ALL_RECOGNIZED                                   \
+  (IREE_HAL_VULKAN_FEATURE_ENABLE_ROBUST_BUFFER_ACCESS |                         \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_BINDING |                               \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_RESIDENCY_ALIASED |                     \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |                      \
+   IREE_HAL_VULKAN_FEATURE_REQUIRED_BASELINE |                                   \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SUBGROUP_SIZE_CONTROL |                        \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_COOPERATIVE_MATRIX |                           \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_STORAGE_BUFFER_8BIT_ACCESS |                   \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_STORAGE_BUFFER_16BIT_ACCESS |                  \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16 |                               \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT64 |                               \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT8 |                                  \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT16 |                                 \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64 |                                 \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INTEGER_DOT_PRODUCT |                   \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL |                          \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE |             \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_TYPE |                         \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_DOT_PRODUCT |                  \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_BFLOAT16_COOPERATIVE_MATRIX |           \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_SUBGROUP_EXTENDED_TYPES |               \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT16 |                           \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT32 |                           \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FMA_FLOAT64 |                           \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT_CONTROLS2 |                       \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT |             \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS | \
+   IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS)
 
 // Shader atomic capabilities required or enabled on a logical device.
 typedef enum iree_hal_vulkan_shader_atomic_feature_bits_e {
@@ -287,6 +300,9 @@ typedef enum iree_hal_vulkan_device_extension_bits_t {
   IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FMA = 1u << 12,
   // VK_KHR_shader_float_controls2 (promoted to Vulkan 1.4).
   IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FLOAT_CONTROLS2 = 1u << 13,
+  // VK_KHR_workgroup_memory_explicit_layout.
+  IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT = 1u
+                                                                          << 14,
   // Recognized extension bits accepted by public Vulkan HAL APIs.
   IREE_HAL_VULKAN_DEVICE_EXTENSION_ALL_RECOGNIZED =
       IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_PORTABILITY_SUBSET |
@@ -302,7 +318,8 @@ typedef enum iree_hal_vulkan_device_extension_bits_t {
       IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT |
       IREE_HAL_VULKAN_DEVICE_EXTENSION_EXT_SHADER_ATOMIC_FLOAT2 |
       IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FMA |
-      IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FLOAT_CONTROLS2,
+      IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FLOAT_CONTROLS2 |
+      IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT,
 } iree_hal_vulkan_device_extension_bits_t;
 
 typedef uint32_t iree_hal_vulkan_device_extensions_t;

@@ -9,7 +9,7 @@
 #include "iree/base/alignment.h"
 
 #define IREE_HAL_VULKAN_DEVICE_SPEC_PAYLOAD_MAGIC UINT32_C(0x53445656)  // VVDS
-#define IREE_HAL_VULKAN_DEVICE_SPEC_HEADER_SIZE 44u
+#define IREE_HAL_VULKAN_DEVICE_SPEC_HEADER_SIZE 48u
 #define IREE_HAL_VULKAN_COOPERATIVE_MATRIX_PROPERTY_SIZE 36u
 
 static void iree_hal_vulkan_device_spec_encode_property(
@@ -145,15 +145,15 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_spec_encode(
   iree_unaligned_store_le_u32(payload.data + 8, spec->api_version);
   iree_unaligned_store_le_u32(payload.data + 12, spec->driver_version);
   iree_unaligned_store_le_u32(payload.data + 16, spec->physical_device_type);
-  iree_unaligned_store_le_u32(payload.data + 20,
+  iree_unaligned_store_le_u64(payload.data + 20,
                               spec->enabled_features.general);
-  iree_unaligned_store_le_u32(payload.data + 24,
+  iree_unaligned_store_le_u32(payload.data + 28,
                               spec->enabled_features.atomics);
-  iree_unaligned_store_le_u32(payload.data + 28, spec->flags);
-  iree_unaligned_store_le_u32(payload.data + 32,
+  iree_unaligned_store_le_u32(payload.data + 32, spec->flags);
+  iree_unaligned_store_le_u32(payload.data + 36,
                               spec->subgroup_supported_operations);
-  iree_unaligned_store_le_u32(payload.data + 36, (uint32_t)property_count);
-  iree_unaligned_store_le_u32(payload.data + 40,
+  iree_unaligned_store_le_u32(payload.data + 40, (uint32_t)property_count);
+  iree_unaligned_store_le_u32(payload.data + 44,
                               spec->maximum_workgroup_subgroup_count);
   for (iree_host_size_t i = 0; i < property_count; ++i) {
     uint8_t* row = payload.data + IREE_HAL_VULKAN_DEVICE_SPEC_HEADER_SIZE +
@@ -192,7 +192,7 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_spec_decode(
         "Vulkan device spec payload version %u is not supported", version);
   }
   const iree_host_size_t property_count =
-      iree_unaligned_load_le_u32(payload.data + 36);
+      iree_unaligned_load_le_u32(payload.data + 40);
   iree_host_size_t expected_payload_size = 0;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_spec_calculate_payload_size(
       property_count, &expected_payload_size));
@@ -221,14 +221,14 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_spec_decode(
   out_spec->physical_device_type =
       iree_unaligned_load_le_u32(payload.data + 16);
   out_spec->enabled_features.general =
-      iree_unaligned_load_le_u32(payload.data + 20);
+      iree_unaligned_load_le_u64(payload.data + 20);
   out_spec->enabled_features.atomics =
-      iree_unaligned_load_le_u32(payload.data + 24);
-  out_spec->flags = iree_unaligned_load_le_u32(payload.data + 28);
+      iree_unaligned_load_le_u32(payload.data + 28);
+  out_spec->flags = iree_unaligned_load_le_u32(payload.data + 32);
   out_spec->subgroup_supported_operations =
-      iree_unaligned_load_le_u32(payload.data + 32);
+      iree_unaligned_load_le_u32(payload.data + 36);
   out_spec->maximum_workgroup_subgroup_count =
-      iree_unaligned_load_le_u32(payload.data + 40);
+      iree_unaligned_load_le_u32(payload.data + 44);
   out_spec->cooperative_matrix.count = property_count;
   out_spec->cooperative_matrix.encoded_data =
       property_count == 0

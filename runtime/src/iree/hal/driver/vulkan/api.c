@@ -37,9 +37,10 @@ iree_hal_vulkan_features_validate(iree_hal_vulkan_features_t features) {
   const iree_hal_vulkan_general_features_t unknown_general_features =
       features.general & ~IREE_HAL_VULKAN_FEATURE_ALL_RECOGNIZED;
   if (unknown_general_features) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unrecognized Vulkan general feature bits 0x%08x",
-                            unknown_general_features);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "unrecognized Vulkan general feature bits 0x%016" PRIx64,
+        unknown_general_features);
   }
   const iree_hal_vulkan_shader_atomic_features_t unknown_atomic_features =
       features.atomics & ~IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_ALL_RECOGNIZED;
@@ -58,6 +59,16 @@ iree_hal_vulkan_features_validate(iree_hal_vulkan_features_t features) {
           IREE_HAL_VULKAN_FEATURE_ENABLE_SPARSE_RESIDENCY_ALIASED)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Vulkan sparse residency requires sparse binding");
+  }
+  if (iree_any_bit_set(
+          features.general,
+          IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS |
+              IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS) &&
+      !iree_all_bits_set(
+          features.general,
+          IREE_HAL_VULKAN_FEATURE_ENABLE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "narrow Workgroup access requires explicit layout");
   }
   return iree_ok_status();
 }
@@ -146,6 +157,12 @@ IREE_API_EXPORT iree_status_t iree_hal_vulkan_device_extensions_from_names(
           extension_count, extension_names,
           VK_KHR_SHADER_FLOAT_CONTROLS_2_EXTENSION_NAME)) {
     extensions |= IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_SHADER_FLOAT_CONTROLS2;
+  }
+  if (iree_hal_vulkan_extension_name_list_contains(
+          extension_count, extension_names,
+          VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME)) {
+    extensions |=
+        IREE_HAL_VULKAN_DEVICE_EXTENSION_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT;
   }
   *out_extensions = extensions;
   return iree_ok_status();
