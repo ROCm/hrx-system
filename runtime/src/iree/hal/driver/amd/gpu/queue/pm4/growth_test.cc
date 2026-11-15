@@ -776,6 +776,7 @@ class ProgramGrowthTest : public GrowthTest {
     growth_completed_.acquire();
     iree_hal_amd_gpu_context_join_memory(&context_);
     JoinPublication();
+    iree_hal_amd_gpu_program_pool_trim(&programs_.storage);
     iree_hal_amd_gpu_context_join_memory(&context_);
     EXPECT_EQ(programs_.storage.registry.head, nullptr);
     EXPECT_EQ(

@@ -87,7 +87,7 @@ void iree_hal_amd_gpu_aql_command_program_release(
   }
   const iree_allocator_t host_allocator = program->host_allocator;
   iree_hal_amd_gpu_profile_commands_release(program->profile);
-  iree_hal_amd_gpu_program_constant_release(&program->constants);
+  iree_hal_amd_gpu_program_range_release(&program->constants);
   iree_hal_amd_gpu_program_deinitialize(&program->resident);
   iree_allocator_free(host_allocator, program->blocks);
   iree_allocator_free(host_allocator, program->host_template);
@@ -348,8 +348,8 @@ static iree_status_t iree_hal_amd_gpu_aql_command_write_constants(
       buffer->host_allocator, allocation_size, (void**)&preparation));
   iree_byte_span_t contents;
   uint64_t address = 0;
-  iree_status_t status = iree_hal_amd_gpu_program_constant_allocate(
-      &buffer->pool->storage, buffer->recording.data.length,
+  iree_status_t status = iree_hal_amd_gpu_program_range_allocate(
+      &buffer->pool->storage.constants, buffer->recording.data.length,
       buffer->recording.alignment, &buffer->program->constants, &contents,
       &address);
   if (iree_status_is_ok(status)) {
@@ -367,8 +367,8 @@ static iree_status_t iree_hal_amd_gpu_aql_command_write_constants(
       memcpy(commands, preparation, buffer->recording.commands.length);
       iree_memcpy_write_only(contents.data, preparation + data_offset,
                              buffer->recording.data.length);
-      status = iree_hal_amd_gpu_program_constant_publish(
-          &buffer->program->constants);
+      status =
+          iree_hal_amd_gpu_program_range_publish(&buffer->program->constants);
     }
   }
   iree_allocator_free(buffer->host_allocator, preparation);

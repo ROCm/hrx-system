@@ -785,6 +785,7 @@ TEST_F(CommandBufferTest, FailedNativePublicationRetainsAndReleasesItsBacking) {
   EXPECT_EQ(pool_.registry.head, nullptr);
   iree_hal_command_buffer_release(recording_);
   recording_ = nullptr;
+  iree_hal_amd_gpu_program_pool_trim(&pool_);
   iree_hal_amd_gpu_context_join_memory(&context_);
   EXPECT_EQ(live_memory_, 0u);
 }

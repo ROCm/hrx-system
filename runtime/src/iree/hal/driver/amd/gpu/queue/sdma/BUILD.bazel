@@ -198,6 +198,7 @@ iree_runtime_cc_library(
         "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:memory_copy",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:inputs",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:program",
