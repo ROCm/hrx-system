@@ -181,9 +181,77 @@ static iree_status_t loom_amdgpu_source_value_analyze_scc_boundaries(
       &result);
 }
 
+static iree_status_t
+loom_amdgpu_source_value_analysis_register_i1_identity_representatives(
+    const loom_value_fact_table_t* fact_table,
+    loom_local_value_domain_t* value_domain,
+    bool* out_has_i1_identity_components) {
+  *out_has_i1_identity_components = false;
+  if (fact_table == NULL || value_domain == NULL ||
+      fact_table->identities.nodes == NULL) {
+    return iree_ok_status();
+  }
+  const loom_value_ordinal_t initial_value_count = value_domain->value_count;
+  for (loom_value_ordinal_t ordinal = 0; ordinal < initial_value_count;
+       ++ordinal) {
+    const loom_value_id_t value_id = value_domain->value_ids[ordinal];
+    if (!loom_amdgpu_type_is_i1(
+            loom_module_value_type(value_domain->module, value_id))) {
+      continue;
+    }
+    const loom_value_id_t representative =
+        loom_value_fact_table_query_identity(fact_table, value_id);
+    if (representative == value_id) {
+      continue;
+    }
+    *out_has_i1_identity_components = true;
+    loom_value_ordinal_t representative_ordinal = LOOM_VALUE_ORDINAL_INVALID;
+    IREE_RETURN_IF_ERROR(loom_local_value_domain_register_value(
+        value_domain, representative, &representative_ordinal));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t
+loom_amdgpu_source_value_analysis_initialize_i1_identity_components(
+    iree_arena_allocator_t* arena,
+    loom_amdgpu_source_value_analysis_t* analysis) {
+  analysis->i1_identity_next_ordinals = NULL;
+  if (analysis->record_count == 0) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, analysis->record_count,
+                                sizeof(*analysis->i1_identity_next_ordinals),
+                                (void**)&analysis->i1_identity_next_ordinals));
+  for (loom_value_ordinal_t ordinal = 0; ordinal < analysis->record_count;
+       ++ordinal) {
+    analysis->i1_identity_next_ordinals[ordinal] = ordinal;
+  }
+  for (loom_value_ordinal_t ordinal = 0; ordinal < analysis->record_count;
+       ++ordinal) {
+    const loom_value_id_t value_id = analysis->value_domain->value_ids[ordinal];
+    if (!loom_amdgpu_type_is_i1(
+            loom_module_value_type(analysis->value_domain->module, value_id))) {
+      continue;
+    }
+    const loom_value_id_t representative =
+        loom_value_fact_table_query_identity(analysis->fact_table, value_id);
+    const loom_value_ordinal_t representative_ordinal =
+        loom_local_value_domain_ordinal(analysis->value_domain, representative);
+    if (representative_ordinal == ordinal) {
+      continue;
+    }
+    analysis->i1_identity_next_ordinals[ordinal] =
+        analysis->i1_identity_next_ordinals[representative_ordinal];
+    analysis->i1_identity_next_ordinals[representative_ordinal] = ordinal;
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_source_value_analysis_prepare(
     const loom_value_fact_table_t* fact_table,
-    const loom_local_value_domain_t* value_domain,
+    loom_local_value_domain_t* value_domain,
     const loom_low_descriptor_set_t* descriptor_set,
     loom_low_representation_plan_t* representation_plan,
     iree_arena_allocator_t* arena,
@@ -203,12 +271,17 @@ static iree_status_t loom_amdgpu_source_value_analysis_prepare(
       analysis->fact_table != fact_table ||
       (value_domain != NULL &&
        analysis->record_count < value_domain->value_count)) {
+    bool has_i1_identity_components = false;
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_source_value_analysis_register_i1_identity_representatives(
+            fact_table, value_domain, &has_i1_identity_components));
     analysis->value_domain = value_domain;
     analysis->fact_table = fact_table;
     analysis->representation_plan = representation_plan;
     analysis->records = NULL;
     analysis->record_count =
         value_domain != NULL ? value_domain->value_count : 0;
+    analysis->i1_identity_next_ordinals = NULL;
     analysis->query.provisional_ordinals = NULL;
     analysis->query.provisional_count = 0;
     analysis->query.generation = 0;
@@ -223,6 +296,11 @@ static iree_status_t loom_amdgpu_source_value_analysis_prepare(
           arena, analysis->record_count,
           sizeof(*analysis->query.provisional_ordinals),
           (void**)&analysis->query.provisional_ordinals));
+      if (has_i1_identity_components) {
+        IREE_RETURN_IF_ERROR(
+            loom_amdgpu_source_value_analysis_initialize_i1_identity_components(
+                arena, analysis));
+      }
       iree_status_t status =
           loom_amdgpu_source_value_analyze_scc_boundaries(analysis);
       if (!iree_status_is_ok(status)) {
@@ -446,6 +524,33 @@ void loom_amdgpu_source_value_analysis_end_bit(
     loom_amdgpu_source_value_analysis_complete_query(analysis, value_ordinal,
                                                      bit);
   }
+}
+
+loom_value_id_t loom_amdgpu_source_value_analysis_i1_identity_representative(
+    const loom_amdgpu_source_value_analysis_t* analysis,
+    loom_value_id_t source_value_id) {
+  if (analysis->i1_identity_next_ordinals == NULL) {
+    return source_value_id;
+  }
+  const loom_value_id_t representative = loom_value_fact_table_query_identity(
+      analysis->fact_table, source_value_id);
+  IREE_ASSERT_NE(loom_local_value_domain_try_ordinal(analysis->value_domain,
+                                                     representative),
+                 LOOM_VALUE_ORDINAL_INVALID);
+  return representative;
+}
+
+loom_value_id_t loom_amdgpu_source_value_analysis_i1_identity_next(
+    const loom_amdgpu_source_value_analysis_t* analysis,
+    loom_value_id_t source_value_id) {
+  if (analysis->i1_identity_next_ordinals == NULL) {
+    return source_value_id;
+  }
+  const loom_value_ordinal_t source_ordinal =
+      loom_local_value_domain_ordinal(analysis->value_domain, source_value_id);
+  const loom_value_ordinal_t next_ordinal =
+      analysis->i1_identity_next_ordinals[source_ordinal];
+  return analysis->value_domain->value_ids[next_ordinal];
 }
 
 bool loom_amdgpu_source_value_analysis_cached_register_shape(
