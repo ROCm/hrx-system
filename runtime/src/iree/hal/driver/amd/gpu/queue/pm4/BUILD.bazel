@@ -72,6 +72,30 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "perf_counters",
+    srcs = ["perf_counters.c"],
+    hdrs = ["perf_counters.h"],
+    visibility = ["//runtime/src/iree/hal/driver/amd/gpu:__subpackages__"],
+    deps = [
+        ":commands",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "perf_counters_test",
+    srcs = ["perf_counters_test.cc"],
+    deps = [
+        ":perf_counters",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "launch",
     srcs = ["launch.c"],
     hdrs = ["launch.h"],
