@@ -539,17 +539,18 @@ TEST_F(Aie2pControlSwitchTest, AvailableLaneKeepsControlPrivateBesidePayload) {
 TEST_F(Aie2pControlSwitchTest, IndependentCommandsShareTheRemainingColumnLane) {
   loom_aie2p_native_delivery_t delivery = {};
   ASSERT_NO_FATAL_FAILURE(AddPayloads(3, &delivery));
-  // The bottom core consumes the fourth southbound lane. The top core can
-  // converge with its complete hardware commands without borrowing payload.
-  for (size_t worker : {0, 3}) {
+  // The bottom core consumes the fourth southbound lane. Each later core
+  // extends its command carrier without borrowing independent payload lanes.
+  uint32_t packets = 0;
+  for (size_t worker : {0, 1, 2, 3}) {
     ASSERT_NO_FATAL_FAILURE(SelectCommand(worker, 1, true));
     ASSERT_NO_FATAL_FAILURE(SelectCommand(worker, 0, true));
+    EXPECT_EQ(packets & workers_[worker].packet_mask, 0u);
+    packets |= workers_[worker].packet_mask;
   }
   EXPECT_TRUE(control_paths_[0].sharing.used);
   EXPECT_FALSE(delivery.sharing.used);
-  EXPECT_EQ(workers_[0].packet_mask & workers_[3].packet_mask, 0u);
-  EXPECT_EQ(control_paths_[0].packets,
-            workers_[0].packet_mask | workers_[3].packet_mask);
+  EXPECT_EQ(control_paths_[0].packets, packets);
   ASSERT_NO_FATAL_FAILURE(Build(true, 6));
 }
 
@@ -560,6 +561,19 @@ TEST_F(Aie2pControlSwitchTest,
   }
   EXPECT_NE(control_paths_[0].sharing.domain, 0u);
   EXPECT_TRUE(control_paths_[0].sharing.used);
+  ASSERT_NO_FATAL_FAILURE(Build(true, 5));
+}
+
+TEST_F(Aie2pControlSwitchTest, SharedCommandsCanTerminateAboveTheCarrierRoot) {
+  loom_aie2p_native_delivery_t delivery = {};
+  ASSERT_NO_FATAL_FAILURE(AddPayloads(3, &delivery));
+  ASSERT_NO_FATAL_FAILURE(SelectCommand(0, 1, true));
+  for (size_t worker : {1, 2, 3}) {
+    // Neighboring-memory publication addresses the lower core's registers;
+    // the finite command can retire before the carrier reaches SRAM.
+    ASSERT_NO_FATAL_FAILURE(SelectCommand(worker, worker + 1, true));
+  }
+  EXPECT_FALSE(delivery.sharing.used);
   ASSERT_NO_FATAL_FAILURE(Build(true, 5));
 }
 

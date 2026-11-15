@@ -364,6 +364,9 @@ static bool loom_aie2p_array_plan_route(
                                                      : 0;
   uint32_t* sharing_links =
       sharing_owner ? builder->domains[sharing_owner - 1].links : NULL;
+  const bool command_carrier =
+      sharing &&
+      sharing->carrier == LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND;
   // Existing multicast prefixes retain their physical arrival and lane. Only
   // the unreserved suffix participates in lane selection.
   while (builder->prefixes.nodes[node_index].coordinate.column !=
@@ -473,20 +476,19 @@ static bool loom_aie2p_array_plan_route(
     const uint32_t shared_channels = channels & step->shared;
     // Control-only carriers and serialized multicast converge before scarce
     // downstream switches. Granted payloads retain free-lane bandwidth.
-    const bool converge =
-        multicast ||
-        (sharing &&
-         sharing->carrier == LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND);
+    const bool converge = multicast || command_carrier;
     const uint32_t preferred = converge && shared_channels ? shared_channels
                                : free_channels             ? free_channels
                                                            : channels;
     const uint8_t channel = iree_math_count_trailing_zeros_u32(preferred);
     const bool borrowed = (*step->occupied & (UINT32_C(1) << channel)) != 0;
     *step->occupied |= UINT32_C(1) << channel;
-    if (i >= shared_step_count ||
+    if (command_carrier || i >= shared_step_count ||
         (multicast && step->direction != LOOM_AIE2P_ARRAY_ROUTE_NORTH)) {
       // Record only domain-owned lanes. Multicast source prefixes stay private;
       // granted control can extend its domain beyond the payload receiver.
+      // Complete commands also own new upstream links: a later source must
+      // be able to join an earlier source's extension of the same carrier.
       *step->sharing_lanes |= UINT32_C(1) << channel;
     }
     loom_aie2p_array_append_route(builder, channel_index, node->coordinate,

@@ -780,6 +780,54 @@ TEST(Aie2pRouteTest, GrantedControlRequiresFreeContinuationBeyondReceiver) {
   iree_arena_block_pool_deinitialize(&blocks);
 }
 
+TEST(Aie2pRouteTest, CommandCarrierRetainsEachUpstreamExtension) {
+  for (const auto& order :
+       {std::vector<uint16_t>{3, 4, 5}, std::vector<uint16_t>{4, 5, 3},
+        std::vector<uint16_t>{5, 4, 3}}) {
+    iree_arena_block_pool_t blocks;
+    iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
+    iree_arena_allocator_t arena;
+    iree_arena_initialize(&blocks, &arena);
+    loom_aie2p_array_route_builder_t routing;
+    loom_aie2p_array_route_tree_t payloads[3] = {};
+    loom_aie2p_array_route_tree_t commands[4] = {};
+    IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+        loom_xdna_npu2_array_family(), 128, &arena, &routing));
+    for (uint8_t i = 0; i < 3; ++i) {
+      ASSERT_TRUE(loom_aie2p_array_route_workers(
+          &routing, i, &payloads[i], {0, static_cast<uint16_t>(i < 2 ? 5 : 4)},
+          i % 2, {0, 1}, i, false));
+    }
+    const size_t first = routing.route_count;
+    ASSERT_TRUE(loom_aie2p_array_route_stream(
+        &routing, 3, &commands[0], {0, 2}, LOOM_XDNA_STREAM_PORT_CORE, 0,
+        {0, 1}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, true));
+    loom_aie2p_array_route_sharing_t sharing;
+    IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
+        &routing, first, routing.route_count - first, {0, 1},
+        LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND, &sharing));
+    for (uint16_t row : order) {
+      SCOPED_TRACE(row);
+      const size_t begin = routing.route_count;
+      ASSERT_TRUE(loom_aie2p_array_route_control(
+          &routing, row + 2, &commands[row - 2], {0, row}, {0, 1}, &sharing));
+      ASSERT_EQ(routing.route_count - begin, row);
+      // Every sender converges onto the sole command lane before the three
+      // independent payload streams consume the remaining southbound lanes.
+      for (size_t i = begin; i < routing.route_count; ++i) {
+        const auto& edge = routing.routes[i];
+        if (edge.coordinate.row >= 2 && edge.coordinate.row <= 4) {
+          EXPECT_EQ(edge.destination_port, LOOM_XDNA_STREAM_PORT_SOUTH);
+          EXPECT_EQ(edge.destination_channel, 3u);
+        }
+      }
+    }
+    EXPECT_TRUE(sharing.used);
+    iree_arena_deinitialize(&arena);
+    iree_arena_block_pool_deinitialize(&blocks);
+  }
+}
+
 TEST(Aie2pRouteTest, SharingIdentitySurvivesOwnerRetirement) {
   iree_arena_block_pool_t blocks;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);

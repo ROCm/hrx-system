@@ -287,8 +287,8 @@ iree_status_t loom_aie2p_native_select_control_route(
     const uint16_t memory_row = loom_xdna_array_tile_kind_facts(
                                     context->family, LOOM_XDNA_TILE_KIND_MEMORY)
                                     ->first_row;
-    if (source.column == tile->coordinate.column && source.row > memory_row &&
-        tile->coordinate.row <= memory_row) {
+    if (source.column == tile->coordinate.column &&
+        source.row > tile->coordinate.row) {
       loom_aie2p_native_control_path_t* path =
           &context->control_paths[source.column];
       if (path->count) {
