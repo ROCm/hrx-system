@@ -231,6 +231,34 @@ static iree_status_t iree_hal_amd_xdna_profile_counters_allocate_result(
       counters, status, "xdna.context_attach_result_buffer");
 }
 
+iree_status_t iree_hal_amd_xdna_profile_counters_check_selection(
+    const iree_hal_device_profiling_options_t* options) {
+  if (options->counter_set_count > 1) {
+    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                            "XDNA exposes one invocation cycle counter set");
+  }
+  if (!options->counter_set_count) {
+    return iree_ok_status();
+  }
+  const iree_hal_profile_counter_set_selection_t* selection =
+      &options->counter_sets[0];
+  if (selection->flags ||
+      (selection->counter_name_count && !selection->counter_names)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid XDNA counter selection");
+  }
+  for (iree_host_size_t i = 0; i < selection->counter_name_count; ++i) {
+    if (!iree_string_view_equal(selection->counter_names[i],
+                                IREE_SV("invocation_cycles"))) {
+      return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "XDNA counter '%.*s' is unavailable",
+                              (int)selection->counter_names[i].size,
+                              selection->counter_names[i].data);
+    }
+  }
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_amd_xdna_profile_counters_begin(
     const iree_hal_device_profiling_options_t* options,
     const iree_hal_profile_chunk_metadata_t* metadata,
@@ -250,27 +278,15 @@ iree_status_t iree_hal_amd_xdna_profile_counters_begin(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "XDNA result association has not retired");
   }
-  if (options->counter_set_count > 1) {
-    return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "XDNA exposes one invocation cycle counter set");
-  }
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amd_xdna_profile_counters_check_selection(options));
   iree_string_view_t name = IREE_SV("xdna");
   if (options->counter_set_count) {
     const iree_hal_profile_counter_set_selection_t* selection =
         &options->counter_sets[0];
-    if (selection->flags || !measuring ||
-        (selection->counter_name_count && !selection->counter_names)) {
+    if (!measuring) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "invalid XDNA counter selection");
-    }
-    for (iree_host_size_t i = 0; i < selection->counter_name_count; ++i) {
-      if (!iree_string_view_equal(selection->counter_names[i],
-                                  IREE_SV("invocation_cycles"))) {
-        return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                                "XDNA counter '%.*s' is unavailable",
-                                (int)selection->counter_names[i].size,
-                                selection->counter_names[i].data);
-      }
     }
     if (selection->name.size) {
       name = selection->name;

@@ -19,6 +19,13 @@ extern "C" {
 typedef struct iree_hal_amd_xdna_profile_counters_t
     iree_hal_amd_xdna_profile_counters_t;
 
+// Checks the requested counter selection without touching the sink or the
+// device: at most one set, and only the counters this device has. An unknown
+// counter name is UNAVAILABLE. Callers run it before a sink session starts,
+// so a rejected selection leaves no session behind.
+iree_status_t iree_hal_amd_xdna_profile_counters_check_selection(
+    const iree_hal_device_profiling_options_t* options);
+
 // Copies selection strings and reserves bounded attribution/result storage.
 // Counter capture attaches its destination once. Metadata-only capture uses no
 // native controls. Context, arena, and sink are borrowed through end.
