@@ -13,15 +13,15 @@ bool loom_motion_read_can_cross_op(const loom_module_t* module,
   if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
     return true;
   }
-  if (op->region_count != 0) {
-    return false;
-  }
   const loom_trait_flags_t traits = loom_op_effective_traits(module, op);
-  if (loom_traits_may_write(traits)) {
+  if (loom_traits_order_reads(traits)) {
     return false;
   }
-  return !iree_any_bit_set(
-      traits, LOOM_TRAIT_NON_DETERMINISTIC | LOOM_TRAIT_HINT |
-                  LOOM_TRAIT_POISON_BOUNDARY | LOOM_TRAIT_CONVERGENT |
-                  LOOM_TRAIT_OBSERVABLE_EFFECT | LOOM_TRAIT_UNIQUE_IDENTITY);
+  loom_region_t* const* regions = loom_op_regions(op);
+  for (uint8_t i = 0; i < op->region_count; ++i) {
+    if (loom_region_has_read_ordering_effects(regions[i])) {
+      return false;
+    }
+  }
+  return true;
 }

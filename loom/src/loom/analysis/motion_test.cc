@@ -277,6 +277,13 @@ TEST_F(MotionTest, ReadBarrierTableIndexesStrictIntervals) {
   IREE_ASSERT_OK(loom_motion_read_barrier_table_can_cross(
       table, first_read_op, first_consumer_op, &can_cross));
   EXPECT_TRUE(can_cross);
+  IREE_ASSERT_OK(loom_motion_read_barrier_table_can_cross(
+      table, pure_gap_op, first_read_op, &can_cross));
+  EXPECT_TRUE(can_cross);
+  // The destination's effect is crossed when moving a later read backward.
+  IREE_ASSERT_OK(loom_motion_read_barrier_table_can_cross(
+      table, second_read_op, first_consumer_op, &can_cross));
+  EXPECT_FALSE(can_cross);
 
   const loom_builder_ip_t saved_ip = builder_.ip;
   loom_builder_set_before(&builder_, fence_op);
@@ -311,6 +318,54 @@ TEST_F(MotionTest, ReadBarrierTableIndexesStrictIntervals) {
   IREE_ASSERT_OK(loom_motion_read_barrier_table_can_cross(
       table, second_read_op, later_op, &can_cross));
   EXPECT_FALSE(can_cross);
+}
+
+TEST_F(MotionTest, NestedReadOrderingTracksTraitChanges) {
+  loom_op_t* outer = nullptr;
+  IREE_ASSERT_OK(loom_test_block_args_build(&builder_, nullptr, 0,
+                                            LOOM_LOCATION_UNKNOWN, &outer));
+  EnterRegion(outer, loom_test_block_args_body(outer));
+  loom_op_t* inner = nullptr;
+  IREE_ASSERT_OK(loom_test_block_args_build(&builder_, nullptr, 0,
+                                            LOOM_LOCATION_UNKNOWN, &inner));
+  EnterRegion(inner, loom_test_block_args_body(inner));
+  loom_op_t* observation = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(
+      &builder_, loom_attr_i64(1), loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      LOOM_LOCATION_UNKNOWN, &observation));
+  LeaveRegion();
+  LeaveRegion();
+
+  // Ordinary nested reads do not order other reads. A volatile read, fence,
+  // write, or semantic boundary does, including when memory traits overlap.
+  const loom_trait_flags_t boundaries[] = {
+      LOOM_TRAIT_WRITES_MEMORY,
+      LOOM_TRAIT_UNKNOWN_EFFECTS,
+      LOOM_TRAIT_MEMORY_FENCE,
+      LOOM_TRAIT_NON_DETERMINISTIC,
+      LOOM_TRAIT_HINT,
+      LOOM_TRAIT_POISON_BOUNDARY,
+      LOOM_TRAIT_CONVERGENT,
+      LOOM_TRAIT_OBSERVABLE_EFFECT,
+      LOOM_TRAIT_UNIQUE_IDENTITY,
+  };
+  const auto set_traits = [&](loom_trait_flags_t traits) {
+    const loom_trait_flags_t old_traits = observation->traits;
+    observation->traits = traits;
+    loom_module_update_op_direct_summaries(module_, observation, old_traits,
+                                           traits);
+  };
+  set_traits(LOOM_TRAIT_READS_MEMORY);
+  EXPECT_TRUE(loom_motion_read_can_cross_op(module_, outer));
+  for (loom_trait_flags_t boundary : boundaries) {
+    SCOPED_TRACE(boundary);
+    set_traits(LOOM_TRAIT_READS_MEMORY | boundary);
+    EXPECT_FALSE(loom_motion_read_can_cross_op(module_, inner));
+    EXPECT_FALSE(loom_motion_read_can_cross_op(module_, outer));
+    set_traits(LOOM_TRAIT_READS_MEMORY);
+    EXPECT_TRUE(loom_motion_read_can_cross_op(module_, inner));
+    EXPECT_TRUE(loom_motion_read_can_cross_op(module_, outer));
+  }
 }
 
 TEST_F(MotionTest, SubtreeAllowsOperandsAvailableBeforeInsertion) {

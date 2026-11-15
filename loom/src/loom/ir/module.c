@@ -271,18 +271,22 @@ static void loom_module_adjust_op_ancestor_summary_counts(
   }
 }
 
-// A nonempty child region contributes one hint source to its containing
+// A nonempty child region contributes one source to its containing
 // region. Once a region remains nonempty (or remains empty), no ancestor's
 // presence changes. Monotone subtree construction/removal therefore propagates
-// at most one transition per region, independent of the number of nested hints.
-static void loom_module_adjust_op_hint_sources(loom_op_t* op, int32_t delta) {
+// at most one transition per region, independent of the number of nested
+// sources.
+static void loom_module_adjust_op_presence_sources(loom_op_t* op,
+                                                   iree_host_size_t offset,
+                                                   int32_t delta) {
   loom_region_t* region =
       op->parent_block ? op->parent_block->parent_region : NULL;
   loom_op_t* parent_op = op->parent_op;
   while (region) {
-    const bool had_hints = region->hint_source_count != 0;
-    loom_region_adjust_summary_count(&region->hint_source_count, delta);
-    if ((region->hint_source_count != 0) == had_hints || !parent_op) {
+    uint32_t* source_count = (uint32_t*)((uint8_t*)region + offset);
+    const bool had_sources = *source_count != 0;
+    loom_region_adjust_summary_count(source_count, delta);
+    if ((*source_count != 0) == had_sources || !parent_op) {
       break;
     }
     region =
@@ -357,7 +361,12 @@ static void loom_module_adjust_op_direct_summaries(loom_module_t* module,
         direction < 0 ? write_spaces : 0, direction > 0 ? write_spaces : 0);
   }
   if (iree_any_bit_set(traits, LOOM_TRAIT_HINT)) {
-    loom_module_adjust_op_hint_sources(op, direction);
+    loom_module_adjust_op_presence_sources(
+        op, offsetof(loom_region_t, hint_source_count), direction);
+  }
+  if (loom_traits_order_reads(traits)) {
+    loom_module_adjust_op_presence_sources(
+        op, offsetof(loom_region_t, read_ordering_source_count), direction);
   }
   if (loom_traits_are_poison(traits)) {
     loom_module_adjust_poison_op_count(module, direction);
@@ -378,7 +387,12 @@ void loom_module_record_op_summaries(loom_module_t* module, loom_op_t* op) {
 void loom_module_record_region_summaries(loom_op_t* parent_op,
                                          const loom_region_t* region) {
   if (region->hint_source_count) {
-    loom_module_adjust_op_hint_sources(parent_op, +1);
+    loom_module_adjust_op_presence_sources(
+        parent_op, offsetof(loom_region_t, hint_source_count), +1);
+  }
+  if (region->read_ordering_source_count) {
+    loom_module_adjust_op_presence_sources(
+        parent_op, offsetof(loom_region_t, read_ordering_source_count), +1);
   }
   for (loom_op_t* ancestor = parent_op; ancestor && ancestor->parent_block;
        ancestor = ancestor->parent_op) {
@@ -462,8 +476,15 @@ void loom_module_update_op_direct_summaries(loom_module_t* module,
       new_read_spaces & ~old_read_spaces, old_spaces & ~new_spaces,
       new_spaces & ~old_spaces);
   if (iree_any_bit_set(old_traits ^ new_traits, LOOM_TRAIT_HINT)) {
-    loom_module_adjust_op_hint_sources(
-        op, iree_any_bit_set(new_traits, LOOM_TRAIT_HINT) ? 1 : -1);
+    loom_module_adjust_op_presence_sources(
+        op, offsetof(loom_region_t, hint_source_count),
+        iree_any_bit_set(new_traits, LOOM_TRAIT_HINT) ? 1 : -1);
+  }
+  if (loom_traits_order_reads(old_traits) !=
+      loom_traits_order_reads(new_traits)) {
+    loom_module_adjust_op_presence_sources(
+        op, offsetof(loom_region_t, read_ordering_source_count),
+        loom_traits_order_reads(new_traits) ? 1 : -1);
   }
   const int32_t poison_delta = (loom_traits_are_poison(new_traits) ? 1 : 0) -
                                (loom_traits_are_poison(old_traits) ? 1 : 0);

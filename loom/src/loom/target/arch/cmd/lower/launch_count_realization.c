@@ -8,15 +8,15 @@
 
 #include <string.h>
 
-#include "loom/analysis/liveness_uses.h"
 #include "loom/analysis/motion.h"
 #include "loom/analysis/read_motion.h"
 #include "loom/analysis/symbol_facts.h"
 #include "loom/error/error_catalog.h"
 #include "loom/error/parameter.h"
+#include "loom/ir/ancestry.h"
 #include "loom/ir/context.h"
 #include "loom/ir/local_value_domain.h"
-#include "loom/ir/type_dependencies.h"
+#include "loom/ir/value_refs.h"
 #include "loom/link/linker.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/command/composition.h"
@@ -57,7 +57,8 @@ typedef struct loom_cmd_launch_count_value_change_t {
 typedef struct loom_cmd_launch_count_read_t {
   // Original memory observation retained by closure construction.
   const loom_op_t* operation;
-  // Reference read at that observation.
+  // Reference read at that observation, or INVALID for a structured subtree
+  // whose nested accesses have no single retained storage-confinement proof.
   loom_value_id_t reference;
 } loom_cmd_launch_count_read_t;
 
@@ -411,31 +412,23 @@ static bool loom_cmd_launch_count_is_reference_projection(
 static iree_status_t loom_cmd_launch_count_visit_value(
     loom_cmd_launch_count_closure_t* closure, loom_value_id_t value_id);
 
-static iree_status_t loom_cmd_launch_count_visit_value_callback(
-    void* user_data, loom_value_id_t value_id) {
-  return loom_cmd_launch_count_visit_value(
-      (loom_cmd_launch_count_closure_t*)user_data, value_id);
-}
+typedef struct loom_cmd_launch_count_capture_t {
+  // Closure receiving dependencies of the operation being cloned.
+  loom_cmd_launch_count_closure_t* closure;
+  // Defines the subtree whose local values are cloned with the operation.
+  const loom_op_t* operation;
+} loom_cmd_launch_count_capture_t;
 
-static iree_status_t loom_cmd_launch_count_visit_attribute_uses(
-    loom_cmd_launch_count_closure_t* closure, const loom_op_t* operation) {
-  const uint32_t* attribute_owners = loom_op_attribute_owners(operation);
-  for (uint8_t i = 0; i < operation->attribute_count; ++i) {
-    if (attribute_owners[i] == 0) {
-      continue;
-    }
-    loom_type_use_iterator_t dependencies;
-    loom_attribute_dependencies_begin(&closure->module->type_uses, operation, i,
-                                      &dependencies);
-    for (loom_value_id_t dependency =
-             loom_type_dependencies_next(&dependencies);
-         dependency != LOOM_VALUE_ID_INVALID;
-         dependency = loom_type_dependencies_next(&dependencies)) {
-      IREE_RETURN_IF_ERROR(
-          loom_cmd_launch_count_visit_value(closure, dependency));
-    }
+static iree_status_t loom_cmd_launch_count_visit_capture(
+    loom_value_id_t value_id, loom_value_id_t type_carrier, void* user_data) {
+  (void)type_carrier;
+  const loom_cmd_launch_count_capture_t* capture =
+      (const loom_cmd_launch_count_capture_t*)user_data;
+  if (loom_op_subtree_defines_value(capture->closure->module,
+                                    capture->operation, value_id)) {
+    return iree_ok_status();
   }
-  return iree_ok_status();
+  return loom_cmd_launch_count_visit_value(capture->closure, value_id);
 }
 
 static iree_status_t loom_cmd_launch_count_visit_operation(
@@ -463,6 +456,11 @@ static iree_status_t loom_cmd_launch_count_visit_operation(
 
   const loom_trait_flags_t traits =
       loom_op_effective_traits(closure->module, operation);
+  if (operation->region_count != 0 &&
+      !loom_motion_read_can_cross_op(closure->module, operation)) {
+    closure->invalid_observation = operation;
+    return iree_ok_status();
+  }
   if (loom_traits_has_side_effects(traits) ||
       loom_traits_has_unique_identity(traits) ||
       iree_any_bit_set(traits, LOOM_TRAIT_COMMAND_EFFECT)) {
@@ -475,10 +473,11 @@ static iree_status_t loom_cmd_launch_count_visit_operation(
         (int)operation_name.size, operation_name.data);
   }
 
-  if (iree_any_bit_set(traits, LOOM_TRAIT_READS_MEMORY)) {
+  const bool structured_read = loom_op_regions_have_read_effects(operation);
+  if (iree_any_bit_set(traits, LOOM_TRAIT_READS_MEMORY) || structured_read) {
     bool can_move = false;
-    const bool ordinary =
-        loom_motion_op_is_ordinary_load(closure->module, operation);
+    const bool ordinary = structured_read || loom_motion_op_is_ordinary_load(
+                                                 closure->module, operation);
     if (ordinary) {
       if (*closure->read_barriers == NULL) {
         IREE_RETURN_IF_ERROR(loom_motion_read_barrier_table_allocate(
@@ -492,13 +491,15 @@ static iree_status_t loom_cmd_launch_count_visit_operation(
       return iree_ok_status();
     }
     closure->needs_source_placement |= !can_move;
-    const loom_memory_access_t access =
-        loom_memory_access_cast(closure->module, operation);
-    IREE_ASSERT(loom_memory_access_isa(access));
-    IREE_ASSERT_EQ(loom_memory_access_operation_kind(access),
-                   LOOM_MEMORY_ACCESS_OPERATION_LOAD);
-    const loom_value_id_t reference = loom_memory_access_view(access);
-    IREE_ASSERT_NE(reference, LOOM_VALUE_ID_INVALID);
+    loom_value_id_t reference = LOOM_VALUE_ID_INVALID;
+    if (!structured_read) {
+      const loom_memory_access_t access =
+          loom_memory_access_cast(closure->module, operation);
+      IREE_ASSERT(loom_memory_access_isa(access));
+      IREE_ASSERT_EQ(loom_memory_access_operation_kind(access),
+                     LOOM_MEMORY_ACCESS_OPERATION_LOAD);
+      reference = loom_memory_access_view(access);
+    }
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
         closure->arena, closure->read_reference_count,
         closure->read_reference_count + 1, sizeof(*closure->read_references),
@@ -512,12 +513,15 @@ static iree_status_t loom_cmd_launch_count_visit_operation(
 
   IREE_RETURN_IF_ERROR(loom_cmd_launch_count_set_value_state(
       closure, state_ordinal, LOOM_CMD_LAUNCH_COUNT_VALUE_VISITING));
-  IREE_RETURN_IF_ERROR(loom_liveness_for_each_op_use(
-      closure->module, operation,
-      loom_liveness_value_callback_make(
-          loom_cmd_launch_count_visit_value_callback, closure)));
-  IREE_RETURN_IF_ERROR(
-      loom_cmd_launch_count_visit_attribute_uses(closure, operation));
+  // Cloning requires all external references, including facts carried only by
+  // nested attributes. Runtime liveness alone is not a complete clone closure.
+  loom_cmd_launch_count_capture_t capture = {
+      .closure = closure,
+      .operation = operation,
+  };
+  IREE_RETURN_IF_ERROR(loom_op_walk_subtree_value_refs(
+      closure->module, operation, loom_cmd_launch_count_visit_capture,
+      &capture));
   IREE_RETURN_IF_ERROR(
       loom_cmd_launch_count_append_operation(closure, operation));
 
@@ -878,6 +882,9 @@ static bool loom_cmd_launch_count_read_conflicts_with_writes(
   if (!cluster->has_possible_writes) {
     return false;
   }
+  if (reference == LOOM_VALUE_ID_INVALID) {
+    return true;
+  }
   const loom_cmd_launch_count_storage_t storage =
       loom_cmd_launch_count_reference_storage(cluster->closure.facts,
                                               reference);
@@ -910,22 +917,27 @@ static iree_status_t loom_cmd_launch_count_new_reads_can_join(
     if (read->operation == before) {
       continue;
     }
-    if (read->operation->parent_block == before->parent_block &&
-        read->operation->block_ordinal < before->block_ordinal) {
-      // This observation precedes the producer. Later consumer writes cannot
-      // invalidate it; only effects between the read and producer matter.
+    if (read->operation->parent_block == before->parent_block) {
+      // Saved observations can lie on either side of the producer while
+      // preceding all consumers. Later consumer writes do not invalidate
+      // motion within that earlier effect-free interval.
       IREE_RETURN_IF_ERROR(loom_motion_read_barrier_table_can_cross(
           *closure->read_barriers, read->operation, before, out_can_join));
-    } else {
-      // A new observation after the producer must be safe both at its own
-      // consumer and across the writes crossed while hoisting it.
-      *out_can_join = !cluster->has_observation_barrier &&
-                      !loom_cmd_launch_count_read_conflicts_with_writes(
-                          root, cluster, read->reference);
       if (*out_can_join) {
-        IREE_RETURN_IF_ERROR(loom_motion_read_barrier_table_can_cross(
-            *closure->read_barriers, read->operation, consumer, out_can_join));
+        continue;
       }
+      if (read->operation->block_ordinal < before->block_ordinal) {
+        break;
+      }
+    }
+    // A fresh observation following consumers may cross their writes only
+    // when its storage is disjoint and no other ordering barrier intervenes.
+    *out_can_join = !cluster->has_observation_barrier &&
+                    !loom_cmd_launch_count_read_conflicts_with_writes(
+                        root, cluster, read->reference);
+    if (*out_can_join) {
+      IREE_RETURN_IF_ERROR(loom_motion_read_barrier_table_can_cross(
+          *closure->read_barriers, read->operation, consumer, out_can_join));
     }
   }
   return iree_ok_status();

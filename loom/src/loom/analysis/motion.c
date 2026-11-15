@@ -328,7 +328,7 @@ iree_status_t loom_motion_read_barrier_table_can_cross(
   if (table == NULL || read_op == NULL || before_op == NULL ||
       read_op->parent_block == NULL ||
       read_op->parent_block != before_op->parent_block ||
-      read_op->block_ordinal >= before_op->block_ordinal) {
+      read_op == before_op) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(
