@@ -774,6 +774,7 @@ iree_runtime_cc_test(
         ":test_device",
         ":testdata",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:profile_test_util",
         "//runtime/src/iree/hal/cts/util:test_base",
