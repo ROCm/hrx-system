@@ -26,6 +26,7 @@ loom_cc_library(
         "//loom/src/loom/rewrite:pattern_registry",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/transforms/cleanup:patterns",
+        "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:predicate_facts",
         "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",

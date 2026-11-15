@@ -55,11 +55,13 @@ iree_status_t loom_value_fact_table_define_operand_cast(
     loom_fact_context_t* context, uint16_t result_ordinal,
     uint16_t operand_ordinal, loom_integer_cast_kind_t kind, uint8_t bit_count);
 
-// Returns a conversion of source that equals value. This can use their shared
-// payload root when source retains every low bit required by value. A false
-// result means no such retained relation is available, not numeric inequality.
+// Expresses an observed cast as a conversion of source. This can use their
+// shared payload root when source retains every low bit required by the cast.
+// The caller obtains the publication with query_integer_cast after any needed
+// numeric-identity translation, retaining its value dependency even on absence.
+// A false result means no retained relation, not numeric inequality.
 bool loom_value_fact_table_query_integer_cast_from(
-    const loom_value_fact_table_t* table, loom_value_id_t value,
+    const loom_value_fact_table_t* table, loom_value_fact_integer_cast_t cast,
     loom_value_id_t source, loom_integer_cast_t* out_cast);
 
 // Compares complete semantic publications, including absence.

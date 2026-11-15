@@ -218,3 +218,65 @@ func.def @offset_extension(%input: i8) -> (offset, i64, i64) {
   %upper = scf.select %valid, %hi$19, %hi$17 : i64
   func.return %address, %lower, %upper : offset, i64, i64
 }
+
+// ====
+
+// A value without a conversion still consumes its direct branch predicates.
+// Conversion admission must preserve that use alongside the cast-derived use.
+func.def @mixed_direct_and_cast_values(%input: i8, %plain: i64) -> (i64, i64, i64, i64, i64, i64) {
+  %wide = scalar.extui %input : i8 to i64
+  %c0 = scalar.constant 0 : i8
+  %byte_limit = scalar.constant 16 : i8
+  %plain_begin = scalar.constant 4 : i64
+  %plain_end = scalar.constant 7 : i64
+  %positive = scalar.cmpi sgt, %input, %c0 : i8
+  %small = scalar.cmpi sle, %input, %byte_limit : i8
+  %above = scalar.cmpi sge, %plain, %plain_begin : i64
+  %below = scalar.cmpi sle, %plain, %plain_end : i64
+  %byte_valid = scalar.andi %positive, %small : i1
+  %plain_valid = scalar.andi %above, %below : i1
+  %valid = scalar.andi %byte_valid, %plain_valid : i1
+  %wide_lower, %wide_upper, %plain_lower, %plain_upper = scf.if %valid -> (i64, i64, i64, i64) {
+    %wide_lo = test.fact_range_lo %wide : i64 -> i64
+    %wide_hi = test.fact_range_hi %wide : i64 -> i64
+    %plain_lo = test.fact_range_lo %plain : i64 -> i64
+    %plain_hi = test.fact_range_hi %plain : i64 -> i64
+    scf.yield %wide_lo, %wide_hi, %plain_lo, %plain_hi : i64, i64, i64, i64
+  } else {
+    %wide_lo = test.fact_range_lo %wide : i64 -> i64
+    %wide_hi = test.fact_range_hi %wide : i64 -> i64
+    %plain_lo = test.fact_range_lo %plain : i64 -> i64
+    %plain_hi = test.fact_range_hi %plain : i64 -> i64
+    scf.yield %wide_lo, %wide_hi, %plain_lo, %plain_hi : i64, i64, i64, i64
+  }
+  func.return %wide, %plain, %wide_lower, %wide_upper, %plain_lower, %plain_upper : i64, i64, i64, i64, i64, i64
+}
+
+// ----
+func.def @mixed_direct_and_cast_values(%input: i8, %plain: i64) -> (i64, i64, i64, i64, i64, i64) {
+  %wide = scalar.extui %input : i8 to i64
+  %c0 = scalar.constant 0 : i8
+  %byte_limit = scalar.constant 16 : i8
+  %plain_begin = scalar.constant 4 : i64
+  %plain_end = scalar.constant 7 : i64
+  %positive = scalar.cmpi sgt, %input, %c0 : i8
+  %small = scalar.cmpi sle, %input, %byte_limit : i8
+  %above = scalar.cmpi sge, %plain, %plain_begin : i64
+  %below = scalar.cmpi sle, %plain, %plain_end : i64
+  %byte_valid = scalar.andi %positive, %small : i1
+  %plain_valid = scalar.andi %above, %below : i1
+  %valid = scalar.andi %byte_valid, %plain_valid : i1
+  %wide_lo$41 = scalar.constant 1 : i64
+  %wide_hi$40 = scalar.constant 16 : i64
+  %plain_lo$39 = scalar.constant 4 : i64
+  %plain_hi$38 = scalar.constant 7 : i64
+  %wide_lo$37 = scalar.constant 0 : i64
+  %wide_hi$36 = scalar.constant 255 : i64
+  %plain_lo$35 = scalar.constant -9223372036854775808 : i64
+  %plain_hi$34 = scalar.constant 9223372036854775807 : i64
+  %wide_lower = scf.select %valid, %wide_lo$41, %wide_lo$37 : i64
+  %wide_upper = scf.select %valid, %wide_hi$40, %wide_hi$36 : i64
+  %plain_lower = scf.select %valid, %plain_lo$39, %plain_lo$35 : i64
+  %plain_upper = scf.select %valid, %plain_hi$38, %plain_hi$34 : i64
+  func.return %wide, %plain, %wide_lower, %wide_upper, %plain_lower, %plain_upper : i64, i64, i64, i64, i64, i64
+}

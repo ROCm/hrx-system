@@ -181,18 +181,12 @@ iree_status_t loom_value_fact_table_define_operand_cast(
 }
 
 bool loom_value_fact_table_query_integer_cast_from(
-    const loom_value_fact_table_t* table, loom_value_id_t value,
+    const loom_value_fact_table_t* table, loom_value_fact_integer_cast_t cast,
     loom_value_id_t source, loom_integer_cast_t* out_cast) {
-  if (!table->integer_casts) {
-    return false;
-  }
-  value = loom_value_fact_table_query_numeric_identity(table, value);
-  source = loom_value_fact_table_query_numeric_identity(table, source);
-  const loom_value_fact_integer_cast_t cast =
-      loom_value_fact_table_query_integer_cast(table, value);
   if (!cast.immediate.bit_count) {
     return false;
   }
+  source = loom_value_fact_table_query_numeric_identity(table, source);
   if (loom_value_fact_table_query_numeric_identity(
           table, cast.immediate.source_value_id) == source) {
     *out_cast = cast.immediate;

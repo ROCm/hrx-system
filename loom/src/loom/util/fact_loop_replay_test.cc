@@ -21,6 +21,7 @@
 #include "loom/ops/op_registry.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/util/fact_cast.h"
 #include "loom/util/fact_snapshot.h"
 #include "loom/util/fact_table.h"
 
@@ -593,6 +594,79 @@ TEST_F(FactLoopDependencyTest, IdentityChangesWithoutNumericChange) {
   Visit(false, query);
   Visit(true, query);
 }
+
+class FactLoopCastDependencyTest
+    : public FactLoopDependencyTest,
+      public ::testing::WithParamInterface<std::tuple<bool, bool>> {};
+
+TEST_P(FactLoopCastDependencyTest, AbsentCastTracksValueUntilPublication) {
+  const auto [populate_cast_table, query_numeric_alias] = GetParam();
+  const auto value = inputs_[3], source = inputs_[4];
+  loom_value_id_t queried_value = value;
+  if (query_numeric_alias) {
+    queried_value = loom_region_entry_arg_id(loom_scf_for_body(outer_), 0);
+    IREE_ASSERT_OK(loom_value_fact_table_define_exact_scalar_origin(
+        &table_, queried_value, {value}));
+  }
+  const loom_integer_cast_t interpretation = {
+      .source_value_id = source,
+      .bit_count = 8,
+      .kind = LOOM_INTEGER_CAST_SIGNED,
+      .unsigned_bit_count = 0,
+  };
+  if (populate_cast_table) {
+    auto unrelated = interpretation;
+    unrelated.source_value_id = inputs_[0];
+    IREE_ASSERT_OK(loom_value_fact_table_define_integer_cast(
+        &table_, source, {unrelated, unrelated}));
+  }
+  bool expected_present = false;
+  loom_value_id_t expected_source = source;
+  auto query = [&] {
+    const auto numeric_value =
+        loom_value_fact_table_query_numeric_identity(&table_, queried_value);
+    const auto cast =
+        loom_value_fact_table_query_integer_cast(&table_, numeric_value);
+    loom_integer_cast_t result;
+    ASSERT_EQ(loom_value_fact_table_query_integer_cast_from(&table_, cast,
+                                                            source, &result),
+              expected_present);
+    if (expected_present) {
+      EXPECT_EQ(result.source_value_id, expected_source);
+      EXPECT_EQ(result.bit_count, interpretation.bit_count);
+      EXPECT_EQ(result.kind, interpretation.kind);
+    }
+  };
+  Visit(false, query);
+  Visit(true, query);
+
+  // A source change cannot supply the missing value interpretation.
+  IREE_ASSERT_OK(loom_value_fact_table_define(
+      &table_, source, loom_value_facts_make(-32, 32, 1)));
+  Visit(true, query);
+
+  IREE_ASSERT_OK(loom_value_fact_table_define_integer_cast(
+      &table_, value, {interpretation, interpretation}));
+  expected_present = true;
+  Visit(false, query);
+  Visit(true, query);
+
+  // Once the interpretation exists, source identity is a live dependency.
+  IREE_ASSERT_OK(loom_value_fact_table_define_exact_scalar_origin(
+      &table_, source, {inputs_[0]}));
+  expected_source = inputs_[0];
+  Visit(false, query);
+  Visit(true, query);
+
+  loom_value_fact_table_clear_integer_cast(&table_, value);
+  expected_present = false;
+  Visit(false, query);
+  Visit(true, query);
+}
+
+INSTANTIATE_TEST_SUITE_P(CastTablePopulation, FactLoopCastDependencyTest,
+                         ::testing::Combine(::testing::Bool(),
+                                            ::testing::Bool()));
 
 TEST_F(FactLoopDependencyTest, PartitionChangesWithoutNumericChange) {
   auto query = [&] {

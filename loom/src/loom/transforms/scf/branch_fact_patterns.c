@@ -18,6 +18,7 @@
 #include "loom/ops/scf/ops.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/transforms/cleanup/patterns.h"
+#include "loom/util/fact_cast.h"
 #include "loom/util/predicate_facts.h"
 #include "loom/util/walk.h"
 
@@ -452,31 +453,36 @@ typedef struct loom_branch_facts_region_use_scan_t {
   loom_branch_facts_edge_assume_set_t* assume_set;
 } loom_branch_facts_region_use_scan_t;
 
+// Candidate collection does not mutate the fact table. Observe conversion
+// evidence once per operand visit, then reuse it for every condition endpoint.
+typedef struct loom_branch_facts_used_value_t {
+  // Region operand whose use may acquire an edge refinement.
+  loom_value_id_t value;
+  // Canonical exact scalar source, or INVALID when no origin is published.
+  loom_value_id_t exact_source;
+  // Retained interpretation of the operand's numeric representative.
+  loom_value_fact_integer_cast_t cast;
+} loom_branch_facts_used_value_t;
+
 static bool loom_branch_facts_value_preserves_condition_value(
-    const loom_rewriter_t* rewriter,
-    const loom_condition_fact_set_t* condition_facts, loom_value_id_t value_id,
+    const loom_value_fact_table_t* fact_table,
+    const loom_condition_fact_set_t* condition_facts,
+    const loom_branch_facts_used_value_t* used_value,
     loom_value_id_t condition_value_id) {
-  if (!rewriter->module || !rewriter->fact_table) {
-    return false;
-  }
-  loom_value_fact_exact_scalar_origin_t origin;
-  if (loom_value_fact_table_query_exact_scalar_origin(
-          rewriter->fact_table, rewriter->module, value_id, &origin) &&
-      loom_value_fact_table_query_identity(rewriter->fact_table,
-                                           origin.source_value_id) ==
-          loom_value_fact_table_query_identity(rewriter->fact_table,
-                                               condition_value_id)) {
+  if (used_value->exact_source != LOOM_VALUE_ID_INVALID &&
+      used_value->exact_source == loom_value_fact_table_query_identity(
+                                      fact_table, condition_value_id)) {
     return true;
   }
   loom_integer_cast_t cast;
   if (!loom_value_fact_table_query_integer_cast_from(
-          rewriter->fact_table, value_id, condition_value_id, &cast)) {
+          fact_table, used_value->cast, condition_value_id, &cast)) {
     return false;
   }
   loom_value_facts_t facts =
-      loom_value_fact_table_lookup(rewriter->fact_table, condition_value_id);
-  loom_condition_fact_set_apply_to_value_facts(
-      condition_facts, rewriter->fact_table, condition_value_id, &facts);
+      loom_value_fact_table_lookup(fact_table, condition_value_id);
+  loom_condition_fact_set_apply_to_value_facts(condition_facts, fact_table,
+                                               condition_value_id, &facts);
   return loom_integer_cast_is_identity(&cast, facts);
 }
 
@@ -485,25 +491,23 @@ loom_branch_facts_edge_assume_set_append_relation_for_value(
     loom_rewriter_t* rewriter, loom_branch_facts_edge_assume_set_t* assume_set,
     const loom_condition_fact_set_t* condition_facts,
     const loom_condition_integer_relation_t* relation,
-    loom_value_id_t value_id) {
-  if (value_id == LOOM_VALUE_ID_INVALID ||
-      value_id >= rewriter->module->values.count) {
-    return iree_ok_status();
-  }
-
+    const loom_branch_facts_used_value_t* used_value) {
+  const loom_value_id_t value_id = used_value->value;
   loom_condition_integer_relation_t mapped_relation = *relation;
   bool matched = false;
   if (relation->left.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE &&
       value_id != relation->left.value_id &&
       loom_branch_facts_value_preserves_condition_value(
-          rewriter, condition_facts, value_id, relation->left.value_id)) {
+          rewriter->fact_table, condition_facts, used_value,
+          relation->left.value_id)) {
     mapped_relation.left.value_id = value_id;
     matched = true;
   }
   if (relation->right.kind == LOOM_CONDITION_INTEGER_OPERAND_VALUE &&
       value_id != relation->right.value_id &&
       loom_branch_facts_value_preserves_condition_value(
-          rewriter, condition_facts, value_id, relation->right.value_id)) {
+          rewriter->fact_table, condition_facts, used_value,
+          relation->right.value_id)) {
     mapped_relation.right.value_id = value_id;
     matched = true;
   }
@@ -522,14 +526,32 @@ loom_branch_facts_edge_assume_set_append_relation_for_value(
 
 static iree_status_t loom_branch_facts_scan_edge_value_use(
     loom_branch_facts_region_use_scan_t* scan, loom_value_id_t value_id) {
-  for (iree_host_size_t i = 0;
-       scan->condition_facts &&
-       i < scan->condition_facts->integer_relation_count;
-       ++i) {
-    IREE_RETURN_IF_ERROR(
-        loom_branch_facts_edge_assume_set_append_relation_for_value(
-            scan->rewriter, scan->assume_set, scan->condition_facts,
-            &scan->condition_facts->integer_relations[i], value_id));
+  if (scan->condition_facts && scan->condition_facts->integer_relation_count &&
+      scan->rewriter->fact_table && value_id != LOOM_VALUE_ID_INVALID &&
+      value_id < scan->module->values.count) {
+    const loom_value_fact_table_t* fact_table = scan->rewriter->fact_table;
+    loom_branch_facts_used_value_t used_value = {
+        .value = value_id, .exact_source = LOOM_VALUE_ID_INVALID};
+    loom_value_fact_exact_scalar_origin_t origin;
+    if (loom_value_fact_table_query_exact_scalar_origin(
+            fact_table, scan->module, value_id, &origin)) {
+      used_value.exact_source = loom_value_fact_table_query_identity(
+          fact_table, origin.source_value_id);
+    }
+    const loom_value_id_t numeric_value =
+        loom_value_fact_table_query_numeric_identity(fact_table, value_id);
+    used_value.cast =
+        loom_value_fact_table_query_integer_cast(fact_table, numeric_value);
+    if (used_value.exact_source != LOOM_VALUE_ID_INVALID ||
+        used_value.cast.immediate.bit_count) {
+      for (iree_host_size_t i = 0;
+           i < scan->condition_facts->integer_relation_count; ++i) {
+        IREE_RETURN_IF_ERROR(
+            loom_branch_facts_edge_assume_set_append_relation_for_value(
+                scan->rewriter, scan->assume_set, scan->condition_facts,
+                &scan->condition_facts->integer_relations[i], &used_value));
+      }
+    }
   }
   for (uint16_t candidate_index = 0;
        candidate_index < scan->assume_set->candidate_count; ++candidate_index) {
