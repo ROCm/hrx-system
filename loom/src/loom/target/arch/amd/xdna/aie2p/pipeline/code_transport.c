@@ -20,6 +20,8 @@ typedef struct loom_aie2p_code_transport_sender_t {
   uint8_t worker_count;
   // Private hardware-command suffix available to this column's load requests.
   loom_aie2p_array_route_sharing_t commands;
+  // Complete code-write packets share one column-wide delivery carrier.
+  loom_aie2p_array_route_sharing_t delivery;
   // Identities excluded by the carrier source and previous load requests.
   uint32_t command_packets;
 } loom_aie2p_code_transport_sender_t;
@@ -51,6 +53,9 @@ iree_status_t loom_aie2p_code_transport_initialize(
     const loom_aie2p_native_control_path_t* path = &plan->control_paths[column];
     loom_aie2p_code_transport_sender_t* sender =
         &out_transport->senders[column];
+    IREE_RETURN_IF_ERROR(loom_aie2p_array_route_sharing_initialize(
+        &plan->routing, 0, 0, (loom_xdna_tile_coordinate_t){column, memory_row},
+        LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND, &sender->delivery));
     sender->command_packets = path->packets;
     if (!path->count) {
       continue;
@@ -115,7 +120,8 @@ static bool loom_aie2p_code_transport_route(
   const bool routed =
       commands ? loom_aie2p_array_route_control(
                      &plan->routing, (uint32_t)plan->connections.group_count,
-                     tree, source.coordinate, destination.coordinate, commands)
+                     tree, source.coordinate, source.port, source.channel,
+                     destination.coordinate, commands)
                : loom_aie2p_array_route_stream(
                      &plan->routing, (uint32_t)plan->connections.group_count,
                      tree, source.coordinate, source.port, source.channel,
@@ -124,7 +130,7 @@ static bool loom_aie2p_code_transport_route(
   if (!routed) {
     return false;
   }
-  if (commands && commands->used) {
+  if (commands && commands->used && source.port == LOOM_XDNA_STREAM_PORT_CORE) {
     plan->control_sources[source_index].destination = UINT32_MAX;
     plan->control_sources[plan->control_paths[source.coordinate.column].source]
         .destination = UINT32_MAX;
@@ -219,7 +225,13 @@ void loom_aie2p_code_transport_bind(
   }
   const uint8_t reply_packet =
       (uint8_t)iree_math_count_trailing_zeros_u32(reply_available);
-  const uint8_t code_packet = sender->worker_count++;
+  ++sender->worker_count;
+  // Descriptor banks may require multiple engines. Their complete commands
+  // share one carrier, so the packet names the destination across all engines.
+  const uint8_t code_packet =
+      (uint8_t)(compute.row - loom_xdna_array_tile_kind_facts(
+                                  family, LOOM_XDNA_TILE_KIND_COMPUTE)
+                                  ->first_row);
   sender->command_packets |= UINT32_C(1) << queue_packet;
   const loom_aie2p_native_connection_endpoint_t core = {
       compute, LOOM_XDNA_STREAM_PORT_CORE, 0};
@@ -233,7 +245,7 @@ void loom_aie2p_code_transport_bind(
           transport, core, queue, queue_packet, NULL,
           sender->commands.domain ? &sender->commands : NULL) ||
       !loom_aie2p_code_transport_route(transport, dma, control, code_packet,
-                                       &sender->tree, NULL) ||
+                                       &sender->tree, &sender->delivery) ||
       !loom_aie2p_code_transport_route(transport, control, core, reply_packet,
                                        NULL, NULL)) {
     *out_requirement =

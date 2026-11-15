@@ -740,13 +740,33 @@ bool loom_aie2p_array_route_control(loom_aie2p_array_route_builder_t* builder,
                                     uint32_t channel_index,
                                     loom_aie2p_array_route_tree_t* tree,
                                     loom_xdna_tile_coordinate_t source,
+                                    loom_xdna_stream_port_t source_port,
+                                    uint8_t source_channel,
                                     loom_xdna_tile_coordinate_t destination,
                                     loom_aie2p_array_route_sharing_t* sharing) {
-  const iree_host_size_t root = loom_aie2p_array_route_source(
-      builder, tree, source, LOOM_XDNA_STREAM_PORT_CORE, 0);
+  const loom_xdna_tile_kind_t source_kind =
+      loom_xdna_array_tile_facts(builder->family, source)->kind;
+  const iree_host_size_t root =
+      source_kind == LOOM_XDNA_TILE_KIND_SHIM_NOC &&
+              source_port == LOOM_XDNA_STREAM_PORT_DMA
+          ? loom_aie2p_array_route_shim_source(builder, channel_index, tree,
+                                               source, source_channel)
+          : loom_aie2p_array_route_source(builder, tree, source, source_port,
+                                          source_channel);
+  uint16_t horizontal_row = source.row;
+  if (source.column != destination.column &&
+      source_kind == LOOM_XDNA_TILE_KIND_MEMORY) {
+    horizontal_row =
+        loom_xdna_array_tile_facts(builder->family, destination)->kind ==
+                LOOM_XDNA_TILE_KIND_MEMORY
+            ? loom_xdna_array_tile_kind_facts(builder->family,
+                                              LOOM_XDNA_TILE_KIND_COMPUTE)
+                  ->first_row
+            : destination.row;
+  }
   return loom_aie2p_array_plan_route(builder, channel_index, root, destination,
                                      LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0,
-                                     source.row, true, sharing, NULL);
+                                     horizontal_row, true, sharing, NULL);
 }
 
 bool loom_aie2p_array_route_workers(

@@ -190,15 +190,18 @@ iree_status_t loom_aie2p_array_route_sharing_initialize(
     loom_aie2p_array_route_carrier_t carrier,
     loom_aie2p_array_route_sharing_t* out_sharing);
 
-// Routes core control packets through the carrier's convergence tile. Granted
-// payloads prefer free lanes; hardware commands converge as early as possible.
-// Occupied lanes may be borrowed only from |sharing|. Beyond the convergence
-// tile, free lanes or this domain's continuations remain available. All sources
-// share the caller-owned packet namespace.
+// Routes complete control packets through the carrier's convergence tile.
+// Core streams and DMA senders use their actual source port and channel.
+// Granted payloads prefer free lanes; hardware commands converge as early as
+// possible. Occupied lanes may be borrowed only from |sharing|. Beyond the
+// convergence tile, free lanes or this domain's continuations remain available.
+// All sources share the caller-owned packet namespace.
 bool loom_aie2p_array_route_control(loom_aie2p_array_route_builder_t* builder,
                                     uint32_t channel_index,
                                     loom_aie2p_array_route_tree_t* tree,
                                     loom_xdna_tile_coordinate_t source,
+                                    loom_xdna_stream_port_t source_port,
+                                    uint8_t source_channel,
                                     loom_xdna_tile_coordinate_t destination,
                                     loom_aie2p_array_route_sharing_t* sharing);
 

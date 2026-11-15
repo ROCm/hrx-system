@@ -180,9 +180,9 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
     }
   }
   const bool routed =
-      sharing ? loom_aie2p_array_route_control(&context->routing, index,
-                                               &control->tree, source,
-                                               destination, sharing)
+      sharing ? loom_aie2p_array_route_control(
+                    &context->routing, index, &control->tree, source,
+                    source_port, 0, destination, sharing)
               : loom_aie2p_array_route_stream(
                     &context->routing, index, &control->tree, source,
                     source_port, 0, destination, destination_port, 0, true);

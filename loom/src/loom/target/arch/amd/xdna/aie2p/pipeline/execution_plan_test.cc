@@ -243,7 +243,8 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   EXPECT_EQ(retained->control_sources[4].packet_mask, 1u << connection.packet);
 
   // Descriptor capacity can end a shared sender before its task queue fills.
-  // The next engine uses the other bank and a separate packet namespace.
+  // The next engine uses the other bank but shares the delivery carrier and
+  // destination namespace, so descriptor demand consumes no additional lane.
   IREE_ASSERT_OK(loom_aie2p_code_transport_initialize(
       retained, 4, &retained_arena_, &code_transport));
   for (uint16_t row = 2; row < 6; ++row) {
@@ -252,7 +253,10 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
     ASSERT_TRUE(iree_string_view_is_empty(requirement));
     EXPECT_EQ(binding.engine, row == 5 ? 2u : 1u);
     EXPECT_EQ(binding.first_descriptor, row == 5 ? 1u : 24u + 7u * (row - 2u));
-    EXPECT_EQ(binding.code_packet, row == 5 ? 0u : row - 2u);
+    EXPECT_EQ(binding.code_packet, row - 2u);
+    EXPECT_EQ(code_transport.plan.routing.link_channels
+                  .northbound[family->column_count],
+              3u);
   }
   EXPECT_EQ(code_transport.plan.tiles[1].mm2s_count, 3u);
   EXPECT_EQ(code_transport.plan.tiles[1].descriptor_counts[0], 8u);

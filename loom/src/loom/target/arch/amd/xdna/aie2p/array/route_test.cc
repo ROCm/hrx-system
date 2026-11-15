@@ -243,6 +243,73 @@ class Aie2pComputeRouteTest : public ::testing::Test {
   iree_arena_allocator_t arena;
 };
 
+TEST_F(Aie2pComputeRouteTest, CompleteCommandsShareAcrossSenderPorts) {
+  const auto* family = loom_xdna_npu2_array_family();
+  for (uint16_t row : {0, 1, 2}) {
+    for (bool dma : {false, true}) {
+      if (!dma && row != 2) {
+        continue;
+      }
+      for (uint16_t destination_column : {0, 1}) {
+        SCOPED_TRACE(::testing::Message()
+                     << "source row " << row << ", DMA " << dma
+                     << ", destination column " << destination_column);
+        iree_arena_reset(&arena);
+        loom_aie2p_array_route_builder_t routing;
+        IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+            family, 128, &arena, &routing));
+        const auto* facts = loom_xdna_array_tile_facts(family, {0, row});
+        const size_t source_count =
+            dma ? facts->dma.channel_count_per_direction : 2;
+        std::vector<loom_aie2p_array_route_tree_t> trees(source_count);
+        loom_aie2p_array_route_sharing_t sharing;
+        IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
+            &routing, 0, 0, {0, row},
+            LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND, &sharing));
+        for (size_t i = 0; i < source_count; ++i) {
+          const loom_xdna_tile_coordinate_t source = {
+              0, dma ? row : static_cast<uint16_t>(row + i)};
+          ASSERT_TRUE(loom_aie2p_array_route_control(
+              &routing, static_cast<uint32_t>(i), &trees[i], source,
+              dma ? LOOM_XDNA_STREAM_PORT_DMA : LOOM_XDNA_STREAM_PORT_CORE,
+              dma ? static_cast<uint8_t>(i) : 0, {destination_column, 5},
+              &sharing));
+          const auto& terminal = routing.routes[routing.route_count - 1];
+          EXPECT_EQ(terminal.coordinate.column, destination_column);
+          EXPECT_EQ(terminal.coordinate.row, 5u);
+          EXPECT_EQ(terminal.destination_port,
+                    LOOM_XDNA_STREAM_PORT_TILE_CONTROL);
+        }
+        // The complete command streams converge despite distinct physical
+        // sources. SRAM senders turn only on compute rows; shim sources retain
+        // their mux wiring before entering the shared switch carrier.
+        const uint16_t carrier_column =
+            facts->kind == LOOM_XDNA_TILE_KIND_MEMORY ? 0 : destination_column;
+        const size_t link = 3 * family->column_count + carrier_column;
+        EXPECT_EQ(routing.link_channels.northbound[link], 1u);
+        for (size_t i = 0; i < routing.route_count; ++i) {
+          const auto& edge = routing.routes[i];
+          if (edge.switch_kind == LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX) {
+            continue;
+          }
+          const auto* tile =
+              loom_xdna_array_tile_facts(family, edge.coordinate);
+          const auto* input = loom_xdna_array_stream_port_range(
+              family, tile->kind, LOOM_XDNA_STREAM_DIRECTION_SLAVE,
+              edge.source_port);
+          const auto* output = loom_xdna_array_stream_port_range(
+              family, tile->kind, LOOM_XDNA_STREAM_DIRECTION_MASTER,
+              edge.destination_port);
+          EXPECT_NE(loom_xdna_array_stream_destination_channels(
+                        family, input, edge.source_channel, output) &
+                        (UINT32_C(1) << edge.destination_channel),
+                    0u);
+        }
+      }
+    }
+  }
+}
+
 TEST_F(Aie2pComputeRouteTest, BranchesAvoidSaturatedDestinationColumns) {
   const auto* family = loom_xdna_npu2_array_family();
   for (bool west : {false, true}) {
@@ -796,9 +863,9 @@ TEST(Aie2pRouteTest, ReceiverGrantSharesOnlyItsPayloadSuffix) {
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(control_sources); ++i) {
     const uint32_t source = 4 + i;
     const size_t first = routing.route_count;
-    ASSERT_TRUE(loom_aie2p_array_route_control(&routing, source, &trees[source],
-                                               control_sources[i], {0, 1},
-                                               &sharing));
+    ASSERT_TRUE(loom_aie2p_array_route_control(
+        &routing, source, &trees[source], control_sources[i],
+        LOOM_XDNA_STREAM_PORT_CORE, 0, {0, 1}, &sharing));
     EXPECT_TRUE(sharing.used);
     // Cross-column control enters the carrier column on its compute row,
     // preserving the path before it joins the granted payload suffix.
@@ -849,6 +916,7 @@ TEST(Aie2pRouteTest, AvailableControlLaneKeepsPayloadUnshared) {
       LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &sharing));
   const size_t first = routing.route_count;
   ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 1, &trees[1], {0, 2},
+                                             LOOM_XDNA_STREAM_PORT_CORE, 0,
                                              {0, 1}, &sharing));
   EXPECT_FALSE(sharing.used);
   EXPECT_EQ(routing.routes[first].destination_channel, 1);
@@ -884,8 +952,9 @@ TEST(Aie2pRouteTest, GrantedControlContinuesBeyondPayloadReceiver) {
     for (uint32_t i = 0; i < 2; ++i) {
       const uint16_t row = (i == 0) == shim_first ? 0 : 1;
       const size_t first = routing.route_count;
-      ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 4 + i, &trees[4],
-                                                 {0, 2}, {0, row}, &sharing));
+      ASSERT_TRUE(loom_aie2p_array_route_control(
+          &routing, 4 + i, &trees[4], {0, 2}, LOOM_XDNA_STREAM_PORT_CORE, 0,
+          {0, row}, &sharing));
       ASSERT_EQ(routing.route_count - first, 3u - row);
       const auto& shared = routing.routes[first];
       EXPECT_EQ(shared.coordinate.row, 2);
@@ -908,6 +977,7 @@ TEST(Aie2pRouteTest, GrantedControlContinuesBeyondPayloadReceiver) {
     // A second arithmetic core shares the same packet namespace and must
     // retain the already reserved continuation after the payload receiver.
     ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 7, &trees[7], {0, 3},
+                                               LOOM_XDNA_STREAM_PORT_CORE, 0,
                                                {0, 0}, &sharing));
     ASSERT_EQ(routing.route_count - other_first, 4u);
     for (size_t i = other_first + 1; i < other_first + 3; ++i) {
@@ -957,6 +1027,7 @@ TEST(Aie2pRouteTest, GrantedControlRequiresFreeContinuationBeyondReceiver) {
   // SRAM north/south passthrough preserves the lane. The carrier's lane zero
   // cannot reach the shim now; another free SRAM-to-shim lane is insufficient.
   EXPECT_FALSE(loom_aie2p_array_route_control(&routing, 5, &trees[5], {0, 2},
+                                              LOOM_XDNA_STREAM_PORT_CORE, 0,
                                               {0, 0}, &sharing));
   EXPECT_EQ(routing.route_count, first);
   EXPECT_FALSE(sharing.used);
@@ -994,7 +1065,8 @@ TEST(Aie2pRouteTest, CommandCarrierRetainsEachUpstreamExtension) {
       SCOPED_TRACE(row);
       const size_t begin = routing.route_count;
       ASSERT_TRUE(loom_aie2p_array_route_control(
-          &routing, row + 2, &commands[row - 2], {0, row}, {0, 1}, &sharing));
+          &routing, row + 2, &commands[row - 2], {0, row},
+          LOOM_XDNA_STREAM_PORT_CORE, 0, {0, 1}, &sharing));
       ASSERT_EQ(routing.route_count - begin, row);
       // Every sender converges onto the sole command lane before the three
       // independent payload streams consume the remaining southbound lanes.
@@ -1035,6 +1107,7 @@ TEST(Aie2pRouteTest, SharingIdentitySurvivesOwnerRetirement) {
       &routing, 0, carrier_count, {0, 1},
       LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &sharing));
   ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 4, &trees[4], {0, 2},
+                                             LOOM_XDNA_STREAM_PORT_CORE, 0,
                                              {0, 1}, &sharing));
   ASSERT_TRUE(sharing.used);
   auto retained = sharing;
@@ -1056,9 +1129,11 @@ TEST(Aie2pRouteTest, SharingIdentitySurvivesOwnerRetirement) {
   iree_arena_deinitialize(&arena);
   const size_t first = routing.route_count;
   EXPECT_FALSE(loom_aie2p_array_route_control(&routing, 5, &trees[4], {0, 2},
+                                              LOOM_XDNA_STREAM_PORT_CORE, 0,
                                               {0, 0}, &sharing));
   EXPECT_EQ(routing.route_count, first);
   ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 5, &trees[4], {0, 2},
+                                             LOOM_XDNA_STREAM_PORT_CORE, 0,
                                              {0, 0}, &retained));
   ASSERT_EQ(routing.route_count - first, 3u);
   const auto& shared = routing.routes[first];

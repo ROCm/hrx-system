@@ -27,7 +27,8 @@ typedef struct loom_aie2p_code_transport_binding_t {
   uint16_t descriptor_count;
   // Core-sender packet identity addressing the SRAM queue.
   uint8_t queue_packet;
-  // DMA-sender packet identity selecting this compute tile's program memory.
+  // Column-wide DMA packet identity selecting this compute tile's program
+  // memory.
   uint8_t code_packet;
   // Tile-control reply identity addressing the same core's completion stream.
   uint8_t reply_packet;
@@ -55,10 +56,12 @@ iree_status_t loom_aie2p_code_transport_initialize(
 // Reserves a descriptor range and queue/data/reply routes. Sequential loaders
 // share a SRAM sender up to its task-queue depth and packet namespace capacity;
 // each loader has at most one incomplete request. A full sender needs another
-// free engine. Payload engines and descriptor ranges remain independent.
-// Packet selection consumes the source producer's retained namespace. SRAM
-// catalog bytes are placed once exact linked code is available. A resource
-// rejection returns a static requirement and invalidates this whole selection.
+// free engine. Code engines share a complete-packet delivery carrier and
+// destination namespace. Payload engines and descriptor ranges stay
+// independent. Packet selection consumes the source producer's retained
+// namespace. SRAM catalog bytes are placed once exact linked code is available.
+// A resource rejection returns a static requirement and invalidates this whole
+// selection.
 void loom_aie2p_code_transport_bind(
     loom_aie2p_code_transport_t* transport, loom_xdna_tile_coordinate_t compute,
     iree_host_size_t descriptor_count,
