@@ -74,8 +74,12 @@ bool loom_storage_interference_root_has_single_live_instance(
 // Proves that two workgroup buffer.alloca roots never require their bytes at
 // the same time. The proof accepts workgroup-uniform mutually exclusive
 // control or a verified workgroup acq_rel barrier separating all synchronous
-// and asynchronous access completions. Missing provenance, unknown memory
-// effects, weaker barriers, and cyclic phase reversal fail the proof.
+// and asynchronous access completions. Repeated phases additionally require
+// fresh single-live-instance allocations with ordered alias lifetimes and a
+// closing rendezvous before the next iteration. Structured scopes retain the
+// enclosing cut; CFG scopes retain all-path access retirement at block entry.
+// Missing provenance, unknown memory effects, weaker barriers, and cyclic
+// phase reversal fail the proof; rendezvous do not discard persistent contents.
 iree_status_t loom_storage_interference_prove_workgroup_nonoverlap(
     loom_storage_interference_t* analysis, loom_value_id_t lhs_root_value_id,
     loom_value_id_t rhs_root_value_id, bool* out_proven);

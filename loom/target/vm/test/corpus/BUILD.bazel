@@ -97,6 +97,7 @@ _KERNEL_SOURCES = [
     "memory/storage/stability/selection.loom",
     "memory/storage/stability/switch.loom",
     "memory/storage/workgroup.loom",
+    "memory/storage/workgroup_phases.loom",
     "memory/view/shrinking.loom",
     "memory/view/strided_recurrence.loom",
     "memory/view/strided_vectors.loom",
