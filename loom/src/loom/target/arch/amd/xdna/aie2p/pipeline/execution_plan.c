@@ -13,8 +13,7 @@ iree_status_t loom_aie2p_execution_plan_copy_resources(
     iree_host_size_t added_connection_capacity, iree_arena_allocator_t* arena,
     loom_aie2p_execution_plan_t* target) {
   const iree_host_size_t tile_count =
-      (iree_host_size_t)source->routing.family->column_count *
-      source->routing.family->row_count;
+      loom_xdna_array_physical_tile_count(source->routing.family);
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, tile_count, sizeof(*target->tiles), (void**)&target->tiles));
   memcpy(target->tiles, source->tiles, tile_count * sizeof(*target->tiles));

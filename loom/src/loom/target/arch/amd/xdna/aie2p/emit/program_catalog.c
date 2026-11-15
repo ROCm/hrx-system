@@ -79,8 +79,8 @@ iree_status_t loom_aie2p_program_catalog_build(
   const loom_xdna_tile_facts_t* compute =
       loom_xdna_array_tile_facts(family, binding->compute);
   loom_aie2p_execution_tile_t* occupancy =
-      &transport->plan.tiles[binding->memory.column * family->row_count +
-                             binding->memory.row];
+      &transport->plan
+           .tiles[loom_xdna_array_physical_tile_index(family, binding->memory)];
   const iree_host_size_t stream_count = binding->descriptor_count;
   loom_aie2p_program_catalog_stream_t* streams = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(

@@ -27,9 +27,7 @@ iree_status_t loom_aie2p_code_transport_initialize(
 static uint32_t loom_aie2p_code_transport_endpoint(
     const loom_xdna_array_family_t* family,
     loom_aie2p_native_connection_endpoint_t endpoint) {
-  return (endpoint.coordinate.column * family->row_count +
-          endpoint.coordinate.row) *
-             2 +
+  return loom_xdna_array_physical_tile_index(family, endpoint.coordinate) * 2 +
          (endpoint.port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL);
 }
 
@@ -102,7 +100,7 @@ void loom_aie2p_code_transport_bind(
       loom_xdna_array_tile_kind_facts(family, LOOM_XDNA_TILE_KIND_MEMORY);
   const loom_xdna_tile_coordinate_t memory = {compute.column, facts->first_row};
   loom_aie2p_execution_tile_t* occupancy =
-      &plan->tiles[memory.column * family->row_count + memory.row];
+      &plan->tiles[loom_xdna_array_physical_tile_index(family, memory)];
   if (occupancy->mm2s_count == facts->dma.channel_count_per_direction) {
     *out_requirement =
         IREE_SV("a free SRAM memory-to-stream engine for code delivery");
@@ -120,7 +118,7 @@ void loom_aie2p_code_transport_bind(
       bank * bank_capacity + occupancy->descriptor_counts[bank];
   occupancy->descriptor_counts[bank] += (uint16_t)descriptor_count;
   const uint32_t core_index =
-      (compute.column * family->row_count + compute.row) * 2;
+      loom_xdna_array_physical_tile_index(family, compute) * 2;
   const uint32_t queue_available =
       ~plan->control_sources[core_index].packet_mask;
   const uint32_t reply_available =

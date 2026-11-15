@@ -115,8 +115,7 @@ static iree_status_t loom_aie2p_native_retain_plan(
     loom_aie2p_native_context_t* context, iree_arena_allocator_t* arena,
     loom_aie2p_execution_plan_t* plan) {
   const iree_host_size_t tile_count =
-      (iree_host_size_t)context->family->column_count *
-      context->family->row_count;
+      loom_xdna_array_physical_tile_count(context->family);
   loom_aie2p_execution_tile_t* tiles = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       context->pass->arena, tile_count, sizeof(*tiles), (void**)&tiles));

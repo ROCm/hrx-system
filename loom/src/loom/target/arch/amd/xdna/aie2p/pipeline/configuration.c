@@ -1008,9 +1008,7 @@ iree_status_t loom_aie2p_native_emit_configuration(
         position, 2, loom_make_named_attr_slice(&program, 1)));
   }
   for (iree_host_size_t i = 0;
-       i < (iree_host_size_t)context->family->column_count *
-               context->family->row_count;
-       ++i) {
+       i < loom_xdna_array_physical_tile_count(context->family); ++i) {
     const uint64_t length = context->plan->tiles[i].memory_length;
     if (!length) {
       continue;
