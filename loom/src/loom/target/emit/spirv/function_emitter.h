@@ -25,6 +25,7 @@
 #include "loom/target/emit/spirv/entry_interface.h"
 #include "loom/target/emit/spirv/module_abi.h"
 #include "loom/target/emit/spirv/module_builder.h"
+#include "loom/target/emit/spirv/module_storage.h"
 #include "loom/target/emit/spirv/module_types.h"
 #include "loom/target/emit/spirv/module_values.h"
 #include "loom/target/emit/spirv/program.h"
@@ -55,6 +56,9 @@ typedef struct loom_spirv_function_emission_plan_t {
   loom_spirv_entry_interface_t entry_interface;
   // True after this function body and its transitive requirements are emitted.
   bool emission_complete;
+  // Transitive Workgroup variables outside explicit-layout blocks. An entry
+  // cannot mix these with a Block-decorated Workgroup allocation.
+  bool uses_implicit_workgroup;
 } loom_spirv_function_emission_plan_t;
 
 // Module-owned resources shared by each function emitted into one module.
@@ -117,8 +121,10 @@ typedef struct loom_spirv_emit_state_t {
   loom_spirv_feature_bits_t required_feature_bits;
   // SPIR-V label ID of the currently open function-section block.
   uint32_t current_label_id;
-  // Function OpVariable declarations accumulated during ordinary body emission.
-  // Empty functions with no private storage allocate no word buffer.
+  // Storage declarations and placements captured during body emission.
+  loom_spirv_module_storage_t storage;
+  // Entry prefix: private OpVariables followed by static storage addresses.
+  // Functions without logical storage allocate no word buffer.
   loom_spirv_binary_writer_t function_variables;
   // Function-section word position immediately following this entry's OpLabel.
   iree_host_size_t function_variable_position;

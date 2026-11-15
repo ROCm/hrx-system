@@ -161,6 +161,21 @@ static loom_spirv_module_abi_context_t loom_spirv_emit_abi_context(
   };
 }
 
+static loom_spirv_module_storage_context_t loom_spirv_emit_storage_context(
+    loom_spirv_emit_state_t* state) {
+  return (loom_spirv_module_storage_context_t){
+      .function = state->function_plan,
+      .values = &state->value_table,
+      .types = state->type_context,
+      .function_prefix = &state->function_variables,
+      .entry_interface = &state->emission_plan->entry_interface,
+      .function_id = state->function_id,
+      .uses_implicit_workgroup = &state->emission_plan->uses_implicit_workgroup,
+      .diagnostic_emitter = state->context->diagnostic_emitter,
+      .accepted = state->context->accepted,
+  };
+}
+
 static iree_status_t loom_spirv_emit_builtin_variable(
     loom_spirv_emit_state_t* state, loom_spirv_builtin_variable_t variable,
     uint32_t* out_variable_id, uint32_t* out_value_type_id,
@@ -1145,6 +1160,8 @@ static iree_status_t loom_spirv_emit_merge_function_requirements(
   IREE_ASSERT(callee->emission_complete,
               "SPIR-V functions must be emitted callee-before-caller");
   state->required_feature_bits |= callee->required_feature_bits;
+  state->emission_plan->uses_implicit_workgroup |=
+      callee->uses_implicit_workgroup;
   for (iree_host_size_t i = 0; i < LOOM_SPIRV_BUILTIN_VARIABLE_COUNT; ++i) {
     const uint32_t variable_id = callee->builtin_interface_variable_ids[i];
     if (variable_id == 0) {
@@ -1276,15 +1293,16 @@ iree_status_t loom_spirv_emit_low_op(loom_spirv_emit_state_t* state,
     return loom_spirv_module_abi_materialize_resource(&context,
                                                       &state->abi_plan, op);
   }
-  if (loom_low_storage_reserve_isa(op)) {
-    return iree_ok_status();
-  }
-  if (loom_low_storage_address_isa(op)) {
+  if (loom_low_storage_reserve_isa(op) || loom_low_storage_address_isa(op)) {
+    const loom_spirv_module_storage_context_t storage_context =
+        loom_spirv_emit_storage_context(state);
+    if (loom_low_storage_reserve_isa(op)) {
+      return loom_spirv_module_storage_reserve(&state->storage,
+                                               &storage_context, op);
+    }
     loom_spirv_module_value_ref_t value_ref = {0};
     IREE_RETURN_IF_ERROR(loom_spirv_module_storage_emit_address(
-        &state->value_table, op, state->type_context, state->builder,
-        &state->function_variables, &state->emission_plan->entry_interface,
-        state->function_id, &value_ref));
+        &state->storage, &storage_context, op, &value_ref));
     const loom_spirv_feature_bits_t feature_bits =
         loom_spirv_scalar_type_descriptor(value_ref.value_type.scalar_type)
             ->required_feature_bits;
@@ -1620,6 +1638,13 @@ static iree_status_t loom_spirv_emit_function_contents(
   IREE_RETURN_IF_ERROR(loom_spirv_emit_function_declaration(state));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_function_parameters(state, entry_block));
   IREE_RETURN_IF_ERROR(loom_spirv_emit_function_body(state));
+  const loom_spirv_module_storage_context_t storage_context =
+      loom_spirv_emit_storage_context(state);
+  IREE_RETURN_IF_ERROR(loom_spirv_module_storage_finish(
+      &state->storage, &storage_context, &state->required_feature_bits));
+  if (!*state->context->accepted) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_spirv_binary_insert_words(
       loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
       state->function_variable_position, state->function_variables.words,

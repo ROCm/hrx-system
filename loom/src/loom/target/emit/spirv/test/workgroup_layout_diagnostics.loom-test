@@ -1,0 +1,18 @@
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda features=COOPERATIVE_MATRIX_KHR,FLOAT16,INT8,WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR,WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR
+// REQUIRES: spirv-dis
+
+// The matrix packet requires explicit layout. A neighboring byte allocation
+// cannot silently switch the whole entry back to implicit scalar-array layout.
+// ERROR@+1: BACKEND/055 {format="SPIR-V", constraint="explicit Workgroup layout must support every storage element width used by the entry"}
+low.func.def public target<spirv.logical.core> abi(shader_entry_point) @mixed_width_layout() asm {
+  %byte_storage = storage {byte_alignment = 1, byte_length = 1} : low.storage<workgroup>
+  %matrix_storage = storage {byte_alignment = 16, byte_length = 512} : low.storage<workgroup>
+  %byte_base = storage_address %byte_storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i8>
+  %matrix_base = storage_address %matrix_storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.f16>
+  %zero = OpConstant.i32 0
+  %offset = OpConstant.offset64 16
+  %stride = OpUConvert.offset64.u32 %offset
+  %ptr = OpAccessChain.workgroup.f16.element_index %matrix_base, %zero
+  %value = OpCooperativeMatrixLoadKHR.lhs.f16.16x16.subgroup.workgroup %ptr, %stride, 0 : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_a>>
+  return
+}

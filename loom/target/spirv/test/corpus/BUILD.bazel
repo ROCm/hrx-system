@@ -304,6 +304,7 @@ _EXTENDED_TYPES_XFAILS = {
     "memory/storage/byte_banks.loom:@raw_byte_spaces": "TARGET/003",
     "memory/storage/workgroup.loom:@workgroup_packet_exchange": "TARGET/003",
     "numeric/conversion/float8_dequantization.loom:@float8_dequantization": "TARGET/002",
+    "numeric/matrix/publication.loom:@matrix_publication": "TARGET/002",
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16": "TARGET/002",
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_f16": "TARGET/003",
 }
@@ -395,6 +396,7 @@ _NO_EXTENDED_TYPES_XFAILS = {
     "numeric/conversion/quantization.loom:@quantization_shapes": "TARGET/003",
     "numeric/float/narrow_reduction.loom:@narrow_reduction": "TARGET/003",
     "numeric/integer/narrow_consumers.loom:@packed_integer_consumers": "TARGET/003",
+    "numeric/matrix/publication.loom:@matrix_publication": "TARGET/003",
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16": "TARGET/003",
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_f16": "TARGET/003",
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_i16": "TARGET/003",
@@ -458,6 +460,7 @@ _ALL_ROOTS_XFAIL = [
     "memory/atomic/workgroup/observations.loom",
     "memory/atomic/workgroup/panel_stream.loom",
     "numeric/matrix/epilogue.loom",
+    "numeric/matrix/publication.loom",
 ]
 
 _SPIRV_EXECUTION_XFAILS = {

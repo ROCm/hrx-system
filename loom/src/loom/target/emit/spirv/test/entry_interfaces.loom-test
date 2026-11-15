@@ -23,7 +23,7 @@ low.func.def public target<spirv.logical.core> abi(shader_entry_point) @shared_r
                OpExtension "SPV_KHR_physical_storage_buffer"
                OpExtension "SPV_KHR_workgroup_memory_explicit_layout"
                OpMemoryModel PhysicalStorageBuffer64 Vulkan
-               OpEntryPoint GLCompute %shared_roundtrip "shared_roundtrip" %base %4 %8
+               OpEntryPoint GLCompute %shared_roundtrip "shared_roundtrip" %26 %4 %8
                OpExecutionMode %shared_roundtrip LocalSize 1 1 1
                OpName %shared_roundtrip "shared_roundtrip"
                OpName %value "value"
@@ -37,6 +37,9 @@ low.func.def public target<spirv.logical.core> abi(shader_entry_point) @shared_r
                OpDecorate %4 Binding 0
                OpDecorate %8 DescriptorSet 0
                OpDecorate %8 Binding 1
+               OpDecorate %_arr_int_uint_4 ArrayStride 4
+               OpMemberDecorate %_struct_24 0 Offset 0
+               OpDecorate %_struct_24 Block
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
   %_struct_5 = OpTypeStruct %int
@@ -50,11 +53,15 @@ low.func.def public target<spirv.logical.core> abi(shader_entry_point) @shared_r
      %uint_4 = OpConstant %uint 4
 %_arr_int_uint_4 = OpTypeArray %int %uint_4
 %_ptr_Workgroup__arr_int_uint_4 = OpTypePointer Workgroup %_arr_int_uint_4
-       %base = OpVariable %_ptr_Workgroup__arr_int_uint_4 Workgroup
       %index = OpConstant %int 0
 %_ptr_Workgroup_int = OpTypePointer Workgroup %int
+ %_struct_24 = OpTypeStruct %_arr_int_uint_4
+%_ptr_Workgroup__struct_24 = OpTypePointer Workgroup %_struct_24
+         %26 = OpVariable %_ptr_Workgroup__struct_24 Workgroup
+     %uint_0 = OpConstant %uint 0
 %shared_roundtrip = OpFunction %void None %10
          %11 = OpLabel
+       %base = OpAccessChain %_ptr_Workgroup__arr_int_uint_4 %26 %uint_0
          %12 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
       %value = OpLoad %int %12 Aligned 4
         %ptr = OpAccessChain %_ptr_Workgroup_int %base %index

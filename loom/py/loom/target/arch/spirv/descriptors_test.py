@@ -688,7 +688,7 @@ def test_raw_storage_byte_descriptors_do_not_require_int8() -> None:
         assert descriptors[key].feature_mask_words == (storage_feature_mask,)
 
 
-def test_workgroup_matrix_memory_needs_no_storage_buffer_features() -> None:
+def test_workgroup_matrix_memory_requires_layout_for_its_carrier_width() -> None:
     descriptors = {
         row.key: row for row in SPIRV_LOGICAL_CORE_DESCRIPTOR_SET.descriptors
     }
@@ -705,6 +705,16 @@ def test_workgroup_matrix_memory_needs_no_storage_buffer_features() -> None:
                 features = descriptor.feature_mask_words[0]
                 assert features == matrix_type.feature_bits | memory.feature_bits
                 assert not features & storage_bits
+                assert features & feature_bits_value(
+                    ("workgroup_memory_explicit_layout_khr",)
+                )
+                for width in (8, 16):
+                    layout_bit = feature_bits_value(
+                        (f"workgroup_memory_explicit_layout_{width}bit_access_khr",)
+                    )
+                    assert bool(features & layout_bit) == (
+                        memory.carrier.byte_width * 8 == width
+                    )
                 assert (
                     features & scalar.register_feature_bits
                     == scalar.register_feature_bits

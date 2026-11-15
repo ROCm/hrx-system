@@ -184,8 +184,42 @@ _COMPILE_XFAILS.update({
     ]
 })
 
+# Standalone F16 operand tiles need a portable carrier extent for replicated
+# WMMA layouts and a matching layout for the gfx12.5 instruction family.
+_F16_OPERAND_LAYOUT_XFAIL_TARGETS = [
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    "gfx11-generic",
+    "gfx1250",
+    "gfx1250-strict",
+    "gfx1251",
+    "gfx12-5-generic",
+]
+
+_COMPILE_XFAILS.update({
+    "//loom/target/amdgpu:" + target: dict(
+        list(_COMPILE_XFAILS.get(
+            "//loom/target/amdgpu:" + target,
+            {},
+        ).items()) + [
+            ("numeric/matrix/publication.loom:@matrix_publication", "AMDGPU/023"),
+        ],
+    )
+    for target in _F16_OPERAND_LAYOUT_XFAIL_TARGETS
+})
+
 loom_corpus_build(
     name = "all",
+    all_roots_xfail = {
+        "//loom/target/amdgpu:" + target: ["numeric/matrix/publication.loom"]
+        for target in _F16_OPERAND_LAYOUT_XFAIL_TARGETS
+    },
     catalog = LOOM_CORPUS,
     excludes = {"//loom/target/amdgpu:all": _NO_KERNEL_ARTIFACT_EXCLUDES},
     profiles = ["//loom/target/amdgpu:all"],
@@ -197,6 +231,7 @@ loom_corpus_test(
     allowed_failures = {
         AMD_GPU_HARDWARE_PROFILE.name: {
             "numeric/matrix/epilogue.loom:@matrix_half_subnormal_values": "AMDGPU/023",
+            "numeric/matrix/publication.loom:@matrix_publication_values": "AMDGPU/023",
             "numeric/vector/packed/dot.loom:@packed_mixed_nibble_dot_values": "TARGET/003",
         },
     },

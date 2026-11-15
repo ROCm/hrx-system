@@ -1,0 +1,374 @@
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda features=WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR validate
+// REQUIRES: spirv-dis, spirv-val
+
+// Member offsets follow reservation order, including an unaddressed reservation,
+// rather than first-use order. A first address in a branch must dominate its
+// later reuse; private variables still precede every entry address instruction.
+low.func.def public target<spirv.logical.core> abi(shader_entry_point) @conditional_addresses(%value: reg<spirv.id : i32>) -> (reg<spirv.id : i32>) asm {
+  %first = storage {byte_alignment = 4, byte_length = 4} : low.storage<workgroup>
+  %gap = storage {byte_alignment = 32, byte_length = 4} : low.storage<workgroup>
+  %last = storage {byte_alignment = 16, byte_length = 4} : low.storage<workgroup>
+  %private = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %zero = OpConstant.i32 0
+  %positive = OpSGreaterThan %value, %zero
+  low.scf.if %positive {
+    %conditional = storage_address %last : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+    %ptr = OpAccessChain.workgroup.i32.element_index %conditional, %zero
+    OpStore.workgroup.i32 %ptr, %value
+  } else {
+    %fallback = storage_address %last : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+    %fallback_ptr = OpAccessChain.workgroup.i32.element_index %fallback, %zero
+    OpStore.workgroup.i32 %fallback_ptr, %zero
+  }
+  %reused = storage_address %last : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %first_base = storage_address %first : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %private_base = storage_address %private : low.storage<private> -> reg<spirv.ptr.function.array.i32>
+  %loaded_ptr = OpAccessChain.workgroup.i32.element_index %reused, %zero
+  %loaded = OpLoad.workgroup.i32 %loaded_ptr
+  return %loaded
+}
+
+// An independent entry starts from byte zero even with identical member types.
+low.func.def public target<spirv.logical.core> abi(shader_entry_point) @independent_frame() asm {
+  %storage = storage {byte_alignment = 16, byte_length = 4} : low.storage<workgroup>
+  %base = storage_address %storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability WorkgroupMemoryExplicitLayoutKHR
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_workgroup_memory_explicit_layout"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %conditional_addresses "conditional_addresses" %39 %4 %8
+               OpEntryPoint GLCompute %independent_frame "independent_frame" %48
+               OpExecutionMode %conditional_addresses LocalSize 1 1 1
+               OpExecutionMode %independent_frame LocalSize 1 1 1
+               OpName %conditional_addresses "conditional_addresses"
+               OpName %value "value"
+               OpName %zero "zero"
+               OpName %positive "positive"
+               OpName %conditional "conditional"
+               OpName %ptr "ptr"
+               OpName %conditional "fallback"
+               OpName %fallback_ptr "fallback_ptr"
+               OpName %conditional "reused"
+               OpName %first_base "first_base"
+               OpName %private_base "private_base"
+               OpName %loaded_ptr "loaded_ptr"
+               OpName %loaded "loaded"
+               OpName %independent_frame "independent_frame"
+               OpName %base "base"
+               OpMemberDecorate %_struct_5 0 Offset 0
+               OpDecorate %_struct_5 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %8 DescriptorSet 0
+               OpDecorate %8 Binding 1
+               OpDecorate %_arr_int_uint_1 ArrayStride 4
+               OpMemberDecorate %_struct_37 0 Offset 48
+               OpDecorate %_arr_int_uint_1_0 ArrayStride 4
+               OpMemberDecorate %_struct_37 1 Offset 0
+               OpDecorate %_struct_37 Block
+               OpDecorate %_arr_int_uint_1_2 ArrayStride 4
+               OpMemberDecorate %_struct_46 0 Offset 0
+               OpDecorate %_struct_46 Block
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+  %_struct_5 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_5 = OpTypePointer StorageBuffer %_struct_5
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+          %4 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %8 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+       %zero = OpConstant %int 0
+       %bool = OpTypeBool
+       %uint = OpTypeInt 32 0
+     %uint_1 = OpConstant %uint 1
+%_arr_int_uint_1 = OpTypeArray %int %uint_1
+%_ptr_Workgroup__arr_int_uint_1 = OpTypePointer Workgroup %_arr_int_uint_1
+%_ptr_Workgroup_int = OpTypePointer Workgroup %int
+%_arr_int_uint_1_0 = OpTypeArray %int %uint_1
+%_ptr_Workgroup__arr_int_uint_1_0 = OpTypePointer Workgroup %_arr_int_uint_1_0
+%_arr_int_uint_1_1 = OpTypeArray %int %uint_1
+%_ptr_Function__arr_int_uint_1_1 = OpTypePointer Function %_arr_int_uint_1_1
+ %_struct_37 = OpTypeStruct %_arr_int_uint_1 %_arr_int_uint_1_0
+%_ptr_Workgroup__struct_37 = OpTypePointer Workgroup %_struct_37
+         %39 = OpVariable %_ptr_Workgroup__struct_37 Workgroup
+     %uint_0 = OpConstant %uint 0
+%_arr_int_uint_1_2 = OpTypeArray %int %uint_1
+%_ptr_Workgroup__arr_int_uint_1_2 = OpTypePointer Workgroup %_arr_int_uint_1_2
+ %_struct_46 = OpTypeStruct %_arr_int_uint_1_2
+%_ptr_Workgroup__struct_46 = OpTypePointer Workgroup %_struct_46
+         %48 = OpVariable %_ptr_Workgroup__struct_46 Workgroup
+%conditional_addresses = OpFunction %void None %10
+         %11 = OpLabel
+%private_base = OpVariable %_ptr_Function__arr_int_uint_1_1 Function
+%conditional = OpAccessChain %_ptr_Workgroup__arr_int_uint_1 %39 %uint_0
+ %first_base = OpAccessChain %_ptr_Workgroup__arr_int_uint_1_0 %39 %uint_1
+         %12 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
+      %value = OpLoad %int %12 Aligned 4
+   %positive = OpSGreaterThan %bool %value %zero
+               OpSelectionMerge %18 None
+               OpBranchConditional %positive %17 %19
+         %17 = OpLabel
+        %ptr = OpAccessChain %_ptr_Workgroup_int %conditional %zero
+               OpStore %ptr %value Aligned 4
+               OpBranch %18
+         %19 = OpLabel
+%fallback_ptr = OpAccessChain %_ptr_Workgroup_int %conditional %zero
+               OpStore %fallback_ptr %zero Aligned 4
+               OpBranch %18
+         %18 = OpLabel
+ %loaded_ptr = OpAccessChain %_ptr_Workgroup_int %conditional %zero
+     %loaded = OpLoad %int %loaded_ptr Aligned 4
+         %36 = OpAccessChain %_ptr_StorageBuffer_int %8 %int_0
+               OpStore %36 %loaded Aligned 4
+               OpReturn
+               OpFunctionEnd
+%independent_frame = OpFunction %void None %10
+         %42 = OpLabel
+       %base = OpAccessChain %_ptr_Workgroup__arr_int_uint_1_2 %48 %uint_0
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda features=WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR,WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS_KHR,WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR,INT8,INT16,FLOAT16,FLOAT64 validate
+// REQUIRES: spirv-dis, spirv-val
+
+// All logical storage scalar widths share the same byte-layout projection.
+low.func.def public target<spirv.logical.core> abi(shader_entry_point) @element_widths() asm {
+  %byte_storage = storage {byte_alignment = 1, byte_length = 3} : low.storage<workgroup>
+  %short_storage = storage {byte_alignment = 2, byte_length = 6} : low.storage<workgroup>
+  %half_storage = storage {byte_alignment = 2, byte_length = 6} : low.storage<workgroup>
+  %int_storage = storage {byte_alignment = 4, byte_length = 12} : low.storage<workgroup>
+  %float_storage = storage {byte_alignment = 4, byte_length = 12} : low.storage<workgroup>
+  %long_storage = storage {byte_alignment = 8, byte_length = 24} : low.storage<workgroup>
+  %double_storage = storage {byte_alignment = 8, byte_length = 24} : low.storage<workgroup>
+  %bytes = storage_address %byte_storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i8>
+  %shorts = storage_address %short_storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i16>
+  %halves = storage_address %half_storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.f16>
+  %ints = storage_address %int_storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  %floats = storage_address %float_storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.f32>
+  %longs = storage_address %long_storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i64>
+  %doubles = storage_address %double_storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.f64>
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability Float16
+               OpCapability Float64
+               OpCapability Int8
+               OpCapability Int16
+               OpCapability WorkgroupMemoryExplicitLayoutKHR
+               OpCapability WorkgroupMemoryExplicitLayout8BitAccessKHR
+               OpCapability WorkgroupMemoryExplicitLayout16BitAccessKHR
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_workgroup_memory_explicit_layout"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %element_widths "element_widths" %37
+               OpExecutionMode %element_widths LocalSize 1 1 1
+               OpName %element_widths "element_widths"
+               OpName %bytes "bytes"
+               OpName %shorts "shorts"
+               OpName %halves "halves"
+               OpName %ints "ints"
+               OpName %floats "floats"
+               OpName %longs "longs"
+               OpName %doubles "doubles"
+               OpDecorate %_arr_char_uint_3 ArrayStride 1
+               OpMemberDecorate %_struct_35 0 Offset 0
+               OpDecorate %_arr_short_uint_3 ArrayStride 2
+               OpMemberDecorate %_struct_35 1 Offset 4
+               OpDecorate %_arr_half_uint_3 ArrayStride 2
+               OpMemberDecorate %_struct_35 2 Offset 10
+               OpDecorate %_arr_int_uint_3 ArrayStride 4
+               OpMemberDecorate %_struct_35 3 Offset 16
+               OpDecorate %_arr_float_uint_3 ArrayStride 4
+               OpMemberDecorate %_struct_35 4 Offset 28
+               OpDecorate %_arr_long_uint_3 ArrayStride 8
+               OpMemberDecorate %_struct_35 5 Offset 40
+               OpDecorate %_arr_double_uint_3 ArrayStride 8
+               OpMemberDecorate %_struct_35 6 Offset 64
+               OpDecorate %_struct_35 Block
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+       %char = OpTypeInt 8 1
+       %uint = OpTypeInt 32 0
+     %uint_3 = OpConstant %uint 3
+%_arr_char_uint_3 = OpTypeArray %char %uint_3
+%_ptr_Workgroup__arr_char_uint_3 = OpTypePointer Workgroup %_arr_char_uint_3
+      %short = OpTypeInt 16 1
+%_arr_short_uint_3 = OpTypeArray %short %uint_3
+%_ptr_Workgroup__arr_short_uint_3 = OpTypePointer Workgroup %_arr_short_uint_3
+       %half = OpTypeFloat 16
+%_arr_half_uint_3 = OpTypeArray %half %uint_3
+%_ptr_Workgroup__arr_half_uint_3 = OpTypePointer Workgroup %_arr_half_uint_3
+        %int = OpTypeInt 32 1
+%_arr_int_uint_3 = OpTypeArray %int %uint_3
+%_ptr_Workgroup__arr_int_uint_3 = OpTypePointer Workgroup %_arr_int_uint_3
+      %float = OpTypeFloat 32
+%_arr_float_uint_3 = OpTypeArray %float %uint_3
+%_ptr_Workgroup__arr_float_uint_3 = OpTypePointer Workgroup %_arr_float_uint_3
+       %long = OpTypeInt 64 1
+%_arr_long_uint_3 = OpTypeArray %long %uint_3
+%_ptr_Workgroup__arr_long_uint_3 = OpTypePointer Workgroup %_arr_long_uint_3
+     %double = OpTypeFloat 64
+%_arr_double_uint_3 = OpTypeArray %double %uint_3
+%_ptr_Workgroup__arr_double_uint_3 = OpTypePointer Workgroup %_arr_double_uint_3
+ %_struct_35 = OpTypeStruct %_arr_char_uint_3 %_arr_short_uint_3 %_arr_half_uint_3 %_arr_int_uint_3 %_arr_float_uint_3 %_arr_long_uint_3 %_arr_double_uint_3
+%_ptr_Workgroup__struct_35 = OpTypePointer Workgroup %_struct_35
+         %37 = OpVariable %_ptr_Workgroup__struct_35 Workgroup
+     %uint_0 = OpConstant %uint 0
+     %uint_1 = OpConstant %uint 1
+     %uint_2 = OpConstant %uint 2
+     %uint_4 = OpConstant %uint 4
+     %uint_5 = OpConstant %uint 5
+     %uint_6 = OpConstant %uint 6
+%element_widths = OpFunction %void None %3
+          %4 = OpLabel
+      %bytes = OpAccessChain %_ptr_Workgroup__arr_char_uint_3 %37 %uint_0
+     %shorts = OpAccessChain %_ptr_Workgroup__arr_short_uint_3 %37 %uint_1
+     %halves = OpAccessChain %_ptr_Workgroup__arr_half_uint_3 %37 %uint_2
+       %ints = OpAccessChain %_ptr_Workgroup__arr_int_uint_3 %37 %uint_3
+     %floats = OpAccessChain %_ptr_Workgroup__arr_float_uint_3 %37 %uint_4
+      %longs = OpAccessChain %_ptr_Workgroup__arr_long_uint_3 %37 %uint_5
+    %doubles = OpAccessChain %_ptr_Workgroup__arr_double_uint_3 %37 %uint_6
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda features=WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR,FLOAT16 validate
+// REQUIRES: spirv-dis, spirv-val
+
+// Optional explicit layout does not narrow ordinary 16-bit Workgroup storage
+// when the device has base support but lacks its independent 16-bit feature.
+low.func.def public target<spirv.logical.core> abi(shader_entry_point) @implicit_half() asm {
+  %half_storage = storage {byte_alignment = 2, byte_length = 6} : low.storage<workgroup>
+  %int_storage = storage {byte_alignment = 4, byte_length = 12} : low.storage<workgroup>
+  %halves = storage_address %half_storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.f16>
+  %ints = storage_address %int_storage : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
+  return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability Float16
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %implicit_half "implicit_half"
+               OpExecutionMode %implicit_half LocalSize 1 1 1
+               OpName %implicit_half "implicit_half"
+               OpName %halves "halves"
+               OpName %ints "ints"
+       %void = OpTypeVoid
+          %3 = OpTypeFunction %void
+       %half = OpTypeFloat 16
+       %uint = OpTypeInt 32 0
+     %uint_3 = OpConstant %uint 3
+%_arr_half_uint_3 = OpTypeArray %half %uint_3
+%_ptr_Workgroup__arr_half_uint_3 = OpTypePointer Workgroup %_arr_half_uint_3
+        %int = OpTypeInt 32 1
+%_arr_int_uint_3 = OpTypeArray %int %uint_3
+%_ptr_Workgroup__arr_int_uint_3 = OpTypePointer Workgroup %_arr_int_uint_3
+     %halves = OpVariable %_ptr_Workgroup__arr_half_uint_3 Workgroup
+       %ints = OpVariable %_ptr_Workgroup__arr_int_uint_3 Workgroup
+%implicit_half = OpFunction %void None %3
+          %4 = OpLabel
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+// RUN: emit spirv-dis input=source-low target=spirv:vulkan1.3+bda features=WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR validate
+// REQUIRES: spirv-dis, spirv-val
+
+// The ordinary pipeline brings helper-owned storage into the entry's frame.
+func.def public @calling_entry(%input: i32) -> (i32) {
+  %result = func.call @storage_helper(%input) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def @storage_helper(%input: i32) -> (i32) {
+  %size = index.constant 4 : offset
+  %base = index.constant 0 : offset
+  %storage = buffer.alloca<workgroup> align(16) %size : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<1xi32>
+  view.store %input, %view[0] : i32, view<1xi32>
+  %value = view.load %view[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability WorkgroupMemoryExplicitLayoutKHR
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_workgroup_memory_explicit_layout"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %calling_entry "calling_entry" %26 %4 %8
+               OpExecutionMode %calling_entry LocalSize 1 1 1
+               OpName %calling_entry "calling_entry"
+               OpName %input "input"
+               OpName %view "view"
+               OpName %value "value"
+               OpMemberDecorate %_struct_5 0 Offset 0
+               OpDecorate %_struct_5 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %8 DescriptorSet 0
+               OpDecorate %8 Binding 1
+               OpDecorate %_arr_int_uint_1 ArrayStride 4
+               OpMemberDecorate %_struct_24 0 Offset 0
+               OpDecorate %_struct_24 Block
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+  %_struct_5 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_5 = OpTypePointer StorageBuffer %_struct_5
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+          %4 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %8 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+       %void = OpTypeVoid
+         %10 = OpTypeFunction %void
+       %uint = OpTypeInt 32 0
+     %uint_1 = OpConstant %uint 1
+%_arr_int_uint_1 = OpTypeArray %int %uint_1
+%_ptr_Workgroup__arr_int_uint_1 = OpTypePointer Workgroup %_arr_int_uint_1
+    %int_0_0 = OpConstant %int 0
+%_ptr_Workgroup_int = OpTypePointer Workgroup %int
+ %_struct_24 = OpTypeStruct %_arr_int_uint_1
+%_ptr_Workgroup__struct_24 = OpTypePointer Workgroup %_struct_24
+         %26 = OpVariable %_ptr_Workgroup__struct_24 Workgroup
+     %uint_0 = OpConstant %uint 0
+%calling_entry = OpFunction %void None %10
+         %11 = OpLabel
+       %view = OpAccessChain %_ptr_Workgroup__arr_int_uint_1 %26 %uint_0
+         %12 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
+      %input = OpLoad %int %12 Aligned 4
+         %21 = OpAccessChain %_ptr_Workgroup_int %view %int_0_0
+               OpStore %21 %input Aligned 4
+      %value = OpLoad %int %21 Aligned 4
+         %23 = OpAccessChain %_ptr_StorageBuffer_int %8 %int_0
+               OpStore %23 %value Aligned 4
+               OpReturn
+               OpFunctionEnd
