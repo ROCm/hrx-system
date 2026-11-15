@@ -104,8 +104,12 @@ void loom_aie2p_native_route_label(loom_aie2p_native_context_t* context,
                                    bool register_command,
                                    uint32_t control_source) {
   if (control_source != UINT32_MAX) {
-    context->control_sources[control_source].packet_mask |= UINT32_C(1)
-                                                            << packet;
+    loom_aie2p_native_control_source_t* source =
+        &context->control_sources[control_source];
+    source->packet_mask |= UINT32_C(1) << packet;
+    if (register_command) {
+      source->register_packet_mask |= UINT32_C(1) << packet;
+    }
   }
   for (iree_host_size_t i = first; i < context->routing.route_count; ++i) {
     context->routes[i] =
@@ -237,8 +241,14 @@ static bool loom_aie2p_native_select_packet_route(
   loom_aie2p_native_control_path_t* packet_scope =
       &context->control_paths[context->workers[worker_index]
                                   .tile->coordinate.column];
+  uint8_t* canonical =
+      context->workers[worker_index].tile->coordinate.column ==
+              tile->coordinate.column
+          ? &context->column_command_packets[tile - context->tiles]
+          : NULL;
   const uint8_t packet = loom_aie2p_native_delivery_packet(
-      delivery, owner->packet_mask | packet_scope->packets, tile, port, 0);
+      delivery, owner->packet_mask | packet_scope->packets, tile, port, 0,
+      canonical ? *canonical : UINT8_MAX);
   if (packet == UINT8_MAX ||
       !loom_aie2p_native_packet_route(
           context, next_source, context->workers[worker_index].tile->coordinate,
@@ -250,6 +260,9 @@ static bool loom_aie2p_native_select_packet_route(
   }
   owner->packet_mask |= UINT32_C(1) << packet;
   packet_scope->packets |= UINT32_C(1) << packet;
+  if (canonical && *canonical == UINT8_MAX) {
+    *canonical = packet;
+  }
   if (commands && commands->sharing.used) {
     context->control_sources[commands->source].destination = UINT32_MAX;
   }
@@ -1200,6 +1213,10 @@ iree_status_t loom_aie2p_native_select_transfers(
                                 (void**)&context->control_destination_sources));
   memset(context->control_destination_sources, 0xff,
          control_source_count * sizeof(*context->control_destination_sources));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(arena, control_source_count / 2,
+                          (void**)&context->column_command_packets));
+  memset(context->column_command_packets, UINT8_MAX, control_source_count / 2);
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, context->family->column_count, sizeof(*context->control_paths),
       (void**)&context->control_paths));

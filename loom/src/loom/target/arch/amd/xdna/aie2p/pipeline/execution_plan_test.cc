@@ -57,8 +57,11 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
       family, 64, &source_arena_, &context.routing));
   std::vector<loom_aie2p_native_control_source_t> sources(tile_count * 2);
   std::vector<uint32_t> destinations(tile_count * 2, UINT32_MAX);
+  std::vector<uint8_t> command_packets(tile_count, UINT8_MAX);
+  command_packets[1] = 3;
   std::vector<loom_aie2p_native_control_path_t> control_paths(
       family->column_count);
+  control_paths[0].packets = 1u << command_packets[1];
   loom_aie2p_native_control_connection_t connection = {
       .source = {{0, 2}, LOOM_XDNA_STREAM_PORT_CORE, 0},
       .destination = {{0, 1}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0},
@@ -151,6 +154,7 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
       .routes = routes.data(),
       .control_sources = sources.data(),
       .control_destination_sources = destinations.data(),
+      .column_command_packets = command_packets.data(),
       .control_paths = control_paths.data(),
       .switches = context.switches,
       .connections = context.connections,
@@ -170,11 +174,13 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   EXPECT_NE(retained->connections.groups, original->connections.groups);
   EXPECT_NE(retained->connections.destinations,
             original->connections.destinations);
+  EXPECT_NE(retained->column_command_packets, original->column_command_packets);
   iree_arena_reset(&source_arena_);
   tiles.clear();
   routes.clear();
   sources.clear();
   destinations.clear();
+  command_packets.clear();
   occupancy.clear();
 
   EXPECT_EQ(retained->base.lifetimes.owners[0], 1u);
@@ -185,7 +191,10 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   EXPECT_EQ(retained->tiles[2].s2mm_count, 1u);
   EXPECT_EQ(retained->control_sources[4].destination, 3u);
   EXPECT_EQ(retained->control_sources[4].packet_mask, 1u << connection.packet);
+  EXPECT_EQ(retained->control_sources[4].register_packet_mask,
+            1u << connection.packet);
   EXPECT_EQ(retained->control_destination_sources[3], 4u);
+  EXPECT_EQ(retained->column_command_packets[1], 3u);
   for (size_t i = 0; i < retained->routing.route_count; ++i) {
     EXPECT_EQ(retained->routes[i].edge, &retained->routing.routes[i]);
     EXPECT_EQ(retained->routes[i].register_command, i < control_route_count);
@@ -218,7 +227,7 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
     EXPECT_EQ(binding.engine, 1u);
     EXPECT_EQ(binding.first_descriptor, 24u + 2u * (row - 2u));
     EXPECT_EQ(binding.descriptor_count, 2u);
-    EXPECT_EQ(binding.queue_packet, 0u);
+    EXPECT_EQ(binding.queue_packet, 3u);
     EXPECT_EQ(binding.code_packet, row - 2u);
     EXPECT_EQ(binding.reply_packet, 0u);
   }
@@ -312,6 +321,7 @@ TEST_F(ExecutionPlanTest, CodeRequestsShareCommandsOnASaturatedColumn) {
   std::vector<loom_aie2p_native_tile_t> tiles(tile_count);
   std::vector<loom_aie2p_native_control_source_t> sources(tile_count * 2);
   std::vector<uint32_t> destinations(tile_count * 2, UINT32_MAX);
+  std::vector<uint8_t> command_packets(tile_count, UINT8_MAX);
   std::vector<loom_aie2p_native_control_path_t> paths(family->column_count);
   std::vector<loom_aie2p_native_route_t> routes(128);
   std::vector<loom_aie2p_native_control_connection_t> controls(16);
@@ -328,6 +338,7 @@ TEST_F(ExecutionPlanTest, CodeRequestsShareCommandsOnASaturatedColumn) {
       .routes = routes.data(),
       .control_sources = sources.data(),
       .control_destination_sources = destinations.data(),
+      .column_command_packets = command_packets.data(),
       .control_paths = paths.data(),
       .control_connections = controls.data(),
   };
@@ -338,14 +349,21 @@ TEST_F(ExecutionPlanTest, CodeRequestsShareCommandsOnASaturatedColumn) {
     ASSERT_TRUE(loom_aie2p_native_packet_route(
         &context, &next_source, {0, row}, LOOM_XDNA_STREAM_PORT_CORE,
         {0, destination}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, packet, nullptr));
+    command_packets[destination] = packet;
+    paths[0].packets |= UINT32_C(1) << packet;
   };
-  command(2, 2, 0);
+  command(2, 2, 2);
   command(2, 0, 1);
-  command(3, 3, 0);
+  command(3, 3, 3);
   command(4, 1, 0);
   command(4, 0, 1);
-  command(4, 4, 2);
-  command(5, 5, 0);
+  command(4, 4, 4);
+  command(5, 5, 5);
+  // A private collective can reuse another core's command ID. Late code
+  // loading must preserve that meaning on its original source stream.
+  ASSERT_TRUE(loom_aie2p_native_packet_route(
+      &context, &next_source, {0, 3}, LOOM_XDNA_STREAM_PORT_CORE, {0, 4},
+      LOOM_XDNA_STREAM_PORT_CORE, 0, nullptr));
   ASSERT_EQ(paths[0].source, 8u);
   ASSERT_EQ(paths[0].count, 4u);
   const uint8_t carrier_arrival =
@@ -398,6 +416,7 @@ TEST_F(ExecutionPlanTest, CodeRequestsShareCommandsOnASaturatedColumn) {
       .routes = context.routes,
       .control_sources = context.control_sources,
       .control_destination_sources = context.control_destination_sources,
+      .column_command_packets = context.column_command_packets,
       .control_paths = paths.data(),
       .switches = context.switches,
       .connections = context.connections};
@@ -411,19 +430,20 @@ TEST_F(ExecutionPlanTest, CodeRequestsShareCommandsOnASaturatedColumn) {
   sources.clear();
   paths.clear();
   controls.clear();
+  command_packets.clear();
   for (uint16_t row = 2; row < 6; ++row) {
     loom_aie2p_code_transport_binding_t binding;
     loom_aie2p_code_transport_bind(&transport, {0, row}, 2, &binding,
                                    &requirement);
     ASSERT_TRUE(iree_string_view_is_empty(requirement));
-    EXPECT_EQ(binding.queue_packet, row + 1u);
+    EXPECT_EQ(binding.queue_packet, row == 3 ? 6u : 0u);
     EXPECT_EQ(binding.code_packet, row - 2u);
     EXPECT_EQ(binding.engine, 0u);
   }
   EXPECT_EQ(
       transport.plan.routing.link_channels.southbound[family->column_count],
       15u);
-  EXPECT_EQ(transport.plan.connections.group_count, 21u);
+  EXPECT_EQ(transport.plan.connections.group_count, 22u);
   bool saw_converged_request = false;
   for (size_t i = 0; i < transport.plan.routing.route_count; ++i) {
     const auto& route = transport.plan.routes[i];

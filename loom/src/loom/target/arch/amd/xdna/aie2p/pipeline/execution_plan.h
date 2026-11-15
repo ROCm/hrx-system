@@ -14,6 +14,9 @@
 extern "C" {
 #endif
 
+// Shared payload/control routes reserve one identity for complete payloads.
+enum { LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID = 16 };
+
 // Complete endpoint ownership for one compiler-generated control stream.
 // Commands, replies, and collective words retain their framing on circuits.
 typedef struct loom_aie2p_native_control_source_t {
@@ -24,11 +27,14 @@ typedef struct loom_aie2p_native_control_source_t {
   uint32_t destination;
   // Packet identities already emitted by this physical sender.
   uint32_t packet_mask;
+  // Subset naming register commands. Private collective identities may
+  // overlap another core's commands before late code delivery joins them.
+  uint32_t register_packet_mask;
 } loom_aie2p_native_control_source_t;
 
 // A private downward command path through its column's SRAM tile. Hardware
 // register commands retire independently of payload consumers. Late senders
-// can share the retained interval with disjoint packet identities.
+// can share the retained interval with identities naming terminal tiles.
 typedef struct loom_aie2p_native_control_path_t {
   // First edge in the original physical route inventory.
   iree_host_size_t first;
@@ -172,6 +178,9 @@ typedef struct loom_aie2p_execution_plan_t {
   // Unique source per core/tile-control destination; UINT32_MAX means unused,
   // and UINT32_MAX - 1 means that different sources share the destination.
   uint32_t* control_destination_sources;
+  // Same-column register-command packet per destination tile, or UINT8_MAX.
+  // Replies and cross-column commands retain their separate namespaces.
+  uint8_t* column_command_packets;
   // Longest private downward hardware-command suffix per physical column.
   loom_aie2p_native_control_path_t* control_paths;
   // Admitted switch register banks in first-use order.

@@ -184,6 +184,8 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
     destinations_.resize(endpoint_count, UINT32_MAX);
     context_.control_sources = sources_.data();
     context_.control_destination_sources = destinations_.data();
+    command_packets_.resize(tiles_.size(), UINT8_MAX);
+    context_.column_command_packets = command_packets_.data();
     control_paths_.resize(context_.family->column_count);
     context_.control_paths = control_paths_.data();
     routes_.resize(128);
@@ -296,6 +298,8 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
   std::vector<loom_aie2p_native_control_connection_t> connections_;
   // A destination stays private only while every use names the same source.
   std::vector<uint32_t> destinations_;
+  // Same-column command identities name terminal tiles, independently of cores.
+  std::vector<uint8_t> command_packets_;
   // Producer-selected intervals available to later hardware commands.
   std::vector<loom_aie2p_native_control_path_t> control_paths_;
   // Eligible payload paths indexed by destination tile.
@@ -541,16 +545,20 @@ TEST_F(Aie2pControlSwitchTest, IndependentCommandsShareTheRemainingColumnLane) {
   ASSERT_NO_FATAL_FAILURE(AddPayloads(3, &delivery));
   // The bottom core consumes the fourth southbound lane. Each later core
   // extends its command carrier without borrowing independent payload lanes.
-  uint32_t packets = 0;
   for (size_t worker : {0, 1, 2, 3}) {
     ASSERT_NO_FATAL_FAILURE(SelectCommand(worker, 1, true));
     ASSERT_NO_FATAL_FAILURE(SelectCommand(worker, 0, true));
-    EXPECT_EQ(packets & workers_[worker].packet_mask, 0u);
-    packets |= workers_[worker].packet_mask;
+    EXPECT_EQ(workers_[worker].packet_mask, workers_[0].packet_mask);
+    EXPECT_EQ(workers_[worker].control_packets[1], 0u);
+    EXPECT_EQ(workers_[worker].control_packets[0], 1u);
+    if (worker) {
+      EXPECT_NE(workers_[worker].control_replies[1],
+                workers_[worker - 1].control_replies[1]);
+    }
   }
   EXPECT_TRUE(control_paths_[0].sharing.used);
   EXPECT_FALSE(delivery.sharing.used);
-  EXPECT_EQ(control_paths_[0].packets, packets);
+  EXPECT_EQ(control_paths_[0].packets, 3u);
   ASSERT_NO_FATAL_FAILURE(Build(true, 6));
 }
 
@@ -562,6 +570,18 @@ TEST_F(Aie2pControlSwitchTest,
   EXPECT_NE(control_paths_[0].sharing.domain, 0u);
   EXPECT_TRUE(control_paths_[0].sharing.used);
   ASSERT_NO_FATAL_FAILURE(Build(true, 5));
+}
+
+TEST_F(Aie2pControlSwitchTest, CrossColumnCommandsKeepTheirSourceNamespace) {
+  // Reserve lower IDs for other destinations of column zero's command stream.
+  control_paths_[0].packets = 0x7f;
+  ASSERT_NO_FATAL_FAILURE(SelectCommand(0, 1, false));
+  ASSERT_EQ(command_packets_[1], 7u);
+  workers_[3].tile = &tiles_[context_.family->row_count + 5];
+  ASSERT_NO_FATAL_FAILURE(SelectCommand(3, 1, false));
+  EXPECT_EQ(workers_[3].control_packets[1], 0u);
+  EXPECT_EQ(control_paths_[1].packets, 1u);
+  EXPECT_EQ(command_packets_[1], 7u);
 }
 
 TEST_F(Aie2pControlSwitchTest, SharedCommandsCanTerminateAboveTheCarrierRoot) {

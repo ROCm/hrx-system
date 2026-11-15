@@ -42,6 +42,10 @@ iree_status_t loom_aie2p_execution_plan_copy_resources(
   memcpy(target->control_destination_sources,
          source->control_destination_sources,
          tile_count * 2 * sizeof(*target->control_destination_sources));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      arena, tile_count, (void**)&target->column_command_packets));
+  memcpy(target->column_command_packets, source->column_command_packets,
+         tile_count);
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, family->column_count, sizeof(*target->control_paths),
       (void**)&target->control_paths));

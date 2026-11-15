@@ -49,11 +49,12 @@ iree_status_t loom_aie2p_code_transport_initialize(
   for (uint16_t column = 0; column < source->routing.family->column_count;
        ++column) {
     const loom_aie2p_native_control_path_t* path = &plan->control_paths[column];
+    loom_aie2p_code_transport_sender_t* sender =
+        &out_transport->senders[column];
+    sender->command_packets = path->packets;
     if (!path->count) {
       continue;
     }
-    loom_aie2p_code_transport_sender_t* sender =
-        &out_transport->senders[column];
     if (path->sharing.domain) {
       sender->commands = path->sharing;
     } else {
@@ -106,6 +107,9 @@ static bool loom_aie2p_code_transport_route(
       *owner = UINT32_MAX - 1;
     }
     control->packet_mask |= UINT32_C(1) << packet;
+    if (destination.port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL) {
+      control->register_packet_mask |= UINT32_C(1) << packet;
+    }
   }
   const iree_host_size_t first = plan->routing.route_count;
   const bool routed =
@@ -187,23 +191,36 @@ void loom_aie2p_code_transport_bind(
   occupancy->descriptor_counts[bank] += (uint16_t)descriptor_count;
   const uint32_t core_index =
       loom_xdna_array_physical_tile_index(family, compute) * 2;
+  uint8_t* command_packet =
+      &plan->column_command_packets[loom_xdna_array_physical_tile_index(
+          family, memory)];
   const uint32_t queue_available = ~(
-      plan->control_sources[core_index].packet_mask | sender->command_packets);
+      plan->control_sources[core_index].packet_mask | sender->command_packets |
+      (UINT32_C(1) << LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID));
   const uint32_t reply_available =
       ~plan->control_sources[core_index + 1].packet_mask;
-  if (!queue_available || !reply_available) {
+  const uint32_t other_packets =
+      plan->control_sources[core_index].packet_mask &
+      ~plan->control_sources[core_index].register_packet_mask;
+  const bool reuse_command =
+      *command_packet != UINT8_MAX &&
+      !(other_packets & (UINT32_C(1) << *command_packet));
+  if ((!queue_available && !reuse_command) || !reply_available) {
     *out_requirement = IREE_SV(
         "unused control packet identities for code loading and completion");
     return;
   }
   const uint8_t queue_packet =
-      (uint8_t)iree_math_count_trailing_zeros_u32(queue_available);
+      reuse_command
+          ? *command_packet
+          : (uint8_t)iree_math_count_trailing_zeros_u32(queue_available);
+  if (*command_packet == UINT8_MAX) {
+    *command_packet = queue_packet;
+  }
   const uint8_t reply_packet =
       (uint8_t)iree_math_count_trailing_zeros_u32(reply_available);
   const uint8_t code_packet = sender->worker_count++;
-  if (sender->commands.domain) {
-    sender->command_packets |= UINT32_C(1) << queue_packet;
-  }
+  sender->command_packets |= UINT32_C(1) << queue_packet;
   const loom_aie2p_native_connection_endpoint_t core = {
       compute, LOOM_XDNA_STREAM_PORT_CORE, 0};
   const loom_aie2p_native_connection_endpoint_t control = {
