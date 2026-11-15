@@ -23,6 +23,9 @@
 #include "iree/hal/driver/amd/gpu/image/hsaco_test_util.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/command_buffer.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/publication.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/perf_counters.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/thread_trace.h"
+#include "iree/hal/driver/amd/gpu/target/identity.h"
 #include "iree/io/file_handle.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -136,6 +139,31 @@ class GpuNativeProfileTestBase : public GpuNativeTest {
       }
     }
     return result;
+  }
+
+  // gfx IP version of the device under test, from its executable target.
+  iree_hal_amd_gpu_gfxip_version_t TargetVersion() {
+    const auto* targets =
+        iree_hal_device_spec_executables(iree_hal_device_spec(device_));
+    iree_hal_amd_gpu_target_identity_t identity = {};
+    IREE_EXPECT_OK(iree_hal_amd_gpu_target_identity_parse_artifact_key(
+        targets->targets[0].target_key, &identity));
+    return identity.version;
+  }
+
+  // Whether the device's trace and counter tables ran on its exact target.
+  // That holds on gfx1151 alone; elsewhere captures carry the unverified flag.
+  bool TraceTableVerified() {
+    iree_hal_amd_gpu_pm4_thread_trace_profile_t profile;
+    IREE_EXPECT_OK(iree_hal_amd_gpu_pm4_thread_trace_profile_initialize(
+        TargetVersion(), &profile));
+    return profile.verified;
+  }
+  bool CounterTableVerified() {
+    iree_hal_amd_gpu_pm4_perf_counter_profile_t profile;
+    IREE_EXPECT_OK(iree_hal_amd_gpu_pm4_perf_counter_profile_initialize(
+        TargetVersion(), &profile));
+    return profile.verified;
   }
 
   void Load(Ref<iree_hal_executable_t>& executable,
@@ -1824,6 +1852,12 @@ class GpuNativeTraceProfileTest : public GpuNativeProfileTestBase {
                   IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_FINISHED);
       EXPECT_FALSE(capture.flags &
                    IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_UNCOLLECTED);
+      // A bracket that never ran on this exact target says so.
+      EXPECT_EQ(
+          (capture.flags &
+           IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_UNVERIFIED_TARGET) !=
+              0,
+          !TraceTableVerified());
       EXPECT_EQ(
           (capture.flags &
            IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_COMMAND_BUFFER_SCOPE) !=
@@ -2046,6 +2080,10 @@ class GpuNativeCounterProfileTest : public GpuNativeProfileTestBase {
                 IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_EXCLUSIVE_WINDOW);
     EXPECT_TRUE(capture.flags &
                 IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_PROCESS_SCOPE);
+    // Sequences that never ran on this exact target say so.
+    EXPECT_EQ((capture.flags &
+               IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_UNVERIFIED_TARGET) != 0,
+              !CounterTableVerified());
     EXPECT_EQ(capture.sample_limit, 3u);
     EXPECT_EQ(capture.sampled_dispatch_count, sample_count);
     EXPECT_EQ(capture.invalid_sample_count, 0u);

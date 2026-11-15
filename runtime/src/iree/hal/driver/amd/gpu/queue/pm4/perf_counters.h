@@ -33,6 +33,13 @@ extern "C" {
 // Two kinds of counter exist. Engine counters (SQG) have one 64-bit instance
 // per shader engine. Instance counters (SQ) have one 32-bit instance per
 // workgroup processor. Both are read per instance; the host sums them.
+//
+// The sequences are generation-parametric: addresses, control values and the
+// event numbers are fields of the target's table, selected once per session.
+// A table is marked verified only for the exact target its sequences ran on.
+// That is gfx1151 (GC 11.5.1), the one GPU this code has run on; every other
+// entry is transcribed from the Mesa and ROCm register databases and event
+// enumerations and has never executed.
 
 enum {
   // Shader engines addressable by one counter configuration.
@@ -40,8 +47,8 @@ enum {
   // Engine counters selectable at once: the hardware has eight SQG slots.
   IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_MAX_ENGINE_COUNTERS = 8,
   // Instance counters selectable at once. Only even SQ select registers are
-  // usable and select 2k feeds result register k; the first four are
-  // qualified.
+  // usable and select 2k feeds result register k; the first four were
+  // exercised.
   IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_MAX_INSTANCE_COUNTERS = 4,
   // Workgroup processors addressable by one counter configuration.
   IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_MAX_INSTANCE_COUNT = 64,
@@ -112,10 +119,15 @@ typedef struct iree_hal_amd_gpu_pm4_perf_counter_profile_t {
   // Selectable events.
   const iree_hal_amd_gpu_pm4_perf_counter_event_t* events;
   uint32_t event_count;
+  // The sequences ran on this exact target and their counts were checked.
+  // False means the table came from register databases alone and has never
+  // run: a session proceeds, warns and marks its capture record.
+  bool verified;
 } iree_hal_amd_gpu_pm4_perf_counter_profile_t;
 
-// Selects the register table of a qualified physical ISA. Unqualified targets
-// return UNIMPLEMENTED and leave the profile zeroed.
+// Selects the register table of a physical ISA. A target without a table
+// returns UNIMPLEMENTED, naming what differs on it and where the missing
+// values are documented, and leaves the profile zeroed.
 iree_status_t iree_hal_amd_gpu_pm4_perf_counter_profile_initialize(
     iree_hal_amd_gpu_gfxip_version_t gfxip,
     iree_hal_amd_gpu_pm4_perf_counter_profile_t* out_profile);

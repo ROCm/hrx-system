@@ -9,6 +9,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "iree/testing/gtest.h"
@@ -83,19 +84,208 @@ class PerfCountersTest : public ::testing::Test {
   std::array<uint32_t, 512> storage_;
 };
 
-TEST_F(PerfCountersTest, OnlyTheQualifiedGenerationHasRegisters) {
-  iree_hal_amd_gpu_pm4_perf_counter_profile_t profile;
-  for (const iree_hal_amd_gpu_gfxip_version_t version :
-       {iree_hal_amd_gpu_gfxip_version_t{11, 0, 0},
-        iree_hal_amd_gpu_gfxip_version_t{12, 0, 0},
-        iree_hal_amd_gpu_gfxip_version_t{10, 3, 0}}) {
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
-                          iree_hal_amd_gpu_pm4_perf_counter_profile_initialize(
-                              version, &profile));
-    EXPECT_EQ(profile.control, 0u);
+// Message of a failed status, consuming it.
+std::string StatusText(iree_status_t status) {
+  std::string message;
+  const iree_allocator_t allocator = iree_allocator_system();
+  char* buffer = nullptr;
+  iree_host_size_t length = 0;
+  if (iree_status_to_string(status, &allocator, &buffer, &length)) {
+    message.assign(buffer, length);
+    iree_allocator_free(allocator, buffer);
   }
+  iree_status_ignore(status);
+  return message;
+}
+
+TEST_F(PerfCountersTest, OnlyGfx1151IsMarkedVerified) {
+  // The one target the sequences ran on.
+  EXPECT_TRUE(profile_.verified);
   // FORCE_EN would count every queue on the device.
   EXPECT_EQ(profile_.block_filter_default & 1u, 0u);
+  // Sibling steppings and GFX11.0 were never run. They share the event
+  // catalog and emit the same words.
+  SelectInstances();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_perf_counter_config_validate(&config_));
+  const uint64_t address = UINT64_C(0x0000007700aa1000);
+  const std::vector<uint32_t> start = Emitted(
+      iree_hal_amd_gpu_pm4_perf_counter_emit_start(words(), &config_, address));
+  storage_.fill(kGuard);
+  const std::vector<uint32_t> sample =
+      Emitted(iree_hal_amd_gpu_pm4_perf_counter_emit_sample(words(), &config_,
+                                                            address));
+  storage_.fill(kGuard);
+  const std::vector<uint32_t> stop =
+      Emitted(iree_hal_amd_gpu_pm4_perf_counter_emit_stop(words(), &config_));
+  for (const iree_hal_amd_gpu_gfxip_version_t version :
+       {iree_hal_amd_gpu_gfxip_version_t{11, 5, 0},
+        iree_hal_amd_gpu_gfxip_version_t{11, 5, 2},
+        iree_hal_amd_gpu_gfxip_version_t{11, 5, 3},
+        iree_hal_amd_gpu_gfxip_version_t{11, 5, 40},
+        iree_hal_amd_gpu_gfxip_version_t{11, 0, 0},
+        iree_hal_amd_gpu_gfxip_version_t{11, 0, 3}}) {
+    SCOPED_TRACE(::testing::Message()
+                 << "gfx" << version.major << "." << version.minor << "."
+                 << version.stepping);
+    iree_hal_amd_gpu_pm4_perf_counter_profile_t profile;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_perf_counter_profile_initialize(
+        version, &profile));
+    EXPECT_FALSE(profile.verified);
+    EXPECT_EQ(profile.events, profile_.events);
+    EXPECT_EQ(profile.event_count, profile_.event_count);
+    config_.profile = &profile;
+    storage_.fill(kGuard);
+    EXPECT_EQ(Emitted(iree_hal_amd_gpu_pm4_perf_counter_emit_start(
+                  words(), &config_, address)),
+              start);
+    storage_.fill(kGuard);
+    EXPECT_EQ(Emitted(iree_hal_amd_gpu_pm4_perf_counter_emit_sample(
+                  words(), &config_, address)),
+              sample);
+    storage_.fill(kGuard);
+    EXPECT_EQ(
+        Emitted(iree_hal_amd_gpu_pm4_perf_counter_emit_stop(words(), &config_)),
+        stop);
+  }
+  iree_hal_amd_gpu_pm4_perf_counter_profile_t gfx120;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_perf_counter_profile_initialize(
+      {12, 0, 0}, &gfx120));
+  EXPECT_FALSE(gfx120.verified);
+}
+
+TEST_F(PerfCountersTest, TargetsWithoutATableAreRefusedNamingTheGap) {
+  struct Case {
+    iree_hal_amd_gpu_gfxip_version_t version;
+    const char* target;
+    const char* gap;
+  };
+  for (const Case& c : {
+           Case{{9, 0, 10}, "gfx9.0.10", "has no SQG block"},
+           Case{{9, 4, 2}, "gfx9.4.2", "basic_counters.xml"},
+           Case{{10, 3, 0}, "gfx10.3.0", "navi10_enum.h"},
+           Case{{11, 7, 0}, "gfx11.7.0", "no register database or event table"},
+           Case{{12, 5, 0}, "gfx12.5.0", "AID_PERFMON_CNTL"},
+           Case{{13, 0, 0}, "gfx13.0.0", "no register table has been written"},
+       }) {
+    iree_hal_amd_gpu_pm4_perf_counter_profile_t profile;
+    std::memset(&profile, 0xa5, sizeof(profile));
+    iree_status_t status = iree_hal_amd_gpu_pm4_perf_counter_profile_initialize(
+        c.version, &profile);
+    EXPECT_TRUE(iree_status_is_unimplemented(status)) << c.target;
+    const std::string message = StatusText(status);
+    // Builds that keep status text name the target and what it lacks.
+    if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS) {
+      EXPECT_NE(
+          message.find(std::string("no PM4 performance counter table for ") +
+                       c.target),
+          std::string::npos)
+          << message;
+      EXPECT_NE(message.find(c.gap), std::string::npos) << message;
+      EXPECT_EQ(message.find("gfx1151"), std::string::npos) << message;
+    }
+    // A refusal never leaves a half-filled table behind.
+    EXPECT_EQ(profile.control, 0u);
+    EXPECT_EQ(profile.events, nullptr);
+    EXPECT_EQ(profile.event_count, 0u);
+    EXPECT_FALSE(profile.verified);
+  }
+}
+
+TEST_F(PerfCountersTest, Gfx120RenumbersEveryEventOnTheSameRegisters) {
+  iree_hal_amd_gpu_pm4_perf_counter_profile_t gfx120;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_perf_counter_profile_initialize(
+      {12, 0, 1}, &gfx120));
+  // Same catalog, in the same order, with the GFX12 numbers.
+  struct Event {
+    const char* name;
+    uint32_t gfx11;
+    uint32_t gfx12;
+  };
+  const Event events[] = {
+      {"SQG_WAVES", 0x14, 0x13},       {"SQG_WAVES_32", 0x15, 0x14},
+      {"SQG_WAVES_64", 0x16, 0x15},    {"SQG_ITEMS", 0x18, 0x17},
+      {"SQG_BUSY_CYCLES", 0x10, 0x0f}, {"SQG_WAVE_CYCLES", 0x11, 0x10},
+      {"SQG_CYCLES", 0x0f, 0x0e},      {"SQG_WAVES_SAVED", 0x0d, 0x0c},
+      {"SQ_WAVES", 0x04, 0x04},        {"SQ_INSTS_VALU", 0x3e, 0x32},
+      {"SQ_INSTS_SALU", 0x3a, 0x2e},   {"SQ_INSTS_ALL", 0x30, 0x27},
+  };
+  ASSERT_EQ(profile_.event_count, IREE_ARRAYSIZE(events));
+  ASSERT_EQ(gfx120.event_count, IREE_ARRAYSIZE(events));
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(events); ++i) {
+    const iree_string_view_t name = iree_make_cstring_view(events[i].name);
+    EXPECT_TRUE(iree_string_view_equal(profile_.events[i].name, name)) << i;
+    EXPECT_TRUE(iree_string_view_equal(gfx120.events[i].name, name)) << i;
+    EXPECT_EQ(profile_.events[i].select, events[i].gfx11) << events[i].name;
+    EXPECT_EQ(gfx120.events[i].select, events[i].gfx12) << events[i].name;
+    EXPECT_EQ(gfx120.events[i].block, profile_.events[i].block);
+    EXPECT_EQ(gfx120.events[i].cycles, profile_.events[i].cycles);
+  }
+
+  // The sequences differ from GFX11.5 only in the select values.
+  SelectInstances();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_perf_counter_config_validate(&config_));
+  auto gfx120_config = config_;
+  gfx120_config.profile = &gfx120;
+  for (uint32_t i = 0; i < config_.engine_counter_count; ++i) {
+    gfx120_config.engine_counters[i] =
+        iree_hal_amd_gpu_pm4_perf_counter_profile_find(
+            &gfx120, config_.engine_counters[i]->name);
+    ASSERT_NE(gfx120_config.engine_counters[i], nullptr);
+  }
+  for (uint32_t i = 0; i < config_.instance_counter_count; ++i) {
+    gfx120_config.instance_counters[i] =
+        iree_hal_amd_gpu_pm4_perf_counter_profile_find(
+            &gfx120, config_.instance_counters[i]->name);
+    ASSERT_NE(gfx120_config.instance_counters[i], nullptr);
+  }
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_pm4_perf_counter_config_validate(&gfx120_config));
+  const uint64_t state = UINT64_C(0x0000007700aa1000);
+  std::vector<uint32_t> expected = Emitted(
+      iree_hal_amd_gpu_pm4_perf_counter_emit_start(words(), &config_, state));
+  storage_.fill(kGuard);
+  const std::vector<uint32_t> start =
+      Emitted(iree_hal_amd_gpu_pm4_perf_counter_emit_start(
+          words(), &gfx120_config, state));
+  ASSERT_EQ(start.size(), expected.size());
+  // SQG_WAVES, SQG_ITEMS, then SQ_WAVES and SQ_INSTS_ALL on even selects.
+  const uint32_t selects[][3] = {
+      {Register(0x36740), 0x14, 0x13},
+      {Register(0x36744), 0x18, 0x17},
+      {Register(0x36700), 0x04, 0x04},
+      {Register(0x36708), 0x30, 0x27},
+  };
+  uint32_t replaced = 0;
+  for (size_t i = 0; i + 2 < expected.size(); ++i) {
+    for (const auto& select : selects) {
+      if (expected[i] == kUconfig && expected[i + 1] == select[0] &&
+          expected[i + 2] == select[1]) {
+        expected[i + 2] = select[2];
+        ++replaced;
+      }
+    }
+  }
+  EXPECT_EQ(replaced, 4u);
+  EXPECT_EQ(start, expected);
+  // Sampling and stopping name no event: identical word for word.
+  storage_.fill(kGuard);
+  const std::vector<uint32_t> sample =
+      Emitted(iree_hal_amd_gpu_pm4_perf_counter_emit_sample(
+          words(), &config_, UINT64_C(0x0000007700bb2000)));
+  storage_.fill(kGuard);
+  EXPECT_EQ(Emitted(iree_hal_amd_gpu_pm4_perf_counter_emit_sample(
+                words(), &gfx120_config, UINT64_C(0x0000007700bb2000))),
+            sample);
+  storage_.fill(kGuard);
+  const std::vector<uint32_t> stop =
+      Emitted(iree_hal_amd_gpu_pm4_perf_counter_emit_stop(words(), &config_));
+  storage_.fill(kGuard);
+  EXPECT_EQ(Emitted(iree_hal_amd_gpu_pm4_perf_counter_emit_stop(
+                words(), &gfx120_config)),
+            stop);
+  // A recording prepared for one layout is not replayed with the other.
+  EXPECT_NE(iree_hal_amd_gpu_pm4_perf_counter_config_signature(&gfx120_config),
+            iree_hal_amd_gpu_pm4_perf_counter_config_signature(&config_));
 }
 
 TEST_F(PerfCountersTest, EventsAreFoundByExactName) {

@@ -29,11 +29,19 @@ extern "C" {
 // One SIMD of one workgroup processor of array zero is traced per shader
 // engine, so a trace samples a small fraction of a dispatch's waves. It is not
 // a census.
+//
+// The sequences are generation-parametric: every address, control value and
+// layout difference is a field of the target's register table, and the table
+// is selected once per session. A table is marked verified only for the exact
+// target its bracket was published on. That is gfx1151 (GC 11.5.1), the one
+// GPU this code has run on; every other entry is transcribed from the Mesa and
+// ROCm register databases and has never executed.
 
 enum {
   // Shader engines addressable by one trace bracket.
   IREE_HAL_AMD_GPU_PM4_THREAD_TRACE_MAX_ENGINE_COUNT = 8,
-  // Per-engine buffer bounds. The upper bound is exclusive on GFX11.
+  // Per-engine buffer bounds. The upper bound is exclusive: it is the GFX11
+  // limit and is kept on GFX12, whose size field would allow more.
   IREE_HAL_AMD_GPU_PM4_THREAD_TRACE_MIN_BUFFER_LENGTH = 128 * 1024,
   IREE_HAL_AMD_GPU_PM4_THREAD_TRACE_MAX_BUFFER_LENGTH = 512 * 1024 * 1024,
   // Buffer base and length granularity.
@@ -50,15 +58,23 @@ enum {
 typedef struct iree_hal_amd_gpu_pm4_thread_trace_profile_t {
   // GRBM_GFX_INDEX.
   uint32_t graphics_index;
-  // SPI_CONFIG_CNTL and its two values. Without the SQG event bits the finish
-  // event never reports completion. The idle value is the reset default.
+  // Register holding the SQG event enables and its two values: SPI_CONFIG_CNTL
+  // on GFX11, SPI_SQG_EVENT_CTL on GFX12. Without the SQG event bits the
+  // finish event never reports completion. The idle value is the reset
+  // default.
   uint32_t event_control;
   uint32_t event_control_tracing;
   uint32_t event_control_idle;
-  // SQ_THREAD_TRACE_BUF0_BASE, in 4 KiB units.
+  // SQ_THREAD_TRACE_BUF0_BASE (GFX11) or BUF0_BASE_LO (GFX12), in 4 KiB units.
   uint32_t buffer_base;
-  // SQ_THREAD_TRACE_BUF0_SIZE: 4 KiB units above bit 8, high base bits below.
+  // SQ_THREAD_TRACE_BUF0_BASE_HI, or 0 when the size register carries the high
+  // base bits. With a separate high register the start sequence also writes
+  // it and resets the write pointer, three more DWORDs each per engine.
+  uint32_t buffer_base_high;
+  // SQ_THREAD_TRACE_BUF0_SIZE and the bit its 4 KiB unit count starts at. The
+  // high base bits sit below the count when buffer_base_high is 0.
   uint32_t buffer_size;
+  uint32_t buffer_size_shift;
   // SQ_THREAD_TRACE_CTRL and its values with the mode on and off.
   uint32_t control;
   uint32_t control_tracing;
@@ -87,10 +103,15 @@ typedef struct iree_hal_amd_gpu_pm4_thread_trace_profile_t {
   uint32_t maximum_simd;
   // The write pointer counts from the buffer base address instead of zero.
   bool write_pointer_includes_base;
+  // The bracket was published on this exact target and its trace decoded.
+  // False means the table came from register databases alone and has never
+  // run: a session proceeds, warns and marks its capture records.
+  bool verified;
 } iree_hal_amd_gpu_pm4_thread_trace_profile_t;
 
-// Selects the register table of a qualified physical ISA. Unqualified targets
-// return UNIMPLEMENTED and leave the profile zeroed.
+// Selects the register table of a physical ISA. A target without a table
+// returns UNIMPLEMENTED, naming what differs on it and where the missing
+// values are documented, and leaves the profile zeroed.
 iree_status_t iree_hal_amd_gpu_pm4_thread_trace_profile_initialize(
     iree_hal_amd_gpu_gfxip_version_t gfxip,
     iree_hal_amd_gpu_pm4_thread_trace_profile_t* out_profile);

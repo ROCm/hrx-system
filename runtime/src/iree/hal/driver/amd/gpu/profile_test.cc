@@ -1526,6 +1526,72 @@ TEST_F(GpuProfileTraceTest, DirectTraceJoinsItsDispatchEventAndStatesCoverage) {
   EXPECT_EQ(sink_.code_objects[0].executable_id, sink_.traces[0].executable_id);
 }
 
+TEST_F(GpuProfileTraceTest, VerifiedTargetNeitherWarnsNorMarksCaptures) {
+  ASSERT_NO_FATAL_FAILURE(BeginTracing());
+  ::testing::internal::CaptureStderr();
+  EXPECT_FALSE(iree_hal_amd_gpu_profile_warn_unverified(profile_, {11, 5, 1}));
+  EXPECT_FALSE(iree_hal_amd_gpu_profile_warn_unverified(nullptr, {11, 0, 0}));
+  EXPECT_EQ(::testing::internal::GetCapturedStderr(), "");
+  auto operation = Direct();
+  ASSERT_NE(iree_hal_amd_gpu_profile_trace_claim(profile_, &operation),
+            nullptr);
+  trace_.Stop(0, 3, 0x90008000, 0);
+  trace_.Stop(1, 5, 0x90008000, 0);
+  ASSERT_NO_FATAL_FAILURE(Complete(&operation));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+  ASSERT_EQ(sink_.captures.size(), 2u);
+  for (const auto& capture : sink_.captures) {
+    EXPECT_FALSE(
+        capture.flags &
+        IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_UNVERIFIED_TARGET);
+  }
+}
+
+TEST_F(GpuProfileTraceTest, UnverifiedTargetWarnsOnceAndMarksEveryCapture) {
+  // GFX11.0: a table that was never run, with a base-relative write pointer.
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_thread_trace_profile_initialize(
+      {11, 0, 3}, &trace_.registers));
+  ASSERT_FALSE(trace_.registers.verified);
+  ASSERT_NO_FATAL_FAILURE(BeginTracing());
+  ::testing::internal::CaptureStderr();
+  EXPECT_TRUE(iree_hal_amd_gpu_profile_warn_unverified(profile_, {11, 0, 3}));
+  const std::string warning = ::testing::internal::GetCapturedStderr();
+  EXPECT_NE(warning.find("executable traces on gfx11.0.3 use UNVERIFIED"),
+            std::string::npos)
+      << warning;
+  EXPECT_EQ(warning.find("counter samples"), std::string::npos) << warning;
+  EXPECT_NE(warning.find("only gfx11.5.1 was tested"), std::string::npos);
+  EXPECT_EQ(std::count(warning.begin(), warning.end(), '\n'), 1);
+  EXPECT_EQ(warning.back(), '\n');
+
+  auto operation = Direct();
+  ASSERT_NE(iree_hal_amd_gpu_profile_trace_claim(profile_, &operation),
+            nullptr);
+  // The hardware leaves the buffer base plus the written units.
+  const auto& config = trace_.storage.config;
+  trace_.Stop(0, static_cast<uint32_t>(config.buffer_addresses[0] >> 5) + 3,
+              0x90008000, 0);
+  trace_.Stop(1, static_cast<uint32_t>(config.buffer_addresses[1] >> 5) + 5,
+              0x90008000, 0);
+  ASSERT_NO_FATAL_FAILURE(Complete(&operation));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+  ASSERT_EQ(sink_.captures.size(), 2u);
+  EXPECT_EQ(sink_.captures[0].written_byte_length, 96u);
+  EXPECT_EQ(sink_.captures[1].written_byte_length, 160u);
+  for (const auto& capture : sink_.captures) {
+    EXPECT_EQ(
+        capture.flags,
+        IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_STABLE_POWER_STATE |
+            IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_FINISHED |
+            IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_UNVERIFIED_TARGET);
+  }
+  // The trace records and their bytes are those of a verified target.
+  ASSERT_EQ(sink_.traces.size(), 2u);
+  EXPECT_EQ(sink_.trace_bytes[0],
+            std::vector<uint8_t>(trace_.buffers[0].begin(),
+                                 trace_.buffers[0].begin() + 96));
+}
+
 TEST_F(GpuProfileTraceTest, UncollectedAndFullEnginesNeverClaimCoverage) {
   ASSERT_NO_FATAL_FAILURE(BeginTracing());
   auto operation = Direct();
@@ -1870,6 +1936,46 @@ TEST_F(GpuProfileCounterTest, StorageIsIgnoredBySessionsThatDoNotCount) {
   auto operation = Direct();
   EXPECT_EQ(iree_hal_amd_gpu_profile_counter_claim(profile_, &operation, NULL),
             nullptr);
+}
+
+TEST_F(GpuProfileCounterTest, UnverifiedTargetWarnsOnceAndMarksTheCapture) {
+  // GFX11.0 shares the GFX11.5 registers and events and was never run.
+  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_perf_counter_profile_initialize(
+      {11, 0, 0}, &counters_.registers));
+  ASSERT_FALSE(counters_.registers.verified);
+  ASSERT_NO_FATAL_FAILURE(BeginCounting());
+  ::testing::internal::CaptureStderr();
+  EXPECT_TRUE(iree_hal_amd_gpu_profile_warn_unverified(profile_, {11, 0, 0}));
+  const std::string warning = ::testing::internal::GetCapturedStderr();
+  EXPECT_NE(warning.find("counter samples on gfx11.0.0 use UNVERIFIED"),
+            std::string::npos)
+      << warning;
+  EXPECT_EQ(warning.find("executable traces"), std::string::npos) << warning;
+  EXPECT_EQ(std::count(warning.begin(), warning.end(), '\n'), 1);
+
+  auto operation = Direct();
+  ASSERT_EQ(iree_hal_amd_gpu_profile_counter_claim(profile_, &operation, NULL),
+            &counters_.storage);
+  ASSERT_NO_FATAL_FAILURE(Publish(&operation));
+  ASSERT_NO_FATAL_FAILURE(Complete(&operation));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_profile_flush(profile_));
+  // The sample itself is unchanged; the capture record carries the caveat.
+  ASSERT_EQ(sink_.counter_samples.size(), 1u);
+  EXPECT_EQ(sink_.counter_values[0],
+            (std::vector<uint64_t>{1, 2, 3, 4, 5, 6, 7}));
+  ASSERT_EQ(sink_.counter_captures.size(), 1u);
+  EXPECT_EQ(sink_.counter_captures[0].flags,
+            IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_STABLE_POWER_STATE |
+                IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_EXCLUSIVE_WINDOW |
+                IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_PROCESS_SCOPE |
+                IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_UNVERIFIED_TARGET);
+}
+
+TEST_F(GpuProfileCounterTest, VerifiedCountersAreNotNamedInTheWarning) {
+  ASSERT_NO_FATAL_FAILURE(BeginCounting());
+  ::testing::internal::CaptureStderr();
+  EXPECT_FALSE(iree_hal_amd_gpu_profile_warn_unverified(profile_, {11, 5, 1}));
+  EXPECT_EQ(::testing::internal::GetCapturedStderr(), "");
 }
 
 TEST_F(GpuProfileCounterTest, DirectSampleJoinsItsDispatchAndNamesItsCounters) {

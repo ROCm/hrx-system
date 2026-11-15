@@ -1654,6 +1654,12 @@ enum iree_hal_profile_counter_capture_flag_bits_t {
 
   // The session's sample bound was reached; later operations ran unsampled.
   IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_LIMIT_REACHED = 1u << 3,
+
+  // The producer's counter programming has never run on this device model:
+  // its register addresses and event numbers come from reference tables, not
+  // from a measurement. Values may be wrong in ways no other field reports,
+  // so consumers must not present them as verified.
+  IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_UNVERIFIED_TARGET = 1u << 4,
 };
 
 // How the samples of one counter set were taken, cumulative for the session.
@@ -2093,6 +2099,13 @@ enum iree_hal_profile_executable_trace_capture_flag_bits_t {
   // The producer could not read back the written extent, so no trace bytes
   // were emitted for this partition.
   IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_UNCOLLECTED = 1u << 5,
+
+  // The producer's trace programming has never run on this device model: its
+  // register addresses, control values and extent decoding come from
+  // reference tables, not from a measurement. The trace may be absent,
+  // truncated or misread in ways no other field reports, so consumers must
+  // not present it as verified.
+  IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_UNVERIFIED_TARGET = 1u << 6,
 };
 
 // How one executable trace partition was captured.

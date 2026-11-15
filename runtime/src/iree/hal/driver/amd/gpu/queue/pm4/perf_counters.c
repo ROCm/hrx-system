@@ -29,86 +29,191 @@
       .cycles = false,                                                   \
   }
 
-// GFX11.5 SQG_PERF_SEL and SQ_PERF_SEL events qualified on GC 11.5.1. The
-// wave, workitem and instruction events matched predicted counts exactly; the
-// cycle events were not compared with a clock.
+// The selectable events, in catalog order, with one generation's SQG_PERF_SEL
+// and SQ_PERF_SEL numbers. Names and meanings are the same on every
+// generation that has the event; only the numbers move.
+#define IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_EVENTS(                            \
+    sqg_waves_, sqg_waves_32_, sqg_waves_64_, sqg_items_, sqg_busy_cycles_,  \
+    sqg_wave_cycles_, sqg_cycles_, sqg_waves_saved_, sq_waves_,              \
+    sq_insts_valu_, sq_insts_salu_, sq_insts_all_)                           \
+  IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_ENGINE_EVENT(                            \
+      "SQG_WAVES", sqg_waves_, false, "Waves launched, per shader engine"),  \
+      IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_ENGINE_EVENT(                        \
+          "SQG_WAVES_32", sqg_waves_32_, false,                              \
+          "32-lane waves launched, per shader engine"),                      \
+      IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_ENGINE_EVENT(                        \
+          "SQG_WAVES_64", sqg_waves_64_, false,                              \
+          "64-lane waves launched, per shader engine"),                      \
+      IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_ENGINE_EVENT(                        \
+          "SQG_ITEMS", sqg_items_, false,                                    \
+          "Workitems launched, per shader engine"),                          \
+      IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_ENGINE_EVENT(                        \
+          "SQG_BUSY_CYCLES", sqg_busy_cycles_, true,                         \
+          "Clock cycles with at least one wave in the shader engine"),       \
+      IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_ENGINE_EVENT(                        \
+          "SQG_WAVE_CYCLES", sqg_wave_cycles_, true,                         \
+          "Clock cycles summed over the waves in the shader engine"),        \
+      IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_ENGINE_EVENT(                        \
+          "SQG_CYCLES", sqg_cycles_, true,                                   \
+          "Clock cycles while counting, per shader engine"),                 \
+      IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_ENGINE_EVENT(                        \
+          "SQG_WAVES_SAVED", sqg_waves_saved_, false,                        \
+          "Waves saved by a context switch, per shader engine"),             \
+      IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_INSTANCE_EVENT(                      \
+          "SQ_WAVES", sq_waves_, "Waves launched, per workgroup processor"), \
+      IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_INSTANCE_EVENT(                      \
+          "SQ_INSTS_VALU", sq_insts_valu_,                                   \
+          "Vector ALU instructions issued, per workgroup processor"),        \
+      IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_INSTANCE_EVENT(                      \
+          "SQ_INSTS_SALU", sq_insts_salu_,                                   \
+          "Scalar ALU instructions issued, per workgroup processor"),        \
+      IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_INSTANCE_EVENT(                      \
+          "SQ_INSTS_ALL", sq_insts_all_,                                     \
+          "Instructions issued, per workgroup processor")
+
+// GFX11.0 and GFX11.5 event numbers (soc21). On gfx1151 the wave, workitem and
+// instruction events matched predicted counts exactly; the cycle events were
+// not compared with a clock.
 static const iree_hal_amd_gpu_pm4_perf_counter_event_t
-    iree_hal_amd_gpu_pm4_perf_counter_gfx115_events[] = {
-        IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_ENGINE_EVENT(
-            "SQG_WAVES", 0x14, false, "Waves launched, per shader engine"),
-        IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_ENGINE_EVENT(
-            "SQG_WAVES_32", 0x15, false,
-            "32-lane waves launched, per shader engine"),
-        IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_ENGINE_EVENT(
-            "SQG_WAVES_64", 0x16, false,
-            "64-lane waves launched, per shader engine"),
-        IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_ENGINE_EVENT(
-            "SQG_ITEMS", 0x18, false, "Workitems launched, per shader engine"),
-        IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_ENGINE_EVENT(
-            "SQG_BUSY_CYCLES", 0x10, true,
-            "Clock cycles with at least one wave in the shader engine"),
-        IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_ENGINE_EVENT(
-            "SQG_WAVE_CYCLES", 0x11, true,
-            "Clock cycles summed over the waves in the shader engine"),
-        IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_ENGINE_EVENT(
-            "SQG_CYCLES", 0x0f, true,
-            "Clock cycles while counting, per shader engine"),
-        IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_ENGINE_EVENT(
-            "SQG_WAVES_SAVED", 0x0d, false,
-            "Waves saved by a context switch, per shader engine"),
-        IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_INSTANCE_EVENT(
-            "SQ_WAVES", 0x04, "Waves launched, per workgroup processor"),
-        IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_INSTANCE_EVENT(
-            "SQ_INSTS_VALU", 0x3e,
-            "Vector ALU instructions issued, per workgroup processor"),
-        IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_INSTANCE_EVENT(
-            "SQ_INSTS_SALU", 0x3a,
-            "Scalar ALU instructions issued, per workgroup processor"),
-        IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_INSTANCE_EVENT(
-            "SQ_INSTS_ALL", 0x30,
-            "Instructions issued, per workgroup processor"),
+    iree_hal_amd_gpu_pm4_perf_counter_gfx11_events[] = {
+        IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_EVENTS(0x14, 0x15, 0x16, 0x18, 0x10,
+                                                 0x11, 0x0f, 0x0d, 0x04, 0x3e,
+                                                 0x3a, 0x30),
+};
+
+// GFX12.0 event numbers (soc24): every SQG event and every SQ instruction
+// event is renumbered against GFX11. Never counted on hardware.
+static const iree_hal_amd_gpu_pm4_perf_counter_event_t
+    iree_hal_amd_gpu_pm4_perf_counter_gfx12_events[] = {
+        IREE_HAL_AMD_GPU_PM4_PERF_COUNTER_EVENTS(0x13, 0x14, 0x15, 0x17, 0x0f,
+                                                 0x10, 0x0e, 0x0c, 0x04, 0x32,
+                                                 0x2e, 0x27),
+};
+
+// Registers and control values GFX11.0, GFX11.5 and GFX12.0 share: the
+// register databases give all three the same addresses and field layouts for
+// every register here. Programmed and read back on gfx1151 only.
+static const iree_hal_amd_gpu_pm4_perf_counter_profile_t
+    iree_hal_amd_gpu_pm4_perf_counter_gfx11_registers = {
+        .graphics_index = 0x30800,
+        .graphics_index_broadcast = UINT32_C(0xe0000000),
+        .control = 0x36020,
+        // Disable and clear; count; count and latch a sample; stop.
+        .control_clear = 0,
+        .control_start = 1,
+        .control_sample = 0x401,
+        .control_stop = 2,
+        .instance_block_control = 0x36780,
+        .engine_block_control = 0x36760,
+        // PS, GS, HS and CS stage enables.
+        .block_control_stages = 0x55,
+        .instance_block_filter = 0x36788,
+        .engine_block_filter = 0x36768,
+        // VMIDs 0-15 enabled, FORCE_EN (bit 0) clear.
+        .block_filter_default = 0x1fffe,
+        .engine_select = 0x36740,
+        .instance_select = 0x36700,
+        .select_default = 0x1ff,
+        .engine_result = 0x34790,
+        .instance_result = 0x34700,
+        .compute_enable = 0x2c00 + ((0xb82c - 0xb000) >> 2),
+};
+
+// One generation of the capability table.
+typedef struct iree_hal_amd_gpu_pm4_perf_counter_target_t {
+  // gfx IP major and minor version the row applies to.
+  uint32_t major;
+  uint32_t minor;
+  // Steppings whose sequences ran on hardware, one bit per stepping.
+  uint32_t verified_steppings;
+  // Register table of the generation.
+  const iree_hal_amd_gpu_pm4_perf_counter_profile_t* registers;
+  // Event catalog of the generation.
+  const iree_hal_amd_gpu_pm4_perf_counter_event_t* events;
+  uint32_t event_count;
+} iree_hal_amd_gpu_pm4_perf_counter_target_t;
+
+// A generation without a table, and what a table for it would need.
+typedef struct iree_hal_amd_gpu_pm4_perf_counter_gap_t {
+  // gfx IP major version, and its minor or UINT32_MAX for every minor.
+  uint32_t major;
+  uint32_t minor;
+  // What differs and where the missing values are documented.
+  const char* reason;
+} iree_hal_amd_gpu_pm4_perf_counter_gap_t;
+
+// Only GFX11.5 stepping 1 (gfx1151) has run: no other GPU was available. Every
+// other row and stepping is transcribed from references and unverified. What
+// was measured there and is assumed elsewhere: the per-queue enable, the
+// sample strobe, the block filters and the pairing of select 2k with result k.
+static const iree_hal_amd_gpu_pm4_perf_counter_target_t
+    iree_hal_amd_gpu_pm4_perf_counter_targets[] = {
+        {11, 5, 1u << 1, &iree_hal_amd_gpu_pm4_perf_counter_gfx11_registers,
+         iree_hal_amd_gpu_pm4_perf_counter_gfx11_events,
+         IREE_ARRAYSIZE(iree_hal_amd_gpu_pm4_perf_counter_gfx11_events)},
+        // aqlprofile drives GFX11.0 with the GFX11.5 registers and events.
+        {11, 0, 0, &iree_hal_amd_gpu_pm4_perf_counter_gfx11_registers,
+         iree_hal_amd_gpu_pm4_perf_counter_gfx11_events,
+         IREE_ARRAYSIZE(iree_hal_amd_gpu_pm4_perf_counter_gfx11_events)},
+        // Mesa's gfx12 database omits the perfmon control register; the
+        // GFX12.0 kernel header names it CP_CP_PERFMON_CNTL at this address.
+        {12, 0, 0, &iree_hal_amd_gpu_pm4_perf_counter_gfx11_registers,
+         iree_hal_amd_gpu_pm4_perf_counter_gfx12_events,
+         IREE_ARRAYSIZE(iree_hal_amd_gpu_pm4_perf_counter_gfx12_events)},
+};
+
+static const iree_hal_amd_gpu_pm4_perf_counter_gap_t
+    iree_hal_amd_gpu_pm4_perf_counter_gaps[] = {
+        {9, UINT32_MAX,
+         "GFX9 (CDNA) has no SQG block, numbers its SQ events differently on "
+         "gfx908, gfx90a and gfx940, and needs the RLC perfmon clock held; "
+         "the values are in aqlprofile pmc_builder.h (GFXIP_LEVEL == 9) and "
+         "rocprofiler-sdk basic_counters.xml"},
+        {10, UINT32_MAX,
+         "GFX10 has no SQG block and numbers its SQ events differently "
+         "(navi10_enum.h); the sequence was not derived for it"},
+        {11, 7, "no register database or event table for GFX11.7 is available"},
+        {12, 5,
+         "GFX12.5 has its own register set (gc_12_1), a second perfmon "
+         "control (AID_PERFMON_CNTL) and per-XCC selection that the sequences "
+         "do not model; see aqlprofile gfx12_primitives.h "
+         "(GFX12_VARIANT_1250)"},
 };
 
 iree_status_t iree_hal_amd_gpu_pm4_perf_counter_profile_initialize(
     iree_hal_amd_gpu_gfxip_version_t gfxip,
     iree_hal_amd_gpu_pm4_perf_counter_profile_t* out_profile) {
   *out_profile = (iree_hal_amd_gpu_pm4_perf_counter_profile_t){0};
-  // Qualified on GC 11.5.1 only: addresses, event numbers and the meaning of
-  // the block filters were measured there and nowhere else.
-  if (gfxip.major != 11 || gfxip.minor != 5) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "PM4 performance counter registers are unavailable for gfx%u.%u.%u",
-        gfxip.major, gfxip.minor, gfxip.stepping);
+  for (uint32_t i = 0;
+       i < IREE_ARRAYSIZE(iree_hal_amd_gpu_pm4_perf_counter_targets); ++i) {
+    const iree_hal_amd_gpu_pm4_perf_counter_target_t* target =
+        &iree_hal_amd_gpu_pm4_perf_counter_targets[i];
+    if (target->major != gfxip.major || target->minor != gfxip.minor) {
+      continue;
+    }
+    *out_profile = *target->registers;
+    out_profile->events = target->events;
+    out_profile->event_count = target->event_count;
+    out_profile->verified =
+        gfxip.stepping < 32 &&
+        (target->verified_steppings & (1u << gfxip.stepping)) != 0;
+    return iree_ok_status();
   }
-  *out_profile = (iree_hal_amd_gpu_pm4_perf_counter_profile_t){
-      .graphics_index = 0x30800,
-      .graphics_index_broadcast = UINT32_C(0xe0000000),
-      .control = 0x36020,
-      // Disable and clear; count; count and latch a sample; stop.
-      .control_clear = 0,
-      .control_start = 1,
-      .control_sample = 0x401,
-      .control_stop = 2,
-      .instance_block_control = 0x36780,
-      .engine_block_control = 0x36760,
-      // PS, GS, HS and CS stage enables.
-      .block_control_stages = 0x55,
-      .instance_block_filter = 0x36788,
-      .engine_block_filter = 0x36768,
-      // VMIDs 0-15 enabled, FORCE_EN (bit 0) clear.
-      .block_filter_default = 0x1fffe,
-      .engine_select = 0x36740,
-      .instance_select = 0x36700,
-      .select_default = 0x1ff,
-      .engine_result = 0x34790,
-      .instance_result = 0x34700,
-      .compute_enable = 0x2c00 + ((0xb82c - 0xb000) >> 2),
-      .events = iree_hal_amd_gpu_pm4_perf_counter_gfx115_events,
-      .event_count =
-          IREE_ARRAYSIZE(iree_hal_amd_gpu_pm4_perf_counter_gfx115_events),
-  };
-  return iree_ok_status();
+  const char* reason = "no register table has been written for this generation";
+  for (uint32_t i = 0;
+       i < IREE_ARRAYSIZE(iree_hal_amd_gpu_pm4_perf_counter_gaps); ++i) {
+    const iree_hal_amd_gpu_pm4_perf_counter_gap_t* gap =
+        &iree_hal_amd_gpu_pm4_perf_counter_gaps[i];
+    if (gap->major == gfxip.major &&
+        (gap->minor == UINT32_MAX || gap->minor == gfxip.minor)) {
+      reason = gap->reason;
+      break;
+    }
+  }
+  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
+                          "no PM4 performance counter table for gfx%u.%u.%u: "
+                          "%s",
+                          gfxip.major, gfxip.minor, gfxip.stepping, reason);
 }
 
 const iree_hal_amd_gpu_pm4_perf_counter_event_t*

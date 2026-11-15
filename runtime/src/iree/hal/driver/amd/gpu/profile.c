@@ -7,6 +7,7 @@
 #include "iree/hal/driver/amd/gpu/profile.h"
 
 #include <inttypes.h>
+#include <stdio.h>
 
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/utils/profile_event_ring.h"
@@ -973,6 +974,10 @@ static iree_status_t iree_hal_amd_gpu_profile_flush_trace(
         capture.flags |=
             IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_UNCOLLECTED;
       }
+      if (!config->profile->verified) {
+        capture.flags |=
+            IREE_HAL_PROFILE_EXECUTABLE_TRACE_CAPTURE_FLAG_UNVERIFIED_TARGET;
+      }
       metadata.content_type =
           IREE_HAL_PROFILE_CONTENT_TYPE_EXECUTABLE_TRACE_CAPTURES;
       const iree_const_byte_span_t span =
@@ -1136,6 +1141,9 @@ static iree_status_t iree_hal_amd_gpu_profile_flush_counter_capture(
                   IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_PROCESS_SCOPE;
   if (storage->stable_power_state) {
     capture.flags |= IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_STABLE_POWER_STATE;
+  }
+  if (!storage->config.profile->verified) {
+    capture.flags |= IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_UNVERIFIED_TARGET;
   }
   if (iree_atomic_load(&profile->counters.limit_reached,
                        iree_memory_order_relaxed)) {
@@ -1413,6 +1421,31 @@ iree_status_t iree_hal_amd_gpu_profile_set_counter_storage(
     profile->counters.storage = NULL;
   }
   return status;
+}
+
+bool iree_hal_amd_gpu_profile_warn_unverified(
+    const iree_hal_amd_gpu_profile_t* profile,
+    iree_hal_amd_gpu_gfxip_version_t gfxip) {
+  if (!profile) {
+    return false;
+  }
+  const bool traces = profile->trace.storage &&
+                      !profile->trace.storage->config.profile->verified;
+  const bool counters = profile->counters.storage &&
+                        !profile->counters.storage->config.profile->verified;
+  if (!traces && !counters) {
+    return false;
+  }
+  fprintf(stderr,
+          "iree-hal-amdgpu: warning: %s%s%s on gfx%u.%u.%u use UNVERIFIED "
+          "register tables: they were transcribed from reference register "
+          "databases and have never run on this GPU model (only gfx11.5.1 was "
+          "tested). Results may be wrong or missing; capture records carry the "
+          "unverified-target flag.\n",
+          traces ? "executable traces" : "", traces && counters ? " and " : "",
+          counters ? "counter samples" : "", gfxip.major, gfxip.minor,
+          gfxip.stepping);
+  return true;
 }
 
 uint32_t iree_hal_amd_gpu_profile_counter_sample_byte_length(

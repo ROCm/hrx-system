@@ -224,6 +224,15 @@ iree_status_t iree_hal_amd_gpu_profile_set_counter_storage(
 bool iree_hal_amd_gpu_profile_counts_dispatches(
     const iree_hal_amd_gpu_profile_t* profile);
 
+// Writes one warning line to stderr when an installed trace or counter
+// register table was never run on |gfxip|, naming the affected families, and
+// returns true. Verified tables write nothing. Called once, after the storages
+// are installed; the capture records of such a session carry the
+// unverified-target flag whether or not anyone reads stderr.
+bool iree_hal_amd_gpu_profile_warn_unverified(
+    const iree_hal_amd_gpu_profile_t* profile,
+    iree_hal_amd_gpu_gfxip_version_t gfxip);
+
 // Bytes a directly published dispatch reserves after its timestamp pair: two
 // raw counter samples, or zero when the session samples no counters.
 uint32_t iree_hal_amd_gpu_profile_counter_sample_byte_length(

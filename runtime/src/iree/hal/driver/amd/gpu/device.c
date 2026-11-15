@@ -1886,6 +1886,26 @@ static iree_status_t iree_hal_amd_gpu_device_import_file(
       device->host_allocator, out_file);
 }
 
+// Rejects a profiling family whose sequences the driver cannot publish on
+// this device's queues. Only the host publishing PM4 on a USER queue is
+// implemented; AQL queues and KERNEL publication are driver gaps on every GPU
+// generation, and the message says so.
+static iree_status_t iree_hal_amd_gpu_device_profile_check_publication(
+    const iree_hal_amd_gpu_device_t* device, const char* family) {
+  const bool aql = device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
+  const bool user = device->queue_options.publication_mode ==
+                    AMDF_QUEUE_PUBLICATION_MODE_USER;
+  if (!aql && user) {
+    return iree_ok_status();
+  }
+  return iree_make_status(
+      IREE_STATUS_UNIMPLEMENTED,
+      "GPU %s are implemented for USER-published PM4 compute queues only; "
+      "this device uses %s queues with %s publication. That is a limit of "
+      "the driver, not of the GPU generation",
+      family, aql ? "AQL" : "PM4", user ? "USER" : "KERNEL");
+}
+
 enum {
   // Per-engine trace buffer when the caller names none. Dense compute fills
   // roughly half a megabyte per engine per millisecond, so this covers tens
@@ -1902,14 +1922,10 @@ enum {
 static iree_status_t iree_hal_amd_gpu_device_trace_prepare(
     iree_hal_amd_gpu_device_t* device,
     const iree_hal_profile_executable_trace_options_t* options) {
-  // Brackets are published by the host on the primary PM4 ring.
-  if (device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL ||
-      device->queue_options.publication_mode !=
-          AMDF_QUEUE_PUBLICATION_MODE_USER) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "GPU executable traces require USER-published PM4 compute queues");
-  }
+  // Brackets are published by the host on the primary PM4 ring. This is what
+  // the driver implements, not what the GPU can do.
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_device_profile_check_publication(
+      device, "executable traces"));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_thread_trace_profile_initialize(
       device->target.version, &device->trace.registers));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_device_perfmon_acquire(device));
@@ -2085,14 +2101,10 @@ static iree_status_t iree_hal_amd_gpu_device_counter_select_name(
 static iree_status_t iree_hal_amd_gpu_device_counter_prepare(
     iree_hal_amd_gpu_device_t* device,
     const iree_hal_device_profiling_options_t* options) {
-  // Samples are published by the host on the primary PM4 ring.
-  if (device->command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL ||
-      device->queue_options.publication_mode !=
-          AMDF_QUEUE_PUBLICATION_MODE_USER) {
-    return iree_make_status(
-        IREE_STATUS_UNIMPLEMENTED,
-        "GPU counter samples require USER-published PM4 compute queues");
-  }
+  // Samples are published by the host on the primary PM4 ring. This is what
+  // the driver implements, not what the GPU can do.
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_device_profile_check_publication(
+      device, "counter samples"));
   if (options->counter_set_count > 1) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                             "GPU counter samples use one counter set");
@@ -2236,8 +2248,9 @@ static iree_status_t iree_hal_amd_gpu_device_profiling_begin(
             device->memory.families[0].queue_family_ordinal, &clock),
         "device_query_queue_clock_info"));
   }
-  // Unsupported targets and queue protocols reject the family before the
-  // sink session starts, like every other unsupported family.
+  // Targets without a register table and unimplemented queue protocols
+  // reject the family before the sink session starts, like every other
+  // unsupported family.
   if (iree_hal_device_profiling_options_requests_executable_traces(options)) {
     iree_status_t trace_status = iree_hal_amd_gpu_device_trace_prepare(
         device, &options->executable_traces);
@@ -2276,6 +2289,8 @@ static iree_status_t iree_hal_amd_gpu_device_profiling_begin(
   if (iree_status_is_ok(status)) {
     device->profile = profile;
     device->memory.mappings.profile = profile;
+    // Loud once per session; the capture records repeat it per capture.
+    iree_hal_amd_gpu_profile_warn_unverified(profile, device->target.version);
   } else {
     // Membership has already cleared all queue borrows after a failed begin.
     status = iree_status_join(status, iree_hal_amd_gpu_profile_end(profile));
