@@ -36,8 +36,9 @@ uint8_t loom_aie2p_native_delivery_packet(
   return UINT8_MAX;
 }
 
-uint8_t loom_aie2p_native_collective_packet(uint32_t* occupied) {
-  const uint32_t available = ~*occupied;
+uint8_t loom_aie2p_native_collective_packet(uint32_t* occupied,
+                                            uint32_t shared) {
+  const uint32_t available = ~(*occupied | shared);
   if (!available) {
     return UINT8_MAX;
   }

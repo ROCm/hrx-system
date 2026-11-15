@@ -141,7 +141,7 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
                                     loom_xdna_tile_coordinate_t destination,
                                     loom_xdna_stream_port_t destination_port,
                                     uint8_t packet,
-                                    loom_aie2p_native_delivery_t* delivery) {
+                                    loom_aie2p_array_route_sharing_t* sharing) {
   context->control_connections[context->control_connection_count++] =
       (loom_aie2p_native_control_connection_t){
           .source = {source, source_port, 0},
@@ -176,18 +176,18 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
     }
   }
   const bool routed =
-      delivery ? loom_aie2p_array_route_control(&context->routing, index,
-                                                &control->tree, source,
-                                                destination, &delivery->sharing)
-               : loom_aie2p_array_route_stream(
-                     &context->routing, index, &control->tree, source,
-                     source_port, 0, destination, destination_port, 0, true);
+      sharing ? loom_aie2p_array_route_control(&context->routing, index,
+                                               &control->tree, source,
+                                               destination, sharing)
+              : loom_aie2p_array_route_stream(
+                    &context->routing, index, &control->tree, source,
+                    source_port, 0, destination, destination_port, 0, true);
   if (!routed) {
     return false;
   }
-  if (delivery && delivery->sharing.used) {
-    // A private endpoint still needs packet filtering when any path to it
-    // borrows payload lanes. Retain that exclusion for the entire source tree.
+  if (sharing && sharing->used) {
+    // Shared carriers merge independently addressed packets, so even a single
+    // endpoint needs filtering. Retain that exclusion for the source tree.
     control->destination = UINT32_MAX;
   }
   loom_aie2p_native_route_label(
@@ -199,17 +199,19 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
   if (source_port == LOOM_XDNA_STREAM_PORT_CORE &&
       destination_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL &&
       source.column == destination.column && source.row > memory_row &&
-      destination.row <= memory_row && (!delivery || !delivery->sharing.used)) {
+      destination.row <= memory_row && (!sharing || !sharing->used)) {
     loom_aie2p_native_control_path_t* path =
         &context->control_paths[source.column];
-    // The highest source provides the longest common downward suffix, so
-    // later senders can converge before the column's busiest lower switch.
-    if (!path->count ||
-        source.row > (path->source / 2) % context->family->row_count) {
+    // Before sharing begins, retain the highest source's downward suffix.
+    // Once senders join its domain, that carrier identity stays fixed.
+    if (!path->sharing.domain &&
+        (!path->count ||
+         source.row > (path->source / 2) % context->family->row_count)) {
       *path = (loom_aie2p_native_control_path_t){
           .first = first,
           .count = context->routing.route_count - first,
-          .source = source_index};
+          .source = source_index,
+          .packets = path->packets};
     }
   }
   return true;
@@ -221,7 +223,8 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
 static bool loom_aie2p_native_select_packet_route(
     loom_aie2p_native_context_t* context, iree_host_size_t worker_index,
     const loom_aie2p_native_tile_t* tile, loom_xdna_stream_port_t port,
-    uint32_t* next_source, uint8_t* out_packet) {
+    loom_aie2p_native_control_path_t* commands, uint32_t* next_source,
+    uint8_t* out_packet) {
   loom_aie2p_native_worker_t* owner =
       &context->workers[context->execution
                             .workers[context->core_engines[worker_index]]];
@@ -229,17 +232,27 @@ static bool loom_aie2p_native_select_packet_route(
     return false;
   }
   loom_aie2p_native_delivery_t* delivery =
-      loom_aie2p_native_route_delivery(context, tile->coordinate);
+      commands ? NULL
+               : loom_aie2p_native_route_delivery(context, tile->coordinate);
+  loom_aie2p_native_control_path_t* packet_scope =
+      &context->control_paths[context->workers[worker_index]
+                                  .tile->coordinate.column];
   const uint8_t packet = loom_aie2p_native_delivery_packet(
-      delivery, owner->packet_mask, tile, port, 0);
+      delivery, owner->packet_mask | packet_scope->packets, tile, port, 0);
   if (packet == UINT8_MAX ||
       !loom_aie2p_native_packet_route(
           context, next_source, context->workers[worker_index].tile->coordinate,
           LOOM_XDNA_STREAM_PORT_CORE, tile->coordinate, port, packet,
-          delivery)) {
+          commands   ? &commands->sharing
+          : delivery ? &delivery->sharing
+                     : NULL)) {
     return false;
   }
   owner->packet_mask |= UINT32_C(1) << packet;
+  packet_scope->packets |= UINT32_C(1) << packet;
+  if (commands && commands->sharing.used) {
+    context->control_sources[commands->source].destination = UINT32_MAX;
+  }
   if (delivery && delivery->sharing.used) {
     owner->packet_mask |= UINT32_C(1) << LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID;
   }
@@ -269,9 +282,29 @@ iree_status_t loom_aie2p_native_select_control_route(
   }
   const iree_host_size_t index = tile - context->tiles;
   if (owner->control_packets[index] == UINT8_MAX) {
+    loom_aie2p_native_control_path_t* commands = NULL;
+    const loom_xdna_tile_coordinate_t source = worker->tile->coordinate;
+    const uint16_t memory_row = loom_xdna_array_tile_kind_facts(
+                                    context->family, LOOM_XDNA_TILE_KIND_MEMORY)
+                                    ->first_row;
+    if (source.column == tile->coordinate.column && source.row > memory_row &&
+        tile->coordinate.row <= memory_row) {
+      loom_aie2p_native_control_path_t* path =
+          &context->control_paths[source.column];
+      if (path->count) {
+        if (!path->sharing.domain) {
+          IREE_RETURN_IF_ERROR(loom_aie2p_array_route_sharing_initialize(
+              &context->routing, path->first, path->count,
+              (loom_xdna_tile_coordinate_t){source.column, memory_row},
+              LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND, &path->sharing));
+        }
+        path->packets |= context->control_sources[path->source].packet_mask;
+        commands = path;
+      }
+    }
     if (!loom_aie2p_native_select_packet_route(
             context, worker_index, tile, LOOM_XDNA_STREAM_PORT_TILE_CONTROL,
-            next_source, &owner->control_packets[index])) {
+            commands, next_source, &owner->control_packets[index])) {
       return loom_aie2p_native_reject(
           context, realization->workers[worker_index].source->declaration,
           IREE_SV("available worker control-packet routes"));

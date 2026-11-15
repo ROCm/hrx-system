@@ -54,11 +54,16 @@ iree_status_t loom_aie2p_code_transport_initialize(
     }
     loom_aie2p_code_transport_sender_t* sender =
         &out_transport->senders[column];
-    IREE_RETURN_IF_ERROR(loom_aie2p_array_route_sharing_initialize(
-        &plan->routing, path->first, path->count,
-        (loom_xdna_tile_coordinate_t){column, memory_row},
-        LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND, &sender->commands));
-    sender->command_packets = plan->control_sources[path->source].packet_mask;
+    if (path->sharing.domain) {
+      sender->commands = path->sharing;
+    } else {
+      IREE_RETURN_IF_ERROR(loom_aie2p_array_route_sharing_initialize(
+          &plan->routing, path->first, path->count,
+          (loom_xdna_tile_coordinate_t){column, memory_row},
+          LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND, &sender->commands));
+    }
+    sender->command_packets =
+        path->packets | plan->control_sources[path->source].packet_mask;
   }
   return iree_ok_status();
 }

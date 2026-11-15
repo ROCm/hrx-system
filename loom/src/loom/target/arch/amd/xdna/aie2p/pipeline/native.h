@@ -1025,12 +1025,14 @@ void loom_aie2p_native_route_label(loom_aie2p_native_context_t* context,
                                    uint32_t control_source);
 
 // Adds a packet route between admitted endpoints and labels its new edges.
-bool loom_aie2p_native_packet_route(
-    loom_aie2p_native_context_t* context, uint32_t* next_source,
-    loom_xdna_tile_coordinate_t source, loom_xdna_stream_port_t source_port,
-    loom_xdna_tile_coordinate_t destination,
-    loom_xdna_stream_port_t destination_port, uint8_t packet,
-    struct loom_aie2p_native_delivery_t* delivery);
+bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
+                                    uint32_t* next_source,
+                                    loom_xdna_tile_coordinate_t source,
+                                    loom_xdna_stream_port_t source_port,
+                                    loom_xdna_tile_coordinate_t destination,
+                                    loom_xdna_stream_port_t destination_port,
+                                    uint8_t packet,
+                                    loom_aie2p_array_route_sharing_t* sharing);
 
 // Selects and retains a regular ingress stream's external descriptor geometry.
 // Stable-source and exact consumer-completion admission precede this query.

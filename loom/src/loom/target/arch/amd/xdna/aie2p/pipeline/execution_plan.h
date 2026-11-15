@@ -36,6 +36,11 @@ typedef struct loom_aie2p_native_control_path_t {
   iree_host_size_t count;
   // Original control source owning the path's packet namespace.
   uint32_t source;
+  // Complete register-command carrier shared by admitted core senders.
+  loom_aie2p_array_route_sharing_t sharing;
+  // Outgoing core packet identities reserved across the column, including
+  // collective branches that may traverse a shared command prefix.
+  uint32_t packets;
 } loom_aie2p_native_control_path_t;
 
 // One physical route edge carrying the packet identity used during admission.

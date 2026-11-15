@@ -190,6 +190,24 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
     context_.routes = routes_.data();
     connections_.resize(128);
     context_.control_connections = connections_.data();
+    context_.workers = workers_.data();
+    context_.core_engines = engines_.data();
+    context_.execution.workers = engines_.data();
+    realization_.workers = worker_sources_.data();
+    for (size_t i = 0; i < workers_.size(); ++i) {
+      engines_[i] = i;
+      workers_[i].tile = &tiles_[i + 2];
+      worker_sources_[i].source = &strand_sources_[i];
+    }
+    next_controllers_.resize(context_.family->column_count, 1);
+  }
+
+  void SelectCommand(size_t worker, uint16_t destination_row, bool reply) {
+    bool valid = false;
+    IREE_ASSERT_OK(loom_aie2p_native_select_control_route(
+        &context_, &realization_, worker, &tiles_[destination_row], reply,
+        &next_source_, next_controllers_.data(), &valid));
+    ASSERT_TRUE(valid);
   }
 
   void AddControl(loom_xdna_tile_coordinate_t source,
@@ -199,7 +217,7 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
                   loom_aie2p_native_delivery_t* delivery = nullptr) {
     ASSERT_TRUE(loom_aie2p_native_packet_route(
         &context_, &next_source_, source, source_port, destination,
-        destination_port, packet, delivery));
+        destination_port, packet, delivery ? &delivery->sharing : nullptr));
   }
 
   void Build(bool expected_valid, size_t expected_switches = 1) {
@@ -282,6 +300,18 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
   std::vector<loom_aie2p_native_control_path_t> control_paths_;
   // Eligible payload paths indexed by destination tile.
   std::vector<loom_aie2p_native_delivery_t*> deliveries_;
+  // Four independently progressing native cores in column zero.
+  std::array<loom_aie2p_native_worker_t, 4> workers_ = {};
+  // One root representative per core, without phase aliases in this fixture.
+  std::array<iree_host_size_t, 4> engines_ = {};
+  // Authored workers supplying the native admission diagnostic boundary.
+  std::array<loom_pipeline_worker_t, 4> worker_sources_ = {};
+  // Source declarations remain empty because successful routing needs no IR.
+  std::array<loom_pipeline_resource_strand_t, 4> strand_sources_ = {};
+  // Bound worker inventory passed through production control admission.
+  loom_pipeline_realization_t realization_ = {};
+  // Return identities are independent of outgoing command identities.
+  std::vector<uint8_t> next_controllers_;
   // Canonical source identity for each route requested by this fixture.
   uint32_t next_source_ = 0;
 };
@@ -504,6 +534,33 @@ TEST_F(Aie2pControlSwitchTest, AvailableLaneKeepsControlPrivateBesidePayload) {
                      LOOM_XDNA_STREAM_PORT_TILE_CONTROL) &
                 (1u << 30),
             0u);
+}
+
+TEST_F(Aie2pControlSwitchTest, IndependentCommandsShareTheRemainingColumnLane) {
+  loom_aie2p_native_delivery_t delivery = {};
+  ASSERT_NO_FATAL_FAILURE(AddPayloads(3, &delivery));
+  // The bottom core consumes the fourth southbound lane. The top core can
+  // converge with its complete hardware commands without borrowing payload.
+  for (size_t worker : {0, 3}) {
+    ASSERT_NO_FATAL_FAILURE(SelectCommand(worker, 1, true));
+    ASSERT_NO_FATAL_FAILURE(SelectCommand(worker, 0, true));
+  }
+  EXPECT_TRUE(control_paths_[0].sharing.used);
+  EXPECT_FALSE(delivery.sharing.used);
+  EXPECT_EQ(workers_[0].packet_mask & workers_[3].packet_mask, 0u);
+  EXPECT_EQ(control_paths_[0].packets,
+            workers_[0].packet_mask | workers_[3].packet_mask);
+  ASSERT_NO_FATAL_FAILURE(Build(true, 6));
+}
+
+TEST_F(Aie2pControlSwitchTest,
+       CommandsConvergeBeforeColumnCapacityIsExhausted) {
+  for (size_t worker : {0, 3}) {
+    ASSERT_NO_FATAL_FAILURE(SelectCommand(worker, 1, false));
+  }
+  EXPECT_NE(control_paths_[0].sharing.domain, 0u);
+  EXPECT_TRUE(control_paths_[0].sharing.used);
+  ASSERT_NO_FATAL_FAILURE(Build(true, 5));
 }
 
 TEST_F(Aie2pControlSwitchTest, BorrowedPayloadLaneKeepsControlPacketFiltering) {

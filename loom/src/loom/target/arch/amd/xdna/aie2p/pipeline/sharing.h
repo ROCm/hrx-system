@@ -62,10 +62,13 @@ uint8_t loom_aie2p_native_delivery_packet(
     const loom_aie2p_native_tile_t* tile, loom_xdna_stream_port_t port,
     uint8_t channel);
 
-// Reserves a scalar collective ID in the core's outgoing occupied set. Selects
-// high IDs first; control routing reserves any shared payload identity there.
-// Returns UINT8_MAX without changing the set when no identity remains.
-uint8_t loom_aie2p_native_collective_packet(uint32_t* occupied);
+// Reserves a scalar collective ID in the core's outgoing occupied set,
+// excluding identities already carried by another source in its shared command
+// column. Selects high IDs first; control routing reserves shared payload
+// identities. Returns UINT8_MAX without changing the set when no identity
+// remains.
+uint8_t loom_aie2p_native_collective_packet(uint32_t* occupied,
+                                            uint32_t shared);
 
 // Selects at most one eligible payload path per control destination from the
 // retained physical distributions and exact receiver credit returns.
