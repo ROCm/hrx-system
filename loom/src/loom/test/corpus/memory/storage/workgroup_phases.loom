@@ -1,0 +1,89 @@
+// Each iteration exchanges data through two fresh scratch allocations. Both
+// phases cross subgroup boundaries and retire readers before reuse. The two
+// workgroups and runtime iteration count exercise independent dynamic instances.
+kernel.def @workgroup_repeated_phases() {
+  %unit = index.constant 1 : index
+  %groups = index.constant 2 : index
+  %width = index.constant 128 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %count: index) {
+  %iterations = index.assume %count [range(%count, 0, 8)] : index
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %half = index.constant 64 : index
+  %quarter = index.constant 32 : index
+  %first_bytes = index.constant 512 : offset
+  %second_bytes = index.constant 1024 : offset
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %first_peer = index.xori %lane, %half : index
+  %second_peer = index.xori %lane, %quarter : index
+  %source = buffer.view %input[%base] : buffer -> view<2x8x128xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<2x8x128x2xi32>
+  scf.for %iteration = [%begin to %iterations step %step] {
+    %first = buffer.alloca<workgroup> align(16) %first_bytes : buffer
+    %first_view = buffer.view %first[%base] : buffer -> view<128xi32>
+    %value = view.load %source[%group, %iteration, %lane] : view<2x8x128xi32> -> i32
+    view.store %value, %first_view[%lane] : i32, view<128xi32>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %received = view.load %first_view[%first_peer] : view<128xi32> -> i32
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %second = buffer.alloca<workgroup> align(16) %second_bytes : buffer
+    %second_view = buffer.view %second[%base] : buffer -> view<128x2xi32>
+    %sum = scalar.addi %received, %value : i32
+    %bits = scalar.xori %received, %value : i32
+    view.store %sum, %second_view[%lane, 0] : i32, view<128x2xi32>
+    view.store %bits, %second_view[%lane, 1] : i32, view<128x2xi32>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %result_sum = view.load %second_view[%second_peer, 0] : view<128x2xi32> -> i32
+    %result_bits = view.load %second_view[%second_peer, 1] : view<128x2xi32> -> i32
+    view.store %result_sum, %destination[%group, %iteration, %lane, 0] : i32, view<2x8x128x2xi32>
+    view.store %result_bits, %destination[%group, %iteration, %lane, 1] : i32, view<2x8x128x2xi32>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  }
+  kernel.return
+}
+
+// Gather the original two input words directly, without allocations or barriers.
+func.def @workgroup_repeated_phases_oracle(%input: buffer, %output: buffer, %count: index) {
+  %iterations = index.assume %count [range(%count, 0, 8)] : index
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %groups = index.constant 2 : index
+  %width = index.constant 128 : index
+  %quarter = index.constant 32 : index
+  %both = index.constant 96 : index
+  %source = buffer.view %input[%base] : buffer -> view<2x8x128xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<2x8x128x2xi32>
+  scf.for %group = [%begin to %groups step %step] {
+    scf.for %iteration = [%begin to %iterations step %step] {
+      scf.for %lane = [%begin to %width step %step] {
+        %first = index.xori %lane, %both : index
+        %second = index.xori %lane, %quarter : index
+        %lhs = view.load %source[%group, %iteration, %first] : view<2x8x128xi32> -> i32
+        %rhs = view.load %source[%group, %iteration, %second] : view<2x8x128xi32> -> i32
+        %sum = scalar.addi %lhs, %rhs : i32
+        %bits = scalar.xori %lhs, %rhs : i32
+        view.store %sum, %destination[%group, %iteration, %lane, 0] : i32, view<2x8x128x2xi32>
+        view.store %bits, %destination[%group, %iteration, %lane, 1] : i32, view<2x8x128x2xi32>
+      }
+    }
+  }
+  func.return
+}
+
+check.scenario @workgroup_repeated_phases_values {
+  check.trial[9](%iterations: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%iterations] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<2x8x128xi32>
+    %storage = check.generate.fill value(-123) : tensor<4104xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<4104xi32> -> tensor<2x8x128x2xi32>
+    check.compare<@workgroup_repeated_phases, @workgroup_repeated_phases_oracle>(%input, %output, %iterations) : (tensor<2x8x128xi32>, tensor<2x8x128x2xi32>, index) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<2x8x128xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<4104xi32>
+    }
+  }
+  check.return
+}

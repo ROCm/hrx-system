@@ -838,3 +838,68 @@ check.scenario @shared_snapshot_window_values {
   }
   check.return
 }
+
+// A write after capture keeps the original planes live in registers. The same
+// byte payload tests packed, half, word, and double-width tail coordinates.
+func.def @large_captured_tails(%trial: index, %input: buffer, %output: buffer) {
+  %plane = index.assume %trial [range(%trial, 0, 1)] : index
+  %base = index.constant 0 : offset
+  %bytes = buffer.view %input[%base] : buffer -> view<2x5x16xi8>
+  %halves = buffer.view %input[%base] : buffer -> view<2x5x8xf16>
+  %words = buffer.view %input[%base] : buffer -> view<2x5x4xf32>
+  %doubles = buffer.view %input[%base] : buffer -> view<2x5x2xf64>
+  %destination = buffer.view %output[%base] : buffer -> view<320xi8>
+  %byte_values = vector.load %bytes[0, 0, 0] : view<2x5x16xi8> -> vector<2x5x16xi8>
+  %half_values = vector.load %halves[0, 0, 0] : view<2x5x8xf16> -> vector<2x5x8xf16>
+  %word_values = vector.load %words[0, 0, 0] : view<2x5x4xf32> -> vector<2x5x4xf32>
+  %double_values = vector.load %doubles[0, 0, 0] : view<2x5x2xf64> -> vector<2x5x2xf64>
+  %changed = scalar.constant 91 : i8
+  view.store %changed, %bytes[0, 0, 0] : i8, view<2x5x16xi8>
+  %byte_tail = vector.extract %byte_values[%plane] : vector<2x5x16xi8> -> vector<5x16xi8>
+  %half_tail = vector.extract %half_values[%plane] : vector<2x5x8xf16> -> vector<5x8xf16>
+  %word_tail = vector.extract %word_values[%plane] : vector<2x5x4xf32> -> vector<5x4xf32>
+  %double_tail = vector.extract %double_values[%plane] : vector<2x5x2xf64> -> vector<5x2xf64>
+  %byte_bits = vector.bitcast %byte_tail : vector<5x16xi8> to vector<80xi8>
+  %half_bits = vector.bitcast %half_tail : vector<5x8xf16> to vector<80xi8>
+  %word_bits = vector.bitcast %word_tail : vector<5x4xf32> to vector<80xi8>
+  %double_bits = vector.bitcast %double_tail : vector<5x2xf64> to vector<80xi8>
+  vector.store %byte_bits, %destination[0] : vector<80xi8>, view<320xi8>
+  vector.store %half_bits, %destination[80] : vector<80xi8>, view<320xi8>
+  vector.store %word_bits, %destination[160] : vector<80xi8>, view<320xi8>
+  vector.store %double_bits, %destination[240] : vector<80xi8>, view<320xi8>
+  func.return
+}
+
+func.def @large_captured_tails_oracle(%trial: index, %input: buffer, %output: buffer) {
+  %plane = index.assume %trial [range(%trial, 0, 1)] : index
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 320 : index
+  %step = index.constant 1 : index
+  %plane_bytes = index.constant 80 : index
+  %plane_offset = index.mul %plane, %plane_bytes : index
+  %source = buffer.view %input[%base] : buffer -> view<160xi8>
+  %destination = buffer.view %output[%base] : buffer -> view<320xi8>
+  scf.for %position = [%begin to %end step %step] {
+    %relative = index.rem %position, %plane_bytes : index
+    %source_position = index.add %plane_offset, %relative : index
+    %value = view.load %source[%source_position] : view<160xi8> -> i8
+    view.store %value, %destination[%position] : i8, view<320xi8>
+  }
+  %changed = scalar.constant 91 : i8
+  view.store %changed, %source[0] : i8, view<160xi8>
+  func.return
+}
+
+check.scenario @large_captured_tail_values {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(1) : tensor<160xi8>
+    %storage = check.generate.fill value(37) : tensor<336xi8>
+    %output = check.tensor.view %storage offset(8) : tensor<336xi8> -> tensor<320xi8>
+    check.compare<@large_captured_tails, @large_captured_tails_oracle>(%trial, %input, %output) : (index, tensor<160xi8>, tensor<320xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<160xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<336xi8>
+    }
+  }
+  check.return
+}

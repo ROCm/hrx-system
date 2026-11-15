@@ -76,6 +76,7 @@ MEMORY_CORPUS = loom_corpus_manifest(
         "storage/stability/switch.loom",
         "storage/word.loom",
         "storage/workgroup.loom",
+        "storage/workgroup_phases.loom",
         "view/access.loom",
         "view/bitcast.loom",
         "view/borrowed_transport.loom",
