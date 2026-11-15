@@ -47,6 +47,9 @@ class GpuNativeProfileTestBase : public GpuNativeTest {
   // instead of failing it.
   virtual bool SkipsUnimplementedFamilies() const { return false; }
 
+  // Primary ring of each queue. Small by default, so capacity paths run.
+  virtual uint32_t RingByteLength() const { return 4096; }
+
   void SetUp() override {
     GpuNativeTest::SetUp();
     if (HasFatalFailure() || IsSkipped()) {
@@ -54,7 +57,7 @@ class GpuNativeProfileTestBase : public GpuNativeTest {
     }
     options_.queue.retirement_capacity = 4;
     options_.queue.argument_capacity = ArgumentCapacity();
-    options_.queue.ring_byte_length = 4096;
+    options_.queue.ring_byte_length = RingByteLength();
     Create();
     if (HasFatalFailure()) {
       return;
@@ -1957,6 +1960,273 @@ TEST_F(GpuNativeTraceProfileTest, RecordedExecutionIsBracketedWhole) {
               sink_.dispatch_events[0].submission_id);
     EXPECT_EQ(trace.record.command_index, UINT32_MAX);
   }
+}
+
+// Hardware counters on the native PM4 queue. Needs a GPU generation with a
+// qualified register table; every other device skips.
+class GpuNativeCounterProfileTest : public GpuNativeProfileTestBase {
+ protected:
+  amdf_queue_command_type_t command_type() const override {
+    return AMDF_QUEUE_COMMAND_TYPE_GPU_PM4;
+  }
+
+  iree_hal_device_profiling_data_families_t Families() const override {
+    return IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
+           IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS |
+           IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA |
+           IREE_HAL_DEVICE_PROFILING_DATA_COUNTER_SAMPLES;
+  }
+
+  void ConfigureProfiling(
+      iree_hal_device_profiling_options_t* options) const override {
+    // The default engine set plus the per-workgroup-processor set, bounded
+    // below what the tests dispatch.
+    options->counter_set_count = 1;
+    options->counter_sets = &selection_;
+    options->counter_samples.max_sample_count = 3;
+  }
+
+  bool SkipsUnimplementedFamilies() const override { return true; }
+
+  // A direct dispatch carries its start, two sample and stop sequences in the
+  // ring itself: about 1,500 DWORDs with both sets.
+  uint32_t RingByteLength() const override { return 64 * 1024; }
+
+  // Sum of a named counter's values in one sample.
+  uint64_t Value(const iree::hal::cts::TestProfileSink::CounterSample& sample,
+                 const char* name) {
+    for (const auto& counter : sink_.counters) {
+      if (counter.name != name) {
+        continue;
+      }
+      uint64_t sum = 0;
+      for (uint32_t i = 0; i < counter.record.sample_value_count; ++i) {
+        sum += sample.values[counter.record.sample_value_offset + i];
+      }
+      return sum;
+    }
+    ADD_FAILURE() << "no counter named " << name;
+    return 0;
+  }
+
+  // Every sample counts exactly one 32-workitem workgroup of the test kernel:
+  // one wave, whatever its lane width.
+  void ExpectOneWorkgroupPerSample(size_t sample_count) {
+    ASSERT_EQ(sink_.counters.size(), 9u);
+    ASSERT_EQ(sink_.counter_samples.size(), sample_count);
+    for (const auto& sample : sink_.counter_samples) {
+      EXPECT_EQ(sample.record.scope,
+                IREE_HAL_PROFILE_COUNTER_SAMPLE_SCOPE_DISPATCH);
+      EXPECT_TRUE(sample.record.flags &
+                  IREE_HAL_PROFILE_COUNTER_SAMPLE_FLAG_DISPATCH_EVENT);
+      EXPECT_EQ(Value(sample, "SQG_WAVES"), 1u);
+      EXPECT_EQ(Value(sample, "SQG_WAVES_32") + Value(sample, "SQG_WAVES_64"),
+                1u);
+      EXPECT_EQ(Value(sample, "SQG_ITEMS"), 32u);
+      EXPECT_GT(Value(sample, "SQG_BUSY_CYCLES"), 0u);
+      // The per-workgroup-processor counters agree with the engine ones.
+      EXPECT_EQ(Value(sample, "SQ_WAVES"), 1u);
+      EXPECT_GT(Value(sample, "SQ_INSTS_ALL"), 0u);
+      EXPECT_EQ(
+          Value(sample, "SQ_INSTS_ALL") >=
+              Value(sample, "SQ_INSTS_VALU") + Value(sample, "SQ_INSTS_SALU"),
+          true);
+      const auto event = std::find_if(
+          sink_.dispatch_events.begin(), sink_.dispatch_events.end(),
+          [&](const auto& candidate) {
+            return candidate.event_id == sample.record.dispatch_event_id;
+          });
+      ASSERT_NE(event, sink_.dispatch_events.end());
+      EXPECT_EQ(sample.record.start_tick, event->start_tick);
+      EXPECT_EQ(sample.record.end_tick, event->end_tick);
+    }
+    ASSERT_FALSE(sink_.counter_captures.empty());
+    const auto& capture = sink_.counter_captures.back();
+    EXPECT_TRUE(capture.flags &
+                IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_EXCLUSIVE_WINDOW);
+    EXPECT_TRUE(capture.flags &
+                IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_PROCESS_SCOPE);
+    EXPECT_EQ(capture.sample_limit, 3u);
+    EXPECT_EQ(capture.sampled_dispatch_count, sample_count);
+    EXPECT_EQ(capture.invalid_sample_count, 0u);
+    EXPECT_EQ(capture.dropped_sample_count, 0u);
+    // Nobody else was collecting, and each stop restored the defaults the
+    // next start then found.
+    EXPECT_EQ(capture.foreign_state_count, 0u);
+    EXPECT_GT(capture.instance_count, 0u);
+  }
+
+  // Requested names: both named sets.
+  const iree_string_view_t names_[2] = {IREE_SVL("sqg"),
+                                        IREE_SVL("instructions")};
+  const iree_hal_profile_counter_set_selection_t selection_ = {
+      .counter_name_count = 2,
+      .counter_names = names_,
+  };
+};
+
+TEST_F(GpuNativeCounterProfileTest, DirectDispatchesAreSampledUpToTheBound) {
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(4, 4),
+      iree_infinite_timeout(), output.out()));
+  Ref<iree_hal_executable_t> executable;
+  iree_hal_executable_function_t function;
+  ASSERT_NO_FATAL_FAILURE(Load(executable, function));
+  Ref<iree_hal_semaphore_t> done;
+  CreateSemaphore(done.out());
+  auto* timeline = done.get();
+  uint64_t previous = 0, next = 1;
+  uint32_t zero = 0, increment = 1, observed = 0;
+  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {1, &timeline, &next},
+                                     output, 0, 4, &zero, 4, nullptr, 0));
+  auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
+  config.workgroup_size[0] = 32;
+  config.workgroup_size[1] = config.workgroup_size[2] = 1;
+  auto reference = iree_hal_make_buffer_ref(output, 0, 4);
+  // Four dispatches against a bound of three.
+  for (size_t i = 0; i < 4; ++i) {
+    previous = next++;
+    IREE_ASSERT_OK(iree_hal_queue_dispatch(
+        queues_[0], {1, &timeline, &previous}, {1, &timeline, &next},
+        executable, function, config,
+        iree_make_const_byte_span(&increment, sizeof(increment)),
+        {1, &reference}, nullptr, 0));
+  }
+  previous = next++;
+  IREE_ASSERT_OK(iree_hal_queue_download(queues_[0], {1, &timeline, &previous},
+                                         {1, &timeline, &next}, output, 0,
+                                         &observed, sizeof(observed), nullptr));
+  ASSERT_NO_FATAL_FAILURE(Wait(done, next));
+  // Sampling changed nothing the kernels computed.
+  EXPECT_EQ(observed, 4u);
+  executable.reset();
+  ASSERT_NO_FATAL_FAILURE(End());
+  ASSERT_EQ(sink_.dispatch_events.size(), 4u);
+  ASSERT_NO_FATAL_FAILURE(ExpectOneWorkgroupPerSample(3));
+  EXPECT_TRUE(sink_.counter_captures.back().flags &
+              IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_LIMIT_REACHED);
+  EXPECT_EQ(sink_.counter_captures.back().sampled_operation_count, 3u);
+  for (const auto& sample : sink_.counter_samples) {
+    EXPECT_FALSE(sample.record.flags &
+                 IREE_HAL_PROFILE_COUNTER_SAMPLE_FLAG_COMMAND_OPERATION);
+  }
+}
+
+TEST_F(GpuNativeCounterProfileTest, RecordedDispatchesAreSampledOneByOne) {
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(24, 8),
+      iree_infinite_timeout(), output.out()));
+  Ref<iree_hal_executable_t> executable;
+  iree_hal_executable_function_t function;
+  ASSERT_NO_FATAL_FAILURE(Load(executable, function));
+  // Recorded while the session samples counters, so every dispatch carries
+  // its own sample sequences.
+  Ref<iree_hal_command_buffer_t> recording;
+  ASSERT_NO_FATAL_FAILURE(
+      Record(executable, function,
+             IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA, 3,
+             /*timestamps=*/true, 0, recording.out()));
+  Ref<iree_hal_semaphore_t> done;
+  CreateSemaphore(done.out());
+  auto* timeline = done.get();
+  uint64_t value = 1;
+  uint32_t zero = 0;
+  std::array<uint64_t, 3> observed = {};
+  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {1, &timeline, &value},
+                                     output, 0, 24, &zero, 4, nullptr, 0));
+  iree_hal_buffer_binding_t binding = {.buffer = output, .length = 24};
+  // Two executions: the first uses the whole bound, the second runs with its
+  // sample sequences disabled and must compute the same thing.
+  for (size_t i = 0; i < 2; ++i) {
+    uint64_t wait = value++;
+    IREE_ASSERT_OK(iree_hal_queue_execute(queues_[0], {1, &timeline, &wait},
+                                          {1, &timeline, &value}, recording,
+                                          {1, &binding}, 0));
+  }
+  uint64_t wait = value++;
+  IREE_ASSERT_OK(iree_hal_queue_download(
+      queues_[0], {1, &timeline, &wait}, {1, &timeline, &value}, output, 0,
+      observed.data(), sizeof(observed), nullptr));
+  ASSERT_NO_FATAL_FAILURE(Wait(done, value));
+  // Three dispatches adding 1, 2 and 3, twice.
+  EXPECT_EQ(observed[0] & 0xffffffffu, 12u);
+  recording.reset();
+  executable.reset();
+  sink_.expected_dispatch_flags =
+      IREE_HAL_PROFILE_DISPATCH_EVENT_FLAG_COMMAND_BUFFER;
+  sink_.expected_dispatch_command_indices = {2, 4, 6, 2, 4, 6};
+  ASSERT_NO_FATAL_FAILURE(End());
+  ASSERT_EQ(sink_.dispatch_events.size(), 6u);
+  ASSERT_NO_FATAL_FAILURE(ExpectOneWorkgroupPerSample(3));
+  EXPECT_EQ(sink_.counter_captures.back().sampled_operation_count, 1u);
+  EXPECT_EQ(sink_.counter_captures.back().skipped_operation_count, 0u);
+  const std::array<uint32_t, 3> indices = {2, 4, 6};
+  for (size_t i = 0; i < 3; ++i) {
+    const auto& record = sink_.counter_samples[i].record;
+    EXPECT_TRUE(record.flags &
+                IREE_HAL_PROFILE_COUNTER_SAMPLE_FLAG_COMMAND_OPERATION);
+    EXPECT_EQ(record.command_index, indices[i]);
+    EXPECT_EQ(record.command_buffer_id,
+              sink_.dispatch_events[0].command_buffer_id);
+    EXPECT_EQ(record.dispatch_event_id, sink_.dispatch_events[i].event_id);
+  }
+}
+
+// The same session on a ring too small for a direct dispatch's counter
+// sequences.
+class GpuNativeCounterSmallRingProfileTest
+    : public GpuNativeCounterProfileTest {
+ protected:
+  uint32_t RingByteLength() const override { return 4096; }
+};
+
+TEST_F(GpuNativeCounterSmallRingProfileTest,
+       DirectDispatchesThatCannotFitRunUnsampled) {
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(4, 4),
+      iree_infinite_timeout(), output.out()));
+  Ref<iree_hal_executable_t> executable;
+  iree_hal_executable_function_t function;
+  ASSERT_NO_FATAL_FAILURE(Load(executable, function));
+  Ref<iree_hal_semaphore_t> done;
+  CreateSemaphore(done.out());
+  auto* timeline = done.get();
+  uint64_t previous = 0, next = 1;
+  uint32_t zero = 0, increment = 1, observed = 0;
+  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {1, &timeline, &next},
+                                     output, 0, 4, &zero, 4, nullptr, 0));
+  auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
+  config.workgroup_size[0] = 32;
+  config.workgroup_size[1] = config.workgroup_size[2] = 1;
+  auto reference = iree_hal_make_buffer_ref(output, 0, 4);
+  for (size_t i = 0; i < 2; ++i) {
+    previous = next++;
+    IREE_ASSERT_OK(iree_hal_queue_dispatch(
+        queues_[0], {1, &timeline, &previous}, {1, &timeline, &next},
+        executable, function, config,
+        iree_make_const_byte_span(&increment, sizeof(increment)),
+        {1, &reference}, nullptr, 0));
+  }
+  previous = next++;
+  IREE_ASSERT_OK(iree_hal_queue_download(queues_[0], {1, &timeline, &previous},
+                                         {1, &timeline, &next}, output, 0,
+                                         &observed, sizeof(observed), nullptr));
+  // The dispatches complete instead of waiting for ring capacity that a
+  // 1,024-DWORD ring can never provide.
+  ASSERT_NO_FATAL_FAILURE(Wait(done, next));
+  EXPECT_EQ(observed, 2u);
+  executable.reset();
+  ASSERT_NO_FATAL_FAILURE(End());
+  EXPECT_EQ(sink_.dispatch_events.size(), 2u);
+  EXPECT_TRUE(sink_.counter_samples.empty());
+  // The counters are still described, and the loss is reported.
+  EXPECT_EQ(sink_.counters.size(), 9u);
+  ASSERT_FALSE(sink_.counter_captures.empty());
+  EXPECT_EQ(sink_.counter_captures.back().sampled_dispatch_count, 0u);
+  EXPECT_EQ(sink_.counter_captures.back().skipped_operation_count, 2u);
 }
 
 INSTANTIATE_TEST_SUITE_P(

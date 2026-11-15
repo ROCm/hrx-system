@@ -540,6 +540,62 @@ static iree_status_t TestProfileSinkWrite(
     test_sink->executable_trace_captures.insert(
         test_sink->executable_trace_captures.end(), records,
         records + record_count);
+  } else if (iree_string_view_equal(metadata->content_type,
+                                    IREE_HAL_PROFILE_CONTENT_TYPE_COUNTERS)) {
+    for (iree_host_size_t offset = 0; offset < iovecs[0].data_length;) {
+      TestProfileSink::Counter counter = {};
+      if (iovecs[0].data_length - offset < sizeof(counter.record)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "counter chunk ends inside a record");
+      }
+      std::memcpy(&counter.record, iovecs[0].data + offset,
+                  sizeof(counter.record));
+      EXPECT_EQ(counter.record.record_length,
+                sizeof(counter.record) + counter.record.block_name_length +
+                    counter.record.name_length +
+                    counter.record.description_length);
+      counter.name.assign(reinterpret_cast<const char*>(
+                              iovecs[0].data + offset + sizeof(counter.record) +
+                              counter.record.block_name_length),
+                          counter.record.name_length);
+      offset += counter.record.record_length;
+      test_sink->counters.push_back(std::move(counter));
+    }
+  } else if (iree_string_view_equal(
+                 metadata->content_type,
+                 IREE_HAL_PROFILE_CONTENT_TYPE_COUNTER_SAMPLES)) {
+    for (iree_host_size_t offset = 0; offset < iovecs[0].data_length;) {
+      TestProfileSink::CounterSample sample = {};
+      if (iovecs[0].data_length - offset < sizeof(sample.record)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "counter sample chunk ends inside a record");
+      }
+      std::memcpy(&sample.record, iovecs[0].data + offset,
+                  sizeof(sample.record));
+      EXPECT_EQ(sample.record.record_length,
+                sizeof(sample.record) + 8 * sample.record.sample_value_count);
+      EXPECT_EQ(metadata->queue_ordinal, sample.record.queue_ordinal);
+      EXPECT_EQ(metadata->stream_id, sample.record.stream_id);
+      sample.values.resize(sample.record.sample_value_count);
+      std::memcpy(sample.values.data(),
+                  iovecs[0].data + offset + sizeof(sample.record),
+                  8 * sample.values.size());
+      offset += sample.record.record_length;
+      test_sink->counter_samples.push_back(std::move(sample));
+    }
+  } else if (iree_string_view_equal(
+                 metadata->content_type,
+                 IREE_HAL_PROFILE_CONTENT_TYPE_COUNTER_CAPTURES)) {
+    EXPECT_EQ(0u, iovecs[0].data_length %
+                      sizeof(iree_hal_profile_counter_capture_record_t));
+    const auto* records =
+        reinterpret_cast<const iree_hal_profile_counter_capture_record_t*>(
+            iovecs[0].data);
+    const iree_host_size_t record_count =
+        iovecs[0].data_length /
+        sizeof(iree_hal_profile_counter_capture_record_t);
+    test_sink->counter_captures.insert(test_sink->counter_captures.end(),
+                                       records, records + record_count);
   }
 
   return iree_ok_status();
