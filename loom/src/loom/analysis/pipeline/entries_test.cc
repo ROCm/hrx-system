@@ -90,7 +90,7 @@ TEST_F(PipelineEntriesTest, SharedHelpersRetainTheirEnclosingConstruction) {
   const loom_pipeline_lifetime_extent_t* extents = nullptr;
   IREE_ASSERT_OK(loom_pipeline_lifetime_layout(
       &lifetimes_, requests, IREE_ARRAYSIZE(requests), 1, &arena_, &extents));
-  const uint64_t offsets[] = {16, 32, 80, 96, 80, 208, 64, 0};
+  const uint64_t offsets[] = {0, 16, 64, 80, 64, 192, 48, 224};
   for (size_t i = 0; i < IREE_ARRAYSIZE(requests); ++i) {
     EXPECT_EQ(requests[i].offset, offsets[i]);
   }

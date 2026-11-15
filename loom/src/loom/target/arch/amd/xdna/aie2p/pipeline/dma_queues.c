@@ -118,6 +118,10 @@ iree_status_t loom_aie2p_native_assign_dma_queues(
   const loom_pipeline_lifetimes_t* lifetimes =
       &realization->invocations.lifetimes;
   iree_host_size_t count = 0;
+  // Stable receive queues let ordered multicast phases reuse the same fanout
+  // without joining otherwise independent DMA outputs into one arbiter.
+  // The common lifetime allocator preserves these first-request preferences
+  // through concurrent subtrees while retaining all coexistence constraints.
   for (iree_host_size_t d = 0; d < distribution_count; ++d) {
     const iree_host_size_t i = distribution_workers[d];
     loom_aie2p_native_worker_t* worker = &context->workers[i];
@@ -130,10 +134,6 @@ iree_status_t loom_aie2p_native_assign_dma_queues(
       if (distribution->path->first != distribution) {
         continue;
       }
-      loom_aie2p_native_request_dma_queue(
-          context, lifetime, distribution->sender.tile, false,
-          &distribution->sender.engine, IREE_HOST_SIZE_MAX, requests, bindings,
-          &count);
       for (iree_host_size_t j = 0; j < distribution->receiver_count; ++j) {
         loom_aie2p_native_distribution_endpoint_t* receiver =
             &distribution->receivers[j];
@@ -148,6 +148,19 @@ iree_status_t loom_aie2p_native_assign_dma_queues(
     const iree_host_size_t lifetime =
         lifetimes
             ->owners[realization->invocations.workers[i].invocation->ordinal];
+    // Send queues retain producer order: prioritizing multicast senders would
+    // change source-tree ownership and can consume additional physical links.
+    for (loom_aie2p_native_distribution_t* distribution =
+             worker->distribution_plan ? worker->distribution_plan->geometries
+                                       : NULL;
+         distribution; distribution = distribution->next_demand) {
+      if (distribution->path->first == distribution) {
+        loom_aie2p_native_request_dma_queue(
+            context, lifetime, distribution->sender.tile, false,
+            &distribution->sender.engine, IREE_HOST_SIZE_MAX, requests,
+            bindings, &count);
+      }
+    }
     for (loom_aie2p_native_dma_path_t* path = worker->transfer_paths; path;
          path = path->next_demand) {
       loom_aie2p_native_request_dma_queue(

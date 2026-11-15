@@ -349,6 +349,8 @@ class MulticastPayloadTest
         .owners = owners_.data(),
         .has_serial = true,
     };
+    IREE_ASSERT_OK(loom_pipeline_lifetimes_index(
+        &arena_, &realization_.invocations.lifetimes));
     const size_t route_capacity = sources * (32 + (queries ? 4 : 0)) * 16;
     IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
         context_.family, route_capacity, &arena_, &context_.routing));

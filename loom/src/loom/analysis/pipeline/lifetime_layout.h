@@ -36,8 +36,10 @@ typedef struct loom_pipeline_lifetime_extent_t {
   uint64_t alignment;
 } loom_pipeline_lifetime_extent_t;
 
-// Places owner-local requests in input order, sums concurrent lifetimes, and
-// overlays serial lifetimes. Parent-owned resources coexist with descendants.
+// Places owner-local requests in input order, orders concurrent subtrees by
+// their first request, and overlays serial lifetimes. This preserves the
+// caller's resource preferences independently of source enumeration order.
+// Parent-owned resources coexist with descendants.
 // Requests may cover only a projection of the original tree. Unrequested
 // lifetimes occupy no space. Offsets are relative to each pool; the caller
 // reserves the returned extents in its physical backing. Status reports arena

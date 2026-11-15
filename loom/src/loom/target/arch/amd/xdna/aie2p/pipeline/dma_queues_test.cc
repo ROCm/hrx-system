@@ -156,9 +156,9 @@ class DmaQueuesTest : public ::testing::Test {
 
 TEST_F(DmaQueuesTest, TransportFamiliesShareOnlySerialQueueLifetimes) {
   Assign();
-  EXPECT_EQ(ordinary_.local_engine, 0);
+  EXPECT_EQ(ordinary_.local_engine, 1);
   EXPECT_EQ(ordinary_.shim_engine, 0);
-  EXPECT_EQ(receivers_[0].engine, 1);
+  EXPECT_EQ(receivers_[0].engine, 0);
   EXPECT_EQ(receivers_[1].engine, receivers_[0].engine);
   EXPECT_EQ(phases_[0].receiver.engine, receivers_[0].engine);
   EXPECT_EQ(phases_[1].receiver.engine, phases_[0].receiver.engine);
@@ -170,17 +170,38 @@ TEST_F(DmaQueuesTest, ConcurrentTransportsKeepIndependentQueues) {
   nodes_[2].kind = LOOM_PIPELINE_LIFETIME_CONCURRENT;
   realization_.invocations.lifetimes.has_serial = false;
   Assign();
-  EXPECT_EQ(receivers_[0].engine, 1);
-  EXPECT_EQ(phases_[0].receiver.engine, 2);
+  EXPECT_EQ(receivers_[0].engine, 0);
+  EXPECT_EQ(phases_[0].receiver.engine, 1);
+  EXPECT_EQ(ordinary_.local_engine, 2);
   EXPECT_EQ(tiles_[1].s2mm_count, 3);
+}
+
+TEST_F(DmaQueuesTest, SerialMulticastsKeepTheirPreferredReceiveQueue) {
+  workers_[2].input = nullptr;
+  distributions_[0].next_demand = nullptr;
+  loom_aie2p_native_distribution_path_t second_path = {.first =
+                                                           &distributions_[1]};
+  distributions_[1].path = &second_path;
+  loom_aie2p_native_distribution_plan_t second_plan = {.geometries =
+                                                           &distributions_[1]};
+  workers_[2].distribution_plan = &second_plan;
+  Assign();
+  EXPECT_EQ(receivers_[0].engine, 0);
+  EXPECT_EQ(receivers_[1].engine, 0);
+  EXPECT_EQ(ordinary_.local_engine, 1);
+  EXPECT_EQ(distributions_[0].sender.engine, 0);
+  EXPECT_EQ(distributions_[1].sender.engine, 0);
+  EXPECT_EQ(tiles_[1].s2mm_count, 2);
+  EXPECT_EQ(tiles_[2].mm2s_count, 1);
 }
 
 TEST_F(DmaQueuesTest, IndependentInputPhasesReserveSeparateReceivers) {
   input_.window_capacity = 0;
   ++context_.dma_queue_count;
   Assign();
-  EXPECT_EQ(phases_[0].receiver.engine, 1);
-  EXPECT_EQ(phases_[1].receiver.engine, 2);
+  EXPECT_EQ(phases_[0].receiver.engine, 0);
+  EXPECT_EQ(phases_[1].receiver.engine, 1);
+  EXPECT_EQ(ordinary_.local_engine, 2);
   EXPECT_EQ(tiles_[1].s2mm_count, 3);
 }
 
