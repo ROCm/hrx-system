@@ -1017,10 +1017,11 @@ iree_status_t loom_aie2p_native_select_sequence(
     loom_aie2p_native_dma_sequence_t* out_sequence,
     iree_string_view_t* out_reason, bool* out_valid);
 
-// Attaches packet identity and retained control ownership to route edges.
-// Payload callers use UINT32_MAX for |control_source|.
+// Attaches packet identity, command progress, and control ownership to edges.
+// Payload callers use false and UINT32_MAX for the last two arguments.
 void loom_aie2p_native_route_label(loom_aie2p_native_context_t* context,
                                    iree_host_size_t first, uint8_t packet,
+                                   bool register_command,
                                    uint32_t control_source);
 
 // Adds a packet route between admitted endpoints and labels its new edges.

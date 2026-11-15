@@ -58,7 +58,8 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
 
   void AddRoute(loom_xdna_stream_port_t source, uint8_t source_channel,
                 loom_xdna_stream_port_t destination,
-                uint8_t destination_channel, uint8_t packet) {
+                uint8_t destination_channel, uint8_t packet,
+                bool register_command = false) {
     const auto index = static_cast<uint32_t>(context_.routing.route_count);
     loom_aie2p_array_route_tree_t tree = {};
     ASSERT_TRUE(loom_aie2p_array_route_stream(
@@ -66,7 +67,8 @@ class Aie2pSwitchTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
         coordinate_, destination, destination_channel, packet != UINT8_MAX));
     routes_.resize(context_.routing.route_count);
     for (size_t i = index; i < context_.routing.route_count; ++i) {
-      routes_[i] = {&context_.routing.routes[i], packet, UINT32_MAX};
+      routes_[i] = {&context_.routing.routes[i], packet, register_command,
+                    UINT32_MAX};
     }
   }
 
@@ -227,7 +229,7 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
                                                  &tree, sources[i], engines[i],
                                                  {0, 1}, i, i == 0));
       loom_aie2p_native_route_label(&context_, first, i == 0 ? 16 : UINT8_MAX,
-                                    UINT32_MAX);
+                                    false, UINT32_MAX);
       if (i == 0) {
         IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
             &context_.routing, first, context_.routing.route_count - first,
@@ -328,8 +330,12 @@ TEST_F(Aie2pControlSwitchTest, PrivateFramingCrossesEveryTileRole) {
   const loom_xdna_tile_coordinate_t shim = {coordinate_.column, 0};
   AddControl(coordinate_, LOOM_XDNA_STREAM_PORT_CORE, shim,
              LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0);
+  const size_t command_route_count = context_.routing.route_count;
   AddControl(shim, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, coordinate_,
              LOOM_XDNA_STREAM_PORT_CORE, 5);
+  for (size_t i = 0; i < context_.routing.route_count; ++i) {
+    EXPECT_EQ(context_.routes[i].register_command, i < command_route_count);
+  }
   ASSERT_NO_FATAL_FAILURE(Build(true, 3));
   for (auto* current = context_.switches; current; current = current->next) {
     const auto& masters = current->banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS];
@@ -615,6 +621,143 @@ TEST_P(Aie2pSwitchTest, MultipleInputComponentsCannotShareArbiters) {
       EXPECT_EQ(PacketDestinations(source, 1, channel),
                 1u << (north + channel));
     }
+  }
+}
+
+TEST_P(Aie2pSwitchTest, RegisterCommandsShareAcrossOverlappingInputs) {
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  for (uint8_t input = 0; input < 2; ++input) {
+    AddRoute(source, input, LOOM_XDNA_STREAM_PORT_NORTH, 0, 0, true);
+    AddRoute(source, input, LOOM_XDNA_STREAM_PORT_NORTH, input + 1, 1, true);
+  }
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  const uint32_t arbiter =
+      Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north) & 7;
+  for (uint8_t channel = 1; channel < 3; ++channel) {
+    EXPECT_EQ(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + channel) & 7,
+              arbiter);
+  }
+  for (uint8_t input = 0; input < 2; ++input) {
+    EXPECT_EQ(PacketDestinations(source, input, 0), 1u << north);
+    EXPECT_EQ(PacketDestinations(source, input, 1), 1u << (north + input + 1));
+  }
+}
+
+TEST_P(Aie2pSwitchTest, PayloadOnACommandOutputPreventsArbiterSharing) {
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  for (uint8_t input = 0; input < 2; ++input) {
+    AddRoute(source, input, LOOM_XDNA_STREAM_PORT_NORTH, 0, 0, true);
+    AddRoute(source, input, LOOM_XDNA_STREAM_PORT_NORTH, input + 1, 1, true);
+  }
+  // The shared transit output also carries payload. Even its command-only
+  // packet classes cannot lend this arbiter to other input components.
+  AddRoute(source, 2, LOOM_XDNA_STREAM_PORT_NORTH, 0, 0);
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  uint32_t arbiters = 0;
+  for (uint8_t channel = 0; channel < 3; ++channel) {
+    const uint32_t arbiter =
+        Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + channel) & 7;
+    EXPECT_EQ(arbiters & (1u << arbiter), 0u);
+    arbiters |= 1u << arbiter;
+  }
+  for (uint8_t input = 0; input < 2; ++input) {
+    EXPECT_EQ(PacketDestinations(source, input, 0), 1u << north);
+    EXPECT_EQ(PacketDestinations(source, input, 1), 1u << (north + input + 1));
+  }
+  EXPECT_EQ(PacketDestinations(source, 2, 0), 1u << north);
+}
+
+TEST_P(Aie2pSwitchTest, DisjointCommandInputsKeepIndependentArbiters) {
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  for (uint8_t input = 0; input < 2; ++input) {
+    for (uint8_t packet = 0; packet < 2; ++packet) {
+      AddRoute(source, input, LOOM_XDNA_STREAM_PORT_NORTH, input * 2 + packet,
+               packet, true);
+    }
+  }
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  EXPECT_NE(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north) & 7,
+            Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + 2) & 7);
+  for (uint8_t input = 0; input < 2; ++input) {
+    const uint32_t arbiter =
+        Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + input * 2) & 7;
+    EXPECT_EQ(
+        Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + input * 2 + 1) & 7,
+        arbiter);
+    for (uint8_t packet = 0; packet < 2; ++packet) {
+      EXPECT_EQ(PacketDestinations(source, input, packet),
+                1u << (north + input * 2 + packet));
+    }
+  }
+}
+
+TEST_P(Aie2pSwitchTest, PayloadSharingRevokesCommandArbiterEligibility) {
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, 0, 0, true);
+  AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, 1, 1);
+  AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, 2, 2, true);
+  AddRoute(source, 1, LOOM_XDNA_STREAM_PORT_NORTH, 2, 0, true);
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  const uint32_t arbiter =
+      Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north) & 7;
+  // The first input already serializes its command and payload. That shared
+  // arbiter cannot subsequently serialize commands from a different input.
+  EXPECT_EQ(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + 1) & 7,
+            arbiter);
+  EXPECT_NE(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + 2) & 7,
+            arbiter);
+  for (uint8_t packet = 0; packet < 3; ++packet) {
+    EXPECT_EQ(PacketDestinations(source, 0, packet), 1u << (north + packet));
+  }
+  EXPECT_EQ(PacketDestinations(source, 1, 0), 1u << (north + 2));
+}
+
+TEST_P(Aie2pSwitchTest, CommandSharingRespectsArbiterSelectionCapacity) {
+  const auto source = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
+                          ? LOOM_XDNA_STREAM_PORT_DMA
+                          : LOOM_XDNA_STREAM_PORT_SOUTH;
+  AddRoute(source, 0, LOOM_XDNA_STREAM_PORT_NORTH, 0, 0, true);
+  AddRoute(source, 1, LOOM_XDNA_STREAM_PORT_NORTH, 0, 0, true);
+  for (uint8_t channel = 1; channel < 6; ++channel) {
+    const uint8_t input = channel < 4 ? 0 : 1;
+    const uint8_t packet = channel < 4 ? channel : channel - 3;
+    AddRoute(source, input, LOOM_XDNA_STREAM_PORT_NORTH, channel, packet, true);
+  }
+  ASSERT_NO_FATAL_FAILURE(Build(true));
+  const uint16_t north = Ordinal(LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                                 LOOM_XDNA_STREAM_PORT_NORTH, 0);
+  const uint32_t first = Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north) & 7;
+  const uint32_t second =
+      Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + 4) & 7;
+  EXPECT_NE(first, second);
+  for (uint8_t channel = 0; channel < 6; ++channel) {
+    EXPECT_EQ(Word(LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS, north + channel) & 7,
+              channel < 4 ? first : second);
+  }
+  for (uint8_t input = 0; input < 2; ++input) {
+    EXPECT_EQ(PacketDestinations(source, input, 0), 1u << north);
+  }
+  for (uint8_t channel = 1; channel < 6; ++channel) {
+    const uint8_t input = channel < 4 ? 0 : 1;
+    const uint8_t packet = channel < 4 ? channel : channel - 3;
+    EXPECT_EQ(PacketDestinations(source, input, packet),
+              1u << (north + channel));
   }
 }
 

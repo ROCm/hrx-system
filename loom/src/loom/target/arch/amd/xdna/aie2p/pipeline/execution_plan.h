@@ -44,6 +44,9 @@ typedef struct loom_aie2p_native_route_t {
   const loom_aie2p_array_route_plan_t* edge;
   // Packet ID, or UINT8_MAX for a circuit without packet filtering.
   uint8_t packet;
+  // A complete compiler-owned register command terminating at tile control.
+  // Its body and hardware consumption do not depend on payload credits.
+  bool register_command;
   // Retained control source, or UINT32_MAX for ordinary payload transport.
   uint32_t control_source;
 } loom_aie2p_native_route_t;

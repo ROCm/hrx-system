@@ -29,8 +29,9 @@ typedef struct loom_aie2p_native_switch_input_t {
 // Admits physical route edges against packet/circuit ownership and switch
 // resources, retaining the complete initialization banks in |arena|.
 // Destination sets connected by a shared output require one arbiter. Disjoint
-// sets share only when fed exclusively by the same input, so arbitration adds
-// no blocking dependency between independent streams. This does not prove
+// sets share when fed exclusively by the same input, or when their overlapping
+// inputs carry only complete register commands with independent progress.
+// Disjoint input sets retain independent arbiters. This does not prove
 // progress for dependencies already present in the selected routes.
 // Allocation errors return a status. A resource conflict returns a static
 // |out_requirement| for the caller's source diagnostic; otherwise it is empty.

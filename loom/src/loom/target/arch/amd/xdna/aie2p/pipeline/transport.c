@@ -101,6 +101,7 @@ bool loom_aie2p_native_select_ingress_descriptor(
 // filter identity along its complete path.
 void loom_aie2p_native_route_label(loom_aie2p_native_context_t* context,
                                    iree_host_size_t first, uint8_t packet,
+                                   bool register_command,
                                    uint32_t control_source) {
   if (control_source != UINT32_MAX) {
     context->control_sources[control_source].packet_mask |= UINT32_C(1)
@@ -110,6 +111,7 @@ void loom_aie2p_native_route_label(loom_aie2p_native_context_t* context,
     context->routes[i] =
         (loom_aie2p_native_route_t){.edge = &context->routing.routes[i],
                                     .packet = packet,
+                                    .register_command = register_command,
                                     .control_source = control_source};
   }
 }
@@ -188,7 +190,9 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
     // borrows payload lanes. Retain that exclusion for the entire source tree.
     control->destination = UINT32_MAX;
   }
-  loom_aie2p_native_route_label(context, first, packet, source_index);
+  loom_aie2p_native_route_label(
+      context, first, packet,
+      destination_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL, source_index);
   const uint16_t memory_row = loom_xdna_array_tile_kind_facts(
                                   context->family, LOOM_XDNA_TILE_KIND_MEMORY)
                                   ->first_row;

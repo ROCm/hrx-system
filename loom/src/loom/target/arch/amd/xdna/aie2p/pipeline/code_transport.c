@@ -121,10 +121,12 @@ static bool loom_aie2p_code_transport_route(
         .destination = UINT32_MAX;
   }
   for (iree_host_size_t i = first; i < plan->routing.route_count; ++i) {
-    plan->routes[i] =
-        (loom_aie2p_native_route_t){.edge = &plan->routing.routes[i],
-                                    .packet = packet,
-                                    .control_source = source_index};
+    plan->routes[i] = (loom_aie2p_native_route_t){
+        .edge = &plan->routing.routes[i],
+        .packet = packet,
+        .register_command =
+            destination.port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL,
+        .control_source = source_index};
   }
   transport->connections[plan->connections.group_count++] =
       (loom_aie2p_native_connection_t){

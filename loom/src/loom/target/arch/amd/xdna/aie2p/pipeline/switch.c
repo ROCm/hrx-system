@@ -48,6 +48,8 @@ typedef struct loom_aie2p_native_switch_admission_t {
   uint32_t drop_headers;
   // Firmware-facing completion inputs retain their packet framing contract.
   uint32_t completion_inputs;
+  // Outputs carrying any traffic that can wait for payload or core progress.
+  uint32_t blocking_masters;
 } loom_aie2p_native_switch_admission_t;
 
 static iree_status_t loom_aie2p_native_switch_initialize(
@@ -340,13 +342,17 @@ static uint8_t loom_aie2p_native_packet_component(uint8_t* parents,
 // selects only one arbiter. An arbiter holds its grant for the whole packet,
 // including stalls: sharing it can prevent an otherwise independent input
 // from making the progress needed to finish that packet. Disjoint components
-// may share only when both have the same single input, which already serializes
-// their packets. Identical sets reuse a selection across packet IDs and inputs.
+// may share when both have the same single input, which already serializes
+// their packets. Complete register-command components can also share when their
+// inputs overlap: their finite packets retire independently of payload credits.
+// Disjoint inputs retain independent arbiters and potential concurrency.
+// Identical sets reuse a selection across packet IDs and inputs.
 static bool loom_aie2p_native_switch_select_packets(
     const loom_xdna_tile_facts_t* facts,
     loom_aie2p_native_switch_admission_t* state) {
   uint8_t selection_counts[32] = {0};
   uint32_t component_inputs[32] = {0};
+  uint32_t blocking_components = 0;
   uint8_t component_bases[32];
   memset(component_bases, UINT8_MAX, sizeof(component_bases));
   for (uint16_t i = 0; i < state->group_count; ++i) {
@@ -356,6 +362,9 @@ static bool loom_aie2p_native_switch_select_packets(
         (uint8_t)iree_math_count_trailing_zeros_u32(group->masters));
     component_inputs[group->component] |=
         UINT32_C(1) << (group->filter / state->filter_slot_count);
+    if (group->masters & state->blocking_masters) {
+      blocking_components |= UINT32_C(1) << group->component;
+    }
     bool shared = false;
     for (uint16_t j = 0; j < i; ++j) {
       if (state->groups[j].masters == group->masters) {
@@ -374,6 +383,7 @@ static bool loom_aie2p_native_switch_select_packets(
   }
   uint8_t arbiter_uses[8] = {0};
   uint32_t arbiter_inputs[8] = {0};
+  uint8_t command_arbiters = 0;
   for (uint16_t i = 0; i < state->group_count; ++i) {
     const uint8_t component = state->groups[i].component;
     uint8_t* base = &component_bases[component];
@@ -383,19 +393,28 @@ static bool loom_aie2p_native_switch_select_packets(
     const uint8_t count = selection_counts[component];
     const uint32_t inputs = component_inputs[component];
     const bool single_input = (inputs & (inputs - 1)) == 0;
+    const bool register_commands =
+        !(blocking_components & (UINT32_C(1) << component));
     // Allocated arbiters precede unused ones, so a compatible arbiter is
     // reused before opening another. One input's filter budget bounds the
     // total number of distinct destination sets that can share its arbiter.
     for (uint8_t arbiter = 0; arbiter < facts->packet_arbiter_count;
          ++arbiter) {
       if (arbiter_uses[arbiter] &&
-          (!single_input || arbiter_inputs[arbiter] != inputs)) {
+          !(single_input && arbiter_inputs[arbiter] == inputs) &&
+          !(register_commands && (command_arbiters & (1u << arbiter)) &&
+            (arbiter_inputs[arbiter] & inputs))) {
         continue;
       }
       if (arbiter_uses[arbiter] + count <= facts->packet_master_select_count) {
         *base = arbiter | (arbiter_uses[arbiter] << 3);
+        if (!arbiter_uses[arbiter] && register_commands) {
+          command_arbiters |= 1u << arbiter;
+        } else if (!register_commands) {
+          command_arbiters &= ~(1u << arbiter);
+        }
         arbiter_uses[arbiter] += count;
-        arbiter_inputs[arbiter] = inputs;
+        arbiter_inputs[arbiter] |= inputs;
         break;
       }
     }
@@ -467,6 +486,9 @@ iree_status_t loom_aie2p_native_switches_build(
             family, kind, LOOM_XDNA_STREAM_DIRECTION_SLAVE, edge->source_port)
             ->ordinal +
         edge->source_channel;
+    if (!selected->register_command) {
+      state->blocking_masters |= UINT32_C(1) << master;
+    }
     bool private_control = false;
     if (selected->control_source != UINT32_MAX) {
       const loom_aie2p_native_control_source_t* source =

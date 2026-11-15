@@ -202,7 +202,7 @@ TEST_F(PayloadTest, LaterPassthroughConstrainsAnEarlierShortIngress) {
   ASSERT_TRUE(loom_aie2p_array_route_stream(
       &context_.routing, 0, &sram, {0, 1}, LOOM_XDNA_STREAM_PORT_DMA, 0, {0, 3},
       LOOM_XDNA_STREAM_PORT_DMA, 1, true));
-  loom_aie2p_native_route_label(&context_, 0, 7, UINT32_MAX);
+  loom_aie2p_native_route_label(&context_, 0, 7, false, UINT32_MAX);
   uint32_t next_source = 1;
   for (size_t i = 0; i < 2; ++i) {
     bool valid = false;

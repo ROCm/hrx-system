@@ -99,9 +99,9 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   context.routes = routes.data();
   context.control_sources = sources.data();
   context.control_destination_sources = destinations.data();
-  loom_aie2p_native_route_label(&context, 0, connection.packet, 4);
+  loom_aie2p_native_route_label(&context, 0, connection.packet, true, 4);
   loom_aie2p_native_route_label(&context, control_route_count, payload.packet,
-                                UINT32_MAX);
+                                false, UINT32_MAX);
   const loom_aie2p_native_switch_input_t input = {
       .routing = &context.routing,
       .routes = context.routes,
@@ -188,6 +188,7 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   EXPECT_EQ(retained->control_destination_sources[3], 4u);
   for (size_t i = 0; i < retained->routing.route_count; ++i) {
     EXPECT_EQ(retained->routes[i].edge, &retained->routing.routes[i]);
+    EXPECT_EQ(retained->routes[i].register_command, i < control_route_count);
     EXPECT_EQ(retained->routes[i].control_source,
               i < control_route_count ? 4u : UINT32_MAX);
   }
@@ -269,7 +270,7 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
     extended_routes[i] =
         i < retained->routing.route_count
             ? retained->routes[i]
-            : loom_aie2p_native_route_t{nullptr, intended.packet, 4};
+            : loom_aie2p_native_route_t{nullptr, intended.packet, true, 4};
     extended_routes[i].edge = &extended.routes[i];
   }
   std::vector<loom_aie2p_native_control_source_t> extended_sources(
@@ -371,7 +372,8 @@ TEST_F(ExecutionPlanTest, CodeRequestsShareCommandsOnASaturatedColumn) {
     ASSERT_TRUE(loom_aie2p_array_route_egress(
         &context.routing, next_source++, &payload_source.tree,
         payload_source.endpoint.tile->coordinate, 0, {0, 0}, i));
-    loom_aie2p_native_route_label(&context, first, UINT8_MAX, UINT32_MAX);
+    loom_aie2p_native_route_label(&context, first, UINT8_MAX, false,
+                                  UINT32_MAX);
   }
   context.payload_sources = payload_sources;
   EXPECT_EQ(context.routing.link_channels.southbound[family->column_count],

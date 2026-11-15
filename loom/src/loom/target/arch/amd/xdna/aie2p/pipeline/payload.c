@@ -379,7 +379,7 @@ static iree_status_t loom_aie2p_native_route_payload_class(
     }
     loom_aie2p_native_route_label(context, first,
                                   source->framed ? payload->packet : UINT8_MAX,
-                                  UINT32_MAX);
+                                  false, UINT32_MAX);
   }
   payload->route_count = context->routing.route_count - payload->route_first;
   payload->routed = true;

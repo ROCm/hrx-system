@@ -59,7 +59,7 @@ class ConnectivityTest : public ::testing::Test {
         &context_.routing, next_label_++, &tree, source.coordinate, source.port,
         source.channel, destination.coordinate, destination.port,
         destination.channel, packet != UINT8_MAX));
-    loom_aie2p_native_route_label(&context_, first, packet, UINT32_MAX);
+    loom_aie2p_native_route_label(&context_, first, packet, false, UINT32_MAX);
   }
 
   void Build() {
