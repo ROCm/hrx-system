@@ -107,12 +107,20 @@ IREE_FLAG(
     "--device_profiling_mode=executable-traces. 0 selects the driver default.\n"
     "Use --device_profiling_filter_* to choose which operations are traced.");
 IREE_FLAG(
+    int64_t, device_profiling_counter_max_samples, 0,
+    "Upper bound on dispatches sampled by --device_profiling_mode=counters.\n"
+    "0 selects the driver default. Sampling brackets each dispatch with a\n"
+    "compute join and register copies; dispatches beyond the bound run\n"
+    "unsampled. Use --device_profiling_filter_* to choose which are sampled.");
+IREE_FLAG(
     bool, device_profiling_allow_partial, false,
     "Lets each device in a multi-device group keep the largest subset of\n"
     "--device_profiling_mode families it implements instead of failing the\n"
     "whole group when one device reports a family as unimplemented. A device\n"
-    "that implements none of the requested families is left unprofiled. Each\n"
-    "reduction is reported on stderr.");
+    "that implements none of the requested families is left unprofiled. A\n"
+    "device that lacks a counter named by --device_profiling_counter loses\n"
+    "its counter families the same way. Each reduction is reported on\n"
+    "stderr.");
 IREE_FLAG(
     bool, print_device_statistics, false,
     "Enables a lightweight HAL profiling session and prints aggregate device\n"
@@ -250,6 +258,27 @@ static iree_status_t iree_hal_profile_executable_trace_options_from_flags(
       (uint32_t)FLAG_device_profiling_trace_max_traces;
   out_options->buffer_byte_length =
       (uint64_t)FLAG_device_profiling_trace_buffer_size;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_profile_counter_sample_options_from_flags(
+    iree_hal_device_profiling_data_families_t data_families,
+    iree_hal_profile_counter_sample_options_t* out_options) {
+  memset(out_options, 0, sizeof(*out_options));
+  if (FLAG_device_profiling_counter_max_samples < 0) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--device_profiling_counter_max_samples must be non-negative");
+  }
+  if (FLAG_device_profiling_counter_max_samples &&
+      !iree_any_bit_set(data_families,
+                        IREE_HAL_DEVICE_PROFILING_DATA_COUNTER_SAMPLES)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "--device_profiling_counter_max_samples requires "
+                            "--device_profiling_mode=counters");
+  }
+  out_options->max_sample_count =
+      (uint64_t)FLAG_device_profiling_counter_max_samples;
   return iree_ok_status();
 }
 
@@ -502,6 +531,17 @@ static void iree_hal_profiling_from_flags_release_devices(
   iree_allocator_free(profiling->host_allocator, profiling->devices);
 }
 
+// True when |status| is a rejection --device_profiling_allow_partial may
+// answer by dropping data families: the device does not implement a family,
+// or it has none of the counters the caller named. Counter names are
+// device-specific while the flag applies to every device of a group.
+static bool iree_hal_profiling_from_flags_is_partial_rejection(
+    iree_status_t status, const iree_hal_device_profiling_options_t* options) {
+  return iree_status_is_unimplemented(status) ||
+         (iree_status_is_unavailable(status) && options->counter_set_count &&
+          iree_hal_device_profiling_options_requests_counters(options));
+}
+
 // Retries |device| with the largest subset of the requested data families it
 // implements. Drivers validate families before touching the sink, so rejected
 // attempts leave no session behind; the first accepted subset is final.
@@ -539,6 +579,11 @@ static iree_status_t iree_hal_profiling_from_flags_begin_partial(
       }
       *out_options = *options;
       out_options->data_families = families;
+      if (!iree_hal_device_profiling_options_requests_counters(out_options)) {
+        // A selection without its family is an invalid request, not a subset.
+        out_options->counter_set_count = 0;
+        out_options->counter_sets = NULL;
+      }
       iree_status_t status = iree_hal_device_profiling_begin(device, out_options);
       if (iree_status_is_ok(status)) {
         iree_status_ignore(unimplemented_status);
@@ -550,7 +595,8 @@ static iree_status_t iree_hal_profiling_from_flags_begin_partial(
                 (uint64_t)options->data_families);
         return iree_ok_status();
       }
-      if (!iree_status_is_unimplemented(status)) {
+      if (!iree_hal_profiling_from_flags_is_partial_rejection(status,
+                                                              out_options)) {
         iree_status_ignore(unimplemented_status);
         return status;
       }
@@ -645,6 +691,8 @@ static iree_status_t iree_hal_begin_device_list_profiling_from_flags(
       iree_hal_profile_capture_filter_from_flags(&options.capture_filter));
   IREE_RETURN_IF_ERROR(iree_hal_profile_executable_trace_options_from_flags(
       options.data_families, &options.executable_traces));
+  IREE_RETURN_IF_ERROR(iree_hal_profile_counter_sample_options_from_flags(
+      options.data_families, &options.counter_samples));
   iree_hal_profile_counter_set_selection_t counter_set = {0};
   if (counter_names.count != 0) {
     counter_set.counter_name_count = counter_names.count;
@@ -721,7 +769,8 @@ static iree_status_t iree_hal_begin_device_list_profiling_from_flags(
       status = iree_hal_device_profiling_begin(profiling->devices[i],
                                                &device_options);
       if (FLAG_device_profiling_allow_partial &&
-          iree_status_is_unimplemented(status)) {
+          iree_hal_profiling_from_flags_is_partial_rejection(status,
+                                                             &device_options)) {
         status = iree_hal_profiling_from_flags_begin_partial(
             profiling->devices[i], i, &options, status, &device_options);
       }

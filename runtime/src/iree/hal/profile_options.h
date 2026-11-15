@@ -264,6 +264,17 @@ typedef struct iree_hal_profile_executable_trace_options_t {
   uint64_t buffer_byte_length;
 } iree_hal_profile_executable_trace_options_t;
 
+// Caller-provided bounds for operation-attributed counter samples.
+//
+// Sampling adds a compute join and one register copy per counter instance on
+// each side of a dispatch, so a session samples a bounded number of
+// dispatches. A zero field selects the producer's default.
+typedef struct iree_hal_profile_counter_sample_options_t {
+  // Upper bound on sampled dispatches in this session. Dispatches matching the
+  // capture filter beyond the bound run unsampled.
+  uint64_t max_sample_count;
+} iree_hal_profile_counter_sample_options_t;
+
 // Controls profiling options.
 //
 // All pointer and string-view fields are borrowed and only need to remain valid
@@ -302,6 +313,10 @@ typedef struct iree_hal_device_profiling_options_t {
   // Executable trace selection, used only when requesting executable traces.
   // A zero-initialized value selects every producer default.
   iree_hal_profile_executable_trace_options_t executable_traces;
+
+  // Counter sample bounds, used only when requesting counter samples. A
+  // zero-initialized value selects every producer default.
+  iree_hal_profile_counter_sample_options_t counter_samples;
 } iree_hal_device_profiling_options_t;
 
 // Opaque storage backing cloned profiling options.

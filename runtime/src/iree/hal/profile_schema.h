@@ -101,6 +101,10 @@ extern "C" {
 #define IREE_HAL_PROFILE_CONTENT_TYPE_COUNTER_SAMPLES \
   IREE_SV("application/vnd.iree.hal.profile.counter-samples")
 
+// Content type for packed iree_hal_profile_counter_capture_record_t records.
+#define IREE_HAL_PROFILE_CONTENT_TYPE_COUNTER_CAPTURES \
+  IREE_SV("application/vnd.iree.hal.profile.counter-captures")
+
 // Content type for packed iree_hal_profile_device_metric_source_record_t
 // records.
 #define IREE_HAL_PROFILE_CONTENT_TYPE_DEVICE_METRIC_SOURCES \
@@ -1630,6 +1634,78 @@ iree_hal_profile_counter_sample_record_default(void) {
   return record;
 }
 
+// Bitfield specifying how the samples of one counter set were taken.
+typedef uint32_t iree_hal_profile_counter_capture_flags_t;
+enum iree_hal_profile_counter_capture_flag_bits_t {
+  IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_NONE = 0u,
+
+  // The producer held a stable device power state while sampling.
+  IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_STABLE_POWER_STATE = 1u << 0,
+
+  // The producer admitted one of its queues into a sampled range at a time
+  // and enabled counting only inside sampled operations, so no other queue of
+  // this producer contributes to a sample.
+  IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_EXCLUSIVE_WINDOW = 1u << 1,
+
+  // The hardware counts every queue of the owning process that has counting
+  // enabled while a sample's range is open, not the sampled operation alone.
+  // Queues outside this producer are invisible to it.
+  IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_PROCESS_SCOPE = 1u << 2,
+
+  // The session's sample bound was reached; later operations ran unsampled.
+  IREE_HAL_PROFILE_COUNTER_CAPTURE_FLAG_LIMIT_REACHED = 1u << 3,
+};
+
+// How the samples of one counter set were taken, cumulative for the session.
+//
+// Counter samples attribute a hardware count to one operation, which is only
+// as exact as the range the hardware counted over. This record states that
+// scope and how much of the session was sampled, so consumers can present the
+// values with their limits. A producer emits it whenever the totals change; a
+// later record for the same |counter_set_id| replaces an earlier one.
+typedef struct iree_hal_profile_counter_capture_record_t {
+  // Size of this record in bytes for forward-compatible parsing.
+  uint32_t record_length;
+  // Flags describing the sampling scope.
+  iree_hal_profile_counter_capture_flags_t flags;
+  // Producer-local counter set identifier these facts describe.
+  uint64_t counter_set_id;
+  // Session-local physical device ordinal associated with this counter set.
+  uint32_t physical_device_ordinal;
+  // Shader engines sampled; engine-scoped counters have one value per engine.
+  uint32_t shader_engine_count;
+  // Compute-unit instances sampled by instance-scoped counters, or 0.
+  uint32_t instance_count;
+  // Reserved for future counter capture fields; must be zero.
+  uint32_t reserved0;
+  // Upper bound on sampled dispatches in this session.
+  uint64_t sample_limit;
+  // Operations whose dispatches were bracketed by counter samples.
+  uint64_t sampled_operation_count;
+  // Counter sample records emitted.
+  uint64_t sampled_dispatch_count;
+  // Matching operations that ran unsampled because another queue held the
+  // sampled range or the operation was recorded without counter samples.
+  uint64_t skipped_operation_count;
+  // Samples lost to producer capacity.
+  uint64_t dropped_sample_count;
+  // Samples discarded because the hardware never wrote their raw values.
+  uint64_t invalid_sample_count;
+  // Sampled operations that found the counter registers programmed by
+  // someone else before they started.
+  uint64_t foreign_state_count;
+} iree_hal_profile_counter_capture_record_t;
+
+// Returns a default counter capture record.
+static inline iree_hal_profile_counter_capture_record_t
+iree_hal_profile_counter_capture_record_default(void) {
+  iree_hal_profile_counter_capture_record_t record;
+  memset(&record, 0, sizeof(record));
+  record.record_length = sizeof(record);
+  record.physical_device_ordinal = UINT32_MAX;
+  return record;
+}
+
 //===----------------------------------------------------------------------===//
 // Device metrics
 //===----------------------------------------------------------------------===//
@@ -2132,6 +2208,8 @@ IREE_HAL_PROFILE_ASSERT_RECORD_LAYOUT(
     iree_hal_profile_executable_trace_record_t, 88);
 IREE_HAL_PROFILE_ASSERT_RECORD_LAYOUT(
     iree_hal_profile_executable_trace_capture_record_t, 80);
+IREE_HAL_PROFILE_ASSERT_RECORD_LAYOUT(iree_hal_profile_counter_capture_record_t,
+                                      88);
 
 IREE_HAL_PROFILE_ASSERT_FIELD_OFFSET(
     iree_hal_profile_executable_code_object_record_t, data_length, 24);
