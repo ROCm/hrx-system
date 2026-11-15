@@ -6,10 +6,10 @@
 
 // Compact finite sets used by condition-relation propagation.
 //
-// Construction uses interned dense bitmaps in a caller-owned scratch arena so
-// set algebra is a straight word operation. Publication rewrites selected roots
-// into an immutable shared DAG in a longer-lived arena. Consumers retain no
-// dense bitmaps or construction hash tables.
+// Domains of at most 32 values encode membership directly in the set ID.
+// Larger domains use interned dense bitmaps in caller-owned scratch, then
+// publish selected roots into an immutable shared DAG in a longer-lived arena.
+// Consumers retain no dense bitmaps or construction hash tables.
 
 #ifndef LOOM_ANALYSIS_CONDITION_RELATION_SET_H_
 #define LOOM_ANALYSIS_CONDITION_RELATION_SET_H_
@@ -21,10 +21,9 @@
 extern "C" {
 #endif
 
-// Identifies a set in either a builder or an immutable index. ID zero is the
-// empty set, IDs [1, value_count] are inline singletons, and larger IDs name
-// representation-owned nodes. Builder IDs must not be used with an index;
-// publication rewrites every supplied root into the index's ID space.
+// Canonical identity of a set within a builder or an immutable index. Zero is
+// the empty set; other IDs are representation-owned and domain-dependent.
+// Publication translates every supplied root into the index's ID space.
 typedef uint32_t loom_condition_relation_set_id_t;
 
 #define LOOM_CONDITION_RELATION_SET_EMPTY ((loom_condition_relation_set_id_t)0)
@@ -59,6 +58,10 @@ typedef bool (*loom_condition_relation_set_visit_fn_t)(void* user_data,
 iree_status_t loom_condition_relation_set_builder_allocate(
     uint32_t value_count, iree_arena_allocator_t* scratch_arena,
     loom_condition_relation_set_builder_t** out_builder);
+
+// Returns the singleton containing |value| in the builder's finite domain.
+loom_condition_relation_set_id_t loom_condition_relation_set_builder_singleton(
+    const loom_condition_relation_set_builder_t* builder, uint32_t value);
 
 // Interns the set containing |values|. Values may be unsorted and repeated.
 iree_status_t loom_condition_relation_set_builder_intern(

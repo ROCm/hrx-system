@@ -951,20 +951,14 @@ static void loom_cfg_condition_relation_solver_operand_variants(
   }
 }
 
-static loom_condition_relation_set_id_t loom_cfg_condition_relation_singleton(
-    loom_cfg_condition_operand_t operand) {
-  IREE_ASSERT_NE(operand, LOOM_CFG_CONDITION_OPERAND_INVALID);
-  return (loom_condition_relation_set_id_t)(operand + 1);
-}
-
 static iree_status_t loom_cfg_condition_relation_add_symmetric(
     loom_cfg_condition_relation_solver_t* solver,
     loom_cfg_condition_operand_t left, loom_cfg_condition_operand_t right,
     loom_integer_order_outcome_bits_t exclusions) {
   const loom_condition_relation_set_id_t left_set =
-      loom_cfg_condition_relation_singleton(left);
+      loom_condition_relation_set_builder_singleton(solver->set_builder, left);
   const loom_condition_relation_set_id_t right_set =
-      loom_cfg_condition_relation_singleton(right);
+      loom_condition_relation_set_builder_singleton(solver->set_builder, right);
   for (loom_integer_order_outcome_t outcome = 0;
        outcome < LOOM_INTEGER_ORDER_OUTCOME_COUNT; ++outcome) {
     if ((exclusions & (1u << outcome)) == 0) {
@@ -1430,7 +1424,8 @@ loom_cfg_condition_relation_build_edges(
       }
       IREE_RETURN_IF_ERROR(loom_condition_relation_set_builder_union(
           solver->set_builder, raw_truth.values[fact.value],
-          loom_cfg_condition_relation_singleton(operand),
+          loom_condition_relation_set_builder_singleton(solver->set_builder,
+                                                        operand),
           &raw_truth.values[fact.value]));
     }
     IREE_RETURN_IF_ERROR(

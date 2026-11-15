@@ -11,6 +11,13 @@
 #include "iree/base/internal/math.h"
 #include "loom/ir/structural_hash.h"
 
+// Every subset fits in the existing ID when the domain fits its bit width.
+enum { LOOM_CONDITION_RELATION_SET_IMMEDIATE_CAPACITY = 32 };
+
+static bool loom_condition_relation_set_is_immediate(uint32_t value_count) {
+  return value_count <= LOOM_CONDITION_RELATION_SET_IMMEDIATE_CAPACITY;
+}
+
 typedef struct loom_condition_relation_dense_set_t {
   // Immutable dense words for this interned set.
   const uint64_t* words;
@@ -296,7 +303,7 @@ iree_status_t loom_condition_relation_set_builder_allocate(
   while ((UINT32_C(1) << builder->root_level) < leaf_capacity) {
     ++builder->root_level;
   }
-  if (builder->word_count != 0) {
+  if (!loom_condition_relation_set_is_immediate(value_count)) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         scratch_arena, builder->word_count, sizeof(*builder->work_words),
         (void**)&builder->work_words));
@@ -305,10 +312,27 @@ iree_status_t loom_condition_relation_set_builder_allocate(
   return iree_ok_status();
 }
 
+loom_condition_relation_set_id_t loom_condition_relation_set_builder_singleton(
+    const loom_condition_relation_set_builder_t* builder, uint32_t value) {
+  IREE_ASSERT_LT(value, builder->value_count);
+  return loom_condition_relation_set_is_immediate(builder->value_count)
+             ? UINT32_C(1) << value
+             : value + 1;
+}
+
 IREE_ATTRIBUTE_NOINLINE
 iree_status_t loom_condition_relation_set_builder_intern(
     loom_condition_relation_set_builder_t* builder, const uint32_t* values,
     iree_host_size_t value_count, loom_condition_relation_set_id_t* out_set) {
+  if (loom_condition_relation_set_is_immediate(builder->value_count)) {
+    loom_condition_relation_set_id_t bits = 0;
+    for (iree_host_size_t i = 0; i < value_count; ++i) {
+      IREE_ASSERT_LT(values[i], builder->value_count);
+      bits |= UINT32_C(1) << values[i];
+    }
+    *out_set = bits;
+    return iree_ok_status();
+  }
   if (value_count == 0) {
     *out_set = LOOM_CONDITION_RELATION_SET_EMPTY;
     return iree_ok_status();
@@ -329,6 +353,10 @@ iree_status_t loom_condition_relation_set_builder_union(
     loom_condition_relation_set_id_t left,
     loom_condition_relation_set_id_t right,
     loom_condition_relation_set_id_t* out_set) {
+  if (loom_condition_relation_set_is_immediate(builder->value_count)) {
+    *out_set = left | right;
+    return iree_ok_status();
+  }
   if (left == LOOM_CONDITION_RELATION_SET_EMPTY) {
     *out_set = right;
     return iree_ok_status();
@@ -360,6 +388,10 @@ iree_status_t loom_condition_relation_set_builder_intersection(
     loom_condition_relation_set_id_t left,
     loom_condition_relation_set_id_t right,
     loom_condition_relation_set_id_t* out_set) {
+  if (loom_condition_relation_set_is_immediate(builder->value_count)) {
+    *out_set = left & right;
+    return iree_ok_status();
+  }
   if (left == LOOM_CONDITION_RELATION_SET_EMPTY ||
       right == LOOM_CONDITION_RELATION_SET_EMPTY) {
     *out_set = LOOM_CONDITION_RELATION_SET_EMPTY;
@@ -404,6 +436,10 @@ iree_status_t loom_condition_relation_set_builder_difference(
     loom_condition_relation_set_id_t left,
     loom_condition_relation_set_id_t right,
     loom_condition_relation_set_id_t* out_set) {
+  if (loom_condition_relation_set_is_immediate(builder->value_count)) {
+    *out_set = left & ~right;
+    return iree_ok_status();
+  }
   if (left == LOOM_CONDITION_RELATION_SET_EMPTY || left == right) {
     *out_set = LOOM_CONDITION_RELATION_SET_EMPTY;
     return iree_ok_status();
@@ -438,11 +474,27 @@ iree_status_t loom_condition_relation_set_builder_difference(
                                                   out_set);
 }
 
+static bool loom_condition_relation_set_visit_immediate(
+    loom_condition_relation_set_id_t bits,
+    loom_condition_relation_set_visit_fn_t visit, void* user_data) {
+  while (bits) {
+    const uint32_t value = (uint32_t)iree_math_count_trailing_zeros_u32(bits);
+    if (!visit(user_data, value)) {
+      return false;
+    }
+    bits &= bits - 1;
+  }
+  return true;
+}
+
 IREE_ATTRIBUTE_NOINLINE
 bool loom_condition_relation_set_builder_for_each_while(
     const loom_condition_relation_set_builder_t* builder,
     loom_condition_relation_set_id_t set,
     loom_condition_relation_set_visit_fn_t visit, void* user_data) {
+  if (loom_condition_relation_set_is_immediate(builder->value_count)) {
+    return loom_condition_relation_set_visit_immediate(set, visit, user_data);
+  }
   if (set == LOOM_CONDITION_RELATION_SET_EMPTY) {
     return true;
   }
@@ -738,6 +790,10 @@ loom_condition_relation_set_builder_publish(
     loom_condition_relation_set_index_t* out_index) {
   *out_index = (loom_condition_relation_set_index_t){0};
   IREE_ASSERT_NE(builder->arena, arena);
+  if (loom_condition_relation_set_is_immediate(builder->value_count)) {
+    out_index->value_count = builder->value_count;
+    return iree_ok_status();
+  }
 
   loom_condition_relation_set_id_t* remap = NULL;
   if (builder->node_count != 0) {
@@ -800,6 +856,9 @@ bool loom_condition_relation_set_index_contains(
   if (set == LOOM_CONDITION_RELATION_SET_EMPTY || value >= index->value_count) {
     return false;
   }
+  if (loom_condition_relation_set_is_immediate(index->value_count)) {
+    return (set & (UINT32_C(1) << value)) != 0;
+  }
   uint8_t level = index->root_level;
   const uint32_t chunk = value / 64;
   while (true) {
@@ -858,6 +917,9 @@ bool loom_condition_relation_set_index_for_each_while(
     const loom_condition_relation_set_index_t* index,
     loom_condition_relation_set_id_t set,
     loom_condition_relation_set_visit_fn_t visit, void* user_data) {
+  if (loom_condition_relation_set_is_immediate(index->value_count)) {
+    return loom_condition_relation_set_visit_immediate(set, visit, user_data);
+  }
   return loom_condition_relation_set_index_visit(index, set, index->root_level,
                                                  0, visit, user_data);
 }
