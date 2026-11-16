@@ -200,6 +200,7 @@ __all__ = [
     "Borrow",
     "Consume",
     "Retain",
+    "Copy",
     "Release",
     "Discard",
     "Escape",
@@ -1679,6 +1680,7 @@ class OperandOwnershipEffectKind(Enum):
     BORROW = "borrow"
     CONSUME = "consume"
     RETAIN = "retain"
+    COPY = "copy"
     RELEASE = "release"
     DISCARD = "discard"
     ESCAPE = "escape"
@@ -1744,6 +1746,11 @@ def Retain(
 ) -> OperandOwnershipEffect:
     """Operation retains the operand resource."""
     return OperandOwnershipEffect(operand, OperandOwnershipEffectKind.RETAIN, carrier)
+
+
+def Copy(operand: str) -> OperandOwnershipEffect:
+    """Copies complete ownership state into an independent stored carrier."""
+    return OperandOwnershipEffect(operand, OperandOwnershipEffectKind.COPY)
 
 
 def Release(
@@ -5493,6 +5500,7 @@ def _validate_ownership_effects(
             if effect.kind not in (
                 OperandOwnershipEffectKind.BORROW,
                 OperandOwnershipEffectKind.RETAIN,
+                OperandOwnershipEffectKind.COPY,
             ):
                 consumed_sources.add(effect.operand)
             if effect.operand not in operand_map:

@@ -1465,7 +1465,7 @@ def validate_descriptor_operands(descriptor: Descriptor) -> DescriptorOperandLay
             raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' uses OPERAND_RESULT; use separate result and operand rows plus an explicit constraint")
         is_result = operand.role is OperandRole.RESULT
         if operand.ownership is not OwnershipEffect.NONE:
-            allowed = (OwnershipEffect.OWNED, OwnershipEffect.BORROWED) if is_result else (OwnershipEffect.BORROW, OwnershipEffect.RETAIN)
+            allowed = (OwnershipEffect.OWNED, OwnershipEffect.BORROWED) if is_result else (OwnershipEffect.BORROW, OwnershipEffect.RETAIN, OwnershipEffect.COPY)
             if operand.ownership not in allowed or (not is_result and not operand_role_is_packet_input(operand.role)) or OperandFlag.VARIADIC in operand.flags:
                 raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' has ownership incompatible with its SSA role")
         if is_result and seen_non_result:

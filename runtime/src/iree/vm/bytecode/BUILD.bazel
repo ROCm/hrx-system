@@ -352,6 +352,20 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "borrowed_object_test",
+    srcs = ["borrowed_object_test.cc"],
+    deps = [
+        ":module",
+        ":module_fixture",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm:test_support",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "interpreter_reference_test",
     srcs = ["interpreter_reference_test.cc"],
     deps = [
@@ -625,6 +639,7 @@ test_suite(
         ":assembler_lexer_test",
         ":assembler_symbols_test",
         ":assembler_test",
+        ":borrowed_object_test",
         ":disassembler_test",
         ":interpreter_atomic_test",
         ":interpreter_buffer_test",

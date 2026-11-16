@@ -206,7 +206,8 @@ iree_status_t loom_low_schedule_borrow_plan_build(
           schedule->module, &effects, node->op, j, &effect);
       if (call || escapes ||
           (has_effect && effect.effect != LOOM_OPERAND_OWNERSHIP_BORROW &&
-           effect.effect != LOOM_OPERAND_OWNERSHIP_RETAIN)) {
+           effect.effect != LOOM_OPERAND_OWNERSHIP_RETAIN &&
+           effect.effect != LOOM_OPERAND_OWNERSHIP_COPY)) {
         loom_low_borrow_note_owner_end(schedule, i, operands[j],
                                        storage_origins, owner_ends,
                                        ambiguous_ends);
@@ -225,7 +226,8 @@ iree_status_t loom_low_schedule_borrow_plan_build(
                  schedule->nodes[component->last_use_node].scheduled_ordinal) {
         component->last_use_node = i;
       }
-      if (escapes) {
+      if (escapes ||
+          (has_effect && effect.effect == LOOM_OPERAND_OWNERSHIP_COPY)) {
         loom_low_borrow_protect(component, LOOM_LOW_BORROW_CAPTURED, i);
       }
     }

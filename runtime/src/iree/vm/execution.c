@@ -29,9 +29,10 @@ IREE_API_EXPORT void iree_vm_call_ref_argument_load_borrow(
     iree_vm_ref_t* inout_ref) {
   const iree_vm_ref_t source = *iree_vm_call_ref_argument_slot(call, ordinal);
   iree_vm_ref_reset(inout_ref);
-  *inout_ref = source.object ? iree_vm_ref_from_ptr_borrowed(
-                                   source.object, iree_vm_ref_type(source))
-                             : iree_vm_ref_null();
+  *inout_ref = source;
+  if (source.object) {
+    inout_ref->type_and_state |= IREE_VM_REF_STATE_BORROWED;
+  }
 }
 
 IREE_API_EXPORT void iree_vm_call_ref_argument_load_move(

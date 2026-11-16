@@ -37,7 +37,8 @@ static iree_status_t iree_vm_environment_validate_ref_type_table(
                             table->structure_size,
                             (size_t)IREE_VM_REF_TYPE_TABLE_V0_REQUIRED_SIZE);
   }
-  if (table->flags != IREE_VM_REF_TYPE_TABLE_FLAG_NONE) {
+  if (table->flags & ~(iree_vm_ref_type_table_flags_t)
+                         IREE_VM_REF_TYPE_TABLE_FLAG_BORROWED_ONLY) {
     return iree_make_status(IREE_STATUS_INCOMPATIBLE,
                             "ref-type table flags 0x%08" PRIx32
                             " are not executable",
@@ -77,6 +78,11 @@ static iree_status_t iree_vm_environment_validate_ref_type_table(
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "ref type %" PRIhsz " does not point back to its provider table", i);
+    }
+    if (iree_vm_ref_type_is_borrowed_only(type) && type->destroy) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "borrowed-only ref type cannot have a destructor");
     }
     if (!type->type_name.data || type->type_name.size == 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

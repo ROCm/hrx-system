@@ -397,7 +397,10 @@ static void iree_vm_invocation_stage_arguments(
       const uintptr_t ownership =
           (argument->metadata & IREE_VM_VARIANT_TAG_MASK) ==
                   IREE_VM_VARIANT_TAG_BORROWED_REF
-              ? IREE_VM_REF_STATE_BORROWED
+              ? (iree_vm_ref_type_is_borrowed_only(
+                     callable_abi->ref_arguments[i].type)
+                     ? IREE_VM_REF_STATE_BORROWED_ONLY
+                     : IREE_VM_REF_STATE_BORROWED)
               : IREE_VM_REF_STATE_OWNED;
       ref_arguments[i].object = (void*)(uintptr_t)argument->payload;
       ref_arguments[i].type_and_state =

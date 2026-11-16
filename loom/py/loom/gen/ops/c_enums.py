@@ -83,6 +83,7 @@ OPERAND_OWNERSHIP_EFFECT_MAP: dict[OperandOwnershipEffectKind, str] = {
     OperandOwnershipEffectKind.BORROW: "LOOM_OPERAND_OWNERSHIP_BORROW",
     OperandOwnershipEffectKind.CONSUME: "LOOM_OPERAND_OWNERSHIP_CONSUME",
     OperandOwnershipEffectKind.RETAIN: "LOOM_OPERAND_OWNERSHIP_RETAIN",
+    OperandOwnershipEffectKind.COPY: "LOOM_OPERAND_OWNERSHIP_COPY",
     OperandOwnershipEffectKind.RELEASE: "LOOM_OPERAND_OWNERSHIP_RELEASE",
     OperandOwnershipEffectKind.DISCARD: "LOOM_OPERAND_OWNERSHIP_DISCARD",
     OperandOwnershipEffectKind.ESCAPE: "LOOM_OPERAND_OWNERSHIP_ESCAPE",

@@ -15,10 +15,13 @@ enum {
   IREE_VM_TEST_CALLABLE_REF = 1,
   IREE_VM_TEST_CALLABLE_YIELD_REF = 2,
   IREE_VM_TEST_CALLABLE_ADD = 3,
-  IREE_VM_TEST_CALLABLE_LAUNCH_CONFIG = 4,
-  IREE_VM_TEST_CALLABLE_F32 = 5,
-  IREE_VM_TEST_CALLABLE_RETURN_FUNCTION = 6,
-  IREE_VM_TEST_CALLABLE_CALL_FUNCTION = 7,
+  IREE_VM_TEST_CALLABLE_YIELD_ADD = 4,
+  IREE_VM_TEST_CALLABLE_LAUNCH_CONFIG = 5,
+  IREE_VM_TEST_CALLABLE_F32 = 6,
+  IREE_VM_TEST_CALLABLE_BORROWED_CALL = 7,
+  IREE_VM_TEST_CALLABLE_YIELDING_CALL = 8,
+  IREE_VM_TEST_CALLABLE_RETURN_FUNCTION = 9,
+  IREE_VM_TEST_CALLABLE_CALL_FUNCTION = 10,
 };
 
 typedef enum iree_vm_test_frame_action_e {
@@ -112,6 +115,12 @@ static const iree_vm_module_signature_type_t iree_vm_test_add_arguments[] = {
     {IREE_VM_SCALAR_TYPE_I32, 0},
     {IREE_VM_SCALAR_TYPE_I32, 0},
 };
+static const iree_vm_module_signature_type_t
+    iree_vm_test_borrowed_call_arguments[] = {
+        {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 0},
+        {IREE_VM_SCALAR_TYPE_I32, 0},
+        {IREE_VM_SCALAR_TYPE_I32, 0},
+};
 static const iree_vm_module_signature_type_t iree_vm_test_f32_arguments[] = {
     {IREE_VM_SCALAR_TYPE_F32, 0},
     {IREE_VM_SCALAR_TYPE_F32, 0},
@@ -167,6 +176,12 @@ static const iree_vm_module_callable_type_declaration_t
          IREE_VM_CALLABLE_TYPE_FLAG_NONE,
          0,
          0},
+        {{{iree_vm_test_add_arguments,
+           IREE_ARRAYSIZE(iree_vm_test_add_arguments), 2, 0, 0},
+          {iree_vm_test_i32, IREE_ARRAYSIZE(iree_vm_test_i32), 1, 0, 0}},
+         IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
+         0,
+         0},
         {{{iree_vm_test_launch_config_arguments,
            IREE_ARRAYSIZE(iree_vm_test_launch_config_arguments), 2, 0, 0},
           {iree_vm_test_launch_config_results,
@@ -179,6 +194,18 @@ static const iree_vm_module_callable_type_declaration_t
           {iree_vm_test_f32_result, IREE_ARRAYSIZE(iree_vm_test_f32_result), 1,
            0, 0}},
          IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+         0,
+         0},
+        {{{iree_vm_test_borrowed_call_arguments,
+           IREE_ARRAYSIZE(iree_vm_test_borrowed_call_arguments), 2, 1, 0},
+          {iree_vm_test_i32, IREE_ARRAYSIZE(iree_vm_test_i32), 1, 0, 0}},
+         IREE_VM_CALLABLE_TYPE_FLAG_NONE,
+         0,
+         0},
+        {{{iree_vm_test_borrowed_call_arguments,
+           IREE_ARRAYSIZE(iree_vm_test_borrowed_call_arguments), 2, 1, 0},
+          {iree_vm_test_i32, IREE_ARRAYSIZE(iree_vm_test_i32), 1, 0, 0}},
+         IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD,
          0,
          0},
         {{{NULL, 0, 0, 0, 0},
@@ -195,21 +222,34 @@ static const iree_vm_module_callable_type_declaration_t
          0},
 };
 
+enum {
+  IREE_VM_TEST_IMPORT_ADD = 0,
+  IREE_VM_TEST_IMPORT_BAD_YIELD_I32 = 1,
+  IREE_VM_TEST_IMPORT_MISSING = 2,
+  IREE_VM_TEST_IMPORT_YIELD_TWICE = 3,
+};
+
 static const iree_vm_module_import_group_t iree_vm_test_import_groups[] = {
-    {IREE_SVL("invocation.test"), 0, 2},
+    {IREE_SVL("invocation.test"), 0, 4},
 };
 static const iree_vm_module_import_declaration_t iree_vm_test_imports[] = {
     {IREE_SVL("invocation.test"), IREE_SVL("add"), IREE_VM_TEST_CALLABLE_ADD,
      IREE_VM_MODULE_IMPORT_FLAG_NONE, 0},
+    {IREE_SVL("invocation.test"), IREE_SVL("bad_yield_i32"),
+     IREE_VM_TEST_CALLABLE_ADD, IREE_VM_MODULE_IMPORT_FLAG_NONE, 0},
     {IREE_SVL("invocation.test"), IREE_SVL("missing"),
      IREE_VM_TEST_CALLABLE_ADD, IREE_VM_MODULE_IMPORT_FLAG_OPTIONAL, 0},
+    {IREE_SVL("invocation.test"), IREE_SVL("yield_twice"),
+     IREE_VM_TEST_CALLABLE_YIELD_I32, IREE_VM_MODULE_IMPORT_FLAG_NONE, 0},
 };
 
 // clang-format off
 #define IREE_VM_TEST_EXPORTS_(export)                                      \
   export(ADD, add, IREE_VM_TEST_CALLABLE_ADD)                              \
   export(BAD_REF_RESULT, bad_ref_result, IREE_VM_TEST_CALLABLE_REF)        \
+  export(BAD_YIELD_I32, bad_yield_i32, IREE_VM_TEST_CALLABLE_ADD)          \
   export(BAD_YIELD_REF, bad_yield_ref, IREE_VM_TEST_CALLABLE_REF)          \
+  export(BORROWED_CALL, borrowed_call, IREE_VM_TEST_CALLABLE_BORROWED_CALL) \
   export(CALL_FUNCTION, call_function, IREE_VM_TEST_CALLABLE_CALL_FUNCTION) \
   export(CALL_IMPORT, call_import, IREE_VM_TEST_CALLABLE_ADD)              \
   export(CALL_LOCAL, call_local, IREE_VM_TEST_CALLABLE_ADD)                \
@@ -219,11 +259,14 @@ static const iree_vm_module_import_declaration_t iree_vm_test_imports[] = {
   export(FAIL, fail, IREE_VM_TEST_CALLABLE_ADD)                            \
   export(LAUNCH_CONFIG, launch_config, IREE_VM_TEST_CALLABLE_LAUNCH_CONFIG) \
   export(MULTIPLY_F32, multiply_f32, IREE_VM_TEST_CALLABLE_F32)            \
+  export(NESTED_CALL, nested_call, IREE_VM_TEST_CALLABLE_ADD)              \
+  export(NESTED_YIELD, nested_yield, IREE_VM_TEST_CALLABLE_YIELD_ADD)       \
   export(RETURN_IMPORT, return_import, IREE_VM_TEST_CALLABLE_RETURN_FUNCTION) \
   export(RETURN_LOCAL, return_local, IREE_VM_TEST_CALLABLE_RETURN_FUNCTION) \
   export(RETURN_OPTIONAL, return_optional, IREE_VM_TEST_CALLABLE_RETURN_FUNCTION) \
   export(YIELD_REF, yield_ref, IREE_VM_TEST_CALLABLE_YIELD_REF)            \
-  export(YIELD_TWICE, yield_twice, IREE_VM_TEST_CALLABLE_YIELD_I32)
+  export(YIELD_TWICE, yield_twice, IREE_VM_TEST_CALLABLE_YIELD_I32)         \
+  export(YIELDING_CALL, yielding_call, IREE_VM_TEST_CALLABLE_YIELDING_CALL)
 // clang-format on
 
 enum {
@@ -327,7 +370,9 @@ static iree_status_t iree_vm_test_call_child(
                                          &params->call, out_outcome);
   }
   const uint16_t import_ordinal =
-      function_ordinal == IREE_VM_TEST_FUNCTION_CALL_IMPORT ? 0 : 1;
+      function_ordinal == IREE_VM_TEST_FUNCTION_CALL_IMPORT
+          ? IREE_VM_TEST_IMPORT_ADD
+          : IREE_VM_TEST_IMPORT_MISSING;
   return iree_vm_invocation_call_import(&params->execution, import_ordinal,
                                         &params->call, out_outcome);
 }
@@ -375,7 +420,9 @@ static iree_status_t iree_vm_test_return_function(
         &params->execution, local_function, &function_ref);
   } else {
     const uint16_t import_ordinal =
-        function_ordinal == IREE_VM_TEST_FUNCTION_RETURN_IMPORT ? 0 : 1;
+        function_ordinal == IREE_VM_TEST_FUNCTION_RETURN_IMPORT
+            ? IREE_VM_TEST_IMPORT_ADD
+            : IREE_VM_TEST_IMPORT_MISSING;
     status = iree_vm_function_ref_from_import(&params->execution,
                                               import_ordinal, &function_ref);
   }
@@ -385,6 +432,95 @@ static iree_status_t iree_vm_test_return_function(
   iree_vm_call_function_result_store(&params->call, 0, function_ref);
   *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
   return iree_ok_status();
+}
+
+// The root keeps its borrow while descendants receive only scalar banks. A
+// second call edge tests the invocation restriction after entering that child.
+static iree_status_t iree_vm_test_call_without_refs(
+    iree_vm_invocation_test_module_t* module,
+    const iree_vm_module_function_start_params_t* params,
+    iree_vm_execution_outcome_t* out_outcome) {
+  iree_vm_frame_t* frame = NULL;
+  IREE_RETURN_IF_ERROR(iree_vm_test_push_frame(
+      module, params, IREE_VM_TEST_FRAME_ACTION_CHILD, 0, &frame));
+  (void)frame;
+  const iree_vm_call_packet_t call = {
+      .value_arguments = params->call.value_arguments,
+      .value_results = params->call.value_results,
+  };
+  if (params->function_ordinal == IREE_VM_TEST_FUNCTION_BORROWED_CALL ||
+      params->function_ordinal == IREE_VM_TEST_FUNCTION_YIELDING_CALL) {
+    const bool may_yield =
+        params->function_ordinal == IREE_VM_TEST_FUNCTION_YIELDING_CALL;
+    const iree_vm_module_local_function_t child = {
+        may_yield ? IREE_VM_TEST_FUNCTION_NESTED_YIELD
+                  : IREE_VM_TEST_FUNCTION_NESTED_CALL,
+        may_yield ? IREE_VM_TEST_CALLABLE_YIELD_ADD : IREE_VM_TEST_CALLABLE_ADD,
+        may_yield ? IREE_VM_MODULE_FUNCTION_FLAG_MAY_YIELD
+                  : IREE_VM_MODULE_FUNCTION_FLAG_NONE,
+    };
+    return iree_vm_invocation_call_local(&params->execution, child, &call,
+                                         out_outcome);
+  }
+
+  if (iree_vm_invocation_has_external_borrowed_arguments(
+          params->execution.invocation) &&
+      !params->call.ref_arguments.direct &&
+      !params->call.ref_arguments.overflow) {
+    ++module->counters->unforwarded_borrow_count;
+  }
+  const uint32_t route =
+      (uint32_t)iree_vm_call_value_argument_load(&params->call, 0);
+  const uint32_t behavior =
+      (uint32_t)iree_vm_call_value_argument_load(&params->call, 1);
+  iree_vm_module_local_function_t child = {
+      IREE_VM_TEST_FUNCTION_ADD,
+      IREE_VM_TEST_CALLABLE_ADD,
+      IREE_VM_MODULE_FUNCTION_FLAG_NONE,
+  };
+  uint16_t import_ordinal = IREE_VM_TEST_IMPORT_ADD;
+  switch (behavior) {
+    case IREE_VM_INVOCATION_TEST_CHILD_COMPLETE:
+      break;
+    case IREE_VM_INVOCATION_TEST_CHILD_DECLARED_YIELD:
+      child.function_ordinal = IREE_VM_TEST_FUNCTION_YIELD_TWICE;
+      child.callable_type_ordinal = IREE_VM_TEST_CALLABLE_YIELD_I32;
+      child.flags = IREE_VM_MODULE_FUNCTION_FLAG_MAY_YIELD;
+      import_ordinal = IREE_VM_TEST_IMPORT_YIELD_TWICE;
+      break;
+    case IREE_VM_INVOCATION_TEST_CHILD_UNDECLARED_YIELD:
+      child.function_ordinal = IREE_VM_TEST_FUNCTION_BAD_YIELD_I32;
+      import_ordinal = IREE_VM_TEST_IMPORT_BAD_YIELD_I32;
+      break;
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unknown child behavior");
+  }
+  iree_vm_function_ref_t function_ref = iree_vm_function_ref_null();
+  switch (route) {
+    case IREE_VM_INVOCATION_TEST_CALL_LOCAL:
+      return iree_vm_invocation_call_local(&params->execution, child, &call,
+                                           out_outcome);
+    case IREE_VM_INVOCATION_TEST_CALL_IMPORT:
+      return iree_vm_invocation_call_import(&params->execution, import_ordinal,
+                                            &call, out_outcome);
+    case IREE_VM_INVOCATION_TEST_CALL_INDIRECT_LOCAL: {
+      IREE_RETURN_IF_ERROR(iree_vm_function_ref_from_local_function(
+          &params->execution, child, &function_ref));
+      break;
+    }
+    case IREE_VM_INVOCATION_TEST_CALL_INDIRECT_IMPORT: {
+      IREE_RETURN_IF_ERROR(iree_vm_function_ref_from_import(
+          &params->execution, import_ordinal, &function_ref));
+      break;
+    }
+    default:
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "unknown child dispatch route");
+  }
+  return iree_vm_invocation_call_function_ref(&params->execution, function_ref,
+                                              child.callable_type_ordinal,
+                                              &call, out_outcome);
 }
 
 static iree_status_t iree_vm_test_function_start(
@@ -414,6 +550,14 @@ static iree_status_t iree_vm_test_function_start(
     case IREE_VM_TEST_FUNCTION_YIELD_REF:
       return iree_vm_test_suspend(module, params, IREE_VM_TEST_FRAME_ACTION_REF,
                                   1, out_outcome);
+    case IREE_VM_TEST_FUNCTION_BAD_YIELD_I32:
+      return iree_vm_test_suspend(module, params, IREE_VM_TEST_FRAME_ACTION_I32,
+                                  1, out_outcome);
+    case IREE_VM_TEST_FUNCTION_BORROWED_CALL:
+    case IREE_VM_TEST_FUNCTION_YIELDING_CALL:
+    case IREE_VM_TEST_FUNCTION_NESTED_CALL:
+    case IREE_VM_TEST_FUNCTION_NESTED_YIELD:
+      return iree_vm_test_call_without_refs(module, params, out_outcome);
     case IREE_VM_TEST_FUNCTION_CALL_FUNCTION: {
       iree_vm_frame_t* frame = NULL;
       IREE_RETURN_IF_ERROR(iree_vm_test_push_frame(
@@ -560,7 +704,7 @@ iree_status_t iree_vm_invocation_test_module_initialize(
        IREE_ARRAYSIZE(iree_vm_test_imports),
        IREE_ARRAYSIZE(iree_vm_test_exports),
        0,
-       {24, 4, 2}},
+       {33, 6, 2}},
       0,
   };
   return iree_vm_module_initialize(&iree_vm_test_module_vtable,

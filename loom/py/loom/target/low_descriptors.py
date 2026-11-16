@@ -63,6 +63,7 @@ class OwnershipEffect(CEnum):
     RETAIN = "LOOM_LOW_OWNERSHIP_RETAIN"
     OWNED = "LOOM_LOW_OWNERSHIP_OWNED"
     BORROWED = "LOOM_LOW_OWNERSHIP_BORROWED"
+    COPY = "LOOM_LOW_OWNERSHIP_COPY"
 
 
 class OperandSourceBinding(CEnum):

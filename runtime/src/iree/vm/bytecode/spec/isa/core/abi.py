@@ -7,6 +7,7 @@
 """Physical overflow access for function call packets."""
 
 from iree.vm.bytecode.spec.isa import (
+    FailureCase,
     FieldRole,
     FieldRuleUse,
     Instruction,
@@ -190,6 +191,7 @@ def _ref_abi_instruction(
     state_effects: tuple[StateEffect, ...],
     assembly: str,
     pseudocode: str,
+    failures: tuple[FailureCase, ...] = (),
 ) -> Instruction:
     return Instruction(
         opcode=opcode,
@@ -210,6 +212,7 @@ def _ref_abi_instruction(
         pseudocode=pseudocode,
         state_effects=state_effects,
         ownership=ownership,
+        failures=failures,
     )
 
 
@@ -233,7 +236,7 @@ REF_ABI_ARGUMENT_LOAD_BORROW = _ref_abi_instruction(
         "The source is not retained. destination_r8 is replaced only after copying "
         "the source, and a previous destination owner is then released.",
         "The paused caller and argument packet dominate the borrow's complete callee "
-        "lifetime, including nested suspension.",
+        "lifetime, including nested suspension where permitted by the invocation contract.",
     ),
     (StateEffect(StateAccess.READ, StateResource.INVOCATION_ARGUMENTS, ("slot_u16",)),),
     "%r<destination> = ref.abi.argument.load.borrow <slot>",
@@ -303,12 +306,20 @@ REF_ABI_RESULT_STORE_MOVE = _ref_abi_instruction(
     ),
     (StateEffect(StateAccess.WRITE, StateResource.INVOCATION_RESULTS, ("slot_u16",)),),
     "ref.abi.result.store.move %r<source>, <slot>",
+    "require_can_retain(refs[source_r8]);\n"
     "source = promote_borrow_to_owner(refs[source_r8]);\n"
     "old_result = frame.result_ref_slots[slot_u16];\n"
     "frame.result_ref_slots[slot_u16] = source;\n"
     "refs[source_r8] = canonical_null_ref;\n"
     "release_or_clear(old_result);\n"
     "pc = pc + 4;",
+    failures=(
+        FailureCase(
+            "failed_precondition",
+            "The source has a borrowed-only type and cannot be returned.",
+            "The source and result slot remain unchanged.",
+        ),
+    ),
 )
 
 

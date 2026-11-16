@@ -11,8 +11,7 @@ static inline iree_vm_ref_object_t* iree_vm_ref_object_cast(void* object) {
 }
 
 static inline bool iree_vm_ref_is_borrowed(iree_vm_ref_t ref) {
-  return (ref.type_and_state & IREE_VM_REF_STATE_MASK) ==
-         IREE_VM_REF_STATE_BORROWED;
+  return (ref.type_and_state & IREE_VM_REF_STATE_BORROWED) != 0;
 }
 
 static inline iree_vm_ref_t iree_vm_ref_make(void* object,
@@ -69,11 +68,18 @@ IREE_API_EXPORT bool iree_vm_ref_isa(iree_vm_ref_t ref,
 
 IREE_API_EXPORT iree_vm_ref_t
 iree_vm_ref_from_ptr_borrowed(void* ptr, iree_vm_ref_type_t type) {
-  return iree_vm_ref_make(ptr, type, IREE_VM_REF_STATE_BORROWED);
+  if (!ptr) {
+    return iree_vm_ref_null();
+  }
+  return iree_vm_ref_make(ptr, type,
+                          iree_vm_ref_type_is_borrowed_only(type)
+                              ? IREE_VM_REF_STATE_BORROWED_ONLY
+                              : IREE_VM_REF_STATE_BORROWED);
 }
 
 IREE_API_EXPORT iree_vm_ref_t
 iree_vm_ref_from_ptr_retained(void* ptr, iree_vm_ref_type_t type) {
+  IREE_ASSERT(!ptr || !iree_vm_ref_type_is_borrowed_only(type));
   if (ptr) {
     iree_vm_ref_object_retain(ptr);
   }
@@ -82,12 +88,14 @@ iree_vm_ref_from_ptr_retained(void* ptr, iree_vm_ref_type_t type) {
 
 IREE_API_EXPORT iree_vm_ref_t
 iree_vm_ref_from_ptr_move(void** inout_ptr, iree_vm_ref_type_t type) {
+  IREE_ASSERT(!*inout_ptr || !iree_vm_ref_type_is_borrowed_only(type));
   void* ptr = *inout_ptr;
   *inout_ptr = NULL;
   return iree_vm_ref_make(ptr, type, IREE_VM_REF_STATE_OWNED);
 }
 
 IREE_API_EXPORT iree_vm_ref_t iree_vm_ref_retain(iree_vm_ref_t ref) {
+  IREE_ASSERT(!iree_vm_ref_is_borrowed_only(ref));
   if (!ref.object) {
     return iree_vm_ref_null();
   }
@@ -97,6 +105,7 @@ IREE_API_EXPORT iree_vm_ref_t iree_vm_ref_retain(iree_vm_ref_t ref) {
 }
 
 IREE_API_EXPORT iree_vm_ref_t iree_vm_ref_move(iree_vm_ref_t* ref) {
+  IREE_ASSERT(!iree_vm_ref_is_borrowed_only(*ref));
   iree_vm_ref_t result = *ref;
   if (result.object && iree_vm_ref_is_borrowed(result)) {
     iree_vm_ref_object_retain(result.object);
@@ -132,6 +141,10 @@ IREE_API_EXPORT iree_status_t iree_vm_ptr_from_ref_retained(
                             "out_ptr is required");
   }
   IREE_RETURN_IF_ERROR(iree_vm_ref_check_type(ref, expected_type));
+  if (iree_vm_ref_is_borrowed_only(ref)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "borrowed-only ref cannot acquire an owner");
+  }
   if (ref.object) {
     iree_vm_ref_object_retain(ref.object);
   }
@@ -146,6 +159,10 @@ IREE_API_EXPORT iree_status_t iree_vm_ptr_from_ref_move(
                             "ref and out_ptr are required");
   }
   IREE_RETURN_IF_ERROR(iree_vm_ref_check_type(*ref, expected_type));
+  if (iree_vm_ref_is_borrowed_only(*ref)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "borrowed-only ref cannot acquire an owner");
+  }
   iree_vm_ref_t old_ref = *ref;
   if (old_ref.object && iree_vm_ref_is_borrowed(old_ref)) {
     iree_vm_ref_object_retain(old_ref.object);

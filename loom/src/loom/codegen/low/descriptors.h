@@ -77,6 +77,8 @@ enum loom_low_ownership_effect_e {
   LOOM_LOW_OWNERSHIP_RETAIN = 2,
   LOOM_LOW_OWNERSHIP_OWNED = 3,
   LOOM_LOW_OWNERSHIP_BORROWED = 4,
+  // Nonconsuming copy into independent storage, preserving borrowed state.
+  LOOM_LOW_OWNERSHIP_COPY = 5,
 };
 
 enum loom_low_operand_role_e {
