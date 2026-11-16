@@ -14,10 +14,11 @@ extern "C" {
 #endif
 
 // Builds an ordinary returning Low helper taking one DMA descriptor selector.
-// It queues a code image through the admitted control route, consumes the
-// header/status completion, and returns only after successful delivery. Exact
-// register/status effects participate in normal callable compilation. The
-// physical queue route and command are private to this compilation workspace.
+// It disables the previous hardware-loop endpoint, queues a code image through
+// the admitted control route, consumes the header/status completion, and
+// returns only after successful delivery. Exact register/status effects
+// participate in normal callable compilation. The physical queue route and
+// command are private to this compilation workspace.
 iree_status_t loom_aie2p_program_loading_build(loom_module_t* module,
                                                uint32_t queue_header,
                                                uint32_t queue_command,

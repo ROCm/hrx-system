@@ -102,6 +102,19 @@ iree_status_t loom_aie2p_program_loading_build(loom_module_t* module,
   loom_builder_enter_region(&code.builder, function, region);
   const loom_value_id_t descriptor =
       loom_region_entry_block(region)->arg_ids[0];
+  // Loop endpoints survive completion of the code that installed them. The
+  // replacement may execute those addresses before setting up its own loop.
+  // Restore LE's inert reset address while still in resident code so the old
+  // endpoint cannot affect control flow in the newly loaded instructions.
+  const loom_named_attr_t loop_end = {.name_id = code.integer_name,
+                                      .value = loom_attr_i64(0xFFFFFu)};
+  loom_op_t* disable_loop = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_build_resolved_descriptor_op(
+      &code.builder, code.descriptors,
+      &code.descriptors
+           ->descriptors[AIE2P_CORE_DESCRIPTOR_REF_STATE_LOOP_END_ADDRESS],
+      0, NULL, 0, loom_make_named_attr_slice(&loop_end, 1), NULL, 0, NULL, 0,
+      LOOM_LOCATION_UNKNOWN, &disable_loop));
   const uint32_t headers[] = {queue_header, queue_command};
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(headers); ++i) {
     loom_value_id_t word;

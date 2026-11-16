@@ -4,6 +4,9 @@
 // Unrolling forces A and B to exceed the instruction store together while
 // each fits separately. Both use the same resident helper and outer storage;
 // revisiting A must restore its code without resetting data or channel state.
+// A ends with a vector loop whose hardware-loop addresses are reused by B's
+// unrolled calls. Replacement must retire the old loop state as well as its
+// instructions, even though B does not install a hardware loop of its own.
 aie2p.target<array> @device {device_profile = "amd.xdna.strix_halo.17f0_11"}
 
 func.def noinline @shared_step(%value: i32, %amount: i32) -> (i32) {
@@ -40,6 +43,13 @@ pipeline.def @phase_a() run(%storage: buffer, %requests: channel<tile<16xi32>>) 
       %value = view.load %values[%i] : view<320xi32> -> i32
       %result = func.call @shared_step(%value, %amount) : (i32, i32) -> (i32)
       view.store %result, %values[%i] : i32, view<320xi32>
+    }
+    %vector_step = index.constant 16 : index
+    %increment = vector.splati 1 : vector<16xi32>
+    scf.for %i = [%begin to %count step %vector_step] {
+      %value = vector.load %values[%i] : view<320xi32> -> vector<16xi32>
+      %result = vector.addi %value, %increment : vector<16xi32>
+      vector.store %result, %values[%i] : vector<16xi32>, view<320xi32>
     }
     channel.release %read : read<tile<16xi32>>
   }
@@ -151,16 +161,19 @@ func.def @reference(%output: buffer) {
   %last_amount = scalar.constant 9 : i32
   %factor = scalar.constant 3 : i32
   %mask = scalar.constant 85 : i32
+  %increment = scalar.constant 1 : i32
   %values = buffer.view %output[%origin] : buffer -> view<320xi32>
   scf.for %i = [%begin to %count step %step] {
     %initial = index.cast %i : index to i32
     %a0 = scalar.addi %initial, %first_amount : i32
-    %a = scalar.muli %a0, %factor : i32
+    %scaled_a = scalar.muli %a0, %factor : i32
+    %a = scalar.addi %scaled_a, %increment : i32
     %mixed = scalar.xori %a, %mask : i32
     %b0 = scalar.addi %mixed, %middle_amount : i32
     %b = scalar.muli %b0, %factor : i32
     %last0 = scalar.addi %b, %last_amount : i32
-    %last = scalar.muli %last0, %factor : i32
+    %scaled_last = scalar.muli %last0, %factor : i32
+    %last = scalar.addi %scaled_last, %increment : i32
     view.store %last, %values[%i] : i32, view<320xi32>
   }
   %extra_offset = index.constant 1280 : offset

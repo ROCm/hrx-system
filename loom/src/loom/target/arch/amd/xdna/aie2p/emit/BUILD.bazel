@@ -355,6 +355,28 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "program_loading_test",
+    srcs = ["program_loading_test.cc"],
+    deps = [
+        ":callable_compile",
+        ":program_loading",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/target:profile",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:provider",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:target_profile",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:encoding",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:registry",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/encoding",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/machine",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "program_layout_test",
     srcs = ["program_layout_test.cc"],
     deps = [
