@@ -58,8 +58,6 @@ class LoomWheelTest(unittest.TestCase):
     def query(self, path):
         model = self.root / "fixture"
         model.mkdir(exist_ok=True)
-        (model / "serve.json").write_text("{}")
-        (model / "weights.data").write_bytes(b"weights")
         # An old, undeclared file in the same output directory must not travel.
         (model / "stale.data").write_bytes(b"stale")
         return "\n".join(
@@ -80,6 +78,7 @@ class LoomWheelTest(unittest.TestCase):
                     "files": [str(model / "serve.json")],
                     "runfiles": [
                         str(model / "serve.json"),
+                        str(model / "model.json"),
                         str(model / "weights.data"),
                     ],
                 },
@@ -93,6 +92,7 @@ class LoomWheelTest(unittest.TestCase):
         script.write_text(
             "import json\n"
             "import sys\n"
+            "from pathlib import Path\n"
             f"query = {query!r}\n"
             f"build_status = {build_status}\n"
             f"log = {os.fspath(self.bazel_log)!r}\n"
@@ -100,6 +100,18 @@ class LoomWheelTest(unittest.TestCase):
             "    stream.write(json.dumps(sys.argv[1:]) + '\\n')\n"
             "command = sys.argv[1] if len(sys.argv) > 1 else None\n"
             "if command == 'build':\n"
+            "    if build_status == 0:\n"
+            f"        model = Path({str(self.root / 'fixture')!r})\n"
+            "        model.mkdir(exist_ok=True)\n"
+            "        (model / 'serve.json').write_text('{}')\n"
+            # Match top-level cache downloads: outputs outside the default
+            # group exist locally only when their group is requested.
+            "        groups = {group.lstrip('+') for arg in sys.argv[2:]\n"
+            "                  if arg.startswith('--output_groups=')\n"
+            "                  for group in arg.split('=', 1)[1].split(',')}\n"
+            "        if 'model_files' in groups:\n"
+            "            (model / 'model.json').write_text('{}')\n"
+            "            (model / 'weights.data').write_bytes(b'weights')\n"
             "    raise SystemExit(build_status)\n"
             "if command == 'cquery':\n"
             "    print(query)\n"
@@ -156,6 +168,7 @@ class LoomWheelTest(unittest.TestCase):
                 self.assertEqual(
                     (output / "model/weights.data").read_bytes(), b"weights"
                 )
+                self.assertEqual((output / "model/model.json").read_text(), "{}")
                 self.assertFalse((output / "model/stale.data").exists())
 
     def test_fortify2_is_scoped_to_optimized_linux_artifacts(self):
