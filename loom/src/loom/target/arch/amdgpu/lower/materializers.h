@@ -87,13 +87,24 @@ loom_type_t loom_amdgpu_materialized_sgpr64_address_type(
     const loom_low_lower_context_t* context, loom_value_id_t source_value,
     const void* plan);
 
+// Normalizes an address to a VGPR pair without changing its source mapping.
+loom_type_t loom_amdgpu_materialized_vgpr64_address_type(
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan);
+
 // Retains the address's signed or unsigned extension as an immutable recipe.
-iree_status_t loom_amdgpu_prepare_sgpr64_address(
+iree_status_t loom_amdgpu_prepare_address_pair(
     loom_low_lower_context_t* context, loom_value_id_t source_value,
     const void** out_plan);
 
 // Extends or reuses the bound address payload according to the selected recipe.
 iree_status_t loom_amdgpu_emit_prepared_sgpr64_address(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, const void* plan,
+    loom_value_id_t* out_low_value);
+
+// Extends or reuses the bound address payload in a pair of VGPRs.
+iree_status_t loom_amdgpu_emit_prepared_vgpr64_address(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_value, const void* plan,
     loom_value_id_t* out_low_value);
@@ -154,6 +165,13 @@ iree_status_t loom_amdgpu_lookup_or_materialize_vop3_binary_rhs(
 // Returns true when a source i32 scalar or vector value can be materialized as
 // a VGPR operand for vector-style packets.
 iree_status_t loom_amdgpu_value_can_materialize_as_vgpr_i32(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t value_id, bool* out_can_materialize);
+
+// Returns true when an index operand has a wide numeric carrier. Bounded
+// native values retain native bit semantics even when transported in a pair;
+// unresolved ranges consume the producer's retained physical width.
+iree_status_t loom_amdgpu_value_can_materialize_as_wide_index(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t value_id, bool* out_can_materialize);
 

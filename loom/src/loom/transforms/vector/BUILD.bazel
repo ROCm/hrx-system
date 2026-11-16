@@ -121,6 +121,17 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "index_bounds",
+    srcs = ["index_bounds.c"],
+    hdrs = ["index_bounds.h"],
+    deps = [
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/rewrite:rewriter",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "to_scalar",
     srcs = [
         "to_scalar.c",
@@ -153,6 +164,7 @@ loom_cc_library(
     ],
     hdrs = ["to_scalar.h"],
     deps = [
+        ":index_bounds",
         "//loom/src/loom/analysis:contract",
         "//loom/src/loom/analysis:matrix_fragment_layout",
         "//loom/src/loom/analysis:motion",
@@ -313,6 +325,7 @@ loom_cc_library(
     srcs = ["shape_legalization.c"],
     hdrs = ["shape_legalization.h"],
     deps = [
+        ":index_bounds",
         ":packet_legalization",
         "//loom/src/loom/analysis:motion",
         "//loom/src/loom/ir",

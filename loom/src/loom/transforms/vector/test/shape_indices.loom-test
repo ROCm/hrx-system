@@ -1,0 +1,117 @@
+// RUN: pass target-legalize{mode=eager},canonicalize,dce,target-legalize{mode=complete},canonicalize,dce
+
+// Flattening retains each axis domain before arithmetic loses the shape.
+// The original row and column remain independently observable.
+test.target<native_vectors> @target
+
+func.def target(@target) @matrix_extract(%a: vector<4xi32>, %b: vector<4xi32>, %row: index, %column: index) -> (i32, index, index) {
+  %flat = vector.concat<0> %a, %b : vector<4xi32>, vector<4xi32> -> vector<8xi32>
+  %matrix = vector.bitcast %flat : vector<8xi32> to vector<4x2xi32>
+  %value = vector.extract %matrix[%row, %column] : vector<4x2xi32> -> i32
+  func.return %value, %row, %column : i32, index, index
+}
+
+func.def target(@target) @tail_extract(%a: vector<4xi32>, %b: vector<4xi32>, %plane: index) -> (vector<4xi32>) {
+  %flat = vector.concat<0> %a, %b : vector<4xi32>, vector<4xi32> -> vector<8xi32>
+  %volume = vector.bitcast %flat : vector<8xi32> to vector<2x2x2xi32>
+  %tail = vector.extract %volume[%plane] : vector<2x2x2xi32> -> vector<2x2xi32>
+  %result = vector.bitcast %tail : vector<2x2xi32> to vector<4xi32>
+  func.return %result : vector<4xi32>
+}
+
+func.def target(@target) @matrix_insert(%a: vector<4xi32>, %b: vector<4xi32>, %value: i32, %row: index, %column: index) -> (vector<4xi32>, vector<4xi32>) {
+  %flat = vector.concat<0> %a, %b : vector<4xi32>, vector<4xi32> -> vector<8xi32>
+  %matrix = vector.bitcast %flat : vector<8xi32> to vector<4x2xi32>
+  %updated = vector.insert %value into %matrix[%row, %column] : i32, vector<4x2xi32>
+  %result = vector.bitcast %updated : vector<4x2xi32> to vector<8xi32>
+  %first = vector.slice %result[0] : vector<8xi32> -> vector<4xi32>
+  %last = vector.slice %result[4] : vector<8xi32> -> vector<4xi32>
+  func.return %first, %last : vector<4xi32>, vector<4xi32>
+}
+
+func.def target(@target) @tail_insert(%a: vector<4xi32>, %b: vector<4xi32>, %value: vector<4xi32>, %row: index) -> (vector<4xi32>, vector<4xi32>) {
+  %flat = vector.concat<0> %a, %b : vector<4xi32>, vector<4xi32> -> vector<8xi32>
+  %matrix = vector.bitcast %flat : vector<8xi32> to vector<2x4xi32>
+  %updated = vector.insert %value into %matrix[%row] : vector<4xi32>, vector<2x4xi32>
+  %result = vector.bitcast %updated : vector<2x4xi32> to vector<8xi32>
+  %first = vector.slice %result[0] : vector<8xi32> -> vector<4xi32>
+  %last = vector.slice %result[4] : vector<8xi32> -> vector<4xi32>
+  func.return %first, %last : vector<4xi32>, vector<4xi32>
+}
+
+// A rectangular slice's origin is bounded by its entire footprint, not just
+// by the first selected element. This rectangle has only one valid row.
+func.def target(@target) @rectangle(%a: vector<4xi32>, %b: vector<4xi32>, %row: index, %column: index) -> (vector<4xi32>) {
+  %flat = vector.concat<0> %a, %b : vector<4xi32>, vector<4xi32> -> vector<8xi32>
+  %matrix = vector.bitcast %flat : vector<8xi32> to vector<2x4xi32>
+  %tile = vector.slice %matrix[%row, %column] : vector<2x4xi32> -> vector<2x2xi32>
+  %result = vector.bitcast %tile : vector<2x2xi32> to vector<4xi32>
+  func.return %result : vector<4xi32>
+}
+
+// ----
+test.target<native_vectors> @target
+
+func.def target(@target) @matrix_extract(%a: vector<4xi32>, %b: vector<4xi32>, %row: index, %column: index) -> (i32, index, index) {
+  %63 = index.assume %row [range(%row, 0, 3)] : index
+  %64 = index.assume %column [range(%column, 0, 1)] : index
+  %65 = index.constant 2 : index
+  %66 = index.madd %63, %65, %64 : index
+  %69 = index.constant 4 : index
+  %70 = index.cmp slt, %66, %69 : index
+  %value = scf.if %70 -> (i32) {
+    %107 = index.assume %66 [lt(%66, 4)] : index
+    %72 = vector.extract %a[%107] : vector<4xi32> -> i32
+    scf.yield %72 : i32
+  } else {
+    %108 = index.assume %66 [ge(%66, 4)] : index
+    %75 = index.constant 4 : index
+    %76 = index.sub %108, %75 : index
+    %78 = vector.extract %b[%76] : vector<4xi32> -> i32
+    scf.yield %78 : i32
+  }
+  func.return %value, %row, %column : i32, index, index
+}
+
+func.def target(@target) @tail_extract(%a: vector<4xi32>, %b: vector<4xi32>, %plane: index) -> (vector<4xi32>) {
+  %flat = vector.concat<0> %a, %b : vector<4xi32>, vector<4xi32> -> vector<8xi32>
+  %80 = index.assume %plane [range(%plane, 0, 1)] : index
+  %110 = index.constant 2 : index
+  %111 = index.shli %80, %110 : index
+  %84 = vector.slice %flat[%111] : vector<8xi32> -> vector<4xi32>
+  func.return %84 : vector<4xi32>
+}
+
+func.def target(@target) @matrix_insert(%a: vector<4xi32>, %b: vector<4xi32>, %value: i32, %row: index, %column: index) -> (vector<4xi32>, vector<4xi32>) {
+  %flat = vector.concat<0> %a, %b : vector<4xi32>, vector<4xi32> -> vector<8xi32>
+  %86 = index.assume %row [range(%row, 0, 3)] : index
+  %87 = index.assume %column [range(%column, 0, 1)] : index
+  %88 = index.constant 2 : index
+  %89 = index.madd %86, %88, %87 : index
+  %91 = vector.insert %value into %flat[%89] : i32, vector<8xi32>
+  %first = vector.slice %91[0] : vector<8xi32> -> vector<4xi32>
+  %last = vector.slice %91[4] : vector<8xi32> -> vector<4xi32>
+  func.return %first, %last : vector<4xi32>, vector<4xi32>
+}
+
+func.def target(@target) @tail_insert(%a: vector<4xi32>, %b: vector<4xi32>, %value: vector<4xi32>, %row: index) -> (vector<4xi32>, vector<4xi32>) {
+  %93 = index.assume %row [range(%row, 0, 1)] : index
+  %96 = index.constant 0 : index
+  %97 = index.cmp eq, %93, %96 : index
+  %113 = scf.select %97, %value, %a : vector<4xi32>
+  %101 = index.constant 1 : index
+  %102 = index.cmp eq, %93, %101 : index
+  %112 = scf.select %102, %value, %b : vector<4xi32>
+  func.return %113, %112 : vector<4xi32>, vector<4xi32>
+}
+
+func.def target(@target) @rectangle(%a: vector<4xi32>, %b: vector<4xi32>, %row: index, %column: index) -> (vector<4xi32>) {
+  %flat = vector.concat<0> %a, %b : vector<4xi32>, vector<4xi32> -> vector<8xi32>
+  %53 = index.assume %column [range(%column, 0, 2)] : index
+  %57 = vector.slice %flat[%53] : vector<8xi32> -> vector<2xi32>
+  %58 = index.constant 4 : index
+  %59 = index.add %53, %58 : index
+  %60 = vector.slice %flat[%59] : vector<8xi32> -> vector<2xi32>
+  %61 = vector.concat<0> %57, %60 : vector<2xi32>, vector<2xi32> -> vector<4xi32>
+  func.return %61 : vector<4xi32>
+}

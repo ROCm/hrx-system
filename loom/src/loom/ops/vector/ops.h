@@ -456,7 +456,7 @@ iree_status_t loom_vector_from_elements_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_EXTRACT: Extract a scalar or tail subvector from a vector at explicit leading indices. Supplying one index consumes the first source axis, two indices consume the first two axes, and consuming all axes produces a scalar element.
+// LOOM_OP_VECTOR_EXTRACT: Extract a scalar or tail subvector from a vector at explicit leading indices. Supplying one index consumes the first source axis, two indices consume the first two axes, and consuming all axes produces a scalar element. Each selected coordinate must be nonnegative and less than its source axis extent.
 // %x = vector.extract %v[%i] : vector<[%n]xf32> -> f32
 LOOM_DEFINE_ISA(loom_vector_extract_isa, LOOM_OP_VECTOR_EXTRACT)
 LOOM_DEFINE_OPERAND(loom_vector_extract_source, 0)
@@ -485,7 +485,7 @@ iree_status_t loom_vector_extract_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_VECTOR_INSERT: Insert a scalar or tail subvector into a vector at explicit leading indices. The inserted value must match the destination tail shape remaining after the supplied indices, and the result type is the same as the destination type.
+// LOOM_OP_VECTOR_INSERT: Insert a scalar or tail subvector into a vector at explicit leading indices. The inserted value must match the destination tail shape remaining after the supplied indices, and the result type is the same as the destination type. Each selected coordinate must be nonnegative and less than its destination axis extent.
 // %r = vector.insert %x into %v[%i] : f32, vector<[%n]xf32>
 LOOM_DEFINE_ISA(loom_vector_insert_isa, LOOM_OP_VECTOR_INSERT)
 LOOM_DEFINE_OPERAND(loom_vector_insert_value, 0)
@@ -514,7 +514,7 @@ iree_status_t loom_vector_insert_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_VECTOR_SLICE: Extract a rank-preserving contiguous register subvector at explicit offsets. The offset list has one entry per source axis; each result axis extent describes how many lanes are kept from that source axis.
+// LOOM_OP_VECTOR_SLICE: Extract a rank-preserving contiguous register subvector at explicit offsets. The offset list has one entry per source axis; each result axis extent describes how many lanes are kept from that source axis. Offsets must be nonnegative and the complete result footprint must fit within the source shape.
 // %tail = vector.slice %v[%i] : vector<[%n]xf32> -> vector<4xf32>
 LOOM_DEFINE_ISA(loom_vector_slice_isa, LOOM_OP_VECTOR_SLICE)
 LOOM_DEFINE_OPERAND(loom_vector_slice_source, 0)

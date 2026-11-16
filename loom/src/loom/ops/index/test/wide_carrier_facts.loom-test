@@ -176,3 +176,70 @@ func.def target(@target) @wide_clamped_powers(%choose: i1) -> (i1, i1) {
   %offset_power = scalar.constant true : i1
   func.return %power, %offset_power : i1, i1
 }
+
+// ====
+
+// Negative products use the same mathematical domain as positive products.
+// Logical shift observes the complete signed carrier, not a truncated low word.
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @negative_products(%input: index) -> (i64, i64, i64, i64, i1) {
+  %bounded = index.assume %input [range(%input, -1073741825, -1073741823)] : index
+  %c4 = index.constant 4 : index
+  %c1 = index.constant 1 : index
+  %lower = index.constant -4294967304 : index
+  %upper = index.constant -4294967288 : index
+  %product = index.mul %bounded, %c4 : index
+  %minimum = index.min %product, %upper : index
+  %maximum = index.max %product, %lower : index
+  %shifted = index.shrui %product, %c1 : index
+  %minimum_lo = test.fact_range_lo %minimum : index -> i64
+  %maximum_hi = test.fact_range_hi %maximum : index -> i64
+  %shift_lo = test.fact_range_lo %shifted : index -> i64
+  %shift_hi = test.fact_range_hi %shifted : index -> i64
+  %negative = index.cmp slt, %product, %upper : index
+  func.return %minimum_lo, %maximum_hi, %shift_lo, %shift_hi, %negative : i64, i64, i64, i64, i1
+}
+
+// ----
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @negative_products(%input: index) -> (i64, i64, i64, i64, i1) {
+  %minimum_lo = scalar.constant -4294967300 : i64
+  %maximum_hi = scalar.constant -4294967292 : i64
+  %shift_lo = scalar.constant 9223372034707292158 : i64
+  %shift_hi = scalar.constant 9223372034707292162 : i64
+  %negative = scalar.constant true : i1
+  func.return %minimum_lo, %maximum_hi, %shift_lo, %shift_hi, %negative : i64, i64, i64, i64, i1
+}
+
+// ====
+
+// A finite range can extend beyond both ends of the native carrier. It is not
+// the unknown envelope published after overflow of the analysis itself.
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @crossing_products(%input: index) -> (i64, i64, i64, i64) {
+  %bounded = index.assume %input [range(%input, -3, 3)] : index
+  %factor = index.constant 1073741824 : index
+  %c0 = index.constant 0 : index
+  %product = index.mul %bounded, %factor : index
+  %minimum = index.min %product, %c0 : index
+  %maximum = index.max %product, %c0 : index
+  %minimum_lo = test.fact_range_lo %minimum : index -> i64
+  %minimum_hi = test.fact_range_hi %minimum : index -> i64
+  %maximum_lo = test.fact_range_lo %maximum : index -> i64
+  %maximum_hi = test.fact_range_hi %maximum : index -> i64
+  func.return %minimum_lo, %minimum_hi, %maximum_lo, %maximum_hi : i64, i64, i64, i64
+}
+
+// ----
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @crossing_products(%input: index) -> (i64, i64, i64, i64) {
+  %minimum_lo = scalar.constant -3221225472 : i64
+  %minimum_hi = scalar.constant 0 : i64
+  %maximum_lo = scalar.constant 0 : i64
+  %maximum_hi = scalar.constant 3221225472 : i64
+  func.return %minimum_lo, %minimum_hi, %maximum_lo, %maximum_hi : i64, i64, i64, i64
+}

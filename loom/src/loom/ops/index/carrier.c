@@ -98,45 +98,30 @@ static bool loom_index_value_has_producer(const loom_module_t* module,
                                         : loom_value_def_op(value) != NULL;
 }
 
-int32_t loom_index_value_fact_carrier_bitwidth(
-    const loom_fact_context_t* context, const loom_module_t* module,
-    loom_value_id_t value_id, loom_scalar_type_t scalar_type,
-    loom_value_facts_t facts) {
-  const int32_t native_bitwidth =
-      loom_index_target_carrier_bitwidth(context, scalar_type);
-  if (native_bitwidth <= 0 || native_bitwidth >= 64 ||
-      scalar_type != LOOM_SCALAR_TYPE_INDEX ||
-      loom_value_facts_is_float(facts) ||
-      !loom_index_value_has_producer(module, value_id)) {
+int32_t loom_index_facts_carrier_bitwidth(loom_value_facts_t facts,
+                                          uint32_t native_bitwidth,
+                                          uint32_t maximum_bitwidth) {
+  if (native_bitwidth == 64) {
     return native_bitwidth;
   }
-
-  // A native index carrier preserves its signed domain and nonnegative raw bit
-  // patterns. Values proven wholly below the native signed domain are not
-  // supported by the target's wide-coordinate carrier. A conservative
-  // envelope crossing that boundary can describe native arithmetic or a wide
-  // value whose range lost precision. It establishes neither representation.
-  // Positive high-bit coordinates require a signed-capable wider carrier when
-  // one is available. A single-carrier target retains its raw native payload.
+  // Arithmetic overflow and imprecise joins publish the full envelope while
+  // retaining independent facts such as divisibility. Only representation
+  // planning can preserve an established producer width through that envelope.
+  if (facts.range_lo == INT64_MIN && facts.range_hi == INT64_MAX) {
+    return 0;
+  }
   const int64_t native_signed_minimum = -(INT64_C(1) << (native_bitwidth - 1));
   const int64_t native_signed_maximum =
       (INT64_C(1) << (native_bitwidth - 1)) - 1;
   const int64_t native_unsigned_maximum =
       (int64_t)((UINT64_C(1) << native_bitwidth) - 1);
-  const uint32_t maximum_bitwidth = loom_target_snapshot_maximum_index_bitwidth(
-      &context->target_facts->storage.snapshot);
-  if (facts.range_hi < native_signed_minimum) {
-    return -1;
-  }
-  if (facts.range_lo < native_signed_minimum) {
-    return maximum_bitwidth > (uint32_t)native_bitwidth ? 0 : native_bitwidth;
-  }
-  if (facts.range_hi <= native_signed_maximum ||
-      (maximum_bitwidth <= (uint32_t)native_bitwidth &&
-       facts.range_hi <= native_unsigned_maximum)) {
+  if (facts.range_lo >= native_signed_minimum &&
+      (facts.range_hi <= native_signed_maximum ||
+       (maximum_bitwidth == native_bitwidth &&
+        facts.range_hi <= native_unsigned_maximum))) {
     return native_bitwidth;
   }
-  if (maximum_bitwidth <= (uint32_t)native_bitwidth || maximum_bitwidth > 64) {
+  if (maximum_bitwidth <= native_bitwidth || maximum_bitwidth > 64) {
     return -1;
   }
   if (maximum_bitwidth == 64) {
@@ -150,4 +135,22 @@ int32_t loom_index_value_fact_carrier_bitwidth(
                  facts.range_hi <= maximum_unsigned_maximum
              ? (int32_t)maximum_bitwidth
              : -1;
+}
+
+int32_t loom_index_value_fact_carrier_bitwidth(
+    const loom_fact_context_t* context, const loom_module_t* module,
+    loom_value_id_t value_id, loom_scalar_type_t scalar_type,
+    loom_value_facts_t facts) {
+  const int32_t native_bitwidth =
+      loom_index_target_carrier_bitwidth(context, scalar_type);
+  if (native_bitwidth <= 0 || native_bitwidth >= 64 ||
+      scalar_type != LOOM_SCALAR_TYPE_INDEX ||
+      loom_value_facts_is_float(facts) ||
+      !loom_index_value_has_producer(module, value_id)) {
+    return native_bitwidth;
+  }
+  return loom_index_facts_carrier_bitwidth(
+      facts, (uint32_t)native_bitwidth,
+      loom_target_snapshot_maximum_index_bitwidth(
+          &context->target_facts->storage.snapshot));
 }

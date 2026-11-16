@@ -41,3 +41,50 @@ func.def target(@target) @interleaved_components(%a: f32, %b: f32, %c: f32, %d: 
   %tail = vector.extract %33[3] : vector<4xf32> -> f32
   func.return %observed, %tail : f32, f32
 }
+
+// ====
+
+// Packet-local indices retain their bounds before subtracting the packet base.
+// The original position stays unconstrained and is returned independently.
+test.target<native_vectors> @target
+
+func.def target(@target) @dynamic_insert(%a: vector<4xf32>, %b: vector<4xf32>, %c: vector<2xf32>, %value: f32, %position: index) -> (vector<4xf32>, vector<4xf32>, vector<2xf32>, index) {
+  %values = vector.concat<0> %a, %b, %c : vector<4xf32>, vector<4xf32>, vector<2xf32> -> vector<10xf32>
+  %updated = vector.insert %value into %values[%position] : f32, vector<10xf32>
+  %first = vector.slice %updated[0] : vector<10xf32> -> vector<4xf32>
+  %middle = vector.slice %updated[4] : vector<10xf32> -> vector<4xf32>
+  %last = vector.slice %updated[8] : vector<10xf32> -> vector<2xf32>
+  func.return %first, %middle, %last, %position : vector<4xf32>, vector<4xf32>, vector<2xf32>, index
+}
+
+// ----
+test.target<native_vectors> @target
+
+func.def target(@target) @dynamic_insert(%a: vector<4xf32>, %b: vector<4xf32>, %c: vector<2xf32>, %value: f32, %position: index) -> (vector<4xf32>, vector<4xf32>, vector<2xf32>, index) {
+  %14 = index.constant 0 : index
+  %15 = index.constant 4 : index
+  %16 = index.cmp ult, %position, %15 : index
+  %17 = index.constant 8 : index
+  %18 = index.cmp ult, %position, %17 : index
+  %19 = index.cmp uge, %position, %15 : index
+  %20 = scalar.andi %19, %18 : i1
+  %21 = index.constant 10 : index
+  %22 = index.cmp ult, %position, %21 : index
+  %23 = index.cmp uge, %position, %17 : index
+  %24 = scalar.andi %23, %22 : i1
+  %26 = scf.select %16, %position, %14 : index
+  %27 = index.assume %26 [range(%26, 0, 3)] : index
+  %28 = vector.insert %value into %a[%27] : f32, vector<4xf32>
+  %29 = scf.select %16, %28, %a : vector<4xf32>
+  %31 = scf.select %20, %position, %15 : index
+  %32 = index.assume %31 [range(%31, 4, 7)] : index
+  %33 = index.sub %32, %15 : index
+  %34 = vector.insert %value into %b[%33] : f32, vector<4xf32>
+  %35 = scf.select %20, %34, %b : vector<4xf32>
+  %37 = scf.select %24, %position, %17 : index
+  %38 = index.assume %37 [range(%37, 8, 9)] : index
+  %39 = index.sub %38, %17 : index
+  %40 = vector.insert %value into %c[%39] : f32, vector<2xf32>
+  %41 = scf.select %24, %40, %c : vector<2xf32>
+  func.return %29, %35, %41, %position : vector<4xf32>, vector<4xf32>, vector<2xf32>, index
+}

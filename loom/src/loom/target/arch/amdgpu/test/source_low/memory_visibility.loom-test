@@ -39,10 +39,8 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direc
   %24 = v_lshlrev_b32_src0_inline %lane, 2
   %after = global_load_b32_saddr %24, %data {glc = 1}
   %scale = s_load_dword %lookup, %22
-  %28 = v_mov_b32_copy %before
-  %pair = v_add_u32 %28, %after
-  %30 = v_mov_b32_copy %scale
-  %result = v_mul_lo_u32 %pair, %30
+  %pair = v_add_u32 %before, %after
+  %result = v_mul_lo_u32 %scale, %pair
   global_store_b32_saddr %24, %result, %destination
   return
 }

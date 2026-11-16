@@ -215,21 +215,21 @@ kernel.def target(@target) @dynamic_workgroup_count(%workgroups_x: index, %workg
 
 // ----
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 4, 1) @dynamic_workgroup_count() asm {
-  %19 = live_in<amdgpu.dispatch_ptr> : reg<amdgpu.sgpr x2>
+  %28 = live_in<amdgpu.dispatch_ptr> : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %21 = s_load_dword_offset_only %19 {offset = 12}
-  %22 = s_mov_b32 6
-  %count_x = s_lshr_b32 %21, %22
-  %24 = s_load_dword_offset_only %19 {offset = 16}
-  %25 = s_mov_b32 2
-  %count_y = s_lshr_b32 %24, %25
-  %count_z = s_load_dword_offset_only %19 {offset = 20}
+  %30 = s_load_dword_offset_only %28 {offset = 12}
+  %31 = s_mov_b32 6
+  %count_x = s_lshr_b32 %30, %31
+  %33 = s_load_dword_offset_only %28 {offset = 16}
+  %34 = s_mov_b32 2
+  %count_y = s_lshr_b32 %33, %34
+  %count_z = s_load_dword_offset_only %28 {offset = 20}
   %count_xy = s_add_u32 %count_x, %count_y
   %count_xyz = s_add_u32 %count_xy, %count_z
   %count_i32 = s_add_u32 %count_xyz, %count_x
   %result = v_mov_b32_copy %count_i32
-  %32 = v_mov_b32 0
-  global_store_b32_saddr %32, %result, %output_view
+  %41 = v_mov_b32 0
+  global_store_b32_saddr %41, %result, %output_view
   return
 }
 
@@ -258,28 +258,28 @@ kernel.def target(@target) @dynamic_non_power_of_two_workgroup_count(%workgroups
 
 // ----
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(3, 5, 7) @dynamic_non_power_of_two_workgroup_count() asm {
-  %17 = live_in<amdgpu.dispatch_ptr> : reg<amdgpu.sgpr x2>
+  %23 = live_in<amdgpu.dispatch_ptr> : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %19 = s_load_dword_offset_only %17 {offset = 12}
-  %20 = s_mov_b32 2863311531
-  %21 = s_mul_hi_u32 %19, %20
-  %count_x = s_lshr_b32_rhs_inline %21, 1
-  %23 = s_load_dword_offset_only %17 {offset = 16}
-  %24 = s_mov_b32 3435973837
-  %25 = s_mul_hi_u32 %23, %24
-  %count_y = s_lshr_b32_rhs_inline %25, 2
-  %27 = s_load_dword_offset_only %17 {offset = 20}
-  %28 = s_mov_b32 613566757
-  %29 = s_mul_hi_u32 %27, %28
-  %30 = s_sub_u32 %27, %29
-  %31 = s_lshr_b32_rhs_inline %30, 1
-  %32 = s_add_u32 %31, %29
-  %count_z = s_lshr_b32_rhs_inline %32, 2
+  %25 = s_load_dword_offset_only %23 {offset = 12}
+  %26 = s_mov_b32 2863311531
+  %27 = s_mul_hi_u32 %25, %26
+  %count_x = s_lshr_b32_rhs_inline %27, 1
+  %29 = s_load_dword_offset_only %23 {offset = 16}
+  %30 = s_mov_b32 3435973837
+  %31 = s_mul_hi_u32 %29, %30
+  %count_y = s_lshr_b32_rhs_inline %31, 2
+  %33 = s_load_dword_offset_only %23 {offset = 20}
+  %34 = s_mov_b32 613566757
+  %35 = s_mul_hi_u32 %33, %34
+  %36 = s_sub_u32 %33, %35
+  %37 = s_lshr_b32_rhs_inline %36, 1
+  %38 = s_add_u32 %37, %35
+  %count_z = s_lshr_b32_rhs_inline %38, 2
   %count_xy = s_add_u32 %count_x, %count_y
   %count_i32 = s_add_u32 %count_xy, %count_z
   %result = v_mov_b32_copy %count_i32
-  %37 = v_mov_b32 0
-  global_store_b32_saddr %37, %result, %output_view
+  %43 = v_mov_b32 0
+  global_store_b32_saddr %43, %result, %output_view
   return
 }
 
@@ -421,26 +421,26 @@ kernel.def target(@target) @clustered_launch_queries(%workgroups_x: index, %work
 
 // ----
 low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) cluster_size(2, 2, 2) @clustered_launch_queries() asm {
-  %53 = live_in<amdgpu.cluster_workgroup_info> : reg<amdgpu.sgpr>
-  %54 = live_in<amdgpu.cluster_id_yz> : reg<amdgpu.sgpr>
+  %144 = live_in<amdgpu.cluster_workgroup_info> : reg<amdgpu.sgpr>
+  %145 = live_in<amdgpu.cluster_id_yz> : reg<amdgpu.sgpr>
   %cluster_x = live_in<amdgpu.cluster_id_x> : reg<amdgpu.sgpr>
-  %56 = live_in<amdgpu.dispatch_ptr> : reg<amdgpu.sgpr x2>
+  %147 = live_in<amdgpu.dispatch_ptr> : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %cluster_workgroup_x = s_and_b32_rhs_inline %53, 15
+  %cluster_workgroup_x = s_and_b32_rhs_inline %144, 15
   %workgroup_x = s_lshl1_add_u32 %cluster_x, %cluster_workgroup_x
-  %cluster_y = s_and_b32_lit %54, 65535
-  %cluster_workgroup_y = s_bfe_u32_lit %53, 262148
+  %cluster_y = s_and_b32_lit %145, 65535
+  %cluster_workgroup_y = s_bfe_u32_lit %144, 262148
   %workgroup_y = s_lshl1_add_u32 %cluster_y, %cluster_workgroup_y
-  %cluster_z = s_lshr_b32_rhs_inline %54, 16
-  %cluster_workgroup_z = s_bfe_u32_lit %53, 262152
+  %cluster_z = s_lshr_b32_rhs_inline %145, 16
+  %cluster_workgroup_z = s_bfe_u32_lit %144, 262152
   %workgroup_z = s_lshl1_add_u32 %cluster_z, %cluster_workgroup_z
   %cluster_workgroup_flat = s_getreg_b32_cluster_workgroup_flat_id
-  %cluster_count_x = s_load_dword_offset_only %56 {offset = 12}
+  %cluster_count_x = s_load_dword_offset_only %147 {offset = 12}
   %workgroup_count_x = s_lshl_b32_rhs_inline %cluster_count_x, 1
-  %69 = s_load_dword_offset_only %56 {offset = 16}
-  %cluster_count_y = s_and_b32_lit %69, 65535
+  %160 = s_load_dword_offset_only %147 {offset = 16}
+  %cluster_count_y = s_and_b32_lit %160, 65535
   %workgroup_count_y = s_lshl_b32_rhs_inline %cluster_count_y, 1
-  %cluster_count_z = s_lshr_b32_rhs_inline %69, 16
+  %cluster_count_z = s_lshr_b32_rhs_inline %160, 16
   %workgroup_count_z = s_lshl_b32_rhs_inline %cluster_count_z, 1
   %sum0 = s_add_u32 %workgroup_x, %workgroup_y
   %sum1 = s_add_u32 %sum0, %workgroup_z
@@ -451,17 +451,17 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) abi_layout({constant_c
   %sum6 = s_add_u32 %sum5, %cluster_workgroup_y
   %sum7 = s_add_u32 %sum6, %cluster_workgroup_z
   %sum8 = s_add_u32 %sum7, %cluster_workgroup_flat
-  %83 = s_mov_b32 6
-  %sum11 = s_add_u32 %sum8, %83
-  %sum12 = s_add_u32 %sum11, %cluster_count_x
-  %sum13 = s_add_u32 %sum12, %cluster_count_y
-  %sum14 = s_add_u32 %sum13, %cluster_count_z
-  %sum15 = s_add_u32 %sum14, %workgroup_count_x
-  %sum16 = s_add_u32 %sum15, %workgroup_count_y
-  %sum_i32 = s_add_u32 %sum16, %workgroup_count_z
+  %174 = s_add_u32 %sum8, %cluster_count_x
+  %175 = s_add_u32 %174, %cluster_count_y
+  %176 = s_add_u32 %175, %cluster_count_z
+  %177 = s_add_u32 %176, %workgroup_count_x
+  %178 = s_add_u32 %177, %workgroup_count_y
+  %179 = s_add_u32 %178, %workgroup_count_z
+  %180 = s_mov_b32 6
+  %sum_i32 = s_add_u32 %179, %180
   %result = v_mov_b32_copy %sum_i32
-  %92 = v_mov_b32 0
-  global_store_b32_saddr %92, %result, %output_view
+  %183 = v_mov_b32 0
+  global_store_b32_saddr %183, %result, %output_view
   return
 }
 
@@ -651,14 +651,14 @@ kernel.def target(@target) @ordinary_gfx1250_workgroup_counts(%workgroups_y: ind
 
 // ----
 low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) @ordinary_gfx1250_workgroup_counts() asm {
-  %13 = live_in<amdgpu.dispatch_ptr> : reg<amdgpu.sgpr x2>
+  %16 = live_in<amdgpu.dispatch_ptr> : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %count_y = s_load_dword_offset_only %13 {offset = 16}
-  %count_z = s_load_dword_offset_only %13 {offset = 20}
+  %count_y = s_load_dword_offset_only %16 {offset = 16}
+  %count_z = s_load_dword_offset_only %16 {offset = 20}
   %value = s_add_u32 %count_y, %count_z
   %result = v_mov_b32_copy %value
-  %19 = v_mov_b32 0
-  global_store_b32_saddr %19, %result, %output_view
+  %22 = v_mov_b32 0
+  global_store_b32_saddr %22, %result, %output_view
   return
 }
 

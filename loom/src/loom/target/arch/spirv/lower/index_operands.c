@@ -9,6 +9,7 @@
 #include "loom/codegen/low/lower/representation_observer.h"
 #include "loom/codegen/low/lower/rule_descriptor.h"
 #include "loom/ir/module.h"
+#include "loom/ops/index/carrier.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
 #include "loom/target/arch/spirv/lower/index.h"
 #include "loom/target/arch/spirv/lower/private_storage.h"
@@ -156,7 +157,7 @@ static bool loom_spirv_index_arithmetic_is_native(
     }
     const loom_value_facts_t value_facts =
         loom_value_fact_table_lookup(facts, value);
-    if (value_facts.range_lo >= INT32_MIN && value_facts.range_hi > INT32_MAX) {
+    if (loom_index_facts_carrier_bitwidth(value_facts, 32, 64) == 64) {
       return false;
     }
     if (!loom_value_facts_fit_signed_bit_count(value_facts, 32)) {

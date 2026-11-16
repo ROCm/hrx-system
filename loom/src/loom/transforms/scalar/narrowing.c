@@ -15,10 +15,13 @@
 static loom_scalar_narrowing_operand_t loom_scalar_narrowing_select_operand(
     const loom_rewriter_t* rewriter, loom_value_id_t input) {
   loom_op_t* producer = loom_rewriter_value_defining_op(rewriter, input);
-  if (producer && loom_scalar_constant_isa(producer)) {
+  if (producer && (loom_scalar_constant_isa(producer) ||
+                   loom_index_constant_isa(producer))) {
     // Keep the literal conversion defined even when the low word is negative.
     int64_t constant =
-        (uint32_t)loom_attr_as_i64(loom_scalar_constant_value(producer));
+        (uint32_t)loom_attr_as_i64(loom_scalar_constant_isa(producer)
+                                       ? loom_scalar_constant_value(producer)
+                                       : loom_index_constant_value(producer));
     if (constant >= INT64_C(0x80000000)) {
       constant -= INT64_C(0x100000000);
     }
@@ -38,17 +41,34 @@ static loom_scalar_narrowing_operand_t loom_scalar_narrowing_select_operand(
       };
     }
   }
-  if (producer && loom_index_cast_isa(producer) && rewriter->fact_table) {
+  if (producer && loom_index_cast_isa(producer)) {
     const loom_value_id_t source = loom_index_cast_input(producer);
     if (loom_type_equal(loom_module_value_type(rewriter->module, source),
-                        loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET)) &&
-        loom_index_target_carrier_bitwidth(&rewriter->fact_table->context,
-                                           LOOM_SCALAR_TYPE_OFFSET) == 32) {
+                        loom_type_scalar(LOOM_SCALAR_TYPE_I32))) {
       return (loom_scalar_narrowing_operand_t){
-          .kind = LOOM_SCALAR_NARROWING_OPERAND_OFFSET,
+          .kind = LOOM_SCALAR_NARROWING_OPERAND_REUSE,
           .value = source,
       };
     }
+    if (loom_type_equal(loom_module_value_type(rewriter->module, source),
+                        loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET)) &&
+        rewriter->fact_table &&
+        loom_index_target_carrier_bitwidth(&rewriter->fact_table->context,
+                                           LOOM_SCALAR_TYPE_OFFSET) == 32) {
+      return (loom_scalar_narrowing_operand_t){
+          .kind = LOOM_SCALAR_NARROWING_OPERAND_ADDRESS,
+          .value = source,
+      };
+    }
+  }
+  const loom_scalar_type_t input_type =
+      loom_type_element_type(loom_module_value_type(rewriter->module, input));
+  if (input_type == LOOM_SCALAR_TYPE_INDEX ||
+      input_type == LOOM_SCALAR_TYPE_OFFSET) {
+    return (loom_scalar_narrowing_operand_t){
+        .kind = LOOM_SCALAR_NARROWING_OPERAND_ADDRESS,
+        .value = input,
+    };
   }
   return (loom_scalar_narrowing_operand_t){
       .kind = LOOM_SCALAR_NARROWING_OPERAND_TRUNCATE,
@@ -82,33 +102,66 @@ bool loom_scalar_narrowing_select(loom_rewriter_t* rewriter,
   if (producer->instance_flags) {
     return false;
   }
+  loom_op_kind_t kind = producer->kind;
   switch (producer->kind) {
     case LOOM_OP_SCALAR_ADDI:
     case LOOM_OP_SCALAR_SUBI:
     case LOOM_OP_SCALAR_MULI:
+    case LOOM_OP_SCALAR_ANDI:
+    case LOOM_OP_SCALAR_ORI:
+    case LOOM_OP_SCALAR_XORI:
+    case LOOM_OP_INDEX_MADD:
       break;
+    case LOOM_OP_INDEX_ADD:
+      kind = LOOM_OP_SCALAR_ADDI;
+      break;
+    case LOOM_OP_INDEX_SUB:
+      kind = LOOM_OP_SCALAR_SUBI;
+      break;
+    case LOOM_OP_INDEX_MUL:
+    case LOOM_OP_INDEX_SCALE:
+      kind = LOOM_OP_SCALAR_MULI;
+      break;
+    case LOOM_OP_INDEX_ANDI:
+      kind = LOOM_OP_SCALAR_ANDI;
+      break;
+    case LOOM_OP_INDEX_ORI:
+      kind = LOOM_OP_SCALAR_ORI;
+      break;
+    case LOOM_OP_INDEX_XORI:
+      kind = LOOM_OP_SCALAR_XORI;
+      break;
+    case LOOM_OP_INDEX_SHLI:
     case LOOM_OP_SCALAR_SHLI: {
-      int64_t shift = 0;
-      if (!loom_value_facts_as_exact_i64(
+      if (!loom_value_facts_fit_unsigned_bit_count(
               loom_rewriter_value_facts(rewriter,
                                         loom_op_const_operands(producer)[1]),
-              &shift) ||
-          shift < 0 || shift >= 32) {
+              5)) {
         return false;
       }
+      kind = LOOM_OP_SCALAR_SHLI;
       break;
     }
     default:
       return false;
   }
   const loom_value_id_t input = loom_op_const_results(producer)[0];
+  const loom_scalar_type_t input_type =
+      loom_type_element_type(loom_module_value_type(rewriter->module, input));
+  if ((input_type == LOOM_SCALAR_TYPE_INDEX ||
+       input_type == LOOM_SCALAR_TYPE_OFFSET) &&
+      (!rewriter->fact_table ||
+       loom_index_target_carrier_bitwidth(&rewriter->fact_table->context,
+                                          input_type) < 32)) {
+    return false;
+  }
   const loom_value_t* value = loom_module_value(rewriter->module, input);
   if (!loom_value_has_single_use(value) ||
       loom_module_value_has_type_uses(rewriter->module, input)) {
     return false;
   }
   loom_scalar_narrowing_plan_t plan = {
-      .kind = producer->kind,
+      .kind = kind,
       .operands =
           {
               loom_scalar_narrowing_select_operand(
@@ -117,8 +170,14 @@ bool loom_scalar_narrowing_select(loom_rewriter_t* rewriter,
                   rewriter, loom_op_const_operands(producer)[1]),
           },
   };
+  if (kind == LOOM_OP_INDEX_MADD) {
+    plan.operands[2] = loom_scalar_narrowing_select_operand(
+        rewriter, loom_op_const_operands(producer)[2]);
+  }
   if ((plan.operands[0].kind == LOOM_SCALAR_NARROWING_OPERAND_TRUNCATE &&
-       plan.operands[1].kind == LOOM_SCALAR_NARROWING_OPERAND_TRUNCATE) ||
+       plan.operands[1].kind == LOOM_SCALAR_NARROWING_OPERAND_TRUNCATE &&
+       (kind != LOOM_OP_INDEX_MADD ||
+        plan.operands[2].kind == LOOM_SCALAR_NARROWING_OPERAND_TRUNCATE)) ||
       !loom_scalar_narrowing_has_only_attribute_owner(rewriter, input,
                                                       attribute_owner)) {
     return false;
@@ -142,10 +201,11 @@ static iree_status_t loom_scalar_narrowing_build_operand(
           &op));
       break;
     }
-    case LOOM_SCALAR_NARROWING_OPERAND_OFFSET: {
+    case LOOM_SCALAR_NARROWING_OPERAND_ADDRESS: {
       IREE_RETURN_IF_ERROR(loom_index_cast_build(
           &rewriter->builder, operand->value,
-          loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET), i32, location, &op));
+          loom_module_value_type(rewriter->module, operand->value), i32,
+          location, &op));
       break;
     }
     case LOOM_SCALAR_NARROWING_OPERAND_TRUNCATE: {
@@ -173,6 +233,15 @@ static iree_status_t loom_scalar_narrowing_build_arithmetic(
     case LOOM_OP_SCALAR_MULI:
       return loom_scalar_muli_build(&rewriter->builder, 0, lhs, rhs, i32,
                                     location, out_op);
+    case LOOM_OP_SCALAR_ANDI:
+      return loom_scalar_andi_build(&rewriter->builder, lhs, rhs, i32, location,
+                                    out_op);
+    case LOOM_OP_SCALAR_ORI:
+      return loom_scalar_ori_build(&rewriter->builder, lhs, rhs, i32, location,
+                                   out_op);
+    case LOOM_OP_SCALAR_XORI:
+      return loom_scalar_xori_build(&rewriter->builder, lhs, rhs, i32, location,
+                                    out_op);
     case LOOM_OP_SCALAR_SHLI:
       return loom_scalar_shli_build(&rewriter->builder, 0, lhs, rhs, i32,
                                     location, out_op);
@@ -191,6 +260,18 @@ iree_status_t loom_scalar_narrowing_build(
       rewriter, &plan->operands[0], location, &lhs));
   IREE_RETURN_IF_ERROR(loom_scalar_narrowing_build_operand(
       rewriter, &plan->operands[1], location, &rhs));
+  if (plan->kind == LOOM_OP_INDEX_MADD) {
+    loom_value_id_t addend = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_scalar_narrowing_build_operand(
+        rewriter, &plan->operands[2], location, &addend));
+    loom_op_t* product = NULL;
+    IREE_RETURN_IF_ERROR(loom_scalar_muli_build(
+        &rewriter->builder, 0, lhs, rhs, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+        location, &product));
+    return loom_scalar_addi_build(
+        &rewriter->builder, 0, loom_scalar_muli_result(product), addend,
+        loom_type_scalar(LOOM_SCALAR_TYPE_I32), location, out_op);
+  }
   return loom_scalar_narrowing_build_arithmetic(rewriter, plan->kind, lhs, rhs,
                                                 location, out_op);
 }

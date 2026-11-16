@@ -306,13 +306,16 @@ static const loom_low_lower_function_storage_mapping_t kTestFunctionStorage[] =
 };
 
 static const uint16_t kTestVectorPacketLaneCounts[] = {4};
+static const uint16_t kTestVectorPacketBitCounts[] = {128};
 static const loom_target_vector_packet_policy_t kTestVectorPacketPolicy = {
     .native_lane_counts = kTestVectorPacketLaneCounts,
+    .native_bit_counts = kTestVectorPacketBitCounts,
     .index_bit_count = 32,
     .offset_bit_count = 32,
     .maximum_unpacketized_bit_count =
         LOOM_TARGET_VECTOR_PACKET_UNBOUNDED_BIT_COUNT,
     .native_lane_count_count = IREE_ARRAYSIZE(kTestVectorPacketLaneCounts),
+    .native_bit_count_count = IREE_ARRAYSIZE(kTestVectorPacketBitCounts),
 };
 
 static bool loom_test_low_source_vector_carrier_supported(

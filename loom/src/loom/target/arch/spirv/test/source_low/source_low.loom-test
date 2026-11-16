@@ -256,11 +256,15 @@ func.def target(@target) @spirv_index_arithmetic(%index: index, %factor: index) 
 }
 
 // ----
-low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_index_arithmetic(%index: reg<spirv.id : index>, %factor: reg<spirv.id : index>) -> (reg<spirv.id : index>) asm {
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_index_arithmetic(%index: reg<spirv.id : index>, %factor: reg<spirv.id : index>) -> (reg<spirv.id : i64>) asm {
   %index_adjustment = OpConstant.i32 1 : reg<spirv.id : index>
-  %previous = OpISub %index, %index_adjustment : reg<spirv.id : index>
-  %scaled = OpIMul %previous, %factor : reg<spirv.id : index>
-  %next = OpIMulAdd %scaled, %factor, %index_adjustment : reg<spirv.id : index>
+  %11 = OpSConvert.i32.i64 %index
+  %12 = OpSConvert.i32.i64 %index_adjustment
+  %previous = OpISub.i64 %11, %12
+  %14 = OpSConvert.i32.i64 %factor
+  %scaled = OpIMul.i64 %previous, %14
+  %17 = OpIMul.i64 %scaled, %14
+  %next = OpIAdd.i64 %17, %12
   return %next
 }
 
@@ -1027,4 +1031,19 @@ low.kernel.def target<spirv.logical.core>(@hal_target_coop_i8) abi_layout({signa
   %93 = OpPtrAccessChain.storage_buffer.i32.byte_offset %out_aligned, %byte_offset_aligned
   OpCooperativeMatrixStoreKHR.accumulator.i32.16x16.subgroup.storage_buffer %93, %result, %92, 0
   return
+}
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @wide_negative_index_constant() -> (index) {
+  %position = index.constant -2147483649 : index
+  func.return %position : index
+}
+
+// ----
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @wide_negative_index_constant() -> (reg<spirv.id : i64>) asm {
+  %position = OpConstant.i64 -2147483649
+  return %position
 }

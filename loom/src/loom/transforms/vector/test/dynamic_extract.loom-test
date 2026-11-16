@@ -29,17 +29,19 @@ func.def @dynamic_matrix_extract(%a: i32, %b: i32, %c: i32, %d: i32, %row: index
 
 // ----
 func.def @dynamic_matrix_extract(%a: i32, %b: i32, %c: i32, %d: i32, %row: index, %column: index) -> (i32) {
-  %9 = index.constant 2 : index
-  %21 = index.madd %row, %9, %column : index
-  %12 = index.constant 1 : index
-  %13 = index.cmp eq, %21, %12 : index
-  %14 = scf.select %13, %b, %a : i32
-  %15 = index.constant 2 : index
-  %16 = index.cmp eq, %21, %15 : index
-  %17 = scf.select %16, %c, %14 : i32
-  %18 = index.constant 3 : index
-  %19 = index.cmp eq, %21, %18 : index
-  %result = scf.select %19, %d, %17 : i32
+  %9 = index.assume %row [range(%row, 0, 1)] : index
+  %10 = index.assume %column [range(%column, 0, 1)] : index
+  %11 = index.constant 2 : index
+  %23 = index.madd %9, %11, %10 : index
+  %14 = index.constant 1 : index
+  %15 = index.cmp eq, %23, %14 : index
+  %16 = scf.select %15, %b, %a : i32
+  %17 = index.constant 2 : index
+  %18 = index.cmp eq, %23, %17 : index
+  %19 = scf.select %18, %c, %16 : i32
+  %20 = index.constant 3 : index
+  %21 = index.cmp eq, %23, %20 : index
+  %result = scf.select %21, %d, %19 : i32
   func.return %result : i32
 }
 
