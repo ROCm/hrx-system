@@ -16,6 +16,8 @@
 #include "loom/pass/options.h"
 #include "loom/pass/report.h"
 #include "loom/pass/value_facts.h"
+#include "loom/util/fact_extensions.h"
+#include "loom/util/fact_table.h"
 
 static bool loom_test_pass_target_record_satisfies_requirement(
     const loom_pass_environment_capability_t* capability,
@@ -157,12 +159,95 @@ static iree_status_t loom_test_noop_run(loom_pass_t* pass,
   return iree_ok_status();
 }
 
+typedef enum loom_test_value_facts_expect_e {
+  LOOM_TEST_VALUE_FACTS_EXPECT_COMPUTE,
+  LOOM_TEST_VALUE_FACTS_EXPECT_INVALIDATED,
+  LOOM_TEST_VALUE_FACTS_EXPECT_REUSE,
+} loom_test_value_facts_expect_t;
+
+// Runs after the preceding pass has destroyed its invocation scratch. Compare
+// semantic payloads, not table-local extension IDs, against an independent
+// solve of every live value in the same scope.
+static iree_status_t loom_test_compare_value_facts(
+    loom_pass_t* pass, loom_module_t* module,
+    loom_pass_value_fact_scope_t scope,
+    const loom_value_fact_table_t* retained_facts) {
+  loom_pass_value_fact_owner_t fresh_owner;
+  loom_pass_value_fact_owner_initialize(pass->value_facts->block_pool,
+                                        &fresh_owner);
+  loom_value_fact_table_t* fresh_facts = NULL;
+  iree_status_t status = loom_pass_value_fact_owner_acquire(
+      &fresh_owner, module, scope, &fresh_facts);
+  loom_value_fact_scope_iterator_t iterator;
+  loom_value_fact_table_scope_begin(fresh_facts, &iterator);
+  loom_value_id_t value_id;
+  while (iree_status_is_ok(status) &&
+         (value_id = loom_value_fact_scope_next(&iterator)) !=
+             LOOM_VALUE_ID_INVALID) {
+    if (!loom_value_fact_table_facts_equal_for_type(
+            module, loom_module_value_type(module, value_id), retained_facts,
+            loom_value_fact_table_lookup(retained_facts, value_id), fresh_facts,
+            loom_value_fact_table_lookup(fresh_facts, value_id))) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "retained facts for value %u differ from fresh computation",
+          value_id);
+    }
+  }
+  loom_pass_value_fact_owner_deinitialize(&fresh_owner);
+  return status;
+}
+
 static iree_status_t loom_test_acquire_value_facts_run(
     loom_pass_t* pass, loom_module_t* module, loom_func_like_t function) {
   loom_value_fact_table_t* value_facts = NULL;
-  return loom_pass_value_facts_acquire(
-      pass, module, loom_pass_value_fact_scope_function(function),
-      &value_facts);
+  if (!pass->decoded_options || !pass->decoded_options->options[0].present) {
+    return loom_pass_value_facts_acquire(
+        pass, module, loom_pass_value_fact_scope_function(function),
+        &value_facts);
+  }
+
+  const loom_test_value_facts_expect_t expectation =
+      (loom_test_value_facts_expect_t)pass->decoded_options->options[0]
+          .enum_value_index;
+  const loom_pass_value_fact_scope_t active_scope =
+      pass->value_facts->active_scope;
+  if (expectation == LOOM_TEST_VALUE_FACTS_EXPECT_INVALIDATED &&
+      active_scope.kind != LOOM_PASS_VALUE_FACT_SCOPE_NONE) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "expected an invalidated value-fact scope");
+  }
+  // Observe the preceding producer's inputs, including its target binding.
+  // A different function still needs its own fresh scope.
+  const loom_pass_value_fact_scope_t scope =
+      active_scope.kind == LOOM_PASS_VALUE_FACT_SCOPE_FUNCTION &&
+              active_scope.function.op == function.op
+          ? active_scope
+          : loom_pass_value_fact_scope_function(function);
+
+  // Observe the real owner without replacing pass-report accounting. Assertion
+  // failures are runner failures, so --update cannot bless a broken invariant.
+  loom_pass_value_fact_lifecycle_counts_t local_counts = {0};
+  loom_pass_value_fact_lifecycle_counts_t* saved_counts =
+      pass->value_facts->lifecycle_counts;
+  loom_pass_value_fact_lifecycle_counts_t* counts =
+      saved_counts ? saved_counts : &local_counts;
+  const uint64_t cache_hits_before = counts->cache_hit_count;
+  pass->value_facts->lifecycle_counts = counts;
+  iree_status_t status =
+      loom_pass_value_facts_acquire(pass, module, scope, &value_facts);
+  pass->value_facts->lifecycle_counts = saved_counts;
+  IREE_RETURN_IF_ERROR(status);
+
+  const bool expected_reuse = expectation == LOOM_TEST_VALUE_FACTS_EXPECT_REUSE;
+  const bool reused = counts->cache_hit_count != cache_hits_before;
+  if (reused != expected_reuse) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "expected value-fact %s, observed %s",
+                            expected_reuse ? "reuse" : "computation",
+                            reused ? "reuse" : "computation");
+  }
+  return loom_test_compare_value_facts(pass, module, scope, value_facts);
 }
 
 static iree_status_t loom_test_mark_changed_run(loom_pass_t* pass,
@@ -390,6 +475,30 @@ static const loom_pass_option_def_t kTestOptionsOptionDefs[] = {
     },
 };
 
+static const loom_pass_option_def_t kTestValueFactsOptionDefs[] = {
+    {
+        .name = IREE_SVL("expect"),
+        .description = IREE_SVL(
+            "Assert acquisition behavior and compare facts to a fresh solve."),
+    },
+};
+
+static const loom_pass_option_enum_value_t kTestValueFactsExpectValues[] = {
+    [LOOM_TEST_VALUE_FACTS_EXPECT_COMPUTE] = {.value = IREE_SVL("compute")},
+    [LOOM_TEST_VALUE_FACTS_EXPECT_INVALIDATED] = {.value =
+                                                      IREE_SVL("invalidated")},
+    [LOOM_TEST_VALUE_FACTS_EXPECT_REUSE] = {.value = IREE_SVL("reuse")},
+};
+
+static const loom_pass_option_schema_t kTestValueFactsSchema[] = {
+    {
+        .name = IREE_SVL("expect"),
+        .kind = LOOM_PASS_OPTION_SCHEMA_ENUM,
+        .enum_values = kTestValueFactsExpectValues,
+        .enum_value_count = IREE_ARRAYSIZE(kTestValueFactsExpectValues),
+    },
+};
+
 static const loom_pass_option_enum_value_t kTestModeValues[] = {
     {.value = IREE_SVL("alpha")},
     {.value = IREE_SVL("beta")},
@@ -496,6 +605,8 @@ static const loom_pass_info_t kTestAcquireValueFactsPassInfo = {
     .name = IREE_SVL("test.acquire-value-facts"),
     .description = IREE_SVL("Acquire function-scoped value facts."),
     .kind = LOOM_PASS_FUNCTION,
+    .option_defs = kTestValueFactsOptionDefs,
+    .option_count = IREE_ARRAYSIZE(kTestValueFactsOptionDefs),
 };
 
 static const loom_pass_info_t* loom_test_acquire_value_facts_pass_info(void) {
@@ -564,6 +675,8 @@ static const loom_pass_descriptor_t kTestPassDescriptors[] = {
         .key = IREE_SVL("test.acquire-value-facts"),
         .info = loom_test_acquire_value_facts_pass_info,
         .function_run = loom_test_acquire_value_facts_run,
+        .option_schema = kTestValueFactsSchema,
+        .option_schema_count = IREE_ARRAYSIZE(kTestValueFactsSchema),
     },
     {
         .key = IREE_SVL("test.error"),

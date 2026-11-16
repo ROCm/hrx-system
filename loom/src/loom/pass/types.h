@@ -40,6 +40,15 @@ typedef enum loom_pass_kind_e {
   LOOM_PASS_COUNT_,
 } loom_pass_kind_t;
 
+// Bitset of analyses maintained across a completed pass invocation.
+typedef uint32_t loom_pass_analysis_flags_t;
+
+enum loom_pass_analysis_flag_bits_e {
+  // Every mutation maintained or invalidated the shared value-fact workspace.
+  // A populated scope remains valid after callback scratch is destroyed.
+  LOOM_PASS_ANALYSIS_VALUE_FACTS = 1u << 0,
+};
+
 typedef struct loom_pass_run_result_t {
   // Number of error diagnostics emitted while running the pass program.
   uint32_t error_count;
@@ -202,6 +211,9 @@ struct loom_pass_t {
   void* state;
   // True when the pass callback explicitly records an IR or semantic change.
   bool changed;
+  // Analyses maintained or explicitly invalidated by this invocation. Unmarked
+  // analyses are invalidated after a change; failed invocations preserve none.
+  loom_pass_analysis_flags_t preserved_analyses;
   // Immutable descriptor-decoded options for pass.run-backed invocation.
   const loom_pass_decoded_options_t* decoded_options;
   // Optional structured diagnostic emitter for pass-specific failures.

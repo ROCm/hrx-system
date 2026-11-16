@@ -455,7 +455,9 @@ static iree_status_t loom_pass_interpreter_invoke(
   if (iree_status_is_ok(status)) {
     *out_changed |= invocation_changed;
   }
-  if (invocation_changed) {
+  if (invocation_changed &&
+      (!iree_status_is_ok(status) || diagnostic_counter.error_count != 0 ||
+       !(pass.preserved_analyses & LOOM_PASS_ANALYSIS_VALUE_FACTS))) {
     loom_pass_value_fact_owner_invalidate(&state->value_facts);
   }
 
