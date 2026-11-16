@@ -359,6 +359,7 @@ loom_cc_library(
         ":call_boundary",
         ":features",
         ":value_types",
+        "//loom/src/loom/analysis:control_uniformity",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/scalar",

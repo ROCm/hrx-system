@@ -1,0 +1,124 @@
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager},canonicalize,dce
+
+// A contiguous power-of-two cluster executing across a complete subgroup can
+// use physical XOR exchanges without observing an inactive lane.
+kernel.def @full_subgroup_cluster() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: f32) {
+  %sum = kernel.subgroup.reduce<addf> %value {cluster_size = 8} : f32
+  test.use %sum : f32
+  kernel.return
+}
+
+// ----
+kernel.def @full_subgroup_cluster() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: f32) {
+  %4 = scalar.constant 32 : i32
+  %5 = scalar.constant 1 : i32
+  %6, %7 = kernel.subgroup.shuffle<xor> %value, %5, %4 : f32, i32, i32
+  %8 = scalar.addf %value, %6 : f32
+  %9 = scalar.constant 2 : i32
+  %10, %11 = kernel.subgroup.shuffle<xor> %8, %9, %4 : f32, i32, i32
+  %12 = scalar.addf %8, %10 : f32
+  %13 = scalar.constant 4 : i32
+  %14, %15 = kernel.subgroup.shuffle<xor> %12, %13, %4 : f32, i32, i32
+  %sum = scalar.addf %12, %14 : f32
+  test.use %sum : f32
+  kernel.return
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager},canonicalize,dce
+
+// The same lowering uses the target's fixed physical width rather than baking
+// in the subgroup32 production profile. Bit 45 is GroupNonUniformShuffle.
+spirv.target<vulkan1_3> @subgroup64 {abi = hal_kernel, contract_feature_bits = 35184372088832, subgroup_size = 64}
+
+kernel.def target(@subgroup64) @full_subgroup64_cluster() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: f32) {
+  %sum = kernel.subgroup.reduce<addf> %value {cluster_size = 8} : f32
+  test.use %sum : f32
+  kernel.return
+}
+
+// ----
+spirv.target<vulkan1_3> @subgroup64 {abi = hal_kernel, contract_feature_bits = 35184372088832, subgroup_size = 64}
+
+kernel.def target(@subgroup64) @full_subgroup64_cluster() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: f32) {
+  %4 = scalar.constant 64 : i32
+  %5 = scalar.constant 1 : i32
+  %6, %7 = kernel.subgroup.shuffle<xor> %value, %5, %4 : f32, i32, i32
+  %8 = scalar.addf %value, %6 : f32
+  %9 = scalar.constant 2 : i32
+  %10, %11 = kernel.subgroup.shuffle<xor> %8, %9, %4 : f32, i32, i32
+  %12 = scalar.addf %8, %10 : f32
+  %13 = scalar.constant 4 : i32
+  %14, %15 = kernel.subgroup.shuffle<xor> %12, %13, %4 : f32, i32, i32
+  %sum = scalar.addf %12, %14 : f32
+  test.use %sum : f32
+  kernel.return
+}
+
+// ====
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager},canonicalize,dce
+
+// A narrower workgroup may leave physical lanes inactive. Retain the native
+// clustered operation, whose participation semantics cover that case.
+kernel.def @partial_subgroup_cluster() {
+  %unit = index.constant 1 : index
+  %width = index.constant 16 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: f32) {
+  %sum = kernel.subgroup.reduce<addf> %value {cluster_size = 8} : f32
+  test.use %sum : f32
+  kernel.return
+}
+
+// ====
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager},canonicalize,dce
+
+// Lane-varying control gives the operation sparse participation even when the
+// workgroup contains a complete subgroup. Retain the native clustered form.
+kernel.def @divergent_cluster() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: f32) {
+  %lane = kernel.workitem.id<x> : index
+  %limit = index.constant 16 : index
+  %inside = index.cmp ult, %lane, %limit : index
+  scf.if %inside {
+    %sum = kernel.subgroup.reduce<addf> %value {cluster_size = 8} : f32
+    test.use %sum : f32
+  }
+  kernel.return
+}
+
+// ====
+// RUN: pass target=spirv:vulkan1.3+bda+subgroup32+reductions+hal target-legalize{mode=eager},canonicalize,dce
+
+// Other combining families, preserved arithmetic, and noncontiguous clusters
+// retain their compact native operations.
+kernel.def @native_families() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%value: f32) {
+  %product = kernel.subgroup.reduce<mulf> %value {cluster_size = 8} : f32
+  %preserved = kernel.subgroup.reduce<addf, preserve> %value {cluster_size = 8} : f32
+  %strided = kernel.subgroup.reduce<addf> %value {cluster_size = 4, cluster_stride = 2} : f32
+  test.use %product, %preserved, %strided : f32, f32, f32
+  kernel.return
+}
