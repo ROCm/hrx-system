@@ -768,6 +768,24 @@ def test_scalar_stream_transfers_preserve_protocol_and_status_dependencies() -> 
     # packet/control headers, and immediate/register termination share scalar
     # stream issue ordering. Status observation above still waits for writeback.
     assert len(traffic) == 50
+    locks = [
+        descriptor
+        for descriptor in descriptors.values()
+        if descriptor.key.startswith("amd.xdna.aie2p.lock.")
+    ]
+    # Immediate/register and conditional acquire/release forms all use the
+    # same delayed lock boundary. No blocking or nonblocking scalar transfer
+    # may enter the stream before that boundary has completed.
+    assert len(locks) == 8
+    for lock, transfer in product(locks, traffic):
+        assert len(lock.effects) == 1
+        assert (
+            separations[
+                lock.effects[0].producer_event,
+                transfer.effects[0].consumer_event,
+            ]
+            == 8
+        )
     for producer, consumer in product(traffic, repeat=2):
         producer_event = producer.effects[0].producer_event
         consumer_event = consumer.effects[0].consumer_event

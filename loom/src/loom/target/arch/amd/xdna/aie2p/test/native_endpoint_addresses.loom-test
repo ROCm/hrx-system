@@ -72,5 +72,5 @@ pipeline.def<kernel> public retain target(@device) @sequential_endpoint_phases()
 partition: 1 columns, 6 rows
 entries: 1
 entry 0: 0 bindings, 0 dynamic relocations
-  invocation 0: bytes=1344 next=1
+  invocation 0: bytes=1360 next=1
   invocation 1: bytes=540 next=1
