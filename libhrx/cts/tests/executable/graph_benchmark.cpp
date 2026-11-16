@@ -17,6 +17,9 @@
 IREE_FLAG(string, graph_runtime, "hrx",
           "Graph implementation: hrx, hip (HRX frontend), or rocm.");
 IREE_FLAG(string, graph_hip_library, "", "Exact selected libamdhip64 path.");
+IREE_FLAG(string, graph_hip_wait_mode, "blocking",
+          "HIP host completion policy: blocking or active. Applies to both "
+          "hip and rocm; native hrx uses blocking waits.");
 IREE_FLAG(string, graph_operation, "dispatch",
           "Graph operation: dispatch, copy, or fill.");
 IREE_FLAG(int32_t, graph_transfer_byte_length, 4,
@@ -107,6 +110,9 @@ class HrxRuntime {
   using GraphType = hrx_graph_t;
 
   HrxRuntime() : api_(HrxLoader::instance()) {
+    Require(
+        std::string(FLAG_graph_hip_wait_mode) == "blocking",
+        "--graph_hip_wait_mode=active requires --graph_runtime=hip or rocm");
     hrx_runtime_t runtime = nullptr;
     Check(api_.runtime_create(nullptr, api_.host_allocator_system(), &runtime));
     const char* driver = std::getenv("HRX_GPU_DRIVER");
@@ -375,10 +381,14 @@ class HipRuntime {
 
   HipRuntime() {
     Require(FLAG_graph_hip_library[0] != 0, "--graph_hip_library is required");
+    const std::string wait_mode = FLAG_graph_hip_wait_mode;
+    Require(wait_mode == "blocking" || wait_mode == "active",
+            "unknown --graph_hip_wait_mode");
     library_.load(FLAG_graph_hip_library);
     Check(Resolve<decltype(&hipInit)>("hipInit")(0));
     Check(Resolve<decltype(&hipSetDeviceFlags)>("hipSetDeviceFlags")(
-        hipDeviceScheduleBlockingSync));
+        wait_mode == "active" ? hipDeviceScheduleSpin
+                              : hipDeviceScheduleBlockingSync));
     hipDeviceProp_t properties = {};
     Check(Resolve<decltype(&hipGetDevicePropertiesR0600)>(
         "hipGetDevicePropertiesR0600")(&properties, 0));
@@ -388,8 +398,8 @@ class HipRuntime {
     label_ =
         std::string(std::string(FLAG_graph_runtime) == "hip" ? "HRX HIP "
                                                              : "ROCm HIP ") +
-        properties.gcnArchName + " " + pci_address +
-        " wait=blocking operation=" + FLAG_graph_operation +
+        properties.gcnArchName + " " + pci_address + " wait=" + wait_mode +
+        " operation=" + FLAG_graph_operation +
         " bytes=" + std::to_string(words_per_node_ * sizeof(uint32_t));
     const auto image =
         hrx_cts::FindAmdgpuExecutableTestImage(properties.gcnArchName);
