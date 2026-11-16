@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/amdgpu:binary.bzl", "iree_amdgpu_binary_variants_embed_data")
-load("//libhrx/build_tools/bazel:cc.bzl", "hrx_cc_benchmark")
+load("//libhrx/build_tools/bazel:cc.bzl", "hrx_cc_benchmark", "hrx_cc_test")
 load("//libhrx/build_tools/bazel:cts.bzl", "hrx_cts_test")
 load(
     "//libhrx/cts:defs.bzl",
@@ -58,6 +58,29 @@ hrx_cts_test(
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/driver/amd/gpu/cts:testdata",
         "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+    ],
+)
+
+hrx_cc_test(
+    name = "hip_graph_visibility_test",
+    srcs = ["hip_graph_visibility_test.cpp"],
+    data = ["//libhrx/src/binding/hip:amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(rootpath //libhrx/src/binding/hip:amdhip64)",
+    },
+    resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = ["@platforms//os:linux"] + _LOOM_CTS_COMPATIBILITY,
+    deps = [
+        ":dependent_chain_testdata",
+        "//libhrx/src/binding/hip:hip_dso_test_util",
+        "//libhrx/src/binding/hip:launch_params",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/driver/amd/gpu/cts:testdata",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
