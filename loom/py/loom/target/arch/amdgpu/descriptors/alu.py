@@ -4267,6 +4267,17 @@ def _f16_sgpr_operand(field_name: str) -> Operand:
     return _sgpr_operand(field_name, register_part=_REG_PART_SGPR_LOW16)
 
 
+def _f16_sgpr_vgpr_operand(field_name: str) -> Operand:
+    return Operand(
+        field_name,
+        OperandRole.OPERAND,
+        (
+            replace(_SGPR_ALT[0], register_part=_REG_PART_SGPR_LOW16),
+            replace(_VGPR_ALT[0], register_part=_REG_PART_VGPR_LOW16),
+        ),
+    )
+
+
 def _v_float_vop3_result(element_bit_width: int) -> Operand:
     if element_bit_width == 16:
         return _f16_vgpr_result()
@@ -4277,7 +4288,7 @@ def _v_float_vop3_result(element_bit_width: int) -> Operand:
 
 def _v_float_vop3_operand(field_name: str, element_bit_width: int) -> Operand:
     if element_bit_width == 16:
-        return _f16_vgpr_operand(field_name)
+        return _f16_sgpr_vgpr_operand(field_name)
     if element_bit_width in (32, 64):
         return _sgpr_vgpr_operand(field_name, units=element_bit_width // 32)
     raise ValueError(f"unsupported VOP3 float width {element_bit_width}")

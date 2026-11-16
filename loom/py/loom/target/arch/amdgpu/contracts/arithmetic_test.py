@@ -1242,6 +1242,18 @@ def test_f32_literal_fma_product_flushing_forms_require_afn() -> None:
         )
 
 
+def test_scalar_f16_fma_uses_native_half_descriptor() -> None:
+    compiled = _COMPILED_ARITHMETIC_RULES
+    rules = tuple(
+        rule
+        for rule in _rules_for_source_op(compiled, scalar_math.scalar_fmaf)
+        if _rule_descriptor_keys(compiled, rule) == ("amdgpu.v_fma_f16",)
+    )
+
+    assert len(rules) == 1
+    assert _rule_type_patterns(compiled, rules[0]) == (Scalar("f16"),) * 4
+
+
 def test_fp64_binary_rules_legalize_packet_sources() -> None:
     compiled = _COMPILED_ARITHMETIC_RULES
     for source_op, descriptor_key in (

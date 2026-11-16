@@ -1,0 +1,29 @@
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+
+func.def @rdna_scalar_f16_fma(%lhs: f16, %rhs: f16, %addend: f16) -> (f16) {
+  %result = scalar.fmaf %lhs, %rhs, %addend : f16
+  func.return %result : f16
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @rdna_scalar_f16_fma(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %result = v_fma_f16 %lhs, %rhs, %addend
+  %10 = v_bfe_u32_offset_0_width_inline_low16 %result
+  return %10
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+func.def @cdna_scalar_f16_fma(%lhs: f16, %rhs: f16, %addend: f16) -> (f16) {
+  %result = scalar.fmaf %lhs, %rhs, %addend : f16
+  func.return %result : f16
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @cdna_scalar_f16_fma(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %addend: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %result = v_fma_f16 %lhs, %rhs, %addend
+  %10 = v_bfe_u32_offset_0_width_inline_low16 %result
+  return %10
+}

@@ -4221,20 +4221,39 @@ def test_scalar_f16_fma_descriptors_pin_low16_and_literal_width() -> None:
             *_gfx11_core_overlays(),
         )
     }
-    for descriptor_key in (
-        "amdgpu.v_fma_f16",
-        "amdgpu.v_mad_f16",
+    for descriptor_key, expected_first_parts in (
+        (
+            "amdgpu.v_fma_f16",
+            (
+                _REG_PART_VGPR_LOW16,
+                _REG_PART_SGPR_LOW16,
+                _REG_PART_SGPR_LOW16,
+                _REG_PART_SGPR_LOW16,
+            ),
+        ),
+        (
+            "amdgpu.v_mad_f16",
+            (_REG_PART_VGPR_LOW16,) * 4,
+        ),
     ):
         descriptor = descriptors[descriptor_key]
-        assert tuple(
-            operand.descriptor_operand.reg_alts[0].register_part
-            for operand in descriptor.operands
-        ) == (
-            _REG_PART_VGPR_LOW16,
-            _REG_PART_VGPR_LOW16,
-            _REG_PART_VGPR_LOW16,
-            _REG_PART_VGPR_LOW16,
+        assert (
+            tuple(
+                operand.descriptor_operand.reg_alts[0].register_part
+                for operand in descriptor.operands
+            )
+            == expected_first_parts
         )
+        if descriptor_key == "amdgpu.v_fma_f16":
+            for operand in descriptor.operands[1:]:
+                assert tuple(
+                    alternative.reg_class
+                    for alternative in operand.descriptor_operand.reg_alts
+                ) == ("amdgpu.sgpr", "amdgpu.vgpr")
+                assert tuple(
+                    alternative.register_part
+                    for alternative in operand.descriptor_operand.reg_alts
+                ) == (_REG_PART_SGPR_LOW16, _REG_PART_VGPR_LOW16)
 
     for descriptor_key in (
         "amdgpu.v_fmac_f16",
