@@ -1,6 +1,6 @@
 // RUN: emit cxx roundtrip
 // REQUIRES: loom-export-cxx
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 
 namespace fragment = loom::vector::fragment;
 namespace loomt = loom::type;
@@ -26,7 +26,7 @@ Half16 fragment_origins(Input source, Output output, loomt::index row,
 }
 
 // ----
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 
 #include <stdfloat>
 

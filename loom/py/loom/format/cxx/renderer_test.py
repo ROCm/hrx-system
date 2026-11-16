@@ -1052,6 +1052,8 @@ kernel.def @matrix() {
 
     result = render_module(load_module(source.encode()))
 
+    assert "#include <loomcxx/fragment.h>" in result
+    assert "#include <loomcxx/vector.h>" not in result
     assert (
         "struct FragmentParameters {\n"
         "  UInt32x2 scale;\n"
@@ -1075,20 +1077,22 @@ kernel.def @matrix() {
 def test_projects_fragment_memory_static_and_dynamic_origins() -> None:
     source = """\
 func.def public @fragment_memory(%source: view<16x16xf16>, %output: view<16x16xf16>, %row: index, %column: index, %m: index, %n: index, %scale: vector<2xi32>) -> (vector<16xf16>) {
-  %fixed = vector.fragment.load<lhs> %source[0, 4] shape [%m, %n] : view<16x16xf16> -> vector<16xf16>
+  %fixed = vector.fragment.load<lhs, type_disjoint> %source[0, 4] shape [%m, %n] : view<16x16xf16> -> vector<16xf16>
   %mixed = vector.fragment.load<rhs> %source[%row, 4] shape [%m, %n] using {scale = %scale : vector<2xi32>} : view<16x16xf16> -> vector<16xf16>
   %runtime = vector.fragment.load<rhs> %source[%row, %column] shape [%m, %n] : view<16x16xf16> -> vector<16xf16>
-  vector.fragment.store<result> %mixed, %output[0, 0] shape [%m, %n] : vector<16xf16>, view<16x16xf16>
+  vector.fragment.store<result, type_disjoint> %mixed, %output[0, 0] shape [%m, %n] : vector<16xf16>, view<16x16xf16>
   func.return %fixed : vector<16xf16>
 }
 """
 
     result = render_module(load_module(source.encode()))
 
+    assert "#include <loomcxx/fragment.h>" in result
+    assert "#include <loomcxx/vector.h>" not in result
     assert (
         "Float16x16 fixed = loom::vector::fragment::load<"
         "loom::vector::fragment::role::lhs, Float16x16, "
-        "loom::memory_access::may_alias, 0, 4>("
+        "loom::memory_access::none, 0, 4>("
         "source, loom::vector::fragment::shape{m, n});" in result
     )
     assert (
@@ -1101,7 +1105,7 @@ func.def public @fragment_memory(%source: view<16x16xf16>, %output: view<16x16xf
     assert (
         "loom::vector::fragment::store<"
         "loom::vector::fragment::role::result, "
-        "loom::memory_access::may_alias, 0, 0>("
+        "loom::memory_access::none, 0, 0>("
         "mixed, output, loom::vector::fragment::shape{m, n});" in result
     )
     assert (

@@ -307,6 +307,26 @@ class CxxRenderer(CxxFunctionRenderer):
             *projected_flags,
         )
 
+    def _render_fragment_store(self, operation: Operation) -> tuple[str, ...]:
+        resolved = self._resolved(operation)
+        role = resolved.attr("role")
+        shape = self._fragment_shape(operation, resolved)
+        template, origin = self._fragment_origin(resolved)
+        selectors = [f"loom::vector::fragment::role::{role}"]
+        access_selector_count = len(selectors)
+        projected_flags = self._append_memory_access_contract(operation, selectors)
+        if template and len(selectors) == access_selector_count:
+            selectors.append("loom::memory_access::none")
+        value = self.expression(resolved.value_id("value"))
+        view = self.expression(resolved.value_id("view"))
+        arguments = ", ".join([value, view, *origin, shape])
+        self.writer.line(
+            "loom::vector::fragment::store<"
+            f"{', '.join(selectors)}{template}>("
+            f"{arguments});"
+        )
+        return ("role", "static_indices", *projected_flags)
+
     def _render_memory(self, operation: Operation) -> tuple[str, ...] | None:
         name = operation.name
         if name == "buffer.null":
@@ -626,21 +646,7 @@ class CxxRenderer(CxxFunctionRenderer):
                 *projected_flags,
             )
         if name == "vector.fragment.store":
-            resolved = self._resolved(operation)
-            role = resolved.attr("role")
-            shape = self._fragment_shape(operation, resolved)
-            template, origin = self._fragment_origin(resolved)
-            selectors = [f"loom::vector::fragment::role::{role}"]
-            projected_flags = self._append_memory_access_contract(operation, selectors)
-            value = self.expression(resolved.value_id("value"))
-            view = self.expression(resolved.value_id("view"))
-            arguments = ", ".join([value, view, *origin, shape])
-            self.writer.line(
-                "loom::vector::fragment::store<"
-                f"{', '.join(selectors)}{template}>("
-                f"{arguments});"
-            )
-            return ("role", "static_indices", *projected_flags)
+            return self._render_fragment_store(operation)
         return None
 
     def _render_kernel_op(self, operation: Operation) -> tuple[str, ...] | None:

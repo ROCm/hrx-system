@@ -1,6 +1,6 @@
 // RUN: roundtrip
 #include <loomcxx/encoding_type.h>
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 
 namespace fragment = loom::vector::fragment;
 using Schema = loom::type::encoding<loom::encoding::role::schema>;
@@ -46,7 +46,7 @@ func.def public @scaled_mma(%lhs_data: vector<16xf16>, %rhs_data: vector<16xf16>
 // ====
 // Batched shape remains explicit while the target provider changes physical
 // carrier type and role without a memory round trip.
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 
 namespace fragment = loom::vector::fragment;
 using Float8 = float __attribute__((ext_vector_type(8)));
@@ -77,7 +77,7 @@ func.def public @repack(%source: vector<8xf32>, %blocks: i64, %rows: i64, %colum
 // ====
 // Fragment memory operations retain full-rank origins, storage auxiliaries,
 // logical matrix shapes, and physical target carriers as separate values.
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 
 namespace fragment = loom::vector::fragment;
 namespace loomt = loom::type;
@@ -145,7 +145,7 @@ func.def public @load_mma_store(%lhs_source_dim0: index, %lhs_source_dim1: index
 // ====
 // Static template origins remain indexed-memory attributes while dynamic
 // entries alone are carried as SSA operands.
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 
 namespace fragment = loom::vector::fragment;
 namespace loomt = loom::type;
@@ -165,11 +165,12 @@ struct Auxiliary {
 void static_fragment_origins(Input source, EncodedInput encoded, Output output,
                              loomt::index row, loomt::size_type m,
                              loomt::size_type n, Scale2 scale) {
-  auto fixed = fragment::load<fragment::role::lhs, Half16, 0, 4>(
+  auto fixed = fragment::load<fragment::role::lhs, Half16,
+                              loom::memory_access::none, 0, 4>(
       source, fragment::shape{m, n});
-  auto mixed =
-      fragment::load<fragment::role::rhs, Half16, loomt::dynamic, 4>(
-          source, {row}, fragment::shape{m, n});
+  auto mixed = fragment::load<fragment::role::rhs, Half16,
+                              loom::memory_access::none, loomt::dynamic, 4>(
+      source, {row}, fragment::shape{m, n});
   auto scaled = fragment::load<fragment::role::rhs, Half16,
                                loom::memory_access::may_alias, 0, 0>(
       encoded, fragment::shape{m, n}, Auxiliary{scale});
@@ -177,10 +178,11 @@ void static_fragment_origins(Input source, EncodedInput encoded, Output output,
       fragment::role::rhs, Half16, loom::memory_access::may_alias,
       loomt::dynamic, 0>(encoded, {row}, fragment::shape{m, n},
                          Auxiliary{scale});
-  fragment::store<fragment::role::result, 0, 0>(
+  fragment::store<fragment::role::result, loom::memory_access::none, 0, 0>(
       fixed, output, fragment::shape{m, n});
-  fragment::store<fragment::role::result, loomt::dynamic, 8>(
-      mixed, output, {row}, fragment::shape{m, n});
+  fragment::store<fragment::role::result, loom::memory_access::none,
+                  loomt::dynamic, 8>(mixed, output, {row},
+                                     fragment::shape{m, n});
   (void)scaled;
   (void)mixed_scaled;
 }
@@ -210,7 +212,7 @@ func.def public @static_fragment_origins(%source_layout: encoding<layout>, %sour
 
 // ====
 // Saturation is an explicit numerical permission on integer MMA.
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 
 using Bytes32 = signed char __attribute__((ext_vector_type(32)));
 using Ints8 = int __attribute__((ext_vector_type(8)));
@@ -229,7 +231,7 @@ func.def public @saturating_mma(%lhs: vector<32xi8>, %rhs: vector<32xi8>, %init:
 // Target providers can describe native FP4 carriers with FP8 block scales
 // without exposing a vendor instruction or carrier type to portable callers.
 #include <loomcxx/encoding.h>
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 
 namespace fragment = loom::vector::fragment;
 using Words8 = unsigned __attribute__((ext_vector_type(8)));

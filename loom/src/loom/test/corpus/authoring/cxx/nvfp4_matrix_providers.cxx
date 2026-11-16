@@ -5,8 +5,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <loomcxx/encoding.h>
+#include <loomcxx/fragment.h>
 #include <loomcxx/target.h>
-#include <loomcxx/vector.h>
 
 #include <stdfloat>
 

@@ -372,7 +372,10 @@ class CxxExpressionRenderer(CxxRenderContext):
             f"loom::vector::fragment::role::{role}",
             self.cpp_type(result),
         ]
+        access_selector_count = len(selectors)
         projected_flags = self._append_memory_access_contract(operation, selectors)
+        if template and len(selectors) == access_selector_count:
+            selectors.append("loom::memory_access::none")
         arguments = [self.expression(resolved.value_id("view")), *origin, shape]
         auxiliary = resolved.value_ids("auxiliary")
         if auxiliary:

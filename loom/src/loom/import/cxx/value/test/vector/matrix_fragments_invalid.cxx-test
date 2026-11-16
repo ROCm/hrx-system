@@ -1,5 +1,5 @@
 // RUN: verify
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 using Vector = float __attribute__((ext_vector_type(4)));
 Vector entry(Vector value) {
   // ERROR@+1: LOWERING/059 "fragment operation has an unknown role"
@@ -9,7 +9,7 @@ Vector entry(Vector value) {
 }
 
 // ====
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 using Bytes = signed char __attribute__((ext_vector_type(4)));
 using Integers = int __attribute__((ext_vector_type(4)));
 Integers entry(Bytes lhs, Bytes rhs, Integers init) {
@@ -19,7 +19,7 @@ Integers entry(Bytes lhs, Bytes rhs, Integers init) {
 }
 
 // ====
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 using Vector = float __attribute__((ext_vector_type(4)));
 struct WrongShape {
   loom::type::size_type columns;
@@ -33,7 +33,7 @@ Vector entry(Vector value, loom::type::size_type rows,
 }
 
 // ====
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 using Vector = float __attribute__((ext_vector_type(4)));
 struct WrongShape {
   loom::type::size_type rows;
@@ -46,7 +46,7 @@ Vector entry(Vector value, loom::type::size_type rows, double columns) {
 }
 
 // ====
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 using Vector = float __attribute__((ext_vector_type(4)));
 struct WrongShape {
   loom::type::size_type rows;
@@ -58,7 +58,7 @@ Vector entry(Vector value, loom::type::size_type rows) {
 }
 
 // ====
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 int entry(int value) {
   // ERROR@+1: LOWERING/059 "vector.fragment must preserve its vector type"
   return loom::vector::fragment::attach<loom::vector::fragment::role::lhs>(
@@ -67,7 +67,7 @@ int entry(int value) {
 
 // ====
 #include <loomcxx/encoding_type.h>
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 using Vector = float __attribute__((ext_vector_type(4)));
 using Schema = loom::type::encoding<loom::encoding::role::schema>;
 struct Parameters {
@@ -82,7 +82,7 @@ Vector entry(Vector value, Schema schema) {
 }
 
 // ====
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 using Vector = float __attribute__((ext_vector_type(4)));
 struct Parameters {
   unsigned scale;
@@ -95,7 +95,7 @@ Vector entry(Vector value, unsigned scale) {
 
 // ====
 #include <loomcxx/encoding_type.h>
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 using Vector = float __attribute__((ext_vector_type(4)));
 using Layout = loom::type::encoding<loom::encoding::role::layout>;
 struct Parameters {
@@ -108,7 +108,7 @@ Vector entry(Vector value, Layout layout) {
 }
 
 // ====
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 using Vector = float __attribute__((ext_vector_type(4)));
 template <loom::vector::fragment::role Role, class Shape>
 [[loom::op("vector.fragment.load")]] Vector invalid(
@@ -120,7 +120,7 @@ Vector entry(Vector source) {
 }
 
 // ====
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 using Vector = float __attribute__((ext_vector_type(4)));
 using View = loom::type::view<loom::type::shape<4, 4>, const float>;
 template <loom::vector::fragment::role Role, class Shape>
@@ -133,7 +133,7 @@ Vector entry(View source) {
 }
 
 // ====
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 using Vector = float __attribute__((ext_vector_type(4)));
 using View = loom::type::view<loom::type::shape<4, 4>, const float>;
 template <loom::vector::fragment::role Role, class Shape>
@@ -146,7 +146,7 @@ float entry(View source) {
 }
 
 // ====
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 using Vector = float __attribute__((ext_vector_type(4)));
 using View = loom::type::view<loom::type::shape<4, 4>, const float>;
 void entry(Vector value, View destination) {
@@ -156,7 +156,7 @@ void entry(Vector value, View destination) {
 }
 
 // ====
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 using Vector = float __attribute__((ext_vector_type(4)));
 using View = loom::type::view<loom::type::shape<4, 4>, volatile float>;
 void entry(Vector value, View destination) {
@@ -166,7 +166,7 @@ void entry(Vector value, View destination) {
 }
 
 // ====
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 using Vector = float __attribute__((ext_vector_type(4)));
 using View = loom::type::view<loom::type::shape<4, 4>, const float>;
 template <loom::vector::fragment::role Role, class Shape>
@@ -179,18 +179,19 @@ Vector entry(View source, Vector scale) {
 }
 
 // ====
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 using Vector = float __attribute__((ext_vector_type(4)));
 using View = loom::type::view<loom::type::shape<4, 4>, const float>;
 Vector entry(View source) {
   // ERROR@+1: LOWERING/059 "fragment static origin selector is outside the index domain"
   return loom::vector::fragment::load<
-      loom::vector::fragment::role::lhs, Vector, 9223372036854775808ULL, 0>(
+      loom::vector::fragment::role::lhs, Vector, loom::memory_access::none,
+      9223372036854775808ULL, 0>(
       source, loom::vector::fragment::shape{2, 2});
 }
 
 // ====
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 using Vector = float __attribute__((ext_vector_type(4)));
 struct Parameters {
   Vector scale;
