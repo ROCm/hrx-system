@@ -288,7 +288,6 @@ iree_status_t iree_hal_streaming_graph_prepare_copy_staging(
     attrs->command.copy.source_offset = 0;
   } else {
     attrs->command.copy.target_offset = 0;
-    attrs->command.copy.release_to_host = true;
   }
   void* host_pointer = NULL;
   iree_status_t status = iree_ok_status();
@@ -1572,9 +1571,6 @@ static iree_status_t iree_hal_streaming_graph_add_copy_buffer_node_resolved(
               .target_buffer = dst_ref.buffer ? dst_ref.buffer->buffer : NULL,
               .target_offset = dst_ref.offset,
               .length = size,
-              .release_to_host =
-                  dst_ref.buffer && dst_ref.buffer->memory_kind !=
-                                        IREE_HAL_STREAMING_MEMORY_KIND_DEVICE,
           },
       .row_count = 1,
       .slice_count = 1,

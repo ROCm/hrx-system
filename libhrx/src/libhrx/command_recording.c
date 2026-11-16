@@ -115,13 +115,11 @@ static iree_status_t hrx_command_record_copy(
   return status;
 }
 
-iree_status_t hrx_graph_record_commands(
+static iree_status_t hrx_graph_record_commands(
     const hrx_graph_schedule_t* schedule, uint32_t node_start_index,
     uint32_t node_count, uint8_t stream_index,
     const iree_hal_barrier_t* dependency_barrier,
-    iree_hal_command_buffer_t* command_buffer,
-    iree_hal_barrier_flags_t* out_release_flags) {
-  *out_release_flags = IREE_HAL_BARRIER_FLAG_NONE;
+    iree_hal_command_buffer_t* command_buffer) {
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0; iree_status_is_ok(status) && i < node_count; ++i) {
     const uint32_t index = schedule->order[node_start_index + i];
@@ -150,9 +148,6 @@ iree_status_t hrx_graph_record_commands(
       case HRX_COMMAND_COPY: {
         const hrx_command_copy_t* copy = (const void*)command;
         status = hrx_command_record_copy(command_buffer, copy);
-        if (copy->release_to_host) {
-          *out_release_flags |= IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
-        }
         break;
       }
       case HRX_COMMAND_FILL: {
@@ -173,5 +168,74 @@ iree_status_t hrx_graph_record_commands(
         IREE_CHECK_UNREACHABLE("invalid resolved command");
     }
   }
+  return status;
+}
+
+iree_status_t hrx_graph_record_partition(
+    const hrx_graph_schedule_t* schedule, uint32_t node_start_index,
+    uint32_t node_count, uint8_t stream_id,
+    iree_hal_command_buffer_t* command_buffer) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_command_buffer_begin(command_buffer));
+
+  // Queue waits order external producers; this partition has no local work
+  // to drain at entry. Payload acquisition remains an explicit dependency.
+  const iree_hal_barrier_t acquire_barrier = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+  };
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_command_buffer_barrier(command_buffer, &acquire_barrier));
+
+  const iree_string_view_t label_name =
+      iree_make_cstring_view("graph partition");
+  const iree_hal_label_location_t* location = NULL;
+  const iree_hal_label_color_t label_color = iree_hal_label_color_unspecified();
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_command_buffer_begin_debug_group(command_buffer, label_name,
+                                                    label_color, location));
+
+  // Every operation in a recorded partition executes on this device. Host
+  // calls and other partitions cross the system-scope entry/exit barriers;
+  // dependencies within the partition only order device memory accesses.
+  const iree_hal_access_scope_t device_access =
+      IREE_HAL_ACCESS_SCOPE_CONSTANT_READ |
+      IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE | IREE_HAL_ACCESS_SCOPE_ATOMIC_READ |
+      IREE_HAL_ACCESS_SCOPE_ATOMIC_WRITE;
+  const iree_hal_memory_barrier_t memory_barrier = {
+      .source_scope = device_access,
+      .target_scope = device_access,
+  };
+  const iree_hal_barrier_t execution_barrier = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      .memory_barrier_count = 1,
+      .memory_barriers = &memory_barrier,
+  };
+  iree_status_t status =
+      hrx_graph_record_commands(schedule, node_start_index, node_count,
+                                stream_id, &execution_barrier, command_buffer);
+
+  if (iree_status_is_ok(status)) {
+    const iree_hal_barrier_t release_barrier = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+    };
+    status = iree_hal_command_buffer_barrier(command_buffer, &release_barrier);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_end_debug_group(command_buffer);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_command_buffer_end(command_buffer);
+  }
+
+  IREE_TRACE_ZONE_END(z0);
   return status;
 }
