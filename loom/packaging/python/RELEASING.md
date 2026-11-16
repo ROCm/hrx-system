@@ -118,11 +118,16 @@ python loom/packaging/python/release.py \
 Repeating without `--dry-run` edits only the named JSON. The release-preparation
 PR includes that change and any updates to [PYPI_README.md](PYPI_README.md), the
 package description embedded in every wheel. Its pull request description also
-contains the exact version-marked editorial section selected for publication.
-The [release-note authoring contract](release_notes/README.md) starts from the
-previous public tag and candidate commit, audits migrations before feature
-prose, and records only evidence-backed outcomes and notable changes. A missing,
-ambiguous, stale, empty, or placeholder-bearing section cannot publish.
+contains the exact version-marked section selected for publication. Candidate
+pull requests carry a concise candidate summary and a link to the release
+line's evolving unlisted Gist. The stable pull request carries the completed
+editorial copied from that Gist, including the notable pull request links that
+create GitHub cross-references. The
+[release-note authoring contract](release_notes/README.md) defines both forms,
+starts from the previous public tag and candidate commit, audits migrations
+before feature prose, and records only evidence-backed outcomes and notable
+changes. A missing, ambiguous, stale, empty, or placeholder-bearing section
+cannot publish.
 
 Review and CI establish the source revision to release. The release tag points
 directly at the commit GitHub records as the version-bump pull request's merge
@@ -156,6 +161,21 @@ this workflow publishes the Loom SDK assets. The release branch owns the
 candidate and stable identities, while ordinary development continues on
 `main`.
 
+Create one unlisted Gist for the `X.Y.Z` release line before opening its first
+candidate pull request. Seed it with the stable editorial template and maintain
+the full release narrative there throughout candidate qualification. Unlisted
+Gists are accessible to anyone with the URL and are not suitable for
+confidential information. Gist references do not create pull request timeline
+cross-references; that is intentional while the editorial is still changing.
+
+Each candidate pull request uses the
+[candidate template](release_notes/CANDIDATE_TEMPLATE.md). Its marked section
+contains a short release focus, material changes since the previous candidate
+or selected main revision, required migrations or test focus, the shared Gist
+URL, and the feedback channel. It does not copy the full editorial or notable
+pull request list. The published candidate therefore points testers at one
+living draft without making every candidate a duplicate release-note archive.
+
 The first candidate sets `package-version` to `X.Y.Zrc1` and names the
 coordinated library tag
 `github:ROCm/hrx-loom-library@vX.Y.Zrc1`. Build and qualify the SDK candidate
@@ -177,18 +197,27 @@ line. Each changed candidate increments the package version and tag (`rc2`,
 `rc3`, and so on), which preserves the exact bytes testers used and keeps every
 feedback report attributable to one source revision. Unrelated features remain
 on `main`; the release line takes only fixes needed to qualify the selected
-release.
+release. Update the same Gist as evidence and migrations change, and summarize
+only the candidate delta in the next version-bump pull request.
 
 When the candidate is accepted, a final identity pull request on the same
 release line changes both `package-version` to `X.Y.Z` and `model-catalog` to
 the coordinated `github:ROCm/hrx-loom-library@vX.Y.Z` tag. Build the stable SDK
 candidate, qualify its exact wheel and source revision through the library pin
 workflow, and publish the immutable stable library release before creating the
-HRX tag. The stable tag then runs the complete qualification again, publishes a
-normal GitHub release, and publishes its two Release wheels to PyPI. Promoting
-GitHub metadata or reusing candidate artifacts cannot substitute for the stable
-build: the stable version has its own library association, tag, wheel metadata,
-checksums, and attestations.
+HRX tag. Copy the completed Gist editorial into the stable pull request's marked
+section and review it against the exact stable range. This final pull request is
+the durable editorial source and creates GitHub cross-references for every
+linked notable pull request. The stable tag then runs the complete qualification
+again, publishes a normal GitHub release, and publishes its two Release wheels
+to PyPI. Promoting GitHub metadata or reusing candidate artifacts cannot
+substitute for the stable build: the stable version has its own library
+association, tag, wheel metadata, checksums, and attestations.
+
+After stable publication, replace the Gist draft with a short pointer to the
+immutable GitHub release. Candidate links continue to resolve, while the
+published release and its source pull request remain the only authoritative
+copies of the completed editorial.
 
 ## Publish the reviewed tag
 
@@ -215,12 +244,14 @@ resumes a draft, verifies its exact asset inventory and SHA-256 digests, uploads
 only missing assets, and publishes only after the set is complete. GitHub
 publication completes before the stable-only PyPI publication starts.
 
-GitHub publication copies the marked editorial section from the exact merged
-version-bump pull request, followed by a generated appendix naming the
-installation path, attached native profiles, standalone executables, checksum
-document, and qualification shape. The body records the source pull request,
-merge commit, version, and editorial digest. Stable releases install from PyPI;
-prereleases install their attached Release wheel directly.
+GitHub publication copies the marked section from the exact merged version-bump
+pull request, followed by a generated appendix naming the installation path,
+attached native profiles, standalone executables, checksum document, and
+qualification shape. For a candidate this is the concise summary and evolving
+Gist link; for a stable release it is the complete reviewed editorial. The body
+records the source pull request, merge commit, version, and editorial digest.
+Stable releases install from PyPI; prereleases install their attached Release
+wheel directly.
 
 A draft retry resolves the source pull request again and requires the complete
 composed body to match. After publication, the immutable release body is the
@@ -284,7 +315,7 @@ producers; it is not the same operation as rerunning failed publication jobs.
 | Concern | Source of truth |
 | --- | --- |
 | Version, catalog association, and package description | [version.json](version.json), [PYPI_README.md](PYPI_README.md) |
-| Editorial release-note contract and pull request template | [release_notes/README.md](release_notes/README.md), [release_notes/TEMPLATE.md](release_notes/TEMPLATE.md) |
+| Editorial release-note contract and pull request templates | [release_notes/README.md](release_notes/README.md), [release_notes/CANDIDATE_TEMPLATE.md](release_notes/CANDIDATE_TEMPLATE.md), [release_notes/TEMPLATE.md](release_notes/TEMPLATE.md) |
 | Wheel contents, native profiles, and Linux ABI audit | [BUILD.bazel](BUILD.bazel), [defs.bzl](defs.bzl), [native.bzl](native.bzl), [manylinux.bzl](manylinux.bzl) |
 | Compiler, runner image, and cross-SDK pins | [Artifact workflow](../../../.github/workflows/build_loom_sdk_artifacts.yml), [Windows setup](../../../.github/scripts/setup_windows_cross.sh), [SDK manifest](../../../.github/scripts/windows-sdk-channel.json) |
 | Artifact export and installed qualification | [loom_wheel.py](../../../build_tools/ci/loom_wheel.py), [installed oracle](../../src/loom/tooling/target/cpu/serve/wheel_model_card_test.py) |
