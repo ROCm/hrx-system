@@ -134,8 +134,8 @@ binary establishes selection and provenance; an uninstrumented binary with the
 same selection state supplies the score.
 
 For a Vulkan backend, continue with the
-[RADV oracle workflow](radv.md) to join the selected pipeline to its SPIR-V and
-ACO program. The reference source kernel is insufficient when the runtime did
+[Vulkan oracle workflow](radv.md) to join the selected pipeline to its SPIR-V and
+native program. The reference source kernel is insufficient when the runtime did
 not select it for the witness.
 
 An algorithm cliff in llama.cpp is evidence about that implementation. Test
