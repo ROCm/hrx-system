@@ -36,8 +36,19 @@ TEST(ProgramTest, HostPublicationUsesTaggedSamplesAcrossMixedPacketsAndWrap) {
   source[0].words[14] = 1;
   source[3].words[14] = 2;
   const auto original = source;
-  for (bool capture : {false, true}) {
+  for (auto [capture, command_data] :
+       {std::make_tuple(false, false), std::make_tuple(false, true),
+        std::make_tuple(true, false), std::make_tuple(true, true)}) {
     SCOPED_TRACE(capture);
+    SCOPED_TRACE(command_data);
+    source[1] = command_data
+                    ? original[1]
+                    : iree_hal_amd_gpu_aql_packet_barrier(
+                          IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND |
+                              IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                              IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_AGENT,
+                          0, nullptr, 0);
+    const auto expected_source = source;
     std::array<iree_hal_amd_gpu_aql_packet_t, 8> published = {};
     for (auto& packet : published) {
       packet.words[0] = IREE_HAL_AMD_GPU_AQL_HEADER_INVALID;
@@ -53,12 +64,14 @@ TEST(ProgramTest, HostPublicationUsesTaggedSamplesAcrossMixedPacketsAndWrap) {
     const auto guard = samples[2];
     const uint64_t sample_address = capture ? UINT64_C(0x123400001000) : 0;
     ASSERT_EQ(iree_hal_amd_gpu_aql_program_emit_host(
-                  source.size(), source.data(), &ring, nullptr, 6,
+                  source.size(), source.data(), command_data, &ring, nullptr, 6,
                   sample_address, capture ? samples.data() : nullptr),
               AMDF_STATUS_OK);
     for (size_t i = 0; i < source.size(); ++i) {
       auto expected = source[i];
-      expected.words[0] |= IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM;
+      if (i == 0 || command_data) {
+        expected.words[0] |= IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM;
+      }
       if (i == 0) {
         expected.words[0] |= IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED;
       }
@@ -79,7 +92,7 @@ TEST(ProgramTest, HostPublicationUsesTaggedSamplesAcrossMixedPacketsAndWrap) {
                 0);
     }
     EXPECT_EQ(memcmp(&samples[2], &guard, sizeof(guard)), 0);
-    EXPECT_EQ(memcmp(source.data(), original.data(), sizeof(source)), 0);
+    EXPECT_EQ(memcmp(source.data(), expected_source.data(), sizeof(source)), 0);
   }
 }
 
@@ -113,9 +126,10 @@ TEST(ProgramTest, HostPublicationStopsAtTheFirstNativeFailure) {
   std::array<iree_hal_amd_gpu_aql_packet_t, 3> source;
   source.fill(iree_hal_amd_gpu_aql_packet_barrier(
       IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND, 0, nullptr, 0));
-  EXPECT_EQ(iree_hal_amd_gpu_aql_program_emit_host(
-                source.size(), source.data(), &ring, &storage, 0, 0, nullptr),
-            amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST));
+  EXPECT_EQ(
+      iree_hal_amd_gpu_aql_program_emit_host(
+          source.size(), source.data(), false, &ring, &storage, 0, 0, nullptr),
+      amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST));
   EXPECT_EQ(calls, 2u);
   EXPECT_EQ(published[0].words[0],
             IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND |

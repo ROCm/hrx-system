@@ -1039,8 +1039,8 @@ iree_hal_amd_gpu_aql_publish_execute_prepared(
             samples);
       } else {
         publication_status = iree_hal_amd_gpu_aql_program_emit_host(
-            block.packet_count, packets, ring, &queue->storage, packet_position,
-            sample_address, samples);
+            block.packet_count, packets, command_data, ring, &queue->storage,
+            packet_position, sample_address, samples);
       }
     } else {
       publication_status = iree_hal_amd_gpu_aql_program_emit(

@@ -105,9 +105,13 @@ uint32_t iree_hal_amd_gpu_aql_program_prefix_count(
 // storage. Dense inputs and fixups are already resolved. Completion operands
 // contain producer-assigned profile ordinals, or zero for unsampled packets.
 // samples is invocation-private storage at sample_address, or NULL/zero when
-// capture is disabled. The caller retains both uploads through completion.
+// capture is disabled. The caller completes the entire chunk's ABI upload
+// before publication and retains stable argument and sample storage through
+// completion. The first packet acquires the ABI for subsequent launches.
+// command_data marks native IB uploads whose command-processor reads retain
+// per-packet acquisition.
 amdf_status_t iree_hal_amd_gpu_aql_program_emit_host(
-    uint32_t packet_count, const void* upload,
+    uint32_t packet_count, const void* upload, bool command_data,
     iree_hal_amd_gpu_aql_ring_t* ring,
     const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
     uint64_t sample_address, iree_hal_amd_gpu_aql_signal_t* samples);
