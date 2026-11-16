@@ -187,19 +187,10 @@ void loom_x86_reference_memory(loom_x86_function_t* function,
   loom_x86_reference_word(function, false, 0, saved_address);
 }
 
-void loom_x86_reference_transfer(loom_x86_function_t* function,
-                                 const loom_x86_reference_context_t* context,
-                                 loom_x86_reference_transfer_t transfer,
-                                 loom_x86_reference_address_t destination,
-                                 loom_x86_reference_address_t source) {
-  if (source.base == destination.base &&
-      source.displacement == destination.displacement) {
-    return;
-  }
-  const loom_x86_reference_address_t payload = {
-      .base = 4, .displacement = context->scratch_offset + 16};
-  loom_x86_reference_scratch(function, context, true);
-  loom_x86_reference_pair(function, false, source);
+// R10/R11 contain an incoming cell. Apply the scheduled ownership action
+// before publishing it in destination storage.
+static void loom_x86_reference_acquire(loom_x86_function_t* function,
+                                       loom_x86_reference_transfer_t transfer) {
   if (transfer == LOOM_X86_REFERENCE_COPY ||
       transfer == LOOM_X86_REFERENCE_BORROW ||
       transfer == LOOM_X86_REFERENCE_RETAIN) {
@@ -238,6 +229,37 @@ void loom_x86_reference_transfer(loom_x86_function_t* function,
     }
     loom_x86_reference_bind(function, ready);
   }
+}
+
+void loom_x86_reference_initialize_from(
+    loom_x86_function_t* function, const loom_x86_reference_context_t* context,
+    loom_x86_reference_address_t destination,
+    loom_x86_reference_address_t source, bool consume) {
+  loom_x86_reference_scratch(function, context, true);
+  loom_x86_reference_pair(function, false, source);
+  loom_x86_reference_acquire(function, consume ? LOOM_X86_REFERENCE_TRANSFER
+                                               : LOOM_X86_REFERENCE_BORROW);
+  if (consume) {
+    loom_x86_reference_initialize(function, source);
+  }
+  loom_x86_reference_pair(function, true, destination);
+  loom_x86_reference_scratch(function, context, false);
+}
+
+void loom_x86_reference_transfer(loom_x86_function_t* function,
+                                 const loom_x86_reference_context_t* context,
+                                 loom_x86_reference_transfer_t transfer,
+                                 loom_x86_reference_address_t destination,
+                                 loom_x86_reference_address_t source) {
+  if (source.base == destination.base &&
+      source.displacement == destination.displacement) {
+    return;
+  }
+  const loom_x86_reference_address_t payload = {
+      .base = 4, .displacement = context->scratch_offset + 16};
+  loom_x86_reference_scratch(function, context, true);
+  loom_x86_reference_pair(function, false, source);
+  loom_x86_reference_acquire(function, transfer);
   loom_x86_reference_pair(function, true, payload);
   if (transfer == LOOM_X86_REFERENCE_TRANSFER) {
     loom_x86_reference_initialize(function, source);

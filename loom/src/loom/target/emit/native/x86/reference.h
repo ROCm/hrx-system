@@ -63,6 +63,15 @@ void loom_x86_reference_bind(loom_x86_function_t* function, uint32_t label);
 void loom_x86_reference_initialize(loom_x86_function_t* function,
                                    loom_x86_reference_address_t address);
 
+// Initializes a fresh invocation cell from a disjoint caller cell. Consuming
+// inputs transfer and clear the caller's cell; other inputs become borrows.
+// Neither path retires the fresh destination or invokes a destructor. R10/R11
+// survive the transport. The caller reserves TRANSFER_CAPACITY records.
+void loom_x86_reference_initialize_from(
+    loom_x86_function_t* function, const loom_x86_reference_context_t* context,
+    loom_x86_reference_address_t destination,
+    loom_x86_reference_address_t source, bool consume);
+
 // Initializes or retires a complete contiguous reference range. Large ranges
 // use one compact loop, and all registers (including an active failure status)
 // survive it. The caller reserves TRANSFER_CAPACITY records.

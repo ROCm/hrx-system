@@ -1833,13 +1833,11 @@ iree_status_t loom_x86_function_prepare(
               .immediate = function_abi->arguments[i].stack_offset},
           UINT32_MAX);
     }
-    loom_x86_reference_transfer(
+    loom_x86_reference_initialize_from(
         &function, &builder.references.context,
-        action == LOOM_X86_CALL_ABI_VALUE_ACTION_REFERENCE_OWNED
-            ? LOOM_X86_REFERENCE_TRANSFER
-            : LOOM_X86_REFERENCE_BORROW,
         loom_x86_function_reference_assignment(frame, &builder, assignment),
-        (loom_x86_reference_address_t){.base = pointer_register});
+        (loom_x86_reference_address_t){.base = pointer_register},
+        action == LOOM_X86_CALL_ABI_VALUE_ACTION_REFERENCE_OWNED);
   }
   loom_x86_function_normalize_arguments(frame, &builder);
   if (builder.storage_alignment > 16) {
