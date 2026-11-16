@@ -220,6 +220,13 @@ static iree_vm_program_callable_abi_t iree_vm_program_build_callable_abi(
     iree_vm_module_callable_type_declaration_t declaration,
     iree_vm_program_field_storage_t* field_storage) {
   iree_vm_program_callable_abi_t callable_abi = {0};
+  for (uint16_t i = 0; i < declaration.signature.arguments.count; ++i) {
+    if (iree_vm_module_signature_type_kind_is_span(
+            declaration.signature.arguments.data[i].kind)) {
+      callable_abi.has_span_arguments = true;
+      return callable_abi;
+    }
+  }
   iree_vm_program_build_signature_side_abi(
       program, linked_module, declaration.signature.arguments, field_storage,
       &callable_abi.value_arguments, &callable_abi.ref_arguments,
@@ -265,7 +272,7 @@ static int iree_vm_program_compare_signature_type(
   if (comparison != 0) {
     return comparison;
   }
-  if (iree_vm_module_signature_type_kind_is_ref(lhs.kind)) {
+  if (iree_vm_module_signature_type_kind_has_ref_type(lhs.kind)) {
     return iree_vm_program_compare_ref_types(
         lhs_module->module->descriptor->ref_types.data[lhs.type_ordinal],
         rhs_module->module->descriptor->ref_types.data[rhs.type_ordinal]);

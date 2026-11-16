@@ -192,6 +192,53 @@ TEST(VMModuleValidationTest, RejectsMalformedSemanticTables) {
   ExpectMetadataRejected(kOutOfRangeMetadata);
 }
 
+TEST(VMModuleValidationTest, ScalarSpanSignaturesUsePairsForEveryElementKind) {
+  for (uint16_t kind = IREE_VM_SCALAR_TYPE_I8; kind <= IREE_VM_SCALAR_TYPE_F64;
+       ++kind) {
+    SCOPED_TRACE(kind);
+    const iree_vm_module_signature_type_t fields[] = {
+        {IREE_VM_SCALAR_TYPE_I32, 0},
+        {static_cast<uint16_t>(IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN | kind),
+         0}};
+    const iree_vm_module_callable_type_declaration_t callables[] = {
+        {{{fields, 2, 4, 0, 0}, {}}, 0, 0, 0}};
+    TableModule module;
+    IREE_ASSERT_OK(module.Publish(
+        iree::vm::testing::TableModuleDefinition().WithCallableTypes(
+            callables)));
+    module.ReleaseOwner();
+  }
+}
+
+TEST(VMModuleValidationTest, RejectsInvalidSpanContracts) {
+  const uint16_t span = IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN;
+  const uint16_t valid_kind =
+      span | static_cast<uint16_t>(IREE_VM_SCALAR_TYPE_I64);
+  for (uint16_t kind :
+       {span, static_cast<uint16_t>(span | 0xFF),
+        static_cast<uint16_t>(span |
+                              IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION),
+        static_cast<uint16_t>(span | IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR)}) {
+    SCOPED_TRACE(kind);
+    const iree_vm_module_signature_type_t fields[] = {{kind, 0}};
+    const iree_vm_module_callable_type_declaration_t callables[] = {
+        {{{fields, 1, 2, 0, 0}, {}}, 0, 0, 0}};
+    ExpectCallableTypesRejected(callables);
+  }
+  const iree_vm_module_signature_type_t fields[] = {{valid_kind, 0}};
+  for (uint16_t physical_count : {0, 1, 3}) {
+    const iree_vm_module_callable_type_declaration_t callables[] = {
+        {{{fields, 1, physical_count, 0, 0}, {}}, 0, 0, 0}};
+    ExpectCallableTypesRejected(callables);
+  }
+  const iree_vm_module_callable_type_declaration_t yieldable[] = {
+      {{{fields, 1, 2, 0, 0}, {}}, IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD, 0, 0}};
+  ExpectCallableTypesRejected(yieldable);
+  const iree_vm_module_callable_type_declaration_t returned[] = {
+      {{{}, {fields, 1, 2, 0, 0}}, 0, 0, 0}};
+  ExpectCallableTypesRejected(returned);
+}
+
 TEST(VMModuleValidationTest, AcceptsDuplicateTargetsAndUnknownMetadataTypes) {
   TableModule module;
   module.definition()

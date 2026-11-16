@@ -547,9 +547,11 @@ def _encode_grammar_program(
             )
             append_field(element.row_record, "descriptor_base_u32")
             for name in (
+                "argument_count_u16",
                 "argument_value_count_u16",
                 "argument_ref_count_u16",
                 "argument_function_count_u16",
+                "result_count_u16",
                 "result_value_count_u16",
                 "result_ref_count_u16",
                 "result_function_count_u16",

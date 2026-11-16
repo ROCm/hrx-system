@@ -30,7 +30,7 @@ from loom.ir import Module
 from loom.target.arch.amd.xdna.aie2p.dialect import ALL_AIE2P_OPS
 from loom.target.arch.amdgpu.dialect import ALL_AMDGPU_OPS
 from loom.target.arch.spirv.dialect import ALL_SPIRV_OPS, ALL_SPIRV_TYPES
-from loom.target.arch.vm.dialect import ALL_VM_OPS
+from loom.target.arch.vm.dialect import ALL_VM_OPS, ALL_VM_TYPES
 from loom.target.arch.wasm.dialect import ALL_WASM_OPS
 from loom.target.arch.x86.dialect import ALL_X86_OPS
 
@@ -69,7 +69,7 @@ def source_ops() -> tuple[Op, ...]:
 def source_types() -> tuple[TypeDef, ...]:
     """Returns every type accepted at the readable source boundary."""
 
-    return _unique_by_name((loom.default_types(), ALL_SPIRV_TYPES))
+    return _unique_by_name((loom.default_types(), ALL_SPIRV_TYPES, ALL_VM_TYPES))
 
 
 @cache

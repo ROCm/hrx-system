@@ -302,6 +302,13 @@ def _append_type_definition_source(source: list[str], all_types: Sequence[Any]) 
             source.append(f"    .namespace_name = {c_string_view(type_def.reference.namespace_name)},")
             source.append(f"    .type_name = {c_string_view(type_def.reference.type_name)},")
             source.append("};")
+        if type_def.register_units:
+            units = ", ".join(f"LOOM_SCALAR_TYPE_{unit.upper()}" for unit in type_def.register_units)
+            source.append(f"static const loom_scalar_type_t loom_type_{ident}_register_units[] = {{{units}}};")
+            source.append(f"static const loom_type_register_layout_t loom_type_{ident}_register_layout = {{")
+            source.append(f"    .unit_types = loom_type_{ident}_register_units,")
+            source.append(f"    .unit_count = {len(type_def.register_units)},")
+            source.append("};")
         source.append(f"static const loom_type_descriptor_t loom_type_{ident}_descriptor = {{")
         source.append(f"    .name = loom_type_{ident}_name,")
         source.append(f"    .ir_kind = {ir_kind},")
@@ -317,6 +324,8 @@ def _append_type_definition_source(source: list[str], all_types: Sequence[Any]) 
             source.append(f"    .parameterized = &{type_descriptor_symbol(type_def)},")
         if type_def.reference is not None:
             source.append(f"    .reference = &loom_type_{ident}_reference,")
+        if type_def.register_units:
+            source.append(f"    .register_layout = &loom_type_{ident}_register_layout,")
         source.append("};")
         source.append("")
 

@@ -54,3 +54,22 @@ func.def target(@target) @negative_index_offset(%input: index) -> (offset) {
   %result = index.cast %negative : index to offset
   func.return %result : offset
 }
+
+// ====
+
+// Bodyless imports have no source fact table. A view without an admitted
+// boundary carrier must receive a target diagnostic during declaration
+// planning, before lowering the caller's frame-backed storage.
+// RUN: emit source-low target=vm:core output=low
+type.decl import("external", "object") @Object
+
+// ERROR@+1: TARGET/033 {op_name="func.decl", actual_type="view<1x[%count]xptr<@Object>>"}
+func.decl import("external", "consume") @consume(%count: index, %objects: view<1x[%count]xptr<@Object>> {access = read})
+
+func.def public @caller(%object: ptr<@Object>) {
+  %count = index.constant 1 : index
+  %objects = view.alloca<private> : view<1x[%count]xptr<@Object>>
+  view.store %object, %objects[0, 0] : ptr<@Object>, view<1x[%count]xptr<@Object>>
+  func.call @consume(%count, %objects) : (index, view<1x[%count]xptr<@Object>>)
+  func.return
+}

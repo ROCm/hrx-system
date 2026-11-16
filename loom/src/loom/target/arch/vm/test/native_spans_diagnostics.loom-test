@@ -1,0 +1,28 @@
+// The native import ABI does not depend on callers' storage provenance. A
+// managed-buffer view cannot silently change it into a buffer/offset signature.
+// RUN: emit vm-dis
+vm.target<core> @vm
+
+func.decl import("external", "consume") target(@vm) @consume(%values: view<1xi64> {access = read})
+
+func.def public target(@vm) @run(%buffer: buffer) {
+  %c0 = index.constant 0 : offset
+  %values = buffer.view %buffer[%c0] : buffer -> view<1xi64>
+  // ERROR@+1: TARGET/097 {op_name="func.call", actual_type="view<1xi64>", reason="VM span arguments require frame-owned view storage"}
+  func.call @consume(%values) : (view<1xi64>)
+  func.return
+}
+
+// ====
+
+// A strided array cannot claim to be a contiguous native range.
+vm.target<core> @vm
+
+func.decl import("external", "consume") target(@vm) @consume(%values: view<2xi64, #encoding.layout.strided<strides=[2]>> {access = read})
+
+func.def public target(@vm) @run() {
+  %values = view.alloca<private> : view<2xi64, #encoding.layout.strided<strides=[2]>>
+  // ERROR@+1: TARGET/097 {op_name="func.call", actual_type="view<2xi64, #encoding.layout.strided<strides=[2]>>", reason="VM span arguments require a contiguous local view"}
+  func.call @consume(%values) : (view<2xi64, #encoding.layout.strided<strides=[2]>>)
+  func.return
+}

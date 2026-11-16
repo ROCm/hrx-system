@@ -107,6 +107,8 @@ typedef struct iree_vm_program_callable_abi_t {
   iree_vm_program_bank_counts_t result_counts;
   // Precomputed root-bank placement for invocation marshalling.
   iree_vm_program_root_layout_t root_layout;
+  // Physical-only signature that cannot use host variant marshalling.
+  bool has_span_arguments;
 } iree_vm_program_callable_abi_t;
 
 // Cached executable initializer plan.

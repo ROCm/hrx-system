@@ -1491,8 +1491,9 @@ const loom_low_descriptor_set_t* loom_low_lower_context_descriptor_set(
 const loom_low_schedule_model_t* loom_low_lower_context_schedule_model(
     const loom_low_lower_context_t* context);
 
-// Returns source value facts computed before planning. Valid only during
-// planning callbacks; emission consumes retained decisions instead.
+// Returns source value facts computed before planning, or NULL when planning
+// a bodyless declaration. Valid only during planning callbacks; emission
+// consumes retained decisions instead.
 const loom_value_fact_table_t* loom_low_lower_context_fact_table(
     const loom_low_lower_context_t* context);
 

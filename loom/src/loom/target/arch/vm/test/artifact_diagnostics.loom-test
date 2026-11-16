@@ -2,7 +2,7 @@
 
 vm.target<core> @target
 
-// ERROR@+1: BACKEND/055 {format="VM", export="untyped", constraint="signature fields carrying scalar or managed reference types"}
+// ERROR@+1: BACKEND/055 {format="VM", export="untyped", constraint="signature fields carrying scalar, managed reference, or native span types"}
 low.func.def public target<vm.core>(@target) @untyped(%value: reg<vm.value>) -> (reg<vm.value>) asm {
   return %value
 }

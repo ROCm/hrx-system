@@ -66,7 +66,7 @@ vm.module core(0.0) {
   }
 
   section functions alignment(8) {
-    func @function0 : @callable2 flags([has_call]) frame(local_bytes = 0, value_registers = 1, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function0 : @callable2 flags([has_call]) frame(local_bytes = 0, value_registers = 1, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       control.call @import2 {direct_ref_move_mask = 0x0000}

@@ -34,18 +34,43 @@ static bool iree_vm_bytecode_call_ref_matches(iree_vm_ref_t ref,
          iree_vm_ref_type(ref) == type;
 }
 
-// Validates the dynamic ref and function arguments of one exact callable.
+// Validates dynamic arguments and resolves spans in implementation-private
+// packet storage. Guest registers retain their encoded coordinates.
 static iree_status_t iree_vm_bytecode_call_validate_arguments(
     const iree_vm_bytecode_image_t* image,
     const iree_vm_module_execution_t* execution,
     const iree_vm_bytecode_v0_callable_type_row_t* callable_type,
     const iree_vm_bytecode_v0_signature_row_t* signature,
-    const iree_vm_bytecode_execution_state_t* state) {
+    const iree_vm_bytecode_execution_state_t* state,
+    iree_vm_call_packet_t* packet) {
   const iree_vm_bytecode_v0_signature_descriptor_row_t* descriptors =
       iree_vm_bytecode_signature_descriptors(
           &image->layout.signatures, callable_type->signature_ordinal_u16);
   const uint32_t argument_count =
       iree_vm_bytecode_signature_argument_count(signature);
+  const iree_vm_bytecode_v0_function_row_t* function = NULL;
+  uint64_t* span_values = NULL;
+  if (iree_vm_bytecode_signature_has_span_arguments(signature)) {
+    function = &image->layout.functions
+                    .rows[iree_vm_frame_function_ordinal(state->frame)];
+    span_values = (uint64_t*)iree_host_align(
+        (uintptr_t)(state->local_bytes + function->local_byte_length_u16),
+        iree_alignof(uint64_t));
+    const uint16_t direct_count = iree_min(signature->argument_value_count_u16,
+                                           IREE_VM_CALL_DIRECT_REGISTER_COUNT);
+    memcpy(span_values, state->values, direct_count * sizeof(uint64_t));
+    if (signature->argument_value_count_u16 > direct_count) {
+      memcpy(span_values + direct_count, state->local_bytes,
+             (signature->argument_value_count_u16 - direct_count) *
+                 sizeof(uint64_t));
+    }
+    packet->value_arguments.direct = span_values;
+    packet->value_arguments.overflow =
+        signature->argument_value_count_u16 > direct_count
+            ? span_values + direct_count
+            : NULL;
+  }
+  uint16_t value_ordinal = 0;
   uint16_t ref_ordinal = 0;
   uint16_t function_ordinal = 0;
   for (uint32_t i = 0; i < argument_count; ++i) {
@@ -77,12 +102,41 @@ static iree_status_t iree_vm_bytecode_call_validate_arguments(
                                 "call function argument contract mismatch");
       }
       ++function_ordinal;
+    } else if (iree_vm_module_signature_type_kind_is_span(
+                   descriptor->kind_u16)) {
+      value_ordinal = (value_ordinal + 1u) / 2u * 2u;
+      const uint64_t offset = span_values[value_ordinal];
+      const uint64_t count = span_values[value_ordinal + 1];
+      const uint16_t element_kind =
+          iree_vm_module_signature_element_kind(descriptor->kind_u16);
+      void* data = NULL;
+      if (iree_vm_module_signature_type_kind_is_ref(element_kind)) {
+        const uint64_t index = offset / 16u;
+        if (offset % 16u != 0 || index > function->local_ref_count_u32 ||
+            count > function->local_ref_count_u32 - index) {
+          return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "call reference span exceeds local storage");
+        }
+        data = state->local_refs + index;
+      } else {
+        const uint8_t width = iree_vm_scalar_type_byte_width(element_kind);
+        if (offset > function->local_byte_length_u16 ||
+            count > (function->local_byte_length_u16 - offset) / width) {
+          return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "call scalar span exceeds local storage");
+        }
+        data = state->local_bytes + offset;
+      }
+      span_values[value_ordinal] = (uintptr_t)data;
+      value_ordinal += 2;
+    } else {
+      ++value_ordinal;
     }
   }
   return iree_ok_status();
 }
 
-// Read-only preparation for one physical child packet.
+// Preparation for one physical child packet, before ownership is transferred.
 typedef struct iree_vm_bytecode_call_plan_t {
   // Complete packet copied into the invocation driver's request.
   iree_vm_call_packet_t packet;
@@ -107,9 +161,6 @@ static iree_status_t iree_vm_bytecode_call_prepare(
       &image->layout.callable_types.rows[callable_type_ordinal];
   const iree_vm_bytecode_v0_signature_row_t* signature =
       &image->layout.signatures.rows[callable_type->signature_ordinal_u16];
-  IREE_RETURN_IF_ERROR(iree_vm_bytecode_call_validate_arguments(
-      image, execution, callable_type, signature, state));
-
   iree_vm_bytecode_call_plan_t plan = {0};
   plan.direct_ref_argument_count = iree_min(IREE_VM_CALL_DIRECT_REGISTER_COUNT,
                                             signature->argument_ref_count_u16);
@@ -188,6 +239,8 @@ static iree_status_t iree_vm_bytecode_call_prepare(
                       : NULL,
           },
   };
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_call_validate_arguments(
+      image, execution, callable_type, signature, state, &plan.packet));
   *out_plan = plan;
   return iree_ok_status();
 }

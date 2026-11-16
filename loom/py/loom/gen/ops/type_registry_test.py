@@ -136,3 +136,12 @@ def test_generate_type_registry_rejects_invalid_fact_domain_symbol() -> None:
 
     with pytest.raises(ValueError, match=r"TypeDef 'test\.handle': fact_domain must be a C symbol name"):
         generate_type_registry([type_def])
+
+
+def test_register_layout_is_semantic_metadata_not_constructor_storage() -> None:
+    aggregate = replace(channel_type, register_units=("i64", "f32"))
+    _, _, metadata = generate_type_registry([aggregate])
+    assert "LOOM_SCALAR_TYPE_I64, LOOM_SCALAR_TYPE_F32" in metadata
+    assert ".register_layout = &loom_type_channel_register_layout," in metadata
+    assert ".unit_count = 2," in metadata
+    assert generate_type_builders([aggregate]) == generate_type_builders([channel_type])

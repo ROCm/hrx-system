@@ -2230,6 +2230,21 @@ class TestTypeDef:
         with _raises(ValueError, match="require an opaque dialect type"):
             TypeDef("test.ref", reference=identity, params=[AttrDef("count", "i64")])
 
+    def test_register_aggregate_layout_requires_scalar_units(self) -> None:
+        value = TypeDef("test.pair", register_units=("i64", "f32"))
+        assert value.register_units == ("i64", "f32")
+        for units in (("bogus",), ("ref<test.object>",)):
+            with _raises(ValueError, match="register units require scalar types"):
+                TypeDef("test.pair", register_units=units)
+        with _raises(
+            ValueError, match="managed references cannot be register aggregates"
+        ):
+            TypeDef(
+                "test.object",
+                reference=ReferenceTypeKey("test", "object"),
+                register_units=("i64",),
+            )
+
     def test_reference_identity_rejects_invalid_names(self) -> None:
         for invalid in ("", "nul\0tail", "\ud800"):
             for names in ((invalid, "object"), ("provider", invalid)):

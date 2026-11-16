@@ -32,7 +32,7 @@ vm.module core(0.0) {
   }
 
   section functions alignment(8) {
-    func @function0 : @callable0 flags([]) frame(local_bytes = 48, value_registers = 6, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function0 : @callable0 flags([]) frame(local_bytes = 48, value_registers = 6, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       %v2 = constant.i32 0x00000000

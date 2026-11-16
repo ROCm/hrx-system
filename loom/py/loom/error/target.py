@@ -1664,6 +1664,19 @@ ERR_TARGET_096 = ErrorDef(
     ),
 )
 
+ERR_TARGET_097 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=97,
+    severity=Severity.ERROR,
+    summary="Borrowed call range is not representable.",
+    message="'{op_name}' cannot pass {actual_type} as a borrowed range: {reason}",
+    params=(
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("actual_type", ParamKind.TYPE),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1744,4 +1757,5 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_094,
     ERR_TARGET_095,
     ERR_TARGET_096,
+    ERR_TARGET_097,
 )

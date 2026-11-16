@@ -78,12 +78,12 @@ vm.module core(0.0) {
   }
 
   section functions alignment(8) {
-    func @function0 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function0 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       control.return
     }
-    func @function1 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 4, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function1 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 4, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       control.call @import0 {direct_ref_move_mask = 0x0001}
@@ -142,7 +142,7 @@ vm.module core(0.0) {
   }
 
   section functions alignment(8) {
-    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 18, function_registers = 0, local_refs = 1, local_functions = 0) {
+    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 18, function_registers = 0, local_refs = 1, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       %r16 = ref.abi.argument.load.move 0

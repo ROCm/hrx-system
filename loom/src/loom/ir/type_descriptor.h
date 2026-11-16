@@ -123,6 +123,16 @@ typedef struct loom_type_reference_key_t {
   iree_string_view_t type_name;
 } loom_type_reference_key_t;
 
+// Exact scalar semantics of an aggregate's ordered register units. Structural
+// concat/slice operations may construct/project this layout without inventing
+// a semantic cast. Each component occupies one unit of the enclosing class.
+typedef struct loom_type_register_layout_t {
+  // Scalar type of each register unit, in ascending unit order.
+  const loom_scalar_type_t* unit_types;
+  // Number of register units in the complete value.
+  uint16_t unit_count;
+} loom_type_register_layout_t;
+
 // Generated metadata for one registered type spelling and representation.
 typedef struct loom_type_descriptor_t {
   // B-string name with a trailing `<` outside its declared length.
@@ -146,6 +156,8 @@ typedef struct loom_type_descriptor_t {
   // Declaration-backed ref/ptr types carry their resolved identity in the type
   // value instead of sharing one payload key across the family descriptor.
   const loom_type_reference_key_t* reference;
+  // Optional exact aggregate register layout, independent of type parameters.
+  const loom_type_register_layout_t* register_layout;
 } loom_type_descriptor_t;
 
 // One name-to-descriptor row in a generated type registry table.

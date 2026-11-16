@@ -7,7 +7,10 @@
 package(licenses = ["notice"])
 
 exports_files(
-    glob(["*.loom"]),
+    glob([
+        "*.cxx",
+        "*.loom",
+    ]),
     visibility = [
         "//loom/src/loom/tooling/target/vm:__pkg__",
         "//loom/src/loom/tooling/target/vm/test:__pkg__",

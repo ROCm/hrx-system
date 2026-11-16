@@ -101,7 +101,7 @@ std::string Source(const std::string& body, size_t argument_count = 1,
   section functions alignment(8) {
     func @function0 : )" +
       callable +
-      R"( flags([has_call]) frame(local_bytes = 0, value_registers = 1, ref_registers = 16, function_registers = 0, local_refs = 3, local_functions = 0) {
+      R"( flags([has_call]) frame(local_bytes = 0, value_registers = 1, ref_registers = 16, function_registers = 0, local_refs = 3, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
 )" + body +
@@ -449,7 +449,7 @@ TEST_P(BorrowedPublicationTest, RejectsBorrowMasqueradingAsManagedStorage) {
       export @export0 name(@run) : @callable0 = @function0
     }
     section functions alignment(8) {
-      func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 16, function_registers = 0, local_refs = 0, local_functions = 0) {
+      func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 16, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
       ^bb0:
         control.block
   )" + std::string(body) +

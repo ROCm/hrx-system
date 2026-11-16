@@ -6,7 +6,7 @@
 
 """VM target selection; instruction records remain in the runtime ISA spec."""
 
-from loom.assembly import AttrDict, SymbolRef, TemplateParam
+from loom.assembly import AttrDict, Param, SymbolRef, TemplateParam
 from loom.dsl import (
     ATTR_TYPE_ENUM,
     ATTR_TYPE_I64,
@@ -20,6 +20,7 @@ from loom.dsl import (
     SymbolDefinition,
     TargetFactSpecialization,
     TargetLikeInterface,
+    TypeDef,
 )
 
 vm_ops = Dialect(
@@ -29,6 +30,19 @@ vm_ops = Dialect(
     default_phase=OpPhase.MODULE_METADATA,
     c_path="target/arch/vm/ops",
     register_by_default=False,
+)
+
+vm_span_type = TypeDef(
+    "vm.span",
+    params=[AttrDef("element_type", "type", doc="Exact scalar or reference element.")],
+    format=[Param("element_type")],
+    register_units=("i64", "i64"),
+    doc=(
+        "A borrowed contiguous range in the caller's local storage. Its two value "
+        "units carry a byte coordinate and an element count. Native calls resolve "
+        "the coordinate into a checked pointer in private call storage; pointer "
+        "bits are never visible to bytecode. Spans cannot escape or be returned."
+    ),
 )
 
 VmTargetKind = EnumDef(
@@ -73,3 +87,4 @@ vm_target = Op(
 )
 
 ALL_VM_OPS: tuple[Op, ...] = (vm_target,)
+ALL_VM_TYPES: tuple[TypeDef, ...] = (vm_span_type,)

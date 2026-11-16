@@ -1,0 +1,111 @@
+// Source-owned arrays reach a native call as borrowed contiguous ranges.
+// RUN: emit vm-dis
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "read_spans") target(@vm) @consume(%count: index, %objects: view<[%count]xptr<@Object>> {access = read}, %values: view<[%count]xi64> {access = read}) -> (i64)
+
+func.decl import("lifetime", "event") target(@vm) @event(%value: i32)
+
+func.def public target(@vm) @run(%object: ptr<@Object>) {
+  %value = scalar.constant 24 : i64
+  %objects = view.alloca<private> : view<4xptr<@Object>>
+  %values = view.alloca<private> : view<4xi64>
+  view.store %object, %objects[1] : ptr<@Object>, view<4xptr<@Object>>
+  view.store %value, %values[1] : i64, view<4xi64>
+  %empty = ref.null : ptr<@Object>
+  view.store %empty, %objects[2] : ptr<@Object>, view<4xptr<@Object>>
+  %other = scalar.constant 17 : i64
+  view.store %other, %values[2] : i64, view<4xi64>
+  %c2 = index.constant 2 : index
+  %object_slice = view.subview %objects[1] : view<4xptr<@Object>> -> view<[%c2]xptr<@Object>>
+  %value_slice = view.subview %values[1] : view<4xi64> -> view<[%c2]xi64>
+  %result = func.call @consume(%c2, %object_slice, %value_slice) : (index, view<[%c2]xptr<@Object>>, view<[%c2]xi64>) -> (i64)
+  %word = scalar.trunci %result : i64 to i32
+  func.call @event(%word) : (i32)
+  func.return
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "run"
+    string @string1 = "lifetime"
+    string @string2 = "object"
+    string @string3 = "lifetime"
+    string @string4 = "event"
+    string @string5 = "read_spans"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string1) {
+      ref_type @ref_type0 name(@string2)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (i32) -> ()
+    signature @signature1 (ptr(@ref_type0)) -> ()
+    signature @signature2 (i64, span<ptr(@ref_type0)>, span<i64>) -> (i64)
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+    callable @callable1 flags([]) depth(0) : @signature1
+    callable @callable2 flags([]) depth(0) : @signature2
+  }
+
+  section imports alignment(8) {
+    group @import_group0 module_name(@string3) {
+      import @import0 name(@string4) flags([]) : @callable0
+      import @import1 name(@string5) flags([]) : @callable2
+    }
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable1 = @function0
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable1 flags([has_call]) frame(local_bytes = 32, value_registers = 6, ref_registers = 1, function_registers = 0, local_refs = 4, local_functions = 0, call_values = 6) {
+    ^bb0:
+      control.block
+      %v0 = constant.s16 24
+      %v1 = constant.i32 0x00000000
+      ref.stack.discard.range %v1 {count = 4}
+      %v2 = constant.i32 0x00000000
+      %v3 = constant.s16 16
+      %v4 = integer.add.i64 %v1, %v3
+      ref.stack.store.indexed.copy %r0, %v4
+      ref.discard %r0
+      %v4 = constant.s16 8
+      %v4 = integer.add.i64 %v2, %v4
+      stack.store.indexed.i64 #v0, %v4, %v0.x1 {scale = 1}
+      %r0 = ref.null
+      %v0 = constant.s16 32
+      %v0 = integer.add.i64 %v1, %v0
+      ref.stack.store.indexed.copy %r0, %v0
+      ref.discard %r0
+      %v0 = constant.s16 17
+      %v3 = integer.add.i64 %v2, %v3
+      stack.store.indexed.i64 #v0, %v3, %v0.x1 {scale = 1}
+      %v5 = constant.s16 2
+      %v0 = constant.s16 16
+      %v4 = integer.add.i64 %v1, %v0
+      %v0 = constant.s16 8
+      %v0 = integer.add.i64 %v2, %v0
+      %v1 = value.copy %v5
+      %v2 = value.copy %v4
+      %v3 = value.copy %v5
+      %v4 = value.copy %v0
+      %v0 = value.copy %v5
+      %v5 = value.copy %v1
+      control.call @import1 {direct_ref_move_mask = 0x0000}
+      %v0 = conversion.integer %v0 {selector = i64.to.i32}
+      control.call @import0 {direct_ref_move_mask = 0x0000}
+      control.return
+    }
+  }
+
+}

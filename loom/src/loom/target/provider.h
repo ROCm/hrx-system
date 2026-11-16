@@ -441,6 +441,9 @@ struct loom_target_provider_t {
   // Physical carrier requested for source views that remain at retained
   // function or CFG boundaries after common-root transport.
   loom_target_view_boundary_carrier_t view_boundary_carrier;
+  // Physical carrier at imported function boundaries. This ABI is independent
+  // of the storage provenance of any callers available to the compiler.
+  loom_target_view_boundary_carrier_t import_view_boundary_carrier;
   // Physical carrier requested for lane predicates crossing structured loop
   // state boundaries or escaping a divergent CFG loop.
   loom_target_loop_predicate_carrier_t loop_predicate_carrier;

@@ -214,6 +214,11 @@ static iree_status_t iree_vm_invocation_validate_arguments(
     const iree_vm_program_callable_abi_t* callable_abi,
     iree_vm_variant_span_t arguments,
     bool* out_has_external_borrowed_arguments) {
+  if (callable_abi->has_span_arguments) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "host variants cannot carry borrowed span arguments");
+  }
   if (IREE_UNLIKELY(
           arguments.count !=
           iree_vm_program_callable_abi_argument_count(callable_abi))) {

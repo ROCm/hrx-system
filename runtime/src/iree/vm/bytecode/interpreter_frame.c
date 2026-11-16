@@ -85,6 +85,13 @@ iree_vm_bytecode_frame_layout_t iree_vm_bytecode_calculate_frame_layout(
   layout.local_bytes_offset = iree_vm_bytecode_frame_append(
       function->local_byte_length_u16, sizeof(uint8_t), iree_alignof(uint8_t),
       &storage_size);
+  if (function->call_value_scratch_count_u16) {
+    // Private call values follow local bytes at their natural alignment. The
+    // call adapter derives this address; it never enters a guest register.
+    iree_vm_bytecode_frame_append(function->call_value_scratch_count_u16,
+                                  sizeof(uint64_t), iree_alignof(uint64_t),
+                                  &storage_size);
+  }
   layout.frame.storage_size = storage_size;
   layout.frame.storage_alignment =
       iree_max(iree_alignof(iree_vm_bytecode_execution_state_t),

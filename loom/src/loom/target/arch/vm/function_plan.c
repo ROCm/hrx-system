@@ -609,6 +609,14 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_call(
       loom_low_allocation_find_call_moves_by_source_ordinal(&frame->allocation,
                                                             node_index);
   out_row->flags_u16 |= IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL;
+  if (signature->argument_count_u16 !=
+      (uint32_t)signature->argument_value_count_u16 +
+          signature->argument_ref_count_u16 +
+          signature->argument_function_count_u16) {
+    out_row->call_value_scratch_count_u16 =
+        iree_max(out_row->call_value_scratch_count_u16,
+                 signature->argument_value_count_u16);
+  }
   out_row->value_register_count_u16 =
       iree_max(out_row->value_register_count_u16,
                iree_min(16, iree_max(signature->argument_value_count_u16,

@@ -6,13 +6,16 @@
 
 #include "loom/target/arch/vm/lower.h"
 
+#include "loom/codegen/low/lower/source_memory.h"
 #include "loom/error/error_catalog.h"
+#include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/vm/contracts/core.h"
 #include "loom/target/arch/vm/contracts/core_lower_rules.h"
 #include "loom/target/arch/vm/descriptors/descriptors.h"
+#include "loom/target/arch/vm/ops/type_builders.h"
 #include "loom/target/arch/vm/types.h"
 #include "loom/util/fact_table.h"
 
@@ -88,6 +91,29 @@ static iree_status_t loom_vm_map_value(void* user_data,
   }
   const loom_value_fact_table_t* facts =
       loom_low_lower_context_fact_table(context);
+  if (facts == NULL) {
+    const loom_type_t element = loom_type_element(source_type);
+    const loom_module_t* module = loom_low_lower_context_module(context);
+    if (loom_value_def_op(loom_module_value(module, source_value)) == NULL &&
+        loom_func_like_import_symbol(loom_low_lower_context_source_function(
+            context)) != LOOM_STRING_ID_INVALID &&
+        loom_type_rank(source_type) == 1 &&
+        loom_vm_source_type_supported(
+            user_data, loom_low_lower_context_module(context), element) &&
+        (!loom_type_is_scalar(element) ||
+         loom_type_element_type(element) != LOOM_SCALAR_TYPE_I1)) {
+      loom_type_id_t element_id = LOOM_TYPE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_module_intern_type_id(
+          loom_low_lower_context_module(context), element, &element_id));
+      loom_type_t span_type;
+      IREE_RETURN_IF_ERROR(loom_vm_span_type_make(
+          loom_low_lower_context_module(context), element_id, &span_type));
+      return loom_low_lower_make_typed_register_type(
+          context, VM_CORE_REG_CLASS_ID_VALUE, 2, span_type, out_low_type);
+    }
+    return loom_vm_map_type(user_data, context, source_op, source_type,
+                            out_low_type);
+  }
   loom_value_fact_view_reference_t reference;
   if (!loom_value_facts_query_view_reference(
           &facts->context, loom_value_fact_table_lookup(facts, source_value),
@@ -199,6 +225,149 @@ static const loom_low_lower_function_storage_mapping_t kFunctionStorage[] = {
      loom_vm_initialize_reference_storage},
 };
 
+typedef struct loom_vm_span_operand_plan_t {
+  // Retained root-relative address, including all subview terms.
+  loom_low_source_memory_access_plan_t access;
+  // Dynamic count source, or INVALID for a static count.
+  loom_value_id_t count;
+  // Element count when count is INVALID.
+  int64_t static_count;
+} loom_vm_span_operand_plan_t;
+
+static iree_status_t loom_vm_reject_span_operand(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, iree_string_view_t reason) {
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_op_name(module, source_op)),
+      loom_param_type(loom_module_value_type(module, source_value)),
+      loom_param_string(reason),
+  };
+  return loom_low_lower_emit_error_ref(context, source_op,
+                                       loom_error_def_ref(LOOM_ERR_TARGET_097),
+                                       params, IREE_ARRAYSIZE(params));
+}
+
+static iree_status_t loom_vm_prepare_span_operand(
+    void* user_data, loom_low_lower_context_t* context,
+    const loom_op_t* source_op, loom_value_id_t source_value,
+    loom_type_t actual_type, loom_type_t required_type, const void** out_plan) {
+  (void)user_data;
+  (void)actual_type;
+  const loom_type_t* payload = loom_type_register_value_type(required_type);
+  if (!payload || !loom_vm_span_type_isa(*payload)) {
+    return loom_vm_reject_span_operand(
+        context, source_op, source_value,
+        IREE_SV("the receiving signature is not a native span"));
+  }
+  const loom_type_t type = loom_module_value_type(
+      loom_low_lower_context_module(context), source_value);
+  const loom_value_fact_table_t* facts =
+      loom_low_lower_context_fact_table(context);
+  loom_value_fact_view_reference_t reference;
+  if (!loom_value_facts_query_view_reference(
+          &facts->context, loom_value_fact_table_lookup(facts, source_value),
+          &reference) ||
+      reference.buffer_value_id != LOOM_VALUE_ID_INVALID ||
+      reference.origin.kind != LOOM_VALUE_FACT_REFERENCE_ORIGIN_ALLOCATION) {
+    return loom_vm_reject_span_operand(
+        context, source_op, source_value,
+        IREE_SV("VM span arguments require frame-owned view storage"));
+  }
+  const loom_view_region_table_t* regions = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_context_view_regions(context, &regions));
+  loom_vm_span_operand_plan_t* plan = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_allocate_plan_data(context, sizeof(*plan), (void**)&plan));
+  loom_low_source_memory_access_diagnostic_t diagnostic;
+  if (!loom_low_source_memory_access_plan_build_view_origin(
+          regions, source_value, &plan->access, &diagnostic) ||
+      plan->access.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE ||
+      plan->access.address_layout !=
+          LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR) {
+    return loom_vm_reject_span_operand(
+        context, source_op, source_value,
+        IREE_SV("VM span arguments require a contiguous local view"));
+  }
+  plan->count = loom_type_dim_is_dynamic_at(type, 0)
+                    ? loom_type_dim_value_id_at(type, 0)
+                    : LOOM_VALUE_ID_INVALID;
+  plan->static_count = plan->count == LOOM_VALUE_ID_INVALID
+                           ? loom_type_dim_static_size_at(type, 0)
+                           : 0;
+  loom_low_lower_require_source_memory_complete_byte_offset_storage(
+      context, &plan->access);
+  if (plan->count != LOOM_VALUE_ID_INVALID) {
+    loom_low_lower_require_source_value_storage(context, plan->count);
+  }
+  *out_plan = plan;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_vm_emit_span_operand(
+    void* user_data, loom_low_lower_context_t* context,
+    const loom_op_t* source_op, loom_value_id_t source_value,
+    loom_value_id_t low_value, loom_type_t required_type, const void* plan_ptr,
+    loom_value_id_t* out_value) {
+  (void)user_data;
+  (void)source_value;
+  (void)low_value;
+  const loom_vm_span_operand_plan_t* plan = plan_ptr;
+  loom_value_id_t parts[2];
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_materialize_source_memory_complete_byte_offset(
+          context, &loom_vm_core_lower_rule_set,
+          &loom_vm_core_lower_rule_set
+               .source_memory_byte_offset_materializers[0],
+          source_op, &plan->access, &parts[0]));
+  const loom_value_id_t address_parts[] = {
+      loom_low_lower_lookup_value(
+          context,
+          loom_low_source_memory_access_address_value_id(&plan->access)),
+      parts[0],
+  };
+  const loom_low_lower_resolved_descriptor_t add_descriptor = {
+      .descriptor = &loom_low_lower_context_descriptor_set(context)
+                         ->descriptors[VM_CORE_DESCRIPTOR_REF_INTEGER_ADD_I64]};
+  loom_type_t address_type;
+  IREE_RETURN_IF_ERROR(loom_low_lower_make_typed_register_type(
+      context, VM_CORE_REG_CLASS_ID_VALUE, 1,
+      loom_type_scalar(LOOM_SCALAR_TYPE_I64), &address_type));
+  loom_op_t* address = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
+      context, &add_descriptor, address_parts, 2, loom_named_attr_slice_empty(),
+      &address_type, 1, NULL, 0, source_op->location, &address));
+  parts[0] = loom_op_results(address)[0];
+  if (plan->count != LOOM_VALUE_ID_INVALID) {
+    parts[1] = loom_low_lower_lookup_value(context, plan->count);
+  } else {
+    loom_string_id_t name = LOOM_STRING_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_builder_intern_string(
+        loom_low_lower_context_builder(context), IREE_SV("bits"), &name));
+    const loom_named_attr_t attr = {.name_id = name,
+                                    .value = loom_attr_i64(plan->static_count)};
+    const loom_low_lower_resolved_descriptor_t descriptor = {
+        .descriptor = &loom_low_lower_context_descriptor_set(context)
+                           ->descriptors[VM_CORE_DESCRIPTOR_REF_CONSTANT_I64]};
+    loom_type_t count_type;
+    IREE_RETURN_IF_ERROR(loom_low_lower_make_typed_register_type(
+        context, VM_CORE_REG_CLASS_ID_VALUE, 1,
+        loom_type_scalar(LOOM_SCALAR_TYPE_I64), &count_type));
+    loom_op_t* constant = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_const(
+        context, &descriptor,
+        (loom_named_attr_slice_t){.entries = &attr, .count = 1}, count_type,
+        source_op->location, &constant));
+    parts[1] = loom_op_results(constant)[0];
+  }
+  loom_op_t* concat = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_concat_build(loom_low_lower_context_builder(context), parts, 2,
+                            required_type, source_op->location, &concat));
+  *out_value = loom_op_results(concat)[0];
+  return iree_ok_status();
+}
+
 static const loom_low_lower_policy_t kPolicy = {
     .name = IREE_SVL("vm-lower"),
     .import_decl_kind = LOOM_LOW_FUNC_DECL_IMPORT_KIND_NATIVE,
@@ -209,6 +378,8 @@ static const loom_low_lower_policy_t kPolicy = {
         {.fn = loom_vm_source_vector_carrier_supported},
     .map_type = {.fn = loom_vm_map_type},
     .map_value = {.fn = loom_vm_map_value},
+    .control_operand = {.prepare = loom_vm_prepare_span_operand,
+                        .emit = loom_vm_emit_span_operand},
     .function_storage = {.mappings = kFunctionStorage,
                          .count = IREE_ARRAYSIZE(kFunctionStorage)},
     .contract = LOOM_VM_CORE_CONTRACT,

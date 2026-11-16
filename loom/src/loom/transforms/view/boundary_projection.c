@@ -157,21 +157,23 @@ static iree_status_t loom_view_boundary_initialize_schema(
   return iree_ok_status();
 }
 
-static bool loom_view_boundary_provider_uses_buffer_offset(
-    const loom_target_function_version_t* version) {
-  return version != NULL && version->resolved_target.provider != NULL &&
-         version->resolved_target.provider->view_boundary_carrier ==
-             LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BUFFER_OFFSET;
-}
-
 static bool loom_view_boundary_function_applies(
     const loom_boundary_projection_rule_t* rule,
     const loom_boundary_projection_plan_t* plan,
     const loom_boundary_projection_function_t* function) {
   (void)rule;
   (void)plan;
-  return loom_view_boundary_provider_uses_buffer_offset(
-      loom_target_function_version_const_cast(function->version));
+  const loom_target_function_version_t* version =
+      loom_target_function_version_const_cast(function->version);
+  if (!version || !version->resolved_target.provider) {
+    return false;
+  }
+  const loom_target_provider_t* provider = version->resolved_target.provider;
+  const loom_target_view_boundary_carrier_t carrier =
+      loom_func_like_import_symbol(function->function) != LOOM_STRING_ID_INVALID
+          ? provider->import_view_boundary_carrier
+          : provider->view_boundary_carrier;
+  return carrier == LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BUFFER_OFFSET;
 }
 
 static iree_status_t loom_view_boundary_plan_slot(

@@ -39,31 +39,52 @@ loom_cc_instance_library(
     ],
 )
 
+loom_cc_instance_library(
+    name = "type_builders",
+    srcs = ["type_builders.c"],
+    hdrs = ["type_builders.h"],
+    deps = [
+        "//loom/src/loom/ir:builders",
+        "//runtime/src/iree/base",
+    ],
+)
+
 loom_generated_cc_library(
     name = "ops",
     srcs = ["registry.c"],
     hdrs = [
         "ops.h",
         "registry.h",
+        "types.h",
     ],
     args = ["--dialect=vm"],
     extra_output_flags = [
         "--ops-include",
         "--builders",
+        "--type-builders",
     ],
     extra_outputs = [
         "ops.inc",
         "builders.c",
+        "type_builders.c",
     ],
-    generated_src_flags = ["--tables"],
-    generated_srcs = ["tables.c"],
+    generated_src_flags = [
+        "--tables",
+        "--types",
+    ],
+    generated_srcs = [
+        "tables.c",
+        "types.c",
+    ],
     generator = "//loom/py/loom/gen/ops:c_tables_vm_generator",
     textual_hdrs = ["ops.inc"],
     deps = [
         ":builders",
+        ":type_builders",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/arch/vm:records",
