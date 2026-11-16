@@ -903,7 +903,12 @@ def _test_managed_type_interop(
             ]
         )
         selected = read_module(selected_path.read_bytes())
-    assert {symbol.name for symbol in selected.symbols} == {"Frame", "Decoder", "entry"}
+    assert {symbol.name for symbol in selected.symbols} == {
+        "Frame",
+        "Decoder",
+        "Packet",
+        "entry",
+    }
     selected_text = printer.print_module(selected)
     assert printer.print_module(parser.parse(selected_text)) == selected_text
 

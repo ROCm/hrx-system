@@ -12,7 +12,9 @@
 #include "loom/format/bytecode/selected_reader.h"
 #include "loom/format/bytecode/writer.h"
 #include "loom/ir/module.h"
+#include "loom/ops/test/ops.h"
 #include "loom/ops/test/registry.h"
+#include "loom/ops/type/ops.h"
 #include "loom/testing/gen.h"
 
 namespace {
@@ -56,6 +58,10 @@ class ReaderFailureTest : public ::testing::Test {
     iree_arena_initialize(&pool_, &index_arena_);
     loom_context_initialize(iree_allocator_system(), &context_);
     IREE_ASSERT_OK(loom_test_dialect_register(&context_));
+    iree_host_size_t type_op_count = 0;
+    const auto* type_ops = loom_type_dialect_vtables(&type_op_count);
+    IREE_ASSERT_OK(loom_context_register_dialect(
+        &context_, LOOM_DIALECT_TYPE, type_ops, (uint16_t)type_op_count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     loom_test_gen_t generator;
     loom_test_gen_initialize_seeded(42, &generator);
@@ -64,6 +70,7 @@ class ReaderFailureTest : public ::testing::Test {
     IREE_ASSERT_OK(
         loom_test_gen_module(&generator, &config, &context_, &pool_, &source));
     ASSERT_NE(source, nullptr);
+    AddReferenceViews(source);
     iree_io_stream_t* stream = nullptr;
     IREE_ASSERT_OK(iree_io_vec_stream_create(
         IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE |
@@ -107,6 +114,43 @@ class ReaderFailureTest : public ::testing::Test {
 
   static iree_const_byte_span_t Bytes(const std::vector<uint8_t>& bytes) {
     return iree_make_const_byte_span(bytes.data(), bytes.size());
+  }
+
+  void AddReferenceViews(loom_module_t* module) {
+    loom_string_id_t namespace_name, type_name, consumer_name;
+    IREE_ASSERT_OK(
+        loom_module_intern_string(module, IREE_SV("reader"), &namespace_name));
+    IREE_ASSERT_OK(
+        loom_module_intern_string(module, IREE_SV("Packet"), &type_name));
+    IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("consume_views"),
+                                             &consumer_name));
+    loom_symbol_ref_t declaration = {}, consumer = {};
+    IREE_ASSERT_OK(
+        loom_module_add_symbol(module, type_name, &declaration.symbol_id));
+    IREE_ASSERT_OK(
+        loom_module_add_symbol(module, consumer_name, &consumer.symbol_id));
+    loom_builder_t builder;
+    loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                            &builder);
+    loom_op_t* op = nullptr;
+    IREE_ASSERT_OK(loom_type_decl_build(&builder, namespace_name, type_name,
+                                        declaration, LOOM_LOCATION_UNKNOWN,
+                                        &op));
+    const auto owner =
+        loom_type_reference(LOOM_REFERENCE_OWNERSHIP_OWNED, namespace_name,
+                            type_name, declaration.symbol_id);
+    const auto borrow =
+        loom_type_reference(LOOM_REFERENCE_OWNERSHIP_BORROWED, namespace_name,
+                            type_name, declaration.symbol_id);
+    uint64_t dimensions[LOOM_TYPE_MAX_RANK];
+    std::fill_n(dimensions, LOOM_TYPE_MAX_RANK, loom_dim_pack_static(1));
+    const loom_type_t arguments[] = {
+        loom_type_reference_view(&owner, 0, nullptr, 0, 0),
+        loom_type_reference_view(&borrow, LOOM_TYPE_MAX_RANK, dimensions, 0, 0),
+    };
+    IREE_ASSERT_OK(loom_test_decl_build(
+        &builder, 0, 0, 0, consumer, arguments, IREE_ARRAYSIZE(arguments),
+        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &op));
   }
 
   iree_status_t Read(ReadPath path, const std::vector<uint8_t>& bytes,
@@ -180,7 +224,9 @@ TEST_F(ReaderFailureTest, AllocationFailureNeverPublishesAProduct) {
         const iree_allocator_t allocator = {&tracking,
                                             ReaderAllocator::Control};
         iree_arena_block_pool_t pool;
-        iree_arena_block_pool_initialize(4096, allocator, &pool);
+        // Small blocks force reference-view dimensions through the backing
+        // allocator so the failure sweep covers their retention as well.
+        iree_arena_block_pool_initialize(128, allocator, &pool);
         iree_arena_allocator_t index_arena;
         iree_arena_initialize(&pool, &index_arena);
         loom_bytecode_read_result_t result = {};

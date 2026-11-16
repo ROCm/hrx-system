@@ -124,6 +124,8 @@ static bool loom_type_import_is_composite(loom_type_t type) {
       return true;
     case LOOM_TYPE_REGISTER:
       return loom_type_register_has_value_type(type);
+    case LOOM_TYPE_VIEW:
+      return loom_type_has_reference_element(type);
     default:
       return false;
   }
@@ -150,6 +152,10 @@ static iree_status_t loom_type_import_initialize_frame(
       break;
     case LOOM_TYPE_REGISTER:
       frame->first.types = loom_type_register_value_type(type);
+      frame->first.count = 1;
+      break;
+    case LOOM_TYPE_VIEW:
+      frame->first.types = loom_type_reference_element(type);
       frame->first.count = 1;
       break;
     default:

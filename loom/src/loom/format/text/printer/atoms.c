@@ -394,6 +394,11 @@ static iree_status_t loom_print_dim(loom_output_stream_t* stream,
                                          loom_dim_static_size(packed));
 }
 
+static iree_status_t loom_text_print_type_impl(loom_type_t type,
+                                               const loom_module_t* module,
+                                               loom_output_stream_t* stream,
+                                               const loom_print_context_t* ctx);
+
 // Shared in source but kept inline in both complete-type and result-type hot
 // paths so declaration-driven spelling does not add a call per printed type.
 static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t loom_print_shaped_interior(
@@ -409,8 +414,13 @@ static IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t loom_print_shaped_interior(
   if (rank > 0) {
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, "x"));
   }
-  IREE_RETURN_IF_ERROR(
-      loom_print_scalar_type(stream, loom_type_element_type(type)));
+  if (loom_type_has_reference_element(type)) {
+    IREE_RETURN_IF_ERROR(loom_text_print_type_impl(
+        *loom_type_reference_element(type), module, stream, ctx));
+  } else {
+    IREE_RETURN_IF_ERROR(
+        loom_print_scalar_type(stream, loom_type_element_type(type)));
+  }
   if (loom_type_has_encoding(type)) {
     IREE_RETURN_IF_ERROR(loom_output_stream_write_cstring(stream, ", "));
     if (loom_type_has_ssa_encoding(type)) {

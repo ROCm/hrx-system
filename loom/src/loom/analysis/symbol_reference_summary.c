@@ -531,6 +531,13 @@ static iree_status_t loom_symbol_reference_summary_enter(
         frame.values = loom_type_register_value_type(type);
         frame.count = frame.values ? 1 : 0;
         break;
+      case LOOM_TYPE_VIEW:
+        if (loom_type_has_reference_element(type)) {
+          frame.children_kind = LOOM_SYMBOL_REFERENCE_SUMMARY_TYPES;
+          frame.values = loom_type_reference_element(type);
+          frame.count = 1;
+        }
+        break;
       default:
         break;
     }

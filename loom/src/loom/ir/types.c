@@ -47,6 +47,36 @@ iree_status_t loom_type_function_build(const loom_type_t* arg_types,
 // Type equality
 //===----------------------------------------------------------------------===//
 
+loom_type_t loom_type_element(loom_type_t type) {
+  if (loom_type_has_reference_element(type)) {
+    return *loom_type_reference_element(type);
+  }
+  return loom_type_is_reference(type)
+             ? type
+             : loom_type_scalar(loom_type_element_type(type));
+}
+
+loom_type_t loom_type_reference_view(const loom_type_t* element_type,
+                                     uint8_t rank, const uint64_t* dims,
+                                     uint16_t encoding_id,
+                                     loom_encoding_flags_t encoding_flags) {
+  uint8_t flags = LOOM_TYPE_FLAG_REFERENCE_ELEMENT | LOOM_TYPE_FLAG_ALL_STATIC;
+  for (uint8_t i = 0; i < rank; ++i) {
+    if (loom_dim_is_dynamic(dims[i])) {
+      flags &= ~LOOM_TYPE_FLAG_ALL_STATIC;
+    }
+  }
+  const loom_type_t type = {
+      .header = loom_type_make_header(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_NONE,
+                                      rank, flags),
+      .encoding_id = encoding_id,
+      .encoding_flags = encoding_flags,
+      .dims = {rank ? (uint64_t)(uintptr_t)dims : 0,
+               (uint64_t)(uintptr_t)element_type},
+  };
+  return type;
+}
+
 // Reusing a completed query for the same immutable by-value representation is
 // exact even when a type or attribute is caller-owned and has not been
 // interned.
@@ -170,13 +200,21 @@ bool loom_type_equal(loom_type_t a, loom_type_t b) {
   if (loom_type_has_inline_dims(a)) {
     return a.dims[0] == b.dims[0] && a.dims[1] == b.dims[1];
   }
+  if (loom_type_has_reference_element(a) &&
+      !loom_type_equal(*loom_type_reference_element(a),
+                       *loom_type_reference_element(b))) {
+    return false;
+  }
   // Overflow: compare each dim via the overflow pointer.
   uint8_t rank = loom_type_rank(a);
   const loom_overflow_dim_t* a_dims =
       (const loom_overflow_dim_t*)(uintptr_t)a.dims[0];
   const loom_overflow_dim_t* b_dims =
       (const loom_overflow_dim_t*)(uintptr_t)b.dims[0];
-  if (rank == 0 || !a_dims || !b_dims) {
+  if (rank == 0) {
+    return true;
+  }
+  if (!a_dims || !b_dims) {
     return a_dims == b_dims;
   }
   for (uint8_t i = 0; i < rank; ++i) {
@@ -331,6 +369,10 @@ uint32_t loom_type_hash(loom_type_t type) {
     return loom_structural_hash_finalize(hash);
   }
 
+  if (loom_type_has_reference_element(type)) {
+    hash = loom_structural_hash_mix_u32(
+        hash, loom_type_hash(*loom_type_reference_element(type)));
+  }
   uint8_t rank = loom_type_rank(type);
   const loom_overflow_dim_t* dims =
       (const loom_overflow_dim_t*)(uintptr_t)type.dims[0];

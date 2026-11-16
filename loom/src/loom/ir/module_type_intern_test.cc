@@ -279,6 +279,63 @@ TEST_F(TypeImportTest, DeepTemporaryGraphRetainsCanonicalChildren) {
   EXPECT_EQ(module_->arena.used_allocation_size, used_after);
 }
 
+TEST_F(TypeImportTest, ReferenceViewsRetainCanonicalElementsAndDimensions) {
+  loom_string_id_t namespace_id, name_id;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module_, IREE_SV("input"), &namespace_id));
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module_, IREE_SV("packet"), &name_id));
+  loom_symbol_id_t declarations[2];
+  const char* names[] = {"Packet", "Alias"};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(names); ++i) {
+    loom_string_id_t spelling;
+    IREE_ASSERT_OK(loom_module_intern_string(
+        module_, iree_make_cstring_view(names[i]), &spelling));
+    IREE_ASSERT_OK(loom_module_add_symbol(module_, spelling, &declarations[i]));
+  }
+  auto element = loom_type_reference(LOOM_REFERENCE_OWNERSHIP_OWNED,
+                                     namespace_id, name_id, declarations[0]);
+  uint64_t dimensions[] = {loom_dim_pack_static(4), loom_dim_pack_static(7)};
+  auto temporary = loom_type_reference_view(&element, 2, dimensions, 0, 0);
+  loom_type_id_t first;
+  IREE_ASSERT_OK(loom_module_intern_type_id(module_, temporary, &first));
+  const auto canonical = loom_type_table_get(&module_->types, first);
+  EXPECT_NE(loom_type_reference_element(canonical), &element);
+  EXPECT_EQ(loom_type_table_hash(&module_->types, first),
+            loom_type_hash(canonical));
+  EXPECT_TRUE(loom_type_equal(canonical, temporary));
+  EXPECT_EQ(module_->types.count, 2u);
+
+  // Declaration spelling does not create another external element identity.
+  element = loom_type_reference(LOOM_REFERENCE_OWNERSHIP_OWNED, namespace_id,
+                                name_id, declarations[1]);
+  loom_type_id_t alias;
+  IREE_ASSERT_OK(loom_module_intern_type_id(module_, temporary, &alias));
+  EXPECT_EQ(alias, first);
+  EXPECT_EQ(loom_type_reference_declaration_id(loom_type_element(canonical)),
+            declarations[0]);
+
+  dimensions[0] = loom_dim_pack_static(8);
+  element = loom_type_reference(LOOM_REFERENCE_OWNERSHIP_BORROWED, namespace_id,
+                                name_id, declarations[0]);
+  loom_type_id_t changed;
+  IREE_ASSERT_OK(loom_module_intern_type_id(module_, temporary, &changed));
+  EXPECT_NE(changed, first);
+  EXPECT_EQ(loom_type_dim_static_size_at(canonical, 0), 4);
+  EXPECT_EQ(loom_type_reference_ownership(loom_type_element(canonical)),
+            LOOM_REFERENCE_OWNERSHIP_OWNED);
+
+  temporary = loom_type_reference_view(&element, 0, nullptr, 0, 0);
+  loom_type_t signature;
+  IREE_ASSERT_OK(loom_module_intern_function_type(module_, &temporary, 1,
+                                                  nullptr, 0, &signature));
+  element = loom_type_none();
+  const auto argument = loom_type_func_arg_types(signature)[0];
+  EXPECT_EQ(loom_type_rank(argument), 0u);
+  EXPECT_EQ(loom_type_reference_ownership(loom_type_element(argument)),
+            LOOM_REFERENCE_OWNERSHIP_BORROWED);
+}
+
 TEST_F(TypeImportTest, CanonicalIdentitySurvivesRecentCacheAndTableGrowth) {
   std::array<loom_type_t, 96> roots;
   loom_type_t type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);

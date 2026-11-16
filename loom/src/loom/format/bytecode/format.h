@@ -85,7 +85,7 @@ extern "C" {
 
 #define LOOM_BYTECODE_MAGIC "LOOM"
 #define LOOM_BYTECODE_MAGIC_LENGTH 4
-#define LOOM_BYTECODE_FORMAT_VERSION 43
+#define LOOM_BYTECODE_FORMAT_VERSION 44
 
 #define LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE (1u << 0)
 #define LOOM_BYTECODE_SOURCE_TRIVIA_COMMENT_COUNT_SHIFT 1
@@ -342,10 +342,13 @@ typedef enum loom_bytecode_section_kind_e {
 //       0 = none, 1 = scalar, 2 = tile, 3 = tensor, 4 = unassigned,
 //       5 = function, 6 = dialect, 7 = encoding, 8 = pool,
 //       9 = vector, 10 = view, 11 = buffer, 12 = register,
-//       13 = storage, 14 = parameterized, 15 = group
+//       13 = storage, 14 = parameterized, 15 = group, 16 = reference
 //     (SCALAR: [element_type: byte])
 //     (TILE/TENSOR/VECTOR/VIEW:
 //       [element_type: byte]
+//       (VIEW with element_type NONE: [reference_element_type_index: varint])
+//             Names a prior exact ref/ptr type. Other views inline a scalar
+//             kind.
 //       [rank: byte]
 //       [encoding_attachment: byte]
 //             0 = none.
@@ -354,7 +357,8 @@ typedef enum loom_bytecode_section_kind_e {
 //       [encoding_instance: varint] (0 = none, else 1-based instance index)
 //       (VIEW only: [access_alignment: byte])
 //             0 = natural physical scalar alignment; otherwise a positive
-//             power of two no larger than that natural alignment.
+//             power of two no larger than that natural alignment. Reference
+//             views require zero; their cell geometry is target-selected.
 //       For each dim (rank times):
 //         [is_dynamic: byte]      (0 = static, 1 = dynamic)
 //         (if static: [size: varint]))
@@ -446,13 +450,15 @@ typedef enum loom_bytecode_section_kind_e {
 //
 //   TILE/TENSOR/VECTOR/VIEW:
 //     element_type, rank, encoding_attachment, encoding_reference.
-//     Attachment 0 requires reference 0; attachment 1 names a one-based static
-//     ENCODINGS instance; attachment 2 names a zero-based SSA value in scope.
-//     VECTOR requires attachment 0.
-//     VIEW then carries access_alignment (0 = natural, otherwise reduced).
-//     For each dimension: is_dynamic, dimension_payload.
-//     A static payload is its size. A dynamic payload is 0 for an unbound
-//     dimension, otherwise the scope-local SSA value number plus 1.
+//     VIEW with element_type NONE inserts an untagged static TYPES index after
+//     element_type. It must name an exact ref/ptr type, independent of SSA
+//     scope. Attachment 0 requires reference 0; attachment 1 names a one-based
+//     static ENCODINGS instance; attachment 2 names a zero-based SSA value in
+//     scope. VECTOR requires attachment 0. VIEW then carries access_alignment
+//     (0 = natural, otherwise reduced). For each dimension: is_dynamic,
+//     dimension_payload. A static payload is its size. A dynamic payload is 0
+//     for an unbound dimension, otherwise the scope-local SSA value number
+//     plus 1.
 //   POOL:
 //     Dynamic block-size SSA value number plus 1, or 0 if unbound.
 //   GROUP:

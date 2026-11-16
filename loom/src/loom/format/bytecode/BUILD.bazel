@@ -243,6 +243,7 @@ loom_cc_test(
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/ops/type",
         "//loom/src/loom/testing:gen",
         "//loom/src/loom/verify",
         "//runtime/src/iree/base/internal:arena",

@@ -46,15 +46,20 @@ class ManagedTypeBytecodeTest : public ::testing::Test {
     Declare(source_, "Other", "other");
     const auto decoder = Declare(source_, "Decoder", "input");
     Declare(source_, "Alias", "input");
-    loom_type_t types[2];
+    loom_type_t types[4];
     IREE_ASSERT_OK(loom_ref_type_make(source_, decoder, &types[0]));
     IREE_ASSERT_OK(loom_ptr_type_make(source_, decoder, &types[1]));
+    const uint64_t dimensions[] = {loom_dim_pack_static(2),
+                                   loom_dim_pack_static(3),
+                                   loom_dim_pack_static(4)};
+    types[2] = loom_type_reference_view(&types[0], 0, nullptr, 0, 0);
+    types[3] = loom_type_reference_view(&types[1], 3, dimensions, 0, 0);
     const auto consumer = AddSymbol(source_, "consume");
     loom_builder_t builder;
     loom_builder_initialize(source_, &source_->arena,
                             loom_module_block(source_), &builder);
     loom_op_t* op = nullptr;
-    IREE_ASSERT_OK(loom_test_decl_build(&builder, 0, 0, 0, consumer, types, 2,
+    IREE_ASSERT_OK(loom_test_decl_build(&builder, 0, 0, 0, consumer, types, 4,
                                         nullptr, 0, nullptr, 0,
                                         LOOM_LOCATION_UNKNOWN, &op));
     bytes_ = Write(source_);
@@ -68,9 +73,12 @@ class ManagedTypeBytecodeTest : public ::testing::Test {
       if (bytes_[entry.entry_offset] == LOOM_BYTECODE_TYPE_REFERENCE) {
         ASSERT_EQ(entry.entry_length, 5u);
         reference_offsets_.push_back(entry.entry_offset);
+      } else if (bytes_[entry.entry_offset] == LOOM_BYTECODE_TYPE_VIEW) {
+        view_ordinals_.push_back(i);
       }
     }
     ASSERT_EQ(reference_offsets_.size(), 2u);
+    ASSERT_EQ(view_ordinals_.size(), 2u);
     ASSERT_LT(metadata_.modules[0].strings.count, 127u);
   }
 
@@ -184,7 +192,7 @@ class ManagedTypeBytecodeTest : public ::testing::Test {
   iree_arena_allocator_t index_arena_;
   // Only declaration and test function schemas are registered; no provider.
   loom_context_t context_;
-  // Source declarations and two independently typed function arguments.
+  // Source declarations, handles, and views of both handle ownership modes.
   loom_module_t* source_ = nullptr;
   // Valid writer output, mutated only by malformed-wire tests.
   std::vector<uint8_t> bytes_;
@@ -192,7 +200,65 @@ class ManagedTypeBytecodeTest : public ::testing::Test {
   loom_bytecode_file_metadata_t metadata_ = {};
   // Offsets of the two compact wire records under test.
   std::vector<size_t> reference_offsets_;
+  // Source TYPES ordinals of rank-zero and rank-three reference views.
+  std::vector<uint32_t> view_ordinals_;
 };
+
+TEST_F(ManagedTypeBytecodeTest, ReferenceViewRejectsForwardElementType) {
+  const auto original = bytes_;
+  for (const auto ordinal : view_ordinals_) {
+    bytes_ = original;
+    const auto offset =
+        metadata_.modules[0].types.entries[ordinal].entry_offset;
+    ASSERT_EQ(bytes_[offset + 1], LOOM_SCALAR_TYPE_NONE);
+    ASSERT_LT(ordinal, 127u);
+    bytes_[offset + 2] = ordinal;
+    ExpectRejected("ERR_BYTECODE_012");
+  }
+}
+
+TEST_F(ManagedTypeBytecodeTest, ReferenceViewRejectsNonReferenceElement) {
+  const auto offset =
+      metadata_.modules[0].types.entries[view_ordinals_[1]].entry_offset;
+  ASSERT_EQ(bytes_[offset + 1], LOOM_SCALAR_TYPE_NONE);
+  bytes_[offset + 2] = view_ordinals_[0];
+
+  // Indexing validates the type graph's structure. Semantic child-kind checks
+  // happen when the full reader or selective linker materializes that graph.
+  loom_bytecode_file_metadata_t index = {};
+  loom_bytecode_read_result_t result = {};
+  IREE_ASSERT_OK(loom_bytecode_read_index(Bytes(), IREE_SV("objects.loombc"),
+                                          &context_, &pool_, &index_arena_,
+                                          nullptr, &result, &index));
+  ASSERT_EQ(result.error_count, 0u);
+  std::string failure;
+  const loom_bytecode_read_options_t options = {
+      .diagnostic_sink = {CaptureFailure, &failure},
+  };
+  loom_module_t* output = nullptr;
+  IREE_ASSERT_OK(loom_bytecode_read_module(
+      Bytes(), IREE_SV("objects.loombc"), &context_, &pool_, &options,
+      iree_allocator_system(), &result, &output));
+  EXPECT_GT(result.error_count, 0u);
+  EXPECT_EQ(failure, "view_element_must_name_a_ref_or_ptr_type");
+  EXPECT_EQ(output, nullptr);
+  loom_module_free(output);
+
+  const auto& metadata = index.modules[0];
+  const iree_host_size_t selected[] = {
+      metadata.symbol_ordinal_by_string_index[StringIndex("Decoder")],
+      metadata.symbol_ordinal_by_string_index[StringIndex("consume")],
+  };
+  failure.clear();
+  IREE_ASSERT_OK(loom_bytecode_materialize_module_symbols(
+      Bytes(), IREE_SV("objects.loombc"), &context_, &pool_, &index, 0,
+      {IREE_ARRAYSIZE(selected), selected}, &options, iree_allocator_system(),
+      &result, &output));
+  EXPECT_GT(result.error_count, 0u);
+  EXPECT_EQ(failure, "view_element_must_name_a_ref_or_ptr_type");
+  EXPECT_EQ(output, nullptr);
+  loom_module_free(output);
+}
 
 TEST_F(ManagedTypeBytecodeTest, RejectsKeyAndBindingMismatchBeforeInterning) {
   const auto original = bytes_;
@@ -370,6 +436,15 @@ TEST_F(ManagedTypeBytecodeTest, SelectedTypesReuseDestinationAliasAndOwnKeys) {
                               loom_type_reference_namespace_id(type)),
         IREE_SV("input")));
   }
+  const auto owned_view =
+      loom_module_value_type(destination, loom_op_operands(consumer)[2]);
+  const auto borrowed_view =
+      loom_module_value_type(destination, loom_op_operands(consumer)[3]);
+  EXPECT_EQ(loom_type_rank(owned_view), 0u);
+  EXPECT_EQ(loom_type_rank(borrowed_view), 3u);
+  EXPECT_EQ(loom_type_dim_static_size_at(borrowed_view, 1), 3);
+  EXPECT_TRUE(loom_type_equal(loom_type_element(owned_view), canonical[0]));
+  EXPECT_TRUE(loom_type_equal(loom_type_element(borrowed_view), canonical[1]));
   loom_verify_result_t verification = {};
   IREE_ASSERT_OK(loom_verify_module(destination, nullptr, &verification));
   EXPECT_EQ(verification.error_count, 0u);

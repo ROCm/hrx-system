@@ -148,6 +148,52 @@ TEST(TypesTest,
   EXPECT_FALSE(loom_type_equal(owned_signature.get(), borrowed_result.get()));
 }
 
+TEST(TypesTest, ReferenceViewElementsPreserveIdentityAtEveryRank) {
+  for (auto ownership :
+       {LOOM_REFERENCE_OWNERSHIP_OWNED, LOOM_REFERENCE_OWNERSHIP_BORROWED}) {
+    const auto element = loom_type_reference(ownership, 7, 11, 2);
+    const auto alias = loom_type_reference(ownership, 7, 11, 19);
+    const auto other = loom_type_reference(ownership, 7, 12, 2);
+    uint64_t dimensions[LOOM_TYPE_MAX_RANK] = {};
+    for (uint8_t rank = 0; rank <= LOOM_TYPE_MAX_RANK; ++rank) {
+      const auto type =
+          loom_type_reference_view(&element, rank, dimensions, 0, 0);
+      const auto equivalent =
+          loom_type_reference_view(&alias, rank, dimensions, 0, 0);
+      const auto different =
+          loom_type_reference_view(&other, rank, dimensions, 0, 0);
+      EXPECT_EQ(sizeof(type), 24u);
+      EXPECT_TRUE(loom_type_is_view(type));
+      EXPECT_TRUE(loom_type_has_reference_element(type));
+      EXPECT_FALSE(loom_type_has_inline_dims(type));
+      EXPECT_TRUE(loom_type_equal(loom_type_element(type), element));
+      EXPECT_TRUE(loom_type_equal(type, equivalent));
+      EXPECT_EQ(loom_type_hash(type), loom_type_hash(equivalent));
+      EXPECT_FALSE(loom_type_equal(type, different));
+      EXPECT_TRUE(loom_type_element_type_equals(element, type));
+      EXPECT_FALSE(loom_type_element_type_equals(other, type));
+      EXPECT_TRUE(loom_type_equal_after_value_remap(nullptr, type, equivalent,
+                                                    nullptr));
+      EXPECT_FALSE(
+          loom_type_equal_after_value_remap(nullptr, type, different, nullptr));
+      for (uint8_t i = 0; i < rank; ++i) {
+        EXPECT_EQ(loom_type_dim(type, i), dimensions[i]);
+      }
+      if (rank < LOOM_TYPE_MAX_RANK) {
+        dimensions[rank] = rank % 2 ? loom_dim_pack_dynamic(rank)
+                                    : loom_dim_pack_static(rank + 1);
+      }
+    }
+  }
+  const auto owner =
+      loom_type_reference(LOOM_REFERENCE_OWNERSHIP_OWNED, 7, 11, 2);
+  const auto borrow =
+      loom_type_reference(LOOM_REFERENCE_OWNERSHIP_BORROWED, 7, 11, 2);
+  EXPECT_FALSE(
+      loom_type_equal(loom_type_reference_view(&owner, 0, nullptr, 0, 0),
+                      loom_type_reference_view(&borrow, 0, nullptr, 0, 0)));
+}
+
 TEST(TypesTest, FunctionTypeEqualAndHashAreStructural) {
   loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   loom_type_t f32 = loom_type_scalar(LOOM_SCALAR_TYPE_F32);

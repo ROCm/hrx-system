@@ -416,6 +416,7 @@ bool loom_type_equal_after_value_remap(const loom_module_t* module,
 
   if (loom_type_is_shaped(source_type)) {
     if (source_type.header != target_type.header ||
+        !loom_type_element_type_equals(source_type, target_type) ||
         !loom_type_shape_equal_after_value_remap(module, source_type,
                                                  target_type, remap)) {
       return false;
@@ -865,6 +866,10 @@ loom_type_hash_after_value_remap(const loom_module_t* module, loom_type_t type,
     hash = loom_structural_hash_mix_u64(hash, type.dims[0]);
     hash = loom_structural_hash_mix_u64(hash, type.dims[1]);
     return loom_structural_hash_finalize(hash);
+  }
+  if (loom_type_has_reference_element(type)) {
+    hash = loom_structural_hash_mix_u32(
+        hash, loom_type_hash(*loom_type_reference_element(type)));
   }
   switch (kind) {
     case LOOM_TYPE_FUNCTION: {

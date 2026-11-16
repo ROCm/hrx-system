@@ -73,6 +73,8 @@ from loom.ir import (
     PoolType,
     Predicate,
     PredicateArg,
+    ReferenceOwnership,
+    ReferenceType,
     Region,
     ScalarType,
     ScalarTypeKind,
@@ -193,6 +195,25 @@ class TestDimensions:
 
 
 class TestShapedTypes:
+    @pytest.mark.parametrize("ownership", list(ReferenceOwnership))
+    @pytest.mark.parametrize("rank", range(16))
+    def test_reference_view_elements(
+        self, ownership: ReferenceOwnership, rank: int
+    ) -> None:
+        element = ReferenceType(ownership, "io", "packet", "Packet")
+        dims = tuple(StaticDim(4) for _ in range(rank))
+        view = ShapedType(TypeKind.VIEW, element, dims)
+        assert view.element_type == element
+        assert view.rank == rank
+        alias = ReferenceType(ownership, "io", "packet", "PacketAlias")
+        assert view == ShapedType(TypeKind.VIEW, alias, dims)
+        assert hash(view) == hash(ShapedType(TypeKind.VIEW, alias, dims))
+        with pytest.raises(ValueError, match="target-selected"):
+            ShapedType(TypeKind.VIEW, element, dims, alignment=1)
+        for kind in (TypeKind.TILE, TypeKind.TENSOR, TypeKind.VECTOR):
+            with pytest.raises(ValueError, match="shaped elements must be scalar"):
+                ShapedType(kind, element, dims or (StaticDim(1),))
+
     def test_tile_static(self) -> None:
         t = ShapedType(TypeKind.TILE, F32, (StaticDim(4), StaticDim(4)))
         assert t.type_kind == TypeKind.TILE

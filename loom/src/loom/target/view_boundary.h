@@ -15,7 +15,9 @@
 typedef enum loom_target_view_boundary_carrier_e {
   // Preserve one semantic view for target-selected direct lowering.
   LOOM_TARGET_VIEW_BOUNDARY_CARRIER_DIRECT = 0,
-  // Transport a materializing buffer and a byte offset within that buffer.
+  // Transport a scalar-element view as a materializing buffer and byte offset.
+  // Reference-element views cannot use byte-addressable buffer storage and
+  // retain their semantic carrier for separate target lowering.
   // Shape and element type remain in the source signature; dynamic dimensions
   // are separate scalar parameters or results, not extra view components.
   LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BUFFER_OFFSET = 1,
@@ -48,7 +50,7 @@ static inline iree_string_view_t loom_view_boundary_component_name(
 // Other semantic types retain their own boundary contracts.
 static inline uint16_t loom_view_boundary_component_count(
     loom_target_view_boundary_carrier_t carrier, loom_type_t type) {
-  return loom_type_is_view(type) &&
+  return loom_type_is_view(type) && !loom_type_has_reference_element(type) &&
                  carrier == LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BUFFER_OFFSET
              ? LOOM_VIEW_BOUNDARY_COMPONENT_COUNT
              : 1;

@@ -693,10 +693,21 @@ static iree_status_t loom_parse_shaped_type(
   }
 
   // Parse element type.
-  loom_token_t element_token;
-  LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_BARE_IDENT, &element_token);
+  loom_token_t element_token = loom_tokenizer_peek(&parser->tokenizer);
   loom_scalar_type_t element_type = LOOM_SCALAR_TYPE_NONE;
-  if (!loom_scalar_type_parse(element_token.text, &element_type)) {
+  loom_type_t reference_element = loom_type_none();
+  if (loom_scalar_type_parse(element_token.text, &element_type)) {
+    loom_tokenizer_next(&parser->tokenizer);
+  } else if (kind == LOOM_TYPE_VIEW) {
+    IREE_RETURN_IF_ERROR(loom_parse_type(parser, mode, &reference_element));
+    if (parser->error_count > errors_before) {
+      return iree_ok_status();
+    }
+    if (!loom_type_is_reference(reference_element)) {
+      return loom_parser_emit_unexpected_token(
+          parser, element_token, IREE_SV("a scalar or ref/ptr view element"));
+    }
+  } else {
     loom_diagnostic_param_t params[] = {
         loom_param_string(element_token.text),
     };
@@ -734,6 +745,11 @@ static iree_status_t loom_parse_shaped_type(
             parser, token,
             IREE_SV("alignment is only permitted on view types"));
       }
+      if (loom_type_is_reference(reference_element)) {
+        return loom_parser_emit_unexpected_token(
+            parser, token,
+            IREE_SV("reference views have target-selected cell alignment"));
+      }
       if (!loom_tokenizer_try_consume_keyword(&parser->tokenizer,
                                               IREE_SV("align"))) {
         return loom_parser_emit_unexpected_token(parser, token,
@@ -756,6 +772,13 @@ static iree_status_t loom_parse_shaped_type(
 
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RANGLE, NULL);
 
+  if (loom_type_is_reference(reference_element)) {
+    const loom_type_t type = loom_type_reference_view(
+        &reference_element, rank, dims, encoding_id, encoding_flags);
+    IREE_RETURN_IF_ERROR(
+        loom_module_intern_type(parser->module, type, out_type));
+    return loom_assign_type_binding_types(parser, *out_type);
+  }
   return loom_intern_shaped_type(parser, kind, element_type, dims, rank,
                                  encoding_id, encoding_flags, alignment,
                                  out_type);

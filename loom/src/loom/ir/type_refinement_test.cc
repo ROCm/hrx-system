@@ -71,6 +71,33 @@ TEST_F(TypeRefinementTest, DynamicDimensionNarrowsToStaticDimension) {
   EXPECT_TRUE(loom_type_is_all_static(refined));
 }
 
+TEST_F(TypeRefinementTest, ReferenceViewRefinementPreservesElementIdentity) {
+  const auto element =
+      loom_type_reference(LOOM_REFERENCE_OWNERSHIP_BORROWED, 7, 11, 2);
+  const auto other =
+      loom_type_reference(LOOM_REFERENCE_OWNERSHIP_BORROWED, 7, 12, 3);
+  const uint64_t dynamic[] = {loom_dim_pack_dynamic(1)};
+  const uint64_t fixed[] = {loom_dim_pack_static(4)};
+  const auto current = loom_type_reference_view(&element, 1, dynamic, 0, 0);
+  const auto candidate = loom_type_reference_view(&element, 1, fixed, 0, 0);
+  loom_type_t refined = {};
+  loom_type_refinement_result_t result;
+  IREE_ASSERT_OK(loom_type_refine_with_candidate(current, candidate, &arena_,
+                                                 &refined, &result));
+  EXPECT_EQ(result, LOOM_TYPE_REFINEMENT_NARROWED);
+  EXPECT_TRUE(loom_type_equal(refined, candidate));
+  EXPECT_TRUE(loom_type_equal(loom_type_element(refined), element));
+  EXPECT_TRUE(loom_type_is_all_static(refined));
+  EXPECT_FALSE(loom_type_has_inline_dims(refined));
+  IREE_ASSERT_OK(loom_type_refine_with_candidate(
+      current, loom_type_reference_view(&other, 1, fixed, 0, 0), &arena_,
+      &refined, &result));
+  EXPECT_EQ(result, LOOM_TYPE_REFINEMENT_CONFLICT);
+  IREE_ASSERT_OK(loom_type_refine_with_candidate(element, other, &arena_,
+                                                 &refined, &result));
+  EXPECT_EQ(result, LOOM_TYPE_REFINEMENT_CONFLICT);
+}
+
 TEST_F(TypeRefinementTest, ShapeRefinementPreservesViewAccessRequirement) {
   const auto dynamic = loom_type_shaped_1d(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_I64,
                                            loom_dim_pack_dynamic(1), 0);

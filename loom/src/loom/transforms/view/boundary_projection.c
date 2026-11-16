@@ -186,7 +186,9 @@ static iree_status_t loom_view_boundary_plan_slot(
   *out_schema = (loom_boundary_projection_schema_t){0};
   *out_claimed = false;
   if (!loom_view_boundary_function_applies(rule, plan, function) ||
-      !loom_type_is_view(loom_module_value_type(plan->module, value_id))) {
+      loom_view_boundary_component_count(
+          LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BUFFER_OFFSET,
+          loom_module_value_type(plan->module, value_id)) == 1) {
     return iree_ok_status();
   }
   const loom_view_boundary_projection_plan_state_t* state =

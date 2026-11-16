@@ -21,7 +21,7 @@ static bool loom_constraint_property_equals(
     case LOOM_PROPERTY_KIND:
       return loom_type_kind(a) == loom_type_kind(b);
     case LOOM_PROPERTY_ELEMENT_TYPE:
-      return loom_type_element_type(a) == loom_type_element_type(b);
+      return loom_type_element_type_equals(a, b);
     case LOOM_PROPERTY_ENCODING:
       return loom_type_encoding_equals(a, b);
     case LOOM_PROPERTY_SHAPE:
@@ -117,8 +117,8 @@ static void loom_verify_emit_pairwise_mismatch(
       break;
     }
     case LOOM_PROPERTY_ELEMENT_TYPE: {
-      loom_type_t element_a = loom_type_scalar(loom_type_element_type(type_a));
-      loom_type_t element_b = loom_type_scalar(loom_type_element_type(type_b));
+      loom_type_t element_a = loom_type_element(type_a);
+      loom_type_t element_b = loom_type_element(type_b);
       loom_diagnostic_param_t params[] = {
           loom_verify_param_string_for_field(name_a, ref_a),
           loom_param_type(element_a),
@@ -1622,7 +1622,7 @@ static void loom_verify_relation_region_arg_match(
         loom_verify_constraint_error_or(constraint, LOOM_ERR_TYPE_008);
     loom_type_t expected_type =
         constraint->property == LOOM_PROPERTY_ELEMENT_TYPE
-            ? loom_type_scalar(loom_type_element_type(input_type))
+            ? loom_type_element(input_type)
             : input_type;
     loom_diagnostic_param_t params[] = {
         loom_param_u32(i),
@@ -1884,7 +1884,7 @@ static void loom_verify_relation_yield_match(
       const loom_type_t expected_type =
           constraint->property == LOOM_PROPERTY_TYPE
               ? target_type
-              : loom_type_scalar(loom_type_element_type(target_type));
+              : loom_type_element(target_type);
       loom_diagnostic_param_t params[] = {
           loom_param_type(yield_type),
           loom_param_type(expected_type),

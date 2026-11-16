@@ -1,5 +1,59 @@
 // RUN: verify
 
+type.decl import("input", "packet") @Packet
+
+type.decl import("input", "packet") @Alias
+
+func.def @reference_subviews_preserve_identity(%count: index, %source: view<[%count]xptr<@Packet>>, %owners: view<4xref<@Packet>>) {
+  %refined = view.refine %source : view<[%count]xptr<@Packet>> -> view<4xptr<@Packet>>
+  %slice = view.subview %refined[1] : view<4xptr<@Packet>> -> view<2xptr<@Packet>>
+  %owned_slice = view.subview %owners[1] : view<4xref<@Packet>> -> view<2xref<@Packet>>
+  func.return
+}
+
+// ====
+
+type.decl import("input", "packet") @Packet
+type.decl import("other", "packet") @Other
+
+func.def @reference_subview_rejects_different_object(%source: view<4xptr<@Packet>>) {
+  // ERROR@+1: TYPE/002 "source" "ptr<@Packet>" "result" "ptr<@Other>"
+  %slice = view.subview %source[1] : view<4xptr<@Packet>> -> view<2xptr<@Other>>
+  func.return
+}
+
+// ====
+
+type.decl import("input", "packet") @Packet
+
+func.def @reference_refine_rejects_ownership_change(%count: index, %source: view<[%count]xref<@Packet>>) {
+  // ERROR@+1: TYPE/002 "source" "ref<@Packet>" "result" "ptr<@Packet>"
+  %refined = view.refine %source : view<[%count]xref<@Packet>> -> view<4xptr<@Packet>>
+  func.return
+}
+
+// ====
+
+type.decl import("input", "packet") @Packet
+
+func.def @reference_bitcast_rejects_exposing_cells(%source: view<4xptr<@Packet>>) {
+  // ERROR@+1: TYPE/003 "source" "dense unencoded view with byte-addressable scalar elements"
+  %bits = view.bitcast %source : view<4xptr<@Packet>> -> view<32xi8>
+  func.return
+}
+
+// ====
+
+type.decl import("input", "packet") @Packet
+
+func.def @reference_bitcast_rejects_forging_cells(%source: view<32xi8>) {
+  // ERROR@+1: TYPE/004 "result" "dense unencoded view with byte-addressable scalar elements"
+  %cells = view.bitcast %source : view<32xi8> -> view<4xref<@Packet>>
+  func.return
+}
+
+// ====
+
 func.def @atomic_load_rejects_release(%view: view<1xi32>) {
   // ERROR@+1: PARSE/017 "ordering"
   %value = view.atomic.load %view[0] {ordering = release, scope = system} : view<1xi32> -> i32

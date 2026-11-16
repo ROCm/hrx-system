@@ -1546,8 +1546,16 @@ loom_verify_type_well_formed_malformation(loom_type_t type) {
   if (!loom_type_kind_is_valid(kind)) {
     return LOOM_VERIFY_TYPE_MALFORMATION_TYPE_KIND_OUT_OF_RANGE;
   }
-  if ((loom_type_is_scalar(type) || loom_type_is_shaped(type)) &&
-      !loom_scalar_type_is_valid(loom_type_element_type(type))) {
+  if (loom_type_has_reference_element(type)) {
+    if (kind != LOOM_TYPE_VIEW || loom_type_has_inline_dims(type) ||
+        loom_type_element_type(type) != LOOM_SCALAR_TYPE_NONE ||
+        !loom_type_reference_element(type) ||
+        !loom_type_is_reference(*loom_type_reference_element(type)) ||
+        loom_type_view_alignment_override(type)) {
+      return LOOM_VERIFY_TYPE_MALFORMATION_ELEMENT_TYPE_OUT_OF_RANGE;
+    }
+  } else if ((loom_type_is_scalar(type) || loom_type_is_shaped(type)) &&
+             !loom_scalar_type_is_valid(loom_type_element_type(type))) {
     return LOOM_VERIFY_TYPE_MALFORMATION_ELEMENT_TYPE_OUT_OF_RANGE;
   }
   switch (kind) {

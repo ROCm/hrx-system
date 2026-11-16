@@ -122,6 +122,7 @@ from loom.ir import (
     Predicate,
     PredicateArg,
     PredicateListAttr,
+    ReferenceType,
     Region,
     RegisterType,
     ScalarType,
@@ -1403,6 +1404,7 @@ def parse_type_from_tokens(
                     scope,
                     module,
                     mode,
+                    type_registry,
                 )
                 tokenizer.in_dim_list = False  # cleanup on error paths
                 return result
@@ -1883,6 +1885,7 @@ def _parse_compact_shape_type_from_tokens(
     scope: NameScope,
     module: Module,
     mode: TypeParseMode,
+    type_registry: dict[str, TypeDef],
 ) -> ShapedType | GroupType:
     """Parse a compact shape type from the token stream.
 
@@ -1957,15 +1960,27 @@ def _parse_compact_shape_type_from_tokens(
         )
 
     # Parse element type (in_dim_list is false here).
-    element_token = tokenizer.expect(TokenKind.BARE_IDENT)
-    scalar_kind = parse_scalar_type_kind(element_token.text)
-    if scalar_kind is None:
-        raise ParseError(
-            f"unknown element type '{element_token.text}' in shaped type",
-            element_token.location,
-            filename,
+    element_token = tokenizer.peek()
+    if type_kind == TypeKind.VIEW:
+        element_type = parse_type_from_tokens(
+            tokenizer, scope, module, type_registry, mode
         )
-    element_type = ScalarType(scalar_kind)
+        if not isinstance(element_type, (ScalarType, ReferenceType)):
+            raise ParseError(
+                "view elements must be scalar or ref/ptr",
+                element_token.location,
+                filename,
+            )
+    else:
+        tokenizer.expect(TokenKind.BARE_IDENT)
+        scalar_kind = parse_scalar_type_kind(element_token.text)
+        if scalar_kind is None:
+            raise ParseError(
+                f"unknown element type '{element_token.text}' in shaped type",
+                element_token.location,
+                filename,
+            )
+        element_type = ScalarType(scalar_kind)
 
     # Parse optional encoding followed by the view-only access alignment.
     encoding: EncodingInstance | DynamicEncoding | None = None

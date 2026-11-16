@@ -1976,8 +1976,12 @@ def _field_value_kind(item: Any) -> Any:
 
 
 def _field_element_type(item: Any) -> Any:
-    """Returns the scalar element type carried by a scalar or shaped field."""
+    """Returns the exact element type carried by a scalar, reference, or shape."""
+    from loom.ir import ReferenceType
+
     value_type = _field_value_type(item)
+    if isinstance(value_type, ReferenceType):
+        return value_type
     if hasattr(value_type, "element_type"):
         return value_type.element_type
     if hasattr(value_type, "dtype"):
@@ -4227,6 +4231,7 @@ def _validate_compact_shape_format(
         EncodingOf,
         ScalarOf,
         ShapeOf,
+        TypeOf,
         kw,
     )
 
@@ -4265,7 +4270,9 @@ def _validate_compact_shape_format(
         if (
             len(params) != (4 if ir_kind == "view" else 3)
             or not isinstance(params[0], ShapeParam)
-            or not isinstance(params[1], ScalarParam)
+            or not isinstance(
+                params[1], TypeParam if ir_kind == "view" else ScalarParam
+            )
             or not isinstance(params[2], EncodingParam)
             or (ir_kind == "view" and not isinstance(params[3], AlignmentParam))
         ):
@@ -4281,7 +4288,7 @@ def _validate_compact_shape_format(
         expected_format = (
             ShapeOf(params[0].name),
             kw("x"),
-            ScalarOf(params[1].name),
+            TypeOf(params[1].name) if ir_kind == "view" else ScalarOf(params[1].name),
             OptionalGroup(
                 [COMMA, EncodingOf(encoding_param.name)],
                 anchor=encoding_param.name,

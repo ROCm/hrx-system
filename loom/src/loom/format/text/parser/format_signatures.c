@@ -475,7 +475,7 @@ static loom_type_t loom_parse_format_binding_arg_type(
   if (!loom_type_is_shaped(type)) {
     return type;
   }
-  return loom_type_scalar(loom_type_element_type(type));
+  return loom_type_element(type);
 }
 
 static iree_status_t loom_parse_format_define_binding_arg(

@@ -722,7 +722,15 @@ class BytecodeReader:
         values: _ValueMap | None,
     ) -> tuple[ShapedType, int]:
         element, offset = self._read_type_field(data, offset, values)
-        elem_kind = ScalarTypeKind(element)
+        if type_kind == TypeKind.VIEW and element == 0:
+            element_id, offset = decode_varint(data, offset)
+            if element_id >= len(self._types) or not isinstance(
+                self._types[element_id], ReferenceType
+            ):
+                raise BytecodeError("view element must name a prior ref/ptr type")
+            element_type = self._types[element_id]
+        else:
+            element_type = ScalarType(ScalarTypeKind(element))
         rank, offset = self._read_type_field(data, offset, values)
         if rank > 15:
             raise BytecodeError(f"shaped type rank exceeds 15: {rank}")
@@ -773,7 +781,7 @@ class BytecodeReader:
         try:
             ir_type = ShapedType(
                 type_kind=type_kind,
-                element_type=ScalarType(elem_kind),
+                element_type=element_type,
                 dims=tuple(dims),
                 encoding=encoding,
                 alignment=alignment or None,

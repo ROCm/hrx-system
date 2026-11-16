@@ -530,7 +530,7 @@ def _print_shaped_type(
 ) -> str:
     """Print shaped types with optional dim names and encodings/layouts."""
     if shaped.rank == 0:
-        inner = repr(shaped.element_type)
+        inner = print_type(shaped.element_type, context)
     else:
         dim_parts: list[str] = []
         for dim in shaped.dims:
@@ -545,7 +545,7 @@ def _print_shaped_type(
                         dim_parts.append(f"[{dim_name}]")
                     else:
                         dim_parts.append("?")
-        inner = "x".join(dim_parts) + "x" + repr(shaped.element_type)
+        inner = "x".join(dim_parts) + "x" + print_type(shaped.element_type, context)
 
     # Encoding suffix.
     if shaped.has_encoding:

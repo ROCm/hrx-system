@@ -97,6 +97,15 @@ iree_status_t loom_bytecode_write_types_section(
       case LOOM_TYPE_VIEW: {
         IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
             page_writer, (uint8_t)loom_type_element_type(type)));
+        if (loom_type_has_reference_element(type)) {
+          const loom_type_id_t dependency =
+              numbering->types.index
+                  .dependencies[numbering->types.index.nodes[module_index]
+                                    .dependencies.begin];
+          IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+              page_writer,
+              numbering->types.writer_ids_by_module_index[dependency]));
+        }
         uint8_t rank = loom_type_rank(type);
         if (kind == LOOM_TYPE_VECTOR) {
           if (rank == 0) {
