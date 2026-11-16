@@ -196,7 +196,7 @@ class SnapshotLifetimeTest : public ResultTest,
                              public ::testing::WithParamInterface<bool> {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(loom_runtime_host_create(4, {}, nullptr,
+    IREE_ASSERT_OK(loom_runtime_host_create(4, nullptr, nullptr,
                                             iree_allocator_system(), &host_));
     const loom_runtime_device_options_t options = {
         .driver = loom_runtime_host_task_driver(host_),
@@ -348,7 +348,7 @@ class SuballocationLifetimeTest : public ResultTest {
  protected:
   void SetUp() override {
     loom_runtime_retirement_initialize(&producer_);
-    IREE_ASSERT_OK(loom_runtime_host_create(2, {}, nullptr,
+    IREE_ASSERT_OK(loom_runtime_host_create(2, nullptr, nullptr,
                                             iree_allocator_system(), &host_));
     const loom_runtime_device_options_t options = {
         .driver = loom_runtime_host_task_driver(host_),

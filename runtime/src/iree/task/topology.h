@@ -240,16 +240,17 @@ typedef enum iree_task_topology_distribution_e {
 // placement domain |node_id| (usually package or cluster). Up to
 // |max_core_count| physical cores will be selected from the node and
 // distributed according to |distribution| strategy across cache domains.
-// |processor_mask| optionally bounds selection by native CPU ID: Linux CPU ID
-// or Windows (group * 64 + processor). Storage is borrowed through this call.
-// With a zero bit_count Linux captures the current thread's effective affinity;
-// other platforms retain their default selection policy. Platforms without hard
-// CPU placement reject an explicit mask.
+// |processor_set| optionally bounds selection by native CPU ID, borrowed
+// through this call. NULL captures the current thread's effective affinity on
+// Linux/Android; other platforms retain their default selection policy. An
+// explicit empty set is an error. Platforms without hard CPU placement reject
+// an explicit set.
 iree_status_t iree_task_topology_initialize_from_physical_cores(
     iree_task_topology_node_id_t node_id,
     iree_task_topology_performance_level_t performance_level,
     iree_task_topology_distribution_t distribution,
-    iree_host_size_t max_core_count, iree_bitmap_t processor_mask,
+    iree_host_size_t max_core_count,
+    const iree_thread_affinity_set_t* processor_set,
     iree_task_topology_t* out_topology);
 
 #ifdef __cplusplus

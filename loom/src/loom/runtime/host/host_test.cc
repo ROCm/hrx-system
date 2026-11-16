@@ -31,8 +31,8 @@ TEST(HostTest, NullLifetimeOperations) {
 
 TEST(HostTest, CompilerAdapterUsesApplicationExecutor) {
   loom_runtime_host_t* host = nullptr;
-  IREE_ASSERT_OK(
-      loom_runtime_host_create(1, {}, nullptr, iree_allocator_system(), &host));
+  IREE_ASSERT_OK(loom_runtime_host_create(1, nullptr, nullptr,
+                                          iree_allocator_system(), &host));
   EXPECT_EQ(loom_runtime_host_executor(host),
             iree_task_executor_from_loomc_task_pool(
                 loom_runtime_host_task_pool(host)));
@@ -76,7 +76,8 @@ TEST(HostTest, CompilerTrimUsesConfiguredAllocatorOnce) {
       },
   };
   loom_runtime_host_t* host = nullptr;
-  IREE_ASSERT_OK(loom_runtime_host_create(2, {}, nullptr, allocator, &host));
+  IREE_ASSERT_OK(
+      loom_runtime_host_create(2, nullptr, nullptr, allocator, &host));
   EXPECT_EQ(state.calls, 0u);
   IREE_EXPECT_OK(loom_runtime_host_trim_compiler(host));
   EXPECT_EQ(state.calls, 1u);
@@ -93,23 +94,24 @@ TEST(HostTest, InvalidCapacityAndAllocationFailureReturnNoHost) {
   loom_runtime_host_t* host = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_runtime_host_create(0, {}, nullptr, iree_allocator_system(), &host));
+      loom_runtime_host_create(0, nullptr, nullptr, iree_allocator_system(),
+                               &host));
   EXPECT_EQ(host, nullptr);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_runtime_host_create(IREE_TASK_EXECUTOR_MAX_WORKER_COUNT + 1, {},
+      loom_runtime_host_create(IREE_TASK_EXECUTOR_MAX_WORKER_COUNT + 1, nullptr,
                                nullptr, iree_allocator_system(), &host));
   EXPECT_EQ(host, nullptr);
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_runtime_host_create(1, {}, nullptr, iree_allocator_null(), &host));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_runtime_host_create(1, nullptr, nullptr,
+                                                 iree_allocator_null(), &host));
   EXPECT_EQ(host, nullptr);
 }
 
 TEST(HostTest, DeviceIoPlacementPreservesNodeIdentities) {
   loom_runtime_host_t* host = nullptr;
-  IREE_ASSERT_OK(
-      loom_runtime_host_create(1, {}, nullptr, iree_allocator_system(), &host));
+  IREE_ASSERT_OK(loom_runtime_host_create(1, nullptr, nullptr,
+                                          iree_allocator_system(), &host));
   auto* pool = loom_runtime_host_proactor_pool(host);
   EXPECT_EQ(iree_async_proactor_pool_count(pool), iree_numa_node_count());
   iree_bitmap_t online_nodes = iree_numa_online_nodes();
@@ -134,12 +136,11 @@ TEST(HostTest, DeviceIoPlacementPreservesNodeIdentities) {
 
 #if defined(IREE_PLATFORM_LINUX)
 TEST(HostTest, EmptyProcessorBudgetReturnsNoHost) {
-  uint64_t words = 0;
-  const iree_bitmap_t budget = {.bit_count = 64, .words = &words};
+  const iree_thread_affinity_set_t budget = {};
   loom_runtime_host_t* host = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_runtime_host_create(1, budget, nullptr, iree_allocator_system(),
+      loom_runtime_host_create(1, &budget, nullptr, iree_allocator_system(),
                                &host));
   EXPECT_EQ(host, nullptr);
 }
@@ -208,8 +209,8 @@ static void CheckHostBudget(HostBudgetMode mode) {
   }
   iree_thread_affinity_set_t budget_set = {};
   struct State {
-    // Explicit constructor input, or an empty view requesting capture.
-    iree_bitmap_t budget = {};
+    // Caller-owned constructor input, or NULL requesting capture.
+    iree_thread_affinity_set_t* budget = nullptr;
     // Startup/submission status published by joining the constructor.
     iree_status_t status = iree_ok_status();
     // Observations outlive host and entry teardown on the constructor thread.
@@ -218,8 +219,9 @@ static void CheckHostBudget(HostBudgetMode mode) {
     AffinityObservation io;
   } state;
   if (mode == HostBudgetMode::kExplicit) {
-    state.budget = iree_thread_affinity_set_bitmap(&budget_set);
-    iree_bitmap_set(state.budget, expected_cpu);
+    state.budget = &budget_set;
+    iree_bitmap_set(iree_thread_affinity_set_bitmap(state.budget),
+                    expected_cpu);
   }
   const iree_thread_create_params_t params = {
       .initial_affinity =
@@ -227,7 +229,7 @@ static void CheckHostBudget(HostBudgetMode mode) {
               .id_assigned = 1,
               .id = static_cast<uint32_t>(constructor_cpu),
           },
-      .initial_processor_mask = available,
+      .initial_processor_set = &available_set,
   };
   iree_thread_t* constructor = nullptr;
   iree_status_t status = iree_thread_create(
@@ -237,7 +239,9 @@ static void CheckHostBudget(HostBudgetMode mode) {
         iree_status_t status = loom_runtime_host_create(
             1, state->budget, nullptr, iree_allocator_system(), &host);
         // The explicit input is borrowed only until host creation returns.
-        iree_bitmap_reset_all(state->budget);
+        if (state->budget) {
+          iree_bitmap_reset_all(iree_thread_affinity_set_bitmap(state->budget));
+        }
         struct Task {
           // Intrusive task accepted by the actual compiler scheduling domain.
           loomc_task_t base;
@@ -317,8 +321,8 @@ TEST(HostTest, ExplicitBudgetOverridesPinnedConstructor) {
 
 TEST(HostTest, BatchArenasShareAndReturnScratchBlocks) {
   loom_runtime_host_t* host = nullptr;
-  IREE_ASSERT_OK(
-      loom_runtime_host_create(1, {}, nullptr, iree_allocator_system(), &host));
+  IREE_ASSERT_OK(loom_runtime_host_create(1, nullptr, nullptr,
+                                          iree_allocator_system(), &host));
   auto* pool = loom_runtime_host_block_pool(host);
   iree_arena_allocator_t first, second;
   iree_arena_initialize(pool, &first);
@@ -345,7 +349,8 @@ class HostReclamationTest : public ::testing::Test {
  protected:
   void SetUp() override {
     const iree_allocator_t allocator = {this, Allocate};
-    IREE_ASSERT_OK(loom_runtime_host_create(2, {}, nullptr, allocator, &host_));
+    IREE_ASSERT_OK(
+        loom_runtime_host_create(2, nullptr, nullptr, allocator, &host_));
   }
   void TearDown() override { loom_runtime_host_release(host_); }
   static iree_status_t Allocate(void* payload, iree_allocator_command_t command,

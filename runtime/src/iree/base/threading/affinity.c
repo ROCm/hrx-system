@@ -12,10 +12,31 @@
 
 #include <string.h>
 
+#include "iree/base/internal/math.h"
+
 #if defined(IREE_PLATFORM_ANDROID) || defined(IREE_PLATFORM_LINUX)
 #include <errno.h>
 #include <sched.h>
 #endif
+
+iree_host_size_t iree_thread_affinity_set_find_first_set(
+    const iree_thread_affinity_set_t* set, iree_host_size_t processor_offset) {
+  if (processor_offset >= IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT) {
+    return IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT;
+  }
+  iree_host_size_t word_index = processor_offset / 64;
+  uint64_t word =
+      set->words[word_index] & (UINT64_MAX << (processor_offset % 64));
+  for (; word_index < IREE_ARRAYSIZE(set->words); ++word_index) {
+    if (word) {
+      return word_index * 64 + iree_math_count_trailing_zeros_u64(word);
+    }
+    if (word_index + 1 < IREE_ARRAYSIZE(set->words)) {
+      word = set->words[word_index + 1];
+    }
+  }
+  return IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT;
+}
 
 void iree_thread_affinity_set_any(iree_thread_affinity_t* out_thread_affinity) {
   memset(out_thread_affinity, 0x00, sizeof(*out_thread_affinity));

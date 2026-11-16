@@ -16,11 +16,11 @@
 
 static iree_status_t iree_async_proactor_pool_thread_runner_create(
     void* user_data, iree_async_proactor_t* proactor, uint32_t node_id,
-    iree_bitmap_t processor_mask, iree_allocator_t allocator,
+    const iree_thread_affinity_set_t* processor_set, iree_allocator_t allocator,
     void** out_runner) {
   iree_async_proactor_thread_options_t thread_options =
       iree_async_proactor_thread_options_default();
-  thread_options.processor_mask = processor_mask;
+  thread_options.processor_set = processor_set;
 
   // Configure NUMA affinity if a node ID is specified.
   if (node_id != UINT32_MAX) {

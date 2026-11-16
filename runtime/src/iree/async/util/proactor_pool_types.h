@@ -42,14 +42,15 @@ typedef struct iree_async_proactor_pool_runner_factory_t {
   // Creates a poll runner for |proactor|.
   // |node_id| is the NUMA node for the proactor (UINT32_MAX if unspecified).
   // A specified node must be established before polling starts; return an
-  // error if the runner cannot provide that locality. |processor_mask| bounds
-  // that affinity and is borrowed only through this call. A zero bit_count
-  // adds no constraint; a runner must not widen a nonzero budget.
+  // error if the runner cannot provide that locality. |processor_set| bounds
+  // that affinity and is borrowed only through this call. NULL adds no
+  // constraint; a runner must not widen an explicit budget.
   // Stores an opaque runner handle in |out_runner| (may be NULL if the runner
   // is self-managing). Called under pool mutex — must not call back into the
   // pool.
   iree_status_t (*create)(void* user_data, iree_async_proactor_t* proactor,
-                          uint32_t node_id, iree_bitmap_t processor_mask,
+                          uint32_t node_id,
+                          const iree_thread_affinity_set_t* processor_set,
                           iree_allocator_t allocator, void** out_runner);
 
   // Requests |runner| to stop without waiting for it to exit. Aggregate pool

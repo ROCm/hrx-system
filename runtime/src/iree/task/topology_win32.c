@@ -464,12 +464,13 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
     iree_task_topology_node_id_t node_id,
     iree_task_topology_performance_level_t performance_level,
     iree_task_topology_distribution_t distribution,
-    iree_host_size_t max_core_count, iree_bitmap_t processor_mask,
+    iree_host_size_t max_core_count,
+    const iree_thread_affinity_set_t* processor_set,
     iree_task_topology_t* out_topology) {
   iree_task_topology_initialize(out_topology);
-  if (processor_mask.bit_count && !processor_mask.words) {
+  if (processor_set && iree_thread_affinity_set_is_empty(processor_set)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "processor budget has no bitmap storage");
+                            "processor budget contains no CPUs");
   }
   // NOTE: win32 implementation doesn't currently support cache-domain-aware
   // distribution strategies. The distribution parameter is accepted for API
@@ -558,13 +559,12 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
     }
   }
 
-  if (processor_mask.bit_count) {
+  if (processor_set) {
     for (iree_host_size_t group = 0; group < max_group_count; ++group) {
       KAFFINITY budget_mask = 0;
       for (iree_host_size_t bit = 0; bit < sizeof(KAFFINITY) * 8; ++bit) {
         const iree_host_size_t processor = group * 64 + bit;
-        if (processor < processor_mask.bit_count &&
-            iree_bitmap_test(processor_mask, processor)) {
+        if (iree_thread_affinity_set_test(processor_set, processor)) {
           budget_mask |= (KAFFINITY)1 << bit;
         }
       }

@@ -164,7 +164,7 @@ iree_status_t iree_thread_create(iree_thread_entry_t entry, void* entry_arg,
       iree_thread_set_priority_class(thread, params.priority_class);
     }
     status = iree_thread_request_affinity(thread, params.initial_affinity,
-                                          params.initial_processor_mask);
+                                          params.initial_processor_set);
   }
 
   if (iree_status_is_ok(status)) {
@@ -263,16 +263,11 @@ void iree_thread_override_end(iree_thread_override_t* override) {
   IREE_TRACE_ZONE_END(z0);
 }
 
-iree_status_t iree_thread_request_affinity(iree_thread_t* thread,
-                                           iree_thread_affinity_t affinity,
-                                           iree_bitmap_t processor_mask) {
-  if (iree_thread_affinity_is_unspecified(affinity) &&
-      !processor_mask.bit_count) {
+iree_status_t iree_thread_request_affinity(
+    iree_thread_t* thread, iree_thread_affinity_t affinity,
+    const iree_thread_affinity_set_t* processor_set) {
+  if (iree_thread_affinity_is_unspecified(affinity) && !processor_set) {
     return iree_ok_status();
-  }
-  if (processor_mask.bit_count && !processor_mask.words) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "processor affinity mask has no storage");
   }
   GROUP_AFFINITY group_affinity = {0};
   if (!iree_thread_affinity_is_unspecified(affinity) &&
@@ -307,8 +302,8 @@ iree_status_t iree_thread_request_affinity(iree_thread_t* thread,
     }
   } else {
     const iree_host_size_t first_cpu =
-        iree_bitmap_find_first_set(processor_mask, 0);
-    if (first_cpu == processor_mask.bit_count) {
+        iree_thread_affinity_set_find_first_set(processor_set, 0);
+    if (first_cpu == IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT) {
       return iree_make_status(IREE_STATUS_UNAVAILABLE,
                               "processor affinity mask contains no CPUs");
     }
@@ -319,32 +314,30 @@ iree_status_t iree_thread_request_affinity(iree_thread_t* thread,
     group_affinity.Group = (WORD)(first_cpu / 64);
     group_affinity.Mask = ~(KAFFINITY)0;
     const iree_host_size_t next_group_cpu = (first_cpu / 64 + 1) * 64;
-    if (next_group_cpu < processor_mask.bit_count &&
-        iree_bitmap_find_first_set(processor_mask, next_group_cpu) !=
-            processor_mask.bit_count) {
+    if (iree_thread_affinity_set_find_first_set(processor_set,
+                                                next_group_cpu) !=
+        IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT) {
       return iree_make_status(
           IREE_STATUS_UNAVAILABLE,
           "Windows hard affinity requires one processor group; "
           "select a CPU or NUMA node within the processor budget");
     }
   }
-  if (processor_mask.bit_count) {
+  if (processor_set) {
     KAFFINITY permitted_mask = 0;
     const iree_host_size_t first_cpu =
         (iree_host_size_t)group_affinity.Group * 64;
     const iree_host_size_t native_end = first_cpu + sizeof(KAFFINITY) * 8;
     if (iree_thread_affinity_is_unspecified(affinity) &&
         sizeof(KAFFINITY) < sizeof(uint64_t) &&
-        native_end < processor_mask.bit_count &&
-        iree_bitmap_find_first_set(processor_mask, native_end) <
-            iree_min(first_cpu + 64, processor_mask.bit_count)) {
+        iree_thread_affinity_set_find_first_set(processor_set, native_end) <
+            first_cpu + 64) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "processor affinity exceeds native group mask");
     }
     for (iree_host_size_t bit = 0; bit < sizeof(KAFFINITY) * 8; ++bit) {
       const iree_host_size_t cpu = first_cpu + bit;
-      if (cpu < processor_mask.bit_count &&
-          iree_bitmap_test(processor_mask, cpu)) {
+      if (iree_thread_affinity_set_test(processor_set, cpu)) {
         permitted_mask |= (KAFFINITY)1 << bit;
       }
     }

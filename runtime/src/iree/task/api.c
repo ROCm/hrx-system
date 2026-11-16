@@ -277,7 +277,7 @@ iree_status_t iree_task_topology_initialize_from_flags(
 
     return iree_task_topology_initialize_from_physical_cores(
         node_id, performance_level, distribution,
-        FLAG_task_topology_max_group_count, (iree_bitmap_t){0}, out_topology);
+        FLAG_task_topology_max_group_count, NULL, out_topology);
   } else {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,

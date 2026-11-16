@@ -263,7 +263,7 @@ iree_status_t iree_async_proactor_create_posix_with_backend(
        ++proactor->initialized_workers) {
     status = iree_async_posix_worker_initialize(
         proactor, proactor->initialized_workers, options.worker_affinity,
-        options.worker_processor_mask, allocator,
+        options.worker_processor_set, allocator,
         &proactor->workers[proactor->initialized_workers]);
   }
 

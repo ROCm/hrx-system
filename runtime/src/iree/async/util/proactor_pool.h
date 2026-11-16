@@ -88,8 +88,9 @@ extern "C" {
 typedef struct iree_async_proactor_pool_options_t {
   // Options applied to each proactor created by the pool. An explicit entry
   // node overrides worker_affinity with that node's CPU affinity.
-  // worker_processor_mask is copied into the pool and bounds both backend
-  // workers and the poll runner, including entries initialized later.
+  // A non-NULL worker_processor_set is copied into the pool allocation and
+  // bounds both backend workers and the poll runner, including entries
+  // initialized later. An explicit empty set fails pool creation.
   iree_async_proactor_options_t proactor_options;
 
   // Optional proactor creator. NULL selects the platform-optimal creator.

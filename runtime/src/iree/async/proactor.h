@@ -438,9 +438,9 @@ typedef struct iree_async_proactor_options_t {
   iree_thread_affinity_t worker_affinity;
 
   // Optional CPU budget bounding backend-owned worker affinity. Native CPU IDs
-  // follow iree_thread_create_params_t. Storage is borrowed through creation;
-  // a zero bit_count adds no constraint. Poll runners receive their own budget.
-  iree_bitmap_t worker_processor_mask;
+  // follow iree_thread_affinity_set_t. Storage is borrowed through creation;
+  // NULL adds no constraint. Poll runners receive their own budget.
+  const iree_thread_affinity_set_t* worker_processor_set;
 } iree_async_proactor_options_t;
 
 // Returns default proactor options.

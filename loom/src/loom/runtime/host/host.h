@@ -8,6 +8,7 @@
 
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/internal/arena.h"
+#include "iree/base/threading/affinity.h"
 #include "iree/hal/api.h"
 #include "iree/task/executor.h"
 #include "loom/runtime/wake.h"
@@ -54,14 +55,15 @@ typedef struct loom_runtime_compiler_options_t {
 // The host always owns a task driver backed by this exact executor; that
 // runtime capability is independent of optional native x86 compiler support.
 // compiler_options may be NULL when the host will never compile model sources.
-// processor_mask bounds the shared Task and I/O workers by native CPU ID. It is
-// borrowed only through creation. A zero bit_count captures the constructing
-// thread's effective affinity once on Linux/Android and retains that budget for
-// later I/O entry creation; other platforms use their default placement policy.
-// An explicit budget permits creation from a thread already pinned more
-// narrowly.
+// processor_set bounds the shared Task and I/O workers by native CPU ID. It is
+// borrowed only through creation; the host's proactor pool retains a copy for
+// later I/O entry creation. NULL captures the constructing thread's effective
+// affinity once on Linux/Android; other platforms use their default placement
+// policy. An explicit empty set is an error. An explicit budget permits
+// creation from a thread already pinned more narrowly.
 iree_status_t loom_runtime_host_create(
-    iree_host_size_t worker_count, iree_bitmap_t processor_mask,
+    iree_host_size_t worker_count,
+    const iree_thread_affinity_set_t* processor_set,
     const loom_runtime_compiler_options_t* compiler_options,
     iree_allocator_t host_allocator, loom_runtime_host_t** out_host);
 

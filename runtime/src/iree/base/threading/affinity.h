@@ -42,17 +42,39 @@ extern "C" {
 #endif
 
 // Caller-owned storage for a native processor set. This value has no allocator
-// or lifetime beyond its containing object; bitmap views borrow its words.
+// or lifetime beyond its containing object. Consumers borrow a const pointer;
+// mutable bitmap views are available for constructing or editing the set.
 typedef struct iree_thread_affinity_set_t {
   // Native processor membership, with CPU N at bit N.
   uint64_t words[IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT / 64];
 } iree_thread_affinity_set_t;
 
-// Returns a bitmap borrowing |set|. Its storage must outlive every use.
+// Returns a mutable bitmap borrowing |set| for construction or editing.
+// Its storage must outlive every use.
 static inline iree_bitmap_t iree_thread_affinity_set_bitmap(
     iree_thread_affinity_set_t* set) {
   iree_bitmap_t bitmap = {IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT, set->words};
   return bitmap;
+}
+
+// Returns whether |processor| belongs to |set|. Native CPU IDs beyond the set's
+// capacity are not members.
+static inline bool iree_thread_affinity_set_test(
+    const iree_thread_affinity_set_t* set, iree_host_size_t processor) {
+  return processor < IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT &&
+         (set->words[processor / 64] & (UINT64_C(1) << (processor % 64))) != 0;
+}
+
+// Finds the first member at or after |processor_offset|, or returns
+// IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT if there is none.
+IREE_API_EXPORT iree_host_size_t iree_thread_affinity_set_find_first_set(
+    const iree_thread_affinity_set_t* set, iree_host_size_t processor_offset);
+
+// Returns whether |set| contains no CPUs.
+static inline bool iree_thread_affinity_set_is_empty(
+    const iree_thread_affinity_set_t* set) {
+  return iree_thread_affinity_set_find_first_set(set, 0) ==
+         IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT;
 }
 
 // Specifies the processor affinity for a particular thread.

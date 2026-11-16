@@ -164,7 +164,7 @@ iree_status_t iree_async_proactor_thread_create(
   memset(&params, 0, sizeof(params));
   params.name = options.debug_name;
   params.initial_affinity = options.affinity;
-  params.initial_processor_mask = options.processor_mask;
+  params.initial_processor_set = options.processor_set;
 
   iree_status_t status =
       iree_thread_create(iree_async_proactor_thread_main, thread, params,

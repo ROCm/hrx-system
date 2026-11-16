@@ -81,9 +81,10 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
     iree_task_topology_node_id_t node_id,
     iree_task_topology_performance_level_t performance_level,
     iree_task_topology_distribution_t distribution,
-    iree_host_size_t max_core_count, iree_bitmap_t processor_mask,
+    iree_host_size_t max_core_count,
+    const iree_thread_affinity_set_t* processor_set,
     iree_task_topology_t* out_topology) {
-  if (processor_mask.bit_count) {
+  if (processor_set) {
     iree_task_topology_initialize(out_topology);
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "WebAssembly does not expose CPU placement");

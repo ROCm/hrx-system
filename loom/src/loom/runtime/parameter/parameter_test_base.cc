@@ -20,7 +20,7 @@ class ParameterTestEnvironment : public ::testing::Environment {
       loom_runtime_host_t* host = nullptr;
       iree_hal_driver_t* driver = nullptr;
       auto status =
-          loom_runtime_host_create(application.worker_count, {}, nullptr,
+          loom_runtime_host_create(application.worker_count, nullptr, nullptr,
                                    iree_allocator_system(), &host);
       if (iree_status_is_ok(status)) {
         status = loom_runtime_test_driver_acquire(host, &driver);

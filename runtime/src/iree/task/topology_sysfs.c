@@ -85,13 +85,6 @@ static uint32_t iree_sysfs_query_processor_count(void) {
   return 0;  // Unknown.
 }
 
-// Returns true if |processor| belongs to the selected application CPU budget.
-static bool iree_sysfs_is_processor_available(uint32_t processor,
-                                              iree_bitmap_t processor_mask) {
-  return processor < processor_mask.bit_count &&
-         iree_bitmap_test(processor_mask, processor);
-}
-
 // Reads the core ID for a specific logical processor.
 // Returns false if the file doesn't exist or can't be parsed.
 static bool iree_sysfs_try_query_core_id(uint32_t processor,
@@ -783,19 +776,18 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
     iree_task_topology_node_id_t node_id,
     iree_task_topology_performance_level_t performance_level,
     iree_task_topology_distribution_t distribution,
-    iree_host_size_t max_core_count, iree_bitmap_t processor_mask,
+    iree_host_size_t max_core_count,
+    const iree_thread_affinity_set_t* processor_set,
     iree_task_topology_t* out_topology) {
   iree_task_topology_initialize(out_topology);
-  if (processor_mask.bit_count && !processor_mask.words) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "processor budget has no bitmap storage");
-  }
   iree_thread_affinity_set_t captured_set;
-  if (!processor_mask.bit_count) {
+  if (!processor_set) {
     IREE_RETURN_IF_ERROR(iree_thread_affinity_query_current(&captured_set));
-    processor_mask = iree_thread_affinity_set_bitmap(&captured_set);
+    processor_set = &captured_set;
   }
-  if (iree_bitmap_none_set(processor_mask)) {
+  const iree_host_size_t first_budget_cpu =
+      iree_thread_affinity_set_find_first_set(processor_set, 0);
+  if (first_budget_cpu == IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "processor budget contains no CPUs");
   }
@@ -807,8 +799,7 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
     iree_task_topology_initialize_from_group_count(iree_min(max_core_count, 1),
                                                    out_topology);
     if (out_topology->group_count) {
-      const uint32_t processor =
-          (uint32_t)iree_bitmap_find_first_set(processor_mask, 0);
+      const uint32_t processor = (uint32_t)first_budget_cpu;
       out_topology->groups[0].processor_index = processor;
       out_topology->groups[0].ideal_thread_affinity.id_assigned = 1;
       out_topology->groups[0].ideal_thread_affinity.id = processor;
@@ -816,13 +807,7 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
     return iree_ok_status();
   }
 
-  // Ignore budget capacity beyond the machine's possible CPU IDs. Padding and
-  // sparse IDs must not bias the randomized start toward the first real CPU.
-  processor_mask.bit_count =
-      iree_min(processor_mask.bit_count, processor_count);
-  const iree_host_size_t available_cpu_count =
-      iree_bitmap_count(processor_mask);
-  if (!available_cpu_count) {
+  if (first_budget_cpu >= processor_count) {
     return iree_make_status(
         IREE_STATUS_UNAVAILABLE,
         "processor budget contains no CPUs in the topology");
@@ -836,7 +821,11 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
   // treated as homogeneous and performance_level filtering is skipped.
   uint32_t max_capacity = 0;
   uint32_t min_capacity = UINT32_MAX;
+  // Count only eligible CPUs within the machine's possible CPU IDs. Padding
+  // and sparse IDs must not bias randomized placement toward the first CPU.
+  iree_host_size_t available_cpu_count = 0;
   for (uint32_t cpu = 0; cpu < processor_count; ++cpu) {
+    available_cpu_count += iree_thread_affinity_set_test(processor_set, cpu);
     const uint32_t capacity = iree_sysfs_query_cpu_capacity(cpu);
     if (capacity > 0) {
       max_capacity = iree_max(max_capacity, capacity);
@@ -865,7 +854,7 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
   uint32_t first_cpu = 0;
   iree_host_size_t remaining = placement % available_cpu_count;
   for (; first_cpu < processor_count; ++first_cpu) {
-    if (iree_sysfs_is_processor_available(first_cpu, processor_mask)) {
+    if (iree_thread_affinity_set_test(processor_set, first_cpu)) {
       if (remaining == 0) {
         break;
       }
@@ -877,7 +866,7 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
   for (uint32_t ordinal = 0;
        ordinal < processor_count && core_count < max_core_count; ++ordinal) {
     const uint32_t cpu = (first_cpu + ordinal) % processor_count;
-    if (!iree_sysfs_is_processor_available(cpu, processor_mask)) {
+    if (!iree_thread_affinity_set_test(processor_set, cpu)) {
       continue;
     }
 
