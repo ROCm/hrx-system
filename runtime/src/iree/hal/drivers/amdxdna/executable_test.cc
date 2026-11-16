@@ -24,8 +24,12 @@ static std::string ToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
 }
 
-static std::vector<uint8_t> ToVector(iree_hal_amdxdna_u8_list_t value) {
-  return std::vector<uint8_t>(value.data, value.data + value.count);
+static std::vector<uint8_t> ToVector(
+    const iree_hal_amdxdna_program_image_t* image) {
+  iree_const_byte_span_t contents =
+      iree_hal_amdxdna_program_image_contents(image);
+  return std::vector<uint8_t>(contents.data,
+                              contents.data + contents.data_length);
 }
 
 static std::vector<uint32_t> ToVector(iree_hal_amdxdna_u32_list_t value) {
@@ -237,8 +241,8 @@ TEST(ExecutableTest, ParsesSharedPdiAndRunDefinitions) {
 
   iree_hal_executable_t* base_executable = nullptr;
   IREE_ASSERT_OK(iree_hal_amdxdna_native_executable_create(
-      /*native_device=*/nullptr, &executable_params, iree_allocator_system(),
-      &base_executable));
+      /*native_device=*/nullptr, /*image_store=*/nullptr, &executable_params,
+      iree_allocator_system(), &base_executable));
   iree_hal_amdxdna_executable* executable =
       iree_hal_amdxdna_executable_cast(base_executable);
 
@@ -246,9 +250,9 @@ TEST(ExecutableTest, ParsesSharedPdiAndRunDefinitions) {
 
   const auto& entry0 = executable->entry_points[0];
   EXPECT_EQ(ToString(entry0.kernel_name), "entry0");
-  EXPECT_EQ(ToVector(entry0.pdi),
+  EXPECT_EQ(ToVector(entry0.pdi_image),
             std::vector<uint8_t>({0x50, 0x44, 0x49, 0x00}));
-  EXPECT_EQ(entry0.xclbin.count, 0u);
+  EXPECT_EQ(entry0.xclbin_image, nullptr);
   ASSERT_EQ(entry0.asm_inst_runlist_count, 2u);
   ASSERT_EQ(entry0.reconf_data_runlist_count, 1u);
   ASSERT_EQ(entry0.patch_runlist_count, 2u);
@@ -265,8 +269,8 @@ TEST(ExecutableTest, ParsesSharedPdiAndRunDefinitions) {
 
   const auto& shared_pdi = executable->entry_points[1];
   EXPECT_EQ(ToString(shared_pdi.kernel_name), "shared_pdi");
-  EXPECT_EQ(ToVector(shared_pdi.pdi), ToVector(entry0.pdi));
-  EXPECT_EQ(shared_pdi.xclbin.count, 0u);
+  EXPECT_EQ(ToVector(shared_pdi.pdi_image), ToVector(entry0.pdi_image));
+  EXPECT_EQ(shared_pdi.xclbin_image, nullptr);
   ASSERT_EQ(shared_pdi.asm_inst_runlist_count, 1u);
   EXPECT_EQ(shared_pdi.reconf_data_runlist_count, 0u);
   EXPECT_EQ(ToVector(shared_pdi.asm_inst_runlist[0]),
@@ -274,8 +278,8 @@ TEST(ExecutableTest, ParsesSharedPdiAndRunDefinitions) {
 
   const auto& reuse_context = executable->entry_points[2];
   EXPECT_EQ(ToString(reuse_context.kernel_name), "reuse_context");
-  EXPECT_EQ(reuse_context.pdi.count, 0u);
-  EXPECT_EQ(reuse_context.xclbin.count, 0u);
+  EXPECT_EQ(reuse_context.pdi_image, nullptr);
+  EXPECT_EQ(reuse_context.xclbin_image, nullptr);
   ASSERT_EQ(reuse_context.asm_inst_runlist_count, 1u);
   EXPECT_EQ(reuse_context.reconf_data_runlist_count, 0u);
   EXPECT_EQ(ToVector(reuse_context.asm_inst_runlist[0]),
@@ -399,8 +403,8 @@ TEST(ExecutableTest, DispatchPlanPrecomputesEntryPointPolicy) {
 
   iree_hal_executable_t* base_executable = nullptr;
   IREE_ASSERT_OK(iree_hal_amdxdna_native_executable_create(
-      /*native_device=*/nullptr, &executable_params, iree_allocator_system(),
-      &base_executable));
+      /*native_device=*/nullptr, /*image_store=*/nullptr, &executable_params,
+      iree_allocator_system(), &base_executable));
   iree_hal_amdxdna_executable* executable =
       iree_hal_amdxdna_executable_cast(base_executable);
 

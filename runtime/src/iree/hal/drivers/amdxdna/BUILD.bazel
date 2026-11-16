@@ -102,6 +102,7 @@ iree_runtime_cc_library(
         "direct_command_buffer_single_cache.c",
         "driver.c",
         "executable.c",
+        "program_image.c",
         "semaphore.c",
         "xclbin_util.c",
     ],
@@ -112,7 +113,6 @@ iree_runtime_cc_library(
         "buffer.h",
         "command_buffer.h",
         "completion_queue.h",
-        "dispatch.h",
         "context_cache.h",
         "ctrlcode_elf.h",
         "device.h",
@@ -120,9 +120,11 @@ iree_runtime_cc_library(
         "direct_command_buffer.h",
         "direct_command_buffer_chain_cache.h",
         "direct_command_buffer_single_cache.h",
+        "dispatch.h",
         "executable.h",
         "executable_internal.h",
         "native.h",
+        "program_image.h",
         "semaphore.h",
         "util.h",
         "xclbin_util.h",
@@ -193,6 +195,18 @@ iree_runtime_cc_test(
 iree_runtime_cc_test(
     name = "direct_command_buffer_single_cache_test",
     srcs = ["direct_command_buffer_single_cache_test.cc"],
+    tags = _AMDXDNA_UNIT_TEST_TAGS,
+    target_compatible_with = _AMDXDNA_COMPATIBLE_WITH,
+    deps = [
+        ":amdxdna",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "program_image_test",
+    srcs = ["program_image_test.cc"],
     tags = _AMDXDNA_UNIT_TEST_TAGS,
     target_compatible_with = _AMDXDNA_COMPATIBLE_WITH,
     deps = [

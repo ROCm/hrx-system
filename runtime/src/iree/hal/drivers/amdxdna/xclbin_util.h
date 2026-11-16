@@ -15,12 +15,11 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Extracts one PDI image from an AXLF/xclbin2 AIE_PARTITION section.
-// The returned span is owned by `host_allocator` and must be released with
-// iree_allocator_free(host_allocator, out_pdi->data).
-iree_status_t iree_hal_amdxdna_xclbin_extract_pdi(
-    iree_const_byte_span_t xclbin, uint32_t pdi_index,
-    iree_allocator_t host_allocator, iree_byte_span_t* out_pdi);
+// Locates one PDI image in an AXLF/xclbin2 AIE_PARTITION section. The
+// returned span aliases `xclbin` and is valid only while it is.
+iree_status_t iree_hal_amdxdna_xclbin_find_pdi(iree_const_byte_span_t xclbin,
+                                               uint32_t pdi_index,
+                                               iree_const_byte_span_t* out_pdi);
 
 #ifdef __cplusplus
 }  // extern "C"

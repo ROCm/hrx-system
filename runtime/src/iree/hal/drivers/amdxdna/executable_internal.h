@@ -17,14 +17,10 @@
 #include "iree/hal/drivers/amdxdna/direct_command_buffer_planning.h"
 #include "iree/hal/drivers/amdxdna/executable.h"
 #include "iree/hal/drivers/amdxdna/native.h"
+#include "iree/hal/drivers/amdxdna/program_image.h"
 
 typedef struct iree_hal_amdxdna_context_cache_lease_t
     iree_hal_amdxdna_context_cache_lease_t;
-
-typedef struct iree_hal_amdxdna_u8_list_t {
-  uint8_t* data;
-  iree_host_size_t count;
-} iree_hal_amdxdna_u8_list_t;
 
 typedef struct iree_hal_amdxdna_u32_list_t {
   uint32_t* data;
@@ -34,11 +30,13 @@ typedef struct iree_hal_amdxdna_u32_list_t {
 typedef struct iree_hal_amdxdna_kernel_params_t {
   // Raw PDI context image from amdxdna-pdi-fb or extracted from an XADX
   // xclbin's AIE_PARTITION section for native drivers that consume PDI.
-  // Empty for amdxdna-elf-fb (AIE4 START_DPU creates a context with no image).
-  iree_hal_amdxdna_u8_list_t pdi;
+  // NULL for amdxdna-elf-fb (AIE4 START_DPU creates a context with no image).
+  // Retained; shared with every executable that carries identical bytes.
+  iree_hal_amdxdna_program_image_t* pdi_image;
   // AXLF/xclbin context wrapper from amdxdna-xclbin-fb for native
-  // drivers that consume an xclbin-shaped context blob. Empty for AELF.
-  iree_hal_amdxdna_u8_list_t xclbin;
+  // drivers that consume an xclbin-shaped context blob. NULL for AELF.
+  // Retained; shared like |pdi_image|.
+  iree_hal_amdxdna_program_image_t* xclbin_image;
   iree_hal_amdxdna_u32_list_t* asm_inst_runlist;
   iree_host_size_t asm_inst_runlist_count;
   iree_hal_amdxdna_u32_list_t* reconf_data_runlist;
@@ -102,8 +100,9 @@ typedef struct iree_hal_amdxdna_executable {
   uint64_t cache_identity;
   iree_host_size_t entry_point_count;
   iree_hal_amdxdna_kernel_params_t* entry_points;
-  // Standalone PDI pool used by in-transaction load_pdi relocations.
-  iree_hal_amdxdna_u8_list_t* pdis;
+  // Standalone PDI pool used by in-transaction load_pdi relocations. Each
+  // image is retained.
+  iree_hal_amdxdna_program_image_t** pdis;
   // Device buffers parallel to `pdis`; allocated on first load_pdi dispatch so
   // unused entry points consume no device memory, then retained so relocated
   // addresses and residency remain stable across dispatches.
@@ -119,6 +118,16 @@ typedef struct iree_hal_amdxdna_executable {
   iree_hal_amdxdna_native_c_cu_index_t context_cu_index;
   bool context_cu_index_valid;
 } iree_hal_amdxdna_executable;
+
+static inline iree_const_byte_span_t iree_hal_amdxdna_kernel_params_pdi(
+    const iree_hal_amdxdna_kernel_params_t* params) {
+  return iree_hal_amdxdna_program_image_contents(params->pdi_image);
+}
+
+static inline iree_const_byte_span_t iree_hal_amdxdna_kernel_params_xclbin(
+    const iree_hal_amdxdna_kernel_params_t* params) {
+  return iree_hal_amdxdna_program_image_contents(params->xclbin_image);
+}
 
 iree_status_t iree_hal_amdxdna_executable_ensure_pdi_buffer(
     iree_hal_amdxdna_executable* executable, uint32_t pdi_ordinal);

@@ -4,8 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/drivers/amdxdna/executable.h"
-
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -14,6 +12,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/flatcc/building.h"
 #include "iree/hal/drivers/amdxdna/ctrlcode_elf.h"
+#include "iree/hal/drivers/amdxdna/executable.h"
 #include "iree/hal/drivers/amdxdna/executable_internal.h"
 #include "iree/schemas/amdxdna_elf_executable_def_builder.h"
 #include "iree/testing/gtest.h"
@@ -118,14 +117,14 @@ static std::vector<uint8_t> BuildVaddLikeElf() {
   write_shdr(0, kShtNull, 0, 0, 0, 0, 0);
   write_shdr(11, kShtProgbits, ctrl_off, static_cast<uint32_t>(ctrltext.size()),
              0, 0, 0);
-  write_shdr(21, kShtStrtab, dynstr_off, static_cast<uint32_t>(dynstr.size()), 0,
-             0, 0);
-  write_shdr(29, kShtDynsym, dynsym_off, static_cast<uint32_t>(dynsym.size()), 2,
-             1, kElf32SymSize);
+  write_shdr(21, kShtStrtab, dynstr_off, static_cast<uint32_t>(dynstr.size()),
+             0, 0, 0);
+  write_shdr(29, kShtDynsym, dynsym_off, static_cast<uint32_t>(dynsym.size()),
+             2, 1, kElf32SymSize);
   write_shdr(37, kShtRela, rela_off, static_cast<uint32_t>(rela.size()), 3, 0,
              kElf32RelaSize);
-  write_shdr(1, kShtStrtab, shstr_off, static_cast<uint32_t>(shstrtab.size()), 0,
-             0, 0);
+  write_shdr(1, kShtStrtab, shstr_off, static_cast<uint32_t>(shstrtab.size()),
+             0, 0, 0);
 
   elf[0] = 0x7F;
   elf[1] = 'E';
@@ -166,8 +165,8 @@ static iree_status_t MakeAelfExecutable(const std::vector<uint8_t>& elf,
 
   iree_hal_amdxdna_elf_ModuleDef_ref_t module_ref = 0;
   if (iree_status_is_ok(status)) {
-    flatbuffers_uint8_vec_ref_t elf_ref = flatbuffers_uint8_vec_create(
-        &builder, elf.data(), elf.size());
+    flatbuffers_uint8_vec_ref_t elf_ref =
+        flatbuffers_uint8_vec_create(&builder, elf.data(), elf.size());
     module_ref = iree_hal_amdxdna_elf_ModuleDef_create(&builder, elf_ref);
     if (!elf_ref || !module_ref) {
       status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -181,8 +180,8 @@ static iree_status_t MakeAelfExecutable(const std::vector<uint8_t>& elf,
         flatbuffers_string_create_str(&builder, export_name);
     if (name_ref &&
         !flatbuffers_failed(iree_hal_amdxdna_elf_ExportDef_start(&builder)) &&
-        !flatbuffers_failed(iree_hal_amdxdna_elf_ExportDef_module_ordinal_add(
-            &builder, 0)) &&
+        !flatbuffers_failed(
+            iree_hal_amdxdna_elf_ExportDef_module_ordinal_add(&builder, 0)) &&
         !flatbuffers_failed(
             iree_hal_amdxdna_elf_ExportDef_name_add(&builder, name_ref)) &&
         !flatbuffers_failed(iree_hal_amdxdna_elf_ExportDef_binding_count_add(
@@ -222,9 +221,9 @@ static iree_status_t MakeAelfExecutable(const std::vector<uint8_t>& elf,
     }
   }
   if (iree_status_is_ok(status)) {
-    out_data->assign(static_cast<const uint8_t*>(flatbuffer_data),
-                     static_cast<const uint8_t*>(flatbuffer_data) +
-                         flatbuffer_size);
+    out_data->assign(
+        static_cast<const uint8_t*>(flatbuffer_data),
+        static_cast<const uint8_t*>(flatbuffer_data) + flatbuffer_size);
   }
   flatcc_builder_aligned_free(flatbuffer_data);
   flatcc_builder_clear(&builder);
@@ -233,8 +232,8 @@ static iree_status_t MakeAelfExecutable(const std::vector<uint8_t>& elf,
 
 TEST(ExecutableElfTest, InfersFormatAndLoadsCtrlcode) {
   std::vector<uint8_t> executable_data;
-  IREE_ASSERT_OK(MakeAelfExecutable(BuildVaddLikeElf(), "vadd", 3,
-                                    &executable_data));
+  IREE_ASSERT_OK(
+      MakeAelfExecutable(BuildVaddLikeElf(), "vadd", 3, &executable_data));
 
   char format[64] = {};
   iree_host_size_t inferred_size = 0;
@@ -251,16 +250,16 @@ TEST(ExecutableElfTest, InfersFormatAndLoadsCtrlcode) {
 
   iree_hal_executable_t* base_executable = nullptr;
   IREE_ASSERT_OK(iree_hal_amdxdna_native_executable_create(
-      /*native_device=*/nullptr, &params, iree_allocator_system(),
-      &base_executable));
+      /*native_device=*/nullptr, /*image_store=*/nullptr, &params,
+      iree_allocator_system(), &base_executable));
   iree_hal_amdxdna_executable* executable =
       iree_hal_amdxdna_executable_cast(base_executable);
   ASSERT_EQ(executable->entry_point_count, 1u);
   const auto& entry = executable->entry_points[0];
   EXPECT_EQ(std::string(entry.kernel_name.data, entry.kernel_name.size),
             "vadd");
-  EXPECT_EQ(entry.pdi.count, 0u);
-  EXPECT_EQ(entry.xclbin.count, 0u);
+  EXPECT_EQ(entry.pdi_image, nullptr);
+  EXPECT_EQ(entry.xclbin_image, nullptr);
   ASSERT_EQ(entry.asm_inst_runlist_count, 1u);
   ASSERT_EQ(entry.asm_inst_runlist[0].count, 6u);
   EXPECT_EQ(entry.asm_inst_runlist[0].data[0], 0x10u);
@@ -343,15 +342,15 @@ TEST(ExecutableElfTest, LoadsAie4PagedCtrlcodeAndPartitionCols) {
   write_shdr(0, kShtNull, 0, 0, 0, 0, 0);
   write_shdr(11, kShtProgbits, ctrl_off, static_cast<uint32_t>(ctrltext.size()),
              0, 0, 0);
-  write_shdr(25, kShtStrtab, dynstr_off, static_cast<uint32_t>(dynstr.size()), 0,
-             0, 0);
-  write_shdr(33, kShtDynsym, dynsym_off, static_cast<uint32_t>(dynsym.size()), 2,
-             1, kElf32SymSize);
+  write_shdr(25, kShtStrtab, dynstr_off, static_cast<uint32_t>(dynstr.size()),
+             0, 0, 0);
+  write_shdr(33, kShtDynsym, dynsym_off, static_cast<uint32_t>(dynsym.size()),
+             2, 1, kElf32SymSize);
   write_shdr(41, kShtRela, rela_off, static_cast<uint32_t>(rela.size()), 3, 0,
              kElf32RelaSize);
   write_shdr(51, 7, note_off, static_cast<uint32_t>(note.size()), 0, 0, 0);
-  write_shdr(1, kShtStrtab, shstr_off, static_cast<uint32_t>(names.size()), 0, 0,
-             0);
+  write_shdr(1, kShtStrtab, shstr_off, static_cast<uint32_t>(names.size()), 0,
+             0, 0);
 
   elf[0] = 0x7F;
   elf[1] = 'E';
@@ -380,14 +379,14 @@ TEST(ExecutableElfTest, LoadsAie4PagedCtrlcodeAndPartitionCols) {
 
   iree_hal_executable_t* base_executable = nullptr;
   IREE_ASSERT_OK(iree_hal_amdxdna_native_executable_create(
-      /*native_device=*/nullptr, &params, iree_allocator_system(),
-      &base_executable));
+      /*native_device=*/nullptr, /*image_store=*/nullptr, &params,
+      iree_allocator_system(), &base_executable));
   iree_hal_amdxdna_executable* executable =
       iree_hal_amdxdna_executable_cast(base_executable);
   ASSERT_EQ(executable->entry_point_count, 1u);
   const auto& entry = executable->entry_points[0];
   EXPECT_EQ(entry.partition_cols, 3u);
-  EXPECT_EQ(entry.pdi.count, 0u);
+  EXPECT_EQ(entry.pdi_image, nullptr);
   ASSERT_EQ(entry.asm_inst_runlist_count, 1u);
   EXPECT_EQ(entry.asm_inst_runlist[0].count, 8192u / 4u);
   EXPECT_EQ(entry.asm_inst_runlist[0].data[0], 0xAAu);

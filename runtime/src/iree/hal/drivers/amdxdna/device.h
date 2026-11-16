@@ -16,6 +16,7 @@
 #include "iree/hal/drivers/amdxdna/async_queue.h"
 #include "iree/hal/drivers/amdxdna/completion_queue.h"
 #include "iree/hal/drivers/amdxdna/native.h"
+#include "iree/hal/drivers/amdxdna/program_image.h"
 
 struct iree_async_proactor_pool_t;
 struct iree_async_proactor_t;
@@ -48,6 +49,8 @@ typedef struct iree_hal_amdxdna_device {
   // The recycler is byte/count bounded and best-fit, avoiding both system-heap
   // retention from novel sizes and fixed-block internal fragmentation.
   iree_hal_amdxdna_host_recycler_t executable_host_recycler;
+  // Context program images shared by every executable loaded on this device.
+  iree_hal_amdxdna_program_image_store_t* program_image_store;
 
   // Per-device async work queue. Defers HAL queue ops until their wait
   // semaphores are satisfied, then runs them on a single worker thread.

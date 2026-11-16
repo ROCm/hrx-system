@@ -9,6 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
+#include "iree/hal/drivers/amdxdna/program_image.h"
 
 struct iree_hal_amdxdna_executable;
 struct iree_hal_amdxdna_device;
@@ -30,9 +31,12 @@ void iree_hal_amdxdna_executable_bind_device(
     iree_hal_executable_t* executable, struct iree_hal_amdxdna_device* device);
 
 // `out_executable` must be released by the caller (see
-// iree_hal_executable_release).
+// iree_hal_executable_release). Context program images are interned in
+// |image_store| when provided so executables with identical images share one
+// host copy; a NULL store gives the executable private copies.
 iree_status_t iree_hal_amdxdna_native_executable_create(
     struct iree_hal_amdxdna_native_device_t* native_device,
+    iree_hal_amdxdna_program_image_store_t* image_store,
     const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);
 

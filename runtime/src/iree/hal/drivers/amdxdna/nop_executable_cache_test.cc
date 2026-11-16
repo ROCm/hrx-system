@@ -4,14 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/drivers/amdxdna/executable.h"
-
 #include <cstdint>
 #include <vector>
 
 #include "iree/base/api.h"
 #include "iree/base/internal/flatcc/building.h"
 #include "iree/hal/api.h"
+#include "iree/hal/drivers/amdxdna/executable.h"
 #include "iree/schemas/pdi_executable_def_builder.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -166,8 +165,8 @@ TEST(NopExecutableCacheTest, PrepareExecutableSucceedsForValidExecutable) {
 
   iree_hal_executable_t* executable = nullptr;
   IREE_ASSERT_OK(iree_hal_amdxdna_native_executable_create(
-      /*native_device=*/nullptr, &load_params, iree_allocator_system(),
-      &executable));
+      /*native_device=*/nullptr, /*image_store=*/nullptr, &load_params,
+      iree_allocator_system(), &executable));
   ASSERT_NE(executable, nullptr);
   iree_hal_executable_release(executable);
 }
@@ -179,8 +178,8 @@ TEST(NopExecutableCacheTest, PrepareRejectsUnknownFormatBeforeParsing) {
 
   iree_hal_executable_t* executable = nullptr;
   iree_status_t status = iree_hal_amdxdna_native_executable_create(
-      /*native_device=*/nullptr, &load_params, iree_allocator_system(),
-      &executable);
+      /*native_device=*/nullptr, /*image_store=*/nullptr, &load_params,
+      iree_allocator_system(), &executable);
   EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
   iree_status_free(status);
   EXPECT_EQ(executable, nullptr);

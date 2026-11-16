@@ -80,11 +80,10 @@ iree_const_byte_span_t Span(const std::vector<uint8_t>& v) {
 
 iree_status_t ExtractPdi(const std::vector<uint8_t>& xclbin, uint32_t pdi_index,
                          std::vector<uint8_t>* out_pdi) {
-  iree_byte_span_t pdi_span = iree_byte_span_empty();
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_xclbin_extract_pdi(
-      Span(xclbin), pdi_index, iree_allocator_system(), &pdi_span));
+  iree_const_byte_span_t pdi_span = iree_const_byte_span_empty();
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdxdna_xclbin_find_pdi(Span(xclbin), pdi_index, &pdi_span));
   out_pdi->assign(pdi_span.data, pdi_span.data + pdi_span.data_length);
-  iree_allocator_free(iree_allocator_system(), pdi_span.data);
   return iree_ok_status();
 }
 

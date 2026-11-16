@@ -3578,10 +3578,8 @@ iree_status_t iree_hal_amdxdna_dispatch_plan_initialize(
   out_plan->data_payload_count = kernel_params->reconf_data_runlist_count;
   out_plan->data_payloads = kernel_params->reconf_data_runlist;
   out_plan->data_payload_run_count = kernel_params->n_reconfigure_runs;
-  out_plan->pdi_span = iree_make_const_byte_span(kernel_params->pdi.data,
-                                                 kernel_params->pdi.count);
-  out_plan->xclbin_span = iree_make_const_byte_span(
-      kernel_params->xclbin.data, kernel_params->xclbin.count);
+  out_plan->pdi_span = iree_hal_amdxdna_kernel_params_pdi(kernel_params);
+  out_plan->xclbin_span = iree_hal_amdxdna_kernel_params_xclbin(kernel_params);
   out_plan->kernel_name = kernel_params->kernel_name;
   bool has_pdi_relocations = false;
   for (iree_host_size_t i = 0; i < out_plan->pdi_relocation_count; ++i) {
@@ -3746,8 +3744,8 @@ iree_status_t iree_hal_amdxdna_direct_command_buffer_dispatch_plan(
             context_ref, plan->kernel_name, &cu_idx);
       }
     }
-  } else if (iree_status_is_ok(status) && (kernel_params->pdi.count != 0 ||
-                                           kernel_params->xclbin.count != 0)) {
+  } else if (iree_status_is_ok(status) &&
+             (kernel_params->pdi_image || kernel_params->xclbin_image)) {
     status = iree_hal_amdxdna_device_get_or_create_context(
         command_buffer->device, plan->pdi_span, plan->xclbin_span,
         plan->kernel_name, kernel_params->partition_cols, &context_ref);

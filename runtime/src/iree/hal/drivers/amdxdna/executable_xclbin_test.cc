@@ -14,6 +14,7 @@
 #include "iree/hal/drivers/amdxdna/direct_command_buffer.h"
 #include "iree/hal/drivers/amdxdna/executable.h"
 #include "iree/hal/drivers/amdxdna/executable_internal.h"
+#include "iree/hal/drivers/amdxdna/program_image.h"
 #include "iree/hal/drivers/amdxdna/shim/ert.h"
 #include "iree/schemas/amdxdna_xclbin_executable_def_builder.h"
 #include "iree/testing/gtest.h"
@@ -25,8 +26,12 @@ static std::string ToString(iree_string_view_t value) {
   return std::string(value.data, value.size);
 }
 
-static std::vector<uint8_t> ToVector(iree_hal_amdxdna_u8_list_t value) {
-  return std::vector<uint8_t>(value.data, value.data + value.count);
+static std::vector<uint8_t> ToVector(
+    const iree_hal_amdxdna_program_image_t* image) {
+  iree_const_byte_span_t contents =
+      iree_hal_amdxdna_program_image_contents(image);
+  return std::vector<uint8_t>(contents.data,
+                              contents.data + contents.data_length);
 }
 
 static std::vector<uint32_t> ToVector(iree_hal_amdxdna_u32_list_t value) {
@@ -352,26 +357,101 @@ TEST(ExecutableXclbinTest, ParsesXadxXclbinDefinitions) {
 
   iree_hal_executable_t* base_executable = nullptr;
   IREE_ASSERT_OK(iree_hal_amdxdna_native_executable_create(
-      /*native_device=*/nullptr, &params, iree_allocator_system(),
-      &base_executable));
+      /*native_device=*/nullptr, /*image_store=*/nullptr, &params,
+      iree_allocator_system(), &base_executable));
   iree_hal_amdxdna_executable* executable =
       iree_hal_amdxdna_executable_cast(base_executable);
 
   ASSERT_EQ(executable->entry_point_count, 2u);
   const auto& e0 = executable->entry_points[0];
   EXPECT_EQ(ToString(e0.kernel_name), "xadx0");
-  EXPECT_EQ(ToVector(e0.pdi),
+  EXPECT_EQ(ToVector(e0.pdi_image),
             pdi0);  // extracted from the AIE_PARTITION by index
-  EXPECT_EQ(ToVector(e0.xclbin), xclbin);  // raw AXLF context wrapper retained
+  EXPECT_EQ(ToVector(e0.xclbin_image),
+            xclbin);  // raw AXLF context wrapper retained
   ASSERT_EQ(e0.asm_inst_runlist_count, 1u);
   EXPECT_EQ(ToVector(e0.asm_inst_runlist[0]), std::vector<uint32_t>({10, 11}));
   const auto& e1 = executable->entry_points[1];
   EXPECT_EQ(ToString(e1.kernel_name), "xadx1");
-  EXPECT_EQ(ToVector(e1.pdi), pdi1);
+  EXPECT_EQ(ToVector(e1.pdi_image), pdi1);
   ASSERT_EQ(e1.asm_inst_runlist_count, 1u);
   EXPECT_EQ(ToVector(e1.asm_inst_runlist[0]), std::vector<uint32_t>({20}));
 
   iree_hal_executable_release(base_executable);
+}
+
+static iree_hal_executable_t* LoadXadx(
+    iree_hal_amdxdna_program_image_store_t* image_store,
+    const std::vector<uint8_t>& xclbin, int32_t pdi_index,
+    std::vector<uint32_t> control_code) {
+  std::vector<uint8_t> executable_data;
+  IREE_CHECK_OK(MakeXadxExecutable(
+      /*xclbins=*/{xclbin},
+      /*entry_points=*/
+      {{"shape", pdi_index, /*xclbin_index=*/0, {{control_code, {}, {}}}}},
+      &executable_data));
+  iree_hal_executable_load_params_t params;
+  iree_hal_executable_load_params_initialize(&params);
+  params.executable_data =
+      iree_make_const_byte_span(executable_data.data(), executable_data.size());
+  iree_hal_executable_t* executable = nullptr;
+  IREE_CHECK_OK(iree_hal_amdxdna_native_executable_create(
+      /*native_device=*/nullptr, image_store, &params, iree_allocator_system(),
+      &executable));
+  return executable;
+}
+
+TEST(ExecutableXclbinTest, ShapeSpecializedExecutablesShareProgramImages) {
+  std::vector<uint8_t> pdi(64, 0xC0);
+  std::vector<uint8_t> xclbin = BuildXclbin({pdi});
+  iree_hal_amdxdna_program_image_store_t* store = nullptr;
+  IREE_ASSERT_OK(iree_hal_amdxdna_program_image_store_create(
+      iree_allocator_system(), &store));
+
+  iree_hal_executable_t* first = LoadXadx(store, xclbin, 0, {10, 11});
+  iree_hal_executable_t* second = LoadXadx(store, xclbin, 0, {20, 21, 22});
+  const auto& first_entry =
+      iree_hal_amdxdna_executable_cast(first)->entry_points[0];
+  const auto& second_entry =
+      iree_hal_amdxdna_executable_cast(second)->entry_points[0];
+  ASSERT_NE(first_entry.xclbin_image, nullptr);
+  ASSERT_NE(first_entry.pdi_image, nullptr);
+  EXPECT_EQ(first_entry.xclbin_image, second_entry.xclbin_image);
+  EXPECT_EQ(first_entry.pdi_image, second_entry.pdi_image);
+  EXPECT_EQ(ToVector(second_entry.pdi_image), pdi);
+
+  iree_hal_amdxdna_program_image_store_stats_t stats;
+  iree_hal_amdxdna_program_image_store_query_stats(store, &stats);
+  EXPECT_EQ(stats.image_count, 2u);
+  EXPECT_EQ(stats.content_bytes, xclbin.size() + pdi.size());
+
+  // The owner may drop the store first; images keep it alive until the last
+  // executable that references them is released.
+  iree_hal_amdxdna_program_image_store_retain(store);
+  iree_hal_amdxdna_program_image_store_release(store);
+  iree_hal_executable_release(first);
+  iree_hal_amdxdna_program_image_store_query_stats(store, &stats);
+  EXPECT_EQ(stats.image_count, 2u);
+  iree_hal_executable_release(second);
+  iree_hal_amdxdna_program_image_store_query_stats(store, &stats);
+  EXPECT_EQ(stats.image_count, 0u);
+  EXPECT_EQ(stats.content_bytes, 0u);
+  iree_hal_amdxdna_program_image_store_release(store);
+}
+
+TEST(ExecutableXclbinTest, ExecutablesWithoutStoreOwnPrivateImages) {
+  std::vector<uint8_t> xclbin = BuildXclbin({std::vector<uint8_t>(16, 0xC0)});
+  iree_hal_executable_t* first = LoadXadx(nullptr, xclbin, 0, {10});
+  iree_hal_executable_t* second = LoadXadx(nullptr, xclbin, 0, {10});
+  const auto& first_entry =
+      iree_hal_amdxdna_executable_cast(first)->entry_points[0];
+  const auto& second_entry =
+      iree_hal_amdxdna_executable_cast(second)->entry_points[0];
+  EXPECT_NE(first_entry.xclbin_image, second_entry.xclbin_image);
+  EXPECT_EQ(ToVector(first_entry.xclbin_image),
+            ToVector(second_entry.xclbin_image));
+  iree_hal_executable_release(first);
+  iree_hal_executable_release(second);
 }
 
 TEST(ExecutableXclbinTest, ParsesLegacyXadxWithoutExtensionFields) {
@@ -390,8 +470,8 @@ TEST(ExecutableXclbinTest, ParsesLegacyXadxWithoutExtensionFields) {
       iree_make_const_byte_span(executable_data.data(), executable_data.size());
   iree_hal_executable_t* base_executable = nullptr;
   IREE_ASSERT_OK(iree_hal_amdxdna_native_executable_create(
-      /*native_device=*/nullptr, &params, iree_allocator_system(),
-      &base_executable));
+      /*native_device=*/nullptr, /*image_store=*/nullptr, &params,
+      iree_allocator_system(), &base_executable));
   auto* executable = iree_hal_amdxdna_executable_cast(base_executable);
   ASSERT_EQ(executable->entry_point_count, 1u);
   EXPECT_EQ(executable->pdi_count, 0u);
@@ -430,8 +510,8 @@ TEST(ExecutableXclbinTest, ParsesStandalonePdisAndRelocations) {
 
   iree_hal_executable_t* base_executable = nullptr;
   IREE_ASSERT_OK(iree_hal_amdxdna_native_executable_create(
-      /*native_device=*/nullptr, &params, iree_allocator_system(),
-      &base_executable));
+      /*native_device=*/nullptr, /*image_store=*/nullptr, &params,
+      iree_allocator_system(), &base_executable));
   iree_hal_amdxdna_executable* executable =
       iree_hal_amdxdna_executable_cast(base_executable);
 
@@ -500,8 +580,8 @@ TEST(ExecutableXclbinTest, LinuxCapsDoNotSelectPartialElfContext) {
 
   iree_hal_executable_t* base_executable = nullptr;
   IREE_ASSERT_OK(iree_hal_amdxdna_native_executable_create(
-      /*native_device=*/nullptr, &params, iree_allocator_system(),
-      &base_executable));
+      /*native_device=*/nullptr, /*image_store=*/nullptr, &params,
+      iree_allocator_system(), &base_executable));
 
   iree_hal_amdxdna_native_c_device_caps_t linux_caps = {};
   linux_caps.dispatch_models =
@@ -567,8 +647,8 @@ static void ExpectInvalidXadxExecutable(
       iree_make_const_byte_span(executable_data.data(), executable_data.size());
   iree_hal_executable_t* base_executable = nullptr;
   iree_status_t status = iree_hal_amdxdna_native_executable_create(
-      /*native_device=*/nullptr, &params, iree_allocator_system(),
-      &base_executable);
+      /*native_device=*/nullptr, /*image_store=*/nullptr, &params,
+      iree_allocator_system(), &base_executable);
   EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
   iree_status_free(status);
 }

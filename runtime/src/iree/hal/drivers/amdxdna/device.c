@@ -254,7 +254,7 @@ static iree_status_t iree_hal_amdxdna_device_load_executable(
   iree_hal_amdxdna_device* device = IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
       base_device, iree_hal_amdxdna_device_vtable, iree_hal_amdxdna_device);
   iree_status_t status = iree_hal_amdxdna_native_executable_create(
-      device->native_device, load_params,
+      device->native_device, device->program_image_store, load_params,
       iree_hal_amdxdna_host_recycler_allocator(
           &device->executable_host_recycler),
       out_executable);
@@ -651,7 +651,8 @@ static iree_status_t iree_hal_amdxdna_queue_execute_submit_error_batch(
     iree_hal_amdxdna_completion_batch_record_command_error(op->completion_batch,
                                                            status);
   } else {
-    iree_hal_amdxdna_completion_batch_record_error(op->completion_batch, status);
+    iree_hal_amdxdna_completion_batch_record_error(op->completion_batch,
+                                                   status);
   }
   iree_status_t submit_status =
       iree_hal_amdxdna_completion_batch_submit(op->completion_batch);
@@ -1381,7 +1382,8 @@ static iree_status_t iree_hal_amdxdna_queue_dispatch_submit_error_batch(
     iree_hal_amdxdna_completion_batch_record_command_error(op->completion_batch,
                                                            status);
   } else {
-    iree_hal_amdxdna_completion_batch_record_error(op->completion_batch, status);
+    iree_hal_amdxdna_completion_batch_record_error(op->completion_batch,
+                                                   status);
   }
   iree_status_t submit_status =
       iree_hal_amdxdna_completion_batch_submit(op->completion_batch);
@@ -1761,7 +1763,6 @@ static void iree_hal_amdxdna_device_destroy(iree_hal_device_t* base_device) {
 
   iree_hal_amdxdna_device* device = IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
       base_device, iree_hal_amdxdna_device_vtable, iree_hal_amdxdna_device);
-
   // Drain and shut down worker queues before tearing down the block pool (the
   // queues' pending ops live in arenas backed by the block pool).
   if (device->async_queue) {
@@ -1821,6 +1822,7 @@ static void iree_hal_amdxdna_device_destroy(iree_hal_device_t* base_device) {
   // first; accessing `device->` after deinitialize is intentionally avoided.
   iree_allocator_t host_allocator = device->host_allocator;
   iree_hal_amdxdna_device_deinitialize(device);
+  iree_hal_amdxdna_program_image_store_release(device->program_image_store);
   iree_hal_amdxdna_host_recycler_deinitialize(
       &device->executable_host_recycler);
   iree_allocator_free(host_allocator, device);
@@ -2044,6 +2046,10 @@ iree_status_t iree_hal_amdxdna_device_create(
         device->host_allocator,
         device->native_caps.max_cached_chain_child_commands,
         &device->chain_command_cache);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amdxdna_program_image_store_create(
+        device->host_allocator, &device->program_image_store);
   }
   if (iree_status_is_ok(status) && should_set_power_mode) {
     status = iree_hal_amdxdna_native_device_c_set_power_mode(

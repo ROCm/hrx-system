@@ -48,11 +48,11 @@ static iree_status_t CheckRange(size_t data_size, uint64_t offset,
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amdxdna_xclbin_extract_pdi(
+iree_status_t iree_hal_amdxdna_xclbin_find_pdi(
     iree_const_byte_span_t xclbin, uint32_t pdi_index,
-    iree_allocator_t host_allocator, iree_byte_span_t* out_pdi) {
+    iree_const_byte_span_t* out_pdi) {
   IREE_ASSERT_ARGUMENT(out_pdi);
-  *out_pdi = iree_byte_span_empty();
+  *out_pdi = iree_const_byte_span_empty();
 
   if (IREE_UNLIKELY(!xclbin.data || xclbin.data_length < 0x1C8 ||
                     memcmp(xclbin.data, "xclbin2\0", 8) != 0)) {
@@ -118,10 +118,6 @@ iree_status_t iree_hal_amdxdna_xclbin_extract_pdi(
   IREE_RETURN_IF_ERROR(CheckRange(aie_partition_size, pdi_offset, pdi_size,
                                   "AIE_PARTITION PDI image"));
 
-  uint8_t* pdi_data = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc(host_allocator, pdi_size, (void**)&pdi_data));
-  memcpy(pdi_data, aie_partition + pdi_offset, pdi_size);
-  *out_pdi = iree_make_byte_span(pdi_data, pdi_size);
+  *out_pdi = iree_make_const_byte_span(aie_partition + pdi_offset, pdi_size);
   return iree_ok_status();
 }
