@@ -309,8 +309,9 @@ static iree_status_t loom_aie2p_program_replacement_compile_impl(
     const loom_aie2p_program_compiler_t* source_compiler, uint32_t queue_header,
     uint32_t queue_command, const uint32_t* descriptors,
     loom_aie2p_program_replacement_candidate_t candidates[2],
+    loom_aie2p_program_layout_t* layout,
     loom_aie2p_program_replacement_candidate_t** out_selected,
-    loom_aie2p_program_layout_t* layout, bool* out_compiled) {
+    bool* out_compiled) {
   iree_arena_allocator_t* arena = request->scratch_arena;
   IREE_RETURN_IF_ERROR(
       loom_aie2p_program_replacement_initialize(request, &candidates[0]));
@@ -392,7 +393,7 @@ iree_status_t loom_aie2p_program_replacement_compile(
   loom_aie2p_program_replacement_candidate_t* selected = NULL;
   iree_status_t status = loom_aie2p_program_replacement_compile_impl(
       request, sources, source, source_clone, source_compiler, queue_header,
-      queue_command, descriptors, candidates, &selected, layout, out_compiled);
+      queue_command, descriptors, candidates, layout, &selected, out_compiled);
   if (selected && request->compile_report) {
     status = iree_status_join(
         status, *out_compiled
