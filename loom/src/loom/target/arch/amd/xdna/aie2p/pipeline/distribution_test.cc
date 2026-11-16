@@ -15,6 +15,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/analysis/pipeline/participants.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_queues.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/payload.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
@@ -746,5 +747,150 @@ INSTANTIATE_TEST_SUITE_P(
     MemoryModules, DistributionPathTest,
     ::testing::Combine(::testing::Values(uint8_t{1}, uint8_t{2}),
                        ::testing::Values(uint8_t{1}, uint8_t{2})));
+
+// Two geometries use the same DMA queues but have distinct logical producers
+// and consumers. Queue order belongs to the transport, not either channel.
+class DistributionCommandOwnershipTest : public ::testing::TestWithParam<bool> {
+ protected:
+  void SetUp() override {
+    iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks_);
+    iree_arena_initialize(&blocks_, &arena_);
+    pass_.arena = &arena_;
+    context_.pass = &pass_;
+    context_.family = loom_xdna_npu2_array_family();
+    context_.tiles = tiles_;
+    context_.workers = workers_;
+    context_.core_engines = engines_;
+    context_.execution.invocations = participants_;
+    for (size_t i = 0; i < IREE_ARRAYSIZE(tiles_); ++i) {
+      tiles_[i].coordinate = {0, static_cast<uint8_t>(i)};
+      tiles_[i].facts =
+          loom_xdna_array_tile_facts(context_.family, tiles_[i].coordinate);
+    }
+    loom_pipeline_participant_t members[] = {{2, 0}, {3, 1}, {4, 2}, {5, 3}};
+    loom_pipeline_execution_conflict_t conflict;
+    IREE_ASSERT_OK(loom_pipeline_participants_build(
+        &arena_, members, IREE_ARRAYSIZE(members), &participants_[1],
+        &conflict));
+    ASSERT_EQ(conflict.second_worker, IREE_HOST_SIZE_MAX);
+    participants_[0] = participants_[1];
+    invocation_.ordinal = 1;
+    for (auto& occurrence : occurrences_) {
+      occurrence.invocation = &invocation_;
+    }
+    realization_.invocations.count = 2;
+    realization_.invocations.workers = occurrences_;
+    realization_.invocations.worker_count = IREE_ARRAYSIZE(workers_);
+    workers_[4].execution = LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION;
+    workers_[4].tile = &tiles_[2];
+    workers_[4].distribution_phases = phases_;
+    for (size_t i = 0; i < 2; ++i) {
+      const uint32_t index = GetParam() ? 1 - i : i;
+      channels_[i].cursor.writer.worker = index;
+      channels_[i + 2].cursor.reader.worker = index + 2;
+      distributions_[i].sender.channel = &channels_[i];
+      distributions_[i].sender.tile = &tiles_[2];
+      distributions_[i].receiver_count = 1;
+      distributions_[i].receivers = &receivers_[i];
+      receivers_[i].channel = &channels_[i + 2];
+      receivers_[i].tile = &tiles_[1];
+      phases_[i].distribution = &distributions_[i];
+    }
+    phases_[0].next = &phases_[1];
+    phases_[1].previous = &phases_[0];
+  }
+
+  void TearDown() override {
+    iree_arena_deinitialize(&arena_);
+    iree_arena_block_pool_deinitialize(&blocks_);
+  }
+
+  void Bind() {
+    bool valid = false;
+    IREE_ASSERT_OK(loom_aie2p_native_bind_distribution_phases(
+        &context_, &realization_, &valid));
+    ASSERT_TRUE(valid);
+  }
+
+  // Allocation lifetime for command lists and participant sets.
+  iree_arena_block_pool_t blocks_ = {};
+  // Test-owned compiler arena.
+  iree_arena_allocator_t arena_ = {};
+  // Pass supplying the arena to native planning.
+  loom_pass_t pass_ = {};
+  // Native planner state under test.
+  loom_aie2p_native_context_t context_ = {};
+  // One column's shim, SRAM, and four compute tiles.
+  loom_aie2p_native_tile_t tiles_[6] = {};
+  // Four participating cores followed by the transport worker.
+  loom_aie2p_native_worker_t workers_[5] = {};
+  // Physical engine of each logical worker.
+  iree_host_size_t engines_[5] = {2, 3, 4, 5, IREE_HOST_SIZE_MAX};
+  // Complete child and root participant inventories.
+  const loom_pipeline_participants_t* participants_[2] = {};
+  // Finite child owning both ordered geometries.
+  loom_pipeline_invocation_t invocation_ = {};
+  // Bound source worker occurrences in that child.
+  loom_pipeline_invocation_worker_t occurrences_[5] = {};
+  // Common ownership facts consumed by native binding.
+  loom_pipeline_realization_t realization_ = {};
+  // Independent producer and receiver channel identities.
+  loom_aie2p_native_channel_t channels_[4] = {};
+  // Receiver geometries sharing one physical SRAM queue.
+  loom_aie2p_native_distribution_endpoint_t receivers_[2] = {};
+  // Distinct descriptors sharing sender and receiver queues.
+  loom_aie2p_native_distribution_t distributions_[2] = {};
+  // Authored order that both physical queues must preserve.
+  loom_aie2p_native_distribution_phase_t phases_[2] = {};
+};
+
+TEST_P(DistributionCommandOwnershipTest, SharedQueuesHaveOneOrderedIssuer) {
+  Bind();
+  const uint32_t producer = GetParam() ? 1 : 0;
+  const uint32_t consumer = producer + 2;
+  for (auto [worker, sender] :
+       {std::pair{producer, true}, std::pair{consumer, false}}) {
+    const auto* command = workers_[worker].distribution_commands;
+    for (size_t i = 0; i < 2; ++i) {
+      ASSERT_NE(command, nullptr);
+      const auto* endpoint =
+          sender ? &distributions_[i].sender : &receivers_[i];
+      EXPECT_EQ(command->endpoint, endpoint);
+      EXPECT_EQ(endpoint->controller_engine, engines_[worker]);
+      EXPECT_EQ(command->direction,
+                sender ? LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM
+                       : LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY);
+      EXPECT_EQ(command->retire, i == 1);
+      command = command->next;
+    }
+    EXPECT_EQ(command, nullptr);
+  }
+  EXPECT_EQ(workers_[1 - producer].distribution_commands, nullptr);
+  EXPECT_EQ(workers_[3 - producer].distribution_commands, nullptr);
+}
+
+TEST_P(DistributionCommandOwnershipTest, AutonomousReceiverKeepsQueueOwner) {
+  channels_[2].cursor.reader.worker = UINT32_MAX;
+  Bind();
+  EXPECT_EQ(receivers_[0].controller_engine, 2);
+  EXPECT_EQ(receivers_[1].controller_engine, 2);
+  const auto* command = workers_[0].distribution_commands;
+  for (size_t i = 0; i < 2; ++i) {
+    ASSERT_NE(command, nullptr);
+    EXPECT_EQ(command->endpoint, &receivers_[i]);
+    command = command->next;
+    if (!GetParam()) {
+      ASSERT_NE(command, nullptr);
+      EXPECT_EQ(command->endpoint, &distributions_[i].sender);
+      command = command->next;
+    }
+  }
+  EXPECT_EQ(command, nullptr);
+  EXPECT_EQ(workers_[2].distribution_commands, nullptr);
+  EXPECT_EQ(workers_[3].distribution_commands, nullptr);
+}
+
+INSTANTIATE_TEST_SUITE_P(FirstProducer, DistributionCommandOwnershipTest,
+                         ::testing::Bool());
 
 }  // namespace

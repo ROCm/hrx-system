@@ -1,0 +1,62 @@
+// RUN: emit pipeline-transport @stream
+
+// A retained first stream has an inner burst, then the second stream advances
+// once. The outer repetition crosses both batches even though their admission
+// scopes and counts differ. Whole-batch order would be AAAAAABB, not AAABAAAB.
+func.def @distribute(%first: channel<tile<1xi32>>, %second: channel<tile<1xi32>>, %left: channel<tile<1xi32>>, %right: channel<tile<1xi32>>) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %cycles = index.constant 2 : index
+  %burst = index.constant 3 : index
+  cfg.br ^outer(%begin: index)
+^outer(%cycle: index):
+  %more_cycles = index.cmp ult, %cycle, %cycles : index
+  cfg.cond_br %more_cycles, ^enter_burst, ^done
+^enter_burst:
+  cfg.br ^inner(%begin: index)
+^inner(%record: index):
+  %more_records = index.cmp ult, %record, %burst : index
+  cfg.cond_br %more_records, ^copy_first, ^copy_second
+^copy_first:
+  %first_read, %first_view = channel.acquire %first : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  %first_copy, %first_keep = channel.fanout %first_read : read<tile<1xi32>> -> (read<tile<1xi32>>, read<tile<1xi32>>)
+  %left_write, %left_view = channel.reserve %left : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.copy %first_copy -> %left_write : read<tile<1xi32>>, write<tile<1xi32>>
+  channel.release %first_keep : read<tile<1xi32>>
+  %next_record = index.add %record, %step : index
+  cfg.br ^inner(%next_record: index)
+^copy_second:
+  %second_read, %second_view = channel.acquire %second : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+  %second_copy, %second_keep = channel.fanout %second_read : read<tile<1xi32>> -> (read<tile<1xi32>>, read<tile<1xi32>>)
+  %right_write, %right_view = channel.reserve %right : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+  channel.copy %second_copy -> %right_write : read<tile<1xi32>>, write<tile<1xi32>>
+  channel.release %second_keep : read<tile<1xi32>>
+  %next_cycle = index.add %cycle, %step : index
+  cfg.br ^outer(%next_cycle: index)
+^done:
+  func.return
+}
+
+pipeline.def<kernel> public @stream() run(%first_storage: buffer, %second_storage: buffer, %left_storage: buffer, %right_storage: buffer) {
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 1 : index
+  %first_slots = buffer.view %first_storage[%origin] : buffer -> view<1x1xi32>
+  %second_slots = buffer.view %second_storage[%origin] : buffer -> view<1x1xi32>
+  %left_slots = buffer.view %left_storage[%origin] : buffer -> view<1x1xi32>
+  %right_slots = buffer.view %right_storage[%origin] : buffer -> view<1x1xi32>
+  %first = channel.bind<fifo> %first_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %second = channel.bind<fifo> %second_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %left = channel.bind<fifo> %left_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %right = channel.bind<fifo> %right_slots, %capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @distribute(%first, %second, %left, %right) : (channel<tile<1xi32>>, channel<tile<1xi32>>, channel<tile<1xi32>>, channel<tile<1xi32>>)
+  }
+}
+
+// ----
+worker 0: transport=channel-copy execution_counts=exact batches=2 streams=0
+  prefix_cycles=0 batch_order=interleaved
+  batch 0: records=1 replays=1
+    record 0: admission=%first_read source=%first admissions=6 transfers=6 final_release=yes destinations=%left
+  batch 1: records=1 replays=1
+    record 0: admission=%second_read source=%second admissions=2 transfers=2 final_release=yes destinations=%right

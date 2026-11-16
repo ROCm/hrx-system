@@ -41,6 +41,9 @@ typedef struct loom_aie2p_native_cursor_t {
   // Admissions within the channel's lifetime can select different slots,
   // including admissions from prior invocations of an importing worker.
   bool advances;
+  // Byte offset in the owning core's frame when this cursor is persistent.
+  // Autonomous cursors and worker-local SSA cursors have no frame cell.
+  iree_host_size_t frame_byte_offset;
 } loom_aie2p_native_cursor_t;
 
 // Physical FIFO state. Addresses select storage; identity selects the protocol.
@@ -402,6 +405,9 @@ typedef struct loom_aie2p_native_distribution_endpoint_t {
   iree_host_size_t controller_engine;
   // Descriptor images, finite queued tasks, and invocation rewind state.
   loom_aie2p_native_dma_sequence_t sequence;
+  // Canonical endpoint owning this task's continuing hardware slot iterator,
+  // or NULL when this endpoint owns its descriptor state.
+  struct loom_aie2p_native_distribution_endpoint_t* iterator_owner;
   // Assigned private descriptor range, or NULL for resident geometry.
   struct loom_aie2p_native_endpoint_storage_t* storage;
   // Next geometry assigned to this range, finalized before boundary emission.
@@ -591,9 +597,10 @@ typedef struct loom_aie2p_native_retirement_t {
   loom_symbol_ref_t function;
 } loom_aie2p_native_retirement_t;
 
-// A finite child endpoint controlled by its producer or consuming core. The
-// child boundary queues it before local work and observes idle after all local
-// async waits, when the core's scalar reply stream is drained.
+// A finite child endpoint controlled by one participating core. Ordered
+// geometries sharing a queue keep its first producer or consuming core as the
+// sole command issuer. The child boundary queues it before local work and
+// observes idle after all local async waits, with scalar replies drained.
 typedef struct loom_aie2p_native_distribution_command_t {
   // Next endpoint controlled by this worker occurrence.
   struct loom_aie2p_native_distribution_command_t* next;
@@ -814,6 +821,8 @@ typedef struct loom_aie2p_native_context_t {
   loom_pipeline_execution_t distribution_execution;
   // Physical core engine per worker; autonomous work has IREE_HOST_SIZE_MAX.
   const iree_host_size_t* core_engines;
+  // Exact persistent cursor storage per core engine, indexed like execution.
+  const iree_host_size_t* cursor_frame_byte_lengths;
   // Distribution path per worker; other execution has IREE_HOST_SIZE_MAX.
   const iree_host_size_t* distribution_engines;
   // Proposed transport-worker equalities from shared physical FIFO cursors.

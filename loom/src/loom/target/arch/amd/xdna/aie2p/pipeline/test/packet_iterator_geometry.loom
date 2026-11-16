@@ -1,9 +1,7 @@
-// RUN: emit source-low @entry target=amd.xdna.aie2p:amd.xdna.strix.17f0_10 output=none
-
-// A partial receiver turn followed by a different packet geometry cannot
-// start an independent iterator at slot zero. The second geometry completes
-// a whole turn, but the preceding geometry has already advanced the ring.
-aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
+// A partial turn followed by a different packet geometry must continue the
+// same receiver iterator. The second geometry makes a whole turn from slot
+// one; restarting its DMA descriptor at slot zero corrupts the ordered output.
+aie2p.target<array> @device
 
 func.def inline @drain(%channel: channel<tile<1xi32>>, %output: buffer, %base: offset, %count: index) {
   %begin = index.constant 0 : index
@@ -68,7 +66,6 @@ pipeline.def @whole() run(%source: channel<tile<1xi32>>, %left: channel<tile<1xi
     func.call @drain(%left, %output_left, %offset, %c3) : (channel<tile<1xi32>>, buffer, offset, index)
   }
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
-    // ERROR@+1: XDNA/051 {requirement="complete destination-ring turns on the same packet path"}
     %read, %payload = channel.acquire %source : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
     %a, %b, %c, %d, %e, %keep = channel.fanout %read : read<tile<1xi32>> -> (read<tile<1xi32>>, read<tile<1xi32>>, read<tile<1xi32>>, read<tile<1xi32>>, read<tile<1xi32>>, read<tile<1xi32>>)
     %wa, %pa = channel.reserve %left : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
@@ -88,7 +85,7 @@ pipeline.def @whole() run(%source: channel<tile<1xi32>>, %left: channel<tile<1xi
   }
 }
 
-pipeline.def<kernel> public retain target(@device) @entry() run(%input_arg: buffer, %left_arg: buffer, %right_arg: buffer) {
+pipeline.def<kernel> public retain target(@device) @packet_iterator_geometry() run(%input_arg: buffer, %left_arg: buffer, %right_arg: buffer) {
   %input, %output_left, %output_right = buffer.assume.alignment %input_arg, %left_arg, %right_arg {minimum_alignment = 4} : buffer, buffer, buffer
   %origin = index.constant 0 : offset
   %source_bytes = index.constant 4 : offset
@@ -116,4 +113,41 @@ pipeline.def<kernel> public retain target(@device) @entry() run(%input_arg: buff
   }
 }
 
-// ----
+func.def @reference(%input: buffer, %left: buffer, %right: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<2xi32>
+  %left_values = buffer.view %left[%origin] : buffer -> view<4xi32>
+  %right_values = buffer.view %right[%origin] : buffer -> view<4xi32>
+  %first = view.load %source[0] : view<2xi32> -> i32
+  %second = view.load %source[1] : view<2xi32> -> i32
+  %increment = scalar.constant 1 : i32
+  %a = scalar.addi %first, %increment : i32
+  %b = scalar.addi %second, %increment : i32
+  view.store %a, %left_values[0] : i32, view<4xi32>
+  view.store %b, %left_values[1] : i32, view<4xi32>
+  view.store %b, %left_values[2] : i32, view<4xi32>
+  view.store %b, %left_values[3] : i32, view<4xi32>
+  view.store %a, %right_values[0] : i32, view<4xi32>
+  view.store %a, %right_values[1] : i32, view<4xi32>
+  view.store %b, %right_values[2] : i32, view<4xi32>
+  view.store %b, %right_values[3] : i32, view<4xi32>
+  func.return
+}
+
+check.scenario public @changing_packet_geometry_preserves_receiver_cursor {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<34xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<34xi32> -> tensor<2xi32>
+    %left_storage = check.generate.fill value(-9999) : tensor<36xi32>
+    %left = check.tensor.view %left_storage offset(64) : tensor<36xi32> -> tensor<4xi32>
+    %right_storage = check.generate.fill value(1234567) : tensor<36xi32>
+    %right = check.tensor.view %right_storage offset(64) : tensor<36xi32> -> tensor<4xi32>
+    check.compare<@packet_iterator_geometry, @reference>(%input, %left, %right) : (tensor<2xi32>, tensor<4xi32>, tensor<4xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<34xi32>
+      check.expect.equal actual(%left_storage) expected(%left_storage) : tensor<36xi32>
+      check.expect.equal actual(%right_storage) expected(%right_storage) : tensor<36xi32>
+    }
+  }
+  check.return
+}

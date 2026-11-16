@@ -106,10 +106,9 @@ static iree_status_t loom_aie2p_native_program_frame(
     loom_aie2p_native_context_t* context, loom_builder_t* builder,
     const loom_pipeline_realization_t* realization, iree_host_size_t engine,
     loom_value_id_t* out_frame) {
-  const iree_host_size_t channel_count = realization->invocations.channel_count;
   loom_op_t *size = NULL, *allocation = NULL;
   IREE_RETURN_IF_ERROR(loom_index_constant_build(
-      builder, loom_attr_i64(channel_count * 2 * sizeof(uint32_t)),
+      builder, loom_attr_i64(context->cursor_frame_byte_lengths[engine]),
       loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET), LOOM_LOCATION_UNKNOWN, &size));
   IREE_RETURN_IF_ERROR(loom_buffer_alloca_build(
       builder, 0, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, LOOM_VALUE_ID_INVALID,

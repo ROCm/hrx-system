@@ -51,7 +51,7 @@ pipeline.def<kernel> public @stream() run(%prefix_storage: buffer, %bulk_storage
 
 // ----
 worker 0: transport=channel-copy execution_counts=exact batches=2 streams=0
-  prefix_cycles=3
+  prefix_cycles=3 batch_order=interleaved
   batch 0: records=1 replays=1
     record 0: admission=%prefix_read source=%prefix admissions=3 transfers=3 final_release=no destinations=%prefix_out
   batch 1: records=1 replays=1
@@ -111,7 +111,7 @@ pipeline.def<kernel> public @stream() run(%prefix_storage: buffer, %bulk_storage
 
 // ----
 worker 0: transport=channel-copy execution_counts=exact batches=2 streams=0
-  prefix_cycles=0
+  prefix_cycles=0 batch_order=interleaved
   batch 0: records=1 replays=1
     record 0: admission=%prefix_read source=%prefix admissions=3 transfers=3 final_release=no destinations=%prefix_out
   batch 1: records=1 replays=1
@@ -171,7 +171,7 @@ pipeline.def<kernel> public @stream() run(%prefix_storage: buffer, %bulk_storage
 
 // ----
 worker 0: transport=channel-copy execution_counts=exact batches=2 streams=0
-  prefix_cycles=0
+  prefix_cycles=0 batch_order=sequential
   batch 0: records=1 replays=1
     record 0: admission=%prefix_read source=%prefix admissions=3 transfers=3 final_release=no destinations=%prefix_out
   batch 1: records=1 replays=1

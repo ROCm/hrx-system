@@ -18,6 +18,7 @@ loom_check_test_suite(
         "invocations.loom-test",
         "schedule.loom-test",
         "transport.loom-test",
+        "transport_batch_order.loom-test",
         "transport_call_spaces.loom-test",
         "transport_captures.loom-test",
         "transport_control.loom-test",
