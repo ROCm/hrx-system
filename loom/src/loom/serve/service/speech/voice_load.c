@@ -8,6 +8,7 @@
 
 #include "iree/base/threading/mutex.h"
 #include "loom/model/card.h"
+#include "loom/runtime/service_control.h"
 #include "loomc/iree.h"
 
 typedef enum loom_serve_speech_voice_load_phase_e {
@@ -27,8 +28,8 @@ struct loom_serve_speech_voice_load_t {
   loom_runtime_sources_t* sources;
   // Borrowed service used for ordinary native upload admission.
   loom_serve_speech_service_t* service;
-  // Service advancement and readiness callbacks borrowed through completion.
-  loom_serve_service_t interface;
+  // Native scheduling and readiness capabilities borrowed through completion.
+  loom_runtime_service_t runtime;
   // Nonblocking owner notification, also installed on the service.
   loom_runtime_wake_callback_t observer;
   // Next declared recording; unchanged while its read task is accepted.
@@ -101,14 +102,13 @@ iree_status_t loom_serve_speech_voice_load_allocate(
   load->host_allocator = host_allocator;
   load->host = host;
   load->service = service;
-  load->interface = loom_serve_speech_service_interface(service);
+  load->runtime = loom_serve_speech_service_interface(service).runtime;
   load->observer = observer;
   iree_slim_mutex_initialize(&load->event.mutex);
   iree_status_t status =
       loom_runtime_sources_clone(sources, host_allocator, &load->sources);
   if (iree_status_is_ok(status)) {
-    load->interface.runtime.vtable->set_observer(load->interface.runtime.self,
-                                                 observer);
+    load->runtime.vtable->set_observer(load->runtime.self, observer);
     *out_load = load;
   } else {
     loom_serve_speech_voice_load_free(load);
@@ -168,8 +168,29 @@ iree_status_t loom_serve_speech_voice_load_advance(
       }
       if (iree_status_is_ok(load->status)) {
         bool progress = false;
-        load->status = load->interface.runtime.vtable->advance(
-            load->interface.runtime.self, 0, &progress);
+        load->status =
+            loom_serve_speech_service_progress(load->service, 0, &progress);
+        // This accepted preparation exclusively owns the unpublished service.
+        // Grant at most one source unit per turn; the enclosing control may
+        // also contain lifecycle offers that belong to a different owner.
+        const loom_runtime_service_control_layout_t layout =
+            loom_runtime_service_control_layout(load->runtime.control);
+        loom_runtime_service_operation_key_t operation = {0};
+        for (uint64_t i = 0;
+             i < layout.offer_capacity && iree_status_is_ok(load->status) &&
+             !operation.serial;
+             ++i) {
+          loom_runtime_service_offer_t offer;
+          if (loom_runtime_service_read_offer(load->runtime.control, i,
+                                              &offer) !=
+              LOOM_RUNTIME_SERVICE_READ_COMPLETE) {
+            progress = true;
+          } else if (offer.choice_count) {
+            load->status = loom_serve_speech_service_try_schedule(
+                load->service, offer.key, 0, 0, &operation);
+          }
+        }
+        progress |= operation.serial != 0;
         if (load->upload &&
             loom_serve_speech_voice_upload_is_complete(load->upload)) {
           load->status = iree_status_join(
@@ -199,14 +220,13 @@ iree_status_t loom_serve_speech_voice_load_advance(
     }
     bool progress = false;
     load->status = iree_status_join(
-        load->status, load->interface.runtime.vtable->advance(
-                          load->interface.runtime.self,
-                          LOOM_RUNTIME_SERVICE_FLAG_STOPPING, &progress));
+        load->status,
+        loom_serve_speech_service_progress(
+            load->service, LOOM_RUNTIME_SERVICE_FLAG_STOPPING, &progress));
     if (progress) {
       load->observer.wake(load->observer.user_data);
     }
-    *out_complete = !load->interface.runtime.vtable->is_pending(
-        load->interface.runtime.self);
+    *out_complete = !load->runtime.vtable->is_pending(load->runtime.self);
     if (*out_complete) {
       return iree_status_clone(load->status);
     }

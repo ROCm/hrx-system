@@ -291,6 +291,7 @@ loom_cc_library(
         ":voice",
         "//loom/binding/c:loomc",
         "//loom/src/loom/model:card",
+        "//loom/src/loom/runtime:service_control",
         "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/host",
         "//loom/src/loom/runtime/program:sources",

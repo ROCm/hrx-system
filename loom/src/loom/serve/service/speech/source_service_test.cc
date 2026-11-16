@@ -194,9 +194,10 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
         .pending_capacity = 4,
         .heartbeat_interval = 0,
     };
+    const auto binding = loom_runtime_service_control_binding(
+        control_.binding().control, 1, 2, 0);
     IREE_ASSERT_OK(loom_serve_speech_service_allocate(
-        host_, generator_, &options, nullptr, control_.binding(), allocator_,
-        &service_));
+        host_, generator_, &options, nullptr, binding, allocator_, &service_));
     interface_ = loom_serve_speech_service_interface(service_);
     interface_.runtime.vtable->set_observer(
         interface_.runtime.self,
@@ -219,7 +220,7 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
           loom_serve_speech_service_progress(service_, flags, &progress);
       if (iree_status_is_ok(status) && !ready()) {
         loom_runtime_service_offer_t offer = {};
-        EXPECT_EQ(loom_runtime_service_read_offer(interface_.runtime.control, 0,
+        EXPECT_EQ(loom_runtime_service_read_offer(interface_.runtime.control, 1,
                                                   &offer),
                   LOOM_RUNTIME_SERVICE_READ_COMPLETE);
         if (iree_any_bit_set(offer.work, allowed_work)) {
@@ -412,8 +413,9 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
   loom_serve_http_listener_t* listener_ = nullptr;
   // Readiness-driven client and optional outer router thread.
   loom_serve::testing::HttpHarness http_;
-  // Parent-owned observations remain valid after service destruction.
-  loom_runtime::testing::ServiceControl control_{2};
+  // Parent-owned observations outlive the service. Its nonzero slot ranges
+  // exercise composition without assuming the engine owns the whole control.
+  loom_runtime::testing::ServiceControl control_{4, 2};
   // Optional manually driven production service, joined before model teardown.
   loom_serve_speech_service_t* service_ = nullptr;
   // Borrowed service operations, used only by the serialized test owner.

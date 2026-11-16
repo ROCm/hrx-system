@@ -15,8 +15,9 @@ extern "C" {
 #endif
 
 // Registers original model-card recordings through the ordinary native upload
-// lifecycle. File reads run on preparation workers; the serialized owner drives
-// service advancement. At most one original recording is retained at a time.
+// lifecycle. File reads run on preparation workers; the serialized owner grants
+// bounded native service units and progresses their accepted obligations. At
+// most one original recording is retained at a time.
 typedef struct loom_serve_speech_voice_load_t loom_serve_speech_voice_load_t;
 
 // Captures an already-resolved source namespace and borrows host/service
@@ -29,10 +30,11 @@ iree_status_t loom_serve_speech_voice_load_allocate(
     loom_serve_speech_service_t* service, loom_runtime_wake_callback_t observer,
     iree_allocator_t host_allocator, loom_serve_speech_voice_load_t** out_load);
 
-// Advances one bounded owner turn. Cancellation is irreversible and stops the
-// service, joining accepted reads, CPU preparation, and device work before
-// reporting completion. Successful completion leaves every declared ID ready
-// and transfers service advancement back to the caller. NULL is complete.
+// Advances one bounded owner turn, accepting at most one offered speech unit.
+// Cancellation is irreversible and stops the service, joining accepted reads,
+// CPU preparation, and device work without further grants before reporting
+// completion. Successful completion leaves every declared ID ready and
+// transfers service scheduling back to the caller. NULL is complete.
 iree_status_t loom_serve_speech_voice_load_advance(
     loom_serve_speech_voice_load_t* load, bool cancel, bool* out_complete);
 
