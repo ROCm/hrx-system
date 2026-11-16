@@ -8,6 +8,7 @@
 #include <array>
 #include <cstring>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include "iree/hal/api.h"
@@ -35,13 +36,15 @@ class GpuNativeProfileTestBase : public GpuNativeTest {
     return IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS;
   }
 
+  virtual uint32_t ArgumentCapacity() const { return 32; }
+
   void SetUp() override {
     GpuNativeTest::SetUp();
     if (HasFatalFailure() || IsSkipped()) {
       return;
     }
     options_.queue.retirement_capacity = 4;
-    options_.queue.argument_capacity = 32;
+    options_.queue.argument_capacity = ArgumentCapacity();
     options_.queue.ring_byte_length = 4096;
     Create();
     if (HasFatalFailure()) {
@@ -244,6 +247,227 @@ class GpuNativeDispatchProfileTest
            IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_METADATA;
   }
 };
+
+class GpuNativeArgumentProfileTest
+    : public GpuNativeProfileTestBase,
+      public ::testing::WithParamInterface<
+          std::tuple<amdf_queue_command_type_t, bool>> {
+ protected:
+  amdf_queue_command_type_t command_type() const override {
+    return std::get<0>(GetParam());
+  }
+
+  // Several fresh records share each traversal before the small ring wraps.
+  uint32_t ArgumentCapacity() const override { return 1024; }
+
+  iree_hal_device_profiling_data_families_t Families() const override {
+    return IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
+           (std::get<1>(GetParam())
+                ? IREE_HAL_DEVICE_PROFILING_DATA_DISPATCH_EVENTS
+                : 0);
+  }
+};
+
+TEST_P(GpuNativeArgumentProfileTest,
+       DependentDispatchesPreserveArgumentsAcrossReuse) {
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(4, 4),
+      iree_infinite_timeout(), output.out()));
+  Ref<iree_hal_executable_t> executable;
+  iree_hal_executable_function_t function;
+  ASSERT_NO_FATAL_FAILURE(Load(executable, function));
+  Ref<iree_hal_semaphore_t> done;
+  CreateSemaphore(done.out());
+  auto* timeline = done.get();
+  uint64_t next = 1;
+  uint32_t zero = 0, observed = 0, expected = 0;
+  IREE_ASSERT_OK(iree_hal_queue_fill(queues_[0], {}, {1, &timeline, &next},
+                                     output, 0, 4, &zero, 4, nullptr, 0));
+  auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
+  config.workgroup_size[0] = 32;
+  config.workgroup_size[1] = config.workgroup_size[2] = 1;
+  auto reference = iree_hal_make_buffer_ref(output, 0, 4);
+  const iree_hal_memory_barrier_t read = {
+      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
+  };
+  const iree_hal_memory_barrier_t write = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+  };
+  const iree_hal_barrier_t acquire = {
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .memory_barrier_count = 1,
+      .memory_barriers = &read,
+  };
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .memory_barrier_count = 1,
+      .memory_barriers = &write,
+  };
+  const iree_hal_barrier_list_t before = {1, &acquire};
+  const iree_hal_barrier_list_t after = {1, &release};
+  const iree_hal_queue_barriers_t device_local = {&before, &after};
+  constexpr uint32_t kRounds = 4;
+  constexpr uint32_t kDispatches = 32;
+  for (uint32_t round = 0; round < kRounds; ++round) {
+    for (uint32_t i = 0; i < kDispatches; ++i) {
+      uint32_t increment = round * kDispatches + i + 1;
+      expected += increment;
+      uint64_t previous = next++;
+      IREE_ASSERT_OK(iree_hal_queue_dispatch(
+          queues_[0], {1, &timeline, &previous}, {1, &timeline, &next},
+          executable, function, config,
+          iree_make_const_byte_span(&increment, sizeof(increment)),
+          {1, &reference}, &device_local, 0));
+    }
+    // Host visibility belongs to the explicit download, not each interior
+    // dispatch. Every next round reuses retired argument and sample storage.
+    uint64_t previous = next++;
+    IREE_ASSERT_OK(iree_hal_queue_download(
+        queues_[0], {1, &timeline, &previous}, {1, &timeline, &next}, output, 0,
+        &observed, sizeof(observed), nullptr));
+    ASSERT_NO_FATAL_FAILURE(Wait(done, next));
+    ASSERT_EQ(observed, expected);
+  }
+  executable.reset();
+  ASSERT_NO_FATAL_FAILURE(End());
+  EXPECT_EQ(Events(IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_DISPATCH).size(),
+            kRounds * kDispatches);
+  if (std::get<1>(GetParam())) {
+    ASSERT_EQ(sink_.dispatch_events.size(), kRounds * kDispatches);
+    uint64_t previous_end = 0;
+    for (const auto& event : sink_.dispatch_events) {
+      EXPECT_GT(event.start_tick, 0u);
+      EXPECT_GE(event.start_tick, previous_end);
+      EXPECT_GE(event.end_tick, event.start_tick);
+      EXPECT_EQ(event.command_buffer_id, 0u);
+      previous_end = event.end_tick;
+    }
+  } else {
+    EXPECT_TRUE(sink_.dispatch_events.empty());
+  }
+}
+
+TEST_P(GpuNativeArgumentProfileTest,
+       RecordedCohortsRetainArgumentsAcrossBarriersAndReplays) {
+  constexpr uint32_t kWidth = 8;
+  constexpr uint32_t kReplays = 8;
+  constexpr std::array<uint32_t, 2> kStages = {3, 9};
+  Ref<iree_hal_executable_t> executable;
+  iree_hal_executable_function_t function;
+  ASSERT_NO_FATAL_FAILURE(Load(executable, function));
+  auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
+  config.workgroup_size[0] = 32;
+  config.workgroup_size[1] = config.workgroup_size[2] = 1;
+  const iree_hal_memory_barrier_t memory = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+  };
+  const iree_hal_barrier_t dependency = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .memory_barrier_count = 1,
+      .memory_barriers = &memory,
+  };
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  // Each cohort updates disjoint words, then the next cohort consumes them.
+  // The longer recording crosses the native ring's packet capacity; replay
+  // alternates distinct argument images through both queues' small arenas.
+  std::array<Ref<iree_hal_command_buffer_t>, kStages.size()> recordings;
+  std::array<std::vector<uint32_t>, kStages.size()> command_indices;
+  std::array<uint32_t, kWidth> expected = {};
+  for (size_t i = 0; i < recordings.size(); ++i) {
+    IREE_ASSERT_OK(iree_hal_command_buffer_create(
+        iree_hal_queue_family(queues_[0]),
+        IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA,
+        IREE_HAL_COMMAND_CATEGORY_DISPATCH, 1, recordings[i].out()));
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(recordings[i]));
+    for (uint32_t stage = 0; stage < kStages[i]; ++stage) {
+      if (stage) {
+        IREE_ASSERT_OK(
+            iree_hal_command_buffer_barrier(recordings[i], &dependency));
+      }
+      for (uint32_t lane = 0; lane < kWidth; ++lane) {
+        uint32_t increment = (stage + 1) * 16 + lane + 1;
+        expected[lane] += increment * (kReplays / kStages.size());
+        auto reference = iree_hal_make_indirect_buffer_ref(0, lane * 4, 4);
+        IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+            recordings[i], executable, function, config,
+            iree_make_const_byte_span(&increment, sizeof(increment)),
+            {1, &reference}, 0));
+        increment = UINT32_MAX;
+        command_indices[i].push_back(stage * (kWidth + 1) + lane);
+      }
+    }
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recordings[i], &release));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(recordings[i]));
+  }
+  std::array<Ref<iree_hal_buffer_t>, 2> outputs;
+  std::array<Ref<iree_hal_semaphore_t>, 2> completions;
+  uint32_t zero = 0;
+  uint64_t one = 1;
+  for (size_t q = 0; q < queues_.size(); ++q) {
+    CreateSemaphore(completions[q].out());
+    auto* timeline = completions[q].get();
+    IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+        pool_, iree_hal_make_pool_reservation_request(sizeof(expected), 4),
+        iree_infinite_timeout(), outputs[q].out()));
+    IREE_ASSERT_OK(iree_hal_queue_fill(queues_[q], {}, {1, &timeline, &one},
+                                       outputs[q], 0, sizeof(expected), &zero,
+                                       sizeof(zero), nullptr, 0));
+  }
+  for (uint64_t replay = 0; replay < kReplays; ++replay) {
+    uint64_t previous = replay + 1, next = previous + 1;
+    for (size_t q = 0; q < queues_.size(); ++q) {
+      auto* timeline = completions[q].get();
+      iree_hal_buffer_binding_t binding = {
+          .buffer = outputs[q],
+          .length = sizeof(expected),
+      };
+      IREE_ASSERT_OK(iree_hal_queue_execute(
+          queues_[q], {1, &timeline, &previous}, {1, &timeline, &next},
+          recordings[replay % recordings.size()], {1, &binding}, 0));
+    }
+  }
+  for (size_t q = 0; q < queues_.size(); ++q) {
+    auto* timeline = completions[q].get();
+    uint64_t previous = kReplays + 1, next = previous + 1;
+    std::array<uint32_t, kWidth> observed = {};
+    IREE_ASSERT_OK(iree_hal_queue_download(
+        queues_[q], {1, &timeline, &previous}, {1, &timeline, &next},
+        outputs[q], 0, observed.data(), sizeof(observed), nullptr));
+    ASSERT_NO_FATAL_FAILURE(Wait(timeline, next));
+    EXPECT_EQ(observed, expected);
+    for (size_t replay = 0; replay < kReplays; ++replay) {
+      const auto& indices = command_indices[replay % recordings.size()];
+      sink_.expected_dispatch_command_indices.insert(
+          sink_.expected_dispatch_command_indices.end(), indices.begin(),
+          indices.end());
+    }
+  }
+  sink_.expected_dispatch_flags =
+      IREE_HAL_PROFILE_DISPATCH_EVENT_FLAG_COMMAND_BUFFER;
+  ASSERT_NO_FATAL_FAILURE(End());
+  EXPECT_EQ(sink_.dispatch_events.size(),
+            std::get<1>(GetParam())
+                ? sink_.expected_dispatch_command_indices.size()
+                : 0u);
+  for (const auto& event : sink_.dispatch_events) {
+    EXPECT_GT(event.start_tick, 0u);
+    EXPECT_GE(event.end_tick, event.start_tick);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    NativeQueues, GpuNativeArgumentProfileTest,
+    ::testing::Combine(::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                         AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+                       ::testing::Bool()));
 
 TEST_P(GpuNativeDispatchProfileTest,
        AcquiredQueueRetainsRecordedSamplesAfterFinalRelease) {

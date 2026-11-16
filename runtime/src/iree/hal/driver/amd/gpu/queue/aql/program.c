@@ -170,7 +170,7 @@ uint32_t iree_hal_amd_gpu_aql_program_prefix_count(
 }
 
 amdf_status_t iree_hal_amd_gpu_aql_program_emit_host(
-    uint32_t packet_count, const void* upload,
+    uint32_t packet_count, const void* upload, bool command_data,
     iree_hal_amd_gpu_aql_ring_t* ring,
     const iree_hal_amd_gpu_user_queue_t* storage, uint64_t position,
     uint64_t sample_address, iree_hal_amd_gpu_aql_signal_t* samples) {
@@ -178,12 +178,14 @@ amdf_status_t iree_hal_amd_gpu_aql_program_emit_host(
   amdf_status_t status = AMDF_STATUS_OK;
   for (uint32_t i = 0; i < packet_count && amdf_status_is_ok(status); ++i) {
     iree_hal_amd_gpu_aql_packet_t packet = packets[i];
-    // Each independently launched packet may consume host-written arguments
-    // or an IB. The first also joins preceding native work, as a resident
-    // program's ordered prelude would.
-    packet.words[0] = (packet.words[0] & ~(3u << 9)) |
-                      IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM |
-                      (i ? 0 : IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED);
+    if (!i || command_data) {
+      // Launch phases advance in queue order. The first acquisition covers
+      // this chunk's complete ABI upload; later packets retain their explicit
+      // payload scopes. Native IB reads keep their per-packet acquisition.
+      packet.words[0] = (packet.words[0] & ~(3u << 9)) |
+                        IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM |
+                        (i ? 0 : IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED);
+    }
     uint64_t completion = 0;
     if (sample_address && packet.words[14]) {
       const uint32_t ordinal = packet.words[14] - 1;

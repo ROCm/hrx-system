@@ -226,6 +226,16 @@ class AqlPublicationTest
            (uint64_t{packets_[packet].words[word + 1]} << 32);
   }
 
+  void PrepareSamples(size_t count) {
+    sample_generation_.memory.contents = iree_make_byte_span(
+        sample_values_.data(), count * sizeof(sample_values_[0]));
+    sample_generation_.address = 0xABCD00009000;
+    sample_generation_.capacity =
+        sample_generation_.memory.contents.data_length;
+    sample_pool_.current = &sample_generation_;
+    queue_.samples = &sample_pool_;
+  }
+
   // Real bounded profile stream used by timestamped publication.
   iree::hal::cts::TestProfileSink sink_;
   // Prepared native scalar target, retained by real control captures.
@@ -246,6 +256,12 @@ class AqlPublicationTest
   iree_hal_amd_gpu_aql_queue_t queue_ = {};
   // Native completion allocations for this queue and an independent producer.
   std::array<Signals, 2> signals_;
+  // Timestamp sample backing retained through submission teardown.
+  std::array<iree_hal_amd_gpu_aql_signal_t, 4> sample_values_ = {};
+  // Native sample allocation borrowed by published profile completions.
+  iree_hal_amd_gpu_byte_storage_t sample_generation_ = {};
+  // Sample allocation owner borrowed by the queue publisher.
+  iree_hal_amd_gpu_byte_storage_pool_t sample_pool_ = {};
   // Retirement storage with the production inline capture extent.
   std::array<iree_hal_amd_gpu_aql_retirement_t, 128> issued_ = {};
   // Native packet allocation observed after publication.
@@ -390,6 +406,79 @@ TEST_P(AqlPublicationTest, FreshArgumentsRetainRequestedPayloadScopes) {
                         [](uint8_t value) { return value == 0xCD; }));
       }
       ++record;
+    }
+  }
+}
+
+TEST_P(AqlPublicationTest, ProfilingPreservesFreshArgumentAcquisition) {
+  auto sampled = BeginProfile();
+  auto host_only = sampled;
+  host_only.completion = {};
+  queue_.producer.argument_cache_isolated = std::get<1>(GetParam());
+  std::array<uint8_t, 4096> argument_bytes = {};
+  arguments_.memory.contents =
+      iree_make_byte_span(argument_bytes.data(), argument_bytes.size());
+  arguments_.address = 0x7000;
+  arguments_.capacity = argument_bytes.size();
+  // Cover empty, single-granule, and multi-granule ABI records.
+  std::array<uint32_t, 48> constants = {};
+  layout_.byte_length = 32 * std::get<0>(GetParam());
+  request_.constants =
+      iree_make_const_byte_span(constants.data(), layout_.byte_length);
+  PrepareSamples(sample_values_.size());
+
+  for (const auto* operation :
+       {&sampled, &host_only,
+        static_cast<iree_hal_amd_gpu_profile_operation_t*>(nullptr)}) {
+    for (uint32_t scopes = 0; scopes < 4; ++scopes) {
+      SCOPED_TRACE(scopes);
+      const uint32_t acquire =
+          (scopes & 1) ? IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM : 0;
+      const uint32_t release =
+          (scopes & 2) ? IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM : 0;
+      const uint32_t before_release =
+          scopes == 2 ? IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_AGENT : 0;
+      const uint32_t after_acquire =
+          scopes == 1 ? IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_AGENT : 0;
+      const uint64_t first = queue_.producer.ring.reserved;
+      const uint64_t argument_begin = arguments_.end;
+      iree_hal_amd_gpu_aql_submission_t* submission = nullptr;
+      iree_status_t status = iree_ok_status();
+      ASSERT_EQ(iree_hal_amd_gpu_aql_publish(&queue_, &request_, 0, nullptr, {},
+                                             {}, acquire | before_release,
+                                             release | after_acquire, nullptr,
+                                             operation, &submission, &status),
+                IREE_HAL_AMD_GPU_AQL_PUBLISH_DONE);
+      IREE_ASSERT_OK(status);
+      ASSERT_EQ(iree_hal_amd_gpu_aql_publish_run(&queue_), AMDF_STATUS_OK);
+      const uint32_t expected_acquire =
+          queue_.producer.argument_cache_isolated &&
+                  (!layout_.byte_length || argument_begin)
+              ? iree_max(acquire, IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_AGENT)
+              : IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM;
+      const uint64_t dispatch_position = first + (before_release ? 1 : 0);
+      if (before_release) {
+        EXPECT_EQ(packets_[first].words[0],
+                  IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND |
+                      IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED | before_release);
+      }
+      EXPECT_EQ(packets_[dispatch_position].words[0],
+                (1u << 16) | IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH |
+                    IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED | expected_acquire |
+                    release);
+      EXPECT_EQ(
+          queue_.producer.ring.reserved,
+          dispatch_position + (operation == &sampled || after_acquire ? 2 : 1));
+      if (operation == &sampled) {
+        EXPECT_EQ(
+            PacketAddress(dispatch_position, 14),
+            sample_generation_.address + scopes * sizeof(sample_values_[0]));
+      }
+      if (operation == &sampled || after_acquire) {
+        EXPECT_EQ(packets_[dispatch_position + 1].words[0],
+                  IREE_HAL_AMD_GPU_AQL_HEADER_BARRIER_AND |
+                      IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED | after_acquire);
+      }
     }
   }
 }
@@ -981,13 +1070,9 @@ TEST_P(AqlPublicationTest, FullSamplesLeaveLaunchArgumentsAvailable) {
   layout_.byte_length = constants.size();
   request_.constants =
       iree_make_const_byte_span(constants.data(), constants.size());
-  iree_hal_amd_gpu_aql_signal_t sample = {};
-  iree_hal_amd_gpu_byte_storage_t generation = {};
-  generation.memory.contents = iree_make_byte_span(&sample, sizeof(sample));
-  generation.address = 0xABCD00009000;
-  generation.capacity = sizeof(sample);
-  iree_hal_amd_gpu_byte_storage_pool_t samples = {.current = &generation};
-  queue_.samples = &samples;
+  PrepareSamples(1);
+  const auto& sample = sample_values_[0];
+  const auto& generation = sample_generation_;
   iree_hal_amd_gpu_aql_submission_t* submission = nullptr;
   iree_status_t status = iree_ok_status();
   ASSERT_EQ(
