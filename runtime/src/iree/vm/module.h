@@ -14,6 +14,7 @@
 #include "iree/vm/execution.h"
 #include "iree/vm/ref.h"
 #include "iree/vm/scalar.h"
+#include "iree/vm/span.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,7 +55,38 @@ enum iree_vm_module_signature_type_kind_e {
   IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR = 0x0101,
   // Module-local callable type named by |type_ordinal|.
   IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION = 0x0200,
+  // Modifier for a contiguous borrowed range of the scalar, ref, or ptr kind.
+  // A span occupies two aligned value cells and cannot escape or be returned.
+  IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN = 0x0400,
+  // Span access bounds. An unqualified span permits reads and writes.
+  IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY = 0x0800,
+  IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_WRITE_ONLY = 0x1000,
+  IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_NO_ACCESS = 0x1800,
 };
+
+static inline bool iree_vm_module_signature_type_kind_is_span(
+    iree_vm_module_signature_type_kind_t kind) {
+  return (kind & IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN) != 0;
+}
+
+static inline iree_vm_module_signature_type_kind_t
+iree_vm_module_signature_element_kind(
+    iree_vm_module_signature_type_kind_t kind) {
+  return kind & ~(IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
+                  IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_NO_ACCESS);
+}
+
+static inline iree_vm_span_access_t iree_vm_module_signature_span_access(
+    iree_vm_module_signature_type_kind_t kind) {
+  const uint16_t bound =
+      kind & IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_NO_ACCESS;
+  return bound == 0 ? IREE_VM_SPAN_ACCESS_READ_WRITE
+         : bound == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY
+             ? IREE_VM_SPAN_ACCESS_READ
+         : bound == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_WRITE_ONLY
+             ? IREE_VM_SPAN_ACCESS_WRITE
+             : IREE_VM_SPAN_ACCESS_NONE;
+}
 
 // Returns whether |kind| uses the managed-ref bank. Declared ownership is part
 // of callable identity, independently of the physical carrier's ownership tag.
@@ -64,8 +96,15 @@ static inline bool iree_vm_module_signature_type_kind_is_ref(
          kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR;
 }
 
+// Includes references nested in spans, independently of the transport bank.
+static inline bool iree_vm_module_signature_type_kind_has_ref_type(
+    iree_vm_module_signature_type_kind_t kind) {
+  return iree_vm_module_signature_type_kind_is_ref(
+      iree_vm_module_signature_element_kind(kind));
+}
+
 typedef struct iree_vm_module_signature_type_t {
-  // Scalar ID, REF, PTR, or FUNCTION.
+  // Scalar ID, REF, PTR, FUNCTION, or SPAN combined with its element kind.
   iree_vm_module_signature_type_kind_t kind;
   // Module-local ref/callable ordinal, or zero for a scalar.
   uint16_t type_ordinal;
@@ -81,7 +120,7 @@ typedef struct iree_vm_module_signature_side_t {
   const iree_vm_module_signature_type_t* data;
   // Number of signature fields in |data|.
   uint16_t count;
-  // Number of fields carried in the value bank.
+  // Number of value cells, including span pairs and their alignment padding.
   uint16_t value_count;
   // Number of fields carried in the ref bank.
   uint16_t ref_count;

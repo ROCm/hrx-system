@@ -72,7 +72,7 @@ vm.module core(0.0) {
   }
 
   section functions alignment(8) {
-    func @function0 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function0 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       %r1 = ref.copy %r0
@@ -81,7 +81,7 @@ vm.module core(0.0) {
       control.call @import0 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function1 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 1, local_functions = 0) {
+    func @function1 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 1, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       ref.stack.store.move %r0, #r0
@@ -91,7 +91,7 @@ vm.module core(0.0) {
       control.call @import0 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function2 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 1, local_functions = 0) {
+    func @function2 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 1, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       ref.stack.store.move %r1, #r0
@@ -101,7 +101,7 @@ vm.module core(0.0) {
       control.call @import0 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function3 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function3 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       %r1 = ref.retain %r0
@@ -109,7 +109,7 @@ vm.module core(0.0) {
       control.call @import0 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function4 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 4, function_registers = 0, local_refs = 1, local_functions = 0) {
+    func @function4 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 4, function_registers = 0, local_refs = 1, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       %r1 = ref.copy %r0
@@ -120,7 +120,7 @@ vm.module core(0.0) {
       %r3 = ref.null
       control.fail aborted, %r3
     }
-    func @function5 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function5 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       %r1 = ref.copy %r0
@@ -128,7 +128,7 @@ vm.module core(0.0) {
       %r0 = ref.move %r1
       control.return
     }
-    func @function6 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function6 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       %r1 = ref.borrow %r0
@@ -136,14 +136,14 @@ vm.module core(0.0) {
       control.call @import0 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function7 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function7 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       %r1 = ref.move %r0
       %r0 = ref.borrow %r1
       control.return
     }
-    func @function8 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 1, local_functions = 0) {
+    func @function8 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 1, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       ref.stack.store.move %r0, #r0
@@ -153,7 +153,7 @@ vm.module core(0.0) {
       control.call @import0 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function9 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 1, local_functions = 0) {
+    func @function9 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 1, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       ref.stack.store.move %r1, #r0
@@ -163,7 +163,7 @@ vm.module core(0.0) {
       control.call @import0 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function10 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0) {
+    func @function10 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       ref.stack.store.indexed.move %r0, %v0
@@ -173,7 +173,7 @@ vm.module core(0.0) {
       control.call @import0 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function11 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0) {
+    func @function11 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       ref.stack.store.indexed.move %r1, %v0
@@ -183,7 +183,7 @@ vm.module core(0.0) {
       control.call @import0 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function12 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0) {
+    func @function12 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       ref.stack.store.indexed.move %r0, %v0
@@ -193,7 +193,7 @@ vm.module core(0.0) {
       control.call @import0 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function13 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0) {
+    func @function13 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       ref.stack.store.indexed.move %r1, %v0
@@ -203,7 +203,7 @@ vm.module core(0.0) {
       control.call @import0 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function14 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0) {
+    func @function14 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       ref.stack.store.indexed.move %r0, %v0
@@ -213,7 +213,7 @@ vm.module core(0.0) {
       control.call @import0 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function15 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0) {
+    func @function15 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       ref.stack.store.indexed.move %r1, %v0
@@ -223,7 +223,7 @@ vm.module core(0.0) {
       control.call @import0 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function16 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0) {
+    func @function16 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       ref.stack.store.indexed.move %r0, %v0
@@ -233,7 +233,7 @@ vm.module core(0.0) {
       control.call @import0 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function17 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0) {
+    func @function17 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       ref.stack.store.indexed.move %r1, %v0

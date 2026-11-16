@@ -53,12 +53,12 @@ vm.module core(0.0) {
   }
 
   section functions alignment(8) {
-    func @function0 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 1, ref_registers = 1, function_registers = 1, local_refs = 0, local_functions = 0) {
+    func @function0 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 1, ref_registers = 1, function_registers = 1, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       control.return
     }
-    func @function1 : @callable2 flags([yieldable, has_call]) frame(local_bytes = 64, value_registers = 16, ref_registers = 16, function_registers = 16, local_refs = 1, local_functions = 1) {
+    func @function1 : @callable2 flags([yieldable, has_call]) frame(local_bytes = 64, value_registers = 16, ref_registers = 16, function_registers = 16, local_refs = 1, local_functions = 1, call_values = 0) {
       switch_targets {
         @switch_target0 = ^bb0
       }

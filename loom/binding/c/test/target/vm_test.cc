@@ -121,7 +121,7 @@ TEST(TargetVmTest, ProfileRetainsProviderFromComposedEnvironment) {
   EXPECT_EQ(provider->profile_type,
             loomc_target_profile_get_interop_view(profile.get())->type);
   EXPECT_EQ(provider->view_boundary_carrier,
-            LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BUFFER_OFFSET);
+            LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BORROWED_DIRECT);
 }
 
 TEST(TargetVmTest, CompilesAndEmitsBytecodeModule) {

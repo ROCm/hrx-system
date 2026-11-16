@@ -31,7 +31,7 @@ vm.module core(0.0) {
   }
 
   section functions alignment(8) {
-    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 4, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 4, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       %v3 = constant.s16 64
@@ -85,7 +85,7 @@ vm.module core(0.0) {
   }
 
   section functions alignment(8) {
-    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 3, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 3, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       buffer.atomic.reduce %r0, %v0, %v1 {carrier = i64, kind = add.integer, ordering = release, scope = system}
@@ -171,7 +171,7 @@ vm.module core(0.0) {
   }
 
   section functions alignment(8) {
-    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       %r0 = buffer.rodata.load @rodata0

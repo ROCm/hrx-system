@@ -1640,7 +1640,18 @@ BoundSignature Functions::bind_callable_signature(
     argument_count += receiver_argument_count;
   }
   size_t indirect_parameter_index = 0;
+  struct ParameterAccessRange {
+    // First projected High argument belonging to the source parameter.
+    size_t first;
+    // Number of projected High arguments belonging to the source parameter.
+    size_t count;
+    // Admitted source bound and its diagnostic location.
+    const ParameterContract* contract;
+  };
+  std::vector<ParameterAccessRange> access_ranges;
+  const auto parameter_contracts = parameter_contracts_.get(symbol);
   for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
+    const size_t first_argument = argument_count;
     auto* parameter = parameters[ordinal];
     const bool is_indirect =
         indirect_parameter_index < indirect_parameters.size() &&
@@ -1672,6 +1683,11 @@ BoundSignature Functions::bind_callable_signature(
       argument_count += types.partition(value_type, source).component_count;
     }
     indirect_parameter_index += is_indirect;
+    if (!parameter_contracts.empty() &&
+        parameter_contracts[ordinal].access_source) {
+      access_ranges.push_back({first_argument, argument_count - first_argument,
+                               &parameter_contracts[ordinal]});
+    }
   }
   size_t ordinary_result_count = 0;
   if (has_ordinary_result) {
@@ -1719,6 +1735,24 @@ BoundSignature Functions::bind_callable_signature(
       types, sources, source, builder,
       has_predicates ? SignatureIdentityRequirement::Required
                      : SignatureIdentityRequirement::DependentTypes);
+  if (!access_ranges.empty()) {
+    callable.signature_flags.resize(callable.types.size(), 0);
+    for (const auto& range : access_ranges) {
+      bool has_storage = false;
+      for (size_t i = range.first; i < range.first + range.count; ++i) {
+        if (loom_type_is_buffer(callable.types[i]) ||
+            loom_type_is_view(callable.types[i])) {
+          callable.signature_flags[i] = range.contract->access;
+          has_storage = true;
+        }
+      }
+      if (!has_storage) {
+        diagnostics_.reject(
+            unit_, range.contract->access_source,
+            "access requires a parameter containing buffer or view storage");
+      }
+    }
+  }
   arguments.assign(callable.types.begin(),
                    callable.types.begin() + argument_count);
   results.assign(callable.types.begin() + argument_count, callable.types.end());
@@ -1871,6 +1905,9 @@ void Functions::build_declarations(Types& types, Locations& locations,
     const loom_attribute_t source_signature = build_c_source_signature(
         unit_, diagnostics_, module_, symbol, source, types);
     loom_func_decl_build_flags_t flags = 0;
+    if (!bound_signature.signature_flags.empty()) {
+      flags |= LOOM_FUNC_DECL_BUILD_FLAG_HAS_SIGNATURE_FLAGS;
+    }
     loom_string_id_t import_module = LOOM_STRING_ID_INVALID;
     loom_string_id_t import_symbol = LOOM_STRING_ID_INVALID;
     if (const auto* import = imports_.lookup(symbol)) {
@@ -1913,9 +1950,10 @@ void Functions::build_declarations(Types& types, Locations& locations,
         source_signature, /*abi=*/0, {}, LOOM_STRING_ID_INVALID, {},
         callees_.at({symbol->canonical(), ImplicitObjectABI::None}),
         arguments.data(), arguments.size(),
-        /*signature_flags=*/iree_const_byte_span_empty(), results.data(),
-        results.size(), nullptr, 0, predicates.data(), predicates.size(),
-        locations.get(source), &op));
+        iree_make_const_byte_span(bound_signature.signature_flags.data(),
+                                  bound_signature.signature_flags.size()),
+        results.data(), results.size(), nullptr, 0, predicates.data(),
+        predicates.size(), locations.get(source), &op));
   }
 }
 
@@ -1980,6 +2018,16 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
   std::optional<LaunchConfiguration> launch_configuration;
   BoundSignature configuration_signature;
   BoundSignature callable_signature;
+  if (kernel || command_program || pipeline || template_definition ||
+      check_case || check_scenario) {
+    for (const auto& contract : parameter_contracts_.get(symbol)) {
+      if (contract.access_source) {
+        diagnostics_.reject(
+            unit_, contract.access_source,
+            "access bounds require an ordinary callable signature");
+      }
+    }
+  }
   BoundStagedSignature staged_signature;
   if (kernel) {
     for (auto* parameter : parameters) {
@@ -2268,7 +2316,10 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
             (loom_symbol_ref_is_valid(target)
                  ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_TARGET
                  : 0) |
-            (predicates.empty() ? 0 : LOOM_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES),
+            (predicates.empty() ? 0 : LOOM_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES) |
+            (callable_signature.signature_flags.empty()
+                 ? 0
+                 : LOOM_FUNC_DEF_BUILD_FLAG_HAS_SIGNATURE_FLAGS),
         exported_.contains(symbol) ? LOOM_FUNC_VISIBILITY_PUBLIC : 0,
         link_once ? LOOM_SYMBOL_LINKAGE_LINK_ONCE : 0,
         annotated(symbol, "retain") ? LOOM_FUNC_RETAIN_RETAIN : 0,
@@ -2277,9 +2328,10 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
         source_signature, 0, {}, 0, {},
         callees_.at({symbol->canonical(), instance.receiver_abi}),
         arguments.data(), arguments.size(),
-        /*signature_flags=*/iree_const_byte_span_empty(), results.data(),
-        results.size(), nullptr, 0, predicates.data(), predicates.size(),
-        locations.get(definition), &op));
+        iree_make_const_byte_span(callable_signature.signature_flags.data(),
+                                  callable_signature.signature_flags.size()),
+        results.data(), results.size(), nullptr, 0, predicates.data(),
+        predicates.size(), locations.get(definition), &op));
   }
   auto* region = check_case            ? loom_check_case_body(op)
                  : check_scenario      ? loom_check_scenario_body(op)

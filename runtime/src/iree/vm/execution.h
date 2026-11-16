@@ -177,6 +177,28 @@ static inline uint64_t iree_vm_call_value_argument_load(
                    .overflow[ordinal - IREE_VM_CALL_DIRECT_REGISTER_COUNT];
 }
 
+// Call-scoped borrowed native storage. Scalar elements use packed little-endian
+// bytes with no alignment promise; ref elements are native iree_vm_ref_t cells.
+// Range bounds are checked before entry. Native consumers check actual ref
+// element types while decoding their arguments, before dereferencing objects.
+// The callee must not retain this range, return it, or yield while using it.
+typedef struct iree_vm_call_span_t {
+  // Borrowed element storage, writable only when the import contract allows it.
+  void* data;
+  // Number of elements in data, not its byte length.
+  iree_host_size_t count;
+} iree_vm_call_span_t;
+
+// Loads a verified native span at its aligned physical value-bank ordinal.
+static inline iree_vm_call_span_t iree_vm_call_span_argument_load(
+    const iree_vm_call_packet_t* call, uint16_t ordinal) {
+  return (iree_vm_call_span_t){
+      .data = (void*)(uintptr_t)iree_vm_call_value_argument_load(call, ordinal),
+      .count =
+          (iree_host_size_t)iree_vm_call_value_argument_load(call, ordinal + 1),
+  };
+}
+
 // Stores exact bits to one valid physical value result.
 static inline void iree_vm_call_value_result_store(
     const iree_vm_call_packet_t* call, uint16_t ordinal, uint64_t value) {

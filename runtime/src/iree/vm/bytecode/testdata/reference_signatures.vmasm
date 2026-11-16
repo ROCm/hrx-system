@@ -39,29 +39,29 @@ vm.module core(0.0) {
   }
 
   section functions alignment(8) {
-    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       control.return
     }
-    func @function1 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function1 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       control.return
     }
-    func @function2 : @callable1 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function2 : @callable1 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       control.call @function1 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function3 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 1, local_refs = 0, local_functions = 0) {
+    func @function3 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 1, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       control.call.indirect %f0, @callable1 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function4 : @callable2 flags([yieldable]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function4 : @callable2 flags([yieldable]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       control.yield.s32 ^bb1
@@ -69,7 +69,7 @@ vm.module core(0.0) {
       control.block
       control.return
     }
-    func @function5 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function5 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       control.fail cancelled, %r0

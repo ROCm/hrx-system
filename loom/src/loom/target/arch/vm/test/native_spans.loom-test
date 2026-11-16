@@ -1,0 +1,505 @@
+// Source-owned arrays reach a native call as borrowed contiguous ranges.
+// RUN: emit vm-object-lifetime borrowed-argument
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "read_spans") target(@vm) @consume(%count: index, %objects: view<[%count]xptr<@Object>> {access = read}, %values: view<[%count]xi64> {access = read}) -> (i64)
+
+func.decl import("lifetime", "event") target(@vm) @event(%value: i32)
+
+func.def public target(@vm) @run(%object: ptr<@Object>) {
+  %value = scalar.constant 24 : i64
+  %objects = view.alloca<private> : view<4xptr<@Object>>
+  %values = view.alloca<private> : view<4xi64>
+  view.store %object, %objects[1] : ptr<@Object>, view<4xptr<@Object>>
+  view.store %value, %values[1] : i64, view<4xi64>
+  %empty = ref.null : ptr<@Object>
+  view.store %empty, %objects[2] : ptr<@Object>, view<4xptr<@Object>>
+  %other = scalar.constant 17 : i64
+  view.store %other, %values[2] : i64, view<4xi64>
+  %c2 = index.constant 2 : index
+  %object_slice = view.subview %objects[1] : view<4xptr<@Object>> -> view<[%c2]xptr<@Object>>
+  %value_slice = view.subview %values[1] : view<4xi64> -> view<[%c2]xi64>
+  %result = func.call @consume(%c2, %object_slice, %value_slice) : (index, view<[%c2]xptr<@Object>>, view<[%c2]xi64>) -> (i64)
+  %word = scalar.trunci %result : i64 to i32
+  func.call @event(%word) : (i32)
+  func.return
+}
+
+
+// ----
+create 1
+span_count 2
+maximum_references 1
+event 42
+OK 1
+destroy 1
+retired 0
+
+// ====
+
+// RUN: emit vm-object-lifetime borrowed-argument
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "read_spans") target(@vm) @read(%count: index, %objects: view<[%count]xptr<@Object>> {access = read}, %values: view<[%count]xi64> {access = read}) -> (i64)
+
+func.decl import("lifetime", "write_spans") target(@vm) @write(%count: index, %objects: view<[%count]xptr<@Object>> {access = read}, %values: view<[%count]xi64> {access = read_write}) -> (i64)
+
+func.decl import("lifetime", "event") target(@vm) @event(%value: i32)
+
+func.def public target(@vm) @run(%object: ptr<@Object>) {
+  %count = index.constant 257 : index
+  %objects = view.alloca<private> : view<259xptr<@Object>>
+  %values = view.alloca<private> : view<259xi64>
+  %sentinel = scalar.constant 12345 : i64
+  view.store %sentinel, %values[0] : i64, view<259xi64>
+  view.store %sentinel, %values[258] : i64, view<259xi64>
+  %object_slice = view.subview %objects[1] : view<259xptr<@Object>> -> view<[%count]xptr<@Object>>
+  %value_slice = view.subview %values[1] : view<259xi64> -> view<[%count]xi64>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%begin to %count step %step] {
+    %value = index.cast %i : index to i64
+    view.store %object, %object_slice[%i] : ptr<@Object>, view<[%count]xptr<@Object>>
+    view.store %value, %value_slice[%i] : i64, view<[%count]xi64>
+  }
+  %sum = func.call @write(%count, %object_slice, %value_slice) : (index, view<[%count]xptr<@Object>>, view<[%count]xi64>) -> (i64)
+  %sum_word = scalar.trunci %sum : i64 to i32
+  func.call @event(%sum_word) : (i32)
+  %again = func.call @read(%count, %object_slice, %value_slice) : (index, view<[%count]xptr<@Object>>, view<[%count]xi64>) -> (i64)
+  %again_word = scalar.trunci %again : i64 to i32
+  func.call @event(%again_word) : (i32)
+  %left = view.load %values[0] : view<259xi64> -> i64
+  %right = view.load %values[258] : view<259xi64> -> i64
+  %left_word = scalar.trunci %left : i64 to i32
+  %right_word = scalar.trunci %right : i64 to i32
+  func.call @event(%left_word) : (i32)
+  func.call @event(%right_word) : (i32)
+  %last = view.load %values[257] : view<259xi64> -> i64
+  %last_word = scalar.trunci %last : i64 to i32
+  func.call @event(%last_word) : (i32)
+  func.return
+}
+
+// ----
+create 1
+span_count 257
+maximum_references 1
+event 33153
+span_count 257
+maximum_references 1
+event 33410
+event 12345
+event 12345
+event 257
+OK 1
+destroy 1
+retired 0
+
+// ====
+
+// The array owns the object after the creating SSA owner is explicitly released.
+// Calling with a ref span borrows the cells without retaining each element.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") target(@vm) @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "read_owners") target(@vm) @read(%count: index, %objects: view<1xref<@Object>> {access = read}, %values: view<1xi64> {access = read}) -> (i64)
+
+func.decl import("lifetime", "event") target(@vm) @event(%value: i32)
+
+func.def public target(@vm) @run() {
+  %objects = view.alloca<private> : view<1xref<@Object>>
+  %values = view.alloca<private> : view<1xi64>
+  %identity = scalar.constant 7 : i32
+  %owner, %unused = func.call @create(%identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  view.store %owner, %objects[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %owner : ref<@Object>
+  %value = scalar.constant 41 : i64
+  view.store %value, %values[0] : i64, view<1xi64>
+  %c1 = index.constant 1 : index
+  %sum = func.call @read(%c1, %objects, %values) : (index, view<1xref<@Object>>, view<1xi64>) -> (i64)
+  %word = scalar.trunci %sum : i64 to i32
+  func.call @event(%word) : (i32)
+  func.return
+}
+
+// ----
+create 7
+span_count 1
+maximum_references 1
+event 48
+destroy 7
+OK 0
+retired 0
+
+// ====
+
+// Zero-length slices may begin immediately past the end of an allocation.
+// RUN: emit vm-object-lifetime borrowed-argument
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "read_spans") target(@vm) @read(%count: index, %objects: view<0xptr<@Object>> {access = read}, %values: view<0xi64> {access = read}) -> (i64)
+
+func.def public target(@vm) @run(%object: ptr<@Object>) {
+  %objects = view.alloca<private> : view<1xptr<@Object>>
+  %values = view.alloca<private> : view<1xi64>
+  %c0 = index.constant 0 : index
+  %object_slice = view.subview %objects[1] : view<1xptr<@Object>> -> view<0xptr<@Object>>
+  %value_slice = view.subview %values[1] : view<1xi64> -> view<0xi64>
+  %sum = func.call @read(%c0, %object_slice, %value_slice) : (index, view<0xptr<@Object>>, view<0xi64>) -> (i64)
+  func.return
+}
+
+// ----
+create 1
+span_count 0
+maximum_references 0
+OK 1
+destroy 1
+retired 0
+
+// ====
+
+// A span pair after fifteen scalar arguments is aligned into overflow storage.
+// RUN: emit vm-object-lifetime borrowed-argument
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "read_wide_spans") target(@vm) @read(%count: index, %a1: i64, %a2: i64, %a3: i64, %a4: i64, %a5: i64, %a6: i64, %a7: i64, %a8: i64, %a9: i64, %a10: i64, %a11: i64, %a12: i64, %a13: i64, %a14: i64, %objects: view<1xptr<@Object>> {access = read}, %values: view<1xi64> {access = read}) -> (i64)
+
+func.decl import("lifetime", "event") target(@vm) @event(%value: i32)
+
+func.def public target(@vm) @run(%object: ptr<@Object>) {
+  %objects = view.alloca<private> : view<1xptr<@Object>>
+  %values = view.alloca<private> : view<1xi64>
+  view.store %object, %objects[0] : ptr<@Object>, view<1xptr<@Object>>
+  %value = scalar.constant 41 : i64
+  view.store %value, %values[0] : i64, view<1xi64>
+  %c1 = index.constant 1 : index
+  %a1 = scalar.constant 1 : i64
+  %a2 = scalar.constant 2 : i64
+  %a3 = scalar.constant 3 : i64
+  %a4 = scalar.constant 4 : i64
+  %a5 = scalar.constant 5 : i64
+  %a6 = scalar.constant 6 : i64
+  %a7 = scalar.constant 7 : i64
+  %a8 = scalar.constant 8 : i64
+  %a9 = scalar.constant 9 : i64
+  %a10 = scalar.constant 10 : i64
+  %a11 = scalar.constant 11 : i64
+  %a12 = scalar.constant 12 : i64
+  %a13 = scalar.constant 13 : i64
+  %a14 = scalar.constant 14 : i64
+  %sum = func.call @read(%c1, %a1, %a2, %a3, %a4, %a5, %a6, %a7, %a8, %a9, %a10, %a11, %a12, %a13, %a14, %objects, %values) : (index, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, view<1xptr<@Object>>, view<1xi64>) -> (i64)
+  %word = scalar.trunci %sum : i64 to i32
+  func.call @event(%word) : (i32)
+  func.return
+}
+
+// ----
+create 1
+span_count 1
+maximum_references 1
+event 42
+OK 1
+destroy 1
+retired 0
+
+// ====
+
+// Empty ranges in empty banks are legal.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>, read>>, %values: reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %c0 = constant.i64 0
+  %ref_offset = constant.i64 0
+  %ref_count = constant.i64 0
+  %scalar_offset = constant.i64 0
+  %scalar_count = constant.i64 0
+  %objects = concat(%ref_offset, %ref_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>, read>>
+  %values = concat(%scalar_offset, %scalar_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64, read>>
+  %sum = low.func.call @read(%c0, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>, read>>, reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
+  return
+}
+
+// ----
+span_count 0
+maximum_references 0
+OK 0
+retired 0
+
+// ====
+
+// A misaligned reference coordinate is rejected even for an empty range.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>, read>>, %values: reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %c0 = constant.i64 0
+  %ref_offset = constant.i64 1
+  %ref_count = constant.i64 0
+  %scalar_offset = constant.i64 0
+  %scalar_count = constant.i64 0
+  %objects = concat(%ref_offset, %ref_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>, read>>
+  %values = concat(%scalar_offset, %scalar_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64, read>>
+  %sum = low.func.call @read(%c0, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>, read>>, reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
+  return
+}
+
+// ----
+OUT_OF_RANGE 0
+retired 0
+
+// ====
+
+// A reference count cannot overflow range validation.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>, read>>, %values: reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %c0 = constant.i64 0
+  %ref_offset = constant.i64 0
+  %ref_count = constant.i64 -1
+  %scalar_offset = constant.i64 0
+  %scalar_count = constant.i64 0
+  %objects = concat(%ref_offset, %ref_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>, read>>
+  %values = concat(%scalar_offset, %scalar_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64, read>>
+  %sum = low.func.call @read(%c0, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>, read>>, reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
+  return
+}
+
+// ----
+OUT_OF_RANGE 0
+retired 0
+
+// ====
+
+// A scalar coordinate cannot overflow range validation.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>, read>>, %values: reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %c0 = constant.i64 0
+  %ref_offset = constant.i64 0
+  %ref_count = constant.i64 0
+  %scalar_offset = constant.i64 -1
+  %scalar_count = constant.i64 0
+  %objects = concat(%ref_offset, %ref_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>, read>>
+  %values = concat(%scalar_offset, %scalar_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64, read>>
+  %sum = low.func.call @read(%c0, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>, read>>, reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
+  return
+}
+
+// ----
+OUT_OF_RANGE 0
+retired 0
+
+// ====
+
+// A scalar count cannot overflow range validation.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>, read>>, %values: reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %c0 = constant.i64 0
+  %ref_offset = constant.i64 0
+  %ref_count = constant.i64 0
+  %scalar_offset = constant.i64 0
+  %scalar_count = constant.i64 -1
+  %objects = concat(%ref_offset, %ref_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>, read>>
+  %values = concat(%scalar_offset, %scalar_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64, read>>
+  %sum = low.func.call @read(%c0, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>, read>>, reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
+  return
+}
+
+// ----
+OUT_OF_RANGE 0
+retired 0
+
+// ====
+
+// Zero-sized allocations require no backing cells.
+// RUN: emit vm-object-lifetime borrowed-argument
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "read_spans") target(@vm) @read(%count: index, %objects: view<0xptr<@Object>> {access = read}, %values: view<0xi64> {access = read}) -> (i64)
+
+func.def public target(@vm) @run(%object: ptr<@Object>) {
+  %objects = view.alloca<private> : view<0xptr<@Object>>
+  %values = view.alloca<private> : view<0xi64>
+  %c0 = index.constant 0 : index
+  %sum = func.call @read(%c0, %objects, %values) : (index, view<0xptr<@Object>>, view<0xi64>) -> (i64)
+  func.return
+}
+
+// ----
+create 1
+span_count 0
+maximum_references 0
+OK 1
+destroy 1
+retired 0
+
+// ====
+
+// Packed scalar ranges preserve their byte coordinates without imposing native
+// C alignment on the caller. Native code uses unaligned scalar accessors.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "read_spans") target(@vm) @read(%count: index, %objects: view<1xptr<@Object>> {access = read}, %values: view<1xi64, align(1)> {access = read}) -> (i64)
+
+func.decl import("lifetime", "event") target(@vm) @event(%value: i32)
+
+func.def public target(@vm) @run() {
+  %objects = view.alloca<private> : view<1xptr<@Object>>
+  %storage = view.alloca<private> : view<9xi8>
+  %bytes = view.subview %storage[1] : view<9xi8> -> view<8xi8>
+  %values = view.bitcast %bytes : view<8xi8> -> view<1xi64, align(1)>
+  %value = scalar.constant 42 : i64
+  view.store %value, %values[0] : i64, view<1xi64, align(1)>
+  %c1 = index.constant 1 : index
+  %sum = func.call @read(%c1, %objects, %values) : (index, view<1xptr<@Object>>, view<1xi64, align(1)>) -> (i64)
+  %word = scalar.trunci %sum : i64 to i32
+  func.call @event(%word) : (i32)
+  func.return
+}
+
+// ----
+span_count 1
+maximum_references 0
+event 42
+OK 0
+retired 0
+
+// ====
+
+// A malicious packet can advertise a different element type from the actual
+// ref cell. The native decoder rejects it before dereferencing the object.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>, read>>, %values: reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %ref_storage = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  %scalar_storage = storage {byte_alignment = 8, byte_length = 8} : low.storage<stack>
+  %length = constant.i64 8
+  %buffer = buffer.allocate %length, 3 : reg<vm.ref : buffer>
+  low.spill %buffer, %ref_storage : reg<vm.ref : buffer>, low.storage<private>
+  %c0 = constant.i64 0
+  low.spill %c0, %scalar_storage : reg<vm.value : i64>, low.storage<stack>
+  %c1 = constant.i64 1
+  %objects = concat(%c0, %c1) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>, read>>
+  %values = concat(%c0, %c1) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64, read>>
+  %sum = low.func.call @read(%c1, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>, read>>, reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
+  return
+}
+
+// ----
+INVALID_ARGUMENT 0
+retired 0
+
+// ====
+
+// Every byte-addressable scalar element kind crosses the same span ABI.
+// Index and offset retain their 64-bit target representation.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+func.decl import("lifetime", "scalar_spans") target(@vm) @consume(%values0: view<2xi8> {access = read}, %values1: view<2xi16> {access = read}, %values2: view<2xi32> {access = read}, %values3: view<2xi64> {access = read}, %values4: view<2xf8E4M3> {access = read}, %values5: view<2xf8E5M2> {access = read}, %values6: view<2xf16> {access = read}, %values7: view<2xbf16> {access = read}, %values8: view<2xf32> {access = read}, %values9: view<2xf64> {access = read}, %values10: view<2xindex> {access = read}, %values11: view<2xoffset> {access = read})
+
+func.def public target(@vm) @run() {
+  %values0 = view.alloca<private> : view<2xi8>
+  %value0 = scalar.constant -23 : i8
+  view.store %value0, %values0[0] : i8, view<2xi8>
+  view.store %value0, %values0[1] : i8, view<2xi8>
+  %values1 = view.alloca<private> : view<2xi16>
+  %value1 = scalar.constant -12345 : i16
+  view.store %value1, %values1[0] : i16, view<2xi16>
+  view.store %value1, %values1[1] : i16, view<2xi16>
+  %values2 = view.alloca<private> : view<2xi32>
+  %value2 = scalar.constant -2345678 : i32
+  view.store %value2, %values2[0] : i32, view<2xi32>
+  view.store %value2, %values2[1] : i32, view<2xi32>
+  %values3 = view.alloca<private> : view<2xi64>
+  %value3 = scalar.constant 12345 : i64
+  view.store %value3, %values3[0] : i64, view<2xi64>
+  view.store %value3, %values3[1] : i64, view<2xi64>
+  %values4 = view.alloca<private> : view<2xf8E4M3>
+  %value4 = scalar.constant 1.5 : f8E4M3
+  view.store %value4, %values4[0] : f8E4M3, view<2xf8E4M3>
+  view.store %value4, %values4[1] : f8E4M3, view<2xf8E4M3>
+  %values5 = view.alloca<private> : view<2xf8E5M2>
+  %value5 = scalar.constant 1.5 : f8E5M2
+  view.store %value5, %values5[0] : f8E5M2, view<2xf8E5M2>
+  view.store %value5, %values5[1] : f8E5M2, view<2xf8E5M2>
+  %values6 = view.alloca<private> : view<2xf16>
+  %value6 = scalar.constant 1.5 : f16
+  view.store %value6, %values6[0] : f16, view<2xf16>
+  view.store %value6, %values6[1] : f16, view<2xf16>
+  %values7 = view.alloca<private> : view<2xbf16>
+  %value7 = scalar.constant 1.5 : bf16
+  view.store %value7, %values7[0] : bf16, view<2xbf16>
+  view.store %value7, %values7[1] : bf16, view<2xbf16>
+  %values8 = view.alloca<private> : view<2xf32>
+  %value8 = scalar.constant 1.5 : f32
+  view.store %value8, %values8[0] : f32, view<2xf32>
+  view.store %value8, %values8[1] : f32, view<2xf32>
+  %values9 = view.alloca<private> : view<2xf64>
+  %value9 = scalar.constant 1.5 : f64
+  view.store %value9, %values9[0] : f64, view<2xf64>
+  view.store %value9, %values9[1] : f64, view<2xf64>
+  %values10 = view.alloca<private> : view<2xindex>
+  %value10 = index.constant 739 : index
+  view.store %value10, %values10[0] : index, view<2xindex>
+  view.store %value10, %values10[1] : index, view<2xindex>
+  %values11 = view.alloca<private> : view<2xoffset>
+  %value11 = index.constant 90210 : offset
+  view.store %value11, %values11[0] : offset, view<2xoffset>
+  view.store %value11, %values11[1] : offset, view<2xoffset>
+  func.call @consume(%values0, %values1, %values2, %values3, %values4, %values5, %values6, %values7, %values8, %values9, %values10, %values11) : (view<2xi8>, view<2xi16>, view<2xi32>, view<2xi64>, view<2xf8E4M3>, view<2xf8E5M2>, view<2xf16>, view<2xbf16>, view<2xf32>, view<2xf64>, view<2xindex>, view<2xoffset>)
+  func.return
+}
+
+// ----
+scalar_spans 12
+OK 0
+retired 0

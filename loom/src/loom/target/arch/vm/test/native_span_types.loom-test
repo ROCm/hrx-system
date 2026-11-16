@@ -1,0 +1,32 @@
+// RUN: verify
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+// The semantic type owns its register layout. Both construction and projection
+// verify without a VM-specific exception in the structural Low operations.
+low.func.def target<vm.core>(@vm) abi(vm_function) @roundtrip(%offset: reg<vm.value : i64>, %count: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>) asm {
+  %span = concat(%offset, %count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>>>
+  %address = slice %span[0] : reg<vm.value x2 : vm.span<ptr<@Object>>> -> reg<vm.value : i64>
+  %length = slice %span[1] : reg<vm.value x2 : vm.span<ptr<@Object>>> -> reg<vm.value : i64>
+  return %address, %length
+}
+
+// ====
+
+vm.target<core> @vm
+low.func.def target<vm.core>(@vm) abi(vm_function) @wrong_component(%offset: reg<vm.value : i64>, %count: reg<vm.value : f64>) asm {
+  // ERROR@+1: TYPE/017 {op_name="low.concat", source_type="reg<vm.value : f64>", result_type="reg<vm.value x2 : vm.span<i64>>"}
+  %span = concat(%offset, %count) : (reg<vm.value : i64>, reg<vm.value : f64>) -> reg<vm.value x2 : vm.span<i64>>
+  return
+}
+
+// ====
+
+vm.target<core> @vm
+low.func.def target<vm.core>(@vm) abi(vm_function) @wrong_projection(%offset: reg<vm.value : i64>, %count: reg<vm.value : i64>) asm {
+  %span = concat(%offset, %count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64>>
+  // ERROR@+1: TYPE/017 {op_name="low.slice", source_type="reg<vm.value x2 : vm.span<i64>>", result_type="reg<vm.value : f64>"}
+  %value = slice %span[0] : reg<vm.value x2 : vm.span<i64>> -> reg<vm.value : f64>
+  return
+}

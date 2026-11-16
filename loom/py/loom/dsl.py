@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple, cast
 from loom import constraint_validation
 from loom.assembly import AssemblyFormat, FormatElement, OptionalGroup
 from loom.errors import ErrorDef
+from loom.scalar_type import SCALAR_TYPE_SPELLINGS
 
 if TYPE_CHECKING:
     from loom.assembly import BlockArgs, FuncArgs
@@ -4336,6 +4337,11 @@ class TypeDef:
     ``reference_ownership`` and one required symbol parameter. Its constructor
     takes the owning module to resolve that declaration's external key.
 
+    An aggregate may declare ``register_units`` as the exact scalar semantics
+    of its ordered register units. Structural Low concat/slice verification
+    uses this layout to construct and project the value without semantic casts.
+    The layout is independent of the type's parameters and owns no runtime data.
+
     Scalar types (f32, i32, index) are NOT TypeDefs — they are
     keywords handled by a fixed name table. TypeDefs are for
     structured types with angle-bracket syntax.
@@ -4380,6 +4386,7 @@ class TypeDef:
     contracts: tuple[ContractFamily, ...] = ()
     reference: ReferenceTypeKey | None = None
     reference_ownership: int | None = None
+    register_units: tuple[str, ...] = ()
 
     def __init__(
         self,
@@ -4395,9 +4402,20 @@ class TypeDef:
         contracts: list[ContractFamily] | tuple[ContractFamily, ...] = (),
         reference: ReferenceTypeKey | None = None,
         reference_ownership: int | None = None,
+        register_units: tuple[str, ...] = (),
     ) -> None:
         frozen_params = tuple(params)
         frozen_format = tuple(format)
+        if len(register_units) > 65535 or any(
+            unit not in SCALAR_TYPE_SPELLINGS for unit in register_units
+        ):
+            raise ValueError(f"TypeDef '{name}': register units require scalar types")
+        if register_units and (
+            reference is not None or reference_ownership is not None
+        ):
+            raise ValueError(
+                f"TypeDef '{name}': managed references cannot be register aggregates"
+            )
         if semantic is None:
             semantic = (
                 TypeSemantic.MANAGED_REFERENCE
@@ -4539,6 +4557,7 @@ class TypeDef:
         object.__setattr__(self, "contracts", tuple(contracts))
         object.__setattr__(self, "reference", reference)
         object.__setattr__(self, "reference_ownership", reference_ownership)
+        object.__setattr__(self, "register_units", tuple(register_units))
 
     def __repr__(self) -> str:
         return f"TypeDef({self.name!r})"

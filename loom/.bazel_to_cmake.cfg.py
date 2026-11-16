@@ -147,9 +147,6 @@ _LOOM_CONFIG_CMAKE_OPTIONS = {
 }
 _LOOM_CONFIG_CMAKE_OPTIONS.update(_loom_amdgpu_config_cmake_options())
 
-_GENERATED_ROOTPATH_PATTERN = re.compile(r"\$\(rootpath ([^)]+)\)")
-_GENERATED_LOCATION_PATTERN = re.compile(r"\$\(location ([^)]+)\)")
-
 
 class LoomBuildFileFunctions(
     LoomCorpusBuildFileFunctions,
@@ -884,26 +881,15 @@ class LoomBuildFileFunctions(
             return repo_name, f"{package}/{filename}"
         return repo_name, filename
 
-    def _convert_generated_file_label(self, label):
-        generated_external_file = self._loom_generated_external_files.get(label)
-        if generated_external_file is not None:
-            return generated_external_file
-        if label.startswith("@"):
-            repo_name, filename = self._parse_external_file_label(label)
-            try:
-                source_dir = self._loom_generated_external_repositories[repo_name]
-            except KeyError as exc:
-                raise ValueError(
-                    f"Generated input {label} has no CMake source mapping for "
-                    f"external repo '{repo_name}'"
-                ) from exc
-            return f"{source_dir}/{filename}"
-        return self._normalize_label(label)
-
     def _cmake_location_paths(self, label):
         generated_external_file = self._loom_generated_external_files.get(label)
         if generated_external_file is not None:
             return [generated_external_file]
+        if label.startswith("@"):
+            repo_name, filename = self._parse_external_file_label(label)
+            source_dir = self._loom_generated_external_repositories.get(repo_name)
+            if source_dir is not None:
+                return [f"{source_dir}/{filename}"]
         return super()._cmake_location_paths(label)
 
     def loom_spirv_registry_sources(
@@ -932,39 +918,6 @@ class LoomBuildFileFunctions(
             "  _LOOM_VULKAN_XML_REGISTRY\n"
             ")\n\n",
             target_compatible_with,
-        )
-
-    def _convert_generated_arg(self, arg):
-        def replace_rootpath(match):
-            return self._convert_generated_file_label(match.group(1))
-
-        def replace_external_location(match):
-            label = match.group(1)
-            if label.startswith("@"):
-                return self._convert_generated_file_label(label)
-            return match.group(0)
-
-        arg = _GENERATED_ROOTPATH_PATTERN.sub(replace_rootpath, arg)
-        return _GENERATED_LOCATION_PATTERN.sub(replace_external_location, arg)
-
-    def _convert_generated_args(self, args):
-        def convert(args):
-            converted_args = []
-            for arg in args or []:
-                arg = self._convert_generated_arg(arg)
-                converted_args.extend(self._convert_location_arg(arg))
-            return converted_args
-
-        return self._map_configurable_list(args, convert)
-
-    def _convert_generated_inputs(self, inputs):
-        return self._map_configurable_list(
-            inputs,
-            lambda labels: list(
-                dict.fromkeys(
-                    self._convert_generated_file_label(label) for label in labels or []
-                )
-            ),
         )
 
     def loom_low_descriptor_data_archive(

@@ -16,6 +16,7 @@
 #include "iree/vm/bytecode/interpreter_frame.h"
 #include "iree/vm/bytecode/interpreter_integer.h"
 #include "iree/vm/bytecode/interpreter_memory.h"
+#include "iree/vm/bytecode/interpreter_span.h"
 #include "iree/vm/bytecode/interpreter_tables.inl"
 #include "iree/vm/bytecode/process.h"
 
@@ -68,6 +69,7 @@ static bool iree_vm_bytecode_function_is_scalar_leaf(
   return !iree_any_bit_set(function->flags_u16,
                            IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD |
                                IREE_VM_BYTECODE_FUNCTION_FLAG_HAS_CALL) &&
+         !iree_vm_bytecode_signature_has_span_arguments(signature) &&
          function->local_byte_length_u16 == 0 &&
          function->ref_register_count_u16 == 0 &&
          function->local_ref_count_u32 == 0 &&
@@ -99,6 +101,14 @@ static iree_vm_bytecode_execution_state_t* iree_vm_bytecode_map_execution_state(
       .local_functions =
           (iree_vm_function_ref_t*)(storage + layout.local_functions_offset),
       .local_bytes = storage + layout.local_bytes_offset,
+      .span_regions =
+          (iree_vm_bytecode_span_region_t*)(storage +
+                                            layout.span_regions_offset),
+      .span_region_capacity = layout.span_region_capacity,
+      .span_argument_values =
+          (uint64_t*)(storage + layout.span_argument_values_offset),
+      .span_buffers = (iree_vm_ref_t*)(storage + layout.span_buffers_offset),
+      .span_buffer_capacity = layout.span_buffer_capacity,
   };
   return state;
 }
@@ -1437,6 +1447,91 @@ iree_vm_bytecode_dispatch_ref_stack_discard_range: {
   IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_stack_discard_range_t);
 }
 
+iree_vm_bytecode_dispatch_span_from_buffer: {
+  const iree_vm_bytecode_span_from_buffer_t* record =
+      (const iree_vm_bytecode_span_from_buffer_t*)record_data;
+  iree_vm_buffer_t* buffer = NULL;
+  const iree_vm_ref_t source = refs[record->buffer_r8];
+  IREE_RETURN_IF_ERROR(
+      iree_vm_bytecode_buffer_check_deref(source, image->buffer_type, &buffer));
+  if (state->span_buffer_count == state->span_buffer_capacity) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "pending buffer spans exceed call scratch capacity");
+  }
+  const uint16_t index = state->span_buffer_count;
+  IREE_RETURN_IF_ERROR(
+      iree_vm_bytecode_ref_retain(&state->span_buffers[index], source));
+  ++state->span_buffer_count;
+  values[record->destination_v8] =
+      (uint64_t)(IREE_VM_BYTECODE_SPAN_BUFFER_REGION_BASE + index)
+      << IREE_VM_BYTECODE_SPAN_REGION_SHIFT;
+  IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_span_from_buffer_t);
+}
+
+iree_vm_bytecode_dispatch_span_load: {
+  const iree_vm_bytecode_span_load_t* record =
+      (const iree_vm_bytecode_span_load_t*)record_data;
+  void* data = NULL;
+  const iree_vm_bytecode_span_region_t* region = NULL;
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_span_resolve(
+      state, values[record->address_v8],
+      iree_vm_bytecode_memory_access_length(record->format_u8), false,
+      IREE_VM_SPAN_ACCESS_READ, &data, &region));
+  iree_vm_bytecode_memory_load_lanes(record->format_u8, data,
+                                     values + record->destination_v8);
+  IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_span_load_t);
+}
+iree_vm_bytecode_dispatch_span_store: {
+  const iree_vm_bytecode_span_store_t* record =
+      (const iree_vm_bytecode_span_store_t*)record_data;
+  void* data = NULL;
+  const iree_vm_bytecode_span_region_t* region = NULL;
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_span_resolve(
+      state, values[record->address_v8],
+      iree_vm_bytecode_memory_access_length(record->format_u8), false,
+      IREE_VM_SPAN_ACCESS_WRITE, &data, &region));
+  iree_vm_bytecode_memory_store_lanes(record->format_u8,
+                                      values + record->source_v8, data);
+  IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_span_store_t);
+}
+iree_vm_bytecode_dispatch_span_ref_load: {
+  const iree_vm_bytecode_span_ref_load_t* record =
+      (const iree_vm_bytecode_span_ref_load_t*)record_data;
+  void* data = NULL;
+  const iree_vm_bytecode_span_region_t* region = NULL;
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_span_resolve(
+      state, values[record->address_v8], IREE_VM_SPAN_REF_STRIDE, true,
+      IREE_VM_SPAN_ACCESS_READ, &data, &region));
+  const iree_vm_ref_t source = *(const iree_vm_ref_t*)data;
+  if ((region->element_kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR &&
+       !(region->access & IREE_VM_SPAN_ACCESS_WRITE)) ||
+      iree_vm_ref_is_borrowed_only(source)) {
+    iree_vm_bytecode_ref_borrow(&refs[record->destination_r8], source);
+  } else {
+    IREE_RETURN_IF_ERROR(
+        iree_vm_bytecode_ref_retain(&refs[record->destination_r8], source));
+  }
+  IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_span_ref_load_t);
+}
+iree_vm_bytecode_dispatch_span_ref_store: {
+  const iree_vm_bytecode_span_ref_store_t* record =
+      (const iree_vm_bytecode_span_ref_store_t*)record_data;
+  void* data = NULL;
+  const iree_vm_bytecode_span_region_t* region = NULL;
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_span_resolve(
+      state, values[record->address_v8], IREE_VM_SPAN_REF_STRIDE, true,
+      IREE_VM_SPAN_ACCESS_WRITE, &data, &region));
+  const iree_vm_ref_t source = refs[record->source_r8];
+  if (source.object && iree_vm_ref_type(source) != region->ref_type) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "stored reference does not match the span element type");
+  }
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_ref_retain(data, source));
+  IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_span_ref_store_t);
+}
+
 iree_vm_bytecode_dispatch_buffer_allocate: {
   const iree_vm_bytecode_buffer_allocate_t* record =
       (const iree_vm_bytecode_buffer_allocate_t*)record_data;
@@ -1757,14 +1852,14 @@ iree_status_t iree_vm_bytecode_interpreter_start(
   }
 
   const iree_vm_bytecode_frame_layout_t layout =
-      iree_vm_bytecode_calculate_frame_layout(function);
+      iree_vm_bytecode_calculate_frame_layout(function, signature);
   iree_vm_frame_t* frame = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_invocation_push_frame(
       params, layout.frame, iree_vm_bytecode_frame_cleanup, &frame));
   iree_vm_bytecode_execution_state_t* state =
       iree_vm_bytecode_map_execution_state(frame, layout, params->call,
                                            program_counter);
-  iree_vm_bytecode_frame_initialize(function, signature, state);
+  iree_vm_bytecode_frame_initialize(image, function, signature, state);
   iree_status_t status = iree_vm_bytecode_dispatch(
       image, function, &params->execution, state, out_outcome);
   if (iree_status_is_ok(status) &&

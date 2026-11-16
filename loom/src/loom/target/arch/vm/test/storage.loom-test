@@ -38,12 +38,12 @@ vm.module core(0.0) {
   }
 
   section functions alignment(8) {
-    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 1, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 1, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       control.return
     }
-    func @function1 : @callable1 flags([has_call]) frame(local_bytes = 32, value_registers = 2, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function1 : @callable1 flags([has_call]) frame(local_bytes = 32, value_registers = 2, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       stack.store.i64 #v16, %v0.x1
@@ -101,7 +101,7 @@ vm.module core(0.0) {
   }
 
   section functions alignment(8) {
-    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 3, function_registers = 0, local_refs = 2, local_functions = 0) {
+    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 3, function_registers = 0, local_refs = 2, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       ref.stack.store.copy %r0, #r1
@@ -144,7 +144,7 @@ vm.module core(0.0) {
   }
 
   section functions alignment(8) {
-    func @function0 : @callable0 flags([]) frame(local_bytes = 8, value_registers = 1, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0) {
+    func @function0 : @callable0 flags([]) frame(local_bytes = 8, value_registers = 1, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
     ^bb0:
       control.block
       %v0 = constant.i32 0x00000000

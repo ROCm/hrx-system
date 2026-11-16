@@ -11,13 +11,16 @@
 
 #include "iree/io/vec_stream.h"
 #include "iree/vm/bytecode/wire/core.h"
+#include "iree/vm/module.h"
 #include "loom/ir/module.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/vm/descriptors/descriptors.h"
 #include "loom/target/arch/vm/function_plan.h"
+#include "loom/target/arch/vm/ops/type_builders.h"
 #include "loom/target/arch/vm/reference_plan.h"
 #include "loom/target/artifact_diagnostics.h"
+#include "loom/target/registers.h"
 
 // A signature is ordered by argument count/types then result count/types,
 // exactly as the wire callable table requires. Ordinals are assigned by
@@ -96,7 +99,8 @@ static int loom_vm_import_compare(const void* lhs_ptr, const void* rhs_ptr) {
   return (int)lhs->callable_ordinal - (int)rhs->callable_ordinal;
 }
 
-static bool loom_vm_signature_type(loom_type_t type, uint16_t* out_kind) {
+static bool loom_vm_signature_type(const loom_module_t* module,
+                                   loom_type_t type, uint16_t* out_kind) {
   // Logical scalar tags are stable, small, and independent of cell width.
   // Predicates cross the ABI as canonical zero/one i32 values.
   static const uint8_t kScalarKinds[LOOM_SCALAR_TYPE_COUNT_] = {
@@ -105,6 +109,8 @@ static bool loom_vm_signature_type(loom_type_t type, uint16_t* out_kind) {
       [LOOM_SCALAR_TYPE_I16] = IREE_VM_BYTECODE_SIGNATURE_KIND_I16,
       [LOOM_SCALAR_TYPE_I32] = IREE_VM_BYTECODE_SIGNATURE_KIND_I32,
       [LOOM_SCALAR_TYPE_I64] = IREE_VM_BYTECODE_SIGNATURE_KIND_I64,
+      [LOOM_SCALAR_TYPE_INDEX] = IREE_VM_BYTECODE_SIGNATURE_KIND_I64,
+      [LOOM_SCALAR_TYPE_OFFSET] = IREE_VM_BYTECODE_SIGNATURE_KIND_I64,
       [LOOM_SCALAR_TYPE_F8E4M3] = IREE_VM_BYTECODE_SIGNATURE_KIND_F8E4M3FN,
       [LOOM_SCALAR_TYPE_F8E5M2] = IREE_VM_BYTECODE_SIGNATURE_KIND_F8E5M2,
       [LOOM_SCALAR_TYPE_F16] = IREE_VM_BYTECODE_SIGNATURE_KIND_F16,
@@ -114,11 +120,31 @@ static bool loom_vm_signature_type(loom_type_t type, uint16_t* out_kind) {
   };
   const loom_type_t* value_type = loom_type_register_value_type(type);
   if (value_type) {
+    uint16_t modifier = 0;
+    loom_type_t element;
+    if (loom_vm_span_type_isa(*value_type)) {
+      if (loom_low_register_type_unit_count(type) != 2) {
+        return false;
+      }
+      modifier = IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN;
+      if (loom_vm_span_type_has_access(*value_type)) {
+        modifier |= (uint16_t)loom_vm_span_type_access(*value_type) << 11;
+      }
+      element = loom_type_table_get(
+          &module->types, loom_vm_span_type_element_type(*value_type));
+      value_type = &element;
+      if ((!loom_type_is_scalar(element) && !loom_type_is_reference(element)) ||
+          (loom_type_is_scalar(element) &&
+           loom_type_element_type(element) == LOOM_SCALAR_TYPE_I1)) {
+        return false;
+      }
+    }
     if (loom_type_is_reference(*value_type)) {
       *out_kind = loom_type_reference_ownership(*value_type) ==
                           LOOM_REFERENCE_OWNERSHIP_BORROWED
                       ? IREE_VM_BYTECODE_SIGNATURE_KIND_PTR
                       : IREE_VM_BYTECODE_SIGNATURE_KIND_REF;
+      *out_kind |= modifier;
       return true;
     }
     if (loom_type_is_buffer(*value_type) ||
@@ -131,7 +157,7 @@ static bool loom_vm_signature_type(loom_type_t type, uint16_t* out_kind) {
                              ? kScalarKinds[loom_type_element_type(*value_type)]
                              : 0;
     if (kind) {
-      *out_kind = kind;
+      *out_kind = kind | modifier;
       return true;
     }
   }
@@ -341,6 +367,8 @@ static iree_status_t loom_vm_program_resolve_signatures(
     const iree_diagnostic_emitter_t function_emitter =
         loom_diagnostic_export_scope_emitter(&scope);
     const uint32_t field_count = entry->argument_count + entry->results.count;
+    entry->signature.row.argument_count_u16 = entry->argument_count;
+    entry->signature.row.result_count_u16 = entry->results.count;
     for (uint32_t j = 0;
          j < field_count && iree_status_is_ok(status) && accepted; ++j) {
       const loom_value_id_t value =
@@ -349,22 +377,27 @@ static iree_status_t loom_vm_program_resolve_signatures(
               : entry->results.values[j - entry->argument_count];
       const loom_type_t type = loom_module_value_type(module, value);
       descriptors[j].type_ordinal_u16 = 0;
-      accepted = loom_vm_signature_type(type, &descriptors[j].kind_u16);
+      accepted = loom_vm_signature_type(module, type, &descriptors[j].kind_u16);
       if (!accepted) {
         status = loom_target_artifact_emit_requirement(
             function_emitter, entry->function.op, IREE_SV("VM"),
-            IREE_SV(
-                "signature fields carrying scalar or managed reference types"));
+            IREE_SV("signature fields carrying scalar, managed reference, or "
+                    "native span types"));
       } else {
         iree_vm_bytecode_v0_signature_row_t* row = &entry->signature.row;
         uint16_t* bank_count = NULL;
         const bool is_reference =
             loom_vm_signature_kind_is_reference(descriptors[j].kind_u16);
+        const bool is_span =
+            iree_vm_module_signature_type_kind_is_span(descriptors[j].kind_u16);
+        if (is_span && j >= entry->argument_count) {
+          accepted = false;
+          status = loom_target_artifact_emit_requirement(
+              function_emitter, entry->function.op, IREE_SV("VM"),
+              IREE_SV("borrowed spans used only as arguments"));
+          break;
+        }
         if (is_reference) {
-          status = loom_vm_reference_plan_bind(
-              references, module, *loom_type_register_value_type(type),
-              scratch_arena, function_emitter, entry->function.op, &accepted,
-              &descriptors[j].type_ordinal_u16);
           bank_count = j < entry->argument_count ? &row->argument_ref_count_u16
                                                  : &row->result_ref_count_u16;
         } else {
@@ -375,6 +408,28 @@ static iree_status_t loom_vm_program_resolve_signatures(
         const uint16_t argument_bank_count =
             is_reference ? row->argument_ref_count_u16
                          : row->argument_value_count_u16;
+        const uint32_t first_unit =
+            is_span ? (*bank_count + 1u) / 2u * 2u : *bank_count;
+        const uint32_t end_unit = first_unit + (is_span ? 2 : 1);
+        if (end_unit > UINT16_MAX) {
+          status =
+              iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                               "VM signature exceeds its physical bank limit");
+          break;
+        }
+        if (iree_vm_module_signature_type_kind_has_ref_type(
+                descriptors[j].kind_u16)) {
+          loom_type_t reference_type = *loom_type_register_value_type(type);
+          if (is_span) {
+            reference_type = loom_type_table_get(
+                &module->types, loom_vm_span_type_element_type(reference_type));
+          }
+          status = loom_vm_reference_plan_bind(
+              references, module, reference_type, scratch_arena,
+              function_emitter, entry->function.op, &accepted,
+              &descriptors[j].type_ordinal_u16);
+        }
+        *bank_count = (uint16_t)first_unit;
         const uint32_t packet_base =
             j < entry->argument_count
                 ? 0
@@ -390,7 +445,7 @@ static iree_status_t loom_vm_program_resolve_signatures(
             .location_base =
                 *bank_count < 16 ? *bank_count : packet_base + *bank_count - 16,
         };
-        ++(*bank_count);
+        *bank_count = (uint16_t)end_unit;
       }
     }
     const iree_vm_bytecode_v0_signature_row_t* row = &entry->signature.row;
@@ -410,15 +465,11 @@ static iree_status_t loom_vm_program_resolve_signatures(
       loom_vm_reference_plan_finalize(references)) {
     for (uint32_t i = 0; i < program->count; ++i) {
       loom_vm_program_callable_t* entry = &program->values[i];
-      if (!entry->signature.row.argument_ref_count_u16 &&
-          !entry->signature.row.result_ref_count_u16) {
-        continue;
-      }
       const uint32_t field_count = entry->argument_count + entry->results.count;
       for (uint32_t j = 0; j < field_count; ++j) {
         iree_vm_bytecode_v0_signature_descriptor_row_t* field =
             &entry->signature.fields[j];
-        if (loom_vm_signature_kind_is_reference(field->kind_u16)) {
+        if (iree_vm_module_signature_type_kind_has_ref_type(field->kind_u16)) {
           field->type_ordinal_u16 = loom_vm_reference_plan_ordinal(
               references, field->type_ordinal_u16);
         }

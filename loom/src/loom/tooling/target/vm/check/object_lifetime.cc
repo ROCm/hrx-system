@@ -6,11 +6,13 @@
 
 #include "loom/tooling/target/vm/check/object_lifetime.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <type_traits>
 #include <vector>
 
+#include "iree/base/api.h"
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/module_test_util.h"
 #include "iree/vm/sync.h"
@@ -173,6 +175,118 @@ iree_status_t Count(Trace* trace, const NativeCall* params) {
   return iree_ok_status();
 }
 
+iree_status_t VisitSpans(Trace* trace, const NativeCall* params, bool write,
+                         uint16_t first_span = 2) {
+  const uint64_t count = iree_vm_call_value_argument_load(&params->call, 0);
+  const auto objects =
+      iree_vm_call_span_argument_load(&params->call, first_span);
+  const auto values =
+      iree_vm_call_span_argument_load(&params->call, first_span + 2);
+  if (count != objects.count || count != values.count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "span counts differ");
+  }
+  const auto* refs = static_cast<const iree_vm_ref_t*>(objects.data);
+  auto* bytes = static_cast<uint8_t*>(values.data);
+  uint64_t sum = 0;
+  int32_t maximum_references = 0;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    void* pointer = nullptr;
+    status = iree_vm_ptr_from_ref_borrowed(refs[i], &kObjectType, &pointer);
+    if (iree_status_is_ok(status)) {
+      const auto* object = static_cast<const Object*>(pointer);
+      if (object) {
+        maximum_references =
+            std::max(maximum_references,
+                     iree_atomic_ref_count_load(&object->ref_object.ref_count));
+      }
+      const uint64_t value = (object ? object->identity : 0) +
+                             iree_unaligned_load_le_u64(bytes + i * 8);
+      sum += value;
+      if (write) {
+        iree_unaligned_store_le_u64(bytes + i * 8, value);
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    trace->events.push_back({"span_count", static_cast<int32_t>(count)});
+    trace->events.push_back({"maximum_references", maximum_references});
+    iree_vm_call_value_result_store(&params->call, 0, sum);
+  }
+  return status;
+}
+
+iree_status_t ReadSpans(Trace* trace, const NativeCall* params) {
+  return VisitSpans(trace, params, false);
+}
+
+iree_status_t WriteSpans(Trace* trace, const NativeCall* params) {
+  return VisitSpans(trace, params, true);
+}
+
+iree_status_t ReadWideSpans(Trace* trace, const NativeCall* params) {
+  iree_status_t status = iree_ok_status();
+  for (uint16_t i = 1; i < 15 && iree_status_is_ok(status); ++i) {
+    if (iree_vm_call_value_argument_load(&params->call, i) != i) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "fixed argument was overwritten");
+    }
+  }
+  IREE_RETURN_IF_ERROR(status);
+  return VisitSpans(trace, params, false, 16);
+}
+
+struct ScalarSpanCase {
+  // Declared native element type.
+  iree_vm_scalar_type_t kind;
+  // Exact packed width expected by this consumer.
+  uint8_t byte_width;
+  // Bits written by the source program into each element.
+  uint64_t bits;
+};
+constexpr ScalarSpanCase kScalarSpanCases[] = {
+    {IREE_VM_SCALAR_TYPE_I8, 1, 0xE9},
+    {IREE_VM_SCALAR_TYPE_I16, 2, 0xCFC7},
+    {IREE_VM_SCALAR_TYPE_I32, 4, 0xFFDC3532},
+    {IREE_VM_SCALAR_TYPE_I64, 8, 12345},
+    {IREE_VM_SCALAR_TYPE_F8E4M3FN, 1, 0x3C},
+    {IREE_VM_SCALAR_TYPE_F8E5M2, 1, 0x3E},
+    {IREE_VM_SCALAR_TYPE_F16, 2, 0x3E00},
+    {IREE_VM_SCALAR_TYPE_BF16, 2, 0x3FC0},
+    {IREE_VM_SCALAR_TYPE_F32, 4, 0x3FC00000},
+    {IREE_VM_SCALAR_TYPE_F64, 8, 0x3FF8000000000000},
+    {IREE_VM_SCALAR_TYPE_I64, 8, 739},
+    {IREE_VM_SCALAR_TYPE_I64, 8, 90210},
+};
+
+iree_status_t ReadScalarSpans(Trace* trace, const NativeCall* params) {
+  iree_status_t status = iree_ok_status();
+  for (uint16_t i = 0;
+       i < IREE_ARRAYSIZE(kScalarSpanCases) && iree_status_is_ok(status); ++i) {
+    const auto span = iree_vm_call_span_argument_load(&params->call, i * 2);
+    if (span.count != 2) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "scalar span count differs");
+    }
+    const auto& expected = kScalarSpanCases[i];
+    const auto* bytes = static_cast<const uint8_t*>(span.data);
+    for (uint16_t element = 0;
+         element < span.count && iree_status_is_ok(status); ++element) {
+      for (uint16_t byte = 0;
+           byte < expected.byte_width && iree_status_is_ok(status); ++byte) {
+        if (bytes[element * expected.byte_width + byte] !=
+            static_cast<uint8_t>(expected.bits >> (byte * 8))) {
+          status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                    "scalar span bytes differ");
+        }
+      }
+    }
+  }
+  IREE_RETURN_IF_ERROR(status);
+  trace->events.push_back({"scalar_spans", IREE_ARRAYSIZE(kScalarSpanCases)});
+  return iree_ok_status();
+}
+
 const iree_vm_module_signature_type_t kOwnedFields[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0}};
 const iree_vm_module_signature_type_t kBorrowedFields[] = {
@@ -185,6 +299,55 @@ const iree_vm_module_signature_type_t kFactoryFields[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 0}};
 const iree_vm_module_signature_type_t kIdentityFields[] = {
     {IREE_VM_SCALAR_TYPE_I32, 0}};
+const iree_vm_module_signature_type_t kOwnerSpanFields[] = {
+    {IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
+         IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY |
+         IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF,
+     0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
+         IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY |
+         static_cast<uint16_t>(IREE_VM_SCALAR_TYPE_I64),
+     0}};
+const iree_vm_module_signature_type_t kSpanFields[] = {
+    {IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
+         IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY |
+         IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR,
+     0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
+         IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY |
+         static_cast<uint16_t>(IREE_VM_SCALAR_TYPE_I64),
+     0}};
+const iree_vm_module_signature_type_t kWritableSpanFields[] = {
+    kSpanFields[0],
+    kSpanFields[1],
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
+         static_cast<uint16_t>(IREE_VM_SCALAR_TYPE_I64),
+     0}};
+const auto kWideSpanFields = [] {
+  std::array<iree_vm_module_signature_type_t, 17> fields = {};
+  for (size_t i = 0; i < 15; ++i) {
+    fields[i] = {IREE_VM_SCALAR_TYPE_I64, 0};
+  }
+  fields[15] = kSpanFields[1];
+  fields[16] = kSpanFields[2];
+  return fields;
+}();
+const auto kScalarSpanFields = [] {
+  std::array<iree_vm_module_signature_type_t, IREE_ARRAYSIZE(kScalarSpanCases)>
+      fields = {};
+  for (size_t i = 0; i < fields.size(); ++i) {
+    fields[i] = {static_cast<uint16_t>(
+                     IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
+                     IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY |
+                     kScalarSpanCases[i].kind),
+                 0};
+  }
+  return fields;
+}();
+const iree_vm_module_signature_type_t kSumFields[] = {
+    {IREE_VM_SCALAR_TYPE_I64, 0}};
 const iree_vm_module_callable_type_declaration_t kCallableTypes[] = {
     {{{}, {}}, 0, 0, 0},
     {{{}, {kFactoryFields, 2, 0, 2, 0}}, 0, 0, 0},
@@ -193,18 +356,37 @@ const iree_vm_module_callable_type_declaration_t kCallableTypes[] = {
     {{{kOwnedFields, 1, 0, 1, 0}, {}}, 0, 0, 0},
     {{{kBorrowedFields, 1, 0, 1, 0}, {}}, 0, 0, 0},
     {{{kFactoryFields, 2, 0, 2, 0}, {}}, 0, 0, 0},
-    {{{kPairFields, 2, 0, 2, 0}, {}}, 0, 0, 0}};
+    {{{kPairFields, 2, 0, 2, 0}, {}}, 0, 0, 0},
+    {{{kOwnerSpanFields, 3, 6, 0, 0}, {kSumFields, 1, 1, 0, 0}}, 0, 0, 0},
+    {{{kWritableSpanFields, 3, 6, 0, 0}, {kSumFields, 1, 1, 0, 0}}, 0, 0, 0},
+    {{{kSpanFields, 3, 6, 0, 0}, {kSumFields, 1, 1, 0, 0}}, 0, 0, 0},
+    {{{kScalarSpanFields.data(), 12, 24, 0, 0}, {}}, 0, 0, 0},
+    {{{kWideSpanFields.data(), 17, 20, 0, 0}, {kSumFields, 1, 1, 0, 0}},
+     0,
+     0,
+     0}};
 const iree_vm_module_export_declaration_t kExports[] = {
-    {IREE_SV("consume"), 4, 0, 0},     {IREE_SV("consume_read"), 6, 9, 0},
-    {IREE_SV("count"), 5, 8, 0},       {IREE_SV("create"), 3, 1, 0},
-    {IREE_SV("create_fail"), 3, 2, 0}, {IREE_SV("create_null"), 1, 3, 0},
-    {IREE_SV("event"), 2, 10, 0},      {IREE_SV("fail"), 0, 4, 0},
-    {IREE_SV("observe"), 0, 5, 0},     {IREE_SV("read"), 5, 6, 0},
-    {IREE_SV("read_pair"), 7, 7, 0}};
+    {IREE_SV("consume"), 4, 0, 0},
+    {IREE_SV("consume_read"), 6, 9, 0},
+    {IREE_SV("count"), 5, 8, 0},
+    {IREE_SV("create"), 3, 1, 0},
+    {IREE_SV("create_fail"), 3, 2, 0},
+    {IREE_SV("create_null"), 1, 3, 0},
+    {IREE_SV("event"), 2, 10, 0},
+    {IREE_SV("fail"), 0, 4, 0},
+    {IREE_SV("observe"), 0, 5, 0},
+    {IREE_SV("read"), 5, 6, 0},
+    {IREE_SV("read_owners"), 8, 11, 0},
+    {IREE_SV("read_pair"), 7, 7, 0},
+    {IREE_SV("read_spans"), 10, 11, 0},
+    {IREE_SV("read_wide_spans"), 12, 13, 0},
+    {IREE_SV("scalar_spans"), 11, 14, 0},
+    {IREE_SV("write_spans"), 9, 12, 0}};
 using NativeFunction = iree_status_t (*)(Trace*, const NativeCall*);
 constexpr NativeFunction kFunctions[] = {
-    Consume, Create,   CreateFail, CreateNull,  Fail,       Observe,
-    Read,    ReadPair, Count,      ConsumeRead, RecordEvent};
+    Consume,     Create,    CreateFail, CreateNull,    Fail,
+    Observe,     Read,      ReadPair,   Count,         ConsumeRead,
+    RecordEvent, ReadSpans, WriteSpans, ReadWideSpans, ReadScalarSpans};
 
 struct ObjectModule {
   // TableModule and its contained VM module both occupy offset zero.

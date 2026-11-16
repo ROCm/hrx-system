@@ -60,6 +60,12 @@ from iree.vm.bytecode.spec.isa.core.ref import (
     REF_STACK_STORE_INDEXED_COPY,
 )
 from iree.vm.bytecode.spec.isa.core.rules import FieldRule, RecordRuleKind
+from iree.vm.bytecode.spec.isa.core.span import (
+    SPAN_LOAD,
+    SPAN_REF_LOAD,
+    SPAN_REF_STORE,
+    SPAN_STORE,
+)
 from iree.vm.bytecode.spec.isa.core.stack import (
     MEMORY_FORMAT_SELECTOR,
     STACK_LOAD_INDEXED,
@@ -96,6 +102,7 @@ from loom.target.contracts import (
     DescriptorRule,
     DirectDescriptorCase,
     EmitDescriptorOp,
+    EmitRegisterSlice,
     Guard,
     GuardDiagnostic,
     RecipeRule,
@@ -950,6 +957,20 @@ def _view_cases():
                     "value",
                 ),
             )
+        accesses += (
+            (
+                view.view_load,
+                SPAN_REF_LOAD if selector is None else SPAN_LOAD,
+                SourceMemoryOperation.LOAD,
+                "result",
+            ),
+            (
+                view.view_store,
+                SPAN_REF_STORE if selector is None else SPAN_STORE,
+                SourceMemoryOperation.STORE,
+                "value",
+            ),
+        )
         if width in _ATOMIC_CARRIERS:
             accesses += (
                 (
@@ -972,15 +993,30 @@ def _view_cases():
                 ),
             )
         for source_op, instruction, operation, value_field in accesses:
+            incoming_span = instruction in (
+                SPAN_LOAD,
+                SPAN_STORE,
+                SPAN_REF_LOAD,
+                SPAN_REF_STORE,
+            )
             reference_transfer = instruction in (
+                SPAN_REF_LOAD,
+                SPAN_REF_STORE,
                 REF_STACK_LOAD_INDEXED_COPY,
                 REF_STACK_STORE_INDEXED_COPY,
             )
-            frame_storage = reference_transfer or instruction in (
-                STACK_LOAD_INDEXED,
-                STACK_STORE_INDEXED,
+            frame_storage = (
+                incoming_span
+                or reference_transfer
+                or instruction
+                in (
+                    STACK_LOAD_INDEXED,
+                    STACK_STORE_INDEXED,
+                )
             )
             lane_transfer = instruction in (
+                SPAN_LOAD,
+                SPAN_STORE,
                 BUFFER_LOAD,
                 BUFFER_STORE,
                 STACK_LOAD_INDEXED,
@@ -993,7 +1029,7 @@ def _view_cases():
                 memory = SourceMemoryConstraint(
                     operation=operation,
                     memory_spaces=("private",)
-                    if frame_storage
+                    if frame_storage and not incoming_span
                     else tuple(sorted(MEMORY_SPACE_NAMES)),
                     element_byte_count=width // 8,
                     minimum_alignment=(
@@ -1053,12 +1089,23 @@ def _view_cases():
                             )
                         )
                     coordinate = ValueRef.temporary("offset" if dynamic else "static")
+                if incoming_span:
+                    emits.append(
+                        EmitRegisterSlice(
+                            source=ValueRef.operand("view"),
+                            result=ValueRef.temporary("span_address"),
+                            unit_offset=0,
+                            result_type=Scalar("i64"),
+                        )
+                    )
                 if frame_storage:
                     emits.append(
                         EmitDescriptorOp(
                             descriptor=add,
                             operands={
-                                "left_v8": ValueRef.source_memory_root(),
+                                "left_v8": ValueRef.temporary("span_address")
+                                if incoming_span
+                                else ValueRef.source_memory_root(),
                                 "right_v8": coordinate,
                             },
                             results={"destination_v8": ValueRef.temporary("address")},
@@ -1075,22 +1122,23 @@ def _view_cases():
                 )
                 results = {}
                 if reference_transfer:
-                    operands["offset_v8"] = coordinate
+                    operands["address_v8" if incoming_span else "offset_v8"] = (
+                        coordinate
+                    )
                     immediates = {}
                     if operation == SourceMemoryOperation.STORE:
                         operands["source_r8"] = ValueRef.operand("value")
                     else:
                         results["destination_r8"] = ValueRef.result("result")
                 elif lane_transfer:
-                    operands["index_v8"] = coordinate
-                    immediates = {
-                        "scale_u8": 1 if frame_storage else 0,
-                        "format_u8": selector.value,
-                    }
-                    if frame_storage:
-                        immediates["base_u16"] = 0
-                    else:
-                        operands["base_v8"] = coordinate
+                    operands["address_v8" if incoming_span else "index_v8"] = coordinate
+                    immediates = {"format_u8": selector.value}
+                    if not incoming_span:
+                        immediates["scale_u8"] = 1 if frame_storage else 0
+                        if frame_storage:
+                            immediates["base_u16"] = 0
+                        else:
+                            operands["base_v8"] = coordinate
                     if operation == SourceMemoryOperation.STORE:
                         operands["source_v8"] = ValueRef.operand("value")
                     else:
@@ -1143,6 +1191,9 @@ def _view_cases():
                         ),
                         Guard.low_value_register_class(
                             "view", "vm.value" if frame_storage else "vm.ref"
+                        ),
+                        Guard.low_value_register_unit_count(
+                            "view", 2 if incoming_span else 1
                         ),
                         *(
                             (Guard.instance_flags_has_none("memory_flags", "noftz"),)

@@ -132,6 +132,13 @@ static iree_status_t iree_vm_module_validate_signature_type(
     const iree_vm_module_descriptor_t* descriptor,
     iree_vm_module_signature_type_t type,
     iree_host_size_t current_callable_ordinal) {
+  const bool is_span = iree_vm_module_signature_type_kind_is_span(type.kind);
+  if (!is_span &&
+      (type.kind & IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_NO_ACCESS)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "span access requires a span signature field");
+  }
+  type.kind = iree_vm_module_signature_element_kind(type.kind);
   if (type.kind > IREE_VM_SCALAR_TYPE_NONE &&
       type.kind <= IREE_VM_SCALAR_TYPE_F64) {
     if (type.type_ordinal != 0) {
@@ -147,7 +154,7 @@ static iree_status_t iree_vm_module_validate_signature_type(
     }
     return iree_ok_status();
   }
-  if (type.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION) {
+  if (!is_span && type.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION) {
     if (type.type_ordinal >= current_callable_ordinal) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
@@ -171,7 +178,7 @@ static int iree_vm_module_compare_signature_type(
   if (comparison != 0) {
     return comparison;
   }
-  if (iree_vm_module_signature_type_kind_is_ref(lhs.kind)) {
+  if (iree_vm_module_signature_type_kind_has_ref_type(lhs.kind)) {
     const iree_vm_ref_type_key_t lhs_key = iree_vm_ref_type_key(
         module->descriptor->ref_types.data[lhs.type_ordinal]);
     const iree_vm_ref_type_key_t rhs_key = iree_vm_ref_type_key(
@@ -226,7 +233,7 @@ static int iree_vm_module_compare_callable_types(
 static iree_status_t iree_vm_module_validate_signature_side(
     const iree_vm_module_t* module, iree_vm_module_signature_side_t side,
     iree_host_size_t current_callable_ordinal, bool is_result,
-    const char* label, uint32_t* inout_nesting_depth) {
+    const char* label, bool may_yield, uint32_t* inout_nesting_depth) {
   if (side.count != 0 && !side.data) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "%s signature storage is required", label);
@@ -237,14 +244,28 @@ static iree_status_t iree_vm_module_validate_signature_side(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "%s signature storage is misaligned", label);
   }
-  uint16_t expected_value_count = 0;
+  uint32_t expected_value_count = 0;
   uint16_t expected_ref_count = 0;
   uint16_t expected_function_count = 0;
   for (uint16_t i = 0; i < side.count; ++i) {
     IREE_RETURN_IF_ERROR(iree_vm_module_validate_signature_type(
         module->descriptor, side.data[i], current_callable_ordinal));
-    if (side.data[i].kind > IREE_VM_SCALAR_TYPE_NONE &&
-        side.data[i].kind <= IREE_VM_SCALAR_TYPE_F64) {
+    if (iree_vm_module_signature_type_kind_is_span(side.data[i].kind)) {
+      if (is_result || may_yield) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "span arguments cannot yield or be returned");
+      }
+      const uint16_t element_kind =
+          iree_vm_module_signature_element_kind(side.data[i].kind);
+      if (element_kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF &&
+          iree_vm_ref_type_is_borrowed_only(
+              module->descriptor->ref_types.data[side.data[i].type_ordinal])) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "borrowed-only span elements require ptr");
+      }
+      expected_value_count = (expected_value_count + 1u) / 2u * 2u + 2u;
+    } else if (side.data[i].kind > IREE_VM_SCALAR_TYPE_NONE &&
+               side.data[i].kind <= IREE_VM_SCALAR_TYPE_F64) {
       ++expected_value_count;
     } else if (iree_vm_module_signature_type_kind_is_ref(side.data[i].kind)) {
       if (iree_vm_ref_type_is_borrowed_only(
@@ -297,9 +318,11 @@ static iree_status_t iree_vm_module_validate_callable_types(
     uint32_t expected_nesting_depth = 0;
     IREE_RETURN_IF_ERROR(iree_vm_module_validate_signature_side(
         module, callable_type.signature.arguments, i, false, "argument",
+        iree_any_bit_set(callable_type.flags,
+                         IREE_VM_CALLABLE_TYPE_FLAG_MAY_YIELD),
         &expected_nesting_depth));
     IREE_RETURN_IF_ERROR(iree_vm_module_validate_signature_side(
-        module, callable_type.signature.results, i, true, "result",
+        module, callable_type.signature.results, i, true, "result", false,
         &expected_nesting_depth));
     const iree_host_size_t value_count =
         callable_type.signature.arguments.value_count +

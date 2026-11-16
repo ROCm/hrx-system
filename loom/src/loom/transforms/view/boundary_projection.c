@@ -15,6 +15,7 @@
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/ops/signature_flags.h"
 #include "loom/target/provider.h"
 #include "loom/target/view_boundary.h"
 #include "loom/transforms/boundary/projection_plan.h"
@@ -157,21 +158,23 @@ static iree_status_t loom_view_boundary_initialize_schema(
   return iree_ok_status();
 }
 
-static bool loom_view_boundary_provider_uses_buffer_offset(
-    const loom_target_function_version_t* version) {
-  return version != NULL && version->resolved_target.provider != NULL &&
-         version->resolved_target.provider->view_boundary_carrier ==
-             LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BUFFER_OFFSET;
-}
-
 static bool loom_view_boundary_function_applies(
     const loom_boundary_projection_rule_t* rule,
     const loom_boundary_projection_plan_t* plan,
     const loom_boundary_projection_function_t* function) {
   (void)rule;
   (void)plan;
-  return loom_view_boundary_provider_uses_buffer_offset(
-      loom_target_function_version_const_cast(function->version));
+  const loom_target_function_version_t* version =
+      loom_target_function_version_const_cast(function->version);
+  if (!version || !version->resolved_target.provider) {
+    return false;
+  }
+  const loom_target_provider_t* provider = version->resolved_target.provider;
+  const loom_target_view_boundary_carrier_t carrier =
+      loom_func_like_import_symbol(function->function) != LOOM_STRING_ID_INVALID
+          ? provider->import_view_boundary_carrier
+          : provider->view_boundary_carrier;
+  return carrier != LOOM_TARGET_VIEW_BOUNDARY_CARRIER_DIRECT;
 }
 
 static iree_status_t loom_view_boundary_plan_slot(
@@ -181,7 +184,6 @@ static iree_status_t loom_view_boundary_plan_slot(
     loom_boundary_projection_slot_role_t role, loom_value_id_t value_id,
     loom_block_t* block, loom_boundary_projection_schema_t* out_schema,
     bool* out_claimed) {
-  (void)role;
   (void)block;
   *out_schema = (loom_boundary_projection_schema_t){0};
   *out_claimed = false;
@@ -190,6 +192,22 @@ static iree_status_t loom_view_boundary_plan_slot(
           LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BUFFER_OFFSET,
           loom_module_value_type(plan->module, value_id)) == 1) {
     return iree_ok_status();
+  }
+  const loom_target_function_version_t* version =
+      loom_target_function_version_const_cast(function->version);
+  uint16_t argument_index = 0;
+  if (role == LOOM_BOUNDARY_PROJECTION_SLOT_FUNCTION_ARGUMENT &&
+      version->resolved_target.provider->view_boundary_carrier ==
+          LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BORROWED_DIRECT &&
+      loom_boundary_projection_signature_slot_index(
+          plan->module, function, role, value_id, &argument_index)) {
+    const iree_const_byte_span_t flags =
+        loom_func_like_signature_flags(function->function);
+    if (argument_index < flags.data_length &&
+        loom_signature_flags_access(flags.data[argument_index]) !=
+            LOOM_ARGUMENT_ACCESS_UNSPECIFIED) {
+      return iree_ok_status();
+    }
   }
   const loom_view_boundary_projection_plan_state_t* state =
       loom_view_boundary_plan_state(rule, plan);

@@ -21,6 +21,9 @@ typedef enum loom_target_view_boundary_carrier_e {
   // Shape and element type remain in the source signature; dynamic dimensions
   // are separate scalar parameters or results, not extra view components.
   LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BUFFER_OFFSET = 1,
+  // Use BUFFER_OFFSET for owning arguments and results, but preserve explicitly
+  // nonescaping view arguments for a target's direct borrowed representation.
+  LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BORROWED_DIRECT = 2,
 } loom_target_view_boundary_carrier_t;
 
 // Ordered components of the BUFFER_OFFSET representation. The buffer owns the
@@ -51,7 +54,7 @@ static inline iree_string_view_t loom_view_boundary_component_name(
 static inline uint16_t loom_view_boundary_component_count(
     loom_target_view_boundary_carrier_t carrier, loom_type_t type) {
   return loom_type_is_view(type) && !loom_type_has_reference_element(type) &&
-                 carrier == LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BUFFER_OFFSET
+                 carrier != LOOM_TARGET_VIEW_BOUNDARY_CARRIER_DIRECT
              ? LOOM_VIEW_BOUNDARY_COMPONENT_COUNT
              : 1;
 }

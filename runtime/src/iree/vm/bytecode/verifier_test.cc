@@ -18,6 +18,7 @@
 #include "iree/vm/bytecode/verifier_data.h"
 #include "iree/vm/bytecode/verifier_testdata.h"
 #include "iree/vm/bytecode/wire/core.h"
+#include "iree/vm/module.h"
 
 namespace {
 
@@ -676,6 +677,144 @@ TEST_F(ModuleVerificationTest, TreatsYieldableAsPermission) {
     MutableRecord(&bytes, contents_, plan_.layout.functions.rows)->flags_u16 =
         IREE_VM_BYTECODE_FUNCTION_FLAG_MAY_YIELD;
     ExpectRejected(bytes);
+  }
+}
+
+class NativeSpanVerificationTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    const auto text = IREE_SV(R"(
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "consume"
+    string @string1 = "native"
+  }
+  section signatures alignment(8) {
+    signature @signature0 () -> ()
+    signature @signature1 (span<i64>) -> (i64)
+  }
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+    callable @callable1 flags([]) depth(0) : @signature1
+  }
+  section imports alignment(8) {
+    group @import_group0 module_name(@string1) {
+      import @import0 name(@string0) flags([]) : @callable1
+    }
+  }
+  section functions alignment(8) {
+    func @function0 : @callable0 flags([has_call]) frame(local_bytes = 0, value_registers = 2, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 2) {
+    ^bb0:
+      control.block
+      control.call @import0 {direct_ref_move_mask = 0x0000}
+      control.return
+    }
+  }
+}
+)");
+    IREE_ASSERT_OK(iree_vm_bytecode_module_fixture_initialize(
+        text, iree_allocator_system(), &fixture_));
+    contents_ = iree_const_cast_byte_span(fixture_.contents);
+    IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(contents_, &plan_));
+    uint32_t block = 0;
+    IREE_ASSERT_OK(iree_vm_bytecode_verify_module_instructions(&plan_, &block));
+  }
+
+  void TearDown() override {
+    iree_vm_bytecode_module_fixture_deinitialize(&fixture_);
+  }
+
+  template <typename Mutator>
+  void RejectMutation(Mutator mutate, bool instructions = false) {
+    std::vector<uint8_t> bytes(contents_.data,
+                               contents_.data + contents_.data_length);
+    mutate(bytes);
+    iree_vm_bytecode_module_plan_t plan = {};
+    const auto data = iree_make_const_byte_span(bytes.data(), bytes.size());
+    if (instructions) {
+      IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(data, &plan));
+      uint32_t block = 0;
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_INVALID_ARGUMENT,
+          iree_vm_bytecode_verify_module_instructions(&plan, &block));
+    } else {
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_INVALID_ARGUMENT,
+          iree_vm_bytecode_verify_module_structure(data, &plan));
+    }
+  }
+
+  // Assembly storage borrowed by the plan until teardown.
+  iree_vm_bytecode_module_fixture_t fixture_ = {};
+  // Immutable baseline for independent mutations.
+  iree_const_byte_span_t contents_ = {};
+  // Structurally verified table coordinates in contents_.
+  iree_vm_bytecode_module_plan_t plan_ = {};
+};
+
+TEST_F(NativeSpanVerificationTest, RejectsInsufficientPrivatePacketStorage) {
+  RejectMutation(
+      [&](auto& bytes) {
+        MutableRecord(&bytes, contents_, plan_.layout.functions.rows)
+            ->call_value_scratch_count_u16 = 1;
+      },
+      true);
+}
+
+TEST_F(NativeSpanVerificationTest, RejectsLogicalAndPhysicalCountMismatch) {
+  RejectMutation([&](auto& bytes) {
+    MutableRecord(&bytes, contents_, plan_.layout.signatures.rows + 1)
+        ->argument_value_count_u16 = 1;
+  });
+  RejectMutation([&](auto& bytes) {
+    MutableRecord(&bytes, contents_, plan_.layout.signatures.rows + 1)
+        ->argument_count_u16 = 2;
+  });
+}
+
+TEST_F(NativeSpanVerificationTest, RejectsYieldingSpanCallees) {
+  RejectMutation([&](auto& bytes) {
+    MutableRecord(&bytes, contents_, plan_.layout.callable_types.rows + 1)
+        ->flags_u16 = IREE_VM_BYTECODE_CALLABLE_TYPE_FLAG_MAY_YIELD;
+  });
+}
+
+TEST_F(NativeSpanVerificationTest, AcceptsBytecodeSpanArguments) {
+  std::vector<uint8_t> bytes(contents_.data,
+                             contents_.data + contents_.data_length);
+  MutableRecord(&bytes, contents_, plan_.layout.functions.rows)
+      ->callable_type_ordinal_u16 = 1;
+  iree_vm_bytecode_module_plan_t plan = {};
+  IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
+      iree_make_const_byte_span(bytes.data(), bytes.size()), &plan));
+  uint32_t block = 0;
+  IREE_ASSERT_OK(iree_vm_bytecode_verify_module_instructions(&plan, &block));
+}
+
+TEST_F(NativeSpanVerificationTest, RejectsSpanResults) {
+  RejectMutation([&](auto& bytes) {
+    auto* signature =
+        MutableRecord(&bytes, contents_, plan_.layout.signatures.rows + 1);
+    // Keep the same descriptor count and bank widths, but swap their sides.
+    signature->argument_value_count_u16 = 1;
+    signature->result_value_count_u16 = 2;
+    auto* descriptors =
+        MutableRecord(&bytes, contents_, plan_.layout.signatures.descriptors);
+    std::swap(descriptors[0], descriptors[1]);
+  });
+}
+
+TEST_F(NativeSpanVerificationTest, RejectsInvalidElementKindsAndRefOrdinals) {
+  for (const uint16_t element : std::initializer_list<uint16_t>{
+           0, 0xFF, IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF,
+           IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR,
+           IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION}) {
+    SCOPED_TRACE(element);
+    RejectMutation([&](auto& bytes) {
+      auto* descriptor =
+          MutableRecord(&bytes, contents_, plan_.layout.signatures.descriptors);
+      descriptor->kind_u16 = IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN | element;
+    });
   }
 }
 

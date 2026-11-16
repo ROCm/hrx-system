@@ -911,6 +911,17 @@ static void iree_vm_bytecode_disassembler_collect_blocks(
   IREE_ASSERT(block_ordinal == function->block_count);
 }
 
+static iree_status_t iree_vm_bytecode_disassembler_span_end(
+    iree_vm_bytecode_disassembler_t* disassembler, uint16_t kind) {
+  const iree_vm_span_access_t access =
+      iree_vm_module_signature_span_access(kind);
+  return iree_vm_bytecode_disassembler_write_cstring(
+      disassembler, access == IREE_VM_SPAN_ACCESS_READ    ? ", read>"
+                    : access == IREE_VM_SPAN_ACCESS_WRITE ? ", write>"
+                    : access == IREE_VM_SPAN_ACCESS_NONE  ? ", none>"
+                                                          : ">");
+}
+
 static iree_status_t iree_vm_bytecode_disassembler_signature_field(
     iree_vm_bytecode_disassembler_t* disassembler, const uint8_t* descriptor,
     uint8_t kind_offset, uint8_t kind_width, uint8_t type_offset,
@@ -918,19 +929,26 @@ static iree_status_t iree_vm_bytecode_disassembler_signature_field(
     uint8_t callable_domain) {
   const uint16_t kind = (uint16_t)iree_vm_bytecode_disassembler_load(
       descriptor + kind_offset, kind_width);
+  const bool is_span = iree_vm_module_signature_type_kind_is_span(kind);
+  const uint16_t element_kind = iree_vm_module_signature_element_kind(kind);
+  if (is_span) {
+    IREE_RETURN_IF_ERROR(
+        iree_vm_bytecode_disassembler_write_cstring(disassembler, "span<"));
+  }
   const iree_vm_bytecode_disassembler_numeric_value_t* spelling =
-      iree_vm_bytecode_disassembler_find_numeric(kind_table, kind);
+      iree_vm_bytecode_disassembler_find_numeric(kind_table, element_kind);
   IREE_ASSERT(spelling);
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_disassembler_write(
       disassembler,
       iree_vm_bytecode_disassembler_text_at(spelling->name_offset)));
   uint8_t domain = 0;
-  if (iree_vm_module_signature_type_kind_is_ref(kind)) {
+  if (iree_vm_module_signature_type_kind_is_ref(element_kind)) {
     domain = ref_domain;
-  } else if (kind == IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION) {
+  } else if (element_kind == IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION) {
     domain = callable_domain;
   } else {
-    return iree_ok_status();
+    return is_span ? iree_vm_bytecode_disassembler_span_end(disassembler, kind)
+                   : iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(
       iree_vm_bytecode_disassembler_write_cstring(disassembler, "("));
@@ -938,7 +956,10 @@ static iree_status_t iree_vm_bytecode_disassembler_signature_field(
       disassembler, domain,
       (uint32_t)iree_vm_bytecode_disassembler_load(descriptor + type_offset,
                                                    type_width)));
-  return iree_vm_bytecode_disassembler_write_cstring(disassembler, ")");
+  IREE_RETURN_IF_ERROR(
+      iree_vm_bytecode_disassembler_write_cstring(disassembler, ")"));
+  return is_span ? iree_vm_bytecode_disassembler_span_end(disassembler, kind)
+                 : iree_ok_status();
 }
 
 static iree_status_t iree_vm_bytecode_disassembler_signature_fields(
@@ -973,8 +994,8 @@ static iree_status_t iree_vm_bytecode_disassembler_signature(
   const uint8_t callable_domain = *program++;
   const uint8_t descriptor_base_offset = *program++;
   const uint8_t descriptor_base_width = *program++;
-  uint32_t counts[6];
-  for (uint8_t i = 0; i < 6; ++i) {
+  uint32_t counts[8];
+  for (uint8_t i = 0; i < 8; ++i) {
     const uint8_t count_offset = *program++;
     const uint8_t count_width = *program++;
     counts[i] = (uint32_t)iree_vm_bytecode_disassembler_load(row + count_offset,
@@ -988,8 +1009,8 @@ static iree_status_t iree_vm_bytecode_disassembler_signature(
 
   const uint32_t base = (uint32_t)iree_vm_bytecode_disassembler_load(
       row + descriptor_base_offset, descriptor_base_width);
-  const uint32_t argument_count = counts[0] + counts[1] + counts[2];
-  const uint32_t result_count = counts[3] + counts[4] + counts[5];
+  const uint32_t argument_count = counts[0];
+  const uint32_t result_count = counts[4];
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_disassembler_signature_fields(
       disassembler, descriptor_record, base, argument_count, kind_offset,
       kind_width, type_offset, type_width, kind_table, ref_domain,

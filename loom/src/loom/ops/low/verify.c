@@ -814,6 +814,51 @@ static iree_status_t loom_low_verify_transfer_register_value_relation(
       emitter);
 }
 
+// A type-owned layout authorizes structural assembly of semantic aggregates.
+// Types without a layout still require exact identity; raw bits cannot acquire
+// a semantic type merely by concatenating or slicing registers.
+static loom_scalar_type_t loom_low_register_unit_type(
+    const loom_module_t* module, loom_type_t type, uint64_t unit) {
+  const loom_type_t* value_type = loom_type_register_value_type(type);
+  if (!value_type) {
+    return LOOM_SCALAR_TYPE_NONE;
+  }
+  const uint64_t unit_count = loom_low_register_type_unit_count(type);
+  if (loom_type_is_scalar(*value_type) && unit_count == 1) {
+    return loom_type_element_type(*value_type);
+  }
+  const loom_type_descriptor_t* descriptor = NULL;
+  if (loom_type_is_parameterized(*value_type)) {
+    descriptor =
+        loom_type_parameterized_descriptor(*value_type)->type_descriptor;
+  } else if (loom_type_is_dialect(*value_type)) {
+    descriptor = loom_context_lookup_type_by_name(
+        module->context,
+        loom_string_table_get(&module->strings,
+                              loom_type_dialect_name_id(*value_type)));
+  }
+  const loom_type_register_layout_t* layout =
+      descriptor ? descriptor->register_layout : NULL;
+  return layout && layout->unit_count == unit_count && unit < unit_count
+             ? layout->unit_types[unit]
+             : LOOM_SCALAR_TYPE_NONE;
+}
+
+static bool loom_low_register_unit_types_match(
+    const loom_module_t* module, loom_type_t source, uint64_t source_offset,
+    loom_type_t result, uint64_t result_offset, uint64_t count) {
+  for (uint64_t i = 0; i < count; ++i) {
+    const loom_scalar_type_t source_type =
+        loom_low_register_unit_type(module, source, source_offset + i);
+    if (source_type == LOOM_SCALAR_TYPE_NONE ||
+        source_type !=
+            loom_low_register_unit_type(module, result, result_offset + i)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static iree_status_t loom_low_verify_slice_register_range(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter) {
@@ -847,7 +892,9 @@ static iree_status_t loom_low_verify_slice_register_range(
   if (!loom_low_register_type_same_class(source_type, result_type) ||
       (!loom_type_register_has_value_type(source_type) &&
        !loom_type_register_has_value_type(result_type)) ||
-      (offset == 0 && loom_type_equal(source_type, result_type))) {
+      (offset == 0 && loom_type_equal(source_type, result_type)) ||
+      loom_low_register_unit_types_match(module, source_type, offset_unit_count,
+                                         result_type, 0, result_unit_count)) {
     return iree_ok_status();
   }
   return loom_low_emit_register_value_relation_error(
@@ -897,9 +944,19 @@ static iree_status_t loom_low_verify_concat_register_value_relation(
       loom_type_equal(diagnostic_source_type, result_type)) {
     return iree_ok_status();
   }
-  return loom_low_emit_register_value_relation_error(
-      module, op, diagnostic_source_index, diagnostic_source_type, result_type,
-      emitter);
+  uint64_t result_offset = 0;
+  for (uint16_t i = 0; i < sources.count; ++i) {
+    const loom_type_t source_type =
+        loom_module_value_type(module, sources.values[i]);
+    const uint64_t count = loom_low_register_type_unit_count(source_type);
+    if (!loom_low_register_unit_types_match(module, source_type, 0, result_type,
+                                            result_offset, count)) {
+      return loom_low_emit_register_value_relation_error(
+          module, op, i, source_type, result_type, emitter);
+    }
+    result_offset += count;
+  }
+  return iree_ok_status();
 }
 
 static const loom_op_t* loom_low_find_enclosing_low_executable_def(

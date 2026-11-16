@@ -51,8 +51,14 @@ static inline bool iree_vm_scalar_type_is_valid(
          scalar_type <= IREE_VM_SCALAR_TYPE_F64;
 }
 
-// Returns the canonical payload mask for |scalar_type|. The caller must pass a
-// recognized scalar type.
+// Returns the packed element byte width of a recognized scalar type.
+static inline uint8_t iree_vm_scalar_type_byte_width(
+    iree_vm_scalar_type_t scalar_type) {
+  static const uint8_t kByteWidths[] = {0, 1, 2, 4, 8, 1, 1, 2, 2, 4, 8};
+  return kByteWidths[scalar_type];
+}
+
+// Returns the canonical payload mask of a recognized scalar type.
 static inline uint64_t iree_vm_scalar_type_payload_mask(
     iree_vm_scalar_type_t scalar_type) {
   switch (scalar_type) {

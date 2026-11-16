@@ -429,6 +429,7 @@ def _default_grammar_inputs() -> tuple[tuple[Op, ...], tuple[TypeDef, ...]]:
     from loom.dialect.vector import ALL_VECTOR_OPS
     from loom.dialect.view import ALL_VIEW_OPS
     from loom.target.arch.spirv.dialect import ALL_SPIRV_TYPES
+    from loom.target.arch.vm.dialect import ALL_VM_TYPES
 
     ops = (
         *ALL_TEST_OPS,
@@ -454,6 +455,7 @@ def _default_grammar_inputs() -> tuple[tuple[Op, ...], tuple[TypeDef, ...]]:
         *ALL_HAL_TYPES,
         *ALL_KERNEL_TYPES,
         *ALL_SPIRV_TYPES,
+        *ALL_VM_TYPES,
     )
     return ops, type_defs
 

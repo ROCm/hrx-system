@@ -67,6 +67,8 @@ typedef struct loom_vm_testbench_t {
   iree_vm_variant_t* results;
   // Retained imported buffer arguments used to trace returned references.
   iree_vm_buffer_t** argument_buffers;
+  // Borrowed span descriptors within the IO slab, one per source argument.
+  iree_vm_typed_span_t* argument_spans;
   // Borrowed Core descriptors whose provider lives with the linked VM runtime.
   iree_vm_ref_types_t ref_types;
 } loom_vm_testbench_t;

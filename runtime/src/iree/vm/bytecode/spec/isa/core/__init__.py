@@ -43,6 +43,7 @@ from iree.vm.bytecode.spec.isa.core.integer import (
     INTEGER_INSTRUCTIONS,
 )
 from iree.vm.bytecode.spec.isa.core.ref import REF_FAMILY, REF_INSTRUCTIONS
+from iree.vm.bytecode.spec.isa.core.span import SPAN_FAMILY, SPAN_INSTRUCTIONS
 from iree.vm.bytecode.spec.isa.core.stack import (
     MEMORY_FORMAT_SELECTOR,
     STACK_FAMILY,
@@ -63,6 +64,7 @@ FAMILIES = (
     ABI_FAMILY,
     REF_FAMILY,
     BUFFER_FAMILY,
+    SPAN_FAMILY,
 )
 SELECTORS = (
     CONTROL_CALL_TARGET_SELECTOR,
@@ -86,4 +88,5 @@ INSTRUCTIONS = (
     *ABI_INSTRUCTIONS,
     *REF_INSTRUCTIONS,
     *BUFFER_INSTRUCTIONS,
+    *SPAN_INSTRUCTIONS,
 )

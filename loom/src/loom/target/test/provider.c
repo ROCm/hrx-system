@@ -368,6 +368,8 @@ const loom_target_provider_t loom_test_target_provider = {
         loom_test_math_policy_registry_initialize,
     .pass_registry = &loom_test_pass_registry_storage,
     .view_boundary_carrier = LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BUFFER_OFFSET,
+    .import_view_boundary_carrier =
+        LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BUFFER_OFFSET,
     .loop_predicate_carrier = LOOM_TARGET_LOOP_PREDICATE_CARRIER_I32,
     .loop_predicate_max_vector_element_count = 32,
     .target_fact_type = &loom_test_target_fact_type,

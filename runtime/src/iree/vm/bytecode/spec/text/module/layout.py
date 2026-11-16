@@ -101,12 +101,8 @@ def build_sections(specification: Specification) -> tuple[SectionText, ...]:
                     SummedFieldLayoutCount(
                         records.SIGNATURE_ROW,
                         (
-                            "argument_value_count_u16",
-                            "result_value_count_u16",
-                            "argument_ref_count_u16",
-                            "result_ref_count_u16",
-                            "argument_function_count_u16",
-                            "result_function_count_u16",
+                            "argument_count_u16",
+                            "result_count_u16",
                         ),
                     ),
                 ),

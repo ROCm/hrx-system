@@ -30,6 +30,8 @@ struct BoundSignature {
 
   // High component types in source-value and partition order.
   std::vector<loom_type_t> types;
+  // Explicit argument/result boundary flags, empty for an unannotated callable.
+  std::vector<uint8_t> signature_flags;
   // Reserved identities in the same order; empty for a static signature.
   std::vector<loom_value_id_t> identities;
   // Overflow dimension payloads retained until the signature's builder call.

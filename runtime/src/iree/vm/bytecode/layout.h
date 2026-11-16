@@ -316,17 +316,22 @@ iree_vm_bytecode_function_signature(
 // Returns the source-ordered argument count of one verified signature.
 static inline uint32_t iree_vm_bytecode_signature_argument_count(
     const iree_vm_bytecode_v0_signature_row_t* row) {
-  return (uint32_t)row->argument_value_count_u16 +
-         (uint32_t)row->argument_ref_count_u16 +
-         (uint32_t)row->argument_function_count_u16;
+  return row->argument_count_u16;
 }
 
 // Returns the source-ordered result count of one verified signature.
 static inline uint32_t iree_vm_bytecode_signature_result_count(
     const iree_vm_bytecode_v0_signature_row_t* row) {
-  return (uint32_t)row->result_value_count_u16 +
-         (uint32_t)row->result_ref_count_u16 +
-         (uint32_t)row->result_function_count_u16;
+  return row->result_count_u16;
+}
+
+// Spans use at least two value cells for one logical field. Ordinary signatures
+// have one physical cell per logical field, with no alignment padding.
+static inline bool iree_vm_bytecode_signature_has_span_arguments(
+    const iree_vm_bytecode_v0_signature_row_t* row) {
+  return row->argument_count_u16 != (uint32_t)row->argument_value_count_u16 +
+                                        row->argument_ref_count_u16 +
+                                        row->argument_function_count_u16;
 }
 
 // Returns the exact instruction bytes of one verified function.

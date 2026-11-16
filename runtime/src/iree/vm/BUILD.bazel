@@ -61,6 +61,7 @@ iree_runtime_cc_library(
         "ref.h",
         "reflection.h",
         "scalar.h",
+        "span.h",
         "sync.h",
         "variant.h",
     ],

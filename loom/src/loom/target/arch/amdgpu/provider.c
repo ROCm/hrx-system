@@ -229,6 +229,8 @@ const loom_target_provider_t loom_amdgpu_target_provider = {
     .materialize_definition = loom_amdgpu_target_materialize_definition,
     .select_call_policy = loom_amdgpu_select_call_policy,
     .view_boundary_carrier = LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BUFFER_OFFSET,
+    .import_view_boundary_carrier =
+        LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BUFFER_OFFSET,
     .loop_predicate_carrier = LOOM_TARGET_LOOP_PREDICATE_CARRIER_I32,
     .loop_predicate_max_vector_element_count =
         LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES,

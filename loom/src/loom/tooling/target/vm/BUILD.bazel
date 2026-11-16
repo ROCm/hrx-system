@@ -62,6 +62,7 @@ loom_cc_library(
         "//loom/binding/c:interop",
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/vm",
+        "//loom/src/loom/ops:builders",
         "//loom/src/loom/target:view_boundary",
         "//loom/src/loom/tooling/testbench:compiled_provider",
         "//loom/src/loom/tooling/testbench/scenario:executor",
@@ -187,6 +188,63 @@ loom_cc_test(
         "//runtime/src/iree/hal/vm:types",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode:module",
+    ],
+)
+
+# Source allocations cross the same native boundary as authored High views.
+_CXX_VM_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/import:cxx",
+    "//loom/config/emit:vm_binary",
+    "//loom/config/execute:vm_iree_vm",
+])
+
+loom_generated_file(
+    name = "cxx_native_spans_ir",
+    testonly = True,
+    args = [
+        "--root=run",
+        "$(location //loom/src/loom/tooling/target/vm/testdata:cxx_native_spans.cxx)",
+    ],
+    generator = "//loom/src/loom/tools/loom-import-cxx",
+    inputs = ["//loom/src/loom/tooling/target/vm/testdata:cxx_native_spans.cxx"],
+    output = "cxx_native_spans.loom",
+    output_flag = "--output=",
+    target_compatible_with = _CXX_VM_COMPATIBLE_WITH,
+)
+
+loom_generated_file(
+    name = "cxx_native_spans_binary",
+    testonly = True,
+    args = [
+        "$(location :cxx_native_spans_ir)",
+        "--target=vm:core",
+    ],
+    generator = "//loom/src/loom/tools/loom-compile",
+    inputs = [":cxx_native_spans_ir"],
+    output = "cxx_native_spans.vm",
+    output_flag = "--output=",
+    target_compatible_with = _CXX_VM_COMPATIBLE_WITH,
+)
+
+iree_c_embed_data(
+    name = "cxx_native_spans_bytecode",
+    testonly = True,
+    srcs = [":cxx_native_spans_binary"],
+    c_file_output = "cxx_native_spans_bytecode.c",
+    h_file_output = "cxx_native_spans_bytecode.h",
+    identifier = "loom_vm_cxx_native_spans_bytecode",
+    target_compatible_with = _CXX_VM_COMPATIBLE_WITH,
+)
+
+loom_cc_test(
+    name = "cxx_native_spans_test",
+    srcs = ["cxx_native_spans_test.c"],
+    target_compatible_with = _CXX_VM_COMPATIBLE_WITH,
+    deps = [
+        ":cxx_native_spans_bytecode",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/vm",
         "//runtime/src/iree/vm/bytecode:module",
     ],

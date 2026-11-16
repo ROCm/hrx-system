@@ -318,6 +318,8 @@ def build_grammars(specification: Specification) -> tuple[RecordGrammar, ...]:
             _scalar(records.FUNCTION_ROW, "local_ref_count_u32"),
             ", local_functions = ",
             _scalar(records.FUNCTION_ROW, "local_function_count_u32"),
+            ", call_values = ",
+            _scalar(records.FUNCTION_ROW, "call_value_scratch_count_u16"),
             ") ",
             FunctionBody(records.FUNCTION_ROW, records.SWITCH_TARGET_ENTRY, "bytecode"),
             keyword="func",

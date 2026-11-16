@@ -6,6 +6,8 @@
 
 #include "loom/import/cxx/binding/parameter_contracts.h"
 
+#include <cxx/ast.h>
+#include <cxx/literals.h>
 #include <cxx/symbols.h>
 #include <cxx/types.h>
 
@@ -53,6 +55,34 @@ void ParameterContracts::declaration(
     visit_loom_attributes(
         unit_, parameter->attributeList,
         [&](std::string_view name, cxx::AttributeAST* attribute) {
+          if (name == "access") {
+            if (declared.access_source) {
+              diagnostics_.reject(unit_, attribute,
+                                  "one access bound per parameter is allowed");
+            }
+            auto* clause = attribute->attributeArgumentClause;
+            auto* arguments = clause ? clause->expressionList : nullptr;
+            auto* literal =
+                arguments && !arguments->next
+                    ? cxx::ast_cast<cxx::StringLiteralExpressionAST>(
+                          arguments->value)
+                    : nullptr;
+            const auto spelling =
+                literal ? literal->literal->stringValue() : std::string_view{};
+            declared.access =
+                spelling == "read"         ? LOOM_ARGUMENT_ACCESS_READ
+                : spelling == "write"      ? LOOM_ARGUMENT_ACCESS_WRITE
+                : spelling == "read_write" ? LOOM_ARGUMENT_ACCESS_READ_WRITE
+                : spelling == "none"       ? LOOM_ARGUMENT_ACCESS_NONE
+                                           : LOOM_ARGUMENT_ACCESS_UNSPECIFIED;
+            if (declared.access == LOOM_ARGUMENT_ACCESS_UNSPECIFIED) {
+              diagnostics_.reject(unit_, attribute,
+                                  "access requires read, write, read_write, or "
+                                  "none as one string literal");
+            }
+            declared.access_source = attribute;
+            return;
+          }
           if (name != "assume_aligned" && name != "noalias") {
             return;
           }
@@ -93,12 +123,22 @@ void ParameterContracts::declaration(
           }
           declared.alignment = {*alignment, attribute};
         });
-    if (declared.alignment.source || declared.noalias_source) {
+    if (declared.alignment.source || declared.noalias_source ||
+        declared.access_source) {
       auto& parameters = contracts_[function->canonical()];
       if (parameters.empty()) {
         parameters.resize(signature->parameterTypes().size());
       }
       auto& previous = parameters[ordinal];
+      if (declared.access_source) {
+        if (previous.access_source && previous.access != declared.access) {
+          diagnostics_.reject(
+              unit_, declared.access_source,
+              "conflicting parameter access across declarations");
+        }
+        previous.access = declared.access;
+        previous.access_source = declared.access_source;
+      }
       if (declared.alignment.source) {
         if (previous.alignment.minimum_alignment &&
             previous.alignment.minimum_alignment !=

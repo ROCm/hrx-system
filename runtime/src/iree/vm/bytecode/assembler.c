@@ -1466,13 +1466,15 @@ static iree_status_t iree_vm_bytecode_assembler_parse_signature_fields(
     iree_vm_bytecode_assembler_t* assembler, uint8_t descriptor_record,
     uint8_t kind_table, uint8_t ref_domain, uint8_t callable_domain,
     uint8_t kind_offset, uint8_t kind_width, uint8_t type_offset,
-    uint8_t type_width, uint32_t counts[3]) {
+    uint8_t type_width, uint32_t counts[4]) {
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_char(
       assembler, '(', "expected '(' before signature fields"));
   if (iree_vm_bytecode_assembler_try_char(assembler, ')')) {
     return iree_ok_status();
   }
   for (;;) {
+    const bool is_span =
+        iree_vm_bytecode_assembler_try_literal(assembler, IREE_SV("span<"));
     uint16_t kind = 0;
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_numeric(
         assembler, kind_table, kind_width, &kind));
@@ -1486,8 +1488,9 @@ static iree_status_t iree_vm_bytecode_assembler_parse_signature_fields(
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_append_record(
         assembler, descriptor_record, &descriptor_ordinal, &descriptor_offset));
     uint8_t descriptor[IREE_VM_BYTECODE_ASSEMBLER_MAX_RECORD_SIZE] = {0};
-    iree_vm_bytecode_assembler_store(descriptor + kind_offset, kind_width,
-                                     kind);
+    iree_vm_bytecode_assembler_store(
+        descriptor + kind_offset, kind_width,
+        kind | (is_span ? IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN : 0));
     if (iree_vm_module_signature_type_kind_is_ref(kind) ||
         kind == IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION) {
       IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_char(
@@ -1501,14 +1504,45 @@ static iree_status_t iree_vm_bytecode_assembler_parse_signature_fields(
       IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_char(
           assembler, ')', "expected ')' after signature type"));
     }
-    uint32_t count_ordinal = 0;
-    if (iree_vm_module_signature_type_kind_is_ref(kind)) {
-      count_ordinal = 1;
-    } else if (kind == IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION) {
+    if (is_span) {
+      uint16_t access = 0;
+      if (iree_vm_bytecode_assembler_try_char(assembler, ',')) {
+        if (iree_vm_bytecode_assembler_try_literal(assembler,
+                                                   IREE_SV("read_write"))) {
+          access = 0;
+        } else if (iree_vm_bytecode_assembler_try_literal(assembler,
+                                                          IREE_SV("read"))) {
+          access = IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY;
+        } else if (iree_vm_bytecode_assembler_try_literal(assembler,
+                                                          IREE_SV("write"))) {
+          access = IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_WRITE_ONLY;
+        } else if (iree_vm_bytecode_assembler_try_literal(assembler,
+                                                          IREE_SV("none"))) {
+          access = IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_NO_ACCESS;
+        } else {
+          return iree_vm_bytecode_assembler_error(assembler,
+                                                  "expected span access bound");
+        }
+      }
+      iree_vm_bytecode_assembler_store(
+          descriptor + kind_offset, kind_width,
+          kind | IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN | access);
+      IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_char(
+          assembler, '>', "expected '>' after span element type"));
+    }
+    IREE_RETURN_IF_ERROR(
+        iree_vm_bytecode_assembler_add_count(assembler, &counts[0], 1));
+    uint32_t count_ordinal = 1;
+    uint32_t count_increment = 1;
+    if (is_span) {
+      count_increment = 2 + (counts[1] & 1);
+    } else if (iree_vm_module_signature_type_kind_is_ref(kind)) {
       count_ordinal = 2;
+    } else if (kind == IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION) {
+      count_ordinal = 3;
     }
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_add_count(
-        assembler, &counts[count_ordinal], 1));
+        assembler, &counts[count_ordinal], count_increment));
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_seek_write(
         assembler, descriptor_offset,
         iree_vm_bytecode_assembler_record_lengths[descriptor_record],
@@ -1533,9 +1567,9 @@ static iree_status_t iree_vm_bytecode_assembler_parse_signature(
   const uint8_t callable_domain = *program++;
   const uint8_t descriptor_base_offset = *program++;
   const uint8_t descriptor_base_width = *program++;
-  uint8_t count_offsets[6];
-  uint8_t count_widths[6];
-  for (uint8_t i = 0; i < 6; ++i) {
+  uint8_t count_offsets[8];
+  uint8_t count_widths[8];
+  for (uint8_t i = 0; i < 8; ++i) {
     count_offsets[i] = *program++;
     count_widths[i] = *program++;
   }
@@ -1547,7 +1581,7 @@ static iree_status_t iree_vm_bytecode_assembler_parse_signature(
 
   iree_vm_bytecode_assembler_store(row + descriptor_base_offset,
                                    descriptor_base_width, descriptor_base);
-  uint32_t counts[6] = {0};
+  uint32_t counts[8] = {0};
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_signature_fields(
       assembler, descriptor_record, kind_table, ref_domain, callable_domain,
       kind_offset, kind_width, type_offset, type_width, &counts[0]));
@@ -1557,13 +1591,8 @@ static iree_status_t iree_vm_bytecode_assembler_parse_signature(
   }
   IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_signature_fields(
       assembler, descriptor_record, kind_table, ref_domain, callable_domain,
-      kind_offset, kind_width, type_offset, type_width, &counts[3]));
-  if ((uint64_t)counts[0] + counts[1] + counts[2] > UINT16_MAX ||
-      (uint64_t)counts[3] + counts[4] + counts[5] > UINT16_MAX) {
-    return iree_vm_bytecode_assembler_error(
-        assembler, "signature side exceeds the logical field limit");
-  }
-  for (uint8_t i = 0; i < 6; ++i) {
+      kind_offset, kind_width, type_offset, type_width, &counts[4]));
+  for (uint8_t i = 0; i < 8; ++i) {
     if (!iree_vm_bytecode_assembler_value_fits(counts[i], count_widths[i])) {
       return iree_vm_bytecode_assembler_error(
           assembler, "signature field count does not fit its record");

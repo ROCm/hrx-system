@@ -1,0 +1,23 @@
+// A strided array cannot claim to be a contiguous native range.
+vm.target<core> @vm
+
+func.decl import("external", "consume") target(@vm) @consume(%values: view<2xi64, #encoding.layout.strided<strides=[2]>> {access = read})
+
+func.def public target(@vm) @run() {
+  %values = view.alloca<private> : view<2xi64, #encoding.layout.strided<strides=[2]>>
+  // ERROR@+1: TARGET/097 {op_name="func.call", actual_type="view<2xi64, #encoding.layout.strided<strides=[2]>>", reason="VM span arguments require a contiguous view"}
+  func.call @consume(%values) : (view<2xi64, #encoding.layout.strided<strides=[2]>>)
+  func.return
+}
+
+// ----
+vm.target<core> @vm
+
+func.decl import("external", "consume") target(@vm) @consume(%values: view<2xi64, #encoding.layout.strided<strides=[2]>> {access = read})
+
+func.def public target(@vm) @run() {
+  %values = view.alloca<private> : view<2xi64, #encoding.layout.strided<strides=[2]>>
+
+  func.call @consume(%values) : (view<2xi64, #encoding.layout.strided<strides=[2]>>)
+  func.return
+}

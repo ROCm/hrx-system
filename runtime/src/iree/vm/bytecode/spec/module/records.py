@@ -281,6 +281,10 @@ SIGNATURE_ROW = _record(
             FieldRule.ANY_BITS,
         ),
         _field(
+            "argument_count_u16", U16, "Logical argument count.", FieldRule.ANY_BITS
+        ),
+        _field("result_count_u16", U16, "Logical result count.", FieldRule.ANY_BITS),
+        _field(
             "argument_value_count_u16", U16, "Value argument count.", FieldRule.ANY_BITS
         ),
         _field(
@@ -598,8 +602,15 @@ FUNCTION_ROW = _record(
             U32,
             "Reserved zero words.",
             FieldRule.ZERO,
-            element_count=2,
+            element_count=1,
         ),
+        _field(
+            "call_value_scratch_count_u16",
+            U16,
+            "Private value cells for the largest outgoing span call.",
+            FieldRule.ANY_BITS,
+        ),
+        _field("reserved_u16", U16, "Reserved zero halfword.", FieldRule.ZERO),
     ),
 )
 

@@ -26,12 +26,17 @@ static bool iree_vm_bytecode_bytes_are_zero(const uint8_t* data,
 static bool iree_vm_bytecode_verify_signature_descriptor(
     const iree_vm_bytecode_module_layout_t* layout, uint16_t kind,
     uint16_t type_ordinal) {
+  const bool is_span = iree_vm_module_signature_type_kind_is_span(kind);
+  if (!is_span && (kind & IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_NO_ACCESS)) {
+    return false;
+  }
+  kind = iree_vm_module_signature_element_kind(kind);
   if (kind >= IREE_VM_BYTECODE_SIGNATURE_KIND_I8 &&
       kind <= IREE_VM_BYTECODE_SIGNATURE_KIND_F64) {
     return type_ordinal == 0;
   } else if (iree_vm_module_signature_type_kind_is_ref(kind)) {
     return type_ordinal < layout->ref_types.entry_count;
-  } else if (kind == IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION) {
+  } else if (!is_span && kind == IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION) {
     // Callable types are parsed after signatures and checked as one complete
     // topologically ordered domain.
     return true;
@@ -201,8 +206,10 @@ static iree_status_t iree_vm_bytecode_verify_signature_descriptors(
     IREE_RETURN_IF_ERROR(iree_vm_bytecode_verify_record(
         IREE_VM_BYTECODE_MODULE_RECORD_SIGNATURE_DESCRIPTOR_ROW,
         (const uint8_t*)&descriptors[i], layout));
-    if (descriptors[i].kind_u16 >= IREE_VM_BYTECODE_SIGNATURE_KIND_I8 &&
-        descriptors[i].kind_u16 <= IREE_VM_BYTECODE_SIGNATURE_KIND_F64) {
+    if (iree_vm_module_signature_type_kind_is_span(descriptors[i].kind_u16)) {
+      value_count = (value_count + 1u) / 2u * 2u + 2u;
+    } else if (descriptors[i].kind_u16 >= IREE_VM_BYTECODE_SIGNATURE_KIND_I8 &&
+               descriptors[i].kind_u16 <= IREE_VM_BYTECODE_SIGNATURE_KIND_F64) {
       ++value_count;
     } else if (iree_vm_module_signature_type_kind_is_ref(
                    descriptors[i].kind_u16)) {
@@ -383,6 +390,13 @@ static iree_status_t iree_vm_bytecode_verify_callable_types(
                                                row->signature_ordinal_u16);
     uint32_t expected_depth = 0;
     for (uint32_t j = 0; j < descriptor_count; ++j) {
+      if (iree_vm_module_signature_type_kind_is_span(descriptors[j].kind_u16) &&
+          (j >= signature->argument_count_u16 ||
+           iree_any_bit_set(row->flags_u16,
+                            IREE_VM_BYTECODE_CALLABLE_TYPE_FLAG_MAY_YIELD))) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "span arguments cannot yield or be returned");
+      }
       if (descriptors[j].kind_u16 != IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION) {
         continue;
       }
@@ -1154,6 +1168,11 @@ static bool iree_vm_bytecode_verify_call_packet(
   }
   const iree_vm_bytecode_v0_signature_row_t* signature =
       &context->layout->signatures.rows[callable_type->signature_ordinal_u16];
+  if (iree_vm_bytecode_signature_has_span_arguments(signature) &&
+      context->function->call_value_scratch_count_u16 <
+          signature->argument_value_count_u16) {
+    return false;
+  }
   if (context->function->value_register_count_u16 <
           iree_vm_bytecode_direct_count(signature->argument_value_count_u16,
                                         signature->result_value_count_u16) ||
