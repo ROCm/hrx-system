@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,6 +24,8 @@
 #include "loom/serve/service/finite/embedding/source_service_test_fixture.h"
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/package.h"
+#include "loom/service/finite/embedding/protocol.h"
+#include "loom/service/finite/registration.h"
 
 namespace loom_serve::testing::embedding {
 
@@ -41,7 +44,144 @@ class ElasticEmbeddingServiceTest : public SourceEmbeddingServiceTest {
     loom_runtime_memory_pool_trim(pool, 0);
     IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
   }
+
+  template <typename Predicate>
+  iree_status_t ProgressRegistrationUntil(
+      loom_service_finite_registration_t* registration, Predicate done) {
+    for (;;) {
+      const auto ticket = iree_notification_prepare_wait(&notification_);
+      auto status = loom_runtime_device_group_advance(group_);
+      const bool progress =
+          loom_service_finite_registration_progress(registration, 0);
+      const auto snapshot =
+          loom_service_finite_registration_snapshot(registration);
+      if (snapshot.phase == LOOM_SERVICE_FINITE_REGISTRATION_RELEASE_FAILED) {
+        status = iree_status_join(status, iree_status_clone(snapshot.status));
+      }
+      const bool complete = done(snapshot);
+      if (complete || progress || !iree_status_is_ok(status)) {
+        iree_notification_cancel_wait(&notification_);
+      } else {
+        iree_notification_commit_wait(&notification_, ticket,
+                                      IREE_DURATION_ZERO,
+                                      IREE_TIME_INFINITE_FUTURE);
+      }
+      if (complete || !iree_status_is_ok(status)) {
+        return status;
+      }
+    }
+  }
 };
+
+TEST_F(ElasticEmbeddingServiceTest,
+       FailedNativeWarmupRetainsAcceptedProtectionUntilRetirement) {
+  const std::string package =
+      iree::testing::MakeTempFilePath("native_warmup_retirement");
+  ASSERT_NO_FATAL_FAILURE(WriteCheckpointPackage(package));
+  loom_serve::testing::ModelDocument document;
+  IREE_ASSERT_OK(document.Load(package + "/model.json"));
+  const loom_service_finite_model_options_t model_options = {
+      .sources = document.value().sources,
+      .asset_directory = IREE_SV("."),
+      .options = document.value().options,
+  };
+  const loom_service_finite_registration_options_t options = {
+      .incarnation = 1,
+      .protocol = loom_service_embedding_protocol(),
+      .name = IREE_SV("native"),
+      .capacity = 1,
+  };
+  const loom_runtime_wake_callback_t observer = {
+      [](void* self) {
+        iree_notification_post(static_cast<iree_notification_t*>(self),
+                               IREE_ALL_WAITERS);
+      },
+      &notification_,
+  };
+  loom_service_finite_registration_t* raw_registration = nullptr;
+  IREE_ASSERT_OK(loom_service_finite_registration_allocate(
+      device_, storage_owner_, &model_options, &options, observer,
+      host_allocator_, &raw_registration));
+  auto retire = [this](loom_service_finite_registration_t* registration) {
+    loom_service_finite_registration_request_retirement(
+        registration, LOOM_SERVICE_FINITE_RETIRE_FLAG_ABORT);
+    IREE_CHECK_OK(
+        ProgressRegistrationUntil(registration, [](const auto& state) {
+          return state.phase == LOOM_SERVICE_FINITE_REGISTRATION_RETIRED;
+        }));
+    loom_service_finite_registration_free(registration);
+  };
+  std::unique_ptr<loom_service_finite_registration_t, decltype(retire)>
+      registration(raw_registration, retire);
+  const auto* control =
+      loom_service_finite_registration_control(registration.get());
+  auto schedule = [&](loom_runtime_service_work_flags_t work) {
+    const auto layout = loom_runtime_service_control_layout(control);
+    for (uint64_t i = 0; i < layout.offer_capacity; ++i) {
+      loom_runtime_service_offer_t offer = {};
+      EXPECT_EQ(loom_runtime_service_read_offer(control, i, &offer),
+                LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+      if (offer.choice_count && offer.work == work) {
+        return loom_service_finite_registration_try_schedule(registration.get(),
+                                                             offer.key, 0, 0);
+      }
+    }
+    return loom_runtime_service_schedule_outcome_t{};
+  };
+  ASSERT_TRUE(schedule(LOOM_RUNTIME_SERVICE_WORK_PREPARATION).accepted);
+  IREE_ASSERT_OK(
+      ProgressRegistrationUntil(registration.get(), [](const auto& state) {
+        return state.phase == LOOM_SERVICE_FINITE_REGISTRATION_READY ||
+               state.phase == LOOM_SERVICE_FINITE_REGISTRATION_FAILED;
+      }));
+  ASSERT_EQ(loom_service_finite_registration_snapshot(registration.get()).phase,
+            LOOM_SERVICE_FINITE_REGISTRATION_READY);
+  ASSERT_TRUE(
+      loom_service_finite_registration_parameters(registration.get()).elastic);
+  loom_runtime::testing::NativeAllocator::ForDevice(device_).FailNextAllocation(
+      IREE_ALLOCATOR_COMMAND_CALLOC, /*native_only=*/true);
+  IREE_ASSERT_OK(loom_service_finite_registration_request_parameters(
+      registration.get(), LOOM_SERVICE_FINITE_PARAMETER_OPERATION_ACTIVATE));
+  const auto accepted = schedule(LOOM_RUNTIME_SERVICE_WORK_ACQUISITION);
+  ASSERT_TRUE(accepted.accepted);
+  IREE_ASSERT_OK(
+      ProgressRegistrationUntil(registration.get(), [](const auto& state) {
+        return state.phase == LOOM_SERVICE_FINITE_REGISTRATION_FAILED;
+      }));
+  const auto failed =
+      loom_service_finite_registration_snapshot(registration.get());
+  EXPECT_EQ(iree_status_code(failed.status), IREE_STATUS_RESOURCE_EXHAUSTED);
+  EXPECT_EQ(failed.parameter_operation,
+            LOOM_SERVICE_FINITE_PARAMETER_OPERATION_NONE);
+  loom_runtime_service_operation_t operation = {};
+  ASSERT_EQ(loom_runtime_service_read_operation(
+                control, accepted.operation.ordinal, &operation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(operation.key.serial, accepted.operation.serial);
+  EXPECT_EQ(operation.work, LOOM_RUNTIME_SERVICE_WORK_ACQUISITION);
+  // The callback joined; protection still lives.
+  EXPECT_EQ(operation.waits, 0u);
+  loom_runtime_service_use_t use = {};
+  EXPECT_EQ(loom_runtime_service_read_operation_use(
+                control, operation.key, operation.publication, 0, &use),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+
+  // No application views remain. Failure cleanup requires no new policy grant,
+  // and only actual native retirement invalidates the accepted use.
+  loom_service_finite_registration_request_retirement(registration.get(), 0);
+  IREE_ASSERT_OK(
+      ProgressRegistrationUntil(registration.get(), [](const auto& state) {
+        return state.phase == LOOM_SERVICE_FINITE_REGISTRATION_RETIRED;
+      }));
+  EXPECT_EQ(loom_runtime_service_read_operation_use(
+                control, operation.key, operation.publication, 0, &use),
+            LOOM_RUNTIME_SERVICE_READ_CHANGED);
+  loom_runtime_service_observation_t observation = {};
+  ASSERT_EQ(loom_runtime_service_read_observation(control, &observation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(observation.pending_operation_count, 0u);
+  EXPECT_EQ(observation.accepted_devices, 0u);
+}
 
 TEST_F(ElasticEmbeddingServiceTest,
        ParameterDeactivationCachesBackingAndReloadsExactly) {
