@@ -57,6 +57,6 @@ int first(Values values) { return loom::view::load(values, 0); }
 func.def public @first(%values: view<4xi32> {access = read}) -> (i32) {
   %2 = scalar.constant 0 : i32
   %3 = index.cast %2 : i32 to index
-  %4 = view.load %values[%3] : view<4xi32> -> i32
+  %4 = view.load<type_disjoint> %values[%3] : view<4xi32> -> i32
   func.return %4 : i32
 }
