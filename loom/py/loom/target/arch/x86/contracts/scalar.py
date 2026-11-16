@@ -346,6 +346,9 @@ def _integer_compare_select_rules(
             guards=(
                 Guard.value_type("condition", _I1),
                 *_typed_guards(("true_value", "false_value", "result"), result_type),
+                # Native FP16 profiles carry half values in XMM even though
+                # other profiles include them in the GPR32 source family.
+                Guard.low_value_register_class("result", f"x86.gpr{result_width}"),
             ),
         )
         for immediate in (True, False):
