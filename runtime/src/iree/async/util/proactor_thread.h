@@ -60,6 +60,11 @@ typedef struct iree_async_proactor_thread_options_t {
   // Default: no affinity (OS scheduler chooses).
   iree_thread_affinity_t affinity;
 
+  // Optional CPU budget bounding affinity before polling begins. Native CPU IDs
+  // follow iree_thread_affinity_set_t. Borrowed only through thread creation;
+  // NULL adds no constraint. An empty set or empty intersection is an error.
+  const iree_thread_affinity_set_t* processor_set;
+
   // Debug name for tracing and diagnostics. Shows in Tracy as the fiber/thread
   // name. Keep it short and descriptive (e.g., "io-main", "net-rx").
   //

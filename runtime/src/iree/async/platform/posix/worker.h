@@ -89,7 +89,8 @@ static_assert(sizeof(iree_async_posix_worker_t) >=
 // On failure, caller should still call deinitialize for cleanup.
 iree_status_t iree_async_posix_worker_initialize(
     struct iree_async_proactor_posix_t* proactor, iree_host_size_t worker_index,
-    iree_thread_affinity_t affinity, iree_allocator_t allocator,
+    iree_thread_affinity_t affinity,
+    const iree_thread_affinity_set_t* processor_set, iree_allocator_t allocator,
     iree_async_posix_worker_t* out_worker);
 
 // Requests that the worker begin exiting.

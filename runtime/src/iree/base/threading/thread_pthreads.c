@@ -156,7 +156,8 @@ iree_status_t iree_thread_create(iree_thread_entry_t entry, void* entry_arg,
     if (params.priority_class != IREE_THREAD_PRIORITY_CLASS_NORMAL) {
       iree_thread_set_priority_class(thread, params.priority_class);
     }
-    status = iree_thread_request_affinity(thread, params.initial_affinity);
+    status = iree_thread_request_affinity(thread, params.initial_affinity,
+                                          params.initial_processor_set);
   }
 
   if (iree_status_is_ok(status)) {
@@ -298,6 +299,10 @@ void iree_thread_override_end(iree_thread_override_t* override) {
 typedef struct iree_thread_cpu_set_builder_t {
   // Native mask populated by the sysfs CPU-list parser.
   cpu_set_t* set;
+  // Native mask capacity in bytes.
+  iree_host_size_t size;
+  // Optional application budget bounding the requested node's processors.
+  const iree_thread_affinity_set_t* processor_set;
   // Whether the node contains CPUs outside the native mask representation.
   bool overflow;
 } iree_thread_cpu_set_builder_t;
@@ -305,20 +310,26 @@ typedef struct iree_thread_cpu_set_builder_t {
 static bool iree_thread_cpu_set_add_range(uint32_t start_cpu, uint32_t end_cpu,
                                           void* user_data) {
   iree_thread_cpu_set_builder_t* builder = user_data;
-  if (end_cpu > CPU_SETSIZE) {
+  if (builder->processor_set) {
+    end_cpu = iree_min(end_cpu, IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT);
+  } else if (end_cpu > builder->size * 8) {
     builder->overflow = true;
     return false;
   }
   for (uint32_t cpu = start_cpu; cpu < end_cpu; ++cpu) {
-    CPU_SET(cpu, builder->set);
+    if (!builder->processor_set ||
+        iree_thread_affinity_set_test(builder->processor_set, cpu)) {
+      CPU_SET_S(cpu, builder->size, builder->set);
+    }
   }
   return true;
 }
 
 // Uses the shared sysfs CPU-list parser so NUMA masks have the same numbering
 // as topology discovery. An absent or unrepresentable node is an error.
-static iree_status_t iree_thread_make_cpu_set_from_node_id(uint32_t node_id,
-                                                           cpu_set_t* out_set) {
+static iree_status_t iree_thread_make_cpu_set_from_node_id(
+    uint32_t node_id, const iree_thread_affinity_set_t* processor_set,
+    iree_host_size_t native_size, cpu_set_t* out_set) {
   char path[128];
   iree_snprintf(path, sizeof(path), "%s/node/node%u/cpulist",
                 iree_sysfs_get_root_path(), node_id);
@@ -326,60 +337,188 @@ static iree_status_t iree_thread_make_cpu_set_from_node_id(uint32_t node_id,
   iree_host_size_t length = 0;
   IREE_RETURN_IF_ERROR(
       iree_sysfs_read_small_file(path, buffer, sizeof(buffer), &length));
-  iree_thread_cpu_set_builder_t builder = {.set = out_set};
+  iree_thread_cpu_set_builder_t builder = {
+      .set = out_set,
+      .size = native_size,
+      .processor_set = processor_set,
+  };
   IREE_RETURN_IF_ERROR(
       iree_sysfs_parse_cpu_list(iree_make_string_view(buffer, length),
                                 iree_thread_cpu_set_add_range, &builder));
   if (builder.overflow) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "NUMA node %u CPU mask exceeds %u CPUs", node_id,
-                            (unsigned)CPU_SETSIZE);
+                            (unsigned)(native_size * 8));
   }
   return iree_ok_status();
 }
 
-iree_status_t iree_thread_request_affinity(iree_thread_t* thread,
-                                           iree_thread_affinity_t affinity) {
-  if (iree_thread_affinity_is_unspecified(affinity)) {
-    return iree_ok_status();
+#if IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS
+// Formats CPU ranges into bounded diagnostic storage. Large sparse sets include
+// an explicit ellipsis and total CPU count instead of allocating scratch space.
+// Both callers provide at least 256 bytes for ranges and the omission suffix.
+static void iree_thread_format_cpu_set(const cpu_set_t* set,
+                                       iree_host_size_t native_size,
+                                       char* buffer,
+                                       iree_host_size_t buffer_capacity) {
+  iree_host_size_t length = 0;
+  char suffix[48];
+  iree_snprintf(suffix, sizeof(suffix), ",... (%d CPUs total)",
+                CPU_COUNT_S(native_size, set));
+  for (iree_host_size_t cpu = 0; cpu < native_size * 8; ++cpu) {
+    if (!CPU_ISSET_S(cpu, native_size, set)) {
+      continue;
+    }
+    const iree_host_size_t start = cpu;
+    while (cpu + 1 < native_size * 8 &&
+           CPU_ISSET_S(cpu + 1, native_size, set)) {
+      ++cpu;
+    }
+    char range[48];
+    iree_host_size_t range_length = 0;
+    if (cpu == start) {
+      range_length = iree_snprintf(range, sizeof(range), "%s%" PRIhsz,
+                                   length ? "," : "", start);
+    } else {
+      range_length =
+          iree_snprintf(range, sizeof(range), "%s%" PRIhsz "-%" PRIhsz,
+                        length ? "," : "", start, cpu);
+    }
+    if (length + range_length + sizeof(suffix) > buffer_capacity) {
+      iree_snprintf(buffer + length, buffer_capacity - length, "%s", suffix);
+      return;
+    }
+    memcpy(buffer + length, range, range_length);
+    length += range_length;
   }
-  cpu_set_t cpu_set;
-  CPU_ZERO(&cpu_set);
-  if (affinity.group_any) {
-    IREE_RETURN_IF_ERROR(
-        iree_thread_make_cpu_set_from_node_id(affinity.group, &cpu_set));
+  if (length) {
+    buffer[length] = 0;
   } else {
-    if (affinity.id >= CPU_SETSIZE ||
-        (affinity.smt && affinity.id + 1 >= CPU_SETSIZE)) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "CPU %u exceeds native affinity mask",
-                              affinity.id);
-    }
-    CPU_SET(affinity.id, &cpu_set);
-    if (affinity.smt) {
-      CPU_SET(affinity.id + 1, &cpu_set);
-    }
+    iree_snprintf(buffer, buffer_capacity, "none");
   }
+}
 
+// Queries only the target thread. Its current affinity may include inherited
+// application policy and is not the enclosing cgroup's full CPU allowance.
+static void iree_thread_format_observed_affinity(
+    iree_thread_t* thread, char* buffer, iree_host_size_t buffer_capacity) {
+  const iree_host_size_t native_size =
+      CPU_ALLOC_SIZE(IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT);
+  cpu_set_t* observed_set = iree_alloca(native_size);
+  CPU_ZERO_S(native_size, observed_set);
   int rc = 0;
 #if defined(IREE_PLATFORM_ANDROID)
 #if __ANDROID_API__ >= 21
-  rc = sched_setaffinity(pthread_gettid_np(thread->handle), sizeof(cpu_set),
-                         &cpu_set) == 0
+  rc = sched_getaffinity(pthread_gettid_np(thread->handle), native_size,
+                         observed_set) == 0
            ? 0
            : errno;
 #else
-  return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                          "thread affinity requires Android API 21");
+  rc = ENOSYS;
 #endif  // __ANDROID_API__ >= 21
 #else
-  rc = pthread_setaffinity_np(thread->handle, sizeof(cpu_set), &cpu_set);
+  rc = pthread_getaffinity_np(thread->handle, native_size, observed_set);
 #endif  // IREE_PLATFORM_ANDROID
   if (rc != 0) {
-    return iree_make_status(iree_status_code_from_errno(rc),
-                            "cannot apply thread affinity: %s", strerror(rc));
+    iree_snprintf(buffer, buffer_capacity, "unavailable (errno %d)", rc);
+  } else {
+    iree_thread_format_cpu_set(observed_set, native_size, buffer,
+                               buffer_capacity);
   }
-  return iree_ok_status();
+}
+#endif  // IREE_STATUS_FEATURE_ANNOTATIONS
+
+static iree_status_t iree_thread_affinity_failure(
+    iree_thread_t* thread, iree_thread_affinity_t affinity,
+    const cpu_set_t* requested_set, iree_host_size_t native_size, int error) {
+#if IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS
+  char requested[256];
+  iree_thread_format_cpu_set(requested_set, native_size, requested,
+                             sizeof(requested));
+  char observed[256];
+  iree_thread_format_observed_affinity(thread, observed, sizeof(observed));
+  char node[64] = {0};
+  if (affinity.group_any) {
+    iree_snprintf(node, sizeof(node), "requested NUMA node %u; ",
+                  affinity.group);
+  }
+  return iree_make_status(
+      iree_status_code_from_errno(error),
+      "cannot apply thread affinity: %s (errno %d); thread '%s'; %s"
+      "requested CPUs [%s]; observed thread affinity after rejection [%s]",
+      strerror(error), error, thread->name, node, requested, observed);
+#else
+  return iree_make_status(iree_status_code_from_errno(error),
+                          "cannot apply thread affinity: %s (errno %d)",
+                          strerror(error), error);
+#endif  // IREE_STATUS_FEATURE_ANNOTATIONS
+}
+
+iree_status_t iree_thread_request_affinity(
+    iree_thread_t* thread, iree_thread_affinity_t affinity,
+    const iree_thread_affinity_set_t* processor_set) {
+  if (iree_thread_affinity_is_unspecified(affinity) && !processor_set) {
+    return iree_ok_status();
+  }
+  const iree_host_size_t native_size =
+      CPU_ALLOC_SIZE(IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT);
+  cpu_set_t* native_set = iree_alloca(native_size);
+  CPU_ZERO_S(native_size, native_set);
+  iree_status_t status = iree_ok_status();
+  if (affinity.group_any) {
+    status = iree_thread_make_cpu_set_from_node_id(
+        affinity.group, processor_set, native_size, native_set);
+    if (!iree_status_is_ok(status)) {
+      status =
+          iree_status_annotate_f(status, "thread '%s'; requested NUMA node %u",
+                                 thread->name, affinity.group);
+    }
+  } else if (affinity.id_assigned) {
+    if (!processor_set && affinity.id + affinity.smt >= native_size * 8) {
+      status =
+          iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                           "thread '%s'; CPU %u exceeds native affinity mask",
+                           thread->name, affinity.id);
+    } else {
+      for (uint32_t cpu = affinity.id; cpu <= affinity.id + affinity.smt;
+           ++cpu) {
+        if (!processor_set ||
+            iree_thread_affinity_set_test(processor_set, cpu)) {
+          CPU_SET_S(cpu, native_size, native_set);
+        }
+      }
+    }
+  } else {
+    for (iree_host_size_t cpu =
+             iree_thread_affinity_set_find_first_set(processor_set, 0);
+         cpu < IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT;
+         cpu =
+             iree_thread_affinity_set_find_first_set(processor_set, cpu + 1)) {
+      CPU_SET_S(cpu, native_size, native_set);
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    int rc = 0;
+#if defined(IREE_PLATFORM_ANDROID)
+#if __ANDROID_API__ >= 21
+    rc = sched_setaffinity(pthread_gettid_np(thread->handle), native_size,
+                           native_set) == 0
+             ? 0
+             : errno;
+#else
+    status = iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "thread affinity requires Android API 21");
+#endif  // __ANDROID_API__ >= 21
+#else
+    rc = pthread_setaffinity_np(thread->handle, native_size, native_set);
+#endif  // IREE_PLATFORM_ANDROID
+    if (rc != 0) {
+      status = iree_thread_affinity_failure(thread, affinity, native_set,
+                                            native_size, rc);
+    }
+  }
+  return status;
 }
 
 void iree_thread_resume(iree_thread_t* thread) {

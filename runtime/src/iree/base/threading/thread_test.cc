@@ -6,8 +6,11 @@
 
 #include "iree/base/threading/thread.h"
 
+#include <array>
+#include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <string>
 #include <thread>
 
 #include "iree/base/internal/atomics.h"
@@ -19,6 +22,7 @@
 
 #if defined(IREE_PLATFORM_LINUX)
 #include <sched.h>
+#include <unistd.h>
 #endif  // IREE_PLATFORM_LINUX
 
 namespace {
@@ -275,7 +279,7 @@ TEST(ThreadTest, RequestAffinity) {
   uint32_t node = iree_numa_node_for_current_thread();
   iree_thread_affinity_t affinity;
   iree_thread_affinity_set_group_any(node, &affinity);
-  IREE_EXPECT_OK(iree_thread_request_affinity(thread, affinity));
+  IREE_EXPECT_OK(iree_thread_request_affinity(thread, affinity, nullptr));
   iree_thread_resume(thread);
   iree_thread_release(thread);
   EXPECT_EQ(node, observed_node);
@@ -324,13 +328,292 @@ TEST(ThreadTest, InvalidAllocatorClearsOutput) {
   EXPECT_EQ(nullptr, thread);
 }
 
+TEST(ThreadAffinityTest, SparseSetQueriesPreserveNativeCpuIds) {
+  iree_thread_affinity_set_t processors = {};
+  EXPECT_TRUE(iree_thread_affinity_set_is_empty(&processors));
+  constexpr iree_host_size_t kCapacity =
+      IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT;
+  const iree_bitmap_t bitmap = iree_thread_affinity_set_bitmap(&processors);
+  for (iree_host_size_t cpu :
+       {iree_host_size_t{0}, kCapacity / 2, kCapacity - 1}) {
+    iree_bitmap_set(bitmap, cpu);
+  }
+  EXPECT_FALSE(iree_thread_affinity_set_is_empty(&processors));
+  EXPECT_EQ(iree_thread_affinity_set_find_first_set(&processors, 0), 0u);
+  EXPECT_EQ(iree_thread_affinity_set_find_first_set(&processors, 1),
+            kCapacity / 2);
+  EXPECT_EQ(
+      iree_thread_affinity_set_find_first_set(&processors, kCapacity / 2 + 1),
+      kCapacity - 1);
+  EXPECT_EQ(iree_thread_affinity_set_find_first_set(&processors, kCapacity),
+            kCapacity);
+  EXPECT_FALSE(iree_thread_affinity_set_test(&processors, kCapacity));
+  for (iree_host_size_t cpu = 0; cpu < kCapacity; ++cpu) {
+    EXPECT_EQ(iree_thread_affinity_set_test(&processors, cpu),
+              cpu == 0 || cpu == kCapacity / 2 || cpu == kCapacity - 1);
+  }
+}
+
 #if defined(IREE_PLATFORM_LINUX)
+// Native readback is independent of the portable capture/conversion under test.
+using NativeCpuSet =
+    std::array<cpu_set_t,
+               (IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT + CPU_SETSIZE - 1) /
+                   CPU_SETSIZE>;
+
+TEST(ThreadAffinityTest, QueryCurrentMatchesNativeAffinity) {
+  NativeCpuSet native = {};
+  ASSERT_EQ(0, sched_getaffinity(0, sizeof(native), native.data()));
+  iree_thread_affinity_set_t captured;
+  memset(&captured, 0xFF, sizeof(captured));
+  IREE_ASSERT_OK(iree_thread_affinity_query_current(&captured));
+  iree_bitmap_t mask = iree_thread_affinity_set_bitmap(&captured);
+  EXPECT_EQ(iree_bitmap_count(mask),
+            CPU_COUNT_S(sizeof(native), native.data()));
+  for (iree_host_size_t cpu = 0; cpu < mask.bit_count; ++cpu) {
+    EXPECT_EQ(iree_thread_affinity_set_test(&captured, cpu),
+              CPU_ISSET_S(cpu, sizeof(native), native.data()) != 0)
+        << "CPU " << cpu;
+  }
+}
+
+TEST(ThreadTest, CapturedBudgetSurvivesPinnedCreator) {
+  iree_thread_affinity_set_t captured_set;
+  IREE_ASSERT_OK(iree_thread_affinity_query_current(&captured_set));
+  iree_bitmap_t captured = iree_thread_affinity_set_bitmap(&captured_set);
+  const iree_host_size_t selected_cpu = iree_bitmap_find_first_set(captured, 0);
+  ASSERT_LT(selected_cpu, captured.bit_count);
+
+  for (bool node_local : {false, true}) {
+    SCOPED_TRACE(node_local ? "node within budget" : "captured budget");
+    iree_thread_affinity_set_t budget_set = captured_set;
+    iree_bitmap_t budget = iree_thread_affinity_set_bitmap(&budget_set);
+    if (node_local) {
+      iree_bitmap_reset_all(budget);
+      iree_bitmap_set(budget, selected_cpu);
+    }
+    struct State {
+      // Child startup input borrowing the application-owned budget.
+      iree_thread_create_params_t child_params = {};
+      // Effective child affinity stored in the waiting owner's state.
+      iree_thread_affinity_set_t observed = {};
+      // Native creation or query failure propagated to the outer test.
+      iree_status_t status = iree_ok_status();
+    } state;
+    state.child_params.initial_processor_set = &budget_set;
+    if (node_local) {
+      iree_thread_affinity_set_group_any(0,
+                                         &state.child_params.initial_affinity);
+    }
+    const iree_thread_create_params_t creator_params = {
+        .initial_affinity =
+            {
+                .id_assigned = 1,
+                .id = static_cast<uint32_t>(selected_cpu),
+            },
+        .initial_processor_set = &budget_set,
+    };
+    iree_thread_t* creator = nullptr;
+    IREE_ASSERT_OK(iree_thread_create(
+        +[](void* arg) -> int {
+          auto* state = static_cast<State*>(arg);
+          if (state->child_params.initial_affinity.group_any) {
+            state->child_params.initial_affinity.group =
+                iree_numa_node_for_current_thread();
+          }
+          iree_thread_t* child = nullptr;
+          iree_status_t status = iree_thread_create(
+              +[](void* arg) -> int {
+                auto* state = static_cast<State*>(arg);
+                state->status =
+                    iree_thread_affinity_query_current(&state->observed);
+                return 0;
+              },
+              state, state->child_params, iree_allocator_system(), &child);
+          iree_thread_release(child);
+          state->status = iree_status_join(status, state->status);
+          return 0;
+        },
+        &state, creator_params, iree_allocator_system(), &creator));
+    iree_thread_release(creator);
+    IREE_EXPECT_OK(state.status);
+    iree_bitmap_t observed = iree_thread_affinity_set_bitmap(&state.observed);
+    EXPECT_EQ(iree_bitmap_count(observed), iree_bitmap_count(budget));
+    for (iree_host_size_t cpu = 0; cpu < observed.bit_count; ++cpu) {
+      EXPECT_EQ(iree_bitmap_test(observed, cpu),
+                cpu < budget.bit_count && iree_bitmap_test(budget, cpu))
+          << "CPU " << cpu;
+    }
+  }
+}
+
+TEST(ThreadTest, EmptyProcessorBudgetNeverCallsEntry) {
+  const iree_thread_affinity_set_t processors = {};
+  const iree_thread_create_params_t params = {
+      .initial_processor_set = &processors,
+  };
+  bool called = false;
+  iree_thread_t* thread = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_thread_create(
+                            +[](void* arg) -> int {
+                              *static_cast<bool*>(arg) = true;
+                              return 0;
+                            },
+                            &called, params, iree_allocator_system(), &thread));
+  EXPECT_EQ(thread, nullptr);
+  EXPECT_FALSE(called);
+}
+
+TEST(ThreadTest, UnrepresentableProcessorNeverCallsEntry) {
+  const iree_thread_create_params_t params = {
+      .initial_affinity =
+          {
+              .id_assigned = 1,
+              .id = IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT,
+          },
+  };
+  bool called = false;
+  iree_thread_t* thread = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        iree_thread_create(
+                            +[](void* arg) -> int {
+                              *static_cast<bool*>(arg) = true;
+                              return 0;
+                            },
+                            &called, params, iree_allocator_system(), &thread));
+  EXPECT_EQ(thread, nullptr);
+  EXPECT_FALSE(called);
+}
+
+TEST(ThreadTest, RejectedAffinityReportsTargetThread) {
+  // A missing CPU is rejected by the real kernel without requiring a cgroup
+  // mutation or changing the test thread's own placement.
+  constexpr int rejected_cpu = IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT - 2;
+  ASSERT_EQ(0, access("/sys/devices/system/cpu", F_OK));
+  for (int cpu = rejected_cpu; cpu < IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT;
+       ++cpu) {
+    const std::string path =
+        "/sys/devices/system/cpu/cpu" + std::to_string(cpu);
+    if (access(path.c_str(), F_OK) == 0) {
+      GTEST_SKIP() << "CPU " << cpu << " exists on this system";
+    }
+    ASSERT_EQ(ENOENT, errno);
+  }
+
+  NativeCpuSet inherited = {};
+  ASSERT_EQ(0, sched_getaffinity(0, sizeof(inherited), inherited.data()));
+  int selected_cpu = 0;
+  while (selected_cpu < IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT &&
+         !CPU_ISSET_S(selected_cpu, sizeof(inherited), inherited.data())) {
+    ++selected_cpu;
+  }
+  ASSERT_LT(selected_cpu, IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT);
+  iree_thread_create_params_t params = {
+      .name = IREE_SV("affinity-test"),
+      .create_suspended = true,
+      .initial_affinity =
+          {
+              .id_assigned = 1,
+              .id = static_cast<uint32_t>(selected_cpu),
+          },
+  };
+  bool called = false;
+  const iree_thread_entry_t entry = +[](void* arg) -> int {
+    *static_cast<bool*>(arg) = true;
+    return 0;
+  };
+  iree_thread_t* thread = nullptr;
+  IREE_ASSERT_OK(iree_thread_create(entry, &called, params,
+                                    iree_allocator_system(), &thread));
+
+  iree_thread_affinity_t rejected = {
+      .id_assigned = 1,
+      .id = rejected_cpu,
+      .smt = 1,
+  };
+  iree_status_t status =
+      iree_thread_request_affinity(thread, rejected, nullptr);
+  EXPECT_EQ(IREE_STATUS_INVALID_ARGUMENT, iree_status_code(status));
+#if IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS
+  const std::string message = iree::Status::ToString(status);
+  EXPECT_THAT(message, ::testing::HasSubstr("thread 'affinity-test'"));
+  EXPECT_THAT(message, ::testing::HasSubstr(
+                           "requested CPUs [" + std::to_string(rejected_cpu) +
+                           "-" + std::to_string(rejected_cpu + 1) + "]"));
+  EXPECT_THAT(message, ::testing::HasSubstr(
+                           "observed thread affinity after rejection [" +
+                           std::to_string(selected_cpu) + "]"));
+  EXPECT_THAT(message, ::testing::HasSubstr("errno " + std::to_string(EINVAL)));
+#endif  // IREE_STATUS_FEATURE_ANNOTATIONS
+  iree_status_free(status);
+  EXPECT_FALSE(called);
+  iree_thread_resume(thread);
+  iree_thread_release(thread);
+  EXPECT_TRUE(called);
+
+  // The same native rejection during startup must retire the suspended native
+  // thread without ever admitting the user's entry routine.
+  called = false;
+  params.create_suspended = false;
+  params.initial_affinity = rejected;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_thread_create(entry, &called, params,
+                                           iree_allocator_system(), &thread));
+  EXPECT_EQ(nullptr, thread);
+  EXPECT_FALSE(called);
+}
+
+TEST(ThreadTest, RejectedSparseBudgetReportsOmission) {
+  iree_thread_affinity_set_t processors = {};
+  iree_bitmap_t budget = iree_thread_affinity_set_bitmap(&processors);
+  const iree_host_size_t first_cpu =
+      budget.bit_count > 128 ? budget.bit_count - 128 : 0;
+  ASSERT_EQ(0, access("/sys/devices/system/cpu", F_OK));
+  for (iree_host_size_t cpu = first_cpu; cpu < budget.bit_count; cpu += 2) {
+    const std::string path =
+        "/sys/devices/system/cpu/cpu" + std::to_string(cpu);
+    if (access(path.c_str(), F_OK) == 0) {
+      GTEST_SKIP() << "CPU " << cpu << " exists on this system";
+    }
+    ASSERT_EQ(ENOENT, errno);
+    iree_bitmap_set(budget, cpu);
+  }
+  const iree_thread_create_params_t params = {
+      .name = IREE_SV("sparse-budget"),
+      .initial_processor_set = &processors,
+  };
+  bool called = false;
+  iree_thread_t* thread = nullptr;
+  iree_status_t status = iree_thread_create(
+      +[](void* arg) -> int {
+        *static_cast<bool*>(arg) = true;
+        return 0;
+      },
+      &called, params, iree_allocator_system(), &thread);
+  EXPECT_EQ(IREE_STATUS_INVALID_ARGUMENT, iree_status_code(status));
+#if IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS
+  const std::string message = iree::Status::ToString(status);
+  EXPECT_THAT(message, ::testing::HasSubstr("thread 'sparse-budget'"));
+  EXPECT_THAT(message, ::testing::HasSubstr("requested CPUs [" +
+                                            std::to_string(first_cpu) + ","));
+  EXPECT_THAT(message, ::testing::HasSubstr(
+                           "... (" + std::to_string(iree_bitmap_count(budget)) +
+                           " CPUs total)]"));
+  EXPECT_THAT(message, ::testing::HasSubstr(
+                           "observed thread affinity after rejection ["));
+#endif  // IREE_STATUS_FEATURE_ANNOTATIONS
+  iree_status_free(status);
+  EXPECT_EQ(nullptr, thread);
+  EXPECT_FALSE(called);
+}
+
 TEST(ThreadTest, CpuAffinityBeforeEntry) {
-  cpu_set_t allowed;
-  ASSERT_EQ(0, sched_getaffinity(0, sizeof(allowed), &allowed));
+  NativeCpuSet allowed = {};
+  ASSERT_EQ(0, sched_getaffinity(0, sizeof(allowed), allowed.data()));
   int cpu = -1;
-  for (int i = CPU_SETSIZE - 1; i >= 0; --i) {
-    if (CPU_ISSET(i, &allowed)) {
+  for (int i = IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT - 1; i >= 0; --i) {
+    if (CPU_ISSET_S(i, sizeof(allowed), allowed.data())) {
       cpu = i;
       break;
     }
@@ -340,19 +623,18 @@ TEST(ThreadTest, CpuAffinityBeforeEntry) {
   iree_thread_create_params_t params = {};
   params.initial_affinity.id_assigned = 1;
   params.initial_affinity.id = cpu;
-  cpu_set_t observed;
-  CPU_ZERO(&observed);
+  NativeCpuSet observed = {};
   iree_thread_t* thread = nullptr;
   IREE_ASSERT_OK(iree_thread_create(
       +[](void* arg) -> int {
-        EXPECT_EQ(0, sched_getaffinity(0, sizeof(cpu_set_t),
-                                       static_cast<cpu_set_t*>(arg)));
+        auto* observed = static_cast<NativeCpuSet*>(arg);
+        EXPECT_EQ(0, sched_getaffinity(0, sizeof(*observed), observed->data()));
         return 0;
       },
       &observed, params, iree_allocator_system(), &thread));
   iree_thread_release(thread);
-  EXPECT_EQ(1, CPU_COUNT(&observed));
-  EXPECT_TRUE(CPU_ISSET(cpu, &observed));
+  EXPECT_EQ(1, CPU_COUNT_S(sizeof(observed), observed.data()));
+  EXPECT_TRUE(CPU_ISSET_S(cpu, sizeof(observed), observed.data()));
 }
 
 TEST(ThreadTest, FailedNativeCreationNeverCallsEntry) {

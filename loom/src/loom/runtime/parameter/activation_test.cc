@@ -32,7 +32,7 @@ class ActivationTest : public ::testing::TestWithParam<uint32_t> {
   }
 
   void SetUp() override {
-    IREE_ASSERT_OK(loom_runtime_host_create(GetParam(), nullptr,
+    IREE_ASSERT_OK(loom_runtime_host_create(GetParam(), nullptr, nullptr,
                                             iree_allocator_system(), &host_));
     const loom_runtime_device_options_t options = {
         .driver = loom_runtime_host_task_driver(host_),

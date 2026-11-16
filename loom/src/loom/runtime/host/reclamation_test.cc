@@ -34,7 +34,8 @@ class ReclamationTest : public ::testing::Test {
           const auto backing = iree_allocator_system();
           return backing.ctl(backing.self, command, parameters, pointer);
         }};
-    IREE_ASSERT_OK(loom_runtime_host_create(1, nullptr, allocator, &host_));
+    IREE_ASSERT_OK(
+        loom_runtime_host_create(1, nullptr, nullptr, allocator, &host_));
   }
 
   void TearDown() override {

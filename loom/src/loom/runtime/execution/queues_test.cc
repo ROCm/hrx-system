@@ -29,8 +29,8 @@ TEST(ExecutionQueuesTest, NullLifetimeOperations) {
 class ExecutionQueuesTest : public ::testing::TestWithParam<bool> {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(
-        loom_runtime_host_create(2, nullptr, iree_allocator_system(), &host_));
+    IREE_ASSERT_OK(loom_runtime_host_create(2, nullptr, nullptr,
+                                            iree_allocator_system(), &host_));
     IREE_ASSERT_OK(loom_runtime_test_driver_acquire(host_, &driver_));
     const loom_runtime_device_options_t options = {
         .driver = driver_,

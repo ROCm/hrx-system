@@ -19,8 +19,8 @@ TEST(DeviceGroupTest, ExternallyOwnedResourcesHaveNoProgressObligations) {
 class DeviceTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(
-        loom_runtime_host_create(1, nullptr, iree_allocator_system(), &host));
+    IREE_ASSERT_OK(loom_runtime_host_create(1, nullptr, nullptr,
+                                            iree_allocator_system(), &host));
   }
   void TearDown() override { loom_runtime_host_release(host); }
 

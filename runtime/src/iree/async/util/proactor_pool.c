@@ -197,14 +197,26 @@ iree_status_t iree_async_proactor_pool_create(
                             "node_count must be >= 1");
   }
 
+  const iree_thread_affinity_set_t* processor_set =
+      options.proactor_options.worker_processor_set;
+  if (processor_set && iree_thread_affinity_set_is_empty(processor_set)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "processor budget contains no CPUs");
+  }
+
   // Allocate the pool and its lightweight slot table together. Proactors,
   // runners, and independently retained entries remain lazily allocated.
   iree_host_size_t total_size = 0;
+  iree_host_size_t processor_set_offset = 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, IREE_STRUCT_LAYOUT(
-              iree_sizeof_struct(iree_async_proactor_pool_t), &total_size,
-              IREE_STRUCT_FIELD(node_count, iree_async_proactor_pool_slot_t,
-                                /*out_offset=*/NULL)));
+      z0,
+      IREE_STRUCT_LAYOUT(
+          iree_sizeof_struct(iree_async_proactor_pool_t), &total_size,
+          IREE_STRUCT_FIELD(node_count, iree_async_proactor_pool_slot_t,
+                            /*out_offset=*/NULL),
+          IREE_STRUCT_FIELD(processor_set ? 1 : 0, iree_thread_affinity_set_t,
+                            &processor_set_offset)));
   iree_async_proactor_pool_t* pool = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(allocator, total_size, (void**)&pool));
@@ -213,6 +225,12 @@ iree_status_t iree_async_proactor_pool_create(
   iree_atomic_ref_count_init(&pool->ref_count);
   pool->allocator = allocator;
   pool->options = options;
+  if (processor_set) {
+    iree_thread_affinity_set_t* retained_set =
+        (iree_thread_affinity_set_t*)((uint8_t*)pool + processor_set_offset);
+    *retained_set = *processor_set;
+    pool->options.proactor_options.worker_processor_set = retained_set;
+  }
   iree_slim_mutex_initialize(&pool->mutex);
   pool->count = node_count;
 
@@ -288,6 +306,7 @@ static iree_status_t iree_async_proactor_pool_ensure_entry_locked(
   if (iree_status_is_ok(status) && entry->runner_factory.create) {
     status = entry->runner_factory.create(entry->runner_factory.user_data,
                                           entry->proactor, entry->node_id,
+                                          proactor_options.worker_processor_set,
                                           entry->allocator, &entry->runner);
   }
 

@@ -464,7 +464,14 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
     iree_task_topology_node_id_t node_id,
     iree_task_topology_performance_level_t performance_level,
     iree_task_topology_distribution_t distribution,
-    iree_host_size_t max_core_count, iree_task_topology_t* out_topology) {
+    iree_host_size_t max_core_count,
+    const iree_thread_affinity_set_t* processor_set,
+    iree_task_topology_t* out_topology) {
+  iree_task_topology_initialize(out_topology);
+  if (processor_set && iree_thread_affinity_set_is_empty(processor_set)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "processor budget contains no CPUs");
+  }
   // NOTE: win32 implementation doesn't currently support cache-domain-aware
   // distribution strategies. The distribution parameter is accepted for API
   // compatibility but ignored.
@@ -472,8 +479,6 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
 
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)node_id);
-
-  iree_task_topology_initialize(out_topology);
 
   // Query the total size required for all information and allocate storage for
   // it on the stack - it's generally just a few KB.
@@ -523,9 +528,8 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
     }
   }
   typedef struct group_info_t {
-    // 1 if the group is included in the current filter.
-    // If 0 then all processors in the group are to be ignored.
-    uint32_t selected : 1;
+    // CPUs permitted by the NUMA-node filter and application budget.
+    KAFFINITY permitted_mask;
     // Bitmask indicating which cores in the group are selected for use.
     KAFFINITY affinity_mask;
   } group_info_t;
@@ -543,15 +547,28 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
       if (node_id == IREE_TASK_TOPOLOGY_NODE_ID_ANY ||
           p->NumaNode.NodeNumber == node_id) {
         if (p->NumaNode.GroupCount == 0) {
-          group_table[p->NumaNode.GroupMask.Group].selected =
-              p->NumaNode.GroupMask.Mask != 0;
+          group_table[p->NumaNode.GroupMask.Group].permitted_mask |=
+              p->NumaNode.GroupMask.Mask;
         } else {
           for (WORD i = 0; i < p->NumaNode.GroupCount; ++i) {
-            group_table[p->NumaNode.GroupMasks[i].Group].selected =
-                p->NumaNode.GroupMasks[i].Mask != 0;
+            group_table[p->NumaNode.GroupMasks[i].Group].permitted_mask |=
+                p->NumaNode.GroupMasks[i].Mask;
           }
         }
       }
+    }
+  }
+
+  if (processor_set) {
+    for (iree_host_size_t group = 0; group < max_group_count; ++group) {
+      KAFFINITY budget_mask = 0;
+      for (iree_host_size_t bit = 0; bit < sizeof(KAFFINITY) * 8; ++bit) {
+        const iree_host_size_t processor = group * 64 + bit;
+        if (iree_thread_affinity_set_test(processor_set, processor)) {
+          budget_mask |= (KAFFINITY)1 << bit;
+        }
+      }
+      group_table[group].permitted_mask &= budget_mask;
     }
   }
 
@@ -576,8 +593,11 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
        p = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*)((uintptr_t)p + p->Size)) {
     if (p->Relationship == RelationProcessorCore) {
       assert(p->Processor.GroupCount == 1);
-      if (!group_table[p->Processor.GroupMask[0].Group].selected) {
-        // NUMA group was not selected for inclusion.
+      group_info_t* group_info = &group_table[p->Processor.GroupMask[0].Group];
+      const KAFFINITY permitted_mask =
+          p->Processor.GroupMask[0].Mask & group_info->permitted_mask;
+      if (!permitted_mask) {
+        // This core has no CPUs satisfying the node and budget filters.
         continue;
       } else if (!iree_task_topology_core_is_selected(has_heterogeneous_cores,
                                                       performance_level,
@@ -585,15 +605,15 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
         // Core filtered based on performance level setting.
         continue;
       }
-      group_info_t* group_info = &group_table[p->Processor.GroupMask[0].Group];
-      group_info->affinity_mask |= p->Processor.GroupMask[0].Mask;
+      group_info->affinity_mask |= permitted_mask;
       ++selected_core_count;
     }
   }
   if (!selected_core_count) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "no processors found with NUMA node ID %u",
+                            "no processors satisfy NUMA node ID %u and the "
+                            "processor budget",
                             node_id);
   }
 
@@ -613,7 +633,8 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
   // Clamp the total number of cores available to the max provided.
   // This is the number of topology groups we'll create.
   iree_host_size_t used_core_count =
-      iree_min(selected_core_count, max_core_count);
+      iree_min(selected_core_count,
+               iree_min(max_core_count, IREE_TASK_TOPOLOGY_MAX_GROUP_COUNT));
 
   // Check if the current (base) processor is part of the filtered groups.
   // If so we perform rotation to favor cores other than the current one.
@@ -623,12 +644,13 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
   GetCurrentProcessorNumberEx(&base_processor_number);
   group_info_t* base_group = &group_table[base_processor_number.Group];
   iree_host_size_t base_core_index = -1;
-  if (base_group->selected &&
-      base_group->affinity_mask & (1ull << base_processor_number.Number)) {
+  if (base_group->affinity_mask & (1ull << base_processor_number.Number)) {
     for (iree_host_size_t core_index = 0; core_index < total_core_count;
          ++core_index) {
-      if (all_cores[core_index]->GroupMask[0].Mask &
-          (1ull << base_processor_number.Number)) {
+      if (all_cores[core_index]->GroupMask[0].Group ==
+              base_processor_number.Group &&
+          (all_cores[core_index]->GroupMask[0].Mask &
+           (1ull << base_processor_number.Number))) {
         base_core_index = core_index;
         break;
       }
@@ -643,26 +665,29 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
   // sense vs being random as it is now.
 
   // Initialize all topology groups from the selected cores.
-  for (iree_host_size_t used_core_index = 0;
-       used_core_index < used_core_count;) {
-    iree_host_size_t adjusted_core_index = used_core_index;
+  for (iree_host_size_t core_offset = 0;
+       core_offset < total_core_count &&
+       out_topology->group_count < used_core_count;
+       ++core_offset) {
+    iree_host_size_t adjusted_core_index = core_offset;
     if (base_core_index != -1) {
       // Rotate the starting core index by the base core such that we only use
       // the base core if all other available cores are utilized.
       adjusted_core_index =
-          (((base_core_index + 1) % total_core_count) + used_core_index) %
+          (((base_core_index + 1) % total_core_count) + core_offset) %
           total_core_count;
     }
 
     PROCESSOR_RELATIONSHIP* core = all_cores[adjusted_core_index];
-    if (!iree_task_topology_core_is_selected(has_heterogeneous_cores,
+    const KAFFINITY permitted_mask =
+        core->GroupMask[0].Mask &
+        group_table[core->GroupMask[0].Group].permitted_mask;
+    if (!permitted_mask ||
+        !iree_task_topology_core_is_selected(has_heterogeneous_cores,
                                              performance_level, core)) {
-      // Core filtered out by performance level; skip and try to find another
-      // usable one. Note that cores with different performance levels may be
-      // arbitrarily distributed across the logical core domain.
+      // Every inspected core advances the search, including filtered cores.
       continue;
     }
-    ++used_core_index;
 
     uint8_t group_index = (uint8_t)out_topology->group_count++;
     iree_task_topology_group_t* group = &out_topology->groups[group_index];
@@ -670,8 +695,14 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
     group->processor_index = (uint32_t)adjusted_core_index;
     group->constructive_sharing_mask =
         iree_task_affinity_set_empty();  // set below
-    iree_task_topology_set_affinity_from_processor(
-        core, &group->ideal_thread_affinity);
+    iree_thread_affinity_t* affinity = &group->ideal_thread_affinity;
+    affinity->group = core->GroupMask[0].Group;
+    affinity->id_assigned = 1;
+    affinity->id = iree_task_count_trailing_zeros_kaffinity(permitted_mask);
+    // The compact affinity value can include an adjacent SMT sibling only
+    // when that CPU belongs to this core and remains inside the budget.
+    affinity->smt = affinity->id + 1 < sizeof(KAFFINITY) * 8 &&
+                    (permitted_mask & ((KAFFINITY)1 << (affinity->id + 1)));
   }
 
   // Assign constructive sharing masks to each topology group.
