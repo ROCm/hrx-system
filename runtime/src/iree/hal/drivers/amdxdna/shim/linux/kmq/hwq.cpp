@@ -13,6 +13,9 @@
 #include <cstddef>
 #include <cstring>
 #include <limits>
+#include <mutex>
+
+#include "device.h"
 
 #include "../../ert.h"
 #include "bo.h"
@@ -348,6 +351,10 @@ hw_q::~hw_q() {
 }
 
 int hw_q::issue_command(bo* cmd_bo) {
+  // Held across the ioctl so a timeout recovery, which takes the same mutex,
+  // cannot destroy this context between the handle read and EXEC_CMD. Recovery
+  // itself runs on the waiter, after this ioctl has returned.
+  std::lock_guard<std::mutex> submit_gate(m_pdev.m_submit_mu);
   // Userspace doorbell is optional. Firmware may return
   // AMDXDNA_INVALID_DOORBELL_OFFSET, so CREATE_HWCTX still takes a host-queue
   // BO and submit uses kernel-mode EXEC_CMD. UMS emits only a direct packet

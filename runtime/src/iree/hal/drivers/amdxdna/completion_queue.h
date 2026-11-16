@@ -13,8 +13,6 @@
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/amdxdna/native.h"
 
-typedef struct iree_hal_amdxdna_completion_queue_t
-    iree_hal_amdxdna_completion_queue_t;
 typedef struct iree_hal_amdxdna_completion_batch_t
     iree_hal_amdxdna_completion_batch_t;
 
@@ -117,6 +115,29 @@ iree_status_t iree_hal_amdxdna_completion_batch_wait(
 
 void iree_hal_amdxdna_completion_batch_destroy(
     iree_hal_amdxdna_completion_batch_t* batch);
+
+// ERT state 8 means the scheduler timed the command out and reset this device.
+// The window lives on this completion queue, which is one per HAL device.
+// Until the command that was submitted after that reset completes, a follow-on
+// command that stays NEW must not fail the semaphore. A NEW on a healthy
+// device stays fatal, and ERT state 9 (reset failed) stays fatal. A status
+// string does not open or close the window.
+void iree_hal_amdxdna_completion_queue_note_timeout_recovery(
+    iree_hal_amdxdna_completion_queue_t* queue);
+// Marks the caller as the command that may close the window. Only the first
+// caller after a timeout wins, and a later timeout invalidates it. Returns
+// false when no window is open or another command already holds it.
+bool iree_hal_amdxdna_completion_queue_arm_recovery_closer(
+    iree_hal_amdxdna_completion_queue_t* queue, uint64_t* out_generation);
+// Gives the closer slot back when that command was not submitted.
+void iree_hal_amdxdna_completion_queue_disarm_recovery_closer(
+    iree_hal_amdxdna_completion_queue_t* queue, uint64_t generation);
+// Closes the window when |generation| is still the armed closer. A completion
+// from any other command, including one already in flight, does not.
+void iree_hal_amdxdna_completion_queue_note_closer_completed(
+    iree_hal_amdxdna_completion_queue_t* queue, uint64_t generation);
+bool iree_hal_amdxdna_completion_queue_timeout_recovery_pending(
+    iree_hal_amdxdna_completion_queue_t* queue);
 
 #ifdef __cplusplus
 }  // extern "C"

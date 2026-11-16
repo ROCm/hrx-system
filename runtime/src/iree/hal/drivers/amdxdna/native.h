@@ -21,6 +21,8 @@ extern "C" {
 // the concrete handles and keep OS/shim details behind these opaque types.
 typedef struct iree_hal_amdxdna_native_device_t
     iree_hal_amdxdna_native_device_t;
+typedef struct iree_hal_amdxdna_completion_queue_t
+    iree_hal_amdxdna_completion_queue_t;
 typedef struct iree_hal_amdxdna_native_buffer_t
     iree_hal_amdxdna_native_buffer_t;
 typedef struct iree_hal_amdxdna_native_context_ref_t
@@ -314,6 +316,12 @@ void iree_hal_amdxdna_native_device_c_destroy(
 iree_status_t iree_hal_amdxdna_native_device_c_set_power_mode(
     iree_hal_amdxdna_native_device_t* device,
     iree_hal_amdxdna_native_c_power_mode_t power_mode);
+
+// Linux KMQ records timeout recovery on this queue. NULL clears it. Windows
+// keeps the pointer unused; it does not recreate hardware contexts.
+void iree_hal_amdxdna_native_device_c_set_completion_queue(
+    iree_hal_amdxdna_native_device_t* device,
+    iree_hal_amdxdna_completion_queue_t* completion_queue);
 
 iree_status_t iree_hal_amdxdna_native_device_c_query_caps(
     iree_hal_amdxdna_native_device_t* device,

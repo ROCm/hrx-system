@@ -73,6 +73,16 @@ struct pdev {
   // heap_base + (xdna_addr - first_heap_xdna_addr). Caller holds m_lock when
   // the heap can grow concurrently.
   int host_ptr_for_dev_bo(uint64_t xdna_addr, size_t size, void** out) const;
+  // Serializes command submit with a post-timeout context recreate. A new
+  // command cannot enter EXEC_CMD until every live hardware context is back.
+  mutable std::mutex m_submit_mu;
+  mutable std::mutex m_contexts_mu;
+  mutable std::vector<hw_ctx*> m_live_contexts;
+  void register_hw_context(hw_ctx* ctx) const;
+  void unregister_hw_context(hw_ctx* ctx) const;
+  // Destroy and recreate every live KMD hardware context. Shared BOs stay.
+  // Returns 0, or the first errno. |out_count| counts contexts visited.
+  int recover_contexts_after_timeout(size_t* out_count) const;
   int open_device(const std::filesystem::path& device_path);
   // Returns 0 on success or the failing errno for recoverable ioctl failures.
   int try_ioctl(unsigned long cmd, void* arg) const;

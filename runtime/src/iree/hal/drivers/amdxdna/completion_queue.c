@@ -79,6 +79,13 @@ struct iree_hal_amdxdna_completion_queue_t {
   iree_async_axis_t frontier_axis;
   iree_atomic_uint64_t epoch;
   iree_atomic_uint64_t* frontier_epoch;
+
+  // Timeout recovery for this device. Guarded by |recovery_mutex|, which is
+  // not held across a submit or wait ioctl and is not nested with |mutex|.
+  iree_slim_mutex_t recovery_mutex;
+  bool recovery_pending;
+  uint64_t recovery_generation;
+  uint64_t recovery_closer_generation;
 };
 
 static bool iree_hal_amdxdna_completion_batch_is_done(void* arg);
@@ -236,11 +243,76 @@ static void iree_hal_amdxdna_completion_batch_clear_native_signals(
   }
 }
 
+void iree_hal_amdxdna_completion_queue_note_timeout_recovery(
+    iree_hal_amdxdna_completion_queue_t* queue) {
+  if (!queue) return;
+  // A new generation drops any closer armed for the previous timeout, so a
+  // command already in flight cannot close the window this timeout opened.
+  iree_slim_mutex_lock(&queue->recovery_mutex);
+  queue->recovery_generation += 1;
+  queue->recovery_closer_generation = 0;
+  queue->recovery_pending = true;
+  iree_slim_mutex_unlock(&queue->recovery_mutex);
+}
+
+bool iree_hal_amdxdna_completion_queue_arm_recovery_closer(
+    iree_hal_amdxdna_completion_queue_t* queue, uint64_t* out_generation) {
+  if (!queue || !out_generation) return false;
+  *out_generation = 0;
+  iree_slim_mutex_lock(&queue->recovery_mutex);
+  bool armed = false;
+  if (queue->recovery_pending && queue->recovery_closer_generation == 0 &&
+      queue->recovery_generation != 0) {
+    queue->recovery_closer_generation = queue->recovery_generation;
+    *out_generation = queue->recovery_generation;
+    armed = true;
+  }
+  iree_slim_mutex_unlock(&queue->recovery_mutex);
+  return armed;
+}
+
+void iree_hal_amdxdna_completion_queue_disarm_recovery_closer(
+    iree_hal_amdxdna_completion_queue_t* queue, uint64_t generation) {
+  if (!queue || generation == 0) return;
+  iree_slim_mutex_lock(&queue->recovery_mutex);
+  if (queue->recovery_pending && queue->recovery_generation == generation &&
+      queue->recovery_closer_generation == generation) {
+    queue->recovery_closer_generation = 0;
+  }
+  iree_slim_mutex_unlock(&queue->recovery_mutex);
+}
+
+void iree_hal_amdxdna_completion_queue_note_closer_completed(
+    iree_hal_amdxdna_completion_queue_t* queue, uint64_t generation) {
+  if (!queue || generation == 0) return;
+  iree_slim_mutex_lock(&queue->recovery_mutex);
+  if (queue->recovery_pending && queue->recovery_generation == generation &&
+      queue->recovery_closer_generation == generation) {
+    queue->recovery_pending = false;
+    queue->recovery_closer_generation = 0;
+  }
+  iree_slim_mutex_unlock(&queue->recovery_mutex);
+}
+
+bool iree_hal_amdxdna_completion_queue_timeout_recovery_pending(
+    iree_hal_amdxdna_completion_queue_t* queue) {
+  if (!queue) return false;
+  iree_slim_mutex_lock(&queue->recovery_mutex);
+  bool pending = queue->recovery_pending;
+  iree_slim_mutex_unlock(&queue->recovery_mutex);
+  return pending;
+}
+
 // ERT_CMD_STATE_ERROR, ABORT, and TIMEOUT. The scheduler finished the
 // command. TIMEOUT includes a reset, so the stream can take another command.
+// NEW is included only while that reset is still being recovered on this
+// device: the command never started because the context was dead.
 // ERT_CMD_STATE_NORESPONSE (9) means the reset failed and stays fatal.
-static bool iree_hal_amdxdna_ert_state_is_command_scoped(uint32_t state) {
-  return state == 5 || state == 6 || state == 8;
+static bool iree_hal_amdxdna_ert_state_is_command_scoped(
+    iree_hal_amdxdna_completion_queue_t* queue, uint32_t state) {
+  if (state == 5 || state == 6 || state == 8) return true;
+  return state == 1 &&
+         iree_hal_amdxdna_completion_queue_timeout_recovery_pending(queue);
 }
 
 static bool iree_hal_amdxdna_status_ert_state(iree_status_t status,
@@ -260,10 +332,11 @@ static bool iree_hal_amdxdna_status_ert_state(iree_status_t status,
   return true;
 }
 
-static bool iree_hal_amdxdna_status_is_command_completion(iree_status_t status) {
+static bool iree_hal_amdxdna_status_is_command_completion(
+    iree_hal_amdxdna_completion_queue_t* queue, iree_status_t status) {
   uint32_t state = 0;
   return iree_hal_amdxdna_status_ert_state(status, &state) &&
-         iree_hal_amdxdna_ert_state_is_command_scoped(state);
+         iree_hal_amdxdna_ert_state_is_command_scoped(queue, state);
 }
 
 static void iree_hal_amdxdna_semaphore_list_record_command_completion(
@@ -322,11 +395,13 @@ static void iree_hal_amdxdna_completion_batch_finish(
   }
   // |command_error| covers every status recorded while building this
   // command, before the device retires it. ERT 5/6/8 cover a command the
-  // scheduler finished. Anything else, including NORESPONSE and queue
-  // shutdown, fails the semaphore.
+  // scheduler finished. ERT 1 is included only while this device's timeout
+  // window is still open. The status text is how a recorded result reports
+  // its ERT state; it does not open that window. Anything else, including
+  // NORESPONSE and queue shutdown, fails the semaphore.
   if (!iree_status_is_ok(status) &&
       (batch->command_error ||
-       iree_hal_amdxdna_status_is_command_completion(status))) {
+       iree_hal_amdxdna_status_is_command_completion(batch->queue, status))) {
     // Advance the timeline and hand the command status to the host waiter
     // of this point. Do not fail the semaphore: a failed IREE semaphore
     // rejects every later wait, including buffer allocation.
@@ -415,6 +490,7 @@ iree_status_t iree_hal_amdxdna_completion_queue_create(
   queue->pending_tail_link = &queue->pending_head;
   queue->frontier_epoch = &queue->epoch;
   iree_slim_mutex_initialize(&queue->mutex);
+  iree_slim_mutex_initialize(&queue->recovery_mutex);
   iree_notification_initialize(&queue->notification);
   iree_notification_initialize(&queue->drain_notification);
   iree_atomic_store(&queue->shutdown_requested, 0, iree_memory_order_relaxed);
@@ -429,6 +505,7 @@ iree_status_t iree_hal_amdxdna_completion_queue_create(
   if (!iree_status_is_ok(status)) {
     iree_notification_deinitialize(&queue->drain_notification);
     iree_notification_deinitialize(&queue->notification);
+    iree_slim_mutex_deinitialize(&queue->recovery_mutex);
     iree_slim_mutex_deinitialize(&queue->mutex);
     iree_allocator_free(host_allocator, queue);
     return status;
@@ -462,6 +539,7 @@ void iree_hal_amdxdna_completion_queue_destroy(
   iree_thread_release(queue->worker_thread);
   iree_notification_deinitialize(&queue->drain_notification);
   iree_notification_deinitialize(&queue->notification);
+  iree_slim_mutex_deinitialize(&queue->recovery_mutex);
   iree_slim_mutex_deinitialize(&queue->mutex);
   iree_allocator_free(queue->host_allocator, queue);
 }

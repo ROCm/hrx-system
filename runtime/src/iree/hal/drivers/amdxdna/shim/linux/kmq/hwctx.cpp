@@ -58,6 +58,7 @@ hw_ctx::hw_ctx(device& device, const std::vector<uint8_t>& pdi,
                const std::map<std::string, uint32_t>& qos, bool umq)
     : hw_ctx(device, qos, std::make_unique<hw_q>(device), pdi, cu_name, n_rows,
              n_cols) {
+  m_uses_umq = umq;
   if (umq) {
     m_init_errno = m_q->init_umq();
     if (m_init_errno) return;
@@ -69,63 +70,55 @@ hw_ctx::hw_ctx(device& device, const std::vector<uint8_t>& pdi,
     m_init_errno = m_q->map_doorbell(m_doorbell);
     if (m_init_errno) return;
   }
-  if (pdi.empty()) {
+  if (!pdi.empty()) {
+    shim_amdxdna_bo_flags f = {};
+    f.flags = AMDXDNA_BO_FLAGS_CACHEABLE;
+    for (int i = 0; i < static_cast<int>(m_cu_info.size()); i++) {
+      cu_info& ci = m_cu_info[i];
+      // see cu_configs[1] in amdxdna_hwctx_param_config_cu
+      if (i >= 1) {
+        m_init_errno = EINVAL;
+        return;
+      }
+      std::unique_ptr<bo> pdi_bo;
+      m_init_errno = alloc_bo(ci.m_pdi.size(), f, &pdi_bo);
+      if (m_init_errno) return;
+      char* pdi_vaddr = reinterpret_cast<char*>(pdi_bo->map());
+      if (pdi_vaddr == nullptr ||
+          reinterpret_cast<uintptr_t>(pdi_vaddr) == AMDXDNA_INVALID_ADDR) {
+        m_init_errno = EINVAL;
+        return;
+      }
+      std::memcpy(pdi_vaddr, ci.m_pdi.data(), ci.m_pdi.size());
+      m_init_errno = pdi_bo->sync(direction::host2device,
+                                  pdi_bo->get_properties().size, 0);
+      if (m_init_errno) return;
+      m_pdi_bos.push_back(std::move(pdi_bo));
+    }
+    m_init_errno = config_cu_on_device();
+    if (m_init_errno) return;
+    SHIM_DEBUG("Created KMQ HW context (%d)", m_handle);
+  } else {
     SHIM_DEBUG("Created %s HW context (%d) without CONFIG_CU",
                umq ? "UMQ" : "KMQ", m_handle);
-    return;
   }
-  std::vector<char> cu_conf_param_buf(sizeof(amdxdna_hwctx_param_config_cu) +
-                                      m_cu_info.size() *
-                                          sizeof(amdxdna_cu_config));
-  auto cu_conf_param = reinterpret_cast<amdxdna_hwctx_param_config_cu*>(
-      cu_conf_param_buf.data());
-
-  cu_conf_param->num_cus = m_cu_info.size();
-  shim_amdxdna_bo_flags f = {};
-  f.flags = AMDXDNA_BO_FLAGS_CACHEABLE;
-  for (int i = 0; i < m_cu_info.size(); i++) {
-    cu_info& ci = m_cu_info[i];
-
-    std::unique_ptr<bo> pdi_bo;
-    m_init_errno = alloc_bo(ci.m_pdi.size(), f, &pdi_bo);
-    if (m_init_errno) return;
-    char* pdi_vaddr = reinterpret_cast<char*>(pdi_bo->map());
-    if (pdi_vaddr == nullptr ||
-        reinterpret_cast<uintptr_t>(pdi_vaddr) == AMDXDNA_INVALID_ADDR) {
-      m_init_errno = EINVAL;
-      return;
-    }
-
-    // see cu_configs[1] in amdxdna_hwctx_param_config_cu
-    if (i >= 1) {
-      m_init_errno = EINVAL;
-      return;
-    }
-    amdxdna_cu_config& cf = cu_conf_param->cu_configs[i];
-    std::memcpy(pdi_vaddr, ci.m_pdi.data(), ci.m_pdi.size());
-    m_init_errno =
-        pdi_bo->sync(direction::host2device, pdi_bo->get_properties().size, 0);
-    if (m_init_errno) return;
-    cf.cu_bo = pdi_bo->get_drm_bo_handle();
-    cf.cu_func = ci.m_func;
-    m_pdi_bos.push_back(std::move(pdi_bo));
-  }
-
-  amdxdna_drm_config_hwctx arg = {};
-  arg.handle = m_handle;
-  arg.param_type = DRM_AMDXDNA_HWCTX_CONFIG_CU;
-  arg.param_val = reinterpret_cast<uintptr_t>(cu_conf_param);
-  arg.param_val_size = cu_conf_param_buf.size();
-  m_init_errno =
-      m_device.get_pdev().try_ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &arg);
-  if (m_init_errno) return;
-
-  SHIM_DEBUG("Created KMQ HW context (%d)", m_handle);
+  m_device.get_pdev().register_hw_context(this);
+  m_registered = true;
 }
 
 hw_ctx::~hw_ctx() {
   SHIM_DEBUG("Destroying KMQ HW context (%d)...", m_handle);
-  delete_ctx_on_device();
+  if (m_registered) {
+    m_device.get_pdev().unregister_hw_context(this);
+    m_registered = false;
+  }
+  // Teardown cannot retry. If the kernel refuses the destroy, drop the local
+  // handle; closing the device fd releases the context. delete rebinds the
+  // queue on failure so a retry can use it, which must not outlive this object.
+  if (delete_ctx_on_device() != 0) {
+    m_q->unbind_hwctx();
+    m_handle = AMDXDNA_INVALID_CTX_HANDLE;
+  }
   delete_syncobj();
 }
 
@@ -156,6 +149,57 @@ int hw_ctx::alloc_bo(size_t size, shim_amdxdna_bo_flags flags,
 
 hw_q* hw_ctx::get_hw_queue() const { return m_q.get(); }
 
+int hw_ctx::config_cu_on_device() {
+  if (m_pdi_bos.empty()) return 0;
+  if (m_pdi_bos.size() != m_cu_info.size() || m_pdi_bos.size() > 1) {
+    return EINVAL;
+  }
+  std::vector<char> cu_conf_param_buf(sizeof(amdxdna_hwctx_param_config_cu) +
+                                      m_pdi_bos.size() * sizeof(amdxdna_cu_config));
+  auto cu_conf_param = reinterpret_cast<amdxdna_hwctx_param_config_cu*>(
+      cu_conf_param_buf.data());
+  cu_conf_param->num_cus = static_cast<uint16_t>(m_pdi_bos.size());
+  for (size_t i = 0; i < m_pdi_bos.size(); i++) {
+    amdxdna_cu_config& cf = cu_conf_param->cu_configs[i];
+    cf.cu_bo = m_pdi_bos[i]->get_drm_bo_handle();
+    cf.cu_func = m_cu_info[i].m_func;
+  }
+  amdxdna_drm_config_hwctx arg = {};
+  arg.handle = m_handle;
+  arg.param_type = DRM_AMDXDNA_HWCTX_CONFIG_CU;
+  arg.param_val = reinterpret_cast<uintptr_t>(cu_conf_param);
+  arg.param_val_size = cu_conf_param_buf.size();
+  return m_device.get_pdev().try_ioctl(DRM_IOCTL_AMDXDNA_CONFIG_HWCTX, &arg);
+}
+
+int hw_ctx::recreate_after_timeout() {
+  // Shared BOs (instruction, arguments, PDI) are allocated against
+  // AMDXDNA_INVALID_CTX_HANDLE and stay valid. Only the KMD context handle,
+  // its syncobj, and a UMQ doorbell mapping are tied to this context. A
+  // failed destroy keeps that handle so the next timeout can retry it.
+  const int delete_err = delete_ctx_on_device();
+  if (delete_err) {
+    m_init_errno = delete_err;
+    return delete_err;
+  }
+  delete_syncobj();
+  const int create_err = create_ctx_on_device();
+  if (create_err) {
+    m_init_errno = create_err;
+    return create_err;
+  }
+  if (m_uses_umq) {
+    const int map_err = m_q->map_doorbell(m_doorbell);
+    if (map_err) {
+      m_init_errno = map_err;
+      return map_err;
+    }
+  }
+  const int config_err = config_cu_on_device();
+  if (config_err) m_init_errno = config_err;
+  return config_err;
+}
+
 int hw_ctx::create_ctx_on_device() {
   amdxdna_drm_create_hwctx arg = {};
   arg.qos_p = reinterpret_cast<uintptr_t>(&m_qos);
@@ -177,19 +221,23 @@ int hw_ctx::create_ctx_on_device() {
   return 0;
 }
 
-void hw_ctx::delete_ctx_on_device() {
-  if (m_handle == AMDXDNA_INVALID_CTX_HANDLE) return;
+int hw_ctx::delete_ctx_on_device() {
+  if (m_handle == AMDXDNA_INVALID_CTX_HANDLE) return 0;
 
+  const uint32_t handle = m_handle;
   m_q->unbind_hwctx();
   amdxdna_drm_destroy_hwctx arg = {};
-  arg.handle = m_handle;
+  arg.handle = handle;
   int err =
       m_device.get_pdev().try_ioctl(DRM_IOCTL_AMDXDNA_DESTROY_HWCTX, &arg);
   if (err) {
-    SHIM_DEBUG("DESTROY_HWCTX handle=%u failed errno=%d", m_handle, err);
+    SHIM_DEBUG("DESTROY_HWCTX handle=%u failed errno=%d", handle, err);
+    m_q->bind_hwctx(this);
+    return err;
   }
   m_handle = AMDXDNA_INVALID_CTX_HANDLE;
   fini_log_buf();
+  return 0;
 }
 
 void hw_ctx::delete_syncobj() {

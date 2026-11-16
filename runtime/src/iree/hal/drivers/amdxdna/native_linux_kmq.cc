@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "iree/base/internal/atomics.h"
+#include "iree/hal/drivers/amdxdna/completion_queue.h"
 #include "iree/hal/drivers/amdxdna/native.h"
 #include "iree/hal/drivers/amdxdna/native_linux_kmq_internal.h"
 #include "iree/hal/drivers/amdxdna/shim/linux/kmq/amdxdna_accel.h"
@@ -45,6 +46,9 @@ struct iree_hal_amdxdna_native_device_t {
   // creation from the NPU architecture (the KMD has no query for it). 0 when
   // the architecture is unrecognized. See query_caps.
   uint32_t hardware_context_budget = 0;
+  // The HAL device's completion queue. Timeout recovery is recorded here, not
+  // in a process-wide flag. NULL until the HAL device publishes it.
+  iree_hal_amdxdna_completion_queue_t* completion_queue = nullptr;
   std::atomic<iree_host_size_t> live_context_image_bytes{0};
   bool is_aie4 = false;
   std::mutex command_pool_mutex;
@@ -93,6 +97,10 @@ struct iree_hal_amdxdna_native_command_t {
   // header word with just the terminal state, so reuse must restore opcode,
   // count, and type before flipping state back to NEW.
   uint32_t compiled_header = 0;
+  // Set when this command is the one whose completion may close the device's
+  // timeout-recovery window. A command already in flight leaves this false.
+  bool recovery_closer = false;
+  uint64_t recovery_generation = 0;
   // Full exec-BO copy taken once after compile. CERT's SVA completion write
   // is the header, but restoring only that word still leaves a reuse hole if
   // firmware clobbers payload/cu_mask; XRT keeps the compiled packet intact
@@ -1346,6 +1354,44 @@ iree_status_t iree_hal_amdxdna_native_command_prepare_chain(
   return iree_ok_status();
 }
 
+static void iree_hal_amdxdna_native_command_arm_recovery_closer(
+    iree_hal_amdxdna_native_command_t* command) {
+  command->recovery_closer = false;
+  command->recovery_generation = 0;
+  iree_hal_amdxdna_completion_queue_t* queue =
+      command->device ? command->device->completion_queue : nullptr;
+  if (!queue) return;
+  uint64_t generation = 0;
+  if (iree_hal_amdxdna_completion_queue_arm_recovery_closer(queue,
+                                                           &generation)) {
+    command->recovery_closer = true;
+    command->recovery_generation = generation;
+  }
+}
+
+static void iree_hal_amdxdna_native_command_disarm_recovery_closer(
+    iree_hal_amdxdna_native_command_t* command) {
+  if (!command->recovery_closer || !command->device ||
+      !command->device->completion_queue) {
+    command->recovery_closer = false;
+    return;
+  }
+  iree_hal_amdxdna_completion_queue_disarm_recovery_closer(
+      command->device->completion_queue, command->recovery_generation);
+  command->recovery_closer = false;
+}
+
+static void iree_hal_amdxdna_native_command_note_closer_completed(
+    iree_hal_amdxdna_native_command_t* command) {
+  if (!command->recovery_closer || !command->device ||
+      !command->device->completion_queue) {
+    return;
+  }
+  iree_hal_amdxdna_completion_queue_note_closer_completed(
+      command->device->completion_queue, command->recovery_generation);
+  command->recovery_closer = false;
+}
+
 // Enqueue one command without blocking. issue_command is async: it writes the
 // EXEC_CMD ioctl and returns a sequence number, so several commands can be in
 // flight on the in-order hardware queue at once.
@@ -1375,7 +1421,13 @@ static iree_status_t iree_hal_amdxdna_native_queue_issue(
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_status_from_errno(
       exec_bo->sync(shim_xdna::direction::host2device),
       "amdxdna native command exec-buffer sync failed"));
+  // Arm before the submit lock. A command already inside that lock was issued
+  // against the pre-timeout context and must not become the closer. The first
+  // command to arm waits behind context recreate, then submits on the new
+  // handle. Its completion is what closes the window.
+  iree_hal_amdxdna_native_command_arm_recovery_closer(command);
   if (const int err = queue->hwq->issue_command(exec_bo)) {
+    iree_hal_amdxdna_native_command_disarm_recovery_closer(command);
     return iree_hal_amdxdna_status_from_errno(
         err, "amdxdna native command submit failed");
   }
@@ -1399,10 +1451,13 @@ static iree_status_t iree_hal_amdxdna_native_queue_wait_issued(
           : 0;
   const int rc = queue->hwq->wait_command(exec_bo, timeout_ms);
   if (rc < 0) {
+    // This command will not complete, so it must not keep the closer slot.
+    iree_hal_amdxdna_native_command_disarm_recovery_closer(command);
     return iree_hal_amdxdna_status_from_errno(
         rc, "amdxdna native command wait failed");
   }
   if (rc == 0) {
+    iree_hal_amdxdna_native_command_disarm_recovery_closer(command);
     return iree_make_status(IREE_STATUS_DEADLINE_EXCEEDED,
                             "amdxdna %.*s timed out",
                             static_cast<int>(label.size), label.data);
@@ -1412,16 +1467,46 @@ static iree_status_t iree_hal_amdxdna_native_queue_wait_issued(
   // KMD job_complete() does not. TDR writes TIMEOUT/ABORT through the kernel
   // vmap of the same cmd BO. clflush so either writer is visible here.
   (void)exec_bo->sync(shim_xdna::direction::device2host);
-  if (packet->state == ERT_CMD_STATE_COMPLETED) return iree_ok_status();
+  if (packet->state == ERT_CMD_STATE_COMPLETED) {
+    iree_hal_amdxdna_native_command_note_closer_completed(command);
+    return iree_ok_status();
+  }
   if (packet->state == ERT_CMD_STATE_TIMEOUT) {
+    // The scheduler reset the device. Record that on this device's completion
+    // queue from the numeric ERT state, then rebuild every hardware context
+    // before the waiter is released. The submit lock is held across that
+    // rebuild so nothing is issued against the dead handles. Shared BOs stay.
+    // A follow-on NEW stays command-scoped until a command submitted after
+    // this timeout actually completes. A closer that itself comes back NEW
+    // releases the slot on the path below, so the next submit can take it.
+    if (command->device && command->device->completion_queue) {
+      iree_hal_amdxdna_completion_queue_note_timeout_recovery(
+          command->device->completion_queue);
+    }
+    size_t recovered = 0;
+    const int recover_err =
+        queue->hwq->m_pdev.recover_contexts_after_timeout(&recovered);
+    if (recover_err) {
+      return iree_make_status(
+          IREE_STATUS_DEADLINE_EXCEEDED,
+          "amdxdna %.*s timed out: ert state %u health version=%u npu_gen=%u "
+          "ctx_error_type=%u; hardware context recreate failed errno %d "
+          "(%zu contexts)",
+          static_cast<int>(label.size), label.data, packet->state,
+          packet->data[0], packet->data[1], packet->data[4], recover_err,
+          recovered);
+    }
     return iree_make_status(
         IREE_STATUS_DEADLINE_EXCEEDED,
         "amdxdna %.*s timed out: ert state %u health version=%u npu_gen=%u "
-        "ctx_error_type=%u",
+        "ctx_error_type=%u; recreated %zu hardware contexts",
         static_cast<int>(label.size), label.data, packet->state,
-        packet->data[0], packet->data[1], packet->data[4]);
+        packet->data[0], packet->data[1], packet->data[4], recovered);
   }
 
+  // NEW, ERROR, ABORT, and NORESPONSE did not complete. If this command held
+  // the closer slot, give it back without closing the window.
+  iree_hal_amdxdna_native_command_disarm_recovery_closer(command);
   if (command->opcode ==
       IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_COMMAND_CHAIN) {
     ert_cmd_chain_data* chain_data =
@@ -1691,6 +1776,13 @@ extern "C" iree_status_t iree_hal_amdxdna_native_device_c_create(
 extern "C" void iree_hal_amdxdna_native_device_c_destroy(
     iree_hal_amdxdna_native_device_t* device) {
   iree_hal_amdxdna_native_device_destroy(device);
+}
+
+extern "C" void iree_hal_amdxdna_native_device_c_set_completion_queue(
+    iree_hal_amdxdna_native_device_t* device,
+    iree_hal_amdxdna_completion_queue_t* completion_queue) {
+  if (!device) return;
+  device->completion_queue = completion_queue;
 }
 
 extern "C" iree_status_t iree_hal_amdxdna_native_device_c_set_power_mode(

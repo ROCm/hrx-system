@@ -121,6 +121,8 @@ static iree_status_t iree_hal_amdxdna_device_initialize_hal_resources(
       &device->block_pool, device->host_allocator, &device->async_queue));
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_completion_queue_create(
       device->host_allocator, &device->completion_queue));
+  iree_hal_amdxdna_native_device_c_set_completion_queue(
+      device->native_device, device->completion_queue);
   return iree_ok_status();
 }
 
@@ -1781,6 +1783,10 @@ static void iree_hal_amdxdna_device_destroy(iree_hal_device_t* base_device) {
   if (device->async_queue) {
     iree_hal_amdxdna_async_queue_destroy(device->async_queue);
     device->async_queue = NULL;
+  }
+  if (device->native_device) {
+    iree_hal_amdxdna_native_device_c_set_completion_queue(device->native_device,
+                                                         NULL);
   }
   if (device->completion_queue) {
     iree_hal_amdxdna_completion_queue_destroy(device->completion_queue);

@@ -5457,6 +5457,13 @@ extern "C" void iree_hal_amdxdna_native_device_c_destroy(
   iree_hal_amdxdna_native_device_destroy(device);
 }
 
+extern "C" void iree_hal_amdxdna_native_device_c_set_completion_queue(
+    iree_hal_amdxdna_native_device_t* device,
+    iree_hal_amdxdna_completion_queue_t* completion_queue) {
+  (void)device;
+  (void)completion_queue;
+}
+
 extern "C" iree_status_t iree_hal_amdxdna_native_device_c_set_power_mode(
     iree_hal_amdxdna_native_device_t* device,
     iree_hal_amdxdna_native_c_power_mode_t power_mode) {

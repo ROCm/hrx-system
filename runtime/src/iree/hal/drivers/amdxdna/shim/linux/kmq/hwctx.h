@@ -71,6 +71,8 @@ struct hw_ctx {
   std::unique_ptr<bo> m_log_bo;
   void* m_log_buf;
   std::vector<std::unique_ptr<bo>> m_pdi_bos;
+  bool m_uses_umq = false;
+  bool m_registered = false;
 
   hw_ctx(device& dev, const std::map<std::string, uint32_t>& qos,
          std::unique_ptr<hw_q> q, const std::vector<uint8_t>& pdi,
@@ -90,11 +92,18 @@ struct hw_ctx {
 
   int open_cu_context(const std::string& cuname, cuidx_t* out_cu_idx);
   int create_ctx_on_device();
+  // Reissue CONFIG_CU against the current KMD handle using the PDI BOs kept
+  // from the original create. Empty when this context has no PDI.
+  int config_cu_on_device();
+  // Replace the KMD hardware context after a device timeout. The hw_ctx
+  // object, its queue, and its shared BOs stay; the DRM handle is new.
+  int recreate_after_timeout();
   void init_log_buf();
   void fini_log_buf() const;
-  // Tear down the firmware context and clear m_handle so a second call is
-  // a no-op.
-  void delete_ctx_on_device();
+  // Tear down the firmware context and clear m_handle so a second call is a
+  // no-op. On ioctl failure the handle and queue binding stay, so the caller
+  // can retry instead of leaking the kernel context.
+  int delete_ctx_on_device();
   void delete_syncobj();
 
   hw_q* get_hw_queue() const;

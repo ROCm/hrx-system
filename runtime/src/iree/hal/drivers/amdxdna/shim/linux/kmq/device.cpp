@@ -448,6 +448,31 @@ int device::init_errno() const { return m_init_errno; }
 
 const pdev& device::get_pdev() const { return *m_pdev; }
 
+void pdev::register_hw_context(hw_ctx* ctx) const {
+  std::lock_guard<std::mutex> lock(m_contexts_mu);
+  m_live_contexts.push_back(ctx);
+}
+
+void pdev::unregister_hw_context(hw_ctx* ctx) const {
+  std::lock_guard<std::mutex> lock(m_contexts_mu);
+  auto it = std::find(m_live_contexts.begin(), m_live_contexts.end(), ctx);
+  if (it != m_live_contexts.end()) m_live_contexts.erase(it);
+}
+
+int pdev::recover_contexts_after_timeout(size_t* out_count) const {
+  std::lock_guard<std::mutex> submit(m_submit_mu);
+  std::lock_guard<std::mutex> contexts(m_contexts_mu);
+  if (out_count) *out_count = m_live_contexts.size();
+  int first_err = 0;
+  for (hw_ctx* ctx : m_live_contexts) {
+    const int err = ctx->recreate_after_timeout();
+    if (err && !first_err) first_err = err;
+  }
+  SHIM_DEBUG("Recreated %zu hardware contexts after timeout, errno=%d",
+             m_live_contexts.size(), first_err);
+  return first_err;
+}
+
 uint64_t device::get_dev_heap_used_bytes() const {
   return m_pdev ? m_pdev->m_dev_heap_used_bytes.load(std::memory_order_relaxed)
                 : 0;
