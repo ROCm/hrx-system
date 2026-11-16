@@ -38,13 +38,13 @@ typedef struct loom_vector_memory_access_t {
   // Logical view being accessed. The dimensions bound valid origins.
   loom_type_t view_type;
 
-  // Register lane grid loaded from or stored into the view.
+  // Register lane grid, or none for a single-element footprint.
   loom_type_t vector_type;
 
   // Rank of view_type.
   uint8_t view_rank;
 
-  // Rank of vector_type.
+  // Rank of vector_type, or zero for a single-element footprint.
   uint8_t vector_rank;
 
   // First view axis covered by vector lanes; vector axes map to trailing view
@@ -190,11 +190,13 @@ typedef struct loom_vector_memory_cache_policy_t {
   uint8_t cache_temporal;
 } loom_vector_memory_cache_policy_t;
 
-// Describes a view/vector access. |context| supplies SSA encoding facts; pass
-// NULL only from structural verification paths that intentionally cannot depend
-// on analysis. Returns false when the types are not a view and a rank-1+
-// vector, or when the vector rank exceeds the view rank. Unknown layouts still
-// produce a valid access with layout_kind UNKNOWN.
+// Describes a view/vector access. A none |vector_type| describes one element
+// with no vector axes, including an element in a rank-zero view.
+// |context| supplies SSA encoding facts; pass NULL only from structural
+// verification paths that intentionally cannot depend on analysis. Returns
+// false when the types are not a view and either none or a rank-1+ vector, or
+// when the vector rank exceeds the view rank. Unknown layouts still produce a
+// valid access with layout_kind UNKNOWN.
 bool loom_vector_memory_access_describe(
     const loom_fact_context_t* context, const loom_module_t* module,
     loom_type_t view_type, loom_type_t vector_type,

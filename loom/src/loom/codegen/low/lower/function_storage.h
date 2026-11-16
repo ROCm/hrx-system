@@ -39,6 +39,12 @@ typedef struct loom_low_lower_function_storage_mapping_t {
   // Source representation admitted by this mapping. Typed reference cells
   // can occupy a different physical bank from byte-addressable storage.
   loom_low_lower_function_storage_source_t source;
+  // Emits required content initialization at the allocation's execution point,
+  // after its address exists. NULL leaves contents unspecified. Reservation
+  // hoisting never moves this executable initialization.
+  iree_status_t (*initialize)(loom_low_lower_context_t* context,
+                              loom_value_id_t address, int64_t byte_length,
+                              loom_location_id_t location);
 } loom_low_lower_function_storage_mapping_t;
 
 typedef struct loom_low_lower_function_storage_config_t {
@@ -54,8 +60,9 @@ typedef struct loom_low_lower_function_storage_plan_t {
   int64_t byte_length;
   // Source-required power-of-two base alignment.
   int64_t byte_alignment;
-  // Structural Low space selected by the target capability.
-  loom_storage_space_t storage_space;
+  // Target capability retained from selection, including content
+  // initialization.
+  const loom_low_lower_function_storage_mapping_t* mapping;
 } loom_low_lower_function_storage_plan_t;
 
 // Proves that a fixed slot preserves the allocation's per-execution identity.

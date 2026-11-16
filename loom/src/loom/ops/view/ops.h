@@ -109,7 +109,7 @@ iree_status_t loom_value_refinement_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_VIEW_LOAD: Load one scalar element from a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis.
+// LOOM_OP_VIEW_LOAD: Load one element from a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis. Reference elements copy the complete handle state into an independent result; owning references acquire an owner and pointers preserve borrowing or its necessary protection.
 // %x = view.load %view[%row, %col] : view<[%M]x[%N]xf32, %layout> -> f32
 LOOM_DEFINE_ISA(loom_view_load_isa, LOOM_OP_VIEW_LOAD)
 LOOM_DEFINE_OPERAND(loom_view_load_view, 0)
@@ -138,7 +138,7 @@ iree_status_t loom_view_load_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
-loom_trait_flags_t loom_memory_access_effective_traits(
+loom_trait_flags_t loom_view_element_access_effective_traits(
     const loom_module_t* module, const loom_op_t* op);
 iree_status_t loom_view_load_facts(
     loom_fact_context_t* context,
@@ -149,7 +149,7 @@ iree_status_t loom_view_load_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_VIEW_STORE: Store one scalar element into a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis.
+// LOOM_OP_VIEW_STORE: Store one element into a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis. Reference elements copy the complete handle state without consuming the source and release any replaced owner. Stored pointers preserve borrowing or its necessary protection.
 // view.store %x, %view[%row, %col] : f32, view<[%M]x[%N]xf32, %layout>
 LOOM_DEFINE_ISA(loom_view_store_isa, LOOM_OP_VIEW_STORE)
 LOOM_DEFINE_OPERAND(loom_view_store_value, 0)
@@ -178,7 +178,7 @@ iree_status_t loom_view_store_build(
     loom_optional uint8_t cache_temporal,
     loom_location_id_t location,
     loom_op_t** out_op);
-loom_trait_flags_t loom_memory_access_effective_traits(
+loom_trait_flags_t loom_view_element_access_effective_traits(
     const loom_module_t* module, const loom_op_t* op);
 iree_status_t loom_view_store_verify(
     const loom_module_t* module, const loom_op_t* op,

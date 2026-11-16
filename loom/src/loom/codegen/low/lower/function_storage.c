@@ -110,7 +110,7 @@ iree_status_t loom_low_lower_function_storage_select(
   *plan = (loom_low_lower_function_storage_plan_t){
       .byte_length = byte_length,
       .byte_alignment = alignment,
-      .storage_space = mapping->storage_space,
+      .mapping = mapping,
   };
   loom_type_t address_type = loom_type_none();
   IREE_RETURN_IF_ERROR(loom_low_lower_make_register_type(
@@ -129,13 +129,17 @@ iree_status_t loom_low_lower_function_storage_emit(
   loom_op_t* storage_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_storage_reserve_build(
       builder, plan->byte_length, plan->byte_alignment,
-      loom_type_storage(plan->storage_space), source_op->location,
+      loom_type_storage(plan->mapping->storage_space), source_op->location,
       &storage_op));
   loom_op_t* address_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_storage_address_build(
       builder, loom_low_storage_reserve_storage(storage_op), /*offset=*/0,
       loom_low_lower_value_binding_type(context, result), source_op->location,
       &address_op));
-  return loom_low_lower_bind_value(context, result,
-                                   loom_low_storage_address_result(address_op));
+  const loom_value_id_t address = loom_low_storage_address_result(address_op);
+  if (plan->mapping->initialize) {
+    IREE_RETURN_IF_ERROR(plan->mapping->initialize(
+        context, address, plan->byte_length, source_op->location));
+  }
+  return loom_low_lower_bind_value(context, result, address);
 }

@@ -46,6 +46,7 @@ from loom.dsl import (
     BorrowedResult,
     CachePolicyInterface,
     ContractFamily,
+    Copy,
     Dialect,
     EnumCase,
     EnumDef,
@@ -251,18 +252,20 @@ view_refine = value_refinement_op(
 )
 
 # ============================================================================
-# view.load/view.store — scalar logical memory access
+# view.load/view.store — single-element logical memory access
 # ============================================================================
 
 view_load = Op(
     name="view.load",
     group=view_ops,
-    doc=("Load one scalar element from a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis."),
+    doc=(
+        "Load one element from a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis. Reference elements copy the complete handle state into an independent result; owning references acquire an owner and pointers preserve borrowing or its necessary protection."
+    ),
     operands=[
         Operand("view", VIEW, role=OperandRole.ACCESS_PATH, doc="Typed source view."),
         Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical element indices.", variadic=True),
     ],
-    results=[Result("result", SCALAR, doc="Loaded scalar element.")],
+    results=[Result("result", ANY, doc="Loaded element with its exact reference or scalar type.")],
     attrs=[
         AttrDef(
             "memory_flags",
@@ -275,7 +278,7 @@ view_load = Op(
     constraints=[SameElementType("view", "result")],
     effects=[Reads("view")],
     interfaces=[CachePolicyInterface(), _memory_access_interface()],
-    effective_traits="loom_memory_access_effective_traits",
+    effective_traits="loom_view_element_access_effective_traits",
     verify="loom_view_load_verify",
     facts="loom_view_load_facts",
     format=[
@@ -298,9 +301,11 @@ view_load = Op(
 view_store = Op(
     name="view.store",
     group=view_ops,
-    doc=("Store one scalar element into a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis."),
+    doc=(
+        "Store one element into a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis. Reference elements copy the complete handle state without consuming the source and release any replaced owner. Stored pointers preserve borrowing or its necessary protection."
+    ),
     operands=[
-        Operand("value", SCALAR, doc="Scalar element to store."),
+        Operand("value", ANY, doc="Element to copy into storage."),
         Operand("view", VIEW, role=OperandRole.ACCESS_PATH, doc="Typed destination view."),
         Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical element indices.", variadic=True),
     ],
@@ -315,8 +320,9 @@ view_store = Op(
     ],
     constraints=[SameElementType("value", "view")],
     effects=[Writes("view")],
+    ownership_effects=[Copy("value")],
     interfaces=[CachePolicyInterface(), _memory_access_interface(value="value")],
-    effective_traits="loom_memory_access_effective_traits",
+    effective_traits="loom_view_element_access_effective_traits",
     verify="loom_view_store_verify",
     format=[
         Flags("memory_flags"),

@@ -32,6 +32,7 @@ from iree.vm.bytecode.spec.isa.core.ref import (
     REF_COMPARE_EQ,
     REF_COMPARE_NULL,
     REF_NULL,
+    REF_STACK_DISCARD_RANGE,
 )
 from iree.vm.bytecode.spec.isa.core.rules import (
     FieldRule,
@@ -39,7 +40,11 @@ from iree.vm.bytecode.spec.isa.core.rules import (
     RefOwnership,
     StateAccess,
 )
-from iree.vm.bytecode.spec.isa.core.stack import MEMORY_FORMAT_SELECTOR
+from iree.vm.bytecode.spec.isa.core.stack import (
+    MEMORY_FORMAT_SELECTOR,
+    STACK_LOAD_INDEXED,
+    STACK_STORE_INDEXED,
+)
 from iree.vm.bytecode.spec.specification import SPECIFICATION
 
 from loom.dialect.scalar import arithmetic, bitwise, conversion, math
@@ -309,9 +314,10 @@ def test_lowering_uses_the_projected_descriptors():
     assert {id(emit.descriptor) for emit in emissions} == {
         id(descriptor)
         for descriptor in descriptors
-        # Symbol-kind selection uses the C recipe before final table ordinals
-        # exist. Shared source and execution tests exercise that producer.
-        if descriptor.encoding_id != BUFFER_RODATA_LOAD.opcode
+        # Symbol selection and frame initialization use retained C recipes.
+        # Source execution tests exercise both producers.
+        if descriptor.encoding_id
+        not in (BUFFER_RODATA_LOAD.opcode, REF_STACK_DISCARD_RANGE.opcode)
     }
     for emit in emissions:
         assert set(emit.operands) == {
@@ -324,6 +330,43 @@ def test_lowering_uses_the_projected_descriptors():
             for operand in emit.descriptor.operands
             if operand.role is OperandRole.RESULT
         }
+
+
+def test_frame_access_covers_scalar_storage_widths():
+    expected = {
+        "i8": 8,
+        "i16": 16,
+        "i32": 32,
+        "i64": 64,
+        "f8E4M3": 8,
+        "f8E5M2": 8,
+        "f16": 16,
+        "bf16": 16,
+        "f32": 32,
+        "f64": 64,
+        "index": 64,
+        "offset": 64,
+    }
+    formats = {value.value: value.name for value in MEMORY_FORMAT_SELECTOR.values}
+    for instruction in (STACK_LOAD_INDEXED, STACK_STORE_INDEXED):
+        actual = {}
+        for case in VM_CORE_CONTRACT_FRAGMENT.cases:
+            if not isinstance(case, DescriptorRule):
+                continue
+            if (
+                case.descriptor is None
+                or case.descriptor.encoding_id != instruction.opcode
+            ):
+                continue
+            (guard,) = tuple(
+                guard for guard in case.guards if guard.kind is GuardKind.VALUE_TYPE
+            )
+            access = case.emit[-1]
+            width = int(formats[access.immediates["format_u8"]].split(".")[0][1:])
+            for element in guard.type_pattern.elements:
+                assert expected[element] == width
+                actual[element] = width
+        assert actual == expected
 
 
 def test_immediate_positions_match_canonical_attributes():
@@ -380,7 +423,10 @@ def test_selectors_preserve_the_spec_domain_and_encoding():
                     )
                     == field.rule.values
                 )
-            elif field.rule.kind is FieldRule.ANY_BITS:
+            elif field.rule.kind in (
+                FieldRule.ANY_BITS,
+                FieldRule.LOCAL_BYTES_RANGE_MEMORY_FORMAT,
+            ):
                 assert immediate.unsigned_max == (1 << immediate.bit_width) - 1
             elif field.rule.kind is FieldRule.RODATA_ORDINAL:
                 assert immediate.kind is ImmediateKind.ORDINAL

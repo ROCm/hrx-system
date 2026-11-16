@@ -391,6 +391,20 @@ iree_status_t loom_view_bitcast_verify(const loom_module_t* module,
   return iree_ok_status();
 }
 
+loom_trait_flags_t loom_view_element_access_effective_traits(
+    const loom_module_t* module, const loom_op_t* op) {
+  loom_trait_flags_t traits = loom_memory_access_effective_traits(module, op);
+  const loom_value_id_t view = loom_view_load_isa(op)
+                                   ? loom_view_load_view(op)
+                                   : loom_view_store_view(op);
+  if (loom_type_has_reference_element(loom_module_value_type(module, view))) {
+    // Copying and replacing handle states may change ownership or finalize an
+    // object. Those effects must remain ordered with other ownership actions.
+    traits |= LOOM_TRAIT_OBSERVABLE_EFFECT | LOOM_TRAIT_UNIQUE_IDENTITY;
+  }
+  return traits;
+}
+
 iree_status_t loom_view_load_verify(const loom_module_t* module,
                                     const loom_op_t* op,
                                     iree_diagnostic_emitter_t emitter) {

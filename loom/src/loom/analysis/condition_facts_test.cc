@@ -2027,11 +2027,10 @@ static unsigned DerivedBooleanTruthMask(
   return truths;
 }
 
-TEST_F(ConditionFactsTest, SelectSelectorTruthMatchesAllCompletions) {
+TEST_F(ConditionFactsTest, SelectedOperandTruthMatchesAllCompletions) {
   const auto type = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
-  const auto selector = DefineValue(type);
-  const auto unknown_true = DefineValue(type);
-  const auto unknown_false = DefineValue(type);
+  const loom_value_id_t inputs[] = {DefineValue(type), DefineValue(type),
+                                    DefineValue(type)};
   loom_value_id_t literals[2];
   for (unsigned truth = 0; truth < 2; ++truth) {
     loom_op_t* literal = nullptr;
@@ -2040,71 +2039,76 @@ TEST_F(ConditionFactsTest, SelectSelectorTruthMatchesAllCompletions) {
                                               LOOM_LOCATION_UNKNOWN, &literal));
     literals[truth] = loom_scalar_constant_result(literal);
   }
-  const loom_value_id_t true_arms[] = {literals[0], literals[1], selector,
-                                       unknown_true};
-  const loom_value_id_t false_arms[] = {literals[0], literals[1], selector,
-                                        unknown_false};
+  const loom_value_id_t arms[] = {literals[0], literals[1], inputs[0],
+                                  inputs[1], inputs[2]};
   loom_condition_derivation_t derivation;
   loom_condition_derivation_initialize(&analysis_arena_, &derivation);
-  for (unsigned true_arm = 0; true_arm < 4; ++true_arm) {
-    for (unsigned false_arm = 0; false_arm < 4; ++false_arm) {
+  for (unsigned true_arm = 0; true_arm < IREE_ARRAYSIZE(arms); ++true_arm) {
+    for (unsigned false_arm = 0; false_arm < IREE_ARRAYSIZE(arms);
+         ++false_arm) {
       loom_op_t* select = nullptr;
-      IREE_ASSERT_OK(loom_scf_select_build(
-          &builder_, selector, true_arms[true_arm], false_arms[false_arm], type,
-          LOOM_LOCATION_UNKNOWN, &select));
+      IREE_ASSERT_OK(loom_scf_select_build(&builder_, inputs[0], arms[true_arm],
+                                           arms[false_arm], type,
+                                           LOOM_LOCATION_UNKNOWN, &select));
       const auto result = loom_scf_select_result(select);
       for (bool assumed_truth : {false, true}) {
         SCOPED_TRACE(::testing::Message()
                      << "true_arm=" << true_arm << ", false_arm=" << false_arm
                      << ", assumed_truth=" << assumed_truth);
-        unsigned selector_outcomes = 0;
-        // Enumerate the selector and both independent unknown inputs, rather
-        // than deriving the expected answer with the query's arm rules.
+        unsigned outcomes[3] = {};
+        // Enumerate complete assignments, independently of derivation's arm
+        // exclusions. This includes aliases between selector and both arms.
         for (unsigned assignment = 0; assignment < 8; ++assignment) {
-          const bool condition = (assignment & 1) != 0;
-          const bool true_values[] = {false, true, condition,
-                                      (assignment & 2) != 0};
-          const bool false_values[] = {false, true, condition,
-                                       (assignment & 4) != 0};
-          if ((condition ? true_values[true_arm] : false_values[false_arm]) ==
-              assumed_truth) {
-            selector_outcomes |= condition ? 2u : 1u;
+          const bool values[] = {false, true, (assignment & 1) != 0,
+                                 (assignment & 2) != 0, (assignment & 4) != 0};
+          if (values[values[2] ? true_arm : false_arm] == assumed_truth) {
+            for (unsigned input = 0; input < 3; ++input) {
+              outcomes[input] |= values[input + 2] ? 2u : 1u;
+            }
           }
         }
-        const bool forced = selector_outcomes == 1u || selector_outcomes == 2u;
-        const bool shares_assumed_truth =
-            forced && ((selector_outcomes == 2u) == assumed_truth);
         IREE_ASSERT_OK(loom_condition_facts_query_complete(
             &condition_query_, /*fact_table=*/nullptr, result, assumed_truth,
             &derivation));
         EXPECT_EQ(DerivedBooleanTruthMask(derivation, result),
                   assumed_truth ? 2u : 1u);
-        EXPECT_EQ(DerivedBooleanTruthMask(derivation, selector),
-                  forced ? selector_outcomes : 0u);
-        EXPECT_EQ(derivation.boolean_fact_count, forced ? 2u : 1u);
+        unsigned known_count = 1;
+        unsigned truth_counts[2] = {unsigned(!assumed_truth),
+                                    unsigned(assumed_truth)};
+        for (unsigned input = 0; input < 3; ++input) {
+          const bool forced = outcomes[input] == 1u || outcomes[input] == 2u;
+          EXPECT_EQ(DerivedBooleanTruthMask(derivation, inputs[input]),
+                    forced ? outcomes[input] : 0u);
+          known_count += forced;
+          if (forced) {
+            ++truth_counts[outcomes[input] == 2u];
+          }
+        }
+        EXPECT_EQ(derivation.boolean_fact_count, known_count);
+        const unsigned equivalent_pairs =
+            truth_counts[0] * (truth_counts[0] - 1) / 2 +
+            truth_counts[1] * (truth_counts[1] - 1) / 2;
         EXPECT_EQ(derivation.integer_facts.integer_relation_count,
-                  1u + (forced ? 1u : 0u) + (shares_assumed_truth ? 1u : 0u));
-        unsigned composed_value_relations = 0;
+                  known_count + equivalent_pairs);
+        // Every retained or composed equality must follow from the same
+        // complete assignments; facts cannot invent a value outside this set.
         for (iree_host_size_t i = 0;
              i < derivation.integer_facts.integer_relation_count; ++i) {
           const auto& fact = derivation.integer_facts.integer_relations[i];
           EXPECT_EQ(fact.relation, LOOM_SYMBOLIC_INTEGER_RELATION_EQ);
           ASSERT_EQ(fact.left.kind, LOOM_CONDITION_INTEGER_OPERAND_VALUE);
+          const auto left =
+              DerivedBooleanTruthMask(derivation, fact.left.value_id);
+          EXPECT_TRUE(left == 1u || left == 2u);
           if (fact.right.kind == LOOM_CONDITION_INTEGER_OPERAND_CONSTANT) {
-            ASSERT_TRUE(fact.right.constant == 0 || fact.right.constant == 1);
-            EXPECT_EQ(DerivedBooleanTruthMask(derivation, fact.left.value_id),
-                      fact.right.constant ? 2u : 1u);
-            continue;
+            EXPECT_TRUE(fact.right.constant == 0 || fact.right.constant == 1);
+            EXPECT_EQ(left, fact.right.constant ? 2u : 1u);
+          } else {
+            ASSERT_EQ(fact.right.kind, LOOM_CONDITION_INTEGER_OPERAND_VALUE);
+            EXPECT_EQ(left,
+                      DerivedBooleanTruthMask(derivation, fact.right.value_id));
           }
-          ASSERT_TRUE(forced);
-          ASSERT_EQ(fact.right.kind, LOOM_CONDITION_INTEGER_OPERAND_VALUE);
-          EXPECT_TRUE((fact.left.value_id == selector &&
-                       fact.right.value_id == result) ||
-                      (fact.left.value_id == result &&
-                       fact.right.value_id == selector));
-          ++composed_value_relations;
         }
-        EXPECT_EQ(composed_value_relations, shares_assumed_truth ? 1u : 0u);
       }
     }
   }

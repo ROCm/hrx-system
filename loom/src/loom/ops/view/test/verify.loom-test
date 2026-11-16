@@ -504,3 +504,44 @@ func.def @preservation_requires_floating_add(%view: view<1xi32>, %value: i32) {
   view.atomic.reduce<addi, noftz> %value, %view[0] {ordering = relaxed, scope = workgroup} : i32, view<1xi32>
   func.return
 }
+
+// ====
+
+type.decl import("input", "packet") @Packet
+type.decl import("other", "packet") @Other
+
+func.def @reference_load_keeps_object_type(%source: view<4xptr<@Packet>>) {
+  // ERROR@+1: TYPE/002 "view" "ptr<@Packet>" "result" "ptr<@Other>"
+  %value = view.load %source[0] : view<4xptr<@Packet>> -> ptr<@Other>
+  func.return
+}
+
+// ====
+
+type.decl import("input", "packet") @Packet
+
+func.def @reference_load_keeps_ownership(%source: view<4xptr<@Packet>>) {
+  // ERROR@+1: TYPE/002 "view" "ptr<@Packet>" "result" "ref<@Packet>"
+  %value = view.load %source[0] : view<4xptr<@Packet>> -> ref<@Packet>
+  func.return
+}
+
+// ====
+
+type.decl import("input", "packet") @Packet
+
+func.def @reference_store_cannot_forge_bits(%target: view<4xptr<@Packet>>, %bits: i64) {
+  // ERROR@+1: TYPE/002 "value" "i64" "view" "ptr<@Packet>"
+  view.store %bits, %target[0] : i64, view<4xptr<@Packet>>
+  func.return
+}
+
+// ====
+
+type.decl import("input", "packet") @Packet
+
+func.def @reference_store_keeps_ownership(%target: view<4xref<@Packet>>, %pointer: ptr<@Packet>) {
+  // ERROR@+1: TYPE/002 "value" "ptr<@Packet>" "view" "ref<@Packet>"
+  view.store %pointer, %target[0] : ptr<@Packet>, view<4xref<@Packet>>
+  func.return
+}

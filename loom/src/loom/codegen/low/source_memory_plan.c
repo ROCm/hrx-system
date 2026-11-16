@@ -1222,21 +1222,14 @@ bool loom_low_source_memory_operation_kind_from_access(
   return *out_operation_kind != LOOM_MEMORY_ACCESS_OPERATION_COUNT_;
 }
 
-static loom_type_t loom_low_source_memory_element_vector_type(
-    loom_type_t view_type) {
-  return loom_type_shaped_1d(LOOM_TYPE_VECTOR,
-                             loom_type_element_type(view_type),
-                             loom_dim_pack_static(1), /*encoding_id=*/0);
-}
-
 static loom_type_t loom_low_source_memory_access_payload_vector_type(
     const loom_module_t* module, const loom_op_t* source_op,
-    loom_memory_access_t access, loom_type_t view_type) {
+    loom_memory_access_t access) {
   if (loom_vector_memory_op_footprint_kind(module, source_op) ==
       LOOM_VECTOR_MEMORY_FOOTPRINT_FRAGMENT) {
     // The source address is the logical origin. The target's fragment layout
     // supplies each lane's physical footprint, not the payload vector shape.
-    return loom_low_source_memory_element_vector_type(view_type);
+    return loom_type_none();
   }
   const loom_value_id_t value_id = loom_memory_access_value(access);
   if (value_id != LOOM_VALUE_ID_INVALID && value_id < module->values.count) {
@@ -1254,7 +1247,7 @@ static loom_type_t loom_low_source_memory_access_payload_vector_type(
       }
     }
   }
-  return loom_low_source_memory_element_vector_type(view_type);
+  return loom_type_none();
 }
 
 static bool loom_low_source_memory_access_plan_from_components(
@@ -1326,13 +1319,15 @@ static bool loom_low_source_memory_access_plan_from_components(
     out_plan->element_byte_count =
         (uint32_t)vector_access.static_element_byte_count;
   }
-  if (vector_access.vector_rank != 1) {
+  if (vector_access.vector_rank > 1) {
     out_diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VECTOR_RANK;
     return false;
   }
-  if (!loom_low_source_memory_access_vector_lane_count(
-          vector_type, &out_plan->vector_lane_count)) {
+  if (vector_access.vector_rank == 0) {
+    out_plan->vector_lane_count = 1;
+  } else if (!loom_low_source_memory_access_vector_lane_count(
+                 vector_type, &out_plan->vector_lane_count)) {
     out_diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VECTOR_LANE_COUNT;
     return false;
@@ -1919,10 +1914,9 @@ bool loom_low_source_memory_access_plan_build(
     return built;
   }
 
-  const loom_type_t view_type = loom_module_value_type(module, view_value_id);
   const loom_type_t vector_type =
       loom_low_source_memory_access_payload_vector_type(module, source_op,
-                                                        access, view_type);
+                                                        access);
   const bool built = loom_low_source_memory_access_plan_build_indexed_impl(
       view_regions, operation_kind, view_value_id,
       loom_memory_access_dynamic_indices(access),
@@ -1975,8 +1969,6 @@ bool loom_low_source_memory_access_plan_build_view_origin(
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_SOURCE;
     return false;
   }
-  const loom_type_t vector_type =
-      loom_low_source_memory_element_vector_type(view_type);
   int64_t zero_indices[LOOM_ENCODING_ADDRESS_LAYOUT_MAX_RANK] = {0};
   const loom_attribute_t static_indices =
       loom_attr_i64_array(zero_indices, loom_type_rank(view_type));
@@ -1984,7 +1976,7 @@ bool loom_low_source_memory_access_plan_build_view_origin(
   return loom_low_source_memory_access_plan_from_components(
       view_regions, LOOM_LOW_SOURCE_MEMORY_OPERATION_VIEW_CARRIER,
       view_value_id, (loom_value_slice_t){0}, static_indices, view_type,
-      vector_type, /*whole_view=*/false, cache_policy,
+      loom_type_none(), /*whole_view=*/false, cache_policy,
       /*axis_byte_strides=*/NULL, out_plan, out_diagnostic);
 }
 

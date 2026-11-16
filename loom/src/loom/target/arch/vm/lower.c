@@ -14,6 +14,7 @@
 #include "loom/target/arch/vm/contracts/core_lower_rules.h"
 #include "loom/target/arch/vm/descriptors/descriptors.h"
 #include "loom/target/arch/vm/types.h"
+#include "loom/util/fact_table.h"
 
 static bool loom_vm_source_type_supported(void* user_data,
                                           const loom_module_t* module,
@@ -75,6 +76,36 @@ static iree_status_t loom_vm_map_type(void* user_data,
 
 #include "loom/target/arch/vm/contracts/tables.inl"
 
+static iree_status_t loom_vm_map_value(void* user_data,
+                                       loom_low_lower_context_t* context,
+                                       const loom_op_t* source_op,
+                                       loom_value_id_t source_value,
+                                       loom_type_t source_type,
+                                       loom_type_t* out_low_type) {
+  if (!loom_type_is_view(source_type)) {
+    return loom_vm_map_type(user_data, context, source_op, source_type,
+                            out_low_type);
+  }
+  const loom_value_fact_table_t* facts =
+      loom_low_lower_context_fact_table(context);
+  loom_value_fact_view_reference_t reference;
+  if (!loom_value_facts_query_view_reference(
+          &facts->context, loom_value_fact_table_lookup(facts, source_value),
+          &reference)) {
+    return iree_ok_status();
+  }
+  if (reference.buffer_value_id != LOOM_VALUE_ID_INVALID) {
+    return loom_low_lower_make_typed_register_type(
+        context, VM_CORE_REG_CLASS_ID_REF, 1, loom_type_buffer(), out_low_type);
+  }
+  if (reference.origin.kind == LOOM_VALUE_FACT_REFERENCE_ORIGIN_ALLOCATION &&
+      reference.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE) {
+    return loom_low_lower_make_register_type(
+        context, VM_CORE_REG_CLASS_ID_VALUE, 1, out_low_type);
+  }
+  return iree_ok_status();
+}
+
 // The source symbol distinguishes immutable bytes from process value globals.
 // Keep that symbol in Low; the module writer assigns its final data ordinal.
 static iree_status_t loom_vm_select_op(void* user_data,
@@ -130,6 +161,44 @@ static iree_status_t loom_vm_emit_op(void* user_data,
                                    loom_op_results(low_op)[0]);
 }
 
+// Reference allocations start null on every execution, including loop reuse.
+// Coordinates use the descriptor cell width, independent of native pointer
+// size.
+static iree_status_t loom_vm_initialize_reference_storage(
+    loom_low_lower_context_t* context, loom_value_id_t address,
+    int64_t byte_length, loom_location_id_t location) {
+  const loom_low_descriptor_set_t* set =
+      loom_low_lower_context_descriptor_set(context);
+  const uint32_t cell_bytes =
+      set->reg_classes[VM_CORE_REG_CLASS_ID_REF].alloc_unit_bits / 8;
+  loom_string_id_t name = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_builder_intern_string(
+      loom_low_lower_context_builder(context), IREE_SV("count_u32"), &name));
+  const loom_named_attr_t attr = {
+      .name_id = name,
+      .value = loom_attr_i64(byte_length / cell_bytes),
+  };
+  const loom_low_lower_resolved_descriptor_t descriptor = {
+      .descriptor =
+          &set->descriptors[VM_CORE_DESCRIPTOR_REF_REF_STACK_DISCARD_RANGE],
+  };
+  loom_op_t* op = NULL;
+  return loom_low_lower_emit_resolved_descriptor_op(
+      context, &descriptor, &address, 1,
+      (loom_named_attr_slice_t){.entries = &attr, .count = 1}, NULL, 0, NULL, 0,
+      location, &op);
+}
+
+static const loom_low_lower_function_storage_mapping_t kFunctionStorage[] = {
+    {LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, LOOM_STORAGE_SPACE_STACK,
+     VM_CORE_REG_CLASS_ID_VALUE,
+     LOOM_LOW_LOWER_FUNCTION_STORAGE_SOURCE_SCALAR_VIEW},
+    {LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, LOOM_STORAGE_SPACE_PRIVATE,
+     VM_CORE_REG_CLASS_ID_VALUE,
+     LOOM_LOW_LOWER_FUNCTION_STORAGE_SOURCE_REFERENCE_VIEW,
+     loom_vm_initialize_reference_storage},
+};
+
 static const loom_low_lower_policy_t kPolicy = {
     .name = IREE_SVL("vm-lower"),
     .import_decl_kind = LOOM_LOW_FUNC_DECL_IMPORT_KIND_NATIVE,
@@ -139,6 +208,9 @@ static const loom_low_lower_policy_t kPolicy = {
     .source_vector_carrier_supported =
         {.fn = loom_vm_source_vector_carrier_supported},
     .map_type = {.fn = loom_vm_map_type},
+    .map_value = {.fn = loom_vm_map_value},
+    .function_storage = {.mappings = kFunctionStorage,
+                         .count = IREE_ARRAYSIZE(kFunctionStorage)},
     .contract = LOOM_VM_CORE_CONTRACT,
     .select_op = {.fn = loom_vm_select_op},
     .emit_op = {.fn = loom_vm_emit_op},

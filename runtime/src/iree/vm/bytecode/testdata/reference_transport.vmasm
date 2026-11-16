@@ -14,6 +14,14 @@ vm.module core(0.0) {
     string @string11 = "retain"
     string @string12 = "borrow_load"
     string @string13 = "borrow_store"
+    string @string14 = "indexed_borrow_load"
+    string @string15 = "indexed_borrow_store"
+    string @string16 = "indexed_copy_load"
+    string @string17 = "indexed_copy_store"
+    string @string18 = "indexed_retain_load"
+    string @string19 = "indexed_retain_store"
+    string @string20 = "indexed_move_load"
+    string @string21 = "indexed_move_store"
   }
 
   section ref_types alignment(8) {
@@ -23,7 +31,7 @@ vm.module core(0.0) {
   }
 
   section signatures alignment(8) {
-    signature @signature0 (ptr(@ref_type0), ref(@ref_type0)) -> (i32, i32, i32, i32)
+    signature @signature0 (i64, ptr(@ref_type0), ref(@ref_type0)) -> (i32, i32, i32, i32)
     signature @signature1 (ptr(@ref_type0)) -> (i32, i32, i32)
     signature @signature2 (ptr(@ref_type0)) -> ()
     signature @signature3 (ptr(@ref_type0)) -> (ptr(@ref_type0))
@@ -52,7 +60,15 @@ vm.module core(0.0) {
     export @export6 name(@string4) : @callable1 = @function5
     export @export7 name(@string5) : @callable3 = @function2
     export @export8 name(@string6) : @callable0 = @function4
-    export @export9 name(@string11) : @callable3 = @function3
+    export @export9 name(@string14) : @callable3 = @function10
+    export @export10 name(@string15) : @callable3 = @function11
+    export @export11 name(@string16) : @callable3 = @function12
+    export @export12 name(@string17) : @callable3 = @function13
+    export @export13 name(@string20) : @callable3 = @function16
+    export @export14 name(@string21) : @callable3 = @function17
+    export @export15 name(@string18) : @callable3 = @function14
+    export @export16 name(@string19) : @callable3 = @function15
+    export @export17 name(@string11) : @callable3 = @function3
   }
 
   section functions alignment(8) {
@@ -143,6 +159,87 @@ vm.module core(0.0) {
       ref.stack.store.move %r1, #r0
       ref.stack.store.borrow %r0, #r0
       %r1 = ref.stack.load.move #r0
+      %v3 = ref.compare.eq %r0, %r1
+      control.call @import0 {direct_ref_move_mask = 0x0000}
+      control.return
+    }
+    func @function10 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0) {
+    ^bb0:
+      control.block
+      ref.stack.store.indexed.move %r0, %v0
+      %r0 = ref.stack.load.indexed.borrow %v0
+      %r1 = ref.stack.load.indexed.borrow %v0
+      %v3 = ref.compare.eq %r0, %r1
+      control.call @import0 {direct_ref_move_mask = 0x0000}
+      control.return
+    }
+    func @function11 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0) {
+    ^bb0:
+      control.block
+      ref.stack.store.indexed.move %r1, %v0
+      ref.stack.store.indexed.borrow %r0, %v0
+      %r1 = ref.stack.load.indexed.move %v0
+      %v3 = ref.compare.eq %r0, %r1
+      control.call @import0 {direct_ref_move_mask = 0x0000}
+      control.return
+    }
+    func @function12 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0) {
+    ^bb0:
+      control.block
+      ref.stack.store.indexed.move %r0, %v0
+      %r0 = ref.stack.load.indexed.copy %v0
+      %r1 = ref.stack.load.indexed.copy %v0
+      %v3 = ref.compare.eq %r0, %r1
+      control.call @import0 {direct_ref_move_mask = 0x0000}
+      control.return
+    }
+    func @function13 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0) {
+    ^bb0:
+      control.block
+      ref.stack.store.indexed.move %r1, %v0
+      ref.stack.store.indexed.copy %r0, %v0
+      %r1 = ref.stack.load.indexed.move %v0
+      %v3 = ref.compare.eq %r0, %r1
+      control.call @import0 {direct_ref_move_mask = 0x0000}
+      control.return
+    }
+    func @function14 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0) {
+    ^bb0:
+      control.block
+      ref.stack.store.indexed.move %r0, %v0
+      %r0 = ref.stack.load.indexed.copy %v0
+      %r1 = ref.stack.load.indexed.retain %v0
+      %v3 = ref.compare.eq %r0, %r1
+      control.call @import0 {direct_ref_move_mask = 0x0000}
+      control.return
+    }
+    func @function15 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0) {
+    ^bb0:
+      control.block
+      ref.stack.store.indexed.move %r1, %v0
+      ref.stack.store.indexed.retain %r0, %v0
+      %r1 = ref.stack.load.indexed.move %v0
+      %v3 = ref.compare.eq %r0, %r1
+      control.call @import0 {direct_ref_move_mask = 0x0000}
+      control.return
+    }
+    func @function16 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0) {
+    ^bb0:
+      control.block
+      ref.stack.store.indexed.move %r0, %v0
+      %r0 = ref.stack.load.indexed.copy %v0
+      %r1 = ref.stack.load.indexed.move %v0
+      %v3 = ref.compare.eq %r0, %r1
+      control.call @import0 {direct_ref_move_mask = 0x0000}
+      control.return
+    }
+    func @function17 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 2, local_functions = 0) {
+    ^bb0:
+      control.block
+      ref.stack.store.indexed.move %r1, %v0
+      ref.stack.store.indexed.move %r0, %v0
+      %r0 = ref.stack.load.indexed.copy %v0
+      %r1 = ref.stack.load.indexed.borrow %v0
       %v3 = ref.compare.eq %r0, %r1
       control.call @import0 {direct_ref_move_mask = 0x0000}
       control.return

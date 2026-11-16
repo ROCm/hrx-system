@@ -114,3 +114,42 @@ vm.module core(0.0) {
   }
 
 }
+
+// ====
+// RUN: emit vm-dis
+
+vm.target<core> @target
+
+low.func.def public target<vm.core>(@target) @storage_address() -> (reg<vm.value : i64>) asm {
+  %storage = storage {byte_alignment = 8, byte_length = 8} : low.storage<stack>
+  %address = storage_address %storage : low.storage<stack> -> reg<vm.value : i64>
+  return %address
+}
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "storage_address"
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 () -> (i64)
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable0 = @function0
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable0 flags([]) frame(local_bytes = 8, value_registers = 1, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      %v0 = constant.i32 0x00000000
+      control.return
+    }
+  }
+
+}

@@ -142,17 +142,6 @@ low.func.def public target<vm.core>(@target) @data_alignment() -> (reg<vm.ref : 
 
 vm.target<core> @target
 
-low.func.def public target<vm.core>(@target) @storage_address() -> (reg<vm.value : i64>) asm {
-  %storage = storage {byte_alignment = 8, byte_length = 8} : low.storage<stack>
-  // ERROR@+1: BACKEND/055 {export="storage_address", constraint="an operation supported by VM instruction emission"}
-  %address = storage_address %storage : low.storage<stack> -> reg<vm.value : i64>
-  return %address
-}
-
-// ====
-
-vm.target<core> @target
-
 low.func.def public target<vm.core>(@target) @short_reload() -> (reg<vm.value : i16>) asm {
   %storage = storage {byte_alignment = 2, byte_length = 2} : low.storage<stack>
   // ERROR@+1: BACKEND/055 {export="short_reload", constraint="a register transfer that fits within its storage span"}

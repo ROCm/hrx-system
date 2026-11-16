@@ -25,7 +25,7 @@ from iree.vm.bytecode.spec.isa.core.rules import (
     StateAccess,
     StateResource,
 )
-from iree.vm.bytecode.spec.schema import U8, U16, Field
+from iree.vm.bytecode.spec.schema import U8, U16, U32, Field
 from iree.vm.bytecode.spec.version import CORE_0
 
 REF_FAMILY = InstructionFamily(
@@ -47,8 +47,10 @@ REF_FAMILY = InstructionFamily(
         "owner and clears every borrow in the exact declared register and local-slot "
         "extents. A borrowed-only type has no owner prefix: internal copies and moves "
         "preserve this restriction, and ownership-producing instructions fail before "
-        "touching the object or destination. Other ref operations are infallible after "
-        "verification. No ref operation suspends."
+        "touching the object or destination. Indexed slot accesses check the byte "
+        "offset's cell alignment and frame range before touching any reference. "
+        "Other ref operations are infallible after verification. No ref operation "
+        "suspends."
     ),
 )
 
@@ -732,6 +734,111 @@ REF_STACK_STORE_BORROW = _stack_transfer(
     "pc = pc + 4;",
 )
 
+
+def _indexed_stack_transfer(opcode: int, source: Instruction) -> Instruction:
+    mnemonic = source.mnemonic.replace("ref.stack.load.", "ref.stack.load.indexed.")
+    mnemonic = mnemonic.replace("ref.stack.store.", "ref.stack.store.indexed.")
+    return source._replace(
+        opcode=opcode,
+        mnemonic=mnemonic,
+        summary=source.summary + " Selects the slot by a checked byte offset.",
+        fields=(
+            source.fields[0],
+            _value_register(
+                "offset_v8",
+                FieldRole.OPERAND,
+                "Byte offset into frame-local ref cells.",
+            ),
+            _field(
+                "zero_padding_tail_u8",
+                U8,
+                "Canonical zero padding.",
+                FieldRole.PADDING,
+                FieldRule.ZERO,
+            ),
+        ),
+        behavior=(
+            "values[offset_v8] must be divisible by the 16-byte ref cell size "
+            "and select an existing local slot. "
+            + source.behavior.replace("slot_u16", "the selected slot")
+        ),
+        success=tuple(
+            text.replace("slot_u16", "the selected slot") for text in source.success
+        ),
+        assembly=source.assembly.replace(source.mnemonic, mnemonic).replace(
+            "#r<slot>", "%v<offset>"
+        ),
+        pseudocode=(
+            "slot = require_ref_cell_byte_offset(values[offset_v8]);\n"
+            + source.pseudocode.replace("slot_u16", "slot")
+        ),
+        state_effects=tuple(
+            effect._replace(resource_fields=("offset_v8",))
+            for effect in source.state_effects
+        ),
+        failures=(
+            FailureCase(
+                "out_of_range",
+                "The byte offset is unaligned or outside the local ref array.",
+                "No reference state is modified.",
+            ),
+            *source.failures,
+        ),
+    )
+
+
+REF_STACK_LOAD_INDEXED_RETAIN = _indexed_stack_transfer(0xE7, REF_STACK_LOAD_RETAIN)
+REF_STACK_LOAD_INDEXED_MOVE = _indexed_stack_transfer(0xE8, REF_STACK_LOAD_MOVE)
+REF_STACK_STORE_INDEXED_RETAIN = _indexed_stack_transfer(0xE9, REF_STACK_STORE_RETAIN)
+REF_STACK_STORE_INDEXED_MOVE = _indexed_stack_transfer(0xEA, REF_STACK_STORE_MOVE)
+REF_STACK_LOAD_INDEXED_COPY = _indexed_stack_transfer(0xEB, REF_STACK_LOAD_COPY)
+REF_STACK_STORE_INDEXED_COPY = _indexed_stack_transfer(0xEC, REF_STACK_STORE_COPY)
+REF_STACK_LOAD_INDEXED_BORROW = _indexed_stack_transfer(0xED, REF_STACK_LOAD_BORROW)
+REF_STACK_STORE_INDEXED_BORROW = _indexed_stack_transfer(0xEE, REF_STACK_STORE_BORROW)
+
+REF_STACK_DISCARD_RANGE = Instruction(
+    opcode=0xEF,
+    mnemonic="ref.stack.discard.range",
+    since=CORE_0,
+    family=REF_FAMILY,
+    summary="Releases or clears a contiguous range of local ref slots.",
+    fields=(
+        _value_register(
+            "offset_v8", FieldRole.OPERAND, "Byte offset into frame-local ref cells."
+        ),
+        _padding(U16),
+        _field(
+            "count_u32",
+            U32,
+            "Number of consecutive local ref slots.",
+            FieldRole.IMMEDIATE,
+            FieldRule.ANY_BITS,
+        ),
+    ),
+    semantics=None,
+    behavior="Checks a 16-byte-aligned logical ref offset and count, then replaces the entire range with canonical null in ascending slot order.",
+    success=(
+        "Each previous owner is released once; borrowed and null cells are only cleared.",
+    ),
+    assembly="ref.stack.discard.range %v<offset> {count = <count>}",
+    pseudocode="base = require_ref_cell_byte_range(values[offset_v8], count_u32);\nfor i in 0..count_u32: clear_ref(&local_refs[base + i]);\npc = pc + 8;",
+    state_effects=(
+        StateEffect(
+            StateAccess.WRITE, StateResource.FRAME_LOCALS, ("offset_v8", "count_u32")
+        ),
+    ),
+    failures=(
+        FailureCase(
+            "out_of_range",
+            "The byte offset is unaligned or the range is outside the local ref array.",
+            "No reference state is modified.",
+        ),
+    ),
+    ownership=(
+        "A zero-length range touches no storage. Each cell is cleared before its previous owner is released.",
+    ),
+)
+
 REF_INSTRUCTIONS = (
     REF_NULL,
     REF_COMPARE_NULL,
@@ -751,4 +858,13 @@ REF_INSTRUCTIONS = (
     REF_BORROW,
     REF_STACK_LOAD_BORROW,
     REF_STACK_STORE_BORROW,
+    REF_STACK_LOAD_INDEXED_RETAIN,
+    REF_STACK_LOAD_INDEXED_MOVE,
+    REF_STACK_STORE_INDEXED_RETAIN,
+    REF_STACK_STORE_INDEXED_MOVE,
+    REF_STACK_LOAD_INDEXED_COPY,
+    REF_STACK_STORE_INDEXED_COPY,
+    REF_STACK_LOAD_INDEXED_BORROW,
+    REF_STACK_STORE_INDEXED_BORROW,
+    REF_STACK_DISCARD_RANGE,
 )

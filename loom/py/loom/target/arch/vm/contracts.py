@@ -56,9 +56,15 @@ from iree.vm.bytecode.spec.isa.core.ref import (
     REF_COMPARE_NULL,
     REF_NULL,
     REF_SELECT,
+    REF_STACK_LOAD_INDEXED_COPY,
+    REF_STACK_STORE_INDEXED_COPY,
 )
 from iree.vm.bytecode.spec.isa.core.rules import FieldRule, RecordRuleKind
-from iree.vm.bytecode.spec.isa.core.stack import MEMORY_FORMAT_SELECTOR
+from iree.vm.bytecode.spec.isa.core.stack import (
+    MEMORY_FORMAT_SELECTOR,
+    STACK_LOAD_INDEXED,
+    STACK_STORE_INDEXED,
+)
 from iree.vm.bytecode.spec.isa.core.value import VALUE_COPY, VALUE_SELECT
 from iree.vm.bytecode.spec.specification import SPECIFICATION
 
@@ -898,21 +904,52 @@ def _view_cases():
             )
         ),
     )
-    for selector in MEMORY_FORMAT_SELECTOR.values:
-        scalar, lanes = selector.name.split(".")
-        if lanes != "x1":
-            continue
-        width = int(scalar[1:])
-        types = tuple(
-            str(ScalarType(kind))
-            for kind in ScalarTypeKind
-            if ScalarType(kind).bitwidth == width
-            and str(ScalarType(kind)) in _SCALAR_TYPES
-        )
-        accesses = (
-            (view.view_load, BUFFER_LOAD, SourceMemoryOperation.LOAD, "result"),
-            (view.view_store, BUFFER_STORE, SourceMemoryOperation.STORE, "value"),
-        )
+    for selector in (*MEMORY_FORMAT_SELECTOR.values, None):
+        if selector is None:
+            # Opaque reference cells share address geometry, not scalar formats.
+            width = 128
+            types = ()
+            accesses = (
+                (
+                    view.view_load,
+                    REF_STACK_LOAD_INDEXED_COPY,
+                    SourceMemoryOperation.LOAD,
+                    "result",
+                ),
+                (
+                    view.view_store,
+                    REF_STACK_STORE_INDEXED_COPY,
+                    SourceMemoryOperation.STORE,
+                    "value",
+                ),
+            )
+        else:
+            scalar, lanes = selector.name.split(".")
+            if lanes != "x1":
+                continue
+            width = int(scalar[1:])
+            types = tuple(
+                str(ScalarType(kind))
+                for kind in ScalarTypeKind
+                if ScalarType(kind).bitwidth == width
+                and str(ScalarType(kind)) in _SCALAR_TYPES
+            )
+            accesses = (
+                (view.view_load, BUFFER_LOAD, SourceMemoryOperation.LOAD, "result"),
+                (view.view_store, BUFFER_STORE, SourceMemoryOperation.STORE, "value"),
+                (
+                    view.view_load,
+                    STACK_LOAD_INDEXED,
+                    SourceMemoryOperation.LOAD,
+                    "result",
+                ),
+                (
+                    view.view_store,
+                    STACK_STORE_INDEXED,
+                    SourceMemoryOperation.STORE,
+                    "value",
+                ),
+            )
         if width in _ATOMIC_CARRIERS:
             accesses += (
                 (
@@ -935,20 +972,36 @@ def _view_cases():
                 ),
             )
         for source_op, instruction, operation, value_field in accesses:
+            reference_transfer = instruction in (
+                REF_STACK_LOAD_INDEXED_COPY,
+                REF_STACK_STORE_INDEXED_COPY,
+            )
+            frame_storage = reference_transfer or instruction in (
+                STACK_LOAD_INDEXED,
+                STACK_STORE_INDEXED,
+            )
+            lane_transfer = instruction in (
+                BUFFER_LOAD,
+                BUFFER_STORE,
+                STACK_LOAD_INDEXED,
+                STACK_STORE_INDEXED,
+            )
             descriptor = _DESCRIPTORS[instruction.opcode]
             # Prefer the shorter zero-static recipe. The general form adds all
             # signed contributions before the VM checks the final unsigned range.
             for dynamic, zero_static in ((False, False), (True, True), (True, False)):
                 memory = SourceMemoryConstraint(
                     operation=operation,
-                    memory_spaces=tuple(sorted(MEMORY_SPACE_NAMES)),
+                    memory_spaces=("private",)
+                    if frame_storage
+                    else tuple(sorted(MEMORY_SPACE_NAMES)),
                     element_byte_count=width // 8,
                     minimum_alignment=(
-                        0 if instruction in (BUFFER_LOAD, BUFFER_STORE) else width // 8
+                        0 if lane_transfer or reference_transfer else width // 8
                     ),
                     alignment_diagnostic=(
                         None
-                        if instruction in (BUFFER_LOAD, BUFFER_STORE)
+                        if lane_transfer or reference_transfer
                         else GuardDiagnostic(
                             ref=target_diagnostic(
                                 ERR_TARGET_050,
@@ -1000,11 +1053,44 @@ def _view_cases():
                             )
                         )
                     coordinate = ValueRef.temporary("offset" if dynamic else "static")
-                operands = {"buffer_r8": ValueRef.operand("view")}
+                if frame_storage:
+                    emits.append(
+                        EmitDescriptorOp(
+                            descriptor=add,
+                            operands={
+                                "left_v8": ValueRef.source_memory_root(),
+                                "right_v8": coordinate,
+                            },
+                            results={"destination_v8": ValueRef.temporary("address")},
+                            result_types={"destination_v8": Scalar("i64")},
+                            source_memory=memory,
+                            source_memory_byte_offset_materializer=(
+                                materializer if zero_static else None
+                            ),
+                        )
+                    )
+                    coordinate = ValueRef.temporary("address")
+                operands = (
+                    {} if frame_storage else {"buffer_r8": ValueRef.operand("view")}
+                )
                 results = {}
-                if instruction in (BUFFER_LOAD, BUFFER_STORE):
-                    operands.update(base_v8=coordinate, index_v8=coordinate)
-                    immediates = {"scale_u8": 0, "format_u8": selector.value}
+                if reference_transfer:
+                    operands["offset_v8"] = coordinate
+                    immediates = {}
+                    if operation == SourceMemoryOperation.STORE:
+                        operands["source_r8"] = ValueRef.operand("value")
+                    else:
+                        results["destination_r8"] = ValueRef.result("result")
+                elif lane_transfer:
+                    operands["index_v8"] = coordinate
+                    immediates = {
+                        "scale_u8": 1 if frame_storage else 0,
+                        "format_u8": selector.value,
+                    }
+                    if frame_storage:
+                        immediates["base_u16"] = 0
+                    else:
+                        operands["base_v8"] = coordinate
                     if operation == SourceMemoryOperation.STORE:
                         operands["source_v8"] = ValueRef.operand("value")
                     else:
@@ -1036,12 +1122,13 @@ def _view_cases():
                 emits.append(
                     EmitDescriptorOp(
                         descriptor=descriptor,
+                        form=DescriptorEmitForm.OP,
                         operands=operands,
                         results=results,
                         immediates=immediates,
                         source_memory=memory,
                         source_memory_byte_offset_materializer=(
-                            materializer if zero_static else None
+                            materializer if zero_static and not frame_storage else None
                         ),
                     )
                 )
@@ -1049,7 +1136,14 @@ def _view_cases():
                     source_op=source_op,
                     descriptor=descriptor,
                     guards=(
-                        Guard.value_type(value_field, Scalar(types)),
+                        (
+                            Guard.low_value_register_class(value_field, "vm.ref")
+                            if reference_transfer
+                            else Guard.value_type(value_field, Scalar(types))
+                        ),
+                        Guard.low_value_register_class(
+                            "view", "vm.value" if frame_storage else "vm.ref"
+                        ),
                         *(
                             (Guard.instance_flags_has_none("memory_flags", "noftz"),)
                             if instruction in (BUFFER_ATOMIC_REDUCE, BUFFER_ATOMIC_RMW)

@@ -1092,6 +1092,7 @@ static iree_status_t loom_condition_query_selection(
     return iree_ok_status();
   }
   loom_value_id_t selector = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t selected_value = LOOM_VALUE_ID_INVALID;
   uint8_t possible_selector_values = 0;
   if (loom_scf_select_isa(op)) {
     selector = loom_scf_select_condition(op);
@@ -1106,6 +1107,16 @@ static iree_status_t loom_condition_query_selection(
              loom_scf_select_true_value(op), frame->assumed_truth)
              ? 2u
              : 0u);
+    // Select operands dominate the result. A forced arm, or a value shared by
+    // both arms, has the result's truth and can supply further guard facts.
+    // Region yields below may instead name branch-local SSA values.
+    if (possible_selector_values == 1u) {
+      selected_value = loom_scf_select_false_value(op);
+    } else if (possible_selector_values == 2u ||
+               loom_scf_select_true_value(op) ==
+                   loom_scf_select_false_value(op)) {
+      selected_value = loom_scf_select_true_value(op);
+    }
   } else {
     const loom_region_branch_t branch =
         loom_region_branch_cast(module, (loom_op_t*)op);
@@ -1135,6 +1146,13 @@ static iree_status_t loom_condition_query_selection(
         possible_selector_values |= selected_truth ? 2u : 1u;
       }
     }
+  }
+  bool literal_truth = false;
+  if (selected_value != LOOM_VALUE_ID_INVALID && selected_value != selector &&
+      !loom_condition_value_literal_bool(module, selected_value,
+                                         &literal_truth)) {
+    IREE_RETURN_IF_ERROR(loom_condition_query_push_derivation(
+        query, selected_value, frame->assumed_truth));
   }
   if (possible_selector_values == 1u || possible_selector_values == 2u) {
     return loom_condition_query_push_derivation(query, selector,

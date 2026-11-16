@@ -44,13 +44,15 @@ bool loom_vector_memory_access_describe(
   }
   *out_access = (loom_vector_memory_access_t){0};
 
-  if (!loom_type_is_view(view_type) || !loom_type_is_vector(vector_type)) {
+  const bool has_vector = loom_type_kind(vector_type) != LOOM_TYPE_NONE;
+  if (!loom_type_is_view(view_type) ||
+      (has_vector && !loom_type_is_vector(vector_type))) {
     return false;
   }
 
   uint8_t view_rank = loom_type_rank(view_type);
-  uint8_t vector_rank = loom_type_rank(vector_type);
-  if (vector_rank == 0 || vector_rank > view_rank) {
+  uint8_t vector_rank = has_vector ? loom_type_rank(vector_type) : 0;
+  if ((has_vector && vector_rank == 0) || vector_rank > view_rank) {
     return false;
   }
 
