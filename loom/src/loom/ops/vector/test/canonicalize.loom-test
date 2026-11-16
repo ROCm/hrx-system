@@ -31,18 +31,18 @@ func.def @rotate_counts_normalize(%words: vector<4xi32>, %wide: vector<2xi64>, %
 
 // ====
 
-// A static result refinement propagates its extent back through the source
-// producer without changing the value carried by the refinement edge.
-func.def @refine_propagates_static_shape(%width: index, %value: i32) -> (vector<8xi32>) {
+// A static result assertion leaves the dynamic producer's type unchanged.
+func.def @refine_preserves_source_shape(%width: index, %value: i32) -> (vector<8xi32>) {
   %source = vector.splat %value : vector<[%width]xi32>
   %refined = vector.refine %source : vector<[%width]xi32> -> vector<8xi32>
   func.return %refined : vector<8xi32>
 }
 
 // ----
-func.def @refine_propagates_static_shape(%width: index, %value: i32) -> (vector<8xi32>) {
-  %source = vector.splat %value : vector<8xi32>
-  func.return %source : vector<8xi32>
+func.def @refine_preserves_source_shape(%width: index, %value: i32) -> (vector<8xi32>) {
+  %source = vector.splat %value : vector<[%width]xi32>
+  %refined = vector.refine %source : vector<[%width]xi32> -> vector<8xi32>
+  func.return %refined : vector<8xi32>
 }
 
 // ====

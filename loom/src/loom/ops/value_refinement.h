@@ -27,7 +27,9 @@ iree_status_t loom_value_refinement_facts(
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// Propagates static structure in both directions through the asserted identity.
+// Propagates source structure to the refined result. An assertion constrains
+// only its result: propagating it backward would change earlier or sibling
+// uses of the source that execute without the assertion.
 iree_status_t loom_value_refinement_type_transfer(
     loom_type_transfer_context_t* context, const loom_module_t* module,
     loom_op_t* op);
