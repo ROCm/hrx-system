@@ -101,6 +101,7 @@ _I16 = Scalar("i16")
 _I32 = Scalar("i32")
 _F16 = Scalar("f16")
 _F32 = Scalar("f32")
+_F64 = Scalar("f64")
 _REGISTER_SUFFIXES = {
     32: "xmm",
     64: "xmm",
@@ -227,43 +228,56 @@ def _scalar_rules() -> tuple[DescriptorRule, ...]:
             _F16,
             "x86.avx512_fp16.vcvtss2sh.xmm",
         ),
+        _scalar_float_conversion_rule(
+            scalar_conversion.scalar_extf,
+            _F16,
+            _F64,
+            "x86.avx512_fp16.vcvtsh2sd.xmm",
+        ),
+        _scalar_float_conversion_rule(
+            scalar_conversion.scalar_fptrunc,
+            _F64,
+            _F16,
+            "x86.avx512_fp16.vcvtsd2sh.xmm",
+        ),
     )
 
 
 def _vector_conversion_rules() -> tuple[DescriptorRule, ...]:
     cases: list[DirectDescriptorCase] = []
-    for lane_count, input_suffix, result_suffix in (
-        (2, "xmm", "xmm"),
-        (4, "xmm", "xmm"),
-        (8, "xmm", "ymm"),
-        (16, "ymm", "zmm"),
+    for element, element_bit_width, extend, truncate, lane_counts in (
+        ("f32", 32, "vcvtph2psx", "vcvtps2phx", (2, 4, 8, 16)),
+        ("f64", 64, "vcvtph2pd", "vcvtpd2ph", (2, 4, 8)),
     ):
-        cases.append(
-            DirectDescriptorCase(
-                vector.vector_extf,
-                _descriptor(
-                    f"x86.avx512_fp16.vcvtph2psx.{result_suffix}.{input_suffix}"
-                ),
-                {
-                    "input": Vector("f16", lanes=lane_count),
-                    "result": Vector("f32", lanes=lane_count),
-                },
-                priority=1,
+        for lane_count in lane_counts:
+            input_suffix = _REGISTER_SUFFIXES[max(128, lane_count * 16)]
+            result_suffix = _REGISTER_SUFFIXES[max(128, lane_count * element_bit_width)]
+            cases.append(
+                DirectDescriptorCase(
+                    vector.vector_extf,
+                    _descriptor(
+                        f"x86.avx512_fp16.{extend}.{result_suffix}.{input_suffix}"
+                    ),
+                    {
+                        "input": Vector("f16", lanes=lane_count),
+                        "result": Vector(element, lanes=lane_count),
+                    },
+                    priority=1,
+                )
             )
-        )
-        cases.append(
-            DirectDescriptorCase(
-                vector.vector_fptrunc,
-                _descriptor(
-                    f"x86.avx512_fp16.vcvtps2phx.{input_suffix}.{result_suffix}"
-                ),
-                {
-                    "input": Vector("f32", lanes=lane_count),
-                    "result": Vector("f16", lanes=lane_count),
-                },
-                priority=1,
+            cases.append(
+                DirectDescriptorCase(
+                    vector.vector_fptrunc,
+                    _descriptor(
+                        f"x86.avx512_fp16.{truncate}.{input_suffix}.{result_suffix}"
+                    ),
+                    {
+                        "input": Vector(element, lanes=lane_count),
+                        "result": Vector("f16", lanes=lane_count),
+                    },
+                    priority=1,
+                )
             )
-        )
     return tuple(
         replace(
             rule, guards=(*rule.guards, Guard.descriptor_available(rule.descriptor))

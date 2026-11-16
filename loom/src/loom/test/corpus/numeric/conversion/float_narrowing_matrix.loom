@@ -34,7 +34,7 @@ func.def inline @canonicalize_half_bits(%half: i32) -> (i32) {
   func.return %canonical_half : i32
 }
 
-// Observes each software-lowered F64 destination through its integer carrier
+// Observes each narrow F64 destination through its integer carrier
 // so every non-NaN result remains exactly comparable. Native F32 conversions
 // have their own floating-environment coverage.
 func.def inline @narrow_f64_bits(%bits: i64) -> (i32, i32, i32, i32) {

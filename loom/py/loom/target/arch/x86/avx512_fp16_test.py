@@ -78,6 +78,14 @@ def test_avx512_fp16_rows_cover_the_native_scalar_and_vector_family() -> None:
     add("vcvtps2phx.ymm.zmm", 0x841D, FEATURE_AVX512_FP16)
     add("vcvtsh2ss.xmm", 0x2013, FEATURE_AVX512_FP16)
     add("vcvtss2sh.xmm", 0x001D, FEATURE_AVX512_FP16)
+    add("vcvtsh2sd.xmm", 0x085A, FEATURE_AVX512_FP16)
+    add("vcvtsd2sh.xmm", 0x1C5A, FEATURE_AVX512_FP16)
+    for suffix, length_bits in (("xmm", 0), ("ymm", 0x4000), ("zmm", 0x8000)):
+        feature_bits = FEATURE_AVX512_FP16
+        if suffix != "zmm":
+            feature_bits |= FEATURE_AVX512_VL
+        add(f"vcvtph2pd.{suffix}.xmm", 0x005A | length_bits, feature_bits)
+        add(f"vcvtpd2ph.xmm.{suffix}", 0x145A | length_bits, feature_bits)
     add("vpbroadcastw.zmm.xmm", 0xA679, FEATURE_AVX512_FP16)
 
     descriptors = {

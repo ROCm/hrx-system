@@ -449,6 +449,19 @@ TEST(EncodingTest, ScalarAndPackedFloatWidthConversions) {
                        {0x62, 0xa1, 0xfd, 0x48, 0x5a, 0xca});
 }
 
+TEST(EncodingTest, NativeHalfDoubleConversions) {
+  // Independent LLVM MC reference encodings exercise the full SIMD bank.
+  loom_x86_encoding_operands_t operands = {.result = 30, .inputs = {29, 28}};
+  ExpectVectorEncoding(0x8210, 0x1c5a, operands,
+                       {0x62, 0x05, 0x97, 0x00, 0x5a, 0xf4});
+  ExpectVectorEncoding(0x8210, 0x085a, operands,
+                       {0x62, 0x05, 0x16, 0x00, 0x5a, 0xf4});
+  ExpectVectorEncoding(0x8140, 0x945a, operands,
+                       {0x62, 0x05, 0xfd, 0x48, 0x5a, 0xf5});
+  ExpectVectorEncoding(0x8140, 0x805a, operands,
+                       {0x62, 0x05, 0x7c, 0x48, 0x5a, 0xf5});
+}
+
 TEST(EncodingTest, LegacyHalfConversions) {
   // Independent LLVM assembler bytes cover both directions, every width, and
   // EVEX high registers. Narrowing reverses the ModRM source/result fields.

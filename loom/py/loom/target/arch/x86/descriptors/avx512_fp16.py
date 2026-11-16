@@ -300,39 +300,39 @@ def _descriptors() -> tuple[Descriptor, ...]:
             strict=True,
         )
     )
-    packed_conversions = (
-        *(
-            _bind(
-                _conversion_descriptor("vcvtph2psx", result_width, input_width),
-                native.VCVTPH2PSX,
-                vector_bit_width=max(result_width, input_width),
-                scalar=False,
-            )
-            for result_width, input_width in ((128, 64), (256, 128), (512, 256))
-        ),
-        *(
-            _bind(
-                _conversion_descriptor("vcvtps2phx", result_width, input_width),
-                native.VCVTPS2PHX,
-                vector_bit_width=max(result_width, input_width),
-                scalar=False,
-            )
-            for result_width, input_width in ((64, 128), (128, 256), (256, 512))
-        ),
+    packed_conversions = tuple(
+        _bind(
+            _conversion_descriptor(
+                instruction.descriptor_mnemonic,
+                half_width if narrow else wide_width,
+                wide_width if narrow else half_width,
+            ),
+            instruction,
+            vector_bit_width=wide_width,
+            scalar=False,
+        )
+        for instruction, element_bit_width, narrow in (
+            (native.VCVTPH2PSX, 32, False),
+            (native.VCVTPS2PHX, 32, True),
+            (native.VCVTPH2PD, 64, False),
+            (native.VCVTPD2PH, 64, True),
+        )
+        for wide_width in _VECTOR_BIT_WIDTHS
+        for half_width in (max(64, wide_width * 16 // element_bit_width),)
     )
-    scalar_conversions = (
+    scalar_conversions = tuple(
         _bind(
-            _scalar_conversion_descriptor("vcvtsh2ss", "float.extend.f16.f32"),
-            native.VCVTSH2SS,
+            _scalar_conversion_descriptor(instruction.descriptor_mnemonic, semantic),
+            instruction,
             vector_bit_width=128,
             scalar=True,
-        ),
-        _bind(
-            _scalar_conversion_descriptor("vcvtss2sh", "float.truncate.f32.f16"),
-            native.VCVTSS2SH,
-            vector_bit_width=128,
-            scalar=True,
-        ),
+        )
+        for instruction, semantic in (
+            (native.VCVTSH2SS, "float.extend.f16.f32"),
+            (native.VCVTSS2SH, "float.truncate.f32.f16"),
+            (native.VCVTSH2SD, "float.extend.f16.f64"),
+            (native.VCVTSD2SH, "float.truncate.f64.f16"),
+        )
     )
     broadcast = _bind(
         _vector_splat_descriptor(

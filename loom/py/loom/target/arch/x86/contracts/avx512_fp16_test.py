@@ -338,8 +338,14 @@ def test_conversions_cover_every_representable_native_width() -> None:
         )
     }
     assert scalar_pairs == {
-        scalar_conversion.scalar_extf: {(Scalar("f16"), Scalar("f32"))},
-        scalar_conversion.scalar_fptrunc: {(Scalar("f32"), Scalar("f16"))},
+        scalar_conversion.scalar_extf: {
+            (Scalar("f16"), Scalar("f32")),
+            (Scalar("f16"), Scalar("f64")),
+        },
+        scalar_conversion.scalar_fptrunc: {
+            (Scalar("f32"), Scalar("f16")),
+            (Scalar("f64"), Scalar("f16")),
+        },
     }
 
     vector_pairs = {
@@ -355,12 +361,18 @@ def test_conversions_cover_every_representable_native_width() -> None:
             (Vector("f16", lanes=4), Vector("f32", lanes=4)),
             (Vector("f16", lanes=8), Vector("f32", lanes=8)),
             (Vector("f16", lanes=16), Vector("f32", lanes=16)),
+            (Vector("f16", lanes=2), Vector("f64", lanes=2)),
+            (Vector("f16", lanes=4), Vector("f64", lanes=4)),
+            (Vector("f16", lanes=8), Vector("f64", lanes=8)),
         },
         vector.vector_fptrunc: {
             (Vector("f32", lanes=2), Vector("f16", lanes=2)),
             (Vector("f32", lanes=4), Vector("f16", lanes=4)),
             (Vector("f32", lanes=8), Vector("f16", lanes=8)),
             (Vector("f32", lanes=16), Vector("f16", lanes=16)),
+            (Vector("f64", lanes=2), Vector("f16", lanes=2)),
+            (Vector("f64", lanes=4), Vector("f16", lanes=4)),
+            (Vector("f64", lanes=8), Vector("f16", lanes=8)),
         },
     }
 
