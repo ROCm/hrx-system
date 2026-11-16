@@ -69,6 +69,7 @@ jobs:
       - name: Install Bazel host tools
         run: |
           python3 dev.py bazel setup --venv
+          python3 -m build_tools.ci.rocm_bazel_cache
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Check tool versions

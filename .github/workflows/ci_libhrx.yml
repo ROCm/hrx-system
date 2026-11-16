@@ -156,6 +156,7 @@ jobs:
         run: |
           python3 --version
           python3 dev.py bazel setup --venv
+          python3 -m build_tools.ci.rocm_bazel_cache
           echo "$PWD/.venv/bin" >> "${GITHUB_PATH}"
 
       - name: Check tool versions
@@ -251,6 +252,7 @@ jobs:
         run: |
           python3 --version
           python3 dev.py bazel setup --venv
+          python3 -m build_tools.ci.rocm_bazel_cache
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Check tool versions

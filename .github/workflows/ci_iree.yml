@@ -138,6 +138,9 @@ jobs:
           - name: GCC / Fastbuild / AMD gfx120x Vulkan
             kind: vulkan
             command: iree-bazel-vulkan
+            # External hardware pools cannot resolve the Azure Kubernetes
+            # cache service. Package fanout will eventually remove these builds.
+            uncached: true
             runner: linux-gfx120X-gpu-rocm
             host_ar: ar
             host_cc: gcc
@@ -150,6 +153,7 @@ jobs:
           - name: Clang / Fastbuild / AMD gfx942
             kind: amdgpu
             command: iree-bazel-amdgpu
+            uncached: true
             runner: linux-gfx942-1gpu-ccs-csp-ossci-rocm
             artifact_set: core
             target_selector: gfx942
@@ -162,6 +166,7 @@ jobs:
           - name: Clang / Fastbuild / AMD gfx90a
             kind: amdgpu
             command: iree-bazel-amdgpu
+            uncached: true
             runner: linux-gfx90a-1gpu-ossci-rocm
             artifact_set: core
             target_selector: gfx90a
@@ -169,6 +174,7 @@ jobs:
           - name: Clang / Fastbuild / AMD gfx110x
             kind: amdgpu
             command: iree-bazel-amdgpu
+            uncached: true
             runner: linux-gfx110X-gpu-rocm
             artifact_set: core
             target_selector: gfx110X-all
@@ -176,6 +182,7 @@ jobs:
           - name: Clang / Fastbuild / AMD gfx1150
             kind: amdgpu
             command: iree-bazel-amdgpu
+            uncached: true
             runner: labxsj-linux-u2604-gfx1150-gpu-rocm
             artifact_set: core
             target_selector: gfx1150
@@ -184,6 +191,7 @@ jobs:
           - name: Clang / Fastbuild / AMD gfx120x
             kind: amdgpu
             command: iree-bazel-amdgpu
+            uncached: true
             runner: linux-gfx120X-gpu-rocm
             artifact_set: core
             target_selector: gfx120X-all
@@ -191,6 +199,7 @@ jobs:
           - name: Clang / ASAN / AMD gfx942
             kind: amdgpu
             command: iree-bazel-amdgpu-asan
+            uncached: true
             runner: linux-gfx942-1gpu-ccs-csp-ossci-rocm
             artifact_set: core
             target_selector: gfx942
@@ -198,6 +207,7 @@ jobs:
           - name: Clang / TSAN / AMD gfx942
             kind: amdgpu
             command: iree-bazel-amdgpu-tsan
+            uncached: true
             runner: linux-gfx942-1gpu-ccs-csp-ossci-rocm
             artifact_set: core
             target_selector: gfx942
@@ -205,6 +215,7 @@ jobs:
           - name: Clang / UBSAN / AMD gfx942
             kind: amdgpu
             command: iree-bazel-amdgpu-ubsan
+            uncached: true
             runner: linux-gfx942-1gpu-ccs-csp-ossci-rocm
             artifact_set: core
             target_selector: gfx942
@@ -224,6 +235,7 @@ jobs:
     env:
       IREE_CI_PLATFORM_COVERAGE: ${{ matrix.platform_coverage && '1' || '0' }}
       IREE_CI_ARTIFACT_SET: ${{ matrix.artifact_set || '' }}
+      IREE_CI_BAZEL_REMOTE_CACHE: ${{ matrix.uncached && '0' || '1' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -383,6 +395,9 @@ jobs:
         run: |
           python3 --version
           python3 dev.py bazel setup --venv
+          if [[ "$IREE_CI_BAZEL_REMOTE_CACHE" == 1 ]]; then
+            python3 -m build_tools.ci.rocm_bazel_cache
+          fi
           if [[ "${{ matrix.kind }}" == windows_msvc ]]; then
             {
               # Keep Wine-visible generated paths below MSVC's path limits.
@@ -598,7 +613,6 @@ jobs:
             command: iree-bazel-repository-integration
             host_toolchain: clang-cl
             platform_coverage: true
-            remote_cache: true
             runner: azure-windows-scale-rocm
             target_selector: gfx11-generic
           - name: Clang CL / Fastbuild / Shared Tools
@@ -611,12 +625,16 @@ jobs:
             kind: amd_client
             command: iree-bazel-amd-client
             host_toolchain: clang-cl
+            # External hardware pools cannot resolve the Azure Kubernetes
+            # cache service. Package fanout will eventually remove these builds.
+            uncached: true
             runner: windows-gfx1151-gpu-rocm
             xdna: true
           - name: Clang CL / ASAN / AMD gfx120x
             kind: amdgpu
             command: iree-bazel-amdgpu-native-asan
             host_toolchain: clang-cl
+            uncached: true
             runner: windows-gfx1201-gpu-rocm
             target_selector: gfx120X-all
     concurrency:
@@ -626,10 +644,7 @@ jobs:
     timeout-minutes: ${{ matrix.kind == 'amd_client' && 45 || 60 }}
     env:
       BAZEL_LLVM: ${{ github.workspace }}\build\${{ matrix.kind == 'amd_client' && 'iree-bazel-client' || 'iree-bazel-windows' }}\rocm-root\lib\llvm
-      IREE_CI_BAZEL_REMOTE_CACHE: ${{ matrix.remote_cache && '1' || '0' }}
-      # Trusted HRX branches populate the shared cache before merge; fork pull
-      # requests remain read-only at the repository ownership boundary.
-      IREE_CI_BAZEL_REMOTE_UPLOAD: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
+      IREE_CI_BAZEL_REMOTE_CACHE: ${{ matrix.uncached && '0' || '1' }}
       IREE_CI_PLATFORM_COVERAGE: ${{ matrix.platform_coverage && '1' || '0' }}
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}\build\${{ matrix.kind == 'amd_client' && 'iree-bazel-client' || 'iree-bazel-windows' }}\downloads
@@ -777,16 +792,8 @@ jobs:
           "build --jobs=$env:IREE_CI_BAZEL_JOBS" |
             Out-File -FilePath .bazelrc.local -Encoding ascii -Append
           if ($env:IREE_CI_BAZEL_REMOTE_CACHE -eq '1') {
-            $cacheStatus = Invoke-RestMethod `
-              -Uri 'http://bazelremote-svc.bazelremote-ns.svc.cluster.local:8080/status' `
-              -Method Get -TimeoutSec 10
-            Write-Output "ROCm CI Bazel cache: $($cacheStatus | ConvertTo-Json -Compress)"
-            "build --config=rocm-ci-cache" |
-              Out-File -FilePath .bazelrc.local -Encoding ascii -Append
-            if ($env:IREE_CI_BAZEL_REMOTE_UPLOAD -ne 'true') {
-              "build --remote_upload_local_results=false" |
-                Out-File -FilePath .bazelrc.local -Encoding ascii -Append
-            }
+            python -m build_tools.ci.rocm_bazel_cache
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           if ("${{ matrix.kind }}" -eq "repository") {
             # The platform lane's Python and shell tests materialize large
@@ -1108,6 +1115,7 @@ jobs:
           mkdir -p build/iree-cmake-windows/host-tools
           python3 build_tools/devtools/install.py bazelisk \
             --bin-dir build/iree-cmake-windows/host-tools
+          python3 -m build_tools.ci.rocm_bazel_cache
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Restore Windows SDK inputs
