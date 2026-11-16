@@ -35,14 +35,14 @@ iree_cc_library(
     ${_hrx_static_platform_copts}
   HDRS
     "${LIBHRX_SOURCE_DIR}/src/iree_hal_compat.h"
-    "amdxdna_executable_cache.h"
+    "amdxdna_executable_reuse_key.h"
     "buffer_table.h"
     "hrx_internal.h"
     "mem_pool.h"
   SRCS
     "allocator.c"
-    "amdxdna_executable_cache.c"
     "amdxdna_executable.c"
+    "amdxdna_executable_reuse_key.c"
     "buffer.c"
     "buffer_table.c"
     "buffer_view.c"
@@ -132,14 +132,14 @@ iree_cc_library(
     ${_hrx_platform_copts}
   HDRS
     "${LIBHRX_SOURCE_DIR}/src/iree_hal_compat.h"
-    "amdxdna_executable_cache.h"
+    "amdxdna_executable_reuse_key.h"
     "buffer_table.h"
     "hrx_internal.h"
     "mem_pool.h"
   SRCS
     "allocator.c"
-    "amdxdna_executable_cache.c"
     "amdxdna_executable.c"
+    "amdxdna_executable_reuse_key.c"
     "buffer.c"
     "buffer_table.c"
     "buffer_view.c"
@@ -254,6 +254,7 @@ if(IREE_HAL_DRIVER_AMDXDNA)
       iree::base
       iree::base::internal::flatcc::parsing
       iree::hal
+      iree::hal::drivers::amdxdna
       iree::schemas::amdxdna_xclbin_executable_def_c_fbs
       iree::testing::gtest
       iree::testing::gtest_main

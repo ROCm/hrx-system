@@ -20,9 +20,9 @@ package(
 
 HRX_SRCS = [
     "allocator.c",
-    "amdxdna_executable_cache.c",
-    "amdxdna_executable_cache.h",
     "amdxdna_executable.c",
+    "amdxdna_executable_reuse_key.c",
+    "amdxdna_executable_reuse_key.h",
     "buffer.c",
     "buffer_table.c",
     "buffer_view.c",
@@ -186,6 +186,7 @@ hrx_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal/flatcc:parsing",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amdxdna",
         "//runtime/src/iree/schemas:amdxdna_xclbin_executable_def_c_fbs",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

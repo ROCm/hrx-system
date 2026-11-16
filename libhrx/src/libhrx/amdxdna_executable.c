@@ -7,13 +7,14 @@
 #include <string.h>
 
 #include "hrx_amdxdna.h"
-#include "amdxdna_executable_cache.h"
 #include "hrx_internal.h"
 
 #if defined(HRX_HAS_IREE_AMDXDNA_DRIVER)
+#include "amdxdna_executable_reuse_key.h"
 #include "iree/base/internal/flatcc/building.h"
 #include "iree/base/threading/call_once.h"
 #include "iree/base/threading/mutex.h"
+#include "iree/hal/drivers/amdxdna/device.h"
 #include "iree/hal/drivers/amdxdna/direct_command_buffer_planning.h"
 #include "iree/schemas/amdxdna_xclbin_executable_def_builder.h"
 
@@ -23,17 +24,13 @@ typedef struct hrx_amdxdna_serialization_workspace_t {
   size_t capacity;
 } hrx_amdxdna_serialization_workspace_t;
 
-#define HRX_AMDXDNA_EXECUTABLE_CACHE_MAX_HOST_BYTES (112u * 1024u * 1024u)
-
 static hrx_amdxdna_serialization_workspace_t
     hrx_amdxdna_serialization_workspace;
-static iree_slim_mutex_t hrx_amdxdna_executable_cache_mutex;
 static iree_once_flag hrx_amdxdna_serialization_workspace_once =
     IREE_ONCE_FLAG_INIT;
 
 static void hrx_amdxdna_serialization_workspace_initialize(void) {
   iree_slim_mutex_initialize(&hrx_amdxdna_serialization_workspace.mutex);
-  iree_slim_mutex_initialize(&hrx_amdxdna_executable_cache_mutex);
 }
 
 static bool hrx_amdxdna_span_is_valid(hrx_const_byte_span_t span) {
@@ -912,7 +909,7 @@ hrx_status_t hrx_amdxdna_xadx_serialize(
 }
 
 #if defined(HRX_HAS_IREE_AMDXDNA_DRIVER)
-static hrx_status_t hrx_amdxdna_executable_create_uncached(
+static hrx_status_t hrx_amdxdna_executable_load(
     hrx_device_t device, const hrx_amdxdna_executable_create_params_t* params,
     hrx_executable_t* executable) {
   hrx_host_allocator_t host_allocator = hrx_host_allocator_system();
@@ -931,7 +928,9 @@ static hrx_status_t hrx_amdxdna_executable_create_uncached(
   return status;
 }
 
-static bool hrx_amdxdna_executable_cache_params(
+// Returns true for executables fully described by their xclbin identity, the
+// entry point context mode, PDI ordinal and name, and the run transaction.
+static bool hrx_amdxdna_executable_reuse_params(
     const hrx_amdxdna_executable_create_params_t* params,
     const hrx_amdxdna_executable_entry_point_t** out_entry_point,
     const hrx_amdxdna_executable_run_t** out_run,
@@ -994,64 +993,31 @@ hrx_status_t hrx_amdxdna_executable_create(
   const hrx_amdxdna_executable_entry_point_t* entry_point = NULL;
   const hrx_amdxdna_executable_run_t* run = NULL;
   const hrx_amdxdna_xclbin_identity_t* xclbin_identity = NULL;
-  if (!hrx_amdxdna_executable_cache_params(params, &entry_point, &run,
+  if (!hrx_amdxdna_executable_reuse_params(params, &entry_point, &run,
                                            &xclbin_identity)) {
-    return hrx_amdxdna_executable_create_uncached(device, params, executable);
+    return hrx_amdxdna_executable_load(device, params, executable);
   }
 
-  hrx_amdxdna_executable_cache_descriptor_t descriptor;
-  if (!hrx_amdxdna_executable_cache_descriptor_initialize(
-          xclbin_identity, entry_point, run, &descriptor)) {
-    return hrx_amdxdna_executable_create_uncached(device, params, executable);
-  }
-  iree_slim_mutex_lock(&hrx_amdxdna_executable_cache_mutex);
-  hrx_amdxdna_executable_cache_s* cache = device->amdxdna_executable_cache;
-  if (!cache) {
-    status = hrx_host_allocator_malloc(hrx_host_allocator_system(),
-                                       sizeof(*cache), (void**)&cache);
+  // Look up before serializing: a hit skips building and parsing the
+  // executable entirely.
+  hrx_amdxdna_executable_reuse_key_t key;
+  status = hrx_amdxdna_executable_reuse_key_initialize(xclbin_identity,
+                                                       entry_point, run, &key);
+  if (!hrx_status_is_ok(status)) return status;
+  iree_hal_executable_t* reused_hal_executable =
+      iree_hal_amdxdna_device_lookup_reusable_executable(device->hal_device,
+                                                         &key.hal_key);
+  if (reused_hal_executable) {
+    status = hrx_executable_wrap_hal(device, reused_hal_executable, executable);
+  } else {
+    status = hrx_amdxdna_executable_load(device, params, executable);
     if (hrx_status_is_ok(status)) {
-      hrx_amdxdna_executable_cache_initialize(
-          HRX_AMDXDNA_EXECUTABLE_CACHE_CAPACITY,
-          HRX_AMDXDNA_EXECUTABLE_CACHE_MAX_HOST_BYTES, cache);
-      device->amdxdna_executable_cache = cache;
-    } else {
-      hrx_status_ignore(status);
-      iree_slim_mutex_unlock(&hrx_amdxdna_executable_cache_mutex);
-      return hrx_amdxdna_executable_create_uncached(device, params, executable);
+      iree_hal_amdxdna_device_publish_reusable_executable(
+          device->hal_device, &key.hal_key, (*executable)->hal_executable);
     }
   }
-
-  iree_hal_executable_t* cached_hal_executable =
-      hrx_amdxdna_executable_cache_lookup(cache, &descriptor);
-  if (cached_hal_executable) {
-    status =
-        hrx_executable_wrap_hal(device, cached_hal_executable, executable);
-    iree_slim_mutex_unlock(&hrx_amdxdna_executable_cache_mutex);
-    return status;
-  }
-
-  status = hrx_amdxdna_executable_create_uncached(device, params, executable);
-  if (!hrx_status_is_ok(status)) {
-    iree_slim_mutex_unlock(&hrx_amdxdna_executable_cache_mutex);
-    return status;
-  }
-
-  (void)hrx_amdxdna_executable_cache_insert(
-      cache, &descriptor, (*executable)->hal_executable);
-  iree_slim_mutex_unlock(&hrx_amdxdna_executable_cache_mutex);
-  return hrx_ok_status();
-}
-
-void hrx_amdxdna_executable_cache_clear(hrx_device_t device) {
-  if (!device || !device->amdxdna_executable_cache) return;
-  iree_call_once(&hrx_amdxdna_serialization_workspace_once,
-                 hrx_amdxdna_serialization_workspace_initialize);
-  iree_slim_mutex_lock(&hrx_amdxdna_executable_cache_mutex);
-  hrx_amdxdna_executable_cache_s* cache = device->amdxdna_executable_cache;
-  device->amdxdna_executable_cache = NULL;
-  hrx_amdxdna_executable_cache_deinitialize(cache);
-  hrx_host_allocator_free(hrx_host_allocator_system(), cache);
-  iree_slim_mutex_unlock(&hrx_amdxdna_executable_cache_mutex);
+  hrx_amdxdna_executable_reuse_key_deinitialize(&key);
+  return status;
 }
 #else
 hrx_status_t hrx_amdxdna_executable_create(
@@ -1066,6 +1032,4 @@ hrx_status_t hrx_amdxdna_executable_create(
   return hrx_make_status(HRX_STATUS_UNIMPLEMENTED,
                          "HRX was built without the amdxdna driver");
 }
-
-void hrx_amdxdna_executable_cache_clear(hrx_device_t device) { (void)device; }
 #endif  // HRX_HAS_IREE_AMDXDNA_DRIVER
