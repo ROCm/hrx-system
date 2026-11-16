@@ -68,10 +68,6 @@ iree_status_t loom_value_refinement_type_transfer(
   const loom_value_id_t result = loom_op_results(op)[0];
   const loom_type_t source_type =
       loom_type_transfer_value_type(context, source);
-  const loom_type_t result_type =
-      loom_type_transfer_value_type(context, result);
-  IREE_RETURN_IF_ERROR(loom_type_transfer_seed_static_structure_from_type(
-      context, source, result_type));
   return loom_type_transfer_seed_static_structure_from_type(context, result,
                                                             source_type);
 }

@@ -21,3 +21,85 @@ func.def public @different_encoding(%source_layout: encoding<layout>, %result_la
   %refined = view.refine %view : view<16xf32, %source_layout> -> view<16xf32, %result_layout>
   func.return %refined : view<16xf32, %result_layout>
 }
+
+// ====
+
+// An assertion belongs to its result. A branch may refine the outer view
+// without changing the extent used before, after, or on the other branch.
+func.def @branch_local_shape(%storage: buffer, %count: index, %single: i1) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %storage[%origin] : buffer -> view<[%count]x4xf32>
+  test.use %view : view<[%count]x4xf32>
+  scf.if %single {
+    %refined = view.refine %view : view<[%count]x4xf32> -> view<1x4xf32>
+    test.use %refined : view<1x4xf32>
+  } else {
+    test.use %view : view<[%count]x4xf32>
+  }
+  test.use %view : view<[%count]x4xf32>
+  func.return
+}
+
+// ----
+func.def @branch_local_shape(%storage: buffer, %count: index, %single: i1) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %storage[%origin] : buffer -> view<[%count]x4xf32>
+  test.use %view : view<[%count]x4xf32>
+  scf.if %single {
+    %refined = view.refine %view : view<[%count]x4xf32> -> view<1x4xf32>
+    test.use %refined : view<1x4xf32>
+  } else {
+    test.use %view : view<[%count]x4xf32>
+  }
+  test.use %view : view<[%count]x4xf32>
+  func.return
+}
+
+// ====
+// RUN: pass pipeline-scf-for,canonicalize,vector-memory-footprint
+
+// Pipelining creates a one-iteration branch. Its inferred view refinement
+// must not replace the dynamic extent still needed by the pipelined branch.
+func.def @pipelined_dynamic_view(%count_value: index, %input: buffer) -> (vector<4xf32>) {
+  %count = index.assume %count_value [range(%count_value, 1, 128)] : index
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %stages = index.constant 2 : index
+  %view = buffer.view %input[%origin] : buffer -> view<[%count]x4xf32>
+  %initial = vector.splatf 0.0 : vector<4xf32>
+  %result = scf.for %block = [%begin to %count step %step](%sum = %initial : vector<4xf32>) -> (vector<4xf32>) pipeline(%stages) {
+    %values = vector.load %view[%block, %begin] : view<[%count]x4xf32> -> vector<4xf32>
+    %next = vector.addf %sum, %values : vector<4xf32>
+    scf.yield %next : vector<4xf32>
+  }
+  func.return %result : vector<4xf32>
+}
+
+// ----
+func.def @pipelined_dynamic_view(%count_value: index, %input: buffer) -> (vector<4xf32>) {
+  %count = index.assume %count_value [range(%count_value, 1, 128)] : index
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %view = buffer.view %input[%origin] : buffer -> view<[%count]x4xf32>
+  %initial = vector.splatf 0.0 : vector<4xf32>
+  %15 = index.constant 1 : index
+  %16 = index.cmp slt, %15, %count : index
+  %36, %37 = scf.if %16 -> (vector<4xf32>, vector<4xf32>) {
+    %32 = index.assume %count [gt(%count, 1)] : index
+    %values = vector.load %view[%begin, %begin] : view<[%count]x4xf32> -> vector<4xf32>
+    %22, %23 = scf.for %19 = [%15 to %32 step %step](%20 = %initial : vector<4xf32>, %21 = %values : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>) {
+      %values = vector.load %view[%19, %begin] : view<[%count]x4xf32> -> vector<4xf32>
+      %next = vector.addf %20, %21 : vector<4xf32>
+      scf.yield %next, %values : vector<4xf32>, vector<4xf32>
+    }
+    scf.yield %22, %23 : vector<4xf32>, vector<4xf32>
+  } else {
+    %view_refined = view.refine %view : view<[%count]x4xf32> -> view<1x4xf32>
+    %values = vector.load %view_refined[%begin, %begin] : view<1x4xf32> -> vector<4xf32>
+    scf.yield %initial, %values : vector<4xf32>, vector<4xf32>
+  }
+  %result = vector.addf %36, %37 : vector<4xf32>
+  func.return %result : vector<4xf32>
+}

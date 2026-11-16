@@ -1,7 +1,7 @@
 // RUN: pass canonicalize
 
-// Automatic shape propagation may refine an explicit qualification's source
-// shape, but only the authored result has the stronger access requirement.
+// Shape and access requirements belong to the refined result. The original
+// view retains its dynamic extent and byte-aligned access contract.
 func.def public @shape_preserves_access_alignment(%storage: buffer, %width: index) -> (i32, i32) {
   %base = index.constant 0 : offset
   %input = buffer.view %storage[%base] : buffer -> view<[%width]xi32, align(1)>
@@ -14,9 +14,9 @@ func.def public @shape_preserves_access_alignment(%storage: buffer, %width: inde
 // ----
 func.def public @shape_preserves_access_alignment(%storage: buffer, %width: index) -> (i32, i32) {
   %base = index.constant 0 : offset
-  %input = buffer.view %storage[%base] : buffer -> view<8xi32, align(1)>
-  %natural = view.refine %input : view<8xi32, align(1)> -> view<8xi32>
-  %packed_value = view.load<volatile> %input[0] : view<8xi32, align(1)> -> i32
+  %input = buffer.view %storage[%base] : buffer -> view<[%width]xi32, align(1)>
+  %natural = view.refine %input : view<[%width]xi32, align(1)> -> view<8xi32>
+  %packed_value = view.load<volatile> %input[0] : view<[%width]xi32, align(1)> -> i32
   %natural_value = view.load<volatile> %natural[1] : view<8xi32> -> i32
   func.return %packed_value, %natural_value : i32, i32
 }

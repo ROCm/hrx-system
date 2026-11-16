@@ -1088,7 +1088,7 @@ TEST_F(TypePropagationTest, VectorTransposeNarrowsPermutedResultShape) {
   EXPECT_EQ(loom_type_dim_static_size_at(refined_type, 1), 4);
 }
 
-TEST_F(TypePropagationTest, EveryShapedRefinementPropagatesInBothDirections) {
+TEST_F(TypePropagationTest, EveryShapedRefinementPropagatesOnlyToResult) {
   using BuildRefinement =
       iree_status_t (*)(loom_builder_t*, loom_value_id_t, loom_type_t,
                         loom_location_id_t, loom_op_t**);
@@ -1154,14 +1154,14 @@ TEST_F(TypePropagationTest, EveryShapedRefinementPropagatesInBothDirections) {
   for (const Carrier& carrier : carriers) {
     for (uint8_t rank = carrier.first_rank; rank <= LOOM_TYPE_MAX_RANK;
          ++rank) {
-      for (bool narrow_source : {false, true}) {
+      for (bool dynamic_source : {false, true}) {
         SCOPED_TRACE(::testing::Message()
                      << "kind=" << int(carrier.kind) << " rank=" << int(rank)
-                     << " narrow_source=" << narrow_source);
+                     << " dynamic_source=" << dynamic_source);
         const loom_type_t source_type =
-            shape(carrier.kind, rank, narrow_source);
+            shape(carrier.kind, rank, dynamic_source);
         const loom_type_t result_type =
-            shape(carrier.kind, rank, !narrow_source);
+            shape(carrier.kind, rank, !dynamic_source);
         loom_op_t* source = nullptr;
         IREE_ASSERT_OK(BuildConstant(loom_attr_i64(0), source_type, &source));
         loom_op_t* refine = nullptr;
@@ -1171,19 +1171,21 @@ TEST_F(TypePropagationTest, EveryShapedRefinementPropagatesInBothDirections) {
         bool changed = false;
         IREE_ASSERT_OK(Propagate(refine, &changed));
         EXPECT_EQ(changed,
-                  rank != 0 || loom_type_can_have_encoding(source_type));
-        for (loom_value_id_t value :
-             {loom_test_constant_result(source), loom_op_results(refine)[0]}) {
-          const loom_type_t type = loom_module_value_type(module_, value);
-          EXPECT_EQ(loom_type_kind(type), carrier.kind);
-          EXPECT_EQ(loom_type_rank(type), rank);
-          if (loom_type_can_have_encoding(type)) {
-            EXPECT_TRUE(loom_type_has_static_encoding(type));
-            EXPECT_EQ(type.encoding_id, encoding_id);
-          }
-          for (uint8_t axis = 0; axis < rank; ++axis) {
-            EXPECT_EQ(loom_type_dim(type, axis), static_dimensions[axis]);
-          }
+                  !dynamic_source &&
+                      (rank != 0 || loom_type_can_have_encoding(source_type)));
+        EXPECT_TRUE(loom_type_equal(
+            loom_module_value_type(module_, loom_test_constant_result(source)),
+            source_type));
+        const loom_type_t type =
+            loom_module_value_type(module_, loom_op_results(refine)[0]);
+        EXPECT_EQ(loom_type_kind(type), carrier.kind);
+        EXPECT_EQ(loom_type_rank(type), rank);
+        if (loom_type_can_have_encoding(type)) {
+          EXPECT_TRUE(loom_type_has_static_encoding(type));
+          EXPECT_EQ(type.encoding_id, encoding_id);
+        }
+        for (uint8_t axis = 0; axis < rank; ++axis) {
+          EXPECT_EQ(loom_type_dim(type, axis), static_dimensions[axis]);
         }
       }
     }
