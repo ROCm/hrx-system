@@ -587,3 +587,133 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
 ^_bb19:
   low.br ^_bb9(%c1: reg<amdgpu.vgpr>)
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target {subgroup_size = 64}
+
+// Both arms of the comparison leave the inner loop through one semantic
+// continuation. The target plan must share one retirement adapter across the
+// complete comparison region instead of fragmenting its continuation by edge.
+func.def target(@target) @shared_exit_region_adapter(%values: vector<2xi32>, %outer_limit: i32) -> (i32) {
+  %lane_limit = vector.extract %values[0] : vector<2xi32> -> i32
+  %advance_limit = vector.extract %values[1] : vector<2xi32> -> i32
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  cfg.br ^outer_header(%c0: i32, %c0: i32)
+^outer_header(%result: i32, %outer: i32):
+  %outer_more = scalar.cmpi slt, %outer, %outer_limit : i32
+  cfg.cond_br %outer_more, ^outer_body, ^done
+^outer_body:
+  cfg.br ^inner_header(%c0: i32)
+^inner_header(%current: i32):
+  %inner_more = scalar.cmpi slt, %current, %lane_limit : i32
+  cfg.cond_br %inner_more, ^inner_body, ^inner_done
+^inner_body:
+  %advance = scalar.cmpi slt, %current, %advance_limit : i32
+  cfg.cond_br %advance, ^inner_latch, ^compare
+^inner_latch:
+  %next_current = scalar.addi %current, %c1 : i32
+  cfg.br ^inner_header(%next_current: i32)
+^compare:
+  %matched = scalar.cmpi eq, %current, %outer : i32
+  cfg.cond_br %matched, ^selected, ^not_selected
+^selected:
+  %selected_result = scalar.addi %result, %current : i32
+  cfg.br ^outer_latch(%selected_result: i32)
+^not_selected:
+  cfg.br ^outer_latch(%result: i32)
+^inner_done:
+  cfg.br ^outer_latch(%result: i32)
+^outer_latch(%next_result: i32):
+  %next_outer = scalar.addi %outer, %c1 : i32
+  cfg.br ^outer_header(%next_result: i32, %next_outer: i32)
+^done:
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @shared_exit_region_adapter(%values: reg<amdgpu.vgpr x2>, %outer_limit: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %lane_limit = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %advance_limit = slice %values[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %39 = v_mov_b32 0
+  %42 = s_mov_b64_exec_read
+  low.br ^outer_header(%39: reg<amdgpu.vgpr>, %39: reg<amdgpu.vgpr>)
+^outer_header(%result: reg<amdgpu.vgpr>, %outer: reg<amdgpu.vgpr>):
+  %outer_more = v_cmp_lt_i32 %outer, %outer_limit
+  %43, %44 = s_and_saveexec_b64 %outer_more
+  low.cond_br %44, ^outer_body, ^_bb10 : reg<amdgpu.scc>
+^outer_body:
+  %45 = v_mov_b32 0
+  %47 = s_mov_b64_exec_read
+  low.br ^inner_header(%45: reg<amdgpu.vgpr>)
+^inner_header(%current: reg<amdgpu.vgpr>):
+  %inner_more = v_cmp_lt_i32 %current, %lane_limit
+  %52 = s_mov_b64_exec_read
+  %53 = s_xor_b64 %52, %inner_more
+  %54, %55 = s_and_saveexec_b64 %53
+  low.cond_br %55, ^inner_done, ^_bb14 : reg<amdgpu.scc>
+^inner_body:
+  %advance = v_cmp_lt_i32 %current, %advance_limit
+  %60 = s_mov_b64_exec_read
+  %61 = s_xor_b64 %60, %advance
+  %62, %63 = s_and_saveexec_b64 %61
+  low.cond_br %63, ^compare, ^_bb16 : reg<amdgpu.scc>
+^inner_latch:
+  %67 = v_mov_b32 1
+  %next_current = v_add_u32 %current, %67
+  low.br ^inner_header(%next_current: reg<amdgpu.vgpr>)
+^compare:
+  %matched = v_cmp_eq_i32 %current, %outer
+  %70, %71 = s_and_saveexec_b64 %matched
+  low.cond_br %71, ^selected, ^_bb18 : reg<amdgpu.scc>
+^selected:
+  %selected_result = v_add_u32 %result, %current
+  low.br ^_bb17(%selected_result: reg<amdgpu.vgpr>)
+^_bb17(%next_result$33: reg<amdgpu.vgpr>):
+  %74 = s_andn2_b64_exec %70, %matched
+  low.cond_br %74, ^not_selected, ^_bb19 : reg<amdgpu.scc>
+^not_selected:
+  s_mov_b64_exec %70
+  %73 = v_cndmask_b32 %result, %next_result$33, %matched
+  low.br ^_bb15(%73: reg<amdgpu.vgpr>)
+^inner_done:
+  %56 = s_mov_b64_exec_read
+  %57 = s_xor_b64 %54, %56
+  %58 = s_mov_b32 0
+  low.br ^_bb11(%result: reg<amdgpu.vgpr>, %57: reg<amdgpu.sgpr x2>, %58: reg<amdgpu.sgpr>)
+^_bb10:
+  s_mov_b64_exec %42
+  return %result
+^_bb11(%next_result$28: reg<amdgpu.vgpr>, %29: reg<amdgpu.sgpr x2>, %30: reg<amdgpu.sgpr>):
+  %48, %49 = s_and_b64_scc %29, %29
+  s_mov_b64_exec %48
+  low.cond_br %49, ^_bb13, ^_bb12 : reg<amdgpu.scc>
+^_bb12:
+  s_mov_b64_exec %47
+  %76 = v_mov_b32 1
+  %next_outer = v_add_u32 %outer, %76
+  low.br ^outer_header(%next_result$28: reg<amdgpu.vgpr>, %next_outer: reg<amdgpu.vgpr>)
+^_bb13:
+  %50 = s_mov_b32 0
+  %51 = s_cmp_eq_i32 %30, %50
+  low.cond_br %51, ^inner_body, ^inner_latch : reg<amdgpu.scc>
+^_bb14:
+  s_mov_b64_exec %54
+  low.br ^inner_body
+^_bb15(%next_result$32: reg<amdgpu.vgpr>):
+  %64 = s_mov_b64_exec_read
+  %65 = s_xor_b64 %62, %64
+  %66 = s_mov_b32 1
+  low.br ^_bb11(%next_result$32: reg<amdgpu.vgpr>, %65: reg<amdgpu.sgpr x2>, %66: reg<amdgpu.sgpr>)
+^_bb16:
+  s_mov_b64_exec %62
+  low.br ^inner_latch
+^_bb18:
+  s_mov_b64_exec %70
+  %72 = v_mov_b32 0
+  low.br ^_bb17(%72: reg<amdgpu.vgpr>)
+^_bb19:
+  s_mov_b64_exec %70
+  low.br ^_bb15(%next_result$33: reg<amdgpu.vgpr>)
+}
