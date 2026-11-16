@@ -246,3 +246,61 @@ def test_wide_shifts_preserve_placement_and_require_a_representable_neighbor(
             result,
             value,
         )
+
+
+@pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
+def test_byte_conversions_read_only_the_selected_register_half(target: str) -> None:
+    overlays = {
+        overlay.descriptor_key: overlay
+        for overlay in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target].overlay_rows()
+    }
+    # Every family has unsigned-byte conversion. Native FP8 conversion first
+    # appears on CDNA3 (FNUZ); CDNA4 and RDNA4 use OCP formats.
+    rows = [(f"amdgpu.v_cvt_f32_ubyte{byte}", byte) for byte in range(4)]
+    has_fp8 = target in ("cdna3", "cdna4") or target.startswith(("rdna4", "gfx12"))
+    if has_fp8:
+        semantics = "fnuz" if target == "cdna3" else "ocp"
+        for source_type in ("fp8", "bf8"):
+            rows.extend(
+                (f"amdgpu.{operation}_{source_type}.{semantics}", 0)
+                for operation in ("v_cvt_f32", "v_cvt_pk_f32")
+            )
+            if target.startswith(("rdna4", "gfx12")):
+                rows.extend(
+                    (f"amdgpu.v_cvt_f32_{source_type}.{semantics}.byte{byte}", byte)
+                    for byte in (1, 2, 3)
+                )
+                rows.append((f"amdgpu.v_cvt_pk_f32_{source_type}.{semantics}.high", 2))
+            if "125" in target or target == "gfx12_5_generic":
+                rows.extend(
+                    (f"amdgpu.v_cvt_f16_{source_type}.{semantics}.byte{byte}", byte)
+                    for byte in range(4)
+                )
+    if target == "cdna4":
+        rows.extend(
+            (
+                f"amdgpu.v_cvt_scalef32_pk_{destination}_{source}.ocp"
+                + (f".byte{byte}" if byte else ""),
+                byte,
+            )
+            for source in ("fp4", "fp8", "bf8")
+            for destination in ("f16", "bf16", "f32")
+            for byte in range(4)
+        )
+
+    for key, byte in rows:
+        source = overlays[key].operands[1].descriptor_operand
+        part = "low16" if byte < 2 else "high16"
+        assert source.role is OperandRole.OPERAND
+        assert source.unit_count == 1
+        assert source.reg_alts == (
+            RegClassAlt(_REG_SGPR, register_part=f"amdgpu.sgpr.{part}"),
+            RegClassAlt(_REG_VGPR, register_part=f"amdgpu.vgpr.{part}"),
+        ), (target, key)
+        compact_pair = key.startswith("amdgpu.v_cvt_pk_f32_") and byte == 0
+        assert source.addressable_unit_count == (128 if compact_pair else 0)
+        assert source.address_map_kind is (
+            OperandAddressMapKind.LOW_SUBSET
+            if compact_pair
+            else OperandAddressMapKind.DIRECT
+        )
