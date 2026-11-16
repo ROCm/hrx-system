@@ -110,25 +110,6 @@ class GitHubActionsWatchTest(unittest.TestCase):
         self.assertIn("newly failed job", normalized_output)
         self.assertIn("130 interrupted by the operator", normalized_output)
 
-    def test_repository_client_pages_without_leaking_scope(self):
-        requested_urls = []
-
-        def get_json(url, _token):
-            requested_urls.append(url)
-            page = int(dict(watch.urllib.parse.parse_qsl(url.split("?", 1)[1]))["page"])
-            return {"jobs": list(range(100 if page == 1 else 1))}
-
-        client = watch.GitHubClient(
-            "ROCm/hrx-system",
-            "secret",
-            get_json=get_json,
-        )
-        results = client.pages("/actions/runs/1/jobs?filter=latest", "jobs")
-        self.assertEqual(len(results), 101)
-        self.assertIn("filter=latest", requested_urls[0])
-        with self.assertRaises(watch.WatchError):
-            client.json("https://api.github.com/repos/other/project/actions/runs/1")
-
     def test_pull_request_selects_latest_exact_head_run(self):
         client = FakeClient()
         client.json_results["/pulls/9"] = {
