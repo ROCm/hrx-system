@@ -661,6 +661,17 @@ amdf_gpu_device_features_t amdf_gpu_kfd_topology_memory_features(
   return features;
 }
 
+uint64_t amdf_gpu_kfd_topology_memory_alignment(
+    const amdf_gpu_kfd_topology_t* topology, uint64_t byte_length) {
+  uint64_t alignment = topology->virtual_address.fragment_size;
+  while (alignment > byte_length) {
+    alignment >>= 1;
+  }
+  return alignment > topology->virtual_address.alignment
+             ? alignment
+             : topology->virtual_address.alignment;
+}
+
 amdf_status_t amdf_gpu_kfd_topology_query_memory(
     int render_descriptor, uint32_t pci_device_id,
     amdf_gpu_kfd_topology_t* topology) {

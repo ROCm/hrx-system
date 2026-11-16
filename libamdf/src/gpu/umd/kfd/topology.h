@@ -139,6 +139,13 @@ amdf_status_t amdf_gpu_kfd_topology_query_memory(
 amdf_gpu_device_features_t amdf_gpu_kfd_topology_memory_features(
     const amdf_gpu_kfd_topology_t* topology, bool integrated);
 
+// Base alignment for an owned GPU VA interval. Uses the largest native
+// translation fragment that fits the extent, with mapping alignment as a floor.
+// This changes only address placement, not backing length or replacement units.
+// Stronger caller requirements and other consumers are combined by the owner.
+uint64_t amdf_gpu_kfd_topology_memory_alignment(
+    const amdf_gpu_kfd_topology_t* topology, uint64_t byte_length);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

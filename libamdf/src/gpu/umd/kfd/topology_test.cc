@@ -1205,6 +1205,41 @@ TEST_F(KfdTopologyTest, UnifiedMemoryObservationDoesNotOpenAnExecutionFile) {
   EXPECT_EQ(native_.descriptor, -1);
 }
 
+TEST(KfdMemoryGeometryTest, UsesNativeFragmentsWithinTheExtent) {
+  struct Case {
+    // Native minimum mapping alignment.
+    uint32_t page_size;
+    // Largest translation fragment reported by the native device.
+    uint32_t fragment_size;
+    // Usable extent, independent of its physical backing.
+    uint64_t byte_length;
+    // Largest useful base alignment without physical padding.
+    uint64_t alignment;
+  };
+  const Case cases[] = {
+      {4096, 65536, 4096, 4096},
+      {4096, 65536, 3 * 4096, 8192},
+      {4096, 65536, 65536 - 4096, 32768},
+      {4096, 65536, 65536, 65536},
+      {4096, 65536, 65536 + 4096, 65536},
+      {4096, 2 * 1024 * 1024, 2 * 1024 * 1024 - 4096, 1024 * 1024},
+      {4096, 2 * 1024 * 1024, 2 * 1024 * 1024, 2 * 1024 * 1024},
+      {4096, 2 * 1024 * 1024, 2 * 1024 * 1024 + 4096, 2 * 1024 * 1024},
+      {65536, 2 * 1024 * 1024, 65536, 65536},
+      {65536, 2 * 1024 * 1024, 3 * 65536, 2 * 65536},
+      {65536, 65536, UINT64_MAX, 65536},
+  };
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.byte_length);
+    amdf_gpu_kfd_topology_t topology = {};
+    topology.virtual_address.alignment = test_case.page_size;
+    topology.virtual_address.fragment_size = test_case.fragment_size;
+    EXPECT_EQ(amdf_gpu_kfd_topology_memory_alignment(&topology,
+                                                     test_case.byte_length),
+              test_case.alignment);
+  }
+}
+
 TEST_F(KfdTopologyTest, IncompleteCpuRouteDoesNotPublishTopology) {
   WriteProperties("io_links_count 1\n");
   amdf_gpu_kfd_topology_t topology;

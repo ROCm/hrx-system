@@ -21,6 +21,7 @@
 #include "libamdf/src/gpu/umd/kfd/buffer.h"
 #include "libamdf/src/gpu/umd/kfd/device.h"
 #include "libamdf/src/gpu/umd/kfd/memory.h"
+#include "libamdf/src/gpu/umd/kfd/topology.h"
 #include "libamdf/src/platform/linux/file.h"
 
 // amdgpu_bo_create_list_entry_array rejects larger validation lists before
@@ -360,14 +361,13 @@ amdf_status_t amdf_gpu_umd_memory_reservation_create(
   size_t alignment = minimum_alignment > devices[0]->page_size
                          ? (size_t)minimum_alignment
                          : devices[0]->page_size;
-  // Keep large aliases eligible for native PTE fragments even when their final
-  // physical extent is short. Alignment consumes only reserved address space;
-  // backing length and independently replaceable mapping units stay unchanged.
+  // Address placement shares ordinary allocation geometry. Physical backing
+  // and independently replaceable mapping units retain their exact extents.
   for (uint32_t i = 0; i < device_count; ++i) {
-    const size_t fragment_size =
-        devices[i]->topology.virtual_address.fragment_size;
-    if (byte_length >= fragment_size && alignment < fragment_size) {
-      alignment = fragment_size;
+    const uint64_t native_alignment = amdf_gpu_kfd_topology_memory_alignment(
+        &devices[i]->topology, byte_length);
+    if (alignment < native_alignment) {
+      alignment = (size_t)native_alignment;
     }
   }
   if (common_address != 0) {

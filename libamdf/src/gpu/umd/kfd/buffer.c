@@ -14,6 +14,7 @@
 #include <sys/mman.h>
 
 #include "libamdf/src/allocator.h"
+#include "libamdf/src/gpu/umd/kfd/topology.h"
 #include "libamdf/src/platform/linux/file.h"
 
 // One native allocation and its stable CPU/GPU address reservation.
@@ -179,9 +180,7 @@ amdf_status_t amdf_gpu_kfd_buffer_prepare(
       create_info->alignment < device->page_size ||
       (create_info->alignment & (create_info->alignment - 1)) != 0 ||
       (create_info->byte_length & (device->page_size - 1)) != 0 ||
-      create_info->host_byte_offset >= device->page_size ||
-      create_info->byte_length >
-          SIZE_MAX - (create_info->alignment - device->page_size)) {
+      create_info->host_byte_offset >= device->page_size) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
   if ((create_info->host_access == AMDF_GPU_KFD_BUFFER_HOST_ACCESS_BORROWED) !=
@@ -189,6 +188,25 @@ amdf_status_t amdf_gpu_kfd_buffer_prepare(
       (create_info->host_access != AMDF_GPU_KFD_BUFFER_HOST_ACCESS_BORROWED &&
        create_info->host_byte_offset != 0) ||
       create_info->host_access > AMDF_GPU_KFD_BUFFER_HOST_ACCESS_BORROWED) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  }
+
+  // Every consumer uses this same GPU address. Align the owned interval for
+  // native translation fragments without expanding the physical allocation.
+  size_t alignment = create_info->alignment;
+  const uint64_t owner_alignment = amdf_gpu_kfd_topology_memory_alignment(
+      &device->topology, create_info->byte_length);
+  if (alignment < owner_alignment) {
+    alignment = (size_t)owner_alignment;
+  }
+  for (uint32_t i = 0; i < create_info->peer_count; ++i) {
+    const uint64_t peer_alignment = amdf_gpu_kfd_topology_memory_alignment(
+        &create_info->peer_devices[i]->topology, create_info->byte_length);
+    if (alignment < peer_alignment) {
+      alignment = (size_t)peer_alignment;
+    }
+  }
+  if (create_info->byte_length > SIZE_MAX - (alignment - device->page_size)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
 
@@ -225,7 +243,7 @@ amdf_status_t amdf_gpu_kfd_buffer_prepare(
   }
   buffer->byte_length = create_info->byte_length;
   buffer->reservation.byte_length =
-      create_info->byte_length + create_info->alignment - device->page_size;
+      create_info->byte_length + alignment - device->page_size;
   void* reservation = mmap(NULL, buffer->reservation.byte_length, PROT_NONE,
                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (reservation == MAP_FAILED) {
@@ -236,8 +254,7 @@ amdf_status_t amdf_gpu_kfd_buffer_prepare(
 
   uintptr_t address = 0;
   if (amdf_status_is_ok(status)) {
-    address = ((uintptr_t)reservation + create_info->alignment - 1) &
-              ~(create_info->alignment - 1);
+    address = ((uintptr_t)reservation + alignment - 1) & ~(alignment - 1);
     if (address < minimum_address || address >= end_address ||
         create_info->byte_length > end_address - address) {
       status = amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE);

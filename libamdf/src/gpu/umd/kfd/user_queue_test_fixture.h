@@ -432,6 +432,7 @@ class KfdUserQueueTest : public ::testing::Test {
     device_.topology.context_save_restore_byte_length = 4096;
     device_.topology.control_stack_byte_length = 4096;
     device_.topology.virtual_address.alignment = 4096;
+    device_.topology.virtual_address.fragment_size = 2 * 1024 * 1024;
     device_.user_queue_native_api = &native_api_;
   }
 
