@@ -23,6 +23,7 @@
 typedef enum loom_check_test_analysis_observation_e {
   LOOM_CHECK_TEST_ANALYSIS_OBSERVATION_LIVENESS = 0,
   LOOM_CHECK_TEST_ANALYSIS_OBSERVATION_STORAGE_INTERFERENCE,
+  LOOM_CHECK_TEST_ANALYSIS_OBSERVATION_PRIVATE_STORAGE_INTERFERENCE,
 } loom_check_test_analysis_observation_t;
 
 static bool loom_check_test_analysis_observation_matches(
@@ -31,7 +32,9 @@ static bool loom_check_test_analysis_observation_matches(
   (void)provider;
   return iree_string_view_equal(target_name, IREE_SV("liveness-json")) ||
          iree_string_view_equal(target_name, IREE_SV("liveness")) ||
-         iree_string_view_equal(target_name, IREE_SV("storage-interference"));
+         iree_string_view_equal(target_name, IREE_SV("storage-interference")) ||
+         iree_string_view_equal(target_name,
+                                IREE_SV("private-storage-interference"));
 }
 
 static iree_status_t loom_check_test_analysis_observation_parse(
@@ -42,6 +45,10 @@ static iree_status_t loom_check_test_analysis_observation_parse(
                              IREE_SV("storage-interference"))) {
     *out_observation =
         LOOM_CHECK_TEST_ANALYSIS_OBSERVATION_STORAGE_INTERFERENCE;
+  } else if (iree_string_view_equal(request->target_name,
+                                    IREE_SV("private-storage-interference"))) {
+    *out_observation =
+        LOOM_CHECK_TEST_ANALYSIS_OBSERVATION_PRIVATE_STORAGE_INTERFERENCE;
   } else {
     *out_observation = LOOM_CHECK_TEST_ANALYSIS_OBSERVATION_LIVENESS;
   }
@@ -140,7 +147,7 @@ static iree_status_t loom_check_test_analysis_observe_liveness(
 }
 
 static iree_status_t loom_check_test_analysis_observe_storage_interference(
-    loom_module_t* module, loom_func_like_t function,
+    loom_module_t* module, loom_func_like_t function, bool private_storage,
     iree_arena_allocator_t* arena, iree_string_builder_t* output) {
   loom_storage_access_scope_t storage_access;
   loom_storage_access_scope_initialize(module, arena, &storage_access);
@@ -190,16 +197,22 @@ static iree_status_t loom_check_test_analysis_observe_storage_interference(
     for (iree_host_size_t j = i + 1;
          j < root_count && iree_status_is_ok(status); ++j) {
       bool nonoverlap = false;
-      status = loom_storage_interference_prove_workgroup_nonoverlap(
-          analysis, roots[i], roots[j], &nonoverlap);
+      if (private_storage) {
+        nonoverlap = loom_storage_interference_prove_private_nonoverlap(
+            analysis, roots[i], roots[j]);
+      } else {
+        status = loom_storage_interference_prove_workgroup_nonoverlap(
+            analysis, roots[i], roots[j], &nonoverlap);
+      }
       if (iree_status_is_ok(status)) {
         const iree_string_view_t lhs =
             loom_low_diagnostic_value_name(module, roots[i]);
         const iree_string_view_t rhs =
             loom_low_diagnostic_value_name(module, roots[j]);
         status = iree_string_builder_append_format(
-            output, "%.*s / %.*s: workgroup_nonoverlap=%s\n", (int)lhs.size,
-            lhs.data, (int)rhs.size, rhs.data, nonoverlap ? "yes" : "unproven");
+            output, "%.*s / %.*s: %s_nonoverlap=%s\n", (int)lhs.size, lhs.data,
+            (int)rhs.size, rhs.data, private_storage ? "private" : "workgroup",
+            nonoverlap ? "yes" : "unproven");
       }
     }
   }
@@ -223,11 +236,12 @@ static iree_status_t loom_check_test_analysis_observation_execute(
   if (!loom_func_like_isa(function)) {
     return iree_ok_status();
   }
-  if (observation ==
-      LOOM_CHECK_TEST_ANALYSIS_OBSERVATION_STORAGE_INTERFERENCE) {
+  if (observation != LOOM_CHECK_TEST_ANALYSIS_OBSERVATION_LIVENESS) {
     return loom_check_test_analysis_observe_storage_interference(
-        native_module->module, function, request->case_arena,
-        &request->result->actual_output);
+        native_module->module, function,
+        observation ==
+            LOOM_CHECK_TEST_ANALYSIS_OBSERVATION_PRIVATE_STORAGE_INTERFERENCE,
+        request->case_arena, &request->result->actual_output);
   }
   return loom_check_test_analysis_observe_liveness(
       native_module->module, function, request->case_arena,
@@ -239,7 +253,9 @@ static iree_status_t loom_check_test_analysis_observation_append_names(
     iree_string_builder_t* builder) {
   (void)provider;
   return iree_string_builder_append_cstring(
-      builder, "liveness-json, liveness, storage-interference");
+      builder,
+      "liveness-json, liveness, storage-interference, "
+      "private-storage-interference");
 }
 
 const loom_check_test_native_emit_provider_t

@@ -102,11 +102,27 @@ typedef struct loom_storage_interference_phase_t {
 static_assert(sizeof(loom_storage_interference_phase_t) <= 56,
               "phase facts must remain sparse in repeated workgroup roots");
 
+typedef struct loom_storage_interference_private_lifetime_t {
+  // Sorted, coalesced live ranges for the root and all of its aliases.
+  loom_liveness_segment_t* segments;
+  // Number of populated segments.
+  iree_host_size_t count;
+  // Allocated segment capacity.
+  iree_host_size_t capacity;
+  // Start of the currently open union interval during the lifetime sweep.
+  uint32_t open_point;
+} loom_storage_interference_private_lifetime_t;
+
 typedef struct loom_storage_interference_footprint_t {
   // Memory access and asynchronous completion operations for this root.
   const loom_op_t** operations;
-  // Sparse repeated-workgroup lifetime facts, or NULL when not needed.
-  loom_storage_interference_phase_t* phase;
+  // Sparse lifetime facts selected by the root's memory space.
+  union {
+    // Repeated-workgroup retirement facts, or NULL when not needed.
+    loom_storage_interference_phase_t* workgroup;
+    // Private instance live ranges, or NULL when the proof is incomplete.
+    loom_storage_interference_private_lifetime_t* private_ranges;
+  } lifetime;
   // Number of initialized operations.
   uint32_t operation_count;
   // Allocated operation pointer capacity.
@@ -322,16 +338,18 @@ static iree_status_t loom_storage_interference_append_footprint_operation(
     const loom_value_t* root = loom_module_value(
         analysis->module, analysis->value_domain->value_ids[root_ordinal]);
     const loom_op_t* allocation_op = loom_value_def_op(root);
-    if (!entry->footprint.phase) {
-      IREE_RETURN_IF_ERROR(
-          iree_arena_allocate(analysis->arena, sizeof(*entry->footprint.phase),
-                              (void**)&entry->footprint.phase));
-      *entry->footprint.phase = (loom_storage_interference_phase_t){
-          .first_access_ordinal = UINT64_MAX,
-          .first_live_point = UINT32_MAX,
-      };
+    if (!entry->footprint.lifetime.workgroup) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(
+          analysis->arena, sizeof(*entry->footprint.lifetime.workgroup),
+          (void**)&entry->footprint.lifetime.workgroup));
+      *entry->footprint.lifetime.workgroup =
+          (loom_storage_interference_phase_t){
+              .first_access_ordinal = UINT64_MAX,
+              .first_live_point = UINT32_MAX,
+          };
     }
-    loom_storage_interference_phase_t* phase = entry->footprint.phase;
+    loom_storage_interference_phase_t* phase =
+        entry->footprint.lifetime.workgroup;
     const loom_op_t* access_anchor = NULL;
     if (!loom_storage_interference_project_to_region(
             operation, allocation_op->parent_block->parent_region,
@@ -444,13 +462,15 @@ static iree_status_t loom_storage_interference_record_value_accesses(
         continue;
       }
     }
-    bool accesses_repeated_root = false;
+    bool needs_async_lifetime = false;
     for (loom_storage_interference_membership_t* membership = memberships;
          membership; membership = membership->next_for_value) {
       loom_storage_interference_entry_t* entry =
           &analysis->entries[membership->root_ordinal];
-      accesses_repeated_root |= iree_any_bit_set(
-          entry->flags, LOOM_STORAGE_INTERFERENCE_ENTRY_REPEATED);
+      needs_async_lifetime |=
+          entry->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE ||
+          iree_any_bit_set(entry->flags,
+                           LOOM_STORAGE_INTERFERENCE_ENTRY_REPEATED);
       IREE_RETURN_IF_ERROR(loom_storage_interference_append_footprint_operation(
           analysis, membership->root_ordinal, user_op));
       if (completion_op) {
@@ -459,7 +479,7 @@ static iree_status_t loom_storage_interference_record_value_accesses(
                 analysis, membership->root_ordinal, completion_op));
       }
     }
-    if (completion_op && accesses_repeated_root) {
+    if (completion_op && needs_async_lifetime) {
       if (lifetime->async_access_count == lifetime->async_access_capacity) {
         IREE_RETURN_IF_ERROR(iree_arena_grow_array(
             &lifetime->arena, lifetime->async_access_count,
@@ -510,8 +530,12 @@ static void loom_storage_interference_include_lifetime(
   for (const loom_storage_interference_membership_t* membership =
            analysis->memberships[value_ordinal];
        membership; membership = membership->next_for_value) {
+    const loom_storage_interference_entry_t* entry =
+        &analysis->entries[membership->root_ordinal];
     loom_storage_interference_phase_t* phase =
-        analysis->entries[membership->root_ordinal].footprint.phase;
+        entry->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP
+            ? entry->footprint.lifetime.workgroup
+            : NULL;
     if (phase) {
       phase->first_live_point = iree_min(phase->first_live_point, start_point);
       phase->last_live_point = iree_max(phase->last_live_point, end_point);
@@ -769,8 +793,9 @@ static iree_status_t loom_storage_interference_prove_cfg_reuse_cuts(
           busy_blocks[j / 64] |= UINT64_C(1) << (j % 64);
         }
       }
-      entry->footprint.phase->cfg_busy_blocks = busy_blocks;
-      entry->footprint.phase->cfg_allocation_block = allocation_block;
+      entry->footprint.lifetime.workgroup->cfg_busy_blocks = busy_blocks;
+      entry->footprint.lifetime.workgroup->cfg_allocation_block =
+          allocation_block;
     }
   }
   return iree_ok_status();
@@ -858,7 +883,7 @@ static iree_status_t loom_storage_interference_build_structured_cuts(
                analysis->value_domain->value_ids[roots[root_index]])) ==
                point->op) {
       loom_storage_interference_phase_t* phase =
-          analysis->entries[roots[root_index++]].footprint.phase;
+          analysis->entries[roots[root_index++]].footprint.lifetime.workgroup;
       phase->allocation_point = point->start_point;
       phase->reentry_point = frame->reentry_point;
     }
@@ -886,7 +911,72 @@ static iree_status_t loom_storage_interference_build_structured_cuts(
   return iree_ok_status();
 }
 
-static iree_status_t loom_storage_interference_prove_single_instances(
+// Inserts one interval into the ordered union. Alias events arrive in order;
+// the allocation's initialization is inserted afterward at its defining point.
+static iree_status_t loom_storage_interference_include_private_segment(
+    loom_storage_interference_t* analysis,
+    loom_storage_interference_private_lifetime_t* lifetime, uint32_t start,
+    uint32_t end) {
+  iree_host_size_t first = 0;
+  iree_host_size_t remaining = lifetime->count;
+  while (remaining) {
+    const iree_host_size_t half = remaining / 2;
+    const iree_host_size_t middle = first + half;
+    if (lifetime->segments[middle].end_point < start) {
+      first = middle + 1;
+      remaining -= half + 1;
+    } else {
+      remaining = half;
+    }
+  }
+  iree_host_size_t last = first;
+  while (last < lifetime->count &&
+         lifetime->segments[last].start_point <= end) {
+    start = iree_min(start, lifetime->segments[last].start_point);
+    end = iree_max(end, lifetime->segments[last].end_point);
+    ++last;
+  }
+  if (first == last) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        analysis->arena, lifetime->count, lifetime->count + 1,
+        sizeof(*lifetime->segments), &lifetime->capacity,
+        (void**)&lifetime->segments));
+  }
+  memmove(lifetime->segments + first + 1, lifetime->segments + last,
+          (lifetime->count - last) * sizeof(*lifetime->segments));
+  lifetime->segments[first] = (loom_liveness_segment_t){start, end};
+  lifetime->count = lifetime->count - (last - first) + 1;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_storage_interference_apply_lifetime_event(
+    loom_storage_interference_t* analysis, const loom_liveness_event_t* event,
+    iree_host_size_t* live_counts) {
+  iree_status_t status = iree_ok_status();
+  for (const loom_storage_interference_membership_t* membership =
+           analysis->memberships[event->value_ordinal];
+       membership && iree_status_is_ok(status);
+       membership = membership->next_for_value) {
+    const loom_value_ordinal_t root = membership->root_ordinal;
+    const loom_storage_interference_entry_t* entry = &analysis->entries[root];
+    loom_storage_interference_private_lifetime_t* lifetime =
+        entry->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE
+            ? entry->footprint.lifetime.private_ranges
+            : NULL;
+    if (lifetime && live_counts[root] == 0) {
+      lifetime->open_point = event->point;
+    }
+    live_counts[root] += event->value_delta;
+    if (lifetime && live_counts[root] == 0 &&
+        lifetime->open_point != event->point) {
+      status = loom_storage_interference_include_private_segment(
+          analysis, lifetime, lifetime->open_point, event->point);
+    }
+  }
+  return status;
+}
+
+static iree_status_t loom_storage_interference_analyze_lifetimes(
     loom_storage_interference_t* analysis,
     loom_storage_interference_lifetime_scratch_t* lifetime) {
   const iree_host_size_t value_count = analysis->value_domain->value_count;
@@ -894,6 +984,17 @@ static iree_status_t loom_storage_interference_prove_single_instances(
   iree_host_size_t workgroup_root_count = 0;
   for (loom_value_ordinal_t i = 0; i < value_count; ++i) {
     loom_storage_interference_entry_t* entry = &analysis->entries[i];
+    if (entry->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE &&
+        iree_all_bits_set(entry->flags,
+                          LOOM_STORAGE_INTERFERENCE_ENTRY_ROOT |
+                              LOOM_STORAGE_INTERFERENCE_ENTRY_COMPLETE)) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(
+          analysis->arena, sizeof(*entry->footprint.lifetime.private_ranges),
+          (void**)&entry->footprint.lifetime.private_ranges));
+      *entry->footprint.lifetime.private_ranges =
+          (loom_storage_interference_private_lifetime_t){0};
+      needs_liveness = true;
+    }
     if (iree_all_bits_set(entry->flags,
                           LOOM_STORAGE_INTERFERENCE_ENTRY_REPEATED |
                               LOOM_STORAGE_INTERFERENCE_ENTRY_COMPLETE)) {
@@ -1009,11 +1110,8 @@ static iree_status_t loom_storage_interference_prove_single_instances(
     while (event_index < event_count &&
            events[event_index].point <= point->start_point) {
       const loom_liveness_event_t* event = &events[event_index++];
-      for (const loom_storage_interference_membership_t* membership =
-               analysis->memberships[event->value_ordinal];
-           membership; membership = membership->next_for_value) {
-        live_counts[membership->root_ordinal] += event->value_delta;
-      }
+      IREE_RETURN_IF_ERROR(loom_storage_interference_apply_lifetime_event(
+          analysis, event, live_counts));
     }
     if (iree_any_bit_set(point->op->traits, LOOM_TRAIT_UNIQUE_IDENTITY)) {
       for (uint16_t j = 0; j < point->op->result_count; ++j) {
@@ -1049,12 +1147,13 @@ static iree_status_t loom_storage_interference_prove_single_instances(
             allocation_op->block_ordinal < point->op->block_ordinal) {
           is_leading_cut =
               point->op->block_ordinal <
-              analysis->entries[root].footprint.phase->first_access_ordinal;
+              analysis->entries[root]
+                  .footprint.lifetime.workgroup->first_access_ordinal;
         }
         bool is_enclosing_cut = false;
         if (structured_barriers) {
           loom_storage_interference_phase_t* phase =
-              analysis->entries[root].footprint.phase;
+              analysis->entries[root].footprint.lifetime.workgroup;
           const loom_storage_interference_structured_barrier_t barrier_scope =
               structured_barriers[barrier_index - 1];
           const bool encloses_instance =
@@ -1079,6 +1178,23 @@ static iree_status_t loom_storage_interference_prove_single_instances(
         }
       }
     }
+  }
+  while (event_index < event_count) {
+    IREE_RETURN_IF_ERROR(loom_storage_interference_apply_lifetime_event(
+        analysis, &events[event_index++], live_counts));
+  }
+  for (loom_value_ordinal_t i = 0; i < value_count; ++i) {
+    const loom_storage_interference_entry_t* entry = &analysis->entries[i];
+    if (entry->memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE ||
+        !entry->footprint.lifetime.private_ranges) {
+      continue;
+    }
+    const uint32_t definition =
+        loom_liveness_interval_for_value_ordinal(&liveness, i)
+            ->definition_point;
+    IREE_RETURN_IF_ERROR(loom_storage_interference_include_private_segment(
+        analysis, entry->footprint.lifetime.private_ranges, definition - 1,
+        definition));
   }
   IREE_ASSERT_EQ(barrier_index, analysis->workgroup_barrier_count);
   if (cfg && cfg->graph.has_cycles) {
@@ -1275,8 +1391,7 @@ iree_status_t loom_storage_interference_analyze_function(
         analysis, value_ordinal, &lifetime);
   }
   if (iree_status_is_ok(status)) {
-    status =
-        loom_storage_interference_prove_single_instances(analysis, &lifetime);
+    status = loom_storage_interference_analyze_lifetimes(analysis, &lifetime);
   }
   iree_arena_deinitialize(&lifetime.arena);
   if (iree_status_is_ok(status)) {
@@ -1324,6 +1439,30 @@ bool loom_storage_interference_root_has_single_live_instance(
   return entry &&
          iree_any_bit_set(entry->flags,
                           LOOM_STORAGE_INTERFERENCE_ENTRY_SINGLE_INSTANCE);
+}
+
+bool loom_storage_interference_prove_private_nonoverlap(
+    const loom_storage_interference_t* analysis,
+    loom_value_id_t lhs_root_value_id, loom_value_id_t rhs_root_value_id) {
+  const loom_storage_interference_entry_t* lhs =
+      loom_storage_interference_lookup_root(analysis, lhs_root_value_id);
+  const loom_storage_interference_entry_t* rhs =
+      loom_storage_interference_lookup_root(analysis, rhs_root_value_id);
+  const uint8_t required = LOOM_STORAGE_INTERFERENCE_ENTRY_COMPLETE |
+                           LOOM_STORAGE_INTERFERENCE_ENTRY_SINGLE_INSTANCE;
+  if (!lhs || !rhs || lhs == rhs ||
+      lhs->memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE ||
+      rhs->memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE ||
+      !iree_all_bits_set(lhs->flags, required) ||
+      !iree_all_bits_set(rhs->flags, required)) {
+    return false;
+  }
+  const loom_storage_interference_private_lifetime_t* left =
+      lhs->footprint.lifetime.private_ranges;
+  const loom_storage_interference_private_lifetime_t* right =
+      rhs->footprint.lifetime.private_ranges;
+  return !loom_liveness_segments_overlap(left->segments, left->count,
+                                         right->segments, right->count);
 }
 
 static iree_status_t loom_storage_interference_get_cfg_region(
@@ -1601,8 +1740,10 @@ static bool loom_storage_interference_phase_retires_before_reentry(
       !iree_all_bits_set(after->flags, required)) {
     return false;
   }
-  const loom_storage_interference_phase_t* first = before->footprint.phase;
-  const loom_storage_interference_phase_t* second = after->footprint.phase;
+  const loom_storage_interference_phase_t* first =
+      before->footprint.lifetime.workgroup;
+  const loom_storage_interference_phase_t* second =
+      after->footprint.lifetime.workgroup;
   if (!first || !second || first->first_live_point < first->allocation_point ||
       second->first_live_point < second->allocation_point ||
       first->last_live_point > second->allocation_point) {

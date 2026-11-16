@@ -1282,6 +1282,10 @@ TEST(LivenessSegmentsTest, ExhaustiveSmallSparseSets) {
                   (rhs_bits & (1u << point)) != 0)
             << "bits=" << rhs_bits << ", point=" << point;
       }
+      EXPECT_EQ(loom_liveness_segments_overlap(segments + lhs.start, lhs.count,
+                                               segments + rhs.start, rhs.count),
+                (lhs_bits & rhs_bits) != 0)
+          << "lhs=" << lhs_bits << ", rhs=" << rhs_bits;
       EXPECT_EQ(loom_liveness_segment_ranges_overlap(segments, lhs, rhs),
                 (lhs_bits & rhs_bits) != 0)
           << "lhs=" << lhs_bits << ", rhs=" << rhs_bits;

@@ -1816,13 +1816,20 @@ bool loom_liveness_segment_range_contains(
 bool loom_liveness_segment_ranges_overlap(
     const loom_liveness_segment_t* segments, loom_liveness_segment_range_t lhs,
     loom_liveness_segment_range_t rhs) {
-  if (lhs.count == 0 || rhs.count == 0) {
+  return loom_liveness_segments_overlap(
+      lhs.count ? &segments[lhs.start] : NULL, lhs.count,
+      rhs.count ? &segments[rhs.start] : NULL, rhs.count);
+}
+
+bool loom_liveness_segments_overlap(const loom_liveness_segment_t* lhs_segment,
+                                    iree_host_size_t lhs_count,
+                                    const loom_liveness_segment_t* rhs_segment,
+                                    iree_host_size_t rhs_count) {
+  if (lhs_count == 0 || rhs_count == 0) {
     return false;
   }
-  const loom_liveness_segment_t* lhs_segment = &segments[lhs.start];
-  const loom_liveness_segment_t* rhs_segment = &segments[rhs.start];
-  const loom_liveness_segment_t* lhs_end = lhs_segment + lhs.count;
-  const loom_liveness_segment_t* rhs_end = rhs_segment + rhs.count;
+  const loom_liveness_segment_t* lhs_end = lhs_segment + lhs_count;
+  const loom_liveness_segment_t* rhs_end = rhs_segment + rhs_count;
   // Both cursors are valid at entry. Only the advanced cursor can become
   // exhausted; the other segment remains available for the next comparison.
   for (;;) {
