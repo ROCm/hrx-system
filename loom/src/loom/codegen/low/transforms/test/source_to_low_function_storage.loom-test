@@ -4,6 +4,7 @@ test.target<low_core> @target
 
 func.def target(@target) @empty_frame_storage() {
   %empty = view.alloca<private> : view<0xi64>
+  %unused = view.alloca<private> : view<16384xi64>
   func.return
 }
 
@@ -166,9 +167,9 @@ func.def target(@target) @reported_storage(%input: vector<4xi32>) {
 
 // ----
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
-COMPILE-REPORT: source_low selected_ops=5 emitted_ops=3 rows=5 unkeyed_maximum_emitted_ops=0
+COMPILE-REPORT: source_low selected_ops=5 emitted_ops=2 rows=5 unkeyed_maximum_emitted_ops=0
 COMPILE-REPORT: source_low[0] function=reported_storage source_op=index.constant selection=rule descriptor_key=test.const.i32 descriptor_semantic_tag=integer.const.i32 emitted_ops=0
 COMPILE-REPORT: source_low[1] function=reported_storage source_op=index.constant selection=rule descriptor_key=test.const.i32 descriptor_semantic_tag=integer.const.i32 emitted_ops=0
-COMPILE-REPORT: source_low[2] function=reported_storage source_op=buffer.alloca selection=plan plan_key=function-storage.alloca emitted_ops=2
+COMPILE-REPORT: source_low[2] function=reported_storage source_op=buffer.alloca selection=plan plan_key=function-storage.alloca emitted_ops=1
 COMPILE-REPORT: source_low[3] function=reported_storage source_op=buffer.view selection=rule emitted_ops=0
 COMPILE-REPORT: source_low[4] function=reported_storage source_op=vector.store selection=rule descriptor_key=test.store.v4i32 descriptor_semantic_tag=memory.store.v128 emitted_ops=1

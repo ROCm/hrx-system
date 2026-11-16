@@ -599,6 +599,27 @@ func.def public @local_pair(%first: i64, %second: i64, %index: index) -> (i64) {
   func.return %result : i64
 }
 
+// Runtime indexing keeps both arrays addressable. Their source types differ,
+// but the first load must precede stores into the same reused physical bytes.
+func.def public @reused_local_arrays(%first: i64, %second: i32, %index: index) -> (i64) {
+  %position = index.assume %index [range(%index, 0, 1)] : index
+  %wide = view.alloca<private> align(64) : view<2xi64>
+  %delta = scalar.constant 17 : i64
+  %other = scalar.addi %first, %delta : i64
+  view.store<type_disjoint> %first, %wide[0] : i64, view<2xi64>
+  view.store<type_disjoint> %other, %wide[1] : i64, view<2xi64>
+  %original = view.load<type_disjoint> %wide[%position] : view<2xi64> -> i64
+  %narrow = view.alloca<private> align(16) : view<2xi32>
+  %step = scalar.constant 3 : i32
+  %next = scalar.addi %second, %step : i32
+  view.store<type_disjoint> %second, %narrow[0] : i32, view<2xi32>
+  view.store<type_disjoint> %next, %narrow[1] : i32, view<2xi32>
+  %selected = view.load<type_disjoint> %narrow[%position] : view<2xi32> -> i32
+  %extended = scalar.extui %selected : i32 to i64
+  %result = scalar.addi %original, %extended : i64
+  func.return %result : i64
+}
+
 // The previous allocation dies before recreation. Volatile accesses keep the
 // addressable loop storage observable through the ordinary native function ABI.
 func.def public @sum_previous_instances(%limit: index) -> (i32) {

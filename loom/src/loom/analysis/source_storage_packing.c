@@ -8,6 +8,8 @@
 
 #include <stdint.h>
 
+#include "loom/analysis/storage_interference.h"
+
 typedef struct loom_source_storage_packing_allocation_t {
   // Source allocation root value.
   loom_value_id_t root_value_id;
@@ -89,6 +91,26 @@ iree_status_t loom_source_storage_packing_allocate(
   }
   *out_packing = packing;
   return iree_ok_status();
+}
+
+static iree_status_t loom_source_storage_packing_private_interference(
+    void* user_data, loom_value_id_t lhs_root_value_id,
+    loom_value_id_t rhs_root_value_id, bool* out_interferes) {
+  *out_interferes = !loom_storage_interference_prove_private_nonoverlap(
+      (const loom_storage_interference_t*)user_data, lhs_root_value_id,
+      rhs_root_value_id);
+  return iree_ok_status();
+}
+
+iree_status_t loom_source_storage_packing_allocate_private(
+    const loom_storage_interference_t* interference,
+    iree_arena_allocator_t* arena,
+    loom_source_storage_packing_t** out_packing) {
+  return loom_source_storage_packing_allocate(
+      loom_source_storage_packing_interference_callback_make(
+          loom_source_storage_packing_private_interference,
+          (void*)interference),
+      NULL, 0, arena, out_packing);
 }
 
 static iree_status_t loom_source_storage_packing_find_byte_offset(

@@ -71,6 +71,15 @@ bool loom_storage_interference_root_may_be_accessed(
 bool loom_storage_interference_root_has_single_live_instance(
     const loom_storage_interference_t* analysis, loom_value_id_t root_value_id);
 
+// Proves that two private allocation roots have disjoint instance lifetimes.
+// Retained segments include allocation initialization, every derived alias,
+// live-through CFG edges, and locally completed asynchronous accesses. Escaping
+// or incomplete roots and overlapping dynamic instances cannot share storage.
+// This query consumes the construction-time proof without traversing source.
+bool loom_storage_interference_prove_private_nonoverlap(
+    const loom_storage_interference_t* analysis,
+    loom_value_id_t lhs_root_value_id, loom_value_id_t rhs_root_value_id);
+
 // Proves that two workgroup buffer.alloca roots never require their bytes at
 // the same time. The proof accepts workgroup-uniform mutually exclusive
 // control or a verified workgroup acq_rel barrier separating all synchronous

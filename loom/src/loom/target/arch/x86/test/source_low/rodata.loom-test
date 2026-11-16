@@ -69,10 +69,10 @@ func.def public @edit_table(%output: buffer, %input: index, %replacement: i32) {
 
 // ----
 low.func.def public target<x86.avx2.core>(@__loom_target_context_0_0) abi(object_function) @edit_table(%output: reg<x86.gpr64>, %position: reg<x86.gpr64>, %replacement: reg<x86.gpr32>) asm {
-  %3 = lea.symbol.gpr64 @__low_rodata_c251e68b
-  %4 = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
-  %scratch = storage_address %4 : low.storage<private> -> reg<x86.gpr64>
-  %6 = vmovdqu32.load.xmm %3 {disp32 = 0}
+  %3 = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  %4 = lea.symbol.gpr64 @__low_rodata_c251e68b
+  %scratch = storage_address %3 : low.storage<private> -> reg<x86.gpr64>
+  %6 = vmovdqu32.load.xmm %4 {disp32 = 0}
   vmovdqu32.store.xmm %6, %scratch {disp32 = 0}
   mov.store.indexed.gpr32 %replacement, %scratch, %position {disp32 = 0, scale = 4}
   %values = vmovdqu32.load.xmm %scratch {disp32 = 0}

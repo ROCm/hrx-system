@@ -1,0 +1,111 @@
+// The anchor stays live across repeated temporary allocations and both arms of
+// the final branch. Volatile accesses keep the private arrays addressable.
+kernel.def @private_reuse() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %anchor_bytes = index.constant 8 : offset
+  %temporary_bytes = index.constant 16 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<4xi32>
+  %outputs = buffer.view %output[%origin] : buffer -> view<4xi32>
+  %first = view.load %inputs[0] : view<4xi32> -> i32
+  %second = view.load %inputs[1] : view<4xi32> -> i32
+  %third = view.load %inputs[2] : view<4xi32> -> i32
+  %fourth = view.load %inputs[3] : view<4xi32> -> i32
+  %anchor = buffer.alloca<private> align(16) %anchor_bytes : buffer
+  %anchor_view = buffer.view %anchor[%origin] : buffer -> view<2xi32>
+  view.store<volatile> %first, %anchor_view[0] : i32, view<2xi32>
+  view.store<volatile> %second, %anchor_view[1] : i32, view<2xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %initial = scalar.constant 0 : i32
+  %sum = scf.for %iteration = [%begin to %end step %step](%accumulator = %initial : i32) -> (i32) {
+    %earlier = buffer.alloca<private> align(16) %temporary_bytes : buffer
+    %earlier_view = buffer.view %earlier[%origin] : buffer -> view<4xi32>
+    %slice = view.subview %earlier_view[1] : view<4xi32> -> view<1xi32>
+    view.store<volatile> %third, %slice[0] : i32, view<1xi32>
+    %saved = view.load<volatile> %slice[0] : view<1xi32> -> i32
+    %later = buffer.alloca<private> align(16) %temporary_bytes : buffer
+    %later_view = buffer.view %later[%origin] : buffer -> view<4xi32>
+    view.store<volatile> %fourth, %later_view[1] : i32, view<4xi32>
+    %loaded = view.load<volatile> %later_view[1] : view<4xi32> -> i32
+    %pair = scalar.addi %saved, %loaded : i32
+    %next = scalar.addi %accumulator, %pair : i32
+    scf.yield %next : i32
+  }
+  %nonnegative = scalar.cmpi sge, %first, %initial : i32
+  %branch_result = scf.if %nonnegative -> (i32) {
+    %left = buffer.alloca<private> align(16) %temporary_bytes : buffer
+    %left_view = buffer.view %left[%origin] : buffer -> view<4xi32>
+    %value = scalar.addi %sum, %first : i32
+    view.store<volatile> %value, %left_view[1] : i32, view<4xi32>
+    %observed = view.load<volatile> %left_view[1] : view<4xi32> -> i32
+    scf.yield %observed : i32
+  } else {
+    %right = buffer.alloca<private> align(16) %temporary_bytes : buffer
+    %right_view = buffer.view %right[%origin] : buffer -> view<4xi32>
+    %value = scalar.subi %sum, %first : i32
+    view.store<volatile> %value, %right_view[1] : i32, view<4xi32>
+    %observed = view.load<volatile> %right_view[1] : view<4xi32> -> i32
+    scf.yield %observed : i32
+  }
+  %preserved_first = view.load<volatile> %anchor_view[0] : view<2xi32> -> i32
+  %preserved_second = view.load<volatile> %anchor_view[1] : view<2xi32> -> i32
+  view.store %preserved_first, %outputs[0] : i32, view<4xi32>
+  view.store %preserved_second, %outputs[1] : i32, view<4xi32>
+  view.store %sum, %outputs[2] : i32, view<4xi32>
+  view.store %branch_result, %outputs[3] : i32, view<4xi32>
+  kernel.return
+}
+
+// The oracle uses only scalar arithmetic, with no private arrays or loop.
+func.def @private_reuse_oracle(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<4xi32>
+  %outputs = buffer.view %output[%origin] : buffer -> view<4xi32>
+  %first = view.load %inputs[0] : view<4xi32> -> i32
+  %second = view.load %inputs[1] : view<4xi32> -> i32
+  %third = view.load %inputs[2] : view<4xi32> -> i32
+  %fourth = view.load %inputs[3] : view<4xi32> -> i32
+  %count = scalar.constant 4 : i32
+  %sign_boundary = scalar.constant 0 : i32
+  %pair = scalar.addi %third, %fourth : i32
+  %sum = scalar.muli %pair, %count : i32
+  %positive = scalar.addi %sum, %first : i32
+  %negative = scalar.subi %sum, %first : i32
+  %nonnegative = scalar.cmpi sge, %first, %sign_boundary : i32
+  %selected = scf.select %nonnegative, %positive, %negative : i32
+  view.store %first, %outputs[0] : i32, view<4xi32>
+  view.store %second, %outputs[1] : i32, view<4xi32>
+  view.store %sum, %outputs[2] : i32, view<4xi32>
+  view.store %selected, %outputs[3] : i32, view<4xi32>
+  func.return
+}
+
+check.scenario @private_reuse_negative {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-7) step(5) : tensor<4xi32>
+    %storage = check.generate.fill value(91) : tensor<12xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<12xi32> -> tensor<4xi32>
+    check.compare<@private_reuse, @private_reuse_oracle>(%input, %output) : (tensor<4xi32>, tensor<4xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<4xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<12xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @private_reuse_overflow {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(2147483620) step(5) : tensor<4xi32>
+    %storage = check.generate.fill value(91) : tensor<12xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<12xi32> -> tensor<4xi32>
+    check.compare<@private_reuse, @private_reuse_oracle>(%input, %output) : (tensor<4xi32>, tensor<4xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<4xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<12xi32>
+    }
+  }
+  check.return
+}

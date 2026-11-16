@@ -27,6 +27,7 @@ loom_corpus_test(
             "memory/buffer/positions.loom",
             "memory/packed/transport.loom",
             "memory/storage/load_snapshot.loom",
+            "memory/storage/private_reuse.loom",
             "numeric/conversion/bfloat_rounding.loom",
             "numeric/conversion/float8_dequantization.loom",
             "numeric/float/clamp.loom",

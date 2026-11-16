@@ -57,3 +57,34 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @bounded_
   %value = lda.volatile<volatile> %storage, 0
   return %value
 }
+
+// ====
+
+aie2p.target<core> @target
+
+func.def target(@target) @reused_private_arrays(%first: i32, %second: i32) -> (i32) {
+  %origin = index.constant 0 : offset
+  %extent = index.constant 8 : offset
+  %earlier = buffer.alloca<private> align(64) %extent : buffer
+  %earlier_view = buffer.view %earlier[%origin] : buffer -> view<2xi32>
+  view.store<volatile> %first, %earlier_view[1] : i32, view<2xi32>
+  %saved = view.load<volatile> %earlier_view[1] : view<2xi32> -> i32
+  %later = buffer.alloca<private> align(16) %extent : buffer
+  %later_view = buffer.view %later[%origin] : buffer -> view<2xi32>
+  view.store<volatile> %second, %later_view[1] : i32, view<2xi32>
+  %loaded = view.load<volatile> %later_view[1] : view<2xi32> -> i32
+  %sum = scalar.addi %saved, %loaded : i32
+  func.return %sum : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @reused_private_arrays(%first: reg<aie2p.er>, %second: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
+  %15 = storage {byte_alignment = 64, byte_length = 8} : low.storage<private>
+  %earlier = storage_address %15 : low.storage<private> -> reg<aie2p.ep>
+  st.volatile<volatile> %first, %earlier, 4
+  %saved = lda.volatile<volatile> %earlier, 4
+  st.volatile<volatile> %second, %earlier, 4
+  %loaded = lda.volatile<volatile> %earlier, 4
+  %sum = add.nc %saved, %loaded
+  return %sum
+}

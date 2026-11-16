@@ -20,6 +20,7 @@ loom_check_test_suite(
         "storage_instances.loom-test",
         "storage_interference.loom-test",
         "storage_phases.loom-test",
+        "storage_private_lifetimes.loom-test",
         "transitive_predicates.loom-test",
     ],
 )

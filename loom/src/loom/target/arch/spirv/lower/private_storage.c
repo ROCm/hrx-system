@@ -6,7 +6,7 @@
 
 #include "loom/target/arch/spirv/lower/private_storage.h"
 
-#include "loom/analysis/storage_layout.h"
+#include "loom/analysis/source_storage_packing.h"
 #include "loom/codegen/low/lower/source_memory.h"
 #include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"
@@ -15,11 +15,10 @@
 #include "loom/target/arch/spirv/error_catalog.h"
 #include "loom/target/arch/spirv/features.h"
 #include "loom/target/arch/spirv/registers.h"
-#include "loom/util/ordinal_map.h"
 
 // Private arrays have at most UINT32_MAX cells of at most eight bytes. A
-// 64-GiB logical interval separates each component, including one-past values.
-// Components are function-local 24-bit ordinals, so positions fit signed i64.
+// 64-GiB logical interval separates each cell-width bank, including one-past
+// values. The four banks and their positions fit signed i64.
 #define LOOM_SPIRV_PRIVATE_SEGMENT_STRIDE (UINT64_C(1) << 36)
 #define LOOM_SPIRV_PRIVATE_ALLOCA_PLAN 16
 
@@ -29,10 +28,8 @@ static const loom_spirv_scalar_type_t kCellTypes[] = {
     LOOM_SPIRV_SCALAR_TYPE_S32, LOOM_SPIRV_SCALAR_TYPE_S64};
 
 typedef struct loom_spirv_private_segment_t {
-  // Aggregate physical array extent in bytes.
-  uint64_t byte_length;
-  // Strongest source allocation alignment in bytes.
-  uint64_t byte_alignment;
+  // Whole-allocation placement within this typed array.
+  loom_source_storage_packing_t* packing;
   // Selected log2(cell byte width).
   uint8_t cell_shift;
   // Whether a retained memory recipe consumes the physical array.
@@ -42,16 +39,24 @@ typedef struct loom_spirv_private_segment_t {
 } loom_spirv_private_segment_t;
 
 typedef struct loom_spirv_private_storage_t {
-  // Sparse component ordinal to segment ordinal, allocated only for private
-  // use.
-  loom_ordinal_map_t component_segments;
+  // Segment ordinal plus one for each log2(cell byte width), or zero if unused.
+  uint8_t cell_segments[IREE_ARRAYSIZE(kCellTypes)];
   // Retained physical arrays in first-use order.
-  loom_spirv_private_segment_t* segments;
+  loom_spirv_private_segment_t segments[IREE_ARRAYSIZE(kCellTypes)];
   // Number of initialized physical arrays.
-  iree_host_size_t count;
-  // Allocated array capacity.
-  iree_host_size_t capacity;
+  uint32_t count;
 } loom_spirv_private_storage_t;
+
+typedef struct loom_spirv_private_alloca_t {
+  // Bounded source extent, including a cell for an empty non-null object.
+  uint64_t byte_length;
+  // Strongest source and selected-cell alignment in bytes.
+  uint64_t byte_alignment;
+  // Logical coordinate populated after materialization demands settle.
+  uint64_t position;
+  // Function-owned cell-width bank ordinal.
+  uint32_t segment;
+} loom_spirv_private_alloca_t;
 
 typedef struct loom_spirv_private_operand_t {
   // Function-owned physical segment ordinal.
@@ -209,36 +214,22 @@ static iree_status_t loom_spirv_private_segment(
   loom_spirv_private_storage_t* storage = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_get_or_allocate_target_state(
       context, &kPrivateStorageKey, sizeof(*storage), (void**)&storage));
-  iree_arena_allocator_t* arena =
-      loom_low_lower_context_function_arena(context);
-  if (!storage->component_segments.arena) {
-    loom_ordinal_map_initialize(arena, &storage->component_segments);
-  }
   loom_low_representation_plan_t* representations =
       loom_low_lower_representation_plan_if_ready(context);
   const loom_value_ordinal_t ordinal = loom_local_value_domain_try_ordinal(
       loom_low_lower_context_value_domain(context), value);
-  const loom_value_ordinal_t component =
-      loom_low_representation_plan_component(representations, ordinal);
-  uint32_t segment;
-  if (!loom_ordinal_map_lookup(&storage->component_segments, 0, component,
-                               &segment)) {
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        arena, storage->count, storage->count + 1, sizeof(*storage->segments),
-        &storage->capacity, (void**)&storage->segments));
-    loom_low_representation_id_t representation;
-    loom_low_representation_plan_lookup(representations, ordinal,
-                                        &representation);
-    segment = (uint32_t)storage->count++;
+  loom_low_representation_id_t representation;
+  loom_low_representation_plan_lookup(representations, ordinal,
+                                      &representation);
+  const uint8_t shift = representation - LOOM_SPIRV_PRIVATE_REPRESENTATION_BASE;
+  if (!storage->cell_segments[shift]) {
+    const uint32_t segment = storage->count++;
     storage->segments[segment] = (loom_spirv_private_segment_t){
-        .byte_alignment = 1,
-        .cell_shift = representation - LOOM_SPIRV_PRIVATE_REPRESENTATION_BASE,
-        .array = LOOM_VALUE_ID_INVALID};
-    IREE_RETURN_IF_ERROR(loom_ordinal_map_insert(&storage->component_segments,
-                                                 0, component, segment));
+        .cell_shift = shift, .array = LOOM_VALUE_ID_INVALID};
+    storage->cell_segments[shift] = (uint8_t)(segment + 1);
   }
   *out_storage = storage;
-  *out_segment = segment;
+  *out_segment = storage->cell_segments[shift] - 1;
   return iree_ok_status();
 }
 
@@ -276,27 +267,57 @@ iree_status_t loom_spirv_select_private_alloca(
   const uint64_t cell_width = UINT64_C(1) << segment->cell_shift;
   const uint64_t alignment = iree_max(
       (uint64_t)loom_buffer_alloca_base_alignment(source_op), cell_width);
-  uint64_t offset;
-  if (!loom_storage_layout_append(iree_max((uint64_t)extent, cell_width),
-                                  alignment, &segment->byte_length, &offset) ||
-      segment->byte_length > UINT32_MAX * cell_width) {
+  if ((uint64_t)extent > UINT32_MAX * cell_width) {
     return loom_low_lower_emit_function_storage_extent_unsupported(
         context, source_op, LOOM_STORAGE_SPACE_PRIVATE,
         loom_buffer_alloca_byte_length(source_op));
   }
-  segment->byte_alignment = iree_max(segment->byte_alignment, alignment);
-  uint64_t* position = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_plan_data(
-      context, sizeof(*position), (void**)&position));
-  *position =
-      (index + UINT64_C(1)) * LOOM_SPIRV_PRIVATE_SEGMENT_STRIDE + offset;
+  loom_spirv_private_alloca_t* plan = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_allocate_plan_data(context, sizeof(*plan), (void**)&plan));
+  *plan = (loom_spirv_private_alloca_t){
+      .byte_length = iree_max((uint64_t)extent, cell_width),
+      .byte_alignment = alignment,
+      .segment = index};
   loom_type_t position_type;
   IREE_RETURN_IF_ERROR(loom_low_lower_make_register_type(
       context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_OFFSET64, 1, &position_type));
   IREE_RETURN_IF_ERROR(loom_low_lower_plan_value_type(
       context, loom_buffer_alloca_result(source_op), position_type));
-  *out_plan =
-      loom_low_lower_plan_make(LOOM_SPIRV_PRIVATE_ALLOCA_PLAN, position);
+  *out_plan = loom_low_lower_plan_make(LOOM_SPIRV_PRIVATE_ALLOCA_PLAN, plan);
+  return iree_ok_status();
+}
+
+iree_status_t loom_spirv_finalize_private_alloca(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_plan_t plan) {
+  loom_spirv_private_alloca_t* allocation =
+      (loom_spirv_private_alloca_t*)plan.target_data;
+  loom_spirv_private_storage_t* storage =
+      (loom_spirv_private_storage_t*)loom_spirv_private_storage_lookup(context);
+  loom_spirv_private_segment_t* segment =
+      &storage->segments[allocation->segment];
+  if (!segment->packing) {
+    loom_storage_interference_t* interference;
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_context_storage_interference(context, &interference));
+    IREE_RETURN_IF_ERROR(loom_source_storage_packing_allocate_private(
+        interference, loom_low_lower_context_function_arena(context),
+        &segment->packing));
+  }
+  uint64_t offset;
+  IREE_RETURN_IF_ERROR(loom_source_storage_packing_append(
+      segment->packing, loom_buffer_alloca_result(source_op),
+      allocation->byte_length, allocation->byte_alignment, &offset));
+  if (loom_source_storage_packing_requirement(segment->packing).byte_length >
+      (uint64_t)UINT32_MAX << segment->cell_shift) {
+    return loom_low_lower_emit_function_storage_extent_unsupported(
+        context, source_op, LOOM_STORAGE_SPACE_PRIVATE,
+        loom_buffer_alloca_byte_length(source_op));
+  }
+  allocation->position =
+      (allocation->segment + UINT64_C(1)) * LOOM_SPIRV_PRIVATE_SEGMENT_STRIDE +
+      offset;
   return iree_ok_status();
 }
 
@@ -332,7 +353,8 @@ iree_status_t loom_spirv_emit_private_alloca(loom_low_lower_context_t* context,
                                              loom_low_lower_plan_t plan) {
   loom_value_id_t position;
   IREE_RETURN_IF_ERROR(loom_spirv_emit_position_constant(
-      context, source_op, (int64_t)*(const uint64_t*)plan.target_data,
+      context, source_op,
+      (int64_t)((const loom_spirv_private_alloca_t*)plan.target_data)->position,
       &position));
   return loom_low_lower_bind_value(
       context, loom_buffer_alloca_result(source_op), position);
@@ -352,13 +374,15 @@ iree_status_t loom_spirv_emit_private_storage(
     if (!segment->requires_array) {
       continue;
     }
+    const loom_source_storage_packing_requirement_t requirement =
+        loom_source_storage_packing_requirement(segment->packing);
     const uint64_t cell_width = UINT64_C(1) << segment->cell_shift;
     const uint64_t byte_length =
-        (segment->byte_length + cell_width - 1) & ~(cell_width - 1);
+        (requirement.byte_length + cell_width - 1) & ~(cell_width - 1);
     loom_op_t* reservation;
     IREE_RETURN_IF_ERROR(loom_low_storage_reserve_build(
         loom_low_lower_context_builder(context), (int64_t)byte_length,
-        (int64_t)segment->byte_alignment,
+        (int64_t)requirement.byte_alignment,
         loom_type_storage(LOOM_STORAGE_SPACE_PRIVATE), location, &reservation));
     loom_type_t type;
     IREE_RETURN_IF_ERROR(loom_low_lower_make_register_type(

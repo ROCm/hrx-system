@@ -483,3 +483,121 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   global_store_b32_saddr %23, %value, %result
   return
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+// Earlier scalar results survive a subsequent allocation at the same offset.
+kernel.def target(@target) @reused_private_roots() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %extent = index.constant 8 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<3xi32>
+  %outputs = buffer.view %output[%origin] : buffer -> view<3xi32>
+  %first_value = view.load %inputs[0] : view<3xi32> -> i32
+  %second_value = view.load %inputs[1] : view<3xi32> -> i32
+  %third_value = view.load %inputs[2] : view<3xi32> -> i32
+  %first = buffer.alloca<private> align(4) %extent : buffer
+  %first_view = buffer.view %first[%origin] : buffer -> view<2xi32>
+  view.store<volatile> %first_value, %first_view[1] : i32, view<2xi32>
+  %second = buffer.alloca<private> align(8) %extent : buffer
+  %second_view = buffer.view %second[%origin] : buffer -> view<2xi32>
+  view.store<volatile> %second_value, %second_view[1] : i32, view<2xi32>
+  %first_loaded = view.load<volatile> %first_view[1] : view<2xi32> -> i32
+  %second_loaded = view.load<volatile> %second_view[1] : view<2xi32> -> i32
+  %third = buffer.alloca<private> align(4) %extent : buffer
+  %third_view = buffer.view %third[%origin] : buffer -> view<2xi32>
+  view.store<volatile> %third_value, %third_view[1] : i32, view<2xi32>
+  %third_loaded = view.load<volatile> %third_view[1] : view<2xi32> -> i32
+  view.store %first_loaded, %outputs[0] : i32, view<3xi32>
+  view.store %second_loaded, %outputs[1] : i32, view<3xi32>
+  view.store %third_loaded, %outputs[2] : i32, view<3xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @reused_private_roots() asm {
+  %inputs = resource<hal_binding> {extent = 12, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %outputs = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %21 = storage {byte_alignment = 8, byte_length = 16} : low.storage<private>
+  %22 = s_mov_b32 0
+  %first_value = s_load_dword %inputs, %22
+  %second_value = s_load_dword %inputs, %22 {offset = 4}
+  %third_value = s_load_dword %inputs, %22 {offset = 8}
+  %29 = v_mov_b32_copy %first_value
+  %30 = v_mov_b32 0
+  scratch_store_b32_vaddr<volatile> %30, %29 {offset = 4}
+  %32 = v_mov_b32_copy %second_value
+  scratch_store_b32_vaddr<volatile> %30, %32 {offset = 12}
+  %first_loaded = scratch_load_b32_vaddr<volatile> %30 {offset = 4}
+  %second_loaded = scratch_load_b32_vaddr<volatile> %30 {offset = 12}
+  %39 = v_mov_b32_copy %third_value
+  scratch_store_b32_vaddr<volatile> %30, %39 {offset = 4}
+  %third_loaded = scratch_load_b32_vaddr<volatile> %30 {offset = 4}
+  global_store_b32_saddr %30, %first_loaded, %outputs
+  global_store_b32_saddr %30, %second_loaded, %outputs {offset = 4}
+  global_store_b32_saddr %30, %third_loaded, %outputs {offset = 8}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+// Earlier scalar results survive a subsequent allocation at the same offset.
+kernel.def target(@target) @reused_private_roots() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %extent = index.constant 8 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<3xi32>
+  %outputs = buffer.view %output[%origin] : buffer -> view<3xi32>
+  %first_value = view.load %inputs[0] : view<3xi32> -> i32
+  %second_value = view.load %inputs[1] : view<3xi32> -> i32
+  %third_value = view.load %inputs[2] : view<3xi32> -> i32
+  %first = buffer.alloca<private> align(4) %extent : buffer
+  %first_view = buffer.view %first[%origin] : buffer -> view<2xi32>
+  view.store<volatile> %first_value, %first_view[1] : i32, view<2xi32>
+  %second = buffer.alloca<private> align(8) %extent : buffer
+  %second_view = buffer.view %second[%origin] : buffer -> view<2xi32>
+  view.store<volatile> %second_value, %second_view[1] : i32, view<2xi32>
+  %first_loaded = view.load<volatile> %first_view[1] : view<2xi32> -> i32
+  %second_loaded = view.load<volatile> %second_view[1] : view<2xi32> -> i32
+  %third = buffer.alloca<private> align(4) %extent : buffer
+  %third_view = buffer.view %third[%origin] : buffer -> view<2xi32>
+  view.store<volatile> %third_value, %third_view[1] : i32, view<2xi32>
+  %third_loaded = view.load<volatile> %third_view[1] : view<2xi32> -> i32
+  view.store %first_loaded, %outputs[0] : i32, view<3xi32>
+  view.store %second_loaded, %outputs[1] : i32, view<3xi32>
+  view.store %third_loaded, %outputs[2] : i32, view<3xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @reused_private_roots() asm {
+  %inputs = resource<hal_binding> {extent = 12, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %outputs = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %21 = storage {byte_alignment = 8, byte_length = 16} : low.storage<private>
+  %22 = s_mov_b32 0
+  %first_value = s_load_dword %inputs, %22
+  %second_value = s_load_dword %inputs, %22 {offset = 4}
+  %third_value = s_load_dword %inputs, %22 {offset = 8}
+  %29 = v_mov_b32_copy %first_value
+  %30 = v_mov_b32 0
+  scratch_store_b32_vaddr<volatile> %30, %29 {offset = 4}
+  %32 = v_mov_b32_copy %second_value
+  scratch_store_b32_vaddr<volatile> %30, %32 {offset = 12}
+  %first_loaded = scratch_load_b32_vaddr<volatile> %30 {offset = 4} : reg<amdgpu.vgpr>
+  %second_loaded = scratch_load_b32_vaddr<volatile> %30 {offset = 12} : reg<amdgpu.vgpr>
+  %39 = v_mov_b32_copy %third_value
+  scratch_store_b32_vaddr<volatile> %30, %39 {offset = 4}
+  %third_loaded = scratch_load_b32_vaddr<volatile> %30 {offset = 4} : reg<amdgpu.vgpr>
+  global_store_dword_saddr %30, %first_loaded, %outputs
+  global_store_dword_saddr %30, %second_loaded, %outputs {offset = 4}
+  global_store_dword_saddr %30, %third_loaded, %outputs {offset = 8}
+  return
+}

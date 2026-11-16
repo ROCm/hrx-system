@@ -18,99 +18,99 @@ func.def @preserve_large_old_source(%source: buffer, %destination: buffer, %repl
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @preserve_large_old_source(%replacement: reg<aie2p.er>) asm {
   %source_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %destination_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %64 = vlda.512.i32x16 %source_aligned, 0
-  %65 = vlda.512.i32x16 %source_aligned, 64
-  %66 = vlda.512.i32x16 %source_aligned, 128
-  %67 = vlda.512.i32x16 %source_aligned, 192
-  %68 = vlda.512.i32x16 %source_aligned, 256
-  %69 = vlda.512.i32x16 %source_aligned, 320
-  %70 = vlda.512.i32x16 %source_aligned, 384
-  %71 = vlda.512.i32x16 %source_aligned, 448
-  %72 = mov.static-address-index 512
-  %73 = vlda.512.i32x16.index %source_aligned, %72
-  %74 = mov.static-address-index 576
-  %75 = vlda.512.i32x16.index %source_aligned, %74
-  %76 = mov.static-address-index 640
-  %77 = vlda.512.i32x16.index %source_aligned, %76
-  %78 = mov.static-address-index 704
-  %79 = vlda.512.i32x16.index %source_aligned, %78
-  %80 = mov.static-address-index 768
-  %81 = vlda.512.i32x16.index %source_aligned, %80
-  %82 = mov.static-address-index 832
-  %83 = vlda.512.i32x16.index %source_aligned, %82
-  %84 = mov.static-address-index 896
-  %85 = vlda.512.i32x16.index %source_aligned, %84
-  %86 = mov.static-address-index 960
-  %87 = vlda.512.i32x16.index %source_aligned, %86
-  %88 = mov.static-address-index 1024
-  %89 = vlda.512.i32x16.index %source_aligned, %88
-  %90 = mov.static-address-index 1088
-  %91 = vlda.512.i32x16.index %source_aligned, %90
-  %92 = mov.static-address-index 1152
-  %93 = vlda.512.i32x16.index %source_aligned, %92
-  %94 = mov.static-address-index 1216
-  %95 = vlda.512.i32x16.index %source_aligned, %94
-  %96 = mov.static-address-index 1280
-  %97 = vlda.512.i32x16.index %source_aligned, %96
-  %98 = mov.static-address-index 1344
-  %99 = vlda.512.i32x16.index %source_aligned, %98
-  %100 = mov.static-address-index 1408
-  %101 = vlda.512.i32x16.index %source_aligned, %100
-  %102 = mov.static-address-index 1472
-  %103 = vlda.512.i32x16.index %source_aligned, %102
-  %104 = mov.static-address-index 1536
-  %105 = vlda.512.i32x16.index %source_aligned, %104
-  %106 = mov.static-address-index 1600
-  %107 = vlda.512.i32x16.index %source_aligned, %106
-  %108 = mov.static-address-index 1664
-  %109 = vlda.512.i32x16.index %source_aligned, %108
-  %110 = mov.static-address-index 1728
-  %111 = vlda.512.i32x16.index %source_aligned, %110
-  %112 = mov.static-address-index 1792
-  %113 = vlda.512.i32x16.index %source_aligned, %112
-  %114 = mov.static-address-index 1856
-  %115 = vlda.512.i32x16.index %source_aligned, %114
-  %116 = mov.static-address-index 1920
-  %117 = vlda.512.i32x16.index %source_aligned, %116
-  %118 = mov.static-address-index 1984
-  %119 = vlda.512.i32x16.index %source_aligned, %118
-  %120 = mov.static-address-index 2048
-  %121 = vlda.512.i32x16.index %source_aligned, %120
-  %122 = storage {byte_alignment = 64, byte_length = 2112} : low.storage<private>
-  %123 = storage_address %122 : low.storage<private> -> reg<aie2p.ep>
-  vst.512.i32x16 %64, %123, 0
-  vst.512.i32x16 %65, %123, 64
-  vst.512.i32x16 %66, %123, 128
-  vst.512.i32x16 %67, %123, 192
-  vst.512.i32x16 %68, %123, 256
-  vst.512.i32x16 %69, %123, 320
-  vst.512.i32x16 %70, %123, 384
-  vst.512.i32x16 %71, %123, 448
-  vst.512.i32x16.index %73, %123, %72
-  vst.512.i32x16.index %75, %123, %74
-  vst.512.i32x16.index %77, %123, %76
-  vst.512.i32x16.index %79, %123, %78
-  vst.512.i32x16.index %81, %123, %80
-  vst.512.i32x16.index %83, %123, %82
-  vst.512.i32x16.index %85, %123, %84
-  vst.512.i32x16.index %87, %123, %86
-  vst.512.i32x16.index %89, %123, %88
-  vst.512.i32x16.index %91, %123, %90
-  vst.512.i32x16.index %93, %123, %92
-  vst.512.i32x16.index %95, %123, %94
-  vst.512.i32x16.index %97, %123, %96
-  vst.512.i32x16.index %99, %123, %98
-  vst.512.i32x16.index %101, %123, %100
-  vst.512.i32x16.index %103, %123, %102
-  vst.512.i32x16.index %105, %123, %104
-  vst.512.i32x16.index %107, %123, %106
-  vst.512.i32x16.index %109, %123, %108
-  vst.512.i32x16.index %111, %123, %110
-  vst.512.i32x16.index %113, %123, %112
-  vst.512.i32x16.index %115, %123, %114
-  vst.512.i32x16.index %117, %123, %116
-  vst.512.i32x16.index %119, %123, %118
-  vst.512.i32x16.index %121, %123, %120
+  %62 = storage {byte_alignment = 64, byte_length = 2112} : low.storage<private>
+  %65 = vlda.512.i32x16 %source_aligned, 0
+  %66 = vlda.512.i32x16 %source_aligned, 64
+  %67 = vlda.512.i32x16 %source_aligned, 128
+  %68 = vlda.512.i32x16 %source_aligned, 192
+  %69 = vlda.512.i32x16 %source_aligned, 256
+  %70 = vlda.512.i32x16 %source_aligned, 320
+  %71 = vlda.512.i32x16 %source_aligned, 384
+  %72 = vlda.512.i32x16 %source_aligned, 448
+  %73 = mov.static-address-index 512
+  %74 = vlda.512.i32x16.index %source_aligned, %73
+  %75 = mov.static-address-index 576
+  %76 = vlda.512.i32x16.index %source_aligned, %75
+  %77 = mov.static-address-index 640
+  %78 = vlda.512.i32x16.index %source_aligned, %77
+  %79 = mov.static-address-index 704
+  %80 = vlda.512.i32x16.index %source_aligned, %79
+  %81 = mov.static-address-index 768
+  %82 = vlda.512.i32x16.index %source_aligned, %81
+  %83 = mov.static-address-index 832
+  %84 = vlda.512.i32x16.index %source_aligned, %83
+  %85 = mov.static-address-index 896
+  %86 = vlda.512.i32x16.index %source_aligned, %85
+  %87 = mov.static-address-index 960
+  %88 = vlda.512.i32x16.index %source_aligned, %87
+  %89 = mov.static-address-index 1024
+  %90 = vlda.512.i32x16.index %source_aligned, %89
+  %91 = mov.static-address-index 1088
+  %92 = vlda.512.i32x16.index %source_aligned, %91
+  %93 = mov.static-address-index 1152
+  %94 = vlda.512.i32x16.index %source_aligned, %93
+  %95 = mov.static-address-index 1216
+  %96 = vlda.512.i32x16.index %source_aligned, %95
+  %97 = mov.static-address-index 1280
+  %98 = vlda.512.i32x16.index %source_aligned, %97
+  %99 = mov.static-address-index 1344
+  %100 = vlda.512.i32x16.index %source_aligned, %99
+  %101 = mov.static-address-index 1408
+  %102 = vlda.512.i32x16.index %source_aligned, %101
+  %103 = mov.static-address-index 1472
+  %104 = vlda.512.i32x16.index %source_aligned, %103
+  %105 = mov.static-address-index 1536
+  %106 = vlda.512.i32x16.index %source_aligned, %105
+  %107 = mov.static-address-index 1600
+  %108 = vlda.512.i32x16.index %source_aligned, %107
+  %109 = mov.static-address-index 1664
+  %110 = vlda.512.i32x16.index %source_aligned, %109
+  %111 = mov.static-address-index 1728
+  %112 = vlda.512.i32x16.index %source_aligned, %111
+  %113 = mov.static-address-index 1792
+  %114 = vlda.512.i32x16.index %source_aligned, %113
+  %115 = mov.static-address-index 1856
+  %116 = vlda.512.i32x16.index %source_aligned, %115
+  %117 = mov.static-address-index 1920
+  %118 = vlda.512.i32x16.index %source_aligned, %117
+  %119 = mov.static-address-index 1984
+  %120 = vlda.512.i32x16.index %source_aligned, %119
+  %121 = mov.static-address-index 2048
+  %122 = vlda.512.i32x16.index %source_aligned, %121
+  %123 = storage_address %62 : low.storage<private> -> reg<aie2p.ep>
+  vst.512.i32x16 %65, %123, 0
+  vst.512.i32x16 %66, %123, 64
+  vst.512.i32x16 %67, %123, 128
+  vst.512.i32x16 %68, %123, 192
+  vst.512.i32x16 %69, %123, 256
+  vst.512.i32x16 %70, %123, 320
+  vst.512.i32x16 %71, %123, 384
+  vst.512.i32x16 %72, %123, 448
+  vst.512.i32x16.index %74, %123, %73
+  vst.512.i32x16.index %76, %123, %75
+  vst.512.i32x16.index %78, %123, %77
+  vst.512.i32x16.index %80, %123, %79
+  vst.512.i32x16.index %82, %123, %81
+  vst.512.i32x16.index %84, %123, %83
+  vst.512.i32x16.index %86, %123, %85
+  vst.512.i32x16.index %88, %123, %87
+  vst.512.i32x16.index %90, %123, %89
+  vst.512.i32x16.index %92, %123, %91
+  vst.512.i32x16.index %94, %123, %93
+  vst.512.i32x16.index %96, %123, %95
+  vst.512.i32x16.index %98, %123, %97
+  vst.512.i32x16.index %100, %123, %99
+  vst.512.i32x16.index %102, %123, %101
+  vst.512.i32x16.index %104, %123, %103
+  vst.512.i32x16.index %106, %123, %105
+  vst.512.i32x16.index %108, %123, %107
+  vst.512.i32x16.index %110, %123, %109
+  vst.512.i32x16.index %112, %123, %111
+  vst.512.i32x16.index %114, %123, %113
+  vst.512.i32x16.index %116, %123, %115
+  vst.512.i32x16.index %118, %123, %117
+  vst.512.i32x16.index %120, %123, %119
+  vst.512.i32x16.index %122, %123, %121
   st %replacement, %source_aligned, 0
   %149 = mov.short 0
   %150 = mov.short 528

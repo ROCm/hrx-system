@@ -1,0 +1,134 @@
+// A loaded ref owns its protection independently of the array. Reusing
+// the entire array releases its cells while the loaded value remains usable.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "count") @count(%value: ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%value: ptr<@Object>)
+
+func.decl import("lifetime", "event") @event(%value: i32)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %objects = view.alloca<private> : view<2xref<@Object>>
+  %identity = scalar.constant 7 : i32
+  %owner, %unused = func.call @create(%identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  view.store %owner, %objects[0] : ref<@Object>, view<2xref<@Object>>
+  ref.release %owner : ref<@Object>
+  %loaded = view.load %objects[0] : view<2xref<@Object>> -> ref<@Object>
+  %pointer = ref.borrow %loaded : ref<@Object> -> ptr<@Object>
+  %replacement = view.alloca<private> : view<2xptr<@Object>>
+  %empty = view.load %replacement[0] : view<2xptr<@Object>> -> ptr<@Object>
+  %is_null = ref.compare.null %empty : ptr<@Object>
+  %word = scalar.extui %is_null : i1 to i32
+  func.call @event(%word) : (i32)
+  func.call @count(%pointer) : (ptr<@Object>)
+  func.call @read(%pointer) : (ptr<@Object>)
+  ref.release %pointer : ptr<@Object>
+  ref.release %loaded : ref<@Object>
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 7
+event 1
+references 1
+read 7
+destroy 7
+live 0
+OK 0
+retired 0
+
+// ====
+
+// A loaded ptr owns its protection independently of the array. Reusing
+// the entire array releases its cells while the loaded value remains usable.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "count") @count(%value: ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%value: ptr<@Object>)
+
+func.decl import("lifetime", "event") @event(%value: i32)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %objects = view.alloca<private> : view<2xptr<@Object>>
+  %identity = scalar.constant 7 : i32
+  %owner, %unused = func.call @create(%identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  // REMARK@+1: DOMINANCE/021
+  %stored = ref.borrow %owner : ref<@Object> -> ptr<@Object>
+  view.store %stored, %objects[0] : ptr<@Object>, view<2xptr<@Object>>
+  ref.release %stored : ptr<@Object>
+  ref.release %owner : ref<@Object>
+  %loaded = view.load %objects[0] : view<2xptr<@Object>> -> ptr<@Object>
+  %replacement = view.alloca<private> : view<2xptr<@Object>>
+  %empty = view.load %replacement[0] : view<2xptr<@Object>> -> ptr<@Object>
+  %is_null = ref.compare.null %empty : ptr<@Object>
+  %word = scalar.extui %is_null : i1 to i32
+  func.call @event(%word) : (i32)
+  func.call @count(%loaded) : (ptr<@Object>)
+  func.call @read(%loaded) : (ptr<@Object>)
+  ref.release %loaded : ptr<@Object>
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 7
+event 1
+references 1
+read 7
+destroy 7
+live 0
+OK 0
+retired 0
+
+// ====
+
+// The reused bank owns only the replacement object when a native call fails.
+// Frame unwinding must release it exactly once.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%value: ptr<@Object>)
+
+func.decl import("lifetime", "fail") @fail()
+
+func.def public @run() {
+  %first = view.alloca<private> : view<2xref<@Object>>
+  %first_identity = scalar.constant 1 : i32
+  %owner, %pointer = func.call @create(%first_identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  view.store %owner, %first[0] : ref<@Object>, view<2xref<@Object>>
+  ref.release %owner : ref<@Object>
+  func.call @read(%pointer) : (ptr<@Object>)
+  ref.release %pointer : ptr<@Object>
+  %second = view.alloca<private> : view<2xref<@Object>>
+  %second_identity = scalar.constant 2 : i32
+  %replacement, %unused = func.call @create(%second_identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  view.store %replacement, %second[1] : ref<@Object>, view<2xref<@Object>>
+  ref.release %replacement : ref<@Object>
+  func.call @fail() : ()
+  func.return
+}
+
+// ----
+create 1
+read 1
+destroy 1
+create 2
+fail 1
+destroy 2
+ABORTED 0
+retired 0

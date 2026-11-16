@@ -180,7 +180,9 @@ static iree_status_t loom_low_lower_record_memory_packet_effects(
     } else {
       summary = *loom_low_memory_access_summary_for_space(effect->memory_space);
       summary.source_flags = source_flags;
-      summary.alias_type = alias_type;
+      // Without a retained storage interval, keep descriptor-conservative
+      // aliasing. Private roots are invocation-varying and their backing bytes
+      // can be reused by successive source objects with different types.
     }
     IREE_RETURN_IF_ERROR(
         loom_low_lower_record_memory_effect(context, low_op, i, &summary));

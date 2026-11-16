@@ -504,6 +504,17 @@ static iree_status_t loom_spirv_preselect_op(void* user_data,
   return loom_spirv_select_workgroup_plan(context, source_op, out_plan);
 }
 
+static iree_status_t loom_spirv_finalize_plan(void* user_data,
+                                              loom_low_lower_context_t* context,
+                                              const loom_op_t* source_op,
+                                              loom_low_lower_plan_t plan) {
+  (void)user_data;
+  if (loom_spirv_private_alloca_plan_isa(plan)) {
+    return loom_spirv_finalize_private_alloca(context, source_op, plan);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_spirv_emit_op(void* user_data,
                                         loom_low_lower_context_t* context,
                                         const loom_op_t* source_op,
@@ -653,6 +664,7 @@ static const loom_low_lower_policy_t kSpirvLowLowerPolicy = {
             .user_data = NULL,
         },
     .preselect_op = {.fn = loom_spirv_preselect_op, .user_data = NULL},
+    .finalize_plan = {.fn = loom_spirv_finalize_plan, .user_data = NULL},
     .query_op_contract =
         {
             .fn = loom_spirv_query_cooperative_contract,

@@ -141,7 +141,7 @@ typedef struct loom_low_lower_selected_plan_t {
     // Physical callee projection and proved logical preconditions.
     const loom_low_lower_projected_call_plan_t* projected_call;
     // Shared bounded-allocation plan owned by the function lowering arena.
-    const loom_low_lower_function_storage_plan_t* function_storage;
+    loom_low_lower_function_storage_plan_t* function_storage;
   } data;
   // Selected plan representation.
   loom_low_lower_selected_plan_kind_t kind;

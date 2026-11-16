@@ -429,6 +429,14 @@ bool loom_liveness_segment_ranges_overlap(
     const loom_liveness_segment_t* segments, loom_liveness_segment_range_t lhs,
     loom_liveness_segment_range_t rhs);
 
+// Compares ordered segment unions with independently owned storage.
+// Empty spans may have NULL pointers; half-open touching endpoints do not
+// overlap.
+bool loom_liveness_segments_overlap(const loom_liveness_segment_t* lhs_segments,
+                                    iree_host_size_t lhs_count,
+                                    const loom_liveness_segment_t* rhs_segments,
+                                    iree_host_size_t rhs_count);
+
 // Returns the block record for |block|, or NULL when |block| is not owned by
 // the analyzed region.
 const loom_liveness_block_info_t* loom_liveness_block_info_for_block(

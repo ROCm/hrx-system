@@ -223,6 +223,7 @@ loom_cc_library(
     srcs = ["source_storage_packing.c"],
     hdrs = ["source_storage_packing.h"],
     deps = [
+        ":storage_interference",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
