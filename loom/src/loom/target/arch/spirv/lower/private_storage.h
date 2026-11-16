@@ -44,6 +44,9 @@ void loom_spirv_private_observe_operand(
 iree_status_t loom_spirv_select_private_alloca(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_plan_t* out_plan);
+iree_status_t loom_spirv_finalize_private_alloca(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_plan_t plan);
 bool loom_spirv_private_alloca_plan_isa(loom_low_lower_plan_t plan);
 iree_status_t loom_spirv_emit_private_alloca(loom_low_lower_context_t* context,
                                              const loom_op_t* source_op,
@@ -52,7 +55,7 @@ iree_status_t loom_spirv_emit_private_storage(
     loom_low_lower_context_t* context);
 
 // Generated memory recipes obtain the typed array and its canonical origin
-// through these materializers. Preparation retains the component and source
+// through these materializers. Preparation retains the cell bank and source
 // address; emission never recovers aliases or revisits source analysis.
 iree_status_t loom_spirv_can_materialize_private_storage(
     loom_low_lower_context_t* context, const loom_op_t* source_op,

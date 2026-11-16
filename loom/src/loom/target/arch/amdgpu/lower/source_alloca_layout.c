@@ -125,17 +125,6 @@ loom_amdgpu_source_alloca_layout_query_workgroup_interference(
   return iree_ok_status();
 }
 
-static iree_status_t
-loom_amdgpu_source_alloca_layout_query_conservative_interference(
-    void* user_data, loom_value_id_t lhs_root_value_id,
-    loom_value_id_t rhs_root_value_id, bool* out_interferes) {
-  (void)user_data;
-  (void)lhs_root_value_id;
-  (void)rhs_root_value_id;
-  *out_interferes = true;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_amdgpu_source_alloca_layout_record_allocation(
     loom_amdgpu_source_alloca_layout_t* layout, const loom_op_t* alloca_op,
     uint64_t byte_length) {
@@ -167,14 +156,16 @@ static iree_status_t loom_amdgpu_source_alloca_layout_record_allocation(
   loom_amdgpu_source_alloca_layout_segment_t* segment =
       &layout->segments[memory_space];
   if (!segment->packing) {
-    const loom_source_storage_packing_interference_fn_t interference_fn =
-        memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP
-            ? loom_amdgpu_source_alloca_layout_query_workgroup_interference
-            : loom_amdgpu_source_alloca_layout_query_conservative_interference;
-    IREE_RETURN_IF_ERROR(loom_source_storage_packing_allocate(
-        loom_source_storage_packing_interference_callback_make(interference_fn,
-                                                               layout),
-        NULL, 0, layout->arena, &segment->packing));
+    if (memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE) {
+      IREE_RETURN_IF_ERROR(loom_source_storage_packing_allocate_private(
+          layout->interference, layout->arena, &segment->packing));
+    } else {
+      IREE_RETURN_IF_ERROR(loom_source_storage_packing_allocate(
+          loom_source_storage_packing_interference_callback_make(
+              loom_amdgpu_source_alloca_layout_query_workgroup_interference,
+              layout),
+          NULL, 0, layout->arena, &segment->packing));
+    }
   }
   uint64_t byte_offset = 0;
   IREE_RETURN_IF_ERROR(loom_source_storage_packing_append(

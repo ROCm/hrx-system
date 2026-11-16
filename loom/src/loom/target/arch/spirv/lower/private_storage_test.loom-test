@@ -113,3 +113,301 @@ low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, i32) 
   OpStore.storage_buffer.i32 %27, %observed
   return
 }
+
+// ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=INT8,INT16,STORAGE_BUFFER_8BIT_ACCESS,STORAGE_BUFFER_16BIT_ACCESS
+
+// The first two objects coexist; the third reuses their bank after both loads.
+kernel.def @reuse_i8_cells() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %extent = index.constant 2 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<3xi8>
+  %outputs = buffer.view %output[%origin] : buffer -> view<3xi8>
+  %first_value = view.load %inputs[0] : view<3xi8> -> i8
+  %second_value = view.load %inputs[1] : view<3xi8> -> i8
+  %third_value = view.load %inputs[2] : view<3xi8> -> i8
+  %first = buffer.alloca<private> align(1) %extent : buffer
+  %first_view = buffer.view %first[%origin] : buffer -> view<2xi8>
+  view.store<volatile> %first_value, %first_view[1] : i8, view<2xi8>
+  %second = buffer.alloca<private> align(2) %extent : buffer
+  %second_view = buffer.view %second[%origin] : buffer -> view<2xi8>
+  view.store<volatile> %second_value, %second_view[1] : i8, view<2xi8>
+  %first_loaded = view.load<volatile> %first_view[1] : view<2xi8> -> i8
+  %second_loaded = view.load<volatile> %second_view[1] : view<2xi8> -> i8
+  %third = buffer.alloca<private> align(1) %extent : buffer
+  %third_view = buffer.view %third[%origin] : buffer -> view<2xi8>
+  view.store<volatile> %third_value, %third_view[1] : i8, view<2xi8>
+  %third_loaded = view.load<volatile> %third_view[1] : view<2xi8> -> i8
+  view.store %first_loaded, %outputs[0] : i8, view<3xi8>
+  view.store %second_loaded, %outputs[1] : i8, view<3xi8>
+  view.store %third_loaded, %outputs[2] : i8, view<3xi8>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @reuse_i8_cells() asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %21 = storage {byte_alignment = 2, byte_length = 4} : low.storage<private>
+  %22 = storage_address %21 : low.storage<private> -> reg<spirv.ptr.function.array.i8>
+  %23 = OpConstant.offset64 0
+  %24 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %23
+  %first_value = OpLoad.storage_buffer.i8 %24
+  %26 = OpConstant.offset64 1
+  %27 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %26
+  %second_value = OpLoad.storage_buffer.i8 %27
+  %29 = OpConstant.offset64 2
+  %30 = OpPtrAccessChain.storage_buffer.i8.byte_offset %input, %29
+  %third_value = OpLoad.storage_buffer.i8 %30
+  %first = OpConstant.offset64 68719476736
+  %34 = OpIAdd.offset64 %first, %26
+  %36 = OpISub.offset64 %34, %first
+  %37 = OpAccessChain.function.i8.byte_offset %22, %36
+  OpStore.function.i8<volatile> %37, %first_value
+  %second = OpConstant.offset64 68719476738
+  %40 = OpIAdd.offset64 %second, %26
+  %42 = OpISub.offset64 %40, %first
+  %43 = OpAccessChain.function.i8.byte_offset %22, %42
+  OpStore.function.i8<volatile> %43, %second_value
+  %49 = OpLoad.function.i8<volatile> %37 : reg<spirv.id>
+  %first_loaded = OpCopyObject.i8 %49
+  %56 = OpLoad.function.i8<volatile> %43 : reg<spirv.id>
+  %second_loaded = OpCopyObject.i8 %56
+  OpStore.function.i8<volatile> %37, %third_value
+  %69 = OpLoad.function.i8<volatile> %37 : reg<spirv.id>
+  %third_loaded = OpCopyObject.i8 %69
+  %72 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %23
+  OpStore.storage_buffer.i8 %72, %first_loaded
+  %74 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %26
+  OpStore.storage_buffer.i8 %74, %second_loaded
+  %76 = OpPtrAccessChain.storage_buffer.i8.byte_offset %output, %29
+  OpStore.storage_buffer.i8 %76, %third_loaded
+  return
+}
+
+// ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=INT8,INT16,STORAGE_BUFFER_8BIT_ACCESS,STORAGE_BUFFER_16BIT_ACCESS
+
+// The first two objects coexist; the third reuses their bank after both loads.
+kernel.def @reuse_i16_cells() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %extent = index.constant 4 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<3xi16>
+  %outputs = buffer.view %output[%origin] : buffer -> view<3xi16>
+  %first_value = view.load %inputs[0] : view<3xi16> -> i16
+  %second_value = view.load %inputs[1] : view<3xi16> -> i16
+  %third_value = view.load %inputs[2] : view<3xi16> -> i16
+  %first = buffer.alloca<private> align(2) %extent : buffer
+  %first_view = buffer.view %first[%origin] : buffer -> view<2xi16>
+  view.store<volatile> %first_value, %first_view[1] : i16, view<2xi16>
+  %second = buffer.alloca<private> align(4) %extent : buffer
+  %second_view = buffer.view %second[%origin] : buffer -> view<2xi16>
+  view.store<volatile> %second_value, %second_view[1] : i16, view<2xi16>
+  %first_loaded = view.load<volatile> %first_view[1] : view<2xi16> -> i16
+  %second_loaded = view.load<volatile> %second_view[1] : view<2xi16> -> i16
+  %third = buffer.alloca<private> align(2) %extent : buffer
+  %third_view = buffer.view %third[%origin] : buffer -> view<2xi16>
+  view.store<volatile> %third_value, %third_view[1] : i16, view<2xi16>
+  %third_loaded = view.load<volatile> %third_view[1] : view<2xi16> -> i16
+  view.store %first_loaded, %outputs[0] : i16, view<3xi16>
+  view.store %second_loaded, %outputs[1] : i16, view<3xi16>
+  view.store %third_loaded, %outputs[2] : i16, view<3xi16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @reuse_i16_cells() asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %27 = storage {byte_alignment = 4, byte_length = 8} : low.storage<private>
+  %28 = storage_address %27 : low.storage<private> -> reg<spirv.ptr.function.array.i16>
+  %29 = OpConstant.offset64 0
+  %30 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %29
+  %first_value = OpLoad.storage_buffer.i16 %30
+  %32 = OpConstant.offset64 2
+  %33 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %32
+  %34 = OpLoad.storage_buffer.i16 %33
+  %35 = OpConstant.offset64 4
+  %36 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %35
+  %37 = OpLoad.storage_buffer.i16 %36
+  %first = OpConstant.offset64 68719476736
+  %40 = OpIAdd.offset64 %first, %32
+  %42 = OpISub.offset64 %40, %first
+  %43 = OpAccessChain.function.i16.byte_offset %28, %42
+  OpStore.function.i16<volatile> %43, %first_value
+  %second = OpConstant.offset64 68719476740
+  %46 = OpIAdd.offset64 %second, %32
+  %48 = OpISub.offset64 %46, %first
+  %49 = OpAccessChain.function.i16.byte_offset %28, %48
+  OpStore.function.i16<volatile> %49, %34
+  %55 = OpLoad.function.i16<volatile> %43 : reg<spirv.id>
+  %first_loaded = OpCopyObject.i16 %55
+  %62 = OpLoad.function.i16<volatile> %49 : reg<spirv.id>
+  %second_loaded = OpCopyObject.i16 %62
+  OpStore.function.i16<volatile> %43, %37
+  %75 = OpLoad.function.i16<volatile> %43 : reg<spirv.id>
+  %third_loaded = OpCopyObject.i16 %75
+  %78 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %29
+  OpStore.storage_buffer.i16 %78, %first_loaded
+  %80 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %32
+  OpStore.storage_buffer.i16 %80, %second_loaded
+  %82 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %35
+  OpStore.storage_buffer.i16 %82, %third_loaded
+  return
+}
+
+// ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=INT8,INT16,STORAGE_BUFFER_8BIT_ACCESS,STORAGE_BUFFER_16BIT_ACCESS
+
+// The first two objects coexist; the third reuses their bank after both loads.
+kernel.def @reuse_i32_cells() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %extent = index.constant 8 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<3xi32>
+  %outputs = buffer.view %output[%origin] : buffer -> view<3xi32>
+  %first_value = view.load %inputs[0] : view<3xi32> -> i32
+  %second_value = view.load %inputs[1] : view<3xi32> -> i32
+  %third_value = view.load %inputs[2] : view<3xi32> -> i32
+  %first = buffer.alloca<private> align(4) %extent : buffer
+  %first_view = buffer.view %first[%origin] : buffer -> view<2xi32>
+  view.store<volatile> %first_value, %first_view[1] : i32, view<2xi32>
+  %second = buffer.alloca<private> align(8) %extent : buffer
+  %second_view = buffer.view %second[%origin] : buffer -> view<2xi32>
+  view.store<volatile> %second_value, %second_view[1] : i32, view<2xi32>
+  %first_loaded = view.load<volatile> %first_view[1] : view<2xi32> -> i32
+  %second_loaded = view.load<volatile> %second_view[1] : view<2xi32> -> i32
+  %third = buffer.alloca<private> align(4) %extent : buffer
+  %third_view = buffer.view %third[%origin] : buffer -> view<2xi32>
+  view.store<volatile> %third_value, %third_view[1] : i32, view<2xi32>
+  %third_loaded = view.load<volatile> %third_view[1] : view<2xi32> -> i32
+  view.store %first_loaded, %outputs[0] : i32, view<3xi32>
+  view.store %second_loaded, %outputs[1] : i32, view<3xi32>
+  view.store %third_loaded, %outputs[2] : i32, view<3xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @reuse_i32_cells() asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %21 = storage {byte_alignment = 8, byte_length = 16} : low.storage<private>
+  %22 = storage_address %21 : low.storage<private> -> reg<spirv.ptr.function.array.i32>
+  %23 = OpConstant.offset64 0
+  %24 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %23
+  %first_value = OpLoad.storage_buffer.i32 %24
+  %26 = OpConstant.offset64 4
+  %27 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %26
+  %second_value = OpLoad.storage_buffer.i32 %27
+  %29 = OpConstant.offset64 8
+  %30 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %29
+  %third_value = OpLoad.storage_buffer.i32 %30
+  %first = OpConstant.offset64 68719476736
+  %34 = OpIAdd.offset64 %first, %26
+  %36 = OpISub.offset64 %34, %first
+  %37 = OpAccessChain.function.i32.byte_offset %22, %36
+  OpStore.function.i32<volatile> %37, %first_value
+  %second = OpConstant.offset64 68719476744
+  %40 = OpIAdd.offset64 %second, %26
+  %42 = OpISub.offset64 %40, %first
+  %43 = OpAccessChain.function.i32.byte_offset %22, %42
+  OpStore.function.i32<volatile> %43, %second_value
+  %49 = OpLoad.function.i32<volatile> %37 : reg<spirv.id>
+  %first_loaded = OpCopyObject.i32 %49
+  %56 = OpLoad.function.i32<volatile> %43 : reg<spirv.id>
+  %second_loaded = OpCopyObject.i32 %56
+  OpStore.function.i32<volatile> %37, %third_value
+  %69 = OpLoad.function.i32<volatile> %37 : reg<spirv.id>
+  %third_loaded = OpCopyObject.i32 %69
+  %72 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %23
+  OpStore.storage_buffer.i32 %72, %first_loaded
+  %74 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %26
+  OpStore.storage_buffer.i32 %74, %second_loaded
+  %76 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %29
+  OpStore.storage_buffer.i32 %76, %third_loaded
+  return
+}
+
+// ====
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=INT8,INT16,STORAGE_BUFFER_8BIT_ACCESS,STORAGE_BUFFER_16BIT_ACCESS
+
+// The first two objects coexist; the third reuses their bank after both loads.
+kernel.def @reuse_i64_cells() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %extent = index.constant 16 : offset
+  %unused_extent = index.constant 131072 : offset
+  %unused = buffer.alloca<private> align(8) %unused_extent : buffer
+  %inputs = buffer.view %input[%origin] : buffer -> view<3xi64>
+  %outputs = buffer.view %output[%origin] : buffer -> view<3xi64>
+  %first_value = view.load %inputs[0] : view<3xi64> -> i64
+  %second_value = view.load %inputs[1] : view<3xi64> -> i64
+  %third_value = view.load %inputs[2] : view<3xi64> -> i64
+  %first = buffer.alloca<private> align(8) %extent : buffer
+  %first_view = buffer.view %first[%origin] : buffer -> view<2xi64>
+  view.store<volatile> %first_value, %first_view[1] : i64, view<2xi64>
+  %second = buffer.alloca<private> align(16) %extent : buffer
+  %second_view = buffer.view %second[%origin] : buffer -> view<2xi64>
+  view.store<volatile> %second_value, %second_view[1] : i64, view<2xi64>
+  %first_loaded = view.load<volatile> %first_view[1] : view<2xi64> -> i64
+  %second_loaded = view.load<volatile> %second_view[1] : view<2xi64> -> i64
+  %third = buffer.alloca<private> align(8) %extent : buffer
+  %third_view = buffer.view %third[%origin] : buffer -> view<2xi64>
+  view.store<volatile> %third_value, %third_view[1] : i64, view<2xi64>
+  %third_loaded = view.load<volatile> %third_view[1] : view<2xi64> -> i64
+  view.store %first_loaded, %outputs[0] : i64, view<3xi64>
+  view.store %second_loaded, %outputs[1] : i64, view<3xi64>
+  view.store %third_loaded, %outputs[2] : i64, view<3xi64>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @reuse_i64_cells() asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %23 = storage {byte_alignment = 16, byte_length = 32} : low.storage<private>
+  %24 = storage_address %23 : low.storage<private> -> reg<spirv.ptr.function.array.i64>
+  %25 = OpConstant.offset64 0
+  %26 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %25
+  %first_value = OpLoad.storage_buffer.i64 %26
+  %28 = OpConstant.offset64 8
+  %29 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %28
+  %second_value = OpLoad.storage_buffer.i64 %29
+  %31 = OpConstant.offset64 16
+  %32 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %31
+  %third_value = OpLoad.storage_buffer.i64 %32
+  %first = OpConstant.offset64 68719476736
+  %36 = OpIAdd.offset64 %first, %28
+  %38 = OpISub.offset64 %36, %first
+  %39 = OpAccessChain.function.i64.byte_offset %24, %38
+  OpStore.function.i64<volatile> %39, %first_value
+  %second = OpConstant.offset64 68719476752
+  %42 = OpIAdd.offset64 %second, %28
+  %44 = OpISub.offset64 %42, %first
+  %45 = OpAccessChain.function.i64.byte_offset %24, %44
+  OpStore.function.i64<volatile> %45, %second_value
+  %51 = OpLoad.function.i64<volatile> %39 : reg<spirv.id>
+  %first_loaded = OpCopyObject.i64 %51
+  %58 = OpLoad.function.i64<volatile> %45 : reg<spirv.id>
+  %second_loaded = OpCopyObject.i64 %58
+  OpStore.function.i64<volatile> %39, %third_value
+  %71 = OpLoad.function.i64<volatile> %39 : reg<spirv.id>
+  %third_loaded = OpCopyObject.i64 %71
+  %74 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %25
+  OpStore.storage_buffer.i64 %74, %first_loaded
+  %76 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %28
+  OpStore.storage_buffer.i64 %76, %second_loaded
+  %78 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %31
+  OpStore.storage_buffer.i64 %78, %third_loaded
+  return
+}

@@ -145,7 +145,7 @@ loom_cc_library(
     hdrs = ["private_storage.h"],
     visibility = ["//loom/src/loom/target/arch/spirv/contracts:__pkg__"],
     deps = [
-        "//loom/src/loom/analysis:storage_layout",
+        "//loom/src/loom/analysis:source_storage_packing",
         "//loom/src/loom/codegen/low:representation_plan",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/codegen/low/lower:representation_observer",
@@ -158,7 +158,6 @@ loom_cc_library(
         "//loom/src/loom/target/arch/spirv:registers",
         "//loom/src/loom/target/arch/spirv/descriptors",
         "//loom/src/loom/util:fact_table",
-        "//loom/src/loom/util:ordinal_map",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
     ],
