@@ -41,10 +41,11 @@ func.def @select_local(%first: i64, %second: i64, %condition: i1) -> (i64) {
 
 // ----
 low.func.def target<x86.scalar.core> abi(object_function) abi_layout({signature = (i64, i64, i1) -> (i64)}) @select_local(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
-  %17 = storage {byte_alignment = 8, byte_length = 8} : low.storage<private>
-  %first_storage = storage_address %17 : low.storage<private> -> reg<x86.gpr64>
-  %19 = storage {byte_alignment = 64, byte_length = 8} : low.storage<private>
-  %second_storage = storage_address %19 : low.storage<private> -> reg<x86.gpr64>
+  %17 = storage {byte_alignment = 64, byte_length = 72} : low.storage<private>
+  %18 = storage_view %17 {byte_length = 8} : low.storage<private> -> low.storage<private>
+  %first_storage = storage_address %18 : low.storage<private> -> reg<x86.gpr64>
+  %20 = storage_view %17 {byte_length = 8, offset = 64} : low.storage<private> -> low.storage<private>
+  %second_storage = storage_address %20 : low.storage<private> -> reg<x86.gpr64>
   %first_view = lea.disp %first_storage {disp32 = 0}
   %second_view = lea.disp %second_storage {disp32 = 0}
   mov.store.gpr64 %first, %first_storage {disp32 = 0}
@@ -123,5 +124,50 @@ low.func.def target<x86.avx512_features.core> abi(object_function) abi_layout({s
   %storage = storage_address %9 : low.storage<private> -> reg<x86.gpr64>
   vmovdqu32.store %input, %storage {disp32 = 0}
   %result = vmovdqu32.load %storage {disp32 = 0}
+  return %result
+}
+
+// ====
+// RUN: emit source-low target=x86:scalar output=low
+
+// Runtime indexing keeps both arrays addressable. Their source types differ,
+// but the first load must precede stores into the same reused physical bytes.
+func.def public @reused_local_arrays(%first: i64, %second: i32, %index: index) -> (i64) {
+  %position = index.assume %index [range(%index, 0, 1)] : index
+  %wide = view.alloca<private> align(64) : view<2xi64>
+  %delta = scalar.constant 17 : i64
+  %other = scalar.addi %first, %delta : i64
+  view.store<type_disjoint> %first, %wide[0] : i64, view<2xi64>
+  view.store<type_disjoint> %other, %wide[1] : i64, view<2xi64>
+  %original = view.load<type_disjoint> %wide[%position] : view<2xi64> -> i64
+  %narrow = view.alloca<private> align(16) : view<2xi32>
+  %step = scalar.constant 3 : i32
+  %next = scalar.addi %second, %step : i32
+  view.store<type_disjoint> %second, %narrow[0] : i32, view<2xi32>
+  view.store<type_disjoint> %next, %narrow[1] : i32, view<2xi32>
+  %selected = view.load<type_disjoint> %narrow[%position] : view<2xi32> -> i32
+  %extended = scalar.extui %selected : i32 to i64
+  %result = scalar.addi %original, %extended : i64
+  func.return %result : i64
+}
+
+// ----
+low.func.def public target<x86.scalar.core> abi(object_function) @reused_local_arrays(%first: reg<x86.gpr64>, %second: reg<x86.gpr32>, %position: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %19 = storage {byte_alignment = 64, byte_length = 16} : low.storage<private>
+  %wide = storage_address %19 : low.storage<private> -> reg<x86.gpr64>
+  %21 = copy %first : reg<x86.gpr64> -> reg<x86.gpr64>
+  %other = add.imm.gpr64 %21 {imm32 = 17}
+  mov.store.gpr64 %first, %wide {disp32 = 0}
+  mov.store.gpr64 %other, %wide {disp32 = 8}
+  %original = mov.load.indexed.gpr64 %wide, %position {disp32 = 0, scale = 8}
+  %24 = storage_view %19 {byte_length = 8} : low.storage<private> -> low.storage<private>
+  %narrow = storage_address %24 : low.storage<private> -> reg<x86.gpr64>
+  %26 = copy %second : reg<x86.gpr32> -> reg<x86.gpr32>
+  %next = add.imm.gpr32 %26 {imm32 = 3}
+  mov.store.gpr32 %second, %narrow {disp32 = 0}
+  mov.store.gpr32 %next, %narrow {disp32 = 4}
+  %extended = mov.load.indexed.u32.gpr64 %narrow, %position {disp32 = 0, scale = 4}
+  %29 = copy %original : reg<x86.gpr64> -> reg<x86.gpr64>
+  %result = add.gpr64 %29, %extended
   return %result
 }

@@ -20,6 +20,7 @@ extern "C" {
 #endif
 
 typedef struct loom_source_storage_packing_t loom_source_storage_packing_t;
+typedef struct loom_storage_interference_t loom_storage_interference_t;
 
 // Queries whether two source allocation roots require distinct byte ranges.
 // The callback must consume retained compiler facts and must not recover the
@@ -74,6 +75,13 @@ iree_status_t loom_source_storage_packing_allocate(
     const loom_source_storage_packing_range_t* reserved_ranges,
     iree_host_size_t reserved_range_count, iree_arena_allocator_t* arena,
     loom_source_storage_packing_t** out_packing);
+
+// Creates a private storage segment using the shared allocation-instance proof.
+// The analysis remains live while allocations are appended; the completed
+// packing and its requirement remain usable after that analysis retires.
+iree_status_t loom_source_storage_packing_allocate_private(
+    const loom_storage_interference_t* interference,
+    iree_arena_allocator_t* arena, loom_source_storage_packing_t** out_packing);
 
 // Appends one source allocation and returns its immutable packed byte offset.
 //

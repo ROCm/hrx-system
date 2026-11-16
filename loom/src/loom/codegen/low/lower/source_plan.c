@@ -662,6 +662,12 @@ static iree_status_t loom_low_lower_finalize_selected_plan_phase(
           context->policy->finalize_plan.user_data, context,
           selected_plan->source_op,
           loom_low_lower_selected_plan_target(selected_plan));
+    } else if (selected_plan->kind ==
+                   LOOM_LOW_LOWER_SELECTED_PLAN_FUNCTION_STORAGE &&
+               !elided) {
+      status = loom_low_lower_function_storage_finalize(
+          context, selected_plan->source_op,
+          selected_plan->data.function_storage);
     } else if (selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_CALL) {
       status = loom_low_lower_source_call_finalize(
           context, selected_plan->source_op, selected_plan->data.call);
@@ -1767,7 +1773,7 @@ static iree_status_t loom_low_lower_plan_op(
 
   if (loom_buffer_alloca_isa(source_op) || loom_view_alloca_isa(source_op)) {
     bool selected = false;
-    const loom_low_lower_function_storage_plan_t* plan = NULL;
+    loom_low_lower_function_storage_plan_t* plan = NULL;
     IREE_RETURN_IF_ERROR(loom_low_lower_function_storage_select(
         context, source_op, &selected, &plan));
     if (selected) {

@@ -191,16 +191,15 @@ static iree_status_t loom_low_lower_map_blocks(
 
 static iree_status_t loom_low_lower_emit_preamble(
     loom_low_lower_context_t* context) {
-  if (context->policy->emit_preamble.fn == NULL) {
-    return iree_ok_status();
-  }
-
   loom_region_t* low_body = loom_low_lower_low_body(context);
   loom_builder_ip_t saved_ip = loom_builder_enter_region(
       &context->builder, context->low_func_op, low_body);
   loom_builder_set_block(&context->builder, loom_region_entry_block(low_body));
-  iree_status_t status = context->policy->emit_preamble.fn(
-      context->policy->emit_preamble.user_data, context);
+  iree_status_t status = loom_low_lower_function_storage_emit_banks(context);
+  if (iree_status_is_ok(status) && context->policy->emit_preamble.fn) {
+    status = context->policy->emit_preamble.fn(
+        context->policy->emit_preamble.user_data, context);
+  }
   loom_builder_restore(&context->builder, saved_ip);
   return status;
 }

@@ -100,6 +100,8 @@ typedef struct loom_low_lowering_frame_t {
   loom_low_lower_value_binding_t* value_bindings;
   // Planned block topology and branch expansions, before Low construction.
   loom_low_lower_control_plan_t* control_plan;
+  // Packed private banks retained for structural reservation emission.
+  loom_low_lower_function_storage_bank_t* function_storage;
   // Supplemental SSA closure for target-created control edges, or NULL.
   loom_low_lower_control_carriers_t* control_carriers;
   // Callable signature, argument imports, and ABI layout retained for emission.

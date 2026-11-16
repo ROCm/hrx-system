@@ -17,6 +17,8 @@ extern "C" {
 #endif
 
 typedef struct loom_low_lower_context_t loom_low_lower_context_t;
+typedef struct loom_low_lower_function_storage_bank_t
+    loom_low_lower_function_storage_bank_t;
 
 typedef enum loom_low_lower_function_storage_source_e {
   // Byte-addressable buffer allocation.
@@ -54,7 +56,8 @@ typedef struct loom_low_lower_function_storage_config_t {
   iree_host_size_t count;
 } loom_low_lower_function_storage_config_t;
 
-// Function-arena-owned decision consumed directly by Low construction.
+// Function-arena-owned allocation selected before demand analysis and placed
+// once that analysis establishes that the allocation needs physical storage.
 typedef struct loom_low_lower_function_storage_plan_t {
   // Proven finite maximum byte length of the source allocation.
   int64_t byte_length;
@@ -63,6 +66,10 @@ typedef struct loom_low_lower_function_storage_plan_t {
   // Target capability retained from selection, including content
   // initialization.
   const loom_low_lower_function_storage_mapping_t* mapping;
+  // Shared structural bank, or NULL for an independently reserved space.
+  loom_low_lower_function_storage_bank_t* bank;
+  // First byte within bank, retaining the complete contiguous source extent.
+  int64_t byte_offset;
 } loom_low_lower_function_storage_plan_t;
 
 // Proves that a fixed slot preserves the allocation's per-execution identity.
@@ -80,10 +87,19 @@ iree_status_t loom_low_lower_function_storage_check_lifetime(
 // the shared diagnostic boundary prevents emission of that function.
 iree_status_t loom_low_lower_function_storage_select(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    bool* out_selected,
-    const loom_low_lower_function_storage_plan_t** out_plan);
+    bool* out_selected, loom_low_lower_function_storage_plan_t** out_plan);
 
-// Emits the retained reservation/address pair using the source buffer's
+// Places one retained allocation after source materialization demands settle.
+// Elided allocations never enter packing or contribute to a frame reservation.
+iree_status_t loom_low_lower_function_storage_finalize(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_function_storage_plan_t* plan);
+
+// Emits each shared structural bank once in the function entry block.
+iree_status_t loom_low_lower_function_storage_emit_banks(
+    loom_low_lower_context_t* context);
+
+// Emits the retained storage view/address pair using the source buffer's
 // selected binding type. No extent operand is queried during emission.
 iree_status_t loom_low_lower_function_storage_emit(
     loom_low_lower_context_t* context, const loom_op_t* source_op,

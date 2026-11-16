@@ -86,6 +86,8 @@ extern "C" uint64_t pressure64(const uint64_t* values);
 extern "C" uint32_t pressure32(const uint32_t* values);
 extern "C" uint64_t storage_spaces(uint64_t input, uint32_t word);
 extern "C" uint64_t local_pair(uint64_t first, uint64_t second, uint64_t index);
+extern "C" uint64_t reused_local_arrays(uint64_t first, uint32_t second,
+                                        uint64_t index);
 extern "C" uint32_t sum_previous_instances(uint64_t count);
 extern "C" void add_i32x4(const int32_t* lhs, const int32_t* rhs,
                           int32_t* output);
@@ -798,6 +800,17 @@ TEST(NativeCallableTest, StackStorageAndAllocationSpills) {
               narrow[0] ^ narrow[10]);
     ASSERT_EQ(local_pair(wide[0], wide[1], 0), wide[0]);
     ASSERT_EQ(local_pair(wide[0], wide[1], 1), wide[1]);
+  }
+}
+
+TEST(NativeCallableTest, ReusedPrivateBytesPreserveDifferentObservationTypes) {
+  for (uint64_t first :
+       {uint64_t{0}, uint64_t{19}, uint64_t{0xfedcba9876543210}}) {
+    for (uint32_t second : {0u, 31u, 0xfffffffdu}) {
+      EXPECT_EQ(reused_local_arrays(first, second, 0), first + second);
+      EXPECT_EQ(reused_local_arrays(first, second, 1),
+                first + 17 + static_cast<uint32_t>(second + 3));
+    }
   }
 }
 
