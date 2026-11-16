@@ -1,0 +1,151 @@
+// RUN: pass combine,combine
+
+test.target<low_core> @native {index_bitwidth = 32, offset_bitwidth = 32}
+
+test.target<low_core> @wide
+
+func.def target(@native) @word_arithmetic(%left: i32, %right: i32, %extra: i32, %count: index) -> (i32, i32, i32, i32, i32, i32, i32, i32) where [range(%count, 0, 31)] {
+  %a = index.cast %left : i32 to index
+  %b = index.cast %right : i32 to index
+  %c = index.cast %extra : i32 to index
+  %add = index.add %a, %b : index
+  %sub = index.sub %a, %b : index
+  %mul = index.mul %a, %b : index
+  %madd = index.madd %a, %b, %c : index
+  %and = index.andi %a, %b : index
+  %or = index.ori %a, %b : index
+  %xor = index.xori %a, %b : index
+  %shift = index.shli %a, %count : index
+  %r0 = index.cast %add : index to i32
+  %r1 = index.cast %sub : index to i32
+  %r2 = index.cast %mul : index to i32
+  %r3 = index.cast %madd : index to i32
+  %r4 = index.cast %and : index to i32
+  %r5 = index.cast %or : index to i32
+  %r6 = index.cast %xor : index to i32
+  %r7 = index.cast %shift : index to i32
+  func.return %r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7 : i32, i32, i32, i32, i32, i32, i32, i32
+}
+
+func.def target(@wide) @chain(%left: i32, %right: i32) -> (i32) {
+  %a = index.cast %left : i32 to index
+  %b = index.cast %right : i32 to index
+  %bias = index.constant 4294967295 : index
+  %sum = index.add %a, %bias : index
+  %product = index.mul %sum, %b : index
+  %result = index.cast %product : index to i32
+  func.return %result : i32
+}
+
+func.def target(@native) @scaled_bytes(%position: index, %stride: offset) -> (i32) {
+  %bytes = index.scale %position, %stride : index, offset -> offset
+  %result = index.cast %bytes : offset to i32
+  func.return %result : i32
+}
+
+func.def target(@wide) @shared(%left: index, %right: index) -> (index, i32) {
+  %sum = index.add %left, %right : index
+  %result = index.cast %sum : index to i32
+  func.return %sum, %result : index, i32
+}
+
+func.def target(@native) @attribute_observer(%left: index, %right: index, %other: index) -> (i32, index) {
+  %sum = index.add %left, %right : index
+  %guarded = index.assume %other [le(%other, %sum)] : index
+  %result = index.cast %sum : index to i32
+  func.return %result, %guarded : i32, index
+}
+
+func.def target(@wide) @full_width_result(%left: index, %right: index) -> (i64) {
+  %sum = index.add %left, %right : index
+  %result = index.cast %sum : index to i64
+  func.return %result : i64
+}
+
+func.def target(@wide) @right_shift(%left: index, %count: index) -> (i32) where [range(%count, 0, 31)] {
+  %shift = index.shrui %left, %count : index
+  %result = index.cast %shift : index to i32
+  func.return %result : i32
+}
+
+func.def target(@wide) @wide_shift_count(%left: index, %count: index) -> (i32) where [range(%count, 0, 63)] {
+  %shift = index.shli %left, %count : index
+  %result = index.cast %shift : index to i32
+  func.return %result : i32
+}
+
+func.def @unselected(%left: index, %right: index) -> (i32) {
+  %sum = index.add %left, %right : index
+  %result = index.cast %sum : index to i32
+  func.return %result : i32
+}
+
+// ----
+test.target<low_core> @native {index_bitwidth = 32, offset_bitwidth = 32}
+
+test.target<low_core> @wide
+
+func.def target(@native) @word_arithmetic(%left: i32, %right: i32, %extra: i32, %count: index) -> (i32, i32, i32, i32, i32, i32, i32, i32) where [range(%count, 0, 31)] {
+  %r0 = scalar.addi %left, %right : i32
+  %r1 = scalar.subi %left, %right : i32
+  %r2 = scalar.muli %left, %right : i32
+  %84 = scalar.muli %left, %right : i32
+  %r3 = scalar.addi %84, %extra : i32
+  %r4 = scalar.andi %left, %right : i32
+  %r5 = scalar.ori %left, %right : i32
+  %r6 = scalar.xori %left, %right : i32
+  %79 = index.cast %count : index to i32
+  %r7 = scalar.shli %left, %79 : i32
+  func.return %r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7 : i32, i32, i32, i32, i32, i32, i32, i32
+}
+
+func.def target(@wide) @chain(%left: i32, %right: i32) -> (i32) {
+  %91 = scalar.constant -1 : i32
+  %sum = scalar.addi %left, %91 : i32
+  %result = scalar.muli %sum, %right : i32
+  func.return %result : i32
+}
+
+func.def target(@native) @scaled_bytes(%position: index, %stride: offset) -> (i32) {
+  %93 = index.cast %position : index to i32
+  %94 = index.cast %stride : offset to i32
+  %result = scalar.muli %93, %94 : i32
+  func.return %result : i32
+}
+
+func.def target(@wide) @shared(%left: index, %right: index) -> (index, i32) {
+  %sum = index.add %left, %right : index
+  %result = index.cast %sum : index to i32
+  func.return %sum, %result : index, i32
+}
+
+func.def target(@native) @attribute_observer(%left: index, %right: index, %other: index) -> (i32, index) {
+  %sum = index.add %left, %right : index
+  %guarded = index.assume %other [le(%other, %sum)] : index
+  %result = index.cast %sum : index to i32
+  func.return %result, %guarded : i32, index
+}
+
+func.def target(@wide) @full_width_result(%left: index, %right: index) -> (i64) {
+  %sum = index.add %left, %right : index
+  %result = index.cast %sum : index to i64
+  func.return %result : i64
+}
+
+func.def target(@wide) @right_shift(%left: index, %count: index) -> (i32) where [range(%count, 0, 31)] {
+  %shift = index.shrui %left, %count : index
+  %result = index.cast %shift : index to i32
+  func.return %result : i32
+}
+
+func.def target(@wide) @wide_shift_count(%left: index, %count: index) -> (i32) where [range(%count, 0, 63)] {
+  %shift = index.shli %left, %count : index
+  %result = index.cast %shift : index to i32
+  func.return %result : i32
+}
+
+func.def @unselected(%left: index, %right: index) -> (i32) {
+  %sum = index.add %left, %right : index
+  %result = index.cast %sum : index to i32
+  func.return %result : i32
+}

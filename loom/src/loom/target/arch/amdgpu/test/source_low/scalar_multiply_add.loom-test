@@ -237,8 +237,8 @@ amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @non_inline_u24_scale(%lanes: reg<amdgpu.vgpr x2>, %start: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %lanes[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %13 = v_mov_b32 80
-  %product = v_mul_lo_u32 %lane, %13
+  %scale = s_mov_b32 80
+  %product = v_mul_lo_u32 %scale, %lane
   %result = v_add_u32 %product, %start
   return %result
 }
@@ -282,7 +282,7 @@ amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @flagged_multiply(%lanes: reg<amdgpu.vgpr x2>, %start: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %lanes[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %product = v_mul_lo_u32_src1_inline %lane, 20
+  %product = v_mul_lo_u32_src0_inline %lane, 20
   %result = v_add_u32 %product, %start
   return %result
 }
@@ -305,7 +305,7 @@ amdgpu.target<gfx942> @target
 
 low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @flagged_add(%lanes: reg<amdgpu.vgpr x2>, %start: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %lane = slice %lanes[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %product = v_mul_lo_u32_src1_inline %lane, 20
+  %product = v_mul_lo_u32_src0_inline %lane, 20
   %result = v_add_u32 %product, %start
   return %result
 }

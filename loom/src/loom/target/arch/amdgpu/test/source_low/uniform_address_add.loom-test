@@ -1,4 +1,4 @@
-// RUN: pass source-to-low,low-select-operand-forms,low-cse,low-dce
+// RUN: pass combine,cse,source-to-low,low-select-operand-forms,low-cse,low-dce
 
 amdgpu.target<gfx11-generic> @target
 
@@ -27,12 +27,11 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %values_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %result_view_0 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %18 = v_lshlrev_b32_src0_inline %fixture_lane, 3
-  %values = global_load_b64_saddr %18, %values_view
-  %position = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %result = v_add_u32 %step, %position
-  %22 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  global_store_b32_saddr %22, %result, %result_view_0
+  %21 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  %value = global_load_b32_saddr %21, %values_view
+  %result = v_add_u32 %step, %value
+  %24 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %24, %result, %result_view_0
   return
 }
 
@@ -65,12 +64,11 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %fixture_lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %values_view = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %result_view_0 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %18 = v_lshlrev_b32_src0_inline %fixture_lane, 3
-  %values = global_load_b64_saddr %18, %values_view
-  %position = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %result = v_add_u32 %step, %position
-  %22 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  global_store_b32_saddr %22, %result, %result_view_0
+  %21 = v_lshlrev_b32_src0_inline %fixture_lane, 3
+  %value = global_load_b32_saddr %21, %values_view
+  %result = v_add_u32 %step, %value
+  %24 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  global_store_b32_saddr %24, %result, %result_view_0
   return
 }
 
@@ -91,8 +89,8 @@ func.def target(@target) @inline_step(%values: vector<2xi32>) -> (i32) {
 amdgpu.target<gfx11-generic> @target
 
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @inline_step(%values: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
-  %position = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %result = v_add_u32_src0_inline %position, 64
+  %value = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %result = v_add_u32_src0_inline %value, 64
   return %result
 }
 
@@ -113,8 +111,8 @@ func.def target(@target) @negative_step(%values: vector<2xi32>) -> (i32) {
 amdgpu.target<gfx11-generic> @target
 
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @negative_step(%values: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
-  %position = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %result = v_add_u32_lit %position, 4294967280
+  %value = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %result = v_add_u32_lit %value, 4294967280
   return %result
 }
 
@@ -135,8 +133,8 @@ func.def target(@target) @literal_step(%values: vector<2xi32>) -> (i32) {
 amdgpu.target<gfx11-generic> @target
 
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @literal_step(%values: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
-  %position = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %result = v_add_u32_lit %position, 128
+  %value = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %result = v_add_u32_lit %value, 128
   return %result
 }
 
@@ -247,9 +245,9 @@ func.def target(@target) @varying_operands(%values: vector<2xi32>) -> (i32) {
 amdgpu.target<gfx11-generic> @target
 
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @varying_operands(%values: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
-  %position = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %step = slice %values[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %result = v_add_u32 %position, %step
+  %lhs = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %rhs = slice %values[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %result = v_add_u32 %lhs, %rhs
   return %result
 }
 
@@ -269,7 +267,7 @@ func.def target(@target) @ordered_subtraction(%values: vector<2xi32>, %step: ind
 amdgpu.target<gfx11-generic> @target
 
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @ordered_subtraction(%values: reg<amdgpu.vgpr x2>, %step: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %position = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %result = v_sub_nc_u32 %position, %step
+  %value = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %result = v_sub_nc_u32 %value, %step
   return %result
 }

@@ -694,6 +694,8 @@ def test_integer_extrema_rules_prefer_encoded_constants() -> None:
             (f"amdgpu.v_{suffix}.lit",),
             (f"amdgpu.s_{suffix}",),
             (f"amdgpu.v_{suffix}",),
+            (f"amdgpu.v_{suffix}",),
+            (f"amdgpu.v_{suffix}",),
         )
 
 
@@ -759,7 +761,56 @@ def test_scalar_i32_bitwise_rules_prefer_encoded_constants() -> None:
             (f"amdgpu.v_{suffix}.lit",),
             (f"amdgpu.s_{suffix}",),
             (f"amdgpu.v_{suffix}",),
+            (f"amdgpu.v_{suffix}",),
+            (f"amdgpu.v_{suffix}",),
         )
+
+
+def test_scalar_i32_binary_rules_preserve_uniform_operand_positions() -> None:
+    compiled = _COMPILED_INTEGER_RULES
+    for source_op, suffix in (
+        (scalar_arithmetic.scalar_addi, "add_u32"),
+        (scalar_arithmetic.scalar_subi, "sub_u32"),
+        (scalar_arithmetic.scalar_muli, "mul_lo_u32"),
+        (scalar_arithmetic.scalar_minsi, "min_i32"),
+        (scalar_arithmetic.scalar_maxsi, "max_i32"),
+        (scalar_arithmetic.scalar_minui, "min_u32"),
+        (scalar_arithmetic.scalar_maxui, "max_u32"),
+        (scalar_bitwise.scalar_andi, "and_b32"),
+        (scalar_bitwise.scalar_ori, "or_b32"),
+        (scalar_bitwise.scalar_xori, "xor_b32"),
+    ):
+        rules = tuple(
+            rule
+            for rule in _rules_for_source_op(compiled, source_op)
+            if set(_rule_type_patterns(compiled, rule)) == {Scalar("i32")}
+            and _rule_descriptor_keys(compiled, rule) == (f"amdgpu.v_{suffix}",)
+        )
+        expected_sources = ((0, 1),)
+        if source_op is not scalar_arithmetic.scalar_subi:
+            expected_sources += ((1, 0),)
+        assert len(rules) == len(expected_sources) + 1
+        for rule, order in zip(rules[:-1], expected_sources, strict=True):
+            emit = compiled.emits[rule.emit_start]
+            sources = compiled.value_refs[
+                emit.operand_ref_start : emit.operand_ref_start + emit.operand_ref_count
+            ]
+            assert tuple(source.index for source in sources) == order
+            assert all(source.materializer_index != 0 for source in sources)
+            guards = compiled.guards[
+                rule.guard_start : rule.guard_start + rule.guard_count
+            ]
+            assert any(
+                guard.kind is GuardKind.LOW_VALUE_REGISTER_CLASS
+                and compiled.value_refs[guard.value_ref_index].kind
+                is SourceValueKind.OPERAND
+                and compiled.value_refs[guard.value_ref_index].index == order[0]
+                and AMDGPU_INTEGER_CONTRACT_FRAGMENT.descriptor_set.reg_classes[
+                    guard.register_class_id
+                ].name
+                == "amdgpu.sgpr"
+                for guard in guards
+            )
 
 
 def test_vector_i32_constants_prefer_inline_without_changing_operand_storage() -> None:

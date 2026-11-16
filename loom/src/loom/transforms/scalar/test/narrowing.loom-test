@@ -281,3 +281,37 @@ func.def @bounded_operand(%input: i64) -> (i32) {
   %result = scalar.addi %5, %6 : i32
   func.return %result : i32
 }
+
+// ====
+
+func.def @bitwise_words(%input: i64, %count: i64) -> (i32, i32, i32, i32) where [range(%count, 0, 31)] {
+  %mask = scalar.constant 9223372034707292287 : i64
+  %and = scalar.andi %input, %mask : i64
+  %or = scalar.ori %input, %mask : i64
+  %xor = scalar.xori %input, %mask : i64
+  %left = scalar.trunci %input : i64 to i32
+  %extended = scalar.extui %left : i32 to i64
+  %shift = scalar.shli %extended, %count : i64
+  %r0 = scalar.trunci %and : i64 to i32
+  %r1 = scalar.trunci %or : i64 to i32
+  %r2 = scalar.trunci %xor : i64 to i32
+  %r3 = scalar.trunci %shift : i64 to i32
+  func.return %r0, %r1, %r2, %r3 : i32, i32, i32, i32
+}
+
+// ----
+func.def @bitwise_words(%input: i64, %count: i64) -> (i32, i32, i32, i32) where [range(%count, 0, 31)] {
+  %22 = scalar.constant -2147483521 : i32
+  %13 = scalar.trunci %input : i64 to i32
+  %r0 = scalar.andi %13, %22 : i32
+  %20 = scalar.constant -2147483521 : i32
+  %14 = scalar.trunci %input : i64 to i32
+  %r1 = scalar.ori %14, %20 : i32
+  %18 = scalar.constant -2147483521 : i32
+  %15 = scalar.trunci %input : i64 to i32
+  %r2 = scalar.xori %15, %18 : i32
+  %left = scalar.trunci %input : i64 to i32
+  %16 = scalar.trunci %count : i64 to i32
+  %r3 = scalar.shli %left, %16 : i32
+  func.return %r0, %r1, %r2, %r3 : i32, i32, i32, i32
+}

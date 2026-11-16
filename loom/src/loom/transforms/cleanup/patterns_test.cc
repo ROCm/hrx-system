@@ -302,7 +302,7 @@ TEST(CleanupPatternsTest, ConfiguredProvidersCoverOwnedRoots) {
   EXPECT_EQ(loom_rewrite_pattern_registry_lookup_kind(source_combine,
                                                       LOOM_OP_INDEX_CAST)
                 .count,
-            1u);
+            2u);
   EXPECT_EQ(loom_rewrite_pattern_registry_lookup_kind(source_combine,
                                                       LOOM_OP_SCALAR_EXTF)
                 .count,

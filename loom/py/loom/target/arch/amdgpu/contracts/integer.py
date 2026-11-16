@@ -435,6 +435,7 @@ def _vgpr_binary_rule(
     descriptor_rhs: str = "rhs",
     source_lhs: str = "lhs",
     source_rhs: str = "rhs",
+    lhs_materializer: ValueMaterializer | None = None,
     signed_bit_count: int | None = None,
     signed_diagnostic: GuardDiagnostic | None = None,
     unsigned_bit_count: int | None = None,
@@ -442,6 +443,7 @@ def _vgpr_binary_rule(
     register_unit_count: int | None = None,
     source_value_guards: tuple[Guard, ...] = (),
 ) -> DescriptorRule:
+    lhs_materializer = lhs_materializer or materializer
     register_shape_guards = (
         (Guard.low_value_register_unit_count("result", register_unit_count),)
         if register_unit_count is not None
@@ -459,8 +461,8 @@ def _vgpr_binary_rule(
                 unsigned_diagnostic=unsigned_diagnostic,
             ),
             Guard.low_value_register_class("result", "amdgpu.vgpr"),
-            Guard.value_materializable("lhs", materializer.name),
-            Guard.value_materializable("rhs", materializer.name),
+            Guard.value_materializable(source_lhs, lhs_materializer.name),
+            Guard.value_materializable(source_rhs, materializer.name),
             *source_value_guards,
             *register_shape_guards,
             Guard.descriptor_available(descriptor),
@@ -469,7 +471,7 @@ def _vgpr_binary_rule(
             EmitDescriptorOp(
                 descriptor=descriptor,
                 operands={
-                    descriptor_lhs: _materialized_operand(source_lhs, materializer),
+                    descriptor_lhs: _materialized_operand(source_lhs, lhs_materializer),
                     descriptor_rhs: _materialized_operand(source_rhs, materializer),
                 },
                 results={"dst": _RESULT},
@@ -642,11 +644,28 @@ def _i32_sgpr_vgpr_rules(
     source_op: Op,
     sgpr_descriptor_key: str,
     vgpr_descriptor_key: str,
+    *,
+    sgpr_operand_orders: tuple[tuple[str, str], ...],
 ) -> tuple[DescriptorRule, ...]:
     sgpr_descriptor = _descriptor(sgpr_descriptor_key)
     vgpr_descriptor = _descriptor(vgpr_descriptor_key)
     return (
         _sgpr_binary_rule(source_op, _I32, sgpr_descriptor),
+        *(
+            _vgpr_binary_rule(
+                source_op,
+                _I32,
+                vgpr_descriptor,
+                I32_VGPR_MATERIALIZER,
+                source_lhs=source_lhs,
+                source_rhs=source_rhs,
+                lhs_materializer=REGISTERS_SGPR_MATERIALIZER,
+                source_value_guards=(
+                    Guard.low_value_register_class(source_lhs, "amdgpu.sgpr"),
+                ),
+            )
+            for source_lhs, source_rhs in sgpr_operand_orders
+        ),
         _vgpr_binary_rule(
             source_op,
             _I32,
@@ -903,12 +922,11 @@ def _i32_encoded_binary_rules(source_op: Op, suffix: str) -> tuple[DescriptorRul
     )
     return (
         *immediate_rules,
-        _sgpr_binary_rule(source_op, _I32, _descriptor(f"amdgpu.s_{suffix}")),
-        _vgpr_binary_rule(
+        *_i32_sgpr_vgpr_rules(
             source_op,
-            _I32,
-            _descriptor(f"amdgpu.v_{suffix}"),
-            I32_VGPR_MATERIALIZER,
+            f"amdgpu.s_{suffix}",
+            f"amdgpu.v_{suffix}",
+            sgpr_operand_orders=(("lhs", "rhs"), ("rhs", "lhs")),
         ),
     )
 
@@ -2094,6 +2112,7 @@ def _rules() -> tuple[DescriptorRule, ...]:
             scalar_arithmetic.scalar_addi,
             "amdgpu.s_add_u32",
             "amdgpu.v_add_u32",
+            sgpr_operand_orders=(("lhs", "rhs"), ("rhs", "lhs")),
         )
     )
     rules.extend(
@@ -2101,6 +2120,7 @@ def _rules() -> tuple[DescriptorRule, ...]:
             scalar_arithmetic.scalar_subi,
             "amdgpu.s_sub_u32",
             "amdgpu.v_sub_u32",
+            sgpr_operand_orders=(("lhs", "rhs"),),
         )
     )
     rules.extend(
@@ -2108,6 +2128,7 @@ def _rules() -> tuple[DescriptorRule, ...]:
             scalar_arithmetic.scalar_muli,
             "amdgpu.s_mul_i32",
             "amdgpu.v_mul_lo_u32",
+            sgpr_operand_orders=(("lhs", "rhs"), ("rhs", "lhs")),
         )
     )
     rules.extend(_scalar_fmai_rules())

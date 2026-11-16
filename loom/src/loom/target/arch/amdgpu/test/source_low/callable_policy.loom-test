@@ -235,27 +235,27 @@ func.def public target(@target) @caller(%configuration: i64) -> (i32) {
 
 // ----
 low.func.def noinline target<amdgpu.gfx11.generic.core> @increment(%position: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %step = s_mov_b32 1
-  %result = v_add_u32 %step, %position
+  %22 = s_mov_b32 1
+  %result = v_add_u32 %22, %position
   return %result
 }
 
 low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @caller(%configuration: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
-  %23 = s_mov_b32 3
-  %shifted = v_lshrrev_b64 %23, %configuration
-  %28 = s_mov_b32 7
-  %29 = s_mov_b32 0
-  %32 = slice %shifted[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %33 = v_and_b32 %28, %32
-  %35 = slice %shifted[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %36 = v_and_b32 %29, %35
-  %selector = concat(%33, %36) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %38 = s_mov_b32 5
-  %limit = concat(%38, %29) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %41 = v_cmp_lt_u64 %selector, %limit
-  %44 = v_mov_b32_copy %38
-  %45 = v_cndmask_b32 %44, %33, %41
-  %value = low.func.call pure @increment(%45) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  %26 = s_mov_b32 3
+  %shifted = v_lshrrev_b64 %26, %configuration
+  %31 = s_mov_b32 7
+  %32 = s_mov_b32 0
+  %35 = slice %shifted[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %36 = v_and_b32 %31, %35
+  %38 = slice %shifted[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %39 = v_and_b32 %32, %38
+  %selector = concat(%36, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %41 = s_mov_b32 5
+  %limit = concat(%41, %32) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %44 = v_cmp_lt_u64 %selector, %limit
+  %47 = v_mov_b32_copy %41
+  %48 = v_cndmask_b32 %47, %36, %44
+  %value = low.func.call pure @increment(%48) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
   return %value
 }
 
@@ -295,9 +295,9 @@ kernel.def target(@target) @varying_values() {
 
 // ----
 low.func.def public noinline target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @absolute(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %sign_boundary = s_mov_b32 0
   %positive = v_cmp_gt_i32_src1_inline %value {rhs = 0}
-  %25 = v_mov_b32 0
-  %negative = v_sub_nc_u32 %25, %value
+  %negative = v_sub_nc_u32 %sign_boundary, %value
   %result = v_cndmask_b32 %negative, %value, %positive
   return %result
 }
@@ -305,11 +305,11 @@ low.func.def public noinline target<amdgpu.gfx11.generic.core>(@target) abi(hal_
 low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @varying_values() asm {
   %lane_value = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %results = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %31 = v_mov_b32 4294967264
-  %centered = v_add_u32 %lane_value, %31
+  %29 = s_mov_b32 4294967264
+  %centered = v_add_u32 %29, %lane_value
   %result = low.func.call pure @absolute(%centered) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
-  %34 = v_lshlrev_b32_src0_inline %lane_value, 2
-  global_store_b32_saddr %34, %result, %results
+  %32 = v_lshlrev_b32_src0_inline %lane_value, 2
+  global_store_b32_saddr %32, %result, %results
   return
 }
 
