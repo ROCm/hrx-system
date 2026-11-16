@@ -1,0 +1,51 @@
+// Adjacent dependent instructions exercise both halves of the double-precision
+// TRANS result across every lane. The final physical planner supplies the gap.
+amdgpu.target<gfx9-4-generic> @transcendental_target
+
+low.func.def schedule(locked) target<amdgpu.gfx9_4.generic.core>(@transcendental_target) @transcendental_residuals(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %reciprocal = v_rcp_f64 %input
+  %reciprocal_error = v_fma_f64_neg_a_one %input, %reciprocal
+  %reciprocal_root = v_rsq_f64 %input
+  %reciprocal_square = v_mul_f64 %reciprocal_root, %reciprocal_root
+  %reciprocal_root_error = v_fma_f64_neg_a_one %input, %reciprocal_square
+  %root = v_sqrt_f64 %input
+  %root_square = v_mul_f64 %root, %root
+  return %reciprocal_error, %reciprocal_root_error, %root_square
+}
+
+kernel.def target(@transcendental_target) @transcendental_residuals_kernel() {
+  %unit = index.constant 1 : index
+  %width = index.constant 256 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %lane = kernel.workitem.id<x> : index
+  %width = index.constant 256 : index
+  %twice_width = index.constant 512 : index
+  %input = buffer.view %input_buffer[%base] : buffer -> view<256xf64>
+  %output = buffer.view %output_buffer[%base] : buffer -> view<768xf64>
+  %value = vector.load %input[%lane] : view<256xf64> -> vector<1xf64>
+  %reciprocal_error, %reciprocal_root_error, %root_square = low.invoke @transcendental_residuals(%value) : (vector<1xf64>) -> (vector<1xf64>, vector<1xf64>, vector<1xf64>)
+  %reciprocal_root_position = index.add %lane, %width : index
+  %root_position = index.add %lane, %twice_width : index
+  vector.store %reciprocal_error, %output[%lane] : vector<1xf64>, view<768xf64>
+  vector.store %reciprocal_root_error, %output[%reciprocal_root_position] : vector<1xf64>, view<768xf64>
+  vector.store %root_square, %output[%root_position] : vector<1xf64>, view<768xf64>
+  kernel.return
+}
+
+check.case @transcendental_f64_result_dependencies {
+  check.requires<hal.amdgpu.target> {target = "gfx9-4-generic"}
+  %input = check.generate.iota offset(0.125) step(0.125) : tensor<256xf64>
+  %output = check.generate.fill value(-1.0) : tensor<768xf64>
+  kernel.launch @transcendental_residuals_kernel(%input, %output) : (tensor<256xf64>, tensor<768xf64>)
+  // MI300 ISA section 12.8 bounds these approximations by 2^29 ULP, or at
+  // most 2^-23 relative error on normal values. Squared approximations and
+  // their f64 products remain within 2^-21, including rounding.
+  %residuals = check.tensor.view %output offset(0) : tensor<768xf64> -> tensor<512xf64>
+  %expected = check.generate.fill value(0.0) : tensor<512xf64>
+  check.expect.approximate actual(%residuals) expected(%expected) atol(4.76837158203125e-07) rtol(0.0) nan(same) : tensor<512xf64>, tensor<512xf64>
+  %root_squares = check.tensor.view %output offset(4096) : tensor<768xf64> -> tensor<256xf64>
+  check.expect.approximate actual(%root_squares) expected(%input) atol(0.0) rtol(4.76837158203125e-07) nan(same) : tensor<256xf64>, tensor<256xf64>
+  check.return
+}

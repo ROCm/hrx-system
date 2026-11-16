@@ -20,7 +20,10 @@ from loom.target.arch.amdgpu.descriptors.cdna import (
     _AMDGPU_GFX9_4_GENERIC_CORE_DESCRIPTOR_SET_BASE,
     AMDGPU_MFMA_TIMINGS_BY_DESCRIPTOR_SET,
 )
-from loom.target.arch.amdgpu.descriptors.common import _amdgpu_mfma_schedule_class_name
+from loom.target.arch.amdgpu.descriptors.common import (
+    _AMDGPU_TRANS_DESCRIPTOR_KEYS,
+    _amdgpu_mfma_schedule_class_name,
+)
 from loom.target.arch.amdgpu.descriptors.matrix import _cdna2_matrix_rows
 from loom.target.arch.amdgpu.descriptors.sets import (
     _gfx9_4_generic_core_overlays,
@@ -798,6 +801,13 @@ def test_descriptor_trait_names_include_memory_and_ref_facts() -> None:
         "LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_ISSUE",
         "LOOM_AMDGPU_DESCRIPTOR_TRAIT_MATRIX_COEXECUTION_SOURCE",
     )
+
+
+def test_trans_descriptor_traits_cover_scheduling_family() -> None:
+    descriptor_set = _descriptor_set(*(_descriptor(key, schedule_class=_SCHEDULE_VALU) for key in _AMDGPU_TRANS_DESCRIPTOR_KEYS))
+    context = amdgpu_target_refs._descriptor_trait_context(descriptor_set)
+    for descriptor in descriptor_set.descriptors:
+        assert "LOOM_AMDGPU_DESCRIPTOR_TRAIT_TRANSCENDENTAL" in amdgpu_target_refs._descriptor_trait_names(context, descriptor), descriptor.key
 
 
 def test_descriptor_trait_names_retain_exec_writes() -> None:

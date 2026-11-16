@@ -41,6 +41,7 @@ from loom.target.arch.amdgpu.descriptors.cdna import (  # noqa: E402
     AMDGPU_MFMA_TIMINGS_BY_DESCRIPTOR_SET,
 )
 from loom.target.arch.amdgpu.descriptors.common import (  # noqa: E402
+    _AMDGPU_TRANS_DESCRIPTOR_KEYS,
     _REG_EXEC,
     _SCHEDULE_VMEM_CACHE_INVALIDATE,
 )
@@ -170,18 +171,6 @@ _IMAGE_MEMORY_ENCODING_FORMAT_IDS = frozenset(
 
 _MATRIX_MEMORY_ENCODING_FORMAT_IDS = (
     _VECTOR_MEMORY_ENCODING_FORMAT_IDS | _IMAGE_MEMORY_ENCODING_FORMAT_IDS | frozenset(AMDGPU_ENCODING_FORMAT_IDS[name] for name in ("ENC_DS", "ENC_VDS", "ENC_EXP", "ENC_VEXPORT"))
-)
-
-_TRANSCENDENTAL_DESCRIPTOR_KEYS = frozenset(
-    (
-        "amdgpu.v_exp_f32",
-        "amdgpu.v_log_f32",
-        "amdgpu.v_sin_f32",
-        "amdgpu.v_cos_f32",
-        "amdgpu.v_sqrt_f32",
-        "amdgpu.v_rsq_f32",
-        "amdgpu.v_rcp_f32",
-    )
 )
 
 _READFIRSTLANE_DESCRIPTOR_KEYS = frozenset(
@@ -622,7 +611,7 @@ def _descriptor_trait_names(
             trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_VECTOR_MEMORY_INTERLOCK")
     if descriptor.semantic_tag in ("float.fma.f64", "float.fmac.f64"):
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_FMA64")
-    if descriptor.key in _TRANSCENDENTAL_DESCRIPTOR_KEYS:
+    if descriptor.key in _AMDGPU_TRANS_DESCRIPTOR_KEYS:
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_TRANSCENDENTAL")
     if descriptor.encoding_format_id in AMDGPU_DPP_ENCODING_FORMAT_IDS:
         trait_names.append("LOOM_AMDGPU_DESCRIPTOR_TRAIT_DPP")
@@ -777,7 +766,7 @@ def _descriptor_cache_coherence_immediate_slot(
 
 def _validate_descriptor_trait_keys() -> None:
     descriptor_ref_keys = frozenset(amdgpu_descriptor_ref_keys())
-    trait_descriptor_keys = _TRANSCENDENTAL_DESCRIPTOR_KEYS | _READFIRSTLANE_DESCRIPTOR_KEYS
+    trait_descriptor_keys = frozenset(_AMDGPU_TRANS_DESCRIPTOR_KEYS) | _READFIRSTLANE_DESCRIPTOR_KEYS
     for descriptor_key in sorted(trait_descriptor_keys):
         if descriptor_key not in descriptor_ref_keys:
             raise ValueError(f"AMDGPU descriptor trait key '{descriptor_key}' is not listed as a descriptor ref")

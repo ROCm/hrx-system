@@ -64,6 +64,7 @@ _AMDGPU_ARTIFACT_CHECK_TESTS = [
     "low_store_data_wait.loom-test",
     "low_system_scope_store_wait.loom-test",
     "low_tensor_gfx1250.loom-test",
+    "low_trans_result_wait.loom-test",
     "low_tuple_alignment.loom-test",
     "low_tuple_capture.loom-test",
     "low_valu_schedule.loom-test",

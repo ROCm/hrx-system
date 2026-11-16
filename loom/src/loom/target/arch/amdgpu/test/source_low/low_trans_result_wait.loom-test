@@ -1,0 +1,108 @@
+// CDNA's non-TRANS VALU consumer needs one intervening issue slot after a
+// transcendental result. The dependency covers both halves of an f64 value.
+// RUN: emit amdgpu-assembly @reciprocal_residual
+
+amdgpu.target<gfx942> @target
+
+low.func.def schedule(locked) target<amdgpu.cdna3.core>(@target) @reciprocal_residual(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %reciprocal = v_rcp_f64 %input
+  %error = v_fma_f64_neg_a_one %input, %reciprocal
+  return %error
+}
+
+// ----
+  v_rcp_f64 v[2:3], v[0:1]
+  s_nop 0
+  v_fma_f64 v[0:1], -v[0:1], v[2:3], 1.0
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @reciprocal_root_square
+
+amdgpu.target<gfx942> @target
+
+low.func.def schedule(locked) target<amdgpu.cdna3.core>(@target) @reciprocal_root_square(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %root = v_rsq_f64 %input
+  %square = v_mul_f64 %root, %root
+  return %square
+}
+
+// ----
+  v_rsq_f64 v[0:1], v[0:1]
+  s_nop 0
+  v_mul_f64 v[0:1], v[0:1], v[0:1]
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @root_square
+
+amdgpu.target<gfx942> @target
+
+low.func.def schedule(locked) target<amdgpu.cdna3.core>(@target) @root_square(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %root = v_sqrt_f64 %input
+  %square = v_mul_f64 %root, %root
+  return %square
+}
+
+// ----
+  v_sqrt_f64 v[0:1], v[0:1]
+  s_nop 0
+  v_mul_f64 v[0:1], v[0:1], v[0:1]
+  s_endpgm
+
+// ====
+// An independent instruction supplies the required gap without a NOP.
+// RUN: emit amdgpu-assembly @independent_work
+
+amdgpu.target<gfx942> @target
+
+low.func.def schedule(locked) target<amdgpu.cdna3.core>(@target) @independent_work(%input: reg<amdgpu.vgpr x2>, %bias: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %reciprocal = v_rcp_f64 %input
+  %sum = v_add_f64 %input, %bias
+  %error = v_fma_f64_neg_a_one %input, %reciprocal
+  return %error, %sum
+}
+
+// ----
+  v_rcp_f64 v[4:5], v[2:3]
+  v_add_f64 v[0:1], v[2:3], v[0:1]
+  v_fma_f64 v[2:3], -v[2:3], v[4:5], 1.0
+  s_endpgm
+
+// ====
+// A TRANS consumer forwards directly; only its ordinary VALU consumer waits.
+// RUN: emit amdgpu-assembly @trans_chain
+
+amdgpu.target<gfx942> @target
+
+low.func.def schedule(locked) target<amdgpu.cdna3.core>(@target) @trans_chain(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %reciprocal = v_rcp_f64 %input
+  %root = v_sqrt_f64 %reciprocal
+  %square = v_mul_f64 %root, %root
+  return %square
+}
+
+// ----
+  v_rcp_f64 v[0:1], v[0:1]
+  v_sqrt_f64 v[0:1], v[0:1]
+  s_nop 0
+  v_mul_f64 v[0:1], v[0:1], v[0:1]
+  s_endpgm
+
+// ====
+// RDNA consumes the same descriptor fact through its dependency counter.
+// RUN: emit amdgpu-assembly @reciprocal_residual
+
+amdgpu.target<gfx1100> @target
+
+low.func.def schedule(locked) target<amdgpu.rdna3.core>(@target) @reciprocal_residual(%input: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %reciprocal = v_rcp_f64 %input
+  %error = v_fma_f64_neg_a_one %input, %reciprocal
+  return %error
+}
+
+// ----
+  v_rcp_f64 v[2:3], v[0:1]
+  s_waitcnt_depctr depctr(0)
+  v_fma_f64 v[0:1], -v[0:1], v[2:3], 1.0
+  s_endpgm
