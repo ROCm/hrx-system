@@ -572,8 +572,7 @@ static loomc_status_t loomc_spirv_profile_validate_feature_dependencies(
       continue;
     }
     const loom_spirv_feature_atom_t missing_atom =
-        (loom_spirv_feature_atom_t)iree_math_count_trailing_zeros_u64(
-            missing_bits);
+        loom_spirv_feature_bits_first_atom(missing_bits);
     const loom_diagnostic_param_t params[] = {
         loom_param_string(iree_string_view_from_loomc(identifier)),
         loom_param_string(descriptor->name),

@@ -104,8 +104,8 @@ def _float_narrowing_feature_atoms(
         f"float{result_width}_signed_zero_inf_nan_preserve",
         f"float{source_width}_signed_zero_inf_nan_preserve",
     )
-    if source_width == 64 and result_width == 16:
-        atoms = (*atoms, "float64_to_float16_conversion")
+    if result_width == 16:
+        atoms = (*atoms, f"float{source_width}_to_float16_conversion")
     return atoms
 
 

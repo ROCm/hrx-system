@@ -1410,8 +1410,7 @@ static iree_status_t loom_spirv_low_verify_storage_address(
         loom_param_string(state->function_name),
         loom_param_type(loom_module_value_type(state->module, result)),
         loom_param_string(loom_spirv_feature_atom_name(
-            (loom_spirv_feature_atom_t)iree_math_count_trailing_zeros_u64(
-                missing_bits))),
+            loom_spirv_feature_bits_first_atom(missing_bits))),
     };
     return loom_spirv_low_emit(context, op, LOOM_ERR_SPIRV_044, params,
                                IREE_ARRAYSIZE(params));

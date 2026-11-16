@@ -31,6 +31,10 @@ struct MockVulkanDevice {
   VkPhysicalDevice handle =
       reinterpret_cast<VkPhysicalDevice>(static_cast<uintptr_t>(0x1234));
   uint32_t vendor_id = 0x10DE;
+  // PCI device identifier supplied by the property query.
+  uint32_t device_id = 0;
+  // Vendor-encoded driver version supplied by the property query.
+  uint32_t driver_version = 0;
   uint32_t api_version = VK_API_VERSION_1_3;
   uint32_t max_workgroup_size[3] = {1024, 512, 64};
   uint32_t max_flat_workgroup_size = 1024;
@@ -139,6 +143,8 @@ void VKAPI_PTR MockGetPhysicalDeviceProperties2(
   ASSERT_NE(properties, nullptr);
   properties->properties.apiVersion = g_mock_vulkan_device->api_version;
   properties->properties.vendorID = g_mock_vulkan_device->vendor_id;
+  properties->properties.deviceID = g_mock_vulkan_device->device_id;
+  properties->properties.driverVersion = g_mock_vulkan_device->driver_version;
   properties->properties.limits.maxComputeWorkGroupSize[0] =
       g_mock_vulkan_device->max_workgroup_size[0];
   properties->properties.limits.maxComputeWorkGroupSize[1] =
@@ -977,6 +983,28 @@ TEST(TargetSpirvVulkanTest, ImportsCooperativeVectorFamily) {
                          : (mask & 2) ? LOOMC_TARGET_FACT_STATE_TRUE
                                       : LOOMC_TARGET_FACT_STATE_FALSE);
     }
+  }
+}
+
+TEST(TargetSpirvVulkanTest, QualifiesNarrowingWithoutDisablingHalfArithmetic) {
+  auto environment = CreateSpirvTargetEnvironment();
+  for (uint32_t identity_change = 0; identity_change < 4; ++identity_change) {
+    SCOPED_TRACE(identity_change);
+    MockVulkanDevice device;
+    device.vendor_id = identity_change == 1 ? 0x1002 : 0x10DE;
+    device.device_id = identity_change == 2 ? 0x2786 : 0x2684;
+    device.driver_version = 2497102272u + (identity_change == 3 ? 64 : 0);
+    auto profile = CreateVulkanProfile(environment.get(), device);
+    ExpectFeatureState(profile.get(),
+                       LOOMC_SPIRV_FEATURE_FLOAT32_TO_FLOAT16_CONVERSION,
+                       identity_change == 0 ? LOOMC_TARGET_FACT_STATE_FALSE
+                                            : LOOMC_TARGET_FACT_STATE_TRUE);
+    ExpectFeatureState(profile.get(),
+                       LOOMC_SPIRV_FEATURE_FLOAT64_TO_FLOAT16_CONVERSION,
+                       identity_change == 1 ? LOOMC_TARGET_FACT_STATE_FALSE
+                                            : LOOMC_TARGET_FACT_STATE_TRUE);
+    ExpectFeatureState(profile.get(), LOOMC_SPIRV_FEATURE_FLOAT16,
+                       LOOMC_TARGET_FACT_STATE_TRUE);
   }
 }
 

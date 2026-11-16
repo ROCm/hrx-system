@@ -139,7 +139,7 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @spirv_
 // ====
 
 
-// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+hal features=INT8,INT16,FLOAT16,STORAGE_BUFFER_8BIT_ACCESS,STORAGE_BUFFER_16BIT_ACCESS,FLOAT16_DENORM_PRESERVE,FLOAT16_ROUNDING_RTE,FLOAT16_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE validate
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+hal features=INT8,INT16,FLOAT16,FLOAT32_TO_FLOAT16_CONVERSION,STORAGE_BUFFER_8BIT_ACCESS,STORAGE_BUFFER_16BIT_ACCESS,FLOAT16_DENORM_PRESERVE,FLOAT16_ROUNDING_RTE,FLOAT16_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE validate
 // REQUIRES: spirv-dis, spirv-val
 
 low.kernel.def target<spirv.logical.core> workgroup_size(1, 1, 1) @spirv_raw_bda_scalar_conversions(%byte_offset: reg<spirv.offset64>) asm {

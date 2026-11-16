@@ -63,7 +63,7 @@ func.def @narrow_to_single(%input: f64) -> (f32) {
 
 // ====
 
-// RUN: emit spirv-dis input=source-low @narrow_to_half target=spirv:vulkan1.3+bda features=FLOAT16,FLOAT64,FLOAT64_TO_FLOAT16_CONVERSION,FLOAT16_DENORM_PRESERVE,FLOAT16_ROUNDING_RTE,FLOAT16_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT64_SIGNED_ZERO_INF_NAN_PRESERVE validate
+// RUN: emit spirv-dis input=source-low @narrow_to_half target=spirv:vulkan1.3+bda features=FLOAT16,FLOAT64,FLOAT32_TO_FLOAT16_CONVERSION,FLOAT64_TO_FLOAT16_CONVERSION,FLOAT16_DENORM_PRESERVE,FLOAT16_ROUNDING_RTE,FLOAT16_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT64_SIGNED_ZERO_INF_NAN_PRESERVE validate
 
 func.def @narrow_to_half(%double: f64, %single: f32) -> (f16, f16) {
   %double_result = scalar.fptrunc %double : f64 to f16

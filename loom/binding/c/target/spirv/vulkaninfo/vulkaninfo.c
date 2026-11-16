@@ -11,14 +11,13 @@
 
 #include "diagnostic.h"
 #include "iree/base/internal/json.h"
+#include "loom/binding/c/target/spirv/vulkan_device.h"
 #include "loomc/iree.h"
 #include "result.h"
 
 enum {
   LOOMC_SPIRV_VULKANINFO_LIMIT_FACT_CAPACITY = 16,
   LOOMC_SPIRV_VULKANINFO_ENVIRONMENT_FACT_CAPACITY = 4,
-  // PCI-SIG vendor identifier reported by AMD Vulkan physical devices.
-  LOOMC_SPIRV_VULKANINFO_AMD_VENDOR_ID = 0x1002,
 };
 
 typedef struct loomc_spirv_vulkaninfo_import_t {
@@ -720,31 +719,72 @@ static loomc_status_t loomc_spirv_vulkaninfo_parse_uint64(
   return loomc_ok_status();
 }
 
-static loomc_status_t loomc_spirv_vulkaninfo_add_float64_to_float16_conversion(
+static loomc_status_t loomc_spirv_vulkaninfo_add_device_conversions(
     loomc_spirv_vulkaninfo_import_t* import,
     iree_string_view_t physical_properties) {
-  iree_string_view_t value = iree_string_view_empty();
-  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_try_lookup(
-      physical_properties, IREE_SV("vendorID"), &value));
-  if (iree_string_view_is_empty(value) ||
-      loomc_spirv_vulkaninfo_is_null(value)) {
-    return loomc_ok_status();
-  }
-  uint64_t vendor_id = 0;
+  static const iree_string_view_t keys[] = {
+      IREE_SVL("vendorID"), IREE_SVL("deviceID"), IREE_SVL("driverVersion")};
+  uint32_t identity[3] = {0};
+  uint32_t known_fields = 0;
   const loomc_string_view_t provenance =
-      loomc_make_cstring_view("vulkaninfo:vendorID");
-  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_parse_uint64(
-      import, value, provenance, &vendor_id));
-  if (vendor_id > UINT32_MAX) {
-    return loomc_spirv_vulkaninfo_fail_message(
-        import, "vulkaninfo vendorID must fit in 32 bits");
+      loomc_make_cstring_view("vulkaninfo:device-identity");
+  loomc_status_t status = loomc_ok_status();
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(keys) && loomc_status_is_ok(status) &&
+                       loomc_result_succeeded(import->result);
+       ++i) {
+    iree_string_view_t value = iree_string_view_empty();
+    iree_status_t lookup_status =
+        loomc_spirv_vulkaninfo_try_lookup(physical_properties, keys[i], &value);
+    if (!iree_status_is_ok(lookup_status)) {
+      status = loomc_spirv_vulkaninfo_fail_iree_status(import, lookup_status);
+      break;
+    }
+    if (iree_string_view_is_empty(value) ||
+        loomc_spirv_vulkaninfo_is_null(value)) {
+      continue;
+    }
+    uint64_t parsed = 0;
+    status = loomc_spirv_vulkaninfo_parse_uint64(
+        import, value, loomc_string_view_from_iree(keys[i]), &parsed);
+    if (!loomc_status_is_ok(status) ||
+        !loomc_result_succeeded(import->result)) {
+      break;
+    }
+    if (parsed > UINT32_MAX) {
+      status = loomc_spirv_vulkaninfo_fail_message(
+          import, "vulkaninfo device identity fields must fit in 32 bits");
+      break;
+    }
+    identity[i] = (uint32_t)parsed;
+    known_fields |= 1u << i;
   }
-  return loomc_spirv_vulkaninfo_add_feature_fact(
-      import, LOOMC_SPIRV_FEATURE_FLOAT64_TO_FLOAT16_CONVERSION,
-      vendor_id != LOOMC_SPIRV_VULKANINFO_AMD_VENDOR_ID
-          ? LOOMC_TARGET_FACT_STATE_TRUE
-          : LOOMC_TARGET_FACT_STATE_FALSE,
-      provenance);
+  if (!loomc_status_is_ok(status) || !loomc_result_succeeded(import->result)) {
+    return status;
+  }
+  const loomc_spirv_feature_bits_t features =
+      loomc_spirv_vulkan_device_conversion_features(identity[0], identity[1],
+                                                    identity[2]);
+  // F64 conversion depends only on the vendor. F32 conversion requires the
+  // complete identity; partial reports leave that feature unknown.
+  if (known_fields & 1u) {
+    LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fact(
+        import, LOOMC_SPIRV_FEATURE_FLOAT64_TO_FLOAT16_CONVERSION,
+        (features & loomc_spirv_feature_bit(
+                        LOOMC_SPIRV_FEATURE_FLOAT64_TO_FLOAT16_CONVERSION))
+            ? LOOMC_TARGET_FACT_STATE_TRUE
+            : LOOMC_TARGET_FACT_STATE_FALSE,
+        provenance));
+  }
+  if (known_fields == 7u) {
+    LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fact(
+        import, LOOMC_SPIRV_FEATURE_FLOAT32_TO_FLOAT16_CONVERSION,
+        (features & loomc_spirv_feature_bit(
+                        LOOMC_SPIRV_FEATURE_FLOAT32_TO_FLOAT16_CONVERSION))
+            ? LOOMC_TARGET_FACT_STATE_TRUE
+            : LOOMC_TARGET_FACT_STATE_FALSE,
+        provenance));
+  }
+  return loomc_ok_status();
 }
 
 static loomc_status_t loomc_spirv_vulkaninfo_add_limit(
@@ -1621,9 +1661,8 @@ static loomc_status_t loomc_spirv_vulkaninfo_import_device(
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_api_version(
       import, physical_properties, IREE_SV("apiVersion"),
       loomc_make_cstring_view("vulkaninfo:apiVersion")));
-  LOOMC_RETURN_IF_ERROR(
-      loomc_spirv_vulkaninfo_add_float64_to_float16_conversion(
-          import, physical_properties));
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_device_conversions(
+      import, physical_properties));
   LOOMC_RETURN_IF_ERROR(
       loomc_spirv_vulkaninfo_import_limits(import, physical_properties));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_import_feature_properties(

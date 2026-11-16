@@ -452,3 +452,268 @@ check.scenario @packed_f64_to_f32_values {
   }
   check.return
 }
+
+// Only the widened result is observable. Publishing the narrow bits as well
+// would hide a driver optimization that incorrectly removes intermediate
+// rounding. The VM evaluates each conversion independently. NaNs are normalized
+// to compare classification while all other bits, including signed zero, stay
+// observable. Scalar, native-packet, and oversized vectors use the same inputs.
+func.def @roundtrip_f32_f16(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %scalar_step = index.constant 1 : index
+  %packet_step = index.constant 4 : index
+  %wide_step = index.constant 8 : index
+  %packet_base = index.constant 256 : offset
+  %wide_base = index.constant 512 : offset
+  %nan = scalar.constant 2143289344 : i32
+  %source = buffer.view %input[%base] : buffer -> view<64xf32>
+  %scalar_output = buffer.view %output[%base] : buffer -> view<64xi32>
+  %packet_output = buffer.view %output[%packet_base] : buffer -> view<64xi32>
+  %wide_output = buffer.view %output[%wide_base] : buffer -> view<64xi32>
+  scf.for %i = [%begin to %end step %scalar_step] {
+    %value = view.load %source[%i] : view<64xf32> -> f32
+    %narrow = scalar.fptrunc %value : f32 to f16
+    %wide = scalar.extf %narrow : f16 to f32
+    %bits = scalar.bitcast %wide : f32 to i32
+    %is_nan = scalar.isnanf %wide : f32
+    %result = scf.select %is_nan, %nan, %bits : i32
+    view.store %result, %scalar_output[%i] : i32, view<64xi32>
+  }
+  %packet_nan = vector.splat %nan : vector<4xi32>
+  scf.for %i = [%begin to %end step %packet_step] {
+    %value = vector.load %source[%i] : view<64xf32> -> vector<4xf32>
+    %narrow = vector.fptrunc %value : vector<4xf32> to vector<4xf16>
+    %wide = vector.extf %narrow : vector<4xf16> to vector<4xf32>
+    %bits = vector.bitcast %wide : vector<4xf32> to vector<4xi32>
+    %is_nan = vector.isnanf %wide : vector<4xf32> -> vector<4xi1>
+    %result = vector.select %is_nan, %packet_nan, %bits : vector<4xi32>
+    vector.store %result, %packet_output[%i] : vector<4xi32>, view<64xi32>
+  }
+  %wide_nan = vector.splat %nan : vector<8xi32>
+  scf.for %i = [%begin to %end step %wide_step] {
+    %value = vector.load %source[%i] : view<64xf32> -> vector<8xf32>
+    %narrow = vector.fptrunc %value : vector<8xf32> to vector<8xf16>
+    %wide = vector.extf %narrow : vector<8xf16> to vector<8xf32>
+    %bits = vector.bitcast %wide : vector<8xf32> to vector<8xi32>
+    %is_nan = vector.isnanf %wide : vector<8xf32> -> vector<8xi1>
+    %result = vector.select %is_nan, %wide_nan, %bits : vector<8xi32>
+    vector.store %result, %wide_output[%i] : vector<8xi32>, view<64xi32>
+  }
+  func.return
+}
+
+check.scenario @roundtrip_f32_f16_values {
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<64xi32>
+    %output = check.generate.fill value(-1) : tensor<192xi32>
+    check.compare<@roundtrip_f32_f16>(%input, %output) : (tensor<64xi32>, tensor<192xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<192xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1065357280) step(1) : tensor<64xi32>
+    %output = check.generate.fill value(-1) : tensor<192xi32>
+    check.compare<@roundtrip_f32_f16>(%input, %output) : (tensor<64xi32>, tensor<192xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<192xi32>
+    }
+  }
+  check.return
+}
+
+func.def @roundtrip_f32_bf16(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %scalar_step = index.constant 1 : index
+  %packet_step = index.constant 4 : index
+  %wide_step = index.constant 8 : index
+  %packet_base = index.constant 256 : offset
+  %wide_base = index.constant 512 : offset
+  %nan = scalar.constant 2143289344 : i32
+  %source = buffer.view %input[%base] : buffer -> view<64xf32>
+  %scalar_output = buffer.view %output[%base] : buffer -> view<64xi32>
+  %packet_output = buffer.view %output[%packet_base] : buffer -> view<64xi32>
+  %wide_output = buffer.view %output[%wide_base] : buffer -> view<64xi32>
+  scf.for %i = [%begin to %end step %scalar_step] {
+    %value = view.load %source[%i] : view<64xf32> -> f32
+    %narrow = scalar.fptrunc %value : f32 to bf16
+    %wide = scalar.extf %narrow : bf16 to f32
+    %bits = scalar.bitcast %wide : f32 to i32
+    %is_nan = scalar.isnanf %wide : f32
+    %result = scf.select %is_nan, %nan, %bits : i32
+    view.store %result, %scalar_output[%i] : i32, view<64xi32>
+  }
+  %packet_nan = vector.splat %nan : vector<4xi32>
+  scf.for %i = [%begin to %end step %packet_step] {
+    %value = vector.load %source[%i] : view<64xf32> -> vector<4xf32>
+    %narrow = vector.fptrunc %value : vector<4xf32> to vector<4xbf16>
+    %wide = vector.extf %narrow : vector<4xbf16> to vector<4xf32>
+    %bits = vector.bitcast %wide : vector<4xf32> to vector<4xi32>
+    %is_nan = vector.isnanf %wide : vector<4xf32> -> vector<4xi1>
+    %result = vector.select %is_nan, %packet_nan, %bits : vector<4xi32>
+    vector.store %result, %packet_output[%i] : vector<4xi32>, view<64xi32>
+  }
+  %wide_nan = vector.splat %nan : vector<8xi32>
+  scf.for %i = [%begin to %end step %wide_step] {
+    %value = vector.load %source[%i] : view<64xf32> -> vector<8xf32>
+    %narrow = vector.fptrunc %value : vector<8xf32> to vector<8xbf16>
+    %wide = vector.extf %narrow : vector<8xbf16> to vector<8xf32>
+    %bits = vector.bitcast %wide : vector<8xf32> to vector<8xi32>
+    %is_nan = vector.isnanf %wide : vector<8xf32> -> vector<8xi1>
+    %result = vector.select %is_nan, %wide_nan, %bits : vector<8xi32>
+    vector.store %result, %wide_output[%i] : vector<8xi32>, view<64xi32>
+  }
+  func.return
+}
+
+check.scenario @roundtrip_f32_bf16_values {
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<64xi32>
+    %output = check.generate.fill value(-1) : tensor<192xi32>
+    check.compare<@roundtrip_f32_bf16>(%input, %output) : (tensor<64xi32>, tensor<192xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<192xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1065385952) step(1) : tensor<64xi32>
+    %output = check.generate.fill value(-1) : tensor<192xi32>
+    check.compare<@roundtrip_f32_bf16>(%input, %output) : (tensor<64xi32>, tensor<192xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<192xi32>
+    }
+  }
+  check.return
+}
+
+func.def @roundtrip_f64_f16(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %scalar_step = index.constant 1 : index
+  %packet_step = index.constant 4 : index
+  %wide_step = index.constant 8 : index
+  %packet_base = index.constant 512 : offset
+  %wide_base = index.constant 1024 : offset
+  %nan = scalar.constant 9221120237041090560 : i64
+  %source = buffer.view %input[%base] : buffer -> view<64xf64>
+  %scalar_output = buffer.view %output[%base] : buffer -> view<64xi64>
+  %packet_output = buffer.view %output[%packet_base] : buffer -> view<64xi64>
+  %wide_output = buffer.view %output[%wide_base] : buffer -> view<64xi64>
+  scf.for %i = [%begin to %end step %scalar_step] {
+    %value = view.load %source[%i] : view<64xf64> -> f64
+    %narrow = scalar.fptrunc %value : f64 to f16
+    %wide = scalar.extf %narrow : f16 to f64
+    %bits = scalar.bitcast %wide : f64 to i64
+    %is_nan = scalar.isnanf %wide : f64
+    %result = scf.select %is_nan, %nan, %bits : i64
+    view.store %result, %scalar_output[%i] : i64, view<64xi64>
+  }
+  %packet_nan = vector.splat %nan : vector<4xi64>
+  scf.for %i = [%begin to %end step %packet_step] {
+    %value = vector.load %source[%i] : view<64xf64> -> vector<4xf64>
+    %narrow = vector.fptrunc %value : vector<4xf64> to vector<4xf16>
+    %wide = vector.extf %narrow : vector<4xf16> to vector<4xf64>
+    %bits = vector.bitcast %wide : vector<4xf64> to vector<4xi64>
+    %is_nan = vector.isnanf %wide : vector<4xf64> -> vector<4xi1>
+    %result = vector.select %is_nan, %packet_nan, %bits : vector<4xi64>
+    vector.store %result, %packet_output[%i] : vector<4xi64>, view<64xi64>
+  }
+  %wide_nan = vector.splat %nan : vector<8xi64>
+  scf.for %i = [%begin to %end step %wide_step] {
+    %value = vector.load %source[%i] : view<64xf64> -> vector<8xf64>
+    %narrow = vector.fptrunc %value : vector<8xf64> to vector<8xf16>
+    %wide = vector.extf %narrow : vector<8xf16> to vector<8xf64>
+    %bits = vector.bitcast %wide : vector<8xf64> to vector<8xi64>
+    %is_nan = vector.isnanf %wide : vector<8xf64> -> vector<8xi1>
+    %result = vector.select %is_nan, %wide_nan, %bits : vector<8xi64>
+    vector.store %result, %wide_output[%i] : vector<8xi64>, view<64xi64>
+  }
+  func.return
+}
+
+check.scenario @roundtrip_f64_f16_values {
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-9223372036854775808 to 9223372036854775807) : tensor<64xi64>
+    %output = check.generate.fill value(-1) : tensor<192xi64>
+    check.compare<@roundtrip_f64_f16>(%input, %output) : (tensor<64xi64>, tensor<192xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<192xi64>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(4607184617823272928) step(1) : tensor<64xi64>
+    %output = check.generate.fill value(-1) : tensor<192xi64>
+    check.compare<@roundtrip_f64_f16>(%input, %output) : (tensor<64xi64>, tensor<192xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<192xi64>
+    }
+  }
+  check.return
+}
+
+func.def @roundtrip_f64_f32(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %scalar_step = index.constant 1 : index
+  %packet_step = index.constant 4 : index
+  %wide_step = index.constant 8 : index
+  %packet_base = index.constant 512 : offset
+  %wide_base = index.constant 1024 : offset
+  %nan = scalar.constant 9221120237041090560 : i64
+  %source = buffer.view %input[%base] : buffer -> view<64xf64>
+  %scalar_output = buffer.view %output[%base] : buffer -> view<64xi64>
+  %packet_output = buffer.view %output[%packet_base] : buffer -> view<64xi64>
+  %wide_output = buffer.view %output[%wide_base] : buffer -> view<64xi64>
+  scf.for %i = [%begin to %end step %scalar_step] {
+    %value = view.load %source[%i] : view<64xf64> -> f64
+    %narrow = scalar.fptrunc %value : f64 to f32
+    %wide = scalar.extf %narrow : f32 to f64
+    %bits = scalar.bitcast %wide : f64 to i64
+    %is_nan = scalar.isnanf %wide : f64
+    %result = scf.select %is_nan, %nan, %bits : i64
+    view.store %result, %scalar_output[%i] : i64, view<64xi64>
+  }
+  %packet_nan = vector.splat %nan : vector<4xi64>
+  scf.for %i = [%begin to %end step %packet_step] {
+    %value = vector.load %source[%i] : view<64xf64> -> vector<4xf64>
+    %narrow = vector.fptrunc %value : vector<4xf64> to vector<4xf32>
+    %wide = vector.extf %narrow : vector<4xf32> to vector<4xf64>
+    %bits = vector.bitcast %wide : vector<4xf64> to vector<4xi64>
+    %is_nan = vector.isnanf %wide : vector<4xf64> -> vector<4xi1>
+    %result = vector.select %is_nan, %packet_nan, %bits : vector<4xi64>
+    vector.store %result, %packet_output[%i] : vector<4xi64>, view<64xi64>
+  }
+  %wide_nan = vector.splat %nan : vector<8xi64>
+  scf.for %i = [%begin to %end step %wide_step] {
+    %value = vector.load %source[%i] : view<64xf64> -> vector<8xf64>
+    %narrow = vector.fptrunc %value : vector<8xf64> to vector<8xf32>
+    %wide = vector.extf %narrow : vector<8xf32> to vector<8xf64>
+    %bits = vector.bitcast %wide : vector<8xf64> to vector<8xi64>
+    %is_nan = vector.isnanf %wide : vector<8xf64> -> vector<8xi1>
+    %result = vector.select %is_nan, %wide_nan, %bits : vector<8xi64>
+    vector.store %result, %wide_output[%i] : vector<8xi64>, view<64xi64>
+  }
+  func.return
+}
+
+check.scenario @roundtrip_f64_f32_values {
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-9223372036854775808 to 9223372036854775807) : tensor<64xi64>
+    %output = check.generate.fill value(-1) : tensor<192xi64>
+    check.compare<@roundtrip_f64_f32>(%input, %output) : (tensor<64xi64>, tensor<192xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<192xi64>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(4607182419068452832) step(1) : tensor<64xi64>
+    %output = check.generate.fill value(-1) : tensor<192xi64>
+    check.compare<@roundtrip_f64_f32>(%input, %output) : (tensor<64xi64>, tensor<192xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<192xi64>
+    }
+  }
+  check.return
+}

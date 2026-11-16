@@ -262,6 +262,45 @@ TEST(TargetSpirvVulkaninfoTest, ImportsFloatControls2CoreAndExtensionNames) {
   }
 }
 
+TEST(TargetSpirvVulkaninfoTest,
+     ImportsConversionIdentityWithoutInventingMissingFacts) {
+  auto environment = CreateSpirvTargetEnvironment();
+  for (uint32_t present = 0; present < 8; ++present) {
+    SCOPED_TRACE(present);
+    std::string json = R"({"properties":{"apiVersion":4206592)";
+    if (present & 1) {
+      json += R"(,"vendorID":4318)";
+    }
+    if (present & 2) {
+      json += R"(,"deviceID":9860)";
+    }
+    if (present & 4) {
+      json += R"(,"driverVersion":2497102272)";
+    }
+    json += "}}";
+    auto source = CreateJsonSource("device-identity.json", json.c_str());
+    auto profile =
+        ImportVulkaninfoProfile(environment.get(), source.get(), nullptr);
+    ExpectFeatureState(profile.get(),
+                       LOOMC_SPIRV_FEATURE_FLOAT32_TO_FLOAT16_CONVERSION,
+                       present == 7 ? LOOMC_TARGET_FACT_STATE_FALSE
+                                    : LOOMC_TARGET_FACT_STATE_UNKNOWN);
+    ExpectFeatureState(profile.get(),
+                       LOOMC_SPIRV_FEATURE_FLOAT64_TO_FLOAT16_CONVERSION,
+                       (present & 1) ? LOOMC_TARGET_FACT_STATE_TRUE
+                                     : LOOMC_TARGET_FACT_STATE_UNKNOWN);
+  }
+  const char* available =
+      R"({"properties":{"apiVersion":4206592,"vendorID":4318,
+      "deviceID":9860,"driverVersion":2497102336}})";
+  auto source = CreateJsonSource("other-driver.json", available);
+  auto profile =
+      ImportVulkaninfoProfile(environment.get(), source.get(), nullptr);
+  ExpectFeatureState(profile.get(),
+                     LOOMC_SPIRV_FEATURE_FLOAT32_TO_FLOAT16_CONVERSION,
+                     LOOMC_TARGET_FACT_STATE_TRUE);
+}
+
 TEST(TargetSpirvVulkaninfoTest, ImportsGpuinfoProfileWrapper) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   const std::string json = R"json({
@@ -820,6 +859,31 @@ TEST(TargetSpirvVulkaninfoTest, ReportsMalformedJsonAsResultDiagnostic) {
       loomc_result_diagnostic_at(result_ptr.get(), 0);
   ASSERT_NE(diagnostic, nullptr);
   EXPECT_EQ(diagnostic->range.source, source.get());
+}
+
+TEST(TargetSpirvVulkaninfoTest,
+     ReportsInvalidDeviceIdentityAsResultDiagnostic) {
+  auto environment = CreateSpirvTargetEnvironment();
+  for (const char* field : {"vendorID", "deviceID", "driverVersion"}) {
+    for (const char* value : {"-1", "4294967296", "\"invalid\"", "false"}) {
+      const std::string json =
+          std::string("{\"properties\":{\"") + field + "\":" + value + "}}";
+      SCOPED_TRACE(json);
+      auto source = CreateJsonSource("bad-device-identity.json", json.c_str());
+      loomc_target_profile_t* profile = nullptr;
+      loomc_result_t* result = nullptr;
+      LOOMC_EXPECT_OK(loomc_target_profile_create_spirv_vulkaninfo(
+          environment.get(), source.get(), nullptr, loomc_allocator_system(),
+          &profile, &result));
+      TargetProfilePtr profile_ptr(profile);
+      ResultPtr result_ptr(result);
+      EXPECT_EQ(profile_ptr.get(), nullptr);
+      ExpectFailedResultCode(result_ptr.get(), "SPIRV/VULKANINFO");
+      const auto* diagnostic = loomc_result_diagnostic_at(result_ptr.get(), 0);
+      ASSERT_NE(diagnostic, nullptr);
+      EXPECT_EQ(diagnostic->range.source, source.get());
+    }
+  }
 }
 
 TEST(TargetSpirvVulkaninfoTest, ReportsMissingSelectedProfile) {

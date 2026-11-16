@@ -276,11 +276,16 @@ typedef enum loomc_spirv_feature_e {
   /// 16-bit storage in explicitly laid out Workgroup blocks.
   LOOMC_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR = 63,
 
+  /// Native F32-to-F16 conversion preserves intermediate rounding.
+  LOOMC_SPIRV_FEATURE_FLOAT32_TO_FLOAT16_CONVERSION = 64,
+
   /// Number of public SPIR-V feature identifiers.
-  LOOMC_SPIRV_FEATURE_COUNT = 64,
+  LOOMC_SPIRV_FEATURE_COUNT = 65,
 } loomc_spirv_feature_t;
 
-/// Bitset of `loomc_spirv_feature_t` values.
+/// Bitset of `loomc_spirv_feature_t` values, formed with
+/// `loomc_spirv_feature_bit`. Identifiers 1..63 retain their corresponding
+/// bits; identifier 64 uses bit 0. UNKNOWN has no bit.
 typedef uint64_t loomc_spirv_feature_bits_t;
 
 /// Encodes a SPIR-V binary version word.
@@ -331,7 +336,7 @@ static inline loomc_spirv_feature_bits_t loomc_spirv_feature_bit(
     loomc_spirv_feature_t feature) {
   return feature > LOOMC_SPIRV_FEATURE_UNKNOWN &&
                  feature < LOOMC_SPIRV_FEATURE_COUNT
-             ? (UINT64_C(1) << feature)
+             ? (UINT64_C(1) << ((uint32_t)feature % 64))
              : 0u;
 }
 

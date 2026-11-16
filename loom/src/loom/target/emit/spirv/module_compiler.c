@@ -264,14 +264,6 @@ static iree_status_t loom_spirv_program_build_function(
         loom_diagnostic_export_scope_emitter(&diagnostic_scope), function_op,
         IREE_SV("SPIR-V"), IREE_SV("the SPIR-V binary artifact format"));
   }
-  if (target_bundle->config->contract_feature_bits &
-      ~loom_spirv_known_feature_bits()) {
-    *out_disposition = LOOM_SPIRV_PROGRAM_FUNCTION_REJECTED;
-    return loom_target_artifact_emit_requirement(
-        loom_diagnostic_export_scope_emitter(&diagnostic_scope), function_op,
-        IREE_SV("SPIR-V"), IREE_SV("supported target features"));
-  }
-
   const loom_func_type_data_t* logical_signature = NULL;
   if (target_bundle->export_plan->abi_kind == LOOM_TARGET_ABI_HAL_KERNEL) {
     logical_signature = loom_spirv_program_function_logical_signature(

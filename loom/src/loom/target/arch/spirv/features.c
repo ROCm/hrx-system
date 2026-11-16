@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/base/internal/math.h"
 #include "loom/target/arch/spirv/features_tables.inl"
 
 loom_spirv_feature_bits_t loom_spirv_feature_atom_bit(
@@ -16,7 +17,16 @@ loom_spirv_feature_bits_t loom_spirv_feature_atom_bit(
       atom >= LOOM_SPIRV_FEATURE_ATOM_COUNT) {
     return 0;
   }
-  return UINT64_C(1) << atom;
+  return UINT64_C(1) << ((uint32_t)atom % 64);
+}
+
+loom_spirv_feature_atom_t loom_spirv_feature_bits_first_atom(
+    loom_spirv_feature_bits_t bits) {
+  if (bits == 0) {
+    return LOOM_SPIRV_FEATURE_ATOM_UNKNOWN;
+  }
+  const uint32_t position = iree_math_count_trailing_zeros_u64(bits);
+  return (loom_spirv_feature_atom_t)(position == 0 ? 64 : position);
 }
 
 const loom_spirv_feature_atom_descriptor_t* loom_spirv_feature_atom_descriptor(
