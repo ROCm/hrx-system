@@ -192,3 +192,66 @@ low.func.def target<test.low.core>(@test_target) @physical_returns(%condition: r
 ^right:
   return %right
 }
+
+// ====
+
+// Each incoming shaped result refers to that path's extent. The common return
+// must instantiate its own extent binder rather than retaining either input.
+func.def @shaped_returns(%condition: i1, %left_extent: index, %left: view<[%left_extent]xf32>, %right_extent: index, %right: view<[%right_extent]xf32>) -> (%extent: index, view<[%extent]xf32>) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  func.return %left_extent, %left : index, view<[%left_extent]xf32>
+^right:
+  func.return %right_extent, %right : index, view<[%right_extent]xf32>
+}
+
+// A return may publish the same provider more than once. The result's declared
+// type relationship still belongs to the first extent position.
+func.def @repeated_extent_returns(%condition: i1, %left_extent: index, %left: view<[%left_extent]xf32>, %right_extent: index, %right: view<[%right_extent]xf32>) -> (%extent: index, index, view<[%extent]xf32>) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  func.return %left_extent, %left_extent, %left : index, index, view<[%left_extent]xf32>
+^right:
+  func.return %right_extent, %right_extent, %right : index, index, view<[%right_extent]xf32>
+}
+
+// The shaped value can instead depend on the second published extent. Repeated
+// incoming values must not change which result position owns its type.
+func.def @second_extent_returns(%condition: i1, %left_extent: index, %left: view<[%left_extent]xf32>, %right_extent: index, %right: view<[%right_extent]xf32>) -> (index, %extent: index, view<[%extent]xf32>) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  func.return %left_extent, %left_extent, %left : index, index, view<[%left_extent]xf32>
+^right:
+  func.return %right_extent, %right_extent, %right : index, index, view<[%right_extent]xf32>
+}
+
+// ----
+func.def @shaped_returns(%condition: i1, %left_extent: index, %left: view<[%left_extent]xf32>, %right_extent: index, %right: view<[%right_extent]xf32>) -> (%extent: index, view<[%extent]xf32>) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  cfg.br ^_bb3(%left_extent: index, %left: view<[%left_extent]xf32>)
+^right:
+  cfg.br ^_bb3(%right_extent: index, %right: view<[%right_extent]xf32>)
+^_bb3(%23: index, %24: view<[%23]xf32>):
+  func.return %23, %24 : index, view<[%23]xf32>
+}
+
+func.def @repeated_extent_returns(%condition: i1, %left_extent: index, %left: view<[%left_extent]xf32>, %right_extent: index, %right: view<[%right_extent]xf32>) -> (%extent: index, index, view<[%extent]xf32>) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  cfg.br ^_bb3(%left_extent: index, %left_extent: index, %left: view<[%left_extent]xf32>)
+^right:
+  cfg.br ^_bb3(%right_extent: index, %right_extent: index, %right: view<[%right_extent]xf32>)
+^_bb3(%25: index, %26: index, %27: view<[%25]xf32>):
+  func.return %25, %26, %27 : index, index, view<[%25]xf32>
+}
+
+func.def @second_extent_returns(%condition: i1, %left_extent: index, %left: view<[%left_extent]xf32>, %right_extent: index, %right: view<[%right_extent]xf32>) -> (index, %extent: index, view<[%extent]xf32>) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  cfg.br ^_bb3(%left_extent: index, %left_extent: index, %left: view<[%left_extent]xf32>)
+^right:
+  cfg.br ^_bb3(%right_extent: index, %right_extent: index, %right: view<[%right_extent]xf32>)
+^_bb3(%28: index, %29: index, %30: view<[%29]xf32>):
+  func.return %28, %29, %30 : index, index, view<[%29]xf32>
+}

@@ -1111,8 +1111,8 @@ func.def @disjoint_loop_frontiers(%left: i1, %running: i1, %matched: i1, %early_
 
 // ====
 
-// Shared exit regions are not owned by either loop. A gateway after them would
-// still be shared, so it cannot isolate either loop's exit frontier.
+// Shared branch-only exits first need private incoming edges. Each loop can
+// then publish its result through its own gateway.
 func.def @shared_loop_exit_regions(%left: i1, %running: i1, %matched: i1, %early_value: i32, %fallback: i32) -> (i32) {
   cfg.cond_br %left, ^left_header, ^right_header
 ^left_header:

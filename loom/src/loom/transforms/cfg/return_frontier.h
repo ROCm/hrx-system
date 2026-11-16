@@ -15,9 +15,9 @@ extern "C" {
 #endif
 
 // Joins reachable normal returns when their execution may be
-// subgroup-divergent. The function's declared body terminator owns the result
-// tuple. Branches carry that tuple to one common return, giving every returning
-// lane a real CFG continuation. Uniform returns and abnormal exits remain
+// subgroup-divergent. The callable's result definitions own the join
+// arguments' type scheme. Branches carry each return tuple to that join, giving
+// every returning lane a real CFG continuation. Uniform and abnormal exits stay
 // unchanged. Consumes the current function's CFG/control facts; a changed
 // frontier invalidates them.
 iree_status_t loom_cfg_converge_returns(

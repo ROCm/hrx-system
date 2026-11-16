@@ -50,7 +50,9 @@ iree_status_t loom_cfg_converge_returns(
   loom_builder_t* builder = &rewriter->builder;
   builder->ip.parent_op = function.op;
   loom_builder_set_block(builder, continuation);
-  const loom_value_id_t* values = loom_op_const_operands(first_return);
+  // Result definitions own the positional type scheme. Return operands may
+  // repeat values and cannot define a one-to-one substitution for that scheme.
+  const loom_value_id_t* values = loom_op_const_results(function.op);
   for (uint16_t i = 0; i < first_return->operand_count; ++i) {
     loom_value_id_t argument = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_builder_define_block_arg(
