@@ -10,6 +10,8 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/runtime/service_control.h"
+#include "loom/runtime/service_schedule.h"
 
 namespace {
 
@@ -201,6 +203,111 @@ TEST_F(DriverTest, CurrentSlotCanRetireAndBeRepublished) {
   visits_.clear();
   loom_runtime_driver_advance(&driver_, &progress);
   EXPECT_EQ(visits_, (std::vector<size_t>{2, 0, 1}));
+}
+
+TEST_F(DriverTest, StaleDecisionsSpendBothIndependentRoundBudgets) {
+  std::array<uint64_t, 17> storage;
+  loom_runtime_service_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(loom_runtime_service_plan_initialize(
+      1, iree_make_byte_span(storage.data(), sizeof(storage)), &plan));
+  size_t evaluations = 0;
+  const loom_runtime_service_policy_t policy = {
+      .self = &evaluations,
+      .select =
+          [](void* self, const loom_runtime_driver_t*,
+             loom_runtime_service_schedule_context_t*,
+             loom_runtime_service_plan_t* output) {
+            ++*static_cast<size_t*>(self);
+            loom_runtime_service_plan_reset(output);
+            const loom_runtime_service_decision_t stale = {
+                .service_ordinal = 4,
+                .service_incarnation = 1,
+            };
+            EXPECT_TRUE(loom_runtime_service_plan_append(output, &stale));
+          },
+  };
+  for (const auto initial : {loom_runtime_service_schedule_budget_t{3, 8},
+                             loom_runtime_service_schedule_budget_t{8, 3}}) {
+    auto budget = initial;
+    evaluations = 0;
+    loom_runtime_service_schedule_context_t context = {.now_ns = 123};
+    bool progress = false;
+    loom_runtime_driver_schedule(&driver_, policy, plan, &budget, &context,
+                                 &progress);
+    EXPECT_FALSE(progress);
+    EXPECT_EQ(evaluations, 3u);
+    EXPECT_EQ(budget.evaluations, initial.evaluations - 3);
+    EXPECT_EQ(budget.decisions, initial.decisions - 3);
+    EXPECT_EQ(context.wake_time_ns, context.now_ns);
+    EXPECT_EQ(loom_runtime_service_plan_layout(plan).applied_count, 1u);
+    const auto outcome = loom_runtime_service_plan_outcome(plan, 0);
+    EXPECT_FALSE(outcome.accepted);
+    EXPECT_EQ(outcome.status_code, IREE_STATUS_OK);
+    EXPECT_EQ(outcome.operation.serial, 0u);
+  }
+}
+
+TEST(DriverPolicyTest, FullOutputVisitsPeersBeforeWrappingOffers) {
+  const iree_host_size_t use_capacity = 0;
+  const loom_runtime_service_offer_capacity_t offers[] = {
+      {1, &use_capacity}, {1, &use_capacity}, {1, &use_capacity}};
+  const loom_runtime_service_control_capacity_t capacity = {
+      .offer_capacity = 3,
+      .offers = offers,
+  };
+  iree_host_size_t length = 0;
+  IREE_ASSERT_OK(loom_runtime_service_control_size(&capacity, &length));
+  std::array<std::vector<uint64_t>, 2> controls;
+  std::array<loom_runtime_service_t, 2> slots = {};
+  size_t attempts = 0;
+  const loom_runtime_service_vtable_t vtable = {
+      .try_schedule =
+          [](void* self, loom_runtime_service_offer_key_t, uint64_t,
+             loom_runtime_service_flags_t,
+             loom_runtime_service_schedule_outcome_t* outcome) {
+            ++*static_cast<size_t*>(self);
+            *outcome = {};
+            return iree_ok_status();
+          },
+  };
+  for (size_t i = 0; i < controls.size(); ++i) {
+    controls[i].resize(length / sizeof(uint64_t));
+    loom_runtime_service_control_t* control = nullptr;
+    IREE_ASSERT_OK(loom_runtime_service_control_initialize(
+        &capacity, i + 1, iree_make_byte_span(controls[i].data(), length),
+        &control));
+    slots[i] = {.self = &attempts, .vtable = &vtable, .control = control};
+    for (uint64_t j = 0; j < 3; ++j) {
+      const loom_runtime_service_offer_t offer = {
+          .key = {j, 1},
+          .choice_count = 1,
+      };
+      const loom_runtime_service_choice_publication_t choice = {};
+      loom_runtime_service_publish_offer(control, &offer, &choice);
+    }
+  }
+  loom_runtime_driver_t driver;
+  loom_runtime_driver_initialize(slots.size(), slots.data(), &driver);
+  std::array<uint64_t, 17> storage;
+  loom_runtime_service_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(loom_runtime_service_plan_initialize(
+      1, iree_make_byte_span(storage.data(), sizeof(storage)), &plan));
+  loom_runtime_service_default_policy_t state = {};
+  const auto policy = loom_runtime_service_default_policy(&state);
+  loom_runtime_service_schedule_context_t context = {};
+  // Keep every opportunity offered. A full output must still reach the second
+  // service instead of repeatedly wrapping the first one's three choices.
+  for (uint64_t i = 0; i < 12; ++i) {
+    policy.select(policy.self, &driver, &context, plan);
+    const auto decision = loom_runtime_service_plan_decision(plan, 0);
+    EXPECT_EQ(decision.service_ordinal, (i / 3) % 2);
+    EXPECT_EQ(decision.offer.ordinal, i % 3);
+    EXPECT_EQ(loom_runtime_service_plan_layout(plan).selection_flags,
+              LOOM_RUNTIME_SERVICE_SELECTION_CAPACITY);
+    loom_runtime_service_plan_complete(plan, IREE_STATUS_OK, {});
+  }
+  EXPECT_EQ(attempts, 0u);
+  IREE_EXPECT_OK(driver.status);
 }
 
 TEST(EmptyDriverTest, StopsWithoutWorkOrPolling) {

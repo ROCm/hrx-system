@@ -29,10 +29,22 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "service_schedule",
+    srcs = ["service_schedule.c"],
+    hdrs = ["service_schedule.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":service_control",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "service",
     hdrs = ["service.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":service_control",
         ":wake",
         "//runtime/src/iree/base",
     ],
@@ -45,6 +57,8 @@ loom_cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":service",
+        ":service_control",
+        ":service_schedule",
         ":wake",
         "//runtime/src/iree/base",
     ],
@@ -55,11 +69,13 @@ loom_cc_test(
     srcs = [
         "driver_test.cc",
         "service_control_test.cc",
+        "service_schedule_test.cc",
     ],
     deps = [
         ":driver",
         ":service",
         ":service_control",
+        ":service_schedule",
         ":wake",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",

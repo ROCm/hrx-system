@@ -1092,6 +1092,20 @@ static void loom_service_finite_set_observer(
                                                       observer);
 }
 
+static iree_status_t loom_service_finite_try_schedule(
+    void* self, loom_runtime_service_offer_key_t offer, uint64_t choice_ordinal,
+    loom_runtime_service_flags_t flags,
+    loom_runtime_service_schedule_outcome_t* out_outcome) {
+  loom_runtime_service_operation_key_t operation;
+  iree_status_t status = loom_service_finite_service_try_schedule(
+      self, offer, choice_ordinal, flags, &operation);
+  *out_outcome = (loom_runtime_service_schedule_outcome_t){
+      .accepted = operation.serial != 0,
+      .status_code = iree_status_code(status),
+      .operation = operation};
+  return status;
+}
+
 loom_service_finite_service_interface_t loom_service_finite_service_interface(
     loom_service_finite_service_t* service) {
   static const loom_runtime_service_vtable_t vtable = {
@@ -1100,6 +1114,7 @@ loom_service_finite_service_interface_t loom_service_finite_service_interface(
       .is_pending = loom_service_finite_is_pending,
       .is_active = loom_service_finite_is_active,
       .advance = loom_service_finite_advance,
+      .try_schedule = loom_service_finite_try_schedule,
   };
   return (loom_service_finite_service_interface_t){
       .name = service->name,
@@ -1107,7 +1122,8 @@ loom_service_finite_service_interface_t loom_service_finite_service_interface(
                   .vtable = &vtable,
                   .capacity_domain = loom_runtime_residency_cache(
                       service->generator.vtable->residency(
-                          service->generator.self))},
+                          service->generator.self)),
+                  .control = service->scheduling.binding.control},
       .kind = service->protocol->kind,
       .tokenizer =
           service->generator.vtable->tokenizer(service->generator.self),

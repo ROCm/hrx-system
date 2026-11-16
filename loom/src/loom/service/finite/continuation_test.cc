@@ -26,6 +26,7 @@
 #include "loom/runtime/program/input.h"
 #include "loom/runtime/program/jit.h"
 #include "loom/runtime/program/program.h"
+#include "loom/runtime/service_schedule.h"
 #include "loom/runtime/testing/application.h"
 #include "loom/runtime/testing/jit.h"
 #include "loom/runtime/testing/service_control.h"
@@ -1038,6 +1039,180 @@ TEST_F(FiniteContinuation, FailedReadinessDoesNotCommitPlannedProgress) {
   EXPECT_EQ(source_.released, 2u);
 }
 
+TEST_F(FiniteContinuation, DecisionPrefixResumesWithoutReplayingAcceptedWork) {
+  ASSERT_NO_FATAL_FAILURE(ReleaseGate());
+  ASSERT_NO_FATAL_FAILURE(Open(0, R"({"model":"sum","input":[1,2]})"));
+  std::array<uint64_t, 35> storage;
+  loom_runtime_service_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(loom_runtime_service_plan_initialize(
+      3, iree_make_byte_span(storage.data(), sizeof(storage)), &plan));
+  const uint64_t incarnation =
+      loom_runtime_service_control_layout(scheduling_.binding().control)
+          .incarnation;
+  loom_runtime_service_decision_t decision = {
+      .service_ordinal = 0,
+      .service_incarnation = incarnation + 1,
+      .offer = Offer().key,
+  };
+  ASSERT_TRUE(loom_runtime_service_plan_append(plan, &decision));
+  decision.service_incarnation = incarnation;
+  ASSERT_TRUE(loom_runtime_service_plan_append(plan, &decision));
+  ASSERT_TRUE(loom_runtime_service_plan_append(plan, &decision));
+
+  loom_runtime_service_default_policy_t policy_state = {};
+  const auto policy = loom_runtime_service_default_policy(&policy_state);
+  loom_runtime_service_schedule_context_t context = {.now_ns = iree_time_now()};
+  loom_runtime_service_schedule_budget_t budget = {};
+  bool progress = false;
+  loom_runtime_driver_schedule(&driver_, policy, plan, &budget, &context,
+                               &progress);
+  EXPECT_TRUE(progress);  // Yield the pending suffix to a later owner turn.
+  EXPECT_EQ(context.wake_time_ns, context.now_ns);
+  EXPECT_EQ(loom_runtime_service_plan_layout(plan).applied_count, 0u);
+  EXPECT_EQ(source_.prepared, 0u);
+
+  budget.decisions = 1;
+  loom_runtime_driver_schedule(&driver_, policy, plan, &budget, &context,
+                               &progress);
+  EXPECT_EQ(budget.decisions, 0u);
+  EXPECT_EQ(loom_runtime_service_plan_layout(plan).applied_count, 1u);
+  EXPECT_FALSE(loom_runtime_service_plan_outcome(plan, 0).accepted);
+  EXPECT_EQ(source_.prepared, 0u);
+
+  budget.decisions = 1;
+  loom_runtime_driver_schedule(&driver_, policy, plan, &budget, &context,
+                               &progress);
+  EXPECT_EQ(loom_runtime_service_plan_layout(plan).applied_count, 2u);
+  const auto preparation = loom_runtime_service_plan_outcome(plan, 1);
+  ASSERT_TRUE(preparation.accepted);
+  EXPECT_NE(preparation.operation.serial, 0u);
+  ASSERT_NO_FATAL_FAILURE(ProgressUntil(
+      [&] { return Offer().work == LOOM_RUNTIME_SERVICE_WORK_EXECUTION; }));
+  EXPECT_EQ(source_.prepared, 1u);
+  EXPECT_EQ(source_.submissions, 0u);
+  const auto execution = Offer();
+
+  // Accepted preparation completed at zero new-work budget. The old duplicate
+  // now spends its own attempt without starting the newly offered execution.
+  budget.decisions = 1;
+  loom_runtime_driver_schedule(&driver_, policy, plan, &budget, &context,
+                               &progress);
+  EXPECT_EQ(loom_runtime_service_plan_layout(plan).applied_count, 3u);
+  EXPECT_FALSE(loom_runtime_service_plan_outcome(plan, 2).accepted);
+  EXPECT_EQ(loom_runtime_service_plan_outcome(plan, 1).operation.serial,
+            preparation.operation.serial);
+  EXPECT_EQ(Offer().key.revision, execution.key.revision);
+  EXPECT_EQ(source_.submissions, 0u);
+
+  // An explicitly empty result ends evaluation even with remaining capacity.
+  const loom_runtime_service_policy_t defer = {
+      .select =
+          [](void*, const loom_runtime_driver_t*,
+             loom_runtime_service_schedule_context_t*,
+             loom_runtime_service_plan_t* output) {
+            loom_runtime_service_plan_reset(output);
+          },
+  };
+  budget = {.evaluations = 4, .decisions = 4};
+  loom_runtime_driver_schedule(&driver_, defer, plan, &budget, &context,
+                               &progress);
+  EXPECT_FALSE(progress);
+  EXPECT_EQ(budget.evaluations, 3u);
+  EXPECT_EQ(budget.decisions, 4u);
+  EXPECT_EQ(context.wake_time_ns, IREE_TIME_INFINITE_FUTURE);
+  EXPECT_EQ(source_.submissions, 0u);
+
+  budget = {.evaluations = 1, .decisions = 1};
+  loom_runtime_driver_schedule(&driver_, policy, plan, &budget, &context,
+                               &progress);
+  EXPECT_EQ(budget.evaluations, 0u);
+  EXPECT_EQ(budget.decisions, 0u);
+  ASSERT_TRUE(loom_runtime_service_plan_outcome(plan, 0).accepted);
+  ASSERT_NO_FATAL_FAILURE(ProgressUntil(
+      [&] { return loom_service_finite_call_is_complete(calls_[0]); }));
+  IREE_ASSERT_OK(loom_service_finite_call_status(calls_[0]));
+  EXPECT_FLOAT_EQ(Read(0), 3.0f);
+  EXPECT_EQ(source_.prepared, 1u);
+  EXPECT_EQ(source_.submissions, 1u);
+}
+
+TEST_F(FiniteContinuation, PolicyDeadlineWakesWithoutAnotherRequest) {
+  ASSERT_NO_FATAL_FAILURE(ReleaseGate());
+  ASSERT_NO_FATAL_FAILURE(Open(0, R"({"model":"sum","input":[20,21]})"));
+  std::array<uint64_t, 17> storage;
+  loom_runtime_service_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(loom_runtime_service_plan_initialize(
+      1, iree_make_byte_span(storage.data(), sizeof(storage)), &plan));
+  struct Policy {
+    // Native traversal state after the intentional first-request deferral.
+    loom_runtime_service_default_policy_t traversal = {};
+    // Batching deadline chosen on the first evaluation, never extended.
+    iree_time_t deadline_ns = 0;
+    // First invocation permitted to emit work.
+    iree_time_t granted_ns = 0;
+    // Number of empty decisions before the deadline.
+    size_t deferrals = 0;
+  } state;
+  const loom_runtime_service_policy_t policy = {
+      .self = &state,
+      .select =
+          [](void* self, const loom_runtime_driver_t* driver,
+             loom_runtime_service_schedule_context_t* context,
+             loom_runtime_service_plan_t* output) {
+            auto& state = *static_cast<Policy*>(self);
+            if (!state.deadline_ns) {
+              state.deadline_ns = context->now_ns + iree_make_duration_ms(1);
+            }
+            if (context->now_ns < state.deadline_ns) {
+              loom_runtime_service_plan_reset(output);
+              context->wake_time_ns = state.deadline_ns;
+              ++state.deferrals;
+              return;
+            }
+            if (!state.granted_ns) {
+              state.granted_ns = context->now_ns;
+            }
+            const auto select =
+                loom_runtime_service_default_policy(&state.traversal);
+            select.select(select.self, driver, context, output);
+          },
+  };
+
+  // The embedding owner integrates the returned policy deadline with the same
+  // notification that carries real service/resource readiness. No extra
+  // request, polling timeout, timer thread, or automatic start supplies a wake.
+  bool complete = false;
+  while (!complete) {
+    const auto ticket = iree_notification_prepare_wait(&notification_);
+    auto status = loom_runtime_device_group_advance(group_);
+    bool progress = false;
+    status = iree_status_join(
+        status, loom_service_finite_service_progress(service_, 0, &progress));
+    loom_runtime_service_schedule_context_t context = {
+        .now_ns = iree_time_now(),
+    };
+    loom_runtime_service_schedule_budget_t budget = {2, 2};
+    bool scheduled = false;
+    loom_runtime_driver_schedule(&driver_, policy, plan, &budget, &context,
+                                 &scheduled);
+    status = iree_status_join(status, iree_status_clone(driver_.status));
+    complete = loom_service_finite_call_is_complete(calls_[0]);
+    if (complete || progress || scheduled || !iree_status_is_ok(status)) {
+      iree_notification_cancel_wait(&notification_);
+    } else {
+      iree_notification_commit_wait(&notification_, ticket, IREE_DURATION_ZERO,
+                                    context.wake_time_ns);
+    }
+    IREE_ASSERT_OK(status);
+  }
+  EXPECT_GT(state.deferrals, 0u);
+  EXPECT_GE(state.granted_ns, state.deadline_ns);
+  EXPECT_EQ(source_.prepared, 1u);
+  EXPECT_EQ(source_.submissions, 1u);
+  IREE_ASSERT_OK(loom_service_finite_call_status(calls_[0]));
+  EXPECT_FLOAT_EQ(Read(0), 41.0f);
+}
+
 TEST_F(FiniteContinuation, FailedStartRetainsItsAcceptedOperation) {
   source_.submission =
       ContinuingSource::Submission::kRejectTimestampAfterDispatch;
@@ -1054,9 +1229,30 @@ TEST_F(FiniteContinuation, FailedStartRetainsItsAcceptedOperation) {
       [&] { return Offer().work == LOOM_RUNTIME_SERVICE_WORK_EXECUTION; }));
   offer = Offer();
   const auto before = loom_runtime_execution_frontier(source_.execution);
+  std::array<uint64_t, 17> storage;
+  loom_runtime_service_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(loom_runtime_service_plan_initialize(
+      1, iree_make_byte_span(storage.data(), sizeof(storage)), &plan));
+  const loom_runtime_service_decision_t decision = {
+      .service_ordinal = 0,
+      .service_incarnation =
+          loom_runtime_service_control_layout(control).incarnation,
+      .offer = offer.key,
+  };
+  ASSERT_TRUE(loom_runtime_service_plan_append(plan, &decision));
+  uint64_t decisions = 1;
+  bool progress = false;
+  loom_runtime_driver_apply_plan(&driver_, plan, &decisions, &progress);
+  EXPECT_TRUE(progress);
+  EXPECT_EQ(decisions, 0u);
+  EXPECT_EQ(loom_runtime_service_plan_layout(plan).applied_count, 1u);
+  const auto outcome = loom_runtime_service_plan_outcome(plan, 0);
+  EXPECT_TRUE(outcome.accepted);
+  EXPECT_EQ(outcome.status_code, IREE_STATUS_INVALID_ARGUMENT);
+  EXPECT_TRUE(driver_.stopping);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_service_finite_service_try_schedule(
-                            service_, offer.key, 0, 0, &accepted));
+                        iree_status_clone(driver_.status));
+  accepted = outcome.operation;
   EXPECT_NE(accepted.serial, 0u);
   const auto after = loom_runtime_execution_frontier(source_.execution);
   EXPECT_GT(after.values[0], before.values[0]);

@@ -293,6 +293,7 @@ loom_cc_library(
         ":batch",
         "//loom/src/loom/runtime:driver",
         "//loom/src/loom/runtime:service_control",
+        "//loom/src/loom/runtime:service_schedule",
         "//loom/src/loom/runtime/device",
         "//loom/src/loom/runtime/execution",
         "//loom/src/loom/runtime/execution:dispatch",

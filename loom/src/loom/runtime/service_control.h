@@ -74,6 +74,17 @@ typedef struct loom_runtime_service_operation_key_t {
   uint64_t serial;
 } loom_runtime_service_operation_key_t;
 
+// Portable result of one attempted choice. The status object stays with its
+// actual error owner; only its numeric code enters scheduling/telemetry data.
+typedef struct loom_runtime_service_schedule_outcome_t {
+  // Acceptance is independent of status: a failed submission can own work.
+  bool accepted;
+  // Numeric status from this attempt, including an error after acceptance.
+  iree_status_code_t status_code;
+  // Accepted lifetime, or zero when no obligation was accepted.
+  loom_runtime_service_operation_key_t operation;
+} loom_runtime_service_schedule_outcome_t;
+
 typedef uint64_t loom_runtime_service_work_flags_t;
 enum loom_runtime_service_work_flag_bits_e {
   LOOM_RUNTIME_SERVICE_WORK_PREPARATION = 1u << 0,

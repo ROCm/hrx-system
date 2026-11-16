@@ -7,6 +7,7 @@
 #define LOOM_RUNTIME_SERVICE_H_
 
 #include "iree/base/api.h"
+#include "loom/runtime/service_control.h"
 #include "loom/runtime/wake.h"
 
 #ifdef __cplusplus
@@ -53,6 +54,17 @@ typedef struct loom_runtime_service_vtable_t {
   // Even after failure, is_pending governs release of service storage.
   iree_status_t (*advance)(void* self, loom_runtime_service_flags_t flags,
                            bool* out_progress);
+  // Claims one advertised source unit without waiting for capacity or device
+  // completion. Present when the capability publishes a control. The outcome
+  // always reports this attempt's acceptance and numeric error, including a
+  // partial submission failure. The returned status follows the composition's
+  // failure boundary: a lifecycle may retain a model-local error and return OK
+  // while still reporting that error in the outcome. Stale choices return an
+  // unaccepted OK outcome. Accepted work retains its independent progress path.
+  iree_status_t (*try_schedule)(
+      void* self, loom_runtime_service_offer_key_t offer,
+      uint64_t choice_ordinal, loom_runtime_service_flags_t flags,
+      loom_runtime_service_schedule_outcome_t* out_outcome);
 } loom_runtime_service_vtable_t;
 
 // Borrowed service capability. Its composition retains both the implementation
@@ -69,6 +81,10 @@ typedef struct loom_runtime_service_t {
   // equal non-NULL identities can provide SHARED_ACTIVITY to each other; NULL
   // means this service has no shared-capacity relationship.
   const void* capacity_domain;
+  // Borrowed explicit-scheduling observations, or NULL when no such capability
+  // is published. The composition joins policy readers before replacing this
+  // binding. A non-NULL control always has a matching try_schedule method.
+  const loom_runtime_service_control_t* control;
 } loom_runtime_service_t;
 
 #ifdef __cplusplus
