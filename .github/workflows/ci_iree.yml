@@ -647,8 +647,8 @@ jobs:
           )
           arguments = ci.parse_arguments([
               "iree-bazel-amdgpu", "--amdgpu-target", "gfx120X-all",
-              "--target", "//loom/target/amdgpu/test/corpus:"
-              "numeric_vector_packed_selection_test_execute_amd_gpu_hardware_test",
+              "--target", "//loom/src/loom/tooling/execution/hal:"
+              "hardware_test_execute_amd_gpu_hardware_test",
               "--bazel-test-results-dir", str(results),
           ])
           steps = ci.steps_from_args(arguments)
@@ -661,6 +661,7 @@ jobs:
           )
           steps[1] = replace(test, argv=test.argv[:4] + (
               "--nocache_test_results", "--test_output=all",
+              "--test_arg=--execution-progress",
               "--strip=never",
               "--host_per_file_copt=.*(gpu/code_queue|gpu/user_queue|"
               "kfd/user_queue|kfd/user_queue_native|kfd/event)\\.c@-g,-O0",

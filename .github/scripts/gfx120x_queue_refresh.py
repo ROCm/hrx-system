@@ -29,9 +29,14 @@ def read_identity(name):
         return "unreadable: " + str(error)
 
 
-def candidate_kernel(release, version, taint):
-    # Packaged and unidentified modules cannot inherit the host's fix history.
-    if version is not None or taint is None or "O" in taint:
+def candidate_driver(release, version, taint):
+    if version is not None:
+        # AMD's fourth component identifies the packaged release independently
+        # of its kernel base. Release 31.60 is the first with MES mode 2.
+        match = re.fullmatch(r"\d+\.\d+\.\d+\.(\d+)", version)
+        return match is not None and 0 < int(match[1]) < 31600000
+    # Unidentified out-of-tree modules cannot inherit the host's fix history.
+    if taint is None or "O" in taint:
         return False
     if taint.startswith("unreadable:"):
         return False
@@ -47,7 +52,7 @@ identity = {
     "srcversion": read_identity("srcversion"),
     "taint": read_identity("taint"),
 }
-eligible = candidate_kernel(identity["release"], identity["version"], identity["taint"])
+eligible = candidate_driver(identity["release"], identity["version"], identity["taint"])
 report("identity", **identity, candidate=eligible)
 
 # All of this state belongs to the debugger. The inferior retains its normal
@@ -117,6 +122,8 @@ class PublicationEntry(gdb.Breakpoint):
             "start": time.monotonic(),
         }
         publication_count += 1
+        if publication_count == 1:
+            report("first-publication", **snapshot(active))
         self.enabled = False
         native_wait.enabled = True
         PublicationReturn()
@@ -156,7 +163,8 @@ def refresh():
     # this callback requires joined execution and is not a live-queue API.
     payload = struct.pack(
         "<QIIII",
-        int(native["ring"]["device_address"]),
+        int(native["ring"]["device_address"])
+        + int(native["plan"]["ring"]["primary_byte_offset"]),
         int(native["queue_identifier"]),
         int(native["plan"]["ring"]["primary_byte_length"]),
         100,
