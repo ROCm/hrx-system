@@ -465,6 +465,38 @@ TEST_F(AqlLifecycleTest, NativeStopReleasesAnUnpublishedRun) {
   EXPECT_TRUE(iree_hal_amd_gpu_signal_pool_has_available(&signal_pool_));
 }
 
+TEST_F(AqlLifecycleTest, FailedProducerWithdrawsBeforeNativeCapacityReturns) {
+  struct Observation {
+    // Borrowed public timeline whose failure precedes native-cell reuse.
+    iree_hal_semaphore_t* semaphore;
+    // Number of returned-capacity notifications during failed retirement.
+    uint32_t count = 0;
+  } observation{semaphore_};
+  signal_pool_.notification = {
+      [](void* user_data) {
+        auto* observation = static_cast<Observation*>(user_data);
+        uint64_t value = 0;
+        IREE_EXPECT_STATUS_IS(
+            IREE_STATUS_ABORTED,
+            iree_hal_semaphore_query(observation->semaphore, &value));
+        ++observation->count;
+      },
+      &observation,
+  };
+  Capture();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_publish_signal(
+      semaphore_, signal_value_, readers_[0], &capture_->signal_producers[0]));
+  // Remove the independent fixture reader so retirement really returns the
+  // cell. A retained observer would conceal an early native-owner release.
+  iree_hal_amd_gpu_signal_release(readers_[0]);
+  readers_[0] = nullptr;
+  FailIssued();
+  StopAndRetire();
+  EXPECT_EQ(observation.count, 1u);
+  EXPECT_EQ(destroyed_, 6u);
+  ExpectFailed();
+}
+
 TEST_F(AqlLifecycleTest, UnpublishedSuffixRetainsItsIndependentHostOwnership) {
   Capture(true);
   FailIssued();
@@ -483,11 +515,12 @@ TEST_F(AqlLifecycleTest, PublicationFailureRetiresWithoutSignalingSuccess) {
   Capture(false, rejected_signal);
   EnableNativeCompletion();
   IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_publish_signal(
-      semaphore_, signal_value_, readers_[0]));
+      semaphore_, signal_value_, readers_[0], &capture_->signal_producers[0]));
   iree_hal_semaphore_fail(rejected_signal,
                           iree_status_from_code(IREE_STATUS_ABORTED));
   iree_status_t status = iree_hal_amd_gpu_semaphore_publish_signal(
-      rejected_signal, signal_value_, readers_[0]);
+      rejected_signal, signal_value_, readers_[0],
+      &capture_->signal_producers[1]);
   EXPECT_EQ(iree_status_code(status), IREE_STATUS_ABORTED);
   iree_hal_amd_gpu_aql_submission_fail(capture_, status);
   iree_status_free(status);

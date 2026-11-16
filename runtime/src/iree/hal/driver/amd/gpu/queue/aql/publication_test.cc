@@ -36,6 +36,10 @@ class AqlPublicationTest
     iree_hal_amd_gpu_signal_block_t block = {};
     // Host ownership for native completion descriptors.
     std::array<iree_hal_amd_gpu_signal_t, 128> signals = {};
+    // Stable borrowed records for externally published native producers.
+    std::array<iree_hal_amd_gpu_semaphore_producer_t, 128> publications = {};
+    // Timelines owned by the fixture until these producers retire.
+    std::array<iree_hal_semaphore_t*, 128> semaphores = {};
     // Coherent native completion allocation.
     std::array<iree_hal_amd_gpu_aql_signal_t, 128> values = {};
     // Two-queue causal vectors owned by the allocation.
@@ -106,17 +110,26 @@ class AqlPublicationTest
   void TearDown() override {
     ASSERT_EQ(iree_hal_amd_gpu_aql_publish_run(&queue_), AMDF_STATUS_OK);
     for (auto* signal : other_producers_) {
-      iree_hal_amd_gpu_signal_retire(signal, IREE_STATUS_OK);
+      const size_t index = signal - signals_[1].signals.data();
+      iree_hal_semaphore_fail(signals_[1].semaphores[index],
+                              iree_status_from_code(IREE_STATUS_CANCELLED));
+      iree_hal_amd_gpu_semaphore_unpublish_signal(
+          signals_[1].semaphores[index], &signals_[1].publications[index]);
+      iree_hal_amd_gpu_signal_retire(signal, IREE_STATUS_CANCELLED);
       iree_hal_amd_gpu_signal_release(signal);
     }
     const uint64_t count =
         iree_atomic_load(&queue_.producer.count, iree_memory_order_acquire);
     for (uint64_t i = 0; i < count; ++i) {
       auto& action = issued_[i];
+      // Packet verification does not execute these captures. Cancellation
+      // covers their public predicates before the final owner withdraws them.
+      iree_hal_amd_gpu_aql_submission_reject(action.submission,
+                                             IREE_STATUS_CANCELLED);
       iree_hal_amd_gpu_aql_submission_release_payload(action.submission);
-      iree_hal_amd_gpu_signal_retire(action.signal, IREE_STATUS_OK);
-      iree_hal_amd_gpu_signal_release(action.signal);
+      iree_hal_amd_gpu_signal_retire(action.signal, IREE_STATUS_CANCELLED);
       iree_hal_amd_gpu_aql_submission_release(action.submission);
+      iree_hal_amd_gpu_signal_release(action.signal);
     }
     iree_hal_amd_gpu_kernarg_layout_free(cooperative_layout_);
     for (auto* semaphore : semaphores_) {
@@ -188,6 +201,14 @@ class AqlPublicationTest
         proactor_, nullptr, 0, 2, iree_allocator_system(), &semaphore));
     semaphores_.push_back(semaphore);
     return semaphore;
+  }
+
+  iree_status_t PublishOther(iree_hal_semaphore_t* semaphore,
+                             iree_hal_amd_gpu_signal_t* signal) {
+    const size_t index = signal - signals_[1].signals.data();
+    signals_[1].semaphores[index] = semaphore;
+    return iree_hal_amd_gpu_semaphore_publish_signal(
+        semaphore, 1, signal, &signals_[1].publications[index]);
   }
 
   void Publish(iree_hal_semaphore_t* output,
@@ -670,8 +691,7 @@ TEST_P(AqlPublicationTest, TerminalReleasePreservesForeignWaitsAndAcquires) {
     const uint64_t frontier[2] = {0, static_cast<uint64_t>(i + 1)};
     iree_hal_amd_gpu_signal_publish_frontier(signal, frontier);
     auto* semaphore = Semaphore();
-    IREE_ASSERT_OK(
-        iree_hal_amd_gpu_semaphore_publish_signal(semaphore, 1, signal));
+    IREE_ASSERT_OK(PublishOther(semaphore, signal));
     waits.push_back({.semaphore = semaphore, .value = 1});
   }
   request_.function = nullptr;
@@ -744,8 +764,7 @@ TEST_P(AqlPublicationTest, EmitsOnlyRequiredDependenciesAndCacheBoundaries) {
     const uint64_t frontier[2] = {0, static_cast<uint64_t>(i + 1)};
     iree_hal_amd_gpu_signal_publish_frontier(signal, frontier);
     auto* semaphore = Semaphore();
-    IREE_ASSERT_OK(
-        iree_hal_amd_gpu_semaphore_publish_signal(semaphore, 1, signal));
+    IREE_ASSERT_OK(PublishOther(semaphore, signal));
     waits.push_back({.semaphore = semaphore, .value = 1});
   }
   waits.push_back({.semaphore = second, .value = 1});

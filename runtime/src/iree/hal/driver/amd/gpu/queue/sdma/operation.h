@@ -104,6 +104,8 @@ typedef struct iree_hal_amd_gpu_sdma_operation_t {
   iree_hal_amd_gpu_sdma_pending_t* pending;
   // Retained public outputs and copied values.
   iree_hal_semaphore_list_t signals;
+  // Borrowed semaphore index records, owned through native producer retirement.
+  iree_hal_amd_gpu_semaphore_producer_t* signal_producers;
   // Native producer for eligible outputs, or NULL for host-only completion.
   iree_hal_amd_gpu_signal_t* signal;
   // Queue-local list link used only while waiting for native backing growth.

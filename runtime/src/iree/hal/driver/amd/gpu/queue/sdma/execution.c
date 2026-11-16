@@ -369,7 +369,8 @@ static void iree_hal_amd_gpu_sdma_accepted(void* user_data) {
       if (iree_hal_amd_gpu_semaphore_isa(operation->signals.semaphores[i])) {
         status = iree_hal_amd_gpu_semaphore_publish_signal(
             operation->signals.semaphores[i],
-            operation->signals.payload_values[i], operation->signal);
+            operation->signals.payload_values[i], operation->signal,
+            &operation->signal_producers[i]);
       }
     }
     if (!iree_status_is_ok(status)) {

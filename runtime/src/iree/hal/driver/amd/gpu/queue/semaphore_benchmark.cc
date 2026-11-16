@@ -63,10 +63,11 @@ BENCHMARK(BM_CompletedWait);
 void BM_NativeWait(benchmark::State& state) {
   Storage storage;
   auto* signal = iree_hal_amd_gpu_signal_pool_try_acquire(&storage.pool, 0);
+  iree_hal_amd_gpu_semaphore_producer_t producer = {};
   const uint64_t frontier = 1;
   iree_hal_amd_gpu_signal_publish_frontier(signal, &frontier);
-  IREE_CHECK_OK(
-      iree_hal_amd_gpu_semaphore_publish_signal(storage.semaphore, 1, signal));
+  IREE_CHECK_OK(iree_hal_amd_gpu_semaphore_publish_signal(storage.semaphore, 1,
+                                                          signal, &producer));
   for (auto _ : state) {
     iree_hal_amd_gpu_semaphore_wait_t wait;
     IREE_CHECK_OK(iree_hal_amd_gpu_semaphore_acquire_wait(storage.semaphore, 1,
@@ -74,6 +75,9 @@ void BM_NativeWait(benchmark::State& state) {
     benchmark::DoNotOptimize(wait);
     iree_hal_amd_gpu_signal_release(wait.signal);
   }
+  IREE_CHECK_OK(iree_hal_amd_gpu_semaphore_publish_completed(storage.semaphore,
+                                                             1, nullptr));
+  iree_hal_amd_gpu_semaphore_unpublish_signal(storage.semaphore, &producer);
   iree_hal_amd_gpu_signal_release(signal);
   state.SetItemsProcessed(state.iterations());
 }
@@ -94,15 +98,17 @@ void BM_Lifecycle(benchmark::State& state) {
   uint64_t value = 0;
   for (auto _ : state) {
     ++value;
+    iree_hal_amd_gpu_semaphore_producer_t producer = {};
     auto* signal = iree_hal_amd_gpu_signal_pool_try_acquire(&storage.pool, 0);
     iree_hal_amd_gpu_signal_publish_frontier(signal, &value);
-    IREE_CHECK_OK(iree_hal_amd_gpu_semaphore_publish_signal(storage.semaphore,
-                                                            value, signal));
+    IREE_CHECK_OK(iree_hal_amd_gpu_semaphore_publish_signal(
+        storage.semaphore, value, signal, &producer));
     iree_hal_amd_gpu_semaphore_wait_t wait;
     IREE_CHECK_OK(iree_hal_amd_gpu_semaphore_acquire_wait(
         storage.semaphore, value, &storage, &wait));
     IREE_CHECK_OK(iree_hal_amd_gpu_semaphore_publish_completed(
         storage.semaphore, value, nullptr));
+    iree_hal_amd_gpu_semaphore_unpublish_signal(storage.semaphore, &producer);
     iree_hal_amd_gpu_signal_release(signal);
     iree_hal_amd_gpu_signal_release(wait.signal);
   }

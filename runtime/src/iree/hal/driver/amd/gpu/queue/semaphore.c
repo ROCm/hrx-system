@@ -18,13 +18,12 @@ typedef struct iree_hal_amd_gpu_submission_semaphore_t {
 typedef struct iree_hal_amd_gpu_semaphore_t {
   // Completed timeline, frontier, failure, and asynchronous host waits.
   iree_async_semaphore_t async;
-  // Highest published native producer, protected by async.mutex.
-  struct {
-    // Timeline value covered by the cached producer, or zero when empty.
-    uint64_t value;
-    // Owned reference, independent of producer and consumer executions.
-    iree_hal_amd_gpu_signal_t* signal;
-  } submitted;
+  // Highest native publication value; availability never regresses.
+  uint64_t submitted_value;
+  // Borrowed live producer index, protected by async.mutex.
+  iree_hal_amd_gpu_semaphore_producer_t* producers;
+  // Borrowed most recently published producer for the ordinary chain path.
+  iree_hal_amd_gpu_semaphore_producer_t* latest_producer;
   // Owned availability view constructed in this object's trailing allocation.
   iree_hal_semaphore_t* submission_semaphore;
   // Enables availability publication after first acquisition, under
@@ -85,7 +84,8 @@ static void iree_hal_amd_gpu_semaphore_destroy(
     iree_async_semaphore_t* base_semaphore) {
   iree_hal_amd_gpu_semaphore_t* semaphore =
       (iree_hal_amd_gpu_semaphore_t*)base_semaphore;
-  iree_hal_amd_gpu_signal_release(semaphore->submitted.signal);
+  IREE_ASSERT(!semaphore->producers,
+              "producer captures retain their semaphore");
   iree_async_semaphore_deinitialize(&semaphore->async);
   // The availability view may outlive the public owner. Its last reference
   // releases the common allocation; no parent access follows this release.
@@ -118,10 +118,168 @@ static uint64_t iree_hal_amd_gpu_semaphore_query(
                                     iree_memory_order_acquire);
 }
 
-// Returns covered cache ownership before delivering submission notifications.
+// Live producer storage belongs to captures, so publication cannot fail for
+// index allocation and completion does not leave historical native cells
+// pinned.
+static uint32_t iree_hal_amd_gpu_producer_height(
+    const iree_hal_amd_gpu_semaphore_producer_t* producer) {
+  return producer ? producer->height : 0;
+}
+
+static void iree_hal_amd_gpu_producer_update(
+    iree_hal_amd_gpu_semaphore_producer_t* producer) {
+  producer->height =
+      1 + iree_max(iree_hal_amd_gpu_producer_height(producer->left),
+                   iree_hal_amd_gpu_producer_height(producer->right));
+}
+
+static void iree_hal_amd_gpu_producer_replace(
+    iree_hal_amd_gpu_semaphore_t* semaphore,
+    iree_hal_amd_gpu_semaphore_producer_t* previous,
+    iree_hal_amd_gpu_semaphore_producer_t* replacement) {
+  if (!previous->parent) {
+    semaphore->producers = replacement;
+  } else if (previous->parent->left == previous) {
+    previous->parent->left = replacement;
+  } else {
+    previous->parent->right = replacement;
+  }
+  if (replacement) {
+    replacement->parent = previous->parent;
+  }
+}
+
+static iree_hal_amd_gpu_semaphore_producer_t* iree_hal_amd_gpu_producer_rotate(
+    iree_hal_amd_gpu_semaphore_t* semaphore,
+    iree_hal_amd_gpu_semaphore_producer_t* producer, bool left) {
+  iree_hal_amd_gpu_semaphore_producer_t* next =
+      left ? producer->right : producer->left;
+  iree_hal_amd_gpu_producer_replace(semaphore, producer, next);
+  if (left) {
+    producer->right = next->left;
+    if (producer->right) {
+      producer->right->parent = producer;
+    }
+    next->left = producer;
+  } else {
+    producer->left = next->right;
+    if (producer->left) {
+      producer->left->parent = producer;
+    }
+    next->right = producer;
+  }
+  producer->parent = next;
+  iree_hal_amd_gpu_producer_update(producer);
+  iree_hal_amd_gpu_producer_update(next);
+  return next;
+}
+
+static void iree_hal_amd_gpu_producer_balance(
+    iree_hal_amd_gpu_semaphore_t* semaphore,
+    iree_hal_amd_gpu_semaphore_producer_t* producer) {
+  while (producer) {
+    iree_hal_amd_gpu_producer_update(producer);
+    const int32_t balance =
+        (int32_t)iree_hal_amd_gpu_producer_height(producer->left) -
+        (int32_t)iree_hal_amd_gpu_producer_height(producer->right);
+    if (balance > 1) {
+      if (iree_hal_amd_gpu_producer_height(producer->left->left) <
+          iree_hal_amd_gpu_producer_height(producer->left->right)) {
+        iree_hal_amd_gpu_producer_rotate(semaphore, producer->left, true);
+      }
+      producer = iree_hal_amd_gpu_producer_rotate(semaphore, producer, false);
+    } else if (balance < -1) {
+      if (iree_hal_amd_gpu_producer_height(producer->right->right) <
+          iree_hal_amd_gpu_producer_height(producer->right->left)) {
+        iree_hal_amd_gpu_producer_rotate(semaphore, producer->right, false);
+      }
+      producer = iree_hal_amd_gpu_producer_rotate(semaphore, producer, true);
+    }
+    producer = producer->parent;
+  }
+}
+
+static iree_hal_amd_gpu_semaphore_producer_t* iree_hal_amd_gpu_producer_find(
+    iree_hal_amd_gpu_semaphore_t* semaphore, uint64_t value) {
+  iree_hal_amd_gpu_semaphore_producer_t* producer = semaphore->latest_producer;
+  if (producer && producer->value == value) {
+    return producer;
+  }
+  producer = semaphore->producers;
+  while (producer && producer->value != value) {
+    producer = value < producer->value ? producer->left : producer->right;
+  }
+  return producer;
+}
+
+static void iree_hal_amd_gpu_producer_insert(
+    iree_hal_amd_gpu_semaphore_t* semaphore, uint64_t value,
+    iree_hal_amd_gpu_signal_t* signal,
+    iree_hal_amd_gpu_semaphore_producer_t* producer) {
+  iree_hal_amd_gpu_semaphore_producer_t* parent = NULL;
+  iree_hal_amd_gpu_semaphore_producer_t** link = &semaphore->producers;
+  while (*link) {
+    parent = *link;
+    // Repeated output values share the first published native predicate.
+    if (parent->value == value) {
+      return;
+    }
+    link = value < parent->value ? &parent->left : &parent->right;
+  }
+  *producer = (iree_hal_amd_gpu_semaphore_producer_t){
+      .parent = parent, .value = value, .signal = signal, .height = 1};
+  *link = producer;
+  semaphore->latest_producer = producer;
+  iree_hal_amd_gpu_producer_balance(semaphore, parent);
+}
+
+void iree_hal_amd_gpu_semaphore_unpublish_signal(
+    iree_hal_semaphore_t* base_semaphore,
+    iree_hal_amd_gpu_semaphore_producer_t* producer) {
+  iree_hal_amd_gpu_semaphore_t* semaphore =
+      iree_hal_amd_gpu_semaphore_cast(base_semaphore);
+  iree_slim_mutex_lock(&semaphore->async.mutex);
+  if (producer->signal) {
+    IREE_ASSERT((uint64_t)iree_atomic_load(&semaphore->async.timeline_value,
+                                           iree_memory_order_acquire) >=
+                        producer->value ||
+                    iree_atomic_load(&semaphore->async.failure_status,
+                                     iree_memory_order_acquire),
+                "producer withdrawal requires public completion or failure");
+    iree_hal_amd_gpu_semaphore_producer_t* parent = producer->parent;
+    if (producer->left && producer->right) {
+      iree_hal_amd_gpu_semaphore_producer_t* next = producer->right;
+      while (next->left) {
+        next = next->left;
+      }
+      if (next->parent != producer) {
+        parent = next->parent;
+        iree_hal_amd_gpu_producer_replace(semaphore, next, next->right);
+        next->right = producer->right;
+        next->right->parent = next;
+      } else {
+        parent = next;
+      }
+      iree_hal_amd_gpu_producer_replace(semaphore, producer, next);
+      next->left = producer->left;
+      next->left->parent = next;
+      next->height = producer->height;
+    } else {
+      iree_hal_amd_gpu_producer_replace(
+          semaphore, producer,
+          producer->left ? producer->left : producer->right);
+    }
+    if (semaphore->latest_producer == producer) {
+      semaphore->latest_producer = NULL;
+    }
+    producer->signal = NULL;
+    iree_hal_amd_gpu_producer_balance(semaphore, parent);
+  }
+  iree_slim_mutex_unlock(&semaphore->async.mutex);
+}
+
 // The enclosing call retains the parent, so its availability view can be
-// borrowed after unlocking. Cell release and callback dispatch never hold this
-// mutex.
+// borrowed after unlocking. Callback dispatch never holds this mutex.
 static iree_status_t iree_hal_amd_gpu_semaphore_update_submission(
     iree_hal_amd_gpu_semaphore_t* semaphore) {
   iree_slim_mutex_lock(&semaphore->async.mutex);
@@ -129,18 +287,10 @@ static iree_status_t iree_hal_amd_gpu_semaphore_update_submission(
                                               iree_memory_order_acquire);
   iree_status_t failure = (iree_status_t)iree_atomic_load(
       &semaphore->async.failure_status, iree_memory_order_acquire);
-  iree_hal_amd_gpu_signal_t* released_signal = NULL;
-  if (value >= semaphore->submitted.value) {
-    released_signal = semaphore->submitted.signal;
-    semaphore->submitted.value = 0;
-    semaphore->submitted.signal = NULL;
-  } else {
-    value = semaphore->submitted.value;
-  }
+  value = iree_max(value, semaphore->submitted_value);
   iree_hal_semaphore_t* submission_semaphore =
       semaphore->submission_observed ? semaphore->submission_semaphore : NULL;
   iree_slim_mutex_unlock(&semaphore->async.mutex);
-  iree_hal_amd_gpu_signal_release(released_signal);
   if (IREE_UNLIKELY(!iree_status_is_ok(failure))) {
     return iree_status_clone(failure);
   }
@@ -177,15 +327,16 @@ iree_status_t iree_hal_amd_gpu_semaphore_acquire_wait(
         &semaphore->async.timeline_value, iree_memory_order_acquire);
     if (current_value >= minimum_value) {
       out_wait->state = IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_COMPLETED;
-    } else if (semaphore->submitted.value >= minimum_value) {
-      // A later producer may depend on this consumer. Only the exact requested
-      // point can replace the public timeline with a native dependency.
-      if (semaphore->submitted.value == minimum_value &&
-          semaphore->submitted.signal->block->domain == domain) {
+    } else if (semaphore->submitted_value >= minimum_value) {
+      iree_hal_amd_gpu_semaphore_producer_t* producer =
+          iree_hal_amd_gpu_producer_find(semaphore, minimum_value);
+      if (producer && producer->signal->block->domain == domain) {
         out_wait->state = IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE;
-        out_wait->signal = semaphore->submitted.signal;
+        out_wait->signal = producer->signal;
         iree_hal_amd_gpu_signal_retain(out_wait->signal);
       } else {
+        // A later producer may depend on this consumer. Missing exact values
+        // and foreign native domains keep the original timeline predicate.
         out_wait->state = IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_HOST;
       }
     }
@@ -196,26 +347,22 @@ iree_status_t iree_hal_amd_gpu_semaphore_acquire_wait(
 
 iree_status_t iree_hal_amd_gpu_semaphore_publish_signal(
     iree_hal_semaphore_t* base_semaphore, uint64_t value,
-    iree_hal_amd_gpu_signal_t* signal) {
+    iree_hal_amd_gpu_signal_t* signal,
+    iree_hal_amd_gpu_semaphore_producer_t* producer) {
   iree_hal_amd_gpu_semaphore_t* semaphore =
       iree_hal_amd_gpu_semaphore_cast(base_semaphore);
-  iree_hal_amd_gpu_signal_t* released_signal = NULL;
   iree_slim_mutex_lock(&semaphore->async.mutex);
   const uint64_t current_value = (uint64_t)iree_atomic_load(
       &semaphore->async.timeline_value, iree_memory_order_acquire);
   iree_status_t failure = (iree_status_t)iree_atomic_load(
       &semaphore->async.failure_status, iree_memory_order_acquire);
-  if (iree_status_is_ok(failure) && value > current_value &&
-      value > semaphore->submitted.value) {
-    iree_hal_amd_gpu_signal_retain(signal);
-    released_signal = semaphore->submitted.signal;
-    semaphore->submitted.value = value;
-    semaphore->submitted.signal = signal;
+  if (iree_status_is_ok(failure) && value > current_value) {
+    iree_hal_amd_gpu_producer_insert(semaphore, value, signal, producer);
+    semaphore->submitted_value = iree_max(semaphore->submitted_value, value);
   }
   iree_hal_semaphore_t* submission_semaphore =
       semaphore->submission_observed ? semaphore->submission_semaphore : NULL;
   iree_slim_mutex_unlock(&semaphore->async.mutex);
-  iree_hal_amd_gpu_signal_release(released_signal);
   if (IREE_UNLIKELY(!iree_status_is_ok(failure))) {
     return iree_status_clone(failure);
   }
@@ -283,12 +430,8 @@ static void iree_hal_amd_gpu_semaphore_on_fail(
   iree_hal_amd_gpu_semaphore_t* semaphore =
       (iree_hal_amd_gpu_semaphore_t*)base_semaphore;
   iree_slim_mutex_lock(&semaphore->async.mutex);
-  iree_hal_amd_gpu_signal_t* released_signal = semaphore->submitted.signal;
-  semaphore->submitted.value = 0;
-  semaphore->submitted.signal = NULL;
   iree_hal_semaphore_t* submission_semaphore = semaphore->submission_semaphore;
   iree_slim_mutex_unlock(&semaphore->async.mutex);
-  iree_hal_amd_gpu_signal_release(released_signal);
   if (submission_semaphore) {
     iree_status_t failure = (iree_status_t)iree_atomic_load(
         &semaphore->async.failure_status, iree_memory_order_acquire);
@@ -296,17 +439,18 @@ static void iree_hal_amd_gpu_semaphore_on_fail(
   }
 }
 
-// A later cached producer may require host work performed after this wait.
+// A later producer may require host work performed after this wait.
 // Only the exact requested value can accelerate a synchronous host wait.
 static iree_hal_amd_gpu_signal_t*
 iree_hal_amd_gpu_semaphore_acquire_host_wait_signal(
     iree_hal_amd_gpu_semaphore_t* semaphore, uint64_t value) {
   iree_hal_amd_gpu_signal_t* signal = NULL;
   iree_slim_mutex_lock(&semaphore->async.mutex);
-  if (semaphore->submitted.value == value && semaphore->submitted.signal &&
-      semaphore->submitted.signal->block->domain ==
-          semaphore->wait_context->domain) {
-    signal = semaphore->submitted.signal;
+  iree_hal_amd_gpu_semaphore_producer_t* producer =
+      iree_hal_amd_gpu_producer_find(semaphore, value);
+  if (producer &&
+      producer->signal->block->domain == semaphore->wait_context->domain) {
+    signal = producer->signal;
     iree_hal_amd_gpu_signal_retain(signal);
   }
   iree_slim_mutex_unlock(&semaphore->async.mutex);

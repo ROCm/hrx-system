@@ -95,8 +95,9 @@ static uint64_t iree_hal_amd_gpu_aql_retire_run(
           &queue->base, action->submission, iree_status_clone(status));
     }
     iree_hal_amd_gpu_signal_retire(action->signal, code);
-    iree_hal_amd_gpu_signal_release(action->signal);
+    // Producer associations borrow the native signal through capture release.
     iree_hal_amd_gpu_aql_submission_release(action->submission);
+    iree_hal_amd_gpu_signal_release(action->signal);
   }
   iree_status_free(status);
   iree_atomic_store(&queue->completed.arguments,
@@ -273,8 +274,9 @@ bool iree_hal_amd_gpu_aql_retirement_poll(
                                                  status);
     }
     iree_hal_amd_gpu_signal_retire(action->signal, code);
-    iree_hal_amd_gpu_signal_release(action->signal);
+    // Producer associations borrow the native signal through capture release.
     iree_hal_amd_gpu_aql_submission_release(submission);
+    iree_hal_amd_gpu_signal_release(action->signal);
     iree_atomic_store(&queue->completed.count, position + 1,
                       iree_memory_order_release);
     IREE_TRACE_ZONE_END(z0);

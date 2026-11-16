@@ -68,8 +68,8 @@ bool iree_hal_amd_gpu_aql_queue_retire_failed(iree_hal_queue_t* base,
       iree_hal_amd_gpu_aql_submission_release_payload(submission);
     }
     iree_hal_amd_gpu_signal_retire(action->signal, code);
-    iree_hal_amd_gpu_signal_release(action->signal);
     iree_hal_amd_gpu_aql_submission_release(submission);
+    iree_hal_amd_gpu_signal_release(action->signal);
     iree_atomic_store(&queue->completed.arguments, arguments,
                       iree_memory_order_release);
     iree_atomic_store(&queue->completed.count, position + 1,

@@ -168,7 +168,8 @@ static void iree_hal_amd_gpu_aql_accept(
       if (iree_hal_amd_gpu_semaphore_isa(submission->signals.semaphores[i])) {
         iree_status_t status = iree_hal_amd_gpu_semaphore_publish_signal(
             submission->signals.semaphores[i],
-            submission->signals.payload_values[i], signal);
+            submission->signals.payload_values[i], signal,
+            &submission->signal_producers[i]);
         if (!iree_status_is_ok(status)) {
           iree_hal_amd_gpu_aql_queue_fail_submission(&queue->base, submission,
                                                      status);

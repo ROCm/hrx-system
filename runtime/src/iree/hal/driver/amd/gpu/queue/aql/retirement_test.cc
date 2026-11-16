@@ -506,8 +506,9 @@ TEST_F(AqlRetirementTest, ForeignOutcomePrecedesSharedRunRetirement) {
       iree_hal_amd_gpu_signal_pool_try_acquire(&signals_[1].cache.pool, 1);
   ASSERT_NE(producer, nullptr);
   readers_.push_back(producer);
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_semaphore_publish_signal(foreign, 1, producer));
+  iree_hal_amd_gpu_semaphore_producer_t publication = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_publish_signal(foreign, 1, producer,
+                                                           &publication));
   Publish(output, 1, foreign, 1);
   for (uint64_t value = 2; value <= 8; ++value) {
     ASSERT_NO_FATAL_FAILURE(Publish(output, value, output, value - 1));
@@ -518,7 +519,9 @@ TEST_F(AqlRetirementTest, ForeignOutcomePrecedesSharedRunRetirement) {
   uint64_t value = UINT64_MAX;
   IREE_ASSERT_OK(iree_hal_semaphore_query(output, &value));
   EXPECT_EQ(value, 0u);
+  iree_hal_semaphore_fail(foreign, iree_status_from_code(IREE_STATUS_ABORTED));
   iree_hal_amd_gpu_signal_retire(producer, IREE_STATUS_ABORTED);
+  iree_hal_amd_gpu_semaphore_unpublish_signal(foreign, &publication);
   ASSERT_TRUE(Poll());
   ExpectRetired(1, IREE_STATUS_ABORTED);
   EXPECT_GT(diagnostics_, 0u);
