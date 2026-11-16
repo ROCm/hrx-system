@@ -521,16 +521,6 @@ func.def target(@target) @vector_f64_requires_target_features(%lhs: f64, %rhs: f
 
 spirv.target<vulkan1_3> @target
 
-func.def target(@target) @index_constants_reject_negative_underflow() -> (index) {
-  // ERROR@+1: TARGET/005 {op_name="index.constant", subject_name="value", minimum="-2147483648", maximum="2147483647"}
-  %underflow = index.constant -2147483649 : index
-  func.return %underflow : index
-}
-
-// ====
-
-spirv.target<vulkan1_3> @target
-
 // Required single-rounding FMA cannot become separate multiply and add.
 func.def target(@target) @explicit_fma_requires_fused_instruction(%a: f32, %b: f32, %c: f32) -> (f32) {
   // ERROR@+1: TARGET/003 {op_name="scalar.fmaf", subject_role="descriptor", subject_name="spirv.op_fma.f32", constraint_key="descriptor_available"}

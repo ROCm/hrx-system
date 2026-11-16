@@ -313,13 +313,59 @@ def test_nonhomomorphic_index_rules_guard_projected_source_widths() -> None:
         (index.index_shrsi, {(0, signed32, 32)}),
     ):
         for rule in _rules_for_source_op(compiled, source_op):
+            if _rule_descriptor_keys(compiled, rule) in (
+                ("amdgpu.s_ashr_i64",),
+                ("amdgpu.v_ashrrev_i64",),
+            ):
+                continue
+            if source_op is index.index_shrsi and any(
+                "lshr" in key for key in _rule_descriptor_keys(compiled, rule)
+            ):
+                assert _operand_width_guards(compiled, rule) == {
+                    (0, GuardKind.VALUE_UNSIGNED_BIT_COUNT, 32),
+                }
+                continue
             assert _operand_width_guards(compiled, rule) == expected_guards
             assert _lhs_range_guards(compiled, rule) == set()
     for rule in _rules_for_source_op(compiled, index.index_shrui):
-        assert _operand_width_guards(compiled, rule) == set()
-        assert _lhs_range_guards(compiled, rule) == {
-            (0, -(2**31), (2**32) - 1),
-        }
+        if _rule_descriptor_keys(compiled, rule) in (
+            ("amdgpu.s_lshr_b64",),
+            ("amdgpu.v_lshrrev_b64",),
+        ):
+            continue
+        assert _operand_width_guards(compiled, rule) in (
+            {(0, GuardKind.VALUE_SIGNED_BIT_COUNT, 32)},
+            {(0, GuardKind.VALUE_UNSIGNED_BIT_COUNT, 32)},
+        )
+        assert _lhs_range_guards(compiled, rule) == set()
+
+
+def test_wide_index_shifts_preserve_the_input_for_narrow_results() -> None:
+    covered = set()
+    for rule in AMDGPU_INTEGER_CONTRACT_FRAGMENT.cases:
+        wide_inputs = [
+            guard.materializer
+            for guard in rule.guards
+            if guard.kind is GuardKind.VALUE_MATERIALIZABLE
+            and guard.field == "lhs"
+            and guard.materializer in ("wide_index_sgpr", "wide_index_vgpr")
+        ]
+        if not wide_inputs:
+            continue
+        result_units = [
+            guard.count
+            for guard in rule.guards
+            if guard.kind is GuardKind.LOW_VALUE_REGISTER_UNIT_COUNT
+            and guard.field == "result"
+        ]
+        assert len(result_units) == 1
+        covered.add((rule.source_op, wide_inputs[0], result_units[0]))
+    assert covered == {
+        (source_op, materializer, result_units)
+        for source_op in (index.index_shrui, index.index_shrsi)
+        for materializer in ("wide_index_sgpr", "wide_index_vgpr")
+        for result_units in (1, 2)
+    }
 
 
 def test_index_bit_operations_cover_scalar_and_vector_registers() -> None:
@@ -694,6 +740,8 @@ def test_integer_extrema_rules_prefer_encoded_constants() -> None:
             (f"amdgpu.v_{suffix}.lit",),
             (f"amdgpu.s_{suffix}",),
             (f"amdgpu.v_{suffix}",),
+            (f"amdgpu.v_{suffix}",),
+            (f"amdgpu.v_{suffix}",),
         )
 
 
@@ -759,7 +807,56 @@ def test_scalar_i32_bitwise_rules_prefer_encoded_constants() -> None:
             (f"amdgpu.v_{suffix}.lit",),
             (f"amdgpu.s_{suffix}",),
             (f"amdgpu.v_{suffix}",),
+            (f"amdgpu.v_{suffix}",),
+            (f"amdgpu.v_{suffix}",),
         )
+
+
+def test_scalar_i32_binary_rules_preserve_uniform_operand_positions() -> None:
+    compiled = _COMPILED_INTEGER_RULES
+    for source_op, suffix in (
+        (scalar_arithmetic.scalar_addi, "add_u32"),
+        (scalar_arithmetic.scalar_subi, "sub_u32"),
+        (scalar_arithmetic.scalar_muli, "mul_lo_u32"),
+        (scalar_arithmetic.scalar_minsi, "min_i32"),
+        (scalar_arithmetic.scalar_maxsi, "max_i32"),
+        (scalar_arithmetic.scalar_minui, "min_u32"),
+        (scalar_arithmetic.scalar_maxui, "max_u32"),
+        (scalar_bitwise.scalar_andi, "and_b32"),
+        (scalar_bitwise.scalar_ori, "or_b32"),
+        (scalar_bitwise.scalar_xori, "xor_b32"),
+    ):
+        rules = tuple(
+            rule
+            for rule in _rules_for_source_op(compiled, source_op)
+            if set(_rule_type_patterns(compiled, rule)) == {Scalar("i32")}
+            and _rule_descriptor_keys(compiled, rule) == (f"amdgpu.v_{suffix}",)
+        )
+        expected_sources = ((0, 1),)
+        if source_op is not scalar_arithmetic.scalar_subi:
+            expected_sources += ((1, 0),)
+        assert len(rules) == len(expected_sources) + 1
+        for rule, order in zip(rules[:-1], expected_sources, strict=True):
+            emit = compiled.emits[rule.emit_start]
+            sources = compiled.value_refs[
+                emit.operand_ref_start : emit.operand_ref_start + emit.operand_ref_count
+            ]
+            assert tuple(source.index for source in sources) == order
+            assert all(source.materializer_index != 0 for source in sources)
+            guards = compiled.guards[
+                rule.guard_start : rule.guard_start + rule.guard_count
+            ]
+            assert any(
+                guard.kind is GuardKind.LOW_VALUE_REGISTER_CLASS
+                and compiled.value_refs[guard.value_ref_index].kind
+                is SourceValueKind.OPERAND
+                and compiled.value_refs[guard.value_ref_index].index == order[0]
+                and AMDGPU_INTEGER_CONTRACT_FRAGMENT.descriptor_set.reg_classes[
+                    guard.register_class_id
+                ].name
+                == "amdgpu.sgpr"
+                for guard in guards
+            )
 
 
 def test_vector_i32_constants_prefer_inline_without_changing_operand_storage() -> None:

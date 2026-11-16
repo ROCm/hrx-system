@@ -33,11 +33,10 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 0
 ^_bb2:
   %43 = v_lshlrev_b32_src0_inline %item, 2
   %value = global_load_b32_saddr %43, %input
-  %45 = v_mov_b32 128
-  %result = v_add_u32 %value, %45
+  %result = v_add_u32 %width, %value
   global_store_b32_saddr %43, %result, %output
-  %48 = v_add_u32 %width, %item
-  low.br ^_bb1(%48: reg<amdgpu.vgpr>)
+  %47 = v_add_u32 %width, %item
+  low.br ^_bb1(%47: reg<amdgpu.vgpr>)
 ^_bb3:
   s_mov_b64_exec %40
   return
@@ -67,8 +66,8 @@ pipeline.def<kernel> public target(@target) @retained_helper() run(%output: view
 
 // ----
 low.func.def noinline target<amdgpu.rdna3.core> @adjust(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %24 = v_mov_b32 32
-  %result = v_add_u32 %value, %24
+  %increment = s_mov_b32 32
+  %result = v_add_u32 %increment, %value
   return %result
 }
 
@@ -76,7 +75,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 0
   %value = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %result = low.func.call pure @adjust(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
-  %29 = v_lshlrev_b32_src0_inline %value, 2
-  global_store_b32_saddr %29, %result, %output
+  %28 = v_lshlrev_b32_src0_inline %value, 2
+  global_store_b32_saddr %28, %result, %output
   return
 }

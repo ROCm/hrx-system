@@ -275,12 +275,13 @@ func.def @dependent_shape(%extent: index, %values: vector<2x[%extent]xi16>, %row
 
 // ----
 func.def @dependent_shape(%extent: index, %values: vector<2x[%extent]xi16>, %row: index, %column: index) -> (f16) {
-  %7 = index.constant 2 : index
-  %14 = index.madd %row, %7, %column : index
-  %10 = index.rem %14, %extent : index
-  %11 = index.div %14, %extent : index
-  %12 = vector.extract %values[%11, %10] : vector<2x[%extent]xi16> -> i16
-  %result = scalar.bitcast %12 : i16 to f16
+  %7 = index.assume %column [range(%column, 0, 1)] : index
+  %8 = index.constant 2 : index
+  %15 = index.madd %row, %8, %7 : index
+  %11 = index.rem %15, %extent : index
+  %12 = index.div %15, %extent : index
+  %13 = vector.extract %values[%12, %11] : vector<2x[%extent]xi16> -> i16
+  %result = scalar.bitcast %13 : i16 to f16
   func.return %result : f16
 }
 

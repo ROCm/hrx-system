@@ -12,6 +12,7 @@ func.def @offset_counter(%lower: offset, %upper: offset, %step: offset, %initial
 
 // ----
 low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @offset_counter(%lower: reg<amdgpu.vgpr x2>, %upper: reg<amdgpu.vgpr x2>, %positive_step: reg<amdgpu.vgpr x2>, %initial: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %increment = s_mov_b32 1
   %28 = s_mov_b64_exec_read
   low.br ^_bb1(%lower: reg<amdgpu.vgpr x2>, %initial: reg<amdgpu.vgpr>)
 ^_bb1(%iv: reg<amdgpu.vgpr x2>, %count: reg<amdgpu.vgpr>):
@@ -19,16 +20,15 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @offset_counter(%lower:
   %29, %30 = s_and_saveexec_b64 %27
   low.cond_br %30, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %31 = v_mov_b32 1
-  %next = v_add_u32 %count, %31
-  %33 = slice %iv[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %34 = slice %iv[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %35 = slice %positive_step[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %36 = slice %positive_step[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %37, %38 = v_add_co_u32 %33, %35
-  %39, %40 = v_add_co_ci_u32 %34, %36, %38
-  %41 = concat(%37, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  low.br ^_bb1(%41: reg<amdgpu.vgpr x2>, %next: reg<amdgpu.vgpr>)
+  %next = v_add_u32 %increment, %count
+  %32 = slice %iv[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %33 = slice %iv[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %34 = slice %positive_step[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %35 = slice %positive_step[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %36, %37 = v_add_co_u32 %32, %34
+  %38, %39 = v_add_co_ci_u32 %33, %35, %37
+  %40 = concat(%36, %38) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^_bb1(%40: reg<amdgpu.vgpr x2>, %next: reg<amdgpu.vgpr>)
 ^_bb3:
   s_mov_b64_exec %28
   return %count

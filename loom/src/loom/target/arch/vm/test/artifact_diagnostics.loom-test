@@ -1,5 +1,30 @@
 // RUN: emit vm-dis
 
+// A requested kernel cannot silently disappear from an otherwise empty image.
+vm.target<core> @target
+
+// ERROR@+1: BACKEND/055 {format="VM", constraint="host functions instead of kernel entry points"}
+low.kernel.def target<vm.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @entry() asm {
+  return
+}
+
+// ====
+
+// Retained helpers do not make a missing dispatch entry a usable artifact.
+vm.target<core> @target
+
+low.func.def target<vm.core>(@target) @helper() asm {
+  return
+}
+
+// ERROR@+1: BACKEND/055 {format="VM", constraint="host functions instead of kernel entry points"}
+low.kernel.def target<vm.core>(@target) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @entry() asm {
+  low.func.call @helper() : ()
+  return
+}
+
+// ====
+
 vm.target<core> @target
 
 // ERROR@+1: BACKEND/055 {format="VM", export="untyped", constraint="signature fields carrying scalar, managed reference, or native span types"}

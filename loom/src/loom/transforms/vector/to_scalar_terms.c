@@ -11,6 +11,7 @@
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/index/ops.h"
+#include "loom/transforms/vector/index_bounds.h"
 #include "loom/transforms/vector/to_scalar_lanes.h"
 
 //===----------------------------------------------------------------------===//
@@ -377,6 +378,10 @@ static iree_status_t loom_vector_to_scalar_linear_ordinal_dynamic(
       &state->rewriter->builder, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
       state->location, 0, &ordinal));
   for (uint8_t axis = 0; axis < indices.rank; ++axis) {
+    loom_value_id_t coordinate = indices.dynamic_indices[axis];
+    IREE_RETURN_IF_ERROR(loom_vector_assume_axis_index(
+        state->rewriter, state->vector_type, axis, 1, coordinate,
+        state->location, &coordinate));
     if (axis > 0) {
       loom_value_id_t dim = LOOM_VALUE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_vector_to_scalar_dim_bound(
@@ -386,8 +391,8 @@ static iree_status_t loom_vector_to_scalar_linear_ordinal_dynamic(
           &ordinal));
     }
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_index_binary(
-        state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD, ordinal,
-        indices.dynamic_indices[axis], &ordinal));
+        state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD, ordinal, coordinate,
+        &ordinal));
   }
   *out_ordinal = ordinal;
   return iree_ok_status();
@@ -504,6 +509,13 @@ iree_status_t loom_vector_to_scalar_linear_ordinal_term(
   loom_vector_to_scalar_index_term_t ordinal =
       loom_vector_to_scalar_static_term(0);
   for (uint8_t axis = 0; axis < indices.rank; ++axis) {
+    loom_vector_to_scalar_index_term_t coordinate =
+        loom_vector_to_scalar_lane_term(state, indices, axis);
+    if (coordinate.is_dynamic && indices.rank > 1) {
+      IREE_RETURN_IF_ERROR(loom_vector_assume_axis_index(
+          state->rewriter, vector_type, axis, 1, coordinate.dynamic_value,
+          state->location, &coordinate.dynamic_value));
+    }
     if (axis > 0) {
       IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
           state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_MUL, ordinal,
@@ -511,8 +523,8 @@ iree_status_t loom_vector_to_scalar_linear_ordinal_term(
           &ordinal));
     }
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_build_term_binary(
-        state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD, ordinal,
-        loom_vector_to_scalar_lane_term(state, indices, axis), &ordinal));
+        state, LOOM_VECTOR_TO_SCALAR_INDEX_BINARY_ADD, ordinal, coordinate,
+        &ordinal));
   }
   *out_ordinal = ordinal;
   return iree_ok_status();

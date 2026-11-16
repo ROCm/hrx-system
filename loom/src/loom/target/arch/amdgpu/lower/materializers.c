@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include "loom/codegen/low/builder.h"
+#include "loom/ops/index/carrier.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/lower/bitpack.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
@@ -255,7 +256,17 @@ loom_type_t loom_amdgpu_materialized_sgpr64_address_type(
       LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2);
 }
 
-iree_status_t loom_amdgpu_prepare_sgpr64_address(
+loom_type_t loom_amdgpu_materialized_vgpr64_address_type(
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan) {
+  (void)plan;
+  (void)source_value;
+  return loom_low_register_type(
+      loom_low_lower_context_descriptor_set(context)->stable_id,
+      LOOM_AMDGPU_REG_CLASS_ID_VGPR, 2);
+}
+
+iree_status_t loom_amdgpu_prepare_address_pair(
     loom_low_lower_context_t* context, loom_value_id_t source_value,
     const void** out_plan) {
   static const loom_amdgpu_integer_operand_form_t kForms[] = {
@@ -279,6 +290,15 @@ iree_status_t loom_amdgpu_emit_prepared_sgpr64_address(
     loom_value_id_t* out_low_value) {
   return loom_amdgpu_lookup_or_materialize_integer_operand(
       context, source_op, source_value, LOOM_AMDGPU_REG_CLASS_ID_SGPR,
+      *(const loom_amdgpu_integer_operand_form_t*)plan, out_low_value);
+}
+
+iree_status_t loom_amdgpu_emit_prepared_vgpr64_address(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, const void* plan,
+    loom_value_id_t* out_low_value) {
+  return loom_amdgpu_lookup_or_materialize_integer_operand(
+      context, source_op, source_value, LOOM_AMDGPU_REG_CLASS_ID_VGPR,
       *(const loom_amdgpu_integer_operand_form_t*)plan, out_low_value);
 }
 
@@ -545,6 +565,24 @@ iree_status_t loom_amdgpu_value_can_materialize_as_sgpr_address_compare(
       *out_can_materialize &&
       !loom_amdgpu_address_comparison_needs_pair(
           module, loom_low_lower_context_fact_table(context), source_op);
+  return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_value_can_materialize_as_wide_index(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t value_id, bool* out_can_materialize) {
+  const loom_value_facts_t facts = loom_value_fact_table_lookup(
+      loom_low_lower_context_fact_table(context), value_id);
+  *out_can_materialize = false;
+  const int32_t bitwidth = loom_index_facts_carrier_bitwidth(facts, 32, 64);
+  if (bitwidth != 0) {
+    *out_can_materialize = bitwidth == 64;
+    return iree_ok_status();
+  }
+  loom_type_t low_type = loom_type_none();
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_map_value(context, source_op, value_id, &low_type));
+  *out_can_materialize = loom_low_register_type_unit_count(low_type) == 2;
   return iree_ok_status();
 }
 

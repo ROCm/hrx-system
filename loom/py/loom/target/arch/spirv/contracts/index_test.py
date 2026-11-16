@@ -88,6 +88,20 @@ def test_index_conversion_contract_contains_only_boundary_operations() -> None:
     }
 
 
+def test_index_constants_cover_both_ends_of_each_signed_carrier() -> None:
+    ranges = {
+        (guard.minimum, guard.maximum)
+        for rule in SPIRV_INDEX_CONVERSION_RULES
+        if rule.source_op is index.index_constant
+        and _value_type_element(rule, "result") == "index"
+        for guard in rule.guards
+        if guard.kind is GuardKind.I64_RANGE
+    }
+    assert ranges == {
+        (-(1 << (width - 1)), (1 << (width - 1)) - 1) for width in (32, 64)
+    }
+
+
 def test_index_cast_contract_covers_every_address_boundary_pair() -> None:
     scalar_types = {"i1", "i8", "i16", "i32", "i64", "index", "offset"}
     address_types = {"index", "offset"}

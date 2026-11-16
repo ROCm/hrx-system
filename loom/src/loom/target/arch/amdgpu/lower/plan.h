@@ -442,6 +442,9 @@ typedef enum loom_amdgpu_address_i64_alu_kind_e {
   LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_SHL = 5,
   LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_MADD_LO = 6,
   LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_MUL_LO = 7,
+  LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_SUB = 8,
+  LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_MADD_LO = 9,
+  LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_SHL = 10,
 } loom_amdgpu_address_i64_alu_kind_t;
 
 // Selected numeric transport for a one- or two-word integer operand. Pair

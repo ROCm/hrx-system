@@ -647,9 +647,9 @@ static iree_status_t loom_target_low_legality_verify_index_value_carrier(
   if (iree_string_view_is_empty(subject_name)) {
     subject_name = IREE_SV("value");
   }
-  const int64_t minimum = native_bitwidth == 64
+  const int64_t minimum = maximum_bitwidth == 64
                               ? INT64_MIN
-                              : -(INT64_C(1) << (native_bitwidth - 1));
+                              : -(INT64_C(1) << (maximum_bitwidth - 1));
   const int64_t maximum =
       maximum_bitwidth == 64 ? INT64_MAX
                              : (int64_t)((UINT64_C(1) << maximum_bitwidth) - 1);

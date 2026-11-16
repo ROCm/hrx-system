@@ -10,17 +10,19 @@ func.def @refined_matrix(%a: i32, %b: i32, %c: i32, %d: i32, %rows: index, %colu
 
 // ----
 func.def @refined_matrix(%a: i32, %b: i32, %c: i32, %d: i32, %rows: index, %columns: index, %row: index, %column: index) -> (i32) {
-  %12 = index.constant 2 : index
-  %24 = index.madd %row, %12, %column : index
-  %15 = index.constant 1 : index
-  %16 = index.cmp eq, %24, %15 : index
-  %17 = scf.select %16, %b, %a : i32
-  %18 = index.constant 2 : index
-  %19 = index.cmp eq, %24, %18 : index
-  %20 = scf.select %19, %c, %17 : i32
-  %21 = index.constant 3 : index
-  %22 = index.cmp eq, %24, %21 : index
-  %result = scf.select %22, %d, %20 : i32
+  %12 = index.assume %row [range(%row, 0, 1)] : index
+  %13 = index.assume %column [range(%column, 0, 1)] : index
+  %14 = index.constant 2 : index
+  %26 = index.madd %12, %14, %13 : index
+  %17 = index.constant 1 : index
+  %18 = index.cmp eq, %26, %17 : index
+  %19 = scf.select %18, %b, %a : i32
+  %20 = index.constant 2 : index
+  %21 = index.cmp eq, %26, %20 : index
+  %22 = scf.select %21, %c, %19 : i32
+  %23 = index.constant 3 : index
+  %24 = index.cmp eq, %26, %23 : index
+  %result = scf.select %24, %d, %22 : i32
   func.return %result : i32
 }
 

@@ -342,14 +342,14 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0,
   %138, %139 = s_and_b64_scc %more, %137
   low.cond_br %139, ^body, ^_bb5 : reg<amdgpu.scc>
 ^body:
-  %141 = v_mov_b32 4294967295
-  %next = v_add_u32 %remaining, %141
-  %144 = v_mov_b32_copy %106
-  %146 = v_mov_b32_copy %107
-  %147 = concat(%144, %146) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %149 = v_mov_b32_copy %109
-  %152 = concat(%149, %146) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  low.br ^loop(%next: reg<amdgpu.vgpr>, %147: reg<amdgpu.vgpr x2>, %152: reg<amdgpu.vgpr x2>)
+  %140 = s_mov_b32 4294967295
+  %next = v_add_u32 %140, %remaining
+  %143 = v_mov_b32_copy %106
+  %145 = v_mov_b32_copy %107
+  %146 = concat(%143, %145) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %148 = v_mov_b32_copy %109
+  %151 = concat(%148, %145) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^loop(%next: reg<amdgpu.vgpr>, %146: reg<amdgpu.vgpr x2>, %151: reg<amdgpu.vgpr x2>)
 ^_bb5:
   s_mov_b64_exec %104
   low.br ^exit
