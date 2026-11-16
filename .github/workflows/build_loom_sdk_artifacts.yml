@@ -72,6 +72,7 @@ jobs:
             g++-13 patchelf p7zip-full python3-venv
           mkdir -p build/loom-sdk/host-tools
           /usr/bin/python3 build_tools/devtools/install.py bazelisk --bin-dir build/loom-sdk/host-tools
+          /usr/bin/python3 -m build_tools.ci.rocm_bazel_cache
           echo "$PWD/build/loom-sdk/host-tools" >> "$GITHUB_PATH"
           echo "$LLVM_ROOT/bin" >> "$GITHUB_PATH"
       - name: Restore Windows SDK inputs
