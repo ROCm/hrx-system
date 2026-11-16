@@ -6,6 +6,7 @@
 
 #include <climits>
 #include <cstdint>
+#include <utility>
 
 #include "iree/testing/gtest.h"
 #include "loom/ir/facts.h"
@@ -426,6 +427,66 @@ TEST(RemsiTransfer, RepresentativeIntervalsContainEveryResult) {
               }
             }
           }
+        }
+      }
+    }
+  }
+}
+
+TEST(RemsiTransfer, DivisibilityProvesZeroAcrossSignsAndAliases) {
+  for (const auto range :
+       {std::pair{-96, 96}, std::pair{-96, -24}, std::pair{24, 96}}) {
+    auto dividend = loom_value_facts_make(range.first, range.second, 24);
+    loom_value_facts_mark_lane_varying(&dividend);
+    for (int64_t value : {-24, -8, -3, -2, -1, 1, 2, 3, 8, 24}) {
+      const auto divisor = loom_value_facts_exact_i64(value);
+      auto result = loom_value_facts_unknown();
+      loom_value_facts_remsi(&dividend, &divisor, &result);
+      ASSERT_TRUE(loom_value_facts_is_exact(result));
+      EXPECT_EQ(result.range_lo, 0);
+      EXPECT_TRUE(loom_value_facts_is_cluster_uniform(result));
+      auto left_alias = dividend;
+      loom_value_facts_remsi(&left_alias, &divisor, &left_alias);
+      EXPECT_TRUE(loom_value_facts_equal(left_alias, result));
+      auto right_alias = divisor;
+      loom_value_facts_remsi(&dividend, &right_alias, &right_alias);
+      EXPECT_TRUE(loom_value_facts_equal(right_alias, result));
+    }
+  }
+}
+
+TEST(RemsiTransfer, DivisibilityRequiresAnExactNonzeroDivisor) {
+  const auto dividend = loom_value_facts_make(-96, 96, 24);
+  for (const auto divisor :
+       {loom_value_facts_exact_i64(0), loom_value_facts_exact_i64(5),
+        loom_value_facts_exact_i64(-5), loom_value_facts_exact_i64(INT64_MIN),
+        loom_value_facts_make(2, 3, 1), loom_value_facts_make(-3, -2, 1)}) {
+    loom_value_facts_t result;
+    loom_value_facts_remsi(&dividend, &divisor, &result);
+    EXPECT_FALSE(loom_value_facts_is_exact(result));
+  }
+}
+
+TEST(RemsiTransfer, DividendDivisorsMatchConcreteRemainders) {
+  for (int64_t multiple : {1, 2, 3, 8}) {
+    for (const auto range :
+         {std::pair{-16, 16}, std::pair{-16, -1}, std::pair{0, 16}}) {
+      auto dividend =
+          loom_value_facts_make(range.first, range.second, multiple);
+      loom_value_facts_refine_predicate_range(&dividend);
+      for (int64_t divisor_value = -8; divisor_value <= 8; ++divisor_value) {
+        if (!divisor_value) {
+          continue;
+        }
+        const auto divisor = loom_value_facts_exact_i64(divisor_value);
+        loom_value_facts_t result;
+        loom_value_facts_remsi(&dividend, &divisor, &result);
+        for (int64_t value = range.first; value <= range.second; ++value) {
+          if (value % multiple) {
+            continue;
+          }
+          const int64_t expected = value % divisor_value;
+          ExpectContains(result, expected);
         }
       }
     }
