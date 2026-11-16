@@ -3,7 +3,7 @@
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @i64_index_cast_unknown_range_rejected(%value: i64) -> (index) {
-  // ERROR@+1: AMDGPU/033 {source_type="i64", result_type="index", carrier_bitwidth="32", required_range_lo="-2147483648", required_range_hi="2147483647", accepted_proof_sources="[scalar.assume on the integer source before index.cast, config or kernel boundary facts on the integer source]"}
+  // ERROR@+1: AMDGPU/033 {source_type="i64", result_type="index", carrier_bitwidth="32", required_range_lo="-2147483648", required_range_hi="4294967295", accepted_proof_sources="[scalar.assume on the integer source before index.cast, config or kernel boundary facts on the integer source]"}
   %index = index.cast %value : i64 to index
   func.return %index : index
 }
@@ -12,52 +12,11 @@ func.def target(@target) @i64_index_cast_unknown_range_rejected(%value: i64) -> 
 
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @i64_index_cast_too_wide_range_rejected(%value: i64) -> (index) {
-  %bounded = scalar.assume %value [range(%value, 0, 2147483648)] : i64
-  // ERROR@+1: AMDGPU/033 {source_range_lo="0", source_range_hi="2147483648", carrier_bitwidth="32", required_range_lo="-2147483648", required_range_hi="2147483647", accepted_proof_sources="[scalar.assume on the integer source before index.cast, config or kernel boundary facts on the integer source]"}
-  %index = index.cast %bounded : i64 to index
-  func.return %index : index
-}
-
-// ====
-
-amdgpu.target<gfx11-generic> @target
-
 func.def target(@target) @i64_index_cast_result_assume_rejected(%value: i64) -> (index) {
-  // ERROR@+1: AMDGPU/033 {source_type="i64", result_type="index", carrier_bitwidth="32", required_range_lo="-2147483648", required_range_hi="2147483647", accepted_proof_sources="[scalar.assume on the integer source before index.cast, config or kernel boundary facts on the integer source]"}
+  // ERROR@+1: AMDGPU/033 {source_type="i64", result_type="index", carrier_bitwidth="32", required_range_lo="-2147483648", required_range_hi="4294967295", accepted_proof_sources="[scalar.assume on the integer source before index.cast, config or kernel boundary facts on the integer source]"}
   %index0 = index.cast %value : i64 to index
   %index = index.assume %index0 [range(%index0, 0, 1023)] : index
   func.return %index : index
-}
-
-// ====
-
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @negative_index_constant_below_storage_range() -> (index) {
-  // ERROR@+1: TARGET/005 {op_name="index.constant", subject_role="result", subject_name="value", constraint_key="index.maximum_carrier", minimum="-2147483648", maximum="9223372036854775807"}
-  %value = index.constant -2147483649 : index
-  func.return %value : index
-}
-
-// ====
-
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @negative_index_constant_must_not_truncate_to_zero() -> (index) {
-  // ERROR@+1: TARGET/005 {op_name="index.constant", subject_role="result", subject_name="value", constraint_key="index.maximum_carrier", minimum="-2147483648", maximum="9223372036854775807"}
-  %value = index.constant -4294967296 : index
-  func.return %value : index
-}
-
-// ====
-
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @negative_computed_index_below_storage_range(%left: index, %right: index) -> (index) where [range(%left, 0, 1), range(%right, 2147483650, 2147483651)] {
-  // ERROR@+1: TARGET/005 {op_name="index.sub", subject_role="result", subject_name="difference", constraint_key="index.maximum_carrier", minimum="-2147483648", maximum="9223372036854775807"}
-  %difference = index.sub %left, %right : index
-  func.return %difference : index
 }
 
 // ====

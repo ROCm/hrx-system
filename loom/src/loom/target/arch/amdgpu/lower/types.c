@@ -6,6 +6,7 @@
 
 #include "loom/target/arch/amdgpu/lower/types.h"
 
+#include "loom/ops/index/carrier.h"
 #include "loom/ops/vector/storage.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/descriptor_ref.h"
@@ -88,11 +89,11 @@ bool loom_amdgpu_source_address_value_needs_64bit(
   if (element_type == LOOM_SCALAR_TYPE_OFFSET) {
     return true;
   }
-  // A join of signed logical coordinates and nonnegative wide addresses still
-  // needs both words. Requiring a nonnegative lower bound would truncate later
-  // arithmetic even when the join itself retained its wide input carrier.
+  // Nonnegative word magnitudes may remain packed in one register. Every other
+  // established wide signed range needs both words; unresolved ranges inherit
+  // their producer width from representation planning.
   return element_type == LOOM_SCALAR_TYPE_INDEX &&
-         facts.range_lo >= INT32_MIN && facts.range_hi > (int64_t)UINT32_MAX;
+         loom_index_facts_carrier_bitwidth(facts, 32, 64) == 64;
 }
 
 bool loom_amdgpu_type_is_f32(loom_type_t type) {

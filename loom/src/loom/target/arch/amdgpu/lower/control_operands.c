@@ -104,7 +104,7 @@ iree_status_t loom_amdgpu_prepare_control_operand(
   }
   if (loom_amdgpu_type_is_address_scalar(source_type) &&
       loom_low_register_type_unit_count(required_type) == 2) {
-    return loom_amdgpu_prepare_sgpr64_address(context, source_value, out_plan);
+    return loom_amdgpu_prepare_address_pair(context, source_value, out_plan);
   }
   return iree_ok_status();
 }

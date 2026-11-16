@@ -9,6 +9,7 @@
 #include "iree/base/internal/math.h"
 #include "loom/analysis/contract_vector.h"
 #include "loom/ir/float_facts.h"
+#include "loom/ops/index/carrier.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
@@ -189,17 +190,8 @@ static void loom_amdgpu_address_representation_constrain_value(
     return;
   }
 
-  bool needs_wide = loom_amdgpu_source_address_value_needs_64bit(
+  const bool needs_wide = loom_amdgpu_source_address_value_needs_64bit(
       module, loom_low_lower_context_fact_table(context), value_id, type);
-  if (loom_type_element_type(type) == LOOM_SCALAR_TYPE_INDEX) {
-    const loom_value_facts_t facts = loom_value_fact_table_lookup(
-        loom_low_lower_context_fact_table(context), value_id);
-    // A transport joining negative coordinates and positive u32 magnitudes
-    // cannot distinguish them in one word. Keep both signs before the join;
-    // extending its already-selected low word would lose that distinction.
-    needs_wide |= facts.range_lo >= INT32_MIN && facts.range_lo < 0 &&
-                  facts.range_hi > INT32_MAX;
-  }
   loom_low_representation_candidate_t candidates[2];
   iree_host_size_t candidate_count = 0;
   if (!needs_wide) {
@@ -231,9 +223,9 @@ static void loom_amdgpu_address_representation_observe_loop(
     // Counted index control compares signed values. A positive u32 payload
     // needs its zero-extended high word even when storage can remain narrow.
     needs_wide |=
-        is_signed ? operand_facts.range_lo >= INT32_MIN &&
-                        operand_facts.range_hi > INT32_MAX
-                  : !loom_value_facts_fit_unsigned_bit_count(operand_facts, 32);
+        is_signed
+            ? loom_index_facts_carrier_bitwidth(operand_facts, 32, 64) == 64
+            : !loom_value_facts_fit_unsigned_bit_count(operand_facts, 32);
   }
   if (!needs_wide) {
     return;

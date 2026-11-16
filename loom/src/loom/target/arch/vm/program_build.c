@@ -223,7 +223,8 @@ static iree_status_t loom_vm_program_collect(
       rodata_symbols[rodata_count++] = (loom_symbol_id_t)i;
       continue;
     }
-    if (!loom_low_func_def_isa(op) && !loom_low_func_decl_isa(op)) {
+    if (!loom_low_func_def_isa(op) && !loom_low_func_decl_isa(op) &&
+        !loom_low_kernel_def_isa(op)) {
       continue;
     }
     // Unresolved IR declarations have no executable binding. A call to one is
@@ -258,6 +259,13 @@ static iree_status_t loom_vm_program_collect(
     };
     const iree_diagnostic_emitter_t function_emitter =
         loom_diagnostic_export_scope_emitter(&scope);
+    if (loom_low_kernel_def_isa(op)) {
+      accepted = false;
+      status = loom_target_artifact_emit_requirement(
+          function_emitter, op, IREE_SV("VM"),
+          IREE_SV("host functions instead of kernel entry points"));
+      continue;
+    }
     if (loom_low_func_decl_isa(op)) {
       const loom_string_id_t import_module =
           loom_func_like_import_module(function);

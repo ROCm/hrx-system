@@ -363,10 +363,12 @@ func.def target(@target) @source_while(%limit: index, %step: index, %seed: index
                OpDecorate %8 Binding 1
                OpDecorate %9 DescriptorSet 0
                OpDecorate %9 Binding 2
+               OpMemberDecorate %_struct_12 0 Offset 0
+               OpDecorate %_struct_12 Block
                OpDecorate %10 DescriptorSet 0
                OpDecorate %10 Binding 3
-               OpDecorate %11 DescriptorSet 0
-               OpDecorate %11 Binding 4
+               OpDecorate %15 DescriptorSet 0
+               OpDecorate %15 Binding 4
         %int = OpTypeInt 32 1
       %int_0 = OpConstant %int 0
   %_struct_5 = OpTypeStruct %int
@@ -375,52 +377,61 @@ func.def target(@target) @source_while(%limit: index, %step: index, %seed: index
           %4 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
           %8 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
           %9 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
-         %10 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
-         %11 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+       %long = OpTypeInt 64 1
+ %_struct_12 = OpTypeStruct %long
+%_ptr_StorageBuffer__struct_12 = OpTypePointer StorageBuffer %_struct_12
+%_ptr_StorageBuffer_long = OpTypePointer StorageBuffer %long
+         %10 = OpVariable %_ptr_StorageBuffer__struct_12 StorageBuffer
+         %15 = OpVariable %_ptr_StorageBuffer__struct_12 StorageBuffer
        %void = OpTypeVoid
-         %13 = OpTypeFunction %void
+         %17 = OpTypeFunction %void
          %c0 = OpConstant %int 0
        %bool = OpTypeBool
-%source_while = OpFunction %void None %13
-         %14 = OpLabel
-         %15 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
-      %limit = OpLoad %int %15 Aligned 4
-         %17 = OpAccessChain %_ptr_StorageBuffer_int %8 %int_0
-       %step = OpLoad %int %17 Aligned 4
-         %19 = OpAccessChain %_ptr_StorageBuffer_int %9 %int_0
-       %seed = OpLoad %int %19 Aligned 4
-               OpBranch %21
-         %21 = OpLabel
-     %before = OpPhi %int %seed %14 %next %24
-               OpLoopMerge %25 %24 None
-               OpBranch %22
-         %22 = OpLabel
+%source_while = OpFunction %void None %17
+         %18 = OpLabel
+         %19 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
+      %limit = OpLoad %int %19 Aligned 4
+         %21 = OpAccessChain %_ptr_StorageBuffer_int %8 %int_0
+       %step = OpLoad %int %21 Aligned 4
+         %23 = OpAccessChain %_ptr_StorageBuffer_int %9 %int_0
+       %seed = OpLoad %int %23 Aligned 4
+         %25 = OpSConvert %long %seed
+               OpBranch %26
+         %26 = OpLabel
+     %before = OpPhi %long %25 %18 %next %29
+               OpLoopMerge %30 %29 None
+               OpBranch %27
+         %27 = OpLabel
 %step_is_positive = OpSGreaterThan %bool %step %c0
-               OpSelectionMerge %34 None
-               OpBranchConditional %step_is_positive %33 %35
-         %33 = OpLabel
-               OpBranch %34
-         %35 = OpLabel
-%extended_limit = OpIAdd %int %limit %step
-               OpBranch %34
-         %34 = OpLabel
-%selected_limit = OpPhi %int %limit %33 %extended_limit %35
+               OpSelectionMerge %39 None
+               OpBranchConditional %step_is_positive %38 %40
+         %38 = OpLabel
+         %41 = OpSConvert %long %limit
+               OpBranch %39
+         %40 = OpLabel
+         %42 = OpSConvert %long %limit
+         %43 = OpSConvert %long %step
+%extended_limit = OpIAdd %long %42 %43
+               OpBranch %39
+         %39 = OpLabel
+%selected_limit = OpPhi %long %41 %38 %extended_limit %40
  %keep_going = OpSLessThan %bool %before %selected_limit
-               OpBranchConditional %keep_going %23 %25
-         %23 = OpLabel
-%body_position = OpPhi %int %before %34
- %body_limit = OpPhi %int %selected_limit %34
-       %next = OpIAdd %int %body_position %step
-               OpBranch %24
-         %24 = OpLabel
-               OpBranch %21
-         %25 = OpLabel
-%result_position = OpPhi %int %before %34
-%result_limit = OpPhi %int %selected_limit %34
-         %41 = OpAccessChain %_ptr_StorageBuffer_int %10 %int_0
-               OpStore %41 %result_position Aligned 4
-         %42 = OpAccessChain %_ptr_StorageBuffer_int %11 %int_0
-               OpStore %42 %result_limit Aligned 4
+               OpBranchConditional %keep_going %28 %30
+         %28 = OpLabel
+%body_position = OpPhi %long %before %39
+ %body_limit = OpPhi %long %selected_limit %39
+         %47 = OpSConvert %long %step
+       %next = OpIAdd %long %body_position %47
+               OpBranch %29
+         %29 = OpLabel
+               OpBranch %26
+         %30 = OpLabel
+%result_position = OpPhi %long %before %39
+%result_limit = OpPhi %long %selected_limit %39
+         %50 = OpAccessChain %_ptr_StorageBuffer_long %10 %int_0
+               OpStore %50 %result_position Aligned 8
+         %51 = OpAccessChain %_ptr_StorageBuffer_long %15 %int_0
+               OpStore %51 %result_limit Aligned 8
                OpReturn
                OpFunctionEnd
 

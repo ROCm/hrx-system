@@ -50,11 +50,21 @@ bool loom_index_value_facts_fit_unsigned_target_carrier(
     const loom_fact_context_t* context, loom_scalar_type_t scalar_type,
     loom_value_facts_t facts);
 
+// Selects the signed index carrier required by a computed range. The native
+// and maximum widths describe the target's available carriers. Below a native
+// 64-bit width, a full unknown range returns zero: it cannot establish a width,
+// even when other facts such as divisibility remain known. Single-carrier
+// targets also preserve native nonnegative raw bit patterns. Returns -1 for an
+// unsupported range.
+int32_t loom_index_facts_carrier_bitwidth(loom_value_facts_t facts,
+                                          uint32_t native_bitwidth,
+                                          uint32_t maximum_bitwidth);
+
 // Returns the carrier width established for one source SSA value. Defined
-// index values use a wider proof carrier when their facts extend above the
-// target-native signed domain and the target advertises that carrier. Raw fact
-// summaries retain the target-native carrier. A producer-backed envelope that
-// cannot distinguish a native value from a wide value with imprecise facts
+// index values use a wider proof carrier when their bounded facts extend beyond
+// the target-native signed domain and the target advertises that carrier. Raw
+// fact summaries retain the target-native carrier. A producer-backed envelope
+// that cannot distinguish a native value from a wide value with imprecise facts
 // leaves the carrier unresolved. Offset values always use their target-selected
 // carrier. Zero indicates an unresolved carrier or targetless context; -1
 // indicates an invalid or unsupported carrier.

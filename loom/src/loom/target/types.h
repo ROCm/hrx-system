@@ -229,9 +229,8 @@ typedef struct loom_target_snapshot_t {
   loom_target_subgroup_partition_t subgroup_partition;
   // Maximum carrier bit width available to producer-established index values.
   // Zero means |index_bitwidth|. A wider value lets lowering preserve computed
-  // coordinates that extend above the native raw payload, including joins
-  // with native signed coordinates, without changing ordinary native index
-  // representation.
+  // coordinates outside the native signed domain, including joins with native
+  // coordinates, without changing ordinary native index representation.
   uint8_t maximum_index_bitwidth;
   // Default pointer bit width for target-independent layout decisions.
   uint32_t default_pointer_bitwidth;

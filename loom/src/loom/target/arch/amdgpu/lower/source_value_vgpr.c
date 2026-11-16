@@ -18,7 +18,6 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
-#include "loom/target/arch/amdgpu/lower/source_representation.h"
 #include "loom/target/arch/amdgpu/lower/source_value_analysis.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
@@ -261,14 +260,6 @@ static const loom_amdgpu_source_producer_flags_t
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_INDEX_CAST)] =
             LOOM_AMDGPU_SOURCE_PRODUCER_INDEX_CAST |
             LOOM_AMDGPU_SOURCE_PRODUCER_FOLLOWS_OPERAND,
-        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_INDEX_SUB)] =
-            LOOM_AMDGPU_SOURCE_PRODUCER_ADDRESS_64BIT,
-        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_INDEX_MUL)] =
-            LOOM_AMDGPU_SOURCE_PRODUCER_ADDRESS_64BIT,
-        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_INDEX_MADD)] =
-            LOOM_AMDGPU_SOURCE_PRODUCER_ADDRESS_64BIT,
-        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_INDEX_SHLI)] =
-            LOOM_AMDGPU_SOURCE_PRODUCER_ADDRESS_64BIT,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_INDEX_CMP)] =
             LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE |
             LOOM_AMDGPU_SOURCE_PRODUCER_I1_COMPARE_SUPPORTS_SGPR_BOOL,
@@ -624,32 +615,6 @@ loom_amdgpu_distribution_transfer_binary_result_follows_operand_vgpr(
   return true;
 }
 
-static bool loom_amdgpu_source_producer_requires_wide_vgpr(
-    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
-    loom_amdgpu_source_value_analysis_t* analysis,
-    loom_value_id_t source_value_id,
-    loom_amdgpu_source_producer_flags_t producer_flags) {
-  if (!iree_any_bit_set(producer_flags,
-                        LOOM_AMDGPU_SOURCE_PRODUCER_ADDRESS_64BIT)) {
-    return false;
-  }
-  if (analysis != NULL && analysis->representation_plan != NULL) {
-    loom_low_representation_id_t representation =
-        LOOM_LOW_REPRESENTATION_ID_NONE;
-    loom_low_representation_plan_lookup(
-        analysis->representation_plan,
-        loom_local_value_domain_ordinal(analysis->value_domain,
-                                        source_value_id),
-        &representation);
-    if (representation == LOOM_AMDGPU_ADDRESS_REPRESENTATION_WIDE) {
-      return true;
-    }
-  }
-  return loom_amdgpu_source_address_value_needs_64bit(
-      module, fact_table, source_value_id,
-      loom_module_value_type(module, source_value_id));
-}
-
 bool loom_amdgpu_source_value_directly_prefers_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     loom_amdgpu_source_value_analysis_t* analysis,
@@ -687,10 +652,6 @@ bool loom_amdgpu_source_value_directly_prefers_vgpr(
 
     const loom_amdgpu_source_producer_flags_t producer_flags =
         loom_amdgpu_source_producer_flags(defining_op->kind);
-    if (loom_amdgpu_source_producer_requires_wide_vgpr(
-            module, fact_table, analysis, source_value_id, producer_flags)) {
-      return true;
-    }
     if (iree_any_bit_set(producer_flags,
                          LOOM_AMDGPU_SOURCE_PRODUCER_WORKITEM_DIMENSION |
                              LOOM_AMDGPU_SOURCE_PRODUCER_ALWAYS_VGPR)) {
@@ -1103,11 +1064,6 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
 
   const loom_amdgpu_source_producer_flags_t producer_flags =
       loom_amdgpu_source_producer_flags(defining_op->kind);
-  if (loom_amdgpu_source_producer_requires_wide_vgpr(
-          module, fact_table, analysis, source_value_id, producer_flags)) {
-    return true;
-  }
-
   if (iree_any_bit_set(producer_flags,
                        LOOM_AMDGPU_SOURCE_PRODUCER_SCALAR_BITCAST) &&
       defining_op->operand_count == 1) {

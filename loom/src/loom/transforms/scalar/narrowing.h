@@ -17,35 +17,36 @@ extern "C" {
 typedef enum loom_scalar_narrowing_operand_kind_e {
   LOOM_SCALAR_NARROWING_OPERAND_REUSE,
   LOOM_SCALAR_NARROWING_OPERAND_CONSTANT,
-  LOOM_SCALAR_NARROWING_OPERAND_OFFSET,
+  LOOM_SCALAR_NARROWING_OPERAND_ADDRESS,
   LOOM_SCALAR_NARROWING_OPERAND_TRUNCATE,
 } loom_scalar_narrowing_operand_kind_t;
 
 typedef struct loom_scalar_narrowing_operand_t {
   // Materialization selected before any IR mutation.
   loom_scalar_narrowing_operand_kind_t kind;
-  // Existing value for reuse, offset conversion, or residual truncation.
+  // Existing value for reuse, address conversion, or residual truncation.
   loom_value_id_t value;
   // Signed i32 payload for a constant materialization.
   int64_t constant;
 } loom_scalar_narrowing_operand_t;
 
-// Stack-local selection for one owned, unflagged i64 arithmetic producer.
+// Stack-local selection for one owned, unflagged integer arithmetic producer.
 // At least one operand narrows without a residual truncation. Values remain
 // borrowed from the module until the caller materializes the selected rewrite.
 typedef struct loom_scalar_narrowing_plan_t {
-  // Add, subtract, multiply, or left shift preserving the observed low word.
+  // Scalar operation preserving the low word, or index.madd to decompose.
   loom_op_kind_t kind;
   // Operand recipes in the original arithmetic order.
-  loom_scalar_narrowing_operand_t operands[2];
+  loom_scalar_narrowing_operand_t operands[3];
 } loom_scalar_narrowing_plan_t;
 
 // Selects a profitable low-word replacement for |producer|, whose result is
-// i64. Requires one ordinary use and no embedded type uses. Attribute
-// references may belong only to |attribute_owner|, or must be absent when it is
+// i64 or an address domain whose selected carrier is at least 32 bits.
+// Requires one ordinary use and no embedded type uses. Attribute references
+// may belong only to |attribute_owner|, or must be absent when it is
 // NULL. The caller owns retirement of that observer and the producer after
-// replacing the demand. Selection inspects only this producer, its two
-// operands, and indexed facts; rejected selections allocate no IR and do not
+// replacing the demand. Selection inspects only this producer, its operands,
+// and indexed facts; rejected selections allocate no IR and do not
 // walk producer chains.
 bool loom_scalar_narrowing_select(loom_rewriter_t* rewriter,
                                   loom_op_t* producer,

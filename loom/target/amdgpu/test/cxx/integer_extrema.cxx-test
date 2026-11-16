@@ -61,14 +61,14 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direc
   %162 = v_lshlrev_b32_src0_inline %lane, 3
   %lhs = global_load_b32_saddr %162, %input
   %rhs = global_load_b32_saddr %162, %input {offset = 4}
-  %175 = v_min_i32 %lhs, %rhs
-  %180 = v_lshlrev_b32_src0_inline %lane, 4
-  global_store_b32_saddr %180, %175, %output
-  %181 = v_max_i32 %rhs, %lhs
-  global_store_b32_saddr %180, %181, %output {offset = 4}
-  %190 = v_min_u32 %rhs, %lhs
-  global_store_b32_saddr %180, %190, %output {offset = 8}
-  %198 = v_max_u32 %lhs, %rhs
-  global_store_b32_saddr %180, %198, %output {offset = 12}
+  %174 = v_min_i32 %lhs, %rhs
+  %179 = v_lshlrev_b32_src0_inline %lane, 4
+  global_store_b32_saddr %179, %174, %output
+  %180 = v_max_i32 %rhs, %lhs
+  global_store_b32_saddr %179, %180, %output {offset = 4}
+  %188 = v_min_u32 %rhs, %lhs
+  global_store_b32_saddr %179, %188, %output {offset = 8}
+  %195 = v_max_u32 %lhs, %rhs
+  global_store_b32_saddr %179, %195, %output {offset = 12}
   return
 }

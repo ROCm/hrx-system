@@ -85,8 +85,8 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @offset_arithmetic
 
 // ====
 
-func.def @index_bitwise(%input: index, %other: index, %amount0: index) -> (index, index, index, index, index, index, index, index, index, index, index) {
-  %amount = index.assume %amount0 [range(%amount0, 1, 31)] : index
+func.def @index_bitwise(%input0: index, %other: index, %amount0: index) -> (index, index, index, index, index, index, index, index, index, index, index) {
+  %input, %amount = index.assume %input0, %amount0 [range(%input0, -65536, 65535), range(%amount0, 1, 15)] : index, index
   %and = index.andi %input, %other : index
   %or = index.ori %input, %other : index
   %xor = index.xori %input, %other : index
@@ -107,34 +107,34 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @index_bitwise(%in
   %or = or %input, %other
   %xor = xor %input, %other
   %shl = lshl %input, %amount
-  %44 = mov.short 0
-  %45 = sub %44, %amount
-  %shrs = ashl %input, %45
-  %48 = sub %44, %amount
-  %shru = lshl %input, %48
-  %51 = mov.short 31
-  %52 = sub %44, %amount
-  %53 = and %amount, %51
-  %54 = and %52, %51
-  %55 = lshl %input, %53
-  %56 = sub %44, %54
-  %57 = lshl %input, %56
-  %rotl = or %55, %57
-  %61 = sub %44, %amount
-  %63 = and %61, %51
-  %64 = sub %44, %53
-  %65 = lshl %input, %64
-  %66 = lshl %input, %63
-  %rotr = or %66, %65
+  %45 = mov.short 0
+  %46 = sub %45, %amount
+  %shrs = ashl %input, %46
+  %49 = sub %45, %amount
+  %shru = lshl %input, %49
+  %52 = mov.short 31
+  %53 = sub %45, %amount
+  %54 = and %amount, %52
+  %55 = and %53, %52
+  %56 = lshl %input, %54
+  %57 = sub %45, %55
+  %58 = lshl %input, %57
+  %rotl = or %56, %58
+  %62 = sub %45, %amount
+  %64 = and %62, %52
+  %65 = sub %45, %54
+  %66 = lshl %input, %65
+  %67 = lshl %input, %64
+  %rotr = or %67, %66
   %clz = clz %input
-  %69 = mov.short -1
-  %70 = xor %input, %69
-  %71 = add.nc.immediate %input, -1
-  %72 = and %70, %71
-  %73 = popcount %72
-  %74 = mov.short 32
-  %75 = copy %input : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %ctz = sel.eqz %74, %73, %75
+  %70 = mov.short -1
+  %71 = xor %input, %70
+  %72 = add.nc.immediate %input, -1
+  %73 = and %71, %72
+  %74 = popcount %73
+  %75 = mov.short 32
+  %76 = copy %input : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %ctz = sel.eqz %75, %74, %76
   %pop = popcount %input
   return %and, %or, %xor, %shl, %shrs, %shru, %rotl, %rotr, %clz, %ctz, %pop
 }

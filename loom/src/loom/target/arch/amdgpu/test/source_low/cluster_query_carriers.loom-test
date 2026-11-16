@@ -211,38 +211,38 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core> abi_layout({constant_count = 0,
   %352, %353 = s_and_b64_scc %more, %351
   low.cond_br %353, ^body, ^_bb4 : reg<amdgpu.scc>
 ^body:
-  %355 = v_mov_b32 4294967295
-  %next = v_add_u32 %remaining, %355
-  %358 = v_mov_b32_copy %209
-  %360 = v_mov_b32_copy %210
-  %361 = concat(%358, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %363 = v_mov_b32_copy %212
-  %366 = concat(%363, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %368 = v_mov_b32_copy %215
-  %371 = concat(%368, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %373 = v_mov_b32_copy %218
-  %376 = concat(%373, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %378 = v_mov_b32_copy %221
-  %381 = concat(%378, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %383 = v_mov_b32_copy %224
-  %386 = concat(%383, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %388 = v_mov_b32_copy %227
-  %391 = concat(%388, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %393 = v_mov_b32_copy %230
-  %396 = concat(%393, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %398 = v_mov_b32_copy %233
-  %401 = concat(%398, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %403 = v_mov_b32_copy %236
-  %406 = concat(%403, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %408 = v_mov_b32_copy %239
-  %411 = concat(%408, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %413 = v_mov_b32_copy %242
-  %416 = concat(%413, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %418 = v_mov_b32_copy %245
-  %421 = concat(%418, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %423 = v_mov_b32_copy %248
-  %426 = concat(%423, %360) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  low.br ^loop(%next: reg<amdgpu.vgpr>, %361: reg<amdgpu.vgpr x2>, %366: reg<amdgpu.vgpr x2>, %371: reg<amdgpu.vgpr x2>, %376: reg<amdgpu.vgpr x2>, %381: reg<amdgpu.vgpr x2>, %386: reg<amdgpu.vgpr x2>, %391: reg<amdgpu.vgpr x2>, %396: reg<amdgpu.vgpr x2>, %401: reg<amdgpu.vgpr x2>, %406: reg<amdgpu.vgpr x2>, %411: reg<amdgpu.vgpr x2>, %416: reg<amdgpu.vgpr x2>, %421: reg<amdgpu.vgpr x2>, %426: reg<amdgpu.vgpr x2>)
+  %354 = s_mov_b32 4294967295
+  %next = v_add_u32 %354, %remaining
+  %357 = v_mov_b32_copy %209
+  %359 = v_mov_b32_copy %210
+  %360 = concat(%357, %359) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %362 = v_mov_b32_copy %212
+  %365 = concat(%362, %359) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %367 = v_mov_b32_copy %215
+  %370 = concat(%367, %359) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %372 = v_mov_b32_copy %218
+  %375 = concat(%372, %359) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %377 = v_mov_b32_copy %221
+  %380 = concat(%377, %359) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %382 = v_mov_b32_copy %224
+  %385 = concat(%382, %359) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %387 = v_mov_b32_copy %227
+  %390 = concat(%387, %359) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %392 = v_mov_b32_copy %230
+  %395 = concat(%392, %359) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %397 = v_mov_b32_copy %233
+  %400 = concat(%397, %359) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %402 = v_mov_b32_copy %236
+  %405 = concat(%402, %359) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %407 = v_mov_b32_copy %239
+  %410 = concat(%407, %359) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %412 = v_mov_b32_copy %242
+  %415 = concat(%412, %359) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %417 = v_mov_b32_copy %245
+  %420 = concat(%417, %359) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %422 = v_mov_b32_copy %248
+  %425 = concat(%422, %359) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^loop(%next: reg<amdgpu.vgpr>, %360: reg<amdgpu.vgpr x2>, %365: reg<amdgpu.vgpr x2>, %370: reg<amdgpu.vgpr x2>, %375: reg<amdgpu.vgpr x2>, %380: reg<amdgpu.vgpr x2>, %385: reg<amdgpu.vgpr x2>, %390: reg<amdgpu.vgpr x2>, %395: reg<amdgpu.vgpr x2>, %400: reg<amdgpu.vgpr x2>, %405: reg<amdgpu.vgpr x2>, %410: reg<amdgpu.vgpr x2>, %415: reg<amdgpu.vgpr x2>, %420: reg<amdgpu.vgpr x2>, %425: reg<amdgpu.vgpr x2>)
 ^_bb4:
   s_mov_b64_exec %207
   return

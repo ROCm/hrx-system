@@ -91,6 +91,43 @@ TEST(IndexCarrierTest, WrapsOffsetFactsAtSelectedWidth) {
   EXPECT_TRUE(loom_value_facts_equal(targetless, wide));
 }
 
+TEST(IndexCarrierTest, SelectsSymmetricComputedRanges) {
+  const struct {
+    // Inclusive mathematical range established for the computed value.
+    int64_t minimum;
+    // Inclusive mathematical upper bound, independent of the divisor.
+    int64_t maximum;
+    // Expected carrier on a target with one 32-bit carrier.
+    int32_t native_only;
+    // Expected carrier on a target with native 32-bit and wide 64-bit carriers.
+    int32_t native_and_wide;
+  } cases[] = {
+      {INT32_MIN, INT32_MAX, 32, 32},
+      {-16, 16, 32, 32},
+      {0, UINT32_MAX, 32, 64},
+      {-1, UINT32_MAX, 32, 64},
+      {INT64_C(-8589934592), INT64_C(-8589934580), -1, 64},
+      {INT64_C(8589934592), INT64_C(8589934604), -1, 64},
+      {INT64_C(-3221225472), INT64_C(3221225472), -1, 64},
+      {INT64_MIN, -1, -1, 64},
+      {1, INT64_MAX, -1, 64},
+      {INT64_MIN, INT64_MAX, 0, 0},
+  };
+  for (const auto& test : cases) {
+    SCOPED_TRACE(::testing::Message()
+                 << test.minimum << " .. " << test.maximum);
+    for (int64_t divisor : {1, 4}) {
+      const auto facts =
+          loom_value_facts_make(test.minimum, test.maximum, divisor);
+      EXPECT_EQ(loom_index_facts_carrier_bitwidth(facts, 32, 32),
+                test.native_only);
+      EXPECT_EQ(loom_index_facts_carrier_bitwidth(facts, 32, 64),
+                test.native_and_wide);
+      EXPECT_EQ(loom_index_facts_carrier_bitwidth(facts, 64, 64), 64);
+    }
+  }
+}
+
 TEST(IndexCarrierTest, UnsignedComparisonsMatchCarrierBits) {
   constexpr uint8_t predicates[] = {
       LOOM_INDEX_CMP_PREDICATE_ULT, LOOM_INDEX_CMP_PREDICATE_ULE,

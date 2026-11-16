@@ -9,6 +9,7 @@
 #include "loom/codegen/low/lower/representation_observer.h"
 #include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"
+#include "loom/ops/index/carrier.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
@@ -23,10 +24,6 @@ typedef enum loom_spirv_index_boundary_action_e {
   LOOM_SPIRV_INDEX_BOUNDARY_ARITHMETIC = 2,
   LOOM_SPIRV_INDEX_BOUNDARY_SHIFT = 3,
 } loom_spirv_index_boundary_action_t;
-
-static bool loom_spirv_index_needs_wide(loom_value_facts_t facts) {
-  return facts.range_lo >= INT32_MIN && facts.range_hi > INT32_MAX;
-}
 
 static bool loom_spirv_is_index(loom_low_lower_context_t* context,
                                 loom_value_id_t value) {
@@ -48,7 +45,7 @@ static void loom_spirv_index_constrain(
       {.representation = LOOM_SPIRV_INDEX_REPRESENTATION_WIDE,
        .cost = {.runtime = 1}},
   };
-  const bool wide = loom_spirv_index_needs_wide(facts);
+  const bool wide = loom_index_facts_carrier_bitwidth(facts, 32, 64) == 64;
   if (!wide &&
       loom_low_lower_representation_component_is_constrained(recorder, value)) {
     return;
@@ -159,7 +156,8 @@ static void loom_spirv_representation_observe_boundary(
   for (uint16_t i = 0; i < 3; ++i) {
     const loom_value_facts_t facts = loom_value_fact_table_lookup(
         loom_low_lower_context_fact_table(context), operands[i]);
-    const bool operand_wide = loom_spirv_index_needs_wide(facts);
+    const bool operand_wide =
+        loom_index_facts_carrier_bitwidth(facts, 32, 64) == 64;
     wide |= operand_wide;
     // An unresolved bound still carries the width established by its producers.
     // Known ranges select the receiving width directly; they need no equality

@@ -184,11 +184,11 @@ func.def @dynamic_shaped_tail(%source: vector<2x3x4xi16>, %plane: index) -> (vec
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @dynamic_shaped_tail(%source: reg<aie2p.vec256 x2>, %plane: reg<aie2p.er>) -> (reg<aie2p.vec256 x2>) asm {
-  %12 = mov.short 12
-  %13 = mul %plane, %12
-  %14 = mov.short 1
-  %15 = lshl %13, %14
-  %result = vshift %source, %source, %15
+  %13 = mov.short 12
+  %14 = mul %plane, %13
+  %15 = mov.short 1
+  %16 = lshl %14, %15
+  %result = vshift %source, %source, %16
   return %result
 }
 

@@ -15,6 +15,7 @@ loom_check_test_suite(
     name = "test",
     srcs = [
         "narrowing.loom-test",
+        "narrowing_payload.loom-test",
         "narrowing_phases.loom-test",
     ],
 )
