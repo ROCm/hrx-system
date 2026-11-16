@@ -157,15 +157,62 @@ class NativeGpuSelectionTest(unittest.TestCase):
     def test_exports_one_verified_gpu_for_subsequent_steps(self):
         environment_path = self.root / "github_env"
         selection = self.select()
-        rocm_environment.export_native_gpu_selection(environment_path, selection)
+        with mock.patch.dict(os.environ, {}, clear=True):
+            rocm_environment.export_native_gpu_selection(environment_path, selection)
         self.assertEqual(
             environment_path.read_text(),
             "ROCR_VISIBLE_DEVICES=GPU-af47ea8fb2cb9b42\n"
             "HIP_VISIBLE_DEVICES=0\n"
             "CUDA_VISIBLE_DEVICES=0\n"
             "GPU_DEVICE_ORDINAL=0\n"
+            "HAL_AMD_GPU_ASSIGNMENT=linux_device:226:144\n"
             "AMDF_CTS_GPU_NATIVE_IDENTITY=linux_device:226:144\n",
         )
+
+    def test_export_rejects_conflicts_without_partial_environment_update(self):
+        selection = self.select()
+        for name in ("HAL_AMD_GPU_ASSIGNMENT", "AMDF_CTS_GPU_NATIVE_IDENTITY"):
+            for value in (
+                "",
+                "linux_device:226:168",
+                "linux_device:226:144,linux_device:226:168",
+            ):
+                with self.subTest(name=name, value=value):
+                    path = self.root / "github_env"
+                    path.write_text("UNRELATED=preserved\n")
+                    with mock.patch.dict(os.environ, {name: value}, clear=True):
+                        with self.assertRaisesRegex(RuntimeError, name + ".*conflicts"):
+                            rocm_environment.export_native_gpu_selection(
+                                path, selection
+                            )
+                    self.assertEqual(path.read_text(), "UNRELATED=preserved\n")
+
+    def test_export_accepts_existing_matching_native_selectors(self):
+        selection = self.select()
+        path = self.root / "github_env"
+        environment = {
+            "HAL_AMD_GPU_ASSIGNMENT": " linux_device:226:144 ",
+            "AMDF_CTS_GPU_NATIVE_IDENTITY": "linux_device:226:144",
+        }
+        with mock.patch.dict(os.environ, environment, clear=True):
+            rocm_environment.export_native_gpu_selection(path, selection)
+        exported = dict(line.split("=", 1) for line in path.read_text().splitlines())
+        self.assertEqual(exported["HAL_AMD_GPU_ASSIGNMENT"], selection.native_identity)
+        self.assertEqual(
+            exported["AMDF_CTS_GPU_NATIVE_IDENTITY"], selection.native_identity
+        )
+
+    def test_single_gpu_preflight_cannot_assign_a_peer_outside_the_job(self):
+        selection = self.select()
+        path = self.root / "github_env"
+        with mock.patch.dict(
+            os.environ,
+            {"AMDF_CTS_GPU_PEER_NATIVE_IDENTITY": "linux_device:226:168"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "single-GPU assignment"):
+                rocm_environment.export_native_gpu_selection(path, selection)
+        self.assertFalse(path.exists())
 
     def test_render_node_device_number_must_match(self):
         self.metadata.st_rdev = os.makedev(226, 168)
