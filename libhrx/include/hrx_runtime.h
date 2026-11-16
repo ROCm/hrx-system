@@ -808,41 +808,25 @@ typedef struct hrx_graph_kernel_node_attrs_t {
   uint32_t flags;
 } hrx_graph_kernel_node_attrs_t;
 
-// Raw device-pointer buffer copy. Recording resolves the pointers through the
-// device allocation table and incurs pointer accounting overhead. Prefer
-// hrx_graph_add_copy_buffer_node() when buffer handles are available.
-typedef struct hrx_graph_copy_ptr_node_attrs_t {
-  void* dst;
-  const void* src;
-  size_t size;
-  uint32_t kind;
-} hrx_graph_copy_ptr_node_attrs_t;
-
-// Raw device-pointer buffer fill. Recording resolves the pointer through the
-// device allocation table and incurs pointer accounting overhead. Prefer
-// hrx_graph_add_fill_buffer_node() when a buffer handle is available.
-typedef struct hrx_graph_fill_ptr_node_attrs_t {
-  void* dst;
-  uint32_t value;
-  size_t count;
-} hrx_graph_fill_ptr_node_attrs_t;
-
 // Native handle-based buffer copy. Source and destination lengths must be
-// equal and nonzero. Recording uses the buffer handles directly without raw
-// pointer accounting overhead. The graph retains the native buffer handles;
+// equal and nonzero. The graph retains the native buffer handles;
 // the caller keeps their pools and allocation epochs live for every launch.
 typedef struct hrx_graph_copy_buffer_node_attrs_t {
+  // Source byte range.
   hrx_buffer_ref_t src;
+  // Destination byte range, with the same length as |src|.
   hrx_buffer_ref_t dst;
 } hrx_graph_copy_buffer_node_attrs_t;
 
 // Native handle-based buffer fill. |pattern_size| must be 1, 2, or 4 and the
 // destination offset and length must be integral multiples of it. Pattern
-// bytes are copied into the graph node during recording. Recording uses the
-// buffer handle directly without raw pointer accounting overhead.
+// bytes are copied into the graph node during recording.
 typedef struct hrx_graph_fill_buffer_node_attrs_t {
+  // Destination byte range.
   hrx_buffer_ref_t dst;
+  // Repeated pattern, using the first |pattern_size| bytes.
   uint32_t pattern;
+  // Number of pattern bytes: 1, 2, or 4.
   size_t pattern_size;
 } hrx_graph_fill_buffer_node_attrs_t;
 
@@ -865,12 +849,6 @@ HRX_API hrx_status_t hrx_graph_add_empty_node(hrx_graph_t graph,
 HRX_API hrx_status_t hrx_graph_add_kernel_node(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
     const hrx_graph_kernel_node_attrs_t* attrs, hrx_graph_node_t* out_node);
-HRX_API hrx_status_t hrx_graph_add_copy_ptr_node(
-    hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
-    const hrx_graph_copy_ptr_node_attrs_t* attrs, hrx_graph_node_t* out_node);
-HRX_API hrx_status_t hrx_graph_add_fill_ptr_node(
-    hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
-    const hrx_graph_fill_ptr_node_attrs_t* attrs, hrx_graph_node_t* out_node);
 HRX_API hrx_status_t hrx_graph_add_copy_buffer_node(
     hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
     const hrx_graph_copy_buffer_node_attrs_t* attrs,
