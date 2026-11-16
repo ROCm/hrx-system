@@ -629,6 +629,13 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
       destination_kind == LOOM_XDNA_TILE_KIND_COMPUTE) {
     horizontal_row = destination.row;
   }
+  // Core packet fanout likewise shares a vertical prefix at its sender. A
+  // horizontal-first broadcast would consume a tensor-transfer lane in every
+  // receiving column instead of turning onto each core's row.
+  if (packet && source_port == LOOM_XDNA_STREAM_PORT_CORE &&
+      destination_port == LOOM_XDNA_STREAM_PORT_CORE) {
+    horizontal_row = destination.row;
+  }
   const uint8_t shim_channel =
       shim_dma
           ? loom_aie2p_array_dma_stream_channel(
@@ -643,7 +650,8 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
     // The other orthogonal turn order may avoid a saturated row or column.
     // Both choices have the same hop count; the failed admission above leaves
     // physical reservations unchanged and discards tentative packet filters.
-    const uint16_t alternate_row = shim_dma ? source.row : destination.row;
+    const uint16_t alternate_row =
+        horizontal_row == source.row ? destination.row : source.row;
     if (source_kind != LOOM_XDNA_TILE_KIND_COMPUTE ||
         (!shim_dma && destination_kind != LOOM_XDNA_TILE_KIND_COMPUTE) ||
         source.column == destination.column ||

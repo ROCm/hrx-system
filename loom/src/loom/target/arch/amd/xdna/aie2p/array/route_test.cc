@@ -310,6 +310,102 @@ TEST_F(Aie2pComputeRouteTest, CompleteCommandsShareAcrossSenderPorts) {
   }
 }
 
+TEST_F(Aie2pComputeRouteTest,
+       CorePacketFanoutPreservesDestinationPayloadLanes) {
+  const auto* family = loom_xdna_npu2_array_family();
+  for (bool west : {false, true}) {
+    for (bool north : {false, true}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "west=" << west << " north=" << north);
+      iree_arena_reset(&arena);
+      loom_aie2p_array_route_builder_t routing;
+      IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+          family, 512, &arena, &routing));
+      const uint16_t source_column = west ? 7 : 0;
+      const loom_xdna_tile_coordinate_t source = {
+          source_column, static_cast<uint16_t>(north ? 2 : 5)};
+      loom_aie2p_array_route_tree_t broadcast = {};
+      for (uint16_t column = 0; column < family->column_count; ++column) {
+        if (column == source_column) {
+          continue;
+        }
+        for (uint16_t row = 2; row < 6; ++row) {
+          ASSERT_TRUE(loom_aie2p_array_route_stream(
+              &routing, 0, &broadcast, source, LOOM_XDNA_STREAM_PORT_CORE, 0,
+              {column, row}, LOOM_XDNA_STREAM_PORT_CORE, 0, true));
+        }
+      }
+      // A request reaches every other core without consuming a vertical lane
+      // in each receiving column. Those columns can still use every lane for
+      // their independent tensor streams after the broadcast is admitted.
+      loom_aie2p_array_route_tree_t payloads[8][6] = {};
+      for (uint16_t column = 0; column < family->column_count; ++column) {
+        if (column == source_column) {
+          continue;
+        }
+        for (uint16_t i = 0; i < (north ? 6 : 4); ++i) {
+          const loom_xdna_tile_coordinate_t memory = {column, 1};
+          const loom_xdna_tile_coordinate_t core = {
+              column, static_cast<uint16_t>(3 + i / 2)};
+          ASSERT_TRUE(loom_aie2p_array_route_workers(
+              &routing, 1 + column * 6 + i, &payloads[column][i],
+              north ? memory : core, north ? i : i % 2, north ? core : memory,
+              north ? i % 2 : i, false));
+        }
+      }
+    }
+  }
+}
+
+TEST_F(Aie2pComputeRouteTest, CorePacketsAvoidSaturatedSourceColumns) {
+  const auto* family = loom_xdna_npu2_array_family();
+  for (bool west : {false, true}) {
+    for (bool north : {false, true}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "west=" << west << " north=" << north);
+      iree_arena_reset(&arena);
+      loom_aie2p_array_route_builder_t routing;
+      IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+          family, 128, &arena, &routing));
+      const uint16_t source_column = west ? 7 : 0;
+      const uint16_t destination_column = west ? 5 : 2;
+      const uint16_t source_row = north ? 2 : 5;
+      const uint16_t destination_row = north ? 3 : 2;
+      loom_aie2p_array_route_tree_t payloads[6] = {};
+      for (uint16_t i = 0; i < (north ? 6 : 4); ++i) {
+        const loom_xdna_tile_coordinate_t memory = {source_column, 1};
+        const loom_xdna_tile_coordinate_t core = {
+            source_column, static_cast<uint16_t>(3 + i / 2)};
+        ASSERT_TRUE(loom_aie2p_array_route_workers(
+            &routing, i, &payloads[i], north ? memory : core, north ? i : i % 2,
+            north ? core : memory, north ? i % 2 : i, false));
+      }
+      const size_t begin = routing.route_count;
+      loom_aie2p_array_route_tree_t control = {};
+      ASSERT_TRUE(loom_aie2p_array_route_stream(
+          &routing, 6, &control, {source_column, source_row},
+          LOOM_XDNA_STREAM_PORT_CORE, 0, {destination_column, destination_row},
+          LOOM_XDNA_STREAM_PORT_CORE, 0, true));
+      // When the sender's preferred vertical prefix is full, the equally
+      // short route turns in the receiving column instead.
+      ASSERT_EQ(routing.route_count - begin, north ? 4u : 6u);
+      for (size_t i = begin; i + 1 < routing.route_count; ++i) {
+        const auto& edge = routing.routes[i];
+        if (edge.destination_port == LOOM_XDNA_STREAM_PORT_EAST ||
+            edge.destination_port == LOOM_XDNA_STREAM_PORT_WEST) {
+          EXPECT_EQ(edge.coordinate.row, source_row);
+        } else {
+          EXPECT_EQ(edge.coordinate.column, destination_column);
+        }
+      }
+      const auto& terminal = routing.routes[routing.route_count - 1];
+      EXPECT_EQ(terminal.coordinate.column, destination_column);
+      EXPECT_EQ(terminal.coordinate.row, destination_row);
+      EXPECT_EQ(terminal.destination_port, LOOM_XDNA_STREAM_PORT_CORE);
+    }
+  }
+}
+
 TEST_F(Aie2pComputeRouteTest, BranchesAvoidSaturatedDestinationColumns) {
   const auto* family = loom_xdna_npu2_array_family();
   for (bool west : {false, true}) {
@@ -343,8 +439,9 @@ TEST_F(Aie2pComputeRouteTest, BranchesAvoidSaturatedDestinationColumns) {
         EXPECT_EQ(north ? routing.link_channels.northbound[link]
                         : routing.link_channels.southbound[link],
                   north ? 63u : 15u);
-        // Both turn orders have an existing sender-owned prefix. The first
-        // attempt must discard its tentative packet filters before retrying.
+        // Both turn orders have an existing sender-owned prefix. Circuits
+        // retry their failed horizontal-first route; packets use the shared
+        // vertical prefix directly.
         ASSERT_TRUE(loom_aie2p_array_route_stream(
             &routing, 6, &control, source, LOOM_XDNA_STREAM_PORT_CORE, 0,
             {destination_column, source_row}, LOOM_XDNA_STREAM_PORT_CORE, 0,
