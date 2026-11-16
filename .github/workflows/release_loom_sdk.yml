@@ -180,6 +180,10 @@ jobs:
   github:
     name: Publish / GitHub assets
     needs: [identity, bundle]
+    if: >-
+      always() &&
+      needs.identity.result == 'success' &&
+      needs.bundle.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -218,7 +222,11 @@ jobs:
   pypi:
     name: Publish / PyPI wheels
     needs: [identity, github]
-    if: needs.identity.outputs.release_channel == 'stable'
+    if: >-
+      always() &&
+      needs.identity.result == 'success' &&
+      needs.github.result == 'success' &&
+      needs.identity.outputs.release_channel == 'stable'
     runs-on: ubuntu-24.04
     environment:
       name: pypi
