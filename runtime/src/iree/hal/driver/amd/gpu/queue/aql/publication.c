@@ -467,8 +467,14 @@ iree_hal_amd_gpu_aql_publish_result_t iree_hal_amd_gpu_aql_publish(
   // dispatch. Native AGENT acquisition clears near caches; explicit payload
   // scopes remain stronger when requested. Other input producers acquire their
   // entire prepared group at SYSTEM scope before its first consumer.
+  // Profiling and separate completion packets do not consume argument bytes
+  // and cannot change this ownership proof. GPU-prepared and caller-owned
+  // arguments retain their independent acquisition protocol.
+  const bool isolated_arguments = queue->producer.argument_cache_isolated &&
+                                  dispatch && !indirect &&
+                                  !indirect_arguments && !cooperative;
   const uint32_t acquire =
-      queue->producer.argument_cache_isolated && run_eligible
+      isolated_arguments
           ? iree_max(before & (3u << 9),
                      argument_length && argument_offset == 0
                          ? IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM
