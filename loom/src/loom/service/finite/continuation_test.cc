@@ -27,6 +27,7 @@
 #include "loom/runtime/program/jit.h"
 #include "loom/runtime/program/program.h"
 #include "loom/runtime/service_schedule.h"
+#include "loom/runtime/telemetry/stream.h"
 #include "loom/runtime/testing/application.h"
 #include "loom/runtime/testing/jit.h"
 #include "loom/runtime/testing/service_control.h"
@@ -653,9 +654,11 @@ class FiniteContinuation : public ::testing::Test {
     const char* source_path = std::getenv("LOOM_FINITE_CONTINUATION_SOURCE");
     ASSERT_NE(source_path, nullptr);
     IREE_ASSERT_OK(source_.Initialize(device_, pool, source_path));
+    IREE_ASSERT_OK(loom_runtime_telemetry_stream_allocate(
+        2, iree_allocator_system(), &history_));
     IREE_ASSERT_OK(loom_service_finite_service_allocate(
         loom_runtime_device_host(device_), source_.generator(),
-        loom_service_embedding_protocol(), IREE_SV("sum"), 4, 0, 0, nullptr,
+        loom_service_embedding_protocol(), IREE_SV("sum"), 4, 0, 0, history_,
         scheduling_.binding(), iree_allocator_system(), &service_));
     interface_ = loom_service_finite_service_interface(service_);
     loom_runtime_driver_initialize(1, &interface_.runtime, &driver_);
@@ -684,6 +687,7 @@ class FiniteContinuation : public ::testing::Test {
       loom_runtime_device_group_set_observer(group_, {});
     }
     IREE_EXPECT_OK(source_.Retire());
+    loom_runtime_telemetry_stream_free(history_);
     iree_hal_semaphore_release(source_.gate);
     iree_status_free(driver_.status);
     iree_notification_deinitialize(&notification_);
@@ -821,6 +825,8 @@ class FiniteContinuation : public ::testing::Test {
   loom_service_finite_service_t* service_ = nullptr;
   // Composition-owned observations outliving the engine and source borrowers.
   loom_runtime::testing::ServiceControl scheduling_;
+  // Bounded event history deliberately smaller than one full request lifetime.
+  loom_runtime_telemetry_stream_t* history_ = nullptr;
   // Borrowed scheduler, request inspection, and telemetry capabilities.
   loom_service_finite_service_interface_t interface_ = {};
   // Shared owner driver for the placed service.
@@ -1290,6 +1296,15 @@ TEST_F(FiniteContinuation, DeviceEstimatesFollowCollectedSourceHistory) {
     ASSERT_NO_FATAL_FAILURE(ProgressUntil(
         [&] { return Offer().work == LOOM_RUNTIME_SERVICE_WORK_EXECUTION; }));
     const auto execution = Offer();
+    if (epoch) {
+      // Earlier epochs ran with no history reader. A late reader misses real
+      // service events, but source estimates and current control stay intact.
+      uint64_t cursor = 0;
+      loom_runtime_telemetry_record_t record;
+      EXPECT_EQ(loom_runtime_telemetry_stream_read(history_, &cursor, &record),
+                LOOM_RUNTIME_TELEMETRY_READ_GAP);
+      EXPECT_GT(cursor, 0u);
+    }
     loom_runtime_service_choice_t choice = {};
     ASSERT_EQ(
         loom_runtime_service_read_choice(control, execution.key, 0, &choice),

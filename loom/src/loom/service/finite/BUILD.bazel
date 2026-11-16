@@ -304,6 +304,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/program",
         "//loom/src/loom/runtime/program:input",
         "//loom/src/loom/runtime/program:jit",
+        "//loom/src/loom/runtime/telemetry:stream",
         "//loom/src/loom/runtime/testing:application",
         "//loom/src/loom/runtime/testing:jit",
         "//loom/src/loom/runtime/testing:service_control",
