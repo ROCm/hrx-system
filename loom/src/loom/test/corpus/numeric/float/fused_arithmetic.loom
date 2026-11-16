@@ -48,7 +48,7 @@ func.def @fma_nan_f16_reference(%input: buffer, %finite: buffer, %output: buffer
   func.return
 }
 
-check.scenario @fma_nan_f16_values {
+check.scenario @fma_f16_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(31745) step(1) : tensor<4xi16>
     %finite = check.generate.fill value(2.0) : tensor<4xf16>
@@ -65,7 +65,92 @@ check.scenario @fma_nan_f16_values {
       check.expect.bitwise actual(%output) expected(%output) : tensor<24xi16>
     }
   }
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %a_bits, %b_bits, %c_bits, %expected_bits = check.generate<@scalar_fma_f16_case>(%trial) : (index) -> (i16, i16, i16, i16)
+    check.compare<@scalar_fma_f16_bits, @scalar_fma_f16_bits_oracle>(%a_bits, %b_bits, %c_bits, %expected_bits) : (i16, i16, i16, i16) -> [actual(%actual: i16), expected(%expected: i16)] {
+      check.expect.bitwise actual(%actual) expected(%expected) : i16
+    }
+  }
   check.return
+}
+
+// Curated finite cases cover exact arithmetic, the minimum subnormal,
+// overflow cancellation, even and odd halfway rounding, a result that differs
+// from separately rounded multiply/add, and signed zero. The oracle receives
+// independent expected encodings instead of sharing floating arithmetic.
+func.def inline @scalar_fma_f16_case(%trial: index) -> (i16, i16, i16, i16) {
+  %a_bits, %b_bits, %c_bits, %expected_bits = scf.switch %trial -> (i16, i16, i16, i16) {
+    case 0 {
+      %a = scalar.constant 15872 : i16
+      %b = scalar.constant 16384 : i16
+      %c = scalar.constant -18432 : i16
+      %expected = scalar.constant 16640 : i16
+      scf.yield %a, %b, %c, %expected : i16, i16, i16, i16
+    }
+    case 1 {
+      %a = scalar.constant 1 : i16
+      %b = scalar.constant 15360 : i16
+      %c = scalar.constant 0 : i16
+      %expected = scalar.constant 1 : i16
+      scf.yield %a, %b, %c, %expected : i16, i16, i16, i16
+    }
+    case 2 {
+      %a = scalar.constant 31743 : i16
+      %b = scalar.constant 16384 : i16
+      %c = scalar.constant -1025 : i16
+      %expected = scalar.constant 31743 : i16
+      scf.yield %a, %b, %c, %expected : i16, i16, i16, i16
+    }
+    case 3 {
+      %a = scalar.constant 15360 : i16
+      %b = scalar.constant 15360 : i16
+      %c = scalar.constant 4096 : i16
+      %expected = scalar.constant 15360 : i16
+      scf.yield %a, %b, %c, %expected : i16, i16, i16, i16
+    }
+    case 4 {
+      %a = scalar.constant 15361 : i16
+      %b = scalar.constant 15360 : i16
+      %c = scalar.constant 4096 : i16
+      %expected = scalar.constant 15362 : i16
+      scf.yield %a, %b, %c, %expected : i16, i16, i16, i16
+    }
+    case 5 {
+      %a = scalar.constant 15361 : i16
+      %b = scalar.constant 15359 : i16
+      %c = scalar.constant -17408 : i16
+      %expected = scalar.constant 4094 : i16
+      scf.yield %a, %b, %c, %expected : i16, i16, i16, i16
+    }
+    case 6 {
+      %a = scalar.constant -32768 : i16
+      %b = scalar.constant 16384 : i16
+      %c = scalar.constant -32768 : i16
+      %expected = scalar.constant -32768 : i16
+      scf.yield %a, %b, %c, %expected : i16, i16, i16, i16
+    }
+    default {
+      %a = scalar.constant 1 : i16
+      %b = scalar.constant 14336 : i16
+      %c = scalar.constant 0 : i16
+      %expected = scalar.constant 0 : i16
+      scf.yield %a, %b, %c, %expected : i16, i16, i16, i16
+    }
+  }
+  func.return %a_bits, %b_bits, %c_bits, %expected_bits : i16, i16, i16, i16
+}
+
+func.def @scalar_fma_f16_bits(%a_bits: i16, %b_bits: i16, %c_bits: i16, %expected_bits: i16) -> (i16) {
+  %a = scalar.bitcast %a_bits : i16 to f16
+  %b = scalar.bitcast %b_bits : i16 to f16
+  %c = scalar.bitcast %c_bits : i16 to f16
+  %result = scalar.fmaf %a, %b, %c : f16
+  %result_bits = scalar.bitcast %result : f16 to i16
+  func.return %result_bits : i16
+}
+
+func.def @scalar_fma_f16_bits_oracle(%a_bits: i16, %b_bits: i16, %c_bits: i16, %expected_bits: i16) -> (i16) {
+  func.return %expected_bits : i16
 }
 
 func.def @fma_nan_f32(%input: buffer, %finite: buffer, %output: buffer) {

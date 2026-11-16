@@ -55,7 +55,7 @@ typedef struct loom_low_source_invocation_call_t {
 } loom_low_source_invocation_call_t;
 
 typedef struct loom_low_source_invocation_return_t {
-  // One verified direct-body exit and its complete result tuple.
+  // One verified callable return and its complete result tuple.
   const loom_op_t* source;
   // Next exit of the same function.
   struct loom_low_source_invocation_return_t* next;
@@ -79,7 +79,7 @@ struct loom_low_source_invocation_function_t {
   loom_low_source_invocation_call_t* incoming;
   // Native edges retained by the same call-graph traversal.
   loom_low_source_invocation_native_call_t* native_calls;
-  // Direct-body returns joined into the result summary.
+  // Body and EXIT-region returns joined into the result summary.
   loom_low_source_invocation_return_t* returns;
   // Result summary in function-result coordinates, owned by boundary facts.
   loom_value_facts_t* results;
@@ -241,6 +241,68 @@ static iree_status_t loom_low_source_invocation_collect_call(
   caller->call_result_count += loom_call_like_results(call).count;
   ++work->call_count;
   return iree_ok_status();
+}
+
+static iree_status_t loom_low_source_invocation_collect_return(
+    void* user_data, loom_symbol_id_t function_symbol,
+    const loom_op_t* source) {
+  loom_low_source_invocation_worklist_t* work = user_data;
+  loom_low_source_invocation_function_t* function =
+      &work->functions[function_symbol];
+  loom_low_source_invocation_return_t* exit = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(work->arena, sizeof(*exit), (void**)&exit));
+  *exit = (loom_low_source_invocation_return_t){.source = source,
+                                                .next = function->returns};
+  function->returns = exit;
+  return iree_ok_status();
+}
+
+static bool loom_low_source_invocation_is_return(
+    const loom_low_source_invocation_worklist_t* work,
+    const loom_low_source_invocation_function_t* function, const loom_op_t* op,
+    const loom_walk_context_t* context) {
+  if (function->source.op->result_count == 0) {
+    return false;
+  }
+  if (loom_func_like_op_is_body_exit(work->module, function->source, op)) {
+    return true;
+  }
+  if (!context->parent_op || !context->block ||
+      loom_block_const_last_op(context->block) != op) {
+    return false;
+  }
+  const loom_region_descriptor_t* body_descriptor =
+      loom_func_like_body_region_descriptor(work->module, function->source);
+  const loom_op_vtable_t* parent_vtable =
+      loom_op_vtable(work->module, context->parent_op);
+  loom_region_t* const* regions = loom_op_regions(context->parent_op);
+  for (uint8_t i = 0; i < context->parent_op->region_count; ++i) {
+    if (regions[i] != context->region) {
+      continue;
+    }
+    const loom_region_descriptor_t* descriptor =
+        loom_op_vtable_region_descriptor(parent_vtable, i);
+    return descriptor && descriptor->execution == LOOM_REGION_EXECUTION_EXIT &&
+           body_descriptor &&
+           loom_region_descriptor_matches_terminator(body_descriptor, op->kind);
+  }
+  return false;
+}
+
+static iree_status_t loom_low_source_invocation_collect_operation(
+    void* user_data, uint16_t node_index, loom_op_t* op, loom_call_like_t call,
+    const loom_walk_context_t* context) {
+  (void)call;
+  loom_low_source_invocation_worklist_t* work = user_data;
+  const loom_symbol_id_t function_symbol =
+      work->facts->call_graph.nodes[node_index].symbol_id;
+  loom_low_source_invocation_function_t* function =
+      &work->functions[function_symbol];
+  return loom_low_source_invocation_is_return(work, function, op, context)
+             ? loom_low_source_invocation_collect_return(user_data,
+                                                         function_symbol, op)
+             : iree_ok_status();
 }
 
 static iree_status_t loom_low_source_invocation_narrow(
@@ -563,22 +625,6 @@ static iree_status_t loom_low_source_invocation_initialize_function(
         module, loom_op_const_results(function->source.op)[i],
         function->selection);
   }
-  if (result_count) {
-    loom_block_t* block = NULL;
-    loom_region_for_each_block(loom_func_like_body(function->source), block) {
-      const loom_op_t* terminator = loom_block_const_last_op(block);
-      if (!loom_func_like_op_is_body_exit(module, function->source,
-                                          terminator)) {
-        continue;
-      }
-      loom_low_source_invocation_return_t* exit = NULL;
-      IREE_RETURN_IF_ERROR(
-          iree_arena_allocate(work->arena, sizeof(*exit), (void**)&exit));
-      *exit = (loom_low_source_invocation_return_t){.source = terminator,
-                                                    .next = function->returns};
-      function->returns = exit;
-    }
-  }
   loom_low_source_invocation_enqueue(work, function);
   return iree_ok_status();
 }
@@ -687,6 +733,7 @@ iree_status_t loom_low_source_invocation_facts_compute(
             {
                 .user_data = &work,
                 .function = loom_low_source_invocation_collect_function,
+                .operation = loom_low_source_invocation_collect_operation,
                 .call = loom_low_source_invocation_collect_call,
             },
     };

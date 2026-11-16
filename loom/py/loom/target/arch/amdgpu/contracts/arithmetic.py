@@ -141,6 +141,7 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_add_f16",
     "amdgpu.v_sub_f16",
     "amdgpu.v_mul_f16",
+    "amdgpu.v_fma_f16",
     "amdgpu.v_fma_f32",
     "amdgpu.v_fma_f32.neg_a",
     "amdgpu.v_fma_f32.neg_a_one",
@@ -1424,6 +1425,24 @@ def _vector_integer_conversion_recipe_rules() -> tuple[RecipeRule, ...]:
         (vector.vector_uitofp, ("amdgpu.v_cvt_f32_u32",), integer_to_float_pairs),
         (vector.vector_fptosi, ("amdgpu.v_cvt_i32_f32",), float_to_integer_pairs),
         (vector.vector_fptoui, ("amdgpu.v_cvt_u32_f32",), float_to_integer_pairs),
+        (
+            vector.vector_fptosi,
+            ("amdgpu.v_cvt_i32_f64",),
+            (
+                (_VEC_F64_STATIC, _VEC_I8_PACKED),
+                (_VEC_F64_STATIC, _VEC_I16_PACKED_STORAGE),
+                (_VEC_F64_STATIC, _VEC_I32_STATIC),
+            ),
+        ),
+        (
+            vector.vector_fptoui,
+            ("amdgpu.v_cvt_u32_f64",),
+            (
+                (_VEC_F64_STATIC, _VEC_I8_PACKED),
+                (_VEC_F64_STATIC, _VEC_I16_PACKED_STORAGE),
+                (_VEC_F64_STATIC, _VEC_I32_STATIC),
+            ),
+        ),
         (
             vector.vector_sitofp,
             ("amdgpu.v_perm_b32", "amdgpu.v_pk_add_f16", "amdgpu.v_xor_b32.lit"),
@@ -2975,41 +2994,6 @@ def _i64_to_f32_rule(source_op: Op, *, signed: bool) -> DescriptorRule:
             ),
         ),
         emit=tuple(emit),
-    )
-
-
-def _narrow_f32_to_integer_rule(
-    source_op: Op,
-    result_type: TypePattern,
-    result_bit_width: int,
-    conversion_descriptor_key: str,
-) -> DescriptorRule:
-    conversion_descriptor = _descriptor(conversion_descriptor_key)
-    extract_descriptor = _descriptor("amdgpu.v_bfe_i32.offset_width_inline")
-    return DescriptorRule(
-        source_op=source_op,
-        descriptor=conversion_descriptor,
-        guards=(
-            _value_type("input", _F32),
-            _value_type("result", result_type),
-            Guard.low_value_register_class("result", "amdgpu.vgpr"),
-            Guard.descriptor_available(conversion_descriptor),
-            Guard.descriptor_available(extract_descriptor),
-        ),
-        emit=(
-            EmitDescriptorOp(
-                descriptor=conversion_descriptor,
-                operands={"input": _f32_vgpr_operand("input")},
-                results={"dst": ValueRef.temporary("wide_result")},
-                result_types={"dst": ValueRef.result("result")},
-            ),
-            EmitDescriptorOp(
-                descriptor=extract_descriptor,
-                operands={"value": ValueRef.temporary("wide_result")},
-                results={"dst": ValueRef.result("result")},
-                immediates={"offset": 0, "width": result_bit_width},
-            ),
-        ),
     )
 
 
@@ -4648,19 +4632,43 @@ def _rules() -> tuple[ContractCase, ...]:
             _i64_to_f64_rule(scalar_conversion.scalar_sitofp, signed=True),
         )
     )
-    for source_op, conversion_descriptor_key in (
-        (scalar_conversion.scalar_fptosi, "amdgpu.v_cvt_i32_f32"),
-        (scalar_conversion.scalar_fptoui, "amdgpu.v_cvt_u32_f32"),
+    for source_op, input_type, conversion_descriptor_key, input_materializer in (
+        (
+            scalar_conversion.scalar_fptosi,
+            _F32,
+            "amdgpu.v_cvt_i32_f32",
+            F32_VGPR_MATERIALIZER,
+        ),
+        (
+            scalar_conversion.scalar_fptoui,
+            _F32,
+            "amdgpu.v_cvt_u32_f32",
+            F32_VGPR_MATERIALIZER,
+        ),
+        (
+            scalar_conversion.scalar_fptosi,
+            _F64,
+            "amdgpu.v_cvt_i32_f64",
+            None,
+        ),
+        (
+            scalar_conversion.scalar_fptoui,
+            _F64,
+            "amdgpu.v_cvt_u32_f64",
+            None,
+        ),
     ):
-        for result_type, result_bit_width in ((_I8, 8), (_I16, 16)):
-            rules.append(
-                _narrow_f32_to_integer_rule(
-                    source_op,
-                    result_type,
-                    result_bit_width,
-                    conversion_descriptor_key,
-                )
+        rules.extend(
+            _cast_rule(
+                source_op,
+                input_type,
+                result_type,
+                conversion_descriptor_key,
+                input_materializer=input_materializer,
+                extra_guards=(Guard.low_value_register_class("result", "amdgpu.vgpr"),),
             )
+            for result_type in (_I8, _I16)
+        )
     rules.extend(
         (
             *_packed_float_binary_rules(
@@ -5094,6 +5102,7 @@ def _rules() -> tuple[ContractCase, ...]:
             _divf_exact_rule(scalar_arithmetic.scalar_divf, _F32),
             _divf_f64_rule(scalar_arithmetic.scalar_divf, _F64, allow_reciprocal=True),
             _divf_f64_rule(scalar_arithmetic.scalar_divf, _F64, allow_reciprocal=False),
+            _fma_rule(scalar_math.scalar_fmaf, _F16, "amdgpu.v_fma_f16"),
             *_f32_fma_rules(scalar_math.scalar_fmaf, _F32),
             _fma_rule(scalar_math.scalar_fmaf, _F64, "amdgpu.v_fma_f64"),
             _unary_rule(scalar_math.scalar_exp2f, _F32, "amdgpu.v_exp_f32"),

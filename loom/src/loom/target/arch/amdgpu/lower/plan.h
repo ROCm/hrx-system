@@ -666,6 +666,8 @@ typedef struct loom_amdgpu_vector_conversion_plan_t {
   loom_scalar_type_t result_element_type;
   // True when byte permutation can broadcast its exponent from an SGPR.
   bool scalar_exponent;
+  // True when the lane descriptor consumes every source register.
+  bool consume_full_source_lane;
   // Static source lane payload bit count.
   uint32_t source_bit_count;
   // Static result lane payload bit count.

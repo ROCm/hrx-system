@@ -605,7 +605,7 @@ _SPIRV_EXECUTION_ALLOWED_FAILURES = {
     # therefore differ from the reference while their ordinary-value scenarios
     # remain strict.
     "numeric/float/comparison.loom:@scalar_float_comparison_sources": "EXPECT/002",
-    "numeric/float/fused_arithmetic.loom:@fma_nan_f16_values": "TARGET/003",
+    "numeric/float/fused_arithmetic.loom:@fma_f16_values": "TARGET/003",
     "numeric/float/fused_arithmetic.loom:@fma_nan_f32_values": "TARGET/003",
     "numeric/float/fused_arithmetic.loom:@fma_nan_f64_values": "TARGET/003",
     "numeric/float/inverse_hyperbolic.loom:@inverse_f32_boundaries": "EXPECT/006",

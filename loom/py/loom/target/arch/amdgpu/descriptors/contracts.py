@@ -120,6 +120,7 @@ _AMDGPU_CONTRACT_DESCRIPTOR_OVERLAY_BUILDERS: dict[
     "amdgpu.v_sub_f64": _v_sub_f64_overlay,
     "amdgpu.v_sub_f16": _v_sub_f16_overlay,
     "amdgpu.v_mul_f16": _v_mul_f16_overlay,
+    "amdgpu.v_fma_f16": _v_fma_f16_overlay,
     **_contract_overlay_builders_from_overlays(_v_binary_f64_overlays()),
     **_contract_overlay_builders_from_overlays(_v_fma_overlays(32)),
     "amdgpu.v_fmaak_f32": _v_fmaak_f32_overlay,

@@ -173,3 +173,64 @@ check.scenario @vector_return_values {
   }
   check.return
 }
+
+// Returns through an EXIT region or the ordinary function terminator. Retained
+// call summaries must join both paths so guarded uses observe the complete
+// result range.
+func.def device @early_or_negative(%candidate: i64, %take: i1) -> (i64) {
+  func.exit %take : i1 {
+    func.return %candidate : i64
+  }
+  %absent = scalar.constant -1 : i64
+  func.return %absent : i64
+}
+
+func.def @early_exit_observation(%input: i64, %output: buffer) {
+  %candidate_mask = scalar.constant 63 : i64
+  %candidate = scalar.andi %input, %candidate_mask : i64
+  %selector_mask = scalar.constant 1 : i64
+  %selector = scalar.andi %input, %selector_mask : i64
+  %selector_threshold = scalar.constant 0 : i64
+  %take = scalar.cmpi ne, %selector, %selector_threshold : i64
+  %result = func.call @early_or_negative(%candidate, %take) : (i64, i1) -> (i64)
+  %negative = scalar.cmpi slt, %result, %selector_threshold : i64
+  %true = scalar.constant true : i1
+  %nonnegative = scalar.xori %negative, %true : i1
+  %observed = scf.if %nonnegative -> (i64) {
+    %bounded = scalar.assume %result [range(%result, 0, 63)] : i64
+    scf.yield %bounded : i64
+  } else {
+    scf.yield %result : i64
+  }
+  %origin = index.constant 0 : offset
+  %result_view = buffer.view %output[%origin] : buffer -> view<1xi64>
+  view.store %observed, %result_view[0] : i64, view<1xi64>
+  func.return
+}
+
+func.def @early_exit_oracle(%input: i64, %output: buffer) {
+  %candidate_mask = scalar.constant 63 : i64
+  %candidate = scalar.andi %input, %candidate_mask : i64
+  %selector_mask = scalar.constant 1 : i64
+  %selector = scalar.andi %input, %selector_mask : i64
+  %selector_threshold = scalar.constant 0 : i64
+  %take = scalar.cmpi ne, %selector, %selector_threshold : i64
+  %absent = scalar.constant -1 : i64
+  %expected = scf.select %take, %candidate, %absent : i64
+  %origin = index.constant 0 : offset
+  %result_view = buffer.view %output[%origin] : buffer -> view<1xi64>
+  view.store %expected, %result_view[0] : i64, view<1xi64>
+  func.return
+}
+
+check.scenario @early_exit_values {
+  check.trial[128](%trial: index, %entropy: check.entropy) {
+    %input_source = check.entropy.fork %entropy name("input") : check.entropy
+    %input = check.entropy.read %input_source[%trial] : check.entropy -> i64
+    %output = check.generate.fill value(0) : tensor<1xi64>
+    check.compare<@early_exit_observation, @early_exit_oracle>(%input, %output) : (i64, tensor<1xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1xi64>
+    }
+  }
+  check.return
+}

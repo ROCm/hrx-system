@@ -546,3 +546,59 @@ check.scenario @bf16_to_integer_4_fractional {
   }
   check.return
 }
+
+// Scalar and vector F64 conversions share the native 32-bit conversion before
+// narrowing. Keep both shapes observable with fractional values spanning each
+// destination type's defined range.
+func.def @f64_to_subword_integer(%signed_i8_input: buffer, %unsigned_i8_input: buffer, %signed_i16_input: buffer, %unsigned_i16_input: buffer, %i8_output: buffer, %i16_output: buffer) {
+  %base = index.constant 0 : offset
+  %signed_i8_source = buffer.view %signed_i8_input[%base] : buffer -> view<4xf64>
+  %unsigned_i8_source = buffer.view %unsigned_i8_input[%base] : buffer -> view<4xf64>
+  %signed_i16_source = buffer.view %signed_i16_input[%base] : buffer -> view<4xf64>
+  %unsigned_i16_source = buffer.view %unsigned_i16_input[%base] : buffer -> view<4xf64>
+  %i8_result = buffer.view %i8_output[%base] : buffer -> view<10xi8>
+  %i16_result = buffer.view %i16_output[%base] : buffer -> view<10xi16>
+
+  %signed_i8_scalar = view.load %signed_i8_source[0] : view<4xf64> -> f64
+  %unsigned_i8_scalar = view.load %unsigned_i8_source[3] : view<4xf64> -> f64
+  %signed_i8_scalar_result = scalar.fptosi %signed_i8_scalar : f64 to i8
+  %unsigned_i8_scalar_result = scalar.fptoui %unsigned_i8_scalar : f64 to i8
+  view.store %signed_i8_scalar_result, %i8_result[0] : i8, view<10xi8>
+  view.store %unsigned_i8_scalar_result, %i8_result[1] : i8, view<10xi8>
+  %signed_i8_vector = vector.load %signed_i8_source[0] : view<4xf64> -> vector<4xf64>
+  %unsigned_i8_vector = vector.load %unsigned_i8_source[0] : view<4xf64> -> vector<4xf64>
+  %signed_i8_vector_result = vector.fptosi %signed_i8_vector : vector<4xf64> to vector<4xi8>
+  %unsigned_i8_vector_result = vector.fptoui %unsigned_i8_vector : vector<4xf64> to vector<4xi8>
+  vector.store %signed_i8_vector_result, %i8_result[2] : vector<4xi8>, view<10xi8>
+  vector.store %unsigned_i8_vector_result, %i8_result[6] : vector<4xi8>, view<10xi8>
+
+  %signed_i16_scalar = view.load %signed_i16_source[0] : view<4xf64> -> f64
+  %unsigned_i16_scalar = view.load %unsigned_i16_source[3] : view<4xf64> -> f64
+  %signed_i16_scalar_result = scalar.fptosi %signed_i16_scalar : f64 to i16
+  %unsigned_i16_scalar_result = scalar.fptoui %unsigned_i16_scalar : f64 to i16
+  view.store %signed_i16_scalar_result, %i16_result[0] : i16, view<10xi16>
+  view.store %unsigned_i16_scalar_result, %i16_result[1] : i16, view<10xi16>
+  %signed_i16_vector = vector.load %signed_i16_source[0] : view<4xf64> -> vector<4xf64>
+  %unsigned_i16_vector = vector.load %unsigned_i16_source[0] : view<4xf64> -> vector<4xf64>
+  %signed_i16_vector_result = vector.fptosi %signed_i16_vector : vector<4xf64> to vector<4xi16>
+  %unsigned_i16_vector_result = vector.fptoui %unsigned_i16_vector : vector<4xf64> to vector<4xi16>
+  vector.store %signed_i16_vector_result, %i16_result[2] : vector<4xi16>, view<10xi16>
+  vector.store %unsigned_i16_vector_result, %i16_result[6] : vector<4xi16>, view<10xi16>
+  func.return
+}
+
+check.scenario @f64_to_subword_integer_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %signed_i8 = check.generate.iota offset(-127.75) step(84.5) : tensor<4xf64>
+    %unsigned_i8 = check.generate.iota offset(0.5) step(84.75) : tensor<4xf64>
+    %signed_i16 = check.generate.iota offset(-32767.75) step(21845.0) : tensor<4xf64>
+    %unsigned_i16 = check.generate.iota offset(0.5) step(21844.5) : tensor<4xf64>
+    %i8_output = check.generate.fill value(42) : tensor<10xi8>
+    %i16_output = check.generate.fill value(42) : tensor<10xi16>
+    check.compare<@f64_to_subword_integer>(%signed_i8, %unsigned_i8, %signed_i16, %unsigned_i16, %i8_output, %i16_output) : (tensor<4xf64>, tensor<4xf64>, tensor<4xf64>, tensor<4xf64>, tensor<10xi8>, tensor<10xi16>) -> () {
+      check.expect.bitwise actual(%i8_output) expected(%i8_output) : tensor<10xi8>
+      check.expect.bitwise actual(%i16_output) expected(%i16_output) : tensor<10xi16>
+    }
+  }
+  check.return
+}
