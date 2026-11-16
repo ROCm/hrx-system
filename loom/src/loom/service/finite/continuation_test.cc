@@ -47,6 +47,10 @@ class ContinuingSource {
             ->topology_index;
     IREE_RETURN_IF_ERROR(
         loom_runtime_device_create_execution(device, pool, &execution));
+    const auto* clock = iree_hal_queue_family_spec(
+        loom_runtime_execution_dispatch_family(execution));
+    timestamp_bits_ = clock->timestamp_valid_bits;
+    iree_unaligned_store_le_u64(&timing_[1], clock->timestamp_frequency_hz);
     IREE_RETURN_IF_ERROR(loom_runtime_residency_allocate(
         loom_runtime_pool_residency_cache(pool), execution, 0, nullptr,
         iree_allocator_system(), &residency_));
@@ -95,6 +99,10 @@ class ContinuingSource {
         IREE_VM_BUFFER_ACCESS_FLAG_READ | IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
         iree_make_byte_span(packet_.data(), sizeof(packet_)), {},
         iree_allocator_system(), &packet_buffer_));
+    IREE_RETURN_IF_ERROR(iree_vm_buffer_wrap(
+        IREE_VM_BUFFER_ACCESS_FLAG_READ | IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
+        iree_make_byte_span(timing_.data(), sizeof(timing_)), {},
+        iree_allocator_system(), &timing_buffer_));
     IREE_RETURN_IF_ERROR(loom_runtime_jit_create(
         loom_runtime_device_handle(device),
         loom_runtime_device_dispatch_queue(device),
@@ -131,6 +139,7 @@ class ContinuingSource {
     loom_runtime_jit_release(std::exchange(jit_, nullptr));
     loom_runtime_execution_release(std::exchange(execution, nullptr));
     iree_vm_buffer_release(std::exchange(packet_buffer_, nullptr));
+    iree_vm_buffer_release(std::exchange(timing_buffer_, nullptr));
     loom_runtime_program_free(std::exchange(program_, nullptr));
     iree_vm_module_release(std::exchange(input_module_, nullptr));
     iree_vm_module_release(std::exchange(batch_module_, nullptr));
@@ -210,9 +219,16 @@ class ContinuingSource {
             },
         .advance_batch =
             [](void* p, bool, bool* complete) {
+              auto* source = static_cast<ContinuingSource*>(p);
               *complete = true;
               return loom_runtime_residency_prepare_working_set(
-                  static_cast<ContinuingSource*>(p)->residency_, 68, 16);
+                  source->residency_, 68, source->OutputBytes());
+            },
+        .device_duration =
+            [](void* p, uint64_t* duration_ns) {
+              return loom_service_finite_batch_device_duration(
+                  static_cast<ContinuingSource*>(p)->batch_module_,
+                  duration_ns);
             },
         .submit =
             [](void* p, loom_service_finite_result_t** result,
@@ -239,6 +255,20 @@ class ContinuingSource {
                   loom_service_finite_batch_end(source->batch_module_, status);
               iree_vm_variant_span_reset(
                   iree_vm_variant_span_from_array(arguments));
+              if (iree_status_is_ok(status) &&
+                  source->submission == Submission::kMeasureDeviceDuration) {
+                const uint64_t begin =
+                    iree_unaligned_load_le_u64(&source->timestamps_[0]);
+                const uint64_t end =
+                    iree_unaligned_load_le_u64(&source->timestamps_[1]);
+                const uint64_t mask =
+                    UINT64_MAX >> (64 - source->timestamp_bits_);
+                iree_unaligned_store_le_u64(&source->timing_[0],
+                                            (end - begin) & mask);
+                iree_unaligned_store_le_u64(&source->timing_[2],
+                                            source->Samples() + 1);
+                memcpy(&source->timing_[3], &source->timing_[5], 16);
+              }
               ++source->collections;
               return status;
             },
@@ -327,7 +357,8 @@ class ContinuingSource {
         loom_service_finite_batch_begin(batch_module_,
                                         LOOM_SERVICE_FINITE_BATCH_PREPARE,
                                         count, work, nullptr),
-        iree_vm_buffer_variant_from_ptr_borrowed(&vm_types_, packet_buffer_)};
+        iree_vm_buffer_variant_from_ptr_borrowed(&vm_types_, packet_buffer_),
+        iree_vm_buffer_variant_from_ptr_borrowed(&vm_types_, timing_buffer_)};
     iree_vm_variant_t plan = {};
     iree_status_t status =
         iree_vm_invoke(loom_runtime_program_invocation(program_), functions_[1],
@@ -349,6 +380,12 @@ class ContinuingSource {
 
   iree_status_t Submit(loom_service_finite_result_t** result,
                        loom_runtime_execution_frontier_t* frontier) {
+    const bool measure = submission == Submission::kMeasureDeviceDuration;
+    if (measure &&
+        (!timestamp_bits_ || !iree_unaligned_load_le_u64(&timing_[1]))) {
+      return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "source requires an advertised queue clock");
+    }
     loom_runtime_residency_cancel_admission(residency_);
     ++submissions;
     uint64_t value = 0;
@@ -384,7 +421,7 @@ class ContinuingSource {
     iree_hal_buffer_t* buffers[2] = {};
     const iree_hal_pool_reservation_request_t allocations[] = {
         iree_hal_make_pool_reservation_request(sizeof(packet_), 16),
-        iree_hal_make_pool_reservation_request(16, 16)};
+        iree_hal_make_pool_reservation_request(OutputBytes(), 16)};
     IREE_RETURN_IF_ERROR(
         loom_runtime_execution_alloca(execution, 2, allocations, buffers));
     const iree_hal_transfer_operation_t packet = {
@@ -402,9 +439,17 @@ class ContinuingSource {
                                             {state_, 0, 160},
                                             {buffers[1], 0, 16}};
     iree_hal_buffer_ref_t scratch[3] = {};
+    if (iree_status_is_ok(status) && measure) {
+      status =
+          loom_runtime_execution_timestamp(execution, buffers[1], 16, &value);
+    }
     if (iree_status_is_ok(status)) {
       status = loom_runtime_dispatch_issue(dispatch_, execution, {3, bindings},
                                            scratch, &value);
+    }
+    if (iree_status_is_ok(status) && measure) {
+      status =
+          loom_runtime_execution_timestamp(execution, buffers[1], 24, &value);
     }
     if (iree_status_is_ok(status)) {
       status = loom_runtime_execution_dealloca(execution, buffers[0], &value);
@@ -413,6 +458,19 @@ class ContinuingSource {
         submission == Submission::kRejectTimestampAfterDispatch) {
       status =
           loom_runtime_execution_timestamp(execution, buffers[1], 3, &value);
+    }
+    if (iree_status_is_ok(status) && measure) {
+      const iree_hal_transfer_operation_t feedback = {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+          .download =
+              {
+                  .source_buffer = buffers[1],
+                  .source_offset = 16,
+                  .target = timestamps_.data(),
+                  .length = sizeof(timestamps_),
+              },
+      };
+      status = loom_runtime_execution_feedback(execution, 1, &feedback, &value);
     }
     if (iree_status_is_ok(status)) {
       auto* output = iree_hal_buffer_allocated_buffer(buffers[1]);
@@ -437,8 +495,12 @@ class ContinuingSource {
     kContinuePublished,
     kOverCapacity,
   };
-  enum class Submission { kExecute, kRejectTimestampAfterDispatch };
-  // Malformed source capture after actual upload, allocation, and dispatch.
+  enum class Submission {
+    kExecute,
+    kMeasureDeviceDuration,
+    kRejectTimestampAfterDispatch,
+  };
+  // Source behavior: ordinary, sampled, or malformed after actual dispatch.
   Submission submission = Submission::kExecute;
   // Authored policy selected to exercise invalid source contracts.
   Collection collection = kProgress;
@@ -481,7 +543,20 @@ class ContinuingSource {
     return iree_unaligned_load_le_u32(bytes.data);
   }
 
+  uint64_t Samples() const { return iree_unaligned_load_le_u64(&timing_[2]); }
+
+  uint64_t LastDurationNs() const {
+    uint64_t duration_ns = 0;
+    EXPECT_TRUE(iree_math_round_mul_div_u64(
+        iree_unaligned_load_le_u64(&timing_[0]), UINT64_C(1000000000),
+        iree_unaligned_load_le_u64(&timing_[1]), &duration_ns));
+    return duration_ns;
+  }
+
  private:
+  uint64_t OutputBytes() const {
+    return submission == Submission::kMeasureDeviceDuration ? 32 : 16;
+  }
   // Immutable device coordinate captured with this source's execution binding.
   uint64_t device_ordinal_ = 0;
   void ReleaseRequest(Request* request) {
@@ -536,6 +611,13 @@ class ContinuingSource {
   std::array<Request*, 4> batch_ = {};
   // Source-authored control packet, reused only after accepted work retires.
   std::array<uint32_t, 17> packet_ = {};
+  // Feedback destination owned by the accepted epoch through collection.
+  std::array<uint64_t, 2> timestamps_ = {};
+  // Cold width of the exact dispatch family's capture clock.
+  uint32_t timestamp_bits_ = 0;
+  // Source history: ticks, frequency, samples, previous shape, prepared shape.
+  // The two shapes each contain cohort count and total source units.
+  std::array<uint64_t, 7> timing_ = {};
   // Stable original membership of the accepted batch.
   size_t count_ = 0;
   // One model-owned VM instance; request continuations are ordinary data.
@@ -552,6 +634,8 @@ class ContinuingSource {
   std::array<iree_vm_function_t, 6> functions_ = {};
   // Reusable borrowed view over the host upload packet.
   iree_vm_buffer_t* packet_buffer_ = nullptr;
+  // CPU source view over collected history, never live device feedback.
+  iree_vm_buffer_t* timing_buffer_ = nullptr;
 };
 
 class FiniteContinuation : public ::testing::Test {
@@ -641,6 +725,40 @@ class FiniteContinuation : public ::testing::Test {
                                       IREE_TIME_INFINITE_FUTURE);
       }
     }
+  }
+  void ProgressUntil(const std::function<bool()>& done) {
+    for (;;) {
+      const auto ticket = iree_notification_prepare_wait(&notification_);
+      auto status = loom_runtime_device_group_advance(group_);
+      bool progress = false;
+      status = iree_status_join(
+          status, loom_service_finite_service_progress(service_, 0, &progress));
+      const bool complete = done();
+      if (!complete && !progress && iree_status_is_ok(status) &&
+          !interface_.runtime.vtable->is_pending(interface_.runtime.self)) {
+        status = iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "no accepted work can satisfy progress-only predicate");
+      }
+      if (complete || progress || !iree_status_is_ok(status)) {
+        iree_notification_cancel_wait(&notification_);
+      } else {
+        iree_notification_commit_wait(&notification_, ticket,
+                                      IREE_DURATION_ZERO,
+                                      IREE_TIME_INFINITE_FUTURE);
+      }
+      IREE_ASSERT_OK(status);
+      if (complete) {
+        break;
+      }
+    }
+  }
+  loom_runtime_service_offer_t Offer() {
+    loom_runtime_service_offer_t offer = {};
+    EXPECT_EQ(loom_runtime_service_read_offer(scheduling_.binding().control, 0,
+                                              &offer),
+              LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    return offer;
   }
   void RemoveService() {
     ASSERT_FALSE(
@@ -932,23 +1050,9 @@ TEST_F(FiniteContinuation, FailedStartRetainsItsAcceptedOperation) {
   IREE_ASSERT_OK(loom_service_finite_service_try_schedule(service_, offer.key,
                                                           0, 0, &accepted));
   ASSERT_NE(accepted.serial, 0u);
-  while (offer.work != LOOM_RUNTIME_SERVICE_WORK_EXECUTION) {
-    const auto ticket = iree_notification_prepare_wait(&notification_);
-    auto status = loom_runtime_device_group_advance(group_);
-    bool progress = false;
-    status = iree_status_join(
-        status, loom_service_finite_service_progress(service_, 0, &progress));
-    const auto read = loom_runtime_service_read_offer(control, 0, &offer);
-    const bool ready = read == LOOM_RUNTIME_SERVICE_READ_COMPLETE &&
-                       offer.work == LOOM_RUNTIME_SERVICE_WORK_EXECUTION;
-    if (ready || progress || !iree_status_is_ok(status)) {
-      iree_notification_cancel_wait(&notification_);
-    } else {
-      iree_notification_commit_wait(&notification_, ticket, IREE_DURATION_ZERO,
-                                    IREE_TIME_INFINITE_FUTURE);
-    }
-    IREE_ASSERT_OK(status);
-  }
+  ASSERT_NO_FATAL_FAILURE(ProgressUntil(
+      [&] { return Offer().work == LOOM_RUNTIME_SERVICE_WORK_EXECUTION; }));
+  offer = Offer();
   const auto before = loom_runtime_execution_frontier(source_.execution);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_service_finite_service_try_schedule(
@@ -971,6 +1075,72 @@ TEST_F(FiniteContinuation, FailedStartRetainsItsAcceptedOperation) {
   EXPECT_EQ(operation.key.serial, accepted.serial);
   IREE_ASSERT_OK(source_.Retire());
   EXPECT_EQ(source_.released, 1u);
+}
+
+TEST_F(FiniteContinuation, DeviceEstimatesFollowCollectedSourceHistory) {
+  source_.submission = ContinuingSource::Submission::kMeasureDeviceDuration;
+  Open(0, R"({"model":"sum","input":[1,2,3,4,5]})");
+  const auto* control = scheduling_.binding().control;
+  uint64_t previous_duration_ns = 0;
+  for (size_t epoch = 0; epoch < 3; ++epoch) {
+    const auto preparation = Offer();
+    ASSERT_EQ(preparation.work, LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
+    loom_runtime_service_operation_key_t accepted;
+    IREE_ASSERT_OK(loom_service_finite_service_try_schedule(
+        service_, preparation.key, 0, 0, &accepted));
+    ASSERT_NE(accepted.serial, 0u);
+    ASSERT_NO_FATAL_FAILURE(ProgressUntil(
+        [&] { return Offer().work == LOOM_RUNTIME_SERVICE_WORK_EXECUTION; }));
+    const auto execution = Offer();
+    loom_runtime_service_choice_t choice = {};
+    ASSERT_EQ(
+        loom_runtime_service_read_choice(control, execution.key, 0, &choice),
+        LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    EXPECT_EQ(choice.estimates, 0u);  // Device time is not whole-unit time.
+    loom_runtime_service_use_t use = {};
+    ASSERT_EQ(loom_runtime_service_read_choice_use(control, execution.key, 0,
+                                                   choice.publication, 0, &use),
+              LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    EXPECT_EQ(source_.Samples(), epoch);
+    // The first cohort has no history; the third has only one remaining unit.
+    EXPECT_EQ(use.estimates,
+              epoch == 1 ? LOOM_RUNTIME_SERVICE_ESTIMATE_DURATION : 0u);
+    if (epoch == 1) {
+      EXPECT_EQ(use.duration_ns, previous_duration_ns);
+    }
+    IREE_ASSERT_OK(loom_service_finite_service_try_schedule(
+        service_, execution.key, 0, 0, &accepted));
+    ASSERT_NE(accepted.serial, 0u);
+    if (epoch == 1) {
+      // The external dependency prevents the next sample from being complete.
+      // Its forecast and accepted resource identity remain independently
+      // usable.
+      bool progress = false;
+      IREE_ASSERT_OK(
+          loom_service_finite_service_progress(service_, 0, &progress));
+      loom_runtime_service_operation_t operation = {};
+      ASSERT_EQ(loom_runtime_service_read_operation(control, accepted.ordinal,
+                                                    &operation),
+                LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+      EXPECT_EQ(operation.waits, LOOM_RUNTIME_SERVICE_WAIT_DEVICE);
+      EXPECT_EQ(operation.estimates, 0u);
+      ASSERT_EQ(loom_runtime_service_read_operation_use(
+                    control, operation.key, operation.publication, 0, &use),
+                LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+      EXPECT_EQ(use.estimates, LOOM_RUNTIME_SERVICE_ESTIMATE_DURATION);
+      EXPECT_EQ(use.duration_ns, previous_duration_ns);
+      EXPECT_EQ(source_.Samples(), 1u);
+      ReleaseGate();
+    }
+    ASSERT_NO_FATAL_FAILURE(ProgressUntil([&] {
+      return epoch == 2 ? loom_service_finite_call_is_complete(calls_[0])
+                        : Offer().work == LOOM_RUNTIME_SERVICE_WORK_PREPARATION;
+    }));
+    EXPECT_EQ(source_.Samples(), epoch + 1);
+    previous_duration_ns = source_.LastDurationNs();
+  }
+  IREE_ASSERT_OK(loom_service_finite_call_status(calls_[0]));
+  EXPECT_FLOAT_EQ(Read(0), 15.0f);
 }
 
 TEST_F(FiniteContinuation, TerminalOfferRequiresPublishedResult) {

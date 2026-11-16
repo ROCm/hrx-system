@@ -6,6 +6,7 @@
 
 #include "loom/service/finite/batch.h"
 
+#include "iree/base/internal/math.h"
 #include "iree/hal/vm/types.h"
 #include "iree/vm/reflection.h"
 #include "loom/runtime/storage/ranges.h"
@@ -29,6 +30,10 @@ typedef struct loom_service_finite_batch_module_t {
   iree_host_size_t count;
   // Accepted output metadata; NULL while preparing, borrowed while collecting.
   const loom_service_finite_result_t* result;
+  // Source-published device interval, valid only for the prepared cohort.
+  uint64_t device_duration_ns;
+  // Distinguishes an explicit zero-duration forecast from no forecast.
+  bool has_device_duration;
 } loom_service_finite_batch_module_t;
 
 static void loom_service_finite_batch_destroy(void* pointer) {
@@ -66,6 +71,9 @@ iree_vm_variant_t loom_service_finite_batch_begin(
   module->requests = requests;
   module->count = count;
   module->result = result;
+  if (phase == LOOM_SERVICE_FINITE_BATCH_PREPARE) {
+    module->has_device_duration = false;
+  }
   return iree_vm_variant_from_ptr_borrowed(module, &batch_type);
 }
 
@@ -91,6 +99,17 @@ iree_status_t loom_service_finite_batch_end(iree_vm_module_t* base,
   return status;
 }
 
+bool loom_service_finite_batch_device_duration(const iree_vm_module_t* base,
+                                               uint64_t* out_duration_ns) {
+  const loom_service_finite_batch_module_t* module =
+      (const loom_service_finite_batch_module_t*)base;
+  if (!module->has_device_duration) {
+    return false;
+  }
+  *out_duration_ns = module->device_duration_ns;
+  return true;
+}
+
 enum loom_service_finite_batch_function_e {
   BATCH_FINISH,
   BATCH_COUNT,
@@ -99,6 +118,7 @@ enum loom_service_finite_batch_function_e {
   BATCH_ORIGIN,
   BATCH_STATE,
   BATCH_BUFFER,
+  BATCH_ESTIMATE_DEVICE_DURATION,
   BATCH_OFFER,
 };
 
@@ -126,7 +146,23 @@ static iree_status_t loom_service_finite_batch_start(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "finite device views require submission");
   }
-  if (function == BATCH_COUNT) {
+  if (function == BATCH_ESTIMATE_DEVICE_DURATION) {
+    if (batch->phase != LOOM_SERVICE_FINITE_BATCH_PREPARE) {
+      return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                              "device duration estimates require preparation");
+    }
+    const uint64_t ticks = iree_vm_call_value_argument_load(call, 0);
+    const uint64_t frequency = iree_vm_call_value_argument_load(call, 1);
+    uint64_t duration_ns = 0;
+    if (!iree_math_round_mul_div_u64(ticks, UINT64_C(1000000000), frequency,
+                                     &duration_ns)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "device duration requires a positive clock "
+                              "frequency and representable nanoseconds");
+    }
+    batch->device_duration_ns = duration_ns;
+    batch->has_device_duration = true;
+  } else if (function == BATCH_COUNT) {
     iree_vm_call_value_result_store(call, 0, batch->count);
   } else if (function == BATCH_FINISH) {
     for (iree_host_size_t i = 0; i < batch->count; ++i) {
@@ -201,6 +237,10 @@ static const iree_vm_module_signature_type_t root_arguments[] = {
     {IREE_VM_SCALAR_TYPE_I32, 0}};
 static const iree_vm_module_signature_type_t root_result[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 2}};
+static const iree_vm_module_signature_type_t duration_arguments[] = {
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 1},
+    {IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_SCALAR_TYPE_I64, 0}};
 static const iree_vm_module_signature_type_t offer_arguments[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 1},
     {IREE_VM_SCALAR_TYPE_I64, 0},
@@ -226,6 +266,7 @@ static const iree_vm_module_callable_type_declaration_t batch_callables[] = {
                    .results = {buffer_results, 1, 0, 1, 0}}},
     {.signature = {.arguments = {root_arguments, 3, 2, 1, 0},
                    .results = {root_result, 1, 0, 1, 0}}},
+    {.signature = {.arguments = {duration_arguments, 3, 2, 1, 0}}},
     {.signature = {.arguments = {offer_arguments, 4, 3, 1, 0}}},
 };
 
@@ -236,6 +277,9 @@ static const iree_vm_module_export_declaration_t batch_exports[] = {
     {.export_name = IREE_SVL("batch_count"),
      .callable_type_ordinal = BATCH_COUNT,
      .function_ordinal = BATCH_COUNT},
+    {.export_name = IREE_SVL("batch_estimate_device_duration"),
+     .callable_type_ordinal = BATCH_ESTIMATE_DEVICE_DURATION,
+     .function_ordinal = BATCH_ESTIMATE_DEVICE_DURATION},
     {.export_name = IREE_SVL("batch_finish"),
      .callable_type_ordinal = BATCH_FINISH,
      .function_ordinal = BATCH_FINISH},
@@ -318,7 +362,7 @@ iree_status_t loom_service_finite_batch_module_create(
       .counts = {.function_count = IREE_ARRAYSIZE(batch_exports),
                  .callable_type_count = IREE_ARRAYSIZE(batch_callables),
                  .export_count = IREE_ARRAYSIZE(batch_exports),
-                 .callable_fields = {.value_count = 10, .ref_count = 12}},
+                 .callable_fields = {.value_count = 12, .ref_count = 13}},
   };
   iree_status_t status = iree_vm_module_initialize(
       &batch_vtable, &module->descriptor, &module->base);

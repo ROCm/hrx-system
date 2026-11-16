@@ -6,6 +6,8 @@ func.decl import("finite", "batch_state") @finite_batch_state(%batch: ptr<@Finit
 
 func.decl import("finite", "batch_offer") @finite_batch_offer(%batch: ptr<@FiniteBatch>, %ordinal: i64, %units: i64, %tag: i64)
 
+func.decl import("finite", "batch_estimate_device_duration") @finite_batch_estimate_device_duration(%batch: ptr<@FiniteBatch>, %ticks: i64, %frequency: i64)
+
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
 // Request state owns its cursor and input. One row publishes only its final
@@ -131,7 +133,7 @@ func.def @collect(%state: buffer, %packet: buffer, %ordinal32: i32) -> (i64, i64
 
 // One VM call plans the whole cohort. Original member ordinals also index the
 // device packet and result directory, including members cancelled after submit.
-func.def public @prepare_batch(%batch: ptr<@FiniteBatch>, %packet: buffer) -> (buffer) {
+func.def public @prepare_batch(%batch: ptr<@FiniteBatch>, %packet: buffer, %timing: buffer) -> (buffer) {
   %count64 = func.call @finite_batch_count(%batch) : (ptr<@FiniteBatch>) -> (i64)
   %bounded_count = scalar.assume %count64 [range(%count64, 1, 4)] : i64
   %count = index.cast %bounded_count : i64 to index
@@ -143,14 +145,33 @@ func.def public @prepare_batch(%batch: ptr<@FiniteBatch>, %packet: buffer) -> (b
   %c1_i64 = scalar.constant 1 : i64
   %count_view = buffer.view %packet[%origin] : buffer -> view<1xi32>
   view.store %count32, %count_view[0] : i32, view<1xi32>
-  %row_count = scf.for %i = [%c0 to %count step %c1](%total = %c0_i64 : i64) -> (i64) {
+  %row_count, %units = scf.for %i = [%c0 to %count step %c1](%total = %c0_i64 : i64, %work = %c0_i64 : i64) -> (i64, i64) {
     %ordinal = index.cast %i : index to i64
     %ordinal32 = scalar.trunci %ordinal : i64 to i32
     %request = func.call @finite_batch_state(%batch, %ordinal) : (ptr<@FiniteBatch>, i64) -> (buffer)
     %final, %consumed = func.call @prepare_work(%request, %packet, %ordinal32) : (buffer, buffer, i32) -> (i64, i64)
     %next = scalar.addi %total, %final : i64
-    scf.yield %next : i64
+    %next_work = scalar.addi %work, %consumed : i64
+    scf.yield %next, %next_work : i64, i64
   }
+  // An estimate belongs to this prepared shape; merely having history is not
+  // enough. Only successful collection updates the previous shape and ticks.
+  %history = buffer.view %timing[%origin] : buffer -> view<7xi64>
+  %samples = view.load %history[2] : view<7xi64> -> i64
+  %previous_count = view.load %history[3] : view<7xi64> -> i64
+  %previous_units = view.load %history[4] : view<7xi64> -> i64
+  %has_sample = scalar.cmpi ne, %samples, %c0_i64 : i64
+  %same_count = scalar.cmpi eq, %count64, %previous_count : i64
+  %same_units = scalar.cmpi eq, %units, %previous_units : i64
+  %same_shape = scalar.andi %same_count, %same_units : i1
+  %estimated = scalar.andi %has_sample, %same_shape : i1
+  scf.if %estimated {
+    %ticks = view.load %history[0] : view<7xi64> -> i64
+    %frequency = view.load %history[1] : view<7xi64> -> i64
+    func.call @finite_batch_estimate_device_duration(%batch, %ticks, %frequency) : (ptr<@FiniteBatch>, i64, i64)
+  }
+  view.store %count64, %history[5] : i64, view<7xi64>
+  view.store %units, %history[6] : i64, view<7xi64>
   %bounded_rows = scalar.assume %row_count [range(%row_count, 0, 4)] : i64
   %rows = index.cast %bounded_rows : i64 to index
   %header_bytes = index.constant 32 : offset

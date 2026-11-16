@@ -102,6 +102,8 @@ struct loom_service_finite_service_t {
     uint64_t next_serial;
     // Accepted identity and origin, retained through failed-model retirement.
     loom_runtime_service_operation_t operation;
+    // Copied device-duration forecast for this prepared cohort, or unknown.
+    loom_runtime_service_use_t device_use;
   } scheduling;
   // Pending jobs in FIFO order; arrivals do not alter a live CPU snapshot.
   loom_service_finite_job_t** pending;
@@ -691,6 +693,15 @@ static iree_status_t loom_service_finite_collect(
     return status;
   }
   if (service->phase == FINITE_PREPARING) {
+    service->scheduling.device_use = (loom_runtime_service_use_t){
+        .resource_ordinal = service->generator.device_ordinal};
+    if (service->prepared_count &&
+        service->generator.vtable->device_duration(
+            service->generator.self,
+            &service->scheduling.device_use.duration_ns)) {
+      service->scheduling.device_use.estimates =
+          LOOM_RUNTIME_SERVICE_ESTIMATE_DURATION;
+    }
     loom_service_finite_prepared(service);
   } else if (service->phase == FINITE_RUNNING) {
     for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {
@@ -748,7 +759,7 @@ static void loom_service_finite_publish(
     service->scheduling.arrivals = arrivals;
   }
   const uint64_t devices = UINT64_C(1) << service->generator.device_ordinal;
-  const loom_runtime_service_use_t use = {
+  const loom_runtime_service_use_t preparation_use = {
       .resource_ordinal = service->generator.device_ordinal};
   const loom_runtime_service_choice_publication_t choice = {
       .choice = {.instance_ordinal =
@@ -756,7 +767,9 @@ static void loom_service_finite_publish(
                  .request_count = request_count,
                  .devices = devices,
                  .use_count = 1},
-      .uses = &use};
+      .uses = work == LOOM_RUNTIME_SERVICE_WORK_EXECUTION
+                  ? &service->scheduling.device_use
+                  : &preparation_use};
   loom_runtime_service_control_t* control = service->scheduling.binding.control;
   loom_runtime_service_publish_offer(control, offer, &choice);
 
@@ -773,7 +786,11 @@ static void loom_service_finite_publish(
   }
   operation->devices = operation->key.serial ? devices : 0;
   operation->use_count = operation->key.serial ? 1 : 0;
-  loom_runtime_service_publish_operation(control, operation, &use);
+  loom_runtime_service_publish_operation(
+      control, operation,
+      operation->work == LOOM_RUNTIME_SERVICE_WORK_EXECUTION
+          ? &service->scheduling.device_use
+          : &preparation_use);
   const loom_runtime_service_observation_t observation = {
       .owned_request_count = service->count,
       .waiting_request_count =

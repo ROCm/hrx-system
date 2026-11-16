@@ -32,6 +32,7 @@ iree_vm_ref_type_t loom_service_finite_batch_type(void);
 //   batch_release(ptr<batch>, i64 ordinal)
 //   batch_offer(ptr<batch>, i64 ordinal, i64 units, i64 tag)
 //   batch_finish(ptr<batch>)
+//   batch_estimate_device_duration(ptr<batch>, i64 ticks, i64 frequency_hz)
 // State buffers retain their identity across epochs. batch_pack explicitly
 // copies them into the ordinary upload directory; continuing sources can
 // instead construct only the next epoch's control packet. batch_offer and
@@ -41,6 +42,10 @@ iree_vm_ref_type_t loom_service_finite_batch_type(void);
 // queue ownership. batch_origin is in source units. Zero units finishes a
 // member; positive units describe its next epoch, with equal tags permitting
 // batching.
+// Device-duration estimates are optional, preparation-only forecasts for the
+// current cohort. Source history and shape matching belong to the source.
+// Positive frequency converts ticks to ns with checked nearest rounding; zero
+// ticks is a valid estimate. No publication leaves the new cohort unknown.
 iree_status_t loom_service_finite_batch_module_create(
     iree_vm_environment_t* environment, const iree_hal_vm_types_t* hal_types,
     uint64_t batch_limit, iree_allocator_t host_allocator,
@@ -68,6 +73,12 @@ iree_vm_variant_t loom_service_finite_batch_begin(
 // Consumes the source invocation status, preserving its error on failure.
 iree_status_t loom_service_finite_batch_end(iree_vm_module_t* module,
                                             iree_status_t status);
+
+// Copies the prepared cohort's source estimate after its CPU loan has joined.
+// False means unknown and leaves out_duration_ns untouched. This never invokes
+// source code or reads feedback still borrowed by device work.
+bool loom_service_finite_batch_device_duration(const iree_vm_module_t* module,
+                                               uint64_t* out_duration_ns);
 
 #ifdef __cplusplus
 }  // extern "C"

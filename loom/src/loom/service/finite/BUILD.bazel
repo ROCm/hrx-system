@@ -209,6 +209,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/storage:ranges",
         "//loom/src/loom/service:prepared_request",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal/vm:types",
         "//runtime/src/iree/vm",
     ],

@@ -233,6 +233,20 @@ valid, and successful completion establishes that the sample was written.
 Each queued epoch owns separate sample slots until its readers retire; a later
 capture must not overwrite feedback that is still in flight.
 
+Finite sources can publish a prepared cohort's device-duration forecast with
+`finite.batch_estimate_device_duration(batch, duration_ticks, frequency_hz)`
+during `prepare_batch`. The source owns its history and decides when the current
+cohort is comparable to a prior sample. A new preparation starts with no estimate;
+an explicit zero is valid. The native boundary checks the frequency and converts
+ticks to nanoseconds with nearest rounding, rejecting unrepresentable durations.
+
+The service copies this value after CPU preparation returns ownership and
+publishes it with the offered device use. Acceptance retains that estimate with
+the operation even after the offer disappears. Observation reads published
+atomic words without invoking the source or reading live feedback. A device
+interval does not establish whole-operation latency, remaining time, or the
+interval's position relative to host collection and delivery.
+
 ### Read checkpoint bytes on demand
 
 Large lookup tables and paged experts can remain in checkpoint files instead

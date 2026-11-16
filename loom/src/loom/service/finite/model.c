@@ -1588,6 +1588,13 @@ static iree_status_t loom_service_finite_generator_collect(
     const loom_service_finite_result_t* result) {
   return loom_service_finite_model_collect_batch(self, count, work, result);
 }
+
+static bool loom_service_finite_generator_device_duration(
+    void* self, uint64_t* out_duration_ns) {
+  const loom_service_finite_model_t* model = self;
+  return loom_service_finite_batch_device_duration(model->control.batch,
+                                                   out_duration_ns);
+}
 static void loom_service_finite_generator_complete(void* self) {
   loom_service_finite_model_complete(self);
 }
@@ -1610,6 +1617,7 @@ loom_service_finite_generator_t loom_service_finite_model_generator(
       .capacity_generation = loom_service_finite_generator_capacity_generation,
       .prepare_batch = loom_service_finite_generator_prepare_batch,
       .advance_batch = loom_service_finite_generator_advance_batch,
+      .device_duration = loom_service_finite_generator_device_duration,
       .submit = loom_service_finite_generator_submit,
       .collect = loom_service_finite_generator_collect,
       .complete = loom_service_finite_generator_complete,

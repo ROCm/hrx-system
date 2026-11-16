@@ -59,6 +59,10 @@ typedef struct loom_service_finite_generator_vtable_t {
                                  const iree_host_size_t* expected_rows);
   // Owner-only asynchronous specialization; complete permits admission.
   iree_status_t (*advance_batch)(void* self, bool cancel, bool* out_complete);
+  // Copies the prepared cohort's source-owned device interval estimate after
+  // CPU preparation joins. False means unknown and leaves the output intact.
+  // This is not whole-unit latency and never samples a device or calls source.
+  bool (*device_duration)(void* self, uint64_t* out_duration_ns);
   // Queues accepted work once. Results retain output and a dependency, not
   // request state, parameters, programs, or the generator itself.
   iree_status_t (*submit)(void* self, loom_service_finite_result_t** out_result,
