@@ -125,7 +125,7 @@ func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: 
     %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
     %28 = index.cast %27 : i64 to offset
     %29 = buffer.view %input[%28] : buffer -> view<1xi32>
-    %30 = view.load<root_in_bounds> %29[0] : view<1xi32> -> i32
+    %30 = view.load<root_in_bounds|type_disjoint> %29[0] : view<1xi32> -> i32
     %total$31 = scalar.addi %total$17, %30 : i32
     scf.yield %total$31 : i32
   }
@@ -151,7 +151,7 @@ kernel.def @scheduled_sum_unroll_3_depth_2() {
     %64 = scalar.assume %177 [range(%177, 0, 9223372036854775807)] : i64
     %65 = index.cast %64 : i64 to offset
     %66 = buffer.view %output[%65] : buffer -> view<1xi32>
-    view.store<root_in_bounds> %58, %66[0] : i32, view<1xi32>
+    view.store<root_in_bounds|type_disjoint> %58, %66[0] : i32, view<1xi32>
   }
   kernel.return
 }
@@ -253,13 +253,13 @@ func.def @scheduled_sum_oracle(%input: buffer, %output: buffer, %rows$126: i32, 
       %input_position$154 = index.cast %153 : i64 to index
       %input_position$155, %input_extent = index.assume %input_position$154, %input_extent$132 [lt(%input_position$154, %input_extent$132)] : index, index
       %input_values = buffer.view %input[%134] : buffer -> view<[%input_extent]xi32>
-      %160 = view.load %input_values[%input_position$155] : view<[%input_extent]xi32> -> i32
+      %160 = view.load<type_disjoint> %input_values[%input_position$155] : view<[%input_extent]xi32> -> i32
       %total$161 = scalar.addi %total$148, %160 : i32
       scf.yield %total$161 : i32
     }
     %162 = scalar.extui %141 : i32 to i64
     %163 = index.cast %162 : i64 to index
-    view.store %total$149, %output_values[%163] : i32, view<7xi32>
+    view.store<type_disjoint> %total$149, %output_values[%163] : i32, view<7xi32>
   }
   func.return
 }

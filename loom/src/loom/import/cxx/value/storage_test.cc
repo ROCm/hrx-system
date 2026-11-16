@@ -164,12 +164,14 @@ TEST_F(StorageTest, DefinedAccessesPromiseRootBoundsWithoutExtentQueries) {
   auto* load = producer(value);
   ASSERT_TRUE(loom_view_load_isa(load));
   EXPECT_EQ(loom_view_load_memory_flags(load),
-            LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS);
+            LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS |
+                LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT);
   storage.store(access, value, integer, owner);
   auto* store = loom_block_const_last_op(loom_module_block(module_));
   ASSERT_TRUE(loom_view_store_isa(store));
   EXPECT_EQ(loom_view_store_memory_flags(store),
-            LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS);
+            LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS |
+                LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT);
 
   for (auto* op = loom_module_block(module_)->first_op; op; op = op->next_op) {
     EXPECT_FALSE(loom_buffer_length_isa(op));
@@ -498,8 +500,9 @@ TEST_F(StorageTest, ResolvedArrayAccessRetainsIndexAndMemoryQualifiers) {
   auto* load = producer(value);
   ASSERT_TRUE(loom_view_load_isa(load));
   EXPECT_EQ(loom_view_load_view(load), allocation.view);
-  EXPECT_EQ(loom_view_load_memory_flags(load),
-            LOOM_MEMORY_ACCESS_FLAG_VOLATILE);
+  EXPECT_EQ(
+      loom_view_load_memory_flags(load),
+      LOOM_MEMORY_ACCESS_FLAG_VOLATILE | LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT);
   ASSERT_EQ(loom_view_load_indices(load).count, 1u);
   EXPECT_EQ(loom_view_load_indices(load).values[0], *access.index);
   storage.store(access, value, element, owner);
@@ -507,8 +510,9 @@ TEST_F(StorageTest, ResolvedArrayAccessRetainsIndexAndMemoryQualifiers) {
   ASSERT_TRUE(loom_view_store_isa(store));
   EXPECT_EQ(loom_view_store_view(store), allocation.view);
   EXPECT_EQ(loom_view_store_value(store), value);
-  EXPECT_EQ(loom_view_store_memory_flags(store),
-            LOOM_MEMORY_ACCESS_FLAG_VOLATILE);
+  EXPECT_EQ(
+      loom_view_store_memory_flags(store),
+      LOOM_MEMORY_ACCESS_FLAG_VOLATILE | LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT);
   ASSERT_EQ(loom_view_store_indices(store).count, 1u);
   EXPECT_EQ(loom_view_store_indices(store).values[0], *access.index);
 }
@@ -582,16 +586,18 @@ TEST_F(StorageTest, BooleanByteAccessRetainsAliasesIndicesAndQualifiers) {
   auto* load = producer(loom_scalar_cmpi_lhs(truth));
   ASSERT_TRUE(loom_view_load_isa(load));
   EXPECT_EQ(loom_view_load_view(load), allocation.view);
-  EXPECT_EQ(loom_view_load_memory_flags(load),
-            LOOM_MEMORY_ACCESS_FLAG_VOLATILE);
+  EXPECT_EQ(
+      loom_view_load_memory_flags(load),
+      LOOM_MEMORY_ACCESS_FLAG_VOLATILE | LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT);
   EXPECT_EQ(loom_view_load_indices(load).values[0], *access.index);
   storage.store(access, value, element, owner);
   auto* store = loom_block_const_last_op(loom_module_block(module_));
   ASSERT_TRUE(loom_view_store_isa(store));
   EXPECT_EQ(loom_view_store_view(store), allocation.view);
   EXPECT_EQ(loom_view_store_indices(store).values[0], *access.index);
-  EXPECT_EQ(loom_view_store_memory_flags(store),
-            LOOM_MEMORY_ACCESS_FLAG_VOLATILE);
+  EXPECT_EQ(
+      loom_view_store_memory_flags(store),
+      LOOM_MEMORY_ACCESS_FLAG_VOLATILE | LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT);
   EXPECT_EQ(loom_type_element_type(
                 loom_module_value_type(module_, loom_view_store_value(store))),
             LOOM_SCALAR_TYPE_I8);

@@ -33,7 +33,7 @@ func.def public @complete_temporary(%output: buffer, %output_byte_offset: offset
   %8 = scalar.constant 0 : i32
   %9, %10 = func.call pure @Slice__operator_call_value(%slice_pointer, %slice_pointer_byte_offset, %slice_lower, %slice_stride, %8) : (buffer, offset, i32, i32, i32) -> (buffer, offset)
   %11 = buffer.view %9[%10] : buffer -> view<1xf64>
-  %12 = view.load<root_in_bounds> %11[0] : view<1xf64> -> f64
+  %12 = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xf64> -> f64
   func.return %12 : f64
 }
 
@@ -109,7 +109,7 @@ func.def public @conditional_temporary(%choose: i1, %first: buffer, %first_byte_
   %14 = scalar.constant 1 : i32
   %15, %16 = func.call pure @Slice__operator_call_value(%slice_pointer, %slice_pointer_byte_offset, %slice_lower, %slice_stride, %14) : (buffer, offset, i32, i32, i32) -> (buffer, offset)
   %17 = buffer.view %15[%16] : buffer -> view<1xf64>
-  %18 = view.load<root_in_bounds> %17[0] : view<1xf64> -> f64
+  %18 = view.load<root_in_bounds|type_disjoint> %17[0] : view<1xf64> -> f64
   func.return %18 : f64
 }
 
@@ -117,7 +117,7 @@ func.def public @mutable_temporary(%input: buffer, %input_byte_offset: offset) -
   %slice_stride = scalar.constant 1 : i32
   %26, %27 = func.call pure @Slice__operator_call_value(%input, %input_byte_offset, %slice_stride, %slice_stride, %slice_stride) : (buffer, offset, i32, i32, i32) -> (buffer, offset)
   %28 = buffer.view %26[%27] : buffer -> view<1xf64>
-  %29 = view.load<root_in_bounds> %28[0] : view<1xf64> -> f64
+  %29 = view.load<root_in_bounds|type_disjoint> %28[0] : view<1xf64> -> f64
   func.return %29 : f64
 }
 
@@ -129,7 +129,7 @@ func.def public @branch_mutation(%choose: i1, %input: buffer, %input_byte_offset
   %slice_stride$66 = scf.select %choose, %slice_stride$35, %slice_stride$41 : i32
   %43, %44 = func.call pure @Slice__operator_call_value(%input, %input_byte_offset, %slice_lower$65, %slice_stride$66, %slice_stride$41) : (buffer, offset, i32, i32, i32) -> (buffer, offset)
   %45 = buffer.view %43[%44] : buffer -> view<1xf64>
-  %46 = view.load<root_in_bounds> %45[0] : view<1xf64> -> f64
+  %46 = view.load<root_in_bounds|type_disjoint> %45[0] : view<1xf64> -> f64
   func.return %46 : f64
 }
 
@@ -187,7 +187,7 @@ func.def public @projected_temporary(%input: buffer, %input_byte_offset: offset)
   %9 = scalar.assume %7 [range(%7, 0, 9223372036854775807)] : i64
   %10 = index.cast %9 : i64 to offset
   %11 = buffer.view %input[%10] : buffer -> view<1xf64>
-  %12 = view.load<root_in_bounds> %11[0] : view<1xf64> -> f64
+  %12 = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xf64> -> f64
   func.call @Owner___Owner_value(%input, %input_byte_offset) : (buffer, offset)
   func.return %12 : f64
 }
@@ -278,7 +278,7 @@ func.def public @nested_temporary(%first: buffer, %first_byte_offset: offset, %s
   %10 = scalar.constant 3 : i32
   %11, %12 = func.call pure @Slice__operator_call_value(%second, %second_byte_offset, %nested_slices_1_lower, %nested_slices_1_stride, %10) : (buffer, offset, i32, i32, i32) -> (buffer, offset)
   %13 = buffer.view %11[%12] : buffer -> view<1xf64>
-  %14 = view.load<root_in_bounds> %13[0] : view<1xf64> -> f64
+  %14 = view.load<root_in_bounds|type_disjoint> %13[0] : view<1xf64> -> f64
   func.return %14 : f64
 }
 
@@ -288,7 +288,7 @@ func.def public @array_subobject_temporary(%first: buffer, %first_byte_offset: o
   %25 = scalar.constant 3 : i32
   %26, %27 = func.call pure @Slice__operator_call_value(%second, %second_byte_offset, %slice_slices_1_lower, %slice_slices_1_stride, %25) : (buffer, offset, i32, i32, i32) -> (buffer, offset)
   %28 = buffer.view %26[%27] : buffer -> view<1xf64>
-  %29 = view.load<root_in_bounds> %28[0] : view<1xf64> -> f64
+  %29 = view.load<root_in_bounds|type_disjoint> %28[0] : view<1xf64> -> f64
   func.return %29 : f64
 }
 
@@ -305,7 +305,7 @@ func.def public @dynamic_array_subobject_temporary(%index: i32, %first: buffer, 
   %86 = scf.select %44, %slice_slices_0_stride, %slice_slices_1_stride : i32
   %49, %50 = func.call pure @Slice__operator_call_value(%83, %84, %85, %86, %42) : (buffer, offset, i32, i32, i32) -> (buffer, offset)
   %51 = buffer.view %49[%50] : buffer -> view<1xf64>
-  %52 = view.load<root_in_bounds> %51[0] : view<1xf64> -> f64
+  %52 = view.load<root_in_bounds|type_disjoint> %51[0] : view<1xf64> -> f64
   func.return %52 : f64
 }
 
@@ -314,7 +314,7 @@ func.def public @base_subobject_temporary(%input: buffer, %input_byte_offset: of
   %63 = scalar.assume %61 [range(%61, 0, 9223372036854775807)] : i64
   %64 = index.cast %63 : i64 to offset
   %65 = buffer.view %input[%64] : buffer -> view<1xf64>
-  %66 = view.load<root_in_bounds> %65[0] : view<1xf64> -> f64
+  %66 = view.load<root_in_bounds|type_disjoint> %65[0] : view<1xf64> -> f64
   func.return %66 : f64
 }
 
@@ -375,7 +375,7 @@ func.def public @qualified_pointer(%input: buffer, %input_byte_offset: offset) -
   %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
   %pointer_byte_offset = index.cast %9 : i64 to offset
   %11 = buffer.view %input[%pointer_byte_offset] : buffer -> view<1xf32>
-  %12 = view.load<root_in_bounds> %11[0] : view<1xf32> -> f32
+  %12 = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xf32> -> f32
   func.return %12 : f32
 }
 
@@ -396,7 +396,7 @@ func.def public @selected_pointer(%choose: i1, %first: buffer, %first_byte_offse
   %pointer = scf.select %35, %first, %second : buffer
   %pointer_byte_offset = scf.select %35, %first_byte_offset, %second_byte_offset : offset
   %38 = buffer.view %pointer[%pointer_byte_offset] : buffer -> view<1xf32>
-  %39 = view.load<root_in_bounds> %38[0] : view<1xf32> -> f32
+  %39 = view.load<root_in_bounds|type_disjoint> %38[0] : view<1xf32> -> f32
   func.return %39 : f32
 }
 
@@ -414,7 +414,7 @@ func.def public @mutate_pointer(%input: buffer, %input_byte_offset: offset, %amo
   %57 = scalar.assume %56 [range(%56, 0, 9223372036854775807)] : i64
   %pointer_byte_offset$58 = index.cast %57 : i64 to offset
   %59 = buffer.view %input[%pointer_byte_offset$58] : buffer -> view<1xf32>
-  %60 = view.load<root_in_bounds> %59[0] : view<1xf32> -> f32
+  %60 = view.load<root_in_bounds|type_disjoint> %59[0] : view<1xf32> -> f32
   func.return %60 : f32
 }
 
@@ -430,20 +430,20 @@ func.def public @copied_pointer(%input: buffer, %input_byte_offset: offset) -> (
   %78 = scalar.assume %77 [range(%77, 0, 9223372036854775807)] : i64
   %pointer_byte_offset$79 = index.cast %78 : i64 to offset
   %80 = buffer.view %input[%pointer_byte_offset$71] : buffer -> view<1xf32>
-  %81 = view.load<root_in_bounds> %80[0] : view<1xf32> -> f32
+  %81 = view.load<root_in_bounds|type_disjoint> %80[0] : view<1xf32> -> f32
   %82 = buffer.view %input[%pointer_byte_offset$79] : buffer -> view<1xf32>
-  %83 = view.load<root_in_bounds> %82[0] : view<1xf32> -> f32
+  %83 = view.load<root_in_bounds|type_disjoint> %82[0] : view<1xf32> -> f32
   %84 = scalar.addf %81, %83 : f32
   func.return %84 : f32
 }
 
 func.def public @ordered_pointer(%input: buffer, %input_byte_offset: offset, %evaluations: buffer, %evaluations_byte_offset: offset) -> (f32) {
   %90 = buffer.view %evaluations[%evaluations_byte_offset] : buffer -> view<1xi32>
-  %91 = view.load<root_in_bounds> %90[0] : view<1xi32> -> i32
+  %91 = view.load<root_in_bounds|type_disjoint> %90[0] : view<1xi32> -> i32
   %92 = scalar.constant 1 : i32
   %93 = scalar.addi %91, %92 : i32
-  view.store<root_in_bounds> %93, %90[0] : i32, view<1xi32>
-  %95 = view.load<root_in_bounds> %90[0] : view<1xi32> -> i32
+  view.store<root_in_bounds|type_disjoint> %93, %90[0] : i32, view<1xi32>
+  %95 = view.load<root_in_bounds|type_disjoint> %90[0] : view<1xi32> -> i32
   %96 = scalar.extsi %95 : i32 to i64
   %121 = scalar.constant 2 : i64
   %122 = scalar.shli %96, %121 : i64
@@ -452,7 +452,7 @@ func.def public @ordered_pointer(%input: buffer, %input_byte_offset: offset, %ev
   %101 = scalar.assume %100 [range(%100, 0, 9223372036854775807)] : i64
   %pointer_byte_offset = index.cast %101 : i64 to offset
   %103 = buffer.view %input[%pointer_byte_offset] : buffer -> view<1xf32>
-  %104 = view.load<root_in_bounds> %103[0] : view<1xf32> -> f32
+  %104 = view.load<root_in_bounds|type_disjoint> %103[0] : view<1xf32> -> f32
   func.return %104 : f32
 }
 
@@ -497,7 +497,7 @@ func.def public @forwarded_pointer(%choose: i1, %first: buffer, %first_byte_offs
   %81 = scf.select %24, %first, %second : buffer
   %82 = scf.select %24, %13, %21 : offset
   %27 = buffer.view %81[%82] : buffer -> view<1xf32>
-  %28 = view.load<root_in_bounds> %27[0] : view<1xf32> -> f32
+  %28 = view.load<root_in_bounds|type_disjoint> %27[0] : view<1xf32> -> f32
   func.return %28 : f32
 }
 
@@ -535,7 +535,7 @@ func.def @select(%choose: i1, %first: buffer, %first_byte_offset: offset, %secon
 
 func.def @read(%pointer: buffer, %pointer_byte_offset: offset) -> (f32) {
   %74 = buffer.view %pointer[%pointer_byte_offset] : buffer -> view<1xf32>
-  %75 = view.load<root_in_bounds> %74[0] : view<1xf32> -> f32
+  %75 = view.load<root_in_bounds|type_disjoint> %74[0] : view<1xf32> -> f32
   func.return %75 : f32
 }
 

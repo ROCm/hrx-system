@@ -404,15 +404,15 @@ func.def public @mixed_storage_reference_call(%pair: buffer, %pair_byte_offset: 
   %value_storage = buffer.alloca<private> align(4) %6 : buffer
   %value_storage_byte_offset = index.constant 0 : offset
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
-  view.store %value$3, %value_view[0] : i32, view<1xi32>
+  view.store<type_disjoint> %value$3, %value_view[0] : i32, view<1xi32>
   %10, %11 = func.call pure @mixed_storage_reference(%stored, %pair, %pair_byte_offset, %value_storage, %value_storage_byte_offset) : (i1, buffer, offset, buffer, offset) -> (buffer, offset)
   %12 = buffer.view %10[%11] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %next, %12[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %next, %12[0] : i32, view<1xi32>
   %13 = index.constant 4 : offset
   %14 = index.add %pair_byte_offset, %13 : offset
   %15 = buffer.view %pair[%14] : buffer -> view<1xi32>
-  %second = view.load<root_in_bounds> %15[0] : view<1xi32> -> i32
-  %value$17 = view.load %value_view[0] : view<1xi32> -> i32
+  %second = view.load<root_in_bounds|type_disjoint> %15[0] : view<1xi32> -> i32
+  %value$17 = view.load<type_disjoint> %value_view[0] : view<1xi32> -> i32
   %18 = scalar.addi %second, %value$17 : i32
   func.return %18 : i32
 }

@@ -68,17 +68,17 @@ func.def public @escaped_pointer_alias(%box_lower: i32, %box_upper: i32) -> (i32
   %8 = index.add %box_storage_byte_offset, %7 : offset
   %9 = index.assume %8 [range(%8, 0, 4)] : offset
   %10 = buffer.view %box_storage[%9] : buffer -> view<1xi32>
-  view.store %box_lower, %10[0] : i32, view<1xi32>
+  view.store<type_disjoint> %box_lower, %10[0] : i32, view<1xi32>
   %11 = index.constant 4 : offset
   %12 = index.add %box_storage_byte_offset, %11 : offset
   %13 = index.assume %12 [range(%12, 0, 4)] : offset
   %14 = buffer.view %box_storage[%13] : buffer -> view<1xi32>
-  view.store %box_upper, %14[0] : i32, view<1xi32>
+  view.store<type_disjoint> %box_upper, %14[0] : i32, view<1xi32>
   %15, %16 = func.call pure @escape(%box_storage, %box_storage_byte_offset) : (buffer, offset) -> (buffer, offset)
   %17 = index.constant 4 : offset
   %18 = index.add %16, %17 : offset
   %19 = buffer.view %15[%18] : buffer -> view<1xi32>
-  %upper = view.load<root_in_bounds> %19[0] : view<1xi32> -> i32
+  %upper = view.load<root_in_bounds|type_disjoint> %19[0] : view<1xi32> -> i32
   func.return %upper : i32
 }
 
@@ -129,7 +129,7 @@ func.def @operator_call_value(%this_view_data: buffer, %this_view_data_byte_offs
   %17 = scalar.assume %16 [range(%16, 0, 9223372036854775807)] : i64
   %18 = index.cast %17 : i64 to offset
   %19 = buffer.view %this_view_data[%18] : buffer -> view<1xi32>
-  %20 = view.load<root_in_bounds> %19[0] : view<1xi32> -> i32
+  %20 = view.load<root_in_bounds|type_disjoint> %19[0] : view<1xi32> -> i32
   %21 = func.call pure @captured_lower(%this_box_lower) : (i32) -> (i32)
   %22 = scalar.addi %20, %21 : i32
   func.return %22 : i32
@@ -158,26 +158,26 @@ func.def public @rebound_pointer_alias(%choose: i1, %left$1: i32, %right$2: i32)
   %left_storage = buffer.alloca<private> align(4) %4 : buffer
   %left_storage_byte_offset = index.constant 0 : offset
   %left_view = buffer.view %left_storage[%left_storage_byte_offset] : buffer -> view<1xi32>
-  view.store %left$1, %left_view[0] : i32, view<1xi32>
+  view.store<type_disjoint> %left$1, %left_view[0] : i32, view<1xi32>
   %8 = index.constant 4 : offset
   %right_storage = buffer.alloca<private> align(4) %8 : buffer
   %right_storage_byte_offset = index.constant 0 : offset
   %right_view = buffer.view %right_storage[%right_storage_byte_offset] : buffer -> view<1xi32>
-  view.store %right$2, %right_view[0] : i32, view<1xi32>
+  view.store<type_disjoint> %right$2, %right_view[0] : i32, view<1xi32>
   %pointer, %pointer_byte_offset = scf.if %choose -> (buffer, offset) {
     scf.yield %right_storage, %right_storage_byte_offset : buffer, offset
   } else {
     scf.yield %left_storage, %left_storage_byte_offset : buffer, offset
   }
   %14 = buffer.view %pointer[%pointer_byte_offset] : buffer -> view<1xi32>
-  %15 = view.load<root_in_bounds> %14[0] : view<1xi32> -> i32
+  %15 = view.load<root_in_bounds|type_disjoint> %14[0] : view<1xi32> -> i32
   %16 = scalar.constant 1 : i32
   %17 = scalar.addi %15, %16 : i32
-  view.store<root_in_bounds> %17, %14[0] : i32, view<1xi32>
-  %left$18 = view.load %left_view[0] : view<1xi32> -> i32
+  view.store<root_in_bounds|type_disjoint> %17, %14[0] : i32, view<1xi32>
+  %left$18 = view.load<type_disjoint> %left_view[0] : view<1xi32> -> i32
   %19 = scalar.constant 10 : i32
   %20 = scalar.muli %left$18, %19 : i32
-  %right$21 = view.load %right_view[0] : view<1xi32> -> i32
+  %right$21 = view.load<type_disjoint> %right_view[0] : view<1xi32> -> i32
   %22 = scalar.addi %20, %right$21 : i32
   func.return %22 : i32
 }

@@ -26,14 +26,14 @@ kernel.def @paged_online_softmax_loop_f32() {
   %state = buffer.view %state_storage[%query_storage_byte_offset] : buffer -> view<2xf32>
   %output_view = buffer.view %output_storage[%query_storage_byte_offset] : buffer -> view<4xf32>
   %181 = index.constant 0 : index
-  %query_vector = vector.load %query_view[%181] : view<4xf32> -> vector<4xf32>
+  %query_vector = vector.load<type_disjoint> %query_view[%181] : view<4xf32> -> vector<4xf32>
   %maximum$180 = scalar.constant -1000000000.0 : f32
   %denominator$48 = scalar.constant 0.0 : f32
   %184 = index.constant 4 : index
   %maximum$189, %denominator$190, %numerator = scf.for %page_begin = [%181 to %token_count$31 step %184](%maximum$186 = %maximum$180 : f32, %denominator$187 = %denominator$48 : f32, %numerator$188 = %initial_accumulator : vector<4xf32>) -> (f32, f32, vector<4xf32>) {
     %182 = index.constant 2 : index
     %logical_page = index.shrui %page_begin, %182 : index
-    %page_id = view.load %table[%logical_page] : view<8xi32> -> i32
+    %page_id = view.load<type_disjoint> %table[%logical_page] : view<8xi32> -> i32
     %70 = scalar.constant 0 : i32
     %present = scalar.cmpi sge, %page_id, %70 : i32
     %maximum$72, %denominator$73, %numerator$74 = scf.if %present -> (f32, f32, vector<4xf32>) {
@@ -55,8 +55,8 @@ kernel.def @paged_online_softmax_loop_f32() {
           %112 = index.cast %111 : i64 to offset
           %key_row = buffer.view %key_storage[%112] : buffer -> view<4xf32>
           %value_row = buffer.view %value_storage[%112] : buffer -> view<4xf32>
-          %key = vector.load %key_row[%181] : view<4xf32> -> vector<4xf32>
-          %value = vector.load %value_row[%181] : view<4xf32> -> vector<4xf32>
+          %key = vector.load<type_disjoint> %key_row[%181] : view<4xf32> -> vector<4xf32>
+          %value = vector.load<type_disjoint> %value_row[%181] : view<4xf32> -> vector<4xf32>
           %score = vector.dotf %query_vector, %key, %denominator$48 : vector<4xf32>, vector<4xf32>, f32
           %updated_max = scalar.maxnumf %maximum$89, %score : f32
           %old_delta = scalar.subf %maximum$89, %updated_max : f32
@@ -90,9 +90,9 @@ kernel.def @paged_online_softmax_loop_f32() {
   } else {
     scf.yield %initial_accumulator : vector<4xf32>
   }
-  view.store %maximum$189, %state[%181] : f32, view<2xf32>
+  view.store<type_disjoint> %maximum$189, %state[%181] : f32, view<2xf32>
   %167 = index.constant 1 : index
-  view.store %denominator$190, %state[%167] : f32, view<2xf32>
-  vector.store %normalized, %output_view[%181] : vector<4xf32>, view<4xf32>
+  view.store<type_disjoint> %denominator$190, %state[%167] : f32, view<2xf32>
+  vector.store<type_disjoint> %normalized, %output_view[%181] : vector<4xf32>, view<4xf32>
   kernel.return
 }

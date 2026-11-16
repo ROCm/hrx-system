@@ -26,11 +26,11 @@ kernel.def @k() {
   %values_storage_byte_offset = index.constant 0 : offset
   %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<3xi32>
   %15 = index.constant 0 : index
-  view.store %a, %values_view[%15] : i32, view<3xi32>
+  view.store<type_disjoint> %a, %values_view[%15] : i32, view<3xi32>
   %16 = index.constant 1 : index
-  view.store %b, %values_view[%16] : i32, view<3xi32>
+  view.store<type_disjoint> %b, %values_view[%16] : i32, view<3xi32>
   %17 = index.constant 2 : index
-  view.store %c, %values_view[%17] : i32, view<3xi32>
+  view.store<type_disjoint> %c, %values_view[%17] : i32, view<3xi32>
   %sum$18 = scalar.constant 0 : i32
   %19 = scalar.constant 3 : i64
   %20 = scalar.constant 4 : i64
@@ -44,7 +44,7 @@ kernel.def @k() {
     scf.condition %35, %sum, %27, %_byte_offset : i1, i32, buffer, offset
   } do(%sum$29: i32, %30: buffer, %_byte_offset$31: offset) {
     %36 = buffer.view %30[%_byte_offset$31] : buffer -> view<1xi32>
-    %v = view.load<root_in_bounds> %36[0] : view<1xi32> -> i32
+    %v = view.load<root_in_bounds|type_disjoint> %36[0] : view<1xi32> -> i32
     %sum$38 = scalar.addi %sum$29, %v : i32
     %39 = scalar.constant 1 : i32
     %40 = scalar.extsi %39 : i32 to i64
@@ -65,7 +65,7 @@ kernel.def @k() {
   %53 = scalar.assume %52 [range(%52, 0, 9223372036854775807)] : i64
   %54 = index.cast %53 : i64 to offset
   %55 = buffer.view %out[%54] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %sum$32, %55[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %sum$32, %55[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -113,7 +113,7 @@ kernel.def @k() {
   %16 = index.add %13, %15 : offset
   %17 = index.assume %16 [range(%16, 0, 0)] : offset
   %18 = buffer.view %12[%17] : buffer -> view<1xi64>
-  view.store %n, %18[0] : i64, view<1xi64>
+  view.store<type_disjoint> %n, %18[0] : i64, view<1xi64>
   %_i$19 = func.call pure @Range__begin_storage(%12, %13) : (buffer, offset) -> (i64)
   %_i$20 = func.call readonly @Range__end_storage(%12, %13) : (buffer, offset) -> (i64)
   %sum$25, %_i$26 = scf.while(%sum = %sum$10 : i64, %_i = %_i$19 : i64) -> (i64, i64) {
@@ -134,7 +134,7 @@ kernel.def @k() {
   %37 = scalar.assume %36 [range(%36, 0, 9223372036854775807)] : i64
   %38 = index.cast %37 : i64 to offset
   %39 = buffer.view %out[%38] : buffer -> view<1xi64>
-  view.store<root_in_bounds> %sum$25, %39[0] : i64, view<1xi64>
+  view.store<root_in_bounds|type_disjoint> %sum$25, %39[0] : i64, view<1xi64>
   kernel.return
 }
 
@@ -148,7 +148,7 @@ func.def @Range__end_storage(%this: buffer, %this_byte_offset: offset) -> (i64) 
   %48 = index.constant 0 : offset
   %49 = index.add %this_byte_offset, %48 : offset
   %50 = buffer.view %this[%49] : buffer -> view<1xi64>
-  %n = view.load<root_in_bounds> %50[0] : view<1xi64> -> i64
+  %n = view.load<root_in_bounds|type_disjoint> %50[0] : view<1xi64> -> i64
   func.return %n : i64
 }
 

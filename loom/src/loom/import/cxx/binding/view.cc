@@ -223,13 +223,6 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
   };
 
   ViewIntrinsic result(*selected);
-  if (*selected == Operation::Load || *selected == Operation::Store) {
-    result.memory_flags_ =
-        read_memory_access_flags(unit, diagnostics, function, 0,
-                                 LOOM_MEMORY_ACCESS_FLAG_VOLATILE |
-                                     LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS,
-                                 owner);
-  }
   switch (*selected) {
     case Operation::Dim: {
       require_count(1);
@@ -472,6 +465,12 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
       result.result_source_type_ = signature->returnType();
       result.element_partition_ =
           &types.partition(signature->returnType(), owner);
+      result.memory_flags_ = read_memory_access_flags(
+          unit, diagnostics, function, 0,
+          LOOM_MEMORY_ACCESS_FLAG_VOLATILE |
+              LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS |
+              LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT,
+          types.memory_access_flags(result.source_view_->element_type), owner);
       return result;
     }
     case Operation::Store: {
@@ -498,6 +497,12 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
           result.unsigned_argument_mask_ |= uint32_t{1} << index;
         }
       }
+      result.memory_flags_ = read_memory_access_flags(
+          unit, diagnostics, function, 0,
+          LOOM_MEMORY_ACCESS_FLAG_VOLATILE |
+              LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS |
+              LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT,
+          types.memory_access_flags(result.source_view_->element_type), owner);
       return result;
     }
   }
@@ -675,8 +680,8 @@ std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
             builder, location);
       }
       check(loom_view_store_build(
-          builder, 0, source_view_->access_flags | memory_flags_,
-          arguments[0].ssa(), view_component(arguments[1]), indices.data(),
+          builder, 0, memory_flags_, arguments[0].ssa(),
+          view_component(arguments[1]), indices.data(),
           source_view_->extents.size(), static_indices.data(),
           source_view_->extents.size(), 0, 0, location, &op));
       return std::nullopt;

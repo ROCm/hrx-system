@@ -105,7 +105,7 @@ class ViewIntrinsic {
   loom_type_t element_result_ = {};
   // Source representation retained at admission for a loaded element.
   const Partition* element_partition_ = nullptr;
-  // Explicit physical-root proof selected by the source specialization.
+  // Inferred and explicitly selected semantics for one memory observation.
   loom_memory_access_flags_t memory_flags_ = 0;
 };
 

@@ -411,9 +411,11 @@ class Types {
   // Leaf carriers are static; admitted records are owned by this Types object.
   // Qualifiers affect access and ownership, not this representation schema.
   const Partition& partition(const cxx::Type* input, cxx::AST* owner);
-  // Observation semantics of an access through this cv-qualified object type.
+  // Observation semantics of an access through this source object type.
   // Pointers pass their pointee type; the pointer binding's own qualifiers do
-  // not affect the accessed object.
+  // not affect the accessed object. C observations and C++ character, byte,
+  // may_alias, aggregate, and otherwise type-universal objects retain
+  // universal aliasing.
   loom_memory_access_flags_t memory_access_flags(const cxx::Type* input);
   // Returns whether projected component types reference destination SSA
   // identities. Such values must use append_bound() after reserving every

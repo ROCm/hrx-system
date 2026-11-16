@@ -101,7 +101,7 @@ func.def public @wide_load(%position: i32) -> (i32) {
   %12 = scalar.extui %11 : i32 to i64
   %13 = scalar.assume %12 [range(%12, 0, 2)] : i64
   %14 = index.cast %13 : i64 to index
-  %15 = view.load %9[%14] : view<3xi16> -> i16
+  %15 = view.load<type_disjoint> %9[%14] : view<3xi16> -> i16
   %16 = scalar.extui %15 : i16 to i32
   func.return %16 : i32
 }
@@ -344,7 +344,7 @@ func.def public @character_arrays(%position: i32) -> (i32) {
   %22 = scalar.extui %21 : i32 to i64
   %23 = scalar.assume %22 [range(%22, 0, 1)] : i64
   %24 = index.cast %23 : i64 to index
-  %25 = view.load %signed_bytes_view[%24] : view<2xi8> -> i8
+  %25 = view.load<type_disjoint> %signed_bytes_view[%24] : view<2xi8> -> i8
   %26 = scalar.extsi %25 : i8 to i32
   %32 = view.load %unsigned_bytes_view[%24] : view<2xi8> -> i8
   %33 = scalar.extui %32 : i8 to i32
@@ -354,15 +354,15 @@ func.def public @character_arrays(%position: i32) -> (i32) {
   %37 = scalar.extui %36 : i32 to i64
   %38 = scalar.assume %37 [range(%37, 0, 3)] : i64
   %39 = index.cast %38 : i64 to index
-  %40 = view.load %utf8_view[%39] : view<4xi8> -> i8
+  %40 = view.load<type_disjoint> %utf8_view[%39] : view<4xi8> -> i8
   %41 = scalar.extui %40 : i8 to i32
   %42 = scalar.addi %34, %41 : i32
-  %48 = view.load %utf16_view[%39] : view<4xi16> -> i16
+  %48 = view.load<type_disjoint> %utf16_view[%39] : view<4xi16> -> i16
   %49 = scalar.extui %48 : i16 to i32
   %50 = scalar.addi %42, %49 : i32
-  %56 = view.load %utf32_view[%39] : view<4xi32> -> i32
+  %56 = view.load<type_disjoint> %utf32_view[%39] : view<4xi32> -> i32
   %57 = scalar.addi %50, %56 : i32
-  %63 = view.load %wide_view[%39] : view<4xi32> -> i32
+  %63 = view.load<type_disjoint> %wide_view[%39] : view<4xi32> -> i32
   %64 = scalar.addi %57, %63 : i32
   func.return %64 : i32
 }
@@ -394,12 +394,12 @@ func.def public @code_units(%position$0: i32) -> (i32) {
   %17 = buffer.view %15[%16] : buffer -> view<3xi8>
   %19 = scalar.assume %5 [range(%5, 0, 2)] : i64
   %20 = index.cast %19 : i64 to index
-  %21 = view.load %17[%20] : view<3xi8> -> i8
+  %21 = view.load<type_disjoint> %17[%20] : view<3xi8> -> i8
   %22 = scalar.extui %21 : i8 to i32
   %23 = scalar.addi %14, %22 : i32
   %24 = buffer.constant align(2) bytes("3ed8f5dd0000") : buffer
   %26 = buffer.view %24[%16] : buffer -> view<3xi16>
-  %30 = view.load %26[%20] : view<3xi16> -> i16
+  %30 = view.load<type_disjoint> %26[%20] : view<3xi16> -> i16
   %31 = scalar.extui %30 : i16 to i32
   %32 = scalar.addi %23, %31 : i32
   func.return %32 : i32
@@ -426,24 +426,24 @@ func.def public @volatile_wide(%position: i32) -> (i32) {
   %observed_view = buffer.view %observed_storage[%observed_storage_byte_offset] : buffer -> view<4xi16>
   %6 = scalar.constant -10178 : i16
   %8 = buffer.view %observed_storage[%observed_storage_byte_offset] : buffer -> view<1xi16>
-  view.store<volatile> %6, %8[0] : i16, view<1xi16>
+  view.store<volatile|type_disjoint> %6, %8[0] : i16, view<1xi16>
   %9 = scalar.constant -8715 : i16
   %33 = index.constant 2 : offset
   %13 = buffer.view %observed_storage[%33] : buffer -> view<1xi16>
-  view.store<volatile> %9, %13[0] : i16, view<1xi16>
+  view.store<volatile|type_disjoint> %9, %13[0] : i16, view<1xi16>
   %14 = scalar.constant 0 : i16
   %32 = index.constant 4 : offset
   %18 = buffer.view %observed_storage[%32] : buffer -> view<1xi16>
-  view.store<volatile> %14, %18[0] : i16, view<1xi16>
+  view.store<volatile|type_disjoint> %14, %18[0] : i16, view<1xi16>
   %31 = index.constant 6 : offset
   %23 = buffer.view %observed_storage[%31] : buffer -> view<1xi16>
-  view.store<volatile> %14, %23[0] : i16, view<1xi16>
+  view.store<volatile|type_disjoint> %14, %23[0] : i16, view<1xi16>
   %24 = scalar.constant 3 : i32
   %25 = scalar.andi %position, %24 : i32
   %26 = scalar.extui %25 : i32 to i64
   %27 = scalar.assume %26 [range(%26, 0, 3)] : i64
   %28 = index.cast %27 : i64 to index
-  %29 = view.load<volatile> %observed_view[%28] : view<4xi16> -> i16
+  %29 = view.load<volatile|type_disjoint> %observed_view[%28] : view<4xi16> -> i16
   %30 = scalar.extui %29 : i16 to i32
   func.return %30 : i32
 }

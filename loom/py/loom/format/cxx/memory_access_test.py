@@ -51,6 +51,7 @@ def _program() -> str:
                     "Access::root_in_bounds",
                     "Access::volatile_",
                     "Access::volatile_ | Access::root_in_bounds",
+                    "Access::may_alias",
                 )
             ):
                 selector = f"Payload, {flags}" if shape else flags
@@ -149,16 +150,31 @@ def _import(importer: str, source: str) -> Module:
 
 def main(importer: str) -> None:
     original = _import(importer, _program())
-    imported = _import(importer, render_module(original))
+    rendered = render_module(original)
+    imported = _import(importer, rendered)
     expected = _observations(original)
-    # Four ordinary/qualified load-store pairs, then two discarded reads and
-    # two repeated stores. Both the initial importer and reimport must retain it.
-    flags = [None, "root_in_bounds", "volatile", "volatile|root_in_bounds"]
-    sequence = [flag for flag in flags for _ in range(2)] + ["volatile"] * 4
+    # Four ordinary/qualified load-store pairs, one explicitly universal pair,
+    # then two discarded reads and two repeated stores. Both the initial import
+    # and reimport must retain the same observation semantics.
+    flags = [
+        "type_disjoint",
+        "root_in_bounds|type_disjoint",
+        "volatile|type_disjoint",
+        "volatile|root_in_bounds|type_disjoint",
+        None,
+    ]
+    sequence = [flag for flag in flags for _ in range(2)] + [
+        "volatile|type_disjoint"
+    ] * 4
     assert all(
         [access[1] for access in trace] == sequence for trace in expected.values()
     )
-    assert _observations(imported) == expected
+    actual = _observations(imported)
+    assert actual == expected, (
+        f"roundtrip changed memory observations:\n"
+        f"expected: {expected!r}\nactual: {actual!r}\n"
+        f"rendered source:\n{rendered}"
+    )
 
 
 if __name__ == "__main__":

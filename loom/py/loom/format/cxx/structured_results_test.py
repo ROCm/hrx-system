@@ -135,7 +135,7 @@ void widened_view(const unsigned* input, unsigned* output) {
   loom::type::view<loom::type::shape<8>, const unsigned> result;
   bool loop_continues = true;
   do {
-    unsigned active = loom::view::load(before, 0);
+    unsigned active = loom::view::load<loom::memory_access::may_alias>(before, 0);
     bool flag = (active & static_cast<unsigned>(1)) != static_cast<unsigned>(0);
     loop_continues = flag;
     result = large;
@@ -143,9 +143,9 @@ void widened_view(const unsigned* input, unsigned* output) {
       before = small;
     }
   } while (loop_continues);
-  unsigned value = loom::view::load(result, 0);
+  unsigned value = loom::view::load<loom::memory_access::may_alias>(result, 0);
   auto destination = loom::buffer::view<1>(output, {});
-  loom::view::store(value, destination, 0);
+  loom::view::store<loom::memory_access::may_alias>(value, destination, 0);
 }
 """
     )

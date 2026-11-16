@@ -164,7 +164,8 @@ void Intrinsics::declaration(cxx::FunctionSymbol* function,
                SubgroupShuffleIntrinsic::supports(
                    selected->arguments[0]->name()) ||
                BufferIntrinsic::supports(selected->arguments[0]->name()) ||
-               ChannelIntrinsic::supports(selected->arguments[0]->name())) {
+               ChannelIntrinsic::supports(selected->arguments[0]->name()) ||
+               FragmentIntrinsic::supports(selected->arguments[0]->name())) {
       // Concrete specialization owns source type and template-argument
       // validation. Retain the complete descriptor until those are known.
     } else if (selected->arguments.size() != 1 ||
@@ -175,7 +176,6 @@ void Intrinsics::declaration(cxx::FunctionSymbol* function,
                     selected->arguments[0]->name()) &&
                 !AddressIntrinsic::supports(selected->arguments[0]->name()) &&
                 !DecodeIntrinsic::supports(selected->arguments[0]->name()) &&
-                !FragmentIntrinsic::supports(selected->arguments[0]->name()) &&
                 !AsyncIntrinsic::supports(selected->arguments[0]->name()) &&
                 !AtomicIntrinsic::supports(selected->arguments[0]->name()) &&
                 !FenceIntrinsic::supports(selected->arguments[0]->name()) &&

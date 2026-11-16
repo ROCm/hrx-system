@@ -118,7 +118,7 @@ func.def public @update_memory(%packets: buffer, %packets_byte_offset: offset, %
   %24 = scalar.assume %23 [range(%23, 0, 9223372036854775807)] : i64
   %25 = index.cast %24 : i64 to offset
   %26 = buffer.view %packets[%25] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %replacement, %26[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %replacement, %26[0] : i32, view<1xi32>
   %27 = scalar.extui %packet_index$7 : i32 to i64
   %28 = scalar.constant 32 : i64
   %29 = scalar.muli %27, %28 : i64
@@ -136,10 +136,10 @@ func.def public @update_memory(%packets: buffer, %packets_byte_offset: offset, %
   %41 = scalar.assume %40 [range(%40, 0, 9223372036854775807)] : i64
   %42 = index.cast %41 : i64 to offset
   %43 = buffer.view %packets[%42] : buffer -> view<1xi32>
-  %44 = view.load<root_in_bounds> %43[0] : view<1xi32> -> i32
+  %44 = view.load<root_in_bounds|type_disjoint> %43[0] : view<1xi32> -> i32
   %45 = scalar.xori %44, %replacement : i32
   %46 = buffer.view %packets[%42] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %45, %46[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %45, %46[0] : i32, view<1xi32>
   %47 = scalar.addi %packet_index$7, %lane_index$18 : i32
   func.return %47 : i32
 }

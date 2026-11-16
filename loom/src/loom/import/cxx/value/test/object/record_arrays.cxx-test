@@ -110,7 +110,7 @@ func.def public @element(%matrices: buffer, %matrices_byte_offset: offset, %matr
   %49 = scalar.assume %48 [range(%48, 0, 9223372036854775807)] : i64
   %50 = index.cast %49 : i64 to offset
   %51 = buffer.view %matrices[%50] : buffer -> view<1xi16>
-  %52 = view.load<root_in_bounds> %51[0] : view<1xi16> -> i16
+  %52 = view.load<root_in_bounds|type_disjoint> %51[0] : view<1xi16> -> i16
   func.return %52 : i16
 }
 
@@ -130,7 +130,7 @@ func.def public @update(%rows: buffer, %rows_byte_offset: offset, %row: i32, %co
   %70 = scalar.assume %69 [range(%69, 0, 9223372036854775807)] : i64
   %71 = index.cast %70 : i64 to offset
   %72 = buffer.view %rows[%71] : buffer -> view<1xi16>
-  view.store<root_in_bounds> %value, %72[0] : i16, view<1xi16>
+  view.store<root_in_bounds|type_disjoint> %value, %72[0] : i16, view<1xi16>
   func.return
 }
 
@@ -208,11 +208,11 @@ func.def public @update(%records: buffer, %records_byte_offset: offset, %record:
   %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
   %20 = index.cast %19 : i64 to offset
   %21 = buffer.view %records[%20] : buffer -> view<1xi32>
-  %previous = view.load<volatile|root_in_bounds> %21[0] : view<1xi32> -> i32
+  %previous = view.load<volatile|root_in_bounds|type_disjoint> %21[0] : view<1xi32> -> i32
   %23 = scalar.constant 1 : i32
   %24 = scalar.addi %previous, %23 : i32
-  view.store<volatile|root_in_bounds> %24, %21[0] : i32, view<1xi32>
-  %42 = view.load<volatile|root_in_bounds> %21[0] : view<1xi32> -> i32
+  view.store<volatile|root_in_bounds|type_disjoint> %24, %21[0] : i32, view<1xi32>
+  %42 = view.load<volatile|root_in_bounds|type_disjoint> %21[0] : view<1xi32> -> i32
   %43 = scalar.addi %previous, %42 : i32
   func.return %43 : i32
 }
@@ -253,17 +253,17 @@ kernel.def @shared_rows() {
   %31 = index.cast %30 : i64 to offset
   %32 = index.assume %31 [range(%31, 0, 252)] : offset
   %33 = buffer.view %words[%32] : buffer -> view<1xi32>
-  view.store %index, %33[0] : i32, view<1xi32>
+  view.store<type_disjoint> %index, %33[0] : i32, view<1xi32>
   %34 = scalar.constant 32 : i32
   %35 = scalar.addi %index, %34 : i32
   %36 = scalar.extui %35 : i32 to i64
   %37 = scalar.assume %36 [range(%36, 0, 63)] : i64
   %38 = index.cast %37 : i64 to index
-  %39 = view.load %words_view[%38] : view<64xi32> -> i32
+  %39 = view.load<type_disjoint> %words_view[%38] : view<64xi32> -> i32
   %45 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
   %46 = index.cast %45 : i64 to offset
   %47 = buffer.view %output[%46] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %39, %47[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %39, %47[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -324,7 +324,7 @@ kernel.def @shared_records() {
   %42 = index.add %30, %41 : offset
   %43 = index.assume %42 [range(%42, 0, 60)] : offset
   %44 = buffer.view %records[%43] : buffer -> view<1xi32>
-  view.store %33, %44[0] : i32, view<1xi32>
+  view.store<type_disjoint> %33, %44[0] : i32, view<1xi32>
   %45 = scalar.constant 2.0 : f32
   %53 = index.constant 8 : offset
   %values_byte_offset = index.add %30, %53 : offset
@@ -334,8 +334,8 @@ kernel.def @shared_records() {
   %62 = index.cast %61 : i64 to offset
   %63 = index.assume %62 [range(%62, 0, 60)] : offset
   %64 = buffer.view %records[%63] : buffer -> view<1xf32>
-  view.store %45, %64[0] : f32, view<1xf32>
-  %sequence = view.load %44[0] : view<1xi32> -> i32
+  view.store<type_disjoint> %45, %64[0] : f32, view<1xf32>
+  %sequence = view.load<type_disjoint> %44[0] : view<1xi32> -> i32
   %tag = view.load %31[0] : view<1xi8> -> i8
   %89 = scalar.extui %tag : i8 to i32
   %90 = scalar.addi %sequence, %89 : i32
@@ -344,10 +344,10 @@ kernel.def @shared_records() {
   %96 = scalar.assume %133 [range(%133, 0, 9223372036854775807)] : i64
   %97 = index.cast %96 : i64 to offset
   %98 = buffer.view %output[%97] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %90, %98[0] : i32, view<1xi32>
-  %118 = view.load %64[0] : view<1xf32> -> f32
+  view.store<root_in_bounds|type_disjoint> %90, %98[0] : i32, view<1xi32>
+  %118 = view.load<type_disjoint> %64[0] : view<1xf32> -> f32
   %126 = buffer.view %values[%97] : buffer -> view<1xf32>
-  view.store<root_in_bounds> %118, %126[0] : f32, view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %118, %126[0] : f32, view<1xf32>
   kernel.return
 }
 

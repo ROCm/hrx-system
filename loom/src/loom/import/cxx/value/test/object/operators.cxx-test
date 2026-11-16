@@ -193,23 +193,23 @@ func.def @Pair__stored_add_value(%this_x: i32, %this_y: i32, %other_x: i32, %oth
   %44 = scalar.addi %this_x, %other_x : i32
   %45 = index.assume %43 [range(%43, 0, 4)] : offset
   %46 = buffer.view %result_storage[%45] : buffer -> view<1xi32>
-  view.store<volatile> %44, %46[0] : i32, view<1xi32>
+  view.store<volatile|type_disjoint> %44, %46[0] : i32, view<1xi32>
   %47 = index.constant 4 : offset
   %48 = index.add %result_storage_byte_offset, %47 : offset
   %49 = scalar.addi %this_y, %other_y : i32
   %50 = index.assume %48 [range(%48, 0, 4)] : offset
   %51 = buffer.view %result_storage[%50] : buffer -> view<1xi32>
-  view.store<volatile> %49, %51[0] : i32, view<1xi32>
+  view.store<volatile|type_disjoint> %49, %51[0] : i32, view<1xi32>
   %52 = index.constant 0 : offset
   %53 = index.add %result_storage_byte_offset, %52 : offset
   %54 = index.assume %53 [range(%53, 0, 4)] : offset
   %55 = buffer.view %result_storage[%54] : buffer -> view<1xi32>
-  %x = view.load<volatile> %55[0] : view<1xi32> -> i32
+  %x = view.load<volatile|type_disjoint> %55[0] : view<1xi32> -> i32
   %57 = index.constant 4 : offset
   %58 = index.add %result_storage_byte_offset, %57 : offset
   %59 = index.assume %58 [range(%58, 0, 4)] : offset
   %60 = buffer.view %result_storage[%59] : buffer -> view<1xi32>
-  %y = view.load<volatile> %60[0] : view<1xi32> -> i32
+  %y = view.load<volatile|type_disjoint> %60[0] : view<1xi32> -> i32
   func.return %x, %y : i32, i32
 }
 
@@ -254,16 +254,16 @@ func.def public @temporary_reference() -> (i32) {
   %15 = index.add %12, %14 : offset
   %16 = index.assume %15 [range(%15, 0, 0)] : offset
   %17 = buffer.view %11[%16] : buffer -> view<1xi32>
-  view.store %9, %17[0] : i32, view<1xi32>
+  view.store<type_disjoint> %9, %17[0] : i32, view<1xi32>
   %18 = index.constant 0 : offset
   %19 = index.add %12, %18 : offset
   %20 = index.assume %19 [range(%19, 0, 0)] : offset
   %21 = buffer.view %11[%20] : buffer -> view<1xi32>
-  %22 = view.load %21[0] : view<1xi32> -> i32
+  %22 = view.load<type_disjoint> %21[0] : view<1xi32> -> i32
   %23 = scalar.addi %22, %6 : i32
   %24 = index.assume %19 [range(%19, 0, 0)] : offset
   %25 = buffer.view %11[%24] : buffer -> view<1xi32>
-  view.store %23, %25[0] : i32, view<1xi32>
+  view.store<type_disjoint> %23, %25[0] : i32, view<1xi32>
   func.return %23 : i32
 }
 
@@ -408,7 +408,7 @@ kernel.def @accumulate_pairs() {
   %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
   %20 = index.cast %19 : i64 to offset
   %21 = buffer.view %input[%20] : buffer -> view<1xi32>
-  %value_x = view.load<root_in_bounds> %21[0] : view<1xi32> -> i32
+  %value_x = view.load<root_in_bounds|type_disjoint> %21[0] : view<1xi32> -> i32
   %23 = scalar.constant 1 : i32
   %24 = scalar.addi %base, %23 : i32
   %25 = scalar.extui %24 : i32 to i64
@@ -419,7 +419,7 @@ kernel.def @accumulate_pairs() {
   %30 = scalar.assume %29 [range(%29, 0, 9223372036854775807)] : i64
   %31 = index.cast %30 : i64 to offset
   %32 = buffer.view %input[%31] : buffer -> view<1xi32>
-  %value_y = view.load<root_in_bounds> %32[0] : view<1xi32> -> i32
+  %value_y = view.load<root_in_bounds|type_disjoint> %32[0] : view<1xi32> -> i32
   %bias_x = scalar.constant 1 : i32
   %bias_y = scalar.constant 2 : i32
   %36 = scalar.constant 3 : i32
@@ -433,7 +433,7 @@ kernel.def @accumulate_pairs() {
   %46 = scalar.assume %45 [range(%45, 0, 9223372036854775807)] : i64
   %47 = index.cast %46 : i64 to offset
   %48 = buffer.view %output[%47] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %result_x, %48[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %result_x, %48[0] : i32, view<1xi32>
   %49 = scalar.constant 1 : i32
   %50 = scalar.addi %base, %49 : i32
   %51 = scalar.extui %50 : i32 to i64
@@ -444,7 +444,7 @@ kernel.def @accumulate_pairs() {
   %56 = scalar.assume %55 [range(%55, 0, 9223372036854775807)] : i64
   %57 = index.cast %56 : i64 to offset
   %58 = buffer.view %output[%57] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %result_y, %58[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %result_y, %58[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -475,11 +475,11 @@ func.def public @temporary_destruction() -> (i32) {
   %observed_storage_byte_offset = index.constant 0 : offset
   %observed_view = buffer.view %observed_storage[%observed_storage_byte_offset] : buffer -> view<1xi32>
   %5 = scalar.constant 0 : i32
-  view.store %5, %observed_view[0] : i32, view<1xi32>
+  view.store<type_disjoint> %5, %observed_view[0] : i32, view<1xi32>
   %6 = scalar.constant 5 : i32
   %7 = func.call pure @TemporaryObserved__bump_value(%6, %observed_storage, %observed_storage_byte_offset) : (i32, buffer, offset) -> (i32)
   func.call @TemporaryObserved___TemporaryObserved_value(%7, %observed_storage, %observed_storage_byte_offset) : (i32, buffer, offset)
-  %observed = view.load %observed_view[0] : view<1xi32> -> i32
+  %observed = view.load<type_disjoint> %observed_view[0] : view<1xi32> -> i32
   func.return %observed : i32
 }
 
@@ -491,7 +491,7 @@ func.def @TemporaryObserved__bump_value(%this_value: i32, %this_observed: buffer
 
 func.def inline @TemporaryObserved___TemporaryObserved_value(%this_value: i32, %this_observed: buffer, %this_observed_byte_offset: offset) {
   %18 = buffer.view %this_observed[%this_observed_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %this_value, %18[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %this_value, %18[0] : i32, view<1xi32>
   func.return
 }
 

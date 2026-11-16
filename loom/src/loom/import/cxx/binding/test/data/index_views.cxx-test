@@ -34,6 +34,6 @@ func.def public @indexed_load(%input: buffer, %count: i32, %position: i32) -> (f
   %source_layout = encoding.layout.dense : encoding<layout>
   %14 = index.constant 0 : offset
   %source = buffer.view %input[%14] : buffer -> view<[%extent$12]xf32, %source_layout>
-  %16 = view.load %source[%coordinate$11] : view<[%extent$12]xf32, %source_layout> -> f32
+  %16 = view.load<type_disjoint> %source[%coordinate$11] : view<[%extent$12]xf32, %source_layout> -> f32
   func.return %16 : f32
 }

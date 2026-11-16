@@ -118,6 +118,7 @@ loom_check_test_suite(
     srcs = [
         "atomic_indexing.cxx-test",
         "selected_reference_results.cxx-test",
+        "type_disjoint_scalar_memory.cxx-test",
     ],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/import:cxx",

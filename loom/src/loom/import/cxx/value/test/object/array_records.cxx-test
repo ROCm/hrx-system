@@ -29,21 +29,21 @@ void write(Record* output, Record value) { *output = value; }
 // ----
 func.def public @read(%input: buffer, %input_byte_offset: offset) -> (i32, i32) {
   %6 = buffer.view %input[%input_byte_offset] : buffer -> view<1xi32>
-  %7 = view.load<root_in_bounds> %6[0] : view<1xi32> -> i32
+  %7 = view.load<root_in_bounds|type_disjoint> %6[0] : view<1xi32> -> i32
   %8 = index.constant 4 : offset
   %9 = index.add %input_byte_offset, %8 : offset
   %10 = buffer.view %input[%9] : buffer -> view<1xi32>
-  %11 = view.load<root_in_bounds> %10[0] : view<1xi32> -> i32
+  %11 = view.load<root_in_bounds|type_disjoint> %10[0] : view<1xi32> -> i32
   func.return %7, %11 : i32, i32
 }
 
 func.def public @write(%output: buffer, %output_byte_offset: offset, %value_first: i32, %value_second: i32) {
   %18 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %value_first, %18[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %value_first, %18[0] : i32, view<1xi32>
   %19 = index.constant 4 : offset
   %20 = index.add %output_byte_offset, %19 : offset
   %21 = buffer.view %output[%20] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %value_second, %21[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %value_second, %21[0] : i32, view<1xi32>
   func.return
 }
 
@@ -91,11 +91,11 @@ func.def public @clipped(%source: buffer, %source_byte_offset: offset, %skipped:
   %10 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
   %11 = index.cast %10 : i64 to offset
   %14 = buffer.view %source[%11] : buffer -> view<1xi32>
-  %value_words_0$15 = view.load<root_in_bounds> %14[0] : view<1xi32> -> i32
+  %value_words_0$15 = view.load<root_in_bounds|type_disjoint> %14[0] : view<1xi32> -> i32
   %16 = index.constant 4 : offset
   %17 = index.add %11, %16 : offset
   %18 = buffer.view %source[%17] : buffer -> view<1xi32>
-  %value_words_1 = view.load<root_in_bounds> %18[0] : view<1xi32> -> i32
+  %value_words_1 = view.load<root_in_bounds|type_disjoint> %18[0] : view<1xi32> -> i32
   %77 = scalar.muli %skipped, %value_words_1 : i32
   %value_words_0$79 = scalar.addi %value_words_0$15, %77 : i32
   func.return %value_words_0$79 : i32
@@ -145,10 +145,10 @@ func.def public @temporary(%index: i32) -> (i32) {
   %words = buffer.alloca<private> align(4) %29 : buffer
   %74 = index.constant 0 : offset
   %36 = buffer.view %words[%74] : buffer -> view<1xi32>
-  view.store %27, %36[0] : i32, view<1xi32>
+  view.store<type_disjoint> %27, %36[0] : i32, view<1xi32>
   %73 = index.constant 4 : offset
   %40 = buffer.view %words[%73] : buffer -> view<1xi32>
-  view.store %28, %40[0] : i32, view<1xi32>
+  view.store<type_disjoint> %28, %40[0] : i32, view<1xi32>
   %43 = scalar.extui %index : i32 to i64
   %71 = scalar.constant 2 : i64
   %72 = scalar.shli %43, %71 : i64
@@ -156,7 +156,7 @@ func.def public @temporary(%index: i32) -> (i32) {
   %49 = index.cast %48 : i64 to offset
   %50 = index.assume %49 [range(%49, 0, 4)] : offset
   %51 = buffer.view %words[%50] : buffer -> view<1xi32>
-  %52 = view.load %51[0] : view<1xi32> -> i32
+  %52 = view.load<type_disjoint> %51[0] : view<1xi32> -> i32
   func.return %52 : i32
 }
 
@@ -199,29 +199,29 @@ func.def public @snapshots(%records: buffer, %records_byte_offset: offset, %inde
   %12 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
   %13 = index.cast %12 : i64 to offset
   %16 = buffer.view %records[%13] : buffer -> view<1xi32>
-  %17 = view.load<root_in_bounds> %16[0] : view<1xi32> -> i32
+  %17 = view.load<root_in_bounds|type_disjoint> %16[0] : view<1xi32> -> i32
   %18 = index.constant 4 : offset
   %19 = index.add %13, %18 : offset
   %20 = buffer.view %records[%19] : buffer -> view<1xi32>
-  %21 = view.load<root_in_bounds> %20[0] : view<1xi32> -> i32
+  %21 = view.load<root_in_bounds|type_disjoint> %20[0] : view<1xi32> -> i32
   %42 = scalar.constant 17 : i32
   %54 = scalar.addi %21, %42 : i32
   %89 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
   %90 = index.cast %89 : i64 to offset
   %93 = buffer.view %records[%90] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %17, %93[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %17, %93[0] : i32, view<1xi32>
   %95 = index.add %90, %18 : offset
   %96 = buffer.view %records[%95] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %54, %96[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %54, %96[0] : i32, view<1xi32>
   %111 = scalar.constant 8 : i64
   %102 = scalar.addi %89, %111 : i64
   %103 = scalar.assume %102 [range(%102, 0, 9223372036854775807)] : i64
   %104 = index.cast %103 : i64 to offset
   %107 = buffer.view %records[%104] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %17, %107[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %17, %107[0] : i32, view<1xi32>
   %109 = index.add %104, %18 : offset
   %110 = buffer.view %records[%109] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %21, %110[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %21, %110[0] : i32, view<1xi32>
   func.return
 }
 
@@ -485,7 +485,7 @@ func.def public @nested_layout(%value: buffer, %value_byte_offset: offset, %inde
   %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
   %20 = index.cast %19 : i64 to offset
   %21 = buffer.view %value[%20] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %3, %21[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %3, %21[0] : i32, view<1xi32>
   %22 = scalar.constant 19 : i32
   %23 = index.constant 16 : offset
   %commands_byte_offset = index.add %value_byte_offset, %23 : offset
@@ -501,7 +501,7 @@ func.def public @nested_layout(%value: buffer, %value_byte_offset: offset, %inde
   %40 = scalar.assume %39 [range(%39, 0, 9223372036854775807)] : i64
   %41 = index.cast %40 : i64 to offset
   %42 = buffer.view %value[%41] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %22, %42[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %22, %42[0] : i32, view<1xi32>
   %72 = scalar.constant -7 : i16
   %47 = index.constant 32 : offset
   %narrow_byte_offset = index.add %value_byte_offset, %47 : offset
@@ -512,7 +512,7 @@ func.def public @nested_layout(%value: buffer, %value_byte_offset: offset, %inde
   %54 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
   %55 = index.cast %54 : i64 to offset
   %56 = buffer.view %value[%55] : buffer -> view<1xi16>
-  view.store<root_in_bounds> %72, %56[0] : i16, view<1xi16>
+  view.store<root_in_bounds|type_disjoint> %72, %56[0] : i16, view<1xi16>
   %58 = index.constant 36 : offset
   %flags_byte_offset = index.add %value_byte_offset, %58 : offset
   %63 = index.cast %flags_byte_offset : offset to i64
@@ -521,7 +521,7 @@ func.def public @nested_layout(%value: buffer, %value_byte_offset: offset, %inde
   %66 = index.cast %65 : i64 to offset
   %67 = buffer.view %value[%66] : buffer -> view<1xi8>
   %69 = scalar.constant 1 : i8
-  view.store<root_in_bounds> %69, %67[0] : i8, view<1xi8>
+  view.store<root_in_bounds|type_disjoint> %69, %67[0] : i8, view<1xi8>
   func.return
 }
 
@@ -552,28 +552,28 @@ kernel.def @array_records_kernel() {
 } launch(%input: buffer, %output: buffer) {
   %149 = index.constant 0 : offset
   %20 = buffer.view %input[%149] : buffer -> view<1xi32>
-  %saved_words_0$21 = view.load<root_in_bounds> %20[0] : view<1xi32> -> i32
+  %saved_words_0$21 = view.load<root_in_bounds|type_disjoint> %20[0] : view<1xi32> -> i32
   %148 = index.constant 4 : offset
   %24 = buffer.view %input[%148] : buffer -> view<1xi32>
-  %saved_words_1 = view.load<root_in_bounds> %24[0] : view<1xi32> -> i32
+  %saved_words_1 = view.load<root_in_bounds|type_disjoint> %24[0] : view<1xi32> -> i32
   %147 = index.constant 8 : offset
   %44 = buffer.view %input[%147] : buffer -> view<1xi32>
-  %45 = view.load<root_in_bounds> %44[0] : view<1xi32> -> i32
+  %45 = view.load<root_in_bounds|type_disjoint> %44[0] : view<1xi32> -> i32
   %46 = scalar.constant 1 : i32
   %47 = scalar.andi %45, %46 : i32
   %changed = func.call pure @change(%saved_words_0$21, %saved_words_1, %47) : (i32, i32, i32) -> (i32)
   %49 = scalar.constant 5 : i32
   %saved_words_0$51 = scalar.addi %saved_words_0$21, %49 : i32
   %62 = buffer.view %output[%149] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %saved_words_0$51, %62[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %saved_words_0$51, %62[0] : i32, view<1xi32>
   %65 = buffer.view %output[%148] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %saved_words_1, %65[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %saved_words_1, %65[0] : i32, view<1xi32>
   %84 = buffer.view %output[%147] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %changed, %84[0] : i32, view<1xi32>
-  %104 = view.load<root_in_bounds> %24[0] : view<1xi32> -> i32
+  view.store<root_in_bounds|type_disjoint> %changed, %84[0] : i32, view<1xi32>
+  %104 = view.load<root_in_bounds|type_disjoint> %24[0] : view<1xi32> -> i32
   %142 = index.constant 12 : offset
   %123 = buffer.view %output[%142] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %104, %123[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %104, %123[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -711,7 +711,7 @@ func.def public @gather(%input: buffer, %input_byte_offset: offset) -> (f32) {
   %12 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
   %13 = index.cast %12 : i64 to offset
   %14 = buffer.view %input[%13] : buffer -> view<1xf32>
-  %15 = view.load<root_in_bounds> %14[0] : view<1xf32> -> f32
+  %15 = view.load<root_in_bounds|type_disjoint> %14[0] : view<1xf32> -> f32
   func.return %15 : f32
 }
 
@@ -750,7 +750,7 @@ func.def @Body__operator_call_value(%this_data: buffer, %this_data_byte_offset: 
   %26 = scalar.assume %24 [range(%24, 0, 9223372036854775807)] : i64
   %27 = index.cast %26 : i64 to offset
   %28 = buffer.view %this_data[%27] : buffer -> view<1xf32>
-  view.store<root_in_bounds> %19, %28[0] : f32, view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %19, %28[0] : f32, view<1xf32>
   func.return
 }
 

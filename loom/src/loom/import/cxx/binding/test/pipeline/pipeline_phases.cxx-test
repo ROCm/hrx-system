@@ -36,7 +36,7 @@ pipeline.def public @child() run(%output: buffer, %phase: i32) {
     %5 = scalar.addi %phase, %4 : i32
     %6 = scalar.extui %phase : i32 to i64
     %7 = index.cast %6 : i64 to index
-    view.store %5, %values[%7] : i32, view<4xi32>
+    view.store<type_disjoint> %5, %values[%7] : i32, view<4xi32>
   }
 }
 

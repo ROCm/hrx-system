@@ -364,9 +364,78 @@ bool Types::has_vector_object_padding(const cxx::Type* type, cxx::AST* owner) {
 }
 
 loom_memory_access_flags_t Types::memory_access_flags(const cxx::Type* input) {
-  return unit_.typeTraits().is_volatile(input)
-             ? LOOM_MEMORY_ACCESS_FLAG_VOLATILE
-             : 0;
+  auto traits = unit_.typeTraits();
+  if (!input) {
+    return 0;
+  }
+  input = traits.remove_reference(input);
+  loom_memory_access_flags_t flags =
+      traits.is_volatile(input) ? LOOM_MEMORY_ACCESS_FLAG_VOLATILE : 0;
+  if (unit_.language() == cxx::LanguageKind::kC) {
+    // C union member punning and character-type representation access require
+    // path information that this type-only query does not receive. Retain
+    // universal aliasing until the observation builder can prove more.
+    return flags;
+  }
+  if ((traits.source_type_attribute_flags(input) &
+       cxx::TypeAttributeFlags::kMayAlias) != cxx::TypeAttributeFlags::kNone) {
+    return flags;
+  }
+  input =
+      cxx::unattributed_type(traits.remove_restrict(traits.remove_cv(input)));
+  if (!input) {
+    return flags;
+  }
+  switch (input->kind()) {
+    case cxx::TypeKind::kBool:
+    case cxx::TypeKind::kShortInt:
+    case cxx::TypeKind::kUnsignedShortInt:
+    case cxx::TypeKind::kInt:
+    case cxx::TypeKind::kUnsignedInt:
+    case cxx::TypeKind::kLongInt:
+    case cxx::TypeKind::kUnsignedLongInt:
+    case cxx::TypeKind::kLongLongInt:
+    case cxx::TypeKind::kUnsignedLongLongInt:
+    case cxx::TypeKind::kInt128:
+    case cxx::TypeKind::kUnsignedInt128:
+    case cxx::TypeKind::kBitInt:
+    case cxx::TypeKind::kUnsignedBitInt:
+    case cxx::TypeKind::kChar8:
+    case cxx::TypeKind::kChar16:
+    case cxx::TypeKind::kChar32:
+    case cxx::TypeKind::kWideChar:
+    case cxx::TypeKind::kFloat8E4M3FN:
+    case cxx::TypeKind::kFloat8E5M2:
+    case cxx::TypeKind::kHalf:
+    case cxx::TypeKind::kFloat16:
+    case cxx::TypeKind::kBFloat16:
+    case cxx::TypeKind::kFloat:
+    case cxx::TypeKind::kDouble:
+    case cxx::TypeKind::kLongDouble:
+    case cxx::TypeKind::kFloat128:
+    case cxx::TypeKind::kEnum:
+      return flags | LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT;
+    case cxx::TypeKind::kSignedChar:
+      return flags | LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT;
+    case cxx::TypeKind::kScopedEnum: {
+      auto* enumeration = cxx::type_cast<cxx::ScopedEnumType>(input)->symbol();
+      auto* parent = cxx::symbol_cast<cxx::NamespaceSymbol>(
+          enumeration ? enumeration->parent() : nullptr);
+      auto* enumeration_name =
+          enumeration ? cxx::name_cast<cxx::Identifier>(enumeration->name())
+                      : nullptr;
+      auto* parent_name =
+          parent ? cxx::name_cast<cxx::Identifier>(parent->name()) : nullptr;
+      if (enumeration_name && parent_name &&
+          parent->parent() == unit_.globalScope() &&
+          enumeration_name->name() == "byte" && parent_name->name() == "std") {
+        return flags;
+      }
+      return flags | LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT;
+    }
+    default:
+      return flags;
+  }
 }
 
 const Partition& Types::partition(const cxx::Type* input, cxx::AST* owner) {
@@ -1166,7 +1235,8 @@ const ViewPartition* Types::view(const cxx::ClassType* input, cxx::AST* owner) {
   result->source = source;
   result->element_type = element_type;
   result->element = element;
-  result->access_flags = memory_access_flags(element_type);
+  result->access_flags =
+      memory_access_flags(element_type) & LOOM_MEMORY_ACCESS_FLAG_VOLATILE;
   result->encoding = view_encoding;
   result->extents = std::move(extents);
   for (size_t axis = 0; axis < result->extents.size(); ++axis) {

@@ -122,23 +122,23 @@ func.def public @load_mma_store(%lhs_source_dim0: index, %lhs_source_dim1: index
   %23 = index.cast %k : i64 to index
   %24 = index.cast %row : i64 to index
   %25 = index.cast %column : i64 to index
-  %lhs = vector.fragment.load<lhs> %lhs_source[%24, %25] shape [%22, %23] : view<[%lhs_source_dim0]x[%lhs_source_dim1]xf16, %lhs_source_layout> -> vector<16xf16>
+  %lhs = vector.fragment.load<lhs, type_disjoint> %lhs_source[%24, %25] shape [%22, %23] : view<[%lhs_source_dim0]x[%lhs_source_dim1]xf16, %lhs_source_layout> -> vector<16xf16>
   %27 = index.cast %k : i64 to index
   %28 = index.cast %n : i64 to index
   %29 = index.cast %row : i64 to index
   %30 = index.cast %column : i64 to index
-  %rhs = vector.fragment.load<rhs> %rhs_source[%29, %30] shape [%27, %28] using {scale = %rhs_scale : vector<2xi32>} : view<[%rhs_source_dim0]x[%rhs_source_dim1]xf16, %rhs_source_storage> -> vector<16xf16>
+  %rhs = vector.fragment.load<rhs, type_disjoint> %rhs_source[%29, %30] shape [%27, %28] using {scale = %rhs_scale : vector<2xi32>} : view<[%rhs_source_dim0]x[%rhs_source_dim1]xf16, %rhs_source_storage> -> vector<16xf16>
   %32 = index.cast %m : i64 to index
   %33 = index.cast %n : i64 to index
   %34 = index.cast %row : i64 to index
   %35 = index.cast %column : i64 to index
-  %init = vector.fragment.load<init> %init_source[%34, %35] shape [%32, %33] : view<[%init_source_dim0]x[%init_source_dim1]xf32, %init_source_layout> -> vector<8xf32>
+  %init = vector.fragment.load<init, type_disjoint> %init_source[%34, %35] shape [%32, %33] : view<[%init_source_dim0]x[%init_source_dim1]xf32, %init_source_layout> -> vector<8xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
   %38 = index.cast %m : i64 to index
   %39 = index.cast %n : i64 to index
   %40 = index.cast %row : i64 to index
   %41 = index.cast %column : i64 to index
-  vector.fragment.store<result> %result, %output[%40, %41] shape [%38, %39] : vector<8xf32>, view<[%output_dim0]x[%output_dim1]xf32, %output_layout>
+  vector.fragment.store<result, type_disjoint> %result, %output[%40, %41] shape [%38, %39] : vector<8xf32>, view<[%output_dim0]x[%output_dim1]xf32, %output_layout>
   func.return
 }
 
@@ -170,32 +170,41 @@ void static_fragment_origins(Input source, EncodedInput encoded, Output output,
   auto mixed =
       fragment::load<fragment::role::rhs, Half16, loomt::dynamic, 4>(
           source, {row}, fragment::shape{m, n});
-  auto scaled = fragment::load<fragment::role::rhs, Half16, 0, 0>(
+  auto scaled = fragment::load<fragment::role::rhs, Half16,
+                               loom::memory_access::may_alias, 0, 0>(
       encoded, fragment::shape{m, n}, Auxiliary{scale});
+  auto mixed_scaled = fragment::load<
+      fragment::role::rhs, Half16, loom::memory_access::may_alias,
+      loomt::dynamic, 0>(encoded, {row}, fragment::shape{m, n},
+                         Auxiliary{scale});
   fragment::store<fragment::role::result, 0, 0>(
       fixed, output, fragment::shape{m, n});
   fragment::store<fragment::role::result, loomt::dynamic, 8>(
       mixed, output, {row}, fragment::shape{m, n});
   (void)scaled;
+  (void)mixed_scaled;
 }
 
 // ----
 func.def public @static_fragment_origins(%source_layout: encoding<layout>, %source: view<16x16xf16, %source_layout>, %encoded_storage: encoding<storage>, %encoded: view<16x16xf16, %encoded_storage>, %output_layout: encoding<layout>, %output: view<16x16xf16, %output_layout>, %row: index, %m: i64, %n: i64, %scale: vector<2xi32>) {
   %10 = index.cast %m : i64 to index
   %11 = index.cast %n : i64 to index
-  %fixed = vector.fragment.load<lhs> %source[0, 4] shape [%10, %11] : view<16x16xf16, %source_layout> -> vector<16xf16>
+  %fixed = vector.fragment.load<lhs, type_disjoint> %source[0, 4] shape [%10, %11] : view<16x16xf16, %source_layout> -> vector<16xf16>
   %13 = index.cast %m : i64 to index
   %14 = index.cast %n : i64 to index
-  %mixed = vector.fragment.load<rhs> %source[%row, 4] shape [%13, %14] : view<16x16xf16, %source_layout> -> vector<16xf16>
+  %mixed = vector.fragment.load<rhs, type_disjoint> %source[%row, 4] shape [%13, %14] : view<16x16xf16, %source_layout> -> vector<16xf16>
   %16 = index.cast %m : i64 to index
   %17 = index.cast %n : i64 to index
   %scaled = vector.fragment.load<rhs> %encoded[0, 0] shape [%16, %17] using {scale = %scale : vector<2xi32>} : view<16x16xf16, %encoded_storage> -> vector<16xf16>
   %19 = index.cast %m : i64 to index
   %20 = index.cast %n : i64 to index
-  vector.fragment.store<result> %fixed, %output[0, 0] shape [%19, %20] : vector<16xf16>, view<16x16xf16, %output_layout>
-  %21 = index.cast %m : i64 to index
-  %22 = index.cast %n : i64 to index
-  vector.fragment.store<result> %mixed, %output[%row, 8] shape [%21, %22] : vector<16xf16>, view<16x16xf16, %output_layout>
+  %mixed_scaled = vector.fragment.load<rhs> %encoded[%row, 0] shape [%19, %20] using {scale = %scale : vector<2xi32>} : view<16x16xf16, %encoded_storage> -> vector<16xf16>
+  %22 = index.cast %m : i64 to index
+  %23 = index.cast %n : i64 to index
+  vector.fragment.store<result, type_disjoint> %fixed, %output[0, 0] shape [%22, %23] : vector<16xf16>, view<16x16xf16, %output_layout>
+  %24 = index.cast %m : i64 to index
+  %25 = index.cast %n : i64 to index
+  vector.fragment.store<result, type_disjoint> %mixed, %output[%row, 8] shape [%24, %25] : vector<16xf16>, view<16x16xf16, %output_layout>
   func.return
 }
 

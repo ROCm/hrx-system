@@ -177,21 +177,38 @@ class CxxRenderer(CxxFunctionRenderer):
         arguments = [self.expression(resolved.value_id("view")), *indices]
         return ", ".join(arguments)
 
-    @staticmethod
     def _append_memory_access_contract(
-        operation: Operation, selectors: list[str]
+        self, operation: Operation, selectors: list[str]
     ) -> tuple[str, ...]:
         flags = operation.attributes.get("memory_flags")
-        if not flags:
+        members = {
+            "volatile": "volatile_",
+            "root_in_bounds": "root_in_bounds",
+        }
+        names = flags.split("|") if flags else []
+        if any(name not in {*members, "type_disjoint"} for name in names):
             return ()
-        members = {"volatile": "volatile_", "root_in_bounds": "root_in_bounds"}
-        names = flags.split("|")
-        if any(name not in members for name in names):
-            return ()
-        selectors.append(
-            " | ".join(f"loom::memory_access::{members[name]}" for name in names)
-        )
-        return ("memory_flags",)
+        type_disjoint = "type_disjoint" in names
+        names = [name for name in names if name != "type_disjoint"]
+        spelling = [f"loom::memory_access::{members[name]}" for name in names]
+        if type_disjoint:
+            resolved = self._resolved(operation)
+            view_id = resolved.value_id("view")
+            view_type = self.module.values[view_id].type
+            if (
+                isinstance(view_type, ShapedType)
+                and repr(view_type.element_type) == "i8"
+                and view_id not in self.view_signed
+            ):
+                # Signless i8 defaults to unsigned char in generated C++.
+                # Preserve a stronger source observation explicitly because
+                # unsigned character objects otherwise alias every type.
+                spelling.append("loom::memory_access::type_disjoint")
+        if not type_disjoint:
+            spelling.append("loom::memory_access::may_alias")
+        if spelling:
+            selectors.append(" | ".join(spelling))
+        return ("memory_flags",) if flags else ()
 
     def _emit_atomic_result(self, result: int, expression: str) -> None:
         if self.use_counts[result] == 0 and result not in self.assignment_targets:
@@ -613,15 +630,17 @@ class CxxRenderer(CxxFunctionRenderer):
             role = resolved.attr("role")
             shape = self._fragment_shape(operation, resolved)
             template, origin = self._fragment_origin(resolved)
+            selectors = [f"loom::vector::fragment::role::{role}"]
+            projected_flags = self._append_memory_access_contract(operation, selectors)
             value = self.expression(resolved.value_id("value"))
             view = self.expression(resolved.value_id("view"))
             arguments = ", ".join([value, view, *origin, shape])
             self.writer.line(
                 "loom::vector::fragment::store<"
-                f"loom::vector::fragment::role::{role}{template}>("
+                f"{', '.join(selectors)}{template}>("
                 f"{arguments});"
             )
-            return ("role", "static_indices")
+            return ("role", "static_indices", *projected_flags)
         return None
 
     def _render_kernel_op(self, operation: Operation) -> tuple[str, ...] | None:

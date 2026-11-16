@@ -165,16 +165,16 @@ template <loom::memory_access Access = loom::memory_access::none, class Vector,
 
 // Loads active lanes from their corresponding footprint positions and takes
 // inactive lanes from passthrough. Nonzero integer mask lanes are active.
-template <class Result, class T, loom::type::size_type... Extents,
-          class Encoding, class Mask,
+template <class Result, loom::memory_access Access = loom::memory_access::none,
+          class T, loom::type::size_type... Extents, class Encoding, class Mask,
           class Origin = loom::type::coordinates<sizeof...(Extents)>>
 [[loom::op("vector.load.mask")]] Result load_mask(
     loom::type::view<loom::type::shape<Extents...>, T, Encoding> source,
     Origin origin, Mask mask, Result passthrough);
 
 // Stores value lanes whose corresponding integer mask lane is nonzero.
-template <class Vector, class T, loom::type::size_type... Extents,
-          class Encoding, class Mask,
+template <loom::memory_access Access = loom::memory_access::none, class Vector,
+          class T, loom::type::size_type... Extents, class Encoding, class Mask,
           class Origin = loom::type::coordinates<sizeof...(Extents)>>
 [[loom::op("vector.store.mask")]] void store_mask(
     Vector value,
@@ -183,16 +183,16 @@ template <class Vector, class T, loom::type::size_type... Extents,
 
 // Densely consumes consecutive source elements for active lanes and takes
 // inactive lanes from passthrough. Nonzero integer mask lanes are active.
-template <class Result, class T, loom::type::size_type... Extents,
-          class Encoding, class Mask,
+template <class Result, loom::memory_access Access = loom::memory_access::none,
+          class T, loom::type::size_type... Extents, class Encoding, class Mask,
           class Origin = loom::type::coordinates<sizeof...(Extents)>>
 [[loom::op("vector.load.expand")]] Result load_expand(
     loom::type::view<loom::type::shape<Extents...>, T, Encoding> source,
     Origin origin, Mask mask, Result passthrough);
 
 // Densely writes active value lanes to consecutive destination elements.
-template <class Vector, class T, loom::type::size_type... Extents,
-          class Encoding, class Mask,
+template <loom::memory_access Access = loom::memory_access::none, class Vector,
+          class T, loom::type::size_type... Extents, class Encoding, class Mask,
           class Origin = loom::type::coordinates<sizeof...(Extents)>>
 [[loom::op("vector.store.compress")]] void store_compress(
     Vector value,
@@ -396,17 +396,20 @@ template <role Role, class Result, class Source, class Shape>
 
 // Loads one target-shaped carrier at a full-rank logical origin. Auxiliary is
 // a flat record of named runtime values required by the view's storage schema.
-template <role Role, class Result, class T, loom::type::size_type... Extents,
-          class Encoding, class Shape,
+template <role Role, class Result,
+          loom::memory_access Access = loom::memory_access::none, class T,
+          loom::type::size_type... Extents, class Encoding, class Shape,
           class Origin = loom::type::coordinates<sizeof...(Extents)>>
-[[loom::op("vector.fragment.load")]] Result load(
+[[loom::op("vector.fragment.load", "memory_access")]] Result load(
     loom::type::view<loom::type::shape<Extents...>, T, Encoding> source,
     Origin origin, Shape logical_shape);
 
-template <role Role, class Result, class T, loom::type::size_type... Extents,
-          class Encoding, class Shape, class Auxiliary,
+template <role Role, class Result,
+          loom::memory_access Access = loom::memory_access::none, class T,
+          loom::type::size_type... Extents, class Encoding, class Shape,
+          class Auxiliary,
           class Origin = loom::type::coordinates<sizeof...(Extents)>>
-[[loom::op("vector.fragment.load")]] Result load(
+[[loom::op("vector.fragment.load", "memory_access")]] Result load(
     loom::type::view<loom::type::shape<Extents...>, T, Encoding> source,
     Origin origin, Shape logical_shape, Auxiliary auxiliary);
 
@@ -422,6 +425,15 @@ template <role Role, class Result, loom::type::size_type... OriginPattern,
     loom::type::view<loom::type::shape<Extents...>, T, Encoding> source,
     Shape logical_shape);
 
+template <role Role, class Result, loom::memory_access Access,
+          loom::type::size_type... OriginPattern, class T,
+          loom::type::size_type... Extents, class Encoding, class Shape>
+  requires(sizeof...(OriginPattern) == sizeof...(Extents) &&
+           ((OriginPattern != loom::type::dynamic) && ...))
+[[loom::op("vector.fragment.load", "memory_access")]] Result load(
+    loom::type::view<loom::type::shape<Extents...>, T, Encoding> source,
+    Shape logical_shape);
+
 template <role Role, class Result, loom::type::size_type... OriginPattern,
           class T, loom::type::size_type... Extents, class Encoding,
           class Shape, class Auxiliary>
@@ -431,12 +443,36 @@ template <role Role, class Result, loom::type::size_type... OriginPattern,
     loom::type::view<loom::type::shape<Extents...>, T, Encoding> source,
     Shape logical_shape, Auxiliary auxiliary);
 
+template <role Role, class Result, loom::memory_access Access,
+          loom::type::size_type... OriginPattern, class T,
+          loom::type::size_type... Extents, class Encoding, class Shape,
+          class Auxiliary>
+  requires(sizeof...(OriginPattern) == sizeof...(Extents) &&
+           ((OriginPattern != loom::type::dynamic) && ...))
+[[loom::op("vector.fragment.load", "memory_access")]] Result load(
+    loom::type::view<loom::type::shape<Extents...>, T, Encoding> source,
+    Shape logical_shape, Auxiliary auxiliary);
+
 template <role Role, class Result, loom::type::size_type... OriginPattern,
           class T, loom::type::size_type... Extents, class Encoding,
           class Shape>
   requires(sizeof...(OriginPattern) == sizeof...(Extents) &&
            ((OriginPattern == loom::type::dynamic) || ...))
 [[loom::op("vector.fragment.load")]] Result load(
+    loom::type::view<loom::type::shape<Extents...>, T, Encoding> source,
+    loom::type::indices<(loom::type::size_type{0} + ... +
+                         (OriginPattern == loom::type::dynamic
+                              ? loom::type::size_type{1}
+                              : loom::type::size_type{0}))>
+        dynamic_origin,
+    Shape logical_shape);
+
+template <role Role, class Result, loom::memory_access Access,
+          loom::type::size_type... OriginPattern, class T,
+          loom::type::size_type... Extents, class Encoding, class Shape>
+  requires(sizeof...(OriginPattern) == sizeof...(Extents) &&
+           ((OriginPattern == loom::type::dynamic) || ...))
+[[loom::op("vector.fragment.load", "memory_access")]] Result load(
     loom::type::view<loom::type::shape<Extents...>, T, Encoding> source,
     loom::type::indices<(loom::type::size_type{0} + ... +
                          (OriginPattern == loom::type::dynamic
@@ -459,11 +495,27 @@ template <role Role, class Result, loom::type::size_type... OriginPattern,
         dynamic_origin,
     Shape logical_shape, Auxiliary auxiliary);
 
+template <role Role, class Result, loom::memory_access Access,
+          loom::type::size_type... OriginPattern, class T,
+          loom::type::size_type... Extents, class Encoding, class Shape,
+          class Auxiliary>
+  requires(sizeof...(OriginPattern) == sizeof...(Extents) &&
+           ((OriginPattern == loom::type::dynamic) || ...))
+[[loom::op("vector.fragment.load", "memory_access")]] Result load(
+    loom::type::view<loom::type::shape<Extents...>, T, Encoding> source,
+    loom::type::indices<(loom::type::size_type{0} + ... +
+                         (OriginPattern == loom::type::dynamic
+                              ? loom::type::size_type{1}
+                              : loom::type::size_type{0}))>
+        dynamic_origin,
+    Shape logical_shape, Auxiliary auxiliary);
+
 // Stores one target-shaped carrier at a full-rank logical origin.
-template <role Role, class Vector, class T, loom::type::size_type... Extents,
+template <role Role, loom::memory_access Access = loom::memory_access::none,
+          class Vector, class T, loom::type::size_type... Extents,
           class Encoding, class Shape,
           class Origin = loom::type::coordinates<sizeof...(Extents)>>
-[[loom::op("vector.fragment.store")]] void store(
+[[loom::op("vector.fragment.store", "memory_access")]] void store(
     Vector value,
     loom::type::view<loom::type::shape<Extents...>, T, Encoding> destination,
     Origin origin, Shape logical_shape);
@@ -478,12 +530,37 @@ template <role Role, loom::type::size_type... OriginPattern, class Vector,
     loom::type::view<loom::type::shape<Extents...>, T, Encoding> destination,
     Shape logical_shape);
 
+template <role Role, loom::memory_access Access,
+          loom::type::size_type... OriginPattern, class Vector, class T,
+          loom::type::size_type... Extents, class Encoding, class Shape>
+  requires(sizeof...(OriginPattern) == sizeof...(Extents) &&
+           ((OriginPattern != loom::type::dynamic) && ...))
+[[loom::op("vector.fragment.store", "memory_access")]] void store(
+    Vector value,
+    loom::type::view<loom::type::shape<Extents...>, T, Encoding> destination,
+    Shape logical_shape);
+
 template <role Role, loom::type::size_type... OriginPattern, class Vector,
           class T, loom::type::size_type... Extents, class Encoding,
           class Shape>
   requires(sizeof...(OriginPattern) == sizeof...(Extents) &&
            ((OriginPattern == loom::type::dynamic) || ...))
 [[loom::op("vector.fragment.store")]] void store(
+    Vector value,
+    loom::type::view<loom::type::shape<Extents...>, T, Encoding> destination,
+    loom::type::indices<(loom::type::size_type{0} + ... +
+                         (OriginPattern == loom::type::dynamic
+                              ? loom::type::size_type{1}
+                              : loom::type::size_type{0}))>
+        dynamic_origin,
+    Shape logical_shape);
+
+template <role Role, loom::memory_access Access,
+          loom::type::size_type... OriginPattern, class Vector, class T,
+          loom::type::size_type... Extents, class Encoding, class Shape>
+  requires(sizeof...(OriginPattern) == sizeof...(Extents) &&
+           ((OriginPattern == loom::type::dynamic) || ...))
+[[loom::op("vector.fragment.store", "memory_access")]] void store(
     Vector value,
     loom::type::view<loom::type::shape<Extents...>, T, Encoding> destination,
     loom::type::indices<(loom::type::size_type{0} + ... +

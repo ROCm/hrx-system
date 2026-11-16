@@ -84,7 +84,7 @@ void exponent_only(double value, int* exponent) { frexp(value, exponent); }
 func.def public @decompose(%value: f64, %power: i32, %exponent: buffer, %exponent_byte_offset: offset) -> (f64) {
   %5, %6 = scalar.frexpf %value : f64, i32
   %7 = buffer.view %exponent[%exponent_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %6, %7[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %6, %7[0] : i32, view<1xi32>
   %8 = scalar.ldexpf %5, %power : f64, i32
   func.return %8 : f64
 }
@@ -92,7 +92,7 @@ func.def public @decompose(%value: f64, %power: i32, %exponent: buffer, %exponen
 func.def public @decompose_float(%value: f32, %power: i32, %exponent: buffer, %exponent_byte_offset: offset) -> (f32) {
   %14, %15 = scalar.frexpf %value : f32, i32
   %16 = buffer.view %exponent[%exponent_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %15, %16[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %15, %16[0] : i32, view<1xi32>
   %17 = scalar.ldexpf %14, %power : f32, i32
   func.return %17 : f32
 }
@@ -100,7 +100,7 @@ func.def public @decompose_float(%value: f32, %power: i32, %exponent: buffer, %e
 func.def public @exponent_only(%value: f64, %exponent: buffer, %exponent_byte_offset: offset) {
   %21, %22 = scalar.frexpf %value : f64, i32
   %23 = buffer.view %exponent[%exponent_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %22, %23[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %22, %23[0] : i32, view<1xi32>
   func.return
 }
 

@@ -38,9 +38,9 @@ void copy_one(const float* input, float* output) {
   unsigned workitem = static_cast<unsigned>(loom::kernel::workitem::id.x);
   loom::type::index v43 = loom::index::cast(workitem);
   auto slice = loom::view::subview<1>(input_view, loom::type::indices{v43}, {});
-  float value = loom::view::load(slice, 0);
+  float value = loom::view::load<loom::memory_access::may_alias>(slice, 0);
   auto output_view = loom::buffer::view<4>(output, {});
-  loom::view::store(value, output_view, v43);
+  loom::view::store<loom::memory_access::may_alias>(value, output_view, v43);
 }
 """
     )
@@ -852,7 +852,10 @@ kernel.def @page_present() {
     result = render_module(load_module(source.encode()))
 
     assert "void page_present(const int* pages)" in result
-    assert "int page_id = loom::view::load(pages_view, 0);" in result
+    assert (
+        "int page_id = loom::view::load<loom::memory_access::may_alias>("
+        "pages_view, 0);" in result
+    )
     assert "bool present = page_id >= 0;" in result
 
 
@@ -1084,23 +1087,27 @@ func.def public @fragment_memory(%source: view<16x16xf16>, %output: view<16x16xf
 
     assert (
         "Float16x16 fixed = loom::vector::fragment::load<"
-        "loom::vector::fragment::role::lhs, Float16x16, 0, 4>("
+        "loom::vector::fragment::role::lhs, Float16x16, "
+        "loom::memory_access::may_alias, 0, 4>("
         "source, loom::vector::fragment::shape{m, n});" in result
     )
     assert (
         "Float16x16 mixed = loom::vector::fragment::load<"
         "loom::vector::fragment::role::rhs, Float16x16, "
-        "loom::type::dynamic, 4>(source, loom::type::indices{row}, "
+        "loom::memory_access::may_alias, loom::type::dynamic, 4>("
+        "source, loom::type::indices{row}, "
         "loom::vector::fragment::shape{m, n}, FragmentAuxiliary{scale});" in result
     )
     assert (
         "loom::vector::fragment::store<"
-        "loom::vector::fragment::role::result, 0, 0>("
+        "loom::vector::fragment::role::result, "
+        "loom::memory_access::may_alias, 0, 0>("
         "mixed, output, loom::vector::fragment::shape{m, n});" in result
     )
     assert (
         "Float16x16 runtime = loom::vector::fragment::load<"
-        "loom::vector::fragment::role::rhs, Float16x16>("
+        "loom::vector::fragment::role::rhs, Float16x16, "
+        "loom::memory_access::may_alias>("
         "source, loom::type::indices{row, column}, "
         "loom::vector::fragment::shape{m, n});" in result
     )
@@ -1200,27 +1207,29 @@ kernel.def @atomics() {
     )
     assert (
         "loom::view::atomic::store<loom::atomic::ordering::relaxed, "
-        "loom::atomic::scope::device>(1u, values_view, 0, 0);" in result
+        "loom::atomic::scope::device, loom::memory_access::may_alias>("
+        "1u, values_view, 0, 0);" in result
     )
     assert (
         "unsigned observed = loom::view::atomic::load<"
-        "loom::atomic::ordering::acquire, loom::atomic::scope::device>("
-        "values_view, 0, 1);" in result
+        "loom::atomic::ordering::acquire, loom::atomic::scope::device, "
+        "loom::memory_access::may_alias>(values_view, 0, 1);" in result
     )
     assert (
         "unsigned old = loom::view::atomic::rmw<loom::atomic::kind::addi, "
-        "loom::atomic::ordering::acq_rel, loom::atomic::scope::device>(1u, "
-        "values_view, 1, 0);" in result
+        "loom::atomic::ordering::acq_rel, loom::atomic::scope::device, "
+        "loom::memory_access::may_alias>(1u, values_view, 1, 0);" in result
     )
     assert (
         "loom::view::atomic::reduce<loom::atomic::kind::maxui, "
-        "loom::atomic::ordering::relaxed, loom::atomic::scope::device>(old, "
-        "values_view, 1, 1);" in result
+        "loom::atomic::ordering::relaxed, loom::atomic::scope::device, "
+        "loom::memory_access::may_alias>(old, values_view, 1, 1);" in result
     )
     assert (
         "(void)loom::view::atomic::cmpxchg<"
         "loom::atomic::ordering::acq_rel, loom::atomic::ordering::acquire, "
-        "loom::atomic::scope::device>(observed, old, values_view, 0, 0);" in result
+        "loom::atomic::scope::device, loom::memory_access::may_alias>("
+        "observed, old, values_view, 0, 0);" in result
     )
 
 
@@ -1291,8 +1300,8 @@ void topology_identity(unsigned* output) {
   loom::type::index shifted = static_cast<loom::type::index>(coordinate) + loom::type::index{1};
   unsigned lane = static_cast<unsigned>(coordinate);
   unsigned long long wide = loom::index::cast<unsigned long long>(static_cast<loom::type::index>(coordinate));
-  loom::view::store(lane, output_view, coordinate);
-  loom::view::store(lane, output_view, shifted);
+  loom::view::store<loom::memory_access::may_alias>(lane, output_view, coordinate);
+  loom::view::store<loom::memory_access::may_alias>(lane, output_view, shifted);
 }
 """
     )
@@ -1609,7 +1618,10 @@ kernel.def @mixed_integer_address_uses() {
 
     result = render_module(load_module(source.encode()))
 
-    assert "unsigned loaded = loom::view::load(input_view, 0);" in result
+    assert (
+        "unsigned loaded = loom::view::load<loom::memory_access::may_alias>("
+        "input_view, 0);" in result
+    )
     assert "bool below = loaded < 16u;" in result
     assert (
         "loom::type::index logical = "

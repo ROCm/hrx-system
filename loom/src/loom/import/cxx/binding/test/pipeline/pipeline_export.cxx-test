@@ -77,7 +77,7 @@ void resident(unsigned factor, loom::type::index column, loom::type::index count
     auto scratch_view = loom::buffer::view<256>(scratch, {});
     unsigned workitem = static_cast<unsigned>(loom::kernel::workitem::id.x);
     unsigned v15 = workers_adjust(workitem);
-    loom::view::store(loom::convert<unsigned char>(v15), scratch_view, loom::type::index{0});
+    loom::view::store<loom::memory_access::may_alias>(loom::convert<unsigned char>(v15), scratch_view, loom::type::index{0});
   }
 }
 

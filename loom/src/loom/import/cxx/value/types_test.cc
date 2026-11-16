@@ -24,6 +24,117 @@ namespace {
 
 using TypesWithModuleTest = ValueBuilderTest;
 
+TEST_F(TypesWithModuleTest, ClassifiesTypeDisjointMemoryObservations) {
+  Source source(IREE_SV(R"(
+    namespace std { enum class byte : unsigned char {}; }
+    enum PlainEnumeration { plain_value };
+    enum class ScopedEnumeration { scoped_value };
+    enum __attribute__((may_alias)) AliasingEnumeration { alias_value };
+    typedef int AliasingInteger __attribute__((may_alias));
+    using NativeVector = int __attribute__((ext_vector_type(4)));
+    struct Record { int value; };
+    namespace enclosing {
+    namespace std { enum class byte : unsigned char {}; }
+    }
+    using ShadowByte = enclosing::std::byte;
+  )"),
+                IREE_SV("memory_observations.cxx"), options());
+  Types types(source.unit(), source.diagnostics());
+  auto* control = source.unit().control();
+  auto source_type = [&](const char* name) {
+    return (*source.unit().globalScope()->find(name).begin())->type();
+  };
+  auto expect_disjoint = [&](const cxx::Type* type) {
+    EXPECT_EQ(types.memory_access_flags(type),
+              LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT)
+        << cxx::to_string(type);
+  };
+  auto expect_universal = [&](const cxx::Type* type) {
+    EXPECT_EQ(types.memory_access_flags(type), 0) << cxx::to_string(type);
+  };
+
+  const cxx::Type* disjoint_types[] = {
+      control->getBoolType(),
+      control->getSignedCharType(),
+      control->getShortIntType(),
+      control->getUnsignedShortIntType(),
+      control->getIntType(),
+      control->getUnsignedIntType(),
+      control->getLongIntType(),
+      control->getUnsignedLongIntType(),
+      control->getLongLongIntType(),
+      control->getUnsignedLongLongIntType(),
+      control->getInt128Type(),
+      control->getUnsignedInt128Type(),
+      control->getBitIntType(37),
+      control->getUnsignedBitIntType(37),
+      control->getChar8Type(),
+      control->getChar16Type(),
+      control->getChar32Type(),
+      control->getWideCharType(),
+      control->getFloatType(),
+      control->getDoubleType(),
+      control->getLongDoubleType(),
+      control->getHalfType(),
+      control->getFloat16Type(),
+      control->getBFloat16Type(),
+      control->getFloat8E4M3FNType(),
+      control->getFloat8E5M2Type(),
+      control->getFloat128Type(),
+      source_type("PlainEnumeration"),
+      source_type("ScopedEnumeration"),
+      source_type("ShadowByte"),
+  };
+  for (const cxx::Type* type : disjoint_types) {
+    expect_disjoint(type);
+  }
+
+  auto* standard = cxx::symbol_cast<cxx::NamespaceSymbol>(
+      *source.unit().globalScope()->find("std").begin());
+  ASSERT_NE(standard, nullptr);
+  const cxx::Type* universal_types[] = {
+      control->getCharType(),
+      control->getUnsignedCharType(),
+      (*standard->find("byte").begin())->type(),
+      source_type("AliasingEnumeration"),
+      source_type("AliasingInteger"),
+      source_type("NativeVector"),
+      source_type("Record"),
+      control->getAtomicType(control->getIntType()),
+      control->getPointerType(control->getIntType()),
+      control->getNullptrType(),
+  };
+  for (const cxx::Type* type : universal_types) {
+    expect_universal(type);
+  }
+
+  expect_disjoint(control->getQualType(control->getIntType(),
+                                       cxx::CvQualifiers::kConstRestrict));
+  EXPECT_EQ(
+      types.memory_access_flags(control->getQualType(
+          control->getIntType(), cxx::CvQualifiers::kVolatile)),
+      LOOM_MEMORY_ACCESS_FLAG_VOLATILE | LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT);
+  expect_disjoint(
+      control->getLvalueReferenceType(control->getUnsignedIntType()));
+  EXPECT_EQ(
+      types.memory_access_flags(
+          control->getLvalueReferenceType(control->getQualType(
+              control->getIntType(), cxx::CvQualifiers::kVolatile))),
+      LOOM_MEMORY_ACCESS_FLAG_VOLATILE | LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT);
+  expect_universal(nullptr);
+
+  auto c_options = options();
+  c_options.standard = IREE_SV("c23");
+  Source c_source(IREE_SV("signed char value;"),
+                  IREE_SV("memory_observations.c"), c_options);
+  Types c_types(c_source.unit(), c_source.diagnostics());
+  EXPECT_EQ(c_types.memory_access_flags(
+                c_source.unit().control()->getSignedCharType()),
+            0);
+  EXPECT_EQ(
+      c_types.memory_access_flags(c_source.unit().control()->getIntType()), 0);
+}
+
 TEST_F(TypesWithModuleTest,
        ObjectPropertiesFollowOwnershipWithoutValueAdmission) {
   Source source(IREE_SV(R"(
@@ -1103,10 +1214,12 @@ TEST(TypesTest, SeparatesRepresentationFromVolatileObservation) {
   auto* pointer = control->getPointerType(observed);
   EXPECT_TRUE(
       loom_type_equal(types.get(observed, owner), types.get(integer, owner)));
-  EXPECT_EQ(types.memory_access_flags(integer), 0);
+  EXPECT_EQ(types.memory_access_flags(integer),
+            LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT);
   EXPECT_EQ(types.memory_access_flags(pointer), 0);
-  EXPECT_EQ(types.memory_access_flags(observed),
-            LOOM_MEMORY_ACCESS_FLAG_VOLATILE);
+  EXPECT_EQ(
+      types.memory_access_flags(observed),
+      LOOM_MEMORY_ACCESS_FLAG_VOLATILE | LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT);
   EXPECT_EQ(types.partition(pointer, owner).kind, ValueKind::Pointer);
   EXPECT_EQ(types.partition(observed, owner).kind, ValueKind::SSA);
   EXPECT_TRUE(types.has_volatile_subobject(observed));

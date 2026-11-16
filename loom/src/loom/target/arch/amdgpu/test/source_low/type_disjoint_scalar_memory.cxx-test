@@ -1,0 +1,95 @@
+// RUN: with-checks emit source-low target=amdgpu:gfx942 output=low
+// INPUT: cxx data-model=lp64
+
+// A float store cannot change an int object. The later uniform int read still
+// observes entry contents and can use scalar memory without restrict.
+#include <hip/hip_runtime.h>
+#define KERNEL                                                               \
+  __global__ [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+
+KERNEL void distinct_types(const int* input, float* output) {
+  unsigned lane = threadIdx.x;
+  output[lane] = 1.0f;
+  int value = input[0];
+  output[lane + 64] = static_cast<float>(value);
+}
+
+// ----
+CHECK: %value = s_load_dword *
+CHECK-NOT: %value = global_load_*
+
+// ====
+
+// Distinct floating formats use distinct logical scalar types even when both
+// accesses eventually use ordinary hardware carriers.
+#include <hip/hip_runtime.h>
+#define KERNEL                                                               \
+  __global__ [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+
+KERNEL void distinct_float_formats(const float* input, _Float16* output) {
+  unsigned lane = threadIdx.x;
+  output[lane] = (_Float16)1.0f;
+  float value = input[0];
+  output[lane + 64] = (_Float16)value;
+}
+
+// ----
+CHECK: %value = s_load_dword *
+CHECK-NOT: %value = global_load_*
+
+// ====
+
+// A same-type store may change the later int read and keeps vector memory.
+#include <hip/hip_runtime.h>
+#define KERNEL                                                               \
+  __global__ [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+
+KERNEL void same_type(const int* input, int* output) {
+  unsigned lane = threadIdx.x;
+  output[lane] = 1;
+  int value = input[0];
+  output[lane + 64] = value;
+}
+
+// ----
+CHECK: %value = global_load_*
+CHECK-NOT: %value = s_load_*
+
+// ====
+
+// Character access can observe any object representation and remains
+// type-universal.
+#include <hip/hip_runtime.h>
+#define KERNEL                                                               \
+  __global__ [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+
+KERNEL void character_store(const int* input, unsigned char* output) {
+  unsigned lane = threadIdx.x;
+  output[lane] = 1;
+  int value = input[0];
+  output[lane + 64] = static_cast<unsigned char>(value);
+}
+
+// ----
+CHECK: %value = global_load_*
+CHECK-NOT: %value = s_load_*
+
+// ====
+
+// An explicitly aliasable source type remains universal even though its
+// physical representation is int.
+#include <hip/hip_runtime.h>
+#define KERNEL                                                               \
+  __global__ [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+typedef int AliasingInteger __attribute__((may_alias));
+
+KERNEL void aliasing_read(const AliasingInteger* input, float* output) {
+  unsigned lane = threadIdx.x;
+  output[lane] = 1.0f;
+  int value = input[0];
+  output[lane + 64] = static_cast<float>(value);
+}
+
+// ----
+CHECK: %value = global_load_*
+CHECK-NOT: %value = s_load_*

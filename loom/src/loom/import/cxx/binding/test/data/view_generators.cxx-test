@@ -33,7 +33,7 @@ func.def public @volatile_input(%input: buffer) {
     %17 = func.call pure @volatile_input_value(%16) : (i32) -> (i32)
     %18 = scalar.extui %16 : i32 to i64
     %19 = index.cast %18 : i64 to index
-    view.store %17, %values[%19] : i32, view<64xi32>
+    view.store<type_disjoint> %17, %values[%19] : i32, view<64xi32>
   }
   func.return
 }
@@ -95,7 +95,7 @@ func.def public @volatile_scalar_input(%input: buffer, %trial: index) {
   %value = buffer.view %input[%26] : buffer -> view<1xi32>
   %28 = func.call pure @volatile_parameter_value(%trial) : (index) -> (i32)
   %36 = index.constant 0 : index
-  view.store %28, %value[%36] : i32, view<1xi32>
+  view.store<type_disjoint> %28, %value[%36] : i32, view<1xi32>
   func.return
 }
 
@@ -119,16 +119,16 @@ func.def public @volatile_parameter_input(%input: buffer) {
   %values = buffer.view %input[%2] : buffer -> view<4xi32>
   %4 = scalar.constant 0 : i32
   %22 = index.constant 0 : index
-  view.store %4, %values[%22] : i32, view<4xi32>
+  view.store<type_disjoint> %4, %values[%22] : i32, view<4xi32>
   %7 = scalar.constant 37 : i32
   %21 = index.constant 1 : index
-  view.store %7, %values[%21] : i32, view<4xi32>
+  view.store<type_disjoint> %7, %values[%21] : i32, view<4xi32>
   %20 = scalar.constant -128 : i32
   %19 = index.constant 2 : index
-  view.store %20, %values[%19] : i32, view<4xi32>
+  view.store<type_disjoint> %20, %values[%19] : i32, view<4xi32>
   %15 = scalar.constant 2147483647 : i32
   %18 = index.constant 3 : index
-  view.store %15, %values[%18] : i32, view<4xi32>
+  view.store<type_disjoint> %15, %values[%18] : i32, view<4xi32>
   func.return
 }
 
@@ -226,32 +226,32 @@ func.def public @volatile_vector_input(%input: buffer, %trial: index) {
   scf.if %14 {
     %15 = scalar.constant 0 : i32
     %66 = index.constant 0 : index
-    view.store %15, %values[%66] : i32, view<4xi32>
+    view.store<type_disjoint> %15, %values[%66] : i32, view<4xi32>
     %18 = scalar.constant 1 : i32
     %65 = index.constant 1 : index
-    view.store %18, %values[%65] : i32, view<4xi32>
+    view.store<type_disjoint> %18, %values[%65] : i32, view<4xi32>
     %21 = scalar.constant -1 : i32
     %64 = index.constant 2 : index
-    view.store %21, %values[%64] : i32, view<4xi32>
+    view.store<type_disjoint> %21, %values[%64] : i32, view<4xi32>
     %24 = scalar.constant -2147483648 : i32
     %63 = index.constant 3 : index
-    view.store %24, %values[%63] : i32, view<4xi32>
+    view.store<type_disjoint> %24, %values[%63] : i32, view<4xi32>
   } else {
     %62 = scalar.constant 1 : i64
     %30 = scalar.cmpi eq, %11, %62 : i64
     scf.if %30 {
       %31 = scalar.constant 37 : i32
       %61 = index.constant 0 : index
-      view.store %31, %values[%61] : i32, view<4xi32>
+      view.store<type_disjoint> %31, %values[%61] : i32, view<4xi32>
       %60 = scalar.constant -128 : i32
       %59 = index.constant 1 : index
-      view.store %60, %values[%59] : i32, view<4xi32>
+      view.store<type_disjoint> %60, %values[%59] : i32, view<4xi32>
       %39 = scalar.constant 65535 : i32
       %58 = index.constant 2 : index
-      view.store %39, %values[%58] : i32, view<4xi32>
+      view.store<type_disjoint> %39, %values[%58] : i32, view<4xi32>
       %42 = scalar.constant 2147483647 : i32
       %57 = index.constant 3 : index
-      view.store %42, %values[%57] : i32, view<4xi32>
+      view.store<type_disjoint> %42, %values[%57] : i32, view<4xi32>
     } else {
       %55 = index.constant 4 : offset
       %49 = index.constant 1 : offset
@@ -260,7 +260,7 @@ func.def public @volatile_vector_input(%input: buffer, %trial: index) {
         %52 = func.call pure @volatile_input_value(%51) : (i32) -> (i32)
         %53 = scalar.extui %51 : i32 to i64
         %54 = index.cast %53 : i64 to index
-        view.store %52, %values[%54] : i32, view<4xi32>
+        view.store<type_disjoint> %52, %values[%54] : i32, view<4xi32>
       }
     }
   }

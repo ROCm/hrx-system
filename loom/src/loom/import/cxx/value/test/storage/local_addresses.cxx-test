@@ -41,11 +41,11 @@ func.def public @select(%first: i1, %left: f64, %right: f64) -> (f64) {
   %result_storage_byte_offset = index.constant 0 : offset
   %result_view = buffer.view %result_storage[%result_storage_byte_offset] : buffer -> view<1xf64>
   scf.if %first {
-    view.store %left, %result_view[0] : f64, view<1xf64>
+    view.store<type_disjoint> %left, %result_view[0] : f64, view<1xf64>
   } else {
-    view.store %right, %result_view[0] : f64, view<1xf64>
+    view.store<type_disjoint> %right, %result_view[0] : f64, view<1xf64>
   }
-  %result = view.load %result_view[0] : view<1xf64> -> f64
+  %result = view.load<type_disjoint> %result_view[0] : view<1xf64> -> f64
   func.return %result : f64
 }
 
@@ -76,7 +76,7 @@ func.def public @output_parameter() -> (i32) {
   %value_storage_byte_offset = index.constant 0 : offset
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi16>
   func.call @initialize(%value_storage, %value_storage_byte_offset) : (buffer, offset)
-  %value = view.load %value_view[0] : view<1xi16> -> i16
+  %value = view.load<type_disjoint> %value_view[0] : view<1xi16> -> i16
   %6 = scalar.extui %value : i16 to i32
   func.return %6 : i32
 }
@@ -85,7 +85,7 @@ func.def inline @initialize(%value: buffer, %value_byte_offset: offset) {
   %9 = scalar.constant 7 : i32
   %10 = scalar.trunci %9 : i32 to i16
   %11 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi16>
-  view.store<root_in_bounds> %10, %11[0] : i16, view<1xi16>
+  view.store<root_in_bounds|type_disjoint> %10, %11[0] : i16, view<1xi16>
   func.return
 }
 
@@ -104,12 +104,12 @@ func.def public @observations(%input: i32) -> (i32) {
   %value_storage = buffer.alloca<private> align(4) %2 : buffer
   %value_storage_byte_offset = index.constant 0 : offset
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
-  view.store<volatile> %input, %value_view[0] : i32, view<1xi32>
-  %value$6 = view.load<volatile> %value_view[0] : view<1xi32> -> i32
+  view.store<volatile|type_disjoint> %input, %value_view[0] : i32, view<1xi32>
+  %value$6 = view.load<volatile|type_disjoint> %value_view[0] : view<1xi32> -> i32
   %7 = scalar.constant 1 : i32
   %8 = scalar.addi %input, %7 : i32
-  view.store<volatile> %8, %value_view[0] : i32, view<1xi32>
-  %value$9 = view.load<volatile> %value_view[0] : view<1xi32> -> i32
+  view.store<volatile|type_disjoint> %8, %value_view[0] : i32, view<1xi32>
+  %value$9 = view.load<volatile|type_disjoint> %value_view[0] : view<1xi32> -> i32
   func.return %value$9 : i32
 }
 
@@ -353,20 +353,20 @@ func.def public @atomic_local(%input: i32) -> (i32) {
   %value_storage = buffer.alloca<private> align(4) %2 : buffer
   %value_storage_byte_offset = index.constant 0 : offset
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
-  view.store %input, %value_view[0] : i32, view<1xi32>
+  view.store<type_disjoint> %input, %value_view[0] : i32, view<1xi32>
   %10 = scalar.constant 1 : i32
   %11 = scalar.addi %input, %10 : i32
   %12 = scalar.constant 41 : i32
-  %19 = view.atomic.cmpxchg<root_in_bounds> %11, %12, %value_view[0] {failure_ordering = seq_cst, scope = system, success_ordering = seq_cst} : i32, view<1xi32> -> i32
+  %19 = view.atomic.cmpxchg<root_in_bounds|type_disjoint> %11, %12, %value_view[0] {failure_ordering = seq_cst, scope = system, success_ordering = seq_cst} : i32, view<1xi32> -> i32
   %failed = scalar.cmpi eq, %19, %11 : i32
   %21 = scalar.constant 1 : i1
   %22 = scalar.xori %failed, %21 : i1
   %58 = scf.select %22, %19, %11 : i32
-  %30 = view.atomic.cmpxchg<root_in_bounds> %58, %12, %value_view[0] {failure_ordering = seq_cst, scope = system, success_ordering = seq_cst} : i32, view<1xi32> -> i32
+  %30 = view.atomic.cmpxchg<root_in_bounds|type_disjoint> %58, %12, %value_view[0] {failure_ordering = seq_cst, scope = system, success_ordering = seq_cst} : i32, view<1xi32> -> i32
   %succeeded = scalar.cmpi eq, %30, %58 : i32
   %33 = scalar.xori %succeeded, %21 : i1
   %57 = scf.select %33, %30, %58 : i32
-  %value = view.load %value_view[0] : view<1xi32> -> i32
+  %value = view.load<type_disjoint> %value_view[0] : view<1xi32> -> i32
   %36 = scalar.addi %value, %57 : i32
   %38 = scalar.constant 1000 : i32
   %39 = scalar.constant 0 : i32

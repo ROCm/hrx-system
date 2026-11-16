@@ -75,27 +75,27 @@ unsigned atomic_access(loom::type::buffer<unsigned> storage, loom::type::offset 
 [[loom::symbol("scalar_access")]]
 unsigned scalar_access(loom::type::buffer<unsigned> storage, loom::type::offset byte_offset, unsigned replacement) {
   auto view = loom::buffer::view<1>(storage, byte_offset, {});
-  unsigned old = loom::view::load<loom::memory_access::root_in_bounds>(view, 0);
-  loom::view::store<loom::memory_access::root_in_bounds>(replacement, view, 0);
+  unsigned old = loom::view::load<loom::memory_access::root_in_bounds | loom::memory_access::may_alias>(view, 0);
+  loom::view::store<loom::memory_access::root_in_bounds | loom::memory_access::may_alias>(replacement, view, 0);
   return old;
 }
 
 [[loom::symbol("vector_access")]]
 UInt32x4 vector_access(loom::type::buffer<unsigned> storage, loom::type::offset byte_offset, UInt32x4 replacement) {
   auto view = loom::buffer::view<4>(storage, byte_offset, {});
-  UInt32x4 old = loom::vector::load<UInt32x4, loom::memory_access::root_in_bounds>(view, {0});
-  loom::vector::store<loom::memory_access::root_in_bounds>(replacement, view, {0});
+  UInt32x4 old = loom::vector::load<UInt32x4, loom::memory_access::root_in_bounds | loom::memory_access::may_alias>(view, {0});
+  loom::vector::store<loom::memory_access::root_in_bounds | loom::memory_access::may_alias>(replacement, view, {0});
   return old;
 }
 
 [[loom::symbol("atomic_access")]]
 unsigned atomic_access(loom::type::buffer<unsigned> storage, loom::type::offset byte_offset, unsigned expected, unsigned replacement) {
   auto view = loom::buffer::view<1>(storage, byte_offset, {});
-  unsigned loaded = loom::view::atomic::load<loom::atomic::ordering::acquire, loom::atomic::scope::device, loom::memory_access::root_in_bounds>(view, 0);
-  loom::view::atomic::store<loom::atomic::ordering::release, loom::atomic::scope::device, loom::memory_access::root_in_bounds>(loaded, view, 0);
-  unsigned old = loom::view::atomic::rmw<loom::atomic::kind::addi, loom::atomic::ordering::acq_rel, loom::atomic::scope::device, loom::memory_access::root_in_bounds>(replacement, view, 0);
-  loom::view::atomic::reduce<loom::atomic::kind::maxui, loom::atomic::ordering::relaxed, loom::atomic::scope::device, loom::memory_access::root_in_bounds>(old, view, 0);
-  unsigned observed = loom::view::atomic::cmpxchg<loom::atomic::ordering::acq_rel, loom::atomic::ordering::acquire, loom::atomic::scope::device, loom::memory_access::root_in_bounds>(expected, replacement, view, 0);
+  unsigned loaded = loom::view::atomic::load<loom::atomic::ordering::acquire, loom::atomic::scope::device, loom::memory_access::root_in_bounds | loom::memory_access::may_alias>(view, 0);
+  loom::view::atomic::store<loom::atomic::ordering::release, loom::atomic::scope::device, loom::memory_access::root_in_bounds | loom::memory_access::may_alias>(loaded, view, 0);
+  unsigned old = loom::view::atomic::rmw<loom::atomic::kind::addi, loom::atomic::ordering::acq_rel, loom::atomic::scope::device, loom::memory_access::root_in_bounds | loom::memory_access::may_alias>(replacement, view, 0);
+  loom::view::atomic::reduce<loom::atomic::kind::maxui, loom::atomic::ordering::relaxed, loom::atomic::scope::device, loom::memory_access::root_in_bounds | loom::memory_access::may_alias>(old, view, 0);
+  unsigned observed = loom::view::atomic::cmpxchg<loom::atomic::ordering::acq_rel, loom::atomic::ordering::acquire, loom::atomic::scope::device, loom::memory_access::root_in_bounds | loom::memory_access::may_alias>(expected, replacement, view, 0);
   return observed;
 }
 
@@ -132,19 +132,19 @@ UInt32x4 observe_packet(loom::type::view<loom::type::shape<4>, unsigned> values,
 
 [[loom::symbol("observe")]]
 unsigned observe(loom::type::view<loom::type::shape<4>, unsigned> values, unsigned replacement) {
-  unsigned ordinary = loom::view::load(values, 0);
-  unsigned discarded = loom::view::load<loom::memory_access::volatile_>(values, 1);
-  unsigned observed = loom::view::load<loom::memory_access::volatile_ | loom::memory_access::root_in_bounds>(values, 2);
-  loom::view::store(replacement, values, 0);
-  loom::view::store<loom::memory_access::volatile_>(ordinary, values, 1);
-  loom::view::store<loom::memory_access::volatile_ | loom::memory_access::root_in_bounds>(observed, values, 2);
+  unsigned ordinary = loom::view::load<loom::memory_access::may_alias>(values, 0);
+  unsigned discarded = loom::view::load<loom::memory_access::volatile_ | loom::memory_access::may_alias>(values, 1);
+  unsigned observed = loom::view::load<loom::memory_access::volatile_ | loom::memory_access::root_in_bounds | loom::memory_access::may_alias>(values, 2);
+  loom::view::store<loom::memory_access::may_alias>(replacement, values, 0);
+  loom::view::store<loom::memory_access::volatile_ | loom::memory_access::may_alias>(ordinary, values, 1);
+  loom::view::store<loom::memory_access::volatile_ | loom::memory_access::root_in_bounds | loom::memory_access::may_alias>(observed, values, 2);
   return observed;
 }
 
 [[loom::symbol("observe_packet")]]
 UInt32x4 observe_packet(loom::type::view<loom::type::shape<4>, unsigned> values, UInt32x4 replacement) {
-  UInt32x4 observed = loom::vector::load<UInt32x4, loom::memory_access::volatile_ | loom::memory_access::root_in_bounds>(values, {0});
-  loom::vector::store<loom::memory_access::volatile_>(replacement, values, {0});
-  loom::vector::store(observed, values, {0});
+  UInt32x4 observed = loom::vector::load<UInt32x4, loom::memory_access::volatile_ | loom::memory_access::root_in_bounds | loom::memory_access::may_alias>(values, {0});
+  loom::vector::store<loom::memory_access::volatile_ | loom::memory_access::may_alias>(replacement, values, {0});
+  loom::vector::store<loom::memory_access::may_alias>(observed, values, {0});
   return observed;
 }

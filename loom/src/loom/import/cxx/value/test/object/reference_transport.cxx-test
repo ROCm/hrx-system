@@ -22,7 +22,7 @@ func.def public @from_memory(%pointer: buffer, %pointer_byte_offset: offset, %la
   %11 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
   %12 = index.cast %11 : i64 to offset
   %15 = buffer.view %layouts[%12] : buffer -> view<1xi64>
-  %16 = view.load<root_in_bounds> %15[0] : view<1xi64> -> i64
+  %16 = view.load<root_in_bounds|type_disjoint> %15[0] : view<1xi64> -> i64
   %view_pointer, %view_pointer_byte_offset, %view_layout_stride = func.call pure @View__View_value(%pointer, %pointer_byte_offset, %16) : (buffer, offset, i64) -> (buffer, offset, i64)
   func.return %view_layout_stride : i64
 }
@@ -62,7 +62,7 @@ func.def public @from_fields(%pointer: buffer, %pointer_byte_offset: offset, %sc
 
 func.def public @from_memory(%scalar: buffer, %scalar_byte_offset: offset, %vector: buffer, %vector_byte_offset: offset) -> (i32) {
   %16 = buffer.view %scalar[%scalar_byte_offset] : buffer -> view<1xi32>
-  %17 = view.load<root_in_bounds> %16[0] : view<1xi32> -> i32
+  %17 = view.load<root_in_bounds|type_disjoint> %16[0] : view<1xi32> -> i32
   %18 = func.call pure @forward_unsigned_int(%17) : (i32) -> (i32)
   %19 = buffer.view %vector[%vector_byte_offset] : buffer -> view<4xi32>
   %20 = vector.load<root_in_bounds> %19[0] : view<4xi32> -> vector<4xi32>
@@ -106,13 +106,13 @@ func.def public @pointer_alias(%value: buffer, %value_byte_offset: offset) -> (i
 
 func.def @observe(%value$4: buffer, %value_byte_offset: offset, %alias: buffer, %alias_byte_offset: offset) -> (i32) {
   %9 = buffer.view %value$4[%value_byte_offset] : buffer -> view<1xi32>
-  %value$10 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  %value$10 = view.load<root_in_bounds|type_disjoint> %9[0] : view<1xi32> -> i32
   %11 = scalar.constant 9 : i32
   %12 = buffer.view %alias[%alias_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %11, %12[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %11, %12[0] : i32, view<1xi32>
   %13 = scalar.constant 10 : i32
   %14 = scalar.muli %value$10, %13 : i32
-  %value$16 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  %value$16 = view.load<root_in_bounds|type_disjoint> %9[0] : view<1xi32> -> i32
   %17 = scalar.addi %14, %value$16 : i32
   func.return %17 : i32
 }
@@ -134,11 +134,11 @@ func.def public @transitive_alias(%value: buffer, %value_byte_offset: offset) ->
 
 func.def @observe(%value$4: buffer, %value_byte_offset: offset, %alias: buffer, %alias_byte_offset: offset) -> (i32) {
   %9 = buffer.view %value$4[%value_byte_offset] : buffer -> view<1xi32>
-  %value$10 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  %value$10 = view.load<root_in_bounds|type_disjoint> %9[0] : view<1xi32> -> i32
   func.call @modify(%alias, %alias_byte_offset) : (buffer, offset)
   %11 = scalar.constant 10 : i32
   %12 = scalar.muli %value$10, %11 : i32
-  %value$14 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  %value$14 = view.load<root_in_bounds|type_disjoint> %9[0] : view<1xi32> -> i32
   %15 = scalar.addi %12, %value$14 : i32
   func.return %15 : i32
 }
@@ -146,7 +146,7 @@ func.def @observe(%value$4: buffer, %value_byte_offset: offset, %alias: buffer, 
 func.def @modify(%value: buffer, %value_byte_offset: offset) {
   %18 = scalar.constant 9 : i32
   %19 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %18, %19[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %18, %19[0] : i32, view<1xi32>
   func.return
 }
 
@@ -169,13 +169,13 @@ func.def public @receiver_alias(%value: buffer, %value_byte_offset: offset) -> (
 
 func.def @Record__observe_storage(%this: buffer, %this_byte_offset: offset, %alias$8: buffer, %alias_byte_offset: offset) -> (i32) {
   %11 = buffer.view %alias$8[%alias_byte_offset] : buffer -> view<1xi32>
-  %alias$12 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
+  %alias$12 = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xi32> -> i32
   %13 = scalar.constant 9 : i32
   %16 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %13, %16[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %13, %16[0] : i32, view<1xi32>
   %17 = scalar.constant 10 : i32
   %18 = scalar.muli %alias$12, %17 : i32
-  %alias$20 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
+  %alias$20 = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xi32> -> i32
   %21 = scalar.addi %18, %alias$20 : i32
   func.return %21 : i32
 }
@@ -200,11 +200,11 @@ func.def public @transitive_receiver(%value: buffer, %value_byte_offset: offset)
 
 func.def @observe(%value$6: buffer, %value_byte_offset: offset, %alias: buffer, %alias_byte_offset: offset) -> (i32) {
   %11 = buffer.view %value$6[%value_byte_offset] : buffer -> view<1xi32>
-  %value$12 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
+  %value$12 = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xi32> -> i32
   func.call @Record__modify_storage(%alias, %alias_byte_offset) : (buffer, offset)
   %13 = scalar.constant 10 : i32
   %14 = scalar.muli %value$12, %13 : i32
-  %value$16 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
+  %value$16 = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xi32> -> i32
   %17 = scalar.addi %14, %value$16 : i32
   func.return %17 : i32
 }
@@ -212,7 +212,7 @@ func.def @observe(%value$6: buffer, %value_byte_offset: offset, %alias: buffer, 
 func.def @Record__modify_storage(%this: buffer, %this_byte_offset: offset) {
   %20 = scalar.constant 9 : i32
   %23 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %20, %23[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %20, %23[0] : i32, view<1xi32>
   func.return
 }
 
@@ -233,11 +233,11 @@ func.def public @external_alias(%value: buffer, %value_byte_offset: offset) -> (
 
 func.def @observe(%value$4: buffer, %value_byte_offset: offset, %alias: buffer, %alias_byte_offset: offset) -> (i32) {
   %9 = buffer.view %value$4[%value_byte_offset] : buffer -> view<1xi32>
-  %value$10 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  %value$10 = view.load<root_in_bounds|type_disjoint> %9[0] : view<1xi32> -> i32
   func.call @modify(%alias, %alias_byte_offset) : (buffer, offset)
   %11 = scalar.constant 10 : i32
   %12 = scalar.muli %value$10, %11 : i32
-  %value$14 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  %value$14 = view.load<root_in_bounds|type_disjoint> %9[0] : view<1xi32> -> i32
   %15 = scalar.addi %12, %value$14 : i32
   func.return %15 : i32
 }
@@ -257,8 +257,8 @@ func.def public @volatile_member(%value: buffer, %value_byte_offset: offset) -> 
 
 func.def @observe(%value: buffer, %value_byte_offset: offset) -> (i32) {
   %9 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
-  %value_value$10 = view.load<volatile|root_in_bounds> %9[0] : view<1xi32> -> i32
-  %value_value$14 = view.load<volatile|root_in_bounds> %9[0] : view<1xi32> -> i32
+  %value_value$10 = view.load<volatile|root_in_bounds|type_disjoint> %9[0] : view<1xi32> -> i32
+  %value_value$14 = view.load<volatile|root_in_bounds|type_disjoint> %9[0] : view<1xi32> -> i32
   %15 = scalar.addi %value_value$10, %value_value$14 : i32
   func.return %15 : i32
 }
@@ -280,13 +280,13 @@ func.def public @mutable_member(%value: buffer, %value_byte_offset: offset) -> (
 
 func.def @observe(%value: buffer, %value_byte_offset: offset, %alias$8: buffer, %alias_byte_offset: offset) -> (i32) {
   %11 = buffer.view %alias$8[%alias_byte_offset] : buffer -> view<1xi32>
-  %alias$12 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
+  %alias$12 = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xi32> -> i32
   %13 = scalar.constant 9 : i32
   %16 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %13, %16[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %13, %16[0] : i32, view<1xi32>
   %17 = scalar.constant 10 : i32
   %18 = scalar.muli %alias$12, %17 : i32
-  %alias$20 = view.load<root_in_bounds> %11[0] : view<1xi32> -> i32
+  %alias$20 = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xi32> -> i32
   %21 = scalar.addi %18, %alias$20 : i32
   func.return %21 : i32
 }
@@ -346,11 +346,11 @@ func.def public @from_local(%pointer: buffer, %pointer_byte_offset: offset, %str
 
 func.def public @from_memory(%pointer: buffer, %pointer_byte_offset: offset, %layouts: buffer, %layouts_byte_offset: offset) -> (i32) {
   %22 = buffer.view %layouts[%layouts_byte_offset] : buffer -> view<1xi32>
-  %23 = view.load<root_in_bounds> %22[0] : view<1xi32> -> i32
+  %23 = view.load<root_in_bounds|type_disjoint> %22[0] : view<1xi32> -> i32
   %24 = index.constant 4 : offset
   %25 = index.add %layouts_byte_offset, %24 : offset
   %26 = buffer.view %layouts[%25] : buffer -> view<1xi32>
-  %27 = view.load<root_in_bounds> %26[0] : view<1xi32> -> i32
+  %27 = view.load<root_in_bounds|type_disjoint> %26[0] : view<1xi32> -> i32
   %view_pointer, %view_pointer_byte_offset, %view_layout_stride, %view_layout_width = func.call pure @make(%pointer, %pointer_byte_offset, %23, %27) : (buffer, offset, i32, i32) -> (buffer, offset, i32, i32)
   %32 = scalar.addi %view_layout_stride, %view_layout_width : i32
   func.return %32 : i32
@@ -383,11 +383,11 @@ func.def public @member_reference(%value: buffer, %value_byte_offset: offset) ->
 
 func.def @observe(%value$4: buffer, %value_byte_offset: offset, %alias_value: buffer, %alias_value_byte_offset: offset) -> (i32) {
   %9 = buffer.view %value$4[%value_byte_offset] : buffer -> view<1xi32>
-  %value$10 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  %value$10 = view.load<root_in_bounds|type_disjoint> %9[0] : view<1xi32> -> i32
   func.call @Reference__modify_value(%alias_value, %alias_value_byte_offset) : (buffer, offset)
   %11 = scalar.constant 10 : i32
   %12 = scalar.muli %value$10, %11 : i32
-  %value$14 = view.load<root_in_bounds> %9[0] : view<1xi32> -> i32
+  %value$14 = view.load<root_in_bounds|type_disjoint> %9[0] : view<1xi32> -> i32
   %15 = scalar.addi %12, %value$14 : i32
   func.return %15 : i32
 }
@@ -395,7 +395,7 @@ func.def @observe(%value$4: buffer, %value_byte_offset: offset, %alias_value: bu
 func.def @Reference__modify_value(%this_value: buffer, %this_value_byte_offset: offset) {
   %18 = scalar.constant 9 : i32
   %19 = buffer.view %this_value[%this_value_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %18, %19[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %18, %19[0] : i32, view<1xi32>
   func.return
 }
 
@@ -413,9 +413,9 @@ func.def public @escaped_member(%value$0: buffer, %value_byte_offset: offset) ->
   %borrowed_value, %borrowed_value_byte_offset = func.call pure @capture(%value$0, %value_byte_offset) : (buffer, offset) -> (buffer, offset)
   %5 = scalar.constant 9 : i32
   %6 = buffer.view %value$0[%value_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %5, %6[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %5, %6[0] : i32, view<1xi32>
   %7 = buffer.view %borrowed_value[%borrowed_value_byte_offset] : buffer -> view<1xi32>
-  %value$8 = view.load<root_in_bounds> %7[0] : view<1xi32> -> i32
+  %value$8 = view.load<root_in_bounds|type_disjoint> %7[0] : view<1xi32> -> i32
   func.return %value$8 : i32
 }
 
@@ -450,20 +450,20 @@ func.def public @escaped_initializers(%left: buffer, %left_byte_offset: offset, 
   %constructed_value, %constructed_value_byte_offset = func.call pure @capture_constructed(%right, %right_byte_offset) : (buffer, offset) -> (buffer, offset)
   %13 = scalar.constant 3 : i32
   %14 = buffer.view %left[%left_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %13, %14[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %13, %14[0] : i32, view<1xi32>
   %15 = scalar.constant 7 : i32
   %16 = buffer.view %right[%right_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %15, %16[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %15, %16[0] : i32, view<1xi32>
   %17 = buffer.view %parenthesized_value[%parenthesized_value_byte_offset] : buffer -> view<1xi32>
-  %value$18 = view.load<root_in_bounds> %17[0] : view<1xi32> -> i32
+  %value$18 = view.load<root_in_bounds|type_disjoint> %17[0] : view<1xi32> -> i32
   %20 = buffer.view %nested_values_0_value[%nested_values_0_value_byte_offset] : buffer -> view<1xi32>
-  %value$21 = view.load<root_in_bounds> %20[0] : view<1xi32> -> i32
+  %value$21 = view.load<root_in_bounds|type_disjoint> %20[0] : view<1xi32> -> i32
   %22 = scalar.addi %value$18, %value$21 : i32
   %24 = buffer.view %nested_values_1_value[%nested_values_1_value_byte_offset] : buffer -> view<1xi32>
-  %value$25 = view.load<root_in_bounds> %24[0] : view<1xi32> -> i32
+  %value$25 = view.load<root_in_bounds|type_disjoint> %24[0] : view<1xi32> -> i32
   %26 = scalar.addi %22, %value$25 : i32
   %27 = buffer.view %constructed_value[%constructed_value_byte_offset] : buffer -> view<1xi32>
-  %value$28 = view.load<root_in_bounds> %27[0] : view<1xi32> -> i32
+  %value$28 = view.load<root_in_bounds|type_disjoint> %27[0] : view<1xi32> -> i32
   %29 = scalar.addi %26, %value$28 : i32
   func.return %29 : i32
 }
