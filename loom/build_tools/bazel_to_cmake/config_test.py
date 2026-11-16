@@ -464,6 +464,81 @@ loom_library(
         ):
             self.assertIn('"--config=' + configuration + '"', output)
 
+    def test_loom_test_named_workloads_match_bazel_expansion(self):
+        output = bazel_to_cmake_converter.convert_build_file(
+            """
+load(
+    "//loom/build_tools/bazel:loom_library.bzl",
+    "loom_execution_profile",
+    "loom_test",
+)
+profile = loom_execution_profile(
+    name = "reference",
+    target_family = "vm",
+    target_class = "cpu",
+    executor = "reference",
+)
+loom_test(
+    name = "subject",
+    srcs = ["subject.loom"],
+    configs = {"common.value": "base"},
+    case = "@base",
+    workloads = {
+        "base": {},
+        "selected": {
+            "case": "@selected",
+            "configs": {
+                "common.value": "override",
+                "selected.width": "8",
+            },
+        },
+    },
+    execution_profiles = [profile],
+    benchmark_smoke = False,
+)
+""",
+            SimpleNamespace(PROJECTS=[self.project], REPO_MAP={"@hrx": ""}),
+            str(REPO_ROOT / "loom/build_tools/bazel_to_cmake/testdata"),
+            repo_root=str(REPO_ROOT),
+        )
+        self.assertEqual(output.count("loom_execution_test("), 2)
+        self.assertIn("subject_base_execute_reference_test", output)
+        self.assertIn("subject_selected_execute_reference_test", output)
+        self.assertIn('"--config=common.value=base"', output)
+        self.assertIn('"--config=common.value=override"', output)
+        self.assertIn('"--config=selected.width=8"', output)
+        self.assertIn('"--case=@base"', output)
+        self.assertIn('"--case=@selected"', output)
+
+    def test_loom_test_rejects_legacy_variants_keyword(self):
+        with self.assertRaisesRegex(
+            NotImplementedError, "loom_test attributes: variants"
+        ):
+            bazel_to_cmake_converter.convert_build_file(
+                """
+load(
+    "//loom/build_tools/bazel:loom_library.bzl",
+    "loom_execution_profile",
+    "loom_test",
+)
+profile = loom_execution_profile(
+    name = "reference",
+    target_family = "vm",
+    target_class = "cpu",
+    executor = "reference",
+)
+loom_test(
+    name = "subject",
+    srcs = ["subject.loom"],
+    variants = {"legacy": {}},
+    execution_profiles = [profile],
+)
+""",
+                SimpleNamespace(PROJECTS=[self.project], REPO_MAP={"@hrx": ""}),
+                str(REPO_ROOT / "loom/build_tools/bazel_to_cmake/testdata"),
+                repo_root=str(REPO_ROOT),
+            )
+
     def test_runtime_amdgpu_cts_uses_architecture_selector_variables(self):
         runtime_project = bazel_to_cmake_config.include_project(
             REPO_ROOT / ".bazel_to_cmake.cfg.py", "runtime/.bazel_to_cmake.cfg.py"

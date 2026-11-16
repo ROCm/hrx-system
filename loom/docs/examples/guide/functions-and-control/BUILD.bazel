@@ -42,12 +42,12 @@ loom_kernel_library(
     ],
 )
 
-# --8<-- [start:workload_variants]
+# --8<-- [start:named_workloads]
 loom_test(
-    name = "read_ahead_variants_test",
+    name = "read_ahead_workloads_test",
     srcs = ["read-ahead-tests.loom"],
     execution_profiles = [AMD_GPU_HARDWARE_PROFILE],
-    variants = {
+    workloads = {
         "serial": {"configs": {
             "read_ahead.depth": "1",
             "read_ahead.unroll": "2",
@@ -59,7 +59,7 @@ loom_test(
     },
     deps = [":read_ahead"],
 )
-# --8<-- [end:workload_variants]
+# --8<-- [end:named_workloads]
 
 loom_kernel_library(
     name = "vector_read_ahead",
@@ -123,7 +123,7 @@ loom_test(
         "paired_rows.right_unroll": "4",
     },
     execution_profiles = [AMD_GPU_ACCESS_PROFILE],
-    variants = {
+    workloads = {
         "both": {"configs": {
             "paired_rows.left_lookahead": "3",
             "paired_rows.right_lookahead": "3",

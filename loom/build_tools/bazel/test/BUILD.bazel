@@ -207,7 +207,7 @@ loom_test(
         SERIALIZED_REFERENCE_PROFILE,
     ],
     target_compatible_with = [":source_provider_available"],
-    variants = {
+    workloads = {
         "all": {},
         "selected": {"case": "scalar_case"},
     },
@@ -224,7 +224,7 @@ loom_test(
     ],
     module = ":profiled_module",
     tags = ["manual"],
-    variants = {
+    workloads = {
         "all": {"case": ""},
         "selected": {},
     },

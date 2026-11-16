@@ -85,7 +85,7 @@ loom_test(
     srcs = ["cooperative_initializers.loom"],
     benchmark_smoke = False,
     execution_profiles = [SPIRV_VULKAN_HARDWARE_PROFILE],
-    variants = {
+    workloads = {
         "carrier_1": {"configs": {"initializer.carrier_width": "1"}},
         "carrier_4": {"configs": {"initializer.carrier_width": "4"}},
         "carrier_8": {"configs": {"initializer.carrier_width": "8"}},
