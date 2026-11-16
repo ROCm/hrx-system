@@ -1,5 +1,52 @@
 // RUN: pass source-to-low
 
+test.target<low_core> @target
+
+func.def target(@target) @empty_frame_storage() {
+  %empty = view.alloca<private> : view<0xi64>
+  func.return
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) abi(object_function) @empty_frame_storage() asm {
+  return
+}
+
+// ====
+
+// Typed roots use the same bounded reservation and address selection as buffers.
+test.target<low_core> @target
+
+func.def target(@target) @typed_storage(%input: vector<4xi32>, %count: index) -> (vector<4xi32>) {
+  %bounded = index.assume %count [range(%count, 4, 16)] : index
+  %private = view.alloca<private> align(16) : view<[%bounded]xi32>
+  %shared = view.alloca<workgroup> align(64) : view<4xi32>
+  vector.store %input, %private[0] : vector<4xi32>, view<[%bounded]xi32>
+  %value = vector.load %private[0] : view<[%bounded]xi32> -> vector<4xi32>
+  vector.store %value, %shared[0] : vector<4xi32>, view<4xi32>
+  %result = vector.load %shared[0] : view<4xi32> -> vector<4xi32>
+  func.return %result : vector<4xi32>
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) abi(object_function) @typed_storage(%input: reg<test.i32 x4>, %bounded: reg<test.i32>) -> (reg<test.i32 x4>) asm {
+  %11 = storage {byte_alignment = 16, byte_length = 64} : low.storage<private>
+  %private = storage_address %11 : low.storage<private> -> reg<test.ptr>
+  %13 = storage {byte_alignment = 64, byte_length = 16} : low.storage<workgroup>
+  %shared = storage_address %13 : low.storage<workgroup> -> reg<test.ptr>
+  test.store.v4i32 %private, %input
+  %value = test.load.v4i32 %private
+  test.store.v4i32 %shared, %value
+  %result = test.load.v4i32 %shared
+  return %result
+}
+
+// ====
+
 // A prior instance remains live across a new execution of the allocation.
 // Fixed storage selection must diagnose this before constructing Low addresses.
 test.target<low_core> @target

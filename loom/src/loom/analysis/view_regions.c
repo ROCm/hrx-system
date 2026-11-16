@@ -261,8 +261,9 @@ static iree_status_t loom_view_region_dim_expr(
                                        out_expression);
 }
 
-static int64_t loom_view_region_static_element_byte_count(loom_type_t type) {
-  int32_t bit_count = loom_scalar_type_bitwidth(loom_type_element_type(type));
+static int64_t loom_view_region_static_element_byte_count(
+    const loom_fact_context_t* context, loom_type_t type) {
+  uint32_t bit_count = loom_fact_context_element_bitwidth(context, type);
   if (bit_count <= 0 || (bit_count % 8) != 0) {
     return -1;
   }
@@ -720,14 +721,15 @@ static iree_status_t loom_view_region_build_address_projection(
 //===----------------------------------------------------------------------===//
 
 static loom_value_fact_view_reference_t loom_view_region_default_reference(
-    loom_value_id_t value_id, loom_type_t view_type) {
+    const loom_fact_context_t* context, loom_value_id_t value_id,
+    loom_type_t view_type) {
   return (loom_value_fact_view_reference_t){
       .base_byte_offset = loom_value_facts_exact_i64(0),
       .footprint_byte_length = loom_value_facts_make(0, INT64_MAX, 1),
       .minimum_alignment = 1,
       .root_minimum_alignment = 1,
       .static_element_byte_count =
-          loom_view_region_static_element_byte_count(view_type),
+          loom_view_region_static_element_byte_count(context, view_type),
       .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN,
       .root_value_id = value_id,
       .buffer_value_id = LOOM_VALUE_ID_INVALID,
@@ -920,7 +922,8 @@ static iree_status_t loom_view_region_build_for_value(
   const loom_module_t* module = table->expression_context->module;
   loom_type_t view_type = loom_module_value_type(module, value_id);
   loom_value_fact_view_reference_t reference =
-      loom_view_region_default_reference(value_id, view_type);
+      loom_view_region_default_reference(
+          &table->expression_context->fact_table->context, value_id, view_type);
   loom_value_facts_t facts = loom_view_region_lookup_facts(table, value_id);
   (void)loom_value_facts_query_view_reference(
       &table->expression_context->fact_table->context, facts, &reference);

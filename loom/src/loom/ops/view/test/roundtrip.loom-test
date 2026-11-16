@@ -1,5 +1,23 @@
 // RUN: roundtrip
 
+type.decl import("objects", "buffer") @Buffer
+
+func.def @typed_frame_arrays(%count: index, %pool: pool) {
+  %values = view.alloca<private> : view<16xi64>
+  %pointers = view.alloca<private> : view<[%count]xptr<@Buffer>>
+  %owners = view.alloca<private> : view<4xref<@Buffer>>
+  %empty = view.alloca<private> : view<0xptr<@Buffer>>
+  %tile = view.alloca<workgroup> pool(%pool) align(64) : view<16x32xf32>
+  test.use %values : view<16xi64>
+  test.use %pointers : view<[%count]xptr<@Buffer>>
+  test.use %owners : view<4xref<@Buffer>>
+  test.use %empty : view<0xptr<@Buffer>>
+  test.use %tile : view<16x32xf32>
+  func.return
+}
+
+// ====
+
 func.def @atomic_observation_and_publication(%view: view<1xi32>, %value: i32) -> (i32, i32, i32) {
   %relaxed = view.atomic.load %view[0] {ordering = relaxed, scope = system} : view<1xi32> -> i32
   %acquired = view.atomic.load %view[0] {ordering = acquire, scope = device} : view<1xi32> -> i32

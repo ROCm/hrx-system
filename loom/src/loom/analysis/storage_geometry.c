@@ -19,7 +19,7 @@ bool loom_storage_geometry_query(const loom_fact_context_t* context,
     return false;
   }
   const int32_t element_bit_count =
-      loom_scalar_type_bitwidth(loom_type_element_type(type));
+      loom_fact_context_element_bitwidth(context, type);
   if (element_bit_count <= 0) {
     return false;
   }

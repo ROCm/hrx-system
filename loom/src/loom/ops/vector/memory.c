@@ -55,7 +55,7 @@ bool loom_vector_memory_access_describe(
   }
 
   int32_t element_bit_count =
-      loom_scalar_type_bitwidth(loom_type_element_type(view_type));
+      loom_fact_context_element_bitwidth(context, view_type);
   int64_t static_element_byte_count = -1;
   if (element_bit_count > 0 && (element_bit_count % 8) == 0) {
     static_element_byte_count = element_bit_count / 8;

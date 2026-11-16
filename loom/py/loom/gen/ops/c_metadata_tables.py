@@ -975,6 +975,8 @@ def generate_tables_c(
                     flags_parts.append("LOOM_RESULT_VARIADIC")
                 if result.allocates:
                     flags_parts.append("LOOM_RESULT_ALLOCATES")
+                if getattr(result, "frame_owned", False):
+                    flags_parts.append("LOOM_RESULT_FRAME_OWNED")
                 if getattr(result, "signature_only", False):
                     flags_parts.append("LOOM_RESULT_SIGNATURE_ONLY")
                 flags = " | ".join(flags_parts) if flags_parts else "0"

@@ -1594,11 +1594,11 @@ iree_status_t loom_low_storage_reserve_verify(
       module, op, loom_low_storage_reserve_storage(op),
       LOOM_DIAGNOSTIC_FIELD_RESULT, 0, IREE_SV("storage"), emitter));
 
-  if (loom_low_storage_reserve_byte_length(op) <= 0) {
+  if (loom_low_storage_reserve_byte_length(op) < 0) {
     IREE_RETURN_IF_ERROR(loom_low_emit_attr_value_error(
         op, loom_low_storage_reserve_byte_length_diagnostic_ref(),
         IREE_SV("byte_length"), loom_low_storage_reserve_byte_length(op),
-        IREE_SV("positive byte length"), emitter));
+        IREE_SV("non-negative byte length"), emitter));
   }
 
   if (!loom_low_is_power_of_two_i64(

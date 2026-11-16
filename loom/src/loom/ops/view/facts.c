@@ -17,6 +17,20 @@
 #include "loom/util/fact_extensions.h"
 #include "loom/util/fact_table.h"
 
+iree_status_t loom_view_alloca_facts(loom_fact_context_t* context,
+                                     const loom_module_t* module,
+                                     const loom_op_t* op,
+                                     const loom_value_facts_t* operand_facts,
+                                     loom_value_facts_t* result_facts) {
+  const loom_value_id_t result = loom_view_alloca_result(op);
+  return loom_view_reference_make_allocation(
+      context, module, result, loom_module_value_type(module, result),
+      loom_view_alloca_has_base_alignment(op)
+          ? (uint64_t)loom_view_alloca_base_alignment(op)
+          : 1,
+      loom_view_alloca_memory_space(op), &result_facts[0]);
+}
+
 static loom_value_facts_t loom_view_subview_dimension_facts(
     const loom_fact_context_t* context, loom_type_t type, uint8_t axis) {
   if (!loom_type_dim_is_dynamic_at(type, axis)) {

@@ -179,6 +179,12 @@ struct loom_fact_context_t {
   loom_value_fact_origin_publication_t* publication;
 };
 
+// Returns the physical width of one scalar or reference element. Ordinary
+// scalar widths are target-independent; index, offset, and opaque reference
+// cells require the selected target's representation. Zero means unknown.
+uint32_t loom_fact_context_element_bitwidth(const loom_fact_context_t* context,
+                                            loom_type_t type);
+
 struct loom_value_fact_table_t {
   // Arena for reusable fact segments, their pointer directory, and oversized
   // extension storage.

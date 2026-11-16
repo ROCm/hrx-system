@@ -2759,6 +2759,28 @@ class TestOp:
                 format=[Scope([ResultType("result")])],
             )
 
+    def test_frame_owned_results_are_fresh_borrowed_storage(self) -> None:
+        for carrier in (BUFFER, dsl.VIEW, dsl.STORAGE):
+            result = Result("result", carrier, allocates=True, frame_owned=True)
+            Op(
+                "test.frame",
+                results=[result],
+                ownership_effects=[dsl.BorrowedResult("result")],
+            )
+            for effects in ([], [dsl.FreshResult("result")]):
+                with _raises(ValueError, match="requires BorrowedResult"):
+                    Op("test.frame", results=[result], ownership_effects=effects)
+        for result in (
+            Result("result", BUFFER, frame_owned=True),
+            Result("result", INTEGER, allocates=True, frame_owned=True),
+        ):
+            with _raises(ValueError, match="must allocate buffer, view, or storage"):
+                Op(
+                    "test.frame",
+                    results=[result],
+                    ownership_effects=[dsl.BorrowedResult("result")],
+                )
+
     def test_reference_source_requires_a_definite_storage_origin(self) -> None:
         Op(
             "test.derive",

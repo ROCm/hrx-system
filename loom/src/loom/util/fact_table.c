@@ -91,6 +91,27 @@ loom_value_facts_t loom_value_fact_table_lookup_at(
   return facts;
 }
 
+uint32_t loom_fact_context_element_bitwidth(const loom_fact_context_t* context,
+                                            loom_type_t type) {
+  const loom_target_bundle_t* bundle =
+      context ? loom_target_facts_bundle(context->target_facts) : NULL;
+  const loom_target_snapshot_t* target = bundle ? bundle->snapshot : NULL;
+  if (loom_type_is_reference(type) || loom_type_has_reference_element(type)) {
+    return target ? target->reference_storage_bitwidth : 0;
+  }
+  const loom_scalar_type_t element = loom_type_element_type(type);
+  switch (element) {
+    case LOOM_SCALAR_TYPE_INDEX:
+      return target ? target->index_bitwidth : 0;
+    case LOOM_SCALAR_TYPE_OFFSET:
+      return target ? target->offset_bitwidth : 0;
+    default: {
+      const int32_t bitwidth = loom_scalar_type_bitwidth(element);
+      return bitwidth > 0 ? (uint32_t)bitwidth : 0;
+    }
+  }
+}
+
 loom_value_id_t loom_value_fact_table_lookup_inference_value(
     const loom_value_fact_table_t* table, loom_value_id_t value,
     loom_value_facts_t* out_facts) {

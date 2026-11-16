@@ -1,5 +1,21 @@
 // RUN: verify
 
+func.def @invalid_allocation_alignment() {
+  // ERROR@+1: STRUCTURE/014 "base_alignment" "3" "positive power-of-two byte alignment"
+  %values = view.alloca<private> align(3) : view<4xi32>
+  func.return
+}
+
+// ====
+
+func.def @invalid_allocation_space() {
+  // ERROR@+1: STRUCTURE/014 "memory_space" "global, workgroup, private, host, or generic memory space"
+  %values = view.alloca<constant> : view<4xi32>
+  func.return
+}
+
+// ====
+
 type.decl import("input", "packet") @Packet
 
 type.decl import("input", "packet") @Alias

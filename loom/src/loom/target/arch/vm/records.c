@@ -14,6 +14,7 @@ static const loom_target_snapshot_t kCoreSnapshot = {
     .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_VM,
     .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_VM_BINARY,
     .default_pointer_bitwidth = 64,
+    .reference_storage_bitwidth = 128,
     .index_bitwidth = 64,
     .maximum_index_bitwidth = 64,
     .offset_bitwidth = 64,

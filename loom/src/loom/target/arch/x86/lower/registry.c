@@ -698,6 +698,9 @@ static iree_status_t loom_x86_map_native_abi_layout(
 static const loom_low_lower_function_storage_mapping_t kX86FunctionStorage[] = {
     {LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, LOOM_STORAGE_SPACE_PRIVATE,
      LOOM_X86_REGISTER_CLASS_GPR64},
+    {LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, LOOM_STORAGE_SPACE_PRIVATE,
+     LOOM_X86_REGISTER_CLASS_GPR64,
+     LOOM_LOW_LOWER_FUNCTION_STORAGE_SOURCE_SCALAR_VIEW},
 };
 
 static bool loom_x86_avx2_source_vector_carrier_supported(

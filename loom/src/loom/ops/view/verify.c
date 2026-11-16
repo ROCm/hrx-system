@@ -58,6 +58,32 @@ static iree_status_t loom_view_emit_operand_constraint(
                         IREE_ARRAYSIZE(params));
 }
 
+iree_status_t loom_view_alloca_verify(const loom_module_t* module,
+                                      const loom_op_t* op,
+                                      iree_diagnostic_emitter_t emitter) {
+  const int64_t alignment = loom_view_alloca_base_alignment(op);
+  if (loom_view_alloca_has_base_alignment(op) &&
+      !iree_math_is_power_of_two_i64(alignment)) {
+    return loom_view_emit_attribute_value_constraint(
+        emitter, op, IREE_SV("base_alignment"), alignment,
+        IREE_SV("positive power-of-two byte alignment"));
+  }
+  const loom_value_fact_memory_space_t memory_space =
+      loom_view_alloca_memory_space(op);
+  switch (memory_space) {
+    case LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL:
+    case LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP:
+    case LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE:
+    case LOOM_VALUE_FACT_MEMORY_SPACE_HOST:
+    case LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC:
+      return iree_ok_status();
+    default:
+      return loom_view_emit_attribute_value_constraint(
+          emitter, op, IREE_SV("memory_space"), memory_space,
+          IREE_SV("global, workgroup, private, host, or generic memory space"));
+  }
+}
+
 static iree_status_t loom_view_verify_atomic_kind(
     iree_diagnostic_emitter_t emitter, const loom_op_t* op,
     iree_string_view_t value_name, loom_type_t value_type, uint8_t kind,

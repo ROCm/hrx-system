@@ -10,32 +10,40 @@ from loom.assembly import (
     ARROW,
     COLON,
     COMMA,
+    Attr,
     AttrDict,
+    Clause,
     Flags,
     IndexList,
+    OptionalGroup,
     Ref,
     ResultType,
+    TemplateParam,
     TemplateParamFlags,
     TypeOf,
 )
 from loom.dialect.atomic import AtomicAccessFlags, AtomicKind, AtomicLoadOrdering, AtomicMemoryFlags, AtomicOrdering, AtomicScope, AtomicStoreOrdering
 from loom.dialect.cache import CacheScope, CacheTemporal
-from loom.dialect.memory import MemoryAccessFlags
+from loom.dialect.memory import MemoryAccessFlags, MemorySpace
 from loom.dsl import (
     ANY,
     ATTR_TYPE_ENUM,
     ATTR_TYPE_FLAGS,
+    ATTR_TYPE_I64,
     ATTR_TYPE_I64_ARRAY,
     BYTE_PATTERN_SCALAR,
     HINT,
     INDEX,
     OBSERVABLE_EFFECT,
+    POOL,
     PURE,
     REFINABLE_RESULT_TYPE_REFS,
     SCALAR,
     VALUE_ALIAS,
     VIEW,
     AttrDef,
+    Borrow,
+    BorrowedResult,
     CachePolicyInterface,
     ContractFamily,
     Dialect,
@@ -684,6 +692,50 @@ view_duplicate = value_duplication_op(
     ],
 )
 
+view_alloca = Op(
+    "view.alloca",
+    group=view_ops,
+    doc=(
+        "Allocate frame-owned typed storage and return a view of its elements. "
+        "The result type supplies the shape and layout. The allocation and all "
+        "derived views borrow the current invocation and cannot escape it. "
+        "Reference elements occupy opaque reference cells, never byte-addressable "
+        "buffer storage. Scalar contents are unspecified; reference cells start "
+        "null. The allocation shares the backing-resource and lifetime contract "
+        "of buffer.alloca."
+    ),
+    operands=[
+        Operand(
+            "pool",
+            POOL,
+            optional=True,
+            doc="Borrowed resource providing the allocation's backing storage.",
+        ),
+    ],
+    results=[
+        Result("result", VIEW, allocates=True, frame_owned=True, doc="Borrowed view of fresh frame-owned storage."),
+    ],
+    attrs=[
+        AttrDef("base_alignment", ATTR_TYPE_I64, optional=True, doc="Minimum byte alignment of the storage base, defaulting to one."),
+        AttrDef("memory_space", ATTR_TYPE_ENUM, enum_def=MemorySpace, doc="Allocatable scratch memory space for the root."),
+    ],
+    ownership_effects=[Borrow("pool"), BorrowedResult("result")],
+    verify="loom_view_alloca_verify",
+    facts="loom_view_alloca_facts",
+    format=[
+        TemplateParam("memory_space"),
+        OptionalGroup([Clause("pool", Ref("pool"))], anchor="pool"),
+        OptionalGroup([Clause("align", Attr("base_alignment"))], anchor="base_alignment"),
+        COLON,
+        ResultType("result"),
+    ],
+    examples=[
+        "%values = view.alloca<private> : view<16xi64>",
+        "%objects = view.alloca<private> : view<16xptr<@Object>>",
+        "%tile = view.alloca<workgroup> pool(%memory) align(64) : view<16x32xf32>",
+    ],
+)
+
 ALL_VIEW_OPS: tuple[Op, ...] = (
     view_subview,
     view_refine,
@@ -697,4 +749,5 @@ ALL_VIEW_OPS: tuple[Op, ...] = (
     view_atomic_store,
     view_bitcast,
     view_duplicate,
+    view_alloca,
 )

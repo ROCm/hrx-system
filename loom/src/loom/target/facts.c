@@ -91,6 +91,7 @@ static bool loom_target_limit_satisfies(uint64_t effective_limit,
 bool loom_target_snapshot_has_same_data_layout(
     const loom_target_snapshot_t* lhs, const loom_target_snapshot_t* rhs) {
   return lhs->default_pointer_bitwidth == rhs->default_pointer_bitwidth &&
+         lhs->reference_storage_bitwidth == rhs->reference_storage_bitwidth &&
          lhs->index_bitwidth == rhs->index_bitwidth &&
          loom_target_snapshot_maximum_index_bitwidth(lhs) ==
              loom_target_snapshot_maximum_index_bitwidth(rhs) &&

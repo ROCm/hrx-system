@@ -522,6 +522,8 @@ class Result:
     variadic: If True, this is zero-or-more result values.
     allocates: If True, this result is a freshly allocated resource
         that cannot alias any pre-existing resource.
+    frame_owned: The execution frame owns this fresh allocation. The result
+        borrows its storage and has no release obligation of its own.
     signature_only: If True, this result describes a locally scoped signature
         value rather than an SSA value visible after the operation.
     reference_source: Named buffer/view operand whose storage this reference
@@ -534,6 +536,7 @@ class Result:
     doc: str = ""
     variadic: bool = False
     allocates: bool = False
+    frame_owned: bool = False
     signature_only: bool = False
     reference_source: str | None = None
 
@@ -5496,6 +5499,29 @@ def _validate_ownership_effects(
     copied_sources: set[str] = set()
     consumed_sources: set[str] = set()
 
+    for result in results:
+        if not getattr(result, "frame_owned", False):
+            continue
+        if not result.allocates or result.type_constraint not in (
+            BUFFER,
+            VIEW,
+            STORAGE,
+        ):
+            raise ValueError(
+                f"Op '{op_name}': frame-owned results must allocate "
+                "buffer, view, or storage resources"
+            )
+        if not any(
+            isinstance(effect, ResultOwnershipEffect)
+            and effect.result == result.name
+            and effect.kind == ResultOwnershipEffectKind.BORROWED
+            for effect in ownership_effects
+        ):
+            raise ValueError(
+                f"Op '{op_name}': frame-owned result '{result.name}' "
+                "requires BorrowedResult"
+            )
+
     for effect in ownership_effects:
         if isinstance(effect, OperandOwnershipEffect):
             if effect.operand in operand_effects:
@@ -7160,7 +7186,9 @@ class Op:
             _validate_effects(name, frozen_effects, frozen_operands, tuple(traits))
         else:
             _validate_no_effect_conflicts(name, tuple(traits), frozen_regions)
-        if frozen_ownership_effects:
+        if frozen_ownership_effects or any(
+            getattr(result, "frame_owned", False) for result in frozen_results
+        ):
             _validate_ownership_effects(
                 name,
                 frozen_ownership_effects,

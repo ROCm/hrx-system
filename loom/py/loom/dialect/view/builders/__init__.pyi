@@ -166,3 +166,15 @@ class ViewBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> list[ValueRef]: ...
+    def alloca(
+        self,
+        *,
+        memory_space: str,
+        pool: ValueRef | None = ...,
+        base_alignment: int | None = ...,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...
