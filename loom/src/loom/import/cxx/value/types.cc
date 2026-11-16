@@ -1238,10 +1238,10 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
   auto append = [&](cxx::Symbol* symbol) {
     auto* type = source_object_type(symbol);
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
-    if (field && traits.is_restrict(type)) {
+    if (field && traits.is_restrict(type) && traits.is_reference(type)) {
       diagnostics_.reject(
           unit_, owner,
-          "restrict-qualified fields require an object-member access scope");
+          "restrict-qualified reference initialization is not supported");
     }
     const bool snapshot = field && traits.is_lvalue_reference(type) &&
                           reference_is_snapshot(field);

@@ -1175,10 +1175,28 @@ kernel template instances.
 
 This is Loom's buffer-root contract. C `restrict` and C++ `__restrict__` describe
 accesses during a lexical scope and can permit two read-only pointers to share
-storage. They currently contribute no alias facts during import. Applying
-`loom::noalias` to ordinary helper parameters diagnoses: helper calls need
-invocation-scoped alias contracts, including when a helper receives two
-non-overlapping slices of one backing buffer.
+storage. Restricted pointer and reference parameters, and a restricted `this`
+pointer, introduce an invocation-scoped `buffer.restrict.begin` domain. Derived
+paths retain their association; returned paths leave that domain through
+`buffer.restrict.end`. These contracts also apply to ordinary helper calls.
+
+Restrict-qualified pointers in fields, local bindings, and immutable globals
+retain their ordinary source representation. They do not introduce additional
+alias promises. For example, this array-view value can be copied, captured, or
+passed to a helper:
+
+```cpp
+struct View { double* __restrict__ data; long stride; };
+double load(View view, long index) { return view.data[index * view.stride]; }
+```
+
+The field qualifier does not create independent noalias roots for each copy.
+Direct restricted parameters keep their invocation scope even when a value
+derived from one is placed in such a record. Applying `loom::noalias` to ordinary
+helper parameters diagnoses; use `restrict` for an invocation-scoped promise.
+Initializing a restrict-qualified reference local, field, or global diagnoses:
+the frontend does not yet preserve its alias binding. Ordinary references and
+restricted reference parameters retain their supported behavior.
 
 ## Named configuration values
 

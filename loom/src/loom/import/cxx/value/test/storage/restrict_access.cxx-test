@@ -307,3 +307,109 @@ func.def @update_view(%target: view<4xi32>, %peer: view<4xi32>) -> (view<4xi32>)
   %17 = buffer.restrict.end %10 : view<4xi32>
   func.return %17 : view<4xi32>
 }
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Field/local qualifiers do not invent independent restrict domains. Copies,
+// nested values, and lambda captures retain the same pointer root and origin.
+struct View { double* __restrict__ data; long stride; };
+double load(View view, long index) { return view.data[index * view.stride]; }
+struct Nested { View views[2]; };
+double copy_and_capture(double* input, long stride, long index) {
+  View view{input, stride};
+  View copy = view;
+  Nested nested{{view, copy}};
+  auto read = [nested, index]() { return nested.views[1].data[index * nested.views[1].stride]; };
+  return read();
+}
+int local_pointer(int* input) {
+  int* __restrict__ local = input;
+  local[0] += 1;
+  return input[0];
+}
+constexpr const unsigned* __restrict__ empty = nullptr;
+bool global_pointer() { return empty == nullptr; }
+// Restrict facts attached to a parameter survive field copies and returns.
+int* return_field(int* __restrict__ input, int* peer) {
+  struct Field { int* __restrict__ pointer; };
+  Field value{input};
+  value.pointer[0] += peer[0];
+  return value.pointer;
+}
+// ----
+func.def public @load(%view_data: buffer, %view_data_byte_offset: offset, %view_stride: i64, %index: i64) -> (f64) {
+  %5 = scalar.muli %index, %view_stride : i64
+  %97 = scalar.constant 3 : i64
+  %98 = scalar.shli %5, %97 : i64
+  %8 = index.cast %view_data_byte_offset : offset to i64
+  %9 = scalar.addi %8, %98 : i64
+  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
+  %11 = index.cast %10 : i64 to offset
+  %12 = buffer.view %view_data[%11] : buffer -> view<1xf64>
+  %13 = view.load<root_in_bounds|type_disjoint> %12[0] : view<1xf64> -> f64
+  func.return %13 : f64
+}
+
+func.def public @copy_and_capture(%input: buffer, %input_byte_offset: offset, %stride: i64, %index: i64) -> (f64) {
+  %19 = func.call readonly @operator_call_value(%input, %input_byte_offset, %stride, %index) : (buffer, offset, i64, i64) -> (f64)
+  func.return %19 : f64
+}
+
+func.def public @local_pointer(%input: buffer, %input_byte_offset: offset) -> (i32) {
+  %23 = scalar.constant 1 : i32
+  %28 = index.cast %input_byte_offset : offset to i64
+  %30 = scalar.assume %28 [range(%28, 0, 9223372036854775807)] : i64
+  %31 = index.cast %30 : i64 to offset
+  %32 = buffer.view %input[%31] : buffer -> view<1xi32>
+  %33 = view.load<root_in_bounds|type_disjoint> %32[0] : view<1xi32> -> i32
+  %34 = scalar.addi %33, %23 : i32
+  view.store<root_in_bounds|type_disjoint> %34, %32[0] : i32, view<1xi32>
+  %44 = view.load<root_in_bounds|type_disjoint> %32[0] : view<1xi32> -> i32
+  func.return %44 : i32
+}
+
+func.def public @global_pointer() -> (i1) {
+  %99 = scalar.constant true : i1
+  func.return %99 : i1
+}
+
+func.def public @return_field(%input: buffer, %input_byte_offset: offset, %peer: buffer, %peer_byte_offset: offset) -> (buffer, offset) {
+  %value_pointer, %58 = buffer.restrict.begin %input peers %peer : buffer, buffer
+  %63 = index.cast %peer_byte_offset : offset to i64
+  %65 = scalar.assume %63 [range(%63, 0, 9223372036854775807)] : i64
+  %66 = index.cast %65 : i64 to offset
+  %67 = buffer.view %58[%66] : buffer -> view<1xi32>
+  %68 = view.load<root_in_bounds|type_disjoint> %67[0] : view<1xi32> -> i32
+  %73 = index.cast %input_byte_offset : offset to i64
+  %75 = scalar.assume %73 [range(%73, 0, 9223372036854775807)] : i64
+  %76 = index.cast %75 : i64 to offset
+  %77 = buffer.view %value_pointer[%76] : buffer -> view<1xi32>
+  %78 = view.load<root_in_bounds|type_disjoint> %77[0] : view<1xi32> -> i32
+  %79 = scalar.addi %78, %68 : i32
+  view.store<root_in_bounds|type_disjoint> %79, %77[0] : i32, view<1xi32>
+  %80 = buffer.restrict.end %value_pointer : buffer
+  func.return %80, %input_byte_offset : buffer, offset
+}
+
+func.def @operator_call_value(%this_nested_views_1_data: buffer, %this_nested_views_1_data_byte_offset: offset, %this_nested_views_1_stride: i64, %this_index: i64) -> (f64) {
+  %88 = scalar.muli %this_index, %this_nested_views_1_stride : i64
+  %100 = scalar.constant 3 : i64
+  %101 = scalar.shli %88, %100 : i64
+  %91 = index.cast %this_nested_views_1_data_byte_offset : offset to i64
+  %92 = scalar.addi %91, %101 : i64
+  %93 = scalar.assume %92 [range(%92, 0, 9223372036854775807)] : i64
+  %94 = index.cast %93 : i64 to offset
+  %95 = buffer.view %this_nested_views_1_data[%94] : buffer -> view<1xf64>
+  %96 = view.load<root_in_bounds|type_disjoint> %95[0] : view<1xf64> -> f64
+  func.return %96 : f64
+}
+
+// ====
+// RUN: verify
+// INPUT: cxx std=c23
+// The same qualifier admission applies to C records and local pointer aliases.
+struct View { const int* restrict data; unsigned stride; };
+int load(struct View view, unsigned index) {
+  const int* restrict local = view.data;
+  return local[index * view.stride];
+}

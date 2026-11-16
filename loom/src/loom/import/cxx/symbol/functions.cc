@@ -799,11 +799,11 @@ void Functions::collect(cxx::DeclarationAST* declaration,
       auto* variable =
           cxx::symbol_cast<cxx::VariableSymbol>(declarator->symbol);
       if (variable && !is_module_metadata) {
-        if (unit_.typeTraits().is_restrict(variable->type())) {
+        if (unit_.typeTraits().is_restrict(variable->type()) &&
+            unit_.typeTraits().is_reference(variable->type())) {
           diagnostics_.reject(
               unit_, declarator,
-              "restrict-qualified global bindings require a lexical access "
-              "scope");
+              "restrict-qualified reference initialization is not supported");
         }
         if (!variable->isExtern() &&
             (unit_.typeTraits().is_volatile(variable->type()) ||
