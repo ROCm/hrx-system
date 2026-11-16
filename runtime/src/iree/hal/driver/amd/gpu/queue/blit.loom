@@ -5,7 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // Fixed-size launch, dynamic byte extent. Each lane owns sixteen consecutive
-// bytes; iterations stride over the whole grid. Full copies use vector memory
+// bytes; iterations stride over the whole grid. Full spans use vector memory
 // operations so each wave writes dense spans instead of separate strided words.
 // The last partial vector uses exact-width portions and never reads or writes
 // outside the admitted range.
@@ -40,10 +40,8 @@ kernel.def export("blit") @blit() {
         %words = vector.load %input[0] : view<4xi32, align(1)> -> vector<4xi32>
         vector.store %words, %destination[0] : vector<4xi32>, view<4xi32, align(1)>
       } else {
-        view.store %pattern, %destination[0] : i32, view<4xi32, align(1)>
-        view.store %pattern, %destination[1] : i32, view<4xi32, align(1)>
-        view.store %pattern, %destination[2] : i32, view<4xi32, align(1)>
-        view.store %pattern, %destination[3] : i32, view<4xi32, align(1)>
+        %words = vector.splat %pattern : vector<4xi32>
+        vector.store %words, %destination[0] : vector<4xi32>, view<4xi32, align(1)>
       }
     } else {
       %tail = index.cast %remaining : offset to i32
@@ -60,8 +58,8 @@ kernel.def export("blit") @blit() {
           %pair = vector.load %input_pair[0] : view<2xi32, align(1)> -> vector<2xi32>
           vector.store %pair, %destination_pair[0] : vector<2xi32>, view<2xi32, align(1)>
         } else {
-          view.store %pattern, %destination_pair[0] : i32, view<2xi32, align(1)>
-          view.store %pattern, %destination_pair[1] : i32, view<2xi32, align(1)>
+          %pair = vector.splat %pattern : vector<2xi32>
+          vector.store %pair, %destination_pair[0] : vector<2xi32>, view<2xi32, align(1)>
         }
       }
       %four_bytes = scalar.andi %tail, %four : i32
