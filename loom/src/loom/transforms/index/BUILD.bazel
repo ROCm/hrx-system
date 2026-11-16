@@ -23,6 +23,7 @@ loom_cc_library(
         "//loom/src/loom/rewrite:pattern_registry",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/transforms/scalar:narrowing",
+        "//loom/src/loom/util:predicate_facts",
         "//runtime/src/iree/base",
     ],
 )

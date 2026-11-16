@@ -321,3 +321,17 @@ kernel.def target(@test_target) @allows_cfg_guarded_workitem_id_assume_excluding
 ^_bb2:
   kernel.return
 }
+
+// ====
+// RUN: pass combine,target-legalize
+
+test.target<low_core> @test_target {index_bitwidth = 32, offset_bitwidth = 32}
+
+// Narrowing must not make an impossible negative observation of a positive
+// mathematical sum appear satisfiable through signed low-word wraparound.
+func.def target(@test_target) @rejects_contradictory_narrowed_observation(%left: index, %right: index) -> (index) where [range(%left, 0, 2147483647), range(%right, 0, 31)] {
+  %sum = index.add %left, %right : index
+  // ERROR@+1: TARGET/059 {predicate_name="range", value_name="sum", required_min="-32", required_max="-1", known_min="0", known_max="2147483678"}
+  %bounded = index.assume %sum [range(%sum, -32, -1)] : index
+  func.return %bounded : index
+}
