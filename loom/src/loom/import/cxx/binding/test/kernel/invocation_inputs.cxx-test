@@ -31,7 +31,7 @@ kernel.def @shifted() {
   %16 = scalar.assume %39 [range(%39, 0, 9223372036854775807)] : i64
   %17 = index.cast %16 : i64 to offset
   %18 = buffer.view %output[%17] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %34, %18[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %34, %18[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -78,7 +78,7 @@ kernel.def @narrow() {
   %17 = scalar.assume %51 [range(%51, 0, 9223372036854775807)] : i64
   %18 = index.cast %17 : i64 to offset
   %19 = buffer.view %output[%18] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %49, %19[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %49, %19[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -97,7 +97,7 @@ kernel.def @wide() {
   %37 = scalar.assume %54 [range(%54, 0, 9223372036854775807)] : i64
   %38 = index.cast %37 : i64 to offset
   %39 = buffer.view %output[%38] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %48, %39[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %48, %39[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -143,7 +143,7 @@ kernel.def @topology() {
   %16 = scalar.assume %41 [range(%41, 0, 9223372036854775807)] : i64
   %17 = index.cast %16 : i64 to offset
   %18 = buffer.view %output[%17] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %39, %18[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %39, %18[0] : i32, view<1xi32>
   kernel.return
 }
 
