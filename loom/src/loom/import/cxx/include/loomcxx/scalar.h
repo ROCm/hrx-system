@@ -146,6 +146,18 @@ template <class Float> struct frexpf_result {
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.frexpf")]] frexpf_result<Float> frexpf(Float input);
 
+// Returns true (i1) if the operand is finite (not NaN and not infinity).
+template <class Float> requires (__is_floating_point(Float))
+[[loom::op("scalar.isfinitef")]] bool isfinitef(Float input);
+
+// Returns true (i1) if the operand is positive or negative infinity.
+template <class Float> requires (__is_floating_point(Float))
+[[loom::op("scalar.isinff")]] bool isinff(Float input);
+
+// Returns true (i1) if the operand is NaN.
+template <class Float> requires (__is_floating_point(Float))
+[[loom::op("scalar.isnanf")]] bool isnanf(Float input);
+
 // Scale input by two raised to the signed i32 exponent, rounding once to the
 // result format with round-to-nearest, ties-to-even. Signed zeros and
 // infinities are preserved, NaNs propagate, and subnormal inputs and results

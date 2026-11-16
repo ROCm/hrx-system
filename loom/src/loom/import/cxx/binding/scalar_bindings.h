@@ -21,7 +21,8 @@ enum loom_cxx_scalar_category_e {
 };
 
 // One generated scalar projection. Variable-type fields share a supported C++
-// type; fixed fields use signed i32. Multiple results form a source record.
+// type; fixed fields use bool or signed i32. Multiple results form a source
+// record.
 typedef struct loom_cxx_scalar_binding_t {
   // Canonical dialect-qualified operation name.
   const char* name;
@@ -33,6 +34,8 @@ typedef struct loom_cxx_scalar_binding_t {
   uint8_t result_count;
   // Fixed signed-i32 fields, with operands followed by results.
   uint8_t fixed_i32_mask;
+  // Fixed boolean fields, with operands followed by results.
+  uint8_t fixed_i1_mask;
   // Whether the operation carries canonical scalar fast-math flags.
   bool has_fastmath;
   // Positive zero-sign preservation flag, or zero when unsupported by the op.

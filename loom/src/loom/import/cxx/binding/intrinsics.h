@@ -84,7 +84,7 @@ class Intrinsics {
   struct ScalarBinding {
     // Operation and permissions admitted independently of the concrete type.
     ScalarOperation operation;
-    // Source-selected scalar representation within the admitted category.
+    // Source-selected variable representation within the admitted category.
     loom_type_t type;
     // Retained source result shape, including nominal record identity.
     const Partition* result;

@@ -37,9 +37,9 @@ double unsupported(double value) {
 }
 
 // ====
-double unsupported(double value) {
-  // ERROR@+1: LOWERING/059 "unsupported math builtin '__builtin_isfinite'"
-  return __builtin_isfinite(value);
+bool unsupported(long double value) {
+  // ERROR@+1: LOWERING/059 "scalar intrinsic operands must be _Float16, __bf16, float, or double"
+  return __builtin_isinf(value);
 }
 
 // ====
