@@ -15,10 +15,27 @@ typedef struct loom_pipeline_lifetime_segment_t {
   iree_host_size_t parent;
   // Complete extent of this lifetime subtree in one resource pool.
   loom_pipeline_lifetime_extent_t extent;
-  // First request during ordered projection, child-list head during its walk,
-  // then a parent-relative offset and finally an absolute pool offset.
+  // First request and child-list head during projection; parent-relative and
+  // then absolute pool offset during each numeric evaluation.
   uint64_t offset;
 } loom_pipeline_lifetime_segment_t;
+
+struct loom_pipeline_lifetime_projection_t {
+  // Indexed source lifetimes whose kinds remain fixed through evaluation.
+  const loom_pipeline_lifetimes_t* lifetimes;
+  // Mutable numeric workspace attached to the immutable projected parents.
+  loom_pipeline_lifetime_segment_t* segments;
+  // Number of occupied projected nodes, bounded by twice the request count.
+  iree_host_size_t segment_count;
+  // Requests in owner preorder, preserving input order within each owner.
+  const iree_host_size_t* request_order;
+  // Projected node for each entry in request_order.
+  iree_host_size_t* placements;
+  // Number of requests in the projection.
+  iree_host_size_t request_count;
+  // Children before parents, with concurrent siblings in first-request order.
+  iree_host_size_t* postorder;
+};
 
 static iree_status_t loom_pipeline_lifetime_append_range(
     loom_pipeline_lifetime_extent_t* extent, uint64_t length,
@@ -92,13 +109,11 @@ LOOM_DEFINE_ADAPTIVE_SORT_WITH_CONTEXT(loom_pipeline_lifetime_sort_segments,
                                        const loom_pipeline_lifetime_segment_t*,
                                        loom_pipeline_lifetime_segment_later)
 
-// Orders each projected sibling set by its earliest request. A global reverse
-// priority order builds those lists by prepending; ancestors may tie, siblings
-// cannot. The iterative postorder consumes each edge once and reuses the
-// completed child-list head as that child's assigned offset.
-static iree_status_t loom_pipeline_lifetime_place_ordered(
-    const loom_pipeline_lifetimes_t* lifetimes,
-    loom_pipeline_lifetime_segment_t* segments, const iree_host_size_t* order,
+// Orders each projected sibling set by its earliest request. The temporary
+// reverse priority order builds child lists; its consumed storage then holds
+// a reusable postorder. Neither evaluation nor offset translation severs edges.
+static void loom_pipeline_lifetime_order_projection(
+    loom_pipeline_lifetime_segment_t* segments, iree_host_size_t* order,
     iree_host_size_t count, iree_host_size_t root,
     iree_host_size_t* next_siblings) {
   for (iree_host_size_t i = 0; i < count; ++i) {
@@ -113,6 +128,7 @@ static iree_status_t loom_pipeline_lifetime_place_ordered(
     }
   }
   iree_host_size_t node = root;
+  iree_host_size_t position = 0;
   bool descend = true;
   while (true) {
     if (descend) {
@@ -120,67 +136,49 @@ static iree_status_t loom_pipeline_lifetime_place_ordered(
         node = segments[node].offset;
       }
     }
+    order[position++] = node;
     const iree_host_size_t parent = segments[node].parent;
     if (parent == IREE_HOST_SIZE_MAX) {
       break;
     }
     const iree_host_size_t next = next_siblings[node];
-    segments[node].offset = 0;
-    IREE_RETURN_IF_ERROR(
-        loom_pipeline_lifetime_fold(lifetimes, segments, node));
     descend = next != IREE_HOST_SIZE_MAX;
     node = descend ? next : parent;
   }
-  segments[root].offset = 0;
-  return iree_ok_status();
 }
 
-// Resolves each parent-relative placement once. Detached roots retain the
-// absolute offset, so repeated requests never repeat ancestor work.
-static uint64_t loom_pipeline_lifetime_absolute_offset(
-    loom_pipeline_lifetime_segment_t* segments, iree_host_size_t first) {
-  uint64_t offset = 0;
-  iree_host_size_t node = first;
-  do {
-    offset += segments[node].offset;
-    node = segments[node].parent;
-  } while (node != IREE_HOST_SIZE_MAX);
-  const uint64_t result = offset;
-  node = first;
-  while (segments[node].parent != IREE_HOST_SIZE_MAX) {
-    const iree_host_size_t parent = segments[node].parent;
-    const uint64_t relative = segments[node].offset;
-    segments[node].offset = offset;
-    segments[node].parent = IREE_HOST_SIZE_MAX;
-    offset -= relative;
-    node = parent;
-  }
-  return result;
-}
-
-// Source-ordered requests can be placed while closing the projected tree.
-// Reordered requests first retain each subtree's earliest input position and
-// defer placement until its complete concurrent sibling set is available.
-static iree_status_t loom_pipeline_lifetime_finish_segment(
-    const loom_pipeline_lifetimes_t* lifetimes,
-    loom_pipeline_lifetime_segment_t* segments, iree_host_size_t child,
-    bool request_order) {
+// Source-ordered requests already finish in placement order. Reordered input
+// retains each subtree's earliest request until its sibling set is complete.
+static void loom_pipeline_lifetime_finish_segment(
+    loom_pipeline_lifetime_projection_t* projection, iree_host_size_t child,
+    bool request_order, iree_host_size_t* position) {
   if (request_order) {
+    loom_pipeline_lifetime_segment_t* current = &projection->segments[child];
     loom_pipeline_lifetime_segment_t* parent =
-        &segments[segments[child].parent];
-    parent->offset = iree_min(parent->offset, segments[child].offset);
-    return iree_ok_status();
+        &projection->segments[current->parent];
+    parent->offset = iree_min(parent->offset, current->offset);
+  } else {
+    projection->postorder[(*position)++] = child;
   }
-  return loom_pipeline_lifetime_fold(lifetimes, segments, child);
 }
 
-static iree_status_t loom_pipeline_lifetime_project(
+static void loom_pipeline_lifetime_project(
     const loom_pipeline_lifetimes_t* lifetimes,
-    loom_pipeline_lifetime_request_t* requests, const iree_host_size_t* order,
-    iree_host_size_t count, iree_host_size_t* placements,
-    loom_pipeline_lifetime_segment_t* segments,
-    iree_host_size_t* priority_order, iree_host_size_t* next_siblings,
-    loom_pipeline_lifetime_extent_t* out_extent) {
+    const loom_pipeline_lifetime_request_t* requests,
+    const iree_host_size_t* order, iree_host_size_t count,
+    iree_host_size_t* placements, loom_pipeline_lifetime_segment_t* segments,
+    iree_host_size_t* postorder, bool request_order,
+    iree_host_size_t* next_siblings,
+    loom_pipeline_lifetime_projection_t* out_projection) {
+  *out_projection = (loom_pipeline_lifetime_projection_t){
+      .lifetimes = lifetimes,
+      .segments = segments,
+      .request_order = order,
+      .placements = placements,
+      .request_count = count,
+      .postorder = postorder,
+  };
+  iree_host_size_t position = 0;
   iree_host_size_t segment_count = 0;
   iree_host_size_t previous = IREE_HOST_SIZE_MAX;
   for (iree_host_size_t i = 0; i < count;) {
@@ -199,8 +197,8 @@ static iree_status_t loom_pipeline_lifetime_project(
             preorder < candidate->preorder + candidate->subtree_count) {
           break;
         }
-        IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_finish_segment(
-            lifetimes, segments, child, priority_order != NULL));
+        loom_pipeline_lifetime_finish_segment(out_projection, child,
+                                              request_order, &position);
         child = parent;
         parent = segments[child].parent;
       }
@@ -211,48 +209,121 @@ static iree_status_t loom_pipeline_lifetime_project(
             .lifetime = ancestor,
             .parent = parent,
             .extent = {.alignment = 1},
-            .offset = priority_order ? IREE_HOST_SIZE_MAX : 0};
+            .offset = request_order ? IREE_HOST_SIZE_MAX : 0};
         segments[child].parent = branch;
         parent = branch;
       }
-      IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_finish_segment(
-          lifetimes, segments, child, priority_order != NULL));
+      loom_pipeline_lifetime_finish_segment(out_projection, child,
+                                            request_order, &position);
     }
     previous = segment_count++;
     segments[previous] = (loom_pipeline_lifetime_segment_t){
         .lifetime = lifetime,
         .parent = parent,
         .extent = {.alignment = 1},
-        .offset = priority_order ? order[i] : 0};
+        .offset = request_order ? order[i] : 0};
     do {
-      loom_pipeline_lifetime_request_t* request = &requests[order[i]];
       placements[i] = previous;
-      IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_append_range(
-          &segments[previous].extent, request->length, request->alignment,
-          &request->offset));
       ++i;
     } while (i < count && requests[order[i]].lifetime == lifetime);
   }
   while (segments[previous].parent != IREE_HOST_SIZE_MAX) {
-    IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_finish_segment(
-        lifetimes, segments, previous, priority_order != NULL));
+    loom_pipeline_lifetime_finish_segment(out_projection, previous,
+                                          request_order, &position);
     previous = segments[previous].parent;
   }
-  if (priority_order) {
+  if (request_order) {
     for (iree_host_size_t i = 0; i < segment_count; ++i) {
-      priority_order[i] = i;
+      postorder[i] = i;
     }
-    loom_pipeline_lifetime_sort_segments(segments, priority_order,
-                                         segment_count);
-    IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_place_ordered(
-        lifetimes, segments, priority_order, segment_count, previous,
-        next_siblings));
+    loom_pipeline_lifetime_sort_segments(segments, postorder, segment_count);
+    loom_pipeline_lifetime_order_projection(segments, postorder, segment_count,
+                                            previous, next_siblings);
+  } else {
+    postorder[position] = previous;
   }
-  *out_extent = segments[previous].extent;
-  for (iree_host_size_t i = 0; i < count; ++i) {
-    requests[order[i]].offset +=
-        loom_pipeline_lifetime_absolute_offset(segments, placements[i]);
+  out_projection->segment_count = segment_count;
+}
+
+iree_status_t loom_pipeline_lifetime_projection_evaluate(
+    loom_pipeline_lifetime_projection_t* projection,
+    loom_pipeline_lifetime_request_t* requests,
+    loom_pipeline_lifetime_extent_t* out_extent) {
+  *out_extent = (loom_pipeline_lifetime_extent_t){.alignment = 1};
+  if (!projection->request_count) {
+    return iree_ok_status();
   }
+  loom_pipeline_lifetime_segment_t* segments = projection->segments;
+  for (iree_host_size_t i = 0; i < projection->segment_count; ++i) {
+    segments[i].extent = (loom_pipeline_lifetime_extent_t){.alignment = 1};
+    segments[i].offset = 0;
+  }
+  for (iree_host_size_t i = 0; i < projection->request_count; ++i) {
+    loom_pipeline_lifetime_request_t* request =
+        &requests[projection->request_order[i]];
+    IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_append_range(
+        &segments[projection->placements[i]].extent, request->length,
+        request->alignment, &request->offset));
+  }
+  const iree_host_size_t last = projection->segment_count - 1;
+  for (iree_host_size_t i = 0; i < last; ++i) {
+    IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_fold(
+        projection->lifetimes, segments, projection->postorder[i]));
+  }
+  *out_extent = segments[projection->postorder[last]].extent;
+  for (iree_host_size_t i = last; i-- > 0;) {
+    loom_pipeline_lifetime_segment_t* node =
+        &segments[projection->postorder[i]];
+    node->offset += segments[node->parent].offset;
+  }
+  for (iree_host_size_t i = 0; i < projection->request_count; ++i) {
+    requests[projection->request_order[i]].offset +=
+        segments[projection->placements[i]].offset;
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_pipeline_lifetime_projection_prepare(
+    const loom_pipeline_lifetimes_t* lifetimes,
+    const loom_pipeline_lifetime_request_t* requests,
+    iree_host_size_t request_count, iree_arena_allocator_t* arena,
+    loom_pipeline_lifetime_projection_t** out_projection) {
+  loom_pipeline_lifetime_projection_t* projection = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(arena, sizeof(*projection), (void**)&projection));
+  if (!request_count) {
+    *projection = (loom_pipeline_lifetime_projection_t){.lifetimes = lifetimes};
+    *out_projection = projection;
+    return iree_ok_status();
+  }
+  loom_pipeline_lifetime_segment_t* segments = NULL;
+  iree_host_size_t* indices = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, request_count, 2 * sizeof(*segments), (void**)&segments));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, request_count, 6 * sizeof(*indices), (void**)&indices));
+  iree_host_size_t* order = indices;
+  iree_host_size_t* placements = indices + request_count;
+  iree_host_size_t* postorder = placements + request_count;
+  iree_host_size_t* siblings = postorder + 2 * request_count;
+  bool reordered = false;
+  iree_host_size_t previous = 0;
+  for (iree_host_size_t i = 0; i < request_count; ++i) {
+    order[i] = i;
+    const iree_host_size_t preorder =
+        lifetimes->ancestry[requests[i].lifetime].preorder;
+    reordered |= preorder < previous;
+    previous = preorder;
+  }
+  if (reordered) {
+    const loom_pipeline_lifetime_order_t context = {lifetimes->ancestry,
+                                                    requests};
+    loom_pipeline_lifetime_sort_requests(&context, order, request_count);
+  }
+  loom_pipeline_lifetime_project(lifetimes, requests, order, request_count,
+                                 placements, segments, postorder, reordered,
+                                 siblings, projection);
+  *out_projection = projection;
   return iree_ok_status();
 }
 
@@ -551,12 +622,12 @@ iree_status_t loom_pipeline_lifetime_layout(
       arena, capacity, 2 * sizeof(*segments), (void**)&segments));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, capacity, sizeof(*placements), (void**)&placements));
-  iree_host_size_t* priority_order = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, priority_capacity,
-                                                 4 * sizeof(*priority_order),
-                                                 (void**)&priority_order));
+  iree_host_size_t* postorder = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, capacity + priority_capacity,
+                                2 * sizeof(*postorder), (void**)&postorder));
   iree_host_size_t* next_siblings =
-      priority_capacity ? priority_order + 2 * priority_capacity : NULL;
+      priority_capacity ? postorder + 2 * capacity : NULL;
   const loom_pipeline_lifetime_order_t context = {lifetimes->ancestry,
                                                   requests};
   const iree_host_size_t width = iree_min((iree_host_size_t)8, dense_count_all);
@@ -577,6 +648,13 @@ iree_status_t loom_pipeline_lifetime_layout(
     if (!count) {
       continue;
     }
+    // A lone request has no coexistence or preference edges to project.
+    if (count == 1) {
+      loom_pipeline_lifetime_request_t* request = &requests[order[offsets[p]]];
+      IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_append_range(
+          &extents[p], request->length, request->alignment, &request->offset));
+      continue;
+    }
     if (mode == LOOM_LIFETIME_DENSE_REQUEST_ORDER) {
       request_pools[request_pool_count++] = p;
       if (request_pool_count == width) {
@@ -591,9 +669,12 @@ iree_status_t loom_pipeline_lifetime_layout(
     if (request_order) {
       loom_pipeline_lifetime_sort_requests(&context, order + offsets[p], count);
     }
-    IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_project(
-        lifetimes, requests, order + offsets[p], count, placements, segments,
-        request_order ? priority_order : NULL, next_siblings, &extents[p]));
+    loom_pipeline_lifetime_projection_t projection;
+    loom_pipeline_lifetime_project(lifetimes, requests, order + offsets[p],
+                                   count, placements, segments, postorder,
+                                   request_order, next_siblings, &projection);
+    IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_projection_evaluate(
+        &projection, requests, &extents[p]));
   }
   if (request_pool_count) {
     IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_layout_columns(

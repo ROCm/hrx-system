@@ -156,6 +156,97 @@ TEST_F(PipelineLifetimeLayoutTest, MixedPoolDemandsKeepIndependentAlignment) {
   }
 }
 
+TEST_F(PipelineLifetimeLayoutTest,
+       RepeatedProjectionUsesCurrentSizesAndAlignment) {
+  loom_pipeline_lifetime_request_t requests[] = {
+      {.lifetime = 6},
+      {.lifetime = 5},
+      {.lifetime = 1},
+      {.lifetime = 5},
+  };
+  loom_pipeline_lifetime_projection_t* projection = nullptr;
+  IREE_ASSERT_OK(loom_pipeline_lifetime_projection_prepare(
+      &lifetimes_, requests, IREE_ARRAYSIZE(requests), &arena_, &projection));
+  const size_t prepared_bytes = arena_.used_allocation_size;
+  const struct {
+    // Current lengths in input order, including repeated owner five.
+    uint64_t lengths[4];
+    // Current alignment requirements, including empty aligned resources.
+    uint64_t alignments[4];
+    // Absolute offsets after serial reuse and concurrent concatenation.
+    uint64_t offsets[4];
+    // Complete pool requirement including alignment gaps.
+    loom_pipeline_lifetime_extent_t extent;
+  } cases[] = {
+      {{11, 5, 3, 2}, {8, 4, 1, 2}, {0, 0, 11, 6}, {14, 8}},
+      {{0, 2, 3, 5}, {64, 2, 4, 4}, {0, 0, 12, 4}, {15, 64}},
+      {{12, 2, 4, 0}, {4, 8, 16, 32}, {0, 0, 16, 0}, {20, 32}},
+      {{0, 0, 0, 0}, {64, 16, 8, 32}, {0, 0, 0, 0}, {0, 64}},
+  };
+  // An unrepresentable proposal cannot destroy the retained topology or poison
+  // the next evaluation. Both accumulation and alignment can exceed the bound.
+  for (bool alignment_overflow : {false, true}) {
+    requests[0].length = INT64_MAX;
+    requests[0].alignment = 1;
+    requests[1].length = 0;
+    requests[1].alignment = 1;
+    requests[2].length = 1;
+    requests[2].alignment = alignment_overflow ? 8 : 1;
+    requests[3].length = 0;
+    requests[3].alignment = 1;
+    loom_pipeline_lifetime_extent_t extent;
+    EXPECT_THAT(iree::Status(loom_pipeline_lifetime_projection_evaluate(
+                    projection, requests, &extent)),
+                iree::testing::status::StatusIs(iree::StatusCode::kOutOfRange));
+    for (const auto& test_case : cases) {
+      for (size_t i = 0; i < IREE_ARRAYSIZE(requests); ++i) {
+        requests[i].length = test_case.lengths[i];
+        requests[i].alignment = test_case.alignments[i];
+      }
+      IREE_ASSERT_OK(loom_pipeline_lifetime_projection_evaluate(
+          projection, requests, &extent));
+      for (size_t i = 0; i < IREE_ARRAYSIZE(requests); ++i) {
+        EXPECT_EQ(requests[i].offset, test_case.offsets[i]);
+      }
+      EXPECT_EQ(extent.length, test_case.extent.length);
+      EXPECT_EQ(extent.alignment, test_case.extent.alignment);
+      EXPECT_EQ(arena_.used_allocation_size, prepared_bytes);
+    }
+  }
+}
+
+TEST_F(PipelineLifetimeLayoutTest, EmptyPreparedProjection) {
+  loom_pipeline_lifetime_projection_t* projection = nullptr;
+  IREE_ASSERT_OK(loom_pipeline_lifetime_projection_prepare(
+      &lifetimes_, nullptr, 0, &arena_, &projection));
+  for (int i = 0; i < 2; ++i) {
+    loom_pipeline_lifetime_extent_t extent = {64, 8};
+    IREE_ASSERT_OK(loom_pipeline_lifetime_projection_evaluate(
+        projection, nullptr, &extent));
+    EXPECT_EQ(extent.length, 0u);
+    EXPECT_EQ(extent.alignment, 1u);
+  }
+}
+
+TEST_F(PipelineLifetimeLayoutTest, SingletonSparsePoolHonorsExtentBound) {
+  loom_pipeline_lifetime_request_t request = {
+      .lifetime = 1,
+      .pool = 4095,
+      .length = uint64_t(INT64_MAX) + 1,
+      .alignment = 8,
+  };
+  const loom_pipeline_lifetime_extent_t* extents = nullptr;
+  EXPECT_THAT(iree::Status(loom_pipeline_lifetime_layout(
+                  &lifetimes_, &request, 1, 4096, &arena_, &extents)),
+              iree::testing::status::StatusIs(iree::StatusCode::kOutOfRange));
+  request.length = 3;
+  IREE_ASSERT_OK(loom_pipeline_lifetime_layout(&lifetimes_, &request, 1, 4096,
+                                               &arena_, &extents));
+  EXPECT_EQ(request.offset, 0u);
+  EXPECT_EQ(extents[4095].length, 3u);
+  EXPECT_EQ(extents[4095].alignment, 8u);
+}
+
 TEST_F(PipelineLifetimeLayoutTest, ConcurrentExtentOverflow) {
   loom_pipeline_lifetime_request_t requests[] = {
       {.lifetime = 1, .pool = 0, .length = uint64_t(INT64_MAX), .alignment = 1},
