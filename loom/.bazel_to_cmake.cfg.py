@@ -501,6 +501,20 @@ class LoomBuildFileFunctions(
         self._converter.body += "loom_test_module(\n" + "".join(blocks) + ")\n\n"
         self._emit_platform_guard_end(target_compatible_with)
 
+    def loom_prepared_test_package(self, name, tags=None, **kwargs):
+        if self._should_skip_target(tags=tags):
+            return
+        raise NotImplementedError(
+            f"loom_prepared_test_package {name} requires the skip-bazel_to_cmake tag"
+        )
+
+    def loom_prepared_test(self, name, tags=None, **kwargs):
+        if self._should_skip_target(tags=tags):
+            return
+        raise NotImplementedError(
+            f"loom_prepared_test {name} requires the skip-bazel_to_cmake tag"
+        )
+
     def loom_test(
         self,
         name,

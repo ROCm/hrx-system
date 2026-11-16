@@ -398,6 +398,41 @@ loom_kernel_binary(name="program", srcs=["program.loom"], deps=[":support"], tar
         self.assertIn("  LIBRARIES\n    ::support", output)
         self.assertIn('OUTPUT\n    "program"', output)
 
+    def test_prepared_tests_require_explicit_cmake_skip(self):
+        repo_cfg = SimpleNamespace(PROJECTS=[self.project], REPO_MAP={"@hrx": ""})
+        for rule, arguments in (
+            (
+                "loom_prepared_test_package",
+                'module=":module", target=":target"',
+            ),
+            (
+                "loom_prepared_test",
+                'package=":package", execution_profiles=[]',
+            ),
+        ):
+            with self.subTest(rule=rule):
+                build_file = f'''
+load("//loom/build_tools/bazel:defs.bzl", "{rule}")
+{rule}(name="prepared", {arguments}, tags=["skip-bazel_to_cmake"])
+'''
+                output = bazel_to_cmake_converter.convert_build_file(
+                    build_file,
+                    repo_cfg,
+                    str(REPO_ROOT / "loom/target/amdgpu/test/corpus/memory"),
+                    repo_root=str(REPO_ROOT),
+                )
+                self.assertNotIn("loom_prepared", output)
+
+                with self.assertRaisesRegex(
+                    NotImplementedError, "requires the skip-bazel_to_cmake tag"
+                ):
+                    bazel_to_cmake_converter.convert_build_file(
+                        build_file.replace(', tags=["skip-bazel_to_cmake"]', ""),
+                        repo_cfg,
+                        str(REPO_ROOT / "loom/target/amdgpu/test/corpus/memory"),
+                        repo_root=str(REPO_ROOT),
+                    )
+
     def test_corpus_catalog_preserves_per_source_configs(self):
         output = bazel_to_cmake_converter.convert_build_file(
             """

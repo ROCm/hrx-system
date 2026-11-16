@@ -211,7 +211,7 @@ loom_cc_library(
         ":scenario_profile",
         ":testbench_actual",
         "//loom/binding/c:loomc",
-        "//loom/src/loom/ir",
+        "//loom/src/loom/ir:builders",
         "//loom/src/loom/tooling/io:file",
         "//loom/src/loom/tooling/testbench:value_materializer",
         "//runtime/src/iree/base",
