@@ -154,7 +154,13 @@ static void loom_service_registration_publish_engine(
     void* self, const loom_runtime_service_observation_t* observation) {
   loom_service_registration_t* registration = self;
   registration->observation = *observation;
-  loom_service_registration_refresh_offers(registration);
+  // Engine activity affects lifecycle eligibility only while the application
+  // wants parameter work or retirement. Lifecycle mutations refresh themselves.
+  if (registration->parameter_operation !=
+          LOOM_SERVICE_PARAMETER_OPERATION_NONE ||
+      registration->retirement_requested) {
+    loom_service_registration_refresh_offers(registration);
+  }
   loom_service_registration_publish(registration);
 }
 
