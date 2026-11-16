@@ -69,18 +69,18 @@ const ViewPartition& require_view(cxx::TranslationUnit& unit,
 }
 
 size_t dynamic_extent_count(const ViewPartition& view) {
-  return std::count_if(view.extents.begin(), view.extents.end(),
-                       [](int64_t extent) { return extent < 0; });
+  return view.dynamic_count;
 }
 
-loom_value_id_t view_component(Value value) {
-  return value.components().back();
+loom_value_id_t view_component(Value value, size_t column = 0) {
+  return static_cast<const ViewPartition&>(value.partition())
+      .view_value(value.components(), column);
 }
 
-loom_value_id_t encoding_component(Value value, const ViewPartition& view) {
+loom_value_id_t encoding_component(Value value, const ViewPartition& view,
+                                   size_t column = 0) {
   IREE_ASSERT(view.encoding);
-  auto components = value.components();
-  return components[components.size() - 2];
+  return value.components()[view.dynamic_count + column];
 }
 
 bool plain_subview_preserves_dense_suffix(const ViewPartition& source,
@@ -326,6 +326,11 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
       }
       result.result_view_ = &require_view(unit, diagnostics, types,
                                           signature->returnType(), owner);
+      if (result.result_view_->is_columnar()) {
+        diagnostics.reject(
+            unit, owner,
+            "buffer.view cannot reinterpret row storage as separate columns");
+      }
       if (loom_type_is_reference(result.result_view_->element)) {
         diagnostics.reject(
             unit, owner,
@@ -420,6 +425,12 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
           &require_view(unit, diagnostics, types, parameters[0], owner);
       result.result_view_ = &require_view(unit, diagnostics, types,
                                           signature->returnType(), owner);
+      if (result.source_view_->is_columnar() ||
+          result.result_view_->is_columnar()) {
+        diagnostics.reject(
+            unit, owner,
+            "view.bitcast requires one contiguous primitive column");
+      }
       if (result.source_view_->encoding || result.result_view_->encoding) {
         diagnostics.reject(unit, owner,
                            "view.bitcast requires plain unencoded views");
@@ -456,9 +467,13 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
           result.unsigned_argument_mask_ |= uint32_t{1} << index;
         }
       }
-      result.element_result_ = types.get(signature->returnType(), owner);
-      if (!loom_type_equal(result.element_result_,
-                           result.source_view_->element)) {
+      const bool same_element =
+          result.source_view_->is_columnar()
+              ? types.unqualified(signature->returnType()) ==
+                    types.unqualified(result.source_view_->element_type)
+              : loom_type_equal(types.get(signature->returnType(), owner),
+                                result.source_view_->element);
+      if (!same_element) {
         diagnostics.reject(unit, owner,
                            "view.load result must match its view element");
       }
@@ -485,8 +500,10 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
       if (unit.typeTraits().is_const(result.source_view_->element_type) ||
           types.unqualified(parameters[0]) !=
               types.unqualified(result.source_view_->element_type) ||
-          !loom_type_equal(types.get(parameters[0], owner),
-                           result.source_view_->element)) {
+          std::any_of(
+              result.source_view_->columns.begin(),
+              result.source_view_->columns.end(),
+              [](const ViewColumn& column) { return !column.writable; })) {
         diagnostics.reject(
             unit, owner,
             "view.store value must match a mutable view element type");
@@ -555,7 +572,15 @@ std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
     case Operation::Alloca:
     case Operation::BufferView:
     case Operation::Subview: {
-      std::array<loom_value_id_t, LOOM_TYPE_MAX_RANK + 2> components;
+      std::array<loom_value_id_t, LOOM_TYPE_MAX_RANK + 4> inline_components;
+      std::vector<loom_value_id_t> overflow_components;
+      if (result_view_->component_count > inline_components.size()) {
+        overflow_components.resize(result_view_->component_count);
+      }
+      auto components = overflow_components.empty()
+                            ? std::span(inline_components)
+                                  .first(result_view_->component_count)
+                            : std::span(overflow_components);
       std::array<loom_value_id_t, LOOM_TYPE_MAX_RANK> offsets;
       size_t component_count = 0;
       auto dimensions = arguments[operation_ == Operation::Alloca ? 0
@@ -595,53 +620,53 @@ std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
               std::span<const loom_value_id_t>(components)
                   .first(component_count));
       IREE_ASSERT(!capture_physical_encoding || result_view_->encoding);
-      std::array<loom_value_id_t, 2> result_ids;
       const size_t result_count = capture_physical_encoding ? 2 : 1;
-      check(loom_builder_reserve_values(builder, result_count,
-                                        result_ids.data()));
-      if (result_view_->encoding) {
-        components[component_count++] =
-            capture_physical_encoding         ? result_ids[1]
-            : operation_ == Operation::Alloca ? arguments[1].components()[0]
-            : operation_ == Operation::BufferView
-                ? arguments[has_buffer_byte_offset_ ? 3 : 2].components()[0]
-                : encoding_component(arguments[0], *source_view_);
-      }
-      components[component_count++] = result_ids[0];
-      std::vector<loom_type_t> result_types;
       BoundTypeStorage type_storage;
-      types.append_bound(result_source_type_, owner,
-                         {components.data(), component_count}, type_storage,
-                         result_types);
-      auto result_type = result_types.back();
-      if (operation_ == Operation::Alloca) {
-        check(loom_view_alloca_build(
-            builder,
-            (alignment_bytes_ != 1
-                 ? LOOM_VIEW_ALLOCA_BUILD_FLAG_HAS_BASE_ALIGNMENT
-                 : 0) |
-                (has_pool_ ? LOOM_VIEW_ALLOCA_BUILD_FLAG_HAS_POOL : 0),
-            memory_space_,
-            has_pool_ ? arguments.back().ssa() : LOOM_VALUE_ID_INVALID,
-            alignment_bytes_, result_type, location, &op));
-      } else if (operation_ == Operation::BufferView) {
-        check(loom_buffer_view_build(builder, pointer->root,
-                                     pointer->byte_offset, result_type,
-                                     location, &op));
-      } else {
-        std::array<int64_t, LOOM_TYPE_MAX_RANK> static_offsets;
-        static_offsets.fill(std::numeric_limits<int64_t>::min());
-        std::array<loom_type_t, 2> subview_result_types = {result_type, {}};
-        if (capture_physical_encoding) {
-          subview_result_types[1] = result_types[result_types.size() - 2];
+      for (size_t column = 0; column < result_view_->column_count(); ++column) {
+        std::array<loom_value_id_t, 2> result_ids;
+        check(loom_builder_reserve_values(builder, result_count,
+                                          result_ids.data()));
+        if (result_view_->encoding) {
+          components[result_view_->dynamic_count + column] =
+              capture_physical_encoding         ? result_ids[1]
+              : operation_ == Operation::Alloca ? arguments[1].components()[0]
+              : operation_ == Operation::BufferView
+                  ? arguments[has_buffer_byte_offset_ ? 3 : 2].components()[0]
+                  : encoding_component(arguments[0], *source_view_, column);
         }
-        check(loom_view_subview_build(
-            builder, view_component(arguments[0]), offsets.data(),
-            result_view_->extents.size(), static_offsets.data(),
-            result_view_->extents.size(), subview_result_types.data(),
-            result_count, location, &op));
+        components[result_view_->column_component(column)] = result_ids[0];
+        auto result_type =
+            result_view_->bind_type(components, type_storage, column);
+        if (operation_ == Operation::Alloca) {
+          check(loom_view_alloca_build(
+              builder,
+              (alignment_bytes_ != 1
+                   ? LOOM_VIEW_ALLOCA_BUILD_FLAG_HAS_BASE_ALIGNMENT
+                   : 0) |
+                  (has_pool_ ? LOOM_VIEW_ALLOCA_BUILD_FLAG_HAS_POOL : 0),
+              memory_space_,
+              has_pool_ ? arguments.back().ssa() : LOOM_VALUE_ID_INVALID,
+              alignment_bytes_, result_type, location, &op));
+        } else if (operation_ == Operation::BufferView) {
+          check(loom_buffer_view_build(builder, pointer->root,
+                                       pointer->byte_offset, result_type,
+                                       location, &op));
+        } else {
+          std::array<int64_t, LOOM_TYPE_MAX_RANK> static_offsets;
+          static_offsets.fill(std::numeric_limits<int64_t>::min());
+          std::array<loom_type_t, 2> subview_result_types = {result_type, {}};
+          if (capture_physical_encoding) {
+            subview_result_types[1] =
+                loom_type_encoding_with_role(result_view_->encoding->role);
+          }
+          check(loom_view_subview_build(
+              builder, view_component(arguments[0], column), offsets.data(),
+              result_view_->extents.size(), static_offsets.data(),
+              result_view_->extents.size(), subview_result_types.data(),
+              result_count, location, &op));
+        }
       }
-      return arena.capture(*result_view_, {components.data(), component_count});
+      return arena.capture(*result_view_, components);
     }
     case Operation::Bitcast: {
       std::vector<loom_type_t> result_types;
@@ -661,12 +686,26 @@ std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
             is_unsigned_component(unsigned_argument_mask_, argument_index),
             builder, location);
       }
-      check(loom_view_load_build(
-          builder, 0, source_view_->access_flags | memory_flags_,
-          view_component(arguments[0]), indices.data(),
-          source_view_->extents.size(), static_indices.data(),
-          source_view_->extents.size(), 0, 0, element_result_, location, &op));
-      return arena.capture(*element_partition_, {loom_op_results(op), 1});
+      std::array<loom_value_id_t, 4> inline_columns;
+      std::vector<loom_value_id_t> overflow_columns;
+      if (source_view_->column_count() > inline_columns.size()) {
+        overflow_columns.resize(source_view_->column_count());
+      }
+      auto columns =
+          overflow_columns.empty()
+              ? std::span(inline_columns).first(source_view_->column_count())
+              : std::span(overflow_columns);
+      for (size_t column = 0; column < source_view_->column_count(); ++column) {
+        check(loom_view_load_build(
+            builder, 0,
+            source_view_->column_access_flags(column) | memory_flags_,
+            view_component(arguments[0], column), indices.data(),
+            source_view_->extents.size(), static_indices.data(),
+            source_view_->extents.size(), 0, 0,
+            source_view_->column_element(column), location, &op));
+        columns[column] = loom_op_results(op)[0];
+      }
+      return arena.capture(*element_partition_, columns);
     }
     case Operation::Store: {
       std::array<loom_value_id_t, LOOM_TYPE_MAX_RANK> indices;
@@ -679,11 +718,15 @@ std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
             is_unsigned_component(unsigned_argument_mask_, argument_index),
             builder, location);
       }
-      check(loom_view_store_build(
-          builder, 0, memory_flags_, arguments[0].ssa(),
-          view_component(arguments[1]), indices.data(),
-          source_view_->extents.size(), static_indices.data(),
-          source_view_->extents.size(), 0, 0, location, &op));
+      for (size_t column = 0; column < source_view_->column_count(); ++column) {
+        check(loom_view_store_build(
+            builder, 0,
+            source_view_->column_access_flags(column) | memory_flags_,
+            arguments[0].components()[column],
+            view_component(arguments[1], column), indices.data(),
+            source_view_->extents.size(), static_indices.data(),
+            source_view_->extents.size(), 0, 0, location, &op));
+      }
       return std::nullopt;
     }
   }
@@ -707,8 +750,7 @@ bool ViewIntrinsic::equivalent(const ViewIntrinsic& other) const {
          unsigned_dimension_mask_ == other.unsigned_dimension_mask_ &&
          unsigned_origin_mask_ == other.unsigned_origin_mask_ &&
          memory_flags_ == other.memory_flags_ &&
-         element_partition_ == other.element_partition_ &&
-         loom_type_equal(element_result_, other.element_result_);
+         element_partition_ == other.element_partition_;
 }
 
 }  // namespace loom::cxx_import

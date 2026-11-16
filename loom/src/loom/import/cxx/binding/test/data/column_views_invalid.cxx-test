@@ -1,0 +1,68 @@
+// RUN: verify
+#include <loomcxx/view.h>
+struct Empty {};
+using Rows = loom::type::view<loom::type::shape<4>, Empty>;
+// ERROR@+1: LOWERING/059 "view rows require at least one field"
+void consume(Rows rows) {}
+
+// ====
+#include <loomcxx/view.h>
+struct Row { unsigned value; bool present; };
+using Rows = loom::type::view<loom::type::shape<4>, Row>;
+// ERROR@+1: LOWERING/059 "view elements require a supported non-boolean scalar or object handle"
+void consume(Rows rows) {}
+
+// ====
+#include <loomcxx/view.h>
+struct Row { unsigned first; double second; };
+using Rows = loom::type::view<loom::type::shape<4>, Row>;
+// ERROR@+1: LOWERING/059 "buffer.view cannot reinterpret row storage as separate columns"
+[[loom::op("buffer.view")]] Rows invalid(Row*, loom::detail::dimensions<0>);
+
+// ====
+#include <loomcxx/view.h>
+struct Row { unsigned first; unsigned second; };
+using Rows = loom::type::view<loom::type::shape<4>, Row>;
+using Bytes = loom::type::view<loom::type::shape<32>, unsigned char>;
+// ERROR@+1: LOWERING/059 "view.bitcast requires one contiguous primitive column"
+[[loom::op("view.bitcast")]] Bytes invalid(Rows);
+
+// ====
+#include <loomcxx/view.h>
+struct Row { const unsigned first; unsigned second; };
+using Rows = loom::type::view<loom::type::shape<4>, Row>;
+// ERROR@+1: LOWERING/059 "view.store value must match a mutable view element type"
+[[loom::op("view.store")]] void invalid(Row, Rows, unsigned);
+
+// ====
+#include <loomcxx/view.h>
+struct Row { unsigned first; double second; };
+using Rows = loom::type::view<loom::type::shape<4>, Row>;
+// ERROR@+1: LOWERING/059 "command.parameter.base requires one contiguous primitive column"
+[[loom::op("command.parameter.base")]] loom::type::buffer<unsigned> invalid(Rows);
+
+// ====
+#include <loomcxx/view.h>
+struct Row { unsigned first; double second; };
+using Rows = loom::type::view<loom::type::shape<4>, const Row>;
+// ERROR@+1: LOWERING/059 "command.parameter cannot reinterpret row storage as separate columns"
+[[loom::op("command.parameter")]] Rows invalid(loom::type::buffer<const unsigned char>);
+
+// ====
+#include <loomcxx/kernel.h>
+struct Row { unsigned first; unsigned second; };
+using Rows = loom::type::view<loom::type::shape<4>, Row>;
+LOOM_INLINE void invalid(Rows source, Rows destination) {
+  // ERROR@+1: LOWERING/059 "kernel async transfers require a primitive column"
+  (void)loom::kernel::async::copy<loom::kernel::async::direction::global_to_workgroup, loom::cache::scope::workgroup, loom::cache::temporal::regular>(source, destination);
+}
+
+// ====
+#include <loomcxx/fragment.h>
+struct Row { float first; float second; };
+using Rows = loom::type::view<loom::type::shape<4>, Row>;
+using Vector = float __attribute__((ext_vector_type(4)));
+void invalid(Rows rows) {
+  // ERROR@+1: LOWERING/059 "fragment memory operation requires a primitive column"
+  (void)loom::vector::fragment::load<loom::vector::fragment::role::lhs, Vector>(rows, {0}, loom::vector::fragment::shape{1u, 4u});
+}

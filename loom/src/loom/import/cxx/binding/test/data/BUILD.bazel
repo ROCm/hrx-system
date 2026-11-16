@@ -17,6 +17,9 @@ loom_check_test_suite(
     srcs = [
         "address_values.cxx-test",
         "address_values_invalid.cxx-test",
+        "allocation_macros.cxx-test",
+        "column_views.cxx-test",
+        "column_views_invalid.cxx-test",
         "dependent_view_loops.cxx-test",
         "encoding_schemas.cxx-test",
         "encoding_schemas_invalid.cxx-test",

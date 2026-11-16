@@ -101,8 +101,6 @@ class ViewIntrinsic {
   uint16_t unsigned_dimension_mask_ = 0;
   // Flattened subview origin components whose integer values are unsigned.
   uint16_t unsigned_origin_mask_ = 0;
-  // Complete element identity for view.load.
-  loom_type_t element_result_ = {};
   // Source representation retained at admission for a loaded element.
   const Partition* element_partition_ = nullptr;
   // Inferred and explicitly selected semantics for one memory observation.

@@ -93,7 +93,12 @@ const ViewPartition& require_view(cxx::TranslationUnit& unit,
     diagnostics.reject(unit, owner,
                        "fragment memory operation requires a view value");
   }
-  return static_cast<const ViewPartition&>(partition);
+  const auto& view = static_cast<const ViewPartition&>(partition);
+  if (view.is_columnar()) {
+    diagnostics.reject(unit, owner,
+                       "fragment memory operation requires a primitive column");
+  }
+  return view;
 }
 
 std::vector<loom_string_id_t> require_named_operands(

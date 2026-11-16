@@ -41,7 +41,13 @@ struct ShapedSignature {
 
   // Binds the payload type to explicit dimensions and optional encoding.
   loom_type_t bind_type(std::span<const loom_value_id_t> dependencies,
-                        BoundTypeStorage& storage) const;
+                        BoundTypeStorage& storage, size_t column = 0) const;
+  // Number of primitive payloads sharing this source shape.
+  size_t payload_count() const {
+    return partition->kind == ValueKind::View
+               ? static_cast<const ViewPartition*>(partition)->column_count()
+               : 1;
+  }
 
   int64_t extent(size_t axis) const {
     return extents ? (*extents)[axis] : inline_extents[axis];

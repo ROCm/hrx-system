@@ -11,14 +11,13 @@
 #include "iree/vm/sync.h"
 #include "loom/tooling/target/vm/cxx_native_spans_bytecode.h"
 
-// C++ projects each dynamic view to its extent and one borrowed span. Named
-// positions keep the native consumer independent of literal packet offsets.
+// C++ projects the record view to one shared extent and two borrowed columns.
+// Named positions keep the consumer independent of literal packet offsets.
 enum {
-  SAMPLE_KEY_COUNT = 0,
+  SAMPLE_COUNT = 0,
   // Span descriptors occupy two values and start at an even bank ordinal.
   SAMPLE_KEYS = 2,
-  SAMPLE_READING_COUNT = SAMPLE_KEYS + 2,
-  SAMPLE_READINGS = SAMPLE_READING_COUNT + 2,
+  SAMPLE_READINGS = SAMPLE_KEYS + 2,
   SAMPLE_VALUE_COUNT = SAMPLE_READINGS + 2,
 };
 
@@ -27,7 +26,6 @@ static const iree_vm_module_signature_type_t sample_arguments[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
          (iree_vm_module_signature_type_kind_t)IREE_VM_SCALAR_TYPE_I32,
      0},
-    {IREE_VM_SCALAR_TYPE_I64, 0},
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
          (iree_vm_module_signature_type_kind_t)IREE_VM_SCALAR_TYPE_I64,
      0},
@@ -58,14 +56,12 @@ static iree_status_t sample_start(
     const iree_vm_module_function_start_params_t* params,
     iree_vm_execution_outcome_t* outcome) {
   const iree_vm_call_packet_t* call = &params->call;
-  const uint64_t count =
-      iree_vm_call_value_argument_load(call, SAMPLE_KEY_COUNT);
+  const uint64_t count = iree_vm_call_value_argument_load(call, SAMPLE_COUNT);
   const iree_vm_call_span_t keys =
       iree_vm_call_span_argument_load(call, SAMPLE_KEYS);
   const iree_vm_call_span_t readings =
       iree_vm_call_span_argument_load(call, SAMPLE_READINGS);
-  if (count != keys.count || count != readings.count ||
-      count != iree_vm_call_value_argument_load(call, SAMPLE_READING_COUNT)) {
+  if (count != keys.count || count != readings.count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "sample column counts must agree");
   }

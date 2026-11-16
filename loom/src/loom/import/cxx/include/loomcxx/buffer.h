@@ -178,22 +178,24 @@ template <loom::memory_space Space, __SIZE_TYPE__ Alignment = 1,
 // Allocates element_count uninitialized T objects in Space. Each execution
 // produces a distinct buffer root. Alignment is a minimum byte alignment and
 // cannot weaken T's natural alignment.
+// Parenthesized names preserve function-like alloca macros from system headers;
+// calls supply explicit template arguments and do not invoke those macros.
 template <class T, loom::memory_space Space,
           __SIZE_TYPE__ Alignment = alignof(T)>
-[[loom::op("buffer.alloca")]] T* alloca(__SIZE_TYPE__ element_count);
+[[loom::op("buffer.alloca")]] T*(alloca)(__SIZE_TYPE__ element_count);
 
 // Retains a native logical element count without exposing its target-selected
 // carrier through source code.
 template <class T, loom::memory_space Space,
           __SIZE_TYPE__ Alignment = alignof(T)>
-[[loom::op("buffer.alloca")]] T* alloca(loom::type::index element_count);
+[[loom::op("buffer.alloca")]] T*(alloca)(loom::type::index element_count);
 
 // Allocates an exact physical byte extent. This form preserves a byte count
 // already computed in Loom's offset domain instead of reinterpreting it as a
 // logical element count.
 template <loom::memory_space Space, __SIZE_TYPE__ Alignment = 1>
-[[loom::op("buffer.alloca")]] unsigned char* alloca(
-    loom::type::offset byte_length);
+[[loom::op("buffer.alloca")]] unsigned char*(
+    alloca)(loom::type::offset byte_length);
 
 namespace assume {
 

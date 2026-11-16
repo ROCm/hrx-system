@@ -89,12 +89,12 @@ std::optional<ShapedSignature> shaped_signature(Types& types,
 }
 
 loom_type_t ShapedSignature::bind_type(
-    std::span<const loom_value_id_t> dependencies,
-    BoundTypeStorage& storage) const {
+    std::span<const loom_value_id_t> dependencies, BoundTypeStorage& storage,
+    size_t column) const {
   switch (partition->kind) {
     case ValueKind::View:
       return static_cast<const ViewPartition*>(partition)->bind_type(
-          dependencies, storage);
+          dependencies, storage, column);
     case ValueKind::Vector:
       return static_cast<const VectorPartition*>(partition)->bind_type(
           dependencies, storage);
@@ -188,7 +188,8 @@ std::optional<RefinementIntrinsic> RefinementIntrinsic::resolve(
                        "access qualifiers, and rank");
   }
   const size_t dynamic_count =
-      result->partition->component_count - 1 - (result->encoding ? 1 : 0);
+      result->partition->component_count -
+      result->payload_count() * (result->encoding ? 2 : 1);
   const size_t required = 1 + (dynamic_count ? 1 : 0);
   const bool explicit_encoding =
       result->encoding && parameters.size() == required + 1;
@@ -220,24 +221,40 @@ std::optional<RefinementIntrinsic> RefinementIntrinsic::resolve(
 Value RefinementIntrinsic::call(std::span<const Value> arguments,
                                 ValueArena& arena, loom_builder_t* builder,
                                 loom_location_id_t location) const {
-  std::array<loom_value_id_t, LOOM_TYPE_MAX_RANK + 2> components;
+  std::array<loom_value_id_t, LOOM_TYPE_MAX_RANK + 4> inline_components;
+  std::vector<loom_value_id_t> overflow_components;
+  if (result_.partition->component_count > inline_components.size()) {
+    overflow_components.resize(result_.partition->component_count);
+  }
+  auto components = overflow_components.empty()
+                        ? std::span(inline_components)
+                              .first(result_.partition->component_count)
+                        : std::span(overflow_components);
   if (dynamic_count_) {
     const auto dimensions = arguments[1].components();
     std::copy(dimensions.begin(), dimensions.end(), components.begin());
   }
-  const size_t dependency_count = result_.partition->component_count - 1;
+  const size_t payload_count = result_.payload_count();
+  const size_t dependency_count =
+      result_.partition->component_count - payload_count;
   const auto source = arguments[0].components();
   if (result_.encoding) {
-    components[dynamic_count_] =
-        explicit_encoding_ ? arguments.back().ssa() : source[source.size() - 2];
+    for (size_t column = 0; column < payload_count; ++column) {
+      components[dynamic_count_ + column] =
+          explicit_encoding_
+              ? arguments.back().ssa()
+              : source[source.size() - 2 * payload_count + column];
+    }
   }
   auto dependencies = std::span(components).first(dependency_count);
   BoundTypeStorage storage;
-  const auto type = result_.bind_type(dependencies, storage);
-  components[dependency_count] =
-      refine_value(source.back(), type, builder, location);
-  return arena.capture(*result_.partition,
-                       std::span(components).first(dependency_count + 1));
+  for (size_t column = 0; column < payload_count; ++column) {
+    const auto type = result_.bind_type(dependencies, storage, column);
+    components[dependency_count + column] =
+        refine_value(source[source.size() - payload_count + column], type,
+                     builder, location);
+  }
+  return arena.capture(*result_.partition, components);
 }
 
 }  // namespace loom::cxx_import

@@ -176,6 +176,10 @@ class BoundTypeStorage {
   // element, alignment, and complete encoding attachment.
   loom_type_t with_dimensions(loom_type_t type,
                               std::span<const uint64_t> dimensions);
+  // Attaches one optional encoding identity, rejecting IDs outside the shaped
+  // type's representable range.
+  static loom_type_t with_encoding(loom_type_t type,
+                                   std::optional<loom_value_id_t> encoding);
 
   // Retains one bounded dimension sequence and returns stable contiguous
   // storage. The sequence must have rank in [1, LOOM_TYPE_MAX_RANK].
@@ -322,27 +326,57 @@ struct VectorPartition final : Partition {
   loom_type_t static_type = {};
 };
 
-// Canonical rank-generic source view. Dynamic extents and an optional encoding
-// are transported before the dependent High view so its type references this
-// binding's own component identities at every call and region boundary.
+// One scalar or reference field of a columnar source view. Nested records and
+// fixed arrays use the same field order as their ordinary value projection.
+struct ViewColumn {
+  // Complete High element, including imported reference identity.
+  loom_type_t element;
+  // Observation semantics inherited from the field and enclosing row.
+  loom_memory_access_flags_t access_flags;
+  // Whether a row store may write this field.
+  bool writable;
+  // Prebound all-static plain column type; unused by dependent views.
+  loom_type_t static_type = {};
+};
+
+// Canonical rank-generic source view. Record elements project to separate
+// scalar/reference columns sharing one set of dynamic extents. Optional column
+// encodings precede the High views; calls and joins bind all dependent
+// types to the destination's own component identities.
 struct ViewPartition final : Partition {
-  // Binds the High view type to dynamic extents in source-axis order followed
-  // by an optional encoding identity.
+  // Binds one High column to shared dynamic extents in source-axis order
+  // followed by the optional per-column encoding identities.
   loom_type_t bind_type(std::span<const loom_value_id_t> dependencies,
-                        BoundTypeStorage& storage) const;
+                        BoundTypeStorage& storage, size_t column = 0) const;
   // Returns the view SSA value from one complete component binding.
-  loom_value_id_t view_value(std::span<const loom_value_id_t> components) const;
+  loom_value_id_t view_value(std::span<const loom_value_id_t> components,
+                             size_t column = 0) const;
   // Whether the High type references a transported extent or encoding value.
-  bool requires_binding() const { return component_count > 1; }
+  bool requires_binding() const { return dynamic_count != 0 || encoding; }
+  bool is_columnar() const { return !columns.empty(); }
+  size_t column_count() const { return columns.empty() ? 1 : columns.size(); }
+  size_t column_component(size_t column) const {
+    return dynamic_count + (encoding ? column_count() : 0) + column;
+  }
+  const loom_type_t& column_element(size_t column) const {
+    return columns.empty() ? element : columns[column].element;
+  }
+  loom_memory_access_flags_t column_access_flags(size_t column) const {
+    return columns.empty() ? access_flags : columns[column].access_flags;
+  }
 
   // Concrete source specialization retaining nominal and cv-qualified rules.
   cxx::ClassSymbol* source;
   // Source element type, including cv qualifiers for access admission.
   const cxx::Type* element_type;
-  // Complete High element, including exact imported reference identity.
+  // Primitive High element; absent for record elements represented by columns.
   loom_type_t element;
   // Observation semantics retained from the source element qualifier.
   loom_memory_access_flags_t access_flags;
+  // Record field projections; empty for a primitive-element view.
+  std::vector<ViewColumn> columns;
+  // Number of shared dynamic dimensions at the start of each binding.
+  size_t dynamic_count = 0;
   // Attached layout or physical-storage encoding, or null for a plain view.
   const EncodingPartition* encoding = nullptr;
   // Static extent, or -1 when the axis has a transported dynamic extent.
@@ -582,6 +616,10 @@ class Types {
   const VectorPartition* semantic_vector(const cxx::ClassType* input,
                                          cxx::AST* owner);
   const ViewPartition* view(const cxx::ClassType* input, cxx::AST* owner);
+  // Admits each scalar/reference row field once, retaining its qualifiers.
+  void append_view_columns(const cxx::Type* type, bool writable,
+                           loom_memory_access_flags_t access_flags,
+                           cxx::AST* owner, std::vector<ViewColumn>& columns);
   const TensorPartition* tensor(const cxx::ClassType* input, cxx::AST* owner);
   void append_component_names(const Partition& partition,
                               std::string_view prefix,
