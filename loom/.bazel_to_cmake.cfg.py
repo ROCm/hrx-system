@@ -404,7 +404,7 @@ class LoomBuildFileFunctions(
         for arg in args or []:
             if arg.split("=", 1)[0] in ("--config", "--case"):
                 raise ValueError(
-                    f"{name}: use loom_test configs and case for workload selection, not {arg}"
+                    f"{name}: use loom_test config and case for workload selection, not {arg}"
                 )
 
     def loom_execution_profile(
@@ -443,9 +443,9 @@ class LoomBuildFileFunctions(
             value = value.split("/")[-1]
         return re.sub(r"[-.+]", "_", value)
 
-    def _loom_test_workloads(self, name, configs, case, workloads):
+    def _loom_test_workloads(self, name, config, case, workloads):
         if workloads is None:
-            return {name: (configs, case)}
+            return {name: (config, case)}
         if not workloads:
             raise ValueError(
                 f"{name} workloads must contain at least one named workload"
@@ -455,7 +455,7 @@ class LoomBuildFileFunctions(
             if not isinstance(workload_name, str) or not workload_name:
                 raise ValueError(f"{name} workload names must be non-empty strings")
             for key in workload:
-                if key not in ("configs", "case"):
+                if key not in ("config", "case"):
                     raise ValueError(
                         f"{name} workload {workload_name} has unknown field {key}"
                     )
@@ -464,10 +464,10 @@ class LoomBuildFileFunctions(
                 raise ValueError(
                     f"{name} has colliding workload names: {workload_name}"
                 )
-            workload_configs = dict(configs)
-            workload_configs.update(workload.get("configs", {}))
+            workload_config = dict(config)
+            workload_config.update(workload.get("config", {}))
             expanded_workloads[expanded_name] = (
-                workload_configs,
+                workload_config,
                 workload.get("case", case),
             )
         return expanded_workloads
@@ -516,7 +516,7 @@ class LoomBuildFileFunctions(
         inputopts=None,
         module=None,
         args=None,
-        configs=None,
+        config=None,
         case="",
         workloads=None,
         execution_profiles=None,
@@ -542,7 +542,7 @@ class LoomBuildFileFunctions(
             raise ValueError(f"{name} requires execution_profiles or compile_targets")
         self._reject_workload_args(name, args)
         expanded_workloads = self._loom_test_workloads(
-            name, configs or {}, case, workloads
+            name, config or {}, case, workloads
         )
         target_compatible_with = self._apply_loom_target_compatible_with(
             target_compatible_with
@@ -560,19 +560,19 @@ class LoomBuildFileFunctions(
             )
         self._emit_platform_guard_begin(target_compatible_with)
         for workload_name, (
-            workload_configs,
+            workload_config,
             workload_case,
         ) in expanded_workloads.items():
-            for key, value in workload_configs.items():
+            for key, value in workload_config.items():
                 if not isinstance(key, str) or not isinstance(value, str):
                     raise ValueError(
-                        f"{workload_name} configs must map symbol names to string values"
+                        f"{workload_name} config must map symbol names to string values"
                     )
             if not isinstance(workload_case, str):
                 raise ValueError(f"{workload_name} case must be a string")
             config_args = [
-                f"--config={key}={workload_configs[key]}"
-                for key in sorted(workload_configs)
+                f"--config={key}={workload_config[key]}"
+                for key in sorted(workload_config)
             ]
             workload_args = config_args + (
                 ["--case=" + workload_case] if workload_case else []

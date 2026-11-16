@@ -48,11 +48,11 @@ loom_test(
     srcs = ["read-ahead-tests.loom"],
     execution_profiles = [AMD_GPU_HARDWARE_PROFILE],
     workloads = {
-        "serial": {"configs": {
+        "serial": {"config": {
             "read_ahead.depth": "1",
             "read_ahead.unroll": "2",
         }},
-        "unroll1": {"configs": {
+        "unroll1": {"config": {
             "read_ahead.depth": "3",
             "read_ahead.unroll": "1",
         }},
@@ -118,27 +118,27 @@ loom_kernel_library(
 loom_test(
     name = "paired_read_ahead_access_test",
     srcs = ["paired-read-ahead-tests.loom"],
-    configs = {
+    config = {
         "paired_rows.left_unroll": "4",
         "paired_rows.right_unroll": "4",
     },
     execution_profiles = [AMD_GPU_ACCESS_PROFILE],
     workloads = {
-        "both": {"configs": {
+        "both": {"config": {
             "paired_rows.left_lookahead": "3",
             "paired_rows.right_lookahead": "3",
         }},
-        "deep": {"configs": {
+        "deep": {"config": {
             "paired_rows.left_lookahead": "31",
             "paired_rows.right_lookahead": "31",
         }},
-        "serial": {"configs": {
+        "serial": {"config": {
             "paired_rows.left_lookahead": "0",
             "paired_rows.left_unroll": "1",
             "paired_rows.right_lookahead": "0",
             "paired_rows.right_unroll": "1",
         }},
-        "swapped": {"configs": {
+        "swapped": {"config": {
             "paired_rows.left_lookahead": "0",
             "paired_rows.left_unroll": "1",
             "paired_rows.right_lookahead": "3",

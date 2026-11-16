@@ -231,7 +231,7 @@ def loom_corpus_test(
             name = test_name,
             args = args,
             benchmark_smoke = False,
-            configs = program.configs,
+            config = program.configs,
             execution_profiles = program_profiles,
             module = program.module_label,
             size = size,

@@ -481,13 +481,13 @@ profile = loom_execution_profile(
 loom_test(
     name = "subject",
     srcs = ["subject.loom"],
-    configs = {"common.value": "base"},
+    config = {"common.value": "base"},
     case = "@base",
     workloads = {
         "base": {},
         "selected": {
             "case": "@selected",
-            "configs": {
+            "config": {
                 "common.value": "override",
                 "selected.width": "8",
             },
@@ -510,9 +510,9 @@ loom_test(
         self.assertIn('"--case=@base"', output)
         self.assertIn('"--case=@selected"', output)
 
-    def test_loom_test_rejects_legacy_variants_keyword(self):
+    def test_loom_test_rejects_legacy_keywords(self):
         with self.assertRaisesRegex(
-            NotImplementedError, "loom_test attributes: variants"
+            NotImplementedError, "loom_test attributes: configs, variants"
         ):
             bazel_to_cmake_converter.convert_build_file(
                 """
@@ -530,6 +530,7 @@ profile = loom_execution_profile(
 loom_test(
     name = "subject",
     srcs = ["subject.loom"],
+    configs = {"legacy": "value"},
     variants = {"legacy": {}},
     execution_profiles = [profile],
 )

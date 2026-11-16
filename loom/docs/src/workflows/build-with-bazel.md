@@ -265,7 +265,7 @@ Modules with no authored `.loom` inputs do not declare a source-check suite.
 
 ### Named workloads share one source owner
 
-`configs` binds compile-time values for compiler qualification, correctness,
+`config` binds compile-time values for compiler qualification, correctness,
 and benchmark smoke. `case` selects cases for the two numerical runners;
 compiler qualification still covers the entire owned module. These settings
 belong to the workload, while execution profiles own device selection,
@@ -277,7 +277,7 @@ Use named `workloads` when the same program needs several configurations:
 --8<-- "examples/guide/functions-and-control/BUILD.bazel:named_workloads"
 ```
 
-Each row overrides keys in the common `configs` mapping and may override the
+Each row overrides keys in the common `config` mapping and may override the
 common `case` selector. Configuration values are strings, as on binary rules.
 Omitting `workloads` creates one default workload; supplying it names the
 complete set, with no extra default row. An empty mapping is an authoring error.
