@@ -367,6 +367,12 @@ iree_status_t loom_service_finite_registration_request_parameters(
 void loom_service_finite_registration_request_retirement(
     loom_service_finite_registration_t* registration,
     loom_service_finite_retire_flags_t flags) {
+  if (registration->engine.self) {
+    // The application may have detached its ready-engine traversal. Accepted
+    // native borrowers now wake the retained lifecycle owner through cleanup.
+    registration->engine.vtable->set_observer(registration->engine.self,
+                                              registration->observer);
+  }
   registration->retirement_requested = true;
   registration->stopping |=
       iree_any_bit_set(flags, LOOM_SERVICE_FINITE_RETIRE_FLAG_ABORT);

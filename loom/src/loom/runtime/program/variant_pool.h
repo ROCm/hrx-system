@@ -141,6 +141,11 @@ void loom_runtime_variant_entry_complete(
 // No allocation, wait, model submission or service selection occurs.
 bool loom_runtime_variant_pool_collect(loom_runtime_variant_pool_t* pool);
 
+// Collects one retained construction directly when the owner already has its
+// stable entry. Other pending entries are untouched. Returns false while its
+// producer is pending or after another owner visit has collected it.
+bool loom_runtime_variant_entry_collect(loom_runtime_variant_entry_t* entry);
+
 // Acquires a ready choice by externally supplied identity. Selection policy
 // and the semantic boundary at which it may run belong to the caller. After
 // acquisition, id/value queries and release are infallible owner operations.

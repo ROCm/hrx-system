@@ -17,8 +17,10 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/runtime/driver.h"
 #include "loom/runtime/program/sources.h"
+#include "loom/runtime/program/variant_pool.h"
 #include "loom/runtime/service_control.h"
 #include "loom/runtime/testing/application.h"
+#include "loom/runtime/testing/worker_gate.h"
 #include "loom/service/finite/decision/protocol.h"
 #include "loom/service/finite/registration.h"
 #include "loom/service/finite/service.h"
@@ -97,13 +99,15 @@ class NativeDecisionServiceTest : public ::testing::Test {
   }
 
   iree_status_t AllocateRegistration(
-      const loom_service_finite_model_options_t& model_options) {
+      const loom_service_finite_model_options_t& model_options,
+      iree_host_size_t variant_capacity = 0) {
     preparation_complete_ = false;
     const loom_service_finite_registration_options_t service_options = {
         .incarnation = ++incarnation_,
         .protocol = loom_service_decision_protocol(),
         .name = IREE_SV("decision"),
         .capacity = 3,
+        .variant_capacity = variant_capacity,
     };
     return loom_service_finite_registration_allocate(
         device_, pool_, &model_options, &service_options, {Wake, this},
@@ -426,7 +430,7 @@ TEST_F(NativeDecisionServiceTest,
       .asset_directory = IREE_SV("."),
       .options = IREE_SV("{\"batch_units\":64}"),
   };
-  IREE_ASSERT_OK(AllocateRegistration(options));
+  IREE_ASSERT_OK(AllocateRegistration(options, 3));
   const auto* control = loom_service_finite_registration_control(registration_);
   const auto load = OfferedWork(LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
   ASSERT_EQ(load.choice_count, 1u);
@@ -441,6 +445,75 @@ TEST_F(NativeDecisionServiceTest,
            LOOM_SERVICE_FINITE_REGISTRATION_READY;
   }));
   ASSERT_NE(service_, nullptr);
+
+  // Explicit management grants own independent compiler lifetimes. A failed
+  // candidate stays local while another candidate becomes usable, and neither
+  // needs an inference request or another scheduling grant to complete.
+  const auto configuration = interface_.reconfiguration;
+  const auto original = configuration.selected(configuration.self);
+  const iree_string_view_t providers[] = {IREE_SV("config.loom"),
+                                          IREE_SV("decide.loom")};
+  const loom_runtime_sources_t replacement = {
+      .base_directory = sources_->base_directory,
+      .count = IREE_ARRAYSIZE(providers),
+      .values = providers,
+  };
+  loom_runtime_variant_id_t candidate = 0;
+  IREE_ASSERT_OK(configuration.stage_native(configuration.self, original,
+                                            &replacement, &candidate));
+  const iree_string_view_t missing = IREE_SV("missing-native-provider.loom");
+  const loom_runtime_sources_t invalid = {
+      .base_directory = sources_->base_directory,
+      .count = 1,
+      .values = &missing,
+  };
+  loom_runtime_variant_id_t failed = 0;
+  IREE_ASSERT_OK(configuration.stage_native(configuration.self, original,
+                                            &invalid, &failed));
+  EXPECT_NE(candidate, failed);
+  EXPECT_TRUE(loom_runtime_variant_pool_pending(configuration.pool));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_runtime_variant_pool_remove(configuration.pool, candidate));
+  loom_runtime_variant_id_t rejected = 0;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        configuration.stage_native(configuration.self, original,
+                                                   &replacement, &rejected));
+  EXPECT_EQ(rejected, 0u);
+  IREE_ASSERT_OK(ProgressUntil(
+      [&] { return !loom_runtime_variant_pool_pending(configuration.pool); }));
+  loom_runtime_variant_snapshot_t variant = {};
+  ASSERT_TRUE(loom_runtime_variant_pool_snapshot(configuration.pool, candidate,
+                                                 &variant));
+  EXPECT_EQ(variant.phase, LOOM_RUNTIME_VARIANT_READY);
+  ASSERT_TRUE(
+      loom_runtime_variant_pool_snapshot(configuration.pool, failed, &variant));
+  EXPECT_EQ(variant.phase, LOOM_RUNTIME_VARIANT_FAILED);
+  EXPECT_EQ(variant.code, IREE_STATUS_NOT_FOUND);
+  IREE_ASSERT_OK(loom_runtime_variant_pool_remove(configuration.pool, failed));
+  struct Selection {
+    // Owner callback has relinquished its borrowed result storage.
+    bool complete = false;
+    // Actual preferred code after the selection attempt.
+    loom_runtime_variant_id_t selected = 0;
+    // Terminal selection outcome, independent of compilation diagnostics.
+    iree_status_code_t code = IREE_STATUS_UNKNOWN;
+  } selection;
+  IREE_ASSERT_OK(configuration.select(
+      configuration.self, candidate, original,
+      [](void* self, iree_status_t status, loom_runtime_variant_id_t selected) {
+        auto& result = *static_cast<Selection*>(self);
+        result.selected = selected;
+        result.code = iree_status_code(status);
+        iree_status_free(status);
+        result.complete = true;
+      },
+      &selection));
+  EXPECT_FALSE(selection.complete);
+  IREE_ASSERT_OK(ProgressUntil([&] { return selection.complete; }));
+  EXPECT_EQ(selection.selected, candidate);
+  EXPECT_EQ(selection.code, IREE_STATUS_OK);
+  EXPECT_EQ(configuration.selected(configuration.self), candidate);
 
   // Explicit warmup is another deferred native choice. Withdrawing it makes
   // the old decision stale; accepted warmup later joins with no new grants.
@@ -605,6 +678,14 @@ TEST_F(NativeDecisionServiceTest,
                   control, operation.key, operation.publication, 0, &use),
               LOOM_RUNTIME_SERVICE_READ_CHANGED);
   }
+  // Reuse a collected compiler slot, then remove while its replacement is
+  // accepted. Relinquishing frontend views cannot release that compiler borrow.
+  loom_runtime::testing::WorkerGate compiler_gate(
+      loom_runtime_host_executor(loom_runtime_device_host(device_)));
+  loom_runtime_variant_id_t final_candidate = 0;
+  IREE_ASSERT_OK(configuration.stage_native(configuration.self, candidate,
+                                            &replacement, &final_candidate));
+  EXPECT_TRUE(loom_runtime_variant_pool_pending(configuration.pool));
   // Relinquish the embedding application's engine views before granting
   // release.
   loom_runtime_driver_set_observer(&driver_, {});
@@ -613,6 +694,17 @@ TEST_F(NativeDecisionServiceTest,
   interface_ = {};
   service_ = nullptr;
   loom_service_finite_registration_request_retirement(registration_, 0);
+  EXPECT_EQ(OfferedWork(LOOM_RUNTIME_SERVICE_WORK_RELEASE).choice_count, 0u);
+  EXPECT_FALSE(loom_service_finite_registration_progress(registration_, 0));
+  // Prepare the wait before releasing the compiler: its completion must wake
+  // the native lifecycle after the application's traversal has detached.
+  const auto retirement_ticket = iree_notification_prepare_wait(&notification_);
+  compiler_gate.Open();
+  iree_notification_commit_wait(&notification_, retirement_ticket,
+                                IREE_DURATION_ZERO, IREE_TIME_INFINITE_FUTURE);
+  IREE_ASSERT_OK(ProgressUntil([&] {
+    return OfferedWork(LOOM_RUNTIME_SERVICE_WORK_RELEASE).choice_count != 0;
+  }));
   const auto release = OfferedWork(LOOM_RUNTIME_SERVICE_WORK_RELEASE);
   ASSERT_EQ(release.choice_count, 1u);
   EXPECT_FALSE(loom_service_finite_registration_progress(registration_, 0));

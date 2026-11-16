@@ -228,6 +228,13 @@ TEST_F(VariantPoolTest, OwnerTraversalAndEvictionPreserveStableEntries) {
     loom_runtime_variant_entry_complete(entry, iree_ok_status(), &disposed_,
                                         nullptr);
   }
+  ASSERT_TRUE(loom_runtime_variant_entry_collect(entries[1]));
+  EXPECT_FALSE(loom_runtime_variant_entry_collect(entries[1]));
+  EXPECT_EQ(loom_runtime_variant_entry_snapshot(entries[0]).phase,
+            LOOM_RUNTIME_VARIANT_COMPILING);
+  EXPECT_EQ(loom_runtime_variant_entry_snapshot(entries[2]).phase,
+            LOOM_RUNTIME_VARIANT_COMPILING);
+  EXPECT_TRUE(loom_runtime_variant_pool_pending(pool_));
   ASSERT_TRUE(loom_runtime_variant_pool_collect(pool_));
   EXPECT_GT(loom_runtime_variant_pool_storage_size(pool_), original_bytes);
   loom_runtime_variant_entry_retain(entries[1]);

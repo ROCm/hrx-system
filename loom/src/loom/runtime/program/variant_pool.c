@@ -240,26 +240,31 @@ bool loom_runtime_variant_pool_collect(loom_runtime_variant_pool_t* pool) {
   bool progress = false;
   for (loom_runtime_variant_entry_t* entry = pool->head; entry;
        entry = entry->next) {
-    if (entry->phase != LOOM_RUNTIME_VARIANT_COMPILING) {
-      continue;
-    }
-    iree_slim_mutex_lock(&pool->mutex);
-    const bool ready = entry->completion.ready;
-    iree_slim_mutex_unlock(&pool->mutex);
-    if (!ready) {
-      continue;
-    }
-    --pool->pending;
-    if (iree_status_is_ok(entry->completion.status)) {
-      entry->phase = LOOM_RUNTIME_VARIANT_READY;
-    } else {
-      entry->phase = LOOM_RUNTIME_VARIANT_FAILED;
-      pool->dispose(entry->completion.value);
-      entry->completion.value = NULL;
-    }
-    progress = true;
+    progress |= loom_runtime_variant_entry_collect(entry);
   }
   return progress;
+}
+
+bool loom_runtime_variant_entry_collect(loom_runtime_variant_entry_t* entry) {
+  if (entry->phase != LOOM_RUNTIME_VARIANT_COMPILING) {
+    return false;
+  }
+  loom_runtime_variant_pool_t* pool = entry->pool;
+  iree_slim_mutex_lock(&pool->mutex);
+  const bool ready = entry->completion.ready;
+  iree_slim_mutex_unlock(&pool->mutex);
+  if (!ready) {
+    return false;
+  }
+  --pool->pending;
+  if (iree_status_is_ok(entry->completion.status)) {
+    entry->phase = LOOM_RUNTIME_VARIANT_READY;
+  } else {
+    entry->phase = LOOM_RUNTIME_VARIANT_FAILED;
+    pool->dispose(entry->completion.value);
+    entry->completion.value = NULL;
+  }
+  return true;
 }
 
 iree_status_t loom_runtime_variant_pool_acquire(

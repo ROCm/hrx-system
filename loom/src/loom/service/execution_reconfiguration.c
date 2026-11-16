@@ -6,6 +6,17 @@
 
 #include "loom/service/execution_reconfiguration.h"
 
+typedef struct loom_service_execution_reconfiguration_job_t {
+  // Allocator retained through the producer's final source access.
+  iree_allocator_t host_allocator;
+  // Stable entry retained until this owner's terminal collection.
+  loom_runtime_variant_entry_t* entry;
+  // Owned provider locators and package, relinquished before completion.
+  loom_runtime_sources_t* sources;
+  // Owner-only link in either the active or available slot list.
+  struct loom_service_execution_reconfiguration_job_t* next;
+} loom_service_execution_reconfiguration_job_t;
+
 struct loom_service_execution_reconfiguration_t {
   // Allocator owning this policy and captured native-provider locators.
   iree_allocator_t host_allocator;
@@ -29,31 +40,23 @@ struct loom_service_execution_reconfiguration_t {
   } selection;
   // Irrevocable shutdown intent; compilation retirement is independent.
   bool stopping;
+  // Independent compiler owners, retained through terminal collection.
+  loom_service_execution_reconfiguration_job_t* active_jobs;
+  // Available stable slots; the selected entry bounds jobs to capacity - 1.
+  loom_service_execution_reconfiguration_job_t* available_jobs;
+  // Tail storage for bounded jobs; live jobs never move or share an ordinal.
+  loom_service_execution_reconfiguration_job_t jobs[];
 };
-
-typedef struct loom_service_execution_reconfiguration_job_t {
-  // Allocator retained independently of service retirement.
-  iree_allocator_t host_allocator;
-  // Stable pending entry, published only after the job relinquishes inputs.
-  loom_runtime_variant_entry_t* entry;
-  // Owned provider locators, filesystem base and retained package, independent
-  // of HTTP. Resolution stays with the source reader so relative file bases
-  // and package namespaces keep their original meaning.
-  loom_runtime_sources_t* sources;
-} loom_service_execution_reconfiguration_job_t;
-
-static void loom_service_execution_reconfiguration_job_free(
-    loom_service_execution_reconfiguration_job_t* job) {
-  loom_runtime_sources_free(job->sources, job->host_allocator);
-  iree_allocator_free(job->host_allocator, job);
-}
 
 static void loom_service_execution_reconfiguration_complete(
     void* user_data, iree_status_t status, void* variant,
     const loom_runtime_compilation_report_t* report) {
   loom_service_execution_reconfiguration_job_t* job = user_data;
   loom_runtime_variant_entry_t* entry = job->entry;
-  loom_service_execution_reconfiguration_job_free(job);
+  loom_runtime_sources_free(job->sources, job->host_allocator);
+  job->sources = NULL;
+  // Publication is the producer's final job/entry/pool access. Collection can
+  // immediately recycle the slot, including when completion precedes return.
   loom_runtime_variant_entry_complete(entry, status, variant, report);
 }
 
@@ -71,18 +74,27 @@ static iree_status_t loom_service_execution_reconfiguration_stage(
                             "native reconfiguration requires providers and "
                             "preserves prepare/control");
   }
-  loom_service_execution_reconfiguration_job_t* job = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(reconfiguration->host_allocator,
-                                             sizeof(*job), (void**)&job));
-  job->host_allocator = reconfiguration->host_allocator;
+  // Provider capture is independent of HTTP. Resolution stays with the source
+  // reader so filesystem bases and package namespaces keep their meaning.
+  loom_runtime_sources_t* captured_sources = NULL;
+  IREE_RETURN_IF_ERROR(loom_runtime_sources_clone(
+      sources, reconfiguration->host_allocator, &captured_sources));
+  loom_runtime_variant_entry_t* entry = NULL;
   iree_status_t status =
-      loom_runtime_sources_clone(sources, job->host_allocator, &job->sources);
+      loom_runtime_variant_pool_begin(reconfiguration->pool, base, &entry);
   if (iree_status_is_ok(status)) {
-    status = loom_runtime_variant_pool_begin(reconfiguration->pool, base,
-                                             &job->entry);
-  }
-  if (iree_status_is_ok(status)) {
-    *out_id = loom_runtime_variant_entry_id(job->entry);
+    // One selected entry always consumes pool capacity. Every active job also
+    // retains its entry, so a successful reservation has an available slot.
+    loom_service_execution_reconfiguration_job_t* job =
+        reconfiguration->available_jobs;
+    IREE_ASSERT(job);
+    reconfiguration->available_jobs = job->next;
+    job->entry = entry;
+    loom_runtime_variant_entry_retain(entry);
+    job->sources = captured_sources;
+    job->next = reconfiguration->active_jobs;
+    reconfiguration->active_jobs = job;
+    *out_id = loom_runtime_variant_entry_id(entry);
     // From here the pool owns terminal observation, including submission
     // rejection. The caller receives a stable ID for every accepted attempt.
     status = reconfiguration->update.compile(
@@ -93,7 +105,8 @@ static iree_status_t loom_service_execution_reconfiguration_stage(
       status = iree_ok_status();
     }
   } else {
-    loom_service_execution_reconfiguration_job_free(job);
+    loom_runtime_sources_free(captured_sources,
+                              reconfiguration->host_allocator);
   }
   return status;
 }
@@ -137,10 +150,18 @@ iree_status_t loom_service_execution_reconfiguration_allocate(
     return iree_ok_status();
   }
   loom_service_execution_reconfiguration_t* reconfiguration = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      host_allocator, sizeof(*reconfiguration), (void**)&reconfiguration));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_struct_array(
+      host_allocator, sizeof(*reconfiguration), capacity - 1,
+      sizeof(*reconfiguration->jobs), (void**)&reconfiguration));
   reconfiguration->host_allocator = host_allocator;
   reconfiguration->update = update;
+  for (iree_host_size_t i = capacity - 1; i > 0; --i) {
+    loom_service_execution_reconfiguration_job_t* job =
+        &reconfiguration->jobs[i - 1];
+    job->host_allocator = host_allocator;
+    job->next = reconfiguration->available_jobs;
+    reconfiguration->available_jobs = job;
+  }
   iree_status_t status = loom_runtime_variant_pool_allocate(
       capacity, NULL, update.dispose, host_allocator,
       &reconfiguration->selected, &reconfiguration->pool);
@@ -159,6 +180,7 @@ void loom_service_execution_reconfiguration_free(
     return;
   }
   IREE_ASSERT(!reconfiguration->selection.entry);
+  IREE_ASSERT(!reconfiguration->active_jobs);
   loom_runtime_variant_entry_release(reconfiguration->selected);
   loom_runtime_variant_pool_free(reconfiguration->pool);
   iree_allocator_free(reconfiguration->host_allocator, reconfiguration);
@@ -177,8 +199,7 @@ void loom_service_execution_reconfiguration_set_observer(
 bool loom_service_execution_reconfiguration_pending(
     const loom_service_execution_reconfiguration_t* reconfiguration) {
   return reconfiguration &&
-         (reconfiguration->selection.entry ||
-          loom_runtime_variant_pool_pending(reconfiguration->pool));
+         (reconfiguration->selection.entry || reconfiguration->active_jobs);
 }
 
 bool loom_service_execution_reconfiguration_advance(
@@ -188,7 +209,24 @@ bool loom_service_execution_reconfiguration_advance(
     return false;
   }
   reconfiguration->stopping |= stopping;
-  bool progress = loom_runtime_variant_pool_collect(reconfiguration->pool);
+  bool progress = false;
+  loom_service_execution_reconfiguration_job_t** link =
+      &reconfiguration->active_jobs;
+  while (*link) {
+    loom_service_execution_reconfiguration_job_t* job = *link;
+    loom_runtime_variant_entry_collect(job->entry);
+    if (loom_runtime_variant_entry_snapshot(job->entry).phase ==
+        LOOM_RUNTIME_VARIANT_COMPILING) {
+      link = &job->next;
+    } else {
+      loom_runtime_variant_entry_release(job->entry);
+      job->entry = NULL;
+      *link = job->next;
+      job->next = reconfiguration->available_jobs;
+      reconfiguration->available_jobs = job;
+      progress = true;
+    }
+  }
   loom_runtime_variant_entry_t* entry = reconfiguration->selection.entry;
   if (!entry || (!quiescent && !reconfiguration->stopping)) {
     return progress;
