@@ -12,6 +12,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/cfg/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/test/ops.h"
@@ -36,6 +37,9 @@ class FactSummaryTest : public ::testing::Test {
     vtables = loom_scf_dialect_vtables(&vtable_count);
     IREE_ASSERT_OK(loom_context_register_dialect(
         &context_, LOOM_DIALECT_SCF, vtables, (uint16_t)vtable_count));
+    vtables = loom_cfg_dialect_vtables(&vtable_count);
+    IREE_ASSERT_OK(loom_context_register_dialect(
+        &context_, LOOM_DIALECT_CFG, vtables, (uint16_t)vtable_count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"),
                                         &block_pool_, nullptr,
@@ -467,15 +471,19 @@ INSTANTIATE_TEST_SUITE_P(BooleanAndKeyed, NewBranchContextTest,
 
 enum class PendingBranchEdit { kKeep, kMove, kErase };
 
-class NestedFeedbackTest : public FactSummaryTest,
-                           public ::testing::WithParamInterface<
-                               std::tuple<bool, PendingBranchEdit, bool>> {};
+class NestedFeedbackTest
+    : public FactSummaryTest,
+      public ::testing::WithParamInterface<
+          std::tuple<bool, PendingBranchEdit, bool, bool>> {};
 
 // Semantic edits can invalidate feedback even when derived rows are already
 // broad. Publishing through a nested summary must both weaken and recover the
 // enclosing loop's facts, without relying on the optional rewrite worklist.
+// Within a CFG cycle, only the summary's published results reach CFG users;
+// child yields cannot schedule that cycle during the loop's feedback solve.
 TEST_P(NestedFeedbackTest, RestoresExactState) {
-  const auto [is_conditional_loop, branch_edit, track_rewrites] = GetParam();
+  const auto [is_conditional_loop, branch_edit, track_rewrites, in_cfg_cycle] =
+      GetParam();
   const auto i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   const auto index = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   auto constant = [&](int64_t value, loom_type_t type) {
@@ -490,6 +498,30 @@ TEST_P(NestedFeedbackTest, RestoresExactState) {
   const auto initial = loom_test_constant_result(constant(2, i32));
   const auto selector = loom_test_constant_result(constant(1, i32));
   auto* increment = constant(0, i32);
+  loom_block_t* cfg_header = nullptr;
+  loom_block_t* cfg_egress = nullptr;
+  loom_block_t* cfg_exit = nullptr;
+  loom_value_id_t cfg_selector = LOOM_VALUE_ID_INVALID;
+  loom_value_id_t cfg_result = LOOM_VALUE_ID_INVALID;
+  if (in_cfg_cycle) {
+    const auto i1 = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
+    const auto enabled = loom_test_constant_result(constant(1, i1));
+    loom_op_t* unknown = nullptr;
+    IREE_ASSERT_OK(loom_test_attrs_build(&builder_, 0, enabled, {}, i1,
+                                         LOOM_LOCATION_UNKNOWN, &unknown));
+    cfg_selector = loom_test_attrs_result(unknown);
+    auto* region = loom_func_like_body(function_);
+    region->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;
+    IREE_ASSERT_OK(loom_region_append_block(module_, region, &cfg_header));
+    IREE_ASSERT_OK(loom_region_append_block(module_, region, &cfg_egress));
+    IREE_ASSERT_OK(loom_region_append_block(module_, region, &cfg_exit));
+    IREE_ASSERT_OK(
+        loom_builder_define_block_arg(&builder_, cfg_exit, i32, &cfg_result));
+    loom_op_t* entry = nullptr;
+    IREE_ASSERT_OK(loom_cfg_br_build(&builder_, cfg_header, nullptr, 0,
+                                     LOOM_LOCATION_UNKNOWN, &entry));
+    loom_builder_set_block(&builder_, cfg_header);
+  }
   loom_op_t* loop = nullptr;
   if (is_conditional_loop) {
     const auto enabled = loom_test_constant_result(
@@ -558,6 +590,17 @@ TEST_P(NestedFeedbackTest, RestoresExactState) {
   IREE_ASSERT_OK(loom_scf_yield_build(&body_builder, loom_op_results(branch), 1,
                                       LOOM_LOCATION_UNKNOWN, &yield));
   loom_op_t* end = nullptr;
+  if (in_cfg_cycle) {
+    IREE_ASSERT_OK(loom_cfg_cond_br_build(&builder_, cfg_selector, cfg_header,
+                                          cfg_egress, LOOM_LOCATION_UNKNOWN,
+                                          &end));
+    loom_builder_set_block(&builder_, cfg_egress);
+    IREE_ASSERT_OK(loom_cfg_br_build(&builder_, cfg_exit, loom_op_results(loop),
+                                     1, LOOM_LOCATION_UNKNOWN, &end));
+    loom_builder_set_block(&builder_, cfg_exit);
+    IREE_ASSERT_OK(loom_test_use_build(&builder_, &cfg_result, 1,
+                                       LOOM_LOCATION_UNKNOWN, &end));
+  }
   IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
                                        LOOM_LOCATION_UNKNOWN, &end));
   iree_arena_allocator_t arena;
@@ -643,6 +686,18 @@ TEST_P(NestedFeedbackTest, RestoresExactState) {
         EXPECT_EQ(loom_value_fact_table_lookup(facts, value).range_hi, 2);
       }
     }
+    if (in_cfg_cycle) {
+      const auto actual = loom_value_fact_table_lookup(facts, cfg_result);
+      EXPECT_TRUE(loom_value_fact_table_facts_equal_for_type(
+          module_, i32, facts, actual, fresh,
+          loom_value_fact_table_lookup(fresh, cfg_result)));
+      EXPECT_EQ(actual.range_lo,
+                loom_value_fact_table_lookup(facts, loom_op_results(loop)[0])
+                    .range_lo);
+      EXPECT_EQ(actual.range_hi,
+                loom_value_fact_table_lookup(facts, loom_op_results(loop)[0])
+                    .range_hi);
+    }
     loom_pass_value_fact_owner_deinitialize(&fresh_owner);
   }
   loom_rewriter_deinitialize(&rewriter);
@@ -656,6 +711,6 @@ INSTANTIATE_TEST_SUITE_P(
                        ::testing::Values(PendingBranchEdit::kKeep,
                                          PendingBranchEdit::kMove,
                                          PendingBranchEdit::kErase),
-                       ::testing::Bool()));
+                       ::testing::Bool(), ::testing::Bool()));
 }  // namespace
 }  // namespace loom

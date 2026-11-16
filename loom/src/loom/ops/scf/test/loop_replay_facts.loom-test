@@ -39,3 +39,154 @@ func.def @nested_capture(%count: index, %seed: index) {
   }
   func.return
 }
+
+// ====
+
+// Later iterations reach 128. Narrowing retains the same full i8 interval,
+// but it can no longer preserve the carried value's numeric identity.
+func.def @counted_narrowing_withdrawal(%raw: i32, %count: index) {
+  %seed = scalar.assume %raw [range(%raw, -128, 127)] : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %increment = scalar.constant 1 : i32
+  %additive_identity = scalar.constant 0 : i8
+  %next = scalar.addi %seed, %increment : i32
+  %result = scf.for %iteration = [%begin to %count step %step](%carried = %seed : i32) -> (i32) {
+    %byte = scalar.trunci %carried : i32 to i8
+    %alias = scalar.assume %byte [range(%byte, -128, 127)] : i8
+    %sum = scalar.addi %alias, %additive_identity : i8
+    %same = test.fact_numeric_identity_matches %sum, %carried : i8, i32 -> i1
+    test.use %same : i1
+    scf.yield %next : i32
+  }
+  func.return
+}
+
+// ----
+func.def @counted_narrowing_withdrawal(%raw: i32, %count: index) {
+  %seed = scalar.assume %raw [range(%raw, -128, 127)] : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %increment = scalar.constant 1 : i32
+  %next = scalar.addi %seed, %increment : i32
+  %result = scf.for %iteration = [%begin to %count step %step](%carried = %seed : i32) -> (i32) {
+    %same = scalar.constant false : i1
+    test.use %same : i1
+    scf.yield %next : i32
+  }
+  func.return
+}
+
+// ====
+
+// The identity remains valid when every iteration fits the destination.
+func.def @counted_narrowing_preserved(%raw: i32, %count: index) {
+  %seed = scalar.assume %raw [range(%raw, -64, 63)] : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %increment = scalar.constant 1 : i32
+  %additive_identity = scalar.constant 0 : i8
+  %next = scalar.addi %seed, %increment : i32
+  %result = scf.for %iteration = [%begin to %count step %step](%carried = %seed : i32) -> (i32) {
+    %byte = scalar.trunci %carried : i32 to i8
+    %alias = scalar.assume %byte [range(%byte, -128, 127)] : i8
+    %sum = scalar.addi %alias, %additive_identity : i8
+    %same = test.fact_numeric_identity_matches %sum, %carried : i8, i32 -> i1
+    test.use %same : i1
+    scf.yield %next : i32
+  }
+  func.return
+}
+
+// ----
+func.def @counted_narrowing_preserved(%raw: i32, %count: index) {
+  %seed = scalar.assume %raw [range(%raw, -64, 63)] : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %increment = scalar.constant 1 : i32
+  %next = scalar.addi %seed, %increment : i32
+  %result = scf.for %iteration = [%begin to %count step %step](%carried = %seed : i32) -> (i32) {
+    %same = scalar.constant true : i1
+    test.use %same : i1
+    scf.yield %next : i32
+  }
+  func.return
+}
+
+// ====
+
+// Condition-loop feedback has the same publication obligation even though its
+// condition and body use distinct carried SSA arguments.
+func.def @condition_narrowing_withdrawal(%raw: i32, %continue: i1) {
+  %seed = scalar.assume %raw [range(%raw, -128, 127)] : i32
+  %increment = scalar.constant 1 : i32
+  %additive_identity = scalar.constant 0 : i8
+  %next = scalar.addi %seed, %increment : i32
+  %result = scf.while(%carried = %seed : i32) -> (i32) {
+    %byte = scalar.trunci %carried : i32 to i8
+    %alias = scalar.assume %byte [range(%byte, -128, 127)] : i8
+    %sum = scalar.addi %alias, %additive_identity : i8
+    %same = test.fact_numeric_identity_matches %sum, %carried : i8, i32 -> i1
+    test.use %same : i1
+    scf.condition %continue, %carried : i1, i32
+  } do(%body_value: i32) {
+    scf.yield %next : i32
+  }
+  func.return
+}
+
+// ----
+func.def @condition_narrowing_withdrawal(%raw: i32, %continue: i1) {
+  %seed = scalar.assume %raw [range(%raw, -128, 127)] : i32
+  %increment = scalar.constant 1 : i32
+  %next = scalar.addi %seed, %increment : i32
+  %result = scf.while(%carried = %seed : i32) -> (i32) {
+    %same = scalar.constant false : i1
+    test.use %same : i1
+    scf.condition %continue, %carried : i1, i32
+  } do(%body_value: i32) {
+    scf.yield %next : i32
+  }
+  func.return
+}
+
+// ====
+
+// The inner solve captures an alias whose numeric interval stays unchanged.
+// Its dependent arithmetic must observe the outer solve's withdrawn origin.
+func.def @nested_narrowing_withdrawal(%raw: i32, %count: index) {
+  %seed = scalar.assume %raw [range(%raw, -128, 127)] : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %increment = scalar.constant 1 : i32
+  %additive_identity = scalar.constant 0 : i8
+  %next = scalar.addi %seed, %increment : i32
+  %result = scf.for %outer_iteration = [%begin to %count step %step](%carried = %seed : i32) -> (i32) {
+    %byte = scalar.trunci %carried : i32 to i8
+    %alias = scalar.assume %byte [range(%byte, -128, 127)] : i8
+    scf.for %inner_iteration = [%begin to %count step %step] {
+      %sum = scalar.addi %alias, %additive_identity : i8
+      %same = test.fact_numeric_identity_matches %sum, %carried : i8, i32 -> i1
+      test.use %same : i1
+    }
+    scf.yield %next : i32
+  }
+  func.return
+}
+
+// ----
+func.def @nested_narrowing_withdrawal(%raw: i32, %count: index) {
+  %seed = scalar.assume %raw [range(%raw, -128, 127)] : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %increment = scalar.constant 1 : i32
+  %next = scalar.addi %seed, %increment : i32
+  %result = scf.for %outer_iteration = [%begin to %count step %step](%carried = %seed : i32) -> (i32) {
+    scf.for %inner_iteration = [%begin to %count step %step] {
+      %same = scalar.constant false : i1
+      test.use %same : i1
+    }
+    scf.yield %next : i32
+  }
+  func.return
+}

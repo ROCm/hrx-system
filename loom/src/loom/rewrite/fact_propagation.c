@@ -1098,10 +1098,6 @@ iree_status_t loom_rewriter_add_parent_summary_ops_to_worklist(
       rewriter->fact_table && rewriter->fact_table->regions.cfg_count;
   for (loom_op_t* parent = op ? op->parent_op : NULL; parent;
        parent = parent->parent_op) {
-    if (changes_summary && has_cfg_facts) {
-      IREE_RETURN_IF_ERROR(loom_rewriter_add_cfg_summary_to_worklist(
-          rewriter, parent->parent_block, /*arguments_changed=*/false));
-    }
     const loom_op_vtable_t* vtable = loom_op_vtable(rewriter->module, parent);
     if (loom_rewriter_op_summarizes_nested_regions(vtable)) {
       // A counted body without carried state has no feedback/result summary.
@@ -1134,6 +1130,12 @@ iree_status_t loom_rewriter_add_parent_summary_ops_to_worklist(
       if (!rewriter->worklist_chunk) {
         break;
       }
+    } else if (changes_summary && has_cfg_facts) {
+      // A structured owner publishes outward through its result users. Only
+      // nonsummary region owners forward a child terminator directly to CFG;
+      // queuing it past a loop summary can reenter the active feedback solve.
+      IREE_RETURN_IF_ERROR(loom_rewriter_add_cfg_summary_to_worklist(
+          rewriter, parent->parent_block, /*arguments_changed=*/false));
     }
   }
   return iree_ok_status();
