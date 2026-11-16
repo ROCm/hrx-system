@@ -354,6 +354,27 @@ class ReleaseTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must contain only amdf-info"):
             inspect_standalone_archive(renamed, self.identity)
 
+    def test_nested_standalone_artifacts_are_complete_and_unique(self):
+        expected_paths = set()
+        for tool in STANDALONE_TOOLS:
+            for platform in PLATFORMS:
+                path = self.standalone(platform, tool=tool)
+                artifact_directory = self.root / platform / f"{tool}-artifact"
+                artifact_directory.mkdir(parents=True, exist_ok=True)
+                nested_path = artifact_directory / path.name
+                path.rename(nested_path)
+                expected_paths.add(nested_path)
+
+        archives = release_standalones(self.root, self.identity)
+        self.assertEqual({archive.path for archive in archives}, expected_paths)
+
+        source_path = sorted(expected_paths)[0]
+        duplicate_directory = self.root / "duplicate-artifact"
+        duplicate_directory.mkdir()
+        (duplicate_directory / source_path.name).write_bytes(source_path.read_bytes())
+        with self.assertRaisesRegex(ValueError, "duplicates"):
+            release_standalones(self.root, self.identity)
+
     def test_bundle_is_complete_and_retries_preserve_exact_bytes(self):
         self.wheel()
         with self.assertRaises(SystemExit):
