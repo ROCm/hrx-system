@@ -15,14 +15,142 @@ func.def target(@target) @dense_packets(%input: view<8x16xbf16>, %output: view<8
 test.target<low_core> @target
 
 func.def target(@target) @dense_packets(%input: view<8x16xbf16>, %output: view<8x16xbf16>, %row: index, %column: index, %active: i1, %previous: vector<2x4xbf16>) -> (vector<2x4xbf16>) {
-  %value = scf.if %active -> (vector<2x4xbf16>) {
-    %10 = vector.load %input[%row, %column] {cache_scope = device, cache_temporal = non_temporal} : view<8x16xbf16> -> vector<2x4xbf16>
-    scf.yield %10 : vector<2x4xbf16>
+  %41 = scf.if %active -> (bf16) {
+    %42 = view.load %input[%row, %column] {cache_scope = device, cache_temporal = non_temporal} : view<8x16xbf16> -> bf16
+    scf.yield %42 : bf16
   } else {
-    scf.yield %previous : vector<2x4xbf16>
+    %43 = vector.extract %previous[0, 0] : vector<2x4xbf16> -> bf16
+    scf.yield %43 : bf16
+  }
+  %44 = scf.if %active -> (bf16) {
+    %45 = index.constant 1 : index
+    %46 = index.add %column, %45 : index
+    %47 = view.load %input[%row, %46] {cache_scope = device, cache_temporal = non_temporal} : view<8x16xbf16> -> bf16
+    scf.yield %47 : bf16
+  } else {
+    %48 = vector.extract %previous[0, 1] : vector<2x4xbf16> -> bf16
+    scf.yield %48 : bf16
+  }
+  %49 = scf.if %active -> (bf16) {
+    %50 = index.constant 2 : index
+    %51 = index.add %column, %50 : index
+    %52 = view.load %input[%row, %51] {cache_scope = device, cache_temporal = non_temporal} : view<8x16xbf16> -> bf16
+    scf.yield %52 : bf16
+  } else {
+    %53 = vector.extract %previous[0, 2] : vector<2x4xbf16> -> bf16
+    scf.yield %53 : bf16
+  }
+  %54 = scf.if %active -> (bf16) {
+    %55 = index.constant 3 : index
+    %56 = index.add %column, %55 : index
+    %57 = view.load %input[%row, %56] {cache_scope = device, cache_temporal = non_temporal} : view<8x16xbf16> -> bf16
+    scf.yield %57 : bf16
+  } else {
+    %58 = vector.extract %previous[0, 3] : vector<2x4xbf16> -> bf16
+    scf.yield %58 : bf16
+  }
+  %59 = scf.if %active -> (bf16) {
+    %60 = index.constant 1 : index
+    %61 = index.add %row, %60 : index
+    %62 = view.load %input[%61, %column] {cache_scope = device, cache_temporal = non_temporal} : view<8x16xbf16> -> bf16
+    scf.yield %62 : bf16
+  } else {
+    %63 = vector.extract %previous[1, 0] : vector<2x4xbf16> -> bf16
+    scf.yield %63 : bf16
+  }
+  %64 = scf.if %active -> (bf16) {
+    %65 = index.constant 1 : index
+    %66 = index.add %row, %65 : index
+    %67 = index.constant 1 : index
+    %68 = index.add %column, %67 : index
+    %69 = view.load %input[%66, %68] {cache_scope = device, cache_temporal = non_temporal} : view<8x16xbf16> -> bf16
+    scf.yield %69 : bf16
+  } else {
+    %70 = vector.extract %previous[1, 1] : vector<2x4xbf16> -> bf16
+    scf.yield %70 : bf16
+  }
+  %71 = scf.if %active -> (bf16) {
+    %72 = index.constant 1 : index
+    %73 = index.add %row, %72 : index
+    %74 = index.constant 2 : index
+    %75 = index.add %column, %74 : index
+    %76 = view.load %input[%73, %75] {cache_scope = device, cache_temporal = non_temporal} : view<8x16xbf16> -> bf16
+    scf.yield %76 : bf16
+  } else {
+    %77 = vector.extract %previous[1, 2] : vector<2x4xbf16> -> bf16
+    scf.yield %77 : bf16
+  }
+  %78 = scf.if %active -> (bf16) {
+    %79 = index.constant 1 : index
+    %80 = index.add %row, %79 : index
+    %81 = index.constant 3 : index
+    %82 = index.add %column, %81 : index
+    %83 = view.load %input[%80, %82] {cache_scope = device, cache_temporal = non_temporal} : view<8x16xbf16> -> bf16
+    scf.yield %83 : bf16
+  } else {
+    %84 = vector.extract %previous[1, 3] : vector<2x4xbf16> -> bf16
+    scf.yield %84 : bf16
+  }
+  %value = vector.from_elements %41, %44, %49, %54, %59, %64, %71, %78 : vector<2x4xbf16>
+  %13 = vector.extract %value[0, 0] : vector<2x4xbf16> -> bf16
+  %14 = vector.extract %value[0, 1] : vector<2x4xbf16> -> bf16
+  %15 = index.constant 1 : index
+  %16 = index.add %column, %15 : index
+  %17 = vector.extract %value[0, 2] : vector<2x4xbf16> -> bf16
+  %18 = index.constant 2 : index
+  %19 = index.add %column, %18 : index
+  %20 = vector.extract %value[0, 3] : vector<2x4xbf16> -> bf16
+  %21 = index.constant 3 : index
+  %22 = index.add %column, %21 : index
+  %23 = vector.extract %value[1, 0] : vector<2x4xbf16> -> bf16
+  %24 = index.constant 1 : index
+  %25 = index.add %row, %24 : index
+  %26 = vector.extract %value[1, 1] : vector<2x4xbf16> -> bf16
+  %27 = index.constant 1 : index
+  %28 = index.add %row, %27 : index
+  %29 = index.constant 1 : index
+  %30 = index.add %column, %29 : index
+  %31 = vector.extract %value[1, 2] : vector<2x4xbf16> -> bf16
+  %32 = index.constant 1 : index
+  %33 = index.add %row, %32 : index
+  %34 = index.constant 2 : index
+  %35 = index.add %column, %34 : index
+  %36 = vector.extract %value[1, 3] : vector<2x4xbf16> -> bf16
+  %37 = index.constant 1 : index
+  %38 = index.add %row, %37 : index
+  %39 = index.constant 3 : index
+  %40 = index.add %column, %39 : index
+  scf.if %active {
+    view.store %13, %output[%row, %column] {cache_scope = system, cache_temporal = writeback} : bf16, view<8x16xbf16>
+  } else {
   }
   scf.if %active {
-    vector.store %value, %output[%row, %column] {cache_scope = system, cache_temporal = writeback} : vector<2x4xbf16>, view<8x16xbf16>
+    view.store %14, %output[%row, %16] {cache_scope = system, cache_temporal = writeback} : bf16, view<8x16xbf16>
+  } else {
+  }
+  scf.if %active {
+    view.store %17, %output[%row, %19] {cache_scope = system, cache_temporal = writeback} : bf16, view<8x16xbf16>
+  } else {
+  }
+  scf.if %active {
+    view.store %20, %output[%row, %22] {cache_scope = system, cache_temporal = writeback} : bf16, view<8x16xbf16>
+  } else {
+  }
+  scf.if %active {
+    view.store %23, %output[%25, %column] {cache_scope = system, cache_temporal = writeback} : bf16, view<8x16xbf16>
+  } else {
+  }
+  scf.if %active {
+    view.store %26, %output[%28, %30] {cache_scope = system, cache_temporal = writeback} : bf16, view<8x16xbf16>
+  } else {
+  }
+  scf.if %active {
+    view.store %31, %output[%33, %35] {cache_scope = system, cache_temporal = writeback} : bf16, view<8x16xbf16>
+  } else {
+  }
+  scf.if %active {
+    view.store %36, %output[%38, %40] {cache_scope = system, cache_temporal = writeback} : bf16, view<8x16xbf16>
+  } else {
   }
   func.return %value : vector<2x4xbf16>
 }

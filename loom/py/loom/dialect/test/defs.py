@@ -203,6 +203,7 @@ _TargetKind = EnumDef(
         EnumCase("low_leaf", 4, doc="Core with a leaf-only native callable ABI."),
         EnumCase("linear_subgroups", 5, doc="Core with subgroups in flattened workitem order."),
         EnumCase("dense_subgroups", 6, doc="Core with dense subgroups in unspecified workitem order."),
+        EnumCase("native_vectors", 7, doc="Core with bounded native floating-point vector carriers."),
     ],
     doc="Synthetic target kind for target-like interface tests.",
     c_type="loom_test_target_kind_t",

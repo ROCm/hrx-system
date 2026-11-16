@@ -1,0 +1,43 @@
+// RUN: pass target-legalize{mode=eager},canonicalize,dce
+
+test.target<native_vectors> @target
+
+// The early scalar observation keeps the product in a separate component.
+// The sum joins the final sum/product component, so its first member precedes
+// the producer even though its insertion anchor follows the producer.
+func.def target(@target) @interleaved_components(%a: f32, %b: f32, %c: f32, %d: f32) -> (f32, f32) {
+  %lhs = vector.from_elements %a, %b, %c, %d, %c, %d, %a, %b : vector<8xf32>
+  %rhs = vector.from_elements %d, %c, %b, %a, %b, %a, %d, %c : vector<8xf32>
+  %bias = vector.from_elements %b, %c, %d, %a, %a, %d, %c, %b : vector<8xf32>
+  %sum = vector.addf %lhs, %rhs : vector<8xf32>
+  %product = vector.mulf %lhs, %rhs : vector<8xf32>
+  %observed = vector.extract %product[0] : vector<8xf32> -> f32
+  %biased = vector.addf %product, %bias : vector<8xf32>
+  %result = vector.mulf %biased, %sum : vector<8xf32>
+  %tail = vector.extract %result[7] : vector<8xf32> -> f32
+  func.return %observed, %tail : f32, f32
+}
+
+// ----
+test.target<native_vectors> @target
+
+func.def target(@target) @interleaved_components(%a: f32, %b: f32, %c: f32, %d: f32) -> (f32, f32) {
+  %lhs = vector.from_elements %a, %b, %c, %d, %c, %d, %a, %b : vector<8xf32>
+  %rhs = vector.from_elements %d, %c, %b, %a, %b, %a, %d, %c : vector<8xf32>
+  %bias = vector.from_elements %b, %c, %d, %a, %a, %d, %c, %b : vector<8xf32>
+  %15 = vector.slice %lhs[0] : vector<8xf32> -> vector<4xf32>
+  %16 = vector.slice %rhs[0] : vector<8xf32> -> vector<4xf32>
+  %17 = vector.mulf %15, %16 : vector<4xf32>
+  %18 = vector.slice %lhs[4] : vector<8xf32> -> vector<4xf32>
+  %19 = vector.slice %rhs[4] : vector<8xf32> -> vector<4xf32>
+  %20 = vector.mulf %18, %19 : vector<4xf32>
+  %observed = vector.extract %17[0] : vector<4xf32> -> f32
+  %28 = vector.slice %lhs[4] : vector<8xf32> -> vector<4xf32>
+  %29 = vector.slice %rhs[4] : vector<8xf32> -> vector<4xf32>
+  %30 = vector.addf %28, %29 : vector<4xf32>
+  %31 = vector.slice %bias[4] : vector<8xf32> -> vector<4xf32>
+  %32 = vector.addf %20, %31 : vector<4xf32>
+  %33 = vector.mulf %32, %30 : vector<4xf32>
+  %tail = vector.extract %33[3] : vector<4xf32> -> f32
+  func.return %observed, %tail : f32, f32
+}
