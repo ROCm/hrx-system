@@ -597,12 +597,14 @@ TEST_P(SubmissionTest, OversizedCaptureUsesCompleteOwnedStorage) {
       &profile_, &barriers, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS,
       &capture));
   EXPECT_EQ(
-      capture->allocation_size,
+      capture->capture_size,
       sizeof(*capture) +
           (GetParam() ? sizeof(iree_hal_amd_gpu_profile_operation_t) : 0) +
           constants.size());
-  EXPECT_EQ(iree_hal_amd_gpu_pm4_submission_tail_storage(capture).data_length,
-            0u);
+  EXPECT_EQ(capture->allocation_size, 8192u);
+  const auto tail = iree_hal_amd_gpu_pm4_submission_tail_storage(capture);
+  ASSERT_GT(tail.data_length, 0u);
+  std::memset(tail.data, 0xA5, tail.data_length);
   EXPECT_EQ(capture->before.release_cache_control, 0u);
   EXPECT_EQ(capture->before.acquire_cache_control, 0u);
   EXPECT_EQ(capture->after.release_cache_control, 0u);
@@ -637,7 +639,7 @@ TEST_P(SubmissionTest, TailStoragePreservesArgumentsAtBlockBoundaries) {
         &profile_, nullptr, IREE_HAL_DISPATCH_FLAG_CUSTOM_DIRECT_ARGUMENTS,
         &capture));
     const auto tail = iree_hal_amd_gpu_pm4_submission_tail_storage(capture);
-    if (size >= capacity - 1) {
+    if (size >= capacity - 1 && size <= capacity) {
       EXPECT_EQ(tail.data_length, 0u);
     } else {
       ASSERT_GT(tail.data_length, 0u);
@@ -647,14 +649,8 @@ TEST_P(SubmissionTest, TailStoragePreservesArgumentsAtBlockBoundaries) {
     for (iree_host_size_t i = 0; i < size; ++i) {
       EXPECT_EQ(capture->dispatch.constants.data[i], 0x35);
     }
-    EXPECT_EQ(
-        capture->allocation_size,
-        size <= capacity
-            ? pool_.block_size
-            : sizeof(*capture) +
-                  (GetParam() ? sizeof(iree_hal_amd_gpu_profile_operation_t)
-                              : 0) +
-                  size);
+    EXPECT_EQ(capture->allocation_size,
+              size <= capacity ? pool_.block_size : 2 * pool_.block_size);
     iree_hal_amd_gpu_pm4_submission_release(capture);
   }
   iree_hal_executable_release(&executable.base);
