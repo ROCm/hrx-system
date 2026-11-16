@@ -59,6 +59,32 @@ loom_py_test(
 )
 
 loom_cc_library(
+    name = "registration",
+    srcs = ["registration.c"],
+    hdrs = ["registration.h"],
+    deps = [
+        ":model",
+        ":packing",
+        ":service",
+        "//loom/src/loom/runtime:service",
+        "//loom/src/loom/runtime:service_control",
+        "//loom/src/loom/runtime:wake",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/parameter:activation",
+        "//loom/src/loom/runtime/parameter:residency",
+        "//loom/src/loom/runtime/program:compilation",
+        "//loom/src/loom/runtime/telemetry:stream",
+        "//loom/src/loom/serve/service",
+        "//loom/src/loom/service:registration",
+        "//loom/src/loom/service/finite:component",
+        "//loom/src/loom/service/finite:model",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
     name = "admission",
     srcs = ["admission.c"],
     hdrs = ["admission.h"],
@@ -162,6 +188,7 @@ loom_cc_library(
     visibility = ["//visibility:private"],
     deps = [
         ":input_count",
+        ":registration",
         ":sequence",
         ":source_service_fixture",
         ":stream",
@@ -173,6 +200,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/testing:worker_gate",
         "//loom/src/loom/serve/server/http:logs",
         "//loom/src/loom/serve/telemetry:record",
+        "//loom/src/loom/service:registration",
         "//loom/src/loom/service/finite:component",
         "//loom/src/loom/service/telemetry:latency",
         "//loom/src/loom/service/telemetry:record",
@@ -384,6 +412,7 @@ loom_cc_library(
         "//loom/src/loom/serve/media:image_codec",
         "//loom/src/loom/serve/media:image_codecs",
         "//loom/src/loom/serve/media:image_request",
+        "//loom/src/loom/service:registration",
         "//loom/src/loom/service/finite:call",
         "//loom/src/loom/service/finite:component",
         "//loom/src/loom/service/finite:model",

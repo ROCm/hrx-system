@@ -5,6 +5,72 @@
 
 #include "loom/service/registration.h"
 
+iree_status_t loom_service_registration_allocate_storage(
+    iree_host_size_t header_length, iree_host_size_t offer_capacity,
+    iree_host_size_t operation_capacity, uint64_t incarnation,
+    iree_allocator_t host_allocator, void** out_registration,
+    loom_runtime_service_control_t** out_control) {
+  *out_registration = NULL;
+  *out_control = NULL;
+  iree_host_size_t capacity_length = 0, operation_uses_offset = 0,
+                   offers_offset = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      0, &capacity_length,
+      IREE_STRUCT_FIELD(operation_capacity, iree_host_size_t,
+                        &operation_uses_offset),
+      IREE_STRUCT_FIELD(offer_capacity, loom_runtime_service_offer_capacity_t,
+                        &offers_offset)));
+  uint8_t* capacity_storage = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, capacity_length,
+                                             (void**)&capacity_storage));
+  iree_host_size_t* operation_uses =
+      (iree_host_size_t*)(capacity_storage + operation_uses_offset);
+  for (iree_host_size_t i = 0; i < operation_capacity; ++i) {
+    operation_uses[i] = 1;
+  }
+  const iree_host_size_t use_capacity = 1;
+  loom_runtime_service_offer_capacity_t* offers =
+      (loom_runtime_service_offer_capacity_t*)(capacity_storage +
+                                               offers_offset);
+  for (iree_host_size_t i = 0; i < offer_capacity; ++i) {
+    offers[i] = (loom_runtime_service_offer_capacity_t){1, &use_capacity};
+  }
+  const loom_runtime_service_control_capacity_t capacity = {
+      .offer_capacity = offer_capacity,
+      .offers = offers,
+      .operation_capacity = operation_capacity,
+      .operation_use_capacities = operation_uses};
+  iree_host_size_t control_length = 0;
+  iree_status_t status =
+      loom_runtime_service_control_size(&capacity, &control_length);
+  iree_host_size_t allocation_length = 0, control_offset = 0;
+  if (iree_status_is_ok(status)) {
+    status =
+        IREE_STRUCT_LAYOUT(header_length, &allocation_length,
+                           IREE_STRUCT_FIELD_ALIGNED(control_length, uint8_t,
+                                                     64, &control_offset));
+  }
+  void* registration = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_aligned(host_allocator, allocation_length,
+                                           64, 0, (void**)&registration);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_runtime_service_control_initialize(
+        &capacity, incarnation,
+        iree_make_byte_span((uint8_t*)registration + control_offset,
+                            control_length),
+        out_control);
+  }
+  iree_allocator_free(host_allocator, capacity_storage);
+  if (iree_status_is_ok(status)) {
+    *out_registration = registration;
+  } else {
+    iree_allocator_free_aligned(host_allocator, registration);
+  }
+  return status;
+}
+
 static bool loom_service_registration_refresh_offers(
     loom_service_registration_t* registration);
 

@@ -6,6 +6,7 @@
 
 #include "loom/runtime/program/variant_pool.h"
 #include "loom/serve/server/router_test_fixture.h"
+#include "loom/service/registration.h"
 #include "loom/service/telemetry/record.h"
 
 namespace {
@@ -20,6 +21,11 @@ using loom_serve::testing::loom_serve_test_model_service_t;
 // registry retirement and variant ownership must handle every intervening
 // request while these dependencies remain outstanding.
 struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
+  // Production native lifecycle owning this dependency's
+  // preparation/retirement.
+  loom_service_registration_t* registration = nullptr;
+  // Allocator owning the lifecycle and retained control.
+  iree_allocator_t allocator = {};
   // Real cache, accessed only by the serving owner except producer completion.
   loom_runtime_variant_pool_t* variants = nullptr;
   // Acquired policy choice; its lifetime belongs to the dependency.
@@ -135,16 +141,23 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
     return iree_ok_status();
   }
   static iree_status_t Prepare(void* self,
-                               loom_serve_registration_prepare_flags_t flags,
-                               bool* out_complete,
-                               loom_serve_service_t* out_service,
+                               loom_service_registration_prepare_flags_t flags,
+                               loom_service_preparation_result_t* out_result,
                                loom_runtime_compilation_report_t* out_report) {
     auto* dependency = static_cast<loom_serve_test_variant_dependency_t*>(self);
-    *out_complete = true;
-    if (iree_any_bit_set(flags, LOOM_SERVE_REGISTRATION_PREPARE_FLAG_CANCEL)) {
+    out_result->flags = LOOM_SERVICE_PREPARATION_RESULT_COMPLETE;
+    if (iree_any_bit_set(flags,
+                         LOOM_SERVICE_REGISTRATION_PREPARE_FLAG_CANCEL)) {
       return iree_make_status(IREE_STATUS_CANCELLED, "preparation cancelled");
     }
-    *out_service = dependency->Interface(nullptr, nullptr);
+    out_result->service = Service(dependency->registration).runtime;
+    return iree_ok_status();
+  }
+  static loom_serve_service_t Service(
+      loom_service_registration_t* registration) {
+    auto* dependency =
+        static_cast<loom_serve_test_variant_dependency_t*>(registration->self);
+    auto service = dependency->Interface(nullptr, nullptr);
     static const loom_runtime_service_vtable_t vtable = {
         .set_observer = SetObserver,
         .has_requests = HasRequests,
@@ -152,11 +165,18 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
         .is_active = IsActive,
         .advance = Advance,
     };
-    out_service->runtime.vtable = &vtable;
-    out_service->telemetry.stream = dependency->stream;
-    out_service->reconfiguration = {dependency, dependency->variants, Stage,
-                                    Select, Selected};
-    return iree_ok_status();
+    service.runtime.vtable = &vtable;
+    service.telemetry.stream = dependency->stream;
+    service.reconfiguration = {dependency, dependency->variants, Stage, Select,
+                               Selected};
+    return service;
+  }
+  static iree_status_t Progress(void* self, loom_runtime_service_flags_t flags,
+                                bool* out_progress) {
+    return Advance(
+        static_cast<loom_serve_test_model_service_t*>(
+            static_cast<loom_serve_test_variant_dependency_t*>(self)),
+        flags, out_progress);
   }
   static iree_status_t Retire(void* self, bool* out_complete) {
     auto* dependency = static_cast<loom_serve_test_variant_dependency_t*>(self);
@@ -170,11 +190,15 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
     return iree_ok_status();
   }
   static void Destroy(void* self) {
-    ++static_cast<loom_serve_test_variant_dependency_t*>(self)->destroyed;
+    auto* dependency = static_cast<loom_serve_test_variant_dependency_t*>(self);
+    ++dependency->destroyed;
+    iree_allocator_free_aligned(dependency->allocator,
+                                dependency->registration);
+    dependency->registration = nullptr;
   }
   static iree_status_t Create(
       void* self, const loom_serve_model_configuration_t* configuration,
-      uint64_t, loom_runtime_wake_callback_t observer,
+      uint64_t incarnation, loom_runtime_wake_callback_t observer,
       loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
       loom_serve_registration_t* out_registration) {
     auto* dependency = static_cast<loom_serve_test_variant_dependency_t*>(self);
@@ -188,11 +212,50 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
     dependency->latency = &dependency->durations;
     dependency->stream = stream;
     dependency->stopping = false;
-    *out_registration = {
-        .self = self,
+    static const loom_service_registration_vtable_t vtable = {
         .prepare = Prepare,
+        .progress = Progress,
         .retire = Retire,
+        .parameters =
+            [](void*, loom_service_model_component_t) {
+              return loom_service_registration_parameters_t{
+                  .phase = "ready",
+                  .prepared = true,
+              };
+            },
+        .set_pinned = [](void*, loom_service_model_component_t, bool) {},
+        .activate =
+            [](void*, loom_service_model_component_t,
+               loom_runtime_activation_flags_t,
+               loom_runtime_activation_phase_t* phase, iree_status_t* status) {
+              *phase = LOOM_RUNTIME_ACTIVATION_COMPLETE;
+              *status = iree_ok_status();
+              return iree_ok_status();
+            },
+        .deactivate =
+            [](void*, loom_service_model_component_t, bool* complete) {
+              *complete = true;
+              return iree_ok_status();
+            },
         .destroy = Destroy,
+    };
+    loom_runtime_service_control_t* control = nullptr;
+    iree_status_t status = loom_service_registration_allocate_storage(
+        sizeof(*dependency->registration), 2, 2, incarnation, host_allocator,
+        reinterpret_cast<void**>(&dependency->registration), &control);
+    if (!iree_status_is_ok(status)) {
+      bool complete = false;
+      iree_status_free(Retire(self, &complete));
+      return status;
+    }
+    dependency->allocator = host_allocator;
+    loom_service_registration_initialize(
+        &vtable, dependency, 1u << LOOM_SERVICE_MODEL_COMPONENT_PRIMARY, 0,
+        loom_runtime_service_control_binding(control, 0, 0, 0), observer,
+        dependency->registration);
+    *out_registration = {
+        .native = dependency->registration,
+        .service = Service,
     };
     return iree_ok_status();
   }

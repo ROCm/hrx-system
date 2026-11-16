@@ -6,6 +6,7 @@
 
 #include "loom/runtime/wake.h"
 #include "loom/serve/server/router_test_fixture.h"
+#include "loom/service/registration.h"
 #include "loom/service/telemetry/record.h"
 
 namespace {
@@ -69,7 +70,7 @@ struct loom_serve_test_registration_dependency_t {
     // Owner observations, used to join an explicit test wake without polling.
     uint64_t advances = 0;
     // Most recent preparation policy supplied by the production registry.
-    loom_serve_registration_prepare_flags_t flags = 0;
+    loom_service_registration_prepare_flags_t flags = 0;
   } preparation;
   // Terminal compiler evidence supplied independently of lifecycle timing.
   loom_runtime_compilation_report_t compilation = {};
@@ -84,13 +85,6 @@ struct loom_serve_test_registration_dependency_t {
   std::atomic<bool> fail_deactivation{false};
   // Eviction policy supplied by the real registry, independent of readiness.
   std::atomic<bool> pinned{false};
-  // Adapter capabilities configured before factory publication.
-  struct {
-    // Whether the dependency implements eviction policy.
-    bool pinning = true;
-    // Whether the dependency implements explicit parameter warmup.
-    bool activation = true;
-  } capabilities;
   // Optional shared pressure domain, configured before factory publication.
   const void* capacity_domain = nullptr;
   // Independently controlled parameter-readiness dependency.
@@ -108,13 +102,17 @@ struct loom_serve_test_registration_dependency_t {
   } activation;
 
   struct loom_serve_test_registration_operation_t {
+    // Production native lifecycle retained through dependency retirement.
+    loom_service_registration_t native;
+    // Allocator owning this provider and its retained control tail.
+    iree_allocator_t allocator;
     // Test-owned model dependency, live beyond the owning registry.
     loom_serve_test_registration_dependency_t* dependency;
   };
 
   static iree_status_t Prepare(void* self,
-                               loom_serve_registration_prepare_flags_t flags,
-                               bool* complete, loom_serve_service_t* service,
+                               loom_service_registration_prepare_flags_t flags,
+                               loom_service_preparation_result_t* result,
                                loom_runtime_compilation_report_t* out_report) {
     auto* dependency =
         static_cast<loom_serve_test_registration_operation_t*>(self)
@@ -123,12 +121,13 @@ struct loom_serve_test_registration_dependency_t {
     dependency->preparation.flags = flags;
     ++dependency->preparation.advances;
     dependency->condition.notify_all();
-    *complete = true;
-    if (iree_any_bit_set(flags, LOOM_SERVE_REGISTRATION_PREPARE_FLAG_CANCEL)) {
+    result->flags = LOOM_SERVICE_PREPARATION_RESULT_COMPLETE;
+    if (iree_any_bit_set(flags,
+                         LOOM_SERVICE_REGISTRATION_PREPARE_FLAG_CANCEL)) {
       return iree_make_status(IREE_STATUS_CANCELLED, "preparation cancelled");
     }
     if (!dependency->preparation.ready) {
-      *complete = false;
+      result->flags = 0;
       return iree_ok_status();
     }
     *out_report = dependency->compilation;
@@ -136,15 +135,33 @@ struct loom_serve_test_registration_dependency_t {
         loom_serve_test_registration_preparation_failure_t::kNone) {
       return iree_make_status(IREE_STATUS_UNAVAILABLE, "model prepare failed");
     }
-    *service =
-        dependency->service.Interface(nullptr, dependency->capacity_domain);
-    service->kind = dependency->kind;
-    if (service->kind == LOOM_SERVICE_KIND_ACTIVITY) {
-      service->endpoint = nullptr;
-      service->accept = nullptr;
-    }
-    service->telemetry.stream = dependency->stream;
+    result->service =
+        Service(&static_cast<loom_serve_test_registration_operation_t*>(self)
+                     ->native)
+            .runtime;
     return iree_ok_status();
+  }
+  static loom_serve_service_t Service(loom_service_registration_t* native) {
+    auto* dependency =
+        static_cast<loom_serve_test_registration_operation_t*>(native->self)
+            ->dependency;
+    auto service =
+        dependency->service.Interface(nullptr, dependency->capacity_domain);
+    service.kind = dependency->kind;
+    if (service.kind == LOOM_SERVICE_KIND_ACTIVITY) {
+      service.endpoint = nullptr;
+      service.accept = nullptr;
+    }
+    service.telemetry.stream = dependency->stream;
+    return service;
+  }
+  static iree_status_t Progress(void* self, loom_runtime_service_flags_t flags,
+                                bool* out_progress) {
+    auto* dependency =
+        static_cast<loom_serve_test_registration_operation_t*>(self)
+            ->dependency;
+    return loom_serve_test_model_service_t::Advance(&dependency->service, flags,
+                                                    out_progress);
   }
   static iree_status_t Retire(void* self, bool* complete) {
     auto* dependency =
@@ -172,10 +189,10 @@ struct loom_serve_test_registration_dependency_t {
     auto* operation =
         static_cast<loom_serve_test_registration_operation_t*>(self);
     ++operation->dependency->destroyed;
-    delete operation;
+    iree_allocator_free_aligned(operation->allocator, operation);
   }
-  static loom_serve_registration_parameters_t Parameters(
-      void* self, loom_serve_model_component_t component) {
+  static loom_service_registration_parameters_t Parameters(
+      void* self, loom_service_model_component_t component) {
     const auto parameters =
         static_cast<loom_serve_test_registration_operation_t*>(self)
             ->dependency->parameters;
@@ -186,13 +203,13 @@ struct loom_serve_test_registration_dependency_t {
         .parameters = parameters,
     };
   }
-  static void SetPinned(void* self, loom_serve_model_component_t component,
+  static void SetPinned(void* self, loom_service_model_component_t component,
                         bool pinned) {
     static_cast<loom_serve_test_registration_operation_t*>(self)
         ->dependency->pinned = pinned;
   }
   static iree_status_t Deactivate(void* self,
-                                  loom_serve_model_component_t component,
+                                  loom_service_model_component_t component,
                                   bool* out_complete) {
     *out_complete = true;
     auto* dependency =
@@ -212,7 +229,7 @@ struct loom_serve_test_registration_dependency_t {
     return iree_ok_status();
   }
   static iree_status_t Activate(void* self,
-                                loom_serve_model_component_t component,
+                                loom_service_model_component_t component,
                                 loom_runtime_activation_flags_t flags,
                                 loom_runtime_activation_phase_t* phase,
                                 iree_status_t* component_status) {
@@ -251,7 +268,7 @@ struct loom_serve_test_registration_dependency_t {
   }
   static iree_status_t Create(
       void* self, const loom_serve_model_configuration_t* configuration,
-      uint64_t, loom_runtime_wake_callback_t observer,
+      uint64_t incarnation, loom_runtime_wake_callback_t observer,
       loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
       loom_serve_registration_t* out_registration) {
     auto* dependency =
@@ -265,16 +282,28 @@ struct loom_serve_test_registration_dependency_t {
     dependency->observer = observer;
     dependency->stream = stream;
     ++dependency->created;
-    *out_registration = {
-        .self = new loom_serve_test_registration_operation_t{dependency},
+    static const loom_service_registration_vtable_t vtable = {
         .prepare = Prepare,
+        .progress = Progress,
         .retire = Retire,
         .parameters = Parameters,
-        .set_pinned = dependency->capabilities.pinning ? SetPinned : nullptr,
-        .activate = dependency->capabilities.activation ? Activate : nullptr,
+        .set_pinned = SetPinned,
+        .activate = Activate,
         .deactivate = Deactivate,
         .destroy = Destroy,
     };
+    loom_serve_test_registration_operation_t* operation = nullptr;
+    loom_runtime_service_control_t* control = nullptr;
+    IREE_RETURN_IF_ERROR(loom_service_registration_allocate_storage(
+        sizeof(*operation), 2, 2, incarnation, host_allocator,
+        reinterpret_cast<void**>(&operation), &control));
+    operation->allocator = host_allocator;
+    operation->dependency = dependency;
+    loom_service_registration_initialize(
+        &vtable, operation, 1u << LOOM_SERVICE_MODEL_COMPONENT_PRIMARY, 0,
+        loom_runtime_service_control_binding(control, 0, 0, 0), observer,
+        &operation->native);
+    *out_registration = {.native = &operation->native, .service = Service};
     return iree_ok_status();
   }
   static iree_status_t QueryStatus(void* self) {
@@ -291,7 +320,7 @@ struct loom_serve_test_registration_dependency_t {
     std::unique_lock<std::mutex> lock(mutex);
     condition.wait(lock, [this] { return retiring; });
   }
-  loom_serve_registration_prepare_flags_t ObservePreparation() {
+  loom_service_registration_prepare_flags_t ObservePreparation() {
     std::unique_lock<std::mutex> lock(mutex);
     condition.wait(lock, [this] { return preparation.advances != 0; });
     const auto previous = preparation.advances;
@@ -689,12 +718,12 @@ TEST_P(HttpRouterRegistrationTest,
       Send("POST", "/v1/embeddings", R"({"model":"dynamic"})");
   wait_held(2);
   EXPECT_EQ(managed_.ObservePreparation(),
-            LOOM_SERVE_REGISTRATION_PREPARE_FLAG_DEMAND);
+            LOOM_SERVICE_REGISTRATION_PREPARE_FLAG_DEMAND);
   EXPECT_EQ(Control("drain", "dynamic").find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(managed_.ObservePreparation(), 0u);
   EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(managed_.ObservePreparation(),
-            LOOM_SERVE_REGISTRATION_PREPARE_FLAG_DEMAND);
+            LOOM_SERVICE_REGISTRATION_PREPARE_FLAG_DEMAND);
 
   const linger reset = {1, 0};
   ASSERT_EQ(setsockopt(inference, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
@@ -707,7 +736,7 @@ TEST_P(HttpRouterRegistrationTest,
   Remove();
   EXPECT_EQ(Read(utility).find("HTTP/1.1 410"), 0u);
   EXPECT_EQ(managed_.preparation.flags,
-            LOOM_SERVE_REGISTRATION_PREPARE_FLAG_CANCEL);
+            LOOM_SERVICE_REGISTRATION_PREPARE_FLAG_CANCEL);
 }
 
 TEST_P(HttpRouterRegistrationTest, ExplicitWarmupSuppliesPreparationDemand) {
@@ -718,7 +747,7 @@ TEST_P(HttpRouterRegistrationTest, ExplicitWarmupSuppliesPreparationDemand) {
   Declare();
   EXPECT_EQ(Control("activate", "dynamic").find("HTTP/1.1 202"), 0u);
   EXPECT_EQ(managed_.ObservePreparation(),
-            LOOM_SERVE_REGISTRATION_PREPARE_FLAG_DEMAND);
+            LOOM_SERVICE_REGISTRATION_PREPARE_FLAG_DEMAND);
   managed_.ReleasePreparation();
   managed_.WaitActivating();
   managed_.ReleaseActivation();
@@ -835,38 +864,6 @@ TEST_P(HttpRouterRegistrationTest, UnregisterJoinsAcceptedActivationFirst) {
 }
 
 TEST_P(HttpRouterRegistrationTest,
-       UnsupportedDeclaredPinRetiresWithoutPublishing) {
-  {
-    std::lock_guard<std::mutex> lock(managed_.mutex);
-    managed_.capabilities.pinning = false;
-  }
-  Declare();
-  EXPECT_EQ(Control("pin", "dynamic").find("HTTP/1.1 200"), 0u);
-  EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 200"), 0u);
-  managed_.WaitRetiring();
-  const auto state = Read(Send("GET", "/v1/status"));
-  EXPECT_NE(state.find("registration cannot pin parameters"),
-            std::string::npos);
-  EXPECT_NE(state.find(R"("registration":"retiring")"), std::string::npos);
-  EXPECT_EQ(Control("pin", "dynamic").find("HTTP/1.1 409"), 0u);
-  EXPECT_EQ(Control("unpin", "dynamic").find("HTTP/1.1 409"), 0u);
-  Remove();
-}
-
-TEST_P(HttpRouterRegistrationTest, UnsupportedReadyPinKeepsTheModelUsable) {
-  {
-    std::lock_guard<std::mutex> lock(managed_.mutex);
-    managed_.capabilities.pinning = false;
-  }
-  Register();
-  EXPECT_EQ(Control("pin", "dynamic").find("HTTP/1.1 501"), 0u);
-  EXPECT_EQ(Control("unpin", "dynamic").find("HTTP/1.1 501"), 0u);
-  EXPECT_EQ(Control("drain", "dynamic").find("HTTP/1.1 200"), 0u);
-  EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 200"), 0u);
-  Remove();
-}
-
-TEST_P(HttpRouterRegistrationTest,
        RemovalWithdrawsWarmupBeforeAdmittedWorkEnds) {
   Register();
   EXPECT_EQ(Control("activate", "dynamic").find("HTTP/1.1 409"), 0u);
@@ -886,24 +883,6 @@ TEST_P(HttpRouterRegistrationTest,
   }
   managed_.service.Release();
   EXPECT_TRUE(Read(request).empty());
-  Remove();
-}
-
-TEST_P(HttpRouterRegistrationTest, UnsupportedWarmupKeepsFailureModelLocal) {
-  {
-    std::lock_guard<std::mutex> lock(managed_.mutex);
-    managed_.capabilities.activation = false;
-  }
-  Declare();
-  EXPECT_EQ(Control("activate", "dynamic").find("HTTP/1.1 202"), 0u);
-  managed_.WaitRetiring();
-  EXPECT_NE(Read(Send("GET", "/v1/status"))
-                .find("registration cannot activate parameters"),
-            std::string::npos);
-  EXPECT_EQ(
-      Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 200"),
-      0u);
-  EXPECT_FALSE(returned_.load());
   Remove();
 }
 

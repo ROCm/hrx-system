@@ -20,6 +20,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/telemetry:sample",
         "//loom/src/loom/serve/server:registry",
         "//loom/src/loom/service:kind",
+        "//loom/src/loom/service:registration",
         "//loom/src/loom/service/telemetry:latency",
         "//loom/src/loom/service/telemetry:record",
         "//runtime/src/iree/base",

@@ -27,6 +27,7 @@
 #include "loom/serve/service/reasoning.h"
 #include "loom/serve/transport/http/multipart.h"
 #include "loom/service/kind.h"
+#include "loom/service/registration.h"
 #include "loom/service/telemetry/record.h"
 #include "loom/util/json.h"
 
@@ -303,7 +304,7 @@ typedef struct loom_serve_router_selector_t {
   // Whether the optional removal mode has already occurred.
   iree_string_view_t mode;
   // Optional parameter-component destination; other control routes reject it.
-  loom_serve_model_component_t* component;
+  loom_service_model_component_t* component;
   // Raw component selector used to reject duplicate fields.
   iree_string_view_t component_name;
 } loom_serve_router_selector_t;
@@ -327,9 +328,9 @@ static iree_status_t loom_serve_router_model_visit(void* user_data,
         iree_json_unescape_string(value, sizeof(decoded), decoded, &length));
     const iree_string_view_t name = iree_make_string_view(decoded, length);
     if (iree_string_view_equal(name, IREE_SV("primary"))) {
-      *selector->component = LOOM_SERVE_MODEL_COMPONENT_PRIMARY;
+      *selector->component = LOOM_SERVICE_MODEL_COMPONENT_PRIMARY;
     } else if (iree_string_view_equal(name, IREE_SV("image"))) {
-      *selector->component = LOOM_SERVE_MODEL_COMPONENT_IMAGE;
+      *selector->component = LOOM_SERVICE_MODEL_COMPONENT_IMAGE;
     } else {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "component must be primary or image");
@@ -369,7 +370,7 @@ static iree_status_t loom_serve_router_model_visit(void* user_data,
 
 static iree_status_t loom_serve_router_model(
     const loom_serve_http_request_t* request, bool control,
-    loom_serve_removal_t* removal, loom_serve_model_component_t* component,
+    loom_serve_removal_t* removal, loom_service_model_component_t* component,
     iree_string_builder_t* output) {
   if (request->multipart) {
     if (control) {
@@ -470,22 +471,22 @@ static iree_status_t loom_serve_router_describe_parameters(
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(output, ",\"parameters\":{"));
   iree_status_t status = iree_ok_status();
-  for (loom_serve_model_component_t component = 0;
-       component < LOOM_SERVE_MODEL_COMPONENT_COUNT &&
+  for (loom_service_model_component_t component = 0;
+       component < LOOM_SERVICE_MODEL_COMPONENT_COUNT &&
        iree_status_is_ok(status);
        ++component) {
     if (!loom_serve_registry_has_component(model, component)) {
       continue;
     }
-    loom_serve_registration_parameters_t state = {
+    loom_service_registration_parameters_t state = {
         .phase = loom_serve_registry_phase(model)};
     bool preparation_available = false;
     if (model->phase == LOOM_SERVE_REGISTRATION_READY &&
-        model->registration.parameters) {
-      state =
-          model->registration.parameters(model->registration.self, component);
+        model->registration.native) {
+      state = loom_service_registration_parameters(model->registration.native,
+                                                   component);
       preparation_available = true;
-    } else if (component == LOOM_SERVE_MODEL_COMPONENT_IMAGE &&
+    } else if (component == LOOM_SERVICE_MODEL_COMPONENT_IMAGE &&
                (model->phase == LOOM_SERVE_REGISTRATION_DECLARED ||
                 model->phase == LOOM_SERVE_REGISTRATION_PREPARING)) {
       state.phase = "declared";
@@ -497,7 +498,7 @@ static iree_status_t loom_serve_router_describe_parameters(
         state.phase,
         (model->pinned_components & (1u << component)) ? "true" : "false");
     if (iree_status_is_ok(status) && preparation_available &&
-        component != LOOM_SERVE_MODEL_COMPONENT_PRIMARY) {
+        component != LOOM_SERVICE_MODEL_COMPONENT_PRIMARY) {
       status = iree_string_builder_append_format(
           output, ",\"preparation_duration_ns\":%" PRIu64,
           state.preparation_duration_ns);
@@ -1370,7 +1371,8 @@ static iree_status_t loom_serve_router_accept(
   }
   iree_string_view_t name;
   loom_serve_removal_t removal = LOOM_SERVE_REMOVAL_DRAIN;
-  loom_serve_model_component_t component = LOOM_SERVE_MODEL_COMPONENT_PRIMARY;
+  loom_service_model_component_t component =
+      LOOM_SERVICE_MODEL_COMPONENT_PRIMARY;
   if (checkpoint) {
     if (!loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Model"),
                                                &name)) {

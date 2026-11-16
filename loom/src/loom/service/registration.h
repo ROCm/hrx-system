@@ -178,6 +178,16 @@ struct loom_service_registration_t {
   uint64_t next_serial;
 };
 
+// Allocates zeroed provider storage followed by a retained control. Every offer
+// has one choice and every choice/operation has one device use. Counts include
+// both common lifecycle slots. The provider releases the combined allocation
+// with iree_allocator_free_aligned after all native and policy readers join.
+iree_status_t loom_service_registration_allocate_storage(
+    iree_host_size_t header_length, iree_host_size_t offer_capacity,
+    iree_host_size_t operation_capacity, uint64_t incarnation,
+    iree_allocator_t host_allocator, void** out_provider,
+    loom_runtime_service_control_t** out_control);
+
 // Initializes zeroed provider-owned storage. Two consecutive exclusive offers
 // and operations begin at binding's ordinals; all source detail precedes the
 // lifecycle operations. Control, provider, and observer survive retirement and

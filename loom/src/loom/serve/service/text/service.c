@@ -843,10 +843,10 @@ iree_status_t loom_serve_text_service_trim_image(
   return iree_ok_status();
 }
 
-void loom_serve_text_service_free(loom_serve_text_service_t* service,
-                                  iree_status_code_t terminal_code) {
+loom_serve_text_retirement_t loom_serve_text_service_free(
+    loom_serve_text_service_t* service, iree_status_code_t terminal_code) {
   if (!service) {
-    return;
+    return (loom_serve_text_retirement_t){0};
   }
   loom_serve_text_warmup_set_observer(
       loom_serve_text_model_warmup(service->model), NULL, NULL);
@@ -861,6 +861,15 @@ void loom_serve_text_service_free(loom_serve_text_service_t* service,
   loom_serve_text_media_projector_free(service->projector);
   const iree_allocator_t host_allocator = service->host_allocator;
   loom_service_execution_reconfiguration_free(service->reconfiguration);
+  loom_serve_text_retirement_t retirement = {
+      .primary = service->scheduling.management,
+      .image = service->scheduling.projection};
+  for (iree_host_size_t i = 0; i < TEXT_OPERATION_COUNT; ++i) {
+    const loom_runtime_service_operation_t* operation =
+        &service->scheduling.operations[i];
+    retirement.primary.pending_operation_count += operation->key.serial != 0;
+    retirement.primary.accepted_devices |= operation->devices;
+  }
   loom_serve_text_service_capacity_discard(service);
   for (iree_host_size_t i = 0; i < service->row_count; ++i) {
     loom_serve_text_session_deinitialize(service->sessions[i]);
@@ -881,6 +890,7 @@ void loom_serve_text_service_free(loom_serve_text_service_t* service,
   loom_serve_text_heartbeat_deinitialize(&service->heartbeat);
   loom_serve_text_telemetry_deinitialize(&service->telemetry);
   iree_allocator_free_aligned(host_allocator, service);
+  return retirement;
 }
 
 static void loom_serve_text_publish_management(

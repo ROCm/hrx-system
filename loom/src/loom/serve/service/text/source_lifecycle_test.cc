@@ -10,6 +10,7 @@
 #include "loom/runtime/parameter/residency.h"
 #include "loom/runtime/telemetry/field.h"
 #include "loom/runtime/testing/worker_gate.h"
+#include "loom/serve/service/text/registration.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/service/telemetry/latency.h"
 #include "loom/service/telemetry/record.h"
@@ -216,7 +217,8 @@ TEST_F(FailedTextDiagnosticsTest, ModelFailureReachesActiveQueuedAndControl) {
   EXPECT_EQ(Read(active, true).find("data: [DONE]"), std::string::npos);
   EXPECT_TRUE(Read(queued, true).empty());
   EXPECT_TRUE(loom_serve_text_checkpoint_control_is_complete(control));
-  loom_serve_text_service_free(service_, IREE_STATUS_OK);
+  const auto retirement =
+      loom_serve_text_service_free(service_, IREE_STATUS_OK);
   service_ = nullptr;
   // Service destruction ends delivery, not either failed residency owner.
   // The parent retains the accepted device use until actual model retirement.
@@ -240,6 +242,13 @@ TEST_F(FailedTextDiagnosticsTest, ModelFailureReachesActiveQueuedAndControl) {
   EXPECT_EQ(observation.offer_count, 0u);
   EXPECT_NE(observation.pending_operation_count, 0u);
   EXPECT_EQ(observation.accepted_devices, accepted.devices);
+  EXPECT_EQ(retirement.primary.pending_operation_count,
+            observation.pending_operation_count);
+  EXPECT_EQ(retirement.primary.accepted_devices, accepted.devices);
+  EXPECT_EQ(retirement.primary.owned_request_count, 0u);
+  EXPECT_EQ(retirement.primary.offer_count, 0u);
+  EXPECT_EQ(retirement.image.pending_operation_count, 0u);
+  EXPECT_EQ(retirement.image.accepted_devices, 0u);
   ExpectFailedEnds(3);
   iree_status_t status = loom_serve_text_checkpoint_control_status(control);
   EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
@@ -922,6 +931,44 @@ TEST_P(PackedTextServiceTest, RetainsHttpHistoryAcrossPackingPolicies) {
 INSTANTIATE_TEST_SUITE_P(PackingPolicies, PackedTextServiceTest,
                          ::testing::Values(LOOM_SERVICE_TEXT_PACKING_MIXED,
                                            LOOM_SERVICE_TEXT_PACKING_SEPARATE));
+
+class ColdTextRegistrationTest : public SourceTextServiceTest {
+ protected:
+  bool NeedsStandaloneModel() const override { return false; }
+};
+
+TEST_F(ColdTextRegistrationTest, UnstartedRetirementDoesNotReadSource) {
+  const auto before = loom_runtime_pool_statistics(storage_owner_);
+  auto model_options = ModelOptions();
+  model_options.sources.control = IREE_SV("absent-control.loom");
+  model_options.tokenizer_path = IREE_SV("absent-tokenizer.json");
+  auto options = ServiceOptions();
+  options.scheduling = {};
+  loom_service_registration_t* registration = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_registration_allocate(
+      device_, storage_owner_, &model_options, &options, nullptr, 1, {},
+      nullptr, host_allocator_, &registration));
+  EXPECT_EQ(loom_service_registration_snapshot(registration).phase,
+            LOOM_SERVICE_REGISTRATION_DECLARED);
+  EXPECT_EQ(loom_serve_text_registration_service(registration), nullptr);
+  EXPECT_FALSE(loom_service_registration_progress(registration, 0));
+  bool complete = false;
+  IREE_ASSERT_OK(loom_service_registration_retire(registration, &complete));
+  EXPECT_TRUE(complete);
+  EXPECT_EQ(loom_service_registration_snapshot(registration).phase,
+            LOOM_SERVICE_REGISTRATION_RETIRED);
+  loom_runtime_service_observation_t observation = {};
+  EXPECT_EQ(loom_runtime_service_read_observation(
+                loom_service_registration_control(registration), &observation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(observation.offer_count, 0u);
+  EXPECT_EQ(observation.pending_operation_count, 0u);
+  EXPECT_EQ(observation.accepted_devices, 0u);
+  loom_service_registration_free(registration);
+  const auto after = loom_runtime_pool_statistics(storage_owner_);
+  EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
+  EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
+}
 
 TEST_F(SourceTextServiceTest, CancelledPreparationRetainsPartialOwnership) {
   const auto before = loom_runtime_pool_statistics(storage_owner_);

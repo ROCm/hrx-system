@@ -167,62 +167,6 @@ static const loom_service_registration_vtable_t
         .deactivate = loom_service_finite_registration_deactivate,
         .destroy = loom_service_finite_registration_destroy};
 
-static iree_status_t loom_service_finite_registration_allocate_storage(
-    iree_host_size_t variant_capacity, uint64_t incarnation,
-    iree_allocator_t host_allocator,
-    loom_service_finite_registration_t** out_registration) {
-  *out_registration = NULL;
-  iree_host_size_t operation_capacity = 0;
-  if (!iree_host_size_checked_add(3, variant_capacity, &operation_capacity)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "finite operation capacity is not representable");
-  }
-  iree_host_size_t* operation_use_capacities = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      host_allocator, operation_capacity, sizeof(*operation_use_capacities),
-      (void**)&operation_use_capacities));
-  for (iree_host_size_t i = 0; i < operation_capacity; ++i) {
-    operation_use_capacities[i] = 1;
-  }
-  const iree_host_size_t use_capacity = 1;
-  const loom_runtime_service_offer_capacity_t offers[] = {
-      {1, &use_capacity}, {1, &use_capacity}, {1, &use_capacity}};
-  const loom_runtime_service_control_capacity_t capacity = {
-      .offer_capacity = 3,
-      .offers = offers,
-      .operation_capacity = operation_capacity,
-      .operation_use_capacities = operation_use_capacities};
-  iree_host_size_t control_length = 0;
-  iree_status_t status =
-      loom_runtime_service_control_size(&capacity, &control_length);
-  iree_host_size_t allocation_length = 0, control_offset = 0;
-  if (iree_status_is_ok(status)) {
-    status = IREE_STRUCT_LAYOUT(
-        sizeof(loom_service_finite_registration_t), &allocation_length,
-        IREE_STRUCT_FIELD_ALIGNED(control_length, uint8_t, 64,
-                                  &control_offset));
-  }
-  loom_service_finite_registration_t* registration = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_aligned(host_allocator, allocation_length,
-                                           64, 0, (void**)&registration);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_runtime_service_control_initialize(
-        &capacity, incarnation,
-        iree_make_byte_span((uint8_t*)registration + control_offset,
-                            control_length),
-        &registration->registration.control);
-  }
-  iree_allocator_free(host_allocator, operation_use_capacities);
-  if (iree_status_is_ok(status)) {
-    *out_registration = registration;
-  } else {
-    iree_allocator_free_aligned(host_allocator, registration);
-  }
-  return status;
-}
-
 iree_status_t loom_service_finite_registration_allocate(
     loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_service_finite_model_options_t* model_options,
@@ -230,10 +174,17 @@ iree_status_t loom_service_finite_registration_allocate(
     loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_service_registration_t** out_registration) {
   *out_registration = NULL;
+  iree_host_size_t operation_capacity = 0;
+  if (!iree_host_size_checked_add(3, options->variant_capacity,
+                                  &operation_capacity)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "finite operation capacity is not representable");
+  }
   loom_service_finite_registration_t* provider = NULL;
-  IREE_RETURN_IF_ERROR(loom_service_finite_registration_allocate_storage(
-      options->variant_capacity, options->incarnation, host_allocator,
-      &provider));
+  loom_runtime_service_control_t* control = NULL;
+  IREE_RETURN_IF_ERROR(loom_service_registration_allocate_storage(
+      sizeof(*provider), 3, operation_capacity, options->incarnation,
+      host_allocator, (void**)&provider, &control));
   provider->host_allocator = host_allocator;
   provider->device = device;
   provider->options = *options;
@@ -247,7 +198,7 @@ iree_status_t loom_service_finite_registration_allocate(
     loom_service_registration_initialize(
         &loom_service_finite_registration_vtable, provider,
         1u << LOOM_SERVICE_MODEL_COMPONENT_PRIMARY, device_ordinal,
-        loom_runtime_service_control_binding(provider->registration.control, 1,
+        loom_runtime_service_control_binding(control, 1,
                                              options->variant_capacity + 1, 0),
         observer, &provider->registration);
     *out_registration = &provider->registration;

@@ -11,6 +11,7 @@
 #include "loom/serve/service/endpoint.h"
 #include "loom/serve/service/text/checkpoint_control.h"
 #include "loom/service/kind.h"
+#include "loom/service/registration.h"
 #include "loom/service/telemetry/record.h"
 #include "loom/service/telemetry/tracing.h"
 
@@ -198,7 +199,7 @@ iree_status_t loom_serve_registry_free(loom_serve_registry_t* registry) {
   }
   for (iree_host_size_t i = 0; i < registry->capacity; ++i) {
     loom_serve_registered_model_t* model = &registry->models[i];
-    if (model->registration.self || model->resolution) {
+    if (model->registration.native || model->resolution) {
       if (!iree_status_is_ok(model->status)) {
         return iree_status_clone(model->status);
       }
@@ -536,15 +537,15 @@ iree_status_t loom_serve_registry_remove(loom_serve_registered_model_t* model,
 }
 
 const char* loom_serve_model_component_name(
-    loom_serve_model_component_t component) {
+    loom_service_model_component_t component) {
   static const char* const names[] = {"primary", "image"};
   return names[component];
 }
 
 bool loom_serve_registry_has_component(
     const loom_serve_registered_model_t* model,
-    loom_serve_model_component_t component) {
-  return component == LOOM_SERVE_MODEL_COMPONENT_PRIMARY ||
+    loom_service_model_component_t component) {
+  return component == LOOM_SERVICE_MODEL_COMPONENT_PRIMARY ||
          (model->configuration.kind == LOOM_SERVICE_KIND_TEXT &&
           (model->configuration.text.image.contract ||
            model->configuration.text.image.prepare.size != 0));
@@ -552,8 +553,8 @@ bool loom_serve_registry_has_component(
 
 static iree_status_t loom_serve_registry_require_component(
     const loom_serve_registered_model_t* model,
-    loom_serve_model_component_t component) {
-  if (component != LOOM_SERVE_MODEL_COMPONENT_PRIMARY &&
+    loom_service_model_component_t component) {
+  if (component != LOOM_SERVICE_MODEL_COMPONENT_PRIMARY &&
       model->configuration.sources.reference.path.size) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "model card is still resolving component metadata");
@@ -567,7 +568,7 @@ static iree_status_t loom_serve_registry_require_component(
 
 iree_status_t loom_serve_registry_deactivate(
     loom_serve_registered_model_t* model,
-    loom_serve_model_component_t component) {
+    loom_service_model_component_t component) {
   IREE_RETURN_IF_ERROR(loom_serve_registry_require_component(model, component));
   if (!model->incarnation || !model->closed || model->removal ||
       (model->pinned_components & (1u << component)) ||
@@ -583,13 +584,13 @@ iree_status_t loom_serve_registry_deactivate(
   if (model->phase == LOOM_SERVE_REGISTRATION_DECLARED) {
     return iree_ok_status();
   }
-  if (model->phase != LOOM_SERVE_REGISTRATION_READY ||
-      !model->registration.parameters) {
+  if (model->phase != LOOM_SERVE_REGISTRATION_READY) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "registration has no prepared parameter residency");
   }
-  const loom_serve_registration_parameters_t state =
-      model->registration.parameters(model->registration.self, component);
+  const loom_service_registration_parameters_t state =
+      loom_service_registration_parameters(model->registration.native,
+                                           component);
   if (!state.deactivatable) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "component cannot release its parameter backing");
@@ -602,7 +603,7 @@ iree_status_t loom_serve_registry_deactivate(
 
 iree_status_t loom_serve_registry_set_pinned(
     loom_serve_registered_model_t* model,
-    loom_serve_model_component_t component, bool pinned) {
+    loom_service_model_component_t component, bool pinned) {
   IREE_RETURN_IF_ERROR(loom_serve_registry_require_component(model, component));
   if (!model->incarnation || model->removal ||
       !iree_status_is_ok(model->status) ||
@@ -615,11 +616,8 @@ iree_status_t loom_serve_registry_set_pinned(
         "deactivation");
   }
   if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
-    if (!model->registration.set_pinned) {
-      return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                              "registration cannot pin parameters");
-    }
-    model->registration.set_pinned(model->registration.self, component, pinned);
+    loom_service_registration_set_pinned(model->registration.native, component,
+                                         pinned);
   }
   if (pinned) {
     model->pinned_components |= 1u << component;
@@ -631,7 +629,7 @@ iree_status_t loom_serve_registry_set_pinned(
 
 iree_status_t loom_serve_registry_activate(
     loom_serve_registered_model_t* model,
-    loom_serve_model_component_t component) {
+    loom_service_model_component_t component) {
   IREE_RETURN_IF_ERROR(loom_serve_registry_require_component(model, component));
   if (!model->incarnation || !model->closed || model->removal ||
       !iree_status_is_ok(model->status) ||
@@ -646,8 +644,7 @@ iree_status_t loom_serve_registry_activate(
   }
   if (model->phase != LOOM_SERVE_REGISTRATION_DECLARED &&
       model->phase != LOOM_SERVE_REGISTRATION_PREPARING &&
-      (model->phase != LOOM_SERVE_REGISTRATION_READY ||
-       !model->registration.activate)) {
+      model->phase != LOOM_SERVE_REGISTRATION_READY) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "registration cannot activate parameters");
   }
@@ -784,44 +781,32 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
     }
   }
   if (model->phase == LOOM_SERVE_REGISTRATION_PREPARING && !model->resolution) {
-    loom_serve_registration_prepare_flags_t flags = 0;
+    loom_service_registration_prepare_flags_t flags = 0;
     if (model->removal) {
-      flags = LOOM_SERVE_REGISTRATION_PREPARE_FLAG_CANCEL;
+      flags = LOOM_SERVICE_REGISTRATION_PREPARE_FLAG_CANCEL;
     } else if ((!model->closed && model->parameter_demand_count) ||
                (model->parameter_operation ==
                     LOOM_SERVE_PARAMETER_OPERATION_WAITING &&
                 model->parameter_component ==
-                    LOOM_SERVE_MODEL_COMPONENT_PRIMARY)) {
-      flags = LOOM_SERVE_REGISTRATION_PREPARE_FLAG_DEMAND;
+                    LOOM_SERVICE_MODEL_COMPONENT_PRIMARY)) {
+      flags = LOOM_SERVICE_REGISTRATION_PREPARE_FLAG_DEMAND;
     }
     bool complete = false;
-    loom_serve_service_t service = {0};
-    model->status =
-        model->registration.prepare(model->registration.self, flags, &complete,
-                                    &service, &model->compilation);
+    model->status = loom_service_registration_prepare(
+        model->registration.native, flags, &complete);
     if (complete) {
-      if (iree_status_is_ok(model->status) && model->pinned_components &&
-          !model->registration.set_pinned) {
-        model->status = iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                                         "registration cannot pin parameters");
-      }
-      if (iree_status_is_ok(model->status) &&
-          model->parameter_operation ==
-              LOOM_SERVE_PARAMETER_OPERATION_WAITING &&
-          !model->registration.activate) {
-        model->status =
-            iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                             "registration cannot activate parameters");
-      }
+      model->compilation =
+          *loom_service_registration_snapshot(model->registration.native)
+               .compilation;
       if (iree_status_is_ok(model->status)) {
-        if (model->registration.set_pinned) {
-          for (loom_serve_model_component_t component = 0;
-               component < LOOM_SERVE_MODEL_COMPONENT_COUNT; ++component) {
-            if (loom_serve_registry_has_component(model, component)) {
-              model->registration.set_pinned(
-                  model->registration.self, component,
-                  (model->pinned_components & (1u << component)) != 0);
-            }
+        const loom_serve_service_t service =
+            model->registration.service(model->registration.native);
+        for (loom_service_model_component_t component = 0;
+             component < LOOM_SERVICE_MODEL_COMPONENT_COUNT; ++component) {
+          if (loom_serve_registry_has_component(model, component)) {
+            loom_service_registration_set_pinned(
+                model->registration.native, component,
+                (model->pinned_components & (1u << component)) != 0);
           }
         }
         model->service = service;
@@ -853,8 +838,8 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
              model->service.runtime.self))) {
       loom_runtime_activation_phase_t phase = LOOM_RUNTIME_ACTIVATION_COMPLETE;
       iree_status_t component_status = iree_ok_status();
-      iree_status_t status = model->registration.activate(
-          model->registration.self, model->parameter_component,
+      iree_status_t status = loom_service_registration_activate(
+          model->registration.native, model->parameter_component,
           model->removal || !iree_status_is_ok(model->status)
               ? LOOM_RUNTIME_ACTIVATION_FLAG_CANCEL
               : 0,
@@ -905,8 +890,8 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
         !model->service.runtime.vtable->is_active(
             model->service.runtime.self)) {
       bool complete = false;
-      iree_status_t status = model->registration.deactivate(
-          model->registration.self, model->parameter_component, &complete);
+      iree_status_t status = loom_service_registration_deactivate(
+          model->registration.native, model->parameter_component, &complete);
       if (!iree_status_is_ok(status)) {
         terminal_status = loom_serve_registry_fail(registry, index, status);
         complete = true;
@@ -921,7 +906,7 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
   if (model->phase == LOOM_SERVE_REGISTRATION_RETIRING) {
     bool complete = false;
     iree_status_t status =
-        model->registration.retire(model->registration.self, &complete);
+        loom_service_registration_retire(model->registration.native, &complete);
     if (!iree_status_is_ok(status)) {
       loom_serve_registry_record_error(model, status);
       model->status = iree_status_join(model->status, status);
@@ -929,7 +914,7 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
                                     LOOM_SERVE_REGISTRATION_RELEASE_FAILED);
       progress = true;
     } else if (complete) {
-      model->registration.destroy(model->registration.self);
+      loom_service_registration_free(model->registration.native);
       model->registration = (loom_serve_registration_t){0};
       loom_serve_registry_set_phase(model, LOOM_SERVE_REGISTRATION_FAILED);
       progress = true;
@@ -945,7 +930,7 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
     memcpy(record.data.words, &telemetry_payload, sizeof(telemetry_payload));
     loom_runtime_telemetry_stream_append(model->stream, &record);
   }
-  if (model->removal && !model->resolution && !model->registration.self &&
+  if (model->removal && !model->resolution && !model->registration.native &&
       !model->held_count && !model->tokenizer_count) {
     IREE_TRACE_SECTION_LEAVE(model->trace.lifecycle);
     IREE_TRACE_SECTION_LEAVE(model->trace.parameters);

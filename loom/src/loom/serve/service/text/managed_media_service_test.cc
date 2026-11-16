@@ -10,6 +10,7 @@
 #include "iree/base/internal/json.h"
 #include "loom/serve/media/image_codec.h"
 #include "loom/serve/service/text/service_test_fixture.h"
+#include "loom/service/registration.h"
 
 namespace {
 
@@ -209,7 +210,7 @@ class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest,
         loom_serve_registry_register(registry, &configuration, &index));
     auto* model = loom_serve_registry_at(registry, index);
     IREE_ASSERT_OK(loom_serve_registry_activate(
-        model, LOOM_SERVE_MODEL_COMPONENT_PRIMARY));
+        model, LOOM_SERVICE_MODEL_COMPONENT_PRIMARY));
     auto* notification = loom_serve_http_server_notification(server_);
     const loom_runtime_wake_callback_t observer = {
         [](void* data) {
@@ -239,15 +240,15 @@ class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest,
         if (!image_started &&
             model->parameter_operation == LOOM_SERVE_PARAMETER_OPERATION_NONE) {
           IREE_ASSERT_OK(loom_serve_registry_activate(
-              model, LOOM_SERVE_MODEL_COMPONENT_IMAGE));
+              model, LOOM_SERVICE_MODEL_COMPONENT_IMAGE));
           IREE_ASSERT_OK(loom_serve_registry_advance(registry, index, observer,
                                                      &advanced));
           progress = true;
           image_started = true;
         }
         if (image_started && model->parameter_operation == operation) {
-          const auto image = model->registration.parameters(
-              model->registration.self, LOOM_SERVE_MODEL_COMPONENT_IMAGE);
+          const auto image = loom_service_registration_parameters(
+              model->registration.native, LOOM_SERVICE_MODEL_COMPONENT_IMAGE);
           EXPECT_STREQ(image.phase,
                        operation == LOOM_SERVE_PARAMETER_OPERATION_WAITING
                            ? "preparing"

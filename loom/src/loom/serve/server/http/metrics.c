@@ -10,6 +10,7 @@
 
 #include "loom/runtime/telemetry/sample.h"
 #include "loom/service/kind.h"
+#include "loom/service/registration.h"
 #include "loom/service/telemetry/latency.h"
 #include "loom/service/telemetry/record.h"
 
@@ -192,18 +193,19 @@ static iree_status_t loom_serve_http_metrics_parameters(
     const loom_serve_registered_model_t* model =
         loom_serve_registry_at(registry, i);
     if (model->phase != LOOM_SERVE_REGISTRATION_READY ||
-        !model->registration.parameters) {
+        !model->registration.native) {
       continue;
     }
-    for (loom_serve_model_component_t component = 0;
-         component < LOOM_SERVE_MODEL_COMPONENT_COUNT &&
+    for (loom_service_model_component_t component = 0;
+         component < LOOM_SERVICE_MODEL_COMPONENT_COUNT &&
          iree_status_is_ok(status);
          ++component) {
       if (!loom_serve_registry_has_component(model, component)) {
         continue;
       }
-      const loom_serve_registration_parameters_t parameters =
-          model->registration.parameters(model->registration.self, component);
+      const loom_service_registration_parameters_t parameters =
+          loom_service_registration_parameters(model->registration.native,
+                                               component);
       if (!parameters.prepared) {
         continue;
       }

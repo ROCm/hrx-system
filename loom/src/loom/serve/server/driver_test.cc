@@ -12,6 +12,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/serve/server/configuration.h"
+#include "loom/service/registration.h"
 
 namespace {
 
@@ -264,6 +265,14 @@ TEST(RegistrationOwnershipTest, DrainDoesNotRequireAnObservationSnapshot) {
   Service service = {.visits = &retired};
   const iree_string_view_t device_name = IREE_SV("device");
   const loom_runtime_pool_binding_t pool = {IREE_SV("pool"), 1};
+  struct Registration {
+    // Production lifecycle, embedded in the dependency's single allocation.
+    loom_service_registration_t native;
+    // Borrowed ready engine whose independent pending flag gates teardown.
+    Service* service;
+    // Allocator owning this provider through retirement.
+    iree_allocator_t allocator;
+  };
   const loom_serve_registration_factory_t factory = {
       .self = &service,
       .kinds = 1u << LOOM_SERVICE_KIND_EMBEDDING,
@@ -271,38 +280,100 @@ TEST(RegistrationOwnershipTest, DrainDoesNotRequireAnObservationSnapshot) {
       .pool_count = 1,
       .pools = &pool,
       .create =
-          [](void* self, const loom_serve_model_configuration_t*, uint64_t,
-             loom_runtime_wake_callback_t, loom_runtime_telemetry_stream_t*,
-             iree_allocator_t, loom_serve_registration_t* out_registration) {
-            *out_registration = {
-                .self = self,
+          [](void* self, const loom_serve_model_configuration_t*,
+             uint64_t incarnation, loom_runtime_wake_callback_t observer,
+             loom_runtime_telemetry_stream_t*, iree_allocator_t allocator,
+             loom_serve_registration_t* out_registration) {
+            static const loom_service_registration_vtable_t vtable = {
                 .prepare =
-                    [](void* self, loom_serve_registration_prepare_flags_t,
-                       bool* out_complete, loom_serve_service_t* out_service,
-                       loom_runtime_compilation_report_t* out_report) {
-                      (void)out_report;
+                    [](void* self, loom_service_registration_prepare_flags_t,
+                       loom_service_preparation_result_t* result,
+                       loom_runtime_compilation_report_t*) {
+                      result->flags = LOOM_SERVICE_PREPARATION_RESULT_COMPLETE;
+                      result->service =
+                          static_cast<Registration*>(self)
+                              ->service->Interface(IREE_SV("managed"), nullptr)
+                              .runtime;
+                      return iree_ok_status();
+                    },
+                .progress =
+                    [](void* self, loom_runtime_service_flags_t flags,
+                       bool* progress) {
+                      auto runtime =
+                          static_cast<Registration*>(self)
+                              ->service->Interface(IREE_SV("managed"), nullptr)
+                              .runtime;
+                      return runtime.vtable->advance(runtime.self, flags,
+                                                     progress);
+                    },
+                .retire =
+                    [](void* self, bool* out_complete) {
+                      static_cast<Registration*>(self)
+                          ->service->visits->push_back(1);
+                      *out_complete = true;
+                      return iree_ok_status();
+                    },
+                .parameters =
+                    [](void*, loom_service_model_component_t) {
+                      return loom_service_registration_parameters_t{
+                          .phase = "ready",
+                          .prepared = true,
+                      };
+                    },
+                .set_pinned = [](void*, loom_service_model_component_t,
+                                 bool) {},
+                .activate =
+                    [](void*, loom_service_model_component_t,
+                       loom_runtime_activation_flags_t,
+                       loom_runtime_activation_phase_t* phase,
+                       iree_status_t* status) {
+                      *phase = LOOM_RUNTIME_ACTIVATION_COMPLETE;
+                      *status = iree_ok_status();
+                      return iree_ok_status();
+                    },
+                .deactivate =
+                    [](void*, loom_service_model_component_t, bool* complete) {
+                      *complete = true;
+                      return iree_ok_status();
+                    },
+                .destroy =
+                    [](void* self) {
+                      iree_allocator_free_aligned(
+                          static_cast<Registration*>(self)->allocator, self);
+                    },
+            };
+            Registration* registration = nullptr;
+            loom_runtime_service_control_t* control = nullptr;
+            IREE_RETURN_IF_ERROR(loom_service_registration_allocate_storage(
+                sizeof(*registration), 2, 2, incarnation, allocator,
+                reinterpret_cast<void**>(&registration), &control));
+            registration->service = static_cast<Service*>(self);
+            registration->allocator = allocator;
+            loom_service_registration_initialize(
+                &vtable, registration,
+                1u << LOOM_SERVICE_MODEL_COMPONENT_PRIMARY, 0,
+                loom_runtime_service_control_binding(control, 0, 0, 0),
+                observer, &registration->native);
+            *out_registration = {
+                .native = &registration->native,
+                .service =
+                    [](loom_service_registration_t* native) {
                       static const loom_service_telemetry_counters_t counters =
                           {};
                       static const loom_service_telemetry_latency_t latency =
                           {};
-                      *out_complete = true;
-                      *out_service = static_cast<Service*>(self)->Interface(
-                          IREE_SV("managed"), nullptr);
-                      out_service->telemetry.counters = &counters;
-                      out_service->telemetry.latency = &latency;
-                      return iree_ok_status();
+                      auto service =
+                          static_cast<Registration*>(native->self)
+                              ->service->Interface(IREE_SV("managed"), nullptr);
+                      service.telemetry.counters = &counters;
+                      service.telemetry.latency = &latency;
+                      return service;
                     },
-                .retire =
-                    [](void* self, bool* out_complete) {
-                      static_cast<Service*>(self)->visits->push_back(1);
-                      *out_complete = true;
-                      return iree_ok_status();
-                    },
-                .destroy = [](void*) {},
             };
             return iree_ok_status();
           },
   };
+
   loom_serve_model_configuration_t configuration = {};
   IREE_ASSERT_OK(loom_serve_model_configuration_initialize(
       IREE_SV(R"({"name":"managed","definition":{"kind":"embedding",)"

@@ -183,6 +183,16 @@ loom_serve_service_t loom_serve_text_service_interface(
 iree_status_t loom_serve_text_service_trim_image(
     loom_serve_text_service_t* service, bool* out_complete);
 
+// Accepted ownership transferred from the destroyed engine to its model owners.
+// Only pending_operation_count and accepted_devices may remain nonzero. Each
+// owner clears its detail slots and contribution after actual model retirement.
+typedef struct loom_serve_text_retirement_t {
+  // Text execution and compiler ownership retained by the primary model.
+  loom_runtime_service_observation_t primary;
+  // Projection ownership retained by the independent image model.
+  loom_runtime_service_observation_t image;
+} loom_serve_text_retirement_t;
+
 // Relinquishes every accepted consumer receipt after readiness retirement. On
 // terminal failure, unresolved device reservations remain pinned for model
 // destruction; on ordinary completed-boundary shutdown, unused reservations are
@@ -192,8 +202,9 @@ iree_status_t loom_serve_text_service_trim_image(
 // this call. Null is accepted.
 // The borrowed model and any HTTP transport both outlive this call. Native
 // caller handles retain final results independently of this service.
-void loom_serve_text_service_free(loom_serve_text_service_t* service,
-                                  iree_status_code_t terminal_code);
+// Returns retained ownership facts without retaining the engine allocation.
+loom_serve_text_retirement_t loom_serve_text_service_free(
+    loom_serve_text_service_t* service, iree_status_code_t terminal_code);
 
 #ifdef __cplusplus
 }  // extern "C"
