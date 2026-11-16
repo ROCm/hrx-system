@@ -19,6 +19,8 @@ IREE_FLAG(string, graph_runtime, "hrx",
 IREE_FLAG(string, graph_hip_library, "", "Exact selected libamdhip64 path.");
 IREE_FLAG(string, graph_operation, "dispatch",
           "Graph operation: dispatch, copy, or fill.");
+IREE_FLAG(int32_t, graph_transfer_byte_length, 4,
+          "Bytes per copy/fill node, as a positive multiple of four.");
 IREE_FLAG(int32_t, graph_host_interval, 0,
           "Insert a host checkpoint after each group of this many operations; "
           "zero records one uninterrupted device sequence.");
@@ -48,15 +50,29 @@ GraphOperation ParseGraphOperation() {
   return GraphOperation::kFill;
 }
 
+size_t WordsPerNode(GraphOperation operation) {
+  if (operation == GraphOperation::kDispatch) {
+    return 1;
+  }
+  Require(FLAG_graph_transfer_byte_length > 0 &&
+              FLAG_graph_transfer_byte_length % sizeof(uint32_t) == 0,
+          "--graph_transfer_byte_length must be a positive multiple of four");
+  return static_cast<size_t>(FLAG_graph_transfer_byte_length) /
+         sizeof(uint32_t);
+}
+
 // Copy graphs select one of two immutable input banks during updates. All
 // operations write the same output words and share the same verification.
-std::vector<uint32_t> InitialValues(size_t count, GraphOperation operation) {
+std::vector<uint32_t> InitialValues(size_t count, GraphOperation operation,
+                                    size_t words_per_node) {
+  const size_t word_count = count * words_per_node;
   std::vector<uint32_t> values(
-      count * (operation == GraphOperation::kCopy ? 3 : 1), 0);
+      word_count * (operation == GraphOperation::kCopy ? 3 : 1), 0);
   if (operation == GraphOperation::kCopy) {
     for (uint32_t bias = 0; bias < 2; ++bias) {
-      for (size_t i = 0; i < count; ++i) {
-        values[(bias + 1) * count + i] = kOutputBase + i + bias;
+      for (size_t i = 0; i < word_count; ++i) {
+        values[(bias + 1) * word_count + i] =
+            kOutputBase + i / words_per_node + bias;
       }
     }
   }
@@ -125,7 +141,8 @@ class HrxRuntime {
     Check(api_.device_get_property(device_, HRX_DEVICE_PROPERTY_ARCHITECTURE,
                                    architecture, sizeof(architecture)));
     label_ = std::string("HRX ") + architecture +
-             " wait=blocking operation=" + FLAG_graph_operation;
+             " wait=blocking operation=" + FLAG_graph_operation +
+             " bytes=" + std::to_string(words_per_node_ * sizeof(uint32_t));
     const auto image = hrx_cts::FindAmdgpuExecutableTestImage(architecture);
     Require(image.file != nullptr, "no configured HSACO for selected GPU");
     Check(api_.executable_load_data(device_, image.file->data, image.file->size,
@@ -146,8 +163,9 @@ class HrxRuntime {
   void Prepare(size_t count, bool host) {
     host_call_count_ = 0;
     launch_count_ = 0;
-    values_.assign(count, 0);
-    const auto initial_values = InitialValues(count, operation_);
+    values_.assign(count * words_per_node_, 0);
+    const auto initial_values =
+        InitialValues(count, operation_, words_per_node_);
     const size_t allocation_size = initial_values.size() * sizeof(uint32_t);
     hrx_buffer_params_t params = {
         .type = host ? HRX_MEMORY_TYPE_HOST_LOCAL |
@@ -175,7 +193,9 @@ class HrxRuntime {
     Check(api_.graph_instantiate(graph_, dispatch_queue_, 0, &executable_));
   }
 
-  void PrepareUpdate() { BuildGraph(values_.size(), 1, &replacement_); }
+  void PrepareUpdate() {
+    BuildGraph(values_.size() / words_per_node_, 1, &replacement_);
+  }
 
   void Update() {
     const uint32_t next_bias = value_bias_ ^ 1;
@@ -188,7 +208,7 @@ class HrxRuntime {
 
   GraphType ConstructTemplate() {
     hrx_graph_t graph = nullptr;
-    BuildGraph(values_.size(), 0, &graph);
+    BuildGraph(values_.size() / words_per_node_, 0, &graph);
     return graph;
   }
 
@@ -208,9 +228,10 @@ class HrxRuntime {
   void Wait() { Check(api_.stream_synchronize(stream_)); }
 
   void Verify() {
-    const size_t checkpoints = FLAG_graph_host_interval > 0
-                                   ? values_.size() / FLAG_graph_host_interval
-                                   : 0;
+    const size_t checkpoints =
+        FLAG_graph_host_interval > 0
+            ? values_.size() / words_per_node_ / FLAG_graph_host_interval
+            : 0;
     Require(host_call_count_ == launch_count_ * checkpoints,
             "HRX graph host checkpoint count mismatch");
     if (mapped_) {
@@ -220,7 +241,7 @@ class HrxRuntime {
                                  values_.size() * sizeof(uint32_t)));
     }
     for (size_t i = 0; i < values_.size(); ++i) {
-      Require(values_[i] == kOutputBase + i + value_bias_,
+      Require(values_[i] == kOutputBase + i / words_per_node_ + value_bias_,
               "HRX graph output mismatch");
     }
   }
@@ -249,13 +270,13 @@ class HrxRuntime {
     hrx_graph_node_t previous = nullptr;
     for (uint32_t i = 0; i < count; ++i) {
       const uint32_t value = kOutputBase + i + value_bias;
-      const hrx_buffer_ref_t binding = {buffer_, i * sizeof(uint32_t),
-                                        sizeof(uint32_t)};
+      const size_t byte_length = words_per_node_ * sizeof(uint32_t);
+      const hrx_buffer_ref_t binding = {buffer_, i * byte_length, byte_length};
       hrx_graph_node_t node = nullptr;
       if (operation_ == GraphOperation::kCopy) {
         const hrx_graph_copy_buffer_node_attrs_t attrs = {
-            .src = {buffer_, ((value_bias + 1) * count + i) * sizeof(uint32_t),
-                    sizeof(uint32_t)},
+            .src = {buffer_, ((value_bias + 1) * count + i) * byte_length,
+                    byte_length},
             .dst = binding,
         };
         Check(api_.graph_add_copy_buffer_node(*out_graph,
@@ -336,6 +357,8 @@ class HrxRuntime {
   uint32_t* mapped_ = nullptr;
   // Selected operation, fixed for all rows in this process.
   const GraphOperation operation_ = ParseGraphOperation();
+  // Output width for each graph node; dispatches always write one word.
+  const size_t words_per_node_ = WordsPerNode(operation_);
   // CPU comparison storage used only outside timed regions.
   std::vector<uint32_t> values_;
   // Architecture and wait policy included in every result.
@@ -366,7 +389,8 @@ class HipRuntime {
         std::string(std::string(FLAG_graph_runtime) == "hip" ? "HRX HIP "
                                                              : "ROCm HIP ") +
         properties.gcnArchName + " " + pci_address +
-        " wait=blocking operation=" + FLAG_graph_operation;
+        " wait=blocking operation=" + FLAG_graph_operation +
+        " bytes=" + std::to_string(words_per_node_ * sizeof(uint32_t));
     const auto image =
         hrx_cts::FindAmdgpuExecutableTestImage(properties.gcnArchName);
     Require(image.file != nullptr, "no configured HSACO for selected GPU");
@@ -401,8 +425,9 @@ class HipRuntime {
   void Prepare(size_t count, bool host) {
     host_call_count_ = 0;
     launch_count_ = 0;
-    values_.assign(count, 0);
-    const auto initial_values = InitialValues(count, operation_);
+    values_.assign(count * words_per_node_, 0);
+    const auto initial_values =
+        InitialValues(count, operation_, words_per_node_);
     const size_t allocation_size = initial_values.size() * sizeof(uint32_t);
     host_ = host;
     if (host) {
@@ -428,7 +453,9 @@ class HipRuntime {
     Check(instantiate_(&executable_, graph_, nullptr, nullptr, 0));
   }
 
-  void PrepareUpdate() { BuildGraph(values_.size(), 1, &replacement_); }
+  void PrepareUpdate() {
+    BuildGraph(values_.size() / words_per_node_, 1, &replacement_);
+  }
 
   void Update() {
     const uint32_t next_bias = value_bias_ ^ 1;
@@ -444,7 +471,7 @@ class HipRuntime {
 
   GraphType ConstructTemplate() {
     hipGraph_t graph = nullptr;
-    BuildGraph(values_.size(), 0, &graph);
+    BuildGraph(values_.size() / words_per_node_, 0, &graph);
     return graph;
   }
 
@@ -466,9 +493,10 @@ class HipRuntime {
   void Wait() { Check(wait_(stream_)); }
 
   void Verify() {
-    const size_t checkpoints = FLAG_graph_host_interval > 0
-                                   ? values_.size() / FLAG_graph_host_interval
-                                   : 0;
+    const size_t checkpoints =
+        FLAG_graph_host_interval > 0
+            ? values_.size() / words_per_node_ / FLAG_graph_host_interval
+            : 0;
     Require(host_call_count_ == launch_count_ * checkpoints,
             "HIP graph host checkpoint count mismatch");
     if (host_) {
@@ -480,7 +508,7 @@ class HipRuntime {
           hipMemcpyDeviceToHost));
     }
     for (size_t i = 0; i < values_.size(); ++i) {
-      Require(values_[i] == kOutputBase + i + value_bias_,
+      Require(values_[i] == kOutputBase + i / words_per_node_ + value_bias_,
               "HIP graph output mismatch");
     }
   }
@@ -520,14 +548,15 @@ class HipRuntime {
             : nullptr;
     for (uint32_t i = 0; i < count; ++i) {
       uint32_t value = kOutputBase + i + value_bias;
-      void* output = static_cast<uint32_t*>(device_output_) + i;
+      void* output =
+          static_cast<uint32_t*>(device_output_) + i * words_per_node_;
       if (operation_ == GraphOperation::kCopy) {
         const void* source = static_cast<uint32_t*>(device_output_) +
-                             (value_bias + 1) * count + i;
-        Check(copy(output, source, sizeof(uint32_t), hipMemcpyDeviceToDevice,
-                   stream_));
+                             ((value_bias + 1) * count + i) * words_per_node_;
+        Check(copy(output, source, words_per_node_ * sizeof(uint32_t),
+                   hipMemcpyDeviceToDevice, stream_));
       } else if (operation_ == GraphOperation::kFill) {
-        Check(fill(output, static_cast<int>(value), 1, stream_));
+        Check(fill(output, static_cast<int>(value), words_per_node_, stream_));
       } else {
         void* arguments[] = {&output, &value};
         Check(dispatch(function_, 1, 1, 1, 1, 1, 1, 0, stream_, arguments,
@@ -569,6 +598,8 @@ class HipRuntime {
   bool host_ = false;
   // Selected operation, fixed for all rows in this process.
   const GraphOperation operation_ = ParseGraphOperation();
+  // Output width for each graph node; dispatches always write one word.
+  const size_t words_per_node_ = WordsPerNode(operation_);
   // CPU comparison storage used only outside timed regions.
   std::vector<uint32_t> values_;
   // Cached public graph-launch entry point.

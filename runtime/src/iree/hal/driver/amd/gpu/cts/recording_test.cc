@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "iree/hal/api.h"
+#include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/driver/amd/gpu/cts/test_device.h"
 #include "iree/hal/driver/amd/gpu/cts/testdata.h"
 #include "iree/hal/driver/amd/gpu/image/hip_images.h"
@@ -589,6 +590,121 @@ TEST_F(GpuNativeRecordingTest, TransferBarriersJoinOnlyPendingCopies) {
       EXPECT_EQ(value, pattern);
     }
     iree_hal_semaphore_release(done);
+  }
+}
+
+TEST_F(GpuNativeRecordingTest,
+       ScalarTransfersPreserveDependenciesAndNeighbors) {
+  using iree::hal::cts::Ref;
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(128, 8),
+      iree_infinite_timeout(), output.out()));
+  Ref<iree_hal_buffer_t> view;
+  IREE_ASSERT_OK(iree_hal_buffer_subspan(output, 4, 64, iree_allocator_system(),
+                                         view.out()));
+  Ref<iree_hal_semaphore_t> done;
+  CreateSemaphore(done.out());
+  auto* timeline = done.get();
+  uint64_t epoch = 0;
+  const uint32_t guard = 0xCCCCCCCC;
+  const uint8_t pattern = 0xA5;
+  const iree_hal_memory_barrier_t memory = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE |
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE |
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+  };
+  const iree_hal_barrier_t dependency = {
+      .source_stage_mask =
+          IREE_HAL_EXECUTION_STAGE_TRANSFER | IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .target_stage_mask =
+          IREE_HAL_EXECUTION_STAGE_TRANSFER | IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .memory_barrier_count = 1,
+      .memory_barriers = &memory,
+  };
+  for (bool indirect : {false, true}) {
+    for (uint32_t length : {4u, 8u, 12u, 16u}) {
+      for (uint32_t offset : {0u, 1u, 4u}) {
+        SCOPED_TRACE(::testing::Message()
+                     << "indirect=" << indirect << " length=" << length
+                     << " offset=" << offset);
+        uint64_t initialized = ++epoch;
+        IREE_ASSERT_OK(iree_hal_queue_fill(
+            queues_[0], {}, {1, &timeline, &initialized}, output, 0, 128,
+            &guard, sizeof(guard), nullptr, 0));
+        Ref<iree_hal_command_buffer_t> recording;
+        IREE_ASSERT_OK(iree_hal_command_buffer_create(
+            iree_hal_queue_family(queues_[0]), 0,
+            IREE_HAL_COMMAND_CATEGORY_TRANSFER |
+                IREE_HAL_COMMAND_CATEGORY_DISPATCH,
+            indirect ? 1 : 0, recording.out()));
+        IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+        const auto reference = [&](uint32_t displacement) {
+          return indirect
+                     ? iree_hal_make_indirect_buffer_ref(0, displacement,
+                                                         length)
+                     : iree_hal_make_buffer_ref(view, displacement, length);
+        };
+        std::array<uint8_t, 16> source = {1,  3,  5,  7,  11, 13, 17, 19,
+                                          23, 29, 31, 37, 41, 43, 47, 53};
+        std::array<uint8_t, 128> expected;
+        expected.fill(0xCC);
+        std::memcpy(expected.data() + 4 + offset + 32, source.data(), length);
+        std::memset(expected.data() + 4 + offset, pattern, length);
+        IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+            recording, source.data(), 0, reference(offset), 0));
+        source.fill(0xDD);  // Recorded updates own their captured input bytes.
+        IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &dependency));
+        if (!(offset & 3)) {
+          // The shader consumes the update and produces the scalar copy input.
+          const uint32_t increment = 17;
+          auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
+          config.workgroup_size[0] = 32;
+          config.workgroup_size[1] = config.workgroup_size[2] = 1;
+          const auto input = reference(offset);
+          IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+              recording, executable_, function_, config,
+              iree_make_const_byte_span(&increment, sizeof(increment)),
+              {1, &input}, 0));
+          IREE_ASSERT_OK(
+              iree_hal_command_buffer_barrier(recording, &dependency));
+          uint32_t first_word = 0;
+          std::memcpy(&first_word, expected.data() + 4 + offset + 32,
+                      sizeof(first_word));
+          first_word += increment;
+          std::memcpy(expected.data() + 4 + offset + 32, &first_word,
+                      sizeof(first_word));
+        }
+        IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+            recording, reference(offset), reference(offset + 32), 0));
+        IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &dependency));
+        IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+            recording, reference(offset), &pattern, sizeof(pattern), 0));
+        const iree_hal_barrier_t release = {
+            .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+            .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+            .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+        };
+        IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
+        IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+        const iree_hal_buffer_binding_t binding = {view, 0, 64};
+        uint64_t executed = ++epoch;
+        IREE_ASSERT_OK(iree_hal_queue_execute(
+            queues_[0], {1, &timeline, &initialized}, {1, &timeline, &executed},
+            recording, {indirect ? 1u : 0u, &binding}, 0));
+        std::array<uint8_t, 128> actual;
+        uint64_t downloaded = ++epoch;
+        IREE_ASSERT_OK(iree_hal_queue_download(
+            queues_[1], {1, &timeline, &executed}, {1, &timeline, &downloaded},
+            output, 0, actual.data(), actual.size(), nullptr));
+        IREE_ASSERT_OK(iree_hal_semaphore_wait(done, downloaded,
+                                               iree_infinite_timeout(), 0));
+        EXPECT_EQ(actual, expected);
+      }
+    }
   }
 }
 

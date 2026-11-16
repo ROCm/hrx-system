@@ -545,6 +545,16 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_buffer_atomic_rmw(
                   iree_hal_amd_gpu_control_rmw(params)));
 }
 
+// Recording may inspect immutable backing facts, but never device addresses.
+// Unresolved table entries retain the byte-capable transfer implementation.
+static bool iree_hal_amd_gpu_pm4_command_reference_is_aligned(
+    iree_hal_buffer_ref_t reference, uint32_t alignment) {
+  return reference.buffer && reference.buffer->memory.backing &&
+         reference.buffer->memory.backing->allocation_alignment >= alignment &&
+         !((reference.buffer->memory.offset + reference.offset) &
+           (alignment - 1));
+}
+
 static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
     iree_hal_amd_gpu_pm4_command_buffer_t* buffer,
     iree_hal_transfer_operation_type_t type, iree_hal_buffer_ref_t source,
@@ -563,14 +573,24 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
   if (!length) {
     return iree_ok_status();
   }
-  // Byte-aligned copies use CP DMA. A direct fill can use its immediate form
+  // Byte-aligned copies admit CP DMA. A direct fill can use its immediate form
   // only when prepared backing proves alignment without reading an address.
-  const bool aligned_fill =
-      !copy && !update && target.buffer && target.buffer->memory.backing &&
-      target.buffer->memory.backing->allocation_alignment >= 4 &&
-      !((target.buffer->memory.offset + target.offset) & 3) && !(length & 3);
+  const bool aligned_target =
+      iree_hal_amd_gpu_pm4_command_reference_is_aligned(target, 4);
+  const bool aligned_fill = !copy && !update && aligned_target && !(length & 3);
   const bool native_dma =
       length != IREE_HAL_WHOLE_BUFFER && (copy || update || aligned_fill);
+  // Confirmed scalar packets avoid CP DMA's transaction setup and join.
+  // COPY_DATA moves one naturally aligned value. WRITE_DATA fits three DWORDs
+  // in the seven DWORDs used by DMA_DATA, without growing the command stream.
+  const bool scalar =
+      aligned_target &&
+      (copy ? ((length == 4 || length == 8) &&
+               iree_hal_amd_gpu_pm4_command_reference_is_aligned(
+                   source, (uint32_t)length) &&
+               iree_hal_amd_gpu_pm4_command_reference_is_aligned(
+                   target, (uint32_t)length))
+            : (length <= 12 && !(length & 3)));
   const uint32_t site = native_dma ? IREE_HAL_AMD_GPU_PM4_SITE_QUEUE
                                    : IREE_HAL_AMD_GPU_PM4_SITE_PROGRAM;
   uint32_t source_value = IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE, target_value = 0;
@@ -581,7 +601,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
         &buffer->inputs, source, site, 0, 1, whole, &source_value));
   }
   uint32_t update_offset = 0;
-  if (update) {
+  if (update && !scalar) {
     void* bytes = NULL;
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
         &buffer->recording.storage, (uint32_t)length, 1, &update_offset,
@@ -589,7 +609,31 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
     memcpy(bytes, source_bytes, (iree_host_size_t)length);
   }
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_flush_barrier(buffer));
-  if (native_dma) {
+  if (scalar) {
+    uint32_t offset = 0;
+    uint32_t* words = NULL;
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_commands(
+        &buffer->recording, copy ? 6 : 4 + (uint32_t)length / 4, &offset,
+        &words));
+    if (copy) {
+      if (length == 8) {
+        iree_hal_amd_gpu_pm4_emit_copy64(words, 0, 0);
+      } else {
+        iree_hal_amd_gpu_pm4_emit_copy32(words, 0, 0);
+      }
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
+          buffer, false, offset + 8, source_value, source.offset, false));
+    } else {
+      uint32_t values[3] = {pattern, pattern, pattern};
+      if (update) {
+        memcpy(values, source_bytes, (iree_host_size_t)length);
+      }
+      iree_hal_amd_gpu_pm4_emit_write(words, 0, (uint32_t)length / 4, values);
+    }
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
+        buffer, false, offset + (copy ? 16 : 8), target_value, target.offset,
+        false));
+  } else if (native_dma) {
     iree_status_t status = iree_ok_status();
     uint64_t position = 0;
     while (position < length && iree_status_is_ok(status)) {
