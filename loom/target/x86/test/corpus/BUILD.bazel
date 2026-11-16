@@ -90,6 +90,7 @@ loom_corpus_test(
         X86_TASK_HARDWARE_PROFILE.name: {
             "control/branch/convergence.loom:@return_convergence_values": "TARGET/001",
             "control/branch/convergence.loom:@row_convergence_values": "TARGET/001",
+            "control/branch/convergence.loom:@switch_return_convergence_values": "TARGET/001",
             "memory/buffer/positions.loom:@shared_position_equality": "TARGET/003",
             "memory/buffer/positions.loom:@storage_domain_equality": "TARGET/001",
             "memory/storage/private.loom:@private_vector_lookup_values": "TARGET/001",
