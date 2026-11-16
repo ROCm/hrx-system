@@ -29,6 +29,8 @@ from loom.packaging.python import release
 GITHUB_RELEASE_BODY_MAXIMUM = 125_000
 GITHUB_ASSET_PAGE_SIZE = 100
 GITHUB_PULL_REQUEST_PAGE_SIZE = 100
+RELEASE_WORKFLOW_PATH = ".github/workflows/release_loom_sdk.yml"
+RELEASE_SECURITY_JOB = "Security / Native production / Analyze"
 _CATALOG_TAG = re.compile(r"github:([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([^\s]+)")
 _PULL_REQUEST_RELEASE_NOTES = re.compile(
     r"^<!-- loom-release-notes:begin version=([^\s]+) -->\n"
@@ -50,6 +52,57 @@ class ReleaseEditorial:
     pull_request: int
     revision: str
     text: str
+
+
+def release_source_revision(
+    repository: str,
+    run_id: int,
+    tag: str,
+    identity: release.Identity,
+    token: str,
+) -> str:
+    """Validates a completed release run whose exact artifacts may be reused."""
+    identity.check_tag(tag)
+    if type(run_id) is not int or run_id <= 0:
+        raise ValueError("Release artifact run ID must be a positive integer")
+    if not token:
+        raise ValueError("Release artifact reuse requires a GitHub token")
+
+    client = github_api.RepositoryClient(
+        repository, token, get_json=github_api.get_json
+    )
+    document = client.json(f"/actions/runs/{run_id}")
+    revision = document.get("head_sha") if isinstance(document, dict) else None
+    if (
+        not isinstance(document, dict)
+        or document.get("path") != RELEASE_WORKFLOW_PATH
+        or document.get("event") not in ("push", "workflow_dispatch")
+        or document.get("head_branch") != tag
+        or document.get("status") != "completed"
+        or not isinstance(revision, str)
+        or re.fullmatch(r"[0-9a-f]{40}", revision) is None
+    ):
+        raise ValueError("Artifact source is not a completed release tag workflow")
+
+    encoded_tag = urllib.parse.quote(tag, safe="")
+    reference = client.json(f"/git/ref/tags/{encoded_tag}")
+    if (
+        not isinstance(reference, dict)
+        or not isinstance(reference.get("object"), dict)
+        or reference["object"].get("type") != "commit"
+        or reference["object"].get("sha") != revision
+    ):
+        raise ValueError("Release tag no longer selects the artifact source revision")
+
+    jobs = client.pages(f"/actions/runs/{run_id}/jobs", "jobs")
+    security_jobs = [
+        job
+        for job in jobs
+        if isinstance(job, dict) and job.get("name") == RELEASE_SECURITY_JOB
+    ]
+    if len(security_jobs) != 1 or security_jobs[0].get("conclusion") != "success":
+        raise ValueError("Artifact source has no successful release security gate")
+    return revision
 
 
 def _release_editorial_from_pull_request(
@@ -539,8 +592,11 @@ def stage_pypi(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("verify", "github", "pypi-stage"))
+    parser.add_argument(
+        "operation", choices=("source-run", "verify", "github", "pypi-stage")
+    )
     parser.add_argument("--tag", required=True)
+    parser.add_argument("--run-id", type=int)
     parser.add_argument("--directory", type=Path, default=Path("release-assets"))
     parser.add_argument(
         "--identity", type=Path, default=Path("loom/packaging/python/version.json")
@@ -552,6 +608,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--revision", default=os.environ.get("GITHUB_SHA"))
     parser.add_argument("--output", type=Path, help="fresh PyPI upload directory")
     args = parser.parse_args(argv)
+    if args.operation == "source-run" and (not args.repository or args.run_id is None):
+        parser.error("source-run requires repository and run ID")
     if args.operation == "github" and (not args.repository or not args.revision):
         parser.error(
             "github requires repository and revision from GitHub Actions or options"
@@ -560,6 +618,17 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("pypi-stage requires --output")
     try:
         identity = release.read_identity(args.identity)
+        if args.operation == "source-run":
+            print(
+                release_source_revision(
+                    args.repository,
+                    args.run_id,
+                    args.tag,
+                    identity,
+                    os.environ.get("GH_TOKEN", ""),
+                )
+            )
+            return 0
         artifacts = verified_release(
             args.directory,
             identity,
@@ -589,7 +658,13 @@ def main(argv: list[str] | None = None) -> int:
                     stream.write(result)
         else:
             print(release.checksum_document(artifacts), end="")
-    except (ValueError, OSError, BadZipFile, subprocess.CalledProcessError) as error:
+    except (
+        ValueError,
+        OSError,
+        BadZipFile,
+        github_api.GitHubAPIError,
+        subprocess.CalledProcessError,
+    ) as error:
         parser.exit(1, f"SDK publication failed: {error}\n")
     return 0
 

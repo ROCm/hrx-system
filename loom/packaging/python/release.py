@@ -13,6 +13,7 @@ import hashlib
 import json
 import re
 import stat
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile, ZipInfo
@@ -258,15 +259,20 @@ def inspect_standalone_archive(path: Path, identity: Identity) -> StandaloneArch
 def release_standalones(directory: Path, identity: Identity) -> list[StandaloneArchive]:
     archives = [
         inspect_standalone_archive(path, identity)
-        for path in sorted(directory.glob("*.zip"))
+        for path in sorted(directory.rglob("*.zip"))
     ]
-    actual = {(archive.tool, archive.platform) for archive in archives}
+    actual = Counter((archive.tool, archive.platform) for archive in archives)
     expected = {(tool, platform) for tool in STANDALONE_TOOLS for platform in PLATFORMS}
-    missing = expected - actual
-    if missing:
+    missing = expected - actual.keys()
+    duplicates = sorted(
+        (archive_identity, count)
+        for archive_identity, count in actual.items()
+        if count > 1
+    )
+    if missing or duplicates:
         raise ValueError(
-            "Release requires each standalone executable for each platform; "
-            f"missing={sorted(missing)}"
+            "Release requires exactly one standalone archive for each executable "
+            f"and platform; missing={sorted(missing)}; duplicates={duplicates}"
         )
     return archives
 
