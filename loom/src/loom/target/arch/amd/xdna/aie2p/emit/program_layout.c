@@ -6,6 +6,8 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_layout.h"
 
+#include <string.h>
+
 #include "loom/analysis/pipeline/lifetime_retention.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_program.h"
 #include "loom/util/adaptive_sort.h"
@@ -58,12 +60,13 @@ iree_status_t loom_aie2p_program_layout_initialize(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, group_count, sizeof(*groups), (void**)&groups));
   for (iree_host_size_t i = 0; i < function_count; ++i) {
-    groups[function_groups[i]] =
-        (loom_aie2p_program_layout_group_t){.owner = function_owners[i]};
+    groups[function_groups[i]] = (loom_aie2p_program_layout_group_t){
+        .owner = function_owners[i], .request_index = function_groups[i]};
   }
   out_layout->function_groups = function_groups;
   out_layout->groups = groups;
   out_layout->group_count = group_count;
+  out_layout->request_count = group_count;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, group_count, sizeof(*out_layout->requests),
       (void**)&out_layout->requests));
@@ -74,6 +77,28 @@ iree_status_t loom_aie2p_program_layout_initialize(
   return loom_pipeline_lifetime_projection_prepare(
       lifetimes, out_layout->requests, group_count, arena,
       &out_layout->projection);
+}
+
+iree_status_t loom_aie2p_program_layout_copy(
+    const loom_aie2p_program_layout_t* source, iree_host_size_t function_count,
+    iree_arena_allocator_t* arena, loom_aie2p_program_layout_t* out_layout) {
+  *out_layout = *source;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, function_count, sizeof(*out_layout->function_groups),
+      (void**)&out_layout->function_groups));
+  memcpy(out_layout->function_groups, source->function_groups,
+         function_count * sizeof(*out_layout->function_groups));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, source->group_count,
+                                                 sizeof(*out_layout->groups),
+                                                 (void**)&out_layout->groups));
+  memcpy(out_layout->groups, source->groups,
+         source->group_count * sizeof(*out_layout->groups));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, source->request_count, sizeof(*out_layout->requests),
+      (void**)&out_layout->requests));
+  memcpy(out_layout->requests, source->requests,
+         source->request_count * sizeof(*out_layout->requests));
+  return iree_ok_status();
 }
 
 typedef struct loom_aie2p_program_membership_t {
@@ -95,8 +120,8 @@ LOOM_DEFINE_ADAPTIVE_SORT(loom_aie2p_program_sort_memberships,
                           loom_aie2p_program_membership_less)
 
 iree_status_t loom_aie2p_program_layout_retain(
-    const loom_aie2p_program_native_t* native, iree_arena_allocator_t* arena,
-    loom_aie2p_program_layout_t* layout) {
+    const loom_aie2p_program_native_t* native, uint64_t minimum_group_length,
+    iree_arena_allocator_t* arena, loom_aie2p_program_layout_t* layout) {
   const iree_host_size_t count = native->function_count;
   loom_aie2p_program_membership_t* memberships = NULL;
   loom_pipeline_lifetime_retention_item_t* items = NULL;
@@ -144,7 +169,7 @@ iree_status_t loom_aie2p_program_layout_retain(
   }
   const loom_pipeline_lifetime_retention_policy_t policy = {
       .resident_group = 0,
-      .minimum_group_length = 1,
+      .minimum_group_length = minimum_group_length,
       .capacity = LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE / alignment,
   };
   IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_retain(
@@ -158,6 +183,29 @@ iree_status_t loom_aie2p_program_layout_retain(
   return iree_ok_status();
 }
 
+iree_status_t loom_aie2p_program_layout_compact(
+    iree_host_size_t function_count, iree_arena_allocator_t* arena,
+    loom_aie2p_program_layout_t* layout, iree_host_size_t** out_group_indices) {
+  iree_host_size_t* indices = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, layout->group_count, sizeof(*indices), (void**)&indices));
+  indices[0] = 0;
+  iree_host_size_t count = 1;
+  for (iree_host_size_t i = 1; i < layout->group_count; ++i) {
+    indices[i] = 0;
+    if (layout->requests[layout->groups[i].request_index].length) {
+      indices[i] = count;
+      layout->groups[count++] = layout->groups[i];
+    }
+  }
+  for (iree_host_size_t i = 0; i < function_count; ++i) {
+    layout->function_groups[i] = indices[layout->function_groups[i]];
+  }
+  layout->group_count = count;
+  *out_group_indices = indices;
+  return iree_ok_status();
+}
+
 iree_status_t loom_aie2p_program_layout_finish(
     const loom_aie2p_program_code_group_t* native_groups,
     loom_aie2p_program_layout_t* layout) {
@@ -166,14 +214,16 @@ iree_status_t loom_aie2p_program_layout_finish(
   loom_pipeline_lifetime_request_t* requests = layout->requests;
   for (iree_host_size_t i = 0; i < group_count; ++i) {
     groups[i].native = native_groups[i];
-    requests[i].length = iree_host_align(native_groups[i].code.byte_length, 4);
-    requests[i].alignment = native_groups[i].code.minimum_alignment;
+    loom_pipeline_lifetime_request_t* request =
+        &requests[groups[i].request_index];
+    request->length = iree_host_align(native_groups[i].code.byte_length, 4);
+    request->alignment = native_groups[i].code.minimum_alignment;
   }
   loom_pipeline_lifetime_extent_t extent;
   IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_projection_evaluate(
       layout->projection, requests, &extent));
   for (iree_host_size_t i = 0; i < group_count; ++i) {
-    groups[i].offset = requests[i].offset;
+    groups[i].offset = requests[groups[i].request_index].offset;
   }
   layout->byte_length = extent.length;
   return iree_ok_status();

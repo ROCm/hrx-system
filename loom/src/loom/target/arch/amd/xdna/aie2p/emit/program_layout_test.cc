@@ -181,7 +181,43 @@ TEST(Aie2pProgramLayoutTest, RetainsEquivalentBodiesBeforePhysicalComposition) {
   loom_aie2p_program_layout_t layout;
   IREE_ASSERT_OK(loom_aie2p_program_layout_initialize(&lifetimes, owners, 5,
                                                       &arena, &arena, &layout));
-  IREE_ASSERT_OK(loom_aie2p_program_layout_retain(&native, &arena, &layout));
+  loom_aie2p_program_layout_t resident;
+  IREE_ASSERT_OK(loom_aie2p_program_layout_copy(&layout, 5, &arena, &resident));
+  EXPECT_EQ(resident.projection, layout.projection);
+  EXPECT_NE(resident.requests, layout.requests);
+  IREE_ASSERT_OK(
+      loom_aie2p_program_layout_retain(&native, 0, &arena, &resident));
+  iree_host_size_t* indices = nullptr;
+  IREE_ASSERT_OK(
+      loom_aie2p_program_layout_compact(5, &arena, &resident, &indices));
+  ASSERT_EQ(resident.group_count, 1u);
+  EXPECT_EQ(resident.request_count, 3u);
+  for (size_t i = 0; i < 3; ++i) {
+    EXPECT_EQ(indices[i], 0u);
+    EXPECT_EQ(layout.requests[i].length, 0u);
+  }
+  EXPECT_EQ(layout.group_count, 3u);
+  EXPECT_EQ(layout.function_groups[1], 1u);
+  EXPECT_EQ(layout.function_groups[3], 2u);
+  loom_aie2p_program_code_group_t resident_group;
+  IREE_ASSERT_OK(loom_aie2p_program_object_partition(
+      &native, nullptr, 0, resident.function_groups, 1, &arena, &arena,
+      &resident.program, &resident_group));
+  IREE_ASSERT_OK(loom_aie2p_program_layout_finish(&resident_group, &resident));
+  EXPECT_EQ(resident.byte_length, 14848u);
+  EXPECT_EQ(resident.groups[0].offset, 0u);
+  EXPECT_EQ(resident.requests[1].length, 0u);
+  EXPECT_EQ(resident.requests[2].length, 0u);
+  // Recompiling a caller may change its exact size after retention. The
+  // selected projection reports that growth without mutating the original
+  // candidate's requirements or native function placement.
+  resident_group.code.byte_length = 16386;
+  IREE_ASSERT_OK(loom_aie2p_program_layout_finish(&resident_group, &resident));
+  EXPECT_EQ(resident.byte_length, 16388u);
+
+  // The unselected layout still admits its original loading plan from the
+  // same native closure and topology, independently of the resident candidate.
+  IREE_ASSERT_OK(loom_aie2p_program_layout_retain(&native, 1, &arena, &layout));
   const iree_host_size_t expected_groups[] = {0, 0, 1, 0, 2};
   for (size_t i = 0; i < 5; ++i) {
     EXPECT_EQ(layout.function_groups[i], expected_groups[i]);
@@ -200,6 +236,44 @@ TEST(Aie2pProgramLayoutTest, RetainsEquivalentBodiesBeforePhysicalComposition) {
   EXPECT_EQ(groups[2].code.byte_length, 6144u);
   EXPECT_EQ(layout.groups[1].offset, 4608u);
   EXPECT_EQ(layout.groups[2].offset, 4608u);
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
+TEST(Aie2pProgramLayoutTest, CompactionPreservesOriginalLifetimeRequests) {
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+  loom_pipeline_lifetimes_t lifetimes = MakeLifetimes();
+  IREE_ASSERT_OK(loom_pipeline_lifetimes_index(&arena, &lifetimes));
+  const iree_host_size_t owners[] = {0, 1, 2};
+  loom_aie2p_program_layout_t layout;
+  IREE_ASSERT_OK(loom_aie2p_program_layout_initialize(&lifetimes, owners, 3,
+                                                      &arena, &arena, &layout));
+  // The middle phase is resident; the later phase still loads independently.
+  layout.function_groups[1] = 0;
+  layout.requests[0].length = 64;
+  layout.requests[2].length = 112;
+  iree_host_size_t* indices = nullptr;
+  IREE_ASSERT_OK(
+      loom_aie2p_program_layout_compact(3, &arena, &layout, &indices));
+  ASSERT_EQ(layout.group_count, 2u);
+  EXPECT_EQ(layout.request_count, 3u);
+  EXPECT_EQ(indices[0], 0u);
+  EXPECT_EQ(indices[1], 0u);
+  EXPECT_EQ(indices[2], 1u);
+  EXPECT_EQ(layout.function_groups[2], 1u);
+  EXPECT_EQ(layout.groups[1].owner, 2u);
+  EXPECT_EQ(layout.groups[1].request_index, 2u);
+  const loom_aie2p_program_code_group_t native_groups[] = {{.code = {64, 16}},
+                                                           {.code = {113, 16}}};
+  IREE_ASSERT_OK(loom_aie2p_program_layout_finish(native_groups, &layout));
+  EXPECT_EQ(layout.groups[1].offset, 64u);
+  EXPECT_EQ(layout.requests[1].length, 0u);
+  EXPECT_EQ(layout.requests[2].length, 116u);
+  EXPECT_EQ(layout.requests[2].offset, 64u);
+  EXPECT_EQ(layout.byte_length, 180u);
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&pool);
 }

@@ -1120,8 +1120,9 @@ iree_status_t loom_aie2p_configuration_plan_materialize(
         ++plan->error_count;
         return iree_ok_status();
       }
-      loom_aie2p_code_transport_bind(&transport, binding.descriptor_count,
-                                     &binding, &requirement);
+      loom_aie2p_code_transport_bind(
+          &transport, (uint16_t)(program_layout->group_count - 1), &binding,
+          &requirement);
       if (!iree_string_view_is_empty(requirement)) {
         return loom_aie2p_configuration_require(plan, load->op, requirement);
       }
@@ -1149,7 +1150,7 @@ iree_status_t loom_aie2p_configuration_plan_materialize(
     if (plan->error_count) {
       return iree_ok_status();
     }
-    if (program_layout) {
+    if (program_layout && program_layout->group_count > 1) {
       iree_string_view_t requirement;
       IREE_RETURN_IF_ERROR(loom_aie2p_program_catalog_build(
           &transport, &binding, program_layout, tiles[i].linked_tile,

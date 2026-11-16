@@ -28,9 +28,12 @@ iree_status_t loom_aie2p_program_replacement_prepare(
 // Compiles a placement-specific program with ordinary loading calls. Only
 // affected controllers and their callers are recompiled; unchanged helpers
 // borrow the source compiler's detached native results and exact call
-// contracts. Physical admission supplies one descriptor per non-root group and
-// the queue header/command. The prepared layout receives exact native code and
-// placement. The source pipeline scope owns lifetime/execution semantics
+// contracts. Physical selection supplies an upper bound of one descriptor per
+// non-root group and the queue header/command. Exact native retention may
+// remove whole loading groups. One bounded recompilation removes those calls
+// and compacts descriptors; final capacity failure preserves the original
+// loading program. The resulting layout contains only the selected native
+// groups. The source pipeline scope owns lifetime/execution semantics
 // throughout.
 iree_status_t loom_aie2p_program_replacement_compile(
     const loom_aie2p_xdna_artifact_request_t* request,
