@@ -146,13 +146,13 @@ std::optional<MemberObjectClasses> member_object_classes(
     return std::nullopt;
   }
   auto traits = unit.typeTraits();
-  auto* object_type = cxx::unaligned_type(traits.remove_cv(
+  auto* object_type = cxx::unattributed_type(traits.remove_cv(
       traits.remove_reference(expression->baseExpression->type)));
   if (expression->accessOp == cxx::TokenKind::T_MINUS_GREATER) {
     object_type = traits.remove_pointer(object_type);
   }
   auto* object = cxx::type_cast<cxx::ClassType>(
-      cxx::unaligned_type(traits.remove_cv(object_type)));
+      cxx::unattributed_type(traits.remove_cv(object_type)));
   if (!object) {
     return std::nullopt;
   }
@@ -251,7 +251,7 @@ std::optional<CapturedObjectMember> captured_object_member(
     return std::nullopt;
   }
   auto traits = unit.typeTraits();
-  auto* object_type = cxx::type_cast<cxx::ClassType>(cxx::unaligned_type(
+  auto* object_type = cxx::type_cast<cxx::ClassType>(cxx::unattributed_type(
       traits.remove_cv(traits.get_element_type(pointer_field->type()))));
   auto* object_definition = object_type ? object_type->definition() : nullptr;
   if (!object_definition || object_definition->resolvedDefinition() !=

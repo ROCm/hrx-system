@@ -246,7 +246,8 @@ TEST_F(VectorMemoryTest, FragmentFootprintUsesLogicalMatrixShape) {
   int64_t static_indices[] = {INT64_MIN, INT64_MIN};
   loom_op_t* load = nullptr;
   IREE_ASSERT_OK(loom_vector_fragment_load_build(
-      &builder_, /*build_flags=*/0, LOOM_VECTOR_ROLE_RHS, view, indices,
+      &builder_, /*build_flags=*/0, LOOM_VECTOR_ROLE_RHS,
+      LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT, view, indices,
       IREE_ARRAYSIZE(indices), static_indices, IREE_ARRAYSIZE(static_indices),
       LOOM_VALUE_ID_INVALID, shape[0], shape[1], /*auxiliary=*/nullptr,
       /*auxiliary_count=*/0,
@@ -254,6 +255,10 @@ TEST_F(VectorMemoryTest, FragmentFootprintUsesLogicalMatrixShape) {
       loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32,
                           loom_dim_pack_static(8), /*encoding_id=*/0),
       LOOM_LOCATION_UNKNOWN, &load));
+
+  const loom_memory_access_t access = loom_memory_access_cast(module_, load);
+  EXPECT_EQ(loom_memory_access_alias_type(module_, access),
+            LOOM_SCALAR_TYPE_BF16);
 
   loom_vector_memory_footprint_t footprint = {};
   ASSERT_TRUE(loom_vector_memory_footprint_describe(
@@ -321,9 +326,9 @@ TEST_F(VectorMemoryTest, BlockedFragmentFootprintUsesRankThreeShape) {
   loom_op_t* load = nullptr;
   IREE_ASSERT_OK(loom_vector_fragment_load_build(
       &builder_, LOOM_VECTOR_FRAGMENT_LOAD_BUILD_FLAG_HAS_BLOCKS,
-      LOOM_VECTOR_ROLE_LHS, view, indices, IREE_ARRAYSIZE(indices),
-      static_indices, IREE_ARRAYSIZE(static_indices), block_count, rows,
-      columns, /*auxiliary=*/nullptr, /*auxiliary_count=*/0,
+      LOOM_VECTOR_ROLE_LHS, /*instance_flags=*/0, view, indices,
+      IREE_ARRAYSIZE(indices), static_indices, IREE_ARRAYSIZE(static_indices),
+      block_count, rows, columns, /*auxiliary=*/nullptr, /*auxiliary_count=*/0,
       /*cache_scope=*/0, /*cache_temporal=*/0,
       loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_BF16,
                           loom_dim_pack_static(2), /*encoding_id=*/0),
@@ -369,9 +374,10 @@ TEST_F(VectorMemoryTest, FixedRecordFragmentFootprintUsesRecordGeometry) {
   const int64_t static_indices[] = {0, 0};
   loom_op_t* load = nullptr;
   IREE_ASSERT_OK(loom_vector_fragment_load_build(
-      &builder_, /*build_flags=*/0, LOOM_VECTOR_ROLE_LHS, view,
-      /*indices=*/nullptr, /*indices_count=*/0, static_indices,
-      IREE_ARRAYSIZE(static_indices), LOOM_VALUE_ID_INVALID, rows, columns,
+      &builder_, /*build_flags=*/0, LOOM_VECTOR_ROLE_LHS,
+      /*instance_flags=*/0, view, /*indices=*/nullptr, /*indices_count=*/0,
+      static_indices, IREE_ARRAYSIZE(static_indices), LOOM_VALUE_ID_INVALID,
+      rows, columns,
       /*auxiliary=*/nullptr, /*auxiliary_count=*/0,
       /*cache_scope=*/0, /*cache_temporal=*/0,
       loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I8,
@@ -428,10 +434,10 @@ TEST_F(VectorMemoryTest, OpFootprintKindClassifiesMemoryFamilies) {
   int64_t static_indices[] = {INT64_MIN, INT64_MIN};
   loom_op_t* fragment_load = nullptr;
   IREE_ASSERT_OK(loom_vector_fragment_load_build(
-      &builder_, /*build_flags=*/0, LOOM_VECTOR_ROLE_RHS, view, indices,
-      IREE_ARRAYSIZE(indices), static_indices, IREE_ARRAYSIZE(static_indices),
-      LOOM_VALUE_ID_INVALID, shape[0], shape[1], /*auxiliary=*/nullptr,
-      /*auxiliary_count=*/0,
+      &builder_, /*build_flags=*/0, LOOM_VECTOR_ROLE_RHS,
+      /*instance_flags=*/0, view, indices, IREE_ARRAYSIZE(indices),
+      static_indices, IREE_ARRAYSIZE(static_indices), LOOM_VALUE_ID_INVALID,
+      shape[0], shape[1], /*auxiliary=*/nullptr, /*auxiliary_count=*/0,
       /*cache_scope=*/0, /*cache_temporal=*/0,
       loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32,
                           loom_dim_pack_static(8), /*encoding_id=*/0),
@@ -441,9 +447,10 @@ TEST_F(VectorMemoryTest, OpFootprintKindClassifiesMemoryFamilies) {
 
   loom_op_t* fragment_store = nullptr;
   IREE_ASSERT_OK(loom_vector_fragment_store_build(
-      &builder_, /*build_flags=*/0, LOOM_VECTOR_ROLE_RESULT, value, view,
-      indices, IREE_ARRAYSIZE(indices), static_indices,
-      IREE_ARRAYSIZE(static_indices), LOOM_VALUE_ID_INVALID, shape[0], shape[1],
+      &builder_, /*build_flags=*/0, LOOM_VECTOR_ROLE_RESULT,
+      /*instance_flags=*/0, value, view, indices, IREE_ARRAYSIZE(indices),
+      static_indices, IREE_ARRAYSIZE(static_indices), LOOM_VALUE_ID_INVALID,
+      shape[0], shape[1],
       /*cache_scope=*/0,
       /*cache_temporal=*/0, LOOM_LOCATION_UNKNOWN, &fragment_store));
   EXPECT_EQ(loom_vector_memory_op_footprint_kind(module_, fragment_store),
@@ -460,6 +467,9 @@ TEST_F(VectorMemoryTest, OpFootprintKindClassifiesMemoryFamilies) {
       LOOM_LOCATION_UNKNOWN, &vector_load));
   EXPECT_EQ(loom_vector_memory_op_footprint_kind(module_, vector_load),
             LOOM_VECTOR_MEMORY_FOOTPRINT_DENSE);
+  EXPECT_EQ(loom_memory_access_alias_type(
+                module_, loom_memory_access_cast(module_, vector_load)),
+            LOOM_SCALAR_TYPE_NONE);
 
   loom_op_t* vector_store = nullptr;
   IREE_ASSERT_OK(loom_vector_store_build(

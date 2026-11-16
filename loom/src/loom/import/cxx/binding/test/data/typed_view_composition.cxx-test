@@ -55,11 +55,11 @@ kernel.def @typed_view_static_layouts() {
   %34 = func.call readonly @read_view___loom__type__view___loom__type__shape_3__8___const_float____loom__type__encoding_0__2__(%dense_source_layout, %dense_source) : (encoding<layout>, view<3x8xf32, %dense_source_layout>) -> (f32)
   %100 = index.constant 0 : offset
   %43 = buffer.view %output[%100] : buffer -> view<1xf32>
-  view.store<root_in_bounds> %34, %43[0] : f32, view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %34, %43[0] : f32, view<1xf32>
   %44 = func.call readonly @read_view___loom__type__view___loom__type__shape_18446744073709551615__8___const_float____loom__type__encoding_0__2__(%strided_source_dim0, %strided_source_layout, %strided_source) : (index, encoding<layout>, view<[%strided_source_dim0]x8xf32, %strided_source_layout>) -> (f32)
   %99 = index.constant 4 : offset
   %53 = buffer.view %output[%99] : buffer -> view<1xf32>
-  view.store<root_in_bounds> %44, %53[0] : f32, view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %44, %53[0] : f32, view<1xf32>
   kernel.return
 }
 
@@ -85,14 +85,14 @@ func.def @make_view_1(%input: buffer, %input_byte_offset: offset) -> (%68: index
 func.def @read_view___loom__type__view___loom__type__shape_3__8___const_float____loom__type__encoding_0__2__(%source_layout: encoding<layout>, %source: view<3x8xf32, %source_layout>) -> (f32) {
   %109 = index.constant 2 : index
   %108 = index.constant 3 : index
-  %89 = view.load %source[%109, %108] : view<3x8xf32, %source_layout> -> f32
+  %89 = view.load<type_disjoint> %source[%109, %108] : view<3x8xf32, %source_layout> -> f32
   func.return %89 : f32
 }
 
 func.def @read_view___loom__type__view___loom__type__shape_18446744073709551615__8___const_float____loom__type__encoding_0__2__(%source_dim0: index, %source_layout: encoding<layout>, %source: view<[%source_dim0]x8xf32, %source_layout>) -> (f32) {
   %111 = index.constant 2 : index
   %110 = index.constant 3 : index
-  %98 = view.load %source[%111, %110] : view<[%source_dim0]x8xf32, %source_layout> -> f32
+  %98 = view.load<type_disjoint> %source[%111, %110] : view<[%source_dim0]x8xf32, %source_layout> -> f32
   func.return %98 : f32
 }
 
@@ -192,8 +192,8 @@ func.def @copy_view_element___loom__type__view___loom__type__shape_1844674407370
   %68 = index.cast %67 : i64 to index
   %69 = scalar.extui %column : i32 to i64
   %70 = index.cast %69 : i64 to index
-  %71 = view.load %source[%68, %70] : view<[%source_dim0]x8xf32, %source_layout> -> f32
-  view.store %71, %destination[%68, %70] : f32, view<[%destination_dim0]x8xf32, %destination_layout>
+  %71 = view.load<type_disjoint> %source[%68, %70] : view<[%source_dim0]x8xf32, %source_layout> -> f32
+  view.store<type_disjoint> %71, %destination[%68, %70] : f32, view<[%destination_dim0]x8xf32, %destination_layout>
   func.return
 }
 
@@ -267,9 +267,9 @@ kernel.def @typed_view_loop() {
   }
   %106 = index.constant 0 : index
   %cell, %cell_layout = view.subview %selected$121[%106, %106] : view<[%selected_dim0$120]x7xi32, %layout> -> view<1x1xi32, %cell_layout>
-  %92 = view.load %cell[%106, %106] : view<1x1xi32, %cell_layout> -> i32
+  %92 = view.load<type_disjoint> %cell[%106, %106] : view<1x1xi32, %cell_layout> -> i32
   %101 = buffer.view %output[%109] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %92, %101[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %92, %101[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -325,12 +325,12 @@ kernel.def @typed_storage_rank3() {
   %source = buffer.view %input[%input_byte_offset] : buffer -> view<[%source_dim0]x[%source_dim1]x16xf8E4M3, #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.f8e4m3fn<affine=scale_only, payload_elements=16, scale_format=e8m0, scale_group_elements=16, scale_operands=1, scale_topology=block_1d>>>
   %workitem_id_x = kernel.workitem.id<x> : index
   %44 = index.constant 0 : index
-  %33 = view.load %source[%44, %44, %workitem_id_x] : view<[%source_dim0]x[%source_dim1]x16xf8E4M3, #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.f8e4m3fn<affine=scale_only, payload_elements=16, scale_format=e8m0, scale_group_elements=16, scale_operands=1, scale_topology=block_1d>>> -> f8E4M3
+  %33 = view.load<type_disjoint> %source[%44, %44, %workitem_id_x] : view<[%source_dim0]x[%source_dim1]x16xf8E4M3, #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.f8e4m3fn<affine=scale_only, payload_elements=16, scale_format=e8m0, scale_group_elements=16, scale_operands=1, scale_topology=block_1d>>> -> f8E4M3
   %34 = index.cast %workitem_id_x : index to i32
   %35 = scalar.extui %34 : i32 to i64
   %40 = scalar.assume %35 [range(%35, 0, 9223372036854775807)] : i64
   %41 = index.cast %40 : i64 to offset
   %42 = buffer.view %output[%41] : buffer -> view<1xf8E4M3>
-  view.store<root_in_bounds> %33, %42[0] : f8E4M3, view<1xf8E4M3>
+  view.store<root_in_bounds|type_disjoint> %33, %42[0] : f8E4M3, view<1xf8E4M3>
   kernel.return
 }

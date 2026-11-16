@@ -192,7 +192,7 @@ static iree_status_t loom_scf_unroll_build_movement_scopes(
           loom_view_region_table_access_is_stable(
               &movement->view_regions, source->root_value_id,
               source->alias_scope_id, source->restrict_access,
-              source->memory_space)) {
+              source->alias_type, source->memory_space)) {
         varying = false;
       }
     }
@@ -258,9 +258,19 @@ static iree_status_t loom_scf_unroll_endpoints_nonconflicting(
       !loom_movement_endpoint_as_view_region(right, &right_region)) {
     return iree_ok_status();
   }
-  return loom_view_regions_prove_no_conflict(
-      &movement_analysis->view_regions, &left_region, left_region.access_flags,
-      &right_region, right_region.access_flags, out_nonconflicting);
+  const loom_view_region_observation_t left_observation = {
+      .region = &left_region,
+      .flags = left_region.access_flags,
+      .alias_type = left->alias_type,
+  };
+  const loom_view_region_observation_t right_observation = {
+      .region = &right_region,
+      .flags = right_region.access_flags,
+      .alias_type = right->alias_type,
+  };
+  return loom_view_region_observations_prove_no_conflict(
+      &movement_analysis->view_regions, &left_observation, &right_observation,
+      out_nonconflicting);
 }
 
 static bool loom_scf_unroll_request_access_endpoint(

@@ -174,6 +174,7 @@ void loom_low_source_memory_access_plan_make_summary(
   *out_summary = (loom_low_memory_access_summary_t){
       .memory_space = memory_space,
       .source_flags = loom_low_source_memory_access_plan_source_flags(plan),
+      .alias_type = plan->alias_type,
       .alias_root_id = alias_root_id,
       .alias_group_id = LOOM_LOW_MEMORY_ALIAS_ID_NONE,
       .precision_flags = precision_flags,

@@ -78,7 +78,8 @@ enum class memory_space {
 
 // Semantic modifiers attached to one memory access, independently of other
 // accesses through the same view. Flags compose with operator|.
-enum class memory_access {
+enum class memory_access : unsigned {
+  // Retain the semantics inferred from the source object type.
   none = 0,
   // Preserve each access and its order relative to other volatile accesses.
   // Does not provide atomicity, synchronization, or cache coherence.
@@ -86,6 +87,14 @@ enum class memory_access {
   // The complete access lies within its allocation root. Logical view bounds
   // remain checked.
   root_in_bounds = 8,
+  // Promise that this observation aliases only compatible logical scalar
+  // types. Arithmetic and enum source objects infer this promise automatically;
+  // an explicit selector may strengthen a byte-oriented observation.
+  type_disjoint = 16,
+  // Source-only selector permitting this observation to alias objects of any
+  // type. Suppresses the ordinary type-based promise inferred by the C++
+  // importer and is not retained in Loom IR.
+  may_alias = 1u << 31,
 };
 
 static constexpr memory_access operator|(memory_access lhs, memory_access rhs) {

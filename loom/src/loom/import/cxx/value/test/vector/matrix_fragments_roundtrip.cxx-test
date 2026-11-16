@@ -1,6 +1,6 @@
-// RUN: emit cxx
+// RUN: emit cxx roundtrip
 // REQUIRES: loom-export-cxx
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 
 namespace fragment = loom::vector::fragment;
 namespace loomt = loom::type;
@@ -10,20 +10,23 @@ using Output = loomt::view<loomt::shape<16, 16>, _Float16>;
 
 Half16 fragment_origins(Input source, Output output, loomt::index row,
                         loomt::size_type m, loomt::size_type n) {
-  auto fixed = fragment::load<fragment::role::lhs, Half16, 0, 4>(
+  auto fixed = fragment::load<fragment::role::lhs, Half16,
+                              loom::memory_access::may_alias, 0, 4>(
       source, fragment::shape{m, n});
-  auto mixed =
-      fragment::load<fragment::role::rhs, Half16, loomt::dynamic, 4>(
-          source, {row}, fragment::shape{m, n});
-  fragment::store<fragment::role::result, 0, 0>(
+  auto mixed = fragment::load<fragment::role::rhs, Half16,
+                              loom::memory_access::may_alias, loomt::dynamic,
+                              4>(source, {row}, fragment::shape{m, n});
+  fragment::store<fragment::role::result, loom::memory_access::may_alias, 0,
+                  0>(
       fixed, output, fragment::shape{m, n});
-  fragment::store<fragment::role::result, loomt::dynamic, 8>(
-      mixed, output, {row}, fragment::shape{m, n});
+  fragment::store<fragment::role::result, loom::memory_access::may_alias,
+                  loomt::dynamic, 8>(mixed, output, {row},
+                                     fragment::shape{m, n});
   return fixed;
 }
 
 // ----
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 
 #include <stdfloat>
 
@@ -34,9 +37,9 @@ Float16x16 fragment_origins(loom::type::view<loom::type::shape<16, 16>, const st
 
 [[loom::symbol("fragment_origins")]]
 Float16x16 fragment_origins(loom::type::view<loom::type::shape<16, 16>, const std::float16_t> source, loom::type::view<loom::type::shape<16, 16>, std::float16_t> output, loom::type::index row, unsigned long long m, unsigned long long n) {
-  Float16x16 fixed = loom::vector::fragment::load<loom::vector::fragment::role::lhs, Float16x16, 0, 4>(source, loom::vector::fragment::shape{loom::index::cast(static_cast<long long>(m)), loom::index::cast(static_cast<long long>(n))});
-  Float16x16 mixed = loom::vector::fragment::load<loom::vector::fragment::role::rhs, Float16x16, loom::type::dynamic, 4>(source, loom::type::indices{row}, loom::vector::fragment::shape{loom::index::cast(static_cast<long long>(m)), loom::index::cast(static_cast<long long>(n))});
-  loom::vector::fragment::store<loom::vector::fragment::role::result, 0, 0>(fixed, output, loom::vector::fragment::shape{loom::index::cast(static_cast<long long>(m)), loom::index::cast(static_cast<long long>(n))});
-  loom::vector::fragment::store<loom::vector::fragment::role::result, loom::type::dynamic, 8>(mixed, output, loom::type::indices{row}, loom::vector::fragment::shape{loom::index::cast(static_cast<long long>(m)), loom::index::cast(static_cast<long long>(n))});
+  Float16x16 fixed = loom::vector::fragment::load<loom::vector::fragment::role::lhs, Float16x16, loom::memory_access::may_alias, 0, 4>(source, loom::vector::fragment::shape{loom::index::cast(static_cast<long long>(m)), loom::index::cast(static_cast<long long>(n))});
+  Float16x16 mixed = loom::vector::fragment::load<loom::vector::fragment::role::rhs, Float16x16, loom::memory_access::may_alias, loom::type::dynamic, 4>(source, loom::type::indices{row}, loom::vector::fragment::shape{loom::index::cast(static_cast<long long>(m)), loom::index::cast(static_cast<long long>(n))});
+  loom::vector::fragment::store<loom::vector::fragment::role::result, loom::memory_access::may_alias, 0, 0>(fixed, output, loom::vector::fragment::shape{loom::index::cast(static_cast<long long>(m)), loom::index::cast(static_cast<long long>(n))});
+  loom::vector::fragment::store<loom::vector::fragment::role::result, loom::memory_access::may_alias, loom::type::dynamic, 8>(mixed, output, loom::type::indices{row}, loom::vector::fragment::shape{loom::index::cast(static_cast<long long>(m)), loom::index::cast(static_cast<long long>(n))});
   return fixed;
 }

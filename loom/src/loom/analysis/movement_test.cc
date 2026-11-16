@@ -409,10 +409,11 @@ TEST_F(MovementTest, ClassifiesMaskedLoadPolicyAndMask) {
   int64_t static_indices[] = {0};
   loom_op_t* op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_mask_build(
-      &builder_, LOOM_VECTOR_LOAD_MASK_BUILD_FLAG_HAS_CACHE_SCOPE, view,
-      nullptr, 0, static_indices, IREE_ARRAYSIZE(static_indices), mask,
-      passthrough, LOOM_CACHE_SCOPE_WORKGROUP, 0,
-      VectorType1D(LOOM_SCALAR_TYPE_F32, 4), LOOM_LOCATION_UNKNOWN, &op));
+      &builder_, LOOM_VECTOR_LOAD_MASK_BUILD_FLAG_HAS_CACHE_SCOPE,
+      /*instance_flags=*/0, view, nullptr, 0, static_indices,
+      IREE_ARRAYSIZE(static_indices), mask, passthrough,
+      LOOM_CACHE_SCOPE_WORKGROUP, 0, VectorType1D(LOOM_SCALAR_TYPE_F32, 4),
+      LOOM_LOCATION_UNKNOWN, &op));
 
   loom_movement_analysis_t analysis = {};
   InitializeAnalysis(&analysis);
@@ -438,7 +439,7 @@ TEST_F(MovementTest, ClassifiesVectorGatherOffsets) {
   int64_t static_indices[] = {0};
   loom_op_t* op = nullptr;
   IREE_ASSERT_OK(loom_vector_gather_build(
-      &builder_, 0, view, nullptr, 0, static_indices,
+      &builder_, 0, /*instance_flags=*/0, view, nullptr, 0, static_indices,
       IREE_ARRAYSIZE(static_indices), offsets, 0, 0,
       VectorType1D(LOOM_SCALAR_TYPE_F32, 4), LOOM_LOCATION_UNKNOWN, &op));
 
@@ -468,8 +469,8 @@ TEST_F(MovementTest, ClassifiesMaskedScatterOffsets) {
   int64_t static_indices[] = {0};
   loom_op_t* op = nullptr;
   IREE_ASSERT_OK(loom_vector_scatter_mask_build(
-      &builder_, 0, value, view, nullptr, 0, static_indices,
-      IREE_ARRAYSIZE(static_indices), offsets, mask, 0, 0,
+      &builder_, 0, /*instance_flags=*/0, value, view, nullptr, 0,
+      static_indices, IREE_ARRAYSIZE(static_indices), offsets, mask, 0, 0,
       LOOM_LOCATION_UNKNOWN, &op));
 
   loom_movement_analysis_t analysis = {};

@@ -226,6 +226,9 @@ typedef struct loom_low_source_memory_access_plan_t {
   uint8_t view_rank;
   // Participant domain in which the origin and retained strides are identical.
   uint8_t uniform_scope;
+  // Logical scalar type used by the source observation for type-disjoint
+  // aliasing, or NONE when the observation is type-universal.
+  loom_scalar_type_t alias_type;
   // Optional caller-owned strides for all view axes, retained independently of
   // the indexed origin. Fragment consumers require these even at zero origin.
   const loom_low_source_memory_axis_byte_stride_t* axis_byte_strides;
@@ -324,6 +327,12 @@ typedef struct loom_low_source_memory_access_plan_t {
   // Callers must separately establish the memory contract at that entry.
   bool reads_entry_contents;
 } loom_low_source_memory_access_plan_t;
+
+static_assert(
+    offsetof(loom_low_source_memory_access_plan_t, alias_type) +
+            sizeof(((loom_low_source_memory_access_plan_t*)0)->alias_type) <=
+        offsetof(loom_low_source_memory_access_plan_t, axis_byte_strides),
+    "the alias type must fit before the existing source-plan pointer field");
 
 // Scope over which the complete origin and retained view strides are identical.
 // Reads only canonical source facts; targets need no source-producer walk.

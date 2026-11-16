@@ -37,19 +37,19 @@ Words vector_access(View values, Words replacement) {
 // ----
 func.def public @scalar_access(%values: view<4xi32>, %replacement: i32) -> (i32) {
   %81 = index.constant 0 : index
-  %ordinary = view.load %values[%81] : view<4xi32> -> i32
+  %ordinary = view.load<type_disjoint> %values[%81] : view<4xi32> -> i32
   %80 = index.constant 1 : index
-  %rooted = view.load<root_in_bounds> %values[%80] : view<4xi32> -> i32
+  %rooted = view.load<root_in_bounds|type_disjoint> %values[%80] : view<4xi32> -> i32
   %79 = index.constant 2 : index
-  %11 = view.load<volatile> %values[%79] : view<4xi32> -> i32
-  %observed = view.load<volatile> %values[%79] : view<4xi32> -> i32
+  %11 = view.load<volatile|type_disjoint> %values[%79] : view<4xi32> -> i32
+  %observed = view.load<volatile|type_disjoint> %values[%79] : view<4xi32> -> i32
   %77 = index.constant 3 : index
-  %both = view.load<volatile|root_in_bounds> %values[%77] : view<4xi32> -> i32
-  view.store %replacement, %values[%81] : i32, view<4xi32>
-  view.store<root_in_bounds> %replacement, %values[%80] : i32, view<4xi32>
-  view.store<volatile> %replacement, %values[%79] : i32, view<4xi32>
-  view.store<volatile|root_in_bounds> %replacement, %values[%77] : i32, view<4xi32>
-  view.store<volatile|root_in_bounds> %replacement, %values[%77] : i32, view<4xi32>
+  %both = view.load<volatile|root_in_bounds|type_disjoint> %values[%77] : view<4xi32> -> i32
+  view.store<type_disjoint> %replacement, %values[%81] : i32, view<4xi32>
+  view.store<root_in_bounds|type_disjoint> %replacement, %values[%80] : i32, view<4xi32>
+  view.store<volatile|type_disjoint> %replacement, %values[%79] : i32, view<4xi32>
+  view.store<volatile|root_in_bounds|type_disjoint> %replacement, %values[%77] : i32, view<4xi32>
+  view.store<volatile|root_in_bounds|type_disjoint> %replacement, %values[%77] : i32, view<4xi32>
   %28 = scalar.addi %ordinary, %rooted : i32
   %29 = scalar.addi %28, %observed : i32
   %30 = scalar.addi %29, %both : i32
@@ -58,20 +58,63 @@ func.def public @scalar_access(%values: view<4xi32>, %replacement: i32) -> (i32)
 
 func.def public @vector_access(%values: view<4xi32>, %replacement: vector<4xi32>) -> (vector<4xi32>) {
   %91 = index.constant 0 : index
-  %ordinary = vector.load %values[%91] : view<4xi32> -> vector<4xi32>
-  %rooted = vector.load<root_in_bounds> %values[%91] : view<4xi32> -> vector<4xi32>
-  %45 = vector.load<volatile> %values[%91] : view<4xi32> -> vector<4xi32>
-  %observed = vector.load<volatile> %values[%91] : view<4xi32> -> vector<4xi32>
-  %both = vector.load<volatile|root_in_bounds> %values[%91] : view<4xi32> -> vector<4xi32>
-  vector.store %replacement, %values[%91] : vector<4xi32>, view<4xi32>
-  vector.store<root_in_bounds> %replacement, %values[%91] : vector<4xi32>, view<4xi32>
-  vector.store<volatile> %replacement, %values[%91] : vector<4xi32>, view<4xi32>
-  vector.store<volatile|root_in_bounds> %replacement, %values[%91] : vector<4xi32>, view<4xi32>
-  vector.store<volatile|root_in_bounds> %replacement, %values[%91] : vector<4xi32>, view<4xi32>
+  %ordinary = vector.load<type_disjoint> %values[%91] : view<4xi32> -> vector<4xi32>
+  %rooted = vector.load<root_in_bounds|type_disjoint> %values[%91] : view<4xi32> -> vector<4xi32>
+  %45 = vector.load<volatile|type_disjoint> %values[%91] : view<4xi32> -> vector<4xi32>
+  %observed = vector.load<volatile|type_disjoint> %values[%91] : view<4xi32> -> vector<4xi32>
+  %both = vector.load<volatile|root_in_bounds|type_disjoint> %values[%91] : view<4xi32> -> vector<4xi32>
+  vector.store<type_disjoint> %replacement, %values[%91] : vector<4xi32>, view<4xi32>
+  vector.store<root_in_bounds|type_disjoint> %replacement, %values[%91] : vector<4xi32>, view<4xi32>
+  vector.store<volatile|type_disjoint> %replacement, %values[%91] : vector<4xi32>, view<4xi32>
+  vector.store<volatile|root_in_bounds|type_disjoint> %replacement, %values[%91] : vector<4xi32>, view<4xi32>
+  vector.store<volatile|root_in_bounds|type_disjoint> %replacement, %values[%91] : vector<4xi32>, view<4xi32>
   %69 = vector.addi %ordinary, %rooted : vector<4xi32>
   %70 = vector.addi %69, %observed : vector<4xi32>
   %71 = vector.addi %70, %both : vector<4xi32>
   func.return %71 : vector<4xi32>
+}
+
+// ====
+// Character and may_alias objects remain universal unless the source makes an
+// explicit promise. An explicit may_alias selector can likewise suppress the
+// promise ordinarily inferred for an arithmetic object.
+#include <loomcxx/view.h>
+using Bytes = loom::type::view<loom::type::shape<4>, unsigned char>;
+using Words = loom::type::view<loom::type::shape<4>, unsigned>;
+typedef unsigned AliasingWord __attribute__((may_alias));
+
+unsigned alias_contracts(Bytes bytes, Words words) {
+  unsigned ordinary_byte = loom::view::load(bytes, 0);
+  unsigned promised_byte =
+      loom::view::load<loom::memory_access::type_disjoint>(bytes, 1);
+  unsigned suppressed_word =
+      loom::view::load<loom::memory_access::may_alias>(words, 2);
+  return ordinary_byte + promised_byte + suppressed_word;
+}
+
+unsigned attributed_access(const AliasingWord* source) {
+  return *source;
+}
+
+// ----
+func.def public @alias_contracts(%bytes: view<4xi8>, %words: view<4xi32>) -> (i32) {
+  %23 = index.constant 0 : index
+  %5 = view.load %bytes[%23] : view<4xi8> -> i8
+  %ordinary_byte = scalar.extui %5 : i8 to i32
+  %22 = index.constant 1 : index
+  %9 = view.load<type_disjoint> %bytes[%22] : view<4xi8> -> i8
+  %promised_byte = scalar.extui %9 : i8 to i32
+  %21 = index.constant 2 : index
+  %suppressed_word = view.load %words[%21] : view<4xi32> -> i32
+  %14 = scalar.addi %ordinary_byte, %promised_byte : i32
+  %15 = scalar.addi %14, %suppressed_word : i32
+  func.return %15 : i32
+}
+
+func.def public @attributed_access(%source: buffer, %source_byte_offset: offset) -> (i32) {
+  %19 = buffer.view %source[%source_byte_offset] : buffer -> view<1xi32>
+  %20 = view.load<root_in_bounds> %19[0] : view<1xi32> -> i32
+  func.return %20 : i32
 }
 
 // ====
@@ -92,9 +135,9 @@ void dynamic_access(View values, loomt::index rows) {
 // ----
 func.def public @dynamic_access(%values_dim0: index, %values: view<[%values_dim0]x4xf32>, %rows: index) {
   %36 = index.constant 0 : index
-  %first = vector.load<volatile> %values[%36, %36] : view<[%values_dim0]x4xf32> -> vector<[%rows]x4xf32>
-  vector.store<volatile> %first, %values[%36, %36] : vector<[%rows]x4xf32>, view<[%values_dim0]x4xf32>
-  %second = vector.load<volatile|root_in_bounds> %values[%36, %36] : view<[%values_dim0]x4xf32> -> vector<[%rows]x4xf32>
-  vector.store<volatile|root_in_bounds> %second, %values[%36, %36] : vector<[%rows]x4xf32>, view<[%values_dim0]x4xf32>
+  %first = vector.load<volatile|type_disjoint> %values[%36, %36] : view<[%values_dim0]x4xf32> -> vector<[%rows]x4xf32>
+  vector.store<volatile|type_disjoint> %first, %values[%36, %36] : vector<[%rows]x4xf32>, view<[%values_dim0]x4xf32>
+  %second = vector.load<volatile|root_in_bounds|type_disjoint> %values[%36, %36] : view<[%values_dim0]x4xf32> -> vector<[%rows]x4xf32>
+  vector.store<volatile|root_in_bounds|type_disjoint> %second, %values[%36, %36] : vector<[%rows]x4xf32>, view<[%values_dim0]x4xf32>
   func.return
 }

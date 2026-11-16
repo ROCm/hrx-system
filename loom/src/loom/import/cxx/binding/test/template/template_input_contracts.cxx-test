@@ -14,7 +14,7 @@ func.def public @entry(%value: view<4x8x6xf32>) -> (f32) {
   %26 = index.constant 3 : index
   %25 = index.constant 7 : index
   %24 = index.constant 5 : index
-  %22 = view.load %value[%26, %25, %24] : view<4x8x6xf32> -> f32
+  %22 = view.load<type_disjoint> %value[%26, %25, %24] : view<4x8x6xf32> -> f32
   func.return %22 : f32
 }
 
@@ -33,7 +33,7 @@ float entry(Fixed value) { return loom::template_apply<read>(value); }
 // ----
 func.def public @entry(%value: view<16xf32>) -> (f32) {
   %14 = index.constant 15 : index
-  %12 = view.load %value[%14] : view<16xf32> -> f32
+  %12 = view.load<type_disjoint> %value[%14] : view<16xf32> -> f32
   func.return %12 : f32
 }
 
@@ -53,7 +53,7 @@ float entry(Fixed value) { return loom::template_apply<read>(value); }
 // ----
 func.def public @entry(%value: view<16xf32>) -> (f32) {
   %18 = index.constant 15 : index
-  %16 = view.load %value[%18] : view<16xf32> -> f32
+  %16 = view.load<type_disjoint> %value[%18] : view<16xf32> -> f32
   func.return %16 : f32
 }
 
@@ -73,7 +73,7 @@ float entry(Family value) { return loom::template_apply<read>(value); }
 // ----
 func.def public @entry(%value: view<16xf32>) -> (f32) {
   %15 = index.constant 15 : index
-  %13 = view.load %value[%15] : view<16xf32> -> f32
+  %13 = view.load<type_disjoint> %value[%15] : view<16xf32> -> f32
   func.return %13 : f32
 }
 

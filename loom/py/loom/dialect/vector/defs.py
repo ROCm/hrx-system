@@ -40,7 +40,7 @@ from loom.assembly import (
 from loom.dialect.atomic import AtomicAccessFlags, AtomicKind, AtomicMemoryFlags, AtomicOrdering, AtomicScope
 from loom.dialect.cache import CacheScope, CacheTemporal
 from loom.dialect.combining import CombiningKind
-from loom.dialect.memory import MemoryAccessFlags
+from loom.dialect.memory import MemoryAccessFlags, TypeDisjointMemoryAccessFlags
 from loom.dialect.scalar import (
     ClampFMode,
     FastMathFlags,
@@ -1577,6 +1577,18 @@ def _indexed_memory_attrs() -> list[AttrDef]:
     ]
 
 
+def _type_disjoint_memory_attrs() -> list[AttrDef]:
+    return [
+        AttrDef(
+            "memory_flags",
+            ATTR_TYPE_FLAGS,
+            optional=True,
+            enum_def=TypeDisjointMemoryAccessFlags,
+        ),
+        *_indexed_memory_attrs(),
+    ]
+
+
 def _memory_access_interface(
     *,
     value: str | None = None,
@@ -1683,7 +1695,7 @@ vector_fragment_load = Op(
             optional=True,
             doc="Sorted auxiliary operand keys mapped to auxiliary operand ordinals.",
         ),
-        *_indexed_memory_attrs(),
+        *_type_disjoint_memory_attrs(),
     ],
     traits=[REFINABLE_RESULT_TYPE_REFS],
     effects=[Reads("view")],
@@ -1692,7 +1704,7 @@ vector_fragment_load = Op(
     verify="loom_vector_fragment_load_verify",
     facts="loom_vector_fragment_load_facts",
     format=[
-        TemplateParam("role"),
+        TemplateParamFlags("role", "memory_flags"),
         Ref("view"),
         IndexList("indices", "static_indices"),
         kw("shape"),
@@ -1762,13 +1774,13 @@ vector_fragment_store = Op(
     ],
     attrs=[
         AttrDef("role", ATTR_TYPE_ENUM, enum_def=VectorFragmentRole),
-        *_indexed_memory_attrs(),
+        *_type_disjoint_memory_attrs(),
     ],
     effects=[Writes("view")],
     interfaces=[CachePolicyInterface(), _memory_access_interface(value="value")],
     verify="loom_vector_fragment_store_verify",
     format=[
-        TemplateParam("role"),
+        TemplateParamFlags("role", "memory_flags"),
         Ref("value"),
         COMMA,
         Ref("view"),
@@ -1905,7 +1917,7 @@ vector_load_mask = Op(
         Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical origin indices.", variadic=True),
     ],
     results=[Result("result", VECTOR, doc="Loaded vector value.")],
-    attrs=_indexed_memory_attrs(),
+    attrs=_type_disjoint_memory_attrs(),
     constraints=[
         HasI1Element("mask"),
         SameElementType("view", "passthrough", "result"),
@@ -1917,6 +1929,7 @@ vector_load_mask = Op(
     verify="loom_vector_load_mask_verify",
     canonicalize="loom_vector_masked_memory_canonicalize",
     format=[
+        Flags("memory_flags"),
         Ref("view"),
         IndexList("indices", "static_indices"),
         COMMA,
@@ -1946,7 +1959,7 @@ vector_store_mask = Op(
         Operand("mask", VECTOR, doc="i1 vector mask selecting stored lanes."),
         Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical origin indices.", variadic=True),
     ],
-    attrs=_indexed_memory_attrs(),
+    attrs=_type_disjoint_memory_attrs(),
     constraints=[
         HasI1Element("mask"),
         SameElementType("value", "view"),
@@ -1957,6 +1970,7 @@ vector_store_mask = Op(
     verify="loom_vector_store_mask_verify",
     canonicalize="loom_vector_masked_memory_canonicalize",
     format=[
+        Flags("memory_flags"),
         Ref("value"),
         COMMA,
         Ref("view"),
@@ -1992,7 +2006,7 @@ vector_load_expand = Op(
         Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical origin indices.", variadic=True),
     ],
     results=[Result("result", VECTOR, doc="Expanded loaded vector value.")],
-    attrs=_indexed_memory_attrs(),
+    attrs=_type_disjoint_memory_attrs(),
     constraints=[
         HasRankOneVector("result"),
         HasI1Element("mask"),
@@ -2005,6 +2019,7 @@ vector_load_expand = Op(
     verify="loom_vector_load_expand_verify",
     canonicalize="loom_vector_masked_memory_canonicalize",
     format=[
+        Flags("memory_flags"),
         Ref("view"),
         IndexList("indices", "static_indices"),
         COMMA,
@@ -2034,7 +2049,7 @@ vector_store_compress = Op(
         Operand("mask", VECTOR, doc="i1 rank-1 vector mask selecting stored lanes."),
         Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical origin indices.", variadic=True),
     ],
-    attrs=_indexed_memory_attrs(),
+    attrs=_type_disjoint_memory_attrs(),
     constraints=[
         HasRankOneVector("value"),
         HasI1Element("mask"),
@@ -2046,6 +2061,7 @@ vector_store_compress = Op(
     verify="loom_vector_store_compress_verify",
     canonicalize="loom_vector_masked_memory_canonicalize",
     format=[
+        Flags("memory_flags"),
         Ref("value"),
         COMMA,
         Ref("view"),
@@ -2080,7 +2096,7 @@ vector_gather = Op(
         Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical origin indices.", variadic=True),
     ],
     results=[Result("result", VECTOR, doc="Gathered vector value.")],
-    attrs=_indexed_memory_attrs(),
+    attrs=_type_disjoint_memory_attrs(),
     constraints=[
         HasIndexOrNonI1IntegerElement("offsets"),
         SameElementType("view", "result"),
@@ -2091,6 +2107,7 @@ vector_gather = Op(
     verify="loom_vector_gather_verify",
     canonicalize="loom_vector_gather_scatter_canonicalize",
     format=[
+        Flags("memory_flags"),
         Ref("view"),
         IndexList("indices", "static_indices"),
         GLUE,
@@ -2126,7 +2143,7 @@ vector_scatter = Op(
         Operand("offsets", VECTOR, role=OperandRole.ACCESS_PATH, doc="Per-lane signed element offsets from the logical origin."),
         Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical origin indices.", variadic=True),
     ],
-    attrs=_indexed_memory_attrs(),
+    attrs=_type_disjoint_memory_attrs(),
     constraints=[
         HasIndexOrNonI1IntegerElement("offsets"),
         SameElementType("value", "view"),
@@ -2137,6 +2154,7 @@ vector_scatter = Op(
     verify="loom_vector_scatter_verify",
     canonicalize="loom_vector_gather_scatter_canonicalize",
     format=[
+        Flags("memory_flags"),
         Ref("value"),
         COMMA,
         Ref("view"),
@@ -2175,7 +2193,7 @@ vector_gather_mask = Op(
         Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical origin indices.", variadic=True),
     ],
     results=[Result("result", VECTOR, doc="Gathered vector value.")],
-    attrs=_indexed_memory_attrs(),
+    attrs=_type_disjoint_memory_attrs(),
     constraints=[
         HasI1Element("mask"),
         HasIndexOrNonI1IntegerElement("offsets"),
@@ -2188,6 +2206,7 @@ vector_gather_mask = Op(
     verify="loom_vector_gather_mask_verify",
     canonicalize="loom_vector_masked_memory_canonicalize",
     format=[
+        Flags("memory_flags"),
         Ref("view"),
         IndexList("indices", "static_indices"),
         GLUE,
@@ -2226,7 +2245,7 @@ vector_scatter_mask = Op(
         Operand("mask", VECTOR, doc="i1 vector mask selecting stored lanes."),
         Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical origin indices.", variadic=True),
     ],
-    attrs=_indexed_memory_attrs(),
+    attrs=_type_disjoint_memory_attrs(),
     constraints=[
         HasI1Element("mask"),
         HasIndexOrNonI1IntegerElement("offsets"),
@@ -2238,6 +2257,7 @@ vector_scatter_mask = Op(
     verify="loom_vector_scatter_mask_verify",
     canonicalize="loom_vector_masked_memory_canonicalize",
     format=[
+        Flags("memory_flags"),
         Ref("value"),
         COMMA,
         Ref("view"),

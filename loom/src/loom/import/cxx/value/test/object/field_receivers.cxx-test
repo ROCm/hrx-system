@@ -27,7 +27,7 @@ func.def @Cursor__reset_value() -> (i32) {
 
 func.def inline @Cursor___Cursor_value(%this_position: i32, %this_output: buffer, %this_output_byte_offset: offset) {
   %8 = buffer.view %this_output[%this_output_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %this_position, %8[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %this_position, %8[0] : i32, view<1xi32>
   func.return
 }
 
@@ -229,7 +229,7 @@ func.def public @copy_receiver(%input: buffer, %input_byte_offset: offset, %amou
   %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
   %21 = index.cast %20 : i64 to offset
   %22 = buffer.view %shifted_pointer[%21] : buffer -> view<1xf32>
-  %23 = view.load<root_in_bounds> %22[0] : view<1xf32> -> f32
+  %23 = view.load<root_in_bounds|type_disjoint> %22[0] : view<1xf32> -> f32
   %24 = scalar.constant 0 : i32
   %25 = scalar.extsi %24 : i32 to i64
   %26 = scalar.constant 4 : i64
@@ -239,7 +239,7 @@ func.def public @copy_receiver(%input: buffer, %input_byte_offset: offset, %amou
   %30 = scalar.assume %29 [range(%29, 0, 9223372036854775807)] : i64
   %31 = index.cast %30 : i64 to offset
   %32 = buffer.view %previous_pointer[%31] : buffer -> view<1xf32>
-  %33 = view.load<root_in_bounds> %32[0] : view<1xf32> -> f32
+  %33 = view.load<root_in_bounds|type_disjoint> %32[0] : view<1xf32> -> f32
   %34 = scalar.addf %23, %33 : f32
   %35 = scalar.sitofp %cursor_length$13 : i32 to f32
   %36 = scalar.addf %34, %35 : f32
@@ -302,7 +302,7 @@ func.def @Base__copy_storage(%this: buffer, %this_byte_offset: offset) -> (i32) 
   %11 = index.constant 0 : offset
   %12 = index.add %this_byte_offset, %11 : offset
   %13 = buffer.view %this[%12] : buffer -> view<1xi32>
-  %14 = view.load<root_in_bounds> %13[0] : view<1xi32> -> i32
+  %14 = view.load<root_in_bounds|type_disjoint> %13[0] : view<1xi32> -> i32
   func.return %14 : i32
 }
 

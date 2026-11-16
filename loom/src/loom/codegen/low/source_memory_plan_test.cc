@@ -174,9 +174,10 @@ TEST_F(SourceMemoryPlanTest, StaticDenseLoadIncludesViewBase) {
   int64_t static_indices[] = {3};
   loom_op_t* load_op = nullptr;
   IREE_ASSERT_OK(loom_vector_load_build(
-      &builder_, 0, /*instance_flags=*/0, loom_buffer_view_result(view_op),
-      nullptr, 0, static_indices, IREE_ARRAYSIZE(static_indices), 0, 0,
-      VectorType1D(4), LOOM_LOCATION_UNKNOWN, &load_op));
+      &builder_, 0, LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT,
+      loom_buffer_view_result(view_op), nullptr, 0, static_indices,
+      IREE_ARRAYSIZE(static_indices), 0, 0, VectorType1D(4),
+      LOOM_LOCATION_UNKNOWN, &load_op));
 
   loom_value_fact_table_t facts = {0};
   ComputeFacts(&facts);
@@ -188,6 +189,7 @@ TEST_F(SourceMemoryPlanTest, StaticDenseLoadIncludesViewBase) {
   EXPECT_EQ(plan.base_view_value_id, loom_buffer_view_result(view_op));
   EXPECT_EQ(plan.root_value_id, buffer);
   EXPECT_EQ(plan.memory_space, LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN);
+  EXPECT_EQ(plan.alias_type, LOOM_SCALAR_TYPE_F32);
   EXPECT_EQ(plan.address_layout,
             LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR);
   EXPECT_EQ(plan.element_byte_count, 4u);
@@ -1527,6 +1529,7 @@ TEST_F(SourceMemoryPlanTest, SummaryCapturesStridedPacketSlot) {
   loom_low_source_memory_access_plan_t plan = {
       .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE,
       .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
+      .alias_type = LOOM_SCALAR_TYPE_F16,
       .alias_scope_id = 7,
       .element_byte_count = 2,
       .vector_lane_count = 8,
@@ -1540,6 +1543,7 @@ TEST_F(SourceMemoryPlanTest, SummaryCapturesStridedPacketSlot) {
   loom_low_byte_interval_t interval = {};
   loom_low_memory_access_summary_t summary = {};
   loom_low_source_memory_access_plan_make_summary(&plan, &interval, &summary);
+  EXPECT_EQ(summary.alias_type, LOOM_SCALAR_TYPE_F16);
   EXPECT_TRUE(
       iree_any_bit_set(summary.precision_flags,
                        LOOM_LOW_MEMORY_ACCESS_PRECISION_STRIDED_INTERVAL));

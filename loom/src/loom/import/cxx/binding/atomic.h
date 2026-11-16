@@ -88,7 +88,7 @@ class AtomicIntrinsic {
   loom_atomic_ordering_t failure_ordering_;
   // Explicit source synchronization scope, preserved without narrowing.
   loom_atomic_scope_t scope_;
-  // Explicit physical-root proof selected by the source specialization.
+  // Inferred and explicitly selected semantics for one memory observation.
   loom_memory_access_flags_t memory_flags_;
   // Typed source view contract, or null when this binding consumes a pointer.
   const ViewPartition* source_view_;

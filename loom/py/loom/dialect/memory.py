@@ -55,8 +55,28 @@ MemoryAccessFlags = EnumDef(
                 "semantics."
             ),
         ),
+        EnumCase(
+            "type_disjoint",
+            16,
+            doc=(
+                "Permit this observation to be proven disjoint from another "
+                "type-disjoint observation when their logical view element "
+                "types differ. Omission remains type-universal. This is an "
+                "aliasing promise only and does not change the accessed bytes "
+                "or execution semantics."
+            ),
+        ),
     ],
     doc="Semantic modifiers shared by scalar and vector memory accesses.",
+    c_type="loom_memory_access_flags_t",
+    c_const_prefix="LOOM_MEMORY_ACCESS_FLAG",
+    c_include="loom/ops/op_defs.h",
+)
+
+TypeDisjointMemoryAccessFlags = EnumDef(
+    "TypeDisjointMemoryAccessFlags",
+    [MemoryAccessFlags.case("type_disjoint")],
+    doc="Type-based aliasing promise for accesses without other memory flags.",
     c_type="loom_memory_access_flags_t",
     c_const_prefix="LOOM_MEMORY_ACCESS_FLAG",
     c_include="loom/ops/op_defs.h",
@@ -84,4 +104,9 @@ LowMemoryAccessFlags = EnumDef(
     c_include="loom/ops/op_defs.h",
 )
 
-__all__ = ["LowMemoryAccessFlags", "MemoryAccessFlags", "MemorySpace"]
+__all__ = [
+    "LowMemoryAccessFlags",
+    "MemoryAccessFlags",
+    "MemorySpace",
+    "TypeDisjointMemoryAccessFlags",
+]

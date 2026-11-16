@@ -1,7 +1,7 @@
 // RUN: emit source-low @fp4_e4m3_mma target=amdgpu:gfx1250 output=low
 
 #include <loomcxx/encoding.h>
-#include <loomcxx/vector.h>
+#include <loomcxx/fragment.h>
 
 namespace fragment = loom::vector::fragment;
 

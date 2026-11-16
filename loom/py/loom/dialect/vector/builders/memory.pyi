@@ -14,6 +14,7 @@ class VectorMemoryMixin:
         self,
         *,
         role: str,
+        memory_flags: str = ...,
         view: ValueRef,
         indices: list[int | ValueRef],
         blocks: ValueRef | None = ...,
@@ -32,6 +33,7 @@ class VectorMemoryMixin:
         self,
         *,
         role: str,
+        memory_flags: str = ...,
         value: ValueRef,
         view: ValueRef,
         indices: list[int | ValueRef],
@@ -70,6 +72,7 @@ class VectorMemoryMixin:
     def load_mask(
         self,
         *,
+        memory_flags: str = ...,
         view: ValueRef,
         indices: list[int | ValueRef],
         mask: ValueRef,
@@ -85,6 +88,7 @@ class VectorMemoryMixin:
     def store_mask(
         self,
         *,
+        memory_flags: str = ...,
         value: ValueRef,
         view: ValueRef,
         indices: list[int | ValueRef],
@@ -96,6 +100,7 @@ class VectorMemoryMixin:
     def expand(
         self,
         *,
+        memory_flags: str = ...,
         view: ValueRef,
         indices: list[int | ValueRef],
         mask: ValueRef,
@@ -111,6 +116,7 @@ class VectorMemoryMixin:
     def compress(
         self,
         *,
+        memory_flags: str = ...,
         value: ValueRef,
         view: ValueRef,
         indices: list[int | ValueRef],
@@ -122,6 +128,7 @@ class VectorMemoryMixin:
     def gather(
         self,
         *,
+        memory_flags: str = ...,
         view: ValueRef,
         indices: list[int | ValueRef],
         offsets: ValueRef,
@@ -136,6 +143,7 @@ class VectorMemoryMixin:
     def scatter(
         self,
         *,
+        memory_flags: str = ...,
         value: ValueRef,
         view: ValueRef,
         indices: list[int | ValueRef],
@@ -147,6 +155,7 @@ class VectorMemoryMixin:
     def gather_mask(
         self,
         *,
+        memory_flags: str = ...,
         view: ValueRef,
         indices: list[int | ValueRef],
         offsets: ValueRef,
@@ -163,6 +172,7 @@ class VectorMemoryMixin:
     def scatter_mask(
         self,
         *,
+        memory_flags: str = ...,
         value: ValueRef,
         view: ValueRef,
         indices: list[int | ValueRef],

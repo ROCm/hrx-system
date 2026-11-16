@@ -200,6 +200,16 @@ def render_preamble(
         headers.add("loomcxx/encoding.h")
     if uses_numeric_conversion:
         headers.add("loomcxx/numeric.h")
+    uses_fragment_header = bool(
+        operation_names
+        & {
+            "vector.fragment",
+            "vector.fragment.load",
+            "vector.fragment.repack",
+            "vector.fragment.store",
+            "vector.mma",
+        }
+    )
     uses_vector_header = any(
         element in {"i1", "index", "offset"} or len(dims) != 1 or -1 in dims
         for element, dims, _signed in vector_aliases
@@ -224,13 +234,9 @@ def render_preamble(
             "vector.dot2f",
             "vector.dotf",
             "vector.decode",
-            "vector.fragment",
-            "vector.fragment.load",
-            "vector.fragment.store",
             "vector.interleave",
             "vector.iota",
             "vector.load",
-            "vector.mma",
             "vector.reduce",
             "vector.refine",
             "vector.select",
@@ -241,7 +247,9 @@ def render_preamble(
             "vector.extract",
         }
     )
-    if uses_vector_header:
+    if uses_fragment_header:
+        headers.add("loomcxx/fragment.h")
+    elif uses_vector_header:
         headers.add("loomcxx/vector.h")
     elif not uses_kernel_header and not uses_pipelines:
         if uses_views:

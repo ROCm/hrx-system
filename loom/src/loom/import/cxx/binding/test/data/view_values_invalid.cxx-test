@@ -7,6 +7,17 @@ unsigned invalid(loom::type::view<loom::type::shape<1>, unsigned> source) {
 }
 
 // ====
+// A source observation cannot simultaneously promise and suppress type-based
+// disjointness.
+#include <loomcxx/view.h>
+unsigned invalid(loom::type::view<loom::type::shape<1>, unsigned> source) {
+  constexpr auto conflicting = loom::memory_access::may_alias |
+                               loom::memory_access::type_disjoint;
+  // ERROR@+1: LOWERING/059 "conflicting memory aliasing flags"
+  return loom::view::load<conflicting>(source, 0);
+}
+
+// ====
 #include <loomcxx/vector.h>
 using Words = unsigned __attribute__((ext_vector_type(4)));
 void invalid(Words value, loom::type::view<loom::type::shape<4>, unsigned> destination) {

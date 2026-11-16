@@ -171,7 +171,7 @@ kernel.def @builtin_inf_probe() {
   %output_byte_offset = index.constant 0 : offset
   %14 = scalar.constant inf : f64
   %15 = buffer.view %output[%output_byte_offset] : buffer -> view<1xf64>
-  view.store<root_in_bounds> %14, %15[0] : f64, view<1xf64>
+  view.store<root_in_bounds|type_disjoint> %14, %15[0] : f64, view<1xf64>
   kernel.return
 }
 
@@ -199,7 +199,7 @@ kernel.def @builtin_inff_probe() {
   %output_byte_offset = index.constant 0 : offset
   %30 = scalar.constant inf : f32
   %31 = buffer.view %output[%output_byte_offset] : buffer -> view<1xf32>
-  view.store<root_in_bounds> %30, %31[0] : f32, view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %30, %31[0] : f32, view<1xf32>
   kernel.return
 }
 

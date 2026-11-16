@@ -68,7 +68,7 @@ void early_exit(bool done, unsigned* output) {
     return;
   }
   auto destination = loom::buffer::view<1>(output, {});
-  loom::view::store(9u, destination, 0);
+  loom::view::store<loom::memory_access::may_alias>(9u, destination, 0);
 }
 
 // ====

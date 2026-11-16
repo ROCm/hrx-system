@@ -40,7 +40,7 @@ func.def public @combine(%left$0: buffer, %left_byte_offset$1: offset, %right: b
   %33 = scalar.assume %32 [range(%32, 0, 9223372036854775807)] : i64
   %34 = index.cast %33 : i64 to offset
   %35 = buffer.view %9[%34] : buffer -> view<1xi32>
-  %36 = view.load<root_in_bounds> %35[0] : view<1xi32> -> i32
+  %36 = view.load<root_in_bounds|type_disjoint> %35[0] : view<1xi32> -> i32
   %37 = scalar.constant 0 : i32
   %38 = scalar.extsi %37 : i32 to i64
   %39 = scalar.constant 4 : i64
@@ -50,9 +50,9 @@ func.def public @combine(%left$0: buffer, %left_byte_offset$1: offset, %right: b
   %43 = scalar.assume %42 [range(%42, 0, 9223372036854775807)] : i64
   %44 = index.cast %43 : i64 to offset
   %45 = buffer.view %left$8[%44] : buffer -> view<1xi32>
-  %46 = view.load<root_in_bounds> %45[0] : view<1xi32> -> i32
+  %46 = view.load<root_in_bounds|type_disjoint> %45[0] : view<1xi32> -> i32
   %47 = scalar.addi %46, %36 : i32
-  view.store<root_in_bounds> %47, %45[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %47, %45[0] : i32, view<1xi32>
   %48 = scalar.constant 0 : i32
   %49 = scalar.extsi %48 : i32 to i64
   %50 = scalar.constant 4 : i64
@@ -62,7 +62,7 @@ func.def public @combine(%left$0: buffer, %left_byte_offset$1: offset, %right: b
   %54 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
   %55 = index.cast %54 : i64 to offset
   %56 = buffer.view %left$8[%55] : buffer -> view<1xi32>
-  %57 = view.load<root_in_bounds> %56[0] : view<1xi32> -> i32
+  %57 = view.load<root_in_bounds|type_disjoint> %56[0] : view<1xi32> -> i32
   %58 = scalar.constant 0 : i32
   %59 = scalar.extsi %58 : i32 to i64
   %60 = scalar.constant 4 : i64
@@ -72,7 +72,7 @@ func.def public @combine(%left$0: buffer, %left_byte_offset$1: offset, %right: b
   %64 = scalar.assume %63 [range(%63, 0, 9223372036854775807)] : i64
   %65 = index.cast %64 : i64 to offset
   %66 = buffer.view %10[%65] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %57, %66[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %57, %66[0] : i32, view<1xi32>
   %67 = buffer.restrict.end %left$8 : buffer
   func.return %67, %derived_byte_offset : buffer, offset
 }
@@ -101,20 +101,20 @@ func.def public @reference_access(%left: buffer, %left_byte_offset: offset, %pee
 func.def @combine_references(%left: buffer, %left_byte_offset: offset, %peer$8: buffer, %peer_byte_offset: offset) -> (i32) {
   %left_address, %peer_address = buffer.restrict.begin %left peers %peer$8 : buffer, buffer
   %13 = buffer.view %peer_address[%peer_byte_offset] : buffer -> view<1xi32>
-  %peer$14 = view.load<root_in_bounds> %13[0] : view<1xi32> -> i32
+  %peer$14 = view.load<root_in_bounds|type_disjoint> %13[0] : view<1xi32> -> i32
   %15 = buffer.view %left_address[%left_byte_offset] : buffer -> view<1xi32>
-  %16 = view.load<root_in_bounds> %15[0] : view<1xi32> -> i32
+  %16 = view.load<root_in_bounds|type_disjoint> %15[0] : view<1xi32> -> i32
   %17 = scalar.addi %16, %peer$14 : i32
   %18 = buffer.view %left_address[%left_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %17, %18[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %17, %18[0] : i32, view<1xi32>
   %19 = buffer.compare.address eq, %left_address[%left_byte_offset], %peer_address[%peer_byte_offset]
   %20 = scf.if %19 -> (i32) {
     %21 = buffer.view %left_address[%left_byte_offset] : buffer -> view<1xi32>
-    %left = view.load<root_in_bounds> %21[0] : view<1xi32> -> i32
+    %left = view.load<root_in_bounds|type_disjoint> %21[0] : view<1xi32> -> i32
     scf.yield %left : i32
   } else {
     %23 = buffer.view %peer_address[%peer_byte_offset] : buffer -> view<1xi32>
-    %peer = view.load<root_in_bounds> %23[0] : view<1xi32> -> i32
+    %peer = view.load<root_in_bounds|type_disjoint> %23[0] : view<1xi32> -> i32
     scf.yield %peer : i32
   }
   func.return %20 : i32
@@ -153,17 +153,17 @@ func.def @Counter__add_storage(%this: buffer, %this_byte_offset: offset, %peer: 
   %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
   %20 = index.cast %19 : i64 to offset
   %21 = buffer.view %12[%20] : buffer -> view<1xi32>
-  %22 = view.load<root_in_bounds> %21[0] : view<1xi32> -> i32
+  %22 = view.load<root_in_bounds|type_disjoint> %21[0] : view<1xi32> -> i32
   %23 = index.constant 0 : offset
   %24 = index.add %this_byte_offset, %23 : offset
   %25 = buffer.view %11[%24] : buffer -> view<1xi32>
-  %26 = view.load<root_in_bounds> %25[0] : view<1xi32> -> i32
+  %26 = view.load<root_in_bounds|type_disjoint> %25[0] : view<1xi32> -> i32
   %27 = scalar.addi %26, %22 : i32
-  view.store<root_in_bounds> %27, %25[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %27, %25[0] : i32, view<1xi32>
   %28 = index.constant 0 : offset
   %29 = index.add %this_byte_offset, %28 : offset
   %30 = buffer.view %11[%29] : buffer -> view<1xi32>
-  %value = view.load<root_in_bounds> %30[0] : view<1xi32> -> i32
+  %value = view.load<root_in_bounds|type_disjoint> %30[0] : view<1xi32> -> i32
   func.return %value : i32
 }
 
@@ -193,7 +193,7 @@ func.def public @template_access(%selected: buffer, %selected_byte_offset: offse
   %13 = scalar.assume %12 [range(%12, 0, 9223372036854775807)] : i64
   %14 = index.cast %13 : i64 to offset
   %15 = buffer.view %5[%14] : buffer -> view<1xi32>
-  %16 = view.load<root_in_bounds> %15[0] : view<1xi32> -> i32
+  %16 = view.load<root_in_bounds|type_disjoint> %15[0] : view<1xi32> -> i32
   func.return %16 : i32
 }
 
@@ -208,7 +208,7 @@ func.def @select_restricted_int(%selected: buffer, %selected_byte_offset: offset
   %31 = scalar.assume %30 [range(%30, 0, 9223372036854775807)] : i64
   %32 = index.cast %31 : i64 to offset
   %33 = buffer.view %24[%32] : buffer -> view<1xi32>
-  %34 = view.load<root_in_bounds> %33[0] : view<1xi32> -> i32
+  %34 = view.load<root_in_bounds|type_disjoint> %33[0] : view<1xi32> -> i32
   %35 = scalar.constant 0 : i32
   %36 = scalar.extsi %35 : i32 to i64
   %37 = scalar.constant 4 : i64
@@ -218,9 +218,9 @@ func.def @select_restricted_int(%selected: buffer, %selected_byte_offset: offset
   %41 = scalar.assume %40 [range(%40, 0, 9223372036854775807)] : i64
   %42 = index.cast %41 : i64 to offset
   %43 = buffer.view %23[%42] : buffer -> view<1xi32>
-  %44 = view.load<root_in_bounds> %43[0] : view<1xi32> -> i32
+  %44 = view.load<root_in_bounds|type_disjoint> %43[0] : view<1xi32> -> i32
   %45 = scalar.addi %44, %34 : i32
-  view.store<root_in_bounds> %45, %43[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %45, %43[0] : i32, view<1xi32>
   %46 = buffer.restrict.end %23 : buffer
   func.return %46, %selected_byte_offset : buffer, offset
 }
@@ -256,7 +256,7 @@ kernel.def @restricted_kernel() {
   %18 = scalar.assume %17 [range(%17, 0, 9223372036854775807)] : i64
   %19 = index.cast %18 : i64 to offset
   %20 = buffer.view %10[%19] : buffer -> view<1xi32>
-  %21 = view.load<root_in_bounds> %20[0] : view<1xi32> -> i32
+  %21 = view.load<root_in_bounds|type_disjoint> %20[0] : view<1xi32> -> i32
   %22 = scalar.constant 0 : i32
   %23 = scalar.extsi %22 : i32 to i64
   %24 = scalar.constant 4 : i64
@@ -266,7 +266,7 @@ kernel.def @restricted_kernel() {
   %28 = scalar.assume %27 [range(%27, 0, 9223372036854775807)] : i64
   %29 = index.cast %28 : i64 to offset
   %30 = buffer.view %11[%29] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %21, %30[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %21, %30[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -292,7 +292,7 @@ func.def public @view_access(%target: view<4xi32>, %peer: view<4xi32>) -> (i32) 
   %3 = func.call @update_view(%target, %peer) : (view<4xi32>, view<4xi32>) -> (view<4xi32>)
   %4 = scalar.constant 0 : i32
   %5 = index.cast %4 : i32 to index
-  %6 = view.load %3[%5] : view<4xi32> -> i32
+  %6 = view.load<type_disjoint> %3[%5] : view<4xi32> -> i32
   func.return %6 : i32
 }
 
@@ -300,10 +300,10 @@ func.def @update_view(%target: view<4xi32>, %peer: view<4xi32>) -> (view<4xi32>)
   %10, %11 = buffer.restrict.begin %target peers %peer : view<4xi32>, view<4xi32>
   %12 = scalar.constant 0 : i32
   %13 = index.cast %12 : i32 to index
-  %value = view.load %11[%13] : view<4xi32> -> i32
+  %value = view.load<type_disjoint> %11[%13] : view<4xi32> -> i32
   %15 = scalar.constant 0 : i32
   %16 = index.cast %15 : i32 to index
-  view.store %value, %10[%16] : i32, view<4xi32>
+  view.store<type_disjoint> %value, %10[%16] : i32, view<4xi32>
   %17 = buffer.restrict.end %10 : view<4xi32>
   func.return %17 : view<4xi32>
 }

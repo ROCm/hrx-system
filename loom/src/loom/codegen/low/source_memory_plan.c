@@ -1799,8 +1799,11 @@ static void loom_low_source_memory_access_retain_semantics(
     loom_low_source_memory_access_plan_t* plan) {
   const loom_memory_access_flags_t source_access_flags =
       loom_memory_access_flags(access);
+  plan->alias_type = loom_memory_access_alias_type(
+      view_regions->expression_context->module, access);
   plan->access_flags =
-      source_access_flags & ~LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS;
+      source_access_flags & ~(LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS |
+                              LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT);
   if (iree_any_bit_set(source_access_flags,
                        LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS) &&
       plan->dynamic_view_base_term_count != 0 &&

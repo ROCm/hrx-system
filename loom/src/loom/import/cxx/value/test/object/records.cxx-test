@@ -81,7 +81,7 @@ func.def @update_eos_state_double(%input: buffer, %input_byte_offset: offset, %i
   %18 = scalar.assume %17 [range(%17, 0, 9223372036854775807)] : i64
   %19 = index.cast %18 : i64 to offset
   %20 = buffer.view %input[%19] : buffer -> view<1xf64>
-  %21 = view.load<root_in_bounds> %20[0] : view<1xf64> -> f64
+  %21 = view.load<root_in_bounds|type_disjoint> %20[0] : view<1xf64> -> f64
   %22 = scalar.constant 3 : i32
   %23 = scalar.andi %index, %22 : i32
   %24 = scalar.constant 0 : i32

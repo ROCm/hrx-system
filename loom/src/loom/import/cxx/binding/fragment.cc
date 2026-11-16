@@ -18,6 +18,7 @@
 #include <utility>
 
 #include "loom/import/cxx/binding/index_values.h"
+#include "loom/import/cxx/binding/memory_access.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/ir/module.h"
 #include "loom/ops/encoding/auxiliary.h"
@@ -222,9 +223,12 @@ std::optional<FragmentIntrinsic> FragmentIntrinsic::resolve(
   if (!operation) {
     return std::nullopt;
   }
-  if (attribute.arguments.size() != 1) {
-    diagnostics.reject(unit, owner,
-                       "fragment operations accept one operation name");
+  const bool has_memory_access_selector =
+      attribute.arguments.size() == 2 &&
+      attribute.arguments[1]->name() == "memory_access" &&
+      (*operation == Operation::Load || *operation == Operation::Store);
+  if (attribute.arguments.size() != 1 && !has_memory_access_selector) {
+    diagnostics.reject(unit, owner, "fragment operation has unknown binding");
   }
   auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
   if (signature->isVariadic()) {
@@ -309,12 +313,18 @@ std::optional<FragmentIntrinsic> FragmentIntrinsic::resolve(
                            "vector.fragment.load does not support volatile "
                            "views");
       }
+      result.memory_flags_ = read_memory_access_flags(
+          unit, diagnostics, function,
+          has_memory_access_selector ? 2 : function->templateArguments().size(),
+          LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT,
+          types.memory_access_flags(result.view_->element_type), owner);
       if (!types.native_vector(signature->returnType())) {
         diagnostics.reject(unit, owner,
                            "vector.fragment.load must return a vector");
       }
       auto static_origin = constant_origin_pattern(
-          unit, diagnostics, function, 2, result.view_->extents.size(), owner);
+          unit, diagnostics, function, 2 + has_memory_access_selector,
+          result.view_->extents.size(), owner);
       if (!static_origin) {
         if (parameters.size() != 3 && parameters.size() != 4) {
           diagnostics.reject(
@@ -382,8 +392,14 @@ std::optional<FragmentIntrinsic> FragmentIntrinsic::resolve(
                            "vector.fragment.store does not support volatile "
                            "views");
       }
+      result.memory_flags_ = read_memory_access_flags(
+          unit, diagnostics, function,
+          has_memory_access_selector ? 1 : function->templateArguments().size(),
+          LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT,
+          types.memory_access_flags(result.view_->element_type), owner);
       auto static_origin = constant_origin_pattern(
-          unit, diagnostics, function, 1, result.view_->extents.size(), owner);
+          unit, diagnostics, function, 1 + has_memory_access_selector,
+          result.view_->extents.size(), owner);
       if (!static_origin) {
         if (parameters.size() != 4) {
           diagnostics.reject(
@@ -518,10 +534,11 @@ std::optional<Value> FragmentIntrinsic::call(
       auto build_flags =
           blocked ? LOOM_VECTOR_FRAGMENT_LOAD_BUILD_FLAG_HAS_BLOCKS : 0;
       check(loom_vector_fragment_load_build(
-          builder, build_flags, role_, view_component(arguments[0]),
-          indices.data(), dynamic_count, static_indices.data(),
-          view_->extents.size(), blocks, rows, columns, named_operands.data(),
-          named_operand_names_.size(), 0, 0, result_type_, location, &op));
+          builder, build_flags, role_, memory_flags_,
+          view_component(arguments[0]), indices.data(), dynamic_count,
+          static_indices.data(), view_->extents.size(), blocks, rows, columns,
+          named_operands.data(), named_operand_names_.size(), 0, 0,
+          result_type_, location, &op));
       return Value(loom_op_results(op)[0]);
     }
     case Operation::Store: {
@@ -544,7 +561,7 @@ std::optional<Value> FragmentIntrinsic::call(
       auto build_flags =
           blocked ? LOOM_VECTOR_FRAGMENT_STORE_BUILD_FLAG_HAS_BLOCKS : 0;
       check(loom_vector_fragment_store_build(
-          builder, build_flags, role_, arguments[0].ssa(),
+          builder, build_flags, role_, memory_flags_, arguments[0].ssa(),
           view_component(arguments[1]), indices.data(), dynamic_count,
           static_indices.data(), view_->extents.size(), blocks, rows, columns,
           0, 0, location, &op));
@@ -566,7 +583,7 @@ bool FragmentIntrinsic::equivalent(const FragmentIntrinsic& other) const {
          origin_argument_ == other.origin_argument_ &&
          shape_argument_ == other.shape_argument_ &&
          named_operand_argument_ == other.named_operand_argument_ &&
-         view_ == other.view_ &&
+         view_ == other.view_ && memory_flags_ == other.memory_flags_ &&
          loom_type_equal(result_type_, other.result_type_) &&
          named_operand_names_ == other.named_operand_names_;
 }

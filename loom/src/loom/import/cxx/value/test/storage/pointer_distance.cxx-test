@@ -69,17 +69,17 @@ func.def public @forward(%value: i32) -> (i64) {
   %values_begin_ = buffer.alloca<private> align(4) %2 : buffer
   %98 = index.constant 0 : offset
   %7 = buffer.view %values_begin_[%98] : buffer -> view<1xi32>
-  view.store %value, %7[0] : i32, view<1xi32>
+  view.store<type_disjoint> %value, %7[0] : i32, view<1xi32>
   %10 = scalar.constant 1 : i32
   %11 = scalar.addi %value, %10 : i32
   %97 = index.constant 4 : offset
   %13 = buffer.view %values_begin_[%97] : buffer -> view<1xi32>
-  view.store %11, %13[0] : i32, view<1xi32>
+  view.store<type_disjoint> %11, %13[0] : i32, view<1xi32>
   %16 = scalar.constant 2 : i32
   %17 = scalar.addi %value, %16 : i32
   %96 = index.constant 8 : offset
   %19 = buffer.view %values_begin_[%96] : buffer -> view<1xi32>
-  view.store %17, %19[0] : i32, view<1xi32>
+  view.store<type_disjoint> %17, %19[0] : i32, view<1xi32>
   %95 = scalar.constant 3 : i64
   func.return %95 : i64
 }
@@ -89,17 +89,17 @@ func.def public @reverse(%value: i32) -> (i64) {
   %values_begin_ = buffer.alloca<private> align(4) %28 : buffer
   %105 = index.constant 0 : offset
   %33 = buffer.view %values_begin_[%105] : buffer -> view<1xi32>
-  view.store %value, %33[0] : i32, view<1xi32>
+  view.store<type_disjoint> %value, %33[0] : i32, view<1xi32>
   %36 = scalar.constant 1 : i32
   %37 = scalar.addi %value, %36 : i32
   %104 = index.constant 4 : offset
   %39 = buffer.view %values_begin_[%104] : buffer -> view<1xi32>
-  view.store %37, %39[0] : i32, view<1xi32>
+  view.store<type_disjoint> %37, %39[0] : i32, view<1xi32>
   %42 = scalar.constant 2 : i32
   %43 = scalar.addi %value, %42 : i32
   %103 = index.constant 8 : offset
   %45 = buffer.view %values_begin_[%103] : buffer -> view<1xi32>
-  view.store %43, %45[0] : i32, view<1xi32>
+  view.store<type_disjoint> %43, %45[0] : i32, view<1xi32>
   %102 = scalar.constant -3 : i64
   func.return %102 : i64
 }

@@ -54,8 +54,8 @@ func.def @partial_f32x3_packed(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<3xf32, align(1)>
   %result = buffer.view %output[%base] : buffer -> view<3xf32, align(1)>
-  %value = vector.load %source[0] : view<3xf32, align(1)> -> vector<3xf32>
-  vector.store %value, %result[0] : vector<3xf32>, view<3xf32, align(1)>
+  %value = vector.load<type_disjoint> %source[0] : view<3xf32, align(1)> -> vector<3xf32>
+  vector.store<type_disjoint> %value, %result[0] : vector<3xf32>, view<3xf32, align(1)>
   func.return
 }
 

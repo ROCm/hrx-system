@@ -54,7 +54,7 @@ float read_advanced(float* data) {
 func.def public @read_advanced(%data: buffer, %data_byte_offset: offset) -> (f32) {
   %3, %4 = func.call pure @advance(%data, %data_byte_offset) : (buffer, offset) -> (buffer, offset)
   %5 = buffer.view %3[%4] : buffer -> view<1xf32>
-  %6 = view.load<root_in_bounds> %5[0] : view<1xf32> -> f32
+  %6 = view.load<root_in_bounds|type_disjoint> %5[0] : view<1xf32> -> f32
   func.return %6 : f32
 }
 
@@ -99,13 +99,13 @@ func.def public @recursive(%count: i32) -> (i32) {
   %8 = index.add %pair_storage_byte_offset, %7 : offset
   %9 = index.assume %8 [range(%8, 0, 4)] : offset
   %10 = buffer.view %pair_storage[%9] : buffer -> view<1xi32>
-  view.store %6, %10[0] : i32, view<1xi32>
+  view.store<type_disjoint> %6, %10[0] : i32, view<1xi32>
   func.call @even(%pair_storage, %pair_storage_byte_offset, %count) : (buffer, offset, i32)
   %11 = index.constant 0 : offset
   %12 = index.add %pair_storage_byte_offset, %11 : offset
   %13 = index.assume %12 [range(%12, 0, 4)] : offset
   %14 = buffer.view %pair_storage[%13] : buffer -> view<1xi32>
-  %first = view.load %14[0] : view<1xi32> -> i32
+  %first = view.load<type_disjoint> %14[0] : view<1xi32> -> i32
   func.return %first : i32
 }
 
@@ -121,7 +121,7 @@ func.def @even(%pair: buffer, %pair_byte_offset: offset, %count: i32) {
     %24 = index.constant 0 : offset
     %25 = index.add %pair_byte_offset, %24 : offset
     %26 = buffer.view %pair[%25] : buffer -> view<1xi32>
-    view.store<root_in_bounds> %23, %26[0] : i32, view<1xi32>
+    view.store<root_in_bounds|type_disjoint> %23, %26[0] : i32, view<1xi32>
   }
   func.return
 }
@@ -164,7 +164,7 @@ func.def @store(%output: buffer, %output_byte_offset: offset, %state_length$7: i
   %15 = scalar.assume %14 [range(%14, 0, 9223372036854775807)] : i64
   %16 = index.cast %15 : i64 to offset
   %17 = buffer.view %output[%16] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %state_length$7, %17[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %state_length$7, %17[0] : i32, view<1xi32>
   func.return %state_length$9 : i32
 }
 
@@ -450,9 +450,9 @@ func.def public @selected_pointer(%choose: i1, %first: buffer, %first_byte_offse
     scf.yield %13, %14 : buffer, offset
   }
   %23 = buffer.view %17[%18] : buffer -> view<1xi32>
-  %24 = view.load<root_in_bounds> %23[0] : view<1xi32> -> i32
+  %24 = view.load<root_in_bounds|type_disjoint> %23[0] : view<1xi32> -> i32
   %25 = buffer.view %21[%22] : buffer -> view<1xi32>
-  %26 = view.load<root_in_bounds> %25[0] : view<1xi32> -> i32
+  %26 = view.load<root_in_bounds|type_disjoint> %25[0] : view<1xi32> -> i32
   %27 = scalar.addi %24, %26 : i32
   func.return %27 : i32
 }
@@ -577,10 +577,10 @@ func.def public @selected_element(%choose: i1, %first: buffer, %first_byte_offse
 func.def @update(%value: buffer, %value_byte_offset: offset) -> (i32) {
   %28 = scalar.constant 5 : i32
   %29 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
-  %30 = view.load<root_in_bounds> %29[0] : view<1xi32> -> i32
+  %30 = view.load<root_in_bounds|type_disjoint> %29[0] : view<1xi32> -> i32
   %31 = scalar.addi %30, %28 : i32
   %32 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %31, %32[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %31, %32[0] : i32, view<1xi32>
   func.return %31 : i32
 }
 

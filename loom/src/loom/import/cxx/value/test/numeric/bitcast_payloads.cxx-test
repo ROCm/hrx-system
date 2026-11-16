@@ -192,13 +192,13 @@ unsigned load(const Payload* input) {
 func.def public @store(%bits: i32, %output: buffer, %output_byte_offset: offset) {
   %3 = scalar.bitcast %bits : i32 to f32
   %4 = buffer.view %output[%output_byte_offset] : buffer -> view<1xf32>
-  view.store<root_in_bounds> %3, %4[0] : f32, view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %3, %4[0] : f32, view<1xf32>
   func.return
 }
 
 func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i32) {
   %8 = buffer.view %input[%input_byte_offset] : buffer -> view<1xf32>
-  %9 = view.load<root_in_bounds> %8[0] : view<1xf32> -> f32
+  %9 = view.load<root_in_bounds|type_disjoint> %8[0] : view<1xf32> -> f32
   %10 = scalar.bitcast %9 : f32 to i32
   func.return %10 : i32
 }
@@ -276,13 +276,13 @@ unsigned long long load(const Payload* input) {
 func.def public @store(%bits: i64, %output: buffer, %output_byte_offset: offset) {
   %3 = scalar.bitcast %bits : i64 to f64
   %4 = buffer.view %output[%output_byte_offset] : buffer -> view<1xf64>
-  view.store<root_in_bounds> %3, %4[0] : f64, view<1xf64>
+  view.store<root_in_bounds|type_disjoint> %3, %4[0] : f64, view<1xf64>
   func.return
 }
 
 func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i64) {
   %8 = buffer.view %input[%input_byte_offset] : buffer -> view<1xf64>
-  %9 = view.load<root_in_bounds> %8[0] : view<1xf64> -> f64
+  %9 = view.load<root_in_bounds|type_disjoint> %8[0] : view<1xf64> -> f64
   %10 = scalar.bitcast %9 : f64 to i64
   func.return %10 : i64
 }

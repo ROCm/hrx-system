@@ -31,6 +31,6 @@ void payloads(unsigned char* output, loom::type::index position) {
   auto* shared = loom::buffer::alloca_init<loom::memory_space::workgroup, 16>(u8"abcd");
   auto source = loom::buffer::view<8>(raw, {});
   auto destination = loom::buffer::view<1>(output, {});
-  unsigned char value = loom::view::load(source, position);
-  loom::view::store(value, destination, 0);
+  unsigned char value = loom::view::load<loom::memory_access::may_alias>(source, position);
+  loom::view::store<loom::memory_access::may_alias>(value, destination, 0);
 }

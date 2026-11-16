@@ -41,6 +41,7 @@ AtomicMemoryFlags = EnumDef(
     "AtomicMemoryFlags",
     [
         MemoryAccessFlags.case("root_in_bounds"),
+        MemoryAccessFlags.case("type_disjoint"),
         EnumCase(
             "noftz",
             2,
@@ -62,7 +63,10 @@ AtomicMemoryFlags = EnumDef(
 AtomicAccessFlags = replace(
     AtomicMemoryFlags,
     name="AtomicAccessFlags",
-    cases=(AtomicMemoryFlags.case("root_in_bounds"),),
+    cases=(
+        AtomicMemoryFlags.case("root_in_bounds"),
+        AtomicMemoryFlags.case("type_disjoint"),
+    ),
     doc="Source address promises shared by all atomic memory accesses.",
 )
 

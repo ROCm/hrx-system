@@ -76,12 +76,12 @@ kernel.def @aligned_array() {
   %14 = scalar.extsi %13 : i32 to i64
   %15 = scalar.assume %14 [range(%14, 0, 3)] : i64
   %16 = index.cast %15 : i64 to index
-  view.store %12, %values_view[%16] : i32, view<4xi32>
+  view.store<type_disjoint> %12, %values_view[%16] : i32, view<4xi32>
   %17 = scalar.constant 0 : i32
   %18 = scalar.extsi %17 : i32 to i64
   %19 = scalar.assume %18 [range(%18, 0, 3)] : i64
   %20 = index.cast %19 : i64 to index
-  %21 = view.load %values_view[%20] : view<4xi32> -> i32
+  %21 = view.load<type_disjoint> %values_view[%20] : view<4xi32> -> i32
   %22 = scalar.constant 0 : i32
   %23 = scalar.extsi %22 : i32 to i64
   %24 = scalar.constant 4 : i64
@@ -91,6 +91,6 @@ kernel.def @aligned_array() {
   %28 = scalar.assume %27 [range(%27, 0, 9223372036854775807)] : i64
   %29 = index.cast %28 : i64 to offset
   %30 = buffer.view %output[%29] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %21, %30[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %21, %30[0] : i32, view<1xi32>
   kernel.return
 }

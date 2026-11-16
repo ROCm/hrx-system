@@ -9,18 +9,18 @@ func.def public @local_observations(%index: i32, %output: buffer) {
   %values = buffer.view %output[%3] : buffer -> view<4xi32>
   %5 = func.call readonly @local_lookup(%index) : (i32) -> (i32)
   %98 = index.constant 0 : index
-  view.store %5, %values[%98] : i32, view<4xi32>
+  view.store<type_disjoint> %5, %values[%98] : i32, view<4xi32>
   %8 = scalar.constant 1 : i32
   %9 = scalar.addi %index, %8 : i32
   %10 = func.call readonly @local_lookup(%9) : (i32) -> (i32)
   %97 = index.constant 1 : index
-  view.store %10, %values[%97] : i32, view<4xi32>
+  view.store<type_disjoint> %10, %values[%97] : i32, view<4xi32>
   %13 = func.call readonly @local_template_lookup_3(%index) : (i32) -> (i32)
   %96 = index.constant 2 : index
-  view.store %13, %values[%96] : i32, view<4xi32>
+  view.store<type_disjoint> %13, %values[%96] : i32, view<4xi32>
   %16 = func.call readonly @local_template_lookup_7(%index) : (i32) -> (i32)
   %95 = index.constant 3 : index
-  view.store %16, %values[%95] : i32, view<4xi32>
+  view.store<type_disjoint> %16, %values[%95] : i32, view<4xi32>
   func.return
 }
 
@@ -35,7 +35,7 @@ func.def @local_lookup(%index: i32) -> (i32) {
   %26 = scalar.extui %25 : i32 to i64
   %27 = scalar.assume %26 [range(%26, 0, 3)] : i64
   %28 = index.cast %27 : i64 to index
-  %29 = view.load %table_view[%28] : view<4xi32> -> i32
+  %29 = view.load<type_disjoint> %table_view[%28] : view<4xi32> -> i32
   %33 = scalar.constant 1 : i32
   %34 = scalar.andi %index, %33 : i32
   %35 = scalar.extui %34 : i32 to i64
@@ -53,7 +53,7 @@ func.def @local_lookup(%index: i32) -> (i32) {
   %50 = index.cast %49 : i64 to offset
   %51 = index.assume %50 [range(%50, 0, 20)] : offset
   %52 = buffer.view %nested_storage[%51] : buffer -> view<1xi32>
-  %53 = view.load %52[0] : view<1xi32> -> i32
+  %53 = view.load<type_disjoint> %52[0] : view<1xi32> -> i32
   %54 = scalar.addi %29, %53 : i32
   %99 = scalar.constant 3 : i64
   %100 = scalar.shli %35, %99 : i64
@@ -63,7 +63,7 @@ func.def @local_lookup(%index: i32) -> (i32) {
   %68 = index.add %66, %67 : offset
   %69 = index.assume %68 [range(%68, 0, 12)] : offset
   %70 = buffer.view %pairs_storage[%69] : buffer -> view<1xi32>
-  %second = view.load %70[0] : view<1xi32> -> i32
+  %second = view.load<type_disjoint> %70[0] : view<1xi32> -> i32
   %72 = scalar.addi %54, %second : i32
   func.return %72 : i32
 }
@@ -77,7 +77,7 @@ func.def @local_template_lookup_3(%index: i32) -> (i32) {
   %80 = scalar.extui %79 : i32 to i64
   %81 = scalar.assume %80 [range(%80, 0, 1)] : i64
   %82 = index.cast %81 : i64 to index
-  %83 = view.load %table_1_view[%82] : view<2xi32> -> i32
+  %83 = view.load<type_disjoint> %table_1_view[%82] : view<2xi32> -> i32
   func.return %83 : i32
 }
 
@@ -90,7 +90,7 @@ func.def @local_template_lookup_7(%index: i32) -> (i32) {
   %91 = scalar.extui %90 : i32 to i64
   %92 = scalar.assume %91 [range(%91, 0, 1)] : i64
   %93 = index.cast %92 : i64 to index
-  %94 = view.load %table_2_view[%93] : view<2xi32> -> i32
+  %94 = view.load<type_disjoint> %table_2_view[%93] : view<2xi32> -> i32
   func.return %94 : i32
 }
 
@@ -116,21 +116,21 @@ func.def public @local_oracle(%index: i32, %output: buffer) {
   %values = buffer.view %output[%3] : buffer -> view<4xi32>
   %5 = func.call pure @local_reference(%index) : (i32) -> (i32)
   %55 = index.constant 0 : index
-  view.store %5, %values[%55] : i32, view<4xi32>
+  view.store<type_disjoint> %5, %values[%55] : i32, view<4xi32>
   %8 = scalar.constant 1 : i32
   %9 = scalar.addi %index, %8 : i32
   %10 = func.call pure @local_reference(%9) : (i32) -> (i32)
   %54 = index.constant 1 : index
-  view.store %10, %values[%54] : i32, view<4xi32>
+  view.store<type_disjoint> %10, %values[%54] : i32, view<4xi32>
   %13 = scalar.constant 3 : i32
   %15 = scalar.andi %index, %8 : i32
   %53 = scalar.addi %15, %13 : i32
   %52 = index.constant 2 : index
-  view.store %53, %values[%52] : i32, view<4xi32>
+  view.store<type_disjoint> %53, %values[%52] : i32, view<4xi32>
   %19 = scalar.constant 7 : i32
   %51 = scalar.addi %15, %19 : i32
   %50 = index.constant 3 : index
-  view.store %51, %values[%50] : i32, view<4xi32>
+  view.store<type_disjoint> %51, %values[%50] : i32, view<4xi32>
   func.return
 }
 
@@ -195,9 +195,9 @@ func.def public @immutable_local_values(%index$0: i32, %output: buffer) {
   %15 = scalar.assume %14 [range(%14, 0, 9223372036854775807)] : i64
   %16 = index.cast %15 : i64 to offset
   %17 = buffer.view %8[%16] : buffer -> view<1xi32>
-  %18 = view.load<root_in_bounds> %17[0] : view<1xi32> -> i32
+  %18 = view.load<root_in_bounds|type_disjoint> %17[0] : view<1xi32> -> i32
   %231 = index.constant 0 : index
-  view.store %18, %values[%231] : i32, view<12xi32>
+  view.store<type_disjoint> %18, %values[%231] : i32, view<12xi32>
   %21 = scalar.constant 0 : i1
   %22, %23 = func.call readonly @immutable_link__inline_table(%21) : (i1) -> (buffer, offset)
   %27 = index.cast %23 : offset to i64
@@ -205,36 +205,36 @@ func.def public @immutable_local_values(%index$0: i32, %output: buffer) {
   %29 = scalar.assume %28 [range(%28, 0, 9223372036854775807)] : i64
   %30 = index.cast %29 : i64 to offset
   %31 = buffer.view %22[%30] : buffer -> view<1xi32>
-  %32 = view.load<root_in_bounds> %31[0] : view<1xi32> -> i32
+  %32 = view.load<root_in_bounds|type_disjoint> %31[0] : view<1xi32> -> i32
   %228 = index.constant 1 : index
-  view.store %32, %values[%228] : i32, view<12xi32>
+  view.store<type_disjoint> %32, %values[%228] : i32, view<12xi32>
   %36, %37 = func.call @immutable_right_inline(%7) : (i1) -> (buffer, offset)
   %41 = index.cast %37 : offset to i64
   %42 = scalar.addi %41, %233 : i64
   %43 = scalar.assume %42 [range(%42, 0, 9223372036854775807)] : i64
   %44 = index.cast %43 : i64 to offset
   %45 = buffer.view %36[%44] : buffer -> view<1xi32>
-  %46 = view.load<root_in_bounds> %45[0] : view<1xi32> -> i32
+  %46 = view.load<root_in_bounds|type_disjoint> %45[0] : view<1xi32> -> i32
   %225 = index.constant 2 : index
-  view.store %46, %values[%225] : i32, view<12xi32>
+  view.store<type_disjoint> %46, %values[%225] : i32, view<12xi32>
   %50, %51 = func.call @immutable_right_inline(%21) : (i1) -> (buffer, offset)
   %55 = index.cast %51 : offset to i64
   %56 = scalar.addi %55, %233 : i64
   %57 = scalar.assume %56 [range(%56, 0, 9223372036854775807)] : i64
   %58 = index.cast %57 : i64 to offset
   %59 = buffer.view %50[%58] : buffer -> view<1xi32>
-  %60 = view.load<root_in_bounds> %59[0] : view<1xi32> -> i32
+  %60 = view.load<root_in_bounds|type_disjoint> %59[0] : view<1xi32> -> i32
   %222 = index.constant 3 : index
-  view.store %60, %values[%222] : i32, view<12xi32>
+  view.store<type_disjoint> %60, %values[%222] : i32, view<12xi32>
   %63, %64 = func.call readonly @immutable_link__template_table_3() : () -> (buffer, offset)
   %68 = index.cast %64 : offset to i64
   %69 = scalar.addi %68, %233 : i64
   %70 = scalar.assume %69 [range(%69, 0, 9223372036854775807)] : i64
   %71 = index.cast %70 : i64 to offset
   %72 = buffer.view %63[%71] : buffer -> view<1xi32>
-  %73 = view.load<root_in_bounds> %72[0] : view<1xi32> -> i32
+  %73 = view.load<root_in_bounds|type_disjoint> %72[0] : view<1xi32> -> i32
   %219 = index.constant 4 : index
-  view.store %73, %values[%219] : i32, view<12xi32>
+  view.store<type_disjoint> %73, %values[%219] : i32, view<12xi32>
   %76 = scalar.constant 3 : i32
   %77, %78 = func.call @immutable_right_template(%76) : (i32) -> (buffer, offset)
   %82 = index.cast %78 : offset to i64
@@ -242,18 +242,18 @@ func.def public @immutable_local_values(%index$0: i32, %output: buffer) {
   %84 = scalar.assume %83 [range(%83, 0, 9223372036854775807)] : i64
   %85 = index.cast %84 : i64 to offset
   %86 = buffer.view %77[%85] : buffer -> view<1xi32>
-  %87 = view.load<root_in_bounds> %86[0] : view<1xi32> -> i32
+  %87 = view.load<root_in_bounds|type_disjoint> %86[0] : view<1xi32> -> i32
   %216 = index.constant 5 : index
-  view.store %87, %values[%216] : i32, view<12xi32>
+  view.store<type_disjoint> %87, %values[%216] : i32, view<12xi32>
   %90, %91 = func.call readonly @immutable_link__template_table_7() : () -> (buffer, offset)
   %95 = index.cast %91 : offset to i64
   %96 = scalar.addi %95, %233 : i64
   %97 = scalar.assume %96 [range(%96, 0, 9223372036854775807)] : i64
   %98 = index.cast %97 : i64 to offset
   %99 = buffer.view %90[%98] : buffer -> view<1xi32>
-  %100 = view.load<root_in_bounds> %99[0] : view<1xi32> -> i32
+  %100 = view.load<root_in_bounds|type_disjoint> %99[0] : view<1xi32> -> i32
   %213 = index.constant 6 : index
-  view.store %100, %values[%213] : i32, view<12xi32>
+  view.store<type_disjoint> %100, %values[%213] : i32, view<12xi32>
   %103 = scalar.constant 7 : i32
   %104, %105 = func.call @immutable_right_template(%103) : (i32) -> (buffer, offset)
   %109 = index.cast %105 : offset to i64
@@ -261,39 +261,39 @@ func.def public @immutable_local_values(%index$0: i32, %output: buffer) {
   %111 = scalar.assume %110 [range(%110, 0, 9223372036854775807)] : i64
   %112 = index.cast %111 : i64 to offset
   %113 = buffer.view %104[%112] : buffer -> view<1xi32>
-  %114 = view.load<root_in_bounds> %113[0] : view<1xi32> -> i32
+  %114 = view.load<root_in_bounds|type_disjoint> %113[0] : view<1xi32> -> i32
   %210 = index.constant 7 : index
-  view.store %114, %values[%210] : i32, view<12xi32>
+  view.store<type_disjoint> %114, %values[%210] : i32, view<12xi32>
   %117, %118 = func.call readonly @immutable_link__private_table() : () -> (buffer, offset)
   %122 = index.cast %118 : offset to i64
   %123 = scalar.addi %122, %233 : i64
   %124 = scalar.assume %123 [range(%123, 0, 9223372036854775807)] : i64
   %125 = index.cast %124 : i64 to offset
   %126 = buffer.view %117[%125] : buffer -> view<1xi32>
-  %127 = view.load<root_in_bounds> %126[0] : view<1xi32> -> i32
+  %127 = view.load<root_in_bounds|type_disjoint> %126[0] : view<1xi32> -> i32
   %207 = index.constant 8 : index
-  view.store %127, %values[%207] : i32, view<12xi32>
+  view.store<type_disjoint> %127, %values[%207] : i32, view<12xi32>
   %130, %131 = func.call @immutable_right_private() : () -> (buffer, offset)
   %135 = index.cast %131 : offset to i64
   %136 = scalar.addi %135, %233 : i64
   %137 = scalar.assume %136 [range(%136, 0, 9223372036854775807)] : i64
   %138 = index.cast %137 : i64 to offset
   %139 = buffer.view %130[%138] : buffer -> view<1xi32>
-  %140 = view.load<root_in_bounds> %139[0] : view<1xi32> -> i32
+  %140 = view.load<root_in_bounds|type_disjoint> %139[0] : view<1xi32> -> i32
   %204 = index.constant 9 : index
-  view.store %140, %values[%204] : i32, view<12xi32>
+  view.store<type_disjoint> %140, %values[%204] : i32, view<12xi32>
   %143, %144 = func.call readonly @immutable_link__address_table__local_table_0_() : () -> (buffer, offset)
   %148 = index.cast %144 : offset to i64
   %149 = scalar.addi %148, %233 : i64
   %150 = scalar.assume %149 [range(%149, 0, 9223372036854775807)] : i64
   %151 = index.cast %150 : i64 to offset
   %152 = buffer.view %143[%151] : buffer -> view<1xi32>
-  %153 = view.load<root_in_bounds> %152[0] : view<1xi32> -> i32
+  %153 = view.load<root_in_bounds|type_disjoint> %152[0] : view<1xi32> -> i32
   %201 = index.constant 10 : index
-  view.store %153, %values[%201] : i32, view<12xi32>
+  view.store<type_disjoint> %153, %values[%201] : i32, view<12xi32>
   %156 = func.call @immutable_right_address(%index$3) : (i32) -> (i32)
   %200 = index.constant 11 : index
-  view.store %156, %values[%200] : i32, view<12xi32>
+  view.store<type_disjoint> %156, %values[%200] : i32, view<12xi32>
   func.return
 }
 
@@ -366,40 +366,40 @@ func.def public @immutable_local_oracle(%index$0: i32, %output: buffer) {
   %104 = scalar.shli %index$3, %103 : i32
   %102 = scalar.addi %104, %7 : i32
   %101 = index.constant 0 : index
-  view.store %102, %values[%101] : i32, view<12xi32>
+  view.store<type_disjoint> %102, %values[%101] : i32, view<12xi32>
   %13 = scalar.constant 13 : i32
   %98 = scalar.addi %104, %13 : i32
   %97 = index.constant 1 : index
-  view.store %98, %values[%97] : i32, view<12xi32>
+  view.store<type_disjoint> %98, %values[%97] : i32, view<12xi32>
   %93 = index.constant 2 : index
-  view.store %102, %values[%93] : i32, view<12xi32>
+  view.store<type_disjoint> %102, %values[%93] : i32, view<12xi32>
   %89 = index.constant 3 : index
-  view.store %98, %values[%89] : i32, view<12xi32>
+  view.store<type_disjoint> %98, %values[%89] : i32, view<12xi32>
   %31 = scalar.constant 3 : i32
   %88 = scalar.addi %index$3, %31 : i32
   %87 = index.constant 4 : index
-  view.store %88, %values[%87] : i32, view<12xi32>
+  view.store<type_disjoint> %88, %values[%87] : i32, view<12xi32>
   %85 = index.constant 5 : index
-  view.store %88, %values[%85] : i32, view<12xi32>
+  view.store<type_disjoint> %88, %values[%85] : i32, view<12xi32>
   %84 = scalar.addi %index$3, %7 : i32
   %83 = index.constant 6 : index
-  view.store %84, %values[%83] : i32, view<12xi32>
+  view.store<type_disjoint> %84, %values[%83] : i32, view<12xi32>
   %81 = index.constant 7 : index
-  view.store %84, %values[%81] : i32, view<12xi32>
+  view.store<type_disjoint> %84, %values[%81] : i32, view<12xi32>
   %47 = scalar.constant 19 : i32
   %78 = scalar.addi %104, %47 : i32
   %77 = index.constant 8 : index
-  view.store %78, %values[%77] : i32, view<12xi32>
+  view.store<type_disjoint> %78, %values[%77] : i32, view<12xi32>
   %73 = index.constant 9 : index
-  view.store %78, %values[%73] : i32, view<12xi32>
+  view.store<type_disjoint> %78, %values[%73] : i32, view<12xi32>
   %72 = scalar.addi %index$3, %2 : i32
   %71 = index.constant 10 : index
-  view.store %72, %values[%71] : i32, view<12xi32>
+  view.store<type_disjoint> %72, %values[%71] : i32, view<12xi32>
   %63 = scalar.constant 100 : i32
   %65 = scalar.muli %63, %index$3 : i32
   %70 = scalar.addi %65, %63 : i32
   %69 = index.constant 11 : index
-  view.store %70, %values[%69] : i32, view<12xi32>
+  view.store<type_disjoint> %70, %values[%69] : i32, view<12xi32>
   func.return
 }
 
@@ -521,7 +521,7 @@ func.def public @immutable_right_address(%index: i32) -> (i32) {
   %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
   %12 = index.cast %11 : i64 to offset
   %13 = buffer.view %2[%12] : buffer -> view<1xi32>
-  %14 = view.load<root_in_bounds> %13[0] : view<1xi32> -> i32
+  %14 = view.load<root_in_bounds|type_disjoint> %13[0] : view<1xi32> -> i32
   func.return %14 : i32
 }
 

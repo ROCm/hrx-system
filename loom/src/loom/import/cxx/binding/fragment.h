@@ -30,8 +30,8 @@ class FragmentIntrinsic {
   static bool supports(std::string_view name);
 
   // Resolves a concrete source specialization. Leading constant template
-  // arguments select the fragment role or MMA flags; source records describe
-  // logical shapes, origins, and named dynamic parameters.
+  // arguments select the fragment role, memory observation, or MMA flags;
+  // source records describe logical shapes, origins, and named parameters.
   static std::optional<FragmentIntrinsic> resolve(
       cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
       cxx::FunctionSymbol* function, const cxx::Attribute& attribute,
@@ -84,6 +84,8 @@ class FragmentIntrinsic {
   uint8_t named_operand_argument_ = UINT8_MAX;
   // Admitted source/destination view for load/store.
   const ViewPartition* view_ = nullptr;
+  // Inferred and explicitly selected semantics for one memory observation.
+  loom_memory_access_flags_t memory_flags_ = 0;
   // Exact physical vector result for non-store operations.
   loom_type_t result_type_ = {};
   // Module-interned record keys in source component order.

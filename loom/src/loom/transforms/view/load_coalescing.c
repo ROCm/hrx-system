@@ -110,8 +110,9 @@ iree_status_t loom_view_load_coalescing_rewrite(
   const loom_memory_access_flags_t memory_flags =
       loom_view_load_memory_flags(op);
   if (memory_flags != loom_view_load_memory_flags(next_op) ||
-      (memory_flags != 0 &&
-       memory_flags != LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS)) {
+      iree_any_bit_set(memory_flags,
+                       ~(LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS |
+                         LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT))) {
     return iree_ok_status();
   }
 

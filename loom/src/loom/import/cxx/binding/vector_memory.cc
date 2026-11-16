@@ -148,13 +148,6 @@ std::optional<VectorMemoryIntrinsic> VectorMemoryIntrinsic::resolve(
 
   auto parameters = signature->parameterTypes();
   VectorMemoryIntrinsic result(*operation);
-  if (*operation == Operation::Load || *operation == Operation::Store) {
-    result.memory_flags_ = read_memory_access_flags(
-        unit, diagnostics, function, *operation == Operation::Load ? 1 : 0,
-        LOOM_MEMORY_ACCESS_FLAG_VOLATILE |
-            LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS,
-        owner);
-  }
   size_t view_index;
   size_t origin_index;
   size_t mask_index = 0;
@@ -274,6 +267,14 @@ std::optional<VectorMemoryIntrinsic> VectorMemoryIntrinsic::resolve(
           "masked vector load passthrough must match its result type");
     }
   }
+  const loom_memory_access_flags_t allowed_flags =
+      result.has_mask() ? LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT
+                        : LOOM_MEMORY_ACCESS_FLAG_VOLATILE |
+                              LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS |
+                              LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT;
+  result.memory_flags_ = read_memory_access_flags(
+      unit, diagnostics, function, result.is_load() ? 1 : 0, allowed_flags,
+      types.memory_access_flags(result.view_->element_type), owner);
   result.origin_unsigned_mask_ = require_index_record(
       unit, diagnostics, types, parameters[origin_index],
       result.view_->extents.size(), owner, "vector memory origin");
@@ -324,10 +325,10 @@ std::optional<Value> VectorMemoryIntrinsic::call(
   };
   switch (operation_) {
     case Operation::Load:
-      check(loom_vector_load_build(
-          builder, 0, view_->access_flags | memory_flags_, view, indices.data(),
-          origin.size(), static_indices.data(), origin.size(), 0, 0,
-          vector_type, location, &op));
+      check(loom_vector_load_build(builder, 0, memory_flags_, view,
+                                   indices.data(), origin.size(),
+                                   static_indices.data(), origin.size(), 0, 0,
+                                   vector_type, location, &op));
       if (!semantic_vector_) {
         return Value(loom_op_results(op)[0]);
       }
@@ -338,10 +339,10 @@ std::optional<Value> VectorMemoryIntrinsic::call(
                            std::span<const loom_value_id_t>(components)
                                .first(dimensions.size() + 1));
     case Operation::Store:
-      check(loom_vector_store_build(
-          builder, 0, view_->access_flags | memory_flags_, vector_value(0),
-          view, indices.data(), origin.size(), static_indices.data(),
-          origin.size(), 0, 0, location, &op));
+      check(loom_vector_store_build(builder, 0, memory_flags_, vector_value(0),
+                                    view, indices.data(), origin.size(),
+                                    static_indices.data(), origin.size(), 0, 0,
+                                    location, &op));
       return std::nullopt;
     case Operation::LoadMask:
     case Operation::LoadExpand: {
@@ -349,8 +350,8 @@ std::optional<Value> VectorMemoryIntrinsic::call(
       const auto build = operation_ == Operation::LoadMask
                              ? loom_vector_load_mask_build
                              : loom_vector_load_expand_build;
-      check(build(builder, 0, view, indices.data(), origin.size(),
-                  static_indices.data(), origin.size(), mask,
+      check(build(builder, 0, memory_flags_, view, indices.data(),
+                  origin.size(), static_indices.data(), origin.size(), mask,
                   arguments[3].ssa(), 0, 0, vector_type_, location, &op));
       return Value(loom_op_results(op)[0]);
     }
@@ -360,9 +361,9 @@ std::optional<Value> VectorMemoryIntrinsic::call(
       const auto build = operation_ == Operation::StoreMask
                              ? loom_vector_store_mask_build
                              : loom_vector_store_compress_build;
-      check(build(builder, 0, arguments[0].ssa(), view, indices.data(),
-                  origin.size(), static_indices.data(), origin.size(), mask, 0,
-                  0, location, &op));
+      check(build(builder, 0, memory_flags_, arguments[0].ssa(), view,
+                  indices.data(), origin.size(), static_indices.data(),
+                  origin.size(), mask, 0, 0, location, &op));
       return std::nullopt;
     }
   }

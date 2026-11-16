@@ -4,7 +4,7 @@ func.def @linearize_dense_load(%input: buffer, %zero_bytes: offset, %head0: inde
   %head = index.assume %head0 [range(%head0, 0, 3)] : index
   %head_dim = index.assume %head_dim0 [range(%head_dim0, 0, 127)] : index
   %input_view = buffer.view %input[%zero_bytes] : buffer -> view<4x128xf16>
-  %value = view.load %input_view[%head, %head_dim] : view<4x128xf16> -> f16
+  %value = view.load<type_disjoint> %input_view[%head, %head_dim] : view<4x128xf16> -> f16
   test.use %value : f16
   func.return
 }
@@ -16,7 +16,7 @@ func.def @linearize_dense_load(%input: buffer, %zero_bytes: offset, %head0: inde
   %input_view = buffer.view %input[%zero_bytes] : buffer -> view<512xf16>
   %8 = index.constant 128 : index
   %9 = index.madd %head, %8, %head_dim : index
-  %value = view.load %input_view[%9] : view<512xf16> -> f16
+  %value = view.load<type_disjoint> %input_view[%9] : view<512xf16> -> f16
   test.use %value : f16
   func.return
 }

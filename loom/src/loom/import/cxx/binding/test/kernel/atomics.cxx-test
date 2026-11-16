@@ -40,20 +40,20 @@ func.def public @claim(%counter: buffer, %counter_byte_offset: offset) -> (i32) 
 
 func.def public @accumulate(%value: i64, %destination: buffer, %destination_byte_offset: offset) {
   %15 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
-  view.atomic.reduce<maxsi, root_in_bounds> %value, %15[0] {ordering = release, scope = workgroup} : i64, view<1xi64>
+  view.atomic.reduce<maxsi, root_in_bounds|type_disjoint> %value, %15[0] {ordering = release, scope = workgroup} : i64, view<1xi64>
   func.return
 }
 
 func.def public @replace(%expected: i64, %replacement: i64, %destination: buffer, %destination_byte_offset: offset) -> (i64) {
   %21 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
-  %22 = view.atomic.cmpxchg<root_in_bounds> %expected, %replacement, %21[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : i64, view<1xi64> -> i64
+  %22 = view.atomic.cmpxchg<root_in_bounds|type_disjoint> %expected, %replacement, %21[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : i64, view<1xi64> -> i64
   func.return %22 : i64
 }
 
 func.def @ticket(%counter: buffer, %counter_byte_offset: offset) -> (i32) {
   %26 = scalar.constant 1 : i32
   %27 = buffer.view %counter[%counter_byte_offset] : buffer -> view<1xi32>
-  %28 = view.atomic.rmw<addi, root_in_bounds> %26, %27[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %28 = view.atomic.rmw<addi, root_in_bounds|type_disjoint> %26, %27[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
   func.return %28 : i32
 }
 
@@ -86,7 +86,7 @@ func.def public @add_byte(%value: i8, %destination: buffer, %destination_byte_of
 
 func.def public @replace_half(%expected: i16, %replacement: i16, %destination: buffer, %destination_byte_offset: offset) -> (i16) {
   %11 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi16>
-  %12 = view.atomic.cmpxchg<root_in_bounds> %expected, %replacement, %11[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i16, view<1xi16> -> i16
+  %12 = view.atomic.cmpxchg<root_in_bounds|type_disjoint> %expected, %replacement, %11[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i16, view<1xi16> -> i16
   func.return %12 : i16
 }
 
@@ -120,16 +120,16 @@ func.def public @observe(%source: buffer, %source_byte_offset: offset) -> (i32) 
   %3 = index.constant 4 : offset
   %4 = index.add %source_byte_offset, %3 : offset
   %5 = buffer.view %source[%4] : buffer -> view<1xi32>
-  %6 = view.atomic.load<root_in_bounds> %5[0] {ordering = acquire, scope = system} : view<1xi32> -> i32
+  %6 = view.atomic.load<root_in_bounds|type_disjoint> %5[0] {ordering = acquire, scope = system} : view<1xi32> -> i32
   func.return %6 : i32
 }
 
 func.def public @publish(%value: i32, %destination: buffer, %destination_byte_offset: offset) {
   buffer.fence scope(system) ordering(release)
   %10 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi32>
-  view.atomic.store<root_in_bounds> %value, %10[0] {ordering = relaxed, scope = system} : i32, view<1xi32>
+  view.atomic.store<root_in_bounds|type_disjoint> %value, %10[0] {ordering = relaxed, scope = system} : i32, view<1xi32>
   %11 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi32>
-  %12 = view.atomic.load<root_in_bounds> %11[0] {ordering = seq_cst, scope = system} : view<1xi32> -> i32
+  %12 = view.atomic.load<root_in_bounds|type_disjoint> %11[0] {ordering = seq_cst, scope = system} : view<1xi32> -> i32
   func.return
 }
 
@@ -160,7 +160,7 @@ func.def public @observe_builtin(%source: buffer, %source_byte_offset: offset) -
   %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
   %10 = index.cast %9 : i64 to offset
   %11 = buffer.view %source[%10] : buffer -> view<1xi32>
-  %12 = view.atomic.load<root_in_bounds> %11[0] {ordering = acquire, scope = system} : view<1xi32> -> i32
+  %12 = view.atomic.load<root_in_bounds|type_disjoint> %11[0] {ordering = acquire, scope = system} : view<1xi32> -> i32
   func.return %12 : i32
 }
 
@@ -175,7 +175,7 @@ func.def public @publish_builtin(%value: i32, %destination: buffer, %destination
   %22 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
   %23 = index.cast %22 : i64 to offset
   %24 = buffer.view %destination[%23] : buffer -> view<1xi32>
-  view.atomic.store<root_in_bounds> %value, %24[0] {ordering = relaxed, scope = system} : i32, view<1xi32>
+  view.atomic.store<root_in_bounds|type_disjoint> %value, %24[0] {ordering = relaxed, scope = system} : i32, view<1xi32>
   func.return
 }
 
@@ -230,13 +230,13 @@ ptrdiff_t add_difference(ptrdiff_t value, ptrdiff_t* destination) {
 // ----
 func.def public @replace_size(%expected: i64, %replacement: i64, %destination: buffer, %destination_byte_offset: offset) -> (i64) {
   %5 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
-  %6 = view.atomic.cmpxchg<root_in_bounds> %expected, %replacement, %5[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : i64, view<1xi64> -> i64
+  %6 = view.atomic.cmpxchg<root_in_bounds|type_disjoint> %expected, %replacement, %5[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : i64, view<1xi64> -> i64
   func.return %6 : i64
 }
 
 func.def public @add_difference(%value: i64, %destination: buffer, %destination_byte_offset: offset) -> (i64) {
   %11 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
-  %12 = view.atomic.rmw<addi, root_in_bounds> %value, %11[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
+  %12 = view.atomic.rmw<addi, root_in_bounds|type_disjoint> %value, %11[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   func.return %12 : i64
 }
 
@@ -273,27 +273,27 @@ func.def public @update_view(%storage: buffer, %storage_byte_offset: offset, %ro
   %values = buffer.view %storage[%storage_byte_offset] : buffer -> view<4x8xi32, %values_layout>
   %6 = scalar.extui %row : i32 to i64
   %7 = index.cast %6 : i64 to index
-  %observed = view.atomic.load %values[%7, %column] {ordering = acquire, scope = device} : view<4x8xi32, %values_layout> -> i32
+  %observed = view.atomic.load<type_disjoint> %values[%7, %column] {ordering = acquire, scope = device} : view<4x8xi32, %values_layout> -> i32
   %9 = scalar.extui %row : i32 to i64
   %10 = index.cast %9 : i64 to index
-  view.atomic.store %observed, %values[%10, %column] {ordering = release, scope = device} : i32, view<4x8xi32, %values_layout>
+  view.atomic.store<type_disjoint> %observed, %values[%10, %column] {ordering = release, scope = device} : i32, view<4x8xi32, %values_layout>
   %11 = scalar.constant 1 : i32
   %12 = scalar.extui %row : i32 to i64
   %13 = index.cast %12 : i64 to index
-  %old = view.atomic.rmw<addi> %11, %values[%13, %column] {ordering = acq_rel, scope = device} : i32, view<4x8xi32, %values_layout> -> i32
+  %old = view.atomic.rmw<addi, type_disjoint> %11, %values[%13, %column] {ordering = acq_rel, scope = device} : i32, view<4x8xi32, %values_layout> -> i32
   %15 = scalar.extui %row : i32 to i64
   %16 = index.cast %15 : i64 to index
-  view.atomic.reduce<maxui> %old, %values[%16, %column] {ordering = relaxed, scope = device} : i32, view<4x8xi32, %values_layout>
+  view.atomic.reduce<maxui, type_disjoint> %old, %values[%16, %column] {ordering = relaxed, scope = device} : i32, view<4x8xi32, %values_layout>
   %17 = scalar.extui %row : i32 to i64
   %18 = index.cast %17 : i64 to index
-  %19 = view.atomic.cmpxchg %observed, %old, %values[%18, %column] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i32, view<4x8xi32, %values_layout> -> i32
+  %19 = view.atomic.cmpxchg<type_disjoint> %observed, %old, %values[%18, %column] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i32, view<4x8xi32, %values_layout> -> i32
   func.return
 }
 
 func.def public @observe_const_view(%storage: buffer, %storage_byte_offset: offset, %index: index) -> (i32) {
   %values_layout = encoding.layout.dense : encoding<layout>
   %values = buffer.view %storage[%storage_byte_offset] : buffer -> view<16xi32, %values_layout>
-  %26 = view.atomic.load %values[%index] {ordering = seq_cst, scope = system} : view<16xi32, %values_layout> -> i32
+  %26 = view.atomic.load<type_disjoint> %values[%index] {ordering = seq_cst, scope = system} : view<16xi32, %values_layout> -> i32
   func.return %26 : i32
 }
 
@@ -301,6 +301,6 @@ func.def public @update_volatile_view(%storage: buffer, %storage_byte_offset: of
   %values_layout = encoding.layout.dense : encoding<layout>
   %values = buffer.view %storage[%storage_byte_offset] : buffer -> view<16xi32, %values_layout>
   %33 = scalar.constant 1 : i32
-  %34 = view.atomic.rmw<xchgi> %33, %values[%index] {ordering = relaxed, scope = system} : i32, view<16xi32, %values_layout> -> i32
+  %34 = view.atomic.rmw<xchgi, type_disjoint> %33, %values[%index] {ordering = relaxed, scope = system} : i32, view<16xi32, %values_layout> -> i32
   func.return %34 : i32
 }

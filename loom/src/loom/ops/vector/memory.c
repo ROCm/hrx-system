@@ -437,31 +437,32 @@ iree_status_t loom_vector_memory_build_unmasked(
     case LOOM_OP_VECTOR_LOAD_MASK:
     case LOOM_OP_VECTOR_LOAD_EXPAND:
       return loom_vector_load_build(
-          builder, cache_policy->build_flags, /*instance_flags=*/0, view,
-          indices.values, indices.count, static_indices.i64_array,
+          builder, cache_policy->build_flags, loom_memory_access_flags(access),
+          view, indices.values, indices.count, static_indices.i64_array,
           static_indices.count, cache_policy->cache_scope,
           cache_policy->cache_temporal, result_type, op->location, out_op);
     case LOOM_OP_VECTOR_STORE_MASK:
     case LOOM_OP_VECTOR_STORE_COMPRESS:
       return loom_vector_store_build(
-          builder, cache_policy->build_flags, /*instance_flags=*/0,
+          builder, cache_policy->build_flags, loom_memory_access_flags(access),
           loom_memory_access_value(access), view, indices.values, indices.count,
           static_indices.i64_array, static_indices.count,
           cache_policy->cache_scope, cache_policy->cache_temporal, op->location,
           out_op);
     case LOOM_OP_VECTOR_GATHER_MASK:
       return loom_vector_gather_build(
-          builder, cache_policy->build_flags, view, indices.values,
-          indices.count, static_indices.i64_array, static_indices.count,
-          loom_memory_access_offsets(access), cache_policy->cache_scope,
-          cache_policy->cache_temporal, result_type, op->location, out_op);
-    case LOOM_OP_VECTOR_SCATTER_MASK:
-      return loom_vector_scatter_build(
-          builder, cache_policy->build_flags, loom_memory_access_value(access),
+          builder, cache_policy->build_flags, loom_memory_access_flags(access),
           view, indices.values, indices.count, static_indices.i64_array,
           static_indices.count, loom_memory_access_offsets(access),
-          cache_policy->cache_scope, cache_policy->cache_temporal, op->location,
-          out_op);
+          cache_policy->cache_scope, cache_policy->cache_temporal, result_type,
+          op->location, out_op);
+    case LOOM_OP_VECTOR_SCATTER_MASK:
+      return loom_vector_scatter_build(
+          builder, cache_policy->build_flags, loom_memory_access_flags(access),
+          loom_memory_access_value(access), view, indices.values, indices.count,
+          static_indices.i64_array, static_indices.count,
+          loom_memory_access_offsets(access), cache_policy->cache_scope,
+          cache_policy->cache_temporal, op->location, out_op);
     case LOOM_OP_VECTOR_ATOMIC_RMW_MASK:
       return loom_vector_atomic_rmw_build(
           builder, cache_policy->build_flags,

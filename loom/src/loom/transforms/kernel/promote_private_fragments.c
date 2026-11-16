@@ -654,7 +654,8 @@ static iree_status_t loom_promote_private_fragments_promote(
 
   loom_op_t* vector_load_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_load_build(
-      &context->rewriter->builder, 0, /*instance_flags=*/0,
+      &context->rewriter->builder, 0,
+      loom_view_load_memory_flags(copy_loop->source_load_op),
       copy_loop->source_view, copy_loop->indices, copy_loop->index_count,
       static_indices, copy_loop->static_index_count, 0, 0,
       copy_loop->vector_type, copy_loop->source_load_op->location,

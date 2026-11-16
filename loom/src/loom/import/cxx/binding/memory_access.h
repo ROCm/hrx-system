@@ -20,12 +20,14 @@ namespace loom::cxx_import {
 class Diagnostics;
 
 // Admits an optional constant memory-access selector against the operation's
-// supported flags. An absent selector or a type parameter carries no flags.
-// Called once when binding a source function; calls retain the admitted bits.
+// supported flags and applies it to the semantics inferred from the source
+// object. may_alias removes inferred type disjointness; explicit flags add to
+// the remaining semantics. Called once when binding a source function.
 loom_memory_access_flags_t read_memory_access_flags(
     cxx::TranslationUnit& unit, Diagnostics& diagnostics,
     cxx::FunctionSymbol* function, size_t argument_index,
-    loom_memory_access_flags_t allowed_flags, cxx::AST* owner);
+    loom_memory_access_flags_t allowed_flags,
+    loom_memory_access_flags_t inferred_flags, cxx::AST* owner);
 
 }  // namespace loom::cxx_import
 

@@ -146,9 +146,6 @@ std::optional<AtomicIntrinsic> AtomicIntrinsic::resolve(
   std::array<uint8_t, 3> selectors;
   read_selectors(unit, diagnostics, function, attribute, owner,
                  std::span(selectors).first(selector_count));
-  const loom_memory_access_flags_t memory_flags =
-      read_memory_access_flags(unit, diagnostics, function, selector_count,
-                               LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS, owner);
   auto kind = LOOM_ATOMIC_KIND_XCHGI;
   auto ordering = LOOM_ATOMIC_ORDERING_RELAXED;
   auto failure_ordering = LOOM_ATOMIC_ORDERING_RELAXED;
@@ -265,6 +262,11 @@ std::optional<AtomicIntrinsic> AtomicIntrinsic::resolve(
                        "atomic minimum/maximum signedness must match the "
                        "destination element type");
   }
+  const loom_memory_access_flags_t memory_flags =
+      read_memory_access_flags(unit, diagnostics, function, selector_count,
+                               LOOM_MEMORY_ACCESS_FLAG_ROOT_IN_BOUNDS |
+                                   LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT,
+                               types.memory_access_flags(element_type), owner);
   return AtomicIntrinsic(operation, element_type, types.get(element, owner),
                          kind, ordering, failure_ordering, scope, memory_flags,
                          source_view, unsigned_index_mask);
@@ -344,7 +346,9 @@ std::optional<AtomicBuiltin> AtomicBuiltin::resolve(
       AtomicIntrinsic(operation, pointer->elementType(),
                       types.get(element, call), kind,
                       LOOM_ATOMIC_ORDERING_RELAXED,
-                      LOOM_ATOMIC_ORDERING_RELAXED, LOOM_ATOMIC_SCOPE_SYSTEM),
+                      LOOM_ATOMIC_ORDERING_RELAXED, LOOM_ATOMIC_SCOPE_SYSTEM,
+                      types.memory_access_flags(pointer->elementType()) &
+                          LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT),
       result, nullptr);
   auto* order = operands;
   for (size_t index = 0; index < binding.argument_count(); ++index) {

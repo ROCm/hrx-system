@@ -590,8 +590,9 @@ static iree_status_t loom_stage_loop_carried_fragments_build_fragment_store(
   const loom_value_id_t* access_indices = has_blocks ? indices : &indices[1];
   loom_op_t* store_op = NULL;
   return loom_vector_fragment_store_build(
-      &context->rewriter->builder, build_flags, LOOM_VECTOR_ROLE_RESULT, value,
-      view, access_indices, index_count, static_indices, index_count, blocks,
+      &context->rewriter->builder, build_flags, LOOM_VECTOR_ROLE_RESULT,
+      /*instance_flags=*/0, value, view, access_indices, index_count,
+      static_indices, index_count, blocks,
       loom_vector_fragment_fact_row_value(fragment->fact),
       loom_vector_fragment_fact_column_value(fragment->fact),
       /*cache_scope=*/0, /*cache_temporal=*/0, anchor_op->location, &store_op);
@@ -617,9 +618,9 @@ static iree_status_t loom_stage_loop_carried_fragments_build_fragment_load(
   const loom_value_id_t* access_indices = has_blocks ? indices : &indices[1];
   loom_op_t* load_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_fragment_load_build(
-      &context->rewriter->builder, build_flags, LOOM_VECTOR_ROLE_INIT, view,
-      access_indices, index_count, static_indices, index_count, blocks,
-      loom_vector_fragment_fact_row_value(fragment->fact),
+      &context->rewriter->builder, build_flags, LOOM_VECTOR_ROLE_INIT,
+      /*instance_flags=*/0, view, access_indices, index_count, static_indices,
+      index_count, blocks, loom_vector_fragment_fact_row_value(fragment->fact),
       loom_vector_fragment_fact_column_value(fragment->fact),
       /*auxiliary=*/NULL, /*auxiliary_count=*/0, /*cache_scope=*/0,
       /*cache_temporal=*/0, fragment->payload_type, anchor_op->location,

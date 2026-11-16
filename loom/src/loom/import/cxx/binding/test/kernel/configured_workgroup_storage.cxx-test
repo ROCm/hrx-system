@@ -78,14 +78,14 @@ kernel.def @configured_workgroup_storage() {
   %39 = scalar.addi %final_stage_base, %lane : i32
   %40 = scalar.extui %39 : i32 to i64
   %41 = index.cast %40 : i64 to index
-  %42 = view.load %stage_view[%41] : view<[%15]xi32, %stage_view_layout> -> i32
+  %42 = view.load<type_disjoint> %stage_view[%41] : view<[%15]xi32, %stage_view_layout> -> i32
   %43 = scalar.extui %lane : i32 to i64
   %70 = scalar.constant 2 : i64
   %71 = scalar.shli %43, %70 : i64
   %48 = scalar.assume %71 [range(%71, 0, 9223372036854775807)] : i64
   %49 = index.cast %48 : i64 to offset
   %50 = buffer.view %output[%49] : buffer -> view<1xi32>
-  view.store<root_in_bounds> %42, %50[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %42, %50[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -102,6 +102,6 @@ func.def inline @store_stage(%stages_dim0: index, %stages_layout: encoding<layou
   %65 = scalar.addi %81, %consumer_lane : i32
   %66 = scalar.extui %65 : i32 to i64
   %67 = index.cast %66 : i64 to index
-  view.store %83, %stages[%67] : i32, view<[%stages_dim0]xi32, %stages_layout>
+  view.store<type_disjoint> %83, %stages[%67] : i32, view<[%stages_dim0]xi32, %stages_layout>
   func.return
 }

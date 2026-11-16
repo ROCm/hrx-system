@@ -82,7 +82,7 @@ class VectorMemoryIntrinsic {
   loom_type_t predicate_type_ = {};
   // Unsigned source interpretations in the full-rank origin record.
   uint16_t origin_unsigned_mask_ = 0;
-  // Explicit physical-root proof selected by the source specialization.
+  // Inferred and explicitly selected semantics for one memory observation.
   loom_memory_access_flags_t memory_flags_ = 0;
 };
 

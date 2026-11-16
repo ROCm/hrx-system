@@ -31,6 +31,7 @@ exports_files([
     "include/loomcxx/command.h",
     "include/loomcxx/encoding.h",
     "include/loomcxx/encoding_type.h",
+    "include/loomcxx/fragment.h",
     "include/loomcxx/index.h",
     "include/loomcxx/kernel.h",
     "include/loomcxx/low.h",

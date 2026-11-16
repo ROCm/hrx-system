@@ -147,6 +147,7 @@ static iree_status_t loom_low_lower_record_memory_packet_effects(
     loom_low_lower_context_t* context, const loom_op_t* low_op,
     const loom_low_descriptor_t* descriptor,
     loom_low_memory_access_source_flags_t source_flags,
+    loom_scalar_type_t alias_type,
     const loom_low_memory_relative_interval_t* relative_interval,
     int64_t lane_byte_count) {
   if (relative_interval == NULL && source_flags == 0) {
@@ -174,10 +175,12 @@ static iree_status_t loom_low_lower_record_memory_packet_effects(
     if (has_relative_interval) {
       summary.memory_space = effect->memory_space;
       summary.source_flags = source_flags;
+      summary.alias_type = alias_type;
       summary.relative_interval = relative_interval;
     } else {
       summary = *loom_low_memory_access_summary_for_space(effect->memory_space);
       summary.source_flags = source_flags;
+      summary.alias_type = alias_type;
     }
     IREE_RETURN_IF_ERROR(
         loom_low_lower_record_memory_effect(context, low_op, i, &summary));
@@ -201,5 +204,6 @@ iree_status_t loom_low_lower_record_memory_packet(
   return loom_low_lower_record_memory_packet_effects(
       context, low_op, descriptor,
       loom_low_source_memory_access_plan_source_flags(source_plan),
-      has_interval ? &relative : NULL, lane_byte_count);
+      source_plan->alias_type, has_interval ? &relative : NULL,
+      lane_byte_count);
 }

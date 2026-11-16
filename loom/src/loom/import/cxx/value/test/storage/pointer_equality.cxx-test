@@ -97,20 +97,20 @@ kernel.def @k() {
   %values_storage_byte_offset = index.constant 0 : offset
   %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<3xi64>
   %15 = index.constant 0 : index
-  view.store %a, %values_view[%15] : i64, view<3xi64>
+  view.store<type_disjoint> %a, %values_view[%15] : i64, view<3xi64>
   %16 = index.constant 1 : index
-  view.store %b, %values_view[%16] : i64, view<3xi64>
+  view.store<type_disjoint> %b, %values_view[%16] : i64, view<3xi64>
   %17 = index.constant 2 : index
-  view.store %c, %values_view[%17] : i64, view<3xi64>
+  view.store<type_disjoint> %c, %values_view[%17] : i64, view<3xi64>
   %p_byte_offset$83 = index.constant 8 : offset
   %best, %best_byte_offset, %p, %p_byte_offset$64 = scf.while(%best = %values_storage : buffer, %best_byte_offset = %values_storage_byte_offset : offset, %p = %values_storage : buffer, %p_byte_offset = %p_byte_offset$83 : offset) -> (buffer, offset, buffer, offset) {
     %65 = buffer.compare.address ne, %p[%p_byte_offset], %values_storage[%11]
     scf.condition %65, %best, %best_byte_offset, %p, %p_byte_offset : i1, buffer, offset, buffer, offset
   } do(%best$57: buffer, %best_byte_offset$58: offset, %p: buffer, %p_byte_offset$60: offset) {
     %66 = buffer.view %best$57[%best_byte_offset$58] : buffer -> view<1xi64>
-    %67 = view.load<root_in_bounds> %66[0] : view<1xi64> -> i64
+    %67 = view.load<root_in_bounds|type_disjoint> %66[0] : view<1xi64> -> i64
     %68 = buffer.view %p[%p_byte_offset$60] : buffer -> view<1xi64>
-    %69 = view.load<root_in_bounds> %68[0] : view<1xi64> -> i64
+    %69 = view.load<root_in_bounds|type_disjoint> %68[0] : view<1xi64> -> i64
     %70 = scalar.cmpi slt, %67, %69 : i64
     %best$85 = scf.select %70, %p, %best$57 : buffer
     %best_byte_offset$86 = scf.select %70, %p_byte_offset$60, %best_byte_offset$58 : offset
@@ -122,8 +122,8 @@ kernel.def @k() {
     scf.yield %best$85, %best_byte_offset$86, %p, %p_byte_offset$80 : buffer, offset, buffer, offset
   }
   %28 = buffer.view %best[%best_byte_offset] : buffer -> view<1xi64>
-  %29 = view.load<root_in_bounds> %28[0] : view<1xi64> -> i64
+  %29 = view.load<root_in_bounds|type_disjoint> %28[0] : view<1xi64> -> i64
   %38 = buffer.view %out[%values_storage_byte_offset] : buffer -> view<1xi64>
-  view.store<root_in_bounds> %29, %38[0] : i64, view<1xi64>
+  view.store<root_in_bounds|type_disjoint> %29, %38[0] : i64, view<1xi64>
   kernel.return
 }

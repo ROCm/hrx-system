@@ -182,7 +182,7 @@ kernel.def @mxfp4_decode_dot() {
   %37 = scalar.constant 0.0 : f32
   %38 = vector.reduce<addf> %partial$36, %37 : vector<16xf32>, f32
   %28 = buffer.view %output[%payload_byte_offset] : buffer -> view<1xf32>
-  view.store<root_in_bounds> %38, %28[0] : f32, view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %38, %28[0] : f32, view<1xf32>
   kernel.return
 }
 
@@ -254,7 +254,7 @@ kernel.def @mxfp8_decode_dot() {
   %37 = scalar.constant 0.0 : f32
   %38 = vector.reduce<addf> %partial$36, %37 : vector<16xf32>, f32
   %28 = buffer.view %output[%payload_byte_offset] : buffer -> view<1xf32>
-  view.store<root_in_bounds> %38, %28[0] : f32, view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %38, %28[0] : f32, view<1xf32>
   kernel.return
 }
 
@@ -455,7 +455,7 @@ kernel.def @decode_dot() {
   %34 = vector.load<root_in_bounds> %33[0] : view<16xbf16> -> vector<16xbf16>
   %35 = func.call pure @packed_group_dot(%28, %30, %32, %34, %scale, %seed) : (vector<16xi8>, vector<16xi8>, vector<16xbf16>, vector<16xbf16>, f32, f32) -> (f32)
   %36 = buffer.view %output[%table_byte_offset] : buffer -> view<1xf32>
-  view.store<root_in_bounds> %35, %36[0] : f32, view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %35, %36[0] : f32, view<1xf32>
   kernel.return
 }
 

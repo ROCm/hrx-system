@@ -106,21 +106,21 @@ void cleanup_expressions(bool choose) {
   auto v30 = loom::buffer::view<4>(reinterpret_cast<const unsigned char*>(v28), {});
   auto* v32 = loom::buffer::alloca<loom::memory_space::private_, 1>(loom::type::offset{1});
   auto v34 = loom::buffer::view<1>(v32, {});
-  loom::view::store((0 ? static_cast<unsigned char>(1) : static_cast<unsigned char>(0)), v34, 0);
+  loom::view::store<loom::memory_access::type_disjoint>((0 ? static_cast<unsigned char>(1) : static_cast<unsigned char>(0)), v34, 0);
   unsigned v37{};
   if (choose) {
     loom::type::offset v41 = loom::type::offset{0} + loom::type::offset{0};
     loom::assume(loom::predicate::range(v41, 0, 0));
     auto v43 = loom::buffer::view<1>(reinterpret_cast<unsigned*>(reinterpret_cast<unsigned char*>(v28) + static_cast<unsigned long long>(v41)), {});
     loom::view::store(8u, v43, 0);
-    loom::view::store((1 ? static_cast<unsigned char>(1) : static_cast<unsigned char>(0)), v34, 0);
+    loom::view::store<loom::memory_access::type_disjoint>((1 ? static_cast<unsigned char>(1) : static_cast<unsigned char>(0)), v34, 0);
     v37 = 9u;
   } else {
     v37 = 10u;
   }
   consume(v37);
   Guard___Guard_value(v37);
-  unsigned char v47 = loom::view::load(v34, 0);
+  unsigned char v47 = loom::view::load<loom::memory_access::type_disjoint>(v34, 0);
   if (v47 != static_cast<unsigned char>(0)) {
     Guard___Guard_storage(loom::buffer::cast<unsigned>(loom::buffer::root(v28)), loom::type::offset{0});
   }

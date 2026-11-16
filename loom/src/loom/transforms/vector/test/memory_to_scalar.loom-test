@@ -15,8 +15,8 @@ func.def @masked_packed_memory_scalarizes(%input: buffer, %output: buffer, %orig
   %base = index.constant 2 : offset
   %input_view = buffer.view %input[%base] : buffer -> view<32xf32, align(2)>
   %output_view = buffer.view %output[%base] : buffer -> view<32xf32, align(2)>
-  %loaded = vector.load.mask %input_view[%origin], %mask, %old : view<32xf32, align(2)>, vector<2xi1>, vector<2xf32>
-  vector.store.mask %value, %output_view[%origin], %mask : vector<2xf32>, view<32xf32, align(2)>, vector<2xi1>
+  %loaded = vector.load.mask<type_disjoint> %input_view[%origin], %mask, %old : view<32xf32, align(2)>, vector<2xi1>, vector<2xf32>
+  vector.store.mask<type_disjoint> %value, %output_view[%origin], %mask : vector<2xf32>, view<32xf32, align(2)>, vector<2xi1>
   func.return %loaded : vector<2xf32>
 }
 
@@ -27,7 +27,7 @@ func.def @masked_packed_memory_scalarizes(%input: buffer, %output: buffer, %orig
   %output_view = buffer.view %output[%base] : buffer -> view<32xf32, align(2)>
   %17 = vector.extract %mask[0] : vector<2xi1> -> i1
   %18 = scf.if %17 -> (f32) {
-    %19 = view.load %input_view[%origin] : view<32xf32, align(2)> -> f32
+    %19 = view.load<type_disjoint> %input_view[%origin] : view<32xf32, align(2)> -> f32
     scf.yield %19 : f32
   } else {
     %20 = vector.extract %old[0] : vector<2xf32> -> f32
@@ -37,7 +37,7 @@ func.def @masked_packed_memory_scalarizes(%input: buffer, %output: buffer, %orig
   %22 = scf.if %21 -> (f32) {
     %23 = index.constant 1 : index
     %24 = index.add %origin, %23 : index
-    %25 = view.load %input_view[%24] : view<32xf32, align(2)> -> f32
+    %25 = view.load<type_disjoint> %input_view[%24] : view<32xf32, align(2)> -> f32
     scf.yield %25 : f32
   } else {
     %26 = vector.extract %old[1] : vector<2xf32> -> f32
@@ -49,11 +49,11 @@ func.def @masked_packed_memory_scalarizes(%input: buffer, %output: buffer, %orig
   %15 = index.constant 1 : index
   %16 = index.add %origin, %15 : index
   scf.if %17 {
-    view.store %12, %output_view[%origin] : f32, view<32xf32, align(2)>
+    view.store<type_disjoint> %12, %output_view[%origin] : f32, view<32xf32, align(2)>
   } else {
   }
   scf.if %21 {
-    view.store %14, %output_view[%16] : f32, view<32xf32, align(2)>
+    view.store<type_disjoint> %14, %output_view[%16] : f32, view<32xf32, align(2)>
   } else {
   }
   func.return %loaded : vector<2xf32>

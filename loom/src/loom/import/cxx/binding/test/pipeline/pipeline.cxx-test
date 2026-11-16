@@ -96,7 +96,7 @@ func.def public @channel_operations(%slots_dim0: index, %slots_dim1: index, %slo
   %11 = scalar.constant 0 : i32
   %12 = index.cast %10 : i32 to index
   %13 = index.cast %11 : i32 to index
-  view.store %seed, %reservation_payload[%12, %13] : f32, view<[%slots_dim1]x8xf32, %payload_layout>
+  view.store<type_disjoint> %seed, %reservation_payload[%12, %13] : f32, view<[%slots_dim1]x8xf32, %payload_layout>
   channel.publish %reservation_write : write<tile<[%slots_dim1]x8xf32, %payload_layout>>
   %accepted = channel.accept %stream : channel<tile<[%slots_dim1]x8xf32, %payload_layout>> -> read<tile<[%slots_dim1]x8xf32, %payload_layout>>
   %payload = channel.wait %accepted : read<tile<[%slots_dim1]x8xf32, %payload_layout>> -> view<[%slots_dim1]x8xf32, %payload_layout>
@@ -104,7 +104,7 @@ func.def public @channel_operations(%slots_dim0: index, %slots_dim1: index, %slo
   %17 = scalar.constant 0 : i32
   %18 = index.cast %16 : i32 to index
   %19 = index.cast %17 : i32 to index
-  %observed = view.load %payload[%18, %19] : view<[%slots_dim1]x8xf32, %payload_layout> -> f32
+  %observed = view.load<type_disjoint> %payload[%18, %19] : view<[%slots_dim1]x8xf32, %payload_layout> -> f32
   %copies_first, %copies_second = channel.fanout %accepted : read<tile<[%slots_dim1]x8xf32, %payload_layout>> -> (read<tile<[%slots_dim1]x8xf32, %payload_layout>>, read<tile<[%slots_dim1]x8xf32, %payload_layout>>)
   channel.release %copies_first : read<tile<[%slots_dim1]x8xf32, %payload_layout>>
   channel.release %copies_second : read<tile<[%slots_dim1]x8xf32, %payload_layout>>
@@ -114,14 +114,14 @@ func.def public @channel_operations(%slots_dim0: index, %slots_dim1: index, %slo
   %26 = scalar.constant 0 : i32
   %27 = index.cast %25 : i32 to index
   %28 = index.cast %26 : i32 to index
-  view.store %observed, %mutable_payload[%27, %28] : f32, view<[%slots_dim1]x8xf32, %payload_layout>
+  view.store<type_disjoint> %observed, %mutable_payload[%27, %28] : f32, view<[%slots_dim1]x8xf32, %payload_layout>
   channel.release %mutable_read : read<tile<[%slots_dim1]x8xf32, %payload_layout>, mutable>
   %acquisition_read, %acquisition_payload = channel.acquire<mutable> %stream : channel<tile<[%slots_dim1]x8xf32, %payload_layout>> -> (read<tile<[%slots_dim1]x8xf32, %payload_layout>, mutable>, view<[%slots_dim1]x8xf32, %payload_layout>)
   %31 = scalar.constant 0 : i32
   %32 = scalar.constant 0 : i32
   %33 = index.cast %31 : i32 to index
   %34 = index.cast %32 : i32 to index
-  view.store %seed, %acquisition_payload[%33, %34] : f32, view<[%slots_dim1]x8xf32, %payload_layout>
+  view.store<type_disjoint> %seed, %acquisition_payload[%33, %34] : f32, view<[%slots_dim1]x8xf32, %payload_layout>
   channel.release %acquisition_read : read<tile<[%slots_dim1]x8xf32, %payload_layout>, mutable>
   %35 = channel.accept %stream : channel<tile<[%slots_dim1]x8xf32, %payload_layout>> -> read<tile<[%slots_dim1]x8xf32, %payload_layout>>
   %triple_first, %triple_remaining_first, %triple_remaining_second = channel.fanout %35 : read<tile<[%slots_dim1]x8xf32, %payload_layout>> -> (read<tile<[%slots_dim1]x8xf32, %payload_layout>>, read<tile<[%slots_dim1]x8xf32, %payload_layout>>, read<tile<[%slots_dim1]x8xf32, %payload_layout>>)

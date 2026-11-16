@@ -128,7 +128,7 @@ func.def public @vector_depth_span(%previous: buffer, %previous_byte_offset: off
     %57 = scalar.assume %56 [range(%56, 0, 9223372036854775807)] : i64
     %58 = index.cast %57 : i64 to offset
     %59 = buffer.view %previous[%58] : buffer -> view<1xi32>
-    %60 = view.load<root_in_bounds> %59[0] : view<1xi32> -> i32
+    %60 = view.load<root_in_bounds|type_disjoint> %59[0] : view<1xi32> -> i32
     %61 = scalar.constant 65535 : i32
     %62 = scalar.andi %60, %61 : i32
     %63 = scalar.constant -65536 : i32
@@ -139,7 +139,7 @@ func.def public @vector_depth_span(%previous: buffer, %previous_byte_offset: off
     %71 = scalar.assume %70 [range(%70, 0, 9223372036854775807)] : i64
     %72 = index.cast %71 : i64 to offset
     %73 = buffer.view %output[%72] : buffer -> view<1xi32>
-    view.store<root_in_bounds> %65, %73[0] : i32, view<1xi32>
+    view.store<root_in_bounds|type_disjoint> %65, %73[0] : i32, view<1xi32>
     %depth$74 = scalar.addi %depth$49, %step : i32
     scf.yield %depth$74 : i32
   }
@@ -191,25 +191,25 @@ func.def public @copy_blocks(%input: buffer, %input_byte_offset: offset, %output
   %10 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
   %11 = index.cast %10 : i64 to offset
   %12 = buffer.view %input[%11] : buffer -> view<1xi32>
-  %count$13 = view.load<root_in_bounds> %12[0] : view<1xi32> -> i32
+  %count$13 = view.load<root_in_bounds|type_disjoint> %12[0] : view<1xi32> -> i32
   %105 = scalar.constant 4 : i64
   %19 = scalar.addi %10, %105 : i64
   %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
   %21 = index.cast %20 : i64 to offset
   %22 = buffer.view %input[%21] : buffer -> view<1xi32>
-  %source_stride$23 = view.load<root_in_bounds> %22[0] : view<1xi32> -> i32
+  %source_stride$23 = view.load<root_in_bounds|type_disjoint> %22[0] : view<1xi32> -> i32
   %104 = scalar.constant 8 : i64
   %29 = scalar.addi %10, %104 : i64
   %30 = scalar.assume %29 [range(%29, 0, 9223372036854775807)] : i64
   %31 = index.cast %30 : i64 to offset
   %32 = buffer.view %input[%31] : buffer -> view<1xi32>
-  %destination_stride$33 = view.load<root_in_bounds> %32[0] : view<1xi32> -> i32
+  %destination_stride$33 = view.load<root_in_bounds|type_disjoint> %32[0] : view<1xi32> -> i32
   %103 = scalar.constant 12 : i64
   %39 = scalar.addi %10, %103 : i64
   %40 = scalar.assume %39 [range(%39, 0, 9223372036854775807)] : i64
   %41 = index.cast %40 : i64 to offset
   %42 = buffer.view %input[%41] : buffer -> view<1xi32>
-  %destination_origin$43 = view.load<root_in_bounds> %42[0] : view<1xi32> -> i32
+  %destination_origin$43 = view.load<root_in_bounds|type_disjoint> %42[0] : view<1xi32> -> i32
   %count$44 = scalar.assume %count$13 [range(%count$13, 0, 20)] : i32
   %source_stride$45 = scalar.assume %source_stride$23 [range(%source_stride$23, 0, 3)] : i32
   %destination_stride$46 = scalar.assume %destination_stride$33 [range(%destination_stride$33, 0, 2)] : i32

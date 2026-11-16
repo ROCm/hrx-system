@@ -281,9 +281,16 @@ static iree_status_t loom_aie2p_kernel_append_access(
 static bool loom_aie2p_kernel_bindings_are_nonconflicting(
     const loom_aie2p_kernel_realization_plan_t* plan, uint16_t left,
     uint16_t right) {
-  return loom_view_region_roots_are_nonconflicting(
-      &plan->bindings[left].root_region, plan->bindings[left].access,
-      &plan->bindings[right].root_region, plan->bindings[right].access);
+  const loom_view_region_observation_t left_observation = {
+      .region = &plan->bindings[left].root_region,
+      .flags = plan->bindings[left].access,
+  };
+  const loom_view_region_observation_t right_observation = {
+      .region = &plan->bindings[right].root_region,
+      .flags = plan->bindings[right].access,
+  };
+  return loom_view_region_observations_are_nonconflicting(&left_observation,
+                                                          &right_observation);
 }
 
 static iree_status_t loom_aie2p_kernel_select_realization_mode(

@@ -368,6 +368,14 @@ class CxxExpressionRenderer(CxxRenderContext):
         role = resolved.attr("role")
         shape = self._fragment_shape(operation, resolved)
         template, origin = self._fragment_origin(resolved)
+        selectors = [
+            f"loom::vector::fragment::role::{role}",
+            self.cpp_type(result),
+        ]
+        access_selector_count = len(selectors)
+        projected_flags = self._append_memory_access_contract(operation, selectors)
+        if template and len(selectors) == access_selector_count:
+            selectors.append("loom::memory_access::none")
         arguments = [self.expression(resolved.value_id("view")), *origin, shape]
         auxiliary = resolved.value_ids("auxiliary")
         if auxiliary:
@@ -381,11 +389,15 @@ class CxxExpressionRenderer(CxxRenderContext):
             )
         expression = (
             "loom::vector::fragment::load<"
-            f"loom::vector::fragment::role::{role}, {self.cpp_type(result)}"
-            f"{template}>(" + ", ".join(arguments) + ")"
+            f"{', '.join(selectors)}{template}>(" + ", ".join(arguments) + ")"
         )
         self._declare(result, expression)
-        return ("role", "static_indices", "auxiliary_names")
+        return (
+            "role",
+            "static_indices",
+            "auxiliary_names",
+            *projected_flags,
+        )
 
     def _render_fragment(self, operation: Operation) -> tuple[str, ...]:
         resolved = self._resolved(operation)
