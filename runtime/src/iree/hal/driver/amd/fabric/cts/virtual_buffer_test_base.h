@@ -211,7 +211,7 @@ class FabricVirtualBufferTest
     IREE_ASSERT_OK(iree_task_topology_initialize_from_physical_cores(
         IREE_TASK_TOPOLOGY_NODE_ID_ANY,
         IREE_TASK_TOPOLOGY_PERFORMANCE_LEVEL_ANY,
-        IREE_TASK_TOPOLOGY_DISTRIBUTION_COMPACT, 1, {}, allocator_, &topology));
+        IREE_TASK_TOPOLOGY_DISTRIBUTION_COMPACT, 1, {}, &topology));
     iree_task_executor_options_t executor_options;
     iree_task_executor_options_initialize(&executor_options);
     auto status = iree_task_executor_create(executor_options, &topology,

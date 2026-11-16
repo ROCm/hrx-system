@@ -137,29 +137,29 @@ TEST_F(PosixProactorTest, PoolNodeConstrainsBackendWorkersWithoutRunner) {
 TEST_F(PosixProactorTest, RetainedBudgetAppliesToFileOperations) {
   int cpu = sched_getcpu();
   ASSERT_GE(cpu, 0);
-  ASSERT_LT(cpu, CPU_SETSIZE);
-  iree_bitmap_t budget = {};
-  IREE_ASSERT_OK(
-      iree_thread_affinity_query_current(iree_allocator_system(), &budget));
-  iree_bitmap_reset_all(budget);
+  ASSERT_LT(cpu, IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT);
+  iree_thread_affinity_set_t budget_set = {};
+  iree_bitmap_t budget = iree_thread_affinity_set_bitmap(&budget_set);
   iree_bitmap_set(budget, cpu);
   iree_status_t status = CreatePool(UINT32_MAX, {}, budget);
   // Deferred entry construction must use the pool's owned copy.
-  iree_allocator_free(iree_allocator_system(), budget.words);
+  iree_bitmap_reset_all(budget);
   IREE_ASSERT_OK(status);
   IREE_ASSERT_OK(iree_async_proactor_pool_get(pool_, 0, &proactor_));
 
   // Every worker has its affinity before construction publishes the proactor.
   auto* posix_proactor = iree_async_proactor_posix_cast(proactor_);
   for (iree_host_size_t i = 0; i < posix_proactor->worker_count; ++i) {
-    cpu_set_t mask;
-    CPU_ZERO(&mask);
+    std::array<cpu_set_t,
+               (IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT + CPU_SETSIZE - 1) /
+                   CPU_SETSIZE>
+        mask = {};
     ASSERT_EQ(pthread_getaffinity_np(
                   (pthread_t)iree_thread_id(posix_proactor->workers[i].thread),
-                  sizeof(mask), &mask),
+                  sizeof(mask), mask.data()),
               0);
-    EXPECT_EQ(CPU_COUNT(&mask), 1);
-    EXPECT_TRUE(CPU_ISSET(cpu, &mask));
+    EXPECT_EQ(CPU_COUNT_S(sizeof(mask), mask.data()), 1);
+    EXPECT_TRUE(CPU_ISSET_S(cpu, sizeof(mask), mask.data()));
   }
 
   // /proc/thread-self resolves on the worker executing FILE_OPEN. Reading the

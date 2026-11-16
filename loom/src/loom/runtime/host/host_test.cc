@@ -10,7 +10,6 @@
 #include <cstring>
 #include <mutex>
 #include <thread>
-#include <vector>
 
 #include "iree/async/operations/scheduling.h"
 #include "iree/base/internal/arena.h"
@@ -148,14 +147,13 @@ TEST(HostTest, EmptyProcessorBudgetReturnsNoHost) {
 struct AffinityObservation {
   AffinityObservation() { iree_notification_initialize(&notification); }
   ~AffinityObservation() {
-    iree_allocator_free(iree_allocator_system(), mask.words);
     iree_status_free(status);
     iree_notification_deinitialize(&notification);
   }
 
   void Capture() {
     node_id = iree_numa_node_for_current_thread();
-    status = iree_thread_affinity_query_current(iree_allocator_system(), &mask);
+    status = iree_thread_affinity_query_current(&processors);
   }
   void Complete() {
     completed.store(true, std::memory_order_release);
@@ -172,13 +170,14 @@ struct AffinityObservation {
   }
   void ExpectProcessor(uint32_t processor) {
     IREE_EXPECT_OK(iree_status_clone(status));
+    iree_bitmap_t mask = iree_thread_affinity_set_bitmap(&processors);
     EXPECT_EQ(iree_bitmap_count(mask), 1u);
     ASSERT_LT(processor, mask.bit_count);
     EXPECT_TRUE(iree_bitmap_test(mask, processor));
   }
 
   // Native mask observed by a real host task or I/O callback.
-  iree_bitmap_t mask = {};
+  iree_thread_affinity_set_t processors = {};
   // Actual node observed by that worker, used to request the matching I/O
   // entry.
   uint32_t node_id = IREE_NUMA_NODE_ANY;
@@ -193,9 +192,9 @@ struct AffinityObservation {
 enum class HostBudgetMode { kCaptureConstructor, kExplicit };
 
 static void CheckHostBudget(HostBudgetMode mode) {
-  iree_bitmap_t available = {};
-  IREE_ASSERT_OK(
-      iree_thread_affinity_query_current(iree_allocator_system(), &available));
+  iree_thread_affinity_set_t available_set;
+  IREE_ASSERT_OK(iree_thread_affinity_query_current(&available_set));
+  iree_bitmap_t available = iree_thread_affinity_set_bitmap(&available_set);
   const auto constructor_cpu = iree_bitmap_find_first_set(available, 0);
   auto expected_cpu = constructor_cpu;
   if (mode == HostBudgetMode::kExplicit) {
@@ -204,12 +203,10 @@ static void CheckHostBudget(HostBudgetMode mode) {
             ? iree_bitmap_find_first_set(available, constructor_cpu + 1)
             : available.bit_count;
     if (expected_cpu == available.bit_count) {
-      iree_allocator_free(iree_allocator_system(), available.words);
       GTEST_SKIP() << "Explicit override requires two available CPUs";
     }
   }
-  std::vector<uint64_t> budget_words(
-      iree_bitmap_calculate_words(available.bit_count));
+  iree_thread_affinity_set_t budget_set = {};
   struct State {
     // Explicit constructor input, or an empty view requesting capture.
     iree_bitmap_t budget = {};
@@ -221,10 +218,7 @@ static void CheckHostBudget(HostBudgetMode mode) {
     AffinityObservation io;
   } state;
   if (mode == HostBudgetMode::kExplicit) {
-    state.budget = {
-        .bit_count = available.bit_count,
-        .words = budget_words.data(),
-    };
+    state.budget = iree_thread_affinity_set_bitmap(&budget_set);
     iree_bitmap_set(state.budget, expected_cpu);
   }
   const iree_thread_create_params_t params = {
@@ -305,7 +299,6 @@ static void CheckHostBudget(HostBudgetMode mode) {
         return 0;
       },
       &state, params, iree_allocator_system(), &constructor);
-  iree_allocator_free(iree_allocator_system(), available.words);
   iree_thread_release(constructor);
   IREE_EXPECT_OK(status);
   IREE_EXPECT_OK(state.status);

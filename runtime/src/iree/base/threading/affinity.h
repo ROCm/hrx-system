@@ -26,6 +26,35 @@
 extern "C" {
 #endif
 
+// Capacity of native processor sets, independent of Task worker counts.
+// Bit N denotes native CPU N on Linux/Android or group * 64 + processor on
+// Windows. The default covers the upstream Linux architecture limits supported
+// by IREE and occupies 1 KiB. Override consistently across the build for a
+// different deployment envelope. A value must be a positive multiple of 64;
+// Linux/Android native masks exceeding the capacity are rejected, never
+// truncated.
+#ifndef IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT
+#define IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT 8192
+#endif
+#if IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT <= 0 || \
+    IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT % 64 != 0
+#error IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT must be a positive multiple of 64
+#endif
+
+// Caller-owned storage for a native processor set. This value has no allocator
+// or lifetime beyond its containing object; bitmap views borrow its words.
+typedef struct iree_thread_affinity_set_t {
+  // Native processor membership, with CPU N at bit N.
+  uint64_t words[IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT / 64];
+} iree_thread_affinity_set_t;
+
+// Returns a bitmap borrowing |set|. Its storage must outlive every use.
+static inline iree_bitmap_t iree_thread_affinity_set_bitmap(
+    iree_thread_affinity_set_t* set) {
+  iree_bitmap_t bitmap = {IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT, set->words};
+  return bitmap;
+}
+
 // Specifies the processor affinity for a particular thread.
 // Each platform handles this differently (if at all).
 //
@@ -101,17 +130,16 @@ static inline bool iree_thread_affinity_is_unspecified(
 IREE_API_EXPORT void iree_thread_affinity_set_group_any(
     uint32_t group, iree_thread_affinity_t* out_thread_affinity);
 
-// Captures the calling thread's effective Linux/Android processor affinity.
-// Bit indices are native logical processor IDs. The result preserves sparse IDs
-// and is not limited to cpu_set_t or to the number of task workers.
+// Captures the calling thread's effective Linux/Android processor affinity into
+// caller-owned storage. Native CPU IDs are preserved, including sparse IDs.
+// Returns OUT_OF_RANGE if the kernel mask exceeds the configured capacity.
 //
-// The caller owns out_processor_mask->words and releases it with |allocator|.
 // Capture this at the application ownership boundary: querying a later pinned
 // worker does not recover the application's original CPU budget. This observes
 // thread affinity, not the enclosing cgroup's complete CPU allowance.
 // Platforms without this effective-affinity query return UNAVAILABLE.
 IREE_API_EXPORT iree_status_t iree_thread_affinity_query_current(
-    iree_allocator_t allocator, iree_bitmap_t* out_processor_mask);
+    iree_thread_affinity_set_t* out_processor_set);
 
 #ifdef __cplusplus
 }  // extern "C"

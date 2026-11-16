@@ -179,11 +179,11 @@ iree_status_t loom_runtime_host_create(
   iree_arena_block_pool_initialize(64 * 1024, host_allocator,
                                    &host->block_pool);
   iree_status_t status = iree_ok_status();
-  iree_bitmap_t captured_mask = {0};
 #if defined(IREE_PLATFORM_LINUX) || defined(IREE_PLATFORM_ANDROID)
+  iree_thread_affinity_set_t captured_set;
   if (!processor_mask.bit_count) {
-    status = iree_thread_affinity_query_current(host_allocator, &captured_mask);
-    processor_mask = captured_mask;
+    status = iree_thread_affinity_query_current(&captured_set);
+    processor_mask = iree_thread_affinity_set_bitmap(&captured_set);
   }
 #endif  // IREE_PLATFORM_LINUX || IREE_PLATFORM_ANDROID
   if (iree_status_is_ok(status) && compiler_options) {
@@ -209,7 +209,7 @@ iree_status_t loom_runtime_host_create(
         IREE_TASK_TOPOLOGY_NODE_ID_ANY,
         IREE_TASK_TOPOLOGY_PERFORMANCE_LEVEL_ANY,
         IREE_TASK_TOPOLOGY_DISTRIBUTION_SCATTER, worker_count, processor_mask,
-        host_allocator, &topology);
+        &topology);
   }
   if (iree_status_is_ok(status)) {
     iree_task_executor_options_t options;
@@ -260,7 +260,6 @@ iree_status_t loom_runtime_host_create(
     status = iree_async_proactor_pool_create(
         node_count, node_ids, options, host_allocator, &host->proactor_pool);
   }
-  iree_allocator_free(host_allocator, captured_mask.words);
   if (iree_status_is_ok(status)) {
     *out_host = host;
   } else {
