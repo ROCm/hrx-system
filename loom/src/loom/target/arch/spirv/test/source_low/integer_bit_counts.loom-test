@@ -8,8 +8,8 @@ func.def @coordinate_count(%value: index) -> (index) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @coordinate_count(%value: reg<spirv.id : index>) -> (reg<spirv.id : index>) asm {
-  %5 = OpConstant.i32 31 : reg<spirv.id>
-  %6 = OpExtInst.GLSL.std.450.FindUMsb.i32 %value : reg<spirv.id>
+  %5 = OpConstant.i32 31
+  %6 = OpExtInst.GLSL.std.450.FindUMsb.i32 %value
   %leading = OpISub %5, %6 : reg<spirv.id : index>
   return %leading
 }
@@ -25,12 +25,12 @@ func.def @narrow_count(%value: i8) -> (i8) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @narrow_count(%value: reg<spirv.id : i8>) -> (reg<spirv.id : i8>) asm {
-  %5 = OpConstant.i32 7 : reg<spirv.id>
-  %6 = OpSConvert.i8.i32 %value : reg<spirv.id>
-  %7 = OpConstant.i32 255 : reg<spirv.id>
-  %8 = OpBitwiseAnd %6, %7 : reg<spirv.id>
-  %9 = OpExtInst.GLSL.std.450.FindUMsb.i32 %8 : reg<spirv.id>
-  %10 = OpISub %5, %9 : reg<spirv.id>
+  %5 = OpConstant.i32 7
+  %6 = OpSConvert.i8.i32 %value
+  %7 = OpConstant.i32 255
+  %8 = OpBitwiseAnd %6, %7
+  %9 = OpExtInst.GLSL.std.450.FindUMsb.i32 %8
+  %10 = OpISub %5, %9
   %leading = OpSConvert.i32.i8 %10
   return %leading
 }
@@ -49,22 +49,22 @@ func.def @wide_count(%first: i64, %second: i64) -> (i64) {
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @wide_count(%first: reg<spirv.id : i64>, %second: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) asm {
   %values = OpCompositeConstruct.v2i64 %first, %second
-  %10 = OpConstant.i32 63 : reg<spirv.id>
-  %11 = OpCompositeConstruct.v2i32 %10, %10 : reg<spirv.id>
-  %12 = OpConstant.i64 32 : reg<spirv.id>
-  %13 = OpCompositeConstruct.v2i64 %12, %12 : reg<spirv.id>
-  %14 = OpShiftRightLogical.v2i64 %values, %13 : reg<spirv.id>
-  %15 = OpSConvert.v2i64.v2i32 %values : reg<spirv.id>
-  %16 = OpSConvert.v2i64.v2i32 %14 : reg<spirv.id>
-  %17 = OpConstant.i32 0 : reg<spirv.id>
-  %18 = OpCompositeConstruct.v2i32 %17, %17 : reg<spirv.id>
-  %19 = OpINotEqual.v2i32 %16, %18 : reg<spirv.id>
-  %20 = OpSelect.v2i32 %19, %16, %15 : reg<spirv.id>
-  %21 = OpConstant.i32 31 : reg<spirv.id>
-  %22 = OpCompositeConstruct.v2i32 %21, %21 : reg<spirv.id>
-  %23 = OpSelect.v2i32 %19, %22, %11 : reg<spirv.id>
-  %24 = OpExtInst.GLSL.std.450.FindUMsb.v2i32 %20 : reg<spirv.id>
-  %25 = OpISub.v2i32 %23, %24 : reg<spirv.id>
+  %10 = OpConstant.i32 63
+  %11 = OpCompositeConstruct.v2i32 %10, %10
+  %12 = OpConstant.i64 32
+  %13 = OpCompositeConstruct.v2i64 %12, %12
+  %14 = OpShiftRightLogical.v2i64 %values, %13
+  %15 = OpSConvert.v2i64.v2i32 %values
+  %16 = OpSConvert.v2i64.v2i32 %14
+  %17 = OpConstant.i32 0
+  %18 = OpCompositeConstruct.v2i32 %17, %17
+  %19 = OpINotEqual.v2i32 %16, %18
+  %20 = OpSelect.v2i32 %19, %16, %15
+  %21 = OpConstant.i32 31
+  %22 = OpCompositeConstruct.v2i32 %21, %21
+  %23 = OpSelect.v2i32 %19, %22, %11
+  %24 = OpExtInst.GLSL.std.450.FindUMsb.v2i32 %20
+  %25 = OpISub.v2i32 %23, %24
   %leading = OpSConvert.v2i32.v2i64 %25
   %result = OpCompositeExtract.v2i64.i64 %leading, 1
   return %result
@@ -82,11 +82,11 @@ func.def @trailing_and_population(%value: i16) -> (i16, i16) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @trailing_and_population(%value: reg<spirv.id : i16>) -> (reg<spirv.id : i16>, reg<spirv.id : i16>) asm {
-  %8 = OpConstant.i16 0 : reg<spirv.id>
-  %9 = OpISub.i16 %8, %value : reg<spirv.id>
-  %10 = OpBitwiseAnd.i16 %value, %9 : reg<spirv.id>
-  %11 = OpConstant.i16 1 : reg<spirv.id>
-  %12 = OpISub.i16 %10, %11 : reg<spirv.id>
+  %8 = OpConstant.i16 0
+  %9 = OpISub.i16 %8, %value
+  %10 = OpBitwiseAnd.i16 %value, %9
+  %11 = OpConstant.i16 1
+  %12 = OpISub.i16 %10, %11
   %trailing = OpBitCount.i16 %12
   %population = OpBitCount.i16 %value
   return %trailing, %population
@@ -109,8 +109,8 @@ func.def @predicate_counts(%first: i1, %second: i1) -> (i1, i1, i1) {
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @predicate_counts(%first: reg<spirv.id : i1>, %second: reg<spirv.id : i1>) -> (reg<spirv.id : i1>, reg<spirv.id : i1>, reg<spirv.id : i1>) asm {
   %population = OpCompositeConstruct.v2bool %first, %second
-  %17 = OpConstantTrue.bool : reg<spirv.id>
-  %18 = OpCompositeConstruct.v2bool %17, %17 : reg<spirv.id>
+  %17 = OpConstantTrue.bool
+  %18 = OpCompositeConstruct.v2bool %17, %17
   %leading = OpLogicalNotEqual.v2bool %population, %18
   %leading_result = OpCompositeExtract.v2bool.bool %leading, 0
   %population_result = OpCompositeExtract.v2bool.bool %population, 1

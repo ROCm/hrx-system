@@ -194,6 +194,8 @@ class OrdinaryVectorInstruction:
     operand_types: tuple[OrdinaryVectorInstructionType, ...]
     feature_atoms: tuple[str, ...] = ()
     component_index_maximum: int | None = None
+    # Fixed instruction literal following the typed value operands.
+    trailing_literal: str | None = None
     # Arithmetic decorations are mutually exclusive under FloatControls2.
     no_contraction: bool = False
     # Preserve special values and evaluation order with FPFastMathMode None.
@@ -206,6 +208,10 @@ class OrdinaryVectorInstruction:
             )
         if self.no_contraction and self.fp_fast_math_none:
             raise ValueError(f"{self.key}: incompatible floating-point decorations")
+        if (self.trailing_literal is not None) != (
+            self.packet_form == "LOOM_SPIRV_PACKET_FORM_TYPED_LITERAL"
+        ):
+            raise ValueError(f"{self.key}: typed-literal packets require a literal")
 
     @property
     def feature_bits(self) -> int:

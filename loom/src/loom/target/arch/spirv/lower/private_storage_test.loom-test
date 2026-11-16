@@ -35,37 +35,37 @@ low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, i32) 
   %21 = OpIAdd.offset64 %object, %20
   %23 = OpISub.offset64 %21, %object
   %24 = OpAccessChain.function.i8.byte_offset %15, %23
-  %25 = OpSConvert.i32.i8 %value : reg<spirv.id>
+  %25 = OpSConvert.i32.i8 %value
   OpStore.function.i8<volatile> %24, %25
   %26 = OpConstant.offset64 1
   %27 = OpIAdd.offset64 %23, %26
   %28 = OpAccessChain.function.i8.byte_offset %15, %27
-  %29 = OpConstant.i32 8 : reg<spirv.id>
-  %30 = OpShiftRightLogical %value, %29 : reg<spirv.id>
-  %31 = OpSConvert.i32.i8 %30 : reg<spirv.id>
+  %29 = OpConstant.i32 8
+  %30 = OpShiftRightLogical %value, %29
+  %31 = OpSConvert.i32.i8 %30
   OpStore.function.i8<volatile> %28, %31
   %32 = OpConstant.offset64 2
   %33 = OpIAdd.offset64 %23, %32
   %34 = OpAccessChain.function.i8.byte_offset %15, %33
-  %35 = OpConstant.i32 16 : reg<spirv.id>
-  %36 = OpShiftRightLogical %value, %35 : reg<spirv.id>
-  %37 = OpSConvert.i32.i8 %36 : reg<spirv.id>
+  %35 = OpConstant.i32 16
+  %36 = OpShiftRightLogical %value, %35
+  %37 = OpSConvert.i32.i8 %36
   OpStore.function.i8<volatile> %34, %37
   %38 = OpConstant.offset64 3
   %39 = OpIAdd.offset64 %23, %38
   %40 = OpAccessChain.function.i8.byte_offset %15, %39
-  %41 = OpConstant.i32 24 : reg<spirv.id>
-  %42 = OpShiftRightLogical %value, %41 : reg<spirv.id>
-  %43 = OpSConvert.i32.i8 %42 : reg<spirv.id>
+  %41 = OpConstant.i32 24
+  %42 = OpShiftRightLogical %value, %41
+  %43 = OpSConvert.i32.i8 %42
   OpStore.function.i8<volatile> %40, %43
   %45 = OpIAdd.offset64 %other, %20
   %47 = OpISub.offset64 %45, %other
   %48 = OpAccessChain.function.i32.byte_offset %17, %47
   OpStore.function.i32<volatile> %48, %value
   %54 = OpLoad.function.i8 %24 : reg<spirv.id>
-  %55 = OpSConvert.i8.i32 %54 : reg<spirv.id>
-  %56 = OpConstant.i32 255 : reg<spirv.id>
-  %57 = OpBitwiseAnd %55, %56 : reg<spirv.id>
+  %55 = OpSConvert.i8.i32 %54
+  %56 = OpConstant.i32 255
+  %57 = OpBitwiseAnd %55, %56
   %byte = OpCopyObject.i32 %57
   %64 = OpLoad.function.i32<volatile> %48 : reg<spirv.id>
   %loaded = OpCopyObject.i32 %64

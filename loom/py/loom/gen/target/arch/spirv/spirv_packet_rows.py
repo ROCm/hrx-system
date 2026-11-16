@@ -253,6 +253,8 @@ class _PacketRow:
     operand_types: tuple[str, ...] = ()
     immediate_count: int = 0
     literal_word_count: int = 0
+    # Fixed instruction literal following the typed value operands.
+    trailing_literal: str | None = None
     memory_alignment: int = 0
     no_contraction: bool = False
     contraction_controlled: bool = False
@@ -296,6 +298,9 @@ class _PacketRow:
         members = {
             "scalar_constant": {
                 "literal_word_count": self.literal_word_count or None,
+            },
+            "typed_literal": {
+                "literal": self.trailing_literal,
             },
             "access_chain": {
                 "coordinate_byte_shift": self.coordinate_byte_shift or None,
@@ -989,6 +994,7 @@ def _ordinary_vector_rows() -> list[_PacketRow]:
                 result_type=_ordinary_vector_instruction_value(row.result_type),
                 operand_types=tuple(_ordinary_vector_instruction_value(operand_type) for operand_type in row.operand_types),
                 immediate_count=int(row.component_index_maximum is not None) + int(controls_contraction),
+                trailing_literal=row.trailing_literal,
                 no_contraction=row.no_contraction or controls_contraction or row.opcode in _FLOAT_CONVERSION_OPCODES,
                 contraction_controlled=controls_contraction,
                 fp_fast_math_none=row.fp_fast_math_none,
@@ -1394,6 +1400,8 @@ def _validate_rows(rows: tuple[_PacketRow, ...], descriptors: tuple[Descriptor, 
 
     for row in rows:
         descriptor = descriptors_by_key[row.descriptor_key]
+        if (row.trailing_literal is not None) != (row.form == "LOOM_SPIRV_PACKET_FORM_TYPED_LITERAL"):
+            raise ValueError(f"{row.descriptor_key}: typed-literal packets require a literal")
         if row.component_function is not None and (
             row.form != "LOOM_SPIRV_PACKET_FORM_EXTENDED_INSTRUCTION"
             or row.result_type is None

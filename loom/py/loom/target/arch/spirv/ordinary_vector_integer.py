@@ -248,26 +248,45 @@ ORDINARY_VECTOR_INTEGER_INSTRUCTIONS = (
 # Integer dots contract four byte components to one 32-bit result.
 INTEGER_DOT_INSTRUCTIONS = tuple(
     OrdinaryVectorInstruction(
-        key=f"spirv.op_{name}.v4i8",
-        mnemonic=f"Op{mnemonic}.v4i8",
+        key=f"spirv.op_{name}.{'packed4x8' if packed else 'v4i8'}",
+        mnemonic=f"Op{mnemonic}.{'packed4x8' if packed else 'v4i8'}",
         opcode=f"LOOM_SPIRV_OP_{name.upper()}",
-        packet_form="LOOM_SPIRV_PACKET_FORM_TYPED",
+        packet_form=(
+            "LOOM_SPIRV_PACKET_FORM_TYPED_LITERAL"
+            if packed
+            else "LOOM_SPIRV_PACKET_FORM_TYPED"
+        ),
         result_type=result_pair.unsigned if name == "u_dot" else result_pair.signed,
         operand_names=("lhs", "rhs"),
         operand_types=(
-            OrdinaryVectorType(
-                input_pair.signed if signed_lhs else input_pair.unsigned, 4
-            ),
-            OrdinaryVectorType(
-                input_pair.signed if signed_rhs else input_pair.unsigned, 4
-            ),
+            (result_pair.signed, result_pair.signed)
+            if packed
+            else (
+                OrdinaryVectorType(
+                    input_pair.signed if signed_lhs else input_pair.unsigned, 4
+                ),
+                OrdinaryVectorType(
+                    input_pair.signed if signed_rhs else input_pair.unsigned, 4
+                ),
+            )
         ),
-        feature_atoms=("integer_dot_product", "integer_dot_product_input4x8_bit"),
+        feature_atoms=(
+            "integer_dot_product",
+            "integer_dot_product_input4x8_bit_packed"
+            if packed
+            else "integer_dot_product_input4x8_bit",
+        ),
+        trailing_literal=(
+            "LOOM_SPIRV_PACKED_VECTOR_FORMAT_PACKED_VECTOR_FORMAT4X8_BIT"
+            if packed
+            else None
+        ),
     )
     for input_pair in ORDINARY_VECTOR_INTEGER_COMPONENT_TYPE_PAIRS
     if input_pair.source_type == "i8"
     for result_pair in ORDINARY_VECTOR_INTEGER_COMPONENT_TYPE_PAIRS
     if result_pair.source_type == "i32"
+    for packed in (False, True)
     for name, mnemonic, signed_lhs, signed_rhs in (
         ("s_dot", "SDot", True, True),
         ("u_dot", "UDot", False, False),

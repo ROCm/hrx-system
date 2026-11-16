@@ -35,9 +35,9 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @computed_bytes(
   %77 = OpConstant.i8 1
   %78 = OpCompositeConstruct.v4i8 %77, %77, %77, %77
   %79 = OpConstant.i32 0 : reg<spirv.id>
-  %80 = OpSDot.v4i8 %71, %78 : reg<spirv.id>
+  %80 = OpSDot.v4i8 %71, %78
   %sum0 = OpIAdd %80, %79
-  %82 = OpSDot.v4i8 %74, %78 : reg<spirv.id>
+  %82 = OpSDot.v4i8 %74, %78
   %sum1 = OpIAdd %82, %79
   %word_mix = OpBitwiseXor %word0, %word1
   %sum = OpIAdd %sum0, %sum1
@@ -96,7 +96,7 @@ low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffe
   %44 = OpConstant.i8 1
   %sum_weights = OpCompositeConstruct.v4i8 %44, %44, %44, %44
   %sum_initial = OpConstant.i32 0 : reg<spirv.id>
-  %47 = OpSDot.v4i8 %bytes, %sum_weights : reg<spirv.id>
+  %47 = OpSDot.v4i8 %bytes, %sum_weights
   %sum = OpIAdd %47, %sum_initial
   %50 = OpPtrAccessChain.storage_buffer.i32.byte_offset %target, %28
   OpStore.storage_buffer.i32 %50, %sum
