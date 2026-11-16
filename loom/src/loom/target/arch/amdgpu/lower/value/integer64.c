@@ -863,8 +863,7 @@ iree_status_t loom_amdgpu_select_index_cast_plan(
       const bool result_is_offset =
           result_scalar_type == LOOM_SCALAR_TYPE_OFFSET;
       const int64_t required_lo = result_is_offset ? 0 : INT32_MIN;
-      const int64_t required_hi =
-          result_is_offset ? (int64_t)UINT32_MAX : INT32_MAX;
+      const int64_t required_hi = UINT32_MAX;
       if (source_facts.range_lo < required_lo ||
           source_facts.range_hi > required_hi) {
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_index_cast_range_diagnostic(
@@ -962,7 +961,7 @@ iree_status_t loom_amdgpu_select_index_cast_plan(
       }
       const bool is_offset = result_scalar_type == LOOM_SCALAR_TYPE_OFFSET;
       const int64_t required_lo = is_offset ? 0 : INT32_MIN;
-      const int64_t required_hi = is_offset ? (int64_t)UINT32_MAX : INT32_MAX;
+      const int64_t required_hi = UINT32_MAX;
       if ((!is_offset && source_facts.range_lo < required_lo) ||
           source_facts.range_hi > required_hi) {
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_index_cast_range_diagnostic(

@@ -313,13 +313,59 @@ def test_nonhomomorphic_index_rules_guard_projected_source_widths() -> None:
         (index.index_shrsi, {(0, signed32, 32)}),
     ):
         for rule in _rules_for_source_op(compiled, source_op):
+            if _rule_descriptor_keys(compiled, rule) in (
+                ("amdgpu.s_ashr_i64",),
+                ("amdgpu.v_ashrrev_i64",),
+            ):
+                continue
+            if source_op is index.index_shrsi and any(
+                "lshr" in key for key in _rule_descriptor_keys(compiled, rule)
+            ):
+                assert _operand_width_guards(compiled, rule) == {
+                    (0, GuardKind.VALUE_UNSIGNED_BIT_COUNT, 32),
+                }
+                continue
             assert _operand_width_guards(compiled, rule) == expected_guards
             assert _lhs_range_guards(compiled, rule) == set()
     for rule in _rules_for_source_op(compiled, index.index_shrui):
-        assert _operand_width_guards(compiled, rule) == set()
-        assert _lhs_range_guards(compiled, rule) == {
-            (0, -(2**31), (2**32) - 1),
-        }
+        if _rule_descriptor_keys(compiled, rule) in (
+            ("amdgpu.s_lshr_b64",),
+            ("amdgpu.v_lshrrev_b64",),
+        ):
+            continue
+        assert _operand_width_guards(compiled, rule) in (
+            {(0, GuardKind.VALUE_SIGNED_BIT_COUNT, 32)},
+            {(0, GuardKind.VALUE_UNSIGNED_BIT_COUNT, 32)},
+        )
+        assert _lhs_range_guards(compiled, rule) == set()
+
+
+def test_wide_index_shifts_preserve_the_input_for_narrow_results() -> None:
+    covered = set()
+    for rule in AMDGPU_INTEGER_CONTRACT_FRAGMENT.cases:
+        wide_inputs = [
+            guard.materializer
+            for guard in rule.guards
+            if guard.kind is GuardKind.VALUE_MATERIALIZABLE
+            and guard.field == "lhs"
+            and guard.materializer in ("wide_index_sgpr", "wide_index_vgpr")
+        ]
+        if not wide_inputs:
+            continue
+        result_units = [
+            guard.count
+            for guard in rule.guards
+            if guard.kind is GuardKind.LOW_VALUE_REGISTER_UNIT_COUNT
+            and guard.field == "result"
+        ]
+        assert len(result_units) == 1
+        covered.add((rule.source_op, wide_inputs[0], result_units[0]))
+    assert covered == {
+        (source_op, materializer, result_units)
+        for source_op in (index.index_shrui, index.index_shrsi)
+        for materializer in ("wide_index_sgpr", "wide_index_vgpr")
+        for result_units in (1, 2)
+    }
 
 
 def test_index_bit_operations_cover_scalar_and_vector_registers() -> None:

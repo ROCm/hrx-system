@@ -165,7 +165,7 @@ def _index_constant_rule(width: int = 32) -> DescriptorRule:
         guards=(
             Guard.attr_kind("value", "i64"),
             Guard.value_type("result", _INDEX),
-            Guard.i64_range("value", _S32_MIN, (1 << (width - 1)) - 1),
+            Guard.i64_range("value", -(1 << (width - 1)), (1 << (width - 1)) - 1),
             Guard.low_value_representation("result", _INDEX_REPRESENTATIONS[width]),
             *_feature_guards(descriptor),
         ),

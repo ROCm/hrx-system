@@ -20,6 +20,7 @@ from loom.dialect.vector import defs as vector
 from loom.dsl import Op
 from loom.target.arch.amdgpu.contracts.index_bitwise import index_bitwise_rules
 from loom.target.arch.amdgpu.contracts.integer64 import (
+    index64_shift_rules,
     integer64_bitwise_rules,
     integer64_rules,
 )
@@ -31,6 +32,8 @@ from loom.target.arch.amdgpu.contracts.materializers import (
     I32_VGPR_MATERIALIZER,
     I64_VGPR_MATERIALIZER,
     REGISTERS_SGPR_MATERIALIZER,
+    WIDE_INDEX_SGPR_MATERIALIZER,
+    WIDE_INDEX_VGPR_MATERIALIZER,
 )
 from loom.target.arch.amdgpu.contracts.memory import BYTE_ADDRESSABLE_SCALAR_ELEMENTS
 from loom.target.arch.amdgpu.descriptors import build_amdgpu_contract_descriptor_set
@@ -2327,20 +2330,38 @@ def _rules() -> tuple[DescriptorRule, ...]:
     )
     rules.extend(
         _index_shift_rules(
+            index.index_shrsi,
+            "amdgpu.s_lshr_b32",
+            "amdgpu.v_lshrrev_b32",
+            "amdgpu.v_lshrrev_b32.src0_inline",
+            source_value_guards=(
+                Guard.value_unsigned_bit_count("lhs", 32),
+                Guard.value_i64_range("rhs", 0, 31),
+            ),
+        )
+    )
+    rules.extend(
+        _index_shift_rules(
+            index.index_shrui,
+            "amdgpu.s_lshr_b32",
+            "amdgpu.v_lshrrev_b32",
+            "amdgpu.v_lshrrev_b32.src0_inline",
+            source_value_guards=(Guard.value_signed_bit_count("lhs", 32),),
+        )
+    )
+    rules.extend(
+        _index_shift_rules(
             index.index_shrui,
             "amdgpu.s_lshr_b32",
             "amdgpu.v_lshrrev_b32",
             "amdgpu.v_lshrrev_b32.src0_inline",
             source_value_guards=(
-                Guard.value_i64_range(
-                    "lhs",
-                    -(2**31),
-                    _UINT32_MAX,
-                    diagnostic=_ADDRESS_32BIT_DIAGNOSTIC,
-                ),
+                Guard.value_unsigned_bit_count("lhs", 32),
+                Guard.value_i64_range("rhs", 0, 31),
             ),
         )
     )
+    rules.extend(index64_shift_rules(_DESCRIPTOR_SET))
     rules.append(_index_madd_sgpr_rule())
     rules.extend(_scalar_ctpopi_i32_rules())
     rules.extend(index_bitwise_rules(_DESCRIPTOR_SET))
@@ -2374,6 +2395,8 @@ AMDGPU_INTEGER_CONTRACT_FRAGMENT = ContractFragment(
         I32_VGPR_MATERIALIZER,
         I64_VGPR_MATERIALIZER,
         ADDRESS_VGPR_MATERIALIZER,
+        WIDE_INDEX_SGPR_MATERIALIZER,
+        WIDE_INDEX_VGPR_MATERIALIZER,
         I1_NATIVE_MASK_MATERIALIZER,
     ),
     cases=_rules(),

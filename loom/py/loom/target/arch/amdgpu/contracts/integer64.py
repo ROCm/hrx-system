@@ -6,11 +6,16 @@
 
 """Fixed-width wide bitwise operations and disjoint-word register transport."""
 
+from loom.dialect.index import defs as index
 from loom.dialect.scalar import bitwise
 from loom.dsl import Op
 from loom.target.arch.amdgpu.contracts.materializers import (
+    ADDRESS_SGPR_MATERIALIZER,
+    ADDRESS_VGPR_MATERIALIZER,
     I64_VGPR_MATERIALIZER,
     REGISTERS_SGPR_MATERIALIZER,
+    WIDE_INDEX_SGPR_MATERIALIZER,
+    WIDE_INDEX_VGPR_MATERIALIZER,
 )
 from loom.target.contracts import (
     DescriptorEmitForm,
@@ -189,6 +194,78 @@ def integer64_rules(descriptor_set: DescriptorSet) -> tuple[DescriptorRule, ...]
                     ),
                 )
             )
+    return tuple(rules)
+
+
+def index64_shift_rules(descriptor_set: DescriptorSet) -> tuple[DescriptorRule, ...]:
+    """Right shifts consume the full input even when the result fits one word."""
+    rules: list[DescriptorRule] = []
+    for source_op, scalar_name, vector_name in (
+        (index.index_shrui, "s_lshr_b64", "v_lshrrev_b64"),
+        (index.index_shrsi, "s_ashr_i64", "v_ashrrev_i64"),
+    ):
+        for bank, descriptor_name, value_materializer, count_materializer in (
+            (
+                "sgpr",
+                scalar_name,
+                WIDE_INDEX_SGPR_MATERIALIZER,
+                ADDRESS_SGPR_MATERIALIZER,
+            ),
+            (
+                "vgpr",
+                vector_name,
+                WIDE_INDEX_VGPR_MATERIALIZER,
+                ADDRESS_VGPR_MATERIALIZER,
+            ),
+        ):
+            descriptor = descriptor_by_key(descriptor_set, f"amdgpu.{descriptor_name}")
+            for result_units in (1, 2):
+                result = ValueRef.result("result")
+                shifted = result if result_units == 2 else ValueRef.temporary("shifted")
+                count = ValueRef.temporary("count")
+                rules.append(
+                    DescriptorRule(
+                        source_op=source_op,
+                        descriptor=descriptor,
+                        guards=(
+                            *(
+                                Guard.value_type(field, Scalar("index"))
+                                for field in ("lhs", "rhs", "result")
+                            ),
+                            Guard.low_value_register_class("result", f"amdgpu.{bank}"),
+                            Guard.low_value_register_unit_count("result", result_units),
+                            Guard.value_materializable("lhs", value_materializer.name),
+                            Guard.value_materializable("lhs", count_materializer.name),
+                            Guard.value_materializable("rhs", count_materializer.name),
+                            Guard.descriptor_available(descriptor),
+                        ),
+                        emit=(
+                            EmitRegisterSlice(
+                                source=ValueRef.operand(
+                                    "rhs", materializer=count_materializer.name
+                                ),
+                                result=count,
+                                unit_count=1,
+                            ),
+                            EmitDescriptorOp(
+                                descriptor=descriptor,
+                                operands={
+                                    "value": ValueRef.operand(
+                                        "lhs", materializer=value_materializer.name
+                                    ),
+                                    "shift": count,
+                                },
+                                results={"dst": shifted},
+                                result_types={"dst": DescriptorResultType()},
+                            ),
+                            *(
+                                (EmitRegisterSlice(source=shifted, result=result),)
+                                if result_units == 1
+                                else ()
+                            ),
+                        ),
+                    )
+                )
     return tuple(rules)
 
 

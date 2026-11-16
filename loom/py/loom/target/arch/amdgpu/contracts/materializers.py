@@ -95,8 +95,26 @@ ADDRESS_SGPR64_MATERIALIZER = ValueMaterializer(
     name="address_sgpr64",
     result_type="loom_amdgpu_materialized_sgpr64_address_type",
     can_materialize="loom_amdgpu_value_can_materialize_as_sgpr_address",
-    prepare="loom_amdgpu_prepare_sgpr64_address",
+    prepare="loom_amdgpu_prepare_address_pair",
     materialize="loom_amdgpu_emit_prepared_sgpr64_address",
+    header="loom/target/arch/amdgpu/lower/materializers.h",
+)
+
+WIDE_INDEX_SGPR_MATERIALIZER = ValueMaterializer(
+    name="wide_index_sgpr",
+    result_type="loom_amdgpu_materialized_sgpr64_address_type",
+    can_materialize="loom_amdgpu_value_can_materialize_as_wide_index",
+    prepare="loom_amdgpu_prepare_address_pair",
+    materialize="loom_amdgpu_emit_prepared_sgpr64_address",
+    header="loom/target/arch/amdgpu/lower/materializers.h",
+)
+
+WIDE_INDEX_VGPR_MATERIALIZER = ValueMaterializer(
+    name="wide_index_vgpr",
+    result_type="loom_amdgpu_materialized_vgpr64_address_type",
+    can_materialize="loom_amdgpu_value_can_materialize_as_wide_index",
+    prepare="loom_amdgpu_prepare_address_pair",
+    materialize="loom_amdgpu_emit_prepared_vgpr64_address",
     header="loom/target/arch/amdgpu/lower/materializers.h",
 )
 
