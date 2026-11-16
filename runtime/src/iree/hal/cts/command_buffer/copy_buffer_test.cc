@@ -209,9 +209,17 @@ TEST_P(CommandBufferCopyBufferTest, CopySizeAndAlignmentClasses) {
                         alignment_case.target_offset, length);
     }
   }
+}
 
-  SCOPED_TRACE("aligned16_mib");
-  RunCopyBufferTest(/*source_offset=*/0, /*target_offset=*/0, 1024 * 1024);
+TEST_P(CommandBufferCopyBufferTest, BulkSizeAndAlignmentClasses) {
+  // Exercise exact tails across grid-stride and bulk-transfer boundaries.
+  // The helper checks the untouched prefix and suffix as well.
+  for (iree_device_size_t length :
+       {65537, 262143, 262144, 262145, 1048575, 1048576, 1048577}) {
+    SCOPED_TRACE(length);
+    RunCopyBufferTest(/*source_offset=*/16, /*target_offset=*/32, length);
+    RunCopyBufferTest(/*source_offset=*/1, /*target_offset=*/3, length);
+  }
 }
 
 TEST_P(CommandBufferCopyBufferTest, RemainingRanges) {

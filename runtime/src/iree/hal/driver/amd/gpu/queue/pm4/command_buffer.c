@@ -578,11 +578,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
   const bool aligned_target =
       iree_hal_amd_gpu_pm4_command_reference_is_aligned(target, 4);
   const bool aligned_fill = !copy && !update && aligned_target && !(length & 3);
-  // CP DMA's transaction setup and dependent joins dominate short transfers.
-  // The resident shader handles those ranges with bounded command storage;
-  // larger fixed extents retain bulk DMA. All paths use the same barriers.
+  // CP DMA's transaction setup and dependent joins dominate recorded transfers
+  // through 1 MiB. The resident shader handles that interval with a bounded
+  // grid; larger fixed extents retain DMA to limit compute occupancy and
+  // command storage. All paths use the same barriers.
   const bool native_dma = length != IREE_HAL_WHOLE_BUFFER &&
-                          (copy || update || aligned_fill) && length > 65536;
+                          (copy || update || aligned_fill) && length > 1048576;
   // Confirmed scalar packets avoid CP DMA's transaction setup and join.
   // Only the 64-bit COPY_DATA form has the required source extent: the 32-bit
   // form may read past its selected DWORD, beyond the caller's accessible

@@ -516,7 +516,8 @@ INSTANTIATE_TEST_SUITE_P(ProgramSize, GpuNativeRecordingSizeTest,
                          ::testing::Values(1u, 2u, 3u, 1000u, 8000u, 65536u));
 
 TEST_F(GpuNativeRecordingTest, TransferBarriersJoinOnlyPendingCopies) {
-  constexpr uint32_t kLength = 128 * 1024;
+  // Keep this extent on the DMA path so the test exercises pending DMA joins.
+  constexpr uint32_t kLength = 2 * 1024 * 1024;
   for (bool copy_at_exit : {false, true}) {
     SCOPED_TRACE(copy_at_exit);
     iree_hal_buffer_t* output = nullptr;
@@ -827,7 +828,7 @@ TEST_F(GpuNativeRecordingTest, TransfersAndDispatchSharePendingNativeBindings) {
     IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
         recording, reference(0, IREE_HAL_WHOLE_BUFFER), &zero, sizeof(zero),
         0));
-    // The fill can use a shader while the update uses CP DMA. Their
+    // The fill can use a shader while the update uses a CP write. Their
     // overlapping writes need a memory dependency across those cache paths.
     const iree_hal_memory_barrier_t transfer_memory = {
         .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
