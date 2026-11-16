@@ -80,7 +80,11 @@ low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @encode_fp8x4(%
   %21 = v_med3_num_f32 %10, %5, %6
   %22 = v_cmp_u_f32 %10, %10
   %23 = v_cndmask_b32 %21, %10, %22
-  %result = v_cvt_pk_fp8_f32_high %17, %20, %23
+  %24 = v_cvt_pk_fp8_f32_high %17, %20, %23
+  %25 = v_perm_b32_src2_lit %7, %8, 775
+  %26 = v_bfi_b32_src0_lit %25, %24, 32896
+  %27 = v_perm_b32_src2_lit %9, %10, 50790400
+  %result = v_bfi_b32_src0_lit %27, %26, 2155872256
   return %result
 }
 
@@ -142,4 +146,60 @@ func.def target(@target) @dot_bf8_bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, 
 low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @dot_bf8_bf8(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>, %acc: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %result = v_dot4_f32_bf8_bf8 %lhs, %rhs, %acc
   return %result
+}
+
+// ====
+
+amdgpu.target<gfx1170> @target
+
+// Native BF8 encoding needs canonical NaN payloads and the source sign.
+func.def target(@target) @encode_bf8(%input: vector<4xf32>) -> (vector<4xf8E5M2>) {
+  %encoded = vector.fptrunc %input : vector<4xf32> to vector<4xf8E5M2>
+  func.return %encoded : vector<4xf8E5M2>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @encode_bf8(%input: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>) asm {
+  %5 = slice %input[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %6 = slice %input[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %7 = slice %input[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %8 = slice %input[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %9 = v_cvt_pk_bf8_f32_low %5, %6
+  %10 = v_cvt_pk_bf8_f32_high %9, %7, %8
+  %11 = v_and_b32_lit %10, 2139062143
+  %12 = v_add_u32_lit %11, 50529027
+  %13 = v_and_b32_lit %12, 2155905152
+  %14 = v_lshrrev_b32_src0_inline %13, 7
+  %15 = v_or_b32 %11, %14
+  %16 = v_perm_b32_src2_lit %5, %6, 775
+  %17 = v_bfi_b32_src0_lit %16, %15, 32896
+  %18 = v_perm_b32_src2_lit %7, %8, 50790400
+  %encoded = v_bfi_b32_src0_lit %18, %17, 2155872256
+  return %encoded
+}
+
+// ====
+
+amdgpu.target<gfx1170> @target
+
+// Integer-derived finite values retain the direct native conversion path.
+func.def target(@target) @encode_finite_fp8(%input: vector<4xi8>) -> (vector<4xf8E4M3>) {
+  %floats = vector.sitofp %input : vector<4xi8> to vector<4xf32>
+  %encoded = vector.fptrunc %floats : vector<4xf32> to vector<4xf8E4M3>
+  func.return %encoded : vector<4xf8E4M3>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4m.core>(@target) abi(hal_kernel) @encode_finite_fp8(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %9 = v_bfe_i32_offset_width_inline %input {offset = 0, width = 8}
+  %10 = v_cvt_f32_i32 %9
+  %11 = v_bfe_i32_offset_width_inline %input {offset = 8, width = 8}
+  %12 = v_cvt_f32_i32 %11
+  %13 = v_bfe_i32_offset_width_inline %input {offset = 16, width = 8}
+  %14 = v_cvt_f32_i32 %13
+  %15 = v_ashrrev_i32_src0_inline %input, 24
+  %16 = v_cvt_f32_i32 %15
+  %22 = v_cvt_pk_fp8_f32_low %10, %12
+  %encoded = v_cvt_pk_fp8_f32_high %22, %14, %16
+  return %encoded
 }

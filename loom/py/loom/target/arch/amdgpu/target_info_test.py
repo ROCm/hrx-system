@@ -113,13 +113,13 @@ def test_descriptor_set_isa_xml_validation_accepts_matching_architecture() -> No
     )
 
 
-def test_noncanonical_native_fp8_nan_is_scoped_to_gfx12_descriptor_sets() -> None:
+def test_noncanonical_native_fp8_nan_is_scoped_to_rdna4_descriptor_sets() -> None:
     flagged_generator_targets = {
         info.generator_target
         for info in AMDGPU_DESCRIPTOR_SET_INFOS
         if info.flags & AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_OCP_FP8_NONCANONICAL_NAN
     }
-    assert flagged_generator_targets == {"rdna4", "gfx12_generic"}
+    assert flagged_generator_targets == {"rdna4m", "rdna4", "gfx12_generic"}
 
 
 def test_system_scope_store_waits_are_scoped_to_gfx120x() -> None:
