@@ -179,8 +179,8 @@ low.func.def schedule(locked) target<amd.xdna.aie2p.core>(@target) @independent_
 }
 
 // ----
-issue cycles: 14
-code bytes: 36
+issue cycles: 18
+code bytes: 44
 coissued bundles: 0
 coissued components: 0
 
@@ -201,8 +201,8 @@ low.func.def schedule(locked) target<amd.xdna.aie2p.core>(@target) @dependent_de
 }
 
 // ----
-issue cycles: 21
-code bytes: 52
+issue cycles: 25
+code bytes: 60
 coissued bundles: 0
 coissued components: 0
 
@@ -300,8 +300,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @lock_effects(%lock_value: reg
 }
 
 // ----
-issue cycles: 12
-code bytes: 32
+issue cycles: 16
+code bytes: 40
 coissued bundles: 0
 coissued components: 0
 
@@ -398,7 +398,7 @@ low.func.def schedule(locked) target<amd.xdna.aie2p.core>(@target) @immediate_ov
 }
 
 // ----
-code: 18 07 04 00 00 00 00 00 00 00 00 00 00 00 18 07 40 10 00 00 18 00 28 10 00 00 18 08 00 10 00 00 00 00 00 00
+code: 18 07 04 00 00 00 00 00 00 00 00 00 00 00 18 07 40 10 00 00 00 00 00 00 18 08 00 10 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00
 
 // ====
 
