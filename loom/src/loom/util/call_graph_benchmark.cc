@@ -57,6 +57,7 @@ class CallModule {
       symbols.push_back(symbol);
       functions.push_back(function);
     }
+    root_ = symbols.front().symbol_id;
     if (shape != GraphShape::kIndependent) {
       for (uint32_t i = 0; i < count; ++i) {
         const uint32_t caller = shape == GraphShape::kChain ? i : 0;
@@ -85,6 +86,7 @@ class CallModule {
   }
 
   loom_module_t* module() { return module_; }
+  loom_symbol_id_t root() const { return root_; }
 
  private:
   // Shared storage for the input module and transient graph builds.
@@ -93,18 +95,24 @@ class CallModule {
   loom_context_t context_;
   // Input graph, retained unchanged across timed iterations.
   loom_module_t* module_ = nullptr;
+  // Root of the measured closure, independent of unused definitions.
+  loom_symbol_id_t root_ = LOOM_SYMBOL_ID_INVALID;
 };
 
-static void BuildGraph(benchmark::State& state, GraphShape shape) {
+static void BuildGraph(benchmark::State& state, GraphShape shape,
+                       bool rooted = false) {
   const uint32_t count = static_cast<uint32_t>(state.range(0));
   CallModule input(shape, count);
   iree_arena_allocator_t arena;
   iree_arena_initialize(input.module()->arena.block_pool, &arena);
   iree_host_size_t used_bytes = 0;
   iree_host_size_t allocated_bytes = 0;
+  const loom_symbol_id_t root = input.root();
+  const loom_call_graph_options_t options = {.roots = &root, .root_count = 1};
   for (auto _ : state) {
     loom_call_graph_t graph;
-    IREE_CHECK_OK(loom_call_graph_build(input.module(), &arena, &graph));
+    IREE_CHECK_OK(loom_call_graph_build(
+        input.module(), rooted ? &options : nullptr, &arena, &graph));
     benchmark::DoNotOptimize(graph.nodes);
     state.PauseTiming();
     used_bytes = arena.used_allocation_size;
@@ -114,6 +122,14 @@ static void BuildGraph(benchmark::State& state, GraphShape shape) {
   }
   state.counters["used_bytes"] = static_cast<double>(used_bytes);
   state.counters["arena_bytes"] = static_cast<double>(allocated_bytes);
+  iree_arena_block_pool_statistics_t statistics = {};
+  iree_arena_block_pool_query_statistics(input.module()->arena.block_pool,
+                                         &statistics);
+  state.counters["pool_system_blocks"] =
+      static_cast<double>(statistics.block_system_allocation_count);
+  state.counters["oversized_bytes_per_iteration"] =
+      static_cast<double>(statistics.oversized_allocation_bytes) /
+      state.iterations();
   state.SetItemsProcessed(state.iterations() * count);
   state.SetComplexityN(count);
   iree_arena_deinitialize(&arena);
@@ -142,6 +158,13 @@ static void BM_CallGraphIndependent(benchmark::State& state) {
   BuildGraph(state, GraphShape::kIndependent);
 }
 BENCHMARK(BM_CallGraphIndependent)->Apply(Scales)->Complexity();
+
+// Only the selected leaf belongs to the graph. Construction of the unrelated
+// definitions is outside timing; the measured path must not enumerate them.
+static void BM_CallGraphReachableLeaf(benchmark::State& state) {
+  BuildGraph(state, GraphShape::kIndependent, true);
+}
+BENCHMARK(BM_CallGraphReachableLeaf)->Arg(0)->Arg(512)->Arg(16384);
 
 }  // namespace
 

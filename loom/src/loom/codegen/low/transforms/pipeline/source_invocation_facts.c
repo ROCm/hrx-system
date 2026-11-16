@@ -169,6 +169,14 @@ static loom_value_facts_t loom_low_source_invocation_unknown(
   return facts;
 }
 
+static iree_status_t loom_low_source_invocation_collect_function(
+    void* user_data, uint16_t node_index, loom_func_like_t function) {
+  (void)node_index;
+  loom_low_source_invocation_worklist_t* work = user_data;
+  work->functions[loom_func_like_callee(function).symbol_id].source = function;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_source_invocation_collect_call(
     void* user_data, loom_symbol_id_t caller_symbol, loom_call_like_t call) {
   loom_low_source_invocation_worklist_t* work = user_data;
@@ -667,18 +675,6 @@ iree_status_t loom_low_source_invocation_facts_compute(
       (void**)&work.functions);
   if (iree_status_is_ok(status)) {
     memset(work.functions, 0, module->symbols.count * sizeof(*work.functions));
-    loom_symbol_t* symbol = NULL;
-    loom_module_for_each_symbol(module, symbol) {
-      if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE) ||
-          !symbol->defining_op) {
-        continue;
-      }
-      const loom_func_like_t function =
-          loom_func_like_cast(module, symbol->defining_op);
-      if (loom_func_like_body(function)) {
-        work.functions[symbol - module->symbols.entries].source = function;
-      }
-    }
     for (iree_host_size_t i = 0; i < selections->count; ++i) {
       const loom_low_source_selection_t* selection = &selections->values[i];
       if (selection->kind != LOOM_LOW_SOURCE_SELECTION_DECLARATION) {
@@ -686,11 +682,16 @@ iree_status_t loom_low_source_invocation_facts_compute(
             .selection = selection;
       }
     }
-    status = loom_call_graph_build_with_calls(
-        module, arena,
-        (loom_call_graph_call_visitor_t){
-            .user_data = &work, .fn = loom_low_source_invocation_collect_call},
-        &out_facts->call_graph);
+    const loom_call_graph_options_t graph_options = {
+        .visitor =
+            {
+                .user_data = &work,
+                .function = loom_low_source_invocation_collect_function,
+                .call = loom_low_source_invocation_collect_call,
+            },
+    };
+    status = loom_call_graph_build(module, &graph_options, arena,
+                                   &out_facts->call_graph);
   }
   if (iree_status_is_ok(status) && work.call_count != 0) {
     uint8_t* direct_call_targets = NULL;

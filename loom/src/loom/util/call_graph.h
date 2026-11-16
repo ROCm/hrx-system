@@ -4,32 +4,30 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Call graph construction and SCC analysis.
+// Direct-call discovery and local collection over an immutable source module.
 //
-// Builds a call graph from direct call-like ops in a module, then computes
-// strongly connected components (SCCs) using Tarjan's algorithm. SCC IDs are
-// assigned in reverse topological order (callees before callers), which is the
-// right iteration order for bottom-up analyses like effect inference, cost
-// modeling, and inlining decisions. Nodes remain in module symbol order.
+// An explicit root set admits only reachable function definitions. Omitting
+// roots includes every definition in module symbol order. Each admitted body
+// is walked once; consumers collect local summaries and callsites during that
+// walk. Distinct edges feed shared SCC analysis in callee-before-caller order.
 //
-// Construction: walks every root region of each function-like symbol looking
-// for direct semantic, target-low-internal, explicit low-invoke, and command
-// program call-like ops, then records (caller, callee) edges. Total cost:
-// O(S+N), where S is the symbol domain and N is the total number of ops across
-// all function root regions. Callee membership is constant-time per callsite.
-//
-// SCC: Tarjan's iterative algorithm, O(V+E) where V = functions and
-// E = call edges. Typically trivial (< 100 nodes for ML models).
-//
-// All memory is arena-allocated. The call graph is valid for the
-// lifetime of the arena.
+// Rooted graph storage scales with admitted functions and distinct edges,
+// independent of the module's unused symbol domain. Whole-module discovery
+// uses compact direct indexing over its already-selected symbol domain.
+// The source module must have complete, resolved local call references and
+// remain unchanged throughout discovery.
+// Results borrow source identities and live in the caller's arena. The graph
+// remains at its original address and expires when the source is rewritten.
 //
 #ifndef LOOM_UTIL_CALL_GRAPH_H_
 #define LOOM_UTIL_CALL_GRAPH_H_
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/analysis/scc.h"
 #include "loom/ir/ir.h"
+#include "loom/util/ordinal_map.h"
+#include "loom/util/walk.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -47,14 +45,13 @@ typedef struct loom_call_graph_node_t {
   uint16_t callee_count;
   // Arena-allocated callee symbol IDs, deduplicated in first-callsite order.
   loom_symbol_id_t* callees;
-  // SCC ID after loom_call_graph_build completes. Functions in the
-  // same SCC share the same scc_id. UINT16_MAX before SCC analysis.
+  // Index into graph.components, assigned after discovery completes.
   uint16_t scc_id;
   // Number of distinct callers, including a self-edge for recursion.
   uint16_t caller_count;
 } loom_call_graph_node_t;
 
-// Call graph for all functions in a module.
+// Call graph for admitted function definitions in a module.
 typedef struct loom_call_graph_t {
   // Immutable source module supplying symbol identities.
   const loom_module_t* module;
@@ -63,17 +60,17 @@ typedef struct loom_call_graph_t {
   // Bit (1 << loom_call_like_kind_t) for each observed tracked call kind,
   // including calls to declarations and duplicate edges of different kinds.
   uint8_t call_kinds;
-  // One node per definition, in module symbol order.
+  // One node per admitted definition, in deterministic discovery order.
   loom_call_graph_node_t* nodes;
-  // SCC count after analysis. SCCs are numbered 0..scc_count-1.
-  uint16_t scc_count;
-  // Per-SCC: true if the SCC is recursive (>1 member or self-call).
-  bool* scc_recursive;
-  // Maps symbol_id → node index (UINT16_MAX if not in the graph).
-  // Enables O(1) lookup from symbol ID.
+  // Callee-first components retaining their member nodes and recursion state.
+  loom_scc_list_t components;
+  // Direct symbol-to-node index for whole-module discovery. NULL for rooted
+  // discovery; entries without a definition contain UINT16_MAX.
   uint16_t* symbol_to_node;
-  // Symbol domain covered by symbol_to_node.
+  // Symbol domain covered by the direct index at discovery time.
   uint16_t symbol_to_node_count;
+  // Sparse symbol-to-node index used only for explicit-root discovery.
+  loom_ordinal_map_t reached_symbols;
 } loom_call_graph_t;
 
 //===----------------------------------------------------------------------===//
@@ -84,27 +81,49 @@ typedef struct loom_call_graph_t {
 // consuming the graph use this query to classify the same call boundary once.
 bool loom_call_graph_tracks_call_kind(loom_call_like_kind_t kind);
 
-// Builds the call graph for all function-like symbols in |module|. Walks every
-// root region looking for tracked direct call-like ops, records edges,
-// deduplicates callee lists, and computes SCCs. All memory is allocated from
-// |arena|.
+// Local collection callbacks share discovery without owning traversal. They
+// may allocate consumer state but must not mutate the source or graph. Node
+// ordinals remain stable; node pointers may move while discovery admits
+// callees.
+typedef struct loom_call_graph_visitor_t {
+  // Owner of the local summaries and retained callsite information.
+  void* user_data;
+  // Receives each admitted definition before its body or an incoming callsite
+  // is visited, including functions with empty bodies.
+  iree_status_t (*function)(void* user_data, uint16_t node_index,
+                            loom_func_like_t function);
+  // Receives every body operation in preorder. |call| is populated only for a
+  // tracked call, avoiding a second interface lookup by local classification.
+  iree_status_t (*operation)(void* user_data, uint16_t node_index,
+                             loom_op_t* op, loom_call_like_t call,
+                             const loom_walk_context_t* context);
+  // Receives every tracked call in walk order, including repeated edges.
+  iree_status_t (*call)(void* user_data, loom_symbol_id_t caller,
+                        loom_call_like_t call);
+} loom_call_graph_visitor_t;
+
+typedef struct loom_call_graph_options_t {
+  // Callable symbols whose transitive definitions are admitted. NULL selects
+  // all definitions; a non-NULL empty array selects none. Declarations have no
+  // graph node. Explicit roots precede transitively discovered definitions.
+  const loom_symbol_id_t* roots;
+  // Number of entries in |roots|.
+  iree_host_size_t root_count;
+  // Optional local collectors invoked during the owning body walk.
+  loom_call_graph_visitor_t visitor;
+} loom_call_graph_options_t;
+
+// Walks every root region of each admitted definition, records distinct
+// edges, and computes SCCs. NULL |options| selects all definitions without
+// local collection. Rooted discovery never scans unused symbol entries/bodies.
+// Discovery costs O(N + C), for admitted body operations and callsites; SCC
+// analysis costs O(V + E), for admitted definitions and distinct call edges.
+// Unrooted construction additionally enumerates the module's symbol table.
+// All output and temporary storage comes from |arena| and its reusable pool.
 iree_status_t loom_call_graph_build(const loom_module_t* module,
+                                    const loom_call_graph_options_t* options,
                                     iree_arena_allocator_t* arena,
                                     loom_call_graph_t* out_graph);
-
-// Optional consumer of callsites discovered during graph construction. The
-// visitor retains callsite-specific state without a second source traversal.
-typedef struct loom_call_graph_call_visitor_t {
-  // Owner of the retained callsite information.
-  void* user_data;
-  // Receives every tracked call in walk order, including repeated edges.
-  iree_status_t (*fn)(void* user_data, loom_symbol_id_t caller,
-                      loom_call_like_t call);
-} loom_call_graph_call_visitor_t;
-
-iree_status_t loom_call_graph_build_with_calls(
-    const loom_module_t* module, iree_arena_allocator_t* arena,
-    loom_call_graph_call_visitor_t visitor, loom_call_graph_t* out_graph);
 
 //===----------------------------------------------------------------------===//
 // Queries
@@ -123,8 +142,8 @@ static inline bool loom_call_graph_has_call_kind(const loom_call_graph_t* graph,
 bool loom_call_graph_is_recursive(const loom_call_graph_t* graph,
                                   loom_symbol_id_t symbol_id);
 
-// Returns the call graph node for |symbol_id|, or NULL if the
-// function is not in the graph (e.g., declaration without a body).
+// Returns the call graph node for |symbol_id|, or NULL if the symbol is not
+// admitted (including declarations and identities outside the snapshot).
 const loom_call_graph_node_t* loom_call_graph_node(
     const loom_call_graph_t* graph, loom_symbol_id_t symbol_id);
 

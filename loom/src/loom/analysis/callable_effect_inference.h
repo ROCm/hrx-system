@@ -22,11 +22,13 @@ extern "C" {
 // are never rewritten. Function definitions remain unannotated; the inferred
 // contracts describe the concrete call graph finalized by the frontend.
 //
-// Every function root-region operation is classified once after call-graph
-// construction. SCC propagation is linear in functions and distinct call
+// Every function root-region operation is classified during call-graph
+// discovery. SCC propagation is linear in functions and distinct call
 // edges. Transient graph and work storage is returned before this function
 // exits; only call attributes and their maintained region summaries change.
 // The module must have complete local symbol definitions and call references.
+// Modules without semantic or native calls return without walking or
+// allocating.
 iree_status_t loom_callable_effect_inference_run(loom_module_t* module);
 
 #ifdef __cplusplus

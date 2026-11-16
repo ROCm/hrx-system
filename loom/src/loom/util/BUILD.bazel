@@ -670,7 +670,9 @@ loom_cc_library(
     srcs = ["call_graph.c"],
     hdrs = ["call_graph.h"],
     deps = [
+        ":ordinal_map",
         ":walk",
+        "//loom/src/loom/analysis:scc",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",

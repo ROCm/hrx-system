@@ -8,92 +8,34 @@
 
 #include <string.h>
 
-#include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
-#include "loom/util/walk.h"
 
-//===----------------------------------------------------------------------===//
-// Edge collection
-//===----------------------------------------------------------------------===//
-
-// One caller's construction state. Only its callee array survives the walk.
-typedef struct loom_edge_list_t {
-  // First-seen callee symbols, retained by the completed graph node.
-  loom_symbol_id_t* callees;
-  // Number of distinct callees already appended.
-  uint16_t count;
-  // Allocated entries in callees.
-  uint16_t capacity;
-} loom_edge_list_t;
-
-static iree_status_t loom_call_graph_grow_u16_bounded_array(
-    iree_arena_allocator_t* arena, iree_host_size_t existing_count,
-    iree_host_size_t minimum_capacity, iree_host_size_t element_size,
-    const char* storage_name, uint16_t* inout_capacity, void** inout_ptr) {
-  if (minimum_capacity > UINT16_MAX || existing_count > UINT16_MAX) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "%s exceeds storage limit (%u)", storage_name,
-                            (unsigned)UINT16_MAX);
-  }
-  iree_host_size_t doubled_capacity = (iree_host_size_t)*inout_capacity * 2;
-  iree_host_size_t new_capacity =
-      doubled_capacity > minimum_capacity ? doubled_capacity : minimum_capacity;
-  if (new_capacity > UINT16_MAX) {
-    new_capacity = UINT16_MAX;
-  }
-
-  void* new_ptr = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(arena, new_capacity, element_size, &new_ptr));
-  if (*inout_ptr && existing_count > 0) {
-    memcpy(new_ptr, *inout_ptr, existing_count * element_size);
-  }
-  *inout_ptr = new_ptr;
-  *inout_capacity = (uint16_t)new_capacity;
-  return iree_ok_status();
-}
-
-static iree_status_t loom_edge_list_add(loom_edge_list_t* list,
-                                        iree_arena_allocator_t* arena,
-                                        loom_symbol_id_t callee) {
-  if (list->count >= list->capacity) {
-    if (list->count == UINT16_MAX) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "call graph callee list exceeds storage limit");
-    }
-    IREE_RETURN_IF_ERROR(loom_call_graph_grow_u16_bounded_array(
-        arena, list->count,
-        iree_max((iree_host_size_t)list->count + 1, (iree_host_size_t)8),
-        sizeof(*list->callees), "call graph callee list", &list->capacity,
-        (void**)&list->callees));
-  }
-  list->callees[list->count++] = callee;
-  return iree_ok_status();
-}
-
-//===----------------------------------------------------------------------===//
-// Walk callback for finding call ops
-//===----------------------------------------------------------------------===//
-
-typedef struct loom_call_collector_t {
-  // Current caller's construction state, reset between function walks.
-  loom_edge_list_t* edges;
-  // Owns graph output and temporary membership storage.
-  iree_arena_allocator_t* arena;
-  // Immutable source module providing the symbol domain and callable
-  // interfaces.
+typedef struct loom_call_graph_builder_t {
+  // Immutable source supplying resolved local call references.
   const loom_module_t* module;
-  // Symbol-indexed membership for the current caller, allocated on its first
-  // edge and reused by clearing only symbols in each completed callee list.
-  uint64_t* callee_membership;
-  // Function currently supplying call edges.
-  loom_symbol_id_t caller;
-  // Tracked call kinds observed across all function walks.
-  uint8_t call_kinds;
-  // Optional owner retaining the discovered callsites.
-  loom_call_graph_call_visitor_t visitor;
-} loom_call_collector_t;
+  // Owns the graph and local collection storage.
+  iree_arena_allocator_t* arena;
+  // Graph whose stable node ordinals form the discovery queue.
+  loom_call_graph_t* graph;
+  // Allocated entries in graph.nodes.
+  iree_host_size_t node_capacity;
+  // Optional local consumers of the shared traversal.
+  loom_call_graph_visitor_t visitor;
+  // Node whose root regions are currently being walked.
+  uint16_t caller;
+  // Current caller's first-seen callee symbols, including declarations.
+  loom_symbol_id_t* callees;
+  // Number of distinct symbols in callees.
+  uint16_t callee_count;
+  // Allocated entries in callees.
+  iree_host_size_t callee_capacity;
+  // Current caller's membership, rebuilt without a module-sized symbol array.
+  loom_ordinal_map_t callee_membership;
+  // Whole-module membership words, lazily allocated and reused by clearing
+  // only the current caller's reached symbols. NULL for rooted discovery.
+  uint64_t* callee_words;
+} loom_call_graph_builder_t;
 
 bool loom_call_graph_tracks_call_kind(loom_call_like_kind_t kind) {
   return kind == LOOM_CALL_LIKE_KIND_SEMANTIC ||
@@ -102,336 +44,248 @@ bool loom_call_graph_tracks_call_kind(loom_call_like_kind_t kind) {
          kind == LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM;
 }
 
-static iree_status_t loom_call_collector_visit(
-    void* user_data, loom_op_t* op, const loom_walk_context_t* context,
-    loom_walk_result_t* out_result) {
-  *out_result = LOOM_WALK_CONTINUE;
-  loom_call_collector_t* collector = (loom_call_collector_t*)user_data;
-  loom_call_like_t call = loom_call_like_cast(collector->module, op);
-  if (!loom_call_like_isa(call)) {
+static iree_status_t loom_call_graph_admit(loom_call_graph_builder_t* builder,
+                                           loom_symbol_id_t symbol_id) {
+  if (loom_call_graph_node(builder->graph, symbol_id)) {
     return iree_ok_status();
   }
-  const loom_call_like_kind_t kind = loom_call_like_kind(call);
-  if (!loom_call_graph_tracks_call_kind(kind)) {
+  const loom_symbol_t* symbol = &builder->module->symbols.entries[symbol_id];
+  if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE) ||
+      !symbol->defining_op) {
     return iree_ok_status();
   }
-  collector->call_kinds |= (uint8_t)(1u << kind);
-  loom_symbol_ref_t callee_ref = loom_call_like_callee(call);
-  if (!loom_symbol_ref_is_valid(callee_ref) || callee_ref.module_id != 0 ||
-      callee_ref.symbol_id >= collector->module->symbols.count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "call-like op target symbol ref {module=%u, symbol=%u} is invalid",
-        (unsigned)callee_ref.module_id, (unsigned)callee_ref.symbol_id);
+  const loom_func_like_t function =
+      loom_func_like_cast(builder->module, symbol->defining_op);
+  if (!loom_func_like_body(function)) {
+    return iree_ok_status();
   }
-  if (!collector->callee_membership) {
-    const iree_host_size_t word_count =
-        (collector->module->symbols.count + 63) / 64;
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        collector->arena, word_count, sizeof(*collector->callee_membership),
-        (void**)&collector->callee_membership));
-    memset(collector->callee_membership, 0,
-           word_count * sizeof(*collector->callee_membership));
-  }
-  uint64_t* word = &collector->callee_membership[callee_ref.symbol_id / 64];
-  const uint64_t bit = UINT64_C(1) << (callee_ref.symbol_id % 64);
-  if ((*word & bit) == 0) {
-    IREE_RETURN_IF_ERROR(loom_edge_list_add(collector->edges, collector->arena,
-                                            callee_ref.symbol_id));
-    *word |= bit;
-  }
-  return collector->visitor.fn
-             ? collector->visitor.fn(collector->visitor.user_data,
-                                     collector->caller, call)
+  loom_call_graph_t* graph = builder->graph;
+  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+      builder->arena, graph->node_count,
+      (iree_host_size_t)graph->node_count + 1, sizeof(*graph->nodes),
+      &builder->node_capacity, (void**)&graph->nodes));
+  const uint16_t node_index = graph->node_count;
+  IREE_RETURN_IF_ERROR(loom_ordinal_map_insert(&graph->reached_symbols, 0,
+                                               symbol_id, node_index));
+  graph->nodes[graph->node_count++] = (loom_call_graph_node_t){
+      .symbol_id = symbol_id,
+  };
+  return builder->visitor.function
+             ? builder->visitor.function(builder->visitor.user_data, node_index,
+                                         function)
              : iree_ok_status();
 }
 
-//===----------------------------------------------------------------------===//
-// Tarjan's SCC (iterative)
-//===----------------------------------------------------------------------===//
-
-typedef struct loom_tarjan_state_t {
-  uint16_t index;    // Discovery index.
-  uint16_t lowlink;  // Lowest reachable index.
-  bool on_stack;     // Currently on the Tarjan stack.
-} loom_tarjan_state_t;
-
-// Iterative Tarjan frame for the DFS stack.
-typedef struct loom_tarjan_frame_t {
-  uint16_t node_index;
-  uint16_t callee_cursor;  // Next callee to visit.
-} loom_tarjan_frame_t;
-
-static iree_status_t loom_call_graph_compute_sccs(
-    loom_call_graph_t* graph, iree_arena_allocator_t* arena) {
-  uint16_t node_count = graph->node_count;
-  if (node_count == 0) {
-    graph->scc_count = 0;
-    graph->scc_recursive = NULL;
-    return iree_ok_status();
-  }
-
-  // Per-node Tarjan state.
-  loom_tarjan_state_t* state = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, node_count, sizeof(loom_tarjan_state_t), (void**)&state));
-  for (uint16_t i = 0; i < node_count; ++i) {
-    state[i].index = UINT16_MAX;  // Unvisited.
-    state[i].lowlink = UINT16_MAX;
-    state[i].on_stack = false;
-  }
-
-  // Tarjan stack (node indices).
-  uint16_t* tarjan_stack = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, node_count, sizeof(uint16_t), (void**)&tarjan_stack));
-  uint16_t tarjan_top = 0;
-
-  // DFS stack.
-  loom_tarjan_frame_t* dfs_stack = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, node_count, sizeof(loom_tarjan_frame_t), (void**)&dfs_stack));
-  uint16_t dfs_top = 0;
-
-  // SCC assignment. Grow as SCCs are found.
-  uint16_t scc_capacity = 16;
-  bool* scc_recursive = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, scc_capacity, sizeof(bool), (void**)&scc_recursive));
-  uint16_t scc_count = 0;
-
-  uint16_t discovery_counter = 0;
-
-  for (uint16_t root = 0; root < node_count; ++root) {
-    if (state[root].index != UINT16_MAX) {
-      continue;  // Already visited.
+static iree_status_t loom_call_graph_collect_edge(
+    loom_call_graph_builder_t* builder, loom_symbol_id_t callee) {
+  if (builder->graph->symbol_to_node) {
+    if (!builder->callee_words) {
+      const iree_host_size_t word_count =
+          (builder->module->symbols.count + 63) / 64;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          builder->arena, word_count, sizeof(*builder->callee_words),
+          (void**)&builder->callee_words));
+      memset(builder->callee_words, 0,
+             word_count * sizeof(*builder->callee_words));
     }
+    uint64_t* word = &builder->callee_words[callee / 64];
+    const uint64_t bit = UINT64_C(1) << (callee % 64);
+    if (*word & bit) {
+      return iree_ok_status();
+    }
+    *word |= bit;
+  } else {
+    uint32_t unused = 0;
+    if (loom_ordinal_map_lookup(&builder->callee_membership, 0, callee,
+                                &unused)) {
+      return iree_ok_status();
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_ordinal_map_insert(&builder->callee_membership, 0, callee, 0));
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+      builder->arena, builder->callee_count,
+      (iree_host_size_t)builder->callee_count + 1, sizeof(*builder->callees),
+      &builder->callee_capacity, (void**)&builder->callees));
+  builder->callees[builder->callee_count++] = callee;
+  return builder->graph->symbol_to_node
+             ? iree_ok_status()
+             : loom_call_graph_admit(builder, callee);
+}
 
-    // Push root.
-    dfs_stack[dfs_top++] =
-        (loom_tarjan_frame_t){.node_index = root, .callee_cursor = 0};
-    state[root].index = discovery_counter;
-    state[root].lowlink = discovery_counter;
-    ++discovery_counter;
-    state[root].on_stack = true;
-    tarjan_stack[tarjan_top++] = root;
+static iree_status_t loom_call_graph_visit(void* user_data, loom_op_t* op,
+                                           const loom_walk_context_t* context,
+                                           loom_walk_result_t* out_result) {
+  *out_result = LOOM_WALK_CONTINUE;
+  loom_call_graph_builder_t* builder = user_data;
+  loom_call_like_t call = loom_call_like_cast(builder->module, op);
+  if (loom_call_like_isa(call) &&
+      loom_call_graph_tracks_call_kind(loom_call_like_kind(call))) {
+    builder->graph->call_kinds |= (uint8_t)(1u << loom_call_like_kind(call));
+    IREE_RETURN_IF_ERROR(loom_call_graph_collect_edge(
+        builder, loom_call_like_callee(call).symbol_id));
+    if (builder->visitor.call) {
+      IREE_RETURN_IF_ERROR(builder->visitor.call(
+          builder->visitor.user_data,
+          builder->graph->nodes[builder->caller].symbol_id, call));
+    }
+  } else {
+    call = (loom_call_like_t){0};
+  }
+  return builder->visitor.operation
+             ? builder->visitor.operation(builder->visitor.user_data,
+                                          builder->caller, op, call, context)
+             : iree_ok_status();
+}
 
-    while (dfs_top > 0) {
-      loom_tarjan_frame_t* frame = &dfs_stack[dfs_top - 1];
-      uint16_t v = frame->node_index;
-      loom_call_graph_node_t* node = &graph->nodes[v];
-
-      if (frame->callee_cursor < node->callee_count) {
-        // Process next callee.
-        loom_symbol_id_t callee_sym = node->callees[frame->callee_cursor++];
-        uint16_t w = graph->symbol_to_node[callee_sym];
-        if (w == UINT16_MAX) {
-          continue;  // External/declaration only.
-        }
-
-        // Each deduplicated edge is visited once by the SCC traversal.
-        ++graph->nodes[w].caller_count;
-
-        if (state[w].index == UINT16_MAX) {
-          // Not yet visited — push onto DFS stack.
-          state[w].index = discovery_counter;
-          state[w].lowlink = discovery_counter;
-          ++discovery_counter;
-          state[w].on_stack = true;
-          tarjan_stack[tarjan_top++] = w;
-          dfs_stack[dfs_top++] =
-              (loom_tarjan_frame_t){.node_index = w, .callee_cursor = 0};
-        } else if (state[w].on_stack) {
-          // Back edge: update lowlink.
-          if (state[w].index < state[v].lowlink) {
-            state[v].lowlink = state[w].index;
-          }
-        }
-      } else {
-        // All callees processed. Pop this node.
-        --dfs_top;
-
-        // Propagate lowlink to parent.
-        if (dfs_top > 0) {
-          uint16_t parent = dfs_stack[dfs_top - 1].node_index;
-          if (state[v].lowlink < state[parent].lowlink) {
-            state[parent].lowlink = state[v].lowlink;
-          }
-        }
-
-        // SCC root?
-        if (state[v].lowlink == state[v].index) {
-          // Grow SCC arrays if needed.
-          if (scc_count >= scc_capacity) {
-            if (scc_count == UINT16_MAX) {
-              return iree_make_status(
-                  IREE_STATUS_RESOURCE_EXHAUSTED,
-                  "call graph SCC list exceeds storage limit");
-            }
-            IREE_RETURN_IF_ERROR(loom_call_graph_grow_u16_bounded_array(
-                arena, scc_count, (iree_host_size_t)scc_count + 1,
-                sizeof(*scc_recursive), "call graph SCC list", &scc_capacity,
-                (void**)&scc_recursive));
-          }
-
-          uint16_t scc_id = scc_count++;
-          uint16_t scc_member_count = 0;
-          bool has_self_edge = false;
-
-          // Pop nodes from Tarjan stack until we hit v.
-          uint16_t w;
-          do {
-            w = tarjan_stack[--tarjan_top];
-            state[w].on_stack = false;
-            graph->nodes[w].scc_id = scc_id;
-            ++scc_member_count;
-
-            // Check for self-edge.
-            loom_call_graph_node_t* wnode = &graph->nodes[w];
-            for (uint16_t c = 0; c < wnode->callee_count; ++c) {
-              if (wnode->callees[c] == wnode->symbol_id) {
-                has_self_edge = true;
-                break;
-              }
-            }
-          } while (w != v);
-
-          scc_recursive[scc_id] = (scc_member_count > 1) || has_self_edge;
-        }
-      }
+static iree_status_t loom_call_graph_visit_successors(
+    void* user_data, iree_host_size_t node_index,
+    loom_scc_successor_callback_t successor) {
+  loom_call_graph_t* graph = user_data;
+  const loom_call_graph_node_t* node = &graph->nodes[node_index];
+  for (uint16_t i = 0; i < node->callee_count; ++i) {
+    const loom_call_graph_node_t* callee =
+        loom_call_graph_node(graph, node->callees[i]);
+    if (callee) {
+      const iree_host_size_t callee_index = callee - graph->nodes;
+      ++graph->nodes[callee_index].caller_count;
+      IREE_RETURN_IF_ERROR(successor.fn(successor.user_data, callee_index));
     }
   }
-
-  graph->scc_count = scc_count;
-  graph->scc_recursive = scc_recursive;
   return iree_ok_status();
 }
 
-//===----------------------------------------------------------------------===//
-// Build
-//===----------------------------------------------------------------------===//
-
 iree_status_t loom_call_graph_build(const loom_module_t* module,
+                                    const loom_call_graph_options_t* options,
                                     iree_arena_allocator_t* arena,
                                     loom_call_graph_t* out_graph) {
-  return loom_call_graph_build_with_calls(
-      module, arena, (loom_call_graph_call_visitor_t){0}, out_graph);
-}
-
-iree_status_t loom_call_graph_build_with_calls(
-    const loom_module_t* module, iree_arena_allocator_t* arena,
-    loom_call_graph_call_visitor_t visitor, loom_call_graph_t* out_graph) {
-  memset(out_graph, 0, sizeof(*out_graph));
-  out_graph->module = module;
-
-  // Count function-like symbols with bodies.
-  uint16_t func_count = 0;
-  loom_symbol_t* sym = NULL;
-  loom_module_for_each_symbol(module, sym) {
-    if (loom_symbol_implements(sym, LOOM_SYMBOL_INTERFACE_FUNC_LIKE) &&
-        sym->defining_op) {
-      loom_func_like_t func = loom_func_like_cast(module, sym->defining_op);
-      if (loom_func_like_body(func)) {
-        ++func_count;
+  *out_graph = (loom_call_graph_t){.module = module};
+  loom_ordinal_map_initialize(arena, &out_graph->reached_symbols);
+  loom_call_graph_builder_t builder = {
+      .module = module,
+      .arena = arena,
+      .graph = out_graph,
+      .visitor = options ? options->visitor : (loom_call_graph_visitor_t){0},
+  };
+  if (options && options->roots) {
+    for (iree_host_size_t i = 0; i < options->root_count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_call_graph_admit(&builder, options->roots[i]));
+    }
+  } else {
+    loom_symbol_t* symbol = NULL;
+    loom_module_for_each_symbol(module, symbol) {
+      if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE) ||
+          !symbol->defining_op) {
+        continue;
+      }
+      const loom_func_like_t function =
+          loom_func_like_cast(module, symbol->defining_op);
+      if (loom_func_like_body(function)) {
+        ++builder.node_capacity;
+      }
+    }
+    if (builder.node_capacity == 0) {
+      return iree_ok_status();
+    }
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, builder.node_capacity,
+                                                   sizeof(*out_graph->nodes),
+                                                   (void**)&out_graph->nodes));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        arena, module->symbols.count, sizeof(*out_graph->symbol_to_node),
+        (void**)&out_graph->symbol_to_node));
+    out_graph->symbol_to_node_count = module->symbols.count;
+    memset(out_graph->symbol_to_node, 0xFF,
+           module->symbols.count * sizeof(*out_graph->symbol_to_node));
+    loom_module_for_each_symbol(module, symbol) {
+      if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE) ||
+          !symbol->defining_op) {
+        continue;
+      }
+      const loom_func_like_t function =
+          loom_func_like_cast(module, symbol->defining_op);
+      if (!loom_func_like_body(function)) {
+        continue;
+      }
+      const loom_symbol_id_t symbol_id =
+          (loom_symbol_id_t)(symbol - module->symbols.entries);
+      const uint16_t node_index = out_graph->node_count;
+      out_graph->symbol_to_node[symbol_id] = node_index;
+      out_graph->nodes[out_graph->node_count++] = (loom_call_graph_node_t){
+          .symbol_id = symbol_id,
+      };
+      if (builder.visitor.function) {
+        IREE_RETURN_IF_ERROR(builder.visitor.function(builder.visitor.user_data,
+                                                      node_index, function));
       }
     }
   }
 
-  if (func_count == 0) {
-    out_graph->node_count = 0;
-    out_graph->scc_count = 0;
-    return iree_ok_status();
-  }
-
-  // Allocate nodes and symbol→node map.
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, func_count,
-                                                 sizeof(loom_call_graph_node_t),
-                                                 (void**)&out_graph->nodes));
-  out_graph->node_count = func_count;
-
-  out_graph->symbol_to_node_count = (uint16_t)module->symbols.count;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(arena, module->symbols.count, sizeof(uint16_t),
-                                (void**)&out_graph->symbol_to_node));
-  memset(out_graph->symbol_to_node, 0xFF,
-         module->symbols.count * sizeof(uint16_t));
-
-  // Walk every function root region to find call ops.
-  loom_call_collector_t collector = {
-      .arena = arena,
-      .module = module,
-      .visitor = visitor,
-  };
-  uint16_t node_index = 0;
-  loom_module_for_each_symbol(module, sym) {
-    if (!loom_symbol_implements(sym, LOOM_SYMBOL_INTERFACE_FUNC_LIKE) ||
-        !sym->defining_op) {
-      continue;
+  // Admitting a callee may grow nodes. Keep ordinals across callbacks and
+  // continue until every transitively reached definition has been visited.
+  for (uint16_t i = 0; i < out_graph->node_count; ++i) {
+    builder.caller = i;
+    builder.callees = NULL;
+    builder.callee_count = 0;
+    builder.callee_capacity = 0;
+    if (!out_graph->symbol_to_node) {
+      loom_ordinal_map_initialize(arena, &builder.callee_membership);
     }
-    loom_func_like_t func = loom_func_like_cast(module, sym->defining_op);
-    if (!loom_func_like_body(func)) {
-      continue;
-    }
-
-    loom_symbol_id_t sym_id = (loom_symbol_id_t)(sym - module->symbols.entries);
-    out_graph->nodes[node_index].symbol_id = sym_id;
-    out_graph->nodes[node_index].caller_count = 0;
-    out_graph->nodes[node_index].scc_id = UINT16_MAX;
-    out_graph->symbol_to_node[sym_id] = node_index;
-
-    loom_edge_list_t edges = {0};
-    collector.edges = &edges;
-    collector.caller = sym_id;
+    const loom_func_like_t function = loom_func_like_cast(
+        module,
+        module->symbols.entries[out_graph->nodes[i].symbol_id].defining_op);
     loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
     IREE_RETURN_IF_ERROR(loom_walk_function(
-        module, func, LOOM_WALK_PRE_ORDER,
-        (loom_walk_callback_t){loom_call_collector_visit, &collector},
-        &walk_result));
-
-    out_graph->nodes[node_index].callee_count = edges.count;
-    out_graph->nodes[node_index].callees = edges.callees;
-    for (uint16_t i = 0; i < edges.count; ++i) {
-      const loom_symbol_id_t callee = edges.callees[i];
-      collector.callee_membership[callee / 64] &=
-          ~(UINT64_C(1) << (callee % 64));
+        module, function, LOOM_WALK_PRE_ORDER,
+        (loom_walk_callback_t){loom_call_graph_visit, &builder}, &walk_result));
+    out_graph->nodes[i].callees = builder.callees;
+    out_graph->nodes[i].callee_count = builder.callee_count;
+    if (builder.callee_words) {
+      for (uint16_t j = 0; j < builder.callee_count; ++j) {
+        const loom_symbol_id_t callee = builder.callees[j];
+        builder.callee_words[callee / 64] &= ~(UINT64_C(1) << (callee % 64));
+      }
     }
-    ++node_index;
   }
-
-  out_graph->call_kinds = collector.call_kinds;
-
-  // Compute SCCs.
-  return loom_call_graph_compute_sccs(out_graph, arena);
+  if (out_graph->node_count == 0) {
+    return iree_ok_status();
+  }
+  const loom_scc_graph_t graph = {
+      .node_count = out_graph->node_count,
+      .visit_successors = loom_scc_visit_successors_callback_make(
+          loom_call_graph_visit_successors, out_graph),
+  };
+  IREE_RETURN_IF_ERROR(
+      loom_scc_compute(&graph, NULL, arena, &out_graph->components));
+  for (iree_host_size_t i = 0; i < out_graph->components.count; ++i) {
+    const loom_scc_t* component = &out_graph->components.values[i];
+    for (iree_host_size_t j = 0; j < component->node_count; ++j) {
+      out_graph->nodes[component->nodes[j]].scc_id = (uint16_t)i;
+    }
+  }
+  return iree_ok_status();
 }
-
-//===----------------------------------------------------------------------===//
-// Queries
-//===----------------------------------------------------------------------===//
 
 bool loom_call_graph_is_recursive(const loom_call_graph_t* graph,
                                   loom_symbol_id_t symbol_id) {
-  if (symbol_id >= graph->symbol_to_node_count) {
-    return false;
-  }
-  uint16_t node_index = graph->symbol_to_node[symbol_id];
-  if (node_index == UINT16_MAX) {
-    return false;
-  }
-  uint16_t scc_id = graph->nodes[node_index].scc_id;
-  if (scc_id == UINT16_MAX || scc_id >= graph->scc_count) {
-    return false;
-  }
-  return graph->scc_recursive[scc_id];
+  const loom_call_graph_node_t* node = loom_call_graph_node(graph, symbol_id);
+  return node && graph->components.values[node->scc_id].is_cycle;
 }
 
 const loom_call_graph_node_t* loom_call_graph_node(
     const loom_call_graph_t* graph, loom_symbol_id_t symbol_id) {
-  if (symbol_id >= graph->symbol_to_node_count) {
+  if (graph->node_count == 0) {
     return NULL;
   }
-  uint16_t node_index = graph->symbol_to_node[symbol_id];
-  if (node_index == UINT16_MAX) {
-    return NULL;
+  if (graph->symbol_to_node) {
+    if (symbol_id >= graph->symbol_to_node_count) {
+      return NULL;
+    }
+    const uint16_t node_index = graph->symbol_to_node[symbol_id];
+    return node_index != UINT16_MAX ? &graph->nodes[node_index] : NULL;
   }
-  return &graph->nodes[node_index];
+  uint32_t node_index = 0;
+  return loom_ordinal_map_lookup(&graph->reached_symbols, 0, symbol_id,
+                                 &node_index)
+             ? &graph->nodes[node_index]
+             : NULL;
 }

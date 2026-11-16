@@ -77,17 +77,10 @@ typedef struct loom_low_source_function_plan_order_t {
   iree_host_size_t count;
 } loom_low_source_function_plan_order_t;
 
-typedef struct loom_low_source_function_plan_frame_t {
-  // Index of the function plan being visited.
-  uint16_t plan_index;
-  // Next call-graph callee to visit.
-  uint16_t callee_cursor;
-} loom_low_source_function_plan_frame_t;
-
 // Builds source-order and stable callee-first views over selected functions.
-// An iterative postorder visits each function and call edge once. Unrelated
-// functions retain source selection order; dependencies move only callees in
-// front of their callers.
+// The retained graph already owns dependency order. Project its components
+// onto selected source plans without traversing edges again; native and
+// unselected definitions need no source plan. Emission retains source order.
 static iree_status_t loom_low_source_function_plan_order_build(
     const loom_low_source_selection_list_t* selections,
     iree_host_size_t function_count, const loom_call_graph_t* call_graph,
@@ -125,72 +118,28 @@ static iree_status_t loom_low_source_function_plan_order_build(
       arena, function_count, sizeof(*out_order->planning_order),
       (void**)&out_order->planning_order));
 
-  uint16_t* symbol_to_plan = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, call_graph->symbol_to_node_count, sizeof(*symbol_to_plan),
-      (void**)&symbol_to_plan));
-  memset(symbol_to_plan, 0xFF,
-         call_graph->symbol_to_node_count * sizeof(*symbol_to_plan));
+  uint16_t* node_to_plan = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, call_graph->node_count,
+                                                 sizeof(*node_to_plan),
+                                                 (void**)&node_to_plan));
+  memset(node_to_plan, 0xFF, call_graph->node_count * sizeof(*node_to_plan));
   for (iree_host_size_t i = 0; i < function_count; ++i) {
     const loom_symbol_id_t symbol_id =
         loom_func_like_callee(out_order->plans[i].selection->func).symbol_id;
-    IREE_ASSERT_LT(i, UINT16_MAX);
-    IREE_ASSERT_LT(symbol_id, call_graph->symbol_to_node_count);
-    symbol_to_plan[symbol_id] = (uint16_t)i;
+    const loom_call_graph_node_t* node =
+        loom_call_graph_node(call_graph, symbol_id);
+    node_to_plan[node - call_graph->nodes] = (uint16_t)i;
   }
 
-  uint8_t* visit_states = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, function_count, sizeof(*visit_states), (void**)&visit_states));
-  memset(visit_states, 0, function_count * sizeof(*visit_states));
-  loom_low_source_function_plan_frame_t* stack = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, function_count, sizeof(*stack), (void**)&stack));
-  uint16_t stack_count = 0;
   iree_host_size_t planning_count = 0;
-  for (uint16_t root = 0; root < function_count; ++root) {
-    if (visit_states[root] != 0) {
-      continue;
-    }
-    visit_states[root] = 1;
-    stack[stack_count++] = (loom_low_source_function_plan_frame_t){
-        .plan_index = root,
-    };
-    while (stack_count != 0) {
-      loom_low_source_function_plan_frame_t* frame = &stack[stack_count - 1];
-      const loom_symbol_id_t symbol_id =
-          loom_func_like_callee(
-              out_order->plans[frame->plan_index].selection->func)
-              .symbol_id;
-      const loom_call_graph_node_t* node =
-          loom_call_graph_node(call_graph, symbol_id);
-      IREE_ASSERT(node != NULL);
-      bool pushed_callee = false;
-      while (frame->callee_cursor < node->callee_count) {
-        const loom_symbol_id_t callee_symbol_id =
-            node->callees[frame->callee_cursor++];
-        if (callee_symbol_id >= call_graph->symbol_to_node_count) {
-          continue;
-        }
-        const uint16_t callee_plan_index = symbol_to_plan[callee_symbol_id];
-        if (callee_plan_index == UINT16_MAX ||
-            visit_states[callee_plan_index] != 0) {
-          continue;
-        }
-        visit_states[callee_plan_index] = 1;
-        stack[stack_count++] = (loom_low_source_function_plan_frame_t){
-            .plan_index = callee_plan_index,
-        };
-        pushed_callee = true;
-        break;
+  for (iree_host_size_t i = 0; i < call_graph->components.count; ++i) {
+    const loom_scc_t* component = &call_graph->components.values[i];
+    for (iree_host_size_t j = 0; j < component->node_count; ++j) {
+      const uint16_t plan_index = node_to_plan[component->nodes[j]];
+      if (plan_index != UINT16_MAX) {
+        out_order->planning_order[planning_count++] =
+            &out_order->plans[plan_index];
       }
-      if (pushed_callee) {
-        continue;
-      }
-      out_order->planning_order[planning_count++] =
-          &out_order->plans[frame->plan_index];
-      visit_states[frame->plan_index] = 2;
-      --stack_count;
     }
   }
   IREE_ASSERT_EQ(planning_count, function_count);
