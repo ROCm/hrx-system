@@ -17,6 +17,7 @@
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
+#include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/lower/source_representation.h"
 #include "loom/target/arch/amdgpu/lower/source_value_analysis.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
@@ -90,11 +91,8 @@ static bool loom_amdgpu_source_memory_access_prefers_vgpr(
           plan.cache_policy.build_flags,
           LOOM_VECTOR_MEMORY_CACHE_POLICY_BUILD_FLAG_SCOPE |
               LOOM_VECTOR_MEMORY_CACHE_POLICY_BUILD_FLAG_TEMPORAL) ||
-      !(loom_view_region_table_access_is_stable(
-            view_regions, plan.root_value_id, plan.alias_scope_id,
-            plan.restrict_access, plan.alias_type, plan.memory_space) ||
-        (plan.reads_entry_contents &&
-         loom_kernel_def_isa(view_regions->value_domain->region->parent_op))) ||
+      !loom_amdgpu_source_memory_scalar_load_is_stable(
+          view_regions, view_regions->value_domain->region->parent_op, &plan) ||
       loom_amdgpu_source_memory_terms_prefer_vgpr(
           module, fact_table, view_regions, analysis, &plan) ||
       loom_amdgpu_analyzed_source_value_prefers_vgpr(
