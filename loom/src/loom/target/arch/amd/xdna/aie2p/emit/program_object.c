@@ -273,16 +273,47 @@ static void loom_aie2p_program_object_order(
   }
 }
 
-static iree_status_t loom_aie2p_program_object_compose(
+iree_status_t loom_aie2p_program_native_initialize(
     const loom_aie2p_leaf_contribution_t* const* contributions,
-    iree_host_size_t contribution_count, const loom_aie2p_program_data_t* data,
-    iree_host_size_t data_count, const iree_host_size_t* function_groups,
-    iree_host_size_t group_count, iree_arena_allocator_t* arena,
-    iree_arena_allocator_t* scratch_arena,
+    iree_host_size_t contribution_count, iree_arena_allocator_t* arena,
+    loom_aie2p_program_native_t* out_native) {
+  iree_host_size_t* indices = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, contribution_count, 2 * sizeof(*indices), (void**)&indices));
+  iree_host_size_t* order = indices + contribution_count;
+  for (iree_host_size_t i = 0; i < contribution_count; ++i) {
+    indices[i] = order[i] = i;
+  }
+  loom_aie2p_program_object_sort_helpers(contributions, order + 1,
+                                         contribution_count - 1);
+  for (iree_host_size_t i = 2; i < contribution_count; ++i) {
+    const iree_host_size_t current = order[i];
+    const iree_host_size_t previous = order[i - 1];
+    if (loom_aie2p_program_object_compare_helpers(
+            contributions[current], contributions[previous]) == 0) {
+      indices[current] = indices[previous];
+    }
+  }
+  *out_native = (loom_aie2p_program_native_t){
+      .contributions = contributions,
+      .function_count = contribution_count,
+      .equivalent_indices = indices,
+      .equivalence_order = order,
+  };
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_program_object_compose(
+    const loom_aie2p_program_native_t* native,
+    const loom_aie2p_program_data_t* data, iree_host_size_t data_count,
+    const iree_host_size_t* function_groups, iree_host_size_t group_count,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     loom_aie2p_program_object_t* out_program,
     loom_aie2p_program_code_group_t* out_groups) {
   *out_program = (loom_aie2p_program_object_t){0};
-
+  const loom_aie2p_leaf_contribution_t* const* contributions =
+      native->contributions;
+  const iree_host_size_t contribution_count = native->function_count;
   const loom_aie2p_leaf_contribution_t* entry = contributions[0];
   const loom_native_object_symbol_t* entry_symbol =
       &entry->object.symbols[entry->realization.entry_symbol_index];
@@ -291,38 +322,23 @@ static iree_status_t loom_aie2p_program_object_compose(
                entry->object.sections[entry_symbol->section_contribution_index]
                    .contribution_alignment);
 
-  iree_host_size_t* helper_order = NULL;
+  iree_host_size_t* physical_order = NULL;
   loom_aie2p_program_function_t* functions = NULL;
   loom_aie2p_program_object_placement_t* placements = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(scratch_arena, contribution_count,
-                                sizeof(*helper_order), (void**)&helper_order));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      scratch_arena, contribution_count, sizeof(*physical_order),
+      (void**)&physical_order));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, contribution_count, sizeof(*functions), (void**)&functions));
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(scratch_arena, contribution_count,
                                 sizeof(*placements), (void**)&placements));
   for (iree_host_size_t i = 0; i < contribution_count; ++i) {
-    helper_order[i] = i;
     functions[i] = (loom_aie2p_program_function_t){
         .contribution = contributions[i],
-        .equivalent_index = i,
-        .canonical_index = i,
+        .equivalent_index = native->equivalent_indices[i],
+        .canonical_index = native->equivalent_indices[i],
     };
-  }
-  // Sorting places equivalent helpers together without comparing every pair.
-  // Only the index projection moves; physical layout retains input order.
-  loom_aie2p_program_object_sort_helpers(contributions, helper_order + 1,
-                                         contribution_count - 1);
-  for (iree_host_size_t i = 2; i < contribution_count; ++i) {
-    const iree_host_size_t current = helper_order[i];
-    const iree_host_size_t previous = helper_order[i - 1];
-    if (loom_aie2p_program_object_compare_helpers(
-            contributions[current], contributions[previous]) == 0) {
-      functions[current].equivalent_index =
-          functions[previous].equivalent_index;
-      functions[current].canonical_index = functions[current].equivalent_index;
-    }
   }
   if (group_count > 1) {
     iree_host_size_t* representatives = NULL;
@@ -334,7 +350,7 @@ static iree_status_t loom_aie2p_program_object_compose(
     // A group's last representative either belongs to that class or starts
     // its next physical body. Zero initially names the unique entry class.
     for (iree_host_size_t i = 1; i < contribution_count; ++i) {
-      const iree_host_size_t current = helper_order[i];
+      const iree_host_size_t current = native->equivalence_order[i];
       const iree_host_size_t group = function_groups[current];
       const iree_host_size_t previous = representatives[group];
       functions[current].canonical_index =
@@ -402,7 +418,6 @@ static iree_status_t loom_aie2p_program_object_compose(
         scratch_arena, group_count, sizeof(*groups), (void**)&groups));
     memset(groups, 0, group_count * sizeof(*groups));
   }
-  iree_host_size_t* physical_order = helper_order;
   loom_aie2p_program_object_order(contributions, functions, contribution_count,
                                   function_groups, group_count,
                                   entry_code_alignment, groups, physical_order);
@@ -564,9 +579,9 @@ static iree_status_t loom_aie2p_program_object_compose(
     }
     capability_flags |= contribution->realization.capability_flags;
   }
-  // Body equivalence has consumed its order projection. Reuse that scratch for
-  // the complete function directory; neither step changes symbol identity.
-  iree_host_size_t* function_order = helper_order;
+  // Physical placement has consumed its order projection. Reuse that scratch
+  // for the function directory; the retained native identities remain intact.
+  iree_host_size_t* function_order = physical_order;
   for (iree_host_size_t i = 0; i < contribution_count; ++i) {
     function_order[i] = placements[i].symbol_start +
                         contributions[i]->realization.entry_symbol_index;
@@ -601,26 +616,24 @@ static iree_status_t loom_aie2p_program_object_compose(
 }
 
 iree_status_t loom_aie2p_program_object_merge(
-    const loom_aie2p_leaf_contribution_t* const* contributions,
-    iree_host_size_t contribution_count, const loom_aie2p_program_data_t* data,
-    iree_host_size_t data_count, iree_arena_allocator_t* arena,
-    iree_arena_allocator_t* scratch_arena,
+    const loom_aie2p_program_native_t* native,
+    const loom_aie2p_program_data_t* data, iree_host_size_t data_count,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     loom_aie2p_program_object_t* out_program) {
   loom_aie2p_program_code_group_t resident;
-  return loom_aie2p_program_object_compose(
-      contributions, contribution_count, data, data_count, NULL, 1, arena,
-      scratch_arena, out_program, &resident);
+  return loom_aie2p_program_object_compose(native, data, data_count, NULL, 1,
+                                           arena, scratch_arena, out_program,
+                                           &resident);
 }
 
 iree_status_t loom_aie2p_program_object_partition(
-    const loom_aie2p_leaf_contribution_t* const* contributions,
-    iree_host_size_t contribution_count, const loom_aie2p_program_data_t* data,
-    iree_host_size_t data_count, const iree_host_size_t* function_groups,
-    iree_host_size_t group_count, iree_arena_allocator_t* arena,
-    iree_arena_allocator_t* scratch_arena,
+    const loom_aie2p_program_native_t* native,
+    const loom_aie2p_program_data_t* data, iree_host_size_t data_count,
+    const iree_host_size_t* function_groups, iree_host_size_t group_count,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     loom_aie2p_program_object_t* out_program,
     loom_aie2p_program_code_group_t* out_groups) {
   return loom_aie2p_program_object_compose(
-      contributions, contribution_count, data, data_count, function_groups,
-      group_count, arena, scratch_arena, out_program, out_groups);
+      native, data, data_count, function_groups, group_count, arena,
+      scratch_arena, out_program, out_groups);
 }

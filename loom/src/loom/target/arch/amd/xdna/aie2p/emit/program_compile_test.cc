@@ -582,10 +582,37 @@ TEST_F(Aie2pProgramCompileTest, ReportsCompleteProgramIncludingRetainedHelper) {
         .compile_report = &report,
     };
     bool compiled = false;
-    loom_aie2p_leaf_contribution_t contribution = {};
-    IREE_ASSERT_OK(CompileProgram(module.get(), entry, &options, compiler,
-                                  &compiled, &contribution));
+    const loom_aie2p_program_helper_t helper_input = {
+        .function = loom_low_func_def_callee(helper),
+        .may_return = true,
+    };
+    const loom_low_read_only_data_set_t data = {};
+    loom_aie2p_program_compilation_t compilation;
+    IREE_ASSERT_OK(loom_aie2p_program_prepare(
+        compiler, entry, /*may_return=*/true, {&helper_input, 1}, &data,
+        &options, &compiled, &compilation));
     ASSERT_TRUE(compiled);
+    ASSERT_EQ(compilation.native.function_count, 2u);
+    EXPECT_EQ(report.static_instruction_mix.vector_alu_count, 0u);
+    EXPECT_EQ(report.dynamic_instruction_mix.vector_alu_count, 0u);
+    EXPECT_EQ(
+        report.emitted_code_byte_count,
+        compilation.native.contributions[0]->realization.code.byte_length);
+
+    // Placement can choose a separate section after seeing exact native sizes.
+    // The reused helper's report is incorporated only in the final composition.
+    const iree_host_size_t function_groups[] = {0, 1};
+    loom_aie2p_program_code_group_t groups[2];
+    const loom_aie2p_program_partition_t partition = {
+        .function_groups = function_groups,
+        .group_count = IREE_ARRAYSIZE(groups),
+        .groups = groups,
+    };
+    loom_aie2p_program_object_t program;
+    IREE_ASSERT_OK(loom_aie2p_program_compose(
+        compiler, &compilation, program_index == 0 ? nullptr : &partition,
+        &program));
+    const auto& contribution = program.contribution;
     ASSERT_EQ(contribution.object.section_count, 2u);
 
     uint64_t semantic_code_bytes = 0;

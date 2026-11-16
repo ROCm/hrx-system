@@ -27,6 +27,19 @@ typedef struct loom_aie2p_program_data_t {
   iree_host_size_t bank_conflict_count;
 } loom_aie2p_program_data_t;
 
+// Exact native results before a placement owner assigns physical code groups.
+typedef struct loom_aie2p_program_native_t {
+  // Borrowed detached contributions in entry-then-helper order. The array and
+  // its immutable contributions outlive native selection and composition.
+  const loom_aie2p_leaf_contribution_t* const* contributions;
+  // Number of logical functions, including the unique entry at index zero.
+  iree_host_size_t function_count;
+  // First equivalent native function, including its symbolic relocations.
+  const iree_host_size_t* equivalent_indices;
+  // Entry first, then helpers ordered by native equivalence and input ordinal.
+  const iree_host_size_t* equivalence_order;
+} loom_aie2p_program_native_t;
+
 // One logical function's identity in a detached complete program.
 typedef struct loom_aie2p_program_function_t {
   // Detached function before merging, including its original local relocations.
@@ -64,6 +77,15 @@ typedef struct loom_aie2p_program_code_group_t {
   loom_aie2p_leaf_storage_requirement_t code;
 } loom_aie2p_program_code_group_t;
 
+// Establishes native equivalence once, before physical groups are selected.
+// Source admission supplies a nonempty closure with compatible targets/ABIs,
+// uniquely named entries, and no observable helper code-address identity.
+// The result borrows |contributions| and owns its equivalence indexes in arena.
+iree_status_t loom_aie2p_program_native_initialize(
+    const loom_aie2p_leaf_contribution_t* const* contributions,
+    iree_host_size_t contribution_count, iree_arena_allocator_t* arena,
+    loom_aie2p_program_native_t* out_native);
+
 // Joins an entry contribution followed by its reachable helper contributions.
 // Source admission and native emission establish a nonempty complete closure
 // of uniquely named functions with the same target and ABI. Each contribution
@@ -90,10 +112,9 @@ typedef struct loom_aie2p_program_code_group_t {
 // temporary layout storage. Scratch indexes need survive only through this
 // call.
 iree_status_t loom_aie2p_program_object_merge(
-    const loom_aie2p_leaf_contribution_t* const* contributions,
-    iree_host_size_t contribution_count, const loom_aie2p_program_data_t* data,
-    iree_host_size_t data_count, iree_arena_allocator_t* arena,
-    iree_arena_allocator_t* scratch_arena,
+    const loom_aie2p_program_native_t* native,
+    const loom_aie2p_program_data_t* data, iree_host_size_t data_count,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     loom_aie2p_program_object_t* out_program);
 
 // Composes the same admitted closure into independently placeable sections.
@@ -106,11 +127,10 @@ iree_status_t loom_aie2p_program_object_merge(
 // The program's code requirement is the sum of packed group lengths, not its
 // eventual physical footprint after lifetime placement.
 iree_status_t loom_aie2p_program_object_partition(
-    const loom_aie2p_leaf_contribution_t* const* contributions,
-    iree_host_size_t contribution_count, const loom_aie2p_program_data_t* data,
-    iree_host_size_t data_count, const iree_host_size_t* function_groups,
-    iree_host_size_t group_count, iree_arena_allocator_t* arena,
-    iree_arena_allocator_t* scratch_arena,
+    const loom_aie2p_program_native_t* native,
+    const loom_aie2p_program_data_t* data, iree_host_size_t data_count,
+    const iree_host_size_t* function_groups, iree_host_size_t group_count,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     loom_aie2p_program_object_t* out_program,
     loom_aie2p_program_code_group_t* out_groups);
 

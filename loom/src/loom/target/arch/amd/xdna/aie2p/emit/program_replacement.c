@@ -220,14 +220,17 @@ static iree_status_t loom_aie2p_program_replacement_compile_impl(
       .group_count = layout->group_count,
       .groups = groups,
   };
-  IREE_RETURN_IF_ERROR(loom_aie2p_program_compile(
+  loom_aie2p_program_compilation_t compilation;
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_prepare(
       compiler, module->symbols.entries[root->entry.symbol_id].defining_op,
       root->may_return,
       (loom_aie2p_program_helper_list_t){helpers, source->helpers.count + 1},
-      &data, &options, &partition, out_compiled, &layout->program));
+      &data, &options, out_compiled, &compilation));
   if (!*out_compiled) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_compose(
+      compiler, &compilation, &partition, &layout->program));
   IREE_RETURN_IF_ERROR(loom_aie2p_program_layout_finish(
       &source->pipeline_entry->scope->lifetimes, groups, arena, layout));
   if (report) {

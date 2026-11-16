@@ -282,14 +282,13 @@ static iree_status_t loom_aie2p_program_bind_data(
   return iree_ok_status();
 }
 
-static iree_status_t loom_aie2p_program_compile_impl(
+static iree_status_t loom_aie2p_program_prepare_impl(
     loom_aie2p_program_compiler_t* compiler, loom_op_t* entry_function_op,
     bool may_return, loom_aie2p_program_helper_list_t helpers,
     const loom_low_read_only_data_set_t* program_data,
     const loom_aie2p_leaf_compile_options_t* entry_options,
-    const loom_aie2p_program_partition_t* partition,
     iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
-    bool* out_compiled, loom_aie2p_program_object_t* out_program) {
+    bool* out_compiled, loom_aie2p_program_compilation_t* out_compilation) {
   loom_module_t* module = compiler->module;
   // r24 and r25 are the position registers in the two load-FIFO tuples. Keep
   // the link shadow out of both tuples so native calls do not reduce the
@@ -323,9 +322,9 @@ static iree_status_t loom_aie2p_program_compile_impl(
 
   const loom_aie2p_leaf_contribution_t** contributions = NULL;
   IREE_RETURN_IF_ERROR(loom_aie2p_program_compiler_prepare_helpers(compiler));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch_arena, helpers.count + 1, sizeof(*contributions),
-      (void**)&contributions));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, helpers.count + 1,
+                                                 sizeof(*contributions),
+                                                 (void**)&contributions));
 
   for (iree_host_size_t i = 0; i < helpers.count; ++i) {
     const loom_aie2p_program_helper_t* helper_input = &helpers.values[i];
@@ -457,38 +456,31 @@ static iree_status_t loom_aie2p_program_compile_impl(
   }
   loom_aie2p_program_data_t* data = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_aie2p_program_bind_data(module, program_data, scratch_arena, &data));
-  if (partition) {
-    IREE_RETURN_IF_ERROR(loom_aie2p_program_object_partition(
-        contributions, helpers.count + 1, data, program_data->count,
-        partition->function_groups, partition->group_count, arena,
-        scratch_arena, out_program, partition->groups));
-  } else {
-    IREE_RETURN_IF_ERROR(loom_aie2p_program_object_merge(
-        contributions, helpers.count + 1, data, program_data->count, arena,
-        scratch_arena, out_program));
-  }
-  if (entry_options->compile_report != NULL) {
-    IREE_RETURN_IF_ERROR(loom_aie2p_program_compose_report(
-        compiler, entry_function_op, helpers, out_program, scratch_arena,
-        entry_options->compile_report));
-  }
+      loom_aie2p_program_bind_data(module, program_data, arena, &data));
+  *out_compilation = (loom_aie2p_program_compilation_t){
+      .entry_function = entry_function_op,
+      .helpers = helpers,
+      .data = data,
+      .data_count = program_data->count,
+      .report = entry_options->compile_report,
+  };
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_native_initialize(
+      contributions, helpers.count + 1, arena, &out_compilation->native));
   *out_compiled = true;
   return iree_ok_status();
 }
 
-iree_status_t loom_aie2p_program_compile(
+iree_status_t loom_aie2p_program_prepare(
     loom_aie2p_program_compiler_t* compiler, loom_op_t* entry_function_op,
     bool may_return, loom_aie2p_program_helper_list_t helpers,
     const loom_low_read_only_data_set_t* program_data,
-    const loom_aie2p_leaf_compile_options_t* entry_options,
-    const loom_aie2p_program_partition_t* partition, bool* out_compiled,
-    loom_aie2p_program_object_t* out_program) {
+    const loom_aie2p_leaf_compile_options_t* entry_options, bool* out_compiled,
+    loom_aie2p_program_compilation_t* out_compilation) {
   IREE_ASSERT_ARGUMENT(compiler);
   IREE_ASSERT_ARGUMENT(entry_function_op);
   IREE_ASSERT_ARGUMENT(entry_options);
   IREE_ASSERT_ARGUMENT(out_compiled);
-  IREE_ASSERT_ARGUMENT(out_program);
+  IREE_ASSERT_ARGUMENT(out_compilation);
   IREE_ASSERT_EQ(compiler->retains_compile_reports,
                  entry_options->compile_report != NULL);
   if (entry_options->compile_report != NULL) {
@@ -496,7 +488,7 @@ iree_status_t loom_aie2p_program_compile(
                    entry_options->compile_report->requested_detail_flags);
   }
   *out_compiled = false;
-  *out_program = (loom_aie2p_program_object_t){0};
+  *out_compilation = (loom_aie2p_program_compilation_t){0};
   iree_arena_allocator_t* arena = compiler->arena;
   loom_aie2p_program_diagnostics_t diagnostics = {
       .module = compiler->module,
@@ -508,7 +500,62 @@ iree_status_t loom_aie2p_program_compile(
       .fn = loom_aie2p_program_emit_diagnostic,
       .user_data = &diagnostics,
   };
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(arena->block_pool, &scratch_arena);
+  const iree_status_t status = loom_aie2p_program_prepare_impl(
+      compiler, entry_function_op, may_return, helpers, program_data, &options,
+      arena, &scratch_arena, out_compiled, out_compilation);
+  iree_arena_deinitialize(&scratch_arena);
+  return status;
+}
+
+iree_status_t loom_aie2p_program_compose(
+    loom_aie2p_program_compiler_t* compiler,
+    const loom_aie2p_program_compilation_t* compilation,
+    const loom_aie2p_program_partition_t* partition,
+    loom_aie2p_program_object_t* out_program) {
+  iree_arena_allocator_t* arena = compiler->arena;
+  iree_arena_allocator_t scratch;
+  iree_arena_initialize(arena->block_pool, &scratch);
+  iree_status_t status =
+      partition ? loom_aie2p_program_object_partition(
+                      &compilation->native, compilation->data,
+                      compilation->data_count, partition->function_groups,
+                      partition->group_count, arena, &scratch, out_program,
+                      partition->groups)
+                : loom_aie2p_program_object_merge(
+                      &compilation->native, compilation->data,
+                      compilation->data_count, arena, &scratch, out_program);
+  if (iree_status_is_ok(status) && compilation->report) {
+    status = loom_aie2p_program_compose_report(
+        compiler, compilation->entry_function, compilation->helpers,
+        out_program, &scratch, compilation->report);
+  }
+  iree_arena_deinitialize(&scratch);
+  return status;
+}
+
+iree_status_t loom_aie2p_program_compile(
+    loom_aie2p_program_compiler_t* compiler, loom_op_t* entry_function_op,
+    bool may_return, loom_aie2p_program_helper_list_t helpers,
+    const loom_low_read_only_data_set_t* program_data,
+    const loom_aie2p_leaf_compile_options_t* entry_options,
+    const loom_aie2p_program_partition_t* partition, bool* out_compiled,
+    loom_aie2p_program_object_t* out_program) {
+  *out_compiled = false;
+  *out_program = (loom_aie2p_program_object_t){0};
   if (helpers.count == 0 && partition == NULL) {
+    iree_arena_allocator_t* arena = compiler->arena;
+    loom_aie2p_program_diagnostics_t diagnostics = {
+        .module = compiler->module,
+        .arena = arena,
+        .emitter = entry_options->diagnostic_emitter,
+    };
+    loom_aie2p_leaf_compile_options_t options = *entry_options;
+    options.diagnostic_emitter = (iree_diagnostic_emitter_t){
+        .fn = loom_aie2p_program_emit_diagnostic,
+        .user_data = &diagnostics,
+    };
     loom_aie2p_leaf_contribution_t* entry = NULL;
     IREE_RETURN_IF_ERROR(
         iree_arena_allocate(arena, sizeof(*entry), (void**)&entry));
@@ -532,11 +579,13 @@ iree_status_t loom_aie2p_program_compile(
     }
     return iree_ok_status();
   }
-  iree_arena_allocator_t scratch_arena;
-  iree_arena_initialize(arena->block_pool, &scratch_arena);
-  const iree_status_t status = loom_aie2p_program_compile_impl(
-      compiler, entry_function_op, may_return, helpers, program_data, &options,
-      partition, arena, &scratch_arena, out_compiled, out_program);
-  iree_arena_deinitialize(&scratch_arena);
-  return status;
+  loom_aie2p_program_compilation_t compilation;
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_prepare(
+      compiler, entry_function_op, may_return, helpers, program_data,
+      entry_options, out_compiled, &compilation));
+  if (!*out_compiled) {
+    return iree_ok_status();
+  }
+  return loom_aie2p_program_compose(compiler, &compilation, partition,
+                                    out_program);
 }

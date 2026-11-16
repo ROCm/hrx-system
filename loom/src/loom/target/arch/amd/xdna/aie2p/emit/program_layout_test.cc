@@ -78,9 +78,12 @@ TEST(Aie2pProgramLayoutTest, SharesInstructionMemoryWithoutLoadingEmptyWindow) {
   IREE_ASSERT_OK(loom_aie2p_program_layout_initialize(
       function_owners, 4, &arena, &arena, &program));
   loom_aie2p_program_code_group_t native_groups[3];
+  loom_aie2p_program_native_t native;
+  IREE_ASSERT_OK(
+      loom_aie2p_program_native_initialize(contributions, 4, &arena, &native));
   IREE_ASSERT_OK(loom_aie2p_program_object_partition(
-      contributions, 4, nullptr, 0, program.function_groups,
-      program.group_count, &arena, &arena, &program.program, native_groups));
+      &native, nullptr, 0, program.function_groups, program.group_count, &arena,
+      &arena, &program.program, native_groups));
   IREE_ASSERT_OK(loom_aie2p_program_layout_finish(&lifetimes, native_groups,
                                                   &arena, &program));
   ASSERT_EQ(program.group_count, 3u);
