@@ -106,14 +106,14 @@ Actual request memory admission remains separate from directory capacity.
 
 ## Image projection
 
-The optional [finite component](../finite/component.h) owns image preparation
-and parameter residency independently of the language model. Text-only requests
+The optional [finite component](../../../service/finite/component.h) owns image
+preparation and parameter residency independently of the language model. Text-only requests
 and exact retained media-prefix hits leave it dormant. The service resolves
-prefix reuse before offering missing image occurrences to the
-[projector](media_projector.h), and projects them before reserving language
-completion storage. The projector batches compatible images from one or several
-queued requests without waiting for hypothetical arrivals or changing admission
-priority.
+prefix reuse and retains the logical language continuation before offering
+missing image occurrences to the [projector](media_projector.h). Its forecast
+includes that continuation's footprint. The projector batches compatible images
+from one or several queued requests without waiting for hypothetical arrivals or
+changing admission priority.
 
 One bounded preparation window realizes compressed inputs directly into
 [RGB/RGBA source packets](../../media/image_request.h). Source programs own
@@ -122,8 +122,17 @@ position geometry. The finite source's work-unit limit bounds a cohort; its
 upload capacity is the decoded-window byte target, with one larger checked
 image permitted alone. A window drains before another begins decoding.
 
-Live requests own [device results](../finite/result.h), not host feature
-copies or persistent projection-cache entries. The result retains pooled output
+Sealing publishes a preparation offer without starting CPU work. A preparation
+grant forecasts and decodes that captured window; an execution grant drains its
+source-compatible cohorts through final collection. Accepted work progresses
+with zero further grants. The component owner supplies one offer and one
+operation slot, retaining their control storage through actual model retirement.
+Failed device ownership remains published after projector destruction. The text
+owner retains the identity counter across quiescent projector replacement, so
+an earlier grant cannot accidentally select a later window.
+
+Live requests own [device results](../../../service/finite/result.h), not host
+feature copies or persistent projection-cache entries. The result retains pooled output
 storage and producer readiness independently of the projector's model and
 weights. [Media epochs](media_epoch.h) import that readiness and gather device
 rows into source-defined text input packets. Only control records and metadata

@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/runtime/testing/service_control.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/service/finite/component.h"
 
@@ -103,6 +104,7 @@ class TextComponentServiceTest : public SourceTextServiceTest {
         device_, storage_owner_, &options, observer, host_allocator_, &image_));
     auto service_options = ServiceOptions();
     service_options.image = image_;
+    service_options.image_scheduling = image_scheduling_.binding();
     IREE_ASSERT_OK(loom_serve_text_service_allocate(
         model_, &service_options, nullptr, host_allocator_, &service_));
     interface_ = loom_serve_text_service_interface(service_);
@@ -151,6 +153,8 @@ class TextComponentServiceTest : public SourceTextServiceTest {
     EXPECT_EQ(Content(Read(client)), Oracle::Complete("abxa", 2));
   }
 
+  // Composition-owned projection observations outlive component retirement.
+  loom_runtime::testing::ServiceControl image_scheduling_;
   // Owned optional computation, outliving the service that borrows it.
   loom_service_finite_component_t* image_ = nullptr;
   // Owned text service, released only after both preparation domains join.

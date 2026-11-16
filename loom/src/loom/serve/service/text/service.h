@@ -26,6 +26,10 @@ typedef struct loom_serve_text_service_options_t {
   // activation and ordinary requests do not start its preparation. Accepted
   // preparation is advanced/joined by the service's serialized owner.
   loom_service_finite_component_t* image;
+  // Optional image contributor's offer/operation and summary publisher.
+  // Required with image; retained by its owner through actual component
+  // retirement.
+  loom_runtime_service_control_binding_t image_scheduling;
   // Initial resident capacity, matching the model at service creation. The
   // directory grows as requests arrive; memory credit gates active requests.
   iree_host_size_t row_count;

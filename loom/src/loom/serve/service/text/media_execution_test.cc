@@ -325,9 +325,12 @@ TEST_F(MediaExecutionTest, ProjectorAlignsAndReturnsItsHostAllocation) {
         .capacity = sizeof(storage) - offset,
         .buffer = storage + offset,
     };
+    loom_runtime::testing::ServiceControl scheduling;
+    uint64_t next_identity = 0;
     loom_serve_text_media_projector_t* projector = nullptr;
     IREE_ASSERT_OK(loom_serve_text_media_projector_allocate(
         producer_, 1, loom_runtime_host_executor(host_), proactor, {},
+        scheduling.binding(), &next_identity,
         iree_allocator_inline_arena(&arena), &projector));
     EXPECT_EQ(reinterpret_cast<uintptr_t>(projector) % alignment, 0u);
     EXPECT_TRUE(loom_serve_text_media_projector_is_collecting(projector));

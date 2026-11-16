@@ -482,6 +482,7 @@ static iree_status_t loom_serve_text_prepare_media(
     IREE_RETURN_IF_ERROR(loom_serve_text_media_projector_allocate(
         model, capacity, service->readiness.executor,
         service->readiness.proactor, service->readiness.observer,
+        service->image_scheduling, &service->image_next_identity,
         service->host_allocator, &service->projector));
   }
   loom_serve_text_media_projector_offer(
@@ -636,7 +637,7 @@ iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
       // cannot admit text work or spend admission-policy overtaking credit.
       if (state_capacity && service->projector) {
         service->media_preparation_end = 0;
-        loom_serve_text_media_projector_start(service->projector);
+        loom_serve_text_media_projector_seal(service->projector);
       }
       memset(&service->pending.prepared, 0, sizeof(service->pending.prepared));
       continue;
@@ -713,7 +714,7 @@ iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
       }
       if (state_capacity && service->projector) {
         service->media_preparation_end = 0;
-        loom_serve_text_media_projector_start(service->projector);
+        loom_serve_text_media_projector_seal(service->projector);
       }
       bool active =
           iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY);
@@ -804,5 +805,5 @@ bool loom_serve_text_media_lookahead(loom_serve_text_service_t* service) {
     return false;
   }
   service->media_preparation_end = 0;
-  return loom_serve_text_media_projector_start(service->projector);
+  return loom_serve_text_media_projector_seal(service->projector);
 }

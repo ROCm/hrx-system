@@ -9,6 +9,7 @@
 
 #include "iree/async/proactor.h"
 #include "iree/task/executor.h"
+#include "loom/runtime/service_control.h"
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/text/input.h"
 #include "loom/serve/service/text/media_input.h"
@@ -68,10 +69,18 @@ void loom_serve_text_media_request_free(
 // bounds the window. Decoded packet bytes target the source upload capacity;
 // one larger checked projection is allowed alone. Prepared windows drain before
 // new decoding. CPU and producer readiness are independent of text's channels.
+// scheduling lends one offer/choice and one operation, each with one use slot,
+// and its summary publisher. Storage survives this owner through actual model
+// retirement, when the component owner clears any failed operation.
+// next_identity is a zero-initialized owner counter retained across quiescent
+// projector replacement. Offer revisions and accepted serials each consume a
+// distinct value; recreating this borrower cannot make an old grant legal.
 iree_status_t loom_serve_text_media_projector_allocate(
     loom_service_finite_model_t* model, iree_host_size_t capacity,
     iree_task_executor_t* executor, iree_async_proactor_t* proactor,
-    loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
+    loom_runtime_wake_callback_t observer,
+    loom_runtime_service_control_binding_t scheduling, uint64_t* next_identity,
+    iree_allocator_t host_allocator,
     loom_serve_text_media_projector_t** out_projector);
 
 // Offers missing projections in request order. False means the current window
@@ -86,8 +95,8 @@ bool loom_serve_text_media_projector_offer(
     loom_serve_text_media_projector_t* projector,
     loom_serve_text_media_request_t* request, uint64_t consumer_bytes);
 
-// Seals a gathered window without a batching timer or waiting for new arrivals.
-bool loom_serve_text_media_projector_start(
+// Seals a gathered window and publishes preparation without starting CPU work.
+bool loom_serve_text_media_projector_seal(
     loom_serve_text_media_projector_t* projector);
 
 // A new preparation window can accept offers without borrowing caller storage.
@@ -115,9 +124,22 @@ void loom_serve_text_media_projector_set_observer(
 // Owner-published activity for service inspection; NULL means no active window.
 const char* loom_serve_text_media_projector_phase(
     const loom_serve_text_media_projector_t* projector);
-iree_status_t loom_serve_text_media_projector_advance(
+// Progresses accepted work, including all compatible cohorts in an accepted
+// execution window. Never starts another window. STOPPING withdraws offers and
+// joins/cancels accepted borrowers. NULL is inert.
+iree_status_t loom_serve_text_media_projector_progress(
     loom_serve_text_media_projector_t* projector,
     loom_runtime_service_flags_t flags, bool* out_progress);
+
+// Claims one published preparation or execution window without waiting. An
+// execution grant covers the source's bounded compatible cohorts and their
+// final collection. Serial zero means stale/unaccepted; acceptance remains
+// observable even if a later submission fails.
+loom_runtime_service_operation_key_t
+loom_serve_text_media_projector_try_schedule(
+    loom_serve_text_media_projector_t* projector,
+    loom_runtime_service_offer_key_t offer, uint64_t choice_ordinal,
+    loom_runtime_service_flags_t flags);
 
 // All accepted callbacks have retired. Request owners have detached their jobs.
 // Failed device work remains component-owned until actual model retirement.

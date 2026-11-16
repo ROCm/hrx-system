@@ -50,6 +50,11 @@ struct loom_serve_text_service_t {
   loom_serve_text_model_t* model;
   // Borrowed optional image computation with independent preparation/residency.
   loom_service_finite_component_t* image;
+  // Borrowed projection control, surviving each quiescent projector
+  // replacement.
+  loom_runtime_service_control_binding_t image_scheduling;
+  // Monotonic offer/operation identities across those replacements.
+  uint64_t image_next_identity;
   // Lazy independent projection owner; text-only requests allocate no window.
   loom_serve_text_media_projector_t* projector;
   // Last receipt in the current finite lookahead window; later arrivals do not

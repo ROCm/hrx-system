@@ -849,6 +849,12 @@ iree_status_t loom_serve_text_service_allocate(
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_text_service_t** out_service) {
   *out_service = NULL;
+  if (options->image && (!options->image_scheduling.control ||
+                         !options->image_scheduling.publish_observation)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "image component requires retained scheduling "
+                            "storage and its summary publisher");
+  }
   if (options->row_count != loom_serve_text_model_row_count(model)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "initial service capacity must match its model");
@@ -904,6 +910,7 @@ iree_status_t loom_serve_text_service_allocate(
       .host_allocator = host_allocator,
       .model = model,
       .image = options->image,
+      .image_scheduling = options->image_scheduling,
       .name = options->name,
       .max_sessions = options->max_sessions,
       .isolated_shape = {loom_serve_text_model_prefill_capacity(model),
@@ -1267,7 +1274,7 @@ static iree_status_t loom_serve_text_advance(void* self,
   if (loom_serve_text_is_active(service)) {
     projection_flags |= LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY;
   }
-  iree_status_t projection_status = loom_serve_text_media_projector_advance(
+  iree_status_t projection_status = loom_serve_text_media_projector_progress(
       service->projector, projection_flags, &projection_progress);
   if (!iree_status_is_ok(projection_status)) {
     flags |= LOOM_RUNTIME_SERVICE_FLAG_STOPPING;
@@ -1281,6 +1288,20 @@ static iree_status_t loom_serve_text_advance(void* self,
   if (iree_status_is_ok(work_status) &&
       !iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
     work_progress |= loom_serve_text_media_lookahead(service);
+    if (service->projector) {
+      loom_runtime_service_offer_t offer;
+      const loom_runtime_service_control_binding_t binding =
+          service->image_scheduling;
+      if (loom_runtime_service_read_offer(binding.control,
+                                          binding.offer_ordinal, &offer) ==
+              LOOM_RUNTIME_SERVICE_READ_COMPLETE &&
+          offer.choice_count) {
+        const loom_runtime_service_operation_key_t operation =
+            loom_serve_text_media_projector_try_schedule(service->projector,
+                                                         offer.key, 0, flags);
+        work_progress |= operation.serial != 0;
+      }
+    }
   }
   // A new model failure needs another owner turn to stop a pending timer.
   *out_progress |= image_progress || projection_progress ||
