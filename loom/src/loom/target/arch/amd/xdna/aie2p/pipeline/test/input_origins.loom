@@ -1,9 +1,11 @@
 // One core consumes a single repeated stream whose origin changes at each
 // child entry. Declaring the consumer first must not delay address preparation
 // until after its first read. Reverse cohorts expose stale descriptor origins.
+// The runtime vector capture crosses a joined phase whose native ABI only
+// accepts scalar and address arguments; required inlining preserves that input.
 aie2p.target<array> @device
 
-pipeline.def @cohort() run(%input: buffer, %output: buffer, %epoch: index) {
+pipeline.def @cohort() run(%input: buffer, %output: buffer, %epoch: index, %bias: vector<16xi32>) {
   %origin = index.constant 0 : offset
   %record_bytes = index.constant 64 : offset
   %cohort_bytes = index.constant 128 : offset
@@ -19,8 +21,6 @@ pipeline.def @cohort() run(%input: buffer, %output: buffer, %epoch: index) {
   %source_cohort = index.sub %last, %epoch : index
   %base = index.scale %source_cohort, %cohort_bytes : index, offset -> offset
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
-    %epoch_value = index.cast %epoch : index to i32
-    %bias = vector.splat %epoch_value : vector<16xi32>
     %first = index.mul %epoch, %records : index
     scf.for %record = [%begin to %records step %step] {
       %read, %payload = channel.acquire<mutable> %stream : channel<tile<16xi32>> -> (read<tile<16xi32>, mutable>, view<16xi32>)
@@ -59,7 +59,9 @@ pipeline.def<kernel> public retain target(@device) @input_origins() run(%input_a
   %epochs = index.constant 3 : index
   pipeline.serial {
     scf.for %epoch = [%begin to %epochs step %step] {
-      pipeline.compose @cohort(%input, %output, %epoch) : (buffer, buffer, index)
+      %epoch_value = index.cast %epoch : index to i32
+      %bias = vector.splat %epoch_value : vector<16xi32>
+      pipeline.compose @cohort(%input, %output, %epoch, %bias) : (buffer, buffer, index, vector<16xi32>)
     }
   }
 }

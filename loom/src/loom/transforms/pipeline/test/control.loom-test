@@ -43,7 +43,7 @@ func.decl @__test_phase_join(%13: index)
 
 func.decl @__test_phase_enter(%14: index)
 
-func.def noinline @__pipeline_engine_0(%15: index) {
+func.def @__pipeline_engine_0(%15: index) {
   func.call @__pipeline_worker_0(%15) : (index)
   func.return
 }
@@ -122,17 +122,17 @@ func.decl @__test_phase_join(%8: index)
 
 func.decl @__test_phase_enter(%9: index)
 
-func.def noinline @__pipeline_engine_0(%10: index) {
+func.def @__pipeline_engine_0(%10: index) {
   func.call @__pipeline_worker_2(%10) : (index)
   func.return
 }
 
-func.def noinline @__pipeline_engine_1(%12: index) {
+func.def @__pipeline_engine_1(%12: index) {
   func.call @__pipeline_worker_1(%12) : (index)
   func.return
 }
 
-func.def noinline @__pipeline_engine_2(%14: index) {
+func.def @__pipeline_engine_2(%14: index) {
   func.call @__pipeline_worker_0(%14) : (index)
   func.return
 }
@@ -220,22 +220,12 @@ func.decl @__test_phase_join(%7: index)
 
 func.decl @__test_phase_enter(%8: index)
 
-func.def noinline @__pipeline_engine_0(%9: index) {
-  test.use %9 : index
-  func.return
-}
-
-func.def noinline @__pipeline_engine_1(%11: index) {
-  test.use %11 : index
-  func.return
-}
-
 func.def public inline @__pipeline_engine_2(%13: i1, %14: index) {
   cfg.cond_br %13, ^_bb1, ^_bb2
 ^_bb1:
   %19 = index.constant 0 : index
   func.call @__test_phase_enter(%19) : (index)
-  func.call @__pipeline_engine_1(%14) : (index)
+  test.use %14 : index
   %20 = index.constant 0 : index
   func.call @__test_phase_join(%20) : (index)
   cfg.br ^_bb3
@@ -260,7 +250,7 @@ func.def public inline @__pipeline_engine_3(%21: i1, %22: index) {
 ^_bb2:
   %25 = index.constant 1 : index
   func.call @__test_phase_enter(%25) : (index)
-  func.call @__pipeline_engine_0(%22) : (index)
+  test.use %22 : index
   %26 = index.constant 1 : index
   func.call @__test_phase_join(%26) : (index)
   cfg.br ^_bb3

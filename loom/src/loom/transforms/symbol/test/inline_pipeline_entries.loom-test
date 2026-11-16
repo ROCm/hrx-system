@@ -1,0 +1,86 @@
+// RUN: pass specialize-target-callgraph,outline-pipeline-strands,test.realize-pipeline,inline-callables{policy=target,budget=4294967295},symbol-dce,cfg-simplify
+
+// A generated phase remains independently callable even when ordinary
+// profitability would inline its entire body.
+test.target<low_core> @target
+
+pipeline.def @phase() run(%output: view<1xi32>, %value: i32) {
+  pipeline.strand workers([0], [1], [1]) {
+    view.store %value, %output[0] : i32, view<1xi32>
+  }
+}
+
+pipeline.def public target(@target) @root() run(%output: view<1xi32>, %value: i32) {
+  pipeline.serial {
+    pipeline.compose @phase(%output, %value) : (view<1xi32>, i32)
+  }
+}
+
+// ----
+test.target<low_core> @target
+
+func.decl @__test_phase_join(%10: index)
+
+func.decl @__test_phase_enter(%11: index)
+
+func.def @__pipeline_engine_0(%12: view<1xi32>, %13: i32) {
+  view.store %13, %12[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def public inline @__pipeline_engine_1(%16: buffer, %17: i32) {
+  %20 = index.constant 0 : offset
+  %21 = buffer.view %16[%20] : buffer -> view<1xi32>
+  %22 = index.constant 0 : index
+  func.call @__test_phase_enter(%22) : (index)
+  func.call @__pipeline_engine_0(%21, %17) : (view<1xi32>, i32)
+  %23 = index.constant 0 : index
+  func.call @__test_phase_join(%23) : (index)
+  func.return
+}
+
+// ====
+
+// An authored helper boundary wins over a generated phase on a leaf-only
+// target. Retaining both would require an unsupported nested native call.
+test.target<low_leaf> @target
+
+func.def noinline @write(%output: view<1xi32>, %value: i32) {
+  view.store %value, %output[0] : i32, view<1xi32>
+  func.return
+}
+
+pipeline.def @phase() run(%output: view<1xi32>, %value: i32) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @write(%output, %value) : (view<1xi32>, i32)
+  }
+}
+
+pipeline.def public target(@target) @root() run(%output: view<1xi32>, %value: i32) {
+  pipeline.serial {
+    pipeline.compose @phase(%output, %value) : (view<1xi32>, i32)
+  }
+}
+
+// ----
+test.target<low_leaf> @target
+
+func.def noinline @__pipeline_worker_0(%output: view<1xi32>, %value: i32) {
+  view.store %value, %output[0] : i32, view<1xi32>
+  func.return
+}
+
+func.decl @__test_phase_join(%10: index)
+
+func.decl @__test_phase_enter(%11: index)
+
+func.def public inline @__pipeline_engine_1(%16: buffer, %17: i32) {
+  %20 = index.constant 0 : offset
+  %21 = buffer.view %16[%20] : buffer -> view<1xi32>
+  %22 = index.constant 0 : index
+  func.call @__test_phase_enter(%22) : (index)
+  func.call @__pipeline_worker_0(%21, %17) : (view<1xi32>, i32)
+  %23 = index.constant 0 : index
+  func.call @__test_phase_join(%23) : (index)
+  func.return
+}

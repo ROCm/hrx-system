@@ -55,12 +55,12 @@ func.decl @__test_phase_join(%26: index)
 
 func.decl @__test_phase_enter(%27: index)
 
-func.def noinline @__pipeline_engine_0(%28: i32, %29: index) {
+func.def @__pipeline_engine_0(%28: i32, %29: index) {
   func.call @__pipeline_worker_0(%28, %29) : (i32, index)
   func.return
 }
 
-func.def noinline @__pipeline_engine_1(%32: i32, %33: index) {
+func.def @__pipeline_engine_1(%32: i32, %33: index) {
   func.call @__pipeline_worker_1(%32, %33) : (i32, index)
   func.return
 }

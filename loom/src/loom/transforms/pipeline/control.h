@@ -61,9 +61,10 @@ typedef struct loom_pipeline_control_callback_t {
 
 typedef struct loom_pipeline_control_options_t {
   // Retains separately joined child constructions as ordinary callable
-  // boundaries for independent native compilation and placement. Concurrent
-  // compositions and the surrounding controller remain inline projections.
-  // Selected child signatures must be supported by the execution owner's ABI.
+  // boundaries for independent native compilation and placement when the
+  // execution owner's ABI admits them. Entry bindings preserve that preference
+  // through ordinary call selection; target-required inlining takes precedence.
+  // Concurrent compositions and the surrounding controller remain inline.
   bool retain_phase_calls;
   // Selected engine per worker; IREE_HOST_SIZE_MAX excludes autonomous work.
   const iree_host_size_t* worker_engines;
