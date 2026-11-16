@@ -18,6 +18,8 @@ extern "C" {
 typedef struct loom_aie2p_program_layout_group_t {
   // Construction ordinal in the retained lifetime tree.
   iree_host_size_t owner;
+  // Stable request in the original common projection, including empty groups.
+  iree_host_size_t request_index;
   // Exact native section and packed byte requirement.
   loom_aie2p_program_code_group_t native;
   // Offset in this core's program memory, including transport alignment.
@@ -38,6 +40,8 @@ typedef struct loom_aie2p_program_layout_t {
   loom_pipeline_lifetime_projection_t* projection;
   // Group requests in stable construction order; numeric requirements vary.
   loom_pipeline_lifetime_request_t* requests;
+  // Original projection size, preserved when native groups become empty.
+  iree_host_size_t request_count;
   // Maximum simultaneous instruction footprint, including write padding.
   uint64_t byte_length;
 } loom_aie2p_program_layout_t;
@@ -52,12 +56,26 @@ iree_status_t loom_aie2p_program_layout_initialize(
     iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     loom_aie2p_program_layout_t* out_layout);
 
+// Copies mutable placement decisions while sharing their prepared topology.
+// Each candidate can change requirements without invalidating another layout.
+iree_status_t loom_aie2p_program_layout_copy(
+    const loom_aie2p_program_layout_t* source, iree_host_size_t function_count,
+    iree_arena_allocator_t* arena, loom_aie2p_program_layout_t* out_layout);
+
 // Promotes native-equivalent bodies into resident storage using the common
-// lifetime policy. Every original loading group remains nonempty, preserving
-// already-compiled caller control flow. Native composition follows selection.
+// lifetime policy. A zero minimum permits removing entire loading groups;
+// otherwise each group retains at least that many aligned native units.
+// Native composition follows selection.
 iree_status_t loom_aie2p_program_layout_retain(
-    const loom_aie2p_program_native_t* native, iree_arena_allocator_t* arena,
-    loom_aie2p_program_layout_t* layout);
+    const loom_aie2p_program_native_t* native, uint64_t minimum_group_length,
+    iree_arena_allocator_t* arena, loom_aie2p_program_layout_t* layout);
+
+// Removes empty native groups while preserving their common lifetime requests.
+// Returns the old-to-dense group map; removed groups map to the resident group.
+// Functions retain their order, and remaining groups retain construction order.
+iree_status_t loom_aie2p_program_layout_compact(
+    iree_host_size_t function_count, iree_arena_allocator_t* arena,
+    loom_aie2p_program_layout_t* layout, iree_host_size_t** out_group_indices);
 
 // Places exact compiled group sizes with the retained common projection. Parent
 // code coexists with descendants; concurrent groups remain disjoint and serial

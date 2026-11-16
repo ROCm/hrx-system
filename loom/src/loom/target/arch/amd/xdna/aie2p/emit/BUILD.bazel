@@ -537,6 +537,7 @@ loom_cc_library(
     deps = [
         ":configuration_storage",
         ":leaf_compile",
+        ":leaf_program",
         ":program",
         ":program_capacity",
         ":program_catalog",
