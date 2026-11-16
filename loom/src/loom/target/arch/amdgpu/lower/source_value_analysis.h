@@ -207,6 +207,13 @@ bool loom_amdgpu_source_value_directly_prefers_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     loom_amdgpu_source_value_analysis_t* analysis,
     loom_value_id_t source_value_id, loom_value_id_t excluded_value_id);
+// Returns true when the exact scalar float producer requires VGPR storage
+// because the descriptor set has no native scalar form. False is inconclusive
+// and requires the complete source value analysis.
+bool loom_amdgpu_source_scalar_float_result_requires_vgpr(
+    const loom_module_t* module,
+    loom_amdgpu_descriptor_set_info_flags_t descriptor_set_info_flags,
+    loom_value_id_t source_value_id);
 bool loom_amdgpu_op_results_prefer_vgpr(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_view_region_table_t* view_regions,

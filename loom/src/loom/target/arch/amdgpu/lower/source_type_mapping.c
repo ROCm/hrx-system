@@ -655,6 +655,37 @@ static void loom_amdgpu_map_contract_register(
       register_unit_count);
 }
 
+// Maps scalar float results that have no native scalar form without acquiring
+// the function-wide recursive analysis. All other values fall through to the
+// complete analysis below.
+static bool loom_amdgpu_map_contract_required_scalar_float_vgpr(
+    const loom_target_contract_query_environment_t* environment,
+    loom_value_id_t source_value_id, loom_type_t source_type,
+    loom_amdgpu_register_shape_t* out_shape) {
+  if (environment->vector_lane_projection.source_lane_count != 0) {
+    return false;
+  }
+  const loom_amdgpu_scalar_value_register_mapping_t* mapping =
+      loom_amdgpu_scalar_value_register_mapping_for_type(source_type);
+  const loom_amdgpu_descriptor_set_info_t* descriptor_set_info =
+      loom_amdgpu_target_info_descriptor_set_at(
+          environment->descriptor_set->descriptor_set_ordinal);
+  if (mapping == NULL ||
+      mapping->policy !=
+          LOOM_AMDGPU_SCALAR_VALUE_REGISTER_POLICY_PREFERRED_BANK) {
+    return false;
+  }
+  if (!loom_amdgpu_source_scalar_float_result_requires_vgpr(
+          environment->module,
+          descriptor_set_info != NULL ? descriptor_set_info->flags : 0,
+          source_value_id)) {
+    return false;
+  }
+  *out_shape = mapping->default_shape;
+  out_shape->class_id = LOOM_AMDGPU_REG_CLASS_ID_VGPR;
+  return true;
+}
+
 iree_status_t loom_amdgpu_map_contract_value(
     void* user_data,
     const loom_target_contract_query_environment_t* environment,
@@ -665,20 +696,22 @@ iree_status_t loom_amdgpu_map_contract_value(
   const loom_type_t source_type = loom_target_contract_query_value_type(
       environment->vector_lane_projection, environment->module,
       source_value_id);
+  loom_amdgpu_register_shape_t shape = {0};
+  bool has_shape = loom_amdgpu_map_contract_required_scalar_float_vgpr(
+      environment, source_value_id, source_type, &shape);
   loom_target_contract_query_environment_t analyzed_environment = *environment;
   loom_amdgpu_source_value_analysis_t* analysis = NULL;
-  if (loom_amdgpu_source_value_register_shape_needs_analysis(
-          environment->module, environment->fact_table, source_value_id,
-          source_type)) {
+  if (!has_shape && loom_amdgpu_source_value_register_shape_needs_analysis(
+                        environment->module, environment->fact_table,
+                        source_value_id, source_type)) {
     IREE_RETURN_IF_ERROR(loom_target_contract_query_resolve_function_analysis(
         &analyzed_environment));
     environment = &analyzed_environment;
     IREE_RETURN_IF_ERROR(loom_amdgpu_source_value_analysis_for_contract_query(
         environment, &analysis));
   }
-  loom_amdgpu_register_shape_t shape = {0};
-  bool has_shape = false;
-  if (environment->vector_lane_projection.source_lane_count != 0) {
+  if (!has_shape &&
+      environment->vector_lane_projection.source_lane_count != 0) {
     // Register-shape cache entries describe authored types. Projected packet
     // queries can ask several widths for the same value and must derive each
     // candidate independently instead of reusing the authored-width answer.
@@ -704,7 +737,7 @@ iree_status_t loom_amdgpu_map_contract_value(
         }
       }
     }
-  } else {
+  } else if (!has_shape) {
     has_shape = loom_amdgpu_source_value_cached_register_shape(
         environment->module, environment->fact_table, environment->view_regions,
         analysis, source_value_id, source_type, &shape);
