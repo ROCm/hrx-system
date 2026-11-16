@@ -22,6 +22,8 @@ const loom_pass_info_t* loom_cfg_converge_pass_info(void);
 // natural loops exclusive exit frontiers when enclosing decisions bypass the
 // same continuation. Downstream shared bodies also converge with early bypasses
 // before executing; their original argument tuples cross a predicate join.
+// Shared branch-only arms receive private edges preserving their result tuples
+// without moving decisions or carrying live-ins through new arguments.
 // Effects stay in their original blocks; scalar live-ins that lose dominance
 // travel through join arguments. Unobservable incoming values are defined zero.
 // Inside natural loops, factoring stays within one iteration and preserves the
