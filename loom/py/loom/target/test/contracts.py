@@ -910,6 +910,29 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
                 ),
             ),
         ),
+        *(
+            DescriptorRule(
+                source_op=vector.vector_splat,
+                guards=(Guard.value_type("result", vector_type),),
+                emit=(
+                    EmitRegisterConcat(
+                        sources=(ValueRef.operand("scalar"),) * lane_count,
+                        result=ValueRef.temporary("broadcast"),
+                        unit_count=lane_count,
+                    ),
+                    EmitRegisterMove(
+                        source=ValueRef.temporary("broadcast"),
+                        result=ValueRef.result("result"),
+                    ),
+                ),
+            )
+            for vector_type, lane_count in (
+                (_V2I32, 2),
+                (_V4I32, 4),
+                (_V4F32, 4),
+                (_V4I1, 4),
+            )
+        ),
         DescriptorRule(
             source_op=vector.vector_from_elements,
             guards=(
@@ -963,7 +986,6 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
         ),
         DescriptorRule(
             source_op=vector.vector_extract,
-            descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
             guards=(
                 Guard.i64_array_count("static_indices", 1),
                 Guard.i64_array_element_range("static_indices", 0, 0, 3),
@@ -971,16 +993,12 @@ TEST_LOW_CORE_CONTRACT_FRAGMENT = ContractFragment(
                 Guard.value_type("result", _I32),
             ),
             emit=(
-                EmitDescriptorOp(
-                    descriptor=TEST_LOW_CONST_I32_DESCRIPTOR,
-                    results={"dst": ValueRef.result("result")},
-                    immediates={
-                        "i32_value": AttrProject.i64_array_element(
-                            "static_indices",
-                            element=0,
-                        )
-                    },
-                    form=DescriptorEmitForm.CONST,
+                EmitRegisterSlice(
+                    source=ValueRef.operand("source"),
+                    result=ValueRef.result("result"),
+                    unit_offset=AttrProject.i64_array_element(
+                        "static_indices", element=0
+                    ),
                 ),
             ),
         ),

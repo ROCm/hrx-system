@@ -151,7 +151,7 @@ struct loom_vector_component_plan_t {
   uint32_t record_count;
   // Maximum number of records backed by |records|.
   uint32_t record_capacity;
-  // Compact components in first-member order.
+  // Compact components in reverse insertion-anchor order.
   loom_vector_component_t* components;
   // Number of initialized components.
   uint32_t component_count;
@@ -1210,8 +1210,13 @@ static iree_status_t loom_vector_component_compact(
       plan->context->arena, plan->demanded_record_count,
       sizeof(*plan->components), (void**)&plan->components));
 
-  for (uint32_t record_index = 0; record_index < plan->record_count;
-       ++record_index) {
+  // Materialization sinks each component to its final member. Visiting records
+  // backward assigns component ordinals by that anchor, even when independent
+  // chains interleave. Formation already prevents an anchor from crossing an
+  // external use, so reverse component order is also producer-before-consumer
+  // order. Prepending keeps each component's own members in dominance order.
+  for (uint32_t remaining = plan->record_count; remaining > 0; --remaining) {
+    const uint32_t record_index = remaining - 1u;
     if (!plan->records[record_index].demanded) {
       continue;
     }
@@ -1231,12 +1236,12 @@ static iree_status_t loom_vector_component_compact(
       };
     } else {
       loom_vector_component_t* component = &plan->components[component_index];
-      loom_vector_component_record_t* previous =
-          &plan->records[component->last_member_index];
-      previous->next_member_index = record_index;
-      plan->records[record_index].previous_member_index =
-          component->last_member_index;
-      component->last_member_index = record_index;
+      loom_vector_component_record_t* next =
+          &plan->records[component->first_member_index];
+      next->previous_member_index = record_index;
+      plan->records[record_index].next_member_index =
+          component->first_member_index;
+      component->first_member_index = record_index;
       ++component->member_count;
     }
     plan->records[record_index].component_index = component_index;
@@ -2277,16 +2282,14 @@ iree_status_t loom_vector_component_packet_legalize(
   IREE_RETURN_IF_ERROR(loom_vector_component_capture_retained_producers(plan));
   // Source-query analyses are valid only before mutation of the represented
   // function. Retain all memory decisions across the complete component batch.
-  for (uint32_t component_index = 0; component_index < plan->component_count;
-       ++component_index) {
+  for (uint32_t remaining = plan->component_count; remaining > 0; --remaining) {
     IREE_RETURN_IF_ERROR(loom_vector_component_prepare_memory_roots(
-        plan, &plan->components[component_index]));
+        plan, &plan->components[remaining - 1u]));
   }
-  for (uint32_t component_index = 0; component_index < plan->component_count;
-       ++component_index) {
+  for (uint32_t remaining = plan->component_count; remaining > 0; --remaining) {
     uint32_t rewritten_op_count = 0;
     IREE_RETURN_IF_ERROR(loom_vector_component_materialize(
-        plan, &plan->components[component_index], &rewritten_op_count));
+        plan, &plan->components[remaining - 1u], &rewritten_op_count));
     *out_rewritten_op_count += rewritten_op_count;
   }
   return iree_ok_status();
