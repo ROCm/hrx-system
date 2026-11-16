@@ -122,6 +122,21 @@ py_test(
     deps = [":github_api"],
 )
 
+py_binary(
+    name = "rocm_bazel_cache",
+    srcs = ["rocm_bazel_cache.py"],
+)
+
+py_test(
+    name = "rocm_bazel_cache_test",
+    size = "small",
+    srcs = [
+        "rocm_bazel_cache.py",
+        "rocm_bazel_cache_test.py",
+    ],
+    main = "rocm_bazel_cache_test.py",
+)
+
 py_library(
     name = "github_actions_triage",
     srcs = ["github_actions_triage.py"],
