@@ -131,6 +131,80 @@ loom_generated_source_family(
         self.assertIn('"${IREE_BINARY_DIR}/loom/consumer/records.c"', output)
         self.assertIn('"${IREE_BINARY_DIR}/loom/consumer/records.h"', output)
 
+    def test_generated_inputs_preserve_producer_output_identity(self):
+        producer = """
+loom_generated_file(
+    name = "intermediate_gen",
+    generator = ":importer",
+    output = "intermediate.loom",
+    output_flag = "--output=",
+)
+"""
+        for label in (":intermediate_gen", ":intermediate.loom"):
+            for producer_first in (False, True):
+                with self.subTest(label=label, producer_first=producer_first):
+                    consumer = f"""
+loom_generated_file(
+    name = "binary_gen",
+    generator = ":compiler",
+    inputs = ["{label}"],
+    args = ["--input=$(location {label})"],
+    output = "binary.vm",
+    output_flag = "--output=",
+)
+"""
+                    output = bazel_to_cmake_converter.convert_build_file(
+                        'load("//loom/build_tools/bazel:build_defs.bzl", "loom_generated_file")\n'
+                        + (
+                            producer + consumer
+                            if producer_first
+                            else consumer + producer
+                        ),
+                        SimpleNamespace(PROJECTS=[self.project], REPO_MAP={"@hrx": ""}),
+                        str(REPO_ROOT / "loom/consumer"),
+                        repo_root=str(REPO_ROOT),
+                    )
+                    path = "${IREE_BINARY_DIR}/loom/consumer/intermediate.loom"
+                    self.assertIn(f'"--input={path}"', output)
+                    self.assertIn(f'INPUTS\n    "{path}"\n', output)
+
+    def test_generated_external_inputs_share_argument_resolution(self):
+        for declaration, label, path in (
+            (
+                'loom_low_descriptor_data_archive(name="schema", repo_name="schema_data", '
+                'urls=["https://example.invalid/schema.tar.gz"], sha256="'
+                + "0" * 64
+                + '")',
+                "@schema_data//tables:instructions.json",
+                "${IREE_BINARY_DIR}/_deps/schema_data-src/tables/instructions.json",
+            ),
+            (
+                'loom_spirv_registry_sources(name="registry")',
+                "@spirv_headers//:spirv_core_grammar_unified1",
+                "${_LOOM_SPIRV_CORE_GRAMMAR}",
+            ),
+        ):
+            with self.subTest(label=label):
+                output = bazel_to_cmake_converter.convert_build_file(
+                    'load("//loom/build_tools/bazel:build_defs.bzl", "loom_generated_file")\n'
+                    + declaration
+                    + f"""
+loom_generated_file(
+    name = "table_gen",
+    generator = ":generator",
+    inputs = ["{label}"],
+    args = ["--input=$(location {label})"],
+    output = "table.inl",
+    output_flag = "--output=",
+)
+""",
+                    SimpleNamespace(PROJECTS=[self.project], REPO_MAP={"@hrx": ""}),
+                    str(REPO_ROOT / "loom/consumer"),
+                    repo_root=str(REPO_ROOT),
+                )
+                self.assertIn(f'"--input={path}"', output)
+                self.assertIn(f'INPUTS\n    "{path}"\n', output)
+
     def test_loom_image_provider_selection_survives_conversion(self):
         converter = SimpleNamespace(body="")
         functions = bazel_to_cmake_converter.BuildFileFunctions(
