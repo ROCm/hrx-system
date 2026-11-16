@@ -309,8 +309,7 @@ TEST_F(CallGraphTest, LocalCollectionSharesDiscoveryAcrossRootRegions) {
     // Tracked calls already classified by graph discovery.
     std::vector<loom_op_t*> calls;
   } collection;
-  const loom_call_graph_options_t options = {
-      .roots = &root.symbol_id,
+  loom_call_graph_options_t options = {
       .root_count = 1,
       .visitor = {
           .user_data = &collection,
@@ -329,21 +328,27 @@ TEST_F(CallGraphTest, LocalCollectionSharesDiscoveryAcrossRootRegions) {
                 state.operations.push_back(op);
                 state.regions.push_back(context->region);
                 if (loom_call_like_isa(call)) {
+                  EXPECT_EQ(state.functions.size(), 2u);
                   state.calls.push_back(call.op);
                 }
                 return iree_ok_status();
               },
       },
   };
-  loom_call_graph_t graph;
-  IREE_ASSERT_OK(
-      loom_call_graph_build(module_, &options, &graph_arena_, &graph));
-  EXPECT_EQ(collection.functions,
-            (std::vector<loom_op_t*>{root.func_op, empty.func_op}));
-  EXPECT_EQ(collection.operations, (std::vector<loom_op_t*>{constant, call}));
-  EXPECT_EQ(collection.regions,
-            (std::vector<loom_region_t*>{root.config, root.body}));
-  EXPECT_EQ(collection.calls, (std::vector<loom_op_t*>{call}));
+  for (bool rooted : {false, true}) {
+    collection = {};
+    options.roots = rooted ? &root.symbol_id : nullptr;
+    loom_call_graph_t graph;
+    IREE_ASSERT_OK(
+        loom_call_graph_build(module_, &options, &graph_arena_, &graph));
+    EXPECT_EQ(collection.functions,
+              (std::vector<loom_op_t*>{root.func_op, empty.func_op}));
+    EXPECT_EQ(collection.operations, (std::vector<loom_op_t*>{constant, call}));
+    EXPECT_EQ(collection.regions,
+              (std::vector<loom_region_t*>{root.config, root.body}));
+    EXPECT_EQ(collection.calls, (std::vector<loom_op_t*>{call}));
+    iree_arena_reset(&graph_arena_);
+  }
 }
 
 TEST_F(CallGraphTest, VisitsEveryCallsiteAcrossKindsAndRoots) {

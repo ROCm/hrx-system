@@ -88,7 +88,8 @@ bool loom_call_graph_tracks_call_kind(loom_call_like_kind_t kind);
 typedef struct loom_call_graph_visitor_t {
   // Owner of the local summaries and retained callsite information.
   void* user_data;
-  // Called before walking one function, including functions with empty bodies.
+  // Receives each admitted definition before its body or an incoming callsite
+  // is visited, including functions with empty bodies.
   iree_status_t (*function)(void* user_data, uint16_t node_index,
                             loom_func_like_t function);
   // Receives every body operation in preorder. |call| is populated only for a

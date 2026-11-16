@@ -64,16 +64,16 @@ static iree_status_t loom_call_graph_admit(loom_call_graph_builder_t* builder,
       builder->arena, graph->node_count,
       (iree_host_size_t)graph->node_count + 1, sizeof(*graph->nodes),
       &builder->node_capacity, (void**)&graph->nodes));
-  if (graph->symbol_to_node) {
-    graph->symbol_to_node[symbol_id] = graph->node_count;
-  } else {
-    IREE_RETURN_IF_ERROR(loom_ordinal_map_insert(&graph->reached_symbols, 0,
-                                                 symbol_id, graph->node_count));
-  }
+  const uint16_t node_index = graph->node_count;
+  IREE_RETURN_IF_ERROR(loom_ordinal_map_insert(&graph->reached_symbols, 0,
+                                               symbol_id, node_index));
   graph->nodes[graph->node_count++] = (loom_call_graph_node_t){
       .symbol_id = symbol_id,
   };
-  return iree_ok_status();
+  return builder->visitor.function
+             ? builder->visitor.function(builder->visitor.user_data, node_index,
+                                         function)
+             : iree_ok_status();
 }
 
 static iree_status_t loom_call_graph_collect_edge(
@@ -108,7 +108,9 @@ static iree_status_t loom_call_graph_collect_edge(
       (iree_host_size_t)builder->callee_count + 1, sizeof(*builder->callees),
       &builder->callee_capacity, (void**)&builder->callees));
   builder->callees[builder->callee_count++] = callee;
-  return loom_call_graph_admit(builder, callee);
+  return builder->graph->symbol_to_node
+             ? iree_ok_status()
+             : loom_call_graph_admit(builder, callee);
 }
 
 static iree_status_t loom_call_graph_visit(void* user_data, loom_op_t* op,
@@ -172,9 +174,13 @@ iree_status_t loom_call_graph_build(const loom_module_t* module,
   } else {
     loom_symbol_t* symbol = NULL;
     loom_module_for_each_symbol(module, symbol) {
+      if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE) ||
+          !symbol->defining_op) {
+        continue;
+      }
       const loom_func_like_t function =
           loom_func_like_cast(module, symbol->defining_op);
-      if (loom_func_like_isa(function) && loom_func_like_body(function)) {
+      if (loom_func_like_body(function)) {
         ++builder.node_capacity;
       }
     }
@@ -191,8 +197,26 @@ iree_status_t loom_call_graph_build(const loom_module_t* module,
     memset(out_graph->symbol_to_node, 0xFF,
            module->symbols.count * sizeof(*out_graph->symbol_to_node));
     loom_module_for_each_symbol(module, symbol) {
-      IREE_RETURN_IF_ERROR(loom_call_graph_admit(
-          &builder, (loom_symbol_id_t)(symbol - module->symbols.entries)));
+      if (!loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_FUNC_LIKE) ||
+          !symbol->defining_op) {
+        continue;
+      }
+      const loom_func_like_t function =
+          loom_func_like_cast(module, symbol->defining_op);
+      if (!loom_func_like_body(function)) {
+        continue;
+      }
+      const loom_symbol_id_t symbol_id =
+          (loom_symbol_id_t)(symbol - module->symbols.entries);
+      const uint16_t node_index = out_graph->node_count;
+      out_graph->symbol_to_node[symbol_id] = node_index;
+      out_graph->nodes[out_graph->node_count++] = (loom_call_graph_node_t){
+          .symbol_id = symbol_id,
+      };
+      if (builder.visitor.function) {
+        IREE_RETURN_IF_ERROR(builder.visitor.function(builder.visitor.user_data,
+                                                      node_index, function));
+      }
     }
   }
 
@@ -203,14 +227,12 @@ iree_status_t loom_call_graph_build(const loom_module_t* module,
     builder.callees = NULL;
     builder.callee_count = 0;
     builder.callee_capacity = 0;
-    loom_ordinal_map_initialize(arena, &builder.callee_membership);
+    if (!out_graph->symbol_to_node) {
+      loom_ordinal_map_initialize(arena, &builder.callee_membership);
+    }
     const loom_func_like_t function = loom_func_like_cast(
         module,
         module->symbols.entries[out_graph->nodes[i].symbol_id].defining_op);
-    if (builder.visitor.function) {
-      IREE_RETURN_IF_ERROR(
-          builder.visitor.function(builder.visitor.user_data, i, function));
-    }
     loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
     IREE_RETURN_IF_ERROR(loom_walk_function(
         module, function, LOOM_WALK_PRE_ORDER,
