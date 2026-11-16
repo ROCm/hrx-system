@@ -21,6 +21,7 @@
 #include "loom/runtime/device/device.h"
 #include "loom/runtime/testing/application.h"
 #include "loom/runtime/testing/native_allocator.h"
+#include "loom/runtime/testing/service_control.h"
 #include "loom/runtime/testing/worker_gate.h"
 #include "loom/serve/service/recognition/model.h"
 #include "loom/serve/service/recognition/stream.h"
@@ -89,6 +90,10 @@ class SourceRecognitionStreamTest : public ::testing::Test {
                             loom_runtime_residency_admission_t* admission,
                             loom_runtime_execution_frontier_t* frontier) {
       auto* test = static_cast<SourceRecognitionStreamTest*>(self);
+      if (test->defer_second_admission_ && test->Row(invocation) == 1) {
+        *admission = LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED;
+        return iree_ok_status();
+      }
       return test->actual_.try_admit(test->actual_.self, invocation, admission,
                                      frontier);
     };
@@ -164,7 +169,8 @@ class SourceRecognitionStreamTest : public ::testing::Test {
         .document_limit = 4096,
     };
     IREE_ASSERT_OK(loom_serve_recognition_stream_service_allocate(
-        host_, observed, &service_options, allocator_, &service_));
+        host_, observed, &service_options, control_.binding(), allocator_,
+        &service_));
     const loom_runtime_wake_callback_t observer = {
         [](void* self) {
           iree_notification_post(static_cast<iree_notification_t*>(self),
@@ -185,15 +191,29 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     iree_notification_deinitialize(&notification_);
   }
 
-  void RetireModel() {
+  void RetireService() {
     if (service_) {
       Settle(true);
       loom_serve_recognition_stream_service_set_observer(service_, {});
       loom_serve_recognition_stream_service_free(service_);
       service_ = nullptr;
     }
+  }
+
+  void RetireModel() {
+    RetireService();
     IREE_EXPECT_OK(loom_serve_recognition_model_free(model_));
     model_ = nullptr;
+    for (uint64_t i = 0; i < 2; ++i) {
+      const loom_runtime_service_operation_t operation = {
+          .key = {.ordinal = i},
+      };
+      loom_runtime_service_publish_operation(control_.binding().control,
+                                             &operation, nullptr);
+    }
+    const loom_runtime_service_observation_t observation = {};
+    loom_runtime_service_publish_observation(control_.binding().control,
+                                             &observation);
   }
 
   size_t Row(void* invocation) const {
@@ -207,11 +227,13 @@ class SourceRecognitionStreamTest : public ::testing::Test {
   }
 
   template <typename Predicate>
-  void AdvanceUntil(Predicate ready, bool stopping = false) {
+  void AdvanceUntil(
+      Predicate ready, bool stopping = false,
+      loom_runtime_service_work_flags_t allowed_work = UINT64_MAX) {
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       bool progress = false;
-      auto status = Advance(stopping, &progress);
+      auto status = Advance(stopping, &progress, allowed_work);
       if (ready() || progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(&notification_);
       } else {
@@ -223,18 +245,65 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     }
   }
 
-  iree_status_t Advance(bool stopping, bool* progress) {
-    auto status = loom_runtime_device_group_advance(group_);
-    return iree_status_join(status,
-                            loom_serve_recognition_stream_service_advance(
-                                service_, stopping, false, progress));
+  loom_runtime_service_observation_t Observation() {
+    loom_runtime_service_observation_t observation = {};
+    EXPECT_EQ(loom_runtime_service_read_observation(control_.binding().control,
+                                                    &observation),
+              LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    return observation;
   }
 
-  void Settle(bool stopping = false) {
+  loom_runtime_service_offer_t Offer() {
+    loom_runtime_service_offer_t offer = {};
+    EXPECT_EQ(
+        loom_runtime_service_read_offer(control_.binding().control, 0, &offer),
+        LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    return offer;
+  }
+
+  loom_runtime_service_operation_t Operation(uint64_t ordinal) {
+    loom_runtime_service_operation_t operation = {};
+    EXPECT_EQ(loom_runtime_service_read_operation(control_.binding().control,
+                                                  ordinal, &operation),
+              LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    return operation;
+  }
+
+  loom_runtime_service_operation_key_t Grant(
+      loom_runtime_service_offer_key_t offer) {
+    loom_runtime_service_operation_key_t operation = {};
+    IREE_EXPECT_OK(loom_serve_recognition_stream_service_try_schedule(
+        service_, offer, 0, 0, &operation));
+    return operation;
+  }
+
+  iree_status_t Advance(
+      bool stopping, bool* progress,
+      loom_runtime_service_work_flags_t allowed_work = UINT64_MAX) {
+    const loom_runtime_service_flags_t flags =
+        stopping ? LOOM_RUNTIME_SERVICE_FLAG_STOPPING : 0;
+    auto status = loom_runtime_device_group_advance(group_);
+    status =
+        iree_status_join(status, loom_serve_recognition_stream_service_progress(
+                                     service_, flags, progress));
+    if (iree_status_is_ok(status)) {
+      const auto offer = Offer();
+      if (iree_any_bit_set(offer.work, allowed_work)) {
+        loom_runtime_service_operation_key_t operation;
+        status = loom_serve_recognition_stream_service_try_schedule(
+            service_, offer.key, 0, flags, &operation);
+        *progress |= operation.serial != 0;
+      }
+    }
+    return status;
+  }
+
+  void Settle(bool stopping = false,
+              loom_runtime_service_work_flags_t allowed_work = UINT64_MAX) {
     while (true) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       bool progress = false;
-      auto status = Advance(stopping, &progress);
+      auto status = Advance(stopping, &progress, allowed_work);
       const bool idle =
           !progress &&
           !loom_serve_recognition_stream_service_is_pending(service_) &&
@@ -348,6 +417,8 @@ class SourceRecognitionStreamTest : public ::testing::Test {
   loom_serve_recognition_model_t* model_ = nullptr;
   // Unmodified source callbacks behind the observation adapter.
   loom_serve_recognition_generator_t actual_ = {};
+  // Caller-retained observations survive the stream engine and model.
+  loom_runtime::testing::ServiceControl control_{2};
   // Actual typed service under test.
   loom_serve_recognition_stream_service_t* service_ = nullptr;
   // Caller-owned results, closed independently of service/model teardown.
@@ -381,6 +452,8 @@ class SourceRecognitionStreamTest : public ::testing::Test {
   iree_hal_semaphore_t* failed_readiness_ = nullptr;
   // Selects backing-release readiness instead of numerical batch readiness.
   bool fail_release_readiness_ = false;
+  // Capacity dependency defers the second row without accepting source work.
+  bool defer_second_admission_ = false;
 };
 
 TEST_F(SourceRecognitionStreamTest,
@@ -492,27 +565,120 @@ TEST_F(SourceRecognitionStreamTest, InputStarvationWaitsForNewFramesOrEof) {
   loom_serve_recognition_stream_t* stream = nullptr;
   ASSERT_NO_FATAL_FAILURE(Open(&stream));
   ASSERT_NO_FATAL_FAILURE(Write(stream, {1}, 1));
-  ASSERT_NO_FATAL_FAILURE(Settle());
+  EXPECT_EQ(Observation().owned_request_count, 1u);
+  EXPECT_EQ(Observation().waiting_request_count, 1u);
+  EXPECT_EQ(Observation().pending_operation_count, 0u);
+  ASSERT_NO_FATAL_FAILURE(Settle(false, 0));
+  EXPECT_EQ(offers_[0].load(), 0u);
+  EXPECT_FALSE(loom_serve_recognition_stream_service_is_active(service_));
+  const auto preparation = Offer();
+  EXPECT_EQ(preparation.work, LOOM_RUNTIME_SERVICE_WORK_PREPARATION |
+                                  LOOM_RUNTIME_SERVICE_WORK_ACQUISITION);
+  EXPECT_NE(Grant(preparation.key).serial, 0u);
+  ASSERT_NO_FATAL_FAILURE(Settle(false, 0));
+  EXPECT_EQ(Operation(0).key.serial, 0u);
+  EXPECT_EQ(offers_[0].load(), 0u);
   EXPECT_EQ(submitted_, 0u);
-  const auto initial_offers = offers_[0].load();
+  const auto first_input = Offer();
+  EXPECT_EQ(first_input.work, LOOM_RUNTIME_SERVICE_WORK_EXECUTION);
+  loom_runtime_service_choice_t choice = {};
+  EXPECT_EQ(loom_runtime_service_read_choice(control_.binding().control,
+                                             first_input.key, 0, &choice),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(choice.request_count, 1u);
+  EXPECT_EQ(choice.devices, UINT64_C(1) << actual_.device_ordinal);
+  EXPECT_EQ(choice.estimates, 0u);
+  ASSERT_NO_FATAL_FAILURE(Settle(false, 0));
+  loom_runtime_service_choice_t unchanged = {};
+  EXPECT_EQ(loom_runtime_service_read_choice(control_.binding().control,
+                                             first_input.key, 0, &unchanged),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(choice.publication, unchanged.publication);
+
+  // The caller writes without a service backpointer. Acceptance refreshes the
+  // legal input extent on the owner, so the preceding decision becomes stale.
+  ASSERT_NO_FATAL_FAILURE(Write(stream, {1}, 1));
+  EXPECT_EQ(Grant(first_input.key).serial, 0u);
+  EXPECT_NE(Offer().key.revision, first_input.key.revision);
+  EXPECT_NE(Grant(Offer().key).serial, 0u);
+  ASSERT_NO_FATAL_FAILURE(Settle(false, 0));
+  EXPECT_EQ(offers_[0].load(), 1u);
+  EXPECT_EQ(submitted_, 0u);
+  EXPECT_EQ(Observation().offer_count, 0u);
+  EXPECT_EQ(Observation().waiting_request_count, 1u);
+  EXPECT_TRUE(loom_serve_recognition_stream_is_waiting(stream));
   for (size_t i = 0; i < 4; ++i) {
     bool progress = false;
-    IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
-        service_, false, false, &progress));
+    IREE_ASSERT_OK(Advance(false, &progress));
     EXPECT_FALSE(progress);
     EXPECT_FALSE(loom_serve_recognition_stream_service_is_pending(service_));
   }
-  EXPECT_EQ(offers_[0].load(), initial_offers);
-  ASSERT_NO_FATAL_FAILURE(Write(stream, {1}, 1));
-  ASSERT_NO_FATAL_FAILURE(Settle());
-  EXPECT_EQ(offers_[0].load(), initial_offers + 1);
+  EXPECT_EQ(offers_[0].load(), 1u);
+  loom_serve_recognition_stream_finish(stream);
+  loom_serve_recognition_stream_finish(stream);
+  ASSERT_NO_FATAL_FAILURE(Settle(false, 0));
   EXPECT_EQ(submitted_, 0u);
-  loom_serve_recognition_stream_finish(stream);
-  loom_serve_recognition_stream_finish(stream);
-  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return Consume(stream); }));
-  ASSERT_NO_FATAL_FAILURE(CheckFinal(stream, "C"));
+  EXPECT_NE(Grant(Offer().key).serial, 0u);
+  ASSERT_NO_FATAL_FAILURE(Settle(false, 0));
   EXPECT_EQ(submitted_, 1u);
+  EXPECT_EQ(Observation().pending_operation_count, 0u);
+  EXPECT_EQ(Observation().owned_request_count, 0u);
+  EXPECT_FALSE(loom_serve_recognition_stream_is_waiting(stream));
+  EXPECT_TRUE(Consume(stream));
+  ASSERT_NO_FATAL_FAILURE(CheckFinal(stream, "C"));
   EXPECT_EQ(loom_serve_recognition_stream_credit(stream), 0u);
+}
+
+TEST_F(SourceRecognitionStreamTest,
+       DeferredAdmissionAndBatchRetainIndependentLifetimes) {
+  loom_serve_recognition_stream_t* first = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Open(&first));
+  ASSERT_NO_FATAL_FAILURE(Write(first, {1, 2, 3}, 3));
+  ASSERT_NO_FATAL_FAILURE(Settle());
+  ASSERT_NE(loom_serve_recognition_stream_peek(first), nullptr);
+  EXPECT_EQ(Text(loom_serve_recognition_stream_peek(first)), "G");
+  loom_serve_recognition_stream_consume(first);
+  ASSERT_NO_FATAL_FAILURE(Write(first, {4, 5, 6}, 3));
+
+  defer_second_admission_ = true;
+  loom_serve_recognition_stream_t* second = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Open(&second));
+  EXPECT_EQ(Offer().work, LOOM_RUNTIME_SERVICE_WORK_PREPARATION |
+                              LOOM_RUNTIME_SERVICE_WORK_ACQUISITION);
+  const auto admission = Grant(Offer().key);
+  EXPECT_NE(admission.serial, 0u);
+  ASSERT_NO_FATAL_FAILURE(Settle(false, 0));
+  EXPECT_EQ(Operation(0).key.serial, admission.serial);
+  EXPECT_EQ(Operation(0).waits, LOOM_RUNTIME_SERVICE_WAIT_CAPACITY);
+  EXPECT_EQ(Offer().work, LOOM_RUNTIME_SERVICE_WORK_EXECUTION);
+  std::vector<std::unique_ptr<loom_runtime::testing::WorkerGate>> workers;
+  for (int i = 0; i < FLAG_test_workers; ++i) {
+    workers.push_back(std::make_unique<loom_runtime::testing::WorkerGate>(
+        loom_runtime_host_executor(host_)));
+  }
+  const auto batch = Grant(Offer().key);
+  EXPECT_NE(batch.serial, 0u);
+  EXPECT_EQ(Observation().pending_operation_count, 2u);
+  EXPECT_EQ(Operation(0).key.serial, admission.serial);
+  EXPECT_EQ(Operation(1).key.serial, batch.serial);
+  EXPECT_EQ(Operation(1).waits, LOOM_RUNTIME_SERVICE_WAIT_CPU);
+  workers.clear();
+  ASSERT_NO_FATAL_FAILURE(Settle(false, 0));
+  EXPECT_EQ(Operation(0).key.serial, admission.serial);
+  EXPECT_EQ(Operation(1).key.serial, 0u);
+  EXPECT_EQ(Observation().pending_operation_count, 1u);
+  ASSERT_NE(loom_serve_recognition_stream_peek(first), nullptr);
+  EXPECT_EQ(Text(loom_serve_recognition_stream_peek(first)), "V");
+  EXPECT_EQ(submitted_, 2u);
+
+  defer_second_admission_ = false;
+  ASSERT_NO_FATAL_FAILURE(Settle(false, 0));
+  EXPECT_EQ(Observation().pending_operation_count, 0u);
+  EXPECT_EQ(submitted_, 2u);
+  ASSERT_NO_FATAL_FAILURE(Settle(true, 0));
+  EXPECT_EQ(Observation().owned_request_count, 0u);
+  EXPECT_EQ(Observation().pending_operation_count, 0u);
+  EXPECT_EQ(end_count_, 2u);
 }
 
 TEST_F(SourceRecognitionStreamTest, InputValidationAndIndependentCredit) {
@@ -565,7 +731,17 @@ TEST_F(SourceRecognitionStreamTest, ShutdownCollectsAcceptedOriginalMembers) {
   ASSERT_NO_FATAL_FAILURE(Open(&stream));
   ASSERT_NO_FATAL_FAILURE(Write(stream, {1, 2, 3}, 3));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return submitted_ == 1; }));
-  ASSERT_NO_FATAL_FAILURE(Settle(true));
+  loom_serve_recognition_stream_service_stop(service_);
+  EXPECT_EQ(Observation().offer_count, 0u);
+  const loom_serve_recognition_request_t request = {
+      .outputs = LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
+  };
+  loom_serve_recognition_stream_t* rejected = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        loom_serve_recognition_stream_service_try_open(
+                            service_, &request, {}, &rejected));
+  EXPECT_EQ(rejected, nullptr);
+  ASSERT_NO_FATAL_FAILURE(Settle(false, 0));
   EXPECT_EQ(collected_[0].load(), 1u);
   EXPECT_EQ(released_[0], 1u);
   EXPECT_EQ(submitted_, 1u);
@@ -639,13 +815,11 @@ TEST_F(SourceRecognitionStreamTest, ClosedCallerRetainsAcceptedInputBorrow) {
   ASSERT_NO_FATAL_FAILURE(Write(stream, {1, 2, 3}, 3));
   loom_serve_recognition_stream_finish(stream);
   bool progress = false;
-  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
-      service_, false, false, &progress));
+  IREE_ASSERT_OK(Advance(false, &progress));
   EXPECT_TRUE(progress);
   EXPECT_TRUE(loom_serve_recognition_stream_service_is_pending(service_));
   ASSERT_NO_FATAL_FAILURE(Close(stream));
-  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
-      service_, true, false, &progress));
+  IREE_ASSERT_OK(Advance(true, &progress, 0));
   EXPECT_FALSE(progress);
   EXPECT_TRUE(loom_serve_recognition_stream_service_is_pending(service_));
   EXPECT_EQ(offers_[0].load(), offers);
@@ -850,8 +1024,7 @@ TEST_F(SourceRecognitionStreamTest, CloseReturnsRowBeforeNativeCapacity) {
 
   ASSERT_NO_FATAL_FAILURE(Close(stream));
   bool progress = false;
-  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
-      service_, false, false, &progress));
+  IREE_ASSERT_OK(Advance(false, &progress));
   EXPECT_TRUE(progress);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return released_[0] == 1; }));
   auto* pool = loom_runtime_pool_memory(storage_owner_);
@@ -870,8 +1043,7 @@ TEST_F(SourceRecognitionStreamTest, CloseReturnsRowBeforeNativeCapacity) {
   const auto previous_offers = offers_[0].load();
   ASSERT_NO_FATAL_FAILURE(Write(peer, {2}, 1));
   loom_serve_recognition_stream_finish(peer);
-  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
-      service_, false, false, &progress));
+  IREE_ASSERT_OK(Advance(false, &progress));
   EXPECT_EQ(offers_[0].load(), previous_offers);
   EXPECT_EQ(released_[0], 1u);
 
@@ -898,8 +1070,7 @@ TEST_F(SourceRecognitionStreamTest,
   ASSERT_NO_FATAL_FAILURE(Write(stream, {1, 2, 3}, 3));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return submitted_ == 1; }));
   bool progress = false;
-  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
-      service_, true, false, &progress));
+  IREE_ASSERT_OK(Advance(true, &progress, 0));
   EXPECT_FALSE(loom_serve_recognition_stream_is_complete(stream));
   iree_hal_semaphore_fail(
       failed_readiness_,
@@ -918,7 +1089,22 @@ TEST_F(SourceRecognitionStreamTest,
   EXPECT_EQ(end_count_, 1u);
   EXPECT_EQ(last_end_outcome_, LOOM_SERVICE_TELEMETRY_FAILED);
   EXPECT_EQ(last_end_code_, IREE_STATUS_ABORTED);
+  const auto failed = Operation(1);
+  EXPECT_NE(failed.key.serial, 0u);
+  EXPECT_EQ(failed.work, LOOM_RUNTIME_SERVICE_WORK_EXECUTION);
+  EXPECT_EQ(failed.waits, 0u);
+  EXPECT_EQ(failed.devices, UINT64_C(1) << actual_.device_ordinal);
+  ASSERT_NO_FATAL_FAILURE(RetireService());
+  EXPECT_EQ(Operation(1).key.serial, failed.key.serial);
+  EXPECT_EQ(Observation().pending_operation_count, 1u);
+  loom_runtime_service_use_t use = {};
+  EXPECT_EQ(loom_runtime_service_read_operation_use(
+                control_.binding().control, failed.key,
+                Operation(1).publication, 0, &use),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(use.resource_ordinal, actual_.device_ordinal);
   ASSERT_NO_FATAL_FAILURE(RetireModel());
+  EXPECT_EQ(Observation().pending_operation_count, 0u);
   EXPECT_EQ(end_count_, 1u);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
                         loom_serve_recognition_stream_status(stream));
@@ -947,7 +1133,17 @@ TEST_F(SourceRecognitionStreamTest,
       failed_readiness_,
       iree_make_status(IREE_STATUS_ABORTED, "lost release readiness"));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED, AdvanceToFailure());
+  const auto failed = Operation(1);
+  EXPECT_NE(failed.key.serial, 0u);
+  EXPECT_EQ(failed.work, LOOM_RUNTIME_SERVICE_WORK_RELEASE);
+  EXPECT_EQ(failed.waits, 0u);
+  ASSERT_NO_FATAL_FAILURE(RetireService());
+  EXPECT_EQ(Operation(1).key.serial, failed.key.serial);
+  EXPECT_EQ(Operation(1).use_count, 1u);
+  EXPECT_EQ(Observation().accepted_devices, UINT64_C(1)
+                                                << actual_.device_ordinal);
   ASSERT_NO_FATAL_FAILURE(RetireModel());
+  EXPECT_EQ(Observation().pending_operation_count, 0u);
   EXPECT_EQ(end_count_, 1u);
   EXPECT_EQ(last_end_outcome_, LOOM_SERVICE_TELEMETRY_FAILED);
   EXPECT_EQ(last_end_code_, IREE_STATUS_ABORTED);

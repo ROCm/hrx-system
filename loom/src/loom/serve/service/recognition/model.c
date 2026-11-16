@@ -1689,6 +1689,9 @@ loom_serve_recognition_generator_t loom_serve_recognition_model_generator(
       .outputs = model->outputs,
       .request_capacity = model->request_capacity,
       .batch_units = model->batch_units,
+      .device_ordinal = iree_hal_device_topology_info(
+                            loom_runtime_device_handle(model->owner))
+                            ->topology_index,
       .prepare = loom_serve_recognition_generator_prepare,
       .discard = loom_serve_recognition_generator_discard,
       .try_admit = loom_serve_recognition_generator_admit,

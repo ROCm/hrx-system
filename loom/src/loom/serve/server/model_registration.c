@@ -30,23 +30,38 @@
 // Ready engines borrow these controls; the registration retains the complete
 // tail through model retirement and all observation readers.
 static iree_status_t loom_serve_model_registration_allocate_storage(
-    iree_host_size_t header_length, iree_host_size_t operation_capacity,
-    uint64_t incarnation, iree_allocator_t host_allocator,
-    void** out_registration, loom_runtime_service_control_t** out_control) {
+    iree_host_size_t header_length, iree_host_size_t offer_capacity,
+    iree_host_size_t operation_capacity, uint64_t incarnation,
+    iree_allocator_t host_allocator, void** out_registration,
+    loom_runtime_service_control_t** out_control) {
   *out_registration = NULL;
   *out_control = NULL;
-  iree_host_size_t* operation_uses = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      host_allocator, operation_capacity, sizeof(*operation_uses),
-      (void**)&operation_uses));
+  iree_host_size_t capacity_length = 0, operation_uses_offset = 0,
+                   offers_offset = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      0, &capacity_length,
+      IREE_STRUCT_FIELD(operation_capacity, iree_host_size_t,
+                        &operation_uses_offset),
+      IREE_STRUCT_FIELD(offer_capacity, loom_runtime_service_offer_capacity_t,
+                        &offers_offset)));
+  uint8_t* capacity_storage = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, capacity_length,
+                                             (void**)&capacity_storage));
+  iree_host_size_t* operation_uses =
+      (iree_host_size_t*)(capacity_storage + operation_uses_offset);
   for (iree_host_size_t i = 0; i < operation_capacity; ++i) {
     operation_uses[i] = 1;
   }
   const iree_host_size_t use_capacity = 1;
-  const loom_runtime_service_offer_capacity_t offer = {1, &use_capacity};
+  loom_runtime_service_offer_capacity_t* offers =
+      (loom_runtime_service_offer_capacity_t*)(capacity_storage +
+                                               offers_offset);
+  for (iree_host_size_t i = 0; i < offer_capacity; ++i) {
+    offers[i] = (loom_runtime_service_offer_capacity_t){1, &use_capacity};
+  }
   const loom_runtime_service_control_capacity_t capacity = {
-      .offer_capacity = 1,
-      .offers = &offer,
+      .offer_capacity = offer_capacity,
+      .offers = offers,
       .operation_capacity = operation_capacity,
       .operation_use_capacities = operation_uses};
   iree_host_size_t control_length = 0;
@@ -71,7 +86,7 @@ static iree_status_t loom_serve_model_registration_allocate_storage(
                             control_length),
         out_control);
   }
-  iree_allocator_free(host_allocator, operation_uses);
+  iree_allocator_free(host_allocator, capacity_storage);
   if (iree_status_is_ok(status)) {
     *out_registration = registration;
   } else {
@@ -341,7 +356,7 @@ static iree_status_t loom_serve_image_registration_create(
   loom_serve_image_registration_t* registration = NULL;
   loom_runtime_service_control_t* control = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_model_registration_allocate_storage(
-      sizeof(*registration), operation_capacity, incarnation, host_allocator,
+      sizeof(*registration), 1, operation_capacity, incarnation, host_allocator,
       (void**)&registration, &control));
   registration->control = control;
   registration->host_allocator = host_allocator;
@@ -562,7 +577,7 @@ static iree_status_t loom_serve_speech_registration_create(
   loom_serve_speech_registration_t* registration = NULL;
   loom_runtime_service_control_t* control = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_model_registration_allocate_storage(
-      sizeof(*registration), 2, incarnation, host_allocator,
+      sizeof(*registration), 1, 2, incarnation, host_allocator,
       (void**)&registration, &control));
   registration->control = control;
   registration->host_allocator = host_allocator;
@@ -616,6 +631,8 @@ typedef struct loom_serve_recognition_registration_t {
   // Owned native/HTTP service, destroyed after CPU and external borrowers
   // retire.
   loom_serve_recognition_service_t* service;
+  // Observation tail retained beyond engine destruction and failed readiness.
+  loom_runtime_service_control_t* control;
   // Explicit warmup, joined before service/model retirement.
   loom_runtime_activation_t* activation;
   // Model consumers have been relinquished with an ownership wake installed.
@@ -659,8 +676,9 @@ static iree_status_t loom_serve_recognition_registration_prepare(
     status = loom_serve_recognition_service_allocate(
         loom_runtime_device_host(registration->device),
         loom_serve_recognition_model_generator(registration->model),
-        &service_options, registration->stream, registration->host_allocator,
-        &registration->service);
+        &service_options, registration->stream,
+        loom_runtime_service_control_binding(registration->control, 0, 0, 0),
+        registration->host_allocator, &registration->service);
   }
   if (iree_status_is_ok(status)) {
     *out_service =
@@ -692,12 +710,19 @@ static iree_status_t loom_serve_recognition_registration_retire(
   IREE_RETURN_IF_ERROR(
       loom_serve_recognition_model_free_retired(registration->model));
   registration->model = NULL;
+  for (uint64_t i = 0; i < 3; ++i) {
+    const loom_runtime_service_operation_t operation = {.key = {.ordinal = i}};
+    loom_runtime_service_publish_operation(registration->control, &operation,
+                                           NULL);
+  }
+  const loom_runtime_service_observation_t observation = {0};
+  loom_runtime_service_publish_observation(registration->control, &observation);
   return iree_ok_status();
 }
 
 static void loom_serve_recognition_registration_destroy(void* self) {
   loom_serve_recognition_registration_t* registration = self;
-  iree_allocator_free(registration->host_allocator, registration);
+  iree_allocator_free_aligned(registration->host_allocator, registration);
 }
 
 static loom_serve_registration_parameters_t
@@ -747,8 +772,11 @@ static iree_status_t loom_serve_recognition_registration_create(
     loom_serve_registration_t* out_registration) {
   const loom_serve_model_registration_options_t* options = self;
   loom_serve_recognition_registration_t* registration = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      host_allocator, sizeof(*registration), (void**)&registration));
+  loom_runtime_service_control_t* control = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_model_registration_allocate_storage(
+      sizeof(*registration), 2, 3, incarnation, host_allocator,
+      (void**)&registration, &control));
+  registration->control = control;
   registration->host_allocator = host_allocator;
   registration->device = loom_runtime_device_group_at(
       options->device_group, configuration->device_index);
@@ -775,7 +803,7 @@ static iree_status_t loom_serve_recognition_registration_create(
         .deactivate = loom_serve_recognition_registration_deactivate,
         .destroy = loom_serve_recognition_registration_destroy};
   } else {
-    iree_allocator_free(host_allocator, registration);
+    iree_allocator_free_aligned(host_allocator, registration);
   }
   return status;
 }

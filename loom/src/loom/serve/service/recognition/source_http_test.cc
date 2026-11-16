@@ -20,6 +20,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/runtime/device/device.h"
 #include "loom/runtime/testing/application.h"
+#include "loom/runtime/testing/service_control.h"
 #include "loom/runtime/testing/worker_gate.h"
 #include "loom/serve/service/recognition/model.h"
 #include "loom/serve/service/recognition/service.h"
@@ -141,7 +142,7 @@ class SourceRecognitionHttpTest : public ::testing::Test {
     };
     IREE_ASSERT_OK(loom_serve_recognition_service_allocate(
         host_, loom_serve_recognition_model_generator(model_), &service_options,
-        nullptr, iree_allocator_system(), &service_));
+        nullptr, control_.binding(), iree_allocator_system(), &service_));
     interface_ = loom_serve_recognition_service_interface(service_);
     const loom_runtime_wake_callback_t observer = {
         [](void* self) {
@@ -170,25 +171,55 @@ class SourceRecognitionHttpTest : public ::testing::Test {
     loom_serve_http_server_free(server_);
     IREE_EXPECT_OK(loom_serve_recognition_model_free(model_));
   }
-  iree_status_t AdvanceService(bool stopping, bool* progress) {
-    auto status = loom_runtime_device_group_advance(group_);
-    return iree_status_join(
-        status,
-        interface_.runtime.vtable->advance(
-            interface_.runtime.self,
-            stopping ? LOOM_RUNTIME_SERVICE_FLAG_STOPPING : 0, progress));
+  loom_runtime_service_observation_t Observation() {
+    loom_runtime_service_observation_t observation = {};
+    EXPECT_EQ(loom_runtime_service_read_observation(control_.binding().control,
+                                                    &observation),
+              LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    return observation;
   }
-  void Advance(bool stopping) {
+
+  loom_runtime_service_operation_t Operation(uint64_t ordinal) {
+    loom_runtime_service_operation_t operation = {};
+    EXPECT_EQ(loom_runtime_service_read_operation(control_.binding().control,
+                                                  ordinal, &operation),
+              LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    return operation;
+  }
+
+  iree_status_t AdvanceService(bool stopping, bool* progress,
+                               uint64_t allowed_offers = UINT64_MAX) {
+    const loom_runtime_service_flags_t flags =
+        stopping ? LOOM_RUNTIME_SERVICE_FLAG_STOPPING : 0;
+    auto status = loom_runtime_device_group_advance(group_);
+    status = iree_status_join(status, loom_serve_recognition_service_progress(
+                                          service_, flags, progress));
+    for (uint64_t i = 0; i < 2 && iree_status_is_ok(status); ++i) {
+      loom_runtime_service_offer_t offer = {};
+      EXPECT_EQ(loom_runtime_service_read_offer(control_.binding().control, i,
+                                                &offer),
+                LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+      if (offer.choice_count && (allowed_offers & (UINT64_C(1) << i))) {
+        loom_runtime_service_schedule_outcome_t outcome = {};
+        status = interface_.runtime.vtable->try_schedule(
+            interface_.runtime.self, offer.key, 0, flags, &outcome);
+        *progress |= outcome.accepted;
+      }
+    }
+    return status;
+  }
+  void Advance(bool stopping, uint64_t allowed_offers = UINT64_MAX) {
     bool progress = false;
-    IREE_ASSERT_OK(AdvanceService(stopping, &progress));
+    IREE_ASSERT_OK(AdvanceService(stopping, &progress, allowed_offers));
   }
   template <typename Predicate>
-  void AdvanceUntil(Predicate ready, bool stopping = false) {
+  void AdvanceUntil(Predicate ready, bool stopping = false,
+                    uint64_t allowed_offers = UINT64_MAX) {
     auto* notification = loom_serve_http_server_notification(server_);
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
-      auto status = AdvanceService(stopping, &progress);
+      auto status = AdvanceService(stopping, &progress, allowed_offers);
       if (ready() || progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(notification);
       } else {
@@ -215,6 +246,8 @@ class SourceRecognitionHttpTest : public ::testing::Test {
   loom_serve_http_server_t* server_ = nullptr;
   // Real loopback socket listener.
   loom_serve_http_listener_t* listener_ = nullptr;
+  // Retained source/decode facts share one composition-owned control.
+  loom_runtime::testing::ServiceControl control_{3, 2};
   // Adapter whose accepted conversion task borrows the claimed upload.
   loom_serve_recognition_service_t* service_ = nullptr;
   // Manually driven production owner interface.
@@ -222,6 +255,41 @@ class SourceRecognitionHttpTest : public ::testing::Test {
   // Readiness-aware socket client; no router thread is running.
   loom_serve::testing::HttpHarness http_;
 };
+
+TEST_F(SourceRecognitionHttpTest, DecodeGrantPreservesQueuedSource) {
+  loom_serve::testing::HttpClient client;
+  IREE_ASSERT_OK(http_.Send(Request(16000, 4), client.put()));
+  loom_serve_http_connection_t* connection = nullptr;
+  const loom_serve_http_request_t* request = nullptr;
+  ASSERT_NO_FATAL_FAILURE(Accept(client.get(), &connection, &request));
+  ASSERT_NO_FATAL_FAILURE(Advance(false, 0));
+  EXPECT_EQ(Observation().owned_request_count, 1u);
+  EXPECT_EQ(Observation().waiting_request_count, 1u);
+  EXPECT_EQ(Observation().offer_count, 2u);
+  ASSERT_NO_FATAL_FAILURE(Advance(false, UINT64_C(1) << 1));
+  const auto decode = Operation(2);
+  EXPECT_NE(decode.key.serial, 0u);
+  EXPECT_EQ(Operation(0).key.serial, 0u);
+  EXPECT_EQ(Observation().pending_operation_count, 1u);
+  EXPECT_EQ(Observation().accepted_devices, 0u);
+  EXPECT_EQ(Observation().waiting_request_count, 1u);
+  ASSERT_NO_FATAL_FAILURE(
+      AdvanceUntil([&] { return Operation(2).key.serial == 0; }, false, 0));
+  EXPECT_EQ(Observation().pending_operation_count, 0u);
+  EXPECT_EQ(Observation().offer_count, 1u);
+  EXPECT_EQ(Observation().owned_request_count, 1u);
+  EXPECT_EQ(interface_.telemetry.counters->completed, 0u);
+  // The decoded block and EOF survive deferral. Only the independent source
+  // offer is granted from here; its existing real model produces the response.
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return interface_.telemetry.counters->completed == 1; }, false, 1));
+  EXPECT_EQ(Observation().owned_request_count, 0u);
+  EXPECT_EQ(Observation().pending_operation_count, 0u);
+  std::string response;
+  IREE_ASSERT_OK(http_.Read(client.release(), false, &response));
+  EXPECT_EQ(response.find("HTTP/1.1 200 OK\r\n"), 0u);
+  EXPECT_NE(response.find(R"({"text":"B"})"), std::string::npos);
+}
 
 class SourceRecognitionHttpRetirementTest
     : public SourceRecognitionHttpTest,
@@ -269,9 +337,10 @@ TEST_F(SourceRecognitionHttpTest, DeploymentRoleRequiresItsDeclaredOutput) {
         .decode_frames = 5,
         .conversion_limit = 8 * 1024 * 1024,
     };
+    control_.Reset();
     auto status = loom_serve_recognition_service_allocate(
-        host_, generator, &options, nullptr, iree_allocator_system(),
-        &service_);
+        host_, generator, &options, nullptr, control_.binding(),
+        iree_allocator_system(), &service_);
     if (row.valid) {
       IREE_ASSERT_OK(status);
       interface_ = loom_serve_recognition_service_interface(service_);
@@ -312,7 +381,20 @@ TEST_P(SourceRecognitionHttpRetirementTest,
     gates.push_back(std::make_unique<loom_runtime::testing::WorkerGate>(
         loom_runtime_host_executor(host_)));
   }
+  ASSERT_NO_FATAL_FAILURE(Advance(false, 0));
+  EXPECT_EQ(Observation().owned_request_count, 1u);
+  EXPECT_EQ(Observation().waiting_request_count, 1u);
+  EXPECT_EQ(Observation().offer_count, 2u);
+  EXPECT_EQ(Observation().pending_operation_count, 0u);
+  EXPECT_FALSE(interface_.runtime.vtable->is_active(interface_.runtime.self));
   ASSERT_NO_FATAL_FAILURE(Advance(false));
+  EXPECT_EQ(Observation().pending_operation_count, 2u);
+  EXPECT_EQ(Operation(0).work, LOOM_RUNTIME_SERVICE_WORK_PREPARATION |
+                                   LOOM_RUNTIME_SERVICE_WORK_ACQUISITION);
+  EXPECT_EQ(Operation(2).work, LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
+  EXPECT_EQ(Operation(2).devices, 0u);
+  EXPECT_EQ(Operation(2).use_count, 0u);
+  const auto decode = Operation(2);
   EXPECT_TRUE(interface_.runtime.vtable->is_active(interface_.runtime.self));
   ASSERT_TRUE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
   if (!stopping) {
@@ -329,7 +411,11 @@ TEST_P(SourceRecognitionHttpRetirementTest,
         },
         connection, iree_infinite_timeout());
   }
-  ASSERT_NO_FATAL_FAILURE(Advance(stopping));
+  ASSERT_NO_FATAL_FAILURE(Advance(stopping, 0));
+  EXPECT_EQ(Operation(2).key.serial, decode.key.serial);
+  EXPECT_EQ(Observation().waiting_request_count, 0u);
+  EXPECT_EQ(Observation().owned_request_count, 1u);
+  EXPECT_EQ(Observation().pending_operation_count, 2u);
   EXPECT_EQ(interface_.telemetry.counters->cancelled, 0u);
   EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 1u);
   EXPECT_TRUE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
@@ -340,7 +426,10 @@ TEST_P(SourceRecognitionHttpRetirementTest,
         return interface_.telemetry.counters->cancelled == 1 &&
                !interface_.runtime.vtable->is_pending(interface_.runtime.self);
       },
-      stopping));
+      stopping, 0));
+  EXPECT_EQ(Operation(2).key.serial, 0u);
+  EXPECT_EQ(Observation().owned_request_count, 0u);
+  EXPECT_EQ(Observation().pending_operation_count, 0u);
   EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 0u);
   EXPECT_FALSE(interface_.runtime.vtable->is_active(interface_.runtime.self));
   if (!stopping) {

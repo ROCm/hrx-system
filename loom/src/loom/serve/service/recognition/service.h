@@ -41,15 +41,25 @@ typedef struct loom_serve_recognition_service_options_t {
 // remain borrowed from a claimed connection through every accepted conversion
 // task, including disconnect and shutdown. Native callers retain final
 // documents independently of this owner. The generator/model outlives this
-// owner.
+// owner. Scheduling storage has two offers/choices and three operations, with
+// one device use per slot. The final offer/operation is host-only decoding;
+// storage remains alive through model retirement and all observation readers.
 iree_status_t loom_serve_recognition_service_allocate(
     loom_runtime_host_t* host, loom_serve_recognition_generator_t generator,
     const loom_serve_recognition_service_options_t* options,
-    loom_runtime_telemetry_stream_t* telemetry, iree_allocator_t host_allocator,
+    loom_runtime_telemetry_stream_t* telemetry,
+    loom_runtime_service_control_binding_t scheduling,
+    iree_allocator_t host_allocator,
     loom_serve_recognition_service_t** out_service);
 
 loom_serve_service_t loom_serve_recognition_service_interface(
     loom_serve_recognition_service_t* service);
+
+// Progresses accepted source/decode work and transfers input/output without
+// accepting a new source or decode unit. Refreshes the retained observations.
+iree_status_t loom_serve_recognition_service_progress(
+    loom_serve_recognition_service_t* service,
+    loom_runtime_service_flags_t flags, bool* out_progress);
 
 // Releases after STOPPING has drained accepted CPU/device callbacks and every
 // connection claim. Never waits for model execution. NULL is accepted.

@@ -92,6 +92,31 @@ without counting the core stream and its HTTP adapter twice.
 Native request accounting begins when admission returns a handle. Immediate
 validation or allocation failure and admission pressure accept no request.
 
+## Scheduling ownership
+
+Native stream ingress queues requests and copies available input without
+starting source work. The serialized owner progresses accepted obligations,
+reads the retained scheduling control, and explicitly grants the current keyed
+opportunity. One offer selects request preparation/admission or a compatible
+source-selection unit. Source selection may report that more input is needed
+without submitting a numerical batch. Appending input or consuming output
+changes eligibility on the next owner turn; acceptance refreshes the captured
+input extent before claiming an older decision.
+
+Admission and numerical work have independent operation lifetimes. Mandatory
+row release uses the numerical slot after its borrowers retire. The common
+native/HTTP service adds one independent host decode offer and operation, so
+decoding can overlap model work without coupling their grants. Its request
+ledger counts a request once even when both units need scheduling. Completed
+callbacks, input transfers, output delivery, cancellation, and backing release
+continue when policy grants no new work. Stopping withdraws opportunities while
+retaining accepted obligations.
+
+Control storage belongs to the composition and outlives its ready engine.
+Failed readiness keeps accepted device participation visible through actual
+model retirement. Final transcript handles retain no service pointer and remain
+independently readable afterward.
+
 ## Dataflow and execution
 
 HTTP upload decoding and PCM conversion run as bounded tasks on the shared

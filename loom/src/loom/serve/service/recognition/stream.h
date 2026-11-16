@@ -8,6 +8,7 @@
 #define LOOM_SERVE_SERVICE_RECOGNITION_STREAM_H_
 
 #include "loom/runtime/host/host.h"
+#include "loom/runtime/service.h"
 #include "loom/runtime/wake.h"
 #include "loom/serve/service/recognition/document.h"
 #include "loom/serve/service/recognition/generator.h"
@@ -49,9 +50,12 @@ typedef struct loom_serve_recognition_stream_service_options_t {
 // All calls are serialized on the owning task; source CPU work uses the host
 // executor and device readiness uses its proactor. No private threads or waits
 // are introduced. Construction accepts no asynchronous work.
+// Scheduling storage has one offer/choice and two operation slots, with one
+// device use each. Its owner retains it through actual model retirement.
 iree_status_t loom_serve_recognition_stream_service_allocate(
     loom_runtime_host_t* host, loom_serve_recognition_generator_t generator,
     const loom_serve_recognition_stream_service_options_t* options,
+    loom_runtime_service_control_binding_t scheduling,
     iree_allocator_t host_allocator,
     loom_serve_recognition_stream_service_t** out_service);
 
@@ -114,6 +118,12 @@ void loom_serve_recognition_stream_consume(
 bool loom_serve_recognition_stream_is_complete(
     const loom_serve_recognition_stream_t* stream);
 
+// Owner-only fact: this request awaits another source unit, including while
+// waiting for input or output credit. Reads only published row state, without
+// calling the source. Retained final results are not waiting requests.
+bool loom_serve_recognition_stream_is_waiting(
+    const loom_serve_recognition_stream_t* stream);
+
 // Returns an owned copy of the request failure, including service-wide failure.
 // The caller consumes the returned status; querying does not clear the failure.
 iree_status_t loom_serve_recognition_stream_status(
@@ -131,16 +141,32 @@ const loom_serve_recognition_document_t* loom_serve_recognition_stream_document(
 void loom_serve_recognition_stream_close(
     loom_serve_recognition_stream_t* stream);
 
-// Advances one bounded owner turn. Input starvation, output pressure, and
-// recoverable shared-capacity admission are non-error states. A true progress
-// result asks the owning scheduler to rotate and return; false awaits a wake
-// or a caller write/consume/close. stopping cancels unfinished streams without
-// consuming caller ownership, and drains accepted callbacks. Errors stop the
-// service, retaining accepted model handles for model teardown; a failed
-// readiness notification is not actual retirement.
-iree_status_t loom_serve_recognition_stream_service_advance(
-    loom_serve_recognition_stream_service_t* service, bool stopping,
-    bool shared_activity, bool* out_progress);
+// Seals admission and withdraws offers, cancelling unfinished streams without
+// consuming caller ownership. Accepted callbacks still require progress.
+void loom_serve_recognition_stream_service_stop(
+    loom_serve_recognition_stream_service_t* service);
+
+// Progresses one bounded owner turn of accepted work, delivery, and mandatory
+// release without starting new preparation or source selection. Input
+// starvation, output pressure, and recoverable capacity denial are non-errors.
+// A true progress result asks the owner to rotate and return; false awaits a
+// wake, a caller write/consume/close, or a policy grant. STOPPING seals
+// admission and drains callbacks. Errors retain accepted model handles for
+// teardown; failed readiness is not actual retirement. Refreshes input/consumer
+// facts on this serialized owner; cross-thread observations use the retained
+// control.
+iree_status_t loom_serve_recognition_stream_service_progress(
+    loom_serve_recognition_stream_service_t* service,
+    loom_runtime_service_flags_t flags, bool* out_progress);
+
+// Accepts the current keyed opportunity, or returns a zero serial when stale.
+// A source-selection unit may await more input without submitting a batch;
+// published device participation is not a promise of numerical work.
+iree_status_t loom_serve_recognition_stream_service_try_schedule(
+    loom_serve_recognition_stream_service_t* service,
+    loom_runtime_service_offer_key_t offer, uint64_t choice_ordinal,
+    loom_runtime_service_flags_t flags,
+    loom_runtime_service_operation_key_t* out_operation);
 
 // Accepted CPU/device callbacks still borrow service storage. Live streams
 // alone are not pending callbacks; active includes their resident source state.

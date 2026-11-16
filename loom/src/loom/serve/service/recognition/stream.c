@@ -92,6 +92,12 @@ typedef enum loom_serve_recognition_phase_e {
 
 enum { RECOGNITION_EVENT_CPU = 1u << 0, RECOGNITION_EVENT_DEVICE = 1u << 1 };
 
+enum {
+  RECOGNITION_OPERATION_ADMISSION = 0,
+  RECOGNITION_OPERATION_BATCH,
+  RECOGNITION_OPERATION_COUNT,
+};
+
 struct loom_serve_recognition_stream_service_t {
   // Allocator owning service, fixed row arrays, and request storage.
   iree_allocator_t host_allocator;
@@ -122,6 +128,27 @@ struct loom_serve_recognition_stream_service_t {
   iree_host_size_t cursor;
   // Allows one new admission between completed numerical batches.
   bool admit_next;
+  // Owner-published facts; readers never inspect live input or worker storage.
+  struct {
+    // Parent-retained storage and its single summary publisher.
+    loom_runtime_service_control_binding_t binding;
+    // Source's current admission-versus-batch opportunity.
+    loom_runtime_service_offer_t offer;
+    // Offered queued request, borrowed until the next owner mutation.
+    loom_serve_recognition_stream_t* queued;
+    // Distinguishes reused rows with otherwise identical request geometry.
+    uint64_t arrival;
+    // Candidate participation before source selection on its CPU borrower.
+    uint64_t request_count;
+    // Independent admission and exclusive source/release obligations.
+    loom_runtime_service_operation_t operations[RECOGNITION_OPERATION_COUNT];
+    // Last published lifetimes, independent of mutable readiness reasons.
+    uint64_t published_serials[RECOGNITION_OPERATION_COUNT];
+    // Monotonic accepted identity, independent of legal offer revisions.
+    uint64_t next_serial;
+    // Last published summary, avoiding stores on unchanged owner turns.
+    loom_runtime_service_observation_t observation;
+  } scheduling;
   // Callback publication and observer detachment share one final-access lock.
   struct {
     // Serializes worker/proactor publication with owner collection.
@@ -167,6 +194,26 @@ struct loom_serve_recognition_stream_service_t {
     IREE_TRACE(iree_section_id_t section;)
   } device;
 };
+
+static void loom_serve_recognition_stream_publish(
+    loom_serve_recognition_stream_service_t* service, bool allow_start);
+
+static loom_runtime_service_operation_key_t
+loom_serve_recognition_begin_operation(
+    loom_serve_recognition_stream_service_t* service, uint64_t ordinal,
+    loom_runtime_service_offer_key_t origin,
+    loom_runtime_service_work_flags_t work) {
+  IREE_ASSERT(service->scheduling.next_serial != UINT64_MAX);
+  loom_runtime_service_operation_t* operation =
+      &service->scheduling.operations[ordinal];
+  *operation = (loom_runtime_service_operation_t){
+      .key = {.ordinal =
+                  service->scheduling.binding.operation_ordinal + ordinal,
+              .serial = ++service->scheduling.next_serial},
+      .origin = origin,
+      .work = work};
+  return operation->key;
+}
 
 static iree_status_t loom_serve_recognition_cpu_run(
     iree_task_process_t* process, const iree_task_worker_context_t* context,
@@ -349,6 +396,14 @@ static void loom_serve_recognition_stream_end(
 static iree_status_t loom_serve_recognition_release(
     loom_serve_recognition_stream_service_t* service,
     loom_serve_recognition_stream_t* row) {
+  loom_runtime_service_operation_t* operation =
+      &service->scheduling.operations[RECOGNITION_OPERATION_BATCH];
+  if (!operation->key.serial) {
+    loom_serve_recognition_begin_operation(
+        service, RECOGNITION_OPERATION_BATCH,
+        (loom_runtime_service_offer_key_t){0},
+        LOOM_RUNTIME_SERVICE_WORK_RELEASE);
+  }
   bool complete = false;
   iree_status_t status =
       service->generator.release(service->generator.self, row->invocation,
@@ -362,6 +417,9 @@ static iree_status_t loom_serve_recognition_release(
   }
   if (!iree_status_is_ok(status) || complete) {
     row->invocation = NULL;
+  }
+  if (iree_status_is_ok(status) && complete) {
+    operation->key.serial = 0;
   }
   return status;
 }
@@ -384,6 +442,8 @@ static iree_status_t loom_serve_recognition_release_finished(
       if (iree_status_is_ok(service->failure)) {
         if (row->phase == RECOGNITION_ROW_WAITING) {
           service->generator.discard(service->generator.self, row->invocation);
+          service->scheduling.operations[RECOGNITION_OPERATION_ADMISSION]
+              .key.serial = 0;
         } else {
           status = loom_serve_recognition_release(service, row);
           if (service->phase != RECOGNITION_PHASE_IDLE) {
@@ -454,6 +514,8 @@ static iree_status_t loom_serve_recognition_admit(
     service->generator.complete_admit(service->generator.self, row->invocation);
     row->phase = RECOGNITION_ROW_READY;
     service->admission = NULL;
+    service->scheduling.operations[RECOGNITION_OPERATION_ADMISSION].key.serial =
+        0;
     *progress = true;
     return iree_ok_status();
   }
@@ -468,6 +530,8 @@ static iree_status_t loom_serve_recognition_admit(
     row->outcome = LOOM_SERVICE_TELEMETRY_REJECTED;
     row->phase = RECOGNITION_ROW_COMPLETE;
     service->admission = NULL;
+    service->scheduling.operations[RECOGNITION_OPERATION_ADMISSION].key.serial =
+        0;
     *progress = true;
   }
   return iree_ok_status();
@@ -502,6 +566,8 @@ static iree_status_t loom_serve_recognition_collect(
     row->outcome = LOOM_SERVICE_TELEMETRY_REJECTED;
     row->phase = RECOGNITION_ROW_COMPLETE;
     service->admission = NULL;
+    service->scheduling.operations[RECOGNITION_OPERATION_ADMISSION].key.serial =
+        0;
     return iree_ok_status();
   }
   status = iree_status_join(status, cpu_status);
@@ -518,6 +584,8 @@ static iree_status_t loom_serve_recognition_collect(
     service->generator.complete_admit(service->generator.self, row->invocation);
     row->phase = RECOGNITION_ROW_READY;
     service->admission = NULL;
+    service->scheduling.operations[RECOGNITION_OPERATION_ADMISSION].key.serial =
+        0;
   } else if (phase == RECOGNITION_PHASE_OFFERING) {
     for (iree_host_size_t i = 0; i < service->batch.candidate_count; ++i) {
       loom_serve_recognition_stream_t* row = service->batch.candidates[i];
@@ -542,6 +610,7 @@ static iree_status_t loom_serve_recognition_collect(
           service->generator.self, &service->device.frontier));
       return loom_serve_recognition_wait(service, RECOGNITION_PHASE_EXECUTING);
     }
+    service->scheduling.operations[RECOGNITION_OPERATION_BATCH].key.serial = 0;
   } else if (phase == RECOGNITION_PHASE_EXECUTING) {
     // Collection is part of accepted work, including during cancellation and
     // shutdown. It releases source feedback and acknowledges each original row.
@@ -568,28 +637,34 @@ static iree_status_t loom_serve_recognition_collect(
     }
     service->generator.release_batch(service->generator.self);
     service->batch.count = 0;
+    service->scheduling.operations[RECOGNITION_OPERATION_BATCH].key.serial = 0;
     service->admit_next = true;
   }
   return iree_ok_status();
 }
 
-static iree_status_t loom_serve_recognition_schedule(
-    loom_serve_recognition_stream_service_t* service, bool shared_activity,
-    bool* progress) {
-  if (service->admission) {
-    IREE_RETURN_IF_ERROR(
-        loom_serve_recognition_admit(service, shared_activity, progress));
-    if (service->phase != RECOGNITION_PHASE_IDLE) {
-      return iree_ok_status();
-    }
-  }
+// Refreshes candidate identity and input extent only at a retired source cut.
+// Captured spans remain immutable while source work borrows them; policy
+// queries read only the published control and never enter this scan.
+static void loom_serve_recognition_stream_publish(
+    loom_serve_recognition_stream_service_t* service, bool allow_start) {
+  const bool can_offer = allow_start && !service->stopping &&
+                         service->phase == RECOGNITION_PHASE_IDLE;
   loom_serve_recognition_stream_t* queued = NULL;
-  service->batch.candidate_count = 0;
-  for (iree_host_size_t i = 0; i < service->generator.request_capacity; ++i) {
+  uint64_t owned_count = 0, waiting_count = 0;
+  iree_host_size_t candidate_count = 0;
+  bool candidates_changed = false;
+  for (iree_host_size_t i = 0;
+       service->rows && i < service->generator.request_capacity; ++i) {
     const iree_host_size_t index =
         (service->cursor + i) % service->generator.request_capacity;
     loom_serve_recognition_stream_t* row = service->rows[index];
     if (!row) {
+      continue;
+    }
+    ++owned_count;
+    waiting_count += loom_serve_recognition_stream_is_waiting(row);
+    if (!can_offer || !row->caller_open || row->cancelled) {
       continue;
     }
     if (row->phase == RECOGNITION_ROW_QUEUED &&
@@ -602,51 +677,145 @@ static iree_status_t loom_serve_recognition_schedule(
          row->input.complete != row->snapshot.complete)) {
       row->phase = RECOGNITION_ROW_READY;
     }
-    if (row->phase == RECOGNITION_ROW_READY && row->caller_open) {
-      service->batch.candidates[service->batch.candidate_count++] = row;
+    if (row->phase == RECOGNITION_ROW_READY) {
+      const loom_serve_recognition_input_block_t input =
+          loom_serve_recognition_input_peek(&row->input);
+      candidates_changed |= candidate_count >= service->batch.candidate_count ||
+                            service->batch.candidates[candidate_count] != row ||
+                            row->snapshot.position != input.position ||
+                            row->snapshot.frame_count != input.frame_count ||
+                            row->snapshot.complete != input.complete;
+      row->snapshot = input;
+      service->batch.candidates[candidate_count++] = row;
     }
   }
-  if (!service->admission && queued &&
-      (service->admit_next || !service->batch.candidate_count)) {
-    service->batch.candidate_count = 0;
-    queued->phase = RECOGNITION_ROW_WAITING;
-    service->admission = queued;
-    service->admit_next = false;
-    loom_serve_recognition_schedule_cpu(service, RECOGNITION_PHASE_PREPARING);
-    *progress = true;
-  } else if (service->batch.candidate_count) {
-    for (iree_host_size_t i = 0; i < service->batch.candidate_count; ++i) {
-      loom_serve_recognition_stream_t* row = service->batch.candidates[i];
-      row->snapshot = loom_serve_recognition_input_peek(&row->input);
-      row->phase = RECOGNITION_ROW_OFFERING;
+  loom_runtime_service_work_flags_t work = 0;
+  uint64_t request_count = 0, arrival = 0;
+  if (can_offer) {
+    candidates_changed |= candidate_count != service->batch.candidate_count;
+    service->batch.candidate_count = candidate_count;
+    if (!service->admission && queued &&
+        (service->admit_next || !candidate_count)) {
+      work = LOOM_RUNTIME_SERVICE_WORK_PREPARATION |
+             LOOM_RUNTIME_SERVICE_WORK_ACQUISITION;
+      request_count = 1;
+      arrival = queued->arrival;
+      service->batch.candidate_count = 0;
+    } else if (candidate_count) {
+      work = LOOM_RUNTIME_SERVICE_WORK_EXECUTION;
+      request_count = candidate_count;
     }
-    loom_serve_recognition_schedule_cpu(service, RECOGNITION_PHASE_OFFERING);
-    *progress = true;
   }
-  return iree_ok_status();
+  const uint64_t devices = UINT64_C(1) << service->generator.device_ordinal;
+  const loom_runtime_service_use_t use = {
+      .resource_ordinal = service->generator.device_ordinal};
+  loom_runtime_service_control_t* control = service->scheduling.binding.control;
+  loom_runtime_service_offer_t* offer = &service->scheduling.offer;
+  if (offer->work != work || service->scheduling.arrival != arrival ||
+      service->scheduling.request_count != request_count ||
+      (work == LOOM_RUNTIME_SERVICE_WORK_EXECUTION && candidates_changed)) {
+    IREE_ASSERT(offer->key.revision != UINT64_MAX);
+    ++offer->key.revision;
+    offer->work = work;
+    offer->choice_count = work ? 1 : 0;
+    service->scheduling.arrival = arrival;
+    service->scheduling.request_count = request_count;
+    const loom_runtime_service_choice_publication_t choice = {
+        .choice = {.instance_ordinal =
+                       service->scheduling.binding.instance_ordinal,
+                   .request_count = request_count,
+                   .devices = devices,
+                   .use_count = 1},
+        .uses = &use};
+    loom_runtime_service_publish_offer(control, offer, &choice);
+  }
+  service->scheduling.queued = arrival ? queued : NULL;
+  loom_runtime_service_wait_flags_t waits[RECOGNITION_OPERATION_COUNT] = {0};
+  if (service->phase == RECOGNITION_PHASE_PREPARING) {
+    waits[RECOGNITION_OPERATION_ADMISSION] = LOOM_RUNTIME_SERVICE_WAIT_CPU;
+  } else if (service->phase == RECOGNITION_PHASE_RESERVING) {
+    waits[RECOGNITION_OPERATION_ADMISSION] = LOOM_RUNTIME_SERVICE_WAIT_DEVICE;
+  } else {
+    waits[RECOGNITION_OPERATION_ADMISSION] = LOOM_RUNTIME_SERVICE_WAIT_CAPACITY;
+  }
+  if (service->phase == RECOGNITION_PHASE_OFFERING ||
+      service->phase == RECOGNITION_PHASE_COLLECTING) {
+    waits[RECOGNITION_OPERATION_BATCH] = LOOM_RUNTIME_SERVICE_WAIT_CPU;
+  } else if (service->phase == RECOGNITION_PHASE_EXECUTING ||
+             service->phase == RECOGNITION_PHASE_RELEASING) {
+    waits[RECOGNITION_OPERATION_BATCH] = LOOM_RUNTIME_SERVICE_WAIT_DEVICE;
+  }
+  uint64_t pending_count = 0;
+  for (iree_host_size_t i = 0; i < RECOGNITION_OPERATION_COUNT; ++i) {
+    loom_runtime_service_operation_t* operation =
+        &service->scheduling.operations[i];
+    pending_count += operation->key.serial != 0;
+    const uint64_t wait =
+        operation->key.serial && iree_status_is_ok(service->failure) ? waits[i]
+                                                                     : 0;
+    if (operation->key.serial != service->scheduling.published_serials[i] ||
+        operation->waits != wait) {
+      operation->waits = wait;
+      operation->devices = operation->key.serial ? devices : 0;
+      operation->use_count = operation->key.serial ? 1 : 0;
+      loom_runtime_service_publish_operation(control, operation, &use);
+      service->scheduling.published_serials[i] = operation->key.serial;
+    }
+  }
+  const loom_runtime_service_observation_t observation = {
+      .owned_request_count = owned_count,
+      .waiting_request_count = waiting_count,
+      .offer_count = offer->choice_count,
+      .pending_operation_count = pending_count,
+      .offered_devices = offer->choice_count ? devices : 0,
+      .accepted_devices = pending_count ? devices : 0};
+  const loom_runtime_service_observation_t* published =
+      &service->scheduling.observation;
+  if (observation.owned_request_count != published->owned_request_count ||
+      observation.waiting_request_count != published->waiting_request_count ||
+      observation.offer_count != published->offer_count ||
+      observation.pending_operation_count !=
+          published->pending_operation_count ||
+      observation.offered_devices != published->offered_devices ||
+      observation.accepted_devices != published->accepted_devices) {
+    service->scheduling.binding.publish_observation(
+        service->scheduling.binding.publisher, &observation);
+    service->scheduling.observation = observation;
+  }
 }
 
-iree_status_t loom_serve_recognition_stream_service_advance(
-    loom_serve_recognition_stream_service_t* service, bool stopping,
-    bool shared_activity, bool* out_progress) {
-  *out_progress = false;
-  if (stopping && !service->stopping) {
-    service->stopping = true;
-    for (iree_host_size_t i = 0; i < service->generator.request_capacity; ++i) {
-      loom_serve_recognition_stream_t* row = service->rows[i];
-      if (row && !loom_serve_recognition_row_is_complete(row)) {
-        row->cancelled = true;
-      }
+void loom_serve_recognition_stream_service_stop(
+    loom_serve_recognition_stream_service_t* service) {
+  if (service->stopping) {
+    return;
+  }
+  service->stopping = true;
+  for (iree_host_size_t i = 0; i < service->generator.request_capacity; ++i) {
+    loom_serve_recognition_stream_t* row = service->rows[i];
+    if (row && !loom_serve_recognition_row_is_complete(row)) {
+      row->cancelled = true;
     }
+  }
+  loom_serve_recognition_stream_publish(service, false);
+}
+
+iree_status_t loom_serve_recognition_stream_service_progress(
+    loom_serve_recognition_stream_service_t* service,
+    loom_runtime_service_flags_t flags, bool* out_progress) {
+  *out_progress = false;
+  if (iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
+    loom_serve_recognition_stream_service_stop(service);
   }
   iree_status_t status = loom_serve_recognition_collect(service, out_progress);
   if (iree_status_is_ok(status) && service->phase == RECOGNITION_PHASE_IDLE) {
     status = loom_serve_recognition_release_finished(service, out_progress);
     // Publication ends this bounded turn before the next source CPU operation.
     if (iree_status_is_ok(status) && !service->stopping && !*out_progress &&
-        service->phase == RECOGNITION_PHASE_IDLE) {
-      status = loom_serve_recognition_schedule(service, shared_activity,
-                                               out_progress);
+        service->phase == RECOGNITION_PHASE_IDLE && service->admission) {
+      status = loom_serve_recognition_admit(
+          service,
+          iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY),
+          out_progress);
     }
   }
   if (!iree_status_is_ok(status)) {
@@ -666,7 +835,47 @@ iree_status_t loom_serve_recognition_stream_service_advance(
     }
     *out_progress = true;
   }
+  loom_serve_recognition_stream_publish(service, !*out_progress);
   return status;
+}
+
+iree_status_t loom_serve_recognition_stream_service_try_schedule(
+    loom_serve_recognition_stream_service_t* service,
+    loom_runtime_service_offer_key_t offer, uint64_t choice_ordinal,
+    loom_runtime_service_flags_t flags,
+    loom_runtime_service_operation_key_t* out_operation) {
+  *out_operation = (loom_runtime_service_operation_key_t){0};
+  if (service->stopping ||
+      iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING) ||
+      offer.ordinal != service->scheduling.offer.key.ordinal ||
+      offer.revision != service->scheduling.offer.key.revision ||
+      choice_ordinal >= service->scheduling.offer.choice_count) {
+    return iree_ok_status();
+  }
+  // Input writes and event consumption can change the legal extent without
+  // touching this service. Refresh on the owner before accepting the key.
+  loom_serve_recognition_stream_publish(service, true);
+  if (offer.revision != service->scheduling.offer.key.revision) {
+    return iree_ok_status();
+  }
+  loom_serve_recognition_stream_t* queued = service->scheduling.queued;
+  *out_operation = loom_serve_recognition_begin_operation(
+      service,
+      queued ? RECOGNITION_OPERATION_ADMISSION : RECOGNITION_OPERATION_BATCH,
+      offer, service->scheduling.offer.work);
+  if (queued) {
+    queued->phase = RECOGNITION_ROW_WAITING;
+    service->admission = queued;
+    service->admit_next = false;
+    loom_serve_recognition_schedule_cpu(service, RECOGNITION_PHASE_PREPARING);
+  } else {
+    for (iree_host_size_t i = 0; i < service->batch.candidate_count; ++i) {
+      service->batch.candidates[i]->phase = RECOGNITION_ROW_OFFERING;
+    }
+    loom_serve_recognition_schedule_cpu(service, RECOGNITION_PHASE_OFFERING);
+  }
+  loom_serve_recognition_stream_publish(service, false);
+  return iree_ok_status();
 }
 
 void loom_serve_recognition_stream_service_set_observer(
@@ -753,6 +962,7 @@ iree_status_t loom_serve_recognition_stream_service_try_open(
     row->phase = RECOGNITION_ROW_QUEUED;
     service->rows[index] = row;
     *out_stream = row;
+    loom_serve_recognition_stream_publish(service, true);
   } else {
     loom_serve_recognition_input_deinitialize(&row->input);
     iree_allocator_free(service->host_allocator, row);
@@ -837,6 +1047,18 @@ bool loom_serve_recognition_stream_is_complete(
   return !stream->service_open && !stream->pending_count;
 }
 
+bool loom_serve_recognition_stream_is_waiting(
+    const loom_serve_recognition_stream_t* stream) {
+  if (!stream->service_open || !stream->caller_open || stream->cancelled) {
+    return false;
+  }
+  return stream->phase == RECOGNITION_ROW_QUEUED ||
+         stream->phase == RECOGNITION_ROW_READY ||
+         stream->phase == RECOGNITION_ROW_AWAIT_INPUT ||
+         (stream->phase == RECOGNITION_ROW_PUBLISHING &&
+          !stream->result.complete);
+}
+
 iree_status_t loom_serve_recognition_stream_status(
     const loom_serve_recognition_stream_t* stream) {
   return iree_status_clone(stream->status);
@@ -883,6 +1105,7 @@ void loom_serve_recognition_stream_service_free(
 iree_status_t loom_serve_recognition_stream_service_allocate(
     loom_runtime_host_t* host, loom_serve_recognition_generator_t generator,
     const loom_serve_recognition_stream_service_options_t* options,
+    loom_runtime_service_control_binding_t scheduling,
     iree_allocator_t host_allocator,
     loom_serve_recognition_stream_service_t** out_service) {
   *out_service = NULL;
@@ -890,10 +1113,10 @@ iree_status_t loom_serve_recognition_stream_service_allocate(
       !generator.complete_admit || !generator.prepare_work ||
       !generator.prepare_batch || !generator.submit || !generator.collect ||
       !generator.release_batch || !generator.release ||
-      !generator.batch_units || !generator.request_capacity ||
-      !generator.input_capacity || !generator.frame_limit ||
-      !generator.event_capacity || !generator.event_bytes ||
-      !generator.outputs ||
+      generator.device_ordinal >= 64 || !generator.batch_units ||
+      !generator.request_capacity || !generator.input_capacity ||
+      !generator.frame_limit || !generator.event_capacity ||
+      !generator.event_bytes || !generator.outputs ||
       (generator.outputs & ~LOOM_SERVE_RECOGNITION_OUTPUT_ALL) ||
       !generator.format.sample_rate || !generator.format.channels ||
       !options->request_limit || !options->document_limit ||
@@ -907,6 +1130,20 @@ iree_status_t loom_serve_recognition_stream_service_allocate(
                             "recognition service requires a complete "
                             "generator and bounded input/output geometry");
   }
+  if (!scheduling.control || !scheduling.publish_observation) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "recognition requires retained scheduling storage");
+  }
+  const loom_runtime_service_control_layout_t layout =
+      loom_runtime_service_control_layout(scheduling.control);
+  if (scheduling.offer_ordinal >= layout.offer_capacity ||
+      scheduling.operation_ordinal > layout.operation_capacity ||
+      layout.operation_capacity - scheduling.operation_ordinal <
+          RECOGNITION_OPERATION_COUNT) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "recognition scheduling needs one offer and two "
+                            "operation slots");
+  }
   loom_serve_recognition_stream_service_t* service = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_aligned(
       host_allocator, sizeof(*service),
@@ -915,6 +1152,12 @@ iree_status_t loom_serve_recognition_stream_service_allocate(
   service->host_allocator = host_allocator;
   service->generator = generator;
   service->options = *options;
+  service->scheduling.binding = scheduling;
+  service->scheduling.offer.key.ordinal = scheduling.offer_ordinal;
+  for (iree_host_size_t i = 0; i < RECOGNITION_OPERATION_COUNT; ++i) {
+    service->scheduling.operations[i].key.ordinal =
+        scheduling.operation_ordinal + i;
+  }
   service->executor = loom_runtime_host_executor(host);
   service->admit_next = true;
   iree_slim_mutex_initialize(&service->events.mutex);

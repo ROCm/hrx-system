@@ -57,6 +57,8 @@ typedef struct loom_serve_recognition_generator_t {
   iree_host_size_t request_capacity;
   // Maximum sum of compatible work units in one numerical batch.
   uint64_t batch_units;
+  // Actual device index in the retained group topology, never source order.
+  uint32_t device_ordinal;
   // CPU-only request preparation. Failure retains no handle. row_index remains
   // reserved by the service until discard/release consumes the handle.
   iree_status_t (*prepare)(void* self, iree_host_size_t row_index,
