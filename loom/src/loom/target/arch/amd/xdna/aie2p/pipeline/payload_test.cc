@@ -72,6 +72,8 @@ class PayloadTest : public ::testing::Test {
   loom_aie2p_native_context_t context_ = {};
   // Hardware coordinates indexed by column then row.
   std::vector<loom_aie2p_native_tile_t> tiles_;
+  // Physical route labels retained alongside the native context.
+  std::vector<loom_aie2p_native_route_t> routes_;
   // Already assigned physical paths in disjoint construction lifetimes.
   loom_aie2p_native_dma_path_t paths_[3] = {};
   // Native endpoint families consumed by payload formation.
@@ -180,8 +182,8 @@ TEST_F(PayloadTest, SourceOwnsPrefixesIndependentlyOfRouteLabels) {
   // cannot select a prefix root or consume additional root-table capacity.
   IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
       context_.family, 16, &arena_, &context_.routing));
-  loom_aie2p_native_route_t routes[16] = {};
-  context_.routes = routes;
+  routes_.resize(16);
+  context_.routes = routes_.data();
   uint32_t next_source = 1000;
   iree_host_size_t root = 0;
   for (size_t i = 0; i < 2; ++i) {
@@ -199,7 +201,7 @@ TEST_F(PayloadTest, SourceOwnsPrefixesIndependentlyOfRouteLabels) {
   for (size_t i = 0; i < 2; ++i) {
     const auto* payload = paths_[i].payload;
     const auto& terminal =
-        routes[payload->route_first + payload->route_count - 1];
+        routes_[payload->route_first + payload->route_count - 1];
     EXPECT_EQ(terminal.edge->coordinate.row, 2 + i);
     EXPECT_TRUE(terminal.edge->dma_destination);
     EXPECT_EQ(terminal.packet, i);
@@ -235,8 +237,8 @@ TEST_F(PayloadTest, LaterPassthroughConstrainsAnEarlierShortIngress) {
   Form();
   IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
       context_.family, 32, &arena_, &context_.routing));
-  loom_aie2p_native_route_t routes[32] = {};
-  context_.routes = routes;
+  routes_.resize(32);
+  context_.routes = routes_.data();
   // The SRAM sender occupies north lane zero. A shim packet terminating in
   // SRAM may arrive on south lane zero, but that lane cannot subsequently
   // pass through: the SRAM switch pairs south/north passthrough lanes.
@@ -569,8 +571,6 @@ class MulticastPayloadTest
   std::vector<std::vector<std::vector<uint32_t>>> packet_receivers_;
   // Per-worker geometry lists.
   std::vector<loom_aie2p_native_distribution_plan_t> plans_;
-  // Complete route labels consumed by native switch admission.
-  std::vector<loom_aie2p_native_route_t> routes_;
   // Emitted switch banks indexed by physical tile.
   std::vector<const loom_aie2p_native_switch_t*> switches_;
   // Resource rejection evidence from the actual native planner.
