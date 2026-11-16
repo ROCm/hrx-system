@@ -28,7 +28,8 @@ typedef enum loom_pipeline_lifetime_kind_t {
 typedef struct loom_pipeline_lifetime_t {
   // Relation between this node's children, or one construction-owned leaf.
   loom_pipeline_lifetime_kind_t kind;
-  // Owning invocation ordinal for OWNER; unused for composition nodes.
+  // Construction owning this state or composition scope. Composition nodes
+  // retain the enclosing owner so shared demands can join without a tree walk.
   iree_host_size_t owner;
   // Parent index, or IREE_HOST_SIZE_MAX for the root.
   iree_host_size_t parent;
@@ -69,6 +70,13 @@ iree_status_t loom_pipeline_lifetimes_index(
 // Finds the nearest common ancestor in O(log(node count)) time, independently
 // of source nesting depth. Both nodes belong to this indexed lifetime tree.
 iree_host_size_t loom_pipeline_lifetimes_common_ancestor(
+    const loom_pipeline_lifetimes_t* lifetimes, iree_host_size_t first,
+    iree_host_size_t second);
+
+// Finds the nearest construction whose state coexists with both owners. The
+// result is a construction ordinal, including when their common ancestor is a
+// serial scope. This preserves outer state while children reuse resources.
+iree_host_size_t loom_pipeline_lifetimes_common_owner(
     const loom_pipeline_lifetimes_t* lifetimes, iree_host_size_t first,
     iree_host_size_t second);
 

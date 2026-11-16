@@ -448,40 +448,8 @@ static void loom_conditioned_value_facts_exit_local_scope(
 // so an empty intersection retains a conservative input.
 static void loom_conditioned_value_facts_apply_active_refinement(
     const loom_value_facts_t* constraint, loom_value_facts_t* destination) {
-  loom_value_facts_t result = *destination;
-  result.range_lo = iree_max(result.range_lo, constraint->range_lo);
-  result.range_hi = iree_min(result.range_hi, constraint->range_hi);
-  if (result.range_lo > result.range_hi) {
-    return;
-  }
-  if (result.known_divisor == 1) {
-    result.known_divisor = constraint->known_divisor;
-  } else if (constraint->known_divisor != 1 &&
-             constraint->known_divisor != result.known_divisor) {
-    int64_t divisor = 0;
-    if (!iree_math_checked_lcm_i64(result.known_divisor,
-                                   constraint->known_divisor, &divisor)) {
-      // Either individual divisor remains valid if their joint divisor does
-      // not fit the compact numeric summary.
-      divisor = iree_max(result.known_divisor, constraint->known_divisor);
-    }
-    result.known_divisor = divisor;
-  }
-  const uint32_t predicates =
-      (result.flags | constraint->flags) &
-      (LOOM_VALUE_FACT_NON_ZERO | LOOM_VALUE_FACT_POWER_OF_TWO);
-  result.flags |= predicates;
-  loom_value_facts_refine_predicate_range(&result);
-  if (result.range_lo == result.range_hi &&
-      (((predicates & LOOM_VALUE_FACT_NON_ZERO) && result.range_lo == 0) ||
-       ((predicates & LOOM_VALUE_FACT_POWER_OF_TWO) &&
-        (result.range_lo <= 0 ||
-         ((uint64_t)result.range_lo & ((uint64_t)result.range_lo - 1)))))) {
-    return;
-  }
-  loom_value_facts_recompute_flags(&result);
-  result.flags |= predicates;
-  *destination = result;
+  (void)loom_value_facts_refine_relation(LOOM_PREDICATE_EQ, *destination,
+                                         *constraint, destination, NULL);
 }
 
 // Only original providers with a different numeric representative need

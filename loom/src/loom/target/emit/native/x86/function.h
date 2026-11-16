@@ -23,8 +23,9 @@ extern "C" {
 typedef struct loom_x86_instruction_t {
   // Fully allocated operands; branch displacement is resolved during layout.
   loom_x86_encoding_operands_t operands;
-  // Shared CFG block ordinal for branches, module symbol ID for calls and
-  // symbolic addresses, or UINT32_MAX without a reference. The encoding format
+  // Shared CFG, epilogue, or function-local label for branches and local
+  // calls; module symbol ID for external calls and symbolic addresses; or
+  // UINT32_MAX without a reference. The encoding format
   // determines the namespace; this has no effect on instruction size or
   // register use.
   uint32_t reference;
@@ -75,6 +76,12 @@ typedef struct loom_x86_function_t {
   iree_host_size_t instruction_count;
   // Number of native symbol relocation rows written by this function.
   iree_host_size_t symbol_fixup_count;
+  // Additional branches from fallible calls to the common failure exit.
+  iree_host_size_t failure_branch_count;
+  // Function-local labels following the shared CFG and common epilogue IDs.
+  uint32_t local_label_count;
+  // Branches and local calls emitted within expanded native operations.
+  uint32_t local_fixup_count;
   // First instruction of each shared CFG block and the common epilogue. Entry
   // transport precedes every block and runs only when the function is invoked.
   iree_host_size_t* block_starts;

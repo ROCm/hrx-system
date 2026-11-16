@@ -4,6 +4,8 @@ aie2p.target<array> @device {device_profile = "amd.xdna.strix_halo.17f0_11"}
 
 // Each helper fits independently. Their aligned composition with the entry
 // exceeds the tile capacity and must use the same authored-program diagnostic.
+// This single lifetime has no replacement boundary: loading support cannot
+// reduce its footprint and must not inflate the reported native requirement.
 func.def noinline @fill_a(%storage: buffer) {
   %origin = index.constant 0 : offset
   %values = buffer.view %storage[%origin] : buffer -> view<1024xi32>
@@ -34,7 +36,7 @@ pipeline.def<kernel> public retain target(@device) @combined_program() run() {
   %memory = pipeline.memory<workgroup>[0, 3] : pool
   %bytes = index.constant 4096 : offset
   %storage = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
-  // ERROR@+1: XDNA/058 {function_name="__aie2p_worker_helper_2", required="19532", capacity="16384"}
+  // ERROR@+1: XDNA/058 {function_name="__aie2p_worker_helper_2", required="19548", capacity="16384"}
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
     func.call @fill_a(%storage) : (buffer)
     func.call @fill_b(%storage) : (buffer)
@@ -57,7 +59,7 @@ pipeline.def<kernel> public retain target(@device) @oversized_native_program() r
   %end = index.constant 2048 : index
   %step = index.constant 1 : index
   %value = scalar.constant 1 : i32
-  // ERROR@+1: XDNA/058 {function_name="__aie2p_worker_helper_2", required="19990", capacity="16384"}
+  // ERROR@+1: XDNA/058 {function_name="__aie2p_worker_helper_2", required="20006", capacity="16384"}
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
     %values = buffer.view %storage[%origin] : buffer -> view<2048xi32>
     scf.for %i = [%begin to %end step %step] unroll {
@@ -68,4 +70,4 @@ pipeline.def<kernel> public retain target(@device) @oversized_native_program() r
 
 // ----
 CHECK: COMPILE-REPORT: summary artifact=hal-executable status=FAILED_PRECONDITION *
-CHECK: COMPILE-REPORT: emission * code_bytes=19990 *
+CHECK: COMPILE-REPORT: emission * code_bytes=20006 *

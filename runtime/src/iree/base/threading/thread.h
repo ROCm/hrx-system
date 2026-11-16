@@ -74,6 +74,12 @@ typedef struct iree_thread_create_params_t {
   // This may be changed later via iree_thread_request_affinity; see that for
   // more information.
   iree_thread_affinity_t initial_affinity;
+
+  // Optional CPU budget intersected with initial_affinity before entry runs.
+  // NULL adds no constraint; an empty set or empty intersection fails creation.
+  // Storage is borrowed only through iree_thread_create, including for
+  // suspended threads. CPU numbering follows iree_thread_affinity_set_t.
+  const iree_thread_affinity_set_t* initial_processor_set;
 } iree_thread_create_params_t;
 
 typedef int (*iree_thread_entry_t)(void* entry_arg);
@@ -134,15 +140,21 @@ IREE_API_EXPORT void iree_thread_override_end(
 // request updates whenever new large amounts of work are about to be performed.
 //
 // Returns an error if the platform cannot apply the requested affinity.
-// An unspecified affinity leaves the current placement unchanged.
+// An unspecified affinity without a processor set leaves placement unchanged.
 // Linux and Windows restrict execution to the requested CPUs. NUMA-node
 // affinity selects eligible CPUs within that node; it does not bind memory.
+// A non-NULL |processor_set| bounds the requested affinity. With an unspecified
+// affinity the set itself selects CPUs. An empty set or empty intersection is
+// an error. Windows hard affinity remains within one processor group; a set
+// alone spanning groups is rejected. Set storage is borrowed only through this
+// call. Darwin does not support hard CPU sets.
 //
 // Darwin CPU IDs are advisory cache-affinity tags, not CPU bindings. On Apple
 // Silicon these tags have no effect; the SMT bit still selects background QoS
 // at creation. NUMA affinity is supported only for the sole memory domain (0).
 IREE_API_EXPORT iree_status_t iree_thread_request_affinity(
-    iree_thread_t* thread, iree_thread_affinity_t affinity);
+    iree_thread_t* thread, iree_thread_affinity_t affinity,
+    const iree_thread_affinity_set_t* processor_set);
 
 // Resumes |thread| if it was created suspended.
 // This has no effect if the thread is not suspended.

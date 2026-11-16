@@ -796,6 +796,181 @@ TEST(FactsApplyPredicate, IntegerIntersectionsAreIndependentOfPredicateOrder) {
   }
 }
 
+static bool NumericConjunctionContains(loom_value_facts_t facts,
+                                       int64_t value) {
+  return value >= facts.range_lo && value <= facts.range_hi &&
+         value % facts.known_divisor == 0 &&
+         (!(facts.flags & LOOM_VALUE_FACT_NON_ZERO) || value != 0) &&
+         (!(facts.flags & LOOM_VALUE_FACT_POWER_OF_TWO) ||
+          (value > 0 && !(static_cast<uint64_t>(value) &
+                          (static_cast<uint64_t>(value) - 1))));
+}
+
+TEST(FactsRefineRelation, EqualityConjoinsNumericPredicates) {
+  for (int64_t left_divisor : {1, 2, 3, 8}) {
+    for (int64_t right_divisor : {1, 2, 3, 8}) {
+      for (unsigned predicates = 0; predicates < 16; ++predicates) {
+        SCOPED_TRACE(::testing::Message()
+                     << "divisors=" << left_divisor << ',' << right_divisor
+                     << ", predicates=" << predicates);
+        auto left = loom_value_facts_make(-120, 120, left_divisor);
+        auto right = loom_value_facts_make(-99, 99, right_divisor);
+        if (predicates & 1) {
+          left.flags |= LOOM_VALUE_FACT_NON_ZERO;
+        }
+        if (predicates & 2) {
+          right.flags |= LOOM_VALUE_FACT_NON_ZERO;
+        }
+        if (predicates & 4) {
+          left.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+        }
+        if (predicates & 8) {
+          right.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+        }
+        loom_value_facts_refine_predicate_range(&left);
+        loom_value_facts_refine_predicate_range(&right);
+        auto refined_left = left;
+        auto refined_right = right;
+        ASSERT_TRUE(loom_value_facts_refine_relation(
+            LOOM_PREDICATE_EQ, left, right, &refined_left, &refined_right));
+        bool reachable = false;
+        for (int64_t value = -120; value <= 120; ++value) {
+          if (!NumericConjunctionContains(left, value) ||
+              !NumericConjunctionContains(right, value)) {
+            continue;
+          }
+          reachable = true;
+          ASSERT_TRUE(NumericConjunctionContains(refined_left, value));
+          ASSERT_TRUE(NumericConjunctionContains(refined_right, value));
+        }
+        if (!reachable) {
+          continue;
+        }
+        int64_t expected_divisor = 0;
+        ASSERT_TRUE(iree_math_checked_lcm_i64(
+            left.known_divisor, right.known_divisor, &expected_divisor));
+        EXPECT_EQ(refined_left.known_divisor, expected_divisor);
+        EXPECT_EQ(refined_right.known_divisor, expected_divisor);
+        const uint32_t required_predicates =
+            (left.flags | right.flags) &
+            (LOOM_VALUE_FACT_NON_ZERO | LOOM_VALUE_FACT_POWER_OF_TWO);
+        EXPECT_EQ(refined_left.flags & required_predicates,
+                  required_predicates);
+        EXPECT_EQ(refined_right.flags & required_predicates,
+                  required_predicates);
+        EXPECT_EQ(refined_left.range_lo, refined_right.range_lo);
+        EXPECT_EQ(refined_left.range_hi, refined_right.range_hi);
+        const auto first_left = refined_left;
+        const auto first_right = refined_right;
+        ASSERT_TRUE(loom_value_facts_refine_relation(
+            LOOM_PREDICATE_EQ, first_left, first_right, &refined_left,
+            &refined_right));
+        EXPECT_TRUE(loom_value_facts_equal(first_left, refined_left));
+        EXPECT_TRUE(loom_value_facts_equal(first_right, refined_right));
+      }
+    }
+  }
+}
+
+TEST(FactsRefineRelation, EqualityPreservesDestinationMetadata) {
+  auto left = loom_value_facts_make(0, 96, 8);
+  auto right = loom_value_facts_make(3, 99, 3);
+  loom_value_facts_mark_workgroup_uniform(&left);
+  loom_value_facts_mark_lane_varying(&right);
+  left.flags |= LOOM_VALUE_FACT_SUBGROUP_LANE_MASK;
+  left.extension_id = 7;
+  right.extension_id = 11;
+  const uint32_t metadata =
+      LOOM_VALUE_FACT_DISTRIBUTION_MASK | LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK;
+  for (unsigned outputs = 0; outputs < 4; ++outputs) {
+    auto refined_left = left;
+    auto refined_right = right;
+    ASSERT_TRUE(loom_value_facts_refine_relation(
+        LOOM_PREDICATE_EQ, left, right, outputs & 1 ? &refined_left : nullptr,
+        outputs & 2 ? &refined_right : nullptr));
+    for (unsigned side = 0; side < 2; ++side) {
+      const auto original = side ? right : left;
+      const auto refined = side ? refined_right : refined_left;
+      if (!(outputs & (1u << side))) {
+        EXPECT_TRUE(loom_value_facts_equal(original, refined));
+        continue;
+      }
+      EXPECT_EQ(refined.range_lo, 24);
+      EXPECT_EQ(refined.range_hi, 96);
+      EXPECT_EQ(refined.known_divisor, 24);
+      EXPECT_TRUE(loom_value_facts_is_subgroup_lane_mask(refined));
+      EXPECT_EQ(refined.flags & metadata, original.flags & metadata);
+      EXPECT_EQ(refined.extension_id, original.extension_id);
+    }
+  }
+  auto same_output = left;
+  ASSERT_TRUE(loom_value_facts_refine_relation(LOOM_PREDICATE_EQ, left, right,
+                                               &same_output, &same_output));
+  EXPECT_EQ(same_output.known_divisor, 24);
+  EXPECT_EQ(same_output.flags & metadata, left.flags & metadata);
+  EXPECT_EQ(same_output.extension_id, left.extension_id);
+}
+
+TEST(FactsRefineRelation,
+     EqualityKeepsTopologyAndPredicateRepresentationLocal) {
+  auto coordinate = loom_value_facts_make(0, 63, 1);
+  loom_value_facts_mark_lane_varying(&coordinate);
+  coordinate.flags |= LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_X;
+  auto selected = loom_value_facts_make(0, 31, 1);
+  loom_value_facts_mark_workgroup_uniform(&selected);
+  ASSERT_TRUE(loom_value_facts_refine_relation(
+      LOOM_PREDICATE_EQ, coordinate, selected, &coordinate, &selected));
+  EXPECT_EQ(coordinate.flags & LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK,
+            LOOM_VALUE_FACT_TOPOLOGY_WORKITEM_X);
+  EXPECT_EQ(selected.flags & LOOM_VALUE_FACT_TOPOLOGY_DOMAIN_MASK, 0u);
+
+  auto predicate = loom_value_facts_make(0, 1, 1);
+  loom_value_facts_mark_lane_predicate(&predicate);
+  auto uniform = loom_value_facts_make(0, 1, 1);
+  loom_value_facts_mark_subgroup_uniform(&uniform);
+  ASSERT_TRUE(loom_value_facts_refine_relation(LOOM_PREDICATE_EQ, predicate,
+                                               uniform, &predicate, &uniform));
+  EXPECT_TRUE(loom_value_facts_is_lane_predicate(predicate));
+  EXPECT_FALSE(loom_value_facts_is_lane_predicate(uniform));
+  EXPECT_TRUE(loom_value_facts_is_subgroup_uniform(uniform));
+}
+
+TEST(FactsRefineRelation, EqualityDivisorOverflowAndExtremeValues) {
+  for (bool reverse : {false, true}) {
+    auto large = loom_value_facts_make(INT64_MIN, INT64_MAX, INT64_MAX);
+    auto even = loom_value_facts_make(INT64_MIN, INT64_MAX, 2);
+    auto left = reverse ? even : large;
+    auto right = reverse ? large : even;
+    ASSERT_TRUE(loom_value_facts_refine_relation(LOOM_PREDICATE_EQ, left, right,
+                                                 &left, &right));
+    EXPECT_EQ(left.known_divisor, INT64_MAX);
+    EXPECT_EQ(right.known_divisor, INT64_MAX);
+    EXPECT_TRUE(NumericConjunctionContains(left, 0));
+    EXPECT_TRUE(NumericConjunctionContains(right, 0));
+  }
+  for (int64_t value : {INT64_MIN, INT64_C(0), INT64_MAX}) {
+    auto exact = loom_value_facts_exact_i64(value);
+    auto unknown = loom_value_facts_unknown();
+    ASSERT_TRUE(loom_value_facts_refine_relation(LOOM_PREDICATE_EQ, exact,
+                                                 unknown, &exact, &unknown));
+    EXPECT_EQ(exact.range_lo, value);
+    EXPECT_EQ(exact.range_hi, value);
+    EXPECT_EQ(unknown.range_lo, value);
+    EXPECT_EQ(unknown.range_hi, value);
+  }
+}
+
+TEST(FactsRefineRelation, ContradictoryEqualityRetainsConservativeInputs) {
+  auto left = loom_value_facts_make(0, 7, 1);
+  auto right = loom_value_facts_make(8, 15, 1);
+  const auto before_left = left;
+  const auto before_right = right;
+  ASSERT_TRUE(loom_value_facts_refine_relation(LOOM_PREDICATE_EQ, left, right,
+                                               &left, &right));
+  EXPECT_TRUE(loom_value_facts_equal(left, before_left));
+  EXPECT_TRUE(loom_value_facts_equal(right, before_right));
+}
+
 TEST(FactsRefineRelation, NarrowingRetainsExplicitNonzeroFacts) {
   loom_value_facts_t nonzero = loom_value_facts_make(0, 255, 1);
   nonzero.flags |= LOOM_VALUE_FACT_NON_ZERO;

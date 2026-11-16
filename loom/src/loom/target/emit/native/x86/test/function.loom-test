@@ -241,9 +241,9 @@ code: 53 48 83 ec 40 8b de c5 fe 6f 07 c5 fc 11 04 24 c5 f8 77 e8 00 00 00 00 85
 x86.target<avx2> @target
 
 low.func.def target<x86.avx2.core>(@target) abi_layout({signature = (f16) -> (f16)}) @stored_half(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
-  %slot = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
-  low.spill %value, %slot : reg<x86.gpr32>, low.storage<private>
-  %restored = low.reload %slot : low.storage<private> -> reg<x86.gpr32>
+  %slot = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  low.spill %value, %slot : reg<x86.gpr32>, low.storage<stack>
+  %restored = low.reload %slot : low.storage<stack> -> reg<x86.gpr32>
   return %restored
 }
 

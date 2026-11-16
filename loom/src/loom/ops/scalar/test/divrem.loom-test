@@ -117,3 +117,38 @@ func.def @signed_constants() -> (i8, i16, i16, i32, i64, i64, i64) {
   %one = scalar.constant 1 : i64
   func.return %negative_positive, %positive_negative, %remainder, %negative_negative, %third, %zero, %one : i8, i16, i16, i32, i64, i64, i64
 }
+
+// ====
+
+// Runtime dividends retain exact divisibility across signed widths. Paired
+// division keeps a live quotient while folding the independent remainder.
+func.def @signed_multiple_remainders(%byte_input: i8, %half_input: i16, %word_input: i32, %wide_input: i64) -> (i8, i16, i32, i64, i32, i64) {
+  %byte = scalar.assume %byte_input [range(%byte_input, -24, 18), multiple_of(%byte_input, 6)] : i8
+  %half = scalar.assume %half_input [range(%half_input, -24, 18), multiple_of(%half_input, 6)] : i16
+  %word = scalar.assume %word_input [range(%word_input, -24, 18), multiple_of(%word_input, 6)] : i32
+  %wide = scalar.assume %wide_input [range(%wide_input, -24, 18), multiple_of(%wide_input, 6)] : i64
+  %positive_byte = scalar.constant 3 : i8
+  %negative_half = scalar.constant -3 : i16
+  %positive_word = scalar.constant 3 : i32
+  %negative_wide = scalar.constant -3 : i64
+  %byte_remainder = scalar.remsi %byte, %positive_byte : i8
+  %half_remainder = scalar.remsi %half, %negative_half : i16
+  %word_quotient, %word_remainder = scalar.divremsi %word, %positive_word : i32
+  %wide_quotient, %wide_remainder = scalar.divremsi %wide, %negative_wide : i64
+  func.return %byte_remainder, %half_remainder, %word_remainder, %wide_remainder, %word_quotient, %wide_quotient : i8, i16, i32, i64, i32, i64
+}
+
+// ----
+func.def @signed_multiple_remainders(%byte_input: i8, %half_input: i16, %word_input: i32, %wide_input: i64) -> (i8, i16, i32, i64, i32, i64) {
+  %word = scalar.assume %word_input [range(%word_input, -24, 18), multiple_of(%word_input, 6)] : i32
+  %wide = scalar.assume %wide_input [range(%wide_input, -24, 18), multiple_of(%wide_input, 6)] : i64
+  %positive_word = scalar.constant 3 : i32
+  %negative_wide = scalar.constant -3 : i64
+  %byte_remainder = scalar.constant 0 : i8
+  %half_remainder = scalar.constant 0 : i16
+  %word_quotient = scalar.divsi %word, %positive_word : i32
+  %word_remainder = scalar.constant 0 : i32
+  %wide_quotient = scalar.divsi %wide, %negative_wide : i64
+  %wide_remainder = scalar.constant 0 : i64
+  func.return %byte_remainder, %half_remainder, %word_remainder, %wide_remainder, %word_quotient, %wide_quotient : i8, i16, i32, i64, i32, i64
+}

@@ -98,6 +98,7 @@ loom_cc_library(
     visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],
     deps = [
         ":target_record_table",
+        "//loom/src/loom/analysis/pipeline:entries",
         "//loom/src/loom/analysis/pipeline:execution",
         "//loom/src/loom/analysis/pipeline:invocations",
         "//loom/src/loom/analysis/pipeline:workers",

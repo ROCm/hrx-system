@@ -35,6 +35,13 @@ loom_test(
     execution_profiles = [XDNA_HARDWARE_PROFILE],
 )
 
+loom_test(
+    name = "program_replacement_execution_test",
+    srcs = ["program_replacement.loom"],
+    benchmark_smoke = False,
+    execution_profiles = [XDNA_HARDWARE_PROFILE],
+)
+
 loom_check_test_suite(
     name = "loom_check_test",
     srcs = [
@@ -47,6 +54,7 @@ loom_check_test_suite(
 loom_check_test_suite(
     name = "program_test",
     srcs = [
+        "loop_minimum_extent.loom-test",
         "program_data.loom-test",
         "program_link_lifetime.loom-test",
         "program_report.loom-test",
@@ -318,6 +326,72 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "program_layout",
+    srcs = ["program_layout.c"],
+    hdrs = ["program_layout.h"],
+    deps = [
+        ":leaf_program",
+        ":program_object",
+        "//loom/src/loom/analysis/pipeline:invocations",
+        "//loom/src/loom/analysis/pipeline:lifetime_retention",
+        "//loom/src/loom/util:adaptive_sort",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "program_loading",
+    srcs = ["program_loading.c"],
+    hdrs = ["program_loading.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:program_clone",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "program_loading_test",
+    srcs = ["program_loading_test.cc"],
+    deps = [
+        ":callable_compile",
+        ":program_loading",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/target:profile",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:provider",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:target_profile",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:encoding",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:registry",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/encoding",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/machine",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "program_layout_test",
+    srcs = ["program_layout_test.cc"],
+    deps = [
+        ":program_layout",
+        ":tile_link",
+        "//loom/src/loom/analysis/pipeline:invocations",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "call_clobbers",
     srcs = ["call_clobbers.c"],
     hdrs = ["call_clobbers.h"],
@@ -353,7 +427,6 @@ loom_cc_library(
     deps = [
         ":callable_compile",
         ":leaf_compile",
-        ":program_capacity",
         ":program_object",
         "//loom/src/loom/codegen/low:read_only_data",
         "//loom/src/loom/ir",
@@ -374,6 +447,7 @@ loom_cc_library(
     hdrs = ["tile_link.h"],
     deps = [
         ":leaf_object",
+        ":program_layout",
         ":relocation",
         "//loom/src/loom/target/arch/amd/xdna/array:facts",
         "//loom/src/loom/target/emit/native:contribution",
@@ -425,6 +499,22 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "program_catalog",
+    srcs = ["program_catalog.c"],
+    hdrs = ["program_catalog.h"],
+    deps = [
+        ":program",
+        ":program_layout",
+        ":tile_link",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/pipeline:execution_plan",
+        "//loom/src/loom/target/arch/amd/xdna/array:registers",
+        "//loom/src/loom/util:adaptive_sort",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "artifact",
     srcs = [
         "array_report.c",
@@ -433,6 +523,8 @@ loom_cc_library(
         "configuration.c",
         "configuration_report.c",
         "configuration_report.h",
+        "program_replacement.c",
+        "program_replacement.h",
     ],
     hdrs = [
         "artifact.h",
@@ -445,11 +537,18 @@ loom_cc_library(
     deps = [
         ":configuration_storage",
         ":leaf_compile",
+        ":leaf_program",
+        ":program",
+        ":program_capacity",
+        ":program_catalog",
         ":program_compile",
+        ":program_layout",
+        ":program_loading",
         ":tile_link",
         ":xdna_product",
         "//loom/src/loom/analysis:source_storage_packing",
         "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/analysis/pipeline:entries",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:function_model",
@@ -475,7 +574,9 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amd/xdna/aie2p/array:program",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/array:resident",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:configuration",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/pipeline:execution_plan",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/records:target_records",
+        "//loom/src/loom/target/arch/amd/xdna/array:registers",
         "//loom/src/loom/target/arch/amd/xdna/device:profile",
         "//loom/src/loom/target/reporting:low",
         "//loom/src/loom/target/reporting:report",
@@ -484,6 +585,18 @@ loom_cc_library(
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",
         "//runtime/src/iree/schemas:xdna_executable",
+    ],
+)
+
+loom_cc_test(
+    name = "program_catalog_test",
+    srcs = ["program_catalog_test.cc"],
+    deps = [
+        ":program_catalog",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -648,6 +761,18 @@ loom_cc_test(
     deps = [
         ":program_object",
         ":relocation",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "relocation_test",
+    srcs = ["relocation_test.cc"],
+    deps = [
+        ":relocation",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/encoding",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

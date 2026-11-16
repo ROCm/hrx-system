@@ -105,6 +105,7 @@ iree_status_t loom_value_fact_table_define_identity(
   }
   table->identities.entries[loom_value_fact_range_offset(
       table->identities.range, value_id)] = source;
+  loom_value_fact_table_publish_change(table, value_id);
   if (inout_changed) {
     *inout_changed = true;
   }
@@ -167,6 +168,7 @@ void loom_value_fact_table_undefine_identity(loom_value_fact_table_t* table,
       loom_value_fact_identity_root(identity)->representative != value_id) {
     table->identities.entries[loom_value_fact_range_offset(
         table->identities.range, value_id)] = NULL;
+    loom_value_fact_table_publish_change(table, value_id);
   }
 }
 

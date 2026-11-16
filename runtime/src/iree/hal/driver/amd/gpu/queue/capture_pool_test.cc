@@ -6,6 +6,7 @@
 
 #include "iree/hal/driver/amd/gpu/queue/capture_pool.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <barrier>
@@ -145,15 +146,31 @@ TEST_F(CapturePoolTest, TrimPreservesActiveBlocksAndAcceptsLaterReturns) {
   EXPECT_EQ(allocator_.live.load(), 0u);
 }
 
-TEST_F(CapturePoolTest, OversizedStorageReturnsDirectlyToAllocator) {
-  iree_byte_span_t block;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_capture_pool_acquire(&pool_, 1025, &block));
-  EXPECT_EQ(block.data_length, 1025u);
-  std::memset(block.data, 0xA5, block.data_length);
-  iree_hal_amd_gpu_capture_pool_trim(&pool_);
-  EXPECT_EQ(allocator_.live.load(), 1u);
-  iree_hal_amd_gpu_capture_pool_release(&pool_, block);
-  EXPECT_EQ(allocator_.live.load(), 0u);
+TEST_F(CapturePoolTest,
+       LargerExtentsReuseStorageAndRetainLivePayloadThroughTrim) {
+  const iree_host_size_t sizes[] = {1025, 1256,  2048,   2049,
+                                    4097, 65537, 1048577};
+  for (iree_host_size_t size : sizes) {
+    iree_byte_span_t block;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_capture_pool_acquire(&pool_, size, &block));
+    EXPECT_GE(block.data_length, size);
+    EXPECT_LT(block.data_length, 2 * size);
+    std::memset(block.data, 0xA5, block.data_length);
+    iree_hal_amd_gpu_capture_pool_trim(&pool_);
+    EXPECT_TRUE(std::all_of(block.data, block.data + block.data_length,
+                            [](uint8_t value) { return value == 0xA5; }));
+    iree_hal_amd_gpu_capture_pool_release(&pool_, block);
+    const size_t allocations = allocator_.allocations.load();
+    for (size_t iteration = 0; iteration < 8; ++iteration) {
+      IREE_ASSERT_OK(
+          iree_hal_amd_gpu_capture_pool_acquire(&pool_, size, &block));
+      std::memset(block.data, 0x59, block.data_length);
+      iree_hal_amd_gpu_capture_pool_release(&pool_, block);
+    }
+    EXPECT_EQ(allocator_.allocations.load(), allocations);
+    iree_hal_amd_gpu_capture_pool_trim(&pool_);
+    EXPECT_EQ(allocator_.live.load(), 0u);
+  }
 }
 
 TEST_F(CapturePoolTest, PartialPreallocationFailurePreservesExistingStorage) {
@@ -182,20 +199,31 @@ TEST_F(CapturePoolTest, AllocationFailureLeavesNoStorage) {
 }
 
 TEST_F(CapturePoolTest, UnalignedAndLargeBlockSizesPreserveCompletePayload) {
-  for (iree_host_size_t size :
+  for (iree_host_size_t base_size :
        std::array<iree_host_size_t, 3>{sizeof(void*), 1031u, 128u * 1024u}) {
     iree_hal_amd_gpu_capture_pool_t pool;
-    iree_hal_amd_gpu_capture_pool_initialize(size, allocator_.allocator(),
+    iree_hal_amd_gpu_capture_pool_initialize(base_size, allocator_.allocator(),
                                              &pool);
+    const iree_host_size_t sizes[] = {base_size - 1, base_size, base_size + 1,
+                                      2 * base_size + 1};
     std::array<iree_byte_span_t, 4> blocks;
-    for (auto& block : blocks) {
+    for (size_t i = 0; i < blocks.size(); ++i) {
+      auto& block = blocks[i];
       IREE_ASSERT_OK(
-          iree_hal_amd_gpu_capture_pool_acquire(&pool, size, &block));
-      EXPECT_EQ(block.data_length, size);
+          iree_hal_amd_gpu_capture_pool_acquire(&pool, sizes[i], &block));
+      if (sizes[i] <= base_size) {
+        EXPECT_EQ(block.data_length, base_size);
+      } else {
+        EXPECT_GE(block.data_length, sizes[i]);
+        EXPECT_LT(block.data_length, 2 * sizes[i]);
+      }
       EXPECT_EQ(reinterpret_cast<uintptr_t>(block.data) % iree_max_align_t, 0u);
-      std::memset(block.data, 0xA5, size);
+      std::memset(block.data, 0xA5, block.data_length);
     }
+    iree_hal_amd_gpu_capture_pool_trim(&pool);
     for (auto block : blocks) {
+      EXPECT_TRUE(std::all_of(block.data, block.data + block.data_length,
+                              [](uint8_t value) { return value == 0xA5; }));
       iree_hal_amd_gpu_capture_pool_release(&pool, block);
     }
     iree_hal_amd_gpu_capture_pool_deinitialize(&pool);
@@ -217,6 +245,15 @@ TEST_F(CapturePoolTest, SlabGeometryOverflowDoesNotReachAllocator) {
   EXPECT_EQ(block.data_length, 0u);
   EXPECT_EQ(allocator_.allocations.load(), 0u);
   iree_hal_amd_gpu_capture_pool_deinitialize(&pool);
+  for (iree_host_size_t size : {SIZE_MAX / 2 + 2, SIZE_MAX}) {
+    block = iree_make_byte_span(&size, sizeof(size));
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        iree_hal_amd_gpu_capture_pool_acquire(&pool_, size, &block));
+    EXPECT_EQ(block.data, nullptr);
+    EXPECT_EQ(block.data_length, 0u);
+  }
+  EXPECT_EQ(allocator_.allocations.load(), 0u);
 }
 
 TEST_F(CapturePoolTest, ConcurrentCallersRetirementAndTrim) {
@@ -239,8 +276,8 @@ TEST_F(CapturePoolTest, ConcurrentCallersRetirementAndTrim) {
       for (size_t round = 0; round < kRoundCount; ++round) {
         epoch.arrive_and_wait();
         for (auto& block : callers[i].blocks) {
-          IREE_EXPECT_OK(
-              iree_hal_amd_gpu_capture_pool_acquire(&pool_, 208, &block));
+          IREE_EXPECT_OK(iree_hal_amd_gpu_capture_pool_acquire(
+              &pool_, 208 + ((i + round) % 4) * 1024, &block));
           if (block.data) {
             std::memset(block.data, 1 + i + round, block.data_length);
           }
@@ -255,12 +292,12 @@ TEST_F(CapturePoolTest, ConcurrentCallersRetirementAndTrim) {
       epoch.arrive_and_wait();
       for (size_t i = 0; i < kCallerCount; ++i) {
         callers[i].published.acquire();
-        std::array<uint8_t, 1024> expected;
-        expected.fill(1 + i + round);
+        const uint8_t expected = 1 + i + round;
         for (auto block : callers[i].blocks) {
           if (block.data) {
-            EXPECT_EQ(std::memcmp(block.data, expected.data(), expected.size()),
-                      0);
+            EXPECT_TRUE(std::all_of(
+                block.data, block.data + block.data_length,
+                [expected](uint8_t value) { return value == expected; }));
             iree_hal_amd_gpu_capture_pool_release(&pool_, block);
           }
         }

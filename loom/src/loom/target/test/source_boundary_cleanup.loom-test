@@ -183,10 +183,20 @@ func.def public target(@target) @combine(%lhs: i32, %rhs: i32) -> (i32) {
 
 // ----
 low.func.def public target<test.low.core>(@target) abi(object_function) @combine(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
-  %result$20 = test.add.i32 %lhs, %lhs
-  %result$21 = test.add.i32 %rhs, %rhs
-  %result$22 = test.add.i32 %result$20, %result$21
-  return %result$22
+  %38 = concat(%lhs, %lhs, %lhs, %lhs) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  %39 = move %38 : reg<test.i32 x4> -> reg<test.i32 x4>
+  %40 = copy %39 : reg<test.i32 x4> -> reg<test.phys x4>
+  %41 = slice %39[0] : reg<test.i32 x4> -> reg<test.i32>
+  %42 = slice %40[0] : reg<test.phys x4> -> reg<test.phys>
+  %43 = test.add.i32.phys_rhs %41, %42
+  %55 = concat(%rhs, %rhs, %rhs, %rhs) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  %56 = move %55 : reg<test.i32 x4> -> reg<test.i32 x4>
+  %57 = copy %56 : reg<test.i32 x4> -> reg<test.phys x4>
+  %58 = slice %56[0] : reg<test.i32 x4> -> reg<test.i32>
+  %59 = slice %57[0] : reg<test.phys x4> -> reg<test.phys>
+  %60 = test.add.i32.phys_rhs %58, %59
+  %result = test.add.i32 %43, %60
+  return %result
 }
 
 // ====

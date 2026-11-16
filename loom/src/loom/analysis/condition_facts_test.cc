@@ -559,6 +559,15 @@ static bool EvaluateIntegerComparison(loom_index_cmp_predicate_t predicate,
   }
 }
 
+static bool IntegerFactsContain(loom_value_facts_t facts, int64_t value) {
+  return value >= facts.range_lo && value <= facts.range_hi &&
+         value % facts.known_divisor == 0 &&
+         (!(facts.flags & LOOM_VALUE_FACT_NON_ZERO) || value != 0) &&
+         (!(facts.flags & LOOM_VALUE_FACT_POWER_OF_TWO) ||
+          (value > 0 && !(static_cast<uint64_t>(value) &
+                          (static_cast<uint64_t>(value) - 1))));
+}
+
 static void ExpectRefinementContainsConcreteValues(
     const loom_condition_integer_comparison_t& comparison,
     const loom_module_t* module, const loom_fact_context_t* context,
@@ -575,34 +584,75 @@ static void ExpectRefinementContainsConcreteValues(
                                           maximum};
   constexpr uint8_t intervals[][2] = {{0, 6}, {0, 2}, {2, 4}, {3, 6},
                                       {3, 3}, {4, 4}, {1, 5}};
-  for (const auto& left_interval : intervals) {
-    for (const auto& right_interval : intervals) {
-      const auto left = loom_value_facts_make(samples[left_interval[0]],
-                                              samples[left_interval[1]], 1);
-      const auto right = loom_value_facts_make(samples[right_interval[0]],
-                                               samples[right_interval[1]], 1);
-      for (bool truth : {false, true}) {
-        SCOPED_TRACE(::testing::Message()
-                     << "width=" << bit_count << ", predicate="
-                     << oracle_predicate << ", truth=" << truth << ", left=["
-                     << left.range_lo << ',' << left.range_hi << "], right=["
-                     << right.range_lo << ',' << right.range_hi << ']');
-        auto refined_left = left;
-        auto refined_right = right;
-        loom_condition_integer_comparison_refine_facts(
-            &comparison, module, context, truth, &refined_left, &refined_right);
-        for (int64_t a : samples) {
-          for (int64_t b : samples) {
-            if (a < left.range_lo || a > left.range_hi || b < right.range_lo ||
-                b > right.range_hi ||
-                EvaluateIntegerComparison(oracle_predicate, bit_count, a, b) !=
-                    truth) {
-              continue;
+  struct NumericPredicates {
+    // Divisibility constraint on the left operand.
+    int64_t left_divisor;
+    // Divisibility constraint on the right operand.
+    int64_t right_divisor;
+    // Independent numeric predicates on the left operand.
+    uint32_t left_flags;
+    // Independent numeric predicates on the right operand.
+    uint32_t right_flags;
+  };
+  constexpr NumericPredicates predicates[] = {
+      {1, 1, 0, 0},
+      {8, 3, 0, 0},
+      {2, 8, LOOM_VALUE_FACT_NON_ZERO, LOOM_VALUE_FACT_NON_ZERO},
+      {4, 1, LOOM_VALUE_FACT_POWER_OF_TWO, LOOM_VALUE_FACT_NON_ZERO},
+      {1, 4, LOOM_VALUE_FACT_NON_ZERO, LOOM_VALUE_FACT_POWER_OF_TWO},
+  };
+  for (const auto& numeric : predicates) {
+    for (const auto& left_interval : intervals) {
+      for (const auto& right_interval : intervals) {
+        auto left = loom_value_facts_make(samples[left_interval[0]],
+                                          samples[left_interval[1]],
+                                          numeric.left_divisor);
+        auto right = loom_value_facts_make(samples[right_interval[0]],
+                                           samples[right_interval[1]],
+                                           numeric.right_divisor);
+        left.flags |= numeric.left_flags;
+        right.flags |= numeric.right_flags;
+        loom_value_facts_refine_predicate_range(&left);
+        loom_value_facts_refine_predicate_range(&right);
+        for (bool truth : {false, true}) {
+          SCOPED_TRACE(
+              ::testing::Message()
+              << "width=" << bit_count << ", predicate=" << oracle_predicate
+              << ", divisors=" << numeric.left_divisor << ","
+              << numeric.right_divisor << ", predicates=" << numeric.left_flags
+              << "," << numeric.right_flags << ", truth=" << truth << ", left=["
+              << left.range_lo << ',' << left.range_hi << "], right=["
+              << right.range_lo << ',' << right.range_hi << ']');
+          auto refined_left = left;
+          auto refined_right = right;
+          loom_condition_integer_comparison_refine_facts(
+              &comparison, module, context, truth, &refined_left,
+              &refined_right);
+          if (refined_left.range_lo <= refined_left.range_hi &&
+              refined_right.range_lo <= refined_right.range_hi) {
+            auto repeated_left = refined_left;
+            auto repeated_right = refined_right;
+            loom_condition_integer_comparison_refine_facts(
+                &comparison, module, context, truth, &repeated_left,
+                &repeated_right);
+            ASSERT_TRUE(loom_value_facts_equal(refined_left, repeated_left));
+            ASSERT_TRUE(loom_value_facts_equal(refined_right, repeated_right));
+          }
+          for (int64_t a : samples) {
+            for (int64_t b : samples) {
+              if (!IntegerFactsContain(left, a) ||
+                  !IntegerFactsContain(right, b) ||
+                  EvaluateIntegerComparison(oracle_predicate, bit_count, a,
+                                            b) != truth) {
+                continue;
+              }
+              EXPECT_LE(refined_left.range_lo, a);
+              EXPECT_GE(refined_left.range_hi, a);
+              EXPECT_LE(refined_right.range_lo, b);
+              EXPECT_GE(refined_right.range_hi, b);
+              EXPECT_TRUE(IntegerFactsContain(refined_left, a));
+              EXPECT_TRUE(IntegerFactsContain(refined_right, b));
             }
-            EXPECT_LE(refined_left.range_lo, a);
-            EXPECT_GE(refined_left.range_hi, a);
-            EXPECT_LE(refined_right.range_lo, b);
-            EXPECT_GE(refined_right.range_hi, b);
           }
         }
       }
@@ -691,6 +741,64 @@ TEST_F(ConditionFactsTest, RefinementUsesNumericCopiesWithoutAllocation) {
       loom_value_fact_table_lookup(&fact_table_, left), source));
   EXPECT_EQ(analysis_arena_.used_allocation_size, used_allocation_size);
   EXPECT_EQ(module_->arena.used_allocation_size, used_module_size);
+}
+
+TEST_F(ConditionFactsTest, UnsignedOutcomesPropagateTheNegativePartition) {
+  for (auto type :
+       {LOOM_SCALAR_TYPE_INDEX, LOOM_SCALAR_TYPE_I8, LOOM_SCALAR_TYPE_I16,
+        LOOM_SCALAR_TYPE_I32, LOOM_SCALAR_TYPE_I64}) {
+    const auto left = DefineValue(loom_type_scalar(type));
+    const auto right = DefineValue(loom_type_scalar(type));
+    for (const auto& operation : kIntegerComparisons) {
+      if (operation.index_predicate != LOOM_INDEX_CMP_PREDICATE_ULT &&
+          operation.index_predicate != LOOM_INDEX_CMP_PREDICATE_ULE &&
+          operation.index_predicate != LOOM_INDEX_CMP_PREDICATE_UGT &&
+          operation.index_predicate != LOOM_INDEX_CMP_PREDICATE_UGE) {
+        continue;
+      }
+      loom_condition_integer_comparison_t comparison = {};
+      const auto* compare =
+          type == LOOM_SCALAR_TYPE_INDEX
+              ? BuildIndexCompare(operation.index_predicate, left, right)
+              : BuildScalarCompare(operation.scalar_predicate, left, right);
+      ASSERT_TRUE(loom_condition_integer_comparison_describe(module_, compare,
+                                                             &comparison));
+      for (bool truth : {false, true}) {
+        const bool left_is_lower =
+            truth ==
+            (operation.index_predicate == LOOM_INDEX_CMP_PREDICATE_ULT ||
+             operation.index_predicate == LOOM_INDEX_CMP_PREDICATE_ULE);
+        auto lower = loom_value_facts_make(-16, -4, 1);
+        auto upper = loom_value_facts_make(-31, 31, 1);
+        loom_condition_integer_comparison_refine_facts(
+            &comparison, module_, &fact_table_.context, truth,
+            left_is_lower ? &lower : &upper, left_is_lower ? &upper : &lower);
+        EXPECT_LT(upper.range_hi, 0)
+            << "type=" << type << ", predicate=" << operation.index_predicate
+            << ", truth=" << truth;
+
+        // The condition result must retain the sign that made its mathematical
+        // relation valid, without changing either ambient operand.
+        const auto lower_input = loom_value_facts_make(-16, -4, 1);
+        const auto upper_input = loom_value_facts_make(-31, 31, 1);
+        DefineFacts(left, left_is_lower ? lower_input : upper_input);
+        DefineFacts(right, left_is_lower ? upper_input : lower_input);
+        ASSERT_TRUE(Query(loom_op_const_results(compare)[0], truth));
+        auto retained_upper = upper_input;
+        EXPECT_TRUE(loom_condition_fact_set_apply_to_value_facts(
+            &condition_facts_, &fact_table_, left_is_lower ? right : left,
+            &retained_upper));
+        EXPECT_EQ(retained_upper.range_lo, upper.range_lo);
+        EXPECT_EQ(retained_upper.range_hi, upper.range_hi);
+        EXPECT_TRUE(loom_value_facts_equal(
+            loom_value_fact_table_lookup(&fact_table_, left),
+            left_is_lower ? lower_input : upper_input));
+        EXPECT_TRUE(loom_value_facts_equal(
+            loom_value_fact_table_lookup(&fact_table_, right),
+            left_is_lower ? upper_input : lower_input));
+      }
+    }
+  }
 }
 
 TEST_F(ConditionFactsTest, AddressEdgesDoNotTruncateMathematicalEnvelopes) {

@@ -405,6 +405,11 @@ uint16_t loom_x86_encoding_gpr_writes(
     case LOOM_X86_ENCODING_FORM_BINARY_CARRY_OUT:
       return (1u << operands->result) | (1u << operands->secondary);
     case LOOM_X86_ENCODING_FORM_STORE:
+    case LOOM_X86_ENCODING_FORM_LABEL:
+    case LOOM_X86_ENCODING_FORM_BRANCH_FLAGS:
+    case LOOM_X86_ENCODING_FORM_TEST_IMMEDIATE_BRANCH:
+    case LOOM_X86_ENCODING_FORM_ZERO_MEMORY:
+    case LOOM_X86_ENCODING_FORM_LOCK_UNARY_MEMORY:
     case LOOM_X86_ENCODING_FORM_JUMP:
     case LOOM_X86_ENCODING_FORM_BRANCH_ZERO:
     case LOOM_X86_ENCODING_FORM_BRANCH_NONZERO:
@@ -413,6 +418,8 @@ uint16_t loom_x86_encoding_gpr_writes(
       return 0;
     case LOOM_X86_ENCODING_FORM_PUSH:
     case LOOM_X86_ENCODING_FORM_CALL:
+    case LOOM_X86_ENCODING_FORM_CALL_LOCAL:
+    case LOOM_X86_ENCODING_FORM_CALL_INDIRECT:
     case LOOM_X86_ENCODING_FORM_RETURN:
       return 1u << 4;
     case LOOM_X86_ENCODING_FORM_POP:
@@ -442,6 +449,35 @@ void loom_x86_encode_instruction(
   uint8_t extension = (encoding_id >> 9) & 7;
   uint16_t width_flags = encoding_id & LOOM_X86_ENCODING_REX_W;
   switch (form) {
+    case LOOM_X86_ENCODING_FORM_LABEL:
+      return;
+    case LOOM_X86_ENCODING_FORM_ZERO_MEMORY:
+      loom_x86_encode_memory(instruction, 0xc7 | width_flags, 0, lhs,
+                             LOOM_X86_ADDRESS_REGISTER_NONE, 0,
+                             (int32_t)operands->immediate);
+      loom_x86_encode_integer(instruction, 0, 4);
+      break;
+    case LOOM_X86_ENCODING_FORM_LOCK_UNARY_MEMORY:
+      loom_x86_encode_byte(instruction, 0xf0);
+      loom_x86_encode_memory(instruction, 0xff, extension, lhs,
+                             LOOM_X86_ADDRESS_REGISTER_NONE, 0,
+                             (int32_t)operands->immediate);
+      break;
+    case LOOM_X86_ENCODING_FORM_BRANCH_FLAGS:
+      loom_x86_encode_opcode(instruction,
+                             LOOM_X86_ENCODING_OPCODE_0F | 0x80 | encoding_id);
+      loom_x86_encode_integer(instruction, operands->immediate, 4);
+      return;
+    case LOOM_X86_ENCODING_FORM_CALL_INDIRECT:
+      loom_x86_encode_registers(instruction, 0xff, 2, lhs);
+      return;
+    case LOOM_X86_ENCODING_FORM_TEST_IMMEDIATE_BRANCH:
+      loom_x86_encode_registers(instruction, 0xf7 | width_flags, 0, lhs);
+      loom_x86_encode_integer(instruction, operands->immediate, 4);
+      loom_x86_encode_opcode(instruction, LOOM_X86_ENCODING_OPCODE_0F | 0x80 |
+                                              operands->secondary);
+      loom_x86_encode_integer(instruction, 0, 4);
+      return;
     case LOOM_X86_ENCODING_FORM_UNARY_RM:
       loom_x86_encode_registers(instruction, encoding_id, extension, result);
       break;
@@ -636,8 +672,9 @@ void loom_x86_encode_instruction(
       return;
     case LOOM_X86_ENCODING_FORM_JUMP:
     case LOOM_X86_ENCODING_FORM_CALL:
+    case LOOM_X86_ENCODING_FORM_CALL_LOCAL:
       loom_x86_encode_opcode(instruction,
-                             form == LOOM_X86_ENCODING_FORM_CALL ? 0xe8 : 0xe9);
+                             form == LOOM_X86_ENCODING_FORM_JUMP ? 0xe9 : 0xe8);
       loom_x86_encode_integer(instruction, operands->immediate, 4);
       return;
     case LOOM_X86_ENCODING_FORM_PUSH:

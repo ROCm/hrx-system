@@ -258,16 +258,24 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_copy32(uint32_t* words,
   return words + 6;
 }
 
-uint32_t* iree_hal_amd_gpu_pm4_emit_write(uint32_t* words,
-                                          uint64_t target_address,
-                                          uint32_t value_count,
-                                          const uint32_t* values) {
+uint32_t* iree_hal_amd_gpu_pm4_emit_write_header(uint32_t* words,
+                                                 uint64_t target_address,
+                                                 uint32_t value_count) {
   words[0] = iree_hal_amd_gpu_pm4_header(0x37, value_count + 4);
   words[1] = (2 << 8) | (1 << 20);
   words[2] = (uint32_t)target_address;
   words[3] = (uint32_t)(target_address >> 32);
-  iree_memcpy_write_only(words + 4, values, value_count * sizeof(*values));
-  return words + 4 + value_count;
+  return words + 4;
+}
+
+uint32_t* iree_hal_amd_gpu_pm4_emit_write(uint32_t* words,
+                                          uint64_t target_address,
+                                          uint32_t value_count,
+                                          const uint32_t* values) {
+  uint32_t* payload = iree_hal_amd_gpu_pm4_emit_write_header(
+      words, target_address, value_count);
+  iree_memcpy_write_only(payload, values, value_count * sizeof(*values));
+  return payload + value_count;
 }
 
 uint32_t* iree_hal_amd_gpu_pm4_emit_nop(uint32_t* words, uint32_t word_count) {

@@ -27,6 +27,10 @@ class AqlDependencyTest : public ::testing::Test {
     iree_hal_amd_gpu_signal_block_t block;
     // Independent ownership for four emulated native completion cells.
     std::array<iree_hal_amd_gpu_signal_t, 4> signals = {};
+    // Borrowed index records, kept stable until producer retirement.
+    std::array<iree_hal_amd_gpu_semaphore_producer_t, 4> publications = {};
+    // Timelines owned by the fixture until their publications are withdrawn.
+    std::array<iree_hal_semaphore_t*, 4> semaphores = {};
     // Hardware-owned coherent completion words.
     std::array<uint64_t, 4> values = {};
     // Two-queue causal snapshots attached to the native allocation.
@@ -53,11 +57,21 @@ class AqlDependencyTest : public ::testing::Test {
     for (auto& wait : waits_) {
       iree_hal_amd_gpu_signal_release(wait.signal);
     }
+    for (auto& queue : queues_) {
+      for (size_t i = 0; i < queue.publications.size(); ++i) {
+        if (queue.semaphores[i]) {
+          iree_hal_semaphore_fail(queue.semaphores[i],
+                                  iree_status_from_code(IREE_STATUS_CANCELLED));
+          iree_hal_amd_gpu_semaphore_unpublish_signal(queue.semaphores[i],
+                                                      &queue.publications[i]);
+        }
+      }
+    }
     for (auto* semaphore : semaphores_) {
       iree_hal_semaphore_release(semaphore);
     }
     for (auto* producer : producers_) {
-      iree_hal_amd_gpu_signal_retire(producer, IREE_STATUS_OK);
+      iree_hal_amd_gpu_signal_retire(producer, IREE_STATUS_CANCELLED);
       iree_hal_amd_gpu_signal_release(producer);
     }
     for (auto& queue : queues_) {
@@ -85,8 +99,11 @@ class AqlDependencyTest : public ::testing::Test {
                                   queue_index == 1 ? 7u : 0u};
     iree_hal_amd_gpu_signal_publish_frontier(producer, frontier);
     auto* semaphore = Semaphore();
-    IREE_CHECK_OK(
-        iree_hal_amd_gpu_semaphore_publish_signal(semaphore, 1, producer));
+    auto& queue = queues_[queue_index];
+    const size_t index = producer - queue.signals.data();
+    queue.semaphores[index] = semaphore;
+    IREE_CHECK_OK(iree_hal_amd_gpu_semaphore_publish_signal(
+        semaphore, 1, producer, &queue.publications[index]));
     waits_.push_back({.semaphore = semaphore, .value = 1});
     return producer;
   }
@@ -103,7 +120,7 @@ class AqlDependencyTest : public ::testing::Test {
   std::array<NativeQueue, 2> queues_;
   // Owned HAL timelines, released before their native allocation metadata.
   std::vector<iree_hal_semaphore_t*> semaphores_;
-  // Original native producer references, independent of cached and wait refs.
+  // Original native producer references, independent of acquired readers.
   std::vector<iree_hal_amd_gpu_signal_t*> producers_;
   // Borrowed semaphore records and any reader references admitted into them.
   std::vector<iree_hal_amd_gpu_aql_wait_t> waits_;
@@ -137,7 +154,7 @@ TEST_F(AqlDependencyTest, PartitionsCrossQueueOperandsWithoutDroppingReaders) {
   }
   EXPECT_EQ(same_count, 2u);
   for (auto* signal : producers_) {
-    EXPECT_EQ(iree_atomic_ref_count_load(&signal->state.live.ref_count), 3);
+    EXPECT_EQ(iree_atomic_ref_count_load(&signal->state.live.ref_count), 2);
   }
 }
 
@@ -156,7 +173,7 @@ TEST_F(AqlDependencyTest, DeferredAdmissionReturnsEveryAcquiredReader) {
     EXPECT_EQ(wait.signal, nullptr);
   }
   for (auto* signal : producers_) {
-    EXPECT_EQ(iree_atomic_ref_count_load(&signal->state.live.ref_count), 2);
+    EXPECT_EQ(iree_atomic_ref_count_load(&signal->state.live.ref_count), 1);
   }
 }
 
@@ -173,7 +190,7 @@ TEST_F(AqlDependencyTest, FailedAdmissionReturnsEveryAcquiredReader) {
     EXPECT_EQ(wait.signal, nullptr);
   }
   for (auto* signal : producers_) {
-    EXPECT_EQ(iree_atomic_ref_count_load(&signal->state.live.ref_count), 2);
+    EXPECT_EQ(iree_atomic_ref_count_load(&signal->state.live.ref_count), 1);
   }
 }
 

@@ -34,6 +34,7 @@ iree_py_library(
         "integer_unary.py",
         "memory.py",
         "packed_dot.py",
+        "reference.py",
         "register_transfer.py",
         "scalar.py",
         "vector_halves.py",

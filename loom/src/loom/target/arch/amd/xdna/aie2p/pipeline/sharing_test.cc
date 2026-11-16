@@ -77,7 +77,12 @@ class Aie2pSharingTest
         tiles_[receiver_index_].coordinate, 0, false));
     path_.routes.count = context_.routing.route_count;
     for (size_t i = 0; i < context_.routing.route_count; ++i) {
-      routes_.push_back({&context_.routing.routes[i], UINT8_MAX, UINT32_MAX});
+      routes_.push_back({
+          .edge = &context_.routing.routes[i],
+          .packet = UINT8_MAX,
+          .register_command = false,
+          .control_source = UINT32_MAX,
+      });
     }
     context_.routes = routes_.data();
   }
@@ -359,30 +364,31 @@ TEST(Aie2pSharingTest, IndependentCoresAgreeOnSharedPacketTerminals) {
   // One core reaches SRAM before the shim; another reaches the shim first.
   // Their independent source ordinals cannot define the shared packet IDs.
   const uint8_t memory_packet = loom_aie2p_native_delivery_packet(
-      &delivery, 0, &memory, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0);
+      &delivery, 0, &memory, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, UINT8_MAX);
   const uint8_t shim_packet = loom_aie2p_native_delivery_packet(
       &delivery, UINT32_C(1) << memory_packet, &shim,
-      LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0);
+      LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, UINT8_MAX);
   ASSERT_NE(memory_packet, shim_packet);
   EXPECT_EQ(loom_aie2p_native_delivery_packet(
-                &delivery, 0, &shim, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0),
+                &delivery, 0, &shim, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0,
+                UINT8_MAX),
             shim_packet);
   EXPECT_EQ(loom_aie2p_native_delivery_packet(
                 &delivery, UINT32_C(1) << shim_packet, &memory,
-                LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0),
+                LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, UINT8_MAX),
             memory_packet);
 
   const uint32_t occupied =
       (UINT32_C(1) << memory_packet) | (UINT32_C(1) << shim_packet);
   const uint8_t credit_packet = loom_aie2p_native_delivery_packet(
-      &delivery, occupied, &shim, LOOM_XDNA_STREAM_PORT_DMA, 0);
+      &delivery, occupied, &shim, LOOM_XDNA_STREAM_PORT_DMA, 0, UINT8_MAX);
   EXPECT_NE(credit_packet, memory_packet);
   EXPECT_NE(credit_packet, shim_packet);
-  EXPECT_EQ(loom_aie2p_native_delivery_packet(&delivery, 0, &shim,
-                                              LOOM_XDNA_STREAM_PORT_DMA, 0),
+  EXPECT_EQ(loom_aie2p_native_delivery_packet(
+                &delivery, 0, &shim, LOOM_XDNA_STREAM_PORT_DMA, 0, UINT8_MAX),
             credit_packet);
-  EXPECT_NE(loom_aie2p_native_delivery_packet(&delivery, 0, &shim,
-                                              LOOM_XDNA_STREAM_PORT_DMA, 1),
+  EXPECT_NE(loom_aie2p_native_delivery_packet(
+                &delivery, 0, &shim, LOOM_XDNA_STREAM_PORT_DMA, 1, UINT8_MAX),
             credit_packet);
 }
 
@@ -390,14 +396,50 @@ TEST(Aie2pSharingTest, UnsharedCorePacketsKeepIndependentIdentities) {
   const loom_aie2p_native_tile_t memory = {.coordinate = {0, 1}};
   const loom_aie2p_native_tile_t shim = {.coordinate = {0, 0}};
   EXPECT_EQ(loom_aie2p_native_delivery_packet(
-                nullptr, 0, &memory, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0),
+                nullptr, 0, &memory, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0,
+                UINT8_MAX),
             0);
+  EXPECT_EQ(
+      loom_aie2p_native_delivery_packet(
+          nullptr, 0, &shim, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, UINT8_MAX),
+      0);
+  EXPECT_EQ(
+      loom_aie2p_native_delivery_packet(
+          nullptr, 1, &shim, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, UINT8_MAX),
+      1);
+}
+
+TEST(Aie2pSharingTest, CanonicalCommandsReuseAnOccupiedIdentity) {
+  const loom_aie2p_native_tile_t memory = {.coordinate = {0, 1}};
+  loom_aie2p_native_delivery_t delivery = {};
+  delivery.packets[7] = {&memory, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0};
+  for (auto* carrier :
+       {&delivery, static_cast<loom_aie2p_native_delivery_t*>(nullptr)}) {
+    EXPECT_EQ(loom_aie2p_native_delivery_packet(
+                  carrier, UINT32_MAX, &memory,
+                  LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, 7),
+              7);
+  }
+}
+
+TEST(Aie2pSharingTest, CanonicalCommandsRespectBorrowedPayloadDestinations) {
+  const loom_aie2p_native_tile_t memory = {.coordinate = {0, 1}};
+  const loom_aie2p_native_tile_t shim = {.coordinate = {0, 0}};
+  loom_aie2p_native_delivery_t delivery = {};
+  delivery.packets[0] = {&memory, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0};
+  // A column identity cannot replace another source's destination when the
+  // complete command borrows a separately owned payload packet namespace.
   EXPECT_EQ(loom_aie2p_native_delivery_packet(
-                nullptr, 0, &shim, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0),
-            0);
-  EXPECT_EQ(loom_aie2p_native_delivery_packet(
-                nullptr, 1, &shim, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0),
+                &delivery, 1, &shim, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, 0),
             1);
+  EXPECT_EQ(delivery.packets[0].tile, &memory);
+  EXPECT_EQ(loom_aie2p_native_delivery_packet(&delivery, UINT32_MAX, &memory,
+                                              LOOM_XDNA_STREAM_PORT_DMA, 0, 0),
+            UINT8_MAX);
+  EXPECT_EQ(loom_aie2p_native_delivery_packet(
+                &delivery, UINT32_MAX, &memory,
+                LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 1, 0),
+            UINT8_MAX);
 }
 
 TEST(Aie2pSharingTest, CollectivesPreserveSparseControlIdentities) {
@@ -409,17 +451,17 @@ TEST(Aie2pSharingTest, CollectivesPreserveSparseControlIdentities) {
   for (uint8_t i = 0; i < 30; ++i) {
     terminals[i].coordinate = {static_cast<uint16_t>(i / 6),
                                static_cast<uint16_t>(i % 6)};
-    ASSERT_NE(
-        loom_aie2p_native_delivery_packet(
-            &delivery, 0, &terminals[i], LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0),
-        UINT8_MAX);
+    ASSERT_NE(loom_aie2p_native_delivery_packet(
+                  &delivery, 0, &terminals[i],
+                  LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, UINT8_MAX),
+              UINT8_MAX);
   }
   const uint8_t control = loom_aie2p_native_delivery_packet(
-      &delivery, 0, &memory, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0);
+      &delivery, 0, &memory, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, UINT8_MAX);
   ASSERT_EQ(control, 31);
   uint32_t occupied = UINT32_C(1) << control;
-  EXPECT_EQ(loom_aie2p_native_collective_packet(&occupied), 30);
-  EXPECT_EQ(loom_aie2p_native_collective_packet(&occupied), 29);
+  EXPECT_EQ(loom_aie2p_native_collective_packet(&occupied, 0), 30);
+  EXPECT_EQ(loom_aie2p_native_collective_packet(&occupied, 0), 29);
   EXPECT_EQ(occupied, UINT32_C(0xe0000000));
 }
 
@@ -428,7 +470,7 @@ TEST(Aie2pSharingTest, CollectivesReserveEveryNonPayloadIdentityOnce) {
   uint32_t occupied = payload;
   uint32_t selected = 0;
   for (uint8_t i = 0; i < 31; ++i) {
-    const uint8_t packet = loom_aie2p_native_collective_packet(&occupied);
+    const uint8_t packet = loom_aie2p_native_collective_packet(&occupied, 0);
     ASSERT_LT(packet, 32);
     EXPECT_NE(packet, LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID);
     const uint32_t bit = UINT32_C(1) << packet;
@@ -437,7 +479,7 @@ TEST(Aie2pSharingTest, CollectivesReserveEveryNonPayloadIdentityOnce) {
     EXPECT_EQ(occupied, selected | payload);
   }
   EXPECT_EQ(selected, UINT32_C(0xfffeffff));
-  EXPECT_EQ(loom_aie2p_native_collective_packet(&occupied), UINT8_MAX);
+  EXPECT_EQ(loom_aie2p_native_collective_packet(&occupied, 0), UINT8_MAX);
   EXPECT_EQ(occupied, selected | payload);
 }
 
@@ -445,30 +487,51 @@ TEST(Aie2pSharingTest, UnsharedCollectivesCanUseEveryPacketIdentity) {
   uint32_t occupied = 0;
   for (uint8_t i = 0; i < 32; ++i) {
     const uint32_t previous = occupied;
-    const uint8_t packet = loom_aie2p_native_collective_packet(&occupied);
+    const uint8_t packet = loom_aie2p_native_collective_packet(&occupied, 0);
     ASSERT_LT(packet, 32);
     EXPECT_EQ(previous & (UINT32_C(1) << packet), 0u);
     EXPECT_EQ(occupied, previous | (UINT32_C(1) << packet));
   }
   EXPECT_EQ(occupied, UINT32_MAX);
-  EXPECT_EQ(loom_aie2p_native_collective_packet(&occupied), UINT8_MAX);
+  EXPECT_EQ(loom_aie2p_native_collective_packet(&occupied, 0), UINT8_MAX);
   EXPECT_EQ(occupied, UINT32_MAX);
+}
+
+TEST(Aie2pSharingTest, CollectivesExcludeOtherSourcesOnSharedCommandPaths) {
+  // Every bit can be the sole remaining identity. The other source's commands
+  // are not locally occupied, but merging the streams makes them unavailable.
+  for (uint8_t available = 0; available < 32; ++available) {
+    const uint32_t bit = UINT32_C(1) << available;
+    uint32_t occupied = 0;
+    const uint32_t shared = ~bit;
+    EXPECT_EQ(loom_aie2p_native_collective_packet(&occupied, shared),
+              available);
+    EXPECT_EQ(occupied, bit);
+    EXPECT_EQ(loom_aie2p_native_collective_packet(&occupied, shared),
+              UINT8_MAX);
+    EXPECT_EQ(occupied, bit);
+  }
+  uint32_t occupied = 0;
+  EXPECT_EQ(loom_aie2p_native_collective_packet(&occupied, UINT32_MAX),
+            UINT8_MAX);
+  EXPECT_EQ(occupied, 0u);
 }
 
 TEST(Aie2pSharingTest, ControlSelectionPreservesCollectiveIdentities) {
   const loom_aie2p_native_tile_t memory = {.coordinate = {0, 1}};
   // The shared payload and all but two other IDs are assigned on this core.
   uint32_t occupied = UINT32_C(0x7ffffffe);
-  EXPECT_EQ(loom_aie2p_native_collective_packet(&occupied), 31);
+  EXPECT_EQ(loom_aie2p_native_collective_packet(&occupied, 0), 31);
   const uint8_t control = loom_aie2p_native_delivery_packet(
-      nullptr, occupied, &memory, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0);
+      nullptr, occupied, &memory, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0,
+      UINT8_MAX);
   ASSERT_EQ(control, 0);
   occupied |= UINT32_C(1) << control;
-  EXPECT_EQ(loom_aie2p_native_collective_packet(&occupied), UINT8_MAX);
-  EXPECT_EQ(
-      loom_aie2p_native_delivery_packet(nullptr, occupied, &memory,
-                                        LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0),
-      UINT8_MAX);
+  EXPECT_EQ(loom_aie2p_native_collective_packet(&occupied, 0), UINT8_MAX);
+  EXPECT_EQ(loom_aie2p_native_delivery_packet(
+                nullptr, occupied, &memory, LOOM_XDNA_STREAM_PORT_TILE_CONTROL,
+                0, UINT8_MAX),
+            UINT8_MAX);
 }
 
 }  // namespace

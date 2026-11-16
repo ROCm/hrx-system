@@ -78,7 +78,7 @@ TEST(AqlSignalTest, InitializesNativeAbiAndRecyclesOnlyAfterReadersRetire) {
   iree_hal_amd_gpu_signal_pool_deinitialize(&pool);
 }
 
-TEST(AqlSignalTest, SemaphoreCacheDoesNotOwnTheLastDependentReader) {
+TEST(AqlSignalTest, WithdrawnProducerDoesNotOwnTheLastDependentReader) {
   iree_async_proactor_t* proactor = nullptr;
   IREE_ASSERT_OK(
       iree_async_proactor_create_platform(iree_async_proactor_options_default(),
@@ -97,10 +97,11 @@ TEST(AqlSignalTest, SemaphoreCacheDoesNotOwnTheLastDependentReader) {
   iree_hal_amd_gpu_aql_signal_block_attach(&pool, &pool, &event, &native,
                                            0x4000, &block);
   auto* producer = iree_hal_amd_gpu_signal_pool_try_acquire(&pool, 1);
+  iree_hal_amd_gpu_semaphore_producer_t publication = {};
   const uint64_t epoch = 7;
   iree_hal_amd_gpu_signal_publish_frontier(producer, &epoch);
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_semaphore_publish_signal(semaphore, 5, producer));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_publish_signal(
+      semaphore, 5, producer, &publication));
   iree_hal_amd_gpu_semaphore_wait_t reader;
   IREE_ASSERT_OK(
       iree_hal_amd_gpu_semaphore_acquire_wait(semaphore, 5, &pool, &reader));
@@ -116,6 +117,7 @@ TEST(AqlSignalTest, SemaphoreCacheDoesNotOwnTheLastDependentReader) {
   iree_hal_amd_gpu_signal_retire(producer, IREE_STATUS_OK);
   IREE_ASSERT_OK(
       iree_hal_amd_gpu_semaphore_publish_completed(semaphore, 5, nullptr));
+  iree_hal_amd_gpu_semaphore_unpublish_signal(semaphore, &publication);
   iree_hal_amd_gpu_signal_release(producer);
   iree_hal_semaphore_release(semaphore);
   EXPECT_FALSE(iree_hal_amd_gpu_signal_block_try_deinitialize(&block));

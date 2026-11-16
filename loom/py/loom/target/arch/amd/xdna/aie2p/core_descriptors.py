@@ -2019,6 +2019,19 @@ def _event_separations() -> tuple[EventSeparation, ...]:
     lock_consumer_event = descriptor_specs._LOCK_EFFECT.consumer_event
     if lock_producer_event is None or lock_consumer_event is None:
         raise ValueError("AIE2P lock effect must define both timing endpoints")
+    # A lock can stall the core after subsequent instructions have issued.
+    # Starting a stream packet in that window can hold a switch arbiter while
+    # the lock waits for another worker that needs the same arbiter. Keep the
+    # first word beyond the lock's resume boundary; later words still issue
+    # consecutively through the stream-to-stream relation above.
+    result.append(
+        EventSeparation(
+            lock_producer_event,
+            _SCALAR_STREAM_ISSUE_EVENT,
+            descriptor_specs._LOCK_CORE_RESUME_CYCLE,
+            ModelQuality.EXACT,
+        )
+    )
     result.append(
         EventSeparation(
             lock_producer_event,

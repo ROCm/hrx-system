@@ -111,6 +111,8 @@ typedef struct iree_hal_amd_gpu_pm4_submission_t {
   iree_hal_amd_gpu_pm4_submission_wait_t* waits;
   // Owned signal timelines and copied values in inline storage.
   iree_hal_semaphore_list_t signals;
+  // Borrowed semaphore index records, owned through native producer retirement.
+  iree_hal_amd_gpu_semaphore_producer_t* signal_producers;
   // Prepared pre-operation execution/cache boundary.
   iree_hal_amd_gpu_pm4_barrier_t before;
   // Prepared terminal execution/cache boundary.

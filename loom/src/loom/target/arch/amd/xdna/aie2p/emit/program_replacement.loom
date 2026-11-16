@@ -1,0 +1,198 @@
+// A producer streams three requests through a one-slot ring. Each A/B/A phase
+// holds its read throughout the shared-helper calls, retaining producer
+// backpressure across that work. A third worker writes an independent result.
+// Unrolling forces A and B to exceed the instruction store together while
+// each fits separately. Both use the same resident helper and outer storage;
+// revisiting A must restore its code without resetting data or channel state.
+// A ends with a vector loop whose hardware-loop addresses are reused by B's
+// unrolled calls. Replacement must retire the old loop state as well as its
+// instructions, even though B does not install a hardware loop of its own.
+aie2p.target<array> @device {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+func.def noinline @shared_step(%value: i32, %amount: i32) -> (i32) {
+  %sum = scalar.addi %value, %amount : i32
+  %factor = scalar.constant 3 : i32
+  %result = scalar.muli %sum, %factor : i32
+  func.return %result : i32
+}
+
+pipeline.def @initialize() run(%storage: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %count = index.constant 320 : index
+  %step = index.constant 1 : index
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %values = buffer.view %storage[%origin] : buffer -> view<320xi32>
+    scf.for %i = [%begin to %count step %step] {
+      %value = index.cast %i : index to i32
+      view.store %value, %values[%i] : i32, view<320xi32>
+    }
+  }
+}
+
+pipeline.def @phase_a() run(%storage: buffer, %requests: channel<tile<16xi32>>) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %count = index.constant 320 : index
+  %step = index.constant 1 : index
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %read, %request = channel.acquire %requests : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %values = buffer.view %storage[%origin] : buffer -> view<320xi32>
+    %amount = view.load %request[%begin] : view<16xi32> -> i32
+    scf.for %i = [%begin to %count step %step] unroll {
+      %value = view.load %values[%i] : view<320xi32> -> i32
+      %result = func.call @shared_step(%value, %amount) : (i32, i32) -> (i32)
+      view.store %result, %values[%i] : i32, view<320xi32>
+    }
+    %vector_step = index.constant 16 : index
+    %increment = vector.splati 1 : vector<16xi32>
+    scf.for %i = [%begin to %count step %vector_step] {
+      %value = vector.load %values[%i] : view<320xi32> -> vector<16xi32>
+      %result = vector.addi %value, %increment : vector<16xi32>
+      vector.store %result, %values[%i] : vector<16xi32>, view<320xi32>
+    }
+    channel.release %read : read<tile<16xi32>>
+  }
+}
+
+pipeline.def @phase_b() run(%storage: buffer, %requests: channel<tile<16xi32>>) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %count = index.constant 320 : index
+  %step = index.constant 1 : index
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %read, %request = channel.acquire %requests : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %values = buffer.view %storage[%origin] : buffer -> view<320xi32>
+    %amount = view.load %request[%begin] : view<16xi32> -> i32
+    %mask = scalar.constant 85 : i32
+    scf.for %i = [%begin to %count step %step] unroll {
+      %value = view.load %values[%i] : view<320xi32> -> i32
+      %mixed = scalar.xori %value, %mask : i32
+      %result = func.call @shared_step(%mixed, %amount) : (i32, i32) -> (i32)
+      view.store %result, %values[%i] : i32, view<320xi32>
+    }
+    channel.release %read : read<tile<16xi32>>
+  }
+}
+
+pipeline.def @record() run(%storage: buffer, %outgoing: channel<tile<320xi32>>, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %count = index.constant 320 : index
+  %step = index.constant 1 : index
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %values = buffer.view %storage[%origin] : buffer -> view<320xi32>
+    %write, %destination = channel.reserve %outgoing : channel<tile<320xi32>> -> (write<tile<320xi32>>, view<320xi32>)
+    scf.for %i = [%begin to %count step %step] {
+      %value = view.load %values[%i] : view<320xi32> -> i32
+      view.store %value, %destination[%i] : i32, view<320xi32>
+    }
+    channel.publish %write : write<tile<320xi32>>
+    %read, %payload = channel.acquire %outgoing : channel<tile<320xi32>> -> (read<tile<320xi32>>, view<320xi32>)
+    %external = buffer.view %output[%origin] : buffer -> view<320xi32>
+    %copy = kernel.async.copy %payload to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<320xi32> to view<320xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<320xi32>>
+  }
+}
+
+pipeline.def<kernel> public retain target(@device) @strand_replacement() run(%output_argument: buffer) {
+  %output = buffer.assume.alignment %output_argument {minimum_alignment = 4} : buffer
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %bytes = index.constant 1280 : offset
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 1 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(16) %bytes : buffer
+  %output_storage = buffer.alloca<workgroup> pool(%memory) align(16) %bytes : buffer
+  %slots = buffer.view %output_storage[%origin] : buffer -> view<1x320xi32>
+  %outgoing = channel.bind<fifo> %slots, %capacity : view<1x320xi32>, index -> channel<tile<320xi32>>
+  %record_bytes = index.constant 64 : offset
+  %independent_offset = index.constant 1280 : offset
+  %incoming_storage = buffer.alloca<workgroup> pool(%memory) align(64) %record_bytes : buffer
+  %incoming_slots = buffer.view %incoming_storage[%origin] : buffer -> view<1x16xi32>
+  %incoming = channel.bind<fifo> %incoming_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %other_memory = pipeline.memory<workgroup>[0, 4] : pool
+  %independent_storage = buffer.alloca<workgroup> pool(%other_memory) align(64) %record_bytes : buffer
+  %independent_slots = buffer.view %independent_storage[%origin] : buffer -> view<1x16xi32>
+  %independent = channel.bind<fifo> %independent_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %records = index.constant 3 : index
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %write, %payload = channel.reserve %incoming : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      %number = index.cast %record : index to i32
+      %bias = scalar.constant 7 : i32
+      %value = scalar.addi %number, %bias : i32
+      %values = vector.splat %value : vector<16xi32>
+      vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
+      channel.publish %write : write<tile<16xi32>>
+    }
+  }
+  pipeline.strand workers([0, 4], [1, 1], [1, 1]) {
+    %write, %payload = channel.reserve %independent : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    %values = vector.splati 701 : vector<16xi32>
+    vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
+    channel.publish %write : write<tile<16xi32>>
+    %read, %source = channel.acquire %independent : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %external = buffer.view %output[%independent_offset] : buffer -> view<16xi32>
+    %copy = kernel.async.copy %source to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<16xi32>>
+  }
+  pipeline.serial {
+    pipeline.compose @initialize(%storage) : (buffer)
+    pipeline.compose @phase_a(%storage, %incoming) : (buffer, channel<tile<16xi32>>)
+    pipeline.compose @phase_b(%storage, %incoming) : (buffer, channel<tile<16xi32>>)
+    pipeline.compose @phase_a(%storage, %incoming) : (buffer, channel<tile<16xi32>>)
+    pipeline.compose @record(%storage, %outgoing, %output) : (buffer, channel<tile<320xi32>>, buffer)
+  }
+}
+
+func.def @reference(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %count = index.constant 320 : index
+  %step = index.constant 1 : index
+  %first_amount = scalar.constant 7 : i32
+  %middle_amount = scalar.constant 8 : i32
+  %last_amount = scalar.constant 9 : i32
+  %factor = scalar.constant 3 : i32
+  %mask = scalar.constant 85 : i32
+  %increment = scalar.constant 1 : i32
+  %values = buffer.view %output[%origin] : buffer -> view<320xi32>
+  scf.for %i = [%begin to %count step %step] {
+    %initial = index.cast %i : index to i32
+    %a0 = scalar.addi %initial, %first_amount : i32
+    %scaled_a = scalar.muli %a0, %factor : i32
+    %a = scalar.addi %scaled_a, %increment : i32
+    %mixed = scalar.xori %a, %mask : i32
+    %b0 = scalar.addi %mixed, %middle_amount : i32
+    %b = scalar.muli %b0, %factor : i32
+    %last0 = scalar.addi %b, %last_amount : i32
+    %scaled_last = scalar.muli %last0, %factor : i32
+    %last = scalar.addi %scaled_last, %increment : i32
+    view.store %last, %values[%i] : i32, view<320xi32>
+  }
+  %extra_offset = index.constant 1280 : offset
+  %extra = buffer.view %output[%extra_offset] : buffer -> view<16xi32>
+  %lanes = index.constant 16 : index
+  %independent_value = scalar.constant 701 : i32
+  scf.for %i = [%begin to %lanes step %step] {
+    view.store %independent_value, %extra[%i] : i32, view<16xi32>
+  }
+  func.return
+}
+
+check.scenario public @repeated_replacement {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(-9999) : tensor<368xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<368xi32> -> tensor<336xi32>
+    check.compare<@strand_replacement, @reference>(%output) : (tensor<336xi32>) -> () {
+      check.expect.equal actual(%storage) expected(%storage) : tensor<368xi32>
+    }
+  }
+  check.return
+}

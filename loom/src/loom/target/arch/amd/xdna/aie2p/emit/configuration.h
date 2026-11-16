@@ -24,8 +24,8 @@ typedef struct loom_aie2p_configuration_plan_t loom_aie2p_configuration_plan_t;
 typedef struct loom_aie2p_configuration_worker_set_t {
   // Private worker/helper definitions and translated source analysis products.
   loom_aie2p_program_clone_t clone;
-  // Compiled complete workers indexed by module-local source symbol ID.
-  loom_aie2p_leaf_contribution_t** contributions_by_symbol;
+  // Detached programs and logical function identities indexed by source symbol.
+  loom_aie2p_program_object_t** programs_by_symbol;
 } loom_aie2p_configuration_worker_set_t;
 
 // Builds a physical configuration plan and its source-known product entry.

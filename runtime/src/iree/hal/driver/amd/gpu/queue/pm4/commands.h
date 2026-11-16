@@ -197,8 +197,15 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_copy32(uint32_t* words,
                                            uint64_t source_address,
                                            uint64_t target_address);
 
-// Emits 4 + value_count DWORDs of confirmed, incrementing WRITE_DATA through
-// TC/L2. Captures 1..16381 payload DWORDs into the command stream. The
+// Emits the four-DWORD header for confirmed, incrementing WRITE_DATA with a TC
+// destination and returns its payload. The caller initializes all 1..16381
+// payload DWORDs before publication. The destination is DWORD aligned.
+uint32_t* iree_hal_amd_gpu_pm4_emit_write_header(uint32_t* words,
+                                                 uint64_t target_address,
+                                                 uint32_t value_count);
+
+// Emits 4 + value_count DWORDs of confirmed, incrementing WRITE_DATA with a TC
+// destination. Captures 1..16381 payload DWORDs into the command stream. The
 // destination is DWORD aligned; values do not overlap the output command
 // extent. This does not invalidate shader caches or complete earlier shader
 // execution.

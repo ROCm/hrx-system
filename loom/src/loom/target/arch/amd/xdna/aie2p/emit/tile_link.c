@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/target/arch/amd/xdna/aie2p/emit/program_layout.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/relocation.h"
 
 static bool loom_aie2p_tile_link_ranges_overlap(uint64_t lhs_address,
@@ -62,7 +63,8 @@ static iree_status_t loom_aie2p_tile_link_assign_addresses(
   const uint64_t code_length = loom_native_section_byte_length(code_section);
   if (code_section->storage != LOOM_NATIVE_SECTION_STORAGE_CONTENTS ||
       code_section->access != code_access ||
-      code_length != realization->code.byte_length) {
+      (!layout->program_layout &&
+       code_length != realization->code.byte_length)) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "AIE2P tile code section does not match its leaf realization");
@@ -78,6 +80,26 @@ static iree_status_t loom_aie2p_tile_link_assign_addresses(
           .memory_space = LOOM_XDNA_MEMORY_SPACE_PROGRAM,
           .owner_offset = layout->program_owner_offset,
       };
+  if (layout->program_layout) {
+    const loom_aie2p_program_layout_t* program = layout->program_layout;
+    for (iree_host_size_t i = 0; i < program->group_count; ++i) {
+      const loom_aie2p_program_layout_group_t* group = &program->groups[i];
+      const iree_host_size_t section_index =
+          assembly
+              ->contribution_layouts[group->native.section_contribution_index]
+              .section_index;
+      assembly->sections[section_index].address =
+          layout->program_address + group->offset;
+      section_placements[section_index] =
+          (loom_aie2p_linked_section_placement_t){
+              .memory_space = LOOM_XDNA_MEMORY_SPACE_PROGRAM,
+              .owner_offset =
+                  layout->program_owner_offset + (uint32_t)group->offset,
+              .load = i == 0 ? LOOM_AIE2P_SECTION_LOAD_INITIAL
+                             : LOOM_AIE2P_SECTION_LOAD_ON_DEMAND,
+          };
+    }
+  }
 
   for (iree_host_size_t i = 0; i < realization->read_only_data_count; ++i) {
     const loom_aie2p_leaf_read_only_data_domain_t* domain =

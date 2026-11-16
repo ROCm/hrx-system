@@ -40,7 +40,9 @@ static iree_status_t iree_hal_amd_gpu_pm4_submission_acquire_storage(
           sizeof(iree_hal_amd_gpu_pm4_submission_wait_t), &payload_offset) ||
       !iree_host_size_checked_mul_add(
           payload_offset, signals.count,
-          sizeof(iree_hal_semaphore_t*) + sizeof(uint64_t), &payload_offset) ||
+          sizeof(iree_hal_amd_gpu_semaphore_producer_t) +
+              sizeof(iree_hal_semaphore_t*) + sizeof(uint64_t),
+          &payload_offset) ||
       !iree_host_size_checked_align(payload_offset, 8, &payload_offset) ||
       !iree_host_size_checked_add(payload_offset, payload_size, &total_size)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -69,12 +71,16 @@ static iree_status_t iree_hal_amd_gpu_pm4_submission_acquire_storage(
   submission->waits = (iree_hal_amd_gpu_pm4_submission_wait_t*)cursor;
   cursor += wait_count * sizeof(*submission->waits);
   submission->signals.count = signals.count;
+  submission->signal_producers = (void*)cursor;
+  cursor += signals.count * sizeof(*submission->signal_producers);
   // Values precede pointers so odd signal counts retain alignment on 32-bit
   // hosts. The payload begins at its independently aligned offset above.
   submission->signals.payload_values = (uint64_t*)cursor;
   cursor += signals.count * sizeof(uint64_t);
   submission->signals.semaphores = (iree_hal_semaphore_t**)cursor;
   for (iree_host_size_t i = 0; i < signals.count; ++i) {
+    submission->signal_producers[i] =
+        (iree_hal_amd_gpu_semaphore_producer_t){0};
     submission->signals.semaphores[i] = signals.semaphores[i];
     submission->signals.payload_values[i] = signals.payload_values[i];
     iree_hal_semaphore_retain(signals.semaphores[i]);
@@ -567,6 +573,10 @@ static void iree_hal_amd_gpu_pm4_submission_destroy(
     iree_hal_semaphore_release(submission->waits[i].semaphore);
   }
   for (iree_host_size_t i = 0; i < submission->signals.count; ++i) {
+    if (submission->signal_producers[i].signal) {
+      iree_hal_amd_gpu_semaphore_unpublish_signal(
+          submission->signals.semaphores[i], &submission->signal_producers[i]);
+    }
     iree_hal_semaphore_release(submission->signals.semaphores[i]);
   }
   iree_hal_amd_gpu_signal_release(submission->signal);

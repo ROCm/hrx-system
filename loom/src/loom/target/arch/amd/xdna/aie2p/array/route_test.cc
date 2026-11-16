@@ -37,7 +37,7 @@ TEST(Aie2pRouteTest, PayloadAndCompletionSourcesOwnIndependentPrefixes) {
   ASSERT_TRUE(loom_aie2p_array_route_stream(
       &routing, 1000, &completion, {0, 0}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL,
       0, {0, 3}, LOOM_XDNA_STREAM_PORT_CORE, 0, true));
-  ASSERT_NE(payload.root, completion.root);
+  ASSERT_NE(payload.root_index, completion.root_index);
   const auto& origin = routing.routes[first];
   EXPECT_EQ(origin.coordinate.column, 0);
   EXPECT_EQ(origin.coordinate.row, 0);
@@ -224,6 +224,354 @@ TEST(Aie2pRouteTest, CompletionRepliesShareTheirSourceColumnPrefix) {
   }
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&blocks);
+}
+
+class Aie2pComputeRouteTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
+    iree_arena_initialize(&blocks, &arena);
+  }
+  void TearDown() override {
+    iree_arena_deinitialize(&arena);
+    iree_arena_block_pool_deinitialize(&blocks);
+  }
+
+  // Backing storage retired even when a route assertion fails.
+  iree_arena_block_pool_t blocks;
+  // Route plans and temporary inventories for the current case.
+  iree_arena_allocator_t arena;
+};
+
+TEST_F(Aie2pComputeRouteTest, CompleteCommandsShareAcrossSenderPorts) {
+  const auto* family = loom_xdna_npu2_array_family();
+  for (uint16_t row : {0, 1, 2}) {
+    for (bool dma : {false, true}) {
+      if (!dma && row != 2) {
+        continue;
+      }
+      for (uint16_t destination_column : {0, 1}) {
+        SCOPED_TRACE(::testing::Message()
+                     << "source row " << row << ", DMA " << dma
+                     << ", destination column " << destination_column);
+        iree_arena_reset(&arena);
+        loom_aie2p_array_route_builder_t routing;
+        IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+            family, 128, &arena, &routing));
+        const auto* facts = loom_xdna_array_tile_facts(family, {0, row});
+        const size_t source_count =
+            dma ? facts->dma.channel_count_per_direction : 2;
+        std::vector<loom_aie2p_array_route_tree_t> trees(source_count);
+        loom_aie2p_array_route_sharing_t sharing;
+        IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
+            &routing, 0, 0, {0, row},
+            LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND, &sharing));
+        for (size_t i = 0; i < source_count; ++i) {
+          const loom_xdna_tile_coordinate_t source = {
+              0, dma ? row : static_cast<uint16_t>(row + i)};
+          ASSERT_TRUE(loom_aie2p_array_route_control(
+              &routing, static_cast<uint32_t>(i), &trees[i], source,
+              dma ? LOOM_XDNA_STREAM_PORT_DMA : LOOM_XDNA_STREAM_PORT_CORE,
+              dma ? static_cast<uint8_t>(i) : 0, {destination_column, 5},
+              &sharing));
+          const auto& terminal = routing.routes[routing.route_count - 1];
+          EXPECT_EQ(terminal.coordinate.column, destination_column);
+          EXPECT_EQ(terminal.coordinate.row, 5u);
+          EXPECT_EQ(terminal.destination_port,
+                    LOOM_XDNA_STREAM_PORT_TILE_CONTROL);
+        }
+        // The complete command streams converge despite distinct physical
+        // sources. SRAM senders turn only on compute rows; shim sources retain
+        // their mux wiring before entering the shared switch carrier.
+        const uint16_t carrier_column =
+            facts->kind == LOOM_XDNA_TILE_KIND_MEMORY ? 0 : destination_column;
+        const size_t link = 3 * family->column_count + carrier_column;
+        EXPECT_EQ(routing.link_channels.northbound[link], 1u);
+        for (size_t i = 0; i < routing.route_count; ++i) {
+          const auto& edge = routing.routes[i];
+          if (edge.switch_kind == LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX) {
+            continue;
+          }
+          const auto* tile =
+              loom_xdna_array_tile_facts(family, edge.coordinate);
+          const auto* input = loom_xdna_array_stream_port_range(
+              family, tile->kind, LOOM_XDNA_STREAM_DIRECTION_SLAVE,
+              edge.source_port);
+          const auto* output = loom_xdna_array_stream_port_range(
+              family, tile->kind, LOOM_XDNA_STREAM_DIRECTION_MASTER,
+              edge.destination_port);
+          EXPECT_NE(loom_xdna_array_stream_destination_channels(
+                        family, input, edge.source_channel, output) &
+                        (UINT32_C(1) << edge.destination_channel),
+                    0u);
+        }
+      }
+    }
+  }
+}
+
+TEST_F(Aie2pComputeRouteTest,
+       CorePacketFanoutPreservesDestinationPayloadLanes) {
+  const auto* family = loom_xdna_npu2_array_family();
+  for (bool west : {false, true}) {
+    for (bool north : {false, true}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "west=" << west << " north=" << north);
+      iree_arena_reset(&arena);
+      loom_aie2p_array_route_builder_t routing;
+      IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+          family, 512, &arena, &routing));
+      const uint16_t source_column = west ? 7 : 0;
+      const loom_xdna_tile_coordinate_t source = {
+          source_column, static_cast<uint16_t>(north ? 2 : 5)};
+      loom_aie2p_array_route_tree_t broadcast = {};
+      for (uint16_t column = 0; column < family->column_count; ++column) {
+        if (column == source_column) {
+          continue;
+        }
+        for (uint16_t row = 2; row < 6; ++row) {
+          ASSERT_TRUE(loom_aie2p_array_route_stream(
+              &routing, 0, &broadcast, source, LOOM_XDNA_STREAM_PORT_CORE, 0,
+              {column, row}, LOOM_XDNA_STREAM_PORT_CORE, 0, true));
+        }
+      }
+      // A request reaches every other core without consuming a vertical lane
+      // in each receiving column. Those columns can still use every lane for
+      // their independent tensor streams after the broadcast is admitted.
+      loom_aie2p_array_route_tree_t payloads[8][6] = {};
+      for (uint16_t column = 0; column < family->column_count; ++column) {
+        if (column == source_column) {
+          continue;
+        }
+        for (uint16_t i = 0; i < (north ? 6 : 4); ++i) {
+          const loom_xdna_tile_coordinate_t memory = {column, 1};
+          const loom_xdna_tile_coordinate_t core = {
+              column, static_cast<uint16_t>(3 + i / 2)};
+          ASSERT_TRUE(loom_aie2p_array_route_workers(
+              &routing, 1 + column * 6 + i, &payloads[column][i],
+              north ? memory : core, north ? i : i % 2, north ? core : memory,
+              north ? i % 2 : i, false));
+        }
+      }
+    }
+  }
+}
+
+TEST_F(Aie2pComputeRouteTest, CorePacketsAvoidSaturatedSourceColumns) {
+  const auto* family = loom_xdna_npu2_array_family();
+  for (bool west : {false, true}) {
+    for (bool north : {false, true}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "west=" << west << " north=" << north);
+      iree_arena_reset(&arena);
+      loom_aie2p_array_route_builder_t routing;
+      IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+          family, 128, &arena, &routing));
+      const uint16_t source_column = west ? 7 : 0;
+      const uint16_t destination_column = west ? 5 : 2;
+      const uint16_t source_row = north ? 2 : 5;
+      const uint16_t destination_row = north ? 3 : 2;
+      loom_aie2p_array_route_tree_t payloads[6] = {};
+      for (uint16_t i = 0; i < (north ? 6 : 4); ++i) {
+        const loom_xdna_tile_coordinate_t memory = {source_column, 1};
+        const loom_xdna_tile_coordinate_t core = {
+            source_column, static_cast<uint16_t>(3 + i / 2)};
+        ASSERT_TRUE(loom_aie2p_array_route_workers(
+            &routing, i, &payloads[i], north ? memory : core, north ? i : i % 2,
+            north ? core : memory, north ? i % 2 : i, false));
+      }
+      const size_t begin = routing.route_count;
+      loom_aie2p_array_route_tree_t control = {};
+      ASSERT_TRUE(loom_aie2p_array_route_stream(
+          &routing, 6, &control, {source_column, source_row},
+          LOOM_XDNA_STREAM_PORT_CORE, 0, {destination_column, destination_row},
+          LOOM_XDNA_STREAM_PORT_CORE, 0, true));
+      // When the sender's preferred vertical prefix is full, the equally
+      // short route turns in the receiving column instead.
+      ASSERT_EQ(routing.route_count - begin, north ? 4u : 6u);
+      for (size_t i = begin; i + 1 < routing.route_count; ++i) {
+        const auto& edge = routing.routes[i];
+        if (edge.destination_port == LOOM_XDNA_STREAM_PORT_EAST ||
+            edge.destination_port == LOOM_XDNA_STREAM_PORT_WEST) {
+          EXPECT_EQ(edge.coordinate.row, source_row);
+        } else {
+          EXPECT_EQ(edge.coordinate.column, destination_column);
+        }
+      }
+      const auto& terminal = routing.routes[routing.route_count - 1];
+      EXPECT_EQ(terminal.coordinate.column, destination_column);
+      EXPECT_EQ(terminal.coordinate.row, destination_row);
+      EXPECT_EQ(terminal.destination_port, LOOM_XDNA_STREAM_PORT_CORE);
+    }
+  }
+}
+
+TEST_F(Aie2pComputeRouteTest, BranchesAvoidSaturatedDestinationColumns) {
+  const auto* family = loom_xdna_npu2_array_family();
+  for (bool west : {false, true}) {
+    for (bool north : {false, true}) {
+      for (bool packet : {false, true}) {
+        SCOPED_TRACE(::testing::Message() << "west=" << west << " north="
+                                          << north << " packet=" << packet);
+        iree_arena_reset(&arena);
+        loom_aie2p_array_route_builder_t routing;
+        loom_aie2p_array_route_tree_t payloads[6] = {};
+        loom_aie2p_array_route_tree_t control = {};
+        IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+            family, 128, &arena, &routing));
+        const uint16_t source_column = west ? 7 : 0;
+        const uint16_t destination_column = west ? 5 : 2;
+        const uint16_t source_row = north ? 2 : 5;
+        const uint16_t destination_row = north ? 3 : 2;
+        const loom_xdna_tile_coordinate_t source = {source_column, source_row};
+        // Independent physical senders exhaust the destination column's
+        // vertical links without occupying either scalar-stream endpoint.
+        for (uint16_t i = 0; i < (north ? 6 : 4); ++i) {
+          const loom_xdna_tile_coordinate_t memory = {destination_column, 1};
+          const loom_xdna_tile_coordinate_t core = {
+              destination_column, static_cast<uint16_t>(3 + i / 2)};
+          ASSERT_TRUE(loom_aie2p_array_route_workers(
+              &routing, i, &payloads[i], north ? memory : core,
+              north ? i : i % 2, north ? core : memory, north ? i % 2 : i,
+              false));
+        }
+        const size_t link = 2 * family->column_count + destination_column;
+        EXPECT_EQ(north ? routing.link_channels.northbound[link]
+                        : routing.link_channels.southbound[link],
+                  north ? 63u : 15u);
+        // Both turn orders have an existing sender-owned prefix. Circuits
+        // retry their failed horizontal-first route; packets use the shared
+        // vertical prefix directly.
+        ASSERT_TRUE(loom_aie2p_array_route_stream(
+            &routing, 6, &control, source, LOOM_XDNA_STREAM_PORT_CORE, 0,
+            {destination_column, source_row}, LOOM_XDNA_STREAM_PORT_CORE, 0,
+            packet));
+        ASSERT_TRUE(loom_aie2p_array_route_stream(
+            &routing, 7, &control, source, LOOM_XDNA_STREAM_PORT_CORE, 0,
+            {source_column, destination_row}, LOOM_XDNA_STREAM_PORT_CORE, 0,
+            packet));
+        const size_t begin = routing.route_count;
+        ASSERT_TRUE(loom_aie2p_array_route_stream(
+            &routing, 8, &control, source, LOOM_XDNA_STREAM_PORT_CORE, 0,
+            {destination_column, destination_row}, LOOM_XDNA_STREAM_PORT_CORE,
+            0, packet));
+        const size_t vertical_hops = north ? 1 : 3;
+        ASSERT_EQ(routing.route_count - begin,
+                  3 + (packet ? vertical_hops : 0));
+        for (size_t i = begin; i < routing.route_count; ++i) {
+          const auto& edge = routing.routes[i];
+          EXPECT_EQ(edge.channel_index, 8u);
+          if (packet && i - begin < vertical_hops) {
+            EXPECT_EQ(edge.coordinate.column, source_column);
+            EXPECT_EQ(edge.destination_port, north
+                                                 ? LOOM_XDNA_STREAM_PORT_NORTH
+                                                 : LOOM_XDNA_STREAM_PORT_SOUTH);
+          } else {
+            EXPECT_EQ(edge.coordinate.row, destination_row);
+            EXPECT_EQ(edge.destination_port,
+                      i + 1 == routing.route_count ? LOOM_XDNA_STREAM_PORT_CORE
+                      : west ? LOOM_XDNA_STREAM_PORT_WEST
+                             : LOOM_XDNA_STREAM_PORT_EAST);
+          }
+        }
+        std::vector<size_t> counts(family->column_count * family->row_count);
+        for (size_t i = 0; i < routing.route_count; ++i) {
+          const auto coordinate = routing.routes[i].coordinate;
+          ++counts[coordinate.column * family->row_count + coordinate.row];
+        }
+        for (size_t i = 0; i < counts.size(); ++i) {
+          EXPECT_EQ(routing.tile_route_counts[i], counts[i]);
+        }
+      }
+    }
+  }
+}
+
+TEST_F(Aie2pComputeRouteTest, PayloadsAvoidSaturatedSourceRows) {
+  const auto* family = loom_xdna_npu2_array_family();
+  for (bool west : {false, true}) {
+    for (bool north : {false, true}) {
+      for (bool packet : {false, true}) {
+        SCOPED_TRACE(::testing::Message() << "west=" << west << " north="
+                                          << north << " packet=" << packet);
+        iree_arena_reset(&arena);
+        loom_aie2p_array_route_builder_t routing;
+        loom_aie2p_array_route_tree_t payloads[5] = {};
+        IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+            family, 64, &arena, &routing));
+        const uint16_t column = west ? 7 : 0;
+        const uint16_t source_row = north ? 2 : 5;
+        const uint16_t destination_row = north ? 3 : 2;
+        for (uint16_t i = 0; i < 4; ++i) {
+          ASSERT_TRUE(loom_aie2p_array_route_workers(
+              &routing, i, &payloads[i], {column, 1}, i,
+              {static_cast<uint16_t>(west ? column - i - 1 : column + i + 1),
+               source_row},
+              0, false));
+        }
+        const size_t begin = routing.route_count;
+        ASSERT_TRUE(loom_aie2p_array_route_workers(
+            &routing, 4, &payloads[4], {column, source_row}, 0,
+            {static_cast<uint16_t>(west ? column - 2 : column + 2),
+             destination_row},
+            0, packet));
+        ASSERT_EQ(routing.route_count - begin, north ? 4u : 6u);
+        for (size_t i = begin; i + 1 < routing.route_count; ++i) {
+          const auto& edge = routing.routes[i];
+          if (edge.destination_port == LOOM_XDNA_STREAM_PORT_EAST ||
+              edge.destination_port == LOOM_XDNA_STREAM_PORT_WEST) {
+            EXPECT_EQ(edge.coordinate.row, destination_row);
+          } else {
+            EXPECT_EQ(edge.coordinate.column, column);
+          }
+        }
+        EXPECT_EQ(routing.routes[routing.route_count - 1].destination_port,
+                  LOOM_XDNA_STREAM_PORT_DMA);
+      }
+    }
+  }
+}
+
+TEST_F(Aie2pComputeRouteTest, BothBlockedTurnOrdersLeaveNoReservations) {
+  const auto* family = loom_xdna_npu2_array_family();
+  loom_aie2p_array_route_builder_t routing;
+  loom_aie2p_array_route_tree_t payloads[12] = {};
+  loom_aie2p_array_route_tree_t control = {};
+  IREE_ASSERT_OK(
+      loom_aie2p_array_route_builder_initialize(family, 128, &arena, &routing));
+  for (uint16_t column : {0, 2}) {
+    for (uint16_t i = 0; i < 6; ++i) {
+      ASSERT_TRUE(loom_aie2p_array_route_workers(
+          &routing, column * 3 + i, &payloads[column * 3 + i], {column, 1}, i,
+          {column, static_cast<uint16_t>(3 + i / 2)}, i % 2, false));
+    }
+  }
+  ASSERT_TRUE(loom_aie2p_array_route_stream(
+      &routing, 12, &control, {0, 2}, LOOM_XDNA_STREAM_PORT_CORE, 0, {1, 2},
+      LOOM_XDNA_STREAM_PORT_CORE, 0, true));
+  const size_t route_count = routing.route_count;
+  const size_t node_count = routing.prefixes.node_count;
+  const size_t tile_count = family->column_count * family->row_count;
+  const std::vector<size_t> counts(routing.tile_route_counts,
+                                   routing.tile_route_counts + tile_count);
+  const uint32_t* masks[] = {
+      routing.link_channels.northbound, routing.link_channels.southbound,
+      routing.link_channels.westbound, routing.link_channels.eastbound};
+  std::vector<uint32_t> lanes;
+  for (const auto* mask : masks) {
+    lanes.insert(lanes.end(), mask, mask + tile_count);
+  }
+  EXPECT_FALSE(loom_aie2p_array_route_stream(
+      &routing, 13, &control, {0, 2}, LOOM_XDNA_STREAM_PORT_CORE, 0, {2, 3},
+      LOOM_XDNA_STREAM_PORT_CORE, 0, true));
+  EXPECT_EQ(routing.route_count, route_count);
+  EXPECT_EQ(routing.prefixes.node_count, node_count);
+  for (size_t i = 0; i < tile_count; ++i) {
+    EXPECT_EQ(routing.tile_route_counts[i], counts[i]);
+    for (size_t direction = 0; direction < IREE_ARRAYSIZE(masks); ++direction) {
+      EXPECT_EQ(masks[direction][i], lanes[direction * tile_count + i]);
+    }
+  }
 }
 
 TEST(Aie2pRouteTest, FailedSuffixDiscardsTentativePacketPrefix) {
@@ -606,14 +954,15 @@ TEST(Aie2pRouteTest, ReceiverGrantSharesOnlyItsPayloadSuffix) {
   }
   loom_aie2p_array_route_sharing_t sharing;
   IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
-      &routing, 0, carrier_count, {0, 1}, &arena, &sharing));
+      &routing, 0, carrier_count, {0, 1},
+      LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &sharing));
   const loom_xdna_tile_coordinate_t control_sources[] = {{0, 4}, {1, 5}};
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(control_sources); ++i) {
     const uint32_t source = 4 + i;
     const size_t first = routing.route_count;
-    ASSERT_TRUE(loom_aie2p_array_route_control(&routing, source, &trees[source],
-                                               control_sources[i], {0, 1},
-                                               &sharing));
+    ASSERT_TRUE(loom_aie2p_array_route_control(
+        &routing, source, &trees[source], control_sources[i],
+        LOOM_XDNA_STREAM_PORT_CORE, 0, {0, 1}, &sharing));
     EXPECT_TRUE(sharing.used);
     // Cross-column control enters the carrier column on its compute row,
     // preserving the path before it joins the granted payload suffix.
@@ -660,9 +1009,11 @@ TEST(Aie2pRouteTest, AvailableControlLaneKeepsPayloadUnshared) {
                                              {0, 1}, 0, false));
   loom_aie2p_array_route_sharing_t sharing;
   IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
-      &routing, 0, routing.route_count, {0, 1}, &arena, &sharing));
+      &routing, 0, routing.route_count, {0, 1},
+      LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &sharing));
   const size_t first = routing.route_count;
   ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 1, &trees[1], {0, 2},
+                                             LOOM_XDNA_STREAM_PORT_CORE, 0,
                                              {0, 1}, &sharing));
   EXPECT_FALSE(sharing.used);
   EXPECT_EQ(routing.routes[first].destination_channel, 1);
@@ -693,12 +1044,14 @@ TEST(Aie2pRouteTest, GrantedControlContinuesBeyondPayloadReceiver) {
     }
     loom_aie2p_array_route_sharing_t sharing;
     IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
-        &routing, 0, carrier_count, {0, 1}, &arena, &sharing));
+        &routing, 0, carrier_count, {0, 1},
+        LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &sharing));
     for (uint32_t i = 0; i < 2; ++i) {
       const uint16_t row = (i == 0) == shim_first ? 0 : 1;
       const size_t first = routing.route_count;
-      ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 4 + i, &trees[4],
-                                                 {0, 2}, {0, row}, &sharing));
+      ASSERT_TRUE(loom_aie2p_array_route_control(
+          &routing, 4 + i, &trees[4], {0, 2}, LOOM_XDNA_STREAM_PORT_CORE, 0,
+          {0, row}, &sharing));
       ASSERT_EQ(routing.route_count - first, 3u - row);
       const auto& shared = routing.routes[first];
       EXPECT_EQ(shared.coordinate.row, 2);
@@ -721,6 +1074,7 @@ TEST(Aie2pRouteTest, GrantedControlContinuesBeyondPayloadReceiver) {
     // A second arithmetic core shares the same packet namespace and must
     // retain the already reserved continuation after the payload receiver.
     ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 7, &trees[7], {0, 3},
+                                               LOOM_XDNA_STREAM_PORT_CORE, 0,
                                                {0, 0}, &sharing));
     ASSERT_EQ(routing.route_count - other_first, 4u);
     for (size_t i = other_first + 1; i < other_first + 3; ++i) {
@@ -761,7 +1115,8 @@ TEST(Aie2pRouteTest, GrantedControlRequiresFreeContinuationBeyondReceiver) {
   }
   loom_aie2p_array_route_sharing_t sharing;
   IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
-      &routing, 0, carrier_count, {0, 1}, &arena, &sharing));
+      &routing, 0, carrier_count, {0, 1},
+      LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &sharing));
   ASSERT_TRUE(loom_aie2p_array_route_stream(
       &routing, 4, &trees[4], {0, 1}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0,
       {0, 0}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, true));
@@ -769,9 +1124,188 @@ TEST(Aie2pRouteTest, GrantedControlRequiresFreeContinuationBeyondReceiver) {
   // SRAM north/south passthrough preserves the lane. The carrier's lane zero
   // cannot reach the shim now; another free SRAM-to-shim lane is insufficient.
   EXPECT_FALSE(loom_aie2p_array_route_control(&routing, 5, &trees[5], {0, 2},
+                                              LOOM_XDNA_STREAM_PORT_CORE, 0,
                                               {0, 0}, &sharing));
   EXPECT_EQ(routing.route_count, first);
   EXPECT_FALSE(sharing.used);
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&blocks);
+}
+
+TEST(Aie2pRouteTest, CommandCarrierRetainsEachUpstreamExtension) {
+  for (const auto& order :
+       {std::vector<uint16_t>{3, 4, 5}, std::vector<uint16_t>{4, 5, 3},
+        std::vector<uint16_t>{5, 4, 3}}) {
+    iree_arena_block_pool_t blocks;
+    iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
+    iree_arena_allocator_t arena;
+    iree_arena_initialize(&blocks, &arena);
+    loom_aie2p_array_route_builder_t routing;
+    loom_aie2p_array_route_tree_t payloads[3] = {};
+    loom_aie2p_array_route_tree_t commands[4] = {};
+    IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+        loom_xdna_npu2_array_family(), 128, &arena, &routing));
+    for (uint8_t i = 0; i < 3; ++i) {
+      ASSERT_TRUE(loom_aie2p_array_route_workers(
+          &routing, i, &payloads[i], {0, static_cast<uint16_t>(i < 2 ? 5 : 4)},
+          i % 2, {0, 1}, i, false));
+    }
+    const size_t first = routing.route_count;
+    ASSERT_TRUE(loom_aie2p_array_route_stream(
+        &routing, 3, &commands[0], {0, 2}, LOOM_XDNA_STREAM_PORT_CORE, 0,
+        {0, 1}, LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, true));
+    loom_aie2p_array_route_sharing_t sharing;
+    IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
+        &routing, first, routing.route_count - first, {0, 1},
+        LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND, &sharing));
+    for (uint16_t row : order) {
+      SCOPED_TRACE(row);
+      const size_t begin = routing.route_count;
+      ASSERT_TRUE(loom_aie2p_array_route_control(
+          &routing, row + 2, &commands[row - 2], {0, row},
+          LOOM_XDNA_STREAM_PORT_CORE, 0, {0, 1}, &sharing));
+      ASSERT_EQ(routing.route_count - begin, row);
+      // Every sender converges onto the sole command lane before the three
+      // independent payload streams consume the remaining southbound lanes.
+      for (size_t i = begin; i < routing.route_count; ++i) {
+        const auto& edge = routing.routes[i];
+        if (edge.coordinate.row >= 2 && edge.coordinate.row <= 4) {
+          EXPECT_EQ(edge.destination_port, LOOM_XDNA_STREAM_PORT_SOUTH);
+          EXPECT_EQ(edge.destination_channel, 3u);
+        }
+      }
+    }
+    EXPECT_TRUE(sharing.used);
+    iree_arena_deinitialize(&arena);
+    iree_arena_block_pool_deinitialize(&blocks);
+  }
+}
+
+TEST(Aie2pRouteTest, SharingIdentitySurvivesOwnerRetirement) {
+  iree_arena_block_pool_t blocks;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&blocks, &arena);
+  loom_aie2p_array_route_builder_t routing;
+  loom_aie2p_array_route_tree_t trees[5] = {};
+  IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+      loom_xdna_npu2_array_family(), 64, &arena, &routing));
+  size_t carrier_count = 0;
+  for (uint32_t i = 0; i < 4; ++i) {
+    ASSERT_TRUE(loom_aie2p_array_route_workers(
+        &routing, i, &trees[i], {0, static_cast<uint16_t>(i + 2)}, 0, {0, 1}, i,
+        false));
+    if (!i) {
+      carrier_count = routing.route_count;
+    }
+  }
+  loom_aie2p_array_route_sharing_t sharing;
+  IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
+      &routing, 0, carrier_count, {0, 1},
+      LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &sharing));
+  ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 4, &trees[4], {0, 2},
+                                             LOOM_XDNA_STREAM_PORT_CORE, 0,
+                                             {0, 1}, &sharing));
+  ASSERT_TRUE(sharing.used);
+  auto retained = sharing;
+  // Reusing the old record for a new domain cannot acquire the old prefix.
+  // Domain identity belongs to the routing owner, not this record's address.
+  IREE_ASSERT_OK(loom_aie2p_array_route_sharing_initialize(
+      &routing, 0, carrier_count, {0, 1},
+      LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &sharing));
+  EXPECT_NE(sharing.domain, retained.domain);
+  iree_arena_allocator_t retained_arena;
+  iree_arena_initialize(&blocks, &retained_arena);
+  loom_aie2p_array_route_builder_t cloned;
+  IREE_ASSERT_OK(loom_aie2p_array_route_builder_clone(
+      &routing, 64, &retained_arena, &cloned));
+  EXPECT_NE(cloned.routes, routing.routes);
+  EXPECT_NE(cloned.prefixes.nodes, routing.prefixes.nodes);
+  EXPECT_NE(cloned.domains, routing.domains);
+  routing = cloned;
+  iree_arena_deinitialize(&arena);
+  const size_t first = routing.route_count;
+  EXPECT_FALSE(loom_aie2p_array_route_control(&routing, 5, &trees[4], {0, 2},
+                                              LOOM_XDNA_STREAM_PORT_CORE, 0,
+                                              {0, 0}, &sharing));
+  EXPECT_EQ(routing.route_count, first);
+  ASSERT_TRUE(loom_aie2p_array_route_control(&routing, 5, &trees[4], {0, 2},
+                                             LOOM_XDNA_STREAM_PORT_CORE, 0,
+                                             {0, 0}, &retained));
+  ASSERT_EQ(routing.route_count - first, 3u);
+  const auto& shared = routing.routes[first];
+  EXPECT_EQ(shared.destination_port, LOOM_XDNA_STREAM_PORT_SOUTH);
+  EXPECT_EQ(shared.destination_channel, 0);
+  const auto& terminal = routing.routes[routing.route_count - 1];
+  EXPECT_EQ(terminal.coordinate.row, 0);
+  EXPECT_EQ(terminal.source_channel, 0);
+  EXPECT_EQ(terminal.destination_port, LOOM_XDNA_STREAM_PORT_TILE_CONTROL);
+  iree_arena_deinitialize(&retained_arena);
+  iree_arena_block_pool_deinitialize(&blocks);
+}
+
+TEST(Aie2pRouteTest, MulticastIdentitySurvivesOwnerRetirement) {
+  iree_arena_block_pool_t blocks;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&blocks, &arena);
+  loom_aie2p_array_route_builder_t routing;
+  loom_aie2p_array_route_tree_t source = {};
+  IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+      loom_xdna_npu2_array_family(), 64, &arena, &routing));
+  loom_aie2p_array_route_multicast_t multicast;
+  IREE_ASSERT_OK(
+      loom_aie2p_array_route_multicast_initialize(&routing, &multicast));
+  ASSERT_TRUE(loom_aie2p_array_route_multicast(&routing, 0, &source, {0, 1}, 0,
+                                               {1, 2}, 0, &multicast));
+  auto retained = multicast;
+  iree_arena_allocator_t retained_arena;
+  iree_arena_initialize(&blocks, &retained_arena);
+  loom_aie2p_array_route_builder_t cloned;
+  IREE_ASSERT_OK(loom_aie2p_array_route_builder_clone(
+      &routing, 64, &retained_arena, &cloned));
+  routing = cloned;
+  iree_arena_deinitialize(&arena);
+  IREE_ASSERT_OK(
+      loom_aie2p_array_route_multicast_initialize(&routing, &multicast));
+  EXPECT_NE(multicast.domain, retained.domain);
+  const size_t first = routing.route_count;
+  EXPECT_FALSE(loom_aie2p_array_route_multicast(&routing, 1, &source, {0, 1}, 0,
+                                                {1, 3}, 0, &multicast));
+  EXPECT_EQ(routing.route_count, first);
+  ASSERT_TRUE(loom_aie2p_array_route_multicast(&routing, 1, &source, {0, 1}, 0,
+                                               {1, 3}, 0, &retained));
+  EXPECT_EQ(routing.routes[routing.route_count - 1].coordinate.row, 3);
+  EXPECT_EQ(routing.routes[routing.route_count - 1].destination_port,
+            LOOM_XDNA_STREAM_PORT_DMA);
+  iree_arena_deinitialize(&retained_arena);
+  iree_arena_block_pool_deinitialize(&blocks);
+}
+
+TEST(Aie2pRouteTest, EmptyOwnerCanBeClonedAndExtended) {
+  iree_arena_block_pool_t blocks;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&blocks, &arena);
+  loom_aie2p_array_route_builder_t source;
+  IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+      loom_xdna_npu2_array_family(), 0, &arena, &source));
+  loom_aie2p_array_route_builder_t empty;
+  IREE_ASSERT_OK(
+      loom_aie2p_array_route_builder_clone(&source, 0, &arena, &empty));
+  EXPECT_EQ(empty.route_count, 0u);
+  EXPECT_EQ(empty.routes, nullptr);
+  loom_aie2p_array_route_builder_t extended;
+  IREE_ASSERT_OK(
+      loom_aie2p_array_route_builder_clone(&empty, 8, &arena, &extended));
+  loom_aie2p_array_route_tree_t tree = {};
+  ASSERT_TRUE(loom_aie2p_array_route_stream(
+      &extended, 0, &tree, {0, 2}, LOOM_XDNA_STREAM_PORT_CORE, 0, {0, 2},
+      LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, true));
+  EXPECT_EQ(extended.route_count, 1u);
+  EXPECT_EQ(extended.routes[0].source_port, LOOM_XDNA_STREAM_PORT_CORE);
+  EXPECT_EQ(extended.routes[0].destination_port,
+            LOOM_XDNA_STREAM_PORT_TILE_CONTROL);
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&blocks);
 }

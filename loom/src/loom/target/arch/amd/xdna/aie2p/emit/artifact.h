@@ -47,6 +47,14 @@ typedef struct loom_aie2p_xdna_artifact_request_t {
   iree_allocator_t allocator;
 } loom_aie2p_xdna_artifact_request_t;
 
+// Allocates private native IR in the artifact's compilation owner. Reports
+// retain every workspace until their schedule/allocation evidence is released;
+// without a report, the caller frees the module after consuming native results.
+// Repeated allocation shares the report's block pool and ownership record.
+iree_status_t loom_aie2p_xdna_allocate_private_module(
+    const loom_aie2p_xdna_artifact_request_t* request,
+    loom_module_t** out_module);
+
 // Compiles one complete Loom-owned XDNA ELF byte sequence. Structured rejection
 // returns OK with |out_emitted| false and no contents.
 iree_status_t loom_aie2p_xdna_compile_artifact(

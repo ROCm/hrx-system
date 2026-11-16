@@ -48,6 +48,42 @@ class FactVectorPartitionTest : public ::testing::Test {
   loom_value_fact_table_t table_ = {};
 };
 
+TEST_F(FactVectorPartitionTest,
+       ReplayTracksPublicationForwardingAndWithdrawal) {
+  IREE_ASSERT_OK(loom_value_fact_table_enable_replay_generations(&table_));
+  const loom_value_id_t value = 4096;
+  const loom_value_id_t alias = 8192;
+  for (loom_value_id_t source : {1u, 2u, 1u}) {
+    const loom_value_fact_vector_partition_component_t component = {source, 4};
+    const auto previous = table_.replay.generation;
+    IREE_ASSERT_OK(loom_value_fact_table_define_vector_partition(
+        &table_, value, MakeExactPartition(&component, 1, 4, 4), nullptr));
+    EXPECT_GT(loom_value_fact_table_replay_generation(&table_, value),
+              previous);
+    const auto generation = table_.replay.generation;
+    IREE_ASSERT_OK(loom_value_fact_table_define_vector_partition(
+        &table_, value, MakeExactPartition(&component, 1, 4, 4), nullptr));
+    EXPECT_EQ(table_.replay.generation, generation);
+    IREE_ASSERT_OK(loom_value_fact_table_forward_vector_partition(
+        &table_, value, alias, nullptr));
+    EXPECT_GT(loom_value_fact_table_replay_generation(&table_, alias),
+              generation);
+    const auto forwarded = table_.replay.generation;
+    IREE_ASSERT_OK(loom_value_fact_table_forward_vector_partition(
+        &table_, value, alias, nullptr));
+    EXPECT_EQ(table_.replay.generation, forwarded);
+    EXPECT_TRUE(loom_value_fact_table_clear_vector_partition(&table_, value));
+    EXPECT_GT(loom_value_fact_table_replay_generation(&table_, value),
+              forwarded);
+    const auto cleared = table_.replay.generation;
+    IREE_ASSERT_OK(loom_value_fact_table_forward_vector_partition(
+        &table_, value, alias, nullptr));
+    EXPECT_GT(loom_value_fact_table_replay_generation(&table_, alias), cleared);
+    EXPECT_EQ(
+        loom_value_fact_table_query_vector_partition(&table_, alias).count, 0u);
+  }
+}
+
 TEST_F(FactVectorPartitionTest, PartitionsOwnComponentsAndTrackScope) {
   loom_value_fact_vector_partition_component_t components[] = {
       {1, 16}, {2, 16}, {3, 8}};

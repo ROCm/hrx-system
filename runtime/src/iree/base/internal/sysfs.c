@@ -4,14 +4,19 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif  // _GNU_SOURCE
+
 #include "iree/base/internal/sysfs.h"
 
 #if defined(IREE_PLATFORM_LINUX) && !defined(IREE_PLATFORM_WASM)
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 //===----------------------------------------------------------------------===//
 // Configuration
@@ -29,6 +34,55 @@ const char* iree_sysfs_get_root_path(void) {
 // File I/O
 //===----------------------------------------------------------------------===//
 
+// Uses caller storage directly so topology discovery does not allocate a stdio
+// stream and buffer for each attribute. The errno result also lets optional
+// queries report absence or read failure without constructing a status object.
+static int iree_sysfs_read_small_file_impl(const char* path, char* buffer,
+                                           size_t buffer_size,
+                                           iree_host_size_t* out_length) {
+  *out_length = 0;
+  int fd;
+  do {
+    fd = open(path, O_RDONLY | O_CLOEXEC);
+  } while (fd < 0 && errno == EINTR);
+  if (fd < 0) {
+    return errno;
+  }
+
+  int error = 0;
+  iree_host_size_t length = 0;
+  while (error == 0) {
+    // A full payload still needs an EOF probe: exact fit is valid, but any
+    // additional byte would leave no room for the NUL terminator.
+    const bool full = length == buffer_size - 1;
+    char extra;
+    ssize_t bytes_read;
+    do {
+      bytes_read = read(fd, full ? &extra : buffer + length,
+                        full ? 1 : buffer_size - 1 - length);
+    } while (bytes_read < 0 && errno == EINTR);
+    if (bytes_read < 0) {
+      error = errno;
+    } else if (bytes_read == 0) {
+      break;
+    } else if (full) {
+      error = EOVERFLOW;
+    } else {
+      length += (iree_host_size_t)bytes_read;
+    }
+  }
+  // Linux releases the descriptor even on EINTR; retrying can close a reused
+  // FD.
+  if (close(fd) != 0 && error == 0) {
+    error = errno;
+  }
+  if (error == 0) {
+    buffer[length] = 0;
+    *out_length = length;
+  }
+  return error;
+}
+
 iree_status_t iree_sysfs_read_small_file(const char* path, char* buffer,
                                          size_t buffer_size,
                                          iree_host_size_t* out_length) {
@@ -36,46 +90,18 @@ iree_status_t iree_sysfs_read_small_file(const char* path, char* buffer,
   IREE_ASSERT_ARGUMENT(buffer);
   IREE_ASSERT_ARGUMENT(buffer_size > 0);
   IREE_ASSERT_ARGUMENT(out_length);
-  *out_length = 0;
-
-  FILE* file = fopen(path, "r");
-  if (!file) {
-    if (errno == ENOENT) {
-      return iree_make_status(IREE_STATUS_NOT_FOUND, "sysfs file not found: %s",
-                              path);
-    }
-    return iree_make_status(IREE_STATUS_PERMISSION_DENIED,
-                            "failed to open sysfs file %s: %s", path,
-                            strerror(errno));
+  const int error =
+      iree_sysfs_read_small_file_impl(path, buffer, buffer_size, out_length);
+  if (error == EOVERFLOW) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "sysfs file %s exceeds buffer capacity of %zu bytes", path,
+        buffer_size - 1);
+  } else if (error != 0) {
+    return iree_make_status(iree_status_code_from_errno(error),
+                            "failed to read sysfs file %s: %s (errno %d)", path,
+                            strerror(error), error);
   }
-
-  // Read entire file into buffer, reserving one byte for NUL terminator.
-  // fread guarantees: bytes_read <= (buffer_size - 1).
-  const size_t bytes_read = fread(buffer, 1, buffer_size - 1, file);
-  if (ferror(file)) {
-    fclose(file);
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "failed to read sysfs file %s: %s", path,
-                            strerror(errno));
-  }
-
-  // Check if file was truncated.
-  if (bytes_read == buffer_size - 1 && !feof(file)) {
-    fclose(file);
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "sysfs file %s exceeds buffer size of %zu bytes",
-                            path, buffer_size);
-  }
-
-  fclose(file);
-
-  // Safety: bytes_read <= (buffer_size - 1), so buffer[bytes_read] is always
-  // a valid index (at most buffer[buffer_size - 1]) and we can add our NUL.
-  IREE_ASSERT(bytes_read < buffer_size);
-
-  // NUL-terminate and return length.
-  buffer[bytes_read] = '\0';
-  *out_length = bytes_read;
   return iree_ok_status();
 }
 
@@ -86,24 +112,8 @@ bool iree_sysfs_try_read_small_file(const char* path, char* buffer,
   IREE_ASSERT_ARGUMENT(buffer);
   IREE_ASSERT_ARGUMENT(buffer_size > 0);
   IREE_ASSERT_ARGUMENT(out_length);
-  *out_length = 0;
-
-  FILE* file = fopen(path, "r");
-  if (!file) {
-    return false;
-  }
-
-  const size_t bytes_read = fread(buffer, 1, buffer_size - 1, file);
-  if (ferror(file) || (bytes_read == buffer_size - 1 && !feof(file))) {
-    fclose(file);
-    return false;
-  }
-  fclose(file);
-
-  IREE_ASSERT(bytes_read < buffer_size);
-  buffer[bytes_read] = '\0';
-  *out_length = bytes_read;
-  return true;
+  return iree_sysfs_read_small_file_impl(path, buffer, buffer_size,
+                                         out_length) == 0;
 }
 
 //===----------------------------------------------------------------------===//

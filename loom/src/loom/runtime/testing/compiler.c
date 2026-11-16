@@ -17,6 +17,6 @@ iree_status_t loom_runtime_test_host_create(iree_host_size_t worker_count,
       .target_providers = &target_provider,
       .target_provider_count = 1,
   };
-  return loom_runtime_host_create(worker_count, &compiler_options,
+  return loom_runtime_host_create(worker_count, NULL, &compiler_options,
                                   host_allocator, out_host);
 }

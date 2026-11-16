@@ -123,7 +123,8 @@ iree_hal_amd_gpu_pm4_publish_accepted(
     if (iree_hal_amd_gpu_semaphore_isa(submission->signals.semaphores[i])) {
       status = iree_hal_amd_gpu_semaphore_publish_signal(
           submission->signals.semaphores[i],
-          submission->signals.payload_values[i], submission->signal);
+          submission->signals.payload_values[i], submission->signal,
+          &submission->signal_producers[i]);
     }
   }
   if (!iree_status_is_ok(status)) {

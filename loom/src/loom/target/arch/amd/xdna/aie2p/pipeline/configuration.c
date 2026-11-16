@@ -227,11 +227,11 @@ static iree_status_t loom_aie2p_native_config_bank(
 
 static iree_status_t loom_aie2p_native_config_routes(
     loom_aie2p_native_configuration_t* config) {
-  const loom_aie2p_native_context_t* context = config->context;
-  if (context->switches) {
+  const loom_aie2p_execution_plan_t* plan = config->context->plan;
+  if (plan->switches) {
     loom_value_id_t zero;
     IREE_RETURN_IF_ERROR(loom_aie2p_native_config_constant(config, 0, &zero));
-    for (const loom_aie2p_native_switch_t* state = context->switches; state;
+    for (const loom_aie2p_native_switch_t* state = plan->switches; state;
          state = state->next) {
       for (unsigned i = 0; i < LOOM_AIE2P_NATIVE_SWITCH_BANK_COUNT; ++i) {
         IREE_RETURN_IF_ERROR(
@@ -255,8 +255,8 @@ static iree_status_t loom_aie2p_native_config_routes(
       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH3,
       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH4,
       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH5};
-  for (iree_host_size_t i = 0; i < context->routing.route_count; ++i) {
-    const loom_aie2p_array_route_plan_t* edge = &context->routing.routes[i];
+  for (iree_host_size_t i = 0; i < plan->routing.route_count; ++i) {
+    const loom_aie2p_array_route_plan_t* edge = &plan->routing.routes[i];
     if (edge->switch_kind != LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX) {
       continue;
     }
@@ -364,6 +364,9 @@ static iree_status_t loom_aie2p_native_config_transfers(
     for (const loom_aie2p_native_dma_descriptor_t* descriptor =
              worker->descriptors;
          descriptor; descriptor = descriptor->next) {
+      if (descriptor->storage && descriptor->storage->first != descriptor) {
+        continue;
+      }
       const loom_aie2p_native_tile_t* tile =
           descriptor->shim ? descriptor->path->shim : descriptor->path->local;
       uint32_t completion_release = 0;
@@ -907,12 +910,6 @@ iree_status_t loom_aie2p_native_emit_configuration(
     const loom_pipeline_realization_t* realization) {
   loom_aie2p_native_context_t* context = user_data;
   loom_module_t* module = rewriter->module;
-  bool valid = false;
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_native_emit_programs(context, rewriter, realization, &valid));
-  if (!valid) {
-    return iree_ok_status();
-  }
   loom_aie2p_native_configuration_t config = {
       .context = context,
       .descriptors = loom_aie2p_configuration_descriptor_set()};
@@ -1013,14 +1010,14 @@ iree_status_t loom_aie2p_native_emit_configuration(
         &config, AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_PROGRAM_LOAD,
         position, 2, loom_make_named_attr_slice(&program, 1)));
   }
-  for (iree_host_size_t i = 0; i < context->inventory.pool_count; ++i) {
-    const uint64_t length = loom_source_storage_packing_requirement(
-                                context->inventory.pools[i].packing)
-                                .byte_length;
+  for (iree_host_size_t i = 0;
+       i < loom_xdna_array_physical_tile_count(context->family); ++i) {
+    const uint64_t length = context->plan->tiles[i].memory_length;
     if (!length) {
       continue;
     }
-    const loom_xdna_tile_coordinate_t tile = context->pool_tiles[i]->coordinate;
+    const loom_xdna_tile_coordinate_t tile = {i / context->family->row_count,
+                                              i % context->family->row_count};
     if ((uint64_t)tile.column + 1 > columns) {
       columns = tile.column + 1;
     }

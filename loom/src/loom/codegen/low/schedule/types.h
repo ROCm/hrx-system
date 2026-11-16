@@ -797,9 +797,10 @@ typedef struct loom_low_schedule_options_t {
   // Optional target-provided schedule models for structural low operations
   // that emit native packets without descriptor rows.
   loom_low_schedule_structural_model_list_t structural_models;
-  // Structured diagnostic emitter for user IR failures.
+  // Structured diagnostic emitter for invalid input constraints. Planning
+  // failures and feedback remain in the returned table for later emission.
   iree_diagnostic_emitter_t emitter;
-  // Optional backend feedback diagnostics to emit after scheduling analysis.
+  // Requested backend feedback, selecting facts retained for later emission.
   loom_low_schedule_diagnostic_flags_t diagnostic_flags;
   // Schedule construction behavior flags.
   loom_low_schedule_flags_t flags;

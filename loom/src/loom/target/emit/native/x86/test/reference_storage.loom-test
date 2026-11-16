@@ -1,0 +1,46 @@
+// A large reference plane uses compact initialization and retirement loops.
+// Code size depends on the operation, not the number of reserved cells.
+// RUN: emit x86-native-bytes @reference_plane
+x86.target<scalar> @target
+
+low.func.def public target<x86.scalar.core>(@target) abi(object_function, {calling_convention = "iree_status"}) @reference_plane() asm {
+  %cells = storage {byte_alignment = 16, byte_length = 1048576} : low.storage<private>
+  return
+}
+
+// ----
+code: 48 81 ec 38 00 10 00 48 89 84 24 20 00 10 00 48 89 94 24 28 00 10 00 48 8d 04 24 ba 00 00 01 00 48 c7 00 00 00 00 00 48 c7 40 08 00 00 00 00 48 83 c0 10 83 ea 01 0f 85 e4 ff ff ff 48 8b 84 24 20 00 10 00 48 8b 94 24 28 00 10 00 31 c0 e9 00 00 00 00 48 89 84 24 20 00 10 00 48 89 94 24 28 00 10 00 48 8d 04 24 ba 00 00 01 00 4c 89 94 24 00 00 10 00 4c 89 9c 24 08 00 10 00 4c 8b 10 4c 8b 58 08 48 c7 00 00 00 00 00 48 c7 40 08 00 00 00 00 4d 85 d2 0f 84 28 00 00 00 49 f7 c3 01 00 00 00 0f 85 1b 00 00 00 f0 41 ff 0a 0f 85 11 00 00 00 4d 8b 1b 4d 85 db 0f 84 05 00 00 00 e8 32 00 00 00 4c 8b 94 24 00 00 10 00 4c 8b 9c 24 08 00 10 00 48 83 c0 10 83 ea 01 0f 85 8c ff ff ff 48 8b 84 24 20 00 10 00 48 8b 94 24 28 00 10 00 e9 21 00 00 00 50 51 52 56 57 41 50 41 51 41 52 41 53 49 8b fa 41 ff d3 41 5b 41 5a 41 59 41 58 5f 5e 5a 59 58 c3 48 81 c4 38 00 10 00 c3
+
+// ====
+
+// Invocation inputs initialize fresh cells. A borrowed argument copies its
+// payload and marks the state without a replacement-release sequence.
+// RUN: emit x86-native-bytes @borrow_input
+x86.target<scalar> @target
+
+type.decl import("native", "object") @Object
+
+low.func.def public target<x86.scalar.core>(@target) abi(object_function, {calling_convention = "iree_status"}) @borrow_input(%pointer: reg<x86.ref : ptr<@Object>>) -> (reg<x86.gpr32>) asm {
+  %missing = ref.compare.null %pointer
+  return %missing
+}
+
+// ----
+code: 41 57 48 83 ec 40 4c 8b ff 48 c7 04 24 00 00 00 00 48 c7 44 24 08 00 00 00 00 4c 89 54 24 10 4c 89 5c 24 18 4c 8b 16 4c 8b 5e 08 4d 85 d2 0f 84 04 00 00 00 49 83 cb 01 4c 89 14 24 4c 89 5c 24 08 4c 8b 54 24 10 4c 8b 5c 24 18 4c 89 54 24 10 4c 89 5c 24 18 4c 8b 14 24 49 83 fa 00 0f 94 c0 0f b6 c0 48 89 44 24 20 4c 8b 54 24 10 4c 8b 5c 24 18 48 8b 44 24 20 41 89 07 31 c0 e9 00 00 00 00 4c 89 54 24 10 4c 89 5c 24 18 4c 8b 14 24 4c 8b 5c 24 08 48 c7 04 24 00 00 00 00 48 c7 44 24 08 00 00 00 00 4d 85 d2 0f 84 28 00 00 00 49 f7 c3 01 00 00 00 0f 85 1b 00 00 00 f0 41 ff 0a 0f 85 11 00 00 00 4d 8b 1b 4d 85 db 0f 84 05 00 00 00 e8 0f 00 00 00 4c 8b 54 24 10 4c 8b 5c 24 18 e9 21 00 00 00 50 51 52 56 57 41 50 41 51 41 52 41 53 49 8b fa 41 ff d3 41 5b 41 5a 41 59 41 58 5f 5e 5a 59 58 c3 48 83 c4 40 41 5f c3
+
+// ====
+
+// An owning argument clears its caller cell after loading both words, then
+// publishes them to the fresh invocation cell. Cleanup still retires it.
+// RUN: emit x86-native-bytes @consume_input
+x86.target<scalar> @target
+
+type.decl import("native", "object") @Object
+
+low.func.def public target<x86.scalar.core>(@target) abi(object_function, {calling_convention = "iree_status"}) @consume_input(%owner: reg<x86.ref : ref<@Object>>) -> (reg<x86.gpr32>) asm {
+  %missing = ref.compare.null %owner
+  return %missing
+}
+
+// ----
+code: 41 57 48 83 ec 40 4c 8b ff 48 c7 04 24 00 00 00 00 48 c7 44 24 08 00 00 00 00 4c 89 54 24 10 4c 89 5c 24 18 4c 8b 16 4c 8b 5e 08 48 c7 06 00 00 00 00 48 c7 46 08 00 00 00 00 4c 89 14 24 4c 89 5c 24 08 4c 8b 54 24 10 4c 8b 5c 24 18 4c 89 54 24 10 4c 89 5c 24 18 4c 8b 14 24 49 83 fa 00 0f 94 c0 0f b6 c0 48 89 44 24 20 4c 8b 54 24 10 4c 8b 5c 24 18 48 8b 44 24 20 41 89 07 31 c0 e9 00 00 00 00 4c 89 54 24 10 4c 89 5c 24 18 4c 8b 14 24 4c 8b 5c 24 08 48 c7 04 24 00 00 00 00 48 c7 44 24 08 00 00 00 00 4d 85 d2 0f 84 28 00 00 00 49 f7 c3 01 00 00 00 0f 85 1b 00 00 00 f0 41 ff 0a 0f 85 11 00 00 00 4d 8b 1b 4d 85 db 0f 84 05 00 00 00 e8 0f 00 00 00 4c 8b 54 24 10 4c 8b 5c 24 18 e9 21 00 00 00 50 51 52 56 57 41 50 41 51 41 52 41 53 49 8b fa 41 ff d3 41 5b 41 5a 41 59 41 58 5f 5e 5a 59 58 c3 48 83 c4 40 41 5f c3

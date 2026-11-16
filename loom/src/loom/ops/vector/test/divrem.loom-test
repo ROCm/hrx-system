@@ -116,3 +116,37 @@ func.def @signed_constants() -> (i8, i8, i16, i16, i64) {
   %distance = scalar.constant -3 : i64
   func.return %negative_positive, %positive_positive, %positive_negative, %negative_remainder, %distance : i8, i8, i16, i16, i64
 }
+
+// ====
+
+// Bounded lane arithmetic retains divisibility even when signs differ.
+func.def @signed_multiple_remainders(%input: vector<4xi8>) -> (vector<4xi8>, vector<4xi8>, vector<4xi8>, vector<4xi8>) {
+  %mask = vector.splati 7 : vector<4xi8>
+  %bias = vector.splati 4 : vector<4xi8>
+  %scale = vector.splati 6 : vector<4xi8>
+  %positive_divisor = vector.splati 3 : vector<4xi8>
+  %negative_divisor = vector.splati -3 : vector<4xi8>
+  %bounded = vector.andi %input, %mask : vector<4xi8>
+  %centered = vector.subi %bounded, %bias : vector<4xi8>
+  %multiples = vector.muli %centered, %scale : vector<4xi8>
+  %positive = vector.remsi %multiples, %positive_divisor : vector<4xi8>
+  %negative = vector.remsi %multiples, %negative_divisor : vector<4xi8>
+  %quotient, %paired = vector.divremsi %multiples, %positive_divisor : vector<4xi8>
+  func.return %positive, %negative, %paired, %quotient : vector<4xi8>, vector<4xi8>, vector<4xi8>, vector<4xi8>
+}
+
+// ----
+func.def @signed_multiple_remainders(%input: vector<4xi8>) -> (vector<4xi8>, vector<4xi8>, vector<4xi8>, vector<4xi8>) {
+  %mask = vector.splati 7 : vector<4xi8>
+  %bias = vector.splati 4 : vector<4xi8>
+  %scale = vector.splati 6 : vector<4xi8>
+  %positive_divisor = vector.splati 3 : vector<4xi8>
+  %bounded = vector.andi %input, %mask : vector<4xi8>
+  %centered = vector.subi %bounded, %bias : vector<4xi8>
+  %multiples = vector.muli %centered, %scale : vector<4xi8>
+  %positive = vector.splati 0 : vector<4xi8>
+  %negative = vector.splati 0 : vector<4xi8>
+  %quotient = vector.divsi %multiples, %positive_divisor : vector<4xi8>
+  %paired = vector.splati 0 : vector<4xi8>
+  func.return %positive, %negative, %paired, %quotient : vector<4xi8>, vector<4xi8>, vector<4xi8>, vector<4xi8>
+}

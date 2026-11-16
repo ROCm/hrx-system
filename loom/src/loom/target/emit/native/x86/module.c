@@ -55,12 +55,16 @@ static iree_status_t loom_x86_module_prepare(
     const loom_target_entry_t* entry = &entries->values[i];
     const iree_string_view_t convention =
         loom_target_entry_bundle(entry)->export_plan->calling_convention;
+    const bool returns_status =
+        iree_string_view_equal(convention, IREE_SV("iree_status"));
     if (!iree_string_view_is_empty(convention) &&
-        !iree_string_view_equal(convention, IREE_SV("sysv"))) {
+        !iree_string_view_equal(convention, IREE_SV("sysv")) &&
+        !returns_status) {
       accepted = false;
       status = loom_x86_module_reject_callable(
           request, entry,
-          IREE_SV("native x86 supports the sysv calling convention"));
+          IREE_SV(
+              "native x86 supports sysv and iree_status calling conventions"));
       continue;
     }
     loom_low_resolved_target_t target = {0};
@@ -77,9 +81,9 @@ static iree_status_t loom_x86_module_prepare(
     bool function_supported = false;
     iree_string_view_t constraint = iree_string_view_empty();
     loom_x86_function_abi_t* function_abi = &module_abi->functions[i];
-    status = loom_x86_function_abi_prepare(request->module, entry->func,
-                                           &target, arena, &function_supported,
-                                           &constraint, function_abi);
+    status = loom_x86_function_abi_prepare(
+        request->module, entry->func, &target, returns_status, arena,
+        &function_supported, &constraint, function_abi);
     if (!iree_status_is_ok(status)) {
       continue;
     }

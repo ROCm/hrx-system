@@ -1384,17 +1384,62 @@ bool loom_value_facts_refine_relation(uint8_t predicate_kind,
           rhs_result, lhs_result);
       break;
     case LOOM_PREDICATE_EQ: {
-      const int64_t range_lo = iree_max(lhs_facts.range_lo, rhs_facts.range_lo);
-      const int64_t range_hi = iree_min(lhs_facts.range_hi, rhs_facts.range_hi);
+      // Equal values share numeric guarantees, but not their execution or
+      // topology identities. Normalize the conjunction once for both outputs.
+      loom_value_facts_t shared = loom_value_facts_unknown();
+      shared.range_lo = iree_max(lhs_facts.range_lo, rhs_facts.range_lo);
+      shared.range_hi = iree_min(lhs_facts.range_hi, rhs_facts.range_hi);
+      if (shared.range_lo > shared.range_hi) {
+        // The numeric lattice has no unreachable element.
+        return true;
+      }
+      shared.known_divisor = lhs_facts.known_divisor;
+      if (shared.known_divisor == 1) {
+        shared.known_divisor = rhs_facts.known_divisor;
+      } else if (rhs_facts.known_divisor != 1 &&
+                 rhs_facts.known_divisor != shared.known_divisor) {
+        int64_t divisor = 0;
+        if (!iree_math_checked_lcm_i64(shared.known_divisor,
+                                       rhs_facts.known_divisor, &divisor)) {
+          // Either input divisor remains sound when their LCM does not fit.
+          divisor = iree_max(shared.known_divisor, rhs_facts.known_divisor);
+        }
+        shared.known_divisor = divisor;
+      }
+      const uint32_t predicates =
+          (lhs_facts.flags | rhs_facts.flags) &
+          (LOOM_VALUE_FACT_NON_ZERO | LOOM_VALUE_FACT_POWER_OF_TWO |
+           LOOM_VALUE_FACT_SUBGROUP_LANE_MASK);
+      shared.flags = predicates;
+      loom_value_facts_refine_predicate_range(&shared);
+      if (shared.range_lo == shared.range_hi &&
+          (((predicates & LOOM_VALUE_FACT_NON_ZERO) && shared.range_lo == 0) ||
+           ((predicates & LOOM_VALUE_FACT_POWER_OF_TWO) &&
+            (shared.range_lo <= 0 ||
+             ((uint64_t)shared.range_lo & ((uint64_t)shared.range_lo - 1)))))) {
+        return true;
+      }
+      shared.flags =
+          loom_value_facts_compute_flags(shared.range_lo, shared.range_hi) |
+          predicates;
+      const uint32_t numeric_mask =
+          LOOM_VALUE_FACT_NON_NEGATIVE | LOOM_VALUE_FACT_NON_ZERO |
+          LOOM_VALUE_FACT_POSITIVE | LOOM_VALUE_FACT_POWER_OF_TWO |
+          LOOM_VALUE_FACT_EXACT | LOOM_VALUE_FACT_BOOLEAN |
+          LOOM_VALUE_FACT_SUBGROUP_LANE_MASK;
       if (lhs_result) {
-        lhs_result->range_lo = range_lo;
-        lhs_result->range_hi = range_hi;
+        lhs_result->range_lo = shared.range_lo;
+        lhs_result->range_hi = shared.range_hi;
+        lhs_result->known_divisor = shared.known_divisor;
+        lhs_result->flags = (lhs_result->flags & ~numeric_mask) | shared.flags;
       }
-      if (rhs_result) {
-        rhs_result->range_lo = range_lo;
-        rhs_result->range_hi = range_hi;
+      if (rhs_result && rhs_result != lhs_result) {
+        rhs_result->range_lo = shared.range_lo;
+        rhs_result->range_hi = shared.range_hi;
+        rhs_result->known_divisor = shared.known_divisor;
+        rhs_result->flags = (rhs_result->flags & ~numeric_mask) | shared.flags;
       }
-      break;
+      return true;
     }
     case LOOM_PREDICATE_LT:
       if (lhs_result && rhs_facts.range_hi > INT64_MIN) {

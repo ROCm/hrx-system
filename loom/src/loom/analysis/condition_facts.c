@@ -639,7 +639,8 @@ bool loom_condition_integer_comparison_relation(
 }
 
 // Normalizes carrier order to mathematical order. Unsigned comparisons may
-// additionally establish a nonnegative lower operand on the selected edge.
+// additionally establish the lower or upper operand's sign partition on the
+// selected edge.
 static bool loom_condition_integer_comparison_normalize_relation(
     const loom_condition_integer_comparison_t* comparison,
     const loom_module_t* module, const loom_fact_context_t* context,
@@ -688,18 +689,24 @@ static bool loom_condition_integer_comparison_normalize_relation(
   const bool ascending = *out_relation == LOOM_SYMBOLIC_INTEGER_RELATION_LT ||
                          *out_relation == LOOM_SYMBOLIC_INTEGER_RELATION_LE;
   loom_value_facts_t* lower = ascending ? lhs_facts : rhs_facts;
-  const loom_value_facts_t upper = ascending ? *rhs_facts : *lhs_facts;
-  if (!loom_value_facts_is_non_negative(upper) ||
-      (comparison->kind == LOOM_OP_INDEX_CMP &&
-       index_comparison_bitwidth < 0) ||
-      (comparison->kind == LOOM_OP_INDEX_CMP && index_comparison_bitwidth > 0 &&
-       !loom_value_facts_fit_signed_bit_count(
-           upper, (uint8_t)index_comparison_bitwidth))) {
-    return false;
+  loom_value_facts_t* upper = ascending ? rhs_facts : lhs_facts;
+  // Mixed sign partitions passed the carrier gate through its signed-range
+  // case; no unsigned-only carrier envelope reaches this point.
+  // Canonicalize the selected partition against its existing predicates before
+  // its endpoints constrain the other operand.
+  if (loom_value_facts_is_non_negative(*upper)) {
+    // A nonnegative upper operand forces a nonnegative lower operand.
+    lower->range_lo = iree_max(lower->range_lo, 0);
+    loom_value_facts_refine_predicate_range(lower);
+    return true;
   }
-  // With no sign bit in the upper operand, lower <=u upper implies lower >= 0.
-  lower->range_lo = iree_max(lower->range_lo, 0);
-  return true;
+  if (lower->range_hi < 0) {
+    // A set sign bit in the lower operand forces it in the upper operand too.
+    upper->range_hi = iree_min(upper->range_hi, -1);
+    loom_value_facts_refine_predicate_range(upper);
+    return true;
+  }
+  return false;
 }
 
 bool loom_condition_integer_comparison_equivalent_relation(
@@ -990,27 +997,20 @@ static iree_status_t loom_condition_facts_query_integer_compare(
       loom_condition_lookup_facts(fact_table, left_value);
   loom_value_facts_t right_facts =
       loom_condition_lookup_facts(fact_table, right_value);
-  const int64_t left_minimum = left_facts.range_lo;
-  const int64_t right_minimum = right_facts.range_lo;
+  const loom_value_facts_t original_left = left_facts;
+  const loom_value_facts_t original_right = right_facts;
   loom_symbolic_integer_relation_t relation;
   if (!loom_condition_integer_comparison_normalize_relation(
           &comparison, module, fact_table ? &fact_table->context : NULL,
           assumed_truth, &left_facts, &right_facts, &relation)) {
     return iree_ok_status();
   }
-  if (left_facts.range_lo != left_minimum ||
-      right_facts.range_lo != right_minimum) {
-    const loom_condition_integer_relation_t nonnegative = {
-        .relation = LOOM_SYMBOLIC_INTEGER_RELATION_GE,
-        .left = loom_condition_value_operand(
-            left_facts.range_lo != left_minimum ? left_value : right_value),
-        .right = {.kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
-                  .value_id = LOOM_VALUE_ID_INVALID,
-                  .constant = 0},
-    };
-    IREE_RETURN_IF_ERROR(loom_condition_fact_set_append_integer_relation(
-        facts, out_derivation, nonnegative, out_complete));
-  }
+  IREE_RETURN_IF_ERROR(loom_condition_facts_append_range_refinement(
+      left_value, original_left, left_facts, facts, out_derivation,
+      out_complete));
+  IREE_RETURN_IF_ERROR(loom_condition_facts_append_range_refinement(
+      right_value, original_right, right_facts, facts, out_derivation,
+      out_complete));
 
   const loom_condition_integer_relation_t assertion = {
       .relation = relation,

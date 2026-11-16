@@ -14,28 +14,6 @@
 extern "C" {
 #endif
 
-// Physical endpoint identity, independent of selected route edges. DMA channels
-// name engines, including on shim tiles; other ports name stream channels.
-typedef struct loom_aie2p_native_connection_endpoint_t {
-  // Tile containing the endpoint.
-  loom_xdna_tile_coordinate_t coordinate;
-  // Endpoint's architectural port class.
-  loom_xdna_stream_port_t port;
-  // Direction-specific channel within the port.
-  uint8_t channel;
-} loom_aie2p_native_connection_endpoint_t;
-
-// One requested control delivery, retained before physical routing. Equal
-// source/packet pairs form one multicast destination set.
-typedef struct loom_aie2p_native_control_connection_t {
-  // Physical sender of the framed control record.
-  loom_aie2p_native_connection_endpoint_t source;
-  // Intended consumer of that record, independent of chosen switch paths.
-  loom_aie2p_native_connection_endpoint_t destination;
-  // Five-bit packet identity within the sender's namespace.
-  uint8_t packet;
-} loom_aie2p_native_control_connection_t;
-
 typedef enum loom_aie2p_native_connectivity_failure_e {
   LOOM_AIE2P_NATIVE_CONNECTIVITY_NONE = 0,
   LOOM_AIE2P_NATIVE_CONNECTIVITY_DEAD_END,
@@ -78,12 +56,15 @@ loom_aie2p_native_connectivity_result_t loom_aie2p_native_connectivity_check(
     const loom_aie2p_native_connection_endpoint_t* destinations,
     iree_host_size_t destination_count, bool retain_header);
 
-// Audits every completed native transport before configuration emission.
+// Audits completed physical transport against retained payload/control intent.
 // Temporary scratch is released before returning. Allocation can fail; a
 // connection mismatch terminates as a compiler invariant failure, never as
 // unsupported user IR or a recoverable route-selection result.
 iree_status_t loom_aie2p_native_connections_verify(
-    const struct loom_aie2p_native_context_t* context);
+    const loom_aie2p_array_route_builder_t* routing,
+    const loom_aie2p_native_switch_t* switches,
+    const loom_aie2p_native_connections_t* connections,
+    iree_arena_allocator_t* arena);
 
 #ifdef __cplusplus
 }  // extern "C"

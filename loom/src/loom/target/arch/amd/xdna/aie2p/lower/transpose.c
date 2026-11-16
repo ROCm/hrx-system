@@ -313,7 +313,12 @@ static bool loom_aie2p_transpose_plan_from_op(
   const loom_aie2p_vector_carrier_t carrier =
       loom_aie2p_vector_carrier_for_type(source_type);
 
-  uint8_t source_lanes[LOOM_AIE2P_TRANSPOSE_MAX_LANE_COUNT] = {0};
+  // Dummy lanes remain fixed points when the permutation is padded to a power
+  // of two. Populate the live prefix over this bounded identity permutation.
+  uint8_t source_lanes[LOOM_AIE2P_TRANSPOSE_MAX_LANE_COUNT];
+  for (uint16_t lane = 0; lane < IREE_ARRAYSIZE(source_lanes); ++lane) {
+    source_lanes[lane] = (uint8_t)lane;
+  }
   loom_aie2p_transpose_source_lanes(module, source_op, lane_count,
                                     source_lanes);
 
@@ -361,9 +366,6 @@ static bool loom_aie2p_transpose_plan_from_op(
     return true;
   }
 
-  for (uint16_t lane = lane_count; lane < padded_lane_count; ++lane) {
-    source_lanes[lane] = (uint8_t)lane;
-  }
   const uint8_t stage_count =
       padded_lane_log2 == 0 ? 0 : (uint8_t)(2u * padded_lane_log2 - 1u);
   out_match->layout.mechanism = LOOM_AIE2P_TRANSPOSE_MECHANISM_BENES;

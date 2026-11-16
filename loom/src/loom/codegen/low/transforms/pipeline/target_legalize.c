@@ -1802,6 +1802,7 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_target_legalize_function(
               .fn = loom_low_target_legalize_function_analysis,
               .user_data = &state,
           },
+      .arena = arena,
   };
   IREE_RETURN_IF_ERROR(
       loom_low_target_legalize_capture_report_source_ops(&state));

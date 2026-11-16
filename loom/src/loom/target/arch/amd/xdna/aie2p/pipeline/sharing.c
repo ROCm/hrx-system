@@ -13,12 +13,18 @@
 uint8_t loom_aie2p_native_delivery_packet(
     loom_aie2p_native_delivery_t* delivery, uint32_t occupied,
     const loom_aie2p_native_tile_t* tile, loom_xdna_stream_port_t port,
-    uint8_t channel) {
+    uint8_t channel, uint8_t preferred) {
   uint32_t available =
       ~(occupied | (UINT32_C(1) << LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID));
+  if (preferred != UINT8_MAX) {
+    available |= UINT32_C(1) << preferred;
+  }
   while (available) {
-    const uint8_t packet = iree_math_count_trailing_zeros_u32(available);
-    available &= available - 1;
+    const uint8_t packet = preferred != UINT8_MAX
+                               ? preferred
+                               : iree_math_count_trailing_zeros_u32(available);
+    preferred = UINT8_MAX;
+    available &= ~(UINT32_C(1) << packet);
     if (delivery && delivery->packets[packet].tile) {
       if (delivery->packets[packet].tile != tile ||
           delivery->packets[packet].port != port ||
@@ -36,8 +42,9 @@ uint8_t loom_aie2p_native_delivery_packet(
   return UINT8_MAX;
 }
 
-uint8_t loom_aie2p_native_collective_packet(uint32_t* occupied) {
-  const uint32_t available = ~*occupied;
+uint8_t loom_aie2p_native_collective_packet(uint32_t* occupied,
+                                            uint32_t shared) {
+  const uint32_t available = ~(*occupied | shared);
   if (!available) {
     return UINT8_MAX;
   }
@@ -148,7 +155,8 @@ iree_status_t loom_aie2p_native_prepare_sharing(
     const loom_aie2p_native_distribution_path_t* path = delivery->path;
     IREE_RETURN_IF_ERROR(loom_aie2p_array_route_sharing_initialize(
         &context->routing, path->routes.first, path->routes.count,
-        path->first->receivers[0].tile->coordinate, arena, &delivery->sharing));
+        path->first->receivers[0].tile->coordinate,
+        LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &delivery->sharing));
     for (loom_aie2p_native_distribution_t* geometry = path->geometries;
          geometry; geometry = geometry->next_geometry) {
       loom_aie2p_native_grant_t* grant;

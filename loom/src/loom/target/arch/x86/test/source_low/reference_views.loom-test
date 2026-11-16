@@ -1,0 +1,70 @@
+// RUN: emit source-low target=x86:scalar output=low
+
+type.decl import("native", "object") @Object
+
+func.def abi(object_function, {calling_convention = "iree_status"}) @reference_array(%owner: ref<@Object>, %position: index) -> (ref<@Object>) {
+  %slot = index.assume %position [range(%position, 0, 3)] : index
+  %values = view.alloca<private> : view<4xref<@Object>>
+  view.store %owner, %values[%slot] : ref<@Object>, view<4xref<@Object>>
+  ref.release %owner : ref<@Object>
+  %result = view.load %values[%slot] : view<4xref<@Object>> -> ref<@Object>
+  func.return %result : ref<@Object>
+}
+
+// ----
+low.func.def target<x86.scalar.core> abi(object_function, {calling_convention = "iree_status"}) abi_layout({signature = (ref<@Object>, index) -> (ref<@Object>)}) @reference_array(%owner: reg<x86.ref : ref<@Object>>, %slot: reg<x86.gpr64>) -> (reg<x86.ref : ref<@Object>>) asm {
+  %9 = storage {byte_alignment = 16, byte_length = 64} : low.storage<private>
+  %values = storage_address %9 : low.storage<private> -> reg<x86.gpr64>
+  ref.discard.range %values {count = 4}
+  %11 = mov.imm64 16
+  %12 = copy %slot : reg<x86.gpr64> -> reg<x86.gpr64>
+  %13 = imul.gpr64 %12, %11
+  ref.store.indexed %owner, %values, %13 {disp32 = 0, scale = 1}
+  low.release %owner : reg<x86.ref : ref<@Object>>
+  %result = ref.load.indexed %values, %13 {disp32 = 0, scale = 1} : reg<x86.ref : ref<@Object>>
+  return %result
+}
+
+// ====
+// RUN: emit source-low target=x86:avx2 output=low
+
+type.decl import("native", "object") @Object
+
+func.def abi(object_function, {calling_convention = "iree_status"}) @borrowed_slice(%values: view<2x3xptr<@Object>>, %row: index, %column: index) -> (ptr<@Object>) {
+  %row_index = index.assume %row [range(%row, 0, 1)] : index
+  %column_index = index.assume %column [range(%column, 0, 2)] : index
+  %tail, %layout = view.subview %values[%row_index, %column_index] : view<2x3xptr<@Object>> -> view<1x1xptr<@Object>, %layout>
+  %result = view.load %tail[0, 0] : view<1x1xptr<@Object>, %layout> -> ptr<@Object>
+  func.return %result : ptr<@Object>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function, {calling_convention = "iree_status"}) abi_layout({signature = (buffer, index, index) -> (ptr<@Object>)}) @borrowed_slice(%values: reg<x86.gpr64>, %row_index: reg<x86.gpr64>, %column_index: reg<x86.gpr64>) -> (reg<x86.ref : ptr<@Object>>) asm {
+  %13 = mov.imm64 48
+  %14 = copy %row_index : reg<x86.gpr64> -> reg<x86.gpr64>
+  %15 = imul.gpr64 %14, %13
+  %16 = mov.imm64 16
+  %17 = copy %column_index : reg<x86.gpr64> -> reg<x86.gpr64>
+  %18 = imul.gpr64 %17, %16
+  %19 = copy %15 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %20 = add.gpr64 %19, %18
+  %result = ref.load.indexed %values, %20 {disp32 = 0, scale = 1} : reg<x86.ref : ptr<@Object>>
+  return %result
+}
+
+// ====
+// RUN: emit source-low target=x86:avx512 output=low
+
+type.decl import("native", "object") @Object
+
+func.def abi(object_function, {calling_convention = "iree_status"}) @wide_reference_offset(%values: view<268435457xref<@Object>>) -> (ref<@Object>) {
+  %result = view.load %values[268435456] : view<268435457xref<@Object>> -> ref<@Object>
+  func.return %result : ref<@Object>
+}
+
+// ----
+low.func.def target<x86.avx512.core> abi(object_function, {calling_convention = "iree_status"}) abi_layout({signature = (buffer) -> (ref<@Object>)}) @wide_reference_offset(%values: reg<x86.gpr64>) -> (reg<x86.ref : ref<@Object>>) asm {
+  %5 = mov.imm64 4294967296
+  %result = ref.load.indexed %values, %5 {disp32 = 0, scale = 1} : reg<x86.ref : ref<@Object>>
+  return %result
+}

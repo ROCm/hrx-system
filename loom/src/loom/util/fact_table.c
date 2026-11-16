@@ -406,6 +406,7 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   table->has_counted_loop_domains = false;
   table->condition_integer_projection_count = 0;
   table->result_type_kind_bits = 0;
+  table->replay.generation = 0;
   loom_value_fact_table_clear_identities(table);
   loom_value_fact_table_clear_origin_scope(table);
   loom_value_id_t segment_value_id = table->first_touched_segment_id;
@@ -426,7 +427,6 @@ void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   }
   table->first_touched_segment_id = LOOM_VALUE_ID_INVALID;
   table->touched_count = 0;
-  table->replay.generation = 0;
   table->replay.loop = NULL;
   table->replay.reads = NULL;
   table->count = 0;
@@ -1012,19 +1012,33 @@ iree_status_t loom_value_fact_table_enable_replay_generations(
   return iree_ok_status();
 }
 
+static IREE_ATTRIBUTE_NOINLINE void loom_value_fact_table_restart_generations(
+    loom_value_fact_table_t* table) {
+  // Zero invalidates every evaluation watermark before the counter restarts.
+  const iree_host_size_t segment_count =
+      table->capacity >> LOOM_VALUE_FACT_SEGMENT_SHIFT;
+  for (iree_host_size_t i = 0; i < segment_count; ++i) {
+    memset(table->segments[i]->replay_generations, 0,
+           LOOM_VALUE_FACT_SEGMENT_CAPACITY *
+               sizeof(*table->segments[i]->replay_generations));
+  }
+  table->replay.generation = 2;
+}
+
 static void loom_value_fact_table_advance_generation(
     loom_value_fact_table_t* table) {
   table->replay.generation += 2;
   if (IREE_UNLIKELY(!table->replay.generation)) {
-    // Zero invalidates every evaluation watermark before the counter restarts.
-    const iree_host_size_t segment_count =
-        table->capacity >> LOOM_VALUE_FACT_SEGMENT_SHIFT;
-    for (iree_host_size_t i = 0; i < segment_count; ++i) {
-      memset(table->segments[i]->replay_generations, 0,
-             LOOM_VALUE_FACT_SEGMENT_CAPACITY *
-                 sizeof(*table->segments[i]->replay_generations));
-    }
-    table->replay.generation = 2;
+    loom_value_fact_table_restart_generations(table);
+  }
+}
+
+void loom_value_fact_table_publish_change(loom_value_fact_table_t* table,
+                                          loom_value_id_t value_id) {
+  if (table->replay.generation) {
+    loom_value_fact_table_advance_generation(table);
+    loom_value_fact_table_set_replay_generation(
+        table, value_id, table->replay.generation | UINT32_C(1));
   }
 }
 
@@ -1052,11 +1066,7 @@ iree_status_t loom_value_fact_table_define_uniform_scope(
     entry = loom_value_fact_table_definition_scope_entry(table, value_id);
   }
   *entry = (uint8_t)scope;
-  if (table->replay.generation) {
-    loom_value_fact_table_advance_generation(table);
-    loom_value_fact_table_set_replay_generation(
-        table, value_id, table->replay.generation | UINT32_C(1));
-  }
+  loom_value_fact_table_publish_change(table, value_id);
   return iree_ok_status();
 }
 
@@ -1075,11 +1085,9 @@ iree_status_t loom_value_fact_table_define(loom_value_fact_table_t* table,
   }
   if (table->replay.generation &&
       (clears_definition || !loom_value_facts_equal(*entry, facts))) {
-    loom_value_fact_table_advance_generation(table);
     // Loop arguments, seeds, and resets publish without evaluating an ordinary
     // equation. Its defining operation must establish this result before reuse.
-    loom_value_fact_table_set_replay_generation(
-        table, value_id, table->replay.generation | UINT32_C(1));
+    loom_value_fact_table_publish_change(table, value_id);
   }
   *entry = facts;
   if ((iree_host_size_t)value_id + 1 > table->count) {
@@ -1105,11 +1113,7 @@ void loom_value_fact_table_undefine(loom_value_fact_table_t* table,
       loom_value_fact_table_mutable_entry(table, value_id);
   if (entry) {
     *entry = (loom_value_facts_t){0};
-    if (table->replay.generation) {
-      loom_value_fact_table_advance_generation(table);
-      loom_value_fact_table_set_replay_generation(
-          table, value_id, table->replay.generation | UINT32_C(1));
-    }
+    loom_value_fact_table_publish_change(table, value_id);
   }
   loom_value_fact_table_undefine_identity(table, value_id);
 }

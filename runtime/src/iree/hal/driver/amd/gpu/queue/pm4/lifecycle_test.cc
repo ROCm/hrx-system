@@ -476,11 +476,12 @@ TEST_F(Pm4LifecycleTest, PublicationFailureRetiresWithoutSignalingSuccess) {
   Capture(CaptureKind::Dispatch, rejected_signal);
   EnableNativeCompletion();
   IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_publish_signal(
-      semaphore_, signal_value_, readers_[0]));
+      semaphore_, signal_value_, readers_[0], &capture_->signal_producers[0]));
   iree_hal_semaphore_fail(rejected_signal,
                           iree_status_from_code(IREE_STATUS_ABORTED));
   iree_status_t status = iree_hal_amd_gpu_semaphore_publish_signal(
-      rejected_signal, signal_value_, readers_[0]);
+      rejected_signal, signal_value_, readers_[0],
+      &capture_->signal_producers[1]);
   EXPECT_EQ(iree_status_code(status), IREE_STATUS_ABORTED);
   iree_hal_amd_gpu_pm4_submission_fail(capture_, status);
   iree_status_free(status);

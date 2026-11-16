@@ -12,15 +12,6 @@
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/input.h"
 #include "loom/transforms/pipeline/control.h"
 
-static iree_status_t loom_aie2p_native_program_register(
-    void* user_data, iree_host_size_t engine, loom_func_like_t function) {
-  loom_aie2p_native_context_t* context = user_data;
-  return loom_pipeline_realization_register_helper(
-      context->code.module, context->code.realization,
-      context->execution.workers[engine], function,
-      context->pass->diagnostic_emitter);
-}
-
 static iree_status_t loom_aie2p_native_program_prepare(
     void* user_data, loom_builder_t* builder, iree_host_size_t worker,
     loom_value_slice_t captures) {
@@ -120,9 +111,53 @@ static iree_status_t loom_aie2p_native_program_frame(
       realization->invocations.entries[0]);
 }
 
+static iree_status_t loom_aie2p_native_retain_plan(
+    loom_aie2p_native_context_t* context, iree_arena_allocator_t* arena,
+    loom_aie2p_execution_plan_t* plan) {
+  const iree_host_size_t tile_count =
+      loom_xdna_array_physical_tile_count(context->family);
+  loom_aie2p_execution_tile_t* tiles = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->pass->arena, tile_count, sizeof(*tiles), (void**)&tiles));
+  for (iree_host_size_t i = 0; i < tile_count; ++i) {
+    const loom_aie2p_native_tile_t* tile = &context->tiles[i];
+    tiles[i] = (loom_aie2p_execution_tile_t){
+        .memory_length =
+            tile->pool_index == UINT32_MAX
+                ? 0
+                : loom_source_storage_packing_requirement(
+                      context->inventory.pools[tile->pool_index].packing)
+                      .byte_length,
+        .lock_count = tile->next_lock,
+        .descriptor_counts = {tile->descriptor_counts[0],
+                              tile->descriptor_counts[1]},
+        .mm2s_count = tile->mm2s_count,
+        .s2mm_count = tile->s2mm_count,
+    };
+  }
+  const loom_aie2p_execution_plan_t selected = {
+      .tiles = tiles,
+      .routing = context->routing,
+      .routes = context->routes,
+      .route_lifetimes = context->route_lifetimes,
+      .route_lifetime_count = context->route_lifetime_count,
+      .control_sources = context->control_sources,
+      .control_destination_sources = context->control_destination_sources,
+      .column_command_packets = context->column_command_packets,
+      .control_paths = context->control_paths,
+      .switches = context->switches,
+      .connections = context->connections,
+  };
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_execution_plan_copy_resources(&selected, 0, arena, plan));
+  context->plan = plan;
+  return iree_ok_status();
+}
+
 iree_status_t loom_aie2p_native_emit_programs(
-    loom_aie2p_native_context_t* context, loom_rewriter_t* rewriter,
+    void* user_data, loom_rewriter_t* rewriter,
     const loom_pipeline_realization_t* realization, bool* out_valid) {
+  loom_aie2p_native_context_t* context = user_data;
   *out_valid = false;
   const loom_value_id_t** state_arguments = NULL;
   iree_host_size_t* preparation_engines = NULL;
@@ -146,23 +181,31 @@ iree_status_t loom_aie2p_native_emit_programs(
     }
   }
   context->code.realization = realization;
+  iree_arena_allocator_t* owner_arena = realization->version_owner
+                                            ? realization->version_owner->arena
+                                            : rewriter->arena;
+  loom_pipeline_entry_scope_t* scope = NULL;
+  IREE_RETURN_IF_ERROR(loom_pipeline_entry_scope_allocate(
+      &loom_aie2p_execution_plan_type, &realization->invocations.lifetimes,
+      realization->invocations.count, owner_arena, &scope));
   const loom_type_t frame_type = loom_type_buffer();
   const loom_pipeline_control_options_t options = {
+      .retain_phase_calls = true,
       .worker_engines = context->core_engines,
       .preparation_engines = preparation_engines,
       .boundary_workers = context->distribution_controllers,
       .state_types = &frame_type,
       .state_count = 1,
       .worker_state_arguments = state_arguments,
-      .emit = {.function = loom_aie2p_native_program_register,
-               .prepare_worker = loom_aie2p_native_program_prepare,
+      .diagnostic_emitter = context->pass->diagnostic_emitter,
+      .emit = {.prepare_worker = loom_aie2p_native_program_prepare,
                .boundary = loom_aie2p_native_program_boundary,
                .collective_begin = loom_aie2p_native_collective_begin,
                .collective_end = loom_aie2p_native_collective_end,
                .user_data = context}};
   loom_pipeline_control_function_t* functions = NULL;
   IREE_RETURN_IF_ERROR(loom_pipeline_control_materialize(
-      rewriter, realization, &context->execution, &options, &functions));
+      rewriter, realization, &context->execution, scope, &options, &functions));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       context->pass->arena, context->execution.engine_count,
       sizeof(*context->programs), (void**)&context->programs));
@@ -204,8 +247,19 @@ iree_status_t loom_aie2p_native_emit_programs(
         NULL, 0, location, &entry));
     const loom_func_like_t function =
         loom_func_like_cast(rewriter->module, entry);
-    IREE_RETURN_IF_ERROR(
-        loom_aie2p_native_program_register(context, engine, function));
+    loom_target_function_version_t* version = NULL;
+    IREE_RETURN_IF_ERROR(loom_pipeline_realization_register_helper(
+        context->code.module, realization, representative, function,
+        context->pass->diagnostic_emitter, &version));
+    if (version != NULL) {
+      loom_pipeline_entry_binding_t* binding = NULL;
+      IREE_RETURN_IF_ERROR(
+          iree_arena_allocate(realization->version_owner->arena,
+                              sizeof(*binding), (void**)&binding));
+      *binding = *projected->entry;
+      binding->role = LOOM_PIPELINE_ENTRY_ROOT;
+      version->pipeline_entry = binding;
+    }
     loom_builder_enter_region(&rewriter->builder, entry,
                               loom_func_def_body(entry));
     // Physical materialization erased source buffer captures. Only the
@@ -228,6 +282,8 @@ iree_status_t loom_aie2p_native_emit_programs(
                                                 LOOM_LOCATION_UNKNOWN, &call));
     context->programs[engine] = function;
   }
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_retain_plan(
+      context, owner_arena, (loom_aie2p_execution_plan_t*)scope));
   *out_valid = true;
   return iree_ok_status();
 }

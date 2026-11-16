@@ -39,12 +39,13 @@ const char* iree_sysfs_get_root_path(void);
 // that typically contain a single number or short list.
 //
 // |path| must be a null-terminated filesystem path.
-// |buffer| must be at least |buffer_size| bytes.
+// |buffer| must be at least |buffer_size| bytes, including the NUL terminator.
 // |out_length| receives the number of bytes read (excluding any NUL added).
 //
 // The buffer is always NUL-terminated on success.
 // Returns IREE_STATUS_NOT_FOUND if the file doesn't exist.
-// Returns IREE_STATUS_OUT_OF_RANGE if the file exceeds buffer_size.
+// Uses caller storage directly without allocating a buffered file stream.
+// Returns IREE_STATUS_OUT_OF_RANGE if the file exceeds |buffer_size| - 1 bytes.
 iree_status_t iree_sysfs_read_small_file(const char* path, char* buffer,
                                          size_t buffer_size,
                                          iree_host_size_t* out_length);

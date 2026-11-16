@@ -203,6 +203,7 @@ _TargetKind = EnumDef(
         EnumCase("low_leaf", 4, doc="Core with a leaf-only native callable ABI."),
         EnumCase("linear_subgroups", 5, doc="Core with subgroups in flattened workitem order."),
         EnumCase("dense_subgroups", 6, doc="Core with dense subgroups in unspecified workitem order."),
+        EnumCase("native_vectors", 7, doc="Core with bounded native floating-point vector carriers."),
     ],
     doc="Synthetic target kind for target-like interface tests.",
     c_type="loom_test_target_kind_t",
@@ -698,6 +699,28 @@ test_segmented = Op(
 # the fact inference function returns exact facts, which the rewriter materializes
 # as scalar.constant ops. This makes internal analysis state observable
 # in .loom-test files.
+
+test_fact_numeric_identity_matches = Op(
+    "test.fact_numeric_identity_matches",
+    group=test_ops,
+    doc="Returns 1 when the operands share a retained numeric identity, independently of storage type.",
+    operands=[Operand("lhs", INTEGER), Operand("rhs", INTEGER)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    facts="loom_test_fact_numeric_identity_matches_facts",
+    format=[
+        Ref("lhs"),
+        COMMA,
+        Ref("rhs"),
+        COLON,
+        TypeOf("lhs"),
+        COMMA,
+        TypeOf("rhs"),
+        ARROW,
+        ResultType("result"),
+    ],
+    examples=["%same = test.fact_numeric_identity_matches %byte, %wide : i8, i64 -> i1"],
+)
 
 test_fact_range_lo = Op(
     "test.fact_range_lo",
@@ -3386,4 +3409,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_f64_array_attrs,
     test_string_array_attrs,
     test_fact_observation_scope,
+    test_fact_numeric_identity_matches,
 )

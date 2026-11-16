@@ -10,6 +10,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/analysis/pipeline/entries.h"
 #include "loom/codegen/low/loop_execution.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/format/text/parser.h"
@@ -1006,6 +1007,166 @@ func.def public @entry() {
           source.get(), &versions, &block_pool_, iree_allocator_system(),
           nullptr, &projected_module));
   EXPECT_EQ(projected_module, nullptr);
+}
+
+TEST_F(TargetFunctionVersionProjectionTest,
+       PipelineScopesRemainSharedAfterSourceCompilationRetirement) {
+  loom_module_t* allocated = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("entries"),
+                                      &block_pool_, nullptr,
+                                      iree_allocator_system(), &allocated));
+  ModulePtr source(allocated);
+  loom_builder_t builder;
+  loom_builder_initialize(source.get(), &source->arena,
+                          loom_module_block(source.get()), &builder);
+  const TestTargetProfile profile =
+      MakeTestProfile(LOOM_TEST_TARGET_KIND_LOW_CORE);
+  loom_target_specialization_request_t requests[5] = {};
+  const char* names[] = {"root", "start", "retire", "other", "ordinary"};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(names); ++i) {
+    loom_builder_enter_region(&builder, nullptr, source->body);
+    loom_string_id_t name;
+    IREE_ASSERT_OK(loom_module_intern_string(
+        source.get(), iree_make_cstring_view(names[i]), &name));
+    loom_symbol_ref_t symbol = {};
+    IREE_ASSERT_OK(
+        loom_module_add_symbol(source.get(), name, &symbol.symbol_id));
+    loom_op_t* function;
+    IREE_ASSERT_OK(loom_func_def_build(
+        &builder, 0, 0, 0, 0, 0, 0, 0, 0, loom_symbol_ref_null(),
+        loom_attr_absent(), 0, loom_named_attr_slice_empty(),
+        LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol, nullptr,
+        0, iree_const_byte_span_empty(), nullptr, 0, nullptr, 0, nullptr, 0,
+        LOOM_LOCATION_UNKNOWN, &function));
+    loom_builder_enter_region(&builder, function, loom_func_def_body(function));
+    loom_op_t* returned;
+    IREE_ASSERT_OK(loom_func_return_build(&builder, nullptr, 0,
+                                          LOOM_LOCATION_UNKNOWN, &returned));
+    requests[i] = {.function_ref = symbol, .target_profile = &profile.base};
+  }
+  auto specialization =
+      Specialize(source.get(), requests, IREE_ARRAYSIZE(requests));
+  ASSERT_EQ(specialization.function_versions.list.count, 5u);
+
+  constexpr auto none = IREE_HOST_SIZE_MAX;
+  const loom_pipeline_lifetime_t nodes[] = {
+      {LOOM_PIPELINE_LIFETIME_CONCURRENT, 0, none, 1, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 0, 0, none, 2},
+      {LOOM_PIPELINE_LIFETIME_SERIAL, 0, 0, 3, none},
+      {LOOM_PIPELINE_LIFETIME_CONCURRENT, 1, 2, 4, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 1, 3, none, none},
+  };
+  const iree_host_size_t owners[] = {1, 4};
+  loom_pipeline_lifetimes_t lifetimes = {
+      .nodes = nodes,
+      .count = IREE_ARRAYSIZE(nodes),
+      .owners = owners,
+      .has_serial = true,
+  };
+  IREE_ASSERT_OK(loom_pipeline_lifetimes_index(&version_arena_, &lifetimes));
+  struct ResourceScope {
+    // Shared lifetime owner embedded first for compilation projection.
+    loom_pipeline_entry_scope_t base;
+    // Owned per-engine resource extents, independent of source IR identities.
+    uint64_t* extents;
+  };
+  static const loom_pipeline_entry_scope_type_t resource_type = {
+      .size = sizeof(ResourceScope),
+      .clone = [](const loom_pipeline_entry_scope_t* source,
+                  iree_arena_allocator_t* arena,
+                  loom_pipeline_entry_scope_t* target) -> iree_status_t {
+        auto* copy = reinterpret_cast<ResourceScope*>(target);
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            arena, 2, sizeof(*copy->extents),
+            reinterpret_cast<void**>(&copy->extents)));
+        const auto* original = reinterpret_cast<const ResourceScope*>(source);
+        copy->extents[0] = original->extents[0];
+        copy->extents[1] = original->extents[1];
+        return iree_ok_status();
+      },
+  };
+  loom_pipeline_entry_scope_t* scopes[2];
+  for (size_t i = 0; i < IREE_ARRAYSIZE(scopes); ++i) {
+    IREE_ASSERT_OK(loom_pipeline_entry_scope_allocate(
+        i == 0 ? &resource_type : &loom_pipeline_entry_scope_type, &lifetimes,
+        IREE_ARRAYSIZE(owners), &version_arena_, &scopes[i]));
+  }
+  auto* resources = reinterpret_cast<ResourceScope*>(scopes[0]);
+  IREE_ASSERT_OK(
+      iree_arena_allocate_array(&version_arena_, 2, sizeof(*resources->extents),
+                                reinterpret_cast<void**>(&resources->extents)));
+  resources->extents[0] = 4096;
+  resources->extents[1] = 8192;
+  const loom_pipeline_entry_role_t roles[] = {
+      LOOM_PIPELINE_ENTRY_ROOT, LOOM_PIPELINE_ENTRY_START,
+      LOOM_PIPELINE_ENTRY_RETIRE, LOOM_PIPELINE_ENTRY_COMPLETE};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(roles); ++i) {
+    loom_pipeline_entry_binding_t* binding;
+    IREE_ASSERT_OK(iree_arena_allocate(&version_arena_, sizeof(*binding),
+                                       reinterpret_cast<void**>(&binding)));
+    *binding = {
+        .scope = scopes[i == 3],
+        .owner = i ? 1u : 0u,
+        .engine = 73,
+        .role = roles[i],
+    };
+    auto* version = loom_target_function_version_cast(
+        specialization.function_versions.list.values[i]);
+    version->pipeline_entry = binding;
+  }
+
+  iree_arena_allocator_t clone_arena;
+  iree_arena_initialize(&block_pool_, &clone_arena);
+  loom_function_version_owner_t cloned_versions;
+  loom_function_version_owner_initialize(&clone_arena, &cloned_versions);
+  ModulePtr projected = Project(
+      source.get(), &specialization.function_versions.list, &cloned_versions);
+  ASSERT_EQ(cloned_versions.list.count, 5u);
+  const auto* first =
+      loom_target_function_version_const_cast(cloned_versions.list.values[0])
+          ->pipeline_entry;
+  ASSERT_NE(first, nullptr);
+  EXPECT_NE(first->scope, scopes[0]);
+  EXPECT_NE(first->scope->lifetimes.nodes, scopes[0]->lifetimes.nodes);
+  EXPECT_NE(first->scope->lifetimes.ancestry, scopes[0]->lifetimes.ancestry);
+  EXPECT_NE(first->scope->lifetimes.owners, scopes[0]->lifetimes.owners);
+  EXPECT_EQ(first->scope->type, &resource_type);
+  const auto* projected_resources =
+      reinterpret_cast<const ResourceScope*>(first->scope);
+  EXPECT_NE(projected_resources->extents, resources->extents);
+  source.reset();
+  iree_arena_reset(&version_arena_);
+  EXPECT_EQ(projected_resources->extents[0], 4096u);
+  EXPECT_EQ(projected_resources->extents[1], 8192u);
+
+  for (size_t i = 0; i < IREE_ARRAYSIZE(roles); ++i) {
+    const auto* version =
+        loom_target_function_version_const_cast(cloned_versions.list.values[i]);
+    const auto* binding = version->pipeline_entry;
+    ASSERT_NE(binding, nullptr);
+    EXPECT_EQ(binding->role, roles[i]);
+    EXPECT_EQ(binding->owner, i ? 1u : 0u);
+    EXPECT_EQ(binding->engine, 73u);
+    EXPECT_EQ(binding->scope->owner_count, 2u);
+    EXPECT_EQ(binding->scope->lifetimes.count, IREE_ARRAYSIZE(nodes));
+    EXPECT_EQ(binding->scope->lifetimes.owners[1], 4u);
+    EXPECT_EQ(loom_pipeline_lifetimes_common_ancestor(
+                  &binding->scope->lifetimes, 1, 4),
+              0u);
+    EXPECT_EQ(
+        version->base.function.op,
+        FindFunction(projected.get(), iree_make_cstring_view(names[i])).op);
+    if (i < 3) {
+      EXPECT_EQ(binding->scope, first->scope);
+    } else {
+      EXPECT_NE(binding->scope, first->scope);
+    }
+  }
+  EXPECT_EQ(
+      loom_target_function_version_const_cast(cloned_versions.list.values[4])
+          ->pipeline_entry,
+      nullptr);
+  iree_arena_deinitialize(&clone_arena);
 }
 
 }  // namespace

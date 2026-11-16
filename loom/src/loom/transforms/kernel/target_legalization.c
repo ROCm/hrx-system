@@ -1203,11 +1203,10 @@ static bool loom_kernel_scan_math_is_supported(loom_combining_kind_t kind,
          (kind != LOOM_COMBINING_KIND_ADDF && kind != LOOM_COMBINING_KIND_MULF);
 }
 
-static iree_status_t loom_kernel_scan_state_initialize(
+static iree_status_t loom_kernel_scan_state_configure(
     loom_target_legalization_context_t* context, const loom_op_t* op,
     loom_value_id_t source_value, loom_combining_kind_t kind,
-    const loom_kernel_scan_cluster_t* cluster, bool need_active_count,
-    loom_kernel_scan_state_t* out_state) {
+    bool direct_physical_lanes, loom_kernel_scan_state_t* out_state) {
   const loom_target_bundle_t* bundle =
       loom_target_legalization_context_bundle(context);
   const uint32_t subgroup_size = bundle->snapshot->subgroup_size;
@@ -1234,8 +1233,7 @@ static iree_status_t loom_kernel_scan_state_initialize(
       .kind = value_kind,
       .subgroup_size = subgroup_size,
       .mask_bit_count = subgroup_size <= 32 ? 32u : 64u,
-      .direct_physical_lanes =
-          loom_kernel_scan_has_direct_physical_lanes(context, op, cluster),
+      .direct_physical_lanes = direct_physical_lanes,
   };
   loom_vector_packet_shape_t packet_shape;
   if (context->vector_packet_policy != NULL &&
@@ -1247,6 +1245,18 @@ static iree_status_t loom_kernel_scan_state_initialize(
         context->arena, packet_shape.chunk_count,
         sizeof(*out_state->packet_values), (void**)&out_state->packet_values));
   }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_kernel_scan_state_initialize(
+    loom_target_legalization_context_t* context, const loom_op_t* op,
+    loom_value_id_t source_value, loom_combining_kind_t kind,
+    const loom_kernel_scan_cluster_t* cluster, bool need_active_count,
+    loom_kernel_scan_state_t* out_state) {
+  IREE_RETURN_IF_ERROR(loom_kernel_scan_state_configure(
+      context, op, source_value, kind,
+      loom_kernel_scan_has_direct_physical_lanes(context, op, cluster),
+      out_state));
   if (out_state->direct_physical_lanes) {
     if (need_active_count) {
       IREE_RETURN_IF_ERROR(loom_kernel_scan_build_integer_constant(
@@ -1260,7 +1270,7 @@ static iree_status_t loom_kernel_scan_state_initialize(
   IREE_RETURN_IF_ERROR(loom_kernel_scan_build_integer_constant(
       out_state, out_state->mask_type, 1, &out_state->one_mask));
   IREE_RETURN_IF_ERROR(loom_kernel_scan_build_integer_constant(
-      out_state, out_state->i32_type, subgroup_size,
+      out_state, out_state->i32_type, out_state->subgroup_size,
       &out_state->subgroup_size_i32));
   IREE_RETURN_IF_ERROR(
       loom_kernel_scan_build_cluster_state(out_state, cluster));
@@ -1377,6 +1387,72 @@ iree_status_t loom_kernel_target_legalize_subgroup_reduce(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
   };
+  return iree_ok_status();
+}
+
+iree_status_t loom_kernel_target_legalize_subgroup_reduce_butterfly(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+  const loom_combining_kind_t kind = loom_kernel_subgroup_reduce_kind(op);
+  if (!loom_kernel_scan_math_is_supported(
+          kind, loom_kernel_subgroup_reduce_math(op))) {
+    return iree_ok_status();
+  }
+  loom_kernel_scan_cluster_t cluster = {0};
+  if (!loom_kernel_reduce_cluster_from_op(context, op, &cluster) ||
+      cluster.stride != 1 || cluster.size <= 1 ||
+      (cluster.size & (cluster.size - 1)) != 0) {
+    return iree_ok_status();
+  }
+
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_set_before(&rewriter->builder, op);
+  const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+  const loom_value_id_t source_value = loom_kernel_subgroup_reduce_value(op);
+  loom_kernel_scan_state_t state;
+  IREE_RETURN_IF_ERROR(
+      loom_kernel_scan_state_configure(context, op, source_value, kind,
+                                       /*direct_physical_lanes=*/true, &state));
+  // XOR offsets below a power-of-two cluster size preserve every higher lane
+  // bit, so the physical exchange cannot cross a cluster boundary. Use the
+  // full physical subgroup width to avoid the logical-width guards required
+  // by the general reference lowering. The shuffle's validity result is
+  // deliberately unused: complete cluster execution was proven by the target
+  // matcher.
+  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_integer_constant(
+      &state, state.i32_type, state.subgroup_size, &state.subgroup_size_i32));
+  loom_value_id_t accumulator = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_transport_value(
+      &state, source_value, &accumulator));
+  for (uint32_t distance = 1; distance < cluster.size; distance <<= 1) {
+    loom_value_id_t offset = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_kernel_scan_build_integer_constant(
+        &state, state.i32_type, distance, &offset));
+    loom_op_t* shuffle_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_kernel_subgroup_shuffle_build(
+        state.builder, LOOM_KERNEL_SUBGROUP_SHUFFLE_MODE_XOR, accumulator,
+        offset, state.subgroup_size_i32, state.value_type, state.location,
+        &shuffle_op));
+    loom_value_id_t combined = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_kernel_scan_build_combine(
+        &state, accumulator, loom_kernel_subgroup_shuffle_result(shuffle_op),
+        &combined));
+    accumulator = combined;
+  }
+
+  loom_value_id_t logical_result = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_kernel_scan_build_logical_value(&state, accumulator,
+                                                            &logical_result));
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, &logical_result, 1, checkpoint));
+  IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+      rewriter, op, &logical_result, 1));
+  out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
   return iree_ok_status();
 }
 

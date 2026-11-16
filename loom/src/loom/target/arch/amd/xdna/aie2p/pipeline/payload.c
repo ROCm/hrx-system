@@ -65,13 +65,39 @@ static bool loom_aie2p_native_payload_before(
                             : a.engine < b.engine;
 }
 
+static iree_status_t loom_aie2p_native_payload_retain_lifetime(
+    loom_aie2p_native_context_t* context,
+    loom_aie2p_native_payload_class_t* payload, iree_host_size_t lifetime) {
+  if (!lifetime ||
+      (payload->lifetime_head &&
+       context->route_lifetimes[payload->lifetime_head].lifetime == lifetime)) {
+    return iree_ok_status();
+  }
+  const iree_host_size_t index = iree_max(1, context->route_lifetime_count);
+  if (index >= context->route_lifetime_capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        context->pass->arena, context->route_lifetime_count, index + 1,
+        sizeof(*context->route_lifetimes), &context->route_lifetime_capacity,
+        (void**)&context->route_lifetimes));
+  }
+  if (!context->route_lifetime_count) {
+    context->route_lifetimes[0] = (loom_aie2p_native_route_lifetime_t){0};
+  }
+  context->route_lifetimes[index] = (loom_aie2p_native_route_lifetime_t){
+      .lifetime = lifetime, .next = payload->lifetime_head};
+  payload->lifetime_head = index;
+  context->route_lifetime_count = index + 1;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_aie2p_native_intern_payload(
     loom_aie2p_native_context_t* context,
     loom_aie2p_native_payload_inventory_t* inventory,
     loom_aie2p_native_payload_endpoint_t sender,
     loom_aie2p_native_payload_endpoint_t* destinations,
     iree_host_size_t destination_count, bool framed, bool distribution,
-    const loom_op_t* op, loom_aie2p_native_payload_class_t** out_payload) {
+    iree_host_size_t lifetime, const loom_op_t* op,
+    loom_aie2p_native_payload_class_t** out_payload) {
   *out_payload = NULL;
   const iree_host_size_t slot =
       inventory->bases[sender.tile - context->tiles] + sender.engine;
@@ -104,8 +130,14 @@ static iree_status_t loom_aie2p_native_intern_payload(
     destinations[j] = endpoint;
   }
   loom_aie2p_native_payload_class_t** position = &source->classes;
+  loom_aie2p_native_payload_class_t** insertion = NULL;
   for (; *position; position = &(*position)->next) {
     loom_aie2p_native_payload_class_t* candidate = *position;
+    if (!insertion &&
+        loom_aie2p_native_payload_before(sender.tile, destinations[0],
+                                         candidate->destinations[0])) {
+      insertion = position;
+    }
     if (candidate->destination_count != destination_count) {
       continue;
     }
@@ -118,7 +150,8 @@ static iree_status_t loom_aie2p_native_intern_payload(
     if (i == destination_count) {
       candidate->distribution_only &= distribution;
       *out_payload = candidate;
-      return iree_ok_status();
+      return loom_aie2p_native_payload_retain_lifetime(context, candidate,
+                                                       lifetime);
     }
   }
   if (source->class_count == 32) {
@@ -157,7 +190,11 @@ static iree_status_t loom_aie2p_native_intern_payload(
            inventory->receiver_words * sizeof(*multicast->receivers));
     payload->multicast = inventory->multicasts = multicast;
   }
-  *position = *out_payload = payload;
+  if (!insertion) {
+    insertion = position;
+  }
+  payload->next = *insertion;
+  *insertion = *out_payload = payload;
   source->framed |= source->class_count > 1;
   for (iree_host_size_t i = 0; i < destination_count; ++i) {
     const iree_host_size_t destination_slot =
@@ -174,7 +211,7 @@ static iree_status_t loom_aie2p_native_intern_payload(
     }
     inventory->arrivals[destination_slot] = source;
   }
-  return iree_ok_status();
+  return loom_aie2p_native_payload_retain_lifetime(context, payload, lifetime);
 }
 
 static iree_status_t loom_aie2p_native_share_payloads(
@@ -211,7 +248,7 @@ static iree_status_t loom_aie2p_native_share_payloads(
        group = group->next_group) {
     if (group->member_count > 1) {
       IREE_RETURN_IF_ERROR(loom_aie2p_array_route_multicast_initialize(
-          &context->routing, context->pass->arena, &group->routes));
+          &context->routing, &group->routes));
     }
   }
   for (loom_aie2p_native_payload_multicast_t* multicast = inventory->multicasts;
@@ -262,6 +299,11 @@ iree_status_t loom_aie2p_native_form_payloads(
   for (iree_host_size_t i = 0; i < realization->invocations.worker_count; ++i) {
     loom_aie2p_native_worker_t* worker = &context->workers[i];
     const loom_op_t* op = realization->function.op;
+    const iree_host_size_t lifetime =
+        inventory.has_serial
+            ? realization->invocations.lifetimes.owners
+                  [realization->invocations.workers[i].invocation->ordinal]
+            : 0;
     for (loom_aie2p_native_dma_path_t* path = worker->transfer_paths; path;
          path = path->next_demand) {
       const loom_aie2p_native_payload_endpoint_t local = {
@@ -271,7 +313,7 @@ iree_status_t loom_aie2p_native_form_payloads(
       destinations[0] = path->ingress ? local : shim;
       IREE_RETURN_IF_ERROR(loom_aie2p_native_intern_payload(
           context, &inventory, path->ingress ? shim : local, destinations, 1,
-          false, false, op, &path->payload));
+          false, false, lifetime, op, &path->payload));
       if (!path->payload) {
         return iree_ok_status();
       }
@@ -305,7 +347,7 @@ iree_status_t loom_aie2p_native_form_payloads(
         }
         IREE_RETURN_IF_ERROR(loom_aie2p_native_intern_payload(
             context, &inventory, sender, destinations, receivers, packet, true,
-            op, &path->payloads[c]));
+            lifetime, op, &path->payloads[c]));
         if (!path->payloads[c]) {
           return iree_ok_status();
         }
@@ -321,8 +363,8 @@ iree_status_t loom_aie2p_native_form_payloads(
             .tile = context->pool_tiles[phase->destination->pool_index],
             .engine = phase->receiver.engine};
         IREE_RETURN_IF_ERROR(loom_aie2p_native_intern_payload(
-            context, &inventory, sender, destinations, 1, true, false, op,
-            &phase->payload));
+            context, &inventory, sender, destinations, 1, true, false, lifetime,
+            op, &phase->payload));
         if (!phase->payload) {
           return iree_ok_status();
         }
@@ -334,15 +376,11 @@ iree_status_t loom_aie2p_native_form_payloads(
   return iree_ok_status();
 }
 
-iree_status_t loom_aie2p_native_route_payload(
+static iree_status_t loom_aie2p_native_route_payload_class(
     loom_aie2p_native_context_t* context,
     loom_aie2p_native_payload_class_t* payload, const loom_op_t* op,
     uint32_t* next_source, bool* out_valid) {
   *out_valid = false;
-  if (payload->routed) {
-    *out_valid = true;
-    return iree_ok_status();
-  }
   loom_aie2p_native_payload_source_t* source = payload->source;
   loom_aie2p_array_route_multicast_t* multicast =
       payload->multicast && payload->multicast->group &&
@@ -373,12 +411,39 @@ iree_status_t loom_aie2p_native_route_payload(
     }
     loom_aie2p_native_route_label(context, first,
                                   source->framed ? payload->packet : UINT8_MAX,
-                                  UINT32_MAX);
+                                  false, UINT32_MAX);
+    for (iree_host_size_t j = first; j < context->routing.route_count; ++j) {
+      context->routes[j].lifetime_head = payload->lifetime_head;
+    }
   }
   payload->route_count = context->routing.route_count - payload->route_first;
   payload->routed = true;
   *out_valid = true;
   return iree_ok_status();
+}
+
+iree_status_t loom_aie2p_native_route_payload(
+    loom_aie2p_native_context_t* context,
+    loom_aie2p_native_payload_class_t* payload, const loom_op_t* op,
+    uint32_t* next_source, bool* out_valid) {
+  *out_valid = true;
+  if (payload->routed) {
+    return iree_ok_status();
+  }
+  // All classes share this sender's physical prefix. Admit its longer paths
+  // before shorter branches fix a lane that cannot pass through an SRAM tile.
+  // Formation retains this order across classes as well as within each class;
+  // runtime packet order and each class's destination set remain unchanged.
+  iree_status_t status = iree_ok_status();
+  bool valid = true;
+  for (loom_aie2p_native_payload_class_t* candidate = payload->source->classes;
+       iree_status_is_ok(status) && valid && candidate;
+       candidate = candidate->next) {
+    status = loom_aie2p_native_route_payload_class(context, candidate, op,
+                                                   next_source, &valid);
+  }
+  *out_valid = valid;
+  return status;
 }
 
 void loom_aie2p_native_frame_payload(

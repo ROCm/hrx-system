@@ -170,6 +170,18 @@ iree_status_t loom_aie2p_native_select_collectives(
   return iree_ok_status();
 }
 
+static uint8_t loom_aie2p_native_reserve_collective_packet(
+    loom_aie2p_native_context_t* context, loom_aie2p_native_worker_t* worker) {
+  loom_aie2p_native_control_path_t* path =
+      &context->control_paths[worker->tile->coordinate.column];
+  const uint8_t packet = loom_aie2p_native_collective_packet(
+      &worker->packet_mask, path->sharing.domain ? path->packets : 0);
+  if (packet != UINT8_MAX) {
+    path->packets |= UINT32_C(1) << packet;
+  }
+  return packet;
+}
+
 iree_status_t loom_aie2p_native_route_collectives(
     loom_aie2p_native_context_t* context, uint32_t* next_source,
     bool* out_valid) {
@@ -193,11 +205,11 @@ iree_status_t loom_aie2p_native_route_collectives(
     loom_aie2p_native_worker_t* relay_worker =
         &context->workers[execution->workers[relay]];
     collective->reader_packet =
-        loom_aie2p_native_collective_packet(&reader_worker->packet_mask);
+        loom_aie2p_native_reserve_collective_packet(context, reader_worker);
     collective->relay_packet =
-        relay == reader
-            ? collective->reader_packet
-            : loom_aie2p_native_collective_packet(&relay_worker->packet_mask);
+        relay == reader ? collective->reader_packet
+                        : loom_aie2p_native_reserve_collective_packet(
+                              context, relay_worker);
     if (collective->reader_packet == UINT8_MAX ||
         collective->relay_packet == UINT8_MAX) {
       return loom_aie2p_native_reject(

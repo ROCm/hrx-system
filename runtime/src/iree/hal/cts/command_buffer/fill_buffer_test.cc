@@ -385,6 +385,27 @@ TEST_P(CommandBufferFillBufferTest, FillSizeAlignmentAndPatternClasses) {
   }
 }
 
+TEST_P(CommandBufferFillBufferTest, BulkSizeAndPatternClasses) {
+  const uint32_t pattern = 0xA15BC72Du;
+  for (iree_device_size_t extent : {256 * 1024, 1024 * 1024}) {
+    for (iree_host_size_t pattern_length : {1, 2, 4}) {
+      for (iree_device_size_t length :
+           {extent - pattern_length, extent, extent + pattern_length}) {
+        const iree_device_size_t offset = 16 + pattern_length;
+        SCOPED_TRACE(::testing::Message()
+                     << "length=" << length
+                     << "pattern_length=" << pattern_length);
+        std::vector<uint8_t> actual;
+        RunFillBufferTest(offset + length + 16, offset, length, &pattern,
+                          pattern_length, actual);
+        EXPECT_THAT(actual, ContainerEq(MakeFilledBytes(offset + length + 16,
+                                                        offset, length, pattern,
+                                                        pattern_length)));
+      }
+    }
+  }
+}
+
 TEST_P(CommandBufferFillBufferTest, RemainingRangePatterns) {
   const uint32_t pattern = 0xA15BC72Du;
   for (iree_host_size_t pattern_length : {1, 2, 4}) {

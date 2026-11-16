@@ -901,3 +901,57 @@ func.def @nonzero_carried_alias(%input: i32, %end: index) {
   test.use %final : i32
   func.return
 }
+
+// ====
+
+// RUN: pass unroll-scf-for,dce
+
+// Equality combines the independent divisibility contracts only on its edge.
+func.def @equality_divisibility(%left_input: i32, %right_input: i32) {
+  %left = scalar.assume %left_input [range(%left_input, -120, 120), multiple_of(%left_input, 8)] : i32
+  %right = scalar.assume %right_input [range(%right_input, -120, 120), multiple_of(%right_input, 3)] : i32
+  %equal = scalar.cmpi eq, %left, %right : i32
+  %combined = scalar.constant 24 : i64
+  %original = scalar.constant 8 : i64
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %equal {
+    %divisor = test.fact_divisor %left : i32 -> i64
+    %proven = scalar.cmpi eq, %divisor, %combined : i64
+    %count = index.cast %proven : i1 to index
+    scf.for %inside = [%begin to %count step %step] unroll {
+      test.use %inside : index
+    }
+  } else {
+    %other_divisor = test.fact_divisor %left : i32 -> i64
+    %other_proven = scalar.cmpi eq, %other_divisor, %original : i64
+    %other_count = index.cast %other_proven : i1 to index
+    scf.for %other = [%begin to %other_count step %step] unroll {
+      test.use %other : index
+    }
+  }
+  %outside_divisor = test.fact_divisor %left : i32 -> i64
+  %outside_proven = scalar.cmpi eq, %outside_divisor, %original : i64
+  %outside_count = index.cast %outside_proven : i1 to index
+  scf.for %outside = [%begin to %outside_count step %step] unroll {
+    test.use %outside : index
+  }
+  func.return
+}
+
+// ----
+func.def @equality_divisibility(%left_input: i32, %right_input: i32) {
+  %left = scalar.assume %left_input [range(%left_input, -120, 120), multiple_of(%left_input, 8)] : i32
+  %right = scalar.assume %right_input [range(%right_input, -120, 120), multiple_of(%right_input, 3)] : i32
+  %equal = scalar.cmpi eq, %left, %right : i32
+  scf.if %equal {
+    %inside_0 = index.constant 0 : index
+    test.use %inside_0 : index
+  } else {
+    %other_0 = index.constant 0 : index
+    test.use %other_0 : index
+  }
+  %outside_0 = index.constant 0 : index
+  test.use %outside_0 : index
+  func.return
+}

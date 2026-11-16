@@ -100,21 +100,24 @@ iree_status_t loom_aie2p_worker_lock(loom_aie2p_worker_builder_t* context,
 iree_status_t loom_aie2p_worker_packet_write(
     loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
     uint8_t packet_id, const loom_value_id_t* words, iree_host_size_t count);
-// Emits a native control packet. The admitted register offset fits 20 bits;
-// count is 1..4 words and the payload's last word carries TLAST.
+// Writes consecutive registers, splitting packets at 16-byte register blocks.
+// The admitted register offset is word-aligned and fits 20 bits; count is 1..4
+// words. Each packet's last payload word carries TLAST.
 iree_status_t loom_aie2p_worker_control_write(
     loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
     uint8_t packet_id, uint32_t register_offset, const loom_value_id_t* words,
     iree_host_size_t count);
 
 // Encodes the register address, payload length, and odd parity of a write
-// command. The admitted register offset fits 20 bits and count is 1..4 words.
+// command. The admitted word-aligned register range fits 20 bits, stays within
+// one 16-byte block, and contains 1..4 words.
 uint32_t loom_aie2p_worker_control_write_command(uint32_t register_offset,
                                                  iree_host_size_t count);
 
 // Emits a write whose encoded command is a runtime operand. Shared DMA helpers
 // receive this operand from their callers instead of specializing the body for
-// every descriptor address. count matches the encoded command's payload length.
+// every descriptor address. count matches the encoded command's payload length;
+// its register range stays within one 16-byte block.
 iree_status_t loom_aie2p_worker_control_write_encoded(
     loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
     uint8_t packet_id, loom_value_id_t command, const loom_value_id_t* words,

@@ -944,18 +944,38 @@ low.func.def target<test.low.core> @invalid_budget(%value: reg<test.i32>) -> (re
       true;
   spill_free_options.materialization_options.supported_storage_spaces =
       LOOM_LOW_STORAGE_SPACE_SET_NONE;
-  loom_low_emission_frame_t frame = {};
-  bool frame_accepted = true;
-  IREE_ASSERT_OK(loom_low_emission_frame_build_spill_free(
-      module.get(), loom_block_op(loom_module_block(module.get()), 0), &options,
-      &spill_free_options, &arena_, &frame, &frame_accepted));
-  EXPECT_FALSE(frame_accepted);
-  ASSERT_EQ(frame.allocation.error_count, 1u);
-  EXPECT_FALSE(
-      loom_low_allocation_failure_is_present(&frame.allocation.failure));
-  EXPECT_EQ(diagnostic_count, 1u);
-  EXPECT_EQ(statistics.frame_build_count, 1u);
-  EXPECT_EQ(statistics.allocation_run_count, 1u);
+  const loom_low_schedule_strategy_t strategies[] = {
+      LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
+      LOOM_LOW_SCHEDULE_STRATEGY_PRESSURE,
+      LOOM_LOW_SCHEDULE_STRATEGY_LATENCY_HIDING,
+      LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
+  };
+  for (const auto strategy : strategies) {
+    SCOPED_TRACE(strategy);
+    options.schedule_strategy = strategy;
+    diagnostic_count = 0;
+    statistics = {};
+    loom_low_emission_frame_t frame = {};
+    bool frame_accepted = true;
+    IREE_ASSERT_OK(loom_low_emission_frame_build_spill_free(
+        module.get(), loom_block_op(loom_module_block(module.get()), 0),
+        &options, &spill_free_options, &arena_, &frame, &frame_accepted));
+    EXPECT_FALSE(frame_accepted);
+    // Pressure-aware scheduling consumes the target constraints before
+    // allocation. Source-order scheduling leaves that rejection to allocation.
+    const bool scheduling_rejected =
+        strategy != LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
+    EXPECT_EQ(frame.schedule.error_count, scheduling_rejected ? 1u : 0u);
+    EXPECT_EQ(frame.allocation.error_count, scheduling_rejected ? 0u : 1u);
+    EXPECT_FALSE(loom_low_schedule_failure_is_present(&frame.schedule.failure));
+    EXPECT_EQ(frame.schedule.failure.state_value_id, LOOM_VALUE_ID_INVALID);
+    EXPECT_FALSE(
+        loom_low_allocation_failure_is_present(&frame.allocation.failure));
+    EXPECT_EQ(diagnostic_count, 1u);
+    EXPECT_EQ(statistics.frame_build_count, 1u);
+    EXPECT_EQ(statistics.allocation_run_count, scheduling_rejected ? 0u : 1u);
+    EXPECT_EQ(statistics.repair.rematerialized_operand_count, 0u);
+  }
 }
 
 TEST_F(LowEmissionFrameTest, SingletonReservationsPreserveTiedStateUpdates) {

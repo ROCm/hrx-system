@@ -198,8 +198,17 @@ def test_scalar_speculation_facts_cover_total_integer_forms() -> None:
     }
     descriptors = tuple(descriptor for descriptor in x86_descriptor_data.X86_SCALAR_DESCRIPTOR_SET.descriptors if not descriptor.encoding_format_id & VECTOR_ENCODING_FORMAT_MARKER)
     observed_forms = {Form(descriptor.encoding_format_id) for descriptor in descriptors}
-    assert total_forms.isdisjoint(trapping_or_effecting_forms)
-    assert observed_forms == total_forms | trapping_or_effecting_forms
+    expanded_reference_forms = {
+        Form.REFERENCE_NULL,
+        Form.REFERENCE_COMPARE_NULL,
+        Form.REFERENCE_COMPARE_EQ,
+        Form.REFERENCE_SELECT,
+        Form.REFERENCE_LOAD,
+        Form.REFERENCE_STORE,
+        Form.REFERENCE_DISCARD_RANGE,
+    }
+    assert total_forms.isdisjoint(trapping_or_effecting_forms | expanded_reference_forms)
+    assert observed_forms == total_forms | trapping_or_effecting_forms | expanded_reference_forms
 
     for descriptor in descriptors:
         form = Form(descriptor.encoding_format_id)
