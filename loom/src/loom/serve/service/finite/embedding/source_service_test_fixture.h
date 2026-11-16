@@ -180,7 +180,7 @@ class SourceEmbeddingServiceTest : public ::testing::Test {
   // Production batched protocol service.
   loom_service_finite_service_t* service_ = nullptr;
   // Observations survive model/engine retirement until the next incarnation.
-  loom_runtime::testing::ServiceControl scheduling_;
+  loom_runtime::testing::ServiceControl scheduling_{1 + 16};
   // Serialized callbacks used by both direct turns and the shared router.
   loom_serve_service_t interface_ = {};
   // Production loopback carrier, independent of scheduler turns.

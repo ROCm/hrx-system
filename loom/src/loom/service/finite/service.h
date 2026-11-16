@@ -70,8 +70,10 @@ typedef struct loom_service_finite_service_interface_t {
 // on a worker. A non-NULL stream is borrowed through service destruction and
 // shares the serialized owner's publication order. NULL creates a service-owned
 // stream.
-// The scheduling binding borrows one offer with one choice/use and one
-// operation with one retained use. Its composition retains the control beyond
+// The scheduling binding borrows one offer with one choice/use and
+// 1 + variant_capacity contiguous operations with one retained use each.
+// The first operation owns the cohort; the remainder own pending selection
+// and independent compilations. Its composition retains the control beyond
 // engine destruction when observation must span preparation and retirement.
 // The binding's synchronous summary publisher receives changed engine facts;
 // a lifecycle composition combines them with its other accepted owners.

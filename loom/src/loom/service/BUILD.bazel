@@ -80,6 +80,7 @@ loom_cc_library(
     hdrs = ["execution_reconfiguration.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "//loom/src/loom/runtime:service_control",
         "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/program:compilation",
         "//loom/src/loom/runtime/program:sources",

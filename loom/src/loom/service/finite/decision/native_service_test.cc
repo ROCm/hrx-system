@@ -9,6 +9,7 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "iree/base/internal/json.h"
 #include "iree/base/threading/notification.h"
@@ -246,6 +247,22 @@ class NativeDecisionServiceTest : public ::testing::Test {
     return outcome.operation;
   }
 
+  std::vector<loom_runtime_service_operation_t> AcceptedOperations() {
+    const auto* control =
+        loom_service_finite_registration_control(registration_);
+    const auto layout = loom_runtime_service_control_layout(control);
+    std::vector<loom_runtime_service_operation_t> operations;
+    for (uint64_t i = 0; i < layout.operation_capacity; ++i) {
+      loom_runtime_service_operation_t operation = {};
+      EXPECT_EQ(loom_runtime_service_read_operation(control, i, &operation),
+                LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+      if (operation.key.serial) {
+        operations.push_back(operation);
+      }
+    }
+    return operations;
+  }
+
   void RetireModel() {
     if (!preparation_complete_) {
       IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
@@ -472,6 +489,27 @@ TEST_F(NativeDecisionServiceTest,
                                             &invalid, &failed));
   EXPECT_NE(candidate, failed);
   EXPECT_TRUE(loom_runtime_variant_pool_pending(configuration.pool));
+  const auto compilations = AcceptedOperations();
+  ASSERT_EQ(compilations.size(), 2u);
+  EXPECT_NE(compilations[0].key.ordinal, compilations[1].key.ordinal);
+  loom_runtime_service_observation_t management = {};
+  ASSERT_EQ(loom_runtime_service_read_observation(control, &management),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(management.pending_operation_count, 2u);
+  EXPECT_EQ(management.owned_request_count, 0u);
+  EXPECT_EQ(management.offer_count, 0u);
+  EXPECT_EQ(management.accepted_devices, 1u);
+  for (const auto& compilation : compilations) {
+    EXPECT_EQ(compilation.origin.revision, 0u);
+    EXPECT_EQ(compilation.waits, LOOM_RUNTIME_SERVICE_WAIT_CPU);
+    EXPECT_EQ(compilation.work, LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
+    loom_runtime_service_use_t use = {};
+    ASSERT_EQ(loom_runtime_service_read_operation_use(
+                  control, compilation.key, compilation.publication, 0, &use),
+              LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    EXPECT_EQ(use.resource_ordinal, 0u);
+    EXPECT_EQ(use.estimates, 0u);
+  }
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
       loom_runtime_variant_pool_remove(configuration.pool, candidate));
@@ -482,6 +520,13 @@ TEST_F(NativeDecisionServiceTest,
   EXPECT_EQ(rejected, 0u);
   IREE_ASSERT_OK(ProgressUntil(
       [&] { return !loom_runtime_variant_pool_pending(configuration.pool); }));
+  EXPECT_TRUE(AcceptedOperations().empty());
+  for (const auto& compilation : compilations) {
+    loom_runtime_service_use_t use = {};
+    EXPECT_EQ(loom_runtime_service_read_operation_use(
+                  control, compilation.key, compilation.publication, 0, &use),
+              LOOM_RUNTIME_SERVICE_READ_CHANGED);
+  }
   loom_runtime_variant_snapshot_t variant = {};
   ASSERT_TRUE(loom_runtime_variant_pool_snapshot(configuration.pool, candidate,
                                                  &variant));
@@ -510,7 +555,13 @@ TEST_F(NativeDecisionServiceTest,
       },
       &selection));
   EXPECT_FALSE(selection.complete);
+  const auto selecting = AcceptedOperations();
+  ASSERT_EQ(selecting.size(), 1u);
+  EXPECT_NE(selecting[0].key.ordinal, compilations[0].key.ordinal);
+  EXPECT_NE(selecting[0].key.ordinal, compilations[1].key.ordinal);
+  EXPECT_EQ(selecting[0].waits, LOOM_RUNTIME_SERVICE_WAIT_QUIESCENCE);
   IREE_ASSERT_OK(ProgressUntil([&] { return selection.complete; }));
+  EXPECT_TRUE(AcceptedOperations().empty());
   EXPECT_EQ(selection.selected, candidate);
   EXPECT_EQ(selection.code, IREE_STATUS_OK);
   EXPECT_EQ(configuration.selected(configuration.self), candidate);
@@ -634,10 +685,31 @@ TEST_F(NativeDecisionServiceTest,
     accepted = Schedule(execution.key);
     EXPECT_EQ(accepted.serial, 0u);
 
+    loom_runtime_variant_id_t overlapping_candidate = 0;
+    if (count == 1) {
+      IREE_ASSERT_OK(configuration.stage_native(
+          configuration.self, candidate, &replacement, &overlapping_candidate));
+      ASSERT_EQ(loom_runtime_service_read_observation(control, &observation),
+                LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+      EXPECT_EQ(observation.pending_operation_count, 2u);
+      EXPECT_EQ(observation.owned_request_count, 1u);
+      // Another producer's publication cannot invalidate this cohort's use.
+      EXPECT_EQ(loom_runtime_service_read_operation_use(
+                    control, operation.key, operation.publication, 0, &use),
+                LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    }
     // Only accepted obligations progress; no automatic selection drives this.
     IREE_ASSERT_OK(ProgressUntil([&] {
-      return loom_service_finite_call_is_complete(calls_[count - 1]);
+      return loom_service_finite_call_is_complete(calls_[count - 1]) &&
+             !loom_runtime_variant_pool_pending(configuration.pool);
     }));
+    if (overlapping_candidate) {
+      ASSERT_TRUE(loom_runtime_variant_pool_snapshot(
+          configuration.pool, overlapping_candidate, &variant));
+      EXPECT_EQ(variant.phase, LOOM_RUNTIME_VARIANT_READY);
+      IREE_ASSERT_OK(loom_runtime_variant_pool_remove(configuration.pool,
+                                                      overlapping_candidate));
+    }
     for (size_t i = 0; i < count; ++i) {
       IREE_ASSERT_OK(loom_service_finite_call_status(calls_[i]));
       ASSERT_NE(loom_service_finite_call_output(calls_[i]), nullptr);
@@ -686,6 +758,14 @@ TEST_F(NativeDecisionServiceTest,
   IREE_ASSERT_OK(configuration.stage_native(configuration.self, candidate,
                                             &replacement, &final_candidate));
   EXPECT_TRUE(loom_runtime_variant_pool_pending(configuration.pool));
+  const auto retiring_compilations = AcceptedOperations();
+  ASSERT_EQ(retiring_compilations.size(), 1u);
+  const auto retiring_compilation = retiring_compilations[0];
+  for (const auto& compilation : compilations) {
+    if (compilation.key.ordinal == retiring_compilation.key.ordinal) {
+      EXPECT_GT(retiring_compilation.key.serial, compilation.key.serial);
+    }
+  }
   // Relinquish the embedding application's engine views before granting
   // release.
   loom_runtime_driver_set_observer(&driver_, {});
@@ -695,6 +775,11 @@ TEST_F(NativeDecisionServiceTest,
   service_ = nullptr;
   loom_service_finite_registration_request_retirement(registration_, 0);
   EXPECT_EQ(OfferedWork(LOOM_RUNTIME_SERVICE_WORK_RELEASE).choice_count, 0u);
+  loom_runtime_service_use_t retiring_use = {};
+  EXPECT_EQ(loom_runtime_service_read_operation_use(
+                control, retiring_compilation.key,
+                retiring_compilation.publication, 0, &retiring_use),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
   EXPECT_FALSE(loom_service_finite_registration_progress(registration_, 0));
   // Prepare the wait before releasing the compiler: its completion must wake
   // the native lifecycle after the application's traversal has detached.
@@ -702,9 +787,19 @@ TEST_F(NativeDecisionServiceTest,
   compiler_gate.Open();
   iree_notification_commit_wait(&notification_, retirement_ticket,
                                 IREE_DURATION_ZERO, IREE_TIME_INFINITE_FUTURE);
+  // Worker completion transfers ownership; only native collection retires the
+  // published operation, independently of the earlier withdrawal of admission.
+  EXPECT_EQ(loom_runtime_service_read_operation_use(
+                control, retiring_compilation.key,
+                retiring_compilation.publication, 0, &retiring_use),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
   IREE_ASSERT_OK(ProgressUntil([&] {
     return OfferedWork(LOOM_RUNTIME_SERVICE_WORK_RELEASE).choice_count != 0;
   }));
+  EXPECT_EQ(loom_runtime_service_read_operation_use(
+                control, retiring_compilation.key,
+                retiring_compilation.publication, 0, &retiring_use),
+            LOOM_RUNTIME_SERVICE_READ_CHANGED);
   const auto release = OfferedWork(LOOM_RUNTIME_SERVICE_WORK_RELEASE);
   ASSERT_EQ(release.choice_count, 1u);
   EXPECT_FALSE(loom_service_finite_registration_progress(registration_, 0));

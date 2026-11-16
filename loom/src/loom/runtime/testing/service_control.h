@@ -17,16 +17,20 @@ namespace loom_runtime::testing {
 // Uses the production layout/initialization API; adds no scheduling behavior.
 class ServiceControl {
  public:
-  ServiceControl() { Reset(); }
+  explicit ServiceControl(iree_host_size_t operation_capacity = 1)
+      : operation_capacity_(operation_capacity) {
+    Reset();
+  }
   ServiceControl(const ServiceControl&) = delete;
   ServiceControl& operator=(const ServiceControl&) = delete;
 
   // Called only after the preceding incarnation's readers/writers have joined.
   void Reset() {
     const iree_host_size_t uses[] = {1};
+    const std::vector<iree_host_size_t> operation_uses(operation_capacity_, 1);
     const loom_runtime_service_offer_capacity_t offers[] = {{1, uses}};
-    const loom_runtime_service_control_capacity_t capacity = {1, offers, 1,
-                                                              uses};
+    const loom_runtime_service_control_capacity_t capacity = {
+        1, offers, operation_capacity_, operation_uses.data()};
     iree_host_size_t length = 0;
     IREE_CHECK_OK(loom_runtime_service_control_size(&capacity, &length));
     storage_.resize(length / sizeof(uint64_t));
@@ -40,6 +44,8 @@ class ServiceControl {
   }
 
  private:
+  // Cold concurrency bound established before any service borrows storage.
+  iree_host_size_t operation_capacity_;
   // Aligned backing storage retained through each explicit Reset boundary.
   std::vector<uint64_t> storage_;
   // Distinguishes successive occupants of this fixture's slot.

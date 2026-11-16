@@ -15,6 +15,8 @@ typedef struct loom_service_execution_reconfiguration_job_t {
   loom_runtime_sources_t* sources;
   // Owner-only link in either the active or available slot list.
   struct loom_service_execution_reconfiguration_job_t* next;
+  // Nonrecycled acceptance lifetime for this reusable operation slot.
+  uint64_t serial;
 } loom_service_execution_reconfiguration_job_t;
 
 struct loom_service_execution_reconfiguration_t {
@@ -44,9 +46,50 @@ struct loom_service_execution_reconfiguration_t {
   loom_service_execution_reconfiguration_job_t* active_jobs;
   // Available stable slots; the selected entry bounds jobs to capacity - 1.
   loom_service_execution_reconfiguration_job_t* available_jobs;
+  // Optional observation binding, attached before any explicit grants.
+  loom_runtime_service_control_binding_t scheduling;
+  // Immutable placement shared by compilation and selected code.
+  uint64_t device_ordinal;
+  // Nonrecycled lifetime for the one pending selection operation.
+  uint64_t selection_serial;
+  // Accepted compiler owners, updated at the same boundaries as active_jobs.
+  iree_host_size_t active_job_count;
   // Tail storage for bounded jobs; live jobs never move or share an ordinal.
   loom_service_execution_reconfiguration_job_t jobs[];
 };
+
+static void loom_service_execution_reconfiguration_publish_operation(
+    loom_service_execution_reconfiguration_t* reconfiguration, uint64_t ordinal,
+    uint64_t serial, loom_runtime_service_wait_flags_t waits) {
+  if (!reconfiguration->scheduling.control) {
+    return;
+  }
+  const loom_runtime_service_operation_t operation = {
+      .key = {reconfiguration->scheduling.operation_ordinal + ordinal, serial},
+      .work = serial ? LOOM_RUNTIME_SERVICE_WORK_PREPARATION : 0,
+      .waits = waits,
+      .devices = serial ? UINT64_C(1) << reconfiguration->device_ordinal : 0,
+      .use_count = serial ? 1 : 0};
+  const loom_runtime_service_use_t use = {.resource_ordinal =
+                                              reconfiguration->device_ordinal};
+  loom_runtime_service_publish_operation(reconfiguration->scheduling.control,
+                                         &operation, &use);
+}
+
+static void loom_service_execution_reconfiguration_publish(
+    loom_service_execution_reconfiguration_t* reconfiguration) {
+  if (!reconfiguration->scheduling.control) {
+    return;
+  }
+  const uint64_t pending = reconfiguration->active_job_count +
+                           (reconfiguration->selection.entry != NULL);
+  const loom_runtime_service_observation_t observation = {
+      .pending_operation_count = pending,
+      .accepted_devices =
+          pending ? UINT64_C(1) << reconfiguration->device_ordinal : 0};
+  reconfiguration->scheduling.publish_observation(
+      reconfiguration->scheduling.publisher, &observation);
+}
 
 static void loom_service_execution_reconfiguration_complete(
     void* user_data, iree_status_t status, void* variant,
@@ -94,7 +137,14 @@ static iree_status_t loom_service_execution_reconfiguration_stage(
     job->sources = captured_sources;
     job->next = reconfiguration->active_jobs;
     reconfiguration->active_jobs = job;
+    ++reconfiguration->active_job_count;
+    IREE_ASSERT(job->serial != UINT64_MAX);
+    ++job->serial;
     *out_id = loom_runtime_variant_entry_id(entry);
+    loom_service_execution_reconfiguration_publish_operation(
+        reconfiguration, 1 + (job - reconfiguration->jobs), job->serial,
+        LOOM_RUNTIME_SERVICE_WAIT_CPU);
+    loom_service_execution_reconfiguration_publish(reconfiguration);
     // From here the pool owns terminal observation, including submission
     // rejection. The caller receives a stable ID for every accepted attempt.
     status = reconfiguration->update.compile(
@@ -135,6 +185,12 @@ static iree_status_t loom_service_execution_reconfiguration_select(
   reconfiguration->selection.entry = entry;
   reconfiguration->selection.completion = completion;
   reconfiguration->selection.user_data = user_data;
+  IREE_ASSERT(reconfiguration->selection_serial != UINT64_MAX);
+  ++reconfiguration->selection_serial;
+  loom_service_execution_reconfiguration_publish_operation(
+      reconfiguration, 0, reconfiguration->selection_serial,
+      LOOM_RUNTIME_SERVICE_WAIT_QUIESCENCE);
+  loom_service_execution_reconfiguration_publish(reconfiguration);
   if (reconfiguration->observer.wake) {
     reconfiguration->observer.wake(reconfiguration->observer.user_data);
   }
@@ -172,6 +228,15 @@ iree_status_t loom_service_execution_reconfiguration_allocate(
     loom_service_execution_reconfiguration_free(reconfiguration);
   }
   return status;
+}
+
+void loom_service_execution_reconfiguration_bind_control(
+    loom_service_execution_reconfiguration_t* reconfiguration,
+    loom_runtime_service_control_binding_t binding, uint64_t device_ordinal) {
+  if (reconfiguration) {
+    reconfiguration->scheduling = binding;
+    reconfiguration->device_ordinal = device_ordinal;
+  }
 }
 
 void loom_service_execution_reconfiguration_free(
@@ -224,8 +289,14 @@ bool loom_service_execution_reconfiguration_advance(
       *link = job->next;
       job->next = reconfiguration->available_jobs;
       reconfiguration->available_jobs = job;
+      --reconfiguration->active_job_count;
+      loom_service_execution_reconfiguration_publish_operation(
+          reconfiguration, 1 + (job - reconfiguration->jobs), 0, 0);
       progress = true;
     }
+  }
+  if (progress) {
+    loom_service_execution_reconfiguration_publish(reconfiguration);
   }
   loom_runtime_variant_entry_t* entry = reconfiguration->selection.entry;
   if (!entry || (!quiescent && !reconfiguration->stopping)) {
@@ -249,6 +320,9 @@ bool loom_service_execution_reconfiguration_advance(
   reconfiguration->selection.entry = NULL;
   reconfiguration->selection.completion = NULL;
   reconfiguration->selection.user_data = NULL;
+  loom_service_execution_reconfiguration_publish_operation(reconfiguration, 0,
+                                                           0, 0);
+  loom_service_execution_reconfiguration_publish(reconfiguration);
   completion(user_data, status,
              loom_runtime_variant_entry_id(reconfiguration->selected));
   return true;

@@ -27,9 +27,9 @@ struct loom_runtime_service_observation_t;
 typedef struct loom_runtime_service_control_binding_t {
   // Borrowed storage, retained through the contributor and all its readers.
   loom_runtime_service_control_t* control;
-  // Stable offer slot assigned exclusively to this contributor.
+  // First exclusive offer slot; the contributor declares its required range.
   uint64_t offer_ordinal;
-  // Stable accepted-operation slot assigned exclusively to this contributor.
+  // First exclusive operation slot; its range is independent of offer slots.
   uint64_t operation_ordinal;
   // Immutable instance coordinate in the composition's binding scope.
   uint64_t instance_ordinal;
@@ -187,6 +187,8 @@ enum loom_runtime_service_wait_flag_bits_e {
   LOOM_RUNTIME_SERVICE_WAIT_CPU = 1u << 1,
   LOOM_RUNTIME_SERVICE_WAIT_DEVICE = 1u << 2,
   LOOM_RUNTIME_SERVICE_WAIT_OUTPUT = 1u << 3,
+  // The service's semantic boundary for changing its execution policy.
+  LOOM_RUNTIME_SERVICE_WAIT_QUIESCENCE = 1u << 4,
 };
 
 typedef struct loom_runtime_service_operation_t {
@@ -194,9 +196,10 @@ typedef struct loom_runtime_service_operation_t {
   loom_runtime_service_operation_key_t key;
   // Read token joining progress and uses; ignored by the publisher.
   uint64_t publication;
-  // Original opportunity, retained for correlation after offer withdrawal.
+  // Original opportunity, retained after withdrawal. Revision zero identifies
+  // an explicit native API grant that did not select a policy offer.
   loom_runtime_service_offer_key_t origin;
-  // Selected alternative, retained independently of the original choice row.
+  // Selected alternative; ignored when origin.revision is zero.
   uint64_t choice_ordinal;
   // Accepted semantic work, retained without consulting the withdrawn offer.
   loom_runtime_service_work_flags_t work;

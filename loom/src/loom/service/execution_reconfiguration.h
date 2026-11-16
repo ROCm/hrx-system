@@ -7,6 +7,7 @@
 #ifndef LOOM_SERVICE_EXECUTION_RECONFIGURATION_H_
 #define LOOM_SERVICE_EXECUTION_RECONFIGURATION_H_
 
+#include "loom/runtime/service_control.h"
 #include "loom/service/reconfiguration.h"
 
 #ifdef __cplusplus
@@ -42,6 +43,17 @@ iree_status_t loom_service_execution_reconfiguration_allocate(
     loom_service_execution_update_t update, iree_host_size_t capacity,
     iree_allocator_t host_allocator,
     loom_service_execution_reconfiguration_t** out_reconfiguration);
+
+// Attaches optional retained observations before management callers or readers
+// attach. The binding supplies capacity operation slots: one selection and
+// capacity - 1 independent compilations, each with one device use. No offer
+// slots are used: management calls explicitly grant their work. The binding
+// and its serialized summary publisher outlive this owner. Binding changes
+// observation only; staging/selection and completion semantics are unchanged.
+// NULL reconfiguration (disabled capacity) is inert.
+void loom_service_execution_reconfiguration_bind_control(
+    loom_service_execution_reconfiguration_t* reconfiguration,
+    loom_runtime_service_control_binding_t binding, uint64_t device_ordinal);
 
 // pending() is false before destruction. Candidate references are released
 // before model retirement. NULL is accepted by all operations below.

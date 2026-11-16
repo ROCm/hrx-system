@@ -147,7 +147,7 @@ static void loom_service_finite_registration_begin_work(
   }
   IREE_ASSERT(registration->scheduling.next_serial != UINT64_MAX);
   work->operation = (loom_runtime_service_operation_t){
-      .key = {.ordinal = work->offer.key.ordinal,
+      .key = {.ordinal = work->operation.key.ordinal,
               .serial = ++registration->scheduling.next_serial},
       .origin = work->offer.key,
       .work = kind,
@@ -166,7 +166,7 @@ static void loom_service_finite_registration_end_work(
     return;
   }
   work->operation = (loom_runtime_service_operation_t){
-      .key = {.ordinal = work->offer.key.ordinal}};
+      .key = {.ordinal = work->operation.key.ordinal}};
   loom_runtime_service_publish_operation(registration->control,
                                          &work->operation, NULL);
   loom_service_finite_registration_refresh_offers(registration);
@@ -260,6 +260,63 @@ static void loom_service_finite_registration_record_failure(
   }
 }
 
+static iree_status_t loom_service_finite_registration_allocate_storage(
+    iree_host_size_t variant_capacity, uint64_t incarnation,
+    iree_allocator_t host_allocator,
+    loom_service_finite_registration_t** out_registration) {
+  *out_registration = NULL;
+  iree_host_size_t operation_capacity = 0;
+  if (!iree_host_size_checked_add(LOOM_FINITE_REGISTRATION_SLOT_COUNT,
+                                  variant_capacity, &operation_capacity)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "finite operation capacity is not representable");
+  }
+  iree_host_size_t* operation_use_capacities = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host_allocator, operation_capacity, sizeof(*operation_use_capacities),
+      (void**)&operation_use_capacities));
+  for (iree_host_size_t i = 0; i < operation_capacity; ++i) {
+    operation_use_capacities[i] = 1;
+  }
+  const iree_host_size_t use_capacity = 1;
+  const loom_runtime_service_offer_capacity_t offers[] = {
+      {1, &use_capacity}, {1, &use_capacity}, {1, &use_capacity}};
+  const loom_runtime_service_control_capacity_t capacity = {
+      .offer_capacity = LOOM_FINITE_REGISTRATION_SLOT_COUNT,
+      .offers = offers,
+      .operation_capacity = operation_capacity,
+      .operation_use_capacities = operation_use_capacities};
+  iree_host_size_t control_length = 0;
+  iree_status_t status =
+      loom_runtime_service_control_size(&capacity, &control_length);
+  iree_host_size_t allocation_length = 0, control_offset = 0;
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        sizeof(loom_service_finite_registration_t), &allocation_length,
+        IREE_STRUCT_FIELD_ALIGNED(control_length, uint8_t, 64,
+                                  &control_offset));
+  }
+  loom_service_finite_registration_t* registration = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_aligned(host_allocator, allocation_length,
+                                           64, 0, (void**)&registration);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_runtime_service_control_initialize(
+        &capacity, incarnation,
+        iree_make_byte_span((uint8_t*)registration + control_offset,
+                            control_length),
+        &registration->control);
+  }
+  iree_allocator_free(host_allocator, operation_use_capacities);
+  if (iree_status_is_ok(status)) {
+    *out_registration = registration;
+  } else {
+    iree_allocator_free_aligned(host_allocator, registration);
+  }
+  return status;
+}
+
 iree_status_t loom_service_finite_registration_allocate(
     loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_service_finite_model_options_t* model_options,
@@ -267,24 +324,10 @@ iree_status_t loom_service_finite_registration_allocate(
     loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_service_finite_registration_t** out_registration) {
   *out_registration = NULL;
-  const iree_host_size_t use_capacities[] = {1, 1, 1};
-  const loom_runtime_service_offer_capacity_t offers[] = {
-      {1, use_capacities}, {1, use_capacities}, {1, use_capacities}};
-  const loom_runtime_service_control_capacity_t capacity = {
-      .offer_capacity = LOOM_FINITE_REGISTRATION_SLOT_COUNT,
-      .offers = offers,
-      .operation_capacity = LOOM_FINITE_REGISTRATION_SLOT_COUNT,
-      .operation_use_capacities = use_capacities};
-  iree_host_size_t control_length = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_runtime_service_control_size(&capacity, &control_length));
-  iree_host_size_t allocation_length = 0, control_offset = 0;
-  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
-      sizeof(loom_service_finite_registration_t), &allocation_length,
-      IREE_STRUCT_FIELD_ALIGNED(control_length, uint8_t, 64, &control_offset)));
   loom_service_finite_registration_t* registration = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_aligned(
-      host_allocator, allocation_length, 64, 0, (void**)&registration));
+  IREE_RETURN_IF_ERROR(loom_service_finite_registration_allocate_storage(
+      options->variant_capacity, options->incarnation, host_allocator,
+      &registration));
   registration->host_allocator = host_allocator;
   registration->device = device;
   registration->options = *options;
@@ -300,16 +343,13 @@ iree_status_t loom_service_finite_registration_allocate(
       .choice_count = 1};
   registration->scheduling.retirement.offer.key.ordinal =
       LOOM_FINITE_REGISTRATION_RETIREMENT;
-  iree_status_t status = loom_runtime_service_control_initialize(
-      &capacity, options->incarnation,
-      iree_make_byte_span((uint8_t*)registration + control_offset,
-                          control_length),
-      &registration->control);
-  if (iree_status_is_ok(status)) {
-    status = loom_service_finite_load_allocate(
-        device, pool, model_options, observer.wake, observer.user_data,
-        host_allocator, &registration->load);
-  }
+  registration->scheduling.lifecycle.operation.key.ordinal =
+      options->variant_capacity + LOOM_FINITE_REGISTRATION_LIFECYCLE;
+  registration->scheduling.retirement.operation.key.ordinal =
+      options->variant_capacity + LOOM_FINITE_REGISTRATION_RETIREMENT;
+  iree_status_t status = loom_service_finite_load_allocate(
+      device, pool, model_options, observer.wake, observer.user_data,
+      host_allocator, &registration->load);
   if (iree_status_is_ok(status)) {
     loom_service_finite_registration_publish_offer(
         registration, &registration->scheduling.lifecycle);

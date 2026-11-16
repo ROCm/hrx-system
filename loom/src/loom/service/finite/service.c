@@ -106,6 +106,8 @@ struct loom_service_finite_service_t {
     uint64_t published_serial;
     // Last published summary, used only to suppress unchanged atomic writes.
     loom_runtime_service_observation_t observation;
+    // Changed facts from independent compilation and pending selection owners.
+    uint64_t management_pending_count;
     // Copied device-duration forecast for this prepared cohort, or unknown.
     loom_runtime_service_use_t device_use;
   } scheduling;
@@ -165,6 +167,14 @@ struct loom_service_finite_service_t {
 };
 
 static void loom_service_finite_publish(loom_service_finite_service_t* service);
+
+static void loom_service_finite_publish_management(
+    void* self, const loom_runtime_service_observation_t* observation) {
+  loom_service_finite_service_t* service = self;
+  service->scheduling.management_pending_count =
+      observation->pending_operation_count;
+  loom_service_finite_publish(service);
+}
 
 static uint64_t loom_service_finite_request_begin(
     loom_service_finite_service_t* service, iree_time_t time_ns) {
@@ -808,9 +818,12 @@ static void loom_service_finite_publish(
           service->pending_count +
           (service->phase == FINITE_READY ? service->cohort_count : 0),
       .offer_count = offer->choice_count,
-      .pending_operation_count = operation->key.serial ? 1 : 0,
+      .pending_operation_count = (operation->key.serial != 0) +
+                                 service->scheduling.management_pending_count,
       .offered_devices = offer->choice_count ? devices : 0,
-      .accepted_devices = operation->devices};
+      .accepted_devices =
+          operation->devices |
+          (service->scheduling.management_pending_count ? devices : 0)};
   const loom_runtime_service_observation_t* published =
       &service->scheduling.observation;
   if (observation.owned_request_count != published->owned_request_count ||
@@ -1191,6 +1204,16 @@ iree_status_t loom_service_finite_service_allocate(
                             "finite service requires a retained control and "
                             "its summary publisher");
   }
+  const loom_runtime_service_control_layout_t layout =
+      loom_runtime_service_control_layout(scheduling.control);
+  if (scheduling.offer_ordinal >= layout.offer_capacity ||
+      scheduling.operation_ordinal >= layout.operation_capacity ||
+      variant_capacity >=
+          layout.operation_capacity - scheduling.operation_ordinal) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "finite control does not cover cohort and "
+                            "management operation slots");
+  }
   iree_async_proactor_t* proactor = NULL;
   IREE_RETURN_IF_ERROR(iree_async_proactor_pool_get(
       loom_runtime_host_proactor_pool(host), 0, &proactor));
@@ -1233,6 +1256,17 @@ iree_status_t loom_service_finite_service_allocate(
     status = loom_service_execution_reconfiguration_allocate(
         generator.vtable->execution_update(generator.self), variant_capacity,
         host_allocator, &service->reconfiguration);
+    if (iree_status_is_ok(status)) {
+      loom_service_execution_reconfiguration_bind_control(
+          service->reconfiguration,
+          (loom_runtime_service_control_binding_t){
+              .control = scheduling.control,
+              .operation_ordinal = scheduling.operation_ordinal + 1,
+              .instance_ordinal = scheduling.instance_ordinal,
+              .publish_observation = loom_service_finite_publish_management,
+              .publisher = service},
+          generator.device_ordinal);
+    }
   }
   if (iree_status_is_ok(status) && !stream) {
     status = loom_runtime_telemetry_stream_allocate(128, host_allocator,

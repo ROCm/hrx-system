@@ -240,7 +240,9 @@ class SourceDecisionServiceTest : public ::testing::Test {
   // Bounded modality services borrowing the corresponding models.
   loom_service_finite_service_t* services_[2] = {};
   // Each stable composition slot owns its observation storage.
-  loom_runtime::testing::ServiceControl scheduling_[2];
+  loom_runtime::testing::ServiceControl scheduling_[2] = {
+      loom_runtime::testing::ServiceControl(1 + 16),
+      loom_runtime::testing::ServiceControl(1 + 16)};
   // Exact production scheduling and routing interfaces.
   loom_serve_service_t interfaces_[2] = {};
   // Shared HTTP connection and request owner.
