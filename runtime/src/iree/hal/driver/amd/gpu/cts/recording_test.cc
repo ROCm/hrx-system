@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <memory>
@@ -515,11 +516,12 @@ INSTANTIATE_TEST_SUITE_P(ProgramSize, GpuNativeRecordingSizeTest,
                          ::testing::Values(1u, 2u, 3u, 1000u, 8000u, 65536u));
 
 TEST_F(GpuNativeRecordingTest, TransferBarriersJoinOnlyPendingCopies) {
+  constexpr uint32_t kLength = 128 * 1024;
   for (bool copy_at_exit : {false, true}) {
     SCOPED_TRACE(copy_at_exit);
     iree_hal_buffer_t* output = nullptr;
     IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-        pool_, iree_hal_make_pool_reservation_request(64, 4),
+        pool_, iree_hal_make_pool_reservation_request(kLength, 4),
         iree_infinite_timeout(), &output));
     iree_hal_command_buffer_t* recording = nullptr;
     IREE_ASSERT_OK(iree_hal_command_buffer_create(
@@ -532,7 +534,7 @@ TEST_F(GpuNativeRecordingTest, TransferBarriersJoinOnlyPendingCopies) {
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &barrier));
     uint32_t pattern = 0x12345678;
-    const auto reference = iree_hal_make_buffer_ref(output, 0, 64);
+    const auto reference = iree_hal_make_buffer_ref(output, 0, kLength);
     IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
         recording, reference, &pattern, sizeof(pattern), 0));
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &barrier));
@@ -559,8 +561,9 @@ TEST_F(GpuNativeRecordingTest, TransferBarriersJoinOnlyPendingCopies) {
     }
     // The leading transfer barrier has no producer. The barrier after the first
     // fill drains its copy, and program exit drains any subsequent copy.
-    EXPECT_EQ(dma_lengths, copy_at_exit ? (std::vector<uint32_t>{64, 0, 64, 0})
-                                        : (std::vector<uint32_t>{64, 0}));
+    EXPECT_EQ(dma_lengths, copy_at_exit
+                               ? (std::vector<uint32_t>{kLength, 0, kLength, 0})
+                               : (std::vector<uint32_t>{kLength, 0}));
     iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&invocation);
 
     iree_hal_semaphore_t* done = nullptr;
@@ -571,14 +574,14 @@ TEST_F(GpuNativeRecordingTest, TransferBarriersJoinOnlyPendingCopies) {
         recording, iree_hal_buffer_binding_table_empty(),
         IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
     iree_hal_command_buffer_release(recording);
-    std::array<uint32_t, 16> actual = {};
+    std::vector<uint32_t> actual(kLength / sizeof(uint32_t));
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
         .download =
             {
                 .source_buffer = output,
                 .target = actual.data(),
-                .length = sizeof(actual),
+                .length = kLength,
             },
     };
     IREE_ASSERT_OK(iree_hal_queue_transfer(
@@ -594,15 +597,17 @@ TEST_F(GpuNativeRecordingTest, TransferBarriersJoinOnlyPendingCopies) {
 }
 
 TEST_F(GpuNativeRecordingTest,
-       ScalarTransfersPreserveDependenciesAndNeighbors) {
+       RecordedTransfersPreserveDependenciesAndNeighbors) {
   using iree::hal::cts::Ref;
+  constexpr uint32_t kRegionStride = 128 * 1024;
+  constexpr uint32_t kBufferLength = 3 * kRegionStride;
   Ref<iree_hal_buffer_t> output;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-      pool_, iree_hal_make_pool_reservation_request(128, 8),
+      pool_, iree_hal_make_pool_reservation_request(kBufferLength, 8),
       iree_infinite_timeout(), output.out()));
   Ref<iree_hal_buffer_t> view;
-  IREE_ASSERT_OK(iree_hal_buffer_subspan(output, 4, 64, iree_allocator_system(),
-                                         view.out()));
+  IREE_ASSERT_OK(iree_hal_buffer_subspan(output, 4, 2 * kRegionStride,
+                                         iree_allocator_system(), view.out()));
   Ref<iree_hal_semaphore_t> done;
   CreateSemaphore(done.out());
   auto* timeline = done.get();
@@ -626,15 +631,18 @@ TEST_F(GpuNativeRecordingTest,
       .memory_barriers = &memory,
   };
   for (bool indirect : {false, true}) {
-    for (uint32_t length : {4u, 8u, 12u, 16u}) {
+    for (uint32_t length :
+         {1u,   2u,   3u,    4u,    7u,    8u,     12u,   15u,
+          16u,  24u,  32u,   64u,   128u,  255u,   256u,  257u,
+          264u, 512u, 1024u, 4096u, 4100u, 65536u, 65537u}) {
       for (uint32_t offset : {0u, 1u, 4u}) {
         SCOPED_TRACE(::testing::Message()
                      << "indirect=" << indirect << " length=" << length
                      << " offset=" << offset);
         uint64_t initialized = ++epoch;
         IREE_ASSERT_OK(iree_hal_queue_fill(
-            queues_[0], {}, {1, &timeline, &initialized}, output, 0, 128,
-            &guard, sizeof(guard), nullptr, 0));
+            queues_[0], {}, {1, &timeline, &initialized}, output, 0,
+            kBufferLength, &guard, sizeof(guard), nullptr, 0));
         Ref<iree_hal_command_buffer_t> recording;
         IREE_ASSERT_OK(iree_hal_command_buffer_create(
             iree_hal_queue_family(queues_[0]), 0,
@@ -648,18 +656,29 @@ TEST_F(GpuNativeRecordingTest,
                                                          length)
                      : iree_hal_make_buffer_ref(view, displacement, length);
         };
-        std::array<uint8_t, 16> source = {1,  3,  5,  7,  11, 13, 17, 19,
-                                          23, 29, 31, 37, 41, 43, 47, 53};
-        std::array<uint8_t, 128> expected;
-        expected.fill(0xCC);
-        std::memcpy(expected.data() + 4 + offset + 32, source.data(), length);
+        std::vector<uint8_t> source(length);
+        for (uint32_t i = 0; i < length; ++i) {
+          source[i] = static_cast<uint8_t>(i * 3 + 1);
+        }
+        std::vector<uint8_t> expected(kBufferLength, 0xCC);
+        std::memcpy(expected.data() + 4 + offset + kRegionStride, source.data(),
+                    length);
         std::memset(expected.data() + 4 + offset, pattern, length);
-        IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
-            recording, source.data(), 0, reference(offset), 0));
-        source.fill(0xDD);  // Recorded updates own their captured input bytes.
+        // Capture chunks within the public update limit while allowing the
+        // dependent copy/fill to cross the bulk-transfer boundary.
+        for (uint32_t position = 0; position < length;) {
+          auto target = reference(offset + position);
+          target.length = std::min<uint32_t>(
+              length - position, IREE_HAL_COMMAND_BUFFER_MAX_UPDATE_SIZE);
+          IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+              recording, source.data(), position, target, 0));
+          position += static_cast<uint32_t>(target.length);
+        }
+        // Recorded updates own their captured input bytes.
+        std::fill(source.begin(), source.end(), 0xDD);
         IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &dependency));
-        if (!(offset & 3)) {
-          // The shader consumes the update and produces the scalar copy input.
+        if (length >= sizeof(uint32_t) && !(offset & 3)) {
+          // The shader consumes the update and produces the copy input.
           const uint32_t increment = 17;
           auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
           config.workgroup_size[0] = 32;
@@ -672,14 +691,15 @@ TEST_F(GpuNativeRecordingTest,
           IREE_ASSERT_OK(
               iree_hal_command_buffer_barrier(recording, &dependency));
           uint32_t first_word = 0;
-          std::memcpy(&first_word, expected.data() + 4 + offset + 32,
+          std::memcpy(&first_word, expected.data() + 4 + offset + kRegionStride,
                       sizeof(first_word));
           first_word += increment;
-          std::memcpy(expected.data() + 4 + offset + 32, &first_word,
+          std::memcpy(expected.data() + 4 + offset + kRegionStride, &first_word,
                       sizeof(first_word));
         }
         IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
-            recording, reference(offset), reference(offset + 32), 0));
+            recording, reference(offset), reference(offset + kRegionStride),
+            0));
         IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &dependency));
         IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
             recording, reference(offset), &pattern, sizeof(pattern), 0));
@@ -690,12 +710,12 @@ TEST_F(GpuNativeRecordingTest,
         };
         IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
         IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
-        const iree_hal_buffer_binding_t binding = {view, 0, 64};
+        const iree_hal_buffer_binding_t binding = {view, 0, 2 * kRegionStride};
         uint64_t executed = ++epoch;
         IREE_ASSERT_OK(iree_hal_queue_execute(
             queues_[0], {1, &timeline, &initialized}, {1, &timeline, &executed},
             recording, {indirect ? 1u : 0u, &binding}, 0));
-        std::array<uint8_t, 128> actual;
+        std::vector<uint8_t> actual(kBufferLength);
         uint64_t downloaded = ++epoch;
         IREE_ASSERT_OK(iree_hal_queue_download(
             queues_[1], {1, &timeline, &executed}, {1, &timeline, &downloaded},
@@ -721,14 +741,18 @@ TEST_F(GpuNativeRecordingTest, CopyPacketsRespectPublicSourceExtent) {
     uint32_t target_offset;
     // Publicly accessible bytes, without an implicit trailing source grant.
     uint32_t length;
-    // Both operands admit the exact eight-byte scalar packet.
+    // Both operands admit one exact eight-byte scalar packet.
     bool wide;
   };
   for (const Copy copy : {Copy{4092, 0, 4, false},
                           {4088, 0, 8, true},
                           {4084, 0, 8, false},
                           {4088, 4, 8, false},
-                          {4084, 0, 12, false}}) {
+                          {4084, 0, 12, false},
+                          {4080, 0, 16, false},
+                          {4064, 0, 32, false},
+                          {3840, 0, 256, false},
+                          {3832, 0, 264, false}}) {
     SCOPED_TRACE(::testing::Message()
                  << copy.source_offset << " -> " << copy.target_offset
                  << " length=" << copy.length);
@@ -769,8 +793,8 @@ TEST_F(GpuNativeRecordingTest, CopyPacketsRespectPublicSourceExtent) {
       offset += ((header >> 16) & 0x3fff) + 2;
     }
     EXPECT_EQ(wide_count, copy.wide ? 1u : 0u);
-    EXPECT_EQ(dma_count, !copy.wide && copy.length != 4 ? 1u : 0u);
-    EXPECT_EQ(dispatch_count, copy.length == 4 ? 1u : 0u);
+    EXPECT_EQ(dma_count, 0u);
+    EXPECT_EQ(dispatch_count, copy.wide ? 0u : 1u);
     iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&invocation);
   }
 }

@@ -578,26 +578,25 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
   const bool aligned_target =
       iree_hal_amd_gpu_pm4_command_reference_is_aligned(target, 4);
   const bool aligned_fill = !copy && !update && aligned_target && !(length & 3);
-  // The shader tail reads exactly the four requested bytes. COPY_DATA32 can
-  // fetch beyond them, while CP DMA's setup and dependent joins dominate such
-  // short transfers. Both paths use the same declared transfer barriers.
+  // CP DMA's transaction setup and dependent joins dominate short transfers.
+  // The resident shader handles those ranges with bounded command storage;
+  // larger fixed extents retain bulk DMA. All paths use the same barriers.
   const bool native_dma = length != IREE_HAL_WHOLE_BUFFER &&
-                          (copy || update || aligned_fill) &&
-                          !(copy && length == 4);
+                          (copy || update || aligned_fill) && length > 65536;
   // Confirmed scalar packets avoid CP DMA's transaction setup and join.
   // Only the 64-bit COPY_DATA form has the required source extent: the 32-bit
   // form may read past its selected DWORD, beyond the caller's accessible
-  // range. WRITE_DATA fits three DWORDs in DMA_DATA's seven command words.
+  // range. Inline writes carry their captured payload directly in the packet;
+  // their bounded size limits command expansion and packet-fetch bandwidth.
   const bool scalar =
       aligned_target &&
       (copy ? (length == 8 &&
-               iree_hal_amd_gpu_pm4_command_reference_is_aligned(
-                   source, (uint32_t)length) &&
-               iree_hal_amd_gpu_pm4_command_reference_is_aligned(
-                   target, (uint32_t)length))
-            : (length <= 12 && !(length & 3)));
-  const uint32_t site = native_dma ? IREE_HAL_AMD_GPU_PM4_SITE_QUEUE
-                                   : IREE_HAL_AMD_GPU_PM4_SITE_PROGRAM;
+               iree_hal_amd_gpu_pm4_command_reference_is_aligned(source, 8) &&
+               iree_hal_amd_gpu_pm4_command_reference_is_aligned(target, 8))
+            : (length <= 256 && !(length & 3)));
+  const uint32_t site = native_dma || scalar
+                            ? IREE_HAL_AMD_GPU_PM4_SITE_QUEUE
+                            : IREE_HAL_AMD_GPU_PM4_SITE_PROGRAM;
   uint32_t source_value = IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE, target_value = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_binding(
       &buffer->inputs, target, site, 0, 1, whole, &target_value));
@@ -625,11 +624,15 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
           buffer, false, offset + 8, source_value, source.offset, false));
     } else {
-      uint32_t values[3] = {pattern, pattern, pattern};
+      uint32_t* payload = iree_hal_amd_gpu_pm4_emit_write_header(
+          words, 0, (uint32_t)length / 4);
       if (update) {
-        memcpy(values, source_bytes, (iree_host_size_t)length);
+        iree_memcpy_write_only(payload, source_bytes, (iree_host_size_t)length);
+      } else {
+        for (uint32_t i = 0; i < length / 4; ++i) {
+          payload[i] = pattern;
+        }
       }
-      iree_hal_amd_gpu_pm4_emit_write(words, 0, (uint32_t)length / 4, values);
     }
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
         buffer, false, offset + (copy ? 16 : 8), target_value, target.offset,
@@ -673,11 +676,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
     *arguments = (iree_hal_amd_gpu_blit_arguments_t){
         .length = length == IREE_HAL_WHOLE_BUFFER ? 0 : length,
         .pattern = pattern,
-        .fill = !copy,
+        .fill = !copy && !update,
     };
-    if (copy) {
+    if (copy || update) {
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
-          buffer, true, argument_offset, source_value, source.offset, false));
+          buffer, true, argument_offset, source_value,
+          update ? update_offset : source.offset, update));
     }
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
         buffer, true, argument_offset + 8, target_value, target.offset, false));

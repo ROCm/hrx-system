@@ -732,6 +732,198 @@ BENCHMARK_TEMPLATE(BM_TransferChain, Submission::kCrossQueue, false)
     ->MeasureProcessCPUTime()
     ->UseRealTime();
 
+enum class RecordedTransfer { kCopy, kFill, kUpdate };
+
+// Device intervals exclude queue admission, terminal notification, and host
+// wakeup. Paired timestamp-free rows expose the observation cost itself. One
+// device and queue persist across the entire size/operation sweep.
+static void BM_RecordedTransfer(benchmark::State& state,
+                                RecordedTransfer operation) {
+  static QueueDevice device;
+  static const iree::Status initialization = device.Initialize(1);
+  if (!initialization.ok()) {
+    state.SkipWithError(initialization.ToString().c_str());
+    return;
+  }
+  const auto* family = iree_hal_queue_family(device.queue(0));
+  const bool timestamps = state.range(2) != 0;
+  if (timestamps &&
+      !iree_all_bits_set(family->spec->flags,
+                         IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_COMMAND_TIMESTAMPS)) {
+    state.SkipWithMessage("command timestamps are unavailable");
+    return;
+  }
+  state.SetLabel(device.label());
+  const size_t count = state.range(0);
+  const size_t length = state.range(1);
+  const size_t words_per_node = length / sizeof(uint32_t);
+  const size_t word_count = (count + 1) * words_per_node;
+  const size_t timestamp_offset = iree_host_align(word_count * 4, 8);
+  std::vector<uint32_t> expected(word_count);
+  std::vector<uint32_t> initial(word_count);
+  std::vector<uint32_t> received(word_count);
+  for (size_t i = 0; i < word_count; ++i) {
+    expected[i] = operation == RecordedTransfer::kCopy
+                      ? 0xC0010000u + static_cast<uint32_t>(i % words_per_node)
+                      : 0xC0010000u + static_cast<uint32_t>(i / words_per_node);
+    initial[i] = i < words_per_node ? expected[i] : 0;
+  }
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_CHECK_OK(iree_hal_pool_allocate_buffer(
+      device.pool(),
+      iree_hal_make_pool_reservation_request(timestamp_offset + 16, 8),
+      iree_infinite_timeout(), &buffer));
+  iree_hal_semaphore_t* timeline = nullptr;
+  IREE_CHECK_OK(iree_hal_semaphore_create(
+      device.device(), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &timeline));
+  iree_hal_command_buffer_t* recording = nullptr;
+  const auto record_begin = iree_time_now();
+  IREE_CHECK_OK(iree_hal_command_buffer_create(
+      family, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, &recording));
+  IREE_CHECK_OK(iree_hal_command_buffer_begin(recording));
+  const iree_hal_barrier_t acquire = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+  };
+  IREE_CHECK_OK(iree_hal_command_buffer_barrier(recording, &acquire));
+  if (timestamps) {
+    IREE_CHECK_OK(iree_hal_command_buffer_timestamp(
+        recording, 0, IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        iree_hal_make_buffer_ref(buffer, timestamp_offset, 8), 0));
+  }
+  const iree_hal_memory_barrier_t memory = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+  };
+  const iree_hal_barrier_t dependency = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .memory_barrier_count = 1,
+      .memory_barriers = &memory,
+  };
+  for (size_t i = 0; i < count; ++i) {
+    if (i) {
+      IREE_CHECK_OK(iree_hal_command_buffer_barrier(recording, &dependency));
+    }
+    const auto target =
+        iree_hal_make_buffer_ref(buffer, (i + 1) * length, length);
+    const auto* payload = expected.data() + (i + 1) * words_per_node;
+    switch (operation) {
+      case RecordedTransfer::kCopy: {
+        IREE_CHECK_OK(iree_hal_command_buffer_copy_buffer(
+            recording, iree_hal_make_buffer_ref(buffer, i * length, length),
+            target, IREE_HAL_COPY_FLAG_NONE));
+        break;
+      }
+      case RecordedTransfer::kFill: {
+        IREE_CHECK_OK(iree_hal_command_buffer_fill_buffer(
+            recording, target, payload, sizeof(*payload),
+            IREE_HAL_FILL_FLAG_NONE));
+        break;
+      }
+      case RecordedTransfer::kUpdate: {
+        IREE_CHECK_OK(iree_hal_command_buffer_update_buffer(
+            recording, payload, 0, target, IREE_HAL_UPDATE_FLAG_NONE));
+        break;
+      }
+    }
+  }
+  if (timestamps) {
+    IREE_CHECK_OK(iree_hal_command_buffer_timestamp(
+        recording, IREE_HAL_EXECUTION_STAGE_TRANSFER, 0,
+        iree_hal_make_buffer_ref(buffer, timestamp_offset + 8, 8), 0));
+  }
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  IREE_CHECK_OK(iree_hal_command_buffer_barrier(recording, &release));
+  IREE_CHECK_OK(iree_hal_command_buffer_end(recording));
+  state.counters["record_ns"] = iree_time_now() - record_begin;
+  uint64_t value = 0;
+  auto reset = [&] {
+    IREE_CHECK_OK(
+        iree_hal_buffer_map_write(buffer, 0, initial.data(), word_count * 4));
+  };
+  auto complete = [&] {
+    ++value;
+    IREE_CHECK_OK(
+        iree_hal_queue_execute(device.queue(0), iree_hal_semaphore_list_empty(),
+                               {1, &timeline, &value}, recording,
+                               iree_hal_buffer_binding_table_empty(), 0));
+    IREE_CHECK_OK(iree_hal_semaphore_wait(
+        timeline, value, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+  };
+  auto verify = [&] {
+    IREE_CHECK_OK(
+        iree_hal_buffer_map_read(buffer, 0, received.data(), word_count * 4));
+    IREE_CHECK_OK(received == expected
+                      ? iree_ok_status()
+                      : iree_make_status(IREE_STATUS_DATA_LOSS,
+                                         "recorded transfer output mismatch"));
+  };
+  reset();
+  complete();
+  verify();
+  double device_nanoseconds = 0;
+  const auto allocations_before = device.allocation_count();
+  for (auto _ : state) {
+    state.PauseTiming();
+    reset();
+    state.ResumeTiming();
+    complete();
+    state.PauseTiming();
+    verify();
+    if (timestamps) {
+      uint64_t ticks[2] = {};
+      IREE_CHECK_OK(iree_hal_buffer_map_read(buffer, timestamp_offset, ticks,
+                                             sizeof(ticks)));
+      const uint32_t bits = family->spec->timestamp_valid_bits;
+      const uint64_t mask = bits == 64 ? UINT64_MAX : (UINT64_C(1) << bits) - 1;
+      device_nanoseconds += double((ticks[1] - ticks[0]) & mask) * 1e9 /
+                            family->spec->timestamp_frequency_hz;
+    }
+    state.ResumeTiming();
+  }
+  if (timestamps) {
+    state.counters["device_ns"] = device_nanoseconds / state.iterations();
+  }
+  state.counters["host_allocations"] =
+      device.allocation_count() - allocations_before;
+  state.SetBytesProcessed(state.iterations() * count * length);
+  state.SetItemsProcessed(state.iterations() * count);
+  iree_hal_command_buffer_release(recording);
+  iree_hal_semaphore_release(timeline);
+  iree_hal_buffer_release(buffer);
+}
+
+static void RecordedTransferArguments(benchmark::Benchmark* benchmark) {
+  for (int64_t count : {1, 256}) {
+    for (int64_t length :
+         {4, 8, 12, 16, 32, 64, 128, 256, 512, 1024, 4096, 65536}) {
+      for (int64_t timestamps : {0, 1}) {
+        benchmark->Args({count, length, timestamps});
+      }
+    }
+  }
+}
+
+#define RECORDED_TRANSFER_CASE(name, operation)                             \
+  BENCHMARK_CAPTURE(BM_RecordedTransfer, name, RecordedTransfer::operation) \
+      ->Name("RecordedTransfer/" #name)                                     \
+      ->Apply(RecordedTransferArguments)                                    \
+      ->ArgNames({"nodes", "bytes", "timestamps"})                          \
+      ->UseRealTime()
+RECORDED_TRANSFER_CASE(Copy, kCopy);
+RECORDED_TRANSFER_CASE(Fill, kFill);
+RECORDED_TRANSFER_CASE(Update, kUpdate);
+#undef RECORDED_TRANSFER_CASE
+
 // A single public transaction initializes disjoint ranges. A one-byte subspan
 // exercises native edge handling without changing the public pattern alignment.
 // Host reset and full byte verification stay outside completion timing.
