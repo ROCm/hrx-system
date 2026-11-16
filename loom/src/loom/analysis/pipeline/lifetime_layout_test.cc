@@ -330,7 +330,10 @@ TEST_F(PipelineLifetimeLayoutTest, EachPoolPreservesItsConcurrentPreferences) {
       }
     }
     loom_pipeline_lifetimes_t lifetimes = {
-        .nodes = nodes.data(), .count = nodes.size(), .has_serial = true};
+        .nodes = nodes.data(),
+        .count = nodes.size(),
+        .has_serial = true,
+    };
     IREE_ASSERT_OK(loom_pipeline_lifetimes_index(&arena_, &lifetimes));
     for (size_t pool_count : {3u, 4096u}) {
       SCOPED_TRACE(pool_count);

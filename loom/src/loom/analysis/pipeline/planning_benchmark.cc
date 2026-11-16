@@ -210,10 +210,12 @@ static void BM_LifetimeReuse(benchmark::State& state) {
   for (size_t role = 0; role < 2; ++role) {
     for (size_t phase = 0; phase < phase_count; ++phase) {
       for (size_t pool = 0; pool < pool_count; ++pool) {
-        requests.push_back({.lifetime = 4 + phase * 3 + ((phase + role) % 2),
-                            .pool = pool,
-                            .length = 1,
-                            .alignment = 1});
+        requests.push_back({
+            .lifetime = 4 + phase * 3 + ((phase + role) % 2),
+            .pool = pool,
+            .length = 1,
+            .alignment = 1,
+        });
       }
     }
   }
@@ -223,7 +225,10 @@ static void BM_LifetimeReuse(benchmark::State& state) {
   iree_arena_initialize(&blocks, &source_arena);
   iree_arena_initialize(&blocks, &arena);
   loom_pipeline_lifetimes_t lifetimes = {
-      .nodes = nodes.data(), .count = nodes.size(), .has_serial = true};
+      .nodes = nodes.data(),
+      .count = nodes.size(),
+      .has_serial = true,
+  };
   IREE_CHECK_OK(loom_pipeline_lifetimes_index(&source_arena, &lifetimes));
   size_t arena_bytes = 0;
   for (auto _ : state) {
