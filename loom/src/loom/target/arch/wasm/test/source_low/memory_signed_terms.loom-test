@@ -127,9 +127,10 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @load_before_origin(%i
 
 // ====
 
-func.def @copy_signed_origin(%input: buffer, %output: buffer, %position_input: index) {
+func.def @copy_signed_origin(%input: buffer, %output: buffer, %left: index, %right: index) {
   %aligned_input = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
   %aligned_output = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %position_input = index.add %left, %right : index
   %position = index.assume %position_input [range(%position_input, -64, 64), multiple_of(%position_input, 16)] : index
   %source = buffer.view %aligned_input[%position] : buffer -> view<4xi32>
   %destination = buffer.view %aligned_output[%position] : buffer -> view<4xi32>
@@ -139,10 +140,11 @@ func.def @copy_signed_origin(%input: buffer, %output: buffer, %position_input: i
 }
 
 // ----
-low.func.def target<wasm.core.simd128> abi(wasm_function) @copy_signed_origin(%aligned_input: reg<wasm.i32>, %aligned_output: reg<wasm.i32>, %position: reg<wasm.i32>) asm {
-  %12 = i32.add %aligned_input, %position
-  %values = v128.load %12
-  %14 = i32.add %aligned_output, %position
-  v128.store %14, %values
+low.func.def target<wasm.core.simd128> abi(wasm_function) @copy_signed_origin(%aligned_input: reg<wasm.i32>, %aligned_output: reg<wasm.i32>, %left: reg<wasm.i32>, %right: reg<wasm.i32>) asm {
+  %position = i32.add %left, %right
+  %20 = i32.add %aligned_input, %position
+  %values = v128.load %20
+  %22 = i32.add %aligned_output, %position
+  v128.store %22, %values
   return
 }

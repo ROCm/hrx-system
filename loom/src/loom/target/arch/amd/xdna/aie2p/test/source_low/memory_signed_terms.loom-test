@@ -164,9 +164,10 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @load_before_origi
 
 // ====
 
-func.def @copy_signed_origin(%input: buffer, %output: buffer, %position_input: index) {
+func.def @copy_signed_origin(%input: buffer, %output: buffer, %left: index, %right: index) {
   %aligned_input = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
   %aligned_output = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %position_input = index.add %left, %right : index
   %position = index.assume %position_input [range(%position_input, -64, 64), multiple_of(%position_input, 16)] : index
   %source = buffer.view %aligned_input[%position] : buffer -> view<4xi32>
   %destination = buffer.view %aligned_output[%position] : buffer -> view<4xi32>
@@ -176,11 +177,12 @@ func.def @copy_signed_origin(%input: buffer, %output: buffer, %position_input: i
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_signed_origin(%position: reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_signed_origin(%left: reg<aie2p.er>, %right: reg<aie2p.er>) asm {
   %aligned_input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %aligned_output = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %15 = mov.address-index %position
-  %16 = vlda.128.i32x4.index %aligned_input, %15
-  vst.128.i32x4.index %16, %aligned_output, %15
+  %position = add.nc %left, %right
+  %23 = mov.address-index %position
+  %24 = vlda.128.i32x4.index %aligned_input, %23
+  vst.128.i32x4.index %24, %aligned_output, %23
   return
 }

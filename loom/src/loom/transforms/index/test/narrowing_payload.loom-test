@@ -149,3 +149,158 @@ func.def @unselected(%left: index, %right: index) -> (i32) {
   %result = index.cast %sum : index to i32
   func.return %result : i32
 }
+
+// ====
+
+test.target<low_core> @native {index_bitwidth = 32, offset_bitwidth = 32}
+
+test.target<low_core> @wide
+
+// Preserve a multi-result assumption and its stronger divisibility predicate.
+// Every arithmetic result may require more than the native word before the
+// assumption establishes the only demanded value domain.
+func.def target(@native) @assumed_word_family(%left: i64, %right: i64, %extra: i64, %count: index) -> (index, index, index, index, index, index, index, index) where [range(%count, 0, 31)] {
+  %a = index.cast %left : i64 to index
+  %b = index.cast %right : i64 to index
+  %c = index.cast %extra : i64 to index
+  %add = index.add %a, %b : index
+  %sub = index.sub %a, %b : index
+  %mul = index.mul %a, %b : index
+  %madd = index.madd %a, %b, %c : index
+  %and = index.andi %a, %b : index
+  %or = index.ori %a, %b : index
+  %xor = index.xori %a, %b : index
+  %shift = index.shli %a, %count : index
+  %r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7 = index.assume %add, %sub, %mul, %madd, %and, %or, %xor, %shift [range(%add, -32, 32), multiple_of(%add, 4), range(%sub, -32, 32), range(%mul, -32, 32), range(%madd, -32, 32), range(%and, -32, 32), range(%or, -32, 32), range(%xor, -32, 32), range(%shift, -32, 32)] : index, index, index, index, index, index, index, index
+  func.return %r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7 : index, index, index, index, index, index, index, index
+}
+
+func.def target(@native) @assumed_sum(%left: index, %right: index) -> (index) {
+  %sum = index.add %left, %right : index
+  %bounded = index.assume %sum [range(%sum, -32, 32)] : index
+  func.return %bounded : index
+}
+
+func.def target(@wide) @wide_assumed_sum(%left: index, %right: index) -> (index) {
+  %sum = index.add %left, %right : index
+  %bounded = index.assume %sum [range(%sum, -32, 32)] : index
+  func.return %bounded : index
+}
+
+func.def target(@native) @shared_assumed_sum(%left: index, %right: index) -> (index, index) {
+  %sum = index.add %left, %right : index
+  %bounded = index.assume %sum [range(%sum, -32, 32)] : index
+  func.return %sum, %bounded : index, index
+}
+
+func.def target(@native) @observed_assumed_sum(%left: index, %right: index, %other: index) -> (index, index) {
+  %sum = index.add %left, %right : index
+  %bounded = index.assume %sum [range(%sum, -32, 32)] : index
+  %observed = index.assume %other [le(%other, %sum)] : index
+  func.return %bounded, %observed : index, index
+}
+
+func.def target(@native) @assumed_full_value(%left: index, %right: index) -> (index) {
+  %sum = index.add %left, %right : index
+  %bounded = index.assume %sum [range(%sum, -4294967296, 4294967294)] : index
+  func.return %bounded : index
+}
+
+func.def target(@native) @assumed_nonlocal_bits(%input: index, %amount: index) -> (index, index, index) where [range(%amount, 0, 63)] {
+  %shifted = index.shli %input, %amount : index
+  %right = index.shrui %input, %amount : index
+  %divisor = index.constant 3 : index
+  %quotient = index.div %input, %divisor : index
+  %a, %b, %c = index.assume %shifted, %right, %quotient [range(%shifted, -32, 32), range(%right, 0, 32), range(%quotient, 0, 32)] : index, index, index
+  func.return %a, %b, %c : index, index, index
+}
+
+// ----
+test.target<low_core> @native {index_bitwidth = 32, offset_bitwidth = 32}
+
+test.target<low_core> @wide
+
+func.def target(@native) @assumed_word_family(%left: i64, %right: i64, %extra: i64, %count: index) -> (index, index, index, index, index, index, index, index) where [range(%count, 0, 31)] {
+  %a = index.cast %left : i64 to index
+  %b = index.cast %right : i64 to index
+  %c = index.cast %extra : i64 to index
+  %72 = index.cast %a : index to i32
+  %73 = index.cast %b : index to i32
+  %74 = scalar.addi %72, %73 : i32
+  %add = index.cast %74 : i32 to index
+  %76 = index.cast %a : index to i32
+  %77 = index.cast %b : index to i32
+  %78 = scalar.subi %76, %77 : i32
+  %sub = index.cast %78 : i32 to index
+  %80 = index.cast %a : index to i32
+  %81 = index.cast %b : index to i32
+  %82 = scalar.muli %80, %81 : i32
+  %mul = index.cast %82 : i32 to index
+  %84 = index.cast %a : index to i32
+  %85 = index.cast %b : index to i32
+  %86 = index.cast %c : index to i32
+  %87 = scalar.muli %84, %85 : i32
+  %88 = scalar.addi %87, %86 : i32
+  %madd = index.cast %88 : i32 to index
+  %90 = index.cast %a : index to i32
+  %91 = index.cast %b : index to i32
+  %92 = scalar.andi %90, %91 : i32
+  %and = index.cast %92 : i32 to index
+  %94 = index.cast %a : index to i32
+  %95 = index.cast %b : index to i32
+  %96 = scalar.ori %94, %95 : i32
+  %or = index.cast %96 : i32 to index
+  %98 = index.cast %a : index to i32
+  %99 = index.cast %b : index to i32
+  %100 = scalar.xori %98, %99 : i32
+  %xor = index.cast %100 : i32 to index
+  %102 = index.cast %a : index to i32
+  %103 = index.cast %count : index to i32
+  %104 = scalar.shli %102, %103 : i32
+  %shift = index.cast %104 : i32 to index
+  %r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7 = index.assume %add, %sub, %mul, %madd, %and, %or, %xor, %shift [range(%add, -32, 32), multiple_of(%add, 4), range(%sub, -32, 32), range(%mul, -32, 32), range(%madd, -32, 32), range(%and, -32, 32), range(%or, -32, 32), range(%xor, -32, 32), range(%shift, -32, 32)] : index, index, index, index, index, index, index, index
+  func.return %r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7 : index, index, index, index, index, index, index, index
+}
+
+func.def target(@native) @assumed_sum(%left: index, %right: index) -> (index) {
+  %106 = index.cast %left : index to i32
+  %107 = index.cast %right : index to i32
+  %108 = scalar.addi %106, %107 : i32
+  %sum = index.cast %108 : i32 to index
+  %bounded = index.assume %sum [range(%sum, -32, 32)] : index
+  func.return %bounded : index
+}
+
+func.def target(@wide) @wide_assumed_sum(%left: index, %right: index) -> (index) {
+  %sum = index.add %left, %right : index
+  %bounded = index.assume %sum [range(%sum, -32, 32)] : index
+  func.return %bounded : index
+}
+
+func.def target(@native) @shared_assumed_sum(%left: index, %right: index) -> (index, index) {
+  %sum = index.add %left, %right : index
+  %bounded = index.assume %sum [range(%sum, -32, 32)] : index
+  func.return %sum, %bounded : index, index
+}
+
+func.def target(@native) @observed_assumed_sum(%left: index, %right: index, %other: index) -> (index, index) {
+  %sum = index.add %left, %right : index
+  %bounded = index.assume %sum [range(%sum, -32, 32)] : index
+  %observed = index.assume %other [le(%other, %sum)] : index
+  func.return %bounded, %observed : index, index
+}
+
+func.def target(@native) @assumed_full_value(%left: index, %right: index) -> (index) {
+  %sum = index.add %left, %right : index
+  %bounded = index.assume %sum [range(%sum, -4294967296, 4294967294)] : index
+  func.return %bounded : index
+}
+
+func.def target(@native) @assumed_nonlocal_bits(%input: index, %amount: index) -> (index, index, index) where [range(%amount, 0, 63)] {
+  %shifted = index.shli %input, %amount : index
+  %right = index.shrui %input, %amount : index
+  %divisor = index.constant 3 : index
+  %quotient = index.div %input, %divisor : index
+  %a, %b, %c = index.assume %shifted, %right, %quotient [range(%shifted, -32, 32), range(%right, 0, 32), range(%quotient, 0, 32)] : index, index, index
+  func.return %a, %b, %c : index, index, index
+}
