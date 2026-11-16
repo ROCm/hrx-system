@@ -844,6 +844,21 @@ class FiniteContinuation : public ::testing::Test {
   std::array<loom_service_finite_call_t*, 3> calls_ = {};
 };
 
+TEST_F(FiniteContinuation, RejectsUnrepresentableDevicePlacement) {
+  ASSERT_NO_FATAL_FAILURE(RemoveService());
+  auto generator = source_.generator();
+  generator.device_ordinal = 64;
+  loom_service_finite_service_t* rejected = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_service_finite_service_allocate(
+          loom_runtime_device_host(device_), generator,
+          loom_service_embedding_protocol(), IREE_SV("sum"), 4, 0, 0, history_,
+          scheduling_.binding(), iree_allocator_system(), &rejected));
+  EXPECT_EQ(rejected, nullptr);
+  loom_service_finite_service_free(rejected);
+}
+
 TEST_F(FiniteContinuation, LatePeerCancellationAndHeldOutput) {
   Open(0, R"({"model":"sum","input":[1,2,3,4,5,6,7,8]})");
   ASSERT_NO_FATAL_FAILURE(Drain([&] { return source_.submissions == 1; }));

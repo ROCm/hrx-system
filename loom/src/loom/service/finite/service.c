@@ -1199,6 +1199,11 @@ iree_status_t loom_service_finite_service_allocate(
     iree_allocator_t host_allocator,
     loom_service_finite_service_t** out_service) {
   *out_service = NULL;
+  if (generator.device_ordinal >= 64) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "finite service device ordinal must fit the 64-bit scheduling mask");
+  }
   if (!name.size || !capacity || heartbeat_interval < 0 ||
       capacity > SIZE_MAX / sizeof(loom_service_prepared_request_t)) {
     return iree_make_status(
