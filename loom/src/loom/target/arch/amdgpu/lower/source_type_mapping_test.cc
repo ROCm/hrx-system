@@ -15,6 +15,7 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/scalar/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/lower/abi.h"
@@ -52,6 +53,9 @@ class AmdgpuSourceTypeMappingTest : public ::testing::Test {
                                                  vtables, (uint16_t)count));
     vtables = loom_low_dialect_vtables(&count);
     IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_LOW,
+                                                 vtables, (uint16_t)count));
+    vtables = loom_scalar_dialect_vtables(&count);
+    IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_SCALAR,
                                                  vtables, (uint16_t)count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("mapping"), &pool_,
@@ -109,6 +113,51 @@ class AmdgpuSourceTypeMappingTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_value_fact_table_compute(&facts_, module_,
                                                  mapping_.source_function));
     IREE_ASSERT_OK(loom_value_fact_table_define(&facts_, value_, facts));
+  }
+
+  void CreateUniformFloatMaximum() {
+    const loom_type_t f32_type = loom_type_scalar(LOOM_SCALAR_TYPE_F32);
+    const loom_type_t argument_types[] = {f32_type, f32_type};
+    loom_builder_t builder;
+    loom_builder_initialize(module_, &module_->arena,
+                            loom_module_block(module_), &builder);
+    loom_string_id_t name = LOOM_STRING_ID_INVALID;
+    IREE_ASSERT_OK(
+        loom_builder_intern_string(&builder, IREE_SV("maximum"), &name));
+    uint16_t symbol = LOOM_SYMBOL_ID_INVALID;
+    IREE_ASSERT_OK(loom_module_add_symbol(module_, name, &symbol));
+    loom_op_t* function = nullptr;
+    IREE_ASSERT_OK(loom_test_func_build(
+        &builder, 0, 0, 0, {0, symbol}, argument_types, 2, &f32_type, 1,
+        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function));
+    mapping_.source_function = loom_func_like_cast(module_, function);
+    loom_block_t* entry =
+        loom_region_entry_block(loom_func_like_body(mapping_.source_function));
+    loom_builder_initialize(module_, &module_->arena, entry, &builder);
+
+    const loom_value_id_t lhs = loom_block_arg_id(entry, 0);
+    const loom_value_id_t rhs = loom_block_arg_id(entry, 1);
+    loom_op_t* maximum = nullptr;
+    IREE_ASSERT_OK(loom_scalar_maxnumf_build(&builder, /*instance_flags=*/0,
+                                             lhs, rhs, f32_type,
+                                             LOOM_LOCATION_UNKNOWN, &maximum));
+    value_ = loom_scalar_maxnumf_result(maximum);
+    IREE_ASSERT_OK(loom_test_yield_build(&builder, &value_, 1,
+                                         LOOM_LOCATION_UNKNOWN, &user_));
+    IREE_ASSERT_OK(loom_value_fact_table_compute(&facts_, module_,
+                                                 mapping_.source_function));
+
+    auto facts = loom_value_facts_unknown();
+    loom_value_facts_mark_subgroup_uniform(&facts);
+    IREE_ASSERT_OK(loom_value_fact_table_define(&facts_, lhs, facts));
+    IREE_ASSERT_OK(loom_value_fact_table_define(&facts_, rhs, facts));
+    IREE_ASSERT_OK(loom_value_fact_table_define(&facts_, value_, facts));
+  }
+
+  void SelectDescriptorSet(iree_string_view_t key) {
+    mapping_.descriptor_set =
+        loom_low_descriptor_registry_lookup(&registry_.registry, key);
+    ASSERT_NE(mapping_.descriptor_set, nullptr);
   }
 
   void ExpectDirectMapping(uint16_t register_class, uint32_t unit_count,
@@ -520,6 +569,19 @@ TEST_F(AmdgpuSourceTypeMappingTest, WideIndexRetainsRangeSelectedWidth) {
   CreateValue(loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), facts);
   ExpectDirectMapping(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 2, false);
   ExpectContractMapping(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 2, false);
+}
+
+TEST_F(AmdgpuSourceTypeMappingTest,
+       NonNativeScalarFloatResultRequiresVgprWithoutFunctionAnalysis) {
+  CreateUniformFloatMaximum();
+  ExpectContractMapping(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1, false);
+}
+
+TEST_F(AmdgpuSourceTypeMappingTest,
+       UniformScalarArithmeticRetainsFunctionAnalysisFallback) {
+  SelectDescriptorSet(IREE_SV("amdgpu.rdna3_5.core"));
+  CreateUniformFloatMaximum();
+  ExpectContractMapping(LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1, true);
 }
 
 struct BufferCase {
