@@ -692,14 +692,18 @@ static bool loom_condition_integer_comparison_normalize_relation(
   loom_value_facts_t* upper = ascending ? rhs_facts : lhs_facts;
   // Mixed sign partitions passed the carrier gate through its signed-range
   // case; no unsigned-only carrier envelope reaches this point.
+  // Canonicalize the selected partition against its existing predicates before
+  // its endpoints constrain the other operand.
   if (loom_value_facts_is_non_negative(*upper)) {
     // A nonnegative upper operand forces a nonnegative lower operand.
     lower->range_lo = iree_max(lower->range_lo, 0);
+    loom_value_facts_refine_predicate_range(lower);
     return true;
   }
   if (lower->range_hi < 0) {
     // A set sign bit in the lower operand forces it in the upper operand too.
     upper->range_hi = iree_min(upper->range_hi, -1);
+    loom_value_facts_refine_predicate_range(upper);
     return true;
   }
   return false;
