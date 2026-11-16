@@ -427,8 +427,7 @@ static iree_status_t iree_hal_streaming_graph_compile_block(
                   IREE_HAL_QUEUE_EXECUTE_FLAG_NONE, &block));
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
           z0, hrx_graph_record_partition(
-                  schedule, partition->start_index, partition->count,
-                  plan->stream_index,
+                  schedule, partition, plan->stream_index,
                   hrx_graph_block_execute(block)->command_buffer));
     } else {
       iree_hal_streaming_graph_node_t* first_node =

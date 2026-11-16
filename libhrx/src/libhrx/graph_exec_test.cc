@@ -516,6 +516,56 @@ TEST_P(GraphKernelTest, ReplacementPreservesPendingArgumentsAndResources) {
   EXPECT_EQ(replacement_result, 31u);
 }
 
+TEST_P(GraphKernelTest,
+       ReplacementCanChangeCommandClassesWhileLaunchIsPending) {
+  hrx::runtime::buffer_ptr buffer;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_allocate(
+      stream_, sizeof(uint32_t),
+      HRX_MEMORY_TYPE_HOST_LOCAL | HRX_MEMORY_TYPE_HOST_COHERENT |
+          HRX_MEMORY_TYPE_DEVICE_VISIBLE,
+      HRX_BUFFER_USAGE_DEFAULT | HRX_BUFFER_USAGE_MAPPING_PERSISTENT,
+      buffer.for_output())));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  void* mapping = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_map(
+      buffer, HRX_MAP_READ | HRX_MAP_WRITE, 0, sizeof(uint32_t), &mapping)));
+  *static_cast<uint32_t*>(mapping) = 0;
+  InstantiateOriginal();
+  Graph replacement;
+  IREE_ASSERT_OK(hrx_status_to_iree(
+      hrx_graph_create(device_, 0, replacement.for_output())));
+  const hrx_graph_fill_buffer_node_attrs_t fill = {
+      .dst = {buffer, 0, sizeof(uint32_t)},
+      .pattern = 41,
+      .pattern_size = sizeof(uint32_t),
+  };
+  hrx_graph_node_t producer = nullptr;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_fill_buffer_node(
+      replacement, nullptr, 0, &fill, &producer)));
+  uint32_t replacement_result = 0;
+  KernelArguments arguments = {&replacement_result, 1,
+                               static_cast<const uint32_t*>(mapping)};
+  auto dispatch = KernelAttrs(GetParam());
+  dispatch.constants = &arguments;
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_graph_add_kernel_node(
+      replacement, &producer, 1, &dispatch, nullptr)));
+  Semaphore gate;
+  IREE_ASSERT_OK(
+      hrx_status_to_iree(hrx_semaphore_create(device_, 0, gate.for_output())));
+  IREE_EXPECT_OK(hrx_status_to_iree(hrx_stream_wait_on(stream_, {gate, 1})));
+  IREE_EXPECT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
+  IREE_EXPECT_OK(hrx_status_to_iree(hrx_graph_exec_update(exec_, replacement)));
+  replacement.reset();
+  IREE_EXPECT_OK(hrx_status_to_iree(hrx_graph_exec_launch(exec_, stream_)));
+  EXPECT_EQ(result_, 0u);
+  EXPECT_EQ(replacement_result, 0u);
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_semaphore_signal(gate, 1)));
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_stream_synchronize(stream_)));
+  EXPECT_EQ(result_, arguments_.value);
+  EXPECT_EQ(replacement_result, 42u);
+  IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_unmap(buffer)));
+}
+
 TEST_P(GraphKernelTest, LaunchCompletesWhileReplacementAllocationIsPaused) {
   InstantiateOriginal();
   auto replacement = MakeKernelGraph(&result_, 31);

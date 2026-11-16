@@ -14,13 +14,17 @@ extern "C" {
 // Producer-resolved commands stored inline in frontend graph nodes. Resources
 // are borrowed under each producer's lifetime contract; argument storage is
 // graph-owned. Retaining HAL command buffers capture their usual references.
-// These records add no owner, allocation, or replay-time translation.
+// These records add no owner, allocation, or replay-time translation. The four
+// kinds also index the compilation-only partition command mask.
 enum hrx_command_kind_e {
   HRX_COMMAND_DISPATCH = 0,
   HRX_COMMAND_COPY,
   HRX_COMMAND_FILL,
   HRX_COMMAND_ATOMIC_BATCH,
+  HRX_COMMAND_COUNT,
 };
+static_assert(HRX_COMMAND_COUNT <= 4,
+              "graph analysis stores two-bit command kinds");
 
 typedef struct hrx_command_t {
   // Resolved operation kind; frontend node classification stays separate.
@@ -168,10 +172,11 @@ iree_status_t hrx_command_record_atomics(
 // table contains resolved commands for recordable nodes and opaque frontend
 // payloads otherwise. System-scope entry/exit barriers publish payloads across
 // queue submissions and host nodes; analyzed dependencies within the partition
-// use device scope. Recording begins and ends here, including the debug group.
+// use device scope for the partition's retained command classes. Recording
+// begins and ends here, including the debug group.
 iree_status_t hrx_graph_record_partition(
-    const hrx_graph_schedule_t* schedule, uint32_t node_start_index,
-    uint32_t node_count, uint8_t stream_index,
+    const hrx_graph_schedule_t* schedule,
+    const hrx_graph_partition_t* partition, uint8_t stream_index,
     iree_hal_command_buffer_t* command_buffer);
 
 #ifdef __cplusplus

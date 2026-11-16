@@ -625,12 +625,17 @@ iree_status_t hrx_graph_schedule_nodes(hrx_graph_node_block_t* node_blocks,
       analysis.sources[index] = &node->attrs;
       analysis.offsets[index + 1] = node->dependency_count;
       edge_count += node->dependency_count;
-      analysis.flags[index] =
-          hrx_graph_node_is_recordable(node->type)
-              ? HRX_GRAPH_ANALYSIS_NODE_RECORDABLE
-          : node->type == HRX_GRAPH_NODE_TYPE_INTERNAL_HOST_CALL
-              ? HRX_GRAPH_ANALYSIS_NODE_ISOLATED
-              : HRX_GRAPH_ANALYSIS_NODE_EMPTY;
+      if (hrx_graph_node_is_recordable(node->type)) {
+        const hrx_command_t* command = (const void*)&node->attrs;
+        analysis.flags[index] =
+            HRX_GRAPH_ANALYSIS_NODE_RECORDABLE |
+            (command->kind << HRX_GRAPH_ANALYSIS_NODE_COMMAND_SHIFT);
+      } else {
+        analysis.flags[index] =
+            node->type == HRX_GRAPH_NODE_TYPE_INTERNAL_HOST_CALL
+                ? HRX_GRAPH_ANALYSIS_NODE_ISOLATED
+                : HRX_GRAPH_ANALYSIS_NODE_EMPTY;
+      }
     }
   }
   iree_status_t status = iree_ok_status();

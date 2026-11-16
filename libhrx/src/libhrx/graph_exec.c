@@ -99,9 +99,8 @@ static iree_status_t hrx_graph_recording_compile_schedule(
         hrx_graph_block_execute(block)->command_buffer = command_buffer;
         hrx_graph_block_execute(block)->flags =
             IREE_HAL_QUEUE_EXECUTE_FLAG_NONE;
-        status = hrx_graph_record_partition(schedule, partition->start_index,
-                                            partition->count, plan.stream_index,
-                                            command_buffer);
+        status = hrx_graph_record_partition(schedule, partition,
+                                            plan.stream_index, command_buffer);
       }
       iree_hal_command_buffer_release(command_buffer);
     } else {

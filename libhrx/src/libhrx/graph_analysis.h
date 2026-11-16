@@ -14,8 +14,10 @@ extern "C" {
 // Maximum partition width, also bounding graph launch semaphore scratch.
 #define HRX_GRAPH_MAX_WORKSTREAMS 8
 
-// The low bits describe recording boundaries; the remaining bits carry the
-// schedule's barrier decision and workstream. Payloads stay in the frontend.
+// The low bits describe recording boundaries. Input recordable nodes carry a
+// two-bit producer-defined command kind; analysis consumes it into the
+// partition mask and replaces it with the schedule's barrier decision and
+// workstream. Payloads stay in the frontend.
 enum hrx_graph_analysis_node_flags_e {
   HRX_GRAPH_ANALYSIS_NODE_RECORDABLE = 0,
   HRX_GRAPH_ANALYSIS_NODE_ISOLATED = 1,
@@ -23,6 +25,7 @@ enum hrx_graph_analysis_node_flags_e {
   HRX_GRAPH_ANALYSIS_NODE_KIND_MASK = 3,
   HRX_GRAPH_ANALYSIS_NODE_BARRIER_BEFORE = 1 << 2,
   HRX_GRAPH_ANALYSIS_NODE_STREAM_SHIFT = 3,
+  HRX_GRAPH_ANALYSIS_NODE_COMMAND_SHIFT = 6,
 };
 
 // Compilation-only indexed graph. All arrays are arena-owned. Frontends
@@ -46,19 +49,22 @@ typedef struct hrx_graph_analysis_t {
   uint32_t* dependencies;
   // Write cursors during preparation, then topological source-node ordinals.
   uint32_t* order;
-  // Packed node kind, barrier-before flag, and workstream by source ordinal.
+  // Input node/command kinds, replaced by barrier/workstream by source ordinal.
   uint8_t* flags;
 } hrx_graph_analysis_t;
 
 // One bounded recordable range or one isolated operation. The 24-bit
-// count covers the recording bound; stream_count is at most eight.
+// count covers the recording bound; stream_count is at most eight. The command
+// union occupies otherwise unused bits, without adding compilation storage.
 typedef struct hrx_graph_partition_t {
   // First position in the schedule's order array.
   uint32_t start_index;
   // Number of ordered nodes in this partition.
   uint32_t count : 24;
   // Number of independent command recordings, or one for an isolated node.
-  uint32_t stream_count : 8;
+  uint32_t stream_count : 4;
+  // Union of (1 << input command kind) across all recordable nodes, else zero.
+  uint32_t command_mask : 4;
 } hrx_graph_partition_t;
 
 // Recording consumes order, flags, and the source table directly. No dependency
