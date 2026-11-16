@@ -172,8 +172,8 @@ static iree_status_t hrx_graph_record_commands(
 }
 
 iree_status_t hrx_graph_record_partition(
-    const hrx_graph_schedule_t* schedule, uint32_t node_start_index,
-    uint32_t node_count, uint8_t stream_id,
+    const hrx_graph_schedule_t* schedule,
+    const hrx_graph_partition_t* partition, uint8_t stream_id,
     iree_hal_command_buffer_t* command_buffer) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -200,14 +200,24 @@ iree_status_t hrx_graph_record_partition(
 
   // Every operation in a recorded partition executes on this device. Host
   // calls and other partitions cross the system-scope entry/exit barriers;
-  // dependencies within the partition only order device memory accesses.
-  const iree_hal_access_scope_t device_access =
-      IREE_HAL_ACCESS_SCOPE_CONSTANT_READ |
-      IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
-      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
-      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
-      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE | IREE_HAL_ACCESS_SCOPE_ATOMIC_READ |
-      IREE_HAL_ACCESS_SCOPE_ATOMIC_WRITE;
+  // dependencies within the partition only order its device access classes.
+  // The whole-partition union preserves history across arbitrary fork/joins;
+  // an immediate predecessor alone need not cover every earlier producer.
+  iree_hal_access_scope_t device_access = 0;
+  if (partition->command_mask & (1u << HRX_COMMAND_DISPATCH)) {
+    device_access |= IREE_HAL_ACCESS_SCOPE_CONSTANT_READ |
+                     IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                     IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE;
+  }
+  if (partition->command_mask &
+      ((1u << HRX_COMMAND_COPY) | (1u << HRX_COMMAND_FILL))) {
+    device_access |= IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                     IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE;
+  }
+  if (partition->command_mask & (1u << HRX_COMMAND_ATOMIC_BATCH)) {
+    device_access |=
+        IREE_HAL_ACCESS_SCOPE_ATOMIC_READ | IREE_HAL_ACCESS_SCOPE_ATOMIC_WRITE;
+  }
   const iree_hal_memory_barrier_t memory_barrier = {
       .source_scope = device_access,
       .target_scope = device_access,
@@ -218,9 +228,9 @@ iree_status_t hrx_graph_record_partition(
       .memory_barrier_count = 1,
       .memory_barriers = &memory_barrier,
   };
-  iree_status_t status =
-      hrx_graph_record_commands(schedule, node_start_index, node_count,
-                                stream_id, &execution_barrier, command_buffer);
+  iree_status_t status = hrx_graph_record_commands(
+      schedule, partition->start_index, partition->count, stream_id,
+      &execution_barrier, command_buffer);
 
   if (iree_status_is_ok(status)) {
     const iree_hal_barrier_t release_barrier = {

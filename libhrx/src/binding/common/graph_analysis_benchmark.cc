@@ -73,7 +73,12 @@ struct NativeGraph {
 
   static size_t NodeSize(uint8_t) { return sizeof(Node); }
 
-  static void Initialize(Node* node, uint8_t type) { node->type = type; }
+  static void Initialize(Node* node, uint8_t type) {
+    node->type = type;
+    if (type == kNodeType) {
+      node->attrs.memset.command.kind = HRX_COMMAND_FILL;
+    }
+  }
 
   static Node** Dependencies(Node* node) { return node->dependencies; }
 
@@ -106,6 +111,10 @@ struct BindingGraph {
   static void Initialize(Node* node, uint8_t type) {
     node->type = type;
     node->dependency_offset = NodeSize(type);
+    if (type == kNodeType) {
+      iree_hal_streaming_graph_node_memset(node)->command.command.kind =
+          HRX_COMMAND_FILL;
+    }
   }
 
   static Node** Dependencies(Node* node) {

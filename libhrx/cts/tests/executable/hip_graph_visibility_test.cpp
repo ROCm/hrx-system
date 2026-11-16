@@ -17,7 +17,8 @@
 namespace {
 
 class HipGraphVisibilityTest
-    : public testing::TestWithParam<std::tuple<uint32_t, uint32_t, uint32_t>> {
+    : public testing::TestWithParam<
+          std::tuple<uint32_t, uint32_t, uint32_t, bool>> {
  protected:
   static void SetUpTestSuite() {
     ASSERT_TRUE(library_.Open()) << library_.error();
@@ -94,12 +95,13 @@ TEST_P(HipGraphVisibilityTest,
   RESOLVE(hipMemcpy);
   RESOLVE(hipGraphCreate);
   RESOLVE(hipGraphAddKernelNode);
+  RESOLVE(hipGraphAddMemcpyNode1D);
   RESOLVE(hipGraphAddEmptyNode);
   RESOLVE(hipGraphInstantiateWithFlags);
   RESOLVE(hipGraphLaunch);
 #undef RESOLVE
 
-  const auto [width, depth, leaf_count] = GetParam();
+  const auto [width, depth, leaf_count, transfer_edges] = GetParam();
   const uint32_t count = width * leaf_count;
   const size_t byte_length = count * sizeof(uint32_t);
   int device = -1;
@@ -140,16 +142,26 @@ TEST_P(HipGraphVisibilityTest,
     return hipGraphAddKernelNode(out_node, graph_, dependencies,
                                  dependency_count, &parameters);
   };
-  std::vector<hipGraphNode_t> tails(width, nullptr);
+  // The large variant uses native DMA and the small variant may use a shader
+  // copy. Both are transfer operations at the graph/HAL boundary.
+  hipGraphNode_t input_copy = nullptr;
+  if (transfer_edges) {
+    ASSERT_EQ(hipSuccess,
+              hipGraphAddMemcpyNode1D(&input_copy, graph_, nullptr, 0,
+                                      buffers_[2], buffers_[0], byte_length,
+                                      hipMemcpyDeviceToDevice));
+  }
+  std::vector<hipGraphNode_t> tails(width, input_copy);
   for (uint32_t phase = 0; phase < depth; ++phase) {
-    const uint32_t source = phase ? 1 + ((phase - 1) & 1) : 0;
+    const uint32_t source =
+        phase ? 1 + ((phase - 1) & 1) : (transfer_edges ? 2 : 0);
     const uint32_t target = 1 + (phase & 1);
     for (uint32_t lane = 0; lane < width; ++lane) {
       hipGraphNode_t node = nullptr;
       ASSERT_EQ(
           hipSuccess,
           add_kernel(
-              &tails[lane], phase ? 1 : 0,
+              &tails[lane], tails[lane] ? 1 : 0,
               static_cast<uint32_t*>(buffers_[source]) + lane * leaf_count,
               static_cast<uint32_t*>(buffers_[target]) + lane * leaf_count,
               leaf_count, phase + 1, &node));
@@ -162,6 +174,13 @@ TEST_P(HipGraphVisibilityTest,
   hipGraphNode_t final = nullptr;
   ASSERT_EQ(hipSuccess, add_kernel(&join, 1, buffers_[1 + ((depth - 1) & 1)],
                                    buffers_[3], count, 9001, &final));
+  if (transfer_edges) {
+    hipGraphNode_t output_copy = nullptr;
+    ASSERT_EQ(hipSuccess,
+              hipGraphAddMemcpyNode1D(&output_copy, graph_, &final, 1,
+                                      buffers_[0], buffers_[3], byte_length,
+                                      hipMemcpyDeviceToDevice));
+  }
   ASSERT_EQ(hipSuccess, hipGraphInstantiateWithFlags(&executable_, graph_, 0));
 
   // Every replay changes every input. The final consumer reads neighbors
@@ -185,8 +204,9 @@ TEST_P(HipGraphVisibilityTest,
     }
     ASSERT_EQ(hipSuccess, hipGraphLaunch(executable_, stream_));
     ASSERT_EQ(hipSuccess, hipStreamSynchronize(stream_));
-    ASSERT_EQ(hipSuccess, hipMemcpy(actual.data(), buffers_[3], byte_length,
-                                    hipMemcpyDeviceToHost));
+    ASSERT_EQ(hipSuccess,
+              hipMemcpy(actual.data(), buffers_[transfer_edges ? 0 : 3],
+                        byte_length, hipMemcpyDeviceToHost));
     ASSERT_EQ(actual, expected) << "replay " << replay;
   }
 }
@@ -194,6 +214,7 @@ TEST_P(HipGraphVisibilityTest,
 INSTANTIATE_TEST_SUITE_P(IndependentChains, HipGraphVisibilityTest,
                          testing::Combine(testing::Values(4u, 8u),
                                           testing::Values(9u, 32u),
-                                          testing::Values(4096u, 262144u)));
+                                          testing::Values(4096u, 262144u),
+                                          testing::Bool()));
 
 }  // namespace

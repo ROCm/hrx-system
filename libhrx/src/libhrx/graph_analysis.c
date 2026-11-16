@@ -179,15 +179,19 @@ static uint32_t hrx_graph_partition_end(const hrx_graph_analysis_t* analysis,
 
 // A multi-stream join collapses the preceding prefix. Record its endpoint and
 // read earlier stream IDs as zero instead of rewriting the prefix at each join.
-// One final pass publishes the assignments and exact barrier decisions.
-static uint32_t hrx_graph_partition_streams(hrx_graph_analysis_t* analysis,
-                                            const uint32_t* ranks,
-                                            uint32_t start, uint32_t end,
-                                            uint32_t* frontiers) {
+// Input command kinds are consumed before their flags become stream IDs; every
+// predecessor has already been visited. One final pass publishes the
+// assignments and exact barrier decisions.
+static hrx_graph_partition_t hrx_graph_partition_streams(
+    hrx_graph_analysis_t* analysis, const uint32_t* ranks, uint32_t start,
+    uint32_t end, uint32_t* frontiers) {
   uint32_t collapsed_end = start;
   uint32_t stream_count = 1;
+  uint32_t command_mask = 0;
   for (uint32_t position = start; position < end; ++position) {
     const uint32_t node = analysis->order[position];
+    command_mask |=
+        1u << (analysis->flags[node] >> HRX_GRAPH_ANALYSIS_NODE_COMMAND_SHIFT);
     uint32_t connected = 0;
     uint32_t frontier = 0;
     for (uint32_t e = analysis->offsets[node]; e < analysis->offsets[node + 1];
@@ -245,7 +249,12 @@ static uint32_t hrx_graph_partition_streams(hrx_graph_analysis_t* analysis,
     }
     analysis->flags[node] = flags;
   }
-  return stream_count;
+  return (hrx_graph_partition_t){
+      .start_index = start,
+      .count = end - start,
+      .stream_count = stream_count,
+      .command_mask = command_mask,
+  };
 }
 
 iree_status_t hrx_graph_analyze(hrx_graph_analysis_t* analysis,
@@ -291,19 +300,19 @@ iree_status_t hrx_graph_analyze(hrx_graph_analysis_t* analysis,
   uint32_t start = hrx_graph_partition_begin(analysis, 0);
   for (uint32_t p = 0; p < partition_count; ++p) {
     const uint32_t end = hrx_graph_partition_end(analysis, start);
-    uint32_t stream_count = 1;
+    hrx_graph_partition_t partition = {
+        .start_index = start,
+        .count = end - start,
+        .stream_count = 1,
+    };
     if ((analysis->flags[analysis->order[start]] &
          HRX_GRAPH_ANALYSIS_NODE_KIND_MASK) ==
         HRX_GRAPH_ANALYSIS_NODE_RECORDABLE) {
-      stream_count =
+      partition =
           hrx_graph_partition_streams(analysis, ranks, start, end, frontiers);
     }
-    partitions[p] = (hrx_graph_partition_t){
-        .start_index = start,
-        .count = end - start,
-        .stream_count = stream_count,
-    };
-    block_count += stream_count;
+    partitions[p] = partition;
+    block_count += partition.stream_count;
     start = hrx_graph_partition_begin(analysis, end);
   }
   *out_schedule = (hrx_graph_schedule_t){

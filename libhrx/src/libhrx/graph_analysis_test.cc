@@ -34,9 +34,10 @@ class GraphAnalysisTest : public ::testing::Test {
     hrx_graph_analysis_t analysis;
     IREE_RETURN_IF_ERROR(
         hrx_graph_analysis_initialize(count, &arena_, &analysis));
+    input_flags_.resize(count);
     for (uint32_t i = 0; i < count; ++i) {
       analysis.sources[i] = nullptr;
-      analysis.flags[i] =
+      input_flags_[i] = analysis.flags[i] =
           kinds.empty() ? HRX_GRAPH_ANALYSIS_NODE_RECORDABLE : kinds[i];
     }
     for (auto [from, to] : edges) {
@@ -80,12 +81,20 @@ class GraphAnalysisTest : public ::testing::Test {
       }
       covered = partition.start_index + partition.count;
       ASSERT_LE(covered, count);
+      uint32_t command_mask = 0;
       for (uint32_t i = partition.start_index; i < covered; ++i) {
+        const uint8_t input_flags = input_flags_[schedule_.order[i]];
+        if ((input_flags & HRX_GRAPH_ANALYSIS_NODE_KIND_MASK) ==
+            HRX_GRAPH_ANALYSIS_NODE_RECORDABLE) {
+          command_mask |=
+              1u << (input_flags >> HRX_GRAPH_ANALYSIS_NODE_COMMAND_SHIFT);
+        }
         EXPECT_NE(schedule_.flags[schedule_.order[i]] &
                       HRX_GRAPH_ANALYSIS_NODE_KIND_MASK,
                   HRX_GRAPH_ANALYSIS_NODE_EMPTY);
         partitions[schedule_.order[i]] = p;
       }
+      EXPECT_EQ(partition.command_mask, command_mask);
     }
     for (; covered < count; ++covered) {
       EXPECT_EQ(schedule_.flags[schedule_.order[covered]] &
@@ -137,6 +146,8 @@ class GraphAnalysisTest : public ::testing::Test {
   iree_arena_allocator_t arena_;
   // Borrowed result, valid until the next Analyze call.
   hrx_graph_schedule_t schedule_ = {};
+  // Frontend classifications used to verify each partition's retained union.
+  std::vector<uint8_t> input_flags_;
 };
 
 TEST_F(GraphAnalysisTest, EmptyAndIndependentGraphs) {
@@ -286,6 +297,9 @@ TEST_F(GraphAnalysisTest, WorkstreamsAndPartitionBoundaries) {
         }
       }
       std::vector<uint8_t> kinds(count, HRX_GRAPH_ANALYSIS_NODE_RECORDABLE);
+      for (uint32_t i = 0; i < count; ++i) {
+        kinds[i] |= (random() % 4) << HRX_GRAPH_ANALYSIS_NODE_COMMAND_SHIFT;
+      }
       if (seed & 2) {
         for (uint32_t i = 31; i < count; i += 32) {
           kinds[i] = HRX_GRAPH_ANALYSIS_NODE_ISOLATED;

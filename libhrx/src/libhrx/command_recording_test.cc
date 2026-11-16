@@ -13,7 +13,15 @@
 
 namespace {
 
-enum class RecordedKind { kBegin, kEnd, kBarrier, kFill };
+enum class RecordedKind {
+  kBegin,
+  kEnd,
+  kBarrier,
+  kDispatch,
+  kCopy,
+  kFill,
+  kAtomic
+};
 
 struct RecordedCommand {
   // Operation observed at the HAL command-buffer boundary.
@@ -70,11 +78,34 @@ struct RecordingCommandBuffer {
                        memory.source_scope, memory.target_scope});
               return iree_ok_status();
             },
+        .atomic_store =
+            +[](iree_hal_command_buffer_t* command_buffer,
+                iree_hal_execution_stage_t, iree_hal_execution_stage_t,
+                iree_hal_buffer_ref_t, iree_hal_atomic_store_params_t) {
+              Cast(command_buffer)->commands.push_back({RecordedKind::kAtomic});
+              return iree_ok_status();
+            },
         .fill_buffer =
             +[](iree_hal_command_buffer_t* command_buffer,
                 iree_hal_buffer_ref_t, const void*, iree_host_size_t,
                 iree_hal_fill_flags_t) {
               Cast(command_buffer)->commands.push_back({RecordedKind::kFill});
+              return iree_ok_status();
+            },
+        .copy_buffer =
+            +[](iree_hal_command_buffer_t* command_buffer,
+                iree_hal_buffer_ref_t, iree_hal_buffer_ref_t,
+                iree_hal_copy_flags_t) {
+              Cast(command_buffer)->commands.push_back({RecordedKind::kCopy});
+              return iree_ok_status();
+            },
+        .dispatch =
+            +[](iree_hal_command_buffer_t* command_buffer,
+                iree_hal_executable_t*, iree_hal_executable_function_t,
+                iree_hal_dispatch_config_t, iree_const_byte_span_t,
+                iree_hal_buffer_ref_list_t, iree_hal_dispatch_flags_t) {
+              Cast(command_buffer)
+                  ->commands.push_back({RecordedKind::kDispatch});
               return iree_ok_status();
             },
     };
@@ -99,6 +130,9 @@ struct RecordingCommandBuffer {
 class CommandRecordingTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    iree_arena_block_pool_initialize(4096, iree_allocator_system(),
+                                     &analysis_pool_);
+    iree_arena_initialize(&analysis_pool_, &analysis_arena_);
     hrx::runtime::runtime_ptr runtime;
     IREE_ASSERT_OK(hrx_status_to_iree(hrx_runtime_create(
         nullptr, hrx_host_allocator_system(), runtime.for_output())));
@@ -124,7 +158,11 @@ class CommandRecordingTest : public ::testing::Test {
         hrx_semaphore_create(device, 0, completion_.for_output())));
   }
 
-  void TearDown() override { iree_hal_command_buffer_release(command_buffer_); }
+  void TearDown() override {
+    iree_hal_command_buffer_release(command_buffer_);
+    iree_arena_deinitialize(&analysis_arena_);
+    iree_arena_block_pool_deinitialize(&analysis_pool_);
+  }
 
   void Execute() {
     uint64_t value = 1;
@@ -152,6 +190,10 @@ class CommandRecordingTest : public ::testing::Test {
   hrx::runtime::semaphore_ptr completion_;
   // Command buffer retained through execution and released in TearDown.
   iree_hal_command_buffer_t* command_buffer_ = nullptr;
+  // Compilation scratch shared by the analyzer and recorder tests.
+  iree_arena_block_pool_t analysis_pool_;
+  // Reset between schedules and released even after a fatal assertion.
+  iree_arena_allocator_t analysis_arena_;
 };
 
 TEST_F(CommandRecordingTest, PartitionPublishesAcrossExternalBoundaries) {
@@ -171,15 +213,16 @@ TEST_F(CommandRecordingTest, PartitionPublishesAcrossExternalBoundaries) {
       .flags = flags,
   };
   RecordingCommandBuffer recorded(iree_hal_queue_family(queue_->hal_queue));
+  const hrx_graph_partition_t partition = {
+      .count = 2,
+      .stream_count = 1,
+      .command_mask = 1u << HRX_COMMAND_FILL,
+  };
   IREE_ASSERT_OK(
-      hrx_graph_record_partition(&schedule, 0, 2, 0, &recorded.base));
+      hrx_graph_record_partition(&schedule, &partition, 0, &recorded.base));
   constexpr iree_hal_access_scope_t device_access =
-      IREE_HAL_ACCESS_SCOPE_CONSTANT_READ |
-      IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
-      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
       IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
-      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE | IREE_HAL_ACCESS_SCOPE_ATOMIC_READ |
-      IREE_HAL_ACCESS_SCOPE_ATOMIC_WRITE;
+      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE;
   const std::vector<RecordedCommand> expected = {
       {RecordedKind::kBegin},
       {RecordedKind::kBarrier, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
@@ -194,6 +237,104 @@ TEST_F(CommandRecordingTest, PartitionPublishesAcrossExternalBoundaries) {
       {RecordedKind::kEnd},
   };
   EXPECT_EQ(recorded.commands, expected);
+}
+
+TEST_F(CommandRecordingTest,
+       InternalBarriersCoverEveryCommandClassInPartition) {
+  const auto* family = iree_hal_queue_family(queue_->hal_queue);
+  // Only the executable's family is needed at this recording-only boundary.
+  // The HAL dependency captures dispatches instead of executing them.
+  static const iree_hal_executable_vtable_t executable_vtable = {
+      .destroy = +[](iree_hal_executable_t*) {},
+  };
+  iree_hal_executable_t executable;
+  iree_hal_executable_initialize(family, &executable_vtable, &executable);
+  hrx_command_dispatch_t dispatch = {
+      .command = {HRX_COMMAND_DISPATCH},
+      .executable = &executable,
+      .workgroup_count = {1, 1, 1},
+      .workgroup_size = {1, 1, 1},
+  };
+  hrx_command_copy_t copy = {
+      .command = {HRX_COMMAND_COPY},
+      .source_buffer = source_.get()->hal_buffer,
+      .target_buffer = target_.get()->hal_buffer,
+      .length = 4,
+  };
+  hrx_command_fill_t fill = {
+      .command = {HRX_COMMAND_FILL},
+      .pattern_size = 4,
+      .target = iree_hal_make_buffer_ref(target_.get()->hal_buffer, 0, 4),
+  };
+  hrx_atomic_operation_t operation = {
+      .kind = HRX_ATOMIC_OPERATION_STORE,
+      .target_buffer = target_.get()->hal_buffer,
+  };
+  operation.params.store = {.value = 1, .width = IREE_HAL_ATOMIC_WIDTH_32};
+  hrx_command_atomic_batch_t atomic = {
+      .command = {HRX_COMMAND_ATOMIC_BATCH},
+      .operation_count = 1,
+      .operations = &operation,
+  };
+  void* commands[] = {&dispatch, &copy, &fill, &atomic};
+  constexpr iree_hal_access_scope_t scopes[] = {
+      IREE_HAL_ACCESS_SCOPE_CONSTANT_READ |
+          IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+          IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+          IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+          IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      IREE_HAL_ACCESS_SCOPE_ATOMIC_READ | IREE_HAL_ACCESS_SCOPE_ATOMIC_WRITE,
+  };
+  // Exercise every pair, including each homogeneous class, through the actual
+  // analyzer and recorder. The join must cover both predecessor classes even
+  // when the immediately preceding recorded command has only the second class.
+  for (uint32_t first = 0; first < HRX_COMMAND_COUNT; ++first) {
+    for (uint32_t second = 0; second < HRX_COMMAND_COUNT; ++second) {
+      SCOPED_TRACE(testing::Message() << first << " -> " << second);
+      hrx_graph_analysis_t analysis;
+      IREE_ASSERT_OK(
+          hrx_graph_analysis_initialize(3, &analysis_arena_, &analysis));
+      analysis.sources[0] = commands[first];
+      analysis.sources[1] = commands[second];
+      analysis.sources[2] = commands[second];
+      analysis.flags[0] = first << HRX_GRAPH_ANALYSIS_NODE_COMMAND_SHIFT;
+      analysis.flags[1] = second << HRX_GRAPH_ANALYSIS_NODE_COMMAND_SHIFT;
+      analysis.flags[2] = second << HRX_GRAPH_ANALYSIS_NODE_COMMAND_SHIFT;
+      analysis.offsets[3] = 2;
+      IREE_ASSERT_OK(hrx_graph_analysis_allocate_dependencies(
+          &analysis, &analysis_arena_));
+      analysis.dependencies[0] = 0;
+      analysis.dependencies[1] = 1;
+      analysis.is_topologically_ordered = true;
+      hrx_graph_schedule_t schedule;
+      IREE_ASSERT_OK(hrx_graph_analyze(&analysis, &analysis_arena_, &schedule));
+      ASSERT_EQ(schedule.partition_count, 1u);
+      RecordingCommandBuffer recorded(family);
+      IREE_ASSERT_OK(hrx_graph_record_partition(
+          &schedule, &schedule.partitions[0], 0, &recorded.base));
+      std::vector<RecordedCommand> barriers;
+      for (const auto& command : recorded.commands) {
+        if (command.kind == RecordedKind::kBarrier) {
+          barriers.push_back(command);
+        }
+      }
+      const auto scope = scopes[first] | scopes[second];
+      const std::vector<RecordedCommand> expected = {
+          {RecordedKind::kBarrier, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+           IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+           IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE},
+          {RecordedKind::kBarrier, IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+           IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE, 0, scope, scope},
+          {RecordedKind::kBarrier, IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, 0,
+           IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE},
+      };
+      EXPECT_EQ(barriers, expected);
+      iree_arena_reset(&analysis_arena_);
+    }
+  }
+  iree_hal_executable_release(&executable);
 }
 
 TEST_F(CommandRecordingTest, StridedCopiesPreserveGapsAndSelectOneWorkstream) {
@@ -238,8 +379,13 @@ TEST_F(CommandRecordingTest, StridedCopiesPreserveGapsAndSelectOneWorkstream) {
       .order = order,
       .flags = flags,
   };
+  const hrx_graph_partition_t partition = {
+      .count = 4,
+      .stream_count = 2,
+      .command_mask = (1u << HRX_COMMAND_COPY) | (1u << HRX_COMMAND_FILL),
+  };
   IREE_ASSERT_OK(
-      hrx_graph_record_partition(&schedule, 0, 4, 0, command_buffer_));
+      hrx_graph_record_partition(&schedule, &partition, 0, command_buffer_));
   Execute();
   std::array<uint8_t, 128> contents;
   IREE_ASSERT_OK(hrx_status_to_iree(hrx_synchronous_d2h(

@@ -109,7 +109,10 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
       } else if (iree_hal_streaming_graph_node_is_recordable(node->type) &&
                  !(node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_KERNEL &&
                    iree_hal_streaming_graph_node_kernel(node)->cooperative)) {
-        analysis.flags[index] = HRX_GRAPH_ANALYSIS_NODE_RECORDABLE;
+        const hrx_command_t* command = (const void*)node->data;
+        analysis.flags[index] =
+            HRX_GRAPH_ANALYSIS_NODE_RECORDABLE |
+            (command->kind << HRX_GRAPH_ANALYSIS_NODE_COMMAND_SHIFT);
       } else {
         analysis.flags[index] = HRX_GRAPH_ANALYSIS_NODE_ISOLATED;
       }
@@ -141,7 +144,8 @@ iree_status_t iree_hal_streaming_graph_schedule_nodes(
       analysis.dependencies[analysis.order[i]++] = dependency->from->node_index;
       is_topologically_ordered &= dependency->from->node_index < i;
     }
-    if (analysis.flags[i] == HRX_GRAPH_ANALYSIS_NODE_RECORDABLE) {
+    if ((analysis.flags[i] & HRX_GRAPH_ANALYSIS_NODE_KIND_MASK) ==
+        HRX_GRAPH_ANALYSIS_NODE_RECORDABLE) {
       analysis.sources[i] = (void*)node->data;
     }
   }
