@@ -5,6 +5,22 @@
 
 #include "loom/service/finite/registration.h"
 
+#include "iree/hal/api.h"
+
+enum {
+  LOOM_FINITE_REGISTRATION_COHORT = 0,
+  LOOM_FINITE_REGISTRATION_LIFECYCLE = 1,
+  LOOM_FINITE_REGISTRATION_RETIREMENT = 2,
+  LOOM_FINITE_REGISTRATION_SLOT_COUNT = 3,
+};
+
+typedef struct loom_service_finite_registration_work_t {
+  // Legal native operation, withdrawn when its explicit call accepts it.
+  loom_runtime_service_offer_t offer;
+  // Accepted ownership, independent of offer withdrawal or a terminal error.
+  loom_runtime_service_operation_t operation;
+} loom_service_finite_registration_work_t;
+
 struct loom_service_finite_registration_t {
   // Allocator owning this operation, independent of model allocations.
   iree_allocator_t host_allocator;
@@ -26,7 +42,116 @@ struct loom_service_finite_registration_t {
   loom_runtime_activation_t* activation;
   // Model consumers have been relinquished with an ownership wake installed.
   bool retiring;
+  // Serialized publication facts; none of these drive model state transitions.
+  struct {
+    // Exact placement retained by every model operation in this registration.
+    uint64_t devices;
+    // Stable device binding; lifecycle work has no source-provided estimate.
+    loom_runtime_service_use_t use;
+    // Latest ready-engine contribution, including admission outside progress.
+    loom_runtime_service_observation_t engine;
+    // Serialized preparation, activation, or deactivation ownership.
+    loom_service_finite_registration_work_t lifecycle;
+    // Separate teardown ownership: a failed activation can still retain a pin
+    // while model retirement joins the actual borrowers that release it.
+    loom_service_finite_registration_work_t retirement;
+    // Nonrecycled accepted lifetime across both native operation slots.
+    uint64_t next_serial;
+  } scheduling;
 };
+
+static void loom_service_finite_registration_publish(
+    loom_service_finite_registration_t* registration) {
+  loom_runtime_service_observation_t observation =
+      registration->scheduling.engine;
+  const loom_service_finite_registration_work_t* lifecycle =
+      &registration->scheduling.lifecycle;
+  const loom_service_finite_registration_work_t* retirement =
+      &registration->scheduling.retirement;
+  observation.offer_count +=
+      lifecycle->offer.choice_count + retirement->offer.choice_count;
+  observation.pending_operation_count +=
+      (lifecycle->operation.key.serial != 0) +
+      (retirement->operation.key.serial != 0);
+  if (lifecycle->offer.choice_count || retirement->offer.choice_count) {
+    observation.offered_devices |= registration->scheduling.devices;
+  }
+  observation.accepted_devices |=
+      lifecycle->operation.devices | retirement->operation.devices;
+  loom_runtime_service_publish_observation(registration->control, &observation);
+}
+
+static void loom_service_finite_registration_publish_engine(
+    void* self, const loom_runtime_service_observation_t* observation) {
+  loom_service_finite_registration_t* registration = self;
+  registration->scheduling.engine = *observation;
+  loom_service_finite_registration_publish(registration);
+}
+
+static void loom_service_finite_registration_publish_offer(
+    loom_service_finite_registration_t* registration,
+    loom_service_finite_registration_work_t* work) {
+  const loom_runtime_service_choice_publication_t choice = {
+      .choice = {.devices = registration->scheduling.devices, .use_count = 1},
+      .uses = &registration->scheduling.use};
+  loom_runtime_service_publish_offer(registration->control, &work->offer,
+                                     &choice);
+}
+
+static void loom_service_finite_registration_withdraw_offer(
+    loom_service_finite_registration_t* registration,
+    loom_service_finite_registration_work_t* work) {
+  if (work->offer.choice_count) {
+    IREE_ASSERT(work->offer.key.revision != UINT64_MAX);
+    ++work->offer.key.revision;
+    work->offer.choice_count = 0;
+    loom_service_finite_registration_publish_offer(registration, work);
+  }
+}
+
+static void loom_service_finite_registration_begin_work(
+    loom_service_finite_registration_t* registration,
+    loom_service_finite_registration_work_t* work,
+    loom_runtime_service_work_flags_t kind) {
+  if (work->operation.key.serial) {
+    // Repeated explicit calls progress the same accepted unit. Its public
+    // ownership contract excludes a different operation until it retires.
+    IREE_ASSERT(work->operation.work == kind);
+    return;
+  }
+  if (work->offer.work != kind || !work->offer.choice_count) {
+    IREE_ASSERT(work->offer.key.revision != UINT64_MAX);
+    ++work->offer.key.revision;
+    work->offer.work = kind;
+    work->offer.choice_count = 1;
+    loom_service_finite_registration_publish_offer(registration, work);
+  }
+  IREE_ASSERT(registration->scheduling.next_serial != UINT64_MAX);
+  work->operation = (loom_runtime_service_operation_t){
+      .key = {.ordinal = work->offer.key.ordinal,
+              .serial = ++registration->scheduling.next_serial},
+      .origin = work->offer.key,
+      .work = kind,
+      .devices = registration->scheduling.devices,
+      .use_count = 1};
+  loom_service_finite_registration_withdraw_offer(registration, work);
+  loom_runtime_service_publish_operation(
+      registration->control, &work->operation, &registration->scheduling.use);
+  loom_service_finite_registration_publish(registration);
+}
+
+static void loom_service_finite_registration_end_work(
+    loom_service_finite_registration_t* registration,
+    loom_service_finite_registration_work_t* work) {
+  if (!work->operation.key.serial) {
+    return;
+  }
+  work->operation = (loom_runtime_service_operation_t){
+      .key = {.ordinal = work->offer.key.ordinal}};
+  loom_runtime_service_publish_operation(registration->control,
+                                         &work->operation, NULL);
+  loom_service_finite_registration_publish(registration);
+}
 
 iree_status_t loom_service_finite_registration_allocate(
     loom_runtime_device_t* device, loom_runtime_pool_t* pool,
@@ -35,12 +160,13 @@ iree_status_t loom_service_finite_registration_allocate(
     loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_service_finite_registration_t** out_registration) {
   *out_registration = NULL;
-  const iree_host_size_t use_capacities[] = {1};
-  const loom_runtime_service_offer_capacity_t offers[] = {{1, use_capacities}};
+  const iree_host_size_t use_capacities[] = {1, 1, 1};
+  const loom_runtime_service_offer_capacity_t offers[] = {
+      {1, use_capacities}, {1, use_capacities}, {1, use_capacities}};
   const loom_runtime_service_control_capacity_t capacity = {
-      .offer_capacity = 1,
+      .offer_capacity = LOOM_FINITE_REGISTRATION_SLOT_COUNT,
       .offers = offers,
-      .operation_capacity = 1,
+      .operation_capacity = LOOM_FINITE_REGISTRATION_SLOT_COUNT,
       .operation_use_capacities = use_capacities};
   iree_host_size_t control_length = 0;
   IREE_RETURN_IF_ERROR(
@@ -56,6 +182,17 @@ iree_status_t loom_service_finite_registration_allocate(
   registration->device = device;
   registration->options = *options;
   registration->observer = observer;
+  const uint64_t device_ordinal =
+      iree_hal_device_topology_info(loom_runtime_device_handle(device))
+          ->topology_index;
+  registration->scheduling.devices = UINT64_C(1) << device_ordinal;
+  registration->scheduling.use.resource_ordinal = device_ordinal;
+  registration->scheduling.lifecycle.offer = (loom_runtime_service_offer_t){
+      .key = {LOOM_FINITE_REGISTRATION_LIFECYCLE, 1},
+      .work = LOOM_RUNTIME_SERVICE_WORK_PREPARATION,
+      .choice_count = 1};
+  registration->scheduling.retirement.offer.key.ordinal =
+      LOOM_FINITE_REGISTRATION_RETIREMENT;
   iree_status_t status = loom_runtime_service_control_initialize(
       &capacity, options->incarnation,
       iree_make_byte_span((uint8_t*)registration + control_offset,
@@ -67,6 +204,9 @@ iree_status_t loom_service_finite_registration_allocate(
         host_allocator, &registration->load);
   }
   if (iree_status_is_ok(status)) {
+    loom_service_finite_registration_publish_offer(
+        registration, &registration->scheduling.lifecycle);
+    loom_service_finite_registration_publish(registration);
     *out_registration = registration;
   } else {
     iree_allocator_free_aligned(host_allocator, registration);
@@ -80,6 +220,9 @@ iree_status_t loom_service_finite_registration_prepare(
     loom_service_finite_service_t** out_service,
     loom_runtime_compilation_report_t* out_report) {
   *out_service = NULL;
+  loom_service_finite_registration_begin_work(
+      registration, &registration->scheduling.lifecycle,
+      LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
   iree_status_t status =
       loom_service_finite_load_advance(registration->load, flags, out_complete);
   if (!*out_complete) {
@@ -102,12 +245,23 @@ iree_status_t loom_service_finite_registration_prepare(
         loom_service_finite_model_generator(registration->model),
         options->protocol, options->name, options->capacity,
         options->variant_capacity, options->heartbeat_interval, options->stream,
-        (loom_runtime_service_control_binding_t){.control =
-                                                     registration->control},
+        (loom_runtime_service_control_binding_t){
+            .control = registration->control,
+            .offer_ordinal = LOOM_FINITE_REGISTRATION_COHORT,
+            .operation_ordinal = LOOM_FINITE_REGISTRATION_COHORT,
+            .publish_observation =
+                loom_service_finite_registration_publish_engine,
+            .publisher = registration},
         registration->host_allocator, &registration->service);
   }
   if (iree_status_is_ok(status)) {
     *out_service = registration->service;
+  }
+  if (iree_status_is_ok(status) || !registration->model) {
+    // Failed load completion has joined its own model retirement. Failure
+    // after model transfer instead retains that ownership until retire.
+    loom_service_finite_registration_end_work(
+        registration, &registration->scheduling.lifecycle);
   }
   return status;
 }
@@ -126,27 +280,63 @@ iree_status_t loom_service_finite_registration_activate(
     loom_service_finite_registration_t* registration,
     loom_runtime_activation_flags_t flags,
     loom_runtime_activation_phase_t* out_phase) {
-  return loom_runtime_activation_poll(
+  loom_service_finite_registration_work_t* work =
+      &registration->scheduling.lifecycle;
+  loom_service_finite_registration_begin_work(
+      registration, work, LOOM_RUNTIME_SERVICE_WORK_ACQUISITION);
+  iree_status_t status = loom_runtime_activation_poll(
       &registration->activation,
       loom_service_finite_model_residency(registration->model),
       loom_runtime_host_proactor_pool(
           loom_runtime_device_host(registration->device)),
       registration->observer.wake, registration->observer.user_data, flags,
       registration->host_allocator, out_phase);
+  if (*out_phase == LOOM_RUNTIME_ACTIVATION_COMPLETE &&
+      iree_status_is_ok(status)) {
+    loom_service_finite_registration_end_work(registration, work);
+  } else {
+    const loom_runtime_service_wait_flags_t waits =
+        *out_phase == LOOM_RUNTIME_ACTIVATION_WAITING
+            ? LOOM_RUNTIME_SERVICE_WAIT_CAPACITY
+        : *out_phase == LOOM_RUNTIME_ACTIVATION_LOADING
+            ? LOOM_RUNTIME_SERVICE_WAIT_DEVICE
+            : 0;
+    if (work->operation.waits != waits) {
+      work->operation.waits = waits;
+      loom_runtime_service_publish_operation(registration->control,
+                                             &work->operation,
+                                             &registration->scheduling.use);
+    }
+  }
+  return status;
 }
 
 iree_status_t loom_service_finite_registration_deactivate(
     loom_service_finite_registration_t* registration, bool* out_complete) {
-  return loom_service_finite_model_deactivate(registration->model,
-                                              out_complete);
+  loom_service_finite_registration_begin_work(
+      registration, &registration->scheduling.lifecycle,
+      LOOM_RUNTIME_SERVICE_WORK_RELEASE);
+  iree_status_t status =
+      loom_service_finite_model_deactivate(registration->model, out_complete);
+  if (iree_status_is_ok(status) && *out_complete) {
+    loom_service_finite_registration_end_work(
+        registration, &registration->scheduling.lifecycle);
+  }
+  return status;
 }
 
 iree_status_t loom_service_finite_registration_retire(
     loom_service_finite_registration_t* registration, bool* out_complete) {
   *out_complete = true;
-  if (!registration) {
+  if (!registration ||
+      (!registration->load && !registration->model && !registration->service)) {
     return iree_ok_status();
   }
+  loom_service_finite_registration_withdraw_offer(
+      registration, &registration->scheduling.lifecycle);
+  loom_service_finite_registration_begin_work(
+      registration, &registration->scheduling.retirement,
+      LOOM_RUNTIME_SERVICE_WORK_RELEASE);
   if (registration->load) {
     IREE_RETURN_IF_ERROR(loom_service_finite_load_free(registration->load));
     registration->load = NULL;
@@ -169,8 +359,11 @@ iree_status_t loom_service_finite_registration_retire(
   const loom_runtime_service_operation_t operation = {0};
   loom_runtime_service_publish_operation(registration->control, &operation,
                                          NULL);
-  const loom_runtime_service_observation_t observation = {0};
-  loom_runtime_service_publish_observation(registration->control, &observation);
+  registration->scheduling.engine = (loom_runtime_service_observation_t){0};
+  loom_service_finite_registration_end_work(
+      registration, &registration->scheduling.lifecycle);
+  loom_service_finite_registration_end_work(
+      registration, &registration->scheduling.retirement);
   return iree_ok_status();
 }
 

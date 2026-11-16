@@ -36,7 +36,7 @@ class ServiceControl {
   }
 
   loom_runtime_service_control_binding_t binding() const {
-    return {.control = control_};
+    return loom_runtime_service_control_binding(control_, 0, 0, 0);
   }
 
  private:

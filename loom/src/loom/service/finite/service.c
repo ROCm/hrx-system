@@ -820,7 +820,8 @@ static void loom_service_finite_publish(
           published->pending_operation_count ||
       observation.offered_devices != published->offered_devices ||
       observation.accepted_devices != published->accepted_devices) {
-    loom_runtime_service_publish_observation(control, &observation);
+    service->scheduling.binding.publish_observation(
+        service->scheduling.binding.publisher, &observation);
     service->scheduling.observation = observation;
   }
 }
@@ -1184,6 +1185,11 @@ iree_status_t loom_service_finite_service_allocate(
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "finite service requires a name and queue capacity");
+  }
+  if (!scheduling.control || !scheduling.publish_observation) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "finite service requires a retained control and "
+                            "its summary publisher");
   }
   iree_async_proactor_t* proactor = NULL;
   IREE_RETURN_IF_ERROR(iree_async_proactor_pool_get(

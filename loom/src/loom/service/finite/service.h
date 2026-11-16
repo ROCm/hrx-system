@@ -73,6 +73,8 @@ typedef struct loom_service_finite_service_interface_t {
 // The scheduling binding borrows one offer with one choice/use and one
 // operation with one retained use. Its composition retains the control beyond
 // engine destruction when observation must span preparation and retirement.
+// The binding's synchronous summary publisher receives changed engine facts;
+// a lifecycle composition combines them with its other accepted owners.
 iree_status_t loom_service_finite_service_allocate(
     loom_runtime_host_t* host, loom_service_finite_generator_t generator,
     const loom_service_finite_protocol_t* protocol, iree_string_view_t name,

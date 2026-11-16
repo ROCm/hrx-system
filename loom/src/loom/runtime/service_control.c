@@ -464,6 +464,23 @@ loom_runtime_service_read_t loom_runtime_service_read_operation_use(
   return LOOM_RUNTIME_SERVICE_READ_COMPLETE;
 }
 
+static void loom_service_control_publish_observation(
+    void* self, const loom_runtime_service_observation_t* observation) {
+  loom_runtime_service_publish_observation(self, observation);
+}
+
+loom_runtime_service_control_binding_t loom_runtime_service_control_binding(
+    loom_runtime_service_control_t* control, uint64_t offer_ordinal,
+    uint64_t operation_ordinal, uint64_t instance_ordinal) {
+  return (loom_runtime_service_control_binding_t){
+      .control = control,
+      .offer_ordinal = offer_ordinal,
+      .operation_ordinal = operation_ordinal,
+      .instance_ordinal = instance_ordinal,
+      .publish_observation = loom_service_control_publish_observation,
+      .publisher = control};
+}
+
 void loom_runtime_service_publish_observation(
     loom_runtime_service_control_t* control,
     const loom_runtime_service_observation_t* observation) {

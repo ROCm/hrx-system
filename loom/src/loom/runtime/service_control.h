@@ -19,6 +19,8 @@ extern "C" {
 // Retirement of model work alone does not authorize freeing this storage.
 typedef struct loom_runtime_service_control_t loom_runtime_service_control_t;
 
+struct loom_runtime_service_observation_t;
+
 // Native attachment of one serialized contributor to a retained control. The
 // composition establishes these exclusive slot assignments before attaching
 // readers. Pointers stay outside the shared byte representation.
@@ -31,7 +33,22 @@ typedef struct loom_runtime_service_control_binding_t {
   uint64_t operation_ordinal;
   // Immutable instance coordinate in the composition's binding scope.
   uint64_t instance_ordinal;
+  // Synchronous fact transfer to the control's one summary publisher. Called
+  // only on the serialized owner after a change, never from a query or worker.
+  // The publisher combines this contributor with its other native owners;
+  // it does not retain the input pointer or reenter the contributor.
+  void (*publish_observation)(
+      void* self, const struct loom_runtime_service_observation_t* observation);
+  // Borrowed summary publisher, retained through the contributor's destruction.
+  void* publisher;
 } loom_runtime_service_control_binding_t;
+
+// Binds a sole contributor directly to the control's summary. Compositions
+// with several contributors supply their aggregate publisher in the returned
+// native binding. These pointers never enter the relocatable control bytes.
+loom_runtime_service_control_binding_t loom_runtime_service_control_binding(
+    loom_runtime_service_control_t* control, uint64_t offer_ordinal,
+    uint64_t operation_ordinal, uint64_t instance_ordinal);
 
 // Decoded immutable 64-byte header. All stored words are little-endian u64;
 // offsets are relative to the beginning of this control, with 8-byte alignment.

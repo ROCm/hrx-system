@@ -539,6 +539,32 @@ TEST_F(NativeDecisionServiceTest, UnstartedCancellationDoesNotReadSource) {
   ASSERT_NO_FATAL_FAILURE(RetireService());
 }
 
+TEST_F(NativeDecisionServiceTest, UnstartedRetirementWithdrawsPreparation) {
+  ASSERT_NO_FATAL_FAILURE(RetireService());
+  const loom_service_finite_model_options_t options = {
+      .sources = *sources_,
+      .asset_directory = IREE_SV("."),
+      .options = IREE_SV("{\"batch_units\":64}"),
+  };
+  IREE_ASSERT_OK(AllocateRegistration(options));
+  const auto* control = loom_service_finite_registration_control(registration_);
+  loom_runtime_service_observation_t observation = {};
+  ASSERT_EQ(loom_runtime_service_read_observation(control, &observation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(observation.offer_count, 1u);
+  EXPECT_EQ(observation.pending_operation_count, 0u);
+  // Exercise the native unstarted disposal path without the fixture's normal
+  // cancellation-and-join step for preparation that has already begun.
+  preparation_complete_ = true;
+  ASSERT_NO_FATAL_FAILURE(RetireModel());
+  ASSERT_EQ(loom_runtime_service_read_observation(control, &observation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(observation.offer_count, 0u);
+  EXPECT_EQ(observation.pending_operation_count, 0u);
+  EXPECT_EQ(observation.offered_devices, 0u);
+  EXPECT_EQ(observation.accepted_devices, 0u);
+}
+
 TEST_F(NativeDecisionServiceTest, PreparationCancellationJoinsAcceptedLoad) {
   ASSERT_NO_FATAL_FAILURE(RetireService());
   const loom_service_finite_model_options_t options = {
@@ -547,15 +573,64 @@ TEST_F(NativeDecisionServiceTest, PreparationCancellationJoinsAcceptedLoad) {
       .options = IREE_SV("{\"batch_units\":64}"),
   };
   IREE_ASSERT_OK(AllocateRegistration(options));
+  const auto* control = loom_service_finite_registration_control(registration_);
+  const auto layout = loom_runtime_service_control_layout(control);
+  loom_runtime_service_observation_t observation = {};
+  ASSERT_EQ(loom_runtime_service_read_observation(control, &observation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(observation.owned_request_count, 0u);
+  EXPECT_EQ(observation.offer_count, 1u);
+  EXPECT_EQ(observation.pending_operation_count, 0u);
+  loom_runtime_service_offer_t preparation = {};
+  for (uint64_t i = 0; i < layout.offer_capacity; ++i) {
+    loom_runtime_service_offer_t candidate = {};
+    ASSERT_EQ(loom_runtime_service_read_offer(control, i, &candidate),
+              LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    if (candidate.choice_count) {
+      preparation = candidate;
+    }
+  }
+  EXPECT_EQ(preparation.work, LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
   loom_runtime_compilation_report_t report = {};
   IREE_ASSERT_OK(loom_service_finite_registration_prepare(
       registration_, 0, &preparation_complete_, &service_, &report));
   EXPECT_FALSE(preparation_complete_);
   EXPECT_EQ(service_, nullptr);
+  ASSERT_EQ(loom_runtime_service_read_observation(control, &observation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(observation.owned_request_count, 0u);
+  EXPECT_EQ(observation.offer_count, 0u);
+  EXPECT_EQ(observation.pending_operation_count, 1u);
+  EXPECT_EQ(observation.accepted_devices, 1u);
+  loom_runtime_service_operation_t operation = {};
+  for (uint64_t i = 0; i < layout.operation_capacity; ++i) {
+    loom_runtime_service_operation_t candidate = {};
+    ASSERT_EQ(loom_runtime_service_read_operation(control, i, &candidate),
+              LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    if (candidate.key.serial) {
+      operation = candidate;
+    }
+  }
+  EXPECT_NE(operation.key.serial, 0u);
+  EXPECT_EQ(operation.origin.ordinal, preparation.key.ordinal);
+  EXPECT_EQ(operation.origin.revision, preparation.key.revision);
+  EXPECT_EQ(operation.work, LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
+  loom_runtime_service_use_t use = {};
+  ASSERT_EQ(loom_runtime_service_read_operation_use(
+                control, operation.key, operation.publication, 0, &use),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(use.resource_ordinal, 0u);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
                         Prepare(LOOM_SERVICE_FINITE_LOAD_FLAG_CANCEL));
   EXPECT_TRUE(preparation_complete_);
   EXPECT_EQ(service_, nullptr);
+  ASSERT_EQ(loom_runtime_service_read_observation(control, &observation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(observation.pending_operation_count, 0u);
+  EXPECT_EQ(observation.accepted_devices, 0u);
+  EXPECT_EQ(loom_runtime_service_read_operation_use(
+                control, operation.key, operation.publication, 0, &use),
+            LOOM_RUNTIME_SERVICE_READ_CHANGED);
   ASSERT_NO_FATAL_FAILURE(RetireService());
 }
 

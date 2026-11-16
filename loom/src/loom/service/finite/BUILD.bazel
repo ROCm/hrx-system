@@ -173,6 +173,7 @@ loom_cc_library(
         "//loom/src/loom/service/finite:protocol",
         "//loom/src/loom/service/finite:service",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
     ],
 )
 

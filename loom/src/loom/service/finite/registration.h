@@ -69,6 +69,7 @@ void loom_service_finite_registration_set_pinned(
 
 // Explicit warmup after admitted service work retires. Call until COMPLETE,
 // including on cancellation, before permitting service work or retirement.
+// Failure can retain parameter protection; model retirement releases it.
 iree_status_t loom_service_finite_registration_activate(
     loom_service_finite_registration_t* registration,
     loom_runtime_activation_flags_t flags,
@@ -79,7 +80,8 @@ iree_status_t loom_service_finite_registration_activate(
 iree_status_t loom_service_finite_registration_deactivate(
     loom_service_finite_registration_t* registration, bool* out_complete);
 
-// Begins after preparation terminates and service/tokenizer borrowers retire.
+// Discards an unstarted owner, or begins after preparation terminates and
+// service/tokenizer borrowers retire.
 // Releases the service, then joins actual model ownership through the original
 // observer, not readiness values. Nonterminal success owes a wake. A platform
 // release failure preserves ownership for explicit retry. NULL is retired.
@@ -91,8 +93,12 @@ iree_status_t loom_service_finite_registration_retire(
 void loom_service_finite_registration_free(
     loom_service_finite_registration_t* registration);
 
-// Borrowed observations survive ready-engine and model retirement, until free.
-// Reader/policy borrows must join before freeing this native lifecycle owner.
+// Borrowed observations include preparation, parameter operations, ready-engine
+// requests, and final model retirement. The registration publishes the summary;
+// the engine contributes facts at its mutation boundaries. Failed activation
+// and final retirement have independent operation slots because readiness
+// failure does not release parameter protection. Observations survive engine
+// and model retirement until free; reader/policy borrows must join before free.
 const loom_runtime_service_control_t* loom_service_finite_registration_control(
     const loom_service_finite_registration_t* registration);
 
