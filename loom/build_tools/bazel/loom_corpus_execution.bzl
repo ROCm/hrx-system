@@ -28,6 +28,16 @@ def _profile_with_runner_args(profile, runner_args):
         target_family = profile.target_family,
     )
 
+def _corpus_program_label(build, target_name):
+    """Resolves a source program beside its corpus build aggregate."""
+    build = str(build)
+    if build.startswith(":") or ":" not in build and "//" not in build:
+        return ":" + target_name
+    separator = build.rfind(":")
+    if separator != -1:
+        return build[:separator + 1] + target_name
+    return build + ":" + target_name
+
 def _partition_failure_qualifications(
         catalog,
         profiles_by_name,
@@ -79,6 +89,7 @@ def loom_corpus_test(
         name,
         catalog,
         execution_profiles,
+        build = None,
         allowed_failures = {},
         excludes = {},
         profile_sources = {},
@@ -98,6 +109,8 @@ def loom_corpus_test(
       name: Whole-catalog test suite name.
       catalog: Target-neutral catalog returned by `loom_corpus_catalog`.
       execution_profiles: Target-owned correctness execution environments.
+      build: Optional target-owned `loom_corpus_build` aggregate identifying
+        the sibling source programs that provide prepared target payloads.
       allowed_failures: Execution profile names mapped to
         '<source>:@<record>' diagnostic dictionaries. A named record may pass;
         if it fails, the failure must carry one of the named diagnostics.
@@ -232,6 +245,10 @@ def loom_corpus_test(
             args = args,
             benchmark_smoke = False,
             configs = program.configs,
+            corpus_program = (
+                _corpus_program_label(build, program.target_name) if build != None else None
+            ),
+            corpus_source_identity = program.identity if build != None else "",
             execution_profiles = program_profiles,
             module = program.module_label,
             size = size,
@@ -260,6 +277,7 @@ def loom_scenario_test(
         name,
         catalog,
         execution_profiles,
+        build = None,
         allowed_failures = {},
         excludes = {},
         xfails = {},
@@ -273,6 +291,7 @@ def loom_scenario_test(
         name = name,
         allowed_failures = allowed_failures,
         args = args,
+        build = build,
         catalog = catalog,
         excludes = excludes,
         execution_profiles = execution_profiles,

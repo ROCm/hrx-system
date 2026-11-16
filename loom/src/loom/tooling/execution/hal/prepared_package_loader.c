@@ -27,8 +27,6 @@ struct loom_run_hal_testbench_prepared_package_t {
   iree_allocator_t host_allocator;
   // Parsed manifest owning all manifest strings and product rows.
   loom_run_hal_testbench_prepared_package_manifest_t manifest;
-  // Full filesystem path of the untouched authored module.
-  char* authored_module_path;
   // Exact target profile selected from |manifest.target_profile|.
   loomc_target_profile_t* target_profile;
   // Unique prepared-module and launch-config payload pairs.
@@ -44,6 +42,29 @@ static iree_status_t loom_run_hal_testbench_prepared_package_join_path(
     iree_allocator_t host_allocator, char** out_path) {
   return loom_tooling_file_path_join(package_directory, relative_path,
                                      host_allocator, out_path);
+}
+
+static iree_status_t loom_run_hal_testbench_prepared_package_read_manifest(
+    iree_string_view_t package_directory, iree_allocator_t host_allocator,
+    loom_run_hal_testbench_prepared_package_manifest_t* out_manifest) {
+  *out_manifest = (loom_run_hal_testbench_prepared_package_manifest_t){0};
+  char* manifest_path = NULL;
+  iree_io_file_contents_t* manifest_contents = NULL;
+  iree_status_t status = loom_run_hal_testbench_prepared_package_join_path(
+      package_directory, IREE_SV("manifest.json"), host_allocator,
+      &manifest_path);
+  if (iree_status_is_ok(status)) {
+    status = loom_tooling_read_input_file(iree_make_cstring_view(manifest_path),
+                                          host_allocator, &manifest_contents);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_prepared_package_manifest_parse(
+        loom_tooling_file_contents_string_view(manifest_contents),
+        host_allocator, out_manifest);
+  }
+  iree_io_file_contents_free(manifest_contents);
+  iree_allocator_free(host_allocator, manifest_path);
+  return status;
 }
 
 static iree_status_t loom_run_hal_testbench_prepared_package_load_module(
@@ -179,28 +200,8 @@ iree_status_t loom_run_hal_testbench_prepared_package_open(
   *package = (loom_run_hal_testbench_prepared_package_t){
       .host_allocator = host_allocator,
   };
-  char* manifest_path = NULL;
-  iree_io_file_contents_t* manifest_contents = NULL;
-  iree_status_t status = loom_run_hal_testbench_prepared_package_join_path(
-      package_directory, IREE_SV("manifest.json"), host_allocator,
-      &manifest_path);
-  if (iree_status_is_ok(status)) {
-    status = loom_tooling_read_input_file(iree_make_cstring_view(manifest_path),
-                                          host_allocator, &manifest_contents);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_run_hal_testbench_prepared_package_manifest_parse(
-        loom_tooling_file_contents_string_view(manifest_contents),
-        host_allocator, &package->manifest);
-  }
-  iree_io_file_contents_free(manifest_contents);
-  iree_allocator_free(host_allocator, manifest_path);
-
-  if (iree_status_is_ok(status)) {
-    status = loom_run_hal_testbench_prepared_package_join_path(
-        package_directory, package->manifest.authored_module_path,
-        host_allocator, &package->authored_module_path);
-  }
+  iree_status_t status = loom_run_hal_testbench_prepared_package_read_manifest(
+      package_directory, host_allocator, &package->manifest);
   if (iree_status_is_ok(status)) {
     status = iree_status_from_loomc(loomc_target_profile_select(
         target_environment,
@@ -243,6 +244,132 @@ iree_status_t loom_run_hal_testbench_prepared_package_open(
   return iree_ok_status();
 }
 
+iree_status_t loom_run_hal_testbench_prepared_package_select_and_open(
+    const iree_string_view_t* package_directories,
+    iree_host_size_t package_directory_count,
+    loom_run_hal_testbench_context_t* hal_context,
+    loomc_target_environment_t* target_environment, loomc_context_t* context,
+    loomc_workspace_t* workspace, iree_allocator_t host_allocator,
+    loom_run_hal_testbench_prepared_package_t** out_package) {
+  *out_package = NULL;
+  if (package_directories == NULL || package_directory_count == 0 ||
+      hal_context == NULL || target_environment == NULL || context == NULL ||
+      workspace == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "prepared package selection requires candidates, a HAL context, and "
+        "a compiler environment");
+  }
+
+  loomc_iree_hal_target_selection_t live_selection = {0};
+  loomc_result_t* live_result = NULL;
+  iree_status_t status = loom_run_hal_testbench_context_select_target(
+      hal_context, loomc_make_cstring_view("prepared package live device"),
+      NULL, &live_selection, &live_result);
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_require_successful_result(
+        live_result, IREE_SV("live device target selection failed"));
+  }
+  if (iree_status_is_ok(status) && (live_selection.target_profile == NULL ||
+                                    live_selection.executable_target == NULL)) {
+    status = iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "live device target selection returned an incomplete target");
+  }
+  loomc_result_release(live_result);
+
+  iree_host_size_t canonical_index = IREE_HOST_SIZE_MAX;
+  iree_host_size_t compatible_index = IREE_HOST_SIZE_MAX;
+  iree_host_size_t compatible_count = 0;
+  for (iree_host_size_t i = 0;
+       i < package_directory_count && iree_status_is_ok(status); ++i) {
+    loom_run_hal_testbench_prepared_package_manifest_t manifest = {0};
+    loomc_target_profile_t* target_profile = NULL;
+    loomc_iree_hal_target_selection_t candidate_selection = {0};
+    loomc_result_t* candidate_result = NULL;
+    bool is_canonical = false;
+    bool is_compatible = false;
+    status = loom_run_hal_testbench_prepared_package_read_manifest(
+        package_directories[i], host_allocator, &manifest);
+    if (iree_status_is_ok(status)) {
+      status = iree_status_from_loomc(loomc_target_profile_select(
+          target_environment,
+          loomc_string_view_from_iree(manifest.target_profile),
+          loomc_allocator_from_iree(host_allocator), &target_profile));
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_run_hal_testbench_context_select_target(
+          hal_context, loomc_make_cstring_view("prepared package candidate"),
+          target_profile, &candidate_selection, &candidate_result);
+    }
+    if (iree_status_is_ok(status) && candidate_result == NULL) {
+      status = iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "prepared package target selection returned no result");
+    }
+    if (iree_status_is_ok(status)) {
+      is_compatible = loomc_result_succeeded(candidate_result);
+    }
+    if (iree_status_is_ok(status) && is_compatible &&
+        (candidate_selection.target_profile == NULL ||
+         candidate_selection.executable_target == NULL)) {
+      status = iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "prepared package target selection returned an incomplete target");
+    }
+    if (iree_status_is_ok(status) && is_compatible) {
+      // Both selections borrow their target record from the same immutable
+      // device specification. Pointer identity therefore names the exact
+      // loader target chosen by the live device without reinterpreting any
+      // target-family profile grammar here.
+      is_canonical = candidate_selection.executable_target ==
+                     live_selection.executable_target;
+    }
+    loomc_result_release(candidate_result);
+    loomc_target_profile_release(candidate_selection.target_profile);
+    loomc_target_profile_release(target_profile);
+    loom_run_hal_testbench_prepared_package_manifest_deinitialize(&manifest);
+
+    if (!iree_status_is_ok(status) || !is_compatible) {
+      continue;
+    }
+    if (is_canonical) {
+      if (canonical_index != IREE_HOST_SIZE_MAX) {
+        status = iree_make_status(
+            IREE_STATUS_FAILED_PRECONDITION,
+            "more than one prepared package exactly matches the live device");
+      } else {
+        canonical_index = i;
+      }
+    } else {
+      compatible_index = i;
+      ++compatible_count;
+    }
+  }
+  iree_host_size_t selected_index = canonical_index;
+  if (iree_status_is_ok(status) && selected_index == IREE_HOST_SIZE_MAX) {
+    if (compatible_count == 0) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "no prepared package is compatible with the live device");
+    } else if (compatible_count > 1) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "more than one generic prepared package is compatible with the "
+          "live device and no exact package is available");
+    } else {
+      selected_index = compatible_index;
+    }
+  }
+  loomc_target_profile_release(live_selection.target_profile);
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_prepared_package_open(
+        package_directories[selected_index], target_environment, context,
+        workspace, host_allocator, out_package);
+  }
+  return status;
+}
+
 void loom_run_hal_testbench_prepared_package_release(
     loom_run_hal_testbench_prepared_package_t* package) {
   if (package == NULL) {
@@ -256,18 +383,10 @@ void loom_run_hal_testbench_prepared_package_release(
                       package->product_payload_indices);
   iree_allocator_free(package->host_allocator, package->payloads);
   loomc_target_profile_release(package->target_profile);
-  iree_allocator_free(package->host_allocator, package->authored_module_path);
   loom_run_hal_testbench_prepared_package_manifest_deinitialize(
       &package->manifest);
   iree_allocator_t host_allocator = package->host_allocator;
   iree_allocator_free(host_allocator, package);
-}
-
-iree_string_view_t loom_run_hal_testbench_prepared_package_authored_module_path(
-    const loom_run_hal_testbench_prepared_package_t* package) {
-  return package != NULL && package->authored_module_path != NULL
-             ? iree_make_cstring_view(package->authored_module_path)
-             : iree_string_view_empty();
 }
 
 iree_string_view_t loom_run_hal_testbench_prepared_package_target_profile(

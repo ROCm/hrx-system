@@ -91,17 +91,15 @@ static iree_status_t loom_run_hal_testbench_prepared_package_validate_path(
 
 enum {
   LOOM_RUN_HAL_PREPARED_PACKAGE_ROOT_SCHEMA = 0,
-  LOOM_RUN_HAL_PREPARED_PACKAGE_ROOT_AUTHORED_MODULE = 1,
-  LOOM_RUN_HAL_PREPARED_PACKAGE_ROOT_TARGET_PROFILE = 2,
-  LOOM_RUN_HAL_PREPARED_PACKAGE_ROOT_ARTIFACT_FORMAT = 3,
-  LOOM_RUN_HAL_PREPARED_PACKAGE_ROOT_PRODUCTS = 4,
-  LOOM_RUN_HAL_PREPARED_PACKAGE_ROOT_FIELD_COUNT = 5,
+  LOOM_RUN_HAL_PREPARED_PACKAGE_ROOT_TARGET_PROFILE = 1,
+  LOOM_RUN_HAL_PREPARED_PACKAGE_ROOT_ARTIFACT_FORMAT = 2,
+  LOOM_RUN_HAL_PREPARED_PACKAGE_ROOT_PRODUCTS = 3,
+  LOOM_RUN_HAL_PREPARED_PACKAGE_ROOT_FIELD_COUNT = 4,
 };
 
 static const char* const
     loom_run_hal_testbench_prepared_package_root_field_names[] = {
-        "schema", "authored_module", "target_profile", "artifact_format",
-        "products"};
+        "schema", "target_profile", "artifact_format", "products"};
 
 typedef struct loom_run_hal_testbench_prepared_package_root_fields_t {
   // Raw JSON string contents or the products array; null data marks omission.
@@ -245,8 +243,6 @@ static iree_status_t loom_run_hal_testbench_prepared_package_validate(
       manifest->target_profile, "target_profile"));
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_prepared_package_validate_string(
       manifest->artifact_format, "artifact_format"));
-  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_prepared_package_validate_path(
-      manifest->authored_module_path));
   for (iree_host_size_t i = 0; i < manifest->product_count; ++i) {
     const loom_run_hal_testbench_prepared_package_product_t* product =
         &manifest->products[i];
@@ -257,16 +253,12 @@ static iree_status_t loom_run_hal_testbench_prepared_package_validate(
         product->prepared_module_path));
     IREE_RETURN_IF_ERROR(loom_run_hal_testbench_prepared_package_validate_path(
         product->launch_config_path));
-    if (iree_string_view_equal(manifest->authored_module_path,
-                               product->prepared_module_path) ||
-        iree_string_view_equal(manifest->authored_module_path,
-                               product->launch_config_path) ||
-        iree_string_view_equal(product->prepared_module_path,
+    if (iree_string_view_equal(product->prepared_module_path,
                                product->launch_config_path)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "prepared-package authored, prepared, and launch artifacts must "
-          "have distinct paths");
+          "prepared-package prepared and launch artifacts must have distinct "
+          "paths");
     }
     for (iree_host_size_t j = 0; j < i; ++j) {
       if (iree_string_view_equal(product->subject,
@@ -358,12 +350,6 @@ iree_status_t loom_run_hal_testbench_prepared_package_manifest_parse(
   if (iree_status_is_ok(status)) {
     status = loom_run_hal_testbench_prepared_package_decode_string(
         &decoder,
-        fields.values[LOOM_RUN_HAL_PREPARED_PACKAGE_ROOT_AUTHORED_MODULE],
-        &manifest.authored_module_path);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_run_hal_testbench_prepared_package_decode_string(
-        &decoder,
         fields.values[LOOM_RUN_HAL_PREPARED_PACKAGE_ROOT_TARGET_PROFILE],
         &manifest.target_profile);
   }
@@ -413,8 +399,6 @@ iree_status_t loom_run_hal_testbench_prepared_package_manifest_write(
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &root, IREE_SV("schema"),
       loom_run_hal_testbench_prepared_package_schema()));
-  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-      &root, IREE_SV("authored_module"), manifest->authored_module_path));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
       &root, IREE_SV("target_profile"), manifest->target_profile));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(

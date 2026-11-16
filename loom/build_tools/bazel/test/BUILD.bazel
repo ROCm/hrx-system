@@ -18,8 +18,6 @@ load(
     "loom_kernel_library",
     "loom_library",
     "loom_module",
-    "loom_prepared_test",
-    "loom_prepared_test_package",
     "loom_target_profile",
     "loom_target_set",
     "loom_test",
@@ -46,14 +44,6 @@ load(
 )
 
 package(default_visibility = ["//visibility:public"])
-
-_PREPARED_PROFILE = loom_execution_profile(
-    name = "prepared_hardware",
-    executor = "hardware",
-    runner_args = ["--device=test-device"],
-    target_class = "gpu",
-    target_family = "amdgpu",
-)
 
 constraint_setting(
     name = "source_provider",
@@ -209,20 +199,6 @@ loom_test_module(
     deps = [":library_dependency"],
 )
 
-loom_prepared_test_package(
-    name = "prepared_profiled_package",
-    module = ":profiled_module",
-    tags = ["manual"],
-    target = ":test_amdgpu_profile",
-)
-
-loom_prepared_test(
-    name = "prepared_profiled_test",
-    execution_profiles = [_PREPARED_PROFILE],
-    package = ":prepared_profiled_package",
-    tags = ["manual"],
-)
-
 loom_test(
     name = "direct_source_test",
     srcs = ["profile_cases.loom"],
@@ -277,13 +253,14 @@ loom_corpus_test(
             "sample/other.loom:@other_scenario": "TARGET/003,EXPECT/006",
         },
     },
+    build = "//loom/build_tools/bazel/test/testdata/corpus/target:all",
     catalog = TEST_CORPUS,
     execution_profiles = [loom_execution_profile(
         name = "reference",
         executor = "reference",
         runner_args = ["--max-samples-per-case=1"],
         target_class = "cpu",
-        target_family = "test",
+        target_family = "fake",
     )],
     profile_sources = {
         "reference": [

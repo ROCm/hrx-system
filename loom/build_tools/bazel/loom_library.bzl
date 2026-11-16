@@ -22,12 +22,12 @@ load(
 )
 load(":loom_binary.bzl", "LoomBinaryInfo", "loom_kernel_binary")
 load(":loom_check.bzl", "loom_check_compile_tests")
+load(":loom_corpus_info.bzl", "LoomCorpusProgramInfo")
 load(
     ":loom_linking.bzl",
     "loom_linking",
     _LoomLibraryInfo = "LoomLibraryInfo",
 )
-load(":loom_target_profile.bzl", "LoomTargetProfileInfo")
 
 _LOOM_BENCHMARK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:benchmark_toolchain_type")
 _LOOM_CXX_IMPORT_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:cxx_import_toolchain_type")
@@ -57,18 +57,10 @@ LoomExecutionTestInfo = provider(
         "benchmark_runner": "Resolved benchmark runner, or None for correctness-only launchers.",
         "benchmark_runner_args": "Smoke, profile, and workload arguments passed to the benchmark runner, or an empty list.",
         "module": "Linked Loom module containing root-owned cases and benchmarks.",
+        "prepared_packages": "Target-payload package directories supplied to the correctness runner.",
         "profile_name": "Stable execution profile name.",
         "test_runner": "Resolved correctness runner executable.",
         "test_runner_args": "Profile, workload, and test arguments passed to the correctness runner.",
-    },
-)
-
-LoomPreparedTestPackageInfo = provider(
-    doc = "One target-prepared scenario execution package.",
-    fields = {
-        "directory": "Tree artifact containing the manifest and package payloads.",
-        "target_family": "Exact target-profile family used by the producer.",
-        "target_selector": "Exact target-profile selector used by the producer.",
     },
 )
 
@@ -390,127 +382,6 @@ _loom_test_module = rule(
     toolchains = [_LOOM_LINK_TOOLCHAIN_TYPE],
 )
 
-def _loom_prepared_test_package_impl(ctx):
-    module = ctx.attr.module[_LoomTestModuleInfo].module
-    target = ctx.attr.target[LoomTargetProfileInfo]
-    output = ctx.actions.declare_directory(ctx.label.name + ".package")
-    args = ctx.actions.args()
-    args.add(module)
-    args.add("--target=%s:%s" % (target.family, target.selector))
-    args.add("--output=%s" % output.path)
-    ctx.actions.run(
-        arguments = [args],
-        executable = ctx.executable._package_tool,
-        inputs = [module],
-        mnemonic = "LoomPrepareTestPackage",
-        outputs = [output],
-        progress_message = "Preparing scenario package %s for %s:%s" % (
-            ctx.label,
-            target.family,
-            target.selector,
-        ),
-    )
-    return [
-        DefaultInfo(files = depset([output])),
-        LoomPreparedTestPackageInfo(
-            directory = output,
-            target_family = target.family,
-            target_selector = target.selector,
-        ),
-    ]
-
-_loom_prepared_test_package = rule(
-    implementation = _loom_prepared_test_package_impl,
-    attrs = {
-        "module": attr.label(
-            mandatory = True,
-            providers = [_LoomTestModuleInfo],
-            doc = "Linked scenario-only test module to prepare.",
-        ),
-        "target": attr.label(
-            mandatory = True,
-            providers = [LoomTargetProfileInfo],
-            doc = "Exact target profile used to prepare every scenario subject.",
-        ),
-        "_package_tool": attr.label(
-            cfg = "exec",
-            default = Label("//loom/build_tools/corpus:loom-corpus-prepare-package"),
-            executable = True,
-        ),
-    },
-    doc = "Prepares one linked scenario module for later execution without source compilation.",
-)
-
-def _loom_prepared_test_launcher_impl(ctx):
-    package = ctx.attr.package[LoomPreparedTestPackageInfo]
-    if package.target_family != ctx.attr.profile_target_family:
-        fail(
-            "%s package target family %s does not match execution profile family %s" % (
-                ctx.label,
-                package.target_family,
-                ctx.attr.profile_target_family,
-            ),
-        )
-    test_tool = ctx.toolchains[_LOOM_TEST_TOOLCHAIN_TYPE].tool
-    output = ctx.actions.declare_file(ctx.label.name + ".sh")
-    arguments = ctx.attr.profile_args + ctx.attr.workload_args + ctx.attr.test_args
-    command_args = "".join([" " + _shell_quote(argument) for argument in arguments])
-    content = (
-        "#!/usr/bin/env bash\n" +
-        "set -euo pipefail\n" +
-        "RUNFILES=\"${{RUNFILES_DIR:-$0.runfiles}}\"\n" +
-        "cd \"${{RUNFILES}}/{workspace}\"\n" +
-        "{environment}" +
-        "exec \"${{PWD}}/{test_tool}\" " +
-        "--prepared-package=\"${{PWD}}/{package}\"{arguments} \"$@\"\n"
-    ).format(
-        arguments = command_args,
-        environment = _tool_environment_exports(test_tool),
-        package = package.directory.short_path,
-        test_tool = test_tool.executable.short_path,
-        workspace = ctx.workspace_name,
-    )
-    ctx.actions.write(
-        content = content,
-        is_executable = True,
-        output = output,
-    )
-    runfiles = _tool_runfiles(ctx, test_tool, [package.directory])
-    return [
-        DefaultInfo(
-            executable = output,
-            files = depset([output]),
-            runfiles = runfiles,
-        ),
-    ]
-
-_loom_prepared_test_launcher = rule(
-    implementation = _loom_prepared_test_launcher_impl,
-    attrs = {
-        "package": attr.label(
-            mandatory = True,
-            providers = [LoomPreparedTestPackageInfo],
-            doc = "Prepared scenario package consumed by the test runner.",
-        ),
-        "profile_args": attr.string_list(
-            doc = "Execution-profile arguments passed to the test runner.",
-        ),
-        "profile_target_family": attr.string(
-            mandatory = True,
-            doc = "Target family required by the execution profile.",
-        ),
-        "test_args": attr.string_list(
-            doc = "Additional test-runner arguments.",
-        ),
-        "workload_args": attr.string_list(
-            doc = "Case-selection arguments passed to the test runner.",
-        ),
-    },
-    doc = "Generates a runner for one prepared scenario package.",
-    executable = True,
-    toolchains = [_LOOM_TEST_TOOLCHAIN_TYPE],
-)
-
 def _tool_runfiles(ctx, tool, files):
     runfiles = ctx.runfiles(files = files + [tool.executable])
     if tool.runfiles:
@@ -566,6 +437,7 @@ def _write_execution_test_launcher(
         test_tool,
         benchmark_tool,
         module,
+        prepared_packages,
         test_runner_args,
         benchmark_runner_args):
     output = ctx.actions.declare_file(ctx.label.name + ".sh")
@@ -577,15 +449,20 @@ def _write_execution_test_launcher(
         " \\\n  %s" % _shell_quote(arg)
         for arg in benchmark_runner_args
     ])
+    prepared_args = "".join([
+        " \\\n  --prepared-package=\"${PWD}/%s\"" % package.short_path
+        for package in prepared_packages
+    ])
     if benchmark_tool != None:
         test_command = (
             "(\n" +
             "{test_environment}" +
             "  exec \"${{PWD}}/{test_tool}\" " +
-            "\"${{PWD}}/{module}\"{test_args} \"$@\"\n" +
+            "\"${{PWD}}/{module}\"{prepared_args}{test_args} \"$@\"\n" +
             ")\n"
         ).format(
             module = module.short_path,
+            prepared_args = prepared_args,
             test_args = test_args,
             test_environment = _tool_environment_exports(test_tool, indent = "  "),
             test_tool = test_tool.executable.short_path,
@@ -594,9 +471,10 @@ def _write_execution_test_launcher(
         test_command = (
             "{test_environment}" +
             "exec \"${{PWD}}/{test_tool}\" " +
-            "\"${{PWD}}/{module}\"{test_args} \"$@\"\n"
+            "\"${{PWD}}/{module}\"{prepared_args}{test_args} \"$@\"\n"
         ).format(
             module = module.short_path,
+            prepared_args = prepared_args,
             test_args = test_args,
             test_environment = _tool_environment_exports(test_tool),
             test_tool = test_tool.executable.short_path,
@@ -640,6 +518,17 @@ def _write_execution_test_launcher(
 
 def _execution_test_launcher_providers(ctx, test_tool, benchmark_tool):
     module = ctx.attr.module[_LoomTestModuleInfo].module
+    prepared_packages = []
+    if ctx.attr.corpus_program != None:
+        program = ctx.attr.corpus_program[LoomCorpusProgramInfo]
+        if program.source_identity != ctx.attr.corpus_source_identity:
+            fail(
+                "%s corpus program owns source %r, not %r" %
+                (ctx.label, program.source_identity, ctx.attr.corpus_source_identity),
+            )
+        prepared_packages = program.prepared_packages.to_list()
+    if prepared_packages and benchmark_tool != None:
+        fail("%s prepared corpus execution is correctness-only" % ctx.label)
     sanitizers = [
         mode
         for mode, setting in [
@@ -660,10 +549,11 @@ def _execution_test_launcher_providers(ctx, test_tool, benchmark_tool):
         test_tool,
         benchmark_tool,
         module,
+        prepared_packages,
         test_runner_args,
         benchmark_runner_args,
     )
-    runfiles = _tool_runfiles(ctx, test_tool, [])
+    runfiles = _tool_runfiles(ctx, test_tool, prepared_packages)
     runfiles = runfiles.merge(ctx.attr.module[DefaultInfo].default_runfiles)
     if benchmark_tool != None:
         runfiles = runfiles.merge(_tool_runfiles(ctx, benchmark_tool, []))
@@ -677,6 +567,7 @@ def _execution_test_launcher_providers(ctx, test_tool, benchmark_tool):
             benchmark_runner = benchmark_tool.executable if benchmark_tool != None else None,
             benchmark_runner_args = benchmark_runner_args,
             module = module,
+            prepared_packages = prepared_packages,
             profile_name = ctx.attr.profile_name,
             test_runner = test_tool.executable,
             test_runner_args = test_runner_args,
@@ -698,6 +589,13 @@ def _loom_correctness_test_launcher_impl(ctx):
     )
 
 _EXECUTION_TEST_LAUNCHER_ATTRS = {
+    "corpus_program": attr.label(
+        providers = [LoomCorpusProgramInfo],
+        doc = "Optional corpus program owning prepared target payloads.",
+    ),
+    "corpus_source_identity": attr.string(
+        doc = "Canonical source identity selected from corpus_program.",
+    ),
     "module": attr.label(
         mandatory = True,
         providers = [_LoomTestModuleInfo],
@@ -928,6 +826,8 @@ def _declare_execution_test(
         tags,
         visibility,
         benchmark_smoke = True,
+        corpus_program = None,
+        corpus_source_identity = "",
         target_compatible_with = [],
         workload_args = []):
     test_kwargs = _execution_test_kwargs(
@@ -939,6 +839,8 @@ def _declare_execution_test(
     )
     runner_args = profile.runner_args + workload_args + test_runner_args
     if profile.runner != None:
+        if corpus_program != None:
+            fail("%s corpus packages require the built-in Loom runner" % name)
         iree_executable_test(
             name = name,
             args = ["$(rootpath %s)" % module] + runner_args,
@@ -954,6 +856,9 @@ def _declare_execution_test(
         "test_args": test_runner_args,
         "workload_args": workload_args,
     }
+    if corpus_program != None:
+        launcher_attrs["corpus_program"] = corpus_program
+        launcher_attrs["corpus_source_identity"] = corpus_source_identity
     if benchmark_smoke:
         launcher_rule = _loom_execution_test_launcher
     else:
@@ -1290,121 +1195,6 @@ def loom_test_module(
             visibility = visibility,
         )
 
-def loom_prepared_test_package(
-        name,
-        module,
-        target,
-        tags = [],
-        visibility = None,
-        target_compatible_with = []):
-    """Prepares a linked scenario module for one exact execution target.
-
-    The output directory contains the untouched authored module, a root-selected
-    prepared-low module, its launch-configuration program, and a strict manifest
-    binding those payloads to the selected target and scenario subjects. V0
-    accepts unconfigured direct-kernel scenarios without external fixture files.
-
-    Args:
-      name: Prepared package target name.
-      module: Reusable ``loom_test_module`` label.
-      target: Exact ``loom_target_profile`` label.
-      tags: Additional tags for the package action.
-      visibility: Bazel visibility of the prepared package.
-      target_compatible_with: Build configuration constraints for the package.
-    """
-    package_attributes = _apply_package_policy(
-        name,
-        tags,
-        target_compatible_with,
-    )
-    _loom_prepared_test_package(
-        name = name,
-        module = module,
-        target = target,
-        tags = package_attributes.tags,
-        testonly = True,
-        visibility = visibility,
-        target_compatible_with = package_attributes.target_compatible_with,
-    )
-
-def loom_prepared_test(
-        name,
-        package,
-        execution_profiles,
-        args = [],
-        case = "",
-        size = "small",
-        tags = [],
-        visibility = None,
-        target_compatible_with = []):
-    """Executes one prepared scenario package without source compilation.
-
-    Args:
-      name: Logical workload name used to derive execution-test targets.
-      package: ``loom_prepared_test_package`` label to execute.
-      execution_profiles: Independent execution environments for the package.
-      args: Additional correctness-runner arguments.
-      case: Optional scenario symbol selected by the runner.
-      size: Bazel test-size classification.
-      tags: Additional tags for generated execution tests.
-      visibility: Bazel visibility of generated execution tests.
-      target_compatible_with: Build constraints for generated execution tests.
-    """
-    if not execution_profiles:
-        fail("%s requires at least one execution profile" % name)
-    _reject_workload_args(name, args)
-    if type(case) != "string":
-        fail("%s case must be a string" % name)
-    workload_args = ["--case=" + case] if case else []
-    package_attributes = _apply_package_policy(
-        name,
-        tags,
-        target_compatible_with,
-    )
-    tests = []
-    profile_names = {}
-    for profile in execution_profiles:
-        if getattr(profile, "kind", None) != "loom_execution_profile":
-            fail("%s execution profile was not created by loom_execution_profile" % name)
-        if profile.runner != None:
-            fail("%s prepared execution does not support custom profile runners" % name)
-        test_name = "%s_execute_%s_test" % (name, _name_suffix(profile.name))
-        if test_name in profile_names:
-            fail(
-                "%s execution profile %s has the same generated name as %s" % (
-                    name,
-                    profile.name,
-                    profile_names[test_name],
-                ),
-            )
-        profile_names[test_name] = profile.name
-        test_kwargs = _execution_test_kwargs(
-            profile,
-            size,
-            package_attributes.tags,
-            visibility,
-            package_attributes.target_compatible_with,
-        )
-        _declare_launcher_test(
-            name = test_name,
-            launcher_rule = _loom_prepared_test_launcher,
-            launcher_attrs = {
-                "package": package,
-                "profile_args": profile.runner_args,
-                "profile_target_family": profile.target_family,
-                "test_args": args,
-                "workload_args": workload_args,
-            },
-            test_kwargs = test_kwargs,
-        )
-        tests.append(test_name)
-    native.test_suite(
-        name = name,
-        tests = tests,
-        tags = package_attributes.tags,
-        visibility = visibility,
-    )
-
 def loom_test(
         name,
         srcs = [],
@@ -1413,6 +1203,8 @@ def loom_test(
         input_format = "",
         inputopts = [],
         module = None,
+        corpus_program = None,
+        corpus_source_identity = "",
         args = [],
         configs = {},
         case = "",
@@ -1462,6 +1254,10 @@ def loom_test(
           again. Exclusive with srcs, deps, data, input_format, and inputopts;
           the source owner retains those inputs, its source checks, and its
           runtime fixtures.
+      corpus_program: Optional Loom corpus program providing prepared target
+          payloads for this source.
+      corpus_source_identity: Canonical source identity selected from
+          corpus_program. Required exactly when corpus_program is present.
       args: Additional arguments passed to the correctness runner.
       configs: String-valued configuration bindings shared by compiler checks
           and selected execution runners.
@@ -1488,6 +1284,8 @@ def loom_test(
         fail("%s requires srcs or a test module" % name)
     if not execution_profiles and not compile_targets:
         fail("%s requires execution_profiles or compile_targets" % name)
+    if (corpus_program == None) != (corpus_source_identity == ""):
+        fail("%s corpus_program and corpus_source_identity must be supplied together" % name)
     _reject_workload_args(name, args)
     requested_tags = tags
     requested_target_compatible_with = target_compatible_with
@@ -1523,6 +1321,8 @@ def loom_test(
         tests.extend(_declare_execution_tests(
             name = workload_name,
             benchmark_smoke = benchmark_smoke,
+            corpus_program = corpus_program,
+            corpus_source_identity = corpus_source_identity,
             module = module,
             profiles = execution_profiles,
             workload_args = workload_args,

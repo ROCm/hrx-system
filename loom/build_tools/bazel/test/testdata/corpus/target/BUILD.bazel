@@ -65,6 +65,7 @@ loom_corpus_build(
             "sample/other.loom": "Profile C deliberately exercises whole-file exclusion.",
         },
     },
+    prepared_sources = ["sample/other.loom"],
     profiles = [":all_profiles"],
     tags = ["manual"],
     xfails = {
@@ -85,13 +86,13 @@ _EXECUTION_PROFILES = [
         executor = "reference",
         runner_args = ["--max-samples-per-case=1"],
         target_class = "cpu",
-        target_family = "test",
+        target_family = "fake",
     ),
     loom_execution_profile(
         name = "selected_reference",
         executor = "reference",
         target_class = "cpu",
-        target_family = "test",
+        target_family = "fake",
     ),
 ]
 
@@ -102,6 +103,7 @@ loom_scenario_test(
             "sample/other.loom:@other_scenario": "TARGET/003,EXPECT/006",
         },
     },
+    build = ":all",
     catalog = TEST_CORPUS,
     excludes = {
         "sample/excluded.loom": "This fixture proves whole-source execution exclusion.",

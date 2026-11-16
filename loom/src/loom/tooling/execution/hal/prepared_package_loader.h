@@ -31,13 +31,24 @@ iree_status_t loom_run_hal_testbench_prepared_package_open(
     loomc_workspace_t* workspace, iree_allocator_t host_allocator,
     loom_run_hal_testbench_prepared_package_t** out_package);
 
+// Selects the package whose compiler profile resolves to the loader target
+// automatically selected for the initialized live device and opens only its
+// payloads. A sole compatible fallback package is accepted when no candidate
+// resolves to that target. Incompatible candidates are normal selection
+// misses; duplicate canonical matches and ambiguous fallbacks are rejected
+// rather than depending on input order. Runtime requirements must be installed
+// on |hal_context| first.
+iree_status_t loom_run_hal_testbench_prepared_package_select_and_open(
+    const iree_string_view_t* package_directories,
+    iree_host_size_t package_directory_count,
+    loom_run_hal_testbench_context_t* hal_context,
+    loomc_target_environment_t* target_environment, loomc_context_t* context,
+    loomc_workspace_t* workspace, iree_allocator_t host_allocator,
+    loom_run_hal_testbench_prepared_package_t** out_package);
+
 // Releases all storage and compiler handles owned by |package|.
 void loom_run_hal_testbench_prepared_package_release(
     loom_run_hal_testbench_prepared_package_t* package);
-
-// Returns the package-owned path of the untouched authored Loom bytecode.
-iree_string_view_t loom_run_hal_testbench_prepared_package_authored_module_path(
-    const loom_run_hal_testbench_prepared_package_t* package);
 
 // Returns the exact canonical target-profile selector from the manifest.
 iree_string_view_t loom_run_hal_testbench_prepared_package_target_profile(

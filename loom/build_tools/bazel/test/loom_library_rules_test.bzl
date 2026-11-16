@@ -15,7 +15,6 @@ load(
     "LoomBinaryInfo",
     "LoomExecutionTestInfo",
     "LoomLibraryInfo",
-    "LoomPreparedTestPackageInfo",
     "loom_execution_profile",
     "loom_test_module",
 )
@@ -291,55 +290,6 @@ def _test_generated_kernel_binary_is_testonly_impl(env, target):
     for arg in action.argv:
         if arg.startswith("--format="):
             env.fail("unexpected exact format in kernel binary arguments %r" % action.argv)
-
-def _test_prepared_package_preserves_target_identity(name, **kwargs):
-    analysis_test(
-        name = name,
-        impl = _test_prepared_package_preserves_target_identity_impl,
-        target = ":prepared_profiled_package",
-        **kwargs
-    )
-
-def _test_prepared_package_preserves_target_identity_impl(env, target):
-    info = target[LoomPreparedTestPackageInfo]
-    env.expect.that_str(info.target_family).equals("amdgpu")
-    env.expect.that_str(info.target_selector).equals("gfx942")
-    env.expect.that_str(info.directory.basename).equals(
-        "prepared_profiled_package.package",
-    )
-    action = _find_action(
-        env,
-        target[TestingAspectInfo].actions,
-        "LoomPrepareTestPackage",
-    )
-    env.expect.that_collection(action.argv).contains("--target=amdgpu:gfx942")
-    _expect_basename(env, action.inputs.to_list(), "profiled_module.loombc")
-
-def _test_prepared_execution_uses_package_profile(name, **kwargs):
-    analysis_test(
-        name = name,
-        impl = _test_prepared_execution_uses_package_profile_impl,
-        targets = {
-            "launcher": ":prepared_profiled_test_execute_prepared_hardware_test_launcher",
-            "suite": ":prepared_profiled_test",
-        },
-        **kwargs
-    )
-
-def _test_prepared_execution_uses_package_profile_impl(env, targets):
-    launcher_attrs = targets.launcher[TestingAspectInfo].attrs
-    env.expect.that_str(launcher_attrs.package.label.name).equals(
-        "prepared_profiled_package",
-    )
-    env.expect.that_collection(launcher_attrs.profile_args).contains_exactly([
-        "--device=test-device",
-    ])
-    env.expect.that_collection([
-        test.label.name
-        for test in targets.suite[TestingAspectInfo].attrs.tests
-    ]).contains_exactly([
-        "prepared_profiled_test_execute_prepared_hardware_test",
-    ])
 
 def _test_execution_profile_contract(name, **kwargs):
     analysis_test(
@@ -791,8 +741,6 @@ def loom_library_rules_test_suite(name):
             _test_native_thread_sanitizer_is_independent,
             _test_native_undefined_sanitizer_is_independent,
             _test_nontext_module_has_no_source_suite,
-            _test_prepared_execution_uses_package_profile,
-            _test_prepared_package_preserves_target_identity,
             _test_redundant_direct_dependency_is_not_transitive,
             _test_resource_profile_preserves_direct_execution,
             _test_reusable_module_owns_source_checks,

@@ -7,6 +7,11 @@
 """Target-owned build qualification for Loom corpus programs."""
 
 load(":loom_corpus_catalog.bzl", "loom_corpus_validate_catalog")
+load(
+    ":loom_corpus_info.bzl",
+    "LoomCorpusBuildInfo",
+    "LoomCorpusProgramInfo",
+)
 load(":loom_linking.bzl", "loom_linking")
 load(
     ":loom_target_profile.bzl",
@@ -16,28 +21,6 @@ load(
 
 _LOOM_COMPILE_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:compile_toolchain_type")
 _LOOM_LINK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:link_toolchain_type")
-
-_LoomCorpusProgramInfo = provider(
-    doc = "Build outputs and source identity for one corpus program.",
-    fields = {
-        "artifacts": "Depset of deployable artifacts across target profiles.",
-        "compile_reports": "Depset of detailed compile reports.",
-        "qualification_results": "Depset of batched diagnostic-xfail results.",
-        "source_identities": "Depset containing the canonical corpus source identity.",
-        "sources": "Depset containing the qualified Loom source.",
-    },
-)
-
-LoomCorpusBuildInfo = provider(
-    doc = "Collected target-owned build outputs for Loom corpus programs.",
-    fields = {
-        "artifacts": "Depset of deployable artifacts across programs and profiles.",
-        "compile_reports": "Depset of detailed compile reports.",
-        "qualification_results": "Depset of batched diagnostic-xfail results.",
-        "source_identities": "Depset of canonical corpus source identities.",
-        "sources": "Depset of qualified Loom sources.",
-    },
-)
 
 def _target_profiles(target):
     if LoomTargetProfileInfo in target:
@@ -96,6 +79,7 @@ def _declare_positive_compile(ctx, source, profile, xfails):
     output_stem = ctx.label.name + "/" + _profile_stem(profile)
     artifact = ctx.actions.declare_file(output_stem + ".artifact")
     compile_report = ctx.actions.declare_file(output_stem + ".compile.json")
+    outputs = [artifact, compile_report]
     args = ctx.actions.args()
     args.add(source)
     args.add("--target=%s:%s" % (profile_info.family, profile_info.selector))
@@ -106,19 +90,66 @@ def _declare_positive_compile(ctx, source, profile, xfails):
     args.add("--compile-report=details")
     args.add("--compile-report-output=%s" % compile_report.path)
 
+    prepared_module = None
+    launch_config = None
+    if ctx.attr.prepare_execution_package:
+        prepared_module = ctx.actions.declare_file(
+            output_stem + ".prepared.loombc",
+        )
+        launch_config = ctx.actions.declare_file(
+            output_stem + ".launch.loombc",
+        )
+        args.add("--emit-prepared-module=%s" % prepared_module.path)
+        args.add("--emit-launch-config=%s" % launch_config.path)
+        outputs.extend([prepared_module, launch_config])
+
     tool = ctx.toolchains[_LOOM_COMPILE_TOOLCHAIN_TYPE].tool
     ctx.actions.run(
         arguments = [args],
         executable = tool.files_to_run,
         inputs = [source],
         mnemonic = "LoomCorpusCompile",
-        outputs = [artifact, compile_report],
+        outputs = outputs,
         progress_message = "Compiling corpus program %s for %s" % (
             ctx.attr.source_identity,
             _display_label(profile.label),
         ),
     )
-    return artifact, compile_report
+    return struct(
+        artifact = artifact,
+        compile_report = compile_report,
+        launch_config = launch_config,
+        prepared_module = prepared_module,
+    )
+
+def _declare_execution_package(ctx, profile, compile_outputs):
+    profile_info = profile[LoomTargetProfileInfo]
+    output_stem = ctx.label.name + "/" + _profile_stem(profile)
+    output = ctx.actions.declare_directory(output_stem + ".package")
+    args = ctx.actions.args()
+    args.add(ctx.file.authored_module)
+    args.add("--target=%s:%s" % (profile_info.family, profile_info.selector))
+    args.add("--compile-report=%s" % compile_outputs.compile_report.path)
+    args.add("--prepared-module=%s" % compile_outputs.prepared_module.path)
+    args.add("--launch-config=%s" % compile_outputs.launch_config.path)
+    args.add("--output=%s" % output.path)
+    ctx.actions.run(
+        arguments = [args],
+        executable = ctx.executable._package_tool,
+        inputs = [
+            ctx.file.authored_module,
+            compile_outputs.compile_report,
+            compile_outputs.launch_config,
+            compile_outputs.prepared_module,
+        ],
+        mnemonic = "LoomAssembleTestPackage",
+        outputs = [output],
+        progress_message = "Assembling corpus package %s for %s" % (
+            ctx.attr.source_identity,
+            _display_label(profile.label),
+        ),
+    )
+    return output
 
 def _declare_xfail_probes(ctx, source, profile, xfails, require_all_roots):
     profile_info = profile[LoomTargetProfileInfo]
@@ -215,6 +246,7 @@ def _loom_corpus_program_impl(ctx):
     ]
     artifacts = []
     compile_reports = []
+    prepared_packages = []
     qualification_results = []
     if active_profiles:
         subject_module = _declare_subject_module(ctx, ctx.file.src)
@@ -223,14 +255,20 @@ def _loom_corpus_program_impl(ctx):
             xfails = xfails_by_label.get(label, {})
             require_all_roots = label in all_roots_xfail_by_label
             if not require_all_roots:
-                artifact, compile_report = _declare_positive_compile(
+                compile_outputs = _declare_positive_compile(
                     ctx,
                     subject_module,
                     profile,
                     xfails,
                 )
-                artifacts.append(artifact)
-                compile_reports.append(compile_report)
+                artifacts.append(compile_outputs.artifact)
+                compile_reports.append(compile_outputs.compile_report)
+                if ctx.attr.prepare_execution_package:
+                    prepared_packages.append(_declare_execution_package(
+                        ctx,
+                        profile,
+                        compile_outputs,
+                    ))
             if xfails:
                 qualification_results.append(_declare_xfail_probes(
                     ctx,
@@ -242,10 +280,12 @@ def _loom_corpus_program_impl(ctx):
 
     artifacts_depset = depset(artifacts)
     compile_reports_depset = depset(compile_reports)
+    prepared_packages_depset = depset(prepared_packages)
     qualification_results_depset = depset(qualification_results)
     default_files = depset(transitive = [
         artifacts_depset,
         compile_reports_depset,
+        prepared_packages_depset,
         qualification_results_depset,
     ])
     return [
@@ -253,13 +293,15 @@ def _loom_corpus_program_impl(ctx):
         OutputGroupInfo(
             artifacts = artifacts_depset,
             compile_reports = compile_reports_depset,
+            prepared_packages = prepared_packages_depset,
             xfail_results = qualification_results_depset,
         ),
-        _LoomCorpusProgramInfo(
+        LoomCorpusProgramInfo(
             artifacts = artifacts_depset,
             compile_reports = compile_reports_depset,
+            prepared_packages = prepared_packages_depset,
             qualification_results = qualification_results_depset,
-            source_identities = depset([ctx.attr.source_identity]),
+            source_identity = ctx.attr.source_identity,
             sources = depset([ctx.file.src]),
         ),
     ]
@@ -274,11 +316,18 @@ _loom_corpus_program = rule(
             ],
             doc = "Target profiles or sets whose complete default root set is covered by diagnostic xfails.",
         ),
+        "authored_module": attr.label(
+            allow_single_file = [".loombc"],
+            doc = "Linked authored test module retained beside prepared actuals.",
+        ),
         "configs": attr.string_dict(
             doc = "String-valued configuration bindings required by this corpus source.",
         ),
         "excludes": attr.label_keyed_string_dict(
             doc = "Target profiles or sets mapped to whole-source exclusion reasons.",
+        ),
+        "prepare_execution_package": attr.bool(
+            doc = "Whether positive compiles also produce hardware execution packages.",
         ),
         "profiles": attr.label_list(
             mandatory = True,
@@ -300,6 +349,11 @@ _loom_corpus_program = rule(
         "xfails": attr.label_keyed_string_dict(
             doc = "Target profiles or sets mapped to encoded root diagnostics.",
         ),
+        "_package_tool": attr.label(
+            cfg = "exec",
+            default = Label("//loom/build_tools/corpus:loom-corpus-assemble-package"),
+            executable = True,
+        ),
         "_xfails_tool": attr.label(
             cfg = "exec",
             default = Label("//loom/build_tools/corpus:loom-corpus-compile-xfails"),
@@ -315,39 +369,46 @@ _loom_corpus_program = rule(
 
 def _loom_corpus_aggregate_impl(ctx):
     artifacts = depset(transitive = [
-        dep[_LoomCorpusProgramInfo].artifacts
+        dep[LoomCorpusProgramInfo].artifacts
         for dep in ctx.attr.programs
     ])
     compile_reports = depset(transitive = [
-        dep[_LoomCorpusProgramInfo].compile_reports
+        dep[LoomCorpusProgramInfo].compile_reports
+        for dep in ctx.attr.programs
+    ])
+    prepared_packages = depset(transitive = [
+        dep[LoomCorpusProgramInfo].prepared_packages
         for dep in ctx.attr.programs
     ])
     qualification_results = depset(transitive = [
-        dep[_LoomCorpusProgramInfo].qualification_results
+        dep[LoomCorpusProgramInfo].qualification_results
         for dep in ctx.attr.programs
     ])
-    source_identities = depset(transitive = [
-        dep[_LoomCorpusProgramInfo].source_identities
+    source_identities = depset([
+        dep[LoomCorpusProgramInfo].source_identity
         for dep in ctx.attr.programs
     ])
     sources = depset(transitive = [
-        dep[_LoomCorpusProgramInfo].sources
+        dep[LoomCorpusProgramInfo].sources
         for dep in ctx.attr.programs
     ])
     return [
         DefaultInfo(files = depset(transitive = [
             artifacts,
             compile_reports,
+            prepared_packages,
             qualification_results,
         ])),
         OutputGroupInfo(
             artifacts = artifacts,
             compile_reports = compile_reports,
+            prepared_packages = prepared_packages,
             xfail_results = qualification_results,
         ),
         LoomCorpusBuildInfo(
             artifacts = artifacts,
             compile_reports = compile_reports,
+            prepared_packages = prepared_packages,
             qualification_results = qualification_results,
             source_identities = source_identities,
             sources = sources,
@@ -359,7 +420,7 @@ _loom_corpus_aggregate = rule(
     attrs = {
         "programs": attr.label_list(
             mandatory = True,
-            providers = [_LoomCorpusProgramInfo],
+            providers = [LoomCorpusProgramInfo],
         ),
     },
     doc = "Collects independently cacheable corpus program build outputs.",
@@ -416,6 +477,7 @@ def loom_corpus_build(
         name,
         catalog,
         profiles,
+        prepared_sources = [],
         xfails = {},
         all_roots_xfail = {},
         excludes = {},
@@ -431,6 +493,8 @@ def loom_corpus_build(
       name: Whole-catalog aggregate target name.
       catalog: Target-neutral catalog returned by `loom_corpus_catalog`.
       profiles: Target-owned compiler profiles or profile sets.
+      prepared_sources: Source identities whose positive compiles also produce
+        late-emission hardware execution packages.
       xfails: Profile or set keyed maps from '<source>:@<root>' to diagnostics.
       all_roots_xfail: Profile or set keyed lists of sources whose complete
         default root set is declared by xfails.
@@ -442,6 +506,18 @@ def loom_corpus_build(
         fail("loom_corpus_build requires at least one profile or profile set")
     if name in [manifest.name for manifest in catalog.manifests]:
         fail("loom_corpus_build aggregate %r collides with a semantic manifest" % name)
+
+    programs_by_identity = {
+        program.identity: program
+        for program in catalog.programs
+    }
+    prepared_source_set = {}
+    for source_identity in prepared_sources:
+        if source_identity not in programs_by_identity:
+            fail("loom_corpus_build prepared source names unknown source %r" % source_identity)
+        if source_identity in prepared_source_set:
+            fail("loom_corpus_build repeats prepared source %r" % source_identity)
+        prepared_source_set[source_identity] = None
 
     xfails_by_source = _partition_exceptions(catalog, xfails, "xfail")
     all_roots_xfail_by_source = _partition_all_roots_xfail(catalog, all_roots_xfail)
@@ -468,29 +544,36 @@ def loom_corpus_build(
                 )
             source_excludes[target] = reason
 
-        _loom_corpus_program(
-            name = program.target_name,
-            all_roots_xfail = all_roots_xfail_by_source[program.identity],
-            configs = program.configs,
-            excludes = source_excludes,
-            profiles = profiles,
-            source_identity = program.identity,
-            src = program.label,
-            xfails = source_xfails,
-            **kwargs
-        )
+        program_kwargs = dict(kwargs)
+        program_kwargs.update({
+            "all_roots_xfail": all_roots_xfail_by_source[program.identity],
+            "configs": program.configs,
+            "excludes": source_excludes,
+            "name": program.target_name,
+            "prepare_execution_package": program.identity in prepared_source_set,
+            "profiles": profiles,
+            "source_identity": program.identity,
+            "src": program.label,
+            "testonly": True,
+            "xfails": source_xfails,
+        })
+        if program.identity in prepared_source_set:
+            program_kwargs["authored_module"] = program.module_label
+        _loom_corpus_program(**program_kwargs)
         program_label = ":" + program.target_name
         program_labels.append(program_label)
         programs_by_manifest[program.manifest].append(program_label)
 
+    aggregate_kwargs = dict(kwargs)
+    aggregate_kwargs["testonly"] = True
     for manifest in catalog.manifests:
         _loom_corpus_aggregate(
             name = manifest.name,
             programs = programs_by_manifest[manifest.name],
-            **kwargs
+            **aggregate_kwargs
         )
     _loom_corpus_aggregate(
         name = name,
         programs = program_labels,
-        **kwargs
+        **aggregate_kwargs
     )

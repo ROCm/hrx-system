@@ -29,8 +29,9 @@ typedef struct loom_run_hal_testbench_prepared_package_product_t {
 // Parsed `loom.testbench.prepared_actuals.v0` package manifest.
 //
 // V0 represents one unconfigured direct-kernel product set for one exact target
-// profile. Strings and product rows are owned by |storage| and remain valid
-// until deinitialization.
+// profile. The authored module is supplied independently so one source module
+// can be paired with any compatible target payload. Strings and product rows
+// are owned by |storage| and remain valid until deinitialization.
 typedef struct loom_run_hal_testbench_prepared_package_manifest_t {
   // Allocator owning |products| and |storage|.
   iree_allocator_t host_allocator;
@@ -40,8 +41,6 @@ typedef struct loom_run_hal_testbench_prepared_package_manifest_t {
   iree_host_size_t product_count;
   // Decoded string storage referenced by this manifest and its products.
   void* storage;
-  // Package-relative untouched authored Loom bytecode path.
-  iree_string_view_t authored_module_path;
   // Exact canonical target-profile selector used by the producer.
   iree_string_view_t target_profile;
   // Exact public executable artifact format selected by the producer.
@@ -52,8 +51,8 @@ typedef struct loom_run_hal_testbench_prepared_package_manifest_t {
 //
 // Unknown, duplicate, missing, and wrongly typed fields are rejected. All file
 // paths must be portable relative paths contained by the package. Products may
-// share prepared modules and launch programs, but those two semantic roles and
-// the authored module must never alias each other.
+// share prepared modules and launch programs, but those two semantic roles must
+// never alias each other.
 iree_status_t loom_run_hal_testbench_prepared_package_manifest_parse(
     iree_string_view_t json, iree_allocator_t host_allocator,
     loom_run_hal_testbench_prepared_package_manifest_t* out_manifest);
