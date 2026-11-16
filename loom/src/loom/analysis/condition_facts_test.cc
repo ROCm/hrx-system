@@ -693,6 +693,64 @@ TEST_F(ConditionFactsTest, RefinementUsesNumericCopiesWithoutAllocation) {
   EXPECT_EQ(module_->arena.used_allocation_size, used_module_size);
 }
 
+TEST_F(ConditionFactsTest, UnsignedOutcomesPropagateTheNegativePartition) {
+  for (auto type :
+       {LOOM_SCALAR_TYPE_INDEX, LOOM_SCALAR_TYPE_I8, LOOM_SCALAR_TYPE_I16,
+        LOOM_SCALAR_TYPE_I32, LOOM_SCALAR_TYPE_I64}) {
+    const auto left = DefineValue(loom_type_scalar(type));
+    const auto right = DefineValue(loom_type_scalar(type));
+    for (const auto& operation : kIntegerComparisons) {
+      if (operation.index_predicate != LOOM_INDEX_CMP_PREDICATE_ULT &&
+          operation.index_predicate != LOOM_INDEX_CMP_PREDICATE_ULE &&
+          operation.index_predicate != LOOM_INDEX_CMP_PREDICATE_UGT &&
+          operation.index_predicate != LOOM_INDEX_CMP_PREDICATE_UGE) {
+        continue;
+      }
+      loom_condition_integer_comparison_t comparison = {};
+      const auto* compare =
+          type == LOOM_SCALAR_TYPE_INDEX
+              ? BuildIndexCompare(operation.index_predicate, left, right)
+              : BuildScalarCompare(operation.scalar_predicate, left, right);
+      ASSERT_TRUE(loom_condition_integer_comparison_describe(module_, compare,
+                                                             &comparison));
+      for (bool truth : {false, true}) {
+        const bool left_is_lower =
+            truth ==
+            (operation.index_predicate == LOOM_INDEX_CMP_PREDICATE_ULT ||
+             operation.index_predicate == LOOM_INDEX_CMP_PREDICATE_ULE);
+        auto lower = loom_value_facts_make(-16, -4, 1);
+        auto upper = loom_value_facts_make(-31, 31, 1);
+        loom_condition_integer_comparison_refine_facts(
+            &comparison, module_, &fact_table_.context, truth,
+            left_is_lower ? &lower : &upper, left_is_lower ? &upper : &lower);
+        EXPECT_LT(upper.range_hi, 0)
+            << "type=" << type << ", predicate=" << operation.index_predicate
+            << ", truth=" << truth;
+
+        // The condition result must retain the sign that made its mathematical
+        // relation valid, without changing either ambient operand.
+        const auto lower_input = loom_value_facts_make(-16, -4, 1);
+        const auto upper_input = loom_value_facts_make(-31, 31, 1);
+        DefineFacts(left, left_is_lower ? lower_input : upper_input);
+        DefineFacts(right, left_is_lower ? upper_input : lower_input);
+        ASSERT_TRUE(Query(loom_op_const_results(compare)[0], truth));
+        auto retained_upper = upper_input;
+        EXPECT_TRUE(loom_condition_fact_set_apply_to_value_facts(
+            &condition_facts_, &fact_table_, left_is_lower ? right : left,
+            &retained_upper));
+        EXPECT_EQ(retained_upper.range_lo, upper.range_lo);
+        EXPECT_EQ(retained_upper.range_hi, upper.range_hi);
+        EXPECT_TRUE(loom_value_facts_equal(
+            loom_value_fact_table_lookup(&fact_table_, left),
+            left_is_lower ? lower_input : upper_input));
+        EXPECT_TRUE(loom_value_facts_equal(
+            loom_value_fact_table_lookup(&fact_table_, right),
+            left_is_lower ? upper_input : lower_input));
+      }
+    }
+  }
+}
+
 TEST_F(ConditionFactsTest, AddressEdgesDoNotTruncateMathematicalEnvelopes) {
   loom_target_facts_t target_facts = {};
   target_facts.storage.snapshot.index_bitwidth = 32;

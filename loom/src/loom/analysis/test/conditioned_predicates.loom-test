@@ -472,3 +472,90 @@ func.def @bitmask_loop_scope(%input: i32) {
   test.use %result : i32
   func.return
 }
+
+// ====
+
+// Unsigned order above a negative lower operand stays in the negative half.
+// The opposite outcome and observations after the branch keep their own facts.
+func.def @unsigned_negative_upper(%input: i32) {
+  %lower = scalar.constant -16 : i32
+  %c0 = scalar.constant 0 : i64
+  %selected = scalar.cmpi ult, %lower, %input : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %selected {
+    %upper = test.fact_range_hi %input : i32 -> i64
+    %negative = scalar.cmpi slt, %upper, %c0 : i64
+    %count = index.cast %negative : i1 to index
+    scf.for %inside = [%begin to %count step %step] unroll {
+      test.use %inside : index
+    }
+  } else {
+    %upper = test.fact_range_hi %input : i32 -> i64
+    %negative = scalar.cmpi slt, %upper, %c0 : i64
+    %count = index.cast %negative : i1 to index
+    scf.for %opposite = [%begin to %count step %step] unroll {
+      test.use %opposite : index
+    }
+  }
+  %upper = test.fact_range_hi %input : i32 -> i64
+  %negative = scalar.cmpi slt, %upper, %c0 : i64
+  %count = index.cast %negative : i1 to index
+  scf.for %outside = [%begin to %count step %step] unroll {
+    test.use %outside : index
+  }
+  func.return
+}
+
+// ----
+func.def @unsigned_negative_upper(%input: i32) {
+  %lower = scalar.constant -16 : i32
+  %selected = scalar.cmpi ult, %lower, %input : i32
+  scf.if %selected {
+    %inside_0 = index.constant 0 : index
+    test.use %inside_0 : index
+  } else {
+  }
+  func.return
+}
+
+// ====
+
+// A reversed false edge has the same sign implication for address arithmetic.
+func.def @unsigned_negative_index(%input: index) {
+  %lower = index.constant -16 : index
+  %c0 = scalar.constant 0 : i64
+  %selected = index.cmp uge, %lower, %input : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %selected {
+    test.use %input : index
+  } else {
+    %upper = test.fact_range_hi %input : index -> i64
+    %negative = scalar.cmpi slt, %upper, %c0 : i64
+    %count = index.cast %negative : i1 to index
+    scf.for %inside = [%begin to %count step %step] unroll {
+      test.use %inside : index
+    }
+  }
+  %upper = test.fact_range_hi %input : index -> i64
+  %negative = scalar.cmpi slt, %upper, %c0 : i64
+  %count = index.cast %negative : i1 to index
+  scf.for %outside = [%begin to %count step %step] unroll {
+    test.use %outside : index
+  }
+  func.return
+}
+
+// ----
+func.def @unsigned_negative_index(%input: index) {
+  %lower = index.constant -16 : index
+  %selected = index.cmp uge, %lower, %input : index
+  scf.if %selected {
+    test.use %input : index
+  } else {
+    %inside_0 = index.constant 0 : index
+    test.use %inside_0 : index
+  }
+  func.return
+}
