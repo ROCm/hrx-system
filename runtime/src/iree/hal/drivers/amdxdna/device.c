@@ -37,6 +37,11 @@
 #define ARENA_BLOCK_SIZE (32 * 1024)
 #define EXECUTABLE_RECYCLER_MAX_BYTES (256 * 1024 * 1024)
 #define EXECUTABLE_RECYCLER_MAX_BLOCKS 4096
+// Shape-specialized producers create most executables only once, so reuse
+// saturates at a few MiB; the bound keeps one-shot executables from pinning
+// host memory.
+#define EXECUTABLE_REUSE_CACHE_MAX_ENTRIES 1024
+#define EXECUTABLE_REUSE_CACHE_MAX_HOST_BYTES (16 * 1024 * 1024)
 
 static const iree_hal_device_vtable_t iree_hal_amdxdna_device_vtable;
 
@@ -821,6 +826,7 @@ static iree_status_t iree_hal_amdxdna_device_trim(
     iree_hal_device_t* base_device) {
   iree_hal_amdxdna_device* device = IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
       base_device, iree_hal_amdxdna_device_vtable, iree_hal_amdxdna_device);
+  iree_hal_amdxdna_executable_reuse_cache_clear(device->executable_reuse_cache);
   return iree_hal_allocator_trim(device->device_allocator);
 }
 
@@ -1763,6 +1769,13 @@ static void iree_hal_amdxdna_device_destroy(iree_hal_device_t* base_device) {
 
   iree_hal_amdxdna_device* device = IREE_HAL_AMDXDNA_CHECKED_VTABLE_CAST(
       base_device, iree_hal_amdxdna_device_vtable, iree_hal_amdxdna_device);
+
+  // Release reusable executables while every cache their destruction reaches
+  // is still alive.
+  iree_hal_amdxdna_executable_reuse_cache_destroy(
+      device->executable_reuse_cache);
+  device->executable_reuse_cache = NULL;
+
   // Drain and shut down worker queues before tearing down the block pool (the
   // queues' pending ops live in arenas backed by the block pool).
   if (device->async_queue) {
@@ -1840,6 +1853,31 @@ void iree_hal_amdxdna_device_drop_unleased_contexts(
     iree_hal_amdxdna_device* device) {
   if (!device || !device->context_cache) return;
   iree_hal_amdxdna_device_context_cache_drop_unleased(device->context_cache);
+}
+
+iree_hal_executable_t* iree_hal_amdxdna_device_lookup_reusable_executable(
+    iree_hal_device_t* base_device,
+    const iree_hal_amdxdna_executable_reuse_key_t* key) {
+  if (!base_device ||
+      !iree_hal_resource_is(base_device, &iree_hal_amdxdna_device_vtable)) {
+    return NULL;
+  }
+  iree_hal_amdxdna_device* device = (iree_hal_amdxdna_device*)base_device;
+  return iree_hal_amdxdna_executable_reuse_cache_lookup(
+      device->executable_reuse_cache, key);
+}
+
+void iree_hal_amdxdna_device_publish_reusable_executable(
+    iree_hal_device_t* base_device,
+    const iree_hal_amdxdna_executable_reuse_key_t* key,
+    iree_hal_executable_t* executable) {
+  if (!base_device ||
+      !iree_hal_resource_is(base_device, &iree_hal_amdxdna_device_vtable)) {
+    return;
+  }
+  iree_hal_amdxdna_device* device = (iree_hal_amdxdna_device*)base_device;
+  (void)iree_hal_amdxdna_executable_reuse_cache_insert(
+      device->executable_reuse_cache, key, executable);
 }
 
 static iree_allocator_t iree_hal_amdxdna_device_host_allocator(
@@ -2050,6 +2088,14 @@ iree_status_t iree_hal_amdxdna_device_create(
   if (iree_status_is_ok(status)) {
     status = iree_hal_amdxdna_program_image_store_create(
         device->host_allocator, &device->program_image_store);
+  }
+  if (iree_status_is_ok(status)) {
+    const iree_hal_amdxdna_executable_reuse_cache_limits_t limits = {
+        .max_entries = EXECUTABLE_REUSE_CACHE_MAX_ENTRIES,
+        .max_host_bytes = EXECUTABLE_REUSE_CACHE_MAX_HOST_BYTES,
+    };
+    status = iree_hal_amdxdna_executable_reuse_cache_create(
+        limits, device->host_allocator, &device->executable_reuse_cache);
   }
   if (iree_status_is_ok(status) && should_set_power_mode) {
     status = iree_hal_amdxdna_native_device_c_set_power_mode(

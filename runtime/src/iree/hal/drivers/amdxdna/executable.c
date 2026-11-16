@@ -1533,6 +1533,108 @@ iree_status_t iree_hal_amdxdna_native_executable_create(
                           "unrecognized amdxdna executable image");
 }
 
+static bool iree_hal_amdxdna_executable_footprint_add_image(
+    const iree_hal_amdxdna_program_image_t* image,
+    iree_hal_amdxdna_executable_footprint_t* footprint) {
+  if (!image) return true;
+  for (iree_host_size_t i = 0; i < footprint->image_count; ++i) {
+    if (footprint->images[i] == image) return true;
+  }
+  if (footprint->image_count == IREE_ARRAYSIZE(footprint->images)) {
+    return false;
+  }
+  footprint->images[footprint->image_count++] = image;
+  return true;
+}
+
+static iree_host_size_t iree_hal_amdxdna_kernel_params_exclusive_host_bytes(
+    const iree_hal_amdxdna_kernel_params_t* params) {
+  iree_host_size_t bytes = params->kernel_name.size;
+  bytes += params->asm_inst_runlist_count * sizeof(*params->asm_inst_runlist);
+  for (iree_host_size_t i = 0; i < params->asm_inst_runlist_count; ++i) {
+    bytes += params->asm_inst_runlist[i].count * sizeof(uint32_t);
+  }
+  bytes +=
+      params->reconf_data_runlist_count * sizeof(*params->reconf_data_runlist);
+  for (iree_host_size_t i = 0; i < params->reconf_data_runlist_count; ++i) {
+    bytes += params->reconf_data_runlist[i].count * sizeof(uint32_t);
+  }
+  bytes += params->patch_runlist_count * sizeof(*params->patch_runlist);
+  for (iree_host_size_t i = 0; i < params->patch_runlist_count; ++i) {
+    bytes += params->patch_runlist[i].count * sizeof(uint32_t);
+  }
+  bytes += params->pdi_relocation_runlist_count *
+           sizeof(*params->pdi_relocation_runlist);
+  for (iree_host_size_t i = 0; i < params->pdi_relocation_runlist_count; ++i) {
+    bytes += params->pdi_relocation_runlist[i].count *
+             sizeof(*params->pdi_relocation_runlist[i].data);
+  }
+  bytes += params->control_parameter_relocation_runlist_count *
+           sizeof(*params->control_parameter_relocation_runlist);
+  for (iree_host_size_t i = 0;
+       i < params->control_parameter_relocation_runlist_count; ++i) {
+    bytes += params->control_parameter_relocation_runlist[i].count *
+             sizeof(*params->control_parameter_relocation_runlist[i].data);
+  }
+  bytes += params->constant_patch_runlist_count *
+           sizeof(*params->constant_patch_runlist);
+  for (iree_host_size_t i = 0; i < params->constant_patch_runlist_count; ++i) {
+    bytes += params->constant_patch_runlist[i].count *
+             sizeof(*params->constant_patch_runlist[i].data);
+  }
+  bytes += params->parameter_count * sizeof(*params->parameters);
+  for (iree_host_size_t i = 0; i < params->parameter_count; ++i) {
+    bytes += params->parameters[i].name.size;
+  }
+  bytes += params->dpu_slice_count * sizeof(*params->dpu_slices);
+  return bytes;
+}
+
+bool iree_hal_amdxdna_executable_query_footprint(
+    iree_hal_executable_t* base_executable,
+    iree_hal_amdxdna_executable_footprint_t* out_footprint) {
+  iree_hal_amdxdna_executable* executable =
+      iree_hal_amdxdna_executable_cast(base_executable);
+  memset(out_footprint, 0, sizeof(*out_footprint));
+  iree_host_size_t bytes = sizeof(*executable);
+  bytes += executable->entry_point_count * sizeof(*executable->entry_points);
+  for (iree_host_size_t i = 0; i < executable->entry_point_count; ++i) {
+    const iree_hal_amdxdna_kernel_params_t* params =
+        &executable->entry_points[i];
+    bytes += iree_hal_amdxdna_kernel_params_exclusive_host_bytes(params);
+    if (!iree_hal_amdxdna_executable_footprint_add_image(params->pdi_image,
+                                                         out_footprint) ||
+        !iree_hal_amdxdna_executable_footprint_add_image(params->xclbin_image,
+                                                         out_footprint)) {
+      return false;
+    }
+  }
+  bytes += executable->pdi_count *
+           (sizeof(*executable->pdis) + sizeof(*executable->pdi_buffers));
+  for (iree_host_size_t i = 0; i < executable->pdi_count; ++i) {
+    if (!iree_hal_amdxdna_executable_footprint_add_image(executable->pdis[i],
+                                                         out_footprint)) {
+      return false;
+    }
+  }
+  out_footprint->exclusive_host_bytes = bytes;
+  return true;
+}
+
+iree_const_byte_span_t iree_hal_amdxdna_executable_single_run_control_code(
+    iree_hal_executable_t* base_executable) {
+  iree_hal_amdxdna_executable* executable =
+      iree_hal_amdxdna_executable_cast(base_executable);
+  if (executable->entry_point_count != 1) return iree_const_byte_span_empty();
+  const iree_hal_amdxdna_kernel_params_t* params = &executable->entry_points[0];
+  if (params->asm_inst_runlist_count != 1) {
+    return iree_const_byte_span_empty();
+  }
+  return iree_make_const_byte_span(
+      (const uint8_t*)params->asm_inst_runlist[0].data,
+      params->asm_inst_runlist[0].count * sizeof(uint32_t));
+}
+
 static void iree_hal_amdxdna_native_executable_destroy(
     iree_hal_executable_t* base_executable) {
   IREE_TRACE_ZONE_BEGIN(z0);

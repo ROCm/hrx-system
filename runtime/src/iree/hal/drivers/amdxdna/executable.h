@@ -40,6 +40,33 @@ iree_status_t iree_hal_amdxdna_native_executable_create(
     const iree_hal_executable_load_params_t* load_params,
     iree_allocator_t host_allocator, iree_hal_executable_t** out_executable);
 
+#define IREE_HAL_AMDXDNA_EXECUTABLE_FOOTPRINT_MAX_IMAGES 4
+
+// Host memory retained by an executable.
+typedef struct iree_hal_amdxdna_executable_footprint_t {
+  // Bytes owned only by the executable: descriptor storage, control code,
+  // patch and relocation tables, and names.
+  iree_host_size_t exclusive_host_bytes;
+  // Distinct program images referenced by the executable. Their bytes are not
+  // included in |exclusive_host_bytes| because other executables may share
+  // them.
+  iree_host_size_t image_count;
+  const iree_hal_amdxdna_program_image_t*
+      images[IREE_HAL_AMDXDNA_EXECUTABLE_FOOTPRINT_MAX_IMAGES];
+} iree_hal_amdxdna_executable_footprint_t;
+
+// Computes the host footprint of |executable|. Returns false when it
+// references more than IREE_HAL_AMDXDNA_EXECUTABLE_FOOTPRINT_MAX_IMAGES
+// distinct images.
+bool iree_hal_amdxdna_executable_query_footprint(
+    iree_hal_executable_t* executable,
+    iree_hal_amdxdna_executable_footprint_t* out_footprint);
+
+// Returns the control code of an executable with exactly one entry point that
+// has exactly one run, or an empty span for any other shape.
+iree_const_byte_span_t iree_hal_amdxdna_executable_single_run_control_code(
+    iree_hal_executable_t* executable);
+
 // Preloads native contexts for self-contained entry points. This is executable
 // preparation work, not queue execution work: it may create native hardware
 // contexts and must therefore never run from device_queue_* entry points.

@@ -15,6 +15,7 @@
 #include "iree/hal/drivers/amdxdna/api.h"
 #include "iree/hal/drivers/amdxdna/async_queue.h"
 #include "iree/hal/drivers/amdxdna/completion_queue.h"
+#include "iree/hal/drivers/amdxdna/executable_reuse_cache.h"
 #include "iree/hal/drivers/amdxdna/native.h"
 #include "iree/hal/drivers/amdxdna/program_image.h"
 
@@ -51,6 +52,11 @@ typedef struct iree_hal_amdxdna_device {
   iree_hal_amdxdna_host_recycler_t executable_host_recycler;
   // Context program images shared by every executable loaded on this device.
   iree_hal_amdxdna_program_image_store_t* program_image_store;
+  // Loaded executables retained for producers that repeatedly create the same
+  // shape-specialized executable. Byte-bounded against the host memory it
+  // keeps alive, cleared on trim, and released first during teardown because
+  // releasing an executable reaches the context and command caches below.
+  iree_hal_amdxdna_executable_reuse_cache_t* executable_reuse_cache;
 
   // Per-device async work queue. Defers HAL queue ops until their wait
   // semaphores are satisfied, then runs them on a single worker thread.
@@ -122,6 +128,20 @@ iree_hal_amdxdna_device* iree_hal_amdxdna_device_cast(
 // those contexts are invalidated as each context is released.
 void iree_hal_amdxdna_device_drop_unleased_contexts(
     iree_hal_amdxdna_device* device);
+
+// Returns a retained executable previously published on |device| under |key|,
+// or NULL on a miss or when |device| is not an amdxdna device.
+iree_hal_executable_t* iree_hal_amdxdna_device_lookup_reusable_executable(
+    iree_hal_device_t* device,
+    const iree_hal_amdxdna_executable_reuse_key_t* key);
+
+// Offers |executable|, loaded on |device|, for reuse under |key|. Best effort:
+// the device may decline to retain it (see
+// iree_hal_amdxdna_executable_reuse_cache_insert).
+void iree_hal_amdxdna_device_publish_reusable_executable(
+    iree_hal_device_t* device,
+    const iree_hal_amdxdna_executable_reuse_key_t* key,
+    iree_hal_executable_t* executable);
 
 #ifdef __cplusplus
 }  // extern "C"
