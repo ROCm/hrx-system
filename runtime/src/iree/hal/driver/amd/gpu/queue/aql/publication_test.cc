@@ -226,6 +226,16 @@ class AqlPublicationTest
            (uint64_t{packets_[packet].words[word + 1]} << 32);
   }
 
+  void PrepareSamples(size_t count) {
+    sample_generation_.memory.contents = iree_make_byte_span(
+        sample_values_.data(), count * sizeof(sample_values_[0]));
+    sample_generation_.address = 0xABCD00009000;
+    sample_generation_.capacity =
+        sample_generation_.memory.contents.data_length;
+    sample_pool_.current = &sample_generation_;
+    queue_.samples = &sample_pool_;
+  }
+
   // Real bounded profile stream used by timestamped publication.
   iree::hal::cts::TestProfileSink sink_;
   // Prepared native scalar target, retained by real control captures.
@@ -246,6 +256,12 @@ class AqlPublicationTest
   iree_hal_amd_gpu_aql_queue_t queue_ = {};
   // Native completion allocations for this queue and an independent producer.
   std::array<Signals, 2> signals_;
+  // Timestamp sample backing retained through submission teardown.
+  std::array<iree_hal_amd_gpu_aql_signal_t, 4> sample_values_ = {};
+  // Native sample allocation borrowed by published profile completions.
+  iree_hal_amd_gpu_byte_storage_t sample_generation_ = {};
+  // Sample allocation owner borrowed by the queue publisher.
+  iree_hal_amd_gpu_byte_storage_pool_t sample_pool_ = {};
   // Retirement storage with the production inline capture extent.
   std::array<iree_hal_amd_gpu_aql_retirement_t, 128> issued_ = {};
   // Native packet allocation observed after publication.
@@ -409,14 +425,7 @@ TEST_P(AqlPublicationTest, ProfilingPreservesFreshArgumentAcquisition) {
   layout_.byte_length = 32 * std::get<0>(GetParam());
   request_.constants =
       iree_make_const_byte_span(constants.data(), layout_.byte_length);
-  std::array<iree_hal_amd_gpu_aql_signal_t, 4> sample_values = {};
-  iree_hal_amd_gpu_byte_storage_t generation = {};
-  generation.memory.contents =
-      iree_make_byte_span(sample_values.data(), sizeof(sample_values));
-  generation.address = 0xABCD00009000;
-  generation.capacity = sizeof(sample_values);
-  iree_hal_amd_gpu_byte_storage_pool_t samples = {.current = &generation};
-  queue_.samples = &samples;
+  PrepareSamples(sample_values_.size());
 
   for (const auto* operation :
        {&sampled, &host_only,
@@ -461,8 +470,9 @@ TEST_P(AqlPublicationTest, ProfilingPreservesFreshArgumentAcquisition) {
           queue_.producer.ring.reserved,
           dispatch_position + (operation == &sampled || after_acquire ? 2 : 1));
       if (operation == &sampled) {
-        EXPECT_EQ(PacketAddress(dispatch_position, 14),
-                  generation.address + scopes * sizeof(sample_values[0]));
+        EXPECT_EQ(
+            PacketAddress(dispatch_position, 14),
+            sample_generation_.address + scopes * sizeof(sample_values_[0]));
       }
       if (operation == &sampled || after_acquire) {
         EXPECT_EQ(packets_[dispatch_position + 1].words[0],
@@ -1060,13 +1070,9 @@ TEST_P(AqlPublicationTest, FullSamplesLeaveLaunchArgumentsAvailable) {
   layout_.byte_length = constants.size();
   request_.constants =
       iree_make_const_byte_span(constants.data(), constants.size());
-  iree_hal_amd_gpu_aql_signal_t sample = {};
-  iree_hal_amd_gpu_byte_storage_t generation = {};
-  generation.memory.contents = iree_make_byte_span(&sample, sizeof(sample));
-  generation.address = 0xABCD00009000;
-  generation.capacity = sizeof(sample);
-  iree_hal_amd_gpu_byte_storage_pool_t samples = {.current = &generation};
-  queue_.samples = &samples;
+  PrepareSamples(1);
+  const auto& sample = sample_values_[0];
+  const auto& generation = sample_generation_;
   iree_hal_amd_gpu_aql_submission_t* submission = nullptr;
   iree_status_t status = iree_ok_status();
   ASSERT_EQ(
