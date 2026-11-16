@@ -177,7 +177,7 @@ check.scenario @vector_return_values {
 // Returns through an EXIT region or the ordinary function terminator. Retained
 // call summaries must join both paths so guarded uses observe the complete
 // result range.
-func.def device @early_or_negative(%candidate: i64, %take: i1) -> (i64) {
+func.def device noinline @early_or_negative(%candidate: i64, %take: i1) -> (i64) {
   func.exit %take : i1 {
     func.return %candidate : i64
   }

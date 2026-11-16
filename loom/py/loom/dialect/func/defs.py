@@ -51,6 +51,7 @@ from loom.dsl import (
     BUFFER,
     I1,
     ISOLATED_FROM_ABOVE,
+    OBSERVABLE_EFFECT,
     POISON_BOUNDARY,
     PURE,
     SYMBOL_DEFINE,
@@ -649,7 +650,9 @@ func_exit = Op(
             execution=RegionExecution.EXIT,
         )
     ],
-    traits=[UNKNOWN_EFFECTS],
+    # Exiting changes subsequent execution without creating a resource or
+    # accessing memory. The region contributes its payload effects separately.
+    traits=[OBSERVABLE_EFFECT],
     verify="loom_func_exit_verify",
     format=[
         Ref("condition"),

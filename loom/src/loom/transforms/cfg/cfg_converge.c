@@ -16,18 +16,23 @@
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/function_version.h"
+#include "loom/transforms/cfg/return_frontier.h"
 #include "loom/util/fact_cfg.h"
 
-#define LOOM_CFG_CONVERGE_STATISTICS(V, statistics_type)                  \
-  V(statistics_type, decisions_factored, "decisions-factored",            \
-    "Number of overlapping decisions factored through a predicate join.") \
-  V(statistics_type, loop_exit_frontiers_isolated,                        \
-    "loop-exit-frontiers-isolated",                                       \
-    "Number of loop exit frontiers isolated from enclosing decisions.")   \
-  V(statistics_type, downstream_frontiers_factored,                       \
-    "downstream-frontiers-factored",                                      \
-    "Number of downstream shared bodies given a predicate join.")         \
-  V(statistics_type, values_carried, "values-carried",                    \
+#define LOOM_CFG_CONVERGE_STATISTICS(V, statistics_type)                   \
+  V(statistics_type, return_frontiers_joined, "return-frontiers-joined",   \
+    "Number of divergent normal-return frontiers joined.")                 \
+  V(statistics_type, forwarding_arms_isolated, "forwarding-arms-isolated", \
+    "Number of shared branch-only arms given a private incoming edge.")    \
+  V(statistics_type, decisions_factored, "decisions-factored",             \
+    "Number of overlapping decisions factored through a predicate join.")  \
+  V(statistics_type, loop_exit_frontiers_isolated,                         \
+    "loop-exit-frontiers-isolated",                                        \
+    "Number of loop exit frontiers isolated from enclosing decisions.")    \
+  V(statistics_type, downstream_frontiers_factored,                        \
+    "downstream-frontiers-factored",                                       \
+    "Number of downstream shared bodies given a predicate join.")          \
+  V(statistics_type, values_carried, "values-carried",                     \
     "Number of scalar live-ins and payloads carried across predicate joins.")
 
 LOOM_PASS_STATISTICS_DEFINE(loom_cfg_converge_statistics,
@@ -367,6 +372,48 @@ static bool loom_cfg_converge_is_forwarding(const loom_block_t* block,
          loom_cfg_br_dest(block->last_op) == continuation;
 }
 
+// A branch-only arm has no effects or local definitions to share. Preserve its
+// outgoing tuple on a private edge instead of moving the decision and carrying
+// live-ins through a predicate join. The original incoming conditional edge
+// has no arguments, so every outgoing value already dominates that edge.
+static iree_status_t loom_cfg_converge_isolate_forwarding_arm(
+    loom_rewriter_t* rewriter, const loom_value_fact_cfg_region_t* facts,
+    uint16_t source, loom_op_t* branch, bool* out_changed) {
+  *out_changed = false;
+  const loom_cfg_postdominance_t* postdominance =
+      &facts->control_structure.postdominance;
+  uint32_t continuation = postdominance->nodes[source].immediate_postdominator;
+  if (continuation == postdominance->exit_node) {
+    return iree_ok_status();
+  }
+  for (uint16_t arm = 0; arm < 2; ++arm) {
+    loom_block_t* destination = loom_op_successors(branch)[arm];
+    if (loom_cfg_dominance_block_dominates(&facts->dominance, source,
+                                           destination->region_index) ||
+        !loom_cfg_converge_is_forwarding(
+            destination, facts->graph.blocks[continuation].block)) {
+      continue;
+    }
+    loom_block_t* forwarding = NULL;
+    IREE_RETURN_IF_ERROR(loom_region_append_block(
+        rewriter->module, destination->parent_region, &forwarding));
+    loom_builder_t* builder = &rewriter->builder;
+    builder->ip.parent_op = branch->parent_op;
+    loom_builder_set_block(builder, forwarding);
+    const loom_op_t* original = destination->last_op;
+    loom_op_t* replacement = NULL;
+    IREE_RETURN_IF_ERROR(loom_cfg_br_build(
+        builder, loom_cfg_br_dest(original), loom_op_const_operands(original),
+        original->operand_count, original->location, &replacement));
+    loom_op_successors(branch)[arm] = forwarding;
+    IREE_RETURN_IF_ERROR(
+        loom_rewriter_refresh_cfg_facts(rewriter, destination->parent_region));
+    *out_changed = true;
+    break;
+  }
+  return iree_ok_status();
+}
+
 // Component order and the earliest reachable DFS node provide independent
 // exclusion bounds. Neither needs a walk through the successor's region.
 static bool loom_cfg_converge_may_reach(const loom_cfg_graph_t* graph,
@@ -380,11 +427,10 @@ static bool loom_cfg_converge_may_reach(const loom_cfg_graph_t* graph,
 
 // A decision with an externally shared arm moves behind that arm's incoming
 // alternatives. Retained reachability bounds prove the redirected edges cannot
-// create a cycle. A false forwarding passthrough already has the canonical
-// conditional body shape and remains untouched. A direct false continuation
-// contributes bypasses only after another shared arm requires a join; those
-// bypasses can close an enclosing decision. A true passthrough has inverted
-// sense and must itself be inspected for external entries.
+// create a cycle. Branch-only arms have already been isolated. A direct false
+// continuation contributes bypasses only after another shared arm requires a
+// join; those bypasses can close an enclosing decision. A true passthrough has
+// inverted sense and must itself be inspected for external entries.
 static iree_status_t loom_cfg_converge_select(loom_cfg_converge_plan_t* plan,
                                               bool* out_selected) {
   *out_selected = false;
@@ -448,10 +494,7 @@ static iree_status_t loom_cfg_converge_select(loom_cfg_converge_plan_t* plan,
                                            destination)) {
       continue;
     }
-    if (arm == 1 &&
-        ((destination == continuation && !plan->incoming_count) ||
-         loom_cfg_converge_is_forwarding(graph->blocks[destination].block,
-                                         graph->blocks[continuation].block))) {
+    if (arm == 1 && destination == continuation && !plan->incoming_count) {
       continue;
     }
     loom_cfg_edge_index_span_t incoming =
@@ -1201,6 +1244,12 @@ static iree_status_t loom_cfg_converge_once(
             LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP)) {
       continue;
     }
+    IREE_RETURN_IF_ERROR(loom_cfg_converge_isolate_forwarding_arm(
+        rewriter, facts, source, branch, out_changed));
+    if (*out_changed) {
+      ++loom_cfg_converge_statistics(pass)->forwarding_arms_isolated;
+      return iree_ok_status();
+    }
     iree_arena_reset(arena);
     loom_cfg_converge_plan_t plan = {
         .module = module,
@@ -1235,7 +1284,8 @@ static iree_status_t loom_cfg_converge_once(
 iree_status_t loom_cfg_converge_run(loom_pass_t* pass, loom_module_t* module,
                                     loom_func_like_t function) {
   loom_region_t* body = loom_func_like_body(function);
-  if (!body || body->block_count < 4) {
+  if (!body || body->block_count < 3 ||
+      loom_func_like_repr_contract(function) != LOOM_STRING_ID_INVALID) {
     return iree_ok_status();
   }
   loom_rewriter_t rewriter = {0};
@@ -1260,6 +1310,12 @@ iree_status_t loom_cfg_converge_run(loom_pass_t* pass, loom_module_t* module,
           rewriter.fact_table, module, body, &facts);
     }
     if (iree_status_is_ok(status)) {
+      status = loom_cfg_converge_returns(&rewriter, function, facts, &changed);
+      if (iree_status_is_ok(status) && changed) {
+        ++loom_cfg_converge_statistics(pass)->return_frontiers_joined;
+      }
+    }
+    if (iree_status_is_ok(status) && !changed) {
       status = loom_cfg_converge_isolate_loop_exit_frontiers(
           pass, module, body, &rewriter, &arena, facts, &changed);
     }

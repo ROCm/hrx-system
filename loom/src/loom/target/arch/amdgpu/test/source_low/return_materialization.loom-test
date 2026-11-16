@@ -27,26 +27,28 @@ kernel.def @caller() {
 
 // ----
 low.func.def noinline target<amdgpu.rdna3_5.core> @return_loaded_or_argument(%view: reg<amdgpu.sgpr x2>, %load: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>, %position: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %23 = s_mov_b32 0
-  %24 = s_cmp_lg_i32 %load, %23
-  low.cond_br %24, ^loaded, ^argument : reg<amdgpu.scc>
+  %25 = s_mov_b32 0
+  %26 = s_cmp_lg_i32 %load, %25
+  low.cond_br %26, ^loaded, ^argument : reg<amdgpu.scc>
 ^loaded:
-  %25 = v_lshlrev_b32_src0_inline %position, 2
-  %value = global_load_b32_saddr %25, %view
-  return %value
+  %27 = v_lshlrev_b32_src0_inline %position, 2
+  %value = global_load_b32_saddr %27, %view
+  low.br ^_bb3(%value: reg<amdgpu.vgpr>)
 ^argument:
-  %27 = v_mov_b32_copy %fallback
-  return %27
+  %29 = v_mov_b32_copy %fallback
+  low.br ^_bb3(%29: reg<amdgpu.vgpr>)
+^_bb3(%24: reg<amdgpu.vgpr>):
+  return %24
 }
 
-low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "load", arg1 = "fallback"}, direct_arg_offsets = [8, 12], direct_arg_parameter_indices = [1, 2], direct_arg_payload_sizes = [1, 4], direct_arg_sizes = [4, 4], parameter_count = 4, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller(%load$28: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "load", arg1 = "fallback"}, direct_arg_offsets = [8, 12], direct_arg_parameter_indices = [1, 2], direct_arg_payload_sizes = [1, 4], direct_arg_sizes = [4, 4], parameter_count = 4, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller(%load$30: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %destination_0 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %load$33 = s_bfe_u32_lit %load$28, 524288
-  %result_0 = low.func.call @return_loaded_or_argument(%input, %load$33, %fallback, %lane) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
-  %35 = v_lshlrev_b32_src0_inline %lane, 2
-  global_store_b32_saddr %35, %result_0, %destination_0
+  %load$35 = s_bfe_u32_lit %load$30, 524288
+  %result_0 = low.func.call @return_loaded_or_argument(%input, %load$35, %fallback, %lane) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  %37 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %37, %result_0, %destination_0
   return
 }
 
@@ -78,26 +80,28 @@ kernel.def @caller() {
 
 // ----
 low.func.def noinline target<amdgpu.rdna3_5.core> @return_argument_or_loaded(%view: reg<amdgpu.sgpr x2>, %load: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>, %position: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %23 = s_mov_b32 0
-  %24 = s_cmp_lg_i32 %load, %23
-  low.cond_br %24, ^loaded, ^argument : reg<amdgpu.scc>
+  %25 = s_mov_b32 0
+  %26 = s_cmp_lg_i32 %load, %25
+  low.cond_br %26, ^loaded, ^argument : reg<amdgpu.scc>
 ^argument:
-  %25 = v_mov_b32_copy %fallback
-  return %25
+  %27 = v_mov_b32_copy %fallback
+  low.br ^_bb3(%27: reg<amdgpu.vgpr>)
 ^loaded:
-  %26 = v_lshlrev_b32_src0_inline %position, 2
-  %value = global_load_b32_saddr %26, %view
-  return %value
+  %28 = v_lshlrev_b32_src0_inline %position, 2
+  %value = global_load_b32_saddr %28, %view
+  low.br ^_bb3(%value: reg<amdgpu.vgpr>)
+^_bb3(%24: reg<amdgpu.vgpr>):
+  return %24
 }
 
-low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "load", arg1 = "fallback"}, direct_arg_offsets = [8, 12], direct_arg_parameter_indices = [1, 2], direct_arg_payload_sizes = [1, 4], direct_arg_sizes = [4, 4], parameter_count = 4, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller(%load$28: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "load", arg1 = "fallback"}, direct_arg_offsets = [8, 12], direct_arg_parameter_indices = [1, 2], direct_arg_payload_sizes = [1, 4], direct_arg_sizes = [4, 4], parameter_count = 4, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller(%load$30: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %destination_0 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %load$33 = s_bfe_u32_lit %load$28, 524288
-  %result_0 = low.func.call @return_argument_or_loaded(%input, %load$33, %fallback, %lane) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
-  %35 = v_lshlrev_b32_src0_inline %lane, 2
-  global_store_b32_saddr %35, %result_0, %destination_0
+  %load$35 = s_bfe_u32_lit %load$30, 524288
+  %result_0 = low.func.call @return_argument_or_loaded(%input, %load$35, %fallback, %lane) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  %37 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %37, %result_0, %destination_0
   return
 }
 
@@ -129,30 +133,32 @@ kernel.def @caller() {
 
 // ----
 low.func.def noinline target<amdgpu.rdna3_5.core> @return_wide_loaded_or_argument(%view: reg<amdgpu.sgpr x2>, %load: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr x2>, %position: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
-  %23 = s_mov_b32 0
-  %24 = s_cmp_lg_i32 %load, %23
-  low.cond_br %24, ^loaded, ^argument : reg<amdgpu.scc>
+  %25 = s_mov_b32 0
+  %26 = s_cmp_lg_i32 %load, %25
+  low.cond_br %26, ^loaded, ^argument : reg<amdgpu.scc>
 ^loaded:
-  %25 = v_lshlrev_b32_src0_inline %position, 3
-  %value = global_load_b64_saddr %25, %view
-  return %value
+  %27 = v_lshlrev_b32_src0_inline %position, 3
+  %value = global_load_b64_saddr %27, %view
+  low.br ^_bb3(%value: reg<amdgpu.vgpr x2>)
 ^argument:
-  %27 = slice %fallback[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %28 = v_mov_b32_copy %27
-  %29 = slice %fallback[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %29 = slice %fallback[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %30 = v_mov_b32_copy %29
-  %31 = concat(%28, %30) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  return %31
+  %31 = slice %fallback[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %32 = v_mov_b32_copy %31
+  %33 = concat(%30, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^_bb3(%33: reg<amdgpu.vgpr x2>)
+^_bb3(%24: reg<amdgpu.vgpr x2>):
+  return %24
 }
 
-low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "load", arg1 = "fallback"}, direct_arg_offsets = [8, 12], direct_arg_parameter_indices = [1, 2], direct_arg_payload_sizes = [1, 8], direct_arg_sizes = [4, 8], parameter_count = 4, resource_count = 2, resource_offsets = [0, 24], resource_parameter_indices = [0, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller(%load$32: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr x2>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "load", arg1 = "fallback"}, direct_arg_offsets = [8, 12], direct_arg_parameter_indices = [1, 2], direct_arg_payload_sizes = [1, 8], direct_arg_sizes = [4, 8], parameter_count = 4, resource_count = 2, resource_offsets = [0, 24], resource_parameter_indices = [0, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller(%load$34: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr x2>) asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %destination_0 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %load$37 = s_bfe_u32_lit %load$32, 524288
-  %result_0 = low.func.call @return_wide_loaded_or_argument(%input, %load$37, %fallback, %lane) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>)
-  %39 = v_lshlrev_b32_src0_inline %lane, 3
-  global_store_b64_saddr %39, %result_0, %destination_0
+  %load$39 = s_bfe_u32_lit %load$34, 524288
+  %result_0 = low.func.call @return_wide_loaded_or_argument(%input, %load$39, %fallback, %lane) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>)
+  %41 = v_lshlrev_b32_src0_inline %lane, 3
+  global_store_b64_saddr %41, %result_0, %destination_0
   return
 }
 
@@ -191,32 +197,34 @@ kernel.def @caller() {
 
 // ----
 low.func.def noinline target<amdgpu.rdna3_5.core> @return_mixed_values(%reals: reg<amdgpu.sgpr x2>, %load: reg<amdgpu.sgpr>, %integer: reg<amdgpu.sgpr>, %real: reg<amdgpu.sgpr>, %tag: reg<amdgpu.sgpr>, %position: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr>) asm {
-  %41 = s_mov_b32 0
-  %42 = s_cmp_lg_i32 %load, %41
-  low.cond_br %42, ^loaded, ^argument : reg<amdgpu.scc>
+  %47 = s_mov_b32 0
+  %48 = s_cmp_lg_i32 %load, %47
+  low.cond_br %48, ^loaded, ^argument : reg<amdgpu.scc>
 ^argument:
-  %43 = v_mov_b32_copy %integer
-  %44 = v_mov_b32_copy %real
-  return %43, %44, %tag
+  %49 = v_mov_b32_copy %integer
+  %50 = v_mov_b32_copy %real
+  low.br ^_bb3(%49: reg<amdgpu.vgpr>, %50: reg<amdgpu.vgpr>)
 ^loaded:
-  %45 = v_lshlrev_b32_src0_inline %position, 2
-  %loaded_integer = global_load_b32_saddr %45, %reals
-  return %loaded_integer, %loaded_integer, %tag
+  %51 = v_lshlrev_b32_src0_inline %position, 2
+  %loaded_integer = global_load_b32_saddr %51, %reals
+  low.br ^_bb3(%loaded_integer: reg<amdgpu.vgpr>, %loaded_integer: reg<amdgpu.vgpr>)
+^_bb3(%44: reg<amdgpu.vgpr>, %45: reg<amdgpu.vgpr>):
+  return %44, %45, %tag
 }
 
-low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 4, direct_arg_count = 4, direct_arg_names = {arg0 = "load", arg1 = "integer", arg2 = "real", arg3 = "tag"}, direct_arg_offsets = [8, 12, 16, 20], direct_arg_parameter_indices = [1, 2, 3, 4], direct_arg_payload_sizes = [1, 4, 4, 4], direct_arg_sizes = [4, 4, 4, 4], parameter_count = 8, resource_count = 4, resource_offsets = [0, 24, 32, 40], resource_parameter_indices = [0, 5, 6, 7], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller(%load$49: reg<amdgpu.sgpr>, %integer: reg<amdgpu.sgpr>, %real: reg<amdgpu.sgpr>, %tag: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 4, direct_arg_count = 4, direct_arg_names = {arg0 = "load", arg1 = "integer", arg2 = "real", arg3 = "tag"}, direct_arg_offsets = [8, 12, 16, 20], direct_arg_parameter_indices = [1, 2, 3, 4], direct_arg_payload_sizes = [1, 4, 4, 4], direct_arg_sizes = [4, 4, 4, 4], parameter_count = 8, resource_count = 4, resource_offsets = [0, 24, 32, 40], resource_parameter_indices = [0, 5, 6, 7], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller(%load$55: reg<amdgpu.sgpr>, %integer: reg<amdgpu.sgpr>, %real: reg<amdgpu.sgpr>, %tag: reg<amdgpu.sgpr>) asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %destination_0 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %destination_1 = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %destination_2 = resource<hal_binding> {extent = 256, index = 3, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %load$58 = s_bfe_u32_lit %load$49, 524288
-  %result_0, %result_1, %result_2 = low.func.call @return_mixed_values(%input, %load$58, %integer, %real, %tag, %lane) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr>)
-  %62 = v_lshlrev_b32_src0_inline %lane, 2
-  global_store_b32_saddr %62, %result_0, %destination_0
-  global_store_b32_saddr %62, %result_1, %destination_1
-  %64 = v_mov_b32_copy %result_2
-  global_store_b32_saddr %62, %64, %destination_2
+  %load$64 = s_bfe_u32_lit %load$55, 524288
+  %result_0, %result_1, %result_2 = low.func.call @return_mixed_values(%input, %load$64, %integer, %real, %tag, %lane) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr>)
+  %68 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %68, %result_0, %destination_0
+  global_store_b32_saddr %68, %result_1, %destination_1
+  %70 = v_mov_b32_copy %result_2
+  global_store_b32_saddr %68, %70, %destination_2
   return
 }
 
@@ -252,32 +260,34 @@ kernel.def @caller() {
 
 // ----
 low.func.def noinline target<amdgpu.rdna3_5.core> @return_offset(%view: reg<amdgpu.sgpr x2>, %load: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr x2>, %position: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
-  %25 = s_mov_b32 0
-  %26 = s_cmp_lg_i32 %load, %25
-  low.cond_br %26, ^loaded, ^argument : reg<amdgpu.scc>
+  %27 = s_mov_b32 0
+  %28 = s_cmp_lg_i32 %load, %27
+  low.cond_br %28, ^loaded, ^argument : reg<amdgpu.scc>
 ^argument:
-  %27 = slice %fallback[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %28 = v_mov_b32_copy %27
-  %29 = slice %fallback[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %29 = slice %fallback[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %30 = v_mov_b32_copy %29
-  %31 = concat(%28, %30) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  return %31
+  %31 = slice %fallback[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %32 = v_mov_b32_copy %31
+  %33 = concat(%30, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^_bb3(%33: reg<amdgpu.vgpr x2>)
 ^loaded:
-  %32 = v_lshlrev_b32_src0_inline %position, 2
-  %byte_offset = global_load_b32_saddr %32, %view
-  %34 = v_mov_b32 0
-  %35 = concat(%byte_offset, %34) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  return %35
+  %34 = v_lshlrev_b32_src0_inline %position, 2
+  %value = global_load_b32_saddr %34, %view
+  %36 = v_mov_b32 0
+  %byte_offset = concat(%value, %36) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^_bb3(%byte_offset: reg<amdgpu.vgpr x2>)
+^_bb3(%26: reg<amdgpu.vgpr x2>):
+  return %26
 }
 
-low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "load", arg1 = "fallback"}, direct_arg_offsets = [8, 12], direct_arg_parameter_indices = [1, 2], direct_arg_payload_sizes = [1, 8], direct_arg_sizes = [4, 8], parameter_count = 4, resource_count = 2, resource_offsets = [0, 24], resource_parameter_indices = [0, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller(%load$36: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr x2>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "load", arg1 = "fallback"}, direct_arg_offsets = [8, 12], direct_arg_parameter_indices = [1, 2], direct_arg_payload_sizes = [1, 8], direct_arg_sizes = [4, 8], parameter_count = 4, resource_count = 2, resource_offsets = [0, 24], resource_parameter_indices = [0, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller(%load$38: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr x2>) asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %destination_0 = resource<hal_binding> {extent = 512, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %load$41 = s_bfe_u32_lit %load$36, 524288
-  %stored_0 = low.func.call @return_offset(%input, %load$41, %fallback, %lane) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>)
-  %43 = v_lshlrev_b32_src0_inline %lane, 3
-  global_store_b64_saddr %43, %stored_0, %destination_0
+  %load$43 = s_bfe_u32_lit %load$38, 524288
+  %stored_0 = low.func.call @return_offset(%input, %load$43, %fallback, %lane) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>)
+  %45 = v_lshlrev_b32_src0_inline %lane, 3
+  global_store_b64_saddr %45, %stored_0, %destination_0
   return
 }
 
@@ -312,35 +322,37 @@ kernel.def @caller() {
 
 // ----
 low.func.def noinline target<amdgpu.rdna3_5.core> @return_predicate(%view: reg<amdgpu.sgpr x2>, %load: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>, %position: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) asm {
-  %30 = s_mov_b32 0
-  %31 = s_cmp_lg_i32 %load, %30
-  low.cond_br %31, ^loaded, ^argument : reg<amdgpu.scc>
+  %32 = s_mov_b32 0
+  %33 = s_cmp_lg_i32 %load, %32
+  low.cond_br %33, ^loaded, ^argument : reg<amdgpu.scc>
 ^argument:
-  %32 = s_cmp_lg_i32_src1_inline %fallback {rhs = 0}
-  %33 = s_mov_b64_exec_read
-  %34 = slice %33[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %35 = slice %33[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %37 = s_cselect_b32 %34, %30, %32
-  %38 = s_cselect_b32 %35, %30, %32
-  %39 = concat(%37, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  return %39
+  %34 = s_cmp_lg_i32_src1_inline %fallback {rhs = 0}
+  %35 = s_mov_b64_exec_read
+  %36 = slice %35[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %37 = slice %35[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39 = s_cselect_b32 %36, %32, %34
+  %40 = s_cselect_b32 %37, %32, %34
+  %41 = concat(%39, %40) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  low.br ^_bb3(%41: reg<amdgpu.sgpr x2>)
 ^loaded:
-  %40 = v_lshlrev_b32_src0_inline %position, 2
-  %value = global_load_b32_saddr %40, %view
+  %42 = v_lshlrev_b32_src0_inline %position, 2
+  %value = global_load_b32_saddr %42, %view
   %positive = v_cmp_gt_i32_src1_inline %value {rhs = 0}
-  return %positive
+  low.br ^_bb3(%positive: reg<amdgpu.sgpr x2>)
+^_bb3(%31: reg<amdgpu.sgpr x2>):
+  return %31
 }
 
-low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "load", arg1 = "fallback"}, direct_arg_offsets = [8, 12], direct_arg_parameter_indices = [1, 2], direct_arg_payload_sizes = [1, 1], direct_arg_sizes = [4, 4], parameter_count = 4, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller(%load$43: reg<amdgpu.sgpr>, %fallback$44: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "load", arg1 = "fallback"}, direct_arg_offsets = [8, 12], direct_arg_parameter_indices = [1, 2], direct_arg_payload_sizes = [1, 1], direct_arg_sizes = [4, 4], parameter_count = 4, resource_count = 2, resource_offsets = [0, 16], resource_parameter_indices = [0, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller(%load$45: reg<amdgpu.sgpr>, %fallback$46: reg<amdgpu.sgpr>) asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %destination_0 = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %load$48 = s_bfe_u32_lit %load$43, 524288
-  %fallback$49 = s_bfe_u32_lit %fallback$44, 524288
-  %result_0 = low.func.call @return_predicate(%input, %load$48, %fallback$49, %lane) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>)
+  %load$50 = s_bfe_u32_lit %load$45, 524288
+  %fallback$51 = s_bfe_u32_lit %fallback$46, 524288
+  %result_0 = low.func.call @return_predicate(%input, %load$50, %fallback$51, %lane) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>)
   %stored_0 = v_cndmask_b32_src0_lit_src1_inline %result_0 {imm32 = 0, true_value = 1}
-  %54 = v_lshlrev_b32_src0_inline %lane, 2
-  global_store_b32_saddr %54, %stored_0, %destination_0
+  %56 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %56, %stored_0, %destination_0
   return
 }
 
@@ -377,50 +389,52 @@ kernel.def @caller() {
 
 // ----
 low.func.def noinline target<amdgpu.rdna3_5.core> @return_selected_buffer(%view: reg<amdgpu.sgpr x2>, %fallback: reg<amdgpu.sgpr x2>, %select: reg<amdgpu.sgpr>, %position: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
-  %29 = s_mov_b32 0
-  %30 = s_cmp_lg_i32 %select, %29
-  low.cond_br %30, ^selected, ^argument : reg<amdgpu.scc>
+  %31 = s_mov_b32 0
+  %32 = s_cmp_lg_i32 %select, %31
+  low.cond_br %32, ^selected, ^argument : reg<amdgpu.scc>
 ^argument:
-  %31 = slice %fallback[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %32 = v_mov_b32_copy %31
-  %33 = slice %fallback[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %33 = slice %fallback[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %34 = v_mov_b32_copy %33
-  %35 = concat(%32, %34) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  return %35
+  %35 = slice %fallback[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %36 = v_mov_b32_copy %35
+  %37 = concat(%34, %36) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^_bb3(%37: reg<amdgpu.vgpr x2>)
 ^selected:
-  %36 = v_lshlrev_b32_src0_inline %position, 2
-  %value = global_load_b32_saddr %36, %view
+  %38 = v_lshlrev_b32_src0_inline %position, 2
+  %value = global_load_b32_saddr %38, %view
   %positive = v_cmp_gt_i32_src1_inline %value {rhs = 0}
-  %39 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %40 = v_mov_b32_copy %39
-  %41 = slice %fallback[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %41 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %42 = v_mov_b32_copy %41
-  %43 = v_cndmask_b32 %42, %40, %positive
-  %44 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %45 = v_mov_b32_copy %44
-  %46 = slice %fallback[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %43 = slice %fallback[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %44 = v_mov_b32_copy %43
+  %45 = v_cndmask_b32 %44, %42, %positive
+  %46 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %47 = v_mov_b32_copy %46
-  %48 = v_cndmask_b32 %47, %45, %positive
-  %selected = concat(%43, %48) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  return %selected
+  %48 = slice %fallback[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %49 = v_mov_b32_copy %48
+  %50 = v_cndmask_b32 %49, %47, %positive
+  %selected = concat(%45, %50) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^_bb3(%selected: reg<amdgpu.vgpr x2>)
+^_bb3(%30: reg<amdgpu.vgpr x2>):
+  return %30
 }
 
-low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "select"}, direct_arg_offsets = [16], direct_arg_parameter_indices = [2], direct_arg_payload_sizes = [1], direct_arg_sizes = [4], parameter_count = 4, resource_count = 3, resource_offsets = [0, 8, 24], resource_parameter_indices = [0, 1, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller(%select$50: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "select"}, direct_arg_offsets = [16], direct_arg_parameter_indices = [2], direct_arg_payload_sizes = [1], direct_arg_sizes = [4], parameter_count = 4, resource_count = 3, resource_offsets = [0, 8, 24], resource_parameter_indices = [0, 1, 3], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller(%select$52: reg<amdgpu.sgpr>) asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %fallback = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %destination_0 = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %select$55 = s_bfe_u32_lit %select$50, 524288
-  %selected = low.func.call @return_selected_buffer(%input, %fallback, %select$55, %lane) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>)
-  %57 = slice %selected[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %58 = slice %selected[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %59 = v_lshlrev_b32_src0_inline %lane, 2
-  %60 = v_lshrrev_b32_src0_inline %lane, 30
-  %61, %62 = v_add_co_u32 %57, %59
-  %63, %64 = v_add_co_ci_u32 %58, %60, %62
-  %65 = concat(%61, %63) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %stored_0 = global_load_b32_vaddr %65
-  global_store_b32_saddr %59, %stored_0, %destination_0
+  %select$57 = s_bfe_u32_lit %select$52, 524288
+  %selected = low.func.call @return_selected_buffer(%input, %fallback, %select$57, %lane) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>)
+  %59 = slice %selected[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %60 = slice %selected[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %61 = v_lshlrev_b32_src0_inline %lane, 2
+  %62 = v_lshrrev_b32_src0_inline %lane, 30
+  %63, %64 = v_add_co_u32 %59, %61
+  %65, %66 = v_add_co_ci_u32 %60, %62, %64
+  %67 = concat(%63, %65) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %stored_0 = global_load_b32_vaddr %67
+  global_store_b32_saddr %61, %stored_0, %destination_0
   return
 }
 
@@ -470,28 +484,30 @@ kernel.def @caller() {
 
 // ----
 low.func.def noinline target<amdgpu.rdna3_5.core> @return_refined_or_constant(%byte_offset: reg<amdgpu.sgpr x2>, %use_refined: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
-  %18 = s_mov_b32 0
-  %19 = s_cmp_lg_i32 %use_refined, %18
-  low.cond_br %19, ^refined, ^constant : reg<amdgpu.scc>
+  %20 = s_mov_b32 0
+  %21 = s_cmp_lg_i32 %use_refined, %20
+  low.cond_br %21, ^refined, ^constant : reg<amdgpu.scc>
 ^refined:
-  %20 = slice %byte_offset[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  return %20
+  %22 = slice %byte_offset[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  low.br ^_bb3(%22: reg<amdgpu.sgpr>)
 ^constant:
   %constant = s_mov_b32 7
-  return %constant
+  low.br ^_bb3(%constant: reg<amdgpu.sgpr>)
+^_bb3(%19: reg<amdgpu.sgpr>):
+  return %19
 }
 
-low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "byte_offset0", arg1 = "use_refined"}, direct_arg_offsets = [0, 8], direct_arg_parameter_indices = [0, 1], direct_arg_payload_sizes = [8, 1], direct_arg_sizes = [8, 4], parameter_count = 3, resource_count = 1, resource_offsets = [16], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller(%byte_offset0: reg<amdgpu.sgpr x2>, %use_refined$23: reg<amdgpu.sgpr>) asm {
+low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "byte_offset0", arg1 = "use_refined"}, direct_arg_offsets = [0, 8], direct_arg_parameter_indices = [0, 1], direct_arg_payload_sizes = [8, 1], direct_arg_sizes = [8, 4], parameter_count = 3, resource_count = 1, resource_offsets = [16], resource_parameter_indices = [2], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller(%byte_offset0: reg<amdgpu.sgpr x2>, %use_refined$25: reg<amdgpu.sgpr>) asm {
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %destination_0 = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %use_refined$26 = s_bfe_u32_lit %use_refined$23, 524288
-  %result_0 = low.func.call pure @return_refined_or_constant(%byte_offset0, %use_refined$26) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>)
-  %28 = s_mov_b32 0
-  %31 = v_mov_b32_copy %result_0
-  %33 = v_mov_b32_copy %28
-  %34 = concat(%31, %33) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %35 = v_lshlrev_b32_src0_inline %lane, 3
-  global_store_b64_saddr %35, %34, %destination_0
+  %use_refined$28 = s_bfe_u32_lit %use_refined$25, 524288
+  %result_0 = low.func.call pure @return_refined_or_constant(%byte_offset0, %use_refined$28) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>)
+  %30 = s_mov_b32 0
+  %33 = v_mov_b32_copy %result_0
+  %35 = v_mov_b32_copy %30
+  %36 = concat(%33, %35) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %37 = v_lshlrev_b32_src0_inline %lane, 3
+  global_store_b64_saddr %37, %36, %destination_0
   return
 }
 

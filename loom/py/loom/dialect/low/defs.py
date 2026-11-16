@@ -718,7 +718,8 @@ low_func_exit = Op(
             terminator="low.return",
         )
     ],
-    traits=[UNKNOWN_EFFECTS],
+    # Preserve the exit's execution independently of its region's effects.
+    traits=[OBSERVABLE_EFFECT],
     verify="loom_low_func_exit_verify",
     format=[
         Ref("condition"),

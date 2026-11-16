@@ -36,5 +36,6 @@ loom_check_test_suite(
         "dead_state.loom-test",
         "low_branches.loom-test",
         "managed_forwarding.loom-test",
+        "return_frontier.loom-test",
     ],
 )

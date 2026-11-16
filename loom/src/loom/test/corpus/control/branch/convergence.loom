@@ -361,3 +361,168 @@ check.scenario @return_convergence_values {
   }
   check.return
 }
+
+// Retained helpers return directly from every switch arm. The second helper
+// shares its first and default result, so control merging must preserve the
+// same payload without sharing a partially active branch body.
+func.def @switch_distinct(%selector: index, %value: i32) -> (i32) {
+  %take = scalar.constant true : i1
+  scf.switch %selector {
+    case 0 {
+      func.exit %take : i1 {
+        func.return %value : i32
+      }
+    }
+    case 1 {
+      %c7 = scalar.constant 7 : i32
+      %sum = scalar.addi %value, %c7 : i32
+      func.exit %take : i1 {
+        func.return %sum : i32
+      }
+    }
+    case 2 {
+      %c3 = scalar.constant 3 : i32
+      %product = scalar.muli %value, %c3 : i32
+      func.exit %take : i1 {
+        func.return %product : i32
+      }
+    }
+    default {
+      %negative = scalar.negi %value : i32
+      func.exit %take : i1 {
+        func.return %negative : i32
+      }
+    }
+  }
+  func.unreachable
+}
+
+func.def @switch_shared(%selector: index, %value: i32) -> (i32) {
+  %take = scalar.constant true : i1
+  scf.switch %selector {
+    case 0 {
+      func.exit %take : i1 {
+        func.return %value : i32
+      }
+    }
+    case 1 {
+      %c7 = scalar.constant 7 : i32
+      %sum = scalar.addi %value, %c7 : i32
+      func.exit %take : i1 {
+        func.return %sum : i32
+      }
+    }
+    case 2 {
+      %c3 = scalar.constant 3 : i32
+      %product = scalar.muli %value, %c3 : i32
+      func.exit %take : i1 {
+        func.return %product : i32
+      }
+    }
+    default {
+      func.exit %take : i1 {
+        func.return %value : i32
+      }
+    }
+  }
+  func.unreachable
+}
+
+kernel.def @switch_return_convergence() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %mode: index) {
+  %participation_count = index.constant 5 : index
+  %lanes_per_step = index.constant 16 : index
+  %bounded_mode = index.assume %mode [range(%mode, 0, 9)] : index
+  %ordinal = index.rem %bounded_mode, %participation_count : index
+  %length = index.mul %ordinal, %lanes_per_step : index
+  %mixed = index.cmp ult, %mode, %participation_count : index
+  %all_choices = scalar.constant 3 : i32
+  %first_choice = scalar.constant 0 : i32
+  %selector_mask = scf.select %mixed, %all_choices, %first_choice : i32
+  %lane = kernel.workitem.id<x> : index
+  %active = index.cmp ult, %lane, %length : index
+  scf.if %active {
+    %origin = index.constant 0 : offset
+    %in = buffer.view %input[%origin] : buffer -> view<64xi32>
+    %out = buffer.view %output[%origin] : buffer -> view<4x64xi32>
+    %value = view.load %in[%lane] : view<64xi32> -> i32
+    %selected = scalar.andi %value, %selector_mask : i32
+    %selector = index.cast %selected : i32 to index
+    %c1 = scalar.constant 1 : i32
+    %next = scalar.addi %value, %c1 : i32
+    %first = func.call noinline @switch_distinct(%selector, %value) : (index, i32) -> (i32)
+    %second = func.call noinline @switch_distinct(%selector, %next) : (index, i32) -> (i32)
+    %third = func.call noinline @switch_shared(%selector, %value) : (index, i32) -> (i32)
+    %fourth = func.call inline @switch_shared(%selector, %next) : (index, i32) -> (i32)
+    view.store %first, %out[0, %lane] : i32, view<4x64xi32>
+    view.store %second, %out[1, %lane] : i32, view<4x64xi32>
+    view.store %third, %out[2, %lane] : i32, view<4x64xi32>
+    view.store %fourth, %out[3, %lane] : i32, view<4x64xi32>
+  }
+  kernel.return
+}
+
+// The oracle computes all alternatives and selects their results. It contains
+// no helper calls, switch statements, or early returns.
+func.def @switch_return_oracle(%input: buffer, %output: buffer, %mode: index) {
+  %participation_count = index.constant 5 : index
+  %lanes_per_step = index.constant 16 : index
+  %bounded_mode = index.assume %mode [range(%mode, 0, 9)] : index
+  %ordinal = index.rem %bounded_mode, %participation_count : index
+  %length = index.mul %ordinal, %lanes_per_step : index
+  %mixed = index.cmp ult, %mode, %participation_count : index
+  %all_choices = scalar.constant 3 : i32
+  %first_choice = scalar.constant 0 : i32
+  %selector_mask = scf.select %mixed, %all_choices, %first_choice : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %in = buffer.view %input[%origin] : buffer -> view<64xi32>
+  %out = buffer.view %output[%origin] : buffer -> view<4x64xi32>
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %c3 = scalar.constant 3 : i32
+  %c7 = scalar.constant 7 : i32
+  scf.for %lane = [%begin to %length step %step] {
+    %value = view.load %in[%lane] : view<64xi32> -> i32
+    %selected = scalar.andi %value, %selector_mask : i32
+    %first_case = scalar.cmpi eq, %selected, %c0 : i32
+    %second_case = scalar.cmpi eq, %selected, %c1 : i32
+    %third_case = scalar.cmpi eq, %selected, %c2 : i32
+    %variant_count = index.constant 4 : index
+    scf.for %variant = [%begin to %variant_count step %step] {
+      %ordinal = index.cast %variant : index to i32
+      %increment = scalar.andi %ordinal, %c1 : i32
+      %seed = scalar.addi %value, %increment : i32
+      %sum = scalar.addi %seed, %c7 : i32
+      %product = scalar.muli %seed, %c3 : i32
+      %negative = scalar.subi %c0, %seed : i32
+      %distinct = scalar.cmpi slt, %ordinal, %c2 : i32
+      %fallback = scf.select %distinct, %negative, %seed : i32
+      %last = scf.select %third_case, %product, %fallback : i32
+      %middle = scf.select %second_case, %sum, %last : i32
+      %result = scf.select %first_case, %seed, %middle : i32
+      view.store %result, %out[%variant, %lane] : i32, view<4x64xi32>
+    }
+  }
+  func.return
+}
+
+check.scenario @switch_return_convergence_values {
+  // Empty, partial, and complete workgroups take mixed switch arms. The next
+  // five trials take a uniform switch arm under the same participation masks.
+  check.trial[10](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-32) step(1) : tensor<64xi32>
+    %storage = check.generate.fill value(-999) : tensor<288xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<288xi32> -> tensor<256xi32>
+    check.compare<@switch_return_convergence, @switch_return_oracle>(%input, %output, %trial) : (tensor<64xi32>, tensor<256xi32>, index) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<288xi32>
+    }
+  }
+  check.return
+}

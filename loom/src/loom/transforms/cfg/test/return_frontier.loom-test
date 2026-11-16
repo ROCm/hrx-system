@@ -1,0 +1,257 @@
+// RUN: with-low-asm pass cfg-converge,cfg-converge
+
+// Each return contributes its own value to one ordinary continuation. The
+// second pass must leave the established frontier unchanged.
+func.def @nested_returns(%first: i1, %second: i1, %left: i32, %middle: i32, %right: i32) -> (i32) {
+  cfg.cond_br %first, ^left, ^remaining
+^left:
+  func.return %left : i32
+^remaining:
+  cfg.cond_br %second, ^middle, ^right
+^middle:
+  func.return %middle : i32
+^right:
+  func.return %right : i32
+}
+
+// The frontier transports the complete result tuple, including references.
+func.def @tuple_returns(%condition: i1, %left: f32, %right: f32, %first: vector<4xi16>, %second: vector<4xi16>, %input: buffer, %output: buffer) -> (f32, vector<4xi16>, buffer) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  func.return %left, %first, %input : f32, vector<4xi16>, buffer
+^right:
+  func.return %right, %second, %output : f32, vector<4xi16>, buffer
+}
+
+// Effects stay on their original paths; void returns still need convergence.
+func.def @void_returns(%condition: i1, %left: i32, %right: i32) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  test.use %left : i32
+  func.return
+^right:
+  test.use %right : i32
+  func.return
+}
+
+// The body descriptor supplies the return kind, including kernel.return.
+kernel.def @kernel_returns() {
+  %c1 = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
+} launch(%value: i32) {
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %c0 : index
+  cfg.cond_br %condition, ^write, ^skip
+^write:
+  test.use %value : i32
+  kernel.return
+^skip:
+  kernel.return
+}
+
+// Entirely uniform control retains direct returns.
+func.def @uniform_returns(%left: i32, %right: i32) -> (i32) {
+  %condition = scalar.constant true : i1
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  func.return %left : i32
+^right:
+  func.return %right : i32
+}
+
+// Unreachable normal returns do not create a new frontier.
+func.def @unreachable_return(%condition: i1, %value: i32) -> (i32) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  test.use %value : i32
+  cfg.br ^result
+^right:
+  cfg.br ^result
+^result:
+  func.return %value : i32
+^dead:
+  func.return %value : i32
+}
+
+// Abnormal termination is not an ordinary returning edge.
+func.def @abnormal_exit(%condition: i1, %value: i32) -> (i32) {
+  cfg.cond_br %condition, ^result, ^unreachable
+^result:
+  func.return %value : i32
+^unreachable:
+  func.unreachable
+}
+
+// ----
+func.def @nested_returns(%first: i1, %second: i1, %left: i32, %middle: i32, %right: i32) -> (i32) {
+  cfg.cond_br %first, ^left, ^remaining
+^left:
+  cfg.br ^_bb5(%left: i32)
+^remaining:
+  cfg.cond_br %second, ^middle, ^right
+^middle:
+  cfg.br ^_bb5(%middle: i32)
+^right:
+  cfg.br ^_bb5(%right: i32)
+^_bb5(%35: i32):
+  func.return %35 : i32
+}
+
+func.def @tuple_returns(%condition: i1, %left: f32, %right: f32, %first: vector<4xi16>, %second: vector<4xi16>, %input: buffer, %output: buffer) -> (f32, vector<4xi16>, buffer) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  cfg.br ^_bb3(%left: f32, %first: vector<4xi16>, %input: buffer)
+^right:
+  cfg.br ^_bb3(%right: f32, %second: vector<4xi16>, %output: buffer)
+^_bb3(%36: f32, %37: vector<4xi16>, %38: buffer):
+  func.return %36, %37, %38 : f32, vector<4xi16>, buffer
+}
+
+func.def @void_returns(%condition: i1, %left: i32, %right: i32) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  test.use %left : i32
+  cfg.br ^_bb3
+^right:
+  test.use %right : i32
+  cfg.br ^_bb3
+^_bb3:
+  func.return
+}
+
+kernel.def @kernel_returns() {
+  %c1 = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
+} launch(%value: i32) {
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %condition = index.cmp eq, %lane, %c0 : index
+  cfg.cond_br %condition, ^write, ^skip
+^write:
+  test.use %value : i32
+  cfg.br ^_bb3
+^skip:
+  cfg.br ^_bb3
+^_bb3:
+  kernel.return
+}
+
+func.def @uniform_returns(%left: i32, %right: i32) -> (i32) {
+  %condition = scalar.constant true : i1
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  func.return %left : i32
+^right:
+  func.return %right : i32
+}
+
+func.def @unreachable_return(%condition: i1, %value: i32) -> (i32) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  test.use %value : i32
+  cfg.br ^result
+^right:
+  cfg.br ^result
+^result:
+  func.return %value : i32
+^dead:
+  func.return %value : i32
+}
+
+func.def @abnormal_exit(%condition: i1, %value: i32) -> (i32) {
+  cfg.cond_br %condition, ^result, ^unreachable
+^result:
+  func.return %value : i32
+^unreachable:
+  func.unreachable
+}
+
+// ====
+
+// Explicit target representations own their physical return and branch ABI.
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @physical_returns(%condition: reg<test.i32>, %left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.i32>) asm {
+  low.cond_br %condition, ^left, ^right : reg<test.i32>
+^left:
+  return %left
+^right:
+  return %right
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @physical_returns(%condition: reg<test.i32>, %left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.i32>) asm {
+  low.cond_br %condition, ^left, ^right : reg<test.i32>
+^left:
+  return %left
+^right:
+  return %right
+}
+
+// ====
+
+// Each incoming shaped result refers to that path's extent. The common return
+// must instantiate its own extent binder rather than retaining either input.
+func.def @shaped_returns(%condition: i1, %left_extent: index, %left: view<[%left_extent]xf32>, %right_extent: index, %right: view<[%right_extent]xf32>) -> (%extent: index, view<[%extent]xf32>) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  func.return %left_extent, %left : index, view<[%left_extent]xf32>
+^right:
+  func.return %right_extent, %right : index, view<[%right_extent]xf32>
+}
+
+// A return may publish the same provider more than once. The result's declared
+// type relationship still belongs to the first extent position.
+func.def @repeated_extent_returns(%condition: i1, %left_extent: index, %left: view<[%left_extent]xf32>, %right_extent: index, %right: view<[%right_extent]xf32>) -> (%extent: index, index, view<[%extent]xf32>) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  func.return %left_extent, %left_extent, %left : index, index, view<[%left_extent]xf32>
+^right:
+  func.return %right_extent, %right_extent, %right : index, index, view<[%right_extent]xf32>
+}
+
+// The shaped value can instead depend on the second published extent. Repeated
+// incoming values must not change which result position owns its type.
+func.def @second_extent_returns(%condition: i1, %left_extent: index, %left: view<[%left_extent]xf32>, %right_extent: index, %right: view<[%right_extent]xf32>) -> (index, %extent: index, view<[%extent]xf32>) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  func.return %left_extent, %left_extent, %left : index, index, view<[%left_extent]xf32>
+^right:
+  func.return %right_extent, %right_extent, %right : index, index, view<[%right_extent]xf32>
+}
+
+// ----
+func.def @shaped_returns(%condition: i1, %left_extent: index, %left: view<[%left_extent]xf32>, %right_extent: index, %right: view<[%right_extent]xf32>) -> (%extent: index, view<[%extent]xf32>) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  cfg.br ^_bb3(%left_extent: index, %left: view<[%left_extent]xf32>)
+^right:
+  cfg.br ^_bb3(%right_extent: index, %right: view<[%right_extent]xf32>)
+^_bb3(%23: index, %24: view<[%23]xf32>):
+  func.return %23, %24 : index, view<[%23]xf32>
+}
+
+func.def @repeated_extent_returns(%condition: i1, %left_extent: index, %left: view<[%left_extent]xf32>, %right_extent: index, %right: view<[%right_extent]xf32>) -> (%extent: index, index, view<[%extent]xf32>) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  cfg.br ^_bb3(%left_extent: index, %left_extent: index, %left: view<[%left_extent]xf32>)
+^right:
+  cfg.br ^_bb3(%right_extent: index, %right_extent: index, %right: view<[%right_extent]xf32>)
+^_bb3(%25: index, %26: index, %27: view<[%25]xf32>):
+  func.return %25, %26, %27 : index, index, view<[%25]xf32>
+}
+
+func.def @second_extent_returns(%condition: i1, %left_extent: index, %left: view<[%left_extent]xf32>, %right_extent: index, %right: view<[%right_extent]xf32>) -> (index, %extent: index, view<[%extent]xf32>) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  cfg.br ^_bb3(%left_extent: index, %left_extent: index, %left: view<[%left_extent]xf32>)
+^right:
+  cfg.br ^_bb3(%right_extent: index, %right_extent: index, %right: view<[%right_extent]xf32>)
+^_bb3(%28: index, %29: index, %30: view<[%29]xf32>):
+  func.return %28, %29, %30 : index, index, view<[%29]xf32>
+}

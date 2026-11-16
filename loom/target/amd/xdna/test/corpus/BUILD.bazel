@@ -57,6 +57,7 @@ loom_corpus_test(
         XDNA_HARDWARE_PROFILE.name: {
             "control/branch/convergence.loom:@return_convergence_values": "XDNA/051",
             "control/branch/convergence.loom:@row_convergence_values": "XDNA/051",
+            "control/branch/convergence.loom:@switch_return_convergence_values": "XDNA/051",
             "function/rodata.loom:@rodata_copy_values": "XDNA/051",
             "function/rodata.loom:@rodata_gather_values": "XDNA/051",
             "function/rodata.loom:@rodata_values": "XDNA/051",

@@ -41,8 +41,6 @@ func.def @and_or(%outer: i1, %inner: i1, %last: i1) -> (i1) {
 
 // ====
 
-// RUN: pass cfg-converge,cfg-converge
-
 // The opposite nesting order carries a true incoming predicate.
 func.def @or_and(%outer: i1, %inner: i1, %last: i1) -> (i1) {
   %rejected = scalar.constant false : i1
@@ -84,8 +82,6 @@ func.def @or_and(%outer: i1, %inner: i1, %last: i1) -> (i1) {
 
 // ====
 
-// RUN: pass cfg-converge,cfg-converge
-
 // Shared publication executes once after mutually exclusive predecessors.
 func.def @shared_tail(%publish: i1, %active: i1, %value: i32) {
   cfg.cond_br %publish, ^publish, ^guard
@@ -124,8 +120,6 @@ func.def @shared_tail(%publish: i1, %active: i1, %value: i32) {
 }
 
 // ====
-
-// RUN: pass cfg-converge,cfg-converge
 
 // A loaded live-in gains a scalar carrier; the bypass supplies defined zero.
 func.def @scalar_live_in(%outer: i1, %inner: i1, %input: view<1xi32>, %output: view<1xi32>, %fallback: i32) -> (i32) {
@@ -168,8 +162,6 @@ func.def @scalar_live_in(%outer: i1, %inner: i1, %input: view<1xi32>, %output: v
 }
 
 // ====
-
-// RUN: pass cfg-converge,cfg-converge
 
 // Nested-region uses inherit the containing CFG block availability.
 func.def @nested_capture(%outer: i1, %inner: i1, %input: f32) {
@@ -217,8 +209,6 @@ func.def @nested_capture(%outer: i1, %inner: i1, %input: f32) {
 
 // ====
 
-// RUN: pass cfg-converge,cfg-converge
-
 // Opaque live-ins retain their valid original CFG and ownership.
 func.def @opaque_capture(%outer: i1, %inner: i1, %input: buffer, %output: view<1xi32>) {
   cfg.cond_br %outer, ^evaluate, ^fallback
@@ -257,8 +247,6 @@ func.def @opaque_capture(%outer: i1, %inner: i1, %input: buffer, %output: view<1
 
 // ====
 
-// RUN: pass cfg-converge,cfg-converge
-
 // Branch-local type identities cannot be replaced by scalar placeholders.
 func.def @type_capture(%outer: i1, %inner: i1, %size: index, %seed: i32) {
   cfg.cond_br %outer, ^evaluate, ^fallback
@@ -294,8 +282,6 @@ func.def @type_capture(%outer: i1, %inner: i1, %size: index, %seed: i32) {
 }
 
 // ====
-
-// RUN: pass cfg-converge,cfg-converge
 
 // References hidden in metadata participate in the same preflight.
 func.def @attribute_capture(%outer: i1, %inner: i1, %size: index, %input: f32) {
@@ -333,9 +319,7 @@ func.def @attribute_capture(%outer: i1, %inner: i1, %size: index, %input: f32) {
 
 // ====
 
-// RUN: pass cfg-converge,cfg-converge
-
-// Transparent shared fallback already has an explicit value continuation.
+// A shared branch-only fallback gets a private edge carrying the same value.
 func.def @transparent_fallback(%outer: i1, %inner: i1, %input: i32, %fallback: i32) -> (i32) {
   cfg.cond_br %outer, ^evaluate, ^fallback
 ^evaluate:
@@ -354,21 +338,21 @@ func.def @transparent_fallback(%outer: i1, %inner: i1, %input: i32, %fallback: i
   cfg.cond_br %outer, ^evaluate, ^fallback
 ^evaluate:
   %value = scalar.addi %input, %input : i32
-  cfg.cond_br %inner, ^selected, ^fallback
+  cfg.cond_br %inner, ^selected, ^_bb5
 ^selected:
   cfg.br ^merge(%value: i32)
 ^fallback:
   cfg.br ^merge(%fallback: i32)
 ^merge(%result: i32):
   func.return %result : i32
+^_bb5:
+  cfg.br ^merge(%fallback: i32)
 }
 
 // ====
 
-// RUN: pass cfg-converge,cfg-converge
-
-// A shared true arm has inverted predicate sense and must be factored before
-// the forwarding block is a single-entry successor of the rebuilt decision.
+// Either predicate sense can isolate a branch-only arm without carrying
+// local values through a new decision.
 func.def @transparent_true_arm(%outer: i1, %inner: i1, %input: i32, %fallback: i32) -> (i32) {
   cfg.cond_br %outer, ^fallback, ^evaluate
 ^evaluate:
@@ -384,27 +368,21 @@ func.def @transparent_true_arm(%outer: i1, %inner: i1, %input: i32, %fallback: i
 
 // ----
 func.def @transparent_true_arm(%outer: i1, %inner: i1, %input: i32, %fallback: i32) -> (i32) {
-  cfg.cond_br %outer, ^_bb2, ^evaluate
+  cfg.cond_br %outer, ^fallback, ^evaluate
 ^evaluate:
   %value = scalar.addi %input, %input : i32
-  cfg.br ^_bb3(%inner: i1, %value: i32)
-^_bb2:
-  %9 = scalar.constant 1 : i1
-  %10 = scalar.constant 0 : i32
-  cfg.br ^_bb3(%9: i1, %10: i32)
-^_bb3(%7: i1, %8: i32):
-  cfg.cond_br %7, ^fallback, ^selected
+  cfg.cond_br %inner, ^_bb5, ^selected
 ^selected:
-  cfg.br ^merge(%8: i32)
+  cfg.br ^merge(%value: i32)
 ^fallback:
   cfg.br ^merge(%fallback: i32)
 ^merge(%result: i32):
   func.return %result : i32
+^_bb5:
+  cfg.br ^merge(%fallback: i32)
 }
 
 // ====
-
-// RUN: pass cfg-converge,cfg-converge
 
 // A shared true continuation receives a dedicated forwarding arm after its
 // upstream bypasses join, leaving both decision successors single-entry.
@@ -439,8 +417,6 @@ func.def @direct_true_continuation(%outer: i1, %inner: i1, %value: i32) {
 }
 
 // ====
-
-// RUN: pass cfg-converge,cfg-converge
 
 // Decisions within one loop iteration converge before reaching its latch.
 func.def @loop_decision(%outer: i1, %inner: i1, %repeat: i1) {
@@ -489,8 +465,6 @@ func.def @loop_decision(%outer: i1, %inner: i1, %repeat: i1) {
 
 // ====
 
-// RUN: pass cfg-converge,cfg-converge
-
 // A uniform selector still joins bypassed lanes from varying participation.
 func.def @uniform_selector_with_partial_participation(%outer: i1, %last: i1) -> (i1) {
   %selected = scalar.constant true : i1
@@ -534,8 +508,6 @@ func.def @uniform_selector_with_partial_participation(%outer: i1, %last: i1) -> 
 
 // ====
 
-// RUN: pass cfg-converge,cfg-converge
-
 // Uniform participation and selection retain direct scalar control.
 func.def @fully_uniform_decisions(%last: i1) -> (i1) {
   %selected = scalar.constant true : i1
@@ -575,8 +547,6 @@ func.def @fully_uniform_decisions(%last: i1) -> (i1) {
 }
 
 // ====
-
-// RUN: pass cfg-converge,cfg-converge
 
 // Factoring the final overlap inserts a constant-predicate alternative. That
 // sibling's component order must not prevent factoring the preceding decision.
@@ -627,8 +597,6 @@ func.def @overlapping_siblings(%a: i1, %b: i1, %c: i1, %value: i32) {
 
 // ====
 
-// RUN: pass cfg-converge,cfg-converge
-
 // Reversing the arms and sibling layout preserves the same effect ownership.
 func.def @overlapping_false_siblings(%a: i1, %b: i1, %c: i1, %value: i32) {
   cfg.cond_br %a, ^guard, ^first
@@ -678,8 +646,6 @@ func.def @overlapping_false_siblings(%a: i1, %b: i1, %c: i1, %value: i32) {
 }
 
 // ====
-
-// RUN: pass cfg-converge,cfg-converge
 
 // Scalar captures travel through the inner join while both loop headers keep
 // their original carried state and entry/backedge ownership.
@@ -744,8 +710,6 @@ func.def @nested_loop_capture(%outer: i1, %inner: i1, %repeat_inner: i1, %repeat
 
 // ====
 
-// RUN: pass cfg-converge,cfg-converge
-
 // A shared header and the loop's exit remain boundaries of the loop owner.
 func.def @loop_boundaries(%enter: i1, %active: i1, %repeat: i1) {
   cfg.cond_br %enter, ^header, ^exit
@@ -774,8 +738,6 @@ func.def @loop_boundaries(%enter: i1, %active: i1, %repeat: i1) {
 
 // ====
 
-// RUN: pass cfg-converge,cfg-converge
-
 // Multiple entries into a cycle provide no dominating iteration boundary.
 func.def @irreducible_overlap(%entry: i1, %first: i1, %second: i1, %last: i1, %repeat: i1) {
   cfg.cond_br %entry, ^left, ^right
@@ -795,8 +757,6 @@ func.def @irreducible_overlap(%entry: i1, %first: i1, %second: i1, %last: i1, %r
 }
 
 // ====
-
-// RUN: pass cfg-converge,cfg-converge
 
 // The enclosing decision converges both the shared body and its upstream bypass.
 func.def @upstream_bypass(%leader: i1, %report: i1, %capture: i1, %value: i32) {
@@ -843,8 +803,6 @@ func.def @upstream_bypass(%leader: i1, %report: i1, %capture: i1, %value: i32) {
 }
 
 // ====
-
-// RUN: pass cfg-converge,cfg-converge
 
 // Exchanging the decision arms carries a true predicate on the upstream bypass.
 func.def @upstream_bypass_true(%leader: i1, %report: i1, %capture: i1, %value: i32) {
@@ -893,8 +851,6 @@ func.def @upstream_bypass_true(%leader: i1, %report: i1, %capture: i1, %value: i
 }
 
 // ====
-
-// RUN: pass cfg-converge,cfg-converge
 
 // Upstream loop-local bypasses converge without redirecting the shared body's
 // exit or the latch backedge into the predicate join.
@@ -955,8 +911,6 @@ func.def @loop_upstream_bypass(%running: i1, %leader: i1, %report: i1, %capture:
 
 // ====
 
-// RUN: pass cfg-converge,cfg-converge
-
 // An outer bypass widens the join's parent. Values loaded only on active paths
 // travel through the join; the bypass never performs the load and carries zero.
 func.def @outer_bypass_capture(%enabled: i1, %leader: i1, %capture: i1, %input: view<1xi32>) {
@@ -1005,8 +959,6 @@ func.def @outer_bypass_capture(%enabled: i1, %leader: i1, %capture: i1, %input: 
 
 // ====
 
-// RUN: pass cfg-converge,cfg-converge
-
 // Shared extent providers remain available to block argument types.
 func.def @argument_type_capture(%outer: i1, %inner: i1, %size: index, %seed: i32) {
   cfg.cond_br %outer, ^evaluate, ^fallback
@@ -1049,8 +1001,6 @@ func.def @argument_type_capture(%outer: i1, %inner: i1, %size: index, %seed: i32
 }
 
 // ====
-
-// RUN: pass cfg-converge,cfg-converge
 
 // A loop and its enclosing early-exit decision need distinct result frontiers.
 // Isolate the loop exits behind one payload-preserving gateway before both
@@ -1099,8 +1049,6 @@ func.def @loop_exit_under_outer_bypass(%early: i1, %running: i1, %matched: i1, %
 }
 
 // ====
-
-// RUN: pass cfg-converge,cfg-converge
 
 // Independent loops retain separate, payload-preserving exit gateways even
 // when their exit regions reach the same result block.
@@ -1163,10 +1111,8 @@ func.def @disjoint_loop_frontiers(%left: i1, %running: i1, %matched: i1, %early_
 
 // ====
 
-// RUN: pass cfg-converge,cfg-converge
-
-// Shared exit regions are not owned by either loop. A gateway after them would
-// still be shared, so it cannot isolate either loop's exit frontier.
+// Shared branch-only exits first need private incoming edges. Each loop can
+// then publish its result through its own gateway.
 func.def @shared_loop_exit_regions(%left: i1, %running: i1, %matched: i1, %early_value: i32, %fallback: i32) -> (i32) {
   cfg.cond_br %left, ^left_header, ^right_header
 ^left_header:
@@ -1189,9 +1135,38 @@ func.def @shared_loop_exit_regions(%left: i1, %running: i1, %matched: i1, %early
   func.return %value : i32
 }
 
-// ====
+// ----
+func.def @shared_loop_exit_regions(%left: i1, %running: i1, %matched: i1, %early_value: i32, %fallback: i32) -> (i32) {
+  cfg.cond_br %left, ^left_header, ^right_header
+^left_header:
+  cfg.cond_br %running, ^left_body, ^normal
+^left_body:
+  cfg.cond_br %matched, ^found, ^left_latch
+^left_latch:
+  cfg.br ^left_header
+^right_header:
+  cfg.cond_br %running, ^right_body, ^_bb12
+^right_body:
+  cfg.cond_br %matched, ^_bb13, ^right_latch
+^right_latch:
+  cfg.br ^right_header
+^found:
+  cfg.br ^_bb10(%early_value: i32)
+^normal:
+  cfg.br ^_bb10(%fallback: i32)
+^_bb9(%7: i32):
+  cfg.br ^result(%7: i32)
+^_bb10(%8: i32):
+  cfg.br ^result(%8: i32)
+^result(%value: i32):
+  func.return %value : i32
+^_bb12:
+  cfg.br ^_bb9(%fallback: i32)
+^_bb13:
+  cfg.br ^_bb9(%early_value: i32)
+}
 
-// RUN: pass cfg-converge,cfg-converge
+// ====
 
 // A gateway instantiates the continuation's complete type scheme: its tile
 // refers to its own extent argument, which dominates the forwarded use.
@@ -1237,8 +1212,6 @@ func.def @dependent_loop_frontier(%early: i1, %running: i1, %matched: i1, %size:
 }
 
 // ====
-
-// RUN: pass cfg-converge,cfg-converge
 
 // The first loop's exit region contains the second loop's frontier. Publish
 // one gateway before replanning the overlapping frontier against the new CFG.
@@ -1305,4 +1278,79 @@ func.def @overlapping_loop_frontiers(%early: i1, %running: i1, %matched: i1, %en
   cfg.br ^result(%9: i32)
 ^result(%value: i32):
   func.return %value : i32
+}
+
+// ====
+
+// An earlier true edge and a later false edge share the same result. Splitting
+// only the forwarding edge keeps intermediate arms and their effects intact.
+func.def @shared_switch_result(%first: i1, %second: i1, %third: i1, %original: i32, %other: i32) -> (i32) {
+  cfg.cond_br %first, ^unchanged, ^second
+^second:
+  test.use %second : i1
+  cfg.cond_br %second, ^middle, ^third
+^third:
+  cfg.cond_br %third, ^last, ^unchanged
+^unchanged:
+  cfg.br ^result(%original: i32)
+^middle:
+  test.use %other : i32
+  cfg.br ^result(%other: i32)
+^last:
+  %sum = scalar.addi %original, %other : i32
+  cfg.br ^result(%sum: i32)
+^result(%value: i32):
+  func.return %value : i32
+}
+
+// The outgoing tuple may include references and dependent shaped types. No
+// value or type moves across its defining control path.
+func.def @forwarding_tuple(%outer: i1, %inner: i1, %size: index, %input: view<[%size]xf32>, %output: buffer, %lanes: vector<4xi32>) -> (%result_extent: index, view<[%result_extent]xf32>, buffer, vector<4xi32>) {
+  cfg.cond_br %outer, ^fallback, ^evaluate
+^evaluate:
+  cfg.cond_br %inner, ^work, ^fallback
+^work:
+  test.use %lanes : vector<4xi32>
+  cfg.br ^result(%size: index, %input: view<[%size]xf32>, %output: buffer, %lanes: vector<4xi32>)
+^fallback:
+  cfg.br ^result(%size: index, %input: view<[%size]xf32>, %output: buffer, %lanes: vector<4xi32>)
+^result(%extent: index, %view: view<[%extent]xf32>, %buffer: buffer, %values: vector<4xi32>):
+  func.return %extent, %view, %buffer, %values : index, view<[%extent]xf32>, buffer, vector<4xi32>
+}
+
+// ----
+func.def @shared_switch_result(%first: i1, %second: i1, %third: i1, %original: i32, %other: i32) -> (i32) {
+  cfg.cond_br %first, ^unchanged, ^second
+^second:
+  test.use %second : i1
+  cfg.cond_br %second, ^middle, ^third
+^third:
+  cfg.cond_br %third, ^last, ^_bb7
+^unchanged:
+  cfg.br ^result(%original: i32)
+^middle:
+  test.use %other : i32
+  cfg.br ^result(%other: i32)
+^last:
+  %sum = scalar.addi %original, %other : i32
+  cfg.br ^result(%sum: i32)
+^result(%value: i32):
+  func.return %value : i32
+^_bb7:
+  cfg.br ^result(%original: i32)
+}
+
+func.def @forwarding_tuple(%outer: i1, %inner: i1, %size: index, %input: view<[%size]xf32>, %output: buffer, %lanes: vector<4xi32>) -> (%result_extent: index, view<[%result_extent]xf32>, buffer, vector<4xi32>) {
+  cfg.cond_br %outer, ^fallback, ^evaluate
+^evaluate:
+  cfg.cond_br %inner, ^work, ^_bb5
+^work:
+  test.use %lanes : vector<4xi32>
+  cfg.br ^result(%size: index, %input: view<[%size]xf32>, %output: buffer, %lanes: vector<4xi32>)
+^fallback:
+  cfg.br ^result(%size: index, %input: view<[%size]xf32>, %output: buffer, %lanes: vector<4xi32>)
+^result(%extent: index, %view: view<[%extent]xf32>, %buffer: buffer, %values: vector<4xi32>):
+  func.return %extent, %view, %buffer, %values : index, view<[%extent]xf32>, buffer, vector<4xi32>
+^_bb5:
+  cfg.br ^result(%size: index, %input: view<[%size]xf32>, %output: buffer, %lanes: vector<4xi32>)
 }

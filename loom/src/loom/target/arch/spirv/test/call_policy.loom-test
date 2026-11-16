@@ -112,3 +112,41 @@ func.def noinline @local_value(%value: i32) -> (i32) {
   %result = view.load %view[0] : view<1xi32> -> i32
   func.return %result : i32
 }
+
+// ====
+
+// An early return changes execution without allocating. Its numeric helper
+// remains callable instead of being mistaken for a storage-bearing helper.
+func.def public @entry(%done: i1, %value: i32, %fallback: i32) -> (i32) {
+  %result = func.call @early_result(%done, %value, %fallback) : (i1, i32, i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def noinline @early_result(%done: i1, %value: i32, %fallback: i32) -> (i32) {
+  func.exit %done : i1 {
+    func.return %value : i32
+  }
+  func.return %fallback : i32
+}
+
+// ====
+
+// Actual allocation inside the exit region retains the same storage boundary.
+func.def public @entry(%done: i1, %value: i32) -> (i32) {
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="early_allocation", failure_code="target_requires_inline"}
+  %result = func.call @early_allocation(%done, %value) : (i1, i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def noinline @early_allocation(%done: i1, %value: i32) -> (i32) {
+  func.exit %done : i1 {
+    %origin = index.constant 0 : offset
+    %bytes = index.constant 4 : offset
+    %storage = buffer.alloca<private> align(4) %bytes : buffer
+    %view = buffer.view %storage[%origin] : buffer -> view<1xi32>
+    view.store %value, %view[0] : i32, view<1xi32>
+    %result = view.load %view[0] : view<1xi32> -> i32
+    func.return %result : i32
+  }
+  func.return %value : i32
+}

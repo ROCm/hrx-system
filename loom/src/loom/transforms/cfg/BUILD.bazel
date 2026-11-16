@@ -91,10 +91,25 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "return_frontier",
+    srcs = ["return_frontier.c"],
+    hdrs = ["return_frontier.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "cfg_converge",
     srcs = ["cfg_converge.c"],
     hdrs = ["cfg_converge.h"],
     deps = [
+        ":return_frontier",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:special_values",
         "//loom/src/loom/ops/cfg",
