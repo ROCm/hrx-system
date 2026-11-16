@@ -29,6 +29,23 @@
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/util/fact_table.h"
 
+bool loom_amdgpu_source_memory_scalar_load_is_stable(
+    const loom_view_region_table_t* view_regions,
+    const loom_op_t* source_function,
+    const loom_low_source_memory_access_plan_t* source) {
+  const bool source_is_kernel = loom_kernel_def_isa(source_function);
+  if (view_regions == NULL ||
+      (source->memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_CONSTANT &&
+       !source_is_kernel)) {
+    return false;
+  }
+  return loom_view_region_table_access_is_stable(
+             view_regions, source->root_value_id, source->alias_scope_id,
+             source->restrict_access, source->alias_type,
+             source->memory_space) ||
+         (source->reads_entry_contents && source_is_kernel);
+}
+
 static loom_amdgpu_memory_access_rejection_flags_t
 loom_amdgpu_memory_access_alloca_root_rejection_bit(
     loom_value_fact_memory_space_t memory_space) {

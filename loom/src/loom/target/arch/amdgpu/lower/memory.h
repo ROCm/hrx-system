@@ -141,6 +141,16 @@ typedef struct loom_amdgpu_memory_access_diagnostic_t {
   uint32_t dynamic_term_index;
 } loom_amdgpu_memory_access_diagnostic_t;
 
+// Returns whether a source load observes contents that remain unchanged for
+// the lifetime of an AMDGPU scalar-cache observation. Mutable storage requires
+// a kernel-wide proof: a retained callable's local analysis cannot see vector
+// stores performed by its callers between invocations. Constant storage is
+// immutable independent of the analyzed function boundary.
+bool loom_amdgpu_source_memory_scalar_load_is_stable(
+    const loom_view_region_table_t* view_regions,
+    const loom_op_t* source_function,
+    const loom_low_source_memory_access_plan_t* source);
+
 // Returns true when the selected packet carries a separately lowered resource
 // operand in addition to its physical address operands.
 static inline bool loom_amdgpu_memory_access_uses_resource_operand(

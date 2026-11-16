@@ -746,3 +746,58 @@ check.scenario @restrict_shared_read_storage_values {
   }
   check.return
 }
+
+// Type-disjointness separates incompatible scalar types; it does not make
+// mutable storage immutable across retained calls. Each later load must observe
+// the prefix written after the preceding call returned.
+func.def noinline @retained_typed_load(%storage: buffer, %position: index) -> (i32) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %storage[%origin] : buffer -> view<4xi32>
+  %value = view.load<root_in_bounds|type_disjoint> %view[%position] : view<4xi32> -> i32
+  func.return %value : i32
+}
+
+kernel.def @retained_typed_prefix() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %storage[%origin] : buffer -> view<4xi32>
+  %begin = index.constant 1 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  scf.for %position = [%begin to %end step %step] {
+    %previous_position = index.sub %position, %step : index
+    %previous = func.call readonly @retained_typed_load(%storage, %previous_position) : (buffer, index) -> (i32)
+    %current = func.call readonly @retained_typed_load(%storage, %position) : (buffer, index) -> (i32)
+    %prefix = scalar.addi %previous, %current : i32
+    view.store<root_in_bounds|type_disjoint> %prefix, %view[%position] : i32, view<4xi32>
+  }
+  kernel.return
+}
+
+func.def @retained_typed_prefix_oracle(%storage: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %storage[%origin] : buffer -> view<4xi32>
+  %begin = index.constant 1 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  scf.for %position = [%begin to %end step %step] {
+    %previous_position = index.sub %position, %step : index
+    %previous = view.load %view[%previous_position] : view<4xi32> -> i32
+    %current = view.load %view[%position] : view<4xi32> -> i32
+    %prefix = scalar.addi %previous, %current : i32
+    view.store %prefix, %view[%position] : i32, view<4xi32>
+  }
+  func.return
+}
+
+check.scenario @retained_typed_prefix_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.iota offset(1) step(1) : tensor<4xi32>
+    check.compare<@retained_typed_prefix, @retained_typed_prefix_oracle>(%storage) : (tensor<4xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<4xi32>
+    }
+  }
+  check.return
+}
