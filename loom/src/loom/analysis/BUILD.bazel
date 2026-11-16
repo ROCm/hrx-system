@@ -21,7 +21,6 @@ loom_cc_library(
         "//loom/src/loom/ops:callable_effects",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/util:call_graph",
-        "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

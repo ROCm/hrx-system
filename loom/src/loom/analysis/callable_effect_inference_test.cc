@@ -20,8 +20,20 @@ namespace {
 class CallableEffectInferenceTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    iree_arena_block_pool_initialize(4096, iree_allocator_system(),
-                                     &block_pool_);
+    const iree_allocator_t allocator = {
+        &allocation_count_,
+        [](void* self, iree_allocator_command_t command, const void* params,
+           void** inout_ptr) {
+          iree_allocator_t system = iree_allocator_system();
+          IREE_RETURN_IF_ERROR(
+              system.ctl(system.self, command, params, inout_ptr));
+          if (command != IREE_ALLOCATOR_COMMAND_FREE) {
+            ++*static_cast<iree_host_size_t*>(self);
+          }
+          return iree_ok_status();
+        },
+    };
+    iree_arena_block_pool_initialize(4096, allocator, &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
     RegisterDialect(LOOM_DIALECT_BUFFER, loom_buffer_dialect_vtables);
     RegisterDialect(LOOM_DIALECT_FUNC, loom_func_dialect_vtables);
@@ -161,11 +173,25 @@ class CallableEffectInferenceTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_callable_effect_inference_run(module_));
   }
 
+  // Successful backing allocations, including analysis traversal scratch.
+  iree_host_size_t allocation_count_ = 0;
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
   loom_module_t* module_ = nullptr;
   loom_builder_t module_builder_ = {};
 };
+
+TEST_F(CallableEffectInferenceTest, CallFreeModuleNeedsNoAnalysisAllocation) {
+  const auto function = BuildDefinition(IREE_SV("leaf"));
+  AppendAllocation(function);
+  AppendReturn(function);
+  IREE_ASSERT_OK(loom_module_compute_uses(module_));
+  const auto allocation_count = allocation_count_;
+  IREE_ASSERT_OK(loom_callable_effect_inference_run(module_));
+  EXPECT_EQ(allocation_count_, allocation_count);
+  EXPECT_EQ(loom_func_like_effect_contract(function),
+            LOOM_CALLABLE_EFFECT_CONTRACT_UNSPECIFIED);
+}
 
 TEST_F(CallableEffectInferenceTest, InfersTransitivePureAndReadonlyCalls) {
   const loom_func_like_t pure_leaf = BuildDefinition(IREE_SV("pure_leaf"));

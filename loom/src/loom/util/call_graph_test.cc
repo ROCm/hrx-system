@@ -20,6 +20,22 @@
 namespace loom {
 namespace {
 
+struct GraphAllocations {
+  // Successful allocation requests from the pool to the backing allocator.
+  iree_host_size_t count = 0;
+
+  static iree_status_t Control(void* self, iree_allocator_command_t command,
+                               const void* params, void** inout_ptr) {
+    iree_allocator_t allocator = iree_allocator_system();
+    IREE_RETURN_IF_ERROR(
+        allocator.ctl(allocator.self, command, params, inout_ptr));
+    if (command != IREE_ALLOCATOR_COMMAND_FREE) {
+      ++static_cast<GraphAllocations*>(self)->count;
+    }
+    return iree_ok_status();
+  }
+};
+
 //===----------------------------------------------------------------------===//
 // Test fixture
 //===----------------------------------------------------------------------===//
@@ -27,8 +43,8 @@ namespace {
 class CallGraphTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    iree_arena_block_pool_initialize(4096, iree_allocator_system(),
-                                     &block_pool_);
+    iree_arena_block_pool_initialize(
+        4096, {&allocations_, GraphAllocations::Control}, &block_pool_);
     loom_context_initialize(iree_allocator_system(), &context_);
 
     iree_host_size_t test_vtable_count = 0;
@@ -56,9 +72,13 @@ class CallGraphTest : public ::testing::Test {
 
   // Function fixture with its symbol and root regions.
   struct FuncInfo {
+    // Definition's identity in the module.
     loom_symbol_id_t symbol_id;
+    // Function-like operation owning the root regions.
     loom_op_t* func_op;
+    // Optional configuration root, distinct from the function body.
     loom_region_t* config;
+    // Executable body root.
     loom_region_t* body;
   };
 
@@ -156,6 +176,8 @@ class CallGraphTest : public ::testing::Test {
 
   void finalize() { IREE_ASSERT_OK(loom_module_compute_uses(module_)); }
 
+  // Tracks backing allocations independently of optional statistics builds.
+  GraphAllocations allocations_;
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
   loom_module_t* module_ = nullptr;
@@ -170,9 +192,10 @@ class CallGraphTest : public ::testing::Test {
 TEST_F(CallGraphTest, EmptyModule) {
   finalize();
   loom_call_graph_t graph;
-  IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, nullptr, &graph_arena_, &graph));
   EXPECT_EQ(graph.node_count, 0u);
-  EXPECT_EQ(graph.scc_count, 0u);
+  EXPECT_EQ(graph.components.count, 0u);
   EXPECT_EQ(graph.call_kinds, 0u);
   EXPECT_EQ(graph.nodes, nullptr);
   EXPECT_EQ(graph_arena_.used_allocation_size, 0u);
@@ -189,6 +212,138 @@ TEST_F(CallGraphTest, TrackedCallKinds) {
   EXPECT_FALSE(loom_call_graph_tracks_call_kind(LOOM_CALL_LIKE_KIND_TEMPLATE));
   EXPECT_FALSE(
       loom_call_graph_tracks_call_kind(LOOM_CALL_LIKE_KIND_COMPOSITION));
+}
+
+TEST_F(CallGraphTest, ExplicitRootsExcludeUnreachableDefinitionsAndStorage) {
+  auto root = create_func("root");
+  auto leaf = create_func("leaf");
+  add_call(root, leaf.symbol_id);
+  const loom_symbol_id_t roots[] = {root.symbol_id, root.symbol_id};
+  const loom_call_graph_options_t options = {
+      .roots = roots,
+      .root_count = IREE_ARRAYSIZE(roots),
+  };
+  finalize();
+  loom_call_graph_t graph;
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, &options, &graph_arena_, &graph));
+  const auto used_bytes = graph_arena_.used_allocation_size;
+  iree_arena_reset(&graph_arena_);
+
+  for (int i = 0; i < 512; ++i) {
+    auto unused = create_func(("unused_" + std::to_string(i)).c_str());
+    add_call(unused, leaf.symbol_id);
+  }
+  finalize();
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, &options, &graph_arena_, &graph));
+  EXPECT_EQ(graph.node_count, 2u);
+  EXPECT_EQ(graph.nodes[0].symbol_id, root.symbol_id);
+  EXPECT_EQ(graph.nodes[1].symbol_id, leaf.symbol_id);
+  EXPECT_EQ(loom_call_graph_node(&graph, leaf.symbol_id)->caller_count, 1u);
+  EXPECT_EQ(graph_arena_.used_allocation_size, used_bytes);
+  EXPECT_EQ(graph.components.count, 2u);
+  EXPECT_EQ(graph.components.values[0].nodes[0], 1u);
+  EXPECT_EQ(graph.components.values[1].nodes[0], 0u);
+}
+
+TEST_F(CallGraphTest, EmptyRootSetAndDeclarationNeedNoStorage) {
+  create_func("unselected");
+  const auto declaration = create_decl("external");
+  finalize();
+  const loom_symbol_id_t roots[] = {declaration.symbol_id};
+  loom_call_graph_options_t options = {.roots = roots, .root_count = 0};
+  loom_call_graph_t graph;
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, &options, &graph_arena_, &graph));
+  EXPECT_EQ(graph.node_count, 0u);
+  EXPECT_EQ(graph_arena_.used_allocation_size, 0u);
+  options.root_count = 1;
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, &options, &graph_arena_, &graph));
+  EXPECT_EQ(graph.node_count, 0u);
+  EXPECT_EQ(loom_call_graph_node(&graph, declaration.symbol_id), nullptr);
+  EXPECT_EQ(graph_arena_.used_allocation_size, 0u);
+}
+
+TEST_F(CallGraphTest, RepeatedAnalysisReusesPooledTraversalAndResultStorage) {
+  auto root = create_func("root");
+  auto helper = create_func("helper");
+  add_call(root, helper.symbol_id);
+  add_call(helper, root.symbol_id);
+  finalize();
+  loom_call_graph_t graph;
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, nullptr, &graph_arena_, &graph));
+  iree_arena_reset(&graph_arena_);
+  const auto allocation_count = allocations_.count;
+  for (int i = 0; i < 100; ++i) {
+    IREE_ASSERT_OK(
+        loom_call_graph_build(module_, nullptr, &graph_arena_, &graph));
+    EXPECT_TRUE(loom_call_graph_is_recursive(&graph, root.symbol_id));
+    iree_arena_reset(&graph_arena_);
+  }
+  EXPECT_EQ(allocations_.count, allocation_count);
+}
+
+TEST_F(CallGraphTest, LocalCollectionSharesDiscoveryAcrossRootRegions) {
+  auto root = create_split_func("root");
+  auto empty = create_func("empty");
+  loom_builder_t builder;
+  loom_builder_initialize(module_, &module_->arena,
+                          loom_region_entry_block(root.config), &builder);
+  builder.ip.parent_op = root.func_op;
+  loom_op_t* constant = nullptr;
+  IREE_ASSERT_OK(loom_test_constant_build(
+      &builder, loom_attr_i64(1), loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      LOOM_LOCATION_UNKNOWN, &constant));
+  loom_op_t* call = add_call(root, empty.symbol_id);
+  finalize();
+  struct Collection {
+    // Definitions visited before their operations, including the empty callee.
+    std::vector<loom_op_t*> functions;
+    // Local operations collected without a second traversal.
+    std::vector<loom_op_t*> operations;
+    // Root regions supplied by the shared walk.
+    std::vector<loom_region_t*> regions;
+    // Tracked calls already classified by graph discovery.
+    std::vector<loom_op_t*> calls;
+  } collection;
+  const loom_call_graph_options_t options = {
+      .roots = &root.symbol_id,
+      .root_count = 1,
+      .visitor = {
+          .user_data = &collection,
+          .function =
+              [](void* user_data, uint16_t node, loom_func_like_t function) {
+                auto& state = *static_cast<Collection*>(user_data);
+                EXPECT_EQ(node, state.functions.size());
+                state.functions.push_back(function.op);
+                return iree_ok_status();
+              },
+          .operation =
+              [](void* user_data, uint16_t node, loom_op_t* op,
+                 loom_call_like_t call, const loom_walk_context_t* context) {
+                auto& state = *static_cast<Collection*>(user_data);
+                EXPECT_EQ(node, 0u);
+                state.operations.push_back(op);
+                state.regions.push_back(context->region);
+                if (loom_call_like_isa(call)) {
+                  state.calls.push_back(call.op);
+                }
+                return iree_ok_status();
+              },
+      },
+  };
+  loom_call_graph_t graph;
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, &options, &graph_arena_, &graph));
+  EXPECT_EQ(collection.functions,
+            (std::vector<loom_op_t*>{root.func_op, empty.func_op}));
+  EXPECT_EQ(collection.operations, (std::vector<loom_op_t*>{constant, call}));
+  EXPECT_EQ(collection.regions,
+            (std::vector<loom_region_t*>{root.config, root.body}));
+  EXPECT_EQ(collection.calls, (std::vector<loom_op_t*>{call}));
 }
 
 TEST_F(CallGraphTest, VisitsEveryCallsiteAcrossKindsAndRoots) {
@@ -211,16 +366,22 @@ TEST_F(CallGraphTest, VisitsEveryCallsiteAcrossKindsAndRoots) {
     std::vector<loom_symbol_id_t> callers;
   } visits;
   loom_call_graph_t graph;
-  IREE_ASSERT_OK(loom_call_graph_build_with_calls(
-      module_, &graph_arena_,
-      {&visits,
-       [](void* user_data, loom_symbol_id_t caller, loom_call_like_t call) {
-         auto* visits = static_cast<Visits*>(user_data);
-         visits->operations.push_back(call.op);
-         visits->callers.push_back(caller);
-         return iree_ok_status();
-       }},
-      &graph));
+  const loom_call_graph_options_t options = {
+      .visitor =
+          {
+              .user_data = &visits,
+              .call =
+                  [](void* user_data, loom_symbol_id_t caller,
+                     loom_call_like_t call) {
+                    auto* visits = static_cast<Visits*>(user_data);
+                    visits->operations.push_back(call.op);
+                    visits->callers.push_back(caller);
+                    return iree_ok_status();
+                  },
+          },
+  };
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, &options, &graph_arena_, &graph));
   EXPECT_EQ(visits.operations, expected);
   EXPECT_TRUE(
       loom_call_graph_has_call_kind(&graph, LOOM_CALL_LIKE_KIND_SEMANTIC));
@@ -254,7 +415,8 @@ TEST_F(CallGraphTest, DeclarationCallContributesKindWithoutCalleeNode) {
   add_call(caller, declaration.symbol_id);
   finalize();
   loom_call_graph_t graph;
-  IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, nullptr, &graph_arena_, &graph));
   EXPECT_TRUE(
       loom_call_graph_has_call_kind(&graph, LOOM_CALL_LIKE_KIND_SEMANTIC));
   EXPECT_FALSE(
@@ -283,7 +445,8 @@ TEST_F(CallGraphTest, DistinctCalleesPreserveOrderAcrossCallers) {
   add_call(callees.back(), second.symbol_id);
   finalize();
   loom_call_graph_t graph;
-  IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, nullptr, &graph_arena_, &graph));
   const auto* first_node = loom_call_graph_node(&graph, first.symbol_id);
   const auto* second_node = loom_call_graph_node(&graph, second.symbol_id);
   ASSERT_EQ(first_node->callee_count, callees.size());
@@ -310,7 +473,8 @@ TEST_F(CallGraphTest, SingleFunctionNoCalls) {
   finalize();
 
   loom_call_graph_t graph;
-  IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, nullptr, &graph_arena_, &graph));
 
   EXPECT_EQ(graph.node_count, 1u);
   EXPECT_EQ(graph.call_kinds, 0u);
@@ -333,7 +497,8 @@ TEST_F(CallGraphTest, LinearChain) {
   finalize();
 
   loom_call_graph_t graph;
-  IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, nullptr, &graph_arena_, &graph));
 
   EXPECT_EQ(graph.node_count, 3u);
   EXPECT_FALSE(loom_call_graph_is_recursive(&graph, a.symbol_id));
@@ -369,7 +534,8 @@ TEST_F(CallGraphTest, DistinctCallersCountRepeatedCallsOnce) {
   finalize();
 
   loom_call_graph_t graph;
-  IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, nullptr, &graph_arena_, &graph));
 
   EXPECT_EQ(loom_call_graph_node(&graph, first.symbol_id)->caller_count, 0u);
   EXPECT_EQ(loom_call_graph_node(&graph, second.symbol_id)->caller_count, 0u);
@@ -384,7 +550,8 @@ TEST_F(CallGraphTest, FindsCallsInEveryFunctionRootRegion) {
   finalize();
 
   loom_call_graph_t graph;
-  IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, nullptr, &graph_arena_, &graph));
 
   const loom_call_graph_node_t* node =
       loom_call_graph_node(&graph, caller.symbol_id);
@@ -399,7 +566,8 @@ TEST_F(CallGraphTest, SelfRecursion) {
   finalize();
 
   loom_call_graph_t graph;
-  IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, nullptr, &graph_arena_, &graph));
 
   EXPECT_EQ(graph.node_count, 1u);
   EXPECT_TRUE(loom_call_graph_is_recursive(&graph, f.symbol_id));
@@ -415,7 +583,8 @@ TEST_F(CallGraphTest, MutualRecursion) {
   finalize();
 
   loom_call_graph_t graph;
-  IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, nullptr, &graph_arena_, &graph));
 
   EXPECT_EQ(graph.node_count, 2u);
   EXPECT_TRUE(loom_call_graph_is_recursive(&graph, a.symbol_id));
@@ -437,7 +606,8 @@ TEST_F(CallGraphTest, DisconnectedFunctions) {
   finalize();
 
   loom_call_graph_t graph;
-  IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, nullptr, &graph_arena_, &graph));
 
   EXPECT_EQ(graph.node_count, 2u);
   EXPECT_FALSE(loom_call_graph_is_recursive(&graph, a.symbol_id));
@@ -451,7 +621,8 @@ TEST_F(CallGraphTest, LowInternalCallEdge) {
   finalize();
 
   loom_call_graph_t graph;
-  IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, nullptr, &graph_arena_, &graph));
 
   EXPECT_TRUE(
       loom_call_graph_has_call_kind(&graph, LOOM_CALL_LIKE_KIND_LOW_INTERNAL));
@@ -472,7 +643,8 @@ TEST_F(CallGraphTest, LowInvokeCallEdge) {
   finalize();
 
   loom_call_graph_t graph;
-  IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+  IREE_ASSERT_OK(
+      loom_call_graph_build(module_, nullptr, &graph_arena_, &graph));
 
   EXPECT_TRUE(
       loom_call_graph_has_call_kind(&graph, LOOM_CALL_LIKE_KIND_LOW_INVOKE));

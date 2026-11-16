@@ -686,11 +686,15 @@ iree_status_t loom_low_source_invocation_facts_compute(
             .selection = selection;
       }
     }
-    status = loom_call_graph_build_with_calls(
-        module, arena,
-        (loom_call_graph_call_visitor_t){
-            .user_data = &work, .fn = loom_low_source_invocation_collect_call},
-        &out_facts->call_graph);
+    const loom_call_graph_options_t graph_options = {
+        .visitor =
+            {
+                .user_data = &work,
+                .call = loom_low_source_invocation_collect_call,
+            },
+    };
+    status = loom_call_graph_build(module, &graph_options, arena,
+                                   &out_facts->call_graph);
   }
   if (iree_status_is_ok(status) && work.call_count != 0) {
     uint8_t* direct_call_targets = NULL;
