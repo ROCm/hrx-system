@@ -261,8 +261,9 @@ TEST_P(SubmissionTest, RetirementOwnsNativeReadersWithoutCallerInputs) {
                                        0x1000, 8, 0, &signal_block);
   auto* producer = iree_hal_amd_gpu_signal_pool_try_acquire(&signal_pool, 0);
   iree_hal_amd_gpu_signal_publish_frontier(producer, &native_frontier);
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_semaphore_publish_signal(semaphore, 1, producer));
+  iree_hal_amd_gpu_semaphore_producer_t publication = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_publish_signal(
+      semaphore, 1, producer, &publication));
   iree_hal_amd_gpu_semaphore_wait_t acquired;
   IREE_ASSERT_OK(
       iree_hal_amd_gpu_semaphore_acquire_wait(semaphore, 1, this, &acquired));
@@ -299,6 +300,9 @@ TEST_P(SubmissionTest, RetirementOwnsNativeReadersWithoutCallerInputs) {
   EXPECT_EQ(retirement->waits[0].signal, acquired.signal);
   EXPECT_EQ(retirement->dispatch.constants.data, nullptr);
   EXPECT_EQ(retirement->dispatch.constants.data_length, 0u);
+  iree_hal_semaphore_fail(semaphore,
+                          iree_status_from_code(IREE_STATUS_ABORTED));
+  iree_hal_amd_gpu_semaphore_unpublish_signal(semaphore, &publication);
   iree_hal_semaphore_release(semaphore);
   iree_hal_executable_release(&executable.base);
   EXPECT_FALSE(executable.destroyed);

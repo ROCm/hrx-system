@@ -20,6 +20,7 @@ iree_status_t iree_hal_amd_gpu_sdma_operation_create(
       (queue->profile ? sizeof(iree_hal_amd_gpu_profile_operation_t) : 0);
   iree_host_size_t size = 0, waits_offset = 0, values_offset = 0;
   iree_host_size_t signals_offset = 0, payload_offset = 0;
+  iree_host_size_t producers_offset = 0;
   iree_host_size_t pending_offset = 0, tracker_offset = 0, tracker_size = 0;
   if (waits.count) {
     IREE_RETURN_IF_ERROR(
@@ -29,6 +30,8 @@ iree_status_t iree_hal_amd_gpu_sdma_operation_create(
       header_size, &size,
       IREE_STRUCT_FIELD(waits.count, iree_hal_amd_gpu_sdma_wait_t,
                         &waits_offset),
+      IREE_STRUCT_FIELD(signals.count, iree_hal_amd_gpu_semaphore_producer_t,
+                        &producers_offset),
       IREE_STRUCT_FIELD(signals.count, uint64_t, &values_offset),
       IREE_STRUCT_FIELD(signals.count, iree_hal_semaphore_t*, &signals_offset),
       IREE_STRUCT_FIELD(waits.count ? 1 : 0, iree_hal_amd_gpu_sdma_pending_t,
@@ -49,6 +52,7 @@ iree_status_t iree_hal_amd_gpu_sdma_operation_create(
       .allocation_size = storage.data_length,
       .waits = (void*)(storage.data + waits_offset),
       .wait_count = waits.count,
+      .signal_producers = (void*)(storage.data + producers_offset),
       .signals =
           {
               .count = signals.count,
@@ -75,6 +79,7 @@ iree_status_t iree_hal_amd_gpu_sdma_operation_create(
     iree_hal_semaphore_retain(waits.semaphores[i]);
   }
   for (iree_host_size_t i = 0; i < signals.count; ++i) {
+    operation->signal_producers[i] = (iree_hal_amd_gpu_semaphore_producer_t){0};
     operation->signals.semaphores[i] = signals.semaphores[i];
     operation->signals.payload_values[i] = signals.payload_values[i];
     iree_hal_semaphore_retain(signals.semaphores[i]);
@@ -125,6 +130,10 @@ static void iree_hal_amd_gpu_sdma_operation_free(
     iree_hal_semaphore_release(operation->waits[i].semaphore);
   }
   for (iree_host_size_t i = 0; i < operation->signals.count; ++i) {
+    if (operation->signal_producers[i].signal) {
+      iree_hal_amd_gpu_semaphore_unpublish_signal(
+          operation->signals.semaphores[i], &operation->signal_producers[i]);
+    }
     iree_hal_semaphore_release(operation->signals.semaphores[i]);
   }
   iree_hal_amd_gpu_signal_release(operation->signal);
