@@ -1066,14 +1066,16 @@ TEST_F(FiniteContinuation, DecisionPrefixResumesWithoutReplayingAcceptedWork) {
   bool progress = false;
   loom_runtime_driver_schedule(&driver_, policy, plan, &budget, &context,
                                &progress);
-  EXPECT_TRUE(progress);  // Yield the pending suffix to a later owner turn.
-  EXPECT_EQ(context.wake_time_ns, context.now_ns);
+  EXPECT_FALSE(progress);  // Withheld credit does not poll the pending suffix.
+  EXPECT_EQ(context.wake_time_ns, IREE_TIME_INFINITE_FUTURE);
   EXPECT_EQ(loom_runtime_service_plan_layout(plan).applied_count, 0u);
   EXPECT_EQ(source_.prepared, 0u);
 
   budget.decisions = 1;
   loom_runtime_driver_schedule(&driver_, policy, plan, &budget, &context,
                                &progress);
+  EXPECT_TRUE(progress);  // Consumed credit yields the retained suffix.
+  EXPECT_EQ(context.wake_time_ns, context.now_ns);
   EXPECT_EQ(budget.decisions, 0u);
   EXPECT_EQ(loom_runtime_service_plan_layout(plan).applied_count, 1u);
   EXPECT_FALSE(loom_runtime_service_plan_outcome(plan, 0).accepted);

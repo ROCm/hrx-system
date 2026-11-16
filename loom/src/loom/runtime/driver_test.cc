@@ -247,6 +247,75 @@ TEST_F(DriverTest, StaleDecisionsSpendBothIndependentRoundBudgets) {
   }
 }
 
+TEST_F(DriverTest, WithheldBudgetsPreservePlansWithoutPolling) {
+  std::array<uint64_t, 17> storage;
+  loom_runtime_service_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(loom_runtime_service_plan_initialize(
+      1, iree_make_byte_span(storage.data(), sizeof(storage)), &plan));
+  size_t evaluations = 0;
+  const loom_runtime_service_policy_t policy = {
+      .self = &evaluations,
+      .select =
+          [](void* self, const loom_runtime_driver_t*,
+             loom_runtime_service_schedule_context_t* context,
+             loom_runtime_service_plan_t* output) {
+            ++*static_cast<size_t*>(self);
+            loom_runtime_service_plan_reset(output);
+            const loom_runtime_service_decision_t stale = {
+                .service_ordinal = 4,
+                .service_incarnation = 1,
+            };
+            EXPECT_TRUE(loom_runtime_service_plan_append(output, &stale));
+            context->wake_time_ns = 500;
+          },
+  };
+  services_[0].pending = true;
+  bool progress = false;
+  loom_runtime_driver_advance(&driver_, &progress);
+  EXPECT_TRUE(loom_runtime_driver_collect(&driver_, &progress));
+  EXPECT_FALSE(progress);
+  loom_runtime_service_schedule_context_t context = {.now_ns = 123};
+  loom_runtime_service_schedule_budget_t budget = {0, 4};
+  loom_runtime_driver_schedule(&driver_, policy, plan, &budget, &context,
+                               &progress);
+  EXPECT_EQ(evaluations, 0u);
+  EXPECT_EQ(context.wake_time_ns, IREE_TIME_INFINITE_FUTURE);
+  EXPECT_FALSE(progress);
+
+  budget = {3, 0};
+  loom_runtime_driver_schedule(&driver_, policy, plan, &budget, &context,
+                               &progress);
+  EXPECT_EQ(evaluations, 1u);
+  EXPECT_EQ(context.wake_time_ns, 500);
+  EXPECT_EQ(loom_runtime_service_plan_layout(plan).decision_count, 1u);
+  EXPECT_EQ(loom_runtime_service_plan_layout(plan).applied_count, 0u);
+  EXPECT_FALSE(progress);
+
+  budget = {0, 0};
+  loom_runtime_driver_schedule(&driver_, policy, plan, &budget, &context,
+                               &progress);
+  EXPECT_EQ(evaluations, 1u);
+  EXPECT_EQ(context.wake_time_ns, IREE_TIME_INFINITE_FUTURE);
+  EXPECT_EQ(loom_runtime_service_plan_layout(plan).applied_count, 0u);
+  EXPECT_FALSE(progress);
+
+  // Existing decisions can consume granted application credit independently
+  // of policy evaluation. The prefix is attempted once, then remains inert.
+  budget = {0, 1};
+  loom_runtime_driver_schedule(&driver_, policy, plan, &budget, &context,
+                               &progress);
+  EXPECT_EQ(loom_runtime_service_plan_layout(plan).applied_count, 1u);
+  EXPECT_EQ(evaluations, 1u);
+  EXPECT_EQ(context.wake_time_ns, context.now_ns);
+  EXPECT_FALSE(progress);
+  budget = {0, 1};
+  loom_runtime_driver_schedule(&driver_, policy, plan, &budget, &context,
+                               &progress);
+  EXPECT_EQ(budget.decisions, 1u);
+  EXPECT_EQ(context.wake_time_ns, IREE_TIME_INFINITE_FUTURE);
+  EXPECT_FALSE(progress);
+}
+
 TEST(DriverPolicyTest, FullOutputVisitsPeersBeforeWrappingOffers) {
   const iree_host_size_t use_capacity = 0;
   const loom_runtime_service_offer_capacity_t offers[] = {

@@ -196,12 +196,15 @@ void loom_runtime_driver_schedule(
   if (driver->stopping || !iree_status_is_ok(driver->status)) {
     return;
   }
+  const bool may_evaluate = budget->evaluations != 0;
   for (;;) {
     loom_runtime_service_plan_layout_t layout =
         loom_runtime_service_plan_layout(plan);
     if (layout.applied_count == layout.decision_count) {
       if (!budget->evaluations) {
-        context->wake_time_ns = context->now_ns;
+        if (may_evaluate) {
+          context->wake_time_ns = context->now_ns;
+        }
         break;
       }
       --budget->evaluations;
@@ -214,6 +217,11 @@ void loom_runtime_driver_schedule(
       if (!layout.decision_count) {
         break;
       }
+    }
+    // Withheld application credit preserves the plan without manufacturing
+    // progress. Consuming granted credit below instead yields another turn.
+    if (!budget->decisions) {
+      break;
     }
     bool progress = false;
     loom_runtime_driver_apply_plan(driver, plan, &budget->decisions, &progress);

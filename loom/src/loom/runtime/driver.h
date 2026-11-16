@@ -115,7 +115,10 @@ loom_runtime_service_policy_t loom_runtime_service_default_policy(
 // wake_time_ns is the earliest requested deadline, or now_ns when a cap leaves
 // further scheduling work. The application integrates that deadline with its
 // existing wait/timer and may wake earlier for actual service/resource events.
-// Native completion is the handoff; no plan count is a readiness signal.
+// An initially zero budget withholds that phase without requesting an immediate
+// wake. The owner supplies its next scheduling opportunity; an unapplied plan
+// remains retained. A positive budget exhausted by this call yields another
+// turn. Native completion is the handoff; no plan count is a readiness signal.
 void loom_runtime_driver_schedule(
     loom_runtime_driver_t* driver, loom_runtime_service_policy_t policy,
     loom_runtime_service_plan_t* plan,
