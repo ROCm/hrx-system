@@ -13,7 +13,6 @@ load(
 )
 load(
     ":loom_corpus_build.bzl",
-    _LoomCorpusBuildInfo = "LoomCorpusBuildInfo",
     _loom_corpus_build = "loom_corpus_build",
 )
 load(
@@ -26,6 +25,10 @@ load(
     ":loom_corpus_execution.bzl",
     _loom_corpus_test = "loom_corpus_test",
     _loom_scenario_test = "loom_scenario_test",
+)
+load(
+    ":loom_corpus_info.bzl",
+    _LoomCorpusBuildInfo = "LoomCorpusBuildInfo",
 )
 load(
     ":loom_library.bzl",

@@ -177,6 +177,8 @@ static loomc_status_t loomc_compile_validate_artifact_options(
         loomc_compile_validate_string_view(options->excluded_roots[i]));
   }
   const loomc_compile_artifact_flags_t known_artifact_flags =
+      LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT |
+      LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_BYTECODE |
       LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG;
   if ((options->artifact_flags & ~known_artifact_flags) != 0) {
     return loomc_make_status(

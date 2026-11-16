@@ -222,6 +222,7 @@ loom_corpus_build(
     },
     catalog = LOOM_CORPUS,
     excludes = {"//loom/target/amdgpu:all": _NO_KERNEL_ARTIFACT_EXCLUDES},
+    prepared_sources = ["memory/storage/private_reuse.loom"],
     profiles = ["//loom/target/amdgpu:all"],
     xfails = _COMPILE_XFAILS,
 )
@@ -236,6 +237,7 @@ loom_corpus_test(
         },
     },
     args = ["--execution-progress"],
+    build = ":all",
     catalog = LOOM_CORPUS,
     execution_profiles = [
         AMD_GPU_HARDWARE_PROFILE,

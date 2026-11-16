@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
+load("//loom/binding/c:shared.bzl", "loomc_cc_binary")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_binary",
@@ -43,6 +44,29 @@ loom_cc_binary(
     ],
 )
 
+loomc_cc_binary(
+    name = "loom-corpus-assemble-package",
+    srcs = ["prepare_package.c"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/binding/c:interop",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/ir:headers",
+        "//loom/src/loom/tooling/cli:loomc_result",
+        "//loom/src/loom/tooling/execution/hal:prepared_package",
+        "//loom/src/loom/tooling/io:file",
+        "//loom/src/loom/tooling/testbench",
+        "//loom/src/loom/tooling/testbench:api",
+        "//loom/src/loom/tooling/testbench:issue_report",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/io:file_handle",
+    ],
+)
+
 loom_cc_test(
     name = "diagnostic_report_test",
     srcs = ["diagnostic_report_test.cc"],
@@ -66,5 +90,24 @@ iree_cli_test(
     tools = {
         "loom-compile": "//loom/src/loom/tools/loom-compile",
         "loom-corpus-compile-xfails": ":loom-corpus-compile-xfails",
+    },
+)
+
+iree_cli_test(
+    name = "assemble_package_execution_test",
+    data = ["//loom/build_tools/corpus/testdata:prepared_package.loom"],
+    manifests = ["prepare_package.test.json"],
+    tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/emit:x86_elf",
+        "//loom/config/emit:vm_binary",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
+    ]),
+    tools = {
+        "loom-compile": "//loom/src/loom/tools/loom-compile",
+        "loom-corpus-assemble-package": ":loom-corpus-assemble-package",
+        "loom-link": "//loom/src/loom/tools/loom-link",
+        "loom-test": "//loom/src/loom/tools/loom-test",
     },
 )

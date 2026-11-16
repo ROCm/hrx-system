@@ -253,13 +253,14 @@ loom_corpus_test(
             "sample/other.loom:@other_scenario": "TARGET/003,EXPECT/006",
         },
     },
+    build = "//loom/build_tools/bazel/test/testdata/corpus/target:all",
     catalog = TEST_CORPUS,
     execution_profiles = [loom_execution_profile(
         name = "reference",
         executor = "reference",
         runner_args = ["--max-samples-per-case=1"],
         target_class = "cpu",
-        target_family = "test",
+        target_family = "fake",
     )],
     profile_sources = {
         "reference": [

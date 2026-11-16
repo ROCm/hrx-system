@@ -171,12 +171,14 @@ def _test_program_supports_all_roots_xfail_impl(env, target):
             env.fail("expected %r in all-roots xfail arguments %r" % (expected_arg, profile_b.argv))
 
     default_files = target[DefaultInfo].files.to_list()
-    if len(default_files) != 3:
-        env.fail("expected one artifact, one report, and one xfail result: %r" % default_files)
+    if len(default_files) != 4:
+        env.fail("expected one artifact, report, package, and xfail result: %r" % default_files)
     if len(target[OutputGroupInfo].artifacts.to_list()) != 1:
         env.fail("expected one artifact output-group file")
     if len(target[OutputGroupInfo].compile_reports.to_list()) != 1:
         env.fail("expected one compile-report output-group file")
+    if len(target[OutputGroupInfo].prepared_packages.to_list()) != 1:
+        env.fail("expected one prepared-package output-group directory")
     if len(target[OutputGroupInfo].xfail_results.to_list()) != 1:
         env.fail("expected one xfail-result output-group file")
 
@@ -207,8 +209,27 @@ def _test_aggregate_collects_program_outputs_impl(env, target):
             "expected three corpus qualification results, got %r" %
             corpus.qualification_results.to_list(),
         )
-    if len(target[DefaultInfo].files.to_list()) != 9:
+    if len(corpus.prepared_packages.to_list()) != 1:
+        env.fail("expected one prepared corpus package")
+    if len(target[DefaultInfo].files.to_list()) != 10:
         env.fail("aggregate default outputs must request every qualification action")
+
+def _test_execution_uses_profile_package_candidates(name, **kwargs):
+    analysis_test(
+        name = name,
+        impl = _test_execution_uses_profile_package_candidates_impl,
+        target = ":sample_other_test_execute_reference_test_launcher",
+        **kwargs
+    )
+
+def _test_execution_uses_profile_package_candidates_impl(env, target):
+    info = target[LoomExecutionTestInfo]
+    prepared_packages = info.prepared_packages
+    if len(prepared_packages) != 1:
+        env.fail("expected one fake-target package candidate, got %r" % prepared_packages)
+    env.expect.that_str(prepared_packages[0].basename).equals(
+        "fake-a.package",
+    )
 
 def _test_program_allows_explicit_full_exclusion(name, **kwargs):
     analysis_test(
@@ -303,6 +324,7 @@ def loom_corpus_rules_test_suite(name):
             _test_aggregate_collects_program_outputs,
             _test_execution_carries_allowed_failures,
             _test_execution_partitions_profiles_and_xfails,
+            _test_execution_uses_profile_package_candidates,
             _test_program_allows_explicit_full_exclusion,
             _test_program_exposes_outputs_and_batched_xfails,
             _test_program_fans_out_by_profile,

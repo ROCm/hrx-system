@@ -125,6 +125,8 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
   loom_target_compile_report_initialize(iree_allocator_system(), &report);
   report.artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_HAL_EXECUTABLE;
   report.backend_name = IREE_SVL("hal");
+  report.artifact_format = IREE_SVL("elf");
+  report.public_artifact_format = IREE_SVL("amdgpu-hsaco");
   loom_target_compile_report_record_artifact_size(&report, 256);
   IREE_ASSERT_OK(loom_target_compile_report_record_pressure_row(
       &report, &pressure_rows[0]));
@@ -210,6 +212,9 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
   ExpectObjectValueEquals(root, IREE_SV("artifact_kind"),
                           IREE_SV("hal-executable"));
   ExpectObjectValueEquals(root, IREE_SV("backend"), IREE_SV("hal"));
+  ExpectObjectValueEquals(root, IREE_SV("artifact_format"), IREE_SV("elf"));
+  ExpectObjectValueEquals(root, IREE_SV("public_artifact_format"),
+                          IREE_SV("amdgpu-hsaco"));
   ExpectObjectUint64Equals(root, IREE_SV("artifact_size"), 256);
 
   const iree_string_view_t entries = LookupObject(root, IREE_SV("entries"));

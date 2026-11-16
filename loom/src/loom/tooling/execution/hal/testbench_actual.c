@@ -612,16 +612,63 @@ static iree_status_t loom_run_hal_testbench_reflect_function_parameters(
   return status;
 }
 
-iree_status_t loom_run_hal_testbench_actual_provider_compile(
-    loom_run_hal_testbench_actual_provider_t* provider) {
-  if (provider->prepared_candidate_initialized || provider->compile_rejected) {
-    return iree_ok_status();
+typedef struct loom_run_hal_testbench_emit_options_storage_t {
+  // Caller-requested artifact-manifest options in the extension chain.
+  loomc_artifact_manifest_options_t artifact_manifest;
+  // Caller-requested compile-report options in the extension chain.
+  loomc_compile_report_options_t compile_report;
+  // Final emission options referencing the two option slots above.
+  loomc_emit_options_t emit;
+} loom_run_hal_testbench_emit_options_storage_t;
+
+static void loom_run_hal_testbench_emit_options_initialize(
+    const loom_run_hal_testbench_actual_provider_t* provider,
+    loom_run_hal_testbench_emit_options_storage_t* out_storage) {
+  *out_storage = (loom_run_hal_testbench_emit_options_storage_t){0};
+  const void* option_chain = NULL;
+  if (provider->artifact_manifest.mode != LOOMC_ARTIFACT_MANIFEST_MODE_NONE) {
+    out_storage->artifact_manifest = provider->artifact_manifest;
+    out_storage->artifact_manifest.type =
+        LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS;
+    out_storage->artifact_manifest.structure_size =
+        sizeof(out_storage->artifact_manifest);
+    out_storage->artifact_manifest.next = option_chain;
+    option_chain = &out_storage->artifact_manifest;
   }
+  if (provider->compile_report.mode != LOOMC_COMPILE_REPORT_MODE_NONE) {
+    out_storage->compile_report = provider->compile_report;
+    out_storage->compile_report.type =
+        LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS;
+    out_storage->compile_report.structure_size =
+        sizeof(out_storage->compile_report);
+    out_storage->compile_report.next = option_chain;
+    option_chain = &out_storage->compile_report;
+  }
+  out_storage->emit = (loomc_emit_options_t){
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(out_storage->emit),
+      .next = option_chain,
+      .artifact_flags =
+          provider->emit_artifact_flags | LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+  };
+}
+
+static iree_status_t loom_run_hal_testbench_actual_provider_select_target(
+    loom_run_hal_testbench_actual_provider_t* provider,
+    loomc_target_profile_t* target_profile,
+    iree_string_view_t* out_entry_symbol) {
+  *out_entry_symbol = iree_string_view_empty();
   if (provider->compilation == NULL || provider->module == NULL ||
       provider->native_module == NULL || provider->invocation == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "HAL actual provider requires compilation, module, "
                             "and invocation state");
+  }
+  if (provider->compilation->context == NULL ||
+      provider->compilation->workspace == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "HAL actual provider requires compiler context and workspace state");
   }
   const bool is_pipeline =
       loom_run_hal_testbench_invocation_is_pipeline(provider->invocation);
@@ -636,15 +683,15 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
         IREE_STATUS_UNIMPLEMENTED,
         "HAL pipeline specialization arguments are not implemented");
   }
-  iree_string_view_t entry_symbol = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_module_symbol_name_from_ref(
       provider->native_module, provider->invocation->callee_ref,
-      &entry_symbol));
+      out_entry_symbol));
+
   loomc_iree_hal_target_selection_t selection = {0};
   loomc_result_t* result = NULL;
   iree_status_t status = loom_run_hal_testbench_context_select_target(
       provider->context, loomc_make_cstring_view("Loom testbench live device"),
-      provider->requested_target_profile, &selection, &result);
+      target_profile, &selection, &result);
   if (iree_status_is_ok(status)) {
     status = loom_run_hal_testbench_observe_result(provider, result);
   }
@@ -683,93 +730,42 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
     }
   }
   loomc_result_release(result);
-  result = NULL;
   loomc_target_profile_release(selection.target_profile);
-  if (!iree_status_is_ok(status) || provider->compile_rejected) {
-    return status;
-  }
+  return status;
+}
 
-  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_emit_progress(
-      provider->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_COMPILE));
-  loomc_module_t* compile_module = NULL;
-  status = iree_status_from_loomc(loomc_module_clone(
-      provider->module, provider->compilation->workspace,
-      loomc_allocator_from_iree(provider->context->host_allocator),
-      &compile_module));
-
-  loomc_artifact_manifest_options_t artifact_manifest =
-      provider->artifact_manifest;
-  const void* emit_option_chain = NULL;
-  if (artifact_manifest.mode != LOOMC_ARTIFACT_MANIFEST_MODE_NONE) {
-    artifact_manifest.type = LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS;
-    artifact_manifest.structure_size = sizeof(artifact_manifest);
-    artifact_manifest.next = emit_option_chain;
-    emit_option_chain = &artifact_manifest;
-  }
-  loomc_compile_report_options_t compile_report = provider->compile_report;
-  if (compile_report.mode != LOOMC_COMPILE_REPORT_MODE_NONE) {
-    compile_report.type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS;
-    compile_report.structure_size = sizeof(compile_report);
-    compile_report.next = emit_option_chain;
-    emit_option_chain = &compile_report;
-  }
-  const loomc_emit_options_t emit_options = {
-      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      .structure_size = sizeof(emit_options),
-      .next = emit_option_chain,
-      .artifact_flags =
-          provider->emit_artifact_flags | LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
-  };
-  const loomc_string_view_t root = loomc_string_view_from_iree(entry_symbol);
-  const loomc_compile_artifact_options_t compile_options = {
-      .type = LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
-      .structure_size = sizeof(compile_options),
-      .next = provider->sanitizer,
-      .roots = &root,
-      .root_count = 1,
-      .target_profile = provider->selected_target_profile,
-      .config = provider->compilation->config,
-      .emit_options = &emit_options,
-      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
-  };
-  if (iree_status_is_ok(status)) {
-    status = iree_status_from_loomc(loomc_compile_artifact(
-        provider->compilation->compiler, provider->compilation->workspace,
-        provider->pass_program, compile_module, &compile_options,
-        loomc_allocator_from_iree(provider->context->host_allocator), &result));
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_run_hal_testbench_observe_result(provider, result);
-  }
-  if (iree_status_is_ok(status)) {
-    provider->compiler_result = result;
-    result = NULL;
-    status = loom_run_hal_testbench_select_compile_artifacts(
-        provider->compiler_result, &provider->artifacts);
-  }
-  if (iree_status_is_ok(status) &&
-      !loomc_result_succeeded(provider->compiler_result)) {
+static iree_status_t loom_run_hal_testbench_actual_provider_adopt_result(
+    loom_run_hal_testbench_actual_provider_t* provider,
+    iree_string_view_t failure_stage, iree_string_view_t failure_message,
+    loomc_result_t** inout_result) {
+  IREE_RETURN_IF_ERROR(
+      loom_run_hal_testbench_observe_result(provider, *inout_result));
+  provider->compiler_result = *inout_result;
+  *inout_result = NULL;
+  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_select_compile_artifacts(
+      provider->compiler_result, &provider->artifacts));
+  if (!loomc_result_succeeded(provider->compiler_result)) {
     loom_run_hal_testbench_record_result_rejection(
-        provider, IREE_SV("compile"),
-        IREE_SV("HAL compilation rejected the source module"),
-        provider->compiler_result);
+        provider, failure_stage, failure_message, provider->compiler_result);
   }
-  loomc_result_release(result);
-  loomc_module_release(compile_module);
-  if (!iree_status_is_ok(status) || provider->compile_rejected) {
-    return status;
-  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_run_hal_testbench_actual_provider_load_artifacts(
+    loom_run_hal_testbench_actual_provider_t* provider,
+    iree_string_view_t entry_symbol) {
   if (provider->artifacts.executable == NULL ||
       provider->artifacts.launch_config == NULL) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,
-        "compiler did not return executable and launch-config artifacts");
+        "HAL actual preparation did not return executable and launch-config "
+        "artifacts");
   }
-
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_emit_progress(
       provider->context,
       LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_EXECUTABLE_LOAD));
 
+  iree_status_t status = iree_ok_status();
   if (provider->sequence_representation ==
       LOOM_RUN_HAL_DISPATCH_SEQUENCE_REPRESENTATION_DIRECT) {
     // Directly dispatched artifacts retain the source entry name across
@@ -819,6 +815,128 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
     provider->prepared_candidate_initialized = false;
   }
   return status;
+}
+
+iree_status_t loom_run_hal_testbench_actual_provider_compile(
+    loom_run_hal_testbench_actual_provider_t* provider) {
+  if (provider->prepared_candidate_initialized || provider->compile_rejected) {
+    return iree_ok_status();
+  }
+  iree_string_view_t entry_symbol = iree_string_view_empty();
+  iree_status_t status = loom_run_hal_testbench_actual_provider_select_target(
+      provider, provider->requested_target_profile, &entry_symbol);
+  if (!iree_status_is_ok(status) || provider->compile_rejected) {
+    return status;
+  }
+  if (provider->compilation->compiler == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "HAL source compilation requires a compiler");
+  }
+
+  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_emit_progress(
+      provider->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_COMPILE));
+  loomc_module_t* compile_module = NULL;
+  status = iree_status_from_loomc(loomc_module_clone(
+      provider->module, provider->compilation->workspace,
+      loomc_allocator_from_iree(provider->context->host_allocator),
+      &compile_module));
+
+  loom_run_hal_testbench_emit_options_storage_t emit_options;
+  loom_run_hal_testbench_emit_options_initialize(provider, &emit_options);
+  const loomc_string_view_t root = loomc_string_view_from_iree(entry_symbol);
+  const loomc_compile_artifact_options_t compile_options = {
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
+      .structure_size = sizeof(compile_options),
+      .next = provider->sanitizer,
+      .roots = &root,
+      .root_count = 1,
+      .target_profile = provider->selected_target_profile,
+      .config = provider->compilation->config,
+      .emit_options = &emit_options.emit,
+      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
+  };
+  loomc_result_t* result = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_status_from_loomc(loomc_compile_artifact(
+        provider->compilation->compiler, provider->compilation->workspace,
+        provider->pass_program, compile_module, &compile_options,
+        loomc_allocator_from_iree(provider->context->host_allocator), &result));
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_actual_provider_adopt_result(
+        provider, IREE_SV("compile"),
+        IREE_SV("HAL compilation rejected the source module"), &result);
+  }
+  loomc_result_release(result);
+  loomc_module_release(compile_module);
+  if (!iree_status_is_ok(status) || provider->compile_rejected) {
+    return status;
+  }
+  return loom_run_hal_testbench_actual_provider_load_artifacts(provider,
+                                                               entry_symbol);
+}
+
+iree_status_t loom_run_hal_testbench_actual_provider_load_prepared(
+    loom_run_hal_testbench_actual_provider_t* provider,
+    const loom_run_hal_testbench_prepared_actual_t* prepared_actual) {
+  if (provider->prepared_candidate_initialized || provider->compile_rejected) {
+    return iree_ok_status();
+  }
+  if (prepared_actual == NULL || prepared_actual->module == NULL ||
+      prepared_actual->launch_config == NULL ||
+      prepared_actual->target_profile == NULL ||
+      loomc_string_view_is_empty(prepared_actual->artifact_format)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "prepared HAL actual requires module, launch config, target profile, "
+        "and artifact format");
+  }
+  if (provider->requested_target_profile != NULL &&
+      !loomc_target_profile_equal(provider->requested_target_profile,
+                                  prepared_actual->target_profile)) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "prepared HAL actual target profile does not match the requested "
+        "profile");
+  }
+
+  iree_string_view_t entry_symbol = iree_string_view_empty();
+  iree_status_t status = loom_run_hal_testbench_actual_provider_select_target(
+      provider, prepared_actual->target_profile, &entry_symbol);
+  if (!iree_status_is_ok(status) || provider->compile_rejected) {
+    return status;
+  }
+
+  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_emit_progress(
+      provider->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_EMIT));
+  loomc_module_t* emit_module = NULL;
+  status = iree_status_from_loomc(loomc_module_clone(
+      prepared_actual->module, provider->compilation->workspace,
+      loomc_allocator_from_iree(provider->context->host_allocator),
+      &emit_module));
+  loom_run_hal_testbench_emit_options_storage_t emit_options;
+  loom_run_hal_testbench_emit_options_initialize(provider, &emit_options);
+  emit_options.emit.artifact_format = prepared_actual->artifact_format;
+  loomc_result_t* result = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_status_from_loomc(loomc_emit_module(
+        provider->context->target_environment, provider->compilation->workspace,
+        emit_module, &emit_options.emit,
+        loomc_allocator_from_iree(provider->context->host_allocator), &result));
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_run_hal_testbench_actual_provider_adopt_result(
+        provider, IREE_SV("emit"),
+        IREE_SV("HAL emission rejected the prepared module"), &result);
+  }
+  loomc_result_release(result);
+  loomc_module_release(emit_module);
+  if (!iree_status_is_ok(status) || provider->compile_rejected) {
+    return status;
+  }
+  provider->artifacts.launch_config = prepared_actual->launch_config;
+  return loom_run_hal_testbench_actual_provider_load_artifacts(provider,
+                                                               entry_symbol);
 }
 
 static iree_status_t loom_run_hal_testbench_invocation_options_push_constant(

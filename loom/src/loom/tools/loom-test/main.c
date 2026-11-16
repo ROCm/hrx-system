@@ -24,6 +24,7 @@
 #include "loom/tooling/cli/loomc_options.h"
 #include "loom/tooling/cli/loomc_result.h"
 #include "loom/tooling/config/input.h"
+#include "loom/tooling/execution/hal/prepared_package_loader.h"
 #include "loom/tooling/execution/hal/scenario_profile.h"
 #include "loom/tooling/execution/hal/testbench_actual.h"
 #include "loom/tooling/input/flags.h"
@@ -51,6 +52,10 @@ IREE_FLAG_LIST(
     string, library,
     "Source or bytecode library linked into the authored input. Repeat as "
     "--library=path.loombc. Libraries are linked whole in argument order.");
+IREE_FLAG_LIST_NAMED(
+    string, prepared_package, "prepared-package",
+    "Prepared scenario target-payload directory. Repeat for every candidate "
+    "produced from the authored module; the live device selects exactly one.");
 IREE_FLAG_NAMED(
     string, file_output_root, "file-output-root", "",
     "Root for relative check.file.write paths. Required only when a "
@@ -150,6 +155,7 @@ static iree_status_t loom_test_emit_execution_progress(
       "runtime-failure-deinitialize",
       "target-select",
       "compile",
+      "emit",
       "executable-load",
       "materialize",
       "stage",
@@ -1044,6 +1050,8 @@ static void loom_test_print_agents_markdown(FILE* stream) {
       "\n"
       "```shell\n"
       "loom-test module.loom --case=@smoke | jq '.failed_sample_count'\n"
+      "loom-test module.loombc --prepared-package=module.package "
+      "--device=amdgpu\n"
       "loom-test module.loom | jq '.samples[] | {case, sample_ordinal, "
       "passed}'\n"
       "loom-test module.loom | jq '.samples[] | select(.issues) | "
@@ -1086,6 +1094,8 @@ int loom_test_main(int argc, char** argv,
       "\n"
       "Usage:\n"
       "  loom-test file.loom --case=@smoke\n"
+      "  loom-test file.loombc --prepared-package=file.package "
+      "--device=amdgpu\n"
       "  cat module.loom | loom-test -\n"
       "  loom-test --agents_md\n");
   for (int i = 1; i < argc; ++i) {
@@ -1114,6 +1124,7 @@ int loom_test_main(int argc, char** argv,
   loomc_module_t* module = NULL;
   loomc_pass_program_t* pass_program = NULL;
   loomc_target_profile_t* requested_target_profile = NULL;
+  loom_run_hal_testbench_prepared_package_t* prepared_package = NULL;
   loomc_module_interop_view_t module_view = {0};
   const loom_module_t* native_module = NULL;
   const loom_source_table_resolver_t* source_table = NULL;
@@ -1196,7 +1207,14 @@ int loom_test_main(int argc, char** argv,
   if (iree_status_is_ok(status)) {
     status = loom_json_array_begin(&planning_issue_stream, &planning_issues);
   }
-  if (iree_status_is_ok(status) && argc > 2) {
+  const iree_flag_string_list_t prepared_package_directories =
+      FLAG_prepared_package_list();
+  const bool uses_prepared_package = prepared_package_directories.count != 0;
+  if (iree_status_is_ok(status) && uses_prepared_package && argc != 2) {
+    status = iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "--prepared-package requires exactly one positional authored module");
+  } else if (iree_status_is_ok(status) && argc > 2) {
     status = iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "loom-test accepts at most one input file or '-' for stdin; got "
@@ -1251,6 +1269,31 @@ int loom_test_main(int argc, char** argv,
     loom_tooling_cli_make_loomc_sanitizer_options(&sanitizer_options,
                                                   &loomc_sanitizer_options);
   }
+  if (iree_status_is_ok(status) && uses_prepared_package) {
+    const iree_flag_string_list_t libraries = FLAG_library_list();
+    const iree_flag_string_list_t configs = FLAG_config_list();
+    const iree_flag_string_list_t config_files = FLAG_config_file_list();
+    if (libraries.count != 0) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--prepared-package cannot be combined with --library");
+    } else if (configs.count != 0 || config_files.count != 0) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "prepared package v0 cannot be combined with compile-time config");
+    } else if (!loom_tooling_cli_pipeline_uses_default(pipeline)) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "--prepared-package cannot be combined with an alternate pipeline");
+    } else if (sanitizer_enabled ||
+               !iree_string_view_equal(
+                   iree_make_cstring_view(FLAG_sanitizer_reporting),
+                   IREE_SV("default"))) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "prepared package v0 cannot be combined with sanitizer options");
+    }
+  }
 
   if (iree_status_is_ok(status)) {
     const loomc_context_target_options_t target_options = {
@@ -1292,11 +1335,11 @@ int loom_test_main(int argc, char** argv,
     status =
         loom_run_hal_testbench_context_validate_explicit_device(&hal_context);
   }
-
   const iree_string_view_t input_path =
       argc < 2 ? iree_string_view_empty() : iree_make_cstring_view(argv[1]);
   const iree_string_view_t filename =
-      (argc < 2 || iree_string_view_equal(input_path, IREE_SV("-")))
+      (iree_string_view_is_empty(input_path) ||
+       iree_string_view_equal(input_path, IREE_SV("-")))
           ? IREE_SV("<stdin>")
           : input_path;
   loom_test_file_provider_t file_provider = {
@@ -1351,7 +1394,7 @@ int loom_test_main(int argc, char** argv,
         loomc_string_view_from_iree(requested_target),
         loomc_allocator_from_iree(allocator), &requested_target_profile));
   }
-  if (iree_status_is_ok(status) && accepted) {
+  if (iree_status_is_ok(status) && accepted && !uses_prepared_package) {
     loomc_result_t* result = NULL;
     status = loom_tooling_cli_prepare_loomc_pass_program(
         compiler_context, module, pipeline, IREE_SV("loom-test pipeline"),
@@ -1371,6 +1414,12 @@ int loom_test_main(int argc, char** argv,
     loom_testbench_module_plan_t module_plan = {0};
     status = loom_testbench_plan_module(native_module, &plan_options,
                                         &plan_arena, &module_plan);
+    if (iree_status_is_ok(status) && uses_prepared_package &&
+        module_plan.case_count != 0) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "prepared package v0 requires a scenario-only authored module");
+    }
     const iree_string_view_t selected_case_name =
         loom_test_normalize_case_name(iree_make_cstring_view(FLAG_case));
     if (iree_status_is_ok(status)) {
@@ -1612,15 +1661,36 @@ int loom_test_main(int argc, char** argv,
                     sanitizer_enabled ? &loomc_sanitizer_options : NULL,
                 .result_callback = compile_result_callback,
             };
-        loom_run_hal_testbench_scenario_profile_initialize(
-            iree_string_view_is_empty(target) ? hal_context.driver_name
-                                              : target,
-            &provider_options, source_table,
-            loom_test_diagnostic_capture_sink(&diagnostic_capture),
-            &hal_scenario_profile);
-        scenario_execution_options.target =
-            loom_run_hal_testbench_scenario_execution_profile(
+        if (uses_prepared_package) {
+          status = loom_run_hal_testbench_prepared_package_select_and_open(
+              prepared_package_directories.values,
+              prepared_package_directories.count, &hal_context,
+              configuration->target_environment, compiler_context,
+              compiler_workspace, allocator, &prepared_package);
+          if (iree_status_is_ok(status)) {
+            loom_run_hal_testbench_prepared_scenario_profile_initialize(
+                loom_run_hal_testbench_prepared_package_target_profile(
+                    prepared_package),
+                &provider_options,
+                loom_run_hal_testbench_prepared_package_resolver(
+                    prepared_package),
+                source_table,
+                loom_test_diagnostic_capture_sink(&diagnostic_capture),
                 &hal_scenario_profile);
+          }
+        } else {
+          loom_run_hal_testbench_scenario_profile_initialize(
+              iree_string_view_is_empty(target) ? hal_context.driver_name
+                                                : target,
+              &provider_options, source_table,
+              loom_test_diagnostic_capture_sink(&diagnostic_capture),
+              &hal_scenario_profile);
+        }
+        if (iree_status_is_ok(status)) {
+          scenario_execution_options.target =
+              loom_run_hal_testbench_scenario_execution_profile(
+                  &hal_scenario_profile);
+        }
       }
     }
     if (iree_status_is_ok(status) && runnable_scenario_count != 0) {
@@ -1856,6 +1926,7 @@ int loom_test_main(int argc, char** argv,
   loomc_target_profile_release(requested_target_profile);
   loomc_pass_program_release(pass_program);
   loomc_module_release(module);
+  loom_run_hal_testbench_prepared_package_release(prepared_package);
   loomc_compiler_release(compiler);
   loomc_workspace_release(compiler_workspace);
   loomc_context_release(compiler_context);

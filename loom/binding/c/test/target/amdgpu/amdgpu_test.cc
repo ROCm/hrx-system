@@ -822,7 +822,8 @@ kernel.def target(@gfx1151) @complete_launch(%group_count: index) {
       .target_profile = profile.get(),
       .config = nullptr,
       .emit_options = &emit_options,
-      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
+      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_BYTECODE |
+                        LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
   };
 
   loomc_result_t* result = nullptr;
@@ -845,6 +846,18 @@ kernel.def target(@gfx1151) @complete_launch(%group_count: index) {
       FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
                    LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE);
   ASSERT_NE(launch_artifact, nullptr);
+  const loomc_artifact_t* prepared_module_artifact =
+      FindArtifact(result_ptr.get(), LOOMC_ARTIFACT_KIND_MODULE,
+                   LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE);
+  ASSERT_NE(prepared_module_artifact, nullptr);
+  loomc_source_t* prepared_module_source = nullptr;
+  LOOMC_ASSERT_OK(loomc_artifact_create_source(
+      prepared_module_artifact, LOOMC_SOURCE_FORMAT_UNKNOWN,
+      loomc_allocator_system(), &prepared_module_source));
+  SourcePtr prepared_module_source_ptr(prepared_module_source);
+  ModulePtr prepared_module = DeserializeModule(
+      context.get(), workspace.get(), prepared_module_source_ptr.get());
+  ASSERT_NE(prepared_module.get(), nullptr);
 
   loomc_launch_config_program_t* launch_program = nullptr;
   LOOMC_ASSERT_OK(loomc_launch_config_program_load(

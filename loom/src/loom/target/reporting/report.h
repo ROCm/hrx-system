@@ -1975,6 +1975,8 @@ typedef struct loom_target_compile_report_t {
   iree_string_view_t lowered_symbol;
   // Canonical target artifact format name, if an artifact was produced.
   iree_string_view_t artifact_format;
+  // Public emitter format required to reproduce final artifact emission.
+  iree_string_view_t public_artifact_format;
   // Number of bytes in the produced artifact.
   uint64_t artifact_size;
   // Number of low schedule nodes before target emission.

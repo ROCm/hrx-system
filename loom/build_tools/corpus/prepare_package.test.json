@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "prepares shared target products for scenario execution",
+      "steps": [
+        {
+          "name": "link-authored-module",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/prepared_package.loom",
+              "--mode=merge",
+              "--to=bc",
+              "--output={tmp}/module.loombc"
+            ]
+          }
+        },
+        {
+          "name": "compile-target-payload",
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "{tmp}/module.loombc",
+              "--target=x86:scalar",
+              "--output={tmp}/module.so",
+              "--compile-report=details",
+              "--compile-report-output={tmp}/compile.json",
+              "--emit-prepared-module={tmp}/prepared.loombc",
+              "--emit-launch-config={tmp}/launch.loombc"
+            ]
+          },
+          "stdout": {"empty": true},
+          "stderr": {"empty": true}
+        },
+        {
+          "name": "assemble-package",
+          "run": {
+            "tool": "loom-corpus-assemble-package",
+            "args": [
+              "{tmp}/module.loombc",
+              "--target=x86:scalar",
+              "--compile-report={tmp}/compile.json",
+              "--prepared-module={tmp}/prepared.loombc",
+              "--launch-config={tmp}/launch.loombc",
+              "--output={tmp}/package"
+            ]
+          },
+          "stdout": {"empty": true},
+          "stderr": {"empty": true},
+          "files": [
+            {"path": "{tmp}/package/prepared.loombc", "non_empty": true},
+            {"path": "{tmp}/package/launch.loombc", "non_empty": true},
+            {
+              "path": "{tmp}/package/manifest.json",
+              "contains": [
+                "\"schema\":\"loom.testbench.prepared_actuals.v0\"",
+                "\"target_profile\":\"x86:scalar\"",
+                "\"artifact_format\":\"x86-hal\"",
+                "\"subject\":\"increment\"",
+                "\"prepared_module\":\"prepared.loombc\"",
+                "\"launch_config\":\"launch.loombc\""
+              ]
+            }
+          ]
+        },
+        {
+          "name": "execute-package",
+          "run": {
+            "tool": "loom-test",
+            "args": [
+              "{tmp}/module.loombc",
+              "--prepared-package={tmp}/package",
+              "--device=task",
+              "--task_topology_max_group_count=2"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "\"scenario_count\":2",
+              "\"trial_count\":2",
+              "\"failed_trial_count\":0",
+              "\"scenario\":\"first\",\"action\":\"compare\"",
+              "\"scenario\":\"second\",\"action\":\"compare\""
+            ]
+          },
+          "stderr": {"empty": true}
+        }
+      ]
+    }
+  ]
+}

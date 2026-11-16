@@ -86,6 +86,14 @@ IREE_FLAG_NAMED(
     string, emit_artifact_manifest, "emit-artifact-manifest", "",
     "Optional output path for --artifact-manifest JSON. Empty derives from the "
     "artifact output path by appending '.manifest.json'.");
+IREE_FLAG_NAMED(
+    string, emit_prepared_module, "emit-prepared-module", "",
+    "Optional output path for the root-selected prepared-low Loom bytecode "
+    "immediately before target emission.");
+IREE_FLAG_NAMED(
+    string, emit_launch_config, "emit-launch-config", "",
+    "Optional output path for the compiler-produced launch-configuration "
+    "program paired with --emit-prepared-module.");
 IREE_FLAG_NAMED(string, compile_report_output, "compile-report-output",
                 "stderr",
                 "Output path for --compile-report. Use 'stderr', 'stdout'/'-', "
@@ -371,6 +379,10 @@ typedef struct loom_compile_artifacts_t {
   const loomc_artifact_t* manifest;
   // Optional compile report sidecar.
   const loomc_artifact_t* report;
+  // Optional root-selected prepared-low Loom bytecode.
+  const loomc_artifact_t* prepared_module;
+  // Optional host launch-configuration program paired with |prepared_module|.
+  const loomc_artifact_t* launch_config;
 } loom_compile_artifacts_t;
 
 static iree_status_t loom_compile_select_artifacts(
@@ -393,6 +405,14 @@ static iree_status_t loom_compile_select_artifacts(
       slot = &out_artifacts->manifest;
     } else if (is_report) {
       slot = &out_artifacts->report;
+    } else if (artifact->kind == LOOMC_ARTIFACT_KIND_MODULE &&
+               loomc_string_view_equal(
+                   artifact->format,
+                   loomc_make_cstring_view(
+                       LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE))) {
+      slot = &out_artifacts->prepared_module;
+    } else if (artifact->kind == LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG) {
+      slot = &out_artifacts->launch_config;
     } else if (artifact->kind == LOOMC_ARTIFACT_KIND_EXECUTABLE) {
       slot = &out_artifacts->primary;
     }
@@ -601,6 +621,16 @@ int main(int argc, char** argv) {
             .flag_name = IREE_SV("--compile-report-output"),
             .path = iree_make_cstring_view(FLAG_compile_report_output),
         },
+        {
+            .active = FLAG_emit_prepared_module[0] != 0,
+            .flag_name = IREE_SV("--emit-prepared-module"),
+            .path = iree_make_cstring_view(FLAG_emit_prepared_module),
+        },
+        {
+            .active = FLAG_emit_launch_config[0] != 0,
+            .flag_name = IREE_SV("--emit-launch-config"),
+            .path = iree_make_cstring_view(FLAG_emit_launch_config),
+        },
         loom_tooling_pass_trace_output_path_from_flags(),
     };
     status = loom_tooling_output_paths_validate_exclusive_stdout(
@@ -739,6 +769,12 @@ int main(int argc, char** argv) {
       .target_profile = target_profile,
       .config = &config_options,
       .emit_options = &emit_options,
+      .artifact_flags = (FLAG_emit_prepared_module[0]
+                             ? LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_BYTECODE
+                             : 0) |
+                        (FLAG_emit_launch_config[0]
+                             ? LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG
+                             : 0),
   };
   if (iree_status_is_ok(status) && exit_code == 0) {
     status = iree_status_from_loomc(
@@ -768,6 +804,18 @@ int main(int argc, char** argv) {
     if (iree_status_is_ok(status) && compile_succeeded && manifest_enabled) {
       status = loom_compile_write_artifact(artifacts.manifest,
                                            manifest_output_path, allocator);
+    }
+    if (iree_status_is_ok(status) && compile_succeeded &&
+        FLAG_emit_prepared_module[0]) {
+      status = loom_compile_write_artifact(
+          artifacts.prepared_module,
+          iree_make_cstring_view(FLAG_emit_prepared_module), allocator);
+    }
+    if (iree_status_is_ok(status) && compile_succeeded &&
+        FLAG_emit_launch_config[0]) {
+      status = loom_compile_write_artifact(
+          artifacts.launch_config,
+          iree_make_cstring_view(FLAG_emit_launch_config), allocator);
     }
     if (!compile_succeeded) {
       exit_code = 1;
