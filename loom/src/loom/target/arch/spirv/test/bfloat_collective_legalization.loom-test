@@ -19,8 +19,17 @@ kernel.def @clustered_bfloat_sum() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
 } launch(%value: bf16) {
   %4 = scalar.extf %value : bf16 to f32
-  %5 = kernel.subgroup.reduce<addf> %4 {cluster_size = 8, cluster_stride = 1} : f32
-  %result = scalar.fptrunc %5 : f32 to bf16
+  %7 = scalar.constant 32 : i32
+  %8 = scalar.constant 1 : i32
+  %9, %10 = kernel.subgroup.shuffle<xor> %4, %8, %7 : f32, i32, i32
+  %11 = scalar.addf %4, %9 : f32
+  %12 = scalar.constant 2 : i32
+  %13, %14 = kernel.subgroup.shuffle<xor> %11, %12, %7 : f32, i32, i32
+  %15 = scalar.addf %11, %13 : f32
+  %16 = scalar.constant 4 : i32
+  %17, %18 = kernel.subgroup.shuffle<xor> %15, %16, %7 : f32, i32, i32
+  %19 = scalar.addf %15, %17 : f32
+  %result = scalar.fptrunc %19 : f32 to bf16
   test.use %result : bf16
   kernel.return
 }

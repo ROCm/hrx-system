@@ -6,7 +6,9 @@
 
 #include "loom/target/arch/spirv/legalization.h"
 
+#include "loom/analysis/control_uniformity.h"
 #include "loom/ir/module.h"
+#include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/vector/ops.h"
@@ -485,6 +487,84 @@ static iree_status_t loom_spirv_legalize_bfloat_collective(
   return iree_ok_status();
 }
 
+static bool loom_spirv_has_complete_clusters(
+    const loom_target_legalization_context_t* context,
+    const loom_target_bundle_t* bundle, uint32_t cluster_size) {
+  const loom_target_snapshot_t* snapshot = bundle->snapshot;
+  if (snapshot->subgroup_size == 0 ||
+      !loom_kernel_def_isa(context->function.op)) {
+    return false;
+  }
+  loom_target_workgroup_size_t workgroup_size;
+  if (!loom_kernel_def_static_workgroup_size_from_facts(
+          context->module, context->function.op, context->fact_table,
+          &workgroup_size)) {
+    return false;
+  }
+  if (snapshot->subgroup_partition >= LOOM_TARGET_SUBGROUP_PARTITION_DENSE) {
+    // Dense partitions fill physical lanes from zero. A partial final subgroup
+    // is safe when its active prefix ends on a cluster boundary. Reduce the
+    // product before the final multiply so arbitrary u32 launch extents cannot
+    // overflow the proof.
+    uint64_t flat_remainder =
+        ((uint64_t)workgroup_size.x * workgroup_size.y) % cluster_size;
+    flat_remainder = (flat_remainder * workgroup_size.z) % cluster_size;
+    return flat_remainder == 0;
+  }
+  return snapshot->subgroup_partition ==
+             LOOM_TARGET_SUBGROUP_PARTITION_WORKGROUP_X_ALIGNED &&
+         workgroup_size.x % snapshot->subgroup_size == 0;
+}
+
+static bool loom_spirv_match_clustered_reduce_butterfly(
+    const loom_target_legalizer_entry_t* entry,
+    const loom_target_legalization_context_t* context, const loom_op_t* op) {
+  (void)entry;
+  const loom_target_bundle_t* bundle =
+      loom_target_legalization_context_bundle(context);
+  if (bundle == NULL || bundle->snapshot == NULL ||
+      bundle->snapshot->subgroup_size == 0 ||
+      bundle->snapshot->subgroup_size > 64 ||
+      !iree_all_bits_set(bundle->config->contract_feature_bits,
+                         LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM_SHUFFLE) ||
+      !loom_kernel_subgroup_reduce_has_cluster_size(op)) {
+    return false;
+  }
+  const uint32_t cluster_size =
+      (uint32_t)loom_kernel_subgroup_reduce_cluster_size(op);
+  const uint32_t cluster_stride =
+      loom_kernel_subgroup_reduce_has_cluster_stride(op)
+          ? (uint32_t)loom_kernel_subgroup_reduce_cluster_stride(op)
+          : 1u;
+  const loom_combining_kind_t kind = loom_kernel_subgroup_reduce_kind(op);
+  const uint8_t math_flags = loom_kernel_subgroup_reduce_math(op);
+  // Native clustered reductions remain compact and competitive for integer,
+  // bitwise, product, and floating-extremum families. Native-arithmetic
+  // floating sums are the family for which a direct butterfly earns its
+  // additional IR and compile-time cost.
+  if (kind != LOOM_COMBINING_KIND_ADDF || math_flags != 0 ||
+      cluster_stride != 1 || cluster_size <= 1 ||
+      cluster_size >= bundle->snapshot->subgroup_size ||
+      bundle->snapshot->subgroup_size % cluster_size != 0 ||
+      (cluster_size & (cluster_size - 1)) != 0 || context->fact_table == NULL ||
+      !loom_spirv_has_complete_clusters(context, bundle, cluster_size)) {
+    return false;
+  }
+  loom_control_uniformity_info_t control_uniformity;
+  loom_control_uniformity_info_initialize(context->module, context->fact_table,
+                                          context->arena, &control_uniformity);
+  return loom_control_uniformity_prove_execution(
+      &control_uniformity, op, LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP, NULL);
+}
+
+static iree_status_t loom_spirv_legalize_clustered_reduce_butterfly(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  return loom_kernel_target_legalize_subgroup_reduce_butterfly(entry, context,
+                                                               op, out_result);
+}
+
 static const loom_target_legalizer_rule_t kSpirvLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_FUNC_CALL,
@@ -512,6 +592,13 @@ static const loom_target_legalizer_rule_t kSpirvLegalizerRules[] = {
         .root_kind = LOOM_OP_KERNEL_WORKGROUP_REDUCE,
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL,
         .legalize = loom_spirv_legalize_bfloat_collective,
+    },
+    {
+        .root_kind = LOOM_OP_KERNEL_SUBGROUP_REDUCE,
+        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REWRITE_LEGAL,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_FLOAT,
+        .match = loom_spirv_match_clustered_reduce_butterfly,
+        .legalize = loom_spirv_legalize_clustered_reduce_butterfly,
     },
     {
         .root_kind = LOOM_OP_KERNEL_SUBGROUP_SHUFFLE,
