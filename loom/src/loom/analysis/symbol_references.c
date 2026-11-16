@@ -11,6 +11,7 @@
 #include "loom/analysis/symbol_reference_summary.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ir/structural_hash.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
@@ -700,6 +701,69 @@ static iree_status_t loom_symbol_reference_visit_module_encodings(
     IREE_RETURN_IF_ERROR(loom_symbol_reference_emit_summary(
         builder, module_scope, LOOM_SYMBOL_REFERENCE_ATTR_INDEX_NONE,
         /*user_op=*/NULL));
+  }
+  return iree_ok_status();
+}
+
+static iree_host_size_t loom_symbol_reference_user_hash(const loom_op_t* op) {
+  return loom_structural_hash_finalize(loom_structural_hash_mix_u64(
+      loom_structural_hash_initialize(), (uintptr_t)op));
+}
+
+static const loom_op_t* loom_symbol_reference_rebound_user(
+    const loom_symbol_reference_user_replacement_t* const* buckets,
+    iree_host_size_t mask, const loom_op_t* original) {
+  iree_host_size_t slot = loom_symbol_reference_user_hash(original) & mask;
+  while (buckets[slot]) {
+    if (buckets[slot]->original == original) {
+      return buckets[slot]->replacement;
+    }
+    slot = (slot + 1) & mask;
+  }
+  return original;
+}
+
+iree_status_t loom_symbol_reference_table_rebind_users(
+    loom_symbol_reference_table_t* table,
+    const loom_symbol_reference_user_replacement_t* replacements,
+    iree_host_size_t replacement_count, iree_arena_allocator_t* arena) {
+  if (!replacement_count) {
+    return iree_ok_status();
+  }
+  iree_host_size_t bucket_count = 2;
+  while (bucket_count / 2 < replacement_count) {
+    if (bucket_count > IREE_HOST_SIZE_MAX / 2) {
+      return iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "symbol-reference replacement index exceeds address space");
+    }
+    bucket_count *= 2;
+  }
+  const loom_symbol_reference_user_replacement_t** buckets = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, bucket_count, sizeof(*buckets), (void**)&buckets));
+  memset(buckets, 0, bucket_count * sizeof(*buckets));
+  const iree_host_size_t mask = bucket_count - 1;
+  for (iree_host_size_t i = 0; i < replacement_count; ++i) {
+    iree_host_size_t slot =
+        loom_symbol_reference_user_hash(replacements[i].original) & mask;
+    while (buckets[slot]) {
+      slot = (slot + 1) & mask;
+    }
+    buckets[slot] = &replacements[i];
+  }
+  for (iree_host_size_t i = 0; i < table->occurrence_count; ++i) {
+    loom_symbol_reference_occurrence_t* occurrence =
+        (loom_symbol_reference_occurrence_t*)
+            loom_symbol_reference_table_occurrence(table, (uint32_t)i);
+    occurrence->user_op =
+        loom_symbol_reference_rebound_user(buckets, mask, occurrence->user_op);
+  }
+  for (iree_host_size_t i = 0; i < table->template_demands.count; ++i) {
+    loom_template_demand_t* demand =
+        (loom_template_demand_t*)&table->template_demands.values[i];
+    demand->apply_op =
+        loom_symbol_reference_rebound_user(buckets, mask, demand->apply_op);
   }
   return iree_ok_status();
 }

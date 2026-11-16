@@ -41,10 +41,11 @@ loom_symbol_reference_observer_t loom_invocation_inputs_observer(
 // Resolves the affected reverse call closure from the retained reference table,
 // diagnoses unavailable/fixed boundaries before mutation, then supplies values
 // at each exact invocation entry and appends ordinary helper/call arguments.
-// Any mutation invalidates references; query-free snapshots remain reusable.
+// Preserves the exclusively owned reference snapshot by rebinding replaced
+// call operations; stable scalar inputs add no symbol dependencies.
 iree_status_t loom_invocation_inputs_apply(
     loom_invocation_inputs_t* inputs, loom_pass_t* pass,
-    const loom_symbol_reference_table_t* references, bool* out_changed);
+    loom_symbol_reference_table_t* references);
 
 #ifdef __cplusplus
 }

@@ -10,9 +10,9 @@
 // analyses. It records occurrences from the symbol whose definition owns
 // an operation to each module-local symbol referenced by that operation, nested
 // attributes, static encoding attributes, and each SSA value definition's
-// type. The table is intentionally rebuilt from immutable IR instead of
-// maintained on every IR mutation path; callers that rewrite symbols should
-// rebuild after mutation.
+// type. Structural mutations rebuild the snapshot. A reference-preserving
+// rewrite may instead rebind operation identities while retaining the already
+// established symbol relationships and ownership.
 
 #ifndef LOOM_ANALYSIS_SYMBOL_REFERENCES_H_
 #define LOOM_ANALYSIS_SYMBOL_REFERENCES_H_
@@ -333,11 +333,33 @@ iree_status_t loom_symbol_reference_table_build(
 
 // Builds the same snapshot while collecting a consumer's local facts during
 // the owning traversal. Reference and consumer state share one immutable
-// source lifetime; both expire when the caller rewrites that source.
+// source lifetime. Structural mutation invalidates both; reference-preserving
+// operation replacement can rebind the table explicitly.
 iree_status_t loom_symbol_reference_table_build_observed(
     const loom_module_t* module, iree_arena_allocator_t* arena,
     loom_symbol_reference_observer_t observer,
     loom_symbol_reference_table_t* out_table);
+
+// One operation replacement that preserves all symbol-reference semantics.
+typedef struct loom_symbol_reference_user_replacement_t {
+  // Previous operation identity, unique within a replacement batch.
+  const loom_op_t* original;
+  // New operation at the same source/region position with the same reference
+  // attribute slots, symbols, roles, types, and structural summaries.
+  const loom_op_t* replacement;
+} loom_symbol_reference_user_replacement_t;
+
+// Rebinds an exclusively owned snapshot after reference-preserving operation
+// replacement. No operation bodies or types are inspected. Symbol definitions,
+// execution regions, reference sets, and structural summaries remain unchanged;
+// all other mutations require a new snapshot. The batch takes expected O(R + E
+// + D) time, with O(R) scratch for R replacements, E occurrences, and D
+// template demands. Empty batches allocate nothing. Only scratch allocation can
+// fail.
+iree_status_t loom_symbol_reference_table_rebind_users(
+    loom_symbol_reference_table_t* table,
+    const loom_symbol_reference_user_replacement_t* replacements,
+    iree_host_size_t replacement_count, iree_arena_allocator_t* arena);
 
 // Returns the dependency SCC graph whose node ordinals are module symbol IDs.
 loom_scc_graph_t loom_symbol_reference_dependency_scc_graph(

@@ -13,6 +13,7 @@
 #include "loom/error/parameter.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ir/structural_hash.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/rewrite/callable.h"
@@ -64,8 +65,8 @@ typedef struct loom_invocation_plan_t {
   loom_invocation_inputs_t* inputs;
   // Preparation owner, including its diagnostic emitter.
   loom_pass_t* pass;
-  // Immutable graph/source ownership, discarded after application.
-  const loom_symbol_reference_table_t* references;
+  // Established relationships retained while call identities are rebound.
+  loom_symbol_reference_table_t* references;
   // Representative query for each stable semantic identity.
   struct {
     // Queries borrowed until all supplies are materialized.
@@ -179,7 +180,8 @@ static iree_status_t loom_invocation_key(loom_invocation_plan_t* plan,
 }
 
 static iree_host_size_t loom_invocation_identity_hash(const void* identity) {
-  return ((uintptr_t)identity >> 3) * UINT64_C(11400714819323198485);
+  return loom_structural_hash_finalize(loom_structural_hash_mix_u64(
+      loom_structural_hash_initialize(), (uintptr_t)identity));
 }
 
 static iree_status_t loom_invocation_admit(loom_invocation_plan_t* plan,
@@ -476,6 +478,10 @@ static iree_status_t loom_invocation_apply_bindings(
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(plan->inputs->arena, plan->keys.count,
                                 sizeof(*operands), (void**)&operands));
+  loom_symbol_reference_user_replacement_t* replacements = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(plan->inputs->arena, plan->calls.count,
+                                sizeof(*replacements), (void**)&replacements));
   for (iree_host_size_t i = 0; i < plan->calls.count; ++i) {
     const loom_invocation_call_t* call = &plan->calls.values[i];
     uint16_t count = 0;
@@ -491,7 +497,11 @@ static iree_status_t loom_invocation_apply_bindings(
     IREE_RETURN_IF_ERROR(loom_callable_append_arguments(
         rewriter, call->op, (loom_value_slice_t){operands, count},
         &replacement));
+    replacements[i] = (loom_symbol_reference_user_replacement_t){
+        .original = call->op, .replacement = replacement};
   }
+  IREE_RETURN_IF_ERROR(loom_symbol_reference_table_rebind_users(
+      plan->references, replacements, plan->calls.count, plan->inputs->arena));
   for (loom_invocation_input_read_t* read = plan->inputs->first_read; read;
        read = read->next) {
     const loom_value_id_t value =
@@ -505,8 +515,7 @@ static iree_status_t loom_invocation_apply_bindings(
 
 iree_status_t loom_invocation_inputs_apply(
     loom_invocation_inputs_t* inputs, loom_pass_t* pass,
-    const loom_symbol_reference_table_t* references, bool* out_changed) {
-  *out_changed = false;
+    loom_symbol_reference_table_t* references) {
   if (!inputs->first_read) {
     return iree_ok_status();
   }
@@ -543,6 +552,5 @@ iree_status_t loom_invocation_inputs_apply(
   loom_rewriter_deinitialize(&rewriter);
   IREE_RETURN_IF_ERROR(status);
   loom_pass_mark_changed(pass);
-  *out_changed = true;
   return iree_ok_status();
 }

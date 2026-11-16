@@ -1767,15 +1767,10 @@ iree_status_t loom_inline_callables_run(loom_pass_t* pass,
           : (loom_symbol_reference_observer_t){0};
   IREE_RETURN_IF_ERROR(loom_symbol_reference_table_build_observed(
       module, pass->arena, observer, &references));
-  bool inputs_changed = false;
-  IREE_RETURN_IF_ERROR(loom_invocation_inputs_apply(
-      &invocation_inputs, pass, &references, &inputs_changed));
+  IREE_RETURN_IF_ERROR(
+      loom_invocation_inputs_apply(&invocation_inputs, pass, &references));
   if (loom_pass_has_error_diagnostics(pass)) {
     return iree_ok_status();
-  }
-  if (inputs_changed) {
-    IREE_RETURN_IF_ERROR(
-        loom_symbol_reference_table_build(module, pass->arena, &references));
   }
   const loom_inline_callables_plan_options_t plan_options = {
       .references = &references,
@@ -1797,8 +1792,10 @@ iree_status_t loom_inline_callables_run(loom_pass_t* pass,
       references.callable_exit_symbols != NULL && target_state != NULL) {
     target_state->source_inline_completion_pending = true;
   }
+  // Appending invocation inputs preserves symbol identities. Only body
+  // inlining can leave symbol-table holes requiring compaction.
   if (iree_status_is_ok(status) && !loom_pass_has_error_diagnostics(pass) &&
-      pass->changed) {
+      (state.statistics.calls_cloned || state.statistics.calls_transferred)) {
     status = loom_module_compact_symbols(module, pass->arena, NULL);
   }
   if (iree_status_is_ok(status) && !loom_pass_has_error_diagnostics(pass) &&

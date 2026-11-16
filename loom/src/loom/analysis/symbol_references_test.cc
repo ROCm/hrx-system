@@ -547,6 +547,62 @@ TEST_F(SymbolReferencesTest,
   }
 }
 
+TEST_F(SymbolReferencesTest, RebindsUsersWithoutRebuildingRelationships) {
+  std::vector<loom_op_t*> users;
+  ModulePtr module = MakeRepeatedReferences(130, &users);
+  auto table = BuildTable(module.get());
+  const auto* original_segments = table.symbol_segments;
+  const auto bytes_before = analysis_arena_.used_allocation_size;
+  IREE_ASSERT_OK(loom_symbol_reference_table_rebind_users(&table, nullptr, 0,
+                                                          &analysis_arena_));
+  EXPECT_EQ(analysis_arena_.used_allocation_size, bytes_before);
+
+  const loom_symbol_ref_t target = {
+      .symbol_id = FindSymbol(module.get(), IREE_SV("target")),
+  };
+  const auto reference = loom_make_symbol_ref_array(&target, 1);
+  std::vector<loom_symbol_reference_user_replacement_t> replacements;
+  loom_builder_t builder = {};
+  loom_builder_initialize(module.get(), &module->arena,
+                          users.front()->parent_block, &builder);
+  for (size_t i = 1; i < users.size(); i += 3) {
+    loom_builder_set_before(&builder, users[i]);
+    const bool availability = (i & 1u) != 0;
+    loom_op_t* replacement = nullptr;
+    IREE_ASSERT_OK(loom_test_symbol_array_attrs_build(
+        &builder, LOOM_TEST_SYMBOL_ARRAY_ATTRS_BUILD_FLAG_HAS_AVAILABLE,
+        availability ? loom_symbol_ref_array_empty() : reference,
+        availability ? reference : loom_symbol_ref_array_empty(),
+        LOOM_LOCATION_UNKNOWN, &replacement));
+    replacements.push_back({users[i], replacement});
+    IREE_ASSERT_OK(loom_op_erase(module.get(), users[i]));
+  }
+  IREE_ASSERT_OK(loom_symbol_reference_table_rebind_users(
+      &table, replacements.data(), replacements.size(), &analysis_arena_));
+  EXPECT_EQ(table.symbol_segments, original_segments);
+  const auto rebuilt = BuildTable(module.get());
+  ASSERT_EQ(table.occurrence_count, rebuilt.occurrence_count);
+  for (uint32_t i = 0; i < table.occurrence_count; ++i) {
+    const auto* actual = loom_symbol_reference_table_occurrence(&table, i);
+    const auto* expected = loom_symbol_reference_table_occurrence(&rebuilt, i);
+    EXPECT_EQ(actual->user_op, expected->user_op);
+    EXPECT_EQ(actual->source_symbol_id, expected->source_symbol_id);
+    EXPECT_EQ(actual->target_symbol_id, expected->target_symbol_id);
+    EXPECT_EQ(actual->target_interfaces, expected->target_interfaces);
+    EXPECT_EQ(actual->next_outgoing_occurrence_id,
+              expected->next_outgoing_occurrence_id);
+    EXPECT_EQ(actual->next_incoming_occurrence_id,
+              expected->next_incoming_occurrence_id);
+    EXPECT_EQ(actual->attr_index, expected->attr_index);
+    EXPECT_EQ(actual->kind, expected->kind);
+    EXPECT_EQ(actual->joins_composition, expected->joins_composition);
+    EXPECT_EQ(actual->role, expected->role);
+    EXPECT_EQ(actual->source_root_region_index_plus_one,
+              expected->source_root_region_index_plus_one);
+    EXPECT_EQ(actual->execution_scope, expected->execution_scope);
+  }
+}
+
 TEST_F(SymbolReferencesTest, AllocationFailureNeverPublishesPartialTable) {
   constexpr uint32_t kCount = 2049;
   std::vector<loom_op_t*> user_ops;
@@ -810,7 +866,7 @@ func.def public @entry(%arg: i32) -> (i32) {
   const loom_symbol_id_t undemanded_family_symbol_id =
       FindSymbol(module.get(), IREE_SV("outer.contract"));
 
-  const loom_symbol_reference_table_t table = BuildTable(module.get());
+  loom_symbol_reference_table_t table = BuildTable(module.get());
 
   EXPECT_EQ(table.calls.count, 0u);
   EXPECT_EQ(table.calls.template_count, 0u);
@@ -839,6 +895,36 @@ func.def public @entry(%arg: i32) -> (i32) {
   }
 
   EXPECT_EQ(table.template_provider_count, 2u);
+
+  // Replacing an apply preserves both its reference occurrence and its
+  // separately retained provider demand.
+  auto* original =
+      const_cast<loom_op_t*>(table.template_demands.values[0].apply_op);
+  loom_builder_t builder = {};
+  loom_builder_initialize(module.get(), &module->arena, original->parent_block,
+                          &builder);
+  loom_builder_set_before(&builder, original);
+  const auto result_type =
+      loom_module_value_type(module.get(), loom_op_results(original)[0]);
+  loom_op_t* replacement = nullptr;
+  IREE_ASSERT_OK(loom_template_apply_build(
+      &builder, 0, loom_template_apply_family(original),
+      loom_op_operands(original), original->operand_count, 0, 0, &result_type,
+      1, nullptr, 0, LOOM_LOCATION_UNKNOWN, &replacement));
+  IREE_ASSERT_OK(loom_value_replace_all_uses_with(
+      module.get(), loom_op_results(original)[0],
+      loom_op_results(replacement)[0]));
+  IREE_ASSERT_OK(loom_op_erase(module.get(), original));
+  const loom_symbol_reference_user_replacement_t rebind = {original,
+                                                           replacement};
+  IREE_ASSERT_OK(loom_symbol_reference_table_rebind_users(&table, &rebind, 1,
+                                                          &analysis_arena_));
+  const auto rebuilt = BuildTable(module.get());
+  ASSERT_EQ(table.template_demands.count, rebuilt.template_demands.count);
+  for (size_t i = 0; i < table.template_demands.count; ++i) {
+    EXPECT_EQ(table.template_demands.values[i].apply_op,
+              rebuilt.template_demands.values[i].apply_op);
+  }
 }
 
 TEST_F(SymbolReferencesTest, TemplateDemandFamiliesAreUniqueAndSorted) {
