@@ -306,3 +306,57 @@ func.def @library__sqrt_void(%value: f64) -> (f64) {
   %11 = scalar.sqrtf %value : f64
   func.return %11 : f64
 }
+
+// ====
+// Classification builtins select the source operand's floating-point width;
+// ordinary C++ conversion preserves the surrounding int result.
+struct ClassificationResults {
+  int finite_single;
+  int infinite_single;
+  int nan_single;
+  int finite_wide;
+  int infinite_wide;
+  int nan_wide;
+};
+ClassificationResults classifications(float single, double wide) {
+  return {__builtin_isfinite(single), __builtin_isinf(single),
+          __builtin_isnan(single), __builtin_isfinite(wide),
+          __builtin_isinf(wide), __builtin_isnan(wide)};
+}
+// ----
+func.def public @classifications(%single: f32, %wide: f64) -> (i32, i32, i32, i32, i32, i32) {
+  %8 = scalar.isfinitef %single : f32
+  %9 = scalar.extui %8 : i1 to i32
+  %10 = scalar.isinff %single : f32
+  %11 = scalar.extui %10 : i1 to i32
+  %12 = scalar.isnanf %single : f32
+  %13 = scalar.extui %12 : i1 to i32
+  %14 = scalar.isfinitef %wide : f64
+  %15 = scalar.extui %14 : i1 to i32
+  %16 = scalar.isinff %wide : f64
+  %17 = scalar.extui %16 : i1 to i32
+  %18 = scalar.isnanf %wide : f64
+  %19 = scalar.extui %18 : i1 to i32
+  func.return %9, %11, %13, %15, %17, %19 : i32, i32, i32, i32, i32, i32
+}
+
+// ====
+// The generated scalar API exposes the same family with its native boolean
+// result and no surrounding source conversion.
+#include <loomcxx/scalar.h>
+struct ClassificationPredicates {
+  bool finite;
+  bool infinite;
+  bool nan;
+};
+ClassificationPredicates predicates(double value) {
+  return {loom::scalar::isfinitef(value), loom::scalar::isinff(value),
+          loom::scalar::isnanf(value)};
+}
+// ----
+func.def public @predicates(%value: f64) -> (i1, i1, i1) {
+  %4 = scalar.isfinitef %value : f64
+  %5 = scalar.isinff %value : f64
+  %6 = scalar.isnanf %value : f64
+  func.return %4, %5, %6 : i1, i1, i1
+}

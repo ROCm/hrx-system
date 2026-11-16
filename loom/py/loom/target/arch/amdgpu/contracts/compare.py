@@ -21,6 +21,7 @@ from loom.target.arch.amdgpu.contracts.materializers import (
     ADDRESS_SGPR64_MATERIALIZER,
     F32_VGPR_MATERIALIZER,
     I32_VGPR_MATERIALIZER,
+    REGISTERS_SGPR_MATERIALIZER,
     REGISTERS_VGPR_MATERIALIZER,
 )
 from loom.target.arch.amdgpu.descriptors import (
@@ -335,12 +336,6 @@ def _i64_scalar_rule(
         )
     else:
         for field, source in operands.items():
-            if operand_materializer:
-                normalized = ValueRef.temporary(f"{field}_pair")
-                emits.append(
-                    EmitRegisterSlice(source=source, result=normalized, unit_count=2)
-                )
-                source = normalized
             emits.extend(
                 EmitRegisterSlice(
                     source=source,
@@ -941,13 +936,17 @@ def _rules() -> tuple[DescriptorRule | RecipeRule, ...]:
         *_float_scalar_rules(scalar.scalar_cmpf, _F16, 16),
         *_float_scalar_rules(scalar.scalar_cmpf, _F32, 32),
         *_float_mask_rules(),
-        *_i64_scalar_rules(scalar.scalar_cmpi),
+        *_i64_scalar_rules(
+            scalar.scalar_cmpi,
+            operand_materializer=REGISTERS_SGPR_MATERIALIZER,
+        ),
         *_typed_rules(
             scalar.scalar_cmpi,
             _I32,
             _REGISTER_LHS,
             _REGISTER_RHS,
             I32_VGPR_MATERIALIZER.name,
+            scalar_materializer=REGISTERS_SGPR_MATERIALIZER,
         ),
         *_typed_rules(
             index.index_cmp,
@@ -988,6 +987,7 @@ AMDGPU_COMPARE_CONTRACT_FRAGMENT = ContractFragment(
         ADDRESS_SGPR64_MATERIALIZER,
         ADDRESS_COMPARE_SGPR_MATERIALIZER,
         I32_VGPR_MATERIALIZER,
+        REGISTERS_SGPR_MATERIALIZER,
         REGISTERS_VGPR_MATERIALIZER,
         F32_VGPR_MATERIALIZER,
         ADDRESS_REGISTER_MATERIALIZER,

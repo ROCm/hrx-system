@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from loom.dialect.scalar import FastMathFlags, TrigonometryMathFlags
-from loom.dsl import ATTR_TYPE_FLAGS, FLOAT, I32, INTEGER, Op, Operand, Result
+from loom.dsl import ATTR_TYPE_FLAGS, FLOAT, I1, I32, INTEGER, Op, Operand, Result
 from loom.gen import bootstrap
 from loom.gen.ops.model import load_dialect_generation
 from loom.gen.support.files import write_text_file
@@ -26,18 +26,28 @@ REGENERATE_COMMAND = "python3 loom/py/loom/gen/run.py cxx_intrinsics --in-place"
 
 # These integer operations preserve the input width and have no permissions.
 _INTEGER_PROJECTIONS = frozenset(("scalar.absi", "scalar.ctlzi", "scalar.cttzi", "scalar.ctpopi"))
+_CLASSIFICATION_PROJECTIONS = frozenset(("scalar.isfinitef", "scalar.isinff", "scalar.isnanf"))
+
+
+def _variable_category(op: Op):
+    categories = {field.type_constraint for field in (*op.operands, *op.results) if field.type_constraint in (FLOAT, INTEGER)}
+    if len(categories) != 1:
+        raise ValueError(f"{op.name}: requires one variable scalar category")
+    return categories.pop()
 
 
 def validate_scalar_projection(op: Op) -> None:
-    """Checks one scalar type relationship with optional fixed i32 fields."""
+    """Checks one scalar type relationship with optional fixed fields."""
     if op.regions or op.successors or not op.results or not op.operands:
         raise ValueError(f"{op.name}: requires fixed scalar operands and results")
     fields = (*op.operands, *op.results)
-    category = op.results[0].type_constraint
+    category = _variable_category(op)
     if len(fields) > 8:
         raise ValueError(f"{op.name}: fixed field mask has capacity for eight values")
-    if category not in (FLOAT, INTEGER) or any(field.variadic or field.type_constraint not in (category, I32) for field in fields) or any(operand.optional for operand in op.operands):
-        raise ValueError(f"{op.name}: requires one scalar category and fixed i32 fields")
+    if any(field.variadic or field.type_constraint not in (category, I1, I32) for field in fields) or any(operand.optional for operand in op.operands):
+        raise ValueError(f"{op.name}: requires one scalar category and fixed fields")
+    if any(operand.type_constraint == I1 for operand in op.operands):
+        raise ValueError(f"{op.name}: fixed boolean operands are not projected")
     if (category == INTEGER and op.attrs) or any(
         attr.attr_type != ATTR_TYPE_FLAGS or (attr.name, attr.enum_def) not in (("fastmath", FastMathFlags), ("math", TrigonometryMathFlags)) for attr in op.attrs
     ):
@@ -45,7 +55,7 @@ def validate_scalar_projection(op: Op) -> None:
     if not any(trait.name == "Pure" for trait in op.traits):
         raise ValueError(f"{op.name}: requires a pure scalar operation")
     names = {field.name for field in fields if field.type_constraint == category}
-    if not op.constraints or any(constraint.name != "SameType" or set(constraint.args) != names for constraint in op.constraints):
+    if len(names) > 1 and (not op.constraints or any(constraint.name != "SameType" or set(constraint.args) != names for constraint in op.constraints)):
         raise ValueError(f"{op.name}: requires one scalar type relationship")
 
 
@@ -55,7 +65,7 @@ def scalar_projections() -> tuple[Op, ...]:
     """
     selected = []
     for op in load_dialect_generation("scalar").ops:
-        if op.name in _INTEGER_PROJECTIONS:
+        if op.name in _INTEGER_PROJECTIONS or op.name in _CLASSIFICATION_PROJECTIONS:
             validate_scalar_projection(op)
             selected.append(op)
             continue
@@ -74,6 +84,8 @@ def scalar_projections() -> tuple[Op, ...]:
 
 
 def _field_cpp_type(field: Operand | Result, parameter: str) -> str:
+    if field.type_constraint == I1:
+        return "bool"
     return "int" if field.type_constraint == I32 else parameter
 
 
@@ -110,14 +122,15 @@ def generate_header(ops: Sequence[Op]) -> str:
                 flags += ', "preserve"'
             lines.append("")
             lines.extend("// " + line for line in textwrap.wrap(op.doc, 76))
-            if op.results[0].type_constraint == INTEGER:
+            category = _variable_category(op)
+            if category == INTEGER:
                 parameter = "Integer"
                 constraint = "__is_integral(Integer) && !__is_same(Integer, bool)"
             else:
                 parameter = "Float"
                 constraint = "__is_floating_point(Float)"
 
-            result_type = parameter
+            result_type = _field_cpp_type(op.results[0], parameter)
             if len(op.results) > 1:
                 result_type = f"{name}_result<{parameter}>"
                 lines.append(f"template <class {parameter}> struct {name}_result {{")
@@ -142,9 +155,12 @@ def generate_source(ops: Sequence[Op]) -> str:
         "",
     ]
     for op in ops:
+        category = _variable_category(op)
         name = op.name.replace(".", "_")
         arguments = ", ".join(f"operands[{index}]" for index in range(len(op.operands)))
         flags = "flags, " if op.attrs else ""
+        variable_result = any(result.type_constraint == category for result in op.results)
+        result_type = ", result_type" if variable_result else ""
         lines.extend(
             [
                 f"static iree_status_t {name}(loom_builder_t* builder, uint8_t flags,",
@@ -154,20 +170,23 @@ def generate_source(ops: Sequence[Op]) -> str:
         )
         if not op.attrs:
             lines.append("  (void)flags;")
+        if not variable_result:
+            lines.append("  (void)result_type;")
         lines.extend(
             [
-                f"  return loom_{name}_build(builder, {flags}{arguments}, result_type, location, out_op);",
+                f"  return loom_{name}_build(builder, {flags}{arguments}{result_type}, location, out_op);",
                 "}",
                 "",
             ]
         )
     lines.append("static const loom_cxx_scalar_binding_t bindings[] = {")
     for op in ops:
-        category = "INTEGER" if op.results[0].type_constraint == INTEGER else "FLOAT"
+        category = "INTEGER" if _variable_category(op) == INTEGER else "FLOAT"
         preserve_flag = next((case.value for attr in op.attrs for case in attr.enum_def.cases if case.keyword == "preserve"), 0)
         fixed_i32_mask = sum(1 << index for index, field in enumerate((*op.operands, *op.results)) if field.type_constraint == I32)
+        fixed_i1_mask = sum(1 << index for index, field in enumerate((*op.operands, *op.results)) if field.type_constraint == I1)
         lines.append(
-            f'    {{"{op.name}", LOOM_CXX_SCALAR_CATEGORY_{category}, {len(op.operands)}, {len(op.results)}, {fixed_i32_mask}, {str(bool(op.attrs)).lower()}, {preserve_flag}, {op.name.replace(".", "_")}}},'
+            f'    {{"{op.name}", LOOM_CXX_SCALAR_CATEGORY_{category}, {len(op.operands)}, {len(op.results)}, {fixed_i32_mask}, {fixed_i1_mask}, {str(bool(op.attrs)).lower()}, {preserve_flag}, {op.name.replace(".", "_")}}},'
         )
     lines.extend(
         [

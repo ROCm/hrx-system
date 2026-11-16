@@ -15,6 +15,7 @@
 #include "loom/target/arch/amdgpu/lower/descriptor_ref.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
+#include "loom/target/arch/amdgpu/lower/materializers.h"
 #include "loom/target/arch/amdgpu/lower/source_integer_representation.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 
@@ -1625,9 +1626,13 @@ static iree_status_t loom_amdgpu_scalar_i64_operand_can_materialize(
   }
   const uint16_t source_register_class =
       loom_low_register_type_class_id(source_low_type);
-  *out_can_lower = source_register_class == result_register_class ||
-                   (result_register_class == LOOM_AMDGPU_REG_CLASS_ID_VGPR &&
-                    source_register_class == LOOM_AMDGPU_REG_CLASS_ID_SGPR);
+  if (result_register_class == LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
+    return loom_amdgpu_value_can_materialize_as_sgpr_registers(
+        context, source_op, source, out_can_lower);
+  }
+  *out_can_lower = result_register_class == LOOM_AMDGPU_REG_CLASS_ID_VGPR &&
+                   (source_register_class == LOOM_AMDGPU_REG_CLASS_ID_SGPR ||
+                    source_register_class == LOOM_AMDGPU_REG_CLASS_ID_VGPR);
   return iree_ok_status();
 }
 
@@ -1765,12 +1770,22 @@ iree_status_t loom_amdgpu_select_scalar_i64_ctpop_plan(
     return iree_ok_status();
   }
 
-  const uint16_t source_register_class =
-      loom_low_register_type_class_id(source_low_type);
   const uint16_t result_register_class =
       loom_low_register_type_class_id(result_low_type);
-  if (source_register_class > LOOM_AMDGPU_REG_CLASS_ID_VGPR ||
-      result_register_class > LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
+  if (result_register_class > LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
+    return iree_ok_status();
+  }
+  uint16_t source_register_class =
+      loom_low_register_type_class_id(source_low_type);
+  if (result_register_class == LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
+    bool source_can_materialize = false;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_value_can_materialize_as_sgpr_registers(
+        context, source_op, source, &source_can_materialize));
+    if (!source_can_materialize) {
+      return iree_ok_status();
+    }
+    source_register_class = LOOM_AMDGPU_REG_CLASS_ID_SGPR;
+  } else if (source_register_class > LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
     return iree_ok_status();
   }
   const loom_amdgpu_scalar_i64_ctpop_kind_t kind =

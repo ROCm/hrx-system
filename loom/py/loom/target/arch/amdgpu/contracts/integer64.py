@@ -8,7 +8,10 @@
 
 from loom.dialect.scalar import bitwise
 from loom.dsl import Op
-from loom.target.arch.amdgpu.contracts.materializers import I64_VGPR_MATERIALIZER
+from loom.target.arch.amdgpu.contracts.materializers import (
+    I64_VGPR_MATERIALIZER,
+    REGISTERS_SGPR_MATERIALIZER,
+)
 from loom.target.contracts import (
     DescriptorEmitForm,
     DescriptorResultType,
@@ -45,8 +48,12 @@ def integer64_rules(descriptor_set: DescriptorSet) -> tuple[DescriptorRule, ...]
                 Guard.low_value_register_class("result", register_class),
                 *(
                     (
-                        Guard.low_value_register_class("lhs", register_class),
-                        Guard.low_value_register_class("rhs", register_class),
+                        Guard.value_materializable(
+                            "lhs", REGISTERS_SGPR_MATERIALIZER.name
+                        ),
+                        Guard.value_materializable(
+                            "rhs", REGISTERS_SGPR_MATERIALIZER.name
+                        ),
                     )
                     if is_scalar
                     else (
@@ -55,7 +62,12 @@ def integer64_rules(descriptor_set: DescriptorSet) -> tuple[DescriptorRule, ...]
                 ),
             )
             value = ValueRef.operand(
-                "lhs", materializer=None if is_scalar else I64_VGPR_MATERIALIZER.name
+                "lhs",
+                materializer=(
+                    REGISTERS_SGPR_MATERIALIZER.name
+                    if is_scalar
+                    else I64_VGPR_MATERIALIZER.name
+                ),
             )
             if source_op != bitwise.scalar_shrsi:
                 zero_descriptor = descriptor_by_key(
@@ -158,7 +170,14 @@ def integer64_rules(descriptor_set: DescriptorSet) -> tuple[DescriptorRule, ...]
                     guards=(*guards, Guard.descriptor_available(descriptor)),
                     emit=(
                         EmitRegisterSlice(
-                            source=ValueRef.operand("rhs"),
+                            source=ValueRef.operand(
+                                "rhs",
+                                materializer=(
+                                    REGISTERS_SGPR_MATERIALIZER.name
+                                    if is_scalar
+                                    else None
+                                ),
+                            ),
                             result=shift,
                             unit_count=1,
                         ),
@@ -188,10 +207,9 @@ def integer64_bitwise_rules(
             descriptor=scalar_descriptor,
             guards=(
                 *typed_guards,
-                *(
-                    Guard.low_value_register_class(field, "amdgpu.sgpr")
-                    for field in ("result", "lhs", "rhs")
-                ),
+                Guard.low_value_register_class("result", "amdgpu.sgpr"),
+                Guard.value_materializable("lhs", REGISTERS_SGPR_MATERIALIZER.name),
+                Guard.value_materializable("rhs", REGISTERS_SGPR_MATERIALIZER.name),
                 Guard.low_value_register_unit_count_eq("result", "lhs"),
                 Guard.low_value_register_unit_count_eq("result", "rhs"),
                 Guard.descriptor_available(scalar_descriptor),
@@ -200,7 +218,10 @@ def integer64_bitwise_rules(
                 EmitDescriptorOp(
                     descriptor=scalar_descriptor,
                     operands={
-                        field: ValueRef.operand(field) for field in ("lhs", "rhs")
+                        field: ValueRef.operand(
+                            field, materializer=REGISTERS_SGPR_MATERIALIZER.name
+                        )
+                        for field in ("lhs", "rhs")
                     },
                     results={"dst": result},
                 ),
@@ -268,7 +289,9 @@ def _word_join_rules() -> tuple[DescriptorRule, ...]:
                     Guard.value_divisible_by(high, 2**32),
                     Guard.low_value_register_class("result", register_class),
                     *(
-                        Guard.low_value_register_class(field, register_class)
+                        Guard.value_materializable(
+                            field, REGISTERS_SGPR_MATERIALIZER.name
+                        )
                         if bank == "sgpr"
                         else Guard.value_materializable(
                             field, I64_VGPR_MATERIALIZER.name
@@ -286,9 +309,11 @@ def _word_join_rules() -> tuple[DescriptorRule, ...]:
                                 EmitRegisterSlice(
                                     source=ValueRef.operand(
                                         field,
-                                        materializer=None
-                                        if bank == "sgpr"
-                                        else I64_VGPR_MATERIALIZER.name,
+                                        materializer=(
+                                            REGISTERS_SGPR_MATERIALIZER.name
+                                            if bank == "sgpr"
+                                            else I64_VGPR_MATERIALIZER.name
+                                        ),
                                     ),
                                     result=word,
                                     unit_offset=offset,

@@ -407,27 +407,15 @@ Intrinsics::ScalarBinding Intrinsics::resolve_scalar(
                             "intrinsic result members must be scalar values");
       }
     }
-    return_type = types_.unqualified(record->members.front().type());
-  }
-  if (operation.scalar->category == LOOM_CXX_SCALAR_CATEGORY_INTEGER) {
-    if (!traits.is_integral(return_type) ||
-        return_type->kind() == cxx::TypeKind::kBool) {
-      diagnostics_.reject(
-          unit_, owner,
-          "scalar intrinsic result must be a non-boolean integer");
-    }
-  } else if (!types_.is_float(return_type)) {
-    diagnostics_.reject(unit_, owner,
-                        "scalar intrinsic result must be _Float16, __bf16, "
-                        "float, or double");
   }
   if (signature->isVariadic() ||
       signature->parameterTypes().size() != operation.scalar->operand_count) {
     diagnostics_.reject(unit_, owner,
                         "intrinsic declaration has the wrong operand count");
   }
+  const cxx::Type* variable_type = nullptr;
   auto check_field = [&](const cxx::Type* type, size_t index,
-                         const char* mismatch) {
+                         bool result_field) {
     type = types_.unqualified(type);
     if (operation.scalar->fixed_i32_mask & (1u << index)) {
       if (!traits.is_integral(type) || types_.is_unsigned(type) ||
@@ -437,22 +425,56 @@ Intrinsics::ScalarBinding Intrinsics::resolve_scalar(
             unit_, owner,
             "fixed i32 intrinsic fields must be signed 32-bit integers");
       }
-    } else if (type != return_type) {
-      diagnostics_.reject(unit_, owner, mismatch);
+      return;
     }
+    if (operation.scalar->fixed_i1_mask & (1u << index)) {
+      if (type->kind() != cxx::TypeKind::kBool) {
+        diagnostics_.reject(unit_, owner,
+                            "fixed i1 intrinsic fields must be boolean");
+      }
+      return;
+    }
+    if (variable_type && type != variable_type) {
+      diagnostics_.reject(
+          unit_, owner,
+          result_field
+              ? (record ? "intrinsic result members must share the primary "
+                          "type"
+                        : "intrinsic result must share the operands' type")
+              : "intrinsic operands must have the result's type");
+    }
+    if (operation.scalar->category == LOOM_CXX_SCALAR_CATEGORY_INTEGER) {
+      if (!traits.is_integral(type) || type->kind() == cxx::TypeKind::kBool) {
+        diagnostics_.reject(
+            unit_, owner,
+            result_field
+                ? "scalar intrinsic result must be a non-boolean integer"
+                : "scalar intrinsic operands must be non-boolean integers");
+      }
+    } else if (!types_.is_float(type)) {
+      diagnostics_.reject(
+          unit_, owner,
+          result_field
+              ? "scalar intrinsic result must be _Float16, __bf16, float, or "
+                "double"
+              : "scalar intrinsic operands must be _Float16, __bf16, float, "
+                "or double");
+    }
+    variable_type = type;
   };
-  size_t index = 0;
-  for (const auto* parameter : signature->parameterTypes()) {
-    check_field(parameter, index++,
-                "intrinsic operands must have the result's type");
-  }
+  size_t index = operation.scalar->operand_count;
   if (record) {
     for (const auto& member : record->members) {
-      check_field(member.type(), index++,
-                  "intrinsic result members must share the primary type");
+      check_field(member.type(), index++, true);
     }
+  } else {
+    check_field(return_type, index++, true);
   }
-  return {operation, types_.get(return_type, owner),
+  index = 0;
+  for (const auto* parameter : signature->parameterTypes()) {
+    check_field(parameter, index++, false);
+  }
+  return {operation, types_.get(variable_type, owner),
           record ? static_cast<const Partition*>(record) : &kSSAPartition};
 }
 

@@ -16,6 +16,14 @@ REGISTERS_VGPR_MATERIALIZER = ValueMaterializer(
     header="loom/target/arch/amdgpu/lower/materializers.h",
 )
 
+REGISTERS_SGPR_MATERIALIZER = ValueMaterializer(
+    name="registers_sgpr",
+    result_type="loom_amdgpu_materialized_sgpr_register_type",
+    can_materialize="loom_amdgpu_value_can_materialize_as_sgpr_registers",
+    materialize="loom_amdgpu_lookup_or_materialize_sgpr_registers",
+    header="loom/target/arch/amdgpu/lower/materializers.h",
+)
+
 I64_LOW_WORDS_MATERIALIZER = ValueMaterializer(
     name="i64_low_words",
     result_type="loom_amdgpu_materialized_i64_low_words_type",
