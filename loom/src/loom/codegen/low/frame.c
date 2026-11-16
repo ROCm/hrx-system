@@ -447,6 +447,7 @@ static iree_status_t loom_low_emission_frame_build_impl(
       .diagnostic_flags = options->schedule_diagnostic_flags,
       .flags = options->schedule_flags,
       .strategy = options->schedule_strategy,
+      .emitter = options->emitter,
   };
   if (options->storage_lease_provider != NULL) {
     schedule_options.flags |=

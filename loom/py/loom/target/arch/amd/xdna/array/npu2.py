@@ -667,6 +667,25 @@ _FIXED_REGISTER_PATTERNS = (
         0x32000,
         (_field("reset", 1), _field("enable", 0)),
     ),
+    *(
+        _pattern(
+            f"{key}.tile_control.status",
+            module,
+            address,
+            (
+                _field("first_header_parity_error", 0, access=RegisterAccess.READ_ONLY),
+                _field(
+                    "second_header_parity_error", 1, access=RegisterAccess.READ_ONLY
+                ),
+                _field("slave_error", 2, access=RegisterAccess.READ_ONLY),
+                _field("tlast_error", 3, access=RegisterAccess.READ_ONLY),
+            ),
+        )
+        for key, module, address in (
+            ("core", RegisterModule.CORE, 0x3FF30),
+            ("memory_tile", RegisterModule.MEMORY_TILE, 0xB0F30),
+        )
+    ),
     _pattern(
         "shim_noc.mux_config",
         RegisterModule.SHIM_NOC,

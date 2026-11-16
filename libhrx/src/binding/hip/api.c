@@ -23490,9 +23490,6 @@ static hipError_t iree_hip_graph_prepare_memcpy_node_params(
     copy->source_offset = local_src ? src_ref.offset : 0;
     copy->target_buffer = local_dst ? dst_ref.buffer->buffer : NULL;
     copy->target_offset = local_dst ? dst_ref.offset : 0;
-    copy->release_to_host =
-        !local_dst ||
-        dst_ref.buffer->memory_kind != IREE_HAL_STREAMING_MEMORY_KIND_DEVICE;
     iree_hip_graph_resolve_memcpy_geometry(
         &plan->attrs.command,
         local_dst ? execution_params->dstPtr.pitch

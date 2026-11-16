@@ -1,0 +1,40 @@
+// RUN: emit aie2p-hardware-loops input=source-low
+
+// The packed arithmetic body is shorter than the loop setup-to-end distance.
+// Widening its existing packets admits the hardware loop without extra cycles.
+aie2p.target<array> @device {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+pipeline.def<kernel> public retain target(@device) @short_body() run(%output_argument: buffer) {
+  %output = buffer.assume.alignment %output_argument {minimum_alignment = 64} : buffer
+  %pool = pipeline.memory<workgroup>[0, 2] : pool
+  %size = index.constant 512 : offset
+  %origin = index.constant 0 : offset
+  %c1 = index.constant 1 : index
+  %begin = index.constant 0 : index
+  %count = index.constant 128 : index
+  %storage = buffer.alloca<workgroup> pool(%pool) align(64) %size : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x128xi32>
+  %channel = channel.bind<fifo> %slots, %c1 : view<1x128xi32>, index -> channel<tile<128xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %write, %values = channel.reserve %channel : channel<tile<128xi32>> -> (write<tile<128xi32>>, view<128xi32>)
+    scf.for %index = [%begin to %count step %c1] {
+      %value = index.cast %index : index to i32
+      %scale = scalar.constant 7 : i32
+      %first = scalar.muli %value, %scale : i32
+      %second = scalar.xori %first, %scale : i32
+      %third = scalar.muli %second, %scale : i32
+      view.store %third, %values[%index] : i32, view<128xi32>
+    }
+    channel.publish %write : write<tile<128xi32>>
+    %read, %completed = channel.acquire %channel : channel<tile<128xi32>> -> (read<tile<128xi32>>, view<128xi32>)
+    %destination = buffer.view %output[%origin] : buffer -> view<128xi32>
+    %copy = kernel.async.copy %completed to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<128xi32> to view<128xi32> -> kernel.async.token
+    %departure = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %departure {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<128xi32>>
+  }
+}
+
+// ----
+.text.__aie2p_worker_helper_9: hardware_loops=1
+  loop 0: iterations=128 count_start_coissued=true end_setup_next=true start_aligned=true start_after_setup=true end_aligned=true end_on_bundle=true end_group_full_width=true setup_distance_valid=true trailing_nop_bundles=3 body_control=0

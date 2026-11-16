@@ -66,6 +66,14 @@ iree_host_size_t loom_pipeline_lifetimes_common_ancestor(
   return ancestry[first].preorder < ancestry[second].preorder ? first : second;
 }
 
+iree_host_size_t loom_pipeline_lifetimes_common_owner(
+    const loom_pipeline_lifetimes_t* lifetimes, iree_host_size_t first,
+    iree_host_size_t second) {
+  const iree_host_size_t ancestor = loom_pipeline_lifetimes_common_ancestor(
+      lifetimes, lifetimes->owners[first], lifetimes->owners[second]);
+  return lifetimes->nodes[ancestor].owner;
+}
+
 typedef struct loom_pipeline_lifetime_pending_t {
   // Node awaiting expansion in the parent-before-child worklist.
   iree_host_size_t node;
@@ -108,12 +116,13 @@ static iree_status_t loom_pipeline_lifetime_append(
   }
   const iree_host_size_t index = builder->count++;
   builder->has_serial |= kind == LOOM_PIPELINE_LIFETIME_SERIAL;
-  builder->nodes[index] =
-      (loom_pipeline_lifetime_t){.kind = kind,
-                                 .owner = invocation ? invocation->ordinal : 0,
-                                 .parent = parent,
-                                 .first_child = IREE_HOST_SIZE_MAX,
-                                 .next_sibling = IREE_HOST_SIZE_MAX};
+  builder->nodes[index] = (loom_pipeline_lifetime_t){
+      .kind = kind,
+      .owner = invocation ? invocation->ordinal : builder->nodes[parent].owner,
+      .parent = parent,
+      .first_child = IREE_HOST_SIZE_MAX,
+      .next_sibling = IREE_HOST_SIZE_MAX,
+  };
   if (kind == LOOM_PIPELINE_LIFETIME_OWNER) {
     builder->owners[invocation->ordinal] = index;
   }

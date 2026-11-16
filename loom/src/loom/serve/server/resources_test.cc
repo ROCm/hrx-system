@@ -48,8 +48,8 @@ class ResourcesTest : public ::testing::Test {
       loom_runtime_pool_backing_t backing = LOOM_RUNTIME_POOL_BACKING_FIXED,
       iree_string_view_t first_name = IREE_SV("first"),
       iree_string_view_t second_name = IREE_SV("second")) {
-    IREE_RETURN_IF_ERROR(
-        loom_runtime_host_create(1, nullptr, iree_allocator_system(), &host_));
+    IREE_RETURN_IF_ERROR(loom_runtime_host_create(
+        1, nullptr, nullptr, iree_allocator_system(), &host_));
     const loom_runtime_device_options_t options[] = {
         {
             .driver = loom_runtime_host_task_driver(host_),

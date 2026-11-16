@@ -136,6 +136,8 @@ typedef struct iree_hal_amd_gpu_aql_submission_t {
   bool profiled;
   // Retained HAL signal timelines and copied values in inline storage.
   iree_hal_semaphore_list_t signals;
+  // Borrowed semaphore index records, owned through native producer retirement.
+  iree_hal_amd_gpu_semaphore_producer_t* signal_producers;
   union {
     // Pool transaction whose native ordering belongs to this submission.
     struct {

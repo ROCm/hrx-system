@@ -13,9 +13,12 @@
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/channel/ops.h"
 #include "loom/ops/func/ops.h"
+#include "loom/ops/index/carrier.h"
 #include "loom/ops/pipeline/ops.h"
+#include "loom/ops/special_values.h"
 #include "loom/rewrite/materialize.h"
 #include "loom/util/adaptive_sort.h"
+#include "loom/util/predicate_facts.h"
 
 typedef enum loom_pipeline_control_site_kind_e {
   LOOM_PIPELINE_CONTROL_STRAND,
@@ -66,12 +69,6 @@ typedef struct loom_pipeline_control_sites_t {
   // NULL when no worker in the invocation requires entry preparation.
   bool* preparation_engines;
 } loom_pipeline_control_sites_t;
-
-typedef enum loom_pipeline_control_projection_e {
-  LOOM_PIPELINE_CONTROL_COMPLETE,
-  LOOM_PIPELINE_CONTROL_START,
-  LOOM_PIPELINE_CONTROL_RETIRE,
-} loom_pipeline_control_projection_t;
 
 static bool loom_pipeline_control_site_less(
     const loom_pipeline_control_site_t* left,
@@ -451,6 +448,87 @@ static iree_status_t loom_pipeline_control_collective(
   return loom_rewriter_erase(rewriter, operations[0]);
 }
 
+// A projected controller has the same captured values as its construction.
+// Preserve its admitted constants and numeric preconditions before removing
+// unused formals; native calls cannot rely on later inlining to recover them.
+static iree_status_t loom_pipeline_control_materialize_arguments(
+    loom_rewriter_t* rewriter, const loom_pipeline_invocation_t* invocation,
+    const loom_value_id_t* source_arguments, uint16_t argument_count,
+    loom_op_t* function) {
+  loom_module_t* module = rewriter->module;
+  loom_block_t* entry = loom_region_entry_block(loom_func_def_body(function));
+  loom_builder_set_before(&rewriter->builder, entry->first_op);
+  const loom_op_t* const* captures = invocation->arguments.literal_captures;
+  loom_ir_remap_t literals;
+  if (captures) {
+    IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(
+        module, module, rewriter->arena, NULL, &literals));
+  }
+  loom_predicate_t* predicates = NULL;
+  iree_host_size_t predicate_count = 0;
+  iree_host_size_t predicate_capacity = 0;
+  for (uint16_t i = 0; i < argument_count; ++i) {
+    const loom_value_id_t argument = entry->arg_ids[i];
+    if (!loom_module_value_has_uses(module, argument)) {
+      continue;
+    }
+    const loom_type_t type = loom_module_value_type(module, argument);
+    const loom_value_facts_t facts =
+        loom_value_fact_table_lookup(invocation->facts, source_arguments[i]);
+    // A body value cannot replace an identity used by the signature's types.
+    // Such an argument retains its ABI slot and receives a precondition below.
+    if (!loom_module_value_has_type_uses(module, argument)) {
+      loom_value_id_t constant = LOOM_VALUE_ID_INVALID;
+      if (loom_value_facts_can_materialize_constant(facts, type)) {
+        IREE_RETURN_IF_ERROR(loom_constant_build(
+            &rewriter->builder, facts, type, function->location, &constant));
+      } else if (captures && captures[i]) {
+        loom_op_t* literal = NULL;
+        IREE_RETURN_IF_ERROR(loom_ir_clone_op(&rewriter->builder, captures[i],
+                                              &literals, &literal));
+        constant = loom_op_results(literal)[0];
+      }
+      if (constant != LOOM_VALUE_ID_INVALID) {
+        IREE_RETURN_IF_ERROR(
+            loom_rewriter_replace_all_uses_with(rewriter, argument, constant));
+        continue;
+      }
+    }
+    int64_t domain_low = 0, domain_high = 0;
+    if (!loom_type_is_scalar(type) ||
+        !loom_value_facts_scalar_type_domain(loom_type_element_type(type),
+                                             &domain_low, &domain_high)) {
+      continue;
+    }
+    loom_predicate_t refinements[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY];
+    const uint16_t count = loom_value_facts_export_integer_refinements(
+        argument,
+        loom_index_integer_carrier_domain_facts(&invocation->facts->context,
+                                                loom_type_element_type(type)),
+        facts, refinements, IREE_ARRAYSIZE(refinements));
+    if (count) {
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          &module->arena, predicate_count, predicate_count + count,
+          sizeof(*predicates), &predicate_capacity, (void**)&predicates));
+      memcpy(predicates + predicate_count, refinements,
+             count * sizeof(*refinements));
+      predicate_count += count;
+    }
+  }
+  if (predicate_count > UINT16_MAX) {
+    return iree_make_status(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        "pipeline argument refinements exceed the predicate limit");
+  }
+  if (predicate_count) {
+    return loom_rewriter_set_attr(
+        rewriter, function,
+        loom_func_like_cast(module, function).vtable->predicates_attr_index,
+        loom_attr_predicate_list(predicates, (uint16_t)predicate_count));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_pipeline_control_project(
     loom_rewriter_t* rewriter, const loom_pipeline_realization_t* realization,
     const loom_pipeline_execution_t* execution,
@@ -458,7 +536,8 @@ static iree_status_t loom_pipeline_control_project(
     const loom_pipeline_invocation_t* invocation, iree_host_size_t engine,
     loom_symbol_ref_t symbol, loom_pipeline_control_sites_t* sites,
     loom_pipeline_control_function_t* functions,
-    loom_pipeline_control_projection_t projection, bool prepares,
+    loom_pipeline_entry_role_t projection, bool prepares,
+    const loom_pipeline_entry_scope_t* scope,
     const loom_pipeline_control_function_t* boundaries,
     loom_pipeline_control_function_t* out_function) {
   loom_module_t* module = rewriter->module;
@@ -477,13 +556,21 @@ static iree_status_t loom_pipeline_control_project(
   }
   loom_builder_enter_region(&rewriter->builder, NULL, module->body);
   loom_op_t* function = NULL;
+  const loom_inline_policy_t inline_policy =
+      options->retain_phase_calls && invocation->schedule != NULL
+          ? LOOM_INLINE_POLICY_UNSPECIFIED
+          : LOOM_INLINE_POLICY_INLINE;
   IREE_RETURN_IF_ERROR(loom_func_def_build(
-      &rewriter->builder, LOOM_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY, 0, 0, 0,
-      0, 0, 0, LOOM_INLINE_POLICY_INLINE, loom_symbol_ref_null(),
+      &rewriter->builder,
+      inline_policy != LOOM_INLINE_POLICY_UNSPECIFIED
+          ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY
+          : 0,
+      0, 0, 0, 0, 0, 0, inline_policy, loom_symbol_ref_null(),
       loom_attr_absent(), 0, loom_named_attr_slice_empty(),
       LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol, types,
-      total_count, /*signature_flags=*/iree_const_byte_span_empty(), NULL, 0,
-      NULL, 0, NULL, 0, invocation->function.op->location, &function));
+      total_count,
+      /*signature_flags=*/iree_const_byte_span_empty(), NULL, 0, NULL, 0, NULL,
+      0, invocation->function.op->location, &function));
   loom_region_t* body = loom_func_def_body(function);
   loom_block_t* entry = loom_region_entry_block(body);
   IREE_RETURN_IF_ERROR(loom_module_assign_value_types(
@@ -519,7 +606,7 @@ static iree_status_t loom_pipeline_control_project(
   }
   loom_builder_set_block(&rewriter->builder, entry);
   rewriter->builder.ip.parent_op = function;
-  if (projection == LOOM_PIPELINE_CONTROL_COMPLETE &&
+  if (projection == LOOM_PIPELINE_ENTRY_COMPLETE &&
       (sites->has_deferred || prepares)) {
     IREE_RETURN_IF_ERROR(loom_pipeline_control_call_projection(
         rewriter, &boundaries[0], arguments));
@@ -532,7 +619,7 @@ static iree_status_t loom_pipeline_control_project(
     loom_builder_set_before(&rewriter->builder, site->target);
     switch (site->kind) {
       case LOOM_PIPELINE_CONTROL_STRAND:
-        if (projection == LOOM_PIPELINE_CONTROL_START &&
+        if (projection == LOOM_PIPELINE_ENTRY_START &&
             options->preparation_engines &&
             options->preparation_engines[site->worker] == engine) {
           const loom_op_t* call =
@@ -542,7 +629,7 @@ static iree_status_t loom_pipeline_control_project(
               options->emit.user_data, &rewriter->builder, site->worker,
               loom_func_call_operands(call)));
         }
-        if (projection == LOOM_PIPELINE_CONTROL_COMPLETE &&
+        if (projection == LOOM_PIPELINE_ENTRY_COMPLETE &&
             options->worker_engines[site->worker] == engine) {
           IREE_RETURN_IF_ERROR(loom_pipeline_control_call_worker(
               rewriter, realization, options, site, state_arguments));
@@ -554,7 +641,7 @@ static iree_status_t loom_pipeline_control_project(
         break;
       }
       case LOOM_PIPELINE_CONTROL_COLLECTIVE:
-        if (projection == LOOM_PIPELINE_CONTROL_COMPLETE &&
+        if (projection == LOOM_PIPELINE_ENTRY_COMPLETE &&
             loom_pipeline_participants_worker(
                 loom_pipeline_execution_schedule(execution, site->scope)
                     ->participants,
@@ -567,19 +654,19 @@ static iree_status_t loom_pipeline_control_project(
         break;  // The acquire site consumes the complete closed borrow.
       case LOOM_PIPELINE_CONTROL_COMPOSITION: {
         if (site->deferred) {
-          if (projection != LOOM_PIPELINE_CONTROL_COMPLETE &&
+          if (projection != LOOM_PIPELINE_ENTRY_COMPLETE &&
               loom_pipeline_participants_worker(
                   options->boundary_workers[site->child->ordinal], engine) !=
                   IREE_HOST_SIZE_MAX) {
             IREE_RETURN_IF_ERROR(options->emit.boundary(
                 options->emit.user_data, &rewriter->builder, engine, NULL,
-                site->child, projection == LOOM_PIPELINE_CONTROL_START,
+                site->child, projection == LOOM_PIPELINE_ENTRY_START,
                 state_arguments));
           }
           IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, site->target));
           break;
         }
-        if (projection != LOOM_PIPELINE_CONTROL_COMPLETE) {
+        if (projection != LOOM_PIPELINE_ENTRY_COMPLETE) {
           IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, site->target));
           break;
         }
@@ -612,7 +699,7 @@ static iree_status_t loom_pipeline_control_project(
       }
       case LOOM_PIPELINE_CONTROL_SERIAL:
         if (site->deferred) {
-          if (projection == LOOM_PIPELINE_CONTROL_COMPLETE) {
+          if (projection == LOOM_PIPELINE_ENTRY_COMPLETE) {
             IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, site->target));
           } else {
             IREE_RETURN_IF_ERROR(
@@ -620,7 +707,7 @@ static iree_status_t loom_pipeline_control_project(
           }
           break;
         }
-        if (projection != LOOM_PIPELINE_CONTROL_COMPLETE) {
+        if (projection != LOOM_PIPELINE_ENTRY_COMPLETE) {
           IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, site->target));
           break;
         }
@@ -651,8 +738,7 @@ static iree_status_t loom_pipeline_control_project(
       case LOOM_PIPELINE_CONTROL_YIELD:
         break;  // The enclosing serial splice owns its continuation.
       case LOOM_PIPELINE_CONTROL_END: {
-        if (projection == LOOM_PIPELINE_CONTROL_COMPLETE &&
-            sites->has_deferred) {
+        if (projection == LOOM_PIPELINE_ENTRY_COMPLETE && sites->has_deferred) {
           IREE_RETURN_IF_ERROR(loom_pipeline_control_call_projection(
               rewriter, &boundaries[1], arguments));
         }
@@ -664,6 +750,8 @@ static iree_status_t loom_pipeline_control_project(
       }
     }
   }
+  IREE_RETURN_IF_ERROR(loom_pipeline_control_materialize_arguments(
+      rewriter, invocation, source_arguments, source_count, function));
   const loom_func_like_t callable = loom_func_like_cast(module, function);
   IREE_RETURN_IF_ERROR(loom_rewriter_seed_function(rewriter, callable));
   loom_op_t* dead = NULL;
@@ -685,18 +773,35 @@ static iree_status_t loom_pipeline_control_project(
       IREE_RETURN_IF_ERROR(loom_block_remove_arg(module, entry, i - 1));
     }
   }
+  iree_arena_allocator_t* owner_arena = realization->version_owner
+                                            ? realization->version_owner->arena
+                                            : rewriter->arena;
+  loom_pipeline_entry_binding_t* binding = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(owner_arena, sizeof(*binding), (void**)&binding));
+  *binding = (loom_pipeline_entry_binding_t){.scope = scope,
+                                             .owner = invocation->ordinal,
+                                             .engine = engine,
+                                             .role = projection};
+  loom_target_function_version_t* version = NULL;
+  IREE_RETURN_IF_ERROR(loom_pipeline_realization_register_helper(
+      module, realization, execution->workers[engine], callable,
+      options->diagnostic_emitter, &version));
+  if (version != NULL) {
+    version->pipeline_entry = binding;
+  }
   *out_function =
       (loom_pipeline_control_function_t){.function = callable,
                                          .arguments = retained,
-                                         .argument_count = retained_count};
-  return options->emit.function
-             ? options->emit.function(options->emit.user_data, engine, callable)
-             : iree_ok_status();
+                                         .argument_count = retained_count,
+                                         .entry = binding};
+  return iree_ok_status();
 }
 
 iree_status_t loom_pipeline_control_materialize(
     loom_rewriter_t* rewriter, const loom_pipeline_realization_t* realization,
     const loom_pipeline_execution_t* execution,
+    const loom_pipeline_entry_scope_t* scope,
     const loom_pipeline_control_options_t* options,
     loom_pipeline_control_function_t** out_functions) {
   *out_functions = NULL;
@@ -762,10 +867,10 @@ iree_status_t loom_pipeline_control_materialize(
         IREE_RETURN_IF_ERROR(loom_pipeline_control_project(
             rewriter, realization, execution, options, invocation, engine,
             symbol, &sites, functions,
-            phase == 0   ? LOOM_PIPELINE_CONTROL_START
-            : phase == 1 ? LOOM_PIPELINE_CONTROL_RETIRE
-                         : LOOM_PIPELINE_CONTROL_COMPLETE,
-            prepares, boundaries,
+            phase == 0   ? LOOM_PIPELINE_ENTRY_START
+            : phase == 1 ? LOOM_PIPELINE_ENTRY_RETIRE
+                         : LOOM_PIPELINE_ENTRY_COMPLETE,
+            prepares, scope, boundaries,
             phase < 2 ? &boundaries[phase] : &functions[index]));
       }
       ++index;

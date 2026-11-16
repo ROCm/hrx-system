@@ -90,7 +90,9 @@ static iree_status_t iree_hal_amd_gpu_aql_submission_allocate(
                                       &payload_offset) ||
       !iree_host_size_checked_mul_add(
           payload_offset, signals.count,
-          sizeof(iree_hal_semaphore_t*) + sizeof(uint64_t), &payload_offset) ||
+          sizeof(iree_hal_amd_gpu_semaphore_producer_t) +
+              sizeof(iree_hal_semaphore_t*) + sizeof(uint64_t),
+          &payload_offset) ||
       !iree_host_size_checked_align(payload_offset, 8, &payload_offset) ||
       !iree_host_size_checked_mul_add(payload_offset, reference_count,
                                       sizeof(iree_hal_buffer_ref_t), &size) ||
@@ -124,6 +126,8 @@ static iree_status_t iree_hal_amd_gpu_aql_submission_allocate(
     *iree_hal_amd_gpu_aql_submission_profile(submission) = *profile;
   }
   uint8_t* cursor = (uint8_t*)(submission->waits + wait_count);
+  submission->signal_producers = (void*)cursor;
+  cursor += signals.count * sizeof(*submission->signal_producers);
   submission->signals = (iree_hal_semaphore_list_t){
       .count = signals.count,
       .payload_values = (uint64_t*)cursor,
@@ -131,6 +135,8 @@ static iree_status_t iree_hal_amd_gpu_aql_submission_allocate(
           (iree_hal_semaphore_t**)(cursor + signals.count * sizeof(uint64_t)),
   };
   for (iree_host_size_t i = 0; i < signals.count; ++i) {
+    submission->signal_producers[i] =
+        (iree_hal_amd_gpu_semaphore_producer_t){0};
     submission->signals.semaphores[i] = signals.semaphores[i];
     submission->signals.payload_values[i] = signals.payload_values[i];
     iree_hal_semaphore_retain(signals.semaphores[i]);
@@ -216,12 +222,15 @@ static iree_status_t iree_hal_amd_gpu_aql_submission_acquire(
   *out_submission = NULL;
   iree_host_size_t size = 0, waits_offset = 0, signals_offset = 0;
   iree_host_size_t values_offset = 0, payload_offset = 0;
+  iree_host_size_t producers_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_amd_gpu_aql_submission_t) +
           (profile ? sizeof(*profile) : 0),
       &size,
       IREE_STRUCT_FIELD(waits.count, iree_hal_amd_gpu_aql_wait_t,
                         &waits_offset),
+      IREE_STRUCT_FIELD(signals.count, iree_hal_amd_gpu_semaphore_producer_t,
+                        &producers_offset),
       IREE_STRUCT_FIELD(signals.count, iree_hal_semaphore_t*, &signals_offset),
       IREE_STRUCT_FIELD(signals.count, uint64_t, &values_offset),
       IREE_STRUCT_FIELD(payload_length, uint8_t, &payload_offset)));
@@ -238,6 +247,7 @@ static iree_status_t iree_hal_amd_gpu_aql_submission_acquire(
       .waits = (void*)(storage.data + waits_offset),
       .native_wait_count = waits.count ? UINT32_MAX : 0,
       .profiled = profile != NULL,
+      .signal_producers = (void*)(storage.data + producers_offset),
       .signals = {signals.count, (void*)(storage.data + signals_offset),
                   (void*)(storage.data + values_offset)},
   };
@@ -250,6 +260,8 @@ static iree_status_t iree_hal_amd_gpu_aql_submission_acquire(
     iree_hal_semaphore_retain(waits.semaphores[i]);
   }
   for (iree_host_size_t i = 0; i < signals.count; ++i) {
+    submission->signal_producers[i] =
+        (iree_hal_amd_gpu_semaphore_producer_t){0};
     submission->signals.semaphores[i] = signals.semaphores[i];
     submission->signals.payload_values[i] = signals.payload_values[i];
     iree_hal_semaphore_retain(signals.semaphores[i]);
@@ -503,6 +515,10 @@ static void iree_hal_amd_gpu_aql_submission_destroy(
     iree_hal_semaphore_release(submission->waits[i].semaphore);
   }
   for (iree_host_size_t i = 0; i < submission->signals.count; ++i) {
+    if (submission->signal_producers[i].signal) {
+      iree_hal_amd_gpu_semaphore_unpublish_signal(
+          submission->signals.semaphores[i], &submission->signal_producers[i]);
+    }
     iree_hal_semaphore_release(submission->signals.semaphores[i]);
   }
   if (submission->pool) {

@@ -62,8 +62,6 @@ typedef struct hrx_command_copy_t {
   hrx_command_t command;
   // Nonzero when inline row/slice geometry follows this structure.
   uint8_t strided;
-  // Publication required for a host-visible destination before signaling.
-  uint8_t release_to_host;
   // Already translated HAL copy flags; no truncation.
   iree_hal_copy_flags_t flags;
   // Resolved source HAL allocation.
@@ -166,17 +164,15 @@ iree_status_t hrx_command_record_atomics(
     iree_hal_execution_stage_t source_stage,
     iree_hal_execution_stage_t target_stage);
 
-// Records one scheduled workstream into an already open command buffer. The
-// source table contains resolved commands for recordable nodes and opaque
-// frontend payloads otherwise. Entry/exit synchronization and debug groups stay
-// with the frontend; this walk emits only the analyzed dependency barriers and
-// accumulates the publication requirements of its commands.
-iree_status_t hrx_graph_record_commands(
+// Records one scheduled workstream as a complete command buffer. The source
+// table contains resolved commands for recordable nodes and opaque frontend
+// payloads otherwise. System-scope entry/exit barriers publish payloads across
+// queue submissions and host nodes; analyzed dependencies within the partition
+// use device scope. Recording begins and ends here, including the debug group.
+iree_status_t hrx_graph_record_partition(
     const hrx_graph_schedule_t* schedule, uint32_t node_start_index,
     uint32_t node_count, uint8_t stream_index,
-    const iree_hal_barrier_t* dependency_barrier,
-    iree_hal_command_buffer_t* command_buffer,
-    iree_hal_barrier_flags_t* out_release_flags);
+    iree_hal_command_buffer_t* command_buffer);
 
 #ifdef __cplusplus
 }  // extern "C"

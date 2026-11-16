@@ -30,6 +30,11 @@ void loom_aie2p_native_task_descriptor_words(
     const loom_aie2p_native_dma_descriptor_t* descriptor,
     const loom_aie2p_native_transfer_t* transfer, uint32_t out_words[8]);
 
+// Final register value, including the final segment's arrival-credit release.
+uint32_t loom_aie2p_native_descriptor_word(
+    const loom_aie2p_native_dma_descriptor_t* descriptor, uint16_t segment,
+    uint8_t word);
+
 // Selects a retired compatible sequence from the physical owner's inventory.
 // Local sequences retain their path and completion credit; shim sequences can
 // cross paths within one bank. Reusing a sequence at different addresses
@@ -50,6 +55,8 @@ loom_aie2p_native_dma_completion_t* loom_aie2p_native_reusable_completion(
 // Admits the required task geometry before any optional address variants.
 // Physical inventory tails belong to resource_owner, which may cover several
 // serialized worker occurrences. Runtime addressing never changes this order.
+// After an occurrence retires, its descriptor storage can serve another path
+// in the same physical bank; entry restoration installs the complete geometry.
 iree_status_t loom_aie2p_native_select_task_descriptors(
     loom_aie2p_native_context_t* context, loom_aie2p_native_worker_t* worker,
     loom_aie2p_native_worker_t* resource_owner,
@@ -57,12 +64,17 @@ iree_status_t loom_aie2p_native_select_task_descriptors(
     loom_aie2p_native_dma_descriptor_t*** descriptor_tail,
     loom_aie2p_native_dma_completion_t*** completion_tail, bool* out_valid);
 
-// Refines admitted core tasks with fixed-address variants using only spare
-// descriptors. Variants inherit routes and completion credits; dynamic tasks
-// and exhausted banks retain their original patchable descriptors. Mixed local
-// addresses also retain a shared descriptor when specialization would split
-// an outlineable external patch body whose local patch remains required.
-iree_status_t loom_aie2p_native_refine_transfer_addresses(
+// Refines admitted core tasks using only spare descriptors: separate resident
+// geometries first, then fixed-address variants. Both retain routes and arrival
+// credits. Exhausted banks keep entry restoration and address patching. Mixed
+// local addresses also retain a shared descriptor when specialization would
+// split an outlineable external patch body whose local patch remains required.
+iree_status_t loom_aie2p_native_refine_transfer_descriptors(
+    loom_aie2p_native_context_t* context, iree_host_size_t worker_count);
+
+// Retains each worker's entry restoration and the physical storage's complete
+// changed-word union after address refinement has finalized its geometries.
+iree_status_t loom_aie2p_native_finalize_dma_storage(
     loom_aie2p_native_context_t* context, iree_host_size_t worker_count);
 
 // Groups final descriptor policies into submission bodies that fit the native

@@ -29,6 +29,7 @@ loom_check_test_suite(
         "bank_sroa_branches.loom-test",
         "bank_sroa_reconstruction.loom-test",
         "bitwise_legalization.loom-test",
+        "component_packets.loom-test",
         "constant_literal_legalization.loom-test",
         "dynamic_extract.loom-test",
         "integer_cast.loom-test",

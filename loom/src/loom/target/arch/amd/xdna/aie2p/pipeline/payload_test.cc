@@ -13,6 +13,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/route.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/connectivity.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_queues.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/input.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/switch.h"
@@ -71,6 +72,8 @@ class PayloadTest : public ::testing::Test {
   loom_aie2p_native_context_t context_ = {};
   // Hardware coordinates indexed by column then row.
   std::vector<loom_aie2p_native_tile_t> tiles_;
+  // Physical route labels retained alongside the native context.
+  std::vector<loom_aie2p_native_route_t> routes_;
   // Already assigned physical paths in disjoint construction lifetimes.
   loom_aie2p_native_dma_path_t paths_[3] = {};
   // Native endpoint families consumed by payload formation.
@@ -91,6 +94,48 @@ TEST_F(PayloadTest, RepeatedPhysicalEndpointsKeepOneUnframedClass) {
   EXPECT_EQ(words[0], 17u);
   EXPECT_EQ(words[1], 23u);
   EXPECT_EQ(words[2], 5u);
+}
+
+TEST_F(PayloadTest, RepeatedPacketClassRetainsEachConstructionUse) {
+  constexpr auto none = IREE_HOST_SIZE_MAX;
+  const loom_pipeline_lifetime_t nodes[] = {
+      {LOOM_PIPELINE_LIFETIME_CONCURRENT, 0, none, 1, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 0, 0, none, 2},
+      {LOOM_PIPELINE_LIFETIME_SERIAL, 0, 0, 3, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 1, 2, none, 4},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 2, 2, none, 5},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 3, 2, none, none},
+  };
+  const iree_host_size_t owners[] = {1, 3, 4, 5};
+  loom_pipeline_invocation_t invocations[3] = {};
+  loom_pipeline_invocation_worker_t workers[3] = {};
+  for (size_t i = 0; i < 3; ++i) {
+    invocations[i].ordinal = i + 1;
+    workers[i].invocation = &invocations[i];
+    Ordinary(i, i == 1 ? 3 : 2, true);
+  }
+  realization_.invocations.workers = workers;
+  realization_.invocations.lifetimes = {
+      .nodes = nodes,
+      .count = IREE_ARRAYSIZE(nodes),
+      .owners = owners,
+      .has_serial = true,
+  };
+  IREE_ASSERT_OK(loom_pipeline_lifetimes_index(
+      &arena_, &realization_.invocations.lifetimes));
+  Form();
+  ASSERT_EQ(paths_[0].payload, paths_[2].payload);
+  ASSERT_NE(paths_[0].payload, paths_[1].payload);
+  // The repeated class is used before and after the other class. Its set
+  // must retain both uses, not just the first owner or their SERIAL ancestor.
+  for (size_t i = 0; i < 2; ++i) {
+    std::set<size_t> uses;
+    for (size_t use = paths_[i].payload->lifetime_head; use;
+         use = context_.route_lifetimes[use].next) {
+      uses.insert(context_.route_lifetimes[use].lifetime);
+    }
+    EXPECT_EQ(uses, i ? std::set<size_t>({4}) : std::set<size_t>({3, 5}));
+  }
 }
 
 TEST_F(PayloadTest, ShimPhasesShareOnePacketNamespace) {
@@ -137,26 +182,30 @@ TEST_F(PayloadTest, SourceOwnsPrefixesIndependentlyOfRouteLabels) {
   // cannot select a prefix root or consume additional root-table capacity.
   IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
       context_.family, 16, &arena_, &context_.routing));
-  loom_aie2p_native_route_t routes[16] = {};
-  context_.routes = routes;
+  routes_.resize(16);
+  context_.routes = routes_.data();
   uint32_t next_source = 1000;
-  loom_aie2p_array_route_node_t* root = nullptr;
+  iree_host_size_t root = 0;
   for (size_t i = 0; i < 2; ++i) {
     bool valid = false;
     IREE_ASSERT_OK(loom_aie2p_native_route_payload(
         &context_, paths_[i].payload, nullptr, &next_source, &valid));
     ASSERT_TRUE(valid);
-    EXPECT_EQ(next_source, 1001 + i);
-    EXPECT_NE(paths_[i].payload->source->tree.root, nullptr);
+    EXPECT_EQ(next_source, 1002);
+    EXPECT_NE(paths_[i].payload->source->tree.root_index, 0u);
     if (i == 0) {
-      root = paths_[i].payload->source->tree.root;
+      root = paths_[i].payload->source->tree.root_index;
     }
-    EXPECT_EQ(paths_[i].payload->source->tree.root, root);
+    EXPECT_EQ(paths_[i].payload->source->tree.root_index, root);
   }
-  const auto& terminal = routes[context_.routing.route_count - 1];
-  EXPECT_EQ(terminal.edge->coordinate.row, 3);
-  EXPECT_TRUE(terminal.edge->dma_destination);
-  EXPECT_EQ(terminal.packet, 1);
+  for (size_t i = 0; i < 2; ++i) {
+    const auto* payload = paths_[i].payload;
+    const auto& terminal =
+        routes_[payload->route_first + payload->route_count - 1];
+    EXPECT_EQ(terminal.edge->coordinate.row, 2 + i);
+    EXPECT_TRUE(terminal.edge->dma_destination);
+    EXPECT_EQ(terminal.packet, i);
+  }
 }
 
 TEST_F(PayloadTest, PhasedInputAndOrdinaryIngressUseTheSamePhysicalClass) {
@@ -178,6 +227,65 @@ TEST_F(PayloadTest, PhasedInputAndOrdinaryIngressUseTheSamePhysicalClass) {
   EXPECT_TRUE(phase.payload->source->framed);
   EXPECT_EQ(phase.payload->source->class_count, 1);
   EXPECT_FALSE(phase.payload->distribution_only);
+}
+
+TEST_F(PayloadTest, LaterPassthroughConstrainsAnEarlierShortIngress) {
+  loom::testing::DiagnosticEmissionCapture diagnostics;
+  pass_.diagnostic_emitter = diagnostics.emitter();
+  Ordinary(0, 1, true);
+  Ordinary(1, 3, true);
+  Form();
+  IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+      context_.family, 32, &arena_, &context_.routing));
+  routes_.resize(32);
+  context_.routes = routes_.data();
+  // The SRAM sender occupies north lane zero. A shim packet terminating in
+  // SRAM may arrive on south lane zero, but that lane cannot subsequently
+  // pass through: the SRAM switch pairs south/north passthrough lanes.
+  loom_aie2p_array_route_tree_t sram = {};
+  ASSERT_TRUE(loom_aie2p_array_route_stream(
+      &context_.routing, 0, &sram, {0, 1}, LOOM_XDNA_STREAM_PORT_DMA, 0, {0, 3},
+      LOOM_XDNA_STREAM_PORT_DMA, 1, true));
+  loom_aie2p_native_route_label(&context_, 0, 7, false, UINT32_MAX);
+  uint32_t next_source = 1;
+  for (size_t i = 0; i < 2; ++i) {
+    bool valid = false;
+    IREE_ASSERT_OK(loom_aie2p_native_route_payload(
+        &context_, paths_[i].payload, nullptr, &next_source, &valid));
+    ASSERT_TRUE(valid);
+  }
+  const loom_aie2p_native_switch_input_t input = {
+      .routing = &context_.routing,
+      .routes = context_.routes,
+  };
+  iree_string_view_t requirement = iree_string_view_empty();
+  IREE_ASSERT_OK(loom_aie2p_native_switches_build(
+      &input, &arena_, &context_.switches, &requirement));
+  ASSERT_TRUE(iree_string_view_is_empty(requirement));
+  loom_aie2p_native_connectivity_t* connectivity = nullptr;
+  IREE_ASSERT_OK(loom_aie2p_native_connectivity_allocate(
+      context_.family, context_.switches, context_.routing.routes,
+      context_.routing.route_count, &arena_, &connectivity));
+  const loom_aie2p_native_connection_endpoint_t shim = {
+      {0, 0}, LOOM_XDNA_STREAM_PORT_DMA, 0};
+  for (size_t i = 0; i < 2; ++i) {
+    const loom_aie2p_native_connection_endpoint_t destination = {
+        paths_[i].local->coordinate, LOOM_XDNA_STREAM_PORT_DMA, 0};
+    EXPECT_EQ(loom_aie2p_native_connectivity_check(connectivity, shim,
+                                                   paths_[i].payload->packet,
+                                                   &destination, 1, false)
+                  .failure,
+              LOOM_AIE2P_NATIVE_CONNECTIVITY_NONE);
+  }
+  const loom_aie2p_native_connection_endpoint_t sender = {
+      {0, 1}, LOOM_XDNA_STREAM_PORT_DMA, 0};
+  const loom_aie2p_native_connection_endpoint_t consumer = {
+      {0, 3}, LOOM_XDNA_STREAM_PORT_DMA, 1};
+  EXPECT_EQ(loom_aie2p_native_connectivity_check(connectivity, sender, 7,
+                                                 &consumer, 1, false)
+                .failure,
+            LOOM_AIE2P_NATIVE_CONNECTIVITY_NONE);
+  EXPECT_TRUE(diagnostics.emissions.empty());
 }
 
 TEST_F(PayloadTest, MulticastClassesIgnoreDestinationEnumerationOrder) {
@@ -287,6 +395,8 @@ class MulticastPayloadTest
         .owners = owners_.data(),
         .has_serial = true,
     };
+    IREE_ASSERT_OK(loom_pipeline_lifetimes_index(
+        &arena_, &realization_.invocations.lifetimes));
     const size_t route_capacity = sources * (32 + (queries ? 4 : 0)) * 16;
     IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
         context_.family, route_capacity, &arena_, &context_.routing));
@@ -316,10 +426,18 @@ class MulticastPayloadTest
         ASSERT_TRUE(valid);
       }
     }
-    bool valid = false;
-    IREE_ASSERT_OK(
-        loom_aie2p_native_switches_build(&context_, nullptr, &valid));
-    ASSERT_TRUE(valid);
+    const loom_aie2p_native_switch_input_t input = {
+        .routing = &context_.routing,
+        .routes = context_.routes,
+        .lifetimes = &realization_.invocations.lifetimes,
+        .route_lifetimes = context_.route_lifetimes,
+        .control_sources = context_.control_sources,
+        .control_destination_sources = context_.control_destination_sources,
+    };
+    iree_string_view_t requirement = iree_string_view_empty();
+    IREE_ASSERT_OK(loom_aie2p_native_switches_build(
+        &input, &arena_, &context_.switches, &requirement));
+    ASSERT_TRUE(iree_string_view_is_empty(requirement));
     EXPECT_TRUE(diagnostics_.emissions.empty());
     switches_.resize(tiles_.size());
     for (auto* sw = context_.switches; sw; sw = sw->next) {
@@ -453,8 +571,6 @@ class MulticastPayloadTest
   std::vector<std::vector<std::vector<uint32_t>>> packet_receivers_;
   // Per-worker geometry lists.
   std::vector<loom_aie2p_native_distribution_plan_t> plans_;
-  // Complete route labels consumed by native switch admission.
-  std::vector<loom_aie2p_native_route_t> routes_;
   // Emitted switch banks indexed by physical tile.
   std::vector<const loom_aie2p_native_switch_t*> switches_;
   // Resource rejection evidence from the actual native planner.
@@ -487,6 +603,7 @@ TEST_P(MulticastPayloadTest, SerializedSourcesPreserveEveryPacketDestination) {
 
 TEST_P(MulticastPayloadTest, ConcurrentSourcesKeepIndependentReceiverQueues) {
   nodes_[2].kind = LOOM_PIPELINE_LIFETIME_CONCURRENT;
+  realization_.invocations.lifetimes.has_serial = false;
   const auto [sources, queries] = GetParam();
   // A core has two receive queues. More concurrent senders are rejected by
   // queue allocation before payload routing can consume those identities.

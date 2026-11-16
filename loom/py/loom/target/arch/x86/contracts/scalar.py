@@ -17,6 +17,8 @@ from loom.dialect.globals import ALL_GLOBAL_OPS
 from loom.dialect.globals import defs as globals
 from loom.dialect.index import ALL_INDEX_OPS
 from loom.dialect.index import defs as index
+from loom.dialect.ref import ALL_REF_OPS
+from loom.dialect.ref import defs as ref
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import bitwise as scalar_bitwise
@@ -41,6 +43,7 @@ from loom.target.arch.x86.contracts.integer_rotation import (
     scalar_integer_rotation_rules,
 )
 from loom.target.arch.x86.contracts.memory import (
+    x86_reference_memory_rules,
     x86_scalar_memory_rules,
     x86_view_carrier_rules,
 )
@@ -1274,6 +1277,39 @@ def _madd_address_rules(
 def _cases() -> Sequence[ContractCase]:
     descriptor_lookup = _descriptor
     return (
+        *(
+            DescriptorRule(
+                source_op=source_op,
+                emit=(
+                    EmitDescriptorOp(
+                        descriptor=descriptor_lookup(f"x86.ref.{operation}"),
+                        form=DescriptorEmitForm.OP,
+                        results={"dst": ValueRef.result("result")},
+                        operands={name: ValueRef.operand(name) for name in inputs},
+                    ),
+                ),
+            )
+            for source_op, operation, inputs in (
+                (ref.ref_null, "null", ()),
+                (ref.ref_compare_null, "compare.null", ("value",)),
+                (ref.ref_compare_eq, "compare.eq", ("left", "right")),
+            )
+        ),
+        DescriptorRule(
+            source_op=scf.scf_select,
+            guards=(Guard.low_value_register_class("true_value", "x86.ref"),),
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=descriptor_lookup("x86.ref.select"),
+                    form=DescriptorEmitForm.OP,
+                    results={"dst": ValueRef.result("result")},
+                    operands={
+                        name: ValueRef.operand(name)
+                        for name in ("condition", "true_value", "false_value")
+                    },
+                ),
+            ),
+        ),
         *x86_view_carrier_rules(
             descriptor_lookup, diagnostic=_SOURCE_MEMORY_DIAGNOSTIC
         ),
@@ -1686,6 +1722,9 @@ def _cases() -> Sequence[ContractCase]:
             )
         ),
         *_madd_address_rules(descriptor_lookup),
+        *x86_reference_memory_rules(
+            descriptor_lookup, diagnostic=_SOURCE_MEMORY_DIAGNOSTIC
+        ),
         *x86_scalar_memory_rules(
             descriptor_lookup, diagnostic=_SOURCE_MEMORY_DIAGNOSTIC
         ),
@@ -1701,6 +1740,7 @@ X86_SCALAR_CONTRACT_DIALECT_OPS = {
     "cfg": ALL_CFG_OPS,
     "global": ALL_GLOBAL_OPS,
     "index": ALL_INDEX_OPS,
+    "ref": ALL_REF_OPS,
     "scalar": ALL_SCALAR_OPS,
     "scf": ALL_SCF_OPS,
     "view": ALL_VIEW_OPS,

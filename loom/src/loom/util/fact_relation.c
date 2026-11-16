@@ -512,12 +512,16 @@ static iree_status_t loom_value_fact_integer_relations_publish_one(
   if (!found && loom_value_fact_relation_roots_empty(roots)) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_touch(table, value_id));
   const iree_host_size_t required_capacity =
       table->integer_relations ? table->integer_relations->count + !found : 1;
   IREE_RETURN_IF_ERROR(loom_value_fact_integer_relations_reserve_entries(
       table, required_capacity));
   *out_changed = loom_value_fact_integer_relations_publish_reserved(
       table->integer_relations, value_id, roots);
+  if (*out_changed) {
+    loom_value_fact_table_publish_change(table, value_id);
+  }
   return iree_ok_status();
 }
 
@@ -1015,9 +1019,11 @@ void loom_value_fact_integer_relations_undefine(loom_value_fact_table_t* table,
   bool found = false;
   const iree_host_size_t ordinal = loom_value_fact_relation_entry_lower_bound(
       table->integer_relations, value_id, &found);
-  if (found) {
+  if (found && !loom_value_fact_relation_roots_empty(
+                   table->integer_relations->entries[ordinal].roots)) {
     table->integer_relations->entries[ordinal].roots =
         (loom_value_fact_relation_roots_t){0};
+    loom_value_fact_table_publish_change(table, value_id);
   }
 }
 
@@ -1379,9 +1385,11 @@ static iree_status_t loom_value_fact_integer_relations_publish_plan(
       table, table->integer_relations->count + missing_count));
   for (uint16_t i = 0; i < pair_count; ++i) {
     if (loom_value_fact_integer_relations_publish_reserved(
-            table->integer_relations, results[i], plan->plans[i]) &&
-        inout_changed) {
-      *inout_changed = true;
+            table->integer_relations, results[i], plan->plans[i])) {
+      loom_value_fact_table_publish_change(table, results[i]);
+      if (inout_changed) {
+        *inout_changed = true;
+      }
     }
   }
   return iree_ok_status();

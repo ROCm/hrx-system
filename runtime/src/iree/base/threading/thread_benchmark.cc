@@ -189,7 +189,7 @@ void BM_ThreadRequestAffinity(benchmark::State& state) {
   iree_thread_affinity_set_group_any(0, &affinity);
 
   for (auto _ : state) {
-    IREE_CHECK_OK(iree_thread_request_affinity(thread, affinity));
+    IREE_CHECK_OK(iree_thread_request_affinity(thread, affinity, nullptr));
   }
 
   keep_running.store(false, std::memory_order_release);

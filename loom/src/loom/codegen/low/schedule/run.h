@@ -22,9 +22,11 @@ extern "C" {
 // remain live and its function semantically immutable until this function
 // returns, and its resolved target must select a machine schedule model. The
 // model's arena-owned results must outlive consumers of the returned table.
-// Diagnosed schedule failures are reported through
-// |options->emitter| and recorded in |out_table->error_count|; status failures
-// are reserved for infrastructure failures.
+// Invalid input constraints are diagnosed through |options->emitter| during
+// construction. Schedule failures and feedback remain in the returned table;
+// callers emit them with loom_low_schedule_diagnostics_emit after accepting a
+// schedule or exhausting repair. All rejections increment error_count; status
+// failures are reserved for infrastructure failures.
 //
 // A schedule(locked) function or kernel preserves authored order within each
 // block under every strategy. Its nodes retain source-order boundaries for

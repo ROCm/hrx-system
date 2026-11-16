@@ -263,9 +263,35 @@ iree_status_t loom_aie2p_program_clone_function(
   IREE_RETURN_IF_ERROR(loom_aie2p_program_clone_body_remap(
       clone, source, &products, &function->memory_accesses,
       &function->loop_execution, &remap));
+  const loom_low_call_boundary_index_t* source_calls =
+      &source->requirements.call_boundaries;
+  const loom_op_t** target_calls = NULL;
+  if (source_calls->count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        clone->arena, source_calls->count, sizeof(*target_calls),
+        (void**)&target_calls));
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        clone->arena, 0, source_calls->count, sizeof(*clone->call_projection),
+        &clone->call_projection_capacity, (void**)&clone->call_projection));
+    for (iree_host_size_t i = 0; i < source_calls->count; ++i) {
+      clone->call_projection[i] = (loom_ir_remap_op_projection_t){
+          .source_op = source_calls->calls[i],
+      };
+    }
+    remap.op_projection.entries = clone->call_projection;
+    remap.op_projection.count = source_calls->count;
+  }
   loom_op_t* definition = NULL;
   IREE_RETURN_IF_ERROR(
       loom_ir_clone_op(&builder, source->function_op, &remap, &definition));
+  IREE_ASSERT_EQ(remap.op_projection.cursor, source_calls->count);
+  for (iree_host_size_t i = 0; i < source_calls->count; ++i) {
+    target_calls[i] = clone->call_projection[i].target_op;
+  }
+  function->call_boundaries = (loom_low_call_boundary_index_t){
+      .calls = target_calls,
+      .count = source_calls->count,
+  };
   clone->functions_by_source[source_id] = function;
   return iree_ok_status();
 }

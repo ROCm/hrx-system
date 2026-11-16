@@ -68,6 +68,20 @@ _XDNA_THREE_COLUMN_PROFILE = loom_execution_profile(
 )
 
 loom_test(
+    name = "descriptor_reentry_test",
+    srcs = [
+        "descriptor_reentry.cxx",
+        "descriptor_reentry.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:vm_iree_vm",
+        "//loom/config/import:cxx",
+    ]),
+)
+
+loom_test(
     name = "one_column_test",
     srcs = [
         "child_cursors.loom",

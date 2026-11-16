@@ -57,8 +57,12 @@ typedef struct loom_low_source_invocation_facts_t {
 // Selected functions use their exact target facts. Changed boundary summaries
 // requeue dependent functions and update retained local equations through the
 // shared incremental fact engine. Entry changes and condition-refined scopes
-// invalidate whole local solves. Finite descending narrowing guarantees
-// convergence when result-to-argument feedback crosses multiple calls.
+// invalidate whole local solves. Numeric, extension, reference, and opaque
+// facts first narrow from conservative seeds. Once their carriers stabilize,
+// complete nonrecursive scalar and vector boundaries restart lane distribution
+// from uniform seeds and monotonically weaken it. Incomplete and recursive
+// boundaries remain conservative. The two finite solves converge even when
+// result-to-argument feedback crosses multiple calls.
 iree_status_t loom_low_source_invocation_facts_compute(
     loom_pass_t* pass, loom_module_t* module,
     const loom_low_source_selection_list_t* selections,

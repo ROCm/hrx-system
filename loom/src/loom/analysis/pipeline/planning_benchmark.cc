@@ -184,4 +184,117 @@ static void BM_Nested(benchmark::State& state) {
 }
 BENCHMARK(BM_Nested)->Args({32, 32})->Args({256, 256})->Args({1024, 1024});
 
+// Each serial phase owns two concurrent resource users. Source enumeration
+// alternates their order, while the caller requests the same role first in
+// every phase. This measures preserving reusable resource identities through
+// both compact and sparse physical pool domains.
+static void RunLifetimeReuse(benchmark::State& state, bool retained,
+                             size_t phase_stride = 1) {
+  const size_t phase_count = state.range(0);
+  const size_t pool_count = state.range(1);
+  constexpr auto none = IREE_HOST_SIZE_MAX;
+  std::vector<loom_pipeline_lifetime_t> nodes(3 + phase_count * 3);
+  nodes[0] = {LOOM_PIPELINE_LIFETIME_CONCURRENT, 0, none, 1, none};
+  nodes[1] = {LOOM_PIPELINE_LIFETIME_OWNER, 0, 0, none, 2};
+  nodes[2] = {LOOM_PIPELINE_LIFETIME_SERIAL, 0, 0, 3, none};
+  for (size_t phase = 0; phase < phase_count; ++phase) {
+    const size_t index = 3 + phase * 3;
+    nodes[index] = {LOOM_PIPELINE_LIFETIME_CONCURRENT, phase * 2 + 1, 2,
+                    index + 1, phase + 1 < phase_count ? index + 3 : none};
+    nodes[index + 1] = {LOOM_PIPELINE_LIFETIME_OWNER, phase * 2 + 1, index,
+                        none, index + 2};
+    nodes[index + 2] = {LOOM_PIPELINE_LIFETIME_OWNER, phase * 2 + 2, index,
+                        none, none};
+  }
+  std::vector<loom_pipeline_lifetime_request_t> requests;
+  requests.reserve(phase_count * pool_count * 2);
+  for (size_t role = 0; role < 2; ++role) {
+    for (size_t phase = 0; phase < phase_count; phase += phase_stride) {
+      for (size_t pool = 0; pool < pool_count; ++pool) {
+        requests.push_back({
+            .lifetime = 4 + phase * 3 + ((phase + role) % 2),
+            .pool = pool,
+            .length = 1,
+            .alignment = 1,
+        });
+      }
+    }
+  }
+  iree_arena_block_pool_t blocks;
+  iree_arena_block_pool_initialize(32768, iree_allocator_system(), &blocks);
+  iree_arena_allocator_t source_arena, arena;
+  iree_arena_initialize(&blocks, &source_arena);
+  iree_arena_initialize(&blocks, &arena);
+  loom_pipeline_lifetimes_t lifetimes = {
+      .nodes = nodes.data(),
+      .count = nodes.size(),
+      .has_serial = true,
+  };
+  IREE_CHECK_OK(loom_pipeline_lifetimes_index(&source_arena, &lifetimes));
+  const size_t source_bytes = source_arena.used_allocation_size;
+  loom_pipeline_lifetime_projection_t* projection = nullptr;
+  if (retained) {
+    IREE_CHECK_OK(loom_pipeline_lifetime_projection_prepare(
+        &lifetimes, requests.data(), requests.size(), &source_arena,
+        &projection));
+  }
+  size_t arena_bytes = 0;
+  for (auto _ : state) {
+    const loom_pipeline_lifetime_extent_t* extents = nullptr;
+    loom_pipeline_lifetime_extent_t extent;
+    if (retained) {
+      IREE_CHECK_OK(loom_pipeline_lifetime_projection_evaluate(
+          projection, requests.data(), &extent));
+      extents = &extent;
+    } else {
+      IREE_CHECK_OK(loom_pipeline_lifetime_layout(&lifetimes, requests.data(),
+                                                  requests.size(), pool_count,
+                                                  &arena, &extents));
+    }
+    uint64_t checksum = 0;
+    for (const auto& request : requests) {
+      checksum += request.offset;
+    }
+    benchmark::DoNotOptimize(checksum);
+    benchmark::DoNotOptimize(extents);
+    arena_bytes = std::max(arena_bytes, arena.used_allocation_size);
+    iree_arena_reset(&arena);
+  }
+  state.counters["arena_bytes"] = double(arena_bytes);
+  state.counters["prepared_bytes"] =
+      double(source_arena.used_allocation_size - source_bytes);
+  state.SetItemsProcessed(state.iterations() * requests.size());
+  iree_arena_deinitialize(&arena);
+  iree_arena_deinitialize(&source_arena);
+  iree_arena_block_pool_deinitialize(&blocks);
+}
+static void BM_LifetimeReuse(benchmark::State& state) {
+  RunLifetimeReuse(state, false);
+}
+BENCHMARK(BM_LifetimeReuse)
+    ->Args({8, 1})
+    ->Args({64, 1})
+    ->Args({256, 1})
+    ->Args({8, 32})
+    ->Args({64, 32})
+    ->Args({256, 32})
+    ->Args({64, 1024});
+
+static void BM_LifetimeProjection(benchmark::State& state) {
+  RunLifetimeReuse(state, true);
+}
+BENCHMARK(BM_LifetimeProjection)->Args({8, 1})->Args({64, 1})->Args({256, 1});
+
+// A resource used by only a subset of phases still belongs to the complete
+// lifetime tree. Preparation retains just its requested owners and boundaries.
+static void BM_LifetimeSparseReuse(benchmark::State& state) {
+  RunLifetimeReuse(state, false, 8);
+}
+BENCHMARK(BM_LifetimeSparseReuse)->Args({64, 1})->Args({256, 1});
+
+static void BM_LifetimeSparseProjection(benchmark::State& state) {
+  RunLifetimeReuse(state, true, 8);
+}
+BENCHMARK(BM_LifetimeSparseProjection)->Args({64, 1})->Args({256, 1});
+
 }  // namespace

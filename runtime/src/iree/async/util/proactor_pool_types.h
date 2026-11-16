@@ -36,18 +36,22 @@ typedef iree_status_t(
 // The standard implementation (proactor_thread_runner.h) creates a dedicated
 // poll thread for each proactor.
 typedef struct iree_async_proactor_pool_runner_factory_t {
+  // Factory context borrowed until every initialized entry is released.
   void* user_data;
 
   // Creates a poll runner for |proactor|.
   // |node_id| is the NUMA node for the proactor (UINT32_MAX if unspecified).
   // A specified node must be established before polling starts; return an
-  // error if the runner cannot provide that locality.
+  // error if the runner cannot provide that locality. |processor_set| bounds
+  // that affinity and is borrowed only through this call. NULL adds no
+  // constraint; a runner must not widen an explicit budget.
   // Stores an opaque runner handle in |out_runner| (may be NULL if the runner
   // is self-managing). Called under pool mutex — must not call back into the
   // pool.
   iree_status_t (*create)(void* user_data, iree_async_proactor_t* proactor,
-                          uint32_t node_id, iree_allocator_t allocator,
-                          void** out_runner);
+                          uint32_t node_id,
+                          const iree_thread_affinity_set_t* processor_set,
+                          iree_allocator_t allocator, void** out_runner);
 
   // Requests |runner| to stop without waiting for it to exit. Aggregate pool
   // teardown requests all runners it owns to stop before destroying any of

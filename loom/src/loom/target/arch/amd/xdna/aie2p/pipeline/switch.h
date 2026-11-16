@@ -7,74 +7,44 @@
 #ifndef LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PIPELINE_SWITCH_H_
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PIPELINE_SWITCH_H_
 
-#include "loom/target/arch/amd/xdna/aie2p/array/route.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/execution_plan.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-struct loom_aie2p_native_context_t;
-
-// Complete endpoint ownership for one compiler-generated control stream.
-// Commands, replies, and collective words retain their framing on circuits.
-typedef struct loom_aie2p_native_control_source_t {
-  // Source-owned physical prefixes, independent of destination route labels.
-  loom_aie2p_array_route_tree_t tree;
-  // Sole owned endpoint, or UINT32_MAX for multiple/external destinations
-  // or any route borrowing payload lanes.
-  uint32_t destination;
-} loom_aie2p_native_control_source_t;
-
-// One physical route edge carrying the packet identity used during admission.
-typedef struct loom_aie2p_native_route_t {
-  // Corresponding edge in the canonical route builder.
-  const loom_aie2p_array_route_plan_t* edge;
-  // Packet ID, or UINT8_MAX for a circuit without packet filtering.
-  uint8_t packet;
-  // Retained control source, or UINT32_MAX for ordinary payload transport.
-  uint32_t control_source;
-} loom_aie2p_native_route_t;
-
-typedef enum loom_aie2p_native_switch_bank_e {
-  LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS = 0,
-  LOOM_AIE2P_NATIVE_SWITCH_BANK_SLAVES,
-  LOOM_AIE2P_NATIVE_SWITCH_BANK_FILTERS,
-  LOOM_AIE2P_NATIVE_SWITCH_BANK_COUNT,
-} loom_aie2p_native_switch_bank_t;
-
-// Complete valid register bank, with zero words for every disabled entry.
-typedef struct loom_aie2p_native_register_bank_t {
-  // Absolute address in the native transaction's 32-bit register space.
-  uint32_t address;
-  // Number of contiguous register words, excluding reserved address holes.
-  uint32_t word_count;
-  // Desired values retained by route admission in the pass arena.
-  uint32_t* words;
-} loom_aie2p_native_register_bank_t;
-
-// A native pipeline owns route selection on each traversed switch. Its first
-// invocation replaces complete banks after prior work has drained; externally
-// prefixed routes are not an undeclared input to this materialization.
-typedef struct loom_aie2p_native_switch_t {
-  // Next routed switch in first-use order, excluding untouched tiles.
-  struct loom_aie2p_native_switch_t* next;
-  // Physical owner retained from switch admission.
-  loom_xdna_tile_coordinate_t coordinate;
-  // Master, slave, and packet-filter banks from the generated register facts.
-  loom_aie2p_native_register_bank_t banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_COUNT];
-} loom_aie2p_native_switch_t;
+// Physical selection consumed by switch admission. These arrays may belong to
+// source construction or an independently retained execution plan.
+typedef struct loom_aie2p_native_switch_input_t {
+  // Canonical physical edges, tile facts, and indexed route counts.
+  const loom_aie2p_array_route_builder_t* routing;
+  // Packet/control identity paired one-for-one with routing's edges.
+  const loom_aie2p_native_route_t* routes;
+  // Common construction exclusion proof retained by the entry scope.
+  const loom_pipeline_lifetimes_t* lifetimes;
+  // Sparse packet-class uses indexed by each route's lifetime_head.
+  const loom_aie2p_native_route_lifetime_t* route_lifetimes;
+  // Endpoint ownership of each core or tile-control sender.
+  const loom_aie2p_native_control_source_t* control_sources;
+  // Sole sender per destination; UINT32_MAX is unused, UINT32_MAX - 1 shared.
+  const uint32_t* control_destination_sources;
+} loom_aie2p_native_switch_input_t;
 
 // Admits physical route edges against packet/circuit ownership and switch
-// resources, retaining the complete initialization banks in the pass arena.
+// resources, retaining the complete initialization banks in |arena|.
 // Destination sets connected by a shared output require one arbiter. Disjoint
-// sets share only when fed exclusively by the same input, so arbitration adds
-// no blocking dependency between independent streams. This does not prove
-// progress for dependencies already present in the selected routes.
-// Allocation errors return a status; route conflicts emit the pipeline's
-// target-support diagnostic and leave the caller's false |out_valid| intact.
+// sets share when fed exclusively by the same input, or when their overlapping
+// inputs carry only complete register commands with independent progress.
+// Different inputs may share when every contributing packet use belongs to
+// disjoint serial lifetimes. This does not prove progress for dependencies
+// already present in the selected routes.
+// Allocation errors return a status. A resource conflict returns a static
+// |out_requirement| for the caller's source diagnostic; otherwise it is empty.
+// |out_switches| receives complete banks only when admission succeeds.
 iree_status_t loom_aie2p_native_switches_build(
-    struct loom_aie2p_native_context_t* context, const loom_op_t* entry,
-    bool* out_valid);
+    const loom_aie2p_native_switch_input_t* input,
+    iree_arena_allocator_t* arena, loom_aie2p_native_switch_t** out_switches,
+    iree_string_view_t* out_requirement);
 
 #ifdef __cplusplus
 }  // extern "C"

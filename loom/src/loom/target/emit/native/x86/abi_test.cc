@@ -237,14 +237,16 @@ class X86FunctionAbiTest : public ::testing::Test {
   }
 
   PreparedAbi Prepare(loom_module_t* module, const char* function_name,
-                      DescriptorSetProvider descriptor_set_provider) {
+                      DescriptorSetProvider descriptor_set_provider,
+                      bool returns_status = false) {
     loom_low_resolved_target_t target = {
         .descriptor_set = descriptor_set_provider(),
     };
     PreparedAbi prepared;
     IREE_CHECK_OK(loom_x86_function_abi_prepare(
-        module, FindFunction(module, function_name), &target, &analysis_arena_,
-        &prepared.supported, &prepared.constraint, &prepared.abi));
+        module, FindFunction(module, function_name), &target, returns_status,
+        &analysis_arena_, &prepared.supported, &prepared.constraint,
+        &prepared.abi));
     return prepared;
   }
 
@@ -328,6 +330,34 @@ static void ExpectSingleValuePlan(const PreparedAbi& prepared,
   }
 }
 
+static void ExpectSingleStatusValuePlan(
+    const PreparedAbi& prepared, uint16_t register_class, uint16_t byte_length,
+    uint8_t byte_alignment, loom_x86_call_abi_value_action_t action) {
+  ASSERT_TRUE(prepared.supported);
+  ASSERT_EQ(prepared.abi.call_contract.argument_count, 1u);
+  ASSERT_EQ(prepared.abi.call_contract.result_count, 1u);
+  EXPECT_TRUE(prepared.abi.returns_status);
+  EXPECT_TRUE(prepared.abi.has_indirect_results);
+  const auto& argument = prepared.abi.call_contract.arguments[0];
+  EXPECT_EQ(argument.location_kind,
+            LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
+  EXPECT_EQ(argument.descriptor_reg_class_id, register_class);
+  EXPECT_EQ(argument.location_base,
+            register_class == LOOM_X86_REGISTER_CLASS_GPR32 ||
+                    register_class == LOOM_X86_REGISTER_CLASS_GPR64
+                ? 6u
+                : 0u);
+  EXPECT_EQ(prepared.abi.call_contract.results[0].location_kind,
+            LOOM_LOW_ALLOCATION_LOCATION_UNASSIGNED);
+  EXPECT_EQ(prepared.abi.results[0].stack_offset, 0u);
+  EXPECT_EQ(prepared.abi.result_storage_offset, 0u);
+  EXPECT_EQ(prepared.abi.call_storage_bytes, byte_length);
+  EXPECT_EQ(prepared.abi.results[0].byte_length, byte_length);
+  EXPECT_EQ(prepared.abi.results[0].byte_alignment, byte_alignment);
+  EXPECT_EQ(prepared.abi.results[0].action, action);
+  EXPECT_FALSE(prepared.abi.has_upper_vector_result);
+}
+
 TEST_F(X86FunctionAbiTest, ScalarLogicalTypesUsePlatformClasses) {
   struct ScalarCase {
     const char* logical_type;
@@ -397,6 +427,11 @@ TEST_F(X86FunctionAbiTest, ScalarLogicalTypesUsePlatformClasses) {
     ExpectSingleValuePlan(prepared, cases[i].register_class,
                           cases[i].byte_length, cases[i].byte_alignment,
                           cases[i].action);
+    const PreparedAbi status = Prepare(
+        module.get(), name.c_str(), loom_x86_avx512_core_descriptor_set, true);
+    ExpectSingleStatusValuePlan(status, cases[i].register_class,
+                                cases[i].byte_length, cases[i].byte_alignment,
+                                cases[i].action);
   }
 }
 
@@ -468,6 +503,12 @@ TEST_F(X86FunctionAbiTest, VectorLogicalTypesCoverEveryWidthFamily) {
                           cases[i].byte_length,
                           static_cast<uint8_t>(cases[i].byte_length),
                           LOOM_X86_CALL_ABI_VALUE_ACTION_NONE);
+    const PreparedAbi status = Prepare(
+        module.get(), name.c_str(), loom_x86_avx512_core_descriptor_set, true);
+    ExpectSingleStatusValuePlan(status, cases[i].register_class,
+                                cases[i].byte_length,
+                                static_cast<uint8_t>(cases[i].byte_length),
+                                LOOM_X86_CALL_ABI_VALUE_ACTION_NONE);
   }
 }
 

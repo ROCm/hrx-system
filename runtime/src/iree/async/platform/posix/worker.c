@@ -330,7 +330,8 @@ static int iree_async_posix_worker_thread_entry(void* entry_arg) {
 
 iree_status_t iree_async_posix_worker_initialize(
     iree_async_proactor_posix_t* proactor, iree_host_size_t worker_index,
-    iree_thread_affinity_t affinity, iree_allocator_t allocator,
+    iree_thread_affinity_t affinity,
+    const iree_thread_affinity_set_t* processor_set, iree_allocator_t allocator,
     iree_async_posix_worker_t* out_worker) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
@@ -356,6 +357,7 @@ iree_status_t iree_async_posix_worker_initialize(
   params.create_suspended = false;
 
   params.initial_affinity = affinity;
+  params.initial_processor_set = processor_set;
 
   // Create and start the worker thread.
   iree_status_t status =

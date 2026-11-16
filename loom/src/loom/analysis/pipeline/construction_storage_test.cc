@@ -94,6 +94,30 @@ class PipelineConstructionStorageTest : public ::testing::Test {
 };
 
 TEST_F(PipelineConstructionStorageTest,
+       SharedUseJoinsTheNearestConstructionOwner) {
+  const auto& lifetimes = invocations_.lifetimes;
+  const size_t expected[5][5] = {
+      {0, 0, 0, 0, 0}, {0, 1, 1, 1, 1}, {0, 1, 2, 1, 1},
+      {0, 1, 1, 3, 1}, {0, 1, 1, 1, 4},
+  };
+  for (size_t first = 0; first < 5; ++first) {
+    for (size_t second = 0; second < 5; ++second) {
+      EXPECT_EQ(loom_pipeline_lifetimes_common_owner(&lifetimes, first, second),
+                expected[first][second]);
+    }
+  }
+  // Both nested serial scopes belong to the wrapper, not the pipeline root.
+  size_t serial_count = 0;
+  for (size_t i = 0; i < lifetimes.count; ++i) {
+    if (lifetimes.nodes[i].kind == LOOM_PIPELINE_LIFETIME_SERIAL) {
+      EXPECT_EQ(lifetimes.nodes[i].owner, 1u);
+      ++serial_count;
+    }
+  }
+  EXPECT_EQ(serial_count, 2u);
+}
+
+TEST_F(PipelineConstructionStorageTest,
        StorageRespectsOwnersAndCanonicalBackings) {
   const loom_source_storage_packing_range_t fixed[] = {{0, 64}};
   loom_pipeline_resource_pool_t pools[2] = {};

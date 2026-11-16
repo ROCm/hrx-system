@@ -166,7 +166,8 @@ coissued components: 7
 
 // The byte store reads r0 at cycle 7, so reusing r0 for the add's cycle-1 write
 // waits until cycle 6. That independent stall does not move the store-to-release
-// deadline from cycle 10. RET and its delay window end at cycle 14.
+// deadline from cycle 10. Return drains the release's eight-cycle resume
+// boundary, including its architectural delay window.
 // RUN: emit aie2p-leaf @independent_deadline report=emission
 
 aie2p.target<core> @target
@@ -179,8 +180,8 @@ low.func.def schedule(locked) target<amd.xdna.aie2p.core>(@target) @independent_
 }
 
 // ----
-issue cycles: 14
-code bytes: 36
+issue cycles: 18
+code bytes: 44
 coissued bundles: 0
 coissued components: 0
 
@@ -201,8 +202,8 @@ low.func.def schedule(locked) target<amd.xdna.aie2p.core>(@target) @dependent_de
 }
 
 // ----
-issue cycles: 21
-code bytes: 52
+issue cycles: 25
+code bytes: 60
 coissued bundles: 0
 coissued components: 0
 
@@ -300,8 +301,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @lock_effects(%lock_value: reg
 }
 
 // ----
-issue cycles: 12
-code bytes: 32
+issue cycles: 16
+code bytes: 40
 coissued bundles: 0
 coissued components: 0
 
@@ -398,7 +399,7 @@ low.func.def schedule(locked) target<amd.xdna.aie2p.core>(@target) @immediate_ov
 }
 
 // ----
-code: 18 07 04 00 00 00 00 00 00 00 00 00 00 00 18 07 40 10 00 00 18 00 28 10 00 00 18 08 00 10 00 00 00 00 00 00
+code: 18 07 04 00 00 00 00 00 00 00 00 00 00 00 18 07 40 10 00 00 00 00 00 00 18 08 00 10 00 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00
 
 // ====
 

@@ -57,7 +57,7 @@ typedef enum iree_hal_amd_gpu_semaphore_wait_state_e {
   IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_COMPLETED,
   // A retained native producer can satisfy the wait without host retirement.
   IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE,
-  // The cache contains a later producer or belongs to another native domain.
+  // Publication covers the value but no exact compatible producer exists.
   // Wait for the requested public value without borrowing native storage.
   IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_HOST,
 } iree_hal_amd_gpu_semaphore_wait_state_t;
@@ -71,15 +71,33 @@ typedef struct iree_hal_amd_gpu_semaphore_wait_t {
   iree_hal_amd_gpu_signal_t* signal;
 } iree_hal_amd_gpu_semaphore_wait_t;
 
+// One accepted producer, stored in its submission's capture. The submission
+// retains both the semaphore and signal until it withdraws this association.
+// Index membership borrows those owners and never pins additional native cells.
+typedef struct iree_hal_amd_gpu_semaphore_producer_t {
+  // Parent in the semaphore's value-ordered index, protected by its mutex.
+  struct iree_hal_amd_gpu_semaphore_producer_t* parent;
+  // Lower-value subtree, protected by the semaphore mutex.
+  struct iree_hal_amd_gpu_semaphore_producer_t* left;
+  // Higher-value subtree, protected by the semaphore mutex.
+  struct iree_hal_amd_gpu_semaphore_producer_t* right;
+  // Exact public timeline value produced by this submission.
+  uint64_t value;
+  // Borrowed native producer; NULL before publication or after withdrawal.
+  iree_hal_amd_gpu_signal_t* signal;
+  // AVL subtree height, with a missing child having height zero.
+  uint32_t height;
+} iree_hal_amd_gpu_semaphore_producer_t;
+
 // Resolves completed waits using atomic loads. An unresolved wait pins its
-// native reader under the cache replacement lock only for an exact producer
+// native reader under the producer index lock only for an exact producer
 // value. A later producer may depend on this consumer and cannot replace the
 // requested dependency; HOST observes the original public timeline instead.
 // The caller has established the semaphore type and retains the native domain
 // through the reader's final release. Domain identity includes addressing,
 // atomic width, completion protocol, visibility, forward progress, and backing
 // lifetime. Foreign
-// signals never escape the cache lock: HOST uses the ordinary completed HAL
+// signals never escape the index lock: HOST uses the ordinary completed HAL
 // timeline, never submission availability, and owns no producer storage.
 // A native result permits the domain's native wait operation. Its retained
 // snapshot supplies the complete native-domain causal history; producer
@@ -95,17 +113,30 @@ iree_status_t iree_hal_amd_gpu_semaphore_acquire_wait(
 // succeeded; a USER publisher has committed the complete command sequence and
 // must publish its write index and doorbell without another fallible step.
 // Captured work with unresolved dependencies is not an eligible producer.
-// Borrows signal and retains it only if it becomes the cached producer. A
-// publication reference keeps signal live until retirement ownership transfers.
-// Higher values replace older cached values; existing readers remain retained.
+// The caller supplies zero-initialized producer storage and retains both
+// semaphore and signal until unpublish_signal. A publication reference keeps
+// signal live until retirement ownership transfers. Every live exact producer
+// remains available independently of subsequent publications.
 // Completion racing publication cannot reinstall an already completed point.
 // Submission publication does not advance the completed timeline or frontier.
 // On failure the native work still owns its references until quiescence.
 iree_status_t iree_hal_amd_gpu_semaphore_publish_signal(
     iree_hal_semaphore_t* semaphore, uint64_t value,
-    iree_hal_amd_gpu_signal_t* signal);
+    iree_hal_amd_gpu_signal_t* signal,
+    iree_hal_amd_gpu_semaphore_producer_t* producer);
 
-// Publishes a proven native completion and returns any covered cache reference.
+// Withdraws a producer after public completion covers its value or the
+// semaphore has failed, and before its capture or native owner is released.
+// An observed available point therefore cannot become unavailable. Readers
+// already acquired under the same mutex retain their independent native use.
+// Zero-initialized unpublished records are accepted; no allocation or callback
+// occurs. The caller still owns semaphore and signal through return.
+void iree_hal_amd_gpu_semaphore_unpublish_signal(
+    iree_hal_semaphore_t* semaphore,
+    iree_hal_amd_gpu_semaphore_producer_t* producer);
+
+// Publishes a proven native completion. Producer associations remain borrowed
+// until their owning submissions withdraw them during retirement.
 // Observers may arrive out of order even when GPU execution was ordered: a
 // later already-observed completion subsumes this observation. This is not a
 // substitute for the application's obligation to order semaphore signals.
@@ -116,9 +147,10 @@ iree_status_t iree_hal_amd_gpu_semaphore_publish_completed(
     const iree_async_frontier_t* frontier);
 
 // Acquires the already constructed view for native submission admission.
-// Its value is covered either by a cached native producer or by the completed
-// timeline. Replacement by a higher producer preserves that predicate; only
-// completion or failure removes the last applicable cache reference.
+// Its value is covered by a published native producer or the completed
+// timeline. Live producers retain their exact associations until retirement;
+// completion then covers the withdrawn points. A higher published value does
+// not supply an exact native dependency for skipped timeline values.
 //
 // First acquisition activates availability notifications under the metadata
 // lock and publishes the current predicate. No allocation or semaphore creation

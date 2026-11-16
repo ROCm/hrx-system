@@ -156,9 +156,9 @@ class DmaQueuesTest : public ::testing::Test {
 
 TEST_F(DmaQueuesTest, TransportFamiliesShareOnlySerialQueueLifetimes) {
   Assign();
-  EXPECT_EQ(ordinary_.local_engine, 0);
+  EXPECT_EQ(ordinary_.local_engine, 1);
   EXPECT_EQ(ordinary_.shim_engine, 0);
-  EXPECT_EQ(receivers_[0].engine, 1);
+  EXPECT_EQ(receivers_[0].engine, 0);
   EXPECT_EQ(receivers_[1].engine, receivers_[0].engine);
   EXPECT_EQ(phases_[0].receiver.engine, receivers_[0].engine);
   EXPECT_EQ(phases_[1].receiver.engine, phases_[0].receiver.engine);
@@ -170,17 +170,86 @@ TEST_F(DmaQueuesTest, ConcurrentTransportsKeepIndependentQueues) {
   nodes_[2].kind = LOOM_PIPELINE_LIFETIME_CONCURRENT;
   realization_.invocations.lifetimes.has_serial = false;
   Assign();
-  EXPECT_EQ(receivers_[0].engine, 1);
-  EXPECT_EQ(phases_[0].receiver.engine, 2);
+  EXPECT_EQ(receivers_[0].engine, 0);
+  EXPECT_EQ(phases_[0].receiver.engine, 1);
+  EXPECT_EQ(ordinary_.local_engine, 2);
   EXPECT_EQ(tiles_[1].s2mm_count, 3);
+}
+
+TEST_F(DmaQueuesTest, SerialMulticastsKeepTheirPreferredReceiveQueue) {
+  workers_[2].input = nullptr;
+  distributions_[0].next_demand = nullptr;
+  loom_aie2p_native_distribution_path_t second_path = {
+      .first = &distributions_[1],
+  };
+  distributions_[1].path = &second_path;
+  loom_aie2p_native_distribution_plan_t second_plan = {
+      .geometries = &distributions_[1],
+  };
+  workers_[2].distribution_plan = &second_plan;
+  Assign();
+  EXPECT_EQ(receivers_[0].engine, 0);
+  EXPECT_EQ(receivers_[1].engine, 0);
+  EXPECT_EQ(ordinary_.local_engine, 1);
+  EXPECT_EQ(distributions_[0].sender.engine, 0);
+  EXPECT_EQ(distributions_[1].sender.engine, 0);
+  EXPECT_EQ(tiles_[1].s2mm_count, 2);
+  EXPECT_EQ(tiles_[2].mm2s_count, 1);
+}
+
+TEST_F(DmaQueuesTest, LocalSenderIdentitySurvivesSerialCrossColumnFanout) {
+  workers_[0] = {};
+  workers_[1] = {};
+  workers_[2] = {};
+  loom_aie2p_native_distribution_t paths[5] = {};
+  loom_aie2p_native_distribution_path_t demands[5] = {};
+  loom_aie2p_native_distribution_endpoint_t receivers[6] = {};
+  const size_t second_column = context_.family->row_count;
+  for (size_t i = 0; i < 5; ++i) {
+    demands[i].first = &paths[i];
+    paths[i].path = &demands[i];
+    paths[i].sender.tile =
+        &tiles_[1 + ((i == 2 || i == 4) ? second_column : 0)];
+    paths[i].receivers = &receivers[i ? i + 1 : 0];
+    paths[i].receiver_count = i ? 1 : 2;
+    for (size_t j = 0; j < paths[i].receiver_count; ++j) {
+      paths[i].receivers[j].tile =
+          &tiles_[2 + ((i == 2 || i == 4 || j) ? second_column : 0)];
+    }
+  }
+  paths[0].next_demand = &paths[1];
+  paths[1].next_demand = &paths[2];
+  paths[3].next_demand = &paths[4];
+  loom_aie2p_native_distribution_plan_t phases[2] = {{.geometries = &paths[0]},
+                                                     {.geometries = &paths[3]}};
+  workers_[1].distribution_plan = &phases[0];
+  workers_[2].distribution_plan = &phases[1];
+  context_.dma_queue_count = 11;
+  Assign();
+  EXPECT_EQ(paths[0].sender.engine, 0);
+  EXPECT_EQ(paths[1].sender.engine, 1);
+  EXPECT_EQ(paths[2].sender.engine, 0);
+  EXPECT_EQ(paths[3].sender.engine, 0);
+  EXPECT_EQ(paths[4].sender.engine, 0);
+  // The crossing broadcast keeps its own receive queue beside the local
+  // sender. The next phase reuses each column's physical sender/receiver pair.
+  EXPECT_EQ(receivers[0].engine, 0);
+  EXPECT_EQ(receivers[1].engine, 1);
+  EXPECT_EQ(receivers[2].engine, 1);
+  EXPECT_EQ(receivers[3].engine, 0);
+  EXPECT_EQ(receivers[4].engine, receivers[0].engine);
+  EXPECT_EQ(receivers[5].engine, receivers[3].engine);
+  EXPECT_EQ(tiles_[2].s2mm_count, 2);
+  EXPECT_EQ(tiles_[second_column + 2].s2mm_count, 2);
 }
 
 TEST_F(DmaQueuesTest, IndependentInputPhasesReserveSeparateReceivers) {
   input_.window_capacity = 0;
   ++context_.dma_queue_count;
   Assign();
-  EXPECT_EQ(phases_[0].receiver.engine, 1);
-  EXPECT_EQ(phases_[1].receiver.engine, 2);
+  EXPECT_EQ(phases_[0].receiver.engine, 0);
+  EXPECT_EQ(phases_[1].receiver.engine, 1);
+  EXPECT_EQ(ordinary_.local_engine, 2);
   EXPECT_EQ(tiles_[1].s2mm_count, 3);
 }
 

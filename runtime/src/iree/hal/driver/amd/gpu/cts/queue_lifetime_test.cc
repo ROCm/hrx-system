@@ -754,6 +754,123 @@ TEST_P(GpuNativeQueueLifetimeTest, QueueReleaseDoesNotDrainHeldAllocation) {
       iree_hal_semaphore_wait(allocated, one, iree_infinite_timeout(), 0));
 }
 
+TEST_P(GpuNativeQueueLifetimeTest,
+       SupersededNativePointJoinsFutureProducerOnConsumerQueue) {
+  Ref<iree_hal_buffer_t> source, output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(256, 4),
+      iree_infinite_timeout(), source.out()));
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(256, 4),
+      iree_infinite_timeout(), output.out()));
+  Ref<iree_hal_semaphore_t> paused, produced, future, joined, downloaded;
+  CreateSemaphore(paused.out());
+  CreateSemaphore(produced.out());
+  CreateSemaphore(future.out());
+  CreateSemaphore(joined.out());
+  CreateSemaphore(downloaded.out());
+  iree_hal_semaphore_t* paused_handle = paused;
+  iree_hal_semaphore_t* produced_handle = produced;
+  iree_hal_semaphore_t* future_handle = future;
+  iree_hal_semaphore_t* joined_handle = joined;
+  iree_hal_semaphore_t* downloaded_handle = downloaded;
+  uint64_t one = 1, two = 2;
+  CompletionPause pause{
+      reinterpret_cast<iree_async_semaphore_t*>(paused_handle)};
+  IREE_ASSERT_OK(pause.Arm(one));
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[0], {},
+                                        {1, &paused_handle, &one}, nullptr, 0));
+  pause.entered.acquire();
+
+  const uint32_t first_pattern = 0xA5C31234;
+  const uint32_t second_pattern = 0xF10D5678;
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+  };
+  const iree_hal_barrier_t acquire = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
+  };
+  const iree_hal_barrier_list_t releases = {1, &release};
+  const iree_hal_barrier_list_t acquires = {1, &acquire};
+  const iree_hal_queue_barriers_t release_barriers = {.after = &releases};
+  const iree_hal_queue_barriers_t copy_barriers = {
+      .before = &acquires,
+      .after = &releases,
+  };
+  IREE_ASSERT_OK(iree_hal_queue_fill(
+      queues_[1], {}, {1, &produced_handle, &one}, source, 0, 256,
+      &first_pattern, sizeof(first_pattern), &release_barriers, 0));
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[1], {1, &produced_handle, &one},
+                                        {1, &produced_handle, &two}, nullptr,
+                                        0));
+  iree_hal_amd_gpu_semaphore_wait_t retained = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_acquire_wait(produced, one, domain_,
+                                                         &retained));
+  std::unique_ptr<iree_hal_amd_gpu_signal_t,
+                  decltype(&iree_hal_amd_gpu_signal_release)>
+      reader(retained.signal, iree_hal_amd_gpu_signal_release);
+  ASSERT_EQ(retained.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
+
+  // The older native point is available, but the second producer is not. The
+  // join must leave this physical queue free to publish that missing producer.
+  iree_hal_semaphore_t* waits[] = {produced, future};
+  uint64_t values[] = {one, one};
+  IREE_ASSERT_OK(iree_hal_queue_copy(queues_[0], {2, waits, values},
+                                     {1, &joined_handle, &one}, source, 0,
+                                     output, 0, 128, &copy_barriers, 0));
+  IREE_ASSERT_OK(iree_hal_queue_fill(
+      queues_[0], {}, {1, &future_handle, &one}, output, 128, 128,
+      &second_pattern, sizeof(second_pattern), &release_barriers, 0));
+
+  // Publication of the missing producer must resume the join before the held
+  // host completion callback runs. The independent publication worker owns
+  // this continuation; wait for its availability view, not public completion.
+  Ref<iree_hal_semaphore_t> joined_submission;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_acquire_submission_semaphore(
+      joined, joined_submission.out()));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(joined_submission, one,
+                                         iree_infinite_timeout(), 0));
+  iree_hal_amd_gpu_semaphore_wait_t published_join = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_acquire_wait(joined, one, domain_,
+                                                         &published_join));
+  std::unique_ptr<iree_hal_amd_gpu_signal_t,
+                  decltype(&iree_hal_amd_gpu_signal_release)>
+      joined_reader(published_join.signal, iree_hal_amd_gpu_signal_release);
+  EXPECT_EQ(published_join.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
+  uint64_t completed_value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(produced, &completed_value));
+  EXPECT_EQ(completed_value, 0u);
+  IREE_ASSERT_OK(iree_hal_semaphore_query(joined, &completed_value));
+  EXPECT_EQ(completed_value, 0u);
+  pause.Join();
+
+  std::array<uint32_t, 64> observed = {};
+  const iree_hal_transfer_operation_t download = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download =
+          {
+              .source_buffer = output,
+              .target = observed.data(),
+              .length = sizeof(observed),
+          },
+  };
+  IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[1], {1, &joined_handle, &one},
+                                         {1, &downloaded_handle, &one}, 1,
+                                         &download, &copy_barriers));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(downloaded, one, iree_infinite_timeout(), 0));
+  for (size_t i = 0; i < observed.size(); ++i) {
+    EXPECT_EQ(observed[i], i < 32 ? first_pattern : second_pattern);
+  }
+  iree_status_code_t code = IREE_STATUS_UNKNOWN;
+  EXPECT_TRUE(iree_hal_amd_gpu_signal_query_retirement(reader.get(), &code));
+  EXPECT_EQ(code, IREE_STATUS_OK);
+}
+
 INSTANTIATE_TEST_SUITE_P(NativeProtocols, GpuNativeQueueLifetimeTest,
                          ::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
                                            AMDF_QUEUE_COMMAND_TYPE_GPU_AQL));

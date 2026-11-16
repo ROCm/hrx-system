@@ -66,8 +66,9 @@ iree_status_t loom_value_fact_table_begin_origins(
 void loom_value_fact_table_end_origins(loom_value_fact_table_t* table,
                                        bool complete);
 
-// Records a result-family definition and its semantic change in an active
-// publication. Direct table definitions outside inference need no publication.
+// Records a result-family definition and publishes its semantic change. A
+// changed value has established table storage before this call. An active
+// inference additionally retains the family and its shared change report.
 void loom_value_fact_table_record_origin(loom_value_fact_table_t* table,
                                          loom_value_id_t value_id,
                                          uint8_t family, bool changed);

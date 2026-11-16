@@ -173,6 +173,7 @@ const loom_x86_deployment_profile_t* loom_x86_deployment_profile_select_cpu(
       .name = IREE_SVL(snapshot_name),                         \
       .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE, \
       .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,      \
+      .reference_storage_bitwidth = 128,                       \
       .default_pointer_bitwidth = 64,                          \
       .index_bitwidth = 64,                                    \
       .maximum_index_bitwidth = 64,                            \

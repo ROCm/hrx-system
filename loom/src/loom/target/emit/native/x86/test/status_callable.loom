@@ -1,0 +1,74 @@
+// The logical program contains no status arguments, results, or branches.
+// Its explicit native ABI remains stable even for an infallible body.
+func.decl abi(object_function, {calling_convention = "iree_status"}) @native_read(%position: i32) -> (i64)
+
+func.decl abi(object_function, {calling_convention = "iree_status"}) @native_accept(%value: i64)
+
+func.decl @native_mix(%value: i64) -> (i64)
+
+func.decl abi(object_function, {calling_convention = "iree_status"}) @native_sum(%a: i64, %b: i64, %c: i64, %d: i64, %e: i64, %f: i64, %g: i64, %h: i64) -> (i64)
+
+func.def public noinline abi(object_function, {calling_convention = "iree_status"}) @status_pair(%seed: i64) -> (i8, i64, i16, f64, i1, f32) {
+  %first_position = scalar.constant 0 : i32
+  %second_position = scalar.constant 1 : i32
+  %third_position = scalar.constant 2 : i32
+  %first = func.call @native_read(%first_position) : (i32) -> (i64)
+  %second = func.call @native_read(%second_position) : (i32) -> (i64)
+  %third = func.call @native_read(%third_position) : (i32) -> (i64)
+  %mixed = func.call @native_mix(%seed) : (i64) -> (i64)
+  %sum0 = scalar.addi %first, %second : i64
+  %sum1 = scalar.addi %sum0, %third : i64
+  %sum = scalar.addi %sum1, %mixed : i64
+  func.call @native_accept(%sum) : (i64)
+  %byte = scalar.constant -89 : i8
+  %short = scalar.constant -21555 : i16
+  %double = scalar.constant 3.5 : f64
+  %yes = scalar.constant true : i1
+  %float = scalar.constant -1.25 : f32
+  func.return %byte, %sum, %short, %double, %yes, %float : i8, i64, i16, f64, i1, f32
+}
+
+func.def public abi(object_function, {calling_convention = "iree_status"}) @status_forward(%seed: i64) -> (i8, i64, i16, f64, i1, f32) {
+  %byte, %sum, %short, %double, %yes, %float = func.call @status_pair(%seed) : (i64) -> (i8, i64, i16, f64, i1, f32)
+  func.return %byte, %sum, %short, %double, %yes, %float : i8, i64, i16, f64, i1, f32
+}
+
+// Hidden result storage shifts one integer argument to the stack. Result
+// layout must remain relative to its own record, not the argument area.
+func.def public abi(object_function, {calling_convention = "iree_status"}) @status_stack(%a: i64, %b: i64, %c: i64, %d: i64, %e: i64, %f: i64, %g: i64, %h: i64) -> (i64) {
+  %sum = func.call @native_sum(%a, %b, %c, %d, %e, %f, %g, %h) : (i64, i64, i64, i64, i64, i64, i64, i64) -> (i64)
+  func.return %sum : i64
+}
+
+// An exported status function keeps its ABI without any fallible operations.
+func.def public abi(object_function, {calling_convention = "iree_status"}) @status_identity(%value: i64) -> (i64) {
+  func.return %value : i64
+}
+
+func.def public abi(object_function, {calling_convention = "iree_status"}) @status_void(%value: i64) {
+  func.call @native_accept(%value) : (i64)
+  func.call @native_accept(%value) : (i64)
+  func.return
+}
+
+func.decl abi(object_function, {calling_convention = "iree_status"}) @native_vector(%a: vector<8xf32>, %b: vector<8xf32>, %c: vector<8xf32>, %d: vector<8xf32>, %e: vector<8xf32>, %f: vector<8xf32>, %g: vector<8xf32>, %h: vector<8xf32>, %i: vector<8xf32>) -> (vector<8xf32>)
+
+// A stack-passed vector and a naturally aligned result record require dynamic
+// stack realignment. The original status survives the restoration path.
+func.def public abi(object_function, {calling_convention = "iree_status"}) @status_vector(%input: buffer) -> (i8, vector<8xf32>, i64) {
+  %origin = index.constant 0 : offset
+  %values = buffer.view %input[%origin] : buffer -> view<72xf32>
+  %a = vector.load %values[0] : view<72xf32> -> vector<8xf32>
+  %b = vector.load %values[8] : view<72xf32> -> vector<8xf32>
+  %c = vector.load %values[16] : view<72xf32> -> vector<8xf32>
+  %d = vector.load %values[24] : view<72xf32> -> vector<8xf32>
+  %e = vector.load %values[32] : view<72xf32> -> vector<8xf32>
+  %f = vector.load %values[40] : view<72xf32> -> vector<8xf32>
+  %g = vector.load %values[48] : view<72xf32> -> vector<8xf32>
+  %h = vector.load %values[56] : view<72xf32> -> vector<8xf32>
+  %i = vector.load %values[64] : view<72xf32> -> vector<8xf32>
+  %sum = func.call @native_vector(%a, %b, %c, %d, %e, %f, %g, %h, %i) : (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>)
+  %first = scalar.constant 19 : i8
+  %last = scalar.constant 771 : i64
+  func.return %first, %sum, %last : i8, vector<8xf32>, i64
+}

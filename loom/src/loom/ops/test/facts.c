@@ -76,6 +76,18 @@ iree_status_t loom_test_effectful_constant_facts(
 // a scalar.constant, making the analysis state observable in .loom-test
 // fixtures.
 
+iree_status_t loom_test_fact_numeric_identity_matches_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  const loom_value_id_t lhs = loom_value_fact_table_query_numeric_identity(
+      context->table, loom_test_fact_numeric_identity_matches_lhs(op));
+  const loom_value_id_t rhs = loom_value_fact_table_query_numeric_identity(
+      context->table, loom_test_fact_numeric_identity_matches_rhs(op));
+  result_facts[0] = loom_value_facts_exact_i64(lhs == rhs);
+  return iree_ok_status();
+}
+
 iree_status_t loom_test_fact_range_lo_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,

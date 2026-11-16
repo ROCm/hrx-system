@@ -74,6 +74,7 @@ loom_target_contract_cc_libraries(
         "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/ref",
         "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/view",

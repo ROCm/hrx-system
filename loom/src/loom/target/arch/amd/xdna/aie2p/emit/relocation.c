@@ -307,32 +307,6 @@ static iree_status_t loom_aie2p_native_relocation_patch_movxm(
   return iree_ok_status();
 }
 
-static iree_status_t loom_aie2p_native_relocation_validate_code_target(
-    const loom_native_object_fixup_layout_t* fixup_layout,
-    const loom_native_object_symbol_layout_t* target_layout,
-    uint64_t target_offset, const loom_native_section_t* source_section,
-    const loom_native_section_t* target_section) {
-  if (fixup_layout->section_index != target_layout->section_index) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AIE2P core code target must share its executable section");
-  }
-  if (source_section->storage != LOOM_NATIVE_SECTION_STORAGE_CONTENTS ||
-      (source_section->access & (LOOM_NATIVE_SECTION_ACCESS_READ |
-                                 LOOM_NATIVE_SECTION_ACCESS_EXECUTE)) !=
-          (LOOM_NATIVE_SECTION_ACCESS_READ |
-           LOOM_NATIVE_SECTION_ACCESS_EXECUTE)) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AIE2P core code fixup requires executable contents");
-  }
-  if (target_offset >= target_section->contents.data_length) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AIE2P core code target lies outside its section");
-  }
-  return iree_ok_status();
-}
-
 iree_status_t loom_aie2p_native_object_apply_fixups(
     const loom_native_object_contribution_t* object,
     loom_native_section_contribution_assembly_t* assembly,
@@ -386,18 +360,12 @@ iree_status_t loom_aie2p_native_object_apply_fixups(
         const bool is_call =
             fixup->relocation_kind ==
             LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_CALL_ABSOLUTE;
-        IREE_RETURN_IF_ERROR(loom_aie2p_native_relocation_validate_code_target(
-            fixup_layout, target_layout, target_offset, source_section,
-            target_section));
         IREE_RETURN_IF_ERROR(loom_aie2p_native_relocation_patch_core_control(
             is_call, target_address, fixup_layout->section_offset,
             source_section));
         break;
       }
       case LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_CODE_ADDRESS_ABSOLUTE: {
-        IREE_RETURN_IF_ERROR(loom_aie2p_native_relocation_validate_code_target(
-            fixup_layout, target_layout, target_offset, source_section,
-            target_section));
         IREE_RETURN_IF_ERROR(loom_aie2p_native_relocation_patch_movxm(
             target_address, fixup_layout->section_offset, source_section));
         break;

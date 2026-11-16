@@ -319,7 +319,8 @@ enum {
   LOOM_OP_TEST_F64_ARRAY_ATTRS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 122),
   LOOM_OP_TEST_STRING_ARRAY_ATTRS = LOOM_OP_KIND(LOOM_DIALECT_TEST, 123),
   LOOM_OP_TEST_FACT_OBSERVATION_SCOPE = LOOM_OP_KIND(LOOM_DIALECT_TEST, 124),
-  LOOM_OP_TEST_COUNT_ = 125,
+  LOOM_OP_TEST_FACT_NUMERIC_IDENTITY_MATCHES = LOOM_OP_KIND(LOOM_DIALECT_TEST, 125),
+  LOOM_OP_TEST_COUNT_ = 126,
 };
 
 // Synthetic flags for TemplateParamFlags parser/printer coverage.
@@ -2487,6 +2488,22 @@ iree_status_t loom_test_fact_observation_scope_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_test_fact_observation_scope_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+
+// LOOM_OP_TEST_FACT_NUMERIC_IDENTITY_MATCHES: Returns 1 when the operands share a retained numeric identity, independently of storage type.
+// %same = test.fact_numeric_identity_matches %byte, %wide : i8, i64 -> i1
+LOOM_DEFINE_ISA(loom_test_fact_numeric_identity_matches_isa, LOOM_OP_TEST_FACT_NUMERIC_IDENTITY_MATCHES)
+LOOM_DEFINE_OPERAND(loom_test_fact_numeric_identity_matches_lhs, 0)
+LOOM_DEFINE_OPERAND(loom_test_fact_numeric_identity_matches_rhs, 1)
+LOOM_DEFINE_RESULT(loom_test_fact_numeric_identity_matches_result, 0)
+iree_status_t loom_test_fact_numeric_identity_matches_build(
+    loom_builder_t* builder, loom_value_id_t lhs,
+    loom_value_id_t rhs, loom_type_t result_type,
+    loom_location_id_t location, loom_op_t** out_op);
+iree_status_t loom_test_fact_numeric_identity_matches_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,

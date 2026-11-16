@@ -6,10 +6,13 @@
 
 #include "iree/hal/driver/amd/gpu/queue/semaphore.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <barrier>
 #include <functional>
+#include <numeric>
+#include <random>
 #include <semaphore>
 #include <thread>
 #include <vector>
@@ -85,6 +88,11 @@ class SemaphoreTest : public ::testing::Test {
                                          8, 0, &block_);
   }
   void TearDown() override {
+    for (size_t i = 0; i < producers_.size(); ++i) {
+      if (producer_semaphores_[i]) {
+        Retire(&signals_[i]);
+      }
+    }
     for (auto* semaphore : semaphores_) {
       iree_hal_semaphore_release(semaphore);
     }
@@ -126,8 +134,29 @@ class SemaphoreTest : public ::testing::Test {
                Signal* signal) {
     const uint64_t frontier[3] = {value, 0, 0};
     iree_hal_amd_gpu_signal_publish_frontier(signal, frontier);
-    IREE_CHECK_OK(
-        iree_hal_amd_gpu_semaphore_publish_signal(semaphore, value, signal));
+    IREE_CHECK_OK(PublishPoint(semaphore, value, signal));
+  }
+  iree_status_t PublishPoint(iree_hal_semaphore_t* semaphore, uint64_t value,
+                             Signal* signal) {
+    const size_t index = signal - signals_.data();
+    producer_semaphores_[index] = semaphore;
+    producer_values_[index] = value;
+    return iree_hal_amd_gpu_semaphore_publish_signal(semaphore, value, signal,
+                                                     &producers_[index]);
+  }
+  void Retire(Signal* signal) {
+    const size_t index = signal - signals_.data();
+    // Completion or an already-recorded failure covers the public predicate
+    // before this producer returns its borrowed association and native owner.
+    iree_status_t status = iree_hal_amd_gpu_semaphore_publish_completed(
+        producer_semaphores_[index], producer_values_[index], nullptr);
+    iree_hal_amd_gpu_signal_retire(signal, iree_status_code(status));
+    iree_status_free(status);
+    iree_hal_amd_gpu_semaphore_unpublish_signal(producer_semaphores_[index],
+                                                &producers_[index]);
+    producers_[index] = {};
+    producer_semaphores_[index] = nullptr;
+    iree_hal_amd_gpu_signal_release(signal);
   }
   Wait AcquireWait(iree_hal_semaphore_t* semaphore, uint64_t value) {
     Wait wait;
@@ -153,6 +182,12 @@ class SemaphoreTest : public ::testing::Test {
   std::array<uint64_t, 8> values_;
   // Independently retained native signal metadata.
   std::array<Signal, 8> signals_ = {};
+  // Borrowed index records owned by the corresponding producer captures.
+  std::array<iree_hal_amd_gpu_semaphore_producer_t, 8> producers_ = {};
+  // Timelines borrowed from the test until each producer retires.
+  std::array<iree_hal_semaphore_t*, 8> producer_semaphores_ = {};
+  // Exact output values, including publications already covered or duplicated.
+  std::array<uint64_t, 8> producer_values_ = {};
   // Three-queue causal snapshots retained by their native signals.
   std::array<uint64_t, 2 + 8 * 3> frontiers_;
   // Finite producer storage, reclaimed only after all uses join.
@@ -209,14 +244,14 @@ class SemaphoreNativeWaitTest : public SemaphoreTest,
 TEST_P(SemaphoreNativeWaitTest, RetainsNativeBackingThroughPublicRetirement) {
   auto* semaphore = Semaphore();
   auto* signal = PublishNative(semaphore, 1, true);
-  iree_hal_amd_gpu_signal_release(signal);
   retire_ = [&] {
     iree_async_single_frontier_t frontier;
     iree_async_single_frontier_initialize(&frontier, 7, 10);
     IREE_EXPECT_OK(iree_hal_amd_gpu_semaphore_publish_completed(
         semaphore, 1, iree_async_single_frontier_as_const_frontier(&frontier)));
-    // Publishing completion dropped the cache reference; the active waiter
-    // still pins its native value until the retirement attempt returns.
+    Retire(signal);
+    // Withdrawing the producer leaves the active waiter pinning its native
+    // value until the retirement attempt returns.
     ExpectAvailableSignals(7);
   };
   IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
@@ -240,7 +275,7 @@ TEST_P(SemaphoreNativeWaitTest, LaterProducerCannotAccelerateEarlierWait) {
       iree_hal_semaphore_wait(semaphore, 1, iree_make_timeout_ms(1),
                               IREE_ASYNC_WAIT_FLAG_ACTIVE));
   EXPECT_EQ(retire_calls_, 0u);
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
 }
 
 TEST_P(SemaphoreNativeWaitTest, ForeignDomainUsesOnlyPublicTimeline) {
@@ -252,7 +287,7 @@ TEST_P(SemaphoreNativeWaitTest, ForeignDomainUsesOnlyPublicTimeline) {
       iree_hal_semaphore_wait(semaphore, 1, iree_make_timeout_ms(1),
                               IREE_ASYNC_WAIT_FLAG_ACTIVE));
   EXPECT_EQ(retire_calls_, 0u);
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
 }
 
 TEST_P(SemaphoreNativeWaitTest, OrdinaryAndImmediateWaitsDoNotRetire) {
@@ -267,7 +302,7 @@ TEST_P(SemaphoreNativeWaitTest, OrdinaryAndImmediateWaitsDoNotRetire) {
       iree_hal_semaphore_wait(semaphore, 1, iree_make_timeout_ms(1),
                               IREE_ASYNC_WAIT_FLAG_NONE));
   EXPECT_EQ(retire_calls_, 0u);
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
 }
 
 TEST_P(SemaphoreNativeWaitTest, NativeCompletionStillRequiresPublicRetirement) {
@@ -280,7 +315,7 @@ TEST_P(SemaphoreNativeWaitTest, NativeCompletionStillRequiresPublicRetirement) {
   // A source that cannot retire does not cause repeated caller-side scans.
   EXPECT_EQ(retire_calls_, 1u);
   EXPECT_EQ(Value(semaphore), 0u);
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
 }
 
 TEST_P(SemaphoreNativeWaitTest, PendingNativeWaitObservesDeadlineAndReleases) {
@@ -292,7 +327,7 @@ TEST_P(SemaphoreNativeWaitTest, PendingNativeWaitObservesDeadlineAndReleases) {
                               IREE_ASYNC_WAIT_FLAG_ACTIVE));
   EXPECT_EQ(retire_calls_, 0u);
   IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphore, 1, nullptr));
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
   ExpectAvailableSignals(8);
 }
 
@@ -300,10 +335,10 @@ TEST_P(SemaphoreNativeWaitTest, PendingNativeWaitObservesFailureAndReleases) {
   auto* semaphore = Semaphore();
   auto* signal = PublishNative(semaphore, 1, false);
   std::thread producer([&] {
-    // Producer, cache, and active reader must all own the native dependency
+    // Producer and active reader must both own the native dependency
     // before failure is delivered. No elapsed-time assumption establishes it.
     while (iree_atomic_load(&signal->state.live.ref_count,
-                            iree_memory_order_acquire) != 3) {
+                            iree_memory_order_acquire) != 2) {
       std::this_thread::yield();
     }
     iree_hal_semaphore_fail(
@@ -315,7 +350,7 @@ TEST_P(SemaphoreNativeWaitTest, PendingNativeWaitObservesFailureAndReleases) {
                               IREE_ASYNC_WAIT_FLAG_ACTIVE));
   producer.join();
   EXPECT_EQ(retire_calls_, 0u);
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
   ExpectAvailableSignals(8);
 }
 
@@ -331,7 +366,7 @@ TEST_P(SemaphoreNativeWaitTest, ShaderFailureDuringRetirementPreventsSuccess) {
       iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
                               IREE_ASYNC_WAIT_FLAG_ACTIVE));
   EXPECT_EQ(retire_calls_, 1u);
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
   ExpectAvailableSignals(8);
 }
 
@@ -348,10 +383,10 @@ TEST_P(SemaphoreNativeWaitTest, CompletedTimelineDoesNotAcquireProducerMutex) {
 TEST_P(SemaphoreNativeWaitTest, YieldRetainsBackingThroughRetirement) {
   auto* semaphore = Semaphore();
   auto* signal = PublishNative(semaphore, 1, true);
-  iree_hal_amd_gpu_signal_release(signal);
   retire_ = [&] {
     IREE_EXPECT_OK(
         iree_hal_amd_gpu_semaphore_publish_completed(semaphore, 1, nullptr));
+    Retire(signal);
     ExpectAvailableSignals(7);
   };
   IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
@@ -372,7 +407,7 @@ TEST_P(SemaphoreNativeWaitTest, YieldRetirementFailurePreventsSuccess) {
       iree_hal_semaphore_wait(semaphore, 1, iree_infinite_timeout(),
                               IREE_ASYNC_WAIT_FLAG_YIELD));
   EXPECT_EQ(retire_calls_, 1u);
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
   ExpectAvailableSignals(8);
 }
 
@@ -393,10 +428,10 @@ TEST_P(SemaphoreNativeWaitTest,
       }
       std::this_thread::yield();
     }
-    // The producer and semaphore cache remain; the native observer is gone.
+    // The producer remains; the native observer is gone.
     EXPECT_EQ(iree_atomic_load(&signal->state.live.ref_count,
                                iree_memory_order_acquire),
-              2);
+              1);
     iree_hal_semaphore_fail(
         semaphore, iree_make_status(IREE_STATUS_ABORTED, "native producer"));
   });
@@ -406,7 +441,7 @@ TEST_P(SemaphoreNativeWaitTest,
                               IREE_ASYNC_WAIT_FLAG_YIELD));
   producer.join();
   EXPECT_EQ(retire_calls_, 0u);
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
   ExpectAvailableSignals(8);
 }
 
@@ -418,7 +453,7 @@ TEST_P(SemaphoreNativeWaitTest, YieldRejectsLaterProducerAndExpiredDeadline) {
       iree_hal_semaphore_wait(semaphore, 1, iree_make_timeout_ms(1),
                               IREE_ASYNC_WAIT_FLAG_YIELD));
   EXPECT_EQ(retire_calls_, 0u);
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
 
   // An expired deadline must not become a fresh native observation budget.
   signal = PublishNative(semaphore, 3, false);
@@ -427,7 +462,7 @@ TEST_P(SemaphoreNativeWaitTest, YieldRejectsLaterProducerAndExpiredDeadline) {
       iree_hal_semaphore_wait(semaphore, 3, iree_make_deadline(1),
                               IREE_ASYNC_WAIT_FLAG_YIELD));
   EXPECT_EQ(retire_calls_, 0u);
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
 }
 
 INSTANTIATE_TEST_SUITE_P(NativePredicates, SemaphoreNativeWaitTest,
@@ -448,10 +483,10 @@ TEST_F(SemaphoreTest, HostTimelinePreservesStrictSignalsAndWaits) {
                         iree_hal_semaphore_signal(semaphore, 3, nullptr));
 }
 
-TEST_F(SemaphoreTest, CompletedWaitDoesNotAcquireProducerCache) {
+TEST_F(SemaphoreTest, CompletedWaitDoesNotAcquireProducerIndex) {
   auto* semaphore = Semaphore(2);
   auto* async = reinterpret_cast<iree_async_semaphore_t*>(semaphore);
-  // A cache publisher may be suspended while the completed timeline already
+  // An index publisher may be suspended while the completed timeline already
   // satisfies this consumer. Its mutex cannot delay completed admission.
   iree_slim_mutex_lock(&async->mutex);
   auto wait = AcquireWait(semaphore, 2);
@@ -496,14 +531,13 @@ TEST_F(SemaphoreTest, SubmittedProducerDoesNotBecomeCompletedHistory) {
   EXPECT_EQ(frontier.entries[0].axis, 7u);
   EXPECT_EQ(frontier.entries[0].epoch, 10u);
   iree_hal_amd_gpu_signal_release(wait.signal);
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
 }
 
 TEST_F(SemaphoreTest, ForeignDomainWaitDoesNotPinProducerBacking) {
   auto* semaphore = Semaphore();
   auto* signal = AcquireSignal();
   Publish(semaphore, 1, signal);
-  iree_hal_amd_gpu_signal_release(signal);
   uint32_t foreign_domain = 0;
   Wait wait;
   IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_acquire_wait(
@@ -515,6 +549,7 @@ TEST_F(SemaphoreTest, ForeignDomainWaitDoesNotPinProducerBacking) {
   IREE_ASSERT_OK(
       iree_hal_amd_gpu_semaphore_publish_completed(semaphore, 1, nullptr));
   EXPECT_EQ(Value(semaphore), 1u);
+  Retire(signal);
   // The query result may remain alive after the foreign producer tears down.
   EXPECT_TRUE(iree_hal_amd_gpu_signal_block_try_deinitialize(&block_));
   iree_hal_amd_gpu_signal_release(wait.signal);
@@ -541,10 +576,10 @@ TEST_F(SemaphoreTest, ForeignQueriesRaceCompletionAndImmediateBackingReuse) {
   for (uint64_t value = 1; value <= kIterations; ++value) {
     auto* signal = AcquireSignal();
     Publish(semaphore, value, signal);
-    iree_hal_amd_gpu_signal_release(signal);
     start.arrive_and_wait();
     IREE_EXPECT_OK(iree_hal_amd_gpu_semaphore_publish_completed(
         semaphore, value, nullptr));
+    Retire(signal);
     acquired.arrive_and_wait();
     const bool detached =
         iree_hal_amd_gpu_signal_block_try_deinitialize(&block_);
@@ -560,20 +595,18 @@ TEST_F(SemaphoreTest, ForeignQueriesRaceCompletionAndImmediateBackingReuse) {
   reader.join();
 }
 
-TEST_F(SemaphoreTest, ReplacingProducerPreservesRetainedCausalSnapshot) {
+TEST_F(SemaphoreTest, RetiredProducerPreservesRetainedCausalSnapshot) {
   auto* semaphore = Semaphore();
   auto* first = AcquireSignal();
   const uint64_t earlier[3] = {4, 2, 0};
   iree_hal_amd_gpu_signal_publish_frontier(first, earlier);
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_semaphore_publish_signal(semaphore, 1, first));
+  IREE_ASSERT_OK(PublishPoint(semaphore, 1, first));
   auto earlier_wait = AcquireWait(semaphore, 1);
   auto* second = AcquireSignal();
   const uint64_t later[3] = {8, 3, 5};
   iree_hal_amd_gpu_signal_publish_frontier(second, later);
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_semaphore_publish_signal(semaphore, 2, second));
-  iree_hal_amd_gpu_signal_release(first);
+  IREE_ASSERT_OK(PublishPoint(semaphore, 2, second));
+  Retire(first);
   auto later_wait = AcquireWait(semaphore, 2);
   uint64_t earlier_consumer[3] = {};
   uint64_t later_consumer[3] = {};
@@ -585,10 +618,34 @@ TEST_F(SemaphoreTest, ReplacingProducerPreservesRetainedCausalSnapshot) {
     EXPECT_EQ(earlier_consumer[i], earlier[i]);
     EXPECT_EQ(later_consumer[i], later[i]);
   }
-  EXPECT_EQ(Value(semaphore), 0u);
+  EXPECT_EQ(Value(semaphore), 1u);
   iree_hal_amd_gpu_signal_release(earlier_wait.signal);
   iree_hal_amd_gpu_signal_release(later_wait.signal);
-  iree_hal_amd_gpu_signal_release(second);
+  Retire(second);
+}
+
+TEST_F(SemaphoreTest, RepeatedOutputValuesPreserveFirstNativeAssociation) {
+  auto* semaphore = Semaphore();
+  auto* first = AcquireSignal();
+  auto* second = AcquireSignal();
+  Publish(semaphore, 5, first);
+  Publish(semaphore, 5, second);
+  auto wait = AcquireWait(semaphore, 5);
+  EXPECT_EQ(wait.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
+  EXPECT_EQ(wait.signal, first);
+  ExpectAvailableSignals(6);
+  Retire(second);
+  EXPECT_EQ(Value(semaphore), 5u);
+  EXPECT_EQ(AcquireWait(semaphore, 5).state,
+            IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_COMPLETED);
+  ExpectAvailableSignals(7);
+  Retire(first);
+  ExpectAvailableSignals(7);
+  iree_status_code_t code = IREE_STATUS_UNKNOWN;
+  EXPECT_TRUE(iree_hal_amd_gpu_signal_query_retirement(wait.signal, &code));
+  EXPECT_EQ(code, IREE_STATUS_OK);
+  iree_hal_amd_gpu_signal_release(wait.signal);
+  ExpectAvailableSignals(8);
 }
 
 TEST_F(SemaphoreTest, ReaderOutlivesProducerAndSemaphore) {
@@ -598,7 +655,7 @@ TEST_F(SemaphoreTest, ReaderOutlivesProducerAndSemaphore) {
   auto wait = AcquireWait(semaphore, 1);
   IREE_ASSERT_OK(
       iree_hal_amd_gpu_semaphore_publish_completed(semaphore, 1, nullptr));
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
   iree_hal_semaphore_release(semaphores_.back());
   semaphores_.pop_back();
   ExpectAvailableSignals(7);
@@ -612,8 +669,7 @@ TEST_F(SemaphoreTest, NativeDependencyWithoutCausalHistory) {
   auto* signal = AcquireSignal();
   const uint64_t producer_frontier[3] = {};
   iree_hal_amd_gpu_signal_publish_frontier(signal, producer_frontier);
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_semaphore_publish_signal(semaphore, 1, signal));
+  IREE_ASSERT_OK(PublishPoint(semaphore, 1, signal));
   auto wait = AcquireWait(semaphore, 1);
   EXPECT_EQ(wait.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
   EXPECT_EQ(wait.signal, signal);
@@ -624,17 +680,17 @@ TEST_F(SemaphoreTest, NativeDependencyWithoutCausalHistory) {
   EXPECT_EQ(consumer_frontier[1], 2u);
   EXPECT_EQ(consumer_frontier[2], 1u);
   iree_hal_amd_gpu_signal_release(wait.signal);
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
 }
 
-TEST_F(SemaphoreTest, ReplacingCachePreservesEveryNativeReader) {
+TEST_F(SemaphoreTest, WithdrawingProducerPreservesEveryNativeReader) {
   auto* semaphore = Semaphore();
   auto* first = AcquireSignal();
   auto* second = AcquireSignal();
   Publish(semaphore, 1, first);
   auto first_wait = AcquireWait(semaphore, 1);
   Publish(semaphore, 2, second);
-  iree_hal_amd_gpu_signal_release(first);
+  Retire(first);
   auto second_wait = AcquireWait(semaphore, 2);
   EXPECT_EQ(first_wait.signal, first);
   EXPECT_EQ(second_wait.signal, second);
@@ -642,7 +698,7 @@ TEST_F(SemaphoreTest, ReplacingCachePreservesEveryNativeReader) {
   iree_hal_amd_gpu_signal_release(first_wait.signal);
   ExpectAvailableSignals(7);
   iree_hal_amd_gpu_signal_release(second_wait.signal);
-  iree_hal_amd_gpu_signal_release(second);
+  Retire(second);
 }
 
 TEST_F(SemaphoreTest, EarlierConsumerProgressesWithoutLaterProducer) {
@@ -652,11 +708,11 @@ TEST_F(SemaphoreTest, EarlierConsumerProgressesWithoutLaterProducer) {
   Publish(semaphore, 1, first);
   Publish(semaphore, 2, second);
 
-  // Producer 2 may depend on this consumer. Its cached native signal cannot
-  // replace the consumer's dependency on the independently progressing 1.
+  // Producer 2 may depend on this consumer. The exact earlier native point
+  // remains independently available after the later publication.
   auto earlier = AcquireWait(semaphore, 1);
-  EXPECT_EQ(earlier.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_HOST);
-  EXPECT_EQ(earlier.signal, nullptr);
+  EXPECT_EQ(earlier.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
+  EXPECT_EQ(earlier.signal, first);
   auto later = AcquireWait(semaphore, 2);
   EXPECT_EQ(later.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
   EXPECT_EQ(later.signal, second);
@@ -682,11 +738,11 @@ TEST_F(SemaphoreTest, EarlierConsumerProgressesWithoutLaterProducer) {
   iree_async_semaphore_wait_context_deinitialize(&context);
   iree_hal_amd_gpu_signal_release(earlier.signal);
   iree_hal_amd_gpu_signal_release(later.signal);
-  iree_hal_amd_gpu_signal_release(first);
-  iree_hal_amd_gpu_signal_release(second);
+  Retire(first);
+  Retire(second);
 }
 
-TEST_F(SemaphoreTest, CompletionBeforePublicationCannotInstallStaleCache) {
+TEST_F(SemaphoreTest, CompletionBeforePublicationCannotInstallStaleProducer) {
   auto* semaphore = Semaphore();
   auto* signal = AcquireSignal();
   IREE_ASSERT_OK(
@@ -694,7 +750,7 @@ TEST_F(SemaphoreTest, CompletionBeforePublicationCannotInstallStaleCache) {
   Publish(semaphore, 1, signal);
   EXPECT_EQ(AcquireWait(semaphore, 1).state,
             IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_COMPLETED);
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
   ExpectAvailableSignals(8);
 }
 
@@ -704,16 +760,16 @@ TEST_F(SemaphoreTest, DelayedPublicationCannotReplaceHigherProducer) {
   auto* second = AcquireSignal();
   Publish(semaphore, 2, second);
   Publish(semaphore, 1, first);
-  iree_hal_amd_gpu_signal_release(first);
-  ExpectAvailableSignals(7);
+  ExpectAvailableSignals(6);
   auto earlier = AcquireWait(semaphore, 1);
-  EXPECT_EQ(earlier.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_HOST);
-  EXPECT_EQ(earlier.signal, nullptr);
+  EXPECT_EQ(earlier.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
+  EXPECT_EQ(earlier.signal, first);
+  Retire(first);
   auto wait = AcquireWait(semaphore, 2);
   EXPECT_EQ(wait.signal, second);
   iree_hal_amd_gpu_signal_release(earlier.signal);
   iree_hal_amd_gpu_signal_release(wait.signal);
-  iree_hal_amd_gpu_signal_release(second);
+  Retire(second);
 }
 
 TEST_F(SemaphoreTest, CompletionObserversCanArriveInReverseOrder) {
@@ -725,11 +781,11 @@ TEST_F(SemaphoreTest, CompletionObserversCanArriveInReverseOrder) {
   IREE_ASSERT_OK(
       iree_hal_amd_gpu_semaphore_publish_completed(semaphore, 1, nullptr));
   EXPECT_EQ(Value(semaphore), 2u);
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
   ExpectAvailableSignals(8);
 }
 
-TEST_F(SemaphoreTest, HostSignalClearsOnlyCoveredCache) {
+TEST_F(SemaphoreTest, HostSignalSatisfiesOnlyCoveredValues) {
   auto* semaphore = Semaphore();
   auto* signal = AcquireSignal();
   Publish(semaphore, 2, signal);
@@ -738,7 +794,7 @@ TEST_F(SemaphoreTest, HostSignalClearsOnlyCoveredCache) {
   EXPECT_EQ(wait.signal, signal);
   iree_hal_amd_gpu_signal_release(wait.signal);
   IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphore, 2, nullptr));
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
   ExpectAvailableSignals(8);
 }
 
@@ -756,7 +812,7 @@ TEST_F(SemaphoreTest, AvailabilityStartsFromPublishedOrCompletedValue) {
   EXPECT_EQ(Submission(submitted), submission);
   IREE_ASSERT_OK(iree_hal_semaphore_signal(submitted, 6, nullptr));
   EXPECT_EQ(Value(submission), 6u);
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
 }
 
 TEST_F(SemaphoreTest, FuturePublicationResumesInlineBeforeCompletion) {
@@ -781,7 +837,7 @@ TEST_F(SemaphoreTest, FuturePublicationResumesInlineBeforeCompletion) {
   auto native_wait = AcquireWait(semaphore, value);
   EXPECT_EQ(native_wait.signal, signal);
   iree_hal_amd_gpu_signal_release(native_wait.signal);
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
   iree_async_semaphore_wait_context_deinitialize(&context);
 }
 
@@ -803,10 +859,12 @@ TEST_F(SemaphoreTest, FailureDoesNotReclaimNativeReaders) {
   EXPECT_EQ(failed_wait.signal, nullptr);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
                         iree_hal_semaphore_signal(semaphore, 2, nullptr));
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_ABORTED,
-      iree_hal_amd_gpu_semaphore_publish_signal(semaphore, 2, signal));
-  iree_hal_amd_gpu_signal_release(signal);
+  iree_hal_amd_gpu_semaphore_producer_t rejected = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED,
+                        iree_hal_amd_gpu_semaphore_publish_signal(
+                            semaphore, 2, signal, &rejected));
+  EXPECT_EQ(rejected.signal, nullptr);
+  Retire(signal);
   ExpectAvailableSignals(7);
   iree_hal_amd_gpu_signal_release(wait.signal);
   ExpectAvailableSignals(8);
@@ -842,7 +900,7 @@ TEST_F(SemaphoreTest, FirstAvailabilityWaitDoesNotAllocate) {
   auto wait = AcquireWait(semaphore, 1);
   EXPECT_EQ(wait.signal, signal);
   iree_hal_amd_gpu_signal_release(wait.signal);
-  iree_hal_amd_gpu_signal_release(signal);
+  Retire(signal);
   iree_hal_semaphore_release(submission);
   iree_hal_semaphore_release(semaphore);
   EXPECT_EQ(allocator.live.load(), 0);
@@ -896,7 +954,7 @@ TEST_F(SemaphoreTest, FutureWaitFailureAndCancellationJoinInline) {
       Publish(semaphore, value, signal);
       EXPECT_EQ(Value(submission), value);
       EXPECT_EQ(Value(semaphore), 0u);
-      iree_hal_amd_gpu_signal_release(signal);
+      Retire(signal);
     }
   }
   iree_async_semaphore_wait_context_deinitialize(&context);
@@ -984,7 +1042,7 @@ TEST_F(SemaphoreTest, PublicationCompletionAndReaderAcquisitionRace) {
       EXPECT_EQ(consumer_frontier[2], 0u);
     }
     finish.arrive_and_wait();
-    iree_hal_amd_gpu_signal_release(signal);
+    Retire(signal);
     iree_hal_amd_gpu_signal_release(wait.signal);
     ExpectAvailableSignals(8);
   }
@@ -1013,9 +1071,92 @@ TEST_F(SemaphoreTest, ConcurrentFirstWaitAndProducerCannotLoseAvailability) {
     EXPECT_EQ(Value(submission), 1u);
     IREE_CHECK_OK(
         iree_hal_amd_gpu_semaphore_publish_completed(semaphore, 1, nullptr));
-    iree_hal_amd_gpu_signal_release(signal);
+    Retire(signal);
   }
   producer.join();
+}
+
+TEST_F(SemaphoreTest,
+       EveryLiveProducerSurvivesOutOfOrderPublicationAndRetirement) {
+  constexpr size_t kCount = 257;
+  std::array<Signal, kCount> signals = {};
+  std::array<uint64_t, kCount> words = {};
+  std::array<uint64_t, 2 + kCount> frontiers = {};
+  std::array<iree_hal_amd_gpu_semaphore_producer_t, kCount> producers = {};
+  std::array<Signal*, kCount> published = {};
+  std::array<size_t, kCount> indices;
+  std::mt19937 random(1234);
+  for (uint32_t order = 0; order < 3; ++order) {
+    SCOPED_TRACE(order);
+    iree_hal_amd_gpu_signal_pool_t pool = {};
+    iree_hal_amd_gpu_signal_block_t block = {};
+    iree_hal_amd_gpu_signal_pool_initialize({}, &pool);
+    iree_hal_amd_gpu_signal_block_initialize(signals.data(), kCount, 1,
+                                             frontiers.data(), &block);
+    iree_hal_amd_gpu_signal_block_attach(&pool, this, words.data(), 0x10000,
+                                         sizeof(uint64_t), 0, &block);
+    auto* semaphore = Semaphore();
+    producers.fill({});
+    std::iota(indices.begin(), indices.end(), 0);
+    if (order == 1) {
+      std::reverse(indices.begin(), indices.end());
+    } else if (order == 2) {
+      std::shuffle(indices.begin(), indices.end(), random);
+    }
+    for (size_t i : indices) {
+      published[i] = iree_hal_amd_gpu_signal_pool_try_acquire(&pool, 1);
+      ASSERT_NE(published[i], nullptr);
+      const uint64_t epoch = i + 1;
+      iree_hal_amd_gpu_signal_publish_frontier(published[i], &epoch);
+      IREE_CHECK_OK(iree_hal_amd_gpu_semaphore_publish_signal(
+          semaphore, 3 * (i + 1), published[i], &producers[i]));
+      EXPECT_EQ(iree_atomic_ref_count_load(&published[i]->state.live.ref_count),
+                1);
+    }
+    EXPECT_EQ(AcquireWait(semaphore, 3 * kCount + 1).state,
+              IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_DEFERRED);
+    EXPECT_EQ(AcquireWait(semaphore, 2).state,
+              IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_HOST);
+    auto retained = AcquireWait(semaphore, 3);
+    EXPECT_EQ(retained.signal, published[0]);
+    size_t begin = 0;
+    while (begin < kCount) {
+      const size_t end = std::min(kCount, begin + 17);
+      for (size_t i = begin; i < kCount; ++i) {
+        auto wait = AcquireWait(semaphore, 3 * (i + 1));
+        EXPECT_EQ(wait.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
+        EXPECT_EQ(wait.signal, published[i]);
+        iree_hal_amd_gpu_signal_release(wait.signal);
+      }
+      IREE_CHECK_OK(iree_hal_amd_gpu_semaphore_publish_completed(
+          semaphore, 3 * end, nullptr));
+      std::iota(indices.begin() + begin, indices.begin() + end, begin);
+      std::shuffle(indices.begin() + begin, indices.begin() + end, random);
+      for (size_t position = begin; position < end; ++position) {
+        const size_t i = indices[position];
+        iree_hal_amd_gpu_signal_retire(published[i], IREE_STATUS_OK);
+        iree_hal_amd_gpu_semaphore_unpublish_signal(semaphore, &producers[i]);
+        iree_hal_amd_gpu_signal_release(published[i]);
+      }
+      begin = end;
+    }
+    iree_status_code_t code = IREE_STATUS_UNKNOWN;
+    EXPECT_TRUE(
+        iree_hal_amd_gpu_signal_query_retirement(retained.signal, &code));
+    EXPECT_EQ(code, IREE_STATUS_OK);
+    iree_hal_amd_gpu_signal_release(retained.signal);
+    size_t reclaimed_count = 0;
+    while (auto* signal = iree_hal_amd_gpu_signal_pool_try_acquire(&pool, 1)) {
+      ASSERT_LT(reclaimed_count, kCount);
+      published[reclaimed_count++] = signal;
+    }
+    EXPECT_EQ(reclaimed_count, kCount);
+    for (size_t i = 0; i < reclaimed_count; ++i) {
+      iree_hal_amd_gpu_signal_release(published[i]);
+    }
+    iree_hal_amd_gpu_signal_block_deinitialize(&block);
+    iree_hal_amd_gpu_signal_pool_deinitialize(&pool);
+  }
 }
 
 }  // namespace

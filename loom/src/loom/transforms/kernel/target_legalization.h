@@ -63,6 +63,16 @@ iree_status_t loom_kernel_target_legalize_subgroup_reduce(
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result);
 
+// Rewrites a contiguous power-of-two subgroup reduction into an XOR
+// butterfly. The caller must prove that every physical lane in each cluster
+// executes the operation; unlike the general reference reduction, this form
+// has no sparse-participation repair. Targets use it when their shuffle tree is
+// preferable to an otherwise legal native clustered reduction.
+iree_status_t loom_kernel_target_legalize_subgroup_reduce_butterfly(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result);
+
 // Rewrites a subgroup scan into portable subgroup primitives. Target
 // legalizers may call this when an otherwise legal scan violates a native
 // implementation precondition. Unsupported cluster shapes are left unchanged

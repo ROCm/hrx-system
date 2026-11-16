@@ -50,6 +50,7 @@ bool loom_value_fact_layout_origin_equal(loom_value_fact_layout_origin_t lhs,
 
 static iree_status_t loom_value_fact_layout_origins_ensure_capacity(
     loom_value_fact_table_t* table, loom_value_id_t value_id) {
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_touch(table, value_id));
   if (!table->layout_origins) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate(table->transient_arena,
                                              sizeof(*table->layout_origins),

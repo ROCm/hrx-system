@@ -69,6 +69,49 @@ allocation-generated moves. This determines the minimal callee-preserved
 register envelope before byte encoding.
 All returns reach its common restore sequence.
 
+Native adapters that can fail use
+`abi(object_function, {calling_convention = "iree_status"})`. The source keeps
+ordinary calls and results:
+
+```loom
+func.decl abi(object_function, {calling_convention = "iree_status"}) @read_value(%position: i32) -> (i64)
+
+func.def public abi(object_function, {calling_convention = "iree_status"}) @read_next(%position: i32) -> (i64) {
+  %value = func.call @read_value(%position) : (i32) -> (i64)
+  %step = scalar.constant 1 : i64
+  %next = scalar.addi %value, %step : i64
+  func.return %next : i64
+}
+```
+
+The corresponding plain C boundaries are:
+
+```c
+iree_status_t read_value(uint64_t* result, uint32_t position);
+iree_status_t read_next(uint64_t* result, uint32_t position);
+```
+
+The compiler checks the returned status before reading ordinary results. Failure
+returns the original status to the caller and skips subsequent operations;
+success publishes results and returns `iree_ok_status()`. A caller using ordinary
+SysV cannot discard this implicit failure and receives a diagnostic. The status
+convention also permits ordinary SysV callees. A function keeps its chosen ABI
+even if its optimized body contains no fallible calls.
+
+Nonempty logical results form one caller-owned record, passed as the first
+pointer argument. Fields follow declaration order, natural scalar/native-vector
+alignment, and C struct tail padding. A single result uses a pointer to that
+value. A function with no logical results has no hidden pointer. Remaining
+arguments use SysV placement, including stack overflow and vector alignment.
+Output storage is not read on failure; adapters publish results only on success
+and release any partially constructed resources themselves. This convention
+uses logical signatures and cannot also request exact C source-object projection.
+
+`status_callable_test` links a compiled High program to a plain C implementer.
+It exercises failure payload identity through nested calls, suppression of later
+effects, success-only result publication, mixed-width result records, stack
+arguments, and a vector result requiring dynamic stack realignment.
+
 The encoder consumes concrete operands and generated opcode facts. It has no
 IR, allocation, or calling-convention decisions to recover. The native object
 writer joins code contributions and owns ELF tables. Only emitted bytes survive

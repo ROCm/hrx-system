@@ -10,6 +10,7 @@
 #include "common/device.h"
 #include "common/event.h"
 #include "common/graph.h"
+#include "libhrx/src/libhrx/command_recording.h"
 #include "libhrx/src/libhrx/device.h"
 
 typedef struct iree_hal_streaming_graph_compiler_t {
@@ -403,78 +404,6 @@ static iree_status_t iree_hal_streaming_graph_allocate_child_graph_block(
   return status;
 }
 
-// Helper to record nodes from a partition into a command buffer.
-static iree_status_t iree_hal_streaming_graph_record_partition(
-    iree_hal_streaming_graph_compiler_t* compiler,
-    const hrx_graph_schedule_t* schedule, uint32_t node_start_index,
-    uint32_t node_count, uint8_t stream_id,
-    iree_hal_command_buffer_t* command_buffer) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  // Begin recording command buffer.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_command_buffer_begin(command_buffer));
-
-  // Scope the partition into a debug group.
-  const iree_string_view_t label_name =
-      iree_make_cstring_view("graph partition");
-  const iree_hal_label_location_t* location = NULL;
-  const iree_hal_label_color_t label_color = iree_hal_label_color_unspecified();
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_command_buffer_begin_debug_group(command_buffer, label_name,
-                                                    label_color, location));
-
-  // A dependency orders both command execution and memory visibility. Graph
-  // nodes can alternate between dispatches, transfers, and atomics, so make
-  // writes from any operation class available to reads by any class.
-  static const iree_hal_memory_barrier_t memory_barrier = {
-      .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
-                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
-                      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
-                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE |
-                      IREE_HAL_ACCESS_SCOPE_ATOMIC_READ |
-                      IREE_HAL_ACCESS_SCOPE_ATOMIC_WRITE,
-      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
-                      IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
-                      IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
-                      IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE |
-                      IREE_HAL_ACCESS_SCOPE_ATOMIC_READ |
-                      IREE_HAL_ACCESS_SCOPE_ATOMIC_WRITE,
-  };
-  const iree_hal_barrier_t execution_barrier = {
-      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH |
-                           IREE_HAL_EXECUTION_STAGE_TRANSFER |
-                           IREE_HAL_EXECUTION_STAGE_ATOMIC,
-      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH |
-                           IREE_HAL_EXECUTION_STAGE_TRANSFER |
-                           IREE_HAL_EXECUTION_STAGE_ATOMIC,
-      .memory_barrier_count = 1,
-      .memory_barriers = &memory_barrier,
-  };
-  iree_hal_barrier_flags_t release_flags = IREE_HAL_BARRIER_FLAG_NONE;
-  iree_status_t status = hrx_graph_record_commands(
-      schedule, node_start_index, node_count, stream_id, &execution_barrier,
-      command_buffer, &release_flags);
-  if (iree_status_is_ok(status) && release_flags) {
-    // Publish registered-host destinations before signaling completion or
-    // releasing a dependent CPU graph node.
-    iree_hal_barrier_t release_barrier = execution_barrier;
-    release_barrier.flags = release_flags;
-    status = iree_hal_command_buffer_barrier(command_buffer, &release_barrier);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_end_debug_group(command_buffer);
-  }
-
-  // End recording.
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_command_buffer_end(command_buffer);
-  }
-
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
 static iree_status_t iree_hal_streaming_graph_compile_block(
     iree_hal_streaming_graph_compiler_t* compiler,
     const hrx_graph_schedule_t* schedule,
@@ -497,8 +426,8 @@ static iree_status_t iree_hal_streaming_graph_compile_block(
                   compiler, plan->dependencies,
                   IREE_HAL_QUEUE_EXECUTE_FLAG_NONE, &block));
       IREE_RETURN_AND_END_ZONE_IF_ERROR(
-          z0, iree_hal_streaming_graph_record_partition(
-                  compiler, schedule, partition->start_index, partition->count,
+          z0, hrx_graph_record_partition(
+                  schedule, partition->start_index, partition->count,
                   plan->stream_index,
                   hrx_graph_block_execute(block)->command_buffer));
     } else {

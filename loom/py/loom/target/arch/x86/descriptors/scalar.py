@@ -108,6 +108,7 @@ from .memory import (
     memory_load_descriptors,
     read_memory_binary_descriptors,
 )
+from .reference import X86_REFERENCE_DESCRIPTORS, X86_REFERENCE_MEMORY_DESCRIPTORS
 
 _NON_TRAPPING_SCALAR_FORMS = frozenset(
     (
@@ -1645,9 +1646,14 @@ X86_SCALAR_PREFIX_DESCRIPTORS = tuple(
     _with_scalar_speculation_facts(descriptor)
     for descriptor in _X86_SCALAR_PREFIX_DESCRIPTORS
 )
-X86_SCALAR_SUFFIX_DESCRIPTORS = tuple(
-    _with_scalar_speculation_facts(descriptor)
-    for descriptor in _X86_SCALAR_SUFFIX_DESCRIPTORS
+
+X86_SCALAR_SUFFIX_DESCRIPTORS = (
+    tuple(
+        _with_scalar_speculation_facts(descriptor)
+        for descriptor in _X86_SCALAR_SUFFIX_DESCRIPTORS
+    )
+    + X86_REFERENCE_DESCRIPTORS
+    + X86_REFERENCE_MEMORY_DESCRIPTORS
 )
 X86_SCALAR_BASE_DESCRIPTORS = (
     *X86_SCALAR_PREFIX_DESCRIPTORS,
@@ -1734,6 +1740,13 @@ X86_SCALAR_DESCRIPTOR_SET = DescriptorSet(
                 physical_registers=(register,),
             )
             for register_class, bit_count, register in _FIXED_GPR_REGISTER_CLASSES
+        ),
+        RegClass(
+            "x86.ref",
+            128,
+            SpillSlotSpace.PRIVATE,
+            flags=(RegClassFlag.REFERENCE,),
+            spill_min_alignment=8,
         ),
     ),
     register_packing_resources=(

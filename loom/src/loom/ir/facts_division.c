@@ -262,6 +262,15 @@ void loom_value_facts_remsi(const loom_value_facts_t* lhs,
     loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
     return;
   }
+  // Exact divisibility proves a zero remainder for either divisor sign.
+  // Magnitudes keep INT64_MIN representable without signed negation.
+  if (rhs_lo == rhs_hi &&
+      (uint64_t)lhs_facts.known_divisor % iree_math_magnitude_i64(rhs_lo) ==
+          0) {
+    *out = loom_value_facts_exact_i64(0);
+    loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts, out);
+    return;
+  }
   // Result magnitude is bounded by |divisor| - 1.
   const uint64_t maximum_divisor_magnitude = iree_max(
       iree_math_magnitude_i64(rhs_lo), iree_math_magnitude_i64(rhs_hi));

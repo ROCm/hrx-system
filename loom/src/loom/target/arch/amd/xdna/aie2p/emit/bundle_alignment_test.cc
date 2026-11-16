@@ -111,7 +111,8 @@ TEST_F(Aie2pBundleAlignmentTest, SelectsLatestOptimalExactWidening) {
   bool aligned = false;
   IREE_ASSERT_OK(loom_aie2p_bundle_alignment_try_loop_boundary(
       &storage, /*region_bundle_start=*/1,
-      /*boundary_bundle_index=*/storage.bundle_count, &aligned));
+      /*boundary_bundle_index=*/storage.bundle_count,
+      /*minimum_added_byte_count=*/0, &aligned));
 
   ASSERT_TRUE(aligned);
   EXPECT_EQ(storage.encoded_byte_length, 432u);
@@ -147,6 +148,115 @@ TEST_F(Aie2pBundleAlignmentTest, SelectsLatestOptimalExactWidening) {
   }
   EXPECT_EQ(store_slot_count, 1u);
   EXPECT_EQ(synthetic_slot_count, 1u);
+}
+
+TEST_F(Aie2pBundleAlignmentTest,
+       WidensToMinimumExtentWithoutExtraIssuePositions) {
+  const loom_aie2p_slot_t store_slot = LOOM_AIE2P_SLOT_ST;
+  const auto format =
+      loom_aie2p_encoding_find_bundle_format_for_slots(&store_slot, 1);
+  for (uint32_t prefix : {0u, 2u, 6u, 14u}) {
+    for (uint8_t minimum : {0, 1, 6, 16, 31, 64, 96, 112}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "prefix=" << prefix << " minimum=" << unsigned(minimum));
+      constexpr uint32_t kRegionPackets = 16;
+      constexpr uint32_t kBundleCount = kRegionPackets + 1;
+      constexpr uint32_t kSlotCapacity =
+          kBundleCount + LOOM_AIE2P_BUNDLE_ALIGNMENT_LOOP_MAX_ADDED_SLOTS;
+      std::array<loom_aie2p_planned_bundle_t, kBundleCount> bundles = {};
+      std::array<loom_aie2p_planned_slot_t, kSlotCapacity> slots = {};
+      std::array<loom_aie2p_slot_realization_t, kSlotCapacity> realizations =
+          {};
+      for (uint32_t i = 0; i < kBundleCount; ++i) {
+        bundles[i] = {
+            .issue_cycle = i,
+            .logical_issue_cycle = i,
+            .byte_offset = prefix + 4 * i,
+            .slot_start = i,
+            .format = format,
+            .slot_count = 1,
+        };
+        slots[i] = {
+            .encoded_slot = {store_slot, 0},
+            .scheduled_packet_index = i,
+        };
+        realizations[i].descriptor_ordinal = 17 + i;
+      }
+      const uint32_t boundary = prefix + 4 * kRegionPackets;
+      loom_aie2p_bundle_alignment_storage_t storage = {
+          .scratch_arena = &arena_,
+          .bundles = bundles.data(),
+          .bundle_count = bundles.size(),
+          .slots = slots.data(),
+          .slot_capacity = slots.size(),
+          .slot_count = kBundleCount,
+          .slot_realizations = realizations.data(),
+          .encoded_byte_length = boundary + 4,
+      };
+      bool aligned = false;
+      IREE_ASSERT_OK(loom_aie2p_bundle_alignment_try_loop_boundary(
+          &storage, 0, kRegionPackets, minimum, &aligned));
+      ASSERT_TRUE(aligned);
+      EXPECT_EQ(storage.bundle_count, kBundleCount);
+      EXPECT_EQ(bundles.back().byte_offset,
+                iree_host_align(boundary + minimum, 16));
+      EXPECT_EQ(storage.encoded_byte_length, bundles.back().byte_offset + 4);
+      for (uint32_t i = 0; i < kBundleCount; ++i) {
+        EXPECT_EQ(bundles[i].issue_cycle, i);
+        EXPECT_EQ(bundles[i].logical_issue_cycle, i);
+        uint32_t useful = 0;
+        for (uint8_t j = 0; j < bundles[i].slot_count; ++j) {
+          const uint32_t index = bundles[i].slot_start + j;
+          if (slots[index].flags & LOOM_AIE2P_PLANNED_SLOT_FLAG_SYNTHETIC_NOP) {
+            continue;
+          }
+          ++useful;
+          EXPECT_EQ(slots[index].encoded_slot.slot, store_slot);
+          EXPECT_EQ(slots[index].scheduled_packet_index, i);
+          EXPECT_EQ(realizations[index].descriptor_ordinal, 17 + i);
+        }
+        EXPECT_EQ(useful, 1u);
+      }
+    }
+  }
+}
+
+TEST_F(Aie2pBundleAlignmentTest, KeepsStreamWhenRequiredExtentCannotBeEncoded) {
+  const loom_aie2p_slot_t store_slot = LOOM_AIE2P_SLOT_ST;
+  const auto format =
+      loom_aie2p_encoding_find_bundle_format_for_slots(&store_slot, 1);
+  loom_aie2p_planned_bundle_t bundle = {
+      .issue_cycle = 7,
+      .byte_offset = 0,
+      .format = format,
+      .slot_count = 1,
+  };
+  std::array<loom_aie2p_planned_slot_t, 32> slots = {};
+  slots[0] = {.encoded_slot = {store_slot, 0}, .scheduled_packet_index = 3};
+  std::array<loom_aie2p_slot_realization_t, 32> realizations = {};
+  realizations[0].descriptor_ordinal = 17;
+  loom_aie2p_bundle_alignment_storage_t storage = {
+      .scratch_arena = &arena_,
+      .bundles = &bundle,
+      .bundle_count = 1,
+      .slots = slots.data(),
+      .slot_capacity = slots.size(),
+      .slot_count = 1,
+      .slot_realizations = realizations.data(),
+      .encoded_byte_length = 4,
+  };
+  bool aligned = true;
+  IREE_ASSERT_OK(loom_aie2p_bundle_alignment_try_loop_boundary(&storage, 0, 1,
+                                                               32, &aligned));
+  EXPECT_FALSE(aligned);
+  EXPECT_EQ(storage.encoded_byte_length, 4u);
+  EXPECT_EQ(storage.slot_count, 1u);
+  EXPECT_EQ(storage.bundle_count, 1u);
+  EXPECT_EQ(bundle.format, format);
+  EXPECT_EQ(bundle.issue_cycle, 7u);
+  EXPECT_EQ(bundle.byte_offset, 0u);
+  EXPECT_EQ(slots[0].scheduled_packet_index, 3u);
+  EXPECT_EQ(realizations[0].descriptor_ordinal, 17u);
 }
 
 TEST_F(Aie2pBundleAlignmentTest,

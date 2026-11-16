@@ -213,7 +213,7 @@ def _memory_immediates(
 def _memory_rule(
     source_op: Op,
     operation: SourceMemoryOperation,
-    value_type: TypePattern,
+    value_type: TypePattern | None,
     *,
     element_byte_count: int,
     lane_count: int,
@@ -338,7 +338,11 @@ def _memory_rule(
                     ),
                 )
             ),
-            Guard.value_type(type_field, value_type),
+            (
+                Guard.value_type(type_field, value_type)
+                if value_type is not None
+                else Guard.low_value_register_class(type_field, "x86.ref")
+            ),
             *(
                 (Guard.descriptor_available(transport_descriptor),)
                 if transport_descriptor is not None
@@ -379,7 +383,7 @@ def _memory_descriptor_key(
 def _full_width_memory_rules(
     source_op: Op,
     operation: SourceMemoryOperation,
-    value_type: TypePattern,
+    value_type: TypePattern | None,
     *,
     element_byte_count: int,
     lane_count: int,
@@ -515,7 +519,11 @@ def _full_width_memory_rules(
                 descriptor=descriptor,
                 source_nodes=source_nodes,
                 guards=(
-                    Guard.value_type(type_field, value_type),
+                    (
+                        Guard.value_type(type_field, value_type)
+                        if value_type is not None
+                        else Guard.low_value_register_class(type_field, "x86.ref")
+                    ),
                     *(
                         (Guard.descriptor_available(transport_descriptor),)
                         if transport_descriptor is not None
@@ -678,7 +686,7 @@ def x86_view_carrier_rules(
             diagnostic=diagnostic,
         )
         for source_op in (buffer.buffer_view, view.view_subview)
-        for element_byte_count in (1, 2, 4, 8)
+        for element_byte_count in (1, 2, 4, 8, 16)
         for full_width_static_offset in (False, True)
         for dynamic in (False, True)
     )
@@ -752,6 +760,51 @@ def _gpr_memory_family_rules(
                 diagnostic=diagnostic,
                 transport=transport,
                 priority=priority,
+            )
+        )
+    return tuple(rules)
+
+
+def x86_reference_memory_rules(
+    descriptor_lookup: _DescriptorLookup,
+    *,
+    diagnostic: GuardDiagnostic,
+) -> tuple[DescriptorRule, ...]:
+    """Uses shared address plans for complete opaque reference cells."""
+
+    rules = []
+    for source_op, operation in (
+        (view.view_load, SourceMemoryOperation.LOAD),
+        (view.view_store, SourceMemoryOperation.STORE),
+    ):
+        rules.extend(
+            _memory_rule(
+                source_op,
+                operation,
+                None,
+                element_byte_count=16,
+                lane_count=1,
+                addressing=addressing,
+                descriptor_key=f"x86.ref.{operation.value}"
+                + (".indexed" if addressing.is_dynamic else ""),
+                descriptor_lookup=descriptor_lookup,
+                diagnostic=diagnostic,
+            )
+            for addressing in (
+                _MemoryAddressing.STATIC,
+                _MemoryAddressing.MATERIALIZE_BYTE_OFFSET,
+            )
+        )
+        rules.extend(
+            _full_width_memory_rules(
+                source_op,
+                operation,
+                None,
+                element_byte_count=16,
+                lane_count=1,
+                descriptor_key=f"x86.ref.{operation.value}.indexed",
+                descriptor_lookup=descriptor_lookup,
+                diagnostic=diagnostic,
             )
         )
     return tuple(rules)

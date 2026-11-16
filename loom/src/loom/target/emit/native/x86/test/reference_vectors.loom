@@ -1,0 +1,15 @@
+type.decl import("native", "object") @Object
+
+func.def public abi(object_function, {calling_convention = "iree_status"}) @object_preserve_vectors(%owner: ref<@Object>, %left_buffer: buffer, %right_buffer: buffer, %output_buffer: buffer) {
+  %origin = index.constant 0 : offset
+  %left_view = buffer.view %left_buffer[%origin] : buffer -> view<16xi32>
+  %right_view = buffer.view %right_buffer[%origin] : buffer -> view<16xi32>
+  %output_view = buffer.view %output_buffer[%origin] : buffer -> view<16xi32>
+  %left = vector.load %left_view[0] : view<16xi32> -> vector<16xi32>
+  %right = vector.load %right_view[0] : view<16xi32> -> vector<16xi32>
+  %less = vector.cmpi slt, %left, %right : vector<16xi32> -> vector<16xi1>
+  ref.release %owner : ref<@Object>
+  %selected = vector.select %less, %left, %right : vector<16xi32>
+  vector.store %selected, %output_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}

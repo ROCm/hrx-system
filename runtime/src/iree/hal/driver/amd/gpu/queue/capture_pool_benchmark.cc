@@ -21,9 +21,17 @@ void BM_RecycleBurst(benchmark::State& state) {
   std::vector<iree_byte_span_t> blocks(state.range(0));
   IREE_CHECK_OK(
       iree_hal_amd_gpu_capture_pool_preallocate(&pool, blocks.size()));
+  for (auto& block : blocks) {
+    IREE_CHECK_OK(
+        iree_hal_amd_gpu_capture_pool_acquire(&pool, state.range(1), &block));
+  }
+  for (auto block : blocks) {
+    iree_hal_amd_gpu_capture_pool_release(&pool, block);
+  }
   for (auto _ : state) {
     for (auto& block : blocks) {
-      IREE_CHECK_OK(iree_hal_amd_gpu_capture_pool_acquire(&pool, 208, &block));
+      IREE_CHECK_OK(
+          iree_hal_amd_gpu_capture_pool_acquire(&pool, state.range(1), &block));
       benchmark::DoNotOptimize(block.data);
     }
     for (auto block : blocks) {
@@ -33,6 +41,15 @@ void BM_RecycleBurst(benchmark::State& state) {
   iree_hal_amd_gpu_capture_pool_deinitialize(&pool);
   state.SetItemsProcessed(state.iterations() * blocks.size());
 }
-BENCHMARK(BM_RecycleBurst)->Arg(1)->Arg(8)->Arg(64)->Arg(1024);
+BENCHMARK(BM_RecycleBurst)
+    ->Args({1, 208})
+    ->Args({1, 1024})
+    ->Args({1, 1025})
+    ->Args({1, 1256})
+    ->Args({1, 4096})
+    ->Args({1, 65537})
+    ->Args({8, 208})
+    ->Args({64, 208})
+    ->Args({1024, 208});
 
 }  // namespace

@@ -8,10 +8,12 @@
 
 #include "loom/error/error_catalog.h"
 #include "loom/ir/module.h"
+#include "loom/target/facts.h"
 #include "loom/target/registers.h"
 #include "loom/target/test/contracts/core.h"
 #include "loom/target/test/contracts/core_lower_rules.h"
 #include "loom/target/test/descriptors.h"
+#include "loom/target/test/target_records.h"
 
 //===----------------------------------------------------------------------===//
 // Type mapping
@@ -303,6 +305,36 @@ static const loom_low_lower_function_storage_mapping_t kTestFunctionStorage[] =
          LOOM_LOW_LOWER_FUNCTION_STORAGE_SOURCE_SCALAR_VIEW},
 };
 
+static const uint16_t kTestVectorPacketLaneCounts[] = {4};
+static const loom_target_vector_packet_policy_t kTestVectorPacketPolicy = {
+    .native_lane_counts = kTestVectorPacketLaneCounts,
+    .index_bit_count = 32,
+    .offset_bit_count = 32,
+    .maximum_unpacketized_bit_count =
+        LOOM_TARGET_VECTOR_PACKET_UNBOUNDED_BIT_COUNT,
+    .native_lane_count_count = IREE_ARRAYSIZE(kTestVectorPacketLaneCounts),
+};
+
+static bool loom_test_low_source_vector_carrier_supported(
+    void* user_data, const loom_target_facts_t* target_facts,
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t value_id, loom_type_t source_type) {
+  (void)user_data;
+  (void)module;
+  (void)fact_table;
+  (void)value_id;
+  // The native-vector profile exposes aggregate-retention boundaries without
+  // changing the generic core's unrestricted structural legalization domain.
+  if (target_facts->selector != LOOM_TEST_TARGET_KIND_NATIVE_VECTORS ||
+      !loom_type_is_vector(source_type) ||
+      loom_type_element_type(source_type) != LOOM_SCALAR_TYPE_F32) {
+    return true;
+  }
+  uint64_t lane_count = 0;
+  return loom_type_static_element_count(source_type, &lane_count) &&
+         lane_count <= 4;
+}
+
 static const loom_low_lower_policy_t kTestLowLowerPolicy = {
     .name = IREE_SVL("test-low-lower-policy"),
     .error_catalog = &loom_error_catalog_core,
@@ -313,6 +345,11 @@ static const loom_low_lower_policy_t kTestLowLowerPolicy = {
                            .user_data = NULL},
     .map_argument = {.fn = loom_test_low_lower_map_argument, .user_data = NULL},
     .contract = LOOM_TEST_LOW_CONTRACT,
+    .vector_packet_policy = &kTestVectorPacketPolicy,
+    .source_vector_carrier_supported =
+        {
+            .fn = loom_test_low_source_vector_carrier_supported,
+        },
     .descriptor_matrix =
         {
             .options = loom_test_low_matrix_options,

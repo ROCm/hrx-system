@@ -997,6 +997,7 @@ iree_status_t loom_aie2p_pipeline_realize(loom_pass_t* pass,
       .select = loom_aie2p_native_select,
       .has_worker_body = loom_aie2p_native_has_worker_body,
       .worker = loom_aie2p_native_emit_worker,
+      .programs = loom_aie2p_native_emit_programs,
       .entry = loom_aie2p_native_emit_configuration,
       .user_data = &context};
   return loom_pipeline_realize(pass, module, function, &context.inventory,

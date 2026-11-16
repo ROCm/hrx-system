@@ -23,7 +23,8 @@ typedef enum loom_test_target_kind_e {
   LOOM_TEST_TARGET_KIND_LOW_LEAF = 4,
   LOOM_TEST_TARGET_KIND_LINEAR_SUBGROUPS = 5,
   LOOM_TEST_TARGET_KIND_DENSE_SUBGROUPS = 6,
-  LOOM_TEST_TARGET_KIND_COUNT_ = 7,
+  LOOM_TEST_TARGET_KIND_NATIVE_VECTORS = 7,
+  LOOM_TEST_TARGET_KIND_COUNT_ = 8,
 } loom_test_target_kind_t;
 
 // Typed fact identity shared by synthetic test target profiles and IR records.

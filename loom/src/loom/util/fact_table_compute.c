@@ -1547,7 +1547,7 @@ static iree_status_t loom_value_fact_table_compute_scoped_op(
   }
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
   // A refinement callback can depend on values outside the operand list. Its
-  // scope cannot reuse equations using numeric operand generations alone.
+  // scope cannot reuse equations using explicit operand generations alone.
   const bool operand_only =
       table->replay.generation && vtable && op->result_count &&
       (vtable->vtable_flags & LOOM_OP_VTABLE_FACTS_FROM_OPERANDS) &&
@@ -1578,9 +1578,10 @@ static iree_status_t loom_value_fact_table_compute_scoped_op(
   iree_status_t status = loom_value_fact_table_compute_ordinary_op(
       table, module, op, vtable, out_changed);
   loom_value_fact_table_end_origins(table, iree_status_is_ok(status));
-  if (iree_status_is_ok(status) && operand_only) {
+  if (iree_status_is_ok(status) && table->replay.generation) {
     // Inference and typed publication are complete. Every result participates,
-    // including unchanged siblings of a multi-result equation.
+    // including unchanged siblings of a multi-result equation and aliases
+    // whose consumers can reuse facts even though the alias cannot.
     const loom_value_id_t* results = loom_op_const_results(op);
     for (uint16_t i = 0; i < op->result_count; ++i) {
       loom_value_fact_table_set_replay_generation(table, results[i],

@@ -157,7 +157,8 @@ iree_status_t iree_thread_create(iree_thread_entry_t entry, void* entry_arg,
                               "thread creation failed: %s", strerror(rc));
   } else {
     thread->mach_port = pthread_mach_thread_np(thread->handle);
-    status = iree_thread_request_affinity(thread, params.initial_affinity);
+    status = iree_thread_request_affinity(thread, params.initial_affinity,
+                                          params.initial_processor_set);
   }
 
   if (iree_status_is_ok(status)) {
@@ -238,8 +239,14 @@ void iree_thread_override_end(iree_thread_override_t* override) {
   IREE_TRACE_ZONE_END(z0);
 }
 
-iree_status_t iree_thread_request_affinity(iree_thread_t* thread,
-                                           iree_thread_affinity_t affinity) {
+iree_status_t iree_thread_request_affinity(
+    iree_thread_t* thread, iree_thread_affinity_t affinity,
+    const iree_thread_affinity_set_t* processor_set) {
+  if (processor_set) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "Darwin supports affinity tags, not hard CPU masks");
+  }
   if (iree_thread_affinity_is_unspecified(affinity)) {
     return iree_ok_status();
   }

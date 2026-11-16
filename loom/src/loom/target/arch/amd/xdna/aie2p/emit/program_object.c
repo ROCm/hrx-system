@@ -148,19 +148,19 @@ static int loom_aie2p_program_object_compare_helpers(
 }
 
 static bool loom_aie2p_program_object_helper_less(
-    const loom_aie2p_leaf_contribution_t* contributions,
+    const loom_aie2p_leaf_contribution_t* const* contributions,
     const iree_host_size_t* lhs, const iree_host_size_t* rhs) {
   const int comparison = loom_aie2p_program_object_compare_helpers(
-      &contributions[*lhs], &contributions[*rhs]);
+      contributions[*lhs], contributions[*rhs]);
   // Equivalent bodies retain their first input as the canonical contribution,
   // independently of the sort's ordering of otherwise equal elements.
   return comparison != 0 ? comparison < 0 : *lhs < *rhs;
 }
 
-LOOM_DEFINE_ADAPTIVE_SORT_WITH_CONTEXT(loom_aie2p_program_object_sort_helpers,
-                                       iree_host_size_t,
-                                       const loom_aie2p_leaf_contribution_t*,
-                                       loom_aie2p_program_object_helper_less)
+LOOM_DEFINE_ADAPTIVE_SORT_WITH_CONTEXT(
+    loom_aie2p_program_object_sort_helpers, iree_host_size_t,
+    const loom_aie2p_leaf_contribution_t* const*,
+    loom_aie2p_program_object_helper_less)
 
 typedef struct loom_aie2p_program_object_placement_t {
   // Input-to-output section indices, including shared code and data sections.
@@ -211,92 +211,154 @@ static uint32_t loom_aie2p_program_object_data_ordinal(
   return name_order[first];
 }
 
-// Every emitted leaf entry has the same 16-byte alignment. Alignment before
-// the first helper is fixed by the entry, and every helper except the final one
-// pays the padding implied by its own byte length. Leaving the helper with the
-// largest such padding last therefore minimizes the complete program length
-// while preserving the relative order of every other helper.
-static iree_host_size_t loom_aie2p_program_object_select_tail(
-    const loom_aie2p_leaf_contribution_t* contributions,
-    const iree_host_size_t* canonical_indices,
-    iree_host_size_t contribution_count, uint64_t code_alignment) {
-  iree_host_size_t tail_index = 0;
-  uint64_t maximum_padding = 0;
-  for (iree_host_size_t i = 1; i < contribution_count; ++i) {
-    if (canonical_indices[i] != i) {
+typedef struct loom_aie2p_program_object_group_t {
+  // Detached name of the first input in this code group.
+  iree_string_view_t name;
+  // Number of logical functions, including aliases.
+  iree_host_size_t count;
+  // Next output ordinal while constructing stable group order.
+  iree_host_size_t cursor;
+  // Function whose alignment gap is left after the group's final byte.
+  iree_host_size_t tail;
+  // Padding avoided by placing tail last.
+  uint64_t tail_padding;
+} loom_aie2p_program_object_group_t;
+
+// Every leaf has the same alignment. Each group leaves its largest alignment
+// gap after the final helper, where it needs no backing. Counting projection
+// groups the functions in linear space/time without a group-by-function scan.
+// The entry remains first; otherwise input order is stable within each group.
+static void loom_aie2p_program_object_order(
+    const loom_aie2p_leaf_contribution_t* const* contributions,
+    const loom_aie2p_program_function_t* functions,
+    iree_host_size_t contribution_count,
+    const iree_host_size_t* function_groups, iree_host_size_t group_count,
+    uint64_t code_alignment, loom_aie2p_program_object_group_t* groups,
+    iree_host_size_t* order) {
+  for (iree_host_size_t i = 0; i < contribution_count; ++i) {
+    loom_aie2p_program_object_group_t* group =
+        &groups[function_groups ? function_groups[i] : 0];
+    if (group->count++ == 0) {
+      group->name = contributions[i]->object.sections[0].section_name;
+      group->tail = i;
+    }
+    if (functions[i].canonical_index != i) {
       continue;
     }
     const loom_native_section_contribution_t* code =
-        &contributions[i].object.sections[0];
+        &contributions[i]->object.sections[0];
     const uint64_t alignment =
         iree_max((uint64_t)1, code->contribution_alignment);
     IREE_ASSERT_EQ(alignment, code_alignment,
                    "AIE2P leaf code contribution alignment");
     const uint64_t remainder = code->contents.data_length % alignment;
     const uint64_t padding = remainder == 0 ? 0 : alignment - remainder;
-    if (padding >= maximum_padding) {
-      maximum_padding = padding;
-      tail_index = i;
+    if (i != 0 && (group->tail == 0 || padding >= group->tail_padding)) {
+      group->tail_padding = padding;
+      group->tail = i;
     }
   }
-  return tail_index;
-}
-
-static iree_host_size_t loom_aie2p_program_object_layout_index(
-    iree_host_size_t layout_index, iree_host_size_t contribution_count,
-    iree_host_size_t tail_index) {
-  if (layout_index == 0 || tail_index == contribution_count - 1 ||
-      layout_index < tail_index) {
-    return layout_index;
+  iree_host_size_t offset = 0;
+  for (iree_host_size_t i = 0; i < group_count; ++i) {
+    groups[i].cursor = offset;
+    offset += groups[i].count;
+    order[offset - 1] = groups[i].tail;
   }
-  return layout_index == contribution_count - 1 ? tail_index : layout_index + 1;
+  for (iree_host_size_t i = 0; i < contribution_count; ++i) {
+    loom_aie2p_program_object_group_t* group =
+        &groups[function_groups ? function_groups[i] : 0];
+    if (i != group->tail) {
+      order[group->cursor++] = i;
+    }
+  }
 }
 
-iree_status_t loom_aie2p_program_object_merge(
-    const loom_aie2p_leaf_contribution_t* contributions,
-    iree_host_size_t contribution_count, const loom_aie2p_program_data_t* data,
-    iree_host_size_t data_count, iree_arena_allocator_t* arena,
-    iree_arena_allocator_t* scratch_arena,
-    loom_aie2p_program_object_t* out_program) {
-  *out_program = (loom_aie2p_program_object_t){0};
+iree_status_t loom_aie2p_program_native_initialize(
+    const loom_aie2p_leaf_contribution_t* const* contributions,
+    iree_host_size_t contribution_count, iree_arena_allocator_t* arena,
+    loom_aie2p_program_native_t* out_native) {
+  iree_host_size_t* indices = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, contribution_count, 2 * sizeof(*indices), (void**)&indices));
+  iree_host_size_t* order = indices + contribution_count;
+  for (iree_host_size_t i = 0; i < contribution_count; ++i) {
+    indices[i] = order[i] = i;
+  }
+  loom_aie2p_program_object_sort_helpers(contributions, order + 1,
+                                         contribution_count - 1);
+  for (iree_host_size_t i = 2; i < contribution_count; ++i) {
+    const iree_host_size_t current = order[i];
+    const iree_host_size_t previous = order[i - 1];
+    if (loom_aie2p_program_object_compare_helpers(
+            contributions[current], contributions[previous]) == 0) {
+      indices[current] = indices[previous];
+    }
+  }
+  *out_native = (loom_aie2p_program_native_t){
+      .contributions = contributions,
+      .function_count = contribution_count,
+      .equivalent_indices = indices,
+      .equivalence_order = order,
+  };
+  return iree_ok_status();
+}
 
-  const loom_aie2p_leaf_contribution_t* entry = &contributions[0];
+static iree_status_t loom_aie2p_program_object_compose(
+    const loom_aie2p_program_native_t* native,
+    const loom_aie2p_program_data_t* data, iree_host_size_t data_count,
+    const iree_host_size_t* function_groups, iree_host_size_t group_count,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
+    loom_aie2p_program_object_t* out_program,
+    loom_aie2p_program_code_group_t* out_groups) {
+  *out_program = (loom_aie2p_program_object_t){0};
+  const loom_aie2p_leaf_contribution_t* const* contributions =
+      native->contributions;
+  const iree_host_size_t contribution_count = native->function_count;
+  const loom_aie2p_leaf_contribution_t* entry = contributions[0];
   const loom_native_object_symbol_t* entry_symbol =
       &entry->object.symbols[entry->realization.entry_symbol_index];
-  const iree_string_view_t code_section_name =
-      entry->object.sections[entry_symbol->section_contribution_index]
-          .section_name;
   const uint64_t entry_code_alignment =
       iree_max((uint64_t)1,
                entry->object.sections[entry_symbol->section_contribution_index]
                    .contribution_alignment);
 
-  iree_host_size_t* helper_order = NULL;
-  iree_host_size_t* canonical_indices = NULL;
+  iree_host_size_t* physical_order = NULL;
+  loom_aie2p_program_function_t* functions = NULL;
   loom_aie2p_program_object_placement_t* placements = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(scratch_arena, contribution_count,
-                                sizeof(*helper_order), (void**)&helper_order));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch_arena, contribution_count, sizeof(*canonical_indices),
-      (void**)&canonical_indices));
+      scratch_arena, contribution_count, sizeof(*physical_order),
+      (void**)&physical_order));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, contribution_count, sizeof(*functions), (void**)&functions));
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(scratch_arena, contribution_count,
                                 sizeof(*placements), (void**)&placements));
   for (iree_host_size_t i = 0; i < contribution_count; ++i) {
-    helper_order[i] = i;
-    canonical_indices[i] = i;
+    functions[i] = (loom_aie2p_program_function_t){
+        .contribution = contributions[i],
+        .equivalent_index = native->equivalent_indices[i],
+        .canonical_index = native->equivalent_indices[i],
+    };
   }
-  // Sorting places equivalent helpers together without comparing every pair.
-  // Only the index projection moves; physical layout retains input order.
-  loom_aie2p_program_object_sort_helpers(contributions, helper_order + 1,
-                                         contribution_count - 1);
-  for (iree_host_size_t i = 2; i < contribution_count; ++i) {
-    const iree_host_size_t current = helper_order[i];
-    const iree_host_size_t previous = helper_order[i - 1];
-    if (loom_aie2p_program_object_compare_helpers(
-            &contributions[current], &contributions[previous]) == 0) {
-      canonical_indices[current] = canonical_indices[previous];
+  if (group_count > 1) {
+    iree_host_size_t* representatives = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(scratch_arena, group_count,
+                                                   sizeof(*representatives),
+                                                   (void**)&representatives));
+    memset(representatives, 0, group_count * sizeof(*representatives));
+    // Each equivalence class is contiguous and ordered by original index.
+    // A group's last representative either belongs to that class or starts
+    // its next physical body. Zero initially names the unique entry class.
+    for (iree_host_size_t i = 1; i < contribution_count; ++i) {
+      const iree_host_size_t current = native->equivalence_order[i];
+      const iree_host_size_t group = function_groups[current];
+      const iree_host_size_t previous = representatives[group];
+      functions[current].canonical_index =
+          functions[previous].equivalent_index ==
+                  functions[current].equivalent_index
+              ? previous
+              : current;
+      representatives[group] = functions[current].canonical_index;
     }
   }
 
@@ -305,9 +367,11 @@ iree_status_t loom_aie2p_program_object_merge(
   iree_host_size_t symbol_count = 0;
   iree_host_size_t fixup_count = 0;
   for (iree_host_size_t i = 0; i < contribution_count; ++i) {
-    const loom_native_object_contribution_t* object = &contributions[i].object;
+    const loom_native_object_contribution_t* object = &contributions[i]->object;
     placements[i].symbol_start = symbol_count;
-    const bool unique_code = canonical_indices[i] == i;
+    functions[i].entry_symbol_index =
+        symbol_count + contributions[i]->realization.entry_symbol_index;
+    const bool unique_code = functions[i].canonical_index == i;
     code_count += unique_code;
     if (!iree_host_size_checked_add(input_section_count, object->section_count,
                                     &input_section_count) ||
@@ -334,7 +398,7 @@ iree_status_t loom_aie2p_program_object_merge(
       (void**)&section_indices));
   for (iree_host_size_t i = 0; i < contribution_count; ++i) {
     placements[i].sections = section_indices;
-    section_indices += contributions[i].object.section_count;
+    section_indices += contributions[i]->object.section_count;
   }
   uint32_t* data_name_order = NULL;
   if (data_count > 4) {
@@ -347,10 +411,22 @@ iree_status_t loom_aie2p_program_object_merge(
     loom_aie2p_program_object_sort_data(data, data_name_order, data_count);
   }
 
-  const iree_host_size_t tail_contribution_index =
-      loom_aie2p_program_object_select_tail(contributions, canonical_indices,
-                                            contribution_count,
-                                            entry_code_alignment);
+  loom_aie2p_program_object_group_t resident_group = {0};
+  loom_aie2p_program_object_group_t* groups = &resident_group;
+  if (group_count != 1) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        scratch_arena, group_count, sizeof(*groups), (void**)&groups));
+    memset(groups, 0, group_count * sizeof(*groups));
+  }
+  loom_aie2p_program_object_order(contributions, functions, contribution_count,
+                                  function_groups, group_count,
+                                  entry_code_alignment, groups, physical_order);
+  for (iree_host_size_t i = 0; i < group_count; ++i) {
+    out_groups[i] = (loom_aie2p_program_code_group_t){
+        .section_contribution_index = IREE_HOST_SIZE_MAX,
+        .code.minimum_alignment = 1,
+    };
+  }
   loom_native_section_contribution_t* sections = NULL;
   loom_native_object_symbol_t* symbols = NULL;
   loom_native_object_fixup_t* fixups = NULL;
@@ -366,28 +442,43 @@ iree_status_t loom_aie2p_program_object_merge(
   uint64_t code_alignment = 1;
   for (iree_host_size_t layout_index = 0; layout_index < contribution_count;
        ++layout_index) {
-    const iree_host_size_t contribution_index =
-        loom_aie2p_program_object_layout_index(layout_index, contribution_count,
-                                               tail_contribution_index);
-    if (canonical_indices[contribution_index] != contribution_index) {
+    const iree_host_size_t contribution_index = physical_order[layout_index];
+    if (functions[contribution_index].canonical_index != contribution_index) {
       continue;
     }
     const loom_aie2p_leaf_contribution_t* contribution =
-        &contributions[contribution_index];
+        contributions[contribution_index];
+    const iree_host_size_t group_index =
+        function_groups ? function_groups[contribution_index] : 0;
+    loom_aie2p_program_code_group_t* group = &out_groups[group_index];
+    if (group->section_contribution_index == IREE_HOST_SIZE_MAX) {
+      group->section_contribution_index = code_index;
+    }
     placements[contribution_index].sections[0] = code_index;
     loom_native_section_contribution_t* code = &sections[code_index++];
     *code = contribution->object.sections[0];
-    code->section_name = code_section_name;
+    code->section_name = groups[group_index].name;
     const uint64_t alignment =
         iree_max((uint64_t)1, code->contribution_alignment);
-    if (!iree_checked_align_u64(code_byte_length, alignment,
-                                &code_byte_length) ||
-        !iree_checked_add_u64(code_byte_length, code->contents.data_length,
+    if (!iree_checked_align_u64(group->code.byte_length, alignment,
+                                &group->code.byte_length) ||
+        !iree_checked_add_u64(group->code.byte_length,
+                              code->contents.data_length,
+                              &group->code.byte_length)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "AIE2P tile program code size overflows");
+    }
+    group->code.minimum_alignment =
+        iree_max(group->code.minimum_alignment, alignment);
+  }
+  for (iree_host_size_t i = 0; i < group_count; ++i) {
+    if (!iree_checked_add_u64(code_byte_length, out_groups[i].code.byte_length,
                               &code_byte_length)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "AIE2P tile program code size overflows");
     }
-    code_alignment = iree_max(code_alignment, alignment);
+    code_alignment =
+        iree_max(code_alignment, out_groups[i].code.minimum_alignment);
   }
 
   loom_aie2p_leaf_read_only_data_domain_t* read_only_data = NULL;
@@ -413,8 +504,9 @@ iree_status_t loom_aie2p_program_object_merge(
   // symbols or relocations. Function-local conflict lists are intentionally
   // replaced by the complete producer inventory, including cross-helper edges.
   for (iree_host_size_t i = 0; i < contribution_count; ++i) {
-    const loom_aie2p_leaf_contribution_t* contribution = &contributions[i];
-    placements[i].sections[0] = placements[canonical_indices[i]].sections[0];
+    const loom_aie2p_leaf_contribution_t* contribution = contributions[i];
+    placements[i].sections[0] =
+        placements[functions[i].canonical_index].sections[0];
     for (iree_host_size_t j = 0;
          j < contribution->realization.read_only_data_count; ++j) {
       const loom_aie2p_leaf_read_only_data_domain_t* local =
@@ -454,12 +546,11 @@ iree_status_t loom_aie2p_program_object_merge(
   iree_host_size_t fixup_start = 0;
   for (iree_host_size_t layout_index = 0; layout_index < contribution_count;
        ++layout_index) {
-    const iree_host_size_t i = loom_aie2p_program_object_layout_index(
-        layout_index, contribution_count, tail_contribution_index);
-    if (canonical_indices[i] != i) {
+    const iree_host_size_t i = physical_order[layout_index];
+    if (functions[i].canonical_index != i) {
       continue;
     }
-    const loom_native_object_contribution_t* object = &contributions[i].object;
+    const loom_native_object_contribution_t* object = &contributions[i]->object;
     for (iree_host_size_t j = 0; j < object->fixup_count; ++j) {
       loom_native_object_fixup_t* fixup = &fixups[fixup_start++];
       *fixup = object->fixups[j];
@@ -471,7 +562,7 @@ iree_status_t loom_aie2p_program_object_merge(
   loom_aie2p_register_unit_set_t register_writes = {0};
   loom_aie2p_leaf_capability_flags_t capability_flags = 0;
   for (iree_host_size_t i = 0; i < contribution_count; ++i) {
-    const loom_aie2p_leaf_contribution_t* contribution = &contributions[i];
+    const loom_aie2p_leaf_contribution_t* contribution = contributions[i];
     for (iree_host_size_t j = 0; j < contribution->object.symbol_count; ++j) {
       loom_native_object_symbol_t* symbol =
           &symbols[placements[i].symbol_start + j];
@@ -488,19 +579,20 @@ iree_status_t loom_aie2p_program_object_merge(
     }
     capability_flags |= contribution->realization.capability_flags;
   }
-  // Body equivalence has consumed its order projection. Reuse that scratch for
-  // the complete function directory; neither step changes symbol identity.
-  iree_host_size_t* function_order = helper_order;
+  // Physical placement has consumed its order projection. Reuse that scratch
+  // for the function directory; the retained native identities remain intact.
+  iree_host_size_t* function_order = physical_order;
   for (iree_host_size_t i = 0; i < contribution_count; ++i) {
     function_order[i] = placements[i].symbol_start +
-                        contributions[i].realization.entry_symbol_index;
+                        contributions[i]->realization.entry_symbol_index;
   }
   loom_aie2p_program_object_sort_functions(symbols, function_order,
                                            contribution_count);
   loom_aie2p_program_object_resolve_calls(
       symbols, function_order, contribution_count, fixups, fixup_count);
 
-  out_program->canonical_indices = canonical_indices;
+  out_program->functions = functions;
+  out_program->function_count = contribution_count;
   out_program->contribution = *entry;
   out_program->contribution.object = (loom_native_object_contribution_t){
       .sections = sections,
@@ -521,4 +613,27 @@ iree_status_t loom_aie2p_program_object_merge(
   out_program->contribution.realization.register_writes = register_writes;
   out_program->contribution.realization.capability_flags = capability_flags;
   return iree_ok_status();
+}
+
+iree_status_t loom_aie2p_program_object_merge(
+    const loom_aie2p_program_native_t* native,
+    const loom_aie2p_program_data_t* data, iree_host_size_t data_count,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
+    loom_aie2p_program_object_t* out_program) {
+  loom_aie2p_program_code_group_t resident;
+  return loom_aie2p_program_object_compose(native, data, data_count, NULL, 1,
+                                           arena, scratch_arena, out_program,
+                                           &resident);
+}
+
+iree_status_t loom_aie2p_program_object_partition(
+    const loom_aie2p_program_native_t* native,
+    const loom_aie2p_program_data_t* data, iree_host_size_t data_count,
+    const iree_host_size_t* function_groups, iree_host_size_t group_count,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
+    loom_aie2p_program_object_t* out_program,
+    loom_aie2p_program_code_group_t* out_groups) {
+  return loom_aie2p_program_object_compose(
+      native, data, data_count, function_groups, group_count, arena,
+      scratch_arena, out_program, out_groups);
 }

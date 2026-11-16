@@ -916,9 +916,12 @@ bool loom_value_facts_predicate_conflict(
 void loom_value_facts_apply_predicate(loom_value_facts_t* facts,
                                       const loom_predicate_t* predicate);
 
-// Refines either side of an integer equality or ordered relation using the
-// counterpart's interval. NULL result pointers leave that side read-only.
-// Input facts are snapshots, allowing result pointers to alias their sources.
+// Refines either side of an integer equality or ordered relation. Equality
+// combines bounds, divisibility, and numeric predicates; ordered relations
+// tighten bounds using the counterpart's interval. Each destination retains its
+// execution distribution, topology, and context-local extension identity.
+// NULL result pointers leave that side read-only. Input facts are snapshots,
+// allowing result pointers to alias their sources or each other.
 // Returns false for predicate kinds that do not refine a pair of intervals.
 bool loom_value_facts_refine_relation(uint8_t predicate_kind,
                                       loom_value_facts_t lhs_facts,
