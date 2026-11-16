@@ -190,7 +190,7 @@ iree_status_t loom_run_hal_testbench_count_kernel_launches(
 typedef struct loom_run_hal_testbench_actual_provider_options_t {
   // Shared HAL context used to prepare and dispatch the candidate.
   loom_run_hal_testbench_context_t* context;
-  // Public compiler services and configuration for private module clones.
+  // Public compiler or emission services for private module clones.
   const loom_testbench_compilation_t* compilation;
   // Public source module compiled by this provider. Defaults to the module in
   // |compilation| and may name an exact-version tooling-generated derivative.
@@ -227,6 +227,23 @@ typedef struct loom_run_hal_testbench_compile_artifacts_t {
   // Optional target-owned textual listing.
   const loomc_artifact_t* target_listing;
 } loom_run_hal_testbench_compile_artifacts_t;
+
+// One target-specialized module ready for final target emission.
+//
+// The module and launch program are the two inseparable outputs of target
+// preparation. Lowering consumes the source launch facts, so a consumer cannot
+// reconstruct |launch_config| from |module|. All fields are borrowed through
+// the prepared provider's lifetime.
+typedef struct loom_run_hal_testbench_prepared_actual_t {
+  // Root-selected prepared-low module accepted by final target emission.
+  const loomc_module_t* module;
+  // Compiler-produced launch-configuration program for the prepared entry.
+  const loomc_artifact_t* launch_config;
+  // Exact immutable target profile used while preparing |module|.
+  loomc_target_profile_t* target_profile;
+  // Exact public emitter format selected while preparing |module|.
+  loomc_string_view_t artifact_format;
+} loom_run_hal_testbench_prepared_actual_t;
 
 typedef struct loom_run_hal_testbench_actual_provider_t {
   // Shared HAL context used to prepare and dispatch the candidate.
@@ -353,6 +370,15 @@ void loom_run_hal_testbench_actual_provider_deinitialize(
 // Compiles and prepares the selected actual candidate if needed.
 iree_status_t loom_run_hal_testbench_actual_provider_compile(
     loom_run_hal_testbench_actual_provider_t* provider);
+
+// Emits and loads one previously prepared actual candidate if needed.
+//
+// Target selection first admits |prepared_actual->target_profile| against the
+// live device. The prepared module then proceeds directly through target
+// emission without linking, source lowering, or launch-config reconstruction.
+iree_status_t loom_run_hal_testbench_actual_provider_load_prepared(
+    loom_run_hal_testbench_actual_provider_t* provider,
+    const loom_run_hal_testbench_prepared_actual_t* prepared_actual);
 
 // Materializes one invocation of an already-prepared provider.
 //

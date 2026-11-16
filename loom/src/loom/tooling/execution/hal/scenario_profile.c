@@ -1074,11 +1074,17 @@ static iree_status_t loom_run_hal_testbench_scenario_product_prepare(
     const loom_testbench_value_table_t* configuration,
     iree_allocator_t host_allocator,
     loom_testbench_prepared_product_t* out_product) {
-  (void)configuration;
   *out_product = (loom_testbench_prepared_product_t){0};
   loom_run_hal_testbench_scenario_profile_t* profile =
       (loom_run_hal_testbench_scenario_profile_t*)user_data;
+  const bool uses_prepared_actual =
+      profile->prepared_actual_resolver.fn != NULL;
   if (invocation->kind == LOOM_TESTBENCH_INVOCATION_COMMAND_PROGRAM) {
+    if (uses_prepared_actual) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "prepared HAL scenario profiles do not support command programs");
+    }
     if (invocation->result_count != 0) {
       return loom_run_hal_testbench_scenario_emit_unsupported_results(
           profile, invocation);
@@ -1098,6 +1104,22 @@ static iree_status_t loom_run_hal_testbench_scenario_product_prepare(
     return iree_make_status(
         IREE_STATUS_UNIMPLEMENTED,
         "HAL pipeline specialization arguments are not implemented");
+  }
+  if (uses_prepared_actual &&
+      invocation->kind != LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "prepared HAL scenario profiles require a direct kernel subject");
+  }
+  if (uses_prepared_actual) {
+    const loom_symbol_t* subject_symbol =
+        &invocation->module->symbols.entries[invocation->callee_ref.symbol_id];
+    if (loom_symbol_implements(subject_symbol,
+                               LOOM_SYMBOL_INTERFACE_PIPELINE)) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "prepared HAL scenario profiles do not support finite pipelines");
+    }
   }
   if (invocation->result_count != 0 &&
       invocation->kind != LOOM_TESTBENCH_INVOCATION_FUNCTION_CALL) {
@@ -1132,7 +1154,13 @@ static iree_status_t loom_run_hal_testbench_scenario_product_prepare(
   loom_run_hal_testbench_actual_provider_options_t provider_options =
       profile->provider_options;
   iree_status_t status = iree_ok_status();
-  if (invocation->kind == LOOM_TESTBENCH_INVOCATION_FUNCTION_CALL) {
+  loom_run_hal_testbench_prepared_actual_t prepared_actual = {0};
+  if (uses_prepared_actual) {
+    status = profile->prepared_actual_resolver.fn(
+        profile->prepared_actual_resolver.user_data, invocation, configuration,
+        &prepared_actual);
+    provider_options.invocation = invocation;
+  } else if (invocation->kind == LOOM_TESTBENCH_INVOCATION_FUNCTION_CALL) {
     status = loom_run_hal_testbench_scenario_build_function_adapter(
         product, &provider_options, invocation);
     if (iree_status_is_ok(status)) {
@@ -1149,7 +1177,11 @@ static iree_status_t loom_run_hal_testbench_scenario_product_prepare(
   }
   loom_run_hal_testbench_actual_provider_initialize(&provider_options,
                                                     &product->provider);
-  status = loom_run_hal_testbench_actual_provider_compile(&product->provider);
+  status =
+      uses_prepared_actual
+          ? loom_run_hal_testbench_actual_provider_load_prepared(
+                &product->provider, &prepared_actual)
+          : loom_run_hal_testbench_actual_provider_compile(&product->provider);
   if (iree_status_is_ok(status) && product->provider.compile_rejected) {
     status = iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -1184,6 +1216,18 @@ void loom_run_hal_testbench_scenario_profile_initialize(
       .diagnostic_sink = diagnostic_sink,
   };
   out_profile->provider_options.invocation = NULL;
+}
+
+void loom_run_hal_testbench_prepared_scenario_profile_initialize(
+    iree_string_view_t name,
+    const loom_run_hal_testbench_actual_provider_options_t* provider_options,
+    loom_run_hal_testbench_prepared_actual_resolver_t prepared_actual_resolver,
+    const loom_source_table_resolver_t* source_table,
+    loom_diagnostic_sink_t diagnostic_sink,
+    loom_run_hal_testbench_scenario_profile_t* out_profile) {
+  loom_run_hal_testbench_scenario_profile_initialize(
+      name, provider_options, source_table, diagnostic_sink, out_profile);
+  out_profile->prepared_actual_resolver = prepared_actual_resolver;
 }
 
 loom_testbench_execution_profile_t

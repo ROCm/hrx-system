@@ -20,6 +20,24 @@
 extern "C" {
 #endif
 
+// Resolves one immutable prepared actual for a concrete scenario product.
+//
+// The configuration table contains the same scenario-level values visible to
+// ordinary product preparation. Returned fields borrow resolver-owned storage
+// through the scenario profile's final prepared-product teardown.
+typedef iree_status_t(
+    IREE_API_PTR* loom_run_hal_testbench_prepared_actual_resolve_fn_t)(
+    void* user_data, const loom_testbench_invocation_plan_t* invocation,
+    const loom_testbench_value_table_t* configuration,
+    loom_run_hal_testbench_prepared_actual_t* out_prepared_actual);
+
+typedef struct loom_run_hal_testbench_prepared_actual_resolver_t {
+  // Resolver callback, or NULL for ordinary source compilation.
+  loom_run_hal_testbench_prepared_actual_resolve_fn_t fn;
+  // Resolver-owned state passed to |fn|.
+  void* user_data;
+} loom_run_hal_testbench_prepared_actual_resolver_t;
+
 // Compiler and runtime inputs shared by every product prepared through one
 // externally selected HAL scenario profile.
 typedef struct loom_run_hal_testbench_scenario_profile_t {
@@ -33,6 +51,8 @@ typedef struct loom_run_hal_testbench_scenario_profile_t {
   const loom_source_table_resolver_t* source_table;
   // Diagnostic sink for scenario adapter errors outside public compilation.
   loom_diagnostic_sink_t diagnostic_sink;
+  // Prepared-actual resolver selected by the prepared profile initializer.
+  loom_run_hal_testbench_prepared_actual_resolver_t prepared_actual_resolver;
 } loom_run_hal_testbench_scenario_profile_t;
 
 typedef struct loom_run_hal_testbench_scenario_benchmark_result_t {
@@ -79,6 +99,19 @@ typedef struct loom_run_hal_testbench_scenario_input_layout_t {
 void loom_run_hal_testbench_scenario_profile_initialize(
     iree_string_view_t name,
     const loom_run_hal_testbench_actual_provider_options_t* provider_options,
+    const loom_source_table_resolver_t* source_table,
+    loom_diagnostic_sink_t diagnostic_sink,
+    loom_run_hal_testbench_scenario_profile_t* out_profile);
+
+// Initializes a borrowing HAL scenario profile backed by prepared actuals.
+//
+// This bounded contract accepts direct kernel subjects. Function adapters,
+// finite pipelines, and command programs retain source compilation until their
+// product identities can be represented without inference on the consumer.
+void loom_run_hal_testbench_prepared_scenario_profile_initialize(
+    iree_string_view_t name,
+    const loom_run_hal_testbench_actual_provider_options_t* provider_options,
+    loom_run_hal_testbench_prepared_actual_resolver_t prepared_actual_resolver,
     const loom_source_table_resolver_t* source_table,
     loom_diagnostic_sink_t diagnostic_sink,
     loom_run_hal_testbench_scenario_profile_t* out_profile);
