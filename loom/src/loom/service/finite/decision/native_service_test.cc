@@ -825,6 +825,84 @@ TEST_F(NativeDecisionServiceTest,
   EXPECT_EQ(observation.pending_operation_count, 0u);
 }
 
+TEST_F(NativeDecisionServiceTest, ColdIntentWaitsForIndependentGrants) {
+  ASSERT_NO_FATAL_FAILURE(RetireService());
+  const loom_service_finite_model_options_t options = {
+      .sources = *sources_,
+      .asset_directory = IREE_SV("."),
+      .options = IREE_SV("{\"batch_units\":64}"),
+  };
+  IREE_ASSERT_OK(AllocateRegistration(options));
+  const auto automatic = OfferedWork(LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
+  loom_service_registration_set_demand(registration_, 0);
+  EXPECT_EQ(OfferedWork(LOOM_RUNTIME_SERVICE_WORK_PREPARATION).choice_count,
+            0u);
+  EXPECT_EQ(Schedule(automatic.key).serial, 0u);
+  EXPECT_FALSE(loom_service_registration_progress(registration_, 0));
+  EXPECT_EQ(loom_service_registration_snapshot(registration_).preparation_start,
+            0);
+  loom_service_registration_set_pinned(
+      registration_, LOOM_SERVICE_MODEL_COMPONENT_PRIMARY, true);
+  EXPECT_EQ(OfferedWork(LOOM_RUNTIME_SERVICE_WORK_PREPARATION).choice_count,
+            0u);
+  IREE_ASSERT_OK(loom_service_registration_request_parameters(
+      registration_, LOOM_SERVICE_MODEL_COMPONENT_PRIMARY,
+      LOOM_SERVICE_PARAMETER_OPERATION_ACTIVATE));
+  const auto preparation = OfferedWork(LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
+  ASSERT_EQ(preparation.choice_count, 1u);
+
+  // Hold the actual compiler workers so owner progress sees a warmup request
+  // coexisting with accepted preparation, never an accepted acquisition.
+  auto* executor =
+      loom_runtime_host_executor(loom_runtime_device_host(device_));
+  std::vector<std::unique_ptr<loom_runtime::testing::WorkerGate>> gates;
+  for (iree_host_size_t i = 0; i < iree_task_executor_worker_count(executor);
+       ++i) {
+    gates.push_back(
+        std::make_unique<loom_runtime::testing::WorkerGate>(executor));
+  }
+  ASSERT_NE(Schedule(preparation.key).serial, 0u);
+  loom_service_registration_progress(registration_, 0);
+  const auto preparing = loom_service_registration_snapshot(registration_);
+  EXPECT_EQ(preparing.phase, LOOM_SERVICE_REGISTRATION_PREPARING);
+  EXPECT_EQ(preparing.parameter_operation,
+            LOOM_SERVICE_PARAMETER_OPERATION_ACTIVATE);
+  EXPECT_GT(preparing.preparation_start, 0);
+  EXPECT_EQ(preparing.preparation_duration_ns, 0u);
+  const auto operations = AcceptedOperations();
+  ASSERT_EQ(operations.size(), 1u);
+  EXPECT_EQ(operations[0].work, LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
+  gates.clear();
+  IREE_ASSERT_OK(ProgressUntil([&] {
+    return loom_service_registration_snapshot(registration_).phase ==
+           LOOM_SERVICE_REGISTRATION_READY;
+  }));
+  const auto ready = loom_service_registration_snapshot(registration_);
+  EXPECT_EQ(ready.pinned_components, 1u);
+  EXPECT_EQ(ready.preparation_start, preparing.preparation_start);
+  EXPECT_GT(ready.preparation_duration_ns, 0u);
+  EXPECT_EQ(ready.parameter_operation,
+            LOOM_SERVICE_PARAMETER_OPERATION_ACTIVATE);
+  EXPECT_EQ(ready.activation_phase, LOOM_RUNTIME_ACTIVATION_WAITING);
+  EXPECT_TRUE(AcceptedOperations().empty());
+  const auto warmup = OfferedWork(LOOM_RUNTIME_SERVICE_WORK_ACQUISITION);
+  ASSERT_EQ(warmup.choice_count, 1u);
+  EXPECT_FALSE(loom_service_registration_progress(registration_, 0));
+  ASSERT_NE(Schedule(warmup.key).serial, 0u);
+  IREE_ASSERT_OK(ProgressUntil([&] {
+    return loom_service_registration_snapshot(registration_)
+               .parameter_operation == LOOM_SERVICE_PARAMETER_OPERATION_NONE;
+  }));
+  EXPECT_EQ(
+      loom_service_registration_snapshot(registration_).preparation_duration_ns,
+      ready.preparation_duration_ns);
+  ASSERT_NO_FATAL_FAILURE(Open(0));
+  ASSERT_NO_FATAL_FAILURE(DriveUntil(
+      [&] { return loom_service_finite_call_is_complete(calls_[0]); }));
+  IREE_EXPECT_OK(loom_service_finite_call_status(calls_[0]));
+  EXPECT_NE(loom_service_finite_call_output(calls_[0]), nullptr);
+}
+
 TEST_F(NativeDecisionServiceTest, PreparationFailurePublishesNoService) {
   ASSERT_NO_FATAL_FAILURE(RetireService());
   loom_service_finite_model_options_t options = {
@@ -837,6 +915,9 @@ TEST_F(NativeDecisionServiceTest, PreparationFailurePublishesNoService) {
       .options = IREE_SV("{\"batch_units\":64}"),
   };
   IREE_ASSERT_OK(AllocateRegistration(options));
+  IREE_ASSERT_OK(loom_service_registration_request_parameters(
+      registration_, LOOM_SERVICE_MODEL_COMPONENT_PRIMARY,
+      LOOM_SERVICE_PARAMETER_OPERATION_ACTIVATE));
   ASSERT_NE(
       Schedule(OfferedWork(LOOM_RUNTIME_SERVICE_WORK_PREPARATION).key).serial,
       0u);
@@ -852,6 +933,7 @@ TEST_F(NativeDecisionServiceTest, PreparationFailurePublishesNoService) {
   EXPECT_EQ(service_, nullptr);
   const auto failed = loom_service_registration_snapshot(registration_);
   EXPECT_EQ(failed.service.self, nullptr);
+  EXPECT_EQ(failed.parameter_operation, LOOM_SERVICE_PARAMETER_OPERATION_NONE);
   EXPECT_EQ(iree_status_code(failed.status), IREE_STATUS_NOT_FOUND);
   loom_runtime_service_observation_t observation;
   ASSERT_EQ(loom_runtime_service_read_observation(
@@ -969,6 +1051,9 @@ TEST_F(NativeDecisionServiceTest, PreparationCancellationJoinsAcceptedLoad) {
                 control, operation.key, operation.publication, 0, &use),
             LOOM_RUNTIME_SERVICE_READ_COMPLETE);
   EXPECT_EQ(use.resource_ordinal, 0u);
+  IREE_ASSERT_OK(loom_service_registration_request_parameters(
+      registration_, LOOM_SERVICE_MODEL_COMPONENT_PRIMARY,
+      LOOM_SERVICE_PARAMETER_OPERATION_ACTIVATE));
   loom_service_registration_request_retirement(registration_,
                                                LOOM_SERVICE_RETIRE_FLAG_ABORT);
   // Cancellation intent cannot release the accepted preparation borrow.

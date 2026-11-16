@@ -74,6 +74,44 @@ iree_status_t loom_service_registration_allocate_storage(
 static bool loom_service_registration_refresh_offers(
     loom_service_registration_t* registration);
 
+static void loom_service_registration_set_phase(
+    loom_service_registration_t* registration,
+    loom_service_registration_phase_t phase) {
+  if (registration->phase == phase) {
+    return;
+  }
+  if (registration->phase == LOOM_SERVICE_REGISTRATION_PREPARING) {
+    registration->preparation_duration_ns =
+        iree_time_now() - registration->preparation_start;
+  } else if (phase == LOOM_SERVICE_REGISTRATION_PREPARING) {
+    registration->preparation_start = iree_time_now();
+  }
+  registration->phase = phase;
+}
+
+static bool loom_service_registration_has_parameter_work(
+    const loom_service_registration_t* registration) {
+  return registration->lifecycle.operation.key.serial &&
+         registration->lifecycle.operation.work !=
+             LOOM_RUNTIME_SERVICE_WORK_PREPARATION;
+}
+
+static loom_service_registration_prepare_flags_t
+loom_service_registration_prepare_flags(
+    const loom_service_registration_t* registration) {
+  if (registration->stopping || registration->retirement_requested) {
+    return LOOM_SERVICE_REGISTRATION_PREPARE_FLAG_CANCEL;
+  }
+  const bool inference = iree_any_bit_set(
+      registration->demand, LOOM_SERVICE_REGISTRATION_DEMAND_PARAMETERS);
+  const bool warmup =
+      registration->parameter_operation ==
+          LOOM_SERVICE_PARAMETER_OPERATION_ACTIVATE &&
+      registration->parameter_component == LOOM_SERVICE_MODEL_COMPONENT_PRIMARY;
+  return inference || warmup ? LOOM_SERVICE_REGISTRATION_PREPARE_FLAG_DEMAND
+                             : 0;
+}
+
 static void loom_service_registration_publish(
     loom_service_registration_t* registration) {
   loom_runtime_service_observation_t observation = registration->observation;
@@ -201,7 +239,10 @@ static bool loom_service_registration_refresh_offers(
   loom_runtime_service_work_flags_t kind = 0;
   if (!registration->stopping && !registration->retirement_requested &&
       !registration->lifecycle.operation.key.serial) {
-    if (registration->phase == LOOM_SERVICE_REGISTRATION_DECLARED) {
+    if (registration->phase == LOOM_SERVICE_REGISTRATION_DECLARED &&
+        (registration->demand ||
+         registration->parameter_operation ==
+             LOOM_SERVICE_PARAMETER_OPERATION_ACTIVATE)) {
       kind = LOOM_RUNTIME_SERVICE_WORK_PREPARATION;
     } else if (registration->phase == LOOM_SERVICE_REGISTRATION_READY &&
                !requests && !active) {
@@ -251,7 +292,11 @@ static void loom_service_registration_record_failure(
           iree_status_join(registration->status, iree_status_clone(status));
     }
     registration->stopping = true;
-    registration->phase = LOOM_SERVICE_REGISTRATION_FAILED;
+    if (!loom_service_registration_has_parameter_work(registration)) {
+      registration->parameter_operation = LOOM_SERVICE_PARAMETER_OPERATION_NONE;
+    }
+    loom_service_registration_set_phase(registration,
+                                        LOOM_SERVICE_REGISTRATION_FAILED);
   }
 }
 
@@ -265,6 +310,7 @@ void loom_service_registration_initialize(
   registration->self = self;
   registration->observer = observer;
   registration->components = components;
+  registration->demand = LOOM_SERVICE_REGISTRATION_DEMAND_PREPARATION;
   registration->control = binding.control;
   registration->devices = UINT64_C(1) << device_ordinal;
   registration->instance_ordinal = binding.instance_ordinal;
@@ -299,11 +345,28 @@ loom_service_registration_snapshot_t loom_service_registration_snapshot(
   return (loom_service_registration_snapshot_t){
       .phase = registration->phase,
       .parameter_operation = registration->parameter_operation,
+      .parameter_component = registration->parameter_component,
+      .activation_phase = registration->activation_phase,
+      .pinned_components = registration->pinned_components,
       .service = registration->phase == LOOM_SERVICE_REGISTRATION_READY
                      ? registration->engine
                      : (loom_runtime_service_t){0},
       .status = registration->status,
-      .compilation = &registration->compilation};
+      .compilation = &registration->compilation,
+      .preparation_start = registration->preparation_start,
+      .preparation_duration_ns = registration->preparation_duration_ns};
+}
+
+void loom_service_registration_set_demand(
+    loom_service_registration_t* registration,
+    loom_service_registration_demand_t demand) {
+  if (registration->demand == demand) {
+    return;
+  }
+  registration->demand = demand;
+  if (loom_service_registration_refresh_offers(registration)) {
+    loom_service_registration_publish(registration);
+  }
 }
 
 static void loom_service_registration_set_parameter_intent(
@@ -332,22 +395,30 @@ iree_status_t loom_service_registration_request_parameters(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unknown parameter operation");
   }
-  if (registration->phase != LOOM_SERVICE_REGISTRATION_READY ||
+  if (registration->phase > LOOM_SERVICE_REGISTRATION_READY ||
       registration->stopping || registration->retirement_requested) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "parameter intent requires a ready registration");
+                            "parameter intent requires a healthy registration");
   }
-  if (registration->lifecycle.operation.key.serial &&
+  if (loom_service_registration_has_parameter_work(registration) &&
       (operation != registration->parameter_operation ||
        component != registration->parameter_component)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "accepted parameter work must complete first");
   }
-  if (operation == LOOM_SERVICE_PARAMETER_OPERATION_DEACTIVATE &&
-      !registration->vtable->parameters(registration->self, component)
-           .deactivatable) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "component does not support parameter release");
+  if (operation == LOOM_SERVICE_PARAMETER_OPERATION_DEACTIVATE) {
+    if (registration->phase == LOOM_SERVICE_REGISTRATION_DECLARED) {
+      operation = LOOM_SERVICE_PARAMETER_OPERATION_NONE;
+    } else if (registration->phase != LOOM_SERVICE_REGISTRATION_READY ||
+               !registration->vtable->parameters(registration->self, component)
+                    .deactivatable) {
+      return iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "component has no releasable parameter residency");
+    }
+  }
+  if (!loom_service_registration_has_parameter_work(registration)) {
+    registration->activation_phase = LOOM_RUNTIME_ACTIVATION_WAITING;
   }
   loom_service_registration_set_parameter_intent(registration, component,
                                                  operation);
@@ -369,11 +440,12 @@ void loom_service_registration_request_retirement(
   registration->retirement_requested = true;
   registration->stopping |=
       iree_any_bit_set(flags, LOOM_SERVICE_RETIRE_FLAG_ABORT);
-  if (!registration->lifecycle.operation.key.serial) {
+  if (!loom_service_registration_has_parameter_work(registration)) {
     registration->parameter_operation = LOOM_SERVICE_PARAMETER_OPERATION_NONE;
   }
   if (registration->phase == LOOM_SERVICE_REGISTRATION_RELEASE_FAILED) {
-    registration->phase = LOOM_SERVICE_REGISTRATION_RETIRING;
+    loom_service_registration_set_phase(registration,
+                                        LOOM_SERVICE_REGISTRATION_RETIRING);
   }
   if (loom_service_registration_refresh_offers(registration)) {
     loom_service_registration_publish(registration);
@@ -386,21 +458,20 @@ bool loom_service_registration_progress(
   const loom_service_registration_phase_t previous_phase = registration->phase;
   const loom_service_parameter_operation_t previous_operation =
       registration->parameter_operation;
+  const loom_runtime_activation_phase_t previous_activation =
+      registration->activation_phase;
   const bool was_stopping = registration->stopping;
   registration->stopping |=
       iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
-  if (registration->stopping && !registration->lifecycle.operation.key.serial) {
+  if (registration->stopping &&
+      !loom_service_registration_has_parameter_work(registration)) {
     registration->parameter_operation = LOOM_SERVICE_PARAMETER_OPERATION_NONE;
   }
   bool progress = false;
   if (registration->phase == LOOM_SERVICE_REGISTRATION_PREPARING) {
     bool complete = false;
-    iree_status_free(loom_service_registration_prepare(
-        registration,
-        registration->stopping || registration->retirement_requested
-            ? LOOM_SERVICE_REGISTRATION_PREPARE_FLAG_CANCEL
-            : 0,
-        &complete));
+    iree_status_free(
+        loom_service_registration_prepare(registration, 0, &complete));
   }
   if (registration->engine.self &&
       registration->phase != LOOM_SERVICE_REGISTRATION_RETIRING &&
@@ -415,7 +486,7 @@ bool loom_service_registration_progress(
     iree_status_free(status);
     progress |= service_progress;
   }
-  if (registration->lifecycle.operation.key.serial) {
+  if (loom_service_registration_has_parameter_work(registration)) {
     if (registration->parameter_operation ==
         LOOM_SERVICE_PARAMETER_OPERATION_ACTIVATE) {
       loom_runtime_activation_phase_t phase;
@@ -448,6 +519,7 @@ bool loom_service_registration_progress(
   }
   return progress || registration->phase != previous_phase ||
          registration->parameter_operation != previous_operation ||
+         registration->activation_phase != previous_activation ||
          registration->stopping != was_stopping;
 }
 
@@ -515,22 +587,34 @@ loom_runtime_service_schedule_outcome_t loom_service_registration_try_schedule(
 iree_status_t loom_service_registration_prepare(
     loom_service_registration_t* registration,
     loom_service_registration_prepare_flags_t flags, bool* out_complete) {
-  registration->phase = LOOM_SERVICE_REGISTRATION_PREPARING;
+  loom_service_registration_set_phase(registration,
+                                      LOOM_SERVICE_REGISTRATION_PREPARING);
   loom_service_registration_begin_work(registration, &registration->lifecycle,
                                        LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
   loom_service_preparation_result_t result = {0};
   iree_status_t status = registration->vtable->prepare(
-      registration->self, flags, &result, &registration->compilation);
+      registration->self,
+      flags | loom_service_registration_prepare_flags(registration), &result,
+      &registration->compilation);
   *out_complete =
       iree_any_bit_set(result.flags, LOOM_SERVICE_PREPARATION_RESULT_COMPLETE);
   if (!*out_complete) {
     return status;
   }
   if (iree_status_is_ok(status)) {
+    for (uint32_t component = 0; component < LOOM_SERVICE_MODEL_COMPONENT_COUNT;
+         ++component) {
+      if (registration->pinned_components & (1u << component)) {
+        registration->vtable->set_pinned(
+            registration->self, (loom_service_model_component_t)component,
+            true);
+      }
+    }
     registration->engine = result.service;
     registration->engine.vtable->set_observer(registration->engine.self,
                                               registration->observer);
-    registration->phase = LOOM_SERVICE_REGISTRATION_READY;
+    loom_service_registration_set_phase(registration,
+                                        LOOM_SERVICE_REGISTRATION_READY);
   }
   loom_service_registration_record_failure(registration, status);
   if (iree_status_is_ok(status) ||
@@ -555,7 +639,9 @@ void loom_service_registration_set_pinned(
   } else {
     registration->pinned_components &= ~(1u << component);
   }
-  registration->vtable->set_pinned(registration->self, component, pinned);
+  if (registration->phase == LOOM_SERVICE_REGISTRATION_READY) {
+    registration->vtable->set_pinned(registration->self, component, pinned);
+  }
   if (loom_service_registration_refresh_offers(registration)) {
     loom_service_registration_publish(registration);
   }
@@ -574,6 +660,7 @@ iree_status_t loom_service_registration_activate(
                                        LOOM_RUNTIME_SERVICE_WORK_ACQUISITION);
   iree_status_t status = registration->vtable->activate(
       registration->self, component, flags, out_phase, out_component_status);
+  registration->activation_phase = *out_phase;
   if (*out_phase == LOOM_RUNTIME_ACTIVATION_COMPLETE) {
     registration->parameter_operation = LOOM_SERVICE_PARAMETER_OPERATION_NONE;
     loom_service_registration_record_failure(registration, status);
@@ -625,7 +712,8 @@ iree_status_t loom_service_registration_retire(
     return iree_ok_status();
   }
   registration->retirement_requested = true;
-  registration->phase = LOOM_SERVICE_REGISTRATION_RETIRING;
+  loom_service_registration_set_phase(registration,
+                                      LOOM_SERVICE_REGISTRATION_RETIRING);
   loom_service_registration_withdraw_offer(registration,
                                            &registration->lifecycle);
   loom_service_registration_begin_work(registration, &registration->retirement,
@@ -640,10 +728,12 @@ iree_status_t loom_service_registration_retire(
   }
   if (!iree_status_is_ok(status)) {
     loom_service_registration_record_failure(registration, status);
-    registration->phase = LOOM_SERVICE_REGISTRATION_RELEASE_FAILED;
+    loom_service_registration_set_phase(
+        registration, LOOM_SERVICE_REGISTRATION_RELEASE_FAILED);
     return status;
   }
-  registration->phase = LOOM_SERVICE_REGISTRATION_RETIRED;
+  loom_service_registration_set_phase(registration,
+                                      LOOM_SERVICE_REGISTRATION_RETIRED);
   for (uint64_t i = 0; i < registration->lifecycle.operation.key.ordinal; ++i) {
     const loom_runtime_service_operation_t operation = {.key.ordinal = i};
     loom_runtime_service_publish_operation(registration->control, &operation,

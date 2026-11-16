@@ -44,6 +44,14 @@ typedef enum loom_service_parameter_operation_e {
   LOOM_SERVICE_PARAMETER_OPERATION_DEACTIVATE,
 } loom_service_parameter_operation_t;
 
+enum loom_service_registration_demand_bits_e {
+  // The application wants a ready service, independently of parameter loading.
+  LOOM_SERVICE_REGISTRATION_DEMAND_PREPARATION = 1u << 0,
+  // Inference requires the primary model's parameters and its preparation.
+  LOOM_SERVICE_REGISTRATION_DEMAND_PARAMETERS = 1u << 1,
+};
+typedef uint32_t loom_service_registration_demand_t;
+
 // Owner-only component facts. Views remain borrowed until the next mutation;
 // observing them never prepares, activates, or releases resources.
 typedef struct loom_service_registration_parameters_t {
@@ -150,6 +158,10 @@ struct loom_service_registration_t {
   loom_service_parameter_operation_t parameter_operation;
   // Component selected by the current parameter operation.
   loom_service_model_component_t parameter_component;
+  // Readiness of accepted warmup, separate from unaccepted parameter intent.
+  loom_runtime_activation_phase_t activation_phase;
+  // Current application demand; explicit warmup independently permits loading.
+  loom_service_registration_demand_t demand;
   // Immutable supported component roles as bit positions.
   uint32_t components;
   // Persistent weight retention installed on prepared components.
@@ -162,6 +174,10 @@ struct loom_service_registration_t {
   iree_status_t status;
   // Copied preparation evidence, independent of compiler/source lifetimes.
   loom_runtime_compilation_report_t compilation;
+  // Start of the accepted preparation interval, in host monotonic nanoseconds.
+  iree_time_t preparation_start;
+  // Terminal preparation interval; queries never read a clock.
+  uint64_t preparation_duration_ns;
   // Exact resource participation for this model's lifecycle work.
   uint64_t devices;
   // Composition-scoped instance shared by this registration's lifecycle work.
@@ -210,20 +226,39 @@ typedef struct loom_service_registration_snapshot_t {
   loom_service_registration_phase_t phase;
   // Requested or accepted parameter work, independent of phase.
   loom_service_parameter_operation_t parameter_operation;
+  // Component selected by the parameter intent or accepted operation.
+  loom_service_model_component_t parameter_component;
+  // WAITING includes unaccepted warmup; LOADING owns accepted asynchronous
+  // work.
+  loom_runtime_activation_phase_t activation_phase;
+  // Persistent weight-retention intent for supported component bit positions.
+  uint32_t pinned_components;
   // Ready capability only in READY; external views require explicit handoff.
   loom_runtime_service_t service;
   // Borrowed retained native failure.
   iree_status_t status;
   // Borrowed copied compilation evidence.
   const loom_runtime_compilation_report_t* compilation;
+  // Accepted preparation start; zero until preparation begins.
+  iree_time_t preparation_start;
+  // Terminal preparation duration; while PREPARING, subtract start from now.
+  uint64_t preparation_duration_ns;
 } loom_service_registration_snapshot_t;
 
 loom_service_registration_snapshot_t loom_service_registration_snapshot(
     const loom_service_registration_t* registration);
 
+// Replaces application demand without starting or cancelling accepted work.
+// Initialization requests preparation. Explicit warmup also permits preparing
+// the model and acquiring its primary parameters, even with no other demand.
+void loom_service_registration_set_demand(
+    loom_service_registration_t* registration,
+    loom_service_registration_demand_t demand);
+
 // Publishes parameter intent without starting work. Existing requests drain
-// before its offer becomes legal. NONE withdraws unaccepted intent; accepted
-// work must complete before another intent can replace it.
+// before its offer becomes legal. Warmup may be requested before preparation;
+// it becomes a separate choice once the model is ready. NONE withdraws
+// unaccepted intent; accepted parameter work must complete before replacement.
 iree_status_t loom_service_registration_request_parameters(
     loom_service_registration_t* registration,
     loom_service_model_component_t component,
@@ -283,7 +318,8 @@ iree_status_t loom_service_registration_retire(
 loom_service_registration_parameters_t loom_service_registration_parameters(
     const loom_service_registration_t* registration,
     loom_service_model_component_t component);
-// Changes retention on a supported ready component without loading it.
+// Changes retention on a supported component without loading it. Cold intent
+// is installed on the model before the ready service is published.
 void loom_service_registration_set_pinned(
     loom_service_registration_t* registration,
     loom_service_model_component_t component, bool pinned);
