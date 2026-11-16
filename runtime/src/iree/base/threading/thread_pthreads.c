@@ -354,14 +354,18 @@ static iree_status_t iree_thread_make_cpu_set_from_node_id(
 }
 
 #if IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS
-// Appends native CPU IDs as ranges, preserving sparse masks without truncation.
-static iree_status_t iree_thread_append_cpu_set(
-    const cpu_set_t* set, iree_host_size_t native_size,
-    iree_string_builder_t* builder) {
-  iree_status_t status = iree_ok_status();
-  bool first = true;
-  for (iree_host_size_t cpu = 0;
-       cpu < native_size * 8 && iree_status_is_ok(status); ++cpu) {
+// Formats CPU ranges into bounded diagnostic storage. Large sparse sets include
+// an explicit ellipsis and total CPU count instead of allocating scratch space.
+// Both callers provide at least 256 bytes for ranges and the omission suffix.
+static void iree_thread_format_cpu_set(const cpu_set_t* set,
+                                       iree_host_size_t native_size,
+                                       char* buffer,
+                                       iree_host_size_t buffer_capacity) {
+  iree_host_size_t length = 0;
+  char suffix[48];
+  iree_snprintf(suffix, sizeof(suffix), ",... (%d CPUs total)",
+                CPU_COUNT_S(native_size, set));
+  for (iree_host_size_t cpu = 0; cpu < native_size * 8; ++cpu) {
     if (!CPU_ISSET_S(cpu, native_size, set)) {
       continue;
     }
@@ -370,23 +374,34 @@ static iree_status_t iree_thread_append_cpu_set(
            CPU_ISSET_S(cpu + 1, native_size, set)) {
       ++cpu;
     }
-    status = iree_string_builder_append_format(builder, "%s%" PRIhsz,
-                                               first ? "" : ",", start);
-    if (iree_status_is_ok(status) && cpu != start) {
-      status = iree_string_builder_append_format(builder, "-%" PRIhsz, cpu);
+    char range[48];
+    iree_host_size_t range_length = 0;
+    if (cpu == start) {
+      range_length = iree_snprintf(range, sizeof(range), "%s%" PRIhsz,
+                                   length ? "," : "", start);
+    } else {
+      range_length =
+          iree_snprintf(range, sizeof(range), "%s%" PRIhsz "-%" PRIhsz,
+                        length ? "," : "", start, cpu);
     }
-    first = false;
+    if (length + range_length + sizeof(suffix) > buffer_capacity) {
+      iree_snprintf(buffer + length, buffer_capacity - length, "%s", suffix);
+      return;
+    }
+    memcpy(buffer + length, range, range_length);
+    length += range_length;
   }
-  if (first) {
-    status = iree_string_builder_append_cstring(builder, "none");
+  if (length) {
+    buffer[length] = 0;
+  } else {
+    iree_snprintf(buffer, buffer_capacity, "none");
   }
-  return status;
 }
 
 // Queries only the target thread. Its current affinity may include inherited
 // application policy and is not the enclosing cgroup's full CPU allowance.
-static iree_status_t iree_thread_append_observed_affinity(
-    iree_thread_t* thread, iree_string_builder_t* builder) {
+static void iree_thread_format_observed_affinity(
+    iree_thread_t* thread, char* buffer, iree_host_size_t buffer_capacity) {
   const iree_host_size_t native_size =
       CPU_ALLOC_SIZE(IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT);
   cpu_set_t* observed_set = iree_alloca(native_size);
@@ -405,55 +420,38 @@ static iree_status_t iree_thread_append_observed_affinity(
   rc = pthread_getaffinity_np(thread->handle, native_size, observed_set);
 #endif  // IREE_PLATFORM_ANDROID
   if (rc != 0) {
-    return iree_string_builder_append_format(
-        builder, "unavailable (%s, errno %d)", strerror(rc), rc);
+    iree_snprintf(buffer, buffer_capacity, "unavailable (errno %d)", rc);
+  } else {
+    iree_thread_format_cpu_set(observed_set, native_size, buffer,
+                               buffer_capacity);
   }
-  return iree_thread_append_cpu_set(observed_set, native_size, builder);
 }
 #endif  // IREE_STATUS_FEATURE_ANNOTATIONS
 
 static iree_status_t iree_thread_affinity_failure(
     iree_thread_t* thread, iree_thread_affinity_t affinity,
     const cpu_set_t* requested_set, iree_host_size_t native_size, int error) {
-  iree_status_t status = iree_make_status(
-      iree_status_code_from_errno(error),
-      "cannot apply thread affinity: %s (errno %d)", strerror(error), error);
 #if IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS
-  iree_string_builder_t builder;
-  iree_string_builder_initialize(thread->allocator, &builder);
-  iree_status_t diagnostic_status = iree_string_builder_append_format(
-      &builder, "thread '%s'; ", thread->name);
-  if (iree_status_is_ok(diagnostic_status) && affinity.group_any) {
-    diagnostic_status = iree_string_builder_append_format(
-        &builder, "requested NUMA node %u; ", affinity.group);
+  char requested[256];
+  iree_thread_format_cpu_set(requested_set, native_size, requested,
+                             sizeof(requested));
+  char observed[256];
+  iree_thread_format_observed_affinity(thread, observed, sizeof(observed));
+  char node[64] = {0};
+  if (affinity.group_any) {
+    iree_snprintf(node, sizeof(node), "requested NUMA node %u; ",
+                  affinity.group);
   }
-  if (iree_status_is_ok(diagnostic_status)) {
-    diagnostic_status =
-        iree_string_builder_append_cstring(&builder, "requested CPUs [");
-  }
-  if (iree_status_is_ok(diagnostic_status)) {
-    diagnostic_status =
-        iree_thread_append_cpu_set(requested_set, native_size, &builder);
-  }
-  if (iree_status_is_ok(diagnostic_status)) {
-    diagnostic_status = iree_string_builder_append_cstring(
-        &builder, "]; observed thread affinity after rejection [");
-  }
-  if (iree_status_is_ok(diagnostic_status)) {
-    diagnostic_status = iree_thread_append_observed_affinity(thread, &builder);
-  }
-  if (iree_status_is_ok(diagnostic_status)) {
-    diagnostic_status = iree_string_builder_append_cstring(&builder, "]");
-  }
-  if (iree_status_is_ok(diagnostic_status)) {
-    status =
-        iree_status_annotate_copy(status, iree_string_builder_view(&builder));
-  } else {
-    status = iree_status_join(status, diagnostic_status);
-  }
-  iree_string_builder_deinitialize(&builder);
+  return iree_make_status(
+      iree_status_code_from_errno(error),
+      "cannot apply thread affinity: %s (errno %d); thread '%s'; %s"
+      "requested CPUs [%s]; observed thread affinity after rejection [%s]",
+      strerror(error), error, thread->name, node, requested, observed);
+#else
+  return iree_make_status(iree_status_code_from_errno(error),
+                          "cannot apply thread affinity: %s (errno %d)",
+                          strerror(error), error);
 #endif  // IREE_STATUS_FEATURE_ANNOTATIONS
-  return status;
 }
 
 iree_status_t iree_thread_request_affinity(iree_thread_t* thread,

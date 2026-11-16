@@ -544,6 +544,50 @@ TEST(ThreadTest, RejectedAffinityReportsTargetThread) {
   EXPECT_FALSE(called);
 }
 
+TEST(ThreadTest, RejectedSparseBudgetReportsOmission) {
+  iree_thread_affinity_set_t processors = {};
+  iree_bitmap_t budget = iree_thread_affinity_set_bitmap(&processors);
+  const iree_host_size_t first_cpu =
+      budget.bit_count > 128 ? budget.bit_count - 128 : 0;
+  ASSERT_EQ(0, access("/sys/devices/system/cpu", F_OK));
+  for (iree_host_size_t cpu = first_cpu; cpu < budget.bit_count; cpu += 2) {
+    const std::string path =
+        "/sys/devices/system/cpu/cpu" + std::to_string(cpu);
+    if (access(path.c_str(), F_OK) == 0) {
+      GTEST_SKIP() << "CPU " << cpu << " exists on this system";
+    }
+    ASSERT_EQ(ENOENT, errno);
+    iree_bitmap_set(budget, cpu);
+  }
+  const iree_thread_create_params_t params = {
+      .name = IREE_SV("sparse-budget"),
+      .initial_processor_mask = budget,
+  };
+  bool called = false;
+  iree_thread_t* thread = nullptr;
+  iree_status_t status = iree_thread_create(
+      +[](void* arg) -> int {
+        *static_cast<bool*>(arg) = true;
+        return 0;
+      },
+      &called, params, iree_allocator_system(), &thread);
+  EXPECT_EQ(IREE_STATUS_INVALID_ARGUMENT, iree_status_code(status));
+#if IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS
+  const std::string message = iree::Status::ToString(status);
+  EXPECT_THAT(message, ::testing::HasSubstr("thread 'sparse-budget'"));
+  EXPECT_THAT(message, ::testing::HasSubstr("requested CPUs [" +
+                                            std::to_string(first_cpu) + ","));
+  EXPECT_THAT(message, ::testing::HasSubstr(
+                           "... (" + std::to_string(iree_bitmap_count(budget)) +
+                           " CPUs total)]"));
+  EXPECT_THAT(message, ::testing::HasSubstr(
+                           "observed thread affinity after rejection ["));
+#endif  // IREE_STATUS_FEATURE_ANNOTATIONS
+  iree_status_free(status);
+  EXPECT_EQ(nullptr, thread);
+  EXPECT_FALSE(called);
+}
+
 TEST(ThreadTest, CpuAffinityBeforeEntry) {
   NativeCpuSet allowed = {};
   ASSERT_EQ(0, sched_getaffinity(0, sizeof(allowed), allowed.data()));
