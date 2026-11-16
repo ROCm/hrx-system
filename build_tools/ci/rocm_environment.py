@@ -172,7 +172,19 @@ def select_native_gpu(
 def export_native_gpu_selection(
     environment_path: Path, selection: NativeGpuSelection
 ) -> None:
-    """Narrows subsequent runtime enumeration to the verified native GPU."""
+    """Exports each consumer's selector from the same verified physical GPU."""
+    for name in ("HAL_AMD_GPU_ASSIGNMENT", "AMDF_CTS_GPU_NATIVE_IDENTITY"):
+        previous = os.environ.get(name)
+        if previous is not None and previous.strip() != selection.native_identity:
+            raise RuntimeError(
+                f"{name}={previous!r} conflicts with "
+                f"the verified GPU assignment {selection.native_identity}"
+            )
+    if peer := os.environ.get("AMDF_CTS_GPU_PEER_NATIVE_IDENTITY"):
+        raise RuntimeError(
+            f"AMDF_CTS_GPU_PEER_NATIVE_IDENTITY={peer!r} requests a peer "
+            "outside this single-GPU assignment"
+        )
     with environment_path.open("a") as environment_file:
         environment_file.write(
             f"ROCR_VISIBLE_DEVICES={selection.rocr_visible_device}\n"
@@ -180,6 +192,7 @@ def export_native_gpu_selection(
         environment_file.write("HIP_VISIBLE_DEVICES=0\n")
         environment_file.write("CUDA_VISIBLE_DEVICES=0\n")
         environment_file.write("GPU_DEVICE_ORDINAL=0\n")
+        environment_file.write(f"HAL_AMD_GPU_ASSIGNMENT={selection.native_identity}\n")
         environment_file.write(
             f"AMDF_CTS_GPU_NATIVE_IDENTITY={selection.native_identity}\n"
         )
@@ -434,12 +447,6 @@ def main() -> int:
                     Path("/dev/dri"),
                     os.environ.get("ROCR_VISIBLE_DEVICES"),
                 )
-                previous = os.environ.get("AMDF_CTS_GPU_NATIVE_IDENTITY")
-                if previous is not None and previous != selection.native_identity:
-                    raise RuntimeError(
-                        f"AMDF_CTS_GPU_NATIVE_IDENTITY={previous!r} conflicts with "
-                        f"the ROCr allocation {selection.native_identity}"
-                    )
                 if github_env := os.environ.get("GITHUB_ENV"):
                     export_native_gpu_selection(Path(github_env), selection)
         else:

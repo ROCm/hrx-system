@@ -113,14 +113,37 @@ HIP code-object fixtures; native execution is provided by libamdf.
 The [profile definitions](../devtools/ci_config.py) specify the package scope
 and resources for each.
 
-AMD profiles forward `HAL_VISIBLE_XDNA_DEVICES`, `HAL_VISIBLE_RDNA_DEVICES`,
-`HAL_VISIBLE_CDNA_DEVICES`, and `HAL_VISIBLE_AMDGPU_DEVICES` into Bazel test
-actions. Each list selects that HAL scheme's unmasked supported device ordinals;
-the lists are independent, and empty values remain empty. For example, a runner
-can set `HAL_VISIBLE_RDNA_DEVICES=1` so ordinary `--device=rdna` callers use its
-second supported RDNA GPU. Native libamdf CTS selection remains explicit through
-`--amdf_gpu_target` and `AMDF_CTS_GPU_NATIVE_IDENTITY`; HAL visibility does not
-modify libamdf's topology.
+Linux GPU preflight correlates the assigned ROCr agent with its KFD/DRM
+identity and emits both native consumer inputs from that one verified choice:
+
+```sh
+HAL_AMD_GPU_ASSIGNMENT=linux_device:226:144
+AMDF_CTS_GPU_NATIVE_IDENTITY=linux_device:226:144
+```
+
+The first constrains ordinary HAL consumers, including Loom and HIP-on-HRX;
+the second selects the standalone native CTS endpoint. No per-family ordinal
+translation is needed. An existing conflicting assignment is an error, and a
+single-GPU job cannot admit an explicit peer outside that assignment. Native
+CTS keeps its independent selection interface; libamdf core does not interpret
+HAL, HIP, or test environment variables.
+
+AMD profiles forward the assignment and `HAL_VISIBLE_XDNA_DEVICES`,
+`HAL_VISIBLE_RDNA_DEVICES`, `HAL_VISIBLE_CDNA_DEVICES`, and
+`HAL_VISIBLE_AMDGPU_DEVICES` into Bazel test actions and CMake test steps. The
+optional scheme masks select and order devices within the physical assignment;
+empty values remain empty. With no assignment they retain native scheme ordinal
+semantics. Windows launchers can use
+`HAL_AMD_GPU_ASSIGNMENT=windows_adapter:<hex LUID>:<decimal physical index>`.
+The HAL also accepts multiple comma-separated identities for multi-GPU jobs.
+
+ROCr/HIP/CUDA masks remain available for foreign-runtime tools. Bazel native
+tests do not inherit those masks, and assigned CMake native test steps remove
+them from their child environment. This prevents a foreign ordinal from being
+applied a second time to the HAL-filtered device list. Tests can still explicitly
+set frontend visibility when exercising HIP compatibility behavior. The
+[AMD driver contract](../../runtime/src/iree/hal/driver/amd/README.md) defines
+assignment, per-scheme filtering, and exact identity selection.
 
 Compiler-only AMDGPU checks use `iree-bazel-loom-amdgpu` or
 `iree-cmake-loom-amdgpu`; they need no GPU. Repository-wide compile checks use

@@ -14,6 +14,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <thread>
@@ -30,6 +31,7 @@
 #include "iree/hal/testing/mock_device.h"
 #include "iree/task/executor.h"
 #include "libamdf/cts/gpu/sdma/encoding/commands.h"
+#include "libamdf/cts/util/native_identity.h"
 
 namespace iree::hal::amd::fabric::cts {
 
@@ -105,6 +107,14 @@ class FabricVirtualBufferTest
     RecordProperty("native_lifetime", GetParam() == AMDF_NATIVE_LIFETIME_PROCESS
                                           ? "process"
                                           : "instance");
+    const char* assigned_text = std::getenv("AMDF_CTS_GPU_NATIVE_IDENTITY");
+    amdf_endpoint_native_identity_t assigned_identity = {};
+    if (assigned_text) {
+      ASSERT_TRUE(
+          amdf::cts::ParseNativeIdentity(assigned_text, &assigned_identity))
+          << "invalid AMDF_CTS_GPU_NATIVE_IDENTITY: " << assigned_text;
+    }
+    bool assigned_found = false;
     amdf_endpoint_id_t endpoint_id = {};
     for (uint32_t i = 0; i < fabric_->endpoint_count && !endpoint_; ++i) {
       if (fabric_->endpoints[i].engine_kind != AMDF_ENGINE_KIND_GPU) {
@@ -118,6 +128,13 @@ class FabricVirtualBufferTest
           .structure_size = sizeof(info),
       };
       ASSERT_EQ(api_->endpoint_query_info(endpoint_, &info), AMDF_STATUS_OK);
+      if (assigned_text && !amdf::cts::NativeIdentityIsEqual(
+                               info.native_identity, assigned_identity)) {
+        ASSERT_EQ(api_->endpoint_close(endpoint_), AMDF_STATUS_OK);
+        endpoint_ = nullptr;
+        continue;
+      }
+      assigned_found = true;
       bool selected = false;
       for (uint32_t f = 0; f < info.queue_family_count; ++f) {
         native_family_.type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO;
@@ -141,8 +158,14 @@ class FabricVirtualBufferTest
         endpoint_ = nullptr;
       }
     }
+    ASSERT_TRUE(!assigned_text || assigned_found)
+        << "AMDF_CTS_GPU_NATIVE_IDENTITY does not identify an enumerated GPU: "
+        << assigned_text;
     if (!endpoint_) {
-      GTEST_SKIP() << "no host-published SDMA family";
+      GTEST_SKIP() << "selected GPU has no host-published SDMA family";
+    }
+    if (assigned_text) {
+      RecordProperty("gpu_native_identity", assigned_text);
     }
     amdf_gpu_endpoint_info_t target = {
         .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,

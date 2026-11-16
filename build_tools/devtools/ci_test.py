@@ -1412,6 +1412,7 @@ class CiTest(unittest.TestCase):
             "HIP_VISIBLE_DEVICES": "0",
             "CUDA_VISIBLE_DEVICES": "1",
             "GPU_DEVICE_ORDINAL": "2",
+            "HAL_AMD_GPU_ASSIGNMENT": "linux_device:226:144",
             "HAL_VISIBLE_XDNA_DEVICES": "",
             "HAL_VISIBLE_RDNA_DEVICES": "1,0",
             "HAL_VISIBLE_CDNA_DEVICES": "0",
@@ -1428,6 +1429,15 @@ class CiTest(unittest.TestCase):
                 f"--test_env={name}={device_visibility[name]}",
                 amdgpu_test.argv,
             )
+        for name in (
+            "ROCR_VISIBLE_DEVICES",
+            "HIP_VISIBLE_DEVICES",
+            "CUDA_VISIBLE_DEVICES",
+            "GPU_DEVICE_ORDINAL",
+        ):
+            self.assertFalse(
+                any(arg.startswith(f"--test_env={name}=") for arg in amdgpu_test.argv)
+            )
         cmake_tests = [
             step for step in cmake_steps if step.name.startswith("Test IREE CMake")
         ]
@@ -1438,6 +1448,7 @@ class CiTest(unittest.TestCase):
 
     def test_native_amd_profiles_preserve_independent_and_empty_visibility(self):
         selection = {
+            "HAL_AMD_GPU_ASSIGNMENT": "windows_adapter:123456:0",
             "HAL_VISIBLE_XDNA_DEVICES": "",
             "HAL_VISIBLE_RDNA_DEVICES": "1,0",
             "HAL_VISIBLE_CDNA_DEVICES": "0",
@@ -1472,6 +1483,56 @@ class CiTest(unittest.TestCase):
                             for arg in step.argv
                         )
                     )
+
+    def test_assigned_native_cmake_child_does_not_reapply_foreign_ordinals(self):
+        # A job owns native device 144, which ROCr calls ordinal 5. HAL exposes
+        # that one physical GPU as ordinal 0; applying 5 again would hide it.
+        inherited = {
+            "HAL_AMD_GPU_ASSIGNMENT": "linux_device:226:144",
+            "AMDF_CTS_GPU_NATIVE_IDENTITY": "linux_device:226:144",
+            "ROCR_VISIBLE_DEVICES": "5",
+            "HIP_VISIBLE_DEVICES": "0",
+            "CUDA_VISIBLE_DEVICES": "0",
+            "GPU_DEVICE_ORDINAL": "0",
+            "PRESERVED": "value with spaces",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "environment.json"
+            # Exercise the actual generated CMake step environment in a child.
+            # Only replace the build-system invocation with a read-only witness.
+            with mock.patch.dict(os.environ, inherited, clear=True):
+                steps = ci.steps_from_args(ci.parse_arguments(["iree-cmake-amdgpu"]))
+                step = next(
+                    step for step in steps if step.name.startswith("Test IREE CMake")
+                )
+                command = (
+                    sys.executable,
+                    "-c",
+                    "import json, os, pathlib; pathlib.Path("
+                    + repr(str(output))
+                    + ").write_text(json.dumps(dict(os.environ)))",
+                )
+                witness = ci.CiStep(step.name, command, env=step.env)
+                with mock.patch.object(ci, "REPO_ROOT", Path(directory)):
+                    result = ci.run_step(witness, verbose=False)
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(os.environ["ROCR_VISIBLE_DEVICES"], "5")
+            child = json.loads(output.read_text())
+        self.assertEqual(child["HAL_AMD_GPU_ASSIGNMENT"], "linux_device:226:144")
+        self.assertEqual(child["AMDF_CTS_GPU_NATIVE_IDENTITY"], "linux_device:226:144")
+        self.assertEqual(child["PRESERVED"], "value with spaces")
+        for name in (
+            "ROCR_VISIBLE_DEVICES",
+            "HIP_VISIBLE_DEVICES",
+            "CUDA_VISIBLE_DEVICES",
+            "GPU_DEVICE_ORDINAL",
+        ):
+            self.assertNotIn(name, child)
+        self.assertIn("env -u ROCR_VISIBLE_DEVICES", witness.command_line())
+
+    def test_cmake_without_physical_assignment_keeps_frontend_visibility(self):
+        with mock.patch.dict(os.environ, {"ROCR_VISIBLE_DEVICES": "5"}, clear=True):
+            self.assertEqual(ci.amd_cmake_test_env(), ())
 
     def test_amdgpu_bazel_device_toolchain_uses_fetched_rocm_root(self):
         args = ci.parse_arguments(["iree-bazel-amdgpu"])

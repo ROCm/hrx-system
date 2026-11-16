@@ -42,8 +42,32 @@ selects all GPUs supported by this build. Both `rdna:0` and `rdna://0` select th
 first visible RDNA device;
 `xdna:0?columns=4` configures an NPU context.
 
-Each scheme has its own dense ordinal namespace. Driver creation captures these
-optional environment variables:
+A launcher can assign physical GPUs once for every GPU scheme using
+`HAL_AMD_GPU_ASSIGNMENT`. It is an ordered, comma-separated list of exact OS
+identities, independent of HAL ordinals and foreign runtimes' visibility masks:
+
+```sh
+HAL_AMD_GPU_ASSIGNMENT=linux_device:226:144,linux_device:226:160 iree-run-module ...
+```
+
+Linux identities name DRM character-device major/minor pairs. Windows identities
+use `windows_adapter:<hex LUID>:<decimal physical adapter index>`. These are
+machine-local assignments that can change on reboot or removal, rather than
+persistent application identifiers. A launcher obtains them from its verified
+native device selection; ordinary applications can keep using the URI forms
+below.
+
+For an assignment containing RDNA A followed by CDNA B, `amdgpu:0` selects A,
+`amdgpu:1` selects B, `rdna:0` selects A, and `cdna:0` selects B. An unset
+assignment preserves native enumeration order. Empty or whitespace-only assigns
+no GPUs. Every entry must identify exactly one GPU in the passive snapshot;
+malformed, duplicate, missing, non-GPU, or ambiguous entries fail driver creation.
+An assigned GPU still needs supported execution services. The driver never
+substitutes an unassigned GPU, even through an exact URI or an opaque device ID.
+XDNA selection and the underlying libamdf topology remain independent.
+
+Each scheme has its own dense ordinal namespace within this assignment. Driver
+creation also captures these optional environment variables:
 
 | Scheme | Ordered visibility list |
 | --- | --- |
@@ -52,12 +76,13 @@ optional environment variables:
 | `cdna` | `HAL_VISIBLE_CDNA_DEVICES` |
 | `amdgpu` | `HAL_VISIBLE_AMDGPU_DEVICES` |
 
-A list indexes that scheme's unmasked supported devices in native enumeration
-order. Unset exposes all devices; an empty or whitespace-only value exposes
-none. Comma-separated decimal ordinals select and reorder devices. Invalid,
+A list indexes that scheme's supported devices in assignment order, or native
+enumeration order when no assignment is set. Unset exposes all devices; an
+empty or whitespace-only value exposes none. Comma-separated decimal ordinals select and reorder devices. Invalid,
 duplicate, or out-of-range ordinals fail driver creation with the variable
 named in the diagnostic. The lists are independent: filtering the unified GPU
-view does not filter the RDNA view or alter libamdf topology.
+view does not filter the RDNA view or alter libamdf topology. Neither view can
+widen the physical assignment.
 
 For example, given native endpoints NPU A, RDNA B, RDNA C:
 
@@ -83,12 +108,17 @@ returned by enumeration name native endpoints across aliases, not URI ordinals.
 Visibility configures selection and is not an access-control boundary.
 Architecture-local ordinals do not claim to match another runtime's combined
 GPU numbering. HIP's ROCR/HIP/CUDA visibility variables are frontend policy
-applied before activation, independently of these HAL scheme filters.
+applied before activation to the HAL-visible list. Launchers that already assign
+physical GPUs through the HAL must not reapply a foreign runtime's pre-assignment
+ordinal to that filtered list; foreign-runtime masks belong on foreign-runtime
+invocations.
 
 GPU discovery captures architecture and usable compute families through query-only
 endpoints; it creates no device, address space, queue, or event. Enumeration and
-selection then use immutable endpoint-index lists. Queue admission selects an
-advertised native protocol and publication mode. The default prefers PM4 on RDNA
+selection then use immutable endpoint-index lists. Physical assignment reuses
+those lists and releases its temporary identity scratch after construction. It
+adds no retained per-device table, worker, or submission-time checks. Queue
+admission selects an advertised native protocol and publication mode. The default prefers PM4 on RDNA
 and AQL on CDNA among supported families; explicit family selection is independent
 of architecture. PM4 supports USER host-producer and KERNEL submission families.
 AQL requires USER publication with both host and device producers and native

@@ -154,7 +154,8 @@ class RequirementAudit:
 class CiStep:
     name: str
     argv: tuple[str, ...]
-    env: tuple[tuple[str, str], ...] = ()
+    # Per-step overrides; None removes an inherited variable in this child only.
+    env: tuple[tuple[str, str | None], ...] = ()
     # Metadata preflight that must succeed before executing a test command.
     requirement_audit: RequirementAudit | None = None
     # Bazel execution profile summarized after this command completes.
@@ -163,8 +164,14 @@ class CiStep:
     test_results: bazel_test_results.BazelTestResultsCapture | None = None
 
     def command_line(self) -> str:
-        env_args = tuple(f"{key}={value}" for key, value in self.env)
-        return shlex.join(env_args + self.argv)
+        unset_args = tuple(
+            arg for key, value in self.env if value is None for arg in ("-u", key)
+        )
+        env_args = tuple(
+            f"{key}={value}" for key, value in self.env if value is not None
+        )
+        prefix = ("env",) + unset_args if unset_args else ()
+        return shlex.join(prefix + env_args + self.argv)
 
 
 @dataclass(frozen=True)
@@ -255,6 +262,7 @@ def codec_options(build_system: str) -> tuple[str, ...]:
 # Bazel test actions do not inherit the client environment. Preserve the
 # selectors that establish the runner's GPU lease without choosing one here.
 AMD_DEVICE_VISIBILITY_ENV_VARS = (
+    "HAL_AMD_GPU_ASSIGNMENT",
     "HAL_VISIBLE_XDNA_DEVICES",
     "HAL_VISIBLE_RDNA_DEVICES",
     "HAL_VISIBLE_CDNA_DEVICES",
@@ -268,6 +276,25 @@ def amd_test_env() -> tuple[tuple[str, str], ...]:
         (name, value)
         for name in AMD_DEVICE_VISIBILITY_ENV_VARS
         if (value := os.environ.get(name)) is not None
+    )
+
+
+def amd_cmake_test_env() -> tuple[tuple[str, str | None], ...]:
+    environment = amd_test_env()
+    if "HAL_AMD_GPU_ASSIGNMENT" not in os.environ:
+        return environment
+    # CTest inherits the job environment, unlike Bazel test actions. HIP-on-HRX
+    # filters the HAL-visible list, so a foreign runtime's original ordinal must
+    # not filter that already-assigned list again. Foreign tools keep their own
+    # masks, and individual tests may still set masks to exercise HIP behavior.
+    return environment + tuple(
+        (name, None)
+        for name in (
+            "ROCR_VISIBLE_DEVICES",
+            "HIP_VISIBLE_DEVICES",
+            "CUDA_VISIBLE_DEVICES",
+            "GPU_DEVICE_ORDINAL",
+        )
     )
 
 
@@ -646,7 +673,7 @@ def cmake_test_step(
     label_regex: str | None = None,
     label_exclude_regex: str | None = None,
     exclude_regex: str = "",
-    env: tuple[tuple[str, str], ...] = (),
+    env: tuple[tuple[str, str | None], ...] = (),
     parallelism: int = 8,
     available_resources: tuple[str, ...] = (),
 ) -> CiStep:
@@ -1402,7 +1429,7 @@ def cmake_amdgpu_steps(
             exclude_regex=xfail_regex,
             available_resources=ci_config.AMDGPU_RESOURCES,
             env=sanitizer_env(sanitizer)
-            + amd_test_env()
+            + amd_cmake_test_env()
             + amd_gpu_cts_test_env(target_selector),
             parallelism=1,
         )
@@ -1425,7 +1452,7 @@ def cmake_amdgpu_steps(
             exclude_regex=resource_exclude_regex,
             available_resources=ci_config.AMDGPU_RESOURCES,
             env=sanitizer_env(sanitizer)
-            + amd_test_env()
+            + amd_cmake_test_env()
             + amd_gpu_cts_test_env(target_selector),
             parallelism=1,
         )
@@ -1900,7 +1927,9 @@ def run_step(step: CiStep, verbose: bool) -> StepResult:
     if step.env:
         environment = os.environ.copy()
         for key, value in step.env:
-            if key == "TSAN_OPTIONS" and environment.get(key):
+            if value is None:
+                environment.pop(key, None)
+            elif key == "TSAN_OPTIONS" and environment.get(key):
                 environment[key] = value + " " + environment[key]
             else:
                 environment[key] = value

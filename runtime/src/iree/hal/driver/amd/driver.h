@@ -34,10 +34,23 @@ extern "C" {
 // ordinal zero; `rdna:N` and `rdna://N` index the same visible list.
 // The scheme-less default is the first visible endpoint in native order.
 //
-// Driver creation captures the enabled schemes' HAL_VISIBLE_XDNA_DEVICES,
+// Driver creation captures HAL_AMD_GPU_ASSIGNMENT when the GPU engine is built.
+// This optional ordered list restricts every GPU scheme and opaque device ID
+// to exact OS identities: linux_device:<decimal major>:<decimal minor> or
+// windows_adapter:<hex LUID>:<decimal physical adapter index>. Unset preserves
+// native enumeration order; empty or whitespace-only assigns no GPUs. Entries
+// must each identify exactly one GPU in the passive native snapshot. Malformed,
+// missing, ambiguous, non-GPU, and duplicate entries fail with
+// INVALID_ARGUMENT. An assigned GPU still requires supported execution; another
+// unassigned GPU never substitutes for it. Assignment does not affect XDNA or
+// native topology. These OS identities are machine-local and can change on
+// reboot or removal.
+//
+// Driver creation also captures the enabled schemes' HAL_VISIBLE_XDNA_DEVICES,
 // HAL_VISIBLE_RDNA_DEVICES, HAL_VISIBLE_CDNA_DEVICES, and
 // HAL_VISIBLE_AMDGPU_DEVICES variables. Each list selects and orders ordinals
-// from that scheme's unmasked supported endpoints. Unset
+// from that scheme's supported endpoints in assignment order (native order
+// without assignment). They cannot widen the physical GPU assignment. Unset
 // exposes all; empty or whitespace-only exposes none. Duplicate, malformed, and
 // out-of-range ordinals fail driver creation with INVALID_ARGUMENT. Variables
 // are independent: filtering amdgpu does not filter rdna. Changing environment
