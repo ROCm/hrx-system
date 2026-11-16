@@ -231,9 +231,10 @@ typedef struct loomc_compile_artifact_options_t {
   const loomc_emit_options_t* emit_options;
 
   /// Additional compiler-side artifacts returned with the primary target
-  /// artifact. Currently only `LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG` is
-  /// accepted. Zero keeps launch-program construction and serialization off
-  /// the compilation path.
+  /// artifact. Module text or bytecode captures the root-selected prepared
+  /// module immediately before target emission. A launch-config request
+  /// returns its inseparable host launch program. Zero keeps all intermediate
+  /// serialization and launch-program construction off the compilation path.
   loomc_compile_artifact_flags_t artifact_flags;
 } loomc_compile_artifact_options_t;
 

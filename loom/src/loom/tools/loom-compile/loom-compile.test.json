@@ -199,6 +199,29 @@
           "exists": false
         }
       ]
+    },
+    {
+      "name": "emits paired prepared module and launch config",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "--root=@prepared",
+          "--target=x86:scalar",
+          "--output={tmp}/prepared.so",
+          "--emit-prepared-module={tmp}/prepared.loombc",
+          "--emit-launch-config={tmp}/prepared-launch.loombc"
+        ],
+        "stdin": {
+          "text": "kernel.def @prepared() {\n  %one = index.constant 1 : index\n  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index\n} launch() {\n  kernel.return\n}\n"
+        }
+      },
+      "stdout": {"empty": true},
+      "stderr": {"empty": true},
+      "files": [
+        {"path": "{tmp}/prepared.so", "non_empty": true},
+        {"path": "{tmp}/prepared.loombc", "non_empty": true},
+        {"path": "{tmp}/prepared-launch.loombc", "non_empty": true}
+      ]
     }
   ]
 }
