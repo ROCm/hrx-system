@@ -9,12 +9,11 @@
 #include <string.h>
 
 #include "iree/base/internal/debugging.h"
+#include "loom/binding/c/target/spirv/vulkan_device.h"
 
 enum {
   LOOMC_SPIRV_VULKAN_LIMIT_FACT_CAPACITY = 16,
   LOOMC_SPIRV_VULKAN_ENVIRONMENT_FACT_CAPACITY = 4,
-  // PCI-SIG vendor identifier reported by AMD Vulkan physical devices.
-  LOOMC_SPIRV_VULKAN_AMD_VENDOR_ID = 0x1002,
 };
 
 typedef struct loomc_spirv_vulkan_profile_facts_t {
@@ -505,11 +504,24 @@ static loomc_status_t loomc_spirv_vulkan_query_properties(
                                                       &properties2);
   IREE_LEAK_CHECK_DISABLE_POP();
   *out_api_version = properties2.properties.apiVersion;
-  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkan_add_bool_feature(
-      facts,
-      properties2.properties.vendorID != LOOMC_SPIRV_VULKAN_AMD_VENDOR_ID,
+  const loomc_spirv_feature_bits_t conversion_features =
+      loomc_spirv_vulkan_device_conversion_features(
+          properties2.properties.vendorID, properties2.properties.deviceID,
+          properties2.properties.driverVersion);
+  const loomc_spirv_feature_t conversions[] = {
+      LOOMC_SPIRV_FEATURE_FLOAT32_TO_FLOAT16_CONVERSION,
       LOOMC_SPIRV_FEATURE_FLOAT64_TO_FLOAT16_CONVERSION,
-      loomc_make_cstring_view("vulkan:vendorID")));
+  };
+  loomc_status_t status = loomc_ok_status();
+  for (uint32_t i = 0; i < sizeof(conversions) / sizeof(conversions[0]) &&
+                       loomc_status_is_ok(status);
+       ++i) {
+    status = loomc_spirv_vulkan_add_bool_feature(
+        facts,
+        (conversion_features & loomc_spirv_feature_bit(conversions[i])) != 0,
+        conversions[i], loomc_make_cstring_view("vulkan:device-identity"));
+  }
+  LOOMC_RETURN_IF_ERROR(status);
 
   const uint32_t max_spirv_version =
       loomc_spirv_max_version_from_vulkan_api_version(

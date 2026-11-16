@@ -127,6 +127,7 @@ loom_cc_library(
     deps = [
         ":isa",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
     ],
 )
 

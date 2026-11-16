@@ -18,6 +18,7 @@
 #include "profile_rows.h"
 #include "result.h"
 #include "target.h"
+#include "vulkan_device.h"
 
 #define LOOMC_SPIRV_IREE_HAL_VULKAN_API_VERSION(major, minor, patch) \
   ((((uint32_t)(major)) << 22) | (((uint32_t)(minor)) << 12) |       \
@@ -32,8 +33,6 @@ enum {
   LOOMC_SPIRV_IREE_HAL_VULKAN_SUBGROUP_FEATURE_SHUFFLE_RELATIVE_BIT =
       0x00000020,
   LOOMC_SPIRV_IREE_HAL_VULKAN_SUBGROUP_FEATURE_CLUSTERED_BIT = 0x00000040,
-  // PCI-SIG vendor identifier reported by AMD Vulkan physical devices.
-  LOOMC_SPIRV_IREE_HAL_VULKAN_AMD_VENDOR_ID = 0x1002,
   LOOMC_SPIRV_IREE_HAL_VULKAN_API_VERSION_1_3 =
       LOOMC_SPIRV_IREE_HAL_VULKAN_API_VERSION(1, 3, 0),
 };
@@ -690,11 +689,20 @@ static loomc_status_t loomc_spirv_iree_hal_query_facts(
       out_facts, true, LOOMC_SPIRV_FEATURE_VULKAN_SHADER, api_provenance);
   loomc_spirv_iree_hal_set_bool_feature(
       out_facts, true, LOOMC_SPIRV_FEATURE_GROUP_NON_UNIFORM, api_provenance);
-  loomc_spirv_iree_hal_set_bool_feature(
-      out_facts,
-      identity->vendor_id != LOOMC_SPIRV_IREE_HAL_VULKAN_AMD_VENDOR_ID,
+  const loomc_spirv_feature_bits_t conversion_features =
+      loomc_spirv_vulkan_device_conversion_features(
+          identity->vendor_id, identity->device_id, vulkan_spec.driver_version);
+  const loomc_spirv_feature_t conversions[] = {
+      LOOMC_SPIRV_FEATURE_FLOAT32_TO_FLOAT16_CONVERSION,
       LOOMC_SPIRV_FEATURE_FLOAT64_TO_FLOAT16_CONVERSION,
-      loomc_make_cstring_view("iree-hal:identity.vendor_id"));
+  };
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(conversions); ++i) {
+    loomc_spirv_iree_hal_set_bool_feature(
+        out_facts,
+        (conversion_features & loomc_spirv_feature_bit(conversions[i])) != 0,
+        conversions[i],
+        loomc_make_cstring_view("iree-hal:vulkan.device-identity"));
+  }
   loomc_spirv_iree_hal_set_environment_fact(
       out_facts, LOOMC_SPIRV_ENVIRONMENT_MAX_SPIRV_VERSION,
       loomc_spirv_max_version_from_vulkan_api_version(

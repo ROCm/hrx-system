@@ -16,6 +16,7 @@ from loom.target.arch.spirv.features import (
     FEATURE_ATOMS,
     FeatureAtom,
     FeatureProfile,
+    feature_bit_value,
     feature_dependency_keys,
     validate_feature_catalog,
 )
@@ -98,3 +99,14 @@ def test_validation_rejects_duplicate_atom_rows() -> None:
 
     with _raises_value_error(r"extensions repeats 'SPV_KHR_vulkan_memory_model'"):
         validate_feature_catalog(atoms=bad_atoms, profiles=())
+
+
+def test_feature_word_has_64_distinct_bits_without_moving_existing_atoms() -> None:
+    bits = [feature_bit_value(atom.key) for atom in FEATURE_ATOMS]
+    assert len(bits) == len(set(bits)) == 64
+    assert bits[:-1] == [1 << identifier for identifier in range(1, 64)]
+    assert bits[-1] == 1
+    validate_feature_catalog()
+    overflow = replace(FEATURE_ATOMS[-1], key="overflow", c_suffix="OVERFLOW", name="spirv.overflow")
+    with _raises_value_error("at most 64 atoms"):
+        validate_feature_catalog(atoms=(*FEATURE_ATOMS, overflow))

@@ -34,7 +34,7 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @signed_widths(%
 
 // ====
 
-// RUN: emit spirv-low control-flow=structured-low target=spirv:vulkan1.3+bda features=FLOAT16,FLOAT64,FLOAT64_TO_FLOAT16_CONVERSION,FLOAT16_DENORM_PRESERVE,FLOAT16_ROUNDING_RTE,FLOAT32_DENORM_PRESERVE,FLOAT16_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT64_SIGNED_ZERO_INF_NAN_PRESERVE
+// RUN: emit spirv-low control-flow=structured-low target=spirv:vulkan1.3+bda features=FLOAT16,FLOAT64,FLOAT32_TO_FLOAT16_CONVERSION,FLOAT64_TO_FLOAT16_CONVERSION,FLOAT16_DENORM_PRESERVE,FLOAT16_ROUNDING_RTE,FLOAT32_DENORM_PRESERVE,FLOAT16_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT32_SIGNED_ZERO_INF_NAN_PRESERVE,FLOAT64_SIGNED_ZERO_INF_NAN_PRESERVE
 
 func.def @signed_floating(%first: f64, %second: f64, %count: index) -> (f64) {
   %begin = index.constant 0 : index

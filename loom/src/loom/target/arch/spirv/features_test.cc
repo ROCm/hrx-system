@@ -100,6 +100,28 @@ TEST(SpirvFeaturesTest, KnownAtomsHaveDirectBitsAndDescriptors) {
             LOOM_SPIRV_FEATURE_VULKAN_SHADER);
 }
 
+TEST(SpirvFeaturesTest, UsesEveryFeatureBitWithoutCollidingWithUnknown) {
+  uint64_t seen = 0;
+  for (uint32_t identifier = 1; identifier < LOOM_SPIRV_FEATURE_ATOM_COUNT;
+       ++identifier) {
+    const auto atom = static_cast<loom_spirv_feature_atom_t>(identifier);
+    const auto bit = loom_spirv_feature_atom_bit(atom);
+    ASSERT_NE(bit, 0u);
+    EXPECT_EQ(seen & bit, 0u);
+    EXPECT_EQ(loom_spirv_feature_bits_first_atom(bit), atom);
+    seen |= bit;
+    ASSERT_NE(loom_spirv_feature_atom_descriptor(atom), nullptr);
+  }
+  EXPECT_EQ(seen, UINT64_MAX);
+  EXPECT_EQ(loom_spirv_known_feature_bits(), seen);
+  EXPECT_EQ(loom_spirv_feature_atom_bit(LOOM_SPIRV_FEATURE_ATOM_UNKNOWN), 0u);
+  EXPECT_EQ(loom_spirv_feature_atom_bit(LOOM_SPIRV_FEATURE_ATOM_COUNT), 0u);
+  EXPECT_EQ(loom_spirv_feature_bits_first_atom(0),
+            LOOM_SPIRV_FEATURE_ATOM_UNKNOWN);
+  EXPECT_EQ(loom_spirv_feature_bits_first_atom(UINT64_MAX),
+            LOOM_SPIRV_FEATURE_ATOM_FLOAT32_TO_FLOAT16_CONVERSION);
+}
+
 TEST(SpirvFeaturesTest, ClosesOnlyRequiredFloatingWidthGroups) {
   const auto half = LOOM_SPIRV_FEATURE_FLOAT16_DENORM_PRESERVE;
   const auto single = LOOM_SPIRV_FEATURE_FLOAT32_DENORM_PRESERVE;

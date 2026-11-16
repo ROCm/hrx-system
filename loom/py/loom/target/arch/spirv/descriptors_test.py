@@ -223,6 +223,7 @@ def test_native_float_narrowing_requires_exact_execution_controls() -> None:
             "float16_rounding_rte",
             "float16_signed_zero_inf_nan_preserve",
             "float32_signed_zero_inf_nan_preserve",
+            "float32_to_float16_conversion",
         ),
     }
 

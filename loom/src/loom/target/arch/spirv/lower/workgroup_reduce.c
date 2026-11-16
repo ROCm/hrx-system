@@ -231,8 +231,7 @@ iree_status_t loom_spirv_select_workgroup_reduce(
     const uint64_t missing_features = required_features & ~available_features;
     if (missing_features != 0) {
       const loom_spirv_feature_atom_t missing_feature =
-          (loom_spirv_feature_atom_t)iree_math_count_trailing_zeros_u64(
-              missing_features);
+          loom_spirv_feature_bits_first_atom(missing_features);
       status = loom_spirv_workgroup_reject(
           context, source_op, IREE_SV("feature"),
           loom_spirv_feature_atom_name(missing_feature),

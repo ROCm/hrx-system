@@ -30,9 +30,11 @@ loom_cc_library(
     srcs = [
         "profile.c",
         "profile_rows.c",
+        "vulkan_device.c",
     ],
     hdrs = [
         "profile_rows.h",
+        "vulkan_device.h",
         "//loom/binding/c:include/loomc/target/spirv/base.h",
         "//loom/binding/c:include/loomc/target/spirv/profile.h",
     ],

@@ -138,6 +138,10 @@ struct VulkanDeviceSpecOptions {
   uint32_t subgroup_supported_operations = 0;
   // PCI vendor identifier reported by the device.
   uint32_t vendor_id = kNvidiaVendorId;
+  // PCI device identifier reported by the device.
+  uint32_t device_id = 0;
+  // Vulkan vendor-encoded driver version.
+  uint32_t driver_version = 1;
   // Dispatch limits replacing the fixture defaults, when present.
   const iree_hal_device_dispatch_spec_t* dispatch_override = nullptr;
   // Maximum number of subgroups in one workgroup.
@@ -161,7 +165,7 @@ iree_status_t CreateVulkanDeviceSpec(
   out_device_spec->reset();
   iree_hal_vulkan_device_spec_t vulkan_spec = {
       .api_version = kVulkanApiVersion13,
-      .driver_version = 1,
+      .driver_version = options.driver_version,
       .physical_device_type = 2,
       .enabled_features = enabled_features,
       .flags = device_spec_flags,
@@ -196,6 +200,7 @@ iree_status_t CreateVulkanDeviceSpec(
       .device_path = iree_string_view_empty(),
       .vendor_name = iree_string_view_empty(),
       .vendor_id = vendor_id,
+      .device_id = options.device_id,
   };
   iree_status_t status =
       iree_hal_device_spec_builder_set_identity(&builder, &identity);
@@ -553,6 +558,36 @@ TEST(LoomcSpirvIreeHalTargetTest, DisablesBrokenAmdFloat64ToFloat16Conversion) {
       profile.get(), LOOMC_SPIRV_FEATURE_FLOAT64_TO_FLOAT16_CONVERSION,
       &feature_state));
   EXPECT_EQ(feature_state, LOOMC_TARGET_FACT_STATE_FALSE);
+}
+
+TEST(LoomcSpirvIreeHalTargetTest,
+     PreservesDeviceIdentityForConversionQualification) {
+  auto environment = CreateSpirvTargetEnvironment();
+  for (uint32_t identity_change = 0; identity_change < 4; ++identity_change) {
+    SCOPED_TRACE(identity_change);
+    DeviceSpecPtr device_spec;
+    IREE_ASSERT_OK(CreateVulkanDeviceSpec(
+        RequiredVulkanFeatures(), kCompleteDeviceSpecFlags,
+        VulkanDeviceSpecOptions{
+            .vendor_id = identity_change == 1 ? kAmdVendorId : kNvidiaVendorId,
+            .device_id = identity_change == 2 ? 0x2786u : 0x2684u,
+            .driver_version = 2497102272u + (identity_change == 3 ? 64 : 0),
+        },
+        &device_spec));
+    FakeHalDevice device = {};
+    InitializeFakeDevice(device_spec.get(), &device);
+    loomc_result_t* result = nullptr;
+    auto profile = SelectTargetFromHal(environment.get(), &device, &result);
+    ResultPtr result_ptr(result);
+    ASSERT_NE(profile.get(), nullptr);
+    ExpectSucceededResult(result_ptr.get());
+    loomc_target_fact_state_t state = LOOMC_TARGET_FACT_STATE_UNKNOWN;
+    LOOMC_EXPECT_OK(loomc_spirv_target_profile_query_feature(
+        profile.get(), LOOMC_SPIRV_FEATURE_FLOAT32_TO_FLOAT16_CONVERSION,
+        &state));
+    EXPECT_EQ(state, identity_change == 0 ? LOOMC_TARGET_FACT_STATE_FALSE
+                                          : LOOMC_TARGET_FACT_STATE_TRUE);
+  }
 }
 
 TEST(LoomcSpirvIreeHalTargetTest, ImportsEnabledArithmeticFeatures) {
@@ -1099,7 +1134,8 @@ TEST(LoomcSpirvIreeHalTargetTest, ForcedProfilesCheckTheCompleteFeatureFamily) {
         feature == LOOMC_SPIRV_FEATURE_PHYSICAL_STORAGE_BUFFER ||
         feature == LOOMC_SPIRV_FEATURE_INT64 ||
         feature == LOOMC_SPIRV_FEATURE_GROUP_NON_UNIFORM ||
-        feature == LOOMC_SPIRV_FEATURE_FLOAT64_TO_FLOAT16_CONVERSION;
+        feature == LOOMC_SPIRV_FEATURE_FLOAT64_TO_FLOAT16_CONVERSION ||
+        feature == LOOMC_SPIRV_FEATURE_FLOAT32_TO_FLOAT16_CONVERSION;
     ExpectForcedSelection(environment.get(), &baseline, profile.get(),
                           baseline_support);
     // Cooperative vector features are not observed or enabled by the HAL

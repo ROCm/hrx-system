@@ -369,7 +369,7 @@ TEST_F(SpirvModuleCompilerTest, InternalSignatureInstructionLimits) {
 }
 
 TEST_F(SpirvModuleCompilerTest, TargetEncodingRequirementsAreDiagnostics) {
-  for (int rejection = 0; rejection < 3; ++rejection) {
+  for (int rejection = 0; rejection < 2; ++rejection) {
     SCOPED_TRACE(rejection);
     ModulePtr module = ParseModule(IREE_SV(R"(
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @entry() asm {
@@ -379,11 +379,8 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @entry() asm {
     loom_target_facts_t facts = {};
     InitializeTargetFacts(&loom_spirv_low_target_bundle_vulkan1_3, &facts);
     facts.storage.export_plan.name = IREE_SV("source_entry");
-    if (rejection == 2) {
+    if (rejection == 1) {
       facts.storage.config.contract_feature_bits = 0;
-    } else if (rejection == 1) {
-      facts.storage.config.contract_feature_bits |=
-          UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_UNKNOWN;
     } else {
       facts.storage.snapshot.artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF;
     }
@@ -402,8 +399,8 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @entry() asm {
     EXPECT_EQ(binary.words, nullptr);
     EXPECT_EQ(diagnostic.error, LOOM_ERR_BACKEND_055);
     EXPECT_EQ(diagnostic.op,
-              rejection == 2 ? nullptr : version.base.function.op);
-    EXPECT_EQ(diagnostic.export_name, rejection == 2 ? "" : "source_entry");
+              rejection == 1 ? nullptr : version.base.function.op);
+    EXPECT_EQ(diagnostic.export_name, rejection == 1 ? "" : "source_entry");
     loom_spirv_module_binary_deinitialize(&binary, iree_allocator_system());
   }
 }

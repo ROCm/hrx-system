@@ -548,6 +548,21 @@ TEST(TargetSpirvProfileTest, NamedProfileRefinementReportsInheritedProvenance) {
   EXPECT_THAT(message, ::testing::HasSubstr("application:subgroup64"));
 }
 
+TEST(TargetSpirvProfileTest, FeatureBitsIncludeTheLastIdentifier) {
+  uint64_t seen = 0;
+  for (uint32_t identifier = 1; identifier < LOOMC_SPIRV_FEATURE_COUNT;
+       ++identifier) {
+    const auto feature = static_cast<loomc_spirv_feature_t>(identifier);
+    const auto bit = loomc_spirv_feature_bit(feature);
+    ASSERT_NE(bit, 0u);
+    EXPECT_EQ(seen & bit, 0u);
+    seen |= bit;
+  }
+  EXPECT_EQ(seen, UINT64_MAX);
+  EXPECT_EQ(loomc_spirv_feature_bit(LOOMC_SPIRV_FEATURE_UNKNOWN), 0u);
+  EXPECT_EQ(loomc_spirv_feature_bit(LOOMC_SPIRV_FEATURE_COUNT), 0u);
+}
+
 TEST(TargetSpirvProfileTest, CreatesEmptyPartialProfile) {
   TargetEnvironmentPtr target_environment = CreateSpirvTargetEnvironment();
   TargetProfilePtr profile = CreateSpirvProfile(target_environment.get(),

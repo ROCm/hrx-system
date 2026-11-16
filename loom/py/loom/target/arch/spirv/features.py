@@ -723,6 +723,14 @@ FEATURE_ATOMS = (
             "LOOM_SPIRV_CAPABILITY_WORKGROUP_MEMORY_EXPLICIT_LAYOUT16_BIT_ACCESS_KHR",
         ),
     ),
+    FeatureAtom(
+        key="float32_to_float16_conversion",
+        c_suffix="FLOAT32_TO_FLOAT16_CONVERSION",
+        name="spirv.float32_to_float16_conversion",
+        doc="Native F32-to-F16 conversion preserves intermediate rounding.",
+        required=("vulkan_shader",),
+        minimum_spirv_version=SPIRV_VERSION_1_0,
+    ),
 )
 
 FEATURE_PROFILES = (
@@ -752,9 +760,11 @@ def feature_bit_value(
     *,
     atoms: Iterable[FeatureAtom] = FEATURE_ATOMS,
 ) -> int:
+    # Identifiers retain their existing bits; identifier 64 uses the spare bit 0.
+    # UNKNOWN is not an atom and never contributes a bit.
     for index, atom in enumerate(atoms, start=1):
         if atom.key == atom_key:
-            return 1 << index
+            return 1 << (index % 64)
     raise ValueError(f"unknown SPIR-V feature atom {atom_key!r}")
 
 
@@ -835,8 +845,8 @@ def validate_feature_catalog(
     _validate_profiles(profiles, atoms_by_key)
     _validate_row_sets(atoms)
     _validate_model_consistency(atoms)
-    if len(atoms) >= 64:
-        raise ValueError("SPIR-V feature atom bitset supports at most 63 atoms")
+    if len(atoms) > 64:
+        raise ValueError("SPIR-V feature atom bitset supports at most 64 atoms")
     for field_name in _ROW_FIELD_NAMES:
         row_count = feature_row_capacity(field_name, atoms=atoms)
         if row_count > 255:

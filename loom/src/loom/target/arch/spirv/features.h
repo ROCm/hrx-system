@@ -155,11 +155,15 @@ typedef enum loom_spirv_feature_atom_e {
   LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR =
       63,
 
+  // Native F32-to-F16 conversion preserves intermediate rounding.
+  LOOM_SPIRV_FEATURE_ATOM_FLOAT32_TO_FLOAT16_CONVERSION = 64,
+
   // Number of feature atom enum slots.
-  LOOM_SPIRV_FEATURE_ATOM_COUNT = 64,
+  LOOM_SPIRV_FEATURE_ATOM_COUNT = 65,
 } loom_spirv_feature_atom_t;
 
-// Bitset of loom_spirv_feature_atom_t values.
+// Bitset of loom_spirv_feature_atom_t values. Identifiers 1..63 retain their
+// corresponding bits; identifier 64 uses bit 0. UNKNOWN has no bit.
 typedef uint64_t loom_spirv_feature_bits_t;
 
 typedef enum loom_spirv_feature_bit_e {
@@ -391,6 +395,9 @@ typedef enum loom_spirv_feature_bit_e {
   (UINT64_C(1)                                                               \
    << LOOM_SPIRV_FEATURE_ATOM_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR)
 
+// Native F32-to-F16 conversion preserves intermediate rounding.
+#define LOOM_SPIRV_FEATURE_FLOAT32_TO_FLOAT16_CONVERSION UINT64_C(1)
+
 // Feature bits known by the SPIR-V target package.
 #define LOOM_SPIRV_FEATURE_KNOWN_BITS                                         \
   (LOOM_SPIRV_FEATURE_VULKAN_SHADER |                                         \
@@ -450,7 +457,8 @@ typedef enum loom_spirv_feature_bit_e {
    LOOM_SPIRV_FEATURE_FLOAT_ALL_ROUNDING_RTE |                                \
    LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_KHR |                  \
    LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_8BIT_ACCESS_KHR |      \
-   LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR)
+   LOOM_SPIRV_FEATURE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_16BIT_ACCESS_KHR |     \
+   LOOM_SPIRV_FEATURE_FLOAT32_TO_FLOAT16_CONVERSION)
 
 // Feature bits unconditionally required by Vulkan 1.3 BDA HAL modules.
 #define LOOM_SPIRV_FEATURE_MODULE_VULKAN_1_3_BDA_BASELINE \
@@ -542,6 +550,10 @@ typedef struct loom_spirv_feature_set_t {
 // Returns the direct feature bit for |atom|, or zero for unknown atoms.
 loom_spirv_feature_bits_t loom_spirv_feature_atom_bit(
     loom_spirv_feature_atom_t atom);
+
+// Returns the atom at the lowest set bit, or UNKNOWN for an empty set.
+loom_spirv_feature_atom_t loom_spirv_feature_bits_first_atom(
+    loom_spirv_feature_bits_t bits);
 
 // Returns the descriptor for |atom|, or NULL when |atom| is unknown.
 const loom_spirv_feature_atom_descriptor_t* loom_spirv_feature_atom_descriptor(
