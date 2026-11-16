@@ -14,6 +14,9 @@ namespace {
 class ResidencyPressureTest : public WeightsTest {
  protected:
   void TearDown() override {
+    if (storage_owner_) {
+      loom_runtime_residency_cache_set_observer(ResidencyCache(), {});
+    }
     if (deferred_backing_) {
       deferred_backing_->statistics_observer = {};
       loom_runtime_memory_pool_set_observer(pool_, nullptr, nullptr);
@@ -157,6 +160,71 @@ TEST_P(ResidencyPressureTest, LiveWorkspaceDefersFutileHistoryEviction) {
   IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
   EXPECT_EQ(state_statistics_.committed_bytes, 2 * kSlabBytes);
   EXPECT_EQ(history_requests_, 1u);
+}
+
+TEST_P(ResidencyPressureTest, AcceptedPeerReleaseWakesAdmission) {
+  IREE_ASSERT_OK(Register(0, 0, 0));
+  IREE_ASSERT_OK(Register(1, 0, 0));
+  IREE_ASSERT_OK(loom_runtime_residency_prepare_working_set(residencies_[0],
+                                                            2 * kSlabBytes, 0));
+  IREE_ASSERT_OK(loom_runtime_residency_prepare_working_set(residencies_[1],
+                                                            kSlabBytes, 0));
+  loom_runtime_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_runtime_residency_cache_set_observer(
+      ResidencyCache(),
+      {loom_runtime_test_weight_activation_wake_t::Notify, &publication_});
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[1], &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
+  EXPECT_FALSE(loom_runtime_residency_cache_is_reclaiming(ResidencyCache()));
+  {
+    std::lock_guard<std::mutex> lock(publication_.mutex);
+    EXPECT_FALSE(publication_.ready);
+  }
+  loom_runtime_residency_release(residencies_[0]);
+  publication_.Await();
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[1], &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_runtime_residency_cancel_admission(residencies_[1]);
+  if (admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED) {
+    loom_runtime_residency_release(residencies_[1]);
+  }
+}
+
+TEST_P(ResidencyPressureTest, CancellingAdmissionHeadWakesNextWaiter) {
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(Compile(i, "direct_incomplete"));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+    IREE_ASSERT_OK(Register(i, i, 1));
+  }
+  IREE_ASSERT_OK(loom_runtime_residency_acquire_wait(residencies_[0]));
+  ASSERT_NO_FATAL_FAILURE(ReadOutputOn(execution_, 0));
+  for (int32_t i = 0; i < 8; ++i) {
+    EXPECT_EQ(output_[i], 30 + i);
+  }
+  IREE_ASSERT_OK(loom_runtime_residency_prepare_working_set(residencies_[1],
+                                                            kSlabBytes, 0));
+  loom_runtime_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[1], &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
+  loom_runtime_residency_cache_set_observer(
+      ResidencyCache(),
+      {loom_runtime_test_weight_activation_wake_t::Notify, &publication_});
+
+  // The retained consumer fits another invocation, but cannot bypass the
+  // older request. Withdrawing that request must wake its successor even
+  // though no physical capacity or invocation pin has been released.
+  loom_runtime_residency_cancel_admission(residencies_[1]);
+  publication_.Await();
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_runtime_residency_cancel_admission(residencies_[0]);
+  loom_runtime_residency_release(residencies_[0]);
+  loom_runtime_residency_release(residencies_[0]);
 }
 
 TEST_P(ResidencyPressureTest,

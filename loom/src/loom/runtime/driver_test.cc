@@ -14,7 +14,7 @@
 namespace {
 
 // Controlled dependencies of the real driver, with distinct request ownership,
-// asynchronous borrowers, and capacity activity.
+// asynchronous borrowers, and terminal failure.
 struct Service {
   // Stable ordinal for exact traversal observations.
   size_t index = 0;
@@ -28,14 +28,12 @@ struct Service {
   bool requests = false;
   // Accepted asynchronous loan awaiting an external completion.
   bool pending = false;
-  // Work capable of releasing shared backing.
-  bool active = false;
   // Persistent terminal failure, not a one-shot test event.
   bool failed = false;
   // Optional publication cleared by the service during its terminal turn.
   loom_runtime_service_t* retirement_slot = nullptr;
 
-  loom_runtime_service_t Interface(const void* capacity_domain) {
+  loom_runtime_service_t Interface() {
     static const loom_runtime_service_vtable_t vtable = {
         .set_observer =
             [](void* self, loom_runtime_wake_callback_t observer) {
@@ -45,8 +43,7 @@ struct Service {
             [](void* self) { return static_cast<Service*>(self)->requests; },
         .is_pending =
             [](void* self) { return static_cast<Service*>(self)->pending; },
-        .is_active =
-            [](void* self) { return static_cast<Service*>(self)->active; },
+        .is_active = [](void*) { return false; },
         .advance = [](void* self, loom_runtime_service_flags_t flags,
                       bool* out_progress) -> iree_status_t {
           auto& service = *static_cast<Service*>(self);
@@ -67,7 +64,7 @@ struct Service {
                      : iree_ok_status();
         },
     };
-    return {this, &vtable, capacity_domain};
+    return {this, &vtable};
   }
 };
 
@@ -77,8 +74,7 @@ class DriverTest : public ::testing::Test {
     for (size_t i = 0; i < services_.size(); ++i) {
       services_[i].index = i;
       services_[i].visits = &visits_;
-      slots_[i] =
-          services_[i].Interface(i < 2 ? &first_domain_ : &second_domain_);
+      slots_[i] = services_[i].Interface();
     }
     loom_runtime_driver_initialize(slots_.size(), slots_.data(), &driver_);
   }
@@ -96,10 +92,6 @@ class DriverTest : public ::testing::Test {
   std::array<Service, 3> services_;
   // Exact traversal observations.
   std::vector<size_t> visits_;
-  // Shared capacity of the first two services.
-  int first_domain_ = 0;
-  // Independent capacity of the third service.
-  int second_domain_ = 0;
 };
 
 TEST_F(DriverTest, RotatesAcrossVacantSlotsAndInstallsObserver) {
@@ -119,20 +111,6 @@ TEST_F(DriverTest, RotatesAcrossVacantSlotsAndInstallsObserver) {
     EXPECT_FALSE(loom_runtime_driver_collect(&driver_, &progress));
   }
   EXPECT_EQ(driver_.cursor, 0u);
-}
-
-TEST_F(DriverTest, PendingLoansAndQueuedRequestsDoNotPromiseSharedCapacity) {
-  services_[1].pending = true;
-  services_[1].requests = true;
-  EXPECT_EQ(loom_runtime_driver_shared_activity(&driver_, 0), 0u);
-  services_[1].active = true;
-  EXPECT_EQ(loom_runtime_driver_shared_activity(&driver_, 0),
-            LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY);
-  EXPECT_EQ(loom_runtime_driver_shared_activity(&driver_, 1), 0u);
-  EXPECT_EQ(loom_runtime_driver_shared_activity(&driver_, 2), 0u);
-  slots_[0].capacity_domain = nullptr;
-  slots_[1].capacity_domain = nullptr;
-  EXPECT_EQ(loom_runtime_driver_shared_activity(&driver_, 0), 0u);
 }
 
 TEST_F(DriverTest, LastFailureStopsEarlierQueuedWorkBeforeDetachment) {
@@ -197,7 +175,7 @@ TEST_F(DriverTest, CurrentSlotCanRetireAndBeRepublished) {
   loom_runtime_driver_advance(&driver_, &progress);
   EXPECT_EQ(visits_, (std::vector<size_t>{2, 0}));
   services_[1].retirement_slot = nullptr;
-  slots_[1] = services_[1].Interface(&first_domain_);
+  slots_[1] = services_[1].Interface();
   visits_.clear();
   loom_runtime_driver_advance(&driver_, &progress);
   EXPECT_EQ(visits_, (std::vector<size_t>{2, 0, 1}));

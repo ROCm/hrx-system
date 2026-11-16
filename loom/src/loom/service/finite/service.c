@@ -754,9 +754,7 @@ static iree_status_t loom_service_finite_advance(
         status = loom_service_finite_submit(service);
         *out_progress = true;
       } else if (iree_status_is_ok(status) &&
-                 admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY &&
-                 !iree_any_bit_set(flags,
-                                   LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY)) {
+                 admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY) {
         iree_status_t rejection =
             iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                              "model parameters exceed available capacity");
@@ -905,11 +903,7 @@ loom_service_finite_service_interface_t loom_service_finite_service_interface(
   };
   return (loom_service_finite_service_interface_t){
       .name = service->name,
-      .runtime = {.self = service,
-                  .vtable = &vtable,
-                  .capacity_domain = loom_runtime_residency_cache(
-                      service->generator.vtable->residency(
-                          service->generator.self))},
+      .runtime = {.self = service, .vtable = &vtable},
       .kind = service->protocol->kind,
       .tokenizer =
           service->generator.vtable->tokenizer(service->generator.self),

@@ -68,8 +68,13 @@ struct loom_serve_test_image_gate_t {
     auto* gate = static_cast<loom_serve_test_image_gate_t*>(self);
     const bool admitted =
         gate->admission_available && (!gate->occupied || !*gate->occupied);
-    *out_admission = admitted ? LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED
-                              : LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY;
+    if (!gate->admission_available) {
+      *out_admission = LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY;
+    } else if (admitted) {
+      *out_admission = LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED;
+    } else {
+      *out_admission = LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED;
+    }
     if (admitted) {
       if (gate->occupied) {
         *gate->occupied = true;
@@ -255,9 +260,6 @@ class ImageServiceFixture : public ::testing::Test {
         .try_admit = loom_serve_test_image_gate_t::Admit,
         .submit = loom_serve_test_image_gate_t::Submit,
         .complete = loom_serve_test_image_gate_t::Complete,
-        .capacity_domain =
-            loom_runtime_pool_residency_cache(loom_runtime_device_group_pool_at(
-                group_, executions_[1] ? index : 0)),
     };
     const loom_serve_image_service_options_t options = {
         .name = name,

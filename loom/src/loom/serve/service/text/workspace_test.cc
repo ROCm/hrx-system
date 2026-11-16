@@ -136,7 +136,7 @@ TEST_F(SourceTextServiceTest, NativeWorkspaceReplacementPreservesAdmission) {
     loom_runtime_residency_admission_t admission;
     IREE_ASSERT_OK(
         loom_runtime_residency_try_admit(peer_residency, &admission));
-    EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+    EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
   }
   IREE_ASSERT_OK(loom_serve_text_model_select_variant(model_, nullptr));
   if (pool) {
@@ -180,7 +180,7 @@ TEST_F(SourceTextServiceTest, NativeWorkspaceReplacementPreservesAdmission) {
     loom_runtime_residency_admission_t admission;
     IREE_ASSERT_OK(
         loom_runtime_residency_try_admit(peer_residency, &admission));
-    EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+    EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
     loom_runtime_residency_cancel_admission(peer_residency);
   }
   IREE_ASSERT_OK(loom_serve_text_row_prefill(cold_row, 1, &token));

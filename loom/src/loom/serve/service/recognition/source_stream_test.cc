@@ -227,7 +227,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     auto status = loom_runtime_device_group_advance(group_);
     return iree_status_join(status,
                             loom_serve_recognition_stream_service_advance(
-                                service_, stopping, false, progress));
+                                service_, stopping, progress));
   }
 
   void Settle(bool stopping = false) {
@@ -498,7 +498,7 @@ TEST_F(SourceRecognitionStreamTest, InputStarvationWaitsForNewFramesOrEof) {
   for (size_t i = 0; i < 4; ++i) {
     bool progress = false;
     IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
-        service_, false, false, &progress));
+        service_, false, &progress));
     EXPECT_FALSE(progress);
     EXPECT_FALSE(loom_serve_recognition_stream_service_is_pending(service_));
   }
@@ -639,13 +639,13 @@ TEST_F(SourceRecognitionStreamTest, ClosedCallerRetainsAcceptedInputBorrow) {
   ASSERT_NO_FATAL_FAILURE(Write(stream, {1, 2, 3}, 3));
   loom_serve_recognition_stream_finish(stream);
   bool progress = false;
-  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
-      service_, false, false, &progress));
+  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(service_, false,
+                                                               &progress));
   EXPECT_TRUE(progress);
   EXPECT_TRUE(loom_serve_recognition_stream_service_is_pending(service_));
   ASSERT_NO_FATAL_FAILURE(Close(stream));
-  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
-      service_, true, false, &progress));
+  IREE_ASSERT_OK(
+      loom_serve_recognition_stream_service_advance(service_, true, &progress));
   EXPECT_FALSE(progress);
   EXPECT_TRUE(loom_serve_recognition_stream_service_is_pending(service_));
   EXPECT_EQ(offers_[0].load(), offers);
@@ -850,8 +850,8 @@ TEST_F(SourceRecognitionStreamTest, CloseReturnsRowBeforeNativeCapacity) {
 
   ASSERT_NO_FATAL_FAILURE(Close(stream));
   bool progress = false;
-  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
-      service_, false, false, &progress));
+  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(service_, false,
+                                                               &progress));
   EXPECT_TRUE(progress);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return released_[0] == 1; }));
   auto* pool = loom_runtime_pool_memory(storage_owner_);
@@ -870,8 +870,8 @@ TEST_F(SourceRecognitionStreamTest, CloseReturnsRowBeforeNativeCapacity) {
   const auto previous_offers = offers_[0].load();
   ASSERT_NO_FATAL_FAILURE(Write(peer, {2}, 1));
   loom_serve_recognition_stream_finish(peer);
-  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
-      service_, false, false, &progress));
+  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(service_, false,
+                                                               &progress));
   EXPECT_EQ(offers_[0].load(), previous_offers);
   EXPECT_EQ(released_[0], 1u);
 
@@ -898,8 +898,8 @@ TEST_F(SourceRecognitionStreamTest,
   ASSERT_NO_FATAL_FAILURE(Write(stream, {1, 2, 3}, 3));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return submitted_ == 1; }));
   bool progress = false;
-  IREE_ASSERT_OK(loom_serve_recognition_stream_service_advance(
-      service_, true, false, &progress));
+  IREE_ASSERT_OK(
+      loom_serve_recognition_stream_service_advance(service_, true, &progress));
   EXPECT_FALSE(loom_serve_recognition_stream_is_complete(stream));
   iree_hal_semaphore_fail(
       failed_readiness_,

@@ -642,8 +642,7 @@ static iree_status_t loom_serve_recognition_advance(
   if (iree_status_is_ok(status)) {
     bool progress = false;
     status = loom_serve_recognition_stream_service_advance(
-        service->streams, service->stopping,
-        (flags & LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY) != 0, &progress);
+        service->streams, service->stopping, &progress);
     *out_progress |= progress;
   }
   if (iree_status_is_ok(status) && !service->stopping && !service->cpu.row) {
@@ -728,9 +727,7 @@ loom_serve_service_t loom_serve_recognition_service_interface(
   };
   return (loom_serve_service_t){
       .name = service->options.name,
-      .runtime = {.self = service,
-                  .vtable = &vtable,
-                  .capacity_domain = service->generator.capacity_domain},
+      .runtime = {.self = service, .vtable = &vtable},
       .accept = service->options.kind == LOOM_SERVICE_KIND_RECOGNITION
                     ? loom_serve_transcription_accept
                     : NULL,

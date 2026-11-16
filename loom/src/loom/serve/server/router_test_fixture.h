@@ -264,8 +264,6 @@ struct loom_serve_test_model_service_t {
   std::deque<std::pair<loom_serve_http_connection_t*,
                        const loom_serve_http_request_t*>>
       pending;
-  // This model waits for another service's request/maintenance to retire.
-  bool wait_for_shared_activity = false;
   // The test owns this model dependency's device-readiness boundary.
   bool hold_completion = false;
   // Protects completion publication and observer detachment.
@@ -288,13 +286,6 @@ struct loom_serve_test_model_service_t {
   iree_status_t result = iree_ok_status();
   // Accepted claims published to the outer test without exposing the FIFO.
   uint64_t accepted = 0;
-  // First pending request's owner-side admission observation.
-  struct {
-    // The owner has considered a request, not merely accepted its transport.
-    bool observed = false;
-    // Copied router inputs, independent of later service/registry lifetimes.
-    loom_runtime_service_flags_t flags = 0;
-  } admission;
   // Optional immutable historical work, published before owner startup.
   const loom_service_telemetry_counters_t* counters = nullptr;
   // Optional immutable duration distributions published before owner startup.
@@ -328,11 +319,6 @@ struct loom_serve_test_model_service_t {
     std::unique_lock<std::mutex> lock(mutex);
     condition.wait(lock, [this, count] { return accepted >= count; });
   }
-  loom_runtime_service_flags_t WaitAdmission() {
-    std::unique_lock<std::mutex> lock(mutex);
-    condition.wait(lock, [this] { return admission.observed; });
-    return admission.flags;
-  }
   void WaitStopping() {
     std::unique_lock<std::mutex> lock(mutex);
     condition.wait(lock, [this] { return stopping; });
@@ -347,7 +333,7 @@ struct loom_serve_test_model_service_t {
 
   static bool IsActive(void* self) {
     const auto* service = static_cast<loom_serve_test_model_service_t*>(self);
-    return !service->wait_for_shared_activity && !service->pending.empty();
+    return service->waiting;
   }
 
   static loom_service_snapshot_t Snapshot(void* self) {
@@ -419,18 +405,6 @@ struct loom_serve_test_model_service_t {
         return status;
       }
     }
-    if (!service->pending.empty()) {
-      std::lock_guard<std::mutex> lock(service->mutex);
-      if (!service->admission.observed) {
-        service->admission = {.observed = true, .flags = flags};
-        service->condition.notify_all();
-      }
-    }
-    if (service->wait_for_shared_activity &&
-        iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY)) {
-      *progress = false;
-      return iree_ok_status();
-    }
     *progress = !service->pending.empty();
     if (!*progress) {
       return iree_ok_status();
@@ -463,8 +437,7 @@ struct loom_serve_test_model_service_t {
     return sink.emit(sink.self, &topic, &service->counters->input_tokens);
   }
 
-  loom_serve_service_t Interface(const iree_tokenizer_t* tokenizer,
-                                 const void* capacity_domain) {
+  loom_serve_service_t Interface(const iree_tokenizer_t* tokenizer) {
     static const loom_runtime_service_vtable_t vtable = {
         .set_observer = SetObserver,
         .has_requests = HasRequests,
@@ -473,9 +446,7 @@ struct loom_serve_test_model_service_t {
         .advance = Advance,
     };
     return {.name = iree_make_cstring_view(name),
-            .runtime = {.self = this,
-                        .vtable = &vtable,
-                        .capacity_domain = capacity_domain},
+            .runtime = {.self = this, .vtable = &vtable},
             .accept = Accept,
             .tokenizer = tokenizer,
             .kind = LOOM_SERVICE_KIND_EMBEDDING,
@@ -534,10 +505,9 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
     IREE_ASSERT_OK(tokenizer_status);
     owner_ = std::thread([this] {
       const loom_serve_service_t services[] = {
-          a_.Interface(tokenizer_a_, &a_), b_.Interface(tokenizer_b_, &a_),
-          held_.Interface(tokenizer_a_, &a_),
-          other_.Interface(nullptr, nullptr),
-          escaped_.Interface(nullptr, nullptr)};
+          a_.Interface(tokenizer_a_), b_.Interface(tokenizer_b_),
+          held_.Interface(tokenizer_a_), other_.Interface(nullptr),
+          escaped_.Interface(nullptr)};
       loom_serve_registry_t* registry = nullptr;
       IREE_ASSERT_OK(loom_serve_registry_allocate(
           IREE_ARRAYSIZE(services), services, managed_capacity_, factory_,
@@ -654,13 +624,19 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
   // First model dependency used only by serialized router turns.
   loom_serve_test_model_service_t a_{"a"};
   // Second model dependency used only by serialized router turns.
-  loom_serve_test_model_service_t b_{"b", {}, true};
+  loom_serve_test_model_service_t b_{"b"};
   // Explicitly held device-readiness dependencies, independent of a and b.
-  loom_serve_test_model_service_t held_{"held", {}, false, true};
+  loom_serve_test_model_service_t held_{
+      .name = "held",
+      .hold_completion = true,
+  };
   // A second held dependency proves failure drains every accepted callback.
-  loom_serve_test_model_service_t other_{"other", {}, false, true};
+  loom_serve_test_model_service_t other_{
+      .name = "other",
+      .hold_completion = true,
+  };
   // Valid deployment identifier requiring distinct metric label escaping.
-  loom_serve_test_model_service_t escaped_{R"(quoted"\name)", {}, true};
+  loom_serve_test_model_service_t escaped_{R"(quoted"\name)"};
   // Outer application caller joining the production router's final release.
   std::thread owner_;
   // Terminal result published by joining owner_.

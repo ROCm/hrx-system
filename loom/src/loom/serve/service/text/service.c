@@ -1255,12 +1255,8 @@ static iree_status_t loom_serve_text_advance(void* self,
     loom_serve_text_telemetry_fail(&service->telemetry, status);
   }
   bool projection_progress = false;
-  loom_runtime_service_flags_t projection_flags = flags;
-  if (loom_serve_text_is_active(service)) {
-    projection_flags |= LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY;
-  }
   iree_status_t projection_status = loom_serve_text_media_projector_advance(
-      service->projector, projection_flags, &projection_progress);
+      service->projector, flags, &projection_progress);
   if (!iree_status_is_ok(projection_status)) {
     flags |= LOOM_RUNTIME_SERVICE_FLAG_STOPPING;
     service->stopping = true;
@@ -1464,10 +1460,7 @@ loom_serve_service_t loom_serve_text_service_interface(
       loom_serve_media_image_codecs(&codecs);
   return (loom_serve_service_t){
       .name = service->name,
-      .runtime = {.self = service,
-                  .vtable = &vtable,
-                  .capacity_domain = loom_runtime_residency_cache(
-                      loom_serve_text_model_residency(service->model))},
+      .runtime = {.self = service, .vtable = &vtable},
       .accept = loom_serve_text_accept,
       .try_open_text = encodes ? NULL : loom_serve_text_open,
       .try_open_text_checkpoint = loom_serve_text_open_checkpoint,

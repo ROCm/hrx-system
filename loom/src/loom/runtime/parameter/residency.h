@@ -45,7 +45,7 @@ void loom_runtime_residency_cache_free(loom_runtime_residency_cache_t* cache);
 bool loom_runtime_residency_cache_is_empty(
     loom_runtime_residency_cache_t* cache);
 
-// Output and activation retirement wake the serialized admission owner.
+// Capacity release and admission priority changes wake the serialized owner.
 // Detachment joins callback access; observers never wait or reenter the cache.
 void loom_runtime_residency_cache_set_observer(
     loom_runtime_residency_cache_t* cache,
@@ -270,10 +270,14 @@ iree_status_t loom_runtime_residency_try_acquire(
     loom_runtime_residency_t* residency, bool* out_admitted);
 
 typedef enum loom_runtime_residency_admission_e {
-  // Declared working set cannot fit. No pin or partial load is owned.
+  // The working set cannot currently fit and has no eligible independent
+  // release to wait for. No pin or partial load is owned. Logical state and
+  // nested consumers within this residency remain the caller's responsibility.
   LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY = 0,
-  // An older waiter has priority or idle-cache maintenance is releasing
-  // backing.
+  // An older waiter has priority, or accepted consumers/output/reclamation in
+  // this cache can release capacity and wake the owner. An already-delivered
+  // wake still requires another admission turn. Queued demand alone cannot
+  // make progress; persistent parameter retention is not an accepted consumer.
   LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED,
   // One pin protects enqueued activation and subsequent consuming work.
   LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED,
@@ -315,8 +319,9 @@ iree_status_t loom_runtime_residency_try_admit_state(
 // Withdraws this model's pending admission, without changing any owned pin or
 // queued device work. Idempotent; called on the owner when its prepared request
 // is fully admitted, cancelled, or rejected. A later request joins behind
-// surviving interests. Parameter readiness alone does not end a turn still
-// waiting for mutable-state capacity.
+// surviving interests. Withdrawing the head wakes its successor. Parameter
+// readiness alone does not end a turn still waiting for mutable-state
+// capacity.
 void loom_runtime_residency_cancel_admission(
     loom_runtime_residency_t* residency);
 
@@ -345,7 +350,8 @@ iree_status_t loom_runtime_residency_await(loom_runtime_residency_t* residency);
 loom_runtime_execution_frontier_t loom_runtime_residency_frontier(
     const loom_runtime_residency_t* residency);
 
-// Releases one owned pin after consumption has retired. No allocation or wait.
+// Releases one owned pin after consumption has retired. Wakes queued admission
+// through the cache observer. No allocation or wait.
 void loom_runtime_residency_release(loom_runtime_residency_t* residency);
 
 // Completes a synchronous model call holding one acquired pin. Success already

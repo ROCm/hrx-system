@@ -897,7 +897,7 @@ TEST_F(FiniteComponentTest, PeerAdmissionWaitsForCapturedOutputRetirement) {
   loom_runtime_residency_admission_t admission;
   IREE_ASSERT_OK(loom_runtime_residency_try_admit(peer_residency, &admission));
   EXPECT_EQ(admission, loom_runtime_pool_memory(storage_owner_)
-                           ? LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY
+                           ? LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED
                            : LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
   IREE_ASSERT_OK(Retire(component_));
   loom_service_finite_component_free(std::exchange(component_, nullptr));
@@ -908,7 +908,7 @@ TEST_F(FiniteComponentTest, PeerAdmissionWaitsForCapturedOutputRetirement) {
   if (admission != LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED) {
     IREE_ASSERT_OK(
         loom_runtime_residency_try_admit(peer_residency, &admission));
-    EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+    EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
   }
   loom_runtime_residency_cache_set_observer(
       loom_runtime_pool_residency_cache(storage_owner_),

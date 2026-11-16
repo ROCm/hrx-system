@@ -91,8 +91,6 @@ struct loom_serve_test_registration_dependency_t {
     // Whether the dependency implements explicit parameter warmup.
     bool activation = true;
   } capabilities;
-  // Optional shared pressure domain, configured before factory publication.
-  const void* capacity_domain = nullptr;
   // Independently controlled parameter-readiness dependency.
   struct {
     // An accepted warmup still borrows the model until readiness is consumed.
@@ -136,8 +134,7 @@ struct loom_serve_test_registration_dependency_t {
         loom_serve_test_registration_preparation_failure_t::kNone) {
       return iree_make_status(IREE_STATUS_UNAVAILABLE, "model prepare failed");
     }
-    *service =
-        dependency->service.Interface(nullptr, dependency->capacity_domain);
+    *service = dependency->service.Interface(nullptr);
     service->kind = dependency->kind;
     if (service->kind == LOOM_SERVICE_KIND_ACTIVITY) {
       service->endpoint = nullptr;
@@ -591,7 +588,6 @@ TEST_P(HttpRouterRegistrationTest,
     std::lock_guard<std::mutex> lock(managed_.mutex);
     managed_.parameters.active = false;
     managed_.parameters.memory.committed_bytes = 0;
-    managed_.capacity_domain = &a_;
   }
   Declare();
   const int operation =
@@ -606,10 +602,9 @@ TEST_P(HttpRouterRegistrationTest,
   WaitHeld("dynamic", 1);
   const int peer = Send("POST", "/v1/test", R"({"model":"b"})");
   b_.WaitAccepted(1);
-  // This peer treats accepted activation as releasable shared pressure. It
-  // remains queued, while independent requests and health still complete.
-  EXPECT_NE(Control("drain", "b").find(R"("queued_requests":1)"),
-            std::string::npos);
+  // The router keeps independent services progressing while activation owns
+  // the dynamic model. Capacity decisions belong to their resource owners.
+  EXPECT_EQ(Read(peer).find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(Read(Send("GET", "/healthz")).find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(
       Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 200"),
@@ -622,7 +617,6 @@ TEST_P(HttpRouterRegistrationTest,
   EXPECT_NE(ready.find(R"("active":true,"backing":"elastic")"),
             std::string::npos);
   EXPECT_NE(ready.find(R"("held_requests":1)"), std::string::npos);
-  EXPECT_EQ(Read(peer).find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(Control("undrain", "dynamic").find("HTTP/1.1 200"), 0u);
   managed_.service.WaitSubmitted();
   managed_.service.Release();
@@ -1121,45 +1115,11 @@ TEST_P(HttpRouterRegistrationTest,
   }
 }
 
-TEST_P(HttpRouterRegistrationTest,
-       RetirementKeepsSharedCapacityWaitersQueuedUntilOwnershipReturns) {
-  {
-    std::lock_guard<std::mutex> lock(managed_.mutex);
-    managed_.capacity_domain = &a_;
-  }
+TEST_P(HttpRouterRegistrationTest, RetirementDoesNotBlockOtherServices) {
   Register();
   EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
   managed_.WaitRetiring();
   const int peer = Send("POST", "/v1/test", R"({"model":"b"})");
-  EXPECT_TRUE(iree_any_bit_set(b_.WaitAdmission(),
-                               LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY));
-  EXPECT_NE(Control("drain", "b").find(R"("queued_requests":1)"),
-            std::string::npos);
-  EXPECT_EQ(managed_.destroyed.load(), 0u);
-  EXPECT_EQ(Read(Send("GET", "/healthz")).find("HTTP/1.1 200"), 0u);
-  EXPECT_EQ(
-      Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 200"),
-      0u);
-  managed_.ReleaseRetirement();
-  EXPECT_EQ(Read(peer).find("HTTP/1.1 200"), 0u);
-  while (Read(Send("GET", "/v1/status")).find(R"("id":"dynamic")") !=
-         std::string::npos) {
-  }
-  EXPECT_EQ(managed_.destroyed.load(), 1u);
-}
-
-TEST_P(HttpRouterRegistrationTest,
-       RetirementDoesNotInventActivityInAnotherCapacityDomain) {
-  {
-    std::lock_guard<std::mutex> lock(managed_.mutex);
-    managed_.capacity_domain = &managed_;
-  }
-  Register();
-  EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
-  managed_.WaitRetiring();
-  const int peer = Send("POST", "/v1/test", R"({"model":"b"})");
-  EXPECT_FALSE(iree_any_bit_set(b_.WaitAdmission(),
-                                LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY));
   EXPECT_EQ(Read(peer).find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(managed_.destroyed.load(), 0u);
   managed_.ReleaseRetirement();
@@ -1269,10 +1229,6 @@ TEST_P(HttpRouterRegistrationTest,
 
 TEST_P(HttpRouterRegistrationTest,
        ReleaseFailureRetainsOwnershipUntilExplicitRetry) {
-  {
-    std::lock_guard<std::mutex> lock(managed_.mutex);
-    managed_.capacity_domain = &a_;
-  }
   managed_.fail_release = true;
   Register();
   EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
@@ -1290,11 +1246,8 @@ TEST_P(HttpRouterRegistrationTest,
       Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("HTTP/1.1 200"),
       0u);
   EXPECT_EQ(managed_.release_attempts.load(), 1u);
-  // Quiescent failure retains backing but promises no progress. A peer must
-  // not park indefinitely waiting for an ownership wake that cannot arrive.
+  // Failed cleanup retains the model while independent requests still run.
   const int peer = Send("POST", "/v1/test", R"({"model":"b"})");
-  EXPECT_FALSE(iree_any_bit_set(b_.WaitAdmission(),
-                                LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY));
   EXPECT_EQ(Read(peer).find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
   while (Read(Send("GET", "/v1/status")).find(R"("id":"dynamic")") !=

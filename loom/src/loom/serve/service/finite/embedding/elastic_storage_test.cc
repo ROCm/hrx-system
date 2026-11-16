@@ -361,10 +361,9 @@ TEST_F(ElasticEmbeddingServiceTest,
   EXPECT_EQ(queued.oldest_active_age, 0);
   // The outer owner holds another model's pin and will release it. Queue the
   // cohort behind that activity instead of treating capacity as unreachable.
-  constexpr auto kShared = LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY;
   while (std::strcmp(interface_.snapshot(interface_.runtime.self).phase,
                      "waiting") != 0) {
-    ASSERT_TRUE(Step(kShared));
+    ASSERT_TRUE(Step());
   }
   const auto waiting = interface_.snapshot(interface_.runtime.self);
   EXPECT_STREQ(waiting.phase, "waiting");
@@ -381,7 +380,7 @@ TEST_F(ElasticEmbeddingServiceTest,
   EXPECT_EQ(loom_runtime_residency_snapshot(retained_residency).pin_count, 1u);
   const uint64_t wakes = wakes_.load();
   for (int i = 0; i < 3; ++i) {
-    EXPECT_FALSE(Step(kShared));
+    EXPECT_FALSE(Step());
     EXPECT_FALSE(interface_.runtime.vtable->is_active(interface_.runtime.self));
     EXPECT_GE(interface_.snapshot(interface_.runtime.self).oldest_active_age,
               waiting.oldest_active_age);
@@ -410,7 +409,7 @@ TEST_F(ElasticEmbeddingServiceTest,
             static_cast<loom_serve_http_connection_t*>(self));
       },
       connection, iree_infinite_timeout());
-  EXPECT_TRUE(Step(kShared));
+  EXPECT_TRUE(Step());
   // Reset withdraws the older pressure interest. The still-pinned peer may
   // accept again without waiting for its existing invocation to finish.
   const auto withdrawn = loom_runtime_residency_snapshot(residency);
@@ -433,7 +432,7 @@ TEST_F(ElasticEmbeddingServiceTest,
   ASSERT_NO_FATAL_FAILURE(Accept(request));
   while (std::strcmp(interface_.snapshot(interface_.runtime.self).phase,
                      "waiting") != 0) {
-    ASSERT_TRUE(Step(kShared));
+    ASSERT_TRUE(Step());
   }
   const auto second_wait = loom_runtime_residency_snapshot(residency);
   EXPECT_TRUE(second_wait.admission.waiting);

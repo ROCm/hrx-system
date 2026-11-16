@@ -179,8 +179,8 @@ TEST_P(HttpRouterTest, FinishedErrorResponseRetainsTransportUntilSent) {
 TEST_P(HttpRouterTest, MetricsCopyHeldAndQueuedOwnershipWithEscapedLabels) {
   const int held = Send("POST", "/v1/test", R"({"model":"held"})");
   held_.WaitSubmitted();
-  const int queued = Send("POST", "/v1/test", R"({"model":"b"})");
-  b_.WaitAccepted(1);
+  const int queued = Send("POST", "/v1/test", R"({"model":"held"})");
+  held_.WaitAccepted(2);
   const auto metrics = Read(Send("GET", "/metrics"));
   EXPECT_EQ(
       metrics,
@@ -190,8 +190,8 @@ TEST_P(HttpRouterTest, MetricsCopyHeldAndQueuedOwnershipWithEscapedLabels) {
       R"(# HELP loom_serve_model_queued_requests Requests outside the active invocation or cohort.
 # TYPE loom_serve_model_queued_requests gauge
 loom_serve_model_queued_requests{model="a",kind="embedding"} 0
-loom_serve_model_queued_requests{model="b",kind="embedding"} 1
-loom_serve_model_queued_requests{model="held",kind="embedding"} 0
+loom_serve_model_queued_requests{model="b",kind="embedding"} 0
+loom_serve_model_queued_requests{model="held",kind="embedding"} 1
 loom_serve_model_queued_requests{model="other",kind="embedding"} 0
 loom_serve_model_queued_requests{model="quoted\"\\name",kind="embedding"} 0
 # HELP loom_serve_model_active_requests Requests owned by the active invocation or cohort, not hardware utilization.
@@ -211,8 +211,8 @@ loom_serve_model_phase{model="quoted\"\\name",kind="embedding",phase="idle"} 1
 # HELP loom_serve_model_oldest_queued_age_seconds Time since the oldest queued request was accepted, or zero if empty.
 # TYPE loom_serve_model_oldest_queued_age_seconds gauge
 loom_serve_model_oldest_queued_age_seconds{model="a",kind="embedding"} 0
-loom_serve_model_oldest_queued_age_seconds{model="b",kind="embedding"} 12.5
-loom_serve_model_oldest_queued_age_seconds{model="held",kind="embedding"} 0
+loom_serve_model_oldest_queued_age_seconds{model="b",kind="embedding"} 0
+loom_serve_model_oldest_queued_age_seconds{model="held",kind="embedding"} 12.5
 loom_serve_model_oldest_queued_age_seconds{model="other",kind="embedding"} 0
 loom_serve_model_oldest_queued_age_seconds{model="quoted\"\\name",kind="embedding"} 0
 # HELP loom_serve_model_oldest_active_age_seconds Time since the oldest active request was accepted, including prior queue residence, or zero if empty.
@@ -283,16 +283,18 @@ loom_serve_server_latency_available 0
   // Scraping changes no model ownership and does not wait on the held work.
   EXPECT_NE(
       Read(Send("GET", "/v1/status"))
-          .find(R"("phase":"held","queued_requests":0,"active_requests":1)"),
+          .find(R"("phase":"held","queued_requests":1,"active_requests":1)"),
       std::string::npos);
   held_.Release();
   EXPECT_NE(Read(held).find("held:/v1/test:"), std::string::npos);
-  EXPECT_NE(Read(queued).find("b:/v1/test:"), std::string::npos);
+  held_.WaitSubmitted();
+  held_.Release();
+  EXPECT_NE(Read(queued).find("held:/v1/test:"), std::string::npos);
   const auto idle = Read(Send("GET", "/metrics"));
   EXPECT_NE(idle.find("loom_serve_model_active_requests{model=\"held\","
                       "kind=\"embedding\"} 0\n"),
             std::string::npos);
-  EXPECT_NE(idle.find("loom_serve_model_queued_requests{model=\"b\","
+  EXPECT_NE(idle.find("loom_serve_model_queued_requests{model=\"held\","
                       "kind=\"embedding\"} 0\n"),
             std::string::npos);
   EXPECT_NE(idle.find("loom_serve_model_phase{model=\"held\","
@@ -568,11 +570,10 @@ TEST_P(HttpRouterLiveOriginTest, AdditionalBrowserOriginUsesHttpConfiguration) {
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterLiveOriginTest,
                          ::testing::Values(4));
 
-TEST_P(HttpRouterTest, UnrelatedCapacityNeverWaitsForHeldCompletion) {
+TEST_P(HttpRouterTest, IndependentRequestsNeverWaitForHeldCompletion) {
   const int held = Send("POST", "/v1/test", R"({"model":"other"})");
   other_.WaitSubmitted();
-  // Both dependencies honor SHARED_ACTIVITY. The held service has no shared
-  // domain: neither a named owner nor another NULL identity can wait on it.
+  // One held completion does not serialize independently admitted services.
   EXPECT_NE(
       Read(Send("POST", "/v1/test", R"({"model":"b"})")).find("b:/v1/test:"),
       std::string::npos);
@@ -819,56 +820,62 @@ TEST_P(HttpRouterTest, HeldModelLeavesIndependentRequestsRunnable) {
 TEST_P(HttpRouterTest, DrainFinishesAdmittedQueueAndHoldsLaterModelBorrowers) {
   const int held = Send("POST", "/v1/test", R"({"model":"held"})");
   held_.WaitSubmitted();
-  const int first = Send("POST", "/v1/test", R"({"model":"b","turn":1})");
-  const int second = Send("POST", "/v1/test", R"({"model":"b","turn":2})");
-  b_.WaitAccepted(2);
-  const auto draining = Control("drain", "b");
-  EXPECT_NE(draining.find(R"("queued_requests":2,"active_requests":0)"),
+  const int first = Send("POST", "/v1/test", R"({"model":"held","turn":1})");
+  const int second = Send("POST", "/v1/test", R"({"model":"held","turn":2})");
+  held_.WaitAccepted(3);
+  const auto draining = Control("drain", "held");
+  EXPECT_NE(draining.find(R"("queued_requests":2,"active_requests":1)"),
             std::string::npos);
   EXPECT_NE(draining.find(R"("admission":"draining")"), std::string::npos);
 
-  const int later = Send("POST", "/v1/test", R"({"model":"b","turn":3})");
+  const int later = Send("POST", "/v1/test", R"({"model":"held","turn":3})");
   const int tokens =
-      Send("POST", "/tokenize", R"({"model":"b","content":"aab"})");
-  EXPECT_NE(WaitHeld("b", 2).find(R"("tokenizer_requests":0)"),
+      Send("POST", "/tokenize", R"({"model":"held","content":"aab"})");
+  EXPECT_NE(WaitHeld("held", 2).find(R"("tokenizer_requests":0)"),
             std::string::npos);
-  EXPECT_EQ(
-      Read(Send("POST", "/v1/test", R"({"model":"b"})")).find("HTTP/1.1 429"),
-      0u);
+  EXPECT_EQ(Read(Send("POST", "/v1/test", R"({"model":"held"})"))
+                .find("HTTP/1.1 429"),
+            0u);
   EXPECT_NE(
       Read(Send("POST", "/v1/test", R"({"model":"a"})")).find("a:/v1/test:"),
       std::string::npos);
   const auto metrics = Read(Send("GET", "/metrics"));
-  EXPECT_NE(metrics.find("loom_serve_model_queued_requests{model=\"b\","
+  EXPECT_NE(metrics.find("loom_serve_model_queued_requests{model=\"held\","
                          "kind=\"embedding\"} 2\n"),
             std::string::npos);
-  EXPECT_NE(metrics.find("loom_serve_model_held_requests{model=\"b\","
+  EXPECT_NE(metrics.find("loom_serve_model_held_requests{model=\"held\","
                          "kind=\"embedding\"} 2\n"),
             std::string::npos);
-  EXPECT_NE(metrics.find("loom_serve_model_admission_open{model=\"b\","
+  EXPECT_NE(metrics.find("loom_serve_model_admission_open{model=\"held\","
                          "kind=\"embedding\"} 0\n"),
             std::string::npos);
 
   held_.Release();
   EXPECT_NE(Read(held).find("held:/v1/test:"), std::string::npos);
-  EXPECT_NE(Read(first).find(R"(b:/v1/test:{"model":"b","turn":1})"),
+  held_.WaitSubmitted();
+  held_.Release();
+  EXPECT_NE(Read(first).find(R"(held:/v1/test:{"model":"held","turn":1})"),
             std::string::npos);
-  EXPECT_NE(Read(second).find(R"(b:/v1/test:{"model":"b","turn":2})"),
+  held_.WaitSubmitted();
+  held_.Release();
+  EXPECT_NE(Read(second).find(R"(held:/v1/test:{"model":"held","turn":2})"),
             std::string::npos);
-  const auto drained = Control("drain", "b");
+  const auto drained = Control("drain", "held");
   EXPECT_NE(drained.find(R"("queued_requests":0,"active_requests":0)"),
             std::string::npos);
   EXPECT_NE(drained.find(R"("admission":"drained","held_requests":2)"),
             std::string::npos);
   {
-    std::lock_guard<std::mutex> lock(b_.mutex);
-    EXPECT_EQ(b_.accepted, 2u);
+    std::lock_guard<std::mutex> lock(held_.mutex);
+    EXPECT_EQ(held_.accepted, 3u);
   }
-  EXPECT_NE(Control("undrain", "b").find(R"("admission":"open")"),
+  EXPECT_NE(Control("undrain", "held").find(R"("admission":"open")"),
             std::string::npos);
-  EXPECT_NE(Read(later).find(R"(b:/v1/test:{"model":"b","turn":3})"),
+  held_.WaitSubmitted();
+  held_.Release();
+  EXPECT_NE(Read(later).find(R"(held:/v1/test:{"model":"held","turn":3})"),
             std::string::npos);
-  EXPECT_NE(Read(tokens).find(R"({"tokens":[1,1,0]})"), std::string::npos);
+  EXPECT_NE(Read(tokens).find(R"({"tokens":[0,0,1]})"), std::string::npos);
 }
 
 TEST_P(HttpRouterTest, AdmissionControlRejectsInvalidSelectorsWithoutClosing) {

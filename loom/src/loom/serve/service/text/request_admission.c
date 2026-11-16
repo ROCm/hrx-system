@@ -716,8 +716,7 @@ iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
         loom_serve_text_media_projector_start(service->projector);
       }
       bool active =
-          iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY);
-      active |= loom_serve_text_media_projector_is_pending(service->projector);
+          loom_serve_text_media_projector_is_pending(service->projector);
       for (iree_host_size_t i = 0; i < service->pending.count; ++i) {
         active |= service->pending.values[i] != pending &&
                   service->pending.values[i]->continuation.session != NULL;

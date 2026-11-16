@@ -662,7 +662,6 @@ static bool loom_serve_speech_has_resident(
 }
 
 static void loom_serve_speech_prepared(loom_serve_speech_service_t* service,
-                                       loom_runtime_service_flags_t flags,
                                        bool* progress) {
   loom_serve_speech_row_t* row = service->admission;
   loom_runtime_residency_admission_t admission;
@@ -693,8 +692,7 @@ static void loom_serve_speech_prepared(loom_serve_speech_service_t* service,
   }
   if (iree_status_is_ok(service->status) &&
       admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY) {
-    if (loom_serve_speech_has_resident(service) ||
-        iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY)) {
+    if (loom_serve_speech_has_resident(service)) {
       return;
     }
     service->generator.discard(service->generator.self, row->invocation);
@@ -1330,10 +1328,9 @@ static bool loom_serve_speech_is_pending(void* self) {
 // Offers are queried from a fresh snapshot on the CPU. A blocked output row
 // never enters this snapshot; neighbors continue using their own send credit.
 static void loom_serve_speech_schedule(loom_serve_speech_service_t* service,
-                                       loom_runtime_service_flags_t flags,
                                        bool* progress) {
   if (service->admission) {
-    loom_serve_speech_prepared(service, flags, progress);
+    loom_serve_speech_prepared(service, progress);
     if (service->phase != SPEECH_PHASE_IDLE ||
         !iree_status_is_ok(service->status)) {
       return;
@@ -1393,7 +1390,7 @@ static iree_status_t loom_serve_speech_advance(
       // Delivery publication ends this bounded owner turn. The router observes
       // progress and rotates before the next admission/numerical selection.
       if (!delivered) {
-        loom_serve_speech_schedule(service, flags, out_progress);
+        loom_serve_speech_schedule(service, out_progress);
       }
     }
   }
@@ -1455,9 +1452,7 @@ loom_serve_service_t loom_serve_speech_service_interface(
   static const iree_string_view_t output_modalities[] = {IREE_SVL("audio")};
   return (loom_serve_service_t){
       .name = service->options.name,
-      .runtime = {.self = service,
-                  .vtable = &vtable,
-                  .capacity_domain = service->generator.capacity_domain},
+      .runtime = {.self = service, .vtable = &vtable},
       .accept = loom_serve_speech_accept,
       .try_open_speech = loom_serve_speech_open,
       .try_upload_voice = service->generator.voice_capacity

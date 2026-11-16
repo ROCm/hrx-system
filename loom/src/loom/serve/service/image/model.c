@@ -1475,6 +1475,5 @@ loom_serve_image_generator_t loom_serve_image_model_generator(
       .query_status = loom_serve_image_generator_query_status,
       .is_pending = loom_serve_image_generator_is_pending,
       .execution_update = loom_service_executables_update(model->executables),
-      .tokenizer = loom_runtime_tokenizer_value(model->tokenizer),
-      .capacity_domain = loom_runtime_residency_cache(model->residency)};
+      .tokenizer = loom_runtime_tokenizer_value(model->tokenizer)};
 }

@@ -14,13 +14,9 @@ extern "C" {
 #endif
 
 enum loom_runtime_service_flag_bits_e {
-  // Another service in the same capacity domain has accepted work or
-  // maintenance that may release capacity. Admission can queue instead of
-  // rejecting an idle-capacity stall.
-  LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY = 1u << 0,
   // Admission has stopped. Consume only already accepted asynchronous work;
   // new model submissions and queued request admission are forbidden.
-  LOOM_RUNTIME_SERVICE_FLAG_STOPPING = 1u << 1,
+  LOOM_RUNTIME_SERVICE_FLAG_STOPPING = 1u << 0,
 };
 typedef uint32_t loom_runtime_service_flags_t;
 
@@ -41,9 +37,8 @@ typedef struct loom_runtime_service_vtable_t {
   // Whether an accepted asynchronous callback still borrows service storage.
   // True requires an eventual wake even after transport admission stops.
   bool (*is_pending)(void* self);
-  // Whether live requests or pending maintenance may release shared capacity.
-  // Queued requests alone are not activity: mutually blocked queues cannot
-  // make progress by waiting on one another.
+  // Whether execution or maintenance still owns model resources. Queued
+  // requests alone do not prevent idle resource management.
   bool (*is_active)(void* self);
   // Advances at most one bounded model unit and reports actual progress. A
   // turn can retry admission after another service released shared capacity.
@@ -56,7 +51,7 @@ typedef struct loom_runtime_service_vtable_t {
 } loom_runtime_service_vtable_t;
 
 // Borrowed service capability. Its composition retains both the implementation
-// and shared-capacity owner through every accepted asynchronous obligation.
+// and resource owners through every accepted asynchronous obligation.
 // A composition may include preparation and retirement in its own progression;
 // only it can invoke the underlying model service while that service is live.
 // Metadata without a progress implementation has no vtable and is not invoked.
@@ -65,10 +60,6 @@ typedef struct loom_runtime_service_t {
   void* self;
   // Immutable implementation methods, shared by instances of the same service.
   const loom_runtime_service_vtable_t* vtable;
-  // Opaque shared-capacity identity, never dereferenced by the scheduler. Only
-  // equal non-NULL identities can provide SHARED_ACTIVITY to each other; NULL
-  // means this service has no shared-capacity relationship.
-  const void* capacity_domain;
 } loom_runtime_service_t;
 
 #ifdef __cplusplus

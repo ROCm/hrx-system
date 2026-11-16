@@ -422,7 +422,7 @@ TEST_P(WeightPackingTest,
     IREE_EXPECT_OK(loom_runtime_residency_try_admit_state(
         residencies_[0], 1, &range, nullptr, nullptr, 0, &admission,
         &operation));
-    EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+    EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
     EXPECT_EQ(operation, nullptr);
   }
   iree_hal_buffer_release(escaping);
@@ -452,7 +452,7 @@ TEST_P(WeightPackingTest,
 }
 
 TEST_P(WeightPackingTest,
-       InvocationWorkingSetFailedStagingDoesNotPromiseCapacity) {
+       InvocationWorkingSetFailedStagingRetainsCreditUntilRetirement) {
   WriteFactors(path_.path(), 0, 8);
   WriteFactors(adapter_path_.path(), 100, 4);
   IREE_ASSERT_OK(Compile(0, "packed_target"));
@@ -494,11 +494,20 @@ TEST_P(WeightPackingTest,
   loom_runtime_residency_admission_t admission;
   IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[1], &admission));
   if (pool_) {
-    // The failed producer still owns its working set until terminal teardown,
-    // but accepted loading is no longer a reason to wait for future capacity.
-    EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+    // Failed readiness does not retire the accepted producer's ownership.
+    // Another invocation waits for that owner's actual release, independently
+    // of whether its loading operation can still complete successfully.
+    EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
   } else {
     EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+    loom_runtime_residency_release(residencies_[1]);
+  }
+  IREE_EXPECT_STATUS_IS(execution_code_,
+                        loom_runtime_execution_drain(execution_));
+  loom_runtime_residency_release(residencies_[0]);
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[1], &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  if (admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED) {
     loom_runtime_residency_release(residencies_[1]);
   }
   loom_runtime_residency_cancel_admission(residencies_[1]);
