@@ -97,6 +97,7 @@ loom_cc_library(
     hdrs = ["provider.h"],
     visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],
     deps = [
+        ":descriptors",
         ":target_record_table",
         "//loom/src/loom/analysis/pipeline:entries",
         "//loom/src/loom/analysis/pipeline:execution",
@@ -110,6 +111,7 @@ loom_cc_library(
         "//loom/src/loom/ops/index:builders",
         "//loom/src/loom/ops/pipeline:op_defs",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/ops/vector:op_defs",
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/pass/test:registry",
@@ -120,6 +122,7 @@ loom_cc_library(
         "//loom/src/loom/target/test/lower:registry",
         "//loom/src/loom/transforms/pipeline:control",
         "//loom/src/loom/transforms/pipeline:realization",
+        "//loom/src/loom/transforms/vector:packet_legalization",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

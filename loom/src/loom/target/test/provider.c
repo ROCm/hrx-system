@@ -9,11 +9,14 @@
 #include <stddef.h>
 
 #include "loom/ops/test/registry.h"
+#include "loom/ops/vector/ops.h"
 #include "loom/pass/test/registry.h"
 #include "loom/target/facts.h"
 #include "loom/target/low_descriptor_registry_core_test.h"
+#include "loom/target/test/descriptors.h"
 #include "loom/target/test/lower/registry.h"
 #include "loom/target/test/target_records.h"
+#include "loom/transforms/vector/packet_insert_legalization.h"
 
 #define LOOM_TEST_MATH_CONSTRAINTS(_)                                      \
   _(GROUPED_FIXTURE, grouped_fixture, "test.math.grouped_product.fixture") \
@@ -334,6 +337,51 @@ static void loom_test_math_policy_registry_initialize(
       kEntries, IREE_ARRAYSIZE(kEntries), out_registry);
 }
 
+static bool loom_test_match_native_vectors(
+    const loom_target_legalizer_entry_t* entry,
+    const loom_target_legalization_context_t* context, const loom_op_t* op) {
+  (void)entry;
+  (void)op;
+  return context->target_facts->selector ==
+         LOOM_TEST_TARGET_KIND_NATIVE_VECTORS;
+}
+
+static iree_status_t loom_test_legalize_vector_insert(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  bool rewritten = false;
+  IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_insert(
+      context, op, context->vector_packet_policy, NULL, &rewritten));
+  *out_result = (loom_target_legalizer_result_t){
+      .action = rewritten ? LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN
+                          : LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+  return iree_ok_status();
+}
+
+static const loom_target_legalizer_rule_t kTestVectorLegalizerRules[] = {
+    {
+        .root_kind = LOOM_OP_VECTOR_INSERT,
+        .match = loom_test_match_native_vectors,
+        .legalize = loom_test_legalize_vector_insert,
+    },
+};
+
+static const loom_target_legalizer_provider_t kTestVectorLegalizerProvider = {
+    .name = IREE_SVL("test-native-vectors"),
+    .scope = {.target_stable_id = TEST_LOW_CORE_TARGET_ID},
+    .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
+    .rules = kTestVectorLegalizerRules,
+    .rule_count = IREE_ARRAYSIZE(kTestVectorLegalizerRules),
+};
+
+static const loom_target_legalizer_provider_t* const kTestLegalizerProviders[] =
+    {
+        &kTestVectorLegalizerProvider,
+};
+
 // Device construction has no native callable ABI. Its independently executing
 // low_core workers do, so source policy must distinguish those environments.
 static loom_target_call_policy_t loom_test_select_call_policy(
@@ -366,6 +414,11 @@ const loom_target_provider_t loom_test_target_provider = {
         loom_test_low_lower_policy_registry_initialize,
     .initialize_math_policy_registry =
         loom_test_math_policy_registry_initialize,
+    .legalizer_provider_list =
+        {
+            .count = IREE_ARRAYSIZE(kTestLegalizerProviders),
+            .values = kTestLegalizerProviders,
+        },
     .pass_registry = &loom_test_pass_registry_storage,
     .view_boundary_carrier = LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BUFFER_OFFSET,
     .import_view_boundary_carrier =

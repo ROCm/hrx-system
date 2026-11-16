@@ -43,29 +43,29 @@ func.def @i64x16_insert_dynamic(%values: vector<16xi64>, %value: i64, %position:
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i64x16_insert_dynamic(%values: reg<aie2p.vec256 x4>, %value: reg<aie2p.er x2>, %position: reg<aie2p.er>) -> (reg<aie2p.vec256 x4>) asm {
-  %26 = mov.short 0
-  %27 = mov.short 8
-  %28 = ltu %position, %27
-  %29 = mov.short 16
+  %28 = mov.short 0
+  %29 = mov.short 8
   %30 = ltu %position, %29
-  %31 = geu %position, %27
-  %32 = and %31, %30
-  %33 = slice %values[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  %34 = copy %28 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %35 = sel.nez %position, %26, %34
-  %36 = copy %35 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
-  %37 = vinsert.64.reg %33, %36, %value
-  %38 = select.mask %28, -1
-  %39 = vsel.32 %37, %33, %38
-  %40 = slice %values[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  %41 = copy %32 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %42 = sel.nez %position, %27, %41
-  %43 = sub %42, %27
-  %44 = copy %43 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
-  %45 = vinsert.64.reg %40, %44, %value
-  %46 = select.mask %32, -1
-  %47 = vsel.32 %45, %40, %46
-  %result = concat(%39, %47) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %31 = mov.short 16
+  %32 = ltu %position, %31
+  %33 = geu %position, %29
+  %34 = and %33, %32
+  %35 = slice %values[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %36 = copy %30 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %37 = sel.nez %position, %28, %36
+  %38 = copy %37 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %39 = vinsert.64.reg %35, %38, %value
+  %40 = select.mask %30, -1
+  %41 = vsel.32 %39, %35, %40
+  %42 = slice %values[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %43 = copy %34 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %44 = sel.nez %position, %29, %43
+  %45 = sub %44, %29
+  %46 = copy %45 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %47 = vinsert.64.reg %42, %46, %value
+  %48 = select.mask %34, -1
+  %49 = vsel.32 %47, %42, %48
+  %result = concat(%41, %49) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   return %result
 }
 

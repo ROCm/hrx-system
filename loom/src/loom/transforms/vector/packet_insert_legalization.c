@@ -400,6 +400,24 @@ iree_status_t loom_vector_packet_legalize_insert(
           builder, packet_conditions[chunk_index], packet_index,
           packet_lower_bound, index_type, op->location, &safe_index_op));
       packet_index = loom_scf_select_result(safe_index_op);
+      // Both arms are inside this packet: the input is selected only after
+      // its two bounds checks, otherwise the first lane is selected. Retain
+      // that range before subtracting the base so native-width legalization
+      // does not have to reconstruct the compound condition. This identity
+      // emits no target operation and is outside the materialization budget.
+      const loom_predicate_t range = {
+          .kind = LOOM_PREDICATE_RANGE,
+          .arg_count = 3,
+          .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
+                       LOOM_PRED_ARG_CONST},
+          .args = {packet_index, lane_offset,
+                   lane_offset + packet_lane_count - 1u},
+      };
+      loom_op_t* bounded_index_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_index_assume_build(
+          builder, &packet_index, 1, &range, 1, &index_type, 1, op->location,
+          &bounded_index_op));
+      packet_index = loom_index_assume_results(bounded_index_op).values[0];
       if (chunk_index > 0) {
         loom_op_t* local_index_op = NULL;
         IREE_RETURN_IF_ERROR(
