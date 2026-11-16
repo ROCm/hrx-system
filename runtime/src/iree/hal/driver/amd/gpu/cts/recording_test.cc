@@ -708,6 +708,73 @@ TEST_F(GpuNativeRecordingTest,
   }
 }
 
+TEST_F(GpuNativeRecordingTest, CopyPacketsRespectPublicSourceExtent) {
+  using iree::hal::cts::Ref;
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(4096, 8),
+      iree_infinite_timeout(), output.out()));
+  struct Copy {
+    // Source ends exactly at the public range boundary where possible.
+    uint32_t source_offset;
+    // Destination alignment is independently required by the wide packet.
+    uint32_t target_offset;
+    // Publicly accessible bytes, without an implicit trailing source grant.
+    uint32_t length;
+    // Both operands admit the exact eight-byte scalar packet.
+    bool wide;
+  };
+  for (const Copy copy : {Copy{4092, 0, 4, false},
+                          {4088, 0, 8, true},
+                          {4084, 0, 8, false},
+                          {4088, 4, 8, false},
+                          {4084, 0, 12, false}}) {
+    SCOPED_TRACE(::testing::Message()
+                 << copy.source_offset << " -> " << copy.target_offset
+                 << " length=" << copy.length);
+    Ref<iree_hal_command_buffer_t> recording;
+    IREE_ASSERT_OK(iree_hal_command_buffer_create(
+        iree_hal_queue_family(queues_[0]), 0,
+        IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, recording.out()));
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+        recording,
+        iree_hal_make_buffer_ref(output, copy.source_offset, copy.length),
+        iree_hal_make_buffer_ref(output, copy.target_offset, copy.length), 0));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+
+    // Inspect before execution: an incorrect 32-bit packet can access another
+    // page and fault the device instead of producing a recoverable test error.
+    iree_hal_amd_gpu_pm4_command_invocation_t invocation;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_command_invocation_initialize(
+        recording, {}, nullptr, 0, &invocation));
+    const auto& program = *invocation.program;
+    const auto* words = reinterpret_cast<const uint32_t*>(
+        program.resident.contents.data + program.entry.offset);
+    uint32_t wide_count = 0;
+    uint32_t dma_count = 0;
+    uint32_t dispatch_count = 0;
+    for (uint32_t offset = 0; offset < program.entry.word_count;) {
+      const uint32_t header = words[offset];
+      if (((header >> 8) & 0xff) == 0x40) {
+        EXPECT_NE(words[offset + 1] & (1u << 16), 0u);
+        ++wide_count;
+      } else if (((header >> 8) & 0xff) == 0x50 && words[offset + 6]) {
+        EXPECT_EQ(words[offset + 6], copy.length);
+        ++dma_count;
+      } else if (((header >> 8) & 0xff) == 0x15) {
+        EXPECT_EQ(words[offset + 1], 1u);
+        ++dispatch_count;
+      }
+      offset += ((header >> 16) & 0x3fff) + 2;
+    }
+    EXPECT_EQ(wide_count, copy.wide ? 1u : 0u);
+    EXPECT_EQ(dma_count, !copy.wide && copy.length != 4 ? 1u : 0u);
+    EXPECT_EQ(dispatch_count, copy.length == 4 ? 1u : 0u);
+    iree_hal_amd_gpu_pm4_command_invocation_deinitialize(&invocation);
+  }
+}
+
 TEST_F(GpuNativeRecordingTest, TransfersAndDispatchSharePendingNativeBindings) {
   for (bool indirect : {false, true}) {
     SCOPED_TRACE(indirect);

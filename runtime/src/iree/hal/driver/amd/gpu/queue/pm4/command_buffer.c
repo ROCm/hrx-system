@@ -578,14 +578,19 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
   const bool aligned_target =
       iree_hal_amd_gpu_pm4_command_reference_is_aligned(target, 4);
   const bool aligned_fill = !copy && !update && aligned_target && !(length & 3);
-  const bool native_dma =
-      length != IREE_HAL_WHOLE_BUFFER && (copy || update || aligned_fill);
+  // The shader tail reads exactly the four requested bytes. COPY_DATA32 can
+  // fetch beyond them, while CP DMA's setup and dependent joins dominate such
+  // short transfers. Both paths use the same declared transfer barriers.
+  const bool native_dma = length != IREE_HAL_WHOLE_BUFFER &&
+                          (copy || update || aligned_fill) &&
+                          !(copy && length == 4);
   // Confirmed scalar packets avoid CP DMA's transaction setup and join.
-  // COPY_DATA moves one naturally aligned value. WRITE_DATA fits three DWORDs
-  // in the seven DWORDs used by DMA_DATA, without growing the command stream.
+  // Only the 64-bit COPY_DATA form has the required source extent: the 32-bit
+  // form may read past its selected DWORD, beyond the caller's accessible
+  // range. WRITE_DATA fits three DWORDs in DMA_DATA's seven command words.
   const bool scalar =
       aligned_target &&
-      (copy ? ((length == 4 || length == 8) &&
+      (copy ? (length == 8 &&
                iree_hal_amd_gpu_pm4_command_reference_is_aligned(
                    source, (uint32_t)length) &&
                iree_hal_amd_gpu_pm4_command_reference_is_aligned(
@@ -616,11 +621,7 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
         &buffer->recording, copy ? 6 : 4 + (uint32_t)length / 4, &offset,
         &words));
     if (copy) {
-      if (length == 8) {
-        iree_hal_amd_gpu_pm4_emit_copy64(words, 0, 0);
-      } else {
-        iree_hal_amd_gpu_pm4_emit_copy32(words, 0, 0);
-      }
+      iree_hal_amd_gpu_pm4_emit_copy64(words, 0, 0);
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
           buffer, false, offset + 8, source_value, source.offset, false));
     } else {
@@ -692,7 +693,11 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_transfer(
     uint32_t* words = NULL;
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_recording_commands(
         &buffer->recording, 31, &command_offset, &words));
-    iree_hal_amd_gpu_pm4_blit_emit(words, &buffer->pool->blit, 0);
+    iree_hal_amd_gpu_pm4_blit_emit(
+        words, &buffer->pool->blit, 0,
+        length == IREE_HAL_WHOLE_BUFFER
+            ? 256
+            : iree_hal_amd_gpu_blit_workgroup_count(length));
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(
         buffer, false, command_offset + 24 * 4,
         IREE_HAL_AMD_GPU_PM4_VALUE_INSTANCE, argument_offset, true));
