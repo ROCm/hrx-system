@@ -248,3 +248,26 @@ test.split_func @split_func_all_regions_dce(%arg: i32) {
 } launch {
   test.yield
 }
+
+// ====
+
+// Conditional exits have no SSA results but change the enclosing callable's
+// execution. Their containing control and Low counterparts remain observable.
+// RUN: with-low-asm pass canonicalize,cse,dce
+func.def @early_result(%outer: i1, %done: i1, %value: i32, %fallback: i32) -> (i32) {
+  scf.if %outer {
+    func.exit %done : i1 {
+      func.return %value : i32
+    }
+  }
+  func.return %fallback : i32
+}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @low_early_result(%done: reg<test.i32>, %value: reg<test.i32>, %fallback: reg<test.i32>) -> (reg<test.i32>) asm {
+  low.func.exit %done : reg<test.i32> {
+    return %value
+  }
+  return %fallback
+}
