@@ -82,7 +82,7 @@ def _apply_package_policy(name, tags, target_compatible_with):
 def _reject_workload_args(name, args):
     for arg in args:
         if arg.split("=")[0] in ["--config", "--case"]:
-            fail("%s: use loom_test configs and case for workload selection, not %s" % (name, arg))
+            fail("%s: use loom_test config and case for workload selection, not %s" % (name, arg))
 
 def loom_execution_profile(
         name,
@@ -103,7 +103,7 @@ def loom_execution_profile(
       target_class: Broad target class, such as gpu or cpu.
       executor: Execution environment, such as hardware or reference.
       runner_args: Profile arguments passed to the selected execution runner or
-          runner sequence. Workload configs and case selection belong on
+          runner sequence. Workload configuration and case selection belong on
           loom_test.
       runner: Optional executable label owning this profile's execution. When
           present, it receives the linked module and correctness arguments
@@ -1014,34 +1014,34 @@ def loom_library(
         visibility = visibility,
     )
 
-def _test_variants(name, configs, case, variants):
-    if variants == None:
-        return {name: struct(configs = configs, case = case)}
-    if not variants:
-        fail("%s variants must contain at least one named workload" % name)
-    workloads = {}
-    for variant_name, variant in variants.items():
-        if type(variant_name) != "string" or not variant_name:
-            fail("%s variant names must be non-empty strings" % name)
-        for key in variant:
-            if key not in ["configs", "case"]:
-                fail("%s variant %s has unknown field %s" % (name, variant_name, key))
-        workload_name = name + "_" + _name_suffix(variant_name)
-        if workload_name in workloads:
-            fail("%s has colliding variant names: %s" % (name, variant_name))
-        workload_configs = dict(configs)
-        workload_configs.update(variant.get("configs", {}))
-        workloads[workload_name] = struct(
-            configs = workload_configs,
-            case = variant.get("case", case),
+def _test_workloads(name, config, case, workloads):
+    if workloads == None:
+        return {name: struct(config = config, case = case)}
+    if not workloads:
+        fail("%s workloads must contain at least one named workload" % name)
+    expanded_workloads = {}
+    for workload_name, workload in workloads.items():
+        if type(workload_name) != "string" or not workload_name:
+            fail("%s workload names must be non-empty strings" % name)
+        for key in workload:
+            if key not in ["config", "case"]:
+                fail("%s workload %s has unknown field %s" % (name, workload_name, key))
+        expanded_name = name + "_" + _name_suffix(workload_name)
+        if expanded_name in expanded_workloads:
+            fail("%s has colliding workload names: %s" % (name, workload_name))
+        workload_config = dict(config)
+        workload_config.update(workload.get("config", {}))
+        expanded_workloads[expanded_name] = struct(
+            config = workload_config,
+            case = workload.get("case", case),
         )
-    return workloads
+    return expanded_workloads
 
-def _test_config_args(name, configs):
-    for key, value in configs.items():
+def _test_config_args(name, config):
+    for key, value in config.items():
         if type(key) != "string" or type(value) != "string":
-            fail("%s configs must map symbol names to string values" % name)
-    return ["--config=%s=%s" % (key, configs[key]) for key in sorted(configs.keys())]
+            fail("%s config must map symbol names to string values" % name)
+    return ["--config=%s=%s" % (key, config[key]) for key in sorted(config.keys())]
 
 def _declare_test_module(
         name,
@@ -1153,9 +1153,9 @@ def loom_test(
         inputopts = [],
         module = None,
         args = [],
-        configs = {},
+        config = {},
         case = "",
-        variants = None,
+        workloads = None,
         execution_profiles = [],
         compile_targets = [],
         benchmark_smoke = True,
@@ -1202,12 +1202,12 @@ def loom_test(
           the source owner retains those inputs, its source checks, and its
           runtime fixtures.
       args: Additional arguments passed to the correctness runner.
-      configs: String-valued configuration bindings shared by compiler checks
+      config: String-valued configuration bindings shared by compiler checks
           and selected execution runners.
       case: Optional case selector passed to selected execution runners.
           Compiler checks continue to qualify the entire owned module.
-      variants: Complete mapping of named workloads, each with optional configs
-          and case fields overriding the common values. Omitted variants create
+      workloads: Complete mapping of named workloads, each with optional config
+          and case fields overriding the common values. Omitted workloads create
           one default workload; an explicitly empty mapping is invalid.
       execution_profiles: Independent execution environments and requirement
           policies. An empty list declares no execution children.
@@ -1237,7 +1237,7 @@ def loom_test(
     )
     tags = package_attributes.tags
     target_compatible_with = package_attributes.target_compatible_with
-    workloads = _test_variants(name, configs, case, variants)
+    expanded_workloads = _test_workloads(name, config, case, workloads)
     tests = []
     if not module:
         module_name = name + "_module"
@@ -1254,8 +1254,8 @@ def loom_test(
         )
         module = ":" + module_name
         tests.extend(_declare_source_format_tests(name, srcs, tags, target_compatible_with))
-    for workload_name, workload in workloads.items():
-        config_args = _test_config_args(workload_name, workload.configs)
+    for workload_name, workload in expanded_workloads.items():
+        config_args = _test_config_args(workload_name, workload.config)
         if type(workload.case) != "string":
             fail("%s case must be a string" % workload_name)
         workload_args = config_args + (["--case=" + workload.case] if workload.case else [])

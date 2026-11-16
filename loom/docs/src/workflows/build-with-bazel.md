@@ -263,34 +263,34 @@ source checks independent of how many target packages consume the module.
 The checks retain the source owner's tags and source-provider constraints.
 Modules with no authored `.loom` inputs do not declare a source-check suite.
 
-### Workload variants share one source owner
+### Named workloads share one source owner
 
-`configs` binds compile-time values for compiler qualification, correctness,
+`config` binds compile-time values for compiler qualification, correctness,
 and benchmark smoke. `case` selects cases for the two numerical runners;
 compiler qualification still covers the entire owned module. These settings
 belong to the workload, while execution profiles own device selection,
 instrumentation, and resource requirements.
 
-Use named `variants` when the same program needs several configurations:
+Use named `workloads` when the same program needs several configurations:
 
 ```starlark
---8<-- "examples/guide/functions-and-control/BUILD.bazel:workload_variants"
+--8<-- "examples/guide/functions-and-control/BUILD.bazel:named_workloads"
 ```
 
-Each row overrides keys in the common `configs` mapping and may override the
+Each row overrides keys in the common `config` mapping and may override the
 common `case` selector. Configuration values are strings, as on binary rules.
-Omitting `variants` creates one default workload; supplying it names the
+Omitting `workloads` creates one default workload; supplying it names the
 complete set, with no extra default row. An empty mapping is an authoring error.
 
 With benchmark smoke enabled, each workload also has a host-only
-`<name>_<variant>_plan_test` that plans its selected benchmarks using the same
+`<name>_<workload>_plan_test` that plans its selected benchmarks using the same
 configuration. Planning is independent of the number of execution profiles.
 Profiles that supply their own runner own benchmark policy too; a test using
 only custom runners has no implicit host benchmark plan.
 
 Each workload has independent compiler and execution children, named
-`<name>_<variant>_compile_<target>` and
-`<name>_<variant>_execute_<profile>_test`. The source import and linked module
+`<name>_<workload>_compile_<target>` and
+`<name>_<workload>_execute_<profile>_test`. The source import and linked module
 remain shared across every row and profile. `args` remains correctness-only;
 `--config` and `--case` are rejected there and in execution profiles so the two
 numerical runners cannot accidentally select different workloads.

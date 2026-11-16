@@ -25,7 +25,7 @@ package(
 loom_test(
     name = "asan_test",
     srcs = ["//loom/src/loom/test/corpus/sanitizer:access_reporting.loom"],
-    configs = {"asan_launch_bound.tile_capacity": "1"},
+    config = {"asan_launch_bound.tile_capacity": "1"},
     execution_profiles = [AMD_GPU_ASAN_PROFILE],
 )
 
