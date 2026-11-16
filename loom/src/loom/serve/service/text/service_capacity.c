@@ -41,7 +41,7 @@ static iree_status_t loom_serve_text_service_capacity_run(void* user_data) {
     if (iree_status_is_ok(status)) {
       ++growth->count;
       status = loom_serve_text_session_initialize(
-          service->scheduling.model_mode,
+          service->epoch_options.model_mode,
           loom_serve_text_model_tokenizer(service->model),
           service->host_allocator, growth->sessions[i]);
     }
@@ -103,7 +103,9 @@ void loom_serve_text_service_capacity_publish(
   service->sessions = service->growth.sessions;
   service->ready = service->growth.ready;
   service->row_count = service->growth.count;
+  loom_serve_text_state_changed(service);
   service->growth = (loom_serve_text_service_capacity_t){0};
+  loom_serve_text_operation_end(service, TEXT_OPERATION_ADMISSION);
 }
 
 void loom_serve_text_service_capacity_discard(
@@ -116,4 +118,5 @@ void loom_serve_text_service_capacity_discard(
   iree_allocator_free(service->host_allocator, service->growth.sessions);
   iree_allocator_free(service->host_allocator, service->growth.ready);
   service->growth = (loom_serve_text_service_capacity_t){0};
+  loom_serve_text_operation_end(service, TEXT_OPERATION_ADMISSION);
 }

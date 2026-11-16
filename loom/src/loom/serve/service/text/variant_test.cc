@@ -292,6 +292,9 @@ TEST_F(SourceTextServiceTest,
 // test assertion exits early; callback storage lives through that join.
 class ReconfigurationTextServiceTest : public SourceTextServiceTest {
  protected:
+  // Three source owners and six independent variant-management slots.
+  loom_runtime::testing::ServiceControl variant_scheduling_{9};
+
   void SetUp() override {
     SourceTextServiceTest::SetUp();
     if (HasFatalFailure()) {
@@ -299,6 +302,7 @@ class ReconfigurationTextServiceTest : public SourceTextServiceTest {
     }
     auto options = ServiceOptions();
     options.variant_capacity = 6;
+    options.scheduling = variant_scheduling_.binding();
     IREE_ASSERT_OK(loom_serve_text_service_allocate(
         model_, &options, nullptr, host_allocator_, &service_));
     interface_ = loom_serve_text_service_interface(service_);

@@ -104,7 +104,7 @@ class TextComponentServiceTest : public SourceTextServiceTest {
         device_, storage_owner_, &options, observer, host_allocator_, &image_));
     auto service_options = ServiceOptions();
     service_options.image = image_;
-    service_options.image_scheduling = image_scheduling_.binding();
+    service_options.scheduling = image_scheduling_.binding();
     IREE_ASSERT_OK(loom_serve_text_service_allocate(
         model_, &service_options, nullptr, host_allocator_, &service_));
     interface_ = loom_serve_text_service_interface(service_);
@@ -154,7 +154,7 @@ class TextComponentServiceTest : public SourceTextServiceTest {
   }
 
   // Composition-owned projection observations outlive component retirement.
-  loom_runtime::testing::ServiceControl image_scheduling_;
+  loom_runtime::testing::ServiceControl image_scheduling_{4, 2};
   // Owned optional computation, outliving the service that borrows it.
   loom_service_finite_component_t* image_ = nullptr;
   // Owned text service, released only after both preparation domains join.

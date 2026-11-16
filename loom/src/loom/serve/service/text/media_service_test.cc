@@ -45,7 +45,7 @@ class MediaServiceTest : public SourceTextServiceTest {
         device_, storage_owner_, &options, observer, host_allocator_, &image_));
     auto service_options = ServiceOptions();
     service_options.image = image_;
-    service_options.image_scheduling = image_scheduling_.binding();
+    service_options.scheduling = image_scheduling_.binding();
     IREE_ASSERT_OK(loom_serve_text_service_allocate(
         model_, &service_options, nullptr, host_allocator_, &service_));
     interface_ = loom_serve_text_service_interface(service_);
@@ -139,8 +139,21 @@ class MediaServiceTest : public SourceTextServiceTest {
       OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
         IREE_ASSERT_OK(interface_.runtime.vtable->advance(
             interface_.runtime.self, 0, &progress));
-        if (std::string(interface_.snapshot(interface_.runtime.self).phase) ==
-            phase) {
+        bool matches =
+            std::string(interface_.snapshot(interface_.runtime.self).phase) ==
+            phase;
+        if (std::strcmp(phase, "image_prepare") == 0) {
+          // The combined inspection phase can describe concurrent text work.
+          // The projector's own operation identifies its actual CPU borrower.
+          loom_runtime_service_operation_t operation;
+          ASSERT_EQ(loom_runtime_service_read_operation(
+                        interface_.runtime.control, 3, &operation),
+                    LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+          matches = operation.key.serial &&
+                    operation.work == LOOM_RUNTIME_SERVICE_WORK_PREPARATION &&
+                    operation.waits == LOOM_RUNTIME_SERVICE_WAIT_CPU;
+        }
+        if (matches) {
           reached = true;
           action();
         }
@@ -155,7 +168,7 @@ class MediaServiceTest : public SourceTextServiceTest {
   }
 
   // Composition-owned projection observations outlive component retirement.
-  loom_runtime::testing::ServiceControl image_scheduling_;
+  loom_runtime::testing::ServiceControl image_scheduling_{4, 2};
   // Source documents outlive lazy preparation and final component retirement.
   loom_serve::testing::ModelDocument projector_document_;
   // Independent optional image computation on the actual text device.

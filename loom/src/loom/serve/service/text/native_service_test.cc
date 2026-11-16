@@ -62,6 +62,192 @@ std::string Quote(iree_string_view_t value) {
   return result;
 }
 
+// Direct native embedding with one resident row makes deferred admission and
+// execution observable independently of transport and the registry's policy.
+class NativeScheduledTextTest
+    : public loom_serve::testing::text::SourceTextServiceTest {
+ protected:
+  iree_host_size_t WorkerCount() const override {
+    return FLAG_native_text_workers;
+  }
+
+  loom_serve_text_options_t ModelOptions() const override {
+    auto options = SourceTextServiceTest::ModelOptions();
+    options.row_count = 1;
+    return options;
+  }
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(SourceTextServiceTest::SetUp());
+    auto options = ServiceOptions();
+    options.row_count = 1;
+    options.max_sessions = 1;
+    options.chunk_size = 32;
+    IREE_ASSERT_OK(loom_serve_text_service_allocate(
+        model_, &options, nullptr, host_allocator_, &service_));
+    interface_ = loom_serve_text_service_interface(service_);
+    Observe(interface_);
+  }
+
+  void TearDown() override {
+    if (service_) {
+      Until(
+          [&] {
+            return !interface_.runtime.vtable->has_requests(service_) &&
+                   !interface_.runtime.vtable->is_pending(service_);
+          },
+          LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
+      interface_.runtime.vtable->set_observer(service_, {});
+      loom_serve_text_service_free(service_, IREE_STATUS_OK);
+    }
+    SourceTextServiceTest::TearDown();
+  }
+
+  void Open(const char* prompt, NativeStream* out_stream) {
+    loom_serve_text_request_t request = {};
+    iree_string_builder_initialize(host_allocator_, &request.body);
+    const auto body = Request(Message("user", prompt), 1);
+    IREE_ASSERT_OK(iree_string_builder_append_string(
+        &request.body, iree_make_string_view(body.data(), body.size())));
+    loom_serve_text_stream_t* stream = nullptr;
+    auto status = loom_serve_text_service_try_open(service_, &request, &stream);
+    iree_string_builder_deinitialize(&request.body);
+    IREE_ASSERT_OK(status);
+    ASSERT_NE(stream, nullptr);
+    out_stream->reset(stream);
+  }
+
+  loom_runtime_service_offer_t Offer() const {
+    loom_runtime_service_offer_t offer = {};
+    EXPECT_EQ(
+        loom_runtime_service_read_offer(interface_.runtime.control, 0, &offer),
+        LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    return offer;
+  }
+
+  loom_runtime_service_observation_t Observation() const {
+    loom_runtime_service_observation_t observation = {};
+    EXPECT_EQ(loom_runtime_service_read_observation(interface_.runtime.control,
+                                                    &observation),
+              LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    return observation;
+  }
+
+  void Progress() {
+    bool progress = false;
+    IREE_ASSERT_OK(loom_runtime_device_group_advance(group_));
+    IREE_ASSERT_OK(loom_serve_text_service_progress(service_, 0, &progress));
+  }
+
+  loom_runtime_service_operation_key_t Grant() {
+    const auto offer = Offer();
+    EXPECT_EQ(offer.choice_count, 1u);
+    loom_runtime_service_operation_key_t operation = {};
+    IREE_EXPECT_OK(loom_serve_text_service_try_schedule(service_, offer.key, 0,
+                                                        0, &operation));
+    EXPECT_NE(operation.serial, 0u);
+    return operation;
+  }
+
+  template <typename Predicate>
+  void Until(Predicate ready, loom_runtime_service_flags_t flags = 0) {
+    auto* notification = loom_serve_http_server_notification(server_);
+    while (!ready()) {
+      const auto ticket = iree_notification_prepare_wait(notification);
+      bool progress = false;
+      IREE_ASSERT_OK(loom_runtime_device_group_advance(group_));
+      IREE_ASSERT_OK(
+          loom_serve_text_service_progress(service_, flags, &progress));
+      if (ready() || progress) {
+        iree_notification_cancel_wait(notification);
+      } else {
+        iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
+                                      IREE_TIME_INFINITE_FUTURE);
+      }
+    }
+  }
+
+  // Borrowed model and caller-owned control outlive this native service.
+  loom_serve_text_service_t* service_ = nullptr;
+  // The same production capability used by embedding and transport owners.
+  loom_serve_service_t interface_ = {};
+};
+
+TEST_F(NativeScheduledTextTest, DeferredUnitsFinishAtZeroNewGrants) {
+  NativeStream first(nullptr, loom_serve_text_stream_close);
+  NativeStream second(nullptr, loom_serve_text_stream_close);
+  ASSERT_NO_FATAL_FAILURE(Open("abxa", &first));
+  ASSERT_NO_FATAL_FAILURE(Open("bxa", &second));
+  ASSERT_NO_FATAL_FAILURE(Progress());
+  const auto preparation = Offer();
+  ASSERT_EQ(preparation.choice_count, 1u);
+  EXPECT_TRUE(preparation.work & LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
+  EXPECT_EQ(Observation().owned_request_count, 2u);
+  EXPECT_EQ(Observation().waiting_request_count, 2u);
+  EXPECT_EQ(Observation().pending_operation_count, 0u);
+  EXPECT_EQ(loom_serve_text_model_parameter_activity(model_).activations, 0u);
+  ASSERT_NO_FATAL_FAILURE(Progress());
+  EXPECT_EQ(Offer().key.revision, preparation.key.revision);
+  const auto accepted = Grant();
+  EXPECT_EQ(accepted.ordinal, 0u);
+  loom_runtime_service_operation_key_t stale = {};
+  IREE_ASSERT_OK(loom_serve_text_service_try_schedule(service_, preparation.key,
+                                                      0, 0, &stale));
+  EXPECT_EQ(stale.serial, 0u);
+  ASSERT_NO_FATAL_FAILURE(Until(
+      [&] { return Offer().work == LOOM_RUNTIME_SERVICE_WORK_EXECUTION; }));
+  EXPECT_EQ(Observation().pending_operation_count, 0u);
+  EXPECT_EQ(Observation().waiting_request_count, 2u);
+  EXPECT_EQ(interface_.telemetry.counters->batches, 0u);
+  ASSERT_NO_FATAL_FAILURE(Progress());
+  EXPECT_EQ(interface_.telemetry.counters->batches, 0u);
+  const auto execution = Grant();
+  EXPECT_EQ(execution.ordinal, 2u);
+  ASSERT_NO_FATAL_FAILURE(Until([&] {
+    if (loom_serve_text_stream_peek(first.get())) {
+      loom_serve_text_stream_consume(first.get());
+    }
+    return loom_serve_text_stream_is_complete(first.get());
+  }));
+  IREE_ASSERT_OK(loom_serve_text_stream_status(first.get()));
+  ASSERT_NE(loom_serve_text_stream_result(first.get()), nullptr);
+  EXPECT_EQ(String(loom_serve_text_stream_result(first.get())->content),
+            Oracle::Complete("abxa", 1));
+  EXPECT_FALSE(loom_serve_text_stream_is_complete(second.get()));
+  EXPECT_EQ(interface_.telemetry.counters->completed, 1u);
+  EXPECT_EQ(interface_.telemetry.counters->batches, 1u);
+  ASSERT_NO_FATAL_FAILURE(
+      Until([&] { return Observation().pending_operation_count == 0; }));
+  EXPECT_EQ(Observation().owned_request_count, 1u);
+  EXPECT_EQ(Observation().waiting_request_count, 1u);
+  EXPECT_TRUE(Offer().work & LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
+}
+
+TEST_F(NativeScheduledTextTest, CancelledChoiceCannotCaptureAReplacement) {
+  NativeStream first(nullptr, loom_serve_text_stream_close);
+  ASSERT_NO_FATAL_FAILURE(Open("abxa", &first));
+  ASSERT_NO_FATAL_FAILURE(Progress());
+  const auto cancelled = Offer();
+  first.reset();
+  loom_runtime_service_operation_key_t operation = {};
+  IREE_ASSERT_OK(loom_serve_text_service_try_schedule(service_, cancelled.key,
+                                                      0, 0, &operation));
+  EXPECT_EQ(operation.serial, 0u);
+  ASSERT_NO_FATAL_FAILURE(Progress());
+  EXPECT_EQ(Observation().owned_request_count, 0u);
+  EXPECT_EQ(Observation().pending_operation_count, 0u);
+  EXPECT_EQ(loom_serve_text_model_parameter_activity(model_).activations, 0u);
+  NativeStream replacement(nullptr, loom_serve_text_stream_close);
+  ASSERT_NO_FATAL_FAILURE(Open("bxa", &replacement));
+  ASSERT_NO_FATAL_FAILURE(Progress());
+  EXPECT_NE(Offer().key.revision, cancelled.key.revision);
+  IREE_ASSERT_OK(loom_serve_text_service_try_schedule(service_, cancelled.key,
+                                                      0, 0, &operation));
+  EXPECT_EQ(operation.serial, 0u);
+  EXPECT_EQ(Observation().owned_request_count, 1u);
+  EXPECT_EQ(Observation().pending_operation_count, 0u);
+}
+
 class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
  protected:
   iree_host_size_t WorkerCount() const override {

@@ -55,6 +55,23 @@ typedef struct loom_serve_text_preparation_t {
   iree_host_size_t growth_count;
 } loom_serve_text_preparation_t;
 
+// Independently retained ownership, not source stages or queued requests.
+typedef enum loom_serve_text_operation_slot_e {
+  TEXT_OPERATION_ADMISSION,
+  TEXT_OPERATION_INPUT_COUNT,
+  TEXT_OPERATION_EXECUTION,
+  TEXT_OPERATION_COUNT,
+} loom_serve_text_operation_slot_t;
+
+// The source retains one legal choice using its existing planning storage.
+typedef enum loom_serve_text_choice_e {
+  TEXT_CHOICE_NONE,
+  TEXT_CHOICE_PREPARATION,
+  TEXT_CHOICE_INPUT_COUNT,
+  TEXT_CHOICE_EPOCH,
+  TEXT_CHOICE_CHECKPOINT,
+} loom_serve_text_choice_t;
+
 // Serialized service ownership shared by request admission, device epochs,
 // and retirement. CPU jobs borrow only the fields described by their phase.
 struct loom_serve_text_service_t {
@@ -76,6 +93,48 @@ struct loom_serve_text_service_t {
   uint64_t media_preparation_end;
   // Native choice pool and text policy, joined before model retirement.
   loom_service_execution_reconfiguration_t* reconfiguration;
+  // Serialized scheduling facts; asynchronous workers never access this state.
+  struct {
+    // Exclusive source/operation ranges and the retained summary publisher.
+    loom_runtime_service_control_binding_t binding;
+    // Actual HAL group placement, shared by the text model and its operations.
+    uint64_t device_ordinal;
+    // Current source-selected opportunity, separate from publication tokens.
+    loom_runtime_service_offer_t offer;
+    // Captured choice kind; NONE means no new unit can currently start.
+    loom_serve_text_choice_t choice;
+    // Exact admission receipt/row or growth extent for PREPARATION.
+    loom_serve_text_preparation_t preparation;
+    // Captured epoch geometry, borrowing epoch.planning.scheduled.
+    loom_serve_packing_plan_t plan;
+    // Request participation in the retained source choice.
+    uint64_t choice_request_count;
+    // Device participation in that choice; zero for a stateless host query.
+    uint64_t choice_devices;
+    // Last published legal revision, independent of operation publication.
+    uint64_t published_revision;
+    // Monotonically changing identities for accepted units.
+    uint64_t next_serial;
+    // Local model/endpoint/continuation changes that invalidate capacity
+    // denials.
+    uint64_t state_revision;
+    // Independent owners retained until their explicit completion boundaries.
+    loom_runtime_service_operation_t operations[TEXT_OPERATION_COUNT];
+    // Last published operation records, suppressing unchanged atomic writes.
+    loom_runtime_service_operation_t published[TEXT_OPERATION_COUNT];
+    // Unfinished generation receipts, including any accepted epoch cohort.
+    uint64_t generation_count;
+    // Generation receipts captured by the current epoch through output release.
+    uint64_t epoch_request_count;
+    // The exclusive execution owner is a checkpoint transaction.
+    bool checkpoint;
+    // Independent management facts transferred by the compiler owner.
+    loom_runtime_service_observation_t management;
+    // Independent projector facts; request ownership overlaps the text queue.
+    loom_runtime_service_observation_t projection;
+    // Last aggregate summary, suppressing unchanged atomic writes.
+    loom_runtime_service_observation_t observation;
+  } scheduling;
   // Borrowed deployment name, independent of the source policy identity.
   iree_string_view_t name;
   // Owned fallback shape for isolated execution.
@@ -89,7 +148,7 @@ struct loom_serve_text_service_t {
   // Output bound when the client omits one.
   iree_host_size_t default_max_tokens;
   // Immutable model epoch geometry and execution choices.
-  loom_serve_text_epoch_options_t scheduling;
+  loom_serve_text_epoch_options_t epoch_options;
   // Rotating admission priority, independent of row or request identity.
   iree_host_size_t cursor;
   // Irreversible admission seal after stop or a terminal service failure.
@@ -178,5 +237,26 @@ void loom_serve_text_schedule_cpu(loom_serve_text_service_t* service,
 // Publishes owner-only model/session facts to the heartbeat snapshot.
 void loom_serve_text_observe(loom_serve_text_service_t* service,
                              const char* phase);
+
+// Records acceptance before any fallible submission can retain ownership.
+loom_runtime_service_operation_key_t loom_serve_text_operation_begin(
+    loom_serve_text_service_t* service, loom_serve_text_operation_slot_t slot,
+    loom_runtime_service_work_flags_t work,
+    loom_runtime_service_offer_key_t origin);
+
+// Ends an actually completed unit; failed ownership remains for model
+// retirement.
+void loom_serve_text_operation_end(loom_serve_text_service_t* service,
+                                   loom_serve_text_operation_slot_t slot);
+
+// Transfers copied owner facts only; selection and model queries live
+// elsewhere.
+void loom_serve_text_publish_control(loom_serve_text_service_t* service);
+
+// Withdraws the retained source choice before its planning storage is mutated.
+void loom_serve_text_withdraw_choice(loom_serve_text_service_t* service);
+
+// Invalidates logical-capacity denials after an actual local ownership change.
+void loom_serve_text_state_changed(loom_serve_text_service_t* service);
 
 #endif  // LOOM_SERVE_SERVICE_TEXT_SERVICE_OWNER_H_

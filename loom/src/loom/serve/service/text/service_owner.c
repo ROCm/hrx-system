@@ -97,3 +97,134 @@ void loom_serve_text_observe(loom_serve_text_service_t* service,
   state->backpressured_rows = backpressured;
   iree_slim_mutex_unlock(&service->heartbeat.mutex);
 }
+
+loom_runtime_service_operation_key_t loom_serve_text_operation_begin(
+    loom_serve_text_service_t* service, loom_serve_text_operation_slot_t slot,
+    loom_runtime_service_work_flags_t work,
+    loom_runtime_service_offer_key_t origin) {
+  IREE_ASSERT(service->scheduling.next_serial != UINT64_MAX);
+  loom_runtime_service_operation_t* operation =
+      &service->scheduling.operations[slot];
+  *operation = (loom_runtime_service_operation_t){
+      .key = {service->scheduling.binding.operation_ordinal + slot,
+              ++service->scheduling.next_serial},
+      .origin = origin,
+      .work = work,
+      .devices = slot == TEXT_OPERATION_INPUT_COUNT
+                     ? 0
+                     : UINT64_C(1) << service->scheduling.device_ordinal,
+      .use_count = slot == TEXT_OPERATION_INPUT_COUNT ? 0 : 1};
+  return operation->key;
+}
+
+void loom_serve_text_operation_end(loom_serve_text_service_t* service,
+                                   loom_serve_text_operation_slot_t slot) {
+  if (iree_status_is_ok(service->telemetry.failure)) {
+    service->scheduling.operations[slot] = (loom_runtime_service_operation_t){
+        .key.ordinal = service->scheduling.binding.operation_ordinal + slot};
+  }
+}
+
+void loom_serve_text_withdraw_choice(loom_serve_text_service_t* service) {
+  if (service->scheduling.choice == TEXT_CHOICE_NONE) {
+    return;
+  }
+  IREE_ASSERT(service->scheduling.offer.key.revision != UINT64_MAX);
+  ++service->scheduling.offer.key.revision;
+  service->scheduling.offer.work = 0;
+  service->scheduling.offer.choice_count = 0;
+  service->scheduling.choice = TEXT_CHOICE_NONE;
+}
+
+void loom_serve_text_state_changed(loom_serve_text_service_t* service) {
+  IREE_ASSERT(service->scheduling.state_revision != UINT64_MAX);
+  ++service->scheduling.state_revision;
+  loom_serve_text_withdraw_choice(service);
+}
+
+void loom_serve_text_publish_control(loom_serve_text_service_t* service) {
+  const loom_runtime_service_control_binding_t binding =
+      service->scheduling.binding;
+  const loom_runtime_service_use_t use = {
+      .resource_ordinal = service->scheduling.device_ordinal};
+  if (service->scheduling.offer.key.revision !=
+      service->scheduling.published_revision) {
+    const loom_runtime_service_choice_publication_t choice = {
+        .choice = {.instance_ordinal = binding.instance_ordinal,
+                   .request_count = service->scheduling.choice_request_count,
+                   .devices = service->scheduling.choice_devices,
+                   .use_count = service->scheduling.choice_devices ? 1 : 0},
+        .uses = &use};
+    loom_runtime_service_publish_offer(binding.control,
+                                       &service->scheduling.offer, &choice);
+    service->scheduling.published_revision =
+        service->scheduling.offer.key.revision;
+  }
+  uint64_t pending_operations = 0, accepted_devices = 0;
+  for (iree_host_size_t i = 0; i < TEXT_OPERATION_COUNT; ++i) {
+    loom_runtime_service_operation_t* operation =
+        &service->scheduling.operations[i];
+    if (operation->key.serial) {
+      ++pending_operations;
+      accepted_devices |= operation->devices;
+      if (!iree_status_is_ok(service->telemetry.failure)) {
+        operation->waits = 0;
+      } else if (i == TEXT_OPERATION_INPUT_COUNT) {
+        operation->waits = LOOM_RUNTIME_SERVICE_WAIT_CPU;
+      } else if (i == TEXT_OPERATION_ADMISSION) {
+        if (service->cpu_work == TEXT_CPU_WORK_PREPARE ||
+            service->cpu_work == TEXT_CPU_WORK_GROW) {
+          operation->waits = LOOM_RUNTIME_SERVICE_WAIT_CPU;
+        } else if (service->completion.work == TEXT_WORK_RESERVE ||
+                   service->completion.work == TEXT_WORK_RETAIN ||
+                   service->completion.work == TEXT_WORK_GROW) {
+          operation->waits = LOOM_RUNTIME_SERVICE_WAIT_DEVICE;
+        } else {
+          operation->waits = LOOM_RUNTIME_SERVICE_WAIT_CAPACITY;
+        }
+      } else {
+        operation->waits = service->cpu_work == TEXT_CPU_WORK_OUTPUT
+                               ? LOOM_RUNTIME_SERVICE_WAIT_CPU
+                               : LOOM_RUNTIME_SERVICE_WAIT_DEVICE;
+      }
+    }
+    if (memcmp(operation, &service->scheduling.published[i],
+               sizeof(*operation))) {
+      loom_runtime_service_publish_operation(binding.control, operation, &use);
+      service->scheduling.published[i] = *operation;
+    }
+  }
+  const loom_service_telemetry_counters_t* counters =
+      &service->telemetry.counters;
+  const loom_runtime_service_observation_t projection =
+      service->scheduling.projection;
+  const loom_runtime_service_observation_t management =
+      service->scheduling.management;
+  const loom_runtime_service_observation_t observation = {
+      .owned_request_count = counters->requests - counters->completed -
+                             counters->rejected - counters->cancelled -
+                             counters->failed,
+      .waiting_request_count =
+          service->pending.count - (service->pending.prepared.session != NULL) +
+          service->input_counts.count -
+          (service->cpu_work == TEXT_CPU_WORK_INPUT_COUNT) +
+          (service->control.consumer.self && !service->scheduling.checkpoint) +
+          service->scheduling.generation_count -
+          service->scheduling.epoch_request_count,
+      .offer_count =
+          service->scheduling.offer.choice_count + projection.offer_count,
+      .pending_operation_count = pending_operations +
+                                 management.pending_operation_count +
+                                 projection.pending_operation_count,
+      .offered_devices = (service->scheduling.offer.choice_count
+                              ? service->scheduling.choice_devices
+                              : 0) |
+                         projection.offered_devices,
+      .accepted_devices = accepted_devices | management.accepted_devices |
+                          projection.accepted_devices};
+  if (memcmp(&observation, &service->scheduling.observation,
+             sizeof(observation))) {
+    binding.publish_observation(binding.publisher, &observation);
+    service->scheduling.observation = observation;
+  }
+}

@@ -63,11 +63,10 @@ iree_status_t loom_serve_text_complete_reservation(
 
 // Progresses only the selected attempt through retention and reservation. A
 // completed, rejected, or yielded attempt never selects the next request.
-// Reports whether the owner can select another attempt on this turn. An
-// unchanged capacity or media wait relies on its existing owner notification.
+// An unchanged capacity or media wait relies on its existing owner
+// notification.
 iree_status_t loom_serve_text_progress_admission(
-    loom_serve_text_service_t* service, loom_runtime_service_flags_t flags,
-    bool* out_select_next);
+    loom_serve_text_service_t* service, loom_runtime_service_flags_t flags);
 
 // Transfers a validated receipt into a stable queue slot without starting work.
 void loom_serve_text_pending_push(
@@ -77,8 +76,14 @@ void loom_serve_text_pending_push(
     const loom_serve_text_sequence_t* sequence,
     loom_serve_text_receipt_t receipt);
 
-// Gathers a bounded observed queue window without changing text admission
-// order.
-bool loom_serve_text_media_lookahead(loom_serve_text_service_t* service);
+// Consumes independent component/projection outcomes for protected requests.
+// Errors and completion progress without granting another preparation attempt.
+iree_status_t loom_serve_text_progress_media(loom_serve_text_service_t* service,
+                                             bool* out_progress);
+
+// Captures the next bounded media-lookahead preparation. Already protected
+// continuations are gathered and sealed without starting another source unit.
+loom_serve_text_preparation_t loom_serve_text_select_media_preparation(
+    loom_serve_text_service_t* service, bool* out_progress);
 
 #endif  // LOOM_SERVE_SERVICE_TEXT_REQUEST_ADMISSION_H_

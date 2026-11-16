@@ -25,6 +25,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
 #include "loom/runtime/telemetry/stream.h"
+#include "loom/runtime/testing/service_control.h"
 #include "loom/runtime/testing/stalled_stderr.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
@@ -119,6 +120,7 @@ class SourceTextServiceTest : public ::testing::Test {
   virtual loom_serve_text_service_options_t ServiceOptions() const {
     return {
         .name = IREE_SV("fixture-text"),
+        .scheduling = scheduling_.binding(),
         .row_count = 4,
         .chunk_size = 3,
         .default_max_tokens = 16,
@@ -532,10 +534,16 @@ class SourceTextServiceTest : public ::testing::Test {
                             "X-Loom-Session: second\r\n");
     ASSERT_NO_FATAL_FAILURE(Accept(second, interface, &connection));
     OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
+      loom_runtime_service_offer_t offer;
+      ASSERT_EQ(
+          loom_runtime_service_read_offer(interface.runtime.control, 0, &offer),
+          LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+      loom_runtime_service_operation_key_t operation;
+      IREE_ASSERT_OK(loom_serve_text_service_try_schedule(value, offer.key, 0,
+                                                          0, &operation));
+      ASSERT_NE(operation.serial, 0u);
       bool progress = false;
-      IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
-                                                       0, &progress));
-      EXPECT_TRUE(progress);
+      IREE_ASSERT_OK(loom_serve_text_service_progress(value, 0, &progress));
     });
     EXPECT_EQ(interface.telemetry.counters->batches, 0u);
     EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests, 1u);
@@ -720,6 +728,8 @@ class SourceTextServiceTest : public ::testing::Test {
   loom_runtime_device_t* device_ = nullptr;
   // Explicit storage owner selected independently from execution placement.
   loom_runtime_pool_t* storage_owner_ = nullptr;
+  // Retained native source control, surviving service and model destruction.
+  loom_runtime::testing::ServiceControl scheduling_{3};
   // Actual source-defined text model, with no native mock implementation.
   loom_serve_text_model_t* model_ = nullptr;
   // Real loopback HTTP carrier.

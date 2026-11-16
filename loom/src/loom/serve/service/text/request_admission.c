@@ -35,14 +35,26 @@ void loom_serve_text_pending_observe(loom_serve_text_service_t* service) {
 
 static void loom_serve_text_pending_remove(loom_serve_text_service_t* service,
                                            iree_host_size_t index) {
+  const bool selected =
+      service->pending.values[index] == service->pending.prepared.request;
   loom_serve_text_pending_queue_remove(&service->pending, index);
+  loom_serve_text_state_changed(service);
+  if (selected) {
+    loom_serve_text_operation_end(service, TEXT_OPERATION_ADMISSION);
+  }
   loom_serve_text_pending_observe(service);
 }
 
 void loom_serve_text_pending_cancel(loom_serve_text_service_t* service,
                                     iree_host_size_t index) {
+  const bool selected =
+      service->pending.values[index] == service->pending.prepared.request;
   loom_serve_text_pending_queue_cancel(&service->pending, index,
                                        service->projector);
+  loom_serve_text_state_changed(service);
+  if (selected) {
+    loom_serve_text_operation_end(service, TEXT_OPERATION_ADMISSION);
+  }
   loom_serve_text_pending_observe(service);
 }
 
@@ -52,12 +64,17 @@ void loom_serve_text_pending_cancel_failed(loom_serve_text_service_t* service,
       service->cpu_work == TEXT_CPU_WORK_PREPARE ||
       service->completion.work == TEXT_WORK_RESERVE ||
       service->completion.work == TEXT_WORK_RETAIN;
+  const bool selected = service->pending.prepared.session != NULL;
   if (loom_serve_text_pending_queue_cancel_failed(
           &service->pending,
           candidate_borrowed ? service->pending.prepared.request : NULL,
           service->cpu_work == TEXT_CPU_WORK_PREPARE, service->projector)) {
     *out_progress = true;
+    loom_serve_text_state_changed(service);
     loom_serve_text_pending_observe(service);
+  }
+  if (selected && !service->pending.prepared.session) {
+    loom_serve_text_operation_end(service, TEXT_OPERATION_ADMISSION);
   }
 }
 
@@ -68,6 +85,9 @@ iree_status_t loom_serve_text_submit_trim(loom_serve_text_service_t* service) {
   if (!service->pool.trim.pending) {
     return iree_ok_status();
   }
+  loom_serve_text_operation_begin(service, TEXT_OPERATION_EXECUTION,
+                                  LOOM_RUNTIME_SERVICE_WORK_RELEASE,
+                                  (loom_runtime_service_offer_key_t){0});
   loom_serve_text_observe(service, "trim");
   service->pool.trim.start_time = iree_time_now();
   IREE_RETURN_IF_ERROR(loom_serve_text_model_submit_trim(
@@ -86,6 +106,8 @@ iree_status_t loom_serve_text_complete_trim(
     return loom_serve_text_await_work(service, TEXT_WORK_TRIM);
   }
   service->pool.trim.pending = false;
+  loom_serve_text_state_changed(service);
+  loom_serve_text_operation_end(service, TEXT_OPERATION_EXECUTION);
   const loom_runtime_storage_statistics_t memory =
       loom_serve_text_model_memory_statistics(service->model);
   const loom_service_text_trim_record_t value = {
@@ -156,6 +178,8 @@ bool loom_serve_text_cache_reclaim_request(void* self) {
     return false;
   }
   service->pool.trim.pending = true;
+  loom_serve_text_state_changed(service);
+  loom_serve_text_publish_control(service);
   loom_runtime_readiness_notify(&service->readiness);
   return true;
 }
@@ -269,7 +293,8 @@ loom_serve_text_preparation_t loom_serve_text_select_preparation(
     return (loom_serve_text_preparation_t){0};
   }
   loom_serve_text_pending_request_t* pending = service->pending.values[index];
-  if (loom_serve_text_media_projector_borrows(service->projector,
+  if (pending->blocked_state_revision == service->scheduling.state_revision ||
+      loom_serve_text_media_projector_borrows(service->projector,
                                               pending->media)) {
     return (loom_serve_text_preparation_t){0};
   }
@@ -278,7 +303,9 @@ loom_serve_text_preparation_t loom_serve_text_select_preparation(
       .index = index,
       .session = pending->continuation.session};
   if (preparation.session) {
-    return preparation;
+    return loom_serve_text_media_request_is_ready(pending->media)
+               ? preparation
+               : (loom_serve_text_preparation_t){0};
   }
   preparation.session = loom_serve_text_session_select(
       service->row_count, service->sessions, pending->name,
@@ -378,8 +405,45 @@ void loom_serve_text_complete_retention(loom_serve_text_service_t* service) {
   loom_serve_text_session_cache_publish(service->pending.prepared.detaching,
                                         session);
   service->pending.prepared.detaching = NULL;
+  loom_serve_text_state_changed(service);
   loom_serve_text_row_reset_retired(session->row);
   service->pool.trim.pending = true;
+}
+
+// Starts only for an accepted text preparation. Subsequent owner turns call
+// this after the component has published readiness, never on a dormant model.
+static iree_status_t loom_serve_text_prepare_projector(
+    loom_serve_text_service_t* service,
+    const loom_serve_text_pending_request_t* pending) {
+  if (!service->projector) {
+    loom_service_finite_model_t* model = NULL;
+    iree_status_t status =
+        loom_service_finite_component_prepare(service->image, &model);
+    if (!iree_status_is_ok(status)) {
+      // Registration/source preparation is service availability, not a defect
+      // in this HTTP payload. Preserve the component's original diagnostic.
+      return iree_status_join(
+          iree_make_status(IREE_STATUS_UNAVAILABLE,
+                           "image component is unavailable"),
+          status);
+    }
+    if (!model) {
+      return iree_ok_status();
+    }
+    iree_host_size_t capacity = 0;
+    if (!iree_host_size_checked_mul(service->pending.capacity,
+                                    pending->chat.policy->images.maximum_count,
+                                    &capacity)) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "image queue extent overflow");
+    }
+    IREE_RETURN_IF_ERROR(loom_serve_text_media_projector_allocate(
+        model, capacity, service->readiness.executor,
+        service->readiness.proactor, service->readiness.observer,
+        service->image_scheduling, &service->image_next_identity,
+        service->host_allocator, &service->projector));
+  }
+  return iree_ok_status();
 }
 
 // Resolves prefix elision before starting the independent image component.
@@ -389,7 +453,7 @@ static iree_status_t loom_serve_text_prepare_media(
     bool* out_state_capacity) {
   *out_ready = true;
   *out_state_capacity = false;
-  if (service->scheduling.model_mode == LOOM_SERVE_TEXT_MODE_ENCODE) {
+  if (service->epoch_options.model_mode == LOOM_SERVE_TEXT_MODE_ENCODE) {
     return iree_ok_status();
   }
   loom_serve_text_pending_request_t* pending =
@@ -467,39 +531,16 @@ static iree_status_t loom_serve_text_prepare_media(
     }
     service->pending.prepared.restored_bytes =
         pending->continuation.restored_bytes;
+    loom_serve_text_state_changed(service);
   }
   if (!service->media_preparation_end &&
       loom_serve_text_media_projector_is_collecting(service->projector)) {
     service->media_preparation_end =
         service->pending.values[service->pending.count - 1]->receipt.serial;
   }
+  IREE_RETURN_IF_ERROR(loom_serve_text_prepare_projector(service, pending));
   if (!service->projector) {
-    loom_service_finite_model_t* model = NULL;
-    iree_status_t status =
-        loom_service_finite_component_prepare(service->image, &model);
-    if (!iree_status_is_ok(status)) {
-      // Registration/source preparation is service availability, not a defect
-      // in this HTTP payload. Preserve the component's original diagnostic.
-      return iree_status_join(
-          iree_make_status(IREE_STATUS_UNAVAILABLE,
-                           "image component is unavailable"),
-          status);
-    }
-    if (!model) {
-      return iree_ok_status();
-    }
-    iree_host_size_t capacity = 0;
-    if (!iree_host_size_checked_mul(service->pending.capacity,
-                                    pending->chat.policy->images.maximum_count,
-                                    &capacity)) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "image queue extent overflow");
-    }
-    IREE_RETURN_IF_ERROR(loom_serve_text_media_projector_allocate(
-        model, capacity, service->readiness.executor,
-        service->readiness.proactor, service->readiness.observer,
-        service->image_scheduling, &service->image_next_identity,
-        service->host_allocator, &service->projector));
+    return iree_ok_status();
   }
   loom_serve_text_media_projector_offer(
       service->projector, pending->media,
@@ -587,6 +628,11 @@ static iree_status_t loom_serve_text_admit_request(
   }
   const iree_status_t status = loom_serve_text_pending_queue_admit(
       &service->pending, &service->cache, service->name);
+  if (iree_status_is_ok(status)) {
+    ++service->scheduling.generation_count;
+    loom_serve_text_state_changed(service);
+    loom_serve_text_operation_end(service, TEXT_OPERATION_ADMISSION);
+  }
   loom_serve_text_pending_observe(service);
   return status;
 }
@@ -598,10 +644,7 @@ iree_status_t loom_serve_text_complete_reservation(
 }
 
 iree_status_t loom_serve_text_progress_admission(
-    loom_serve_text_service_t* service, loom_runtime_service_flags_t flags,
-    bool* out_select_next) {
-  *out_select_next =
-      !service->pending.prepared.session && service->pending.count;
+    loom_serve_text_service_t* service, loom_runtime_service_flags_t flags) {
   // Cancellation can leave a completed full-cache exchange without its
   // incoming admission. Settle that excess here, never in terminal teardown's
   // host-only pending removal while device ownership may remain unresolved.
@@ -636,11 +679,13 @@ iree_status_t loom_serve_text_progress_admission(
         loom_serve_text_prepare_media(service, &media_ready, &state_capacity);
     if (!iree_status_is_ok(status)) {
       status = loom_serve_text_reject_prepared(service, status);
-      *out_select_next = true;
       continue;
     }
     if (service->completion.work != TEXT_WORK_NONE) {
       break;
+    }
+    if (state_capacity || (!media_ready && !pending->continuation.session)) {
+      pending->blocked_state_revision = service->scheduling.state_revision;
     }
     if (service->pending.prepared.index != service->pending.admission.cursor) {
       // Lookahead may reserve a future consumer and gather its images, but it
@@ -650,14 +695,14 @@ iree_status_t loom_serve_text_progress_admission(
         loom_serve_text_media_projector_seal(service->projector);
       }
       memset(&service->pending.prepared, 0, sizeof(service->pending.prepared));
-      *out_select_next = true;
+      loom_serve_text_operation_end(service, TEXT_OPERATION_ADMISSION);
       continue;
     }
     if (!media_ready && !state_capacity) {
       memset(&service->pending.prepared, 0, sizeof(service->pending.prepared));
+      loom_serve_text_operation_end(service, TEXT_OPERATION_ADMISSION);
       if (loom_serve_text_admission_blocked(&service->pending.admission,
                                             service->pending.count)) {
-        *out_select_next = true;
         continue;
       }
       break;
@@ -742,6 +787,7 @@ iree_status_t loom_serve_text_progress_admission(
         if (admission == TEXT_ADMISSION_CAPACITY) {
           break;
         }
+        pending->blocked_state_revision = service->scheduling.state_revision;
         const iree_host_size_t previous = service->pending.admission.cursor;
         const bool probe = loom_serve_text_admission_blocked(
             &service->pending.admission, service->pending.count);
@@ -750,9 +796,9 @@ iree_status_t loom_serve_text_progress_admission(
               loom_serve_text_model_residency(service->model));
           memset(&service->pending.prepared, 0,
                  sizeof(service->pending.prepared));
+          loom_serve_text_operation_end(service, TEXT_OPERATION_ADMISSION);
         }
         if (probe) {
-          *out_select_next = true;
           continue;
         }
         break;
@@ -764,11 +810,9 @@ iree_status_t loom_serve_text_progress_admission(
               "retained state leaves insufficient completion capacity; "
               "release a checkpoint, lower max_tokens, or use elastic backing "
               "with a larger memory budget"));
-      *out_select_next = true;
       continue;
     }
     status = loom_serve_text_admit_request(service, flags);
-    *out_select_next = true;
   }
   return status;
 }
@@ -784,14 +828,68 @@ void loom_serve_text_pending_push(
   loom_serve_text_pending_observe(service);
 }
 
-// Lookahead prepares only the already-observed queue window. It never changes
-// the admission cursor or spends/replenishes overtaking credit.
-bool loom_serve_text_media_lookahead(loom_serve_text_service_t* service) {
+// Advances already protected text continuations when the independent image
+// owner publishes readiness. Queue mutation waits for row/codec CPU loans.
+iree_status_t loom_serve_text_progress_media(loom_serve_text_service_t* service,
+                                             bool* out_progress) {
+  if (!service->image || service->cpu_work == TEXT_CPU_WORK_PREPARE ||
+      service->cpu_work == TEXT_CPU_WORK_GROW) {
+    return iree_ok_status();
+  }
+  const loom_service_finite_component_phase_t phase =
+      loom_service_finite_component_phase(service->image);
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < service->pending.count && iree_status_is_ok(status);) {
+    loom_serve_text_pending_request_t* pending = service->pending.values[i];
+    if (!pending->continuation.session ||
+        loom_serve_text_media_projector_borrows(service->projector,
+                                                pending->media)) {
+      ++i;
+      continue;
+    }
+    iree_status_t request_status =
+        loom_serve_text_media_request_take_status(pending->media);
+    if (iree_status_is_ok(request_status) &&
+        !loom_serve_text_media_request_is_ready(pending->media)) {
+      if (!service->projector &&
+          (phase == LOOM_SERVICE_FINITE_COMPONENT_READY ||
+           phase == LOOM_SERVICE_FINITE_COMPONENT_FAILED)) {
+        request_status = loom_serve_text_prepare_projector(service, pending);
+      }
+      if (iree_status_is_ok(request_status) &&
+          loom_serve_text_media_projector_is_collecting(service->projector)) {
+        if (!service->media_preparation_end) {
+          service->media_preparation_end =
+              service->pending.values[service->pending.count - 1]
+                  ->receipt.serial;
+        }
+      }
+    }
+    if (iree_status_is_ok(request_status)) {
+      ++i;
+    } else {
+      loom_serve_text_media_projector_cancel(service->projector,
+                                             pending->media);
+      status = loom_serve_text_pending_request_reject(
+          pending, &service->telemetry, request_status,
+          service->host_allocator);
+      loom_serve_text_pending_remove(service, i);
+      *out_progress = true;
+    }
+  }
+  return status;
+}
+
+// Lookahead selects only from the already-observed queue window. Gathering
+// protected continuations and sealing a window starts no CPU or device work.
+loom_serve_text_preparation_t loom_serve_text_select_media_preparation(
+    loom_serve_text_service_t* service, bool* out_progress) {
   if (!service->media_preparation_end || service->pending.prepared.session ||
       service->cpu_work != TEXT_CPU_WORK_NONE ||
       (service->completion.work != TEXT_WORK_NONE &&
        service->completion.work != TEXT_WORK_EPOCH)) {
-    return false;
+    return (loom_serve_text_preparation_t){0};
   }
   for (iree_host_size_t i = 0; i < service->pending.count; ++i) {
     const loom_serve_text_pending_request_t* request =
@@ -800,11 +898,12 @@ bool loom_serve_text_media_lookahead(loom_serve_text_service_t* service) {
       break;
     }
     if (request->continuation.session) {
-      if (service->projector) {
-        loom_serve_text_media_projector_offer(
-            service->projector, request->media,
-            loom_serve_text_reservation_memory_footprint(
-                &request->continuation.reservation));
+      if (service->projector &&
+          !loom_serve_text_media_projector_offer(
+              service->projector, request->media,
+              loom_serve_text_reservation_memory_footprint(
+                  &request->continuation.reservation))) {
+        break;
       }
       continue;
     }
@@ -812,17 +911,16 @@ bool loom_serve_text_media_lookahead(loom_serve_text_service_t* service) {
       const loom_serve_text_preparation_t preparation =
           loom_serve_text_select_preparation(service, i);
       if (preparation.request) {
-        loom_serve_text_begin_preparation(service, &preparation);
-        return true;
+        return preparation;
       }
     }
     // An earlier text-only, unavailable-row, or capacity-blocked request is
     // a cohort boundary, not a gap for later consumers to reserve across.
     break;
   }
-  if (!service->projector) {
-    return false;
+  if (service->projector) {
+    service->media_preparation_end = 0;
+    *out_progress |= loom_serve_text_media_projector_seal(service->projector);
   }
-  service->media_preparation_end = 0;
-  return loom_serve_text_media_projector_seal(service->projector);
+  return (loom_serve_text_preparation_t){0};
 }

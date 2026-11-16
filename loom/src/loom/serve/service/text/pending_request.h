@@ -41,6 +41,10 @@ typedef struct loom_serve_text_pending_request_t {
   bool replay_prefix;
   // Page-rounded completion requirement for the prepared history.
   iree_host_size_t reservation;
+  // Local ownership revision at a blocked continuation/capacity attempt. Zero
+  // means no denial; state, endpoint, or continuation changes restore
+  // eligibility.
+  uint64_t blocked_state_revision;
   // Cumulative CPU preparation time, excluding unchanged admission retries.
   iree_duration_t prepare_duration;
   // Validated local session key borrowing immutable consumer input.

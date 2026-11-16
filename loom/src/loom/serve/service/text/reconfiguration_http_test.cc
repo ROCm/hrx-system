@@ -18,9 +18,13 @@ using loom_serve::testing::text::SourceTextServiceTest;
 
 class ReconfigurationHttpTextTest : public SourceTextServiceTest {
  protected:
+  // Three source owners and four independent variant-management slots.
+  loom_runtime::testing::ServiceControl variant_scheduling_{7};
+
   loom_serve_text_service_options_t ServiceOptions() const override {
     auto options = SourceTextServiceTest::ServiceOptions();
     options.variant_capacity = 4;
+    options.scheduling = variant_scheduling_.binding();
     return options;
   }
 

@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <cstring>
 
+#include "loom/runtime/parameter/residency.h"
 #include "loom/runtime/telemetry/field.h"
 #include "loom/runtime/testing/worker_gate.h"
 #include "loom/serve/service/text/service_test_fixture.h"
@@ -158,6 +159,18 @@ TEST_F(FailedTextDiagnosticsTest, ModelFailureReachesActiveQueuedAndControl) {
     return std::string(interface_.snapshot(interface_.runtime.self).phase) ==
            "execute";
   }));
+  loom_runtime_service_operation_t accepted;
+  ASSERT_EQ(loom_runtime_service_read_operation(interface_.runtime.control, 2,
+                                                &accepted),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  ASSERT_NE(accepted.key.serial, 0u);
+  EXPECT_EQ(accepted.work, LOOM_RUNTIME_SERVICE_WORK_EXECUTION);
+  EXPECT_NE(accepted.devices, 0u);
+  // The admitted row and its submitted invocation independently pin parameters.
+  const auto accepted_pins =
+      loom_runtime_residency_snapshot(loom_serve_text_model_residency(model_))
+          .pin_count;
+  EXPECT_EQ(accepted_pins, 2u);
   const int queued = Send(Request(Message("user", "ax")));
   ASSERT_NO_FATAL_FAILURE(Accept(queued, interface_, &connection));
   const loom_serve_text_checkpoint_request_t request = {
@@ -205,6 +218,28 @@ TEST_F(FailedTextDiagnosticsTest, ModelFailureReachesActiveQueuedAndControl) {
   EXPECT_TRUE(loom_serve_text_checkpoint_control_is_complete(control));
   loom_serve_text_service_free(service_, IREE_STATUS_OK);
   service_ = nullptr;
+  // Service destruction ends delivery, not either failed residency owner.
+  // The parent retains the accepted device use until actual model retirement.
+  loom_runtime_service_operation_t retained;
+  ASSERT_EQ(loom_runtime_service_read_operation(interface_.runtime.control, 2,
+                                                &retained),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(retained.key.serial, accepted.key.serial);
+  EXPECT_EQ(retained.devices, accepted.devices);
+  EXPECT_EQ(retained.use_count, 1u);
+  EXPECT_EQ(retained.waits, 0u);
+  EXPECT_EQ(
+      loom_runtime_residency_snapshot(loom_serve_text_model_residency(model_))
+          .pin_count,
+      accepted_pins);
+  loom_runtime_service_observation_t observation;
+  ASSERT_EQ(loom_runtime_service_read_observation(interface_.runtime.control,
+                                                  &observation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(observation.owned_request_count, 0u);
+  EXPECT_EQ(observation.offer_count, 0u);
+  EXPECT_NE(observation.pending_operation_count, 0u);
+  EXPECT_EQ(observation.accepted_devices, accepted.devices);
   ExpectFailedEnds(3);
   iree_status_t status = loom_serve_text_checkpoint_control_status(control);
   EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
@@ -413,6 +448,20 @@ TEST_F(SourceTextServiceTest, CheckpointClaimSurvivesDisconnectAndStopping) {
     const int pin =
         Send("", "X-Loom-Session: root\r\n", "/v1/checkpoints/base");
     ASSERT_NO_FATAL_FAILURE(Accept(pin, interface, &connection));
+    // HTTP admission queues the control; native policy explicitly accepts its
+    // source opportunity before this test disconnects the receipt owner.
+    EXPECT_FALSE(interface.runtime.vtable->is_pending(interface.runtime.self));
+    bool progress = false;
+    IREE_ASSERT_OK(loom_serve_text_service_progress(value, 0, &progress));
+    loom_runtime_service_offer_t offer;
+    ASSERT_EQ(
+        loom_runtime_service_read_offer(interface.runtime.control, 0, &offer),
+        LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    ASSERT_EQ(offer.choice_count, 1u);
+    loom_runtime_service_operation_key_t operation;
+    IREE_ASSERT_OK(loom_serve_text_service_try_schedule(value, offer.key, 0, 0,
+                                                        &operation));
+    ASSERT_NE(operation.serial, 0u);
     // Pin ownership has been accepted. The owner has not consumed readiness,
     // even if the device/proactor has already completed its work.
     // Request-backed names must survive peer failure until the endpoint can be
