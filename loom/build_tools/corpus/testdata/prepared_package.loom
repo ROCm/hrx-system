@@ -1,0 +1,42 @@
+kernel.def @increment() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %storage[%origin] : buffer -> view<1xi32>
+  %value = view.load %view[0] : view<1xi32> -> i32
+  %c1 = scalar.constant 1 : i32
+  %result = scalar.addi %value, %c1 : i32
+  view.store %result, %view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+func.def @increment_oracle(%storage: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %storage[%origin] : buffer -> view<1xi32>
+  %value = view.load %view[0] : view<1xi32> -> i32
+  %c1 = scalar.constant 1 : i32
+  %result = scalar.addi %value, %c1 : i32
+  view.store %result, %view[0] : i32, view<1xi32>
+  func.return
+}
+
+check.scenario @first {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(41) : tensor<1xi32>
+    check.compare<@increment, @increment_oracle>(%storage) : (tensor<1xi32>) -> () {
+      check.expect.equal actual(%storage) expected(%storage) : tensor<1xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario @second {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(9) : tensor<1xi32>
+    check.compare<@increment, @increment_oracle>(%storage) : (tensor<1xi32>) -> () {
+      check.expect.equal actual(%storage) expected(%storage) : tensor<1xi32>
+    }
+  }
+  check.return
+}

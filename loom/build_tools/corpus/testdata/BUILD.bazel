@@ -13,6 +13,7 @@ exports_files(
     [
         "all_roots_xfail.loom",
         "diagnostic_xfails.loom",
+        "prepared_package.loom",
     ],
     visibility = ["//loom/build_tools/corpus:__pkg__"],
 )

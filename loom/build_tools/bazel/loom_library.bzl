@@ -27,6 +27,7 @@ load(
     "loom_linking",
     _LoomLibraryInfo = "LoomLibraryInfo",
 )
+load(":loom_target_profile.bzl", "LoomTargetProfileInfo")
 
 _LOOM_BENCHMARK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:benchmark_toolchain_type")
 _LOOM_CXX_IMPORT_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:cxx_import_toolchain_type")
@@ -59,6 +60,15 @@ LoomExecutionTestInfo = provider(
         "profile_name": "Stable execution profile name.",
         "test_runner": "Resolved correctness runner executable.",
         "test_runner_args": "Profile, workload, and test arguments passed to the correctness runner.",
+    },
+)
+
+LoomPreparedTestPackageInfo = provider(
+    doc = "One target-prepared scenario execution package.",
+    fields = {
+        "directory": "Tree artifact containing the manifest and package payloads.",
+        "target_family": "Exact target-profile family used by the producer.",
+        "target_selector": "Exact target-profile selector used by the producer.",
     },
 )
 
@@ -378,6 +388,57 @@ _loom_test_module = rule(
     },
     doc = "Links one root-owned Loom test module.",
     toolchains = [_LOOM_LINK_TOOLCHAIN_TYPE],
+)
+
+def _loom_prepared_test_package_impl(ctx):
+    module = ctx.attr.module[_LoomTestModuleInfo].module
+    target = ctx.attr.target[LoomTargetProfileInfo]
+    output = ctx.actions.declare_directory(ctx.label.name + ".package")
+    args = ctx.actions.args()
+    args.add(module)
+    args.add("--target=%s:%s" % (target.family, target.selector))
+    args.add("--output=%s" % output.path)
+    ctx.actions.run(
+        arguments = [args],
+        executable = ctx.executable._package_tool,
+        inputs = [module],
+        mnemonic = "LoomPrepareTestPackage",
+        outputs = [output],
+        progress_message = "Preparing scenario package %s for %s:%s" % (
+            ctx.label,
+            target.family,
+            target.selector,
+        ),
+    )
+    return [
+        DefaultInfo(files = depset([output])),
+        LoomPreparedTestPackageInfo(
+            directory = output,
+            target_family = target.family,
+            target_selector = target.selector,
+        ),
+    ]
+
+_loom_prepared_test_package = rule(
+    implementation = _loom_prepared_test_package_impl,
+    attrs = {
+        "module": attr.label(
+            mandatory = True,
+            providers = [_LoomTestModuleInfo],
+            doc = "Linked scenario-only test module to prepare.",
+        ),
+        "target": attr.label(
+            mandatory = True,
+            providers = [LoomTargetProfileInfo],
+            doc = "Exact target profile used to prepare every scenario subject.",
+        ),
+        "_package_tool": attr.label(
+            cfg = "exec",
+            default = Label("//loom/build_tools/corpus:loom-corpus-prepare-package"),
+            executable = True,
+        ),
+    },
+    doc = "Prepares one linked scenario module for later execution without source compilation.",
 )
 
 def _tool_runfiles(ctx, tool, files):
@@ -1143,6 +1204,43 @@ def loom_test_module(
             tags = package_attributes.tags,
             visibility = visibility,
         )
+
+def loom_prepared_test_package(
+        name,
+        module,
+        target,
+        tags = [],
+        visibility = None,
+        target_compatible_with = []):
+    """Prepares a linked scenario module for one exact execution target.
+
+    The output directory contains the untouched authored module, a root-selected
+    prepared-low module, its launch-configuration program, and a strict manifest
+    binding those payloads to the selected target and scenario subjects. V0
+    accepts unconfigured direct-kernel scenarios without external fixture files.
+
+    Args:
+      name: Prepared package target name.
+      module: Reusable ``loom_test_module`` label.
+      target: Exact ``loom_target_profile`` label.
+      tags: Additional tags for the package action.
+      visibility: Bazel visibility of the prepared package.
+      target_compatible_with: Build configuration constraints for the package.
+    """
+    package_attributes = _apply_package_policy(
+        name,
+        tags,
+        target_compatible_with,
+    )
+    _loom_prepared_test_package(
+        name = name,
+        module = module,
+        target = target,
+        tags = package_attributes.tags,
+        testonly = True,
+        visibility = visibility,
+        target_compatible_with = package_attributes.target_compatible_with,
+    )
 
 def loom_test(
         name,

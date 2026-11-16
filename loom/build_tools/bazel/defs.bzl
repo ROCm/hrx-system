@@ -31,9 +31,11 @@ load(
     ":loom_library.bzl",
     _LoomExecutionTestInfo = "LoomExecutionTestInfo",
     _LoomLibraryInfo = "LoomLibraryInfo",
+    _LoomPreparedTestPackageInfo = "LoomPreparedTestPackageInfo",
     _loom_execution_profile = "loom_execution_profile",
     _loom_kernel_library = "loom_kernel_library",
     _loom_library = "loom_library",
+    _loom_prepared_test_package = "loom_prepared_test_package",
     _loom_test = "loom_test",
     _loom_test_module = "loom_test_module",
 )
@@ -64,6 +66,7 @@ LoomBinaryInfo = _LoomBinaryInfo
 LoomCorpusBuildInfo = _LoomCorpusBuildInfo
 LoomExecutionTestInfo = _LoomExecutionTestInfo
 LoomLibraryInfo = _LoomLibraryInfo
+LoomPreparedTestPackageInfo = _LoomPreparedTestPackageInfo
 LoomModelInfo = _LoomModelInfo
 LoomTargetProfileInfo = _LoomTargetProfileInfo
 LoomTargetSetInfo = _LoomTargetSetInfo
@@ -81,6 +84,7 @@ loom_library = _loom_library
 loom_model = _loom_model
 loom_model_documentation = _loom_model_documentation
 loom_module = _loom_module
+loom_prepared_test_package = _loom_prepared_test_package
 loom_target_profile = _loom_target_profile
 loom_target_set = _loom_target_set
 loom_test = _loom_test

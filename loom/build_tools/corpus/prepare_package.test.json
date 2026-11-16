@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "prepares shared target products for scenario execution",
+      "steps": [
+        {
+          "name": "link-authored-module",
+          "run": {
+            "tool": "loom-link",
+            "args": [
+              "{srcdir}/testdata/prepared_package.loom",
+              "--mode=merge",
+              "--to=bc",
+              "--output={tmp}/module.loombc"
+            ]
+          }
+        },
+        {
+          "name": "prepare-package",
+          "run": {
+            "tool": "loom-corpus-prepare-package",
+            "args": [
+              "{tmp}/module.loombc",
+              "--target=x86:scalar",
+              "--output={tmp}/package"
+            ]
+          },
+          "stdout": {"empty": true},
+          "stderr": {"empty": true},
+          "files": [
+            {"path": "{tmp}/package/authored.loombc", "non_empty": true},
+            {"path": "{tmp}/package/prepared.loombc", "non_empty": true},
+            {"path": "{tmp}/package/launch.loombc", "non_empty": true},
+            {
+              "path": "{tmp}/package/manifest.json",
+              "contains": [
+                "\"schema\":\"loom.testbench.prepared_actuals.v0\"",
+                "\"target_profile\":\"x86:scalar\"",
+                "\"subject\":\"increment\"",
+                "\"prepared_module\":\"prepared.loombc\"",
+                "\"launch_config\":\"launch.loombc\""
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
