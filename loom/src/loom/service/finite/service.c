@@ -102,6 +102,10 @@ struct loom_service_finite_service_t {
     uint64_t next_serial;
     // Accepted identity and origin, retained through failed-model retirement.
     loom_runtime_service_operation_t operation;
+    // Last published operation lifetime; zero is the initially empty slot.
+    uint64_t published_serial;
+    // Last published summary, used only to suppress unchanged atomic writes.
+    loom_runtime_service_observation_t observation;
     // Copied device-duration forecast for this prepared cohort, or unknown.
     loom_runtime_service_use_t device_use;
   } scheduling;
@@ -747,6 +751,10 @@ static void loom_service_finite_publish(
   const uint64_t arrivals = work == LOOM_RUNTIME_SERVICE_WORK_PREPARATION
                                 ? service->admission.arrivals
                                 : 0;
+  const uint64_t devices = UINT64_C(1) << service->generator.device_ordinal;
+  const loom_runtime_service_use_t preparation_use = {
+      .resource_ordinal = service->generator.device_ordinal};
+  loom_runtime_service_control_t* control = service->scheduling.binding.control;
   loom_runtime_service_offer_t* offer = &service->scheduling.offer;
   if (offer->work != work ||
       service->scheduling.request_count != request_count ||
@@ -757,40 +765,43 @@ static void loom_service_finite_publish(
     offer->choice_count = work ? 1 : 0;
     service->scheduling.request_count = request_count;
     service->scheduling.arrivals = arrivals;
+    // The cohort estimate is captured before this execution offer appears and
+    // remains immutable until that cohort retires.
+    const loom_runtime_service_choice_publication_t choice = {
+        .choice = {.instance_ordinal =
+                       service->scheduling.binding.instance_ordinal,
+                   .request_count = request_count,
+                   .devices = devices,
+                   .use_count = 1},
+        .uses = work == LOOM_RUNTIME_SERVICE_WORK_EXECUTION
+                    ? &service->scheduling.device_use
+                    : &preparation_use};
+    loom_runtime_service_publish_offer(control, offer, &choice);
   }
-  const uint64_t devices = UINT64_C(1) << service->generator.device_ordinal;
-  const loom_runtime_service_use_t preparation_use = {
-      .resource_ordinal = service->generator.device_ordinal};
-  const loom_runtime_service_choice_publication_t choice = {
-      .choice = {.instance_ordinal =
-                     service->scheduling.binding.instance_ordinal,
-                 .request_count = request_count,
-                 .devices = devices,
-                 .use_count = 1},
-      .uses = work == LOOM_RUNTIME_SERVICE_WORK_EXECUTION
-                  ? &service->scheduling.device_use
-                  : &preparation_use};
-  loom_runtime_service_control_t* control = service->scheduling.binding.control;
-  loom_runtime_service_publish_offer(control, offer, &choice);
 
   loom_runtime_service_operation_t* operation = &service->scheduling.operation;
-  operation->waits = 0;
+  loom_runtime_service_wait_flags_t waits = 0;
   if (service->phase == FINITE_PREPARING ||
       service->phase == FINITE_SPECIALIZING ||
       service->phase == FINITE_COLLECTING) {
-    operation->waits = LOOM_RUNTIME_SERVICE_WAIT_CPU;
+    waits = LOOM_RUNTIME_SERVICE_WAIT_CPU;
   } else if (service->phase == FINITE_WAITING) {
-    operation->waits = LOOM_RUNTIME_SERVICE_WAIT_CAPACITY;
+    waits = LOOM_RUNTIME_SERVICE_WAIT_CAPACITY;
   } else if (service->phase == FINITE_RUNNING) {
-    operation->waits = LOOM_RUNTIME_SERVICE_WAIT_DEVICE;
+    waits = LOOM_RUNTIME_SERVICE_WAIT_DEVICE;
   }
-  operation->devices = operation->key.serial ? devices : 0;
-  operation->use_count = operation->key.serial ? 1 : 0;
-  loom_runtime_service_publish_operation(
-      control, operation,
-      operation->work == LOOM_RUNTIME_SERVICE_WORK_EXECUTION
-          ? &service->scheduling.device_use
-          : &preparation_use);
+  if (operation->key.serial != service->scheduling.published_serial ||
+      operation->waits != waits) {
+    operation->waits = waits;
+    operation->devices = operation->key.serial ? devices : 0;
+    operation->use_count = operation->key.serial ? 1 : 0;
+    loom_runtime_service_publish_operation(
+        control, operation,
+        operation->work == LOOM_RUNTIME_SERVICE_WORK_EXECUTION
+            ? &service->scheduling.device_use
+            : &preparation_use);
+    service->scheduling.published_serial = operation->key.serial;
+  }
   const loom_runtime_service_observation_t observation = {
       .owned_request_count = service->count,
       .waiting_request_count =
@@ -800,7 +811,18 @@ static void loom_service_finite_publish(
       .pending_operation_count = operation->key.serial ? 1 : 0,
       .offered_devices = offer->choice_count ? devices : 0,
       .accepted_devices = operation->devices};
-  loom_runtime_service_publish_observation(control, &observation);
+  const loom_runtime_service_observation_t* published =
+      &service->scheduling.observation;
+  if (observation.owned_request_count != published->owned_request_count ||
+      observation.waiting_request_count != published->waiting_request_count ||
+      observation.offer_count != published->offer_count ||
+      observation.pending_operation_count !=
+          published->pending_operation_count ||
+      observation.offered_devices != published->offered_devices ||
+      observation.accepted_devices != published->accepted_devices) {
+    loom_runtime_service_publish_observation(control, &observation);
+    service->scheduling.observation = observation;
+  }
 }
 
 static iree_status_t loom_service_finite_advance_execution(

@@ -1124,6 +1124,10 @@ TEST_F(FiniteContinuation, DeviceEstimatesFollowCollectedSourceHistory) {
                 LOOM_RUNTIME_SERVICE_READ_COMPLETE);
       EXPECT_EQ(operation.waits, LOOM_RUNTIME_SERVICE_WAIT_DEVICE);
       EXPECT_EQ(operation.estimates, 0u);
+      IREE_ASSERT_OK(
+          loom_service_finite_service_progress(service_, 0, &progress));
+      EXPECT_FALSE(progress);
+      // An unchanged accepted wait keeps its retained use join readable.
       ASSERT_EQ(loom_runtime_service_read_operation_use(
                     control, operation.key, operation.publication, 0, &use),
                 LOOM_RUNTIME_SERVICE_READ_COMPLETE);

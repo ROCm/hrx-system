@@ -421,6 +421,15 @@ TEST_F(NativeDecisionServiceTest,
     EXPECT_EQ(choice.request_count, count);
     EXPECT_EQ(choice.devices, 1u);
     EXPECT_EQ(choice.estimates, 0u);
+    // Progress with no accepted work preserves the selected choice's use join.
+    IREE_ASSERT_OK(
+        loom_service_finite_service_progress(service_, 0, &progress));
+    EXPECT_FALSE(progress);
+    loom_runtime_service_use_t offered_use = {};
+    EXPECT_EQ(
+        loom_runtime_service_read_choice_use(
+            control, execution.key, 0, choice.publication, 0, &offered_use),
+        LOOM_RUNTIME_SERVICE_READ_COMPLETE);
     IREE_ASSERT_OK(loom_service_finite_service_try_schedule(
         service_, preparation.key, 0, 0, &accepted));
     EXPECT_EQ(accepted.serial, 0u);
