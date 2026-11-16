@@ -1,0 +1,223 @@
+// A computed byte vector feeds both a native dot and packed-word consumers.
+// Packetizing the bitcast must reuse the same computed values for both uses.
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+extended-types features=INTEGER_DOT_PRODUCT,INTEGER_DOT_PRODUCT_INPUT4X8_BIT control-flow=structured-low
+
+func.def @computed_bytes(%a: f32, %b: f32, %c: f32, %d: f32, %e: f32, %f: f32, %g: f32, %h: f32, %scale: f32) -> (i32) {
+  %input = vector.from_elements %a, %b, %c, %d, %e, %f, %g, %h : vector<8xf32>
+  %divisor = vector.splat %scale : vector<8xf32>
+  %normalized = vector.divf %input, %divisor : vector<8xf32>
+  %bytes = vector.fptosi %normalized : vector<8xf32> to vector<8xi8>
+  %words = vector.bitcast %bytes : vector<8xi8> to vector<2xi32>
+  %sum_weights = vector.splati 1 : vector<8xi8>
+  %sum_initial = vector.splati 0 : vector<2xi32>
+  %sums = vector.dot4i<s8s8> %bytes, %sum_weights, %sum_initial : vector<8xi8>, vector<8xi8>, vector<2xi32>
+  %word0 = vector.extract %words[0] : vector<2xi32> -> i32
+  %word1 = vector.extract %words[1] : vector<2xi32> -> i32
+  %sum0 = vector.extract %sums[0] : vector<2xi32> -> i32
+  %sum1 = vector.extract %sums[1] : vector<2xi32> -> i32
+  %word_mix = scalar.xori %word0, %word1 : i32
+  %sum = scalar.addi %sum0, %sum1 : i32
+  %result = scalar.xori %word_mix, %sum : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @computed_bytes(%a: reg<spirv.id : f32>, %b: reg<spirv.id : f32>, %c: reg<spirv.id : f32>, %d: reg<spirv.id : f32>, %e: reg<spirv.id : f32>, %f: reg<spirv.id : f32>, %g: reg<spirv.id : f32>, %h: reg<spirv.id : f32>, %scale: reg<spirv.id : f32>) -> (reg<spirv.id : i32>) asm {
+  %68 = OpCompositeConstruct.v4f32 %scale, %scale, %scale, %scale
+  %69 = OpCompositeConstruct.v4f32 %a, %b, %c, %d
+  %70 = OpFDiv.v4f32 %69, %68
+  %71 = OpConvertFToS.v4f32.v4i8 %70
+  %72 = OpCompositeConstruct.v4f32 %e, %f, %g, %h
+  %73 = OpFDiv.v4f32 %72, %68
+  %74 = OpConvertFToS.v4f32.v4i8 %73
+  %word0 = OpBitcast.v4i8.i32 %71
+  %word1 = OpBitcast.v4i8.i32 %74
+  %77 = OpConstant.i8 1
+  %78 = OpCompositeConstruct.v4i8 %77, %77, %77, %77
+  %79 = OpConstant.i32 0 : reg<spirv.id>
+  %80 = OpSDot.v4i8 %71, %78 : reg<spirv.id>
+  %sum0 = OpIAdd %80, %79
+  %82 = OpSDot.v4i8 %74, %78 : reg<spirv.id>
+  %sum1 = OpIAdd %82, %79
+  %word_mix = OpBitwiseXor %word0, %word1
+  %sum = OpIAdd %sum0, %sum1
+  %result = OpBitwiseXor %word_mix, %sum
+  return %result
+}
+
+// ====
+// A one-lane vector has a scalar carrier. Publishing it must consume the
+// computed native bitcast instead of replaying the floating-point producer.
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+extended-types features=INTEGER_DOT_PRODUCT,INTEGER_DOT_PRODUCT_INPUT4X8_BIT control-flow=structured-low
+
+kernel.def @publish_computed_word() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer, %scale: f32) {
+  %origin = index.constant 0 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<4xf32>
+  %output = buffer.view %target[%origin] : buffer -> view<2xi32>
+  %values = vector.load %input[0] : view<4xf32> -> vector<4xf32>
+  %divisor = vector.splat %scale : vector<4xf32>
+  %normalized = vector.divf %values, %divisor : vector<4xf32>
+  %bytes = vector.fptosi %normalized : vector<4xf32> to vector<4xi8>
+  %word = vector.bitcast %bytes : vector<4xi8> to vector<1xi32>
+  vector.store %word, %output[0] : vector<1xi32>, view<2xi32>
+  %sum_weights = vector.splati 1 : vector<4xi8>
+  %sum_initial = vector.splati 0 : vector<1xi32>
+  %sum = vector.dot4i<s8s8> %bytes, %sum_weights, %sum_initial : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  vector.store %sum, %output[1] : vector<1xi32>, view<2xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer, f32) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @publish_computed_word(%scale: reg<spirv.id : f32>) asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %target = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %25 = OpConstant.offset64 0
+  %26 = OpPtrAccessChain.storage_buffer.f32.byte_offset %source, %25
+  %27 = OpLoad.storage_buffer.f32 %26
+  %28 = OpConstant.offset64 4
+  %29 = OpPtrAccessChain.storage_buffer.f32.byte_offset %source, %28
+  %30 = OpLoad.storage_buffer.f32 %29
+  %31 = OpConstant.offset64 8
+  %32 = OpPtrAccessChain.storage_buffer.f32.byte_offset %source, %31
+  %33 = OpLoad.storage_buffer.f32 %32
+  %34 = OpConstant.offset64 12
+  %35 = OpPtrAccessChain.storage_buffer.f32.byte_offset %source, %34
+  %36 = OpLoad.storage_buffer.f32 %35
+  %values = OpCompositeConstruct.v4f32 %27, %30, %33, %36
+  %divisor = OpCompositeConstruct.v4f32 %scale, %scale, %scale, %scale
+  %normalized = OpFDiv.v4f32 %values, %divisor
+  %bytes = OpConvertFToS.v4f32.v4i8 %normalized
+  %word = OpBitcast.v4i8.i32 %bytes
+  %43 = OpPtrAccessChain.storage_buffer.i32.byte_offset %target, %25
+  OpStore.storage_buffer.i32 %43, %word
+  %44 = OpConstant.i8 1
+  %sum_weights = OpCompositeConstruct.v4i8 %44, %44, %44, %44
+  %sum_initial = OpConstant.i32 0 : reg<spirv.id>
+  %47 = OpSDot.v4i8 %bytes, %sum_weights : reg<spirv.id>
+  %sum = OpIAdd %47, %sum_initial
+  %50 = OpPtrAccessChain.storage_buffer.i32.byte_offset %target, %28
+  OpStore.storage_buffer.i32 %50, %sum
+  return
+}
+
+// ====
+// The packed result is wider than a native carrier. Its retained partition
+// must carry the bit-layout computation through the store boundary.
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+extended-types control-flow=structured-low
+
+kernel.def @publish_computed_halfwords() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%source: buffer, %target: buffer, %scale: f32) {
+  %origin = index.constant 0 : offset
+  %input = buffer.view %source[%origin] : buffer -> view<4xf32>
+  %output = buffer.view %target[%origin] : buffer -> view<8xi16>
+  %values = vector.load %input[0] : view<4xf32> -> vector<4xf32>
+  %divisor = vector.splat %scale : vector<4xf32>
+  %normalized = vector.divf %values, %divisor : vector<4xf32>
+  %words = vector.fptosi %normalized : vector<4xf32> to vector<4xi32>
+  %halfwords = vector.bitcast %words : vector<4xi32> to vector<8xi16>
+  vector.store %halfwords, %output[0] : vector<8xi16>, view<8xi16>
+  %sum_origin = index.constant 16 : offset
+  %sum_output = buffer.view %target[%sum_origin] : buffer -> view<1xi32>
+  %sum_initial = scalar.constant 0 : i32
+  %sum = vector.reduce<addi> %words, %sum_initial : vector<4xi32>, i32
+  view.store %sum, %sum_output[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer, f32) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @publish_computed_halfwords(%scale: reg<spirv.id : f32>) asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %target = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %67 = OpConstant.offset64 0
+  %68 = OpPtrAccessChain.storage_buffer.f32.byte_offset %source, %67
+  %69 = OpLoad.storage_buffer.f32 %68
+  %70 = OpConstant.offset64 4
+  %71 = OpPtrAccessChain.storage_buffer.f32.byte_offset %source, %70
+  %72 = OpLoad.storage_buffer.f32 %71
+  %73 = OpConstant.offset64 8
+  %74 = OpPtrAccessChain.storage_buffer.f32.byte_offset %source, %73
+  %75 = OpLoad.storage_buffer.f32 %74
+  %76 = OpConstant.offset64 12
+  %77 = OpPtrAccessChain.storage_buffer.f32.byte_offset %source, %76
+  %78 = OpLoad.storage_buffer.f32 %77
+  %79 = OpFDiv.f32 %69, %scale
+  %80 = OpConvertFToS.f32.i32 %79
+  %81 = OpFDiv.f32 %72, %scale
+  %82 = OpConvertFToS.f32.i32 %81
+  %83 = OpCompositeConstruct.v2i32 %80, %82
+  %84 = OpBitcast.v2i32.v4i16 %83
+  %85 = OpFDiv.f32 %75, %scale
+  %86 = OpConvertFToS.f32.i32 %85
+  %87 = OpFDiv.f32 %78, %scale
+  %88 = OpConvertFToS.f32.i32 %87
+  %89 = OpCompositeConstruct.v2i32 %86, %88
+  %90 = OpBitcast.v2i32.v4i16 %89
+  %91 = OpCompositeExtract.v4i16.i16 %84, 0
+  %92 = OpCompositeExtract.v4i16.i16 %84, 1
+  %93 = OpCompositeExtract.v4i16.i16 %84, 2
+  %94 = OpCompositeExtract.v4i16.i16 %84, 3
+  %96 = OpPtrAccessChain.storage_buffer.i16.byte_offset %target, %67
+  OpStore.storage_buffer.i16 %96, %91
+  %97 = OpConstant.offset64 2
+  %98 = OpPtrAccessChain.storage_buffer.i16.byte_offset %target, %97
+  OpStore.storage_buffer.i16 %98, %92
+  %100 = OpPtrAccessChain.storage_buffer.i16.byte_offset %target, %70
+  OpStore.storage_buffer.i16 %100, %93
+  %101 = OpConstant.offset64 6
+  %102 = OpPtrAccessChain.storage_buffer.i16.byte_offset %target, %101
+  OpStore.storage_buffer.i16 %102, %94
+  %103 = OpCompositeExtract.v4i16.i16 %90, 0
+  %104 = OpCompositeExtract.v4i16.i16 %90, 1
+  %105 = OpCompositeExtract.v4i16.i16 %90, 2
+  %106 = OpCompositeExtract.v4i16.i16 %90, 3
+  %108 = OpPtrAccessChain.storage_buffer.i16.byte_offset %target, %73
+  OpStore.storage_buffer.i16 %108, %103
+  %109 = OpConstant.offset64 10
+  %110 = OpPtrAccessChain.storage_buffer.i16.byte_offset %target, %109
+  OpStore.storage_buffer.i16 %110, %104
+  %112 = OpPtrAccessChain.storage_buffer.i16.byte_offset %target, %76
+  OpStore.storage_buffer.i16 %112, %105
+  %113 = OpConstant.offset64 14
+  %114 = OpPtrAccessChain.storage_buffer.i16.byte_offset %target, %113
+  OpStore.storage_buffer.i16 %114, %106
+  %115 = OpIAdd %80, %82
+  %116 = OpIAdd %115, %86
+  %sum = OpIAdd %116, %88
+  %118 = OpConstant.offset64 16
+  %119 = OpPtrAccessChain.storage_buffer.i32.byte_offset %target, %118
+  OpStore.storage_buffer.i32 %119, %sum
+  return
+}
+
+// ====
+// A partial final packet retains its own source/result lane-count ratio.
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+extended-types control-flow=structured-low
+
+func.def @pack_halfwords_with_tail(%a: i16, %b: i16, %c: i16, %d: i16, %e: i16, %f: i16) -> (i32) {
+  %input = vector.from_elements %a, %b, %c, %d, %e, %f : vector<6xi16>
+  %words = vector.bitcast %input : vector<6xi16> to vector<3xi32>
+  %first = vector.extract %words[0] : vector<3xi32> -> i32
+  %second = vector.extract %words[1] : vector<3xi32> -> i32
+  %third = vector.extract %words[2] : vector<3xi32> -> i32
+  %pair = scalar.addi %first, %second : i32
+  %sum = scalar.addi %pair, %third : i32
+  func.return %sum : i32
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @pack_halfwords_with_tail(%a: reg<spirv.id : i16>, %b: reg<spirv.id : i16>, %c: reg<spirv.id : i16>, %d: reg<spirv.id : i16>, %e: reg<spirv.id : i16>, %f: reg<spirv.id : i16>) -> (reg<spirv.id : i32>) asm {
+  %31 = OpCompositeConstruct.v4i16 %a, %b, %c, %d
+  %32 = OpBitcast.v4i16.v2i32 %31
+  %33 = OpCompositeConstruct.v2i16 %e, %f
+  %third = OpBitcast.v2i16.i32 %33
+  %first = OpCompositeExtract.v2i32.i32 %32, 0
+  %second = OpCompositeExtract.v2i32.i32 %32, 1
+  %pair = OpIAdd %first, %second
+  %sum = OpIAdd %pair, %third
+  return %sum
+}

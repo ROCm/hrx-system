@@ -372,3 +372,61 @@ check.scenario @saturating_nibble_values {
   }
   check.return
 }
+
+// The same converted bytes feed packed publication and a widened code sum.
+// The oracle publishes each byte independently of the vector bit layout.
+func.def @publish_converted_bytes(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<32xf32>
+  %destination = buffer.view %output[%base] : buffer -> view<9xi32>
+  %values = vector.load %source[0] : view<32xf32> -> vector<32xf32>
+  %divisor = vector.splatf 4.0 : vector<32xf32>
+  %scaled = vector.divf %values, %divisor : vector<32xf32>
+  %bytes = vector.fptosi %scaled : vector<32xf32> to vector<32xi8>
+  %words = vector.bitcast %bytes : vector<32xi8> to vector<8xi32>
+  vector.store %words, %destination[0] : vector<8xi32>, view<9xi32>
+  %sum_weights = vector.splati 1 : vector<32xi8>
+  %partial_sum_initial = vector.splati 0 : vector<8xi32>
+  %sums = vector.dot4i<s8s8> %bytes, %sum_weights, %partial_sum_initial : vector<32xi8>, vector<32xi8>, vector<8xi32>
+  %sum_initial = scalar.constant 0 : i32
+  %sum = vector.reduce<addi> %sums, %sum_initial : vector<8xi32>, i32
+  view.store %sum, %destination[8] : i32, view<9xi32>
+  func.return
+}
+
+func.def @publish_converted_bytes_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %sum_origin = index.constant 32 : offset
+  %source = buffer.view %input[%base] : buffer -> view<32xf32>
+  %bytes = buffer.view %output[%base] : buffer -> view<32xi8>
+  %sum_output = buffer.view %output[%sum_origin] : buffer -> view<1xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 32 : index
+  %step = index.constant 1 : index
+  %divisor = scalar.constant 4.0 : f32
+  %sum_initial = scalar.constant 0 : i32
+  %sum = scf.for %i = [%begin to %end step %step](%accumulator = %sum_initial : i32) -> (i32) {
+    %value = view.load %source[%i] : view<32xf32> -> f32
+    %scaled = scalar.divf %value, %divisor : f32
+    %byte = scalar.fptosi %scaled : f32 to i8
+    view.store %byte, %bytes[%i] : i8, view<32xi8>
+    %word = scalar.extsi %byte : i8 to i32
+    %next = scalar.addi %accumulator, %word : i32
+    scf.yield %next : i32
+  }
+  view.store %sum, %sum_output[0] : i32, view<1xi32>
+  func.return
+}
+
+check.scenario @converted_byte_publication {
+  check.trial[32](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-508.0 to 508.0) : tensor<32xf32>
+    %storage = check.generate.fill value(-91) : tensor<13xi32>
+    %output = check.tensor.view %storage offset(8) : tensor<13xi32> -> tensor<9xi32>
+    check.compare<@publish_converted_bytes, @publish_converted_bytes_oracle>(%input, %output) : (tensor<32xf32>, tensor<9xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<13xi32>
+    }
+  }
+  check.return
+}

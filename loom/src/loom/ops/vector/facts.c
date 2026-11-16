@@ -2778,11 +2778,28 @@ static iree_status_t loom_vector_concat_define_partition_fact(
     const loom_value_t* input_value = loom_module_value(module, input);
     if (!loom_value_is_block_arg(input_value)) {
       const loom_op_t* input_op = loom_value_def_op(input_value);
-      if (input_op != NULL &&
-          iree_all_bits_set(loom_op_effective_traits(module, input_op),
-                            LOOM_TRAIT_DECOMPOSABLE)) {
-        partition_flags |=
-            LOOM_VALUE_FACT_VECTOR_PARTITION_FLAG_COMPUTED_PACKETS;
+      if (input_op != NULL) {
+        bool computes_packets = false;
+        switch (input_op->kind) {
+          // Bit-layout conversions compute packets even though their changing
+          // lane counts prevent elementwise decomposition. Their consumers must
+          // preserve those packets instead of rebuilding the source lanes.
+          case LOOM_OP_VECTOR_BITCAST:
+          case LOOM_OP_VECTOR_BITPACK:
+          case LOOM_OP_VECTOR_BITUNPACKU:
+          case LOOM_OP_VECTOR_BITUNPACKS:
+            computes_packets = true;
+            break;
+          default:
+            computes_packets =
+                iree_all_bits_set(loom_op_effective_traits(module, input_op),
+                                  LOOM_TRAIT_DECOMPOSABLE);
+            break;
+        }
+        if (computes_packets) {
+          partition_flags |=
+              LOOM_VALUE_FACT_VECTOR_PARTITION_FLAG_COMPUTED_PACKETS;
+        }
       }
     }
     if (expand_nested_partitions) {

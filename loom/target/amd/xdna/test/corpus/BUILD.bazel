@@ -103,6 +103,7 @@ loom_corpus_test(
             "numeric/vector/lanes.loom:@wide_lane_transpose_bits": "XDNA/058",
             "numeric/vector/lanes.loom:@word_lanes_all_bits": "XDNA/051",
             "numeric/vector/packed/arithmetic.loom:@packed_halfword_add_values": "XDNA/051",
+            "numeric/vector/packed/narrowing.loom:@converted_byte_publication": "LOWERING/036",
         },
     },
 )

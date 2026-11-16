@@ -230,6 +230,53 @@ class BitstreamPacketLegalizationTest(unittest.TestCase):
             self.assertGreater(int(fields["created_ops"]), 0, line)
         self.assertEqual(actual, expected)
 
+    def test_bitcast_family_projects_both_packet_shapes(self):
+        # Six lanes of the wider element exercise full packets and tails in
+        # both directions. An 8:1 width ratio cannot fit both sides in SPIR-V's
+        # four-lane carriers and retains the composed scalar lowering.
+        types = ("i8", "i16", "i32", "i64", "f16", "bf16", "f32", "f64")
+        cases = []
+        expected = set()
+        for source_type in types:
+            for result_type in types:
+                source_width = int(source_type.lstrip("bfi"))
+                result_width = int(result_type.lstrip("bfi"))
+                if source_type == result_type or max(source_width, result_width) > (
+                    4 * min(source_width, result_width)
+                ):
+                    continue
+                bit_count = 6 * max(source_width, result_width)
+                source_vector = f"vector<{bit_count // source_width}x{source_type}>"
+                result_vector = f"vector<{bit_count // result_width}x{result_type}>"
+                name = f"cast_{source_type}_{result_type}"
+                expected.add(name)
+                cases.append(
+                    f"// RUN: compile-report target={_TARGET} target-legalize{{mode=eager}}\n\n"
+                    f"func.def @{name}(%input: {source_vector}) -> ({result_vector}) {{\n"
+                    f"  %result = vector.bitcast %input : {source_vector} to {result_vector}\n"
+                    f"  func.return %result : {result_vector}\n"
+                    "}\n"
+                )
+        with tempfile.TemporaryDirectory() as directory:
+            source_path = Path(directory) / "bitcast_family.loom-test"
+            source_path.write_text("\n// ====\n".join(cases), newline="\n")
+            update = self._run_checker(source_path, update=True)
+            self.assertIn("updated", update.stderr + update.stdout)
+            result = self._run_checker(source_path)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            report = source_path.read_text()
+        actual = set()
+        for line in report.splitlines():
+            if not line.startswith("COMPILE-REPORT: target_legalization["):
+                continue
+            fields = _report_fields(line)
+            if fields.get("source_op") != "vector.bitcast":
+                continue
+            actual.add(fields["function"])
+            self.assertEqual(fields["action"], "rewritten", line)
+            self.assertEqual(fields["scalarized"], "false", line)
+        self.assertEqual(actual, expected)
+
     def test_wide_memory_source_retains_word_packets(self):
         if _ARGS.exhaustive:
             self.skipTest("covered by the ordinary family target")
@@ -266,19 +313,21 @@ class BitstreamPacketLegalizationTest(unittest.TestCase):
         self.assertEqual(bitpack_rows[0]["action"], "rewritten")
 
         summaries = {
-            row["source_op"]: row
+            (row["source_op"], row["descriptor_key"]): row
             for row in report["source_low"]["selection_summaries"]["rows"]
         }
         self.assertEqual(
-            summaries["vector.from_elements"]["descriptor_key"],
-            "spirv.op_composite_construct.v4i8",
+            summaries[("vector.from_elements", "spirv.op_composite_construct.v4i8")][
+                "selected_op_count"
+            ],
+            32,
         )
-        self.assertEqual(summaries["vector.from_elements"]["selected_op_count"], 32)
         self.assertEqual(
-            summaries["vector.bitcast"]["descriptor_key"],
-            "spirv.op_bitcast.v4i8.i32",
+            summaries[("vector.bitcast", "spirv.op_bitcast.v4i8.i32")][
+                "selected_op_count"
+            ],
+            32,
         )
-        self.assertEqual(summaries["vector.bitcast"]["selected_op_count"], 32)
 
 
 _PARSER = argparse.ArgumentParser()
