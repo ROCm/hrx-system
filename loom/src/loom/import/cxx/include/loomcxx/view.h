@@ -196,22 +196,24 @@ loom::type::index dim(loom::type::view<Shape, T, Encoding> source);
 // subviews borrow that storage. Scalar elements start unspecified; managed
 // reference cells start null. Alignment is a minimum byte alignment. Explicit
 // pools use the same backing-resource contract as buffer::alloca.
+// Parenthesized names preserve function-like alloca macros from system headers;
+// calls supply <Result, ...> and therefore do not invoke those macros.
 template <class Result, loom::memory_space Space = loom::memory_space::private_,
           loom::type::size_type Alignment = 1>
-[[loom::op("view.alloca")]] Result alloca(
+[[loom::op("view.alloca")]] Result(alloca)(
     loom::detail::dimensions<Result::shape_type::dynamic_count> dimensions =
         {});
 
 template <class Result, loom::memory_space Space = loom::memory_space::private_,
           loom::type::size_type Alignment = 1>
   requires(Result::shape_type::dynamic_count > 0)
-[[loom::op("view.alloca")]] Result alloca(
+[[loom::op("view.alloca")]] Result(alloca)(
     loom::detail::shape_dimensions<Result> dimensions);
 
 template <class Result, loom::memory_space Space = loom::memory_space::private_,
           loom::type::size_type Alignment = 1, loom::encoding::role Role,
           loom::type::size_type Rank>
-[[loom::op("view.alloca")]] Result alloca(
+[[loom::op("view.alloca")]] Result(alloca)(
     loom::detail::dimensions<Result::shape_type::dynamic_count> dimensions,
     loom::type::encoding<Role, Rank> encoding);
 
@@ -219,26 +221,26 @@ template <class Result, loom::memory_space Space = loom::memory_space::private_,
           loom::type::size_type Alignment = 1, loom::encoding::role Role,
           loom::type::size_type Rank>
   requires(Result::shape_type::dynamic_count > 0)
-[[loom::op("view.alloca")]] Result alloca(
+[[loom::op("view.alloca")]] Result(alloca)(
     loom::detail::shape_dimensions<Result> dimensions,
     loom::type::encoding<Role, Rank> encoding);
 
 template <class Result, loom::memory_space Space = loom::memory_space::private_,
           loom::type::size_type Alignment = 1>
-[[loom::op("view.alloca")]] Result alloca(
+[[loom::op("view.alloca")]] Result(alloca)(
     loom::detail::dimensions<Result::shape_type::dynamic_count> dimensions,
     loom::type::pool pool);
 
 template <class Result, loom::memory_space Space = loom::memory_space::private_,
           loom::type::size_type Alignment = 1>
   requires(Result::shape_type::dynamic_count > 0)
-[[loom::op("view.alloca")]] Result alloca(
+[[loom::op("view.alloca")]] Result(alloca)(
     loom::detail::shape_dimensions<Result> dimensions, loom::type::pool pool);
 
 template <class Result, loom::memory_space Space = loom::memory_space::private_,
           loom::type::size_type Alignment = 1, loom::encoding::role Role,
           loom::type::size_type Rank>
-[[loom::op("view.alloca")]] Result alloca(
+[[loom::op("view.alloca")]] Result(alloca)(
     loom::detail::dimensions<Result::shape_type::dynamic_count> dimensions,
     loom::type::encoding<Role, Rank> encoding, loom::type::pool pool);
 
@@ -246,7 +248,7 @@ template <class Result, loom::memory_space Space = loom::memory_space::private_,
           loom::type::size_type Alignment = 1, loom::encoding::role Role,
           loom::type::size_type Rank>
   requires(Result::shape_type::dynamic_count > 0)
-[[loom::op("view.alloca")]] Result alloca(
+[[loom::op("view.alloca")]] Result(alloca)(
     loom::detail::shape_dimensions<Result> dimensions,
     loom::type::encoding<Role, Rank> encoding, loom::type::pool pool);
 
