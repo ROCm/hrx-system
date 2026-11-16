@@ -611,6 +611,22 @@ loom_cc_test(
     ],
 )
 
+loom_cc_test(
+    name = "fact_table_replay_test",
+    srcs = ["fact_table_replay_test.cc"],
+    deps = [
+        ":fact_relation",
+        ":fact_table",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/vector",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_check_test(
     name = "fact_loop_test",
     src = "fact_loop_test.loom-test",

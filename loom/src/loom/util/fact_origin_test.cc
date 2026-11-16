@@ -96,6 +96,88 @@ static loom_value_fact_contextual_query_origin_t ContextualQueryOrigin(
   return origin;
 }
 
+TEST_F(FactOriginStorageTest, EveryOriginFamilyPublishesReplayChanges) {
+  using Setter = iree_status_t (*)(loom_value_fact_table_t*, loom_value_id_t,
+                                   loom_value_id_t);
+  const Setter setters[] = {
+      [](auto* table, auto value, auto source) {
+        return loom_value_fact_table_define_uniform_element_origin(
+            table, value, source, source);
+      },
+      [](auto* table, auto value, auto source) {
+        return loom_value_fact_table_define_static_lane_origin(table, value,
+                                                               {source, 0, 1});
+      },
+      [](auto* table, auto value, auto source) {
+        return loom_value_fact_table_define_exact_lane_origin(
+            table, value, ExactLaneOrigin(source, 0, 1));
+      },
+      [](auto* table, auto value, auto source) {
+        return loom_value_fact_table_define_uniform_scale_origin(
+            table, value, {source, source + 1});
+      },
+      [](auto* table, auto value, auto source) {
+        return loom_value_fact_table_define_contextual_query_origin(
+            table, value,
+            ContextualQueryOrigin(LOOM_PARAMETERIZED_ATTR_KIND(3, 7),
+                                  loom_attr_i64(source)));
+      },
+      [](auto* table, auto value, auto source) {
+        return loom_value_fact_table_define_layout_explicit_strides(
+            table, value, &source, 1);
+      },
+      [](auto* table, auto value, auto source) {
+        return loom_value_fact_table_define_exact_scalar_origin(table, value,
+                                                                {source});
+      },
+      [](auto* table, auto value, auto source) {
+        const loom_integer_cast_t cast = {
+            .source_value_id = source,
+            .bit_count = 8,
+            .kind = LOOM_INTEGER_CAST_UNSIGNED,
+        };
+        return loom_value_fact_table_define_integer_cast(table, value,
+                                                         {cast, cast});
+      },
+  };
+  for (size_t family = 0; family < IREE_ARRAYSIZE(setters); ++family) {
+    SCOPED_TRACE(family);
+    loom_value_fact_table_t table;
+    IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
+    IREE_ASSERT_OK(loom_value_fact_table_enable_replay_generations(&table));
+    // Origin-only seeds establish storage even beyond the initial numeric
+    // range. Repeated publication is idempotent, including after withdrawal.
+    const loom_value_id_t value = 4096;
+    for (loom_value_id_t source : {1u, 2u, 1u}) {
+      const auto previous_generation = table.replay.generation;
+      loom_value_fact_origin_snapshot_t previous;
+      loom_value_fact_table_snapshot_origins(&table, value, &previous);
+      IREE_ASSERT_OK(setters[family](&table, value, source));
+      const auto generation =
+          loom_value_fact_table_replay_generation(&table, value);
+      EXPECT_GT(generation, previous_generation);
+      loom_value_fact_origin_snapshot_t current;
+      loom_value_fact_table_snapshot_origins(&table, value, &current);
+      EXPECT_FALSE(loom_value_fact_origin_snapshot_equal(&previous, &current));
+      IREE_ASSERT_OK(setters[family](&table, value, source));
+      EXPECT_EQ(loom_value_fact_table_replay_generation(&table, value),
+                generation);
+      loom_value_fact_table_clear_origins(&table, value);
+      EXPECT_GT(loom_value_fact_table_replay_generation(&table, value),
+                generation);
+      const auto cleared_generation = table.replay.generation;
+      loom_value_fact_table_clear_origins(&table, value);
+      EXPECT_EQ(table.replay.generation, cleared_generation);
+    }
+    loom_value_fact_table_clear_scope(&table);
+    EXPECT_EQ(table.replay.generation, 0u);
+    IREE_ASSERT_OK(loom_value_fact_table_enable_replay_generations(&table));
+    EXPECT_EQ(loom_value_fact_table_replay_generation(&table, value), 0u);
+    IREE_ASSERT_OK(setters[family](&table, value, 3));
+    EXPECT_NE(loom_value_fact_table_replay_generation(&table, value), 0u);
+  }
+}
+
 TEST_F(FactOriginStorageTest, UniformElementOriginsClearOnlyTouchedEntries) {
   loom_value_fact_table_t table = {0};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));

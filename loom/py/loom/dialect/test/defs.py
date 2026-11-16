@@ -699,6 +699,28 @@ test_segmented = Op(
 # as scalar.constant ops. This makes internal analysis state observable
 # in .loom-test files.
 
+test_fact_numeric_identity_matches = Op(
+    "test.fact_numeric_identity_matches",
+    group=test_ops,
+    doc="Returns 1 when the operands share a retained numeric identity, independently of storage type.",
+    operands=[Operand("lhs", INTEGER), Operand("rhs", INTEGER)],
+    results=[Result("result", I1)],
+    traits=[PURE],
+    facts="loom_test_fact_numeric_identity_matches_facts",
+    format=[
+        Ref("lhs"),
+        COMMA,
+        Ref("rhs"),
+        COLON,
+        TypeOf("lhs"),
+        COMMA,
+        TypeOf("rhs"),
+        ARROW,
+        ResultType("result"),
+    ],
+    examples=["%same = test.fact_numeric_identity_matches %byte, %wide : i8, i64 -> i1"],
+)
+
 test_fact_range_lo = Op(
     "test.fact_range_lo",
     group=test_ops,
@@ -3386,4 +3408,5 @@ ALL_TEST_OPS: tuple[Op, ...] = (
     test_f64_array_attrs,
     test_string_array_attrs,
     test_fact_observation_scope,
+    test_fact_numeric_identity_matches,
 )

@@ -483,7 +483,7 @@ struct loom_value_fact_table_t {
     // Lazily allocated query scratch for condition-loop edge projections.
     loom_value_fact_condition_scratch_t* condition;
   } scratch;
-  // Numeric dependency tracking, activated lazily by iterative solvers.
+  // Fact publication tracking, activated lazily by iterative solvers.
   struct {
     // Stack-owned outer/nested solve boundary; NULL outside loop inference.
     loom_value_fact_loop_replay_t* loop;
@@ -930,12 +930,18 @@ iree_status_t loom_value_fact_table_compute_op(loom_value_fact_table_t* table,
                                                const loom_module_t* module,
                                                const loom_op_t* op);
 
-// Activates numeric change tracking for the current fact scope. Iterative
-// solvers call this before their first traversal; nested solves share the
-// publication serial. clear_scope releases the transient column. This does not
-// enter immutable replay: the solver owns table->replaying separately.
+// Activates numeric and auxiliary change tracking for the current fact scope.
+// Iterative solvers call this before their first traversal; nested solves share
+// the publication serial. clear_scope releases the transient column. This does
+// not enter immutable replay: the solver owns table->replaying separately.
 iree_status_t loom_value_fact_table_enable_replay_generations(
     loom_value_fact_table_t* table);
+
+// Publishes a changed numeric or auxiliary fact for an already touched value.
+// A complete inference establishes the result's evaluation watermark later.
+// Inactive replay tracking costs no storage and needs no serial update.
+void loom_value_fact_table_publish_change(loom_value_fact_table_t* table,
+                                          loom_value_id_t value_id);
 
 // Computes facts for a single op and reports whether any result facts changed
 // relative to the table's previous entries.

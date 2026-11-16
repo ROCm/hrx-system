@@ -412,7 +412,7 @@ def test_operand_fact_dependencies_require_an_equation(missing: str) -> None:
 )
 def test_operand_fact_dependencies_reject_contextual_inference(fields) -> None:
     fields = dict(results=[Result("result", INTEGER)]) | fields
-    with pytest.raises(ValueError, match="cannot observe execution, regions, or auxiliary identity facts"):
+    with pytest.raises(ValueError, match="cannot observe execution, regions, or declared identity dependencies"):
         Op(
             "test.equation",
             facts="test_equation_facts",

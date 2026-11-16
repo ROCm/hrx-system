@@ -6844,10 +6844,11 @@ class Op:
         target register packets while materializing its results.
     canonicalize_without_facts: Whether the canonicalization callback depends
         only on IR structure and may run before pending facts are published.
-    facts_from_operands: Whether inference depends only on operand fact tuples,
-        immutable IR, and the scope's target configuration, and only publishes
-        result tuples. Extension payloads are part of their owning tuples;
-        auxiliary relations and other value facts are separate dependencies.
+    facts_from_operands: Whether inference depends only on complete explicit
+        operand publications, immutable IR, and the scope's target configuration,
+        and only publishes its own results. Publications include extensions and
+        retained numeric origins; execution context and independently changing
+        values are separate dependencies.
     invocation_input: Whether this pure zero-operand query reads a stable value
         from the current execution invocation that helpers can receive as an
         ordinary argument. The operation kind, attributes, and result type
@@ -7030,7 +7031,7 @@ class Op:
             ):
                 raise ValueError(
                     f"{name}: facts_from_operands cannot observe execution, regions, "
-                    "or auxiliary identity facts"
+                    "or declared identity dependencies"
                 )
         object.__setattr__(self, "facts_from_operands", facts_from_operands)
         if invocation_input and (

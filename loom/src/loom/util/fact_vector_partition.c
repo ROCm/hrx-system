@@ -241,6 +241,7 @@ bool loom_value_fact_table_clear_vector_partition(
       loom_value_fact_vector_partitions_lookup(partitions, value_id);
   if (entry && entry->storage) {
     entry->storage = NULL;
+    loom_value_fact_table_publish_change(table, value_id);
     return true;
   }
   return false;
@@ -328,6 +329,8 @@ iree_status_t loom_value_fact_table_define_vector_partition(
     return iree_ok_status();
   }
 
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_touch(table, value_id));
+
   const iree_host_size_t component_count =
       (iree_host_size_t)partition.count +
       (snapshot_reuses_components ? 0 : partition.snapshot_count);
@@ -388,6 +391,7 @@ iree_status_t loom_value_fact_table_define_vector_partition(
   }
   loom_value_fact_vector_partitions_lookup(table->vector_partitions, value_id)
       ->storage = storage;
+  loom_value_fact_table_publish_change(table, value_id);
   if (inout_changed) {
     *inout_changed = true;
   }
@@ -414,9 +418,11 @@ iree_status_t loom_value_fact_table_forward_vector_partition(
   if (result_entry && result_entry->storage == storage) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_touch(table, result_value_id));
   IREE_RETURN_IF_ERROR(loom_value_fact_vector_partitions_ensure_entry(
       table, result_value_id, &result_entry));
   result_entry->storage = storage;
+  loom_value_fact_table_publish_change(table, result_value_id);
   if (inout_changed) {
     *inout_changed = true;
   }
