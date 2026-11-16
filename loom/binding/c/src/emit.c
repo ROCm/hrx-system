@@ -625,6 +625,8 @@ void loomc_emit_transaction_bind_emitter(loomc_emit_transaction_t* transaction,
   transaction->compile_report.report.backend_name = emitter->name;
   transaction->compile_report.report.artifact_format =
       loom_target_artifact_format_name(emitter->target_artifact_format);
+  transaction->compile_report.report.public_artifact_format =
+      emitter->public_artifact_format;
 }
 
 loomc_status_t loomc_emit_transaction_select_emitter(

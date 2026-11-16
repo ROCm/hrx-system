@@ -1676,6 +1676,10 @@ iree_status_t loom_target_compile_report_format_json(
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(
           &object, IREE_SV("artifact_format"), report->artifact_format));
+  IREE_RETURN_IF_ERROR(
+      loom_target_compile_report_json_write_optional_string_field(
+          &object, IREE_SV("public_artifact_format"),
+          report->public_artifact_format));
 
   if (iree_any_bit_set(report->detail_flags,
                        LOOM_TARGET_COMPILE_REPORT_DETAIL_ARTIFACT_SIZE)) {
