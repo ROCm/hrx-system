@@ -109,3 +109,63 @@ low.func.def target<test.low.core>(@test_target) abi(object_function) @structura
   %result_hi = copy %17 : reg<test.f32> -> reg<test.i32>
   return %result_lo, %result_hi
 }
+
+// ====
+
+// RUN: pass source-to-low
+
+// Calls preceding their definitions share a leaf and mix a native invocation
+// with a declaration. Planning publishes callee interfaces
+// first, while emitted definitions remain in their authored order.
+test.target<low_core> @target
+
+func.def public target(@target) @entry(%value: i32) -> (i32) {
+  %first = func.call @middle(%value) : (i32) -> (i32)
+  %second = func.call @leaf(%first) : (i32) -> (i32)
+  %native = low.invoke @native_leaf(%second) : (i32) -> (i32)
+  %result = func.call @external(%native) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def target(@target) @middle(%value: i32) -> (i32) {
+  %result = func.call @leaf(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+low.func.def target<test.low.core>(@target) @native_leaf(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+
+func.def target(@target) @leaf(%value: i32) -> (i32) {
+  %result = scalar.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.decl target(@target) @external(%value: i32) -> (i32)
+
+// ----
+test.target<low_core> @target
+
+low.func.def public target<test.low.core>(@target) abi(object_function) @entry(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %first = low.func.call @middle(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  %second = low.func.call @leaf(%first) : (reg<test.i32>) -> (reg<test.i32>)
+  %native = low.func.call @native_leaf(%second) : (reg<test.i32>) -> (reg<test.i32>)
+  %result = low.func.call @external(%native) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+low.func.def target<test.low.core>(@target) abi(object_function) @middle(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.func.call @leaf(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  return %result
+}
+
+low.func.def target<test.low.core>(@target) @native_leaf(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+
+low.func.def target<test.low.core>(@target) abi(object_function) @leaf(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = test.add.i32 %value, %value
+  return %result
+}
+
+low.func.decl target<test.low.core>(@target) @external(%value: reg<test.i32>) -> (reg<test.i32>)
