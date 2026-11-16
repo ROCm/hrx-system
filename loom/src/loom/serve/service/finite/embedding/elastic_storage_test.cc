@@ -73,6 +73,139 @@ class ElasticEmbeddingServiceTest : public SourceEmbeddingServiceTest {
 };
 
 TEST_F(ElasticEmbeddingServiceTest,
+       CapacityWaitingWarmupRetainsIdentityWithoutClaimingActivity) {
+  const std::string package =
+      iree::testing::MakeTempFilePath("native_warmup_capacity");
+  ASSERT_NO_FATAL_FAILURE(WriteCheckpointPackage(package));
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
+  loom_service_finite_service_free(std::exchange(service_, nullptr));
+  IREE_ASSERT_OK(
+      loom_service_finite_model_free(std::exchange(model_, nullptr)));
+  ASSERT_NO_FATAL_FAILURE(CreateModel(package));
+  retained_ = std::exchange(model_, nullptr);
+  ASSERT_NO_FATAL_FAILURE(CreateModel(package));
+  auto release = [](loom_runtime_residency_t* residency) {
+    loom_runtime_residency_release(residency);
+  };
+  auto* first_residency = loom_service_finite_model_residency(retained_);
+  IREE_ASSERT_OK(loom_runtime_residency_acquire_wait(first_residency));
+  std::unique_ptr<loom_runtime_residency_t, decltype(release)> first_pin(
+      first_residency, release);
+  auto* second_residency = loom_service_finite_model_residency(model_);
+  IREE_ASSERT_OK(loom_runtime_residency_acquire_wait(second_residency));
+  std::unique_ptr<loom_runtime_residency_t, decltype(release)> second_pin(
+      second_residency, release);
+  ASSERT_EQ(
+      loom_runtime_residency_statistics(first_pin.get()).committed_bytes +
+          loom_runtime_residency_statistics(second_pin.get()).committed_bytes,
+      8192u);
+  loom_serve::testing::ModelDocument document;
+  IREE_ASSERT_OK(document.Load(package + "/model.json"));
+  const loom_service_finite_model_options_t model_options = {
+      .sources = document.value().sources,
+      .asset_directory = IREE_SV("."),
+      .options = document.value().options,
+  };
+  const loom_service_finite_registration_options_t options = {
+      .incarnation = 1,
+      .protocol = loom_service_embedding_protocol(),
+      .name = IREE_SV("native"),
+      .capacity = 1,
+  };
+  const loom_runtime_wake_callback_t observer = {
+      [](void* self) {
+        iree_notification_post(static_cast<iree_notification_t*>(self),
+                               IREE_ALL_WAITERS);
+      },
+      &notification_,
+  };
+  // Model preparation temporarily installs its own physical-owner observer.
+  // This owner now advances both the registration and its shared pool.
+  loom_runtime_workspace_set_observer(
+      loom_runtime_pool_workspace(storage_owner_), observer);
+  loom_runtime_memory_pool_set_observer(
+      loom_runtime_pool_memory(storage_owner_), observer.wake,
+      observer.user_data);
+  loom_service_registration_t* raw_registration = nullptr;
+  IREE_ASSERT_OK(loom_service_finite_registration_allocate(
+      device_, storage_owner_, &model_options, &options, observer,
+      host_allocator_, &raw_registration));
+  auto retire = [this](loom_service_registration_t* registration) {
+    loom_service_registration_request_retirement(
+        registration, LOOM_SERVICE_RETIRE_FLAG_ABORT);
+    IREE_CHECK_OK(
+        ProgressRegistrationUntil(registration, [](const auto& state) {
+          return state.phase == LOOM_SERVICE_REGISTRATION_RETIRED;
+        }));
+    loom_service_registration_free(registration);
+  };
+  std::unique_ptr<loom_service_registration_t, decltype(retire)> registration(
+      raw_registration, retire);
+  const auto* control = loom_service_registration_control(registration.get());
+  auto schedule = [&](loom_runtime_service_work_flags_t work) {
+    const auto layout = loom_runtime_service_control_layout(control);
+    for (uint64_t i = 0; i < layout.offer_capacity; ++i) {
+      loom_runtime_service_offer_t offer = {};
+      EXPECT_EQ(loom_runtime_service_read_offer(control, i, &offer),
+                LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+      if (offer.choice_count && offer.work == work) {
+        return loom_service_registration_try_schedule(registration.get(),
+                                                      offer.key, 0, 0);
+      }
+    }
+    return loom_runtime_service_schedule_outcome_t{};
+  };
+  ASSERT_TRUE(schedule(LOOM_RUNTIME_SERVICE_WORK_PREPARATION).accepted);
+  IREE_ASSERT_OK(
+      ProgressRegistrationUntil(registration.get(), [](const auto& state) {
+        return state.phase == LOOM_SERVICE_REGISTRATION_READY ||
+               state.phase == LOOM_SERVICE_REGISTRATION_FAILED;
+      }));
+  ASSERT_EQ(loom_service_registration_snapshot(registration.get()).phase,
+            LOOM_SERVICE_REGISTRATION_READY);
+  ASSERT_TRUE(loom_service_registration_parameters(
+                  registration.get(), LOOM_SERVICE_MODEL_COMPONENT_PRIMARY)
+                  .parameters.elastic);
+  IREE_ASSERT_OK(loom_service_registration_request_parameters(
+      registration.get(), LOOM_SERVICE_MODEL_COMPONENT_PRIMARY,
+      LOOM_SERVICE_PARAMETER_OPERATION_ACTIVATE));
+  const auto accepted = schedule(LOOM_RUNTIME_SERVICE_WORK_ACQUISITION);
+  ASSERT_TRUE(accepted.accepted);
+  EXPECT_EQ(
+      loom_service_registration_snapshot(registration.get()).activation_phase,
+      LOOM_RUNTIME_ACTIVATION_WAITING);
+  EXPECT_FALSE(loom_service_registration_is_pending(registration.get()));
+  EXPECT_FALSE(loom_service_registration_is_active(registration.get()));
+  loom_runtime_service_operation_t operation = {};
+  ASSERT_EQ(loom_runtime_service_read_operation(
+                control, accepted.operation.ordinal, &operation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(operation.key.serial, accepted.operation.serial);
+  EXPECT_EQ(operation.waits, LOOM_RUNTIME_SERVICE_WAIT_CAPACITY);
+
+  // A real peer releases capacity. The accepted warmup completes without
+  // another scheduling grant, and only then retires its accepted identity.
+  first_pin.reset();
+  IREE_ASSERT_OK(
+      ProgressRegistrationUntil(registration.get(), [](const auto& state) {
+        return state.parameter_operation ==
+               LOOM_SERVICE_PARAMETER_OPERATION_NONE;
+      }));
+  IREE_ASSERT_OK(iree_status_clone(
+      loom_service_registration_snapshot(registration.get()).status));
+  const auto parameters =
+      loom_service_registration_parameters(registration.get(),
+                                           LOOM_SERVICE_MODEL_COMPONENT_PRIMARY)
+          .parameters;
+  EXPECT_EQ(parameters.memory.committed_bytes, 4096u);
+  EXPECT_EQ(parameters.pin_count, 0u);
+  ASSERT_EQ(loom_runtime_service_read_operation(
+                control, accepted.operation.ordinal, &operation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(operation.key.serial, 0u);
+}
+
+TEST_F(ElasticEmbeddingServiceTest,
        FailedNativeWarmupRetainsAcceptedProtectionUntilRetirement) {
   const std::string package =
       iree::testing::MakeTempFilePath("native_warmup_retirement");

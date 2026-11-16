@@ -247,11 +247,10 @@ static iree_status_t loom_serve_text_registration_deactivate(
 static iree_status_t loom_serve_text_registration_activate(
     void* self, loom_service_model_component_t component,
     loom_runtime_activation_flags_t flags,
-    loom_runtime_activation_phase_t* out_phase,
-    iree_status_t* out_component_status) {
+    loom_service_activation_result_t* out_result) {
   loom_serve_text_registration_t* registration = self;
-  *out_component_status = iree_ok_status();
-  *out_phase = LOOM_RUNTIME_ACTIVATION_COMPLETE;
+  *out_result =
+      loom_service_activation_result(LOOM_RUNTIME_ACTIVATION_COMPLETE);
   loom_runtime_residency_t* residency = NULL;
   if (component == LOOM_SERVICE_MODEL_COMPONENT_IMAGE &&
       !registration->activation) {
@@ -259,13 +258,14 @@ static iree_status_t loom_serve_text_registration_activate(
       return iree_ok_status();
     }
     loom_service_finite_model_t* model = NULL;
-    *out_component_status =
+    out_result->component_status =
         loom_service_finite_component_prepare(registration->image, &model);
-    if (!iree_status_is_ok(*out_component_status)) {
+    if (!iree_status_is_ok(out_result->component_status)) {
       return iree_ok_status();
     }
     if (!model) {
-      *out_phase = LOOM_RUNTIME_ACTIVATION_WAITING;
+      out_result->phase = LOOM_RUNTIME_ACTIVATION_WAITING;
+      out_result->waits = LOOM_RUNTIME_SERVICE_WAIT_CPU;
       return iree_ok_status();
     }
     residency = loom_service_finite_model_residency(model);
@@ -274,13 +274,16 @@ static iree_status_t loom_serve_text_registration_activate(
   }
   // An accepted image activation already owns its residency borrow. Joining
   // cancellation must not reenter component preparation during removal.
-  return loom_runtime_activation_poll(
+  loom_runtime_activation_phase_t phase;
+  iree_status_t status = loom_runtime_activation_poll(
       &registration->activation, residency,
       loom_runtime_host_proactor_pool(
           loom_runtime_device_host(registration->device)),
       registration->registration.observer.wake,
       registration->registration.observer.user_data, flags,
-      registration->host_allocator, out_phase);
+      registration->host_allocator, &phase);
+  *out_result = loom_service_activation_result(phase);
+  return status;
 }
 
 static const loom_service_registration_vtable_t

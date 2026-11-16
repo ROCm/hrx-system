@@ -109,18 +109,19 @@ static void loom_service_finite_registration_set_pinned(
 static iree_status_t loom_service_finite_registration_activate(
     void* self, loom_service_model_component_t component,
     loom_runtime_activation_flags_t flags,
-    loom_runtime_activation_phase_t* out_phase,
-    iree_status_t* out_component_status) {
+    loom_service_activation_result_t* out_result) {
   loom_service_finite_registration_t* provider = self;
-  *out_component_status = iree_ok_status();
-  return loom_runtime_activation_poll(
+  loom_runtime_activation_phase_t phase;
+  iree_status_t status = loom_runtime_activation_poll(
       &provider->activation,
       loom_service_finite_model_residency(provider->model),
       loom_runtime_host_proactor_pool(
           loom_runtime_device_host(provider->device)),
       provider->registration.observer.wake,
       provider->registration.observer.user_data, flags,
-      provider->host_allocator, out_phase);
+      provider->host_allocator, &phase);
+  *out_result = loom_service_activation_result(phase);
+  return status;
 }
 
 static iree_status_t loom_service_finite_registration_deactivate(

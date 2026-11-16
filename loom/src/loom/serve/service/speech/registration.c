@@ -169,18 +169,19 @@ static iree_status_t loom_serve_speech_registration_deactivate(
 static iree_status_t loom_serve_speech_registration_activate(
     void* self, loom_service_model_component_t component,
     loom_runtime_activation_flags_t flags,
-    loom_runtime_activation_phase_t* out_phase,
-    iree_status_t* out_component_status) {
-  *out_component_status = iree_ok_status();
+    loom_service_activation_result_t* out_result) {
   loom_serve_speech_registration_t* registration = self;
-  return loom_runtime_activation_poll(
+  loom_runtime_activation_phase_t phase;
+  iree_status_t status = loom_runtime_activation_poll(
       &registration->activation,
       loom_serve_speech_model_residency(registration->model),
       loom_runtime_host_proactor_pool(
           loom_runtime_device_host(registration->device)),
       registration->registration.observer.wake,
       registration->registration.observer.user_data, flags,
-      registration->host_allocator, out_phase);
+      registration->host_allocator, &phase);
+  *out_result = loom_service_activation_result(phase);
+  return status;
 }
 
 static const loom_service_registration_vtable_t

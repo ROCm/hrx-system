@@ -227,9 +227,9 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
         .activate =
             [](void*, loom_service_model_component_t,
                loom_runtime_activation_flags_t,
-               loom_runtime_activation_phase_t* phase, iree_status_t* status) {
-              *phase = LOOM_RUNTIME_ACTIVATION_COMPLETE;
-              *status = iree_ok_status();
+               loom_service_activation_result_t* result) {
+              *result = loom_service_activation_result(
+                  LOOM_RUNTIME_ACTIVATION_COMPLETE);
               return iree_ok_status();
             },
         .deactivate =

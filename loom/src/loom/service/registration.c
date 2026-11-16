@@ -418,13 +418,21 @@ loom_service_registration_snapshot_t loom_service_registration_snapshot(
       .preparation_duration_ns = registration->preparation_duration_ns};
 }
 
+static bool loom_service_registration_parameters_pending(
+    const loom_service_registration_t* registration) {
+  return loom_service_registration_has_parameter_work(registration) &&
+         (registration->parameter_operation ==
+              LOOM_SERVICE_PARAMETER_OPERATION_DEACTIVATE ||
+          iree_any_bit_set(registration->lifecycle.operation.waits,
+                           LOOM_RUNTIME_SERVICE_WAIT_CPU |
+                               LOOM_RUNTIME_SERVICE_WAIT_DEVICE));
+}
+
 bool loom_service_registration_is_pending(
     const loom_service_registration_t* registration) {
   return registration->phase == LOOM_SERVICE_REGISTRATION_PREPARING ||
          registration->phase == LOOM_SERVICE_REGISTRATION_RETIRING ||
-         (registration->parameter_operation !=
-              LOOM_SERVICE_PARAMETER_OPERATION_NONE &&
-          loom_service_registration_has_parameter_work(registration)) ||
+         loom_service_registration_parameters_pending(registration) ||
          (registration->engine.self &&
           registration->engine.vtable->is_pending(registration->engine.self));
 }
@@ -433,9 +441,7 @@ bool loom_service_registration_is_active(
     const loom_service_registration_t* registration) {
   return registration->phase == LOOM_SERVICE_REGISTRATION_PREPARING ||
          registration->phase == LOOM_SERVICE_REGISTRATION_RETIRING ||
-         (registration->parameter_operation !=
-              LOOM_SERVICE_PARAMETER_OPERATION_NONE &&
-          loom_service_registration_has_parameter_work(registration)) ||
+         loom_service_registration_parameters_pending(registration) ||
          (registration->engine.self &&
           registration->engine.vtable->is_active(registration->engine.self));
 }
@@ -764,9 +770,12 @@ iree_status_t loom_service_registration_activate(
       registration, component, LOOM_SERVICE_PARAMETER_OPERATION_ACTIVATE);
   loom_service_registration_begin_work(registration, work,
                                        LOOM_RUNTIME_SERVICE_WORK_ACQUISITION);
+  loom_service_activation_result_t result;
   iree_status_t status = registration->vtable->activate(
-      registration->self, component, flags, out_phase, out_component_status);
-  registration->activation_phase = *out_phase;
+      registration->self, component, flags, &result);
+  *out_phase = result.phase;
+  *out_component_status = result.component_status;
+  registration->activation_phase = result.phase;
   if (!iree_status_is_ok(*out_component_status)) {
     loom_service_registration_record_error(registration, *out_component_status);
   }
@@ -780,14 +789,8 @@ iree_status_t loom_service_registration_activate(
     }
   }
   if (work->operation.key.serial) {
-    const loom_runtime_service_wait_flags_t waits =
-        *out_phase == LOOM_RUNTIME_ACTIVATION_WAITING
-            ? LOOM_RUNTIME_SERVICE_WAIT_CAPACITY
-        : *out_phase == LOOM_RUNTIME_ACTIVATION_LOADING
-            ? LOOM_RUNTIME_SERVICE_WAIT_DEVICE
-            : 0;
-    if (work->operation.waits != waits) {
-      work->operation.waits = waits;
+    if (work->operation.waits != result.waits) {
+      work->operation.waits = result.waits;
       loom_runtime_service_publish_operation(
           registration->control, &work->operation, &registration->use);
     }

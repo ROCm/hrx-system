@@ -231,9 +231,7 @@ struct loom_serve_test_registration_dependency_t {
   static iree_status_t Activate(void* self,
                                 loom_service_model_component_t component,
                                 loom_runtime_activation_flags_t flags,
-                                loom_runtime_activation_phase_t* phase,
-                                iree_status_t* component_status) {
-    *component_status = iree_ok_status();
+                                loom_service_activation_result_t* result) {
     auto* dependency =
         static_cast<loom_serve_test_registration_operation_t*>(self)
             ->dependency;
@@ -242,7 +240,8 @@ struct loom_serve_test_registration_dependency_t {
     const bool cancel =
         iree_any_bit_set(flags, LOOM_RUNTIME_ACTIVATION_FLAG_CANCEL);
     if (!activation.submitted && cancel) {
-      *phase = LOOM_RUNTIME_ACTIVATION_COMPLETE;
+      *result =
+          loom_service_activation_result(LOOM_RUNTIME_ACTIVATION_COMPLETE);
       return iree_ok_status();
     }
     if (!activation.submitted) {
@@ -252,12 +251,12 @@ struct loom_serve_test_registration_dependency_t {
     activation.cancelling |= cancel;
     dependency->condition.notify_all();
     if (!activation.ready) {
-      *phase = LOOM_RUNTIME_ACTIVATION_LOADING;
+      *result = loom_service_activation_result(LOOM_RUNTIME_ACTIVATION_LOADING);
       return iree_ok_status();
     }
     activation.submitted = false;
     activation.ready = false;
-    *phase = LOOM_RUNTIME_ACTIVATION_COMPLETE;
+    *result = loom_service_activation_result(LOOM_RUNTIME_ACTIVATION_COMPLETE);
     if (iree_status_is_ok(activation.status)) {
       auto& parameters = dependency->parameters;
       parameters.activity.activations += !parameters.active;

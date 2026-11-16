@@ -95,8 +95,34 @@ typedef struct loom_service_preparation_result_t {
   loom_runtime_service_t service;
 } loom_service_preparation_result_t;
 
+// Activation can wait for component preparation before parameter admission.
+// The public phase and actual prerequisite remain independent: WAITING may
+// denote a CPU borrower or capacity pressure with no callback pending.
+typedef struct loom_service_activation_result_t {
+  // Parameter readiness exposed to the application.
+  loom_runtime_activation_phase_t phase;
+  // Actual prerequisites, retained in the accepted operation's observation.
+  loom_runtime_service_wait_flags_t waits;
+  // Owned component-local diagnostic; parent failure is returned separately.
+  iree_status_t component_status;
+} loom_service_activation_result_t;
+
+// Projects the parameter owner's readiness; providers with additional work
+// publish its actual prerequisite instead of borrowing this phase mapping.
+static inline loom_service_activation_result_t loom_service_activation_result(
+    loom_runtime_activation_phase_t phase) {
+  loom_service_activation_result_t result = {.phase = phase};
+  if (phase == LOOM_RUNTIME_ACTIVATION_WAITING) {
+    result.waits = LOOM_RUNTIME_SERVICE_WAIT_CAPACITY;
+  } else if (phase == LOOM_RUNTIME_ACTIVATION_LOADING) {
+    result.waits = LOOM_RUNTIME_SERVICE_WAIT_DEVICE;
+  }
+  return result;
+}
+
 // Typed resource mechanics. These callbacks run on the serialized owner and
-// never wait. A nonterminal accepted operation owes the owner's next wake.
+// never wait. Asynchronous borrowers owe a wake; capacity waits depend on
+// another owner releasing resources.
 // The provider knows its own resource retention; a missing ready engine alone
 // cannot establish that failed preparation has released native resources.
 typedef struct loom_service_registration_vtable_t {
@@ -122,8 +148,7 @@ typedef struct loom_service_registration_vtable_t {
   iree_status_t (*activate)(void* self,
                             loom_service_model_component_t component,
                             loom_runtime_activation_flags_t flags,
-                            loom_runtime_activation_phase_t* out_phase,
-                            iree_status_t* out_component_status);
+                            loom_service_activation_result_t* out_result);
   // Releases an idle component's parameters or optional prepared model.
   iree_status_t (*deactivate)(void* self,
                               loom_service_model_component_t component,
@@ -314,12 +339,13 @@ bool loom_service_registration_progress(
 
 // Accepted asynchronous work still borrows native storage and owes a wake.
 // Unaccepted preparation, parameter, and retirement intent alone is not
-// pending.
+// pending. Capacity-blocked warmup retains acceptance without a callback.
 bool loom_service_registration_is_pending(
     const loom_service_registration_t* registration);
 
-// Accepted lifecycle/parameter work or source activity may release capacity.
-// Queued intent and failed platform cleanup alone provide no peer activity.
+// Asynchronous lifecycle/parameter work or source activity may release
+// capacity. Queued intent and failed platform cleanup alone provide no peer
+// activity.
 bool loom_service_registration_is_active(
     const loom_service_registration_t* registration);
 

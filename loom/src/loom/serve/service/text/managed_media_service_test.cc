@@ -255,6 +255,29 @@ class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest,
           EXPECT_STREQ(image.phase, phase == LOOM_RUNTIME_ACTIVATION_WAITING
                                         ? "preparing"
                                         : "ready");
+          EXPECT_TRUE(
+              loom_service_registration_is_pending(model->registration.native));
+          EXPECT_TRUE(
+              loom_service_registration_is_active(model->registration.native));
+          const auto* control =
+              loom_service_registration_control(model->registration.native);
+          const auto layout = loom_runtime_service_control_layout(control);
+          bool found_activation = false;
+          for (uint64_t i = 0; i < layout.operation_capacity; ++i) {
+            loom_runtime_service_operation_t operation = {};
+            ASSERT_EQ(
+                loom_runtime_service_read_operation(control, i, &operation),
+                LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+            if (operation.key.serial &&
+                operation.work == LOOM_RUNTIME_SERVICE_WORK_ACQUISITION) {
+              EXPECT_EQ(operation.waits,
+                        phase == LOOM_RUNTIME_ACTIVATION_WAITING
+                            ? LOOM_RUNTIME_SERVICE_WAIT_CPU
+                            : LOOM_RUNTIME_SERVICE_WAIT_DEVICE);
+              found_activation = true;
+            }
+          }
+          EXPECT_TRUE(found_activation);
           IREE_ASSERT_OK(
               loom_serve_registry_remove(model, LOOM_SERVE_REMOVAL_ABORT));
           removed = true;
