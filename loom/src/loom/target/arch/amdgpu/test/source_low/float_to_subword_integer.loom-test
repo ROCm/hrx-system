@@ -1,0 +1,70 @@
+// RUN: emit source-low target=amdgpu:gfx1201 output=low
+
+func.def @f64_to_subword_integer(%scalar: f64, %vector: vector<2xf64>) -> (i8, i8, i8, i8, i16, i16, i32, i32, vector<2xi8>, vector<2xi8>, vector<2xi16>, vector<2xi16>, vector<2xi32>, vector<2xi32>) {
+  %scalar_i8 = scalar.fptosi %scalar : f64 to i8
+  %scalar_u8 = scalar.fptoui %scalar : f64 to i8
+  %scalar_i32 = scalar.fptosi %scalar : f64 to i32
+  %scalar_u32 = scalar.fptoui %scalar : f64 to i32
+  %explicit_scalar_i8 = scalar.trunci %scalar_i32 : i32 to i8
+  %explicit_scalar_u8 = scalar.trunci %scalar_u32 : i32 to i8
+  %scalar_i16 = scalar.fptosi %scalar : f64 to i16
+  %scalar_u16 = scalar.fptoui %scalar : f64 to i16
+  %signed_zero_extended = scalar.extui %scalar_i8 : i8 to i32
+  %unsigned_sign_extended = scalar.extsi %scalar_u8 : i8 to i32
+  %vector_i8 = vector.fptosi %vector : vector<2xf64> to vector<2xi8>
+  %vector_u8 = vector.fptoui %vector : vector<2xf64> to vector<2xi8>
+  %vector_i16 = vector.fptosi %vector : vector<2xf64> to vector<2xi16>
+  %vector_u16 = vector.fptoui %vector : vector<2xf64> to vector<2xi16>
+  %vector_i32 = vector.fptosi %vector : vector<2xf64> to vector<2xi32>
+  %vector_u32 = vector.fptoui %vector : vector<2xf64> to vector<2xi32>
+  func.return %scalar_i8, %scalar_u8, %explicit_scalar_i8, %explicit_scalar_u8, %scalar_i16, %scalar_u16, %signed_zero_extended, %unsigned_sign_extended, %vector_i8, %vector_u8, %vector_i16, %vector_u16, %vector_i32, %vector_u32 : i8, i8, i8, i8, i16, i16, i32, i32, vector<2xi8>, vector<2xi8>, vector<2xi16>, vector<2xi16>, vector<2xi32>, vector<2xi32>
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @f64_to_subword_integer(%scalar: reg<amdgpu.vgpr x2>, %vector: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %scalar_i8 = v_cvt_i32_f64 %scalar
+  %scalar_u8 = v_cvt_u32_f64 %scalar
+  %signed_zero_extended = v_and_b32_lit %scalar_i8, 255
+  %unsigned_sign_extended = v_bfe_i32_offset_width_inline %scalar_u8 {offset = 0, width = 8}
+  %56 = slice %vector[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %57 = v_cvt_i32_f64 %56
+  %58 = v_and_b32_lit %57, 255
+  %59 = slice %vector[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %60 = v_cvt_i32_f64 %59
+  %61 = v_and_b32_lit %60, 255
+  %vector_i8 = v_lshl_add_u32_shift_imm %61, %58, 8
+  %64 = v_cvt_u32_f64 %56
+  %65 = v_and_b32_lit %64, 255
+  %67 = v_cvt_u32_f64 %59
+  %68 = v_and_b32_lit %67, 255
+  %vector_u8 = v_lshl_add_u32_shift_imm %68, %65, 8
+  %72 = v_and_b32_lit %57, 65535
+  %75 = v_and_b32_lit %60, 65535
+  %vector_i16 = v_lshl_add_u32_shift_imm %75, %72, 16
+  %79 = v_and_b32_lit %64, 65535
+  %82 = v_and_b32_lit %67, 65535
+  %vector_u16 = v_lshl_add_u32_shift_imm %82, %79, 16
+  %vector_i32 = concat(%57, %60) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %vector_u32 = concat(%64, %67) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %scalar_i8, %scalar_u8, %scalar_i8, %scalar_u8, %scalar_i8, %scalar_u8, %signed_zero_extended, %unsigned_sign_extended, %vector_i8, %vector_u8, %vector_i16, %vector_u16, %vector_i32, %vector_u32
+}
+
+// ====
+// RUN: emit source-low target=amdgpu:gfx1201 output=low
+
+func.def @f32_to_subword_integer(%scalar: f32) -> (i8, i8, i8, i8) {
+  %scalar_i8 = scalar.fptosi %scalar : f32 to i8
+  %scalar_u8 = scalar.fptoui %scalar : f32 to i8
+  %scalar_i32 = scalar.fptosi %scalar : f32 to i32
+  %scalar_u32 = scalar.fptoui %scalar : f32 to i32
+  %explicit_scalar_i8 = scalar.trunci %scalar_i32 : i32 to i8
+  %explicit_scalar_u8 = scalar.trunci %scalar_u32 : i32 to i8
+  func.return %scalar_i8, %scalar_u8, %explicit_scalar_i8, %explicit_scalar_u8 : i8, i8, i8, i8
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @f32_to_subword_integer(%scalar: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %scalar_i8 = v_cvt_i32_f32 %scalar
+  %scalar_u8 = v_cvt_u32_f32 %scalar
+  return %scalar_i8, %scalar_u8, %scalar_i8, %scalar_u8
+}

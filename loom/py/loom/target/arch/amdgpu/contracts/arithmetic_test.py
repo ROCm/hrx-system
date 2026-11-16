@@ -648,6 +648,28 @@ def test_i64_to_f32_rules_preserve_single_rounding() -> None:
         assert _rule_descriptor_keys(compiled, matching_rules[0]) == expected_sequence
 
 
+def test_narrow_float_to_integer_rules_cover_f32_and_f64() -> None:
+    compiled = _COMPILED_ARITHMETIC_RULES
+    for source_op, conversion_descriptor in (
+        (scalar_conversion.scalar_fptosi, "amdgpu.v_cvt_i32"),
+        (scalar_conversion.scalar_fptoui, "amdgpu.v_cvt_u32"),
+    ):
+        matching_rules = {}
+        for rule in _rules_for_source_op(compiled, source_op):
+            types = _rule_type_patterns(compiled, rule)
+            if len(types) != 2 or types[1] not in (Scalar("i8"), Scalar("i16")):
+                continue
+            matching_rules[types] = _rule_descriptor_keys(compiled, rule)
+
+        assert matching_rules == {
+            (Scalar(float_type), Scalar(integer_type)): (
+                f"{conversion_descriptor}_{float_type}",
+            )
+            for float_type in ("f32", "f64")
+            for integer_type in ("i8", "i16")
+        }
+
+
 def test_integer_extrema_rules_prefer_encoded_constants() -> None:
     compiled = _COMPILED_INTEGER_RULES
 
@@ -1891,6 +1913,13 @@ def test_vector_integer_conversion_contracts_preserve_storage_and_lane_counts() 
     }
     to_float = {("i8", "f32"), ("i16", "f32"), ("i32", "f32")}
     from_float = {(result, source) for source, result in to_float}
+    from_float.update(
+        {
+            ("f64", "i8"),
+            ("f64", "i16"),
+            ("f64", "i32"),
+        }
+    )
     to_float.add(("i8", "f16"))
     for source_op, expected_pairs in (
         (vector.vector_extsi, widening),
