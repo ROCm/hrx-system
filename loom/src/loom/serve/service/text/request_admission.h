@@ -53,10 +53,13 @@ iree_status_t loom_serve_text_complete_preparation(
 iree_status_t loom_serve_text_complete_reservation(
     loom_serve_text_service_t* service, loom_runtime_service_flags_t flags);
 
-// Admits ready text work or protects media consumers without worker waits.
-iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
-                                            loom_runtime_service_flags_t flags,
-                                            bool allow_preparation);
+// Progresses only the selected attempt through retention and reservation. A
+// completed, rejected, or yielded attempt never selects the next request.
+// Reports whether the owner can select another attempt on this turn. An
+// unchanged capacity or media wait relies on its existing owner notification.
+iree_status_t loom_serve_text_progress_admission(
+    loom_serve_text_service_t* service, loom_runtime_service_flags_t flags,
+    bool* out_select_next);
 
 // Transfers a validated receipt into a stable queue slot without starting work.
 void loom_serve_text_pending_push(

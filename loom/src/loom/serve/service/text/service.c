@@ -1190,8 +1190,19 @@ static iree_status_t loom_serve_text_advance_work(
   // turn. Retry admission even without a service-local capacity event.
   const iree_host_size_t pending_count = service->pending.count;
   loom_serve_text_observe(service, "admit");
+  bool select_next = false;
   iree_status_t status =
-      loom_serve_text_admit_pending(service, flags, !yield_preparation);
+      loom_serve_text_progress_admission(service, flags, &select_next);
+  while (select_next && !yield_preparation && iree_status_is_ok(status)) {
+    if (!loom_serve_text_begin_preparation(service)) {
+      break;
+    }
+    if (loom_serve_text_has_work(service)) {
+      *out_progress = true;
+      break;
+    }
+    status = loom_serve_text_progress_admission(service, flags, &select_next);
+  }
   *out_progress |= pending_count != service->pending.count;
   if (loom_serve_text_has_work(service)) {
     *out_progress = true;

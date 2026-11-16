@@ -581,9 +581,11 @@ iree_status_t loom_serve_text_complete_reservation(
   return loom_serve_text_admit_request(service, flags);
 }
 
-iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
-                                            loom_runtime_service_flags_t flags,
-                                            bool allow_preparation) {
+iree_status_t loom_serve_text_progress_admission(
+    loom_serve_text_service_t* service, loom_runtime_service_flags_t flags,
+    bool* out_select_next) {
+  *out_select_next =
+      !service->pending.prepared.session && service->pending.count;
   // Cancellation can leave a completed full-cache exchange without its
   // incoming admission. Settle that excess here, never in terminal teardown's
   // host-only pending removal while device ownership may remain unresolved.
@@ -606,16 +608,7 @@ iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
     }
   }
   iree_status_t status = iree_ok_status();
-  while (service->pending.count && iree_status_is_ok(status)) {
-    if (!service->pending.prepared.session) {
-      if (allow_preparation) {
-        loom_serve_text_begin_preparation(service);
-      }
-      if (!service->pending.prepared.session ||
-          loom_serve_text_has_work(service)) {
-        break;
-      }
-    }
+  while (service->pending.prepared.session && iree_status_is_ok(status)) {
     loom_serve_text_pending_request_t* pending =
         service->pending.prepared.request;
     loom_serve_text_session_t* session = service->pending.prepared.session;
@@ -627,6 +620,7 @@ iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
         loom_serve_text_prepare_media(service, &media_ready, &state_capacity);
     if (!iree_status_is_ok(status)) {
       status = loom_serve_text_reject_prepared(service, status);
+      *out_select_next = true;
       continue;
     }
     if (service->completion.work != TEXT_WORK_NONE) {
@@ -640,12 +634,14 @@ iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
         loom_serve_text_media_projector_seal(service->projector);
       }
       memset(&service->pending.prepared, 0, sizeof(service->pending.prepared));
+      *out_select_next = true;
       continue;
     }
     if (!media_ready && !state_capacity) {
       memset(&service->pending.prepared, 0, sizeof(service->pending.prepared));
       if (loom_serve_text_admission_blocked(&service->pending.admission,
                                             service->pending.count)) {
+        *out_select_next = true;
         continue;
       }
       break;
@@ -740,6 +736,7 @@ iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
                  sizeof(service->pending.prepared));
         }
         if (probe) {
+          *out_select_next = true;
           continue;
         }
         break;
@@ -751,9 +748,11 @@ iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
               "retained state leaves insufficient completion capacity; "
               "release a checkpoint, lower max_tokens, or use elastic backing "
               "with a larger memory budget"));
+      *out_select_next = true;
       continue;
     }
     status = loom_serve_text_admit_request(service, flags);
+    *out_select_next = true;
   }
   return status;
 }
