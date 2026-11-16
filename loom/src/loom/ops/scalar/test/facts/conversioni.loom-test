@@ -288,7 +288,7 @@ func.def @nonzero_widening(%input: i8, %wide_input: i16) -> (i1, i1, i1, i1, i64
   %signed_nonzero = scalar.constant true : i1
   %index_nonzero = scalar.constant true : i1
   %truncated_nonzero = scalar.constant false : i1
-  %minimum = scalar.constant 1 : i64
+  %minimum = scalar.constant 2 : i64
   %divisor = scalar.constant 2 : i64
   func.return %unsigned_nonzero, %signed_nonzero, %index_nonzero, %truncated_nonzero, %minimum, %divisor : i1, i1, i1, i1, i64, i64
 }

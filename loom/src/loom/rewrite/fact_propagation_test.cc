@@ -1740,7 +1740,14 @@ TEST_P(ConditionInductionFactsRewriteTest, SemanticEditsMatchFreshAnalysis) {
   set_constant(initial, maximum - 1);
   set_constant(upper, maximum);
   set_constant(step, 2);
-  check(domain_minimum, domain_maximum, domain_maximum, UINT64_MAX);
+  // An even initial value and increment retain parity across unsigned wrap.
+  // Finite domains exclude their odd maximum; unbounded sentinels stay open.
+  const int64_t even_domain_maximum =
+      domain_maximum == INT64_MAX ? domain_maximum : domain_maximum - 1;
+  check(domain_minimum, even_domain_maximum, even_domain_maximum, UINT64_MAX);
+  for (auto value : {counter, position, next}) {
+    EXPECT_EQ(loom_value_fact_table_lookup(facts, value).known_divisor, 2);
+  }
   set_constant(initial, 0);
   set_constant(upper, 4);
   set_constant(step, 1);

@@ -1121,7 +1121,8 @@ TEST_F(SourceMemoryPlanTest, RootBoundsPromiseConstrainsDynamicViewBase) {
   ASSERT_EQ(plan.dynamic_term_count, 1u);
   EXPECT_EQ(plan.dynamic_view_base_term_count, 1u);
   EXPECT_EQ(plan.dynamic_view_base_byte_facts.range_lo, 0);
-  EXPECT_EQ(plan.dynamic_view_base_byte_facts.range_hi, 63);
+  EXPECT_EQ(plan.dynamic_view_base_byte_facts.range_hi, 60);
+  EXPECT_EQ(plan.dynamic_view_base_byte_facts.known_divisor, 4);
   EXPECT_TRUE(loom_low_source_memory_dynamic_offset_fits_unsigned_bit_count(
       &plan, plan.static_byte_offset, 32));
   EXPECT_EQ(plan.access_flags, 0u);

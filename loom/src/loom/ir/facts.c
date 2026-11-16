@@ -456,6 +456,7 @@ loom_value_facts_t loom_value_facts_clamp_domain(loom_value_facts_t facts,
         LOOM_VALUE_FACT_LANE_PREDICATE | LOOM_VALUE_FACT_SUBGROUP_LANE_MASK)) |
       preserved_topology_flags;
   result.extension_id = facts.extension_id;
+  loom_value_facts_refine_predicate_range(&result);
   return result;
 }
 
@@ -1441,10 +1442,12 @@ bool loom_value_facts_refine_relation(uint8_t predicate_kind,
   if (lhs_result) {
     loom_value_facts_recompute_flags(lhs_result);
     lhs_result->flags |= lhs_preserved_flags;
+    loom_value_facts_refine_predicate_range(lhs_result);
   }
   if (rhs_result && rhs_result != lhs_result) {
     loom_value_facts_recompute_flags(rhs_result);
     rhs_result->flags |= rhs_preserved_flags;
+    loom_value_facts_refine_predicate_range(rhs_result);
   }
   return true;
 }

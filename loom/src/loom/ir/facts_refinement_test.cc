@@ -810,6 +810,39 @@ TEST(FactsRefineRelation, NarrowingRetainsExplicitNonzeroFacts) {
   EXPECT_TRUE(loom_value_facts_is_non_zero(nonzero));
 }
 
+TEST(FactsRefineRelation, NormalizesPredicatesOnEitherWritableSide) {
+  const auto interval = loom_value_facts_make(5, 9, 1);
+  for (bool reversed : {false, true}) {
+    auto power = loom_value_facts_make(1, 64, 4);
+    power.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+    loom_value_facts_mark_workgroup_uniform(&power);
+    power.extension_id = 7;
+    if (reversed) {
+      ASSERT_TRUE(loom_value_facts_refine_relation(LOOM_PREDICATE_EQ, interval,
+                                                   power, nullptr, &power));
+    } else {
+      ASSERT_TRUE(loom_value_facts_refine_relation(LOOM_PREDICATE_EQ, power,
+                                                   interval, &power, nullptr));
+    }
+    EXPECT_EQ(power.range_lo, 8);
+    EXPECT_EQ(power.range_hi, 8);
+    EXPECT_TRUE(loom_value_facts_is_exact(power));
+    EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(power));
+    EXPECT_EQ(power.extension_id, 7u);
+  }
+
+  for (auto predicate : {LOOM_PREDICATE_LE, LOOM_PREDICATE_ULE}) {
+    auto nonzero = loom_value_facts_make(0, 12, 4);
+    nonzero.flags |= LOOM_VALUE_FACT_NON_ZERO;
+    const auto bound = loom_value_facts_make(0, 6, 1);
+    ASSERT_TRUE(loom_value_facts_refine_relation(predicate, nonzero, bound,
+                                                 &nonzero, nullptr));
+    EXPECT_EQ(nonzero.range_lo, 4);
+    EXPECT_EQ(nonzero.range_hi, 4);
+    EXPECT_TRUE(loom_value_facts_is_exact(nonzero));
+  }
+}
+
 static bool unsigned_relation_holds(loom_predicate_kind_t kind, int64_t lhs,
                                     int64_t rhs) {
   switch (kind) {

@@ -1460,10 +1460,10 @@ CHECK-NOT: *test.fact_range_*
 
 // ====
 
-// RUN: with-checks pass canonicalize,dce
-
 // The terminal increment must fit the fixed-width carrier. Treating i8 as the
 // target offset width would incorrectly infer a mathematical [126, 128] range.
+// RUN: pass canonicalize,dce
+
 func.def @scalar_i8_terminal_wrap() -> (i64, i64) {
   %begin = scalar.constant 126 : i8
   %end = scalar.constant 127 : i8
@@ -1499,11 +1499,37 @@ func.def @scalar_i8_next_guard_terminal_wrap() -> (i64, i64) {
 }
 
 // ----
-CHECK: %wrap_lo = scalar.constant -128 : i64
-CHECK: %wrap_hi = scalar.constant 127 : i64
-CHECK: %next_wrap_lo = scalar.constant -128 : i64
-CHECK: %next_wrap_hi = scalar.constant 127 : i64
-CHECK-NOT: *test.fact_range_*
+func.def @scalar_i8_terminal_wrap() -> (i64, i64) {
+  %begin = scalar.constant 126 : i8
+  %step = scalar.constant 2 : i8
+  cfg.br ^header(%begin: i8)
+^header(%counter: i8):
+  %wrap_lo = scalar.constant -128 : i64
+  %wrap_hi = scalar.constant 126 : i64
+  %more = scalar.constant true : i1
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %next = scalar.addi %counter, %step : i8
+  cfg.br ^header(%next: i8)
+^exit:
+  func.return %wrap_lo, %wrap_hi : i64, i64
+}
+
+func.def @scalar_i8_next_guard_terminal_wrap() -> (i64, i64) {
+  %begin = scalar.constant 126 : i8
+  %step = scalar.constant 2 : i8
+  cfg.br ^header(%begin: i8)
+^header(%counter: i8):
+  %next = scalar.addi %counter, %step : i8
+  %next_wrap_lo = scalar.constant -128 : i64
+  %next_wrap_hi = scalar.constant 126 : i64
+  %more = scalar.constant true : i1
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  cfg.br ^header(%next: i8)
+^exit:
+  func.return %next_wrap_lo, %next_wrap_hi : i64, i64
+}
 
 // ====
 
