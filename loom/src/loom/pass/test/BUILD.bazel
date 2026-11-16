@@ -48,6 +48,7 @@ loom_cc_library(
         "//loom/src/loom/pass:report",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
     ],

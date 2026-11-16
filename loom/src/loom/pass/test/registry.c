@@ -16,6 +16,7 @@
 #include "loom/pass/options.h"
 #include "loom/pass/report.h"
 #include "loom/pass/value_facts.h"
+#include "loom/util/cfg_graph.h"
 #include "loom/util/fact_extensions.h"
 #include "loom/util/fact_table.h"
 
@@ -165,9 +166,85 @@ typedef enum loom_test_value_facts_expect_e {
   LOOM_TEST_VALUE_FACTS_EXPECT_REUSE,
 } loom_test_value_facts_expect_t;
 
+static iree_status_t loom_test_compare_value_fact_cfg(
+    void* user_data, const loom_cfg_graph_t* fresh) {
+  const loom_value_fact_table_t* retained_facts = user_data;
+  const loom_cfg_graph_t* retained =
+      loom_value_fact_table_lookup_cfg_graph(retained_facts, fresh->region);
+  if (!retained) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "retained facts are missing a live CFG snapshot");
+  }
+  if (retained->block_count != fresh->block_count ||
+      retained->edge_count != fresh->edge_count ||
+      retained->backward_edge_count != fresh->backward_edge_count ||
+      retained->has_cycles != fresh->has_cycles ||
+      retained->malformed != fresh->malformed ||
+      retained->reverse_postorder.count != fresh->reverse_postorder.count) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "retained CFG shape differs from fresh computation");
+  }
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < fresh->block_count && iree_status_is_ok(status); ++i) {
+    const loom_cfg_block_info_t* lhs = &retained->blocks[i];
+    const loom_cfg_block_info_t* rhs = &fresh->blocks[i];
+    if (lhs->block != rhs->block ||
+        lhs->successor_start != rhs->successor_start ||
+        lhs->successor_count != rhs->successor_count ||
+        lhs->successor_edge_start != rhs->successor_edge_start ||
+        lhs->predecessor_start != rhs->predecessor_start ||
+        lhs->predecessor_count != rhs->predecessor_count ||
+        lhs->predecessor_edge_start != rhs->predecessor_edge_start ||
+        lhs->reachable != rhs->reachable ||
+        lhs->can_reach_exit != rhs->can_reach_exit ||
+        lhs->preorder != rhs->preorder || lhs->parent != rhs->parent ||
+        lhs->preorder_end != rhs->preorder_end ||
+        lhs->component != rhs->component ||
+        lhs->component_is_cyclic != rhs->component_is_cyclic ||
+        lhs->is_dfs_backedge_target != rhs->is_dfs_backedge_target ||
+        lhs->reachability_root != rhs->reachability_root) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "retained CFG block %zu differs from fresh computation", i);
+    }
+  }
+  for (iree_host_size_t i = 0;
+       i < fresh->edge_count && iree_status_is_ok(status); ++i) {
+    const loom_cfg_edge_info_t* lhs = &retained->edges[i];
+    const loom_cfg_edge_info_t* rhs = &fresh->edges[i];
+    if (lhs->terminator != rhs->terminator ||
+        lhs->source_block_index != rhs->source_block_index ||
+        lhs->target_block_index != rhs->target_block_index ||
+        lhs->successor_index != rhs->successor_index ||
+        lhs->selector_value_id != rhs->selector_value_id ||
+        retained->successor_indices[i] != fresh->successor_indices[i] ||
+        retained->successor_edge_indices[i] !=
+            fresh->successor_edge_indices[i] ||
+        retained->predecessor_indices[i] != fresh->predecessor_indices[i] ||
+        retained->predecessor_edge_indices[i] !=
+            fresh->predecessor_edge_indices[i]) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "retained CFG edge %zu differs from fresh computation", i);
+    }
+  }
+  for (iree_host_size_t i = 0;
+       i < fresh->reverse_postorder.count && iree_status_is_ok(status); ++i) {
+    if (retained->reverse_postorder.values[i] !=
+        fresh->reverse_postorder.values[i]) {
+      status = iree_make_status(
+          IREE_STATUS_FAILED_PRECONDITION,
+          "retained CFG traversal differs from fresh computation at %zu", i);
+    }
+  }
+  return status;
+}
+
 // Runs after the preceding pass has destroyed its invocation scratch. Compare
 // semantic payloads, not table-local extension IDs, against an independent
-// solve of every live value in the same scope.
+// solve of every live value and CFG snapshot in the same scope.
 static iree_status_t loom_test_compare_value_facts(
     loom_pass_t* pass, loom_module_t* module,
     loom_pass_value_fact_scope_t scope,
@@ -178,8 +255,10 @@ static iree_status_t loom_test_compare_value_facts(
   loom_value_fact_table_t* fresh_facts = NULL;
   iree_status_t status = loom_pass_value_fact_owner_acquire(
       &fresh_owner, module, scope, &fresh_facts);
-  loom_value_fact_scope_iterator_t iterator;
-  loom_value_fact_table_scope_begin(fresh_facts, &iterator);
+  loom_value_fact_scope_iterator_t iterator = {0};
+  if (iree_status_is_ok(status)) {
+    loom_value_fact_table_scope_begin(fresh_facts, &iterator);
+  }
   loom_value_id_t value_id;
   while (iree_status_is_ok(status) &&
          (value_id = loom_value_fact_scope_next(&iterator)) !=
@@ -193,6 +272,18 @@ static iree_status_t loom_test_compare_value_facts(
           "retained facts for value %u differ from fresh computation",
           value_id);
     }
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_value_fact_table_enumerate_cfg_graphs(
+        fresh_facts, (loom_value_fact_cfg_graph_callback_t){
+                         .fn = loom_test_compare_value_fact_cfg,
+                         .user_data = (void*)retained_facts});
+  }
+  if (iree_status_is_ok(status) &&
+      retained_facts->regions.cfg_count != fresh_facts->regions.cfg_count) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "retained CFG snapshot count differs from fresh computation");
   }
   loom_pass_value_fact_owner_deinitialize(&fresh_owner);
   return status;
