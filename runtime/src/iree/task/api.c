@@ -247,7 +247,8 @@ static bool iree_task_topology_parse_favor_preset(
 }
 
 iree_status_t iree_task_topology_initialize_from_flags(
-    iree_task_topology_node_id_t node_id, iree_task_topology_t* out_topology) {
+    iree_task_topology_node_id_t node_id, iree_allocator_t host_allocator,
+    iree_task_topology_t* out_topology) {
   IREE_ASSERT_ARGUMENT(out_topology);
   iree_task_topology_initialize(out_topology);
 
@@ -277,7 +278,8 @@ iree_status_t iree_task_topology_initialize_from_flags(
 
     return iree_task_topology_initialize_from_physical_cores(
         node_id, performance_level, distribution,
-        FLAG_task_topology_max_group_count, (iree_bitmap_t){0}, out_topology);
+        FLAG_task_topology_max_group_count, (iree_bitmap_t){0}, host_allocator,
+        out_topology);
   } else {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -353,7 +355,8 @@ static void iree_task_topology_print(iree_host_size_t topology_id,
   }
 }
 
-iree_status_t iree_task_topologies_print_from_flags(void) {
+iree_status_t iree_task_topologies_print_from_flags(
+    iree_allocator_t host_allocator) {
   const iree_flag_string_list_t cpu_ids_list =
       FLAG_task_topology_cpu_ids_list();
   if (cpu_ids_list.count == 0) {
@@ -374,8 +377,8 @@ iree_status_t iree_task_topologies_print_from_flags(void) {
       node_base_id += node_offset + 1;
       node_mask_bits = iree_shr(node_mask_bits, node_offset + 1);
       iree_task_topology_t topology;
-      IREE_RETURN_IF_ERROR(
-          iree_task_topology_initialize_from_flags(node_id, &topology));
+      IREE_RETURN_IF_ERROR(iree_task_topology_initialize_from_flags(
+          node_id, host_allocator, &topology));
       // Skip topologies with no worker groups.
       if (topology.group_count > 0) {
         iree_task_topology_print(topology_index++, &topology);
@@ -470,7 +473,8 @@ iree_status_t iree_task_executors_create_from_flags(
 
       // Query topology for the node this executor is pinned to.
       iree_task_topology_t topology;
-      status = iree_task_topology_initialize_from_flags(node_id, &topology);
+      status = iree_task_topology_initialize_from_flags(node_id, host_allocator,
+                                                        &topology);
       if (!iree_status_is_ok(status)) {
         break;
       }

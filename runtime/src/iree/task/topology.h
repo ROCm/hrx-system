@@ -245,12 +245,14 @@ typedef enum iree_task_topology_distribution_e {
 // With a zero bit_count Linux captures the current thread's effective affinity;
 // other platforms retain their default selection policy. Platforms without hard
 // CPU placement reject an explicit mask.
+// |host_allocator| supplies temporary affinity-query storage released before
+// returning; the resulting topology retains no allocator-owned storage.
 iree_status_t iree_task_topology_initialize_from_physical_cores(
     iree_task_topology_node_id_t node_id,
     iree_task_topology_performance_level_t performance_level,
     iree_task_topology_distribution_t distribution,
     iree_host_size_t max_core_count, iree_bitmap_t processor_mask,
-    iree_task_topology_t* out_topology);
+    iree_allocator_t host_allocator, iree_task_topology_t* out_topology);
 
 #ifdef __cplusplus
 }  // extern "C"

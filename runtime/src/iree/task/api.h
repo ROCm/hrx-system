@@ -26,13 +26,15 @@ iree_status_t iree_task_executor_options_initialize_from_flags(
 
 // Initializes |out_topology| from the command line flags.
 // Depending on the mode flags |node_id| will be used to pin the topology to a
-// specific NUMA node.
+// specific NUMA node. Temporary query storage uses |host_allocator|.
 iree_status_t iree_task_topology_initialize_from_flags(
-    iree_task_topology_node_id_t node_id, iree_task_topology_t* out_topology);
+    iree_task_topology_node_id_t node_id, iree_allocator_t host_allocator,
+    iree_task_topology_t* out_topology);
 
 // Prints the task topologies selected by the current command line flags to
 // stdout.
-iree_status_t iree_task_topologies_print_from_flags(void);
+iree_status_t iree_task_topologies_print_from_flags(
+    iree_allocator_t host_allocator);
 
 //===----------------------------------------------------------------------===//
 // Task system factory functions

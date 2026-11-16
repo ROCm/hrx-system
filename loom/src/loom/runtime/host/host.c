@@ -209,7 +209,7 @@ iree_status_t loom_runtime_host_create(
         IREE_TASK_TOPOLOGY_NODE_ID_ANY,
         IREE_TASK_TOPOLOGY_PERFORMANCE_LEVEL_ANY,
         IREE_TASK_TOPOLOGY_DISTRIBUTION_SCATTER, worker_count, processor_mask,
-        &topology);
+        host_allocator, &topology);
   }
   if (iree_status_is_ok(status)) {
     iree_task_executor_options_t options;

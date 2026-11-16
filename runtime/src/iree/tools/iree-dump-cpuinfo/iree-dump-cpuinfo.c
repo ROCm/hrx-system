@@ -29,7 +29,8 @@ static void iree_dump_cpuinfo_print_cpu_features(void) {
 }
 
 int main(int argc, char* argv[]) {
-  iree_cpu_initialize(iree_allocator_system());
+  iree_allocator_t host_allocator = iree_allocator_system();
+  iree_cpu_initialize(host_allocator);
 
   iree_flags_set_usage(
       "iree-dump-cpuinfo",
@@ -38,7 +39,7 @@ int main(int argc, char* argv[]) {
 
   iree_status_t status = iree_ok_status();
   if (FLAG_dump_task_topologies) {
-    status = iree_task_topologies_print_from_flags();
+    status = iree_task_topologies_print_from_flags(host_allocator);
   } else {
     iree_dump_cpuinfo_print_cpu_features();
   }

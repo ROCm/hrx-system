@@ -100,7 +100,7 @@ loomc_status_t loomc_task_pool_allocate(
   iree_status_t status = iree_task_topology_initialize_from_physical_cores(
       IREE_TASK_TOPOLOGY_NODE_ID_ANY, IREE_TASK_TOPOLOGY_PERFORMANCE_LEVEL_ANY,
       IREE_TASK_TOPOLOGY_DISTRIBUTION_SCATTER, max_worker_count,
-      (iree_bitmap_t){0}, &topology);
+      (iree_bitmap_t){0}, iree_allocator_from_loomc(allocator), &topology);
 
   iree_task_executor_t* executor = NULL;
   if (iree_status_is_ok(status)) {

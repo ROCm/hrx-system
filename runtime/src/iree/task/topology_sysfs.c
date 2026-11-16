@@ -784,7 +784,7 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
     iree_task_topology_performance_level_t performance_level,
     iree_task_topology_distribution_t distribution,
     iree_host_size_t max_core_count, iree_bitmap_t processor_mask,
-    iree_task_topology_t* out_topology) {
+    iree_allocator_t host_allocator, iree_task_topology_t* out_topology) {
   iree_task_topology_initialize(out_topology);
   if (processor_mask.bit_count && !processor_mask.words) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -792,12 +792,12 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
   }
   iree_bitmap_t captured_mask = {0};
   if (!processor_mask.bit_count) {
-    IREE_RETURN_IF_ERROR(iree_thread_affinity_query_current(
-        iree_allocator_system(), &captured_mask));
+    IREE_RETURN_IF_ERROR(
+        iree_thread_affinity_query_current(host_allocator, &captured_mask));
     processor_mask = captured_mask;
   }
   if (iree_bitmap_none_set(processor_mask)) {
-    iree_allocator_free(iree_allocator_system(), captured_mask.words);
+    iree_allocator_free(host_allocator, captured_mask.words);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "processor budget contains no CPUs");
   }
@@ -815,7 +815,7 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
       out_topology->groups[0].ideal_thread_affinity.id_assigned = 1;
       out_topology->groups[0].ideal_thread_affinity.id = processor;
     }
-    iree_allocator_free(iree_allocator_system(), captured_mask.words);
+    iree_allocator_free(host_allocator, captured_mask.words);
     return iree_ok_status();
   }
 
@@ -826,7 +826,7 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
   const iree_host_size_t available_cpu_count =
       iree_bitmap_count(processor_mask);
   if (!available_cpu_count) {
-    iree_allocator_free(iree_allocator_system(), captured_mask.words);
+    iree_allocator_free(host_allocator, captured_mask.words);
     return iree_make_status(
         IREE_STATUS_UNAVAILABLE,
         "processor budget contains no CPUs in the topology");
@@ -1019,7 +1019,7 @@ iree_status_t iree_task_topology_initialize_from_physical_cores(
                               "no physical cores satisfy the processor budget "
                               "and topology filters");
   }
-  iree_allocator_free(iree_allocator_system(), captured_mask.words);
+  iree_allocator_free(host_allocator, captured_mask.words);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

@@ -149,10 +149,47 @@ TEST(TopologyTest, FromPhysicalCores) {
   iree_task_topology_initialize(&topology);
   IREE_ASSERT_OK(iree_task_topology_initialize_from_physical_cores(
       IREE_TASK_TOPOLOGY_NODE_ID_ANY, IREE_TASK_TOPOLOGY_PERFORMANCE_LEVEL_ANY,
-      IREE_TASK_TOPOLOGY_DISTRIBUTION_SCATTER, kMaxGroupCount, {}, &topology));
+      IREE_TASK_TOPOLOGY_DISTRIBUTION_SCATTER, kMaxGroupCount, {},
+      iree_allocator_system(), &topology));
   EnsureTopologyValid(kMaxGroupCount, &topology);
   iree_task_topology_deinitialize(&topology);
 }
+
+#if defined(IREE_PLATFORM_LINUX) && !defined(IREE_PLATFORM_WASM)
+TEST(TopologyTest, PhysicalCoreCaptureUsesCallerAllocator) {
+  bool allocation_requested = false;
+  const iree_allocator_t allocator = {
+      &allocation_requested, [](void* self, iree_allocator_command_t command,
+                                const void* params, void** inout_pointer) {
+        *static_cast<bool*>(self) = true;
+        return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+      }};
+  iree_task_topology_t topology;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_task_topology_initialize_from_physical_cores(
+                            IREE_TASK_TOPOLOGY_NODE_ID_ANY,
+                            IREE_TASK_TOPOLOGY_PERFORMANCE_LEVEL_ANY,
+                            IREE_TASK_TOPOLOGY_DISTRIBUTION_SCATTER, 4, {},
+                            allocator, &topology));
+  EXPECT_TRUE(allocation_requested);
+  EXPECT_EQ(topology.group_count, 0u);
+}
+
+TEST(TopologyTest, PhysicalCoreExplicitBudgetDoesNotAllocate) {
+  iree_bitmap_t budget = {};
+  IREE_ASSERT_OK(
+      iree_thread_affinity_query_current(iree_allocator_system(), &budget));
+  iree_task_topology_t topology;
+  iree_status_t status = iree_task_topology_initialize_from_physical_cores(
+      IREE_TASK_TOPOLOGY_NODE_ID_ANY, IREE_TASK_TOPOLOGY_PERFORMANCE_LEVEL_ANY,
+      IREE_TASK_TOPOLOGY_DISTRIBUTION_SCATTER, 4, budget, iree_allocator_null(),
+      &topology);
+  iree_allocator_free(iree_allocator_system(), budget.words);
+  IREE_ASSERT_OK(status);
+  EnsureTopologyValid(4, &topology);
+  iree_task_topology_deinitialize(&topology);
+}
+#endif  // IREE_PLATFORM_LINUX && !IREE_PLATFORM_WASM
 
 #if defined(IREE_PLATFORM_WINDOWS)
 TEST(TopologyTest, PhysicalCoreBudgetUsesNativeGroupAndProcessor) {
@@ -166,7 +203,8 @@ TEST(TopologyTest, PhysicalCoreBudgetUsesNativeGroupAndProcessor) {
   iree_task_topology_t topology;
   IREE_ASSERT_OK(iree_task_topology_initialize_from_physical_cores(
       IREE_TASK_TOPOLOGY_NODE_ID_ANY, IREE_TASK_TOPOLOGY_PERFORMANCE_LEVEL_ANY,
-      IREE_TASK_TOPOLOGY_DISTRIBUTION_SCATTER, 4, budget, &topology));
+      IREE_TASK_TOPOLOGY_DISTRIBUTION_SCATTER, 4, budget,
+      iree_allocator_system(), &topology));
   ASSERT_EQ(topology.group_count, 1u);
   const auto& affinity = topology.groups[0].ideal_thread_affinity;
   EXPECT_TRUE(affinity.id_assigned);
