@@ -430,8 +430,7 @@ bool loom_serve_recognition_stream_service_is_pending(
 }
 
 static iree_status_t loom_serve_recognition_admit(
-    loom_serve_recognition_stream_service_t* service, bool shared_activity,
-    bool* progress) {
+    loom_serve_recognition_stream_service_t* service, bool* progress) {
   loom_serve_recognition_stream_t* row = service->admission;
   loom_runtime_residency_admission_t admission;
   loom_runtime_execution_frontier_t frontier;
@@ -458,7 +457,6 @@ static iree_status_t loom_serve_recognition_admit(
     return iree_ok_status();
   }
   if (admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY &&
-      !shared_activity &&
       !loom_serve_recognition_stream_service_is_active(service)) {
     service->generator.discard(service->generator.self, row->invocation);
     row->invocation = NULL;
@@ -574,11 +572,9 @@ static iree_status_t loom_serve_recognition_collect(
 }
 
 static iree_status_t loom_serve_recognition_schedule(
-    loom_serve_recognition_stream_service_t* service, bool shared_activity,
-    bool* progress) {
+    loom_serve_recognition_stream_service_t* service, bool* progress) {
   if (service->admission) {
-    IREE_RETURN_IF_ERROR(
-        loom_serve_recognition_admit(service, shared_activity, progress));
+    IREE_RETURN_IF_ERROR(loom_serve_recognition_admit(service, progress));
     if (service->phase != RECOGNITION_PHASE_IDLE) {
       return iree_ok_status();
     }
@@ -628,7 +624,7 @@ static iree_status_t loom_serve_recognition_schedule(
 
 iree_status_t loom_serve_recognition_stream_service_advance(
     loom_serve_recognition_stream_service_t* service, bool stopping,
-    bool shared_activity, bool* out_progress) {
+    bool* out_progress) {
   *out_progress = false;
   if (stopping && !service->stopping) {
     service->stopping = true;
@@ -645,8 +641,7 @@ iree_status_t loom_serve_recognition_stream_service_advance(
     // Publication ends this bounded turn before the next source CPU operation.
     if (iree_status_is_ok(status) && !service->stopping && !*out_progress &&
         service->phase == RECOGNITION_PHASE_IDLE) {
-      status = loom_serve_recognition_schedule(service, shared_activity,
-                                               out_progress);
+      status = loom_serve_recognition_schedule(service, out_progress);
     }
   }
   if (!iree_status_is_ok(status)) {

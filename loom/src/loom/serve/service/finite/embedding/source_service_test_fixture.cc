@@ -86,12 +86,9 @@ iree_status_t loom_serve_test_embedding_model_lifecycle_t::Drain(
   }
   bool pending = loom_runtime_workspace_is_pending(self->workspace);
   if (self->service) {
-    const auto flags =
-        self->complete ? 0 : LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY;
     self->status = iree_status_join(
-        self->status,
-        self->service->runtime.vtable->advance(self->service->runtime.self,
-                                               flags, &result->did_work));
+        self->status, self->service->runtime.vtable->advance(
+                          self->service->runtime.self, 0, &result->did_work));
     pending |=
         self->service->runtime.vtable->is_pending(self->service->runtime.self);
   }
@@ -237,8 +234,6 @@ void SourceEmbeddingServiceTest::CreateService(
       loom_service_embedding_protocol(), IREE_SV("fixture"), 16, 16,
       heartbeat_interval, nullptr, host_allocator_, &service_));
   interface_ = loom_serve_finite_http_interface(service_);
-  EXPECT_EQ(interface_.runtime.capacity_domain,
-            loom_runtime_pool_residency_cache(storage_owner_));
   const loom_runtime_wake_callback_t observer = {
       [](void* self) {
         auto* test = static_cast<SourceEmbeddingServiceTest*>(self);

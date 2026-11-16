@@ -707,7 +707,6 @@ static void loom_serve_image_encode_next(loom_serve_image_service_t* service) {
 }
 
 static void loom_serve_image_prepared(loom_serve_image_service_t* service,
-                                      loom_runtime_service_flags_t flags,
                                       bool* progress) {
   if (service->stopping || !loom_serve_image_has_peer(service)) {
     service->generator.discard_batch(service->generator.self);
@@ -726,10 +725,7 @@ static void loom_serve_image_prepared(loom_serve_image_service_t* service,
   }
   if (iree_status_is_ok(service->status) &&
       admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY) {
-    if (iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY)) {
-      return;
-    }
-    // No accepted producer can release capacity; waiting on queued peers
+    // No eligible release can satisfy admission; waiting on queued peers
     // would deadlock mutually inadmissible requests.
     service->generator.discard_batch(service->generator.self);
     loom_serve_image_reject_cohort(
@@ -1147,7 +1143,7 @@ static iree_status_t loom_serve_image_advance(
     }
   }
   if (service->phase == IMAGE_PHASE_WAITING) {
-    loom_serve_image_prepared(service, flags, out_progress);
+    loom_serve_image_prepared(service, out_progress);
   } else if (service->phase == IMAGE_PHASE_READY) {
     service->status = loom_serve_image_service_submit(service);
     *out_progress = true;
@@ -1207,9 +1203,7 @@ loom_serve_service_t loom_serve_image_service_interface(
   static const iree_string_view_t output_modalities[] = {IREE_SVL("image")};
   return (loom_serve_service_t){
       .name = service->options.name,
-      .runtime = {.self = service,
-                  .vtable = &vtable,
-                  .capacity_domain = service->generator.capacity_domain},
+      .runtime = {.self = service, .vtable = &vtable},
       .accept = loom_serve_image_accept,
       .tokenizer = service->generator.tokenizer,
       .kind = LOOM_SERVICE_KIND_IMAGE,

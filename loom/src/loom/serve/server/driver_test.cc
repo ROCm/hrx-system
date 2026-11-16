@@ -17,7 +17,7 @@ namespace {
 
 // Controlled service dependencies, not a replacement for the production driver.
 // Real model/cancellation paths also use this driver in the decision and HTTP
-// suites; these small dependencies make traversal and capacity facts exact.
+// suites; these dependencies make traversal and lifetime transitions exact.
 struct Service {
   // Stable slot ordinal used to observe traversal.
   size_t index = 0;
@@ -31,13 +31,10 @@ struct Service {
   bool pending = false;
   // Accepted queue/execution/delivery ownership, excluding maintenance.
   bool requests = false;
-  // Work that can release shared physical capacity.
-  bool active = false;
   // Terminal dependency failure published on its next turn.
   bool fail = false;
 
-  loom_serve_service_t Interface(iree_string_view_t name,
-                                 const void* capacity_domain) {
+  loom_serve_service_t Interface(iree_string_view_t name) {
     static const loom_runtime_service_vtable_t vtable = {
         .set_observer =
             [](void* self, loom_runtime_wake_callback_t value) {
@@ -47,8 +44,7 @@ struct Service {
             [](void* self) { return static_cast<Service*>(self)->requests; },
         .is_pending =
             [](void* self) { return static_cast<Service*>(self)->pending; },
-        .is_active =
-            [](void* self) { return static_cast<Service*>(self)->active; },
+        .is_active = [](void*) { return false; },
         .advance = [](void* self, loom_runtime_service_flags_t flags,
                       bool* out_progress) -> iree_status_t {
           auto& service = *static_cast<Service*>(self);
@@ -73,7 +69,6 @@ struct Service {
             {
                 .self = this,
                 .vtable = &vtable,
-                .capacity_domain = capacity_domain,
             },
     };
   }
@@ -88,8 +83,7 @@ class DriverTest : public ::testing::Test {
     for (size_t i = 0; i < services_.size(); ++i) {
       services_[i].index = i;
       services_[i].visits = &visits_;
-      interfaces[i] = services_[i].Interface(
-          names[i], i < 2 ? &first_domain_ : &second_domain_);
+      interfaces[i] = services_[i].Interface(names[i]);
     }
     loom_serve_registry_t* registry = nullptr;
     IREE_ASSERT_OK(
@@ -110,10 +104,6 @@ class DriverTest : public ::testing::Test {
   std::array<Service, 3> services_;
   // Service visits have even ordinals; pre-retirement observations are odd.
   std::vector<size_t> visits_;
-  // Distinct opaque capacity identities; no physical pool is required here.
-  int first_domain_ = 0;
-  // Independent capacity owner for the third service.
-  int second_domain_ = 0;
 };
 
 TEST_F(DriverTest, RotatesAcrossVacantSlotsAndObservesEachTurn) {
@@ -142,26 +132,6 @@ TEST_F(DriverTest, RotatesAcrossVacantSlotsAndObservesEachTurn) {
     IREE_EXPECT_OK(iree_status_clone(driver_.runtime.status));
   }
   EXPECT_EQ(driver_.runtime.cursor, 0u);
-}
-
-TEST_F(DriverTest, CapacityWaitingRequiresActivityInTheSameNonnullDomain) {
-  services_[1].pending = true;
-  EXPECT_EQ(loom_serve_driver_shared_activity(&driver_, 0), 0u);
-  services_[1].active = true;
-  EXPECT_EQ(loom_serve_driver_shared_activity(&driver_, 0),
-            LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY);
-  EXPECT_EQ(loom_serve_driver_shared_activity(&driver_, 1), 0u);
-  EXPECT_EQ(loom_serve_driver_shared_activity(&driver_, 2), 0u);
-  auto* first = loom_serve_registry_at(driver_.registry, 0);
-  auto* second = loom_serve_registry_at(driver_.registry, 1);
-  first->service.runtime.capacity_domain = nullptr;
-  second->service.runtime.capacity_domain = nullptr;
-  // These controlled dependencies change their publication together; actual
-  // model publication updates the capability at its owning transition.
-  driver_.runtime.services[0].capacity_domain = nullptr;
-  driver_.runtime.services[1].capacity_domain = nullptr;
-  EXPECT_EQ(loom_serve_driver_shared_activity(&driver_, 0), 0u);
-  services_[1].pending = false;
 }
 
 TEST_F(DriverTest, ApplicationFailureStopsPeersButRetainsPendingOwnership) {
@@ -287,7 +257,7 @@ TEST(RegistrationOwnershipTest, DrainDoesNotRequireAnObservationSnapshot) {
                           {};
                       *out_complete = true;
                       *out_service = static_cast<Service*>(self)->Interface(
-                          IREE_SV("managed"), nullptr);
+                          IREE_SV("managed"));
                       out_service->telemetry.counters = &counters;
                       out_service->telemetry.latency = &latency;
                       return iree_ok_status();

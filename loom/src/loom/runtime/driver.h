@@ -45,11 +45,6 @@ void loom_runtime_driver_initialize(iree_host_size_t capacity,
 void loom_runtime_driver_set_observer(loom_runtime_driver_t* driver,
                                       loom_runtime_wake_callback_t observer);
 
-// Another occupied slot in the same nonnull capacity domain owns activity that
-// can release capacity. Queued requests alone never justify waiting on a peer.
-loom_runtime_service_flags_t loom_runtime_driver_shared_activity(
-    const loom_runtime_driver_t* driver, iree_host_size_t selected);
-
 // Advances every occupied slot once in rotating order, including after failure.
 // A returned failure latches stopping/status; accepted work still drains.
 void loom_runtime_driver_advance(loom_runtime_driver_t* driver,

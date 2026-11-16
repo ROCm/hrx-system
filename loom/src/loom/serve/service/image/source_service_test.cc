@@ -113,8 +113,6 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     http_.Start([this] {
       const loom_serve_image_generator_t generator =
           loom_serve_image_model_generator(model_);
-      EXPECT_EQ(generator.capacity_domain,
-                loom_runtime_pool_residency_cache(storage_owner_));
       const loom_serve_image_service_options_t options = {
           .name = loom_serve_image_model_name(model_),
           .width = kWidth,

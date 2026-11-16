@@ -52,7 +52,6 @@ static void loom_serve_registry_publish_service(loom_serve_registry_t* registry,
   registry->services[index] = (loom_runtime_service_t){
       .self = model,
       .vtable = &loom_serve_registry_service_vtable,
-      .capacity_domain = model->service.runtime.capacity_domain,
   };
 }
 
@@ -681,12 +680,15 @@ static void loom_serve_registry_release_service(
   model->latency = *model->service.telemetry.latency;
   model->service = (loom_serve_service_t){
       .name = model->service.name,
-      .runtime = {.capacity_domain = model->service.runtime.capacity_domain},
       .kind = model->service.kind,
       .endpoint = model->service.endpoint,
-      .telemetry = {.stream = model->stream,
-                    .counters = &model->counters,
-                    .latency = &model->latency}};
+      .telemetry =
+          {
+              .stream = model->stream,
+              .counters = &model->counters,
+              .latency = &model->latency,
+          },
+  };
 }
 
 static void loom_serve_registry_record_error(
@@ -823,8 +825,6 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
           }
         }
         model->service = service;
-        registry->services[index].capacity_domain =
-            service.runtime.capacity_domain;
         service.runtime.vtable->set_observer(service.runtime.self, observer);
         loom_serve_registry_set_phase(model, LOOM_SERVE_REGISTRATION_READY);
       } else {
@@ -1000,8 +1000,8 @@ static bool loom_serve_registry_service_is_pending(void* self) {
 
 static bool loom_serve_registry_service_is_active(void* self) {
   const loom_serve_registered_model_t* model = self;
-  // Retirement can release backing after model callbacks are gone. A failed
-  // release is quiescent and cannot supply capacity to a waiting peer.
+  // Retirement owns resources after model callbacks are gone. Failed release
+  // is quiescent and requires an explicit management retry.
   return model->phase == LOOM_SERVE_REGISTRATION_RETIRING ||
          (model->phase == LOOM_SERVE_REGISTRATION_READY &&
           (model->service.runtime.vtable->is_active(

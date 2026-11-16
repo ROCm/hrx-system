@@ -140,7 +140,7 @@ void loom_serve_recognition_stream_close(
 // readiness notification is not actual retirement.
 iree_status_t loom_serve_recognition_stream_service_advance(
     loom_serve_recognition_stream_service_t* service, bool stopping,
-    bool shared_activity, bool* out_progress);
+    bool* out_progress);
 
 // Accepted CPU/device callbacks still borrow service storage. Live streams
 // alone are not pending callbacks; active includes their resident source state.

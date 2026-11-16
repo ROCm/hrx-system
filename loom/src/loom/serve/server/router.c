@@ -966,9 +966,8 @@ static iree_status_t loom_serve_router_admit(
   }
   const loom_serve_service_t* service =
       &loom_serve_router_model_at(router, service_index)->service;
-  iree_status_t status = service->accept(
-      service->runtime.self, connection, request,
-      loom_serve_driver_shared_activity(&router->driver, service_index));
+  iree_status_t status =
+      service->accept(service->runtime.self, connection, request, 0);
   return iree_status_is_ok(status)
              ? status
              : loom_serve_registry_fail(router->driver.registry, service_index,

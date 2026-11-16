@@ -863,9 +863,7 @@ iree_status_t loom_serve_text_media_projector_advance(
         status = loom_serve_text_media_projector_submit(projector);
         *out_progress = true;
       } else if (iree_status_is_ok(status) &&
-                 admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY &&
-                 !iree_any_bit_set(flags,
-                                   LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY)) {
+                 admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY) {
         for (iree_host_size_t i = 0; i < projector->cohort_count; ++i) {
           loom_serve_text_media_job_t* job = projector->cohort[i];
           if (job->request) {

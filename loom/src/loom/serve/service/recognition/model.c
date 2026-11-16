@@ -1700,7 +1700,6 @@ loom_serve_recognition_generator_t loom_serve_recognition_model_generator(
       .release_batch = loom_serve_recognition_generator_release_batch,
       .release = loom_serve_recognition_generator_release,
       .tokenizer = loom_runtime_tokenizer_value(model->tokenizer),
-      .capacity_domain = loom_runtime_residency_cache(model->residency),
       .parameter_activity =
           loom_serve_recognition_generator_parameter_activity};
 }

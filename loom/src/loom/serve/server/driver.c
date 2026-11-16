@@ -21,11 +21,6 @@ void loom_serve_driver_set_observer(loom_serve_driver_t* driver,
   loom_runtime_driver_set_observer(&driver->runtime, observer);
 }
 
-loom_runtime_service_flags_t loom_serve_driver_shared_activity(
-    const loom_serve_driver_t* driver, iree_host_size_t selected) {
-  return loom_runtime_driver_shared_activity(&driver->runtime, selected);
-}
-
 void loom_serve_driver_advance(loom_serve_driver_t* driver,
                                loom_runtime_wake_callback_t wake,
                                loom_serve_registry_observer_t observer,
