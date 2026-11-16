@@ -75,6 +75,8 @@ typedef struct loom_x86_function_t {
   iree_host_size_t instruction_count;
   // Number of native symbol relocation rows written by this function.
   iree_host_size_t symbol_fixup_count;
+  // Additional branches from fallible calls to the common failure exit.
+  iree_host_size_t failure_branch_count;
   // First instruction of each shared CFG block and the common epilogue. Entry
   // transport precedes every block and runs only when the function is invoked.
   iree_host_size_t* block_starts;

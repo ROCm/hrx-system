@@ -19,6 +19,7 @@
 #include "loom/target/emit/native/x86/transport.h"
 
 enum {
+  LOOM_X86_STATUS_RESULT_POINTER_REGISTER = 7,
   LOOM_X86_INDIRECT_RESULT_POINTER_REGISTER = 10,
   LOOM_X86_GPR_TRANSPORT_SCRATCH_REGISTER = 11,
   LOOM_X86_VECTOR_TRANSPORT_SCRATCH_REGISTER = 8,
@@ -519,10 +520,16 @@ static void loom_x86_function_append_abi_result_transport(
     uint32_t register_location, uint8_t base_register,
     loom_x86_function_builder_t* builder) {
   loom_x86_transport_instruction_t instruction;
+  // Caller loads address the outgoing area through RSP. Callee stores use
+  // the hidden pointer, which already addresses the start of the result record.
+  const uint32_t offset =
+      abi->results[result_index].stack_offset -
+      (abi->returns_status && transfer == LOOM_X86_STORAGE_TRANSFER_STORE
+           ? abi->result_storage_offset
+           : 0);
   const bool selected = loom_x86_transport_select_abi_storage(
       transfer, descriptor_reg_class_id, abi->results[result_index].byte_length,
-      register_location, base_register,
-      (int32_t)abi->results[result_index].stack_offset, &instruction);
+      register_location, base_register, (int32_t)offset, &instruction);
   IREE_ASSERT_TRUE(selected);
   loom_x86_function_append_transport(builder->function, &instruction);
 }
@@ -700,10 +707,21 @@ static iree_status_t loom_x86_function_call(
     loom_x86_function_append_transport(function, &store);
   }
   if (callee_abi->has_indirect_results) {
-    IREE_RETURN_IF_ERROR(
-        loom_x86_function_move(builder, LOOM_X86_REGISTER_CLASS_GPR64,
-                               LOOM_X86_INDIRECT_RESULT_POINTER_REGISTER,
-                               LOOM_X86_REGISTER_CLASS_GPR64, 4));
+    if (callee_abi->returns_status) {
+      loom_x86_function_append(
+          function, LOOM_X86_ENCODING_FORM_ADDRESS_DISPLACEMENT,
+          0x8d | LOOM_X86_ENCODING_REX_W,
+          (loom_x86_encoding_operands_t){
+              .immediate = callee_abi->result_storage_offset,
+              .result = LOOM_X86_STATUS_RESULT_POINTER_REGISTER,
+              .inputs = {4}},
+          UINT32_MAX);
+    } else {
+      IREE_RETURN_IF_ERROR(
+          loom_x86_function_move(builder, LOOM_X86_REGISTER_CLASS_GPR64,
+                                 LOOM_X86_INDIRECT_RESULT_POINTER_REGISTER,
+                                 LOOM_X86_REGISTER_CLASS_GPR64, 4));
+    }
   }
   if (!callee_abi->has_upper_vector_register_argument) {
     builder->upper_vector_call_cleanup_indices
@@ -713,6 +731,15 @@ static iree_status_t loom_x86_function_call(
   loom_x86_function_append(function, LOOM_X86_ENCODING_FORM_CALL, 0,
                            (loom_x86_encoding_operands_t){0}, callee.symbol_id);
   ++function->symbol_fixup_count;
+  if (callee_abi->returns_status) {
+    // Result storage is undefined on failure. Branch before any result loads
+    // or allocation moves can overwrite the status in RAX.
+    loom_x86_function_append(function, LOOM_X86_ENCODING_FORM_BRANCH_NONZERO,
+                             LOOM_X86_ENCODING_REX_W,
+                             (loom_x86_encoding_operands_t){.inputs = {0}},
+                             function->block_count);
+    ++function->failure_branch_count;
+  }
   function->may_dirty_upper_vector_state |= callee_abi->has_upper_vector_result;
   for (uint16_t i = 0; i < callee_abi->call_contract.result_count; ++i) {
     const loom_low_allocation_abi_location_t* location =
@@ -1086,6 +1113,11 @@ static iree_status_t loom_x86_function_structural(
   }
   if (loom_low_return_isa(node->op)) {
     IREE_RETURN_IF_ERROR(loom_x86_function_return(frame, packet, builder));
+    if (builder->function_abi->returns_status) {
+      loom_x86_function_append(
+          function, LOOM_X86_ENCODING_FORM_ZERO_REGISTER, 0x31,
+          (loom_x86_encoding_operands_t){.result = 0}, UINT32_MAX);
+    }
     loom_x86_function_jump(function, function->block_count, block_index + 1);
     return iree_ok_status();
   }
@@ -1166,6 +1198,7 @@ iree_status_t loom_x86_function_prepare(
   iree_host_size_t normalization_count = 0;
   iree_host_size_t outgoing_count = 0;
   iree_host_size_t indirect_call_count = 0;
+  iree_host_size_t status_call_count = 0;
   iree_host_size_t indirect_call_result_instruction_count = 0;
   uint32_t outgoing_bytes = 0;
   uint32_t outgoing_alignment = schedule->call_node_count ? 16 : 0;
@@ -1177,6 +1210,17 @@ iree_status_t loom_x86_function_prepare(
     const loom_x86_function_abi_t* callee_abi = loom_x86_module_abi_lookup(
         module_abi, loom_low_func_call_callee(node->op));
     IREE_ASSERT_NE(callee_abi, NULL);
+    if (callee_abi->returns_status && !function_abi->returns_status) {
+      const loom_diagnostic_param_t params[] = {loom_param_string(
+          IREE_SV("an iree_status caller to propagate a fallible call"))};
+      return iree_diagnostic_emit(
+          emitter,
+          &(loom_diagnostic_emission_t){.op = node->op,
+                                        .error = LOOM_ERR_X86_004,
+                                        .params = params,
+                                        .param_count = IREE_ARRAYSIZE(params)});
+    }
+    status_call_count += callee_abi->returns_status;
     outgoing_bytes = iree_max(outgoing_bytes, callee_abi->call_storage_bytes);
     outgoing_alignment =
         iree_max(outgoing_alignment, callee_abi->call_storage_alignment);
@@ -1297,6 +1341,8 @@ iree_status_t loom_x86_function_prepare(
       schedule->scheduled_node_count + schedule->block_count +
       frame->allocation.move_count + 2u * outgoing_count +
       incoming_instruction_count + normalization_count + indirect_call_count +
+      status_call_count +
+      (function_abi->returns_status ? schedule->block_count : 0) +
       indirect_call_result_instruction_count +
       function_abi->has_indirect_results +
       2u * indirect_result_count * frame->allocation.exit_move_count;
@@ -1324,11 +1370,13 @@ iree_status_t loom_x86_function_prepare(
   // Invocation transport precedes block labels so a body backedge cannot
   // reload original ABI inputs. Its writes participate in frame preservation.
   if (function_abi->has_indirect_results) {
-    IREE_RETURN_IF_ERROR(
-        loom_x86_function_move(&builder, LOOM_X86_REGISTER_CLASS_GPR64,
-                               LOOM_X86_RETAINED_RESULT_POINTER_REGISTER,
-                               LOOM_X86_REGISTER_CLASS_GPR64,
-                               LOOM_X86_INDIRECT_RESULT_POINTER_REGISTER));
+    IREE_RETURN_IF_ERROR(loom_x86_function_move(
+        &builder, LOOM_X86_REGISTER_CLASS_GPR64,
+        LOOM_X86_RETAINED_RESULT_POINTER_REGISTER,
+        LOOM_X86_REGISTER_CLASS_GPR64,
+        function_abi->returns_status
+            ? LOOM_X86_STATUS_RESULT_POINTER_REGISTER
+            : LOOM_X86_INDIRECT_RESULT_POINTER_REGISTER));
   }
   loom_x86_function_normalize_arguments(frame, &builder);
   if (builder.storage_alignment > 16) {
@@ -1508,7 +1556,8 @@ iree_status_t loom_x86_function_write(const loom_x86_function_t* function,
       arena, function->block_count + 1, sizeof(*block_offsets),
       (void**)&block_offsets));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, 2 * function->block_count, sizeof(*fixups), (void**)&fixups));
+      arena, 2 * function->block_count + function->failure_branch_count,
+      sizeof(*fixups), (void**)&fixups));
   iree_status_t status = iree_ok_status();
   for (uint8_t reg = 0; reg < 16 && iree_status_is_ok(status); ++reg) {
     if (function->saved_registers & (1u << reg)) {

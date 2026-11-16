@@ -71,6 +71,13 @@ typedef struct loom_x86_call_abi_layout_t {
   bool is_exact_sysv;
 } loom_x86_call_abi_layout_t;
 
+// Returns whether explicit function ABI attributes select the status
+// convention. Absent attributes retain the target's ordinary SysV default.
+// Native artifact admission separately diagnoses unsupported convention
+// spellings.
+bool loom_x86_call_abi_returns_status(const loom_module_t* module,
+                                      loom_named_attr_slice_t abi_attrs);
+
 // Builds the canonical exact SysV layout consumed by native x86 emission.
 // Placement arrays correspond one-to-one with the physical semantic types and
 // only need to remain live for the duration of this call. The returned slice

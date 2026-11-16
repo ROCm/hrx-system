@@ -34,7 +34,7 @@ typedef struct loom_x86_abi_value_t {
 static_assert(sizeof(loom_x86_abi_value_t) == 8,
               "x86 ABI value rows must remain compact");
 
-// One immutable SysV classification retained for a function symbol.
+// One immutable native calling-convention plan retained for a function symbol.
 typedef struct loom_x86_function_abi_t {
   // Resolved representation and profile shared by classification and emission.
   loom_low_resolved_target_t target;
@@ -48,12 +48,17 @@ typedef struct loom_x86_function_abi_t {
   uint32_t stack_argument_bytes;
   // Bytes occupied by arguments and caller-owned result storage.
   uint32_t call_storage_bytes;
+  // Caller-RSP-relative start of the result record for status-returning calls.
+  uint32_t result_storage_offset;
   // Required caller-RSP alignment, or zero when no argument uses the stack.
   uint8_t stack_argument_alignment;
   // Required caller-RSP alignment for arguments and indirect results.
   uint8_t call_storage_alignment;
-  // True when module-internal results overflow their register banks.
+  // True for status results or module-internal register-result overflow.
   bool has_indirect_results;
+  // Platform result is iree_status_t; logical results use a hidden first
+  // pointer.
+  bool returns_status;
   // True when an argument retains live YMM/ZMM0-15 state through CALL.
   bool has_upper_vector_register_argument;
   // True when the result returns live YMM/ZMM0-15 state to the caller.
@@ -85,11 +90,14 @@ iree_status_t loom_x86_module_abi_initialize(
 // describe dispatch parameters rather than their fixed physical adapter and do
 // not override its carrier signature. |resolved_target| is the function's
 // resolved representation and prevents publishing unavailable register
-// classes. Unsupported user signatures return OK with |out_supported| false
-// and a borrowed diagnostic constraint. Allocated rows remain owned by |arena|.
+// classes. |returns_status| selects an IREE status result and a hidden first
+// pointer to the C-layout logical result record. It cannot be combined with
+// exact C source-signature projection. Unsupported user signatures return OK
+// with |out_supported| false and a borrowed diagnostic constraint. Allocated
+// rows remain owned by |arena|.
 iree_status_t loom_x86_function_abi_prepare(
     const loom_module_t* module, loom_func_like_t function,
-    const loom_low_resolved_target_t* resolved_target,
+    const loom_low_resolved_target_t* resolved_target, bool returns_status,
     iree_arena_allocator_t* arena, bool* out_supported,
     iree_string_view_t* out_constraint, loom_x86_function_abi_t* out_abi);
 

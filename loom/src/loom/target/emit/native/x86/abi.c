@@ -219,12 +219,13 @@ static iree_status_t loom_x86_abi_allocate_values(
 
 iree_status_t loom_x86_function_abi_prepare(
     const loom_module_t* module, loom_func_like_t function,
-    const loom_low_resolved_target_t* resolved_target,
+    const loom_low_resolved_target_t* resolved_target, bool returns_status,
     iree_arena_allocator_t* arena, bool* out_supported,
     iree_string_view_t* out_constraint, loom_x86_function_abi_t* out_abi) {
   *out_supported = false;
   *out_constraint = iree_string_view_empty();
-  *out_abi = (loom_x86_function_abi_t){.target = *resolved_target};
+  *out_abi = (loom_x86_function_abi_t){.target = *resolved_target,
+                                       .returns_status = returns_status};
   const loom_low_descriptor_set_t* descriptor_set =
       resolved_target->descriptor_set;
 
@@ -235,7 +236,13 @@ iree_status_t loom_x86_function_abi_prepare(
     return iree_ok_status();
   }
   const loom_func_type_data_t* signature = abi_layout.signature;
-  if (!abi_layout.is_exact_sysv && function.op->result_count > 1 &&
+  if (returns_status && abi_layout.is_exact_sysv) {
+    *out_constraint = IREE_SV(
+        "iree_status calls use logical signatures, not exact C ABI projection");
+    return iree_ok_status();
+  }
+  if (!returns_status && !abi_layout.is_exact_sysv &&
+      function.op->result_count > 1 &&
       (!loom_func_like_is_module_internal(function) ||
        function.op->region_count == 0)) {
     *out_constraint = IREE_SV(
@@ -392,7 +399,10 @@ iree_status_t loom_x86_function_abi_prepare(
     return iree_ok_status();
   }
 
-  uint16_t register_counts[2] = {0, 0};
+  // A status result occupies RAX. The first integer argument is a pointer to
+  // the ordinary result record when the logical function returns values.
+  uint16_t register_counts[2] = {
+      returns_status && function.op->result_count != 0 ? 1 : 0, 0};
   uint64_t stack_bytes = 0;
   for (uint16_t i = 0; i < argument_count; ++i) {
     const loom_type_t logical_type =
@@ -457,6 +467,10 @@ iree_status_t loom_x86_function_abi_prepare(
   out_abi->call_storage_bytes = (uint32_t)stack_bytes;
   out_abi->call_storage_alignment = out_abi->stack_argument_alignment;
 
+  // Status calls place every logical result in a C-layout record. The normal
+  // internal convention places only register overflow after stack arguments.
+  uint64_t result_bytes = returns_status ? 0 : stack_bytes;
+  uint32_t result_alignment = 1;
   uint16_t result_register_counts[2] = {0, 0};
   for (uint16_t i = 0; i < function.op->result_count; ++i) {
     const loom_type_t logical_type =
@@ -477,7 +491,7 @@ iree_status_t loom_x86_function_abi_prepare(
     };
     const uint16_t register_index =
         result_register_counts[classification.abi_class]++;
-    const uint16_t register_limit = 2;
+    const uint16_t register_limit = returns_status ? 0 : 2;
     if (register_index < register_limit) {
       const uint32_t location =
           classification.abi_class == LOOM_X86_CALL_ABI_CLASS_INTEGER
@@ -499,21 +513,37 @@ iree_status_t loom_x86_function_abi_prepare(
           classification.boundary_register_class, location);
       continue;
     }
-    const uint32_t alignment = iree_max(8u, value->byte_alignment);
-    stack_bytes = iree_host_align(stack_bytes, alignment);
-    if (stack_bytes > UINT32_MAX) {
+    const uint32_t alignment = returns_status
+                                   ? value->byte_alignment
+                                   : iree_max(8u, value->byte_alignment);
+    result_bytes = iree_host_align(result_bytes, alignment);
+    if (result_bytes > UINT32_MAX) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "x86 ABI call storage exceeds 32 bits");
     }
-    value->stack_offset = (uint32_t)stack_bytes;
-    stack_bytes += iree_host_align(value->byte_length, 8u);
+    value->stack_offset = (uint32_t)result_bytes;
+    result_bytes += returns_status ? value->byte_length
+                                   : iree_host_align(value->byte_length, 8u);
+    result_alignment = iree_max(result_alignment, alignment);
     out_abi->call_storage_alignment = (uint8_t)iree_max(
         out_abi->call_storage_alignment, iree_max(16u, alignment));
     out_abi->has_indirect_results = true;
   }
+  const uint64_t result_offset =
+      returns_status ? iree_host_align(stack_bytes, result_alignment) : 0;
+  stack_bytes =
+      result_offset + (returns_status
+                           ? iree_host_align(result_bytes, result_alignment)
+                           : result_bytes);
   if (stack_bytes > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "x86 ABI call storage exceeds 32 bits");
+  }
+  out_abi->result_storage_offset = (uint32_t)result_offset;
+  if (returns_status) {
+    for (uint16_t i = 0; i < function.op->result_count; ++i) {
+      out_abi->results[i].stack_offset += (uint32_t)result_offset;
+    }
   }
   out_abi->call_storage_bytes = (uint32_t)stack_bytes;
 

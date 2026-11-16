@@ -216,6 +216,7 @@ loom_cc_library(
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/x86:call_abi",
         "//loom/src/loom/tools/loom-check:execute",
         "//loom/src/loom/tools/loom-check/test:native_provider",
         "//loom/src/loom/tools/loom-check/test/low:native_emit",

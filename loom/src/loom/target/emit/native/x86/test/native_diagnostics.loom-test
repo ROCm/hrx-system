@@ -95,3 +95,22 @@ kernel.def export("read") @read() {
   view.store %value, %destination[0] : i32, view<1xi32>
   kernel.return
 }
+
+// ====
+
+// A platform C result cannot also propagate the implicit failure result.
+func.decl abi(object_function, {calling_convention = "iree_status"}) @fallible()
+
+func.def public @cannot_discard_failure() {
+  // ERROR@+1: X86/004 {constraint="an iree_status caller to propagate a fallible call"}
+  func.call @fallible() : ()
+  func.return
+}
+
+// ====
+
+// Exact platform C projection and the implicit status result are distinct ABIs.
+// ERROR@+1: TARGET/032 {op_constraint="iree_status calls use logical signatures, not exact C ABI projection"}
+low.func.def public target<x86.scalar.core> abi(object_function, {calling_convention = "iree_status"}) abi_layout({signature = (i64) -> (i64), sysv = {argument_offsets = [-1], argument_registers = [7], result_registers = [0], stack_alignment = 0, stack_bytes = 0}}) @conflicting_signature(%value: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  return %value
+}
