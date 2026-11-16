@@ -622,39 +622,44 @@ static void loom_aie2p_bundle_alignment_select_call_formats(
   for (iree_host_size_t packet_index = 0;
        packet_index < LOOM_AIE2P_CALL_ALIGNMENT_PACKET_COUNT; ++packet_index) {
     const loom_aie2p_call_alignment_packet_t* packet = &packets[packet_index];
-    for (iree_host_size_t added_byte_count = 0;
-         added_byte_count <= LOOM_AIE2P_CALL_ALIGNMENT_MAX_ADDED_BYTE_COUNT;
-         ++added_byte_count) {
-      const loom_aie2p_call_alignment_state_t* state =
-          &states[packet_index][added_byte_count];
-      if (!state->reachable) {
+    // Format legality depends on the packet, not on the path reaching it.
+    // Resolve each format once, then apply it to the reachable byte counts.
+    for (iree_host_size_t format_ordinal = 1; format_ordinal <= format_count;
+         ++format_ordinal) {
+      const loom_aie2p_bundle_format_id_t format =
+          (loom_aie2p_bundle_format_id_t)format_ordinal;
+      loom_aie2p_bundle_format_info_t format_info;
+      if (!loom_aie2p_bundle_alignment_call_format_accepts_packet(
+              format, packet, original_slots, &format_info)) {
         continue;
       }
-      for (iree_host_size_t format_ordinal = 1; format_ordinal <= format_count;
-           ++format_ordinal) {
-        const loom_aie2p_bundle_format_id_t format =
-            (loom_aie2p_bundle_format_id_t)format_ordinal;
-        loom_aie2p_bundle_format_info_t format_info;
-        if (!loom_aie2p_bundle_alignment_call_format_accepts_packet(
-                format, packet, original_slots, &format_info)) {
-          continue;
-        }
-        const uint8_t format_byte_length = format_info.bit_count / 8;
-        if (format_byte_length < packet->byte_length) {
+      const uint8_t format_byte_length = format_info.bit_count / 8;
+      if (format_byte_length < packet->byte_length) {
+        continue;
+      }
+      const iree_host_size_t format_added_byte_count =
+          format_byte_length - packet->byte_length;
+      for (iree_host_size_t added_byte_count = 0;
+           added_byte_count <= LOOM_AIE2P_CALL_ALIGNMENT_MAX_ADDED_BYTE_COUNT -
+                                   format_added_byte_count;
+           ++added_byte_count) {
+        const loom_aie2p_call_alignment_state_t* state =
+            &states[packet_index][added_byte_count];
+        if (!state->reachable) {
           continue;
         }
         const iree_host_size_t next_added_byte_count =
-            added_byte_count + format_byte_length - packet->byte_length;
-        if (next_added_byte_count >
-            LOOM_AIE2P_CALL_ALIGNMENT_MAX_ADDED_BYTE_COUNT) {
-          continue;
-        }
+            added_byte_count + format_added_byte_count;
         const uint8_t next_slot_record_count =
             state->slot_record_count + format_info.slot_count;
         loom_aie2p_call_alignment_state_t* next_state =
             &states[packet_index + 1][next_added_byte_count];
+        // Equal-cost paths prefer less earlier widening, then the first
+        // format ordinal. Keep this preference independent of traversal order.
         if (next_state->reachable &&
-            next_state->slot_record_count <= next_slot_record_count) {
+            (next_state->slot_record_count < next_slot_record_count ||
+             (next_state->slot_record_count == next_slot_record_count &&
+              next_state->previous_added_byte_count <= added_byte_count))) {
           continue;
         }
         *next_state = (loom_aie2p_call_alignment_state_t){
