@@ -147,21 +147,11 @@ static int loom_aie2p_program_object_compare_helpers(
   return 0;
 }
 
-typedef struct loom_aie2p_program_object_inputs_t {
-  // Detached functions in entry-then-helper order.
-  const loom_aie2p_leaf_contribution_t* const* contributions;
-  // Dense code groups, or NULL for one resident section.
-  const iree_host_size_t* groups;
-} loom_aie2p_program_object_inputs_t;
-
 static bool loom_aie2p_program_object_helper_less(
-    const loom_aie2p_program_object_inputs_t* inputs,
+    const loom_aie2p_leaf_contribution_t* const* contributions,
     const iree_host_size_t* lhs, const iree_host_size_t* rhs) {
-  if (inputs->groups && inputs->groups[*lhs] != inputs->groups[*rhs]) {
-    return inputs->groups[*lhs] < inputs->groups[*rhs];
-  }
   const int comparison = loom_aie2p_program_object_compare_helpers(
-      inputs->contributions[*lhs], inputs->contributions[*rhs]);
+      contributions[*lhs], contributions[*rhs]);
   // Equivalent bodies retain their first input as the canonical contribution,
   // independently of the sort's ordering of otherwise equal elements.
   return comparison != 0 ? comparison < 0 : *lhs < *rhs;
@@ -169,7 +159,7 @@ static bool loom_aie2p_program_object_helper_less(
 
 LOOM_DEFINE_ADAPTIVE_SORT_WITH_CONTEXT(
     loom_aie2p_program_object_sort_helpers, iree_host_size_t,
-    const loom_aie2p_program_object_inputs_t*,
+    const loom_aie2p_leaf_contribution_t* const*,
     loom_aie2p_program_object_helper_less)
 
 typedef struct loom_aie2p_program_object_placement_t {
@@ -316,25 +306,43 @@ static iree_status_t loom_aie2p_program_object_compose(
     helper_order[i] = i;
     functions[i] = (loom_aie2p_program_function_t){
         .contribution = contributions[i],
+        .equivalent_index = i,
         .canonical_index = i,
     };
   }
   // Sorting places equivalent helpers together without comparing every pair.
   // Only the index projection moves; physical layout retains input order.
-  const loom_aie2p_program_object_inputs_t inputs = {
-      .contributions = contributions,
-      .groups = function_groups,
-  };
-  loom_aie2p_program_object_sort_helpers(&inputs, helper_order + 1,
+  loom_aie2p_program_object_sort_helpers(contributions, helper_order + 1,
                                          contribution_count - 1);
   for (iree_host_size_t i = 2; i < contribution_count; ++i) {
     const iree_host_size_t current = helper_order[i];
     const iree_host_size_t previous = helper_order[i - 1];
-    if ((!function_groups ||
-         function_groups[current] == function_groups[previous]) &&
-        loom_aie2p_program_object_compare_helpers(
+    if (loom_aie2p_program_object_compare_helpers(
             contributions[current], contributions[previous]) == 0) {
-      functions[current].canonical_index = functions[previous].canonical_index;
+      functions[current].equivalent_index =
+          functions[previous].equivalent_index;
+      functions[current].canonical_index = functions[current].equivalent_index;
+    }
+  }
+  if (group_count > 1) {
+    iree_host_size_t* representatives = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(scratch_arena, group_count,
+                                                   sizeof(*representatives),
+                                                   (void**)&representatives));
+    memset(representatives, 0, group_count * sizeof(*representatives));
+    // Each equivalence class is contiguous and ordered by original index.
+    // A group's last representative either belongs to that class or starts
+    // its next physical body. Zero initially names the unique entry class.
+    for (iree_host_size_t i = 1; i < contribution_count; ++i) {
+      const iree_host_size_t current = helper_order[i];
+      const iree_host_size_t group = function_groups[current];
+      const iree_host_size_t previous = representatives[group];
+      functions[current].canonical_index =
+          functions[previous].equivalent_index ==
+                  functions[current].equivalent_index
+              ? previous
+              : current;
+      representatives[group] = functions[current].canonical_index;
     }
   }
 

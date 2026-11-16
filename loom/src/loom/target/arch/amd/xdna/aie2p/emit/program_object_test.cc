@@ -292,6 +292,7 @@ TEST(Aie2pProgramObjectTest, PreservesFirstIdentityAcrossInterleavedBodies) {
   for (size_t i = 1; i < contributions.size(); ++i) {
     const size_t first = (i - 1) % kBodyCount + 1;
     EXPECT_EQ(program.functions[i].canonical_index, first);
+    EXPECT_EQ(program.functions[i].equivalent_index, first);
     EXPECT_EQ(program.contribution.object.symbols[i].section_contribution_index,
               first);
   }
@@ -332,8 +333,10 @@ TEST(Aie2pProgramObjectTest, SharesAndPacksWithinIndependentCodeGroups) {
       IREE_ARRAYSIZE(contributions), nullptr, 0, function_groups,
       IREE_ARRAYSIZE(groups), &arena, &arena, &program, groups));
   const iree_host_size_t canonical[] = {0, 1, 2, 2, 4, 5, 6};
+  const iree_host_size_t equivalent[] = {0, 1, 2, 2, 2, 5, 1};
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(canonical); ++i) {
     EXPECT_EQ(program.functions[i].canonical_index, canonical[i]);
+    EXPECT_EQ(program.functions[i].equivalent_index, equivalent[i]);
   }
   EXPECT_EQ(program.contribution.object.section_count, 6u);
   EXPECT_EQ(program.contribution.object.fixup_count, 6u);
@@ -653,6 +656,7 @@ TEST_P(Aie2pProgramDataTest,
       &program));
   for (size_t i = 1; i < contribution_count; ++i) {
     EXPECT_EQ(program.functions[i].canonical_index, 1 + (i - 1) % data_count);
+    EXPECT_EQ(program.functions[i].equivalent_index, 1 + (i - 1) % data_count);
   }
   iree_arena_deinitialize(&scratch_arena);
   // Final linking may outlive both the source inventory and its temporary

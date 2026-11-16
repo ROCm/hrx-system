@@ -47,7 +47,7 @@ iree_status_t loom_aie2p_program_replacement_prepare(
         continue;
       }
       const iree_host_size_t canonical =
-          native->functions[i + 1].canonical_index;
+          native->functions[i + 1].equivalent_index;
       const iree_host_size_t owner = source->entry_owners[i];
       shared_owners[canonical] =
           shared_owners[canonical] == IREE_HOST_SIZE_MAX
@@ -62,7 +62,7 @@ iree_status_t loom_aie2p_program_replacement_prepare(
                                                  source->helpers.values[i])
                   ->pipeline_entry
               ? source->entry_owners[i]
-              : shared_owners[native->functions[i + 1].canonical_index];
+              : shared_owners[native->functions[i + 1].equivalent_index];
     }
     status = loom_aie2p_program_layout_initialize(owners, count, arena,
                                                   &scratch, out_layout);

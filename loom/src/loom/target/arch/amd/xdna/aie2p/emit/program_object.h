@@ -35,11 +35,15 @@ typedef struct loom_aie2p_program_function_t {
   const loom_aie2p_leaf_contribution_t* contribution;
   // Entry symbol in the merged native object, including aliases of shared code.
   iree_host_size_t entry_symbol_index;
-  // First equivalent function in this inventory. The program entry is unique.
+  // First equivalent native function across all placement groups. Equality
+  // includes symbolic relocations; the program entry remains unique.
+  iree_host_size_t equivalent_index;
+  // First equivalent function sharing this physical group's code and local
+  // relocations. Equal bodies in other groups retain independent placement.
   iree_host_size_t canonical_index;
 } loom_aie2p_program_function_t;
 
-// Physical program and the logical-to-physical identity established by merging.
+// Native equivalence and physical code placement established by composition.
 typedef struct loom_aie2p_program_object_t {
   // Complete tile contribution, with sections and relocations owned by |arena|.
   loom_aie2p_leaf_contribution_t contribution;
@@ -81,9 +85,10 @@ typedef struct loom_aie2p_program_code_group_t {
 // The entry continues to own all imports and mutable storage. The result
 // retains its exact combined code requirement even when it exceeds one core's
 // program memory; physical placement owns target capacity admission after
-// composition. The result retains function-to-symbol and canonical identity
-// without borrowing source IR or temporary layout storage. Scratch indexes
-// need survive only through this call.
+// composition. The result retains function-to-symbol bindings, global native
+// equivalence, and physical body identities without borrowing source IR or
+// temporary layout storage. Scratch indexes need survive only through this
+// call.
 iree_status_t loom_aie2p_program_object_merge(
     const loom_aie2p_leaf_contribution_t* const* contributions,
     iree_host_size_t contribution_count, const loom_aie2p_program_data_t* data,
@@ -95,6 +100,7 @@ iree_status_t loom_aie2p_program_object_merge(
 // |function_groups| assigns every input function to a dense, nonempty group;
 // group zero contains the entry. Code sharing never crosses group boundaries:
 // equal source bodies may require distinct addresses and local relocations.
+// Global native equivalence remains available independently of that placement.
 // Data and stack retain the complete program's ordinary ownership. The caller
 // supplies |group_count| output slots; section names borrow detached inputs.
 // The program's code requirement is the sum of packed group lengths, not its
