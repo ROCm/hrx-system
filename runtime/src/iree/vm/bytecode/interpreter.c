@@ -158,6 +158,21 @@ static inline void iree_vm_bytecode_ref_move(iree_vm_ref_t* target,
   iree_vm_bytecode_ref_replace(target, moved_ref);
 }
 
+// Reference coordinates use 16 logical bytes per cell independently of host
+// pointer size. Conversion to a native carrier address happens only after the
+// alignment and range checks; value registers never contain host addresses.
+static inline iree_status_t iree_vm_bytecode_ref_resolve_index(
+    uint32_t local_ref_count, uint64_t byte_offset, uint32_t* out_slot) {
+  const uint64_t slot = byte_offset >> 4;
+  if (IREE_UNLIKELY((byte_offset & 15u) != 0 || slot >= local_ref_count)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "indexed reference offset is unaligned or outside the frame");
+  }
+  *out_slot = (uint32_t)slot;
+  return iree_ok_status();
+}
+
 // Resolves one verified signed word displacement from the record end.
 static inline const uint8_t* iree_vm_bytecode_direct_target(
     const uint8_t* record_data, iree_host_size_t record_length,
@@ -1320,6 +1335,106 @@ iree_vm_bytecode_dispatch_ref_stack_discard: {
       (const iree_vm_bytecode_ref_stack_discard_t*)record_data;
   iree_vm_ref_reset(&local_refs[record->slot_u16]);
   IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_stack_discard_t);
+}
+
+iree_vm_bytecode_dispatch_ref_stack_load_indexed_retain: {
+  const iree_vm_bytecode_ref_stack_load_indexed_retain_t* record =
+      (const iree_vm_bytecode_ref_stack_load_indexed_retain_t*)record_data;
+  uint32_t slot = 0;
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_ref_resolve_index(
+      function->local_ref_count_u32, values[record->offset_v8], &slot));
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_ref_retain(
+      &refs[record->destination_r8], local_refs[slot]));
+  IREE_VM_BYTECODE_DISPATCH_NEXT(
+      iree_vm_bytecode_ref_stack_load_indexed_retain_t);
+}
+iree_vm_bytecode_dispatch_ref_stack_load_indexed_move: {
+  const iree_vm_bytecode_ref_stack_load_indexed_move_t* record =
+      (const iree_vm_bytecode_ref_stack_load_indexed_move_t*)record_data;
+  uint32_t slot = 0;
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_ref_resolve_index(
+      function->local_ref_count_u32, values[record->offset_v8], &slot));
+  iree_vm_bytecode_ref_move(&refs[record->destination_r8], &local_refs[slot]);
+  IREE_VM_BYTECODE_DISPATCH_NEXT(
+      iree_vm_bytecode_ref_stack_load_indexed_move_t);
+}
+iree_vm_bytecode_dispatch_ref_stack_load_indexed_copy: {
+  const iree_vm_bytecode_ref_stack_load_indexed_copy_t* record =
+      (const iree_vm_bytecode_ref_stack_load_indexed_copy_t*)record_data;
+  uint32_t slot = 0;
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_ref_resolve_index(
+      function->local_ref_count_u32, values[record->offset_v8], &slot));
+  iree_vm_bytecode_ref_copy(&refs[record->destination_r8], local_refs[slot]);
+  IREE_VM_BYTECODE_DISPATCH_NEXT(
+      iree_vm_bytecode_ref_stack_load_indexed_copy_t);
+}
+iree_vm_bytecode_dispatch_ref_stack_load_indexed_borrow: {
+  const iree_vm_bytecode_ref_stack_load_indexed_borrow_t* record =
+      (const iree_vm_bytecode_ref_stack_load_indexed_borrow_t*)record_data;
+  uint32_t slot = 0;
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_ref_resolve_index(
+      function->local_ref_count_u32, values[record->offset_v8], &slot));
+  iree_vm_bytecode_ref_borrow(&refs[record->destination_r8], local_refs[slot]);
+  IREE_VM_BYTECODE_DISPATCH_NEXT(
+      iree_vm_bytecode_ref_stack_load_indexed_borrow_t);
+}
+iree_vm_bytecode_dispatch_ref_stack_store_indexed_retain: {
+  const iree_vm_bytecode_ref_stack_store_indexed_retain_t* record =
+      (const iree_vm_bytecode_ref_stack_store_indexed_retain_t*)record_data;
+  uint32_t slot = 0;
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_ref_resolve_index(
+      function->local_ref_count_u32, values[record->offset_v8], &slot));
+  IREE_RETURN_IF_ERROR(
+      iree_vm_bytecode_ref_retain(&local_refs[slot], refs[record->source_r8]));
+  IREE_VM_BYTECODE_DISPATCH_NEXT(
+      iree_vm_bytecode_ref_stack_store_indexed_retain_t);
+}
+iree_vm_bytecode_dispatch_ref_stack_store_indexed_move: {
+  const iree_vm_bytecode_ref_stack_store_indexed_move_t* record =
+      (const iree_vm_bytecode_ref_stack_store_indexed_move_t*)record_data;
+  uint32_t slot = 0;
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_ref_resolve_index(
+      function->local_ref_count_u32, values[record->offset_v8], &slot));
+  iree_vm_bytecode_ref_move(&local_refs[slot], &refs[record->source_r8]);
+  IREE_VM_BYTECODE_DISPATCH_NEXT(
+      iree_vm_bytecode_ref_stack_store_indexed_move_t);
+}
+iree_vm_bytecode_dispatch_ref_stack_store_indexed_copy: {
+  const iree_vm_bytecode_ref_stack_store_indexed_copy_t* record =
+      (const iree_vm_bytecode_ref_stack_store_indexed_copy_t*)record_data;
+  uint32_t slot = 0;
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_ref_resolve_index(
+      function->local_ref_count_u32, values[record->offset_v8], &slot));
+  iree_vm_bytecode_ref_copy(&local_refs[slot], refs[record->source_r8]);
+  IREE_VM_BYTECODE_DISPATCH_NEXT(
+      iree_vm_bytecode_ref_stack_store_indexed_copy_t);
+}
+iree_vm_bytecode_dispatch_ref_stack_store_indexed_borrow: {
+  const iree_vm_bytecode_ref_stack_store_indexed_borrow_t* record =
+      (const iree_vm_bytecode_ref_stack_store_indexed_borrow_t*)record_data;
+  uint32_t slot = 0;
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_ref_resolve_index(
+      function->local_ref_count_u32, values[record->offset_v8], &slot));
+  iree_vm_bytecode_ref_borrow(&local_refs[slot], refs[record->source_r8]);
+  IREE_VM_BYTECODE_DISPATCH_NEXT(
+      iree_vm_bytecode_ref_stack_store_indexed_borrow_t);
+}
+iree_vm_bytecode_dispatch_ref_stack_discard_range: {
+  const iree_vm_bytecode_ref_stack_discard_range_t* record =
+      (const iree_vm_bytecode_ref_stack_discard_range_t*)record_data;
+  const uint64_t byte_offset = values[record->offset_v8];
+  const uint64_t base = byte_offset >> 4;
+  if (IREE_UNLIKELY((byte_offset & 15u) != 0 ||
+                    base > function->local_ref_count_u32 ||
+                    record->count_u32 > function->local_ref_count_u32 - base)) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "reference discard range is unaligned or outside the frame");
+  }
+  for (uint32_t i = 0; i < record->count_u32; ++i) {
+    iree_vm_ref_reset(&local_refs[base + i]);
+  }
+  IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_stack_discard_range_t);
 }
 
 iree_vm_bytecode_dispatch_buffer_allocate: {

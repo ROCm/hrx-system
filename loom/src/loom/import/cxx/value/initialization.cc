@@ -26,6 +26,7 @@
 #include "loom/import/cxx/source/initializer_lists.h"
 #include "loom/import/cxx/source/objects.h"
 #include "loom/ops/buffer/ops.h"
+#include "loom/ops/ref/ops.h"
 #include "loom/ops/scalar/ops.h"
 
 namespace loom::cxx_import {
@@ -544,6 +545,11 @@ Value Initialization::zero(const cxx::Type* type, cxx::AST* owner) {
     return storage_.null(owner);
   }
   auto output = types_.get(type, owner);
+  if (partition.kind == ValueKind::Object) {
+    loom_op_t* op;
+    check(loom_ref_null_build(&builder_, output, locations_.get(owner), &op));
+    return arena_.capture(partition, {loom_op_results(op), 1});
+  }
   if (partition.kind != ValueKind::SSA ||
       loom_type_kind(output) != LOOM_TYPE_SCALAR) {
     diagnostics_.reject(unit_, owner,
@@ -863,6 +869,9 @@ Value Initialization::from_elements(const cxx::Type* type,
     return finish_value_receiver(*record, owner);
   }
   const auto& partition = types_.partition(type, owner);
+  if (partition.kind == ValueKind::Object && !elements) {
+    return zero(type, owner);
+  }
   if (partition.kind == ValueKind::Address) {
     if (elements && !elements->next) {
       return evaluation_.convert(elements->value, type, owner);
@@ -871,6 +880,7 @@ Value Initialization::from_elements(const cxx::Type* type,
                         "address values require one integer or address value");
   }
   if (partition.kind == ValueKind::Buffer ||
+      partition.kind == ValueKind::Object ||
       partition.kind == ValueKind::OpaqueDialect ||
       partition.kind == ValueKind::Encoding ||
       partition.kind == ValueKind::Pool || partition.kind == ValueKind::Tile ||

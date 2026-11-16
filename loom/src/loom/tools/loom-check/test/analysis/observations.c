@@ -14,7 +14,6 @@
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
-#include "loom/ops/buffer/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/type_registry.h"
 #include "loom/tools/loom-check/diagnostics.h"
@@ -167,7 +166,9 @@ static iree_status_t loom_check_test_analysis_observe_storage_interference(
     const loom_value_id_t value_id = domain.value_ids[i];
     const loom_value_t* value = loom_module_value(module, value_id);
     if (loom_value_is_block_arg(value) ||
-        !loom_buffer_alloca_isa(loom_value_def_op(value))) {
+        !loom_op_vtable_result_is_frame_owned(
+            loom_op_vtable(module, loom_value_def_op(value)),
+            loom_value_def_index(value))) {
       continue;
     }
     roots[root_count++] = value_id;

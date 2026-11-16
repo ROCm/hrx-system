@@ -18,6 +18,15 @@ extern "C" {
 
 typedef struct loom_low_lower_context_t loom_low_lower_context_t;
 
+typedef enum loom_low_lower_function_storage_source_e {
+  // Byte-addressable buffer allocation.
+  LOOM_LOW_LOWER_FUNCTION_STORAGE_SOURCE_BUFFER = 0,
+  // Typed allocation with scalar elements.
+  LOOM_LOW_LOWER_FUNCTION_STORAGE_SOURCE_SCALAR_VIEW,
+  // Typed allocation with opaque reference elements.
+  LOOM_LOW_LOWER_FUNCTION_STORAGE_SOURCE_REFERENCE_VIEW,
+} loom_low_lower_function_storage_source_t;
+
 // Target capability for a source allocation space. This is independent of the
 // final physical placement, which belongs to the target's emission frame.
 typedef struct loom_low_lower_function_storage_mapping_t {
@@ -27,12 +36,21 @@ typedef struct loom_low_lower_function_storage_mapping_t {
   loom_storage_space_t storage_space;
   // One-unit descriptor-set register class holding the reservation's address.
   uint16_t address_register_class;
+  // Source representation admitted by this mapping. Typed reference cells
+  // can occupy a different physical bank from byte-addressable storage.
+  loom_low_lower_function_storage_source_t source;
+  // Emits required content initialization at the allocation's execution point,
+  // after its address exists. NULL leaves contents unspecified. Reservation
+  // hoisting never moves this executable initialization.
+  iree_status_t (*initialize)(loom_low_lower_context_t* context,
+                              loom_value_id_t address, int64_t byte_length,
+                              loom_location_id_t location);
 } loom_low_lower_function_storage_mapping_t;
 
 typedef struct loom_low_lower_function_storage_config_t {
   // Borrowed immutable mappings, or NULL when allocations use another path.
   const loom_low_lower_function_storage_mapping_t* mappings;
-  // Number of mappings, with at most one per source memory space.
+  // Number of mappings, with at most one per source kind and memory space.
   iree_host_size_t count;
 } loom_low_lower_function_storage_config_t;
 
@@ -42,8 +60,9 @@ typedef struct loom_low_lower_function_storage_plan_t {
   int64_t byte_length;
   // Source-required power-of-two base alignment.
   int64_t byte_alignment;
-  // Structural Low space selected by the target capability.
-  loom_storage_space_t storage_space;
+  // Target capability retained from selection, including content
+  // initialization.
+  const loom_low_lower_function_storage_mapping_t* mapping;
 } loom_low_lower_function_storage_plan_t;
 
 // Proves that a fixed slot preserves the allocation's per-execution identity.
@@ -55,7 +74,7 @@ iree_status_t loom_low_lower_function_storage_check_lifetime(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     bool* out_supported);
 
-// Selects one buffer.alloca using the active policy and established value
+// Selects one buffer.alloca or view.alloca using the active policy and retained
 // facts. An unsupported space remains unselected for other lowering mechanisms.
 // An invalid extent or lifetime is selected but diagnosed, with a NULL plan;
 // the shared diagnostic boundary prevents emission of that function.

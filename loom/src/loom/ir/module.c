@@ -3695,6 +3695,14 @@ static bool loom_topological_type_equal_fn(const void* context,
   }
 
   switch (loom_type_kind(candidate)) {
+    case LOOM_TYPE_VIEW:
+      if (loom_type_has_reference_element(candidate)) {
+        return loom_type_shape_equals(existing, candidate) &&
+               loom_type_equal(*loom_type_reference_element(existing),
+                               loom_type_table_get(&ctx->module->types,
+                                                   ctx->dependency_ids[0]));
+      }
+      return loom_type_equal(existing, candidate);
     case LOOM_TYPE_FUNCTION: {
       const loom_func_type_data_t* existing_data =
           loom_type_func_data(existing);
@@ -3773,6 +3781,17 @@ static uint32_t loom_topological_type_hash(
       hash, (uint32_t)type.encoding_id | ((uint32_t)type.encoding_flags << 16));
 
   switch (loom_type_kind(type)) {
+    case LOOM_TYPE_VIEW:
+      if (loom_type_has_reference_element(type)) {
+        hash = loom_structural_hash_mix_u32(
+            hash, loom_type_table_hash(&context->module->types,
+                                       context->dependency_ids[0]));
+        for (uint8_t i = 0; i < loom_type_rank(type); ++i) {
+          hash = loom_structural_hash_mix_u64(hash, loom_type_dim(type, i));
+        }
+        return loom_structural_hash_finalize(hash);
+      }
+      return loom_type_hash(type);
     case LOOM_TYPE_FUNCTION: {
       const loom_func_type_data_t* data = loom_type_func_data(type);
       hash = loom_structural_hash_mix_u16(hash, data->arg_count);
@@ -3919,6 +3938,25 @@ static iree_status_t loom_module_clone_topological_type_from_context(
       (const loom_topological_type_context_t*)clone_context;
   const loom_type_t type = ctx->type;
   switch (loom_type_kind(type)) {
+    case LOOM_TYPE_VIEW: {
+      if (!loom_type_has_reference_element(type)) {
+        return loom_module_clone_type_payload(module, type, out_type);
+      }
+      const uint8_t rank = loom_type_rank(type);
+      loom_reference_view_type_data_t* data = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(
+          &module->arena, sizeof(*data) + rank * sizeof(data->dimensions[0]),
+          (void**)&data));
+      data->element_type =
+          loom_type_table_get(&module->types, ctx->dependency_ids[0]);
+      for (uint8_t i = 0; i < rank; ++i) {
+        data->dimensions[i] = loom_type_dim(type, i);
+      }
+      *out_type =
+          loom_type_reference_view(&data->element_type, rank, data->dimensions,
+                                   type.encoding_id, type.encoding_flags);
+      return iree_ok_status();
+    }
     case LOOM_TYPE_FUNCTION: {
       const loom_func_type_data_t* source_data = loom_type_func_data(type);
       iree_host_size_t allocation_size = 0;
@@ -4162,6 +4200,10 @@ iree_status_t loom_module_intern_topological_type_id(
     case LOOM_TYPE_TENSOR:
     case LOOM_TYPE_VECTOR:
     case LOOM_TYPE_VIEW: {
+      if (loom_type_has_reference_element(type)) {
+        expected_dependency_count = 1;
+        break;
+      }
       // Shaped wire records name their scalar element inline. Selective
       // readers may not have reached a separate scalar table entry.
       IREE_RETURN_IF_ERROR(
@@ -4273,6 +4315,15 @@ static iree_status_t loom_module_intern_type_with_dependencies(
     case LOOM_TYPE_TENSOR:
     case LOOM_TYPE_VECTOR:
     case LOOM_TYPE_VIEW: {
+      if (loom_type_has_reference_element(type)) {
+        loom_type_id_t type_id = LOOM_TYPE_ID_INVALID;
+        IREE_RETURN_IF_ERROR(loom_type_import(module, type, &type_id));
+        *out_interned_type = loom_type_table_get(&module->types, type_id);
+        if (out_type_id) {
+          *out_type_id = type_id;
+        }
+        return iree_ok_status();
+      }
       IREE_RETURN_IF_ERROR(
           loom_module_intern_shaped_element_type(module, type));
       break;

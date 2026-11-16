@@ -1057,3 +1057,138 @@ kernel.def @test() {
 
 // ----
 storage: accessed=yes single_instance=yes
+
+// ====
+
+// Initialized frame storage follows the same instance lifetime as an
+// uninitialized allocation; an older view still pins the previous instance.
+func.def @test(%limit: index) -> (i32) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %seed = scalar.constant 0 : i32
+  %initial_storage = buffer.alloca.init<private> align(4) bytes("01000000") : buffer
+  %initial_view = buffer.view %initial_storage[%origin] : buffer -> view<1xi32>
+  %sum, %last = scf.for %i = [%begin to %limit step %step](%accumulator = %seed : i32, %previous = %initial_view : view<1xi32>) -> (i32, view<1xi32>) {
+    %storage = buffer.alloca.init<private> align(4) bytes("02000000") : buffer
+    %slot = buffer.view %storage[%origin] : buffer -> view<1xi32>
+    %old_value = view.load %previous[0] : view<1xi32> -> i32
+    %next_sum = scalar.addi %accumulator, %old_value : i32
+    scf.yield %next_sum, %slot : i32, view<1xi32>
+  }
+  func.return %sum : i32
+}
+
+// ----
+initial_storage: accessed=yes single_instance=yes
+storage: accessed=yes single_instance=unproven
+initial_storage / storage: workgroup_nonoverlap=unproven
+
+// ====
+
+// Reading the previous initialized instance before allocating the next one
+// permits one physical reservation for all loop iterations.
+func.def @test(%limit: index) -> (i32) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %seed = scalar.constant 0 : i32
+  %initial_storage = buffer.alloca.init<private> align(4) bytes("01000000") : buffer
+  %initial_view = buffer.view %initial_storage[%origin] : buffer -> view<1xi32>
+  %sum, %last = scf.for %i = [%begin to %limit step %step](%accumulator = %seed : i32, %previous = %initial_view : view<1xi32>) -> (i32, view<1xi32>) {
+    %old_value = view.load %previous[0] : view<1xi32> -> i32
+    %storage = buffer.alloca.init<private> align(4) bytes("02000000") : buffer
+    %slot = buffer.view %storage[%origin] : buffer -> view<1xi32>
+    %next_sum = scalar.addi %accumulator, %old_value : i32
+    scf.yield %next_sum, %slot : i32, view<1xi32>
+  }
+  func.return %sum : i32
+}
+
+// ----
+initial_storage: accessed=yes single_instance=yes
+storage: accessed=yes single_instance=yes
+initial_storage / storage: workgroup_nonoverlap=unproven
+
+// ====
+
+// An older view remains live at the next allocation.
+func.def @test(%limit: index) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %seed = scalar.constant 0 : i32
+  %increment = scalar.constant 1 : i32
+  %initial_view = view.alloca<private> align(4) : view<1xi32>
+  view.store %seed, %initial_view[0] : i32, view<1xi32>
+  %sum, %value, %last = scf.for %i = [%begin to %limit step %step](%accumulator = %seed : i32, %previous_value = %seed : i32, %previous = %initial_view : view<1xi32>) -> (i32, i32, view<1xi32>) {
+    %slot = view.alloca<private> align(4) : view<1xi32>
+    %next_value = scalar.addi %previous_value, %increment : i32
+    view.store %next_value, %slot[0] : i32, view<1xi32>
+    %old_value = view.load %previous[0] : view<1xi32> -> i32
+    %next_sum = scalar.addi %accumulator, %old_value : i32
+    scf.yield %next_sum, %next_value, %slot : i32, i32, view<1xi32>
+  }
+  func.return %sum : i32
+}
+
+// ----
+initial_view: accessed=yes single_instance=yes
+slot: accessed=yes single_instance=unproven
+initial_view / slot: workgroup_nonoverlap=unproven
+
+// ====
+
+// The older view dies before the next allocation.
+func.def @test(%limit: index) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %seed = scalar.constant 0 : i32
+  %increment = scalar.constant 1 : i32
+  %initial_view = view.alloca<private> align(4) : view<1xi32>
+  view.store %seed, %initial_view[0] : i32, view<1xi32>
+  %sum, %value, %last = scf.for %i = [%begin to %limit step %step](%accumulator = %seed : i32, %previous_value = %seed : i32, %previous = %initial_view : view<1xi32>) -> (i32, i32, view<1xi32>) {
+    %old_value = view.load %previous[0] : view<1xi32> -> i32
+    %slot = view.alloca<private> align(4) : view<1xi32>
+    %next_value = scalar.addi %previous_value, %increment : i32
+    view.store %next_value, %slot[0] : i32, view<1xi32>
+    %next_sum = scalar.addi %accumulator, %old_value : i32
+    scf.yield %next_sum, %next_value, %slot : i32, i32, view<1xi32>
+  }
+  func.return %sum : i32
+}
+
+// ----
+initial_view: accessed=yes single_instance=yes
+slot: accessed=yes single_instance=yes
+initial_view / slot: workgroup_nonoverlap=unproven
+
+// ====
+
+// Typed allocations use the enclosing rendezvous proof for repeated roots.
+// The condition ends before the barrier that retires the complete instance.
+kernel.def @test() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch() {
+  %value = scalar.constant 7 : i32
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %selected = index.cmp eq, %group, %begin : index
+  scf.for %iteration = [%begin to %end step %step] {
+    scf.if %selected {
+      %slot = view.alloca<workgroup> align(4) : view<32xi32>
+      view.store %value, %slot[%lane] : i32, view<32xi32>
+      kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+      %loaded = view.load %slot[0] : view<32xi32> -> i32
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  }
+  kernel.return
+}
+
+// ----
+slot: accessed=yes single_instance=yes

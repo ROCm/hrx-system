@@ -177,10 +177,21 @@ TEST_F(BytecodeReferenceTest, TransfersPreserveOwnershipAndReplaceDestination) {
     // Live VM owners acquired when the input is borrowed.
     int32_t borrowed_count;
   };
-  const Case cases[] = {{"borrow", 1, 0},       {"borrow_load", 1, 0},
-                        {"borrow_store", 1, 0}, {"copy_register", 2, 0},
-                        {"copy_load", 3, 0},    {"copy_store", 2, 0},
-                        {"retain", 2, 1}};
+  const Case cases[] = {{"borrow", 1, 0},
+                        {"borrow_load", 1, 0},
+                        {"borrow_store", 1, 0},
+                        {"copy_register", 2, 0},
+                        {"copy_load", 3, 0},
+                        {"copy_store", 2, 0},
+                        {"retain", 2, 1},
+                        {"indexed_borrow_load", 1, 0},
+                        {"indexed_borrow_store", 1, 0},
+                        {"indexed_copy_load", 3, 0},
+                        {"indexed_copy_store", 2, 0},
+                        {"indexed_retain_load", 3, 1},
+                        {"indexed_retain_store", 2, 1},
+                        {"indexed_move_load", 2, 0},
+                        {"indexed_move_store", 2, 0}};
   for (const auto& test : cases) {
     SCOPED_TRACE(test.name);
     for (bool owned : {false, true}) {
@@ -195,6 +206,7 @@ TEST_F(BytecodeReferenceTest, TransfersPreserveOwnershipAndReplaceDestination) {
           iree_vm_ref_t destination =
               replace ? MakeObject(7) : iree_vm_ref_null();
           iree_vm_variant_t arguments[] = {
+              iree_vm_variant_from_i64(16),
               owned ? iree_vm_variant_from_ref_move(&source)
                     : iree_vm_variant_from_ref_borrowed(source),
               iree_vm_variant_from_ref_move(&destination),
@@ -222,6 +234,40 @@ TEST_F(BytecodeReferenceTest, TransfersPreserveOwnershipAndReplaceDestination) {
           EXPECT_EQ(destroyed_, int(replace) + int(!null_source));
         }
       }
+    }
+  }
+}
+
+TEST_F(BytecodeReferenceTest, IndexedTransfersCheckOffsetsAndUnwindOwners) {
+  for (const char* name :
+       {"indexed_borrow_load", "indexed_borrow_store", "indexed_copy_load",
+        "indexed_copy_store", "indexed_retain_load", "indexed_retain_store",
+        "indexed_move_load", "indexed_move_store"}) {
+    SCOPED_TRACE(name);
+    // Both valid cells, unaligned offsets, the first absent cell, and unsigned
+    // wraparound. Failures and successes reuse the same invocation.
+    for (int64_t offset : {0, 1, 16, 17, 32, -16, -1, 16}) {
+      SCOPED_TRACE(offset);
+      destroyed_ = 0;
+      iree_vm_ref_t source = MakeObject(42);
+      iree_vm_ref_t destination = MakeObject(7);
+      iree_vm_variant_t arguments[] = {
+          iree_vm_variant_from_i64(offset),
+          iree_vm_variant_from_ref_move(&source),
+          iree_vm_variant_from_ref_move(&destination),
+      };
+      iree_vm_variant_t results[4] = {};
+      iree_status_t status = iree_vm_invoke(
+          invocation_, Lookup(name), iree_vm_variant_span_from_array(arguments),
+          iree_vm_variant_span_from_array(results));
+      if (offset == 0 || offset == 16) {
+        IREE_EXPECT_OK(status);
+      } else {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, status);
+      }
+      EXPECT_EQ(destroyed_, 2);
+      iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+      iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
     }
   }
 }

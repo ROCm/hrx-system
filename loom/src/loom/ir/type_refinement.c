@@ -81,8 +81,10 @@ static iree_status_t loom_type_refinement_rebuild_dimensions(
     }
   }
 
-  uint8_t flags = 0;
-  if (rank <= 2) {
+  const bool reference_element = loom_type_has_reference_element(current_type);
+  const bool inline_dimensions = rank <= 2 && !reference_element;
+  uint8_t flags = reference_element ? LOOM_TYPE_FLAG_REFERENCE_ELEMENT : 0;
+  if (inline_dimensions) {
     flags |= LOOM_TYPE_FLAG_INLINE_DIMS;
   }
   if (all_static) {
@@ -93,18 +95,18 @@ static iree_status_t loom_type_refinement_rebuild_dimensions(
   refined.header =
       (current_type.header & ~(UINT32_C(0xF) << 20)) | ((uint32_t)flags << 20);
   refined.dims[0] = 0;
-  refined.dims[1] = 0;
+  refined.dims[1] = reference_element ? current_type.dims[1] : 0;
 
-  if (rank <= 2) {
+  if (inline_dimensions) {
     for (uint8_t i = 0; i < rank; ++i) {
       refined.dims[i] = dimensions[i];
     }
   } else {
     if (!arena) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "rank-%u type refinement requires an arena for overflow dimensions",
-          rank);
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "rank-%u type refinement requires an arena for "
+                              "out-of-line dimensions",
+                              rank);
     }
     loom_overflow_dim_t* overflow_dimensions = NULL;
     IREE_RETURN_IF_ERROR(
@@ -137,6 +139,13 @@ static loom_type_refinement_result_t loom_type_refine_element_or_role_value(
 
   if (!loom_type_refinement_has_element_or_role(current_type)) {
     return LOOM_TYPE_REFINEMENT_UNCHANGED;
+  }
+
+  if (loom_type_has_reference_element(current_type) ||
+      loom_type_has_reference_element(candidate_type)) {
+    return loom_type_element_type_equals(current_type, candidate_type)
+               ? LOOM_TYPE_REFINEMENT_UNCHANGED
+               : LOOM_TYPE_REFINEMENT_CONFLICT;
   }
 
   uint8_t current_value = (uint8_t)loom_type_element_type(current_type);
@@ -326,8 +335,8 @@ iree_status_t loom_type_refine_with_candidate(
   }
 
   loom_type_kind_t kind = loom_type_kind(current_type);
-  if (kind == LOOM_TYPE_FUNCTION || kind == LOOM_TYPE_DIALECT ||
-      kind == LOOM_TYPE_REGISTER) {
+  if (!loom_type_has_dimensions(current_type) && kind != LOOM_TYPE_SCALAR &&
+      kind != LOOM_TYPE_ENCODING) {
     *out_result = loom_type_equal(current_type, candidate_type)
                       ? LOOM_TYPE_REFINEMENT_UNCHANGED
                       : LOOM_TYPE_REFINEMENT_CONFLICT;

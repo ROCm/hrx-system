@@ -24,6 +24,7 @@ from loom.assembly import (
     Param,
     ScalarOf,
     ShapeOf,
+    TypeOf,
     kw,
 )
 from loom.dsl import (
@@ -37,6 +38,7 @@ from loom.dsl import (
     ShapeParam,
     SymbolReference,
     TypeDef,
+    TypeParam,
 )
 from loom.ir import (
     EncodingRole,
@@ -179,16 +181,17 @@ vector_type = TypeDef(
 view_type = TypeDef(
     name="view",
     doc=(
-        "Typed non-owning logical coordinate space over buffer storage with "
-        "optional address layout. Executed element accesses require natural "
-        "physical scalar alignment unless align(...) explicitly reduces it. "
+        "Typed non-owning logical coordinate space over storage with scalar "
+        "or exact ref/ptr elements and optional address layout. Executed scalar "
+        "accesses require natural physical alignment unless align(...) reduces "
+        "it. Reference cells use target-selected storage and alignment. "
         "Forming or transporting a view implies no access or address promise."
     ),
     ir_kind="view",
     fact_domain="loom_view_fact_domain",
     params=[
         ShapeParam("dims"),
-        ScalarParam("element_type"),
+        TypeParam("element_type"),
         EncodingParam("layout"),
         AlignmentParam(
             "alignment",
@@ -202,7 +205,7 @@ view_type = TypeDef(
     format=[
         ShapeOf("dims"),
         kw("x"),
-        ScalarOf("element_type"),
+        TypeOf("element_type"),
         OptionalGroup([COMMA, EncodingOf("layout")], anchor="layout"),
         OptionalGroup(
             [COMMA, Clause("align", AlignmentOf("alignment"))],

@@ -1,0 +1,54 @@
+// RUN: emit vm-object-lifetime borrowed-argument
+// Local scalar and object arrays share ordinary indexing and slicing. The
+// caller owns the payload throughout; storing its borrowed handle adds no owner.
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+
+struct [[loom::import("lifetime", "object")]] Object;
+[[loom::import("lifetime", "read")]] void read(loom::ptr<Object> value);
+[[loom::import("lifetime", "count")]] void count(loom::ptr<Object> value);
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+namespace lt = loom::type;
+using Objects = lt::view<lt::shape<4>, loom::ptr<Object>>;
+using Values = lt::view<lt::shape<4>, unsigned>;
+
+void run(loom::ptr<Object> object) {
+  auto objects = loom::view::alloca<Objects>();
+  auto values = loom::view::alloca<Values>();
+  read(loom::view::load(objects, 0));
+  const auto capacity = loom::index::cast<unsigned>(loom::view::dim<0>(objects));
+  for (unsigned i = 0; i < capacity; ++i) {
+    loom::view::store(object, objects, i);
+    loom::view::store(40 + i, values, i);
+  }
+  auto tail = loom::view::subview<3>(objects, {1}, {});
+  auto numbers = loom::view::subview<3>(values, {1}, {});
+  const auto tail_count = loom::index::cast<unsigned>(loom::view::dim<0>(tail));
+  for (unsigned i = 0; i < tail_count; ++i) {
+    auto value = loom::view::load(tail, i);
+    read(value);
+    count(value);
+    event(loom::view::load(numbers, i));
+  }
+  loom::view::store(loom::ptr<Object>{}, tail, 1);
+  read(loom::view::load(objects, 2));
+  count(object);
+}
+// ----
+create 1
+read -1
+read 1
+references 1
+event 41
+read 1
+references 1
+event 42
+read 1
+references 1
+event 43
+read -1
+references 1
+OK 1
+destroy 1
+retired 0

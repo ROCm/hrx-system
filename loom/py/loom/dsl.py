@@ -522,6 +522,8 @@ class Result:
     variadic: If True, this is zero-or-more result values.
     allocates: If True, this result is a freshly allocated resource
         that cannot alias any pre-existing resource.
+    frame_owned: The execution frame owns this fresh allocation. The result
+        borrows its storage and has no release obligation of its own.
     signature_only: If True, this result describes a locally scoped signature
         value rather than an SSA value visible after the operation.
     reference_source: Named buffer/view operand whose storage this reference
@@ -534,6 +536,7 @@ class Result:
     doc: str = ""
     variadic: bool = False
     allocates: bool = False
+    frame_owned: bool = False
     signature_only: bool = False
     reference_source: str | None = None
 
@@ -1976,8 +1979,12 @@ def _field_value_kind(item: Any) -> Any:
 
 
 def _field_element_type(item: Any) -> Any:
-    """Returns the scalar element type carried by a scalar or shaped field."""
+    """Returns the exact element type carried by a scalar, reference, or shape."""
+    from loom.ir import ReferenceType
+
     value_type = _field_value_type(item)
+    if isinstance(value_type, ReferenceType):
+        return value_type
     if hasattr(value_type, "element_type"):
         return value_type.element_type
     if hasattr(value_type, "dtype"):
@@ -4227,6 +4234,7 @@ def _validate_compact_shape_format(
         EncodingOf,
         ScalarOf,
         ShapeOf,
+        TypeOf,
         kw,
     )
 
@@ -4265,7 +4273,9 @@ def _validate_compact_shape_format(
         if (
             len(params) != (4 if ir_kind == "view" else 3)
             or not isinstance(params[0], ShapeParam)
-            or not isinstance(params[1], ScalarParam)
+            or not isinstance(
+                params[1], TypeParam if ir_kind == "view" else ScalarParam
+            )
             or not isinstance(params[2], EncodingParam)
             or (ir_kind == "view" and not isinstance(params[3], AlignmentParam))
         ):
@@ -4281,7 +4291,7 @@ def _validate_compact_shape_format(
         expected_format = (
             ShapeOf(params[0].name),
             kw("x"),
-            ScalarOf(params[1].name),
+            TypeOf(params[1].name) if ir_kind == "view" else ScalarOf(params[1].name),
             OptionalGroup(
                 [COMMA, EncodingOf(encoding_param.name)],
                 anchor=encoding_param.name,
@@ -5488,6 +5498,29 @@ def _validate_ownership_effects(
     moved_sources: set[str] = set()
     copied_sources: set[str] = set()
     consumed_sources: set[str] = set()
+
+    for result in results:
+        if not getattr(result, "frame_owned", False):
+            continue
+        if not result.allocates or result.type_constraint not in (
+            BUFFER,
+            VIEW,
+            STORAGE,
+        ):
+            raise ValueError(
+                f"Op '{op_name}': frame-owned results must allocate "
+                "buffer, view, or storage resources"
+            )
+        if not any(
+            isinstance(effect, ResultOwnershipEffect)
+            and effect.result == result.name
+            and effect.kind == ResultOwnershipEffectKind.BORROWED
+            for effect in ownership_effects
+        ):
+            raise ValueError(
+                f"Op '{op_name}': frame-owned result '{result.name}' "
+                "requires BorrowedResult"
+            )
 
     for effect in ownership_effects:
         if isinstance(effect, OperandOwnershipEffect):
@@ -7153,7 +7186,9 @@ class Op:
             _validate_effects(name, frozen_effects, frozen_operands, tuple(traits))
         else:
             _validate_no_effect_conflicts(name, tuple(traits), frozen_regions)
-        if frozen_ownership_effects:
+        if frozen_ownership_effects or any(
+            getattr(result, "frame_owned", False) for result in frozen_results
+        ):
             _validate_ownership_effects(
                 name,
                 frozen_ownership_effects,

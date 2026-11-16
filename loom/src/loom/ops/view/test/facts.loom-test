@@ -1,5 +1,72 @@
 // RUN: pass canonicalize
 
+type.decl import("objects", "buffer") @Buffer
+
+func.def @unbound_reference_layout() -> (i64, i64) {
+  %objects = view.alloca<private> : view<16xptr<@Buffer>>
+  %empty = view.alloca<private> : view<0xref<@Buffer>, #encoding.layout.strided<strides=[2]>>
+  %width = test.fact_view_element_bytes %objects : view<16xptr<@Buffer>> -> i64
+  %length = test.fact_view_byte_length_hi %empty : view<0xref<@Buffer>, #encoding.layout.strided<strides=[2]>> -> i64
+  func.return %width, %length : i64, i64
+}
+
+// ----
+type.decl import("objects", "buffer") @Buffer
+
+func.def @unbound_reference_layout() -> (i64, i64) {
+  %width = scalar.constant -1 : i64
+  %length = scalar.constant 0 : i64
+  func.return %width, %length : i64, i64
+}
+
+// ====
+
+vm.target<core> @vm
+
+type.decl import("objects", "buffer") @Buffer
+
+func.def target(@vm) @vm_reference_layout() -> (i64, i64, i64) {
+  %objects = view.alloca<private> : view<16xptr<@Buffer>>
+  %tail = view.subview %objects[3] : view<16xptr<@Buffer>> -> view<5xptr<@Buffer>>
+  %width = test.fact_view_element_bytes %objects : view<16xptr<@Buffer>> -> i64
+  %offset = test.fact_view_byte_offset_hi %tail : view<5xptr<@Buffer>> -> i64
+  %length = test.fact_view_byte_length_hi %tail : view<5xptr<@Buffer>> -> i64
+  func.return %width, %offset, %length : i64, i64, i64
+}
+
+// ----
+vm.target<core> @vm
+
+type.decl import("objects", "buffer") @Buffer
+
+func.def target(@vm) @vm_reference_layout() -> (i64, i64, i64) {
+  %width = scalar.constant 16 : i64
+  %offset = scalar.constant 48 : i64
+  %length = scalar.constant 80 : i64
+  func.return %width, %offset, %length : i64, i64, i64
+}
+
+// ====
+
+
+func.def @typed_frame_array_facts() -> (i64, i64, i64) {
+  %values = view.alloca<private> align(16) : view<4x8xi64>
+  %tail, %layout = view.subview %values[1, 2] : view<4x8xi64> -> view<2x4xi64, %layout>
+  %space = test.fact_view_memory_space %tail : view<2x4xi64, %layout> -> i64
+  %root = test.fact_view_root_min_alignment %tail : view<2x4xi64, %layout> -> i64
+  %alignment = test.fact_view_min_alignment %tail : view<2x4xi64, %layout> -> i64
+  func.return %space, %root, %alignment : i64, i64, i64
+}
+// ----
+func.def @typed_frame_array_facts() -> (i64, i64, i64) {
+  %space = scalar.constant 3 : i64
+  %root = scalar.constant 16 : i64
+  %alignment = scalar.constant 16 : i64
+  func.return %space, %root, %alignment : i64, i64, i64
+}
+
+// ====
+
 // Qualification and carrier formation do not assert address alignment, even
 // when the natural requirement is stronger than a known odd origin.
 func.def @access_requirement_is_not_an_address_fact(%buffer: buffer) -> (i64, i64, i64, i64) {

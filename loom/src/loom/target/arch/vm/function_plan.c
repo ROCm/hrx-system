@@ -635,6 +635,45 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_call(
                                 storage, stream);
 }
 
+// A frame address is a byte offset interpreted by the checked local-memory
+// instructions. It never exposes a host address to VM value registers.
+static iree_status_t loom_vm_function_storage_address(
+    const loom_low_emission_frame_t* frame,
+    const loom_low_schedule_node_t* node,
+    const loom_vm_function_storage_t* storage, iree_io_stream_t* stream) {
+  const loom_low_storage_layout_t* layout =
+      &frame->schedule.requirements.storage_layout;
+  loom_low_storage_layout_reference_t reference;
+  loom_low_storage_layout_lookup_reference(
+      &layout->index, layout->records,
+      loom_low_storage_address_storage(node->op), &reference);
+  const bool is_reference =
+      reference.reservation.space == LOOM_STORAGE_SPACE_PRIVATE;
+  const uint32_t cell_bytes =
+      frame->target.descriptor_set->reg_classes[VM_CORE_REG_CLASS_ID_REF]
+          .alloc_unit_bits /
+      8;
+  const uint32_t base = is_reference ? storage->packet_ref_count * cell_bytes
+                                     : storage->local_base;
+  const loom_low_allocation_assignment_t* assignment =
+      loom_low_allocation_assignment_for_value_ordinal(
+          &frame->allocation,
+          loom_low_schedule_node_const_result_ordinals(node)[0], NULL);
+  if (assignment->descriptor_reg_class_id != VM_CORE_REG_CLASS_ID_VALUE ||
+      assignment->location_count != 1) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "VM frame addresses require one value register");
+  }
+  const iree_vm_bytecode_constant_i32_t instruction = {
+      .opcode = IREE_VM_BYTECODE_OPCODE_CONSTANT_I32,
+      .destination_v8 = (uint8_t)assignment->location_base,
+      .bits_u32 = (uint32_t)(base + reference.reservation.byte_offset +
+                             reference.byte_offset +
+                             loom_low_storage_address_offset(node->op)),
+  };
+  return iree_io_stream_write(stream, sizeof(instruction), &instruction);
+}
+
 static iree_status_t loom_vm_function_storage(
     const loom_low_emission_frame_t* frame,
     const loom_low_schedule_node_t* node,
@@ -1061,6 +1100,10 @@ iree_status_t loom_vm_function_plan_write(
           case LOOM_OP_LOW_STORAGE_RESERVE:
           case LOOM_OP_LOW_STORAGE_VIEW:
             // Storage layout is already fixed by the shared scheduler.
+            break;
+          case LOOM_OP_LOW_STORAGE_ADDRESS:
+            status = loom_vm_function_storage_address(&frame, node, &storage,
+                                                      stream);
             break;
           case LOOM_OP_LOW_SPILL:
           case LOOM_OP_LOW_RELOAD:

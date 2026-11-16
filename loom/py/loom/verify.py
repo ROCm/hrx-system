@@ -1456,6 +1456,8 @@ def _shaped_satisfies_constraint(
             and shaped_type.rank == 1
             and shaped_type.is_all_static
         )
+    if not isinstance(shaped_type.element_type, ScalarType):
+        return False
     if constraint == TypeConstraint.INTEGER_ELEMENT:
         return shaped_type.element_type.kind in _INTEGER_SCALAR_KINDS
     if constraint == TypeConstraint.FLOAT_ELEMENT:

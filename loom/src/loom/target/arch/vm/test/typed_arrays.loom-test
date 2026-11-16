@@ -1,0 +1,218 @@
+// RUN: emit vm-object-lifetime
+
+func.decl import("lifetime", "event") @event(%value: i32)
+
+func.def noinline @array_tail(%seed: i64, %capacity: index) -> (i64) {
+  %bounded = index.assume %capacity [range(%capacity, 4, 8)] : index
+  %values = view.alloca<private> : view<[%bounded]xi64>
+  %tail = view.subview %values[1] : view<[%bounded]xi64> -> view<3xi64>
+  %begin = index.constant 0 : index
+  %end = index.constant 3 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%begin to %end step %step] {
+    %position = index.cast %i : index to i64
+    %value = scalar.addi %seed, %position : i64
+    view.store %value, %tail[%i] : i64, view<3xi64>
+  }
+  %result = view.load %tail[2] : view<3xi64> -> i64
+  func.return %result : i64
+}
+
+func.def public @run() {
+  %seed = scalar.constant 40 : i64
+  %capacity = index.constant 6 : index
+  %value = func.call @array_tail(%seed, %capacity) : (i64, index) -> (i64)
+  %word = scalar.trunci %value : i64 to i32
+  func.call @event(%word) : (i32)
+  func.return
+}
+
+// ----
+event 42
+OK 0
+retired 0
+
+// ====
+
+// Array ranges remain disjoint from the outgoing overflow argument packet.
+func.decl import("lifetime", "event") @event(%value: i32)
+
+func.def noinline @sum(%a0: i64, %a1: i64, %a2: i64, %a3: i64, %a4: i64, %a5: i64, %a6: i64, %a7: i64, %a8: i64, %a9: i64, %a10: i64, %a11: i64, %a12: i64, %a13: i64, %a14: i64, %a15: i64, %a16: i64) -> (i64) {
+  %sum1 = scalar.addi %a0, %a1 : i64
+  %sum2 = scalar.addi %sum1, %a2 : i64
+  %sum3 = scalar.addi %sum2, %a3 : i64
+  %sum4 = scalar.addi %sum3, %a4 : i64
+  %sum5 = scalar.addi %sum4, %a5 : i64
+  %sum6 = scalar.addi %sum5, %a6 : i64
+  %sum7 = scalar.addi %sum6, %a7 : i64
+  %sum8 = scalar.addi %sum7, %a8 : i64
+  %sum9 = scalar.addi %sum8, %a9 : i64
+  %sum10 = scalar.addi %sum9, %a10 : i64
+  %sum11 = scalar.addi %sum10, %a11 : i64
+  %sum12 = scalar.addi %sum11, %a12 : i64
+  %sum13 = scalar.addi %sum12, %a13 : i64
+  %sum14 = scalar.addi %sum13, %a14 : i64
+  %sum15 = scalar.addi %sum14, %a15 : i64
+  %sum16 = scalar.addi %sum15, %a16 : i64
+  func.return %sum16 : i64
+}
+
+func.def noinline @arrays(%value: i64) {
+  %left = view.alloca<private> : view<4xi64>
+  %right = view.alloca<private> align(64) : view<8xi16>
+  %right_value = scalar.constant 7 : i16
+  view.store %value, %left[3] : i64, view<4xi64>
+  view.store %right_value, %right[2] : i16, view<8xi16>
+  %overflow_value = scalar.constant 3 : i64
+  %sum = func.call @sum(%value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %overflow_value) : (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) -> (i64)
+  %original = view.load %left[3] : view<4xi64> -> i64
+  %other = view.load %right[2] : view<8xi16> -> i16
+  %original_word = scalar.trunci %original : i64 to i32
+  %other_word = scalar.extui %other : i16 to i32
+  %sum_word = scalar.trunci %sum : i64 to i32
+  func.call @event(%original_word) : (i32)
+  func.call @event(%other_word) : (i32)
+  func.call @event(%sum_word) : (i32)
+  func.return
+}
+
+func.def public @run() {
+  %value = scalar.constant 42 : i64
+  func.call @arrays(%value) : (i64)
+  func.return
+}
+
+// ----
+event 42
+event 7
+event 675
+OK 0
+retired 0
+
+// ====
+
+// Each supported scalar element keeps its bits through frame memory.
+func.decl import("lifetime", "event") @event(%value: i32)
+
+func.def public @run() {
+  %array0 = view.alloca<private> : view<2xi8>
+  %value0 = scalar.constant -23 : i8
+  view.store %value0, %array0[1] : i8, view<2xi8>
+  %loaded0 = view.load %array0[1] : view<2xi8> -> i8
+  %word0 = scalar.extsi %loaded0 : i8 to i32
+  func.call @event(%word0) : (i32)
+  %array1 = view.alloca<private> : view<2xi16>
+  %value1 = scalar.constant -12345 : i16
+  view.store %value1, %array1[1] : i16, view<2xi16>
+  %loaded1 = view.load %array1[1] : view<2xi16> -> i16
+  %word1 = scalar.extsi %loaded1 : i16 to i32
+  func.call @event(%word1) : (i32)
+  %array2 = view.alloca<private> : view<2xi32>
+  %value2 = scalar.constant -2345678 : i32
+  view.store %value2, %array2[1] : i32, view<2xi32>
+  %loaded2 = view.load %array2[1] : view<2xi32> -> i32
+  func.call @event(%loaded2) : (i32)
+  %array3 = view.alloca<private> : view<2xi64>
+  %value3 = scalar.constant 12345 : i64
+  view.store %value3, %array3[1] : i64, view<2xi64>
+  %loaded3 = view.load %array3[1] : view<2xi64> -> i64
+  %word3 = scalar.trunci %loaded3 : i64 to i32
+  func.call @event(%word3) : (i32)
+  %array4 = view.alloca<private> : view<2xf8E4M3>
+  %value4 = scalar.constant 1.5 : f8E4M3
+  view.store %value4, %array4[1] : f8E4M3, view<2xf8E4M3>
+  %loaded4 = view.load %array4[1] : view<2xf8E4M3> -> f8E4M3
+  %bits4 = scalar.bitcast %loaded4 : f8E4M3 to i8
+  %word4 = scalar.extui %bits4 : i8 to i32
+  func.call @event(%word4) : (i32)
+  %array5 = view.alloca<private> : view<2xf8E5M2>
+  %value5 = scalar.constant 1.5 : f8E5M2
+  view.store %value5, %array5[1] : f8E5M2, view<2xf8E5M2>
+  %loaded5 = view.load %array5[1] : view<2xf8E5M2> -> f8E5M2
+  %bits5 = scalar.bitcast %loaded5 : f8E5M2 to i8
+  %word5 = scalar.extui %bits5 : i8 to i32
+  func.call @event(%word5) : (i32)
+  %array6 = view.alloca<private> : view<2xf16>
+  %value6 = scalar.constant 1.5 : f16
+  view.store %value6, %array6[1] : f16, view<2xf16>
+  %loaded6 = view.load %array6[1] : view<2xf16> -> f16
+  %bits6 = scalar.bitcast %loaded6 : f16 to i16
+  %word6 = scalar.extui %bits6 : i16 to i32
+  func.call @event(%word6) : (i32)
+  %array7 = view.alloca<private> : view<2xbf16>
+  %value7 = scalar.constant 1.5 : bf16
+  view.store %value7, %array7[1] : bf16, view<2xbf16>
+  %loaded7 = view.load %array7[1] : view<2xbf16> -> bf16
+  %bits7 = scalar.bitcast %loaded7 : bf16 to i16
+  %word7 = scalar.extui %bits7 : i16 to i32
+  func.call @event(%word7) : (i32)
+  %array8 = view.alloca<private> : view<2xf32>
+  %value8 = scalar.constant 1.5 : f32
+  view.store %value8, %array8[1] : f32, view<2xf32>
+  %loaded8 = view.load %array8[1] : view<2xf32> -> f32
+  %bits8 = scalar.bitcast %loaded8 : f32 to i32
+  func.call @event(%bits8) : (i32)
+  %array9 = view.alloca<private> : view<2xf64>
+  %value9 = scalar.constant 1.5 : f64
+  view.store %value9, %array9[1] : f64, view<2xf64>
+  %loaded9 = view.load %array9[1] : view<2xf64> -> f64
+  %bits9 = scalar.bitcast %loaded9 : f64 to i64
+  %shift9 = scalar.constant 32 : i64
+  %high9 = scalar.shrui %bits9, %shift9 : i64
+  %word9 = scalar.trunci %high9 : i64 to i32
+  func.call @event(%word9) : (i32)
+  %array10 = view.alloca<private> : view<2xindex>
+  %value10 = index.constant 739 : index
+  view.store %value10, %array10[1] : index, view<2xindex>
+  %loaded10 = view.load %array10[1] : view<2xindex> -> index
+  %word10 = index.cast %loaded10 : index to i32
+  func.call @event(%word10) : (i32)
+  %array11 = view.alloca<private> : view<2xoffset>
+  %value11 = index.constant 90210 : offset
+  view.store %value11, %array11[1] : offset, view<2xoffset>
+  %loaded11 = view.load %array11[1] : view<2xoffset> -> offset
+  %word11 = index.cast %loaded11 : offset to i32
+  func.call @event(%word11) : (i32)
+  func.return
+}
+
+// ----
+event -23
+event -12345
+event -2345678
+event 12345
+event 60
+event 62
+event 15872
+event 16320
+event 1069547520
+event 1073217536
+event 739
+event 90210
+OK 0
+retired 0
+
+// ====
+
+// A rank-zero cell and a strided matrix share the same address machinery.
+func.decl import("lifetime", "event") @event(%value: i32)
+
+func.def public @run() {
+  %cell = view.alloca<private> : view<i32>
+  %matrix = view.alloca<private> : view<2x3xi32, #encoding.layout.strided<strides=[8, 2]>>
+  %first = scalar.constant 321 : i32
+  %second = scalar.constant 987 : i32
+  view.store %first, %cell[] : i32, view<i32>
+  view.store %second, %matrix[1, 2] : i32, view<2x3xi32, #encoding.layout.strided<strides=[8, 2]>>
+  %cell_value = view.load %cell[] : view<i32> -> i32
+  %matrix_value = view.load %matrix[1, 2] : view<2x3xi32, #encoding.layout.strided<strides=[8, 2]>> -> i32
+  func.call @event(%cell_value) : (i32)
+  func.call @event(%matrix_value) : (i32)
+  func.return
+}
+
+// ----
+event 321
+event 987
+OK 0
+retired 0

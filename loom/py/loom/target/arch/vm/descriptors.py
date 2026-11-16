@@ -63,6 +63,9 @@ from iree.vm.bytecode.spec.isa.core.ref import (
     REF_COMPARE_NULL,
     REF_NULL,
     REF_SELECT,
+    REF_STACK_DISCARD_RANGE,
+    REF_STACK_LOAD_INDEXED_COPY,
+    REF_STACK_STORE_INDEXED_COPY,
 )
 from iree.vm.bytecode.spec.isa.core.rules import (
     FieldRule,
@@ -70,7 +73,11 @@ from iree.vm.bytecode.spec.isa.core.rules import (
     RefOwnership,
     StateAccess,
 )
-from iree.vm.bytecode.spec.isa.core.stack import MEMORY_FORMAT_SELECTOR
+from iree.vm.bytecode.spec.isa.core.stack import (
+    MEMORY_FORMAT_SELECTOR,
+    STACK_LOAD_INDEXED,
+    STACK_STORE_INDEXED,
+)
 from iree.vm.bytecode.spec.isa.core.value import VALUE_COPY, VALUE_SELECT
 from iree.vm.bytecode.spec.specification import SPECIFICATION
 
@@ -132,6 +139,12 @@ _BUFFER_INSTRUCTIONS = (
     BUFFER_RODATA_LOAD,
     *_ATOMIC_INSTRUCTIONS,
 )
+_STACK_INSTRUCTIONS = (STACK_LOAD_INDEXED, STACK_STORE_INDEXED)
+_REF_STACK_INSTRUCTIONS = (
+    REF_STACK_LOAD_INDEXED_COPY,
+    REF_STACK_STORE_INDEXED_COPY,
+    REF_STACK_DISCARD_RANGE,
+)
 
 _INTEGER_TYPES = {32: ScalarTypeKind.I32, 64: ScalarTypeKind.I64}
 _FLOAT_TYPES = {32: ScalarTypeKind.F32, 64: ScalarTypeKind.F64}
@@ -189,6 +202,7 @@ _SELECTORS = {
         *_SCALAR_INSTRUCTIONS,
         *_SCALAR_CONVERSIONS,
         *_BUFFER_INSTRUCTIONS,
+        *_STACK_INSTRUCTIONS,
     )
     for field in instruction.fields
     if field.rule.kind is FieldRule.SELECTOR
@@ -292,7 +306,10 @@ def _immediates(instruction: Instruction) -> tuple[Immediate, ...]:
         elif field.rule.kind is FieldRule.ALLOWED_VALUES:
             kind = ImmediateKind.ENUM
             domain = f"{instruction.mnemonic}.{field.field.name}"
-        elif field.rule.kind is FieldRule.ANY_BITS:
+        elif field.rule.kind in (
+            FieldRule.ANY_BITS,
+            FieldRule.LOCAL_BYTES_RANGE_MEMORY_FORMAT,
+        ):
             maximum = (1 << bit_width) - 1
         elif field.rule.kind is FieldRule.RODATA_ORDINAL:
             kind = ImmediateKind.ORDINAL
@@ -570,5 +587,10 @@ VM_CORE_DESCRIPTOR_SET = DescriptorSet(
             )
             for op in _BUFFER_INSTRUCTIONS
         ),
+        *(
+            _descriptor(op, (ScalarTypeKind.I64,) if op is STACK_LOAD_INDEXED else ())
+            for op in _STACK_INSTRUCTIONS
+        ),
+        *(_descriptor(op, ()) for op in _REF_STACK_INSTRUCTIONS),
     ),
 )

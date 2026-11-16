@@ -1,0 +1,140 @@
+// RUN: roundtrip
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+
+struct [[loom::import("hal", "semaphore")]] Semaphore;
+struct [[loom::import("hal", "semaphore")]] Semaphore;
+struct [[loom::import("hal", "buffer")]] Buffer;
+namespace loomt = loom::type;
+using Semaphores = loomt::view<loomt::shape<loomt::dynamic>, loom::ptr<Semaphore>>;
+using Buffers = loomt::view<loomt::shape<loomt::dynamic>, loom::ptr<Buffer>>;
+
+[[loom::import("hal", "consume")]]
+void consume(Semaphores semaphores, Buffers buffers, loom::ptr<Buffer> value);
+
+void route(loom::ptr<Semaphore> semaphore, loom::ptr<Buffer> buffer,
+           unsigned long long count) {
+  using SemaphoreStorage = loomt::view<loomt::shape<259>, loom::ptr<Semaphore>>;
+  using BufferStorage = loomt::view<loomt::shape<259>, loom::ptr<Buffer>>;
+  auto semaphores = loom::view::alloca<SemaphoreStorage>();
+  auto buffers = loom::view::alloca<BufferStorage>();
+  for (unsigned long long i = 0; i < count; ++i) {
+    loom::view::store(semaphore, semaphores, i + 1);
+    loom::view::store(buffer, buffers, i + 1);
+  }
+  loom::view::store(loom::ptr<Buffer>{}, buffers, 2);
+  auto waits = loom::view::subview<loomt::dynamic>(semaphores, {1}, {count});
+  auto bindings = loom::view::subview<loomt::dynamic>(buffers, {1}, {count});
+  consume(waits, bindings, loom::view::load(buffers, 0));
+}
+// ----
+type.decl import("hal", "semaphore") @Semaphore
+
+type.decl import("hal", "buffer") @Buffer
+
+func.def public @route(%semaphore: ptr<@Semaphore>, %buffer: ptr<@Buffer>, %count: i64) {
+  %semaphores = view.alloca<private> : view<259xptr<@Semaphore>>
+  %buffers = view.alloca<private> : view<259xptr<@Buffer>>
+  %5 = scalar.constant 0 : i32
+  %i$6 = scalar.extsi %5 : i32 to i64
+  %i$9 = scf.while(%i = %i$6 : i64) -> (i64) {
+    %10 = scalar.cmpi ult, %i, %count : i64
+    scf.condition %10, %i : i1, i64
+  } do(%i$8: i64) {
+    %11 = scalar.constant 1 : i32
+    %12 = scalar.extsi %11 : i32 to i64
+    %13 = scalar.addi %i$8, %12 : i64
+    %14 = index.cast %13 : i64 to index
+    view.store %semaphore, %semaphores[%14] : ptr<@Semaphore>, view<259xptr<@Semaphore>>
+    %15 = scalar.constant 1 : i32
+    %16 = scalar.extsi %15 : i32 to i64
+    %17 = scalar.addi %i$8, %16 : i64
+    %18 = index.cast %17 : i64 to index
+    view.store %buffer, %buffers[%18] : ptr<@Buffer>, view<259xptr<@Buffer>>
+    %19 = scalar.constant 1 : i64
+    %i$20 = scalar.addi %i$8, %19 : i64
+    scf.yield %i$20 : i64
+  }
+  %21 = ref.null : ptr<@Buffer>
+  %22 = scalar.constant 2 : i32
+  %23 = index.cast %22 : i32 to index
+  view.store %21, %buffers[%23] : ptr<@Buffer>, view<259xptr<@Buffer>>
+  %24 = scalar.constant 1 : i32
+  %25 = scalar.extsi %24 : i32 to i64
+  %waits_dim0 = index.cast %count : i64 to index
+  %27 = index.cast %25 : i64 to index
+  %waits = view.subview %semaphores[%27] : view<259xptr<@Semaphore>> -> view<[%waits_dim0]xptr<@Semaphore>>
+  %29 = scalar.constant 1 : i32
+  %30 = scalar.extsi %29 : i32 to i64
+  %bindings_dim0 = index.cast %count : i64 to index
+  %32 = index.cast %30 : i64 to index
+  %bindings = view.subview %buffers[%32] : view<259xptr<@Buffer>> -> view<[%bindings_dim0]xptr<@Buffer>>
+  %34 = scalar.constant 0 : i32
+  %35 = index.cast %34 : i32 to index
+  %36 = view.load %buffers[%35] : view<259xptr<@Buffer>> -> ptr<@Buffer>
+  func.call @consume(%waits_dim0, %waits, %bindings_dim0, %bindings, %36) : (index, view<[%waits_dim0]xptr<@Semaphore>>, index, view<[%bindings_dim0]xptr<@Buffer>>, ptr<@Buffer>)
+  func.return
+}
+
+func.decl import("hal", "consume") @consume(%37: index, %38: view<[%37]xptr<@Semaphore>>, %39: index, %40: view<[%39]xptr<@Buffer>>, %41: ptr<@Buffer>)
+
+// ====
+// Reference identity survives encoded rank-three dimensions and const access.
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+struct Payload;
+using Handle = loom::ptr<Payload>;
+namespace loomt = loom::type;
+using Shape = loomt::shape<loomt::dynamic, 2, 3>;
+using Layout = loomt::encoding<loom::encoding::role::layout, 3>;
+using Grid = loomt::view<Shape, Handle, Layout>;
+using ReadGrid = loomt::view<Shape, const Handle, Layout>;
+// The annotation may follow declarations using the same incomplete class.
+[[loom::op("view.load")]] Handle read(ReadGrid, unsigned, unsigned, unsigned);
+struct [[loom::import("service", "payload")]] Payload;
+[[loom::import("service", "consume")]] void consume(Handle);
+void route(Handle value, ReadGrid source, unsigned long long count) {
+  auto grid = loom::view::alloca<Grid>({count}, loom::encoding::layout::dense<3>());
+  loom::view::store(value, grid, 0, 1, 2);
+  auto copy = value;
+  copy = loom::view::load(grid, 0, 1, 2);
+  consume(copy);
+  consume(read(source, 0, 1, 2));
+}
+// ----
+type.decl import("service", "payload") @Payload
+
+func.def public @route(%value: ptr<@Payload>, %source_dim0: index, %source_layout: encoding<layout>, %source: view<[%source_dim0]x2x3xptr<@Payload>, %source_layout>, %count: i64) {
+  %grid_layout = encoding.layout.dense : encoding<layout>
+  %grid_dim0 = index.cast %count : i64 to index
+  %grid = view.alloca<private> : view<[%grid_dim0]x2x3xptr<@Payload>, %grid_layout>
+  %8 = scalar.constant 0 : i32
+  %9 = scalar.constant 1 : i32
+  %10 = scalar.constant 2 : i32
+  %11 = index.cast %8 : i32 to index
+  %12 = index.cast %9 : i32 to index
+  %13 = index.cast %10 : i32 to index
+  view.store %value, %grid[%11, %12, %13] : ptr<@Payload>, view<[%grid_dim0]x2x3xptr<@Payload>, %grid_layout>
+  %14 = scalar.constant 0 : i32
+  %15 = scalar.constant 1 : i32
+  %16 = scalar.constant 2 : i32
+  %17 = index.cast %14 : i32 to index
+  %18 = index.cast %15 : i32 to index
+  %19 = index.cast %16 : i32 to index
+  %copy = view.load %grid[%17, %18, %19] : view<[%grid_dim0]x2x3xptr<@Payload>, %grid_layout> -> ptr<@Payload>
+  func.call @consume(%copy) : (ptr<@Payload>)
+  %21 = scalar.constant 0 : i32
+  %22 = scalar.constant 1 : i32
+  %23 = scalar.constant 2 : i32
+  %24 = scalar.extui %21 : i32 to i64
+  %25 = index.cast %24 : i64 to index
+  %26 = scalar.extui %22 : i32 to i64
+  %27 = index.cast %26 : i64 to index
+  %28 = scalar.extui %23 : i32 to i64
+  %29 = index.cast %28 : i64 to index
+  %30 = view.load %source[%25, %27, %29] : view<[%source_dim0]x2x3xptr<@Payload>, %source_layout> -> ptr<@Payload>
+  func.call @consume(%30) : (ptr<@Payload>)
+  func.return
+}
+
+func.decl import("service", "consume") @consume(%31: ptr<@Payload>)

@@ -202,7 +202,9 @@ loom_remap_leaf_type(loom_type_remap_context_t* context, loom_type_t* type,
       }
       if (dimensions) {
         type->dims[0] = (uint64_t)(uintptr_t)dimensions;
-        type->dims[1] = 0;
+        if (!loom_type_has_reference_element(*type)) {
+          type->dims[1] = 0;
+        }
         changed = true;
       }
     }

@@ -57,9 +57,11 @@ class ViewIntrinsic {
   enum class Operation {
     LayoutDense,
     LayoutStrided,
+    Alloca,
     BufferView,
     Subview,
     Bitcast,
+    Dim,
     Load,
     Store,
   };
@@ -78,9 +80,20 @@ class ViewIntrinsic {
   const BufferPartition* source_buffer_ = nullptr;
   // Whether a typed buffer.view carries an explicit physical byte offset.
   bool has_buffer_byte_offset_ = false;
+  // Allocation's backing memory domain, admitted from its source selector.
+  loom_value_fact_memory_space_t memory_space_ =
+      LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE;
+  // Minimum byte alignment of a fresh view allocation.
+  int64_t alignment_bytes_ = 1;
+  // Whether the allocation borrows an explicit backing pool.
+  bool has_pool_ = false;
   // Admitted source view for subview/load/store.
   const ViewPartition* source_view_ = nullptr;
-  // Admitted dependent result view for buffer.view/subview.
+  // Static extent selected by view.dim, or -1 for a transported dimension.
+  int64_t dimension_extent_ = -1;
+  // Component supplying a dynamic view.dim result in the admitted source view.
+  uint8_t dimension_component_ = 0;
+  // Admitted dependent result view for allocation, construction, and slicing.
   const ViewPartition* result_view_ = nullptr;
   // Source arguments whose fixed-width integer values are unsigned.
   uint32_t unsigned_argument_mask_ = 0;
@@ -88,8 +101,10 @@ class ViewIntrinsic {
   uint16_t unsigned_dimension_mask_ = 0;
   // Flattened subview origin components whose integer values are unsigned.
   uint16_t unsigned_origin_mask_ = 0;
-  // Native scalar result for view.load.
-  loom_type_t scalar_result_ = {};
+  // Complete element identity for view.load.
+  loom_type_t element_result_ = {};
+  // Source representation retained at admission for a loaded element.
+  const Partition* element_partition_ = nullptr;
   // Explicit physical-root proof selected by the source specialization.
   loom_memory_access_flags_t memory_flags_ = 0;
 };

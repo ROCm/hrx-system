@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "iree/base/api.h"
+#include "loom/import/cxx/binding/allocation.h"
 #include "loom/import/cxx/binding/index_values.h"
 #include "loom/import/cxx/binding/memory_access.h"
 #include "loom/import/cxx/source/error.h"
@@ -126,7 +127,10 @@ uint64_t static_view_bit_count(cxx::TranslationUnit& unit,
                                Diagnostics& diagnostics,
                                const ViewPartition& view, std::string_view role,
                                cxx::AST* owner) {
-  const int32_t element_bits = loom_scalar_type_bitwidth(view.element);
+  const int32_t element_bits =
+      loom_type_is_scalar(view.element)
+          ? loom_scalar_type_bitwidth(loom_type_element_type(view.element))
+          : 0;
   if (element_bits < 8 || element_bits % 8 != 0) {
     diagnostics.reject(
         unit, owner,
@@ -166,11 +170,17 @@ std::optional<ViewIntrinsic::Operation> ViewIntrinsic::parse_operation(
   if (name == "buffer.view") {
     return Operation::BufferView;
   }
+  if (name == "view.alloca") {
+    return Operation::Alloca;
+  }
   if (name == "view.subview") {
     return Operation::Subview;
   }
   if (name == "view.bitcast") {
     return Operation::Bitcast;
+  }
+  if (name == "view.dim") {
+    return Operation::Dim;
   }
   if (name == "view.load") {
     return Operation::Load;
@@ -221,6 +231,35 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
                                  owner);
   }
   switch (*selected) {
+    case Operation::Dim: {
+      require_count(1);
+      result.source_view_ =
+          &require_view(unit, diagnostics, types, parameters[0], owner);
+      auto arguments = function->templateArguments();
+      auto value = arguments.empty()
+                       ? std::nullopt
+                       : cxx::template_argument_value(arguments[0]);
+      auto* axis = value ? std::get_if<cxx::ConstInt>(&*value) : nullptr;
+      if (!axis || axis->isNegative() ||
+          axis->toUWide() >= result.source_view_->extents.size()) {
+        diagnostics.reject(
+            unit, owner,
+            "view.dim requires a constant axis within the view rank");
+      }
+      const size_t axis_index = axis->toUIntMax();
+      result.dimension_extent_ = result.source_view_->extents[axis_index];
+      result.dimension_component_ =
+          std::count_if(result.source_view_->extents.begin(),
+                        result.source_view_->extents.begin() + axis_index,
+                        [](int64_t extent) { return extent < 0; });
+      result.element_partition_ =
+          &types.partition(signature->returnType(), owner);
+      if (types.address_domain(signature->returnType(), owner) !=
+          LOOM_SCALAR_TYPE_INDEX) {
+        diagnostics.reject(unit, owner, "view.dim must return a Loom index");
+      }
+      return result;
+    }
     case Operation::LayoutDense: {
       require_count(0);
       result.result_encoding_ = &require_layout(unit, diagnostics, types,
@@ -244,9 +283,61 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
       result.result_source_type_ = signature->returnType();
       return result;
     }
-    case Operation::BufferView: {
+    case Operation::Alloca: {
       result.result_view_ = &require_view(unit, diagnostics, types,
                                           signature->returnType(), owner);
+      const size_t base_count = result.result_view_->encoding ? 2 : 1;
+      if (parameters.size() != base_count &&
+          parameters.size() != base_count + 1) {
+        diagnostics.reject(unit, owner,
+                           "view.alloca requires dimensions, its result "
+                           "encoding, and an optional pool");
+      }
+      result.unsigned_dimension_mask_ = require_index_record(
+          unit, diagnostics, types, parameters[0],
+          dynamic_extent_count(*result.result_view_), owner, "view dimensions");
+      if (result.result_view_->encoding &&
+          result.result_view_->encoding !=
+              &require_encoding(unit, diagnostics, types, parameters[1],
+                                owner)) {
+        diagnostics.reject(unit, owner,
+                           "view.alloca encoding type must match its result "
+                           "view");
+      }
+      result.has_pool_ = parameters.size() != base_count;
+      if (result.has_pool_ &&
+          types.partition(parameters.back(), owner).kind != ValueKind::Pool) {
+        diagnostics.reject(unit, owner,
+                           "view.alloca final operand must be a Loom pool");
+      }
+      auto arguments = function->templateArguments();
+      if (arguments.size() < 3 || cxx::template_argument_type(arguments[0]) !=
+                                      signature->returnType()) {
+        diagnostics.reject(unit, owner,
+                           "view.alloca requires result type, memory space, "
+                           "and alignment template arguments");
+      }
+      result.memory_space_ = read_allocation_space(
+          unit, diagnostics, cxx::template_argument_value(arguments[1]),
+          "view.alloca", owner);
+      result.alignment_bytes_ = read_byte_alignment(
+          unit, diagnostics, cxx::template_argument_value(arguments[2]),
+          "view.alloca", owner);
+      result.result_source_type_ = signature->returnType();
+      return result;
+    }
+    case Operation::BufferView: {
+      if (parameters.empty()) {
+        diagnostics.reject(unit, owner,
+                           "buffer.view has the wrong operand count");
+      }
+      result.result_view_ = &require_view(unit, diagnostics, types,
+                                          signature->returnType(), owner);
+      if (loom_type_is_reference(result.result_view_->element)) {
+        diagnostics.reject(
+            unit, owner,
+            "buffer.view cannot reinterpret bytes as object handles");
+      }
       auto* pointer =
           cxx::type_cast<cxx::PointerType>(types.unqualified(parameters[0]));
       const BufferPartition* buffer = nullptr;
@@ -372,14 +463,15 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
           result.unsigned_argument_mask_ |= uint32_t{1} << index;
         }
       }
-      result.scalar_result_ = types.get(signature->returnType(), owner);
-      if (loom_type_kind(result.scalar_result_) != LOOM_TYPE_SCALAR ||
-          loom_type_element_type(result.scalar_result_) !=
-              result.source_view_->element) {
+      result.element_result_ = types.get(signature->returnType(), owner);
+      if (!loom_type_equal(result.element_result_,
+                           result.source_view_->element)) {
         diagnostics.reject(unit, owner,
                            "view.load result must match its view element");
       }
       result.result_source_type_ = signature->returnType();
+      result.element_partition_ =
+          &types.partition(signature->returnType(), owner);
       return result;
     }
     case Operation::Store: {
@@ -394,8 +486,8 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
       if (unit.typeTraits().is_const(result.source_view_->element_type) ||
           types.unqualified(parameters[0]) !=
               types.unqualified(result.source_view_->element_type) ||
-          loom_type_element_type(types.get(parameters[0], owner)) !=
-              result.source_view_->element) {
+          !loom_type_equal(types.get(parameters[0], owner),
+                           result.source_view_->element)) {
         diagnostics.reject(
             unit, owner,
             "view.store value must match a mutable view element type");
@@ -420,6 +512,17 @@ std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
                                          loom_location_id_t location) const {
   loom_op_t* op;
   switch (operation_) {
+    case Operation::Dim: {
+      if (dimension_extent_ >= 0) {
+        check(loom_index_constant_build(
+            builder, loom_attr_i64(dimension_extent_),
+            loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), location, &op));
+        return arena.capture(*element_partition_, {loom_op_results(op), 1});
+      }
+      return arena.capture(
+          *element_partition_,
+          arguments[0].components().subspan(dimension_component_, 1));
+    }
     case Operation::LayoutDense:
       check(loom_encoding_layout_dense_build(
           builder,
@@ -444,12 +547,14 @@ std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
           location, &op));
       return arena.capture(*result_encoding_, {loom_op_results(op), 1});
     }
+    case Operation::Alloca:
     case Operation::BufferView:
     case Operation::Subview: {
       std::array<loom_value_id_t, LOOM_TYPE_MAX_RANK + 2> components;
       std::array<loom_value_id_t, LOOM_TYPE_MAX_RANK> offsets;
       size_t component_count = 0;
-      auto dimensions = arguments[operation_ == Operation::BufferView
+      auto dimensions = arguments[operation_ == Operation::Alloca ? 0
+                                  : operation_ == Operation::BufferView
                                       ? (has_buffer_byte_offset_ ? 2 : 1)
                                       : 2]
                             .components();
@@ -491,7 +596,8 @@ std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
                                         result_ids.data()));
       if (result_view_->encoding) {
         components[component_count++] =
-            capture_physical_encoding ? result_ids[1]
+            capture_physical_encoding         ? result_ids[1]
+            : operation_ == Operation::Alloca ? arguments[1].components()[0]
             : operation_ == Operation::BufferView
                 ? arguments[has_buffer_byte_offset_ ? 3 : 2].components()[0]
                 : encoding_component(arguments[0], *source_view_);
@@ -503,7 +609,17 @@ std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
                          {components.data(), component_count}, type_storage,
                          result_types);
       auto result_type = result_types.back();
-      if (operation_ == Operation::BufferView) {
+      if (operation_ == Operation::Alloca) {
+        check(loom_view_alloca_build(
+            builder,
+            (alignment_bytes_ != 1
+                 ? LOOM_VIEW_ALLOCA_BUILD_FLAG_HAS_BASE_ALIGNMENT
+                 : 0) |
+                (has_pool_ ? LOOM_VIEW_ALLOCA_BUILD_FLAG_HAS_POOL : 0),
+            memory_space_,
+            has_pool_ ? arguments.back().ssa() : LOOM_VALUE_ID_INVALID,
+            alignment_bytes_, result_type, location, &op));
+      } else if (operation_ == Operation::BufferView) {
         check(loom_buffer_view_build(builder, pointer->root,
                                      pointer->byte_offset, result_type,
                                      location, &op));
@@ -544,8 +660,8 @@ std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
           builder, 0, source_view_->access_flags | memory_flags_,
           view_component(arguments[0]), indices.data(),
           source_view_->extents.size(), static_indices.data(),
-          source_view_->extents.size(), 0, 0, scalar_result_, location, &op));
-      return Value(loom_op_results(op)[0]);
+          source_view_->extents.size(), 0, 0, element_result_, location, &op));
+      return arena.capture(*element_partition_, {loom_op_results(op), 1});
     }
     case Operation::Store: {
       std::array<loom_value_id_t, LOOM_TYPE_MAX_RANK> indices;
@@ -576,13 +692,18 @@ bool ViewIntrinsic::equivalent(const ViewIntrinsic& other) const {
          result_encoding_ == other.result_encoding_ &&
          source_buffer_ == other.source_buffer_ &&
          has_buffer_byte_offset_ == other.has_buffer_byte_offset_ &&
-         source_view_ == other.source_view_ &&
+         memory_space_ == other.memory_space_ &&
+         alignment_bytes_ == other.alignment_bytes_ &&
+         has_pool_ == other.has_pool_ && source_view_ == other.source_view_ &&
+         dimension_extent_ == other.dimension_extent_ &&
+         dimension_component_ == other.dimension_component_ &&
          result_view_ == other.result_view_ &&
          unsigned_argument_mask_ == other.unsigned_argument_mask_ &&
          unsigned_dimension_mask_ == other.unsigned_dimension_mask_ &&
          unsigned_origin_mask_ == other.unsigned_origin_mask_ &&
          memory_flags_ == other.memory_flags_ &&
-         loom_type_equal(scalar_result_, other.scalar_result_);
+         element_partition_ == other.element_partition_ &&
+         loom_type_equal(element_result_, other.element_result_);
 }
 
 }  // namespace loom::cxx_import

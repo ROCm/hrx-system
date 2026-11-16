@@ -33,6 +33,7 @@ enum class ValueKind {
   Array,
   Buffer,
   Address,
+  Object,
   OpaqueDialect,
   Encoding,
   Pool,
@@ -79,6 +80,7 @@ class Value {
   bool is_array() const { return partition_->kind == ValueKind::Array; }
   bool is_buffer() const { return partition_->kind == ValueKind::Buffer; }
   bool is_address() const { return partition_->kind == ValueKind::Address; }
+  bool is_object() const { return partition_->kind == ValueKind::Object; }
   bool is_opaque_dialect() const {
     return partition_->kind == ValueKind::OpaqueDialect;
   }
@@ -93,6 +95,7 @@ class Value {
     IREE_ASSERT(partition_->kind == ValueKind::SSA ||
                 partition_->kind == ValueKind::Buffer ||
                 partition_->kind == ValueKind::Address ||
+                partition_->kind == ValueKind::Object ||
                 partition_->kind == ValueKind::OpaqueDialect ||
                 partition_->kind == ValueKind::Encoding ||
                 partition_->kind == ValueKind::Pool);

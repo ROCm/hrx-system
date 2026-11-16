@@ -74,7 +74,9 @@ static iree_status_t loom_ir_remap_leaf_type(loom_ir_remap_t* remap,
         target_overflow_dims[i] = loom_dim_pack_dynamic(target_value);
       }
       target_type.dims[0] = (uint64_t)(uintptr_t)target_overflow_dims;
-      target_type.dims[1] = 0;
+      if (!loom_type_has_reference_element(target_type)) {
+        target_type.dims[1] = 0;
+      }
       needs_interned_payload = true;
     }
   }
@@ -407,6 +409,8 @@ typedef struct loom_payload_frame_t {
   } children;
   // Borrowed structural type children; NULL for other representations.
   const loom_type_t* source_types;
+  // Number of structural type children before any static encoding edge.
+  uint32_t source_type_count;
   // Number of immediate children.
   uint32_t count;
   // Next child to request; its output storage remains stable while suspended.
@@ -555,6 +559,9 @@ static bool loom_payload_type_requires_walk(loom_type_t type) {
       return true;
     case LOOM_TYPE_REGISTER:
       return loom_type_register_has_value_type(type);
+    case LOOM_TYPE_VIEW:
+      return loom_type_has_reference_element(type) ||
+             loom_type_has_static_encoding(type);
     default:
       return loom_type_has_static_encoding(type);
   }
@@ -605,6 +612,14 @@ static iree_status_t loom_payload_request_type(loom_payload_walk_t* walk,
       frame->source_types = loom_type_register_value_type(type);
       frame->count = 1;
       break;
+    case LOOM_TYPE_VIEW:
+      if (loom_type_has_reference_element(type)) {
+        frame->source_types = loom_type_reference_element(type);
+        frame->count = 1;
+        break;
+      }
+      frame->count = 1;
+      return iree_ok_status();
     case LOOM_TYPE_PARAMETERIZED:
       frame->count = loom_type_parameterized_parameter_count(type);
       return iree_arena_allocate_array(&walk->scratch, frame->count,
@@ -618,6 +633,10 @@ static iree_status_t loom_payload_request_type(loom_payload_walk_t* walk,
   if (frame->count && !frame->source_types) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "non-empty source type list has a NULL payload");
+  }
+  frame->source_type_count = frame->count;
+  if (loom_type_has_static_encoding(type)) {
+    ++frame->count;
   }
   if (frame == &walk->root &&
       frame->count <= IREE_ARRAYSIZE(walk->root_children)) {
@@ -725,6 +744,18 @@ static iree_status_t loom_payload_finish_type(loom_payload_walk_t* walk) {
   loom_module_t* target = walk->remap->target_module;
   loom_type_t type = frame->source.type;
   switch (loom_type_kind(type)) {
+    case LOOM_TYPE_VIEW: {
+      loom_type_t element;
+      if (loom_type_has_reference_element(type)) {
+        element = loom_type_table_get(&target->types, frame->children.types[0]);
+        type.dims[1] = (uint64_t)(uintptr_t)&element;
+      }
+      IREE_RETURN_IF_ERROR(loom_ir_remap_leaf_type(
+          walk->remap, type, (uint16_t)frame->result, &type));
+      IREE_RETURN_IF_ERROR(
+          loom_module_intern_type_id(target, type, &frame->result));
+      break;
+    }
     case LOOM_TYPE_PARAMETERIZED: {
       const loom_parameterized_type_kind_t kind =
           loom_type_parameterized_kind(type);
@@ -847,7 +878,7 @@ static iree_status_t loom_payload_run(loom_payload_walk_t* walk) {
         status = loom_payload_request_attribute(
             walk, loom_type_parameterized_parameters(frame->source.type)[index],
             1, &walk->scratch, &frame->children.attributes[index]);
-      } else if (frame->source_types) {
+      } else if (index < frame->source_type_count) {
         status = loom_payload_request_type(walk, frame->source_types[index],
                                            &frame->children.types[index]);
       } else {

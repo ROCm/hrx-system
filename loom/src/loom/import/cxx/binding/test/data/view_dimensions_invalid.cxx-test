@@ -1,0 +1,25 @@
+// RUN: verify
+#include <loomcxx/view.h>
+using View = loom::type::view<loom::type::shape<4>, float>;
+loom::type::index invalid(View input) {
+  // ERROR@+1: LOWERING/059 "view.dim requires a constant axis within the view rank"
+  return loom::view::dim<1>(input);
+}
+
+// ====
+#include <loomcxx/view.h>
+using View = loom::type::view<loom::type::shape<4>, float>;
+loom::type::index invalid(View input) {
+  // ERROR@+1: LOWERING/059 "view.dim requires a constant axis within the view rank"
+  return loom::view::dim<static_cast<loom::type::size_type>(-1)>(input);
+}
+
+// ====
+#include <loomcxx/view.h>
+using View = loom::type::view<loom::type::shape<4>, float>;
+template <unsigned Axis>
+[[loom::op("view.dim")]] unsigned dim(View);
+unsigned invalid(View input) {
+  // ERROR@+1: LOWERING/059 "view.dim must return a Loom index"
+  return dim<0>(input);
+}

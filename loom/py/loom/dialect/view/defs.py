@@ -10,34 +10,43 @@ from loom.assembly import (
     ARROW,
     COLON,
     COMMA,
+    Attr,
     AttrDict,
+    Clause,
     Flags,
     IndexList,
+    OptionalGroup,
     Ref,
     ResultType,
+    TemplateParam,
     TemplateParamFlags,
     TypeOf,
 )
 from loom.dialect.atomic import AtomicAccessFlags, AtomicKind, AtomicLoadOrdering, AtomicMemoryFlags, AtomicOrdering, AtomicScope, AtomicStoreOrdering
 from loom.dialect.cache import CacheScope, CacheTemporal
-from loom.dialect.memory import MemoryAccessFlags
+from loom.dialect.memory import MemoryAccessFlags, MemorySpace
 from loom.dsl import (
     ANY,
     ATTR_TYPE_ENUM,
     ATTR_TYPE_FLAGS,
+    ATTR_TYPE_I64,
     ATTR_TYPE_I64_ARRAY,
     BYTE_PATTERN_SCALAR,
     HINT,
     INDEX,
     OBSERVABLE_EFFECT,
+    POOL,
     PURE,
     REFINABLE_RESULT_TYPE_REFS,
     SCALAR,
     VALUE_ALIAS,
     VIEW,
     AttrDef,
+    Borrow,
+    BorrowedResult,
     CachePolicyInterface,
     ContractFamily,
+    Copy,
     Dialect,
     EnumCase,
     EnumDef,
@@ -243,18 +252,20 @@ view_refine = value_refinement_op(
 )
 
 # ============================================================================
-# view.load/view.store — scalar logical memory access
+# view.load/view.store — single-element logical memory access
 # ============================================================================
 
 view_load = Op(
     name="view.load",
     group=view_ops,
-    doc=("Load one scalar element from a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis."),
+    doc=(
+        "Load one element from a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis. Reference elements copy the complete handle state into an independent result; owning references acquire an owner and pointers preserve borrowing or its necessary protection."
+    ),
     operands=[
         Operand("view", VIEW, role=OperandRole.ACCESS_PATH, doc="Typed source view."),
         Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical element indices.", variadic=True),
     ],
-    results=[Result("result", SCALAR, doc="Loaded scalar element.")],
+    results=[Result("result", ANY, doc="Loaded element with its exact reference or scalar type.")],
     attrs=[
         AttrDef(
             "memory_flags",
@@ -267,7 +278,7 @@ view_load = Op(
     constraints=[SameElementType("view", "result")],
     effects=[Reads("view")],
     interfaces=[CachePolicyInterface(), _memory_access_interface()],
-    effective_traits="loom_memory_access_effective_traits",
+    effective_traits="loom_view_element_access_effective_traits",
     verify="loom_view_load_verify",
     facts="loom_view_load_facts",
     format=[
@@ -290,9 +301,11 @@ view_load = Op(
 view_store = Op(
     name="view.store",
     group=view_ops,
-    doc=("Store one scalar element into a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis."),
+    doc=(
+        "Store one element into a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis. Reference elements copy the complete handle state without consuming the source and release any replaced owner. Stored pointers preserve borrowing or its necessary protection."
+    ),
     operands=[
-        Operand("value", SCALAR, doc="Scalar element to store."),
+        Operand("value", ANY, doc="Element to copy into storage."),
         Operand("view", VIEW, role=OperandRole.ACCESS_PATH, doc="Typed destination view."),
         Operand("indices", INDEX, role=OperandRole.ACCESS_PATH, doc="Dynamic logical element indices.", variadic=True),
     ],
@@ -307,8 +320,9 @@ view_store = Op(
     ],
     constraints=[SameElementType("value", "view")],
     effects=[Writes("view")],
+    ownership_effects=[Copy("value")],
     interfaces=[CachePolicyInterface(), _memory_access_interface(value="value")],
-    effective_traits="loom_memory_access_effective_traits",
+    effective_traits="loom_view_element_access_effective_traits",
     verify="loom_view_store_verify",
     format=[
         Flags("memory_flags"),
@@ -684,6 +698,50 @@ view_duplicate = value_duplication_op(
     ],
 )
 
+view_alloca = Op(
+    "view.alloca",
+    group=view_ops,
+    doc=(
+        "Allocate frame-owned typed storage and return a view of its elements. "
+        "The result type supplies the shape and layout. The allocation and all "
+        "derived views borrow the current invocation and cannot escape it. "
+        "Reference elements occupy opaque reference cells, never byte-addressable "
+        "buffer storage. Scalar contents are unspecified; reference cells start "
+        "null. The allocation shares the backing-resource and lifetime contract "
+        "of buffer.alloca."
+    ),
+    operands=[
+        Operand(
+            "pool",
+            POOL,
+            optional=True,
+            doc="Borrowed resource providing the allocation's backing storage.",
+        ),
+    ],
+    results=[
+        Result("result", VIEW, allocates=True, frame_owned=True, doc="Borrowed view of fresh frame-owned storage."),
+    ],
+    attrs=[
+        AttrDef("base_alignment", ATTR_TYPE_I64, optional=True, doc="Minimum byte alignment of the storage base, defaulting to one."),
+        AttrDef("memory_space", ATTR_TYPE_ENUM, enum_def=MemorySpace, doc="Allocatable scratch memory space for the root."),
+    ],
+    ownership_effects=[Borrow("pool"), BorrowedResult("result")],
+    verify="loom_view_alloca_verify",
+    facts="loom_view_alloca_facts",
+    format=[
+        TemplateParam("memory_space"),
+        OptionalGroup([Clause("pool", Ref("pool"))], anchor="pool"),
+        OptionalGroup([Clause("align", Attr("base_alignment"))], anchor="base_alignment"),
+        COLON,
+        ResultType("result"),
+    ],
+    examples=[
+        "%values = view.alloca<private> : view<16xi64>",
+        "%objects = view.alloca<private> : view<16xptr<@Object>>",
+        "%tile = view.alloca<workgroup> pool(%memory) align(64) : view<16x32xf32>",
+    ],
+)
+
 ALL_VIEW_OPS: tuple[Op, ...] = (
     view_subview,
     view_refine,
@@ -697,4 +755,5 @@ ALL_VIEW_OPS: tuple[Op, ...] = (
     view_atomic_store,
     view_bitcast,
     view_duplicate,
+    view_alloca,
 )

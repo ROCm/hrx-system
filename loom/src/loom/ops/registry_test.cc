@@ -900,11 +900,11 @@ TEST(TypeRegistry, ViewFormatElements) {
       loom_type_registry_lookup(nullptr, iree_make_cstring_view("view"));
   ASSERT_NE(desc, nullptr);
   ASSERT_EQ(desc->format_element_count, 13);
-  // ShapeOf, Keyword(x), ScalarOf, optional encoding and alignment clauses.
+  // ShapeOf, Keyword(x), TypeOf, optional encoding and alignment clauses.
   EXPECT_EQ(desc->format_elements[0].kind, LOOM_TYPE_FMT_SHAPE);
   EXPECT_EQ(desc->format_elements[1].kind, LOOM_TYPE_FMT_KEYWORD);
   EXPECT_EQ(desc->format_elements[1].data, LOOM_KW_X);
-  EXPECT_EQ(desc->format_elements[2].kind, LOOM_TYPE_FMT_SCALAR);
+  EXPECT_EQ(desc->format_elements[2].kind, LOOM_TYPE_FMT_TYPE);
   EXPECT_EQ(desc->format_elements[3].kind, LOOM_TYPE_FMT_OPTIONAL);
   EXPECT_EQ(desc->format_elements[4].kind, LOOM_TYPE_FMT_KEYWORD);
   EXPECT_EQ(desc->format_elements[4].data, LOOM_KW_COMMA);

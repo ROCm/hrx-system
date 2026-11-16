@@ -34,6 +34,8 @@ static inline bool loom_symbol_reference_type_may_contain_ref(
       return true;
     case LOOM_TYPE_REGISTER:
       return loom_type_register_has_value_type(type);
+    case LOOM_TYPE_VIEW:
+      return loom_type_has_reference_element(type);
     default:
       return false;
   }

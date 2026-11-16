@@ -336,6 +336,16 @@ iree_status_t loom_buffer_view_verify(const loom_module_t* module,
   if (!loom_type_is_view(result_type)) {
     return iree_ok_status();
   }
+  if (loom_type_has_reference_element(result_type)) {
+    const loom_diagnostic_param_t params[] = {
+        loom_param_string(IREE_SV("result")),
+        loom_param_type(result_type),
+        loom_param_string(
+            IREE_SV("scalar elements over byte-addressable storage")),
+    };
+    return loom_buffer_emit(emitter, op, LOOM_ERR_TYPE_004, params,
+                            IREE_ARRAYSIZE(params));
+  }
 
   return loom_buffer_verify_strided_layout_rank(module, op, emitter,
                                                 result_type);

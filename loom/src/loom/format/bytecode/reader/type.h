@@ -32,11 +32,13 @@ typedef struct loom_bytecode_scoped_shape_t {
   uint64_t dimensions[LOOM_TYPE_MAX_RANK];
   // Static encoding index or zero-based source value number, per attachment.
   uint64_t encoding_ordinal;
+  // Static ref/ptr type ordinal when a view's element_type is NONE.
+  uint64_t element_ordinal;
   // Bit i selects a source value number in dimensions[i].
   uint16_t dynamic_axes;
   // Number of initialized dimensions.
   uint8_t rank;
-  // Scalar element type, or NONE for a group.
+  // Scalar element type, or NONE for a group or reference view.
   uint8_t element_type;
   // Wire encoding attachment kind: none, static, or SSA.
   uint8_t attachment;
@@ -136,6 +138,12 @@ static inline bool loom_bytecode_type_parameters_finish(
   }
   return true;
 }
+// Completes a decoded reference-view shell from its materialized element.
+// The wire reference was range-checked; this boundary checks its semantic kind.
+bool loom_bytecode_type_bind_reference_element(
+    loom_bytecode_reader_decoder_t* decoder, const loom_module_t* module,
+    loom_type_id_t element_type_id, uint64_t bytecode_offset,
+    loom_type_t* type);
 
 // State required to materialize a validated type plan into a module.
 typedef struct loom_bytecode_type_materializer_t {

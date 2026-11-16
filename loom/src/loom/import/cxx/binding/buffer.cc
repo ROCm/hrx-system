@@ -20,55 +20,11 @@
 #include <variant>
 
 #include "iree/base/internal/unicode.h"
+#include "loom/import/cxx/binding/allocation.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
 
 namespace loom::cxx_import {
-namespace {
-
-int64_t byte_alignment(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
-                       const std::optional<cxx::ConstValue>& value,
-                       std::string_view operation, cxx::AST* owner) {
-  auto* alignment = value ? std::get_if<cxx::ConstInt>(&*value) : nullptr;
-  if (!alignment || alignment->isNegative() ||
-      alignment->toUWide() > INT64_MAX || alignment->toUWide() == 0 ||
-      (alignment->toUWide() & (alignment->toUWide() - 1)) != 0) {
-    diagnostics.reject(
-        unit, owner,
-        std::string(operation) +
-            " alignment must be a positive power-of-two byte count");
-  }
-  return static_cast<int64_t>(alignment->toUIntMax());
-}
-
-loom_value_fact_memory_space_t allocation_space(
-    cxx::TranslationUnit& unit, Diagnostics& diagnostics,
-    const std::optional<cxx::ConstValue>& value, std::string_view operation,
-    cxx::AST* owner) {
-  auto* space = value ? std::get_if<cxx::ConstInt>(&*value) : nullptr;
-  if (!space || space->isNegative() || space->toUWide() > UINT8_MAX) {
-    diagnostics.reject(
-        unit, owner,
-        std::string(operation) + " memory space must be a constant enum");
-  }
-  auto memory_space =
-      static_cast<loom_value_fact_memory_space_t>(space->toUIntMax());
-  switch (memory_space) {
-    case LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL:
-    case LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP:
-    case LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE:
-    case LOOM_VALUE_FACT_MEMORY_SPACE_HOST:
-    case LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC:
-      return memory_space;
-    default:
-      diagnostics.reject(unit, owner,
-                         std::string(operation) +
-                             " requires an allocatable memory space: global, "
-                             "workgroup, private, host, or generic");
-  }
-}
-
-}  // namespace
 
 bool BufferIntrinsic::supports(std::string_view name) {
   return name == "buffer.constant" || name == "buffer.alloca.init" ||
@@ -252,11 +208,12 @@ std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
                          "memory space for buffer.alloca.init");
     }
     const auto space =
-        immutable ? LOOM_VALUE_FACT_MEMORY_SPACE_CONSTANT
-                  : allocation_space(unit, diagnostics,
-                                     cxx::template_argument_value(arguments[0]),
-                                     name, owner);
-    const auto alignment = byte_alignment(
+        immutable
+            ? LOOM_VALUE_FACT_MEMORY_SPACE_CONSTANT
+            : read_allocation_space(unit, diagnostics,
+                                    cxx::template_argument_value(arguments[0]),
+                                    name, owner);
+    const auto alignment = read_byte_alignment(
         unit, diagnostics,
         cxx::template_argument_value(arguments[alignment_index]), name, owner);
     return BufferIntrinsic(
@@ -423,10 +380,10 @@ std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
     }
   }
 
-  auto memory_space = allocation_space(
+  auto memory_space = read_allocation_space(
       unit, diagnostics,
       cxx::template_argument_value(arguments[space_argument]), name, owner);
-  auto alignment_bytes = byte_alignment(
+  auto alignment_bytes = read_byte_alignment(
       unit, diagnostics,
       cxx::template_argument_value(arguments[alignment_argument]), name, owner);
 

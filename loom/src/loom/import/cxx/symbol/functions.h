@@ -22,7 +22,7 @@
 #include "loom/import/cxx/binding/config.h"
 #include "loom/import/cxx/binding/fastmath.h"
 #include "loom/import/cxx/binding/function_contracts.h"
-#include "loom/import/cxx/binding/function_imports.h"
+#include "loom/import/cxx/binding/imports.h"
 #include "loom/import/cxx/binding/intrinsics.h"
 #include "loom/import/cxx/binding/launch.h"
 #include "loom/import/cxx/binding/parameter_contracts.h"
@@ -192,7 +192,7 @@ class Functions {
         configs_(configs),
         fastmath_(fastmath),
         function_contracts_(function_contracts),
-        function_imports_(unit, diagnostics),
+        imports_(unit, diagnostics),
         target_definitions_(target_definitions),
         template_definitions_(template_definitions),
         names_(names),
@@ -200,7 +200,7 @@ class Functions {
 
   // Selects explicit qualified roots or externally visible concrete
   // definitions. Called once before translating the pending worklist.
-  void select(std::span<const iree_string_view_t> roots);
+  void select(std::span<const iree_string_view_t> roots, Types& types);
   // Analyzes every source definition reachable from selected roots, then
   // propagates sparse reference and receiver effects to a fixed point before
   // any native callable signature is emitted.
@@ -331,7 +331,17 @@ class Functions {
   // Callable predicates reconciled by semantic source identity.
   FunctionContracts& function_contracts_;
   // Runtime service bindings reconciled across bodyless redeclarations.
-  FunctionImports function_imports_;
+  Imports imports_;
+  struct IntrinsicDeclaration {
+    // Namespace-scope callable whose attributes need concrete type admission.
+    cxx::FunctionSymbol* function;
+    // Leading source annotations, borrowed from the translation unit.
+    cxx::List<cxx::AttributeSpecifierAST*>* attributes;
+    // Source declaration owning diagnostics.
+    cxx::AST* owner;
+  };
+  // Deferred until import metadata from every redeclaration is available.
+  std::vector<IntrinsicDeclaration> intrinsic_declarations_;
   // Owns source target definitions and function-like bindings to them.
   TargetDefinitions& target_definitions_;
   // Owns target-selected template family provider contracts.

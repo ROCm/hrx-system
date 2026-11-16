@@ -402,3 +402,33 @@ func.def public target(@carrier_target) @choose_dependent_region_view(%left: buf
   %value = view.load %selected[0] : view<[%size]xi32, %layout> -> i32
   func.return %value : i32
 }
+
+// ====
+
+// Reference cells keep their exact element and ownership contract through
+// boundary projection. Only the numeric view has a byte-buffer carrier.
+// RUN: pass specialize-target-callgraph,decompose-view-boundaries
+
+test.target<low_core> @carrier_target
+
+type.decl import("input", "packet") @Packet
+
+func.decl target(@carrier_target) @consume(%packets: view<4xptr<@Packet>>, %owners: view<3xref<@Packet>>, %bytes: view<8xi8>)
+
+func.def public target(@carrier_target) @forward(%packets: view<4xptr<@Packet>>, %owners: view<3xref<@Packet>>, %bytes: view<8xi8>) {
+  func.call @consume(%packets, %owners, %bytes) : (view<4xptr<@Packet>>, view<3xref<@Packet>>, view<8xi8>)
+  func.return
+}
+
+// ----
+test.target<low_core> @carrier_target
+
+type.decl import("input", "packet") @Packet
+
+func.decl target(@carrier_target) @consume(%packets: view<4xptr<@Packet>>, %owners: view<3xref<@Packet>>, %bytes_root: buffer, %bytes_offset: offset)
+
+func.def public target(@carrier_target) @forward(%packets: view<4xptr<@Packet>>, %owners: view<3xref<@Packet>>, %bytes_root: buffer, %bytes_offset: offset) {
+  %bytes = buffer.view %bytes_root[%bytes_offset] : buffer -> view<8xi8>
+  func.call @consume(%packets, %owners, %bytes_root, %bytes_offset) : (view<4xptr<@Packet>>, view<3xref<@Packet>>, buffer, offset)
+  func.return
+}

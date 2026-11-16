@@ -194,6 +194,14 @@ TEST_F(BorrowedObjectTest, PreservesBorrowThroughRegistersLocalsAndNativeCall) {
     %r1 = ref.borrow %r0
     ref.stack.store.move %r1, #r2
     %r0 = ref.stack.load.move #r2
+    %v0 = constant.s16 32
+    ref.stack.store.indexed.copy %r0, %v0
+    %r1 = ref.stack.load.indexed.copy %v0
+    ref.stack.store.indexed.borrow %r1, %v0
+    %r0 = ref.stack.load.indexed.borrow %v0
+    ref.stack.store.indexed.move %r1, %v0
+    %r0 = ref.stack.load.indexed.move %v0
+    ref.stack.discard.range %v0 {count = 1}
   )")));
   Link();
   for (int i = 0; i < 2; ++i) {
@@ -227,6 +235,50 @@ TEST_F(BorrowedObjectTest, SelectionPreservesBorrowedOnlyStateAndAliases) {
     EXPECT_EQ(value, present ? 42 : 0);
   }
 }
+
+struct ReferenceRangeCase {
+  // Logical byte offset encoded in the guest's value register.
+  int16_t offset;
+  // Number of consecutive reference cells to discard.
+  uint32_t count;
+  // Whether the complete range lies within the three-cell test frame.
+  bool valid;
+};
+class BorrowedReferenceRangeTest
+    : public BorrowedObjectTest,
+      public ::testing::WithParamInterface<ReferenceRangeCase> {};
+TEST_P(BorrowedReferenceRangeTest, ValidatesTheWholeRangeBeforeClearing) {
+  const auto test = GetParam();
+  IREE_ASSERT_OK(Load(Source(
+      "ref.stack.store.copy %r0, #r2\n%v0 = constant.s16 " +
+      std::to_string(test.offset) + "\nref.stack.discard.range %v0 {count = " +
+      std::to_string(test.count) + "}\n%r0 = ref.stack.load.copy #r2")));
+  Link();
+  for (int i = 0; i < 2; ++i) {
+    auto argument = Borrow();
+    iree_vm_variant_t result = iree_vm_variant_from_i32(-1);
+    iree_status_t status =
+        iree_vm_invoke(invocation_, function_, {&argument, 1}, {&result, 1});
+    if (test.valid) {
+      IREE_EXPECT_OK(status);
+    } else {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, status);
+    }
+    int32_t value = 0;
+    IREE_EXPECT_OK(iree_vm_i32_from_variant(result, &value));
+    EXPECT_EQ(value, test.valid ? (test.count ? 0 : 42) : -1);
+    iree_vm_variant_reset(&result);
+  }
+}
+INSTANTIATE_TEST_SUITE_P(
+    ReferenceRanges, BorrowedReferenceRangeTest,
+    ::testing::Values(
+        ReferenceRangeCase{0, 3, true}, ReferenceRangeCase{32, 1, true},
+        ReferenceRangeCase{48, 0, true}, ReferenceRangeCase{0, 0, true},
+        ReferenceRangeCase{1, 1, false}, ReferenceRangeCase{48, 1, false},
+        ReferenceRangeCase{64, 0, false}, ReferenceRangeCase{32, 2, false},
+        ReferenceRangeCase{0, UINT32_MAX, false},
+        ReferenceRangeCase{-16, 0, false}));
 
 TEST_F(BorrowedObjectTest, PreservesBorrowThroughOverflowArguments) {
   IREE_ASSERT_OK(
@@ -269,6 +321,9 @@ INSTANTIATE_TEST_SUITE_P(
     OwnershipOpcodes, BorrowedRetainTest,
     ::testing::Values(
         "%r1 = ref.retain %r0", "ref.stack.store.retain %r0, #r2",
+        "%v0 = constant.s16 32\nref.stack.store.indexed.retain %r0, %v0",
+        "%v0 = constant.s16 32\nref.stack.store.indexed.copy %r0, %v0\n%r1 = "
+        "ref.stack.load.indexed.retain %v0",
         "ref.stack.store.copy %r0, #r2\n%r1 = ref.stack.load.retain #r2"));
 
 TEST_F(BorrowedObjectTest, ConsumesBorrowedArgumentsOnAdmissionFailure) {

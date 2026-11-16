@@ -1,5 +1,15 @@
 // RUN: verify
 
+type.decl import("input", "packet") @Packet
+
+func.def @buffer_view_rejects_reference_cells(%buffer: buffer, %offset: offset) {
+  // ERROR@+1: TYPE/004 "result" "scalar elements over byte-addressable storage"
+  %view = buffer.view %buffer[%offset] : buffer -> view<4xref<@Packet>>
+  func.return
+}
+
+// ====
+
 func.def @fence_requires_ordering() {
   // ERROR@+1: PARSE/017 "ordering"
   buffer.fence scope(system) ordering(relaxed)

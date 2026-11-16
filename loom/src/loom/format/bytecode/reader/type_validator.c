@@ -133,7 +133,9 @@ static bool loom_bytecode_type_plan_build_shaped(
     loom_scalar_type_t element_type, uint8_t rank, uint8_t attachment,
     uint64_t encoding_instance, uint8_t alignment, const uint64_t* dims,
     uint64_t offset, loom_type_t* out_type) {
-  if (!loom_scalar_type_is_valid(element_type)) {
+  const bool reference_element =
+      kind == LOOM_TYPE_VIEW && element_type == LOOM_SCALAR_TYPE_NONE;
+  if (!reference_element && !loom_scalar_type_is_valid(element_type)) {
     return loom_bytecode_reader_emit_enum_value(
         decoder, IREE_SV("element_type"), element_type, LOOM_SCALAR_TYPE_COUNT_,
         offset);
@@ -188,8 +190,8 @@ static bool loom_bytecode_type_plan_build_shaped(
         IREE_SV("encoding_attachment"), offset,
         IREE_SV("vector_types_must_not_carry_encoding_or_layout_attachments"));
   }
-  if (alignment &&
-      !loom_type_view_alignment_is_valid(element_type, alignment)) {
+  if (alignment && (reference_element || !loom_type_view_alignment_is_valid(
+                                             element_type, alignment))) {
     return loom_bytecode_reader_emit_invalid_field(
         decoder, IREE_SV("TYPES"), IREE_SV("type"), 0,
         IREE_SV("access_alignment"), offset,
@@ -201,7 +203,18 @@ static bool loom_bytecode_type_plan_build_shaped(
   }
 
   loom_type_t type = {0};
-  if (rank == 0) {
+  if (reference_element) {
+    uint64_t* retained_dimensions = NULL;
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        decoder, iree_arena_allocate_array(scratch_arena, rank,
+                                           sizeof(*retained_dimensions),
+                                           (void**)&retained_dimensions)));
+    if (rank) {
+      memcpy(retained_dimensions, dims, rank * sizeof(*retained_dimensions));
+    }
+    type = loom_type_reference_view(NULL, rank, retained_dimensions,
+                                    encoding_id, 0);
+  } else if (rank == 0) {
     type = loom_type_shaped_0d(kind, element_type, encoding_id);
   } else if (rank == 1) {
     type = loom_type_shaped_1d(kind, element_type, dims[0], encoding_id);
@@ -226,7 +239,7 @@ static bool loom_bytecode_type_plan_build_shaped(
     type.encoding_id = encoding_id;
     type.dims[0] = (uint64_t)(uintptr_t)overflow_dims;
   }
-  if (kind == LOOM_TYPE_VIEW) {
+  if (kind == LOOM_TYPE_VIEW && !reference_element) {
     type = loom_type_view_with_alignment(type, alignment);
   }
   *out_type = type;
@@ -372,6 +385,18 @@ static bool loom_bytecode_type_plan_decode_entry(
       uint8_t attachment = 0;
       LOOM_BYTECODE_RETURN_IF_REJECTED(
           loom_bytecode_reader_read_u8(decoder, cursor, &element_type));
+      uint64_t element_type_id = 0;
+      const bool reference_element =
+          kind == LOOM_TYPE_VIEW && element_type == LOOM_SCALAR_TYPE_NONE;
+      if (reference_element) {
+        const uint64_t reference_offset =
+            loom_bytecode_reader_cursor_absolute_position(cursor);
+        LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_read_uvarint(
+            decoder, cursor, &element_type_id));
+        LOOM_BYTECODE_RETURN_IF_REJECTED(
+            loom_bytecode_type_plan_validate_type_ref(
+                decoder, element_type_id, type_index, reference_offset));
+      }
       LOOM_BYTECODE_RETURN_IF_REJECTED(
           loom_bytecode_reader_read_u8(decoder, cursor, &rank));
       uint64_t attachment_offset =
@@ -422,6 +447,18 @@ static bool loom_bytecode_type_plan_decode_entry(
           (loom_scalar_type_t)element_type, rank, attachment, encoding_instance,
           alignment, dims, attachment_offset,
           out_plan_entry ? &direct_type : NULL));
+      if (reference_element && out_plan_entry) {
+        loom_bytecode_reference_view_fact_t* fact = NULL;
+        LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+            decoder,
+            iree_arena_allocate(scratch_arena, sizeof(*fact), (void**)&fact)));
+        *fact = (loom_bytecode_reference_view_fact_t){
+            .base = {.type_id = type_index, .kind = LOOM_TYPE_VIEW},
+            .element_type_id = (loom_type_id_t)element_type_id,
+        };
+        out_plan_entry->direct_type = direct_type;
+        type_fact = &fact->base;
+      }
       break;
     }
     case LOOM_TYPE_GROUP: {

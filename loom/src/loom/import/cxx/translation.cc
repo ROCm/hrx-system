@@ -136,7 +136,7 @@ class Translator final : private Initialization::Evaluation {
   }
 
   void translate() {
-    functions_.select({options_.roots, options_.root_count});
+    functions_.select({options_.roots, options_.root_count}, types_);
     functions_.analyze(types_);
     for (size_t index = 0; index < functions_.pending().size(); ++index) {
       function(functions_.pending()[index]);
@@ -424,9 +424,9 @@ class Translator final : private Initialization::Evaluation {
       return Value(result);
     }
     if (value.is_record() || value.is_array() || value.is_buffer() ||
-        value.is_opaque_dialect() || value.is_encoding() || value.is_pool() ||
-        value.is_tile() || value.is_channel() || value.is_vector() ||
-        value.is_view() || value.is_tensor()) {
+        value.is_object() || value.is_opaque_dialect() || value.is_encoding() ||
+        value.is_pool() || value.is_tile() || value.is_channel() ||
+        value.is_vector() || value.is_view() || value.is_tensor()) {
       if (&types_.partition(output_type, owner) != &value.partition()) {
         fail(owner, "conversion must preserve the source value type");
       }

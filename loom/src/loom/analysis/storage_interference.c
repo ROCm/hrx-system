@@ -12,7 +12,6 @@
 #include "loom/analysis/liveness.h"
 #include "loom/analysis/liveness_events.h"
 #include "loom/ir/context.h"
-#include "loom/ops/buffer/ops.h"
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/util/cfg_graph.h"
@@ -853,9 +852,11 @@ static iree_status_t loom_storage_interference_build_structured_cuts(
     }
     loom_storage_interference_structured_frame_t* frame =
         &frames[frame_count - 1];
-    if (root_index < root_count && loom_buffer_alloca_isa(point->op) &&
-        loom_buffer_alloca_result(point->op) ==
-            analysis->value_domain->value_ids[roots[root_index]]) {
+    while (root_index < root_count &&
+           loom_value_def_op(loom_module_value(
+               analysis->module,
+               analysis->value_domain->value_ids[roots[root_index]])) ==
+               point->op) {
       loom_storage_interference_phase_t* phase =
           analysis->entries[roots[root_index++]].footprint.phase;
       phase->allocation_point = point->start_point;
@@ -1014,14 +1015,16 @@ static iree_status_t loom_storage_interference_prove_single_instances(
         live_counts[membership->root_ordinal] += event->value_delta;
       }
     }
-    if (loom_buffer_alloca_isa(point->op)) {
-      const loom_value_ordinal_t root = loom_local_value_domain_ordinal(
-          analysis->value_domain, loom_buffer_alloca_result(point->op));
-      if (iree_any_bit_set(analysis->entries[root].flags,
-                           LOOM_STORAGE_INTERFERENCE_ENTRY_REPEATED) &&
-          live_counts[root] != 0) {
-        analysis->entries[root].flags &=
-            ~LOOM_STORAGE_INTERFERENCE_ENTRY_SINGLE_INSTANCE;
+    if (iree_any_bit_set(point->op->traits, LOOM_TRAIT_UNIQUE_IDENTITY)) {
+      for (uint16_t j = 0; j < point->op->result_count; ++j) {
+        const loom_value_ordinal_t root = loom_local_value_domain_ordinal(
+            analysis->value_domain, loom_op_const_results(point->op)[j]);
+        if (iree_any_bit_set(analysis->entries[root].flags,
+                             LOOM_STORAGE_INTERFERENCE_ENTRY_REPEATED) &&
+            live_counts[root] != 0) {
+          analysis->entries[root].flags &=
+              ~LOOM_STORAGE_INTERFERENCE_ENTRY_SINGLE_INSTANCE;
+        }
       }
     }
     // The retained barrier table is a subsequence of this source-preorder walk.
@@ -1127,8 +1130,11 @@ static iree_status_t loom_storage_interference_initialize_values(
     const loom_value_t* value = loom_module_value(analysis->module, value_id);
     if (!loom_value_is_block_arg(value)) {
       const loom_op_t* defining_op = loom_value_def_op(value);
-      if (defining_op && loom_buffer_alloca_isa(defining_op) &&
-          loom_buffer_alloca_result(defining_op) == value_id) {
+      if (defining_op &&
+          loom_storage_interference_value_is_reference(analysis, value_id) &&
+          loom_op_vtable_result_is_frame_owned(
+              loom_op_vtable(analysis->module, defining_op),
+              loom_value_def_index(value))) {
         if (analysis->entries == NULL) {
           const iree_host_size_t value_count =
               analysis->value_domain->value_count;
@@ -1147,10 +1153,22 @@ static iree_status_t loom_storage_interference_initialize_values(
           memset(analysis->memberships, 0,
                  value_count * sizeof(*analysis->memberships));
         }
+        const loom_value_facts_t facts =
+            loom_value_fact_table_lookup(analysis->fact_table, value_id);
+        loom_value_fact_buffer_reference_t buffer_reference = {0};
+        loom_value_fact_view_reference_t view_reference = {0};
+        const loom_value_fact_memory_space_t memory_space =
+            loom_value_facts_query_buffer_reference(
+                &analysis->fact_table->context, facts, &buffer_reference)
+                ? buffer_reference.memory_space
+            : loom_value_facts_query_view_reference(
+                  &analysis->fact_table->context, facts, &view_reference)
+                ? view_reference.memory_space
+                : LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN;
         analysis->entries[value_ordinal] = (loom_storage_interference_entry_t){
             .flags = LOOM_STORAGE_INTERFERENCE_ENTRY_ROOT |
                      LOOM_STORAGE_INTERFERENCE_ENTRY_COMPLETE,
-            .memory_space = loom_buffer_alloca_memory_space(defining_op),
+            .memory_space = memory_space,
         };
         analysis->entries[value_ordinal].flags |=
             loom_value_fact_table_block_may_repeat(analysis->fact_table,

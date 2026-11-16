@@ -56,6 +56,12 @@ static iree_status_t loom_bytecode_emit_complete_type(
     case LOOM_TYPE_VIEW: {
       IREE_RETURN_IF_ERROR(
           loom_bytecode_emit_uvarint(sink, loom_type_element_type(type)));
+      if (loom_type_has_reference_element(type)) {
+        const loom_type_id_t element =
+            index->dependencies[node->dependencies.begin];
+        IREE_RETURN_IF_ERROR(loom_bytecode_emit_uvarint(
+            sink, numbering->types.writer_ids_by_module_index[element]));
+      }
       IREE_RETURN_IF_ERROR(
           loom_bytecode_emit_uvarint(sink, loom_type_rank(type)));
       const uint32_t attachment = loom_type_has_ssa_encoding(type)      ? 2

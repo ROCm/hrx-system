@@ -1,5 +1,25 @@
 // RUN: verify
 
+vm.target<core> @vm
+
+low.func.def target<vm.core>(@vm) abi(vm_function) @empty_storage() asm {
+  %bytes = storage {byte_alignment = 1, byte_length = 0} : low.storage<stack>
+  %refs = storage {byte_alignment = 16, byte_length = 0} : low.storage<private>
+  return
+}
+
+// ====
+
+vm.target<core> @vm
+
+low.func.def target<vm.core>(@vm) abi(vm_function) @negative_storage() asm {
+  // ERROR@+1: STRUCTURE/014 "byte_length" "non-negative byte length"
+  %bytes = storage {byte_alignment = 1, byte_length = -1} : low.storage<stack>
+  return
+}
+
+// ====
+
 test.target<low_core> @test_target
 
 low.kernel.def target<test.low.core>(@test_target) linkage(dso_local) @kernel_linkage_uses_default_name() asm {

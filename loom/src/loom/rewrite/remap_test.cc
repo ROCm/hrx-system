@@ -1190,9 +1190,18 @@ TEST_F(RemapTest, RemapsReferenceIdentityAndKeepsExistingTargetAlias) {
   const auto source_borrow =
       loom_type_reference(LOOM_REFERENCE_OWNERSHIP_BORROWED, source_namespace,
                           source_name, source_declaration);
+  const uint64_t dimensions[] = {loom_dim_pack_static(3)};
+  const loom_type_t arguments[] = {
+      source_owner,
+      loom_type_reference_view(&source_owner, 1, dimensions, 0, 0),
+  };
+  const loom_type_t results[] = {
+      source_borrow,
+      loom_type_reference_view(&source_borrow, 0, nullptr, 0, 0),
+  };
   loom_type_t source_signature;
   IREE_ASSERT_OK(loom_module_intern_function_type(
-      source_, &source_owner, 1, &source_borrow, 1, &source_signature));
+      source_, arguments, 2, results, 2, &source_signature));
   const loom_ir_remap_options_t options = {
       .remap_symbol =
           loom_ir_remap_symbol_callback_make(RemapSymbolByName, nullptr),
@@ -1221,6 +1230,12 @@ TEST_F(RemapTest, RemapsReferenceIdentityAndKeepsExistingTargetAlias) {
           target_->symbols.entries[result_declaration].name_id),
       IREE_SV("Decoder")));
   EXPECT_FALSE(loom_type_equal(argument, result));
+  const auto owner_view = loom_type_func_arg_types(target_signature)[1];
+  const auto borrow_view = loom_type_func_result_types(target_signature)[1];
+  EXPECT_EQ(loom_type_dim_static_size_at(owner_view, 0), 3);
+  EXPECT_TRUE(loom_type_equal(loom_type_element(owner_view), argument));
+  EXPECT_EQ(loom_type_rank(borrow_view), 0u);
+  EXPECT_TRUE(loom_type_equal(loom_type_element(borrow_view), result));
 }
 
 TEST_F(RemapTest, CopiesOrderedF64ArraysAcrossModules) {

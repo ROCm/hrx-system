@@ -261,6 +261,9 @@ static loom_value_facts_t loom_view_addi_nonnegative(loom_value_facts_t lhs,
 
 static loom_value_facts_t loom_view_scale_by_element_bytes(
     loom_value_facts_t element_facts, int64_t static_element_byte_count) {
+  if (loom_value_facts_is_zero(element_facts)) {
+    return loom_value_facts_exact_i64(0);
+  }
   if (static_element_byte_count < 0) {
     return loom_view_nonnegative_unknown_facts();
   }
@@ -285,8 +288,9 @@ static uint64_t loom_view_alignment_from_offset_facts(
   return loom_view_power_of_two_factor(offset_facts.known_divisor);
 }
 
-static int64_t loom_view_static_element_byte_count(loom_type_t type) {
-  int32_t bit_count = loom_scalar_type_bitwidth(loom_type_element_type(type));
+static int64_t loom_view_static_element_byte_count(
+    const loom_fact_context_t* context, loom_type_t type) {
+  uint32_t bit_count = loom_fact_context_element_bitwidth(context, type);
   if (bit_count <= 0 || (bit_count % 8) != 0) {
     return -1;
   }
@@ -408,10 +412,6 @@ static loom_value_facts_t loom_view_suffix_footprint_facts(
     loom_type_t view_type, uint8_t first_axis,
     int64_t static_element_byte_count,
     const loom_value_fact_address_layout_t* address_layout) {
-  if (static_element_byte_count < 0) {
-    return loom_view_nonnegative_unknown_facts();
-  }
-
   uint8_t rank = loom_type_rank(view_type);
   loom_value_facts_t max_element_offset = loom_value_facts_exact_i64(0);
   bool may_be_empty = false;
@@ -584,14 +584,15 @@ static loom_value_fact_buffer_reference_t loom_view_default_buffer_reference(
 }
 
 static loom_value_fact_view_reference_t loom_view_default_view_reference(
-    loom_value_id_t source_value_id, loom_type_t source_type) {
+    const loom_fact_context_t* context, loom_value_id_t source_value_id,
+    loom_type_t source_type) {
   return (loom_value_fact_view_reference_t){
       .base_byte_offset = loom_value_facts_exact_i64(0),
       .footprint_byte_length = loom_view_nonnegative_unknown_facts(),
       .minimum_alignment = 1,
       .root_minimum_alignment = 1,
       .static_element_byte_count =
-          loom_view_static_element_byte_count(source_type),
+          loom_view_static_element_byte_count(context, source_type),
       .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN,
       .root_value_id = source_value_id,
       .buffer_value_id = LOOM_VALUE_ID_INVALID,
@@ -606,13 +607,41 @@ iree_status_t loom_view_reference_refine_restrict_access(
     loom_value_fact_restrict_access_t restrict_access,
     loom_value_facts_t* out) {
   loom_value_fact_view_reference_t reference =
-      loom_view_default_view_reference(source_value_id, source_type);
+      loom_view_default_view_reference(context, source_value_id, source_type);
   (void)loom_value_facts_query_view_reference(context, source_facts,
                                               &reference);
   reference.root_value_id = loom_value_fact_view_reference_resolve_root_value(
       reference, source_value_id);
   reference.restrict_access = restrict_access;
   return loom_value_facts_make_view_reference(context, reference, out);
+}
+
+iree_status_t loom_view_reference_make_allocation(
+    loom_fact_context_t* context, const loom_module_t* module,
+    loom_value_id_t result, loom_type_t result_type, uint64_t minimum_alignment,
+    loom_value_fact_memory_space_t memory_space, loom_value_facts_t* out) {
+  loom_value_fact_view_reference_t reference =
+      loom_view_default_view_reference(context, result, result_type);
+  reference.footprint_byte_length = loom_view_footprint_facts(
+      context, module, result_type, reference.static_element_byte_count,
+      /*address_layout=*/NULL);
+  reference.minimum_alignment = minimum_alignment;
+  reference.root_minimum_alignment = minimum_alignment;
+  reference.memory_space = memory_space;
+  reference.alias_scope_id = result;
+  reference.nullability = LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL;
+  reference.origin = context->reference_origin;
+  if (reference.origin.kind != LOOM_VALUE_FACT_REFERENCE_ORIGIN_UNKNOWN) {
+    reference.origin.kind = LOOM_VALUE_FACT_REFERENCE_ORIGIN_ALLOCATION;
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_value_facts_make_view_reference(context, reference, out));
+  if (memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
+    loom_value_facts_mark_workgroup_uniform(out);
+  } else {
+    loom_value_facts_mark_lane_varying(out);
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_view_reference_make_record(loom_fact_context_t* context,
@@ -622,7 +651,7 @@ iree_status_t loom_view_reference_make_record(loom_fact_context_t* context,
                                               loom_type_t storage_type,
                                               loom_value_facts_t* out) {
   loom_value_fact_view_reference_t reference =
-      loom_view_default_view_reference(storage_value_id, storage_type);
+      loom_view_default_view_reference(context, storage_value_id, storage_type);
   (void)loom_value_facts_query_view_reference(context, storage_facts,
                                               &reference);
   reference.root_value_id = loom_value_fact_view_reference_resolve_root_value(
@@ -666,7 +695,7 @@ iree_status_t loom_view_reference_make_buffer_view(
   view_reference.base_byte_offset.extension_id =
       LOOM_VALUE_FACT_EXTENSION_ID_NONE;
   view_reference.static_element_byte_count =
-      loom_view_static_element_byte_count(result_type);
+      loom_view_static_element_byte_count(context, result_type);
   view_reference.footprint_byte_length = loom_view_footprint_facts(
       context, module, result_type, view_reference.static_element_byte_count,
       /*address_layout=*/NULL);
@@ -692,7 +721,7 @@ iree_status_t loom_view_reference_make_unplaced_view(
   (void)loom_value_facts_query_buffer_reference(context, buffer_facts,
                                                 &buffer_reference);
   loom_value_fact_view_reference_t view_reference =
-      loom_view_default_view_reference(result_value_id, result_type);
+      loom_view_default_view_reference(context, result_value_id, result_type);
   view_reference.footprint_byte_length = loom_view_footprint_facts(
       context, module, result_type, view_reference.static_element_byte_count,
       /*address_layout=*/NULL);
@@ -712,13 +741,13 @@ iree_status_t loom_view_reference_make_subview(
     const loom_value_fact_address_layout_t* result_address_layout,
     loom_value_facts_t* out) {
   loom_value_fact_view_reference_t source_reference =
-      loom_view_default_view_reference(source_value_id, source_type);
+      loom_view_default_view_reference(context, source_value_id, source_type);
   (void)loom_value_facts_query_view_reference(context, source_facts,
                                               &source_reference);
 
   loom_value_fact_view_reference_t view_reference = {0};
   view_reference.static_element_byte_count =
-      loom_view_static_element_byte_count(result_type);
+      loom_view_static_element_byte_count(context, result_type);
   loom_value_facts_t additional_byte_offset = loom_value_facts_unknown();
   if (!loom_view_subview_additional_byte_offset_facts(
           context, module, source_type, static_offsets, dynamic_offsets,
@@ -752,7 +781,7 @@ iree_status_t loom_view_reference_make_reinterpret(
     loom_value_id_t source_value_id, loom_value_facts_t source_facts,
     loom_type_t source_type, loom_type_t result_type, loom_value_facts_t* out) {
   loom_value_fact_view_reference_t source_reference =
-      loom_view_default_view_reference(source_value_id, source_type);
+      loom_view_default_view_reference(context, source_value_id, source_type);
   (void)loom_value_facts_query_view_reference(context, source_facts,
                                               &source_reference);
 
@@ -761,7 +790,7 @@ iree_status_t loom_view_reference_make_reinterpret(
       loom_value_fact_view_reference_resolve_root_value(source_reference,
                                                         source_value_id);
   view_reference.static_element_byte_count =
-      loom_view_static_element_byte_count(result_type);
+      loom_view_static_element_byte_count(context, result_type);
   view_reference.footprint_byte_length = loom_view_footprint_facts(
       context, module, result_type, view_reference.static_element_byte_count,
       /*address_layout=*/NULL);

@@ -48,6 +48,7 @@ iree_c_embed_data(
         "//loom/src/loom/import/cxx:include/loomcxx/low.h",
         "//loom/src/loom/import/cxx:include/loomcxx/math.h",
         "//loom/src/loom/import/cxx:include/loomcxx/numeric.h",
+        "//loom/src/loom/import/cxx:include/loomcxx/object.h",
         "//loom/src/loom/import/cxx:include/loomcxx/pipeline.h",
         "//loom/src/loom/import/cxx:include/loomcxx/predicate.h",
         "//loom/src/loom/import/cxx:include/loomcxx/scalar.h",

@@ -13,6 +13,7 @@
 #define LOOM_OPS_VIEW_OPS_H_
 
 #include "loom/ops/op_defs.h"
+#include "loom/ir/types.h"
 #include "loom/ops/atomic.h"
 #include "loom/ops/cache.h"
 
@@ -33,7 +34,8 @@ enum {
   LOOM_OP_VIEW_ATOMIC_STORE = LOOM_OP_KIND(LOOM_DIALECT_VIEW, 9),
   LOOM_OP_VIEW_BITCAST = LOOM_OP_KIND(LOOM_DIALECT_VIEW, 10),
   LOOM_OP_VIEW_DUPLICATE = LOOM_OP_KIND(LOOM_DIALECT_VIEW, 11),
-  LOOM_OP_VIEW_COUNT_ = 12,
+  LOOM_OP_VIEW_ALLOCA = LOOM_OP_KIND(LOOM_DIALECT_VIEW, 12),
+  LOOM_OP_VIEW_COUNT_ = 13,
 };
 
 // Intended future access kind for a prefetch hint.
@@ -107,7 +109,7 @@ iree_status_t loom_value_refinement_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_VIEW_LOAD: Load one scalar element from a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis.
+// LOOM_OP_VIEW_LOAD: Load one element from a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis. Reference elements copy the complete handle state into an independent result; owning references acquire an owner and pointers preserve borrowing or its necessary protection.
 // %x = view.load %view[%row, %col] : view<[%M]x[%N]xf32, %layout> -> f32
 LOOM_DEFINE_ISA(loom_view_load_isa, LOOM_OP_VIEW_LOAD)
 LOOM_DEFINE_OPERAND(loom_view_load_view, 0)
@@ -136,7 +138,7 @@ iree_status_t loom_view_load_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
-loom_trait_flags_t loom_memory_access_effective_traits(
+loom_trait_flags_t loom_view_element_access_effective_traits(
     const loom_module_t* module, const loom_op_t* op);
 iree_status_t loom_view_load_facts(
     loom_fact_context_t* context,
@@ -147,7 +149,7 @@ iree_status_t loom_view_load_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_VIEW_STORE: Store one scalar element into a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis.
+// LOOM_OP_VIEW_STORE: Store one element into a typed view at a full-rank logical index. The index list is expressed in view coordinates and must name one position per view axis. Reference elements copy the complete handle state without consuming the source and release any replaced owner. Stored pointers preserve borrowing or its necessary protection.
 // view.store %x, %view[%row, %col] : f32, view<[%M]x[%N]xf32, %layout>
 LOOM_DEFINE_ISA(loom_view_store_isa, LOOM_OP_VIEW_STORE)
 LOOM_DEFINE_OPERAND(loom_view_store_value, 0)
@@ -176,7 +178,7 @@ iree_status_t loom_view_store_build(
     loom_optional uint8_t cache_temporal,
     loom_location_id_t location,
     loom_op_t** out_op);
-loom_trait_flags_t loom_memory_access_effective_traits(
+loom_trait_flags_t loom_view_element_access_effective_traits(
     const loom_module_t* module, const loom_op_t* op);
 iree_status_t loom_view_store_verify(
     const loom_module_t* module, const loom_op_t* op,
@@ -459,6 +461,36 @@ iree_status_t loom_value_duplication_facts(
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
+
+// LOOM_OP_VIEW_ALLOCA: Allocate frame-owned typed storage and return a view of its elements. The result type supplies the shape and layout. The allocation and all derived views borrow the current invocation and cannot escape it. Reference elements occupy opaque reference cells, never byte-addressable buffer storage. Scalar contents are unspecified; reference cells start null. The allocation shares the backing-resource and lifetime contract of buffer.alloca.
+// %values = view.alloca<private> : view<16xi64>
+LOOM_DEFINE_ISA(loom_view_alloca_isa, LOOM_OP_VIEW_ALLOCA)
+LOOM_DEFINE_OPTIONAL_OPERAND(loom_view_alloca_pool, 0)
+LOOM_DEFINE_RESULT(loom_view_alloca_result, 0)
+LOOM_DEFINE_ATTR_I64(loom_view_alloca_base_alignment, 0)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_view_alloca_memory_space, 1, loom_value_fact_memory_space_t)
+enum loom_view_alloca_build_flag_bits_e {
+  LOOM_VIEW_ALLOCA_BUILD_FLAG_HAS_POOL = 1u << 0,
+  LOOM_VIEW_ALLOCA_BUILD_FLAG_HAS_BASE_ALIGNMENT = 1u << 1,
+};
+typedef uint32_t loom_view_alloca_build_flags_t;
+iree_status_t loom_view_alloca_build(
+    loom_builder_t* builder,
+    loom_view_alloca_build_flags_t build_flags,
+    loom_value_fact_memory_space_t memory_space,
+    loom_optional loom_may_consume loom_value_id_t pool,
+    loom_optional int64_t base_alignment,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_view_alloca_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+iree_status_t loom_view_alloca_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // Returns the vtable array for the view dialect.
 const loom_op_vtable_t* const* loom_view_dialect_vtables(

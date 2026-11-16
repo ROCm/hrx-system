@@ -1679,7 +1679,7 @@ low_storage_reserve = Op(
         AttrDef("byte_length", ATTR_TYPE_I64),
         AttrDef("byte_alignment", ATTR_TYPE_I64),
     ],
-    results=[Result("storage", STORAGE, allocates=True)],
+    results=[Result("storage", STORAGE, allocates=True, frame_owned=True)],
     ownership_effects=[BorrowedResult("storage")],
     traits=[UNKNOWN_EFFECTS],
     verify="loom_low_storage_reserve_verify",

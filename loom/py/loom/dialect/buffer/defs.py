@@ -300,6 +300,7 @@ buffer_alloca = Op(
             BUFFER,
             doc="Fresh opaque scratch storage root.",
             allocates=True,
+            frame_owned=True,
         ),
     ],
     attrs=[
@@ -354,7 +355,7 @@ buffer_alloca_init = Op(
     operands=[
         Operand("pool", POOL, optional=True, doc="Borrowed backing allocation resource."),
     ],
-    results=[Result("result", BUFFER, allocates=True, doc="Fresh initialized storage root.")],
+    results=[Result("result", BUFFER, allocates=True, frame_owned=True, doc="Fresh initialized storage root.")],
     attrs=[
         AttrDef("base_alignment", ATTR_TYPE_I64, doc="Minimum byte alignment of the storage base."),
         AttrDef("memory_space", ATTR_TYPE_ENUM, enum_def=MemorySpace, doc="Allocatable scratch memory space."),

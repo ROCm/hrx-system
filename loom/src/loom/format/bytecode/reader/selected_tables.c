@@ -46,6 +46,9 @@ typedef struct loom_bytecode_selected_table_payload_t {
           loom_type_t value;
           // Scratch-owned static encoding identity, or NULL without one.
           uint32_t* encoding_id;
+          // Scratch-owned projected reference element, or NULL for scalar
+          // views.
+          loom_type_id_t* element_type_id;
         } direct;
         // Canonical parent metadata and its completed child identities.
         struct {
@@ -533,8 +536,9 @@ static bool loom_bytecode_selected_table_prepare_type_plan(
     payload->type.direct.value = loom_type_reference(
         reference->ownership, namespace_id, name_id, declaration.symbol_id);
     payload->type.direct.encoding_id = NULL;
+    payload->type.direct.element_type_id = NULL;
     return true;
-  } else if (fact != NULL) {
+  } else if (fact != NULL && fact->kind != LOOM_TYPE_VIEW) {
     return loom_bytecode_reader_check_status(
         materializer->decoder,
         loom_bytecode_selected_table_prepare_structural_type(
@@ -553,6 +557,20 @@ static bool loom_bytecode_selected_table_prepare_type_plan(
   }
   payload->type.direct.value = type;
   payload->type.direct.encoding_id = NULL;
+  payload->type.direct.element_type_id = NULL;
+  if (fact && fact->kind == LOOM_TYPE_VIEW) {
+    const loom_bytecode_reference_view_fact_t* view =
+        (const loom_bytecode_reference_view_fact_t*)fact;
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        materializer->decoder,
+        iree_arena_allocate(materializer->scratch_arena,
+                            sizeof(*payload->type.direct.element_type_id),
+                            (void**)&payload->type.direct.element_type_id)));
+    LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+        materializer->decoder, loom_bytecode_selected_table_project_type(
+                                   materializer, view->element_type_id,
+                                   payload->type.direct.element_type_id)));
+  }
   if (loom_type_has_static_encoding(type)) {
     LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
         materializer->decoder,
@@ -616,32 +634,52 @@ static bool loom_bytecode_selected_table_prepare_type(
       materializer, &plan_entry, fact, payload);
 }
 
-static iree_status_t loom_bytecode_selected_table_finish_type(
+static bool loom_bytecode_selected_table_finish_type(
     loom_bytecode_selected_table_materializer_t* materializer,
     const loom_bytecode_selected_table_payload_t* payload,
-    loom_type_id_t* out_type_id) {
+    uint32_t source_ordinal, loom_type_id_t* out_type_id) {
   switch (payload->type.form) {
     case LOOM_BYTECODE_SELECTED_TYPE_DIRECT: {
       loom_type_t type = payload->type.direct.value;
       if (payload->type.direct.encoding_id != NULL) {
         type.encoding_id = (uint16_t)*payload->type.direct.encoding_id;
       }
-      return loom_module_intern_topological_type_id(materializer->output_module,
-                                                    type, NULL, 0, out_type_id);
+      if (payload->type.direct.element_type_id) {
+        LOOM_BYTECODE_RETURN_IF_REJECTED(
+            loom_bytecode_type_bind_reference_element(
+                materializer->decoder, materializer->output_module,
+                *payload->type.direct.element_type_id,
+                materializer->metadata->types.entries[source_ordinal]
+                    .entry_offset,
+                &type));
+        return loom_bytecode_reader_check_status(
+            materializer->decoder,
+            loom_module_intern_topological_type_id(
+                materializer->output_module, type,
+                payload->type.direct.element_type_id, 1, out_type_id));
+      }
+      return loom_bytecode_reader_check_status(
+          materializer->decoder,
+          loom_module_intern_topological_type_id(materializer->output_module,
+                                                 type, NULL, 0, out_type_id));
     }
     case LOOM_BYTECODE_SELECTED_TYPE_STRUCTURAL:
-      return loom_bytecode_type_materialize_structural(
-          &payload->type.structural.plan, payload->type.structural.fact,
-          payload->type.structural.children, materializer->output_module,
-          out_type_id);
+      return loom_bytecode_reader_check_status(
+          materializer->decoder,
+          loom_bytecode_type_materialize_structural(
+              &payload->type.structural.plan, payload->type.structural.fact,
+              payload->type.structural.children, materializer->output_module,
+              out_type_id));
     case LOOM_BYTECODE_SELECTED_TYPE_PARAMETERIZED: {
       loom_type_t type = {0};
       const loom_parameterized_type_descriptor_t* descriptor =
           payload->type.parameterized.descriptor;
-      return loom_module_make_parameterized_type(
-          materializer->output_module, descriptor,
-          payload->type.parameterized.parameters, descriptor->parameter_count,
-          &type, out_type_id);
+      return loom_bytecode_reader_check_status(
+          materializer->decoder,
+          loom_module_make_parameterized_type(
+              materializer->output_module, descriptor,
+              payload->type.parameterized.parameters,
+              descriptor->parameter_count, &type, out_type_id));
     }
   }
   IREE_ASSERT_UNREACHABLE("selected type construction form");
@@ -980,7 +1018,7 @@ static iree_status_t loom_bytecode_selected_table_finish_location(
                                   payload->location.value, out_location_id);
 }
 
-static iree_status_t loom_bytecode_selected_table_finish_entry(
+static bool loom_bytecode_selected_table_finish_entry(
     loom_bytecode_selected_table_materializer_t* materializer,
     loom_bytecode_selected_table_kind_t table_kind, uint32_t source_ordinal,
     loom_bytecode_selected_table_payload_t* payload, uint32_t* destination) {
@@ -988,28 +1026,33 @@ static iree_status_t loom_bytecode_selected_table_finish_entry(
   switch (table_kind) {
     case LOOM_BYTECODE_SELECTED_TABLE_ENCODING: {
       uint16_t encoding_id = 0;
-      IREE_RETURN_IF_ERROR(loom_module_add_encoding(
-          materializer->output_module, &payload->encoding, &encoding_id));
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+          materializer->decoder,
+          loom_module_add_encoding(materializer->output_module,
+                                   &payload->encoding, &encoding_id)));
       target_id = encoding_id;
       break;
     }
     case LOOM_BYTECODE_SELECTED_TABLE_TYPE: {
-      IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_finish_type(
-          materializer, payload, &target_id));
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_selected_table_finish_type(
+          materializer, payload, source_ordinal, &target_id));
       break;
     }
     case LOOM_BYTECODE_SELECTED_TABLE_LOCATION: {
-      IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_finish_location(
-          materializer, payload, &target_id));
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+          materializer->decoder, loom_bytecode_selected_table_finish_location(
+                                     materializer, payload, &target_id)));
       break;
     }
   }
-  IREE_RETURN_IF_ERROR(loom_ordinal_map_insert(
-      &materializer->projection,
-      loom_bytecode_selected_table_projection_domain(table_kind),
-      source_ordinal, target_id));
+  LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_reader_check_status(
+      materializer->decoder,
+      loom_ordinal_map_insert(
+          &materializer->projection,
+          loom_bytecode_selected_table_projection_domain(table_kind),
+          source_ordinal, target_id)));
   *destination = target_id;
-  return iree_ok_status();
+  return true;
 }
 
 // Keeps dependency construction off the completed-identity lookup path.
@@ -1071,11 +1114,9 @@ loom_bytecode_selected_table_materialize_unresolved(
       checkpoint = frame->pending->checkpoint;
     }
     if (accepted && materializer->worklist.count == frame_depth) {
-      accepted = loom_bytecode_reader_check_status(
-          materializer->decoder,
-          loom_bytecode_selected_table_finish_entry(
-              materializer, frame->table_kind, frame->source_ordinal, payload,
-              frame->destination));
+      accepted = loom_bytecode_selected_table_finish_entry(
+          materializer, frame->table_kind, frame->source_ordinal, payload,
+          frame->destination);
       if (frame_depth != 1) {
         iree_arena_checkpoint_restore(&checkpoint);
       }

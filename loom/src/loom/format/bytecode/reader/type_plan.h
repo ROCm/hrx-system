@@ -70,6 +70,15 @@ typedef struct loom_bytecode_reference_type_fact_t {
   loom_reference_ownership_t ownership;
 } loom_bytecode_reference_type_fact_t;
 
+// A reference view retains its shape in direct_type and resolves its element
+// from a prior static entry before constructing the canonical native type.
+typedef struct loom_bytecode_reference_view_fact_t {
+  // Common sparse type-fact header, with kind VIEW.
+  loom_bytecode_type_fact_t base;
+  // Prior static type ordinal; materialization requires an exact ref/ptr type.
+  loom_type_id_t element_type_id;
+} loom_bytecode_reference_view_fact_t;
+
 // Native prefix and type-reference facts for a structural payload. The prefix
 // contains the function signature header, the two register carrier words, or
 // zeros for dialect types. Canonical construction copies the parent metadata

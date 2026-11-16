@@ -39,6 +39,7 @@ static bool loom_target_profile_snapshot_equal(
          lhs->subgroup_partition == rhs->subgroup_partition &&
          lhs->maximum_index_bitwidth == rhs->maximum_index_bitwidth &&
          lhs->default_pointer_bitwidth == rhs->default_pointer_bitwidth &&
+         lhs->reference_storage_bitwidth == rhs->reference_storage_bitwidth &&
          lhs->index_bitwidth == rhs->index_bitwidth &&
          lhs->offset_bitwidth == rhs->offset_bitwidth &&
          lhs->max_workgroup_size.x == rhs->max_workgroup_size.x &&

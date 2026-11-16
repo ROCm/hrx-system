@@ -324,7 +324,7 @@ class ShapedType:
     """
 
     type_kind: TypeKind  # TILE, TENSOR, VECTOR, or VIEW
-    element_type: ScalarType
+    element_type: ScalarType | ReferenceType
     dims: tuple[Dim, ...]
     encoding: EncodingInstance | DynamicEncoding | None = None
     # Reduced byte alignment required by executed view element accesses.
@@ -346,9 +346,16 @@ class ShapedType:
                 raise ValueError("vector types must have rank >= 1")
             if self.encoding is not None:
                 raise ValueError("vector types must not carry encodings/layouts")
+        if not isinstance(self.element_type, ScalarType) and not (
+            self.type_kind == TypeKind.VIEW
+            and isinstance(self.element_type, ReferenceType)
+        ):
+            raise ValueError("shaped elements must be scalar, or ref/ptr for views")
         if self.alignment is not None:
             if self.type_kind != TypeKind.VIEW:
                 raise ValueError("only view types may carry an access alignment")
+            if isinstance(self.element_type, ReferenceType):
+                raise ValueError("reference views have target-selected cell alignment")
             natural_alignment = max(1, self.element_type.bitwidth // 8)
             if (
                 not isinstance(self.alignment, int)
@@ -369,6 +376,8 @@ class ShapedType:
         """Byte alignment required by an executed view element access."""
         if self.type_kind != TypeKind.VIEW:
             raise ValueError("only view types have an access alignment")
+        if isinstance(self.element_type, ReferenceType):
+            raise ValueError("reference views have target-selected cell alignment")
         return self.alignment or max(1, self.element_type.bitwidth // 8)
 
     @property

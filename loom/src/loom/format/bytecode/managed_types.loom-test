@@ -8,8 +8,10 @@ type.decl import("input", "decoder") @Alias
 
 type.decl import("other", "decoder") @Other
 
+type.decl import("io", "packet") @Packet
+
 // Nested signatures and body arguments retain the same exact identities.
-func.def @entry(%frame: ref<@Frame>, %decoder: ptr<@Decoder>, %callback: (ptr<@Decoder>) -> (ref<@Frame>)) -> (ref<@Frame>) {
+func.def @entry(%frame: ref<@Frame>, %decoder: ptr<@Decoder>, %callback: (ptr<@Decoder>) -> (ref<@Frame>), %packet_count: index, %packets: view<[%packet_count]xptr<@Packet>>, %frames: view<2x3xref<@Frame>>, %packet: view<ref<@Packet>>) -> (ref<@Frame>) {
   func.return %frame : ref<@Frame>
 }
 
@@ -22,10 +24,10 @@ func.def @unused(%other: ref<@Other>) -> (ref<@Other>) {
 
 type.decl import("media", "image.frame") @Client
 
-func.decl @consume(%frame: ref<@Client>, %callback: (ptr<@Client>) -> (ref<@Client>)) -> (ref<@Client>)
+func.decl @consume(%frame: ref<@Client>, %callback: (ptr<@Client>) -> (ref<@Client>), %packets: view<4xptr<@Client>>) -> (ref<@Client>)
 
-func.def @entry(%frame: ref<@Client>, %callback: (ptr<@Client>) -> (ref<@Client>)) -> (ref<@Client>) {
-  %result = func.call @consume(%frame, %callback) : (ref<@Client>, (ptr<@Client>) -> (ref<@Client>)) -> (ref<@Client>)
+func.def @entry(%frame: ref<@Client>, %callback: (ptr<@Client>) -> (ref<@Client>), %packets: view<4xptr<@Client>>) -> (ref<@Client>) {
+  %result = func.call @consume(%frame, %callback, %packets) : (ref<@Client>, (ptr<@Client>) -> (ref<@Client>), view<4xptr<@Client>>) -> (ref<@Client>)
   func.return %result : ref<@Client>
 }
 
@@ -36,6 +38,6 @@ type.decl import("unused", "payload") @Other
 
 type.decl import("media", "image.frame") @Provider
 
-func.def public @consume(%frame: ref<@Provider>, %callback: (ptr<@Provider>) -> (ref<@Provider>)) -> (ref<@Provider>) {
+func.def public @consume(%frame: ref<@Provider>, %callback: (ptr<@Provider>) -> (ref<@Provider>), %packets: view<4xptr<@Provider>>) -> (ref<@Provider>) {
   func.return %frame : ref<@Provider>
 }

@@ -262,14 +262,16 @@ class SymbolReferenceProjectionBuilder:
         value: Any,
         attr_def: Any | None = None,
     ) -> None:
-        # Scalars and SSA-bound shapes cannot carry symbol references. Keep this
+        # Scalar elements and SSA encodings carry no symbol references. Keep this
         # ordinary path out of the graph index, as in the native classification.
         if isinstance(value, (int, float, bytes, bytearray, ScalarType)):
             return
         if type(value) is str and getattr(attr_def, "attr_type", None) != "symbol":
             return
-        if isinstance(value, ShapedType) and not isinstance(
-            value.encoding, EncodingInstance
+        if (
+            isinstance(value, ShapedType)
+            and isinstance(value.element_type, ScalarType)
+            and not isinstance(value.encoding, EncodingInstance)
         ):
             return
         root_key = (id(value), id(attr_def))

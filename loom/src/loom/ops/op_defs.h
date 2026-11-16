@@ -470,6 +470,9 @@ enum loom_result_flag_bits_e {
   // Result values describe a locally scoped operation signature and are not
   // visible as SSA definitions after the operation.
   LOOM_RESULT_SIGNATURE_ONLY = 1u << 2,
+  // The execution frame owns this fresh storage allocation. Its result is a
+  // borrow with no explicit release obligation; aliases cannot outlive it.
+  LOOM_RESULT_FRAME_OWNED = 1u << 3,
 };
 typedef uint8_t loom_result_flags_t;
 
@@ -857,6 +860,19 @@ static inline bool loom_op_vtable_has_signature_only_results(
                            LOOM_OP_VTABLE_VARIADIC_RESULTS)) &&
          iree_any_bit_set(vtable->result_descriptors[0].flags,
                           LOOM_RESULT_SIGNATURE_ONLY);
+}
+
+// Returns whether this result borrows a fresh frame-owned allocation. The
+// result index belongs to a verified instance of this operation descriptor.
+static inline bool loom_op_vtable_result_is_frame_owned(
+    const loom_op_vtable_t* vtable, uint16_t result_index) {
+  if (!vtable || !vtable->result_descriptors) {
+    return false;
+  }
+  const uint16_t field_index =
+      iree_min(result_index, vtable->fixed_result_count);
+  return iree_any_bit_set(vtable->result_descriptors[field_index].flags,
+                          LOOM_RESULT_FRAME_OWNED);
 }
 
 // Returns the number of operand segment counts stored on an instance of this

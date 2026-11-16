@@ -75,7 +75,7 @@ const RecordPartition* require_record(cxx::TranslationUnit& unit,
 
 bool payload_shape_matches(const TilePartition& payload,
                            const ViewPartition& view, size_t prefix_rank) {
-  if (payload.element != view.element ||
+  if (!loom_type_equal(loom_type_scalar(payload.element), view.element) ||
       view.extents.size() != payload.extents.size() + prefix_rank) {
     return false;
   }

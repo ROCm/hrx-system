@@ -1368,6 +1368,21 @@ class TestConstraints:
         assert c.error is not None
         assert c.error.error_id == "ERR_TYPE_002"
 
+    def test_same_reference_element_type(self) -> None:
+        c = SameElementType("value", "view")
+        for ownership in ir.ReferenceOwnership:
+            element = ir.ReferenceType(ownership, "io", "packet", "Packet")
+            view = ir.ShapedType(ir.TypeKind.VIEW, element, (ir.StaticDim(4),))
+            alias = ir.ReferenceType(ownership, "io", "packet", "Alias")
+            assert c.check({"value": alias, "view": view})[0]
+            for other_ownership in ir.ReferenceOwnership:
+                value = ir.ReferenceType(other_ownership, "io", "packet", "Packet")
+                assert c.check({"value": value, "view": view})[0] == (
+                    other_ownership == ownership
+                )
+            other = ir.ReferenceType(ownership, "other", "packet", "Other")
+            assert not c.check({"value": other, "view": view})[0]
+
     def test_same_encoding(self) -> None:
         c = SameEncoding("a", "b")
         assert c.error is not None
@@ -2743,6 +2758,28 @@ class TestOp:
                 results=[Result("result", ANY, allocates=True, signature_only=True)],
                 format=[Scope([ResultType("result")])],
             )
+
+    def test_frame_owned_results_are_fresh_borrowed_storage(self) -> None:
+        for carrier in (BUFFER, dsl.VIEW, dsl.STORAGE):
+            result = Result("result", carrier, allocates=True, frame_owned=True)
+            Op(
+                "test.frame",
+                results=[result],
+                ownership_effects=[dsl.BorrowedResult("result")],
+            )
+            for effects in ([], [dsl.FreshResult("result")]):
+                with _raises(ValueError, match="requires BorrowedResult"):
+                    Op("test.frame", results=[result], ownership_effects=effects)
+        for result in (
+            Result("result", BUFFER, frame_owned=True),
+            Result("result", INTEGER, allocates=True, frame_owned=True),
+        ):
+            with _raises(ValueError, match="must allocate buffer, view, or storage"):
+                Op(
+                    "test.frame",
+                    results=[result],
+                    ownership_effects=[dsl.BorrowedResult("result")],
+                )
 
     def test_reference_source_requires_a_definite_storage_origin(self) -> None:
         Op(

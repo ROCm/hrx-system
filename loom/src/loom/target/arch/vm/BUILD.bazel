@@ -185,6 +185,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/vm/contracts:core_lower_rules",
         "//loom/src/loom/target/arch/vm/descriptors",
         "//loom/src/loom/target/arch/vm/ops",
+        "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
     ],
 )

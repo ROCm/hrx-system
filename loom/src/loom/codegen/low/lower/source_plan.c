@@ -1765,7 +1765,7 @@ static iree_status_t loom_low_lower_plan_op(
         LOOM_LOW_LOWER_SOURCE_GRAPH_ALTERNATIVE_FIXED);
   }
 
-  if (loom_buffer_alloca_isa(source_op)) {
+  if (loom_buffer_alloca_isa(source_op) || loom_view_alloca_isa(source_op)) {
     bool selected = false;
     const loom_low_lower_function_storage_plan_t* plan = NULL;
     IREE_RETURN_IF_ERROR(loom_low_lower_function_storage_select(

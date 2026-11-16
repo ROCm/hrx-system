@@ -28,6 +28,14 @@
 
 namespace loom::cxx_import {
 
+// A borrowed runtime object, identified independently of any native layout.
+struct ObjectPartition final : Partition {
+  // Complete source wrapper retaining trivial-copy semantics.
+  cxx::ClassSymbol* source;
+  // Exact High reference ownership and imported payload identity.
+  loom_type_t type;
+};
+
 // One direct subobject's position in an admitted record value. Component
 // slices describe High value transport, independently of C++ object offsets.
 struct SubobjectPartition {
@@ -154,8 +162,8 @@ struct OpaqueDialectPartition final : Partition {
 };
 
 // Owns temporary overflow dimensions while bound High types are consumed by
-// one immediately following builder call. Rank-one and rank-two types retain
-// dimensions inline and leave this storage empty.
+// one immediately following builder call. Scalar-element rank-one and rank-two
+// types retain dimensions inline and leave this storage empty.
 class BoundTypeStorage {
  public:
   BoundTypeStorage() = default;
@@ -170,7 +178,7 @@ class BoundTypeStorage {
                               std::span<const uint64_t> dimensions);
 
   // Retains one bounded dimension sequence and returns stable contiguous
-  // storage. The sequence must have rank in [3, LOOM_TYPE_MAX_RANK].
+  // storage. The sequence must have rank in [1, LOOM_TYPE_MAX_RANK].
   const loom_overflow_dim_t* retain_dimensions(
       std::span<const loom_overflow_dim_t> dimensions);
 
@@ -331,8 +339,8 @@ struct ViewPartition final : Partition {
   cxx::ClassSymbol* source;
   // Source element type, including cv qualifiers for access admission.
   const cxx::Type* element_type;
-  // High scalar representation of one logical element.
-  loom_scalar_type_t element;
+  // Complete High element, including exact imported reference identity.
+  loom_type_t element;
   // Observation semantics retained from the source element qualifier.
   loom_memory_access_flags_t access_flags;
   // Attached layout or physical-storage encoding, or null for a plain view.
@@ -536,6 +544,13 @@ class Types {
   bool is_opaque_dialect(const cxx::Type* type, std::string_view name,
                          cxx::AST* owner);
 
+  // Establishes an admitted incomplete payload's exact module-local identity.
+  // Called in source order before admitting any callable source types.
+  void declare_object_import(cxx::ClassSymbol* source,
+                             std::string_view namespace_name,
+                             std::string_view payload_name,
+                             std::string_view declaration_name);
+
  private:
   struct ObjectProperties {
     // Whether any owned component lacks a native byte-storage representation.
@@ -546,6 +561,7 @@ class Types {
   ObjectProperties object_properties(const cxx::Type* input);
   void require_record_storage(const cxx::ClassType* input, cxx::AST* owner);
   const Partition* special(const cxx::Type* input, cxx::AST* owner);
+  const ObjectPartition* object(const cxx::ClassType* input, cxx::AST* owner);
   const BufferPartition* buffer(const cxx::ClassType* input, cxx::AST* owner);
   const AddressPartition* address(const cxx::ClassType* input,
                                   loom_scalar_type_t element_type,
@@ -585,6 +601,11 @@ class Types {
   Diagnostics& diagnostics_;
   // Destination owning interned dialect type names; null in scalar-only tests.
   loom_module_t* module_;
+  // Exact imported payload declarations, keyed by canonical incomplete class.
+  std::unordered_map<cxx::ClassSymbol*, loom_type_t> object_imports_;
+  // Concrete borrowed wrappers, retaining their payload's exact High type.
+  std::unordered_map<cxx::ClassSymbol*, std::unique_ptr<ObjectPartition>>
+      objects_;
   // Stable source partitions, independent of every particular SSA binding.
   std::unordered_map<cxx::ClassSymbol*, std::unique_ptr<RecordPartition>>
       records_;

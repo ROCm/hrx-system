@@ -81,6 +81,23 @@ static bool loom_bytecode_read_complete_type(
                                                : LOOM_VALUE_ID_INVALID);
       }
     }
+    if (kind == LOOM_TYPE_VIEW && shape.element_type == LOOM_SCALAR_TYPE_NONE) {
+      loom_type_id_t element = LOOM_TYPE_ID_INVALID;
+      LOOM_BYTECODE_RETURN_IF_REJECTED(LOOM_BYTECODE_TYPE_PROJECT_COMPLETED(
+          materializer, cursor, scope, shape.element_ordinal << 1, &element));
+      loom_type_t type = loom_type_reference_view(
+          NULL, shape.rank, shape.dimensions, target_encoding,
+          shape.attachment == LOOM_BYTECODE_ENCODING_ATTACHMENT_SSA
+              ? LOOM_ENCODING_FLAG_SSA
+              : 0);
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_type_bind_reference_element(
+          materializer->decoder, materializer->output_module, element,
+          kind_offset, &type));
+      return loom_bytecode_reader_check_status(
+          materializer->decoder,
+          loom_module_intern_topological_type_id(
+              materializer->output_module, type, &element, 1, out_type));
+    }
     loom_type_t type = {0};
     type.header = loom_type_make_raw_header(
         kind, shape.element_type, shape.rank,

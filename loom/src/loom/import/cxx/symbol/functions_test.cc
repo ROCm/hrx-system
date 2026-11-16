@@ -102,7 +102,7 @@ TEST_F(FunctionsTest, RootsQueueEachConcreteHelperOnceWithPrivateVisibility) {
                       pipeline_contracts, configs, fastmath, function_contracts,
                       target_definitions, template_definitions, names);
   const iree_string_view_t roots[] = {IREE_SV("entry")};
-  functions.select(roots);
+  functions.select(roots, types);
   ASSERT_EQ(functions.pending().size(), 1u);
   auto entry_definition =
       functions.define(functions.pending()[0], types, locations, &builder_);
@@ -163,7 +163,7 @@ TEST_F(FunctionsTest,
                       immutable_objects, intrinsics, launches, command_programs,
                       pipeline_contracts, configs, fastmath, function_contracts,
                       target_definitions, template_definitions, names);
-  functions.select({});
+  functions.select({}, types);
   ASSERT_EQ(functions.pending().size(), 2u);
   auto defined =
       functions.define(functions.pending()[0], types, locations, &builder_);
@@ -217,7 +217,7 @@ TEST_F(FunctionsTest, ConfiguredScenarioRetainsItsNativeRegionSignature) {
                       pipeline_contracts, configs, fastmath, function_contracts,
                       target_definitions, template_definitions, names);
 
-  functions.select({});
+  functions.select({}, types);
   ASSERT_EQ(functions.pending().size(), 1u);
   auto defined =
       functions.define(functions.pending()[0], types, locations, &builder_);

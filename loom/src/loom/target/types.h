@@ -235,6 +235,9 @@ typedef struct loom_target_snapshot_t {
   uint8_t maximum_index_bitwidth;
   // Default pointer bit width for target-independent layout decisions.
   uint32_t default_pointer_bitwidth;
+  // Physical width of one opaque ref/ptr storage cell. Zero leaves reference
+  // storage unrepresented. This is a target ABI property, not a source cast.
+  uint32_t reference_storage_bitwidth;
   // Native index bit width chosen for unconstrained inputs and ordinary
   // lowered index values.
   uint32_t index_bitwidth;

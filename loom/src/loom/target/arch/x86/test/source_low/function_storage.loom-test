@@ -1,5 +1,24 @@
 // RUN: emit source-low target=x86:scalar output=low
 
+func.def @typed_array(%input: i64, %index: index) -> (i64) {
+  %position = index.assume %index [range(%index, 0, 3)] : index
+  %values = view.alloca<private> align(16) : view<4xi64>
+  view.store %input, %values[%position] : i64, view<4xi64>
+  %result = view.load %values[%position] : view<4xi64> -> i64
+  func.return %result : i64
+}
+
+// ----
+low.func.def target<x86.scalar.core> abi(object_function) @typed_array(%input: reg<x86.gpr64>, %position: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %9 = storage {byte_alignment = 16, byte_length = 32} : low.storage<private>
+  %values = storage_address %9 : low.storage<private> -> reg<x86.gpr64>
+  mov.store.indexed.gpr64 %input, %values, %position {disp32 = 0, scale = 8}
+  %result = mov.load.indexed.gpr64 %values, %position {disp32 = 0, scale = 8}
+  return %result
+}
+
+// ====
+
 // Private roots support scalar memory and view transport across control flow.
 func.def @select_local(%first: i64, %second: i64, %condition: i1) -> (i64) {
   %bytes = index.constant 8 : offset

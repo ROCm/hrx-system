@@ -132,6 +132,12 @@ static iree_status_t loom_bytecode_type_graph_add_children(
       children = loom_type_register_value_type(type);
       count = children ? 1 : 0;
       break;
+    case LOOM_TYPE_VIEW:
+      if (loom_type_has_reference_element(type)) {
+        children = loom_type_reference_element(type);
+        count = 1;
+      }
+      break;
     case LOOM_TYPE_PARAMETERIZED: {
       const loom_attribute_t* parameters =
           loom_type_parameterized_parameters(type);
@@ -199,7 +205,7 @@ iree_status_t loom_bytecode_type_index_initialize(
     iree_host_size_t begin = graph.count;
     IREE_RETURN_IF_ERROR(loom_bytecode_type_graph_add_children(&graph, type));
     out_index->nodes[i].dependencies.explicit_count = graph.count - begin;
-    if (loom_type_is_shaped(type)) {
+    if (loom_type_is_shaped(type) && !loom_type_has_reference_element(type)) {
       IREE_RETURN_IF_ERROR(loom_bytecode_type_graph_add_dependency(
           &graph,
           loom_bytecode_type_index_lookup(

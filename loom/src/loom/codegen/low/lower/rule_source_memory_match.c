@@ -7,8 +7,8 @@
 #include "iree/base/internal/math.h"
 #include "loom/codegen/low/lower/rule_match.h"
 #include "loom/codegen/low/lower/rule_source_memory.h"
+#include "loom/ir/context.h"
 #include "loom/ir/module.h"
-#include "loom/ops/buffer/ops.h"
 
 void loom_low_lower_rule_source_memory_state_initialize(
     const loom_op_t* source_op,
@@ -176,7 +176,9 @@ static bool loom_low_lower_rule_source_memory_root_matches(
       const loom_value_t* root =
           loom_module_value(module, access->root_value_id);
       return !loom_value_is_block_arg(root) &&
-             loom_buffer_alloca_isa(loom_value_def_op(root));
+             loom_op_vtable_result_is_frame_owned(
+                 loom_op_vtable(module, loom_value_def_op(root)),
+                 loom_value_def_index(root));
     }
     default:
       return false;

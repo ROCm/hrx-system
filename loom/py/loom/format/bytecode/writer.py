@@ -198,7 +198,7 @@ BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
 
 # File magic and version.
 MAGIC = b"LOOM"
-FORMAT_VERSION = 43
+FORMAT_VERSION = 44
 PRODUCER = "loom-py"
 
 SYMBOL_INTERFACE_FLAG_MASK = (1 << 14) - 1
@@ -1028,7 +1028,11 @@ class BytecodeWriter:
                 buf.write_u8(kind.value)
             case ShapedType():
                 buf.write_u8(BYTECODE_TYPE_KIND_BY_IR_KIND[ir_type.type_kind])
-                buf.write_u8(ir_type.element_type.kind.value)
+                if isinstance(ir_type.element_type, ReferenceType):
+                    buf.write_u8(0)  # NONE selects a static ref/ptr element type ID.
+                    buf.write_varint(self._ctx.intern_type(ir_type.element_type))
+                else:
+                    buf.write_u8(ir_type.element_type.kind.value)
                 buf.write_u8(ir_type.rank)
                 # Encoding attachment: 0 = none, 1 = static, 2 = scoped SSA.
                 if isinstance(ir_type.encoding, DynamicEncoding):

@@ -1,0 +1,392 @@
+// RUN: roundtrip
+#include <loomcxx/view.h>
+
+namespace loomt = loom::type;
+
+template <class T>
+static T local(T value) {
+  using Values = loomt::view<loomt::shape<3>, T>;
+  auto values = loom::view::alloca<Values>();
+  loom::view::store(value, values, 1);
+  auto tail = loom::view::subview<1>(values, {1}, {});
+  return loom::view::load(tail, 0);
+}
+
+// Every scalar carrier uses the same typed allocation path.
+double scalar_family(signed char a, unsigned char b, short c,
+                     unsigned short d, int e, unsigned f, long long g,
+                     unsigned long long h, float i, double j,
+                     loomt::index k, loomt::offset l) {
+  return local(a) + local(b) + local(c) + local(d) + local(e) + local(f) +
+         local(g) + local(h) + local(i) + local(j) +
+         loom::index::cast<unsigned>(local(k)) +
+         loom::offset::cast<unsigned>(local(l));
+}
+// ----
+func.def public @scalar_family(%a: i8, %b: i8, %c: i16, %d: i16, %e: i32, %f: i32, %g: i64, %h: i64, %i: f32, %j: f64, %k: index, %l: offset) -> (f64) {
+  %13 = func.call @local_signed_char(%a) : (i8) -> (i8)
+  %14 = scalar.extsi %13 : i8 to i32
+  %15 = func.call @local_unsigned_char(%b) : (i8) -> (i8)
+  %16 = scalar.extui %15 : i8 to i32
+  %17 = scalar.addi %14, %16 : i32
+  %18 = func.call @local_short(%c) : (i16) -> (i16)
+  %19 = scalar.extsi %18 : i16 to i32
+  %20 = scalar.addi %17, %19 : i32
+  %21 = func.call @local_unsigned_short(%d) : (i16) -> (i16)
+  %22 = scalar.extui %21 : i16 to i32
+  %23 = scalar.addi %20, %22 : i32
+  %24 = func.call @local_int(%e) : (i32) -> (i32)
+  %25 = scalar.addi %23, %24 : i32
+  %26 = func.call @local_unsigned_int(%f) : (i32) -> (i32)
+  %27 = scalar.addi %25, %26 : i32
+  %28 = scalar.extui %27 : i32 to i64
+  %29 = func.call @local_long_long(%g) : (i64) -> (i64)
+  %30 = scalar.addi %28, %29 : i64
+  %31 = func.call @local_unsigned_long_long(%h) : (i64) -> (i64)
+  %32 = scalar.addi %30, %31 : i64
+  %33 = scalar.uitofp %32 : i64 to f32
+  %34 = func.call @local_float(%i) : (f32) -> (f32)
+  %35 = scalar.addf %33, %34 : f32
+  %36 = scalar.extf %35 : f32 to f64
+  %37 = func.call @local_double(%j) : (f64) -> (f64)
+  %38 = scalar.addf %36, %37 : f64
+  %39 = func.call @local___loom__type__index(%k) : (index) -> (index)
+  %40 = index.cast %39 : index to i32
+  %41 = scalar.uitofp %40 : i32 to f64
+  %42 = scalar.addf %38, %41 : f64
+  %43 = func.call @local___loom__type__offset(%l) : (offset) -> (offset)
+  %44 = index.cast %43 : offset to i32
+  %45 = scalar.uitofp %44 : i32 to f64
+  %46 = scalar.addf %42, %45 : f64
+  func.return %46 : f64
+}
+
+func.def @local_signed_char(%value: i8) -> (i8) {
+  %values = view.alloca<private> : view<3xi8>
+  %50 = scalar.constant 1 : i32
+  %51 = index.cast %50 : i32 to index
+  view.store %value, %values[%51] : i8, view<3xi8>
+  %52 = scalar.constant 1 : i32
+  %53 = scalar.extsi %52 : i32 to i64
+  %54 = index.cast %53 : i64 to index
+  %tail = view.subview %values[%54] : view<3xi8> -> view<1xi8>
+  %56 = scalar.constant 0 : i32
+  %57 = index.cast %56 : i32 to index
+  %58 = view.load %tail[%57] : view<1xi8> -> i8
+  func.return %58 : i8
+}
+
+func.def @local_unsigned_char(%value: i8) -> (i8) {
+  %values = view.alloca<private> : view<3xi8>
+  %62 = scalar.constant 1 : i32
+  %63 = index.cast %62 : i32 to index
+  view.store %value, %values[%63] : i8, view<3xi8>
+  %64 = scalar.constant 1 : i32
+  %65 = scalar.extsi %64 : i32 to i64
+  %66 = index.cast %65 : i64 to index
+  %tail = view.subview %values[%66] : view<3xi8> -> view<1xi8>
+  %68 = scalar.constant 0 : i32
+  %69 = index.cast %68 : i32 to index
+  %70 = view.load %tail[%69] : view<1xi8> -> i8
+  func.return %70 : i8
+}
+
+func.def @local_short(%value: i16) -> (i16) {
+  %values = view.alloca<private> : view<3xi16>
+  %74 = scalar.constant 1 : i32
+  %75 = index.cast %74 : i32 to index
+  view.store %value, %values[%75] : i16, view<3xi16>
+  %76 = scalar.constant 1 : i32
+  %77 = scalar.extsi %76 : i32 to i64
+  %78 = index.cast %77 : i64 to index
+  %tail = view.subview %values[%78] : view<3xi16> -> view<1xi16>
+  %80 = scalar.constant 0 : i32
+  %81 = index.cast %80 : i32 to index
+  %82 = view.load %tail[%81] : view<1xi16> -> i16
+  func.return %82 : i16
+}
+
+func.def @local_unsigned_short(%value: i16) -> (i16) {
+  %values = view.alloca<private> : view<3xi16>
+  %86 = scalar.constant 1 : i32
+  %87 = index.cast %86 : i32 to index
+  view.store %value, %values[%87] : i16, view<3xi16>
+  %88 = scalar.constant 1 : i32
+  %89 = scalar.extsi %88 : i32 to i64
+  %90 = index.cast %89 : i64 to index
+  %tail = view.subview %values[%90] : view<3xi16> -> view<1xi16>
+  %92 = scalar.constant 0 : i32
+  %93 = index.cast %92 : i32 to index
+  %94 = view.load %tail[%93] : view<1xi16> -> i16
+  func.return %94 : i16
+}
+
+func.def @local_int(%value: i32) -> (i32) {
+  %values = view.alloca<private> : view<3xi32>
+  %98 = scalar.constant 1 : i32
+  %99 = index.cast %98 : i32 to index
+  view.store %value, %values[%99] : i32, view<3xi32>
+  %100 = scalar.constant 1 : i32
+  %101 = scalar.extsi %100 : i32 to i64
+  %102 = index.cast %101 : i64 to index
+  %tail = view.subview %values[%102] : view<3xi32> -> view<1xi32>
+  %104 = scalar.constant 0 : i32
+  %105 = index.cast %104 : i32 to index
+  %106 = view.load %tail[%105] : view<1xi32> -> i32
+  func.return %106 : i32
+}
+
+func.def @local_unsigned_int(%value: i32) -> (i32) {
+  %values = view.alloca<private> : view<3xi32>
+  %110 = scalar.constant 1 : i32
+  %111 = index.cast %110 : i32 to index
+  view.store %value, %values[%111] : i32, view<3xi32>
+  %112 = scalar.constant 1 : i32
+  %113 = scalar.extsi %112 : i32 to i64
+  %114 = index.cast %113 : i64 to index
+  %tail = view.subview %values[%114] : view<3xi32> -> view<1xi32>
+  %116 = scalar.constant 0 : i32
+  %117 = index.cast %116 : i32 to index
+  %118 = view.load %tail[%117] : view<1xi32> -> i32
+  func.return %118 : i32
+}
+
+func.def @local_long_long(%value: i64) -> (i64) {
+  %values = view.alloca<private> : view<3xi64>
+  %122 = scalar.constant 1 : i32
+  %123 = index.cast %122 : i32 to index
+  view.store %value, %values[%123] : i64, view<3xi64>
+  %124 = scalar.constant 1 : i32
+  %125 = scalar.extsi %124 : i32 to i64
+  %126 = index.cast %125 : i64 to index
+  %tail = view.subview %values[%126] : view<3xi64> -> view<1xi64>
+  %128 = scalar.constant 0 : i32
+  %129 = index.cast %128 : i32 to index
+  %130 = view.load %tail[%129] : view<1xi64> -> i64
+  func.return %130 : i64
+}
+
+func.def @local_unsigned_long_long(%value: i64) -> (i64) {
+  %values = view.alloca<private> : view<3xi64>
+  %134 = scalar.constant 1 : i32
+  %135 = index.cast %134 : i32 to index
+  view.store %value, %values[%135] : i64, view<3xi64>
+  %136 = scalar.constant 1 : i32
+  %137 = scalar.extsi %136 : i32 to i64
+  %138 = index.cast %137 : i64 to index
+  %tail = view.subview %values[%138] : view<3xi64> -> view<1xi64>
+  %140 = scalar.constant 0 : i32
+  %141 = index.cast %140 : i32 to index
+  %142 = view.load %tail[%141] : view<1xi64> -> i64
+  func.return %142 : i64
+}
+
+func.def @local_float(%value: f32) -> (f32) {
+  %values = view.alloca<private> : view<3xf32>
+  %146 = scalar.constant 1 : i32
+  %147 = index.cast %146 : i32 to index
+  view.store %value, %values[%147] : f32, view<3xf32>
+  %148 = scalar.constant 1 : i32
+  %149 = scalar.extsi %148 : i32 to i64
+  %150 = index.cast %149 : i64 to index
+  %tail = view.subview %values[%150] : view<3xf32> -> view<1xf32>
+  %152 = scalar.constant 0 : i32
+  %153 = index.cast %152 : i32 to index
+  %154 = view.load %tail[%153] : view<1xf32> -> f32
+  func.return %154 : f32
+}
+
+func.def @local_double(%value: f64) -> (f64) {
+  %values = view.alloca<private> : view<3xf64>
+  %158 = scalar.constant 1 : i32
+  %159 = index.cast %158 : i32 to index
+  view.store %value, %values[%159] : f64, view<3xf64>
+  %160 = scalar.constant 1 : i32
+  %161 = scalar.extsi %160 : i32 to i64
+  %162 = index.cast %161 : i64 to index
+  %tail = view.subview %values[%162] : view<3xf64> -> view<1xf64>
+  %164 = scalar.constant 0 : i32
+  %165 = index.cast %164 : i32 to index
+  %166 = view.load %tail[%165] : view<1xf64> -> f64
+  func.return %166 : f64
+}
+
+func.def @local___loom__type__index(%value: index) -> (index) {
+  %values = view.alloca<private> : view<3xindex>
+  %170 = scalar.constant 1 : i32
+  %171 = index.cast %170 : i32 to index
+  view.store %value, %values[%171] : index, view<3xindex>
+  %172 = scalar.constant 1 : i32
+  %173 = scalar.extsi %172 : i32 to i64
+  %174 = index.cast %173 : i64 to index
+  %tail = view.subview %values[%174] : view<3xindex> -> view<1xindex>
+  %176 = scalar.constant 0 : i32
+  %177 = index.cast %176 : i32 to index
+  %178 = view.load %tail[%177] : view<1xindex> -> index
+  func.return %178 : index
+}
+
+func.def @local___loom__type__offset(%value: offset) -> (offset) {
+  %values = view.alloca<private> : view<3xoffset>
+  %182 = scalar.constant 1 : i32
+  %183 = index.cast %182 : i32 to index
+  view.store %value, %values[%183] : offset, view<3xoffset>
+  %184 = scalar.constant 1 : i32
+  %185 = scalar.extsi %184 : i32 to i64
+  %186 = index.cast %185 : i64 to index
+  %tail = view.subview %values[%186] : view<3xoffset> -> view<1xoffset>
+  %188 = scalar.constant 0 : i32
+  %189 = index.cast %188 : i32 to index
+  %190 = view.load %tail[%189] : view<1xoffset> -> offset
+  func.return %190 : offset
+}
+
+// ====
+#include <loomcxx/pipeline.h>
+
+namespace loomt = loom::type;
+using Plane = loomt::view<loomt::shape<loomt::dynamic, 4>, float>;
+using Layout = loomt::encoding<loom::encoding::role::layout, 2>;
+using Encoded = loomt::view<loomt::shape<loomt::dynamic, 4>, float, Layout>;
+using Storage = loomt::encoding<loom::encoding::role::storage, 2>;
+using Physical = loomt::view<loomt::shape<2, 4>, float, Storage>;
+
+void backing(loomt::pool pool, loomt::index rows, unsigned count,
+             Layout layout, Storage storage) {
+  auto global = loom::view::alloca<Plane, loom::memory_space::global>({count});
+  auto workgroup = loom::view::alloca<Plane, loom::memory_space::workgroup, 64>(
+      loomt::indices<1>{rows}, pool);
+  auto host = loom::view::alloca<Encoded, loom::memory_space::host>(
+      {count}, layout, pool);
+  auto generic = loom::view::alloca<Encoded, loom::memory_space::generic>(
+      loomt::indices<1>{rows}, layout);
+  auto physical = loom::view::alloca<Physical>({}, storage);
+  loom::view::store(1.0f, global, 0, 0);
+  loom::view::store(2.0f, workgroup, 0, 0);
+  loom::view::store(3.0f, host, 0, 0);
+  loom::view::store(4.0f, generic, 0, 0);
+  loom::view::store(5.0f, physical, 0, 0);
+}
+// ----
+func.def public @backing(%pool: pool, %rows: index, %count: i32, %layout: encoding<layout>, %storage: encoding<storage>) {
+  %5 = scalar.extui %count : i32 to i64
+  %global_dim0 = index.cast %5 : i64 to index
+  %global = view.alloca<global> : view<[%global_dim0]x4xf32>
+  %workgroup = view.alloca<workgroup> pool(%pool) align(64) : view<[%rows]x4xf32>
+  %9 = scalar.extui %count : i32 to i64
+  %host_dim0 = index.cast %9 : i64 to index
+  %host = view.alloca<host> pool(%pool) : view<[%host_dim0]x4xf32, %layout>
+  %generic = view.alloca<generic> : view<[%rows]x4xf32, %layout>
+  %physical = view.alloca<private> : view<2x4xf32, %storage>
+  %14 = scalar.constant 1.0 : f32
+  %15 = scalar.constant 0 : i32
+  %16 = scalar.constant 0 : i32
+  %17 = index.cast %15 : i32 to index
+  %18 = index.cast %16 : i32 to index
+  view.store %14, %global[%17, %18] : f32, view<[%global_dim0]x4xf32>
+  %19 = scalar.constant 2.0 : f32
+  %20 = scalar.constant 0 : i32
+  %21 = scalar.constant 0 : i32
+  %22 = index.cast %20 : i32 to index
+  %23 = index.cast %21 : i32 to index
+  view.store %19, %workgroup[%22, %23] : f32, view<[%rows]x4xf32>
+  %24 = scalar.constant 3.0 : f32
+  %25 = scalar.constant 0 : i32
+  %26 = scalar.constant 0 : i32
+  %27 = index.cast %25 : i32 to index
+  %28 = index.cast %26 : i32 to index
+  view.store %24, %host[%27, %28] : f32, view<[%host_dim0]x4xf32, %layout>
+  %29 = scalar.constant 4.0 : f32
+  %30 = scalar.constant 0 : i32
+  %31 = scalar.constant 0 : i32
+  %32 = index.cast %30 : i32 to index
+  %33 = index.cast %31 : i32 to index
+  view.store %29, %generic[%32, %33] : f32, view<[%rows]x4xf32, %layout>
+  %34 = scalar.constant 5.0 : f32
+  %35 = scalar.constant 0 : i32
+  %36 = scalar.constant 0 : i32
+  %37 = index.cast %35 : i32 to index
+  %38 = index.cast %36 : i32 to index
+  view.store %34, %physical[%37, %38] : f32, view<2x4xf32, %storage>
+  func.return
+}
+
+// ====
+#include <loomcxx/view.h>
+namespace loomt = loom::type;
+using Empty = loomt::view<loomt::shape<0>, unsigned>;
+using Volume = loomt::view<loomt::shape<2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2>, unsigned>;
+unsigned ranks(unsigned value) {
+  auto empty = loom::view::alloca<Empty>();
+  auto volume = loom::view::alloca<Volume, loom::memory_space::private_, 32>();
+  loom::view::store(value, volume, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
+  return loom::view::load(volume, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
+}
+// ----
+func.def public @ranks(%value: i32) -> (i32) {
+  %empty = view.alloca<private> : view<0xi32>
+  %volume = view.alloca<private> align(32) : view<2x1x1x1x1x1x1x1x1x1x1x1x1x1x2xi32>
+  %4 = scalar.constant 1 : i32
+  %5 = scalar.constant 0 : i32
+  %6 = scalar.constant 0 : i32
+  %7 = scalar.constant 0 : i32
+  %8 = scalar.constant 0 : i32
+  %9 = scalar.constant 0 : i32
+  %10 = scalar.constant 0 : i32
+  %11 = scalar.constant 0 : i32
+  %12 = scalar.constant 0 : i32
+  %13 = scalar.constant 0 : i32
+  %14 = scalar.constant 0 : i32
+  %15 = scalar.constant 0 : i32
+  %16 = scalar.constant 0 : i32
+  %17 = scalar.constant 0 : i32
+  %18 = scalar.constant 1 : i32
+  %19 = index.cast %4 : i32 to index
+  %20 = index.cast %5 : i32 to index
+  %21 = index.cast %6 : i32 to index
+  %22 = index.cast %7 : i32 to index
+  %23 = index.cast %8 : i32 to index
+  %24 = index.cast %9 : i32 to index
+  %25 = index.cast %10 : i32 to index
+  %26 = index.cast %11 : i32 to index
+  %27 = index.cast %12 : i32 to index
+  %28 = index.cast %13 : i32 to index
+  %29 = index.cast %14 : i32 to index
+  %30 = index.cast %15 : i32 to index
+  %31 = index.cast %16 : i32 to index
+  %32 = index.cast %17 : i32 to index
+  %33 = index.cast %18 : i32 to index
+  view.store %value, %volume[%19, %20, %21, %22, %23, %24, %25, %26, %27, %28, %29, %30, %31, %32, %33] : i32, view<2x1x1x1x1x1x1x1x1x1x1x1x1x1x2xi32>
+  %34 = scalar.constant 1 : i32
+  %35 = scalar.constant 0 : i32
+  %36 = scalar.constant 0 : i32
+  %37 = scalar.constant 0 : i32
+  %38 = scalar.constant 0 : i32
+  %39 = scalar.constant 0 : i32
+  %40 = scalar.constant 0 : i32
+  %41 = scalar.constant 0 : i32
+  %42 = scalar.constant 0 : i32
+  %43 = scalar.constant 0 : i32
+  %44 = scalar.constant 0 : i32
+  %45 = scalar.constant 0 : i32
+  %46 = scalar.constant 0 : i32
+  %47 = scalar.constant 0 : i32
+  %48 = scalar.constant 1 : i32
+  %49 = index.cast %34 : i32 to index
+  %50 = index.cast %35 : i32 to index
+  %51 = index.cast %36 : i32 to index
+  %52 = index.cast %37 : i32 to index
+  %53 = index.cast %38 : i32 to index
+  %54 = index.cast %39 : i32 to index
+  %55 = index.cast %40 : i32 to index
+  %56 = index.cast %41 : i32 to index
+  %57 = index.cast %42 : i32 to index
+  %58 = index.cast %43 : i32 to index
+  %59 = index.cast %44 : i32 to index
+  %60 = index.cast %45 : i32 to index
+  %61 = index.cast %46 : i32 to index
+  %62 = index.cast %47 : i32 to index
+  %63 = index.cast %48 : i32 to index
+  %64 = view.load %volume[%49, %50, %51, %52, %53, %54, %55, %56, %57, %58, %59, %60, %61, %62, %63] : view<2x1x1x1x1x1x1x1x1x1x1x1x1x1x2xi32> -> i32
+  func.return %64 : i32
+}

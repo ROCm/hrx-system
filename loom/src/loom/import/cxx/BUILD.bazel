@@ -36,6 +36,7 @@ exports_files([
     "include/loomcxx/low.h",
     "include/loomcxx/math.h",
     "include/loomcxx/numeric.h",
+    "include/loomcxx/object.h",
     "include/loomcxx/pipeline.h",
     "include/loomcxx/predicate.h",
     "include/loomcxx/scalar.h",

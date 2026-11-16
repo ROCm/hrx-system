@@ -388,6 +388,9 @@ enum loom_type_flags_e {
   // Type has all-static dimensions (no dynamic dims).
   // Enables fast-path checks without inspecting individual dims.
   LOOM_TYPE_FLAG_ALL_STATIC = (1 << 1),
+  // A view's element is an exact ref/ptr type stored through dims[1]. Such
+  // views keep their dimensions out of line, including ranks zero through two.
+  LOOM_TYPE_FLAG_REFERENCE_ELEMENT = (1 << 2),
 };
 
 // Maximum rank representable in the type header. Rank is packed into four bits
@@ -420,7 +423,7 @@ typedef struct loom_type_t {
   //   [8:15]  loom_scalar_type_t (shaped types), loom_encoding_role_t
   //           (encoding), or loom_storage_space_t (storage)
   //   [16:19] rank (0-LOOM_TYPE_MAX_RANK for dimensioned types, 0 otherwise)
-  //   [20:23] loom_type_flags_e (inline_dims, all_static)
+  //   [20:23] loom_type_flags_e (inline_dims, all_static, reference_element)
   //   [24:31] view access alignment override in bytes (0 = natural)
   uint32_t header;
 
@@ -439,13 +442,24 @@ typedef struct loom_type_t {
   // Inline dim storage for rank <= 2. Each element is a packed dim
   // (see loom_dim_pack_*). For rank > 2, dims[0] is a pointer to an
   // arena-allocated loom_overflow_dim_t array and dims[1] is unused. For
-  // function
-  // types, dims[0] is a pointer to loom_func_type_data_t.
+  // function types, dims[0] is a pointer to loom_func_type_data_t. Reference
+  // views always use out-of-line dimensions and store a pointer to their
+  // complete element type in dims[1].
   uint64_t dims[2];
 } loom_type_t;
 
 // Static assert: type must be exactly 24 bytes, no padding.
 static_assert(sizeof(loom_type_t) == 24, "loom_type_t must be 24 bytes");
+
+// Arena-owned reference-view payload. The outer type points to element_type
+// through dims[1] and dimensions through dims[0]; the outer rank owns the
+// dimension count. Reference cells never acquire a numerical scalar kind.
+typedef struct loom_reference_view_type_data_t {
+  // Complete owning ref or borrowed ptr element identity.
+  loom_type_t element_type;
+  // Packed logical dimensions, including empty storage for rank zero.
+  uint64_t dimensions[];
+} loom_reference_view_type_data_t;
 
 // Arena-owned payload for a register type carrying a semantic value type.
 // Stored via pointer in dims[0] of a non-inline LOOM_TYPE_REGISTER type.
@@ -507,6 +521,17 @@ static inline uint8_t loom_type_rank(loom_type_t type) {
 
 static inline uint8_t loom_type_flags(loom_type_t type) {
   return (uint8_t)((type.header >> 20) & 0xF);
+}
+
+// Returns whether a view carries a complete ref/ptr element type instead of
+// a scalar kind. Numeric shaped values retain their compact scalar payload.
+static inline bool loom_type_has_reference_element(loom_type_t type) {
+  return (loom_type_flags(type) & LOOM_TYPE_FLAG_REFERENCE_ELEMENT) != 0;
+}
+
+// Returns the borrowed complete element type of a reference-element view.
+static inline const loom_type_t* loom_type_reference_element(loom_type_t type) {
+  return (const loom_type_t*)(uintptr_t)type.dims[1];
 }
 
 // Returns a view's explicitly reduced element-access alignment in bytes, or
@@ -795,13 +820,6 @@ static inline bool loom_register_class_name_is_qualified(
 
 // --- Type comparison ---
 
-// Returns true if two types have the same element type.
-// Meaningful for scalar and shaped types. For non-element-bearing types
-// (group, function, encoding, pool), compares the raw header byte.
-static inline bool loom_type_element_type_equals(loom_type_t a, loom_type_t b) {
-  return loom_type_element_type(a) == loom_type_element_type(b);
-}
-
 // Returns true if two types have the same rank.
 static inline bool loom_type_rank_equals(loom_type_t a, loom_type_t b) {
   return loom_type_rank(a) == loom_type_rank(b);
@@ -829,6 +847,32 @@ bool loom_type_static_element_count(loom_type_t type,
 // list recursively. Register types compare carrier payloads and an optional
 // semantic value type recursively.
 bool loom_type_equal(loom_type_t a, loom_type_t b);
+
+// Returns the complete scalar or reference element type. A scalar or reference
+// value is its own element; shaped values expose their declared element.
+loom_type_t loom_type_element(loom_type_t type);
+
+// Returns true if two scalar/shaped/reference values have the same element
+// identity, including ref/ptr ownership and exact external type for references.
+// Other kinds retain the raw header-payload comparison.
+static inline bool loom_type_element_type_equals(loom_type_t a, loom_type_t b) {
+  if (loom_type_has_reference_element(a) ||
+      loom_type_has_reference_element(b) || loom_type_is_reference(a) ||
+      loom_type_is_reference(b)) {
+    return loom_type_equal(loom_type_element(a), loom_type_element(b));
+  }
+  return loom_type_element_type(a) == loom_type_element_type(b);
+}
+
+// Constructs a reference-element view borrowing |element_type| and |dims|.
+// The element is an exact ref/ptr type; dimensions have the usual packed
+// representation and rank is at most LOOM_TYPE_MAX_RANK. Module interning
+// retains both payloads. The view has no byte-alignment override: reference
+// cells have target-selected storage geometry and cannot be byte-reinterpreted.
+loom_type_t loom_type_reference_view(const loom_type_t* element_type,
+                                     uint8_t rank, const uint64_t* dims,
+                                     uint16_t encoding_id,
+                                     loom_encoding_flags_t encoding_flags);
 
 // Returns a content-based hash for |type|.
 //

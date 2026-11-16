@@ -13,6 +13,21 @@
 #include "loom/format/bytecode/reader/module_view.h"
 #include "loom/ops/type_registry.h"
 
+bool loom_bytecode_type_bind_reference_element(
+    loom_bytecode_reader_decoder_t* decoder, const loom_module_t* module,
+    loom_type_id_t element_type_id, uint64_t bytecode_offset,
+    loom_type_t* type) {
+  const loom_type_t* element =
+      loom_type_table_entry(&module->types, element_type_id);
+  if (!loom_type_is_reference(*element)) {
+    return loom_bytecode_reader_emit_invalid_field(
+        decoder, IREE_SV("TYPES"), IREE_SV("view"), 0, IREE_SV("element_type"),
+        bytecode_offset, IREE_SV("view_element_must_name_a_ref_or_ptr_type"));
+  }
+  type->dims[1] = (uint64_t)(uintptr_t)element;
+  return true;
+}
+
 bool loom_bytecode_type_decode_kind(loom_bytecode_reader_decoder_t* decoder,
                                     uint8_t kind_byte, uint64_t offset,
                                     loom_type_kind_t* out_kind) {
@@ -294,9 +309,20 @@ bool loom_bytecode_type_read_scoped_shape(
     uint64_t value_count, iree_host_size_t encoding_count,
     loom_bytecode_scoped_shape_t* out_shape) {
   uint64_t element = 0, rank = 0, attachment = 0, encoding = 0, alignment = 0;
+  uint64_t element_ordinal = 0;
   if (kind != LOOM_TYPE_GROUP) {
     LOOM_BYTECODE_RETURN_IF_REJECTED(
         loom_bytecode_reader_read_uvarint(decoder, cursor, &element));
+  }
+  const bool reference_element =
+      kind == LOOM_TYPE_VIEW && element == LOOM_SCALAR_TYPE_NONE;
+  if (reference_element) {
+    LOOM_BYTECODE_RETURN_IF_REJECTED(
+        loom_bytecode_reader_read_uvarint(decoder, cursor, &element_ordinal));
+    if (element_ordinal > UINT32_MAX) {
+      return loom_bytecode_type_emit_invalid_scoped_record(
+          decoder, cursor, IREE_SV("element_type"));
+    }
   }
   LOOM_BYTECODE_RETURN_IF_REJECTED(
       loom_bytecode_reader_read_uvarint(decoder, cursor, &rank));
@@ -315,13 +341,15 @@ bool loom_bytecode_type_read_scoped_shape(
           loom_bytecode_reader_read_uvarint(decoder, cursor, &alignment));
     }
     if (element >= LOOM_SCALAR_TYPE_COUNT_ ||
-        !loom_scalar_type_is_valid(element) || rank > LOOM_TYPE_MAX_RANK ||
+        (!reference_element && !loom_scalar_type_is_valid(element)) ||
+        rank > LOOM_TYPE_MAX_RANK ||
         attachment > LOOM_BYTECODE_ENCODING_ATTACHMENT_SSA ||
         (kind == LOOM_TYPE_VECTOR && (rank == 0 || attachment != 0))) {
       return loom_bytecode_type_emit_invalid_scoped_record(decoder, cursor,
                                                            IREE_SV("shape"));
     }
-    if (alignment && !loom_type_view_alignment_is_valid(element, alignment)) {
+    if (alignment && (reference_element ||
+                      !loom_type_view_alignment_is_valid(element, alignment))) {
       return loom_bytecode_type_emit_invalid_scoped_record(
           decoder, cursor, IREE_SV("access_alignment"));
     }
@@ -358,6 +386,7 @@ bool loom_bytecode_type_read_scoped_shape(
     dynamic_axes |= (uint16_t)(dynamic << i);
   }
   out_shape->encoding_ordinal = encoding;
+  out_shape->element_ordinal = element_ordinal;
   out_shape->dynamic_axes = dynamic_axes;
   out_shape->rank = (uint8_t)rank;
   out_shape->element_type = (uint8_t)element;
@@ -485,6 +514,22 @@ bool loom_bytecode_type_materialize_prefix(
         type =
             loom_type_reference(reference->ownership, reference->namespace_id,
                                 reference->name_id, declaration_id);
+      } else if (fact->kind == LOOM_TYPE_VIEW) {
+        const loom_bytecode_reference_view_fact_t* view =
+            (const loom_bytecode_reference_view_fact_t*)fact;
+        const loom_type_id_t element =
+            materializer->module_view->types.entries[view->element_type_id]
+                .completed_type;
+        type = entry->direct_type;
+        accepted = loom_bytecode_type_bind_reference_element(
+            materializer->decoder, materializer->output_module, element,
+            entry->bytecode_offset, &type);
+        if (accepted) {
+          accepted = loom_bytecode_reader_check_status(
+              materializer->decoder,
+              loom_module_intern_topological_type_id(
+                  materializer->output_module, type, &element, 1, &type_id));
+        }
       } else {
         loom_bytecode_structural_type_fact_t* structural_fact =
             (loom_bytecode_structural_type_fact_t*)fact;

@@ -1750,7 +1750,8 @@ loom_low_lower_emit_source_type_unsupported(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     iree_string_view_t field_name, loom_type_t actual_type) IREE_ATTRIBUTE_COLD;
 
-// Emits ERR_TARGET_080 when function storage has no finite positive maximum.
+// Emits ERR_TARGET_080 when function storage has no finite non-negative
+// maximum.
 iree_status_t loom_low_lower_emit_function_storage_extent_unsupported(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_storage_space_t storage_space, loom_value_id_t byte_length_value);
