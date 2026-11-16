@@ -128,7 +128,7 @@ class BazelProfileSummaryTest(unittest.TestCase):
             self.assertEqual(summary.slow_test_count, 1)
             self.assertEqual(summary.slow_test_action_count, 1)
             self.assertEqual(
-                summary.slow_tests[0],
+                summary.top_tests[0],
                 bazel_profile_summary.TestTiming(
                     label="//example:slow_test",
                     action_seconds=12.5,
@@ -140,7 +140,7 @@ class BazelProfileSummaryTest(unittest.TestCase):
             )
             self.assertEqual(summary.slow_non_test_action_count, 1)
             self.assertEqual(
-                summary.slow_non_test_actions[0].name,
+                summary.top_non_test_actions[0].name,
                 "<unnamed IreeGenerate action>",
             )
             self.assertEqual(
@@ -291,10 +291,14 @@ class BazelProfileSummaryTest(unittest.TestCase):
             markdown = bazel_profile_summary.render_markdown(summary, "Queued")
             self.assertIn("Remote-result observations | 1 / 1.800 s", markdown)
             self.assertIn("Test resource admission | 1 / 10.000 s", markdown)
-            self.assertIn("No observed test execution reached 10 s", markdown)
+            self.assertIn("Longest test executions", markdown)
+            self.assertIn("1.800 s", markdown)
+            self.assertIn("Generating queued data", markdown)
             console = bazel_profile_summary.render_console(summary, "Queued")
             self.assertIn("0 test execution suspect(s)", console)
             self.assertIn("1 slow test action(s)", console)
+            self.assertIn("[test] 1.800s remote result", console)
+            self.assertIn("[action] 1.000s remote result", console)
 
     def test_falls_back_to_action_when_execution_timing_is_unavailable(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -323,10 +327,10 @@ class BazelProfileSummaryTest(unittest.TestCase):
             self.assertEqual(summary.slow_test_action_count, 1)
             self.assertEqual(summary.slow_test_count, 1)
             self.assertEqual(
-                summary.slow_tests[0].execution_source,
+                summary.top_tests[0].execution_source,
                 bazel_profile_summary.EXECUTION_SOURCE_ACTION_FALLBACK,
             )
-            self.assertIsNone(summary.slow_tests[0].admission_seconds)
+            self.assertIsNone(summary.top_tests[0].admission_seconds)
             self.assertIn(
                 "11.000s action fallback, 11.000s action",
                 bazel_profile_summary.render_console(summary, "Test example"),
@@ -357,6 +361,9 @@ class BazelProfileSummaryTest(unittest.TestCase):
             self.assertEqual(payload["schema"], bazel_profile_summary.SCHEMA)
             self.assertEqual(payload["profile"], profile_path.name)
             self.assertEqual(payload["action_aggregates"][0]["mnemonic"], "CppCompile")
+            self.assertEqual(
+                payload["top_non_test_actions"][0]["name"], "Compiling example.cc"
+            )
 
     def test_rejects_missing_or_malformed_profiles(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -105,6 +105,23 @@ py_test(
     deps = [":github_api"],
 )
 
+py_binary(
+    name = "github_actions_history",
+    srcs = ["github_actions_history.py"],
+    deps = [":github_api"],
+)
+
+py_test(
+    name = "github_actions_history_test",
+    size = "small",
+    srcs = [
+        "github_actions_history.py",
+        "github_actions_history_test.py",
+    ],
+    main = "github_actions_history_test.py",
+    deps = [":github_api"],
+)
+
 py_library(
     name = "github_actions_triage",
     srcs = ["github_actions_triage.py"],
@@ -275,6 +292,7 @@ test_suite(
         ":ci_core_common_test",
         ":ci_core_linux_test",
         ":ci_core_windows_test",
+        ":github_actions_history_test",
         ":github_actions_triage_test",
         ":github_actions_watch_test",
         ":github_api_test",
