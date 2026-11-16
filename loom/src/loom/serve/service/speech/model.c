@@ -1721,6 +1721,9 @@ loom_serve_speech_generator_t loom_serve_speech_model_generator(
       .request_capacity = model->request_capacity,
       .batch_units = model->batch_units,
       .voice_capacity = model->voice_capacity,
+      .device_ordinal = iree_hal_device_topology_info(
+                            loom_runtime_device_handle(model->owner))
+                            ->topology_index,
       .prepare_voice = model->voice_capacity
                            ? loom_serve_speech_generator_prepare_voice
                            : NULL,

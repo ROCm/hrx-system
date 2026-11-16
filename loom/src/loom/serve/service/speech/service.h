@@ -8,6 +8,7 @@
 #define LOOM_SERVE_SERVICE_SPEECH_SERVICE_H_
 
 #include "loom/runtime/host/host.h"
+#include "loom/runtime/service_control.h"
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/speech/generator.h"
 #include "loom/serve/service/speech/stream.h"
@@ -33,11 +34,32 @@ typedef struct loom_serve_speech_service_t loom_serve_speech_service_t;
 // consumer requires 24 kHz mono output and rejects other geometry before audio.
 // Source CPU work shares the host executor; device completion uses its
 // proactor. A non-NULL telemetry stream remains borrowed through retirement.
+// Scheduling binds one offer/choice and two operation slots with one device use
+// each: admission can wait independently of a numerical batch or row release.
+// Storage and its summary publisher outlive the service and actual model
+// retirement; a terminal failure retains accepted uses after this engine dies.
 iree_status_t loom_serve_speech_service_allocate(
     loom_runtime_host_t* host, loom_serve_speech_generator_t generator,
     const loom_serve_speech_service_options_t* options,
-    loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
-    loom_serve_speech_service_t** out_service);
+    loom_runtime_telemetry_stream_t* stream,
+    loom_runtime_service_control_binding_t scheduling,
+    iree_allocator_t host_allocator, loom_serve_speech_service_t** out_service);
+
+// Advances accepted CPU/admission/device work, delivery, and release without
+// granting another preparation or numerical batch. Calls use the owner.
+iree_status_t loom_serve_speech_service_progress(
+    loom_serve_speech_service_t* service, loom_runtime_service_flags_t flags,
+    bool* out_progress);
+
+// Accepts a current source-owned choice without waiting. Preparation includes
+// admission; execution includes compatible source packing through encoding.
+// A stale choice succeeds with a zero operation. Acceptance is independent of
+// status and retains its operation identity through actual unit retirement.
+iree_status_t loom_serve_speech_service_try_schedule(
+    loom_serve_speech_service_t* service,
+    loom_runtime_service_offer_key_t offer, uint64_t choice_ordinal,
+    loom_runtime_service_flags_t flags,
+    loom_runtime_service_operation_key_t* out_operation);
 
 // Opens a native output stream in the same bounded queue and compatible cohorts
 // as HTTP requests. request must be initialized; successful acceptance moves it

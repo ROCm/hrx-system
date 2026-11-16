@@ -26,6 +26,7 @@
 #include "loom/runtime/storage/memory.h"
 #include "loom/runtime/testing/application.h"
 #include "loom/runtime/testing/native_allocator.h"
+#include "loom/runtime/testing/service_control.h"
 #include "loom/runtime/testing/worker_gate.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
@@ -194,7 +195,8 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
         .heartbeat_interval = 0,
     };
     IREE_ASSERT_OK(loom_serve_speech_service_allocate(
-        host_, generator_, &options, nullptr, allocator_, &service_));
+        host_, generator_, &options, nullptr, control_.binding(), allocator_,
+        &service_));
     interface_ = loom_serve_speech_service_interface(service_);
     interface_.runtime.vtable->set_observer(
         interface_.runtime.self,
@@ -206,13 +208,27 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
   }
 
   template <typename Predicate>
-  void AdvanceUntil(Predicate ready, loom_runtime_service_flags_t flags = 0) {
+  void AdvanceUntil(
+      Predicate ready, loom_runtime_service_flags_t flags = 0,
+      loom_runtime_service_work_flags_t allowed_work = UINT64_MAX) {
     auto* notification = loom_serve_http_server_notification(server_);
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
-      auto status = interface_.runtime.vtable->advance(interface_.runtime.self,
-                                                       flags, &progress);
+      auto status =
+          loom_serve_speech_service_progress(service_, flags, &progress);
+      if (iree_status_is_ok(status) && !ready()) {
+        loom_runtime_service_offer_t offer = {};
+        EXPECT_EQ(loom_runtime_service_read_offer(interface_.runtime.control, 0,
+                                                  &offer),
+                  LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+        if (iree_any_bit_set(offer.work, allowed_work)) {
+          loom_runtime_service_operation_key_t operation;
+          status = loom_serve_speech_service_try_schedule(service_, offer.key,
+                                                          0, flags, &operation);
+          progress |= operation.serial != 0;
+        }
+      }
       if (ready() || progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(notification);
       } else {
@@ -396,6 +412,8 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
   loom_serve_http_listener_t* listener_ = nullptr;
   // Readiness-driven client and optional outer router thread.
   loom_serve::testing::HttpHarness http_;
+  // Parent-owned observations remain valid after service destruction.
+  loom_runtime::testing::ServiceControl control_{2};
   // Optional manually driven production service, joined before model teardown.
   loom_serve_speech_service_t* service_ = nullptr;
   // Borrowed service operations, used only by the serialized test owner.
@@ -1083,9 +1101,17 @@ TEST_P(SourceSpeechServiceTest,
     loom_serve_speech_stream_consume(stream.get());
   }
   EXPECT_EQ(frames, 49u);
+  // Final delivery and any elastic row release are accepted obligations; no
+  // further preparation or numerical grant is needed to retire the model use.
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-      [&] { return interface_.telemetry.counters->completed == 3; }));
+      [&] { return interface_.telemetry.counters->completed == 3; }, 0, 0));
   EXPECT_FALSE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
+  loom_runtime_service_observation_t observation = {};
+  ASSERT_EQ(loom_runtime_service_read_observation(interface_.runtime.control,
+                                                  &observation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(observation.pending_operation_count, 0u);
+  EXPECT_EQ(observation.owned_request_count, 0u);
   const auto* final = loom_serve_speech_stream_peek(stream.get());
   const std::vector<uint8_t> final_samples(
       final->samples.data, final->samples.data + final->samples.data_length);

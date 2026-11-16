@@ -67,6 +67,8 @@ typedef struct loom_serve_speech_generator_t {
   uint64_t batch_units;
   // Bounded prepared voice slots; zero selects source-owned static voice IDs.
   iree_host_size_t voice_capacity;
+  // Actual group-device coordinate, retained through every model operation.
+  uint64_t device_ordinal;
   // CPU preparation returns an owned request handle, with no device submission
   // or shared admission mutation. INVALID_ARGUMENT rejects a client request;
   // other failures are terminal. Failure retains no request and returns NULL.

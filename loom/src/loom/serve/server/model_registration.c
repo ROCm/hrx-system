@@ -27,6 +27,59 @@
 #include "loom/service/finite/registration.h"
 #include "loom/service/finite/service.h"
 
+// Ready engines borrow these controls; the registration retains the complete
+// tail through model retirement and all observation readers.
+static iree_status_t loom_serve_model_registration_allocate_storage(
+    iree_host_size_t header_length, iree_host_size_t operation_capacity,
+    uint64_t incarnation, iree_allocator_t host_allocator,
+    void** out_registration, loom_runtime_service_control_t** out_control) {
+  *out_registration = NULL;
+  *out_control = NULL;
+  iree_host_size_t* operation_uses = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host_allocator, operation_capacity, sizeof(*operation_uses),
+      (void**)&operation_uses));
+  for (iree_host_size_t i = 0; i < operation_capacity; ++i) {
+    operation_uses[i] = 1;
+  }
+  const iree_host_size_t use_capacity = 1;
+  const loom_runtime_service_offer_capacity_t offer = {1, &use_capacity};
+  const loom_runtime_service_control_capacity_t capacity = {
+      .offer_capacity = 1,
+      .offers = &offer,
+      .operation_capacity = operation_capacity,
+      .operation_use_capacities = operation_uses};
+  iree_host_size_t control_length = 0;
+  iree_status_t status =
+      loom_runtime_service_control_size(&capacity, &control_length);
+  iree_host_size_t allocation_length = 0, control_offset = 0;
+  if (iree_status_is_ok(status)) {
+    status =
+        IREE_STRUCT_LAYOUT(header_length, &allocation_length,
+                           IREE_STRUCT_FIELD_ALIGNED(control_length, uint8_t,
+                                                     64, &control_offset));
+  }
+  void* registration = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_aligned(host_allocator, allocation_length,
+                                           64, 0, (void**)&registration);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_runtime_service_control_initialize(
+        &capacity, incarnation,
+        iree_make_byte_span((uint8_t*)registration + control_offset,
+                            control_length),
+        out_control);
+  }
+  iree_allocator_free(host_allocator, operation_uses);
+  if (iree_status_is_ok(status)) {
+    *out_registration = registration;
+  } else {
+    iree_allocator_free_aligned(host_allocator, registration);
+  }
+  return status;
+}
+
 static loom_serve_registration_parameters_t
 loom_serve_registration_prepared_parameters(
     loom_runtime_residency_snapshot_t parameters) {
@@ -237,61 +290,6 @@ static void loom_serve_image_registration_destroy(void* self) {
   iree_allocator_free_aligned(registration->host_allocator, registration);
 }
 
-static iree_status_t loom_serve_image_registration_allocate_storage(
-    iree_host_size_t variant_capacity, uint64_t incarnation,
-    iree_allocator_t host_allocator,
-    loom_serve_image_registration_t** out_registration) {
-  *out_registration = NULL;
-  iree_host_size_t operation_capacity = 0;
-  if (!iree_host_size_checked_add(1, variant_capacity, &operation_capacity)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "image operation capacity is not representable");
-  }
-  iree_host_size_t* operation_uses = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      host_allocator, operation_capacity, sizeof(*operation_uses),
-      (void**)&operation_uses));
-  for (iree_host_size_t i = 0; i < operation_capacity; ++i) {
-    operation_uses[i] = 1;
-  }
-  const iree_host_size_t use_capacity = 1;
-  const loom_runtime_service_offer_capacity_t offer = {1, &use_capacity};
-  const loom_runtime_service_control_capacity_t capacity = {
-      .offer_capacity = 1,
-      .offers = &offer,
-      .operation_capacity = operation_capacity,
-      .operation_use_capacities = operation_uses};
-  iree_host_size_t control_length = 0;
-  iree_status_t status =
-      loom_runtime_service_control_size(&capacity, &control_length);
-  iree_host_size_t allocation_length = 0, control_offset = 0;
-  if (iree_status_is_ok(status)) {
-    status = IREE_STRUCT_LAYOUT(
-        sizeof(loom_serve_image_registration_t), &allocation_length,
-        IREE_STRUCT_FIELD_ALIGNED(control_length, uint8_t, 64,
-                                  &control_offset));
-  }
-  loom_serve_image_registration_t* registration = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_aligned(host_allocator, allocation_length,
-                                           64, 0, (void**)&registration);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_runtime_service_control_initialize(
-        &capacity, incarnation,
-        iree_make_byte_span((uint8_t*)registration + control_offset,
-                            control_length),
-        &registration->control);
-  }
-  iree_allocator_free(host_allocator, operation_uses);
-  if (iree_status_is_ok(status)) {
-    *out_registration = registration;
-  } else {
-    iree_allocator_free_aligned(host_allocator, registration);
-  }
-  return status;
-}
-
 static loom_serve_registration_parameters_t
 loom_serve_image_registration_parameters(
     void* self, loom_serve_model_component_t component) {
@@ -334,10 +332,18 @@ static iree_status_t loom_serve_image_registration_create(
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_registration_t* out_registration) {
   const loom_serve_model_registration_options_t* options = self;
+  iree_host_size_t operation_capacity = 0;
+  if (!iree_host_size_checked_add(1, configuration->variant_capacity,
+                                  &operation_capacity)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "image operation capacity is not representable");
+  }
   loom_serve_image_registration_t* registration = NULL;
-  IREE_RETURN_IF_ERROR(loom_serve_image_registration_allocate_storage(
-      configuration->variant_capacity, incarnation, host_allocator,
-      &registration));
+  loom_runtime_service_control_t* control = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_model_registration_allocate_storage(
+      sizeof(*registration), operation_capacity, incarnation, host_allocator,
+      (void**)&registration, &control));
+  registration->control = control;
   registration->host_allocator = host_allocator;
   registration->options = options;
   registration->device = loom_runtime_device_group_at(
@@ -398,6 +404,8 @@ typedef struct loom_serve_speech_registration_t {
   loom_serve_speech_service_t* service;
   // Original card recordings, joined before publication or retirement.
   loom_serve_speech_voice_load_t* voices;
+  // Tail-owned observations, retained beyond the ready engine and model uses.
+  loom_runtime_service_control_t* control;
   // Explicit warmup, joined before service/model retirement.
   loom_runtime_activation_t* activation;
   // Model consumers have been relinquished with an ownership wake installed.
@@ -440,8 +448,9 @@ static iree_status_t loom_serve_speech_registration_prepare(
       status = loom_serve_speech_service_allocate(
           loom_runtime_device_host(registration->device),
           loom_serve_speech_model_generator(registration->model),
-          &service_options, registration->stream, registration->host_allocator,
-          &registration->service);
+          &service_options, registration->stream,
+          loom_runtime_service_control_binding(registration->control, 0, 0, 0),
+          registration->host_allocator, &registration->service);
     }
     if (iree_status_is_ok(status)) {
       status = loom_serve_speech_voice_load_allocate(
@@ -490,12 +499,19 @@ static iree_status_t loom_serve_speech_registration_retire(void* self,
   IREE_RETURN_IF_ERROR(
       loom_serve_speech_model_free_retired(registration->model));
   registration->model = NULL;
+  const loom_runtime_service_operation_t admission = {.key = {.ordinal = 0}};
+  const loom_runtime_service_operation_t batch = {.key = {.ordinal = 1}};
+  loom_runtime_service_publish_operation(registration->control, &admission,
+                                         NULL);
+  loom_runtime_service_publish_operation(registration->control, &batch, NULL);
+  const loom_runtime_service_observation_t observation = {0};
+  loom_runtime_service_publish_observation(registration->control, &observation);
   return iree_ok_status();
 }
 
 static void loom_serve_speech_registration_destroy(void* self) {
   loom_serve_speech_registration_t* registration = self;
-  iree_allocator_free(registration->host_allocator, registration);
+  iree_allocator_free_aligned(registration->host_allocator, registration);
 }
 
 static loom_serve_registration_parameters_t
@@ -544,8 +560,11 @@ static iree_status_t loom_serve_speech_registration_create(
     loom_serve_registration_t* out_registration) {
   const loom_serve_model_registration_options_t* options = self;
   loom_serve_speech_registration_t* registration = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      host_allocator, sizeof(*registration), (void**)&registration));
+  loom_runtime_service_control_t* control = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_model_registration_allocate_storage(
+      sizeof(*registration), 2, incarnation, host_allocator,
+      (void**)&registration, &control));
+  registration->control = control;
   registration->host_allocator = host_allocator;
   registration->options = options;
   registration->device = loom_runtime_device_group_at(
@@ -573,7 +592,7 @@ static iree_status_t loom_serve_speech_registration_create(
         .deactivate = loom_serve_speech_registration_deactivate,
         .destroy = loom_serve_speech_registration_destroy};
   } else {
-    iree_allocator_free(host_allocator, registration);
+    iree_allocator_free_aligned(host_allocator, registration);
   }
   return status;
 }
