@@ -1886,7 +1886,7 @@ TEST_P(ImageSpecializationTest, PeerAdmissionRetainsWholeInvocationWorkingSet) {
     // Each 9,216-byte output fits individually. Two outputs exceed the
     // bounded domain's 16 KiB even before payload and workspace.
     EXPECT_EQ(admission, loom_runtime_pool_memory(storage_owner_)
-                             ? LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY
+                             ? LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED
                              : LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
     if (admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED) {
       loom_runtime_residency_release(loom_serve_image_model_residency(model_));

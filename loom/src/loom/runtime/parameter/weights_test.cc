@@ -614,7 +614,7 @@ TEST_P(WeightsTest, SharedWorkingSetsAdmitAtomicallyAndEvictOnlyIdleGroups) {
   // set. Denial starts no load and retains no partial working-set protection.
   loom_runtime_residency_admission_t admission;
   IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[1], &admission));
-  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
   EXPECT_EQ(loom_runtime_residency_snapshot(residencies_[1]).pin_count, 0u);
   EXPECT_EQ(loom_runtime_weights_activity(plans_[2]).activations, 0u);
   loom_runtime_residency_cancel_admission(residencies_[1]);
@@ -1046,7 +1046,7 @@ TEST_P(WeightsTest, PressureAdmissionDrainsNewPinsButNotAcceptedConsumers) {
     loom_runtime_residency_release(residencies_[0]);
     return;
   }
-  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
   const auto waiting = loom_runtime_residency_snapshot(residencies_[1]);
   EXPECT_EQ(waiting.pin_count, 0u);
   EXPECT_TRUE(waiting.admission.waiting);
@@ -1092,7 +1092,7 @@ TEST_P(WeightsTest, PressureAdmissionDrainsNewPinsButNotAcceptedConsumers) {
   ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
   loom_runtime_residency_release(residencies_[0]);
   IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[1], &admission));
-  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
   IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
   ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
   loom_runtime_residency_release(residencies_[0]);
@@ -1106,7 +1106,7 @@ TEST_P(WeightsTest, PressureAdmissionDrainsNewPinsButNotAcceptedConsumers) {
   EXPECT_EQ(admitted.pin_count, 1u);
   ASSERT_NO_FATAL_FAILURE(Run(1, 290));
   IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
-  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
   EXPECT_EQ(loom_runtime_residency_snapshot(residencies_[0]).admission.count,
             2u);
   loom_runtime_residency_release(residencies_[1]);
@@ -1139,7 +1139,7 @@ TEST_P(WeightsTest, PressureTurnSurvivesMutableStateNativeReturn) {
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(state_, 0, kSlabBytes));
   loom_runtime_residency_admission_t admission;
   IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[1], &admission));
-  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
   IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
   ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
   loom_runtime_residency_release(residencies_[0]);
@@ -1420,7 +1420,7 @@ TEST_P(WeightsTest, ReclaimsIdleHistoryOnlyWhenProtectedParametersFit) {
   // Even discarding every idle history cannot admit the two-slab group while
   // this one-slab peer is pinned. Neither kind of pin permits useful eviction.
   IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
-  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
   EXPECT_EQ(owner.requests, 0u);
   EXPECT_TRUE(owner.retained);
   EXPECT_FALSE(loom_runtime_residency_cache_is_reclaiming(cache));

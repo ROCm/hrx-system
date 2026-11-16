@@ -16,6 +16,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/runtime/driver.h"
+#include "loom/runtime/parameter/residency.h"
 #include "loom/runtime/program/sources.h"
 #include "loom/runtime/testing/application.h"
 #include "loom/service/finite/decision/protocol.h"
@@ -81,6 +82,7 @@ class NativeDecisionServiceTest : public ::testing::Test {
     if (consumer_) {
       IREE_EXPECT_OK(loom_runtime_execution_drain(consumer_));
     }
+    loom_runtime_residency_free(consumer_residency_);
     loom_runtime_execution_release(consumer_);
     iree_hal_semaphore_release(gate_);
     loom_runtime_device_group_set_observer(group_, {});
@@ -322,6 +324,8 @@ class NativeDecisionServiceTest : public ::testing::Test {
   std::array<loom_service_finite_call_t*, 4> calls_ = {};
   // Independent downstream work, never submitted through the source model.
   loom_runtime_execution_t* consumer_ = nullptr;
+  // Accepted consumer credit, released after downstream execution retires.
+  loom_runtime_residency_t* consumer_residency_ = nullptr;
   // Explicit consumer dependency proving retirement does not wait for peers.
   iree_hal_semaphore_t* gate_ = nullptr;
   // Downstream logical output, released after its queue captures it.
@@ -382,6 +386,30 @@ TEST_F(NativeDecisionServiceTest, PreparationCancellationJoinsAcceptedLoad) {
 }
 
 TEST_F(NativeDecisionServiceTest, DeviceOutputEscapesBeforeServiceRetirement) {
+  // Bound the shared pool so a later native consumer must wait for escaped
+  // output even after the producing service has been removed.
+  ASSERT_NO_FATAL_FAILURE(RetireService());
+  constexpr uint64_t kMemoryLimit = 4 * 1024 * 1024;
+  const loom_runtime_pool_options_t pool_options = {
+      .elastic = true,
+      .weight_slab_size = kMemoryLimit / 2,
+      .state_slab_size = kMemoryLimit / 2,
+      .memory_limit = kMemoryLimit,
+  };
+  IREE_ASSERT_OK(loom_runtime_device_group_create_pool(
+      group_, {IREE_SV("escaped-result"), 1}, &pool_options, &pool_));
+  const loom_runtime_wake_callback_t observer = {Wake, this};
+  loom_runtime_device_group_set_observer(group_, observer);
+  const loom_service_finite_model_options_t model_options = {
+      .sources = *sources_,
+      .asset_directory = IREE_SV("."),
+      .options = IREE_SV("{\"batch_units\":64}"),
+  };
+  IREE_ASSERT_OK(AllocateRegistration(model_options));
+  IREE_ASSERT_OK(Prepare(0));
+  interface_ = loom_service_finite_service_interface(service_);
+  loom_runtime_driver_initialize(1, &interface_.runtime, &driver_);
+  loom_runtime_driver_set_observer(&driver_, observer);
   ASSERT_NO_FATAL_FAILURE(Open(0));
   ASSERT_NO_FATAL_FAILURE(Open(1));
   ASSERT_NO_FATAL_FAILURE(DriveUntil([&] {
@@ -450,6 +478,18 @@ TEST_F(NativeDecisionServiceTest, DeviceOutputEscapesBeforeServiceRetirement) {
   }
   ASSERT_NO_FATAL_FAILURE(RetireService());
 
+  auto* cache = loom_runtime_pool_residency_cache(pool_);
+  IREE_ASSERT_OK(loom_runtime_residency_allocate(cache, consumer_, 0, nullptr,
+                                                 iree_allocator_system(),
+                                                 &consumer_residency_));
+  IREE_ASSERT_OK(loom_runtime_residency_prepare_working_set(consumer_residency_,
+                                                            kMemoryLimit, 0));
+  loom_runtime_residency_admission_t admission;
+  IREE_ASSERT_OK(
+      loom_runtime_residency_try_admit(consumer_residency_, &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
+  EXPECT_TRUE(loom_runtime_residency_cache_is_pending(cache));
+
   // Accepted downstream captures, not the source model or caller receipts,
   // now own the result. Releasing the gate must still yield the packed output.
   IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, 1, nullptr));
@@ -457,6 +497,44 @@ TEST_F(NativeDecisionServiceTest, DeviceOutputEscapesBeforeServiceRetirement) {
   IREE_ASSERT_OK(loom_runtime_execution_drain(consumer_));
   EXPECT_FLOAT_EQ(values_[0], 0.75f);
   EXPECT_FLOAT_EQ(values_[1], 0.25f);
+  EXPECT_FALSE(loom_runtime_residency_cache_is_pending(cache));
+  IREE_ASSERT_OK(
+      loom_runtime_residency_try_admit(consumer_residency_, &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_runtime_residency_cancel_admission(consumer_residency_);
+  IREE_ASSERT_OK(
+      loom_runtime_execution_reserve_workspace(consumer_, kMemoryLimit, 16));
+  const auto full_allocation =
+      iree_hal_make_pool_reservation_request(kMemoryLimit, 16);
+  IREE_ASSERT_OK(
+      loom_runtime_execution_alloca(consumer_, 1, &full_allocation, &target_));
+  const float pattern = 0.5f;
+  const iree_hal_transfer_operation_t fill = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+      .fill =
+          {
+              .target_buffer = target_,
+              .length = sizeof(values_),
+              .pattern = &pattern,
+              .pattern_length = sizeof(pattern),
+          },
+  };
+  IREE_ASSERT_OK(loom_runtime_execution_transfer(consumer_, 1, &fill, &value));
+  const iree_hal_transfer_operation_t readback = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download =
+          {
+              .source_buffer = target_,
+              .target = values_.data(),
+              .length = sizeof(values_),
+          },
+  };
+  IREE_ASSERT_OK(
+      loom_runtime_execution_feedback(consumer_, 1, &readback, &value));
+  iree_hal_buffer_release(std::exchange(target_, nullptr));
+  IREE_ASSERT_OK(loom_runtime_execution_drain(consumer_));
+  EXPECT_FLOAT_EQ(values_[0], pattern);
+  EXPECT_FLOAT_EQ(values_[1], pattern);
 }
 
 TEST_F(NativeDecisionServiceTest, PressurePreservesInputAndRejectionIsLocal) {

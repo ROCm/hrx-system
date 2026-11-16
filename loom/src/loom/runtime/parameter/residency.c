@@ -120,7 +120,7 @@ struct loom_runtime_residency_t {
   loom_runtime_residency_t* previous;
   // Next registration in least-to-most-recent order.
   loom_runtime_residency_t* next;
-  // Accepted consumers and explicit retention owners excluding eviction.
+  // Accepted invocation pins, independent of persistent weight retention.
   iree_host_size_t pin_count;
   // Persistent weight-only retention, independent of accepted operation pins.
   bool pinned;
@@ -966,6 +966,7 @@ void loom_runtime_residency_cancel_admission(
   }
   residency->admission.duration_ns +=
       iree_time_now() - residency->admission.start_time;
+  const bool was_first = cache->admission.first == residency;
   if (residency->admission.previous) {
     residency->admission.previous->admission.next = residency->admission.next;
   } else {
@@ -979,6 +980,9 @@ void loom_runtime_residency_cancel_admission(
   }
   residency->admission.previous = NULL;
   residency->admission.next = NULL;
+  if (was_first && cache->admission.first) {
+    loom_runtime_residency_cache_wake(cache);
+  }
 }
 
 static void loom_runtime_residency_queue_admission(
@@ -1108,14 +1112,13 @@ static bool loom_runtime_residency_contains_group(
   return false;
 }
 
-// Forecast against service-owned requirements and live reservation accounting.
-// Unpinned weight groups are reclaimable; shared pinned groups count once.
-// Native allocator availability and idle slab caches are not scheduling inputs.
-static bool loom_runtime_residency_state_budget(
-    const loom_runtime_residency_t* residency, uint64_t private_bytes,
-    uint64_t* out_resident_bytes, uint64_t* out_capacity) {
+// Computes parameter protection once per physical group. A release projection
+// drops only accepted invocation pins; explicit retention remains protected.
+static bool loom_runtime_residency_parameter_budget(
+    const loom_runtime_residency_t* residency, bool include_consumers,
+    uint64_t* out_parameter_bytes, uint64_t* out_capacity) {
   loom_runtime_residency_cache_t* cache = residency->cache;
-  *out_resident_bytes = 0;
+  *out_parameter_bytes = 0;
   *out_capacity = UINT64_MAX;
   if (!cache->pool) {
     return true;
@@ -1133,7 +1136,8 @@ static bool loom_runtime_residency_state_budget(
   uint64_t parameter_bytes = 0;
   for (const loom_runtime_residency_group_t* group = cache->groups.oldest;
        group; group = group->next) {
-    const bool needed = loom_runtime_residency_group_is_pinned(group) ||
+    const bool needed = group->pinned || group->retention_count ||
+                        (include_consumers && group->pin_count) ||
                         loom_runtime_residency_contains_group(residency, group);
     for (iree_host_size_t i = 0; i < group->weight_count; ++i) {
       const loom_runtime_storage_usage_t memory =
@@ -1146,6 +1150,64 @@ static bool loom_runtime_residency_state_budget(
         remaining -= memory.reserved_bytes;
       }
     }
+  }
+  *out_parameter_bytes = parameter_bytes;
+  *out_capacity = remaining;
+  return true;
+}
+
+// Capture release authority before attempting pressure admission. Output
+// release can race the attempt; its already-posted wake still requires another
+// owner turn. Other invocation pins release through the serialized owner.
+// Persistent protection must still leave room for the incoming working set.
+// This residency's own nested consumers remain its caller's responsibility.
+static bool loom_runtime_residency_can_wait_for_consumers(
+    loom_runtime_residency_t* residency) {
+  loom_runtime_residency_cache_t* cache = residency->cache;
+  uint64_t parameter_bytes = 0, capacity = 0;
+  if (!loom_runtime_residency_parameter_budget(residency,
+                                               /*include_consumers=*/false,
+                                               &parameter_bytes, &capacity)) {
+    return false;
+  }
+  const uint64_t workspace_bytes =
+      loom_runtime_residency_private_peak(residency->activation_bytes,
+                                          residency->private_bytes,
+                                          residency->output_bytes) +
+      residency->output_bytes;
+  if (loom_runtime_residency_workspace_footprint(cache, workspace_bytes) >
+      capacity) {
+    return false;
+  }
+  if (loom_runtime_residency_cache_is_pending(cache)) {
+    return true;
+  }
+  for (const loom_runtime_residency_t* entry = cache->oldest; entry;
+       entry = entry->next) {
+    if (entry != residency && entry->pin_count) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Forecast against service-owned requirements and live reservation accounting.
+// Unpinned weight groups are reclaimable; shared pinned groups count once.
+// Native allocator availability and idle slab caches are not scheduling inputs.
+static bool loom_runtime_residency_state_budget(
+    const loom_runtime_residency_t* residency, uint64_t private_bytes,
+    uint64_t* out_resident_bytes, uint64_t* out_capacity) {
+  loom_runtime_residency_cache_t* cache = residency->cache;
+  *out_resident_bytes = 0;
+  *out_capacity = UINT64_MAX;
+  if (!cache->pool) {
+    return true;
+  }
+  uint64_t parameter_bytes = 0, remaining = 0;
+  if (!loom_runtime_residency_parameter_budget(residency,
+                                               /*include_consumers=*/true,
+                                               &parameter_bytes, &remaining)) {
+    return false;
   }
   // No observation above collects native operations: every counter belongs to
   // the same serialized owner snapshot, including pending range commitments.
@@ -1317,6 +1379,8 @@ static iree_status_t loom_runtime_residency_acquire_parameters(
     // before discarding history, keeping successful admission query-free.
     loom_runtime_residency_cache_t* cache = residency->cache;
     const bool reclaiming = loom_runtime_residency_cache_is_reclaiming(cache);
+    const bool consumers =
+        loom_runtime_residency_can_wait_for_consumers(residency);
     IREE_RETURN_IF_ERROR(loom_runtime_memory_pool_query_status(cache->pool));
     if (!loom_runtime_residency_fits(residency, additional_state,
                                      residency->private_bytes)) {
@@ -1327,6 +1391,10 @@ static iree_status_t loom_runtime_residency_acquire_parameters(
         IREE_RETURN_IF_ERROR(loom_runtime_residency_request_history(
             residency, state, additional_state, out_admission));
       }
+      if (*out_admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY &&
+          consumers) {
+        *out_admission = LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED;
+      }
       return iree_ok_status();
     }
   }
@@ -1334,6 +1402,8 @@ static iree_status_t loom_runtime_residency_acquire_parameters(
   // complete state growth before borrowing another pin.
   if (residency->pin_count && residency->active) {
     if (state) {
+      const bool consumers =
+          loom_runtime_residency_can_wait_for_consumers(residency);
       loom_runtime_memory_admission_t admission;
       IREE_RETURN_IF_ERROR(loom_runtime_residency_commit_state(
           residency, state, (loom_runtime_memory_demand_t){0}, &admission));
@@ -1346,6 +1416,10 @@ static iree_status_t loom_runtime_residency_acquire_parameters(
           // fit without releasing any physical slab.
           IREE_RETURN_IF_ERROR(loom_runtime_residency_request_history(
               residency, state, additional_state, out_admission));
+        }
+        if (*out_admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY &&
+            consumers) {
+          *out_admission = LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED;
         }
         return iree_ok_status();
       }
@@ -1363,6 +1437,9 @@ static iree_status_t loom_runtime_residency_acquire_parameters(
     active &= residency->entries[i].group->active;
   }
   residency->active = false;
+  const bool consumers =
+      (!active || state) && residency->cache->pool &&
+      loom_runtime_residency_can_wait_for_consumers(residency);
   if (residency->output_bytes && residency->cache->pool) {
     loom_runtime_residency_output_t* output = NULL;
     IREE_RETURN_IF_ERROR(iree_allocator_malloc(
@@ -1411,6 +1488,11 @@ static iree_status_t loom_runtime_residency_acquire_parameters(
       } else if (iree_status_is_ok(status) && state && state->forecast) {
         status = loom_runtime_residency_request_history(
             residency, state, additional_state, out_admission);
+      }
+      if (iree_status_is_ok(status) &&
+          *out_admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY &&
+          consumers) {
+        *out_admission = LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED;
       }
       return status;
     }
@@ -1598,6 +1680,9 @@ void loom_runtime_residency_release(loom_runtime_residency_t* residency) {
     }
     loom_runtime_residency_unlink(residency);
     loom_runtime_residency_append(residency);
+  }
+  if (residency->cache->admission.first) {
+    loom_runtime_residency_cache_wake(residency->cache);
   }
 }
 

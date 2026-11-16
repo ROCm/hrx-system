@@ -169,7 +169,7 @@ TEST_F(PoolBindingTest, RetainedResultsChargeOnlyTheirExplicitPool) {
   ASSERT_NO_FATAL_FAILURE(Prepare(peer_));
   auto* residency = loom_service_finite_model_residency(peer_);
   IREE_ASSERT_OK(loom_runtime_residency_try_admit(residency, &admission));
-  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
   EXPECT_TRUE(loom_runtime_residency_snapshot(residency).admission.waiting);
 
   // Cancelling an unsubmitted cohort withdraws its interest, without releasing
@@ -178,7 +178,7 @@ TEST_F(PoolBindingTest, RetainedResultsChargeOnlyTheirExplicitPool) {
   EXPECT_FALSE(loom_runtime_residency_snapshot(residency).admission.waiting);
   ASSERT_NO_FATAL_FAILURE(Prepare(peer_));
   IREE_ASSERT_OK(loom_runtime_residency_try_admit(residency, &admission));
-  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
 
   StartRouter();
   const auto response =
