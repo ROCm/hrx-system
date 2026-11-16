@@ -657,16 +657,14 @@ jobs:
           )
           test = steps[1]
           debugger = Path(os.environ["GITHUB_WORKSPACE"]) / (
-              ".github/scripts/gfx120x_queue_refresh.py"
+              ".github/scripts/gfx120x_queue_refresh.sh"
           )
           steps[1] = replace(test, argv=test.argv[:4] + (
               "--nocache_test_results", "--test_output=all",
-              "--test_arg=--execution-progress",
               "--strip=never",
               "--host_per_file_copt=.*(gpu/code_queue|gpu/user_queue|"
               "kfd/user_queue|kfd/user_queue_native|kfd/event)\\.c@-g,-O0",
-              "--run_under=/usr/bin/gdb -nx -batch -x "
-              + str(debugger) + " --args /bin/bash",
+              "--run_under=/bin/bash " + str(debugger),
           ) + test.argv[4:])
           ci.bazel_test_results.prepare_output_directory(results)
           raise SystemExit(ci.run_steps(
