@@ -343,6 +343,52 @@ TEST_F(CallableInlineTest, InlinesDirectCallAndReplacesReturnOperand) {
   EXPECT_EQ(loom_region_entry_block(callee_body)->op_count, 2u);
 }
 
+TEST_F(CallableInlineTest, AppendsArgumentsPreservingUsesAndPresentation) {
+  const loom_type_t type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  const loom_symbol_ref_t callee_ref = MakeSymbol(IREE_SV("negate"));
+  loom_op_t* callee = BuildNegateFunction(callee_ref, type);
+  loom_op_t* original = nullptr;
+  loom_op_t* caller =
+      BuildCaller(MakeSymbol(IREE_SV("caller")), callee_ref, type, &original);
+  loom_value_id_t argument = loom_op_const_operands(original)[0];
+  const iree_string_view_t comment = IREE_SV("Retained helper call.");
+  IREE_ASSERT_OK(
+      loom_module_attach_op_comments(module_, original, &comment, 1));
+  // The owner publishes the callee's extended interface before rewriting calls.
+  loom_value_id_t formal;
+  IREE_ASSERT_OK(loom_module_define_value(module_, type, &formal));
+  IREE_ASSERT_OK(loom_block_add_arg(module_,
+                                    loom_region_entry_block(loom_func_like_body(
+                                        loom_func_like_cast(module_, callee))),
+                                    formal));
+
+  loom_rewriter_t rewriter = {};
+  loom_rewriter_initialize(&rewriter, module_, &rewriter_arena_);
+  loom_op_t* replacement = nullptr;
+  IREE_ASSERT_OK(loom_callable_append_arguments(&rewriter, original,
+                                                {&argument, 1}, &replacement));
+  loom_rewriter_deinitialize(&rewriter);
+
+  EXPECT_TRUE(iree_any_bit_set(original->flags, LOOM_OP_FLAG_DEAD));
+  ASSERT_EQ(replacement->operand_count, 2u);
+  EXPECT_EQ(loom_op_const_operands(replacement)[0], argument);
+  EXPECT_EQ(loom_op_const_operands(replacement)[1], argument);
+  EXPECT_EQ(replacement->parent_op, caller);
+  const loom_value_id_t result = loom_op_const_results(replacement)[0];
+  const loom_block_t* body = loom_region_entry_block(
+      loom_func_like_body(loom_func_like_cast(module_, caller)));
+  EXPECT_EQ(loom_func_return_operands(body->last_op).values[0], result);
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_string_table_get(&module_->strings,
+                            loom_module_value(module_, result)->name_id),
+      IREE_SV("call_result")));
+  iree_host_size_t comment_count;
+  const auto* comments =
+      loom_module_op_comments(module_, replacement, &comment_count);
+  ASSERT_EQ(comment_count, 1u);
+  EXPECT_TRUE(iree_string_view_equal(comments[0], comment));
+}
+
 TEST_F(CallableInlineTest, EmptyBodyIsNotLinear) {
   const loom_symbol_ref_t callee_ref = MakeSymbol(IREE_SV("empty"));
   loom_op_t* callee_op = nullptr;

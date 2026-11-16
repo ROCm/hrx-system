@@ -6,11 +6,86 @@
 
 #include "loom/rewrite/callable.h"
 
+#include <string.h>
+
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/rewrite/materialize.h"
 #include "loom/util/adaptive_sort.h"
+
+iree_status_t loom_callable_append_arguments(loom_rewriter_t* rewriter,
+                                             loom_op_t* source,
+                                             loom_value_slice_t arguments,
+                                             loom_op_t** out_call_op) {
+  loom_module_t* module = rewriter->module;
+  loom_builder_t* builder = &rewriter->builder;
+  loom_builder_set_before(builder, source);
+  loom_op_t* target = NULL;
+  IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
+      builder, source->kind, source->operand_count + arguments.count,
+      source->result_count, 0, source->tied_result_count,
+      source->attribute_count, source->location, &target));
+  target->instance_flags = source->instance_flags;
+  target->traits = source->traits;
+  target->intrinsic_read_spaces = source->intrinsic_read_spaces;
+  target->intrinsic_write_spaces = source->intrinsic_write_spaces;
+  target->flags |= source->flags & LOOM_OP_SOURCE_PRESENTATION_FLAG_MASK;
+  if (source->operand_count) {
+    memcpy(loom_op_operands(target), loom_op_const_operands(source),
+           source->operand_count * sizeof(loom_value_id_t));
+  }
+  if (arguments.count) {
+    memcpy(loom_op_operands(target) + source->operand_count, arguments.values,
+           arguments.count * sizeof(loom_value_id_t));
+  }
+  if (source->tied_result_count) {
+    memcpy(loom_op_tied_results(target), loom_op_tied_results(source),
+           source->tied_result_count * sizeof(loom_tied_result_t));
+  }
+  const loom_ir_remap_options_t options = {.allow_unmapped_values = true};
+  loom_ir_remap_t remap = {0};
+  IREE_RETURN_IF_ERROR(loom_ir_remap_initialize(module, module, rewriter->arena,
+                                                &options, &remap));
+  // Install the complete result correspondence before translating any type:
+  // a shaped result may refer to another result of this same call.
+  for (uint16_t i = 0; i < source->result_count; ++i) {
+    const loom_value_id_t old_value = loom_op_const_results(source)[i];
+    loom_value_id_t* new_value = &loom_op_results(target)[i];
+    IREE_RETURN_IF_ERROR(loom_module_define_value(
+        module, loom_module_value_type(module, old_value), new_value));
+    IREE_RETURN_IF_ERROR(
+        loom_ir_remap_map_value(&remap, old_value, *new_value));
+  }
+  for (uint16_t i = 0; i < source->result_count; ++i) {
+    loom_type_t type;
+    IREE_RETURN_IF_ERROR(loom_ir_remap_type(
+        &remap,
+        loom_module_value_type(module, loom_op_const_results(source)[i]),
+        &type));
+    IREE_RETURN_IF_ERROR(
+        loom_module_set_value_type(module, loom_op_results(target)[i], type));
+    IREE_RETURN_IF_ERROR(loom_rewriter_copy_value_name(
+        rewriter, loom_op_const_results(source)[i],
+        loom_op_results(target)[i]));
+  }
+  for (uint8_t i = 0; i < source->attribute_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_ir_remap_attribute(
+        &remap, loom_op_const_attrs(source)[i], &loom_op_attrs(target)[i]));
+  }
+  IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, target));
+  iree_host_size_t comment_count = 0;
+  const iree_string_view_t* comments =
+      loom_module_op_comments(module, source, &comment_count);
+  if (comment_count) {
+    IREE_RETURN_IF_ERROR(loom_module_attach_op_comments(
+        module, target, comments, comment_count));
+  }
+  IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+      rewriter, source, loom_op_const_results(target), target->result_count));
+  *out_call_op = target;
+  return iree_ok_status();
+}
 
 static bool loom_callable_get_call_symbol_ref(const loom_module_t* module,
                                               const loom_op_t* call_op,

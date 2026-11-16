@@ -1,4 +1,4 @@
-// RUN: emit spirv-dis @caller validate
+// RUN: emit spirv-dis validate
 // REQUIRES: spirv-dis, spirv-val
 
 spirv.target<vulkan1_3> @target
@@ -54,5 +54,88 @@ low.func.def public target<spirv.logical.core>(@target) abi(shader_entry_point) 
      %caller = OpFunction %void None %16
          %17 = OpLabel
       %value = OpFunctionCall %int %helper
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+spirv.target<vulkan1_3> @target
+
+// Builtins read only by a native helper belong to each calling entry's
+// interface. Both entries share one helper and one builtin variable.
+low.func.def target<spirv.logical.core>(@target) @workitem_helper() -> (reg<spirv.id : index>) asm {
+  %lane = OpLoadBuiltin.local_invocation_id.x
+  return %lane
+}
+
+low.func.def public target<spirv.logical.core>(@target) abi(shader_entry_point) @call_workitem_helper() -> (reg<spirv.id : index>) asm {
+  %lane = low.func.call @workitem_helper() : () -> (reg<spirv.id : index>)
+  return %lane
+}
+
+low.func.def public target<spirv.logical.core>(@target) abi(shader_entry_point) @call_workitem_helper_again() -> (reg<spirv.id : index>) asm {
+  %lane = low.func.call @workitem_helper() : () -> (reg<spirv.id : index>)
+  return %lane
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %call_workitem_helper "call_workitem_helper" %local_invocation_id
+               OpEntryPoint GLCompute %call_workitem_helper_again "call_workitem_helper_again" %local_invocation_id
+               OpExecutionMode %call_workitem_helper LocalSize 1 1 1
+               OpExecutionMode %call_workitem_helper_again LocalSize 1 1 1
+               OpName %workitem_helper "workitem_helper"
+               OpName %local_invocation_id "local_invocation_id"
+               OpName %lane "lane"
+               OpName %call_workitem_helper "call_workitem_helper"
+               OpName %lane_0 "lane"
+               OpName %call_workitem_helper_again "call_workitem_helper_again"
+               OpName %lane_1 "lane"
+               OpDecorate %local_invocation_id BuiltIn LocalInvocationId
+               OpMemberDecorate %_struct_15 0 Offset 0
+               OpDecorate %_struct_15 Block
+               OpDecorate %14 DescriptorSet 0
+               OpDecorate %14 Binding 0
+               OpDecorate %24 DescriptorSet 0
+               OpDecorate %24 Binding 0
+        %int = OpTypeInt 32 1
+          %3 = OpTypeFunction %int
+       %uint = OpTypeInt 32 0
+     %v3uint = OpTypeVector %uint 3
+%_ptr_Input_v3uint = OpTypePointer Input %v3uint
+%local_invocation_id = OpVariable %_ptr_Input_v3uint Input
+      %int_0 = OpConstant %int 0
+ %_struct_15 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_15 = OpTypePointer StorageBuffer %_struct_15
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+         %14 = OpVariable %_ptr_StorageBuffer__struct_15 StorageBuffer
+       %void = OpTypeVoid
+         %19 = OpTypeFunction %void
+         %24 = OpVariable %_ptr_StorageBuffer__struct_15 StorageBuffer
+%workitem_helper = OpFunction %int None %3
+          %4 = OpLabel
+          %9 = OpLoad %v3uint %local_invocation_id
+         %10 = OpCompositeExtract %uint %9 0
+       %lane = OpBitcast %int %10
+               OpReturnValue %lane
+               OpFunctionEnd
+%call_workitem_helper = OpFunction %void None %19
+         %20 = OpLabel
+     %lane_0 = OpFunctionCall %int %workitem_helper
+         %22 = OpAccessChain %_ptr_StorageBuffer_int %14 %int_0
+               OpStore %22 %lane_0 Aligned 4
+               OpReturn
+               OpFunctionEnd
+%call_workitem_helper_again = OpFunction %void None %19
+         %25 = OpLabel
+     %lane_1 = OpFunctionCall %int %workitem_helper
+         %27 = OpAccessChain %_ptr_StorageBuffer_int %24 %int_0
+               OpStore %27 %lane_1 Aligned 4
                OpReturn
                OpFunctionEnd

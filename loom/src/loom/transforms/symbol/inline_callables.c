@@ -34,6 +34,7 @@
 #include "loom/transforms/symbol/inline_plan.h"
 #include "loom/transforms/symbol/inline_preflight.h"
 #include "loom/transforms/symbol/inline_profitability.h"
+#include "loom/transforms/symbol/invocation_inputs.h"
 #include "loom/util/walk.h"
 
 //===----------------------------------------------------------------------===//
@@ -446,7 +447,8 @@ static bool loom_inline_scope_inherits_target(
     loom_symbol_reference_execution_scope_id_t scope) {
   return scope == 0 ||
          !loom_symbol_ref_is_valid(
-             state->options.references->execution_targets.values[scope - 1]);
+             state->options.references->execution_scopes.values[scope - 1]
+                 .target);
 }
 
 // Selected templates expand in the application context established by their
@@ -504,8 +506,9 @@ static bool loom_inline_shares_target_context(
       loom_inline_scope_inherits_target(state, entry->execution_scope)
           ? loom_func_like_target(
                 state->symbols[entry->source_symbol_id].function)
-          : state->options.references->execution_targets
-                .values[entry->execution_scope - 1];
+          : state->options.references->execution_scopes
+                .values[entry->execution_scope - 1]
+                .target;
   return callee_target.module_id == caller_target.module_id &&
          callee_target.symbol_id == caller_target.symbol_id;
 }
@@ -1749,11 +1752,31 @@ iree_status_t loom_inline_callables_run(loom_pass_t* pass,
   }
   loom_symbol_reference_table_t references = {0};
   loom_target_function_version_snapshot_t target_versions = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_symbol_reference_table_build(module, pass->arena, &references));
   IREE_RETURN_IF_ERROR(loom_target_function_version_snapshot_build(
       module, loom_target_pass_capability_function_versions(target_capability),
       pass->arena, &target_versions));
+  loom_invocation_inputs_t invocation_inputs = {
+      .module = module,
+      .arena = pass->arena,
+      .versions =
+          target_versions.version_handles_by_symbol ? &target_versions : NULL,
+  };
+  const loom_symbol_reference_observer_t observer =
+      options->stage == LOOM_INLINE_STAGE_PREPARE
+          ? loom_invocation_inputs_observer(&invocation_inputs)
+          : (loom_symbol_reference_observer_t){0};
+  IREE_RETURN_IF_ERROR(loom_symbol_reference_table_build_observed(
+      module, pass->arena, observer, &references));
+  bool inputs_changed = false;
+  IREE_RETURN_IF_ERROR(loom_invocation_inputs_apply(
+      &invocation_inputs, pass, &references, &inputs_changed));
+  if (loom_pass_has_error_diagnostics(pass)) {
+    return iree_ok_status();
+  }
+  if (inputs_changed) {
+    IREE_RETURN_IF_ERROR(
+        loom_symbol_reference_table_build(module, pass->arena, &references));
+  }
   const loom_inline_callables_plan_options_t plan_options = {
       .references = &references,
       .target_versions = &target_versions,

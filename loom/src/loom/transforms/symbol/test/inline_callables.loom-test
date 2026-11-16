@@ -86,14 +86,14 @@ func.def target(@subgroup64) abi(object_function) @caller_subgroup64() -> (index
 
 // RUN: pass inline-callables
 
-func.def inline @misplaced_lane_id() -> (index) {
-  // ERROR@+1: STRUCTURE/029 "kernel.subgroup.lane.id" "one-of-required" "kernel.def or pipeline.strand" "func.def"
-  %lane = kernel.subgroup.lane.id : index
-  func.return %lane : index
+func.def inline @misplaced_active_mask() -> (i64) {
+  // ERROR@+1: STRUCTURE/029 "kernel.subgroup.active.mask" "one-of-required" "kernel.def or pipeline.strand" "func.def"
+  %mask = kernel.subgroup.active.mask : i64
+  func.return %mask : i64
 }
 
 func.def @rejects_illegal_final_inline_placement() {
-  %lane = func.call @misplaced_lane_id() : () -> (index)
+  %mask = func.call @misplaced_active_mask() : () -> (i64)
   func.return
 }
 

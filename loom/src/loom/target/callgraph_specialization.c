@@ -498,12 +498,12 @@ static iree_status_t loom_target_callgraph_execution_context(
     loom_symbol_reference_execution_scope_id_t scope,
     loom_target_callgraph_context_t** out_context) {
   const loom_symbol_ref_t target =
-      state->references.execution_targets.values[scope - 1];
+      state->references.execution_scopes.values[scope - 1].target;
   if (loom_symbol_ref_is_valid(target)) {
     if (state->execution_contexts == NULL) {
       IREE_RETURN_IF_ERROR(
           iree_allocator_malloc_array(iree_arena_allocator(state->pass->arena),
-                                      state->references.execution_targets.count,
+                                      state->references.execution_scopes.count,
                                       sizeof(*state->execution_contexts),
                                       (void**)&state->execution_contexts));
     }
@@ -975,8 +975,9 @@ static iree_status_t loom_target_callgraph_plan_reachable_rows(
                 .function_facts->target_symbol;
         if (edge->execution_scope != 0) {
           const loom_symbol_ref_t execution_target =
-              state->references.execution_targets
-                  .values[edge->execution_scope - 1];
+              state->references.execution_scopes
+                  .values[edge->execution_scope - 1]
+                  .target;
           if (loom_symbol_ref_is_valid(execution_target)) {
             caller_target = execution_target;
           }
@@ -1431,7 +1432,7 @@ iree_status_t loom_target_callgraph_specialization_run(loom_pass_t* pass,
   IREE_RETURN_IF_ERROR(loom_target_callgraph_seed_versions(&state));
   IREE_RETURN_IF_ERROR(loom_target_callgraph_seed_authored_roots(&state));
   if (state.root_contexts == NULL &&
-      state.references.execution_targets.count == 0) {
+      state.references.execution_scopes.count == 0) {
     return iree_ok_status();
   }
   if (!state.plan_valid) {

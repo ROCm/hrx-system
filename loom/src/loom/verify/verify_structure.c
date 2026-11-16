@@ -9,6 +9,7 @@
 #include "loom/error/error_catalog.h"
 #include "loom/ir/type_descriptor.h"
 #include "loom/ops/callable_effects.h"
+#include "loom/ops/func/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/reference_type.h"
 #include "loom/verify/verify_diagnostics.h"
@@ -336,6 +337,12 @@ static bool loom_verify_has_deferred_required_ancestor(
         parent_vtable->symbol_kind == LOOM_SYMBOL_TEMPLATE_DEF) {
       return true;
     }
+    if (loom_func_def_isa(parent) &&
+        loom_op_semantics(state->module, op).invocation_input) {
+      // Source preparation replaces this stable read with an ordinary formal.
+      // A nested isolated region still stops the inherited context below.
+      return true;
+    }
     if (parent_vtable && parent_vtable->func_like) {
       const uint8_t inline_policy_attr_index =
           parent_vtable->func_like->inline_policy_attr_index;
@@ -416,9 +423,8 @@ void loom_verify_op_placement(loom_verify_state_t* state, const loom_op_t* op,
     if (loom_verify_find_ancestor(op, ancestor_kind)) {
       continue;
     }
-    // Templates and required-inline functions are verified before their final
-    // placement context is known. Materialization or inlining supplies that
-    // context, and verification after the transform enforces the requirement.
+    // Templates, required-inline functions, and inherited invocation inputs
+    // defer placement until source preparation supplies their final context.
     if (loom_verify_has_deferred_required_ancestor(state, op)) {
       continue;
     }

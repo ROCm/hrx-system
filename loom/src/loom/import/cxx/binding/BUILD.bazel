@@ -615,6 +615,7 @@ loom_cc_library(
         ":combining",
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/import/cxx/value:types",
+        "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:atomic",
         "//loom/src/loom/ops:combining",

@@ -175,15 +175,16 @@ class Translator final : private Initialization::Evaluation {
     return reference_value(expression, owner);
   }
 
-  void require_kernel_context(cxx::AST* owner) {
+  void require_kernel_context(cxx::AST* owner, bool invocation_input = false) {
     // Required inlining defers the IR ancestor requirement until expansion.
     if (current_function_.kind == FunctionKind::Kernel ||
         current_function_.kind == FunctionKind::TemplateDefinition ||
         (current_function_.kind == FunctionKind::Pipeline &&
          pipeline_strand_depth_ != 0) ||
         (current_function_.kind == FunctionKind::Ordinary &&
-         loom_func_def_inline_policy(current_function_.operation) ==
-             LOOM_INLINE_POLICY_INLINE)) {
+         (invocation_input ||
+          loom_func_def_inline_policy(current_function_.operation) ==
+              LOOM_INLINE_POLICY_INLINE))) {
       return;
     }
     if (current_function_.kind == FunctionKind::Pipeline) {
@@ -6494,7 +6495,7 @@ class Translator final : private Initialization::Evaluation {
         auto slice = types_.selection(member, ast);
         return value.project(*slice.partition, slice.component_offset);
       }
-      require_kernel_context(ast);
+      require_kernel_context(ast, /*invocation_input=*/true);
       auto axis = cxx::to_string(member->symbol->name());
       loom_kernel_dimension_t dimension;
       if (axis == "x") {
@@ -6787,11 +6788,14 @@ class Translator final : private Initialization::Evaluation {
              "check declarations cannot be called from ordinary functions");
       }
       auto* binding = intrinsics_.lookup(function, ast);
-      if (binding &&
-          (std::holds_alternative<KernelCollectiveIntrinsic>(*binding) ||
-           std::holds_alternative<SubgroupShuffleIntrinsic>(*binding) ||
-           std::holds_alternative<AsyncIntrinsic>(*binding))) {
-        require_kernel_context(ast);
+      if (binding) {
+        if (const auto* collective =
+                std::get_if<KernelCollectiveIntrinsic>(binding)) {
+          require_kernel_context(ast, collective->is_invocation_input(module_));
+        } else if (std::holds_alternative<SubgroupShuffleIntrinsic>(*binding) ||
+                   std::holds_alternative<AsyncIntrinsic>(*binding)) {
+          require_kernel_context(ast);
+        }
       }
       if (binding && std::holds_alternative<TargetIntrinsic>(*binding)) {
         require_launch_configuration_context(ast);

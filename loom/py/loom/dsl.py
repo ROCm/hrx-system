@@ -6796,6 +6796,10 @@ class Op:
         immutable IR, and the scope's target configuration, and only publishes
         result tuples. Extension payloads are part of their owning tuples;
         auxiliary relations and other value facts are separate dependencies.
+    invocation_input: Whether this pure zero-operand query reads a stable value
+        from the current execution invocation that helpers can receive as an
+        ordinary argument. The operation kind, attributes, and result type
+        identify the input independently of the query's source location.
     legacy_formats: Legacy textual formats accepted by migration tooling.
     examples: List of example IR strings for documentation.
 
@@ -6828,6 +6832,7 @@ class Op:
     )
     facts: str = ""  # C function name for fact inference, or "".
     facts_from_operands: bool = False
+    invocation_input: bool = False
     type_transfer: str = ""  # C function name for semantic type transfer, or "".
     condition_refinement: ConditionRefinement | None = None
     execution_condition: ExecutionCondition | None = None
@@ -6872,6 +6877,7 @@ class Op:
         effective_traits: str = "",
         facts: str = "",
         facts_from_operands: bool = False,
+        invocation_input: bool = False,
         type_transfer: str = "",
         condition_refinement: ConditionRefinement | None = None,
         execution_condition: ExecutionCondition | None = None,
@@ -6975,6 +6981,56 @@ class Op:
                     "or auxiliary identity facts"
                 )
         object.__setattr__(self, "facts_from_operands", facts_from_operands)
+        if invocation_input and (
+            frozen_operands
+            or frozen_regions
+            or frozen_successors
+            or frozen_effects
+            or frozen_ownership_effects
+            or len(frozen_results) != 1
+            or frozen_results[0].variadic
+            or frozen_results[0].allocates
+            or not any(trait.name == "Pure" for trait in traits)
+            or any(
+                trait.name
+                in {
+                    "Contextual",
+                    "Convergent",
+                    "NonDeterministic",
+                    "UnknownEffects",
+                    "ObservableEffect",
+                    "UniqueIdentity",
+                }
+                for trait in traits
+            )
+        ):
+            raise ValueError(
+                f"{name}: invocation inputs require one pure stable result "
+                "without operands, effects, regions, or control flow"
+            )
+        if invocation_input and (
+            frozen_results[0].signature_only
+            or frozen_results[0].type_constraint
+            not in {
+                SCALAR,
+                INTEGER,
+                FLOAT,
+                INDEX,
+                OFFSET,
+                ADDRESS,
+                I1,
+                I32,
+            }
+            or any(
+                attr.attr_type != ATTR_TYPE_ENUM or attr.open_enum
+                for attr in frozen_attrs
+            )
+        ):
+            raise ValueError(
+                f"{name}: invocation inputs require a scalar result "
+                "and closed enum parameters"
+            )
+        object.__setattr__(self, "invocation_input", invocation_input)
         object.__setattr__(self, "type_transfer", type_transfer)
         object.__setattr__(self, "condition_refinement", condition_refinement)
         object.__setattr__(self, "execution_condition", execution_condition)

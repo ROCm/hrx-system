@@ -1,0 +1,159 @@
+// RUN: pass inline-callables{stage=prepare},canonicalize,cse,dce
+#include <loomcxx/kernel.h>
+
+// The numeric helper can stay outlined while a required wrapper disappears.
+[[loom::inline]] static unsigned lane() {
+  return static_cast<unsigned>(loom::kernel::workitem::id.x);
+}
+
+[[loom::noinline]] static unsigned position(unsigned bias) {
+  return lane() + bias + static_cast<unsigned>(loom::kernel::workgroup::size.x);
+}
+
+[[loom::kernel, loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void shifted(unsigned* output, unsigned bias) {
+  output[lane()] = position(bias);
+}
+
+// ----
+kernel.def @shifted() {
+  %2 = index.constant 1 : index
+  %5 = index.constant 64 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%5, %2, %2) : index
+} launch(%output: buffer, %bias: i32) {
+  %workgroup_size_x = index.constant 64 : index
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %34 = func.call pure @position(%bias, %workgroup_size_x, %workitem_id_x) : (i32, index, index) -> (i32)
+  %37 = index.cast %workitem_id_x : index to i32
+  %11 = scalar.extui %37 : i32 to i64
+  %38 = scalar.constant 2 : i64
+  %39 = scalar.shli %11, %38 : i64
+  %16 = scalar.assume %39 [range(%39, 0, 9223372036854775807)] : i64
+  %17 = index.cast %16 : i64 to offset
+  %18 = buffer.view %output[%17] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %34, %18[0] : i32, view<1xi32>
+  kernel.return
+}
+
+func.def noinline @position(%bias: i32, %workgroup_size_x: index, %workitem_id_x: index) -> (i32) {
+  %28 = index.cast %workitem_id_x : index to i32
+  %22 = scalar.addi %28, %bias : i32
+  %24 = index.cast %workgroup_size_x : index to i32
+  %25 = scalar.addi %22, %24 : i32
+  func.return %25 : i32
+}
+
+// ====
+
+#include <loomcxx/kernel.h>
+
+// The two entry geometries supply different values to one retained helper.
+[[loom::noinline]] static unsigned width_plus(unsigned value) {
+  return value + static_cast<unsigned>(loom::kernel::workgroup::size.x);
+}
+
+[[loom::kernel, loom::workgroup_size(32, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void narrow(unsigned* output, unsigned value) {
+  output[loom::kernel::workitem::id.x] = width_plus(value);
+}
+
+[[loom::kernel, loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void wide(unsigned* output, unsigned value) {
+  output[loom::kernel::workitem::id.x] = width_plus(value);
+}
+
+// ----
+kernel.def @narrow() {
+  %2 = index.constant 1 : index
+  %5 = index.constant 32 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%5, %2, %2) : index
+} launch(%output: buffer, %value: i32) {
+  %workgroup_size_x = index.constant 32 : index
+  %49 = func.call pure @width_plus(%value, %workgroup_size_x) : (i32, index) -> (i32)
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %11 = index.cast %workitem_id_x : index to i32
+  %12 = scalar.extui %11 : i32 to i64
+  %50 = scalar.constant 2 : i64
+  %51 = scalar.shli %12, %50 : i64
+  %17 = scalar.assume %51 [range(%51, 0, 9223372036854775807)] : i64
+  %18 = index.cast %17 : i64 to offset
+  %19 = buffer.view %output[%18] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %49, %19[0] : i32, view<1xi32>
+  kernel.return
+}
+
+kernel.def @wide() {
+  %22 = index.constant 1 : index
+  %25 = index.constant 64 : index
+  kernel.launch.config workgroups(%22, %22, %22) workgroup_size(%25, %22, %22) : index
+} launch(%output: buffer, %value: i32) {
+  %workgroup_size_x = index.constant 64 : index
+  %48 = func.call pure @width_plus(%value, %workgroup_size_x) : (i32, index) -> (i32)
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %31 = index.cast %workitem_id_x : index to i32
+  %32 = scalar.extui %31 : i32 to i64
+  %53 = scalar.constant 2 : i64
+  %54 = scalar.shli %32, %53 : i64
+  %37 = scalar.assume %54 [range(%54, 0, 9223372036854775807)] : i64
+  %38 = index.cast %37 : i64 to offset
+  %39 = buffer.view %output[%38] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %48, %39[0] : i32, view<1xi32>
+  kernel.return
+}
+
+func.def noinline @width_plus(%value: i32, %workgroup_size_x: index) -> (i32) {
+  %43 = index.cast %workgroup_size_x : index to i32
+  %44 = scalar.addi %value, %43 : i32
+  func.return %44 : i32
+}
+
+// ====
+
+#include <loomcxx/kernel.h>
+
+// Subgroup queries use the same stable input contract as coordinate members.
+[[loom::noinline]] static unsigned subgroup() {
+  return static_cast<unsigned>(loom::kernel::subgroup::id())
+      + static_cast<unsigned>(loom::kernel::subgroup::count())
+      + static_cast<unsigned>(loom::kernel::subgroup::size())
+      + static_cast<unsigned>(loom::kernel::subgroup::lane_id());
+}
+
+[[loom::kernel, loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void topology(unsigned* output) {
+  output[loom::kernel::workitem::id.x] = subgroup();
+}
+
+// ----
+kernel.def @topology() {
+  %1 = index.constant 1 : index
+  %4 = index.constant 64 : index
+  kernel.launch.config workgroups(%1, %1, %1) workgroup_size(%4, %1, %1) : index
+} launch(%output: buffer) {
+  %35 = kernel.subgroup.id : index
+  %36 = kernel.subgroup.count : index
+  %37 = kernel.subgroup.size : index
+  %38 = kernel.subgroup.lane.id : index
+  %39 = func.call pure @subgroup(%35, %36, %37, %38) : (index, index, index, index) -> (i32)
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %10 = index.cast %workitem_id_x : index to i32
+  %11 = scalar.extui %10 : i32 to i64
+  %40 = scalar.constant 2 : i64
+  %41 = scalar.shli %11, %40 : i64
+  %16 = scalar.assume %41 [range(%41, 0, 9223372036854775807)] : i64
+  %17 = index.cast %16 : i64 to offset
+  %18 = buffer.view %output[%17] : buffer -> view<1xi32>
+  view.store<root_in_bounds> %39, %18[0] : i32, view<1xi32>
+  kernel.return
+}
+
+func.def noinline @subgroup(%31: index, %32: index, %33: index, %34: index) -> (i32) {
+  %21 = index.cast %31 : index to i32
+  %23 = index.cast %32 : index to i32
+  %24 = scalar.addi %21, %23 : i32
+  %26 = index.cast %33 : index to i32
+  %27 = scalar.addi %24, %26 : i32
+  %29 = index.cast %34 : index to i32
+  %30 = scalar.addi %27, %29 : i32
+  func.return %30 : i32
+}

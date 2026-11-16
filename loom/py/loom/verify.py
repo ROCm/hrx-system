@@ -1061,9 +1061,7 @@ class ModuleVerifier:
                         operation.name == trait.args[0] for operation in parent_stack
                     ):
                         continue
-                    # Templates and required-inline functions are verified
-                    # before their final placement context is known.
-                    if self._has_deferred_required_ancestor(parent_stack):
+                    if self._has_deferred_required_ancestor(op_decl, parent_stack):
                         continue
                     expected = trait.args[0] if trait.args else "<missing>"
                     self.diagnostics.error(
@@ -1076,9 +1074,7 @@ class ModuleVerifier:
                         operation.name in trait.args for operation in parent_stack
                     ):
                         continue
-                    # Templates and required-inline functions are verified
-                    # before their final placement context is known.
-                    if self._has_deferred_required_ancestor(parent_stack):
+                    if self._has_deferred_required_ancestor(op_decl, parent_stack):
                         continue
                     expected = ", ".join(f"'{name}'" for name in trait.args)
                     self.diagnostics.error(
@@ -1099,11 +1095,15 @@ class ModuleVerifier:
                         )
 
     def _has_deferred_required_ancestor(
-        self, parent_stack: tuple[Operation, ...]
+        self, op_decl: Op, parent_stack: tuple[Operation, ...]
     ) -> bool:
         for operation in reversed(parent_stack):
             declaration = self.registry.op(operation.name)
             if operation.name == "template.def":
+                return True
+            if operation.name == "func.def" and op_decl.invocation_input:
+                # Source preparation replaces this stable read with a formal.
+                # A nested isolated region stops the inherited context below.
                 return True
             if declaration:
                 for interface in declaration.interfaces:

@@ -132,6 +132,8 @@ def _op_semantics_row(op: Op, condition_refinement_index: int = 0) -> list[str]:
         row.append(f".eager_execution_cost = {op.eager_execution_cost},")
     if op.lifetime_effects_only:
         row.append(".lifetime_effects_only = true,")
+    if op.invocation_input:
+        row.append(".invocation_input = true,")
     if op.callable_effect_contract is not None:
         contract_index = c_queries.resolve_attr_index(op, op.callable_effect_contract, "callable effect contract")
         row.append(f".callable_effect_attr_index_plus_one = {contract_index + 1},")

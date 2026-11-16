@@ -602,6 +602,7 @@ kernel_workitem_id = Op(
     name="kernel.workitem.id",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
+    invocation_input=True,
     doc=(
         "Read one coordinate of the current invocation within its workgroup. "
         "The result is a logical index value, not a byte offset; target "
@@ -640,6 +641,7 @@ kernel_workgroup_id = Op(
     name="kernel.workgroup.id",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
+    invocation_input=True,
     doc=(
         "Read one coordinate of the current workgroup within the dispatch "
         "grid. The result is a logical index value; target lowering decides "
@@ -678,6 +680,7 @@ kernel_workgroup_size = Op(
     name="kernel.workgroup.size",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
+    invocation_input=True,
     doc=("Read the selected workgroup size dimension. A launch configuration contract can make this an exact fact; otherwise target facts bound the dynamic launch value."),
     results=[Result("result", INDEX, doc="Workgroup size in the selected dimension.")],
     attrs=[
@@ -698,6 +701,7 @@ kernel_workgroup_count = Op(
     name="kernel.workgroup.count",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
+    invocation_input=True,
     doc="Read the dispatched workgroup count in one grid dimension.",
     results=[Result("result", INDEX, doc="Dispatched workgroup count in the selected dimension.")],
     attrs=[
@@ -723,6 +727,7 @@ kernel_cluster_id = Op(
     name="kernel.cluster.id",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
+    invocation_input=True,
     doc=("Read one coordinate of the current workgroup cluster within the dispatch cluster grid. The global workgroup coordinate in a dimension is cluster.id * cluster.size + cluster.workgroup.id."),
     results=[
         Result(
@@ -750,6 +755,7 @@ kernel_cluster_workgroup_id = Op(
     name="kernel.cluster.workgroup.id",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
+    invocation_input=True,
     doc=("Read one coordinate of the current workgroup within its workgroup cluster. The coordinate is zero for an ordinary non-clustered launch."),
     results=[
         Result(
@@ -778,6 +784,7 @@ kernel_cluster_workgroup_flat_id = Op(
     group=kernel_ops,
     builder_name="cluster_workgroup_flat_id",
     phase=OpPhase.EXECUTABLE,
+    invocation_input=True,
     doc=("Read the row-major flat coordinate of the current workgroup within its workgroup cluster, with x as the minor dimension."),
     results=[
         Result(
@@ -797,6 +804,7 @@ kernel_cluster_size = Op(
     name="kernel.cluster.size",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
+    invocation_input=True,
     doc=("Read the selected workgroup-cluster extent. An ordinary non-clustered launch has extent one in every dimension."),
     results=[
         Result(
@@ -824,6 +832,7 @@ kernel_cluster_count = Op(
     name="kernel.cluster.count",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
+    invocation_input=True,
     doc=("Read the number of workgroup clusters in one dispatch dimension. This is the exact quotient of workgroup.count by cluster.size."),
     results=[
         Result(
@@ -851,6 +860,7 @@ kernel_workitem_dispatch_id = Op(
     name="kernel.workitem.dispatch.id",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
+    invocation_input=True,
     doc=(
         "Read one coordinate of the current invocation in the whole dispatch. "
         "This is the logical coordinate formed from workgroup id, workgroup "
@@ -882,6 +892,7 @@ kernel_subgroup_id = Op(
     name="kernel.subgroup.id",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
+    invocation_input=True,
     doc="Read the current subgroup coordinate within the workgroup.",
     results=[Result("result", INDEX, doc="Current subgroup id within the workgroup.")],
     traits=[PURE, _KERNEL_EXECUTION_CONTEXT],
@@ -894,6 +905,7 @@ kernel_subgroup_count = Op(
     name="kernel.subgroup.count",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
+    invocation_input=True,
     doc="Read the number of subgroups in the current workgroup.",
     results=[Result("result", INDEX, doc="Subgroup count in the workgroup.")],
     traits=[PURE, _KERNEL_EXECUTION_CONTEXT],
@@ -906,6 +918,7 @@ kernel_subgroup_size = Op(
     name="kernel.subgroup.size",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
+    invocation_input=True,
     doc=("Read the execution width of the current subgroup. The width includes inactive lanes and may exceed the workgroup's invocation count."),
     results=[Result("result", INDEX, doc="Current subgroup size.")],
     traits=[PURE, _KERNEL_EXECUTION_CONTEXT],
@@ -918,6 +931,7 @@ kernel_subgroup_lane_id = Op(
     name="kernel.subgroup.lane.id",
     group=kernel_ops,
     phase=OpPhase.EXECUTABLE,
+    invocation_input=True,
     doc="Read the current invocation coordinate within its subgroup.",
     results=[Result("result", INDEX, doc="Current subgroup lane id.")],
     traits=[PURE, _KERNEL_EXECUTION_CONTEXT],

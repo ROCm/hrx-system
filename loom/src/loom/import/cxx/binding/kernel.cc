@@ -19,6 +19,8 @@
 
 #include "loom/import/cxx/binding/combining.h"
 #include "loom/import/cxx/source/error.h"
+#include "loom/ir/context.h"
+#include "loom/ir/module.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
 
@@ -386,6 +388,13 @@ std::optional<KernelCollectiveIntrinsic> KernelCollectiveIntrinsic::resolve(
                                      *combining);
   }
   return KernelCollectiveIntrinsic(*operation, result_type, &result_partition);
+}
+
+bool KernelCollectiveIntrinsic::is_invocation_input(
+    const loom_module_t* module) const {
+  return loom_context_resolve_op_semantics(
+             module->context, static_cast<loom_op_kind_t>(operation_))
+      .invocation_input;
 }
 
 Value KernelCollectiveIntrinsic::call(std::span<const Value> arguments,

@@ -31,6 +31,16 @@ iree_status_t loom_callable_resolve_direct_callee(const loom_module_t* module,
                                                   const loom_op_t* call_op,
                                                   loom_func_like_t* out_callee);
 
+// Appends ordinary operands to a direct semantic call without changing its
+// existing argument/result positions. The signature owner proves the extended
+// arity fits the operation and updates the callee before verification resumes.
+// Preserves ties, dependent result types, attributes, names, and presentation.
+// The original operation is erased; returned results replace all old uses.
+iree_status_t loom_callable_append_arguments(loom_rewriter_t* rewriter,
+                                             loom_op_t* call_op,
+                                             loom_value_slice_t arguments,
+                                             loom_op_t** out_call_op);
+
 // Inlines |callee| at |call_op| using clone materialization.
 //
 // The callee must be a same-module function-like op. A body consisting of one
