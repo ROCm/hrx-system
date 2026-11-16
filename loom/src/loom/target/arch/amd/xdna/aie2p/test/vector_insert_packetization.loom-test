@@ -196,33 +196,30 @@ func.def @i16x2x2x16_insert_dynamic(%values: vector<2x2x16xi16>, %value: i16, %p
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i16x2x2x16_insert_dynamic(%values: reg<aie2p.vec256 x4>, %value: reg<aie2p.er>, %plane: reg<aie2p.er>, %lane: reg<aie2p.er>) -> (reg<aie2p.vec256 x4>) asm {
-  %37 = mov.short 32
-  %38 = copy %lane : reg<aie2p.er> -> reg<aie2p.er>
-  %39 = mac %38, %plane, %37
-  %40 = mov.short 16
-  %41 = add.nc %39, %40
-  %42 = mov.short 0
-  %43 = ltu %41, %37
-  %44 = mov.short 64
-  %45 = ltu %41, %44
-  %46 = geu %41, %37
-  %47 = and %46, %45
-  %48 = slice %values[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  %49 = copy %43 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %50 = sel.nez %41, %42, %49
-  %51 = copy %50 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
-  %52 = vinsert.16.reg %48, %51, %value
-  %53 = select.mask %43, -1
-  %54 = vsel.32 %52, %48, %53
-  %55 = slice %values[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  %56 = copy %47 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %57 = sel.nez %41, %37, %56
-  %58 = sub %57, %37
-  %59 = copy %58 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
-  %60 = vinsert.16.reg %55, %59, %value
-  %61 = select.mask %47, -1
-  %62 = vsel.32 %60, %55, %61
-  %result = concat(%54, %62) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %39 = mov.short 32
+  %40 = copy %lane : reg<aie2p.er> -> reg<aie2p.er>
+  %41 = mac %40, %plane, %39
+  %42 = mov.short 16
+  %43 = add.nc %41, %42
+  %44 = mov.short 0
+  %45 = ltu %43, %39
+  %46 = geu %43, %39
+  %47 = slice %values[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %48 = copy %45 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %49 = sel.nez %43, %44, %48
+  %50 = copy %49 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %51 = vinsert.16.reg %47, %50, %value
+  %52 = select.mask %45, -1
+  %53 = vsel.32 %51, %47, %52
+  %54 = slice %values[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %55 = copy %46 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %56 = sel.nez %43, %39, %55
+  %57 = sub %56, %39
+  %58 = copy %57 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %59 = vinsert.16.reg %54, %58, %value
+  %60 = select.mask %46, -1
+  %61 = vsel.32 %59, %54, %60
+  %result = concat(%53, %61) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   return %result
 }
 
@@ -237,25 +234,25 @@ func.def @bf16x3x16_insert_dynamic_row(%row: vector<16xbf16>, %values: vector<3x
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @bf16x3x16_insert_dynamic_row(%row: reg<aie2p.vec256 x2>, %values: reg<aie2p.vec256 x4>, %position: reg<aie2p.er>) -> (reg<aie2p.vec256 x4>) asm {
-  %32 = slice %values[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  %33 = eqz %position
-  %34 = select.mask %33, -1
-  %35 = vsel.32 %row, %32, %34
-  %37 = slice %values[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  %38 = mova.i32 32
-  %39 = vshift %32, %37, %38
-  %40 = mov.short 1
-  %41 = eq %position, %40
-  %42 = select.mask %41, -1
-  %43 = vsel.32 %row, %39, %42
-  %45 = mov.short 2
-  %46 = eq %position, %45
-  %47 = select.mask %46, -1
-  %48 = vsel.32 %row, %37, %47
-  %49 = slice %35[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %50 = slice %43[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %51 = concat(%49, %50) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %result = concat(%51, %48) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %33 = slice %values[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %34 = eqz %position
+  %35 = select.mask %34, -1
+  %36 = vsel.32 %row, %33, %35
+  %38 = slice %values[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %39 = mova.i32 32
+  %40 = vshift %33, %38, %39
+  %41 = mov.short 1
+  %42 = eq %position, %41
+  %43 = select.mask %42, -1
+  %44 = vsel.32 %row, %40, %43
+  %46 = mov.short 2
+  %47 = eq %position, %46
+  %48 = select.mask %47, -1
+  %49 = vsel.32 %row, %38, %48
+  %50 = slice %36[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %51 = slice %44[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %52 = concat(%50, %51) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %result = concat(%52, %49) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   return %result
 }
 
@@ -270,51 +267,46 @@ func.def @i8x64x2_insert_dynamic_pair(%pair: vector<2xi8>, %values: vector<64x2x
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x64x2_insert_dynamic_pair(%pair: reg<aie2p.vec256 x2>, %values: reg<aie2p.vec256 x4>, %position: reg<aie2p.er>) -> (reg<aie2p.vec256 x4>) asm {
-  %59 = mov.short 1
-  %60 = lshl %position, %59
-  %61 = vextract.8.imm %pair, 0
-  %62 = mov.short 0
-  %63 = mov.short 64
-  %64 = ltu %60, %63
-  %65 = mov.short 128
-  %66 = ltu %60, %65
-  %67 = geu %60, %63
-  %68 = and %67, %66
-  %69 = slice %values[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  %70 = copy %64 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %71 = sel.nez %60, %62, %70
-  %72 = copy %71 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
-  %73 = vinsert.8.reg %69, %72, %61
-  %74 = select.mask %64, -1
-  %75 = vsel.32 %73, %69, %74
-  %76 = slice %values[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
-  %77 = copy %68 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %78 = sel.nez %60, %63, %77
-  %79 = sub %78, %63
-  %80 = copy %79 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
-  %81 = vinsert.8.reg %76, %80, %61
-  %82 = select.mask %68, -1
-  %83 = vsel.32 %81, %76, %82
-  %84 = add.nc %60, %59
-  %85 = vextract.8.imm %pair, 1
-  %86 = ltu %84, %63
-  %87 = ltu %84, %65
-  %88 = geu %84, %63
-  %89 = and %88, %87
-  %90 = copy %86 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %91 = sel.nez %84, %62, %90
-  %92 = copy %91 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
-  %93 = vinsert.8.reg %75, %92, %85
-  %94 = select.mask %86, -1
-  %95 = vsel.32 %93, %75, %94
-  %96 = copy %89 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %97 = sel.nez %84, %63, %96
-  %98 = sub %97, %63
-  %99 = copy %98 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
-  %100 = vinsert.8.reg %83, %99, %85
-  %101 = select.mask %89, -1
-  %102 = vsel.32 %100, %83, %101
-  %result = concat(%95, %102) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %60 = mov.short 1
+  %61 = lshl %position, %60
+  %62 = vextract.8.imm %pair, 0
+  %63 = mov.short 0
+  %64 = mov.short 64
+  %65 = ltu %61, %64
+  %66 = geu %61, %64
+  %67 = slice %values[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %68 = copy %65 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %69 = sel.nez %61, %63, %68
+  %70 = copy %69 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %71 = vinsert.8.reg %67, %70, %62
+  %72 = select.mask %65, -1
+  %73 = vsel.32 %71, %67, %72
+  %74 = slice %values[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %75 = copy %66 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %76 = sel.nez %61, %64, %75
+  %77 = sub %76, %64
+  %78 = copy %77 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %79 = vinsert.8.reg %74, %78, %62
+  %80 = select.mask %66, -1
+  %81 = vsel.32 %79, %74, %80
+  %82 = add.nc %61, %60
+  %83 = vextract.8.imm %pair, 1
+  %84 = ltu %82, %64
+  %85 = geu %82, %64
+  %86 = copy %84 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %87 = sel.nez %82, %63, %86
+  %88 = copy %87 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %89 = vinsert.8.reg %73, %88, %83
+  %90 = select.mask %84, -1
+  %91 = vsel.32 %89, %73, %90
+  %92 = copy %85 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %93 = sel.nez %82, %64, %92
+  %94 = sub %93, %64
+  %95 = copy %94 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %96 = vinsert.8.reg %81, %95, %83
+  %97 = select.mask %85, -1
+  %98 = vsel.32 %96, %81, %97
+  %result = concat(%91, %98) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
   return %result
 }
 

@@ -16,6 +16,7 @@
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
+#include "loom/transforms/vector/index_bounds.h"
 #include "loom/transforms/vector/packet_materialization.h"
 #include "loom/util/fact_vector_partition.h"
 
@@ -99,12 +100,13 @@ static bool loom_vector_static_shape_memory_is_contiguous(
 // coordinate is static; otherwise |out_dynamic_index| carries the complete
 // ordinal and |out_static_index| is zero.
 static iree_status_t loom_vector_static_shape_linearize_indices(
-    loom_builder_t* builder, loom_type_t shaped_type,
+    loom_rewriter_t* rewriter, loom_type_t shaped_type, loom_type_t access_type,
     loom_attribute_t static_indices, loom_value_slice_t dynamic_indices,
     loom_location_id_t location, loom_value_id_t* out_dynamic_index,
     int64_t* out_static_index) {
   *out_dynamic_index = LOOM_VALUE_ID_INVALID;
   *out_static_index = 0;
+  loom_builder_t* builder = &rewriter->builder;
 
   loom_value_id_t dynamic_axis_indices[LOOM_TYPE_MAX_RANK];
   uint16_t dynamic_index_position = 0;
@@ -113,6 +115,20 @@ static iree_status_t loom_vector_static_shape_linearize_indices(
     if (static_indices.i64_array[axis] == INT64_MIN) {
       dynamic_axis_indices[axis] =
           dynamic_indices.values[dynamic_index_position++];
+      if (loom_type_is_vector(shaped_type)) {
+        // Leading coordinates select one tail; rank-preserving slices select
+        // the full result extent. Keep those bounds before flattening erases
+        // the axes. Memory coordinates retain their separate view contract.
+        const uint8_t first_access_axis =
+            loom_type_rank(shaped_type) - loom_type_rank(access_type);
+        const int64_t extent = axis < first_access_axis
+                                   ? 1
+                                   : loom_type_dim_static_size_at(
+                                         access_type, axis - first_access_axis);
+        IREE_RETURN_IF_ERROR(loom_vector_assume_axis_index(
+            rewriter, shaped_type, axis, extent, dynamic_axis_indices[axis],
+            location, &dynamic_axis_indices[axis]));
+      }
     }
   }
 
@@ -216,7 +232,7 @@ static iree_status_t loom_vector_static_shape_extract_rewrite(
   loom_value_id_t dynamic_prefix_ordinal = LOOM_VALUE_ID_INVALID;
   int64_t static_prefix_ordinal = 0;
   IREE_RETURN_IF_ERROR(loom_vector_static_shape_linearize_indices(
-      &rewriter->builder, source_type, static_indices, dynamic_indices,
+      rewriter, source_type, result_type, static_indices, dynamic_indices,
       op->location, &dynamic_prefix_ordinal, &static_prefix_ordinal));
 
   loom_value_id_t dynamic_offset = dynamic_prefix_ordinal;
@@ -757,7 +773,7 @@ static iree_status_t loom_vector_static_shape_slice_rewrite(
   loom_value_id_t dynamic_origin = LOOM_VALUE_ID_INVALID;
   int64_t static_origin = 0;
   IREE_RETURN_IF_ERROR(loom_vector_static_shape_linearize_indices(
-      &rewriter->builder, source_type, static_offsets, dynamic_offsets,
+      rewriter, source_type, result_type, static_offsets, dynamic_offsets,
       op->location, &dynamic_origin, &static_origin));
   loom_value_id_t flat_source = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_static_shape_flatten_value(
@@ -990,7 +1006,7 @@ static iree_status_t loom_vector_static_shape_insert_rewrite(
   loom_value_id_t dynamic_prefix_ordinal = LOOM_VALUE_ID_INVALID;
   int64_t static_prefix_ordinal = 0;
   IREE_RETURN_IF_ERROR(loom_vector_static_shape_linearize_indices(
-      &rewriter->builder, dest_type, static_indices, dynamic_indices,
+      rewriter, dest_type, value_type, static_indices, dynamic_indices,
       op->location, &dynamic_prefix_ordinal, &static_prefix_ordinal));
   loom_value_id_t flat_dest = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_static_shape_flatten_value(
@@ -1396,8 +1412,8 @@ static iree_status_t loom_vector_static_shape_contiguous_memory_rewrite(
   loom_value_id_t dynamic_index = LOOM_VALUE_ID_INVALID;
   int64_t static_index = 0;
   IREE_RETURN_IF_ERROR(loom_vector_static_shape_linearize_indices(
-      builder, view_type, static_indices, dynamic_indices, op->location,
-      &dynamic_index, &static_index));
+      rewriter, view_type, vector_type, static_indices, dynamic_indices,
+      op->location, &dynamic_index, &static_index));
 
   loom_type_t flat_view_type = loom_type_shaped_1d(
       LOOM_TYPE_VIEW, loom_type_element_type(view_type),

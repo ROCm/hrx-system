@@ -17,10 +17,12 @@ func.def @shaped_merge(%first: vector<4xi32>, %second: vector<4xi32>, %condition
 
 // ----
 func.def @shaped_merge(%first: vector<4xi32>, %second: vector<4xi32>, %condition: i1, %row: index, %column: index) -> (i32) {
-  %16 = scf.select %condition, %first, %second : vector<4xi32>
-  %10 = index.constant 2 : index
-  %11 = index.madd %row, %10, %column : index
-  %value = vector.extract %16[%11] : vector<4xi32> -> i32
+  %18 = scf.select %condition, %first, %second : vector<4xi32>
+  %10 = index.assume %row [range(%row, 0, 1)] : index
+  %11 = index.assume %column [range(%column, 0, 1)] : index
+  %12 = index.constant 2 : index
+  %13 = index.madd %10, %12, %11 : index
+  %value = vector.extract %18[%13] : vector<4xi32> -> i32
   func.return %value : i32
 }
 

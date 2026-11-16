@@ -826,7 +826,8 @@ vector_extract = Op(
         "Extract a scalar or tail subvector from a vector at explicit leading "
         "indices. Supplying one index consumes the first source axis, two "
         "indices consume the first two axes, and consuming all axes produces "
-        "a scalar element."
+        "a scalar element. Each selected coordinate must be nonnegative and "
+        "less than its source axis extent."
     ),
     operands=[
         Operand("source", VECTOR, role=OperandRole.ACCESS_PATH),
@@ -866,7 +867,8 @@ vector_insert = Op(
         "Insert a scalar or tail subvector into a vector at explicit leading "
         "indices. The inserted value must match the destination tail shape "
         "remaining after the supplied indices, and the result type is the "
-        "same as the destination type."
+        "same as the destination type. Each selected coordinate must be "
+        "nonnegative and less than its destination axis extent."
     ),
     operands=[
         Operand("value", ANY),
@@ -914,7 +916,9 @@ vector_slice = Op(
     doc=(
         "Extract a rank-preserving contiguous register subvector at explicit "
         "offsets. The offset list has one entry per source axis; each result "
-        "axis extent describes how many lanes are kept from that source axis."
+        "axis extent describes how many lanes are kept from that source axis. "
+        "Offsets must be nonnegative and the complete result footprint must "
+        "fit within the source shape."
     ),
     operands=[
         Operand("source", VECTOR, role=OperandRole.ACCESS_PATH),

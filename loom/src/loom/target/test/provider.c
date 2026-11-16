@@ -17,6 +17,7 @@
 #include "loom/target/test/lower/registry.h"
 #include "loom/target/test/target_records.h"
 #include "loom/transforms/vector/packet_insert_legalization.h"
+#include "loom/transforms/vector/shape_legalization.h"
 
 #define LOOM_TEST_MATH_CONSTRAINTS(_)                                      \
   _(GROUPED_FIXTURE, grouped_fixture, "test.math.grouped_product.fixture") \
@@ -346,14 +347,18 @@ static bool loom_test_match_native_vectors(
          LOOM_TEST_TARGET_KIND_NATIVE_VECTORS;
 }
 
-static iree_status_t loom_test_legalize_vector_insert(
+static iree_status_t loom_test_legalize_vector_structure(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {
   (void)entry;
   bool rewritten = false;
-  IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_insert(
-      context, op, context->vector_packet_policy, NULL, &rewritten));
+  IREE_RETURN_IF_ERROR(
+      loom_vector_static_shape_rewrite_op(context, op, &rewritten));
+  if (!rewritten && loom_vector_insert_isa(op)) {
+    IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_insert(
+        context, op, context->vector_packet_policy, NULL, &rewritten));
+  }
   *out_result = (loom_target_legalizer_result_t){
       .action = rewritten ? LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN
                           : LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
@@ -363,9 +368,19 @@ static iree_status_t loom_test_legalize_vector_insert(
 
 static const loom_target_legalizer_rule_t kTestVectorLegalizerRules[] = {
     {
+        .root_kind = LOOM_OP_VECTOR_EXTRACT,
+        .match = loom_test_match_native_vectors,
+        .legalize = loom_test_legalize_vector_structure,
+    },
+    {
         .root_kind = LOOM_OP_VECTOR_INSERT,
         .match = loom_test_match_native_vectors,
-        .legalize = loom_test_legalize_vector_insert,
+        .legalize = loom_test_legalize_vector_structure,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_SLICE,
+        .match = loom_test_match_native_vectors,
+        .legalize = loom_test_legalize_vector_structure,
     },
 };
 

@@ -123,6 +123,7 @@ loom_cc_library(
         "//loom/src/loom/transforms/pipeline:control",
         "//loom/src/loom/transforms/pipeline:realization",
         "//loom/src/loom/transforms/vector:packet_legalization",
+        "//loom/src/loom/transforms/vector:shape_legalization",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
