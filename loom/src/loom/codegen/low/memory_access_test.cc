@@ -156,6 +156,23 @@ TEST(MemoryAccessTest, SharedSpaceSummariesPreserveConservativeAliasing) {
       generic, global, LOOM_LOW_MEMORY_COMPARISON_INDEPENDENT));
 }
 
+TEST(MemoryAccessTest, TypeDisjointSummariesDoNotAlias) {
+  const auto* universal =
+      loom_low_memory_access_summary_for_space(LOOM_LOW_MEMORY_SPACE_GLOBAL);
+  auto floating = *universal;
+  floating.alias_type = LOOM_SCALAR_TYPE_F32;
+  auto integer = *universal;
+  integer.alias_type = LOOM_SCALAR_TYPE_I32;
+
+  EXPECT_FALSE(loom_low_memory_access_summaries_may_alias(
+      &floating, &integer, LOOM_LOW_MEMORY_COMPARISON_INDEPENDENT));
+  EXPECT_TRUE(loom_low_memory_access_summaries_may_alias(
+      &floating, &floating, LOOM_LOW_MEMORY_COMPARISON_INDEPENDENT));
+  EXPECT_TRUE(loom_low_memory_access_summaries_may_alias(
+      &floating, universal, LOOM_LOW_MEMORY_COMPARISON_INDEPENDENT));
+  EXPECT_FALSE(loom_low_memory_access_summaries_equal(&floating, &integer));
+}
+
 TEST(MemoryAccessTest, EqualSummariesPreserveIdentityAndFootprintFacts) {
   const auto original = MakeStridedSummary(7, 64, 0, 16);
   auto other = original;

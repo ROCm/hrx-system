@@ -130,6 +130,9 @@ typedef struct loom_low_memory_access_summary_t {
   uint8_t memory_space;
   // Source operation semantics retained across target-low lowering.
   loom_low_memory_access_source_flags_t source_flags;
+  // Logical scalar type used by the source observation for type-disjoint
+  // aliasing, or NONE when the observation is type-universal.
+  loom_scalar_type_t alias_type;
   // Comparable alias root identifier, or NONE when unknown.
   uint32_t alias_root_id;
   // Comparable disjoint alias group identifier, or NONE when unknown.

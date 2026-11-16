@@ -249,14 +249,25 @@ class ViewRegionsTest : public ::testing::Test {
     return loom_buffer_view_result(view);
   }
 
-  loom_op_t* BuildVectorLoad(loom_value_id_t view,
-                             loom_memory_access_flags_t flags = 0) {
+  loom_op_t* BuildVectorLoad(
+      loom_value_id_t view, loom_memory_access_flags_t flags = 0,
+      loom_scalar_type_t element_type = LOOM_SCALAR_TYPE_F32) {
     const int64_t indices[] = {0};
     loom_op_t* load = nullptr;
-    IREE_CHECK_OK(loom_vector_load_build(&builder_, 0, flags, view, nullptr, 0,
-                                         indices, 1, 0, 0, VectorType1D(4),
-                                         LOOM_LOCATION_UNKNOWN, &load));
+    IREE_CHECK_OK(loom_vector_load_build(
+        &builder_, 0, flags, view, nullptr, 0, indices, 1, 0, 0,
+        VectorType1D(4, element_type), LOOM_LOCATION_UNKNOWN, &load));
     return load;
+  }
+
+  loom_op_t* BuildVectorStore(loom_value_id_t value, loom_value_id_t view,
+                              loom_memory_access_flags_t flags = 0) {
+    const int64_t indices[] = {0};
+    loom_op_t* store = nullptr;
+    IREE_CHECK_OK(loom_vector_store_build(&builder_, 0, flags, value, view,
+                                          nullptr, 0, indices, 1, 0, 0,
+                                          LOOM_LOCATION_UNKNOWN, &store));
+    return store;
   }
 
   loom_value_id_t BuildReadOnlyView(loom_value_id_t buffer) {
@@ -273,16 +284,18 @@ class ViewRegionsTest : public ::testing::Test {
     return value;
   }
 
-  bool AccessIsStable(loom_view_region_table_t* table, loom_value_id_t view) {
+  bool AccessIsStable(loom_view_region_table_t* table, loom_value_id_t view,
+                      loom_scalar_type_t alias_type = LOOM_SCALAR_TYPE_NONE) {
     const loom_view_region_t* region = nullptr;
     IREE_CHECK_OK(loom_view_region_table_get(table, view, &region));
     return loom_view_region_table_access_is_stable(
         table, region->root_value_id, region->alias_scope_id,
-        region->restrict_access, region->memory_space);
+        region->restrict_access, alias_type, region->memory_space);
   }
 
-  loom_type_t VectorType1D(int64_t extent) {
-    return loom_type_shaped_1d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32,
+  loom_type_t VectorType1D(
+      int64_t extent, loom_scalar_type_t element_type = LOOM_SCALAR_TYPE_F32) {
+    return loom_type_shaped_1d(LOOM_TYPE_VECTOR, element_type,
                                loom_dim_pack_static(extent), 0);
   }
 
@@ -910,6 +923,75 @@ TEST_F(ViewRegionsTest, ReadOnlyStorageRequiresAliasOrConstantProof) {
   EXPECT_FALSE(AccessIsStable(&table, unread));
 }
 
+TEST_F(ViewRegionsTest, TypeDisjointWritesPreserveTypedEntryReads) {
+  const loom_value_id_t integer =
+      BuildView(DefineBufferArg(), LOOM_SCALAR_TYPE_I32);
+  const loom_value_id_t floating_source = BuildView(DefineBufferArg());
+  const loom_value_id_t floating_destination = BuildView(DefineBufferArg());
+  const loom_op_t* floating_load =
+      BuildVectorLoad(floating_source, LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT);
+  BuildVectorStore(loom_vector_load_result(floating_load), floating_destination,
+                   LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT);
+  const loom_op_t* integer_load = BuildVectorLoad(
+      integer, LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT, LOOM_SCALAR_TYPE_I32);
+
+  loom_value_fact_table_t facts = {};
+  ComputeFacts(&facts);
+  loom_view_region_table_t table = {};
+  Analyze(&facts, &table);
+
+  EXPECT_TRUE(
+      loom_view_region_table_reads_entry_contents(&table, integer_load));
+  EXPECT_TRUE(AccessIsStable(&table, integer, LOOM_SCALAR_TYPE_I32));
+  EXPECT_FALSE(AccessIsStable(&table, integer, LOOM_SCALAR_TYPE_F32));
+  EXPECT_FALSE(AccessIsStable(&table, integer));
+}
+
+TEST_F(ViewRegionsTest, CompatibleTypedWritesInvalidateEntryReads) {
+  const loom_value_id_t input =
+      BuildView(DefineBufferArg(), LOOM_SCALAR_TYPE_I32);
+  const loom_value_id_t stored_source =
+      BuildView(DefineBufferArg(), LOOM_SCALAR_TYPE_I32);
+  const loom_value_id_t stored_destination =
+      BuildView(DefineBufferArg(), LOOM_SCALAR_TYPE_I32);
+  const loom_op_t* stored_load =
+      BuildVectorLoad(stored_source, LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT,
+                      LOOM_SCALAR_TYPE_I32);
+  BuildVectorStore(loom_vector_load_result(stored_load), stored_destination,
+                   LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT);
+  const loom_op_t* input_load = BuildVectorLoad(
+      input, LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT, LOOM_SCALAR_TYPE_I32);
+
+  loom_value_fact_table_t facts = {};
+  ComputeFacts(&facts);
+  loom_view_region_table_t table = {};
+  Analyze(&facts, &table);
+
+  EXPECT_FALSE(loom_view_region_table_reads_entry_contents(&table, input_load));
+  EXPECT_FALSE(AccessIsStable(&table, input, LOOM_SCALAR_TYPE_I32));
+}
+
+TEST_F(ViewRegionsTest, TypeUniversalWritesInvalidateTypedEntryReads) {
+  const loom_value_id_t integer =
+      BuildView(DefineBufferArg(), LOOM_SCALAR_TYPE_I32);
+  const loom_value_id_t floating_source = BuildView(DefineBufferArg());
+  const loom_value_id_t floating_destination = BuildView(DefineBufferArg());
+  const loom_op_t* floating_load = BuildVectorLoad(floating_source);
+  BuildVectorStore(loom_vector_load_result(floating_load),
+                   floating_destination);
+  const loom_op_t* integer_load = BuildVectorLoad(
+      integer, LOOM_MEMORY_ACCESS_FLAG_TYPE_DISJOINT, LOOM_SCALAR_TYPE_I32);
+
+  loom_value_fact_table_t facts = {};
+  ComputeFacts(&facts);
+  loom_view_region_table_t table = {};
+  Analyze(&facts, &table);
+
+  EXPECT_FALSE(
+      loom_view_region_table_reads_entry_contents(&table, integer_load));
+  EXPECT_FALSE(AccessIsStable(&table, integer, LOOM_SCALAR_TYPE_I32));
+}
+
 TEST_F(ViewRegionsTest, SchedulesPreserveTheirChildMemoryEffects) {
   const loom_value_id_t input =
       BuildView(BuildNoAliasBuffer(DefineBufferArg()));
@@ -1421,6 +1503,41 @@ TEST_F(ViewRegionsTest, KeepsOverlappingAndDifferentRootViewsConservative) {
   EXPECT_FALSE(no_overlap);
 }
 
+TEST_F(ViewRegionsTest, TypeDisjointObservationsDoNotConflict) {
+  const loom_value_id_t buffer = DefineBufferArg();
+  const loom_value_id_t floating = BuildView(buffer, LOOM_SCALAR_TYPE_F32);
+  const loom_value_id_t integer = BuildView(buffer, LOOM_SCALAR_TYPE_I32);
+
+  loom_value_fact_table_t facts = {};
+  ComputeFacts(&facts);
+  loom_view_region_table_t table = {};
+  Analyze(&facts, &table);
+  const loom_view_region_t* floating_region = nullptr;
+  const loom_view_region_t* integer_region = nullptr;
+  IREE_ASSERT_OK(
+      loom_view_region_table_get(&table, floating, &floating_region));
+  IREE_ASSERT_OK(loom_view_region_table_get(&table, integer, &integer_region));
+
+  const loom_view_region_observation_t floating_write = {
+      .region = floating_region,
+      .flags = LOOM_VIEW_ACCESS_WRITE,
+      .alias_type = LOOM_SCALAR_TYPE_F32,
+  };
+  loom_view_region_observation_t integer_read = {
+      .region = integer_region,
+      .flags = LOOM_VIEW_ACCESS_READ,
+      .alias_type = LOOM_SCALAR_TYPE_I32,
+  };
+  EXPECT_TRUE(loom_view_region_observations_are_nonconflicting(&floating_write,
+                                                               &integer_read));
+  integer_read.alias_type = LOOM_SCALAR_TYPE_F32;
+  EXPECT_FALSE(loom_view_region_observations_are_nonconflicting(&floating_write,
+                                                                &integer_read));
+  integer_read.alias_type = LOOM_SCALAR_TYPE_NONE;
+  EXPECT_FALSE(loom_view_region_observations_are_nonconflicting(&floating_write,
+                                                                &integer_read));
+}
+
 TEST_F(ViewRegionsTest, AllocationFreshnessRelationships) {
   loom_value_id_t incoming = DefineBufferArg();
   loom_value_id_t other_incoming = DefineBufferArg();
@@ -1570,25 +1687,36 @@ TEST_F(ViewRegionsTest, RestrictProvesAccessConflictsNotPhysicalDisjointness) {
                                                     regions[1], &result));
   EXPECT_FALSE(result);
 
-  IREE_ASSERT_OK(loom_view_regions_prove_no_conflict(
-      &table, regions[0], LOOM_VIEW_ACCESS_WRITE, regions[1],
-      LOOM_VIEW_ACCESS_READ, &result));
+  const auto prove_no_conflict = [&](const loom_view_region_t* left,
+                                     loom_view_access_flags_t left_flags,
+                                     const loom_view_region_t* right,
+                                     loom_view_access_flags_t right_flags) {
+    const loom_view_region_observation_t left_observation = {
+        .region = left,
+        .flags = left_flags,
+    };
+    const loom_view_region_observation_t right_observation = {
+        .region = right,
+        .flags = right_flags,
+    };
+    return loom_view_region_observations_prove_no_conflict(
+        &table, &left_observation, &right_observation, &result);
+  };
+
+  IREE_ASSERT_OK(prove_no_conflict(regions[0], LOOM_VIEW_ACCESS_WRITE,
+                                   regions[1], LOOM_VIEW_ACCESS_READ));
   EXPECT_TRUE(result);
-  IREE_ASSERT_OK(loom_view_regions_prove_no_conflict(
-      &table, regions[0], LOOM_VIEW_ACCESS_WRITE, regions[2],
-      LOOM_VIEW_ACCESS_READ, &result));
+  IREE_ASSERT_OK(prove_no_conflict(regions[0], LOOM_VIEW_ACCESS_WRITE,
+                                   regions[2], LOOM_VIEW_ACCESS_READ));
   EXPECT_TRUE(result);
-  IREE_ASSERT_OK(loom_view_regions_prove_no_conflict(
-      &table, regions[2], LOOM_VIEW_ACCESS_WRITE, regions[3],
-      LOOM_VIEW_ACCESS_READ, &result));
+  IREE_ASSERT_OK(prove_no_conflict(regions[2], LOOM_VIEW_ACCESS_WRITE,
+                                   regions[3], LOOM_VIEW_ACCESS_READ));
   EXPECT_FALSE(result);
-  IREE_ASSERT_OK(loom_view_regions_prove_no_conflict(
-      &table, regions[4], LOOM_VIEW_ACCESS_WRITE, regions[1],
-      LOOM_VIEW_ACCESS_READ, &result));
+  IREE_ASSERT_OK(prove_no_conflict(regions[4], LOOM_VIEW_ACCESS_WRITE,
+                                   regions[1], LOOM_VIEW_ACCESS_READ));
   EXPECT_FALSE(result);
-  IREE_ASSERT_OK(loom_view_regions_prove_no_conflict(
-      &table, regions[2], LOOM_VIEW_ACCESS_READ, regions[3],
-      LOOM_VIEW_ACCESS_READ, &result));
+  IREE_ASSERT_OK(prove_no_conflict(regions[2], LOOM_VIEW_ACCESS_READ,
+                                   regions[3], LOOM_VIEW_ACCESS_READ));
   EXPECT_TRUE(result);
 }
 

@@ -25,7 +25,12 @@ typedef struct loom_motion_memory_write_t {
   const loom_op_t* operation;
   // Position in the immutable effect sequence.
   uint32_t position;
+  // Logical scalar type used by this write for type-disjoint aliasing.
+  loom_scalar_type_t alias_type;
 } loom_motion_memory_write_t;
+
+static_assert(sizeof(loom_motion_memory_write_t) == sizeof(void*) + 8,
+              "motion write rows must remain compact");
 
 typedef struct loom_motion_memory_footprint_t {
   // Exact or conservative root-relative begin expression.
@@ -188,6 +193,8 @@ static iree_status_t loom_motion_memory_capture_effect(
   memory->writes.entries[memory->writes.count++] = (loom_motion_memory_write_t){
       .operation = op,
       .position = memory->position++,
+      .alias_type = loom_memory_access_alias_type(
+          module, loom_memory_access_cast(module, op)),
   };
   return iree_ok_status();
 }
@@ -525,6 +532,7 @@ static uint32_t loom_motion_memory_first_write(
 static iree_status_t loom_motion_memory_check_group(
     loom_motion_memory_t* memory, const loom_motion_memory_group_t* group,
     loom_motion_memory_scope_t scope, const loom_view_region_t* read,
+    loom_scalar_type_t read_alias_type,
     loom_motion_loop_hoist_result_t* result) {
   uint32_t index =
       loom_motion_memory_first_write(memory, group->writes, scope.begin);
@@ -535,9 +543,16 @@ static iree_status_t loom_motion_memory_check_group(
   }
   const loom_view_region_t* representative =
       &memory->movement->view_regions.regions[group->view_region];
-  if (loom_view_region_roots_are_nonconflicting(read, LOOM_VIEW_ACCESS_READ,
-                                                representative,
-                                                LOOM_VIEW_ACCESS_WRITE)) {
+  const loom_view_region_observation_t read_root_observation = {
+      .region = read,
+      .flags = LOOM_VIEW_ACCESS_READ,
+  };
+  const loom_view_region_observation_t write_root_observation = {
+      .region = representative,
+      .flags = LOOM_VIEW_ACCESS_WRITE,
+  };
+  if (loom_view_region_observations_are_nonconflicting(
+          &read_root_observation, &write_root_observation)) {
     return iree_ok_status();
   }
   if (read->root_value_id != LOOM_VALUE_ID_INVALID &&
@@ -573,10 +588,20 @@ static iree_status_t loom_motion_memory_check_group(
     written.end_byte_offset = footprint->end;
     loom_symbolic_expr_constant(footprint->static_byte_length,
                                 &written.byte_length);
+    const loom_view_region_observation_t read_observation = {
+        .region = read,
+        .flags = LOOM_VIEW_ACCESS_READ,
+        .alias_type = read_alias_type,
+    };
+    const loom_view_region_observation_t write_observation = {
+        .region = &written,
+        .flags = LOOM_VIEW_ACCESS_WRITE,
+        .alias_type = write->alias_type,
+    };
     bool nonconflicting = false;
-    IREE_RETURN_IF_ERROR(loom_view_regions_prove_no_conflict(
-        &memory->movement->view_regions, read, LOOM_VIEW_ACCESS_READ, &written,
-        LOOM_VIEW_ACCESS_WRITE, &nonconflicting));
+    IREE_RETURN_IF_ERROR(loom_view_region_observations_prove_no_conflict(
+        &memory->movement->view_regions, &read_observation, &write_observation,
+        &nonconflicting));
     if (!nonconflicting) {
       result->rejection_bits =
           LOOM_MOTION_LOOP_HOIST_REJECTION_OVERLAPPING_WRITE;
@@ -668,7 +693,8 @@ iree_status_t loom_motion_memory_evaluate_loop(
       LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE) {
     for (iree_host_size_t i = 0; i < memory->groups.count; ++i) {
       IREE_RETURN_IF_ERROR(loom_motion_memory_check_group(
-          memory, &memory->groups.entries[i], scope, &read_region, out_result));
+          memory, &memory->groups.entries[i], scope, &read_region,
+          read->alias_type, out_result));
       if (out_result->rejection_bits) {
         break;
       }
@@ -695,7 +721,7 @@ iree_status_t loom_motion_memory_evaluate_loop(
       break;
     }
     IREE_RETURN_IF_ERROR(loom_motion_memory_check_group(
-        memory, group, scope, &read_region, out_result));
+        memory, group, scope, &read_region, read->alias_type, out_result));
     if (out_result->rejection_bits) {
       return iree_ok_status();
     }
@@ -716,7 +742,7 @@ iree_status_t loom_motion_memory_evaluate_loop(
         continue;
       }
       IREE_RETURN_IF_ERROR(loom_motion_memory_check_group(
-          memory, group, scope, &read_region, out_result));
+          memory, group, scope, &read_region, read->alias_type, out_result));
       if (out_result->rejection_bits) {
         return iree_ok_status();
       }

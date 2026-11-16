@@ -372,6 +372,20 @@ TEST(MemoryAccessHelpers, AliasTypesAreConservativelyComparable) {
                                                        LOOM_SCALAR_TYPE_I32));
   EXPECT_FALSE(loom_memory_access_alias_types_may_alias(LOOM_SCALAR_TYPE_I32,
                                                         LOOM_SCALAR_TYPE_F32));
+
+  loom_scalar_type_set_t set = 0;
+  EXPECT_FALSE(
+      loom_memory_access_alias_type_set_may_alias(set, LOOM_SCALAR_TYPE_I32));
+  set |= loom_memory_access_alias_type_set(LOOM_SCALAR_TYPE_F32);
+  EXPECT_TRUE(
+      loom_memory_access_alias_type_set_may_alias(set, LOOM_SCALAR_TYPE_F32));
+  EXPECT_FALSE(
+      loom_memory_access_alias_type_set_may_alias(set, LOOM_SCALAR_TYPE_I32));
+  EXPECT_TRUE(
+      loom_memory_access_alias_type_set_may_alias(set, LOOM_SCALAR_TYPE_NONE));
+  set |= loom_memory_access_alias_type_set(LOOM_SCALAR_TYPE_NONE);
+  EXPECT_TRUE(
+      loom_memory_access_alias_type_set_may_alias(set, LOOM_SCALAR_TYPE_I32));
 }
 
 }  // namespace

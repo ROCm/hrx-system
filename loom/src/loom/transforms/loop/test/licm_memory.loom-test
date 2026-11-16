@@ -1,5 +1,41 @@
 // RUN: pass licm
 
+// Type-disjoint observations of the same physical bytes cannot affect one
+// another. The integer read therefore crosses the floating-point write even
+// without a distinct root or a byte-interval proof.
+func.def @type_disjoint_observations(%storage: buffer, %replacement: f32, %initial: i32) -> (i32) {
+  %offset = index.constant 0 : offset
+  %integer_view = buffer.view %storage[%offset] : buffer -> view<1xi32>
+  %floating_view = buffer.view %storage[%offset] : buffer -> view<1xf32>
+  %begin = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %result = scf.for %i = [%begin to %end step %step](%carry = %initial : i32) -> (i32) {
+    %loaded = view.load<type_disjoint> %integer_view[0] : view<1xi32> -> i32
+    view.store<type_disjoint> %replacement, %floating_view[0] : f32, view<1xf32>
+    scf.yield %loaded : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @type_disjoint_observations(%storage: buffer, %replacement: f32, %initial: i32) -> (i32) {
+  %offset = index.constant 0 : offset
+  %integer_view = buffer.view %storage[%offset] : buffer -> view<1xi32>
+  %floating_view = buffer.view %storage[%offset] : buffer -> view<1xf32>
+  %begin = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  %loaded = view.load<type_disjoint> %integer_view[0] : view<1xi32> -> i32
+  %result = scf.for %i = [%begin to %end step %step](%carry = %initial : i32) -> (i32) {
+    view.store<type_disjoint> %replacement, %floating_view[0] : f32, view<1xf32>
+    scf.yield %loaded : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+
 // A write in a sibling loop does not interfere. Both reads cross writes to
 // other slots, even though the function-wide write union covers both slots.
 func.def @sibling_writes(%storage: view<8xi32>, %initial: i32) -> (i32) {

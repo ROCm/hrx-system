@@ -523,6 +523,7 @@ static iree_status_t loom_movement_describe_scalar(
                                   LOOM_MOVEMENT_REJECTION_FOOTPRINT;
     return loom_movement_describe_result(false, out_described);
   }
+  view_endpoint->alias_type = loom_memory_access_alias_type(module, access);
   if (!iree_any_bit_set(view_endpoint->flags,
                         LOOM_MOVEMENT_ENDPOINT_STATIC_LENGTH)) {
     diagnostic->rejection_bits |= LOOM_MOVEMENT_REJECTION_FOOTPRINT;
@@ -713,6 +714,9 @@ static iree_status_t loom_movement_describe_vector(
   }
 
   loom_memory_access_t access = loom_memory_access_cast(module, op);
+  loom_movement_endpoint_t* view_endpoint =
+      descriptor->writes_view ? &request->dest : &request->source;
+  view_endpoint->alias_type = loom_memory_access_alias_type(module, access);
   bool applied = false;
   IREE_RETURN_IF_ERROR(loom_movement_apply_vector_access(
       analysis, view_value_id,

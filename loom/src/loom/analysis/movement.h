@@ -196,7 +196,19 @@ typedef struct loom_movement_endpoint_t {
 
   // Precision inherited from the underlying view-region analysis.
   loom_view_region_precision_flags_t precision_flags;
+
+  // Logical scalar type used by this memory observation for type-disjoint
+  // aliasing, or NONE when the observation is type-universal.
+  loom_scalar_type_t alias_type;
 } loom_movement_endpoint_t;
+
+static_assert(
+    sizeof(loom_movement_endpoint_t) ==
+        ((offsetof(loom_movement_endpoint_t, precision_flags) +
+          sizeof(((loom_movement_endpoint_t*)0)->precision_flags) +
+          iree_alignof(loom_movement_endpoint_t) - 1) &
+         ~(iree_alignof(loom_movement_endpoint_t) - 1)),
+    "the alias type must fit in existing movement endpoint tail padding");
 
 // A target-independent request extracted from one source IR operation.
 typedef struct loom_movement_request_t {

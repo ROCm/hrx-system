@@ -1549,6 +1549,27 @@ static inline bool loom_memory_access_alias_types_may_alias(
          left == right;
 }
 
+// Returns the compact-set member for one alias type. Bit zero represents a
+// type-universal access; the remaining bits use loom_scalar_type_t ordinals
+// directly.
+static inline loom_scalar_type_set_t loom_memory_access_alias_type_set(
+    loom_scalar_type_t type) {
+  return (loom_scalar_type_set_t)(1u << type);
+}
+
+// Returns whether any member of |set| may alias |type|. An empty set describes
+// no observations. A universal member or query aliases every nonempty set.
+static inline bool loom_memory_access_alias_type_set_may_alias(
+    loom_scalar_type_set_t set, loom_scalar_type_t type) {
+  if (!set) {
+    return false;
+  }
+  return type == LOOM_SCALAR_TYPE_NONE ||
+         iree_any_bit_set(
+             set, loom_memory_access_alias_type_set(LOOM_SCALAR_TYPE_NONE)) ||
+         iree_any_bit_set(set, loom_memory_access_alias_type_set(type));
+}
+
 // Returns the physical byte-offset operand, or INVALID for logical accesses.
 loom_value_id_t loom_memory_access_byte_offset(loom_memory_access_t access);
 

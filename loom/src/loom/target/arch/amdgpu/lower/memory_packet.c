@@ -1408,7 +1408,7 @@ static bool loom_amdgpu_memory_access_try_select_global_smem(
       !(loom_view_region_table_access_is_stable(
             selection_context->view_regions, candidate.source->root_value_id,
             candidate.source->alias_scope_id, candidate.source->restrict_access,
-            candidate.source->memory_space) ||
+            candidate.source->alias_type, candidate.source->memory_space) ||
         (candidate.source->reads_entry_contents &&
          loom_kernel_def_isa(selection_context->source_function.op)))) {
     return false;

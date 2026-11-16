@@ -536,6 +536,7 @@ loom_cc_library(
         "//loom/src/loom/analysis:symbolic_expr",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ops:op_defs",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

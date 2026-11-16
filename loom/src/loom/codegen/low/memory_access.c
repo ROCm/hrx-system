@@ -11,6 +11,7 @@
 #include "iree/base/api.h"
 #include "loom/analysis/symbolic_congruence.h"
 #include "loom/ir/intern_table.h"
+#include "loom/ops/op_defs.h"
 
 loom_low_memory_space_t loom_low_memory_access_normalize_space(
     loom_low_memory_space_t memory_space) {
@@ -134,6 +135,10 @@ bool loom_low_memory_access_summaries_may_alias(
                                                right->memory_space)) {
     return false;
   }
+  if (!loom_memory_access_alias_types_may_alias(left->alias_type,
+                                                right->alias_type)) {
+    return false;
+  }
   const loom_low_memory_relative_interval_t* lhs = left->relative_interval;
   const loom_low_memory_relative_interval_t* rhs = right->relative_interval;
   const bool same_captured_invocation =
@@ -198,6 +203,7 @@ bool loom_low_memory_access_summaries_equal(
     return false;
   }
   if (left->memory_space != right->memory_space ||
+      left->alias_type != right->alias_type ||
       left->precision_flags != right->precision_flags) {
     return false;
   }
