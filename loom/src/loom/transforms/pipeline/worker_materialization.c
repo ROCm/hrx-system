@@ -144,5 +144,6 @@ iree_status_t loom_pipeline_worker_materialization_offset(
   }
   return loom_view_materialize_offset_expression(
       builder, &expression, LOOM_VALUE_ID_INVALID,
+      loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
       loom_pipeline_worker_materialization_value(instance, anchor), out_value);
 }

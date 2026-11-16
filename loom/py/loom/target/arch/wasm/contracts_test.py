@@ -770,9 +770,21 @@ def test_numeric_memory_shapes_share_exact_v128_accesses() -> None:
             memory = rule.emit[-1].source_memory
             assert memory.element_byte_count * memory.vector_lane_count == 16
             assert memory.vector_lane_byte_stride == memory.element_byte_count
+            assert memory.byte_offset_bit_count == 32
+            if memory.static_byte_offset_minimum < 0:
+                assert memory.static_byte_offset_minimum == -(1 << 31)
+                assert memory.dynamic_term_count_minimum == 0
+                assert memory.dynamic_offset_unsigned_bit_count == 0
+                assert (
+                    rule.emit[0].operands["rhs"] == ValueRef.source_memory_byte_offset()
+                )
+                assert rule.emit[-1].immediates["offset"] == 0
+            elif memory.dynamic_term_count != 0:
+                assert memory.dynamic_term_count_minimum == 1
+                assert memory.dynamic_offset_unsigned_bit_count == 32
             for shape in _numeric_vector_shapes(rule, field):
                 counts[shape] = counts.get(shape, 0) + 1
-        # Static, dynamic with immediate bias, and dynamic with register bias.
+        # Static and dynamic unsigned immediates, plus complete register offsets.
         assert counts == {shape: 3 for shape in _expected_numeric_vector_shapes()}
 
 

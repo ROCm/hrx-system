@@ -277,7 +277,7 @@ def test_view_carriers_materialize_every_supported_view_as_one_address() -> None
             assert constraint.element_byte_count == 1
             assert constraint.vector_lane_count == 1
             assert constraint.vector_lane_byte_stride == 1
-            assert constraint.byte_offset_unsigned_bit_count == 32
+            assert constraint.byte_offset_bit_count == 32
 
         zero, immediate, compact_register, static_register, dynamic_register = rules
         assert isinstance(zero.emit[0], EmitRegisterCopy)

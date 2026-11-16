@@ -244,8 +244,9 @@ class SourceMemoryConstraint:
     reuse_view_base: bool = False
     # The complete origin and every retained stride are subgroup-uniform.
     require_subgroup_uniform: bool = False
-    # Unsigned width of the complete byte offset, or zero if unconstrained.
-    byte_offset_unsigned_bit_count: int = 0
+    # Register width of the complete displacement: [-2^(N-1), 2^N-1].
+    # Zero leaves the width unconstrained.
+    byte_offset_bit_count: int = 0
     # Unsigned width excluding the selected recipe's displacement, or zero if
     # unconstrained. A retained view base includes its own bias.
     dynamic_offset_unsigned_bit_count: int = 0
@@ -282,7 +283,7 @@ class SourceMemoryConstraint:
         preserve_source_index: bool = False,
         reuse_view_base: bool = False,
         require_subgroup_uniform: bool = False,
-        byte_offset_unsigned_bit_count: int = 0,
+        byte_offset_bit_count: int = 0,
         dynamic_offset_unsigned_bit_count: int = 0,
         alignment_diagnostic: GuardDiagnostic | None = None,
         byte_offset_diagnostic: GuardDiagnostic | None = None,
@@ -331,8 +332,8 @@ class SourceMemoryConstraint:
         object.__setattr__(self, "require_subgroup_uniform", require_subgroup_uniform)
         object.__setattr__(
             self,
-            "byte_offset_unsigned_bit_count",
-            byte_offset_unsigned_bit_count,
+            "byte_offset_bit_count",
+            byte_offset_bit_count,
         )
         object.__setattr__(
             self,
@@ -450,12 +451,9 @@ class SourceMemoryConstraint:
             raise ValueError(
                 "source memory dynamic view-base term count must fit in u8"
             )
-        if self.allow_dynamic_stride_values and (
-            dynamic_term_count == 0
-            or (dynamic_term_count is None and self.dynamic_term_count_minimum == 0)
-        ):
+        if self.allow_dynamic_stride_values and dynamic_term_count == 0:
             raise ValueError(
-                "dynamic source memory stride values require at least one dynamic term"
+                "dynamic source memory stride values require a dynamic-capable recipe"
             )
         if self.preserve_source_index:
             if dynamic_term_count == 0 or (
@@ -470,7 +468,6 @@ class SourceMemoryConstraint:
                 )
         if self.reuse_view_base and (
             dynamic_term_count is not None
-            or self.dynamic_term_count_minimum == 0
             or self.dynamic_view_base_term_count is not None
             or self.preserve_source_index
         ):
@@ -493,7 +490,7 @@ class SourceMemoryConstraint:
             _I64_MIN <= self.dynamic_byte_stride <= _I64_MAX
         ):
             raise ValueError("source memory dynamic byte stride must fit in i64")
-        if not 0 <= self.byte_offset_unsigned_bit_count <= 64:
+        if not 0 <= self.byte_offset_bit_count <= 64:
             raise ValueError("source memory byte offset width must be in [0, 64]")
         if not 0 <= self.dynamic_offset_unsigned_bit_count <= 64:
             raise ValueError(

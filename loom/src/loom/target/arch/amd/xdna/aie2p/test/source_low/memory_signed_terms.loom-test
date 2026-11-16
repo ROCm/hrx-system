@@ -141,3 +141,46 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @negative_varying_
   %value = lda.i32.index %table, %22
   return %value
 }
+
+// ====
+
+// Backward scalar accesses and dynamic packet origins retain the target-native
+// address register without widening their arithmetic.
+func.def @load_before_origin(%input: buffer) -> (i32) {
+  %backward = index.constant -4 : index
+  %view = buffer.view %input[%backward] : buffer -> view<1xi32>
+  %value = view.load %view[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @load_before_origin() -> (reg<aie2p.er>) asm {
+  %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %backward = mov.short -4
+  %8 = mov.address-index %backward
+  %value = lda.i32.index %input, %8
+  return %value
+}
+
+// ====
+
+func.def @copy_signed_origin(%input: buffer, %output: buffer, %position_input: index) {
+  %aligned_input = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %aligned_output = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %position = index.assume %position_input [range(%position_input, -64, 64), multiple_of(%position_input, 16)] : index
+  %source = buffer.view %aligned_input[%position] : buffer -> view<4xi32>
+  %destination = buffer.view %aligned_output[%position] : buffer -> view<4xi32>
+  %values = vector.load %source[0] : view<4xi32> -> vector<4xi32>
+  vector.store %values, %destination[0] : vector<4xi32>, view<4xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_signed_origin(%position: reg<aie2p.er>) asm {
+  %aligned_input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %aligned_output = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %15 = mov.address-index %position
+  %16 = vlda.128.i32x4.index %aligned_input, %15
+  vst.128.i32x4.index %16, %aligned_output, %15
+  return
+}

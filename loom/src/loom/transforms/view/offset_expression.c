@@ -98,12 +98,117 @@ static iree_status_t loom_view_materialize_offset_domain_translation(
   return iree_ok_status();
 }
 
+static iree_status_t loom_view_position_convert(loom_builder_t* builder,
+                                                loom_value_id_t value,
+                                                loom_type_t type,
+                                                loom_location_id_t location,
+                                                loom_value_id_t* out_value) {
+  const loom_type_t source_type =
+      loom_module_value_type(builder->module, value);
+  if (loom_type_equal(source_type, type)) {
+    *out_value = value;
+    return iree_ok_status();
+  }
+  // Physical view carriers keep the target's full unsigned address width.
+  // A signed coordinate enters that modular domain, rather than asserting
+  // the nonnegative precondition of a numeric index.cast to offset.
+  if (loom_type_equal(source_type, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX)) &&
+      loom_type_equal(type, loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET))) {
+    loom_op_t* stride = NULL;
+    IREE_RETURN_IF_ERROR(loom_index_constant_build(builder, loom_attr_i64(1),
+                                                   type, location, &stride));
+    loom_op_t* scale = NULL;
+    IREE_RETURN_IF_ERROR(loom_index_scale_build(
+        builder, value, loom_index_constant_result(stride), type, location,
+        &scale));
+    *out_value = loom_index_scale_result(scale);
+    return iree_ok_status();
+  }
+  loom_op_t* cast = NULL;
+  IREE_RETURN_IF_ERROR(loom_index_cast_build(builder, value, source_type, type,
+                                             location, &cast));
+  *out_value = loom_index_cast_result(cast);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_view_emit_index_expression(
+    loom_builder_t* builder, const loom_symbolic_expr_t* expression,
+    loom_value_id_t base_value_id, loom_location_id_t location,
+    loom_value_id_t* out_value) {
+  const loom_type_t type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  if (base_value_id == LOOM_VALUE_ID_INVALID &&
+      loom_symbolic_expr_has_relation_value(expression)) {
+    return loom_view_position_convert(builder, expression->relation_value_id,
+                                      type, location, out_value);
+  }
+  loom_value_id_t sum = base_value_id;
+  if (sum != LOOM_VALUE_ID_INVALID) {
+    IREE_RETURN_IF_ERROR(
+        loom_view_position_convert(builder, sum, type, location, &sum));
+  }
+  if (expression->constant != 0 ||
+      (sum == LOOM_VALUE_ID_INVALID && expression->term_count == 0)) {
+    loom_op_t* constant = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_index_constant_build(builder, loom_attr_i64(expression->constant),
+                                  type, location, &constant));
+    const loom_value_id_t value = loom_index_constant_result(constant);
+    if (sum == LOOM_VALUE_ID_INVALID) {
+      sum = value;
+    } else {
+      loom_op_t* add = NULL;
+      IREE_RETURN_IF_ERROR(
+          loom_index_add_build(builder, sum, value, type, location, &add));
+      sum = loom_index_add_result(add);
+    }
+  }
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < expression->term_count && iree_status_is_ok(status); ++i) {
+    const loom_symbolic_term_t* term = &expression->terms[i];
+    loom_value_id_t value = LOOM_VALUE_ID_INVALID;
+    status = loom_view_position_convert(builder, term->relation_value_id, type,
+                                        location, &value);
+    if (iree_status_is_ok(status) && term->coefficient != 1) {
+      loom_op_t* coefficient = NULL;
+      status =
+          loom_index_constant_build(builder, loom_attr_i64(term->coefficient),
+                                    type, location, &coefficient);
+      if (iree_status_is_ok(status)) {
+        loom_op_t* multiply = NULL;
+        status = loom_index_mul_build(builder, value,
+                                      loom_index_constant_result(coefficient),
+                                      location, &multiply);
+        if (iree_status_is_ok(status)) {
+          value = loom_index_mul_result(multiply);
+        }
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      if (sum == LOOM_VALUE_ID_INVALID) {
+        sum = value;
+      } else {
+        loom_op_t* add = NULL;
+        status =
+            loom_index_add_build(builder, sum, value, type, location, &add);
+        if (iree_status_is_ok(status)) {
+          sum = loom_index_add_result(add);
+        }
+      }
+    }
+  }
+  *out_value = iree_status_is_ok(status) ? sum : LOOM_VALUE_ID_INVALID;
+  return status;
+}
+
 iree_status_t loom_view_materialize_offset_expression(
     loom_builder_t* builder, const loom_symbolic_expr_t* expression,
-    loom_value_id_t base_value_id, loom_value_id_t anchor_value_id,
-    loom_value_id_t* out_value) {
+    loom_value_id_t base_value_id, loom_type_t result_type,
+    loom_value_id_t anchor_value_id, loom_value_id_t* out_value) {
   if (base_value_id != LOOM_VALUE_ID_INVALID && expression->constant == 0 &&
-      expression->term_count == 0) {
+      expression->term_count == 0 &&
+      loom_type_equal(loom_module_value_type(builder->module, base_value_id),
+                      result_type)) {
     *out_value = base_value_id;
     return iree_ok_status();
   }
@@ -119,17 +224,21 @@ iree_status_t loom_view_materialize_offset_expression(
   }
   const loom_location_id_t location = anchor->location;
   return loom_view_emit_offset_expression(builder, expression, base_value_id,
-                                          location, out_value);
+                                          result_type, location, out_value);
 }
 
 iree_status_t loom_view_emit_offset_expression(
     loom_builder_t* builder, const loom_symbolic_expr_t* expression,
-    loom_value_id_t base_value_id, loom_location_id_t location,
-    loom_value_id_t* out_value) {
+    loom_value_id_t base_value_id, loom_type_t result_type,
+    loom_location_id_t location, loom_value_id_t* out_value) {
+  if (loom_type_equal(result_type, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX))) {
+    return loom_view_emit_index_expression(builder, expression, base_value_id,
+                                           location, out_value);
+  }
   if (base_value_id != LOOM_VALUE_ID_INVALID && expression->constant == 0 &&
       expression->term_count == 0) {
-    *out_value = base_value_id;
-    return iree_ok_status();
+    return loom_view_position_convert(builder, base_value_id, result_type,
+                                      location, out_value);
   }
   // Reuse the complete producer spelling. Its SSA identity carries facts
   // established for the aggregate expression that a term-by-term
@@ -137,19 +246,20 @@ iree_status_t loom_view_emit_offset_expression(
   // dominance contract guarantees availability at the insertion point.
   if (base_value_id == LOOM_VALUE_ID_INVALID &&
       loom_symbolic_expr_has_relation_value(expression)) {
-    const loom_value_id_t value = expression->relation_value_id;
-    const loom_type_t source_type =
-        loom_module_value_type(builder->module, value);
-    const loom_type_t offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
-    if (loom_type_equal(source_type, offset_type)) {
-      *out_value = value;
-      return iree_ok_status();
-    }
-    loom_op_t* cast = NULL;
-    IREE_RETURN_IF_ERROR(loom_index_cast_build(builder, value, source_type,
-                                               offset_type, location, &cast));
-    *out_value = loom_index_cast_result(cast);
-    return iree_ok_status();
+    return loom_view_position_convert(builder, expression->relation_value_id,
+                                      result_type, location, out_value);
+  }
+  if (base_value_id != LOOM_VALUE_ID_INVALID) {
+    IREE_RETURN_IF_ERROR(loom_view_position_convert(
+        builder, base_value_id, result_type, location, &base_value_id));
+  } else if (expression->term_count == 0 && expression->constant < 0) {
+    loom_op_t* constant = NULL;
+    IREE_RETURN_IF_ERROR(loom_index_constant_build(
+        builder, loom_attr_i64(expression->constant),
+        loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), location, &constant));
+    return loom_view_position_convert(builder,
+                                      loom_index_constant_result(constant),
+                                      result_type, location, out_value);
   }
   // A constant translation stays in the physical address domain. Converting
   // a carried base to signed arithmetic and back would require a new range

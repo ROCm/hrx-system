@@ -169,7 +169,7 @@ iree_status_t loom_buffer_assume_same_root_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_BUFFER_VIEW: Form a typed non-owning view from an opaque buffer root and base byte offset. The result view type carries the address layout.
+// LOOM_OP_BUFFER_VIEW: Form a typed non-owning view from an opaque buffer origin and byte displacement. A signed index permits positions before a supplied interior origin; an offset remains nonnegative. Forming a view does not access memory or enlarge the buffer's accessible storage. Every eventual access must remain within that storage. The result view type carries the address layout.
 // %view = buffer.view %buffer[%offset] : buffer -> view<[%M]xf32, %layout>
 LOOM_DEFINE_ISA(loom_buffer_view_isa, LOOM_OP_BUFFER_VIEW)
 LOOM_DEFINE_OPERAND(loom_buffer_view_buffer, 0)

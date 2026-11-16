@@ -772,17 +772,17 @@ class EmitDescriptorOp:
                     f"{source_op.name}: descriptor '{self.descriptor.key}' "
                     f"operand '{descriptor_field}' needs a source-memory emit"
                 )
-            if self.source_memory.dynamic_term_count is None:
-                if self.source_memory.dynamic_term_count_minimum == 0:
-                    raise ValueError(
-                        f"{source_op.name}: descriptor '{self.descriptor.key}' "
-                        f"operand '{descriptor_field}' needs dynamic source "
-                        "memory"
-                    )
-            elif self.source_memory.dynamic_term_count == 0:
+            if value_ref.kind is SourceValueKind.SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET and (
+                self.source_memory.dynamic_term_count == 0
+                or (
+                    self.source_memory.dynamic_term_count is None
+                    and self.source_memory.dynamic_term_count_minimum == 0
+                )
+            ):
                 raise ValueError(
                     f"{source_op.name}: descriptor '{self.descriptor.key}' "
-                    f"operand '{descriptor_field}' needs dynamic source memory"
+                    f"operand '{descriptor_field}' needs dynamic source "
+                    "memory"
                 )
             if self.source_memory_byte_offset_materializer is None:
                 raise ValueError(

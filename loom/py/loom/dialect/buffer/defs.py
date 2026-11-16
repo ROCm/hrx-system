@@ -33,6 +33,7 @@ from loom.assembly import (
 from loom.dialect.atomic import AtomicFenceOrdering, AtomicScope
 from loom.dialect.memory import MemorySpace
 from loom.dsl import (
+    ADDRESS,
     ANY,
     ATTR_TYPE_BYTES,
     ATTR_TYPE_ENUM,
@@ -706,13 +707,15 @@ buffer_assume_same_root = Op(
 buffer_view = Op(
     name="buffer.view",
     group=buffer_ops,
-    doc=("Form a typed non-owning view from an opaque buffer root and base byte offset. The result view type carries the address layout."),
+    doc=(
+        "Form a typed non-owning view from an opaque buffer origin and byte displacement. A signed index permits positions before a supplied interior origin; an offset remains nonnegative. Forming a view does not access memory or enlarge the buffer's accessible storage. Every eventual access must remain within that storage. The result view type carries the address layout."
+    ),
     operands=[
         Operand("buffer", BUFFER, doc="Opaque storage root.", role=OperandRole.ACCESS_PATH),
         Operand(
             "byte_offset",
-            OFFSET,
-            doc="Base byte offset from the buffer root.",
+            ADDRESS,
+            doc="Byte displacement from the buffer origin: signed index or nonnegative offset.",
             role=OperandRole.ACCESS_PATH,
         ),
     ],

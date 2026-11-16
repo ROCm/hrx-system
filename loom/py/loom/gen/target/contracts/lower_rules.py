@@ -1152,8 +1152,8 @@ def _validate_c_table_shape(
                 f"{row_subject} dynamic byte stride",
             )
         _require_u8(
-            constraint.byte_offset_unsigned_bit_count,
-            f"{row_subject} byte offset unsigned bit count",
+            constraint.byte_offset_bit_count,
+            f"{row_subject} byte offset bit count",
         )
         _require_u8(
             constraint.dynamic_offset_unsigned_bit_count,

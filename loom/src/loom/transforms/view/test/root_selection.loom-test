@@ -274,3 +274,37 @@ func.def @fused_block_selections(%first: buffer, %second: buffer, %third: buffer
   view.store %initial, %first_view[0] : i32, view<1xi32>
   cfg.br ^consumer
 }
+
+
+// ====
+
+func.def @signed_distinct_origins(%first: buffer, %second: buffer, %third: buffer, %position: index, %choose_first: i1, %choose_pair: i1) -> (i32) {
+  %c0 = index.constant 0 : offset
+  %first_view = buffer.view %first[%position] : buffer -> view<1xi32>
+  %second_view = buffer.view %second[%c0] : buffer -> view<1xi32>
+  %third_view = buffer.view %third[%c0] : buffer -> view<1xi32>
+  %pair = scf.select %choose_first, %first_view, %second_view : view<1xi32>
+  %selected = scf.select %choose_pair, %pair, %third_view : view<1xi32>
+  %result = view.load %selected[0] : view<1xi32> -> i32
+  func.return %result : i32
+}
+
+// ----
+func.def @signed_distinct_origins(%first: buffer, %second: buffer, %third: buffer, %position: index, %choose_first: i1, %choose_pair: i1) -> (i32) {
+  %c0 = index.constant 0 : offset
+  %14 = index.cast %c0 : offset to index
+  %pair_root, %pair_offset = scf.if %choose_first -> (buffer, index) {
+    scf.yield %first, %position : buffer, index
+  } else {
+    scf.yield %second, %14 : buffer, index
+  }
+  %18 = index.cast %c0 : offset to index
+  %selected_root, %selected_offset = scf.if %choose_pair -> (buffer, index) {
+    scf.yield %pair_root, %pair_offset : buffer, index
+  } else {
+    scf.yield %third, %18 : buffer, index
+  }
+  %selected = buffer.view %selected_root[%selected_offset] : buffer -> view<1xi32>
+  %result = view.load %selected[0] : view<1xi32> -> i32
+  func.return %result : i32
+}

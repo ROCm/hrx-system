@@ -163,6 +163,7 @@ loom_cc_library(
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/buffer",
+        "//loom/src/loom/ops/index",
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/pass:value_facts",

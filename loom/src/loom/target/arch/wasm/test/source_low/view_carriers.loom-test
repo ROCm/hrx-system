@@ -72,13 +72,11 @@ func.def public @rotate_distinct_views(%first: buffer, %second: buffer, %first_o
 
 // ----
 low.func.def public target<wasm.core.simd128> abi(wasm_function) @rotate_distinct_views(%first_storage: reg<wasm.i32>, %second_storage: reg<wasm.i32>, %first_origin: reg<wasm.i32>, %second_origin: reg<wasm.i32>, %count: reg<wasm.i32>, %seed: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
-  %31 = i32.const 0
-  %32 = i32.add %31, %first_origin
-  %first_view = i32.add %first_storage, %32
-  %35 = i32.add %31, %second_origin
-  %second_view = i32.add %second_storage, %35
+  %first_view = i32.add %first_storage, %first_origin
+  %second_view = i32.add %second_storage, %second_origin
+  %begin = i32.const 0
   %step = i32.const 1
-  %last, %other = low.scf.for signed [%31 to %count step %step] iter_args(%first_view: reg<wasm.i32>, %second_view: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) do(%ordinal: reg<wasm.i32>, %current: reg<wasm.i32>, %next: reg<wasm.i32>) {
+  %last, %other = low.scf.for signed [%begin to %count step %step] iter_args(%first_view: reg<wasm.i32>, %second_view: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) do(%ordinal: reg<wasm.i32>, %current: reg<wasm.i32>, %next: reg<wasm.i32>) {
     %value = i32.add %seed, %ordinal
     i32.store %current, %value
     low.scf.yield %next, %current : reg<wasm.i32>, reg<wasm.i32>
@@ -106,7 +104,7 @@ low.func.def public target<wasm.core.simd128> abi(wasm_function) @return_subview
   %15 = i32.const 4
   %17 = i32.mul %position, %15
   %18 = i32.add %origin, %17
-  %19 = i32.add %15, %18
+  %19 = i32.add %18, %15
   %inner = i32.add %storage, %19
   return %inner
 }
@@ -148,7 +146,7 @@ func.def public @read_called_view(%input: buffer, %origin: offset) -> (i32) {
 // ----
 low.func.def noinline target<wasm.core.simd128> @make_record_window(%storage: reg<wasm.i32>, %origin: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
   %18 = i32.const 8
-  %19 = i32.add %18, %origin
+  %19 = i32.add %origin, %18
   %record = i32.add %storage, %19
   return %record
 }

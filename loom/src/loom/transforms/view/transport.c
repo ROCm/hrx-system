@@ -10,6 +10,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"
+#include "loom/ops/index/carrier.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/rewriter.h"
@@ -69,6 +70,14 @@ typedef enum loom_view_transport_placement_e {
   LOOM_VIEW_TRANSPORT_AFTER_ANCHOR = 1,
 } loom_view_transport_placement_t;
 
+// Joins prefer signed coordinates until a full-width physical offset requires
+// the target's modular offset domain. The order is the join operation.
+enum {
+  LOOM_VIEW_POSITION_NONNEGATIVE = 0,
+  LOOM_VIEW_POSITION_INDEX = 1,
+  LOOM_VIEW_POSITION_PHYSICAL = 2,
+};
+
 typedef struct loom_view_transport_value_t {
   // Original view value, reused as the offset value after decomposition.
   loom_value_id_t value_id;
@@ -84,6 +93,8 @@ typedef struct loom_view_transport_value_t {
   iree_host_size_t first_dependent;
   // Whether all required components are available for this transport.
   bool selected;
+  // Joined byte-position domain of this connected transport.
+  uint8_t position_domain;
 } loom_view_transport_value_t;
 
 typedef struct loom_view_transport_dependency_t {
@@ -135,6 +146,8 @@ typedef struct loom_view_transport_plan_t {
   const loom_view_region_table_t* regions;
   // Offset recipes indexed by view-region ordinal.
   loom_view_transport_offset_t* offsets;
+  // Largest nonnegative value in the selected native signed index carrier.
+  int64_t maximum_index;
   // Selection dependencies, also linking members of one SCF signature.
   loom_view_transport_dependency_t* dependencies;
   // Number of populated dependency edges.
@@ -295,6 +308,45 @@ static void loom_view_transport_plan_offset(
   }
 }
 
+static uint8_t loom_view_transport_offset_domain(
+    const loom_view_transport_plan_t* plan, loom_view_region_id_t region_id) {
+  const loom_view_transport_offset_t* offset = &plan->offsets[region_id];
+  const loom_type_t index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  const loom_value_facts_t facts =
+      plan->regions->regions[region_id].begin_byte_offset.facts;
+  if (offset->value_id != LOOM_VALUE_ID_INVALID) {
+    if (loom_type_equal(loom_module_value_type(plan->module, offset->value_id),
+                        index_type)) {
+      return LOOM_VIEW_POSITION_INDEX;
+    }
+    return facts.range_lo >= 0 && facts.range_hi < INT64_MAX &&
+                   facts.range_hi <= plan->maximum_index
+               ? LOOM_VIEW_POSITION_NONNEGATIVE
+               : LOOM_VIEW_POSITION_PHYSICAL;
+  }
+  if (offset->base_value_id != LOOM_VALUE_ID_INVALID &&
+      loom_type_equal(
+          loom_module_value_type(plan->module, offset->base_value_id),
+          index_type)) {
+    return LOOM_VIEW_POSITION_INDEX;
+  }
+  // Unknown facts do not turn a full-width physical offset into an index.
+  // A bounded negative complete position does need the signed domain even
+  // when it was formed by a subview of a nonnegative base.
+  if (facts.range_lo > INT64_MIN && facts.range_lo < 0) {
+    return LOOM_VIEW_POSITION_INDEX;
+  }
+  if (offset->base_value_id != LOOM_VALUE_ID_INVALID &&
+      loom_type_equal(
+          loom_module_value_type(plan->module, offset->base_value_id),
+          loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET)) &&
+      (facts.range_lo < 0 || facts.range_hi == INT64_MAX ||
+       facts.range_hi > plan->maximum_index)) {
+    return LOOM_VIEW_POSITION_PHYSICAL;
+  }
+  return LOOM_VIEW_POSITION_NONNEGATIVE;
+}
+
 static iree_status_t loom_view_transport_add_operand(
     loom_view_transport_plan_t* plan, loom_op_t* op, uint16_t operand_index,
     loom_value_id_t target_value) {
@@ -311,6 +363,9 @@ static iree_status_t loom_view_transport_add_operand(
   if (offset->value_id == LOOM_VALUE_ID_INVALID && !offset->expression) {
     plan->values[target].selected = false;
   }
+  plan->values[target].position_domain = iree_max(
+      plan->values[target].position_domain,
+      loom_view_transport_offset_domain(plan, source_region->region_id));
   IREE_RETURN_IF_ERROR(
       loom_view_transport_add_dependency(plan, offset->dependency, target));
   if (plan->operand_count == plan->operand_capacity) {
@@ -437,7 +492,10 @@ static iree_status_t loom_view_transport_select(
                                                  sizeof(*unavailable),
                                                  (void**)&unavailable));
   iree_host_size_t count = 0;
+  bool has_signed_position = false;
   for (iree_host_size_t i = 0; i < plan->value_count; ++i) {
+    has_signed_position |=
+        plan->values[i].position_domain == LOOM_VIEW_POSITION_INDEX;
     if (!plan->values[i].selected) {
       unavailable[count++] = i;
     }
@@ -451,6 +509,31 @@ static iree_status_t loom_view_transport_select(
       }
       plan->values[target].selected = false;
       unavailable[count++] = target;
+    }
+  }
+  if (!has_signed_position) {
+    return iree_ok_status();
+  }
+  // SCF signature members already have reciprocal dependency edges. Propagate
+  // physical requirements first, then signed coordinates through the remaining
+  // components. Each domain visits an edge at most once and reuses the queue.
+  for (uint8_t domain = LOOM_VIEW_POSITION_PHYSICAL;
+       domain >= LOOM_VIEW_POSITION_INDEX; --domain) {
+    count = 0;
+    for (iree_host_size_t i = 0; i < plan->value_count; ++i) {
+      if (plan->values[i].position_domain == domain) {
+        unavailable[count++] = i;
+      }
+    }
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      for (iree_host_size_t edge = plan->values[unavailable[i]].first_dependent;
+           edge != IREE_HOST_SIZE_MAX; edge = plan->dependencies[edge].next) {
+        const iree_host_size_t target = plan->dependencies[edge].target;
+        if (plan->values[target].position_domain < domain) {
+          plan->values[target].position_domain = domain;
+          unavailable[count++] = target;
+        }
+      }
     }
   }
   return iree_ok_status();
@@ -468,8 +551,12 @@ static iree_status_t loom_view_transport_materialize_offset(
     *out_value = offset->value_id;
     return iree_ok_status();
   }
+  const bool signed_position = loom_view_transport_offset_domain(
+                                   plan, region_id) == LOOM_VIEW_POSITION_INDEX;
   IREE_RETURN_IF_ERROR(loom_view_materialize_offset_expression(
       &rewriter->builder, offset->expression, offset->base_value_id,
+      loom_type_scalar(signed_position ? LOOM_SCALAR_TYPE_INDEX
+                                       : LOOM_SCALAR_TYPE_OFFSET),
       plan->regions->regions[region_id].view_value_id, &offset->value_id));
   *out_value = offset->value_id;
   return iree_ok_status();
@@ -497,7 +584,10 @@ static iree_status_t loom_view_transport_reconstruct(
   IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_with(
       rewriter, value->value_id, replacement));
   IREE_RETURN_IF_ERROR(loom_rewriter_set_value_type(
-      rewriter, value->value_id, loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET)));
+      rewriter, value->value_id,
+      loom_type_scalar(value->position_domain == LOOM_VIEW_POSITION_INDEX
+                           ? LOOM_SCALAR_TYPE_INDEX
+                           : LOOM_SCALAR_TYPE_OFFSET)));
   loom_op_t* view = NULL;
   return loom_buffer_view_build(builder, value->buffer_value_id,
                                 value->value_id, value->type,
@@ -523,6 +613,18 @@ static iree_status_t loom_view_transport_rewrite(
     loom_value_id_t offset;
     IREE_RETURN_IF_ERROR(loom_view_transport_materialize_offset(
         plan, rewriter, operand->source_region, &offset));
+    const loom_type_t source_type =
+        loom_module_value_type(plan->module, offset);
+    const loom_type_t target_type = loom_module_value_type(
+        plan->module, plan->values[operand->target].value_id);
+    if (!loom_type_equal(source_type, target_type)) {
+      loom_builder_set_before(&rewriter->builder, operand->op);
+      loom_symbolic_expr_t identity;
+      loom_symbolic_expr_constant(0, &identity);
+      IREE_RETURN_IF_ERROR(loom_view_emit_offset_expression(
+          &rewriter->builder, &identity, offset, target_type,
+          operand->op->location, &offset));
+    }
     IREE_RETURN_IF_ERROR(loom_rewriter_set_operand(
         rewriter, operand->op, operand->operand_index, offset));
     ++statistics->operands_decomposed;
@@ -560,6 +662,9 @@ static iree_status_t loom_view_transport_prepare(
   IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
       pass, plan->module, loom_pass_value_fact_scope_function(function),
       &facts));
+  plan->maximum_index = loom_index_integer_carrier_domain_facts(
+                            &facts->context, LOOM_SCALAR_TYPE_INDEX)
+                            .range_hi;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       plan->arena, plan->domain.value_count, sizeof(*plan->indices),
       (void**)&plan->indices));
@@ -679,6 +784,8 @@ typedef struct loom_view_root_selection_t {
   bool selected;
   // Whether the selection has been appended to the dependency order.
   bool ordered;
+  // Joined byte-position domain of the selected origins.
+  uint8_t position_domain;
 } loom_view_root_selection_t;
 
 typedef struct loom_view_root_selection_plan_t {
@@ -793,6 +900,13 @@ static iree_status_t loom_view_root_selection_plan_entries(
         plan, i, loom_scf_select_false_value(selection->op),
         &selection->false_source);
     selection->selected = true_available && false_available;
+    if (selection->selected) {
+      selection->position_domain =
+          iree_max(loom_view_transport_offset_domain(
+                       &plan->offsets, selection->true_source.region_id),
+                   loom_view_transport_offset_domain(
+                       &plan->offsets, selection->false_source.region_id));
+    }
   }
 
   IREE_RETURN_IF_ERROR(
@@ -830,6 +944,9 @@ static iree_status_t loom_view_root_selection_plan_entries(
             break;
           }
           selection->selected &= plan->selections[source].selected;
+          selection->position_domain =
+              iree_max(selection->position_domain,
+                       plan->selections[source].position_domain);
         }
         if (dependency != IREE_HOST_SIZE_MAX) {
           pending[pending_count++] = dependency;
@@ -881,10 +998,28 @@ static iree_status_t loom_view_root_selection_rewrite(
 
     loom_builder_t* builder = &rewriter->builder;
     loom_builder_set_before(builder, selection->op);
+    const loom_type_t position_type =
+        loom_type_scalar(selection->position_domain == LOOM_VIEW_POSITION_INDEX
+                             ? LOOM_SCALAR_TYPE_INDEX
+                             : LOOM_SCALAR_TYPE_OFFSET);
+    loom_value_id_t* positions[] = {&true_values[1], &false_values[1]};
+    iree_status_t status = iree_ok_status();
+    for (iree_host_size_t j = 0;
+         j < IREE_ARRAYSIZE(positions) && iree_status_is_ok(status); ++j) {
+      const loom_type_t source_type =
+          loom_module_value_type(plan->module, *positions[j]);
+      if (!loom_type_equal(source_type, position_type)) {
+        loom_symbolic_expr_t identity;
+        loom_symbolic_expr_constant(0, &identity);
+        status = loom_view_emit_offset_expression(
+            builder, &identity, *positions[j], position_type,
+            selection->op->location, positions[j]);
+      }
+    }
+    IREE_RETURN_IF_ERROR(status);
     const loom_value_id_t value_checkpoint =
         loom_rewriter_value_checkpoint(rewriter);
-    const loom_type_t result_types[] = {
-        loom_type_buffer(), loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET)};
+    const loom_type_t result_types[] = {loom_type_buffer(), position_type};
     loom_op_t* if_op = NULL;
     IREE_RETURN_IF_ERROR(loom_scf_if_build(
         builder, LOOM_SCF_IF_BUILD_FLAG_HAS_ELSE_REGION,
@@ -964,6 +1099,9 @@ static iree_status_t loom_view_root_selection_prepare(
       .domain = plan->domain,
       .indices = plan->selection_indices,
       .regions = &regions,
+      .maximum_index = loom_index_integer_carrier_domain_facts(
+                           &facts->context, LOOM_SCALAR_TYPE_INDEX)
+                           .range_hi,
   };
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       plan->arena, regions.region_count, sizeof(*plan->offsets.offsets),
