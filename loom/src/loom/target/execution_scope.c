@@ -20,14 +20,14 @@ iree_status_t loom_target_execution_scope_resolve(
     const loom_target_execution_scope_t** out_scope) {
   if (table->values == NULL) {
     IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-        iree_arena_allocator(arena), references->execution_targets.count,
+        iree_arena_allocator(arena), references->execution_scopes.count,
         sizeof(*table->values), (void**)&table->values));
   }
   loom_target_execution_scope_t** slot = &table->values[scope - 1];
   if (*slot == NULL) {
     loom_target_execution_scope_t target = inherited;
     const loom_symbol_ref_t witness =
-        references->execution_targets.values[scope - 1];
+        references->execution_scopes.values[scope - 1].target;
     if (loom_symbol_ref_is_valid(witness)) {
       const loom_symbol_facts_base_t* base_facts = NULL;
       IREE_RETURN_IF_ERROR(loom_symbol_fact_table_lookup_ref(

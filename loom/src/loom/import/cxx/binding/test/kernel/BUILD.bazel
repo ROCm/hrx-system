@@ -30,6 +30,7 @@ loom_check_test_suite(
         "collective_scans.cxx-test",
         "configured_workgroup_storage.cxx-test",
         "initialization_kernels.cxx-test",
+        "invocation_inputs.cxx-test",
         "kernel_arguments.cxx-test",
         "kernel_arguments_invalid.cxx-test",
         "kernel_callers.cxx-test",

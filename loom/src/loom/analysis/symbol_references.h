@@ -10,9 +10,9 @@
 // analyses. It records occurrences from the symbol whose definition owns
 // an operation to each module-local symbol referenced by that operation, nested
 // attributes, static encoding attributes, and each SSA value definition's
-// type. The table is intentionally rebuilt from immutable IR instead of
-// maintained on every IR mutation path; callers that rewrite symbols should
-// rebuild after mutation.
+// type. Structural mutations rebuild the snapshot. A reference-preserving
+// rewrite may instead rebind operation identities while retaining the already
+// established symbol relationships and ownership.
 
 #ifndef LOOM_ANALYSIS_SYMBOL_REFERENCES_H_
 #define LOOM_ANALYSIS_SYMBOL_REFERENCES_H_
@@ -40,11 +40,34 @@ typedef uint32_t loom_template_demand_id_t;
 // Sentinel for occurrences not attached to a concrete op attribute.
 #define LOOM_SYMBOL_REFERENCE_ATTR_INDEX_NONE ((uint8_t)UINT8_MAX)
 
-// Independent execution region ordinal plus one in execution_targets. Zero
+// Independent execution region ordinal plus one in execution_scopes. Zero
 // names the owning function's context, including its specialized version.
 // A nonzero scope enters that environment's independently executing worker
 // contract, optionally selecting a different target first.
 typedef uint32_t loom_symbol_reference_execution_scope_id_t;
+
+// Independently executing region and its inherited or explicitly selected
+// target. Equal targets do not make two regions the same invocation.
+typedef struct loom_symbol_reference_execution_scope_t {
+  // Exact invocation boundary borrowed from the analyzed module.
+  const loom_region_t* region;
+  // Target witness, or null to inherit the owning function's environment.
+  loom_symbol_ref_t target;
+} loom_symbol_reference_execution_scope_t;
+
+// Optional invocation-input collection alongside reference discovery. The
+// callback observes only ops declaring that semantic contract. It may
+// retain facts in its own arena but must not rewrite the module.
+typedef struct loom_symbol_reference_observer_t {
+  // Receives a query and its established source and execution ownership.
+  // Root-region ordinals are one-based; zero denotes the symbol's contract.
+  iree_status_t (*invocation_input)(
+      void* user_data, const loom_op_t* op, loom_symbol_id_t source_symbol_id,
+      uint8_t source_root_region_index_plus_one,
+      loom_symbol_reference_execution_scope_id_t execution_scope);
+  // Collection state owned by the reference table's caller.
+  void* user_data;
+} loom_symbol_reference_observer_t;
 
 // Classifies where a symbol reference occurrence was found.
 typedef enum loom_symbol_reference_occurrence_kind_e {
@@ -202,15 +225,15 @@ typedef struct loom_symbol_reference_table_t {
   // do not propagate membership: each bit describes only the symbol body
   // visited by this structural analysis. NULL when no callable exits exist.
   const uint64_t* callable_exit_symbols;
-  // Target environments selected by independently executing regions. Nested
-  // regions inheriting an existing worker environment share its scope.
+  // Exact independent invocation regions with their target witnesses. Nested
+  // workers remain distinct even when they inherit the same environment.
   struct {
-    // References in traversal order. Null inherits the owning function's
-    // environment; an explicit unresolved reference selects an unbound worker.
-    const loom_symbol_ref_t* values;
+    // Regions in traversal order. Each retains its inherited target witness;
+    // an explicit unresolved witness selects an unbound worker.
+    const loom_symbol_reference_execution_scope_t* values;
     // Number of distinct execution scopes.
     iree_host_size_t count;
-  } execution_targets;
+  } execution_scopes;
   // Abstract template.apply provider demands owned by module symbols.
   struct {
     // Demand records owned by the caller-provided arena.
@@ -307,6 +330,36 @@ static inline bool loom_symbol_reference_template_family_is_demanded(
 iree_status_t loom_symbol_reference_table_build(
     const loom_module_t* module, iree_arena_allocator_t* arena,
     loom_symbol_reference_table_t* out_table);
+
+// Builds the same snapshot while collecting a consumer's local facts during
+// the owning traversal. Reference and consumer state share one immutable
+// source lifetime. Structural mutation invalidates both; reference-preserving
+// operation replacement can rebind the table explicitly.
+iree_status_t loom_symbol_reference_table_build_observed(
+    const loom_module_t* module, iree_arena_allocator_t* arena,
+    loom_symbol_reference_observer_t observer,
+    loom_symbol_reference_table_t* out_table);
+
+// One operation replacement that preserves all symbol-reference semantics.
+typedef struct loom_symbol_reference_user_replacement_t {
+  // Previous operation identity, unique within a replacement batch.
+  const loom_op_t* original;
+  // New operation at the same source/region position with the same reference
+  // attribute slots, symbols, roles, types, and structural summaries.
+  const loom_op_t* replacement;
+} loom_symbol_reference_user_replacement_t;
+
+// Rebinds an exclusively owned snapshot after reference-preserving operation
+// replacement. No operation bodies or types are inspected. Symbol definitions,
+// execution regions, reference sets, and structural summaries remain unchanged;
+// all other mutations require a new snapshot. The batch takes expected O(R + E
+// + D) time, with O(R) scratch for R replacements, E occurrences, and D
+// template demands. Empty batches allocate nothing. Only scratch allocation can
+// fail.
+iree_status_t loom_symbol_reference_table_rebind_users(
+    loom_symbol_reference_table_t* table,
+    const loom_symbol_reference_user_replacement_t* replacements,
+    iree_host_size_t replacement_count, iree_arena_allocator_t* arena);
 
 // Returns the dependency SCC graph whose node ordinals are module symbol IDs.
 loom_scc_graph_t loom_symbol_reference_dependency_scc_graph(

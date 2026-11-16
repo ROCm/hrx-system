@@ -762,6 +762,22 @@ ERR_LOWERING_073 = ErrorDef(
 )
 
 
+ERR_LOWERING_074 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=74,
+    severity=Severity.ERROR,
+    summary="Callable invocation input is unavailable.",
+    message="cannot supply {query}: {reason}",
+    params=(
+        ErrorParam("query", ParamKind.STRING),
+        ErrorParam("reason", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Call the helper from a kernel or worker, or pass the required value explicitly"
+    ),
+)
+
+
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
     ERR_LOWERING_023,
@@ -804,4 +820,5 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_071,
     ERR_LOWERING_072,
     ERR_LOWERING_073,
+    ERR_LOWERING_074,
 )

@@ -786,8 +786,7 @@ kernel.def @launch_config_requires_index_operands() {
 
 // ====
 
-func.def @workitem_id_requires_execution_body() {
-  // ERROR@+1: STRUCTURE/029 "kernel.workitem.id" "one-of-required" "kernel.def or pipeline.strand" "func.def"
+func.def @workitem_id_inherits_invocation() {
   %tid = kernel.workitem.id<x> : index
   func.return
 }
@@ -801,8 +800,7 @@ func.def inline @required_inline_defers_kernel_placement() -> (index) {
 
 // ====
 
-func.def noinline @noinline_does_not_defer_kernel_placement() -> (index) {
-  // ERROR@+1: STRUCTURE/029 "kernel.workitem.id" "one-of-required" "kernel.def or pipeline.strand" "func.def"
+func.def noinline @noinline_uses_explicit_invocation_inputs() -> (index) {
   %tid = kernel.workitem.id<x> : index
   func.return %tid : index
 }
@@ -834,32 +832,25 @@ kernel.def @exit_requires_direct_kernel_body() {
 
 // ====
 
-func.def @workgroup_id_requires_execution_body() {
-  // ERROR@+1: STRUCTURE/029 "kernel.workgroup.id" "one-of-required" "kernel.def or pipeline.strand" "func.def"
+func.def @workgroup_id_inherits_invocation() {
   %gid = kernel.workgroup.id<x> : index
   func.return
 }
 
 // ====
 
-func.def @workgroup_size_requires_execution_body() {
-  // ERROR@+1: STRUCTURE/029 "kernel.workgroup.size" "one-of-required" "kernel.def or pipeline.strand" "func.def"
+func.def @workgroup_size_inherits_invocation() {
   %size = kernel.workgroup.size<x> : index
   func.return
 }
 
 // ====
 
-func.def @cluster_queries_require_execution_body() {
-  // ERROR@+1: STRUCTURE/029 "kernel.cluster.id" "one-of-required" "kernel.def or pipeline.strand" "func.def"
+func.def @cluster_queries_inherit_invocation() {
   %cluster = kernel.cluster.id<x> : index
-  // ERROR@+1: STRUCTURE/029 "kernel.cluster.workgroup.id" "one-of-required" "kernel.def or pipeline.strand" "func.def"
   %local = kernel.cluster.workgroup.id<y> : index
-  // ERROR@+1: STRUCTURE/029 "kernel.cluster.workgroup.flat_id" "one-of-required" "kernel.def or pipeline.strand" "func.def"
   %flat = kernel.cluster.workgroup.flat_id : index
-  // ERROR@+1: STRUCTURE/029 "kernel.cluster.size" "one-of-required" "kernel.def or pipeline.strand" "func.def"
   %size = kernel.cluster.size<z> : index
-  // ERROR@+1: STRUCTURE/029 "kernel.cluster.count" "one-of-required" "kernel.def or pipeline.strand" "func.def"
   %count = kernel.cluster.count<x> : index
   func.return
 }

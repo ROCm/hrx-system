@@ -673,6 +673,30 @@ def test_verifier_does_not_defer_noinline_ancestor_requirement() -> None:
     assert _diagnostic_text_contains(diagnostics, "missing required ancestor")
 
 
+@pytest.mark.parametrize("inline_policy", ["", "inline", "noinline"])
+@pytest.mark.parametrize("isolated", [False, True])
+def test_verifier_defers_invocation_inputs_at_function_boundary(
+    inline_policy: str, isolated: bool
+) -> None:
+    from loom.builders import default_ops
+
+    body = "%lane = kernel.workitem.id<x> : index"
+    if isolated:
+        body = "test.isolated_region {\n" + body + "\ntest.yield\n}"
+    parser = Parser()
+    parser.register_ops(default_ops())
+    parser.register_types(ALL_BUILTIN_TYPES)
+    module = parser.parse(
+        f"func.def {inline_policy} @helper() {{\n{body}\nfunc.return\n}}"
+    )
+
+    diagnostics = verify_module(module)
+
+    assert diagnostics.has_errors == isolated
+    if isolated:
+        assert _diagnostic_text_contains(diagnostics, "missing required ancestor")
+
+
 def test_verifier_does_not_defer_inline_through_nested_isolation() -> None:
     isolated_op = Operation(
         name="test.isolated_region",

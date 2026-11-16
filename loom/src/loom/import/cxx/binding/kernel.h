@@ -18,6 +18,7 @@
 #include "loom/ir/facts.h"
 #include "loom/ops/atomic.h"
 #include "loom/ops/combining.h"
+#include "loom/ops/kernel/ops.h"
 
 namespace loom::cxx_import {
 
@@ -54,8 +55,9 @@ class SubgroupShuffleIntrinsic {
 };
 
 // Typed source projection of kernel topology, votes, broadcasts, reductions,
-// and scans. Calls require a kernel or required-inline helper; the translation
-// driver owns that placement check. Collective participation and convergence
+// and scans. Stable topology queries may be used in ordinary helpers; the
+// translation driver checks placement for participation-dependent collectives.
+// Collective participation and convergence
 // remain High semantics, independent of the source spelling or target wave
 // width.
 class KernelCollectiveIntrinsic {
@@ -75,24 +77,27 @@ class KernelCollectiveIntrinsic {
   Value call(std::span<const Value> arguments, ValueArena& arena,
              loom_builder_t* builder, loom_location_id_t location) const;
 
+  // Uses the generated IR contract, shared with source input normalization.
+  bool is_invocation_input(const loom_module_t* module) const;
+
   bool equivalent(const KernelCollectiveIntrinsic& other) const;
 
  private:
   enum class Operation {
-    Id,
-    Count,
-    Size,
-    LaneId,
-    Any,
-    All,
-    Ballot,
-    ActiveMask,
-    Broadcast,
-    BroadcastFirst,
-    SubgroupReduce,
-    WorkgroupReduce,
-    SubgroupScan,
-    WorkgroupScan,
+    Id = LOOM_OP_KERNEL_SUBGROUP_ID,
+    Count = LOOM_OP_KERNEL_SUBGROUP_COUNT,
+    Size = LOOM_OP_KERNEL_SUBGROUP_SIZE,
+    LaneId = LOOM_OP_KERNEL_SUBGROUP_LANE_ID,
+    Any = LOOM_OP_KERNEL_SUBGROUP_VOTE_ANY,
+    All = LOOM_OP_KERNEL_SUBGROUP_VOTE_ALL,
+    Ballot = LOOM_OP_KERNEL_SUBGROUP_VOTE_BALLOT,
+    ActiveMask = LOOM_OP_KERNEL_SUBGROUP_ACTIVE_MASK,
+    Broadcast = LOOM_OP_KERNEL_SUBGROUP_BROADCAST,
+    BroadcastFirst = LOOM_OP_KERNEL_SUBGROUP_BROADCAST_FIRST,
+    SubgroupReduce = LOOM_OP_KERNEL_SUBGROUP_REDUCE,
+    WorkgroupReduce = LOOM_OP_KERNEL_WORKGROUP_REDUCE,
+    SubgroupScan = LOOM_OP_KERNEL_SUBGROUP_SCAN,
+    WorkgroupScan = LOOM_OP_KERNEL_WORKGROUP_SCAN,
   };
 
   struct Scan {

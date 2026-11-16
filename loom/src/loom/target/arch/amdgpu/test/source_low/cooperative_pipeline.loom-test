@@ -24,22 +24,22 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 0
   %output = resource<hal_binding> {extent = 4096, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %width = s_mov_b32 128
   %end = s_mov_b32 1024
-  %36 = s_mov_b64_exec_read
+  %40 = s_mov_b64_exec_read
   low.br ^_bb1(%thread: reg<amdgpu.vgpr>)
 ^_bb1(%item: reg<amdgpu.vgpr>):
-  %35 = v_cmp_lt_i32 %item, %end
-  %37, %38 = s_and_saveexec_b64 %35
-  low.cond_br %38, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+  %39 = v_cmp_lt_i32 %item, %end
+  %41, %42 = s_and_saveexec_b64 %39
+  low.cond_br %42, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %39 = v_lshlrev_b32_src0_inline %item, 2
-  %value = global_load_b32_saddr %39, %input
-  %41 = v_mov_b32 128
-  %result = v_add_u32 %value, %41
-  global_store_b32_saddr %39, %result, %output
-  %44 = v_add_u32 %width, %item
-  low.br ^_bb1(%44: reg<amdgpu.vgpr>)
+  %43 = v_lshlrev_b32_src0_inline %item, 2
+  %value = global_load_b32_saddr %43, %input
+  %45 = v_mov_b32 128
+  %result = v_add_u32 %value, %45
+  global_store_b32_saddr %43, %result, %output
+  %48 = v_add_u32 %width, %item
+  low.br ^_bb1(%48: reg<amdgpu.vgpr>)
 ^_bb3:
-  s_mov_b64_exec %36
+  s_mov_b64_exec %40
   return
 }
 
@@ -67,8 +67,8 @@ pipeline.def<kernel> public target(@target) @retained_helper() run(%output: view
 
 // ----
 low.func.def noinline target<amdgpu.rdna3.core> @adjust(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %22 = v_mov_b32 32
-  %result = v_add_u32 %value, %22
+  %24 = v_mov_b32 32
+  %result = v_add_u32 %value, %24
   return %result
 }
 
@@ -76,7 +76,7 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) abi_layout({constant_count = 0
   %value = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %output = resource<hal_binding> {extent = 512, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %result = low.func.call pure @adjust(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
-  %27 = v_lshlrev_b32_src0_inline %value, 2
-  global_store_b32_saddr %27, %result, %output
+  %29 = v_lshlrev_b32_src0_inline %value, 2
+  global_store_b32_saddr %29, %result, %output
   return
 }

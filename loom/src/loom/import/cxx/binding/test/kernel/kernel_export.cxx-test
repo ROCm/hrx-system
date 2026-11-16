@@ -168,3 +168,40 @@ static loom::kernel::clustered_configuration clustered_configuration(unsigned gr
 [[loom::kernel(clustered_configuration)]]
 void clustered() {
 }
+
+// ====
+
+// Queries in retained helpers remain authorable through export and reimport.
+// RUN: emit cxx roundtrip
+#include <loomcxx/kernel.h>
+
+[[loom::noinline]] static unsigned helper(unsigned value) {
+  return value + static_cast<unsigned>(loom::kernel::workitem::id.x);
+}
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(32, 1, 1)]]
+void entry(unsigned* output, unsigned value) {
+  output[loom::kernel::workitem::id.x] = helper(value);
+}
+
+// ----
+#include <loomcxx/kernel.h>
+#include <loomcxx/numeric.h>
+
+[[loom::symbol("helper"), loom::noinline]]
+static unsigned helper(unsigned value);
+
+[[loom::symbol("helper"), loom::noinline]]
+static unsigned helper(unsigned value) {
+  unsigned workitem = static_cast<unsigned>(loom::kernel::workitem::id.x);
+  return (value + workitem);
+}
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(32, 1, 1)]]
+void entry(unsigned* output, unsigned value) {
+  unsigned v9 = helper(value);
+  unsigned workitem = static_cast<unsigned>(loom::kernel::workitem::id.x);
+  unsigned long long output_byte_offset_1 = loom::offset::cast<unsigned long long>(loom::type::offset{0}) + (loom::convert<unsigned long long>(workitem) * 4ull);
+  auto output_view = loom::buffer::view<1>(reinterpret_cast<unsigned*>(reinterpret_cast<unsigned char*>(output) + static_cast<unsigned long long>(loom::offset::cast(output_byte_offset_1))), {});
+  loom::view::store<loom::memory_access::root_in_bounds>(v9, output_view, 0);
+}

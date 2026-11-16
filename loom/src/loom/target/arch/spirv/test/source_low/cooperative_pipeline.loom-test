@@ -26,14 +26,14 @@ low.kernel.def target<spirv.logical.core>(@target) abi_layout({signature = (buff
   %end = OpConstant.i32 1024 : reg<spirv.id : index>
   %increment = OpConstant.i32 128
   low.scf.for signed [%thread to %end step %width] do(%item: reg<spirv.id : index>) {
-    %30 = OpSConvert.i32.offset64 %item
-    %31 = OpConstant.offset64 4
-    %32 = OpIMul.offset64 %30, %31
-    %33 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %32
-    %value = OpLoad.storage_buffer.i32 %33
+    %34 = OpSConvert.i32.offset64 %item
+    %35 = OpConstant.offset64 4
+    %36 = OpIMul.offset64 %34, %35
+    %37 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %36
+    %value = OpLoad.storage_buffer.i32 %37
     %result = OpIAdd %value, %increment
-    %39 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %32
-    OpStore.storage_buffer.i32 %39, %result
+    %43 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %36
+    OpStore.storage_buffer.i32 %43, %result
   }
   return
 }

@@ -1,0 +1,57 @@
+// RUN: pass inline-callables{stage=prepare,budget=0,hot-budget=0}
+
+// A host-callable entry cannot silently change its external signature.
+func.def noinline @helper() -> (index) {
+  %lane = kernel.workitem.id<x> : index
+  func.return %lane : index
+}
+
+// ERROR@+1: LOWERING/074 {query="kernel.workitem.id", reason="a public or native signature cannot acquire invocation arguments"}
+func.def public @host() -> (index) {
+  %value = func.call @helper() : () -> (index)
+  func.return %value : index
+}
+
+// ====
+
+// Launch configuration executes before any workitem invocation exists.
+func.def noinline @helper() -> (index) {
+  %lane = kernel.workitem.id<x> : index
+  func.return %lane : index
+}
+
+kernel.def @entry() {
+  %unit = index.constant 1 : index
+  // ERROR@+1: LOWERING/074 {query="kernel.workitem.id", reason="the calling region has no kernel or worker invocation"}
+  %count = func.call pure @helper() : () -> (index)
+  kernel.launch.config workgroups(%count, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+
+// Native source signatures are fixed even when the symbol is private.
+// ERROR@+1: LOWERING/074 {query="kernel.workitem.id", reason="a public or native signature cannot acquire invocation arguments"}
+func.def noinline source_signature(#func.abi.c.signature<arguments = [], results = [0], types = [#func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @native() -> (i32) {
+  %lane = kernel.workitem.id<x> : index
+  %result = index.cast %lane : index to i32
+  func.return %result : i32
+}
+
+// ====
+
+// A non-semantic reference cannot acquire a hidden argument list.
+func.def noinline @helper() -> (index) {
+  %lane = kernel.workitem.id<x> : index
+  func.return %lane : index
+}
+
+kernel.def @entry() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch() {
+  // ERROR@+1: LOWERING/074 {query="kernel.workitem.id", reason="this reference does not pass ordinary callable arguments"}
+  %value = test.low_invoke @helper() : () -> (index)
+  kernel.return
+}

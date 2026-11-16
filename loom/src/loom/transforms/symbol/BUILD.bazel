@@ -240,6 +240,30 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "invocation_inputs",
+    srcs = ["invocation_inputs.c"],
+    hdrs = ["invocation_inputs.h"],
+    deps = [
+        "//loom/src/loom/analysis:callable_inputs",
+        "//loom/src/loom/analysis:scc",
+        "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/func",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/rewrite:callable",
+        "//loom/src/loom/rewrite:materialize",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:function_version",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "inline_callables",
     srcs = [
         "inline_callables.c",
@@ -254,6 +278,7 @@ loom_cc_library(
     ],
     deps = [
         ":inline_profitability",
+        ":invocation_inputs",
         "//loom/src/loom/analysis:availability",
         "//loom/src/loom/analysis:scc",
         "//loom/src/loom/analysis:symbol_facts",

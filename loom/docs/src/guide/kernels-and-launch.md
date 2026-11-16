@@ -140,6 +140,30 @@ Choose the level that expresses the algorithm. A subgroup reduction naturally
 uses subgroup values; a tiled matrix kernel often uses separate workgroup and
 workitem axes; a flat elementwise kernel can use the dispatch id.
 
+### Share coordinate-dependent helpers
+
+Ordinary helpers can read these coordinates without being forced inline:
+
+```loom
+func.def noinline @position(%bias: index) -> (index) {
+  %lane = kernel.workitem.id<x> : index
+  %result = index.add %lane, %bias : index
+  func.return %result : index
+}
+```
+
+When a kernel or worker calls `position`, compilation supplies its workitem ID
+as an ordinary helper argument. Intermediate helpers forward that argument;
+the public kernel signature stays unchanged. Two workers calling the same
+helper each supply their own coordinates. Constant launch dimensions can fold
+away through the same argument specialization used for explicitly passed values.
+
+Every path to the helper must supply an invocation. A host-callable entry, a
+launch-configuration region, or a fixed native signature cannot provide these
+arguments implicitly and produces a diagnostic at that boundary. Active masks,
+votes, shuffles, and barriers describe participation at the operation itself;
+they are not stable coordinate inputs that can be moved to the caller.
+
 ## Form masks over active subgroup lanes
 
 Subgroup votes describe cooperation without naming a backend.

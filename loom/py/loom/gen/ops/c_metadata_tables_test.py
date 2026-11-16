@@ -16,6 +16,7 @@ from loom.dsl import (
     ATTR_TYPE_SYMBOL,
     CONVERGENT,
     FACT_IDENTITY,
+    INDEX,
     INTEGER,
     ISOLATED_FROM_ABOVE,
     PURE,
@@ -140,6 +141,34 @@ def test_generate_tables_requires_authored_eager_execution_policy() -> None:
 
     with pytest.raises(ValueError, match="explicit eager_execution_cost"):
         generate_tables_c("test", 0, [op])
+
+
+def test_invocation_input_metadata() -> None:
+    query = Op("test.invocation", group=Dialect("test"), results=[Result("value", INDEX)], traits=[PURE], invocation_input=True)
+    ordinary = Op("test.constant", group=Dialect("test"), results=[Result("value", INDEX)], traits=[PURE])
+    assert generate_tables_c("test", 0, [query, ordinary]).count(".invocation_input = true") == 1
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"operands": [Operand("argument", INDEX)]},
+        {"regions": [RegionDef("body")]},
+        {"results": []},
+        {"results": [Result("value", INDEX, variadic=True)]},
+        {"results": [Result("value", INDEX, signature_only=True)]},
+        {"results": [Result("value", INDEX, allocates=True)]},
+        {"results": [Result("value", ANY)]},
+        {"traits": []},
+        {"traits": [PURE, CONVERGENT]},
+        {"traits": [PURE, UNIQUE_IDENTITY]},
+        {"attrs": [AttrDef("references", ATTR_TYPE_PREDICATE_LIST)]},
+    ],
+)
+def test_invocation_inputs_have_no_hidden_value_or_execution_dependencies(fields: dict) -> None:
+    arguments = {"results": [Result("value", INDEX)], "traits": [PURE], **fields}
+    with pytest.raises(ValueError, match="invocation inputs require"):
+        Op("test.invocation", group=Dialect("test"), invocation_input=True, **arguments)
 
 
 def test_generate_tables_emits_dynamic_speculation_cost() -> None:

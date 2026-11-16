@@ -11,6 +11,7 @@
 #include "loom/analysis/symbol_reference_summary.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ir/structural_hash.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
@@ -35,6 +36,8 @@ typedef struct loom_symbol_reference_builder_t {
   iree_arena_allocator_t* arena;
   // Invocation-owned structural facts, separate from occurrence storage.
   loom_symbol_reference_summary_t* summary;
+  // Consumer-owned local collection sharing this immutable traversal.
+  loom_symbol_reference_observer_t observer;
   // Direct directory of lazily allocated mutable symbol occurrence rows.
   const loom_symbol_reference_symbol_occurrences_t** symbol_segments;
   // Append-only occurrence rows staged until the complete table is published.
@@ -52,15 +55,16 @@ typedef struct loom_symbol_reference_builder_t {
   uint32_t module_occurrence_count;
   // Direct call counts accumulated as occurrences are published.
   loom_symbol_reference_call_counts_t calls;
-  // Execution target references for independent regions, in traversal order.
+  // Independent invocation regions and target witnesses, in traversal order.
   struct {
-    // Target references; null entries inherit the owning function's target.
-    loom_symbol_ref_t* values;
+    // Exact regions; null target witnesses inherit the owning function's
+    // target.
+    loom_symbol_reference_execution_scope_t* values;
     // Number of initialized entries.
     iree_host_size_t count;
     // Number of allocated entries.
     iree_host_size_t capacity;
-  } execution_targets;
+  } execution_scopes;
   // Mutable template-demand storage and family summary.
   struct {
     // Demand entries.
@@ -558,27 +562,31 @@ static iree_status_t loom_symbol_reference_visit_op_attrs(
   return iree_ok_status();
 }
 
-static iree_status_t loom_symbol_reference_append_execution_target(
-    loom_symbol_reference_builder_t* builder, loom_symbol_ref_t target,
+static iree_status_t loom_symbol_reference_append_execution_scope(
+    loom_symbol_reference_builder_t* builder, const loom_region_t* region,
+    loom_symbol_ref_t target,
     loom_symbol_reference_execution_scope_id_t* out_scope) {
-  if (builder->execution_targets.count == UINT32_MAX) {
+  if (builder->execution_scopes.count == UINT32_MAX) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
         "symbol reference table exceeds %u execution scopes",
         (unsigned)UINT32_MAX);
   }
-  if (builder->execution_targets.count == builder->execution_targets.capacity) {
+  if (builder->execution_scopes.count == builder->execution_scopes.capacity) {
     IREE_RETURN_IF_ERROR(
-        iree_arena_grow_array(builder->arena, builder->execution_targets.count,
-                              builder->execution_targets.count + 1,
-                              sizeof(*builder->execution_targets.values),
-                              &builder->execution_targets.capacity,
-                              (void**)&builder->execution_targets.values));
+        iree_arena_grow_array(builder->arena, builder->execution_scopes.count,
+                              builder->execution_scopes.count + 1,
+                              sizeof(*builder->execution_scopes.values),
+                              &builder->execution_scopes.capacity,
+                              (void**)&builder->execution_scopes.values));
   }
-  builder->execution_targets.values[builder->execution_targets.count++] =
-      target;
+  builder->execution_scopes.values[builder->execution_scopes.count++] =
+      (loom_symbol_reference_execution_scope_t){
+          .region = region,
+          .target = target,
+      };
   *out_scope = (loom_symbol_reference_execution_scope_id_t)
-                   builder->execution_targets.count;
+                   builder->execution_scopes.count;
   return iree_ok_status();
 }
 
@@ -613,8 +621,9 @@ static iree_status_t loom_symbol_reference_visit_region(
           nested_source_scope.symbol_id != LOOM_SYMBOL_ID_INVALID &&
           (nested_source_scope.execution_scope == 0 ||
            !loom_symbol_ref_is_valid(
-               builder->execution_targets
-                   .values[nested_source_scope.execution_scope - 1]))) {
+               builder->execution_scopes
+                   .values[nested_source_scope.execution_scope - 1]
+                   .target))) {
         IREE_RETURN_IF_ERROR(loom_symbol_reference_builder_set_symbol_bit(
             builder, nested_source_scope.symbol_id,
             &builder->contextual_symbols));
@@ -628,6 +637,14 @@ static iree_status_t loom_symbol_reference_visit_region(
       if (loom_template_apply_isa(op)) {
         IREE_RETURN_IF_ERROR(loom_symbol_reference_append_template_demand(
             builder, nested_source_scope, op));
+      }
+      if (builder->observer.invocation_input && op->operand_count == 0 &&
+          op->result_count == 1 && op->region_count == 0 &&
+          loom_op_semantics(builder->module, op).invocation_input) {
+        IREE_RETURN_IF_ERROR(builder->observer.invocation_input(
+            builder->observer.user_data, op, nested_source_scope.symbol_id,
+            nested_source_scope.root_region_index_plus_one,
+            nested_source_scope.execution_scope));
       }
       IREE_RETURN_IF_ERROR(loom_symbol_reference_visit_op_defined_value_types(
           builder, nested_source_scope, op, vtable));
@@ -652,14 +669,17 @@ static iree_status_t loom_symbol_reference_visit_region(
           child_source_scope.serial_schedule = false;
           const loom_attribute_t attr = loom_op_const_attrs(
               op)[descriptor->execution_target_attr_index_plus_one - 1];
-          if (!loom_attr_is_absent(attr) ||
-              child_source_scope.execution_scope == 0) {
-            IREE_RETURN_IF_ERROR(loom_symbol_reference_append_execution_target(
-                builder,
-                loom_attr_is_absent(attr) ? loom_symbol_ref_null()
-                                          : loom_attr_as_symbol(attr),
-                &child_source_scope.execution_scope));
-          }
+          const loom_symbol_ref_t inherited_target =
+              child_source_scope.execution_scope == 0
+                  ? loom_symbol_ref_null()
+                  : builder->execution_scopes
+                        .values[child_source_scope.execution_scope - 1]
+                        .target;
+          IREE_RETURN_IF_ERROR(loom_symbol_reference_append_execution_scope(
+              builder, regions[i],
+              loom_attr_is_absent(attr) ? inherited_target
+                                        : loom_attr_as_symbol(attr),
+              &child_source_scope.execution_scope));
         }
         IREE_RETURN_IF_ERROR(loom_symbol_reference_visit_region(
             builder, child_source_scope, regions[i]));
@@ -685,8 +705,79 @@ static iree_status_t loom_symbol_reference_visit_module_encodings(
   return iree_ok_status();
 }
 
+static iree_host_size_t loom_symbol_reference_user_hash(const loom_op_t* op) {
+  return loom_structural_hash_finalize(loom_structural_hash_mix_u64(
+      loom_structural_hash_initialize(), (uintptr_t)op));
+}
+
+static const loom_op_t* loom_symbol_reference_rebound_user(
+    const loom_symbol_reference_user_replacement_t* const* buckets,
+    iree_host_size_t mask, const loom_op_t* original) {
+  iree_host_size_t slot = loom_symbol_reference_user_hash(original) & mask;
+  while (buckets[slot]) {
+    if (buckets[slot]->original == original) {
+      return buckets[slot]->replacement;
+    }
+    slot = (slot + 1) & mask;
+  }
+  return original;
+}
+
+iree_status_t loom_symbol_reference_table_rebind_users(
+    loom_symbol_reference_table_t* table,
+    const loom_symbol_reference_user_replacement_t* replacements,
+    iree_host_size_t replacement_count, iree_arena_allocator_t* arena) {
+  if (!replacement_count) {
+    return iree_ok_status();
+  }
+  iree_host_size_t bucket_count = 2;
+  while (bucket_count / 2 < replacement_count) {
+    if (bucket_count > IREE_HOST_SIZE_MAX / 2) {
+      return iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "symbol-reference replacement index exceeds address space");
+    }
+    bucket_count *= 2;
+  }
+  const loom_symbol_reference_user_replacement_t** buckets = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, bucket_count, sizeof(*buckets), (void**)&buckets));
+  memset(buckets, 0, bucket_count * sizeof(*buckets));
+  const iree_host_size_t mask = bucket_count - 1;
+  for (iree_host_size_t i = 0; i < replacement_count; ++i) {
+    iree_host_size_t slot =
+        loom_symbol_reference_user_hash(replacements[i].original) & mask;
+    while (buckets[slot]) {
+      slot = (slot + 1) & mask;
+    }
+    buckets[slot] = &replacements[i];
+  }
+  for (iree_host_size_t i = 0; i < table->occurrence_count; ++i) {
+    loom_symbol_reference_occurrence_t* occurrence =
+        (loom_symbol_reference_occurrence_t*)
+            loom_symbol_reference_table_occurrence(table, (uint32_t)i);
+    occurrence->user_op =
+        loom_symbol_reference_rebound_user(buckets, mask, occurrence->user_op);
+  }
+  for (iree_host_size_t i = 0; i < table->template_demands.count; ++i) {
+    loom_template_demand_t* demand =
+        (loom_template_demand_t*)&table->template_demands.values[i];
+    demand->apply_op =
+        loom_symbol_reference_rebound_user(buckets, mask, demand->apply_op);
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_symbol_reference_table_build(
     const loom_module_t* module, iree_arena_allocator_t* arena,
+    loom_symbol_reference_table_t* out_table) {
+  return loom_symbol_reference_table_build_observed(
+      module, arena, (loom_symbol_reference_observer_t){0}, out_table);
+}
+
+iree_status_t loom_symbol_reference_table_build_observed(
+    const loom_module_t* module, iree_arena_allocator_t* arena,
+    loom_symbol_reference_observer_t observer,
     loom_symbol_reference_table_t* out_table) {
   if (!out_table) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -704,6 +795,7 @@ iree_status_t loom_symbol_reference_table_build(
 
   loom_symbol_reference_builder_t builder = {0};
   loom_symbol_reference_builder_initialize(module, arena, &builder);
+  builder.observer = observer;
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(arena->block_pool, &scratch_arena);
   loom_symbol_reference_summary_t summary;
@@ -735,10 +827,10 @@ iree_status_t loom_symbol_reference_table_build(
       .template_provider_count = builder.template_provider_count,
       .contextual_symbols = builder.contextual_symbols,
       .callable_exit_symbols = builder.callable_exit_symbols,
-      .execution_targets =
+      .execution_scopes =
           {
-              .values = builder.execution_targets.values,
-              .count = builder.execution_targets.count,
+              .values = builder.execution_scopes.values,
+              .count = builder.execution_scopes.count,
           },
       .template_demands =
           {

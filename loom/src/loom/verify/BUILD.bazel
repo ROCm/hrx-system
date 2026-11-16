@@ -51,6 +51,7 @@ loom_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:reference_type",
         "//loom/src/loom/ops:special_values",
+        "//loom/src/loom/ops/func:op_defs",
         "//loom/src/loom/target:registers",
         "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:cfg_dominance",

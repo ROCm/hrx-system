@@ -872,6 +872,29 @@ annotations. The compiler keeps those decisions compatible with the target:
 oversized physical argument lists and unsupported helper storage force
 expansion. `loom::noinline` instead diagnoses an incompatible boundary.
 
+Stable kernel coordinates and dimensions also work inside ordinary helpers:
+
+```cpp
+#include <loomcxx/kernel.h>
+
+[[loom::noinline]] static unsigned position(unsigned bias) {
+  return bias + static_cast<unsigned>(loom::kernel::workitem::id.x);
+}
+
+[[loom::kernel, loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void shifted(unsigned* output, unsigned bias) {
+  output[loom::kernel::workitem::id.x] = position(bias);
+}
+```
+
+The shared compiler passes the workitem ID as an ordinary argument to
+`position`, preserving a callable body without adding an argument to `shifted`.
+Wrappers forward the same value, and independent workers supply their own
+coordinates. Known launch dimensions can specialize away. Public host entries,
+fixed native signatures, and launch-configuration regions diagnose a missing
+invocation rather than inventing a runtime context. Active masks, votes,
+shuffles, and barriers retain their participation and placement requirements.
+
 SPIR-V retains ordinary scalar and static-vector helpers, including nested
 calls. Buffer/view signatures and helpers that may create storage still expand
 so storage planning sees their accesses in the caller. Cooperative-matrix

@@ -137,6 +137,10 @@ typedef struct loom_op_semantics_t {
   // or zero when no such contract is declared. Independent of direct-callee
   // identity so unresolved template applications share the same semantics.
   uint8_t callable_effect_attr_index_plus_one;
+  // A zero-operand pure value supplied by the current execution invocation.
+  // Equal operation kinds, attributes, and result types request one input
+  // within that invocation; ordinary helpers may receive it as an argument.
+  bool invocation_input;
   // Target-contract families required to preserve this op's semantics.
   loom_contract_family_set_t contract_families;
 } loom_op_semantics_t;

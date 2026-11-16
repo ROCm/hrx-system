@@ -545,7 +545,8 @@ static iree_status_t loom_template_selection_resolve_application_target(
   }
   loom_template_applicability_target_t inherited = {0};
   if (!loom_symbol_ref_is_valid(
-          state->references.execution_targets.values[execution_scope - 1])) {
+          state->references.execution_scopes.values[execution_scope - 1]
+              .target)) {
     IREE_RETURN_IF_ERROR(loom_template_selection_resolve_function_target(
         state, context, &inherited));
   }

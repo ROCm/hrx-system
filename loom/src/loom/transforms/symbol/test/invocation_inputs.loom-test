@@ -1,0 +1,305 @@
+// Stable queries become ordinary arguments; caller signatures stay unchanged.
+// A second preparation produces the same program.
+// RUN: pass inline-callables{stage=prepare,budget=0,hot-budget=0},inline-callables{stage=prepare,budget=0,hot-budget=0}
+
+func.def noinline @leaf(%value: index) -> (index) {
+  %lane = kernel.workitem.id<x> : index
+  %width = kernel.workgroup.size<x> : index
+  %position = index.add %lane, %value : index
+  %result = index.add %position, %width : index
+  func.return %result : index
+}
+
+func.def noinline @middle(%value: index) -> (index) {
+  %left = func.call @leaf(%value) : (index) -> (index)
+  %right = func.call @leaf(%left) : (index) -> (index)
+  func.return %right : index
+}
+
+kernel.def @entry() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%output: view<64xindex>) {
+  %origin = index.constant 0 : index
+  %value = func.call @middle(%origin) : (index) -> (index)
+  %position = kernel.workitem.id<x> : index
+  view.store %value, %output[%position] : index, view<64xindex>
+  kernel.return
+}
+
+// ----
+func.def noinline @leaf(%value: index, %lane: index, %width: index) -> (index) {
+  %position = index.add %lane, %value : index
+  %result = index.add %position, %width : index
+  func.return %result : index
+}
+
+func.def noinline @middle(%value: index, %lane: index, %width: index) -> (index) {
+  %left = func.call @leaf(%value, %lane, %width) : (index, index, index) -> (index)
+  %right = func.call @leaf(%left, %lane, %width) : (index, index, index) -> (index)
+  func.return %right : index
+}
+
+kernel.def @entry() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%output: view<64xindex>) {
+  %lane = kernel.workitem.id<x> : index
+  %width = kernel.workgroup.size<x> : index
+  %origin = index.constant 0 : index
+  %value = func.call @middle(%origin, %lane, %width) : (index, index, index) -> (index)
+  %position = kernel.workitem.id<x> : index
+  view.store %value, %output[%position] : index, view<64xindex>
+  kernel.return
+}
+
+// ====
+
+// Same-target siblings and a nested worker are distinct invocation suppliers.
+// Expression cleanup must not share their pure calls across invocation boundaries.
+// RUN: pass cse,inline-callables{stage=prepare,budget=0,hot-budget=0},cse
+func.def noinline @coordinate() -> (index) {
+  %lane = kernel.subgroup.lane.id : index
+  func.return %lane : index
+}
+
+pipeline.def @workers() run(%output: view<4xindex>) {
+  pipeline.strand workers([0], [1], [1]) {
+    %value = func.call pure @coordinate() : () -> (index)
+    view.store %value, %output[0] : index, view<4xindex>
+    pipeline.strand workers([1], [1], [1]) {
+      %nested = func.call pure @coordinate() : () -> (index)
+      view.store %nested, %output[1] : index, view<4xindex>
+    }
+  }
+  pipeline.strand workers([2], [1], [1]) {
+    %value = func.call pure @coordinate() : () -> (index)
+    view.store %value, %output[2] : index, view<4xindex>
+  }
+}
+
+// ----
+func.def noinline @coordinate(%lane: index) -> (index) {
+  func.return %lane : index
+}
+
+pipeline.def @workers() run(%output: view<4xindex>) {
+  pipeline.strand workers([0], [1], [1]) {
+    %lane = kernel.subgroup.lane.id : index
+    %value = func.call pure @coordinate(%lane) : (index) -> (index)
+    view.store %value, %output[0] : index, view<4xindex>
+    pipeline.strand workers([1], [1], [1]) {
+      %lane = kernel.subgroup.lane.id : index
+      %nested = func.call pure @coordinate(%lane) : (index) -> (index)
+      view.store %nested, %output[1] : index, view<4xindex>
+    }
+  }
+  pipeline.strand workers([2], [1], [1]) {
+    %lane = kernel.subgroup.lane.id : index
+    %value = func.call pure @coordinate(%lane) : (index) -> (index)
+    view.store %value, %output[2] : index, view<4xindex>
+  }
+}
+
+// ====
+
+// Recursive components share their input set; no recursive IR walk is needed.
+func.def noinline @recur(%value: index) -> (index) {
+  %width = kernel.subgroup.size : index
+  %next = index.sub %value, %width : index
+  %result = func.call @recur(%next) : (index) -> (index)
+  func.return %result : index
+}
+
+kernel.def @entry() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: view<1xindex>) {
+  %origin = index.constant 0 : index
+  %value = func.call @recur(%origin) : (index) -> (index)
+  view.store %value, %output[0] : index, view<1xindex>
+  kernel.return
+}
+
+// ----
+func.def noinline @recur(%value: index, %width: index) -> (index) {
+  %next = index.sub %value, %width : index
+  %result = func.call @recur(%next, %width) : (index, index) -> (index)
+  func.return %result : index
+}
+
+kernel.def @entry() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: view<1xindex>) {
+  %width = kernel.subgroup.size : index
+  %origin = index.constant 0 : index
+  %value = func.call @recur(%origin, %width) : (index, index) -> (index)
+  view.store %value, %output[0] : index, view<1xindex>
+  kernel.return
+}
+
+// ====
+
+// Every stable query family and coordinate parameter shares the same transport.
+func.def noinline @coordinates() -> (index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index) {
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %workitem_id_y = kernel.workitem.id<y> : index
+  %workitem_id_z = kernel.workitem.id<z> : index
+  %workgroup_id_x = kernel.workgroup.id<x> : index
+  %workgroup_size_y = kernel.workgroup.size<y> : index
+  %workgroup_count_z = kernel.workgroup.count<z> : index
+  %workitem_dispatch_id_y = kernel.workitem.dispatch.id<y> : index
+  %subgroup_id = kernel.subgroup.id : index
+  %subgroup_count = kernel.subgroup.count : index
+  %subgroup_size = kernel.subgroup.size : index
+  %subgroup_lane_id = kernel.subgroup.lane.id : index
+  %cluster_id_x = kernel.cluster.id<x> : index
+  %cluster_workgroup_id_y = kernel.cluster.workgroup.id<y> : index
+  %cluster_workgroup_flat_id = kernel.cluster.workgroup.flat_id : index
+  %cluster_size_z = kernel.cluster.size<z> : index
+  %cluster_count_y = kernel.cluster.count<y> : index
+  func.return %workitem_id_x, %workitem_id_y, %workitem_id_z, %workgroup_id_x, %workgroup_size_y, %workgroup_count_z, %workitem_dispatch_id_y, %subgroup_id, %subgroup_count, %subgroup_size, %subgroup_lane_id, %cluster_id_x, %cluster_workgroup_id_y, %cluster_workgroup_flat_id, %cluster_size_z, %cluster_count_y : index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index
+}
+
+pipeline.def @worker() run() {
+  pipeline.strand workers([0], [1], [1]) {
+    %workitem_id_x, %workitem_id_y, %workitem_id_z, %workgroup_id_x, %workgroup_size_y, %workgroup_count_z, %workitem_dispatch_id_y, %subgroup_id, %subgroup_count, %subgroup_size, %subgroup_lane_id, %cluster_id_x, %cluster_workgroup_id_y, %cluster_workgroup_flat_id, %cluster_size_z, %cluster_count_y = func.call @coordinates() : () -> (index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index)
+  }
+}
+
+// ----
+func.def noinline @coordinates(%workitem_id_x: index, %workitem_id_y: index, %workitem_id_z: index, %workgroup_id_x: index, %workgroup_size_y: index, %workgroup_count_z: index, %workitem_dispatch_id_y: index, %subgroup_id: index, %subgroup_count: index, %subgroup_size: index, %subgroup_lane_id: index, %cluster_id_x: index, %cluster_workgroup_id_y: index, %cluster_workgroup_flat_id: index, %cluster_size_z: index, %cluster_count_y: index) -> (index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index) {
+  func.return %workitem_id_x, %workitem_id_y, %workitem_id_z, %workgroup_id_x, %workgroup_size_y, %workgroup_count_z, %workitem_dispatch_id_y, %subgroup_id, %subgroup_count, %subgroup_size, %subgroup_lane_id, %cluster_id_x, %cluster_workgroup_id_y, %cluster_workgroup_flat_id, %cluster_size_z, %cluster_count_y : index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index
+}
+
+pipeline.def @worker() run() {
+  pipeline.strand workers([0], [1], [1]) {
+    %workitem_id_x$64 = kernel.workitem.id<x> : index
+    %workitem_id_y$65 = kernel.workitem.id<y> : index
+    %workitem_id_z$66 = kernel.workitem.id<z> : index
+    %workgroup_id_x$67 = kernel.workgroup.id<x> : index
+    %workgroup_size_y$68 = kernel.workgroup.size<y> : index
+    %workgroup_count_z$69 = kernel.workgroup.count<z> : index
+    %workitem_dispatch_id_y$70 = kernel.workitem.dispatch.id<y> : index
+    %subgroup_id$71 = kernel.subgroup.id : index
+    %subgroup_count$72 = kernel.subgroup.count : index
+    %subgroup_size$73 = kernel.subgroup.size : index
+    %subgroup_lane_id$74 = kernel.subgroup.lane.id : index
+    %cluster_id_x$75 = kernel.cluster.id<x> : index
+    %cluster_workgroup_id_y$76 = kernel.cluster.workgroup.id<y> : index
+    %cluster_workgroup_flat_id$77 = kernel.cluster.workgroup.flat_id : index
+    %cluster_size_z$78 = kernel.cluster.size<z> : index
+    %cluster_count_y$79 = kernel.cluster.count<y> : index
+    %workitem_id_x$80, %workitem_id_y$81, %workitem_id_z$82, %workgroup_id_x$83, %workgroup_size_y$84, %workgroup_count_z$85, %workitem_dispatch_id_y$86, %subgroup_id$87, %subgroup_count$88, %subgroup_size$89, %subgroup_lane_id$90, %cluster_id_x$91, %cluster_workgroup_id_y$92, %cluster_workgroup_flat_id$93, %cluster_size_z$94, %cluster_count_y$95 = func.call @coordinates(%workitem_id_x$64, %workitem_id_y$65, %workitem_id_z$66, %workgroup_id_x$67, %workgroup_size_y$68, %workgroup_count_z$69, %workitem_dispatch_id_y$70, %subgroup_id$71, %subgroup_count$72, %subgroup_size$73, %subgroup_lane_id$74, %cluster_id_x$75, %cluster_workgroup_id_y$76, %cluster_workgroup_flat_id$77, %cluster_size_z$78, %cluster_count_y$79) : (index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index) -> (index, index, index, index, index, index, index, index, index, index, index, index, index, index, index, index)
+  }
+}
+
+// ====
+
+// Growing operands preserves scalar ties and dimensions referring to co-results.
+func.def noinline @rows(%storage: buffer, %seed: i32) -> (%count: index, view<[%count]xf32>, %seed as i32) {
+  %width = kernel.workgroup.size<x> : index
+  %base = index.constant 0 : offset
+  %view = buffer.view %storage[%base] : buffer -> view<[%width]xf32>
+  func.return %width, %view, %seed : index, view<[%width]xf32>, i32
+}
+
+kernel.def @inspect() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer, %seed: i32) {
+  %count, %view, %result = func.call @rows(%storage, %seed) : (buffer, i32) -> (index, view<[%count]xf32>, %seed as i32)
+  test.use %view : view<[%count]xf32>
+  test.use %result : i32
+  kernel.return
+}
+
+// ----
+func.def noinline @rows(%storage: buffer, %seed: i32, %width: index) -> (%count: index, view<[%count]xf32>, %seed as i32) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %storage[%base] : buffer -> view<[%width]xf32>
+  func.return %width, %view, %seed : index, view<[%width]xf32>, i32
+}
+
+kernel.def @inspect() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer, %seed: i32) {
+  %width = kernel.workgroup.size<x> : index
+  %count, %view, %result = func.call @rows(%storage, %seed, %width) : (buffer, i32, index) -> (index, view<[%count]xf32>, %seed as i32)
+  test.use %view : view<[%count]xf32>
+  test.use %result : i32
+  kernel.return
+}
+
+// ====
+
+// Selecting a provider gives its helper an executable version while the generic
+// library retains the original signature for a deferred application.
+// RUN: pass specialize-target-callgraph,select-templates{mode=early,rewrite=inline},specialize-target-callgraph,inline-callables{stage=prepare,budget=0,hot-budget=0}
+test.target<low_core> @device {subgroup_size = 32}
+
+template.decl @position(%count: index) -> (index)
+
+func.def noinline @read_position() -> (index) {
+  %lane = kernel.workitem.id<x> : index
+  func.return %lane : index
+}
+
+template.def<@position> @provider(%count: index) -> (index) where [eq(%count, 1)] {
+  %value = func.call @read_position() : () -> (index)
+  template.return %value : index
+}
+
+func.def public @deferred(%count: index) -> (index) {
+  %value = template.apply<@position>(%count) : (index) -> (index)
+  func.return %value : index
+}
+
+kernel.def target(@device) @selected() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: view<1xindex>) {
+  %count = index.constant 1 : index
+  %value = template.apply<@position>(%count) : (index) -> (index)
+  view.store %value, %output[0] : index, view<1xindex>
+  kernel.return
+}
+
+// ----
+test.target<low_core> @device {subgroup_size = 32}
+
+template.decl @position(%count: index) -> (index)
+
+func.def noinline @read_position() -> (index) {
+  %lane = kernel.workitem.id<x> : index
+  func.return %lane : index
+}
+
+func.def noinline @read_position_spec0(%lane: index) -> (index) {
+  func.return %lane : index
+}
+
+template.def<@position> @provider(%count: index) -> (index) where [eq(%count, 1)] {
+  %value = func.call @read_position() : () -> (index)
+  template.return %value : index
+}
+
+func.def public @deferred(%count: index) -> (index) {
+  %value = template.apply<@position>(%count) : (index) -> (index)
+  func.return %value : index
+}
+
+kernel.def target(@device) @selected() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: view<1xindex>) {
+  %lane = kernel.workitem.id<x> : index
+  %count = index.constant 1 : index
+  %value = func.call @read_position_spec0(%lane) : (index) -> (index)
+  view.store %value, %output[0] : index, view<1xindex>
+  kernel.return
+}
