@@ -158,7 +158,9 @@ class ContinuingSource {
               return static_cast<ContinuingSource*>(p)->residency_;
             },
         .execution_update =
-            [](void*) { return loom_service_execution_update_t{}; },
+            [](void* p) {
+              return static_cast<ContinuingSource*>(p)->execution_update;
+            },
         .set_observer =
             [](void* p, loom_runtime_wake_callback_t observer) {
               static_cast<ContinuingSource*>(p)->observer_ = observer;
@@ -504,6 +506,8 @@ class ContinuingSource {
   };
   // Source behavior: ordinary, sampled, or malformed after actual dispatch.
   Submission submission = Submission::kExecute;
+  // Optional dependency used to exercise selection at cohort boundaries.
+  loom_service_execution_update_t execution_update = {};
   // Authored policy selected to exercise invalid source contracts.
   Collection collection = kProgress;
   // Native timeline belongs to this source; results retain it independently.
@@ -656,13 +660,7 @@ class FiniteContinuation : public ::testing::Test {
     IREE_ASSERT_OK(source_.Initialize(device_, pool, source_path));
     IREE_ASSERT_OK(loom_runtime_telemetry_stream_allocate(
         2, iree_allocator_system(), &history_));
-    IREE_ASSERT_OK(loom_service_finite_service_allocate(
-        loom_runtime_device_host(device_), source_.generator(),
-        loom_service_embedding_protocol(), IREE_SV("sum"), 4, 0, 0, history_,
-        scheduling_.binding(), iree_allocator_system(), &service_));
-    interface_ = loom_service_finite_service_interface(service_);
-    loom_runtime_driver_initialize(1, &interface_.runtime, &driver_);
-    loom_runtime_driver_set_observer(&driver_, {Wake, this});
+    ASSERT_NO_FATAL_FAILURE(AllocateService(0));
     loom_runtime_device_group_set_observer(group_, {Wake, this});
     IREE_ASSERT_OK(iree_hal_semaphore_create(
         loom_runtime_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
@@ -771,6 +769,17 @@ class FiniteContinuation : public ::testing::Test {
     loom_runtime_driver_set_observer(&driver_, {});
     loom_service_finite_service_free(std::exchange(service_, nullptr));
   }
+  void AllocateService(iree_host_size_t variant_capacity) {
+    scheduling_.Reset();
+    IREE_ASSERT_OK(loom_service_finite_service_allocate(
+        loom_runtime_device_host(device_), source_.generator(),
+        loom_service_embedding_protocol(), IREE_SV("sum"), 4, variant_capacity,
+        0, history_, scheduling_.binding(), iree_allocator_system(),
+        &service_));
+    interface_ = loom_service_finite_service_interface(service_);
+    loom_runtime_driver_initialize(1, &interface_.runtime, &driver_);
+    loom_runtime_driver_set_observer(&driver_, {Wake, this});
+  }
   void Open(size_t index, const char* json,
             loom_service_finite_output_format_t format =
                 LOOM_SERVICE_FINITE_OUTPUT_DEVICE) {
@@ -824,7 +833,7 @@ class FiniteContinuation : public ::testing::Test {
   // Owned production finite scheduler.
   loom_service_finite_service_t* service_ = nullptr;
   // Composition-owned observations outliving the engine and source borrowers.
-  loom_runtime::testing::ServiceControl scheduling_;
+  loom_runtime::testing::ServiceControl scheduling_{2};
   // Bounded event history deliberately smaller than one full request lifetime.
   loom_runtime_telemetry_stream_t* history_ = nullptr;
   // Borrowed scheduler, request inspection, and telemetry capabilities.
@@ -1016,6 +1025,19 @@ TEST_F(FiniteContinuation, LogicalRowsEncodeInOrderWithTotalUsage) {
 }
 
 TEST_F(FiniteContinuation, FailedReadinessDoesNotCommitPlannedProgress) {
+  ASSERT_NO_FATAL_FAILURE(RemoveService());
+  // This source has only its original execution. Management can select it,
+  // but replacement compilation is an unsupported external dependency.
+  source_.execution_update = {
+      .compile =
+          [](void*, const loom_runtime_sources_t*,
+             loom_runtime_variant_completion_fn_t, void*) {
+            return iree_status_from_code(IREE_STATUS_UNIMPLEMENTED);
+          },
+      .select = [](void*, void*) { return iree_ok_status(); },
+      .dispose = [](void*) {},
+  };
+  ASSERT_NO_FATAL_FAILURE(AllocateService(1));
   Open(0, R"({"model":"sum","input":[[1,2],[3,4],[5,6],[7,8]]})");
   ASSERT_NO_FATAL_FAILURE(Drain([&] { return source_.submissions == 1; }));
   Open(1, R"({"model":"sum","input":[20,21]})");
@@ -1023,6 +1045,21 @@ TEST_F(FiniteContinuation, FailedReadinessDoesNotCommitPlannedProgress) {
   ASSERT_EQ(source_.cohorts[1], (std::vector<uint32_t>{20, 1}));
   EXPECT_EQ(source_.AcceptedPosition(0), 0u);
   EXPECT_EQ(source_.AcceptedPosition(1), 2u);
+  const auto* control = scheduling_.binding().control;
+  loom_runtime_service_operation_t accepted = {};
+  ASSERT_EQ(loom_runtime_service_read_operation(control, 0, &accepted),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  ASSERT_NE(accepted.key.serial, 0u);
+  const auto configuration = interface_.reconfiguration;
+  const auto original = configuration.selected(configuration.self);
+  bool selection_complete = false;
+  IREE_ASSERT_OK(configuration.select(
+      configuration.self, original, original,
+      [](void* self, iree_status_t status, loom_runtime_variant_id_t) {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, status);
+        *static_cast<bool*>(self) = true;
+      },
+      &selection_complete));
   auto* gate = std::exchange(source_.gate, nullptr);
   iree_hal_semaphore_fail(gate, iree_status_from_code(IREE_STATUS_ABORTED));
   iree_hal_semaphore_release(gate);
@@ -1032,6 +1069,17 @@ TEST_F(FiniteContinuation, FailedReadinessDoesNotCommitPlannedProgress) {
                loom_service_finite_call_is_complete(calls_[1]) &&
                !interface_.runtime.vtable->is_pending(interface_.runtime.self);
       }));
+  EXPECT_TRUE(selection_complete);
+  loom_runtime_service_observation_t observation = {};
+  ASSERT_EQ(loom_runtime_service_read_observation(control, &observation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(observation.pending_operation_count, 1u);
+  EXPECT_EQ(observation.accepted_devices, 1u);
+  loom_runtime_service_operation_t failed = {};
+  ASSERT_EQ(loom_runtime_service_read_operation(control, 0, &failed),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(failed.key.serial, accepted.key.serial);
+  EXPECT_EQ(failed.use_count, 1u);
   EXPECT_EQ(source_.collections, 1u);
   EXPECT_EQ(source_.AcceptedPosition(0), 0u);
   EXPECT_EQ(source_.AcceptedPosition(1), 2u);
@@ -1041,6 +1089,11 @@ TEST_F(FiniteContinuation, FailedReadinessDoesNotCommitPlannedProgress) {
   }
   loom_runtime_driver_set_observer(&driver_, {});
   loom_service_finite_service_free(std::exchange(service_, nullptr));
+  // The ready engine can disappear before the source releases failed captures.
+  loom_runtime_service_use_t use = {};
+  EXPECT_EQ(loom_runtime_service_read_operation_use(
+                control, failed.key, failed.publication, 0, &use),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED, source_.Retire());
   EXPECT_EQ(source_.released, 2u);
 }

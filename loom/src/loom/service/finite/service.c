@@ -306,6 +306,12 @@ static void loom_service_finite_finish(loom_service_finite_service_t* service,
   }
   service->cohort_count = 0;
   service->phase = FINITE_IDLE;
+  // Failed readiness can leave model-owned captures and protection alive after
+  // every request retires. Only successful completion relinquishes this unit.
+  if (iree_status_is_ok(terminal_status) &&
+      iree_status_is_ok(service->failure)) {
+    service->scheduling.operation.key.serial = 0;
+  }
 }
 
 // A prepared cohort can exceed the configured capacity without invalidating
@@ -555,6 +561,9 @@ static void loom_service_finite_prepared(
   service->cohort_count = selected;
   service->admission.blocked = selected == 0;
   service->phase = selected ? FINITE_SPECIALIZING : FINITE_IDLE;
+  if (!selected && iree_status_is_ok(service->failure)) {
+    service->scheduling.operation.key.serial = 0;
+  }
 }
 
 static bool loom_service_finite_has_requests(void* self) {
@@ -745,10 +754,6 @@ static bool loom_service_finite_can_prepare(
 
 static void loom_service_finite_publish(
     loom_service_finite_service_t* service) {
-  if (iree_status_is_ok(service->failure) &&
-      (service->phase == FINITE_IDLE || service->phase == FINITE_READY)) {
-    service->scheduling.operation.key.serial = 0;
-  }
   loom_runtime_service_work_flags_t work = 0;
   uint64_t request_count = 0;
   if (!service->stopping && service->phase == FINITE_READY) {
@@ -956,6 +961,7 @@ iree_status_t loom_service_finite_service_progress(
         loom_service_finite_finish(service, iree_ok_status());
       } else {
         service->phase = FINITE_READY;
+        service->scheduling.operation.key.serial = 0;
       }
       *out_progress = true;
     }
