@@ -1,45 +1,29 @@
 // RUN: verify
-// Local restrict lifetimes need a lexical scope rather than the callable-entry
-// scope used by incoming pointer and reference paths.
-int local_pointer(int* input) {
-  // ERROR@+1: LOWERING/059 "restrict-qualified local bindings require a lexical access scope"
-  int* __restrict__ local = input;
-  return local[0];
-}
-
-// ====
-static int local_reference_impl(int& input) {
-  // ERROR@+1: LOWERING/059 "restrict-qualified local bindings require a lexical access scope"
-  int& __restrict__ local = input;
-  return local;
-}
-
-int local_reference(int* input) { return local_reference_impl(*input); }
-
-// ====
-// Persisted field qualifiers need a scope tied to the containing object.
-struct RestrictedField {
-  int* __restrict__ pointer;
-};
-
-// ERROR@+1: LOWERING/059 "restrict-qualified fields require an object-member access scope"
-int field_pointer(RestrictedField value) {
-  return value.pointer[0];
-}
-
-// ====
-// Namespace storage does not have a callable-entry restrict lifetime.
-// ERROR@+1: LOWERING/059 "restrict-qualified global bindings require a lexical access scope"
-extern int* __restrict__ global_pointer;
-
-int global_access() {
-  return global_pointer[0];
-}
-
-// ====
 // ERROR@+1: LOWERING/059 "address-taken restrict-qualified parameters require a stored pointer representation"
 int addressed_parameter(int* __restrict__ pointer) {
   int* __restrict__* address = &pointer;
   (void)address;
   return pointer[0];
 }
+
+// ====
+// Reference initialization must bind the original object, not a value copy.
+// The frontend does not yet preserve that distinction for qualified references.
+static int local_reference(int& input) {
+  // ERROR@+1: LOWERING/059 "restrict-qualified reference initialization is not supported"
+  int& __restrict__ local = input;
+  local += 1;
+  return input;
+}
+int caller(int* input) { return local_reference(*input); }
+
+// ====
+struct Reference { int& __restrict__ value; };
+// ERROR@+1: LOWERING/059 "restrict-qualified reference initialization is not supported"
+int field_reference(int* input) { Reference reference{*input}; return reference.value; }
+
+// ====
+constexpr int value = 3;
+// ERROR@+1: LOWERING/059 "restrict-qualified reference initialization is not supported"
+const int& __restrict__ global_reference = value;
+int caller() { return global_reference; }

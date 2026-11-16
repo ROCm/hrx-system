@@ -2160,10 +2160,10 @@ class Translator final : private Initialization::Evaluation {
     if (cxx::symbol_cast<cxx::TypeAliasSymbol>(declaration->symbol)) {
       return;
     }
-    if (variable && unit_.typeTraits().is_restrict(variable->type())) {
+    if (variable && unit_.typeTraits().is_restrict(variable->type()) &&
+        unit_.typeTraits().is_reference(variable->type())) {
       fail(declaration,
-           "restrict-qualified local bindings require a lexical access "
-           "scope");
+           "restrict-qualified reference initialization is not supported");
     }
     if (variable && variable->isStatic() && !variable->isThreadLocal()) {
       if (annotated(variable, "workgroup")) {
@@ -3950,6 +3950,10 @@ class Translator final : private Initialization::Evaluation {
         group.partition ==
             &types_.partition(types_.unqualified_value(object->type), owner)) {
       return target;
+    }
+    if (auto* address = std::get_if<StorageProjection>(&object->location)) {
+      return {ObjectLvalue{
+          group.type, storage_.subobject(*address, group.byte_offset, owner)}};
     }
     fail(owner,
          "projected reference call requires a source value or complete scalar "

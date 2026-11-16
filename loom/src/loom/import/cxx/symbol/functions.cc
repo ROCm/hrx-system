@@ -670,6 +670,7 @@ void Functions::analyze(Types& types) {
       const bool input = analysis->parameter_input(member.source, group);
       output &= analysis->parameter_output(member.source, group);
       group.component_offset += member.component_offset;
+      group.byte_offset += member.byte_offset();
       if (input) {
         projection.inputs.push_back(group);
         projection.input_component_count += group.partition->component_count;
@@ -798,11 +799,11 @@ void Functions::collect(cxx::DeclarationAST* declaration,
       auto* variable =
           cxx::symbol_cast<cxx::VariableSymbol>(declarator->symbol);
       if (variable && !is_module_metadata) {
-        if (unit_.typeTraits().is_restrict(variable->type())) {
+        if (unit_.typeTraits().is_restrict(variable->type()) &&
+            unit_.typeTraits().is_reference(variable->type())) {
           diagnostics_.reject(
               unit_, declarator,
-              "restrict-qualified global bindings require a lexical access "
-              "scope");
+              "restrict-qualified reference initialization is not supported");
         }
         if (!variable->isExtern() &&
             (unit_.typeTraits().is_volatile(variable->type()) ||
