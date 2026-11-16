@@ -531,6 +531,12 @@ class SourceTextServiceTest : public ::testing::Test {
     const int second = Send(Request(Message("user", second_prompt), 4),
                             "X-Loom-Session: second\r\n");
     ASSERT_NO_FATAL_FAILURE(Accept(second, interface, &connection));
+    OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
+      bool progress = false;
+      IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
+                                                       0, &progress));
+      EXPECT_TRUE(progress);
+    });
     EXPECT_EQ(interface.telemetry.counters->batches, 0u);
     EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests, 1u);
     // Metadata stays owner-readable while preparation borrows the second

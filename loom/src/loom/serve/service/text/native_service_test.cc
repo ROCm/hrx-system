@@ -482,10 +482,15 @@ TEST_F(NativeTextRegistryTest, AbortRetiresAcceptedWorkBeforeReleasingInput) {
   OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
     IREE_ASSERT_OK(Open(body_, "second", &second));
     ASSERT_NE(second, nullptr);
+    bool progress = false;
+    auto& service = Model()->service;
+    IREE_ASSERT_OK(
+        service.runtime.vtable->advance(service.runtime.self, 0, &progress));
+    EXPECT_TRUE(progress);
     EXPECT_EQ(Model()->service.telemetry.counters->batches, 0u);
-    // Admission has accepted the independent preparation loan. With one worker
-    // it cannot start until this owner turn returns; additional workers may
-    // already be reading the body. Neither case may release it at close.
+    // The owner has accepted the independent preparation loan. With one worker
+    // it cannot start until this turn returns; additional workers may already
+    // be reading the body. Neither case may release it at close.
     second.reset();
     IREE_ASSERT_OK(
         loom_serve_registry_remove(Model(), LOOM_SERVE_REMOVAL_ABORT));

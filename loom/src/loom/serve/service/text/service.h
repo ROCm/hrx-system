@@ -81,6 +81,7 @@ iree_status_t loom_serve_text_service_allocate(
 // success is queue pressure. Pressure and failure leave request untouched and
 // do not count a receipt. Source validation occurs on a shared CPU task after
 // acceptance. The caller advances the service and owns the handle until close.
+// Admission only queues the receipt; the serialized owner starts preparation.
 iree_status_t loom_serve_text_service_try_open(
     loom_serve_text_service_t* service, loom_serve_text_request_t* request,
     loom_serve_text_stream_t** out_stream);

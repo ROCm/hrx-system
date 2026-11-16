@@ -51,6 +51,14 @@ class AdmissionServiceTest : public SourceTextServiceTest {
              std::string(interface.snapshot(interface.runtime.self).phase) ==
                  "idle";
     };
+    auto settle = [&] {
+      // A queued arrival has no borrower until the owner selects it. Give it
+      // one scheduling opportunity before waiting for capacity quiescence.
+      bool progress = false;
+      IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
+                                                       0, &progress));
+      ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, quiescent));
+    };
     auto idle = [&] {
       return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
              !interface.runtime.vtable->is_active(interface.runtime.self) &&
@@ -96,7 +104,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
         stalled.Send(server_, Request(Message("user", "abxa"), 25)));
     loom_serve_http_connection_t* active = nullptr;
     ASSERT_NO_FATAL_FAILURE(AcceptLoopback(interface, &active));
-    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, quiescent));
+    ASSERT_NO_FATAL_FAILURE(settle());
     ASSERT_EQ(interface.telemetry.counters->output_tokens,
               initial.output_tokens + 1);
     ASSERT_FALSE(loom_serve_http_connection_can_send(active));
@@ -106,7 +114,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
     const int head = Send(Request(head_messages, head_limit), head_headers);
     loom_serve_http_connection_t* head_connection = nullptr;
     ASSERT_NO_FATAL_FAILURE(Accept(head, interface, &head_connection));
-    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, quiescent));
+    ASSERT_NO_FATAL_FAILURE(settle());
     ASSERT_EQ(interface.snapshot(interface.runtime.self).queued_requests, 1u);
     for (size_t i = 0; i < budget; ++i) {
       const int tail = Send(Request(Message("user", "a"), 4));
@@ -125,7 +133,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
     // A new arrival cannot replenish the oldest request's overtake budget.
     const int extra = Send(Request(Message("user", "b"), 4));
     ASSERT_NO_FATAL_FAILURE(Accept(extra, interface, &connection));
-    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, quiescent));
+    ASSERT_NO_FATAL_FAILURE(settle());
     bool progress = false;
     IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self, 0,
                                                      &progress));
@@ -279,7 +287,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
           loom_runtime_host_executor(host_), [&] {
             IREE_ASSERT_OK(interface.accept(interface.runtime.self,
                                             tail_connection, tail_request, 0));
-            EXPECT_TRUE(
+            EXPECT_FALSE(
                 interface.runtime.vtable->is_pending(interface.runtime.self));
             EXPECT_EQ(
                 interface.snapshot(interface.runtime.self).queued_requests, 2u);
@@ -307,6 +315,15 @@ class AdmissionServiceTest : public SourceTextServiceTest {
       EXPECT_EQ(Content(Read(replacement)), Oracle::Complete("bx", 4));
     } else {
       ASSERT_NO_FATAL_FAILURE(Accept(tail, interface, &connection));
+      EXPECT_FALSE(
+          interface.runtime.vtable->is_pending(interface.runtime.self));
+      loom_serve::testing::text::OwnerTurn::Run(
+          loom_runtime_host_executor(host_), [&] {
+            bool progress = false;
+            IREE_ASSERT_OK(interface.runtime.vtable->advance(
+                interface.runtime.self, 0, &progress));
+            EXPECT_TRUE(progress);
+          });
       ASSERT_TRUE(interface.runtime.vtable->is_pending(interface.runtime.self));
       EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests, 2u);
     }

@@ -766,13 +766,6 @@ void loom_serve_text_pending_push(
   loom_serve_text_pending_queue_push(&service->pending, consumer, body, name,
                                      checkpoint, sequence, receipt);
   loom_serve_text_pending_observe(service);
-  // Both ingress paths can prepare the oldest queued input while an accepted
-  // epoch owns different rows. Scheduling this finite loan cannot fail or
-  // change the accepted request's ownership.
-  if (service->completion.work == TEXT_WORK_EPOCH &&
-      service->cpu_work == TEXT_CPU_WORK_NONE) {
-    loom_serve_text_begin_preparation(service);
-  }
 }
 
 // Lookahead prepares only the already-observed queue window. It never changes

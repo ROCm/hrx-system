@@ -678,6 +678,10 @@ TEST_F(SourceTextServiceTest, StoppingAccountsForQueuedControlAndCpuBorrowers) {
   const int generation =
       Send(Request(Message("user", "ab")), "X-Loom-Session: first\r\n");
   ASSERT_NO_FATAL_FAILURE(accept(generation));
+  bool progress = false;
+  IREE_ASSERT_OK(
+      interface.runtime.vtable->advance(interface.runtime.self, 0, &progress));
+  EXPECT_TRUE(progress);
   // CPU completion may already be posted, but only the owner can consume it.
   // Checkpoint and generation claims queue behind that real accepted borrower.
   const int control =
@@ -1062,9 +1066,9 @@ TEST_F(SourceTextServiceTest,
         },
         claim.connection, iree_infinite_timeout());
   }
-  // Failure can arrive after the router claims a request but before the model
-  // accepts it. A single-worker turn cannot run the preparation it just queued:
-  // that borrowed head must survive, while both unborrowed tails retire now.
+  // Failure can arrive after the router claims a request but before service
+  // admission. All three receipts remain queued without a CPU borrower, so the
+  // next owner turn can cancel them without starting doomed preparation.
   loom_serve::testing::text::OwnerTurn::Run(
       loom_runtime_host_executor(host_), [&] {
         for (const auto& claim : claims) {
@@ -1073,20 +1077,18 @@ TEST_F(SourceTextServiceTest,
         }
         EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests,
                   3u);
+        EXPECT_FALSE(
+            interface.runtime.vtable->is_pending(interface.runtime.self));
         bool progress = false;
         IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
                                                          0, &progress));
-        // The first heartbeat precedes borrower collection. It must include
-        // arrivals after preparation began, not just the initial FIFO head.
+        // The first heartbeat precedes queue collection and sees every arrival.
         read_snapshots();
         EXPECT_EQ(reported_queued, 3u);
         EXPECT_TRUE(progress);
-        EXPECT_GE(interface.telemetry.counters->cancelled, 2u);
-        EXPECT_EQ(interface.telemetry.counters->cancelled, 2u);
+        EXPECT_EQ(interface.telemetry.counters->cancelled, 3u);
         EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests,
-                  1u);
-        EXPECT_TRUE(
-            interface.runtime.vtable->is_pending(interface.runtime.self));
+                  0u);
       });
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
     read_snapshots();

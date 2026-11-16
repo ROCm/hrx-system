@@ -1038,6 +1038,19 @@ static iree_status_t loom_serve_text_advance_work(
     *out_progress = true;
     loom_serve_text_pending_observe(service);
   }
+  // Accept an independent CPU loan while the retained epoch owns other rows.
+  // Ingress only queues requests; this owner turn determines when preparation
+  // can begin, before collecting the epoch's retained inputs and feedback.
+  if (service->completion.work == TEXT_WORK_EPOCH &&
+      service->cpu_work == TEXT_CPU_WORK_NONE &&
+      !iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
+    bool scheduled = loom_serve_text_begin_preparation(service);
+    scheduled |= loom_serve_text_begin_input_count(service);
+    if (scheduled) {
+      *out_progress = true;
+      return iree_ok_status();
+    }
+  }
   bool yield_preparation = false;
   if (service->cpu_work != TEXT_CPU_WORK_NONE) {
     iree_status_t status = iree_ok_status();
@@ -1077,11 +1090,6 @@ static iree_status_t loom_serve_text_advance_work(
     iree_status_t status = iree_ok_status();
     if (!loom_runtime_readiness_take(
             &service->readiness, &service->device_wait.wait.result, &status)) {
-      if (service->completion.work == TEXT_WORK_EPOCH &&
-          !iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
-        *out_progress |= loom_serve_text_begin_preparation(service);
-        *out_progress |= loom_serve_text_begin_input_count(service);
-      }
       return iree_ok_status();
     }
     const loom_serve_text_work_t work = service->completion.work;
@@ -1303,18 +1311,6 @@ static iree_status_t loom_serve_text_accept(
   }
   iree_status_t status =
       loom_serve_text_enqueue(service, connection, request, receipt);
-  if (iree_status_is_ok(status) && !loom_serve_text_has_work(service)) {
-    status = loom_serve_text_admit_pending(service, flags,
-                                           /*allow_preparation=*/true);
-  } else if (iree_status_is_ok(status) &&
-             service->completion.work == TEXT_WORK_EPOCH &&
-             service->cpu_work == TEXT_CPU_WORK_NONE) {
-    loom_serve_text_begin_preparation(service);
-  }
-  if (iree_status_is_ok(status) &&
-      !iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
-    loom_serve_text_begin_input_count(service);
-  }
   if (!iree_status_is_ok(status)) {
     service->stopping = true;
     loom_serve_text_telemetry_fail(&service->telemetry, status);
