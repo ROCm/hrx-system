@@ -902,10 +902,14 @@ static void BM_RecordedTransfer(benchmark::State& state,
   iree_hal_buffer_release(buffer);
 }
 
-static void RecordedTransferArguments(benchmark::Benchmark* benchmark) {
+static void RecordedTransferArguments(benchmark::Benchmark* benchmark,
+                                      int64_t maximum_length) {
   for (int64_t count : {1, 256}) {
-    for (int64_t length :
-         {4, 8, 12, 16, 32, 64, 128, 256, 512, 1024, 4096, 65536}) {
+    for (int64_t length : {4, 8, 12, 16, 32, 64, 128, 256, 512, 1024, 4096,
+                           65536, 131072, 262144, 1048576}) {
+      if (length > maximum_length) {
+        continue;
+      }
       for (int64_t timestamps : {0, 1}) {
         benchmark->Args({count, length, timestamps});
       }
@@ -913,15 +917,17 @@ static void RecordedTransferArguments(benchmark::Benchmark* benchmark) {
   }
 }
 
-#define RECORDED_TRANSFER_CASE(name, operation)                             \
+#define RECORDED_TRANSFER_CASE(name, operation, maximum_length)             \
   BENCHMARK_CAPTURE(BM_RecordedTransfer, name, RecordedTransfer::operation) \
       ->Name("RecordedTransfer/" #name)                                     \
-      ->Apply(RecordedTransferArguments)                                    \
+      ->Apply([](benchmark::Benchmark* benchmark) {                         \
+        RecordedTransferArguments(benchmark, maximum_length);               \
+      })                                                                    \
       ->ArgNames({"nodes", "bytes", "timestamps"})                          \
       ->UseRealTime()
-RECORDED_TRANSFER_CASE(Copy, kCopy);
-RECORDED_TRANSFER_CASE(Fill, kFill);
-RECORDED_TRANSFER_CASE(Update, kUpdate);
+RECORDED_TRANSFER_CASE(Copy, kCopy, 1048576);
+RECORDED_TRANSFER_CASE(Fill, kFill, 1048576);
+RECORDED_TRANSFER_CASE(Update, kUpdate, 65536);
 #undef RECORDED_TRANSFER_CASE
 
 // A single public transaction initializes disjoint ranges. A one-byte subspan
