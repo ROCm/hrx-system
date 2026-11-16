@@ -128,6 +128,7 @@ static bool loom_x86_abi_carrier_class(loom_type_t carrier,
     case LOOM_X86_REGISTER_CLASS_XMM:
     case LOOM_X86_REGISTER_CLASS_YMM:
     case LOOM_X86_REGISTER_CLASS_ZMM:
+    case LOOM_X86_REGISTER_CLASS_REF:
       *out_register_class = register_class;
       return true;
     default:
@@ -143,6 +144,11 @@ static bool loom_x86_abi_classify_value(
     return false;
   }
   if (loom_type_equal(logical_type, loom_type_none())) {
+    if (carrier_class == LOOM_X86_REGISTER_CLASS_REF) {
+      const loom_type_t* value_type = loom_type_register_value_type(carrier);
+      return value_type && loom_x86_call_abi_classify_source_carrier(
+                               *value_type, carrier_class, out_classification);
+    }
     const uint16_t byte_length =
         loom_x86_call_abi_register_byte_length(carrier_class);
     *out_classification = (loom_x86_call_abi_classification_t){
@@ -270,7 +276,9 @@ iree_status_t loom_x86_function_abi_prepare(
           loom_module_value_type(module, argument_ids[i]);
       loom_x86_call_abi_classification_t classification;
       if (!loom_x86_abi_classify_value(logical_type, carrier,
-                                       &classification)) {
+                                       &classification) ||
+          classification.carrier_register_class ==
+              LOOM_X86_REGISTER_CLASS_REF) {
         *out_constraint = IREE_SV(
             "native x86 argument logical type and Low carrier disagree");
         return iree_ok_status();
@@ -346,7 +354,9 @@ iree_status_t loom_x86_function_abi_prepare(
       const loom_type_t carrier = loom_module_value_type(module, result_ids[i]);
       loom_x86_call_abi_classification_t classification;
       if (!loom_x86_abi_classify_value(logical_type, carrier,
-                                       &classification)) {
+                                       &classification) ||
+          classification.carrier_register_class ==
+              LOOM_X86_REGISTER_CLASS_REF) {
         *out_constraint =
             IREE_SV("native x86 result logical type and Low carrier disagree");
         return iree_ok_status();
@@ -421,6 +431,16 @@ iree_status_t loom_x86_function_abi_prepare(
         .byte_alignment = classification.byte_alignment,
         .action = classification.action,
     };
+    const bool is_reference =
+        classification.carrier_register_class == LOOM_X86_REGISTER_CLASS_REF;
+    if (is_reference) {
+      if (!returns_status) {
+        *out_constraint =
+            IREE_SV("native object arguments require iree_status");
+        return iree_ok_status();
+      }
+      value->byte_length = 8;
+    }
     const uint16_t register_index = register_counts[classification.abi_class]++;
     const uint16_t register_limit =
         classification.abi_class == LOOM_X86_CALL_ABI_CLASS_INTEGER
@@ -439,7 +459,9 @@ iree_status_t loom_x86_function_abi_prepare(
         return iree_ok_status();
       }
       argument_locations[i] = (loom_low_allocation_abi_location_t){
-          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .location_kind = is_reference
+                               ? LOOM_LOW_ALLOCATION_LOCATION_UNASSIGNED
+                               : LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
           .descriptor_reg_class_id = classification.boundary_register_class,
           .location_base = location,
       };
@@ -489,6 +511,11 @@ iree_status_t loom_x86_function_abi_prepare(
         .byte_alignment = classification.byte_alignment,
         .action = classification.action,
     };
+    if (classification.carrier_register_class == LOOM_X86_REGISTER_CLASS_REF &&
+        !returns_status) {
+      *out_constraint = IREE_SV("native object results require iree_status");
+      return iree_ok_status();
+    }
     const uint16_t register_index =
         result_register_counts[classification.abi_class]++;
     const uint16_t register_limit = returns_status ? 0 : 2;

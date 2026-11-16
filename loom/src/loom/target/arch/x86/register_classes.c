@@ -47,6 +47,7 @@ bool loom_x86_register_class_for_vector_bit_width(
 loom_x86_register_class_t loom_x86_logical_register_class(
     uint16_t descriptor_reg_class_id) {
   static const uint16_t logical_classes[] = {
+      [X86_AVX512_FEATURES_CORE_REG_CLASS_ID_REF] = LOOM_X86_REGISTER_CLASS_REF,
       [X86_AVX512_FEATURES_CORE_REG_CLASS_ID_GPR32] =
           LOOM_X86_REGISTER_CLASS_GPR32,
       [X86_AVX512_FEATURES_CORE_REG_CLASS_ID_GPR64] =

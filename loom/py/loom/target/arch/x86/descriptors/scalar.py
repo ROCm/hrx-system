@@ -1645,9 +1645,57 @@ X86_SCALAR_PREFIX_DESCRIPTORS = tuple(
     _with_scalar_speculation_facts(descriptor)
     for descriptor in _X86_SCALAR_PREFIX_DESCRIPTORS
 )
-X86_SCALAR_SUFFIX_DESCRIPTORS = tuple(
-    _with_scalar_speculation_facts(descriptor)
-    for descriptor in _X86_SCALAR_SUFFIX_DESCRIPTORS
+X86_REFERENCE_DESCRIPTORS = tuple(
+    Descriptor(
+        key=f"x86.ref.{operation}",
+        encoding_format_id=form,
+        encoding_id=1,
+        mnemonic=f"ref.{operation}",
+        semantic_tag=f"reference.{operation}",
+        operands=(
+            Operand("dst", OperandRole.RESULT, (RegClassAlt(result_class),)),
+            *(
+                Operand(name, OperandRole.OPERAND, (RegClassAlt(register_class),))
+                for name, register_class in inputs
+            ),
+        ),
+        asm_forms=_asm(results=("dst",), operands=tuple(name for name, _ in inputs)),
+        schedule_class=_SCHEDULE_SCALAR,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    )
+    for operation, form, result_class, inputs in (
+        ("null", Form.REFERENCE_NULL, "x86.ref", ()),
+        (
+            "compare.null",
+            Form.REFERENCE_COMPARE_NULL,
+            _REG_GPR32,
+            (("value", "x86.ref"),),
+        ),
+        (
+            "compare.eq",
+            Form.REFERENCE_COMPARE_EQ,
+            _REG_GPR32,
+            (("left", "x86.ref"), ("right", "x86.ref")),
+        ),
+        (
+            "select",
+            Form.REFERENCE_SELECT,
+            "x86.ref",
+            (
+                ("condition", _REG_GPR32),
+                ("true_value", "x86.ref"),
+                ("false_value", "x86.ref"),
+            ),
+        ),
+    )
+)
+
+X86_SCALAR_SUFFIX_DESCRIPTORS = (
+    tuple(
+        _with_scalar_speculation_facts(descriptor)
+        for descriptor in _X86_SCALAR_SUFFIX_DESCRIPTORS
+    )
+    + X86_REFERENCE_DESCRIPTORS
 )
 X86_SCALAR_BASE_DESCRIPTORS = (
     *X86_SCALAR_PREFIX_DESCRIPTORS,
@@ -1734,6 +1782,13 @@ X86_SCALAR_DESCRIPTOR_SET = DescriptorSet(
                 physical_registers=(register,),
             )
             for register_class, bit_count, register in _FIXED_GPR_REGISTER_CLASSES
+        ),
+        RegClass(
+            "x86.ref",
+            128,
+            SpillSlotSpace.PRIVATE,
+            flags=(RegClassFlag.REFERENCE,),
+            spill_min_alignment=8,
         ),
     ),
     register_packing_resources=(

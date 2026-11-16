@@ -92,7 +92,13 @@ iree_status_t loom_x86_module_abi_initialize(
 // resolved representation and prevents publishing unavailable register
 // classes. |returns_status| selects an IREE status result and a hidden first
 // pointer to the C-layout logical result record. It cannot be combined with
-// exact C source-signature projection. Unsupported user signatures return OK
+// exact C source-signature projection. Object arguments address complete
+// iree_vm_ref_t cells: ref<T> transfers and clears the caller's cell, ptr<T>
+// borrows it. Object results are complete owning cells in the result record,
+// including promoted managed ptr<T> results. Borrowed-only results fail before
+// publication. The result record must be disjoint from input cells and is
+// initialized by the callee only on success; its prior contents are not owners.
+// Unsupported user signatures return OK
 // with |out_supported| false and a borrowed diagnostic constraint. Allocated
 // rows remain owned by |arena|.
 iree_status_t loom_x86_function_abi_prepare(

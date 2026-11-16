@@ -27,6 +27,10 @@ typedef enum loom_x86_call_abi_value_action_e {
   LOOM_X86_CALL_ABI_VALUE_ACTION_NORMALIZE_I1 = 1,
   LOOM_X86_CALL_ABI_VALUE_ACTION_NORMALIZE_I8 = 2,
   LOOM_X86_CALL_ABI_VALUE_ACTION_NORMALIZE_I16 = 3,
+  // Reference parameters address a complete cell. Owners consume and clear
+  // that cell; pointers borrow it. Results contain a complete cell by value.
+  LOOM_X86_CALL_ABI_VALUE_ACTION_REFERENCE_OWNED = 4,
+  LOOM_X86_CALL_ABI_VALUE_ACTION_REFERENCE_BORROWED = 5,
 } loom_x86_call_abi_value_action_t;
 
 // Physical classes and stack properties for one source-typed ABI value.

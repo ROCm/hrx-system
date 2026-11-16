@@ -83,6 +83,23 @@ typedef enum loom_x86_encoding_form_e {
   LOOM_X86_ENCODING_FORM_UNARY_F3_R_RM = 39,
   // Destructive add/sub followed by materialized carry or borrow.
   LOOM_X86_ENCODING_FORM_BINARY_CARRY_OUT = 40,
+  // Function-local control and final-owner destruction sequences.
+  LOOM_X86_ENCODING_FORM_LABEL = 41,
+  LOOM_X86_ENCODING_FORM_CALL_LOCAL = 42,
+  LOOM_X86_ENCODING_FORM_CALL_INDIRECT = 43,
+  // Branch on existing flags; encoding_id is the architectural condition code.
+  LOOM_X86_ENCODING_FORM_BRANCH_FLAGS = 44,
+  // Writes a zero word at input 0 plus displacement, without a scratch GPR.
+  LOOM_X86_ENCODING_FORM_ZERO_MEMORY = 45,
+  // Atomic INC/DEC of the 32-bit owner prefix at input 0 plus displacement.
+  LOOM_X86_ENCODING_FORM_LOCK_UNARY_MEMORY = 46,
+  // TEST r/m, imm32 followed by the condition code in operands.secondary.
+  LOOM_X86_ENCODING_FORM_TEST_IMMEDIATE_BRANCH = 47,
+  // Descriptor recipes expanded into concrete cell operations before encoding.
+  LOOM_X86_ENCODING_FORM_REFERENCE_NULL = 48,
+  LOOM_X86_ENCODING_FORM_REFERENCE_COMPARE_NULL = 49,
+  LOOM_X86_ENCODING_FORM_REFERENCE_COMPARE_EQ = 50,
+  LOOM_X86_ENCODING_FORM_REFERENCE_SELECT = 51,
 } loom_x86_encoding_form_t;
 
 // Native fixup identities. Object adapters supply their format's mapping.

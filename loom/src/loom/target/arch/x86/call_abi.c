@@ -396,6 +396,20 @@ static bool loom_x86_call_abi_classify_vector(
 bool loom_x86_call_abi_classify_source_type(
     loom_type_t source_type,
     loom_x86_call_abi_classification_t* out_classification) {
+  if (loom_type_is_reference(source_type)) {
+    *out_classification = (loom_x86_call_abi_classification_t){
+        .abi_class = LOOM_X86_CALL_ABI_CLASS_INTEGER,
+        .carrier_register_class = LOOM_X86_REGISTER_CLASS_REF,
+        .boundary_register_class = LOOM_X86_REGISTER_CLASS_GPR64,
+        .byte_length = 16,
+        .byte_alignment = 8,
+        .action = loom_type_reference_ownership(source_type) ==
+                          LOOM_REFERENCE_OWNERSHIP_OWNED
+                      ? LOOM_X86_CALL_ABI_VALUE_ACTION_REFERENCE_OWNED
+                      : LOOM_X86_CALL_ABI_VALUE_ACTION_REFERENCE_BORROWED,
+    };
+    return true;
+  }
   if (loom_type_is_buffer(source_type) || loom_type_is_view(source_type)) {
     *out_classification = (loom_x86_call_abi_classification_t){
         .abi_class = LOOM_X86_CALL_ABI_CLASS_INTEGER,

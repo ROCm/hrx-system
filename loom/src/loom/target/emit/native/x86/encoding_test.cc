@@ -49,6 +49,32 @@ constexpr uint16_t VectorRecipe(uint8_t reg, uint8_t middle, uint8_t rm,
          (behavior << 12);
 }
 
+TEST(EncodingTest, ReferenceOwnershipMechanics) {
+  loom_x86_encoding_operands_t operands = {};
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_LABEL, 0, operands, {}, 0, 0);
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_CALL_LOCAL, 0, operands,
+                 {0xe8, 0, 0, 0, 0}, 1u << 4);
+  operands.inputs[0] = 11;
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_CALL_INDIRECT, 0, operands,
+                 {0x41, 0xff, 0xd3}, 1u << 4);
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_LOCK_UNARY_MEMORY, 0, operands,
+                 {0xf0, 0x41, 0xff, 0x03}, 0);
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_LOCK_UNARY_MEMORY, 1u << 9, operands,
+                 {0xf0, 0x41, 0xff, 0x0b}, 0);
+  operands.immediate = 1;
+  operands.secondary = 5;
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_TEST_IMMEDIATE_BRANCH,
+                 LOOM_X86_ENCODING_REX_W, operands,
+                 {0x49, 0xf7, 0xc3, 1, 0, 0, 0, 0x0f, 0x85, 0, 0, 0, 0}, 0, 2);
+  operands.immediate = -7;
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_BRANCH_FLAGS, 5, operands,
+                 {0x0f, 0x85, 0xf9, 0xff, 0xff, 0xff}, 0);
+  operands.inputs[0] = 4;
+  operands.immediate = 24;
+  ExpectEncoding(LOOM_X86_ENCODING_FORM_ZERO_MEMORY, LOOM_X86_ENCODING_REX_W,
+                 operands, {0x48, 0xc7, 0x44, 0x24, 0x18, 0, 0, 0, 0}, 0);
+}
+
 TEST(EncodingTest, VectorRegisterPrefixesAndBehaviors) {
   loom_x86_encoding_operands_t operands = {
       .result = 1,

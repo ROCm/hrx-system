@@ -55,6 +55,11 @@ class Form(IntEnum):
     UNARY_F3_R_RM = 39
     # Destructive add/sub followed by SETB and MOVZX of carry/borrow.
     BINARY_CARRY_OUT = 40
+    # 41..47 are local control and owner-count forms in the C encoder.
+    REFERENCE_NULL = 48
+    REFERENCE_COMPARE_NULL = 49
+    REFERENCE_COMPARE_EQ = 50
+    REFERENCE_SELECT = 51
 
 
 class Flag(IntFlag):
