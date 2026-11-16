@@ -632,9 +632,9 @@ TEST_F(GpuNativeRecordingTest,
   };
   for (bool indirect : {false, true}) {
     for (uint32_t length :
-         {1u,   2u,   3u,    4u,    7u,    8u,     12u,   15u,
-          16u,  24u,  32u,   64u,   128u,  255u,   256u,  257u,
-          264u, 512u, 1024u, 4096u, 4100u, 65536u, 65537u}) {
+         {1u,   2u,   3u,   4u,   5u,   6u,    7u,    8u,    9u,     10u,
+          11u,  12u,  13u,  14u,  15u,  16u,   24u,   32u,   64u,    128u,
+          255u, 256u, 257u, 264u, 512u, 1024u, 4096u, 4100u, 65536u, 65537u}) {
       for (uint32_t offset : {0u, 1u, 4u}) {
         SCOPED_TRACE(::testing::Message()
                      << "indirect=" << indirect << " length=" << length
