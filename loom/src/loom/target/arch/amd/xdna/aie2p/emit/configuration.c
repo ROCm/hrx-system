@@ -1089,9 +1089,9 @@ iree_status_t loom_aie2p_configuration_plan_materialize(
       }
       IREE_ASSERT(entry->scope == replacement_scope);
       iree_string_view_t requirement;
-      loom_aie2p_code_transport_bind(&transport, load->coordinate,
-                                     program_layout->group_count - 1, &binding,
-                                     &requirement);
+      loom_aie2p_code_transport_select(&transport, load->coordinate,
+                                       program_layout->group_count - 1,
+                                       &binding, &requirement);
       if (!iree_string_view_is_empty(requirement)) {
         return loom_aie2p_configuration_require(plan, load->op, requirement);
       }
@@ -1119,6 +1119,11 @@ iree_status_t loom_aie2p_configuration_plan_materialize(
       if (!compiled) {
         ++plan->error_count;
         return iree_ok_status();
+      }
+      loom_aie2p_code_transport_bind(&transport, binding.descriptor_count,
+                                     &binding, &requirement);
+      if (!iree_string_view_is_empty(requirement)) {
+        return loom_aie2p_configuration_require(plan, load->op, requirement);
       }
       program = &program_layout->program;
     }

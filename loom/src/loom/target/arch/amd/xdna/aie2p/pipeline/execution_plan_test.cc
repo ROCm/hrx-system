@@ -235,8 +235,10 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
       retained, 4, &retained_arena_, &code_transport));
   loom_aie2p_code_transport_binding_t binding;
   for (uint16_t row = 2; row < 6; ++row) {
-    loom_aie2p_code_transport_bind(&code_transport, {0, row}, 2, &binding,
-                                   &requirement);
+    loom_aie2p_code_transport_select(&code_transport, {0, row}, 2, &binding,
+                                     &requirement);
+    ASSERT_TRUE(iree_string_view_is_empty(requirement));
+    loom_aie2p_code_transport_bind(&code_transport, 2, &binding, &requirement);
     ASSERT_TRUE(iree_string_view_is_empty(requirement));
     EXPECT_EQ(binding.engine, 1u);
     EXPECT_EQ(binding.first_descriptor, 24u + 2u * (row - 2u));
@@ -262,8 +264,10 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   IREE_ASSERT_OK(loom_aie2p_code_transport_initialize(
       retained, 4, &retained_arena_, &code_transport));
   for (uint16_t row = 2; row < 6; ++row) {
-    loom_aie2p_code_transport_bind(&code_transport, {0, row}, 7, &binding,
-                                   &requirement);
+    loom_aie2p_code_transport_select(&code_transport, {0, row}, 7, &binding,
+                                     &requirement);
+    ASSERT_TRUE(iree_string_view_is_empty(requirement));
+    loom_aie2p_code_transport_bind(&code_transport, 7, &binding, &requirement);
     ASSERT_TRUE(iree_string_view_is_empty(requirement));
     EXPECT_EQ(binding.engine, row == 5 ? 2u : 1u);
     EXPECT_EQ(binding.first_descriptor, row == 5 ? 1u : 24u + 7u * (row - 2u));
@@ -275,6 +279,45 @@ TEST_F(ExecutionPlanTest, SourceRetirementPreservesRoutesAndPhysicalOwnership) {
   EXPECT_EQ(code_transport.plan.tiles[1].mm2s_count, 3u);
   EXPECT_EQ(code_transport.plan.tiles[1].descriptor_counts[0], 8u);
   EXPECT_EQ(code_transport.plan.tiles[1].descriptor_counts[1], 21u);
+  IREE_ASSERT_OK(loom_aie2p_code_transport_finish(
+      &code_transport, &retained_arena_, &requirement));
+  ASSERT_TRUE(iree_string_view_is_empty(requirement));
+
+  // Native placement can discard a selection or use fewer descriptors. Until
+  // binding, neither a failed resource check nor an unused loader consumes an
+  // engine, packet identity, route, or queue slot from the next worker.
+  IREE_ASSERT_OK(loom_aie2p_code_transport_initialize(
+      retained, 4, &retained_arena_, &code_transport));
+  loom_aie2p_code_transport_select(&code_transport, {0, 2}, 25, &binding,
+                                   &requirement);
+  ASSERT_FALSE(iree_string_view_is_empty(requirement));
+  loom_aie2p_code_transport_select(&code_transport, {0, 2}, 7, &binding,
+                                   &requirement);
+  ASSERT_TRUE(iree_string_view_is_empty(requirement));
+  loom_aie2p_code_transport_bind(&code_transport, 0, &binding, &requirement);
+  ASSERT_TRUE(iree_string_view_is_empty(requirement));
+  EXPECT_EQ(binding.descriptor_count, 0u);
+  EXPECT_EQ(code_transport.plan.tiles[1].mm2s_count, 1u);
+  EXPECT_EQ(code_transport.plan.tiles[1].descriptor_counts[1], 0u);
+  EXPECT_EQ(code_transport.plan.routing.route_count,
+            retained->routing.route_count);
+  EXPECT_EQ(code_transport.plan.connections.group_count, 2u);
+  for (uint16_t row = 2; row < 6; ++row) {
+    loom_aie2p_code_transport_select(&code_transport, {0, row}, 7, &binding,
+                                     &requirement);
+    ASSERT_TRUE(iree_string_view_is_empty(requirement));
+    EXPECT_EQ(binding.engine, 1u);
+    EXPECT_EQ(binding.first_descriptor, 24u + 5u * (row - 2u));
+    EXPECT_EQ(binding.queue_packet, 3u);
+    EXPECT_EQ(binding.reply_packet, 0u);
+    loom_aie2p_code_transport_bind(&code_transport, 5, &binding, &requirement);
+    ASSERT_TRUE(iree_string_view_is_empty(requirement));
+    EXPECT_EQ(binding.descriptor_count, 5u);
+  }
+  EXPECT_EQ(code_transport.plan.tiles[1].mm2s_count, 2u);
+  EXPECT_EQ(code_transport.plan.tiles[1].descriptor_counts[0], 1u);
+  EXPECT_EQ(code_transport.plan.tiles[1].descriptor_counts[1], 20u);
+  EXPECT_EQ(code_transport.plan.connections.group_count, 14u);
   IREE_ASSERT_OK(loom_aie2p_code_transport_finish(
       &code_transport, &retained_arena_, &requirement));
   ASSERT_TRUE(iree_string_view_is_empty(requirement));
@@ -455,8 +498,10 @@ TEST_F(ExecutionPlanTest, CodeRequestsShareCommandsOnASaturatedColumn) {
   command_packets.clear();
   for (uint16_t row = 2; row < 6; ++row) {
     loom_aie2p_code_transport_binding_t binding;
-    loom_aie2p_code_transport_bind(&transport, {0, row}, 2, &binding,
-                                   &requirement);
+    loom_aie2p_code_transport_select(&transport, {0, row}, 2, &binding,
+                                     &requirement);
+    ASSERT_TRUE(iree_string_view_is_empty(requirement));
+    loom_aie2p_code_transport_bind(&transport, 2, &binding, &requirement);
     ASSERT_TRUE(iree_string_view_is_empty(requirement));
     EXPECT_EQ(binding.queue_packet, row == 3 ? 6u : 0u);
     EXPECT_EQ(binding.code_packet, row - 2u);

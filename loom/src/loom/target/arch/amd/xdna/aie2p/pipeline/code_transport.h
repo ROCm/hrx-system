@@ -23,7 +23,7 @@ typedef struct loom_aie2p_code_transport_binding_t {
   uint16_t engine;
   // First descriptor in the engine's parity bank; one per non-root code group.
   uint16_t first_descriptor;
-  // Number of descriptors reserved for the complete code catalog.
+  // Selected upper bound, reduced to the retained count when bound.
   uint16_t descriptor_count;
   // Core-sender packet identity addressing the SRAM queue.
   uint8_t queue_packet;
@@ -53,19 +53,31 @@ iree_status_t loom_aie2p_code_transport_initialize(
     const loom_aie2p_execution_plan_t* source, iree_host_size_t worker_capacity,
     iree_arena_allocator_t* arena, loom_aie2p_code_transport_t* out_transport);
 
-// Reserves a descriptor range and queue/data/reply routes. Sequential loaders
-// share a SRAM sender up to its task-queue depth and packet namespace capacity;
+// Selects descriptor and packet identities without reserving resources. The
+// returned binding remains valid until the next bind in this execution scope.
+// Native compilation may discard the selection or reduce its descriptor count.
+// Sequential loaders share a SRAM sender up to its task-queue depth and packet
+// namespace capacity;
 // each loader has at most one incomplete request. A full sender needs another
 // free engine. Code engines share a complete-packet delivery carrier and
 // destination namespace. Payload engines and descriptor ranges stay
 // independent. Packet selection consumes the source producer's retained
 // namespace. SRAM catalog bytes are placed once exact linked code is available.
-// A resource rejection returns a static requirement and invalidates this whole
-// selection.
-void loom_aie2p_code_transport_bind(
-    loom_aie2p_code_transport_t* transport, loom_xdna_tile_coordinate_t compute,
-    iree_host_size_t descriptor_count,
+// A resource rejection returns a static requirement and leaves transport
+// intact.
+void loom_aie2p_code_transport_select(
+    const loom_aie2p_code_transport_t* transport,
+    loom_xdna_tile_coordinate_t compute, iree_host_size_t descriptor_count,
     loom_aie2p_code_transport_binding_t* out_binding,
+    iree_string_view_t* out_requirement);
+
+// Reserves the selected routes and the retained prefix of its descriptor range.
+// A zero count consumes no descriptors, engines, routes, or packet identities.
+// The caller supplies a count no larger than the selected bound, before another
+// binding changes this scope. A routing rejection invalidates the selection.
+void loom_aie2p_code_transport_bind(
+    loom_aie2p_code_transport_t* transport, uint16_t descriptor_count,
+    loom_aie2p_code_transport_binding_t* binding,
     iree_string_view_t* out_requirement);
 
 // Admits the complete switch bank once and independently audits every original
