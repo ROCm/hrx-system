@@ -705,7 +705,7 @@ TEST(ControlFlowTest, ArraySelectionRetainsValuesUntilAnAddressIsObserved) {
       View value{data, {1, 2, 3}};
       Box addressed{{4, 5, 6}};
       consume(addressed.values);
-      return value.values[index] + 1[value.values];
+      return (value.values[index] + 1[value.values]) + *value.values;
     }
   )"),
                 IREE_SV("array_selection.cxx"), options);
@@ -737,7 +737,23 @@ TEST(ControlFlowTest, ArraySelectionRetainsValuesUntilAnAddressIsObserved) {
   EXPECT_TRUE(analysis.addressed(bindings[1]));
 
   ASSERT_NE(returned, nullptr);
-  auto* sum = cxx::ast_cast<cxx::BinaryExpressionAST>(returned->expression);
+  auto* combined =
+      cxx::ast_cast<cxx::BinaryExpressionAST>(returned->expression);
+  ASSERT_NE(combined, nullptr);
+  auto* dereference = cxx::ast_cast<cxx::UnaryExpressionAST>(
+      unwrap_expression(combined->rightExpression));
+  ASSERT_NE(dereference, nullptr);
+  auto* first = analysis.array_selection(dereference);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->index, nullptr);
+  EXPECT_EQ(first->constant_index, 0u);
+  auto first_destination = analysis.destination(dereference);
+  ASSERT_TRUE(first_destination.has_value());
+  EXPECT_EQ(first_destination->binding, bindings[0]);
+  EXPECT_EQ(first_destination->component_offset, 2u);
+  EXPECT_EQ(first_destination->member->component_count, 1u);
+  auto* sum = cxx::ast_cast<cxx::BinaryExpressionAST>(
+      unwrap_expression(combined->leftExpression));
   ASSERT_NE(sum, nullptr);
   auto* dynamic = cxx::ast_cast<cxx::SubscriptExpressionAST>(
       unwrap_expression(sum->leftExpression));
@@ -745,8 +761,8 @@ TEST(ControlFlowTest, ArraySelectionRetainsValuesUntilAnAddressIsObserved) {
       unwrap_expression(sum->rightExpression));
   ASSERT_NE(dynamic, nullptr);
   ASSERT_NE(constant, nullptr);
-  auto* dynamic_selection = analysis.array_subscript(dynamic);
-  auto* constant_selection = analysis.array_subscript(constant);
+  auto* dynamic_selection = analysis.array_selection(dynamic);
+  auto* constant_selection = analysis.array_selection(constant);
   ASSERT_NE(dynamic_selection, nullptr);
   ASSERT_NE(constant_selection, nullptr);
   EXPECT_TRUE(dynamic_selection->array_first);

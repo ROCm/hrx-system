@@ -39,12 +39,13 @@ class RangeLoops;
 class InitializerLists;
 struct InitializerList;
 
-// Builtin fixed-array selection retained by the owning source traversal.
-// Subscripts preserve written evaluation order, including i[array] syntax.
-struct ArraySubscript {
+// Builtin fixed-array element selection retained by the source traversal.
+// Subscripts and dereferences share source ownership and element projection.
+struct ArraySelection {
   // Source array operand, with its original qualifiers and value category.
   cxx::ExpressionAST* array;
-  // Integral selector evaluated once at its written source position.
+  // Integral selector evaluated once at its source position, or null for
+  // *array.
   cxx::ExpressionAST* index;
   // Complete array type. Accessor borrows resolve this during call analysis;
   // translation sees only resolved selections.
@@ -300,10 +301,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   // unsupported lvalue. A vector lane names its owning vector slice; whole
   // identifiers need no indexed projection record.
   std::optional<Destination> destination(cxx::ExpressionAST* expression) const;
-  // Null for pointer indexing and overloaded operators. Array selectors and
-  // constant ordinals are classified once before identity and value lowering.
-  const ArraySubscript* array_subscript(
-      cxx::SubscriptExpressionAST* expression) const;
+  // Null for ordinary pointer indexing and overloaded operators. Array
+  // selectors and ordinals are retained before identity and value lowering.
+  const ArraySelection* array_selection(cxx::ExpressionAST* expression) const;
   // Whether this member projects existing memory instead of an SSA record.
   // Object identity is propagated from visited children once during analysis.
   bool storage_backed(cxx::MemberExpressionAST* expression) const;
@@ -848,8 +848,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Nested lvalue ownership and transitive component offsets computed once.
   std::unordered_map<cxx::ExpressionAST*, Destination> destinations_;
   // Source array selectors; ordinary expressions retain no entry.
-  std::unordered_map<cxx::SubscriptExpressionAST*, ArraySubscript>
-      array_subscripts_;
+  std::unordered_map<cxx::ExpressionAST*, ArraySelection> array_selections_;
   // Memory record objects and member projections, including nested fields.
   std::unordered_set<cxx::ExpressionAST*> storage_expressions_;
   // Automatic roots retained through member projections and transparent

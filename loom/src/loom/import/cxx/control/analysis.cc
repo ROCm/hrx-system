@@ -1226,11 +1226,8 @@ void ControlFlow::postVisit(cxx::AST* ast) {
                binary && !binary->symbol &&
                binary->op == cxx::TokenKind::T_COMMA) {
       owner = object_owner(binary->rightExpression);
-    } else if (auto* subscript =
-                   cxx::ast_cast<cxx::SubscriptExpressionAST>(expression)) {
-      if (auto* selection = array_subscript(subscript)) {
-        owner = object_owner(selection->array);
-      }
+    } else if (auto* selection = array_selection(expression)) {
+      owner = object_owner(selection->array);
     }
     if (owner) {
       object_owners_.emplace(expression, owner);
@@ -1629,10 +1626,9 @@ void ControlFlow::visit(cxx::AssignmentExpressionAST* ast) {
   accept(ast->leftExpression);
   auto* subscript =
       cxx::ast_cast<cxx::SubscriptExpressionAST>(ast->leftExpression);
-  const auto* array_selection =
-      subscript ? array_subscript(subscript) : nullptr;
+  const auto* selection = subscript ? array_selection(subscript) : nullptr;
   if (!ordinary_call &&
-      ((subscript && (!array_selection || !array_selection->constant_index)) ||
+      ((subscript && (!selection || !selection->constant_index)) ||
        (cxx::ast_cast<cxx::MemberExpressionAST>(ast->leftExpression) &&
         cxx::ast_cast<cxx::MemberExpressionAST>(ast->leftExpression)
                 ->vectorComponentKind != cxx::VectorComponentKind::kNone))) {
@@ -1698,6 +1694,18 @@ void ControlFlow::visit(cxx::PostIncrExpressionAST* ast) {
 }
 
 void ControlFlow::visit(cxx::UnaryExpressionAST* ast) {
+  if (!ast->symbol && ast->op == cxx::TokenKind::T_AMP &&
+      ast != borrowed_pointer_expression_ && ast != borrowed_call_address_) {
+    auto* dereference = cxx::ast_cast<cxx::UnaryExpressionAST>(
+        unwrap_expression(ast->expression));
+    if (dereference && !dereference->symbol &&
+        dereference->op == cxx::TokenKind::T_STAR) {
+      // &* observes the pointer, not its pointee. In particular, an opaque
+      // pointee needs no array partition or source-storage representation.
+      accept(dereference->expression);
+      return;
+    }
+  }
   auto* alias_binding = [&]() -> cxx::Symbol* {
     if (ast->symbol || ast->op != cxx::TokenKind::T_STAR) {
       return nullptr;
@@ -1710,29 +1718,32 @@ void ControlFlow::visit(cxx::UnaryExpressionAST* ast) {
                : nullptr;
   }();
   auto* saved_alias_use = pointer_alias_use_;
+  auto* saved_borrowed_expression = borrowed_pointer_expression_;
+  const bool borrows_array = !ast->symbol &&
+                             ast->op == cxx::TokenKind::T_STAR &&
+                             array_borrow_origin(ast->expression);
   if (alias_binding) {
     pointer_alias_use_ = alias_binding;
   }
+  if (borrows_array) {
+    borrowed_pointer_expression_ = unwrap_expression(ast->expression);
+  }
   cxx::ASTVisitor::visit(ast);
   pointer_alias_use_ = saved_alias_use;
+  borrowed_pointer_expression_ = saved_borrowed_expression;
+  if (borrows_array) {
+    array_selections_.emplace(
+        ast, ArraySelection{unwrap_expression(ast->expression), nullptr,
+                            borrowed_array_type(ast->expression), true, 0});
+    retain_destination(unwrap_expression(ast->expression));
+    retain_destination(ast);
+  }
   if (auto call = direct_operator_call(ast)) {
     retain_call(*call, ast);
     return;
   }
   if (!ast->symbol && ast->op == cxx::TokenKind::T_AMP) {
     if (ast != borrowed_pointer_expression_ && ast != borrowed_call_address_) {
-      if (auto* dereference = cxx::ast_cast<cxx::UnaryExpressionAST>(
-              unwrap_expression(ast->expression));
-          dereference && !dereference->symbol &&
-          dereference->op == cxx::TokenKind::T_STAR) {
-        if (auto* source = cxx::ast_cast<cxx::IdExpressionAST>(
-                unwrap_expression(dereference->expression))) {
-          if (auto found = pointer_aliases_.find(source->symbol);
-              found != pointer_aliases_.end()) {
-            found->second.transparent = false;
-          }
-        }
-      }
       require_identity(ast->expression);
     }
   }
@@ -1874,7 +1885,8 @@ bool ControlFlow::collect_projected_reference_return(
 
   auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(expression);
   auto traits = unit_.typeTraits();
-  if (!subscript || subscript->symbol) {
+  const auto* selection = array_selection(expression);
+  if (!selection) {
     bool reference_call = false;
     if (subscript && subscript->symbol) {
       auto* signature =
@@ -1905,10 +1917,6 @@ bool ControlFlow::collect_projected_reference_return(
       }
     }
     return reference_call;
-  }
-  const auto* selection = array_subscript(subscript);
-  if (!selection) {
-    return false;
   }
   auto* source = array_borrow_origin(selection->array);
   auto target = source ? classify_destination(source) : std::nullopt;
@@ -2310,7 +2318,7 @@ void ControlFlow::visit(cxx::SubscriptExpressionAST* ast) {
   if (!array_first && !traits.is_array(index_type) && !borrowed_array) {
     return;
   }
-  ArraySubscript selection{
+  ArraySelection selection{
       array_first ? ast->baseExpression : index,
       array_first ? index : ast->baseExpression,
       borrowed_array ? borrowed_type : (array_first ? base_type : index_type),
@@ -2327,15 +2335,19 @@ void ControlFlow::visit(cxx::SubscriptExpressionAST* ast) {
       selection.constant_index = static_cast<size_t>(integer->toUIntMax());
     }
   }
-  array_subscripts_.emplace(ast, selection);
+  array_selections_.emplace(ast, selection);
   retain_destination(selection.array);
   retain_destination(ast);
 }
 
-const ArraySubscript* ControlFlow::array_subscript(
-    cxx::SubscriptExpressionAST* expression) const {
-  auto found = array_subscripts_.find(expression);
-  if (found != array_subscripts_.end() &&
+const ArraySelection* ControlFlow::array_selection(
+    cxx::ExpressionAST* expression) const {
+  if (expression->kind() != cxx::ASTKind::SubscriptExpression &&
+      expression->kind() != cxx::ASTKind::UnaryExpression) {
+    return nullptr;
+  }
+  auto found = array_selections_.find(expression);
+  if (found != array_selections_.end() &&
       unit_.typeTraits().is_pointer(found->second.array->type)) {
     auto* id = cxx::ast_cast<cxx::IdExpressionAST>(
         unwrap_expression(found->second.array));
@@ -2347,7 +2359,7 @@ const ArraySubscript* ControlFlow::array_subscript(
       }
     }
   }
-  return found == array_subscripts_.end() ? nullptr : &found->second;
+  return found == array_selections_.end() ? nullptr : &found->second;
 }
 
 void ControlFlow::analyze_default_constructor(const cxx::Type* type,
@@ -3035,11 +3047,12 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
       }
       return;
     }
-    const auto* selection = array_subscript(subscript);
-    if (!selection) {
+    if (!array_selection(subscript)) {
       argument.inherent_storage = true;
       return;
     }
+  }
+  if (const auto* selection = array_selection(expression)) {
     auto array_identity = retain_array_identity(selection->array);
     if (argument_requires_storage(array_identity)) {
       append_identity(array_identity, argument);
@@ -3048,7 +3061,7 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
     }
     if (!selection->type) {
       const size_t count =
-          types_.partition(subscript->type, expression).component_count;
+          types_.partition(expression->type, expression).component_count;
       append_identity(
           array_identity, argument,
           selection->constant_index
@@ -4524,8 +4537,8 @@ bool ControlFlow::propagate_field_inputs() {
 }
 
 void ControlFlow::finalize_callable_effects() {
-  for (auto entry = array_subscripts_.begin();
-       entry != array_subscripts_.end();) {
+  for (auto entry = array_selections_.begin();
+       entry != array_selections_.end();) {
     auto& selection = entry->second;
     if (selection.type) {
       ++entry;
@@ -4533,7 +4546,7 @@ void ControlFlow::finalize_callable_effects() {
     }
     selection.type = borrowed_array_type(selection.array);
     if (!selection.type) {
-      entry = array_subscripts_.erase(entry);
+      entry = array_selections_.erase(entry);
       continue;
     }
     const auto* array = cxx::type_cast<cxx::BoundedArrayType>(
@@ -5130,8 +5143,9 @@ std::optional<Destination> ControlFlow::classify_destination(
     if (types_.native_vector(index->type)) {
       return classify_destination(index);
     }
-    if (auto* selection = array_subscript(subscript);
-        selection && selection->constant_index) {
+  }
+  if (auto* selection = array_selection(expression)) {
+    if (selection->constant_index) {
       auto* source = array_borrow_origin(selection->array);
       auto target = source ? classify_destination(source) : std::nullopt;
       if (target && selection->type) {
@@ -5275,11 +5289,11 @@ bool ControlFlow::classify_storage(cxx::ExpressionAST* expression) const {
   if (auto* operand = explicit_reference_operand(unit_, expression)) {
     return storage_expressions_.contains(operand);
   }
+  if (auto* selection = array_selection(expression)) {
+    return storage_expressions_.contains(selection->array);
+  }
   if (auto* subscript =
           cxx::ast_cast<cxx::SubscriptExpressionAST>(expression)) {
-    if (auto* selection = array_subscript(subscript)) {
-      return storage_expressions_.contains(selection->array);
-    }
     return !subscript->symbol;
   }
   if (auto* unary = cxx::ast_cast<cxx::UnaryExpressionAST>(expression)) {
