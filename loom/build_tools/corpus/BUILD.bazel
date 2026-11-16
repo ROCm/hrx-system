@@ -100,9 +100,13 @@ iree_cli_test(
     tags = ["hostonly"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/emit:x86_elf",
+        "//loom/config/emit:vm_binary",
+        "//runtime/config/hal:driver_task",
+        "//runtime/config/hal:executable_loader_embedded_elf",
     ]),
     tools = {
         "loom-corpus-prepare-package": ":loom-corpus-prepare-package",
         "loom-link": "//loom/src/loom/tools/loom-link",
+        "loom-test": "//loom/src/loom/tools/loom-test",
     },
 )

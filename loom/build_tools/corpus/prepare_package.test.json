@@ -43,6 +43,27 @@
               ]
             }
           ]
+        },
+        {
+          "name": "execute-package",
+          "run": {
+            "tool": "loom-test",
+            "args": [
+              "--prepared-package={tmp}/package",
+              "--device=task",
+              "--task_topology_max_group_count=2"
+            ]
+          },
+          "stdout": {
+            "contains": [
+              "\"scenario_count\":2",
+              "\"trial_count\":2",
+              "\"failed_trial_count\":0",
+              "\"scenario\":\"first\",\"action\":\"compare\"",
+              "\"scenario\":\"second\",\"action\":\"compare\""
+            ]
+          },
+          "stderr": {"empty": true}
         }
       ]
     }

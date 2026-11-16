@@ -24,7 +24,7 @@
 #include "loomc/target/configured.h"
 
 IREE_FLAG(string, target, "", "Exact target profile in family:selector form.");
-IREE_FLAG(string, output, "", "New prepared-package output directory.");
+IREE_FLAG(string, output, "", "Prepared-package output directory.");
 
 static const iree_string_view_t kManifestPath = {"manifest.json",
                                                  sizeof("manifest.json") - 1};
@@ -282,14 +282,6 @@ static iree_status_t loom_corpus_write_package(
     iree_string_view_t input_path, iree_string_view_t output_directory,
     const loom_corpus_compile_artifacts_t* artifacts,
     loom_corpus_prepared_products_t* products, iree_allocator_t allocator) {
-  bool output_exists = false;
-  IREE_RETURN_IF_ERROR(loom_tooling_file_path_is_directory(
-      output_directory, allocator, &output_exists));
-  if (output_exists) {
-    return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
-                            "output directory '%.*s' already exists",
-                            (int)output_directory.size, output_directory.data);
-  }
   IREE_RETURN_IF_ERROR(
       loom_tooling_create_directory_if_needed(output_directory, allocator));
 

@@ -908,7 +908,7 @@ iree_status_t loom_run_hal_testbench_actual_provider_load_prepared(
   }
 
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_context_emit_progress(
-      provider->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_COMPILE));
+      provider->context, LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_EMIT));
   loomc_module_t* emit_module = NULL;
   status = iree_status_from_loomc(loomc_module_clone(
       prepared_actual->module, provider->compilation->workspace,

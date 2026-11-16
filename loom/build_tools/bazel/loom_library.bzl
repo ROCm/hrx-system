@@ -441,6 +441,76 @@ _loom_prepared_test_package = rule(
     doc = "Prepares one linked scenario module for later execution without source compilation.",
 )
 
+def _loom_prepared_test_launcher_impl(ctx):
+    package = ctx.attr.package[LoomPreparedTestPackageInfo]
+    if package.target_family != ctx.attr.profile_target_family:
+        fail(
+            "%s package target family %s does not match execution profile family %s" % (
+                ctx.label,
+                package.target_family,
+                ctx.attr.profile_target_family,
+            ),
+        )
+    test_tool = ctx.toolchains[_LOOM_TEST_TOOLCHAIN_TYPE].tool
+    output = ctx.actions.declare_file(ctx.label.name + ".sh")
+    arguments = ctx.attr.profile_args + ctx.attr.workload_args + ctx.attr.test_args
+    command_args = "".join([" " + _shell_quote(argument) for argument in arguments])
+    content = (
+        "#!/usr/bin/env bash\n" +
+        "set -euo pipefail\n" +
+        "RUNFILES=\"${{RUNFILES_DIR:-$0.runfiles}}\"\n" +
+        "cd \"${{RUNFILES}}/{workspace}\"\n" +
+        "{environment}" +
+        "exec \"${{PWD}}/{test_tool}\" " +
+        "--prepared-package=\"${{PWD}}/{package}\"{arguments} \"$@\"\n"
+    ).format(
+        arguments = command_args,
+        environment = _tool_environment_exports(test_tool),
+        package = package.directory.short_path,
+        test_tool = test_tool.executable.short_path,
+        workspace = ctx.workspace_name,
+    )
+    ctx.actions.write(
+        content = content,
+        is_executable = True,
+        output = output,
+    )
+    runfiles = _tool_runfiles(ctx, test_tool, [package.directory])
+    return [
+        DefaultInfo(
+            executable = output,
+            files = depset([output]),
+            runfiles = runfiles,
+        ),
+    ]
+
+_loom_prepared_test_launcher = rule(
+    implementation = _loom_prepared_test_launcher_impl,
+    attrs = {
+        "package": attr.label(
+            mandatory = True,
+            providers = [LoomPreparedTestPackageInfo],
+            doc = "Prepared scenario package consumed by the test runner.",
+        ),
+        "profile_args": attr.string_list(
+            doc = "Execution-profile arguments passed to the test runner.",
+        ),
+        "profile_target_family": attr.string(
+            mandatory = True,
+            doc = "Target family required by the execution profile.",
+        ),
+        "test_args": attr.string_list(
+            doc = "Additional test-runner arguments.",
+        ),
+        "workload_args": attr.string_list(
+            doc = "Case-selection arguments passed to the test runner.",
+        ),
+    },
+    doc = "Generates a runner for one prepared scenario package.",
+    executable = True,
+    toolchains = [_LOOM_TEST_TOOLCHAIN_TYPE],
+)
+
 def _tool_runfiles(ctx, tool, files):
     runfiles = ctx.runfiles(files = files + [tool.executable])
     if tool.runfiles:
@@ -823,17 +893,12 @@ def _execution_profile_tags(profile):
         "loom-executor=%s" % profile.executor,
     ]
 
-def _declare_execution_test(
-        name,
-        module,
+def _execution_test_kwargs(
         profile,
-        test_runner_args,
         size,
         tags,
         visibility,
-        benchmark_smoke = True,
-        target_compatible_with = [],
-        workload_args = []):
+        target_compatible_with):
     test_kwargs = apply_test_requirements(
         {
             "size": size,
@@ -852,6 +917,26 @@ def _declare_execution_test(
     )
     if visibility != None:
         test_kwargs["visibility"] = visibility
+    return test_kwargs
+
+def _declare_execution_test(
+        name,
+        module,
+        profile,
+        test_runner_args,
+        size,
+        tags,
+        visibility,
+        benchmark_smoke = True,
+        target_compatible_with = [],
+        workload_args = []):
+    test_kwargs = _execution_test_kwargs(
+        profile,
+        size,
+        tags,
+        visibility,
+        target_compatible_with,
+    )
     runner_args = profile.runner_args + workload_args + test_runner_args
     if profile.runner != None:
         iree_executable_test(
@@ -1240,6 +1325,84 @@ def loom_prepared_test_package(
         testonly = True,
         visibility = visibility,
         target_compatible_with = package_attributes.target_compatible_with,
+    )
+
+def loom_prepared_test(
+        name,
+        package,
+        execution_profiles,
+        args = [],
+        case = "",
+        size = "small",
+        tags = [],
+        visibility = None,
+        target_compatible_with = []):
+    """Executes one prepared scenario package without source compilation.
+
+    Args:
+      name: Logical workload name used to derive execution-test targets.
+      package: ``loom_prepared_test_package`` label to execute.
+      execution_profiles: Independent execution environments for the package.
+      args: Additional correctness-runner arguments.
+      case: Optional scenario symbol selected by the runner.
+      size: Bazel test-size classification.
+      tags: Additional tags for generated execution tests.
+      visibility: Bazel visibility of generated execution tests.
+      target_compatible_with: Build constraints for generated execution tests.
+    """
+    if not execution_profiles:
+        fail("%s requires at least one execution profile" % name)
+    _reject_workload_args(name, args)
+    if type(case) != "string":
+        fail("%s case must be a string" % name)
+    workload_args = ["--case=" + case] if case else []
+    package_attributes = _apply_package_policy(
+        name,
+        tags,
+        target_compatible_with,
+    )
+    tests = []
+    profile_names = {}
+    for profile in execution_profiles:
+        if getattr(profile, "kind", None) != "loom_execution_profile":
+            fail("%s execution profile was not created by loom_execution_profile" % name)
+        if profile.runner != None:
+            fail("%s prepared execution does not support custom profile runners" % name)
+        test_name = "%s_execute_%s_test" % (name, _name_suffix(profile.name))
+        if test_name in profile_names:
+            fail(
+                "%s execution profile %s has the same generated name as %s" % (
+                    name,
+                    profile.name,
+                    profile_names[test_name],
+                ),
+            )
+        profile_names[test_name] = profile.name
+        test_kwargs = _execution_test_kwargs(
+            profile,
+            size,
+            package_attributes.tags,
+            visibility,
+            package_attributes.target_compatible_with,
+        )
+        _declare_launcher_test(
+            name = test_name,
+            launcher_rule = _loom_prepared_test_launcher,
+            launcher_attrs = {
+                "package": package,
+                "profile_args": profile.runner_args,
+                "profile_target_family": profile.target_family,
+                "test_args": args,
+                "workload_args": workload_args,
+            },
+            test_kwargs = test_kwargs,
+        )
+        tests.append(test_name)
+    native.test_suite(
+        name = name,
+        tests = tests,
+        tags = package_attributes.tags,
+        visibility = visibility,
     )
 
 def loom_test(

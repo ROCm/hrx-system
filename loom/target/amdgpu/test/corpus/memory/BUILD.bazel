@@ -1,0 +1,30 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//loom/build_tools/bazel:defs.bzl",
+    "loom_prepared_test",
+    "loom_prepared_test_package",
+)
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMD_GPU_HARDWARE_PROFILE")
+
+package(default_visibility = ["//visibility:public"])
+
+loom_prepared_test_package(
+    name = "private_reuse_gfx1100_package",
+    module = "//loom/src/loom/test/corpus/memory/storage:memory_storage_private_reuse",
+    target = "//loom/target/amdgpu:gfx1100",
+)
+
+loom_prepared_test(
+    name = "private_reuse_gfx1100",
+    args = ["--execution-progress"],
+    execution_profiles = [AMD_GPU_HARDWARE_PROFILE],
+    package = ":private_reuse_gfx1100_package",
+    # Generic AMD GPU pools may contain another gfx11 processor. Keep exact
+    # packages explicit until workflow routing binds the package selector.
+    tags = ["manual"],
+)
