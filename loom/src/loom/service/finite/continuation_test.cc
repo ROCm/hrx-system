@@ -1147,6 +1147,119 @@ TEST_F(FiniteContinuation, DeviceEstimatesFollowCollectedSourceHistory) {
   EXPECT_FLOAT_EQ(Read(0), 15.0f);
 }
 
+TEST_F(FiniteContinuation, IndependentSamplesSurviveCancellationAndRetirement) {
+  loom_runtime::testing::ServiceControl peer_control;
+  loom_service_finite_service_t* peer_service = nullptr;
+  std::array<loom_runtime_service_t, 2> services = {interface_.runtime, {}};
+  auto retire_peer = [&](ContinuingSource* peer) {
+    if (source_.gate) {
+      ReleaseGate();
+    }
+    if (peer->gate) {
+      IREE_EXPECT_OK(iree_hal_semaphore_signal(peer->gate, 1, nullptr));
+      iree_hal_semaphore_release(std::exchange(peer->gate, nullptr));
+    }
+    loom_service_finite_call_close(std::exchange(calls_[1], nullptr));
+    driver_.stopping = true;
+    Drain([&] {
+      for (const auto& service : services) {
+        if (service.vtable && service.vtable->is_pending(service.self)) {
+          return false;
+        }
+      }
+      return true;
+    });
+    if (peer_service) {
+      services[1].vtable->set_observer(services[1].self, {});
+      loom_service_finite_service_free(peer_service);
+    }
+    IREE_EXPECT_OK(peer->Retire());
+    driver_.services = &interface_.runtime;
+    driver_.capacity = 1;
+    delete peer;
+  };
+  std::unique_ptr<ContinuingSource, decltype(retire_peer)> peer(
+      new ContinuingSource, retire_peer);
+  IREE_ASSERT_OK(
+      peer->Initialize(device_, loom_runtime_device_group_pool_at(group_, 0),
+                       std::getenv("LOOM_FINITE_CONTINUATION_SOURCE")));
+  IREE_ASSERT_OK(loom_service_finite_service_allocate(
+      loom_runtime_device_host(device_), peer->generator(),
+      loom_service_embedding_protocol(), IREE_SV("peer"), 4, 0, 0, nullptr,
+      peer_control.binding(), iree_allocator_system(), &peer_service));
+  services[1] = loom_service_finite_service_interface(peer_service).runtime;
+  driver_.services = services.data();
+  driver_.capacity = services.size();
+  loom_runtime_driver_set_observer(&driver_, {Wake, this});
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      loom_runtime_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      0, IREE_HAL_SEMAPHORE_FLAG_NONE, &peer->gate));
+  source_.submission = ContinuingSource::Submission::kMeasureDeviceDuration;
+  peer->submission = ContinuingSource::Submission::kMeasureDeviceDuration;
+  Open(0, R"({"model":"sum","input":[1,2,3,4,5]})");
+  iree_string_builder_t body;
+  iree_string_builder_initialize(iree_allocator_system(), &body);
+  IREE_ASSERT_OK(iree_string_builder_append_cstring(
+      &body, R"({"model":"peer","input":[10,20,30,40,50]})"));
+  auto status = loom_service_finite_service_try_open(
+      peer_service, &body, LOOM_SERVICE_FINITE_OUTPUT_DEVICE, &calls_[1]);
+  iree_string_builder_deinitialize(&body);
+  IREE_ASSERT_OK(status);
+  ASSERT_NE(calls_[1], nullptr);
+  ASSERT_NO_FATAL_FAILURE(Drain(
+      [&] { return source_.submissions == 2 && peer->submissions == 2; }));
+
+  const auto* control = scheduling_.binding().control;
+  loom_runtime_service_operation_t operation = {};
+  ASSERT_EQ(loom_runtime_service_read_operation(control, 0, &operation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  ASSERT_NE(operation.key.serial, 0u);
+  EXPECT_EQ(operation.waits, LOOM_RUNTIME_SERVICE_WAIT_DEVICE);
+  const uint64_t duration_ns = source_.LastDurationNs();
+  EXPECT_EQ(source_.Samples(), 1u);
+  EXPECT_EQ(peer->Samples(), 1u);
+
+  // Cancellation releases caller interest, not the accepted feedback target.
+  // The other source has a separate timeline and can finish while it is held.
+  loom_service_finite_call_close(std::exchange(calls_[0], nullptr));
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(peer->gate, 1, nullptr));
+  iree_hal_semaphore_release(std::exchange(peer->gate, nullptr));
+  ASSERT_NO_FATAL_FAILURE(Drain([&] {
+    return loom_service_finite_call_is_complete(calls_[1]) &&
+           !services[1].vtable->is_pending(services[1].self);
+  }));
+  IREE_ASSERT_OK(loom_service_finite_call_status(calls_[1]));
+  EXPECT_EQ(peer->Samples(), 3u);
+  services[1].vtable->set_observer(services[1].self, {});
+  services[1] = {};
+  loom_service_finite_service_free(std::exchange(peer_service, nullptr));
+  IREE_ASSERT_OK(peer->Retire());
+  EXPECT_FLOAT_EQ(Read(1), 150.0f);
+  loom_runtime_service_observation_t observation = {};
+  ASSERT_EQ(loom_runtime_service_read_observation(
+                peer_control.binding().control, &observation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(observation.owned_request_count, 0u);
+  EXPECT_EQ(observation.pending_operation_count, 0u);
+  loom_runtime_service_use_t use = {};
+  ASSERT_EQ(loom_runtime_service_read_operation_use(
+                control, operation.key, operation.publication, 0, &use),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(use.estimates, LOOM_RUNTIME_SERVICE_ESTIMATE_DURATION);
+  EXPECT_EQ(use.duration_ns, duration_ns);
+  EXPECT_EQ(source_.Samples(), 1u);
+  EXPECT_EQ(source_.LastDurationNs(), duration_ns);
+
+  ReleaseGate();
+  ASSERT_NO_FATAL_FAILURE(Drain([&] {
+    return !interface_.runtime.vtable->is_pending(interface_.runtime.self);
+  }));
+  EXPECT_EQ(source_.Samples(), 2u);
+  EXPECT_EQ(loom_runtime_service_read_operation_use(
+                control, operation.key, operation.publication, 0, &use),
+            LOOM_RUNTIME_SERVICE_READ_CHANGED);
+}
+
 TEST_F(FiniteContinuation, TerminalOfferRequiresPublishedResult) {
   source_.collection = ContinuingSource::kEarlyFinish;
   Open(0, R"({"model":"sum","input":[1,2,3,4]})");
