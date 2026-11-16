@@ -31,6 +31,7 @@ iree_runtime_cc_library(
         "//libamdf:amdf_static",
         "//libamdf:headers",
         "//libamdf/cts/gpu/sdma/encoding:commands",
+        "//libamdf/cts/util:native_identity",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:test_base",
