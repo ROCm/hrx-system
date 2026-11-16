@@ -190,6 +190,19 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "prepared_package",
+    srcs = ["prepared_package.c"],
+    hdrs = ["prepared_package.h"],
+    deps = [
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_library(
     name = "testbench_staging",
     srcs = ["testbench_staging.c"],
     hdrs = ["testbench_staging.h"],
@@ -316,6 +329,18 @@ loom_cc_test(
         ":runtime",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal/memory:heap_pool",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "prepared_package_test",
+    srcs = ["prepared_package_test.cc"],
+    deps = [
+        ":prepared_package",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
