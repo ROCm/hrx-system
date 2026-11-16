@@ -7,6 +7,15 @@ on:
   push:
     tags: ["v*.*.*"]
   workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: Completed release workflow run supplying qualified artifacts
+        type: string
+        required: false
+      release_tag:
+        description: Existing release tag selected by the artifact run
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -19,27 +28,60 @@ jobs:
   identity:
     name: Validate / Release identity
     runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
     outputs:
+      artifact_run_id: ${{ steps.release.outputs.artifact_run_id }}
       release_channel: ${{ steps.release.outputs.release_channel }}
+      release_tag: ${{ steps.release.outputs.release_tag }}
+      reuse_artifacts: ${{ steps.release.outputs.reuse_artifacts }}
+      revision: ${{ steps.release.outputs.revision }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Require the canonical release tag and catalog
         id: release
+        env:
+          ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          if [[ "$GITHUB_REF_TYPE" != tag ]]; then
-            echo 'Select a release tag when dispatching this workflow.' >&2
-            exit 1
+          if [[ -n "$ARTIFACT_RUN_ID" || -n "$RELEASE_TAG" ]]; then
+            if [[ "$GITHUB_EVENT_NAME" != workflow_dispatch || \
+                  -z "$ARTIFACT_RUN_ID" || -z "$RELEASE_TAG" ]]; then
+              echo 'Artifact reuse requires a workflow run ID and release tag.' >&2
+              exit 1
+            fi
+            revision=$(
+              python3 -m build_tools.ci.loom_release source-run \
+                --run-id="$ARTIFACT_RUN_ID" --tag="$RELEASE_TAG"
+            )
+            reuse_artifacts=true
+          else
+            if [[ "$GITHUB_REF_TYPE" != tag ]]; then
+              echo 'Select a release tag when dispatching this workflow.' >&2
+              exit 1
+            fi
+            ARTIFACT_RUN_ID=$GITHUB_RUN_ID
+            RELEASE_TAG=$GITHUB_REF_NAME
+            revision=$GITHUB_SHA
+            reuse_artifacts=false
           fi
           release_channel=$(
-            python3 loom/packaging/python/release.py check-tag "$GITHUB_REF_NAME"
+            python3 loom/packaging/python/release.py check-tag "$RELEASE_TAG"
           )
+          echo "artifact_run_id=$ARTIFACT_RUN_ID" >> "$GITHUB_OUTPUT"
           echo "release_channel=$release_channel" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "reuse_artifacts=$reuse_artifacts" >> "$GITHUB_OUTPUT"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
 
   build_release:
     name: Release
     needs: identity
+    if: needs.identity.outputs.reuse_artifacts == 'false'
     uses: $/.github/workflows/build_loom_sdk.yml
     with:
       profile: Release
@@ -50,6 +92,7 @@ jobs:
   build_tracy:
     name: Tracy
     needs: identity
+    if: needs.identity.outputs.reuse_artifacts == 'false'
     uses: $/.github/workflows/build_loom_sdk.yml
     with:
       profile: Tracy
@@ -60,6 +103,7 @@ jobs:
   build_debug:
     name: Debug
     needs: identity
+    if: needs.identity.outputs.reuse_artifacts == 'false'
     uses: $/.github/workflows/build_loom_sdk.yml
     with:
       profile: Debug
@@ -70,6 +114,7 @@ jobs:
   build_asan:
     name: ASAN
     needs: identity
+    if: needs.identity.outputs.reuse_artifacts == 'false'
     uses: $/.github/workflows/build_loom_sdk.yml
     with:
       profile: ASAN
@@ -80,6 +125,7 @@ jobs:
   security:
     name: Security / Native production
     needs: identity
+    if: needs.identity.outputs.reuse_artifacts == 'false'
     uses: $/.github/workflows/codeql_cpp.yml
     permissions:
       contents: read
@@ -87,7 +133,16 @@ jobs:
 
   bundle:
     name: Bundle / Verify artifact set
-    needs: [build_release, build_tracy, build_debug, build_asan, security]
+    needs: [identity, build_release, build_tracy, build_debug, build_asan, security]
+    if: >-
+      always() &&
+      needs.identity.result == 'success' &&
+      (needs.identity.outputs.reuse_artifacts == 'true' ||
+       (needs.build_release.result == 'success' &&
+        needs.build_tracy.result == 'success' &&
+        needs.build_debug.result == 'success' &&
+        needs.build_asan.result == 'success' &&
+        needs.security.result == 'success'))
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -101,14 +156,19 @@ jobs:
           pattern: loom-sdk-wheel-*
           merge-multiple: true
           path: release-assets
+          run-id: ${{ needs.identity.outputs.artifact_run_id }}
+          github-token: ${{ github.token }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: loom-standalone-archive-*
           merge-multiple: true
           path: release-assets
+          run-id: ${{ needs.identity.outputs.artifact_run_id }}
+          github-token: ${{ github.token }}
       - name: Verify release identities and record exact bytes
         run: |
-          python3 loom/packaging/python/release.py bundle release-assets --tag="$GITHUB_REF_NAME"
+          python3 loom/packaging/python/release.py bundle release-assets \
+            --tag="${{ needs.identity.outputs.release_tag }}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: loom-sdk-checksums
@@ -119,7 +179,7 @@ jobs:
 
   github:
     name: Publish / GitHub assets
-    needs: bundle
+    needs: [identity, bundle]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -134,11 +194,15 @@ jobs:
           pattern: loom-sdk-wheel-*
           merge-multiple: true
           path: release-assets
+          run-id: ${{ needs.identity.outputs.artifact_run_id }}
+          github-token: ${{ github.token }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: loom-standalone-archive-*
           merge-multiple: true
           path: release-assets
+          run-id: ${{ needs.identity.outputs.artifact_run_id }}
+          github-token: ${{ github.token }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: loom-sdk-checksums
@@ -147,7 +211,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 -m build_tools.ci.loom_release github --tag="$GITHUB_REF_NAME"
+          python3 -m build_tools.ci.loom_release github \
+            --tag="${{ needs.identity.outputs.release_tag }}" \
+            --revision="${{ needs.identity.outputs.revision }}"
 
   pypi:
     name: Publish / PyPI wheels
@@ -170,11 +236,15 @@ jobs:
           pattern: loom-sdk-wheel-*
           merge-multiple: true
           path: release-assets
+          run-id: ${{ needs.identity.outputs.artifact_run_id }}
+          github-token: ${{ github.token }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: loom-standalone-archive-*
           merge-multiple: true
           path: release-assets
+          run-id: ${{ needs.identity.outputs.artifact_run_id }}
+          github-token: ${{ github.token }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: loom-sdk-checksums
@@ -183,7 +253,7 @@ jobs:
         id: pypi
         run: |
           python3 -m build_tools.ci.loom_release pypi-stage \
-            --tag="$GITHUB_REF_NAME" --output=pypi-assets
+            --tag="${{ needs.identity.outputs.release_tag }}" --output=pypi-assets
       - name: Publish with OIDC
         if: steps.pypi.outputs.pending == 'true'
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3

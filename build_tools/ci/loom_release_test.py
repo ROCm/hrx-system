@@ -184,6 +184,65 @@ class LoomReleaseTest(unittest.TestCase):
             "catalog": self.identity.catalog,
         } | changes
 
+    def source_run(self, **changes):
+        return {
+            "path": loom_release.RELEASE_WORKFLOW_PATH,
+            "event": "push",
+            "head_branch": self.tag,
+            "head_sha": self.revision,
+            "status": "completed",
+        } | changes
+
+    def source_tag(self, **changes):
+        return {"object": {"type": "commit", "sha": self.revision}} | changes
+
+    def source_jobs(self, conclusion="success"):
+        return {
+            "jobs": [
+                {
+                    "name": loom_release.RELEASE_SECURITY_JOB,
+                    "conclusion": conclusion,
+                }
+            ]
+        }
+
+    def test_release_source_run_is_bound_to_the_current_tag_and_security_gate(self):
+        responses = [self.source_run(), self.source_tag(), self.source_jobs()]
+        with patch.object(github_api, "get_json", side_effect=responses) as get_json:
+            self.assertEqual(
+                loom_release.release_source_revision(
+                    "fixture/sdk", 123, self.tag, self.identity, "token"
+                ),
+                self.revision,
+            )
+        urls = [call.args[0] for call in get_json.call_args_list]
+        self.assertIn("/actions/runs/123", urls[0])
+        self.assertIn(f"/git/ref/tags/{self.tag}", urls[1])
+        self.assertIn("/actions/runs/123/jobs", urls[2])
+
+    def test_release_source_run_rejects_a_moved_tag(self):
+        responses = [
+            self.source_run(),
+            self.source_tag(object={"type": "commit", "sha": "f" * 40}),
+        ]
+        with (
+            patch.object(github_api, "get_json", side_effect=responses),
+            self.assertRaisesRegex(ValueError, "no longer selects"),
+        ):
+            loom_release.release_source_revision(
+                "fixture/sdk", 123, self.tag, self.identity, "token"
+            )
+
+    def test_release_source_run_requires_its_security_gate(self):
+        responses = [self.source_run(), self.source_tag(), self.source_jobs("failure")]
+        with (
+            patch.object(github_api, "get_json", side_effect=responses),
+            self.assertRaisesRegex(ValueError, "security gate"),
+        ):
+            loom_release.release_source_revision(
+                "fixture/sdk", 123, self.tag, self.identity, "token"
+            )
+
     def test_verification_requires_existing_matching_complete_checksums(self):
         actual = loom_release.verified_release(
             self.directory, self.identity, self.description, self.tag
