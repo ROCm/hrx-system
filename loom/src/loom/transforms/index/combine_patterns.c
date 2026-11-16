@@ -12,6 +12,7 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/transforms/scalar/narrowing.h"
+#include "loom/util/predicate_facts.h"
 
 static loom_op_t* loom_index_combine_defining_op(
     const loom_rewriter_t* rewriter, loom_value_id_t value_id) {
@@ -200,9 +201,12 @@ static iree_status_t loom_index_narrow_assumed_arithmetic_pattern(
     const loom_value_id_t input = loom_op_const_operands(op)[i];
     const loom_value_id_t result = loom_op_const_results(op)[i];
     if (!loom_type_equal(loom_module_value_type(rewriter->module, input),
-                         index_type) ||
-        loom_value_facts_fit_signed_bit_count(
-            loom_rewriter_value_facts(rewriter, input), 32) ||
+                         index_type)) {
+      continue;
+    }
+    const loom_value_facts_t input_facts =
+        loom_rewriter_value_facts(rewriter, input);
+    if (loom_value_facts_fit_signed_bit_count(input_facts, 32) ||
         !loom_value_facts_fit_signed_bit_count(
             loom_rewriter_value_facts(rewriter, result), 32)) {
       continue;
@@ -241,6 +245,28 @@ static iree_status_t loom_index_narrow_assumed_arithmetic_pattern(
                                      index_type, producer->location, &restored);
       if (iree_status_is_ok(status)) {
         replacements[i] = loom_index_cast_result(restored);
+        // The demanded value fits signed32, but wrapping arithmetic can lose
+        // facts inferred from its original operands. Retain only those lost
+        // input refinements; the existing assumption still owns its explicit
+        // bounds and relations. Together they preserve the defined observation.
+        loom_predicate_t
+            predicates[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY];
+        const uint16_t predicate_count =
+            loom_value_facts_export_integer_refinements(
+                replacements[i],
+                loom_rewriter_value_facts(rewriter, replacements[i]),
+                input_facts, predicates, IREE_ARRAYSIZE(predicates));
+        if (predicate_count) {
+          loom_op_t* refined = NULL;
+          status = loom_index_assume_build(
+              &rewriter->builder, &replacements[i], 1, predicates,
+              predicate_count, &index_type, 1, op->location, &refined);
+          if (iree_status_is_ok(status)) {
+            replacements[i] = loom_op_const_results(refined)[0];
+          }
+        }
+      }
+      if (iree_status_is_ok(status)) {
         status =
             loom_rewriter_copy_value_name(rewriter, input, replacements[i]);
       }

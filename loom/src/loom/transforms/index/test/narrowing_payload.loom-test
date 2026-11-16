@@ -304,3 +304,109 @@ func.def target(@native) @assumed_nonlocal_bits(%input: index, %amount: index) -
   %a, %b, %c = index.assume %shifted, %right, %quotient [range(%shifted, -32, 32), range(%right, 0, 32), range(%quotient, 0, 32)] : index, index, index
   func.return %a, %b, %c : index, index, index
 }
+
+// ====
+// RUN: pass combine,canonicalize
+
+test.target<low_core> @native {index_bitwidth = 32, offset_bitwidth = 32}
+
+// The explicit bounds prove signed32 observations. Nonnegativity and
+// nonpositivity come from the arithmetic operands and must survive narrowing.
+// Returning the values and their inferred endpoints observes both contracts.
+func.def target(@native) @inferred_arithmetic_bounds(%positive: index, %negative: index, %small: index) -> (index, index, index, index, index, i64, i64, i64, i64, i64) where [range(%positive, 0, 2147483647), range(%negative, -2147483648, 0), range(%small, 0, 31)] {
+  %c8 = index.constant 8 : index
+  %c3 = index.constant 3 : index
+  %sum = index.add %positive, %small : index
+  %difference = index.sub %negative, %small : index
+  %product = index.mul %positive, %c8 : index
+  %combined = index.madd %positive, %c8, %small : index
+  %shifted = index.shli %positive, %c3 : index
+  %a, %b, %c, %d, %e = index.assume %sum, %difference, %product, %combined, %shifted [lt(%sum, 32), ge(%difference, -31), lt(%product, 128), lt(%combined, 128), lt(%shifted, 128)] : index, index, index, index, index
+  %lo_a = test.fact_range_lo %a : index -> i64
+  %hi_b = test.fact_range_hi %b : index -> i64
+  %lo_c = test.fact_range_lo %c : index -> i64
+  %lo_d = test.fact_range_lo %d : index -> i64
+  %lo_e = test.fact_range_lo %e : index -> i64
+  func.return %a, %b, %c, %d, %e, %lo_a, %hi_b, %lo_c, %lo_d, %lo_e : index, index, index, index, index, i64, i64, i64, i64, i64
+}
+
+// A non-power-of-two divisor need not survive low-word modular arithmetic.
+// The original bounded observation still has that divisor, independent of
+// the explicit interval and the relationship to another assumption result.
+func.def target(@native) @inferred_divisibility(%value: index, %limit: index) -> (index, index) where [range(%value, 0, 2147483646), multiple_of(%value, 3), range(%limit, 1, 100)] {
+  %c3 = index.constant 3 : index
+  %product = index.mul %value, %c3 : index
+  %bounded, %other = index.assume %product, %limit [lt(%product, %limit)] : index, index
+  func.return %bounded, %other : index, index
+}
+
+// ----
+test.target<low_core> @native {index_bitwidth = 32, offset_bitwidth = 32}
+
+func.def target(@native) @inferred_arithmetic_bounds(%positive: index, %negative: index, %small: index) -> (index, index, index, index, index, i64, i64, i64, i64, i64) where [range(%positive, 0, 2147483647), range(%negative, -2147483648, 0), range(%small, 0, 31)] {
+  %43 = index.cast %positive : index to i32
+  %44 = index.cast %small : index to i32
+  %45 = scalar.addi %43, %44 : i32
+  %46 = index.cast %45 : i32 to index
+  %sum = index.assume %46 [range(%46, 0, 2147483678)] : index
+  %48 = index.cast %negative : index to i32
+  %49 = index.cast %small : index to i32
+  %50 = scalar.subi %48, %49 : i32
+  %51 = index.cast %50 : i32 to index
+  %difference = index.assume %51 [range(%51, -2147483679, 0)] : index
+  %53 = index.cast %positive : index to i32
+  %72 = scalar.constant 3 : i32
+  %73 = scalar.shli %53, %72 : i32
+  %56 = index.cast %73 : i32 to index
+  %product = index.assume %56 [range(%56, 0, 17179869176)] : index
+  %58 = index.cast %positive : index to i32
+  %60 = index.cast %small : index to i32
+  %70 = scalar.constant 3 : i32
+  %71 = scalar.shli %58, %70 : i32
+  %62 = scalar.addi %71, %60 : i32
+  %63 = index.cast %62 : i32 to index
+  %combined = index.assume %63 [range(%63, 0, 17179869207)] : index
+  %65 = index.cast %positive : index to i32
+  %66 = scalar.constant 3 : i32
+  %67 = scalar.shli %65, %66 : i32
+  %68 = index.cast %67 : i32 to index
+  %shifted = index.assume %68 [range(%68, 0, 17179869176)] : index
+  %a, %b, %c, %d, %e = index.assume %sum, %difference, %product, %combined, %shifted [lt(%sum, 32), ge(%difference, -31), lt(%product, 128), lt(%combined, 128), lt(%shifted, 128)] : index, index, index, index, index
+  %lo_a = scalar.constant 0 : i64
+  %hi_b = scalar.constant 0 : i64
+  %lo_c = scalar.constant 0 : i64
+  %lo_d = scalar.constant 0 : i64
+  %lo_e = scalar.constant 0 : i64
+  func.return %a, %b, %c, %d, %e, %lo_a, %hi_b, %lo_c, %lo_d, %lo_e : index, index, index, index, index, i64, i64, i64, i64, i64
+}
+
+func.def target(@native) @inferred_divisibility(%value: index, %limit: index) -> (index, index) where [range(%value, 0, 2147483646), multiple_of(%value, 3), range(%limit, 1, 100)] {
+  %74 = index.cast %value : index to i32
+  %75 = scalar.constant 3 : i32
+  %76 = scalar.muli %74, %75 : i32
+  %77 = index.cast %76 : i32 to index
+  %product = index.assume %77 [range(%77, 0, 6442450938), multiple_of(%77, 9)] : index
+  %bounded, %other = index.assume %product, %limit [lt(%product, %limit)] : index, index
+  func.return %bounded, %other : index, index
+}
+
+// ====
+// RUN: pass combine,combine
+
+test.target<low_core> @native {index_bitwidth = 32, offset_bitwidth = 32}
+
+// An already-native producer needs no reconstruction or extra refinement.
+func.def target(@native) @already_native_sum(%left: index, %right: index) -> (index) where [range(%left, 0, 15), range(%right, 0, 15)] {
+  %sum = index.add %left, %right : index
+  %bounded = index.assume %sum [lt(%sum, 16)] : index
+  func.return %bounded : index
+}
+
+// ----
+test.target<low_core> @native {index_bitwidth = 32, offset_bitwidth = 32}
+
+func.def target(@native) @already_native_sum(%left: index, %right: index) -> (index) where [range(%left, 0, 15), range(%right, 0, 15)] {
+  %sum = index.add %left, %right : index
+  %bounded = index.assume %sum [lt(%sum, 16)] : index
+  func.return %bounded : index
+}
