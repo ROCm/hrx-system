@@ -55,8 +55,10 @@ def build_wheel(
     }:
         flags.extend(LINUX_OPTIMIZED_COPTS)
     targets = [WHEEL, ASSOCIATED_WHEEL, MODEL]
+    # The fixture's default output is only serve.json. Request its complete
+    # publication files so cached outputs are materialized for the export below.
     subprocess.run(
-        [bazel, "build", *flags, *targets],
+        [bazel, "build", *flags, "--output_groups=+model_files", *targets],
         cwd=root,
         check=True,
     )
