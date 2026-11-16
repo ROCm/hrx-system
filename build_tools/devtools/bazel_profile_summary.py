@@ -15,10 +15,12 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "hrx.bazel-profile-summary.v2"
+SCHEMA = "hrx.bazel-profile-summary.v3"
 SLOW_DURATION_SECONDS = 10.0
-MAX_RECORDED_SUSPECTS = 50
-MAX_RENDERED_SUSPECTS = 20
+MAX_RECORDED_TIMINGS = 50
+MAX_RENDERED_TIMINGS = 10
+MAX_CONSOLE_TIMINGS = 5
+MAX_RENDERED_CRITICAL_PATH = 20
 
 EXECUTION_SOURCE_PROCESS = "process"
 EXECUTION_SOURCE_REMOTE_RESULT = "remote_result"
@@ -140,14 +142,14 @@ class BazelProfileSummary:
     slow_test_count: int
     # Number of tests whose full action duration meets the suspect threshold.
     slow_test_action_count: int
-    # Longest tests meeting the execution threshold, capped for artifact size.
-    slow_tests: tuple[TestTiming, ...]
+    # Longest observed test executions, capped for artifact size.
+    top_tests: tuple[TestTiming, ...]
     # Number of non-test actions whose selected execution meets the threshold.
     slow_non_test_action_count: int
     # Number of non-test actions whose full action duration meets the threshold.
     slow_non_test_raw_action_count: int
-    # Longest non-test execution suspects, capped for artifact size.
-    slow_non_test_actions: tuple[ActionExecutionTiming, ...]
+    # Longest observed non-test executions, capped for artifact size.
+    top_non_test_actions: tuple[ActionExecutionTiming, ...]
     # Bazel-reported critical-path components in dependency order.
     critical_path: tuple[ActionTiming, ...]
 
@@ -391,20 +393,8 @@ def summarize(profile_path: Path) -> BazelProfileSummary:
             key=lambda value: (-aggregate_durations[value], value),
         )
     )
-    slow_tests = [
-        timing
-        for timing in test_timings
-        if timing.execution_seconds >= SLOW_DURATION_SECONDS
-    ]
-    slow_tests.sort(key=lambda timing: (-timing.execution_seconds, timing.label))
-    slow_non_test_actions = [
-        timing
-        for timing in non_test_actions
-        if timing.execution_seconds >= SLOW_DURATION_SECONDS
-    ]
-    slow_non_test_actions.sort(
-        key=lambda timing: (-timing.execution_seconds, timing.name)
-    )
+    test_timings.sort(key=lambda timing: (-timing.execution_seconds, timing.label))
+    non_test_actions.sort(key=lambda timing: (-timing.execution_seconds, timing.name))
 
     critical_path = []
     for event in events:
@@ -491,17 +481,22 @@ def summarize(profile_path: Path) -> BazelProfileSummary:
             sum(timing.admission_seconds or 0.0 for timing in admission_timings),
             6,
         ),
-        slow_test_count=len(slow_tests),
+        slow_test_count=sum(
+            timing.execution_seconds >= SLOW_DURATION_SECONDS for timing in test_timings
+        ),
         slow_test_action_count=sum(
             timing.action_seconds >= SLOW_DURATION_SECONDS for timing in test_timings
         ),
-        slow_tests=tuple(slow_tests[:MAX_RECORDED_SUSPECTS]),
-        slow_non_test_action_count=len(slow_non_test_actions),
+        top_tests=tuple(test_timings[:MAX_RECORDED_TIMINGS]),
+        slow_non_test_action_count=sum(
+            timing.execution_seconds >= SLOW_DURATION_SECONDS
+            for timing in non_test_actions
+        ),
         slow_non_test_raw_action_count=sum(
             timing.action_seconds >= SLOW_DURATION_SECONDS
             for timing in non_test_actions
         ),
-        slow_non_test_actions=tuple(slow_non_test_actions[:MAX_RECORDED_SUSPECTS]),
+        top_non_test_actions=tuple(non_test_actions[:MAX_RECORDED_TIMINGS]),
         critical_path=tuple(timing for _, timing in critical_path),
     )
 
@@ -575,65 +570,71 @@ def render_markdown(summary: BazelProfileSummary, title: str) -> str:
         f"{summary.slow_non_test_raw_action_count:,} |",
         "",
     ]
-    if summary.slow_tests:
+    if summary.top_tests:
         lines.extend(
             [
-                f"#### Test suspects (at or above {SLOW_DURATION_SECONDS:g} s)",
+                "#### Longest test executions",
                 "",
-                "| Execution | Source | Admission | Action | Target |",
-                "| ---: | --- | ---: | ---: | --- |",
+                "| Execution | Budget | Source | Admission | Action | Target |",
+                "| ---: | ---: | --- | ---: | ---: | --- |",
             ]
         )
-        for timing in summary.slow_tests[:MAX_RENDERED_SUSPECTS]:
+        for timing in summary.top_tests[:MAX_RENDERED_TIMINGS]:
             critical = " **critical path**" if timing.critical_path else ""
+            budget = max(0.0, timing.execution_seconds - SLOW_DURATION_SECONDS)
+            budget_text = f"+{budget:.3f} s" if budget else "—"
             lines.append(
                 f"| {_seconds_cell(timing.execution_seconds)} | "
+                f"{budget_text} | "
                 f"{_execution_source_text(timing.execution_source)} | "
                 f"{_seconds_cell(timing.admission_seconds)} | "
                 f"{_seconds_cell(timing.action_seconds)} | "
                 f"`{_markdown_text(timing.label)}`{critical} |"
             )
-        if summary.slow_test_count > MAX_RENDERED_SUSPECTS:
+        if summary.test_action_count > MAX_RENDERED_TIMINGS:
             lines.append(
-                f"|  |  |  |  | "
-                f"{summary.slow_test_count - MAX_RENDERED_SUSPECTS:,} "
-                f"additional suspects; JSON retains the longest "
-                f"{len(summary.slow_tests):,} and the total count |"
+                f"|  |  |  |  |  | "
+                f"{summary.test_action_count - MAX_RENDERED_TIMINGS:,} "
+                f"additional tests; JSON retains the longest "
+                f"{len(summary.top_tests):,} |"
             )
         lines.append("")
     else:
         lines.extend(
             [
-                f"No observed test execution reached {SLOW_DURATION_SECONDS:g} s.",
+                "No TestRunner actions were profiled.",
                 "",
             ]
         )
 
-    if summary.slow_non_test_actions:
+    if summary.top_non_test_actions:
         lines.extend(
             [
-                "#### Non-test action suspects "
-                f"(at or above {SLOW_DURATION_SECONDS:g} s)",
+                "#### Longest non-test action executions",
                 "",
-                "| Execution | Source | Admission | Action | Mnemonic | Description |",
-                "| ---: | --- | ---: | ---: | --- | --- |",
+                "| Execution | Budget | Source | Admission | Action | Mnemonic | Description |",
+                "| ---: | ---: | --- | ---: | ---: | --- | --- |",
             ]
         )
-        for timing in summary.slow_non_test_actions[:MAX_RENDERED_SUSPECTS]:
+        for timing in summary.top_non_test_actions[:MAX_RENDERED_TIMINGS]:
+            budget = max(0.0, timing.execution_seconds - SLOW_DURATION_SECONDS)
+            budget_text = f"+{budget:.3f} s" if budget else "—"
             lines.append(
                 f"| {_seconds_cell(timing.execution_seconds)} | "
+                f"{budget_text} | "
                 f"{_execution_source_text(timing.execution_source)} | "
                 f"{_seconds_cell(timing.admission_seconds)} | "
                 f"{_seconds_cell(timing.action_seconds)} | "
                 f"`{_markdown_text(timing.mnemonic)}` | "
                 f"{_markdown_text(timing.name)} |"
             )
-        if summary.slow_non_test_action_count > MAX_RENDERED_SUSPECTS:
+        non_test_action_count = summary.action_count - summary.test_action_count
+        if non_test_action_count > MAX_RENDERED_TIMINGS:
             lines.append(
-                f"|  |  |  |  |  | "
-                f"{summary.slow_non_test_action_count - MAX_RENDERED_SUSPECTS:,} "
-                f"additional suspects; JSON retains the longest "
-                f"{len(summary.slow_non_test_actions):,} and the total count |"
+                f"|  |  |  |  |  |  | "
+                f"{non_test_action_count - MAX_RENDERED_TIMINGS:,} "
+                f"additional actions; JSON retains the longest "
+                f"{len(summary.top_non_test_actions):,} |"
             )
         lines.append("")
 
@@ -649,7 +650,7 @@ def render_markdown(summary: BazelProfileSummary, title: str) -> str:
         for timing in sorted(
             summary.critical_path,
             key=lambda value: (-value.duration_seconds, value.name),
-        )[:MAX_RENDERED_SUSPECTS]:
+        )[:MAX_RENDERED_CRITICAL_PATH]:
             lines.append(
                 f"| {_seconds_cell(timing.duration_seconds)} | "
                 f"{_markdown_text(timing.name)} |"
@@ -669,7 +670,7 @@ def render_console(summary: BazelProfileSummary, title: str) -> str:
         f"{summary.slow_test_action_count} slow test action(s), "
         f"{summary.slow_non_test_action_count} non-test execution suspect(s)"
     ]
-    for timing in summary.slow_tests[:MAX_RENDERED_SUSPECTS]:
+    for timing in summary.top_tests[:MAX_CONSOLE_TIMINGS]:
         source = _execution_source_text(timing.execution_source)
         admission = (
             f", {timing.admission_seconds:.3f}s admission"
@@ -680,7 +681,7 @@ def render_console(summary: BazelProfileSummary, title: str) -> str:
             f"  [test] {timing.execution_seconds:.3f}s {source}{admission}, "
             f"{timing.action_seconds:.3f}s action {timing.label}"
         )
-    for timing in summary.slow_non_test_actions[:MAX_RENDERED_SUSPECTS]:
+    for timing in summary.top_non_test_actions[:MAX_CONSOLE_TIMINGS]:
         source = _execution_source_text(timing.execution_source)
         admission = (
             f", {timing.admission_seconds:.3f}s admission"
