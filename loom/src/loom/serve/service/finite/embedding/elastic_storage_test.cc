@@ -26,6 +26,7 @@
 #include "loom/serve/testing/package.h"
 #include "loom/service/finite/embedding/protocol.h"
 #include "loom/service/finite/registration.h"
+#include "loom/service/registration.h"
 
 namespace loom_serve::testing::embedding {
 
@@ -47,15 +48,13 @@ class ElasticEmbeddingServiceTest : public SourceEmbeddingServiceTest {
 
   template <typename Predicate>
   iree_status_t ProgressRegistrationUntil(
-      loom_service_finite_registration_t* registration, Predicate done) {
+      loom_service_registration_t* registration, Predicate done) {
     for (;;) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       auto status = loom_runtime_device_group_advance(group_);
-      const bool progress =
-          loom_service_finite_registration_progress(registration, 0);
-      const auto snapshot =
-          loom_service_finite_registration_snapshot(registration);
-      if (snapshot.phase == LOOM_SERVICE_FINITE_REGISTRATION_RELEASE_FAILED) {
+      const bool progress = loom_service_registration_progress(registration, 0);
+      const auto snapshot = loom_service_registration_snapshot(registration);
+      if (snapshot.phase == LOOM_SERVICE_REGISTRATION_RELEASE_FAILED) {
         status = iree_status_join(status, iree_status_clone(snapshot.status));
       }
       const bool complete = done(snapshot);
@@ -98,23 +97,22 @@ TEST_F(ElasticEmbeddingServiceTest,
       },
       &notification_,
   };
-  loom_service_finite_registration_t* raw_registration = nullptr;
+  loom_service_registration_t* raw_registration = nullptr;
   IREE_ASSERT_OK(loom_service_finite_registration_allocate(
       device_, storage_owner_, &model_options, &options, observer,
       host_allocator_, &raw_registration));
-  auto retire = [this](loom_service_finite_registration_t* registration) {
-    loom_service_finite_registration_request_retirement(
-        registration, LOOM_SERVICE_FINITE_RETIRE_FLAG_ABORT);
+  auto retire = [this](loom_service_registration_t* registration) {
+    loom_service_registration_request_retirement(
+        registration, LOOM_SERVICE_RETIRE_FLAG_ABORT);
     IREE_CHECK_OK(
         ProgressRegistrationUntil(registration, [](const auto& state) {
-          return state.phase == LOOM_SERVICE_FINITE_REGISTRATION_RETIRED;
+          return state.phase == LOOM_SERVICE_REGISTRATION_RETIRED;
         }));
-    loom_service_finite_registration_free(registration);
+    loom_service_registration_free(registration);
   };
-  std::unique_ptr<loom_service_finite_registration_t, decltype(retire)>
-      registration(raw_registration, retire);
-  const auto* control =
-      loom_service_finite_registration_control(registration.get());
+  std::unique_ptr<loom_service_registration_t, decltype(retire)> registration(
+      raw_registration, retire);
+  const auto* control = loom_service_registration_control(registration.get());
   auto schedule = [&](loom_runtime_service_work_flags_t work) {
     const auto layout = loom_runtime_service_control_layout(control);
     for (uint64_t i = 0; i < layout.offer_capacity; ++i) {
@@ -122,8 +120,8 @@ TEST_F(ElasticEmbeddingServiceTest,
       EXPECT_EQ(loom_runtime_service_read_offer(control, i, &offer),
                 LOOM_RUNTIME_SERVICE_READ_COMPLETE);
       if (offer.choice_count && offer.work == work) {
-        return loom_service_finite_registration_try_schedule(registration.get(),
-                                                             offer.key, 0, 0);
+        return loom_service_registration_try_schedule(registration.get(),
+                                                      offer.key, 0, 0);
       }
     }
     return loom_runtime_service_schedule_outcome_t{};
@@ -131,28 +129,28 @@ TEST_F(ElasticEmbeddingServiceTest,
   ASSERT_TRUE(schedule(LOOM_RUNTIME_SERVICE_WORK_PREPARATION).accepted);
   IREE_ASSERT_OK(
       ProgressRegistrationUntil(registration.get(), [](const auto& state) {
-        return state.phase == LOOM_SERVICE_FINITE_REGISTRATION_READY ||
-               state.phase == LOOM_SERVICE_FINITE_REGISTRATION_FAILED;
+        return state.phase == LOOM_SERVICE_REGISTRATION_READY ||
+               state.phase == LOOM_SERVICE_REGISTRATION_FAILED;
       }));
-  ASSERT_EQ(loom_service_finite_registration_snapshot(registration.get()).phase,
-            LOOM_SERVICE_FINITE_REGISTRATION_READY);
-  ASSERT_TRUE(
-      loom_service_finite_registration_parameters(registration.get()).elastic);
+  ASSERT_EQ(loom_service_registration_snapshot(registration.get()).phase,
+            LOOM_SERVICE_REGISTRATION_READY);
+  ASSERT_TRUE(loom_service_registration_parameters(
+                  registration.get(), LOOM_SERVICE_MODEL_COMPONENT_PRIMARY)
+                  .parameters.elastic);
   loom_runtime::testing::NativeAllocator::ForDevice(device_).FailNextAllocation(
       IREE_ALLOCATOR_COMMAND_CALLOC, /*native_only=*/true);
-  IREE_ASSERT_OK(loom_service_finite_registration_request_parameters(
-      registration.get(), LOOM_SERVICE_FINITE_PARAMETER_OPERATION_ACTIVATE));
+  IREE_ASSERT_OK(loom_service_registration_request_parameters(
+      registration.get(), LOOM_SERVICE_MODEL_COMPONENT_PRIMARY,
+      LOOM_SERVICE_PARAMETER_OPERATION_ACTIVATE));
   const auto accepted = schedule(LOOM_RUNTIME_SERVICE_WORK_ACQUISITION);
   ASSERT_TRUE(accepted.accepted);
   IREE_ASSERT_OK(
       ProgressRegistrationUntil(registration.get(), [](const auto& state) {
-        return state.phase == LOOM_SERVICE_FINITE_REGISTRATION_FAILED;
+        return state.phase == LOOM_SERVICE_REGISTRATION_FAILED;
       }));
-  const auto failed =
-      loom_service_finite_registration_snapshot(registration.get());
+  const auto failed = loom_service_registration_snapshot(registration.get());
   EXPECT_EQ(iree_status_code(failed.status), IREE_STATUS_RESOURCE_EXHAUSTED);
-  EXPECT_EQ(failed.parameter_operation,
-            LOOM_SERVICE_FINITE_PARAMETER_OPERATION_NONE);
+  EXPECT_EQ(failed.parameter_operation, LOOM_SERVICE_PARAMETER_OPERATION_NONE);
   loom_runtime_service_operation_t operation = {};
   ASSERT_EQ(loom_runtime_service_read_operation(
                 control, accepted.operation.ordinal, &operation),
@@ -168,10 +166,10 @@ TEST_F(ElasticEmbeddingServiceTest,
 
   // No application views remain. Failure cleanup requires no new policy grant,
   // and only actual native retirement invalidates the accepted use.
-  loom_service_finite_registration_request_retirement(registration.get(), 0);
+  loom_service_registration_request_retirement(registration.get(), 0);
   IREE_ASSERT_OK(
       ProgressRegistrationUntil(registration.get(), [](const auto& state) {
-        return state.phase == LOOM_SERVICE_FINITE_REGISTRATION_RETIRED;
+        return state.phase == LOOM_SERVICE_REGISTRATION_RETIRED;
       }));
   EXPECT_EQ(loom_runtime_service_read_operation_use(
                 control, operation.key, operation.publication, 0, &use),

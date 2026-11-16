@@ -25,6 +25,7 @@
 #include "loom/service/finite/decision/protocol.h"
 #include "loom/service/finite/registration.h"
 #include "loom/service/finite/service.h"
+#include "loom/service/registration.h"
 
 namespace {
 
@@ -118,21 +119,22 @@ class NativeDecisionServiceTest : public ::testing::Test {
   // Each native lifecycle occupying this fixture's slot has a distinct key.
   uint64_t incarnation_ = 0;
 
-  iree_status_t Prepare(loom_service_finite_load_flags_t flags) {
+  iree_status_t Prepare(loom_service_registration_prepare_flags_t flags) {
     iree_status_t status = iree_ok_status();
-    loom_runtime_compilation_report_t report = {};
     while (!preparation_complete_) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       status =
           iree_status_join(status, loom_runtime_device_group_advance(group_));
       status = iree_status_join(
-          status, loom_service_finite_registration_prepare(
-                      registration_,
-                      flags | (iree_status_is_ok(status)
-                                   ? 0
-                                   : LOOM_SERVICE_FINITE_LOAD_FLAG_CANCEL),
-                      &preparation_complete_, &service_, &report));
+          status,
+          loom_service_registration_prepare(
+              registration_,
+              flags | (iree_status_is_ok(status)
+                           ? 0
+                           : LOOM_SERVICE_REGISTRATION_PREPARE_FLAG_CANCEL),
+              &preparation_complete_));
       if (preparation_complete_) {
+        service_ = loom_service_finite_registration_service(registration_);
         iree_notification_cancel_wait(&notification_);
       } else {
         iree_notification_commit_wait(&notification_, ticket,
@@ -177,20 +179,19 @@ class NativeDecisionServiceTest : public ::testing::Test {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       auto status = loom_runtime_device_group_advance(group_);
       const bool progress =
-          loom_service_finite_registration_progress(registration_, flags);
-      const auto snapshot =
-          loom_service_finite_registration_snapshot(registration_);
+          loom_service_registration_progress(registration_, flags);
+      const auto snapshot = loom_service_registration_snapshot(registration_);
       if (!preparation_complete_ &&
-          snapshot.phase != LOOM_SERVICE_FINITE_REGISTRATION_DECLARED &&
-          snapshot.phase != LOOM_SERVICE_FINITE_REGISTRATION_PREPARING) {
+          snapshot.phase != LOOM_SERVICE_REGISTRATION_DECLARED &&
+          snapshot.phase != LOOM_SERVICE_REGISTRATION_PREPARING) {
         preparation_complete_ = true;
-        if (snapshot.service) {
-          service_ = snapshot.service;
+        if (snapshot.service.self) {
+          service_ = loom_service_finite_registration_service(registration_);
           interface_ = loom_service_finite_service_interface(service_);
           loom_runtime_driver_initialize(1, &interface_.runtime, &driver_);
         }
       }
-      if (snapshot.phase == LOOM_SERVICE_FINITE_REGISTRATION_RETIRED) {
+      if (snapshot.phase == LOOM_SERVICE_REGISTRATION_RETIRED) {
         service_ = nullptr;
       }
       const bool complete = done();
@@ -215,17 +216,15 @@ class NativeDecisionServiceTest : public ::testing::Test {
 
   loom_runtime_service_offer_t Offer() {
     loom_runtime_service_offer_t offer = {};
-    EXPECT_EQ(
-        loom_runtime_service_read_offer(
-            loom_service_finite_registration_control(registration_), 0, &offer),
-        LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    EXPECT_EQ(loom_runtime_service_read_offer(
+                  loom_service_registration_control(registration_), 0, &offer),
+              LOOM_RUNTIME_SERVICE_READ_COMPLETE);
     return offer;
   }
 
   loom_runtime_service_offer_t OfferedWork(
       loom_runtime_service_work_flags_t kind) {
-    const auto* control =
-        loom_service_finite_registration_control(registration_);
+    const auto* control = loom_service_registration_control(registration_);
     const auto layout = loom_runtime_service_control_layout(control);
     for (uint64_t i = 0; i < layout.offer_capacity; ++i) {
       loom_runtime_service_offer_t offer = {};
@@ -240,16 +239,15 @@ class NativeDecisionServiceTest : public ::testing::Test {
 
   loom_runtime_service_operation_key_t Schedule(
       loom_runtime_service_offer_key_t offer) {
-    const auto outcome = loom_service_finite_registration_try_schedule(
-        registration_, offer, 0, 0);
+    const auto outcome =
+        loom_service_registration_try_schedule(registration_, offer, 0, 0);
     EXPECT_EQ(outcome.status_code, IREE_STATUS_OK);
     EXPECT_EQ(outcome.accepted, outcome.operation.serial != 0);
     return outcome.operation;
   }
 
   std::vector<loom_runtime_service_operation_t> AcceptedOperations() {
-    const auto* control =
-        loom_service_finite_registration_control(registration_);
+    const auto* control = loom_service_registration_control(registration_);
     const auto layout = loom_runtime_service_control_layout(control);
     std::vector<loom_runtime_service_operation_t> operations;
     for (uint64_t i = 0; i < layout.operation_capacity; ++i) {
@@ -265,8 +263,9 @@ class NativeDecisionServiceTest : public ::testing::Test {
 
   void RetireModel() {
     if (!preparation_complete_) {
-      IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
-                            Prepare(LOOM_SERVICE_FINITE_LOAD_FLAG_CANCEL));
+      IREE_EXPECT_STATUS_IS(
+          IREE_STATUS_CANCELLED,
+          Prepare(LOOM_SERVICE_REGISTRATION_PREPARE_FLAG_CANCEL));
     }
     if (driver_.capacity) {
       ASSERT_NO_FATAL_FAILURE(DriveUntil(
@@ -283,8 +282,8 @@ class NativeDecisionServiceTest : public ::testing::Test {
     while (!complete) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       auto status = loom_runtime_device_group_advance(group_);
-      status = iree_status_join(status, loom_service_finite_registration_retire(
-                                            registration_, &complete));
+      status = iree_status_join(
+          status, loom_service_registration_retire(registration_, &complete));
       if (complete || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(&notification_);
       } else {
@@ -299,8 +298,7 @@ class NativeDecisionServiceTest : public ::testing::Test {
 
   void RetireService() {
     ASSERT_NO_FATAL_FAILURE(RetireModel());
-    loom_service_finite_registration_free(
-        std::exchange(registration_, nullptr));
+    loom_service_registration_free(std::exchange(registration_, nullptr));
   }
 
   // Real asynchronous composition: application threads enter for admission and
@@ -416,7 +414,7 @@ class NativeDecisionServiceTest : public ::testing::Test {
   // Owns source views until every preparation/cancellation attempt retires.
   loom_runtime_sources_t* sources_ = nullptr;
   // Shared production preparation/service/retirement owner.
-  loom_service_finite_registration_t* registration_ = nullptr;
+  loom_service_registration_t* registration_ = nullptr;
   // Preparation loans have retired, including on terminal failure.
   bool preparation_complete_ = false;
   // Borrowed real admission, batching, and CPU/device progression.
@@ -448,18 +446,18 @@ TEST_F(NativeDecisionServiceTest,
       .options = IREE_SV("{\"batch_units\":64}"),
   };
   IREE_ASSERT_OK(AllocateRegistration(options, 3));
-  const auto* control = loom_service_finite_registration_control(registration_);
+  const auto* control = loom_service_registration_control(registration_);
   const auto load = OfferedWork(LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
   ASSERT_EQ(load.choice_count, 1u);
-  EXPECT_FALSE(loom_service_finite_registration_progress(registration_, 0));
-  EXPECT_EQ(loom_service_finite_registration_snapshot(registration_).phase,
-            LOOM_SERVICE_FINITE_REGISTRATION_DECLARED);
+  EXPECT_FALSE(loom_service_registration_progress(registration_, 0));
+  EXPECT_EQ(loom_service_registration_snapshot(registration_).phase,
+            LOOM_SERVICE_REGISTRATION_DECLARED);
   const auto load_operation = Schedule(load.key);
   ASSERT_NE(load_operation.serial, 0u);
   EXPECT_EQ(Schedule(load.key).serial, 0u);
   IREE_ASSERT_OK(ProgressUntil([&] {
-    return loom_service_finite_registration_snapshot(registration_).phase ==
-           LOOM_SERVICE_FINITE_REGISTRATION_READY;
+    return loom_service_registration_snapshot(registration_).phase ==
+           LOOM_SERVICE_REGISTRATION_READY;
   }));
   ASSERT_NE(service_, nullptr);
 
@@ -568,52 +566,60 @@ TEST_F(NativeDecisionServiceTest,
 
   // Explicit warmup is another deferred native choice. Withdrawing it makes
   // the old decision stale; accepted warmup later joins with no new grants.
-  IREE_ASSERT_OK(loom_service_finite_registration_request_parameters(
-      registration_, LOOM_SERVICE_FINITE_PARAMETER_OPERATION_ACTIVATE));
+  IREE_ASSERT_OK(loom_service_registration_request_parameters(
+      registration_, LOOM_SERVICE_MODEL_COMPONENT_PRIMARY,
+      LOOM_SERVICE_PARAMETER_OPERATION_ACTIVATE));
   const auto withdrawn = OfferedWork(LOOM_RUNTIME_SERVICE_WORK_ACQUISITION);
   ASSERT_EQ(withdrawn.choice_count, 1u);
-  EXPECT_FALSE(loom_service_finite_registration_progress(registration_, 0));
-  IREE_ASSERT_OK(loom_service_finite_registration_request_parameters(
-      registration_, LOOM_SERVICE_FINITE_PARAMETER_OPERATION_NONE));
+  EXPECT_FALSE(loom_service_registration_progress(registration_, 0));
+  IREE_ASSERT_OK(loom_service_registration_request_parameters(
+      registration_, LOOM_SERVICE_MODEL_COMPONENT_PRIMARY,
+      LOOM_SERVICE_PARAMETER_OPERATION_NONE));
   EXPECT_EQ(Schedule(withdrawn.key).serial, 0u);
-  IREE_ASSERT_OK(loom_service_finite_registration_request_parameters(
-      registration_, LOOM_SERVICE_FINITE_PARAMETER_OPERATION_ACTIVATE));
+  IREE_ASSERT_OK(loom_service_registration_request_parameters(
+      registration_, LOOM_SERVICE_MODEL_COMPONENT_PRIMARY,
+      LOOM_SERVICE_PARAMETER_OPERATION_ACTIVATE));
   const auto warmup = OfferedWork(LOOM_RUNTIME_SERVICE_WORK_ACQUISITION);
   const auto warmup_operation = Schedule(warmup.key);
   ASSERT_NE(warmup_operation.serial, 0u);
   EXPECT_NE(warmup_operation.serial, load_operation.serial);
   IREE_ASSERT_OK(ProgressUntil([&] {
-    return loom_service_finite_registration_snapshot(registration_)
-               .parameter_operation ==
-           LOOM_SERVICE_FINITE_PARAMETER_OPERATION_NONE;
+    return loom_service_registration_snapshot(registration_)
+               .parameter_operation == LOOM_SERVICE_PARAMETER_OPERATION_NONE;
   }));
-  if (loom_service_finite_registration_parameters(registration_).elastic) {
-    IREE_ASSERT_OK(loom_service_finite_registration_request_parameters(
-        registration_, LOOM_SERVICE_FINITE_PARAMETER_OPERATION_DEACTIVATE));
+  if (loom_service_registration_parameters(registration_,
+                                           LOOM_SERVICE_MODEL_COMPONENT_PRIMARY)
+          .parameters.elastic) {
+    IREE_ASSERT_OK(loom_service_registration_request_parameters(
+        registration_, LOOM_SERVICE_MODEL_COMPONENT_PRIMARY,
+        LOOM_SERVICE_PARAMETER_OPERATION_DEACTIVATE));
     const auto unpinned = OfferedWork(LOOM_RUNTIME_SERVICE_WORK_RELEASE);
     ASSERT_EQ(unpinned.choice_count, 1u);
-    loom_service_finite_registration_set_pinned(registration_, true);
+    loom_service_registration_set_pinned(
+        registration_, LOOM_SERVICE_MODEL_COMPONENT_PRIMARY, true);
     EXPECT_EQ(OfferedWork(LOOM_RUNTIME_SERVICE_WORK_RELEASE).choice_count, 0u);
     EXPECT_EQ(Schedule(unpinned.key).serial, 0u);
-    loom_service_finite_registration_set_pinned(registration_, false);
+    loom_service_registration_set_pinned(
+        registration_, LOOM_SERVICE_MODEL_COMPONENT_PRIMARY, false);
     ASSERT_NE(
         Schedule(OfferedWork(LOOM_RUNTIME_SERVICE_WORK_RELEASE).key).serial,
         0u);
     IREE_ASSERT_OK(ProgressUntil([&] {
-      return loom_service_finite_registration_snapshot(registration_)
-                 .parameter_operation ==
-             LOOM_SERVICE_FINITE_PARAMETER_OPERATION_NONE;
+      return loom_service_registration_snapshot(registration_)
+                 .parameter_operation == LOOM_SERVICE_PARAMETER_OPERATION_NONE;
     }));
-    EXPECT_FALSE(
-        loom_service_finite_registration_parameters(registration_).active);
+    EXPECT_FALSE(loom_service_registration_parameters(
+                     registration_, LOOM_SERVICE_MODEL_COMPONENT_PRIMARY)
+                     .parameters.active);
   } else {
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_FAILED_PRECONDITION,
-        loom_service_finite_registration_request_parameters(
-            registration_, LOOM_SERVICE_FINITE_PARAMETER_OPERATION_DEACTIVATE));
+        loom_service_registration_request_parameters(
+            registration_, LOOM_SERVICE_MODEL_COMPONENT_PRIMARY,
+            LOOM_SERVICE_PARAMETER_OPERATION_DEACTIVATE));
   }
-  EXPECT_EQ(loom_service_finite_registration_snapshot(registration_).phase,
-            LOOM_SERVICE_FINITE_REGISTRATION_READY);
+  EXPECT_EQ(loom_service_registration_snapshot(registration_).phase,
+            LOOM_SERVICE_REGISTRATION_READY);
   IREE_ASSERT_OK(
       loom_runtime_device_create_execution(device_, pool_, &consumer_));
   const float expected_probabilities[] = {2.0f / 3.0f, 0.25f, 1.0f / 3.0f};
@@ -631,7 +637,7 @@ TEST_F(NativeDecisionServiceTest,
       accepted = Schedule(initial.key);
       EXPECT_EQ(accepted.serial, 0u);  // The candidate window changed.
     }
-    bool progress = loom_service_finite_registration_progress(registration_, 0);
+    bool progress = loom_service_registration_progress(registration_, 0);
     loom_runtime_service_observation_t observation = {};
     ASSERT_EQ(loom_runtime_service_read_observation(control, &observation),
               LOOM_RUNTIME_SERVICE_READ_COMPLETE);
@@ -657,7 +663,7 @@ TEST_F(NativeDecisionServiceTest,
     EXPECT_EQ(choice.devices, 1u);
     EXPECT_EQ(choice.estimates, 0u);
     // Progress with no accepted work preserves the selected choice's use join.
-    progress = loom_service_finite_registration_progress(registration_, 0);
+    progress = loom_service_registration_progress(registration_, 0);
     EXPECT_FALSE(progress);
     loom_runtime_service_use_t offered_use = {};
     EXPECT_EQ(
@@ -773,14 +779,14 @@ TEST_F(NativeDecisionServiceTest,
   driver_.capacity = 0;
   interface_ = {};
   service_ = nullptr;
-  loom_service_finite_registration_request_retirement(registration_, 0);
+  loom_service_registration_request_retirement(registration_, 0);
   EXPECT_EQ(OfferedWork(LOOM_RUNTIME_SERVICE_WORK_RELEASE).choice_count, 0u);
   loom_runtime_service_use_t retiring_use = {};
   EXPECT_EQ(loom_runtime_service_read_operation_use(
                 control, retiring_compilation.key,
                 retiring_compilation.publication, 0, &retiring_use),
             LOOM_RUNTIME_SERVICE_READ_COMPLETE);
-  EXPECT_FALSE(loom_service_finite_registration_progress(registration_, 0));
+  EXPECT_FALSE(loom_service_registration_progress(registration_, 0));
   // Prepare the wait before releasing the compiler: its completion must wake
   // the native lifecycle after the application's traversal has detached.
   const auto retirement_ticket = iree_notification_prepare_wait(&notification_);
@@ -802,15 +808,15 @@ TEST_F(NativeDecisionServiceTest,
             LOOM_RUNTIME_SERVICE_READ_CHANGED);
   const auto release = OfferedWork(LOOM_RUNTIME_SERVICE_WORK_RELEASE);
   ASSERT_EQ(release.choice_count, 1u);
-  EXPECT_FALSE(loom_service_finite_registration_progress(registration_, 0));
-  EXPECT_EQ(loom_service_finite_registration_snapshot(registration_).phase,
-            LOOM_SERVICE_FINITE_REGISTRATION_READY);
+  EXPECT_FALSE(loom_service_registration_progress(registration_, 0));
+  EXPECT_EQ(loom_service_registration_snapshot(registration_).phase,
+            LOOM_SERVICE_REGISTRATION_READY);
   ASSERT_NE(Schedule(release.key).serial, 0u);
   IREE_ASSERT_OK(ProgressUntil([&] {
-    return loom_service_finite_registration_snapshot(registration_).phase ==
-           LOOM_SERVICE_FINITE_REGISTRATION_RETIRED;
+    return loom_service_registration_snapshot(registration_).phase ==
+           LOOM_SERVICE_REGISTRATION_RETIRED;
   }));
-  EXPECT_EQ(control, loom_service_finite_registration_control(registration_));
+  EXPECT_EQ(control, loom_service_registration_control(registration_));
   EXPECT_EQ(loom_runtime_service_control_layout(control).incarnation,
             incarnation_);
   loom_runtime_service_observation_t observation = {};
@@ -838,27 +844,34 @@ TEST_F(NativeDecisionServiceTest, PreparationFailurePublishesNoService) {
       IREE_STATUS_NOT_FOUND,
       ProgressUntil(
           [&] {
-            return loom_service_finite_registration_snapshot(registration_)
-                       .phase == LOOM_SERVICE_FINITE_REGISTRATION_FAILED;
+            return loom_service_registration_snapshot(registration_).phase ==
+                   LOOM_SERVICE_REGISTRATION_FAILED;
           },
           0, IREE_STATUS_NOT_FOUND));
   EXPECT_TRUE(preparation_complete_);
   EXPECT_EQ(service_, nullptr);
-  const auto failed = loom_service_finite_registration_snapshot(registration_);
-  EXPECT_EQ(failed.service, nullptr);
+  const auto failed = loom_service_registration_snapshot(registration_);
+  EXPECT_EQ(failed.service.self, nullptr);
   EXPECT_EQ(iree_status_code(failed.status), IREE_STATUS_NOT_FOUND);
-  loom_service_finite_registration_request_retirement(registration_, 0);
+  loom_runtime_service_observation_t observation;
+  ASSERT_EQ(loom_runtime_service_read_observation(
+                loom_service_registration_control(registration_), &observation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(observation.offer_count, 0u);
+  EXPECT_EQ(observation.pending_operation_count, 0u);
+  EXPECT_EQ(observation.accepted_devices, 0u);
+  loom_service_registration_request_retirement(registration_, 0);
   // A retained error is observable while accepted cleanup still progresses.
   IREE_ASSERT_STATUS_IS(
       IREE_STATUS_NOT_FOUND,
       ProgressUntil(
           [&] {
-            return loom_service_finite_registration_snapshot(registration_)
-                       .phase == LOOM_SERVICE_FINITE_REGISTRATION_RETIRED;
+            return loom_service_registration_snapshot(registration_).phase ==
+                   LOOM_SERVICE_REGISTRATION_RETIRED;
           },
           0, IREE_STATUS_NOT_FOUND));
-  EXPECT_EQ(loom_service_finite_registration_snapshot(registration_).phase,
-            LOOM_SERVICE_FINITE_REGISTRATION_RETIRED);
+  EXPECT_EQ(loom_service_registration_snapshot(registration_).phase,
+            LOOM_SERVICE_REGISTRATION_RETIRED);
   ASSERT_NO_FATAL_FAILURE(RetireService());
 }
 
@@ -869,7 +882,7 @@ TEST_F(NativeDecisionServiceTest, UnstartedCancellationDoesNotReadSource) {
   };
   IREE_ASSERT_OK(AllocateRegistration(options));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
-                        Prepare(LOOM_SERVICE_FINITE_LOAD_FLAG_CANCEL));
+                        Prepare(LOOM_SERVICE_REGISTRATION_PREPARE_FLAG_CANCEL));
   EXPECT_TRUE(preparation_complete_);
   EXPECT_EQ(service_, nullptr);
   ASSERT_NO_FATAL_FAILURE(RetireService());
@@ -883,7 +896,7 @@ TEST_F(NativeDecisionServiceTest, UnstartedRetirementWithdrawsPreparation) {
       .options = IREE_SV("{\"batch_units\":64}"),
   };
   IREE_ASSERT_OK(AllocateRegistration(options));
-  const auto* control = loom_service_finite_registration_control(registration_);
+  const auto* control = loom_service_registration_control(registration_);
   loom_runtime_service_observation_t observation = {};
   ASSERT_EQ(loom_runtime_service_read_observation(control, &observation),
             LOOM_RUNTIME_SERVICE_READ_COMPLETE);
@@ -909,7 +922,7 @@ TEST_F(NativeDecisionServiceTest, PreparationCancellationJoinsAcceptedLoad) {
       .options = IREE_SV("{\"batch_units\":64}"),
   };
   IREE_ASSERT_OK(AllocateRegistration(options));
-  const auto* control = loom_service_finite_registration_control(registration_);
+  const auto* control = loom_service_registration_control(registration_);
   const auto layout = loom_runtime_service_control_layout(control);
   loom_runtime_service_observation_t observation = {};
   ASSERT_EQ(loom_runtime_service_read_observation(control, &observation),
@@ -927,9 +940,9 @@ TEST_F(NativeDecisionServiceTest, PreparationCancellationJoinsAcceptedLoad) {
     }
   }
   EXPECT_EQ(preparation.work, LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
-  loom_runtime_compilation_report_t report = {};
-  IREE_ASSERT_OK(loom_service_finite_registration_prepare(
-      registration_, 0, &preparation_complete_, &service_, &report));
+  IREE_ASSERT_OK(loom_service_registration_prepare(registration_, 0,
+                                                   &preparation_complete_));
+  service_ = loom_service_finite_registration_service(registration_);
   EXPECT_FALSE(preparation_complete_);
   EXPECT_EQ(service_, nullptr);
   ASSERT_EQ(loom_runtime_service_read_observation(control, &observation),
@@ -956,8 +969,8 @@ TEST_F(NativeDecisionServiceTest, PreparationCancellationJoinsAcceptedLoad) {
                 control, operation.key, operation.publication, 0, &use),
             LOOM_RUNTIME_SERVICE_READ_COMPLETE);
   EXPECT_EQ(use.resource_ordinal, 0u);
-  loom_service_finite_registration_request_retirement(
-      registration_, LOOM_SERVICE_FINITE_RETIRE_FLAG_ABORT);
+  loom_service_registration_request_retirement(registration_,
+                                               LOOM_SERVICE_RETIRE_FLAG_ABORT);
   // Cancellation intent cannot release the accepted preparation borrow.
   EXPECT_EQ(loom_runtime_service_read_operation_use(
                 control, operation.key, operation.publication, 0, &use),
@@ -966,8 +979,8 @@ TEST_F(NativeDecisionServiceTest, PreparationCancellationJoinsAcceptedLoad) {
       IREE_STATUS_CANCELLED,
       ProgressUntil(
           [&] {
-            return loom_service_finite_registration_snapshot(registration_)
-                       .phase == LOOM_SERVICE_FINITE_REGISTRATION_RETIRED;
+            return loom_service_registration_snapshot(registration_).phase ==
+                   LOOM_SERVICE_REGISTRATION_RETIRED;
           },
           0, IREE_STATUS_CANCELLED));
   EXPECT_TRUE(preparation_complete_);
@@ -1112,9 +1125,9 @@ TEST_F(NativeDecisionServiceTest, StopDuringPreparationJoinsInputBorrowers) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
                         loom_service_finite_call_status(calls_[0]));
   EXPECT_EQ(loom_service_finite_call_output(calls_[0]), nullptr);
-  const auto stopped = loom_service_finite_registration_snapshot(registration_);
-  EXPECT_EQ(stopped.phase, LOOM_SERVICE_FINITE_REGISTRATION_READY);
-  EXPECT_EQ(stopped.service, service_);
+  const auto stopped = loom_service_registration_snapshot(registration_);
+  EXPECT_EQ(stopped.phase, LOOM_SERVICE_REGISTRATION_READY);
+  EXPECT_EQ(stopped.service.self, service_);
   iree_string_builder_t body;
   iree_string_builder_initialize(iree_allocator_system(), &body);
   IREE_EXPECT_OK(iree_string_builder_append_cstring(&body, kRequest));
@@ -1134,11 +1147,11 @@ TEST_F(NativeDecisionServiceTest, StopDuringPreparationJoinsInputBorrowers) {
   driver_.capacity = 0;
   interface_ = {};
   service_ = nullptr;
-  loom_service_finite_registration_request_retirement(
-      registration_, LOOM_SERVICE_FINITE_RETIRE_FLAG_ABORT);
+  loom_service_registration_request_retirement(registration_,
+                                               LOOM_SERVICE_RETIRE_FLAG_ABORT);
   IREE_ASSERT_OK(ProgressUntil([&] {
-    return loom_service_finite_registration_snapshot(registration_).phase ==
-           LOOM_SERVICE_FINITE_REGISTRATION_RETIRED;
+    return loom_service_registration_snapshot(registration_).phase ==
+           LOOM_SERVICE_REGISTRATION_RETIRED;
   }));
 }
 

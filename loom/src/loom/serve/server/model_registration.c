@@ -26,6 +26,7 @@
 #include "loom/service/finite/model.h"
 #include "loom/service/finite/registration.h"
 #include "loom/service/finite/service.h"
+#include "loom/service/registration.h"
 
 // Ready engines borrow these controls; the registration retains the complete
 // tail through model retirement and all observation readers.
@@ -109,42 +110,49 @@ static iree_status_t loom_serve_model_finite_prepare(
     void* self, loom_serve_registration_prepare_flags_t flags,
     bool* out_complete, loom_serve_service_t* out_service,
     loom_runtime_compilation_report_t* out_report) {
-  loom_service_finite_service_t* service = NULL;
-  iree_status_t status = loom_service_finite_registration_prepare(
+  iree_status_t status = loom_service_registration_prepare(
       self,
       iree_any_bit_set(flags, LOOM_SERVE_REGISTRATION_PREPARE_FLAG_CANCEL)
-          ? LOOM_SERVICE_FINITE_LOAD_FLAG_CANCEL
+          ? LOOM_SERVICE_REGISTRATION_PREPARE_FLAG_CANCEL
           : 0,
-      out_complete, &service, out_report);
+      out_complete);
+  if (*out_complete) {
+    *out_report = *loom_service_registration_snapshot(self).compilation;
+  }
   if (iree_status_is_ok(status) && *out_complete) {
-    *out_service = loom_serve_finite_http_interface(service);
+    *out_service = loom_serve_finite_http_interface(
+        loom_service_finite_registration_service(self));
   }
   return status;
 }
 
 static iree_status_t loom_serve_model_finite_retire(void* self,
                                                     bool* out_complete) {
-  return loom_service_finite_registration_retire(self, out_complete);
+  return loom_service_registration_retire(self, out_complete);
 }
 
 static void loom_serve_model_finite_destroy(void* self) {
-  loom_service_finite_registration_free(self);
+  loom_service_registration_free(self);
 }
 
 static loom_serve_registration_parameters_t loom_serve_model_finite_parameters(
     void* self, loom_serve_model_component_t component) {
   return loom_serve_registration_prepared_parameters(
-      loom_service_finite_registration_parameters(self));
+      loom_service_registration_parameters(self,
+                                           LOOM_SERVICE_MODEL_COMPONENT_PRIMARY)
+          .parameters);
 }
 
 static void loom_serve_model_finite_set_pinned(
     void* self, loom_serve_model_component_t component, bool pinned) {
-  loom_service_finite_registration_set_pinned(self, pinned);
+  loom_service_registration_set_pinned(
+      self, LOOM_SERVICE_MODEL_COMPONENT_PRIMARY, pinned);
 }
 
 static iree_status_t loom_serve_model_finite_deactivate(
     void* self, loom_serve_model_component_t component, bool* out_complete) {
-  return loom_service_finite_registration_deactivate(self, out_complete);
+  return loom_service_registration_deactivate(
+      self, LOOM_SERVICE_MODEL_COMPONENT_PRIMARY, out_complete);
 }
 
 static iree_status_t loom_serve_model_finite_activate(
@@ -153,7 +161,9 @@ static iree_status_t loom_serve_model_finite_activate(
     loom_runtime_activation_phase_t* out_phase,
     iree_status_t* out_component_status) {
   *out_component_status = iree_ok_status();
-  return loom_service_finite_registration_activate(self, flags, out_phase);
+  return loom_service_registration_activate(
+      self, LOOM_SERVICE_MODEL_COMPONENT_PRIMARY, flags, out_phase,
+      out_component_status);
 }
 
 static iree_status_t loom_serve_finite_registration_create(
@@ -177,7 +187,7 @@ static iree_status_t loom_serve_finite_registration_create(
       .variant_capacity = configuration->variant_capacity,
       .heartbeat_interval = options->heartbeat_interval,
       .stream = stream};
-  loom_service_finite_registration_t* registration = NULL;
+  loom_service_registration_t* registration = NULL;
   IREE_RETURN_IF_ERROR(loom_service_finite_registration_allocate(
       loom_runtime_device_group_at(options->device_group,
                                    configuration->device_index),

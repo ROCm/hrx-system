@@ -12,6 +12,22 @@ package(
 )
 
 loom_cc_library(
+    name = "registration",
+    srcs = ["registration.c"],
+    hdrs = ["registration.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime:service",
+        "//loom/src/loom/runtime:service_control",
+        "//loom/src/loom/runtime:wake",
+        "//loom/src/loom/runtime/parameter:activation",
+        "//loom/src/loom/runtime/parameter:residency",
+        "//loom/src/loom/runtime/program:compilation",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "inspection",
     hdrs = ["inspection.h"],
     visibility = ["//visibility:public"],
