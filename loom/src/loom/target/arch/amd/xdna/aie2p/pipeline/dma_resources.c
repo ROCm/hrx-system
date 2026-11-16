@@ -250,11 +250,10 @@ static iree_status_t loom_aie2p_native_allocate_task_descriptor(
   uint16_t* next_descriptor = loom_aie2p_native_descriptor_bank(
       tile, engine, &descriptor_base, &descriptor_count);
   loom_aie2p_native_dma_descriptor_t* shared = NULL;
-  // Resident geometry avoids entry restoration while the bank has room. Once
-  // full, complete worker retirement lets a later serial occurrence restore
-  // another geometry without changing its per-copy submission path.
-  if (task->transfer_count > descriptor_count - *next_descriptor &&
-      worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_CORE) {
+  // Required admission shares retired storage before spending capacity on
+  // resident geometry. Other physical owners may still need this bank; spare
+  // slots remove entry restoration after all owners have been admitted.
+  if (worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_CORE) {
     const loom_aie2p_native_transfer_t* next = task->first_transfer;
     for (loom_aie2p_native_dma_descriptor_t* candidate =
              resource_owner->descriptors;
@@ -463,12 +462,68 @@ static bool loom_aie2p_native_submission_fits(
   return loom_aie2p_call_abi_requirements_fit(requirements);
 }
 
-// Admission first packs all required geometries, preserving the programs that
-// fit by rewriting shared addresses. Only then may spare descriptors remove
-// issue-time patches. Each variant inherits the original ordered lifetimes and
-// arrival credit; it needs no new route, semaphore, or payload storage.
-iree_status_t loom_aie2p_native_refine_transfer_addresses(
+// Geometry objects and task references remain stable while spare slots give
+// a geometry its own resident sequence. Only intra-sequence links move; address
+// patching and completion identities retain their admitted policies.
+static void loom_aie2p_native_refine_descriptor_geometries(
     loom_aie2p_native_context_t* context, iree_host_size_t worker_count) {
+  for (iree_host_size_t i = 0; i < worker_count; ++i) {
+    for (loom_aie2p_native_dma_descriptor_t* first =
+             context->workers[i].descriptors;
+         first; first = first->next) {
+      loom_aie2p_native_dma_storage_t* storage = first->storage;
+      if (!storage || storage->first != first) {
+        continue;
+      }
+      const bool shim = first->shim;
+      uint16_t base, capacity;
+      uint16_t* used = loom_aie2p_native_descriptor_bank(
+          shim ? first->path->shim : first->path->local,
+          shim ? first->path->shim_engine : first->path->local_engine, &base,
+          &capacity);
+      const loom_aie2p_native_memory_layout_t* layout =
+          shim ? NULL : first->path->local->memory_layout;
+      const uint8_t word = layout ? layout->chain.word : 7;
+      const loom_xdna_register_field_id_t next =
+          layout ? layout->chain.next
+                 : LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD7_NEXT_BD;
+      const loom_xdna_register_field_info_t field =
+          loom_xdna_register_field_info(next);
+      const uint32_t mask = (UINT32_MAX >> (32 - field.bit_width))
+                            << field.least_significant_bit;
+      loom_aie2p_native_dma_descriptor_t** link = &storage->geometries;
+      while (*link) {
+        loom_aie2p_native_dma_descriptor_t* geometry = *link;
+        const uint16_t count = geometry->sequence.descriptor_count;
+        if (geometry == first || count > capacity - *used) {
+          link = &geometry->next_geometry;
+          continue;
+        }
+        geometry->sequence.descriptor = base + *used;
+        *used += count;
+        for (uint16_t segment = 0; segment + 1 < count; ++segment) {
+          uint32_t* value = &geometry->sequence.words[segment][word];
+          *value = (*value & ~mask) |
+                   loom_xdna_register_field_encode(
+                       next, geometry->sequence.descriptor + segment + 1);
+        }
+        *link = geometry->next_geometry;
+        geometry->next_geometry = NULL;
+        geometry->storage = NULL;
+      }
+      if (storage->geometries == first && !first->next_geometry) {
+        first->storage = NULL;
+      }
+    }
+  }
+}
+
+// Admission first packs all required geometries, preserving the programs that
+// fit by restoring retired storage. Spare descriptors then remove entry
+// restoration and issue-time address patches without new routes or credits.
+iree_status_t loom_aie2p_native_refine_transfer_descriptors(
+    loom_aie2p_native_context_t* context, iree_host_size_t worker_count) {
+  loom_aie2p_native_refine_descriptor_geometries(context, worker_count);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < worker_count;
        ++i) {

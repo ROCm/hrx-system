@@ -313,7 +313,8 @@ typedef struct loom_aie2p_native_dma_storage_t {
   loom_aie2p_native_dma_descriptor_t* first;
   // Immutable geometries sharing the first geometry's descriptor range.
   loom_aie2p_native_dma_descriptor_t* geometries;
-  // Most recently selected geometry; its latest transfer owns retirement.
+  // Most recently selected geometry during required admission; its latest
+  // transfer owns retirement. Optional refinement no longer uses this cursor.
   loom_aie2p_native_dma_descriptor_t* active;
   // Union of differing register words, one bit mask per physical descriptor.
   uint8_t* changed_words;

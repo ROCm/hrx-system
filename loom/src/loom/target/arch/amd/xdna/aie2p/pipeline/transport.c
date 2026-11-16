@@ -1385,7 +1385,7 @@ iree_status_t loom_aie2p_native_select_transfers(
     }
   }
   if (iree_status_is_ok(status) && valid) {
-    status = loom_aie2p_native_refine_transfer_addresses(
+    status = loom_aie2p_native_refine_transfer_descriptors(
         context, realization->invocations.worker_count);
   }
   if (iree_status_is_ok(status) && valid) {
