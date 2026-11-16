@@ -371,7 +371,8 @@ static iree_status_t loom_low_allocation_build_entry_moves(
     source.location_base = entry->location_base;
     loom_low_allocation_move_plan_append_assignment(
         &state->move_plan, &source, 0, destination, 0,
-        destination->location_count, /*consume_source=*/true, &raw_move_count);
+        destination->location_count, LOOM_LOW_MOVE_KIND_TRANSFER,
+        &raw_move_count);
     loom_low_allocation_target_constraints_record_location_extent(
         &state->target_constraints, source.descriptor_reg_class_id,
         source.location_kind, source.location_base, source.location_count);
@@ -481,10 +482,21 @@ loom_low_allocation_append_boundary_moves(
                     state->unit_liveness.storage_segments.entries,
                     state->unit_liveness.end_points,
                     state->unit_liveness.point_count, assignment, point)));
+    // A surviving pointer carrier anchors the callee's borrow through result
+    // publication. Its home is protected by call-clobber liveness, so argument
+    // transport need not acquire another owner even when the carrier owns its
+    // protection. Last-use carriers and owning fields still transfer.
+    const bool borrows_source = !consume_source && value_type &&
+                                loom_type_is_reference(*value_type) &&
+                                loom_type_reference_ownership(*value_type) ==
+                                    LOOM_REFERENCE_OWNERSHIP_BORROWED;
     loom_low_allocation_move_plan_append_assignment(
         &state->move_plan, from_abi ? &boundary : assignment, 0,
         from_abi ? assignment : &boundary, 0, assignment->location_count,
-        consume_source, &raw_count);
+        consume_source   ? LOOM_LOW_MOVE_KIND_TRANSFER
+        : borrows_source ? LOOM_LOW_MOVE_KIND_BORROW
+                         : LOOM_LOW_MOVE_KIND_COPY,
+        &raw_count);
   }
   IREE_RETURN_IF_ERROR(loom_low_allocation_move_plan_append_group(
       &state->move_plan, owner_op, point, point, raw_count, out_group,

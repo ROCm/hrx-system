@@ -158,6 +158,12 @@ loom_low_move_t Transfer(uint32_t destination, uint32_t source) {
   return move;
 }
 
+loom_low_move_t Borrow(uint32_t destination, uint32_t source) {
+  auto move = Move(destination, source);
+  move.kind = LOOM_LOW_MOVE_KIND_BORROW;
+  return move;
+}
+
 loom_low_move_t MoveBetween(uint32_t destination,
                             uint16_t destination_register_class_id,
                             uint32_t source,
@@ -173,6 +179,7 @@ std::string MoveString(const loom_low_move_t& move) {
          std::to_string(move.destination.location) +
          (move.kind == LOOM_LOW_MOVE_KIND_EXCHANGE   ? "<->"
           : move.kind == LOOM_LOW_MOVE_KIND_TRANSFER ? "<-!"
+          : move.kind == LOOM_LOW_MOVE_KIND_BORROW   ? "<-&"
                                                      : "<-") +
          std::to_string(move.source.location);
 }
@@ -313,6 +320,24 @@ TEST(LowMoveSequenceTest, ReferenceCycleRetiresItsTemporaryAfterFanout) {
       ResolveMoves(moves, IREE_ARRAYSIZE(moves), temporaries,
                    IREE_ARRAYSIZE(temporaries), ReferenceDescriptorSet()),
       ::testing::ElementsAre("0:2<-0", "0:3<-!0", "0:0<-!1", "0:1<-!3"));
+}
+
+TEST(LowMoveSequenceTest, BorrowsSurvivingCarriersAcrossArgumentPlacement) {
+  // Cover the single-move fast path and fan-out alongside an independent cycle.
+  const loom_low_move_t single[] = {Borrow(0, 4)};
+  EXPECT_THAT(ResolveMoves(single, IREE_ARRAYSIZE(single), nullptr, 0,
+                           ReferenceDescriptorSet()),
+              ::testing::ElementsAre("0:0<-&4"));
+  const loom_low_move_t moves[] = {Borrow(0, 4), Borrow(1, 4), Transfer(2, 3),
+                                   Transfer(3, 2)};
+  const loom_low_move_location_t temporary[] = {Location(5)};
+  EXPECT_THAT(ResolveMoves(moves, IREE_ARRAYSIZE(moves), temporary,
+                           IREE_ARRAYSIZE(temporary), ReferenceDescriptorSet()),
+              ::testing::ElementsAre("0:0<-&4", "0:1<-&4", "0:5<-!3", "0:3<-!2",
+                                     "0:2<-!5"));
+  EXPECT_EQ(loom_low_move_access_count(moves), 1u);
+  EXPECT_EQ(loom_low_move_read(moves, 0)->location, 4u);
+  EXPECT_EQ(loom_low_move_write(moves, 0)->location, 0u);
 }
 
 TEST(LowMoveSequenceTest, ReferenceTransfersPreserveParallelStateAndOwnership) {

@@ -130,7 +130,9 @@ iree_status_t loom_low_move_sequence_scratch_initialize(
 // Consuming reference inputs transfer only on their source's final read;
 // identities and source-preserving inputs keep that carrier live. Reference
 // cycles transfer their carriers through scratch without retaining a spare
-// owner after the group.
+// owner after the group. Borrow rows retain their kind and keep their source
+// live; the producer proves that source is not overwritten by the group and
+// anchors every later destination use.
 // When non-NULL, |out_input_flags| reports the identity and active rows already
 // classified while preparing the move set.
 // |out_complete| is false only when the temporary resolver emitted an

@@ -669,6 +669,46 @@ REF_BORROW = Instruction(
     ),
 )
 
+REF_STACK_LOAD_BORROW = _stack_transfer(
+    0xC7,
+    "ref.stack.load.borrow",
+    "Borrows a local ref slot into a register.",
+    "destination_r8",
+    FieldRole.RESULT,
+    RefOwnership.REPLACE_BORROW,
+    "Ref-register ordinal replaced by the borrowed handle.",
+    "Borrows the exact object and descriptor from a live local slot without retaining.",
+    "The slot is unchanged and the destination holds canonical null or a borrow.",
+    "The compiler proves an anchor covering destination replacement and every use "
+    "of the borrow. A previous destination owner is released; the source is not retained.",
+    (StateEffect(StateAccess.READ, StateResource.FRAME_LOCALS, ("slot_u16",)),),
+    "%r<destination> = ref.stack.load.borrow #r<slot>",
+    "source = local_refs[slot_u16];\n"
+    "borrowed = source.is_null ? canonical_null_ref : as_borrowed_ref(source);\n"
+    "replace_ref(&refs[destination_r8], borrowed);\n"
+    "pc = pc + 4;",
+)
+
+REF_STACK_STORE_BORROW = _stack_transfer(
+    0xE6,
+    "ref.stack.store.borrow",
+    "Borrows a ref register into a local slot.",
+    "source_r8",
+    FieldRole.OPERAND,
+    RefOwnership.BORROW,
+    "Live source whose owner covers the borrowed slot.",
+    "Borrows the exact object and descriptor from a live register without retaining.",
+    "The register is unchanged and the slot holds canonical null or a borrow.",
+    "The compiler proves an anchor covering slot replacement and every use of the "
+    "borrow. A previous slot owner is released; the source is not retained.",
+    (StateEffect(StateAccess.WRITE, StateResource.FRAME_LOCALS, ("slot_u16",)),),
+    "ref.stack.store.borrow %r<source>, #r<slot>",
+    "source = refs[source_r8];\n"
+    "borrowed = source.is_null ? canonical_null_ref : as_borrowed_ref(source);\n"
+    "replace_ref(&local_refs[slot_u16], borrowed);\n"
+    "pc = pc + 4;",
+)
+
 REF_INSTRUCTIONS = (
     REF_NULL,
     REF_COMPARE_NULL,
@@ -686,4 +726,6 @@ REF_INSTRUCTIONS = (
     REF_STACK_LOAD_COPY,
     REF_STACK_STORE_COPY,
     REF_BORROW,
+    REF_STACK_LOAD_BORROW,
+    REF_STACK_STORE_BORROW,
 )

@@ -159,6 +159,30 @@ static uint16_t loom_vm_move_storage_location(
   }
 }
 
+// Reference transport has the same ownership contract in registers and slots.
+typedef struct loom_vm_ref_move_opcodes_t {
+  // Register-to-register transport.
+  uint8_t register_opcode;
+  // Local-slot-to-register transport.
+  uint8_t load_opcode;
+  // Register-to-local-slot transport.
+  uint8_t store_opcode;
+} loom_vm_ref_move_opcodes_t;
+
+static const loom_vm_ref_move_opcodes_t loom_vm_ref_move_opcodes[] = {
+    [LOOM_LOW_MOVE_KIND_COPY] = {IREE_VM_BYTECODE_OPCODE_REF_COPY,
+                                 IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_COPY,
+                                 IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_COPY},
+    [LOOM_LOW_MOVE_KIND_TRANSFER] =
+        {IREE_VM_BYTECODE_OPCODE_REF_MOVE,
+         IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_MOVE,
+         IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_MOVE},
+    [LOOM_LOW_MOVE_KIND_BORROW] =
+        {IREE_VM_BYTECODE_OPCODE_REF_BORROW,
+         IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_BORROW,
+         IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_BORROW},
+};
+
 static iree_status_t loom_vm_function_moves(
     const loom_low_move_t* moves, loom_low_move_range_t range,
     const loom_vm_function_storage_t* storage, iree_io_stream_t* stream) {
@@ -170,7 +194,8 @@ static iree_status_t loom_vm_function_moves(
     const bool is_load = loom_vm_move_location_is_storage(&move->source);
     const bool is_ref =
         move->source.descriptor_reg_class_id == VM_CORE_REG_CLASS_ID_REF;
-    const bool transfer = move->kind == LOOM_LOW_MOVE_KIND_TRANSFER;
+    const loom_vm_ref_move_opcodes_t* ref_opcodes =
+        &loom_vm_ref_move_opcodes[move->kind];
     if (is_store && is_load) {
       const uint16_t source =
           loom_vm_move_storage_location(storage, &move->source);
@@ -179,8 +204,7 @@ static iree_status_t loom_vm_function_moves(
       status = is_ref
                    ? loom_vm_function_copy_ref(
                          stream, storage, destination, source,
-                         transfer ? IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_MOVE
-                                  : IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_COPY,
+                         ref_opcodes->load_opcode,
                          IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_MOVE)
                    : loom_vm_function_copy_value(stream, destination, source);
     } else if (is_store || is_load) {
@@ -192,10 +216,7 @@ static iree_status_t loom_vm_function_moves(
       if (is_ref) {
         status = loom_vm_function_transfer_refs(
             stream,
-            is_store ? (transfer ? IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_MOVE
-                                 : IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_COPY)
-                     : (transfer ? IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_MOVE
-                                 : IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_COPY),
+            is_store ? ref_opcodes->store_opcode : ref_opcodes->load_opcode,
             location, (uint16_t)reg->location, 1);
       } else {
         status = loom_vm_function_transfer_stack(
@@ -203,10 +224,9 @@ static iree_status_t loom_vm_function_moves(
       }
     } else {
       // Register-pair encodings share operand locations. Allocation retains
-      // whether a source survives or transfers its complete reference carrier.
+      // whether transport borrows, copies, or transfers a reference carrier.
       const iree_vm_bytecode_value_copy_t instruction = {
-          .opcode = is_ref ? (transfer ? IREE_VM_BYTECODE_OPCODE_REF_MOVE
-                                       : IREE_VM_BYTECODE_OPCODE_REF_COPY)
+          .opcode = is_ref ? ref_opcodes->register_opcode
                            : IREE_VM_BYTECODE_OPCODE_VALUE_COPY,
           .destination_v8 = (uint8_t)move->destination.location,
           .source_v8 = (uint8_t)move->source.location,

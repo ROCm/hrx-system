@@ -515,7 +515,7 @@ static iree_status_t loom_low_move_sequence_prepare(
     } else {
       source_entry->flags |= LOOM_LOW_MOVE_SEQUENCE_LOCATION_FLAG_PRESERVED;
     }
-    if (scratch->moves[i].kind == LOOM_LOW_MOVE_KIND_COPY) {
+    if (scratch->moves[i].kind != LOOM_LOW_MOVE_KIND_TRANSFER) {
       source_entry->flags |= LOOM_LOW_MOVE_SEQUENCE_LOCATION_FLAG_PRESERVED;
     }
     IREE_RETURN_IF_ERROR(loom_low_move_sequence_mark_explicit_location(
@@ -572,9 +572,11 @@ static void loom_low_move_sequence_emit_ready_move(
       source->source_use_count == 1 &&
       !iree_any_bit_set(source->flags,
                         LOOM_LOW_MOVE_SEQUENCE_LOCATION_FLAG_PRESERVED);
-  loom_low_move_sequence_append(
-      state, &move.destination, &move.source,
-      consume_source ? LOOM_LOW_MOVE_KIND_TRANSFER : LOOM_LOW_MOVE_KIND_COPY);
+  loom_low_move_sequence_append(state, &move.destination, &move.source,
+                                consume_source ? LOOM_LOW_MOVE_KIND_TRANSFER
+                                : move.kind == LOOM_LOW_MOVE_KIND_BORROW
+                                    ? LOOM_LOW_MOVE_KIND_BORROW
+                                    : LOOM_LOW_MOVE_KIND_COPY);
   loom_low_move_sequence_deactivate_move(state, move_index);
 }
 
