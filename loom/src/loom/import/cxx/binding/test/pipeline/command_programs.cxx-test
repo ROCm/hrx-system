@@ -204,3 +204,25 @@ command.def public @run_configured(%count: i32) launch(%counts: buffer, %output:
   kernel.launch @configured[%count, %counts, %counts_byte_offset](%output) : [i32, buffer, offset](buffer)
   command.return
 }
+
+// ====
+// Column payloads form the launch suffix; their shared extent and individual
+// encodings remain specialization inputs through nested command launches.
+// RUN: roundtrip
+#include <loomcxx/command.h>
+struct Row { unsigned first; double second; };
+namespace lt = loom::type;
+using Rows = lt::view<lt::shape<lt::dynamic>, Row,
+                      lt::encoding<loom::encoding::role::layout, 1>>;
+[[loom::command_program]] void consume([[loom::launch]] Rows rows);
+[[loom::command_program]] void forward([[loom::launch]] Rows rows) {
+  loom::command::launch<consume>(rows);
+}
+
+// ----
+command.def public @forward(%rows_dim0: index, %rows_first_layout: encoding<layout>, %rows_second_layout: encoding<layout>) launch(%rows_first: view<[%rows_dim0]xi32, %rows_first_layout>, %rows_second: view<[%rows_dim0]xf64, %rows_second_layout>) {
+  command.launch @consume[%rows_dim0, %rows_first_layout, %rows_second_layout](%rows_first, %rows_second) : [index, encoding<layout>, encoding<layout>](view<[%rows_dim0]xi32, %rows_first_layout>, view<[%rows_dim0]xf64, %rows_second_layout>)
+  command.return
+}
+
+command.decl public @consume(%5: index, %6: encoding<layout>, %7: encoding<layout>) launch(%8: view<[%5]xi32, %6>, %9: view<[%5]xf64, %7>)

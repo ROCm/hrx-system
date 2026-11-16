@@ -121,6 +121,9 @@ std::optional<CommandParameterIntrinsic> CommandParameterIntrinsic::resolve(
           "result");
     }
     const auto& source_view = static_cast<const ViewPartition&>(source);
+    if (source_view.is_columnar()) {
+      fail("command.parameter.base requires one contiguous primitive column");
+    }
     const auto& result_buffer = static_cast<const BufferPartition&>(result);
     if (source_view.element_type != result_buffer.element_type) {
       fail("command.parameter.base must preserve its source element type");
@@ -137,6 +140,10 @@ std::optional<CommandParameterIntrinsic> CommandParameterIntrinsic::resolve(
     fail("command.parameter requires a typed buffer and typed view result");
   }
   const auto& view = static_cast<const ViewPartition&>(result);
+  if (view.is_columnar()) {
+    fail(
+        "command.parameter cannot reinterpret row storage as separate columns");
+  }
   if (!unit.typeTraits().is_const(view.element_type)) {
     fail("command.parameter requires a const-qualified result element type");
   }

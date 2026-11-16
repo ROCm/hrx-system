@@ -89,28 +89,13 @@ loom_type_t make_shaped_type(loom_type_kind_t kind, loom_scalar_type_t element,
   return storage.with_dimensions(base, dimensions);
 }
 
-loom_type_t with_encoding(loom_type_t result,
-                          std::optional<loom_value_id_t> encoding) {
-  if (encoding) {
-    if (*encoding > UINT16_MAX) {
-      check(iree_make_status(
-          IREE_STATUS_RESOURCE_EXHAUSTED,
-          "encoding value ID %u exceeds the shaped type limit of %u", *encoding,
-          UINT16_MAX));
-    }
-    result.encoding_id = static_cast<uint16_t>(*encoding);
-    result.encoding_flags = LOOM_ENCODING_FLAG_SSA;
-  }
-  return result;
-}
-
 loom_type_t make_encoded_shaped_type(loom_type_kind_t kind,
                                      loom_scalar_type_t element,
                                      std::span<const uint64_t> dimensions,
                                      std::optional<loom_value_id_t> encoding,
                                      BoundTypeStorage& storage) {
-  return with_encoding(make_shaped_type(kind, element, dimensions, storage),
-                       encoding);
+  return BoundTypeStorage::with_encoding(
+      make_shaped_type(kind, element, dimensions, storage), encoding);
 }
 
 loom_type_t make_channel_handle_type(loom_module_t* module,
@@ -139,21 +124,22 @@ loom_type_t make_channel_handle_type(loom_module_t* module,
   return result;
 }
 
-loom_type_t make_view_type(const loom_type_t& element,
-                           std::span<const uint64_t> dimensions,
-                           std::optional<loom_value_id_t> encoding,
-                           BoundTypeStorage& storage) {
-  return with_encoding(
-      loom_type_is_reference(element)
-          ? loom_type_reference_view(&element, dimensions.size(),
-                                     storage.retain_dimensions(dimensions), 0,
-                                     0)
-          : make_shaped_type(LOOM_TYPE_VIEW, loom_type_element_type(element),
-                             dimensions, storage),
-      encoding);
-}
-
 }  // namespace
+
+loom_type_t BoundTypeStorage::with_encoding(
+    loom_type_t result, std::optional<loom_value_id_t> encoding) {
+  if (encoding) {
+    if (*encoding > UINT16_MAX) {
+      check(iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "encoding value ID %u exceeds the shaped type limit of %u", *encoding,
+          UINT16_MAX));
+    }
+    result.encoding_id = static_cast<uint16_t>(*encoding);
+    result.encoding_flags = LOOM_ENCODING_FLAG_SSA;
+  }
+  return result;
+}
 
 loom_type_t BoundTypeStorage::with_dimensions(
     loom_type_t type, std::span<const uint64_t> dimensions) {
@@ -275,36 +261,6 @@ loom_type_t VectorPartition::bind_type(
 }
 
 loom_value_id_t VectorPartition::vector_value(
-    std::span<const loom_value_id_t> components) const {
-  IREE_ASSERT(components.size() == component_count);
-  return components.back();
-}
-
-loom_type_t ViewPartition::bind_type(
-    std::span<const loom_value_id_t> dependencies,
-    BoundTypeStorage& storage) const {
-  IREE_ASSERT(dependencies.size() == component_count - 1);
-  if (!requires_binding()) {
-    return static_type;
-  }
-  std::array<uint64_t, LOOM_TYPE_MAX_RANK> dimensions;
-  size_t dependency = 0;
-  for (size_t axis = 0; axis < extents.size(); ++axis) {
-    dimensions[axis] = extents[axis] < 0
-                           ? loom_dim_pack_dynamic(dependencies[dependency++])
-                           : loom_dim_pack_static(extents[axis]);
-  }
-  std::optional<loom_value_id_t> encoding_value;
-  if (encoding) {
-    encoding_value = dependencies[dependency++];
-  }
-  IREE_ASSERT_EQ(dependency, dependencies.size());
-  return make_view_type(
-      element, std::span<const uint64_t>(dimensions).first(extents.size()),
-      encoding_value, storage);
-}
-
-loom_value_id_t ViewPartition::view_value(
     std::span<const loom_value_id_t> components) const {
   IREE_ASSERT(components.size() == component_count);
   return components.back();
@@ -1163,108 +1119,6 @@ const VectorPartition* Types::semantic_vector(const cxx::ClassType* input,
   return admitted;
 }
 
-const ViewPartition* Types::view(const cxx::ClassType* input, cxx::AST* owner) {
-  auto* source = input->definition();
-  if (auto found = views_.find(source); found != views_.end()) {
-    return found->second.get();
-  }
-  auto traits = unit_.typeTraits();
-  if (source) {
-    traits.require_complete_class(source);
-    source = input->definition();
-  }
-  if (traits.is_volatile(input) || !source || !source->isComplete() ||
-      source->isUnion() || !source->baseClasses().empty() ||
-      !traits.is_trivially_copyable(input) ||
-      !traits.has_trivial_destructor(input)) {
-    diagnostics_.reject(unit_, owner,
-                        "view values require a complete trivial class without "
-                        "bases");
-  }
-  auto arguments = source->templateArguments();
-  if (arguments.size() != 3) {
-    diagnostics_.reject(unit_, owner,
-                        "view values require shape, element, and optional "
-                        "encoding type arguments");
-  }
-  auto extents =
-      parse_shape(cxx::template_argument_type(arguments[0]), "view", owner);
-  auto* element_type = cxx::template_argument_type(arguments[1]);
-  if (!element_type) {
-    diagnostics_.reject(unit_, owner,
-                        "view element requires a source type argument");
-  }
-  auto element = get(element_type, owner);
-  if (!loom_type_is_reference(element) &&
-      (loom_type_kind(element) != LOOM_TYPE_SCALAR ||
-       loom_type_element_type(element) == LOOM_SCALAR_TYPE_I1)) {
-    diagnostics_.reject(unit_, owner,
-                        "view elements require a supported non-boolean scalar "
-                        "or object handle");
-  }
-  const EncodingPartition* view_encoding = nullptr;
-  auto* encoding_type = cxx::template_argument_type(arguments[2]);
-  if (!encoding_type) {
-    diagnostics_.reject(unit_, owner,
-                        "view encoding requires a source type argument");
-  }
-  if (unqualified(encoding_type)->kind() != cxx::TypeKind::kVoid) {
-    const auto& admitted_encoding = partition(encoding_type, owner);
-    if (admitted_encoding.kind != ValueKind::Encoding) {
-      diagnostics_.reject(unit_, owner,
-                          "view encoding must be void or a Loom encoding type");
-    }
-    view_encoding = &static_cast<const EncodingPartition&>(admitted_encoding);
-    if ((view_encoding->role != LOOM_ENCODING_ROLE_ADDRESS_LAYOUT &&
-         view_encoding->role != LOOM_ENCODING_ROLE_PHYSICAL_STORAGE) ||
-        view_encoding->rank != extents.size()) {
-      diagnostics_.reject(unit_, owner,
-                          "view encoding must be a layout or physical storage "
-                          "encoding with the same rank");
-    }
-  }
-  size_t dynamic_count = 0;
-  for (auto extent : extents) {
-    if (extent < 0) {
-      ++dynamic_count;
-    }
-  }
-  auto result = std::make_unique<ViewPartition>();
-  result->kind = ValueKind::View;
-  result->component_count = dynamic_count + (view_encoding ? 2 : 1);
-  result->source = source;
-  result->element_type = element_type;
-  result->element = element;
-  result->access_flags =
-      memory_access_flags(element_type) & LOOM_MEMORY_ACCESS_FLAG_VOLATILE;
-  result->encoding = view_encoding;
-  result->extents = std::move(extents);
-  for (size_t axis = 0; axis < result->extents.size(); ++axis) {
-    if (result->extents[axis] < 0) {
-      result->component_names.push_back("dim" + std::to_string(axis));
-    }
-  }
-  if (view_encoding) {
-    result->component_names.push_back(
-        view_encoding->role == LOOM_ENCODING_ROLE_ADDRESS_LAYOUT ? "layout"
-                                                                 : "storage");
-  }
-  result->component_names.emplace_back();
-  if (!result->requires_binding()) {
-    std::array<uint64_t, LOOM_TYPE_MAX_RANK> dimensions;
-    for (size_t axis = 0; axis < result->extents.size(); ++axis) {
-      dimensions[axis] = loom_dim_pack_static(result->extents[axis]);
-    }
-    result->static_type = make_view_type(
-        result->element,
-        std::span<const uint64_t>(dimensions).first(result->extents.size()),
-        std::nullopt, result->static_type_storage);
-  }
-  auto* admitted = result.get();
-  views_.emplace(source, std::move(result));
-  return admitted;
-}
-
 const TensorPartition* Types::tensor(const cxx::ClassType* input,
                                      cxx::AST* owner) {
   auto* source = input->definition();
@@ -1478,6 +1332,8 @@ void Types::append_component_names(const Partition& partition,
   auto append = [&](std::string_view suffix) {
     if (suffix.empty()) {
       output.emplace_back(prefix);
+    } else if (prefix.empty()) {
+      output.emplace_back(suffix);
     } else {
       output.emplace_back(std::string(prefix) + "_" + std::string(suffix));
     }
@@ -1536,7 +1392,9 @@ void Types::append_component_names(const Partition& partition,
       const auto& array = static_cast<const ArrayPartition&>(partition);
       for (size_t index = 0; index < array.source->size(); ++index) {
         append_component_names(
-            *array.element, std::string(prefix) + "_" + std::to_string(index),
+            *array.element,
+            (prefix.empty() ? "" : std::string(prefix) + "_") +
+                std::to_string(index),
             output);
       }
       return;
@@ -2214,21 +2072,19 @@ void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
             unit_, owner,
             "view values require reserved destination component identities");
       }
-      size_t component = 0;
       for (size_t axis = 0; axis < view.extents.size(); ++axis) {
         if (view.extents[axis] < 0) {
           output.push_back(loom_type_scalar(LOOM_SCALAR_TYPE_INDEX));
-          ++component;
         }
       }
       if (view.encoding) {
-        output.push_back(loom_type_encoding_with_role(view.encoding->role));
-        ++component;
+        for (size_t column = 0; column < view.column_count(); ++column) {
+          output.push_back(loom_type_encoding_with_role(view.encoding->role));
+        }
       }
-      output.push_back(view.bind_type(identities.empty()
-                                          ? std::span<const loom_value_id_t>{}
-                                          : identities.first(component),
-                                      storage));
+      for (size_t column = 0; column < view.column_count(); ++column) {
+        output.push_back(view.bind_type(identities, storage, column));
+      }
       return;
     }
   }

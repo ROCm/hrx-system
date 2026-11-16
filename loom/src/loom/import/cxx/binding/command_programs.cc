@@ -201,8 +201,12 @@ const StagedSignatureProjection& CommandPrograms::project(
             "loom::type::buffer or loom::type::view value");
       }
       IREE_ASSERT_GT(partition.component_count, 0);
-      parameter_specializations = partition.component_count - 1;
-      parameter_binding_count = 1;
+      parameter_binding_count =
+          partition.kind == ValueKind::View
+              ? static_cast<const ViewPartition&>(partition).column_count()
+              : 1;
+      parameter_specializations =
+          partition.component_count - parameter_binding_count;
     }
     IREE_ASSERT_EQ(parameter_specializations + parameter_binding_count,
                    partition.component_count);

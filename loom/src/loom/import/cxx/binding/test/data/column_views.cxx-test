@@ -1,0 +1,277 @@
+// RUN: roundtrip
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+namespace t = loom::type;
+struct [[loom::import("collections", "buffer")]] Buffer;
+struct Binding {
+  loom::ptr<Buffer> buffer;
+  unsigned long long offset;
+  unsigned long long length;
+};
+using Bindings = t::view<t::shape<t::dynamic>, Binding>;
+
+[[loom::import("collections", "consume")]]
+unsigned long long consume([[loom::access("read")]] Bindings bindings);
+
+unsigned long long relay([[loom::access("read")]] Bindings bindings) {
+  return consume(bindings);
+}
+
+unsigned long long construct(loom::ptr<Buffer> buffer, unsigned count) {
+  using Storage = t::view<t::shape<4>, Binding>;
+  auto values = loom::view::alloca<Storage>();
+  loom::view::store(Binding{buffer, 16, 32}, values, 1);
+  loom::view::store(Binding{loom::ptr<Buffer>{}, 0, 0}, values, 2);
+  auto selected = loom::view::subview<t::dynamic>(values, {1}, {count});
+  return consume(selected);
+}
+// ----
+type.decl import("collections", "buffer") @Buffer
+
+func.def public @relay(%bindings_dim0: index, %bindings_buffer: view<[%bindings_dim0]xptr<@Buffer>> {access = read}, %bindings_offset: view<[%bindings_dim0]xi64> {access = read}, %bindings_length: view<[%bindings_dim0]xi64> {access = read}) -> (i64) {
+  %5 = func.call @consume(%bindings_dim0, %bindings_buffer, %bindings_offset, %bindings_length) : (index, view<[%bindings_dim0]xptr<@Buffer>>, view<[%bindings_dim0]xi64>, view<[%bindings_dim0]xi64>) -> (i64)
+  func.return %5 : i64
+}
+
+func.def public @construct(%buffer: ptr<@Buffer>, %count: i32) -> (i64) {
+  %values_buffer = view.alloca<private> : view<4xptr<@Buffer>>
+  %values_offset = view.alloca<private> : view<4xi64>
+  %values_length = view.alloca<private> : view<4xi64>
+  %12 = scalar.constant 16 : i32
+  %13 = scalar.extsi %12 : i32 to i64
+  %14 = scalar.constant 32 : i32
+  %15 = scalar.extsi %14 : i32 to i64
+  %16 = scalar.constant 1 : i32
+  %17 = index.cast %16 : i32 to index
+  view.store %buffer, %values_buffer[%17] : ptr<@Buffer>, view<4xptr<@Buffer>>
+  view.store %13, %values_offset[%17] : i64, view<4xi64>
+  view.store %15, %values_length[%17] : i64, view<4xi64>
+  %18 = ref.null : ptr<@Buffer>
+  %19 = scalar.constant 0 : i32
+  %20 = scalar.extsi %19 : i32 to i64
+  %21 = scalar.constant 0 : i32
+  %22 = scalar.extsi %21 : i32 to i64
+  %23 = scalar.constant 2 : i32
+  %24 = index.cast %23 : i32 to index
+  view.store %18, %values_buffer[%24] : ptr<@Buffer>, view<4xptr<@Buffer>>
+  view.store %20, %values_offset[%24] : i64, view<4xi64>
+  view.store %22, %values_length[%24] : i64, view<4xi64>
+  %25 = scalar.constant 1 : i32
+  %26 = scalar.extsi %25 : i32 to i64
+  %27 = scalar.extui %count : i32 to i64
+  %selected_dim0 = index.cast %27 : i64 to index
+  %29 = index.cast %26 : i64 to index
+  %selected_buffer = view.subview %values_buffer[%29] : view<4xptr<@Buffer>> -> view<[%selected_dim0]xptr<@Buffer>>
+  %selected_offset = view.subview %values_offset[%29] : view<4xi64> -> view<[%selected_dim0]xi64>
+  %selected_length = view.subview %values_length[%29] : view<4xi64> -> view<[%selected_dim0]xi64>
+  %33 = func.call @consume(%selected_dim0, %selected_buffer, %selected_offset, %selected_length) : (index, view<[%selected_dim0]xptr<@Buffer>>, view<[%selected_dim0]xi64>, view<[%selected_dim0]xi64>) -> (i64)
+  func.return %33 : i64
+}
+
+func.decl import("collections", "consume") @consume(%34: index, %35: view<[%34]xptr<@Buffer>> {access = read}, %36: view<[%34]xi64> {access = read}, %37: view<[%34]xi64> {access = read}) -> (i64)
+
+// ====
+// RUN: roundtrip
+#include <loomcxx/view.h>
+namespace t = loom::type;
+struct Header { unsigned flags; short keys[2]; };
+struct Row { Header header; double value; };
+using Rows = t::view<t::shape<3>, Row>;
+Row exchange(Rows rows, Row value) {
+  loom::view::store(value, rows, 1);
+  return loom::view::load(rows, 2);
+}
+// ----
+func.def public @exchange(%rows_header_flags: view<3xi32>, %rows_header_keys_0: view<3xi16>, %rows_header_keys_1: view<3xi16>, %rows_value: view<3xf64>, %value_header_flags: i32, %value_header_keys_0: i16, %value_header_keys_1: i16, %value_value: f64) -> (i32, i16, i16, f64) {
+  %12 = scalar.constant 1 : i32
+  %13 = index.cast %12 : i32 to index
+  view.store %value_header_flags, %rows_header_flags[%13] : i32, view<3xi32>
+  view.store %value_header_keys_0, %rows_header_keys_0[%13] : i16, view<3xi16>
+  view.store %value_header_keys_1, %rows_header_keys_1[%13] : i16, view<3xi16>
+  view.store %value_value, %rows_value[%13] : f64, view<3xf64>
+  %14 = scalar.constant 2 : i32
+  %15 = index.cast %14 : i32 to index
+  %16 = view.load %rows_header_flags[%15] : view<3xi32> -> i32
+  %17 = view.load %rows_header_keys_0[%15] : view<3xi16> -> i16
+  %18 = view.load %rows_header_keys_1[%15] : view<3xi16> -> i16
+  %19 = view.load %rows_value[%15] : view<3xf64> -> f64
+  func.return %16, %17, %18, %19 : i32, i16, i16, f64
+}
+
+// ====
+// RUN: roundtrip
+#include <loomcxx/view.h>
+namespace t = loom::type;
+struct Row { float first; int second; };
+using Layout = t::encoding<loom::encoding::role::layout, 2>;
+using Rows = t::view<t::shape<t::dynamic, t::dynamic>, Row, Layout>;
+Rows crop(Rows rows, unsigned count) {
+  return loom::view::subview<t::dynamic, t::dynamic>(rows, {1, 2}, {count, 3});
+}
+using Fixed = t::view<t::shape<2, 3>, Row, Layout>;
+Fixed refine(Rows rows) { return loom::view::refine<Fixed>(rows); }
+// ----
+func.def public @crop(%rows_dim0: index, %rows_dim1: index, %rows_first_layout: encoding<layout>, %rows_second_layout: encoding<layout>, %rows_first: view<[%rows_dim0]x[%rows_dim1]xf32, %rows_first_layout>, %rows_second: view<[%rows_dim0]x[%rows_dim1]xi32, %rows_second_layout>, %count: i32) -> (%7: index, %8: index, %9: encoding<layout>, %10: encoding<layout>, view<[%7]x[%8]xf32, %9>, view<[%7]x[%8]xi32, %10>) {
+  %13 = scalar.constant 1 : i32
+  %14 = scalar.extsi %13 : i32 to i64
+  %15 = scalar.constant 2 : i32
+  %16 = scalar.extsi %15 : i32 to i64
+  %17 = scalar.extui %count : i32 to i64
+  %18 = scalar.constant 3 : i32
+  %19 = scalar.extsi %18 : i32 to i64
+  %20 = index.cast %17 : i64 to index
+  %21 = index.cast %19 : i64 to index
+  %22 = index.cast %14 : i64 to index
+  %23 = index.cast %16 : i64 to index
+  %24, %25 = view.subview %rows_first[%22, %23] : view<[%rows_dim0]x[%rows_dim1]xf32, %rows_first_layout> -> view<[%20]x[%21]xf32, %25>
+  %26, %27 = view.subview %rows_second[%22, %23] : view<[%rows_dim0]x[%rows_dim1]xi32, %rows_second_layout> -> view<[%20]x[%21]xi32, %27>
+  func.return %20, %21, %25, %27, %24, %26 : index, index, encoding<layout>, encoding<layout>, view<[%20]x[%21]xf32, %25>, view<[%20]x[%21]xi32, %27>
+}
+
+func.def public @refine(%rows_dim0: index, %rows_dim1: index, %rows_first_layout: encoding<layout>, %rows_second_layout: encoding<layout>, %rows_first: view<[%rows_dim0]x[%rows_dim1]xf32, %rows_first_layout>, %rows_second: view<[%rows_dim0]x[%rows_dim1]xi32, %rows_second_layout>) -> (%34: encoding<layout>, %35: encoding<layout>, view<2x3xf32, %34>, view<2x3xi32, %35>) {
+  %38 = view.refine %rows_first : view<[%rows_dim0]x[%rows_dim1]xf32, %rows_first_layout> -> view<2x3xf32, %rows_first_layout>
+  %39 = view.refine %rows_second : view<[%rows_dim0]x[%rows_dim1]xi32, %rows_second_layout> -> view<2x3xi32, %rows_second_layout>
+  func.return %rows_first_layout, %rows_second_layout, %38, %39 : encoding<layout>, encoding<layout>, view<2x3xf32, %rows_first_layout>, view<2x3xi32, %rows_second_layout>
+}
+
+// ====
+// RUN: roundtrip
+#include <loomcxx/view.h>
+namespace t = loom::type;
+struct Row { unsigned first; double second; };
+using Rows = t::view<t::shape<t::dynamic>, Row>;
+Rows select(bool condition, Rows left, Rows right) {
+  auto result = condition ? left : right;
+  return result;
+}
+// ----
+func.def public @select(%condition: i1, %left_dim0: index, %left_first: view<[%left_dim0]xi32>, %left_second: view<[%left_dim0]xf64>, %right_dim0: index, %right_first: view<[%right_dim0]xi32>, %right_second: view<[%right_dim0]xf64>) -> (%7: index, view<[%7]xi32>, view<[%7]xf64>) {
+  %result_dim0, %result_first, %result_second = scf.if %condition -> (index, view<[%result_dim0]xi32>, view<[%result_dim0]xf64>) {
+    scf.yield %left_dim0, %left_first, %left_second : index, view<[%left_dim0]xi32>, view<[%left_dim0]xf64>
+  } else {
+    scf.yield %right_dim0, %right_first, %right_second : index, view<[%right_dim0]xi32>, view<[%right_dim0]xf64>
+  }
+  func.return %result_dim0, %result_first, %result_second : index, view<[%result_dim0]xi32>, view<[%result_dim0]xf64>
+}
+
+// ====
+// RUN: pass select-templates{mode=final,rewrite=inline},canonicalize,symbol-dce
+#include <loomcxx/template.h>
+#include <loomcxx/view.h>
+namespace t = loom::type;
+struct Row { unsigned first; float second; };
+using Layout = t::encoding<loom::encoding::role::layout, 1>;
+using Family = t::view<t::shape<t::dynamic>, Row, Layout>;
+using Fixed = t::view<t::shape<4>, Row>;
+LOOM_TEMPLATE_DECL("rows.read") Row read(Family rows);
+LOOM_TEMPLATE_DEF(read)
+Row read_fixed(Fixed rows) { return loom::view::load(rows, 3u); }
+Row entry(Fixed rows) { return loom::template_apply<read>(rows); }
+// ----
+func.def public @entry(%rows_first: view<4xi32>, %rows_second: view<4xf32>) -> (i32, f32) {
+  %30 = index.constant 3 : index
+  %26 = view.load %rows_first[%30] : view<4xi32> -> i32
+  %27 = view.load %rows_second[%30] : view<4xf32> -> f32
+  func.return %26, %27 : i32, f32
+}
+
+// ====
+// RUN: pass select-templates{mode=final,rewrite=inline},canonicalize,symbol-dce
+#include <loomcxx/template.h>
+#include <loomcxx/view.h>
+namespace t = loom::type;
+struct Row { unsigned first; float second; };
+using Layout = t::encoding<loom::encoding::role::layout, 1>;
+using Fixed = t::view<t::shape<4>, Row>;
+using Dynamic = t::view<t::shape<t::dynamic>, Row, Layout>;
+LOOM_TEMPLATE_DECL("rows.read") Row read(Fixed rows);
+LOOM_TEMPLATE_DEF(read)
+Row read_dynamic(Dynamic rows) { return loom::view::load(rows, 3u); }
+Row entry(Fixed rows) { return loom::template_apply<read>(rows); }
+// ----
+func.def public @entry(%rows_first: view<4xi32>, %rows_second: view<4xf32>) -> (i32, f32) {
+  %26 = index.constant 3 : index
+  %22 = view.load %rows_first[%26] : view<4xi32> -> i32
+  %23 = view.load %rows_second[%26] : view<4xf32> -> f32
+  func.return %22, %23 : i32, f32
+}
+
+// ====
+// Each field retains its own observation semantics; volatile rows make every
+// field access observable without changing the shared shape.
+// RUN: roundtrip
+#include <loomcxx/view.h>
+struct Row { volatile unsigned observed; unsigned ordinary; };
+namespace lt = loom::type;
+using Rows = lt::view<lt::shape<2>, Row>;
+void copy(Rows rows) {
+  auto row = loom::view::load(rows, 0);
+  loom::view::store(row, rows, 1);
+}
+
+// ----
+func.def public @copy(%rows_observed: view<2xi32>, %rows_ordinary: view<2xi32>) {
+  %2 = index.constant 8 : offset
+  %row_storage = buffer.alloca<private> align(4) %2 : buffer
+  %row_storage_byte_offset = index.constant 0 : offset
+  %row_view = buffer.view %row_storage[%row_storage_byte_offset] : buffer -> view<8xi8>
+  %6 = scalar.constant 0 : i32
+  %7 = index.cast %6 : i32 to index
+  %8 = view.load<volatile> %rows_observed[%7] : view<2xi32> -> i32
+  %9 = view.load %rows_ordinary[%7] : view<2xi32> -> i32
+  %10 = index.constant 0 : offset
+  %11 = index.add %row_storage_byte_offset, %10 : offset
+  %12 = index.assume %11 [range(%11, 0, 4)] : offset
+  %13 = buffer.view %row_storage[%12] : buffer -> view<1xi32>
+  view.store<volatile|type_disjoint> %8, %13[0] : i32, view<1xi32>
+  %14 = index.constant 4 : offset
+  %15 = index.add %row_storage_byte_offset, %14 : offset
+  %16 = index.assume %15 [range(%15, 0, 4)] : offset
+  %17 = buffer.view %row_storage[%16] : buffer -> view<1xi32>
+  view.store<type_disjoint> %9, %17[0] : i32, view<1xi32>
+  %18 = index.constant 0 : offset
+  %19 = index.add %row_storage_byte_offset, %18 : offset
+  %20 = index.assume %19 [range(%19, 0, 4)] : offset
+  %21 = buffer.view %row_storage[%20] : buffer -> view<1xi32>
+  %row_observed = view.load<volatile|type_disjoint> %21[0] : view<1xi32> -> i32
+  %23 = index.constant 4 : offset
+  %24 = index.add %row_storage_byte_offset, %23 : offset
+  %25 = index.assume %24 [range(%24, 0, 4)] : offset
+  %26 = buffer.view %row_storage[%25] : buffer -> view<1xi32>
+  %row_ordinary = view.load<type_disjoint> %26[0] : view<1xi32> -> i32
+  %28 = scalar.constant 1 : i32
+  %29 = index.cast %28 : i32 to index
+  view.store<volatile> %row_observed, %rows_observed[%29] : i32, view<2xi32>
+  view.store %row_ordinary, %rows_ordinary[%29] : i32, view<2xi32>
+  func.return
+}
+
+// ====
+// Borrowed reference fields keep their exact object identity through row
+// loads, stores, and ordinary record returns.
+// RUN: roundtrip
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+struct [[loom::import("collections", "item")]] Item;
+struct Row { loom::ptr<Item> item; unsigned tag; };
+using Rows = loom::type::view<loom::type::shape<4>, Row>;
+Row exchange([[loom::access("read_write")]] Rows rows, Row value) {
+  auto previous = loom::view::load(rows, 1);
+  loom::view::store(value, rows, 1);
+  return previous;
+}
+
+// ----
+type.decl import("collections", "item") @Item
+
+func.def public @exchange(%rows_item: view<4xptr<@Item>> {access = read_write}, %rows_tag: view<4xi32> {access = read_write}, %value_item: ptr<@Item>, %value_tag: i32) -> (ptr<@Item>, i32) {
+  %6 = scalar.constant 1 : i32
+  %7 = index.cast %6 : i32 to index
+  %previous_item = view.load %rows_item[%7] : view<4xptr<@Item>> -> ptr<@Item>
+  %previous_tag = view.load %rows_tag[%7] : view<4xi32> -> i32
+  %10 = scalar.constant 1 : i32
+  %11 = index.cast %10 : i32 to index
+  view.store %value_item, %rows_item[%11] : ptr<@Item>, view<4xptr<@Item>>
+  view.store %value_tag, %rows_tag[%11] : i32, view<4xi32>
+  func.return %previous_item, %previous_tag : ptr<@Item>, i32
+}

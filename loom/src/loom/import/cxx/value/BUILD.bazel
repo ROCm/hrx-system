@@ -66,6 +66,7 @@ loom_cc_library(
     srcs = [
         "object_types.cc",
         "types.cc",
+        "view_types.cc",
     ],
     hdrs = ["types.h"],
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],

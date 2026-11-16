@@ -1473,6 +1473,51 @@ func.def @suffix(...) -> (%dim0: index, %layout: encoding<layout>,
 Every call result and control-flow join names its own extent and layout instead
 of retaining references to values inside the callee or one incoming branch.
 
+Record elements use the same view operations. A view of records projects to
+one primitive view per field, with one shared set of extents. Nested records
+and fixed arrays follow ordinary value field order. For example:
+
+```cpp
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+
+struct [[loom::import("resources", "buffer")]] Buffer;
+struct Binding {
+  loom::ptr<Buffer> buffer;
+  unsigned long long offset;
+  unsigned long long length;
+};
+using Bindings = loom::type::view<
+    loom::type::shape<loom::type::dynamic>, Binding>;
+
+[[loom::import("resources", "consume")]]
+void consume([[loom::access("read")]] Bindings bindings);
+```
+
+The imported declaration carries the count once:
+
+```loom
+type.decl import("resources", "buffer") @Buffer
+func.decl import("resources", "consume") @consume(
+    %count: index,
+    %buffers: view<[%count]xptr<@Buffer>> {access = read},
+    %offsets: view<[%count]xi64> {access = read},
+    %lengths: view<[%count]xi64> {access = read})
+```
+
+`view::alloca<view<shape<4>, Binding>>()` reserves the three columns through
+ordinary view allocations. `view::store(Binding{buffer, offset, length}, rows,
+index)` writes one element of each column; `view::load` reconstructs that
+record. `view::subview` slices all columns with the same origin and extents,
+without copying rows. A field's const and volatile qualifiers govern its
+accesses, and an encoded view carries a separate encoding for each column.
+
+These views describe separate columns. `buffer::view` and `view::bitcast`
+cannot reinterpret a C++ array of records as column storage. Operations on one
+primitive stream, such as vector loads or asynchronous memory transfers, also
+require a primitive-element view. Borrowed view lifetime and access contracts
+apply independently to each projected column.
+
 Compile-time policies can choose the shape type itself:
 
 ```cpp

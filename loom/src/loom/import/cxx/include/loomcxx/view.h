@@ -20,6 +20,10 @@ class pool;
 // address layout or physical storage encoding; void represents an ordinary
 // unencoded Loom view. The private object representation gives source copies
 // and sizeof real C++ semantics.
+// Record elements use separate scalar/reference columns with shared extents.
+// Row loads and stores project the record's fields in declaration order; nested
+// records and fixed arrays preserve their ordinary value projection. These
+// columns do not reinterpret an array of native C++ record objects.
 template <class Shape, class T, class Encoding = void>
 class [[loom::type("view")]] view {
  public:

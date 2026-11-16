@@ -54,6 +54,10 @@ const ViewPartition& require_view(cxx::TranslationUnit& unit,
         "kernel async " + std::string(operand) + " requires a view value");
   }
   const auto& view = static_cast<const ViewPartition&>(partition);
+  if (view.is_columnar()) {
+    diagnostics.reject(unit, owner,
+                       "kernel async transfers require a primitive column");
+  }
   if (view.access_flags != 0) {
     diagnostics.reject(unit, owner,
                        "kernel async transfers do not support volatile views");

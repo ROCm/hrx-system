@@ -22,9 +22,11 @@ namespace {
 
 // Source admission already proved carrier, rank, element, and encoding-role
 // compatibility. Only the destination's dynamic components need transport.
-void append_dependencies(const ShapedSignature& destination, loom_type_t actual,
+void append_dependencies(const ShapedSignature& destination,
+                         std::span<const loom_value_id_t> payloads,
                          loom_builder_t* builder, loom_location_id_t location,
                          std::vector<loom_value_id_t>& operands) {
+  const auto actual = loom_module_value_type(builder->module, payloads[0]);
   for (size_t axis = 0; axis < destination.rank; ++axis) {
     if (destination.extent(axis) >= 0) {
       continue;
@@ -40,15 +42,18 @@ void append_dependencies(const ShapedSignature& destination, loom_type_t actual,
     }
   }
   if (destination.encoding) {
-    if (loom_type_has_ssa_encoding(actual)) {
-      operands.push_back(loom_type_encoding_value_id(actual));
-    } else {
-      loom_op_t* dense;
-      check(loom_encoding_layout_dense_build(
-          builder,
-          loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT),
-          location, &dense));
-      operands.push_back(loom_op_results(dense)[0]);
+    for (const auto payload : payloads) {
+      const auto actual = loom_module_value_type(builder->module, payload);
+      if (loom_type_has_ssa_encoding(actual)) {
+        operands.push_back(loom_type_encoding_value_id(actual));
+      } else {
+        loom_op_t* dense;
+        check(loom_encoding_layout_dense_build(
+            builder,
+            loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT),
+            location, &dense));
+        operands.push_back(loom_op_results(dense)[0]);
+      }
     }
   }
 }
@@ -83,10 +88,9 @@ void append_template_input(Value value, const cxx::Type* family, Types& types,
     return;
   }
   const auto shape = shaped_signature(types, family, owner);
-  const auto payload = value.components().back();
-  append_dependencies(*shape, loom_module_value_type(builder->module, payload),
-                      builder, location, operands);
-  operands.push_back(payload);
+  const auto payloads = value.components().last(shape->payload_count());
+  append_dependencies(*shape, payloads, builder, location, operands);
+  operands.insert(operands.end(), payloads.begin(), payloads.end());
 }
 
 Value bind_template_input(Value incoming, const cxx::Type* source, Types& types,
@@ -98,17 +102,20 @@ Value bind_template_input(Value incoming, const cxx::Type* source, Types& types,
     return incoming;
   }
   const auto shape = shaped_signature(types, source, owner);
-  const auto payload = incoming.components().back();
+  const auto payloads = incoming.components().last(shape->payload_count());
   std::vector<loom_value_id_t> components;
   components.reserve(partition.component_count);
-  append_dependencies(*shape, loom_module_value_type(builder->module, payload),
-                      builder, location, components);
-  components.push_back(payload);
+  append_dependencies(*shape, payloads, builder, location, components);
+  const size_t dependency_count = components.size();
+  components.insert(components.end(), payloads.begin(), payloads.end());
   BoundTypeStorage storage;
-  const auto type = shape->bind_type(
-      std::span<const loom_value_id_t>(components).first(components.size() - 1),
-      storage);
-  components.back() = refine_value(payload, type, builder, location);
+  for (size_t column = 0; column < payloads.size(); ++column) {
+    const auto type = shape->bind_type(
+        std::span<const loom_value_id_t>(components).first(dependency_count),
+        storage, column);
+    components[dependency_count + column] =
+        refine_value(payloads[column], type, builder, location);
+  }
   return arena.capture(partition, components);
 }
 
@@ -143,12 +150,13 @@ BoundTemplateSignature bind_template_signature(
       }
     } else {
       const auto shape = shaped_signature(types, source, owner);
-      auto& type = result.native.types[offset + count - 1];
+      const size_t payload_offset = offset + count - shape->payload_count();
+      const auto& first_type = result.native.types[payload_offset];
       std::array<uint64_t, LOOM_TYPE_MAX_RANK> dimensions;
       for (size_t axis = 0; axis < shape->rank; ++axis) {
         dimensions[axis] = shape->extent(axis) >= 0
                                ? loom_dim_pack_static(shape->extent(axis))
-                               : loom_type_dim(type, axis);
+                               : loom_type_dim(first_type, axis);
         if (has_predicates && shape->extent(axis) < 0) {
           result.source_identities.push_back(
               loom_dim_is_dynamic(dimensions[axis])
@@ -157,19 +165,26 @@ BoundTemplateSignature bind_template_signature(
         }
       }
       if (has_predicates && shape->encoding) {
-        result.source_identities.push_back(
-            loom_type_has_ssa_encoding(type) ? loom_type_encoding_value_id(type)
-                                             : LOOM_VALUE_ID_INVALID);
+        for (size_t column = 0; column < shape->payload_count(); ++column) {
+          const auto& type = result.native.types[payload_offset + column];
+          result.source_identities.push_back(
+              loom_type_has_ssa_encoding(type)
+                  ? loom_type_encoding_value_id(type)
+                  : LOOM_VALUE_ID_INVALID);
+        }
       }
-      type = result.native.type_storage.with_dimensions(
-          type, std::span<const uint64_t>(dimensions).first(shape->rank));
-      if (!shape->encoding) {
-        type.encoding_id = 0;
-        type.encoding_flags = 0;
-      }
-      if (has_predicates) {
-        result.source_identities.push_back(
-            result.native.identities[offset + count - 1]);
+      for (size_t column = 0; column < shape->payload_count(); ++column) {
+        auto& type = result.native.types[payload_offset + column];
+        type = result.native.type_storage.with_dimensions(
+            type, std::span<const uint64_t>(dimensions).first(shape->rank));
+        if (!shape->encoding) {
+          type.encoding_id = 0;
+          type.encoding_flags = 0;
+        }
+        if (has_predicates) {
+          result.source_identities.push_back(
+              result.native.identities[payload_offset + column]);
+        }
       }
     }
     offset += count;
