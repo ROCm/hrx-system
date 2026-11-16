@@ -71,6 +71,17 @@ void loom_x86_reference_range(loom_x86_function_t* function,
                               loom_x86_reference_address_t address,
                               uint32_t count, bool discard);
 
+// Copies between a cell and a complete native address. The address recipe uses
+// ADDRESS_DISPLACEMENT or ADDRESS_ADD_SCALE and may name any allocated GPR.
+// Address calculation preserves RAX and precedes the cell operation's scratch
+// use, so aliases with its scratch registers remain safe. Reserves
+// TRANSFER_CAPACITY records.
+void loom_x86_reference_memory(loom_x86_function_t* function,
+                               const loom_x86_reference_context_t* context,
+                               uint16_t address_form,
+                               loom_x86_encoding_operands_t address,
+                               loom_x86_reference_address_t value, bool store);
+
 // Emits a complete alias-safe cell operation. R10/R11 and every register a
 // final destructor may clobber are preserved. Caller-reserved capacity follows
 // the bounds above; address bases cannot be R10/R11. A transfer's endpoints

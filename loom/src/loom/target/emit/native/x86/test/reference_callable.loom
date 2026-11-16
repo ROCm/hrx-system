@@ -82,3 +82,63 @@ func.def public abi(object_function, {calling_convention = "iree_status"}) @obje
 ^done:
   func.return %left, %right : ref<@Object>, ref<@Object>
 }
+
+// Each execution of the source allocation starts null even when packing reuses
+// one physical range across loop iterations.
+func.def public abi(object_function, {calling_convention = "iree_status"}) @object_view_reuse(%owner: ref<@Object>, %count: index) -> (i32) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %initial = scalar.constant 0 : i32
+  cfg.br ^loop(%c0: index, %initial: i32)
+^loop(%iteration: index, %observed: i32):
+  %again = index.cmp ult, %iteration, %count : index
+  cfg.cond_br %again, ^body, ^done
+^body:
+  %values = view.alloca<private> : view<3xref<@Object>>
+  %empty = view.load %values[2] : view<3xref<@Object>> -> ref<@Object>
+  %missing = ref.compare.null %empty : ref<@Object>
+  ref.release %empty : ref<@Object>
+  %increment = scalar.extui %missing : i1 to i32
+  %total = scalar.addi %observed, %increment : i32
+  view.store %owner, %values[2] : ref<@Object>, view<3xref<@Object>>
+  %next = index.add %iteration, %c1 : index
+  cfg.br ^loop(%next: index, %total: i32)
+^done:
+  ref.release %owner : ref<@Object>
+  func.return %observed : i32
+}
+
+// A dynamic borrowed column is ordinary contiguous reference cells. Slicing
+// adjusts its address, and loading does not promote the borrowed row.
+func.def public abi(object_function, {calling_convention = "iree_status"}) @object_view_slice(%count: index, %values: view<[%count]xptr<@Object>> {access = read}, %position: index) -> (ptr<@Object>) {
+  %valid = index.cmp ult, %position, %count : index
+  cfg.cond_br %valid, ^read, ^empty
+^read:
+  %tail = view.subview %values[%position] : view<[%count]xptr<@Object>> -> view<1xptr<@Object>>
+  %result = view.load %tail[0] : view<1xptr<@Object>> -> ptr<@Object>
+  func.return %result : ptr<@Object>
+^empty:
+  %nothing = ref.null : ptr<@Object>
+  func.return %nothing : ptr<@Object>
+}
+
+// Mutation replaces an owning cell in caller-provided storage. Its native
+// destructor may clobber registers before the function returns.
+func.def public abi(object_function, {calling_convention = "iree_status"}) @object_view_replace(%owner: ref<@Object>, %values: view<3xref<@Object>>, %position: index) {
+  %slot = index.assume %position [range(%position, 0, 2)] : index
+  view.store %owner, %values[%slot] : ref<@Object>, view<3xref<@Object>>
+  ref.release %owner : ref<@Object>
+  func.return
+}
+
+func.decl abi(object_function, {calling_convention = "iree_status"}) @object_inspect(%count: index, %values: view<[%count]xptr<@Object>> {access = read}, %failure: i32)
+
+func.def noinline abi(object_function, {calling_convention = "iree_status"}) @object_view_forward(%count: index, %values: view<[%count]xptr<@Object>> {access = read}, %failure: i32) {
+  func.call @object_inspect(%count, %values, %failure) : (index, view<[%count]xptr<@Object>>, i32)
+  func.return
+}
+
+func.def public abi(object_function, {calling_convention = "iree_status"}) @object_view_call(%count: index, %values: view<[%count]xptr<@Object>> {access = read}, %failure: i32) {
+  func.call @object_view_forward(%count, %values, %failure) : (index, view<[%count]xptr<@Object>>, i32)
+  func.return
+}

@@ -43,6 +43,7 @@ from loom.target.arch.x86.contracts.integer_rotation import (
     scalar_integer_rotation_rules,
 )
 from loom.target.arch.x86.contracts.memory import (
+    x86_reference_memory_rules,
     x86_scalar_memory_rules,
     x86_view_carrier_rules,
 )
@@ -1721,6 +1722,9 @@ def _cases() -> Sequence[ContractCase]:
             )
         ),
         *_madd_address_rules(descriptor_lookup),
+        *x86_reference_memory_rules(
+            descriptor_lookup, diagnostic=_SOURCE_MEMORY_DIAGNOSTIC
+        ),
         *x86_scalar_memory_rules(
             descriptor_lookup, diagnostic=_SOURCE_MEMORY_DIAGNOSTIC
         ),

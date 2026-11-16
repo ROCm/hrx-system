@@ -40,3 +40,15 @@ low.func.def public target<x86.avx2.core> abi(object_function, {calling_conventi
   %right = low.reload.move %cells {offset = 16} : low.storage<private> -> reg<x86.ref : ref<@Object>>
   return %left, %right, %missing
 }
+
+// External ranges need destruction scratch even without an SSA reference bank.
+// The same operation handles both single cells and a counted range.
+low.func.def public target<x86.avx2.core> abi(object_function, {calling_convention = "iree_status"}) @object_storage_clear(%cells: reg<x86.gpr64>) asm {
+  ref.discard.range %cells {count = 1}
+  return
+}
+
+low.func.def public target<x86.avx2.core> abi(object_function, {calling_convention = "iree_status"}) @object_storage_clear_many(%cells: reg<x86.gpr64>) asm {
+  ref.discard.range %cells {count = 3}
+  return
+}

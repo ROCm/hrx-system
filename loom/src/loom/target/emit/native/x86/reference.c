@@ -123,7 +123,7 @@ void loom_x86_reference_range(loom_x86_function_t* function,
   if (!count) {
     return;
   }
-  if (count == 1) {
+  if (count == 1 && address.base != 10 && address.base != 11) {
     if (discard) {
       loom_x86_reference_discard(function, context, address);
     } else {
@@ -168,6 +168,23 @@ void loom_x86_reference_range(loom_x86_function_t* function,
                             loop);
   loom_x86_reference_word(function, false, 0, saved_address);
   loom_x86_reference_word(function, false, 2, saved_count);
+}
+
+void loom_x86_reference_memory(loom_x86_function_t* function,
+                               const loom_x86_reference_context_t* context,
+                               uint16_t address_form,
+                               loom_x86_encoding_operands_t address,
+                               loom_x86_reference_address_t value, bool store) {
+  const loom_x86_reference_address_t saved_address = {
+      .base = 4, .displacement = context->scratch_offset + 32};
+  loom_x86_reference_word(function, true, 0, saved_address);
+  address.result = 0;
+  loom_x86_function_append(function, address_form,
+                           0x8d | LOOM_X86_ENCODING_REX_W, address, UINT32_MAX);
+  const loom_x86_reference_address_t memory = {.base = 0};
+  loom_x86_reference_transfer(function, context, LOOM_X86_REFERENCE_COPY,
+                              store ? memory : value, store ? value : memory);
+  loom_x86_reference_word(function, false, 0, saved_address);
 }
 
 void loom_x86_reference_transfer(loom_x86_function_t* function,

@@ -60,6 +60,9 @@ class Form(IntEnum):
     REFERENCE_COMPARE_NULL = 49
     REFERENCE_COMPARE_EQ = 50
     REFERENCE_SELECT = 51
+    REFERENCE_LOAD = 52
+    REFERENCE_STORE = 53
+    REFERENCE_DISCARD_RANGE = 54
 
 
 class Flag(IntFlag):
@@ -221,6 +224,8 @@ def validate_descriptor_encoding(descriptor: Descriptor) -> None:
     address_base_input = {
         Form.LOAD: 0,
         Form.STORE: 1,
+        Form.REFERENCE_LOAD: 0,
+        Form.REFERENCE_STORE: 1,
         Form.BINARY_R_MEMORY: 1,
     }.get(form)
     if address_base_input is None:

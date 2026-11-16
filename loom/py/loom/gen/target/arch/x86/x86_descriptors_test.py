@@ -203,6 +203,9 @@ def test_scalar_speculation_facts_cover_total_integer_forms() -> None:
         Form.REFERENCE_COMPARE_NULL,
         Form.REFERENCE_COMPARE_EQ,
         Form.REFERENCE_SELECT,
+        Form.REFERENCE_LOAD,
+        Form.REFERENCE_STORE,
+        Form.REFERENCE_DISCARD_RANGE,
     }
     assert total_forms.isdisjoint(trapping_or_effecting_forms | expanded_reference_forms)
     assert observed_forms == total_forms | trapping_or_effecting_forms | expanded_reference_forms

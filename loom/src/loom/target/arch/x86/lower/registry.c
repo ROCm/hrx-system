@@ -714,12 +714,40 @@ static iree_status_t loom_x86_map_native_abi_layout(
 
 #include "loom/target/arch/x86/contracts/tables.inl"
 
+// Shared packing may reuse a reservation, but each allocation execution starts
+// with null cells. Reinitialization releases owners retained by the previous
+// execution.
+static iree_status_t loom_x86_initialize_reference_storage(
+    loom_low_lower_context_t* context, loom_value_id_t address,
+    int64_t byte_length, loom_location_id_t location) {
+  const loom_low_descriptor_set_t* set =
+      loom_low_lower_context_descriptor_set(context);
+  const uint32_t ordinal = loom_low_descriptor_set_lookup_descriptor(
+      set, IREE_SV("x86.ref.discard.range"));
+  loom_string_id_t name = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_builder_intern_string(
+      loom_low_lower_context_builder(context), IREE_SV("count"), &name));
+  const loom_named_attr_t attr = {.name_id = name,
+                                  .value = loom_attr_i64(byte_length / 16)};
+  const loom_low_lower_resolved_descriptor_t descriptor = {
+      .descriptor = &set->descriptors[ordinal]};
+  loom_op_t* op = NULL;
+  return loom_low_lower_emit_resolved_descriptor_op(
+      context, &descriptor, &address, 1,
+      (loom_named_attr_slice_t){.entries = &attr, .count = 1}, NULL, 0, NULL, 0,
+      location, &op);
+}
+
 static const loom_low_lower_function_storage_mapping_t kX86FunctionStorage[] = {
     {LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, LOOM_STORAGE_SPACE_STACK,
      LOOM_X86_REGISTER_CLASS_GPR64},
     {LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, LOOM_STORAGE_SPACE_STACK,
      LOOM_X86_REGISTER_CLASS_GPR64,
      LOOM_LOW_LOWER_FUNCTION_STORAGE_SOURCE_SCALAR_VIEW},
+    {LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, LOOM_STORAGE_SPACE_PRIVATE,
+     LOOM_X86_REGISTER_CLASS_GPR64,
+     LOOM_LOW_LOWER_FUNCTION_STORAGE_SOURCE_REFERENCE_VIEW,
+     loom_x86_initialize_reference_storage},
 };
 
 static bool loom_x86_avx2_source_vector_carrier_supported(

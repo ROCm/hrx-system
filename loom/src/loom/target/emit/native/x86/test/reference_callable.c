@@ -88,6 +88,19 @@ extern iree_status_t object_storage_borrowed(uint32_t* result,
 extern iree_status_t object_storage_group(storage_result_t* result,
                                           iree_vm_ref_t* first,
                                           iree_vm_ref_t* second);
+extern iree_status_t object_view_reuse(uint32_t* result, iree_vm_ref_t* owner,
+                                       uint64_t count);
+extern iree_status_t object_view_slice(iree_vm_ref_t* result, uint64_t count,
+                                       const iree_vm_ref_t* values,
+                                       uint64_t position);
+extern iree_status_t object_view_replace(iree_vm_ref_t* owner,
+                                         iree_vm_ref_t* values,
+                                         uint64_t position);
+extern iree_status_t object_view_call(uint64_t count,
+                                      const iree_vm_ref_t* values,
+                                      uint32_t failure);
+extern iree_status_t object_storage_clear(iree_vm_ref_t* cells);
+extern iree_status_t object_storage_clear_many(iree_vm_ref_t* cells);
 
 // Host observations are independent of generated ownership bookkeeping.
 static unsigned destroyed;
@@ -146,6 +159,10 @@ __attribute__((target("avx512f"))) static void clobber_wide_vectors(void) {
 }
 // Number of C adapters reached before propagation.
 static unsigned calls;
+// C observes the exact collection geometry and reference state passed by Loom.
+static uint64_t inspected_count;
+// Non-null rows observed independently of the source's view construction.
+static uint64_t inspected_non_null_count;
 // One status payload whose exact identity must survive every cleanup path.
 static iree_status_t failure_status;
 
@@ -212,6 +229,22 @@ iree_status_t object_consume(iree_vm_ref_t* owner, uint32_t failure) {
   ++calls;
   iree_vm_ref_reset(owner);
   return failure == 2 ? failure_status : iree_ok_status();
+}
+
+iree_status_t object_inspect(uint64_t count, const iree_vm_ref_t* values,
+                             uint32_t failure) {
+  inspected_count = count;
+  inspected_non_null_count = 0;
+  for (uint64_t i = 0; i < count; ++i) {
+    if (!iree_vm_ref_is_null(values[i])) {
+      if (!(values[i].type_and_state & IREE_VM_REF_STATE_BORROWED)) {
+        return iree_make_status(IREE_STATUS_INTERNAL,
+                                "borrowed column acquired an owner");
+      }
+      ++inspected_non_null_count;
+    }
+  }
+  return failure ? failure_status : iree_ok_status();
 }
 
 iree_status_t object_read(result_t* result, const iree_vm_ref_t* pointer,
@@ -410,5 +443,67 @@ int main(void) {
     iree_vm_ref_reset(&result.second);
     CHECK(destroyed == destroyed_before + count);
   }
+  for (unsigned count = 0; count < 8; ++count) {
+    const unsigned destroyed_before = destroyed;
+    CHECK(iree_status_is_ok(object_create(&owner, 0)));
+    uint32_t observed = UINT32_MAX;
+    CHECK(iree_status_is_ok(object_view_reuse(&observed, &owner, count)));
+    CHECK(observed == count && destroyed == destroyed_before + 1);
+    CHECK(iree_vm_ref_is_null(owner));
+  }
+  {
+    const unsigned destroyed_before = destroyed;
+    CHECK(iree_status_is_ok(object_create(&owner, 0)));
+    const iree_vm_ref_t values[] = {
+        iree_vm_ref_null(), scoped,
+        iree_vm_ref_from_ptr_borrowed(owner.object, &object_type)};
+    for (unsigned position = 0; position < 4; ++position) {
+      iree_vm_ref_t result = iree_vm_ref_null();
+      iree_status_t slice_status =
+          object_view_slice(&result, 3, values, position);
+      if (position == 1) {
+        CHECK(iree_status_is_failed_precondition(slice_status));
+        iree_status_ignore(slice_status);
+        CHECK(iree_vm_ref_is_null(result));
+      } else {
+        CHECK(iree_status_is_ok(slice_status));
+        CHECK(result.object == (position == 2 ? owner.object : NULL));
+      }
+      iree_vm_ref_reset(&result);
+      CHECK(destroyed == destroyed_before);
+    }
+    iree_vm_ref_t cells[3] = {0};
+    for (unsigned position = 0; position < 3; ++position) {
+      CHECK(iree_status_is_ok(object_create(&cells[position], 0)));
+    }
+    void* replacement = owner.object;
+    CHECK(iree_status_is_ok(object_view_replace(&owner, cells, 1)));
+    CHECK(iree_vm_ref_is_null(owner) && cells[1].object == replacement);
+    CHECK(destroyed == destroyed_before + 1);
+    CHECK(iree_status_is_ok(object_storage_clear(cells)));
+    CHECK(iree_vm_ref_is_null(cells[0]) && destroyed == destroyed_before + 2);
+    CHECK(iree_status_is_ok(object_storage_clear_many(cells)));
+    CHECK(destroyed == destroyed_before + 4);
+    for (unsigned position = 0; position < 3; ++position) {
+      CHECK(iree_vm_ref_is_null(cells[position]));
+    }
+  }
+  failure_status =
+      iree_make_status(IREE_STATUS_DATA_LOSS, "counted call failure");
+  iree_vm_ref_t borrowed_cells[67];
+  for (unsigned i = 0; i < IREE_ARRAYSIZE(borrowed_cells); ++i) {
+    borrowed_cells[i] = i % 2 ? iree_vm_ref_null() : scoped;
+  }
+  const uint64_t counts[] = {0, 1, 17, 67};
+  for (unsigned i = 0; i < IREE_ARRAYSIZE(counts); ++i) {
+    for (unsigned failure = 0; failure < 2; ++failure) {
+      iree_status_t call_status = object_view_call(
+          counts[i], counts[i] ? borrowed_cells : NULL, failure);
+      CHECK(call_status == (failure ? failure_status : iree_ok_status()));
+      CHECK(inspected_count == counts[i]);
+      CHECK(inspected_non_null_count == (counts[i] + 1) / 2);
+    }
+  }
+  iree_status_ignore(failure_status);
   return passed ? 0 : 1;
 }

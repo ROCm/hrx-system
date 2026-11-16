@@ -110,7 +110,8 @@ static bool loom_x86_function_is_reference(uint16_t register_class) {
 
 static bool loom_x86_function_has_references(
     const loom_x86_function_builder_t* builder) {
-  return builder->references.count || builder->references.storage_count;
+  return builder->references.count || builder->references.storage_count ||
+         builder->references.context.destroy_label;
 }
 
 static uint32_t loom_x86_function_exit_label(
@@ -186,6 +187,25 @@ static iree_status_t loom_x86_function_append_storage(
   return iree_ok_status();
 }
 
+// External reference ranges can require destruction without an SSA reference
+// bank. Allocate their helper scratch when first emitted; final frame layout
+// follows packet emission, so earlier stack offsets remain stable.
+static iree_status_t loom_x86_function_reference_context(
+    loom_x86_function_builder_t* builder) {
+  if (builder->references.context.destroy_label) {
+    return iree_ok_status();
+  }
+  uint64_t scratch_offset = 0;
+  IREE_RETURN_IF_ERROR(loom_x86_function_append_storage(
+      LOOM_X86_REFERENCE_SCRATCH_BYTES, 16, builder, &scratch_offset));
+  builder->references.context.scratch_offset = (uint32_t)scratch_offset;
+  builder->references.context.destroy_label =
+      loom_x86_reference_label(builder->function);
+  builder->references.cleanup_label =
+      loom_x86_reference_label(builder->function);
+  return iree_ok_status();
+}
+
 iree_host_size_t loom_x86_function_reserved_ranges(
     const loom_x86_function_abi_t* function_abi,
     loom_low_allocation_reserved_range_t out_ranges[2]) {
@@ -223,7 +243,8 @@ bool loom_x86_loop_placement_cost_query(
   const loom_low_descriptor_layout_t* layout =
       loom_low_descriptor_layout(descriptor_set, descriptor);
   if ((layout->encoding_format_id >= LOOM_X86_ENCODING_FORM_REFERENCE_NULL &&
-       layout->encoding_format_id <= LOOM_X86_ENCODING_FORM_REFERENCE_SELECT) ||
+       layout->encoding_format_id <=
+           LOOM_X86_ENCODING_FORM_REFERENCE_DISCARD_RANGE) ||
       layout->encoding_format_id == LOOM_X86_ENCODING_FORM_NONE ||
       iree_any_bit_set(layout->encoding_format_id,
                        LOOM_X86_ENCODING_FORMAT_VECTOR)) {
@@ -1146,6 +1167,49 @@ static iree_status_t loom_x86_function_packet(
     }
     return iree_ok_status();
   }
+  if (descriptor_layout->encoding_format_id >=
+          LOOM_X86_ENCODING_FORM_REFERENCE_LOAD &&
+      descriptor_layout->encoding_format_id <=
+          LOOM_X86_ENCODING_FORM_REFERENCE_DISCARD_RANGE) {
+    IREE_RETURN_IF_ERROR(loom_x86_function_reference_context(builder));
+    IREE_RETURN_IF_ERROR(loom_x86_function_reserve(
+        builder, LOOM_X86_REFERENCE_TRANSFER_CAPACITY));
+    const uint16_t form = descriptor_layout->encoding_format_id;
+    const bool store = form == LOOM_X86_ENCODING_FORM_REFERENCE_STORE;
+    const uint8_t base =
+        loom_x86_function_register(loom_low_packet_operand_assignment(
+            &frame->allocation, packet, store ? 1 : 0));
+    if (form == LOOM_X86_ENCODING_FORM_REFERENCE_DISCARD_RANGE) {
+      loom_x86_reference_range(
+          function, &builder->references.context,
+          (loom_x86_reference_address_t){.base = base},
+          (uint32_t)loom_x86_function_immediate(frame, packet, 0).i64, true);
+    } else {
+      const bool indexed = descriptor_layout->immediate_count == 2;
+      loom_x86_encoding_operands_t address = {
+          .inputs = {base},
+          .immediate = loom_x86_function_immediate(frame, packet, 0).i64};
+      if (indexed) {
+        address.inputs[1] =
+            loom_x86_function_register(loom_low_packet_operand_assignment(
+                &frame->allocation, packet, store ? 2 : 1));
+        address.secondary = (uint8_t)iree_math_count_trailing_zeros_u32(
+            (uint32_t)loom_x86_function_immediate(frame, packet, 1).i64);
+      }
+      const loom_low_allocation_assignment_t* value =
+          store ? loom_low_packet_operand_assignment(&frame->allocation, packet,
+                                                     0)
+                : loom_low_packet_result_assignment(&frame->allocation, packet,
+                                                    0);
+      loom_x86_reference_memory(
+          function, &builder->references.context,
+          indexed ? LOOM_X86_ENCODING_FORM_ADDRESS_ADD_SCALE
+                  : LOOM_X86_ENCODING_FORM_ADDRESS_DISPLACEMENT,
+          address,
+          loom_x86_function_reference_assignment(frame, builder, value), store);
+    }
+    return iree_ok_status();
+  }
   if (descriptor_layout->encoding_format_id == LOOM_X86_ENCODING_FORM_NONE) {
     iree_string_view_t mnemonic = loom_low_descriptor_set_string(
         frame->target.descriptor_set, descriptor->mnemonic_string_ref);
@@ -1594,16 +1658,11 @@ iree_status_t loom_x86_function_prepare(
                      .private_bytes /
                  16);
   if (loom_x86_function_has_references(&builder)) {
-    uint64_t bank_offset = 0, scratch_offset = 0;
+    uint64_t bank_offset = 0;
     IREE_RETURN_IF_ERROR(loom_x86_function_append_storage(
         (uint64_t)builder.references.count * 16, 8, &builder, &bank_offset));
-    IREE_RETURN_IF_ERROR(loom_x86_function_append_storage(
-        LOOM_X86_REFERENCE_SCRATCH_BYTES, 16, &builder, &scratch_offset));
     builder.references.base = (uint32_t)bank_offset;
-    builder.references.context.scratch_offset = (uint32_t)scratch_offset;
-    builder.references.context.destroy_label =
-        loom_x86_reference_label(&function);
-    builder.references.cleanup_label = loom_x86_reference_label(&function);
+    IREE_RETURN_IF_ERROR(loom_x86_function_reference_context(&builder));
   }
   if (builder.rejected) {
     return iree_ok_status();
