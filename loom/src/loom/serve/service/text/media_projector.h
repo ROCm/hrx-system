@@ -39,9 +39,17 @@ iree_status_t loom_serve_text_media_request_allocate(
 // remaining projections have published results. Requests whose declared phases
 // fit only sequentially publish after producer completion; others can compose
 // directly with future-ready results. Does not start or wait for work.
+// The serialized owner first retires any codec CPU borrow of this request.
 bool loom_serve_text_media_request_bind(
     loom_serve_text_media_request_t* request,
     const loom_serve_text_input_t* input, iree_host_size_t consumed);
+
+// Whether every currently bound span has a published result. Publication fills
+// the bound view directly; unchanged input coordinates need no second bind.
+// This is an owner-only fact; codec CPU jobs never modify it. NULL has no media
+// prerequisites. Request status is consumed separately.
+bool loom_serve_text_media_request_is_ready(
+    const loom_serve_text_media_request_t* request);
 
 // Commits the bound input after admission and projector detachment. Drops
 // projections superseded by a retained prefix and ends the chat borrow.

@@ -422,8 +422,12 @@ static iree_status_t loom_serve_text_prepare_media(
   }
   IREE_RETURN_IF_ERROR(
       loom_serve_text_media_request_take_status(pending->media));
-  *out_ready = loom_serve_text_media_request_bind(pending->media,
-                                                  &pending->input, consumed);
+  // A prepared continuation protects these exact input/prefix coordinates.
+  // Projection publication keeps its bound result view current while waiting.
+  *out_ready = pending->continuation.session
+                   ? loom_serve_text_media_request_is_ready(pending->media)
+                   : loom_serve_text_media_request_bind(
+                         pending->media, &pending->input, consumed);
   if (*out_ready) {
     return iree_ok_status();
   }

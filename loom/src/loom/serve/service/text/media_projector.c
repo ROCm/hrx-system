@@ -37,8 +37,10 @@ struct loom_serve_text_media_request_t {
   // contiguous suffix of chat projections; no parallel ordinal array is
   // necessary.
   iree_host_size_t first_projection;
-  // Current immutable view borrowed by epoch submission.
+  // Current bound view, immutable once admitted to an epoch.
   loom_serve_text_media_input_t input;
+  // Bound projections whose results have not yet been published by the owner.
+  iree_host_size_t missing_count;
   // Jobs attached to the sole projector, including accepted producer work.
   iree_host_size_t job_count;
   // Captured language continuation footprint, excluding image features.
@@ -103,7 +105,7 @@ bool loom_serve_text_media_request_bind(
     const loom_serve_text_input_t* input, iree_host_size_t consumed) {
   request->first_projection = request->count;
   request->input = (loom_serve_text_media_input_t){.spans = request->spans};
-  bool ready = true;
+  request->missing_count = 0;
   for (iree_host_size_t i = 0; i < input->media_span_count; ++i) {
     const loom_serve_text_media_span_t* span = &input->media_spans[i];
     if ((iree_host_size_t)span->input_offset + span->input_count <= consumed) {
@@ -126,9 +128,14 @@ bool loom_serve_text_media_request_bind(
         .metadata = loom_serve_text_media_projection_metadata(request->chat,
                                                               projection),
     };
-    ready &= projected->result != NULL;
+    request->missing_count += projected->result == NULL;
   }
-  return ready;
+  return request->missing_count == 0;
+}
+
+bool loom_serve_text_media_request_is_ready(
+    const loom_serve_text_media_request_t* request) {
+  return !request || request->missing_count == 0;
 }
 
 void loom_serve_text_media_request_begin(
@@ -815,12 +822,24 @@ static void loom_serve_text_media_projector_publish(
         (job->request->await_producer && !completed)) {
       continue;
     }
+    loom_serve_text_media_request_t* request = job->request;
     loom_serve_text_media_projection_result_t* projected =
-        &job->request->results[job->projection_index];
+        &request->results[job->projection_index];
     loom_service_finite_result_retain(projector->result);
     projected->result = projector->result;
     projected->result_index = (uint32_t)i;
     projected->selected = false;
+    // A retained prefix can elide a projection after its window was gathered.
+    // Bound spans are the checked contiguous suffix of projection identities.
+    if (job->projection_index >= request->first_projection &&
+        job->projection_index - request->first_projection <
+            request->input.span_count) {
+      loom_serve_text_media_input_span_t* span =
+          &request->spans[job->projection_index - request->first_projection];
+      span->result = projected->result;
+      span->request_index = projected->result_index;
+      --request->missing_count;
+    }
     loom_serve_text_media_job_detach(projector, job);
   }
 }

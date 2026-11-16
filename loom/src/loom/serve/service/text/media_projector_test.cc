@@ -210,6 +210,7 @@ class MediaProjectorTest : public ::testing::Test {
         &chat_, host_allocator_, &requests_[index]));
     EXPECT_FALSE(
         loom_serve_text_media_request_bind(requests_[index], &input_, 0));
+    EXPECT_FALSE(loom_serve_text_media_request_is_ready(requests_[index]));
     EXPECT_TRUE(loom_serve_text_media_projector_offer(
         projector_, requests_[index], consumer_bytes));
   }
@@ -299,9 +300,9 @@ TEST_F(MediaProjectorTest, PublishesAccordingToPhaseFootprintAndKeepsOrdinals) {
       0));
   // This owner has submitted but has not consumed completion. Native device
   // speed cannot change this boundary; no sleeps or repeated races are needed.
-  EXPECT_TRUE(loom_serve_text_media_request_bind(requests_[0], &input_, 0));
-  EXPECT_FALSE(loom_serve_text_media_request_bind(requests_[1], &input_, 0));
-  EXPECT_FALSE(loom_serve_text_media_request_bind(requests_[2], &input_, 0));
+  EXPECT_TRUE(loom_serve_text_media_request_is_ready(requests_[0]));
+  EXPECT_FALSE(loom_serve_text_media_request_is_ready(requests_[1]));
+  EXPECT_FALSE(loom_serve_text_media_request_is_ready(requests_[2]));
   EXPECT_EQ(loom_service_finite_model_parameters(model_).pin_count, 1u);
   ASSERT_TRUE(loom_serve_text_media_projector_cancel(projector_, requests_[1]));
   loom_serve_text_media_request_free(requests_[1]);
@@ -313,7 +314,7 @@ TEST_F(MediaProjectorTest, PublishesAccordingToPhaseFootprintAndKeepsOrdinals) {
   EXPECT_EQ(Observation().accepted_devices, 0u);
   EXPECT_EQ(Observation().owned_request_count, 0u);
   EXPECT_EQ(loom_service_finite_model_parameters(model_).pin_count, 0u);
-  ASSERT_TRUE(loom_serve_text_media_request_bind(requests_[2], &input_, 0));
+  ASSERT_TRUE(loom_serve_text_media_request_is_ready(requests_[2]));
   const auto* early = loom_serve_text_media_request_input(requests_[0]);
   const auto* deferred = loom_serve_text_media_request_input(requests_[2]);
   EXPECT_EQ(early->spans[0].result, deferred->spans[0].result);
@@ -448,6 +449,34 @@ TEST_F(MediaProjectorTest,
   loom_serve_text_media_request_free(std::exchange(requests_[0], nullptr));
 }
 
+TEST_F(MediaProjectorTest, PublishesAfterBoundInputElidesAProjection) {
+  ASSERT_NO_FATAL_FAILURE(Offer(0, 0));
+  ASSERT_NO_FATAL_FAILURE(Offer(1, 0));
+  ASSERT_NO_FATAL_FAILURE(PrepareWindow());
+  const auto& span = input_.media_spans[0];
+  ASSERT_TRUE(loom_serve_text_media_request_bind(
+      requests_[0], &input_, span.input_offset + span.input_count));
+  EXPECT_TRUE(loom_serve_text_media_request_is_ready(requests_[0]));
+  EXPECT_EQ(loom_serve_text_media_request_input(requests_[0])->span_count, 0u);
+  ASSERT_NE(Grant(ReadOffer().key).serial, 0u);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return loom_serve_text_media_projector_is_collecting(projector_); },
+      0));
+  EXPECT_TRUE(loom_serve_text_media_request_is_ready(requests_[0]));
+  ASSERT_TRUE(loom_serve_text_media_request_is_ready(requests_[1]));
+  const auto* retained = loom_serve_text_media_request_input(requests_[1]);
+  ASSERT_NE(retained->spans[0].result, nullptr);
+  // Rebinding the original coordinates reuses the published projection, even
+  // though the current continuation did not need it at publication time.
+  ASSERT_TRUE(loom_serve_text_media_request_bind(requests_[0], &input_, 0));
+  const auto* restored = loom_serve_text_media_request_input(requests_[0]);
+  EXPECT_EQ(restored->spans[0].result, retained->spans[0].result);
+  EXPECT_EQ(restored->spans[0].request_index, 0u);
+  EXPECT_EQ(retained->spans[0].request_index, 1u);
+  EXPECT_EQ(restored->spans[0].input_offset, span.input_offset);
+  EXPECT_EQ(restored->spans[0].input_count, span.input_count);
+}
+
 TEST_F(MediaProjectorTest, RejectsImpossibleContinuationBeforeSubmission) {
   ASSERT_NO_FATAL_FAILURE(Offer(0, 16 * 1024));
   ASSERT_TRUE(loom_serve_text_media_projector_seal(projector_));
@@ -504,7 +533,7 @@ TEST_F(MediaProjectorTest, SharesOneCohortAndBatchesRemainingOwnerProjections) {
   std::array<const loom_serve_text_media_input_t*, 3> inputs = {};
   for (size_t i = 0; i < requests_.size(); ++i) {
     IREE_ASSERT_OK(loom_serve_text_media_request_take_status(requests_[i]));
-    ASSERT_TRUE(loom_serve_text_media_request_bind(requests_[i], &input_, 0));
+    ASSERT_TRUE(loom_serve_text_media_request_is_ready(requests_[i]));
     inputs[i] = loom_serve_text_media_request_input(requests_[i]);
   }
   const auto* shared = inputs[0]->spans[0].result;
