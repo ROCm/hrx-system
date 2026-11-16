@@ -31,7 +31,7 @@ constexpr std::array kSchemes = {
     std::pair{"xdna", IREE_HAL_AMD_XDNA_ENABLED},
 };
 
-// Tests mutate only these scheme variables and restore the caller's
+// Tests mutate only these selection variables and restore the caller's
 // environment. A whitespace-only value exercises the empty-list contract on
 // both CRTs: the Windows CRT setter removes a variable when given an empty
 // string.
@@ -65,6 +65,8 @@ class ScopedEnvironment {
 struct NativeEndpoint {
   // Stable instance-local identity and engine classification.
   amdf_endpoint_summary_t summary = {};
+  // OS identity reported through passive endpoint discovery.
+  amdf_endpoint_native_identity_t native_identity = {};
   // Architecture facts copied through the GPU extension.
   amdf_gpu_endpoint_info_t gpu = {};
   // Cached family descriptors, independent of any active device.
@@ -102,6 +104,9 @@ struct NativeInstance {
       std::snprintf(endpoints[i].summary.name,
                     sizeof(endpoints[i].summary.name), "GPU %u", i);
       endpoints[i].gpu.gfx_ip.major = 11;
+      endpoints[i].native_identity.type =
+          AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE;
+      endpoints[i].native_identity.value.linux_device = {226, 128 + i};
     }
     endpoints[0].gpu.gfx_ip = {10, 3, 6};
     endpoints[1].gpu.gfx_ip = {12, 0, 1};
@@ -229,6 +234,8 @@ amdf_status_t AMDF_CALL CloseEndpoint(amdf_endpoint_t*) {
 
 amdf_status_t AMDF_CALL QueryEndpoint(amdf_endpoint_t* endpoint,
                                       amdf_endpoint_info_t* out_info) {
+  out_info->native_identity =
+      reinterpret_cast<NativeEndpoint*>(endpoint)->native_identity;
   out_info->queue_family_count = static_cast<uint32_t>(
       reinterpret_cast<NativeEndpoint*>(endpoint)->families.size());
   return AMDF_STATUS_OK;
@@ -349,6 +356,8 @@ class DriverTest : public ::testing::Test {
     EXPECT_EQ(NativeInstance::current->open_count, 0u);
   }
 
+  // Physical GPU assignment constrains all GPU schemes and opaque IDs.
+  ScopedEnvironment gpu_assignment_{"HAL_AMD_GPU_ASSIGNMENT"};
   // Scheme selections are independent even when they name the same endpoints.
   ScopedEnvironment rdna_visibility_{"HAL_VISIBLE_RDNA_DEVICES"};
   // CDNA visibility is independent of RDNA and the combined GPU view.
@@ -506,6 +515,157 @@ TEST_F(DriverTest, NumericIdsCannotBypassPassiveQualification) {
     EXPECT_EQ(NativeInstance::current->open_count, 0u);
   }
 }
+
+TEST_F(DriverTest, AssignmentSelectsPhysicalGpusBeforeIndependentSchemeViews) {
+  gpu_assignment_.Set(
+      " linux_device:226:133, linux_device:226:131, linux_device:226:129 ");
+  IREE_ASSERT_OK(CreateDriver());
+  EXPECT_EQ(Enumerate(IREE_SV("amdgpu")),
+            (std::vector<iree_hal_device_id_t>{6, 4, 2}));
+  EXPECT_EQ(Enumerate(IREE_SV("rdna")),
+            (std::vector<iree_hal_device_id_t>{4, 2}));
+  EXPECT_EQ(Enumerate(IREE_SV("cdna")), (std::vector<iree_hal_device_id_t>{6}));
+  if (IREE_HAL_AMD_XDNA_ENABLED) {
+    EXPECT_EQ(Enumerate(IREE_SV("xdna")),
+              (std::vector<iree_hal_device_id_t>{5}));
+  }
+  EXPECT_EQ(native_.activation_count, 0u);
+  EXPECT_EQ(native_.open_count, 0u);
+  EXPECT_EQ(native_.query_count, 5u);
+  CreatePath(IREE_SV(""), IREE_STATUS_RESOURCE_EXHAUSTED, 6, IREE_SV("amdgpu"));
+  CreatePath(IREE_SV(""), IREE_STATUS_RESOURCE_EXHAUSTED, 4);
+}
+
+TEST_F(DriverTest, AssignmentIsCapturedAndCannotBeWidenedByIdentityOrId) {
+  gpu_assignment_.Set("linux_device:226:131");
+  native_.endpoints[1].gpu.unique_id = UINT64_C(0x1111222233334444);
+  native_.endpoints[3].gpu.unique_id = UINT64_C(0x5555666677778888);
+  IREE_ASSERT_OK(CreateDriver());
+  gpu_assignment_.Set("linux_device:226:129");
+  EXPECT_EQ(Enumerate(IREE_SV("amdgpu")),
+            (std::vector<iree_hal_device_id_t>{4}));
+  EXPECT_EQ(Enumerate(IREE_SV("rdna")), (std::vector<iree_hal_device_id_t>{4}));
+  EXPECT_TRUE(Enumerate(IREE_SV("cdna")).empty());
+  CreatePath(IREE_SV("GPU-5555666677778888"), IREE_STATUS_RESOURCE_EXHAUSTED,
+             4);
+  for (const auto scheme : {IREE_SV("rdna"), IREE_SV("amdgpu"), IREE_SV("")}) {
+    CreatePath(IREE_SV("GPU-1111222233334444"), IREE_STATUS_UNAVAILABLE, 0,
+               scheme);
+    CreatePath(IREE_SV("id/00000000000000020000000000000000"),
+               IREE_STATUS_UNAVAILABLE, 0, scheme);
+  }
+  auto params = iree_hal_device_create_params_default();
+  params.proactor_pool = proactors_;
+  for (const iree_hal_device_id_t id : {2, 4}) {
+    iree_hal_device_t* device = nullptr;
+    const uint32_t before = native_.activation_count;
+    IREE_EXPECT_STATUS_IS(
+        id == 4 ? IREE_STATUS_RESOURCE_EXHAUSTED : IREE_STATUS_UNAVAILABLE,
+        iree_hal_driver_create_device_by_id(driver_, id, 0, nullptr, &params,
+                                            iree_allocator_system(), &device));
+    EXPECT_EQ(device, nullptr);
+    EXPECT_EQ(native_.activation_count, before + (id == 4 ? 1u : 0u));
+  }
+}
+
+TEST_F(DriverTest, SchemeOrdinalsAreRelativeToAssignmentOrder) {
+  gpu_assignment_.Set(
+      "linux_device:226:131,linux_device:226:133,linux_device:226:129");
+  rdna_visibility_.Set("1");
+  gpu_visibility_.Set("1,0");
+  IREE_ASSERT_OK(CreateDriver());
+  EXPECT_EQ(Enumerate(IREE_SV("rdna")), (std::vector<iree_hal_device_id_t>{2}));
+  EXPECT_EQ(Enumerate(IREE_SV("amdgpu")),
+            (std::vector<iree_hal_device_id_t>{6, 4}));
+  CreatePath(IREE_SV("0"), IREE_STATUS_RESOURCE_EXHAUSTED, 2);
+  CreatePath(IREE_SV("0"), IREE_STATUS_RESOURCE_EXHAUSTED, 6,
+             IREE_SV("amdgpu"));
+}
+
+TEST_F(DriverTest, SchemeMaskCannotNameAnUnassignedOrdinal) {
+  gpu_assignment_.Set("linux_device:226:131");
+  rdna_visibility_.Set("1");
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, CreateDriver());
+  EXPECT_EQ(driver_, nullptr);
+  EXPECT_EQ(native_.activation_count, 0u);
+}
+
+TEST_F(DriverTest, EmptyAssignmentLeavesNpuSelectionIndependent) {
+  gpu_assignment_.Set(" \t");
+  IREE_ASSERT_OK(CreateDriver());
+  for (const auto scheme :
+       {IREE_SV("amdgpu"), IREE_SV("rdna"), IREE_SV("cdna")}) {
+    EXPECT_TRUE(Enumerate(scheme).empty());
+    CreatePath(IREE_SV(""), IREE_STATUS_NOT_FOUND, 0, scheme);
+  }
+  EXPECT_EQ(Enumerate(IREE_SV("")), IREE_HAL_AMD_XDNA_ENABLED
+                                        ? std::vector<iree_hal_device_id_t>{5}
+                                        : std::vector<iree_hal_device_id_t>{});
+}
+
+TEST_F(DriverTest, AssignedGpuWithoutComputeSupportDoesNotSelectAnotherGpu) {
+  gpu_assignment_.Set("linux_device:226:128");
+  IREE_ASSERT_OK(CreateDriver());
+  EXPECT_TRUE(Enumerate(IREE_SV("amdgpu")).empty());
+  CreatePath(IREE_SV(""), IREE_STATUS_NOT_FOUND, 0);
+  CreatePath(IREE_SV("id/00000000000000010000000000000000"),
+             IREE_STATUS_UNAVAILABLE, 0);
+  EXPECT_EQ(native_.activation_count, 0u);
+}
+
+TEST_F(DriverTest, WindowsAssignmentMatchesBothLuidAndPhysicalAdapterIndex) {
+  for (auto& endpoint : native_.endpoints) {
+    endpoint.native_identity.type =
+        AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_WINDOWS_ADAPTER;
+    endpoint.native_identity.value.windows_adapter = {
+        UINT64_C(0xfedcba9876543210),
+        static_cast<uint32_t>(endpoint.summary.id.words[0] - 1)};
+  }
+  gpu_assignment_.Set("windows_adapter:FEDCBA9876543210:3");
+  IREE_ASSERT_OK(CreateDriver());
+  EXPECT_EQ(Enumerate(IREE_SV("amdgpu")),
+            (std::vector<iree_hal_device_id_t>{4}));
+  CreatePath(IREE_SV(""), IREE_STATUS_RESOURCE_EXHAUSTED, 4);
+}
+
+TEST_F(DriverTest, AmbiguousNativeIdentityFailsBeforeActivation) {
+  native_.endpoints[3].native_identity = native_.endpoints[1].native_identity;
+  gpu_assignment_.Set("linux_device:226:129");
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, CreateDriver());
+  EXPECT_EQ(driver_, nullptr);
+  EXPECT_EQ(native_.activation_count, 0u);
+  EXPECT_EQ(native_.open_count, 0u);
+}
+
+class InvalidAssignmentTest
+    : public DriverTest,
+      public ::testing::WithParamInterface<const char*> {};
+
+TEST_P(InvalidAssignmentTest,
+       RejectsInvalidOrNonGpuAssignmentBeforeActivation) {
+  gpu_assignment_.Set(GetParam());
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, CreateDriver());
+  EXPECT_EQ(driver_, nullptr);
+  EXPECT_EQ(native_.activation_count, 0u);
+  EXPECT_EQ(native_.open_count, 0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Selection, InvalidAssignmentTest,
+    ::testing::Values(
+        "0", "linux_device:", "linux_device:226:", "linux_device::131",
+        "linux_device:-226:131", "linux_device:+226:131",
+        "linux_device:0xe2:131", "linux_device:4294967296:131",
+        "linux_device:226:4294967296", "linux_device:226:131:0",
+        "linux_device:226: 131", "linux_device:226:131x",
+        "linux_device:226:999", "linux_device:226:132", "linux_device:226:131,",
+        ",linux_device:226:131", "linux_device:226:131, ,linux_device:226:129",
+        "linux_device:226:131,linux_device:226:131",
+        "linux_device:226:131,linux_device:0226:0131", "windows_adapter::0",
+        "windows_adapter:0x1234:0", "windows_adapter:10000000000000000:0",
+        "windows_adapter:123g:0", "windows_adapter:1234:-1",
+        "windows_adapter:1234:4294967296", "windows_adapter:1234:0",
+        "none:0:0"));
 
 TEST_F(DriverTest, CodePublicationTimeoutAcceptsMilliseconds) {
   IREE_ASSERT_OK(CreateDriver());
@@ -777,6 +937,7 @@ TEST_F(DriverTest, DisabledEngineConfigurationDoesNotAffectDiscovery) {
     rdna_visibility_.Set("invalid");
     cdna_visibility_.Set("invalid");
     gpu_visibility_.Set("invalid");
+    gpu_assignment_.Set("invalid");
   }
   if (!IREE_HAL_AMD_XDNA_ENABLED) {
     xdna_visibility_.Set("invalid");

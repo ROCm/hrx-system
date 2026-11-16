@@ -58,8 +58,9 @@ typedef struct iree_hal_amd_driver_t {
   iree_allocator_t host_allocator;
   // Shared instance and passive discovery retained by each materialized device.
   iree_hal_amd_fabric_t* fabric;
-  // Unmasked scheme membership bits per native endpoint. This allocation also
-  // owns all view indices and identities; zero means unsupported execution.
+  // Assigned scheme membership bits per native endpoint, before ordinal masks.
+  // This allocation also owns all view indices and identifiers; zero means
+  // unassigned or unsupported execution.
   uint32_t* endpoint_schemes;
   // Cached native GPU identifiers, or zero when the endpoint has none.
   uint64_t* endpoint_unique_ids;
@@ -134,7 +135,7 @@ static iree_status_t iree_hal_amd_driver_query_gpu_support(
     iree_hal_amd_fabric_t* fabric, const amdf_gpu_api_t* gpu,
     const amdf_endpoint_summary_t* summary,
     amdf_gpu_architecture_t* out_architecture, uint64_t* out_unique_id,
-    bool* out_supported) {
+    amdf_endpoint_native_identity_t* out_native_identity, bool* out_supported) {
   *out_architecture = AMDF_GPU_ARCHITECTURE_UNKNOWN;
   *out_unique_id = 0;
   *out_supported = false;
@@ -148,6 +149,16 @@ static iree_status_t iree_hal_amd_driver_query_gpu_support(
   };
   iree_status_t status = IREE_HAL_AMD_STATUS_FROM_AMDF(
       gpu->endpoint_query_info(endpoint, &info), "gpu.endpoint_query_info");
+  if (iree_status_is_ok(status) && out_native_identity) {
+    amdf_endpoint_info_t endpoint_info = {
+        .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+        .structure_size = sizeof(endpoint_info),
+    };
+    status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+        fabric->api->endpoint_query_info(endpoint, &endpoint_info),
+        "endpoint_query_info");
+    *out_native_identity = endpoint_info.native_identity;
+  }
   bool supported = false;
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_device_query_support(fabric->api, endpoint,
@@ -376,8 +387,8 @@ static iree_status_t iree_hal_amd_driver_create_device_by_id(
   IREE_RETURN_IF_ERROR(iree_hal_amd_driver_resolve_id(driver, id, &endpoint));
   if (!driver->endpoint_schemes[endpoint - driver->fabric->endpoints]) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "AMD endpoint '%s' has no supported execution "
-                            "queue family",
+                            "AMD endpoint '%s' is unassigned or has no "
+                            "supported execution queue family",
                             endpoint->name);
   }
   return iree_hal_amd_driver_create_device(driver, endpoint, param_count,
@@ -419,6 +430,161 @@ static bool iree_hal_amd_driver_parse_ordinal(iree_string_view_t path,
   *out_ordinal = ordinal;
   return true;
 }
+
+#if IREE_HAL_AMD_GPU_ENABLED
+static bool iree_hal_amd_driver_parse_native_identity(
+    iree_string_view_t text, amdf_endpoint_native_identity_t* out_identity) {
+  *out_identity = (amdf_endpoint_native_identity_t){0};
+  const bool is_linux =
+      iree_string_view_consume_prefix(&text, IREE_SV("linux_device:"));
+  if (!is_linux &&
+      !iree_string_view_consume_prefix(&text, IREE_SV("windows_adapter:"))) {
+    return false;
+  }
+  iree_string_view_t first, second;
+  iree_string_view_split(text, ':', &first, &second);
+  if (iree_string_view_is_empty(first) || iree_string_view_is_empty(second)) {
+    return false;
+  }
+  if (is_linux) {
+    out_identity->type = AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE;
+    return iree_hal_amd_driver_parse_ordinal(
+               first, &out_identity->value.linux_device.major) &&
+           iree_hal_amd_driver_parse_ordinal(
+               second, &out_identity->value.linux_device.minor);
+  }
+  out_identity->type = AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_WINDOWS_ADAPTER;
+  uint64_t luid = 0;
+  if (first.size > 16) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < first.size; ++i) {
+    const char c = first.data[i];
+    uint32_t digit = 0;
+    if (c >= '0' && c <= '9') {
+      digit = c - '0';
+    } else if (c >= 'a' && c <= 'f') {
+      digit = c - 'a' + 10;
+    } else if (c >= 'A' && c <= 'F') {
+      digit = c - 'A' + 10;
+    } else {
+      return false;
+    }
+    luid = (luid << 4) | digit;
+  }
+  out_identity->value.windows_adapter.luid = luid;
+  return iree_hal_amd_driver_parse_ordinal(
+      second, &out_identity->value.windows_adapter.physical_adapter_index);
+}
+
+static bool iree_hal_amd_driver_native_identity_equal(
+    const amdf_endpoint_native_identity_t* lhs,
+    const amdf_endpoint_native_identity_t* rhs) {
+  if (lhs->type != rhs->type) {
+    return false;
+  }
+  switch (lhs->type) {
+    case AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE:
+      return lhs->value.linux_device.major == rhs->value.linux_device.major &&
+             lhs->value.linux_device.minor == rhs->value.linux_device.minor;
+    case AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_WINDOWS_ADAPTER:
+      return lhs->value.windows_adapter.luid ==
+                 rhs->value.windows_adapter.luid &&
+             lhs->value.windows_adapter.physical_adapter_index ==
+                 rhs->value.windows_adapter.physical_adapter_index;
+    default:
+      return false;
+  }
+}
+
+// Resolves the physical assignment before any scheme's ordinal mask. The union
+// view is scratch here: its storage can hold every distinct assigned endpoint,
+// and its final native-order contents are built after all masks are applied.
+static iree_status_t iree_hal_amd_driver_apply_assignment(
+    iree_hal_amd_driver_t* driver, iree_string_view_t assignment,
+    const amdf_endpoint_native_identity_t* identities) {
+  iree_hal_amd_driver_view_t* selected = &driver->all_view;
+  iree_string_view_t remaining = iree_string_view_trim(assignment);
+  iree_status_t status = iree_ok_status();
+  while (!iree_string_view_is_empty(remaining) && iree_status_is_ok(status)) {
+    iree_string_view_t token;
+    const intptr_t separator =
+        iree_string_view_split(remaining, ',', &token, &remaining);
+    token = iree_string_view_trim(token);
+    amdf_endpoint_native_identity_t identity;
+    if (!iree_hal_amd_driver_parse_native_identity(token, &identity) ||
+        (separator != -1 && iree_string_view_is_empty(remaining))) {
+      status =
+          iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                           "HAL_AMD_GPU_ASSIGNMENT requires comma-separated "
+                           "linux_device:<decimal major>:<decimal minor> or "
+                           "windows_adapter:<hex LUID>:<decimal physical "
+                           "adapter index> identities");
+      continue;
+    }
+    uint32_t match_count = 0, endpoint_index = 0;
+    for (uint32_t i = 0; i < driver->fabric->endpoint_count; ++i) {
+      if (iree_hal_amd_driver_native_identity_equal(&identity,
+                                                    &identities[i])) {
+        ++match_count;
+        endpoint_index = i;
+      }
+    }
+    if (match_count != 1) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "HAL_AMD_GPU_ASSIGNMENT identity '%.*s' matches %u GPU endpoints; "
+          "exactly one is required",
+          (int)token.size, token.data, match_count);
+      continue;
+    }
+    for (uint32_t i = 0; i < selected->count; ++i) {
+      if (selected->indices[i] == endpoint_index) {
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "HAL_AMD_GPU_ASSIGNMENT repeats GPU identity '%.*s'",
+            (int)token.size, token.data);
+        break;
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      selected->indices[selected->count++] = endpoint_index;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    // Construct each GPU scheme in assignment order, then discard membership
+    // for every unassigned GPU so opaque device IDs cannot widen the
+    // assignment.
+    for (uint32_t j = 0; j < IREE_ARRAYSIZE(driver->views); ++j) {
+      if (iree_hal_amd_driver_schemes[j].engine_kind != AMDF_ENGINE_KIND_GPU) {
+        continue;
+      }
+      iree_hal_amd_driver_view_t* view = &driver->views[j];
+      view->count = 0;
+      for (uint32_t i = 0; i < selected->count; ++i) {
+        const uint32_t index = selected->indices[i];
+        if (driver->endpoint_schemes[index] & (1u << j)) {
+          view->indices[view->count++] = index;
+        }
+      }
+    }
+    for (uint32_t i = 0; i < driver->fabric->endpoint_count; ++i) {
+      if (driver->fabric->endpoints[i].engine_kind != AMDF_ENGINE_KIND_GPU) {
+        continue;
+      }
+      bool assigned = false;
+      for (uint32_t j = 0; j < selected->count; ++j) {
+        assigned |= selected->indices[j] == i;
+      }
+      if (!assigned) {
+        driver->endpoint_schemes[i] = 0;
+      }
+    }
+  }
+  selected->count = 0;
+  return status;
+}
+#endif  // IREE_HAL_AMD_GPU_ENABLED
 
 // Applies one scheme's visibility without changing another scheme or the native
 // snapshot. The temporary copy permits arbitrary reordering of the source list.
@@ -506,6 +672,13 @@ static iree_status_t iree_hal_amd_driver_initialize_views(
 
   iree_status_t status = iree_ok_status();
 #if IREE_HAL_AMD_GPU_ENABLED
+  const char* assignment = getenv("HAL_AMD_GPU_ASSIGNMENT");
+  amdf_endpoint_native_identity_t* identities = NULL;
+  if (assignment && endpoint_count) {
+    IREE_RETURN_IF_ERROR(
+        iree_allocator_malloc_array(driver->host_allocator, endpoint_count,
+                                    sizeof(*identities), (void**)&identities));
+  }
   const amdf_gpu_api_t* gpu = NULL;
   for (uint32_t i = 0; i < endpoint_count && !gpu && iree_status_is_ok(status);
        ++i) {
@@ -529,7 +702,8 @@ static iree_status_t iree_hal_amd_driver_initialize_views(
     if (endpoint->engine_kind == AMDF_ENGINE_KIND_GPU) {
       status = iree_hal_amd_driver_query_gpu_support(
           driver->fabric, gpu, endpoint, &architecture,
-          &driver->endpoint_unique_ids[i], &supported);
+          &driver->endpoint_unique_ids[i], identities ? &identities[i] : NULL,
+          &supported);
     }
 #endif
 #if IREE_HAL_AMD_XDNA_ENABLED
@@ -552,6 +726,13 @@ static iree_status_t iree_hal_amd_driver_initialize_views(
       }
     }
   }
+#if IREE_HAL_AMD_GPU_ENABLED
+  if (iree_status_is_ok(status) && assignment) {
+    status = iree_hal_amd_driver_apply_assignment(
+        driver, iree_make_cstring_view(assignment), identities);
+  }
+  iree_allocator_free(driver->host_allocator, identities);
+#endif  // IREE_HAL_AMD_GPU_ENABLED
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(driver->views) && iree_status_is_ok(status); ++i) {
     status = iree_hal_amd_driver_apply_visibility(
