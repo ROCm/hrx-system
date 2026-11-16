@@ -33,6 +33,17 @@ load(
 )
 load(":cc_opts.bzl", "cc_opts")
 
+# This isolated diagnostic branch inspects private types in exec-config tools.
+# Bazel's exec transition otherwise forces strip=always after command-line flags.
+def _diagnostic_debug_transition_impl(_settings, _attr):
+    return {"//command_line_option:strip": "never"}
+
+_diagnostic_debug_transition = transition(
+    implementation = _diagnostic_debug_transition_impl,
+    inputs = [],
+    outputs = ["//command_line_option:strip"],
+)
+
 # Extending the rules_cc implementation keeps the public target as the actual
 # C/C++ rule: compilation actions, implicit outputs, aspects, and every parent
 # provider remain attached to the same label. The surrounding symbolic macro
@@ -42,6 +53,7 @@ cc_binary = rule(
     attrs = cc_execution_attrs,
     initializer = cc_execution_initializer,
     parent = rules_cc_binary,
+    cfg = _diagnostic_debug_transition,
 )
 
 def _iree_cc_library_group_impl(ctx):

@@ -563,7 +563,7 @@ jobs:
           retention-days: 7
 
   diagnose_gfx120x:
-    name: Capture Linux gfx120x native syscalls
+    name: Observe one Linux gfx120x queue refresh
     if: github.event_name == 'workflow_dispatch'
     runs-on: linux-gfx120X-gpu-rocm
     timeout-minutes: 20
@@ -613,10 +613,10 @@ jobs:
       - name: Fetch ROCm toolchain
         run: bash .github/scripts/fetch_rocm_toolchain.sh
 
-      - name: Install Bazel host tools and syscall tracer
+      - name: Install Bazel host tools and debugger
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends strace
+          apt-get install -y --no-install-recommends gdb
           python3 dev.py bazel setup --venv
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
@@ -624,7 +624,7 @@ jobs:
         timeout-minutes: 1
         run: |
           bazel --version
-          strace --version
+          gdb --version
           bash .github/scripts/check_host_toolchain.sh --expect-artifact
           bash .github/scripts/check_rocm_device_toolchain.sh
           test -d "${HRX_ROCM_ROOT}/include"
@@ -632,7 +632,7 @@ jobs:
             --export-libamdf-gpu-selection \
             --amdgpu-target gfx120X-all
 
-      - name: Capture the native test's syscalls
+      - name: Observe the native code publisher
         id: gfx120x_diagnostic
         run: |
           python3 - <<'PYTHON'
@@ -656,10 +656,16 @@ jobs:
               "dev.py", "bazel", "test"
           )
           test = steps[1]
+          debugger = Path(os.environ["GITHUB_WORKSPACE"]) / (
+              ".github/scripts/gfx120x_queue_refresh.py"
+          )
           steps[1] = replace(test, argv=test.argv[:4] + (
               "--nocache_test_results", "--test_output=all",
-              "--run_under=/usr/bin/strace -f -ttt -T -yy "
-              "-e trace=ioctl,futex /bin/bash",
+              "--strip=never",
+              "--host_per_file_copt=.*(gpu/code_queue|gpu/user_queue|"
+              "kfd/user_queue|kfd/user_queue_native|kfd/event)\\.c@-g,-O0",
+              "--run_under=/usr/bin/gdb -nx -batch -x "
+              + str(debugger) + " --args /bin/bash",
           ) + test.argv[4:])
           ci.bazel_test_results.prepare_output_directory(results)
           raise SystemExit(ci.run_steps(
