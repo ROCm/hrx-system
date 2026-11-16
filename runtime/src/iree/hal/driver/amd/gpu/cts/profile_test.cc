@@ -288,8 +288,25 @@ TEST_P(GpuNativeDirectChainProfileTest,
   config.workgroup_size[0] = 32;
   config.workgroup_size[1] = config.workgroup_size[2] = 1;
   auto reference = iree_hal_make_buffer_ref(output, 0, 4);
-  const iree_hal_barrier_list_t no_barriers = {};
-  const iree_hal_queue_barriers_t device_local = {&no_barriers, &no_barriers};
+  const iree_hal_memory_barrier_t read = {
+      .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
+  };
+  const iree_hal_memory_barrier_t write = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
+  };
+  const iree_hal_barrier_t acquire = {
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .memory_barrier_count = 1,
+      .memory_barriers = &read,
+  };
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .memory_barrier_count = 1,
+      .memory_barriers = &write,
+  };
+  const iree_hal_barrier_list_t before = {1, &acquire};
+  const iree_hal_barrier_list_t after = {1, &release};
+  const iree_hal_queue_barriers_t device_local = {&before, &after};
   constexpr uint32_t kRounds = 4;
   constexpr uint32_t kDispatches = 32;
   for (uint32_t round = 0; round < kRounds; ++round) {
