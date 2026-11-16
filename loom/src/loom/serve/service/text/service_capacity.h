@@ -31,10 +31,15 @@ typedef struct loom_serve_text_service_capacity_t {
   loom_serve_text_resize_t* resize;
 } loom_serve_text_service_capacity_t;
 
-// Called after selection found no idle resident. A successful retired owner
-// starts amortized growth up to max_sessions; a reached ceiling, accepted
-// epochs, and prepared continuations leave demand pending without growth.
-bool loom_serve_text_service_capacity_begin(loom_serve_text_service_t* service);
+// Selects the next amortized capacity after no idle resident was found. Zero
+// means a reached ceiling, accepted work, or an address-bound continuation
+// prevents growth. Selection starts no work and changes no ownership.
+iree_host_size_t loom_serve_text_service_capacity_select(
+    const loom_serve_text_service_t* service);
+
+// Starts CPU preparation for the selected capacity on the serialized owner.
+void loom_serve_text_service_capacity_begin(loom_serve_text_service_t* service,
+                                            iree_host_size_t requested);
 
 // After CPU readiness, submits native growth on the shared pool's owner and
 // imports its device frontier. Never waits for native completion.

@@ -49,27 +49,31 @@ static iree_status_t loom_serve_text_service_capacity_run(void* user_data) {
   IREE_RETURN_AND_END_ZONE(z0, status);
 }
 
-bool loom_serve_text_service_capacity_begin(
-    loom_serve_text_service_t* service) {
+iree_host_size_t loom_serve_text_service_capacity_select(
+    const loom_serve_text_service_t* service) {
   const iree_host_size_t maximum =
       service->max_sessions ? iree_min(service->max_sessions, INT32_MAX)
                             : INT32_MAX;
   if (loom_serve_text_has_work(service) || service->pending.prepared.session ||
       service->row_count == maximum) {
-    return false;
+    return 0;
   }
   for (iree_host_size_t i = 0; i < service->pending.count; ++i) {
     if (service->pending.values[i]->continuation.session) {
       // A media continuation has captured address-dependent restore plans.
       // Its ordinary admission/cancellation releases that native borrower.
-      return false;
+      return 0;
     }
   }
-  service->growth.requested = iree_min(2 * service->row_count, maximum);
+  return iree_min(2 * service->row_count, maximum);
+}
+
+void loom_serve_text_service_capacity_begin(loom_serve_text_service_t* service,
+                                            iree_host_size_t requested) {
+  service->growth.requested = requested;
   loom_serve_text_observe(service, "grow");
   loom_serve_text_schedule_cpu(service, TEXT_CPU_WORK_GROW,
                                loom_serve_text_service_capacity_run);
-  return true;
 }
 
 iree_status_t loom_serve_text_service_capacity_await(

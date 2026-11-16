@@ -263,41 +263,59 @@ static iree_status_t loom_serve_text_prepare_admission(void* user_data) {
       service->row_count, service->sessions, &service->pool.geometry);
 }
 
-// The owner lends idle rows and the selected request's host storage. A running
-// epoch owns active rows and independent transfer buffers; its completion
-// remains unconsumed until this job releases the shared model invocation.
-static bool loom_serve_text_begin_preparation_at(
+loom_serve_text_preparation_t loom_serve_text_select_preparation(
     loom_serve_text_service_t* service, iree_host_size_t index) {
   if (!service->pending.count || service->pending.prepared.session) {
-    return false;
+    return (loom_serve_text_preparation_t){0};
   }
   loom_serve_text_pending_request_t* pending = service->pending.values[index];
   if (loom_serve_text_media_projector_borrows(service->projector,
                                               pending->media)) {
-    return false;
+    return (loom_serve_text_preparation_t){0};
   }
+  loom_serve_text_preparation_t preparation = {
+      .request = pending,
+      .index = index,
+      .session = pending->continuation.session};
+  if (preparation.session) {
+    return preparation;
+  }
+  preparation.session = loom_serve_text_session_select(
+      service->row_count, service->sessions, pending->name,
+      pending->chat.policy && !pending->checkpoint ? &pending->chat : NULL);
+  if (!preparation.session) {
+    preparation.growth_count = loom_serve_text_service_capacity_select(service);
+    if (preparation.growth_count) {
+      return preparation;
+    }
+  } else if (!preparation.session->preparing) {
+    return preparation;
+  }
+  return (loom_serve_text_preparation_t){0};
+}
+
+// The owner lends idle rows and the selected request's host storage. A running
+// epoch owns active rows and independent transfer buffers; its completion
+// remains unconsumed until this job releases the shared model invocation.
+void loom_serve_text_begin_preparation(
+    loom_serve_text_service_t* service,
+    const loom_serve_text_preparation_t* preparation) {
+  if (preparation->growth_count) {
+    loom_serve_text_service_capacity_begin(service, preparation->growth_count);
+    return;
+  }
+  loom_serve_text_pending_request_t* pending = preparation->request;
+  loom_serve_text_session_t* session = preparation->session;
+  service->pending.prepared.request = pending;
+  service->pending.prepared.index = preparation->index;
+  service->pending.prepared.session = session;
   if (pending->continuation.session) {
-    service->pending.prepared.request = pending;
-    service->pending.prepared.index = index;
-    service->pending.prepared.session = pending->continuation.session;
     service->pending.prepared.cached = pending->continuation.cached;
     service->pending.prepared.prefix = pending->continuation.prefix;
     service->pending.prepared.restored_bytes =
         pending->continuation.restored_bytes;
-    return true;
+    return;
   }
-  loom_serve_text_session_t* session = loom_serve_text_session_select(
-      service->row_count, service->sessions, pending->name,
-      pending->chat.policy && !pending->checkpoint ? &pending->chat : NULL);
-  if (!session) {
-    return loom_serve_text_service_capacity_begin(service);
-  }
-  if (session->preparing) {
-    return false;
-  }
-  service->pending.prepared.request = pending;
-  service->pending.prepared.index = index;
-  service->pending.prepared.session = session;
   service->pending.prepared.cached =
       loom_serve_text_session_cache_find(&service->cache, pending->name);
   const loom_serve_text_input_prefix_t prefix =
@@ -311,19 +329,13 @@ static bool loom_serve_text_begin_preparation_at(
           : loom_serve_text_input_is_current(&pending->input, &pending->chat,
                                              prefix);
   if (current) {
-    return true;
+    return;
   }
   if (service->completion.work == TEXT_WORK_NONE) {
     loom_serve_text_observe(service, "prepare");
   }
   loom_serve_text_schedule_cpu(service, TEXT_CPU_WORK_PREPARE,
                                loom_serve_text_prepare_admission);
-  return true;
-}
-
-bool loom_serve_text_begin_preparation(loom_serve_text_service_t* service) {
-  return loom_serve_text_begin_preparation_at(
-      service, service->pending.admission.cursor);
 }
 
 static iree_status_t loom_serve_text_retain_selected(
@@ -792,9 +804,13 @@ bool loom_serve_text_media_lookahead(loom_serve_text_service_t* service) {
       }
       continue;
     }
-    if ((!request->input.token_storage || request->media) &&
-        loom_serve_text_begin_preparation_at(service, i)) {
-      return true;
+    if (!request->input.token_storage || request->media) {
+      const loom_serve_text_preparation_t preparation =
+          loom_serve_text_select_preparation(service, i);
+      if (preparation.request) {
+        loom_serve_text_begin_preparation(service, &preparation);
+        return true;
+      }
     }
     // An earlier text-only, unavailable-row, or capacity-blocked request is
     // a cohort boundary, not a gap for later consumers to reserve across.

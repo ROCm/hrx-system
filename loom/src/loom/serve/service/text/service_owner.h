@@ -41,6 +41,20 @@ typedef enum loom_serve_text_cpu_work_e {
   TEXT_CPU_WORK_GROW,
 } loom_serve_text_cpu_work_t;
 
+// One source-selected preparation opportunity, captured without lending rows
+// or starting a CPU task. The serialized owner accepts it before any mutation
+// of the pending queue or resident directory can invalidate the selection.
+typedef struct loom_serve_text_preparation_t {
+  // Stable queued receipt; NULL denotes no legal preparation opportunity.
+  loom_serve_text_pending_request_t* request;
+  // Captured FIFO position, independent of the receipt's stable address.
+  iree_host_size_t index;
+  // Selected idle row, or NULL when resident-directory growth comes first.
+  loom_serve_text_session_t* session;
+  // Requested resident capacity for growth; zero for an existing row.
+  iree_host_size_t growth_count;
+} loom_serve_text_preparation_t;
+
 // Serialized service ownership shared by request admission, device epochs,
 // and retirement. CPU jobs borrow only the fields described by their phase.
 struct loom_serve_text_service_t {

@@ -38,8 +38,16 @@ iree_status_t loom_serve_text_cache_forecast(
     void* self, const loom_runtime_residency_forecast_t* request,
     loom_runtime_residency_projection_t* out_projection);
 
-// Lends an idle row to CPU preparation for the selected admission candidate.
-bool loom_serve_text_begin_preparation(loom_serve_text_service_t* service);
+// Captures an eligible queued receipt and idle row, or required growth, without
+// starting work. No source invocation, allocation, or native mutation occurs.
+loom_serve_text_preparation_t loom_serve_text_select_preparation(
+    loom_serve_text_service_t* service, iree_host_size_t index);
+
+// Accepts a captured selection on the same serialized owner. The selected row
+// remains protected through CPU preparation, retention, and reservation.
+void loom_serve_text_begin_preparation(
+    loom_serve_text_service_t* service,
+    const loom_serve_text_preparation_t* preparation);
 
 // Publishes an outgoing row's cache endpoint after successful readiness.
 void loom_serve_text_complete_retention(loom_serve_text_service_t* service);

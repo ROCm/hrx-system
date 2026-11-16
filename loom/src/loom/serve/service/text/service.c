@@ -1051,7 +1051,13 @@ static iree_status_t loom_serve_text_advance_work(
   if (service->completion.work == TEXT_WORK_EPOCH &&
       service->cpu_work == TEXT_CPU_WORK_NONE &&
       !iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
-    bool scheduled = loom_serve_text_begin_preparation(service);
+    const loom_serve_text_preparation_t preparation =
+        loom_serve_text_select_preparation(service,
+                                           service->pending.admission.cursor);
+    if (preparation.request) {
+      loom_serve_text_begin_preparation(service, &preparation);
+    }
+    bool scheduled = preparation.request != NULL;
     scheduled |= loom_serve_text_begin_input_count(service);
     if (scheduled) {
       *out_progress = true;
@@ -1194,9 +1200,13 @@ static iree_status_t loom_serve_text_advance_work(
   iree_status_t status =
       loom_serve_text_progress_admission(service, flags, &select_next);
   while (select_next && !yield_preparation && iree_status_is_ok(status)) {
-    if (!loom_serve_text_begin_preparation(service)) {
+    const loom_serve_text_preparation_t preparation =
+        loom_serve_text_select_preparation(service,
+                                           service->pending.admission.cursor);
+    if (!preparation.request) {
       break;
     }
+    loom_serve_text_begin_preparation(service, &preparation);
     if (loom_serve_text_has_work(service)) {
       *out_progress = true;
       break;
@@ -1235,7 +1245,13 @@ static iree_status_t loom_serve_text_advance_work(
       status = loom_serve_text_submit_epoch(service, &plan, spans);
     } else if (yield_preparation) {
       // With no ready device work, rejection never stalls the remaining FIFO.
-      *out_progress |= loom_serve_text_begin_preparation(service);
+      const loom_serve_text_preparation_t preparation =
+          loom_serve_text_select_preparation(service,
+                                             service->pending.admission.cursor);
+      if (preparation.request) {
+        loom_serve_text_begin_preparation(service, &preparation);
+        *out_progress = true;
+      }
     }
   }
   if (!loom_serve_text_has_work(service)) {
