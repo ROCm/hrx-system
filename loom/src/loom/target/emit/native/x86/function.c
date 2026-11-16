@@ -72,6 +72,8 @@ typedef struct loom_x86_function_builder_t {
     uint32_t base;
     // Number of cells, including allocator-selected cycle scratch.
     uint32_t count;
+    // Explicit private reference cells retained by the shared storage layout.
+    uint32_t storage_count;
     // Exit that retires all remaining owners before the ordinary epilogue.
     uint32_t cleanup_label;
   } references;
@@ -106,10 +108,16 @@ static bool loom_x86_function_is_reference(uint16_t register_class) {
   return register_class == LOOM_X86_REGISTER_CLASS_REF;
 }
 
+static bool loom_x86_function_has_references(
+    const loom_x86_function_builder_t* builder) {
+  return builder->references.count || builder->references.storage_count;
+}
+
 static uint32_t loom_x86_function_exit_label(
     const loom_x86_function_builder_t* builder) {
-  return builder->references.count ? builder->references.cleanup_label
-                                   : builder->function->block_count;
+  return loom_x86_function_has_references(builder)
+             ? builder->references.cleanup_label
+             : builder->function->block_count;
 }
 
 static loom_x86_reference_address_t loom_x86_function_reference_location(
@@ -250,6 +258,17 @@ static iree_status_t loom_x86_function_storage_layout(
         IREE_SV("stack, scratch, or private storage; host functions have no "
                 "workgroup storage ABI"));
   }
+  for (iree_host_size_t i = 0; i < layout->record_count; ++i) {
+    const loom_low_storage_layout_reservation_t* reservation =
+        &layout->records[i].reservation;
+    if (reservation->space == LOOM_STORAGE_SPACE_PRIVATE &&
+        reservation->byte_size % 16 != 0) {
+      return loom_x86_function_reject(
+          builder, LOOM_ERR_X86_004,
+          IREE_SV(
+              "private storage containing complete 16-byte reference cells"));
+    }
+  }
   static const loom_storage_space_t spaces[] = {
       LOOM_STORAGE_SPACE_STACK,
       LOOM_STORAGE_SPACE_SCRATCH,
@@ -263,8 +282,11 @@ static iree_status_t loom_x86_function_storage_layout(
       continue;
     }
     IREE_RETURN_IF_ERROR(loom_x86_function_append_storage(
-        requirement.byte_length, requirement.minimum_alignment, builder,
-        &builder->storage_offsets[spaces[i]]));
+        requirement.byte_length,
+        spaces[i] == LOOM_STORAGE_SPACE_PRIVATE
+            ? iree_max(requirement.minimum_alignment, 8u)
+            : requirement.minimum_alignment,
+        builder, &builder->storage_offsets[spaces[i]]));
   }
   const loom_low_allocation_table_t* allocation = &frame->allocation;
   if (!builder->rejected && allocation->move_storage_count) {
@@ -1257,11 +1279,21 @@ static iree_status_t loom_x86_function_storage(
       is_store
           ? loom_low_packet_operand_assignment(&frame->allocation, packet, 0)
           : loom_low_packet_result_assignment(&frame->allocation, packet, 0);
-  if (loom_x86_function_is_reference(assignment->descriptor_reg_class_id)) {
+  const bool is_reference =
+      loom_x86_function_is_reference(assignment->descriptor_reg_class_id);
+  if (!is_address && is_reference != (reference.reservation.space ==
+                                      LOOM_STORAGE_SPACE_PRIVATE)) {
     return loom_x86_function_reject(
         builder, LOOM_ERR_X86_004,
-        IREE_SV("byte-register storage transfers; reference cells require a "
-                "typed ownership storage plane"));
+        IREE_SV("private storage for references and stack or scratch storage "
+                "for values"));
+  }
+  if (is_reference &&
+      byte_offset % 16 !=
+          builder->storage_offsets[LOOM_STORAGE_SPACE_PRIVATE] % 16) {
+    return loom_x86_function_reject(
+        builder, LOOM_ERR_X86_004,
+        IREE_SV("cell-aligned reference storage offsets"));
   }
   if (assignment->location_kind == LOOM_LOW_ALLOCATION_LOCATION_STORAGE) {
     return iree_ok_status();
@@ -1275,7 +1307,9 @@ static iree_status_t loom_x86_function_storage(
         IREE_SV("one 64-bit GPR for storage addresses"));
   }
   const uint32_t unit_bytes =
-      loom_x86_transport_byte_length(assignment->descriptor_reg_class_id);
+      is_reference
+          ? 16
+          : loom_x86_transport_byte_length(assignment->descriptor_reg_class_id);
   if (!is_address && (relative_offset > reference.byte_length ||
                       (uint64_t)assignment->location_count * unit_bytes >
                           reference.byte_length - relative_offset)) {
@@ -1295,6 +1329,30 @@ static iree_status_t loom_x86_function_storage(
                                        .inputs = {4}},
         UINT32_MAX);
     return iree_ok_status();
+  }
+  if (is_reference) {
+    iree_status_t status = iree_ok_status();
+    for (uint32_t unit = 0;
+         unit < assignment->location_count && iree_status_is_ok(status);
+         ++unit) {
+      status = loom_x86_function_reserve(builder,
+                                         LOOM_X86_REFERENCE_TRANSFER_CAPACITY);
+      if (iree_status_is_ok(status)) {
+        const loom_x86_reference_address_t cell = {
+            .base = 4, .displacement = (int32_t)(byte_offset + 16u * unit)};
+        const loom_x86_reference_address_t value =
+            loom_x86_function_reference_location(
+                &frame->allocation, builder,
+                loom_low_allocation_assignment_unit_location(
+                    frame->target.descriptor_set, assignment, unit));
+        loom_x86_reference_transfer(
+            builder->function, &builder->references.context,
+            loom_low_storage_transfer_moves(op) ? LOOM_X86_REFERENCE_TRANSFER
+                                                : LOOM_X86_REFERENCE_COPY,
+            is_store ? cell : value, is_store ? value : cell);
+      }
+    }
+    return status;
   }
   if (assignment->location_count > 1) {
     IREE_RETURN_IF_ERROR(
@@ -1531,12 +1589,16 @@ iree_status_t loom_x86_function_prepare(
         frame->allocation.physical_extents
             .ends_by_reg_class[LOOM_X86_REGISTER_CLASS_REF];
   }
-  if (builder.references.count) {
+  builder.references.storage_count =
+      (uint32_t)(frame->schedule.requirements.storage_layout.space_sizes
+                     .private_bytes /
+                 16);
+  if (loom_x86_function_has_references(&builder)) {
     uint64_t bank_offset = 0, scratch_offset = 0;
     IREE_RETURN_IF_ERROR(loom_x86_function_append_storage(
         (uint64_t)builder.references.count * 16, 8, &builder, &bank_offset));
-    IREE_RETURN_IF_ERROR(
-        loom_x86_function_append_storage(32, 16, &builder, &scratch_offset));
+    IREE_RETURN_IF_ERROR(loom_x86_function_append_storage(
+        LOOM_X86_REFERENCE_SCRATCH_BYTES, 16, &builder, &scratch_offset));
     builder.references.base = (uint32_t)bank_offset;
     builder.references.context.scratch_offset = (uint32_t)scratch_offset;
     builder.references.context.destroy_label =
@@ -1650,10 +1712,18 @@ iree_status_t loom_x86_function_prepare(
             ? LOOM_X86_STATUS_RESULT_POINTER_REGISTER
             : LOOM_X86_INDIRECT_RESULT_POINTER_REGISTER));
   }
-  if (builder.references.count) {
+  if (loom_x86_function_has_references(&builder)) {
     IREE_RETURN_IF_ERROR(loom_x86_function_reserve(
-        &builder, 2u * builder.references.count +
+        &builder, LOOM_X86_REFERENCE_TRANSFER_CAPACITY +
+                      2u * builder.references.count +
                       2u * frame->allocation.move_storage_count));
+    loom_x86_reference_range(
+        &function, &builder.references.context,
+        (loom_x86_reference_address_t){
+            .base = 4,
+            .displacement =
+                (int32_t)builder.storage_offsets[LOOM_STORAGE_SPACE_PRIVATE]},
+        builder.references.storage_count, false);
     for (uint32_t i = 0; i < builder.references.count; ++i) {
       loom_x86_reference_initialize(
           &function,
@@ -1766,10 +1836,11 @@ iree_status_t loom_x86_function_prepare(
                    : loom_x86_function_structural(frame, &packet, &builder);
     }
   }
-  if (builder.references.count && !builder.rejected &&
+  if (loom_x86_function_has_references(&builder) && !builder.rejected &&
       iree_status_is_ok(status)) {
     status = loom_x86_function_reserve(
-        &builder, LOOM_X86_REFERENCE_DESTROY_CAPACITY + 2 +
+        &builder, LOOM_X86_REFERENCE_DESTROY_CAPACITY +
+                      LOOM_X86_REFERENCE_TRANSFER_CAPACITY + 2 +
                       LOOM_X86_REFERENCE_DISCARD_CAPACITY *
                           ((iree_host_size_t)builder.references.count +
                            frame->allocation.move_storage_count));
@@ -1793,6 +1864,13 @@ iree_status_t loom_x86_function_prepare(
                   .displacement = (int32_t)builder.move_storage_offsets[i]});
         }
       }
+      loom_x86_reference_range(
+          &function, &builder.references.context,
+          (loom_x86_reference_address_t){
+              .base = 4,
+              .displacement =
+                  (int32_t)builder.storage_offsets[LOOM_STORAGE_SPACE_PRIVATE]},
+          builder.references.storage_count, true);
       loom_x86_function_jump(&function, function.block_count, UINT32_MAX);
       ++function.local_fixup_count;
       loom_x86_reference_destroy_thunk(&function, &builder.references.context,

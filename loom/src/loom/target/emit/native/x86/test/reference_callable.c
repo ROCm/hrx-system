@@ -43,6 +43,14 @@ typedef struct null_result_t {
   // Null pointer result.
   iree_vm_ref_t pointer;
 } null_result_t;
+typedef struct storage_result_t {
+  // First owner survives retirement of the private storage plane.
+  iree_vm_ref_t first;
+  // Second owner may be null.
+  iree_vm_ref_t second;
+  // An untouched cell must be null before any store.
+  uint32_t missing;
+} storage_result_t;
 
 extern iree_status_t object_forward(result_t* result, uint32_t failure,
                                     uint64_t seed);
@@ -72,6 +80,14 @@ extern iree_status_t object_preserve_vectors(iree_vm_ref_t* owner,
 
 extern iree_status_t object_rotate(null_result_t* result, iree_vm_ref_t* first,
                                    iree_vm_ref_t* second, uint32_t count);
+
+extern iree_status_t object_storage(iree_vm_ref_t* result, iree_vm_ref_t* first,
+                                    iree_vm_ref_t* second, uint32_t failure);
+extern iree_status_t object_storage_borrowed(uint32_t* result,
+                                             const iree_vm_ref_t* pointer);
+extern iree_status_t object_storage_group(storage_result_t* result,
+                                          iree_vm_ref_t* first,
+                                          iree_vm_ref_t* second);
 
 // Host observations are independent of generated ownership bookkeeping.
 static unsigned destroyed;
@@ -345,6 +361,54 @@ int main(void) {
     iree_vm_ref_reset(&pair.owner);
     iree_vm_ref_reset(&pair.pointer);
     CHECK(destroyed == destroyed_before + 2);
+  }
+  failure_status =
+      iree_make_status(IREE_STATUS_DATA_LOSS, "storage cleanup failure");
+  for (unsigned failure = 0; failure <= 2; failure += 2) {
+    const unsigned destroyed_before = destroyed;
+    iree_vm_ref_t first = iree_vm_ref_null(), second = iree_vm_ref_null();
+    iree_vm_ref_t result = iree_vm_ref_null();
+    CHECK(iree_status_is_ok(object_create(&first, 0)));
+    CHECK(iree_status_is_ok(object_create(&second, 0)));
+    void* first_object = first.object;
+    iree_status_t storage_status =
+        object_storage(&result, &first, &second, failure);
+    CHECK(storage_status == (failure ? failure_status : iree_ok_status()));
+    CHECK(iree_vm_ref_is_null(first) && iree_vm_ref_is_null(second));
+    CHECK(destroyed == destroyed_before + (failure ? 2 : 1));
+    if (failure) {
+      CHECK(iree_vm_ref_is_null(result));
+    } else {
+      CHECK(result.object == first_object);
+      uint32_t same = 0;
+      CHECK(iree_status_is_ok(object_storage_borrowed(&same, &result)));
+      CHECK(same == 1 && destroyed == destroyed_before + 1);
+      iree_vm_ref_reset(&result);
+      CHECK(destroyed == destroyed_before + 2);
+    }
+  }
+  iree_status_ignore(failure_status);
+  uint32_t same = 0;
+  CHECK(iree_status_is_ok(object_storage_borrowed(&same, &scoped)));
+  CHECK(same == 1);
+  for (unsigned count = 1; count <= 2; ++count) {
+    const unsigned destroyed_before = destroyed;
+    iree_vm_ref_t first = iree_vm_ref_null(), second = iree_vm_ref_null();
+    CHECK(iree_status_is_ok(object_create(&first, 0)));
+    if (count == 2) {
+      CHECK(iree_status_is_ok(object_create(&second, 0)));
+    }
+    void* first_object = first.object;
+    void* second_object = second.object;
+    storage_result_t result = {0};
+    CHECK(iree_status_is_ok(object_storage_group(&result, &first, &second)));
+    CHECK(iree_vm_ref_is_null(first) && iree_vm_ref_is_null(second));
+    CHECK(result.first.object == first_object);
+    CHECK(result.second.object == second_object);
+    CHECK(result.missing == 1 && destroyed == destroyed_before);
+    iree_vm_ref_reset(&result.first);
+    iree_vm_ref_reset(&result.second);
+    CHECK(destroyed == destroyed_before + count);
   }
   return passed ? 0 : 1;
 }

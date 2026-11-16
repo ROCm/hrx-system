@@ -39,6 +39,7 @@ loom_check_test_suite(
         "integer_unary.loom-test",
         "operand_ties.loom-test",
         "predicate_bitstream.loom-test",
+        "reference_storage.loom-test",
         "root_native_bytes.loom-test",
         "rounding_native_bytes.loom-test",
         "scalar_memory_native_bytes.loom-test",
@@ -115,12 +116,30 @@ loom_generated_file(
     ],
 )
 
+loom_generated_file(
+    name = "reference_storage_object",
+    testonly = True,
+    args = [
+        "$(location reference_storage.loom)",
+        "--target=x86:avx2",
+    ],
+    generator = "//loom/src/loom/tools/loom-compile:loom-compile",
+    inputs = ["reference_storage.loom"],
+    output = "reference_storage.o",
+    output_flag = "--output=",
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+)
+
 loom_cc_binary(
     name = "reference_callable",
     testonly = True,
     srcs = [
         "reference_callable.c",
         "reference_callable.o",
+        "reference_storage.o",
         "reference_vectors.o",
     ],
     copts = ["-mavx2"],

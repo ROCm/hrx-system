@@ -116,6 +116,60 @@ void loom_x86_reference_discard(loom_x86_function_t* function,
   loom_x86_reference_scratch(function, context, false);
 }
 
+void loom_x86_reference_range(loom_x86_function_t* function,
+                              const loom_x86_reference_context_t* context,
+                              loom_x86_reference_address_t address,
+                              uint32_t count, bool discard) {
+  if (!count) {
+    return;
+  }
+  if (count == 1) {
+    if (discard) {
+      loom_x86_reference_discard(function, context, address);
+    } else {
+      loom_x86_reference_initialize(function, address);
+    }
+    return;
+  }
+  const loom_x86_reference_address_t saved_address = {
+      .base = 4, .displacement = context->scratch_offset + 32};
+  const loom_x86_reference_address_t saved_count = {
+      .base = 4, .displacement = context->scratch_offset + 40};
+  loom_x86_reference_word(function, true, 0, saved_address);
+  loom_x86_reference_word(function, true, 2, saved_count);
+  loom_x86_function_append(
+      function, LOOM_X86_ENCODING_FORM_ADDRESS_DISPLACEMENT,
+      0x8d | LOOM_X86_ENCODING_REX_W,
+      (loom_x86_encoding_operands_t){.result = 0,
+                                     .inputs = {address.base},
+                                     .immediate = address.displacement},
+      UINT32_MAX);
+  loom_x86_function_append(
+      function, LOOM_X86_ENCODING_FORM_CONSTANT, 0xb8,
+      (loom_x86_encoding_operands_t){.result = 2, .immediate = count},
+      UINT32_MAX);
+  const uint32_t loop = loom_x86_reference_label(function);
+  loom_x86_reference_bind(function, loop);
+  if (discard) {
+    loom_x86_reference_discard(function, context,
+                               (loom_x86_reference_address_t){.base = 0});
+  } else {
+    loom_x86_reference_initialize(function,
+                                  (loom_x86_reference_address_t){.base = 0});
+  }
+  loom_x86_function_append(
+      function, LOOM_X86_ENCODING_FORM_BINARY_IMMEDIATE,
+      0x81 | LOOM_X86_ENCODING_REX_W,
+      (loom_x86_encoding_operands_t){.result = 0, .immediate = 16}, UINT32_MAX);
+  loom_x86_function_append(
+      function, LOOM_X86_ENCODING_FORM_BINARY_IMMEDIATE, 0x81 | (5u << 9),
+      (loom_x86_encoding_operands_t){.result = 2, .immediate = 1}, UINT32_MAX);
+  loom_x86_reference_branch(function, LOOM_X86_ENCODING_FORM_BRANCH_FLAGS, 5, 0,
+                            loop);
+  loom_x86_reference_word(function, false, 0, saved_address);
+  loom_x86_reference_word(function, false, 2, saved_count);
+}
+
 void loom_x86_reference_transfer(loom_x86_function_t* function,
                                  const loom_x86_reference_context_t* context,
                                  loom_x86_reference_transfer_t transfer,

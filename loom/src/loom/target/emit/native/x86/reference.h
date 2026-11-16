@@ -25,7 +25,7 @@ typedef struct loom_x86_reference_address_t {
 } loom_x86_reference_address_t;
 
 typedef struct loom_x86_reference_context_t {
-  // Four pointer-sized stack words preserving R10/R11 and a pending payload.
+  // Six stack words preserving R10/R11, a pending payload, and range cursors.
   uint32_t scratch_offset;
   // Function-local label of the final-destructor preservation thunk.
   uint32_t destroy_label;
@@ -49,6 +49,8 @@ enum {
   LOOM_X86_REFERENCE_TRANSFER_CAPACITY = 64,
   LOOM_X86_REFERENCE_DISCARD_CAPACITY = 24,
   LOOM_X86_REFERENCE_DESTROY_CAPACITY = 112,
+  // Six pointer-sized words, shared by all synchronous reference operations.
+  LOOM_X86_REFERENCE_SCRATCH_BYTES = 48,
 };
 
 // Allocates an ID after the shared CFG and common epilogue labels.
@@ -60,6 +62,14 @@ void loom_x86_reference_bind(loom_x86_function_t* function, uint32_t label);
 // Clears a fresh cell without releasing it. The caller reserves two records.
 void loom_x86_reference_initialize(loom_x86_function_t* function,
                                    loom_x86_reference_address_t address);
+
+// Initializes or retires a complete contiguous reference range. Large ranges
+// use one compact loop, and all registers (including an active failure status)
+// survive it. The caller reserves TRANSFER_CAPACITY records.
+void loom_x86_reference_range(loom_x86_function_t* function,
+                              const loom_x86_reference_context_t* context,
+                              loom_x86_reference_address_t address,
+                              uint32_t count, bool discard);
 
 // Emits a complete alias-safe cell operation. R10/R11 and every register a
 // final destructor may clobber are preserved. Caller-reserved capacity follows
