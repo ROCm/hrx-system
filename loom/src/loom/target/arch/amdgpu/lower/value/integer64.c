@@ -173,6 +173,18 @@ static const loom_amdgpu_descriptor_requirement_t
 };
 
 static const loom_amdgpu_descriptor_requirement_t
+    kAmdgpuAddressI64ShlSgprDescriptorRequirements[] = {
+        {
+            .constraint_key = IREE_SVL("descriptor.s_mov_b32"),
+            .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32,
+        },
+        {
+            .constraint_key = IREE_SVL("descriptor.s_lshl_b64"),
+            .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_LSHL_B64,
+        },
+};
+
+static const loom_amdgpu_descriptor_requirement_t
     kAmdgpuAddressI64ShlVgprDescriptorRequirements[] = {
         {
             .constraint_key = IREE_SVL("descriptor.v_mov_b32"),
@@ -330,7 +342,7 @@ static const loom_amdgpu_i64_alu_descriptor_requirement_row_t
 
 static const loom_amdgpu_i64_alu_descriptor_requirement_row_t
     kAmdgpuAddressI64AluDescriptorRequirementRows
-        [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_MUL_LO + 1] = {
+        [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_SHL + 1] = {
             [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_ADD] =
                 {
                     .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
@@ -340,6 +352,23 @@ static const loom_amdgpu_i64_alu_descriptor_requirement_row_t
                 {
                     .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
                         kAmdgpuScalarI64MulSgprDescriptorRequirements),
+                },
+            [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_SUB] =
+                {
+                    .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
+                        kAmdgpuScalarI64SubSgprDescriptorRequirements),
+                },
+            [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_MADD_LO] =
+                {
+                    .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
+                        kAmdgpuScalarI64MulSgprDescriptorRequirements),
+                    .second = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
+                        kAmdgpuOffsetAddSgprDescriptorRequirements),
+                },
+            [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_SHL] =
+                {
+                    .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
+                        kAmdgpuAddressI64ShlSgprDescriptorRequirements),
                 },
             [LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_ADD] =
                 {
@@ -1351,6 +1380,12 @@ static loom_amdgpu_address_i64_alu_kind_t loom_amdgpu_address_i64_alu_sgpr_kind(
       return LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_ADD;
     case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_MUL_LO:
       return LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_MUL_LO;
+    case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_SUB:
+      return LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_SUB;
+    case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_MADD_LO:
+      return LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_MADD_LO;
+    case LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_SHL:
+      return LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_SHL;
     default:
       return LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_NONE;
   }
@@ -1460,6 +1495,7 @@ iree_status_t loom_amdgpu_select_address_i64_alu_plan(
   const bool has_product =
       kind == LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_MUL_LO ||
       kind == LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_MUL_LO ||
+      kind == LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_SGPR_MADD_LO ||
       kind == LOOM_AMDGPU_ADDRESS_I64_ALU_KIND_VGPR_MADD_LO;
   const uint8_t minimum_unit_count = has_product ? 1 : 2;
   *out_plan = (loom_amdgpu_address_i64_alu_plan_t){
