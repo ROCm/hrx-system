@@ -415,7 +415,9 @@ static loom_target_call_policy_t loom_x86_select_call_policy(
   }
   if (callee.op->result_count > 1 &&
       (!loom_func_like_is_module_internal(callee) ||
-       callee.op->region_count == 0)) {
+       callee.op->region_count == 0) &&
+      !loom_x86_call_abi_returns_status(module,
+                                        loom_func_like_abi_attrs(callee))) {
     return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
   }
   uint16_t argument_count = 0;

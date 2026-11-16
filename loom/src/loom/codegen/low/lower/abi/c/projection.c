@@ -998,7 +998,7 @@ static iree_status_t loom_low_c_abi_reserve_storage(
   loom_op_t* storage_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_storage_reserve_build(
       ir, object->storage_byte_length, object->storage_byte_alignment,
-      loom_type_storage(LOOM_STORAGE_SPACE_PRIVATE), location, &storage_op));
+      loom_type_storage(LOOM_STORAGE_SPACE_STACK), location, &storage_op));
   *out_storage = loom_low_storage_reserve_storage(storage_op);
   loom_op_t* address_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_storage_address_build(

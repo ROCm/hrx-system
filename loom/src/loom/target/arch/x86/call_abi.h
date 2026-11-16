@@ -27,6 +27,10 @@ typedef enum loom_x86_call_abi_value_action_e {
   LOOM_X86_CALL_ABI_VALUE_ACTION_NORMALIZE_I1 = 1,
   LOOM_X86_CALL_ABI_VALUE_ACTION_NORMALIZE_I8 = 2,
   LOOM_X86_CALL_ABI_VALUE_ACTION_NORMALIZE_I16 = 3,
+  // Reference parameters address a complete cell. Owners consume and clear
+  // that cell; pointers borrow it. Results contain a complete cell by value.
+  LOOM_X86_CALL_ABI_VALUE_ACTION_REFERENCE_OWNED = 4,
+  LOOM_X86_CALL_ABI_VALUE_ACTION_REFERENCE_BORROWED = 5,
 } loom_x86_call_abi_value_action_t;
 
 // Physical classes and stack properties for one source-typed ABI value.
@@ -70,6 +74,13 @@ typedef struct loom_x86_call_abi_layout_t {
   // physical placement to the ordinary native ABI planner.
   bool is_exact_sysv;
 } loom_x86_call_abi_layout_t;
+
+// Returns whether explicit function ABI attributes select the status
+// convention. Absent attributes retain the target's ordinary SysV default.
+// Native artifact admission separately diagnoses unsupported convention
+// spellings.
+bool loom_x86_call_abi_returns_status(const loom_module_t* module,
+                                      loom_named_attr_slice_t abi_attrs);
 
 // Builds the canonical exact SysV layout consumed by native x86 emission.
 // Placement arrays correspond one-to-one with the physical semantic types and

@@ -563,18 +563,18 @@ low.func.def public target<x86.scalar.core> abi(object_function) @pressure32(%in
 low.func.def public target<x86.scalar.core> abi(object_function) @storage_spaces(%input: reg<x86.gpr64>, %word: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
   %stack = storage {byte_alignment = 64, byte_length = 32} : low.storage<stack>
   %scratch = storage {byte_alignment = 8, byte_length = 8} : low.storage<scratch>
-  %private = storage {byte_alignment = 4, byte_length = 8} : low.storage<private>
+  %word_storage = storage {byte_alignment = 4, byte_length = 8} : low.storage<stack>
   %tail = storage_view %stack {byte_length = 24, offset = 8} : low.storage<stack> -> low.storage<stack>
   %nested = storage_view %tail {byte_length = 16, offset = 8} : low.storage<stack> -> low.storage<stack>
   low.spill %input, %nested {offset = 8} : reg<x86.gpr64>, low.storage<stack>
   %bias = mov.imm64 258
   %scratch_value = add.gpr64 %input, %bias
   low.spill %scratch_value, %scratch : reg<x86.gpr64>, low.storage<scratch>
-  low.spill %word, %private {offset = 4} : reg<x86.gpr32>, low.storage<private>
+  low.spill %word, %word_storage {offset = 4} : reg<x86.gpr32>, low.storage<stack>
   %loaded = low.reload %nested {offset = 8} : low.storage<stack> -> reg<x86.rdx>
   %value = copy %loaded : reg<x86.rdx> -> reg<x86.gpr64>
   %other = low.reload %scratch : low.storage<scratch> -> reg<x86.gpr64>
-  %narrow = low.reload %private {offset = 4} : low.storage<private> -> reg<x86.gpr32>
+  %narrow = low.reload %word_storage {offset = 4} : low.storage<stack> -> reg<x86.gpr32>
   %wide = movzx.gpr64.gpr32 %narrow
   %address = storage_address %stack : low.storage<stack> -> reg<x86.gpr64>
   %mask = mov.imm64 63

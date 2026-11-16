@@ -89,6 +89,7 @@ loom_check_test_suite(
         "packed_memory_alignment.loom-test",
         "packed_memory_values.loom-test",
         "predicate_extension.loom-test",
+        "reference_views.loom-test",
         "rodata.loom-test",
         "scalar_selection.loom-test",
         "selected_payload_transport.loom-test",

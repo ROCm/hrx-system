@@ -140,6 +140,9 @@ static bool loom_x86_source_type_supported(void* user_data,
                                            loom_type_t source_type) {
   (void)user_data;
   (void)module;
+  if (loom_type_is_reference(source_type)) {
+    return true;
+  }
   if (!loom_type_is_scalar(source_type)) {
     return false;
   }
@@ -166,6 +169,10 @@ static bool loom_x86_type_is_address_gpr64(loom_type_t type) {
 
 static bool loom_x86_scalar_register_class_for_source_type(
     loom_type_t source_type, loom_x86_register_class_t* out_register_class) {
+  if (loom_type_is_reference(source_type)) {
+    *out_register_class = LOOM_X86_REGISTER_CLASS_REF;
+    return true;
+  }
   if (loom_x86_type_is_address_gpr64(source_type)) {
     *out_register_class = LOOM_X86_REGISTER_CLASS_GPR64;
     return true;
@@ -263,7 +270,11 @@ static bool loom_x86_avx512_features_register_class_for_source_type(
 
 static iree_status_t loom_x86_make_register_type(
     loom_low_lower_context_t* context, loom_x86_register_class_t register_class,
-    loom_type_t* out_type) {
+    loom_type_t source_type, loom_type_t* out_type) {
+  if (register_class == LOOM_X86_REGISTER_CLASS_REF) {
+    return loom_low_lower_make_typed_register_type(context, register_class, 1,
+                                                   source_type, out_type);
+  }
   return loom_low_lower_make_register_type(context, register_class, 1,
                                            out_type);
 }
@@ -276,7 +287,8 @@ static iree_status_t loom_x86_map_avx512_type(void* user_data,
   loom_x86_register_class_t register_class = 0;
   if (loom_x86_avx512_register_class_for_source_type(source_type,
                                                      &register_class)) {
-    return loom_x86_make_register_type(context, register_class, out_low_type);
+    return loom_x86_make_register_type(context, register_class, source_type,
+                                       out_low_type);
   }
   return iree_ok_status();
 }
@@ -289,7 +301,8 @@ static iree_status_t loom_x86_map_avx2_type(void* user_data,
   loom_x86_register_class_t register_class = 0;
   if (loom_x86_avx2_register_class_for_source_type(source_type,
                                                    &register_class)) {
-    return loom_x86_make_register_type(context, register_class, out_low_type);
+    return loom_x86_make_register_type(context, register_class, source_type,
+                                       out_low_type);
   }
   return iree_ok_status();
 }
@@ -306,7 +319,8 @@ static iree_status_t loom_x86_map_avx2_features_type(
   loom_x86_register_class_t register_class = 0;
   if (loom_x86_avx2_features_register_class_for_source_type(
           source_type, feature_bits, &register_class)) {
-    return loom_x86_make_register_type(context, register_class, out_low_type);
+    return loom_x86_make_register_type(context, register_class, source_type,
+                                       out_low_type);
   }
   return iree_ok_status();
 }
@@ -327,7 +341,8 @@ static iree_status_t loom_x86_map_avx2_value(void* user_data,
   loom_x86_register_class_t register_class = 0;
   if (loom_x86_avx2_predicate_register_class(source_type, representation,
                                              &register_class)) {
-    return loom_x86_make_register_type(context, register_class, out_low_type);
+    return loom_x86_make_register_type(context, register_class, source_type,
+                                       out_low_type);
   }
   return iree_ok_status();
 }
@@ -358,7 +373,8 @@ static iree_status_t loom_x86_map_avx512_value(
   loom_x86_register_class_t register_class = 0;
   if (loom_x86_avx512_predicate_register_class(source_type, representation,
                                                &register_class)) {
-    return loom_x86_make_register_type(context, register_class, out_low_type);
+    return loom_x86_make_register_type(context, register_class, source_type,
+                                       out_low_type);
   }
   return iree_ok_status();
 }
@@ -445,7 +461,8 @@ static iree_status_t loom_x86_map_scalar_type(void* user_data,
   loom_x86_register_class_t register_class = 0;
   if (loom_x86_scalar_register_class_for_source_type(source_type,
                                                      &register_class)) {
-    return loom_x86_make_register_type(context, register_class, out_low_type);
+    return loom_x86_make_register_type(context, register_class, source_type,
+                                       out_low_type);
   }
   return iree_ok_status();
 }
@@ -458,7 +475,8 @@ static iree_status_t loom_x86_map_packed_dot_type(
   if (loom_x86_static_vector_register_class_for_source_type(
           source_type, /*minimum_vector_bit_width=*/128,
           /*maximum_vector_bit_width=*/512, &register_class)) {
-    return loom_x86_make_register_type(context, register_class, out_low_type);
+    return loom_x86_make_register_type(context, register_class, source_type,
+                                       out_low_type);
   }
   return iree_ok_status();
 }
@@ -543,7 +561,8 @@ static iree_status_t loom_x86_map_avx512_features_type(
   loom_x86_register_class_t register_class = 0;
   if (loom_x86_avx512_features_register_class_for_source_type(
           source_type, feature_bits, &register_class)) {
-    return loom_x86_make_register_type(context, register_class, out_low_type);
+    return loom_x86_make_register_type(context, register_class, source_type,
+                                       out_low_type);
   }
   return iree_ok_status();
 }
@@ -695,12 +714,40 @@ static iree_status_t loom_x86_map_native_abi_layout(
 
 #include "loom/target/arch/x86/contracts/tables.inl"
 
+// Shared packing may reuse a reservation, but each allocation execution starts
+// with null cells. Reinitialization releases owners retained by the previous
+// execution.
+static iree_status_t loom_x86_initialize_reference_storage(
+    loom_low_lower_context_t* context, loom_value_id_t address,
+    int64_t byte_length, loom_location_id_t location) {
+  const loom_low_descriptor_set_t* set =
+      loom_low_lower_context_descriptor_set(context);
+  const uint32_t ordinal = loom_low_descriptor_set_lookup_descriptor(
+      set, IREE_SV("x86.ref.discard.range"));
+  loom_string_id_t name = LOOM_STRING_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_builder_intern_string(
+      loom_low_lower_context_builder(context), IREE_SV("count"), &name));
+  const loom_named_attr_t attr = {.name_id = name,
+                                  .value = loom_attr_i64(byte_length / 16)};
+  const loom_low_lower_resolved_descriptor_t descriptor = {
+      .descriptor = &set->descriptors[ordinal]};
+  loom_op_t* op = NULL;
+  return loom_low_lower_emit_resolved_descriptor_op(
+      context, &descriptor, &address, 1,
+      (loom_named_attr_slice_t){.entries = &attr, .count = 1}, NULL, 0, NULL, 0,
+      location, &op);
+}
+
 static const loom_low_lower_function_storage_mapping_t kX86FunctionStorage[] = {
-    {LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, LOOM_STORAGE_SPACE_PRIVATE,
+    {LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, LOOM_STORAGE_SPACE_STACK,
      LOOM_X86_REGISTER_CLASS_GPR64},
-    {LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, LOOM_STORAGE_SPACE_PRIVATE,
+    {LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, LOOM_STORAGE_SPACE_STACK,
      LOOM_X86_REGISTER_CLASS_GPR64,
      LOOM_LOW_LOWER_FUNCTION_STORAGE_SOURCE_SCALAR_VIEW},
+    {LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, LOOM_STORAGE_SPACE_PRIVATE,
+     LOOM_X86_REGISTER_CLASS_GPR64,
+     LOOM_LOW_LOWER_FUNCTION_STORAGE_SOURCE_REFERENCE_VIEW,
+     loom_x86_initialize_reference_storage},
 };
 
 static bool loom_x86_avx2_source_vector_carrier_supported(

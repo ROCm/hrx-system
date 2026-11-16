@@ -764,8 +764,17 @@ def test_scalar_select_rules_cover_native_carrier_families() -> None:
         for case in X86_SCALAR_CONTRACT_FRAGMENT.cases
         if isinstance(case, DescriptorRule) and case.source_op is scf.scf_select
     )
+    reference_guard = Guard.low_value_register_class("true_value", "x86.ref")
+    reference_rules = tuple(rule for rule in rules if reference_guard in rule.guards)
+    assert len(reference_rules) == 1
+    assert reference_rules[0].emit[0].descriptor.key == "x86.ref.select"
+    assert reference_rules[0].guards == (
+        Guard.low_value_register_class("true_value", "x86.ref"),
+    )
     assert {
-        (_value_type_guard(rule, "result"), rule.descriptor.key) for rule in rules
+        (_value_type_guard(rule, "result"), rule.descriptor.key)
+        for rule in rules
+        if rule not in reference_rules
     } == {
         (
             Scalar(

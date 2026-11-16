@@ -22,6 +22,16 @@ static const loom_attribute_t* loom_x86_call_abi_find_attr(
   return NULL;
 }
 
+bool loom_x86_call_abi_returns_status(const loom_module_t* module,
+                                      loom_named_attr_slice_t abi_attrs) {
+  const loom_attribute_t* attr = loom_x86_call_abi_find_attr(
+      module, abi_attrs, IREE_SV("calling_convention"));
+  return attr && attr->kind == LOOM_ATTR_STRING &&
+         iree_string_view_equal(
+             loom_string_table_get(&module->strings, attr->string_id),
+             IREE_SV("iree_status"));
+}
+
 iree_status_t loom_x86_call_abi_layout_make(
     loom_module_t* module, const loom_type_t* argument_types,
     uint16_t argument_count, const loom_type_t* result_types,
@@ -386,6 +396,20 @@ static bool loom_x86_call_abi_classify_vector(
 bool loom_x86_call_abi_classify_source_type(
     loom_type_t source_type,
     loom_x86_call_abi_classification_t* out_classification) {
+  if (loom_type_is_reference(source_type)) {
+    *out_classification = (loom_x86_call_abi_classification_t){
+        .abi_class = LOOM_X86_CALL_ABI_CLASS_INTEGER,
+        .carrier_register_class = LOOM_X86_REGISTER_CLASS_REF,
+        .boundary_register_class = LOOM_X86_REGISTER_CLASS_GPR64,
+        .byte_length = 16,
+        .byte_alignment = 8,
+        .action = loom_type_reference_ownership(source_type) ==
+                          LOOM_REFERENCE_OWNERSHIP_OWNED
+                      ? LOOM_X86_CALL_ABI_VALUE_ACTION_REFERENCE_OWNED
+                      : LOOM_X86_CALL_ABI_VALUE_ACTION_REFERENCE_BORROWED,
+    };
+    return true;
+  }
   if (loom_type_is_buffer(source_type) || loom_type_is_view(source_type)) {
     *out_classification = (loom_x86_call_abi_classification_t){
         .abi_class = LOOM_X86_CALL_ABI_CLASS_INTEGER,

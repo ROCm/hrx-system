@@ -1,0 +1,33 @@
+// A failed call branches before reading its result slot. Successful results
+// are published through the first hidden pointer, followed by a zero status.
+// RUN: emit x86-native-bytes @forward
+x86.target<scalar> @target
+
+low.func.decl target<x86.scalar.core>(@target) abi(object_function, {calling_convention = "iree_status"}) @read(%position: reg<x86.gpr64>) -> (reg<x86.gpr64>)
+
+low.func.def target<x86.scalar.core>(@target) abi(object_function, {calling_convention = "iree_status"}) @forward(%position: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %value = low.func.call @read(%position) : (reg<x86.gpr64>) -> (reg<x86.gpr64>)
+  return %value
+}
+
+// ----
+code: 41 57 48 83 ec 10 4c 8b ff 48 8d 3c 24 e8 00 00 00 00 48 85 c0 0f 85 09 00 00 00 48 8b 04 24 49 89 07 31 c0 48 83 c4 10 41 5f c3
+
+// ====
+
+// A status function without ordinary results needs no hidden pointer or
+// result storage. Each failure branches to the same preserved-register exit.
+// RUN: emit x86-native-bytes @sequence
+x86.target<scalar> @target
+
+low.func.decl target<x86.scalar.core>(@target) abi(object_function, {calling_convention = "iree_status"}) @observe(%value: reg<x86.gpr64>)
+
+low.func.def target<x86.scalar.core>(@target) abi(object_function, {calling_convention = "iree_status"}) @sequence(%value: reg<x86.gpr64>) asm {
+  low.func.call @observe(%value) : (reg<x86.gpr64>)
+  low.func.call @observe(%value) : (reg<x86.gpr64>)
+  low.func.call @observe(%value) : (reg<x86.gpr64>)
+  return
+}
+
+// ----
+code: 53 48 8b df 48 8b fb e8 00 00 00 00 48 85 c0 0f 85 24 00 00 00 48 8b fb e8 00 00 00 00 48 85 c0 0f 85 13 00 00 00 48 8b fb e8 00 00 00 00 48 85 c0 0f 85 02 00 00 00 31 c0 5b c3

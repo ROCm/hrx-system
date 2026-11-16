@@ -10,6 +10,7 @@
 #include "loom/analysis/symbol_facts.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/arch/x86/call_abi.h"
 #include "loom/target/emit/native/x86/abi.h"
 #include "loom/target/emit/native/x86/function.h"
 #include "loom/tools/loom-check/diagnostics.h"
@@ -106,8 +107,11 @@ static iree_status_t loom_x86_loom_check_prepare_abis(
     }
     bool supported = false;
     iree_string_view_t constraint = iree_string_view_empty();
+    const loom_func_like_t function = loom_func_like_cast(module, op);
+    const bool returns_status = loom_x86_call_abi_returns_status(
+        module, loom_func_like_abi_attrs(function));
     IREE_RETURN_IF_ERROR(loom_x86_function_abi_prepare(
-        module, loom_func_like_cast(module, op), &target, request->case_arena,
+        module, function, &target, returns_status, request->case_arena,
         &supported, &constraint, &out_module_abi->functions[function_index]));
     if (!supported) {
       return iree_status_allocate_copy(IREE_STATUS_UNIMPLEMENTED,

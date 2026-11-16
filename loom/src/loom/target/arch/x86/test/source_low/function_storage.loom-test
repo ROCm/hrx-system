@@ -10,8 +10,8 @@ func.def @typed_array(%input: i64, %index: index) -> (i64) {
 
 // ----
 low.func.def target<x86.scalar.core> abi(object_function) @typed_array(%input: reg<x86.gpr64>, %position: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
-  %9 = storage {byte_alignment = 16, byte_length = 32} : low.storage<private>
-  %values = storage_address %9 : low.storage<private> -> reg<x86.gpr64>
+  %9 = storage {byte_alignment = 16, byte_length = 32} : low.storage<stack>
+  %values = storage_address %9 : low.storage<stack> -> reg<x86.gpr64>
   mov.store.indexed.gpr64 %input, %values, %position {disp32 = 0, scale = 8}
   %result = mov.load.indexed.gpr64 %values, %position {disp32 = 0, scale = 8}
   return %result
@@ -41,11 +41,11 @@ func.def @select_local(%first: i64, %second: i64, %condition: i1) -> (i64) {
 
 // ----
 low.func.def target<x86.scalar.core> abi(object_function) abi_layout({signature = (i64, i64, i1) -> (i64)}) @select_local(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
-  %17 = storage {byte_alignment = 64, byte_length = 72} : low.storage<private>
-  %18 = storage_view %17 {byte_length = 8} : low.storage<private> -> low.storage<private>
-  %first_storage = storage_address %18 : low.storage<private> -> reg<x86.gpr64>
-  %20 = storage_view %17 {byte_length = 8, offset = 64} : low.storage<private> -> low.storage<private>
-  %second_storage = storage_address %20 : low.storage<private> -> reg<x86.gpr64>
+  %17 = storage {byte_alignment = 64, byte_length = 72} : low.storage<stack>
+  %18 = storage_view %17 {byte_length = 8} : low.storage<stack> -> low.storage<stack>
+  %first_storage = storage_address %18 : low.storage<stack> -> reg<x86.gpr64>
+  %20 = storage_view %17 {byte_length = 8, offset = 64} : low.storage<stack> -> low.storage<stack>
+  %second_storage = storage_address %20 : low.storage<stack> -> reg<x86.gpr64>
   %first_view = lea.disp %first_storage {disp32 = 0}
   %second_view = lea.disp %second_storage {disp32 = 0}
   mov.store.gpr64 %first, %first_storage {disp32 = 0}
@@ -76,8 +76,8 @@ func.def @local_vector(%input: vector<8xi32>) -> (vector<8xi32>) {
 
 // ----
 low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<8xi32>) -> (vector<8xi32>)}) @local_vector(%input: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
-  %9 = storage {byte_alignment = 32, byte_length = 32} : low.storage<private>
-  %storage = storage_address %9 : low.storage<private> -> reg<x86.gpr64>
+  %9 = storage {byte_alignment = 32, byte_length = 32} : low.storage<stack>
+  %storage = storage_address %9 : low.storage<stack> -> reg<x86.gpr64>
   vmovdqu32.store.ymm %input, %storage {disp32 = 0}
   %result = vmovdqu32.load.ymm %storage {disp32 = 0}
   return %result
@@ -98,8 +98,8 @@ func.def @local_vector(%input: vector<16xi32>) -> (vector<16xi32>) {
 
 // ----
 low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (vector<16xi32>) -> (vector<16xi32>)}) @local_vector(%input: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
-  %9 = storage {byte_alignment = 64, byte_length = 64} : low.storage<private>
-  %storage = storage_address %9 : low.storage<private> -> reg<x86.gpr64>
+  %9 = storage {byte_alignment = 64, byte_length = 64} : low.storage<stack>
+  %storage = storage_address %9 : low.storage<stack> -> reg<x86.gpr64>
   vmovdqu32.store %input, %storage {disp32 = 0}
   %result = vmovdqu32.load %storage {disp32 = 0}
   return %result
@@ -120,8 +120,8 @@ func.def @local_vector(%input: vector<16xi32>) -> (vector<16xi32>) {
 
 // ----
 low.func.def target<x86.avx512_features.core> abi(object_function) abi_layout({signature = (vector<16xi32>) -> (vector<16xi32>)}) @local_vector(%input: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
-  %9 = storage {byte_alignment = 64, byte_length = 64} : low.storage<private>
-  %storage = storage_address %9 : low.storage<private> -> reg<x86.gpr64>
+  %9 = storage {byte_alignment = 64, byte_length = 64} : low.storage<stack>
+  %storage = storage_address %9 : low.storage<stack> -> reg<x86.gpr64>
   vmovdqu32.store %input, %storage {disp32 = 0}
   %result = vmovdqu32.load %storage {disp32 = 0}
   return %result
@@ -153,15 +153,15 @@ func.def public @reused_local_arrays(%first: i64, %second: i32, %index: index) -
 
 // ----
 low.func.def public target<x86.scalar.core> abi(object_function) @reused_local_arrays(%first: reg<x86.gpr64>, %second: reg<x86.gpr32>, %position: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
-  %19 = storage {byte_alignment = 64, byte_length = 16} : low.storage<private>
-  %wide = storage_address %19 : low.storage<private> -> reg<x86.gpr64>
+  %19 = storage {byte_alignment = 64, byte_length = 16} : low.storage<stack>
+  %wide = storage_address %19 : low.storage<stack> -> reg<x86.gpr64>
   %21 = copy %first : reg<x86.gpr64> -> reg<x86.gpr64>
   %other = add.imm.gpr64 %21 {imm32 = 17}
   mov.store.gpr64 %first, %wide {disp32 = 0}
   mov.store.gpr64 %other, %wide {disp32 = 8}
   %original = mov.load.indexed.gpr64 %wide, %position {disp32 = 0, scale = 8}
-  %24 = storage_view %19 {byte_length = 8} : low.storage<private> -> low.storage<private>
-  %narrow = storage_address %24 : low.storage<private> -> reg<x86.gpr64>
+  %24 = storage_view %19 {byte_length = 8} : low.storage<stack> -> low.storage<stack>
+  %narrow = storage_address %24 : low.storage<stack> -> reg<x86.gpr64>
   %26 = copy %second : reg<x86.gpr32> -> reg<x86.gpr32>
   %next = add.imm.gpr32 %26 {imm32 = 3}
   mov.store.gpr32 %second, %narrow {disp32 = 0}

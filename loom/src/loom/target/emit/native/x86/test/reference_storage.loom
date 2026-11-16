@@ -1,0 +1,54 @@
+type.decl import("native", "object") @Object
+
+low.func.decl target<x86.avx2.core> abi(object_function, {calling_convention = "iree_status"}) @object_consume(%owner: reg<x86.ref : ref<@Object>>, %failure: reg<x86.gpr32>)
+
+// The private plane owns cells independently of their SSA carriers. Replacing
+// a cell invokes native destruction while the remaining inputs stay live.
+low.func.def public target<x86.avx2.core> abi(object_function, {calling_convention = "iree_status"}) @object_storage(%first: reg<x86.ref : ref<@Object>>, %second: reg<x86.ref : ref<@Object>>, %failure: reg<x86.gpr32>) -> (reg<x86.ref : ref<@Object>>) asm {
+  %cells = storage {byte_alignment = 8, byte_length = 64} : low.storage<private>
+  low.spill.move %first, %cells : reg<x86.ref : ref<@Object>>, low.storage<private>
+  low.spill.move %second, %cells {offset = 16} : reg<x86.ref : ref<@Object>>, low.storage<private>
+  %copy = low.reload %cells : low.storage<private> -> reg<x86.ref : ref<@Object>>
+  low.spill.move %copy, %cells {offset = 16} : reg<x86.ref : ref<@Object>>, low.storage<private>
+  %taken = low.reload.move %cells {offset = 16} : low.storage<private> -> reg<x86.ref : ref<@Object>>
+  low.func.call @object_consume(%taken, %failure) : (reg<x86.ref : ref<@Object>>, reg<x86.gpr32>)
+  %result = low.reload.move %cells : low.storage<private> -> reg<x86.ref : ref<@Object>>
+  return %result
+}
+
+low.func.def public target<x86.avx2.core> abi(object_function, {calling_convention = "iree_status"}) @object_storage_borrowed(%pointer: reg<x86.ref : ptr<@Object>>) -> (reg<x86.gpr32>) asm {
+  %cells = storage {byte_alignment = 16, byte_length = 48} : low.storage<private>
+  low.spill %pointer, %cells {offset = 16} : reg<x86.ref : ptr<@Object>>, low.storage<private>
+  %copy = low.reload %cells {offset = 16} : low.storage<private> -> reg<x86.ref : ptr<@Object>>
+  %same = ref.compare.eq %pointer, %copy
+  return %same
+}
+
+// Group transport copies and consumes every cell, including nulls. The caller
+// receives the surviving owners after the private plane has been retired.
+low.func.def public target<x86.avx2.core> abi(object_function, {calling_convention = "iree_status"}) @object_storage_group(%first: reg<x86.ref : ref<@Object>>, %second: reg<x86.ref : ref<@Object>>) -> (reg<x86.ref : ref<@Object>>, reg<x86.ref : ref<@Object>>, reg<x86.gpr32>) asm {
+  %cells = storage {byte_alignment = 16, byte_length = 80} : low.storage<private>
+  %empty = low.reload %cells {offset = 64} : low.storage<private> -> reg<x86.ref : ptr<@Object>>
+  %missing = ref.compare.null %empty
+  low.spill.move %first, %cells : reg<x86.ref : ref<@Object>>, low.storage<private>
+  low.spill.move %second, %cells {offset = 16} : reg<x86.ref : ref<@Object>>, low.storage<private>
+  %copy = low.reload %cells : low.storage<private> -> reg<x86.ref x2>
+  low.spill %copy, %cells {offset = 32} : reg<x86.ref x2>, low.storage<private>
+  %taken = low.reload.move %cells {offset = 32} : low.storage<private> -> reg<x86.ref x2>
+  low.spill.move %taken, %cells : reg<x86.ref x2>, low.storage<private>
+  %left = low.reload.move %cells : low.storage<private> -> reg<x86.ref : ref<@Object>>
+  %right = low.reload.move %cells {offset = 16} : low.storage<private> -> reg<x86.ref : ref<@Object>>
+  return %left, %right, %missing
+}
+
+// External ranges need destruction scratch even without an SSA reference bank.
+// The same operation handles both single cells and a counted range.
+low.func.def public target<x86.avx2.core> abi(object_function, {calling_convention = "iree_status"}) @object_storage_clear(%cells: reg<x86.gpr64>) asm {
+  ref.discard.range %cells {count = 1}
+  return
+}
+
+low.func.def public target<x86.avx2.core> abi(object_function, {calling_convention = "iree_status"}) @object_storage_clear_many(%cells: reg<x86.gpr64>) asm {
+  ref.discard.range %cells {count = 3}
+  return
+}
