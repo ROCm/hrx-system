@@ -28,6 +28,7 @@
 #include "loom/runtime/program/program.h"
 #include "loom/runtime/testing/application.h"
 #include "loom/runtime/testing/jit.h"
+#include "loom/runtime/testing/service_control.h"
 #include "loom/service/finite/batch.h"
 #include "loom/service/finite/embedding/protocol.h"
 #include "loom/service/finite/generator.h"
@@ -41,6 +42,9 @@ class ContinuingSource {
 
   iree_status_t Initialize(loom_runtime_device_t* device,
                            loom_runtime_pool_t* pool, const char* source_path) {
+    device_ordinal_ =
+        iree_hal_device_topology_info(loom_runtime_device_handle(device))
+            ->topology_index;
     IREE_RETURN_IF_ERROR(
         loom_runtime_device_create_execution(device, pool, &execution));
     IREE_RETURN_IF_ERROR(loom_runtime_residency_allocate(
@@ -250,7 +254,7 @@ class ContinuingSource {
               source->ReleaseBatch();
             },
     };
-    return {this, &vtable};
+    return {this, &vtable, device_ordinal_};
   }
 
   iree_status_t PrepareRequest(iree_vm_buffer_t* input,
@@ -405,6 +409,11 @@ class ContinuingSource {
     if (iree_status_is_ok(status)) {
       status = loom_runtime_execution_dealloca(execution, buffers[0], &value);
     }
+    if (iree_status_is_ok(status) &&
+        submission == Submission::kRejectTimestampAfterDispatch) {
+      status =
+          loom_runtime_execution_timestamp(execution, buffers[1], 3, &value);
+    }
     if (iree_status_is_ok(status)) {
       auto* output = iree_hal_buffer_allocated_buffer(buffers[1]);
       iree_hal_buffer_retain(output);
@@ -428,6 +437,9 @@ class ContinuingSource {
     kContinuePublished,
     kOverCapacity,
   };
+  enum class Submission { kExecute, kRejectTimestampAfterDispatch };
+  // Malformed source capture after actual upload, allocation, and dispatch.
+  Submission submission = Submission::kExecute;
   // Authored policy selected to exercise invalid source contracts.
   Collection collection = kProgress;
   // Native timeline belongs to this source; results retain it independently.
@@ -470,6 +482,8 @@ class ContinuingSource {
   }
 
  private:
+  // Immutable device coordinate captured with this source's execution binding.
+  uint64_t device_ordinal_ = 0;
   void ReleaseRequest(Request* request) {
     if (!request) {
       return;
@@ -557,7 +571,7 @@ class FiniteContinuation : public ::testing::Test {
     IREE_ASSERT_OK(loom_service_finite_service_allocate(
         loom_runtime_device_host(device_), source_.generator(),
         loom_service_embedding_protocol(), IREE_SV("sum"), 4, 0, 0, nullptr,
-        iree_allocator_system(), &service_));
+        scheduling_.binding(), iree_allocator_system(), &service_));
     interface_ = loom_service_finite_service_interface(service_);
     loom_runtime_driver_initialize(1, &interface_.runtime, &driver_);
     loom_runtime_driver_set_observer(&driver_, {Wake, this});
@@ -686,6 +700,8 @@ class FiniteContinuation : public ::testing::Test {
   ContinuingSource source_;
   // Owned production finite scheduler.
   loom_service_finite_service_t* service_ = nullptr;
+  // Composition-owned observations outliving the engine and source borrowers.
+  loom_runtime::testing::ServiceControl scheduling_;
   // Borrowed scheduler, request inspection, and telemetry capabilities.
   loom_service_finite_service_interface_t interface_ = {};
   // Shared owner driver for the placed service.
@@ -903,6 +919,60 @@ TEST_F(FiniteContinuation, FailedReadinessDoesNotCommitPlannedProgress) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ABORTED, source_.Retire());
   EXPECT_EQ(source_.released, 2u);
 }
+
+TEST_F(FiniteContinuation, FailedStartRetainsItsAcceptedOperation) {
+  source_.submission =
+      ContinuingSource::Submission::kRejectTimestampAfterDispatch;
+  Open(0, R"({"model":"sum","input":[1,2,3,4]})");
+  const auto* control = scheduling_.binding().control;
+  loom_runtime_service_offer_t offer = {};
+  ASSERT_EQ(loom_runtime_service_read_offer(control, 0, &offer),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  loom_runtime_service_operation_key_t accepted;
+  IREE_ASSERT_OK(loom_service_finite_service_try_schedule(service_, offer.key,
+                                                          0, 0, &accepted));
+  ASSERT_NE(accepted.serial, 0u);
+  while (offer.work != LOOM_RUNTIME_SERVICE_WORK_EXECUTION) {
+    const auto ticket = iree_notification_prepare_wait(&notification_);
+    auto status = loom_runtime_device_group_advance(group_);
+    bool progress = false;
+    status = iree_status_join(
+        status, loom_service_finite_service_progress(service_, 0, &progress));
+    const auto read = loom_runtime_service_read_offer(control, 0, &offer);
+    const bool ready = read == LOOM_RUNTIME_SERVICE_READ_COMPLETE &&
+                       offer.work == LOOM_RUNTIME_SERVICE_WORK_EXECUTION;
+    if (ready || progress || !iree_status_is_ok(status)) {
+      iree_notification_cancel_wait(&notification_);
+    } else {
+      iree_notification_commit_wait(&notification_, ticket, IREE_DURATION_ZERO,
+                                    IREE_TIME_INFINITE_FUTURE);
+    }
+    IREE_ASSERT_OK(status);
+  }
+  const auto before = loom_runtime_execution_frontier(source_.execution);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_service_finite_service_try_schedule(
+                            service_, offer.key, 0, 0, &accepted));
+  EXPECT_NE(accepted.serial, 0u);
+  const auto after = loom_runtime_execution_frontier(source_.execution);
+  EXPECT_GT(after.values[0], before.values[0]);
+  loom_runtime_service_operation_t operation = {};
+  ASSERT_EQ(loom_runtime_service_read_operation(control, 0, &operation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(operation.key.serial, accepted.serial);
+  EXPECT_EQ(operation.work, LOOM_RUNTIME_SERVICE_WORK_EXECUTION);
+  EXPECT_EQ(operation.use_count, 1u);
+  ASSERT_TRUE(loom_service_finite_call_is_complete(calls_[0]));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_service_finite_call_status(calls_[0]));
+  ASSERT_NO_FATAL_FAILURE(RemoveService());
+  ASSERT_EQ(loom_runtime_service_read_operation(control, 0, &operation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(operation.key.serial, accepted.serial);
+  IREE_ASSERT_OK(source_.Retire());
+  EXPECT_EQ(source_.released, 1u);
+}
+
 TEST_F(FiniteContinuation, TerminalOfferRequiresPublishedResult) {
   source_.collection = ContinuingSource::kEarlyFinish;
   Open(0, R"({"model":"sum","input":[1,2,3,4]})");

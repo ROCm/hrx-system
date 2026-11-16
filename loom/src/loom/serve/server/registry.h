@@ -146,8 +146,11 @@ typedef struct loom_serve_registration_factory_t {
   // Allocates an unstarted operation; performs no source I/O, model allocation
   // or submission. Failure returns no operation. Invoked after admission opens
   // or explicit activation, never for metadata-only registration alone.
+  // Incarnation is the registry-assigned lifetime of this slot's occupant;
+  // native observations retain it independently of the model's residency.
   iree_status_t (*create)(void* self,
                           const loom_serve_model_configuration_t* configuration,
+                          uint64_t incarnation,
                           loom_runtime_wake_callback_t observer,
                           loom_runtime_telemetry_stream_t* stream,
                           iree_allocator_t host_allocator,

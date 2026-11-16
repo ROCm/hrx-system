@@ -9,6 +9,7 @@
 #include <cstring>
 
 #include "loom/runtime/host/readiness.h"
+#include "loom/runtime/testing/service_control.h"
 #include "loom/serve/service/text/epoch.h"
 #include "loom/serve/service/text/epoch_upload.h"
 #include "loom/serve/service/text/media_epoch.h"
@@ -146,7 +147,7 @@ class NativeMediaHandoffTest : public MediaExecutionTest {
     IREE_ASSERT_OK(loom_service_finite_service_allocate(
         host_, loom_service_finite_model_generator(producer_),
         loom_service_embedding_protocol(), IREE_SV("media"), 3, 0, 0, nullptr,
-        host_allocator_, &native_service_));
+        scheduling_.binding(), host_allocator_, &native_service_));
     interface_.runtime =
         loom_service_finite_service_interface(native_service_).runtime;
     Observe(interface_);
@@ -176,6 +177,8 @@ class NativeMediaHandoffTest : public MediaExecutionTest {
 
   // Finite owner borrowing the producer until its asynchronous work retires.
   loom_service_finite_service_t* native_service_ = nullptr;
+  // Composition-owned observations outlive independently retained output.
+  loom_runtime::testing::ServiceControl scheduling_;
   // Existing fixture event-loop adapter; no HTTP requests use this interface.
   loom_serve_service_t interface_ = {};
   // Independent caller interests, retaining device results after model removal.

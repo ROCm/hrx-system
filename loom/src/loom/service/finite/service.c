@@ -55,13 +55,15 @@ typedef enum loom_service_finite_phase_e {
   FINITE_IDLE = 0,
   FINITE_PREPARING,
   FINITE_SPECIALIZING,
+  FINITE_READY,
   FINITE_WAITING,
   FINITE_RUNNING,
   FINITE_COLLECTING,
 } loom_service_finite_phase_t;
 
-static const char finite_phases[][16] = {"idle",    "preparing", "specializing",
-                                         "waiting", "running",   "collecting"};
+static const char finite_phases[][16] = {
+    "idle",    "preparing", "specializing", "ready",
+    "waiting", "running",   "collecting"};
 
 struct loom_service_finite_service_t {
   // Allocator owning the queue, jobs and encoded results.
@@ -86,6 +88,21 @@ struct loom_service_finite_service_t {
   bool stopping;
   // First terminal failure retained across outstanding CPU/source borrowers.
   iree_status_t failure;
+  // Publication belongs to the retained native lifecycle, not model residency.
+  struct {
+    // Exclusive offer/operation slots in the lifecycle owner's control.
+    loom_runtime_service_control_binding_t binding;
+    // Last legal opportunity; its revision changes independently of estimates.
+    loom_runtime_service_offer_t offer;
+    // Candidate extent associated with the current legal revision.
+    uint64_t request_count;
+    // Arrival generation belonging to an offered preparation window.
+    uint64_t arrivals;
+    // Monotonic acceptance identity, preserved after an operation retires.
+    uint64_t next_serial;
+    // Accepted identity and origin, retained through failed-model retirement.
+    loom_runtime_service_operation_t operation;
+  } scheduling;
   // Pending jobs in FIFO order; arrivals do not alter a live CPU snapshot.
   loom_service_finite_job_t** pending;
   // Number of pending jobs.
@@ -140,6 +157,8 @@ struct loom_service_finite_service_t {
     loom_service_telemetry_latency_t latency;
   } telemetry;
 };
+
+static void loom_service_finite_publish(loom_service_finite_service_t* service);
 
 static uint64_t loom_service_finite_request_begin(
     loom_service_finite_service_t* service, iree_time_t time_ns) {
@@ -529,7 +548,8 @@ static bool loom_service_finite_has_requests(void* self) {
 
 static bool loom_service_finite_is_active(void* self) {
   const loom_service_finite_service_t* service = self;
-  return service->phase != FINITE_IDLE && service->phase != FINITE_WAITING;
+  return service->phase != FINITE_IDLE && service->phase != FINITE_READY &&
+         service->phase != FINITE_WAITING;
 }
 
 static bool loom_service_finite_is_pending(void* self) {
@@ -686,9 +706,162 @@ static iree_status_t loom_service_finite_collect(
   return status;
 }
 
-static iree_status_t loom_service_finite_advance(
-    void* self, loom_runtime_service_flags_t flags, bool* out_progress) {
-  loom_service_finite_service_t* service = self;
+static bool loom_service_finite_can_prepare(
+    const loom_service_finite_service_t* service) {
+  return !service->stopping && service->phase == FINITE_IDLE &&
+         service->pending_count &&
+         (!service->admission.blocked ||
+          service->admission.arrivals != service->admission.selected_arrivals ||
+          (service->generator.vtable->capacity_generation &&
+           service->generator.vtable->capacity_generation(
+               service->generator.self) !=
+               service->admission.selected_capacity));
+}
+
+static void loom_service_finite_publish(
+    loom_service_finite_service_t* service) {
+  if (iree_status_is_ok(service->failure) &&
+      (service->phase == FINITE_IDLE || service->phase == FINITE_READY)) {
+    service->scheduling.operation.key.serial = 0;
+  }
+  loom_runtime_service_work_flags_t work = 0;
+  uint64_t request_count = 0;
+  if (!service->stopping && service->phase == FINITE_READY) {
+    work = LOOM_RUNTIME_SERVICE_WORK_EXECUTION;
+    request_count = service->cohort_count;
+  } else if (loom_service_finite_can_prepare(service)) {
+    work = LOOM_RUNTIME_SERVICE_WORK_PREPARATION;
+    request_count = service->pending_count;
+  }
+  const uint64_t arrivals = work == LOOM_RUNTIME_SERVICE_WORK_PREPARATION
+                                ? service->admission.arrivals
+                                : 0;
+  loom_runtime_service_offer_t* offer = &service->scheduling.offer;
+  if (offer->work != work ||
+      service->scheduling.request_count != request_count ||
+      service->scheduling.arrivals != arrivals) {
+    IREE_ASSERT(offer->key.revision != UINT64_MAX);
+    ++offer->key.revision;
+    offer->work = work;
+    offer->choice_count = work ? 1 : 0;
+    service->scheduling.request_count = request_count;
+    service->scheduling.arrivals = arrivals;
+  }
+  const uint64_t devices = UINT64_C(1) << service->generator.device_ordinal;
+  const loom_runtime_service_use_t use = {
+      .resource_ordinal = service->generator.device_ordinal};
+  const loom_runtime_service_choice_publication_t choice = {
+      .choice = {.instance_ordinal =
+                     service->scheduling.binding.instance_ordinal,
+                 .request_count = request_count,
+                 .devices = devices,
+                 .use_count = 1},
+      .uses = &use};
+  loom_runtime_service_control_t* control = service->scheduling.binding.control;
+  loom_runtime_service_publish_offer(control, offer, &choice);
+
+  loom_runtime_service_operation_t* operation = &service->scheduling.operation;
+  operation->waits = 0;
+  if (service->phase == FINITE_PREPARING ||
+      service->phase == FINITE_SPECIALIZING ||
+      service->phase == FINITE_COLLECTING) {
+    operation->waits = LOOM_RUNTIME_SERVICE_WAIT_CPU;
+  } else if (service->phase == FINITE_WAITING) {
+    operation->waits = LOOM_RUNTIME_SERVICE_WAIT_CAPACITY;
+  } else if (service->phase == FINITE_RUNNING) {
+    operation->waits = LOOM_RUNTIME_SERVICE_WAIT_DEVICE;
+  }
+  operation->devices = operation->key.serial ? devices : 0;
+  operation->use_count = operation->key.serial ? 1 : 0;
+  loom_runtime_service_publish_operation(control, operation, &use);
+  const loom_runtime_service_observation_t observation = {
+      .owned_request_count = service->count,
+      .waiting_request_count =
+          service->pending_count +
+          (service->phase == FINITE_READY ? service->cohort_count : 0),
+      .offer_count = offer->choice_count,
+      .pending_operation_count = operation->key.serial ? 1 : 0,
+      .offered_devices = offer->choice_count ? devices : 0,
+      .accepted_devices = operation->devices};
+  loom_runtime_service_publish_observation(control, &observation);
+}
+
+static iree_status_t loom_service_finite_advance_execution(
+    loom_service_finite_service_t* service, loom_runtime_service_flags_t flags,
+    bool* out_progress) {
+  iree_status_t status = iree_ok_status();
+  loom_runtime_residency_admission_t admission;
+  status = loom_runtime_residency_try_admit(
+      service->generator.vtable->residency(service->generator.self),
+      &admission);
+  if (iree_status_is_ok(status) &&
+      admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED) {
+    status = loom_service_finite_submit(service);
+    *out_progress = true;
+  } else if (iree_status_is_ok(status) &&
+             admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY &&
+             !iree_any_bit_set(flags,
+                               LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY)) {
+    iree_status_t rejection =
+        iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                         "model parameters exceed available capacity");
+    loom_service_finite_reject_cohort(service, rejection);
+    iree_status_free(rejection);
+    *out_progress = true;
+  }
+  if (!iree_status_is_ok(status)) {
+    loom_service_finite_error(service, 0, status);
+    loom_service_finite_finish(service, status);
+  }
+  return status;
+}
+
+iree_status_t loom_service_finite_service_try_schedule(
+    loom_service_finite_service_t* service,
+    loom_runtime_service_offer_key_t offer, uint64_t choice_ordinal,
+    loom_runtime_service_flags_t flags,
+    loom_runtime_service_operation_key_t* out_operation) {
+  *out_operation = (loom_runtime_service_operation_key_t){0};
+  if (service->stopping ||
+      iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING) ||
+      offer.ordinal != service->scheduling.offer.key.ordinal ||
+      offer.revision != service->scheduling.offer.key.revision ||
+      choice_ordinal >= service->scheduling.offer.choice_count) {
+    return iree_ok_status();
+  }
+  IREE_ASSERT(service->scheduling.next_serial != UINT64_MAX);
+  service->scheduling.operation = (loom_runtime_service_operation_t){
+      .key = {.ordinal = service->scheduling.binding.operation_ordinal,
+              .serial = ++service->scheduling.next_serial},
+      .origin = offer,
+      .choice_ordinal = choice_ordinal,
+      .work = service->scheduling.offer.work};
+  *out_operation = service->scheduling.operation.key;
+  iree_status_t status = iree_ok_status();
+  if (service->phase == FINITE_IDLE) {
+    service->admission.selected_arrivals = service->admission.arrivals;
+    memcpy(service->cohort, service->pending,
+           service->pending_count * sizeof(*service->cohort));
+    service->cohort_count = service->pending_count;
+    service->pending_count = 0;
+    loom_service_finite_schedule_cpu(service, FINITE_PREPARING);
+  } else {
+    service->phase = FINITE_WAITING;
+    bool progress = false;
+    status = loom_service_finite_advance_execution(service, flags, &progress);
+  }
+  if (!iree_status_is_ok(status)) {
+    service->stopping = true;
+    service->failure = iree_status_clone(status);
+    loom_service_finite_cancel_peers(service);
+  }
+  loom_service_finite_publish(service);
+  return status;
+}
+
+iree_status_t loom_service_finite_service_progress(
+    loom_service_finite_service_t* service, loom_runtime_service_flags_t flags,
+    bool* out_progress) {
   *out_progress = false;
   if (iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
     service->stopping = true;
@@ -700,7 +873,8 @@ static iree_status_t loom_service_finite_advance(
   *out_progress |= loom_service_execution_reconfiguration_advance(
       service->reconfiguration,
       iree_status_is_ok(status) &&
-          (service->phase == FINITE_IDLE || service->phase == FINITE_WAITING),
+          (service->phase == FINITE_IDLE || service->phase == FINITE_READY ||
+           service->phase == FINITE_WAITING),
       service->stopping || !iree_status_is_ok(status));
   if (iree_status_is_ok(status) && service->phase == FINITE_SPECIALIZING) {
     bool has_peer = false;
@@ -728,12 +902,13 @@ static iree_status_t loom_service_finite_advance(
         service->generator.vtable->release_batch(service->generator.self);
         loom_service_finite_finish(service, iree_ok_status());
       } else {
-        service->phase = FINITE_WAITING;
+        service->phase = FINITE_READY;
       }
       *out_progress = true;
     }
   }
-  if (iree_status_is_ok(status) && service->phase == FINITE_WAITING) {
+  if (iree_status_is_ok(status) &&
+      (service->phase == FINITE_READY || service->phase == FINITE_WAITING)) {
     bool has_peer = false;
     for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {
       const loom_service_finite_consumer_t consumer =
@@ -744,47 +919,10 @@ static iree_status_t loom_service_finite_advance(
       service->generator.vtable->release_batch(service->generator.self);
       loom_service_finite_finish(service, iree_ok_status());
       *out_progress = true;
-    } else {
-      loom_runtime_residency_admission_t admission;
-      status = loom_runtime_residency_try_admit(
-          service->generator.vtable->residency(service->generator.self),
-          &admission);
-      if (iree_status_is_ok(status) &&
-          admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED) {
-        status = loom_service_finite_submit(service);
-        *out_progress = true;
-      } else if (iree_status_is_ok(status) &&
-                 admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY &&
-                 !iree_any_bit_set(flags,
-                                   LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY)) {
-        iree_status_t rejection =
-            iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                             "model parameters exceed available capacity");
-        loom_service_finite_reject_cohort(service, rejection);
-        iree_status_free(rejection);
-        *out_progress = true;
-      }
-      if (!iree_status_is_ok(status)) {
-        loom_service_finite_error(service, 0, status);
-        loom_service_finite_finish(service, status);
-      }
+    } else if (service->phase == FINITE_WAITING) {
+      status =
+          loom_service_finite_advance_execution(service, flags, out_progress);
     }
-  }
-  if (iree_status_is_ok(status) && !service->stopping &&
-      service->phase == FINITE_IDLE && service->pending_count &&
-      (!service->admission.blocked ||
-       service->admission.arrivals != service->admission.selected_arrivals ||
-       (service->generator.vtable->capacity_generation &&
-        service->generator.vtable->capacity_generation(
-            service->generator.self) !=
-            service->admission.selected_capacity))) {
-    service->admission.selected_arrivals = service->admission.arrivals;
-    memcpy(service->cohort, service->pending,
-           service->pending_count * sizeof(*service->cohort));
-    service->cohort_count = service->pending_count;
-    service->pending_count = 0;
-    loom_service_finite_schedule_cpu(service, FINITE_PREPARING);
-    *out_progress = true;
   }
   bool timer_progress = false;
   bool tick = false;
@@ -803,6 +941,26 @@ static iree_status_t loom_service_finite_advance(
     }
     loom_service_finite_cancel_peers(service);
   }
+  loom_service_finite_publish(service);
+  return status;
+}
+
+static iree_status_t loom_service_finite_advance(
+    void* self, loom_runtime_service_flags_t flags, bool* out_progress) {
+  loom_service_finite_service_t* service = self;
+  IREE_RETURN_IF_ERROR(
+      loom_service_finite_service_progress(service, flags, out_progress));
+  loom_runtime_service_offer_t offer;
+  if (loom_runtime_service_read_offer(service->scheduling.binding.control,
+                                      service->scheduling.binding.offer_ordinal,
+                                      &offer) !=
+      LOOM_RUNTIME_SERVICE_READ_COMPLETE) {
+    return iree_ok_status();
+  }
+  loom_runtime_service_operation_key_t operation;
+  iree_status_t status = loom_service_finite_service_try_schedule(
+      service, offer.key, 0, flags, &operation);
+  *out_progress |= operation.serial != 0;
   return status;
 }
 
@@ -835,6 +993,7 @@ static void loom_service_finite_job_admit(
   service->pending[service->pending_count++] = job;
   ++service->count;
   ++service->admission.arrivals;
+  loom_service_finite_publish(service);
 }
 
 iree_status_t loom_service_finite_service_try_accept(
@@ -937,10 +1096,11 @@ void loom_service_finite_service_free(loom_service_finite_service_t* service) {
                                           (loom_runtime_wake_callback_t){0});
   service->stopping = true;
   loom_service_finite_cancel_peers(service);
-  if (service->phase == FINITE_WAITING) {
+  if (service->phase == FINITE_READY || service->phase == FINITE_WAITING) {
     service->generator.vtable->release_batch(service->generator.self);
   }
   loom_service_finite_finish(service, iree_ok_status());
+  loom_service_finite_publish(service);
   iree_status_free(service->failure);
   loom_service_execution_reconfiguration_free(service->reconfiguration);
   loom_runtime_timer_deinitialize(&service->timer);
@@ -960,6 +1120,7 @@ iree_status_t loom_service_finite_service_allocate(
     const loom_service_finite_protocol_t* protocol, iree_string_view_t name,
     iree_host_size_t capacity, iree_host_size_t variant_capacity,
     iree_duration_t heartbeat_interval, loom_runtime_telemetry_stream_t* stream,
+    loom_runtime_service_control_binding_t scheduling,
     iree_allocator_t host_allocator,
     loom_service_finite_service_t** out_service) {
   *out_service = NULL;
@@ -981,6 +1142,9 @@ iree_status_t loom_service_finite_service_allocate(
   service->protocol = protocol;
   service->name = name;
   service->capacity = capacity;
+  service->scheduling.binding = scheduling;
+  service->scheduling.offer.key.ordinal = scheduling.offer_ordinal;
+  service->scheduling.operation.key.ordinal = scheduling.operation_ordinal;
   service->telemetry.stream = stream;
   service->telemetry.owns_stream = !stream;
   loom_runtime_readiness_initialize(loom_runtime_host_executor(host), proactor,
@@ -1023,6 +1187,7 @@ iree_status_t loom_service_finite_service_allocate(
                                                                       "idle"};
     memcpy(record.data.words, &telemetry_payload, sizeof(telemetry_payload));
     loom_runtime_telemetry_stream_append(service->telemetry.stream, &record);
+    loom_service_finite_publish(service);
     *out_service = service;
   } else {
     loom_service_finite_service_free(service);

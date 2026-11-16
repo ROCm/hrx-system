@@ -8,6 +8,7 @@
 #define LOOM_SERVICE_FINITE_SERVICE_H_
 
 #include "loom/runtime/service.h"
+#include "loom/runtime/service_control.h"
 #include "loom/runtime/telemetry/stream.h"
 #include "loom/service/finite/call.h"
 #include "loom/service/finite/consumer.h"
@@ -69,16 +70,38 @@ typedef struct loom_service_finite_service_interface_t {
 // on a worker. A non-NULL stream is borrowed through service destruction and
 // shares the serialized owner's publication order. NULL creates a service-owned
 // stream.
+// The scheduling binding borrows one offer with one choice/use and one
+// operation with one retained use. Its composition retains the control beyond
+// engine destruction when observation must span preparation and retirement.
 iree_status_t loom_service_finite_service_allocate(
     loom_runtime_host_t* host, loom_service_finite_generator_t generator,
     const loom_service_finite_protocol_t* protocol, iree_string_view_t name,
     iree_host_size_t capacity, iree_host_size_t variant_capacity,
     iree_duration_t heartbeat_interval, loom_runtime_telemetry_stream_t* stream,
+    loom_runtime_service_control_binding_t scheduling,
     iree_allocator_t host_allocator,
     loom_service_finite_service_t** out_service);
 
 loom_service_finite_service_interface_t loom_service_finite_service_interface(
     loom_service_finite_service_t* service);
+
+// Progresses accepted obligations and publishes current legal opportunities.
+// Never starts another candidate window or numerical cohort. Accepted capacity
+// waits, compilation, device work, and output collection progress independently
+// of subsequent scheduling grants, including during stopping/failure.
+iree_status_t loom_service_finite_service_progress(
+    loom_service_finite_service_t* service, loom_runtime_service_flags_t flags,
+    bool* out_progress);
+
+// Claims one currently published choice on the serialized owner. Stale or
+// withdrawn choices return OK with a zero operation serial. An accepted serial
+// is returned independently of status: failed submissions can retain borrowers.
+// Capacity/device readiness never causes a synchronous wait here.
+iree_status_t loom_service_finite_service_try_schedule(
+    loom_service_finite_service_t* service,
+    loom_runtime_service_offer_key_t offer, uint64_t choice_ordinal,
+    loom_runtime_service_flags_t flags,
+    loom_runtime_service_operation_key_t* out_operation);
 
 // Immutable semantic protocol role, also used by frontend route selection.
 loom_service_kind_t loom_service_finite_service_kind(

@@ -251,7 +251,7 @@ struct loom_serve_test_registration_dependency_t {
   }
   static iree_status_t Create(
       void* self, const loom_serve_model_configuration_t* configuration,
-      loom_runtime_wake_callback_t observer,
+      uint64_t, loom_runtime_wake_callback_t observer,
       loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
       loom_serve_registration_t* out_registration) {
     auto* dependency =

@@ -375,6 +375,7 @@ loom_cc_library(
         ":model",
         ":source_service_fixture",
         "//loom/src/loom/runtime/host:readiness",
+        "//loom/src/loom/runtime/testing:service_control",
         "//loom/src/loom/serve/media:image_codec",
         "//loom/src/loom/serve/media:image_codecs",
         "//loom/src/loom/serve/media:image_request",

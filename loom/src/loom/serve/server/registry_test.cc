@@ -96,7 +96,7 @@ class RegistryTest : public ::testing::TestWithParam<bool> {
         .pools = kPools,
         .create =
             [](void* self,
-               const loom_serve_model_configuration_t* configuration,
+               const loom_serve_model_configuration_t* configuration, uint64_t,
                loom_runtime_wake_callback_t observer,
                loom_runtime_telemetry_stream_t* stream,
                iree_allocator_t host_allocator,

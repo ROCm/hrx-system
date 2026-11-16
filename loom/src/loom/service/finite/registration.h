@@ -21,6 +21,8 @@ typedef struct loom_service_finite_registration_t
     loom_service_finite_registration_t;
 
 typedef struct loom_service_finite_registration_options_t {
+  // Nonzero composition-assigned lifetime, changed when a slot is reused.
+  uint64_t incarnation;
   // Immutable modality contract, borrowed through retirement.
   const loom_service_finite_protocol_t* protocol;
   // Deployment identifier, borrowed through retirement.
@@ -88,6 +90,11 @@ iree_status_t loom_service_finite_registration_retire(
 // definition/resource/observer storage can be released after this call.
 void loom_service_finite_registration_free(
     loom_service_finite_registration_t* registration);
+
+// Borrowed observations survive ready-engine and model retirement, until free.
+// Reader/policy borrows must join before freeing this native lifecycle owner.
+const loom_runtime_service_control_t* loom_service_finite_registration_control(
+    const loom_service_finite_registration_t* registration);
 
 #ifdef __cplusplus
 }  // extern "C"

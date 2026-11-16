@@ -89,7 +89,7 @@ static iree_status_t loom_serve_model_finite_activate(
 
 static iree_status_t loom_serve_finite_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
-    loom_runtime_wake_callback_t observer,
+    uint64_t incarnation, loom_runtime_wake_callback_t observer,
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_registration_t* out_registration) {
   const loom_serve_model_registration_options_t* options = self;
@@ -99,6 +99,7 @@ static iree_status_t loom_serve_finite_registration_create(
       .options = configuration->options,
       .specialization_cache = configuration->specialization_cache};
   const loom_service_finite_registration_options_t service_options = {
+      .incarnation = incarnation,
       .protocol = configuration->kind == LOOM_SERVICE_KIND_EMBEDDING
                       ? loom_service_embedding_protocol()
                       : loom_service_decision_protocol(),
@@ -266,7 +267,7 @@ static iree_status_t loom_serve_image_registration_activate(
 
 static iree_status_t loom_serve_image_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
-    loom_runtime_wake_callback_t observer,
+    uint64_t incarnation, loom_runtime_wake_callback_t observer,
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_registration_t* out_registration) {
   const loom_serve_model_registration_options_t* options = self;
@@ -474,7 +475,7 @@ static iree_status_t loom_serve_speech_registration_activate(
 
 static iree_status_t loom_serve_speech_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
-    loom_runtime_wake_callback_t observer,
+    uint64_t incarnation, loom_runtime_wake_callback_t observer,
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_registration_t* out_registration) {
   const loom_serve_model_registration_options_t* options = self;
@@ -658,7 +659,7 @@ static iree_status_t loom_serve_recognition_registration_activate(
 
 static iree_status_t loom_serve_recognition_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
-    loom_runtime_wake_callback_t observer,
+    uint64_t incarnation, loom_runtime_wake_callback_t observer,
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_registration_t* out_registration) {
   const loom_serve_model_registration_options_t* options = self;
@@ -906,7 +907,7 @@ static iree_status_t loom_serve_text_registration_activate(
 
 static iree_status_t loom_serve_text_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
-    loom_runtime_wake_callback_t observer,
+    uint64_t incarnation, loom_runtime_wake_callback_t observer,
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_registration_t* out_registration) {
   const loom_serve_model_registration_options_t* options = self;
@@ -1002,11 +1003,11 @@ static iree_status_t loom_serve_text_registration_create(
 
 static iree_status_t loom_serve_model_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
-    loom_runtime_wake_callback_t observer,
+    uint64_t incarnation, loom_runtime_wake_callback_t observer,
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_registration_t* out_registration) {
   static iree_status_t (*const create[])(
-      void*, const loom_serve_model_configuration_t*,
+      void*, const loom_serve_model_configuration_t*, uint64_t,
       loom_runtime_wake_callback_t, loom_runtime_telemetry_stream_t*,
       iree_allocator_t, loom_serve_registration_t*) = {
       [LOOM_SERVICE_KIND_TEXT] = loom_serve_text_registration_create,
@@ -1019,8 +1020,8 @@ static iree_status_t loom_serve_model_registration_create(
           loom_serve_recognition_registration_create,
       [LOOM_SERVICE_KIND_ACTIVITY] = loom_serve_recognition_registration_create,
   };
-  return create[configuration->kind](self, configuration, observer, stream,
-                                     host_allocator, out_registration);
+  return create[configuration->kind](self, configuration, incarnation, observer,
+                                     stream, host_allocator, out_registration);
 }
 
 static iree_status_t loom_serve_model_registration_query_status(void* self) {

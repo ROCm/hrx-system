@@ -18,6 +18,7 @@
 #include "iree/testing/gtest.h"
 #include "loom/runtime/device/device.h"
 #include "loom/runtime/program/compilation.h"
+#include "loom/runtime/testing/service_control.h"
 #include "loom/serve/service/service.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/model_wait.h"
@@ -178,6 +179,8 @@ class SourceEmbeddingServiceTest : public ::testing::Test {
   std::string directory_;
   // Production batched protocol service.
   loom_service_finite_service_t* service_ = nullptr;
+  // Observations survive model/engine retirement until the next incarnation.
+  loom_runtime::testing::ServiceControl scheduling_;
   // Serialized callbacks used by both direct turns and the shared router.
   loom_serve_service_t interface_ = {};
   // Production loopback carrier, independent of scheduler turns.

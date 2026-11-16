@@ -126,6 +126,7 @@ loom_cc_library(
     deps = [
         ":accumulation",
         "//loom/src/loom/runtime:service",
+        "//loom/src/loom/runtime:service_control",
         "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/execution",
         "//loom/src/loom/runtime/execution:wait",
@@ -160,6 +161,7 @@ loom_cc_library(
     hdrs = ["registration.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "//loom/src/loom/runtime:service_control",
         "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/device",
         "//loom/src/loom/runtime/host",
@@ -289,6 +291,7 @@ loom_cc_library(
     deps = [
         ":batch",
         "//loom/src/loom/runtime:driver",
+        "//loom/src/loom/runtime:service_control",
         "//loom/src/loom/runtime/device",
         "//loom/src/loom/runtime/execution",
         "//loom/src/loom/runtime/execution:dispatch",
@@ -299,6 +302,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/program:jit",
         "//loom/src/loom/runtime/testing:application",
         "//loom/src/loom/runtime/testing:jit",
+        "//loom/src/loom/runtime/testing:service_control",
         "//loom/src/loom/service/finite:call",
         "//loom/src/loom/service/finite:generator",
         "//loom/src/loom/service/finite:result",

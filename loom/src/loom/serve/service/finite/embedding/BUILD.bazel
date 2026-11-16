@@ -29,6 +29,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/parameter:residency",
         "//loom/src/loom/runtime/program:compilation",
         "//loom/src/loom/runtime/testing:application",
+        "//loom/src/loom/runtime/testing:service_control",
         "//loom/src/loom/runtime/testing:stalled_stderr",
         "//loom/src/loom/serve/server:model_registration",
         "//loom/src/loom/serve/server:registry",
@@ -170,6 +171,7 @@ loom_cc_library(
     }),
     deps = [
         ":source_service_fixture",
+        "//loom/src/loom/runtime/testing:service_control",
         "//loom/src/loom/serve/service/finite:http",
         "//loom/src/loom/serve/testing:model",
         "//loom/src/loom/service/finite:model",

@@ -1615,5 +1615,10 @@ loom_service_finite_generator_t loom_service_finite_model_generator(
       .complete = loom_service_finite_generator_complete,
       .release_batch = loom_service_finite_generator_release_batch,
   };
-  return (loom_service_finite_generator_t){model, &vtable};
+  return (loom_service_finite_generator_t){
+      .self = model,
+      .vtable = &vtable,
+      .device_ordinal = iree_hal_device_topology_info(
+                            loom_runtime_device_handle(model->owner))
+                            ->topology_index};
 }

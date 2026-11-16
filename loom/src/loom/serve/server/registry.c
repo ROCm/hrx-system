@@ -737,8 +737,9 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
           registry->host_allocator, &model->resolution);
     } else {
       model->status = registry->factory.create(
-          registry->factory.self, &model->configuration, observer,
-          model->stream, registry->host_allocator, &model->registration);
+          registry->factory.self, &model->configuration, model->incarnation,
+          observer, model->stream, registry->host_allocator,
+          &model->registration);
     }
     if (!iree_status_is_ok(model->status)) {
       loom_serve_registry_set_phase(model, LOOM_SERVE_REGISTRATION_FAILED);
@@ -760,8 +761,9 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
         if (!model->closed || model->parameter_operation ==
                                   LOOM_SERVE_PARAMETER_OPERATION_WAITING) {
           model->status = registry->factory.create(
-              registry->factory.self, &model->configuration, observer,
-              model->stream, registry->host_allocator, &model->registration);
+              registry->factory.self, &model->configuration, model->incarnation,
+              observer, model->stream, registry->host_allocator,
+              &model->registration);
         } else {
           // Resolve model facts while drained without preparing programs or
           // parameters. Component management can then use the declared roles.

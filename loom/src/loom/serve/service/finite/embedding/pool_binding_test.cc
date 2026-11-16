@@ -35,10 +35,11 @@ class PoolBindingTest : public SourceEmbeddingServiceTest {
         package, loom_runtime_device_group_at(group_, 0), shared_, &producer_));
     ASSERT_NO_FATAL_FAILURE(Load(package, device_, shared_, &peer_));
     ASSERT_NO_FATAL_FAILURE(Load(package, device_, isolated_, &model_));
+    scheduling_.Reset();
     IREE_ASSERT_OK(loom_service_finite_service_allocate(
         host_, loom_service_finite_model_generator(model_),
         loom_service_embedding_protocol(), IREE_SV("fixture"), 16, 16, 0,
-        nullptr, host_allocator_, &service_));
+        nullptr, scheduling_.binding(), host_allocator_, &service_));
     interface_ = loom_serve_finite_http_interface(service_);
     EXPECT_EQ(interface_.runtime.capacity_domain,
               loom_runtime_pool_residency_cache(isolated_));

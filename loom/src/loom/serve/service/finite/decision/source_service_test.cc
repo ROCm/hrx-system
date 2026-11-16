@@ -22,6 +22,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/runtime/testing/application.h"
+#include "loom/runtime/testing/service_control.h"
 #include "loom/serve/server/resources.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/finite/http.h"
@@ -76,7 +77,7 @@ class SourceDecisionServiceTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_service_finite_service_allocate(
         host_, loom_service_finite_model_generator(models_[0]),
         loom_service_decision_protocol(), IREE_SV("decisions"), 16, 16, 0,
-        nullptr, host_allocator_, &services_[0]));
+        nullptr, scheduling_[0].binding(), host_allocator_, &services_[0]));
     interfaces_[0] = loom_serve_finite_http_interface(services_[0]);
     EXPECT_EQ(interfaces_[0].runtime.capacity_domain,
               loom_runtime_pool_residency_cache(storage_owner_));
@@ -200,7 +201,7 @@ class SourceDecisionServiceTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_service_finite_service_allocate(
         host_, loom_service_finite_model_generator(models_[1]),
         loom_service_embedding_protocol(), IREE_SV("vectors"), 16, 16, 0,
-        nullptr, host_allocator_, &services_[1]));
+        nullptr, scheduling_[1].binding(), host_allocator_, &services_[1]));
     interfaces_[1] = loom_serve_finite_http_interface(services_[1]);
     interfaces_[0].runtime.vtable->set_observer(interfaces_[0].runtime.self,
                                                 {});
@@ -238,6 +239,8 @@ class SourceDecisionServiceTest : public ::testing::Test {
   loom_service_finite_model_t* models_[2] = {};
   // Bounded modality services borrowing the corresponding models.
   loom_service_finite_service_t* services_[2] = {};
+  // Each stable composition slot owns its observation storage.
+  loom_runtime::testing::ServiceControl scheduling_[2];
   // Exact production scheduling and routing interfaces.
   loom_serve_service_t interfaces_[2] = {};
   // Shared HTTP connection and request owner.
@@ -403,10 +406,11 @@ TEST_F(SourceDecisionServiceTest, AdmissionAllocationFailureRetiresHttpClaim) {
         return system.ctl(system.self, command, parameters, pointer);
       }};
   loom_service_finite_service_t* service = nullptr;
+  loom_runtime::testing::ServiceControl scheduling;
   IREE_ASSERT_OK(loom_service_finite_service_allocate(
       host_, loom_service_finite_model_generator(models_[0]),
       loom_service_decision_protocol(), IREE_SV("decisions"), 1, 0, 0, nullptr,
-      allocator, &service));
+      scheduling.binding(), allocator, &service));
   std::unique_ptr<loom_service_finite_service_t,
                   decltype(&loom_service_finite_service_free)>
       owner(service, loom_service_finite_service_free);

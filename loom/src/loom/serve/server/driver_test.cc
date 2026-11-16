@@ -271,7 +271,7 @@ TEST(RegistrationOwnershipTest, DrainDoesNotRequireAnObservationSnapshot) {
       .pool_count = 1,
       .pools = &pool,
       .create =
-          [](void* self, const loom_serve_model_configuration_t*,
+          [](void* self, const loom_serve_model_configuration_t*, uint64_t,
              loom_runtime_wake_callback_t, loom_runtime_telemetry_stream_t*,
              iree_allocator_t, loom_serve_registration_t* out_registration) {
             *out_registration = {

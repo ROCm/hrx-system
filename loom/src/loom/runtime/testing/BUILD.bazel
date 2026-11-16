@@ -13,6 +13,17 @@ package(
 )
 
 loom_cc_library(
+    name = "service_control",
+    testonly = True,
+    hdrs = ["service_control.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime:service_control",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "native_allocator",
     testonly = True,
     hdrs = ["native_allocator.h"],

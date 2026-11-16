@@ -235,7 +235,8 @@ void SourceEmbeddingServiceTest::CreateService(
   IREE_ASSERT_OK(loom_service_finite_service_allocate(
       host_, loom_service_finite_model_generator(model_),
       loom_service_embedding_protocol(), IREE_SV("fixture"), 16, 16,
-      heartbeat_interval, nullptr, host_allocator_, &service_));
+      heartbeat_interval, nullptr, scheduling_.binding(), host_allocator_,
+      &service_));
   interface_ = loom_serve_finite_http_interface(service_);
   EXPECT_EQ(interface_.runtime.capacity_domain,
             loom_runtime_pool_residency_cache(storage_owner_));

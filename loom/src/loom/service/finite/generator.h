@@ -83,6 +83,9 @@ typedef struct loom_service_finite_generator_t {
   void* self;
   // Immutable source operations, outliving self.
   const loom_service_finite_generator_vtable_t* vtable;
+  // Execution device in the enclosing immutable HAL group. The native finite
+  // source has one placement; its stages share this device's execution domain.
+  uint64_t device_ordinal;
 } loom_service_finite_generator_t;
 
 #ifdef __cplusplus

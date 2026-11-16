@@ -20,6 +20,8 @@ struct loom_service_finite_registration_t {
   loom_service_finite_model_t* model;
   // Owned service, destroyed after all request and CPU borrowers retire.
   loom_service_finite_service_t* service;
+  // Tail-allocated observations, retained independently of model residency.
+  loom_runtime_service_control_t* control;
   // Explicit warmup, joined before model retirement.
   loom_runtime_activation_t* activation;
   // Model consumers have been relinquished with an ownership wake installed.
@@ -33,20 +35,41 @@ iree_status_t loom_service_finite_registration_allocate(
     loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_service_finite_registration_t** out_registration) {
   *out_registration = NULL;
+  const iree_host_size_t use_capacities[] = {1};
+  const loom_runtime_service_offer_capacity_t offers[] = {{1, use_capacities}};
+  const loom_runtime_service_control_capacity_t capacity = {
+      .offer_capacity = 1,
+      .offers = offers,
+      .operation_capacity = 1,
+      .operation_use_capacities = use_capacities};
+  iree_host_size_t control_length = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_runtime_service_control_size(&capacity, &control_length));
+  iree_host_size_t allocation_length = 0, control_offset = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      sizeof(loom_service_finite_registration_t), &allocation_length,
+      IREE_STRUCT_FIELD_ALIGNED(control_length, uint8_t, 64, &control_offset)));
   loom_service_finite_registration_t* registration = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      host_allocator, sizeof(*registration), (void**)&registration));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_aligned(
+      host_allocator, allocation_length, 64, 0, (void**)&registration));
   registration->host_allocator = host_allocator;
   registration->device = device;
   registration->options = *options;
   registration->observer = observer;
-  iree_status_t status = loom_service_finite_load_allocate(
-      device, pool, model_options, observer.wake, observer.user_data,
-      host_allocator, &registration->load);
+  iree_status_t status = loom_runtime_service_control_initialize(
+      &capacity, options->incarnation,
+      iree_make_byte_span((uint8_t*)registration + control_offset,
+                          control_length),
+      &registration->control);
+  if (iree_status_is_ok(status)) {
+    status = loom_service_finite_load_allocate(
+        device, pool, model_options, observer.wake, observer.user_data,
+        host_allocator, &registration->load);
+  }
   if (iree_status_is_ok(status)) {
     *out_registration = registration;
   } else {
-    iree_allocator_free(host_allocator, registration);
+    iree_allocator_free_aligned(host_allocator, registration);
   }
   return status;
 }
@@ -79,6 +102,8 @@ iree_status_t loom_service_finite_registration_prepare(
         loom_service_finite_model_generator(registration->model),
         options->protocol, options->name, options->capacity,
         options->variant_capacity, options->heartbeat_interval, options->stream,
+        (loom_runtime_service_control_binding_t){.control =
+                                                     registration->control},
         registration->host_allocator, &registration->service);
   }
   if (iree_status_is_ok(status)) {
@@ -141,12 +166,22 @@ iree_status_t loom_service_finite_registration_retire(
   IREE_RETURN_IF_ERROR(
       loom_service_finite_model_free_retired(registration->model));
   registration->model = NULL;
+  const loom_runtime_service_operation_t operation = {0};
+  loom_runtime_service_publish_operation(registration->control, &operation,
+                                         NULL);
+  const loom_runtime_service_observation_t observation = {0};
+  loom_runtime_service_publish_observation(registration->control, &observation);
   return iree_ok_status();
 }
 
 void loom_service_finite_registration_free(
     loom_service_finite_registration_t* registration) {
   if (registration) {
-    iree_allocator_free(registration->host_allocator, registration);
+    iree_allocator_free_aligned(registration->host_allocator, registration);
   }
+}
+
+const loom_runtime_service_control_t* loom_service_finite_registration_control(
+    const loom_service_finite_registration_t* registration) {
+  return registration->control;
 }
