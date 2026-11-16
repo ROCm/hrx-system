@@ -19,7 +19,8 @@ extern "C" {
 typedef struct loom_serve_router_options_t {
   // Positive per-turn limit on new transport claims and, independently, on
   // previously held claims released into model admission and telemetry batches
-  // formatted for live observers.
+  // formatted for live observers. Also bounds native scheduling evaluations
+  // and decision attempts separately; accepted work always progresses.
   iree_host_size_t request_quota;
   // Global requests parked behind closed model admission gates. Must be below
   // transport connection capacity so holding alone cannot exclude control.

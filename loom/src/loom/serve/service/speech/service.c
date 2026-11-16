@@ -1632,14 +1632,7 @@ iree_status_t loom_serve_speech_service_try_schedule(
 
 static iree_status_t loom_serve_speech_advance(
     void* self, loom_runtime_service_flags_t flags, bool* out_progress) {
-  loom_serve_speech_service_t* service = self;
-  IREE_RETURN_IF_ERROR(
-      loom_serve_speech_service_progress(service, flags, out_progress));
-  loom_runtime_service_operation_key_t operation;
-  iree_status_t status = loom_serve_speech_service_try_schedule(
-      service, service->scheduling.offer.key, 0, flags, &operation);
-  *out_progress |= operation.serial != 0;
-  return status;
+  return loom_serve_speech_service_progress(self, flags, out_progress);
 }
 
 static iree_status_t loom_serve_speech_try_schedule(

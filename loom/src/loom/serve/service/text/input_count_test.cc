@@ -180,8 +180,7 @@ TEST_F(InputCountTest, StopJoinsBorrowedHeadAndCancelsQueuedQueries) {
         interface_.runtime.vtable->is_pending(interface_.runtime.self));
     EXPECT_EQ(interface_.snapshot(interface_.runtime.self).queued_requests, 2u);
     bool progress = false;
-    IREE_ASSERT_OK(interface_.runtime.vtable->advance(interface_.runtime.self,
-                                                      0, &progress));
+    IREE_ASSERT_OK(schedule_.Advance(&interface_.runtime, 0, &progress));
     EXPECT_TRUE(progress);
     // The sole worker is still running this owner turn, so the first query
     // cannot have released its CPU loan. Stopping may cancel only the tail.
@@ -222,8 +221,7 @@ TEST_F(InputCountTest, FullQueueRejectsWithoutDisturbingAcceptedQueries) {
     EXPECT_EQ(interface_.snapshot(interface_.runtime.self).queued_requests, 2u);
     EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 0u);
     bool progress = false;
-    IREE_ASSERT_OK(interface_.runtime.vtable->advance(interface_.runtime.self,
-                                                      0, &progress));
+    IREE_ASSERT_OK(schedule_.Advance(&interface_.runtime, 0, &progress));
     EXPECT_TRUE(progress);
     EXPECT_EQ(interface_.snapshot(interface_.runtime.self).queued_requests, 1u);
     EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 1u);
@@ -254,8 +252,7 @@ TEST_F(InputCountTest, DisconnectRetiresTheHeadBeforeReusingItsClaim) {
                                        requests[i], 0));
     }
     bool progress = false;
-    IREE_ASSERT_OK(interface_.runtime.vtable->advance(interface_.runtime.self,
-                                                      0, &progress));
+    IREE_ASSERT_OK(schedule_.Advance(&interface_.runtime, 0, &progress));
     EXPECT_TRUE(progress);
   });
   const linger reset = {1, 0};

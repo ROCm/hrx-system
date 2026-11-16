@@ -23,6 +23,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/runtime/testing/application.h"
 #include "loom/runtime/testing/service_control.h"
+#include "loom/runtime/testing/service_schedule.h"
 #include "loom/serve/server/resources.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/finite/http.h"
@@ -167,8 +168,7 @@ class SourceDecisionServiceTest : public ::testing::Test {
     const uint64_t previous = wakes_.load();
     IREE_EXPECT_OK(loom_runtime_device_group_advance(resources_.device_group));
     bool progress = false;
-    IREE_EXPECT_OK(interfaces_[0].runtime.vtable->advance(
-        interfaces_[0].runtime.self, 0, &progress));
+    IREE_EXPECT_OK(schedule_.Advance(&interfaces_[0].runtime, 0, &progress));
     if (interfaces_[0].runtime.vtable->is_active(interfaces_[0].runtime.self) ||
         loom_runtime_device_group_is_pending(resources_.device_group)) {
       struct loom_serve_test_decision_wait_t {
@@ -239,6 +239,8 @@ class SourceDecisionServiceTest : public ::testing::Test {
   loom_service_finite_model_t* models_[2] = {};
   // Bounded modality services borrowing the corresponding models.
   loom_service_finite_service_t* services_[2] = {};
+  // Reusable explicit default-policy decisions.
+  loom_runtime::testing::ServiceSchedule schedule_;
   // Each stable composition slot owns its observation storage.
   loom_runtime::testing::ServiceControl scheduling_[2] = {
       loom_runtime::testing::ServiceControl(1 + 16),

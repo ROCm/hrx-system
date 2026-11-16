@@ -11,6 +11,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/runtime/program/package.h"
+#include "loom/runtime/testing/service_schedule.h"
 #include "loom/serve/server/registry.h"
 
 namespace {
@@ -322,6 +323,11 @@ TEST_F(ModelResolutionTest, RemovalJoinsResolutionBeforeReleasingDeclaration) {
   bool progress = false;
   IREE_ASSERT_OK(
       loom_serve_registry_advance(registry, index, Observer(), &progress));
+  EXPECT_FALSE(progress);
+  EXPECT_EQ(task_, nullptr);
+  loom_runtime::testing::ServiceSchedule schedule;
+  IREE_ASSERT_OK(schedule.Advance(
+      &loom_serve_registry_services(registry)[index], 0, &progress));
   ASSERT_TRUE(progress);
   ASSERT_NE(task_, nullptr);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,

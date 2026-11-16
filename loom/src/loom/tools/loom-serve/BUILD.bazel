@@ -89,8 +89,10 @@ loom_cc_library(
     hdrs = ["activity_test.h"],
     deps = [
         ":options",
+        "//loom/src/loom/runtime:driver",
         "//loom/src/loom/runtime/device",
         "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/testing:service_schedule",
         "//loom/src/loom/runtime/testing:worker_gate",
         "//loom/src/loom/serve/server:configuration",
         "//loom/src/loom/serve/server:device_configuration",

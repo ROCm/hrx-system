@@ -6,6 +6,8 @@
 
 #include "iree/base/tooling/flags.h"
 #include "loom/runtime/device/device.h"
+#include "loom/runtime/driver.h"
+#include "loom/runtime/testing/service_schedule.h"
 #include "loom/serve/service/text/checkpoint_control.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/stream.h"
@@ -336,23 +338,20 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
                                  IREE_ALL_WAITERS);
         },
         notification};
+    loom_runtime::testing::ServiceSchedule schedule;
+    loom_serve_registry_set_advance_observer(registry_, wake, {});
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
       auto status = loom_runtime_device_group_advance(group_);
-      if (iree_status_is_ok(status) &&
-          Model()->phase == LOOM_SERVE_REGISTRATION_READY) {
-        auto& service = Model()->service;
-        status = service.runtime.vtable->advance(
-            service.runtime.self, loom_serve_registry_service_flags(Model()),
-            &progress);
-      }
       bool registry_progress = false;
       if (iree_status_is_ok(status)) {
-        status = loom_serve_registry_advance(registry_, index_, wake,
-                                             &registry_progress);
+        status =
+            schedule.Advance(&loom_serve_registry_services(registry_)[index_],
+                             0, &registry_progress);
       }
-      status = iree_status_join(status, iree_status_clone(Model()->status));
+      status = iree_status_join(
+          status, iree_status_clone(loom_serve_registry_state(Model()).status));
       if (ready() || progress || registry_progress ||
           !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(notification);
@@ -366,8 +365,10 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
 
   void Prepare() {
     Model()->closed = false;
-    ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil(
-        [&] { return Model()->phase == LOOM_SERVE_REGISTRATION_READY; }));
+    ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] {
+      return loom_serve_registry_state(Model()).phase ==
+             LOOM_SERVICE_REGISTRATION_READY;
+    }));
   }
 
   bool Idle() {
@@ -596,7 +597,8 @@ TEST_F(NativeTextRegistryTest, StalledNativeAndHttpPeerRetainDetachedResult) {
   NativeStream stream(nullptr, loom_serve_text_stream_close);
   IREE_ASSERT_OK(Open(body_, "native", &stream));
   EXPECT_EQ(stream, nullptr);
-  EXPECT_EQ(Model()->phase, LOOM_SERVE_REGISTRATION_DECLARED);
+  EXPECT_EQ(loom_serve_registry_state(Model()).phase,
+            LOOM_SERVICE_REGISTRATION_DECLARED);
   ASSERT_NO_FATAL_FAILURE(Prepare());
   IREE_ASSERT_OK(Open(body_, "native", &stream));
   ASSERT_NE(stream, nullptr);
@@ -668,11 +670,12 @@ TEST_F(NativeTextRegistryTest, AbortRetiresAcceptedWorkBeforeReleasingInput) {
   OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
     IREE_ASSERT_OK(Open(body_, "second", &second));
     ASSERT_NE(second, nullptr);
-    bool progress = false;
-    auto& service = Model()->service;
-    IREE_ASSERT_OK(
-        service.runtime.vtable->advance(service.runtime.self, 0, &progress));
-    EXPECT_TRUE(progress);
+    // Grant the independent CPU offer before collecting the device epoch.
+    loom_runtime_driver_t driver;
+    loom_runtime_driver_initialize(
+        1, &loom_serve_registry_services(registry_)[index_], &driver);
+    EXPECT_TRUE(schedule_.Schedule(&driver));
+    IREE_ASSERT_OK(driver.status);
     EXPECT_EQ(Model()->service.telemetry.counters->batches, 0u);
     // The owner has accepted the independent preparation loan. With one worker
     // it cannot start until this turn returns; additional workers may already
@@ -919,7 +922,8 @@ TEST_F(NativeTextRegistryTest, NativeCheckpointReleaseDoesNotPrepareModel) {
       OpenCheckpoint(LOOM_SERVE_TEXT_CHECKPOINT_ACTION_RELEASE, "absent", "",
                      &released));
   EXPECT_EQ(released, nullptr);
-  EXPECT_EQ(Model()->phase, LOOM_SERVE_REGISTRATION_DECLARED);
+  EXPECT_EQ(loom_serve_registry_state(Model()).phase,
+            LOOM_SERVICE_REGISTRATION_DECLARED);
   EXPECT_TRUE(Model()->closed);
 }
 
@@ -937,8 +941,8 @@ TEST_F(NativeTextRegistryTest,
   ASSERT_NE(submitted, nullptr);
   auto& service = Model()->service;
   bool progress = false;
-  IREE_ASSERT_OK(
-      service.runtime.vtable->advance(service.runtime.self, 0, &progress));
+  IREE_ASSERT_OK(schedule_.Advance(
+      &loom_serve_registry_services(registry_)[index_], 0, &progress));
   ASSERT_TRUE(progress);
   ASSERT_FALSE(loom_serve_text_checkpoint_control_is_complete(submitted.get()));
   ASSERT_EQ(service.snapshot(service.runtime.self).active_requests, 1u);

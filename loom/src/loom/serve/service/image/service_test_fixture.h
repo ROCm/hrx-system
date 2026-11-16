@@ -39,6 +39,7 @@
 #include "loom/runtime/telemetry/stream.h"
 #include "loom/runtime/testing/application.h"
 #include "loom/runtime/testing/service_control.h"
+#include "loom/runtime/testing/service_schedule.h"
 #include "loom/runtime/testing/stalled_stderr.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
@@ -389,8 +390,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
       while (!ready()) {
         const auto ticket = iree_notification_prepare_wait(notification);
         bool progress = false;
-        IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
-                                                         flags, &progress));
+        IREE_ASSERT_OK(schedule_.Advance(&interface.runtime, flags, &progress));
         if (ready() || progress) {
           iree_notification_cancel_wait(notification);
         } else {
@@ -742,6 +742,8 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
   std::string directory_;
   // Real source-JIT model with two kernels and reflected private workspace.
   loom_serve_image_model_t* model_ = nullptr;
+  // Reusable explicit default-policy decisions.
+  loom_runtime::testing::ServiceSchedule schedule_;
   // Retained cohort and management observations, enclosing model teardown.
   loom_runtime::testing::ServiceControl scheduling_{17};
   // Production loopback carrier and request claim owner.

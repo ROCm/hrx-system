@@ -1006,21 +1006,7 @@ iree_status_t loom_service_finite_service_progress(
 
 static iree_status_t loom_service_finite_advance(
     void* self, loom_runtime_service_flags_t flags, bool* out_progress) {
-  loom_service_finite_service_t* service = self;
-  IREE_RETURN_IF_ERROR(
-      loom_service_finite_service_progress(service, flags, out_progress));
-  loom_runtime_service_offer_t offer;
-  if (loom_runtime_service_read_offer(service->scheduling.binding.control,
-                                      service->scheduling.binding.offer_ordinal,
-                                      &offer) !=
-      LOOM_RUNTIME_SERVICE_READ_COMPLETE) {
-    return iree_ok_status();
-  }
-  loom_runtime_service_operation_key_t operation;
-  iree_status_t status = loom_service_finite_service_try_schedule(
-      service, offer.key, 0, flags, &operation);
-  *out_progress |= operation.serial != 0;
-  return status;
+  return loom_service_finite_service_progress(self, flags, out_progress);
 }
 
 static iree_status_t loom_service_finite_job_allocate(

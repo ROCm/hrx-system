@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "iree/hal/api.h"
+#include "loom/runtime/device/pool.h"
 #include "loom/service/finite/component.h"
 
 typedef struct loom_serve_text_registration_t {
@@ -334,9 +335,10 @@ iree_status_t loom_serve_text_registration_allocate(
           (images ? 1u << LOOM_SERVICE_MODEL_COMPONENT_IMAGE : 0),
       iree_hal_device_topology_info(loom_runtime_device_handle(device))
           ->topology_index,
+      loom_runtime_pool_residency_cache(pool),
       loom_runtime_service_control_binding(control, 1 + 2 * images,
                                            operation_capacity - 2, 0),
-      observer, &registration->registration);
+      observer, options->name, stream, &registration->registration);
   loom_serve_text_options_t copied_options = *model_options;
   if (model_options->epoch_count) {
     loom_serve_packing_shape_t* shapes =

@@ -6,11 +6,13 @@
 
 #include "loom/serve/server/driver.h"
 
+#include <algorithm>
 #include <array>
 #include <vector>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/runtime/testing/service_schedule.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/service/registration.h"
 
@@ -159,8 +161,8 @@ TEST_F(DriverTest, CapacityWaitingRequiresActivityInTheSameNonnullDomain) {
   second->service.runtime.capacity_domain = nullptr;
   // These controlled dependencies change their publication together; actual
   // model publication updates the capability at its owning transition.
-  driver_.runtime.services[0].capacity_domain = nullptr;
-  driver_.runtime.services[1].capacity_domain = nullptr;
+  loom_serve_registry_services(driver_.registry)[0].capacity_domain = nullptr;
+  loom_serve_registry_services(driver_.registry)[1].capacity_domain = nullptr;
   EXPECT_EQ(loom_serve_driver_shared_activity(&driver_, 0), 0u);
   services_[1].pending = false;
 }
@@ -261,8 +263,11 @@ TEST(EmptyDriverTest, ZeroSlotsCanStopWithoutWorkOrPolling) {
 }
 
 TEST(RegistrationOwnershipTest, DrainDoesNotRequireAnObservationSnapshot) {
-  std::vector<size_t> retired;
-  Service service = {.visits = &retired};
+  std::vector<size_t> visits;
+  Service service = {.visits = &visits};
+  const auto retirement_count = [&] {
+    return std::count(visits.begin(), visits.end(), size_t{1});
+  };
   const iree_string_view_t device_name = IREE_SV("device");
   const loom_runtime_pool_binding_t pool = {IREE_SV("pool"), 1};
   struct Registration {
@@ -351,9 +356,9 @@ TEST(RegistrationOwnershipTest, DrainDoesNotRequireAnObservationSnapshot) {
             registration->allocator = allocator;
             loom_service_registration_initialize(
                 &vtable, registration,
-                1u << LOOM_SERVICE_MODEL_COMPONENT_PRIMARY, 0,
+                1u << LOOM_SERVICE_MODEL_COMPONENT_PRIMARY, 0, nullptr,
                 loom_runtime_service_control_binding(control, 0, 0, 0),
-                observer, &registration->native);
+                observer, IREE_SV("managed"), nullptr, &registration->native);
             *out_registration = {
                 .native = &registration->native,
                 .service =
@@ -389,8 +394,24 @@ TEST(RegistrationOwnershipTest, DrainDoesNotRequireAnObservationSnapshot) {
       loom_serve_registry_register(registry, &configuration, &index));
   bool progress = false;
   IREE_ASSERT_OK(loom_serve_registry_advance(registry, index, {}, &progress));
+  EXPECT_FALSE(progress);
+  loom_runtime::testing::ServiceSchedule schedule;
+  const auto cold_incarnation =
+      loom_runtime_service_control_layout(
+          loom_serve_registry_services(registry)[index].control)
+          .incarnation;
+  IREE_ASSERT_OK(schedule.Advance(
+      &loom_serve_registry_services(registry)[index], 0, &progress));
+  EXPECT_NE(loom_runtime_service_control_layout(
+                loom_serve_registry_services(registry)[index].control)
+                .incarnation,
+            cold_incarnation);
+  IREE_ASSERT_OK(schedule.Advance(
+      &loom_serve_registry_services(registry)[index], 0, &progress));
+  IREE_ASSERT_OK(loom_serve_registry_advance(registry, index, {}, &progress));
   auto* model = loom_serve_registry_at(registry, index);
-  ASSERT_EQ(model->phase, LOOM_SERVE_REGISTRATION_READY);
+  ASSERT_EQ(loom_serve_registry_state(model).phase,
+            LOOM_SERVICE_REGISTRATION_READY);
   ASSERT_EQ(model->service.snapshot, nullptr);
   IREE_ASSERT_OK(loom_serve_registry_remove(model, LOOM_SERVE_REMOVAL_DRAIN));
 
@@ -399,14 +420,14 @@ TEST(RegistrationOwnershipTest, DrainDoesNotRequireAnObservationSnapshot) {
   EXPECT_EQ(loom_serve_registry_service_flags(model), 0u);
   IREE_ASSERT_OK(loom_serve_registry_advance(registry, index, {}, &progress));
   EXPECT_FALSE(progress);
-  EXPECT_TRUE(retired.empty());
+  EXPECT_EQ(retirement_count(), 0);
 
   service.requests = false;
   model->tokenizer_count = 1;
   EXPECT_EQ(loom_serve_registry_service_flags(model), 0u);
   IREE_ASSERT_OK(loom_serve_registry_advance(registry, index, {}, &progress));
   EXPECT_FALSE(progress);
-  EXPECT_TRUE(retired.empty());
+  EXPECT_EQ(retirement_count(), 0);
 
   // Idle callbacks still borrow storage but must not prevent stopping them.
   model->tokenizer_count = 0;
@@ -414,19 +435,22 @@ TEST(RegistrationOwnershipTest, DrainDoesNotRequireAnObservationSnapshot) {
   EXPECT_EQ(loom_serve_registry_service_flags(model),
             LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
   IREE_ASSERT_OK(loom_serve_registry_advance(registry, index, {}, &progress));
-  EXPECT_FALSE(progress);
-  EXPECT_TRUE(retired.empty());
+  EXPECT_TRUE(progress);
+  EXPECT_EQ(retirement_count(), 0);
 
   service.pending = false;
   model->held_count = 1;
   IREE_ASSERT_OK(loom_serve_registry_advance(registry, index, {}, &progress));
   EXPECT_FALSE(progress);
-  EXPECT_TRUE(retired.empty());
+  EXPECT_EQ(retirement_count(), 0);
 
   model->held_count = 0;
   IREE_ASSERT_OK(loom_serve_registry_advance(registry, index, {}, &progress));
   EXPECT_TRUE(progress);
-  EXPECT_EQ(retired, std::vector<size_t>{1});
+  EXPECT_EQ(retirement_count(), 0);
+  IREE_ASSERT_OK(loom_serve_registry_advance(registry, index, {}, &progress));
+  EXPECT_TRUE(progress);
+  EXPECT_EQ(retirement_count(), 1);
   EXPECT_EQ(loom_serve_registry_count(registry), 0u);
   IREE_EXPECT_OK(loom_serve_registry_free(registry));
 }

@@ -27,6 +27,7 @@
 #include "loom/runtime/testing/application.h"
 #include "loom/runtime/testing/native_allocator.h"
 #include "loom/runtime/testing/service_control.h"
+#include "loom/runtime/testing/service_schedule.h"
 #include "loom/runtime/testing/worker_gate.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
@@ -413,6 +414,8 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
   loom_serve_http_listener_t* listener_ = nullptr;
   // Readiness-driven client and optional outer router thread.
   loom_serve::testing::HttpHarness http_;
+  // Reusable explicit default-policy decisions.
+  loom_runtime::testing::ServiceSchedule schedule_;
   // Parent-owned observations outlive the service. Its nonzero slot ranges
   // exercise composition without assuming the engine owns the whole control.
   loom_runtime::testing::ServiceControl control_{4, 2};
@@ -1405,8 +1408,7 @@ TEST_P(SourceVoiceServiceTest,
           loom_runtime_host_executor(host_)));
     }
     bool progress = false;
-    IREE_ASSERT_OK(interface_.runtime.vtable->advance(interface_.runtime.self,
-                                                      0, &progress));
+    IREE_ASSERT_OK(schedule_.Advance(&interface_.runtime, 0, &progress));
     EXPECT_TRUE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
     const auto cancelled = interface_.telemetry.counters->cancelled;
     upload.reset();
@@ -1441,8 +1443,7 @@ TEST_P(SourceVoiceServiceTest,
         loom_runtime_host_executor(host_)));
   }
   bool progress = false;
-  IREE_ASSERT_OK(interface_.runtime.vtable->advance(interface_.runtime.self, 0,
-                                                    &progress));
+  IREE_ASSERT_OK(schedule_.Advance(&interface_.runtime, 0, &progress));
   IREE_ASSERT_OK(interface_.runtime.vtable->advance(
       interface_.runtime.self, LOOM_RUNTIME_SERVICE_FLAG_STOPPING, &progress));
   EXPECT_FALSE(loom_serve_speech_voice_upload_is_complete(upload.get()));

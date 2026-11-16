@@ -29,6 +29,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/host",
         "//loom/src/loom/runtime/testing:application",
         "//loom/src/loom/runtime/testing:service_control",
+        "//loom/src/loom/runtime/testing:service_schedule",
         "//loom/src/loom/serve/server:registry",
         "//loom/src/loom/serve/server:resources",
         "//loom/src/loom/serve/server:router",

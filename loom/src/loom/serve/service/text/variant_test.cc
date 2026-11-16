@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <mutex>
 
+#include "loom/runtime/driver.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 
 namespace {
@@ -434,9 +435,15 @@ TEST_F(ReconfigurationTextServiceTest,
         ASSERT_NO_FATAL_FAILURE(Select(id));
         EXPECT_FALSE(selection_.called);
         EXPECT_EQ(configuration_.selected(configuration_.self), original_);
+        // Grant the published independent CPU offer before collecting the
+        // device epoch and applying the pending variant selection.
+        loom_runtime_driver_t driver;
+        loom_runtime_driver_initialize(1, &interface_.runtime, &driver);
+        EXPECT_TRUE(schedule_.Schedule(&driver));
+        IREE_ASSERT_OK(driver.status);
         bool progress = false;
-        IREE_ASSERT_OK(interface_.runtime.vtable->advance(
-            interface_.runtime.self, 0, &progress));
+        loom_runtime_driver_advance(&driver, &progress);
+        IREE_ASSERT_OK(driver.status);
         // The accepted CPU task cannot retire while its sole worker runs this
         // turn, even if the outstanding device epoch is already ready.
         EXPECT_FALSE(selection_.called);
@@ -560,14 +567,12 @@ TEST_F(ReconfigurationTextServiceTest,
         IREE_ASSERT_OK(
             interface_.accept(interface_.runtime.self, connection, request, 0));
         bool progress = false;
-        IREE_ASSERT_OK(interface_.runtime.vtable->advance(
-            interface_.runtime.self, 0, &progress));
+        IREE_ASSERT_OK(schedule_.Advance(&interface_.runtime, 0, &progress));
         EXPECT_TRUE(progress);
         EXPECT_TRUE(
             interface_.runtime.vtable->is_pending(interface_.runtime.self));
         ASSERT_NO_FATAL_FAILURE(Select(id));
-        IREE_ASSERT_OK(interface_.runtime.vtable->advance(
-            interface_.runtime.self, 0, &progress));
+        IREE_ASSERT_OK(schedule_.Advance(&interface_.runtime, 0, &progress));
         EXPECT_FALSE(selection_.called);
         EXPECT_EQ(configuration_.selected(configuration_.self), original_);
       });

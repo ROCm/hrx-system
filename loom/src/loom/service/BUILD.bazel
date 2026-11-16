@@ -23,6 +23,9 @@ loom_cc_library(
         "//loom/src/loom/runtime/parameter:activation",
         "//loom/src/loom/runtime/parameter:residency",
         "//loom/src/loom/runtime/program:compilation",
+        "//loom/src/loom/runtime/telemetry:stream",
+        "//loom/src/loom/service/telemetry:record",
+        "//loom/src/loom/service/telemetry:tracing",
         "//runtime/src/iree/base",
     ],
 )

@@ -254,8 +254,10 @@ static iree_status_t loom_serve_http_variant_model(
     if (!name.size || !iree_string_view_equal(name, model->service.name)) {
       continue;
     }
-    if (model->removal || model->phase != LOOM_SERVE_REGISTRATION_READY ||
-        !iree_status_is_ok(model->status)) {
+    if (model->removal ||
+        loom_serve_registry_state(model).phase !=
+            LOOM_SERVICE_REGISTRATION_READY ||
+        !iree_status_is_ok(loom_serve_registry_state(model).status)) {
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "model has no healthy live service");
     }
@@ -641,7 +643,8 @@ iree_status_t loom_serve_http_variants_advance(
           &model->service.reconfiguration;
       loom_runtime_variant_snapshot_t snapshot;
       if (model->incarnation != wait->incarnation || model->removal ||
-          model->phase != LOOM_SERVE_REGISTRATION_READY) {
+          loom_serve_registry_state(model).phase !=
+              LOOM_SERVICE_REGISTRATION_READY) {
         status = loom_serve_http_response_reject(
             variants->server, wait->connection, 410, "Gone",
             IREE_SV("model registration is retiring"), scratch);

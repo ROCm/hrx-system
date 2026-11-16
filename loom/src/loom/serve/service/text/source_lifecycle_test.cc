@@ -737,8 +737,7 @@ TEST_F(SourceTextServiceTest, StoppingAccountsForQueuedControlAndCpuBorrowers) {
       Send(Request(Message("user", "ab")), "X-Loom-Session: first\r\n");
   ASSERT_NO_FATAL_FAILURE(accept(generation));
   bool progress = false;
-  IREE_ASSERT_OK(
-      interface.runtime.vtable->advance(interface.runtime.self, 0, &progress));
+  IREE_ASSERT_OK(schedule_.Advance(&interface.runtime, 0, &progress));
   EXPECT_TRUE(progress);
   // CPU completion may already be posted, but only the owner can consume it.
   // Checkpoint and generation claims queue behind that real accepted borrower.

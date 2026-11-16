@@ -189,7 +189,7 @@ class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest,
   // Exercise the same native registry adapter at an exact serialized boundary.
   // The sole shared worker cannot run newly queued preparation/readiness work
   // until this owner turn returns; removal never relies on elapsed time.
-  void RemoveDuring(loom_serve_parameter_operation_t operation) {
+  void RemoveDuring(loom_runtime_activation_phase_t phase) {
     IREE_ASSERT_OK(loom_serve_text_model_free(model_));
     model_ = nullptr;
     const auto declaration = ImageDeclaration();
@@ -218,41 +218,43 @@ class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest,
                                  IREE_ALL_WAITERS);
         },
         notification};
+    loom_serve_registry_set_advance_observer(registry, observer, {});
     bool image_started = false;
     bool removed = false;
     while (model->incarnation && !HasFatalFailure()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
       OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
-        if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
-          IREE_ASSERT_OK(model->service.runtime.vtable->advance(
-              model->service.runtime.self,
-              loom_serve_registry_service_flags(model), &progress));
-        }
         bool advanced = false;
-        IREE_ASSERT_OK(
-            loom_serve_registry_advance(registry, index, observer, &advanced));
+        IREE_ASSERT_OK(schedule_.Advance(
+            &loom_serve_registry_services(registry)[index], 0, &advanced));
         progress |= advanced;
-        IREE_ASSERT_OK(iree_status_clone(model->status));
-        if (model->phase != LOOM_SERVE_REGISTRATION_READY || removed) {
+        IREE_ASSERT_OK(
+            iree_status_clone(loom_serve_registry_state(model).status));
+        if (loom_serve_registry_state(model).phase !=
+                LOOM_SERVICE_REGISTRATION_READY ||
+            removed) {
           return;
         }
         if (!image_started &&
-            model->parameter_operation == LOOM_SERVE_PARAMETER_OPERATION_NONE) {
+            loom_serve_registry_state(model).parameter_operation ==
+                LOOM_SERVICE_PARAMETER_OPERATION_NONE) {
           IREE_ASSERT_OK(loom_serve_registry_activate(
               model, LOOM_SERVICE_MODEL_COMPONENT_IMAGE));
-          IREE_ASSERT_OK(loom_serve_registry_advance(registry, index, observer,
-                                                     &advanced));
+          IREE_ASSERT_OK(schedule_.Advance(
+              &loom_serve_registry_services(registry)[index], 0, &advanced));
           progress = true;
           image_started = true;
         }
-        if (image_started && model->parameter_operation == operation) {
+        if (image_started &&
+            loom_serve_registry_state(model).parameter_operation ==
+                LOOM_SERVICE_PARAMETER_OPERATION_ACTIVATE &&
+            loom_serve_registry_state(model).activation_phase == phase) {
           const auto image = loom_service_registration_parameters(
               model->registration.native, LOOM_SERVICE_MODEL_COMPONENT_IMAGE);
-          EXPECT_STREQ(image.phase,
-                       operation == LOOM_SERVE_PARAMETER_OPERATION_WAITING
-                           ? "preparing"
-                           : "ready");
+          EXPECT_STREQ(image.phase, phase == LOOM_RUNTIME_ACTIVATION_WAITING
+                                        ? "preparing"
+                                        : "ready");
           IREE_ASSERT_OK(
               loom_serve_registry_remove(model, LOOM_SERVE_REMOVAL_ABORT));
           removed = true;
@@ -506,11 +508,11 @@ TEST_P(ManagedMediaServiceTest, ComponentSelectorsValidateTheDeclaredBoundary) {
 }
 
 TEST_P(ManagedMediaServiceTest, RemovalJoinsAcceptedImagePreparation) {
-  RemoveDuring(LOOM_SERVE_PARAMETER_OPERATION_WAITING);
+  RemoveDuring(LOOM_RUNTIME_ACTIVATION_WAITING);
 }
 
 TEST_P(ManagedMediaServiceTest, RemovalJoinsAcceptedImageActivation) {
-  RemoveDuring(LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING);
+  RemoveDuring(LOOM_RUNTIME_ACTIVATION_LOADING);
 }
 
 INSTANTIATE_TEST_SUITE_P(Declarations, ManagedMediaServiceTest,

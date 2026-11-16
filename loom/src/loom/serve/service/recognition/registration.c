@@ -6,6 +6,7 @@
 #include "loom/serve/service/recognition/registration.h"
 
 #include "iree/hal/api.h"
+#include "loom/runtime/device/pool.h"
 
 typedef struct loom_serve_recognition_registration_t {
   // Shared native lifecycle and accepted ownership.
@@ -197,9 +198,10 @@ iree_status_t loom_serve_recognition_registration_allocate(
         1u << LOOM_SERVICE_MODEL_COMPONENT_PRIMARY,
         iree_hal_device_topology_info(loom_runtime_device_handle(device))
             ->topology_index,
+        loom_runtime_pool_residency_cache(pool),
         loom_runtime_service_control_binding(control, 2, operation_capacity - 2,
                                              0),
-        observer, &registration->registration);
+        observer, options->name, stream, &registration->registration);
     *out_registration = &registration->registration;
   } else {
     iree_allocator_free_aligned(host_allocator, registration);

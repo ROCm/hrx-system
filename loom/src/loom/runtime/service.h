@@ -46,10 +46,10 @@ typedef struct loom_runtime_service_vtable_t {
   // Queued requests alone are not activity: mutually blocked queues cannot
   // make progress by waiting on one another.
   bool (*is_active)(void* self);
-  // Advances at most one bounded model unit and reports actual progress. A
-  // turn can retry admission after another service released shared capacity.
-  // False means awaiting readiness, never polling. STOPPING consumes accepted
-  // readiness without launching another model unit. Terminal failure belongs
+  // Progresses accepted obligations and publishes legal new-work offers. It
+  // never grants another unit; try_schedule applies explicit policy decisions.
+  // False means awaiting readiness, never polling. STOPPING cancels and joins
+  // accepted ownership without launching new work. Terminal failure belongs
   // to this service; shared resource owners report wider failure independently.
   // Even after failure, is_pending governs release of service storage.
   iree_status_t (*advance)(void* self, loom_runtime_service_flags_t flags,

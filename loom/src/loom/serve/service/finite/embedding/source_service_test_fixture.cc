@@ -36,6 +36,27 @@ const char* SourceServiceDirectStageSource() {
   return source ? source : "";
 }
 
+// These owners also progress an actual model holding shared parameter capacity.
+// They supply that peer activity to the explicit finite grant directly.
+static iree_status_t AdvanceService(const loom_serve_service_t& service,
+                                    loom_runtime_service_flags_t flags,
+                                    bool* out_progress) {
+  IREE_RETURN_IF_ERROR(service.runtime.vtable->advance(service.runtime.self,
+                                                       flags, out_progress));
+  loom_runtime_service_offer_t offer;
+  const auto read =
+      loom_runtime_service_read_offer(service.runtime.control, 0, &offer);
+  IREE_ASSERT_EQ(read, LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  if (!offer.choice_count) {
+    return iree_ok_status();
+  }
+  loom_runtime_service_schedule_outcome_t outcome;
+  const auto status = service.runtime.vtable->try_schedule(
+      service.runtime.self, offer.key, 0, flags, &outcome);
+  *out_progress |= outcome.accepted;
+  return status;
+}
+
 void loom_serve_test_embedding_model_lifecycle_t::Wake(void* user_data) {
   auto* self =
       static_cast<loom_serve_test_embedding_model_lifecycle_t*>(user_data);
@@ -89,9 +110,7 @@ iree_status_t loom_serve_test_embedding_model_lifecycle_t::Drain(
     const auto flags =
         self->complete ? 0 : LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY;
     self->status = iree_status_join(
-        self->status,
-        self->service->runtime.vtable->advance(self->service->runtime.self,
-                                               flags, &result->did_work));
+        self->status, AdvanceService(*self->service, flags, &result->did_work));
     pending |=
         self->service->runtime.vtable->is_pending(self->service->runtime.self);
   }
@@ -323,8 +342,7 @@ bool SourceEmbeddingServiceTest::Step(loom_runtime_service_flags_t flags) {
   auto* workspace = loom_runtime_pool_workspace(storage_owner_);
   IREE_EXPECT_OK(loom_runtime_workspace_advance(workspace));
   bool progress = false;
-  IREE_EXPECT_OK(interface_.runtime.vtable->advance(interface_.runtime.self,
-                                                    flags, &progress));
+  IREE_EXPECT_OK(AdvanceService(interface_, flags, &progress));
   auto* pool = loom_runtime_pool_memory(storage_owner_);
   if (interface_.runtime.vtable->is_active(interface_.runtime.self) ||
       loom_runtime_workspace_is_pending(workspace) ||

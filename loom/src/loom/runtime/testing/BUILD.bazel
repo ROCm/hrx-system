@@ -24,6 +24,19 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "service_schedule",
+    testonly = True,
+    hdrs = ["service_schedule.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime:driver",
+        "//loom/src/loom/runtime:service",
+        "//loom/src/loom/runtime:service_schedule",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "native_allocator",
     testonly = True,
     hdrs = ["native_allocator.h"],

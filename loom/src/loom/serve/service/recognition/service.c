@@ -796,24 +796,7 @@ static iree_status_t loom_serve_recognition_try_schedule(
 
 static iree_status_t loom_serve_recognition_advance(
     void* self, loom_runtime_service_flags_t flags, bool* out_progress) {
-  loom_serve_recognition_service_t* service = self;
-  IREE_RETURN_IF_ERROR(
-      loom_serve_recognition_service_progress(service, flags, out_progress));
-  iree_status_t status = iree_ok_status();
-  for (uint64_t i = 0; i < 2 && iree_status_is_ok(status); ++i) {
-    loom_runtime_service_offer_t offer;
-    if (loom_runtime_service_read_offer(
-            service->scheduling.binding.control,
-            service->scheduling.binding.offer_ordinal + i,
-            &offer) == LOOM_RUNTIME_SERVICE_READ_COMPLETE &&
-        offer.choice_count) {
-      loom_runtime_service_schedule_outcome_t outcome;
-      status = loom_serve_recognition_try_schedule(self, offer.key, 0, flags,
-                                                   &outcome);
-      *out_progress |= outcome.accepted;
-    }
-  }
-  return status;
+  return loom_serve_recognition_service_progress(self, flags, out_progress);
 }
 
 static void loom_serve_recognition_set_observer(

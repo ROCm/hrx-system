@@ -154,7 +154,8 @@ static iree_status_t loom_serve_http_metrics_extensions(
        ++i) {
     const loom_serve_registered_model_t* model =
         loom_serve_registry_at(registry, i);
-    if (model->phase != LOOM_SERVE_REGISTRATION_READY ||
+    if (loom_serve_registry_state(model).phase !=
+            LOOM_SERVICE_REGISTRATION_READY ||
         !model->service.telemetry.sample) {
       continue;
     }
@@ -192,7 +193,8 @@ static iree_status_t loom_serve_http_metrics_parameters(
        ++i) {
     const loom_serve_registered_model_t* model =
         loom_serve_registry_at(registry, i);
-    if (model->phase != LOOM_SERVE_REGISTRATION_READY ||
+    if (loom_serve_registry_state(model).phase !=
+            LOOM_SERVICE_REGISTRATION_READY ||
         !model->registration.native) {
       continue;
     }

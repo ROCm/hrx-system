@@ -251,8 +251,8 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
     dependency->allocator = host_allocator;
     loom_service_registration_initialize(
         &vtable, dependency, 1u << LOOM_SERVICE_MODEL_COMPONENT_PRIMARY, 0,
-        loom_runtime_service_control_binding(control, 0, 0, 0), observer,
-        dependency->registration);
+        nullptr, loom_runtime_service_control_binding(control, 0, 0, 0),
+        observer, configuration->name, stream, dependency->registration);
     *out_registration = {
         .native = dependency->registration,
         .service = Service,

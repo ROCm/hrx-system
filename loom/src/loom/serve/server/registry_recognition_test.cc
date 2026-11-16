@@ -18,6 +18,7 @@
 #include "loom/runtime/device/device.h"
 #include "loom/runtime/host/host.h"
 #include "loom/runtime/testing/application.h"
+#include "loom/runtime/testing/service_schedule.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/registry.h"
@@ -177,24 +178,21 @@ class RegistryRecognitionTest : public ::testing::Test {
         notification};
     loom_runtime_device_group_set_observer(registration_options_.device_group,
                                            wake);
+    loom_runtime::testing::ServiceSchedule schedule;
+    loom_serve_registry_set_advance_observer(registry_, wake, {});
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
       iree_status_t status =
           loom_runtime_device_group_advance(registration_options_.device_group);
-      if (Model()->phase == LOOM_SERVE_REGISTRATION_READY) {
-        auto& service = Model()->service;
-        status = iree_status_join(
-            status, service.runtime.vtable->advance(
-                        service.runtime.self,
-                        loom_serve_registry_service_flags(Model()), &progress));
-      }
       bool registry_progress = false;
       if (iree_status_is_ok(status)) {
-        status = loom_serve_registry_advance(registry_, index_, wake,
-                                             &registry_progress);
+        status =
+            schedule.Advance(&loom_serve_registry_services(registry_)[index_],
+                             0, &registry_progress);
       }
-      status = iree_status_join(status, iree_status_clone(Model()->status));
+      status = iree_status_join(
+          status, iree_status_clone(loom_serve_registry_state(Model()).status));
       if (ready() || progress || registry_progress ||
           !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(notification);
@@ -208,8 +206,10 @@ class RegistryRecognitionTest : public ::testing::Test {
 
   void Prepare() {
     Model()->closed = false;
-    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-        [&] { return Model()->phase == LOOM_SERVE_REGISTRATION_READY; }));
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+      return loom_serve_registry_state(Model()).phase ==
+             LOOM_SERVICE_REGISTRATION_READY;
+    }));
   }
 
   iree_status_t Open(loom_serve_recognition_test_input_t* input,
@@ -357,7 +357,8 @@ TEST_F(RegistryRecognitionTest, NativeDrainAndHttpPeerPreserveFinalDocument) {
   loom_serve_recognition_test_input_t input;
   IREE_ASSERT_OK(Open(&input));
   EXPECT_EQ(input.stream, nullptr);
-  EXPECT_EQ(Model()->phase, LOOM_SERVE_REGISTRATION_DECLARED);
+  EXPECT_EQ(loom_serve_registry_state(Model()).phase,
+            LOOM_SERVICE_REGISTRATION_DECLARED);
   ASSERT_NO_FATAL_FAILURE(Prepare());
   IREE_ASSERT_OK(Open(&input));
   ASSERT_NE(input.stream, nullptr);

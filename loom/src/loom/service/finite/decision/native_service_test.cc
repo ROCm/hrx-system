@@ -21,6 +21,7 @@
 #include "loom/runtime/program/variant_pool.h"
 #include "loom/runtime/service_control.h"
 #include "loom/runtime/testing/application.h"
+#include "loom/runtime/testing/service_schedule.h"
 #include "loom/runtime/testing/worker_gate.h"
 #include "loom/service/finite/decision/protocol.h"
 #include "loom/service/finite/registration.h"
@@ -154,6 +155,7 @@ class NativeDecisionServiceTest : public ::testing::Test {
           driver_.status, loom_runtime_device_group_advance(group_));
       bool progress = false;
       loom_runtime_driver_advance(&driver_, &progress);
+      progress |= schedule_.Schedule(&driver_);
       loom_runtime_driver_collect(&driver_, &progress);
       const bool complete = done();
       if (complete || progress || !iree_status_is_ok(driver_.status)) {
@@ -371,6 +373,7 @@ class NativeDecisionServiceTest : public ::testing::Test {
           iree_status_join(fixture.driver_.status,
                            loom_runtime_device_group_advance(fixture.group_));
       loom_runtime_driver_advance(&fixture.driver_, &result->did_work);
+      result->did_work |= fixture.schedule_.Schedule(&fixture.driver_);
       bool pending =
           loom_runtime_driver_collect(&fixture.driver_, &result->did_work);
       pending |= loom_runtime_device_group_is_pending(fixture.group_);
@@ -421,6 +424,8 @@ class NativeDecisionServiceTest : public ::testing::Test {
   loom_service_finite_service_t* service_ = nullptr;
   // Owner-side operations, with no listener or HTTP notification.
   loom_service_finite_service_interface_t interface_ = {};
+  // Reusable explicit default-policy decisions.
+  loom_runtime::testing::ServiceSchedule schedule_;
   // Shared production traversal and retirement policy, also used by HTTP.
   loom_runtime_driver_t driver_ = {};
   // Joined wake target for resource and service publications.
@@ -850,6 +855,11 @@ TEST_F(NativeDecisionServiceTest, ColdIntentWaitsForIndependentGrants) {
       LOOM_SERVICE_PARAMETER_OPERATION_ACTIVATE));
   const auto preparation = OfferedWork(LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
   ASSERT_EQ(preparation.choice_count, 1u);
+  EXPECT_FALSE(loom_service_registration_is_pending(registration_));
+  EXPECT_FALSE(loom_service_registration_is_active(registration_));
+  EXPECT_EQ(
+      loom_service_registration_snapshot(registration_).service.capacity_domain,
+      loom_runtime_pool_residency_cache(pool_));
 
   // Hold the actual compiler workers so owner progress sees a warmup request
   // coexisting with accepted preparation, never an accepted acquisition.
@@ -865,6 +875,10 @@ TEST_F(NativeDecisionServiceTest, ColdIntentWaitsForIndependentGrants) {
   loom_service_registration_progress(registration_, 0);
   const auto preparing = loom_service_registration_snapshot(registration_);
   EXPECT_EQ(preparing.phase, LOOM_SERVICE_REGISTRATION_PREPARING);
+  EXPECT_TRUE(loom_service_registration_is_pending(registration_));
+  EXPECT_TRUE(loom_service_registration_is_active(registration_));
+  EXPECT_EQ(preparing.service.capacity_domain,
+            loom_runtime_pool_residency_cache(pool_));
   EXPECT_EQ(preparing.parameter_operation,
             LOOM_SERVICE_PARAMETER_OPERATION_ACTIVATE);
   EXPECT_GT(preparing.preparation_start, 0);
@@ -1077,6 +1091,53 @@ TEST_F(NativeDecisionServiceTest, PreparationCancellationJoinsAcceptedLoad) {
   EXPECT_EQ(loom_runtime_service_read_operation_use(
                 control, operation.key, operation.publication, 0, &use),
             LOOM_RUNTIME_SERVICE_READ_CHANGED);
+  ASSERT_NO_FATAL_FAILURE(RetireService());
+}
+
+TEST_F(NativeDecisionServiceTest, ApplicationFailureJoinsAcceptedPreparation) {
+  ASSERT_NO_FATAL_FAILURE(RetireService());
+  const loom_service_finite_model_options_t options = {
+      .sources = *sources_,
+      .asset_directory = IREE_SV("."),
+      .options = IREE_SV("{\"batch_units\":64}"),
+  };
+  IREE_ASSERT_OK(AllocateRegistration(options));
+  auto* executor =
+      loom_runtime_host_executor(loom_runtime_device_host(device_));
+  std::vector<std::unique_ptr<loom_runtime::testing::WorkerGate>> gates;
+  for (iree_host_size_t i = 0; i < iree_task_executor_worker_count(executor);
+       ++i) {
+    gates.push_back(
+        std::make_unique<loom_runtime::testing::WorkerGate>(executor));
+  }
+  const auto preparation = OfferedWork(LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
+  ASSERT_NE(Schedule(preparation.key).serial, 0u);
+  loom_service_registration_fail(
+      registration_,
+      iree_make_status(IREE_STATUS_ABORTED, "application failure"));
+  const auto failed = loom_service_registration_snapshot(registration_);
+  EXPECT_EQ(iree_status_code(failed.status), IREE_STATUS_ABORTED);
+  EXPECT_EQ(failed.phase, LOOM_SERVICE_REGISTRATION_PREPARING);
+  EXPECT_EQ(failed.diagnostic_revision, 1u);
+  EXPECT_EQ(failed.service.self, nullptr);
+  EXPECT_EQ(AcceptedOperations().size(), 1u);
+  loom_service_registration_request_retirement(registration_,
+                                               LOOM_SERVICE_RETIRE_FLAG_ABORT);
+  loom_service_registration_progress(registration_, 0);
+  EXPECT_EQ(AcceptedOperations().size(), 1u);
+  gates.clear();
+  IREE_ASSERT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      ProgressUntil(
+          [&] {
+            return loom_service_registration_snapshot(registration_).phase ==
+                   LOOM_SERVICE_REGISTRATION_RETIRED;
+          },
+          0, IREE_STATUS_ABORTED));
+  const auto retired = loom_service_registration_snapshot(registration_);
+  EXPECT_EQ(retired.service.self, nullptr);
+  EXPECT_EQ(retired.diagnostic_revision, 1u);
+  EXPECT_TRUE(AcceptedOperations().empty());
   ASSERT_NO_FATAL_FAILURE(RetireService());
 }
 

@@ -31,6 +31,7 @@
 #include "loom/runtime/testing/application.h"
 #include "loom/runtime/testing/jit.h"
 #include "loom/runtime/testing/service_control.h"
+#include "loom/runtime/testing/service_schedule.h"
 #include "loom/service/finite/batch.h"
 #include "loom/service/finite/embedding/protocol.h"
 #include "loom/service/finite/generator.h"
@@ -709,6 +710,7 @@ class FiniteContinuation : public ::testing::Test {
           driver_.status, loom_runtime_device_group_advance(group_));
       bool progress = false;
       loom_runtime_driver_advance(&driver_, &progress);
+      progress |= schedule_.Schedule(&driver_);
       const bool pending = loom_runtime_driver_collect(&driver_, &progress);
       if (done() || !pending || progress) {
         iree_notification_cancel_wait(&notification_);
@@ -838,6 +840,8 @@ class FiniteContinuation : public ::testing::Test {
   loom_runtime_telemetry_stream_t* history_ = nullptr;
   // Borrowed scheduler, request inspection, and telemetry capabilities.
   loom_service_finite_service_interface_t interface_ = {};
+  // Reusable explicit default-policy decisions.
+  loom_runtime::testing::ServiceSchedule schedule_;
   // Shared owner driver for the placed service.
   loom_runtime_driver_t driver_ = {};
   // Independent caller interests, possibly outliving the producer.

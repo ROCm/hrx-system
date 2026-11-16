@@ -20,7 +20,7 @@ typedef struct loom_runtime_driver_t {
   // Borrowed stable slots through final collection. A NULL vtable is vacant.
   // The owner may publish or clear slots between calls or retire the current
   // slot during its advance; it must preserve accepted callback lifetimes.
-  loom_runtime_service_t* services;
+  const loom_runtime_service_t* services;
   // Immutable slot count, including vacant publication credit.
   iree_host_size_t capacity;
   // Rotating priority, advanced once per complete traversal.
@@ -37,7 +37,7 @@ typedef struct loom_runtime_driver_t {
 // Initializes inert state over caller-owned slots. The caller later consumes
 // driver.status. Services and their capacity owners outlive final collection.
 void loom_runtime_driver_initialize(iree_host_size_t capacity,
-                                    loom_runtime_service_t* services,
+                                    const loom_runtime_service_t* services,
                                     loom_runtime_driver_t* out_driver);
 
 // Installs or detaches the owner wake on published services. A later publisher

@@ -100,6 +100,16 @@ incarnations distinguish a removed model from a replacement with the same
 name. Observation pages are live, not an atomic whole-server snapshot.
 Persistent collectors use `/metrics`; event history remains in `/logz`.
 
+Model observation pages also carry `scheduling` facts: owned requests, requests
+waiting for another unit of work, offered units, accepted operations, and the
+devices participating in offered or accepted work. These are independent counts;
+a request can belong to accepted work while awaiting another unit. Device values
+are decimal strings containing bit masks indexed by the device group, not
+utilization or exclusive occupancy. The scheduling incarnation identifies the
+current native control binding and may change during model attachment while the
+route incarnation stays fixed. A missing control is `scheduling: null`; a sample
+that overlaps publication has `observation: null`, rather than fabricated zeroes.
+
 ## Start with status and counters
 
 ```sh

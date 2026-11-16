@@ -10,6 +10,7 @@
 #include "loom/runtime/parameter/residency.h"
 #include "loom/runtime/program/compilation.h"
 #include "loom/runtime/service.h"
+#include "loom/runtime/telemetry/stream.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -148,7 +149,12 @@ struct loom_service_registration_t {
   void* self;
   // Owner wake target, retained until actual native retirement.
   loom_runtime_wake_callback_t observer;
-  // Ready engine capability; detached before provider retirement destroys it.
+  // Borrowed deployment name, retained through native destruction.
+  iree_string_view_t name;
+  // Optional borrowed history; publication never waits for a consumer.
+  loom_runtime_telemetry_stream_t* stream;
+  // Ready engine or cold metadata. Capacity identity survives retirement;
+  // executable callbacks detach before the provider destroys their engine.
   loom_runtime_service_t engine;
   // Retained observation bytes, independent of model and engine allocations.
   loom_runtime_service_control_t* control;
@@ -172,6 +178,8 @@ struct loom_service_registration_t {
   bool retirement_requested;
   // Owned failure, retained after the engine and model are gone.
   iree_status_t status;
+  // Monotonic diagnostic publication, including component-local failures.
+  uint64_t diagnostic_revision;
   // Copied preparation evidence, independent of compiler/source lifetimes.
   loom_runtime_compilation_report_t compilation;
   // Start of the accepted preparation interval, in host monotonic nanoseconds.
@@ -192,6 +200,13 @@ struct loom_service_registration_t {
   loom_service_registration_work_t retirement;
   // Nonrecycled accepted identities across both lifecycle operation slots.
   uint64_t next_serial;
+  // Elapsed sections follow the owner across compute worker handoffs.
+  IREE_TRACE(struct {
+    // Preparation or retirement, ending at its terminal result.
+    iree_section_id_t lifecycle;
+    // Explicit warmup or deactivation, including admission waits.
+    iree_section_id_t parameters;
+  } trace;)
 };
 
 // Allocates zeroed provider storage followed by a retained control. Every offer
@@ -207,12 +222,15 @@ iree_status_t loom_service_registration_allocate_storage(
 // Initializes zeroed provider-owned storage. Two consecutive exclusive offers
 // and operations begin at binding's ordinals; all source detail precedes the
 // lifecycle operations. Control, provider, and observer survive retirement and
-// reader joins. This establishes trusted provider coordinates, not user input.
+// reader joins. Name and optional history are borrowed through destruction.
+// Capacity identity comes from the selected native pool and survives engine
+// destruction. This establishes trusted provider coordinates, not user input.
 void loom_service_registration_initialize(
     const loom_service_registration_vtable_t* vtable, void* self,
-    uint32_t components, uint64_t device_ordinal,
+    uint32_t components, uint64_t device_ordinal, const void* capacity_domain,
     loom_runtime_service_control_binding_t binding,
-    loom_runtime_wake_callback_t observer,
+    loom_runtime_wake_callback_t observer, iree_string_view_t name,
+    loom_runtime_telemetry_stream_t* stream,
     loom_service_registration_t* out_registration);
 
 // Supplies one source contributor's exclusive detail slots and the native
@@ -224,19 +242,24 @@ loom_runtime_service_control_binding_t loom_service_registration_binding(
 typedef struct loom_service_registration_snapshot_t {
   // Current native lifecycle phase.
   loom_service_registration_phase_t phase;
+  // External views have been relinquished; native retirement may be scheduled.
+  bool retirement_requested;
   // Requested or accepted parameter work, independent of phase.
   loom_service_parameter_operation_t parameter_operation;
   // Component selected by the parameter intent or accepted operation.
   loom_service_model_component_t parameter_component;
-  // WAITING includes unaccepted warmup; LOADING owns accepted asynchronous
-  // work.
+  // Warmup stage. WAITING may still own optional component preparation;
+  // is_pending reports actual accepted asynchronous borrowing.
   loom_runtime_activation_phase_t activation_phase;
   // Persistent weight-retention intent for supported component bit positions.
   uint32_t pinned_components;
-  // Ready capability only in READY; external views require explicit handoff.
+  // Ready capability in READY, capacity identity alone before/after the engine.
+  // External executable views require explicit handoff.
   loom_runtime_service_t service;
   // Borrowed retained native failure.
   iree_status_t status;
+  // Changes when a native or component-local diagnostic is published.
+  uint64_t diagnostic_revision;
   // Borrowed copied compilation evidence.
   const loom_runtime_compilation_report_t* compilation;
   // Accepted preparation start; zero until preparation begins.
@@ -254,6 +277,11 @@ loom_service_registration_snapshot_t loom_service_registration_snapshot(
 void loom_service_registration_set_demand(
     loom_service_registration_t* registration,
     loom_service_registration_demand_t demand);
+
+// Transfers an application failure into this native owner. Accepted work still
+// joins through progress; external views still require retirement handoff.
+void loom_service_registration_fail(loom_service_registration_t* registration,
+                                    iree_status_t status);
 
 // Publishes parameter intent without starting work. Existing requests drain
 // before its offer becomes legal. Warmup may be requested before preparation;
@@ -283,6 +311,17 @@ void loom_service_registration_request_retirement(
 bool loom_service_registration_progress(
     loom_service_registration_t* registration,
     loom_runtime_service_flags_t flags);
+
+// Accepted asynchronous work still borrows native storage and owes a wake.
+// Unaccepted preparation, parameter, and retirement intent alone is not
+// pending.
+bool loom_service_registration_is_pending(
+    const loom_service_registration_t* registration);
+
+// Accepted lifecycle/parameter work or source activity may release capacity.
+// Queued intent and failed platform cleanup alone provide no peer activity.
+bool loom_service_registration_is_active(
+    const loom_service_registration_t* registration);
 
 // Claims one advertised lifecycle or source unit without waiting. Errors stay
 // in the owning native scope; acceptance is independent of status and cleanup.

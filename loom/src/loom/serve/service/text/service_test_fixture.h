@@ -26,6 +26,7 @@
 #include "iree/testing/temp_file.h"
 #include "loom/runtime/telemetry/stream.h"
 #include "loom/runtime/testing/service_control.h"
+#include "loom/runtime/testing/service_schedule.h"
 #include "loom/runtime/testing/stalled_stderr.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
@@ -440,8 +441,7 @@ class SourceTextServiceTest : public ::testing::Test {
       const auto ticket = iree_notification_prepare_wait(notification);
       IREE_ASSERT_OK(loom_runtime_device_group_advance(group_));
       bool progress = false;
-      IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
-                                                       flags, &progress));
+      IREE_ASSERT_OK(schedule_.Advance(&interface.runtime, flags, &progress));
       if (ready() || progress) {
         iree_notification_cancel_wait(notification);
       } else {
@@ -776,6 +776,8 @@ class SourceTextServiceTest : public ::testing::Test {
   loom_runtime_device_t* device_ = nullptr;
   // Explicit storage owner selected independently from execution placement.
   loom_runtime_pool_t* storage_owner_ = nullptr;
+  // Reusable explicit default-policy decisions.
+  loom_runtime::testing::ServiceSchedule schedule_;
   // Retained native source control, surviving service and model destruction.
   loom_runtime::testing::ServiceControl scheduling_{3};
   // Actual source-defined text model, with no native mock implementation.

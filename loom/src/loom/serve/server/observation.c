@@ -8,6 +8,7 @@
 
 #include <inttypes.h>
 
+#include "loom/runtime/service_control.h"
 #include "loom/runtime/telemetry/stream.h"
 #include "loom/serve/telemetry/sample.h"
 #include "loom/service/kind.h"
@@ -190,6 +191,35 @@ static iree_status_t loom_serve_observation_model(
                 .created_ns
           : 0,
       output));
+  const loom_runtime_service_control_t* control =
+      loom_serve_registry_control(model);
+  if (control) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        output,
+        ",\"scheduling\":{\"incarnation\":\"%" PRIu64 "\",\"observation\":",
+        loom_runtime_service_control_layout(control).incarnation));
+    loom_runtime_service_observation_t observation;
+    if (loom_runtime_service_read_observation(control, &observation) ==
+        LOOM_RUNTIME_SERVICE_READ_COMPLETE) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          output,
+          "{\"owned_request_count\":\"%" PRIu64
+          "\",\"waiting_request_count\":\"%" PRIu64
+          "\",\"offer_count\":\"%" PRIu64
+          "\",\"pending_operation_count\":\"%" PRIu64
+          "\",\"offered_devices\":\"%" PRIu64
+          "\",\"accepted_devices\":\"%" PRIu64 "\"}",
+          observation.owned_request_count, observation.waiting_request_count,
+          observation.offer_count, observation.pending_operation_count,
+          observation.offered_devices, observation.accepted_devices));
+    } else {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "null"));
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "}"));
+  } else {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(output, ",\"scheduling\":null"));
+  }
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(output, ",\"topics\":["));
   static const loom_runtime_telemetry_metric_t fields[] = {
@@ -202,7 +232,8 @@ static iree_status_t loom_serve_observation_model(
                              (uint64_t)snapshot.oldest_active_age};
   IREE_RETURN_IF_ERROR(
       loom_serve_telemetry_sample_write_json(&topic, values, output));
-  if (model->phase == LOOM_SERVE_REGISTRATION_READY &&
+  if (loom_serve_registry_state(model).phase ==
+          LOOM_SERVICE_REGISTRATION_READY &&
       service->telemetry.sample) {
     IREE_RETURN_IF_ERROR(service->telemetry.sample(
         service->runtime.self, (loom_runtime_telemetry_sample_sink_t){

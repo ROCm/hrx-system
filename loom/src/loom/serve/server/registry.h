@@ -60,8 +60,8 @@ typedef struct loom_serve_registration_factory_t {
   // Allocates an unstarted operation; performs no source I/O, model allocation
   // or submission. Failure returns no operation. Invoked after admission opens
   // or explicit activation, never for metadata-only registration alone.
-  // Incarnation is the registry-assigned lifetime of this slot's occupant;
-  // native observations retain it independently of the model's residency.
+  // Incarnation identifies this control binding, independently of route
+  // identity. Replacing the cold control invalidates earlier decisions.
   iree_status_t (*create)(void* self,
                           const loom_serve_model_configuration_t* configuration,
                           uint64_t incarnation,
@@ -77,37 +77,18 @@ typedef struct loom_serve_registration_factory_t {
   iree_status_t (*query_status)(void* self);
 } loom_serve_registration_factory_t;
 
-typedef enum loom_serve_registration_phase_e {
-  LOOM_SERVE_REGISTRATION_DECLARED = 0,
-  LOOM_SERVE_REGISTRATION_PREPARING,
-  LOOM_SERVE_REGISTRATION_READY,
-  LOOM_SERVE_REGISTRATION_RETIRING,
-  LOOM_SERVE_REGISTRATION_FAILED,
-  LOOM_SERVE_REGISTRATION_RELEASE_FAILED,
-} loom_serve_registration_phase_t;
-
 typedef enum loom_serve_removal_e {
   LOOM_SERVE_REMOVAL_NONE = 0,
   LOOM_SERVE_REMOVAL_DRAIN,
   LOOM_SERVE_REMOVAL_ABORT,
 } loom_serve_removal_t;
 
-typedef enum loom_serve_parameter_operation_e {
-  LOOM_SERVE_PARAMETER_OPERATION_NONE = 0,
-  // Explicit warmup waiting for preparation, admitted work or physical
-  // capacity.
-  LOOM_SERVE_PARAMETER_OPERATION_WAITING,
-  // Warmup has submitted its asynchronous parameter-readiness wait.
-  LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING,
-  // Release waiting for admitted model work to retire.
-  LOOM_SERVE_PARAMETER_OPERATION_DEACTIVATING,
-} loom_serve_parameter_operation_t;
-
 // Stable owner-only slot. Empty service.name marks an unused slot. A slot is
 // reused only after every held claim, tokenizer task and model borrower
-// retires. Service callbacks exist only while phase is READY. Other phases
-// expose just immutable route/capacity-domain metadata and copied counters,
-// never model pointers. The opaque capacity owner survives native retirement.
+// retires. A ready service facade stays borrowed through its external users,
+// including native failure. It is detached before native retirement; afterward
+// the slot exposes immutable route metadata and copied transport observations.
+// The opaque capacity owner survives native retirement.
 typedef struct loom_serve_registered_model_t {
   // Owning stable table, including while this slot is vacant or retiring.
   loom_serve_registry_t* registry;
@@ -115,31 +96,38 @@ typedef struct loom_serve_registered_model_t {
   loom_serve_service_t service;
   // Owned declaration for managed entries; empty name denotes borrowed service.
   loom_serve_model_configuration_t configuration;
-  // Accepted cold card resolution, joined before modality construction or
-  // removal. Borrows configuration until its terminal publication.
-  loom_serve_model_resolution_t* resolution;
-  // Owned modality operation, created lazily by admission or explicit
-  // activation.
+  // Owned native provider. It retains diagnostics after actual retirement.
   loom_serve_registration_t registration;
-  // Preparation/publication/retirement state, independent of admission.
-  loom_serve_registration_phase_t phase;
-  // Monotonic start of the current PREPARING interval; phase owns its validity.
-  iree_time_t preparation_start;
-  // Completed PREPARING intervals, excluding declared gaps and retirement.
-  uint64_t preparation_duration_ns;
+  // Cold declaration ownership before transfer to the native provider.
+  struct {
+    // Retained initial control, allocated with the registry and reused only
+    // after all route and policy readers join.
+    loom_runtime_service_control_t* control;
+    // Legal card-resolution or provider-attachment choice.
+    loom_runtime_service_offer_t offer;
+    // Accepted cold task, independent of whether its choice remains legal.
+    loom_runtime_service_operation_t operation;
+    // Accepted card reader; joined before replacing configuration or control.
+    loom_serve_model_resolution_t* resolution;
+    // Owned construction diagnostic; native failures live in registration.
+    iree_status_t status;
+    // Deferred warmup transferred exactly once when the provider is attached.
+    loom_service_parameter_operation_t parameter_operation;
+    // Component selected by the deferred warmup.
+    loom_service_model_component_t parameter_component;
+    // Cold retention intent transferred before native preparation can start.
+    uint32_t pinned_components;
+    // Start of accepted card/attachment work in host monotonic nanoseconds.
+    iree_time_t start_ns;
+    // Completed cold intervals, excluding idle declaration time.
+    uint64_t duration_ns;
+    // Nonrecycled accepted identities within this cold control incarnation.
+    uint64_t next_serial;
+  } attachment;
   // Irreversible unregister intent; drain can be escalated explicitly to abort.
   loom_serve_removal_t removal;
   // Reversible admission gate, not a residency or cancellation flag.
   bool closed;
-  // Weight-only retention bits indexed by loom_service_model_component_t.
-  // Applied after preparation without activating parameters, retaining
-  // sessions, or promising admission progress.
-  uint8_t pinned_components;
-  // loom_service_model_component_t selected by the current or last operation.
-  uint8_t parameter_component;
-  // Mutually exclusive residency intent, independent of its HTTP connection.
-  // Removal withdraws waiting admission and joins submitted activation first.
-  loom_serve_parameter_operation_t parameter_operation;
   // Requests parked outside service admission on transport-owned storage.
   iree_host_size_t held_count;
   // Held inference requests, excluding tokenizer and retained-state utilities.
@@ -155,21 +143,10 @@ typedef struct loom_serve_registered_model_t {
   loom_service_telemetry_latency_t latency;
   // Owned history shared with the live service; identity survives preparation.
   loom_runtime_telemetry_stream_t* stream;
-  // Terminal load/release evidence, owned until removal or explicit retry.
-  iree_status_t status;
-  // Copied source diagnostics, independent of compiler and operation lifetimes.
-  loom_runtime_compilation_report_t compilation;
   // Monotonic registration identity; zero denotes an externally owned service.
   uint64_t incarnation;
   // Wall-clock Unix seconds at registration, fixed until deployment retirement.
   int64_t registered_unix_seconds;
-  // Elapsed operations follow the serialized owner across worker handoffs.
-  IREE_TRACE(struct {
-    // Preparation or retirement, ending at its terminal result.
-    iree_section_id_t lifecycle;
-    // Explicit warmup or deactivation, including admission and readiness waits.
-    iree_section_id_t parameters;
-  } trace;)
 } loom_serve_registered_model_t;
 
 // Copies borrowed service interfaces into stable slots and reserves metadata
@@ -340,14 +317,23 @@ iree_status_t loom_serve_registry_fail(loom_serve_registry_t* registry,
                                        iree_host_size_t index,
                                        iree_status_t status);
 
-// Advances one lifecycle after the router advances its ready service. Package
-// and native operation errors remain in the slot unless the factory reports
-// shared-resource failure. Accepted borrowers retire before model destruction.
-// Reports actual progress; otherwise waits for an installed ownership wake.
+// Progresses accepted cold/native work and observes the external-view handoff.
+// The common service wrapper invokes transport observation before relinquishing
+// a ready facade. New work requires explicit scheduling grants. Model-local
+// errors stay in their owner; only factory-owned shared failure escapes.
 iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
                                           iree_host_size_t index,
                                           loom_runtime_wake_callback_t observer,
                                           bool* out_progress);
+// Copies native lifecycle facts, or the cold declaration before attachment.
+// Status and report remain borrowed through the next owner mutation.
+loom_service_registration_snapshot_t loom_serve_registry_state(
+    const loom_serve_registered_model_t* model);
+
+// Current policy binding, replaced only at a serialized cold handoff.
+const loom_runtime_service_control_t* loom_serve_registry_control(
+    const loom_serve_registered_model_t* model);
+
 bool loom_serve_registry_pending(const loom_serve_registered_model_t* model);
 const char* loom_serve_registry_phase(
     const loom_serve_registered_model_t* model);

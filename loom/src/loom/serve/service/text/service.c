@@ -1685,70 +1685,7 @@ static iree_status_t loom_serve_text_try_schedule(
 static iree_status_t loom_serve_text_advance(void* self,
                                              loom_runtime_service_flags_t flags,
                                              bool* out_progress) {
-  loom_serve_text_service_t* service = self;
-  *out_progress = false;
-  // The default owner accepts an independent preparation before consuming a
-  // retained epoch. Explicit native callers can grant or defer the same offer.
-  if (!service->stopping &&
-      !iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING) &&
-      service->completion.work == TEXT_WORK_EPOCH &&
-      service->cpu_work == TEXT_CPU_WORK_NONE) {
-    loom_serve_text_select_work(service, false, out_progress);
-    loom_runtime_service_operation_key_t operation;
-    IREE_RETURN_IF_ERROR(loom_serve_text_service_try_schedule(
-        service, service->scheduling.offer.key, 0, flags, &operation));
-    *out_progress |= operation.serial != 0;
-  }
-  bool progress = false;
-  IREE_RETURN_IF_ERROR(
-      loom_serve_text_service_progress(service, flags, &progress));
-  *out_progress |= progress;
-  // Inline prepared admissions may fill the existing cohort in one owner turn.
-  // A finite entry budget excludes arrivals and prevents a waiting retry loop.
-  iree_host_size_t remaining = service->pending.count + 1;
-  iree_status_t status = iree_ok_status();
-  while (remaining-- && service->scheduling.offer.choice_count &&
-         iree_status_is_ok(status)) {
-    loom_runtime_service_operation_key_t operation;
-    status = loom_serve_text_service_try_schedule(
-        service, service->scheduling.offer.key, 0, flags, &operation);
-    *out_progress |= operation.serial != 0;
-    if (!iree_status_is_ok(status) || !operation.serial ||
-        loom_serve_text_has_work(service)) {
-      break;
-    }
-    status = loom_serve_text_service_progress(service, flags, &progress);
-    *out_progress |= progress;
-  }
-  if (iree_status_is_ok(status) && service->projector) {
-    loom_runtime_service_offer_t offer;
-    const loom_runtime_service_control_binding_t binding =
-        service->image_scheduling;
-    if (loom_runtime_service_read_offer(binding.control, binding.offer_ordinal,
-                                        &offer) ==
-            LOOM_RUNTIME_SERVICE_READ_COMPLETE &&
-        offer.choice_count) {
-      loom_runtime_service_operation_key_t operation;
-      status = loom_serve_text_service_try_schedule(service, offer.key, 0,
-                                                    flags, &operation);
-      *out_progress |= operation.serial != 0;
-    }
-  }
-  if (iree_status_is_ok(status) && service->image) {
-    const loom_runtime_service_control_binding_t binding =
-        loom_service_finite_component_scheduling_binding(service->image);
-    loom_runtime_service_offer_t offer;
-    if (loom_runtime_service_read_offer(binding.control, binding.offer_ordinal,
-                                        &offer) ==
-            LOOM_RUNTIME_SERVICE_READ_COMPLETE &&
-        offer.choice_count) {
-      loom_runtime_service_operation_key_t operation;
-      status = loom_serve_text_service_try_schedule(service, offer.key, 0,
-                                                    flags, &operation);
-      *out_progress |= operation.serial != 0;
-    }
-  }
-  return status;
+  return loom_serve_text_service_progress(self, flags, out_progress);
 }
 
 static iree_status_t loom_serve_text_accept(

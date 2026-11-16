@@ -301,8 +301,8 @@ struct loom_serve_test_registration_dependency_t {
     operation->dependency = dependency;
     loom_service_registration_initialize(
         &vtable, operation, 1u << LOOM_SERVICE_MODEL_COMPONENT_PRIMARY, 0,
-        loom_runtime_service_control_binding(control, 0, 0, 0), observer,
-        &operation->native);
+        nullptr, loom_runtime_service_control_binding(control, 0, 0, 0),
+        observer, configuration->name, stream, &operation->native);
     *out_registration = {.native = &operation->native, .service = Service};
     return iree_ok_status();
   }

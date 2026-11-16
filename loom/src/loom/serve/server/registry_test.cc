@@ -9,6 +9,7 @@
 #include <array>
 #include <cstring>
 #include <filesystem>
+#include <memory>
 #include <string>
 
 #include "iree/io/file_contents.h"
@@ -17,6 +18,8 @@
 #include "iree/testing/temp_file.h"
 #include "loom/runtime/telemetry/stream.h"
 #include "loom/serve/server/configuration.h"
+#include "loom/serve/server/observation.h"
+#include "loom/serve/server/resources.h"
 #include "loom/serve/service/recognition/request.h"
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/speech/request.h"
@@ -163,7 +166,9 @@ TEST_P(RegistryTest, FileRegistrationOwnsAuthoredPathsAndSelectedBase) {
   EXPECT_EQ(configuration_.sources.values, nullptr);
   const auto* model = loom_serve_registry_at(registry_, index);
   const int64_t registered = model->registered_unix_seconds;
-  EXPECT_EQ(model->phase, LOOM_SERVE_REGISTRATION_DECLARED);
+  EXPECT_EQ(loom_serve_registry_state(model).phase,
+            LOOM_SERVICE_REGISTRATION_DECLARED);
+  EXPECT_FALSE(loom_serve_registry_pending(model));
   EXPECT_TRUE(model->closed);
   EXPECT_EQ(String(model->service.name), "vectors");
   EXPECT_STREQ(model->service.endpoint, "/v1/embeddings");
@@ -184,6 +189,49 @@ TEST_P(RegistryTest, FileRegistrationOwnsAuthoredPathsAndSelectedBase) {
   IREE_ASSERT_OK(loom_serve_registry_advance(registry_, index, {}, &progress));
   EXPECT_FALSE(progress);
   EXPECT_EQ(model->registered_unix_seconds, registered);
+
+  // Observation sampling distinguishes cold intent from accepted work without
+  // asking the factory to prepare the missing source files.
+  const loom_serve_resources_t resources = {};
+  loom_serve_observation_t* observation_value = nullptr;
+  IREE_ASSERT_OK(loom_serve_observation_allocate(
+      registry_, &resources, iree_allocator_system(), &observation_value));
+  std::unique_ptr<loom_serve_observation_t,
+                  decltype(&loom_serve_observation_free)>
+      observation(observation_value, loom_serve_observation_free);
+  char storage[4096];
+  iree_string_builder_t output;
+  iree_string_builder_initialize_with_storage(storage, sizeof(storage),
+                                              &output);
+  auto sample = [&] {
+    iree_host_size_t cursor = 0;
+    do {
+      IREE_CHECK_OK(loom_serve_observation_sample(observation.get(), 100,
+                                                  &cursor, &output));
+    } while (cursor);
+    // The server page precedes the single managed model.
+    iree_string_builder_reset(&output);
+    loom_serve_observation_version_t version;
+    IREE_CHECK_OK(loom_serve_observation_write_page(observation.get(), &cursor,
+                                                    &output, &version));
+    iree_string_builder_reset(&output);
+    IREE_CHECK_OK(loom_serve_observation_write_page(observation.get(), &cursor,
+                                                    &output, &version));
+    return String(iree_string_builder_view(&output));
+  };
+  EXPECT_NE(
+      sample().find("\"offer_count\":\"0\",\"pending_operation_count\":\"0\""),
+      std::string::npos);
+  IREE_ASSERT_OK(
+      loom_serve_registry_activate(loom_serve_registry_at(registry_, index),
+                                   LOOM_SERVICE_MODEL_COMPONENT_PRIMARY));
+  EXPECT_NE(
+      sample().find("\"offer_count\":\"1\",\"pending_operation_count\":\"0\""),
+      std::string::npos);
+  EXPECT_EQ(loom_serve_registry_state(model).phase,
+            LOOM_SERVICE_REGISTRATION_DECLARED);
+  EXPECT_FALSE(loom_serve_registry_pending(model));
+  iree_string_builder_deinitialize(&output);
   IREE_ASSERT_OK(loom_serve_registry_remove(
       loom_serve_registry_at(registry_, index), LOOM_SERVE_REMOVAL_DRAIN));
   IREE_ASSERT_OK(loom_serve_registry_advance(registry_, index, {}, &progress));

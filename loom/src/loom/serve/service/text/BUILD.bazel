@@ -70,6 +70,7 @@ loom_cc_library(
         "//loom/src/loom/runtime:service_control",
         "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/device:pool",
         "//loom/src/loom/runtime/host",
         "//loom/src/loom/runtime/parameter:activation",
         "//loom/src/loom/runtime/parameter:residency",
@@ -144,6 +145,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/telemetry:stream",
         "//loom/src/loom/runtime/testing:application",
         "//loom/src/loom/runtime/testing:service_control",
+        "//loom/src/loom/runtime/testing:service_schedule",
         "//loom/src/loom/runtime/testing:stalled_stderr",
         "//loom/src/loom/serve/server:model_registration",
         "//loom/src/loom/serve/server:registry",
@@ -292,7 +294,10 @@ loom_cc_library(
     srcs = ["variant_test.cc"],
     target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
     visibility = ["//visibility:private"],
-    deps = [":source_service_fixture"],
+    deps = [
+        ":source_service_fixture",
+        "//loom/src/loom/runtime:driver",
+    ],
     alwayslink = True,
 )
 
@@ -434,7 +439,9 @@ loom_cc_library(
         ":checkpoint_control",
         ":source_service_fixture",
         ":stream",
+        "//loom/src/loom/runtime:driver",
         "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/testing:service_schedule",
         "//loom/src/loom/service/telemetry:record",
         "//loom/src/loom/util:json",
         "//runtime/src/iree/base/tooling:flags",

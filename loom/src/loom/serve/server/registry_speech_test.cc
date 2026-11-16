@@ -20,6 +20,7 @@
 #include "loom/runtime/host/host.h"
 #include "loom/runtime/telemetry/stream.h"
 #include "loom/runtime/testing/application.h"
+#include "loom/runtime/testing/service_schedule.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/registry.h"
@@ -124,17 +125,16 @@ class RegistrySpeechTest : public ::testing::Test {
         notification};
     loom_runtime_device_group_set_observer(registration_options_.device_group,
                                            wake);
+    loom_runtime::testing::ServiceSchedule schedule;
+    loom_serve_registry_set_advance_observer(registry_, wake, {});
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
       iree_status_t status =
           loom_runtime_device_group_advance(registration_options_.device_group);
-      if (Model()->phase == LOOM_SERVE_REGISTRATION_READY) {
+      if (loom_serve_registry_state(Model()).phase ==
+          LOOM_SERVICE_REGISTRATION_READY) {
         auto& service = Model()->service;
-        status = iree_status_join(
-            status, service.runtime.vtable->advance(
-                        service.runtime.self,
-                        loom_serve_registry_service_flags(Model()), &progress));
         loom_runtime_telemetry_record_t record;
         loom_runtime_telemetry_read_t result;
         while ((result = loom_runtime_telemetry_stream_read(
@@ -150,10 +150,12 @@ class RegistrySpeechTest : public ::testing::Test {
       }
       bool registry_progress = false;
       if (iree_status_is_ok(status)) {
-        status = loom_serve_registry_advance(registry_, index_, wake,
-                                             &registry_progress);
+        status =
+            schedule.Advance(&loom_serve_registry_services(registry_)[index_],
+                             0, &registry_progress);
       }
-      status = iree_status_join(status, iree_status_clone(Model()->status));
+      status = iree_status_join(
+          status, iree_status_clone(loom_serve_registry_state(Model()).status));
       if (ready() || progress || registry_progress ||
           !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(notification);
@@ -290,12 +292,15 @@ TEST_F(RegistrySpeechTest, SharedOutputAndFinalHandleSurviveNameReuse) {
   SpeechStream stream(nullptr, loom_serve_speech_stream_close);
   IREE_ASSERT_OK(Open(FLAG_voice, &stream));
   EXPECT_EQ(stream, nullptr);
-  EXPECT_EQ(Model()->phase, LOOM_SERVE_REGISTRATION_DECLARED);
+  EXPECT_EQ(loom_serve_registry_state(Model()).phase,
+            LOOM_SERVICE_REGISTRATION_DECLARED);
   Model()->closed = false;
   IREE_ASSERT_OK(Open(FLAG_voice, &stream));
   EXPECT_EQ(stream, nullptr);
-  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-      [&] { return Model()->phase == LOOM_SERVE_REGISTRATION_READY; }));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return loom_serve_registry_state(Model()).phase ==
+           LOOM_SERVICE_REGISTRATION_READY;
+  }));
   IREE_ASSERT_OK(Open(FLAG_voice, &stream));
   ASSERT_NE(stream, nullptr);
   ASSERT_NO_FATAL_FAILURE(AwaitOutput(stream.get()));
@@ -332,8 +337,10 @@ TEST_F(RegistrySpeechTest, SharedOutputAndFinalHandleSurviveNameReuse) {
   ASSERT_NO_FATAL_FAILURE(Register());
   EXPECT_GT(Model()->incarnation, incarnation);
   Model()->closed = false;
-  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-      [&] { return Model()->phase == LOOM_SERVE_REGISTRATION_READY; }));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return loom_serve_registry_state(Model()).phase ==
+           LOOM_SERVICE_REGISTRATION_READY;
+  }));
   SpeechStream replacement(nullptr, loom_serve_speech_stream_close);
   IREE_ASSERT_OK(Open(FLAG_voice, &replacement));
   ASSERT_NE(replacement, nullptr);
@@ -358,8 +365,10 @@ TEST_F(RegistrySpeechTest, SharedOutputAndFinalHandleSurviveNameReuse) {
 
 TEST_F(RegistrySpeechTest, AbortDetachesLiveStreamsBeforeModelRetirement) {
   Model()->closed = false;
-  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-      [&] { return Model()->phase == LOOM_SERVE_REGISTRATION_READY; }));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return loom_serve_registry_state(Model()).phase ==
+           LOOM_SERVICE_REGISTRATION_READY;
+  }));
   SpeechStream first(nullptr, loom_serve_speech_stream_close);
   SpeechStream second(nullptr, loom_serve_speech_stream_close);
   IREE_ASSERT_OK(Open(FLAG_voice, &first));
@@ -393,8 +402,10 @@ TEST_F(RegistrySpeechTest, AbortDetachesLiveStreamsBeforeModelRetirement) {
 TEST_F(RegistrySpeechTest,
        StaggeredStreamsPreserveOutputAcrossCancelledSlotReuse) {
   Model()->closed = false;
-  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-      [&] { return Model()->phase == LOOM_SERVE_REGISTRATION_READY; }));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return loom_serve_registry_state(Model()).phase ==
+           LOOM_SERVICE_REGISTRATION_READY;
+  }));
   const std::array<const char*, 4> voices = {
       FLAG_voice, FLAG_alternate_voice, FLAG_third_voice, FLAG_fourth_voice};
   const std::string text = FLAG_text;

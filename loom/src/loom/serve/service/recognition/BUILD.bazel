@@ -28,6 +28,7 @@ loom_cc_library(
         "//loom/src/loom/runtime:service_control",
         "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/device:pool",
         "//loom/src/loom/runtime/host",
         "//loom/src/loom/runtime/parameter:activation",
         "//loom/src/loom/runtime/parameter:residency",

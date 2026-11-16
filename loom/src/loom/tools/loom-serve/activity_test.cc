@@ -21,6 +21,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/tooling/device_profiling.h"
 #include "loom/runtime/host/host.h"
+#include "loom/runtime/testing/service_schedule.h"
 #include "loom/runtime/testing/worker_gate.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
@@ -170,6 +171,8 @@ class NativeActivityTest : public ::testing::Test {
         0, nullptr, model_count_,
         loom_serve_model_registration_factory(&registration_), allocator_,
         &registry_));
+    loom_runtime_driver_initialize(
+        model_count_, loom_serve_registry_services(registry_), &driver_);
     ASSERT_NO_FATAL_FAILURE(Register(FLAG_model, 0));
     if (model_count_ == 2) {
       ASSERT_NO_FATAL_FAILURE(Register(FLAG_transcription_model, 1));
@@ -177,7 +180,8 @@ class NativeActivityTest : public ::testing::Test {
     IREE_ASSERT_OK(Until(
         [&] {
           for (size_t i = 0; i < model_count_; ++i) {
-            if (Model(i)->phase != LOOM_SERVE_REGISTRATION_READY) {
+            if (loom_serve_registry_state(Model(i)).phase !=
+                LOOM_SERVICE_REGISTRATION_READY) {
               return false;
             }
           }
@@ -199,6 +203,7 @@ class NativeActivityTest : public ::testing::Test {
                 [](bool*) { return iree_ok_status(); }));
       IREE_EXPECT_OK(loom_serve_registry_free(registry_));
     }
+    iree_status_free(driver_.status);
     iree_notification_deinitialize(&notification_);
   }
 
@@ -252,39 +257,29 @@ class NativeActivityTest : public ::testing::Test {
                                  IREE_ALL_WAITERS);
         },
         &notification_};
+    loom_serve_registry_set_advance_observer(registry_, wake, {});
     auto status = iree_ok_status();
     while (iree_status_is_ok(status) && !done()) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       bool progress = false;
       status = pump(&progress);
-      for (size_t i = 0; i < model_count_ && iree_status_is_ok(status); ++i) {
-        const size_t index = (cursor_ + i) % model_count_;
+      bool advanced = false;
+      loom_runtime_driver_advance(&driver_, &advanced);
+      progress |= advanced | schedule_.Schedule(&driver_);
+      status = iree_status_join(status, iree_status_clone(driver_.status));
+      for (size_t index = 0; index < model_count_ && iree_status_is_ok(status);
+           ++index) {
         auto* model = Model(index);
-        if (!model->service.name.size) {
-          continue;
-        }
-        bool advanced = false;
-        if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
-          auto& service = model->service;
-          status = service.runtime.vtable->advance(
-              service.runtime.self, loom_serve_registry_service_flags(model),
-              &advanced);
-          progress |= advanced;
-        }
-        if (iree_status_is_ok(status)) {
-          status =
-              loom_serve_registry_advance(registry_, index, wake, &advanced);
-          progress |= advanced;
-        }
         // Preparation failures remain recorded until removal finishes. Report
         // them during setup, but let teardown finish retiring accepted work.
         // A release failure prevents retirement and must still stop the wait.
-        if (!model->removal ||
-            model->phase == LOOM_SERVE_REGISTRATION_RELEASE_FAILED) {
-          status = iree_status_join(status, iree_status_clone(model->status));
+        if (!model->removal || loom_serve_registry_state(model).phase ==
+                                   LOOM_SERVICE_REGISTRATION_RELEASE_FAILED) {
+          status = iree_status_join(
+              status,
+              iree_status_clone(loom_serve_registry_state(model).status));
         }
       }
-      cursor_ = (cursor_ + 1) % model_count_;
       if (!iree_status_is_ok(status) || progress || done()) {
         iree_notification_cancel_wait(&notification_);
       } else {
@@ -583,8 +578,10 @@ class NativeActivityTest : public ::testing::Test {
   std::array<std::string, 2> names_;
   // Actual number of configured model roles.
   size_t model_count_ = 1;
-  // Rotating first service prevents owner iteration bias.
-  size_t cursor_ = 0;
+  // Real roster retains shared-capacity relationships across both phases.
+  loom_runtime_driver_t driver_ = {};
+  // Bounded default-policy storage, reused across owner turns.
+  loom_runtime::testing::ServiceSchedule schedule_{2};
   // Recorded input owned by the test's microphone and independent oracle.
   std::vector<float> samples_;
 };
@@ -716,9 +713,9 @@ TEST_F(NativeActivityTest, AcceptedCancellationAndRetainedFinalEvent) {
     bool progress = false;
     IREE_ASSERT_OK(Feed(&interrupted, &progress, false));
     auto& service = Model()->service;
-    IREE_ASSERT_OK(service.runtime.vtable->advance(
-        service.runtime.self, loom_serve_registry_service_flags(Model()),
-        &progress));
+    loom_runtime_driver_advance(&driver_, &progress);
+    progress |= schedule_.Schedule(&driver_);
+    IREE_ASSERT_OK(iree_status_clone(driver_.status));
     EXPECT_TRUE(progress);
     interrupted.stream.reset();
     IREE_ASSERT_OK(service.runtime.vtable->advance(
@@ -763,9 +760,12 @@ TEST_F(NativeActivityTest, AcceptedCancellationAndRetainedFinalEvent) {
   EXPECT_EQ(final->activity.end, saved.end);
   EXPECT_EQ(final->activity.speech_probability, saved.speech_probability);
   ASSERT_NO_FATAL_FAILURE(Register(FLAG_model, 0));
-  IREE_ASSERT_OK(
-      Until([&] { return Model()->phase == LOOM_SERVE_REGISTRATION_READY; },
-            [](bool*) { return iree_ok_status(); }));
+  IREE_ASSERT_OK(Until(
+      [&] {
+        return loom_serve_registry_state(Model()).phase ==
+               LOOM_SERVICE_REGISTRATION_READY;
+      },
+      [](bool*) { return iree_ok_status(); }));
   loom_serve_activity_test_stream_t replacement;
   replacement.samples = samples_;
   ASSERT_NO_FATAL_FAILURE(Run(&replacement));

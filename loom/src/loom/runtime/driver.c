@@ -6,7 +6,7 @@
 #include "loom/runtime/driver.h"
 
 void loom_runtime_driver_initialize(iree_host_size_t capacity,
-                                    loom_runtime_service_t* services,
+                                    const loom_runtime_service_t* services,
                                     loom_runtime_driver_t* out_driver) {
   *out_driver = (loom_runtime_driver_t){
       .services = services,

@@ -282,8 +282,7 @@ TEST_P(SourceImageServiceTest, SelectionWaitsForWholeImageAndEncoderRelease) {
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
-      IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
-                                                       0, &progress));
+      IREE_ASSERT_OK(schedule_.Advance(&interface.runtime, 0, &progress));
       if (ready() || progress) {
         iree_notification_cancel_wait(notification);
       } else {

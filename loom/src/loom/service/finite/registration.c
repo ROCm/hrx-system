@@ -6,6 +6,7 @@
 #include "loom/service/finite/registration.h"
 
 #include "iree/hal/api.h"
+#include "loom/runtime/device/pool.h"
 
 // The native registration and its retained control share this one allocation.
 // Source mechanics retain typed resource handles; lifecycle state has one
@@ -198,9 +199,10 @@ iree_status_t loom_service_finite_registration_allocate(
     loom_service_registration_initialize(
         &loom_service_finite_registration_vtable, provider,
         1u << LOOM_SERVICE_MODEL_COMPONENT_PRIMARY, device_ordinal,
+        loom_runtime_pool_residency_cache(pool),
         loom_runtime_service_control_binding(control, 1,
                                              options->variant_capacity + 1, 0),
-        observer, &provider->registration);
+        observer, options->name, options->stream, &provider->registration);
     *out_registration = &provider->registration;
   } else {
     iree_allocator_free_aligned(host_allocator, provider);

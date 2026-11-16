@@ -55,8 +55,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
       // A queued arrival has no borrower until the owner selects it. Give it
       // one scheduling opportunity before waiting for capacity quiescence.
       bool progress = false;
-      IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
-                                                       0, &progress));
+      IREE_ASSERT_OK(schedule_.Advance(&interface.runtime, 0, &progress));
       ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, quiescent));
     };
     auto idle = [&] {
@@ -292,8 +291,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
             EXPECT_EQ(
                 interface.snapshot(interface.runtime.self).queued_requests, 2u);
             bool progress = false;
-            IREE_ASSERT_OK(interface.runtime.vtable->advance(
-                interface.runtime.self, 0, &progress));
+            IREE_ASSERT_OK(schedule_.Advance(&interface.runtime, 0, &progress));
             EXPECT_TRUE(progress);
             EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
             EXPECT_EQ(
@@ -320,8 +318,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
       loom_serve::testing::text::OwnerTurn::Run(
           loom_runtime_host_executor(host_), [&] {
             bool progress = false;
-            IREE_ASSERT_OK(interface.runtime.vtable->advance(
-                interface.runtime.self, 0, &progress));
+            IREE_ASSERT_OK(schedule_.Advance(&interface.runtime, 0, &progress));
             EXPECT_TRUE(progress);
           });
       ASSERT_TRUE(interface.runtime.vtable->is_pending(interface.runtime.self));

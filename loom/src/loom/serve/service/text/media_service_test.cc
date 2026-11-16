@@ -138,8 +138,7 @@ class MediaServiceTest : public SourceTextServiceTest {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
       OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
-        IREE_ASSERT_OK(interface_.runtime.vtable->advance(
-            interface_.runtime.self, 0, &progress));
+        IREE_ASSERT_OK(schedule_.Advance(&interface_.runtime, 0, &progress));
         bool matches =
             std::string(interface_.snapshot(interface_.runtime.self).phase) ==
             phase;
