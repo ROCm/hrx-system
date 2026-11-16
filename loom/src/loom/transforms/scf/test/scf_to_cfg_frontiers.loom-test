@@ -257,3 +257,54 @@ func.def @alternating_frontiers(%condition: i1, %limit: index, %seed: i32) {
 ^_bb15:
   func.return
 }
+
+// ====
+
+// The condition region carries a selected Boolean through its nested join
+// before deciding whether to enter the body or return the tested position.
+func.def @guarded_condition_result(%input: view<37xi32>, %start: index) -> (index) {
+  %length = index.constant 37 : index
+  %terminal = scf.while(%before = %start : index) -> (index) {
+    %inside = index.cmp ult, %before, %length : index
+    %continue = scf.if %inside -> (i1) {
+      %value = view.load %input[%before] : view<37xi32> -> i32
+      %threshold = scalar.constant 0 : i32
+      %positive = scalar.cmpi sgt, %value, %threshold : i32
+      scf.yield %positive : i1
+    } else {
+      scf.yield %inside : i1
+    }
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %step = index.constant 1 : index
+    %next = index.add %current, %step : index
+    scf.yield %next : index
+  }
+  func.return %terminal : index
+}
+
+// ----
+func.def @guarded_condition_result(%input: view<37xi32>, %start: index) -> (index) {
+  %length = index.constant 37 : index
+  cfg.br ^_bb1(%start: index)
+^_bb1(%before: index):
+  %inside = index.cmp ult, %before, %length : index
+  cfg.cond_br %inside, ^_bb2, ^_bb3
+^_bb2:
+  %value = view.load %input[%before] : view<37xi32> -> i32
+  %threshold = scalar.constant 0 : i32
+  %positive = scalar.cmpi sgt, %value, %threshold : i32
+  cfg.br ^_bb4(%positive: i1)
+^_bb3:
+  cfg.br ^_bb4(%inside: i1)
+^_bb4(%continue: i1):
+  cfg.cond_br %continue, ^_bb5, ^_bb6
+^_bb5:
+  %step = index.constant 1 : index
+  %next = index.add %before, %step : index
+  cfg.br ^_bb1(%next: index)
+^_bb6:
+  cfg.br ^_bb7(%before: index)
+^_bb7(%terminal: index):
+  func.return %terminal : index
+}

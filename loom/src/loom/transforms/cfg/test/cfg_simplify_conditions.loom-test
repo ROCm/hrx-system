@@ -153,3 +153,51 @@ func.def @preserves_constant_materialization(%gate: i1, %other: i1) -> (i1) {
 ^unknown:
   func.return %other : i1
 }
+
+// ====
+
+// Threading the condition join replaces its Boolean argument with the load's
+// comparison and moves the branch. The load remains guarded by the bounds
+// check, and either exit returns the position tested by the loop header.
+func.def @forwards_guarded_loop_condition(%input: view<37xi32>, %start: index) -> (index) {
+  %length = index.constant 37 : index
+  cfg.br ^header(%start: index)
+^header(%position: index):
+  %inside = index.cmp ult, %position, %length : index
+  cfg.cond_br %inside, ^read, ^outside
+^read:
+  %value = view.load %input[%position] : view<37xi32> -> i32
+  %threshold = scalar.constant 0 : i32
+  %positive = scalar.cmpi sgt, %value, %threshold : i32
+  cfg.br ^condition(%positive: i1)
+^outside:
+  cfg.br ^condition(%inside: i1)
+^condition(%continue: i1):
+  cfg.cond_br %continue, ^body, ^exit
+^body:
+  %step = index.constant 1 : index
+  %next = index.add %position, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %position : index
+}
+
+// ----
+func.def @forwards_guarded_loop_condition(%input: view<37xi32>, %start: index) -> (index) {
+  %length = index.constant 37 : index
+  cfg.br ^header(%start: index)
+^header(%position: index):
+  %inside = index.cmp ult, %position, %length : index
+  cfg.cond_br %inside, ^read, ^exit
+^read:
+  %value = view.load %input[%position] : view<37xi32> -> i32
+  %threshold = scalar.constant 0 : i32
+  %positive = scalar.cmpi sgt, %value, %threshold : i32
+  cfg.cond_br %positive, ^body, ^exit
+^body:
+  %step = index.constant 1 : index
+  %next = index.add %position, %step : index
+  cfg.br ^header(%next: index)
+^exit:
+  func.return %position : index
+}
