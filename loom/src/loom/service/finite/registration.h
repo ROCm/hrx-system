@@ -7,6 +7,7 @@
 #define LOOM_SERVICE_FINITE_REGISTRATION_H_
 
 #include "loom/runtime/parameter/activation.h"
+#include "loom/runtime/service.h"
 #include "loom/service/finite/model.h"
 #include "loom/service/finite/service.h"
 
@@ -19,6 +20,39 @@ extern "C" {
 // have independent ownership and may outlive this registration.
 typedef struct loom_service_finite_registration_t
     loom_service_finite_registration_t;
+
+typedef enum loom_service_finite_registration_phase_e {
+  LOOM_SERVICE_FINITE_REGISTRATION_DECLARED = 0,
+  LOOM_SERVICE_FINITE_REGISTRATION_PREPARING,
+  LOOM_SERVICE_FINITE_REGISTRATION_READY,
+  LOOM_SERVICE_FINITE_REGISTRATION_FAILED,
+  LOOM_SERVICE_FINITE_REGISTRATION_RETIRING,
+  LOOM_SERVICE_FINITE_REGISTRATION_RETIRED,
+  LOOM_SERVICE_FINITE_REGISTRATION_RELEASE_FAILED,
+} loom_service_finite_registration_phase_t;
+
+typedef enum loom_service_finite_parameter_operation_e {
+  LOOM_SERVICE_FINITE_PARAMETER_OPERATION_NONE = 0,
+  LOOM_SERVICE_FINITE_PARAMETER_OPERATION_ACTIVATE,
+  LOOM_SERVICE_FINITE_PARAMETER_OPERATION_DEACTIVATE,
+} loom_service_finite_parameter_operation_t;
+
+// Owner-thread state, independent of concurrent scheduling observations. Every
+// pointer is borrowed through the next owner mutation; nothing transfers
+// resource or diagnostic ownership to the observer.
+typedef struct loom_service_finite_registration_snapshot_t {
+  // Native preparation/publication/retirement phase.
+  loom_service_finite_registration_phase_t phase;
+  // Requested or accepted parameter operation, independent of model phase.
+  loom_service_finite_parameter_operation_t parameter_operation;
+  // Ready engine; NULL in all other phases. Existing engine views remain
+  // borrowed until the application's explicit retirement handoff.
+  loom_service_finite_service_t* service;
+  // Borrowed accumulated native failure; the registration owns the diagnostic.
+  iree_status_t status;
+  // Borrowed terminal preparation evidence, retained through model retirement.
+  const loom_runtime_compilation_report_t* compilation;
+} loom_service_finite_registration_snapshot_t;
 
 typedef struct loom_service_finite_registration_options_t {
   // Nonzero composition-assigned lifetime, changed when a slot is reused.
@@ -47,6 +81,56 @@ iree_status_t loom_service_finite_registration_allocate(
     const loom_service_finite_registration_options_t* options,
     loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_service_finite_registration_t** out_registration);
+
+loom_service_finite_registration_snapshot_t
+loom_service_finite_registration_snapshot(
+    const loom_service_finite_registration_t* registration);
+
+// Requests one parameter operation without starting it. The application closes
+// admission until this intent completes; already admitted requests drain before
+// its offer becomes legal. Deactivation requires elastic backing and waits for
+// persistent retention to be unpinned. NONE withdraws an unaccepted request.
+// An accepted operation must complete before another can replace it. This call
+// performs no source I/O, compilation, device submission, or readiness wait.
+iree_status_t loom_service_finite_registration_request_parameters(
+    loom_service_finite_registration_t* registration,
+    loom_service_finite_parameter_operation_t operation);
+
+enum loom_service_finite_retire_flag_bits_e {
+  // Cancels queued work and joins accepted work instead of draining requests.
+  LOOM_SERVICE_FINITE_RETIRE_FLAG_ABORT = 1u << 0,
+};
+typedef uint32_t loom_service_finite_retire_flags_t;
+
+// Irreversible handoff after future admission stops and external service or
+// tokenizer views join. Independent request receipts may remain alive. Normal
+// removal offers release after admitted requests finish. ABORT cancels them;
+// accepted cleanup then progresses even without new scheduling grants. Native
+// failures also use that cleanup path after this handoff. Calling again after
+// RELEASE_FAILED explicitly retries the retained platform release.
+void loom_service_finite_registration_request_retirement(
+    loom_service_finite_registration_t* registration,
+    loom_service_finite_retire_flags_t flags);
+
+// Consumes accepted native work without starting another offered unit. Reports
+// actual progress; failures remain in snapshot.status and do not fail peers.
+// STOPPING joins/cancels accepted work but cannot destroy an externally
+// borrowed engine: request_retirement supplies that separate ownership handoff.
+bool loom_service_finite_registration_progress(
+    loom_service_finite_registration_t* registration,
+    loom_runtime_service_flags_t flags);
+
+// Claims one currently advertised lifecycle or engine choice without waiting.
+// Stale choices return an unaccepted OK outcome. Native errors are retained in
+// snapshot.status; acceptance remains independent of failure and actual
+// cleanup. Direct prepare/activate/deactivate/retire calls below are explicit
+// grants of those same native operations and share their ownership/progress
+// paths.
+loom_runtime_service_schedule_outcome_t
+loom_service_finite_registration_try_schedule(
+    loom_service_finite_registration_t* registration,
+    loom_runtime_service_offer_key_t offer, uint64_t choice_ordinal,
+    loom_runtime_service_flags_t flags);
 
 // Advances preparation or irrevocable cancellation without waiting. A
 // nonterminal result owes a wake after accepted work retires. Terminal success

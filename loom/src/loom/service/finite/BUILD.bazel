@@ -161,6 +161,7 @@ loom_cc_library(
     hdrs = ["registration.h"],
     visibility = ["//visibility:public"],
     deps = [
+        "//loom/src/loom/runtime:service",
         "//loom/src/loom/runtime:service_control",
         "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/device",
