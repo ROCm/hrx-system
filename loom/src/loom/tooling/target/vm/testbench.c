@@ -11,6 +11,7 @@
 #include "iree/vm/execution.h"
 #include "iree/vm/module/string/module.h"
 #include "iree/vm/sync.h"
+#include "loom/ops/signature_flags.h"
 #include "loom/tooling/target/vm/buffer.h"
 #include "loomc/artifact.h"
 #include "loomc/interop.h"
@@ -22,6 +23,8 @@ struct loom_vm_testbench_function_t {
   iree_vm_function_t callee;
   // Borrowed source parameters supplying exact scalar types during marshalling.
   const loom_value_id_t* parameter_ids;
+  // Borrowed explicit source contracts, indexed in argument/result order.
+  iree_const_byte_span_t signature_flags;
   // Number of source parameters, before boundary projection.
   uint16_t parameter_count;
   // Number of physical result variants, after boundary projection.
@@ -264,12 +267,15 @@ static iree_status_t loom_vm_testbench_compile(
     iree_host_size_t total_size = 0;
     iree_host_size_t results_offset = 0;
     iree_host_size_t argument_buffers_offset = 0;
+    iree_host_size_t argument_spans_offset = 0;
     status = IREE_STRUCT_LAYOUT(
         0, &total_size,
         IREE_STRUCT_FIELD(max_arguments, iree_vm_variant_t, NULL),
         IREE_STRUCT_FIELD(max_results, iree_vm_variant_t, &results_offset),
         IREE_STRUCT_FIELD(max_buffers, iree_vm_buffer_t*,
-                          &argument_buffers_offset));
+                          &argument_buffers_offset),
+        IREE_STRUCT_FIELD(max_buffers, iree_vm_typed_span_t,
+                          &argument_spans_offset));
     if (iree_status_is_ok(status) && total_size) {
       status = iree_allocator_malloc(testbench->host_allocator, total_size,
                                      (void**)&testbench->arguments);
@@ -280,6 +286,9 @@ static iree_status_t loom_vm_testbench_compile(
         testbench->argument_buffers =
             (iree_vm_buffer_t**)((uint8_t*)testbench->arguments +
                                  argument_buffers_offset);
+        testbench->argument_spans =
+            (iree_vm_typed_span_t*)((uint8_t*)testbench->arguments +
+                                    argument_spans_offset);
         memset(testbench->argument_buffers, 0,
                max_buffers * sizeof(*testbench->argument_buffers));
       }
@@ -310,6 +319,7 @@ static iree_status_t loom_vm_testbench_prepare_function(
       loom_func_like_const_cast(invocation->module, symbol->defining_op);
   prepared->parameter_ids =
       loom_func_like_arg_ids(function, &prepared->parameter_count);
+  prepared->signature_flags = loom_func_like_signature_flags(function);
   const loom_string_id_t export_name = loom_func_like_export_symbol(function);
   return iree_vm_process_lookup_function(
       process, IREE_SV("test"),
@@ -530,6 +540,27 @@ static iree_status_t loom_vm_testbench_export_buffer(
   return iree_ok_status();
 }
 
+// Storage elements retain their exact byte width, including narrow floats.
+// Index/offset elements use the VM's 64-bit scalar carrier.
+static iree_vm_scalar_type_t loom_vm_testbench_span_element_type(
+    loom_scalar_type_t type) {
+  static const iree_vm_scalar_type_t kTypes[LOOM_SCALAR_TYPE_COUNT_] = {
+      [LOOM_SCALAR_TYPE_I8] = IREE_VM_SCALAR_TYPE_I8,
+      [LOOM_SCALAR_TYPE_I16] = IREE_VM_SCALAR_TYPE_I16,
+      [LOOM_SCALAR_TYPE_I32] = IREE_VM_SCALAR_TYPE_I32,
+      [LOOM_SCALAR_TYPE_I64] = IREE_VM_SCALAR_TYPE_I64,
+      [LOOM_SCALAR_TYPE_INDEX] = IREE_VM_SCALAR_TYPE_I64,
+      [LOOM_SCALAR_TYPE_OFFSET] = IREE_VM_SCALAR_TYPE_I64,
+      [LOOM_SCALAR_TYPE_F8E4M3] = IREE_VM_SCALAR_TYPE_F8E4M3FN,
+      [LOOM_SCALAR_TYPE_F8E5M2] = IREE_VM_SCALAR_TYPE_F8E5M2,
+      [LOOM_SCALAR_TYPE_F16] = IREE_VM_SCALAR_TYPE_F16,
+      [LOOM_SCALAR_TYPE_BF16] = IREE_VM_SCALAR_TYPE_BF16,
+      [LOOM_SCALAR_TYPE_F32] = IREE_VM_SCALAR_TYPE_F32,
+      [LOOM_SCALAR_TYPE_F64] = IREE_VM_SCALAR_TYPE_F64,
+  };
+  return kTypes[type];
+}
+
 static iree_status_t loom_vm_testbench_invoke_prepared(
     void* user_data, const loom_testbench_invocation_plan_t* invocation,
     iree_host_size_t workload_count, const loom_testbench_value_t* workloads,
@@ -548,8 +579,17 @@ static iree_status_t loom_vm_testbench_invoke_prepared(
     const loom_type_t type =
         loom_module_value_type(invocation->module, prepared->parameter_ids[i]);
     iree_vm_variant_t* argument = &arguments[argument_count];
-    argument_count += loom_view_boundary_component_count(
-        testbench->view_boundary_carrier, type);
+    const bool borrowed_view =
+        loom_type_is_view(type) &&
+        testbench->view_boundary_carrier ==
+            LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BORROWED_DIRECT &&
+        i < prepared->signature_flags.data_length &&
+        loom_signature_flags_access(prepared->signature_flags.data[i]) !=
+            LOOM_ARGUMENT_ACCESS_UNSPECIFIED;
+    argument_count += borrowed_view
+                          ? 1
+                          : loom_view_boundary_component_count(
+                                testbench->view_boundary_carrier, type);
     if (inputs[i].kind == LOOM_TESTBENCH_VALUE_KIND_BUFFER) {
       status = loom_vm_testbench_import_buffer(testbench, &inputs[i].buffer,
                                                &argument[0]);
@@ -559,7 +599,30 @@ static iree_status_t loom_vm_testbench_invoke_prepared(
       }
       if (iree_status_is_ok(status)) {
         iree_vm_buffer_retain(argument_buffers[i]);
-        if (loom_type_is_view(type)) {
+        if (borrowed_view) {
+          iree_vm_buffer_t* buffer = argument_buffers[i];
+          const iree_vm_buffer_access_flags_t access =
+              iree_vm_buffer_access(buffer);
+          iree_vm_typed_span_t* span = &testbench->argument_spans[i];
+          *span = (iree_vm_typed_span_t){
+              .data = loom_vm_testbench_buffer_data(buffer),
+              .scalar_type = loom_vm_testbench_span_element_type(
+                  loom_type_element_type(type)),
+              .access =
+                  (iree_any_bit_set(access, IREE_VM_BUFFER_ACCESS_FLAG_READ)
+                       ? IREE_VM_SPAN_ACCESS_READ
+                       : 0) |
+                  (iree_any_bit_set(access, IREE_VM_BUFFER_ACCESS_FLAG_WRITE)
+                       ? IREE_VM_SPAN_ACCESS_WRITE
+                       : 0),
+          };
+          span->count = iree_vm_buffer_length(buffer) /
+                        iree_vm_scalar_type_byte_width(span->scalar_type);
+          // argument_buffers keeps the mapping alive while the span is
+          // borrowed.
+          iree_vm_variant_reset(argument);
+          *argument = iree_vm_variant_from_span_borrowed(span);
+        } else if (loom_type_is_view(type)) {
           // The imported buffer already exposes the binding's exact range.
           argument[LOOM_VIEW_BOUNDARY_COMPONENT_OFFSET] =
               iree_vm_variant_from_i64(0);

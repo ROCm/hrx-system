@@ -302,16 +302,26 @@ const iree_vm_module_signature_type_t kIdentityFields[] = {
 const iree_vm_module_signature_type_t kOwnerSpanFields[] = {
     {IREE_VM_SCALAR_TYPE_I64, 0},
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
+         IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY |
          IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF,
      0},
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
+         IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY |
          static_cast<uint16_t>(IREE_VM_SCALAR_TYPE_I64),
      0}};
 const iree_vm_module_signature_type_t kSpanFields[] = {
     {IREE_VM_SCALAR_TYPE_I64, 0},
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
+         IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY |
          IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR,
      0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
+         IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY |
+         static_cast<uint16_t>(IREE_VM_SCALAR_TYPE_I64),
+     0}};
+const iree_vm_module_signature_type_t kWritableSpanFields[] = {
+    kSpanFields[0],
+    kSpanFields[1],
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
          static_cast<uint16_t>(IREE_VM_SCALAR_TYPE_I64),
      0}};
@@ -328,8 +338,10 @@ const auto kScalarSpanFields = [] {
   std::array<iree_vm_module_signature_type_t, IREE_ARRAYSIZE(kScalarSpanCases)>
       fields = {};
   for (size_t i = 0; i < fields.size(); ++i) {
-    fields[i] = {static_cast<uint16_t>(IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
-                                       kScalarSpanCases[i].kind),
+    fields[i] = {static_cast<uint16_t>(
+                     IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
+                     IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY |
+                     kScalarSpanCases[i].kind),
                  0};
   }
   return fields;
@@ -346,6 +358,7 @@ const iree_vm_module_callable_type_declaration_t kCallableTypes[] = {
     {{{kFactoryFields, 2, 0, 2, 0}, {}}, 0, 0, 0},
     {{{kPairFields, 2, 0, 2, 0}, {}}, 0, 0, 0},
     {{{kOwnerSpanFields, 3, 6, 0, 0}, {kSumFields, 1, 1, 0, 0}}, 0, 0, 0},
+    {{{kWritableSpanFields, 3, 6, 0, 0}, {kSumFields, 1, 1, 0, 0}}, 0, 0, 0},
     {{{kSpanFields, 3, 6, 0, 0}, {kSumFields, 1, 1, 0, 0}}, 0, 0, 0},
     {{{kScalarSpanFields.data(), 12, 24, 0, 0}, {}}, 0, 0, 0},
     {{{kWideSpanFields.data(), 17, 20, 0, 0}, {kSumFields, 1, 1, 0, 0}},
@@ -365,9 +378,9 @@ const iree_vm_module_export_declaration_t kExports[] = {
     {IREE_SV("read"), 5, 6, 0},
     {IREE_SV("read_owners"), 8, 11, 0},
     {IREE_SV("read_pair"), 7, 7, 0},
-    {IREE_SV("read_spans"), 9, 11, 0},
-    {IREE_SV("read_wide_spans"), 11, 13, 0},
-    {IREE_SV("scalar_spans"), 10, 14, 0},
+    {IREE_SV("read_spans"), 10, 11, 0},
+    {IREE_SV("read_wide_spans"), 12, 13, 0},
+    {IREE_SV("scalar_spans"), 11, 14, 0},
     {IREE_SV("write_spans"), 9, 12, 0}};
 using NativeFunction = iree_status_t (*)(Trace*, const NativeCall*);
 constexpr NativeFunction kFunctions[] = {

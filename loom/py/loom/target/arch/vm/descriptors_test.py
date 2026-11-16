@@ -40,6 +40,7 @@ from iree.vm.bytecode.spec.isa.core.rules import (
     RefOwnership,
     StateAccess,
 )
+from iree.vm.bytecode.spec.isa.core.span import SPAN_FROM_BUFFER
 from iree.vm.bytecode.spec.isa.core.stack import (
     MEMORY_FORMAT_SELECTOR,
     STACK_LOAD_INDEXED,
@@ -58,6 +59,7 @@ from loom.target.contracts import (
     LOWER_EMIT_FLAG_RECORD_SOURCE_MEMORY,
     AttrProject,
     DescriptorRule,
+    EmitDescriptorOp,
     GuardKind,
     ValueRef,
     compile_lower_rule_set,
@@ -310,14 +312,23 @@ def test_lowering_uses_the_projected_descriptors():
         for case in VM_CORE_CONTRACT_FRAGMENT.cases
         if isinstance(case, DescriptorRule)
     )
-    emissions = tuple(emit for case in cases for emit in case.emit)
+    emissions = tuple(
+        emit
+        for case in cases
+        for emit in case.emit
+        if isinstance(emit, EmitDescriptorOp)
+    )
     assert {id(emit.descriptor) for emit in emissions} == {
         id(descriptor)
         for descriptor in descriptors
-        # Symbol selection and frame initialization use retained C recipes.
-        # Source execution tests exercise both producers.
+        # Symbol selection, frame initialization, and call storage adapters use
+        # retained C recipes. Source execution tests exercise these producers.
         if descriptor.encoding_id
-        not in (BUFFER_RODATA_LOAD.opcode, REF_STACK_DISCARD_RANGE.opcode)
+        not in (
+            BUFFER_RODATA_LOAD.opcode,
+            REF_STACK_DISCARD_RANGE.opcode,
+            SPAN_FROM_BUFFER.opcode,
+        )
     }
     for emit in emissions:
         assert set(emit.operands) == {

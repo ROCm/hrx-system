@@ -772,15 +772,23 @@ TEST_F(NativeSpanVerificationTest, RejectsLogicalAndPhysicalCountMismatch) {
   });
 }
 
-TEST_F(NativeSpanVerificationTest, RejectsYieldingAndBytecodeSpanCallees) {
+TEST_F(NativeSpanVerificationTest, RejectsYieldingSpanCallees) {
   RejectMutation([&](auto& bytes) {
     MutableRecord(&bytes, contents_, plan_.layout.callable_types.rows + 1)
         ->flags_u16 = IREE_VM_BYTECODE_CALLABLE_TYPE_FLAG_MAY_YIELD;
   });
-  RejectMutation([&](auto& bytes) {
-    MutableRecord(&bytes, contents_, plan_.layout.functions.rows)
-        ->callable_type_ordinal_u16 = 1;
-  });
+}
+
+TEST_F(NativeSpanVerificationTest, AcceptsBytecodeSpanArguments) {
+  std::vector<uint8_t> bytes(contents_.data,
+                             contents_.data + contents_.data_length);
+  MutableRecord(&bytes, contents_, plan_.layout.functions.rows)
+      ->callable_type_ordinal_u16 = 1;
+  iree_vm_bytecode_module_plan_t plan = {};
+  IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
+      iree_make_const_byte_span(bytes.data(), bytes.size()), &plan));
+  uint32_t block = 0;
+  IREE_ASSERT_OK(iree_vm_bytecode_verify_module_instructions(&plan, &block));
 }
 
 TEST_F(NativeSpanVerificationTest, RejectsSpanResults) {

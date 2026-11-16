@@ -16,6 +16,7 @@
 #include "iree/vm/function.h"
 #include "iree/vm/ref.h"
 #include "iree/vm/scalar.h"
+#include "iree/vm/span.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -67,6 +68,21 @@ enum iree_vm_variant_tag_bits_e {
 #define IREE_VM_VARIANT_SCALAR_METADATA_(scalar_type) \
   (((uint64_t)(scalar_type) << 2) | IREE_VM_VARIANT_TAG_SCALAR)
 
+// A non-ref carrier outside the scalar type domain. Its payload borrows a
+// typed span descriptor; it never owns either that descriptor or its storage.
+#define IREE_VM_VARIANT_SPAN_METADATA_ UINT64_MAX
+
+static inline iree_vm_variant_t iree_vm_variant_from_span_borrowed(
+    const iree_vm_typed_span_t* span) {
+  iree_vm_variant_t variant = {(uint64_t)(uintptr_t)span,
+                               IREE_VM_VARIANT_SPAN_METADATA_};
+  return variant;
+}
+
+static inline bool iree_vm_variant_is_span(iree_vm_variant_t variant) {
+  return variant.metadata == IREE_VM_VARIANT_SPAN_METADATA_;
+}
+
 // Returns the canonical moved-from/unused carrier.
 static inline iree_vm_variant_t iree_vm_variant_empty(void) {
   iree_vm_variant_t variant = {
@@ -98,7 +114,8 @@ static inline bool iree_vm_variant_is_null(iree_vm_variant_t variant) {
 static inline bool iree_vm_variant_is_scalar(iree_vm_variant_t variant) {
   return (variant.metadata & IREE_VM_VARIANT_TAG_MASK) ==
              IREE_VM_VARIANT_TAG_SCALAR &&
-         (variant.metadata >> 2) != IREE_VM_SCALAR_TYPE_NONE;
+         (variant.metadata >> 2) > IREE_VM_SCALAR_TYPE_NONE &&
+         (variant.metadata >> 2) <= IREE_VM_SCALAR_TYPE_F64;
 }
 
 // Returns true when |variant| carries a function reference.

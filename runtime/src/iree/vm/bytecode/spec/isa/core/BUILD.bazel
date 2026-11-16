@@ -26,6 +26,7 @@ iree_py_library(
         "integer.py",
         "ref.py",
         "rules.py",
+        "span.py",
         "stack.py",
         "value.py",
     ],

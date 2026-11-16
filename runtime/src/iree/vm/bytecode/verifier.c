@@ -27,6 +27,9 @@ static bool iree_vm_bytecode_verify_signature_descriptor(
     const iree_vm_bytecode_module_layout_t* layout, uint16_t kind,
     uint16_t type_ordinal) {
   const bool is_span = iree_vm_module_signature_type_kind_is_span(kind);
+  if (!is_span && (kind & IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_NO_ACCESS)) {
+    return false;
+  }
   kind = iree_vm_module_signature_element_kind(kind);
   if (kind >= IREE_VM_BYTECODE_SIGNATURE_KIND_I8 &&
       kind <= IREE_VM_BYTECODE_SIGNATURE_KIND_F64) {
@@ -555,10 +558,6 @@ static iree_status_t iree_vm_bytecode_verify_function_signature(
   }
   const iree_vm_bytecode_v0_signature_row_t* signature =
       iree_vm_bytecode_function_signature(layout, row);
-  if (iree_vm_bytecode_signature_has_span_arguments(signature)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "bytecode functions cannot receive native spans");
-  }
   const uint16_t required_value_registers =
       iree_min(IREE_VM_CALL_DIRECT_REGISTER_COUNT,
                iree_max(signature->argument_value_count_u16,

@@ -84,6 +84,11 @@ void reject_misplaced_binding_attributes(
               std::string(name) +
                   " requires a leading pointer parameter attribute");
         }
+        if (name == "access" && scope != BindingAttributeScope::Parameter) {
+          diagnostics.reject(
+              unit, attribute,
+              "access requires a leading ordinary parameter attribute");
+        }
         if (name == "launch" &&
             scope != BindingAttributeScope::StagedParameter) {
           diagnostics.reject(

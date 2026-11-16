@@ -34,6 +34,7 @@ class StateResource(enum.Enum):
     FRAME_LOCALS = "frame.locals"
     PROCESS_GLOBALS = "process.globals"
     BUFFER = "buffer"
+    BORROWED_STORAGE = "borrowed.storage"
 
 
 class RefNullPolicy(enum.Enum):

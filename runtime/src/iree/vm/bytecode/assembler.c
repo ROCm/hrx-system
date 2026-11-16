@@ -1505,6 +1505,28 @@ static iree_status_t iree_vm_bytecode_assembler_parse_signature_fields(
           assembler, ')', "expected ')' after signature type"));
     }
     if (is_span) {
+      uint16_t access = 0;
+      if (iree_vm_bytecode_assembler_try_char(assembler, ',')) {
+        if (iree_vm_bytecode_assembler_try_literal(assembler,
+                                                   IREE_SV("read_write"))) {
+          access = 0;
+        } else if (iree_vm_bytecode_assembler_try_literal(assembler,
+                                                          IREE_SV("read"))) {
+          access = IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY;
+        } else if (iree_vm_bytecode_assembler_try_literal(assembler,
+                                                          IREE_SV("write"))) {
+          access = IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_WRITE_ONLY;
+        } else if (iree_vm_bytecode_assembler_try_literal(assembler,
+                                                          IREE_SV("none"))) {
+          access = IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_NO_ACCESS;
+        } else {
+          return iree_vm_bytecode_assembler_error(assembler,
+                                                  "expected span access bound");
+        }
+      }
+      iree_vm_bytecode_assembler_store(
+          descriptor + kind_offset, kind_width,
+          kind | IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN | access);
       IREE_RETURN_IF_ERROR(iree_vm_bytecode_assembler_parse_char(
           assembler, '>', "expected '>' after span element type"));
     }

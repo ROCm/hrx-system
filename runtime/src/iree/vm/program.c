@@ -153,11 +153,34 @@ static void iree_vm_program_build_signature_side_abi(
   *out_ref_fields = counts.ref_count ? field_storage->ref_fields : NULL;
   *out_function_fields =
       counts.function_count ? field_storage->function_fields : NULL;
+  iree_vm_program_scalar_field_abi_t* value_fields =
+      field_storage->scalar_fields;
+  if (counts.value_count) {
+    memset(value_fields, 0, counts.value_count * sizeof(*value_fields));
+    field_storage->scalar_fields += counts.value_count;
+  }
+  uint16_t value_ordinal = 0;
   for (uint16_t i = 0; i < signature_side.count; ++i) {
     const iree_vm_module_signature_type_t type = signature_side.data[i];
-    if (type.kind > IREE_VM_SCALAR_TYPE_NONE &&
-        type.kind <= IREE_VM_SCALAR_TYPE_F64) {
-      *field_storage->scalar_fields++ = (iree_vm_program_scalar_field_abi_t){
+    if (iree_vm_module_signature_type_kind_is_span(type.kind)) {
+      value_ordinal = (value_ordinal + 1u) / 2u * 2u;
+      const uint16_t element_kind =
+          iree_vm_module_signature_element_kind(type.kind);
+      value_fields[value_ordinal] = (iree_vm_program_scalar_field_abi_t){
+          .payload_mask =
+              iree_vm_module_signature_type_kind_is_ref(element_kind)
+                  ? (uintptr_t)linked_module->module->descriptor->ref_types
+                        .data[type.type_ordinal]
+                  : 0,
+          .variant_metadata = IREE_VM_PROGRAM_FIELD_SPAN |
+                              ((uint32_t)type.kind << 2) |
+                              IREE_VM_VARIANT_TAG_SCALAR,
+          .variant_offset = (uint32_t)(i * sizeof(iree_vm_variant_t)),
+      };
+      value_ordinal += 2;
+    } else if (type.kind > IREE_VM_SCALAR_TYPE_NONE &&
+               type.kind <= IREE_VM_SCALAR_TYPE_F64) {
+      value_fields[value_ordinal++] = (iree_vm_program_scalar_field_abi_t){
           .payload_mask = iree_vm_scalar_type_payload_mask(type.kind),
           .variant_metadata =
               ((uint32_t)type.kind << 2) | IREE_VM_VARIANT_TAG_SCALAR,
@@ -220,11 +243,12 @@ static iree_vm_program_callable_abi_t iree_vm_program_build_callable_abi(
     iree_vm_module_callable_type_declaration_t declaration,
     iree_vm_program_field_storage_t* field_storage) {
   iree_vm_program_callable_abi_t callable_abi = {0};
+  callable_abi.argument_count = declaration.signature.arguments.count;
   for (uint16_t i = 0; i < declaration.signature.arguments.count; ++i) {
     if (iree_vm_module_signature_type_kind_is_span(
             declaration.signature.arguments.data[i].kind)) {
       callable_abi.has_span_arguments = true;
-      return callable_abi;
+      break;
     }
   }
   iree_vm_program_build_signature_side_abi(

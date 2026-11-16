@@ -1,0 +1,62 @@
+// RUN: roundtrip
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+
+using Values = loom::type::view<loom::type::shape<4>, int>;
+struct [[loom::import("objects", "item")]] Item;
+using Objects = loom::type::view<loom::type::shape<4>, loom::ptr<Item>>;
+struct Columns {
+  Objects objects;
+  Values values;
+};
+
+[[loom::import("arrays", "read")]]
+int read([[loom::access("read")]] Columns input);
+[[loom::import("arrays", "write")]]
+void write([[loom::access("write")]] Values output);
+[[loom::import("arrays", "ignore")]]
+void ignore([[loom::access("none")]] Values storage);
+[[loom::import("arrays", "update")]]
+void update([[loom::access("read_write")]] Values storage);
+
+int run([[loom::access("read")]] Columns input,
+        [[loom::access("read_write")]] Values output) {
+  write(output);
+  ignore(output);
+  update(output);
+  return read(input);
+}
+
+// ----
+type.decl import("objects", "item") @Item
+
+func.def public @run(%input_objects: view<4xptr<@Item>> {access = read}, %input_values: view<4xi32> {access = read}, %output: view<4xi32> {access = read_write}) -> (i32) {
+  func.call @write(%output) : (view<4xi32>)
+  func.call @ignore(%output) : (view<4xi32>)
+  func.call @update(%output) : (view<4xi32>)
+  %4 = func.call @read(%input_objects, %input_values) : (view<4xptr<@Item>>, view<4xi32>) -> (i32)
+  func.return %4 : i32
+}
+
+func.decl import("arrays", "write") @write(%5: view<4xi32> {access = write})
+
+func.decl import("arrays", "ignore") @ignore(%6: view<4xi32> {access = none})
+
+func.decl import("arrays", "update") @update(%7: view<4xi32> {access = read_write})
+
+func.decl import("arrays", "read") @read(%8: view<4xptr<@Item>> {access = read}, %9: view<4xi32> {access = read}) -> (i32)
+
+// ====
+// A declaration contributes the bound when the definition is unannotated.
+#include <loomcxx/view.h>
+using Values = loom::type::view<loom::type::shape<4>, int>;
+int first([[loom::access("read")]] Values input);
+int first(Values values) { return loom::view::load(values, 0); }
+
+// ----
+func.def public @first(%values: view<4xi32> {access = read}) -> (i32) {
+  %2 = scalar.constant 0 : i32
+  %3 = index.cast %2 : i32 to index
+  %4 = view.load %values[%3] : view<4xi32> -> i32
+  func.return %4 : i32
+}

@@ -6,6 +6,8 @@
 
 #include "iree/vm/bytecode/interpreter_call.h"
 
+#include "iree/vm/bytecode/interpreter_span.h"
+
 void iree_vm_bytecode_call_cleanup_completed(
     iree_vm_bytecode_execution_state_t* state) {
   const iree_vm_bytecode_call_cleanup_t cleanup = state->pending_call_cleanup;
@@ -20,6 +22,11 @@ void iree_vm_bytecode_call_cleanup_completed(
   }
   for (uint16_t i = 0; i < cleanup.overflow_argument_count; ++i) {
     iree_vm_ref_reset(&state->local_refs[i]);
+  }
+  const uint16_t buffer_count = state->span_buffer_count;
+  state->span_buffer_count = 0;
+  for (uint16_t i = 0; i < buffer_count; ++i) {
+    iree_vm_ref_reset(&state->span_buffers[i]);
   }
 }
 
@@ -110,9 +117,31 @@ static iree_status_t iree_vm_bytecode_call_validate_arguments(
       const uint16_t element_kind =
           iree_vm_module_signature_element_kind(descriptor->kind_u16);
       void* data = NULL;
-      if (iree_vm_module_signature_type_kind_is_ref(element_kind)) {
-        const uint64_t index = offset / 16u;
-        if (offset % 16u != 0 || index > function->local_ref_count_u32 ||
+      const bool is_ref =
+          iree_vm_module_signature_type_kind_is_ref(element_kind);
+      if (offset >> IREE_VM_BYTECODE_SPAN_REGION_SHIFT) {
+        const uint64_t width =
+            is_ref ? IREE_VM_SPAN_REF_STRIDE
+                   : iree_vm_scalar_type_byte_width(element_kind);
+        if (count > IREE_VM_SPAN_MAX_BYTE_LENGTH / width) {
+          return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "call span extent overflows its coordinate");
+        }
+        const iree_vm_bytecode_span_region_t* region = NULL;
+        IREE_RETURN_IF_ERROR(iree_vm_bytecode_span_resolve(
+            state, offset, count * width, is_ref,
+            iree_vm_module_signature_span_access(descriptor->kind_u16), &data,
+            &region));
+        if (is_ref &&
+            region->ref_type !=
+                image->resolved_ref_types[descriptor->type_ordinal_u16]) {
+          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                  "call reference span type mismatch");
+        }
+      } else if (is_ref) {
+        const uint64_t index = offset / IREE_VM_SPAN_REF_STRIDE;
+        if (offset % IREE_VM_SPAN_REF_STRIDE != 0 ||
+            index > function->local_ref_count_u32 ||
             count > function->local_ref_count_u32 - index) {
           return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                                   "call reference span exceeds local storage");

@@ -127,6 +127,9 @@ static bool loom_vm_signature_type(const loom_module_t* module,
         return false;
       }
       modifier = IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN;
+      if (loom_vm_span_type_has_access(*value_type)) {
+        modifier |= (uint16_t)loom_vm_span_type_access(*value_type) << 11;
+      }
       element = loom_type_table_get(
           &module->types, loom_vm_span_type_element_type(*value_type));
       value_type = &element;
@@ -387,12 +390,11 @@ static iree_status_t loom_vm_program_resolve_signatures(
             loom_vm_signature_kind_is_reference(descriptors[j].kind_u16);
         const bool is_span =
             iree_vm_module_signature_type_kind_is_span(descriptors[j].kind_u16);
-        if (is_span && (j >= entry->argument_count ||
-                        loom_low_func_def_isa(entry->function.op))) {
+        if (is_span && j >= entry->argument_count) {
           accepted = false;
           status = loom_target_artifact_emit_requirement(
               function_emitter, entry->function.op, IREE_SV("VM"),
-              IREE_SV("spans used only as native import arguments"));
+              IREE_SV("borrowed spans used only as arguments"));
           break;
         }
         if (is_reference) {

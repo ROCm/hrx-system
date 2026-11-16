@@ -911,6 +911,17 @@ static void iree_vm_bytecode_disassembler_collect_blocks(
   IREE_ASSERT(block_ordinal == function->block_count);
 }
 
+static iree_status_t iree_vm_bytecode_disassembler_span_end(
+    iree_vm_bytecode_disassembler_t* disassembler, uint16_t kind) {
+  const iree_vm_span_access_t access =
+      iree_vm_module_signature_span_access(kind);
+  return iree_vm_bytecode_disassembler_write_cstring(
+      disassembler, access == IREE_VM_SPAN_ACCESS_READ    ? ", read>"
+                    : access == IREE_VM_SPAN_ACCESS_WRITE ? ", write>"
+                    : access == IREE_VM_SPAN_ACCESS_NONE  ? ", none>"
+                                                          : ">");
+}
+
 static iree_status_t iree_vm_bytecode_disassembler_signature_field(
     iree_vm_bytecode_disassembler_t* disassembler, const uint8_t* descriptor,
     uint8_t kind_offset, uint8_t kind_width, uint8_t type_offset,
@@ -936,9 +947,8 @@ static iree_status_t iree_vm_bytecode_disassembler_signature_field(
   } else if (element_kind == IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION) {
     domain = callable_domain;
   } else {
-    return is_span
-               ? iree_vm_bytecode_disassembler_write_cstring(disassembler, ">")
-               : iree_ok_status();
+    return is_span ? iree_vm_bytecode_disassembler_span_end(disassembler, kind)
+                   : iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(
       iree_vm_bytecode_disassembler_write_cstring(disassembler, "("));
@@ -946,8 +956,10 @@ static iree_status_t iree_vm_bytecode_disassembler_signature_field(
       disassembler, domain,
       (uint32_t)iree_vm_bytecode_disassembler_load(descriptor + type_offset,
                                                    type_width)));
-  return iree_vm_bytecode_disassembler_write_cstring(disassembler,
-                                                     is_span ? ")>" : ")");
+  IREE_RETURN_IF_ERROR(
+      iree_vm_bytecode_disassembler_write_cstring(disassembler, ")"));
+  return is_span ? iree_vm_bytecode_disassembler_span_end(disassembler, kind)
+                 : iree_ok_status();
 }
 
 static iree_status_t iree_vm_bytecode_disassembler_signature_fields(

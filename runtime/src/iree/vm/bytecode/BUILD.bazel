@@ -302,6 +302,8 @@ iree_runtime_cc_library(
         "interpreter_integer.h",
         "interpreter_integer_impl.inl",
         "interpreter_memory.h",
+        "interpreter_span.c",
+        "interpreter_span.h",
         "interpreter_tables.inl",
         "module.c",
         "process.c",
@@ -344,6 +346,19 @@ iree_runtime_cc_test(
         ":module",
         ":module_fixture",
         ":reference_signature_testdata",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "incoming_span_test",
+    srcs = ["incoming_span_test.cc"],
+    deps = [
+        ":module",
+        ":module_fixture",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -642,6 +657,7 @@ test_suite(
         ":assembler_test",
         ":borrowed_object_test",
         ":disassembler_test",
+        ":incoming_span_test",
         ":interpreter_atomic_test",
         ":interpreter_buffer_test",
         ":interpreter_conversion_test",

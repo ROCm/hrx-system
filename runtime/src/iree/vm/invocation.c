@@ -209,16 +209,52 @@ static iree_vm_variant_t* iree_vm_invocation_variant_slot(
   return (iree_vm_variant_t*)((uint8_t*)variants + variant_offset);
 }
 
+static iree_status_t iree_vm_invocation_validate_span(
+    iree_vm_variant_t argument, iree_vm_program_scalar_field_abi_t field) {
+  if (!iree_vm_variant_is_span(argument) || !argument.payload) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invocation requires a borrowed typed span");
+  }
+  const iree_vm_typed_span_t* span =
+      (const iree_vm_typed_span_t*)(uintptr_t)argument.payload;
+  const uint16_t signature_kind =
+      (uint16_t)((field.variant_metadata & ~IREE_VM_PROGRAM_FIELD_SPAN) >> 2);
+  const uint16_t kind = iree_vm_module_signature_element_kind(signature_kind);
+  if ((span->access & ~IREE_VM_SPAN_ACCESS_READ_WRITE) != 0 ||
+      (iree_vm_module_signature_span_access(signature_kind) & ~span->access) !=
+          0) {
+    return iree_make_status(
+        IREE_STATUS_PERMISSION_DENIED,
+        "invocation span access does not satisfy its signature");
+  }
+  const bool is_ref = iree_vm_module_signature_type_kind_is_ref(kind);
+  if ((!span->data && span->count) ||
+      (is_ref ? span->scalar_type != IREE_VM_SCALAR_TYPE_NONE ||
+                    span->ref_type !=
+                        (iree_vm_ref_type_t)(uintptr_t)field.payload_mask
+              : span->scalar_type != kind || span->ref_type != NULL)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invocation span element type or storage mismatch");
+  }
+  const uint64_t width =
+      is_ref ? sizeof(iree_vm_ref_t) : iree_vm_scalar_type_byte_width(kind);
+  const uint64_t coordinate_width = is_ref ? IREE_VM_SPAN_REF_STRIDE : width;
+  if (span->count > IREE_VM_SPAN_MAX_BYTE_LENGTH / coordinate_width ||
+      span->count > SIZE_MAX / width ||
+      (uintptr_t)span->data > UINTPTR_MAX - span->count * width ||
+      (is_ref && span->data &&
+       !iree_host_ptr_has_alignment(span->data, iree_alignof(iree_vm_ref_t)))) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "invocation span exceeds its storage geometry");
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t iree_vm_invocation_validate_arguments(
     const iree_vm_program_t* program, uint64_t target_bits,
     const iree_vm_program_callable_abi_t* callable_abi,
     iree_vm_variant_span_t arguments,
     bool* out_has_external_borrowed_arguments) {
-  if (callable_abi->has_span_arguments) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "host variants cannot carry borrowed span arguments");
-  }
   if (IREE_UNLIKELY(
           arguments.count !=
           iree_vm_program_callable_abi_argument_count(callable_abi))) {
@@ -228,8 +264,15 @@ static iree_status_t iree_vm_invocation_validate_arguments(
   for (uint16_t i = 0; i < callable_abi->argument_counts.value_count; ++i) {
     const iree_vm_program_scalar_field_abi_t field =
         callable_abi->value_arguments[i];
+    if (!field.variant_metadata) {
+      continue;
+    }
     const iree_vm_variant_t argument =
         *iree_vm_invocation_variant_slot(arguments.data, field.variant_offset);
+    if (field.variant_metadata & IREE_VM_PROGRAM_FIELD_SPAN) {
+      IREE_RETURN_IF_ERROR(iree_vm_invocation_validate_span(argument, field));
+      continue;
+    }
     if (argument.metadata != field.variant_metadata ||
         (argument.payload & ~field.payload_mask) != 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -237,7 +280,7 @@ static iree_status_t iree_vm_invocation_validate_arguments(
     }
   }
 
-  bool has_external_borrowed_arguments = false;
+  bool has_external_borrowed_arguments = callable_abi->has_span_arguments;
   for (uint16_t i = 0; i < callable_abi->argument_counts.ref_count; ++i) {
     const iree_vm_program_ref_field_abi_t field =
         callable_abi->ref_arguments[i];
@@ -389,9 +432,22 @@ static void iree_vm_invocation_stage_arguments(
     iree_vm_variant_span_t arguments, const iree_vm_call_packet_t* packet) {
   uint64_t* value_arguments = (uint64_t*)packet->value_arguments.direct;
   for (uint16_t i = 0; i < callable_abi->argument_counts.value_count; ++i) {
-    iree_vm_variant_t* argument = iree_vm_invocation_variant_slot(
-        arguments.data, callable_abi->value_arguments[i].variant_offset);
-    value_arguments[i] = argument->payload;
+    const iree_vm_program_scalar_field_abi_t field =
+        callable_abi->value_arguments[i];
+    if (!field.variant_metadata) {
+      value_arguments[i] = 0;
+      continue;
+    }
+    iree_vm_variant_t* argument =
+        iree_vm_invocation_variant_slot(arguments.data, field.variant_offset);
+    if (field.variant_metadata & IREE_VM_PROGRAM_FIELD_SPAN) {
+      const iree_vm_typed_span_t* span =
+          (const iree_vm_typed_span_t*)(uintptr_t)argument->payload;
+      value_arguments[i++] = (uintptr_t)span->data;
+      value_arguments[i] = span->count;
+    } else {
+      value_arguments[i] = argument->payload;
+    }
     *argument = iree_vm_variant_empty();
   }
   iree_vm_ref_t* ref_arguments = packet->ref_arguments.direct;

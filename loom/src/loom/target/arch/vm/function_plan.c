@@ -802,13 +802,10 @@ static iree_status_t loom_vm_function_arguments(
     const loom_low_emission_frame_t* frame,
     const loom_vm_function_signature_t* signature, uint16_t argument_count,
     const loom_vm_function_storage_t* storage, iree_io_stream_t* stream) {
-  uint16_t ordinals_by_bank[2] = {0};
   iree_status_t status = iree_ok_status();
   for (uint16_t i = 0; i < argument_count && iree_status_is_ok(status); ++i) {
-    const bool is_ref =
-        loom_vm_signature_kind_is_reference(signature->fields[i].kind_u16);
-    const uint16_t ordinal = ordinals_by_bank[is_ref]++;
-    if (ordinal < 16) {
+    const loom_low_allocation_abi_location_t* source = &signature->locations[i];
+    if (source->location_kind != LOOM_LOW_ALLOCATION_LOCATION_CALL_STORAGE) {
       continue;
     }
     const loom_low_allocation_assignment_t* assignment =
@@ -817,44 +814,49 @@ static iree_status_t loom_vm_function_arguments(
     if (!assignment) {
       continue;
     }
-    if (assignment->location_kind == LOOM_LOW_ALLOCATION_LOCATION_STORAGE) {
-      const uint16_t destination =
-          storage->binding_locations[assignment->location_base];
-      if (is_ref) {
-        status = loom_vm_function_copy_ref(
-            stream, storage, destination, ordinal - 16,
-            IREE_VM_BYTECODE_OPCODE_REF_ABI_ARGUMENT_LOAD_MOVE,
-            IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_MOVE);
-      } else {
-        status = loom_vm_function_transfer_stack(
-            stream, storage->borrowed_value, 0, 1, true);
-        if (iree_status_is_ok(status)) {
-          const iree_vm_bytecode_value_abi_argument_load_t instruction = {
-              .opcode = IREE_VM_BYTECODE_OPCODE_VALUE_ABI_ARGUMENT_LOAD,
-              .destination_v8 = 0,
-              .slot_u16 = ordinal - 16,
-          };
-          status =
-              iree_io_stream_write(stream, sizeof(instruction), &instruction);
-        }
-        if (iree_status_is_ok(status)) {
-          status =
-              loom_vm_function_transfer_stack(stream, destination, 0, 1, true);
-        }
-        if (iree_status_is_ok(status)) {
-          status = loom_vm_function_transfer_stack(
-              stream, storage->borrowed_value, 0, 1, false);
-        }
-      }
+    const bool is_ref =
+        source->descriptor_reg_class_id == VM_CORE_REG_CLASS_ID_REF;
+    const bool spilled =
+        assignment->location_kind == LOOM_LOW_ALLOCATION_LOCATION_STORAGE;
+    const uint16_t destination =
+        spilled ? storage->binding_locations[assignment->location_base]
+                : assignment->location_base;
+    if (spilled && is_ref) {
+      status = loom_vm_function_copy_ref(
+          stream, storage, destination, source->location_base,
+          IREE_VM_BYTECODE_OPCODE_REF_ABI_ARGUMENT_LOAD_MOVE,
+          IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_MOVE);
       continue;
     }
-    const iree_vm_bytecode_value_abi_argument_load_t instruction = {
-        .opcode = is_ref ? IREE_VM_BYTECODE_OPCODE_REF_ABI_ARGUMENT_LOAD_MOVE
-                         : IREE_VM_BYTECODE_OPCODE_VALUE_ABI_ARGUMENT_LOAD,
-        .destination_v8 = (uint8_t)assignment->location_base,
-        .slot_u16 = ordinal - 16,
-    };
-    status = iree_io_stream_write(stream, sizeof(instruction), &instruction);
+    if (spilled) {
+      status = loom_vm_function_transfer_stack(stream, storage->borrowed_value,
+                                               0, 1, true);
+    }
+    for (uint32_t unit = 0;
+         unit < assignment->unit_count && iree_status_is_ok(status); ++unit) {
+      const uint32_t point = assignment->unit_point_start + unit;
+      // A dead pair lane can share its location with another live argument.
+      // Entry loads obey the same per-unit liveness as register allocation.
+      if (frame->allocation.unit_start_points[point] ==
+          frame->allocation.unit_end_points[point]) {
+        continue;
+      }
+      const iree_vm_bytecode_value_abi_argument_load_t instruction = {
+          .opcode = is_ref ? IREE_VM_BYTECODE_OPCODE_REF_ABI_ARGUMENT_LOAD_MOVE
+                           : IREE_VM_BYTECODE_OPCODE_VALUE_ABI_ARGUMENT_LOAD,
+          .destination_v8 = spilled ? 0 : (uint8_t)(destination + unit),
+          .slot_u16 = source->location_base + unit,
+      };
+      status = iree_io_stream_write(stream, sizeof(instruction), &instruction);
+      if (iree_status_is_ok(status) && spilled) {
+        status = loom_vm_function_transfer_stack(
+            stream, destination + unit * sizeof(uint64_t), 0, 1, true);
+      }
+    }
+    if (iree_status_is_ok(status) && spilled) {
+      status = loom_vm_function_transfer_stack(stream, storage->borrowed_value,
+                                               0, 1, false);
+    }
   }
   return status;
 }

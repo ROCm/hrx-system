@@ -1,0 +1,244 @@
+// Incoming views keep their storage roots while loads and outgoing subviews
+// consume the source offsets and extents. No native pointer enters Low IR.
+// RUN: emit vm-dis
+vm.target<core> @vm
+
+type.decl import("arrays", "object") @Object
+
+func.decl import("arrays", "read_one") target(@vm) @read_one(%object: ptr<@Object>, %value: i64) -> (i64)
+
+func.decl import("arrays", "read_many") target(@vm) @read_many(%count: index, %objects: view<[%count]xptr<@Object>> {access = read}, %values: view<[%count]xi64> {access = read}) -> (i64)
+
+func.def public target(@vm) @run(%objects: view<4xptr<@Object>> {access = read}, %values: view<4xi64> {access = read}) -> (i64) {
+  %object = view.load %objects[0] : view<4xptr<@Object>> -> ptr<@Object>
+  %value = view.load %values[0] : view<4xi64> -> i64
+  %first = func.call @read_one(%object, %value) : (ptr<@Object>, i64) -> (i64)
+  %count = index.constant 2 : index
+  %object_slice = view.subview %objects[1] : view<4xptr<@Object>> -> view<[%count]xptr<@Object>>
+  %value_slice = view.subview %values[1] : view<4xi64> -> view<[%count]xi64>
+  %rest = func.call @read_many(%count, %object_slice, %value_slice) : (index, view<[%count]xptr<@Object>>, view<[%count]xi64>) -> (i64)
+  %sum = scalar.addi %first, %rest : i64
+  func.return %sum : i64
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "run"
+    string @string1 = "arrays"
+    string @string2 = "object"
+    string @string3 = "arrays"
+    string @string4 = "read_many"
+    string @string5 = "read_one"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string1) {
+      ref_type @ref_type0 name(@string2)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (ptr(@ref_type0), i64) -> (i64)
+    signature @signature1 (span<ptr(@ref_type0), read>, span<i64, read>) -> (i64)
+    signature @signature2 (i64, span<ptr(@ref_type0), read>, span<i64, read>) -> (i64)
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+    callable @callable1 flags([]) depth(0) : @signature1
+    callable @callable2 flags([]) depth(0) : @signature2
+  }
+
+  section imports alignment(8) {
+    group @import_group0 module_name(@string3) {
+      import @import0 name(@string4) flags([]) : @callable2
+      import @import1 name(@string5) flags([]) : @callable0
+    }
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable1 = @function0
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable1 flags([has_call]) frame(local_bytes = 0, value_registers = 7, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 6) {
+    ^bb0:
+      control.block
+      %v1 = constant.zero
+      %v3 = value.copy %v0
+      %v0 = integer.add.i64 %v3, %v1
+      %r0 = span.ref.load %v0
+      %v0 = integer.add.i64 %v2, %v1
+      %v0.x1 = span.load.i64 %v0
+      control.call @import1 {direct_ref_move_mask = 0x0001}
+      %v6 = value.copy %v0
+      %v1 = constant.s16 2
+      %v0 = constant.s16 16
+      %v0 = integer.add.i64 %v3, %v0
+      %v3 = constant.s16 8
+      %v2 = integer.add.i64 %v2, %v3
+      %v3 = value.copy %v1
+      %v4 = value.copy %v2
+      %v5 = value.copy %v3
+      %v2 = value.copy %v0
+      %v3 = value.copy %v1
+      %v0 = value.copy %v1
+      control.call @import0 {direct_ref_move_mask = 0x0000}
+      %v0 = integer.add.i64 %v6, %v0
+      control.return
+    }
+  }
+
+}
+
+// ====
+
+// Independent collection counts force aligned pairs into the overflow packet.
+// Only used lanes are loaded; unused span counts may share registers with live
+// values, so loading a whole pair would clobber those values.
+// RUN: emit vm-dis
+vm.target<core> @vm
+
+type.decl import("arrays", "object") @Object
+
+func.decl import("arrays", "consume") target(@vm) @consume(%count: index, %objects: view<[%count]xptr<@Object>> {access = read}, %offsets: view<[%count]xi64> {access = read}, %lengths: view<[%count]xi64> {access = read})
+
+func.def public target(@vm) @run(%wait_count: index, %waits: view<[%wait_count]xptr<@Object>> {access = read}, %wait_values: view<[%wait_count]xi64> {access = read}, %signal_count: index, %signals: view<[%signal_count]xptr<@Object>> {access = read}, %signal_values: view<[%signal_count]xi64> {access = read}, %binding_count: index, %buffers: view<[%binding_count]xptr<@Object>> {access = read}, %offsets: view<[%binding_count]xi64> {access = read}, %lengths: view<[%binding_count]xi64> {access = read}) -> (index) {
+  func.call @consume(%binding_count, %buffers, %offsets, %lengths) : (index, view<[%binding_count]xptr<@Object>>, view<[%binding_count]xi64>, view<[%binding_count]xi64>)
+  %sum = index.add %wait_count, %signal_count : index
+  func.return %sum : index
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "run"
+    string @string1 = "arrays"
+    string @string2 = "object"
+    string @string3 = "arrays"
+    string @string4 = "consume"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string1) {
+      ref_type @ref_type0 name(@string2)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (i64, span<ptr(@ref_type0), read>, span<i64, read>, span<i64, read>) -> ()
+    signature @signature1 (i64, span<ptr(@ref_type0), read>, span<i64, read>, i64, span<ptr(@ref_type0), read>, span<i64, read>, i64, span<ptr(@ref_type0), read>, span<i64, read>, span<i64, read>) -> (i64)
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+    callable @callable1 flags([]) depth(0) : @signature1
+  }
+
+  section imports alignment(8) {
+    group @import_group0 module_name(@string3) {
+      import @import0 name(@string4) flags([]) : @callable0
+    }
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable1 = @function0
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable1 flags([has_call]) frame(local_bytes = 0, value_registers = 16, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 8) {
+    ^bb0:
+      control.block
+      %v8 = value.copy %v0
+      %v9 = value.copy %v6
+      %v0 = value.abi.argument.load 0
+      %v2 = value.abi.argument.load 2
+    ^bb1:
+      control.block
+      %v1 = constant.zero
+      %v11 = integer.add.i64 %v14, %v1
+      %v4 = integer.add.i64 %v0, %v1
+      %v5 = value.copy %v12
+      %v0 = integer.add.i64 %v2, %v1
+      %v1 = value.copy %v12
+      %v2 = value.copy %v11
+      %v3 = value.copy %v12
+      %v6 = value.copy %v0
+      %v7 = value.copy %v1
+      %v0 = value.copy %v12
+      control.call @import0 {direct_ref_move_mask = 0x0000}
+      %v0 = integer.add.i64 %v8, %v9
+      control.return
+    }
+  }
+
+}
+
+// ====
+
+// Managed-buffer storage uses the same borrowed import ABI as local storage.
+// A private owner keeps the buffer alive through the call.
+// RUN: emit vm-dis
+vm.target<core> @vm
+
+func.decl import("external", "consume") target(@vm) @consume(%values: view<1xi64> {access = read})
+
+func.def public target(@vm) @run(%buffer: buffer) {
+  %c0 = index.constant 0 : offset
+  %values = buffer.view %buffer[%c0] : buffer -> view<1xi64>
+  func.call @consume(%values) : (view<1xi64>)
+  func.return
+}
+
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "run"
+    string @string1 = "vm"
+    string @string2 = "buffer"
+    string @string3 = "external"
+    string @string4 = "consume"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string1) {
+      ref_type @ref_type0 name(@string2)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (ref(@ref_type0)) -> ()
+    signature @signature1 (span<i64, read>) -> ()
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+    callable @callable1 flags([]) depth(0) : @signature1
+  }
+
+  section imports alignment(8) {
+    group @import_group0 module_name(@string3) {
+      import @import0 name(@string4) flags([]) : @callable1
+    }
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable0 = @function0
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable0 flags([has_call]) frame(local_bytes = 0, value_registers = 2, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 2) {
+    ^bb0:
+      control.block
+      %v0 = constant.zero
+      %v1 = span.from.buffer %r0
+      %v0 = integer.add.i64 %v1, %v0
+      %v1 = constant.s16 1
+      control.call @import0 {direct_ref_move_mask = 0x0000}
+      control.return
+    }
+  }
+
+}

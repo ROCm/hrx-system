@@ -47,7 +47,7 @@ vm.module core(0.0) {
   section signatures alignment(8) {
     signature @signature0 (i32) -> ()
     signature @signature1 (ptr(@ref_type0)) -> ()
-    signature @signature2 (i64, span<ptr(@ref_type0)>, span<i64>) -> (i64)
+    signature @signature2 (i64, span<ptr(@ref_type0), read>, span<i64, read>) -> (i64)
   }
 
   section callable_types alignment(8) {

@@ -12,11 +12,13 @@
 #include "loom/ir/module.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/signature_flags.h"
 #include "loom/target/arch/vm/contracts/core.h"
 #include "loom/target/arch/vm/contracts/core_lower_rules.h"
 #include "loom/target/arch/vm/descriptors/descriptors.h"
 #include "loom/target/arch/vm/ops/type_builders.h"
 #include "loom/target/arch/vm/types.h"
+#include "loom/target/registers.h"
 #include "loom/util/fact_table.h"
 
 static bool loom_vm_source_type_supported(void* user_data,
@@ -79,6 +81,44 @@ static iree_status_t loom_vm_map_type(void* user_data,
 
 #include "loom/target/arch/vm/contracts/tables.inl"
 
+static loom_argument_access_t loom_vm_argument_access(
+    loom_low_lower_context_t* context, uint16_t argument_index) {
+  const iree_const_byte_span_t flags = loom_func_like_signature_flags(
+      loom_low_lower_context_source_function(context));
+  return flags.data_length
+             ? loom_signature_flags_access(flags.data[argument_index])
+             : LOOM_ARGUMENT_ACCESS_UNSPECIFIED;
+}
+
+static iree_status_t loom_vm_map_span(loom_low_lower_context_t* context,
+                                      loom_type_t source_type,
+                                      loom_argument_access_t access,
+                                      loom_type_t* out_low_type) {
+  const loom_type_t element = loom_type_element(source_type);
+  loom_module_t* module = loom_low_lower_context_module(context);
+  if (loom_type_rank(source_type) != 1 ||
+      !loom_vm_source_type_supported(NULL, module, element) ||
+      (loom_type_is_scalar(element) &&
+       loom_type_element_type(element) == LOOM_SCALAR_TYPE_I1)) {
+    return iree_ok_status();
+  }
+  loom_type_id_t element_id = LOOM_TYPE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(
+      loom_module_intern_type_id(module, element, &element_id));
+  const loom_vm_span_type_access_t permission =
+      access == LOOM_ARGUMENT_ACCESS_READ    ? LOOM_VM_SPAN_TYPE_ACCESS_READ
+      : access == LOOM_ARGUMENT_ACCESS_WRITE ? LOOM_VM_SPAN_TYPE_ACCESS_WRITE
+      : access == LOOM_ARGUMENT_ACCESS_NONE
+          ? LOOM_VM_SPAN_TYPE_ACCESS_NONE
+          : LOOM_VM_SPAN_TYPE_ACCESS_READ_WRITE;
+  loom_type_t span_type;
+  IREE_RETURN_IF_ERROR(loom_vm_span_type_make(
+      module, permission ? LOOM_VM_SPAN_TYPE_BUILD_FLAG_HAS_ACCESS : 0,
+      element_id, permission, &span_type));
+  return loom_low_lower_make_typed_register_type(
+      context, VM_CORE_REG_CLASS_ID_VALUE, 2, span_type, out_low_type);
+}
+
 static iree_status_t loom_vm_map_value(void* user_data,
                                        loom_low_lower_context_t* context,
                                        const loom_op_t* source_op,
@@ -102,14 +142,20 @@ static iree_status_t loom_vm_map_value(void* user_data,
             user_data, loom_low_lower_context_module(context), element) &&
         (!loom_type_is_scalar(element) ||
          loom_type_element_type(element) != LOOM_SCALAR_TYPE_I1)) {
-      loom_type_id_t element_id = LOOM_TYPE_ID_INVALID;
-      IREE_RETURN_IF_ERROR(loom_module_intern_type_id(
-          loom_low_lower_context_module(context), element, &element_id));
-      loom_type_t span_type;
-      IREE_RETURN_IF_ERROR(loom_vm_span_type_make(
-          loom_low_lower_context_module(context), element_id, &span_type));
-      return loom_low_lower_make_typed_register_type(
-          context, VM_CORE_REG_CLASS_ID_VALUE, 2, span_type, out_low_type);
+      const loom_func_like_t function =
+          loom_low_lower_context_source_function(context);
+      uint16_t argument_count = 0;
+      const loom_value_id_t* arguments =
+          loom_func_like_arg_ids(function, &argument_count);
+      const uint16_t operand_offset =
+          arguments - loom_op_const_operands(function.op);
+      const loom_use_t* definition =
+          loom_value_single_use(loom_module_value(module, source_value));
+      return loom_vm_map_span(
+          context, source_type,
+          loom_vm_argument_access(
+              context, loom_use_operand_index(*definition) - operand_offset),
+          out_low_type);
     }
     return loom_vm_map_type(user_data, context, source_op, source_type,
                             out_low_type);
@@ -124,10 +170,75 @@ static iree_status_t loom_vm_map_value(void* user_data,
     return loom_low_lower_make_typed_register_type(
         context, VM_CORE_REG_CLASS_ID_REF, 1, loom_type_buffer(), out_low_type);
   }
+  if (reference.origin.kind == LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY &&
+      reference.origin.entry_value_id != LOOM_VALUE_ID_INVALID) {
+    const loom_value_t* entry =
+        loom_module_value(loom_low_lower_context_module(context),
+                          reference.origin.entry_value_id);
+    const loom_argument_access_t access =
+        loom_vm_argument_access(context, loom_value_def_index(entry));
+    if (access != LOOM_ARGUMENT_ACCESS_UNSPECIFIED) {
+      // Body views retain a storage root; their shape and subview offsets live
+      // in source memory facts. Only a call boundary materializes a span pair.
+      return loom_low_lower_make_register_type(
+          context, VM_CORE_REG_CLASS_ID_VALUE, 2, out_low_type);
+    }
+  }
   if (reference.origin.kind == LOOM_VALUE_FACT_REFERENCE_ORIGIN_ALLOCATION &&
       reference.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE) {
     return loom_low_lower_make_register_type(
         context, VM_CORE_REG_CLASS_ID_VALUE, 1, out_low_type);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_vm_map_argument(
+    void* user_data, loom_low_lower_context_t* context,
+    const loom_op_t* source_function_op, uint16_t source_argument_index,
+    loom_value_id_t source_argument_id,
+    loom_low_lower_abi_argument_t* out_argument) {
+  const loom_type_t type = loom_module_value_type(
+      loom_low_lower_context_module(context), source_argument_id);
+  const loom_argument_access_t access =
+      loom_vm_argument_access(context, source_argument_index);
+  if (loom_type_is_view(type) &&
+      (access != LOOM_ARGUMENT_ACCESS_UNSPECIFIED ||
+       loom_func_like_import_symbol(loom_low_lower_context_source_function(
+           context)) != LOOM_STRING_ID_INVALID)) {
+    IREE_RETURN_IF_ERROR(
+        loom_vm_map_span(context, type, access, &out_argument->abi_type));
+    if (loom_func_like_body(loom_low_lower_context_source_function(context))) {
+      IREE_RETURN_IF_ERROR(loom_low_lower_make_register_type(
+          context, VM_CORE_REG_CLASS_ID_VALUE, 2, &out_argument->body_type));
+    }
+    return iree_ok_status();
+  }
+  return loom_vm_map_value(user_data, context, source_function_op,
+                           source_argument_id, type, &out_argument->abi_type);
+}
+
+static iree_status_t loom_vm_emit_entry_setup(
+    void* user_data, loom_low_lower_context_t* context) {
+  (void)user_data;
+  uint16_t argument_count = 0;
+  const loom_value_id_t* arguments = loom_func_like_arg_ids(
+      loom_low_lower_context_source_function(context), &argument_count);
+  const loom_block_t* entry = loom_region_entry_block(
+      loom_low_func_def_body(loom_low_lower_context_low_function(context)));
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  for (uint16_t i = 0; i < argument_count; ++i) {
+    if (!loom_type_is_view(loom_module_value_type(module, arguments[i])) ||
+        loom_vm_argument_access(context, i) ==
+            LOOM_ARGUMENT_ACCESS_UNSPECIFIED) {
+      continue;
+    }
+    loom_op_t* root = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_slice_build(
+        loom_low_lower_context_builder(context), entry->arg_ids[i], 0,
+        loom_low_lower_value_binding_type(context, arguments[i]),
+        loom_low_lower_context_source_function(context).op->location, &root));
+    IREE_RETURN_IF_ERROR(loom_low_lower_bind_value(context, arguments[i],
+                                                   loom_op_results(root)[0]));
   }
   return iree_ok_status();
 }
@@ -232,6 +343,8 @@ typedef struct loom_vm_span_operand_plan_t {
   loom_value_id_t count;
   // Element count when count is INVALID.
   int64_t static_count;
+  // Buffer-backed storage requires a call-scoped VM owner before marshalling.
+  bool buffer_backed;
 } loom_vm_span_operand_plan_t;
 
 static iree_status_t loom_vm_reject_span_operand(
@@ -253,7 +366,6 @@ static iree_status_t loom_vm_prepare_span_operand(
     const loom_op_t* source_op, loom_value_id_t source_value,
     loom_type_t actual_type, loom_type_t required_type, const void** out_plan) {
   (void)user_data;
-  (void)actual_type;
   const loom_type_t* payload = loom_type_register_value_type(required_type);
   if (!payload || !loom_vm_span_type_isa(*payload)) {
     return loom_vm_reject_span_operand(
@@ -268,26 +380,27 @@ static iree_status_t loom_vm_prepare_span_operand(
   if (!loom_value_facts_query_view_reference(
           &facts->context, loom_value_fact_table_lookup(facts, source_value),
           &reference) ||
-      reference.buffer_value_id != LOOM_VALUE_ID_INVALID ||
-      reference.origin.kind != LOOM_VALUE_FACT_REFERENCE_ORIGIN_ALLOCATION) {
+      (reference.buffer_value_id == LOOM_VALUE_ID_INVALID &&
+       reference.origin.kind != LOOM_VALUE_FACT_REFERENCE_ORIGIN_ALLOCATION &&
+       reference.origin.kind != LOOM_VALUE_FACT_REFERENCE_ORIGIN_ENTRY)) {
     return loom_vm_reject_span_operand(
         context, source_op, source_value,
-        IREE_SV("VM span arguments require frame-owned view storage"));
+        IREE_SV("VM span arguments require identifiable view storage"));
   }
   const loom_view_region_table_t* regions = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_context_view_regions(context, &regions));
   loom_vm_span_operand_plan_t* plan = NULL;
   IREE_RETURN_IF_ERROR(
       loom_low_lower_allocate_plan_data(context, sizeof(*plan), (void**)&plan));
+  plan->buffer_backed = reference.buffer_value_id != LOOM_VALUE_ID_INVALID;
   loom_low_source_memory_access_diagnostic_t diagnostic;
   if (!loom_low_source_memory_access_plan_build_view_origin(
           regions, source_value, &plan->access, &diagnostic) ||
-      plan->access.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE ||
       plan->access.address_layout !=
           LOOM_LOW_SOURCE_MEMORY_ADDRESS_LAYOUT_COMPACT_ROW_MAJOR) {
     return loom_vm_reject_span_operand(
         context, source_op, source_value,
-        IREE_SV("VM span arguments require a contiguous local view"));
+        IREE_SV("VM span arguments require a contiguous view"));
   }
   plan->count = loom_type_dim_is_dynamic_at(type, 0)
                     ? loom_type_dim_value_id_at(type, 0)
@@ -320,7 +433,7 @@ static iree_status_t loom_vm_emit_span_operand(
           &loom_vm_core_lower_rule_set
                .source_memory_byte_offset_materializers[0],
           source_op, &plan->access, &parts[0]));
-  const loom_value_id_t address_parts[] = {
+  loom_value_id_t address_parts[] = {
       loom_low_lower_lookup_value(
           context,
           loom_low_source_memory_access_address_value_id(&plan->access)),
@@ -333,6 +446,25 @@ static iree_status_t loom_vm_emit_span_operand(
   IREE_RETURN_IF_ERROR(loom_low_lower_make_typed_register_type(
       context, VM_CORE_REG_CLASS_ID_VALUE, 1,
       loom_type_scalar(LOOM_SCALAR_TYPE_I64), &address_type));
+  if (plan->buffer_backed) {
+    const loom_low_lower_resolved_descriptor_t descriptor = {
+        .descriptor =
+            &loom_low_lower_context_descriptor_set(context)
+                 ->descriptors[VM_CORE_DESCRIPTOR_REF_SPAN_FROM_BUFFER]};
+    loom_op_t* borrow = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
+        context, &descriptor, address_parts, 1, loom_named_attr_slice_empty(),
+        &address_type, 1, NULL, 0, source_op->location, &borrow));
+    address_parts[0] = loom_op_results(borrow)[0];
+  } else if (loom_low_register_type_unit_count(loom_module_value_type(
+                 loom_low_lower_context_module(context), address_parts[0])) ==
+             2) {
+    loom_op_t* slice = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_slice_build(
+        loom_low_lower_context_builder(context), address_parts[0], 0,
+        address_type, source_op->location, &slice));
+    address_parts[0] = loom_op_results(slice)[0];
+  }
   loom_op_t* address = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_emit_resolved_descriptor_op(
       context, &add_descriptor, address_parts, 2, loom_named_attr_slice_empty(),
@@ -378,6 +510,8 @@ static const loom_low_lower_policy_t kPolicy = {
         {.fn = loom_vm_source_vector_carrier_supported},
     .map_type = {.fn = loom_vm_map_type},
     .map_value = {.fn = loom_vm_map_value},
+    .map_argument = {.fn = loom_vm_map_argument},
+    .entry_setup = {.emit = loom_vm_emit_entry_setup},
     .control_operand = {.prepare = loom_vm_prepare_span_operand,
                         .emit = loom_vm_emit_span_operand},
     .function_storage = {.mappings = kFunctionStorage,

@@ -14,6 +14,7 @@
 #include "iree/vm/execution.h"
 #include "iree/vm/ref.h"
 #include "iree/vm/scalar.h"
+#include "iree/vm/span.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,6 +58,10 @@ enum iree_vm_module_signature_type_kind_e {
   // Modifier for a contiguous borrowed range of the scalar, ref, or ptr kind.
   // A span occupies two aligned value cells and cannot escape or be returned.
   IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN = 0x0400,
+  // Span access bounds. An unqualified span permits reads and writes.
+  IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY = 0x0800,
+  IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_WRITE_ONLY = 0x1000,
+  IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_NO_ACCESS = 0x1800,
 };
 
 static inline bool iree_vm_module_signature_type_kind_is_span(
@@ -67,7 +72,20 @@ static inline bool iree_vm_module_signature_type_kind_is_span(
 static inline iree_vm_module_signature_type_kind_t
 iree_vm_module_signature_element_kind(
     iree_vm_module_signature_type_kind_t kind) {
-  return kind & ~IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN;
+  return kind & ~(IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
+                  IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_NO_ACCESS);
+}
+
+static inline iree_vm_span_access_t iree_vm_module_signature_span_access(
+    iree_vm_module_signature_type_kind_t kind) {
+  const uint16_t bound =
+      kind & IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_NO_ACCESS;
+  return bound == 0 ? IREE_VM_SPAN_ACCESS_READ_WRITE
+         : bound == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY
+             ? IREE_VM_SPAN_ACCESS_READ
+         : bound == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_WRITE_ONLY
+             ? IREE_VM_SPAN_ACCESS_WRITE
+             : IREE_VM_SPAN_ACCESS_NONE;
 }
 
 // Returns whether |kind| uses the managed-ref bank. Declared ownership is part

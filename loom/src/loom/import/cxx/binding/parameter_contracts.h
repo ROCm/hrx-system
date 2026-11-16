@@ -18,6 +18,7 @@
 #include "loom/import/cxx/source/locations.h"
 #include "loom/import/cxx/source/source.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/signature_flags.h"
 
 namespace loom::cxx_import {
 
@@ -29,13 +30,18 @@ struct ParameterAlignment {
   cxx::AttributeAST* source = nullptr;
 };
 
-// Independent entry promises on an incoming kernel buffer root. Neither
-// promise changes its storage identity or applies to a reassigned pointer.
+// Explicit boundary contracts on one source parameter. Pointer root promises
+// apply at entry; access bounds follow the parameter's projected storage
+// values.
 struct ParameterContract {
   // Alignment of the incoming pointer address, absent when unannotated.
   ParameterAlignment alignment;
   // Root noalias promise; null when absent. Owns diagnostics and IR location.
   cxx::AttributeAST* noalias_source = nullptr;
+  // Shallow storage access and nonescape bound, or UNSPECIFIED when absent.
+  loom_argument_access_t access = LOOM_ARGUMENT_ACCESS_UNSPECIFIED;
+  // Source access annotation owning diagnostics; null when unspecified.
+  cxx::AttributeAST* access_source = nullptr;
 };
 
 // Emits admitted entry promises while preserving buffer identity. The caller

@@ -44,13 +44,16 @@ typedef struct iree_vm_program_bank_counts_t {
 
 // One scalar field mapped between source order and the physical value bank.
 typedef struct iree_vm_program_scalar_field_abi_t {
-  // Canonical payload bits permitted by the scalar type.
+  // Canonical scalar bits, or the exact ref type for a reference span.
   uint64_t payload_mask;
-  // Exact scalar variant metadata expected or published at the host boundary.
+  // Scalar metadata, SPAN plus its element kind, or zero for alignment padding.
   uint32_t variant_metadata;
   // Byte offset of the source-ordered host variant.
   uint32_t variant_offset;
 } iree_vm_program_scalar_field_abi_t;
+
+// Marks a span's first field; its second field has zero metadata.
+#define IREE_VM_PROGRAM_FIELD_SPAN UINT32_C(0x80000000)
 
 // One ref field mapped between source order and the physical ref bank.
 typedef struct iree_vm_program_ref_field_abi_t {
@@ -107,8 +110,10 @@ typedef struct iree_vm_program_callable_abi_t {
   iree_vm_program_bank_counts_t result_counts;
   // Precomputed root-bank placement for invocation marshalling.
   iree_vm_program_root_layout_t root_layout;
-  // Physical-only signature that cannot use host variant marshalling.
+  // Whether value arguments include borrowed span descriptors.
   bool has_span_arguments;
+  // Logical host argument count, independently of physical padding and spans.
+  uint16_t argument_count;
 } iree_vm_program_callable_abi_t;
 
 // Cached executable initializer plan.
@@ -230,9 +235,7 @@ static inline bool iree_vm_program_target_may_yield(uint64_t target_bits) {
 // Returns the logical argument count of one callable ABI.
 static inline iree_host_size_t iree_vm_program_callable_abi_argument_count(
     const iree_vm_program_callable_abi_t* callable_abi) {
-  return (iree_host_size_t)callable_abi->argument_counts.value_count +
-         callable_abi->argument_counts.ref_count +
-         callable_abi->argument_counts.function_count;
+  return callable_abi->argument_count;
 }
 
 // Returns the logical result count of one callable ABI.

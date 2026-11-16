@@ -73,6 +73,11 @@ from iree.vm.bytecode.spec.isa.core.rules import (
     RefOwnership,
     StateAccess,
 )
+from iree.vm.bytecode.spec.isa.core.span import (
+    SPAN_FROM_BUFFER,
+    SPAN_INSTRUCTIONS,
+    SPAN_LOAD,
+)
 from iree.vm.bytecode.spec.isa.core.stack import (
     MEMORY_FORMAT_SELECTOR,
     STACK_LOAD_INDEXED,
@@ -203,6 +208,7 @@ _SELECTORS = {
         *_SCALAR_CONVERSIONS,
         *_BUFFER_INSTRUCTIONS,
         *_STACK_INSTRUCTIONS,
+        *SPAN_INSTRUCTIONS,
     )
     for field in instruction.fields
     if field.rule.kind is FieldRule.SELECTOR
@@ -592,5 +598,11 @@ VM_CORE_DESCRIPTOR_SET = DescriptorSet(
             for op in _STACK_INSTRUCTIONS
         ),
         *(_descriptor(op, ()) for op in _REF_STACK_INSTRUCTIONS),
+        *(
+            _descriptor(
+                op, (ScalarTypeKind.I64,) if op in (SPAN_LOAD, SPAN_FROM_BUFFER) else ()
+            )
+            for op in SPAN_INSTRUCTIONS
+        ),
     ),
 )

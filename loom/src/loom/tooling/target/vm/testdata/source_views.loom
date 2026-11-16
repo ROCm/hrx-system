@@ -1,5 +1,5 @@
 // Ordinary host calls use the same view boundary as calls inside the program.
-func.def @first(%values: view<4xi32>) -> (i32) {
+func.def @first(%values: view<4xi32> {access = read}) -> (i32) {
   %value = view.load %values[0] : view<4xi32> -> i32
   func.return %value : i32
 }
@@ -9,7 +9,7 @@ func.def @middle(%values: view<8xi32>) -> (view<4xi32>) {
   func.return %middle : view<4xi32>
 }
 
-func.def @write_overlap(%middle: view<4xi32>, %whole: view<8xi32>, %replacement: i32) -> (i32) {
+func.def @write_overlap(%middle: view<4xi32> {access = write}, %whole: view<8xi32> {access = read}, %replacement: i32) -> (i32) {
   view.store %replacement, %middle[0] : i32, view<4xi32>
   %observed = view.load %whole[2] : view<8xi32> -> i32
   func.return %observed : i32
@@ -24,7 +24,7 @@ func.def @forward_dynamic(%size: index, %values: view<[%size]xi32>) -> (view<[%s
   func.return %values : view<[%size]xi32>
 }
 
-func.def @sum_dynamic(%size: index, %values: view<[%size]xi32>) -> (i32) {
+func.def @sum_dynamic(%size: index, %values: view<[%size]xi32> {access = read}) -> (i32) {
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
   %initial_sum = scalar.constant 0 : i32

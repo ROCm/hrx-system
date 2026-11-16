@@ -223,7 +223,7 @@ vm.target<core> @vm
 
 type.decl import("lifetime", "object") @Object
 
-low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>>>, %values: reg<vm.value x2 : vm.span<i64>>) -> (reg<vm.value : i64>)
+low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>, read>>, %values: reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
 
 low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
   %c0 = constant.i64 0
@@ -231,9 +231,9 @@ low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
   %ref_count = constant.i64 0
   %scalar_offset = constant.i64 0
   %scalar_count = constant.i64 0
-  %objects = concat(%ref_offset, %ref_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>>>
-  %values = concat(%scalar_offset, %scalar_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64>>
-  %sum = low.func.call @read(%c0, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>>>, reg<vm.value x2 : vm.span<i64>>) -> (reg<vm.value : i64>)
+  %objects = concat(%ref_offset, %ref_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>, read>>
+  %values = concat(%scalar_offset, %scalar_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64, read>>
+  %sum = low.func.call @read(%c0, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>, read>>, reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
   return
 }
 
@@ -251,7 +251,7 @@ vm.target<core> @vm
 
 type.decl import("lifetime", "object") @Object
 
-low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>>>, %values: reg<vm.value x2 : vm.span<i64>>) -> (reg<vm.value : i64>)
+low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>, read>>, %values: reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
 
 low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
   %c0 = constant.i64 0
@@ -259,9 +259,9 @@ low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
   %ref_count = constant.i64 0
   %scalar_offset = constant.i64 0
   %scalar_count = constant.i64 0
-  %objects = concat(%ref_offset, %ref_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>>>
-  %values = concat(%scalar_offset, %scalar_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64>>
-  %sum = low.func.call @read(%c0, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>>>, reg<vm.value x2 : vm.span<i64>>) -> (reg<vm.value : i64>)
+  %objects = concat(%ref_offset, %ref_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>, read>>
+  %values = concat(%scalar_offset, %scalar_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64, read>>
+  %sum = low.func.call @read(%c0, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>, read>>, reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
   return
 }
 
@@ -277,7 +277,7 @@ vm.target<core> @vm
 
 type.decl import("lifetime", "object") @Object
 
-low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>>>, %values: reg<vm.value x2 : vm.span<i64>>) -> (reg<vm.value : i64>)
+low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>, read>>, %values: reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
 
 low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
   %c0 = constant.i64 0
@@ -285,9 +285,9 @@ low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
   %ref_count = constant.i64 -1
   %scalar_offset = constant.i64 0
   %scalar_count = constant.i64 0
-  %objects = concat(%ref_offset, %ref_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>>>
-  %values = concat(%scalar_offset, %scalar_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64>>
-  %sum = low.func.call @read(%c0, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>>>, reg<vm.value x2 : vm.span<i64>>) -> (reg<vm.value : i64>)
+  %objects = concat(%ref_offset, %ref_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>, read>>
+  %values = concat(%scalar_offset, %scalar_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64, read>>
+  %sum = low.func.call @read(%c0, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>, read>>, reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
   return
 }
 
@@ -303,7 +303,7 @@ vm.target<core> @vm
 
 type.decl import("lifetime", "object") @Object
 
-low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>>>, %values: reg<vm.value x2 : vm.span<i64>>) -> (reg<vm.value : i64>)
+low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>, read>>, %values: reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
 
 low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
   %c0 = constant.i64 0
@@ -311,9 +311,9 @@ low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
   %ref_count = constant.i64 0
   %scalar_offset = constant.i64 -1
   %scalar_count = constant.i64 0
-  %objects = concat(%ref_offset, %ref_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>>>
-  %values = concat(%scalar_offset, %scalar_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64>>
-  %sum = low.func.call @read(%c0, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>>>, reg<vm.value x2 : vm.span<i64>>) -> (reg<vm.value : i64>)
+  %objects = concat(%ref_offset, %ref_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>, read>>
+  %values = concat(%scalar_offset, %scalar_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64, read>>
+  %sum = low.func.call @read(%c0, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>, read>>, reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
   return
 }
 
@@ -329,7 +329,7 @@ vm.target<core> @vm
 
 type.decl import("lifetime", "object") @Object
 
-low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>>>, %values: reg<vm.value x2 : vm.span<i64>>) -> (reg<vm.value : i64>)
+low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>, read>>, %values: reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
 
 low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
   %c0 = constant.i64 0
@@ -337,9 +337,9 @@ low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
   %ref_count = constant.i64 0
   %scalar_offset = constant.i64 0
   %scalar_count = constant.i64 -1
-  %objects = concat(%ref_offset, %ref_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>>>
-  %values = concat(%scalar_offset, %scalar_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64>>
-  %sum = low.func.call @read(%c0, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>>>, reg<vm.value x2 : vm.span<i64>>) -> (reg<vm.value : i64>)
+  %objects = concat(%ref_offset, %ref_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>, read>>
+  %values = concat(%scalar_offset, %scalar_count) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64, read>>
+  %sum = low.func.call @read(%c0, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>, read>>, reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
   return
 }
 
@@ -416,7 +416,7 @@ vm.target<core> @vm
 
 type.decl import("lifetime", "object") @Object
 
-low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>>>, %values: reg<vm.value x2 : vm.span<i64>>) -> (reg<vm.value : i64>)
+low.func.decl import(native, "read_spans", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%count: reg<vm.value : i64>, %objects: reg<vm.value x2 : vm.span<ptr<@Object>, read>>, %values: reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
 
 low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
   %ref_storage = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
@@ -427,9 +427,9 @@ low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
   %c0 = constant.i64 0
   low.spill %c0, %scalar_storage : reg<vm.value : i64>, low.storage<stack>
   %c1 = constant.i64 1
-  %objects = concat(%c0, %c1) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>>>
-  %values = concat(%c0, %c1) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64>>
-  %sum = low.func.call @read(%c1, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>>>, reg<vm.value x2 : vm.span<i64>>) -> (reg<vm.value : i64>)
+  %objects = concat(%c0, %c1) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<ptr<@Object>, read>>
+  %values = concat(%c0, %c1) : (reg<vm.value : i64>, reg<vm.value : i64>) -> reg<vm.value x2 : vm.span<i64, read>>
+  %sum = low.func.call @read(%c1, %objects, %values) : (reg<vm.value : i64>, reg<vm.value x2 : vm.span<ptr<@Object>, read>>, reg<vm.value x2 : vm.span<i64, read>>) -> (reg<vm.value : i64>)
   return
 }
 

@@ -1,0 +1,30 @@
+// RUN: verify
+void scalar(
+    // ERROR@+1: LOWERING/059 "access requires a parameter containing buffer or view storage"
+    [[loom::access("read")]] int input) {}
+
+// ====
+#include <loomcxx/view.h>
+using Values = loom::type::view<loom::type::shape<4>, int>;
+void duplicate(
+    // ERROR@+1: LOWERING/059 "one access bound per parameter is allowed"
+    [[loom::access("read"), loom::access("write")]] Values input) {}
+
+// ====
+#include <loomcxx/view.h>
+using Values = loom::type::view<loom::type::shape<4>, int>;
+void malformed(
+    // ERROR@+1: LOWERING/059 "access requires read, write, read_write, or none as one string literal"
+    [[loom::access("immutable")]] Values input) {}
+
+// ====
+#include <loomcxx/view.h>
+using Values = loom::type::view<loom::type::shape<4>, int>;
+void declared([[loom::access("read")]] Values input);
+void declared(
+    // ERROR@+1: LOWERING/059 "conflicting parameter access across declarations"
+    [[loom::access("write")]] Values input) {}
+
+// ====
+// ERROR@+1: LOWERING/059 "access requires a leading ordinary parameter attribute"
+[[loom::access("read")]] void misplaced(int input) {}

@@ -133,6 +133,11 @@ static iree_status_t iree_vm_module_validate_signature_type(
     iree_vm_module_signature_type_t type,
     iree_host_size_t current_callable_ordinal) {
   const bool is_span = iree_vm_module_signature_type_kind_is_span(type.kind);
+  if (!is_span &&
+      (type.kind & IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_NO_ACCESS)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "span access requires a span signature field");
+  }
   type.kind = iree_vm_module_signature_element_kind(type.kind);
   if (type.kind > IREE_VM_SCALAR_TYPE_NONE &&
       type.kind <= IREE_VM_SCALAR_TYPE_F64) {
