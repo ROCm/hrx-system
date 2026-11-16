@@ -14,7 +14,7 @@ func.def @wrapping_range(%x: i8) -> (i64, i64, i64) {
 // ----
 func.def @wrapping_range(%x: i8) -> (i64, i64, i64) {
   %lo = scalar.constant -128 : i64
-  %hi = scalar.constant 127 : i64
+  %hi = scalar.constant 126 : i64
   %divisor = scalar.constant 2 : i64
   func.return %lo, %hi, %divisor : i64, i64, i64
 }

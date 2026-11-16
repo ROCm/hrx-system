@@ -470,7 +470,8 @@ static void loom_conditioned_value_facts_apply_active_refinement(
   const uint32_t predicates =
       (result.flags | constraint->flags) &
       (LOOM_VALUE_FACT_NON_ZERO | LOOM_VALUE_FACT_POWER_OF_TWO);
-  loom_value_facts_refine_divisible_range(&result);
+  result.flags |= predicates;
+  loom_value_facts_refine_predicate_range(&result);
   if (result.range_lo == result.range_hi &&
       (((predicates & LOOM_VALUE_FACT_NON_ZERO) && result.range_lo == 0) ||
        ((predicates & LOOM_VALUE_FACT_POWER_OF_TWO) &&

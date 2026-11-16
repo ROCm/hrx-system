@@ -85,8 +85,8 @@ func.def target(@offset64) @exact_wrap_64() -> (offset, offset, offset) {
 // ====
 
 // Interval wrapping preserves the power-of-two divisor while widening a
-// disjoint modular interval to the complete 32-bit unsigned range. An in-range
-// subtraction retains its precise interval.
+// disjoint modular interval to the 32-bit unsigned domain. Divisibility removes
+// impossible endpoints; an in-range subtraction retains its precise interval.
 test.target<low_core> @offset32 {index_bitwidth = 32, offset_bitwidth = 32}
 
 func.def target(@offset32) @interval_wrap_32(%crossing_input: offset, %safe_input: offset) -> (offset, offset, i64, i64, i64, i64, i64, i64) {
@@ -114,7 +114,7 @@ func.def target(@offset32) @interval_wrap_32(%crossing_input: offset, %safe_inpu
   %wrapped = index.sub %crossing, %c4 : offset
   %difference = index.sub %safe, %c4 : offset
   %wrapped_lo = scalar.constant 0 : i64
-  %wrapped_hi = scalar.constant 4294967295 : i64
+  %wrapped_hi = scalar.constant 4294967292 : i64
   %wrapped_divisor = scalar.constant 4 : i64
   %difference_lo = scalar.constant 0 : i64
   %difference_hi = scalar.constant 4 : i64
@@ -304,4 +304,52 @@ func.def target(@offset32) @native_offset_endpoint(%length: offset) -> (i64, i64
   %divisor = scalar.constant 64 : i64
   %bounded = scalar.constant true : i1
   func.return %input_upper, %lower, %upper, %divisor, %bounded : i64, i64, i64, i64, i1
+}
+
+// ====
+
+// A dynamic multiple of the carrier modulus is exactly zero only in the
+// selected 32-bit domain. The wider and targetless forms retain the scale.
+test.target<low_core> @offset32 {index_bitwidth = 32, offset_bitwidth = 32}
+
+test.target<low_core> @offset64 {index_bitwidth = 64, offset_bitwidth = 64}
+
+func.def target(@offset32) @modulus_scale_32(%element: index) -> (offset) {
+  %stride = index.constant 4294967296 : offset
+  %bytes = index.scale %element, %stride : index, offset -> offset
+  func.return %bytes : offset
+}
+
+func.def target(@offset64) @modulus_scale_64(%element: index) -> (offset) {
+  %stride = index.constant 4294967296 : offset
+  %bytes = index.scale %element, %stride : index, offset -> offset
+  func.return %bytes : offset
+}
+
+func.def @modulus_scale_targetless(%element: index) -> (offset) {
+  %stride = index.constant 4294967296 : offset
+  %bytes = index.scale %element, %stride : index, offset -> offset
+  func.return %bytes : offset
+}
+
+// ----
+test.target<low_core> @offset32 {index_bitwidth = 32, offset_bitwidth = 32}
+
+test.target<low_core> @offset64 {index_bitwidth = 64, offset_bitwidth = 64}
+
+func.def target(@offset32) @modulus_scale_32(%element: index) -> (offset) {
+  %bytes = index.constant 0 : offset
+  func.return %bytes : offset
+}
+
+func.def target(@offset64) @modulus_scale_64(%element: index) -> (offset) {
+  %stride = index.constant 4294967296 : offset
+  %bytes = index.scale %element, %stride : index, offset -> offset
+  func.return %bytes : offset
+}
+
+func.def @modulus_scale_targetless(%element: index) -> (offset) {
+  %stride = index.constant 4294967296 : offset
+  %bytes = index.scale %element, %stride : index, offset -> offset
+  func.return %bytes : offset
 }

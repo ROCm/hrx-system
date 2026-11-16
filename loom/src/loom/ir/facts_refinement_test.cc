@@ -565,6 +565,9 @@ TEST(FactsApplyPredicate, DivisibleBoundsPreserveUnboundedAndOverflowDomains) {
       {1, INT64_MAX, 4, 4, INT64_MAX},
       {INT64_MAX - 1, INT64_MAX, 4, INT64_MAX - 1, INT64_MAX},
       {INT64_MIN, INT64_MIN + 1, 3, INT64_MIN, INT64_MIN + 1},
+      {INT64_MIN, INT64_MIN + 1, 2, INT64_MIN, INT64_MIN + 1},
+      {1, INT64_MAX, INT64_MAX, 1, INT64_MAX},
+      {INT64_MAX - 1, INT64_MAX, INT64_MAX, INT64_MAX - 1, INT64_MAX},
       {INT64_MIN + 1, INT64_MAX - 1, INT64_MAX, -INT64_MAX, 0},
       {-3, -1, 4, -3, -1},
       {1, 3, 4, 1, 3},
@@ -607,6 +610,192 @@ TEST(FactsRefineDivisibleRange, PreservesIndependentFacts) {
   EXPECT_TRUE(loom_value_facts_equal(facts, floating));
 }
 
+TEST(FactsRefinePredicateRange, MatchesEnumeratedIntegerSets) {
+  for (int64_t divisor = 1; divisor <= 8; ++divisor) {
+    for (unsigned predicates = 0; predicates < 4; ++predicates) {
+      for (int64_t lower = -16; lower <= 16; ++lower) {
+        for (int64_t upper = lower; upper <= 16; ++upper) {
+          SCOPED_TRACE(::testing::Message()
+                       << lower << ".." << upper << " divisor=" << divisor
+                       << " predicates=" << predicates);
+          auto input = loom_value_facts_make(lower, upper, divisor);
+          if (predicates & 1) {
+            input.flags |= LOOM_VALUE_FACT_NON_ZERO;
+          }
+          if (predicates & 2) {
+            input.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+          }
+          loom_value_facts_mark_workgroup_uniform(&input);
+          input.extension_id = 7;
+          int64_t expected_lower = INT64_MAX;
+          int64_t expected_upper = INT64_MIN;
+          for (int64_t value = lower; value <= upper; ++value) {
+            if (value % input.known_divisor != 0 ||
+                (loom_value_facts_is_non_zero(input) && value == 0) ||
+                (loom_value_facts_is_power_of_two(input) &&
+                 (value <= 0 || (value & (value - 1)) != 0))) {
+              continue;
+            }
+            if (expected_lower == INT64_MAX) {
+              expected_lower = value;
+            }
+            expected_upper = value;
+          }
+          auto result = input;
+          loom_value_facts_refine_predicate_range(&result);
+          if (expected_lower > expected_upper) {
+            // The lattice has no bottom; an empty set keeps its input summary.
+            EXPECT_TRUE(loom_value_facts_equal(input, result));
+          } else {
+            EXPECT_EQ(result.range_lo, expected_lower);
+            EXPECT_EQ(result.range_hi, expected_upper);
+            EXPECT_EQ(result.known_divisor, input.known_divisor);
+            EXPECT_EQ(result.flags & input.flags, input.flags);
+            EXPECT_EQ(result.extension_id, input.extension_id);
+            EXPECT_EQ(loom_value_facts_is_exact(result),
+                      expected_lower == expected_upper);
+          }
+          auto repeated = result;
+          loom_value_facts_refine_predicate_range(&repeated);
+          EXPECT_TRUE(loom_value_facts_equal(result, repeated));
+        }
+      }
+    }
+  }
+}
+
+TEST(FactsRefinePredicateRange, PositivePowersCoverFiniteAndUnboundedRanges) {
+  auto whole_domain = loom_value_facts_unknown();
+  whole_domain.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+  loom_value_facts_refine_predicate_range(&whole_domain);
+  EXPECT_EQ(whole_domain.range_lo, 1);
+  EXPECT_EQ(whole_domain.range_hi, INT64_MAX);
+  auto finite_domain = loom_value_facts_make(1, INT64_MAX - 1, 1);
+  finite_domain.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+  loom_value_facts_refine_predicate_range(&finite_domain);
+  EXPECT_EQ(finite_domain.range_lo, 1);
+  EXPECT_EQ(finite_domain.range_hi, INT64_C(1) << 62);
+  for (int bit = 1; bit <= 62; ++bit) {
+    SCOPED_TRACE(bit);
+    const int64_t power = INT64_C(1) << bit;
+    auto rounded = loom_value_facts_make(power - 1, power + 1, power);
+    rounded.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+    loom_value_facts_refine_predicate_range(&rounded);
+    EXPECT_EQ(rounded.range_lo, power);
+    EXPECT_EQ(rounded.range_hi, power);
+    EXPECT_TRUE(loom_value_facts_is_exact(rounded));
+    EXPECT_TRUE(loom_value_facts_is_positive(rounded));
+
+    auto excluded = loom_value_facts_make(power + 1, INT64_MAX, 1);
+    excluded.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+    const auto original = excluded;
+    loom_value_facts_refine_predicate_range(&excluded);
+    if (bit < 62) {
+      EXPECT_EQ(excluded.range_lo, power * 2);
+      EXPECT_EQ(excluded.range_hi, INT64_MAX);
+    } else {
+      // The next power is beyond the signed payload, but an unsigned offset
+      // may still hold it. Preserve the input rather than capping the range.
+      EXPECT_TRUE(loom_value_facts_equal(excluded, original));
+    }
+  }
+}
+
+TEST(FactsRefinePredicateRange, NonzeroPreservesUnboundedDivisibleEndpoints) {
+  for (int64_t divisor : {INT64_C(1), INT64_C(3), INT64_MAX}) {
+    auto positive = loom_value_facts_make(0, INT64_MAX, divisor);
+    positive.flags |= LOOM_VALUE_FACT_NON_ZERO;
+    loom_value_facts_refine_predicate_range(&positive);
+    // INT64_MAX is an unbounded sentinel: an unsigned offset may hold both
+    // INT64_MAX and 2*INT64_MAX, so the summary must not become exact.
+    EXPECT_EQ(positive.range_lo, divisor == INT64_MAX ? 0 : divisor);
+    EXPECT_EQ(positive.range_hi, INT64_MAX);
+    EXPECT_FALSE(loom_value_facts_is_exact(positive));
+    auto negative = loom_value_facts_make(INT64_MIN, 0, divisor);
+    negative.flags |= LOOM_VALUE_FACT_NON_ZERO;
+    loom_value_facts_refine_predicate_range(&negative);
+    EXPECT_EQ(negative.range_lo, INT64_MIN);
+    EXPECT_EQ(negative.range_hi, -divisor);
+  }
+}
+
+TEST(FactsRefinePredicateRange, PreservesFloatingFacts) {
+  for (double value : {0.0, -3.5, std::numeric_limits<double>::infinity(),
+                       std::numeric_limits<double>::quiet_NaN()}) {
+    auto original = loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F64, value);
+    original.extension_id = 9;
+    auto result = original;
+    loom_value_facts_refine_predicate_range(&result);
+    EXPECT_TRUE(loom_value_facts_equal(result, original));
+  }
+}
+
+TEST(FactsRefinePredicateRange, PreservesExactExtrema) {
+  for (int64_t value : {INT64_MIN, INT64_MAX}) {
+    const auto original = loom_value_facts_exact_i64(value);
+    auto facts = original;
+    loom_value_facts_refine_predicate_range(&facts);
+    EXPECT_TRUE(loom_value_facts_equal(facts, original));
+    facts = loom_value_facts_unknown();
+    const auto predicate = make_predicate_range(value, value);
+    loom_value_facts_apply_predicate(&facts, &predicate);
+    EXPECT_EQ(facts.range_lo, value);
+    EXPECT_EQ(facts.range_hi, value);
+    EXPECT_TRUE(loom_value_facts_is_exact(facts));
+  }
+}
+
+TEST(FactsApplyPredicate, IntegerIntersectionsAreIndependentOfPredicateOrder) {
+  constexpr unsigned orders[][3] = {
+      {0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0},
+  };
+  for (bool power_of_two : {false, true}) {
+    for (int64_t divisor = 1; divisor <= 8; ++divisor) {
+      for (int64_t lower = -4; lower <= 8; ++lower) {
+        for (int64_t upper = lower; upper <= 8; ++upper) {
+          int64_t expected_lower = INT64_MAX;
+          int64_t expected_upper = INT64_MIN;
+          for (int64_t value = lower; value <= upper; ++value) {
+            if (value == 0 || value % divisor != 0 ||
+                (power_of_two && (value < 0 || (value & (value - 1)) != 0))) {
+              continue;
+            }
+            if (expected_lower == INT64_MAX) {
+              expected_lower = value;
+            }
+            expected_upper = value;
+          }
+          if (expected_lower > expected_upper) {
+            continue;
+          }
+          const loom_predicate_t predicates[] = {
+              make_predicate_range(lower, upper),
+              make_predicate_1(LOOM_PREDICATE_MULTIPLE_OF, divisor),
+              power_of_two ? make_predicate_power_of_two()
+                           : make_predicate_1(LOOM_PREDICATE_NE, 0),
+          };
+          for (const auto& order : orders) {
+            SCOPED_TRACE(::testing::Message()
+                         << lower << ".." << upper << " divisor=" << divisor
+                         << " power_of_two=" << power_of_two
+                         << " order=" << order[0] << order[1] << order[2]);
+            auto facts = loom_value_facts_unknown();
+            for (unsigned index : order) {
+              loom_value_facts_apply_predicate(&facts, &predicates[index]);
+            }
+            EXPECT_EQ(facts.range_lo, expected_lower);
+            EXPECT_EQ(facts.range_hi, expected_upper);
+            EXPECT_TRUE(loom_value_facts_is_non_zero(facts));
+            if (power_of_two) {
+              EXPECT_TRUE(loom_value_facts_is_power_of_two(facts));
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(FactsRefineRelation, NarrowingRetainsExplicitNonzeroFacts) {
   loom_value_facts_t nonzero = loom_value_facts_make(0, 255, 1);
   nonzero.flags |= LOOM_VALUE_FACT_NON_ZERO;
@@ -619,6 +808,39 @@ TEST(FactsRefineRelation, NarrowingRetainsExplicitNonzeroFacts) {
   EXPECT_TRUE(loom_value_facts_refine_relation(LOOM_PREDICATE_LE, lower,
                                                nonzero, nullptr, &nonzero));
   EXPECT_TRUE(loom_value_facts_is_non_zero(nonzero));
+}
+
+TEST(FactsRefineRelation, NormalizesPredicatesOnEitherWritableSide) {
+  const auto interval = loom_value_facts_make(5, 9, 1);
+  for (bool reversed : {false, true}) {
+    auto power = loom_value_facts_make(1, 64, 4);
+    power.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+    loom_value_facts_mark_workgroup_uniform(&power);
+    power.extension_id = 7;
+    if (reversed) {
+      ASSERT_TRUE(loom_value_facts_refine_relation(LOOM_PREDICATE_EQ, interval,
+                                                   power, nullptr, &power));
+    } else {
+      ASSERT_TRUE(loom_value_facts_refine_relation(LOOM_PREDICATE_EQ, power,
+                                                   interval, &power, nullptr));
+    }
+    EXPECT_EQ(power.range_lo, 8);
+    EXPECT_EQ(power.range_hi, 8);
+    EXPECT_TRUE(loom_value_facts_is_exact(power));
+    EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(power));
+    EXPECT_EQ(power.extension_id, 7u);
+  }
+
+  for (auto predicate : {LOOM_PREDICATE_LE, LOOM_PREDICATE_ULE}) {
+    auto nonzero = loom_value_facts_make(0, 12, 4);
+    nonzero.flags |= LOOM_VALUE_FACT_NON_ZERO;
+    const auto bound = loom_value_facts_make(0, 6, 1);
+    ASSERT_TRUE(loom_value_facts_refine_relation(predicate, nonzero, bound,
+                                                 &nonzero, nullptr));
+    EXPECT_EQ(nonzero.range_lo, 4);
+    EXPECT_EQ(nonzero.range_hi, 4);
+    EXPECT_TRUE(loom_value_facts_is_exact(nonzero));
+  }
 }
 
 static bool unsigned_relation_holds(loom_predicate_kind_t kind, int64_t lhs,
@@ -759,7 +981,7 @@ TEST(FactsApplyPredicate, UnsignedBoundsRetainIndependentFactsAndDivisibility) {
   facts.extension_id = 7;
   const auto predicate = make_predicate_1(LOOM_PREDICATE_ULT, 6);
   loom_value_facts_apply_predicate(&facts, &predicate);
-  EXPECT_EQ(facts.range_lo, 0);
+  EXPECT_EQ(facts.range_lo, 4);
   EXPECT_EQ(facts.range_hi, 4);
   EXPECT_EQ(facts.known_divisor, 4);
   EXPECT_EQ(facts.extension_id, 7);

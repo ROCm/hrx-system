@@ -1526,3 +1526,107 @@ check.scenario @guarded_wide_lookup_values {
   }
   check.return
 }
+
+// Quotients of predicate-refined ranges become exact loop counts. Each row
+// exercises true/false edges independently, then observes the unguarded value.
+func.def @predicate_quotient_counts(%input_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_buffer[%base] : buffer -> view<6xi32>
+  %output = buffer.view %output_buffer[%base] : buffer -> view<6x4xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 6 : index
+  %step = index.constant 1 : index
+  %c0 = scalar.constant 0 : i32
+  %unit = scalar.constant 1 : i32
+  %radix = scalar.constant 2 : i32
+  %power_divisor = scalar.constant 8 : i32
+  %power_lower = scalar.constant 5 : i32
+  %power_upper = scalar.constant 9 : i32
+  scf.for %row = [%begin to %end step %step] {
+    %raw = view.load %input[%row] : view<6xi32> -> i32
+    %ranged = scalar.assume %raw [range(%raw, 0, 2)] : i32
+    %nonzero = scalar.cmpi ne, %raw, %c0 : i32
+    scf.if %nonzero {
+      %remaining = scalar.subi %radix, %ranged : i32
+      %quotient = scalar.divui %remaining, %radix : i32
+      %count = scalar.addi %quotient, %unit : i32
+      %limit = index.cast %count : i32 to index
+      scf.for %i = [%begin to %limit step %step] unroll {
+        view.store %raw, %output[%row, 0] : i32, view<6x4xi32>
+      }
+    }
+    %negative = scalar.subi %c0, %ranged : i32
+    %negative_alias = scalar.assume %negative [range(%negative, -2, 0)] : i32
+    %negative_nonzero = scalar.cmpi ne, %negative, %c0 : i32
+    scf.if %negative_nonzero {
+      %remaining = scalar.addi %negative_alias, %radix : i32
+      %quotient = scalar.divui %remaining, %radix : i32
+      %count = scalar.addi %quotient, %unit : i32
+      %limit = index.cast %count : i32 to index
+      scf.for %i = [%begin to %limit step %step] unroll {
+        view.store %negative, %output[%row, 1] : i32, view<6x4xi32>
+      }
+    }
+    %shift = scalar.addi %ranged, %radix : i32
+    %shifted = scalar.shli %unit, %shift : i32
+    %power = scalar.assume %shifted [power_of_two(%shifted)] : i32
+    %above = scalar.cmpi sge, %power, %power_lower : i32
+    %below = scalar.cmpi sle, %power, %power_upper : i32
+    %selected = scalar.andi %above, %below : i1
+    scf.if %selected {
+      %count = scalar.divui %power, %power_divisor : i32
+      %limit = index.cast %count : i32 to index
+      scf.for %i = [%begin to %limit step %step] unroll {
+        view.store %power, %output[%row, 2] : i32, view<6x4xi32>
+      }
+    }
+    %remaining = scalar.subi %radix, %ranged : i32
+    %quotient = scalar.divui %remaining, %radix : i32
+    %outside_count = scalar.addi %quotient, %unit : i32
+    view.store %outside_count, %output[%row, 3] : i32, view<6x4xi32>
+  }
+  func.return
+}
+
+// The oracle writes the mathematical cases directly, without assumptions,
+// quotient-derived control flow, or an unrolling requirement.
+func.def @predicate_quotient_counts_oracle(%input_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_buffer[%base] : buffer -> view<6xi32>
+  %output = buffer.view %output_buffer[%base] : buffer -> view<6x4xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 6 : index
+  %step = index.constant 1 : index
+  %c0 = scalar.constant 0 : i32
+  %unit = scalar.constant 1 : i32
+  %double_count = scalar.constant 2 : i32
+  %power = scalar.constant 8 : i32
+  scf.for %row = [%begin to %end step %step] {
+    %value = view.load %input[%row] : view<6xi32> -> i32
+    %nonzero = scalar.cmpi ne, %value, %c0 : i32
+    scf.if %nonzero {
+      %negative = scalar.subi %c0, %value : i32
+      view.store %value, %output[%row, 0] : i32, view<6x4xi32>
+      view.store %negative, %output[%row, 1] : i32, view<6x4xi32>
+    }
+    %selected = scalar.cmpi eq, %value, %unit : i32
+    scf.if %selected {
+      view.store %power, %output[%row, 2] : i32, view<6x4xi32>
+    }
+    %outside_count = scf.select %nonzero, %unit, %double_count : i32
+    view.store %outside_count, %output[%row, 3] : i32, view<6x4xi32>
+  }
+  func.return
+}
+
+check.scenario @predicate_quotient_count_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(0) step(1) period(3) : tensor<6xi32>
+    %output = check.generate.fill value(-9) : tensor<6x4xi32>
+    check.compare<@predicate_quotient_counts, @predicate_quotient_counts_oracle>(%input, %output) : (tensor<6xi32>, tensor<6x4xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<6xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<6x4xi32>
+    }
+  }
+  check.return
+}

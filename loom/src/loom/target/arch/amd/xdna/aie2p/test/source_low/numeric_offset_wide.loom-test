@@ -27,11 +27,10 @@ func.def @offset_scale_unsigned_wrap(%base: i32, %increment: i32) -> (offset) {
 
 // ====
 
-func.def @offset_scale_large_stride(%element: index) -> (offset) {
+func.def @offset_constant_exceeds_carrier() -> (offset) {
   // ERROR@+1: TARGET/005
-  %stride = index.constant 4294967296 : offset
-  %bytes = index.scale %element, %stride : index, offset -> offset
-  func.return %bytes : offset
+  %wide = index.constant 4294967296 : offset
+  func.return %wide : offset
 }
 
 // ====

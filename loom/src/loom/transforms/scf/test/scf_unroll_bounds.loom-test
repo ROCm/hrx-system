@@ -268,3 +268,69 @@ func.def @partial_tile_unroll_remains_dynamic(%remaining: index) {
   }
   func.return
 }
+
+// ====
+// RUN: pass unroll-scf-for,dce
+
+// Narrowing a proven positive power to [5,9] leaves only eight, so a quotient
+// derived from it is an exact trip count before any canonicalization runs.
+func.def public @power_of_two_store(%input: i32, %output: buffer) {
+  %power = scalar.assume %input [power_of_two(%input)] : i32
+  %ranged = scalar.assume %power [range(%power, 5, 9)] : i32
+  %divisor = scalar.constant 8 : i32
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = scalar.divui %ranged, %divisor : i32
+  %end = index.cast %count : i32 to index
+  scf.for %iteration = [%begin to %end step %step] unroll {
+    view.store %input, %view[0] : i32, view<1xi32>
+  }
+  func.return
+}
+
+// ----
+func.def public @power_of_two_store(%input: i32, %output: buffer) {
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<1xi32>
+  view.store %input, %view[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// RUN: pass unroll-scf-for,dce
+
+func.def public @nonzero_store(%input: i32, %output: buffer) {
+  %ranged = scalar.assume %input [range(%input, 0, 2)] : i32
+  %radix = scalar.constant 2 : i32
+  %unit = scalar.constant 1 : i32
+  %c0 = scalar.constant 0 : i32
+  %selected = scalar.cmpi ne, %input, %c0 : i32
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<1xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %selected {
+    %remaining = scalar.subi %radix, %ranged : i32
+    %quotient = scalar.divui %remaining, %radix : i32
+    %count = scalar.addi %quotient, %unit : i32
+    %end = index.cast %count : i32 to index
+    scf.for %iteration = [%begin to %end step %step] unroll {
+      view.store %input, %view[0] : i32, view<1xi32>
+    }
+  }
+  func.return
+}
+
+// ----
+func.def public @nonzero_store(%input: i32, %output: buffer) {
+  %c0 = scalar.constant 0 : i32
+  %selected = scalar.cmpi ne, %input, %c0 : i32
+  %base = index.constant 0 : offset
+  %view = buffer.view %output[%base] : buffer -> view<1xi32>
+  scf.if %selected {
+    view.store %input, %view[0] : i32, view<1xi32>
+  }
+  func.return
+}

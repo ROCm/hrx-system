@@ -890,8 +890,16 @@ void loom_value_facts_recompute_flags(loom_value_facts_t* facts);
 // updates cached flags, preserving independent predicates and distribution.
 // Floating-point facts and unbounded endpoints remain unchanged. Intervals
 // containing no representable multiple stay conservative because the lattice
-// has no empty set.
+// has no empty set. A refinement cannot collapse an unbounded interval into
+// an exact value by rounding its finite endpoint to the opposite sentinel.
 void loom_value_facts_refine_divisible_range(loom_value_facts_t* facts);
+
+// Intersects integer bounds with proven nonzero, positive-power-of-two, and
+// divisibility predicates. Preserves independent facts and leaves floating
+// facts unchanged. Unbounded upper endpoints remain unbounded, including for
+// powers beyond the signed payload. Empty intersections retain the incoming
+// summary because the numeric lattice has no bottom element.
+void loom_value_facts_refine_predicate_range(loom_value_facts_t* facts);
 
 // Returns true when |predicate| is statically impossible for |facts|. This is a
 // validation query, not a transfer function: callers that accept user assumes
@@ -901,10 +909,10 @@ bool loom_value_facts_predicate_conflict(
     loom_value_facts_t facts, const loom_predicate_t* predicate,
     loom_value_fact_predicate_conflict_t* out_conflict);
 
-// Tightens facts using a single predicate constraint, combining finite integer
-// bounds with the known divisor. Unbounded endpoints remain unbounded. Modifies
-// the facts in place and recomputes flags afterward. The caller is responsible
-// for enforcing that the predicate is legal for the value type.
+// Tightens facts using a single predicate constraint, combining integer bounds
+// with the known divisor and independent nonzero/power-of-two predicates.
+// Modifies the facts in place and recomputes flags afterward. The caller is
+// responsible for enforcing that the predicate is legal for the value type.
 void loom_value_facts_apply_predicate(loom_value_facts_t* facts,
                                       const loom_predicate_t* predicate);
 

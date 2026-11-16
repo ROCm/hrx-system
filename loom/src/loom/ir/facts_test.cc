@@ -661,12 +661,67 @@ TEST(FactsClampDomain, PreservesIndependentNonzeroPredicate) {
 
     loom_value_facts_t clamped =
         loom_value_facts_clamp_domain(facts, -128, 127);
-    EXPECT_EQ(clamped.range_lo, bound == 127 ? -127 : -128);
-    EXPECT_EQ(clamped.range_hi, 127);
+    EXPECT_EQ(clamped.range_lo, bound == 127 ? -124 : -128);
+    EXPECT_EQ(clamped.range_hi, 124);
     EXPECT_EQ(clamped.known_divisor, 4);
     EXPECT_TRUE(loom_value_facts_is_non_zero(clamped));
     EXPECT_TRUE(loom_value_facts_is_lane_varying(clamped));
     EXPECT_EQ(clamped.extension_id, 7u);
+  }
+}
+
+TEST(FactsClampDomain, RetainedPredicatesCoverUnsignedOffsetExtrema) {
+  int64_t domain_lower = 0;
+  int64_t domain_upper = 0;
+  ASSERT_TRUE(loom_value_facts_scalar_type_domain(
+      LOOM_SCALAR_TYPE_OFFSET, &domain_lower, &domain_upper));
+  const uint64_t sign_bit = UINT64_C(1) << 63;
+  for (int64_t lower : {INT64_C(0), INT64_C(1), INT64_MAX - 1}) {
+    for (int64_t divisor :
+         {INT64_C(1), INT64_C(2), INT64_C(3), INT64_C(1) << 62, INT64_MAX}) {
+      for (unsigned predicates = 0; predicates < 4; ++predicates) {
+        SCOPED_TRACE(::testing::Message()
+                     << "lower=" << lower << " divisor=" << divisor
+                     << " predicates=" << predicates);
+        auto input = loom_value_facts_make(lower, INT64_MAX, divisor);
+        if (predicates & 1) {
+          input.flags |= LOOM_VALUE_FACT_NON_ZERO;
+        }
+        if (predicates & 2) {
+          input.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+        }
+        const auto result =
+            loom_value_facts_clamp_domain(input, domain_lower, domain_upper);
+        for (uint64_t value : {UINT64_C(0), UINT64_C(1), (uint64_t)divisor,
+                               (uint64_t)divisor * 2, sign_bit - 1, sign_bit,
+                               UINT64_MAX - 1, UINT64_MAX}) {
+          if (value < (uint64_t)lower || value % (uint64_t)divisor != 0 ||
+              ((predicates & 1) && value == 0) ||
+              ((predicates & 2) && (value == 0 || (value & (value - 1))))) {
+            continue;
+          }
+          EXPECT_GE(value, (uint64_t)result.range_lo);
+          if (result.range_hi != INT64_MAX) {
+            EXPECT_LE(value, (uint64_t)result.range_hi);
+          }
+          if (loom_value_facts_is_exact(result)) {
+            EXPECT_EQ(value, (uint64_t)result.range_lo);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(FactsClampDomain, PowerBoundsFollowFiniteIntegerDomains) {
+  auto power = loom_value_facts_unknown();
+  power.flags |= LOOM_VALUE_FACT_POWER_OF_TWO;
+  for (int bit_count = 1; bit_count <= 62; ++bit_count) {
+    const int64_t upper = (INT64_C(1) << bit_count) - 1;
+    const auto facts = loom_value_facts_clamp_domain(power, 0, upper);
+    EXPECT_EQ(facts.range_lo, 1);
+    EXPECT_EQ(facts.range_hi, INT64_C(1) << (bit_count - 1));
+    EXPECT_TRUE(loom_value_facts_is_power_of_two(facts));
   }
 }
 
