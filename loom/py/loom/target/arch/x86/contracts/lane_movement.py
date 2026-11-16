@@ -143,6 +143,12 @@ def _lane_extract_rule(
         guards=(
             Guard.value_type("source", source_type),
             Guard.value_type("result", result_type),
+            Guard.low_value_register_class(
+                "result",
+                "x86.xmm"
+                if transport is not None
+                else f"x86.gpr{max(32, element_bit_width)}",
+            ),
             Guard.operand_segment_count("indices", 0),
             Guard.i64_array_count("static_indices", 1),
             Guard.i64_array_element_range("static_indices", 0, 0, lane_count - 1),
@@ -247,6 +253,12 @@ def _lane_insert_rule(
             Guard.value_type("value", value_type),
             Guard.value_type("dest", vector_type),
             Guard.value_type("result", vector_type),
+            Guard.low_value_register_class(
+                "value",
+                "x86.xmm"
+                if transport is not None
+                else f"x86.gpr{max(32, element_bit_width)}",
+            ),
             Guard.operand_segment_count("indices", 0),
             Guard.i64_array_count("static_indices", 1),
             Guard.i64_array_element_range("static_indices", 0, 0, lane_count - 1),

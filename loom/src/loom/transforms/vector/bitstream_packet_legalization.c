@@ -94,6 +94,8 @@ typedef struct loom_vector_bitstream_plan_t {
   bool is_bitpack;
   // True when unpacked fields require signed extension.
   bool is_signed_unpack;
+  // Supported singleton integer vector widths, indexed by log2(bit width).
+  uint8_t scalar_packet_width_mask;
 } loom_vector_bitstream_plan_t;
 
 typedef struct loom_vector_bitstream_source_cursor_t {
@@ -531,10 +533,24 @@ static iree_status_t loom_vector_bitstream_scalar_to_packet(
                                      out_packet, out_packet_type);
 }
 
+static uint32_t loom_vector_bitstream_packet_scalar_bit_count(
+    uint8_t scalar_packet_width_mask, uint32_t maximum_bit_count,
+    uint32_t packet_lane_count, uint32_t work_element_bit_count) {
+  const uint32_t exact_bit_count = packet_lane_count * work_element_bit_count;
+  if (packet_lane_count == 1u ||
+      iree_any_bit_set(
+          scalar_packet_width_mask,
+          1u << iree_math_count_trailing_zeros_u32(exact_bit_count))) {
+    return exact_bit_count;
+  }
+  return maximum_bit_count;
+}
+
 static uint16_t loom_vector_bitstream_packet_lane_mask(
     const loom_target_legalization_context_t* context,
     loom_scalar_type_t source_element, loom_scalar_type_t work_element,
-    uint32_t work_element_bit_count, uint32_t packet_bit_count) {
+    uint32_t work_element_bit_count, uint32_t packet_bit_count,
+    uint8_t scalar_packet_width_mask) {
   static const uint8_t kCandidateLaneCounts[] = {8, 4, 2, 1};
   uint16_t lane_mask = 0;
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kCandidateLaneCounts); ++i) {
@@ -549,17 +565,19 @@ static uint16_t loom_vector_bitstream_packet_lane_mask(
         loom_vector_bitstream_vector_type(work_element, lane_count);
     bool has_bridge = lane_count == 1u;
     if (!has_bridge) {
+      const uint32_t scalar_bit_count =
+          loom_vector_bitstream_packet_scalar_bit_count(
+              scalar_packet_width_mask, packet_bit_count, lane_count,
+              work_element_bit_count);
       const loom_type_t padded_work_packet_type =
           loom_vector_bitstream_vector_type(
-              work_element, packet_bit_count / work_element_bit_count);
-      const loom_scalar_type_t packet_element =
-          loom_vector_bitstream_required_scalar_type(packet_bit_count);
-      const loom_type_t carrier_type =
-          loom_vector_bitstream_vector_type(packet_element, 1u);
-      has_bridge = loom_target_legalization_has_bitstream_packet_carrier(
-                       context, padded_work_packet_type) &&
-                   loom_target_legalization_has_bitstream_packet_carrier(
-                       context, carrier_type);
+              work_element, scalar_bit_count / work_element_bit_count);
+      has_bridge =
+          iree_any_bit_set(
+              scalar_packet_width_mask,
+              1u << iree_math_count_trailing_zeros_u32(scalar_bit_count)) &&
+          loom_target_legalization_has_bitstream_packet_carrier(
+              context, padded_work_packet_type);
     }
     if (has_bridge &&
         loom_target_legalization_has_bitstream_packet_carrier(
@@ -584,16 +602,6 @@ static uint32_t loom_vector_bitstream_select_lane_count(
   }
   IREE_ASSERT_UNREACHABLE("bitstream plan has no terminal packet lane");
   return 1;
-}
-
-static uint32_t loom_vector_bitstream_packet_scalar_bit_count(
-    const loom_vector_bitstream_plan_t* plan, uint32_t packet_lane_count,
-    uint32_t work_element_bit_count) {
-  if (packet_lane_count == 1u &&
-      work_element_bit_count > plan->packet_bit_count) {
-    return work_element_bit_count;
-  }
-  return plan->packet_bit_count;
 }
 
 static bool loom_vector_bitstream_can_partition(uint16_t packet_lane_mask,
@@ -826,8 +834,11 @@ static iree_status_t loom_vector_bitstream_source_packet_scalar(
       builder, packet, packet_type, work_packet_type, &packet));
   return loom_vector_bitstream_packet_to_scalar(
       builder, packet, work_packet_type, packet_lane_count,
-      work_element_bit_count, plan->packet_bit_count, out_scalar,
-      out_scalar_type);
+      work_element_bit_count,
+      loom_vector_bitstream_packet_scalar_bit_count(
+          plan->scalar_packet_width_mask, plan->packet_bit_count,
+          packet_lane_count, work_element_bit_count),
+      out_scalar, out_scalar_type);
 }
 
 static iree_status_t loom_vector_bitstream_compress(
@@ -1032,14 +1043,26 @@ static iree_status_t loom_vector_bitstream_plan(
   const loom_scalar_type_t storage_element =
       loom_type_element_type(storage_type);
   const uint32_t packet_bit_count = native_word_bit_count;
+  uint8_t scalar_packet_width_mask = 0;
+  for (uint32_t bit_count = 8u; bit_count <= packet_bit_count;
+       bit_count *= 2u) {
+    const loom_type_t carrier_type = loom_vector_bitstream_vector_type(
+        loom_vector_bitstream_required_scalar_type(bit_count), 1u);
+    if (loom_target_legalization_has_bitstream_packet_carrier(context,
+                                                              carrier_type)) {
+      scalar_packet_width_mask |=
+          (uint8_t)(1u << iree_math_count_trailing_zeros_u32(bit_count));
+    }
+  }
   const uint16_t logical_packet_lane_mask =
       loom_vector_bitstream_packet_lane_mask(
           context, loom_type_element_type(logical_type), work_element,
-          work_element_bit_count, packet_bit_count);
+          work_element_bit_count, packet_bit_count, scalar_packet_width_mask);
   const uint16_t storage_packet_lane_mask =
       loom_vector_bitstream_packet_lane_mask(
           context, storage_element, storage_work_element,
-          storage_work_element_bit_count, packet_bit_count);
+          storage_work_element_bit_count, packet_bit_count,
+          scalar_packet_width_mask);
   if (!loom_vector_bitstream_can_partition(logical_packet_lane_mask,
                                            logical_lane_count) ||
       !loom_vector_bitstream_can_partition(storage_packet_lane_mask,
@@ -1078,6 +1101,7 @@ static iree_status_t loom_vector_bitstream_plan(
       .storage_work_element_bit_count = storage_work_element_bit_count,
       .word_bit_count = word_bit_count,
       .packet_bit_count = packet_bit_count,
+      .scalar_packet_width_mask = scalar_packet_width_mask,
       .word_count = (uint32_t)word_count,
       .logical_packet_lane_mask = logical_packet_lane_mask,
       .storage_packet_lane_mask = storage_packet_lane_mask,
@@ -1252,7 +1276,8 @@ static iree_status_t loom_vector_bitstream_build_storage_packets(
                  lanes_before_word_end));
     const uint32_t packet_scalar_bit_count =
         loom_vector_bitstream_packet_scalar_bit_count(
-            plan, packet_lane_count, plan->storage_work_element_bit_count);
+            plan->scalar_packet_width_mask, plan->packet_bit_count,
+            packet_lane_count, plan->storage_work_element_bit_count);
     const loom_type_t packet_scalar_type = loom_type_scalar(
         loom_vector_bitstream_required_scalar_type(packet_scalar_bit_count));
     loom_value_id_t packet_scalar = LOOM_VALUE_ID_INVALID;
@@ -1269,7 +1294,7 @@ static iree_status_t loom_vector_bitstream_build_storage_packets(
     IREE_RETURN_IF_ERROR(loom_vector_bitstream_scalar_to_packet(
         builder, packet_scalar, packet_scalar_type, storage_work_element,
         packet_lane_count, plan->storage_work_element_bit_count,
-        plan->packet_bit_count, &work_packet, &work_packet_type));
+        packet_scalar_bit_count, &work_packet, &work_packet_type));
     const loom_type_t packet_type = loom_vector_bitstream_vector_type(
         loom_type_element_type(plan->storage_type), packet_lane_count);
     IREE_RETURN_IF_ERROR(loom_vector_bitstream_vector_convert_unsigned(
@@ -1387,7 +1412,8 @@ static iree_status_t loom_vector_bitstream_unpack(
         plan->logical_lane_count - logical_lane_offset);
     const uint32_t carrier_scalar_bit_count =
         loom_vector_bitstream_packet_scalar_bit_count(
-            plan, packet_lane_count, plan->work_element_bit_count);
+            plan->scalar_packet_width_mask, plan->packet_bit_count,
+            packet_lane_count, plan->work_element_bit_count);
     const loom_type_t carrier_scalar_type = loom_type_scalar(
         loom_vector_bitstream_required_scalar_type(carrier_scalar_bit_count));
     loom_value_id_t carrier = LOOM_VALUE_ID_INVALID;
@@ -1409,7 +1435,7 @@ static iree_status_t loom_vector_bitstream_unpack(
     loom_type_t work_packet_type = loom_type_none();
     IREE_RETURN_IF_ERROR(loom_vector_bitstream_scalar_to_packet(
         builder, carrier, carrier_scalar_type, work_element, packet_lane_count,
-        plan->work_element_bit_count, plan->packet_bit_count, &work_packet,
+        plan->work_element_bit_count, carrier_scalar_bit_count, &work_packet,
         &work_packet_type));
     const loom_type_t result_packet_type =
         loom_vector_bitstream_vector_type(logical_element, packet_lane_count);

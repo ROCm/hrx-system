@@ -137,13 +137,36 @@ bool loom_vector_packet_shape_from_type(
   uint32_t lane_count = 0;
   uint32_t chunk_lane_count = 0;
   if (!loom_vector_packet_static_lane_count(vector_type, &lane_count) ||
+      lane_count <= 1u ||
       (loom_target_legalization_has_source_vector_carrier(
            context, vector_type, LOOM_VALUE_ID_INVALID) &&
        !loom_target_vector_packet_policy_requires_packets(policy,
-                                                          vector_type)) ||
-      !loom_vector_packet_select_native_chunk_lane_count(
-          policy, vector_type, lane_count - 1u, &chunk_lane_count)) {
+                                                          vector_type))) {
     return false;
+  }
+  if (!loom_vector_packet_select_native_chunk_lane_count(
+          policy, vector_type, lane_count - 1u, &chunk_lane_count)) {
+    // A non-native payload can be smaller than every preferred packet width.
+    // Use an admitted logical packet only to close that carrier gap, leaving
+    // preferred widths unchanged for ordinary memory and component planning.
+    for (uint8_t i = 0; i < policy->native_lane_count_count; ++i) {
+      const uint32_t candidate_lane_count = policy->native_lane_counts[i];
+      if (candidate_lane_count == 0 || candidate_lane_count >= lane_count ||
+          candidate_lane_count <= chunk_lane_count) {
+        continue;
+      }
+      const loom_vector_packet_shape_t candidate = {
+          .lane_count = lane_count,
+          .chunk_lane_count = candidate_lane_count,
+      };
+      if (loom_vector_packet_shape_has_source_carriers(context, vector_type,
+                                                       &candidate)) {
+        chunk_lane_count = candidate_lane_count;
+      }
+    }
+    if (chunk_lane_count == 0) {
+      return false;
+    }
   }
   const uint32_t chunk_count = (lane_count - 1u) / chunk_lane_count + 1u;
   *out_shape = (loom_vector_packet_shape_t){

@@ -87,6 +87,7 @@ from loom.target.contracts import (
     GuardDiagnostic,
     Scalar,
     TypePattern,
+    ValueAliasRule,
     ValueProject,
     ValueRef,
     Vector,
@@ -288,6 +289,18 @@ def _vector_conversion_rules() -> tuple[DescriptorRule, ...]:
 
 def _vector_rules() -> tuple[DescriptorRule, ...]:
     return (
+        *binary_descriptor_rules(
+            tuple(
+                DirectDescriptorCase(
+                    getattr(vector, f"vector_{row.source_operation}"),
+                    _descriptor(f"x86.avx512_fp16.{row.mnemonic}.xmm"),
+                    Vector("f16", lanes=1),
+                    priority=1,
+                )
+                for row in AVX512_FP16_SCALAR_FLOAT_BINARY_FAMILIES
+            ),
+            form=DescriptorEmitForm.OP,
+        ),
         *direct_vector_family_rules(
             _descriptor,
             descriptor_key_prefix="x86.avx512_fp16",
@@ -319,8 +332,56 @@ def _vector_rules() -> tuple[DescriptorRule, ...]:
     )
 
 
-def _transport_rules() -> tuple[DescriptorRule, ...]:
+def _transport_rules() -> tuple[ContractCase, ...]:
+    # A scalar and a singleton vector share the low 16 bits of an XMM register.
+    # Packet tails therefore need no GPR transport or lane instruction.
+    singleton = Vector("f16", lanes=1)
+    static_index_guards = (
+        Guard.operand_segment_count("indices", 0),
+        Guard.i64_array_count("static_indices", 1),
+        Guard.i64_array_element_range("static_indices", 0, 0, 0),
+    )
     return (
+        ValueAliasRule(
+            source_op=vector.vector_splat,
+            source=ValueRef.operand("scalar"),
+            result=ValueRef.result("result"),
+            guards=(
+                Guard.value_type("scalar", _F16),
+                Guard.value_type("result", singleton),
+            ),
+        ),
+        ValueAliasRule(
+            source_op=vector.vector_from_elements,
+            source=ValueRef.operand("elements", element=0),
+            result=ValueRef.result("result"),
+            guards=(
+                Guard.operand_segment_count("elements", 1),
+                Guard.value_type("elements", _F16),
+                Guard.value_type("result", singleton),
+            ),
+        ),
+        ValueAliasRule(
+            source_op=vector.vector_extract,
+            source=ValueRef.operand("source"),
+            result=ValueRef.result("result"),
+            guards=(
+                Guard.value_type("source", singleton),
+                Guard.value_type("result", _F16),
+                *static_index_guards,
+            ),
+        ),
+        ValueAliasRule(
+            source_op=vector.vector_insert,
+            source=ValueRef.operand("value"),
+            result=ValueRef.result("result"),
+            guards=(
+                Guard.value_type("value", _F16),
+                Guard.value_type("dest", singleton),
+                Guard.value_type("result", singleton),
+                *static_index_guards,
+            ),
+        ),
         *x86_scalar_xmm_word_memory_rules(
             _descriptor,
             value_type=_F16,

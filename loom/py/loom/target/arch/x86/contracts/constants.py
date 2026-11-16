@@ -238,6 +238,7 @@ def integer_vector_splat_rule(
     broadcast_immediates: dict[str, int] | None = None,
     lane_type: TypePattern | None = None,
     priority: int = 0,
+    scalar_register_class: str | None = None,
     result_register_class: str | None = None,
 ) -> DescriptorRule:
     """Broadcasts an integer scalar directly or through an XMM transfer."""
@@ -279,6 +280,11 @@ def integer_vector_splat_rule(
         guards=(
             Guard.value_type("scalar", scalar_type),
             Guard.value_type("result", result_type),
+            *(
+                (Guard.low_value_register_class("scalar", scalar_register_class),)
+                if scalar_register_class is not None
+                else ()
+            ),
             *(
                 (Guard.low_value_register_class("result", result_register_class),)
                 if result_register_class is not None
