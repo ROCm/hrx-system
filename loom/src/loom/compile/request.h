@@ -37,10 +37,11 @@ typedef struct loom_compile_entry_selection_t {
   // Selected roots, preserving explicit order/duplicates. Derived roots own
   // their names in the caller arena. Empty selects the entire module.
   iree_string_view_list_t roots;
-  // Common target family authored on selected kernel roots, or NULL.
+  // Common concrete target family authored on selected kernel roots, or NULL.
   const loom_target_fact_type_t* target_fact_type;
-  // Number of selected kernel roots without an authored target.
-  iree_host_size_t untargeted_kernel_count;
+  // Number of selected kernel roots without a concrete target: either no
+  // authored target or an external target declaration requiring a profile.
+  iree_host_size_t unbound_kernel_count;
 } loom_compile_entry_selection_t;
 
 // User constraints applied while resolving one compilation request.

@@ -1,9 +1,11 @@
-// RUN: with-checks emit spirv-dis target=spirv:vulkan1.3+bda+hal input=source-low limits=SUBGROUP_SIZE:64 validate
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+hal input=source-low limits=SUBGROUP_SIZE:64 validate
 // REQUIRES: spirv-dis, spirv-val
 
-// Profile transport through the checker reaches source specialization and
-// artifact emission. Only the launch query and subgroup metadata are asserted.
-kernel.def @profile_width() {
+// An external target acquires the explicit profile before artifact selection.
+// Its target query controls both the launch and emitted subgroup metadata.
+target.decl @device
+
+kernel.def target(@device) @profile_width() {
   %unit = index.constant 1 : index
   %width = target.subgroup.size : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
@@ -12,8 +14,38 @@ kernel.def @profile_width() {
 }
 
 // ----
-CHECK: OpExecutionMode %profile_width LocalSize 64 1 1
-CHECK: OpModuleProcessed "iree.vulkan.bda.v1[profile_width].subgroup_size=64"
+               OpCapability Shader
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 GLSL450
+               OpEntryPoint GLCompute %profile_width "profile_width"
+               OpExecutionMode %profile_width LocalSize 64 1 1
+               OpName %profile_width "profile_width"
+               OpModuleProcessed "iree.vulkan.bda.v1[profile_width].subgroup_size=64"
+               OpModuleProcessed "iree.vulkan.bda.v1[profile_width].root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1[profile_width].constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1[profile_width].constant_length=0"
+               OpModuleProcessed "iree.vulkan.bda.v1[profile_width].bindings=0"
+               OpModuleProcessed "iree.vulkan.bda.parameters.v1[profile_width]="
+               OpDecorate %_struct_8 Block
+               OpMemberDecorate %_struct_8 0 Offset 0
+               OpMemberDecorate %_struct_8 1 Offset 8
+               OpMemberDecorate %_struct_8 2 Offset 16
+               OpMemberDecorate %_struct_8 3 Offset 20
+               OpMemberDecorate %_struct_8 4 Offset 24
+               OpMemberDecorate %_struct_8 5 Offset 28
+       %void = OpTypeVoid
+          %4 = OpTypeFunction %void
+      %ulong = OpTypeInt 64 0
+       %uint = OpTypeInt 32 0
+  %_struct_8 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint
+%_ptr_PushConstant__struct_8 = OpTypePointer PushConstant %_struct_8
+          %2 = OpVariable %_ptr_PushConstant__struct_8 PushConstant
+%profile_width = OpFunction %void None %4
+          %5 = OpLabel
+               OpReturn
+               OpFunctionEnd
 
 // ====
 

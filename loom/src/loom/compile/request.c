@@ -156,6 +156,10 @@ static iree_status_t loom_compile_entry_selection_kernel_target_type(
   }
   const loom_symbol_t* target_symbol =
       &module->symbols.entries[target_ref.symbol_id];
+  if (loom_symbol_implements(target_symbol, LOOM_SYMBOL_INTERFACE_TARGET) &&
+      loom_symbol_definition_is_declaration(target_symbol->definition)) {
+    return iree_ok_status();
+  }
   const loom_target_like_descriptor_t* descriptor = loom_target_like_descriptor(
       loom_target_like_cast(module, target_symbol->defining_op));
   if (descriptor == NULL || descriptor->fact_type == NULL) {
@@ -173,7 +177,7 @@ static iree_status_t loom_compile_entry_selection_merge_kernel_target(
   IREE_RETURN_IF_ERROR(loom_compile_entry_selection_kernel_target_type(
       module, symbol, &fact_type));
   if (fact_type == NULL) {
-    ++selection->untargeted_kernel_count;
+    ++selection->unbound_kernel_count;
     return iree_ok_status();
   }
   if (selection->target_fact_type != NULL &&
@@ -636,14 +640,13 @@ iree_status_t loom_compile_request_resolve(
       request.target_profile != NULL ? request.target_profile->type->fact_type
                                      : selection.target_fact_type;
   if (selection.kind == LOOM_COMPILE_ENTRY_KIND_KERNEL &&
-      request.target_profile == NULL &&
-      selection.untargeted_kernel_count != 0) {
+      request.target_profile == NULL && selection.unbound_kernel_count != 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "kernel entries require an explicit target when %u selected root%s "
-        "omit target(...) attrs",
-        (unsigned)selection.untargeted_kernel_count,
-        selection.untargeted_kernel_count == 1 ? "" : "s");
+        "kernel entries require an explicit target profile for %" PRIhsz
+        " selected root%s without a concrete target",
+        selection.unbound_kernel_count,
+        selection.unbound_kernel_count == 1 ? "" : "s");
   }
   if (selection.kind == LOOM_COMPILE_ENTRY_KIND_KERNEL &&
       target_fact_type == NULL) {
