@@ -1672,12 +1672,16 @@ iree_status_t loom_scf_to_cfg_run(loom_pass_t* pass, loom_module_t* module,
     if (!iree_status_is_ok(status) || state.frontier.count == 0) {
       break;
     }
-    bool exits_only = true;
+    // Only loop lowering consumes source facts: termination legality and
+    // numeric constraints transported to the generated loop arguments.
+    bool requires_facts = false;
     for (iree_host_size_t i = 0; i < state.frontier.count; ++i) {
-      exits_only &= state.frontier.entries[i].lowering_kind ==
-                    LOOM_SCF_TO_CFG_LOWERING_EXIT;
+      const loom_scf_to_cfg_lowering_kind_t kind =
+          state.frontier.entries[i].lowering_kind;
+      requires_facts |= kind == LOOM_SCF_TO_CFG_LOWERING_FOR ||
+                        kind == LOOM_SCF_TO_CFG_LOWERING_WHILE;
     }
-    if (!exits_only) {
+    if (requires_facts) {
       status = loom_pass_value_facts_acquire(
           pass, module,
           loom_pass_value_fact_scope_function_for_target(

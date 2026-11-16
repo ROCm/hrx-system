@@ -38,6 +38,7 @@ loom_check_test_suite(
         "scf_pipeline_report.loom-test",
         "scf_to_cfg.loom-test",
         "scf_to_cfg_facts.loom-test",
+        "scf_to_cfg_frontiers.loom-test",
         "scf_unroll.loom-test",
         "scf_unroll_bounds.loom-test",
         "scf_unroll_carrier.loom-test",
