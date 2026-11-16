@@ -12,11 +12,11 @@
 #ifndef LOOM_OPS_FUNC_OPS_H_
 #define LOOM_OPS_FUNC_OPS_H_
 
-#include "loom/ir/parameterized_attr.h"
+#include "loom/ir/attribute_schema.h"
 #include "loom/ops/op_defs.h"
-#include "loom/ir/argument_access.h"
 #include "loom/ir/ir.h"
 #include "loom/ir/location.h"
+#include "loom/ops/signature_flags.h"
 #include "loom/target/types.h"
 
 enum {

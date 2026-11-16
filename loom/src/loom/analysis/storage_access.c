@@ -10,11 +10,11 @@
 
 #include "loom/analysis/movement.h"
 #include "loom/analysis/value_relation.h"
-#include "loom/ir/argument_access.h"
 #include "loom/ir/context.h"
 #include "loom/ops/callable_effects.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/ops/signature_flags.h"
 #include "loom/util/walk.h"
 
 typedef struct loom_storage_access_caller_t {

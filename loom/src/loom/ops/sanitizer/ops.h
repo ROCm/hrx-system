@@ -13,7 +13,7 @@
 #define LOOM_OPS_SANITIZER_OPS_H_
 
 #include "loom/ops/op_defs.h"
-#include "loom/ir/memory_space.h"
+#include "loom/ir/types.h"
 #include "loom/ops/atomic.h"
 
 #ifdef __cplusplus

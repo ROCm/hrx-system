@@ -8,10 +8,10 @@
 
 #include <string.h>
 
-#include "loom/ir/argument_access.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/callable_effects.h"
+#include "loom/ops/signature_flags.h"
 
 typedef struct loom_link_func_contract_attr_t {
   // Source contract attribute index.

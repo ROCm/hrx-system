@@ -45,6 +45,7 @@ loom_cc_test(
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
         "//loom/src/loom/link/testdata/func_contract",
+        "//loom/src/loom/ops:headers",
         "//loom/src/loom/ops:op_registry",
         "//loom/src/loom/rewrite:remap",
         "//runtime/src/iree/base",

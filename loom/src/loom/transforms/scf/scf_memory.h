@@ -10,7 +10,7 @@
 #define LOOM_TRANSFORMS_SCF_SCF_MEMORY_H_
 
 #include "iree/base/internal/arena.h"
-#include "loom/ir/memory_space.h"
+#include "loom/ir/types.h"
 #include "loom/rewrite/remap.h"
 
 #ifdef __cplusplus

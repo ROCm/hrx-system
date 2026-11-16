@@ -13,7 +13,7 @@
 #define LOOM_OPS_PIPELINE_OPS_H_
 
 #include "loom/ops/op_defs.h"
-#include "loom/ir/memory_space.h"
+#include "loom/ir/types.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -12,7 +12,7 @@
 #ifndef LOOM_OPS_TARGET_OPS_H_
 #define LOOM_OPS_TARGET_OPS_H_
 
-#include "loom/ir/parameterized_attr.h"
+#include "loom/ir/attribute_schema.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/types.h"
 

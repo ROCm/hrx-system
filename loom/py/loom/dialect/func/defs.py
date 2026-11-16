@@ -130,7 +130,7 @@ ArgumentAccess = EnumDef(
     ),
     c_type="loom_argument_access_t",
     c_const_prefix="LOOM_ARGUMENT_ACCESS",
-    c_include="loom/ir/argument_access.h",
+    c_include="loom/ops/signature_flags.h",
 )
 
 Temperature = EnumDef(

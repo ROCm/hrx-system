@@ -71,6 +71,23 @@ or enum for a backend table is usually hiding the contract in the wrong place.
 Move the type to a checked-in header and have Python emit rows that initialize
 that type.
 
+Header boundaries follow coherent representation contracts, algorithms, and
+dependency direction. The unit is the invariant cluster: its vocabulary,
+representation, and the helpers that maintain it belong together. A new enum or
+struct ordinarily extends its existing owner; being independently nameable or
+used by several callers is not a reason for another header. A separate header
+earns its place through a distinct responsibility or a dependency boundary that
+its consumers actually need.
+
+For example, `ir/types.h` owns common value/type and memory-space vocabulary,
+`ir/attribute_schema.h` owns attribute field and family descriptors, and
+`ir/type_descriptor.h` owns type and parameter-schema descriptors. Source
+signature flags and their mutation helpers live together in
+`ops/signature_flags.h`. The `:type_headers` and `:headers` Bazel targets expose
+declaration capabilities; they do not imply one file per declaration. These
+owners keep related contracts discoverable without turning `ir/ir.h` or another
+umbrella header into a catch-all.
+
 Public documentation, command help, agent guidance, and canonical examples are
 product surfaces. They lead with user goals and stable observable behavior,
 keep implementation machinery behind the point where it becomes necessary,

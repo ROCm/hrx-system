@@ -13,8 +13,8 @@
 #define LOOM_OPS_TEMPLATE_OPS_H_
 
 #include "loom/ops/op_defs.h"
-#include "loom/ir/argument_access.h"
 #include "loom/ir/ir.h"
+#include "loom/ops/signature_flags.h"
 
 #ifdef __cplusplus
 extern "C" {

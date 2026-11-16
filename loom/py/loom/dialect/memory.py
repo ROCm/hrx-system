@@ -27,7 +27,7 @@ MemorySpace = EnumDef(
     doc="Target-independent memory space for storage roots, views, and fences.",
     c_type="loom_value_fact_memory_space_t",
     c_const_prefix="LOOM_VALUE_FACT_MEMORY_SPACE",
-    c_include="loom/ir/memory_space.h",
+    c_include="loom/ir/types.h",
 )
 
 MemoryAccessFlags = EnumDef(

@@ -174,7 +174,7 @@ def generate_ops_h(
     if encoding_families:
         lines.append('#include "loom/ir/encoding.h"')
     if parameterized_attrs:
-        lines.append('#include "loom/ir/parameterized_attr.h"')
+        lines.append('#include "loom/ir/attribute_schema.h"')
     lines.append('#include "loom/ops/op_defs.h"')
     enum_includes = sorted(
         {

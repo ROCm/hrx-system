@@ -22,8 +22,8 @@
 #define LOOM_IR_CONTEXT_H_
 
 #include "iree/base/api.h"
+#include "loom/ir/attribute_schema.h"
 #include "loom/ir/ir.h"
-#include "loom/ir/parameterized_attr.h"
 #include "loom/ir/semantics.h"
 #include "loom/ir/type_descriptor.h"
 

@@ -31,8 +31,8 @@ Each dialect still has one batched generator action. Its existing `builders.c`
 output is compiled once into the construction library and reused by the combined
 library. The generated `ops.h`/`ops.inc` declaration surface is shared rather
 than regenerated for each consumer. Semantic callback declarations remain in
-that surface; depending on it does not link their implementations. Enum headers
-likewise expose vocabulary without requiring target record tables.
+that surface; depending on it does not link their implementations. Shared
+vocabulary is available without requiring target record tables.
 
 The declaration boundary is transitive. Generic operation declarations use
 `//loom/src/loom/ops:headers`; shared atomic, cache, and combining vocabulary
@@ -41,6 +41,8 @@ value/type vocabulary, while `:headers` supplies graph representation and
 metadata declarations without IR storage or interning implementations. These
 are dependency capabilities, not new C APIs or alternative representations.
 The existing `:ir` and `:builders` aggregates keep their implementation roles.
+Within each capability, headers group a coherent contract and its helpers;
+individual enums or structs extend that contract's owning header.
 
 An out-of-line call still requires its implementation dependency. In particular,
 generated attribute setters invoke generic operation mutation, and rewrite

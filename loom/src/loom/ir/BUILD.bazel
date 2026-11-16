@@ -58,12 +58,11 @@ loom_cc_library_group(
 
 # Value/type vocabulary and graph representation are also available without
 # storage, interning, replacement, or other out-of-line IR operations.
+# Header files group coherent representation contracts within each capability;
+# individual enums and structs extend their owning header.
 _TYPE_HEADERS = [
-    "argument_access.h",
     "attribute.h",
-    "memory_space.h",
     "scalar_type.h",
-    "signature_flags.h",
     "structural_hash.h",
     "type_constraint.h",
     "types.h",
@@ -81,8 +80,6 @@ _REPRESENTATION_HEADERS = [
     "intern_table.h",
     "ir.h",
     "location.h",
-    "parameterized_attr.h",
-    "parameterized_type.h",
     "semantics.h",
     "string_table.h",
     "type_descriptor.h",

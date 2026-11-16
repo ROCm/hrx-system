@@ -13,7 +13,7 @@
 #define LOOM_OPS_ENCODING_OPS_H_
 
 #include "loom/ir/encoding.h"
-#include "loom/ir/parameterized_attr.h"
+#include "loom/ir/attribute_schema.h"
 #include "loom/ops/op_defs.h"
 
 enum {

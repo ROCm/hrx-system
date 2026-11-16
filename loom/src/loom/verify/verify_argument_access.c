@@ -8,7 +8,7 @@
 
 #include "loom/analysis/storage_access.h"
 #include "loom/error/error_catalog.h"
-#include "loom/ir/argument_access.h"
+#include "loom/ops/signature_flags.h"
 #include "loom/verify/verify_diagnostics.h"
 #include "loom/verify/verify_state.h"
 

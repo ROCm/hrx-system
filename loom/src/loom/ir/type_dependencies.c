@@ -8,7 +8,7 @@
 
 #include <string.h>
 
-#include "loom/ir/parameterized_type.h"
+#include "loom/ir/type_descriptor.h"
 #include "loom/util/segmented_storage.h"
 
 //===----------------------------------------------------------------------===//

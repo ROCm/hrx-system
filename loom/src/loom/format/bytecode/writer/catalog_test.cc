@@ -12,9 +12,9 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/ir/attribute_schema.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
-#include "loom/ir/parameterized_attr.h"
 #include "loom/ir/type_descriptor.h"
 
 namespace loom {

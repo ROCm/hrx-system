@@ -14,7 +14,7 @@
 
 #include "loom/import/cxx/binding/pipeline_contracts.h"
 #include "loom/import/cxx/value/types.h"
-#include "loom/ir/memory_space.h"
+#include "loom/ir/types.h"
 
 namespace loom::cxx_import {
 

@@ -10,11 +10,11 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/format/text/parser.h"
-#include "loom/ir/argument_access.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/link/testdata/func_contract/func_contract_testdata.h"
 #include "loom/ops/op_registry.h"
+#include "loom/ops/signature_flags.h"
 
 namespace loom {
 namespace {
