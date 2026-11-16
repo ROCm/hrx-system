@@ -30,6 +30,7 @@ from loom.target.arch.amdgpu.contracts.materializers import (
     I1_NATIVE_MASK_MATERIALIZER,
     I32_VGPR_MATERIALIZER,
     I64_VGPR_MATERIALIZER,
+    REGISTERS_SGPR_MATERIALIZER,
 )
 from loom.target.arch.amdgpu.contracts.memory import BYTE_ADDRESSABLE_SCALAR_ELEMENTS
 from loom.target.arch.amdgpu.descriptors import build_amdgpu_contract_descriptor_set
@@ -308,15 +309,18 @@ def _sgpr_binary_rule(
                 unsigned_diagnostic=unsigned_diagnostic,
             ),
             Guard.low_value_register_class("result", "amdgpu.sgpr"),
-            Guard.low_value_register_class("lhs", "amdgpu.sgpr"),
-            Guard.low_value_register_class("rhs", "amdgpu.sgpr"),
+            Guard.value_materializable("lhs", REGISTERS_SGPR_MATERIALIZER.name),
+            Guard.value_materializable("rhs", REGISTERS_SGPR_MATERIALIZER.name),
             *register_shape_guards,
             Guard.descriptor_available(descriptor),
         ),
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
-                operands={"lhs": _DIRECT_LHS, "rhs": _DIRECT_RHS},
+                operands={
+                    "lhs": _materialized_operand("lhs", REGISTERS_SGPR_MATERIALIZER),
+                    "rhs": _materialized_operand("rhs", REGISTERS_SGPR_MATERIALIZER),
+                },
                 results={"dst": _RESULT},
             ),
         ),
@@ -677,8 +681,8 @@ def _i32_carry_borrow_sgpr_rule(
     descriptor = _descriptor(descriptor_key)
     guards = (
         *_carry_borrow_typed_guards(_I32, value_result, predicate_result),
-        Guard.low_value_register_class("lhs", "amdgpu.sgpr"),
-        Guard.low_value_register_class("rhs", "amdgpu.sgpr"),
+        Guard.value_materializable("lhs", REGISTERS_SGPR_MATERIALIZER.name),
+        Guard.value_materializable("rhs", REGISTERS_SGPR_MATERIALIZER.name),
         Guard.low_value_register_class(value_result, "amdgpu.sgpr"),
         Guard.low_value_register_unit_count("lhs", 1),
         Guard.low_value_register_unit_count("rhs", 1),
@@ -691,7 +695,10 @@ def _i32_carry_borrow_sgpr_rule(
         emit = (
             EmitDescriptorOp(
                 descriptor=descriptor,
-                operands={"lhs": _DIRECT_LHS, "rhs": _DIRECT_RHS},
+                operands={
+                    "lhs": _materialized_operand("lhs", REGISTERS_SGPR_MATERIALIZER),
+                    "rhs": _materialized_operand("rhs", REGISTERS_SGPR_MATERIALIZER),
+                },
                 results={
                     "dst": ValueRef.result(value_result),
                     descriptor_predicate_result: ValueRef.result(predicate_result),
@@ -708,7 +715,10 @@ def _i32_carry_borrow_sgpr_rule(
         emit = (
             EmitDescriptorOp(
                 descriptor=descriptor,
-                operands={"lhs": _DIRECT_LHS, "rhs": _DIRECT_RHS},
+                operands={
+                    "lhs": _materialized_operand("lhs", REGISTERS_SGPR_MATERIALIZER),
+                    "rhs": _materialized_operand("rhs", REGISTERS_SGPR_MATERIALIZER),
+                },
                 results={
                     "dst": ValueRef.result(value_result),
                     descriptor_predicate_result: ValueRef.temporary("predicate"),
@@ -831,15 +841,8 @@ def _i32_immediate_binary_rule(
     literal_range: tuple[int, int] | None = None,
 ) -> DescriptorRule:
     scalar_register = register_class == "amdgpu.sgpr"
-    register_guard = (
-        Guard.low_value_register_class(nonliteral_source, register_class)
-        if scalar_register
-        else Guard.value_materializable(nonliteral_source, I32_VGPR_MATERIALIZER.name)
-    )
-    operand = (
-        ValueRef.operand(nonliteral_source)
-        if scalar_register
-        else _materialized_operand(nonliteral_source, I32_VGPR_MATERIALIZER)
+    operand_materializer = (
+        REGISTERS_SGPR_MATERIALIZER if scalar_register else I32_VGPR_MATERIALIZER
     )
     return DescriptorRule(
         source_op=source_op,
@@ -847,7 +850,7 @@ def _i32_immediate_binary_rule(
         guards=(
             *_typed_binary_guards(_I32),
             Guard.low_value_register_class("result", register_class),
-            register_guard,
+            Guard.value_materializable(nonliteral_source, operand_materializer.name),
             Guard.value_exact_i64(
                 literal_source,
                 diagnostic=_I32_LITERAL_EXACT_DIAGNOSTIC,
@@ -867,7 +870,11 @@ def _i32_immediate_binary_rule(
         emit=(
             EmitDescriptorOp(
                 descriptor=descriptor,
-                operands={"lhs" if scalar_register else "rhs": operand},
+                operands={
+                    "lhs" if scalar_register else "rhs": _materialized_operand(
+                        nonliteral_source, operand_materializer
+                    )
+                },
                 results={"dst": _RESULT},
                 immediates={"imm32": ValueProject.i32_as_u32_bits(literal_source)},
                 form=DescriptorEmitForm.OP,
@@ -1377,12 +1384,21 @@ def _i64_word_extract_rules(source_op: Op) -> tuple[DescriptorRule, ...]:
                 Guard.value_type("result", _I32),
                 Guard.i64_range("offset", offset, offset),
                 Guard.i64_range("width", 32, 32),
-                Guard.low_value_register_class("source", register_class),
+                Guard.value_materializable("source", REGISTERS_SGPR_MATERIALIZER.name)
+                if register_class == "amdgpu.sgpr"
+                else Guard.low_value_register_class("source", register_class),
                 Guard.low_value_register_class("result", register_class),
             ),
             emit=(
                 EmitRegisterSlice(
-                    source=ValueRef.operand("source"),
+                    source=ValueRef.operand(
+                        "source",
+                        materializer=(
+                            REGISTERS_SGPR_MATERIALIZER.name
+                            if register_class == "amdgpu.sgpr"
+                            else None
+                        ),
+                    ),
                     result=_RESULT,
                     unit_offset=offset // 32,
                 ),
@@ -1410,14 +1426,18 @@ def _i32_bitfield_extract_rules(
             guards=(
                 Guard.value_type("source", _I32),
                 Guard.value_type("result", _I32),
-                Guard.low_value_register_class("source", "amdgpu.sgpr"),
+                Guard.value_materializable("source", REGISTERS_SGPR_MATERIALIZER.name),
                 Guard.low_value_register_class("result", "amdgpu.sgpr"),
                 Guard.descriptor_available(sgpr_descriptor),
             ),
             emit=(
                 EmitDescriptorOp(
                     descriptor=sgpr_descriptor,
-                    operands={"value": ValueRef.operand("source")},
+                    operands={
+                        "value": _materialized_operand(
+                            "source", REGISTERS_SGPR_MATERIALIZER
+                        )
+                    },
                     results={"dst": _RESULT},
                     immediates={
                         # S_BFE places the offset in bits 4:0 and width in 22:16.
@@ -2000,14 +2020,18 @@ def _scalar_ctpopi_i32_rules() -> tuple[DescriptorRule, ...]:
             descriptor=scalar_descriptor,
             guards=(
                 *typed_guards,
-                Guard.low_value_register_class("input", "amdgpu.sgpr"),
+                Guard.value_materializable("input", REGISTERS_SGPR_MATERIALIZER.name),
                 Guard.low_value_register_class("result", "amdgpu.sgpr"),
                 Guard.descriptor_available(scalar_descriptor),
             ),
             emit=(
                 EmitDescriptorOp(
                     descriptor=scalar_descriptor,
-                    operands={"input": ValueRef.operand("input")},
+                    operands={
+                        "input": _materialized_operand(
+                            "input", REGISTERS_SGPR_MATERIALIZER
+                        )
+                    },
                     results={"dst": ValueRef.result("result")},
                 ),
             ),
@@ -2325,6 +2349,7 @@ AMDGPU_INTEGER_CONTRACT_FRAGMENT = ContractFragment(
     public_header="loom/target/arch/amdgpu/contracts/integer.h",
     materializers=(
         ADDRESS_SGPR_MATERIALIZER,
+        REGISTERS_SGPR_MATERIALIZER,
         I32_VGPR_MATERIALIZER,
         I64_VGPR_MATERIALIZER,
         ADDRESS_VGPR_MATERIALIZER,

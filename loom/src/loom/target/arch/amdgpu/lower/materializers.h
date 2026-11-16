@@ -51,6 +51,11 @@ loom_type_t loom_amdgpu_materialized_vgpr_register_type(
     const loom_low_lower_context_t* context, loom_value_id_t source_value,
     const void* plan);
 
+// Preserves a numeric payload's register count in the scalar register bank.
+loom_type_t loom_amdgpu_materialized_sgpr_register_type(
+    const loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void* plan);
+
 // Projects each i64 lane to its low word, preserving the producer's bank.
 // Native 64-bit shifts consume only this word of each defined [0, 63] count.
 loom_type_t loom_amdgpu_materialized_i64_low_words_type(
@@ -118,6 +123,18 @@ iree_status_t loom_amdgpu_value_can_materialize_as_vgpr_registers(
 // VGPR. Block-local vector copies are shared by later uses. Preserves all
 // payload bits, including unspecified upper bits of narrow values.
 iree_status_t loom_amdgpu_lookup_or_materialize_vgpr_registers(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, loom_value_id_t* out_low_value);
+
+// Returns true when a source value has a scalar-register mapping or a
+// subgroup-uniform vector-register mapping that can be projected to SGPRs.
+iree_status_t loom_amdgpu_value_can_materialize_as_sgpr_registers(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t value_id, bool* out_can_materialize);
+
+// Reuses the bound SGPR value or projects each word of a proven-uniform VGPR
+// payload with readfirstlane without changing its canonical source mapping.
+iree_status_t loom_amdgpu_lookup_or_materialize_sgpr_registers(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t source_value, loom_value_id_t* out_low_value);
 

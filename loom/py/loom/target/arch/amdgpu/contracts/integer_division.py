@@ -15,6 +15,7 @@ from loom.target.arch.amdgpu.contracts.materializers import (
     ADDRESS_SGPR_MATERIALIZER,
     ADDRESS_VGPR_MATERIALIZER,
     I32_VGPR_MATERIALIZER,
+    REGISTERS_SGPR_MATERIALIZER,
 )
 from loom.target.contracts import (
     DescriptorEmitForm,
@@ -37,8 +38,6 @@ from loom.target.low_descriptors import Descriptor, DescriptorSet
 
 _INDEX = Scalar("index")
 _I32 = Scalar("i32")
-_DIRECT_LHS = ValueRef.operand("lhs")
-_DIRECT_RHS = ValueRef.operand("rhs")
 _RESULT = ValueRef.result("result")
 _UINT32_MAX = (2**32) - 1
 _INT32_MAX = (2**31) - 1
@@ -67,7 +66,7 @@ def _sgpr_operand(field: str, type_pattern: TypePattern) -> ValueRef:
     return (
         _materialized_operand(field, ADDRESS_SGPR_MATERIALIZER)
         if type_pattern == _INDEX
-        else ValueRef.operand(field)
+        else _materialized_operand(field, REGISTERS_SGPR_MATERIALIZER)
     )
 
 
@@ -101,10 +100,13 @@ def _magic_division_guards(
             ),
         )
     if register_class == "amdgpu.sgpr":
-        value_guards = tuple(
-            Guard.value_materializable(field, ADDRESS_SGPR_MATERIALIZER.name)
+        materializer = (
+            ADDRESS_SGPR_MATERIALIZER
             if type_pattern == _INDEX
-            else Guard.low_value_register_class(field, "amdgpu.sgpr")
+            else REGISTERS_SGPR_MATERIALIZER
+        )
+        value_guards = tuple(
+            Guard.value_materializable(field, materializer.name)
             for field in ("lhs", "rhs")
         )
     else:
@@ -560,7 +562,10 @@ def _high_bit_division_rule(
 ) -> DescriptorRule:
     scalar_register = register_class == "amdgpu.sgpr"
     operands = (
-        (_DIRECT_LHS, _DIRECT_RHS)
+        tuple(
+            _materialized_operand(field, REGISTERS_SGPR_MATERIALIZER)
+            for field in ("lhs", "rhs")
+        )
         if scalar_register
         else tuple(
             _materialized_operand(field, I32_VGPR_MATERIALIZER)
@@ -569,7 +574,7 @@ def _high_bit_division_rule(
     )
     register_guards = (
         tuple(
-            Guard.low_value_register_class(field, register_class)
+            Guard.value_materializable(field, REGISTERS_SGPR_MATERIALIZER.name)
             for field in ("lhs", "rhs")
         )
         if scalar_register
@@ -674,9 +679,13 @@ def _signed_magic_guards(
     needs_divisor_value: bool,
 ) -> tuple[Guard, ...]:
     if register_class == "amdgpu.sgpr":
-        value_guards = [Guard.low_value_register_class("lhs", register_class)]
+        value_guards = [
+            Guard.value_materializable("lhs", REGISTERS_SGPR_MATERIALIZER.name)
+        ]
         if needs_divisor_value:
-            value_guards.append(Guard.low_value_register_class("rhs", register_class))
+            value_guards.append(
+                Guard.value_materializable("rhs", REGISTERS_SGPR_MATERIALIZER.name)
+            )
     else:
         value_guards = [Guard.value_materializable("lhs", I32_VGPR_MATERIALIZER.name)]
         if needs_divisor_value:
@@ -751,7 +760,7 @@ def _signed_magic_emits(
     prefix = "s" if scalar_register else "v"
     form = DescriptorEmitForm.AUTO if scalar_register else DescriptorEmitForm.OP
     lhs = (
-        _DIRECT_LHS
+        _materialized_operand("lhs", REGISTERS_SGPR_MATERIALIZER)
         if scalar_register
         else _materialized_operand("lhs", I32_VGPR_MATERIALIZER)
     )
@@ -867,12 +876,12 @@ def _signed_magic_rule(
             "amdgpu.s_sub_u32" if scalar_register else "amdgpu.v_sub_u32",
         )
         lhs = (
-            _DIRECT_LHS
+            _materialized_operand("lhs", REGISTERS_SGPR_MATERIALIZER)
             if scalar_register
             else _materialized_operand("lhs", I32_VGPR_MATERIALIZER)
         )
         rhs = (
-            _DIRECT_RHS
+            _materialized_operand("rhs", REGISTERS_SGPR_MATERIALIZER)
             if scalar_register
             else _materialized_operand("rhs", I32_VGPR_MATERIALIZER)
         )
@@ -1007,20 +1016,19 @@ def _dynamic_division_rule(
             )
         )
     if register_class == "amdgpu.sgpr":
-        if type_pattern == _INDEX:
-            guards.extend(
-                Guard.value_materializable(field, ADDRESS_SGPR_MATERIALIZER.name)
-                for field in ("lhs", "rhs")
-            )
-            guards.extend(
-                Guard.low_value_register_class(field, register_class)
-                for field in result_fields
-            )
-        else:
-            guards.extend(
-                Guard.low_value_register_class(field, register_class)
-                for field in value_fields
-            )
+        materializer = (
+            ADDRESS_SGPR_MATERIALIZER
+            if type_pattern == _INDEX
+            else REGISTERS_SGPR_MATERIALIZER
+        )
+        guards.extend(
+            Guard.value_materializable(field, materializer.name)
+            for field in ("lhs", "rhs")
+        )
+        guards.extend(
+            Guard.low_value_register_class(field, register_class)
+            for field in result_fields
+        )
     else:
         materializer = (
             ADDRESS_VGPR_MATERIALIZER
