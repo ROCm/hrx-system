@@ -11,7 +11,7 @@
 #include "iree/base/internal/unicode.h"
 #include "loom/error/error_catalog.h"
 #include "loom/format/bytecode/reader/type.h"
-#include "loom/ir/parameterized_type.h"
+#include "loom/ir/type_descriptor.h"
 
 bool loom_bytecode_attribute_read_bytes(loom_bytecode_reader_decoder_t* decoder,
                                         loom_bytecode_reader_cursor_t* cursor,

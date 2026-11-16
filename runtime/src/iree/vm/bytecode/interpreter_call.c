@@ -28,8 +28,9 @@ static bool iree_vm_bytecode_call_ref_matches(iree_vm_ref_t ref,
   if (!ref.object) {
     return ref.type_and_state == 0;
   }
-  return (ref.type_and_state & IREE_VM_REF_STATE_MASK) <=
-             IREE_VM_REF_STATE_BORROWED &&
+  return ((ref.type_and_state & IREE_VM_REF_STATE_MASK) ==
+              IREE_VM_REF_STATE_OWNED ||
+          (ref.type_and_state & IREE_VM_REF_STATE_BORROWED) != 0) &&
          iree_vm_ref_type(ref) == type;
 }
 
@@ -207,8 +208,11 @@ static void iree_vm_bytecode_call_commit(
         state->call_ref_scratch[i] = source;
         state->refs[i] = iree_vm_ref_null();
       } else {
-        state->call_ref_scratch[i] = iree_vm_ref_from_ptr_borrowed(
-            source.object, iree_vm_ref_type(source));
+        state->call_ref_scratch[i] = source;
+        if (source.object) {
+          state->call_ref_scratch[i].type_and_state |=
+              IREE_VM_REF_STATE_BORROWED;
+        }
       }
     }
     cleanup.direct_scratch = state->call_ref_scratch;

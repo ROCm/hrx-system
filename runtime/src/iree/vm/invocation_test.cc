@@ -23,6 +23,13 @@ namespace {
 
 constexpr iree_host_size_t kInvocationStorageSize = 16 * 1024;
 
+constexpr iree_vm_invocation_test_call_route_t kChildCallRoutes[] = {
+    IREE_VM_INVOCATION_TEST_CALL_LOCAL,
+    IREE_VM_INVOCATION_TEST_CALL_IMPORT,
+    IREE_VM_INVOCATION_TEST_CALL_INDIRECT_LOCAL,
+    IREE_VM_INVOCATION_TEST_CALL_INDIRECT_IMPORT,
+};
+
 void CountWake(void* user_data) { ++*static_cast<int*>(user_data); }
 
 void CountAtomicWake(void* user_data) {
@@ -537,6 +544,153 @@ TEST_F(VMInvocationTest, RejectsBorrowedRefsAcrossDeclaredOrActualYield) {
                              iree_vm_invocation_test_object_type());
   EXPECT_EQ(first_destroy_count, 1);
   EXPECT_EQ(second_destroy_count, 1);
+}
+
+TEST_F(VMInvocationTest, KeepsBorrowScopeThroughChildrenWithoutRefArguments) {
+  for (auto route : kChildCallRoutes) {
+    SCOPED_TRACE(route);
+    for (auto behavior : {IREE_VM_INVOCATION_TEST_CHILD_COMPLETE,
+                          IREE_VM_INVOCATION_TEST_CHILD_DECLARED_YIELD,
+                          IREE_VM_INVOCATION_TEST_CHILD_UNDECLARED_YIELD}) {
+      SCOPED_TRACE(behavior);
+      int destroy_count = 0;
+      iree_vm_invocation_test_object_t object = {};
+      iree_vm_invocation_test_object_initialize(&destroy_count, &object);
+      std::array<iree_vm_variant_t, 3> arguments = {
+          iree_vm_variant_from_ptr_borrowed(
+              &object, iree_vm_invocation_test_object_type()),
+          iree_vm_variant_from_i32(route),
+          iree_vm_variant_from_i32(behavior),
+      };
+      std::array<iree_vm_variant_t, 1> results = {
+          iree_vm_variant_from_i32(123),
+      };
+      const auto before = counters_;
+      iree_vm_execution_outcome_t outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
+      iree_status_t status = iree_vm_invocation_start(
+          invocation_, LookupFunction(IREE_SV("borrowed_call")),
+          MakeVariantSpan(arguments), MakeVariantSpan(results), {}, &outcome);
+      EXPECT_EQ(
+          counters_.unforwarded_borrow_count - before.unforwarded_borrow_count,
+          1);
+      if (behavior == IREE_VM_INVOCATION_TEST_CHILD_COMPLETE) {
+        IREE_EXPECT_OK(status);
+        EXPECT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_COMPLETED);
+        ExpectI32(results[0], route);
+        EXPECT_EQ(counters_.start_count - before.start_count, 3);
+        EXPECT_EQ(counters_.resume_count - before.resume_count, 2);
+        EXPECT_EQ(counters_.cleanup_count - before.cleanup_count, 2);
+      } else {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION, status);
+        ExpectI32(results[0], 123);
+        const bool leaf_entered =
+            behavior == IREE_VM_INVOCATION_TEST_CHILD_UNDECLARED_YIELD;
+        EXPECT_EQ(counters_.start_count - before.start_count,
+                  leaf_entered ? 3 : 2);
+        EXPECT_EQ(counters_.resume_count - before.resume_count, 0);
+        EXPECT_EQ(counters_.cleanup_count - before.cleanup_count,
+                  leaf_entered ? 3 : 2);
+        IREE_EXPECT_STATUS_IS(
+            IREE_STATUS_INVALID_ARGUMENT,
+            iree_vm_invocation_resume(invocation_, MakeVariantSpan(results),
+                                      &outcome));
+        ExpectI32(results[0], 123);
+      }
+      for (const auto argument : arguments) {
+        EXPECT_TRUE(iree_vm_variant_is_empty(argument));
+      }
+      EXPECT_EQ(destroy_count, 0);
+      iree_vm_ref_object_release(&object,
+                                 iree_vm_invocation_test_object_type());
+      EXPECT_EQ(destroy_count, 1);
+
+      // Terminal completion/failure retires the borrow restriction. A fresh
+      // scalar-only invocation can suspend and resume on the same storage.
+      std::array<iree_vm_variant_t, 1> next_arguments = {
+          iree_vm_variant_from_i32(41),
+      };
+      IREE_ASSERT_OK(iree_vm_invocation_start(
+          invocation_, LookupFunction(IREE_SV("yield_twice")),
+          MakeVariantSpan(next_arguments), MakeVariantSpan(results), {},
+          &outcome));
+      ASSERT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
+      IREE_ASSERT_OK(iree_vm_invocation_resume(
+          invocation_, MakeVariantSpan(results), &outcome));
+      ASSERT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
+      IREE_ASSERT_OK(iree_vm_invocation_resume(
+          invocation_, MakeVariantSpan(results), &outcome));
+      EXPECT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_COMPLETED);
+      ExpectI32(results[0], 42);
+    }
+  }
+}
+
+TEST_F(VMInvocationTest, RejectsBorrowedRootBeforeEnteringYieldingCallTree) {
+  int destroy_count = 0;
+  iree_vm_invocation_test_object_t object = {};
+  iree_vm_invocation_test_object_initialize(&destroy_count, &object);
+  std::array<iree_vm_variant_t, 3> arguments = {
+      iree_vm_variant_from_ptr_borrowed(&object,
+                                        iree_vm_invocation_test_object_type()),
+      iree_vm_variant_from_i32(IREE_VM_INVOCATION_TEST_CALL_IMPORT),
+      iree_vm_variant_from_i32(IREE_VM_INVOCATION_TEST_CHILD_COMPLETE),
+  };
+  std::array<iree_vm_variant_t, 1> results = {iree_vm_variant_from_i32(123)};
+  iree_vm_execution_outcome_t outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_vm_invocation_start(
+          invocation_, LookupFunction(IREE_SV("yielding_call")),
+          MakeVariantSpan(arguments), MakeVariantSpan(results), {}, &outcome));
+  EXPECT_EQ(counters_.start_count, 0);
+  EXPECT_EQ(counters_.cleanup_count, 0);
+  for (const auto argument : arguments) {
+    EXPECT_TRUE(iree_vm_variant_is_empty(argument));
+  }
+  ExpectI32(results[0], 123);
+  EXPECT_EQ(destroy_count, 0);
+  iree_vm_ref_object_release(&object, iree_vm_invocation_test_object_type());
+  EXPECT_EQ(destroy_count, 1);
+}
+
+TEST_F(VMInvocationTest, AllowsOwnedRootThroughYieldingChildrenWithoutRefs) {
+  for (auto route : kChildCallRoutes) {
+    SCOPED_TRACE(route);
+    int destroy_count = 0;
+    iree_vm_invocation_test_object_t object = {};
+    iree_vm_invocation_test_object_initialize(&destroy_count, &object);
+    void* pointer = &object;
+    std::array<iree_vm_variant_t, 3> arguments = {
+        iree_vm_variant_from_ptr_move(&pointer,
+                                      iree_vm_invocation_test_object_type()),
+        iree_vm_variant_from_i32(route),
+        iree_vm_variant_from_i32(IREE_VM_INVOCATION_TEST_CHILD_DECLARED_YIELD),
+    };
+    std::array<iree_vm_variant_t, 1> results = {iree_vm_variant_from_i32(123)};
+    const auto before = counters_;
+    iree_vm_execution_outcome_t outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
+    IREE_ASSERT_OK(iree_vm_invocation_start(
+        invocation_, LookupFunction(IREE_SV("yielding_call")),
+        MakeVariantSpan(arguments), MakeVariantSpan(results), {}, &outcome));
+    ASSERT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
+    EXPECT_EQ(destroy_count, 0);
+    ExpectI32(results[0], 123);
+    IREE_ASSERT_OK(iree_vm_invocation_resume(
+        invocation_, MakeVariantSpan(results), &outcome));
+    ASSERT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_SUSPENDED);
+    EXPECT_EQ(destroy_count, 0);
+    ExpectI32(results[0], 123);
+    IREE_ASSERT_OK(iree_vm_invocation_resume(
+        invocation_, MakeVariantSpan(results), &outcome));
+    EXPECT_EQ(outcome, IREE_VM_EXECUTION_OUTCOME_COMPLETED);
+    ExpectI32(results[0], route + 1);
+    EXPECT_EQ(destroy_count, 1);
+    EXPECT_EQ(counters_.start_count - before.start_count, 3);
+    EXPECT_EQ(counters_.resume_count - before.resume_count, 4);
+    EXPECT_EQ(counters_.cleanup_count - before.cleanup_count, 3);
+    EXPECT_EQ(counters_.unforwarded_borrow_count,
+              before.unforwarded_borrow_count);
+  }
 }
 
 TEST_F(VMInvocationTest, DiscardsInvalidProviderResultsAndFailures) {

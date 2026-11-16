@@ -1087,6 +1087,11 @@ static iree_status_t loom_boundary_projection_replace_function(
           loom_block_add_arg(plan->module, target_entry, target_arguments[i]));
     }
   }
+  IREE_RETURN_IF_ERROR(loom_func_like_project_signature_flags(
+      plan->module, function->function,
+      loom_func_like_cast(plan->module, target), function->argument_count,
+      function->result_count, function->argument_indices,
+      function->result_indices));
   IREE_RETURN_IF_ERROR(loom_builder_finalize_op(builder, target));
   IREE_RETURN_IF_ERROR(
       loom_boundary_projection_copy_comments(plan, source, target));

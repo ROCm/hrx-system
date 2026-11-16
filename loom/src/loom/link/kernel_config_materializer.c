@@ -356,7 +356,8 @@ static iree_status_t loom_link_kernel_config_build_helper(
       /*source_signature=*/loom_attr_absent(), /*abi=*/0,
       loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
       loom_named_attr_slice_empty(), config_ref, argument_types,
-      header->workload_argument_count, result_types,
+      header->workload_argument_count,
+      /*signature_flags=*/iree_const_byte_span_empty(), result_types,
       IREE_ARRAYSIZE(result_types), /*tied_results=*/NULL,
       /*tied_result_count=*/0, /*predicates=*/NULL,
       /*predicates_count=*/0, header->location, &helper_op));
@@ -806,7 +807,8 @@ static iree_status_t loom_link_kernel_config_build_ir_helper(
       loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
       loom_named_attr_slice_empty(),
       projection->configuration_functions[selection_ordinal], argument_types,
-      source_workloads.count, result_types, IREE_ARRAYSIZE(result_types),
+      source_workloads.count, /*signature_flags=*/iree_const_byte_span_empty(),
+      result_types, IREE_ARRAYSIZE(result_types),
       /*tied_results=*/NULL, /*tied_result_count=*/0,
       /*predicates=*/NULL, /*predicates_count=*/0, location, &helper_op));
 

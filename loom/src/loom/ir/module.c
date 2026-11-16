@@ -11,7 +11,6 @@
 #include "iree/base/internal/math.h"
 #include "iree/base/internal/unicode.h"
 #include "loom/ir/context.h"
-#include "loom/ir/parameterized_type.h"
 #include "loom/ir/structural_hash.h"
 #include "loom/ir/type_descriptor.h"
 #include "loom/ir/type_identity.h"

@@ -1,0 +1,40 @@
+// RUN: emit storage-interference @test
+
+// Opaque native declarations can establish synchronous use of passed storage.
+// Their ambient effects do not expose fresh unpassed caller allocations.
+func.decl @native_copy(%source: view<1xi32> {access = read}, %target: view<1xi32> {access = write}, %shape: buffer {access = none}, %unknown: buffer)
+
+func.def @test(%limit: index) {
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 4 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %index = [%begin to %limit step %step] {
+    %source = buffer.alloca<private> align(4) %bytes : buffer
+    %target = buffer.alloca<private> align(4) %bytes : buffer
+    %shape = buffer.alloca<private> align(4) %bytes : buffer
+    %unknown = buffer.alloca<private> align(4) %bytes : buffer
+    %unpassed = buffer.alloca<private> align(4) %bytes : buffer
+    %source_view = buffer.view %source[%origin] : buffer -> view<1xi32>
+    %target_view = buffer.view %target[%origin] : buffer -> view<1xi32>
+    func.call @native_copy(%source_view, %target_view, %shape, %unknown) : (view<1xi32>, view<1xi32>, buffer, buffer)
+  }
+  func.return
+}
+
+// ----
+source: accessed=yes single_instance=yes
+target: accessed=yes single_instance=yes
+shape: accessed=no single_instance=yes
+unknown: accessed=yes single_instance=unproven
+unpassed: accessed=no single_instance=yes
+source / target: workgroup_nonoverlap=unproven
+source / shape: workgroup_nonoverlap=unproven
+source / unknown: workgroup_nonoverlap=unproven
+source / unpassed: workgroup_nonoverlap=unproven
+target / shape: workgroup_nonoverlap=unproven
+target / unknown: workgroup_nonoverlap=unproven
+target / unpassed: workgroup_nonoverlap=unproven
+shape / unknown: workgroup_nonoverlap=unproven
+shape / unpassed: workgroup_nonoverlap=unproven
+unknown / unpassed: workgroup_nonoverlap=unproven

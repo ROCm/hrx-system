@@ -482,8 +482,8 @@ static iree_status_t loom_pipeline_control_project(
       0, 0, 0, LOOM_INLINE_POLICY_INLINE, loom_symbol_ref_null(),
       loom_attr_absent(), 0, loom_named_attr_slice_empty(),
       LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol, types,
-      total_count, NULL, 0, NULL, 0, NULL, 0, invocation->function.op->location,
-      &function));
+      total_count, /*signature_flags=*/iree_const_byte_span_empty(), NULL, 0,
+      NULL, 0, NULL, 0, invocation->function.op->location, &function));
   loom_region_t* body = loom_func_def_body(function);
   loom_block_t* entry = loom_region_entry_block(body);
   IREE_RETURN_IF_ERROR(loom_module_assign_value_types(

@@ -3829,6 +3829,46 @@ class TestSymbolKernelContract:
                 format=[SymbolRef("callee"), Region("body")],
             )
 
+    def test_signature_flags_requires_optional_bytes(self) -> None:
+        with _raises(ValueError, match="signature flags require an optional"):
+            Op(
+                "test.function",
+                traits=[SYMBOL_DEFINE],
+                attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL), AttrDef("access", "i64")],
+                symbol_def=SymbolDefinition(
+                    field="callee", name="function", interfaces=["func_like"]
+                ),
+                regions=[RegionDef("body")],
+                interfaces=[
+                    FuncLikeInterface(
+                        callee="callee", body="body", signature_flags="access"
+                    )
+                ],
+                format=[
+                    SymbolRef("callee"),
+                    FuncArgs("args", access="access"),
+                    Region("body"),
+                ],
+            )
+
+    def test_argument_access_syntax_requires_interface_contract(self) -> None:
+        with _raises(ValueError, match="FuncArgs access must match"):
+            Op(
+                "test.function",
+                traits=[SYMBOL_DEFINE],
+                attrs=[AttrDef("callee", ATTR_TYPE_SYMBOL)],
+                symbol_def=SymbolDefinition(
+                    field="callee", name="function", interfaces=["func_like"]
+                ),
+                regions=[RegionDef("body")],
+                interfaces=[FuncLikeInterface(callee="callee", body="body")],
+                format=[
+                    SymbolRef("callee"),
+                    FuncArgs("args", access="access"),
+                    Region("body"),
+                ],
+            )
+
     def test_body_signature_may_have_contiguous_argument_groups(self) -> None:
         op = Op(
             "test.partitioned_function",

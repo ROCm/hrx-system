@@ -69,6 +69,10 @@ enum iree_vm_ref_type_table_flag_bits_e {
   // The descriptors exist only for provider-independent reflection. Such a
   // table cannot be registered for executable module construction.
   IREE_VM_REF_TYPE_TABLE_FLAG_REFLECTION_ONLY = 1u << 0,
+  // Objects have externally bounded lifetimes and no intrusive owner prefix.
+  // They can only be passed as synchronous ptr arguments, never owned,
+  // returned, or stored in globals. Descriptors must have no destroy callback.
+  IREE_VM_REF_TYPE_TABLE_FLAG_BORROWED_ONLY = 1u << 1,
 };
 typedef uint32_t iree_vm_ref_type_table_flags_t;
 
@@ -109,6 +113,12 @@ struct iree_vm_ref_type_descriptor_t {
   iree_string_view_t type_name;
 };
 
+// Returns whether a canonical type names storage that cannot acquire owners.
+static inline bool iree_vm_ref_type_is_borrowed_only(iree_vm_ref_type_t type) {
+  return type && iree_any_bit_set(type->table->flags,
+                                  IREE_VM_REF_TYPE_TABLE_FLAG_BORROWED_ONLY);
+}
+
 // Structured identity of one exact ref type.
 typedef struct iree_vm_ref_type_key_t {
   // Provider namespace.
@@ -136,9 +146,10 @@ static inline iree_vm_ref_type_key_t iree_vm_ref_type_key(
 // Reference-counted Objects
 //===----------------------------------------------------------------------===//
 
-// Fixed intrusive prefix of every VM-visible ref object. Providers initialize
-// this prefix once and never query, copy, move, or directly modify it. Every
-// VM-visible object pointer addresses this prefix at offset zero.
+// Fixed intrusive prefix of every managed VM-visible ref object. Borrowed-only
+// types have no prefix. Providers initialize this prefix once and never query,
+// copy, move, or directly modify it. Every managed object pointer addresses
+// this prefix at offset zero.
 typedef struct iree_vm_ref_object_t {
   // Opaque intrusive owner-count storage.
   iree_atomic_ref_count_t ref_count;
@@ -159,9 +170,9 @@ static_assert(iree_alignof(iree_vm_ref_type_descriptor_t) >= 4,
 IREE_API_EXPORT void iree_vm_ref_object_initialize(
     iree_vm_ref_object_t* out_object);
 
-// Adds one owner through the non-null object's offset-zero prefix. Retaining is
-// always valid while the caller has live access to |object|. The owner count is
-// never queried.
+// Adds one owner through a managed object's offset-zero prefix. Retaining is
+// valid while the caller has live access to that managed |object|. The owner
+// count is never queried.
 IREE_API_EXPORT void iree_vm_ref_object_retain(void* object);
 
 // Releases one raw object owner through its matching trusted descriptor. Final
@@ -180,18 +191,22 @@ IREE_API_EXPORT void iree_vm_ref_object_release(void* object,
 //   *_retained  creates a new owner; the destination must be reset/released.
 //   *_move      transfers an owner and clears the source.
 //
-// Moving a borrowed ref first retains it so the result can safely escape the
+// Moving an ordinary borrowed ref first retains it so the result can escape the
 // borrow anchor. Ref counts are never queried: live access is sufficient to
 // retain, and every owning carrier is reset exactly once.
+// Ownership-producing APIs require managed objects. Borrowed-only objects may
+// only use borrowed constructors/extractors and reset; checked ownership
+// extractors reject them. Internal register moves preserve the borrow instead.
 
 // Complete typed ref state. |type_and_state| contains the descriptor pointer in
-// its upper bits and one ownership bit in bit zero. Canonical null is all zero.
+// its upper bits, a borrow bit in bit zero, and a borrowed-only bit in bit one.
+// Canonical null is all zero. State two is invalid.
 // This is an in-process native ABI and is never serialized or copied across
 // bitness.
 typedef struct iree_vm_ref_t {
   // VM-visible object pointer or null.
   void* object;
-  // Exact descriptor pointer plus owned/borrowed state.
+  // Exact descriptor pointer plus ownership and lifetime state.
   uintptr_t type_and_state;
 } iree_vm_ref_t;
 
@@ -201,7 +216,9 @@ enum iree_vm_ref_state_bits_e {
   IREE_VM_REF_STATE_OWNED = 0u,
   // The carrier borrows an object kept live by another anchor.
   IREE_VM_REF_STATE_BORROWED = 1u,
-  // Reserved descriptor-pointer bits carrying the complete state.
+  // Nonpromotable borrow of externally scoped storage without an owner prefix.
+  IREE_VM_REF_STATE_BORROWED_ONLY = 3u,
+  // Descriptor-pointer bits carrying the complete state.
   IREE_VM_REF_STATE_MASK = 3u,
 };
 
@@ -232,6 +249,12 @@ static inline iree_vm_ref_type_t iree_vm_ref_type(iree_vm_ref_t ref) {
                     : NULL;
 }
 
+// Queries the cached lifetime restriction without loading the type descriptor.
+static inline bool iree_vm_ref_is_borrowed_only(iree_vm_ref_t ref) {
+  return (ref.type_and_state & IREE_VM_REF_STATE_MASK) ==
+         IREE_VM_REF_STATE_BORROWED_ONLY;
+}
+
 // Returns true when |ref| contains a non-null object with exact |type|.
 IREE_API_EXPORT bool iree_vm_ref_isa(iree_vm_ref_t ref,
                                      iree_vm_ref_type_t type);
@@ -243,23 +266,24 @@ IREE_API_EXPORT iree_vm_ref_t
 iree_vm_ref_from_ptr_borrowed(void* ptr, iree_vm_ref_type_t type);
 
 // Retains |ptr| and returns one owned ref. A non-null |ptr| requires its exact
-// non-null canonical |type|. A null pointer produces canonical null regardless
-// of |type|.
+// non-null canonical managed |type|. Borrowed-only types are not valid here. A
+// null pointer produces canonical null regardless of |type|.
 IREE_API_EXPORT iree_vm_ref_t
 iree_vm_ref_from_ptr_retained(void* ptr, iree_vm_ref_type_t type);
 
 // Moves one pointer owner into a ref and clears |inout_ptr|. A non-null pointer
-// requires its exact non-null canonical |type|. The |inout_ptr| argument must
-// address an actual void* object; typed pointer-to-pointer values use a stamped
-// adapter and are never cast to void**.
+// requires its exact non-null canonical managed |type|. The |inout_ptr|
+// argument must address an actual void* object; typed pointer-to-pointer values
+// use a stamped adapter and are never cast to void**.
 IREE_API_EXPORT iree_vm_ref_t
 iree_vm_ref_from_ptr_move(void** inout_ptr, iree_vm_ref_type_t type);
 
-// Returns an owned copy of |ref|, promoting a borrow when required.
+// Returns an owned copy of a managed |ref|, promoting an ordinary borrow.
+// A borrowed-only ref cannot be passed to an ownership-producing API.
 IREE_API_EXPORT iree_vm_ref_t iree_vm_ref_retain(iree_vm_ref_t ref);
 
-// Moves |ref| and leaves its source canonical null. A borrowed source is
-// promoted before clearing so the result cannot escape its borrow anchor.
+// Moves a managed |ref| and leaves its source canonical null. A borrowed source
+// is promoted before clearing so the result cannot escape its borrow anchor.
 IREE_API_EXPORT iree_vm_ref_t iree_vm_ref_move(iree_vm_ref_t* ref);
 
 // Releases an owned ref when present and writes canonical null.

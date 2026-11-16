@@ -33,7 +33,7 @@ from loom.assembly import (
     TypesOf,
     kw,
 )
-from loom.dialect.func.defs import CallingConv, EffectContract, Temperature
+from loom.dialect.func.defs import ArgumentAccess, CallingConv, EffectContract, Temperature
 from loom.dialect.symbol import Retain, Visibility
 from loom.dsl import (
     ANY,
@@ -78,6 +78,7 @@ _MODIFIER_ATTRS = [
     AttrDef("effect_contract", "enum", enum_def=EffectContract, optional=True),
     AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
     AttrDef("predicates", "predicate_list", optional=True),
+    AttrDef("signature_flags", "bytes", enum_def=ArgumentAccess, optional=True),
 ]
 
 _MODIFIER_FORMAT = [
@@ -123,7 +124,7 @@ def _signature_format(symbol_field: str) -> list[Any]:
         SymbolRef(symbol_field),
         Scope(
             [
-                FuncArgs("args"),
+                FuncArgs("args", access="signature_flags"),
                 OptionalGroup(
                     [ARROW, ResultTypeList("results")],
                     anchor="results",
@@ -141,6 +142,7 @@ _FUNC_LIKE_COMMON: dict[str, Any] = dict(
     visibility="visibility",
     cc="cc",
     effect_contract="effect_contract",
+    signature_flags="signature_flags",
     temperature="temperature",
     predicates="predicates",
     target="target",

@@ -119,9 +119,14 @@ static inline void iree_vm_bytecode_ref_replace(iree_vm_ref_t* target,
 }
 
 // Retains |source| before replacing |target| so the two may alias.
-static inline void iree_vm_bytecode_ref_retain(iree_vm_ref_t* target,
-                                               iree_vm_ref_t source) {
+static inline iree_status_t iree_vm_bytecode_ref_retain(iree_vm_ref_t* target,
+                                                        iree_vm_ref_t source) {
+  if (iree_vm_ref_is_borrowed_only(source)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "borrowed-only ref cannot acquire an owner");
+  }
   iree_vm_bytecode_ref_replace(target, iree_vm_ref_retain(source));
+  return iree_ok_status();
 }
 
 // Internal copies preserve the source lifetime contract. Owners acquire an
@@ -130,6 +135,16 @@ static inline void iree_vm_bytecode_ref_copy(iree_vm_ref_t* target,
                                              iree_vm_ref_t source) {
   if (!(source.type_and_state & IREE_VM_REF_STATE_BORROWED)) {
     source = iree_vm_ref_retain(source);
+  }
+  iree_vm_bytecode_ref_replace(target, source);
+}
+
+// The compiler proves the source anchor covers replacement and all later uses
+// of this borrow. Canonical null must not acquire a borrowed state bit.
+static inline void iree_vm_bytecode_ref_borrow(iree_vm_ref_t* target,
+                                               iree_vm_ref_t source) {
+  if (source.object) {
+    source.type_and_state |= IREE_VM_REF_STATE_BORROWED;
   }
   iree_vm_bytecode_ref_replace(target, source);
 }
@@ -783,7 +798,8 @@ iree_vm_bytecode_dispatch_global_ref_mutable_load_retain: {
         IREE_STATUS_FAILED_PRECONDITION,
         "nonnullable mutable ref global is temporarily null");
   }
-  iree_vm_bytecode_ref_retain(&refs[record->destination_r8], source);
+  iree_vm_bytecode_ref_replace(&refs[record->destination_r8],
+                               iree_vm_ref_retain(source));
   IREE_VM_BYTECODE_DISPATCH_NEXT(
       iree_vm_bytecode_global_ref_mutable_load_retain_t);
 }
@@ -1154,6 +1170,10 @@ iree_vm_bytecode_dispatch_ref_abi_argument_load_move: {
 iree_vm_bytecode_dispatch_ref_abi_result_store_move: {
   const iree_vm_bytecode_ref_abi_result_store_move_t* record =
       (const iree_vm_bytecode_ref_abi_result_store_move_t*)record_data;
+  if (iree_vm_ref_is_borrowed_only(refs[record->source_r8])) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "borrowed-only ref cannot be returned");
+  }
   iree_vm_call_ref_result_store_move(
       call, record->slot_u16 + IREE_VM_CALL_DIRECT_REGISTER_COUNT,
       &refs[record->source_r8]);
@@ -1199,8 +1219,8 @@ iree_vm_bytecode_dispatch_ref_compare_eq: {
 iree_vm_bytecode_dispatch_ref_retain: {
   const iree_vm_bytecode_ref_retain_t* record =
       (const iree_vm_bytecode_ref_retain_t*)record_data;
-  iree_vm_bytecode_ref_retain(&refs[record->destination_r8],
-                              refs[record->source_r8]);
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_ref_retain(
+      &refs[record->destination_r8], refs[record->source_r8]));
   IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_retain_t);
 }
 iree_vm_bytecode_dispatch_ref_move: {
@@ -1220,11 +1240,8 @@ iree_vm_bytecode_dispatch_ref_copy: {
 iree_vm_bytecode_dispatch_ref_borrow: {
   const iree_vm_bytecode_ref_borrow_t* record =
       (const iree_vm_bytecode_ref_borrow_t*)record_data;
-  iree_vm_ref_t borrowed = refs[record->source_r8];
-  if (borrowed.object) {
-    borrowed.type_and_state |= IREE_VM_REF_STATE_BORROWED;
-  }
-  iree_vm_bytecode_ref_replace(&refs[record->destination_r8], borrowed);
+  iree_vm_bytecode_ref_borrow(&refs[record->destination_r8],
+                              refs[record->source_r8]);
   IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_borrow_t);
 }
 iree_vm_bytecode_dispatch_ref_select: {
@@ -1233,7 +1250,7 @@ iree_vm_bytecode_dispatch_ref_select: {
   const iree_vm_ref_t selected = values[record->condition_v8]
                                      ? refs[record->true_r8]
                                      : refs[record->false_r8];
-  iree_vm_bytecode_ref_retain(&refs[record->destination_r8], selected);
+  iree_vm_bytecode_ref_copy(&refs[record->destination_r8], selected);
   IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_select_t);
 }
 iree_vm_bytecode_dispatch_ref_discard: {
@@ -1245,8 +1262,8 @@ iree_vm_bytecode_dispatch_ref_discard: {
 iree_vm_bytecode_dispatch_ref_stack_load_retain: {
   const iree_vm_bytecode_ref_stack_load_retain_t* record =
       (const iree_vm_bytecode_ref_stack_load_retain_t*)record_data;
-  iree_vm_bytecode_ref_retain(&refs[record->destination_r8],
-                              local_refs[record->slot_u16]);
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_ref_retain(
+      &refs[record->destination_r8], local_refs[record->slot_u16]));
   IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_stack_load_retain_t);
 }
 iree_vm_bytecode_dispatch_ref_stack_load_move: {
@@ -1263,11 +1280,18 @@ iree_vm_bytecode_dispatch_ref_stack_load_copy: {
                             local_refs[record->slot_u16]);
   IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_stack_load_copy_t);
 }
+iree_vm_bytecode_dispatch_ref_stack_load_borrow: {
+  const iree_vm_bytecode_ref_stack_load_borrow_t* record =
+      (const iree_vm_bytecode_ref_stack_load_borrow_t*)record_data;
+  iree_vm_bytecode_ref_borrow(&refs[record->destination_r8],
+                              local_refs[record->slot_u16]);
+  IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_stack_load_borrow_t);
+}
 iree_vm_bytecode_dispatch_ref_stack_store_retain: {
   const iree_vm_bytecode_ref_stack_store_retain_t* record =
       (const iree_vm_bytecode_ref_stack_store_retain_t*)record_data;
-  iree_vm_bytecode_ref_retain(&local_refs[record->slot_u16],
-                              refs[record->source_r8]);
+  IREE_RETURN_IF_ERROR(iree_vm_bytecode_ref_retain(
+      &local_refs[record->slot_u16], refs[record->source_r8]));
   IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_stack_store_retain_t);
 }
 iree_vm_bytecode_dispatch_ref_stack_store_move: {
@@ -1283,6 +1307,13 @@ iree_vm_bytecode_dispatch_ref_stack_store_copy: {
   iree_vm_bytecode_ref_copy(&local_refs[record->slot_u16],
                             refs[record->source_r8]);
   IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_stack_store_copy_t);
+}
+iree_vm_bytecode_dispatch_ref_stack_store_borrow: {
+  const iree_vm_bytecode_ref_stack_store_borrow_t* record =
+      (const iree_vm_bytecode_ref_stack_store_borrow_t*)record_data;
+  iree_vm_bytecode_ref_borrow(&local_refs[record->slot_u16],
+                              refs[record->source_r8]);
+  IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_stack_store_borrow_t);
 }
 iree_vm_bytecode_dispatch_ref_stack_discard: {
   const iree_vm_bytecode_ref_stack_discard_t* record =

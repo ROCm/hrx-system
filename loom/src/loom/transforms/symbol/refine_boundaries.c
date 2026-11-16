@@ -18,6 +18,7 @@
 #include "loom/ir/module.h"
 #include "loom/ir/type_refinement.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/signature_flags.h"
 #include "loom/ops/special_values.h"
 #include "loom/ops/type_registry.h"
 #include "loom/pass/options.h"
@@ -909,7 +910,8 @@ static iree_status_t loom_refine_boundaries_apply_logical_argument_replacement(
     const loom_refine_boundaries_replacement_table_t* replacements,
     const loom_refine_boundaries_function_t* function_info,
     const loom_refine_boundaries_argument_projection_t* projection,
-    uint16_t argument_index, int64_t* applied_count) {
+    uint16_t argument_index, iree_const_byte_span_t signature_flags,
+    uint8_t** merged_flags, int64_t* applied_count) {
   loom_value_id_t canonical_argument =
       function_info->argument_ids[argument_index];
   loom_value_id_t canonical_replacement = LOOM_VALUE_ID_INVALID;
@@ -929,8 +931,28 @@ static iree_status_t loom_refine_boundaries_apply_logical_argument_replacement(
       loom_block_arg_id(projection->entry_block, argument_index);
   loom_value_id_t replacement =
       loom_block_arg_id(projection->entry_block, (uint16_t)replacement_index);
-  return loom_refine_boundaries_apply_direct_value_replacement(
-      module, old_value, replacement, applied_count);
+  const int64_t previous_count = *applied_count;
+  IREE_RETURN_IF_ERROR(loom_refine_boundaries_apply_direct_value_replacement(
+      module, old_value, replacement, applied_count));
+  if (!signature_flags.data_length || *applied_count == previous_count) {
+    return iree_ok_status();
+  }
+  // Closed-callgraph argument coalescing transfers all uses to the retained
+  // parameter, including their access permissions and possible escape.
+  const uint8_t* access = *merged_flags ? *merged_flags : signature_flags.data;
+  const uint8_t source = access[argument_index];
+  const uint8_t target = access[replacement_index];
+  const uint8_t joined = loom_signature_flags_join_arguments(source, target);
+  if (joined != target) {
+    if (!*merged_flags) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          &module->arena, signature_flags.data_length, sizeof(**merged_flags),
+          (void**)merged_flags));
+      memcpy(*merged_flags, signature_flags.data, signature_flags.data_length);
+    }
+    (*merged_flags)[replacement_index] = joined;
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_refine_boundaries_apply_projected_argument_values(
@@ -940,6 +962,9 @@ static iree_status_t loom_refine_boundaries_apply_projected_argument_values(
     loom_refine_boundaries_function_t* function_info, int64_t* applied_count,
     int64_t* materialized_count, bool apply_replacements,
     bool materialize_constants) {
+  const iree_const_byte_span_t signature_flags =
+      loom_func_like_signature_flags(function_info->function);
+  uint8_t* merged_flags = NULL;
   for (uint8_t projection_index = 0;
        projection_index < function_info->argument_projection_count;
        ++projection_index) {
@@ -959,7 +984,7 @@ static iree_status_t loom_refine_boundaries_apply_projected_argument_values(
         IREE_RETURN_IF_ERROR(
             loom_refine_boundaries_apply_logical_argument_replacement(
                 module, replacements, function_info, projection, i,
-                applied_count));
+                signature_flags, &merged_flags, applied_count));
       }
       if (materialize_constants) {
         IREE_RETURN_IF_ERROR(loom_refine_boundaries_materialize_exact_value(
@@ -969,6 +994,13 @@ static iree_status_t loom_refine_boundaries_apply_projected_argument_values(
             materialized_count));
       }
     }
+  }
+  if (merged_flags) {
+    IREE_RETURN_IF_ERROR(loom_op_set_attr(
+        module, function_info->function.op,
+        function_info->function.vtable->signature_flags_attr_index,
+        loom_attr_signature_flags(merged_flags,
+                                  (uint32_t)signature_flags.data_length)));
   }
   return iree_ok_status();
 }

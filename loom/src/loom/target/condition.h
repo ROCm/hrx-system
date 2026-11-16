@@ -10,7 +10,7 @@
 #define LOOM_TARGET_CONDITION_H_
 
 #include "iree/base/api.h"
-#include "loom/ir/parameterized_attr.h"
+#include "loom/ir/attribute_schema.h"
 #include "loom/target/facts.h"
 
 #ifdef __cplusplus

@@ -1113,6 +1113,65 @@ ERR_STRUCTURE_067 = ErrorDef(
     fix_hint="Attach the region through its containing operation",
 )
 
+# ERR_STRUCTURE_068: Boundary flags must align with arguments and results.
+ERR_STRUCTURE_068 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=68,
+    severity=Severity.ERROR,
+    summary="Signature flags count does not match the signature.",
+    message="signature flags have {actual_count} entries, expected {expected_count}",
+    params=(
+        ErrorParam("actual_count", ParamKind.U32),
+        ErrorParam("expected_count", ParamKind.U32),
+    ),
+)
+
+# ERR_STRUCTURE_069: Shallow storage access applies only to buffer/view arguments.
+ERR_STRUCTURE_069 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=69,
+    severity=Severity.ERROR,
+    summary="Argument access requires a buffer or view.",
+    message=(
+        "argument {argument_index} has type {argument_type}; "
+        "access bounds require a buffer or view"
+    ),
+    params=(
+        ErrorParam("argument_index", ParamKind.U32),
+        ErrorParam("argument_type", ParamKind.TYPE),
+    ),
+)
+
+# ERR_STRUCTURE_070: A body's inferred effects exceed its parameter promise.
+ERR_STRUCTURE_070 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=70,
+    severity=Severity.ERROR,
+    summary="Function body violates an argument access bound.",
+    message=(
+        "argument {argument_index} declares access = {access}, "
+        "but its uses permit {violation}"
+    ),
+    params=(
+        ErrorParam("argument_index", ParamKind.U32),
+        ErrorParam("access", ParamKind.STRING),
+        ErrorParam("violation", ParamKind.STRING),
+    ),
+)
+
+# ERR_STRUCTURE_071: Reserved flag bits and result contracts are not admitted.
+ERR_STRUCTURE_071 = ErrorDef(
+    domain=ErrorDomain.STRUCTURE,
+    code=71,
+    severity=Severity.ERROR,
+    summary="Unsupported signature flags.",
+    message="signature value {value_index} has unsupported flags {flags}",
+    params=(
+        ErrorParam("value_index", ParamKind.U32),
+        ErrorParam("flags", ParamKind.U32),
+    ),
+)
+
 ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_001,
     ERR_STRUCTURE_002,
@@ -1179,4 +1238,8 @@ ALL_STRUCTURE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_STRUCTURE_065,
     ERR_STRUCTURE_066,
     ERR_STRUCTURE_067,
+    ERR_STRUCTURE_068,
+    ERR_STRUCTURE_069,
+    ERR_STRUCTURE_070,
+    ERR_STRUCTURE_071,
 )

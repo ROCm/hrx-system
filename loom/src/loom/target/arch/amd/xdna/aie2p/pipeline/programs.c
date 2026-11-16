@@ -201,7 +201,8 @@ iree_status_t loom_aie2p_native_emit_programs(
         &rewriter->builder, 0, 0, 0, 0, 0, 0, 0, 0, loom_symbol_ref_null(),
         loom_attr_absent(), 0, loom_named_attr_slice_empty(),
         LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol, NULL, 0,
-        NULL, 0, NULL, 0, NULL, 0, location, &entry));
+        /*signature_flags=*/iree_const_byte_span_empty(), NULL, 0, NULL, 0,
+        NULL, 0, location, &entry));
     const loom_func_like_t function =
         loom_func_like_cast(rewriter->module, entry);
     IREE_RETURN_IF_ERROR(

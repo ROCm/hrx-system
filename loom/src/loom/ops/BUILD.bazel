@@ -26,6 +26,7 @@ _OP_HEADERS = [
     "builder.h",
     "mutation.h",
     "op_defs.h",
+    "signature_flags.h",
     "use_list.h",
 ]
 
@@ -66,6 +67,7 @@ loom_cc_instance_library(
     srcs = [
         "builder.c",
         "op_defs.c",
+        "signature_flags.c",
         "use_list.c",
     ],
     hdrs = _OP_HEADERS,

@@ -103,7 +103,7 @@ typedef struct loom_storage_access_barrier_t {
 } loom_storage_access_barrier_t;
 
 typedef struct loom_storage_access_function_t {
-  // Formal references in entry-block argument order; scalar entries are NULL.
+  // Formal references in signature order; scalar entries are NULL.
   loom_storage_reference_t** arguments;
   // Canonical reference nodes, including unused formal references.
   loom_storage_reference_t* references;
@@ -163,6 +163,7 @@ void loom_storage_access_scope_initialize(
 // restores its exact numbering. Its value IDs and the caller's fact table are
 // untouched. No callee fact scope is acquired. On allocation failure the caller
 // domain is restored and this scope must be retired rather than queried again.
+// |value_domain| may be NULL when the caller holds no ordinal scratch borrow.
 iree_status_t loom_storage_access_require_function(
     loom_storage_access_scope_t* scope, loom_func_like_t function,
     loom_local_value_domain_t* value_domain,

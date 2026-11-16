@@ -155,7 +155,8 @@ static void loom_low_allocation_edge_copy_record_segment(
   loom_low_allocation_move_plan_append_assignment(
       context->move_plan, source_assignment, source_unit_offset,
       destination_assignment, destination_unit_offset, unit_count,
-      consume_source, &builder->raw_move_count);
+      consume_source ? LOOM_LOW_MOVE_KIND_TRANSFER : LOOM_LOW_MOVE_KIND_COPY,
+      &builder->raw_move_count);
 }
 
 static void loom_low_allocation_edge_copy_record_branch_payload_segments(

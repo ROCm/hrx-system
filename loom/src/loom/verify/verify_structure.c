@@ -7,7 +7,7 @@
 #include "loom/verify/verify_structure.h"
 
 #include "loom/error/error_catalog.h"
-#include "loom/ir/parameterized_type.h"
+#include "loom/ir/type_descriptor.h"
 #include "loom/ops/callable_effects.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/reference_type.h"

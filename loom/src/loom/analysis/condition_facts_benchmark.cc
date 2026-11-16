@@ -389,6 +389,7 @@ class NestedStructuredBranchFactsBenchmark {
         /*abi=*/0, loom_named_attr_slice_empty(),
         /*export_symbol=*/LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(),
         {/*module_id=*/0, /*symbol_id=*/symbol}, &i32, /*arg_types_count=*/1,
+        /*signature_flags=*/iree_const_byte_span_empty(),
         /*result_types=*/nullptr, /*result_count=*/0,
         /*tied_results=*/nullptr, /*tied_result_count=*/0,
         /*predicates=*/nullptr, /*predicates_count=*/0, LOOM_LOCATION_UNKNOWN,

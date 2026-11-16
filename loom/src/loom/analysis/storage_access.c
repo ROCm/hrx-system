@@ -14,6 +14,7 @@
 #include "loom/ops/callable_effects.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/ops/signature_flags.h"
 #include "loom/util/walk.h"
 
 typedef struct loom_storage_access_caller_t {
@@ -26,12 +27,16 @@ typedef struct loom_storage_access_caller_t {
 typedef struct loom_storage_access_function_record_t {
   // Canonical local graph and transitive callable access summary.
   loom_storage_access_function_t graph;
-  // Source definition whose body remains alive throughout construction.
+  // Function whose signature and optional body remain alive during
+  // construction.
   loom_func_like_t function;
   // Module-local symbol indexing this record.
   uint16_t symbol_id;
   // True while this function's growing invalidation bound awaits propagation.
   bool unbounded_queued;
+  // A local operation with unknown effects may implicitly expose formals.
+  // Known ambient reads/writes remain separate from reference transport.
+  bool has_unmodeled_memory_access;
   // Sparse symbol index branch; the first record needs only its leaf.
   struct {
     // Tagged branch or untagged leaf for each value of |bit|.
@@ -101,7 +106,8 @@ static loom_func_like_t loom_storage_access_call_function(
           module, module->symbols.entries[callee.symbol_id].defining_op);
       if (!loom_func_like_is_kernel(function) &&
           loom_func_like_repr_contract(function) == LOOM_STRING_ID_INVALID &&
-          loom_func_like_body(function)) {
+          (loom_func_like_body(function) ||
+           loom_func_like_signature_flags(function).data_length)) {
         return function;
       }
     }
@@ -209,26 +215,54 @@ static iree_status_t loom_storage_access_enqueue_function(
       .function = function,
       .symbol_id = symbol_id,
   };
-  const loom_block_t* entry =
-      loom_region_entry_block(loom_func_like_body(function));
+  uint16_t argument_count = 0;
+  const loom_value_id_t* arguments =
+      loom_func_like_arg_ids(function, &argument_count);
+  const bool has_body = loom_func_like_body(function) != NULL;
+  const iree_const_byte_span_t access =
+      loom_func_like_signature_flags(function);
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->scope->arena, entry->arg_count, sizeof(*record->graph.arguments),
+      state->scope->arena, argument_count, sizeof(*record->graph.arguments),
       (void**)&record->graph.arguments));
-  for (uint16_t i = 0; i < entry->arg_count; ++i) {
+  for (uint16_t i = 0; i < argument_count; ++i) {
     record->graph.arguments[i] = NULL;
-    const loom_value_id_t value_id = loom_block_arg_id(entry, i);
+    const loom_value_id_t value_id = arguments[i];
     if (loom_storage_access_is_reference(state->scope->module, value_id)) {
       IREE_RETURN_IF_ERROR(loom_storage_access_add_reference(
           state, record, value_id, &record->graph.arguments[i]));
+      if (!has_body) {
+        // An opaque declaration supplies the bound. A visible body starts
+        // empty and is inferred independently, so it cannot validate itself
+        // by assuming its authored promise.
+        const loom_argument_access_t bound =
+            access.data_length ? loom_signature_flags_access(access.data[i])
+                               : LOOM_ARGUMENT_ACCESS_UNSPECIFIED;
+        record->graph.arguments[i]->effects =
+            bound == LOOM_ARGUMENT_ACCESS_UNSPECIFIED
+                ? LOOM_STORAGE_ACCESS_ESCAPE
+                : bound & LOOM_ARGUMENT_ACCESS_READ_WRITE;
+        record->graph.arguments[i]->footprint =
+            LOOM_STORAGE_ACCESS_FOOTPRINT_STORAGE;
+      }
     }
   }
   loom_storage_access_index_function(state, record, previous);
-  if (state->last_function) {
-    state->last_function->next_pending = record;
+  if (!has_body) {
+    // A parameter bound says nothing about ambient storage. Callers already
+    // distinguish that storage from their fresh, unexposed allocations.
+    record->graph.has_unbounded_memory_access =
+        loom_func_like_effect_contract(function) !=
+        LOOM_CALLABLE_EFFECT_CONTRACT_PURE;
+    record->graph.unbounded_write_spaces =
+        loom_callable_effects_written_memory_spaces(function);
   } else {
-    state->first_function = record;
+    if (state->last_function) {
+      state->last_function->next_pending = record;
+    } else {
+      state->first_function = record;
+    }
+    state->last_function = record;
   }
-  state->last_function = record;
   *out_record = record;
   return iree_ok_status();
 }
@@ -528,6 +562,8 @@ static iree_status_t loom_storage_access_visit(
           !described_read) ||
          (iree_any_bit_set(traits, LOOM_TRAIT_WRITES_MEMORY) &&
           !described_write))) {
+      state->current->has_unmodeled_memory_access |=
+          iree_any_bit_set(traits, LOOM_TRAIT_UNKNOWN_EFFECTS);
       state->current->graph.has_unknown_memory_access = true;
       loom_storage_access_mark_unbounded(
           state, state->current, loom_op_read_memory_spaces(op, traits),
@@ -603,7 +639,7 @@ static iree_status_t loom_storage_access_build_pending(
                                                 .user_data = state},
                          &walk_result);
     if (iree_status_is_ok(status) &&
-        state->current->graph.has_unknown_memory_access) {
+        state->current->has_unmodeled_memory_access) {
       // An unmodeled local effect can reach every formal reference. Project
       // that uncertainty through argument edges, never through an unrelated
       // caller allocation. This runs once after the body's uses are classified.
@@ -678,9 +714,13 @@ iree_status_t loom_storage_access_require_function(
       loom_storage_access_enqueue_function(scope->state, function, &record));
   iree_status_t status = iree_ok_status();
   if (scope->state->first_function) {
-    loom_local_value_domain_release(value_domain);
+    if (value_domain) {
+      loom_local_value_domain_release(value_domain);
+    }
     status = loom_storage_access_build_pending(scope->state);
-    loom_local_value_domain_restore(value_domain);
+    if (value_domain) {
+      loom_local_value_domain_restore(value_domain);
+    }
     if (iree_status_is_ok(status)) {
       loom_storage_access_solve(scope->state);
     }

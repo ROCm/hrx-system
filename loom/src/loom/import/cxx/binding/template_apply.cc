@@ -176,7 +176,9 @@ loom_symbol_ref_t TemplateApplyIntrinsic::materialize(
         /*effect_contract=*/0, /*temperature=*/0, loom_symbol_ref_null(),
         loom_make_parameterized_attr_array(requirements.data(),
                                            requirements.size()),
-        reference, argument_types, argument_count, result_types, result_count,
+        reference, argument_types, argument_count,
+        /*signature_flags=*/iree_const_byte_span_empty(), result_types,
+        result_count,
         /*tied_results=*/nullptr,
         /*tied_result_count=*/0, predicates.data(), predicates.size(),
         family_->declaration_location, &family_->declaration));

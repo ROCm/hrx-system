@@ -110,8 +110,9 @@ static iree_status_t iree_vm_module_validate_descriptor(
           "module ref type %" PRIhsz " is null, misaligned, or unowned", i);
     }
     if ((type->table->flags &
-         ~(iree_vm_ref_type_table_flags_t)
-             IREE_VM_REF_TYPE_TABLE_FLAG_REFLECTION_ONLY) != 0) {
+         ~(iree_vm_ref_type_table_flags_t)(IREE_VM_REF_TYPE_TABLE_FLAG_REFLECTION_ONLY |
+                                           IREE_VM_REF_TYPE_TABLE_FLAG_BORROWED_ONLY)) !=
+        0) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "module ref type %" PRIhsz " has unsupported provider flags", i);
@@ -224,8 +225,8 @@ static int iree_vm_module_compare_callable_types(
 
 static iree_status_t iree_vm_module_validate_signature_side(
     const iree_vm_module_t* module, iree_vm_module_signature_side_t side,
-    iree_host_size_t current_callable_ordinal, const char* label,
-    uint32_t* inout_nesting_depth) {
+    iree_host_size_t current_callable_ordinal, bool is_result,
+    const char* label, uint32_t* inout_nesting_depth) {
   if (side.count != 0 && !side.data) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "%s signature storage is required", label);
@@ -246,6 +247,14 @@ static iree_status_t iree_vm_module_validate_signature_side(
         side.data[i].kind <= IREE_VM_SCALAR_TYPE_F64) {
       ++expected_value_count;
     } else if (iree_vm_module_signature_type_kind_is_ref(side.data[i].kind)) {
+      if (iree_vm_ref_type_is_borrowed_only(
+              module->descriptor->ref_types.data[side.data[i].type_ordinal]) &&
+          (is_result ||
+           side.data[i].kind != IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "borrowed-only types require ptr arguments and cannot be returned");
+      }
       ++expected_ref_count;
     } else {
       ++expected_function_count;
@@ -287,10 +296,10 @@ static iree_status_t iree_vm_module_validate_callable_types(
     }
     uint32_t expected_nesting_depth = 0;
     IREE_RETURN_IF_ERROR(iree_vm_module_validate_signature_side(
-        module, callable_type.signature.arguments, i, "argument",
+        module, callable_type.signature.arguments, i, false, "argument",
         &expected_nesting_depth));
     IREE_RETURN_IF_ERROR(iree_vm_module_validate_signature_side(
-        module, callable_type.signature.results, i, "result",
+        module, callable_type.signature.results, i, true, "result",
         &expected_nesting_depth));
     const iree_host_size_t value_count =
         callable_type.signature.arguments.value_count +

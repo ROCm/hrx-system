@@ -221,6 +221,8 @@ def test_register_fields_preserve_the_wire_bank_and_position():
                 RefOwnership.REPLACE_RETAIN: OwnershipEffect.OWNED,
                 RefOwnership.REPLACE_BORROW: OwnershipEffect.BORROWED,
                 RefOwnership.CLEAR: OwnershipEffect.NONE,
+                RefOwnership.COPY: OwnershipEffect.COPY,
+                RefOwnership.REPLACE_COPY: OwnershipEffect.NONE,
             }
             assert operand.ownership is (
                 expected_ownership[field.ref_policy.ownership]
@@ -248,7 +250,12 @@ def test_effects_preserve_state_access_not_runtime_aborts():
         creates_owner = any(
             field.ref_policy
             and field.ref_policy.ownership
-            in (RefOwnership.REPLACE_OWNER, RefOwnership.REPLACE_RETAIN)
+            in (
+                RefOwnership.REPLACE_OWNER,
+                RefOwnership.REPLACE_RETAIN,
+                RefOwnership.COPY,
+                RefOwnership.REPLACE_COPY,
+            )
             for field in instruction.fields
         )
         if creates_owner:

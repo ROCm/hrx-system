@@ -164,8 +164,9 @@ TEST_F(LowLowerFunctionBoundaryTest,
       loom_symbol_ref_null(), /*source_signature=*/loom_attr_absent(),
       /*abi=*/0, loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
       loom_named_attr_slice_empty(), symbol, argument_types,
-      IREE_ARRAYSIZE(argument_types), &i32_type, 1, nullptr, 0, nullptr, 0,
-      LOOM_LOCATION_UNKNOWN, &source_op));
+      IREE_ARRAYSIZE(argument_types),
+      /*signature_flags=*/iree_const_byte_span_empty(), &i32_type, 1, nullptr,
+      0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &source_op));
   const loom_func_like_t source_function =
       loom_func_like_cast(module_, source_op);
   uint16_t source_argument_count = 0;
@@ -295,7 +296,9 @@ TEST_F(LowLowerFunctionBoundaryTest,
       /*inline_policy=*/0, loom_symbol_ref_null(), source_signature, /*abi=*/0,
       loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
       loom_named_attr_slice_empty(), AddSymbol(IREE_SV("external_c")),
-      /*arg_types=*/nullptr, /*arg_count=*/0, /*result_types=*/nullptr,
+      /*arg_types=*/nullptr, /*arg_count=*/0,
+      /*signature_flags=*/iree_const_byte_span_empty(),
+      /*result_types=*/nullptr,
       /*result_count=*/0, /*tied_results=*/nullptr, /*tied_result_count=*/0,
       /*predicates=*/nullptr, /*predicate_count=*/0, LOOM_LOCATION_UNKNOWN,
       &source_op));
@@ -335,8 +338,9 @@ TEST_F(LowLowerFunctionBoundaryTest,
       /*cc=*/0, /*effect_contract=*/0, /*temperature=*/0, /*inline_policy=*/0,
       loom_symbol_ref_null(), /*source_signature=*/loom_attr_absent(),
       /*abi=*/0, loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
-      loom_named_attr_slice_empty(), symbol, &i32_type, 1, &i32_type, 1,
-      nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &source_op));
+      loom_named_attr_slice_empty(), symbol, &i32_type, 1,
+      /*signature_flags=*/iree_const_byte_span_empty(), &i32_type, 1, nullptr,
+      0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &source_op));
   const loom_func_like_t source_declaration =
       loom_func_like_cast(module_, source_op);
   uint16_t source_argument_count = 0;
@@ -441,8 +445,9 @@ TEST_P(LowLowerResultMappingTest, DefinitionConsumesPreparedBoundary) {
       loom_symbol_ref_null(), /*source_signature=*/loom_attr_absent(),
       /*abi=*/0, loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
       loom_named_attr_slice_empty(), symbol, argument_types,
-      IREE_ARRAYSIZE(argument_types), result_types, result_count, nullptr, 0,
-      nullptr, 0, LOOM_LOCATION_UNKNOWN, &source_op));
+      IREE_ARRAYSIZE(argument_types),
+      /*signature_flags=*/iree_const_byte_span_empty(), result_types,
+      result_count, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &source_op));
   mapping_context_.source_function = loom_func_like_cast(module_, source_op);
   loom_region_t* body = loom_func_like_body(mapping_context_.source_function);
   loom_block_t* entry = loom_region_entry_block(body);
@@ -576,7 +581,8 @@ TEST_P(LowLowerArgumentQueryTest, OnlyRequiredArgumentsEmitDiagnostics) {
       loom_symbol_ref_null(), /*source_signature=*/loom_attr_absent(),
       /*abi=*/0, loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
       loom_named_attr_slice_empty(), AddSymbol(IREE_SV("arguments")),
-      argument_types, IREE_ARRAYSIZE(argument_types), nullptr, 0, nullptr, 0,
+      argument_types, IREE_ARRAYSIZE(argument_types),
+      /*signature_flags=*/iree_const_byte_span_empty(), nullptr, 0, nullptr, 0,
       nullptr, 0, LOOM_LOCATION_UNKNOWN, &source_op));
   const loom_func_like_t function = loom_func_like_cast(module_, source_op);
   loom_region_t* body = loom_func_like_body(function);

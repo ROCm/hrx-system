@@ -2150,12 +2150,16 @@ class Printer:
                     field=name,
                     start_attr=start_attr,
                     end_attr=end_attr,
+                    access=access,
                 ):
                     assert isinstance(fields, ResolvedFields)
                     if start_attr is not None:
                         covered_attrs.add(start_attr)
                     if end_attr is not None:
                         covered_attrs.add(end_attr)
+                    access_values = fields.attr(access) if access is not None else None
+                    if access is not None:
+                        covered_attrs.add(access)
                     _arg_names, _arg_types, arg_value_ids = fields.func_args(name)
                     start = fields.attr(start_attr) if start_attr is not None else 0
                     end = (
@@ -2177,9 +2181,15 @@ class Printer:
                         )
                     arg_value_ids = arg_value_ids[start:end]
                     arg_strs: list[str] = []
-                    for arg_value_id in arg_value_ids:
+                    for index, arg_value_id in enumerate(arg_value_ids, start):
                         type_str = self._print_value_type(arg_value_id, module)
-                        arg_strs.append(f"{self._value_name(arg_value_id)}: {type_str}")
+                        arg_str = f"{self._value_name(arg_value_id)}: {type_str}"
+                        if isinstance(access_values, bytes) and access_values[index]:
+                            access_str = _format_enum_attr_value(
+                                access_values[index], op_decl.attr(access)
+                            )
+                            arg_str += f" {{access = {access_str}}}"
+                        arg_strs.append(arg_str)
                     stream.emit("(" + ", ".join(arg_strs) + ")", glue=True)
 
                 case PredicateList(field=name):

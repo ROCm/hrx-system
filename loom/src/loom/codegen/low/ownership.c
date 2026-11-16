@@ -39,6 +39,7 @@ static uint8_t loom_low_ownership_query(const loom_op_t* op, bool is_result,
       [LOOM_LOW_OWNERSHIP_RETAIN] = LOOM_OPERAND_OWNERSHIP_RETAIN,
       [LOOM_LOW_OWNERSHIP_OWNED] = LOOM_RESULT_OWNERSHIP_FRESH,
       [LOOM_LOW_OWNERSHIP_BORROWED] = LOOM_RESULT_OWNERSHIP_BORROWED,
+      [LOOM_LOW_OWNERSHIP_COPY] = LOOM_OPERAND_OWNERSHIP_COPY,
   };
   return effects[effect];
 }

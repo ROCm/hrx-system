@@ -95,7 +95,6 @@
 #include "loom/ir/encoding.h"
 #include "loom/ir/intern_table.h"
 #include "loom/ir/location.h"
-#include "loom/ir/memory_space.h"
 #include "loom/ir/string_table.h"
 #include "loom/ir/type_table.h"
 #include "loom/ir/types.h"
@@ -1343,6 +1342,11 @@ typedef struct loom_func_like_vtable_t {
   // Index of the optional callable effect-contract enum attr.
   // LOOM_ATTR_INDEX_NONE if absent.
   uint8_t effect_contract_attr_index;
+
+  // Index of optional boundary flags in [arguments | results] order, or
+  // LOOM_ATTR_INDEX_NONE. Each byte stores one loom_signature_flags_t in
+  // argument-then-result order.
+  uint8_t signature_flags_attr_index;
 
   // Index of the optional temperature enum attr. LOOM_ATTR_INDEX_NONE if
   // absent.

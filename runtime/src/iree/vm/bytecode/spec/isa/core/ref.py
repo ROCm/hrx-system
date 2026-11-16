@@ -7,6 +7,7 @@
 """Generic typed ref-state and function-local ref-slot instructions."""
 
 from iree.vm.bytecode.spec.isa import (
+    FailureCase,
     FieldRole,
     FieldRuleUse,
     Instruction,
@@ -44,7 +45,19 @@ REF_FAMILY = InstructionFamily(
         "snapshot and clear their distinct source before replacement. Copying or moving "
         "an internal borrow preserves its dominating lifetime. Frame unwind releases every "
         "owner and clears every borrow in the exact declared register and local-slot "
-        "extents. These operations are infallible after verification and never suspend."
+        "extents. A borrowed-only type has no owner prefix: internal copies and moves "
+        "preserve this restriction, and ownership-producing instructions fail before "
+        "touching the object or destination. Other ref operations are infallible after "
+        "verification. No ref operation suspends."
+    ),
+)
+
+
+_BORROWED_ONLY_RETAIN_FAILURES = (
+    FailureCase(
+        "failed_precondition",
+        "The retained source has a borrowed-only type.",
+        "No object, source, or destination is modified.",
     ),
 )
 
@@ -233,9 +246,11 @@ REF_RETAIN = Instruction(
         "A null source publishes null; a non-null source publishes one owner carrying "
         "its exact object and descriptor.",
     ),
+    failures=_BORROWED_ONLY_RETAIN_FAILURES,
     assembly="%r<destination> = ref.retain %r<source>",
     pseudocode=(
         "source = refs[source_r8];\n"
+        "require_can_retain(source);\n"
         "new_owner = retain_ref(source);\n"
         "replace_ref(&refs[destination_r8], new_owner);\n"
         "pc = pc + 4;"
@@ -361,6 +376,11 @@ def _stack_transfer(
         assembly=assembly,
         pseudocode=pseudocode,
         state_effects=state_effects,
+        failures=(
+            _BORROWED_ONLY_RETAIN_FAILURES
+            if register_ownership in (RefOwnership.RETAIN, RefOwnership.REPLACE_RETAIN)
+            else ()
+        ),
         ownership=(ownership,),
     )
 
@@ -381,6 +401,7 @@ REF_STACK_LOAD_RETAIN = _stack_transfer(
     (StateEffect(StateAccess.READ, StateResource.FRAME_LOCALS, ("slot_u16",)),),
     "%r<destination> = ref.stack.load.retain #r<slot>",
     "source = local_refs[slot_u16];\n"
+    "require_can_retain(source);\n"
     "new_owner = retain_ref(source);\n"
     "replace_ref(&refs[destination_r8], new_owner);\n"
     "pc = pc + 4;",
@@ -425,6 +446,7 @@ REF_STACK_STORE_RETAIN = _stack_transfer(
     (StateEffect(StateAccess.WRITE, StateResource.FRAME_LOCALS, ("slot_u16",)),),
     "ref.stack.store.retain %r<source>, #r<slot>",
     "source = refs[source_r8];\n"
+    "require_can_retain(source);\n"
     "new_owner = retain_ref(source);\n"
     "replace_ref(&local_refs[slot_u16], new_owner);\n"
     "pc = pc + 4;",
@@ -476,13 +498,13 @@ REF_SELECT = Instruction(
     mnemonic="ref.select",
     since=CORE_0,
     family=REF_FAMILY,
-    summary="Retains the selected reference into a register.",
+    summary="Copies the selected reference and its ownership state into a register.",
     fields=(
         _ref_register(
             "destination_r8",
             FieldRole.RESULT,
-            RefOwnership.REPLACE_RETAIN,
-            "Ref-register ordinal replaced by the selected owner.",
+            RefOwnership.REPLACE_COPY,
+            "Ref-register ordinal replaced by the selected reference state.",
         ),
         _value_register(
             "condition_v8",
@@ -492,13 +514,13 @@ REF_SELECT = Instruction(
         _ref_register(
             "true_r8",
             FieldRole.OPERAND,
-            RefOwnership.RETAIN,
+            RefOwnership.COPY,
             "Source selected when the condition is nonzero.",
         ),
         _ref_register(
             "false_r8",
             FieldRole.OPERAND,
-            RefOwnership.RETAIN,
+            RefOwnership.COPY,
             "Source selected when the condition is zero.",
         ),
         InstructionField(
@@ -510,23 +532,24 @@ REF_SELECT = Instruction(
     semantics=None,
     behavior=(
         "Selects true_r8 when the complete condition is nonzero, otherwise false_r8, "
-        "and creates an owned copy in destination_r8. All ref ordinals may alias."
+        "and copies its complete state into destination_r8. All ref ordinals may alias."
     ),
     success=(
-        "A null selection publishes null; a non-null selection publishes one owner "
-        "carrying its exact object and descriptor.",
+        "A null selection publishes null; a non-null selection preserves its exact "
+        "object, descriptor, and ownership state.",
     ),
     assembly="%r<destination> = ref.select %v<condition>, %r<true>, %r<false>",
     pseudocode=(
         "selected = values[condition_v8] != 0 ? refs[true_r8] : refs[false_r8];\n"
-        "new_owner = retain_ref(selected);\n"
-        "replace_ref(&refs[destination_r8], new_owner);\n"
+        "copy = is_owned_ref(selected) ? retain_ref(selected) : selected;\n"
+        "replace_ref(&refs[destination_r8], copy);\n"
         "pc = pc + 8;"
     ),
     ownership=(
-        "Only the selected source is retained, before releasing any previous "
-        "destination owner. Selecting a borrow creates an owner; selecting an "
-        "owned destination has no net refcount change.",
+        "An owned selection is retained before releasing the destination. A borrowed "
+        "selection preserves its existing anchor, which must cover destination "
+        "replacement and all later uses. An aliased selection has no net ownership "
+        "change; borrowed-only objects require no intrusive prefix access.",
     ),
 )
 
@@ -669,6 +692,46 @@ REF_BORROW = Instruction(
     ),
 )
 
+REF_STACK_LOAD_BORROW = _stack_transfer(
+    0xC7,
+    "ref.stack.load.borrow",
+    "Borrows a local ref slot into a register.",
+    "destination_r8",
+    FieldRole.RESULT,
+    RefOwnership.REPLACE_BORROW,
+    "Ref-register ordinal replaced by the borrowed handle.",
+    "Borrows the exact object and descriptor from a live local slot without retaining.",
+    "The slot is unchanged and the destination holds canonical null or a borrow.",
+    "The compiler proves an anchor covering destination replacement and every use "
+    "of the borrow. A previous destination owner is released; the source is not retained.",
+    (StateEffect(StateAccess.READ, StateResource.FRAME_LOCALS, ("slot_u16",)),),
+    "%r<destination> = ref.stack.load.borrow #r<slot>",
+    "source = local_refs[slot_u16];\n"
+    "borrowed = source.is_null ? canonical_null_ref : as_borrowed_ref(source);\n"
+    "replace_ref(&refs[destination_r8], borrowed);\n"
+    "pc = pc + 4;",
+)
+
+REF_STACK_STORE_BORROW = _stack_transfer(
+    0xE6,
+    "ref.stack.store.borrow",
+    "Borrows a ref register into a local slot.",
+    "source_r8",
+    FieldRole.OPERAND,
+    RefOwnership.BORROW,
+    "Live source whose owner covers the borrowed slot.",
+    "Borrows the exact object and descriptor from a live register without retaining.",
+    "The register is unchanged and the slot holds canonical null or a borrow.",
+    "The compiler proves an anchor covering slot replacement and every use of the "
+    "borrow. A previous slot owner is released; the source is not retained.",
+    (StateEffect(StateAccess.WRITE, StateResource.FRAME_LOCALS, ("slot_u16",)),),
+    "ref.stack.store.borrow %r<source>, #r<slot>",
+    "source = refs[source_r8];\n"
+    "borrowed = source.is_null ? canonical_null_ref : as_borrowed_ref(source);\n"
+    "replace_ref(&local_refs[slot_u16], borrowed);\n"
+    "pc = pc + 4;",
+)
+
 REF_INSTRUCTIONS = (
     REF_NULL,
     REF_COMPARE_NULL,
@@ -686,4 +749,6 @@ REF_INSTRUCTIONS = (
     REF_STACK_LOAD_COPY,
     REF_STACK_STORE_COPY,
     REF_BORROW,
+    REF_STACK_LOAD_BORROW,
+    REF_STACK_STORE_BORROW,
 )

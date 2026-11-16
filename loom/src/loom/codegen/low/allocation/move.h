@@ -39,6 +39,11 @@ enum loom_low_move_kind_e {
   // Transfers the complete reference state, replacing the destination and
   // clearing the source. No independent owner is acquired by the transfer.
   LOOM_LOW_MOVE_KIND_TRANSFER = 2,
+  // Publishes a borrowed reference without acquiring ownership. The producer
+  // proves the source carrier survives every use of the destination, including
+  // destination replacement and any intervening call. That carrier cannot be
+  // overwritten by this parallel group or used as cycle scratch.
+  LOOM_LOW_MOVE_KIND_BORROW = 3,
 };
 typedef uint8_t loom_low_move_kind_t;
 
@@ -49,7 +54,8 @@ typedef struct loom_low_move_t {
   // Unit read by the operation, and cleared by transfer or overwritten by
   // exchange.
   loom_low_move_location_t source;
-  // Copy, exchange, or consuming reference transfer retained by allocation.
+  // Copy, exchange, consuming transfer, or anchored borrow retained by
+  // allocation.
   loom_low_move_kind_t kind;
 } loom_low_move_t;
 
@@ -57,7 +63,10 @@ typedef struct loom_low_move_t {
 // both writes at one native issue position. A reference transfer clears its
 // second write instead of publishing the destination's old contents there.
 static inline uint32_t loom_low_move_access_count(const loom_low_move_t* move) {
-  return move->kind == LOOM_LOW_MOVE_KIND_COPY ? 1 : 2;
+  return move->kind == LOOM_LOW_MOVE_KIND_EXCHANGE ||
+                 move->kind == LOOM_LOW_MOVE_KIND_TRANSFER
+             ? 2
+             : 1;
 }
 
 // Returns read |index|, which is less than loom_low_move_access_count(move).

@@ -84,8 +84,9 @@ class ChannelPlanTest : public ::testing::Test {
         /*source_signature=*/loom_attr_absent(), 0,
         loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
         loom_named_attr_slice_empty(), {0, symbol}, arguments.data(),
-        arguments.size(), results.data(), results.size(), nullptr, 0, nullptr,
-        0, LOOM_LOCATION_UNKNOWN, &function));
+        arguments.size(), /*signature_flags=*/iree_const_byte_span_empty(),
+        results.data(), results.size(), nullptr, 0, nullptr, 0,
+        LOOM_LOCATION_UNKNOWN, &function));
     loom_builder_enter_region(&builder_, function,
                               loom_func_def_body(function));
     return function;

@@ -64,7 +64,8 @@ class InputContractTest : public ::testing::Test {
         &builder, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
         /*effect_contract=*/0, /*temperature=*/0, loom_symbol_ref_null(),
         loom_parameterized_attr_array_empty(), {0, symbol}, arguments,
-        IREE_ARRAYSIZE(arguments), results, IREE_ARRAYSIZE(results),
+        IREE_ARRAYSIZE(arguments), iree_const_byte_span_empty(), results,
+        IREE_ARRAYSIZE(results),
         /*tied_results=*/nullptr, /*tied_result_count=*/0,
         /*predicates=*/nullptr, /*predicates_count=*/0, LOOM_LOCATION_UNKNOWN,
         &family));

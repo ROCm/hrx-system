@@ -11,8 +11,8 @@
 #include "iree/base/internal/math.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
-#include "loom/ir/parameterized_type.h"
 #include "loom/ir/structural_hash.h"
+#include "loom/ir/type_descriptor.h"
 
 typedef enum loom_symbol_reference_summary_transform_e {
   LOOM_SYMBOL_REFERENCE_SUMMARY_IDENTITY = 0,

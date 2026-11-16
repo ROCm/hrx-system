@@ -21,9 +21,9 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/ir/attribute_schema.h"
 #include "loom/ir/ir.h"
 #include "loom/ir/module_source.h"
-#include "loom/ir/parameterized_attr.h"
 #include "loom/ir/type_dependencies.h"
 #include "loom/ir/value_refs.h"
 #include "loom/ir/value_replacement.h"

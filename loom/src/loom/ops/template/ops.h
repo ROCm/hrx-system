@@ -14,6 +14,7 @@
 
 #include "loom/ops/op_defs.h"
 #include "loom/ir/ir.h"
+#include "loom/ops/signature_flags.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,9 +69,10 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_template_decl_cc, 2, loom_template_cc_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_template_decl_effect_contract, 3, loom_callable_effect_contract_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_template_decl_temperature, 4, loom_template_temperature_t)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_template_decl_predicates, 5)
-LOOM_DEFINE_ATTR_SYMBOL(loom_template_decl_target, 6)
-LOOM_DEFINE_ATTR_PARAMETERIZED_ARRAY(loom_template_decl_requires, 7)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_template_decl_retain, 8, loom_template_retain_t)
+LOOM_DEFINE_ATTR_BYTES(loom_template_decl_signature_flags, 6)
+LOOM_DEFINE_ATTR_SYMBOL(loom_template_decl_target, 7)
+LOOM_DEFINE_ATTR_PARAMETERIZED_ARRAY(loom_template_decl_requires, 8)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_template_decl_retain, 9, loom_template_retain_t)
 enum loom_template_decl_build_flag_bits_e {
   LOOM_TEMPLATE_DECL_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
   LOOM_TEMPLATE_DECL_BUILD_FLAG_HAS_RETAIN = 1u << 1,
@@ -79,7 +81,8 @@ enum loom_template_decl_build_flag_bits_e {
   LOOM_TEMPLATE_DECL_BUILD_FLAG_HAS_TEMPERATURE = 1u << 4,
   LOOM_TEMPLATE_DECL_BUILD_FLAG_HAS_TARGET = 1u << 5,
   LOOM_TEMPLATE_DECL_BUILD_FLAG_HAS_REQUIRES = 1u << 6,
-  LOOM_TEMPLATE_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 7,
+  LOOM_TEMPLATE_DECL_BUILD_FLAG_HAS_SIGNATURE_FLAGS = 1u << 7,
+  LOOM_TEMPLATE_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 8,
 };
 typedef uint32_t loom_template_decl_build_flags_t;
 iree_status_t loom_template_decl_build(
@@ -95,6 +98,7 @@ iree_status_t loom_template_decl_build(
     loom_symbol_ref_t family,
     const loom_type_t* arg_types,
     iree_host_size_t arg_types_count,
+    loom_optional iree_const_byte_span_t signature_flags,
     const loom_type_t* result_types,
     iree_host_size_t result_count,
     const loom_tied_result_t* tied_results,
@@ -120,10 +124,11 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_template_def_cc, 3, loom_template_cc_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_template_def_effect_contract, 4, loom_callable_effect_contract_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_template_def_temperature, 5, loom_template_temperature_t)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_template_def_predicates, 6)
-LOOM_DEFINE_ATTR_SYMBOL(loom_template_def_target, 7)
-LOOM_DEFINE_ATTR_PARAMETERIZED_ARRAY(loom_template_def_requires, 8)
-LOOM_DEFINE_ATTR_I64(loom_template_def_priority, 9)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_template_def_retain, 10, loom_template_retain_t)
+LOOM_DEFINE_ATTR_BYTES(loom_template_def_signature_flags, 7)
+LOOM_DEFINE_ATTR_SYMBOL(loom_template_def_target, 8)
+LOOM_DEFINE_ATTR_PARAMETERIZED_ARRAY(loom_template_def_requires, 9)
+LOOM_DEFINE_ATTR_I64(loom_template_def_priority, 10)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_template_def_retain, 11, loom_template_retain_t)
 LOOM_DEFINE_REGION(loom_template_def_body, 0)
 enum loom_template_def_build_flag_bits_e {
   LOOM_TEMPLATE_DEF_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
@@ -134,7 +139,8 @@ enum loom_template_def_build_flag_bits_e {
   LOOM_TEMPLATE_DEF_BUILD_FLAG_HAS_TARGET = 1u << 5,
   LOOM_TEMPLATE_DEF_BUILD_FLAG_HAS_PRIORITY = 1u << 6,
   LOOM_TEMPLATE_DEF_BUILD_FLAG_HAS_REQUIRES = 1u << 7,
-  LOOM_TEMPLATE_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 8,
+  LOOM_TEMPLATE_DEF_BUILD_FLAG_HAS_SIGNATURE_FLAGS = 1u << 8,
+  LOOM_TEMPLATE_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 9,
 };
 typedef uint32_t loom_template_def_build_flags_t;
 iree_status_t loom_template_def_build(
@@ -152,6 +158,7 @@ iree_status_t loom_template_def_build(
     loom_symbol_ref_t implementation,
     const loom_type_t* arg_types,
     iree_host_size_t arg_types_count,
+    loom_optional iree_const_byte_span_t signature_flags,
     const loom_type_t* result_types,
     iree_host_size_t result_count,
     const loom_tied_result_t* tied_results,
@@ -176,10 +183,11 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_template_ukernel_cc, 3, loom_template_cc_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_template_ukernel_effect_contract, 4, loom_callable_effect_contract_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_template_ukernel_temperature, 5, loom_template_temperature_t)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_template_ukernel_predicates, 6)
-LOOM_DEFINE_ATTR_SYMBOL(loom_template_ukernel_target, 7)
-LOOM_DEFINE_ATTR_PARAMETERIZED_ARRAY(loom_template_ukernel_requires, 8)
-LOOM_DEFINE_ATTR_I64(loom_template_ukernel_priority, 9)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_template_ukernel_retain, 10, loom_template_retain_t)
+LOOM_DEFINE_ATTR_BYTES(loom_template_ukernel_signature_flags, 7)
+LOOM_DEFINE_ATTR_SYMBOL(loom_template_ukernel_target, 8)
+LOOM_DEFINE_ATTR_PARAMETERIZED_ARRAY(loom_template_ukernel_requires, 9)
+LOOM_DEFINE_ATTR_I64(loom_template_ukernel_priority, 10)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_template_ukernel_retain, 11, loom_template_retain_t)
 enum loom_template_ukernel_build_flag_bits_e {
   LOOM_TEMPLATE_UKERNEL_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
   LOOM_TEMPLATE_UKERNEL_BUILD_FLAG_HAS_RETAIN = 1u << 1,
@@ -189,7 +197,8 @@ enum loom_template_ukernel_build_flag_bits_e {
   LOOM_TEMPLATE_UKERNEL_BUILD_FLAG_HAS_TARGET = 1u << 5,
   LOOM_TEMPLATE_UKERNEL_BUILD_FLAG_HAS_PRIORITY = 1u << 6,
   LOOM_TEMPLATE_UKERNEL_BUILD_FLAG_HAS_REQUIRES = 1u << 7,
-  LOOM_TEMPLATE_UKERNEL_BUILD_FLAG_HAS_PREDICATES = 1u << 8,
+  LOOM_TEMPLATE_UKERNEL_BUILD_FLAG_HAS_SIGNATURE_FLAGS = 1u << 8,
+  LOOM_TEMPLATE_UKERNEL_BUILD_FLAG_HAS_PREDICATES = 1u << 9,
 };
 typedef uint32_t loom_template_ukernel_build_flags_t;
 iree_status_t loom_template_ukernel_build(
@@ -207,6 +216,7 @@ iree_status_t loom_template_ukernel_build(
     loom_symbol_ref_t implementation,
     const loom_type_t* arg_types,
     iree_host_size_t arg_types_count,
+    loom_optional iree_const_byte_span_t signature_flags,
     const loom_type_t* result_types,
     iree_host_size_t result_count,
     const loom_tied_result_t* tied_results,

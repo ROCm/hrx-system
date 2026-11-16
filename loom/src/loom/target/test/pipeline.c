@@ -134,8 +134,9 @@ static iree_status_t loom_test_pipeline_collective_call(
       LOOM_STRING_ID_INVALID, 0, 0, 0, 0, loom_symbol_ref_null(),
       loom_attr_absent(), 0, loom_named_attr_slice_empty(),
       LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol,
-      argument_types, argument_count, result_types, result_count, NULL, 0, NULL,
-      0, LOOM_LOCATION_UNKNOWN, &declaration));
+      argument_types, argument_count,
+      /*signature_flags=*/iree_const_byte_span_empty(), result_types,
+      result_count, NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN, &declaration));
   return loom_func_call_build(builder, 0, 0, 0, 0, symbol, arguments,
                               argument_count, result_types, result_count, NULL,
                               0, LOOM_LOCATION_UNKNOWN, out_call);
@@ -227,8 +228,9 @@ static iree_status_t loom_test_pipeline_entry(
         LOOM_STRING_ID_INVALID, 0, 0, 0, 0, loom_symbol_ref_null(),
         loom_attr_absent(), 0, loom_named_attr_slice_empty(),
         LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(),
-        state->boundaries[i], &type, 1, NULL, 0, NULL, 0, NULL, 0,
-        LOOM_LOCATION_UNKNOWN, &declaration));
+        state->boundaries[i], &type, 1,
+        /*signature_flags=*/iree_const_byte_span_empty(), NULL, 0, NULL, 0,
+        NULL, 0, LOOM_LOCATION_UNKNOWN, &declaration));
   }
   const loom_pipeline_control_options_t options = {
       .worker_engines = state->engines,

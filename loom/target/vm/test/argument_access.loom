@@ -1,0 +1,38 @@
+// A synchronous helper fills a caller-owned slice. Reads after return observe
+// both writes, while neighboring elements retain their sentinel values.
+func.def noinline @fill_pair(%output: view<2xi32> {access = write}, %first: i32, %second: i32) {
+  view.store %first, %output[0] : i32, view<2xi32>
+  view.store %second, %output[1] : i32, view<2xi32>
+  func.return
+}
+
+func.def @fill_middle(%first: i32, %second: i32) -> (i32, i32, i32, i32) {
+  %bytes = index.constant 16 : offset
+  %origin = index.constant 0 : offset
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %whole = buffer.view %storage[%origin] : buffer -> view<4xi32>
+  %left = scalar.constant -7 : i32
+  %right = scalar.constant 91 : i32
+  view.store %left, %whole[0] : i32, view<4xi32>
+  view.store %right, %whole[3] : i32, view<4xi32>
+  %middle = view.subview %whole[1] : view<4xi32> -> view<2xi32>
+  func.call @fill_pair(%middle, %first, %second) : (view<2xi32>, i32, i32)
+  %a = view.load %whole[0] : view<4xi32> -> i32
+  %b = view.load %whole[1] : view<4xi32> -> i32
+  %c = view.load %whole[2] : view<4xi32> -> i32
+  %d = view.load %whole[3] : view<4xi32> -> i32
+  func.return %a, %b, %c, %d : i32, i32, i32, i32
+}
+
+check.case @caller_owned_output_slice {
+  %first = check.literal value(17) : i32
+  %second = check.literal value(23) : i32
+  %left = check.literal value(-7) : i32
+  %right = check.literal value(91) : i32
+  %a, %b, %c, %d = func.call @fill_middle(%first, %second) : (i32, i32) -> (i32, i32, i32, i32)
+  check.expect.equal actual(%a) expected(%left) : i32
+  check.expect.equal actual(%b) expected(%first) : i32
+  check.expect.equal actual(%c) expected(%second) : i32
+  check.expect.equal actual(%d) expected(%right) : i32
+  check.return
+}

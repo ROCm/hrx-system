@@ -9,8 +9,8 @@
 #include <string.h>
 
 #include "loom/ir/module.h"
-#include "loom/ir/parameterized_type.h"
 #include "loom/ir/structural_hash.h"
+#include "loom/ir/type_descriptor.h"
 
 // Temporary graph construction capacity; the index retains the completed edges.
 typedef struct loom_bytecode_type_graph_t {

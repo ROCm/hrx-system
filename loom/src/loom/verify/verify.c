@@ -10,6 +10,7 @@
 #include "loom/ir/module_record.h"
 #include "loom/util/cfg_dominance.h"
 #include "loom/util/cfg_graph.h"
+#include "loom/verify/verify_argument_access.h"
 #include "loom/verify/verify_constraints.h"
 #include "loom/verify/verify_consumption.h"
 #include "loom/verify/verify_diagnostics.h"
@@ -665,6 +666,11 @@ loom_verify_op(loom_verify_state_t* state, const loom_op_t* op,
     };
     IREE_RETURN_IF_ERROR(vtable->verify(state->module, op, emitter));
   }
+  if (vtable->func_like && state->result->error_count == initial_error_count) {
+    IREE_RETURN_IF_ERROR(loom_verify_argument_access_record(
+        state,
+        (loom_func_like_t){.op = (loom_op_t*)op, .vtable = vtable->func_like}));
+  }
   return iree_ok_status();
 }
 
@@ -854,6 +860,14 @@ iree_status_t loom_verify_module(const loom_module_t* module,
   }
 
   if (out_result->error_count == 0) {
+    diagnostic_status = loom_verify_argument_access_check(&state);
+    if (!iree_status_is_ok(diagnostic_status)) {
+      loom_verify_state_deinitialize(&state);
+      return diagnostic_status;
+    }
+  }
+
+  if (out_result->error_count == 0) {
     diagnostic_status = loom_verify_consumption_check(&state);
     if (!iree_status_is_ok(diagnostic_status)) {
       loom_verify_state_deinitialize(&state);
@@ -927,6 +941,9 @@ iree_status_t loom_verify_functions(const loom_module_t* module,
     }
   }
 
+  if (iree_status_is_ok(verify_status) && out_result->error_count == 0) {
+    verify_status = loom_verify_argument_access_check(&state);
+  }
   if (iree_status_is_ok(verify_status) && out_result->error_count == 0) {
     verify_status = loom_verify_consumption_check(&state);
   }

@@ -11,6 +11,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/callable_effects.h"
+#include "loom/ops/signature_flags.h"
 
 typedef struct loom_link_func_contract_attr_t {
   // Source contract attribute index.
@@ -248,6 +249,56 @@ static void loom_link_func_contract_apply_effect_contract(
   }
 }
 
+static iree_status_t loom_link_func_contract_apply_argument_access(
+    const loom_link_func_contract_t* source,
+    const loom_link_func_contract_t* selected, loom_ir_remap_t* remap,
+    loom_link_func_contract_apply_mode_t mode,
+    loom_link_func_contract_mismatch_t* out_mismatch) {
+  const uint8_t source_index = source->function->signature_flags_attr_index;
+  if (!loom_link_func_contract_attr_present(source, source_index)) {
+    return iree_ok_status();
+  }
+  const uint8_t selected_index = selected->function->signature_flags_attr_index;
+  if (selected_index == LOOM_ATTR_INDEX_NONE) {
+    loom_link_func_contract_mismatch_field(IREE_SV("signature_flags"),
+                                           out_mismatch);
+    return iree_ok_status();
+  }
+  const iree_const_byte_span_t required =
+      loom_attr_as_bytes(source->attributes[source_index]);
+  const iree_const_byte_span_t provided =
+      loom_attr_as_bytes(selected->attributes[selected_index]);
+  bool needs_merge = false;
+  for (iree_host_size_t i = 0; i < required.data_length; ++i) {
+    if (required.data[i] == LOOM_ARGUMENT_ACCESS_UNSPECIFIED) {
+      continue;
+    }
+    if (!provided.data_length ||
+        provided.data[i] == LOOM_ARGUMENT_ACCESS_UNSPECIFIED) {
+      needs_merge = true;
+    } else if ((provided.data[i] & LOOM_ARGUMENT_ACCESS_READ_WRITE) &
+               ~(required.data[i] & LOOM_ARGUMENT_ACCESS_READ_WRITE)) {
+      loom_link_func_contract_mismatch_field(IREE_SV("signature_flags"),
+                                             out_mismatch);
+      break;
+    }
+  }
+  if (!loom_link_func_contract_mismatch_present(out_mismatch) && needs_merge &&
+      mode == LOOM_LINK_FUNC_CONTRACT_APPLY_MERGE) {
+    uint8_t* values = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        &remap->target_module->arena, required.data_length, sizeof(*values),
+        (void**)&values));
+    for (iree_host_size_t i = 0; i < required.data_length; ++i) {
+      values[i] = provided.data_length && provided.data[i] ? provided.data[i]
+                                                           : required.data[i];
+    }
+    selected->attributes[selected_index] =
+        loom_attr_signature_flags(values, (uint32_t)required.data_length);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_link_func_contract_apply(
     const loom_link_func_contract_t* source,
     const loom_link_func_contract_t* selected, loom_ir_remap_t* remap,
@@ -407,6 +458,10 @@ static iree_status_t loom_link_func_contract_apply(
   if (!loom_link_func_contract_mismatch_present(out_mismatch)) {
     loom_link_func_contract_apply_effect_contract(source, selected, mode,
                                                   out_mismatch);
+  }
+  if (!loom_link_func_contract_mismatch_present(out_mismatch)) {
+    IREE_RETURN_IF_ERROR(loom_link_func_contract_apply_argument_access(
+        source, selected, remap, mode, out_mismatch));
   }
   if (loom_link_func_contract_mismatch_present(out_mismatch) ||
       !iree_any_bit_set(flags, LOOM_LINK_FUNC_CONTRACT_MERGE_FLAG_OUTPUT)) {

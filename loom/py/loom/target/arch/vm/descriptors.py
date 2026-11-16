@@ -343,6 +343,10 @@ def _descriptor(
                     RefOwnership.REPLACE_OWNER: OwnershipEffect.OWNED,
                     RefOwnership.REPLACE_RETAIN: OwnershipEffect.OWNED,
                     RefOwnership.REPLACE_BORROW: OwnershipEffect.BORROWED,
+                    RefOwnership.COPY: OwnershipEffect.COPY,
+                    # Copy results preserve the lifetime mode carried by their
+                    # exact source type, as with structural reloads.
+                    RefOwnership.REPLACE_COPY: OwnershipEffect.NONE,
                     # A null result has no payload owner. Its authored type
                     # determines the source lifetime obligation.
                     RefOwnership.CLEAR: OwnershipEffect.NONE,
@@ -360,7 +364,12 @@ def _descriptor(
     # Owner acquisition must also precede later source consumption. A removal
     # flag alone does not establish scheduling dependencies with releases.
     creates_owner = any(
-        operand.ownership is OwnershipEffect.OWNED for operand in operands
+        operand.ownership in (OwnershipEffect.OWNED, OwnershipEffect.COPY)
+        for operand in operands
+    )
+    copies_state = any(
+        field.ref_policy and field.ref_policy.ownership is RefOwnership.REPLACE_COPY
+        for field in instruction.fields
     )
     defines_null = any(
         field.role is FieldRole.RESULT
@@ -380,7 +389,11 @@ def _descriptor(
             )
             for effect in instruction.state_effects
         )
-    ) + ((Effect(EffectKind.UNKNOWN, MemorySpace.GENERIC),) if creates_owner else ())
+    ) + (
+        (Effect(EffectKind.UNKNOWN, MemorySpace.GENERIC),)
+        if creates_owner or copies_state
+        else ()
+    )
     return Descriptor(
         key=f"vm.{instruction.mnemonic}",
         mnemonic=instruction.mnemonic,

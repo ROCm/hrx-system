@@ -882,7 +882,9 @@ TEST_F(WriterTest, ImportAndExportOffsetsAddressMatchingEntries) {
       /*abi=*/0, loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
       loom_named_attr_slice_empty(),
       {.module_id = 0, .symbol_id = import_symbol_id},
-      /*arg_types=*/nullptr, /*arg_types_count=*/0, /*result_types=*/nullptr,
+      /*arg_types=*/nullptr, /*arg_types_count=*/0,
+      /*signature_flags=*/iree_const_byte_span_empty(),
+      /*result_types=*/nullptr,
       /*result_count=*/0, /*tied_results=*/nullptr, /*tied_result_count=*/0,
       /*predicates=*/nullptr, /*predicates_count=*/0, LOOM_LOCATION_NONE,
       &import_op));

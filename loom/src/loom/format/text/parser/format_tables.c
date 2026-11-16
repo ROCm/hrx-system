@@ -87,7 +87,8 @@ static bool loom_parse_format_parsed_attr_present(
 }
 
 static bool loom_parse_format_element_covers_attr(
-    const loom_format_element_t* element, uint16_t attr_index) {
+    const loom_op_vtable_t* vtable, const loom_format_element_t* element,
+    uint16_t attr_index) {
   switch (element->kind) {
     case LOOM_FORMAT_KIND_ATTR_VALUE:
     case LOOM_FORMAT_KIND_SYMBOL_REF:
@@ -111,7 +112,9 @@ static bool loom_parse_format_element_covers_attr(
     case LOOM_FORMAT_KIND_ALIGNED_REFS:
       return element->data == attr_index;
     case LOOM_FORMAT_KIND_FUNC_ARGS:
-      return LOOM_FORMAT_FUNC_ARGS_START_ATTR_INDEX(element->data) ==
+      return (vtable->func_like &&
+              vtable->func_like->signature_flags_attr_index == attr_index) ||
+             LOOM_FORMAT_FUNC_ARGS_START_ATTR_INDEX(element->data) ==
                  attr_index ||
              LOOM_FORMAT_FUNC_ARGS_END_ATTR_INDEX(element->data) == attr_index;
     case LOOM_FORMAT_KIND_BLOCK_ARGS:
@@ -129,15 +132,15 @@ static bool loom_parse_format_element_covers_attr(
 }
 
 static bool loom_parse_format_inline_attr_covers_attr(
-    loom_format_t format, const loom_format_element_t* inline_element,
-    uint16_t attr_index) {
+    const loom_op_vtable_t* vtable, loom_format_t format,
+    const loom_format_element_t* inline_element, uint16_t attr_index) {
   const loom_format_element_t* elements = format.elements;
   for (uint16_t i = 0; i < format.count; ++i) {
     const loom_format_element_t* element = &elements[i];
     if (element == inline_element) {
       continue;
     }
-    if (loom_parse_format_element_covers_attr(element, attr_index)) {
+    if (loom_parse_format_element_covers_attr(vtable, element, attr_index)) {
       return false;
     }
   }
@@ -156,8 +159,8 @@ iree_status_t loom_parse_format_apply_elided_attr_defaults(
         &vtable->attr_descriptors[attr_index];
     if (!iree_any_bit_set(descriptor->flags, LOOM_ATTR_ELIDE_DEFAULT) ||
         loom_parse_format_parsed_attr_present(parsed, attr_index) ||
-        !loom_parse_format_inline_attr_covers_attr(format, inline_element,
-                                                   attr_index)) {
+        !loom_parse_format_inline_attr_covers_attr(
+            vtable, format, inline_element, attr_index)) {
       continue;
     }
     loom_attribute_t default_value =
@@ -779,6 +782,13 @@ iree_status_t loom_parse_format_inline_attr_dict(loom_parser_t* parser,
       IREE_RETURN_IF_ERROR(
           loom_parse_format_emit_unknown_attr_name(parser, key_token));
       return iree_ok_status();
+    }
+    // FuncArgs owns the complete signature payload; its physical bytes are
+    // not an alternate source spelling in an inline attribute dictionary.
+    if (vtable->func_like &&
+        attr_index == vtable->func_like->signature_flags_attr_index) {
+      return loom_parser_emit_unexpected_token(
+          parser, key_token, IREE_SV("parameter access annotations"));
     }
     if (loom_parse_format_parsed_attr_present(parsed, attr_index)) {
       IREE_RETURN_IF_ERROR(

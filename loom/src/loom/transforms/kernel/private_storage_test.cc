@@ -75,8 +75,8 @@ class PrivateStorageTest : public ::testing::Test {
         &builder_, 0, 0, 0, 0, 0, 0, 0, 0, loom_symbol_ref_null(),
         loom_attr_absent(), 0, loom_named_attr_slice_empty(),
         LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), {0, symbol},
-        types, 2, nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN,
-        &function_));
+        types, 2, /*signature_flags=*/iree_const_byte_span_empty(), nullptr, 0,
+        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function_));
     auto* body = loom_func_def_body(function_);
     loom_builder_enter_region(&builder_, function_, body);
     const auto initial = loom_region_entry_arg_id(body, 0);

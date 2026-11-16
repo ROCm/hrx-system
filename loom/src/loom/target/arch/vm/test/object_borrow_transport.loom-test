@@ -100,8 +100,8 @@ retired 0
 // ====
 
 // Returning a borrowed copy acquires protection at the escaping boundary.
-// A further live copy protects the native call independently. Both temporary
-// owners retire before the final observation of the host-anchored argument.
+// Native calls borrow that protected result. Its owner retires before the final
+// observation of the host-anchored argument.
 // RUN: emit vm-object-lifetime borrowed-argument
 type.decl import("lifetime", "object") @Object
 
@@ -124,9 +124,146 @@ func.def public @run(%value: ptr<@Object>) {
 
 // ----
 create 1
-references 3
+references 2
 read 1
 references 1
 OK 1
 destroy 1
+retired 0
+
+// ====
+
+// One protected carrier anchors repeated direct and overflow arguments across
+// a source loop. The original owner is gone before the calls. The child may
+// retire unused arguments and return an alias; only that escaping result needs
+// a new owner, which is released before the next submission.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "count") @count(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def noinline @overflow(%first: ptr<@Object>, %unused1: ptr<@Object>, %unused2: ptr<@Object>, %unused3: ptr<@Object>, %unused4: ptr<@Object>, %unused5: ptr<@Object>, %unused6: ptr<@Object>, %unused7: ptr<@Object>, %unused8: ptr<@Object>, %unused9: ptr<@Object>, %unused10: ptr<@Object>, %unused11: ptr<@Object>, %unused12: ptr<@Object>, %unused13: ptr<@Object>, %unused14: ptr<@Object>, %unused15: ptr<@Object>, %last: ptr<@Object>) -> (ptr<@Object>) {
+  func.call @count(%first) : (ptr<@Object>)
+  func.call @count(%last) : (ptr<@Object>)
+  func.return %last : ptr<@Object>
+}
+
+func.def public @run() {
+  %identity = scalar.constant 1 : i32
+  %owner, %unused = func.call @create(%identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  // REMARK@+1: DOMINANCE/021
+  %pointer = ref.borrow %owner : ref<@Object> -> ptr<@Object>
+  func.call @consume(%owner) : (ref<@Object>)
+  %begin = index.constant 0 : index
+  %end = index.constant 2 : index
+  %step = index.constant 1 : index
+  scf.for %iteration = [%begin to %end step %step] {
+    %returned = func.call @overflow(%pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer) : (ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>) -> (ptr<@Object>)
+    func.call @read(%returned) : (ptr<@Object>)
+  }
+  func.call @read(%pointer) : (ptr<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 1
+consume 1
+references 1
+references 1
+read 1
+references 1
+references 1
+read 1
+read 1
+destroy 1
+live 0
+OK 0
+retired 0
+
+// ====
+
+// A local slot owns the only remaining protection. Its reload feeds direct and
+// overflow arguments without extra owners; the slot outlives the call.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%identity: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "count", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @count(%pointer: reg<vm.ref : ptr<@Object>>)
+
+low.func.def noinline target<vm.core>(@vm) abi(vm_function) @overflow(%first: reg<vm.ref : ptr<@Object>>, %unused1: reg<vm.ref : ptr<@Object>>, %unused2: reg<vm.ref : ptr<@Object>>, %unused3: reg<vm.ref : ptr<@Object>>, %unused4: reg<vm.ref : ptr<@Object>>, %unused5: reg<vm.ref : ptr<@Object>>, %unused6: reg<vm.ref : ptr<@Object>>, %unused7: reg<vm.ref : ptr<@Object>>, %unused8: reg<vm.ref : ptr<@Object>>, %unused9: reg<vm.ref : ptr<@Object>>, %unused10: reg<vm.ref : ptr<@Object>>, %unused11: reg<vm.ref : ptr<@Object>>, %unused12: reg<vm.ref : ptr<@Object>>, %unused13: reg<vm.ref : ptr<@Object>>, %unused14: reg<vm.ref : ptr<@Object>>, %unused15: reg<vm.ref : ptr<@Object>>, %last: reg<vm.ref : ptr<@Object>>) asm {
+  low.func.call @count(%first) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @count(%last) : (reg<vm.ref : ptr<@Object>>)
+  return
+}
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %identity = constant.i32 1
+  %owner, %pointer = low.func.call @create(%identity) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  %slot = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  low.spill.move %pointer, %slot : reg<vm.ref : ptr<@Object>>, low.storage<private>
+  %loaded = low.reload %slot : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  low.func.call @overflow(%loaded, %loaded, %loaded, %loaded, %loaded, %loaded, %loaded, %loaded, %loaded, %loaded, %loaded, %loaded, %loaded, %loaded, %loaded, %loaded, %loaded) : (reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>)
+  return
+}
+
+// ----
+create 1
+references 1
+references 1
+destroy 1
+OK 0
+retired 0
+
+// ====
+
+// A failing child clears borrowed arguments before the caller's last anchor
+// retires. The later source use keeps that anchor out of the call packet.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "count") @count(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "fail") @fail()
+
+func.def noinline @child(%pointer: ptr<@Object>) {
+  func.call @count(%pointer) : (ptr<@Object>)
+  func.call @fail() : ()
+  func.return
+}
+
+func.def public @run() {
+  %identity = scalar.constant 1 : i32
+  %owner, %pointer = func.call @create(%identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  func.call @consume(%owner) : (ref<@Object>)
+  func.call @child(%pointer) : (ptr<@Object>)
+  func.call @read(%pointer) : (ptr<@Object>)
+  func.return
+}
+
+// ----
+create 1
+consume 1
+references 1
+fail 1
+destroy 1
+ABORTED 0
 retired 0

@@ -505,6 +505,9 @@ static iree_status_t loom_finalize_op(
            parsed->tied_result_count * sizeof(loom_tied_result_t));
   }
 
+  IREE_RETURN_IF_ERROR(
+      loom_parse_finalize_signature_flags(parser, vtable, parsed));
+
   // Copy attributes.
   if (parsed->attribute_count > 0) {
     memcpy(loom_op_attrs(op), parsed->attributes,

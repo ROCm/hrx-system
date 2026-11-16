@@ -190,7 +190,8 @@ static iree_status_t loom_pipeline_outline_body(
         /*source_signature=*/loom_attr_absent(), 0,
         loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
         loom_named_attr_slice_empty(), symbol, capture_types, capture_count,
-        NULL, 0, NULL, 0, NULL, 0, declaration->location, &function));
+        /*signature_flags=*/iree_const_byte_span_empty(), NULL, 0, NULL, 0,
+        NULL, 0, declaration->location, &function));
   }
   loom_region_t* target_body = concurrent ? loom_pipeline_def_body(function)
                                           : loom_func_def_body(function);

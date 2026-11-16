@@ -47,6 +47,13 @@ iree_status_t loom_parse_format_func_args(loom_parser_t* parser,
                                           uint16_t pending_func_arg_base,
                                           loom_parsed_op_t* parsed);
 
+// Completes the argument-then-result flags after the whole signature is parsed.
+// FuncArgs accumulates argument bytes in parser storage; this publishes the
+// complete immutable payload in the module arena.
+iree_status_t loom_parse_finalize_signature_flags(
+    loom_parser_t* parser, const loom_op_vtable_t* vtable,
+    loom_parsed_op_t* parsed);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

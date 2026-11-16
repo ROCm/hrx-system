@@ -1,0 +1,25 @@
+// RUN: roundtrip
+
+func.decl @copy_values(%count: index, %source: view<[%count]xi32> {access = read}, %target: view<[%count]xi32> {access = write}, %unbounded: buffer)
+
+func.decl @inspect(%input: buffer {access = none})
+
+func.def @update(%values: view<2xi32> {access = read_write}) {
+  %first = view.load %values[0] : view<2xi32> -> i32
+  view.store %first, %values[1] : i32, view<2xi32>
+  func.return
+}
+
+// ====
+
+// RUN: format bytecode
+
+func.decl @copy_values(%count: index, %source: view<[%count]xi32> {access = read}, %target: view<[%count]xi32> {access = write}, %unbounded: buffer)
+
+func.decl @inspect(%input: buffer {access = none})
+
+func.def @update(%values: view<2xi32> {access = read_write}) {
+  %first = view.load %values[0] : view<2xi32> -> i32
+  view.store %first, %values[1] : i32, view<2xi32>
+  func.return
+}

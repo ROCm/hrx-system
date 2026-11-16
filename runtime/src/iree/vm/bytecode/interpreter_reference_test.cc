@@ -177,10 +177,9 @@ TEST_F(BytecodeReferenceTest, TransfersPreserveOwnershipAndReplaceDestination) {
     // Live VM owners acquired when the input is borrowed.
     int32_t borrowed_count;
   };
-  const Case cases[] = {{"borrow", 1, 0},
-                        {"copy_register", 2, 0},
-                        {"copy_load", 3, 0},
-                        {"copy_store", 2, 0},
+  const Case cases[] = {{"borrow", 1, 0},       {"borrow_load", 1, 0},
+                        {"borrow_store", 1, 0}, {"copy_register", 2, 0},
+                        {"copy_load", 3, 0},    {"copy_store", 2, 0},
                         {"retain", 2, 1}};
   for (const auto& test : cases) {
     SCOPED_TRACE(test.name);

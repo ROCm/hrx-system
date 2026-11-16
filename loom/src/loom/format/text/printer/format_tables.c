@@ -19,7 +19,8 @@
 //===----------------------------------------------------------------------===//
 
 static bool loom_print_format_element_covers_attr(
-    const loom_format_element_t* element, uint16_t attr_index) {
+    const loom_op_vtable_t* vtable, const loom_format_element_t* element,
+    uint16_t attr_index) {
   switch (element->kind) {
     case LOOM_FORMAT_KIND_ATTR_VALUE:
     case LOOM_FORMAT_KIND_SYMBOL_REF:
@@ -43,7 +44,9 @@ static bool loom_print_format_element_covers_attr(
     case LOOM_FORMAT_KIND_ALIGNED_REFS:
       return element->data == attr_index;
     case LOOM_FORMAT_KIND_FUNC_ARGS:
-      return LOOM_FORMAT_FUNC_ARGS_START_ATTR_INDEX(element->data) ==
+      return (vtable->func_like &&
+              vtable->func_like->signature_flags_attr_index == attr_index) ||
+             LOOM_FORMAT_FUNC_ARGS_START_ATTR_INDEX(element->data) ==
                  attr_index ||
              LOOM_FORMAT_FUNC_ARGS_END_ATTR_INDEX(element->data) == attr_index;
     case LOOM_FORMAT_KIND_BLOCK_ARGS:
@@ -81,7 +84,7 @@ static bool loom_print_inline_attr_dict_attr_present(
     if (element == inline_element) {
       continue;
     }
-    if (loom_print_format_element_covers_attr(element, attr_index)) {
+    if (loom_print_format_element_covers_attr(vtable, element, attr_index)) {
       return false;
     }
   }

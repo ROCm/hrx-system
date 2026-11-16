@@ -29,8 +29,9 @@ extern "C" {
 // layout used by inline construction and calling-compiler optimization. They
 // are not a wire format or an independent construction API. An owning carrier
 // must be moved or reset exactly once. Ref-valued variants use the borrowed,
-// retained, and move ownership vocabulary from ref.h. Function refs are always
-// non-owning and borrow their program.
+// retained, and move ownership vocabulary from ref.h. Borrowed-only types
+// require borrowed construction; ownership-producing APIs require managed
+// objects. Function refs are always non-owning and borrow their program.
 typedef struct iree_vm_variant_t {
   // Canonical scalar bits or integer representation of an object pointer.
   uint64_t payload;
@@ -340,7 +341,7 @@ IREE_API_EXPORT iree_status_t iree_vm_ref_from_variant_borrowed(
     iree_vm_variant_t variant, iree_vm_ref_t* out_ref);
 
 // Extracts an owned complete ref without changing |variant|. Non-ref input
-// leaves |out_ref| untouched.
+// and borrowed-only input leave |out_ref| untouched.
 IREE_API_EXPORT iree_status_t iree_vm_ref_from_variant_retained(
     iree_vm_variant_t variant, iree_vm_ref_t* out_ref);
 

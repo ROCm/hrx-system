@@ -200,6 +200,7 @@ __all__ = [
     "Borrow",
     "Consume",
     "Retain",
+    "Copy",
     "Release",
     "Discard",
     "Escape",
@@ -1679,6 +1680,7 @@ class OperandOwnershipEffectKind(Enum):
     BORROW = "borrow"
     CONSUME = "consume"
     RETAIN = "retain"
+    COPY = "copy"
     RELEASE = "release"
     DISCARD = "discard"
     ESCAPE = "escape"
@@ -1744,6 +1746,11 @@ def Retain(
 ) -> OperandOwnershipEffect:
     """Operation retains the operand resource."""
     return OperandOwnershipEffect(operand, OperandOwnershipEffectKind.RETAIN, carrier)
+
+
+def Copy(operand: str) -> OperandOwnershipEffect:
+    """Copies complete ownership state into an independent stored carrier."""
+    return OperandOwnershipEffect(operand, OperandOwnershipEffectKind.COPY)
 
 
 def Release(
@@ -4847,6 +4854,35 @@ def _collect_func_args_elements(
     return tuple(func_args)
 
 
+def _validate_func_args_access(
+    name: str,
+    format_elements: tuple[FormatElement, ...],
+    attrs: tuple[AttrDef, ...],
+    func_like: FuncLikeInterface | None,
+) -> None:
+    """Keeps parameter syntax and the shared access contract aligned."""
+    signature_flags = func_like.signature_flags if func_like is not None else None
+    if signature_flags is not None:
+        access_attr = next(
+            (attr for attr in attrs if attr.name == signature_flags), None
+        )
+        if (
+            access_attr is None
+            or access_attr.attr_type != ATTR_TYPE_BYTES
+            or access_attr.enum_def is None
+            or not access_attr.optional
+        ):
+            raise ValueError(
+                f"Op '{name}': signature flags require an optional byte "
+                "array with an access enum"
+            )
+    for element in _collect_func_args_elements(format_elements):
+        if element.access != signature_flags:
+            raise ValueError(
+                f"Op '{name}': FuncArgs access must match FuncLike signature_flags"
+            )
+
+
 def _validate_func_args_partitions(
     op_name: str,
     format_elements: tuple[FormatElement, ...],
@@ -5464,6 +5500,7 @@ def _validate_ownership_effects(
             if effect.kind not in (
                 OperandOwnershipEffectKind.BORROW,
                 OperandOwnershipEffectKind.RETAIN,
+                OperandOwnershipEffectKind.COPY,
             ):
                 consumed_sources.add(effect.operand)
             if effect.operand not in operand_map:
@@ -5878,6 +5915,9 @@ class FuncLikeInterface(NamedTuple):
     cc: str | None = None
     # Callable effect-contract enum attr. None if not applicable.
     effect_contract: str | None = None
+    # Compact boundary flags in argument-then-result order. Zero entries carry
+    # no additional contract; the access enum describes the low subfield.
+    signature_flags: str | None = None
     # Temperature enum attr. None if not applicable.
     temperature: str | None = None
     # Inline policy enum attr. None if not applicable.
@@ -7016,6 +7056,7 @@ class Op:
             None,
         )
         func_args_fields = _collect_func_args_fields(frozen_format)
+        _validate_func_args_access(name, frozen_format, frozen_attrs, func_like)
         if func_args_fields and func_like is None:
             raise ValueError(
                 f"Op '{name}': FuncArgs format elements require a "

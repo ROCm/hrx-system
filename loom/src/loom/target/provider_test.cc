@@ -349,7 +349,8 @@ class TargetProviderTest : public ::testing::Test {
         /*inline_policy=*/0, loom_symbol_ref_null(),
         /*source_signature=*/loom_attr_absent(), /*abi=*/0,
         loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
-        loom_named_attr_slice_empty(), symbol, &type, 1, &type, 1,
+        loom_named_attr_slice_empty(), symbol, &type, 1,
+        /*signature_flags=*/iree_const_byte_span_empty(), &type, 1,
         tied_result ? &tie : nullptr, tied_result ? 1 : 0,
         /*predicates=*/nullptr, /*predicates_count=*/0, LOOM_LOCATION_UNKNOWN,
         &function_op));

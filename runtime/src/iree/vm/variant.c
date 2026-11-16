@@ -150,6 +150,7 @@ iree_vm_variant_from_ptr_borrowed(void* ptr, iree_vm_ref_type_t type) {
 
 IREE_API_EXPORT iree_vm_variant_t
 iree_vm_variant_from_ptr_retained(void* ptr, iree_vm_ref_type_t type) {
+  IREE_ASSERT(!ptr || !iree_vm_ref_type_is_borrowed_only(type));
   if (ptr) {
     iree_vm_ref_object_retain(ptr);
   }
@@ -158,6 +159,7 @@ iree_vm_variant_from_ptr_retained(void* ptr, iree_vm_ref_type_t type) {
 
 IREE_API_EXPORT iree_vm_variant_t
 iree_vm_variant_from_ptr_move(void** inout_ptr, iree_vm_ref_type_t type) {
+  IREE_ASSERT(!*inout_ptr || !iree_vm_ref_type_is_borrowed_only(type));
   void* ptr = *inout_ptr;
   *inout_ptr = NULL;
   return iree_vm_variant_make_ref(ptr, type, IREE_VM_VARIANT_TAG_OWNED_REF);
@@ -171,6 +173,7 @@ iree_vm_variant_from_ref_borrowed(iree_vm_ref_t ref) {
 
 IREE_API_EXPORT iree_vm_variant_t
 iree_vm_variant_from_ref_retained(iree_vm_ref_t ref) {
+  IREE_ASSERT(!iree_vm_ref_is_borrowed_only(ref));
   if (ref.object) {
     iree_vm_ref_object_retain(ref.object);
   }
@@ -210,6 +213,10 @@ IREE_API_EXPORT iree_status_t iree_vm_ref_from_variant_retained(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "variant is not a ref");
   }
+  if (iree_vm_ref_type_is_borrowed_only(iree_vm_variant_ref_type(variant))) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "borrowed-only ref cannot acquire an owner");
+  }
   *out_ref = iree_vm_ref_from_ptr_retained((void*)(uintptr_t)variant.payload,
                                            iree_vm_variant_ref_type(variant));
   return iree_ok_status();
@@ -224,6 +231,10 @@ IREE_API_EXPORT iree_status_t iree_vm_ref_from_variant_move(
   if (!iree_vm_variant_is_ref(*variant)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "variant is not a ref");
+  }
+  if (iree_vm_ref_type_is_borrowed_only(iree_vm_variant_ref_type(*variant))) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "borrowed-only ref cannot acquire an owner");
   }
   iree_vm_variant_t old_variant = *variant;
   void* object = (void*)(uintptr_t)old_variant.payload;
@@ -259,6 +270,10 @@ IREE_API_EXPORT iree_status_t iree_vm_ptr_from_variant_retained(
                             "out_ptr is required");
   }
   IREE_RETURN_IF_ERROR(iree_vm_variant_check_ref_type(variant, expected_type));
+  if (iree_vm_ref_type_is_borrowed_only(iree_vm_variant_ref_type(variant))) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "borrowed-only ref cannot acquire an owner");
+  }
   void* object = (void*)(uintptr_t)variant.payload;
   if (object) {
     iree_vm_ref_object_retain(object);
@@ -275,6 +290,10 @@ IREE_API_EXPORT iree_status_t iree_vm_ptr_from_variant_move(
                             "variant and out_ptr are required");
   }
   IREE_RETURN_IF_ERROR(iree_vm_variant_check_ref_type(*variant, expected_type));
+  if (iree_vm_ref_type_is_borrowed_only(iree_vm_variant_ref_type(*variant))) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "borrowed-only ref cannot acquire an owner");
+  }
   iree_vm_variant_t old_variant = *variant;
   void* object = (void*)(uintptr_t)old_variant.payload;
   if (object && iree_vm_variant_ref_is_borrowed(old_variant)) {
@@ -294,6 +313,8 @@ IREE_API_EXPORT bool iree_vm_variant_ref_isa(iree_vm_variant_t variant,
 IREE_API_EXPORT iree_vm_variant_t
 iree_vm_variant_retain(iree_vm_variant_t variant) {
   if (variant.payload && iree_vm_variant_is_ref(variant)) {
+    IREE_ASSERT(
+        !iree_vm_ref_type_is_borrowed_only(iree_vm_variant_ref_type(variant)));
     iree_vm_ref_object_retain((void*)(uintptr_t)variant.payload);
     variant.metadata &= ~(uint64_t)IREE_VM_VARIANT_TAG_MASK;
   }
@@ -304,6 +325,8 @@ IREE_API_EXPORT iree_vm_variant_t
 iree_vm_variant_move(iree_vm_variant_t* variant) {
   iree_vm_variant_t result = *variant;
   if (result.payload && iree_vm_variant_ref_is_borrowed(result)) {
+    IREE_ASSERT(
+        !iree_vm_ref_type_is_borrowed_only(iree_vm_variant_ref_type(result)));
     iree_vm_ref_object_retain((void*)(uintptr_t)result.payload);
     result.metadata &= ~(uint64_t)IREE_VM_VARIANT_TAG_MASK;
   }

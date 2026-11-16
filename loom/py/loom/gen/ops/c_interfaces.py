@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from loom.dsl import (
+    ATTR_TYPE_BYTES,
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64,
     ATTR_TYPE_PARAMETERIZED,
@@ -182,6 +183,12 @@ INTERFACES: tuple[InterfaceSpec, ...] = (
             InterfaceFieldSpec("visibility", "visibility_attr_index", "attr"),
             InterfaceFieldSpec("cc", "cc_attr_index", "attr"),
             InterfaceFieldSpec("effect_contract", "effect_contract_attr_index", "attr"),
+            InterfaceFieldSpec(
+                "signature_flags",
+                "signature_flags_attr_index",
+                "attr",
+                expected_attr_type=ATTR_TYPE_BYTES,
+            ),
             InterfaceFieldSpec("temperature", "temperature_attr_index", "attr"),
             InterfaceFieldSpec("inline_policy", "inline_policy_attr_index", "attr"),
             InterfaceFieldSpec("predicates", "predicates_attr_index", "attr"),

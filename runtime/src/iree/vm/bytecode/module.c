@@ -101,6 +101,16 @@ static iree_status_t iree_vm_bytecode_module_resolve_ref_types(
     }
     entry_base += group->entry_count_u32;
   }
+  const uint32_t global_ref_count =
+      layout->globals.header ? layout->globals.header->ref_count_u32 : 0;
+  for (uint32_t i = 0; i < global_ref_count; ++i) {
+    if (iree_vm_ref_type_is_borrowed_only(
+            out_types[layout->globals.refs[i].ref_type_ordinal_u16])) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "borrowed-only types cannot be stored in globals");
+    }
+  }
   return iree_ok_status();
 }
 

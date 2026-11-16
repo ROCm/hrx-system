@@ -29,3 +29,9 @@ loom_test(
     srcs = ["call_target_context.loom"],
     execution_profiles = [VM_REFERENCE_PROFILE],
 )
+
+loom_test(
+    name = "argument_access_test",
+    srcs = ["argument_access.loom"],
+    execution_profiles = [VM_REFERENCE_PROFILE],
+)

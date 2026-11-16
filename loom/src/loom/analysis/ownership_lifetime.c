@@ -363,6 +363,8 @@ static iree_string_view_t loom_ownership_lifetime_operand_effect_name(
       return IREE_SV("consume");
     case LOOM_OPERAND_OWNERSHIP_RETAIN:
       return IREE_SV("retain");
+    case LOOM_OPERAND_OWNERSHIP_COPY:
+      return IREE_SV("copy");
     case LOOM_OPERAND_OWNERSHIP_RELEASE:
       return IREE_SV("release");
     case LOOM_OPERAND_OWNERSHIP_DISCARD:
@@ -794,6 +796,7 @@ static iree_status_t loom_ownership_lifetime_apply_operand_effect(
   switch (effect->effect) {
     case LOOM_OPERAND_OWNERSHIP_BORROW:
     case LOOM_OPERAND_OWNERSHIP_RETAIN:
+    case LOOM_OPERAND_OWNERSHIP_COPY:
       return loom_ownership_lifetime_apply_borrow(state, bits, op, effect);
     case LOOM_OPERAND_OWNERSHIP_CONSUME:
     case LOOM_OPERAND_OWNERSHIP_RELEASE:

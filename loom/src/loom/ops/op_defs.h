@@ -29,6 +29,7 @@
 #include "loom/ops/builder.h"
 #include "loom/ops/format.h"
 #include "loom/ops/mutation.h"
+#include "loom/ops/signature_flags.h"
 #include "loom/ops/use_list.h"
 #include "loom/util/bstring.h"
 
@@ -371,6 +372,9 @@ enum loom_operand_ownership_effect_e {
   LOOM_OPERAND_OWNERSHIP_ESCAPE = 6,
   // Transfers the exact owned or borrowed state and invalidates the source.
   LOOM_OPERAND_OWNERSHIP_MOVE = 7,
+  // Copies complete state into independent storage without consuming the
+  // source. Owners acquire another release obligation; borrows stay borrowed.
+  LOOM_OPERAND_OWNERSHIP_COPY = 8,
 };
 typedef uint8_t loom_operand_ownership_effect_t;
 
