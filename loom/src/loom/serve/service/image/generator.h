@@ -38,6 +38,8 @@ typedef struct loom_serve_image_generator_t {
   void* self;
   // Positive source-declared work limit for one cohort.
   uint64_t batch_limit;
+  // Execution device coordinate in the enclosing immutable HAL group.
+  uint64_t device_ordinal;
   // CPU source preparation, with no shared admission-policy mutation. Returns
   // INVALID_ARGUMENT for rejected input with no retained payload; other errors
   // are terminal. Success transfers opaque bytes to the request owner; this

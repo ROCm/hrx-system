@@ -54,6 +54,7 @@ typedef enum loom_serve_image_phase_e {
   IMAGE_PHASE_PREPARING,
   IMAGE_PHASE_BATCHING,
   IMAGE_PHASE_SPECIALIZING,
+  IMAGE_PHASE_PREPARED,
   IMAGE_PHASE_WAITING,
   IMAGE_PHASE_READY,
   IMAGE_PHASE_GENERATING,
@@ -61,7 +62,7 @@ typedef enum loom_serve_image_phase_e {
 } loom_serve_image_phase_t;
 
 static const char* const image_phases[] = {
-    "idle",    "preparing", "batching",   "specializing",
+    "idle",    "preparing", "batching",   "specializing", "prepared",
     "waiting", "ready",     "generating", "encoding"};
 
 enum { IMAGE_EVENT_CPU = 1u << 0, IMAGE_EVENT_DEVICE = 1u << 1 };
@@ -85,6 +86,25 @@ struct loom_serve_image_service_t {
   bool stopping;
   // Owned failure accumulated on a turn, transferred to the router on return.
   iree_status_t status;
+  // Copied owner facts published into the enclosing lifecycle's retained rows.
+  struct {
+    // Exclusive offer/cohort slots and the sole composed summary publisher.
+    loom_runtime_service_control_binding_t binding;
+    // Current legal source opportunity, independent of its publication token.
+    loom_runtime_service_offer_t offer;
+    // Candidate window or prepared-cohort participation for this legal offer.
+    uint64_t request_count;
+    // Monotonic acceptance identity; zero is never assigned to accepted work.
+    uint64_t next_serial;
+    // Accepted unit, retained through failed source retirement.
+    loom_runtime_service_operation_t operation;
+    // Last published lifetime, used to suppress unchanged operation writes.
+    uint64_t published_serial;
+    // Last composed summary, used to suppress unchanged atomic writes.
+    loom_runtime_service_observation_t observation;
+    // Independent compiler/selection owners, updated by their publisher.
+    uint64_t management_pending_count;
+  } scheduling;
   // Total host request credit shared by queued and active requests.
   iree_host_size_t capacity;
   // Owned jobs across the pending queue and active cohort.
@@ -177,6 +197,17 @@ struct loom_serve_image_service_t {
   // Reusable application-side HTTP/JSON response storage.
   iree_string_builder_t response;
 };
+
+static void loom_serve_image_publish(loom_serve_image_service_t* service);
+static void loom_serve_image_stop(loom_serve_image_service_t* service);
+
+static void loom_serve_image_publish_management(
+    void* self, const loom_runtime_service_observation_t* observation) {
+  loom_serve_image_service_t* service = self;
+  service->scheduling.management_pending_count =
+      observation->pending_operation_count;
+  loom_serve_image_publish(service);
+}
 
 static uint64_t loom_serve_image_active(
     const loom_serve_image_service_t* service) {
@@ -596,6 +627,10 @@ static void loom_serve_image_finish(loom_serve_image_service_t* service,
   service->cohort.count = 0;
   service->cohort.next = 0;
   service->phase = IMAGE_PHASE_IDLE;
+  if (outcome != LOOM_SERVICE_TELEMETRY_FAILED &&
+      !service->telemetry.failure_code && iree_status_is_ok(service->status)) {
+    service->scheduling.operation.key.serial = 0;
+  }
 }
 
 static void loom_serve_image_reject_cohort(loom_serve_image_service_t* service,
@@ -619,6 +654,9 @@ static void loom_serve_image_reject_cohort(loom_serve_image_service_t* service,
   service->cohort.count = 0;
   service->cohort.next = 0;
   service->phase = IMAGE_PHASE_IDLE;
+  if (!service->telemetry.failure_code && iree_status_is_ok(service->status)) {
+    service->scheduling.operation.key.serial = 0;
+  }
 }
 
 // Requeue the prepared snapshot ahead of arrivals that came while CPU work was
@@ -845,6 +883,15 @@ static void loom_serve_image_collect(loom_serve_image_service_t* service,
     loom_serve_image_encode_next(service);
   } else if (service->phase == IMAGE_PHASE_PREPARING) {
     loom_serve_image_preparation_complete(service);
+    // Capture is the second CPU loan of this accepted preparation. Unprepared
+    // arrivals outside its snapshot require another grant.
+    if (!service->stopping && iree_status_is_ok(service->status) &&
+        service->pending_count && service->pending[0]->prepared.bytes) {
+      loom_serve_image_select(service);
+    } else if (!service->telemetry.failure_code &&
+               iree_status_is_ok(service->status)) {
+      service->scheduling.operation.key.serial = 0;
+    }
   } else if (service->phase == IMAGE_PHASE_BATCHING) {
     // The generator checked the total output extent before accepting capture.
     iree_host_size_t offset = 0;
@@ -908,6 +955,16 @@ static iree_status_t loom_serve_image_accept(
       .request = receipt.id,
       .event = &LOOM_SERVICE_TELEMETRY_REQUEST_BEGIN};
   loom_runtime_telemetry_stream_append(service->telemetry.stream, &begin);
+  if (service->stopping ||
+      iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
+    if (!service->stopping) {
+      loom_serve_image_stop(service);
+      loom_serve_image_publish(service);
+    }
+    return loom_serve_image_reject(service, connection, &receipt,
+                                   "503 Service Unavailable",
+                                   IREE_SV("image service is stopping"));
+  }
   if (!iree_string_view_equal(request->method, IREE_SV("POST")) ||
       !iree_string_view_equal(request->target,
                               IREE_SV("/v1/images/generations"))) {
@@ -959,6 +1016,7 @@ static iree_status_t loom_serve_image_accept(
         (iree_host_size_t)job->request.width * job->request.height * 4;
     service->pending[service->pending_count++] = job;
     ++service->count;
+    loom_serve_image_publish(service);
   } else {
     loom_serve_http_connection_abort(connection);
     loom_serve_image_request_end(service, &receipt,
@@ -1091,9 +1149,88 @@ static bool loom_serve_image_is_pending(void* self) {
          loom_runtime_timer_is_pending(&service->timer);
 }
 
-static iree_status_t loom_serve_image_advance(
-    void* self, loom_runtime_service_flags_t flags, bool* out_progress) {
-  loom_serve_image_service_t* service = self;
+static void loom_serve_image_publish(loom_serve_image_service_t* service) {
+  loom_runtime_service_work_flags_t work = 0;
+  uint64_t request_count = 0;
+  if (!service->stopping && service->phase == IMAGE_PHASE_PREPARED) {
+    work = LOOM_RUNTIME_SERVICE_WORK_EXECUTION;
+    request_count = service->cohort.count;
+  } else if (!service->stopping && service->phase == IMAGE_PHASE_IDLE &&
+             service->pending_count) {
+    work = LOOM_RUNTIME_SERVICE_WORK_PREPARATION;
+    request_count = service->pending_count;
+  }
+  const uint64_t devices = UINT64_C(1) << service->generator.device_ordinal;
+  const loom_runtime_service_use_t use = {
+      .resource_ordinal = service->generator.device_ordinal};
+  loom_runtime_service_control_t* control = service->scheduling.binding.control;
+  loom_runtime_service_offer_t* offer = &service->scheduling.offer;
+  if (offer->work != work ||
+      service->scheduling.request_count != request_count) {
+    IREE_ASSERT(offer->key.revision != UINT64_MAX);
+    ++offer->key.revision;
+    offer->work = work;
+    offer->choice_count = work ? 1 : 0;
+    service->scheduling.request_count = request_count;
+    const loom_runtime_service_choice_publication_t choice = {
+        .choice = {.instance_ordinal =
+                       service->scheduling.binding.instance_ordinal,
+                   .request_count = request_count,
+                   .devices = devices,
+                   .use_count = 1},
+        .uses = &use};
+    loom_runtime_service_publish_offer(control, offer, &choice);
+  }
+  loom_runtime_service_operation_t* operation = &service->scheduling.operation;
+  loom_runtime_service_wait_flags_t waits = 0;
+  if (service->phase == IMAGE_PHASE_PREPARING ||
+      service->phase == IMAGE_PHASE_BATCHING ||
+      service->phase == IMAGE_PHASE_SPECIALIZING ||
+      service->phase == IMAGE_PHASE_ENCODING) {
+    waits = LOOM_RUNTIME_SERVICE_WAIT_CPU;
+  } else if (service->phase == IMAGE_PHASE_WAITING) {
+    waits = LOOM_RUNTIME_SERVICE_WAIT_CAPACITY;
+  } else if (service->phase == IMAGE_PHASE_GENERATING) {
+    waits = LOOM_RUNTIME_SERVICE_WAIT_DEVICE;
+  }
+  if (operation->key.serial != service->scheduling.published_serial ||
+      operation->waits != waits) {
+    operation->waits = waits;
+    operation->devices = operation->key.serial ? devices : 0;
+    operation->use_count = operation->key.serial ? 1 : 0;
+    loom_runtime_service_publish_operation(control, operation, &use);
+    service->scheduling.published_serial = operation->key.serial;
+  }
+  const loom_runtime_service_observation_t observation = {
+      .owned_request_count = service->count,
+      .waiting_request_count =
+          service->pending_count +
+          (service->phase == IMAGE_PHASE_PREPARED ? service->cohort.count : 0),
+      .offer_count = offer->choice_count,
+      .pending_operation_count = (operation->key.serial != 0) +
+                                 service->scheduling.management_pending_count,
+      .offered_devices = offer->choice_count ? devices : 0,
+      .accepted_devices =
+          operation->devices |
+          (service->scheduling.management_pending_count ? devices : 0)};
+  const loom_runtime_service_observation_t* published =
+      &service->scheduling.observation;
+  if (observation.owned_request_count != published->owned_request_count ||
+      observation.waiting_request_count != published->waiting_request_count ||
+      observation.offer_count != published->offer_count ||
+      observation.pending_operation_count !=
+          published->pending_operation_count ||
+      observation.offered_devices != published->offered_devices ||
+      observation.accepted_devices != published->accepted_devices) {
+    service->scheduling.binding.publish_observation(
+        service->scheduling.binding.publisher, &observation);
+    service->scheduling.observation = observation;
+  }
+}
+
+iree_status_t loom_serve_image_service_progress(
+    loom_serve_image_service_t* service, loom_runtime_service_flags_t flags,
+    bool* out_progress) {
   *out_progress = false;
   if (!service->stopping &&
       iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
@@ -1111,6 +1248,7 @@ static iree_status_t loom_serve_image_advance(
       service->reconfiguration,
       iree_status_is_ok(service->status) &&
           (service->phase == IMAGE_PHASE_IDLE ||
+           service->phase == IMAGE_PHASE_PREPARED ||
            service->phase == IMAGE_PHASE_WAITING),
       service->stopping || !iree_status_is_ok(service->status));
   if (!service->stopping && !iree_status_is_ok(service->status)) {
@@ -1140,13 +1278,20 @@ static iree_status_t loom_serve_image_advance(
         service->generator.discard_batch(service->generator.self);
         loom_serve_image_finish(service, LOOM_SERVICE_TELEMETRY_CANCELLED);
       } else {
-        service->phase = IMAGE_PHASE_WAITING;
-        service->phase_start = iree_time_now();
+        service->phase = IMAGE_PHASE_PREPARED;
+        service->scheduling.operation.key.serial = 0;
       }
       *out_progress = true;
     }
   }
-  if (service->phase == IMAGE_PHASE_WAITING) {
+  if (service->phase == IMAGE_PHASE_PREPARED &&
+      (service->stopping || !loom_serve_image_has_peer(service))) {
+    service->generator.discard_batch(service->generator.self);
+    loom_serve_image_finish(service, service->telemetry.failure_code
+                                         ? LOOM_SERVICE_TELEMETRY_FAILED
+                                         : LOOM_SERVICE_TELEMETRY_CANCELLED);
+    *out_progress = true;
+  } else if (service->phase == IMAGE_PHASE_WAITING) {
     loom_serve_image_prepared(service, flags, out_progress);
   } else if (service->phase == IMAGE_PHASE_READY) {
     service->status = loom_serve_image_service_submit(service);
@@ -1154,19 +1299,6 @@ static iree_status_t loom_serve_image_advance(
     if (!iree_status_is_ok(service->status)) {
       loom_serve_image_finish(service, LOOM_SERVICE_TELEMETRY_FAILED);
     }
-  }
-  if (!service->stopping && iree_status_is_ok(service->status) &&
-      service->phase == IMAGE_PHASE_IDLE && service->pending_count) {
-    if (service->pending[0]->prepared.bytes) {
-      loom_serve_image_select(service);
-    } else {
-      memcpy(service->cohort.jobs, service->pending,
-             service->pending_count * sizeof(*service->cohort.jobs));
-      service->cohort.count = service->pending_count;
-      service->pending_count = 0;
-      loom_serve_image_schedule_cpu(service, IMAGE_PHASE_PREPARING);
-    }
-    *out_progress = true;
   }
   bool timer_progress = false;
   bool tick = false;
@@ -1191,6 +1323,78 @@ static iree_status_t loom_serve_image_advance(
     loom_serve_image_diagnose(service, loom_serve_image_active(service),
                               status);
   }
+  loom_serve_image_publish(service);
+  return status;
+}
+
+iree_status_t loom_serve_image_service_try_schedule(
+    loom_serve_image_service_t* service, loom_runtime_service_offer_key_t offer,
+    uint64_t choice_ordinal, loom_runtime_service_flags_t flags,
+    loom_runtime_service_operation_key_t* out_operation) {
+  *out_operation = (loom_runtime_service_operation_key_t){0};
+  if (service->stopping ||
+      iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING) ||
+      offer.ordinal != service->scheduling.offer.key.ordinal ||
+      offer.revision != service->scheduling.offer.key.revision ||
+      choice_ordinal >= service->scheduling.offer.choice_count) {
+    return iree_ok_status();
+  }
+  IREE_ASSERT(service->scheduling.next_serial != UINT64_MAX);
+  service->scheduling.operation = (loom_runtime_service_operation_t){
+      .key = {.ordinal = service->scheduling.binding.operation_ordinal,
+              .serial = ++service->scheduling.next_serial},
+      .origin = offer,
+      .choice_ordinal = choice_ordinal,
+      .work = service->scheduling.offer.work};
+  *out_operation = service->scheduling.operation.key;
+  if (service->phase == IMAGE_PHASE_IDLE) {
+    if (service->pending[0]->prepared.bytes) {
+      loom_serve_image_select(service);
+    } else {
+      memcpy(service->cohort.jobs, service->pending,
+             service->pending_count * sizeof(*service->cohort.jobs));
+      service->cohort.count = service->pending_count;
+      service->pending_count = 0;
+      loom_serve_image_schedule_cpu(service, IMAGE_PHASE_PREPARING);
+    }
+  } else {
+    service->phase = IMAGE_PHASE_WAITING;
+    service->phase_start = iree_time_now();
+    bool progress = false;
+    loom_serve_image_prepared(service, flags, &progress);
+  }
+  iree_status_t status = service->status;
+  if (!iree_status_is_ok(status)) {
+    service->telemetry.failure_code = iree_status_code(status);
+    loom_serve_image_stop(service);
+    loom_serve_image_diagnose(service, loom_serve_image_active(service),
+                              status);
+  }
+  service->status = iree_ok_status();
+  loom_serve_image_publish(service);
+  return status;
+}
+
+static iree_status_t loom_serve_image_advance(
+    void* self, loom_runtime_service_flags_t flags, bool* out_progress) {
+  loom_serve_image_service_t* service = self;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_image_service_progress(service, flags, out_progress));
+  loom_runtime_service_operation_key_t operation;
+  iree_status_t status = loom_serve_image_service_try_schedule(
+      service, service->scheduling.offer.key, 0, flags, &operation);
+  *out_progress |= operation.serial != 0;
+  return status;
+}
+
+static iree_status_t loom_serve_image_try_schedule(
+    void* self, loom_runtime_service_offer_key_t offer, uint64_t choice_ordinal,
+    loom_runtime_service_flags_t flags,
+    loom_runtime_service_schedule_outcome_t* out_outcome) {
+  iree_status_t status = loom_serve_image_service_try_schedule(
+      self, offer, choice_ordinal, flags, &out_outcome->operation);
+  out_outcome->accepted = out_outcome->operation.serial != 0;
+  out_outcome->status_code = iree_status_code(status);
   return status;
 }
 
@@ -1202,6 +1406,7 @@ loom_serve_service_t loom_serve_image_service_interface(
       .is_pending = loom_serve_image_is_pending,
       .is_active = loom_serve_image_is_active,
       .advance = loom_serve_image_advance,
+      .try_schedule = loom_serve_image_try_schedule,
   };
   static const iree_string_view_t input_modalities[] = {IREE_SVL("text")};
   static const iree_string_view_t output_modalities[] = {IREE_SVL("image")};
@@ -1209,7 +1414,8 @@ loom_serve_service_t loom_serve_image_service_interface(
       .name = service->options.name,
       .runtime = {.self = service,
                   .vtable = &vtable,
-                  .capacity_domain = service->generator.capacity_domain},
+                  .capacity_domain = service->generator.capacity_domain,
+                  .control = service->scheduling.binding.control},
       .accept = loom_serve_image_accept,
       .tokenizer = service->generator.tokenizer,
       .kind = LOOM_SERVICE_KIND_IMAGE,
@@ -1237,13 +1443,15 @@ void loom_serve_image_service_free(loom_serve_image_service_t* service) {
   if (!service->stopping) {
     loom_serve_image_stop(service);
   }
-  if (service->phase == IMAGE_PHASE_WAITING) {
+  if (service->phase == IMAGE_PHASE_PREPARED ||
+      service->phase == IMAGE_PHASE_WAITING) {
     service->generator.discard_batch(service->generator.self);
     loom_serve_image_finish(service, service->telemetry.failure_code
                                          ? LOOM_SERVICE_TELEMETRY_FAILED
                                          : LOOM_SERVICE_TELEMETRY_CANCELLED);
   }
   loom_service_execution_reconfiguration_free(service->reconfiguration);
+  loom_serve_image_publish(service);
   service->generator.set_observer(service->generator.self,
                                   (loom_runtime_wake_callback_t){0});
   loom_runtime_timer_deinitialize(&service->timer);
@@ -1266,20 +1474,37 @@ void loom_serve_image_service_free(loom_serve_image_service_t* service) {
 iree_status_t loom_serve_image_service_allocate(
     loom_runtime_host_t* host, loom_serve_image_generator_t generator,
     const loom_serve_image_service_options_t* options,
-    loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
-    loom_serve_image_service_t** out_service) {
+    loom_runtime_telemetry_stream_t* stream,
+    loom_runtime_service_control_binding_t scheduling,
+    iree_allocator_t host_allocator, loom_serve_image_service_t** out_service) {
   *out_service = NULL;
   if (!generator.try_admit || !generator.batch_limit || !generator.prepare ||
       !generator.prepare_batch || !generator.set_observer ||
       !generator.advance_batch || !generator.discard_batch ||
-      !generator.submit || !generator.complete || !options->width ||
-      !options->height || !options->name.size || !options->pending_capacity ||
+      !generator.submit || !generator.complete ||
+      generator.device_ordinal >= 64 || !options->width || !options->height ||
+      !options->name.size || !options->pending_capacity ||
       options->heartbeat_interval < 0 ||
       options->pending_capacity >=
           IREE_HOST_SIZE_MAX / sizeof(loom_service_prepared_request_t)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "image service requires a generator, geometry, "
                             "name and queue capacity");
+  }
+  if (!scheduling.control || !scheduling.publish_observation) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "image service requires a retained control and "
+                            "its summary publisher");
+  }
+  const loom_runtime_service_control_layout_t layout =
+      loom_runtime_service_control_layout(scheduling.control);
+  if (scheduling.offer_ordinal >= layout.offer_capacity ||
+      scheduling.operation_ordinal >= layout.operation_capacity ||
+      options->variant_capacity >=
+          layout.operation_capacity - scheduling.operation_ordinal) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "image control does not cover cohort and "
+                            "management operation slots");
   }
   loom_serve_image_service_t* service = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_aligned(
@@ -1288,6 +1513,9 @@ iree_status_t loom_serve_image_service_allocate(
   service->host_allocator = host_allocator;
   service->generator = generator;
   service->options = *options;
+  service->scheduling.binding = scheduling;
+  service->scheduling.offer.key.ordinal = scheduling.offer_ordinal;
+  service->scheduling.operation.key.ordinal = scheduling.operation_ordinal;
   service->capacity = options->pending_capacity + 1;
   service->telemetry.stream = stream;
   service->executor = loom_runtime_host_executor(host);
@@ -1318,6 +1546,17 @@ iree_status_t loom_serve_image_service_allocate(
     status = loom_service_execution_reconfiguration_allocate(
         generator.execution_update, options->variant_capacity, host_allocator,
         &service->reconfiguration);
+    if (iree_status_is_ok(status)) {
+      loom_service_execution_reconfiguration_bind_control(
+          service->reconfiguration,
+          (loom_runtime_service_control_binding_t){
+              .control = scheduling.control,
+              .operation_ordinal = scheduling.operation_ordinal + 1,
+              .instance_ordinal = scheduling.instance_ordinal,
+              .publish_observation = loom_serve_image_publish_management,
+              .publisher = service},
+          generator.device_ordinal);
+    }
   }
   if (iree_status_is_ok(status) && !stream) {
     status = loom_runtime_telemetry_stream_allocate(128, host_allocator,

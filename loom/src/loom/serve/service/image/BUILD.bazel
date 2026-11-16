@@ -85,6 +85,7 @@ loom_cc_library(
         ":generator",
         ":output",
         ":request",
+        "//loom/src/loom/runtime:service_control",
         "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/execution",
         "//loom/src/loom/runtime/host",
@@ -176,13 +177,16 @@ loom_cc_library(
     testonly = True,
     srcs = [
         "source_service_test.cc",
+        "specialization_test.cc",
     ],
+    hdrs = ["service_test_fixture.h"],
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
+        "//loom/src/loom/runtime:service_control",
         "//loom/src/loom/runtime/device",
         "//loom/src/loom/runtime/execution",
         "//loom/src/loom/runtime/host",
@@ -193,6 +197,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/telemetry:field",
         "//loom/src/loom/runtime/telemetry:stream",
         "//loom/src/loom/runtime/testing:application",
+        "//loom/src/loom/runtime/testing:service_control",
         "//loom/src/loom/runtime/testing:stalled_stderr",
         "//loom/src/loom/serve/server:model_registration",
         "//loom/src/loom/serve/server:registry",

@@ -431,6 +431,7 @@ loom_cc_library(
     deps = [
         ":configuration",
         ":registry",
+        "//loom/src/loom/runtime:service_control",
         "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/device",
         "//loom/src/loom/runtime/host",

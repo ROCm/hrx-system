@@ -8,6 +8,7 @@
 #define LOOM_SERVE_SERVICE_IMAGE_SERVICE_H_
 
 #include "loom/runtime/host/host.h"
+#include "loom/runtime/service_control.h"
 #include "loom/serve/service/image/generator.h"
 #include "loom/serve/service/service.h"
 
@@ -41,11 +42,29 @@ typedef struct loom_serve_image_service_t loom_serve_image_service_t;
 // encoding share the host executor. The generator and deployment name outlive
 // this object. A supplied telemetry stream is borrowed through destruction and
 // preserves the registration's history; NULL creates a service-owned stream.
+// The supplied control has one single-choice offer and 1 + variant_capacity
+// operation slots, each with one device use. Its storage and summary publisher
+// outlive this engine and the generator's actual retirement.
 iree_status_t loom_serve_image_service_allocate(
     loom_runtime_host_t* host, loom_serve_image_generator_t generator,
     const loom_serve_image_service_options_t* options,
-    loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
-    loom_serve_image_service_t** out_service);
+    loom_runtime_telemetry_stream_t* stream,
+    loom_runtime_service_control_binding_t scheduling,
+    iree_allocator_t host_allocator, loom_serve_image_service_t** out_service);
+
+// Consumes accepted readiness and cleanup without granting another source unit.
+// Preparation ends at a prepared cohort; execution spans its source-controlled
+// parts and final encoders. Both remain progressable with no scheduling grants.
+iree_status_t loom_serve_image_service_progress(
+    loom_serve_image_service_t* service, loom_runtime_service_flags_t flags,
+    bool* out_progress);
+
+// Accepts one current choice without waiting. A stale choice succeeds with a
+// zero operation; a failed start can return both an error and an accepted key.
+iree_status_t loom_serve_image_service_try_schedule(
+    loom_serve_image_service_t* service, loom_runtime_service_offer_key_t offer,
+    uint64_t choice_ordinal, loom_runtime_service_flags_t flags,
+    loom_runtime_service_operation_key_t* out_operation);
 
 // Borrows callbacks for the common HTTP owner. Prepared requests wait for
 // shared admission without retaining device pins; waiting alone is not activity

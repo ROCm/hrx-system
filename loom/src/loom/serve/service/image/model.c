@@ -1463,6 +1463,9 @@ loom_serve_image_generator_t loom_serve_image_model_generator(
   return (loom_serve_image_generator_t){
       .self = model,
       .batch_limit = model->batch_limit,
+      .device_ordinal = iree_hal_device_topology_info(
+                            loom_runtime_device_handle(model->owner))
+                            ->topology_index,
       .prepare = loom_serve_image_generator_prepare,
       .prepare_batch = loom_serve_image_generator_prepare_batch,
       .set_observer = loom_serve_image_generator_set_observer,

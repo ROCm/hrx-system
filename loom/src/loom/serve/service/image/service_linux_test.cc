@@ -18,7 +18,9 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/buffer.h"
 #include "loom/runtime/device/device.h"
+#include "loom/runtime/service_control.h"
 #include "loom/runtime/testing/device.h"
+#include "loom/runtime/testing/service_control.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/image/service.h"
 #include "loom/serve/telemetry/record.h"
@@ -243,6 +245,7 @@ class ImageServiceFixture : public ::testing::Test {
     const loom_serve_image_generator_t generator = {
         .self = &gates_[index],
         .batch_limit = 1,
+        .device_ordinal = executions_[1] ? index : 0,
         .prepare = loom_serve_test_image_gate_t::Prepare,
         .prepare_batch = loom_serve_test_image_gate_t::PrepareBatch,
         .set_observer = [](void*, loom_runtime_wake_callback_t) {},
@@ -267,7 +270,8 @@ class ImageServiceFixture : public ::testing::Test {
         .heartbeat_interval = heartbeat_interval,
     };
     IREE_ASSERT_OK(loom_serve_image_service_allocate(
-        host_, generator, &options, nullptr, host_allocator_, &images_[index]));
+        host_, generator, &options, nullptr, scheduling_[index].binding(),
+        host_allocator_, &images_[index]));
     services_[index] = loom_serve_image_service_interface(images_[index]);
   }
 
@@ -402,6 +406,8 @@ class ImageServiceFixture : public ::testing::Test {
   loom_serve_test_image_gate_t gates_[2];
   // Production services kept alive until all telemetry readers finish.
   loom_serve_image_service_t* images_[2] = {};
+  // Controls remain alive beyond engine destruction and native retirement.
+  loom_runtime::testing::ServiceControl scheduling_[2];
   // Borrowed registry interfaces, valid until RetireImages.
   loom_serve_service_t services_[2] = {};
   // Independent reader position for heartbeat and shutdown evidence.
@@ -547,6 +553,14 @@ class ImageServiceTestBase : public SharedImageServiceFixture<WorkerCount, 1> {
     EXPECT_EQ(counters.input_tokens + counters.output_tokens, 0u);
     EXPECT_EQ(gates_[0].completed, device_failed_ ? 0u : 1u);
     EXPECT_EQ(gates_[0].discarded, 1u);
+    loom_runtime_service_observation_t observation = {};
+    ASSERT_EQ(loom_runtime_service_read_observation(
+                  services_[0].runtime.control, &observation),
+              LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    // Failed readiness leaves source-owned protection for actual retirement;
+    // successful response and cancellation have relinquished that obligation.
+    EXPECT_EQ(observation.pending_operation_count, device_failed_ ? 1u : 0u);
+    EXPECT_EQ(observation.accepted_devices, device_failed_ ? 1u : 0u);
   }
 };
 
