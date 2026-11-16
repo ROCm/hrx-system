@@ -91,12 +91,26 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "allocation",
+    srcs = ["allocation.cc"],
+    hdrs = ["allocation.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        "//loom/src/loom/import/cxx/source",
+        "//loom/src/loom/ir:type_headers",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_library(
     name = "buffer",
     srcs = ["buffer.cc"],
     hdrs = ["buffer.h"],
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
+        ":allocation",
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/import/cxx/source:expressions",
         "//loom/src/loom/import/cxx/value:storage",
@@ -182,9 +196,9 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "function_imports",
-    srcs = ["function_imports.cc"],
-    hdrs = ["function_imports.h"],
+    name = "imports",
+    srcs = ["imports.cc"],
+    hdrs = ["imports.h"],
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
@@ -488,6 +502,7 @@ loom_cc_library(
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
+        ":allocation",
         ":index_values",
         ":memory_access",
         "//loom/src/loom/import/cxx/source",

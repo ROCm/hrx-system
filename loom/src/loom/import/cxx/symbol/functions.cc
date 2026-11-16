@@ -196,7 +196,8 @@ bool has_source_visibility(cxx::FunctionSymbol* function,
 
 }  // namespace
 
-void Functions::select(std::span<const iree_string_view_t> roots) {
+void Functions::select(std::span<const iree_string_view_t> roots,
+                       Types& types) {
   auto* root = cxx::ast_cast<cxx::TranslationUnitAST>(unit_.ast());
   if (!root) {
     diagnostics_.reject(unit_, unit_.ast(),
@@ -204,6 +205,16 @@ void Functions::select(std::span<const iree_string_view_t> roots) {
   }
   std::vector<cxx::FunctionSymbol*> definitions;
   collect(root->declarationList, DeclarationScope::Namespace, definitions);
+  for (const auto& object : imports_.objects()) {
+    types.declare_object_import(
+        object.source, object.binding.module, *object.binding.symbol,
+        names_.unique(cxx::to_string(object.source->name())));
+  }
+  for (const auto& declaration : intrinsic_declarations_) {
+    intrinsics_.declaration(declaration.function, declaration.attributes,
+                            declaration.owner);
+  }
+  intrinsic_declarations_.clear();
   command_programs_.finish();
   pipeline_contracts_.finish();
   loom_builder_t builder;
@@ -332,7 +343,7 @@ bool Functions::ordinary_analysis_call(const DirectCall& call) {
   if (definition(function)) {
     return true;
   }
-  if (!function_imports_.lookup(function) &&
+  if (!imports_.lookup(function) &&
       !explicit_names_.contains(function->canonical())) {
     intrinsics_.bind_math(function, call.source);
   }
@@ -688,8 +699,8 @@ void Functions::collect(cxx::DeclarationAST* declaration,
                       scope);
     if (scope == DeclarationScope::Namespace &&
         !function->symbol->isTemplatePattern()) {
-      intrinsics_.declaration(function->symbol, function->attributeList,
-                              function);
+      intrinsic_declarations_.push_back(
+          {function->symbol, function->attributeList, function});
       launches_.declaration(function->symbol, function->attributeList);
       definitions_.emplace(function->symbol->canonical(), function->symbol);
       definitions.push_back(function->symbol);
@@ -715,14 +726,14 @@ void Functions::collect(cxx::DeclarationAST* declaration,
         for (auto* declarator : cxx::ListView{simple->initDeclaratorList}) {
           if (auto* function =
                   cxx::symbol_cast<cxx::FunctionSymbol>(declarator->symbol)) {
-            intrinsics_.declaration(function, simple->attributeList,
-                                    declarator);
+            intrinsic_declarations_.push_back(
+                {function, simple->attributeList, declarator});
           }
         }
       } else if (auto* function = cxx::ast_cast<cxx::FunctionDefinitionAST>(
                      pattern->declaration)) {
-        intrinsics_.declaration(function->symbol, function->attributeList,
-                                function);
+        intrinsic_declarations_.push_back(
+            {function->symbol, function->attributeList, function});
       }
     }
     collect(pattern->declaration,
@@ -752,9 +763,11 @@ void Functions::collect(cxx::DeclarationAST* declaration,
     }
     for (auto* specifier : cxx::ListView{simple->declSpecifierList}) {
       if (auto* record = cxx::ast_cast<cxx::ClassSpecifierAST>(specifier)) {
-        admit_declaration(nullptr, record->attributeList, record,
-                          DeclarationScope::Nested);
+        admit_declaration(record->symbol, record->attributeList, record, scope);
         collect(record->declarationList, DeclarationScope::Nested, definitions);
+      } else if (auto* record = cxx::ast_cast<cxx::ElaboratedTypeSpecifierAST>(
+                     specifier)) {
+        admit_declaration(record->symbol, record->attributeList, record, scope);
       } else if (auto* enumeration =
                      cxx::ast_cast<cxx::EnumSpecifierAST>(specifier)) {
         admit_declaration(nullptr, enumeration->attributeList, enumeration,
@@ -774,7 +787,8 @@ void Functions::collect(cxx::DeclarationAST* declaration,
         continue;
       }
       if (function) {
-        intrinsics_.declaration(function, simple->attributeList, declarator);
+        intrinsic_declarations_.push_back(
+            {function, simple->attributeList, declarator});
         launches_.declaration(function, simple->attributeList);
         if (!function->isTemplatePattern()) {
           declarations_.try_emplace(function->canonical(),
@@ -816,7 +830,7 @@ bool Functions::admit_declaration(
                  cxx::ast_cast<cxx::FunctionDefinitionAST>(owner)) {
     source_declarator = definition->declarator;
   }
-  function_imports_.declaration(function, attributes, owner);
+  imports_.declaration(symbol, attributes, owner);
   if (source_declarator) {
     auto* prototype =
         function ? cxx::getFunctionPrototype(source_declarator) : nullptr;
@@ -832,13 +846,13 @@ bool Functions::admit_declaration(
       parameter_contracts_.declaration(function, prototype);
       fastmath_.declaration(function, attributes, prototype);
       function_contracts_.declaration(function, prototype);
-      if (const auto* import = function_imports_.lookup(function);
+      if (const auto* import = imports_.lookup(function);
           import && (cxx::ast_cast<cxx::FunctionDefinitionAST>(owner) ||
                      definitions_.contains(function->canonical()))) {
         diagnostics_.reject(unit_, import->source,
                             "import bindings require bodyless functions");
       }
-      if (const auto* import = function_imports_.lookup(function);
+      if (const auto* import = imports_.lookup(function);
           import &&
           (annotated(function, "kernel") || annotated(function, "op") ||
            annotated(function, "assume") || annotated(function, "check_case") ||
@@ -1859,7 +1873,7 @@ void Functions::build_declarations(Types& types, Locations& locations,
     loom_func_decl_build_flags_t flags = 0;
     loom_string_id_t import_module = LOOM_STRING_ID_INVALID;
     loom_string_id_t import_symbol = LOOM_STRING_ID_INVALID;
-    if (const auto* import = function_imports_.lookup(symbol)) {
+    if (const auto* import = imports_.lookup(symbol)) {
       flags |= LOOM_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_MODULE;
       check(loom_builder_intern_string(builder, view(import->module),
                                        &import_module));

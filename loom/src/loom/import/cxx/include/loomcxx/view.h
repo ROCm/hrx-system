@@ -13,6 +13,8 @@
 
 namespace loom::type {
 
+class pool;
+
 // A typed, borrowed view. Static extents are part of Shape; each dynamic extent
 // is captured when the view is constructed. Encoding names a transported
 // address layout or physical storage encoding; void represents an ordinary
@@ -180,6 +182,70 @@ view(loom::type::buffer<T> data, loom::type::offset byte_offset,
 
 namespace loom::view {
 
+// Returns the captured logical extent of one source axis. Dynamic extents
+// reuse their existing identity; static extents are constants.
+template <loom::type::size_type Axis, class Shape, class T, class Encoding>
+[[loom::op("view.dim")]]
+loom::type::index dim(loom::type::view<Shape, T, Encoding> source);
+
+// Allocates typed storage owned by the current invocation. The result and its
+// subviews borrow that storage. Scalar elements start unspecified; managed
+// reference cells start null. Alignment is a minimum byte alignment. Explicit
+// pools use the same backing-resource contract as buffer::alloca.
+template <class Result, loom::memory_space Space = loom::memory_space::private_,
+          loom::type::size_type Alignment = 1>
+[[loom::op("view.alloca")]] Result alloca(
+    loom::detail::dimensions<Result::shape_type::dynamic_count> dimensions =
+        {});
+
+template <class Result, loom::memory_space Space = loom::memory_space::private_,
+          loom::type::size_type Alignment = 1>
+  requires(Result::shape_type::dynamic_count > 0)
+[[loom::op("view.alloca")]] Result alloca(
+    loom::detail::shape_dimensions<Result> dimensions);
+
+template <class Result, loom::memory_space Space = loom::memory_space::private_,
+          loom::type::size_type Alignment = 1, loom::encoding::role Role,
+          loom::type::size_type Rank>
+[[loom::op("view.alloca")]] Result alloca(
+    loom::detail::dimensions<Result::shape_type::dynamic_count> dimensions,
+    loom::type::encoding<Role, Rank> encoding);
+
+template <class Result, loom::memory_space Space = loom::memory_space::private_,
+          loom::type::size_type Alignment = 1, loom::encoding::role Role,
+          loom::type::size_type Rank>
+  requires(Result::shape_type::dynamic_count > 0)
+[[loom::op("view.alloca")]] Result alloca(
+    loom::detail::shape_dimensions<Result> dimensions,
+    loom::type::encoding<Role, Rank> encoding);
+
+template <class Result, loom::memory_space Space = loom::memory_space::private_,
+          loom::type::size_type Alignment = 1>
+[[loom::op("view.alloca")]] Result alloca(
+    loom::detail::dimensions<Result::shape_type::dynamic_count> dimensions,
+    loom::type::pool pool);
+
+template <class Result, loom::memory_space Space = loom::memory_space::private_,
+          loom::type::size_type Alignment = 1>
+  requires(Result::shape_type::dynamic_count > 0)
+[[loom::op("view.alloca")]] Result alloca(
+    loom::detail::shape_dimensions<Result> dimensions, loom::type::pool pool);
+
+template <class Result, loom::memory_space Space = loom::memory_space::private_,
+          loom::type::size_type Alignment = 1, loom::encoding::role Role,
+          loom::type::size_type Rank>
+[[loom::op("view.alloca")]] Result alloca(
+    loom::detail::dimensions<Result::shape_type::dynamic_count> dimensions,
+    loom::type::encoding<Role, Rank> encoding, loom::type::pool pool);
+
+template <class Result, loom::memory_space Space = loom::memory_space::private_,
+          loom::type::size_type Alignment = 1, loom::encoding::role Role,
+          loom::type::size_type Rank>
+  requires(Result::shape_type::dynamic_count > 0)
+[[loom::op("view.alloca")]] Result alloca(
+    loom::detail::shape_dimensions<Result> dimensions,
+    loom::type::encoding<Role, Rank> encoding, loom::type::pool pool);
+
 // Asserts Result's shape while preserving borrowed storage and access rights.
 // An encoded Result retains the source encoding unless a replacement is
 // supplied. An unencoded Result asserts ordinary unencoded addressing. No copy,
@@ -245,20 +311,20 @@ template <class Result, class Shape, class T, class Encoding>
 [[loom::op("view.bitcast")]] Result bitcast(
     loom::type::view<Shape, T, Encoding> source);
 
-// Loads one scalar at a logical coordinate.
+// Loads one element at a logical coordinate, preserving its exact type.
 template <loom::memory_access Access = loom::memory_access::none, class Shape,
           class T, class Encoding, class... Indices>
 [[loom::op("view.load")]]
 T load(loom::type::view<Shape, T, Encoding> source, Indices... indices);
 
-// Observes one volatile element and returns its ordinary scalar value.
+// Observes one volatile element and returns its unqualified value.
 template <loom::memory_access Access = loom::memory_access::none, class Shape,
           class T, class Encoding, class... Indices>
 [[loom::op("view.load")]]
 T load(loom::type::view<Shape, volatile T, Encoding> source,
        Indices... indices);
 
-// Stores one scalar at a logical coordinate. Template deduction
+// Stores one element at a logical coordinate. Template deduction
 // rejects destinations whose element type is const.
 template <loom::memory_access Access = loom::memory_access::none, class Shape,
           class T, class Encoding, class... Indices>
@@ -266,7 +332,7 @@ template <loom::memory_access Access = loom::memory_access::none, class Shape,
 void store(T value, loom::type::view<Shape, T, Encoding> destination,
            Indices... indices);
 
-// Observes a store through a volatile view without qualifying the scalar value.
+// Observes a store through a volatile view without qualifying the element.
 template <loom::memory_access Access = loom::memory_access::none, class Shape,
           class T, class Encoding, class... Indices>
 [[loom::op("view.store")]]

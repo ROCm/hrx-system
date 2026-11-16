@@ -7,19 +7,19 @@
 [[loom::import("service", "symbol", "extra")]] unsigned external(unsigned value);
 
 // ====
-// ERROR@+1: LOWERING/059 "import names require nonempty string literals"
+// ERROR@+1: LOWERING/059 "import names require nonempty NUL-free string literals"
 [[loom::import(42)]] unsigned external(unsigned value);
 
 // ====
-// ERROR@+1: LOWERING/059 "import names require nonempty string literals"
+// ERROR@+1: LOWERING/059 "import names require nonempty NUL-free string literals"
 [[loom::import("")]] unsigned external(unsigned value);
 
 // ====
-// ERROR@+1: LOWERING/059 "import bindings require concrete namespace-scope functions"
+// ERROR@+1: LOWERING/059 "import bindings require concrete namespace-scope functions or incomplete object classes"
 [[loom::import("service")]] extern const unsigned value;
 
 // ====
-// ERROR@+1: LOWERING/059 "import bindings require functions with external linkage"
+// ERROR@+1: LOWERING/059 "import bindings require external linkage"
 [[loom::import("service")]] static unsigned external(unsigned value);
 
 // ====
@@ -78,7 +78,7 @@ unsigned external(unsigned left, unsigned right);
 unsigned external(unsigned value) [[loom::import("service")]];
 
 // ====
-// ERROR@+2: LOWERING/059 "import bindings require concrete namespace-scope functions"
+// ERROR@+2: LOWERING/059 "import bindings require concrete namespace-scope functions or incomplete object classes"
 template <class T>
 [[loom::import("service")]] T external(T value);
 

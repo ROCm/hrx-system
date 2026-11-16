@@ -1,0 +1,102 @@
+// RUN: verify
+#include <loomcxx/object.h>
+struct Buffer;
+// ERROR@+1: LOWERING/059 "object payload requires an explicit loom::import identity"
+void route(loom::ptr<Buffer> value) {}
+
+// ====
+// ERROR@+1: LOWERING/059 "object imports require incomplete namespace-scope classes"
+struct [[loom::import("hal", "buffer")]] Buffer {};
+
+// ====
+// ERROR@+1: LOWERING/059 "object imports require incomplete namespace-scope classes"
+struct [[loom::import("hal", "buffer")]] Buffer;
+struct Buffer {};
+
+// ====
+// ERROR@+1: LOWERING/059 "object imports require a namespace and payload name"
+struct [[loom::import("hal")]] Buffer;
+
+// ====
+struct [[loom::import("hal", "buffer")]] Buffer;
+// ERROR@+1: LOWERING/059 "conflicting import bindings across object redeclarations"
+struct [[loom::import("hal", "semaphore")]] Buffer;
+
+// ====
+// ERROR@+1: LOWERING/059 "import names require nonempty NUL-free string literals"
+struct [[loom::import("hal", "buffer\0trailing")]] Buffer;
+
+// ====
+#include <loomcxx/object.h>
+// ERROR@+1: LOWERING/059 "borrowed object handles require one imported payload class"
+void route(loom::ptr<unsigned> value) {}
+
+// ====
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+struct [[loom::import("hal", "buffer")]] Buffer;
+using View = loom::type::view<loom::type::shape<4>, loom::ptr<Buffer>>;
+// ERROR@+1: LOWERING/059 "buffer.view cannot reinterpret bytes as object handles"
+[[loom::op("buffer.view")]] View invalid(loom::ptr<Buffer>*, loom::detail::dimensions<0>);
+
+// ====
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+struct [[loom::import("hal", "buffer")]] Buffer;
+using Objects = loom::type::view<loom::type::shape<4>, loom::ptr<Buffer>>;
+using Bytes = loom::type::view<loom::type::shape<32>, unsigned char>;
+// ERROR@+1: LOWERING/059 "view.bitcast source requires a byte-addressable scalar element"
+[[loom::op("view.bitcast")]] Bytes invalid(Objects);
+
+// ====
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+struct [[loom::import("hal", "buffer")]] Buffer;
+struct [[loom::import("hal", "semaphore")]] Semaphore;
+using Objects = loom::type::view<loom::type::shape<4>, loom::ptr<Buffer>>;
+// ERROR@+1: LOWERING/059 "view.load result must match its view element"
+[[loom::op("view.load")]] loom::ptr<Semaphore> invalid(Objects, unsigned);
+
+// ====
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+struct [[loom::import("hal", "buffer")]] Buffer;
+using Objects = loom::type::view<loom::type::shape<4>, const loom::ptr<Buffer>>;
+// ERROR@+1: LOWERING/059 "view.store value must match a mutable view element type"
+[[loom::op("view.store")]] void invalid(loom::ptr<Buffer>, Objects, unsigned);
+
+// ====
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+struct [[loom::import("hal", "buffer")]] Buffer;
+struct [[loom::import("hal", "semaphore")]] Semaphore;
+using Objects = loom::type::view<loom::type::shape<4>, loom::ptr<Buffer>>;
+// ERROR@+1: LOWERING/059 "view.store value must match a mutable view element type"
+[[loom::op("view.store")]] void invalid(loom::ptr<Semaphore>, Objects, unsigned);
+
+// ====
+// ERROR@+1: LOWERING/059 "object imports require incomplete namespace-scope classes"
+union [[loom::import("service", "payload")]] Payload;
+
+// ====
+struct Owner {
+  // ERROR@+1: LOWERING/059 "object imports require incomplete namespace-scope classes"
+  struct [[loom::import("service", "payload")]] Payload;
+};
+
+// ====
+// ERROR@+2: LOWERING/059 "object imports require incomplete namespace-scope classes"
+template <class T>
+struct [[loom::import("service", "payload")]] Payload;
+
+// ====
+// ERROR@+1: LOWERING/059 "one import binding is allowed per declaration"
+struct [[loom::import("service", "payload"), loom::import("service", "payload")]] Payload;
+
+// ====
+#include <loomcxx/object.h>
+struct [[loom::import("service", "payload")]] Payload;
+void write(loom::ptr<Payload>* destination, loom::ptr<Payload> value) {
+  // ERROR@+1: LOWERING/059 "Loom source types require SSA value transport"
+  *destination = value;
+}

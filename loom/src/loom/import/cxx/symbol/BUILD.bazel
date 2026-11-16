@@ -73,7 +73,7 @@ loom_cc_library(
         "//loom/src/loom/import/cxx/binding:config",
         "//loom/src/loom/import/cxx/binding:fastmath",
         "//loom/src/loom/import/cxx/binding:function_contracts",
-        "//loom/src/loom/import/cxx/binding:function_imports",
+        "//loom/src/loom/import/cxx/binding:imports",
         "//loom/src/loom/import/cxx/binding:intrinsics",
         "//loom/src/loom/import/cxx/binding:launch",
         "//loom/src/loom/import/cxx/binding:parameter_contracts",

@@ -1,0 +1,71 @@
+// RUN: verify
+#include <loomcxx/view.h>
+using Values = loom::type::view<loom::type::shape<3>, unsigned>;
+void invalid() {
+  // ERROR@+1: LOWERING/059 "view.alloca requires an allocatable memory space: global, workgroup, private, host, or generic"
+  auto values = loom::view::alloca<Values, loom::memory_space::constant>();
+}
+
+// ====
+#include <loomcxx/view.h>
+using Values = loom::type::view<loom::type::shape<3>, unsigned>;
+void invalid() {
+  // ERROR@+1: LOWERING/059 "view.alloca requires an allocatable memory space: global, workgroup, private, host, or generic"
+  auto values = loom::view::alloca<Values, loom::memory_space::descriptor>();
+}
+
+// ====
+#include <loomcxx/view.h>
+using Values = loom::type::view<loom::type::shape<3>, unsigned>;
+void invalid() {
+  // ERROR@+1: LOWERING/059 "view.alloca alignment must be a positive power-of-two byte count"
+  auto values = loom::view::alloca<Values, loom::memory_space::private_, 0>();
+}
+
+// ====
+#include <loomcxx/view.h>
+using Values = loom::type::view<loom::type::shape<3>, unsigned>;
+void invalid() {
+  // ERROR@+1: LOWERING/059 "view.alloca alignment must be a positive power-of-two byte count"
+  auto values = loom::view::alloca<Values, loom::memory_space::private_, 3>();
+}
+
+// ====
+#include <loomcxx/view.h>
+using Values = loom::type::view<loom::type::shape<3>, unsigned>;
+void invalid() {
+  // ERROR@+1: LOWERING/059 "view.alloca alignment must be a positive power-of-two byte count"
+  auto values = loom::view::alloca<Values, loom::memory_space::private_, static_cast<loom::type::size_type>(-1)>();
+}
+
+// ====
+#include <loomcxx/view.h>
+using Values = loom::type::view<loom::type::shape<3>, unsigned>;
+// ERROR@+1: LOWERING/059 "buffer.view has the wrong operand count"
+[[loom::op("buffer.view")]] Values invalid();
+
+// ====
+#include <loomcxx/view.h>
+using Values = loom::type::view<loom::type::shape<3>, unsigned>;
+// ERROR@+1: LOWERING/059 "view.alloca requires dimensions, its result encoding, and an optional pool"
+[[loom::op("view.alloca")]] Values invalid();
+
+// ====
+#include <loomcxx/view.h>
+using Values = loom::type::view<loom::type::shape<3>, unsigned>;
+// ERROR@+1: LOWERING/059 "view.alloca final operand must be a Loom pool"
+[[loom::op("view.alloca")]] Values invalid(loom::detail::dimensions<0>, unsigned);
+
+// ====
+#include <loomcxx/view.h>
+using Layout = loom::type::encoding<loom::encoding::role::layout, 2>;
+using Storage = loom::type::encoding<loom::encoding::role::storage, 2>;
+using Values = loom::type::view<loom::type::shape<3, 4>, unsigned, Layout>;
+// ERROR@+1: LOWERING/059 "view.alloca encoding type must match its result view"
+[[loom::op("view.alloca")]] Values invalid(loom::detail::dimensions<0>, Storage);
+
+// ====
+#include <loomcxx/view.h>
+using Values = loom::type::view<loom::type::shape<3>, unsigned>;
+// ERROR@+1: LOWERING/059 "view.alloca requires result type, memory space, and alignment template arguments"
+[[loom::op("view.alloca")]] Values invalid(loom::detail::dimensions<0>);

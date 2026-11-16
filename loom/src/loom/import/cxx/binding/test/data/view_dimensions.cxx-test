@@ -1,0 +1,42 @@
+// RUN: roundtrip
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+
+namespace lt = loom::type;
+using Matrix = lt::view<lt::shape<lt::dynamic, 17, lt::dynamic>, const float>;
+
+lt::index outer(Matrix input) { return loom::view::dim<0>(input); }
+lt::index middle(Matrix input) { return loom::view::dim<1>(input); }
+lt::index inner(Matrix input) { return loom::view::dim<2>(input); }
+
+struct [[loom::import("objects", "item")]] Item;
+using Objects = lt::view<lt::shape<lt::dynamic>, loom::ptr<Item>>;
+lt::index object_count(Objects input) { return loom::view::dim<0>(input); }
+
+using Encoded = lt::view<lt::shape<lt::dynamic, lt::dynamic>, float,
+                         lt::encoding<loom::encoding::role::layout, 2>>;
+lt::index encoded_inner(Encoded input) { return loom::view::dim<1>(input); }
+
+// ----
+type.decl import("objects", "item") @Item
+
+func.def public @outer(%input_dim0: index, %input_dim2: index, %input: view<[%input_dim0]x17x[%input_dim2]xf32>) -> (index) {
+  func.return %input_dim0 : index
+}
+
+func.def public @middle(%input_dim0: index, %input_dim2: index, %input: view<[%input_dim0]x17x[%input_dim2]xf32>) -> (index) {
+  %8 = index.constant 17 : index
+  func.return %8 : index
+}
+
+func.def public @inner(%input_dim0: index, %input_dim2: index, %input: view<[%input_dim0]x17x[%input_dim2]xf32>) -> (index) {
+  func.return %input_dim2 : index
+}
+
+func.def public @object_count(%input_dim0: index, %input: view<[%input_dim0]xptr<@Item>>) -> (index) {
+  func.return %input_dim0 : index
+}
+
+func.def public @encoded_inner(%input_dim0: index, %input_dim1: index, %input_layout: encoding<layout>, %input: view<[%input_dim0]x[%input_dim1]xf32, %input_layout>) -> (index) {
+  func.return %input_dim1 : index
+}
