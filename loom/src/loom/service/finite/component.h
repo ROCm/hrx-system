@@ -7,6 +7,7 @@
 #ifndef LOOM_SERVICE_FINITE_COMPONENT_H_
 #define LOOM_SERVICE_FINITE_COMPONENT_H_
 
+#include "loom/runtime/service_control.h"
 #include "loom/runtime/wake.h"
 #include "loom/service/finite/model.h"
 
@@ -32,12 +33,44 @@ typedef enum loom_service_finite_component_phase_e {
 // model allocation, or parameter reservation occurs. Device, pool, options'
 // views, package and observer remain borrowed through retirement and
 // destruction. The observer must schedule the shared owner without reentering
-// this object.
+// this object. Scheduling supplies one exclusive offer/choice and one operation
+// with one device use each. Its storage and summary publisher survive actual
+// component retirement. Reusing these slots for another component requires a
+// cold control incarnation change after all readers and publishers join.
 iree_status_t loom_service_finite_component_allocate(
     loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_service_finite_model_options_t* options,
-    loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
+    loom_runtime_wake_callback_t observer,
+    loom_runtime_service_control_binding_t scheduling,
+    iree_allocator_t host_allocator,
     loom_service_finite_component_t** out_component);
+
+// Copies the immutable attachment on the serialized owner. A composition uses
+// these coordinates to dispatch component offers alongside its other owners.
+loom_runtime_service_control_binding_t
+loom_service_finite_component_scheduling_binding(
+    const loom_service_finite_component_t* component);
+
+// Publishes shared preparation demand without accessing sources or submitting
+// work. Repeated demand shares the same offer/attempt. Failure and shutdown
+// suppress further attempts; cancelling one request does not cancel this
+// component's shared demand.
+void loom_service_finite_component_request_preparation(
+    loom_service_finite_component_t* component);
+
+// Lends the prepared model only while READY. NULL means no available model;
+// status distinguishes failed preparation from unaccepted or pending work.
+// The borrower excludes trim and retirement until it relinquishes the model.
+loom_service_finite_model_t* loom_service_finite_component_prepared_model(
+    const loom_service_finite_component_t* component);
+
+// Accepts the current preparation offer without waiting. Stale choices are
+// unaccepted successes. Native errors remain component-owned and are reported
+// independently of acceptance; the parent may continue unrelated requests.
+loom_runtime_service_schedule_outcome_t
+loom_service_finite_component_try_schedule(
+    loom_service_finite_component_t* component,
+    loom_runtime_service_offer_key_t offer, uint64_t choice_ordinal);
 
 loom_service_finite_component_phase_t loom_service_finite_component_phase(
     const loom_service_finite_component_t* component);
@@ -48,7 +81,7 @@ loom_service_finite_component_phase_t loom_service_finite_component_phase(
 uint64_t loom_service_finite_component_preparation_duration_ns(
     const loom_service_finite_component_t* component);
 
-// Starts the first preparation on demand, or observes that same attempt.
+// Explicitly grants the first preparation, or observes that same attempt.
 // Success with *out_model == NULL means pending; the observer schedules further
 // owner turns. Success with a model lends it until quiescent trim or
 // retirement. No parameter activation occurs. A failed attempt retains its

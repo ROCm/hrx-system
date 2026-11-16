@@ -42,10 +42,11 @@ class MediaServiceTest : public SourceTextServiceTest {
         loom_serve_http_server_notification(server_),
     };
     IREE_ASSERT_OK(loom_service_finite_component_allocate(
-        device_, storage_owner_, &options, observer, host_allocator_, &image_));
+        device_, storage_owner_, &options, observer,
+        image_scheduling_.image_binding(), host_allocator_, &image_));
     auto service_options = ServiceOptions();
     service_options.image = image_;
-    service_options.scheduling = image_scheduling_.binding();
+    service_options.scheduling = image_scheduling_.text_binding();
     IREE_ASSERT_OK(loom_serve_text_service_allocate(
         model_, &service_options, nullptr, host_allocator_, &service_));
     interface_ = loom_serve_text_service_interface(service_);
@@ -168,7 +169,7 @@ class MediaServiceTest : public SourceTextServiceTest {
   }
 
   // Composition-owned projection observations outlive component retirement.
-  loom_runtime::testing::ServiceControl image_scheduling_{4, 2};
+  loom_serve::testing::text::TextComponentControl image_scheduling_;
   // Source documents outlive lazy preparation and final component retirement.
   loom_serve::testing::ModelDocument projector_document_;
   // Independent optional image computation on the actual text device.
@@ -221,6 +222,87 @@ class CachedMediaServiceTest : public MediaServiceTest {
     return count;
   }
 };
+
+TEST_F(MediaServiceTest, ImageDemandWaitsForAnIndependentPreparationGrant) {
+  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PAM)) {
+    return;
+  }
+  const auto image =
+      ImageMessage("a", "image/x-portable-arbitrarymap", kPam, "low", "b");
+  std::vector<int> clients;
+  ASSERT_NO_FATAL_FAILURE(SendTogether(
+      {Request(Message("user", "abxa"), 2), Request(image, 4)}, &clients));
+  const auto binding = loom_service_finite_component_scheduling_binding(image_);
+  loom_runtime_service_offer_t image_offer = {};
+  auto* notification = loom_serve_http_server_notification(server_);
+  while (!image_offer.choice_count ||
+         interface_.telemetry.counters->completed < 1) {
+    const auto ticket = iree_notification_prepare_wait(notification);
+    IREE_ASSERT_OK(loom_runtime_device_group_advance(group_));
+    bool progress = false;
+    IREE_ASSERT_OK(loom_serve_text_service_progress(service_, 0, &progress));
+    loom_runtime_service_offer_t text_offer;
+    ASSERT_EQ(loom_runtime_service_read_offer(binding.control, 0, &text_offer),
+              LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    loom_runtime_service_operation_key_t operation;
+    IREE_ASSERT_OK(loom_serve_text_service_try_schedule(
+        service_, text_offer.key, 0, 0, &operation));
+    progress |= operation.serial != 0;
+    ASSERT_EQ(loom_runtime_service_read_offer(
+                  binding.control, binding.offer_ordinal, &image_offer),
+              LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+    if (loom_service_finite_component_phase(image_) !=
+        LOOM_SERVICE_FINITE_COMPONENT_DECLARED) {
+      iree_notification_cancel_wait(notification);
+      FAIL() << "text preparation started the deferred image component";
+    }
+    if (progress || (image_offer.choice_count &&
+                     interface_.telemetry.counters->completed >= 1)) {
+      iree_notification_cancel_wait(notification);
+    } else {
+      iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
+                                    IREE_TIME_INFINITE_FUTURE);
+    }
+  }
+  EXPECT_EQ(Content(Read(clients[0])), Oracle::Complete("abxa", 2));
+  EXPECT_EQ(loom_service_finite_component_phase(image_),
+            LOOM_SERVICE_FINITE_COMPONENT_DECLARED);
+  EXPECT_EQ(loom_service_finite_component_report(image_)->commands, 0u);
+  EXPECT_EQ(loom_service_finite_component_prepared_model(image_), nullptr);
+  loom_runtime_service_observation_t observation;
+  ASSERT_EQ(
+      loom_runtime_service_read_observation(binding.control, &observation),
+      LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(observation.owned_request_count, 1u);
+  EXPECT_EQ(observation.waiting_request_count, 1u);
+  EXPECT_NE(observation.offered_devices, 0u);
+
+  loom_runtime_service_schedule_outcome_t outcome;
+  IREE_ASSERT_OK(interface_.runtime.vtable->try_schedule(
+      interface_.runtime.self, image_offer.key, 0, 0, &outcome));
+  ASSERT_TRUE(outcome.accepted);
+  loom_runtime_service_operation_t operation;
+  ASSERT_EQ(loom_runtime_service_read_operation(
+                binding.control, binding.operation_ordinal, &operation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(operation.key.serial, outcome.operation.serial);
+  EXPECT_EQ(operation.work, LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
+  EXPECT_NE(operation.devices, 0u);
+  IREE_ASSERT_OK(interface_.runtime.vtable->try_schedule(
+      interface_.runtime.self, image_offer.key, 0, 0, &outcome));
+  EXPECT_FALSE(outcome.accepted);
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] { return Idle(); }));
+  Oracle oracle;
+  for (int32_t value : {0, Feature(511), 1}) {
+    oracle.Consume(value);
+  }
+  EXPECT_EQ(Content(Read(clients[1])), Complete(oracle, 4));
+  ASSERT_EQ(
+      loom_runtime_service_read_observation(binding.control, &observation),
+      LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(observation.pending_operation_count, 0u);
+  EXPECT_EQ(observation.accepted_devices, 0u);
+}
 
 TEST_F(CachedMediaServiceTest,
        DetachedHistorySurvivesPreparedMediaAndExchange) {

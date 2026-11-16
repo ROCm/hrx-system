@@ -41,6 +41,54 @@
 
 namespace loom_serve::testing::text {
 
+// Native composition retained through both model lifetimes. Each child owns
+// its exclusive detail slots and contributes copied facts to this one summary.
+class TextComponentControl {
+ public:
+  loom_runtime_service_control_binding_t text_binding() {
+    auto binding = control_.binding();
+    binding.publisher = this;
+    binding.publish_observation =
+        [](void* self, const loom_runtime_service_observation_t* observation) {
+          auto* control = static_cast<TextComponentControl*>(self);
+          control->text_ = *observation;
+          control->Publish();
+        };
+    return binding;
+  }
+
+  loom_runtime_service_control_binding_t image_binding() {
+    auto binding = text_binding();
+    binding.offer_ordinal = 2;
+    binding.operation_ordinal = 4;
+    binding.publish_observation =
+        [](void* self, const loom_runtime_service_observation_t* observation) {
+          auto* control = static_cast<TextComponentControl*>(self);
+          control->image_ = *observation;
+          control->Publish();
+        };
+    return binding;
+  }
+
+ private:
+  void Publish() {
+    auto observation = text_;
+    observation.offer_count += image_.offer_count;
+    observation.pending_operation_count += image_.pending_operation_count;
+    observation.offered_devices |= image_.offered_devices;
+    observation.accepted_devices |= image_.accepted_devices;
+    loom_runtime_service_publish_observation(control_.binding().control,
+                                             &observation);
+  }
+
+  // Text, projector, and optional component slots outlive their publishers.
+  loom_runtime::testing::ServiceControl control_{5, 3};
+  // Text request ownership, main operations, and projector contribution.
+  loom_runtime_service_observation_t text_ = {};
+  // Independent component preparation/release, without duplicate requests.
+  loom_runtime_service_observation_t image_ = {};
+};
+
 // Credit-controlled client carrying the ordinary text routing headers.
 class StalledClient : public loom_serve::testing::StalledHttpClient {
  public:

@@ -410,15 +410,15 @@ void loom_serve_text_complete_retention(loom_serve_text_service_t* service) {
   service->pool.trim.pending = true;
 }
 
-// Starts only for an accepted text preparation. Subsequent owner turns call
-// this after the component has published readiness, never on a dormant model.
+// Accepted text preparation publishes component demand without starting its
+// independent load. Later owner turns attach the projector after readiness.
 static iree_status_t loom_serve_text_prepare_projector(
     loom_serve_text_service_t* service,
     const loom_serve_text_pending_request_t* pending) {
   if (!service->projector) {
-    loom_service_finite_model_t* model = NULL;
+    loom_service_finite_component_request_preparation(service->image);
     iree_status_t status =
-        loom_service_finite_component_prepare(service->image, &model);
+        iree_status_clone(loom_service_finite_component_status(service->image));
     if (!iree_status_is_ok(status)) {
       // Registration/source preparation is service availability, not a defect
       // in this HTTP payload. Preserve the component's original diagnostic.
@@ -427,6 +427,8 @@ static iree_status_t loom_serve_text_prepare_projector(
                            "image component is unavailable"),
           status);
     }
+    loom_service_finite_model_t* model =
+        loom_service_finite_component_prepared_model(service->image);
     if (!model) {
       return iree_ok_status();
     }

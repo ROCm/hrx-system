@@ -24,6 +24,7 @@
 #include "iree/testing/temp_file.h"
 #include "loom/runtime/testing/application.h"
 #include "loom/runtime/testing/device.h"
+#include "loom/runtime/testing/service_control.h"
 #include "loom/service/finite/result.h"
 
 namespace {
@@ -168,8 +169,8 @@ class FiniteComponentTest : public ::testing::Test {
         .options = IREE_SV("{}"),
     };
     IREE_ASSERT_OK(loom_service_finite_component_allocate(
-        device_, storage_owner_, &options_, owner_.observer(), host_allocator_,
-        &component_));
+        device_, storage_owner_, &options_, owner_.observer(),
+        control_.binding(), host_allocator_, &component_));
   }
 
   void TearDown() override {
@@ -222,25 +223,27 @@ class FiniteComponentTest : public ::testing::Test {
   void UseDemandSources() {
     IREE_ASSERT_OK(Retire(component_));
     loom_service_finite_component_free(std::exchange(component_, nullptr));
+    control_.Reset();
     options_.sources.prepare = IREE_SV("demand_prepare.loom");
     options_.sources.control = IREE_SV("demand_control.loom");
     options_.sources.count = 1;
     providers_[0] = IREE_SV("demand_kernels.loom");
     IREE_ASSERT_OK(loom_service_finite_component_allocate(
-        device_, storage_owner_, &options_, owner_.observer(), host_allocator_,
-        &component_));
+        device_, storage_owner_, &options_, owner_.observer(),
+        control_.binding(), host_allocator_, &component_));
   }
 
   void UseRetainedSources() {
     IREE_ASSERT_OK(Retire(component_));
     loom_service_finite_component_free(std::exchange(component_, nullptr));
+    control_.Reset();
     options_.sources.prepare = IREE_SV("retained_prepare.loom");
     options_.sources.control = IREE_SV("retained_control.loom");
     options_.sources.count = 1;
     providers_[0] = IREE_SV("retained_kernels.loom");
     IREE_ASSERT_OK(loom_service_finite_component_allocate(
-        device_, storage_owner_, &options_, owner_.observer(), host_allocator_,
-        &component_));
+        device_, storage_owner_, &options_, owner_.observer(),
+        control_.binding(), host_allocator_, &component_));
   }
 
   void RunRetainedEpoch(loom_service_finite_model_t* model,
@@ -438,10 +441,11 @@ class FiniteComponentTest : public ::testing::Test {
         loom_service_finite_model_submit(model, &results_[0], &ready));
     loom_service_finite_result_release(std::exchange(results_[0], nullptr));
 
+    loom_runtime::testing::ServiceControl peer_control;
     loom_service_finite_component_t* peer = nullptr;
     IREE_ASSERT_OK(loom_service_finite_component_allocate(
-        device_, storage_owner_, &options_, owner_.observer(), host_allocator_,
-        &peer));
+        device_, storage_owner_, &options_, owner_.observer(),
+        peer_control.binding(), host_allocator_, &peer));
     loom_service_finite_model_t* peer_model = nullptr;
     IREE_ASSERT_OK(Prepare(peer, &peer_model));
     ASSERT_NO_FATAL_FAILURE(PrepareBatch(peer_model, 0, 2 * kSlabSize));
@@ -493,6 +497,8 @@ class FiniteComponentTest : public ::testing::Test {
                                       IREE_SV("copy.loom")};
   // Stable borrowed definition through final component destruction.
   loom_service_finite_model_options_t options_ = {};
+  // Observation storage survives the component and its actual model.
+  loom_runtime::testing::ServiceControl control_;
   // Owned optional model handle under test.
   loom_service_finite_component_t* component_ = nullptr;
   // Cohort outputs independent of component parameter and command ownership.
@@ -523,12 +529,90 @@ TEST_F(FiniteComponentTest,
             LOOM_SERVICE_FINITE_COMPONENT_DECLARED);
 }
 
+TEST_F(FiniteComponentTest, DeferredPreparationKeepsOneOfferUntilAccepted) {
+  const auto* control = control_.binding().control;
+  loom_service_finite_component_request_preparation(component_);
+  loom_runtime_service_offer_t offer;
+  ASSERT_EQ(loom_runtime_service_read_offer(control, 0, &offer),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  ASSERT_EQ(offer.choice_count, 1u);
+  EXPECT_EQ(offer.work, LOOM_RUNTIME_SERVICE_WORK_PREPARATION);
+  loom_service_finite_component_request_preparation(component_);
+  EXPECT_FALSE(loom_service_finite_component_advance(component_, false));
+  EXPECT_EQ(loom_service_finite_component_phase(component_),
+            LOOM_SERVICE_FINITE_COMPONENT_DECLARED);
+  EXPECT_EQ(loom_service_finite_component_prepared_model(component_), nullptr);
+  EXPECT_EQ(loom_service_finite_component_report(component_)->commands, 0u);
+  EXPECT_EQ(loom_service_finite_component_preparation_duration_ns(component_),
+            0u);
+
+  bool accepted = false;
+  IREE_ASSERT_OK(owner_.Run(device_, storage_owner_, [&](bool* complete) {
+    if (!accepted) {
+      const auto outcome =
+          loom_service_finite_component_try_schedule(component_, offer.key, 0);
+      EXPECT_TRUE(outcome.accepted);
+      EXPECT_EQ(outcome.status_code, IREE_STATUS_OK);
+      EXPECT_NE(outcome.operation.serial, 0u);
+      EXPECT_FALSE(
+          loom_service_finite_component_try_schedule(component_, offer.key, 0)
+              .accepted);
+      loom_runtime_service_operation_t operation;
+      EXPECT_EQ(loom_runtime_service_read_operation(control, 0, &operation),
+                LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+      EXPECT_EQ(operation.key.serial, outcome.operation.serial);
+      EXPECT_EQ(operation.origin.revision, offer.key.revision);
+      accepted = true;
+    }
+    loom_service_finite_component_advance(component_, false);
+    *complete =
+        loom_service_finite_component_prepared_model(component_) != nullptr;
+    return iree_status_clone(loom_service_finite_component_status(component_));
+  }));
+  auto* model = loom_service_finite_component_prepared_model(component_);
+  ASSERT_NE(model, nullptr);
+  loom_runtime_service_observation_t observation;
+  ASSERT_EQ(loom_runtime_service_read_observation(control, &observation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(observation.offer_count, 0u);
+  EXPECT_EQ(observation.pending_operation_count, 0u);
+  EXPECT_EQ(observation.accepted_devices, 0u);
+  ASSERT_NO_FATAL_FAILURE(Invoke(model));
+}
+
+TEST_F(FiniteComponentTest, StoppingWithdrawsUnacceptedPreparation) {
+  loom_service_finite_component_request_preparation(component_);
+  loom_runtime_service_offer_t offer;
+  ASSERT_EQ(
+      loom_runtime_service_read_offer(control_.binding().control, 0, &offer),
+      LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_TRUE(loom_service_finite_component_advance(component_, true));
+  EXPECT_FALSE(loom_service_finite_component_is_pending(component_));
+  EXPECT_FALSE(
+      loom_service_finite_component_try_schedule(component_, offer.key, 0)
+          .accepted);
+  loom_service_finite_component_request_preparation(component_);
+  loom_runtime_service_observation_t observation;
+  ASSERT_EQ(loom_runtime_service_read_observation(control_.binding().control,
+                                                  &observation),
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+  EXPECT_EQ(observation.offer_count, 0u);
+  EXPECT_EQ(observation.pending_operation_count, 0u);
+  EXPECT_EQ(loom_service_finite_component_report(component_)->commands, 0u);
+}
+
 TEST_F(FiniteComponentTest, RepeatedDemandSharesOneUnactivatedPreparation) {
   loom_service_finite_model_t* model = nullptr;
   IREE_ASSERT_OK(owner_.Run(device_, storage_owner_, [&](bool* complete) {
     iree_status_t status =
         loom_service_finite_component_prepare(component_, &model);
     if (iree_status_is_ok(status) && !model) {
+      loom_runtime_service_operation_t operation;
+      EXPECT_EQ(loom_runtime_service_read_operation(control_.binding().control,
+                                                    0, &operation),
+                LOOM_RUNTIME_SERVICE_READ_COMPLETE);
+      EXPECT_NE(operation.key.serial, 0u);
+      EXPECT_EQ(operation.origin.revision, 0u);
       status = loom_service_finite_component_prepare(component_, &model);
     }
     *complete = model != nullptr;
@@ -657,10 +741,11 @@ TEST_F(FiniteComponentTest, ComponentReleasePreservesResidentPeer) {
   loom_service_finite_model_t* model = nullptr;
   IREE_ASSERT_OK(Prepare(component_, &model));
   ASSERT_NO_FATAL_FAILURE(Invoke(model));
+  loom_runtime::testing::ServiceControl peer_control;
   loom_service_finite_component_t* peer = nullptr;
   IREE_ASSERT_OK(loom_service_finite_component_allocate(
-      device_, storage_owner_, &options_, owner_.observer(), host_allocator_,
-      &peer));
+      device_, storage_owner_, &options_, owner_.observer(),
+      peer_control.binding(), host_allocator_, &peer));
   loom_service_finite_model_t* peer_model = nullptr;
   IREE_ASSERT_OK(Prepare(peer, &peer_model));
   ASSERT_NO_FATAL_FAILURE(Invoke(peer_model));
@@ -804,9 +889,10 @@ TEST_F(FiniteComponentTest,
   ASSERT_NO_FATAL_FAILURE(Submit(model, 0, 16, true));
   IREE_ASSERT_OK(Retire(component_));
   loom_service_finite_component_free(std::exchange(component_, nullptr));
+  control_.Reset();
   IREE_ASSERT_OK(loom_service_finite_component_allocate(
-      device_, storage_owner_, &options_, owner_.observer(), host_allocator_,
-      &component_));
+      device_, storage_owner_, &options_, owner_.observer(), control_.binding(),
+      host_allocator_, &component_));
   IREE_ASSERT_OK(Prepare(component_, &model));
   ASSERT_NO_FATAL_FAILURE(RunRetainedEpochs(model, 0, 3));
   ASSERT_NO_FATAL_FAILURE(CheckResult(0, 8.0f));
@@ -846,9 +932,10 @@ TEST_F(FiniteComponentTest, UnjoinedDemandReadsRetireWithRejectedInvocation) {
   // Removal releases the source VM before waiting for captured storage users.
   IREE_ASSERT_OK(Retire(component_));
   loom_service_finite_component_free(std::exchange(component_, nullptr));
+  control_.Reset();
   IREE_ASSERT_OK(loom_service_finite_component_allocate(
-      device_, storage_owner_, &options_, owner_.observer(), host_allocator_,
-      &component_));
+      device_, storage_owner_, &options_, owner_.observer(), control_.binding(),
+      host_allocator_, &component_));
   IREE_ASSERT_OK(Prepare(component_, &model));
   ASSERT_NO_FATAL_FAILURE(Submit(model, 1));
   ASSERT_NO_FATAL_FAILURE(CheckResult(1, 4.0f));
@@ -884,10 +971,11 @@ TEST_F(FiniteComponentTest, PeerAdmissionWaitsForCapturedOutputRetirement) {
       loom_runtime_execution_transfer(consumer_, 1, &download, &value));
   loom_service_finite_result_release(std::exchange(results_[0], nullptr));
 
+  loom_runtime::testing::ServiceControl peer_control;
   loom_service_finite_component_t* peer = nullptr;
   IREE_ASSERT_OK(loom_service_finite_component_allocate(
-      device_, storage_owner_, &options_, owner_.observer(), host_allocator_,
-      &peer));
+      device_, storage_owner_, &options_, owner_.observer(),
+      peer_control.binding(), host_allocator_, &peer));
   loom_service_finite_model_t* peer_model = nullptr;
   IREE_ASSERT_OK(Prepare(peer, &peer_model));
   auto* peer_residency = loom_service_finite_model_residency(peer_model);

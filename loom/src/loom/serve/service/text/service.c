@@ -821,11 +821,26 @@ static void loom_serve_text_stop(loom_serve_text_service_t* service,
       service, terminal_code == IREE_STATUS_OK ? "stopped" : "failed");
 }
 
-void loom_serve_text_service_release_projector(
-    loom_serve_text_service_t* service) {
+iree_status_t loom_serve_text_service_trim_image(
+    loom_serve_text_service_t* service, bool* out_complete) {
+  *out_complete = false;
+  if (loom_service_finite_component_is_pending(service->image)) {
+    return iree_ok_status();
+  }
   loom_serve_text_media_projector_free(service->projector);
   service->projector = NULL;
   service->media_preparation_end = 0;
+  IREE_RETURN_IF_ERROR(
+      loom_service_finite_component_trim(service->image, out_complete));
+  if (*out_complete) {
+    const loom_runtime_service_operation_t operation = {
+        .key.ordinal = service->image_scheduling.operation_ordinal};
+    loom_runtime_service_publish_operation(service->image_scheduling.control,
+                                           &operation, NULL);
+    service->scheduling.projection = (loom_runtime_service_observation_t){0};
+    loom_serve_text_publish_control(service);
+  }
+  return iree_ok_status();
 }
 
 void loom_serve_text_service_free(loom_serve_text_service_t* service,
@@ -909,6 +924,22 @@ iree_status_t loom_serve_text_service_allocate(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "text control does not cover source, management, "
                             "and projection owners");
+  }
+  if (options->image) {
+    const loom_runtime_service_control_binding_t component =
+        loom_service_finite_component_scheduling_binding(options->image);
+    const uint64_t operation_count =
+        base_operations + options->variant_capacity;
+    if (component.control != binding.control ||
+        (component.offer_ordinal >= binding.offer_ordinal &&
+         component.offer_ordinal - binding.offer_ordinal < offer_count) ||
+        (component.operation_ordinal >= binding.operation_ordinal &&
+         component.operation_ordinal - binding.operation_ordinal <
+             operation_count)) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "text and image component require disjoint "
+                              "slots in the same retained control");
+    }
   }
   const uint64_t device_ordinal =
       iree_hal_device_topology_info(
@@ -1524,23 +1555,30 @@ iree_status_t loom_serve_text_service_progress(
   return iree_status_join(status, work_status);
 }
 
-iree_status_t loom_serve_text_service_try_schedule(
+static iree_status_t loom_serve_text_schedule_choice(
     loom_serve_text_service_t* service, loom_runtime_service_offer_key_t offer,
     uint64_t choice_ordinal, loom_runtime_service_flags_t flags,
-    loom_runtime_service_operation_key_t* out_operation) {
-  *out_operation = (loom_runtime_service_operation_key_t){0};
+    loom_runtime_service_schedule_outcome_t* out_outcome) {
+  *out_outcome = (loom_runtime_service_schedule_outcome_t){0};
   if (service->stopping ||
       iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
     return iree_ok_status();
   }
   if (service->image &&
       offer.ordinal == service->image_scheduling.offer_ordinal) {
-    *out_operation = loom_serve_text_media_projector_try_schedule(
+    out_outcome->operation = loom_serve_text_media_projector_try_schedule(
         service->projector, offer, choice_ordinal, flags);
+    out_outcome->accepted = out_outcome->operation.serial != 0;
     return iree_ok_status();
   }
-  if (offer.ordinal != service->scheduling.offer.key.ordinal ||
-      offer.revision != service->scheduling.offer.key.revision ||
+  if (offer.ordinal != service->scheduling.offer.key.ordinal) {
+    if (service->image) {
+      *out_outcome = loom_service_finite_component_try_schedule(
+          service->image, offer, choice_ordinal);
+    }
+    return iree_ok_status();
+  }
+  if (offer.revision != service->scheduling.offer.key.revision ||
       choice_ordinal >= service->scheduling.offer.choice_count) {
     return iree_ok_status();
   }
@@ -1573,8 +1611,9 @@ iree_status_t loom_serve_text_service_try_schedule(
       choice == TEXT_CHOICE_PREPARATION   ? TEXT_OPERATION_ADMISSION
       : choice == TEXT_CHOICE_INPUT_COUNT ? TEXT_OPERATION_INPUT_COUNT
                                           : TEXT_OPERATION_EXECUTION;
-  *out_operation = loom_serve_text_operation_begin(
+  out_outcome->operation = loom_serve_text_operation_begin(
       service, slot, service->scheduling.offer.work, offer);
+  out_outcome->accepted = true;
   loom_serve_text_withdraw_choice(service);
   iree_status_t status = iree_ok_status();
   switch (choice) {
@@ -1610,6 +1649,18 @@ iree_status_t loom_serve_text_service_try_schedule(
     loom_serve_text_withdraw_choice(service);
   }
   loom_serve_text_publish_control(service);
+  out_outcome->status_code = iree_status_code(status);
+  return status;
+}
+
+iree_status_t loom_serve_text_service_try_schedule(
+    loom_serve_text_service_t* service, loom_runtime_service_offer_key_t offer,
+    uint64_t choice_ordinal, loom_runtime_service_flags_t flags,
+    loom_runtime_service_operation_key_t* out_operation) {
+  loom_runtime_service_schedule_outcome_t outcome;
+  iree_status_t status = loom_serve_text_schedule_choice(
+      service, offer, choice_ordinal, flags, &outcome);
+  *out_operation = outcome.operation;
   return status;
 }
 
@@ -1617,14 +1668,8 @@ static iree_status_t loom_serve_text_try_schedule(
     void* self, loom_runtime_service_offer_key_t offer, uint64_t choice_ordinal,
     loom_runtime_service_flags_t flags,
     loom_runtime_service_schedule_outcome_t* out_outcome) {
-  loom_runtime_service_operation_key_t operation;
-  const iree_status_t status = loom_serve_text_service_try_schedule(
-      self, offer, choice_ordinal, flags, &operation);
-  *out_outcome = (loom_runtime_service_schedule_outcome_t){
-      .accepted = operation.serial != 0,
-      .status_code = iree_status_code(status),
-      .operation = operation};
-  return status;
+  return loom_serve_text_schedule_choice(self, offer, choice_ordinal, flags,
+                                         out_outcome);
 }
 
 static iree_status_t loom_serve_text_advance(void* self,
@@ -1669,6 +1714,20 @@ static iree_status_t loom_serve_text_advance(void* self,
     loom_runtime_service_offer_t offer;
     const loom_runtime_service_control_binding_t binding =
         service->image_scheduling;
+    if (loom_runtime_service_read_offer(binding.control, binding.offer_ordinal,
+                                        &offer) ==
+            LOOM_RUNTIME_SERVICE_READ_COMPLETE &&
+        offer.choice_count) {
+      loom_runtime_service_operation_key_t operation;
+      status = loom_serve_text_service_try_schedule(service, offer.key, 0,
+                                                    flags, &operation);
+      *out_progress |= operation.serial != 0;
+    }
+  }
+  if (iree_status_is_ok(status) && service->image) {
+    const loom_runtime_service_control_binding_t binding =
+        loom_service_finite_component_scheduling_binding(service->image);
+    loom_runtime_service_offer_t offer;
     if (loom_runtime_service_read_offer(binding.control, binding.offer_ordinal,
                                         &offer) ==
             LOOM_RUNTIME_SERVICE_READ_COMPLETE &&

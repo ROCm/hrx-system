@@ -26,10 +26,11 @@ typedef struct loom_serve_text_service_options_t {
   // activation and ordinary requests do not start its preparation. Accepted
   // preparation is advanced/joined by the service's serialized owner.
   loom_service_finite_component_t* image;
-  // Retained control and sole aggregate publisher. Requires one source offer
+  // Retained control and this source's aggregate publisher. Requires one offer
   // and three independent operations, followed by variant_capacity management
-  // operations. An image component adds one offer and one operation. Storage
-  // outlives this service and actual model/component retirement.
+  // operations. An image projector adds one offer and one operation. Its
+  // component has a separate disjoint binding in the same retained control;
+  // the parent combines both contributions through actual model retirement.
   loom_runtime_service_control_binding_t scheduling;
   // Initial resident capacity, matching the model at service creation. The
   // directory grows as requests arrive; memory credit gates active requests.
@@ -110,7 +111,9 @@ iree_status_t loom_serve_text_service_progress(
 
 // Accepts one captured source choice without blocking. A stale or cancelled
 // choice returns OK with a zero serial. Acceptance is reported independently
-// of failure, including a submission that retains device ownership.
+// of failure, including a submission that retains device ownership. Optional
+// component failures remain component-owned and affect its waiting requests;
+// the common runtime outcome also reports that component's numeric start error.
 iree_status_t loom_serve_text_service_try_schedule(
     loom_serve_text_service_t* service, loom_runtime_service_offer_key_t offer,
     uint64_t choice_ordinal, loom_runtime_service_flags_t flags,
@@ -172,12 +175,13 @@ iree_status_t loom_serve_text_service_try_schedule(
 loom_serve_service_t loom_serve_text_service_interface(
     loom_serve_text_service_t* service);
 
-// Relinquishes the idle projector's model borrow before independent image
-// component release. Admission is closed and every request/CPU/device borrower
-// has retired. Text model, retained histories, and checkpoints are unchanged;
-// the next image demand creates a new projector around the prepared component.
-void loom_serve_text_service_release_projector(
-    loom_serve_text_service_t* service);
+// Explicitly releases the idle projector and trims its component. Admission is
+// closed and every request/CPU/device borrower has retired. Nonterminal success
+// owes an owner wake. Failed projection observations clear only after actual
+// component release completes. The next image demand uses a new projector;
+// text state and retained histories keep their existing ownership.
+iree_status_t loom_serve_text_service_trim_image(
+    loom_serve_text_service_t* service, bool* out_complete);
 
 // Relinquishes every accepted consumer receipt after readiness retirement. On
 // terminal failure, unresolved device reservations remain pinned for model

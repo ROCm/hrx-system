@@ -101,10 +101,11 @@ class TextComponentServiceTest : public SourceTextServiceTest {
         },
         loom_serve_http_server_notification(server_)};
     IREE_ASSERT_OK(loom_service_finite_component_allocate(
-        device_, storage_owner_, &options, observer, host_allocator_, &image_));
+        device_, storage_owner_, &options, observer,
+        image_scheduling_.image_binding(), host_allocator_, &image_));
     auto service_options = ServiceOptions();
     service_options.image = image_;
-    service_options.scheduling = image_scheduling_.binding();
+    service_options.scheduling = image_scheduling_.text_binding();
     IREE_ASSERT_OK(loom_serve_text_service_allocate(
         model_, &service_options, nullptr, host_allocator_, &service_));
     interface_ = loom_serve_text_service_interface(service_);
@@ -154,7 +155,7 @@ class TextComponentServiceTest : public SourceTextServiceTest {
   }
 
   // Composition-owned projection observations outlive component retirement.
-  loom_runtime::testing::ServiceControl image_scheduling_{4, 2};
+  loom_serve::testing::text::TextComponentControl image_scheduling_;
   // Owned optional computation, outliving the service that borrows it.
   loom_service_finite_component_t* image_ = nullptr;
   // Owned text service, released only after both preparation domains join.
@@ -171,6 +172,27 @@ TEST_F(TextComponentServiceTest, OrdinaryTextLeavesImageDormant) {
   EXPECT_TRUE(
       loom_runtime_residency_snapshot(loom_serve_text_model_residency(model_))
           .active);
+}
+
+TEST_F(TextComponentServiceTest, OverlappingComponentBindingsAreRejected) {
+  auto options = ServiceOptions();
+  options.image = image_;
+  options.scheduling = image_scheduling_.text_binding();
+  options.scheduling.offer_ordinal = 1;
+  loom_serve_text_service_t* overlapping = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_text_service_allocate(model_, &options, nullptr,
+                                       host_allocator_, &overlapping));
+  EXPECT_EQ(overlapping, nullptr);
+  options.scheduling.offer_ordinal = 0;
+  options.scheduling.operation_ordinal = 1;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_text_service_allocate(model_, &options, nullptr,
+                                       host_allocator_, &overlapping));
+  EXPECT_EQ(overlapping, nullptr);
+  ASSERT_NO_FATAL_FAILURE(CompleteTextRequest());
 }
 
 TEST_F(TextComponentServiceTest, ImageFailureDoesNotFailConcurrentText) {

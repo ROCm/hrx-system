@@ -832,6 +832,10 @@ typedef struct loom_serve_text_registration_t {
   loom_service_finite_component_t* image;
   // Observation tail retained through actual text and image model retirement.
   loom_runtime_service_control_t* control;
+  // Latest ready-text contribution, including projection and compiler owners.
+  loom_runtime_service_observation_t text_observation;
+  // Independent optional-component preparation and release ownership.
+  loom_runtime_service_observation_t image_observation;
   // Service borrowing model state until all protocol claims are resolved.
   loom_serve_text_service_t* service;
   // Explicit warmup, joined before service/model retirement.
@@ -839,6 +843,34 @@ typedef struct loom_serve_text_registration_t {
   // Model consumers have relinquished views with an ownership wake installed.
   bool retiring;
 } loom_serve_text_registration_t;
+
+static void loom_serve_text_registration_publish(
+    loom_serve_text_registration_t* registration) {
+  loom_runtime_service_observation_t observation =
+      registration->text_observation;
+  observation.offer_count += registration->image_observation.offer_count;
+  observation.pending_operation_count +=
+      registration->image_observation.pending_operation_count;
+  observation.offered_devices |=
+      registration->image_observation.offered_devices;
+  observation.accepted_devices |=
+      registration->image_observation.accepted_devices;
+  loom_runtime_service_publish_observation(registration->control, &observation);
+}
+
+static void loom_serve_text_registration_publish_text(
+    void* self, const loom_runtime_service_observation_t* observation) {
+  loom_serve_text_registration_t* registration = self;
+  registration->text_observation = *observation;
+  loom_serve_text_registration_publish(registration);
+}
+
+static void loom_serve_text_registration_publish_image(
+    void* self, const loom_runtime_service_observation_t* observation) {
+  loom_serve_text_registration_t* registration = self;
+  registration->image_observation = *observation;
+  loom_serve_text_registration_publish(registration);
+}
 
 static iree_status_t loom_serve_text_registration_prepare(
     void* self, loom_serve_registration_prepare_flags_t flags,
@@ -867,11 +899,17 @@ static iree_status_t loom_serve_text_registration_prepare(
     const loom_serve_text_configuration_t* text = &configuration->text;
     const loom_serve_text_cache_selection_t cache =
         loom_serve_text_model_cache_selection(registration->model);
+    loom_runtime_service_control_binding_t scheduling =
+        loom_runtime_service_control_binding(registration->control, 0, 0, 0);
+    if (registration->image) {
+      scheduling.publish_observation =
+          loom_serve_text_registration_publish_text;
+      scheduling.publisher = registration;
+    }
     const loom_serve_text_service_options_t options = {
         .name = configuration->name,
         .image = registration->image,
-        .scheduling = loom_runtime_service_control_binding(
-            registration->control, 0, 0, 0),
+        .scheduling = scheduling,
         .row_count = text->rows,
         .max_sessions = text->max_sessions,
         .variant_capacity = configuration->variant_capacity,
@@ -1015,17 +1053,8 @@ static iree_status_t loom_serve_text_registration_deactivate(
     void* self, loom_serve_model_component_t component, bool* out_complete) {
   loom_serve_text_registration_t* registration = self;
   if (component == LOOM_SERVE_MODEL_COMPONENT_IMAGE) {
-    *out_complete = false;
-    if (loom_service_finite_component_is_pending(registration->image)) {
-      return iree_ok_status();
-    }
-    loom_serve_text_service_release_projector(registration->service);
-    const iree_status_t status =
-        loom_service_finite_component_trim(registration->image, out_complete);
-    if (iree_status_is_ok(status) && *out_complete) {
-      loom_serve_text_registration_release_projection(registration);
-    }
-    return status;
+    return loom_serve_text_service_trim_image(registration->service,
+                                              out_complete);
   }
   return loom_serve_text_model_deactivate(registration->model, out_complete);
 }
@@ -1090,14 +1119,15 @@ static iree_status_t loom_serve_text_registration_create(
   loom_serve_text_registration_t* registration = NULL;
   const bool images = text->image.contract || text->image.prepare.size;
   iree_host_size_t operation_capacity = 0;
-  if (!iree_host_size_checked_add(3 + images, configuration->variant_capacity,
+  if (!iree_host_size_checked_add(3 + 2 * images,
+                                  configuration->variant_capacity,
                                   &operation_capacity)) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "text operation capacity is not representable");
   }
   loom_runtime_service_control_t* control = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_model_registration_allocate_storage(
-      total, 1 + images, operation_capacity, incarnation, host_allocator,
+      total, 1 + 2 * images, operation_capacity, incarnation, host_allocator,
       (void**)&registration, &control));
   registration->host_allocator = host_allocator;
   registration->control = control;
@@ -1149,8 +1179,14 @@ static iree_status_t loom_serve_text_registration_create(
     image_options.sources.prepare = text->image.prepare;
     image_options.sources.control = text->image.control;
     status = loom_service_finite_component_allocate(
-        registration->device, pool, &image_options, observer, host_allocator,
-        &registration->image);
+        registration->device, pool, &image_options, observer,
+        (loom_runtime_service_control_binding_t){
+            .control = control,
+            .offer_ordinal = 2,
+            .operation_ordinal = 4 + configuration->variant_capacity,
+            .publish_observation = loom_serve_text_registration_publish_image,
+            .publisher = registration},
+        host_allocator, &registration->image);
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_text_load_allocate(
