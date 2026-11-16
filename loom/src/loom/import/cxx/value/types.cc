@@ -493,9 +493,11 @@ std::span<const ValueProjection> Types::projections(const cxx::Type* input,
   }
   const auto& admitted = partition(input, owner);
   std::vector<ValueProjection> result;
-  auto append = [&](const cxx::Type* type, size_t offset) {
+  auto append = [&](const cxx::Type* type, size_t component_offset,
+                    uint64_t byte_offset) {
     for (auto child : projections(type, owner)) {
-      child.component_offset += offset;
+      child.component_offset += component_offset;
+      child.byte_offset += byte_offset;
       result.push_back(child);
     }
   };
@@ -506,22 +508,28 @@ std::span<const ValueProjection> Types::projections(const cxx::Type* input,
       if (traits.is_reference(member.type())) {
         auto* field = static_cast<cxx::FieldSymbol*>(member.source);
         if (reference_is_snapshot(field)) {
-          append(reference_transport_type(field), member.component_offset);
+          append(reference_transport_type(field), member.component_offset,
+                 member.byte_offset());
         } else {
           // Ordinary reference members retain their binding as a pointer
           // group. The referent is not a subobject of the record.
           result.push_back({reference_transport_type(field), member.partition,
-                            member.component_offset});
+                            member.component_offset, member.byte_offset()});
         }
       } else {
-        append(member.type(), member.component_offset);
+        append(member.type(), member.component_offset, member.byte_offset());
       }
     }
   } else if (admitted.kind == ValueKind::Array) {
     const auto& array = static_cast<const ArrayPartition&>(admitted);
+    auto* layout = unit_.control()->memoryLayout();
+    const auto element_bytes =
+        layout->sizeOf(array.source->elementType()).value();
+    uint64_t byte_offset = 0;
     for (size_t offset = 0; offset < admitted.component_count;
          offset += array.element->component_count) {
-      append(array.source->elementType(), offset);
+      append(array.source->elementType(), offset, byte_offset);
+      byte_offset += element_bytes;
     }
   } else {
     result.push_back({input, &admitted, 0});

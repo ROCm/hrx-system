@@ -60,6 +60,9 @@ struct ValueProjection {
   const Partition* partition;
   // First component relative to the complete enclosing source value.
   size_t component_offset;
+  // Physical displacement when the enclosing object admits native storage.
+  // Semantic handles and reference snapshots use only the component offset.
+  uint64_t byte_offset = 0;
 };
 
 // Canonical source record structure, built once at admission. Members retain

@@ -670,6 +670,7 @@ void Functions::analyze(Types& types) {
       const bool input = analysis->parameter_input(member.source, group);
       output &= analysis->parameter_output(member.source, group);
       group.component_offset += member.component_offset;
+      group.byte_offset += member.byte_offset();
       if (input) {
         projection.inputs.push_back(group);
         projection.input_component_count += group.partition->component_count;

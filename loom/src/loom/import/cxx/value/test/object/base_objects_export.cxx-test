@@ -76,3 +76,52 @@ static void Base___Base_value(unsigned this_value) {
   observe(this_value);
   return;
 }
+
+// ====
+// Projected value calls and retained reference results keep the same nonzero
+// base/member displacement when raised and imported again.
+struct Prefix { int tag; };
+struct Bounds { int lower, upper; };
+struct Record : Prefix, Bounds {};
+static int read(const Record& record) { return record.upper; }
+static const int& reference(const Record& record) { return record.upper; }
+int stored_record(const Record* record) { return read(*record) + reference(*record); }
+// ----
+#include <loomcxx/view.h>
+
+struct reference_result {
+  loom::type::buffer<unsigned char> value0;
+  loom::type::offset value1;
+};
+
+[[loom::symbol("stored_record")]]
+unsigned stored_record(loom::type::buffer<unsigned> record, loom::type::offset record_byte_offset);
+
+[[loom::symbol("read")]]
+static unsigned read(unsigned record_Bounds_upper);
+
+[[loom::symbol("reference")]]
+static reference_result reference(loom::type::buffer<unsigned char> record, loom::type::offset record_byte_offset);
+
+[[loom::symbol("stored_record")]]
+unsigned stored_record(loom::type::buffer<unsigned> record, loom::type::offset record_byte_offset) {
+  auto v5 = loom::buffer::view<1>(loom::buffer::cast<const unsigned>(record), (record_byte_offset + loom::type::offset{8}), {});
+  unsigned v6 = loom::view::load<loom::memory_access::root_in_bounds>(v5, 0);
+  unsigned v7 = read(v6);
+  reference_result call_result = reference(loom::buffer::cast<unsigned char>(record), record_byte_offset);
+  auto v8 = call_result.value0;
+  loom::type::offset v9 = call_result.value1;
+  auto v10 = loom::buffer::view<1>(loom::buffer::cast<const unsigned>(v8), v9, {});
+  unsigned v11 = loom::view::load<loom::memory_access::root_in_bounds>(v10, 0);
+  return (v7 + v11);
+}
+
+[[loom::symbol("read")]]
+static unsigned read(unsigned record_Bounds_upper) {
+  return record_Bounds_upper;
+}
+
+[[loom::symbol("reference")]]
+static reference_result reference(loom::type::buffer<unsigned char> record, loom::type::offset record_byte_offset) {
+  return {record, (record_byte_offset + loom::type::offset{8})};
+}

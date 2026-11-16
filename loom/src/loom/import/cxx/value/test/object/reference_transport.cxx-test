@@ -1,4 +1,42 @@
 // RUN: pass canonicalize,cse,dce
+// A projected const-reference call loads only the observed field, whether the
+// pointer is the caller's parameter or a member of another value receiver.
+struct Box { int lo, hi; };
+static int at(const Box& box, long index) { return box.lo + static_cast<int>(index); }
+struct Cursor {
+  const Box* box;
+  long index;
+  int get() const { return at(*box, index); }
+};
+int from_pointer(const Box* box, long index) { return at(*box, index); }
+int from_field(const Box* box, long index) { return Cursor{box, index}.get(); }
+// ----
+func.def public @from_pointer(%box: buffer, %box_byte_offset: offset, %index: i64) -> (i32) {
+  %6 = buffer.view %box[%box_byte_offset] : buffer -> view<1xi32>
+  %7 = view.load<root_in_bounds|type_disjoint> %6[0] : view<1xi32> -> i32
+  %8 = func.call pure @at(%7, %index) : (i32, i64) -> (i32)
+  func.return %8 : i32
+}
+
+func.def public @from_field(%box: buffer, %box_byte_offset: offset, %index: i64) -> (i32) {
+  %13 = func.call readonly @Cursor__get_value(%box, %box_byte_offset, %index) : (buffer, offset, i64) -> (i32)
+  func.return %13 : i32
+}
+
+func.def @at(%box_lo: i32, %index: i64) -> (i32) {
+  %17 = scalar.trunci %index : i64 to i32
+  %18 = scalar.addi %box_lo, %17 : i32
+  func.return %18 : i32
+}
+
+func.def @Cursor__get_value(%this_box: buffer, %this_box_byte_offset: offset, %this_index: i64) -> (i32) {
+  %25 = buffer.view %this_box[%this_box_byte_offset] : buffer -> view<1xi32>
+  %26 = view.load<root_in_bounds|type_disjoint> %25[0] : view<1xi32> -> i32
+  %27 = func.call pure @at(%26, %this_index) : (i32, i64) -> (i32)
+  func.return %27 : i32
+}
+
+// ====
 // Both callers share one constructor. A stored layout must not force the
 // pointer-bearing local View into byte storage in the other caller.
 struct Layout { long stride; };
@@ -483,4 +521,109 @@ func.def @capture_constructed(%value: buffer, %value_byte_offset: offset) -> (bu
 
 func.def inline @Constructed__Constructed_value(%source: buffer, %source_byte_offset: offset) -> (buffer, offset) {
   func.return %source, %source_byte_offset : buffer, offset
+}
+
+// ====
+// Physical offsets include base subobjects, padding, nested records, and array
+// elements. Selected references must apply the same projection to both origins.
+struct Prefix { unsigned ignored; };
+struct Bounds { int unused; int limits[3]; };
+struct Region : Prefix, Bounds {
+  char padding;
+  Bounds nested;
+  int upper() const { return nested.limits[2]; }
+};
+static int selected_limit(const Region& region) { return region.limits[1] + region.nested.limits[2]; }
+int from_memory(const Region* region) { return selected_limit(*region) + region->upper(); }
+int from_choice(bool choose, const Region* left, const Region* right) { return selected_limit(choose ? *left : *right); }
+// ----
+func.def public @from_memory(%region: buffer, %region_byte_offset: offset) -> (i32) {
+  %3 = index.constant 12 : offset
+  %4 = index.add %region_byte_offset, %3 : offset
+  %5 = buffer.view %region[%4] : buffer -> view<1xi32>
+  %6 = view.load<root_in_bounds|type_disjoint> %5[0] : view<1xi32> -> i32
+  %7 = index.constant 36 : offset
+  %8 = index.add %region_byte_offset, %7 : offset
+  %9 = buffer.view %region[%8] : buffer -> view<1xi32>
+  %10 = view.load<root_in_bounds|type_disjoint> %9[0] : view<1xi32> -> i32
+  %11 = func.call pure @selected_limit(%6, %10) : (i32, i32) -> (i32)
+  %12 = func.call readonly @Region__upper_storage(%region, %region_byte_offset) : (buffer, offset) -> (i32)
+  %13 = scalar.addi %11, %12 : i32
+  func.return %13 : i32
+}
+
+func.def public @from_choice(%choose: i1, %left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (i32) {
+  %54 = scf.select %choose, %left, %right : buffer
+  %55 = scf.select %choose, %left_byte_offset, %right_byte_offset : offset
+  %22 = index.constant 12 : offset
+  %23 = index.add %55, %22 : offset
+  %24 = buffer.view %54[%23] : buffer -> view<1xi32>
+  %25 = view.load<root_in_bounds|type_disjoint> %24[0] : view<1xi32> -> i32
+  %26 = index.constant 36 : offset
+  %27 = index.add %55, %26 : offset
+  %28 = buffer.view %54[%27] : buffer -> view<1xi32>
+  %29 = view.load<root_in_bounds|type_disjoint> %28[0] : view<1xi32> -> i32
+  %30 = func.call pure @selected_limit(%25, %29) : (i32, i32) -> (i32)
+  func.return %30 : i32
+}
+
+func.def @selected_limit(%region_Bounds_limits_1: i32, %region_nested_limits_2: i32) -> (i32) {
+  %36 = scalar.addi %region_Bounds_limits_1, %region_nested_limits_2 : i32
+  func.return %36 : i32
+}
+
+func.def @Region__upper_storage(%this: buffer, %this_byte_offset: offset) -> (i32) {
+  %40 = index.constant 24 : offset
+  %41 = index.add %this_byte_offset, %40 : offset
+  %42 = index.constant 4 : offset
+  %limits_byte_offset = index.add %41, %42 : offset
+  %56 = scalar.constant 8 : i64
+  %48 = index.cast %limits_byte_offset : offset to i64
+  %49 = scalar.addi %48, %56 : i64
+  %50 = scalar.assume %49 [range(%49, 0, 9223372036854775807)] : i64
+  %51 = index.cast %50 : i64 to offset
+  %52 = buffer.view %this[%51] : buffer -> view<1xi32>
+  %53 = view.load<root_in_bounds|type_disjoint> %52[0] : view<1xi32> -> i32
+  func.return %53 : i32
+}
+
+// ====
+// A projection keeps the containing storage's alignment, including unaligned
+// scalar and vector fields. Mutation writes back only the observed field.
+using Words = unsigned __attribute__((vector_size(16)));
+struct __attribute__((packed)) Packet { char tag; unsigned unused; Words words; unsigned value; };
+static unsigned read_packet(const Packet& packet) { return packet.words[2] + packet.value; }
+static void update(Packet& packet, unsigned value) { packet.value = value; }
+unsigned packet_access(Packet* packet, unsigned value) {
+  unsigned old = read_packet(*packet);
+  update(*packet, value);
+  return old;
+}
+// ----
+func.def public @packet_access(%packet: buffer, %packet_byte_offset: offset, %value: i32) -> (i32) {
+  %4 = index.constant 5 : offset
+  %5 = index.add %packet_byte_offset, %4 : offset
+  %6 = buffer.view %packet[%5] : buffer -> view<4xi32, align(1)>
+  %7 = vector.load<root_in_bounds> %6[0] : view<4xi32, align(1)> -> vector<4xi32>
+  %8 = index.constant 21 : offset
+  %9 = index.add %packet_byte_offset, %8 : offset
+  %10 = buffer.view %packet[%9] : buffer -> view<1xi32, align(1)>
+  %11 = view.load<root_in_bounds|type_disjoint> %10[0] : view<1xi32, align(1)> -> i32
+  %old = func.call pure @read_packet(%7, %11) : (vector<4xi32>, i32) -> (i32)
+  func.call @update(%packet, %packet_byte_offset, %value) : (buffer, offset, i32)
+  func.return %old : i32
+}
+
+func.def @read_packet(%packet_words: vector<4xi32>, %packet_value: i32) -> (i32) {
+  %26 = vector.extract %packet_words[2] : vector<4xi32> -> i32
+  %19 = scalar.addi %26, %packet_value : i32
+  func.return %19 : i32
+}
+
+func.def @update(%packet: buffer, %packet_byte_offset: offset, %value: i32) {
+  %23 = index.constant 21 : offset
+  %24 = index.add %packet_byte_offset, %23 : offset
+  %25 = buffer.view %packet[%24] : buffer -> view<1xi32, align(1)>
+  view.store<root_in_bounds|type_disjoint> %value, %25[0] : i32, view<1xi32, align(1)>
+  func.return
 }

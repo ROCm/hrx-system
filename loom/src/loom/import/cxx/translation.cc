@@ -3951,6 +3951,10 @@ class Translator final : private Initialization::Evaluation {
             &types_.partition(types_.unqualified_value(object->type), owner)) {
       return target;
     }
+    if (auto* address = std::get_if<StorageProjection>(&object->location)) {
+      return {ObjectLvalue{
+          group.type, storage_.subobject(*address, group.byte_offset, owner)}};
+    }
     fail(owner,
          "projected reference call requires a source value or complete scalar "
          "storage");
