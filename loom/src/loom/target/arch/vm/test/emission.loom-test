@@ -1,8 +1,14 @@
 // RUN: emit vm-dis
 
-// Unselected source functions do not require any bytecode function sections.
+// Source and foreign callables do not belong to this VM artifact.
 func.def @unused(%value: i32) -> (i32) {
   func.return %value : i32
+}
+
+test.target<low_core> @native
+
+low.kernel.def target<test.low.core>(@native) @native_entry() asm {
+  return
 }
 
 // ----
