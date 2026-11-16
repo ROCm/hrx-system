@@ -148,7 +148,8 @@ iree_status_t loom_aie2p_native_emit_input_origins(
     expression.term_count = phase->source_capture_count;
     loom_value_id_t offset;
     IREE_RETURN_IF_ERROR(loom_view_emit_offset_expression(
-        builder, &expression, LOOM_VALUE_ID_INVALID, LOOM_LOCATION_UNKNOWN,
+        builder, &expression, LOOM_VALUE_ID_INVALID,
+        loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET), LOOM_LOCATION_UNKNOWN,
         &offset));
     loom_op_t *integer, *narrowed;
     IREE_RETURN_IF_ERROR(loom_index_cast_build(

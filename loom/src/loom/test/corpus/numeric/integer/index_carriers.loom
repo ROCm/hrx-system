@@ -238,3 +238,95 @@ check.scenario @native_index_values {
   }
   check.return
 }
+
+// The only observation of each computed index is its explicit signed bound.
+// Inputs are runtime words; the oracle keeps full-width integer arithmetic.
+func.def @assumed_index_observations(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %inputs = buffer.view %input[%origin] : buffer -> view<4x3xi32>
+  %results = buffer.view %output[%origin] : buffer -> view<4x8xi64>
+  scf.for %row = [%begin to %end step %step] {
+    %left = view.load %inputs[%row, 0] : view<4x3xi32> -> i32
+    %right = view.load %inputs[%row, 1] : view<4x3xi32> -> i32
+    %extra = view.load %inputs[%row, 2] : view<4x3xi32> -> i32
+    %a = index.cast %left : i32 to index
+    %b = index.cast %right : i32 to index
+    %c = index.cast %extra : i32 to index
+    %add = index.add %a, %b : index
+    %sub = index.sub %a, %b : index
+    %mul = index.mul %a, %b : index
+    %madd = index.madd %a, %b, %c : index
+    %and = index.andi %a, %b : index
+    %or = index.ori %a, %b : index
+    %xor = index.xori %a, %b : index
+    %shift = index.shli %a, %row : index
+    %r0, %r1, %r2, %r3, %r4, %r5, %r6, %r7 = index.assume %add, %sub, %mul, %madd, %and, %or, %xor, %shift [range(%add, -1024, 1024), range(%sub, -1024, 1024), range(%mul, -1024, 1024), range(%madd, -1024, 1024), range(%and, -1024, 1024), range(%or, -1024, 1024), range(%xor, -1024, 1024), range(%shift, -1024, 1024)] : index, index, index, index, index, index, index, index
+    %value0 = index.cast %r0 : index to i64
+    view.store %value0, %results[%row, 0] : i64, view<4x8xi64>
+    %value1 = index.cast %r1 : index to i64
+    view.store %value1, %results[%row, 1] : i64, view<4x8xi64>
+    %value2 = index.cast %r2 : index to i64
+    view.store %value2, %results[%row, 2] : i64, view<4x8xi64>
+    %value3 = index.cast %r3 : index to i64
+    view.store %value3, %results[%row, 3] : i64, view<4x8xi64>
+    %value4 = index.cast %r4 : index to i64
+    view.store %value4, %results[%row, 4] : i64, view<4x8xi64>
+    %value5 = index.cast %r5 : index to i64
+    view.store %value5, %results[%row, 5] : i64, view<4x8xi64>
+    %value6 = index.cast %r6 : index to i64
+    view.store %value6, %results[%row, 6] : i64, view<4x8xi64>
+    %value7 = index.cast %r7 : index to i64
+    view.store %value7, %results[%row, 7] : i64, view<4x8xi64>
+  }
+  func.return
+}
+
+func.def @assumed_index_oracle(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %inputs = buffer.view %input[%origin] : buffer -> view<4x3xi32>
+  %results = buffer.view %output[%origin] : buffer -> view<4x8xi64>
+  scf.for %row = [%begin to %end step %step] {
+    %left = view.load %inputs[%row, 0] : view<4x3xi32> -> i32
+    %right = view.load %inputs[%row, 1] : view<4x3xi32> -> i32
+    %extra = view.load %inputs[%row, 2] : view<4x3xi32> -> i32
+    %a = scalar.extsi %left : i32 to i64
+    %b = scalar.extsi %right : i32 to i64
+    %c = scalar.extsi %extra : i32 to i64
+    %count = index.cast %row : index to i64
+    %add = scalar.addi %a, %b : i64
+    %sub = scalar.subi %a, %b : i64
+    %mul = scalar.muli %a, %b : i64
+    %madd = scalar.addi %mul, %c : i64
+    %and = scalar.andi %a, %b : i64
+    %or = scalar.ori %a, %b : i64
+    %xor = scalar.xori %a, %b : i64
+    %shift = scalar.shli %a, %count : i64
+    view.store %add, %results[%row, 0] : i64, view<4x8xi64>
+    view.store %sub, %results[%row, 1] : i64, view<4x8xi64>
+    view.store %mul, %results[%row, 2] : i64, view<4x8xi64>
+    view.store %madd, %results[%row, 3] : i64, view<4x8xi64>
+    view.store %and, %results[%row, 4] : i64, view<4x8xi64>
+    view.store %or, %results[%row, 5] : i64, view<4x8xi64>
+    view.store %xor, %results[%row, 6] : i64, view<4x8xi64>
+    view.store %shift, %results[%row, 7] : i64, view<4x8xi64>
+  }
+  func.return
+}
+
+check.scenario @assumed_index_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-5) step(1) : tensor<4x3xi32>
+    %storage = check.generate.fill value(-123) : tensor<36xi64>
+    %output = check.tensor.view %storage offset(16) : tensor<36xi64> -> tensor<4x8xi64>
+    check.compare<@assumed_index_observations, @assumed_index_oracle>(%input, %output) : (tensor<4x3xi32>, tensor<4x8xi64>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<36xi64>
+    }
+  }
+  check.return
+}

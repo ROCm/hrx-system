@@ -445,3 +445,67 @@ func.def @memory_recurrence(%input: buffer, %condition: i1) -> (i32) {
   %result = view.load %selected[0] : view<1xi32> -> i32
   func.return %result : i32
 }
+
+
+// ====
+
+func.def @signed_origin_selection(%input: buffer, %position: index, %condition: i1) -> (view<1xi32>) {
+  %c0 = index.constant 0 : offset
+  %signed = buffer.view %input[%position] : buffer -> view<1xi32>
+  %ordinary = buffer.view %input[%c0] : buffer -> view<1xi32>
+  %selected = scf.select %condition, %signed, %ordinary : view<1xi32>
+  func.return %selected : view<1xi32>
+}
+
+// ----
+func.def @signed_origin_selection(%input: buffer, %position: index, %condition: i1) -> (view<1xi32>) {
+  %10 = index.constant 0 : index
+  %selected_offset = scf.select %condition, %position, %10 : index
+  %selected = buffer.view %input[%selected_offset] : buffer -> view<1xi32>
+  func.return %selected : view<1xi32>
+}
+
+// ====
+
+func.def @signed_origin_loop(%input: buffer, %position: index, %count: index) -> (view<1xi32>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %first = buffer.view %input[%position] : buffer -> view<1xi32>
+  %last = scf.for %i = [%c0 to %count step %c1](%window = %first : view<1xi32>) -> (view<1xi32>) {
+    %next = view.subview %window[-1] : view<1xi32> -> view<1xi32>
+    scf.yield %next : view<1xi32>
+  }
+  func.return %last : view<1xi32>
+}
+
+// ----
+func.def @signed_origin_loop(%input: buffer, %position: index, %count: index) -> (view<1xi32>) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %last_offset = scf.for %i = [%c0 to %count step %c1](%window_offset = %position : index) -> (index) {
+    %13 = index.constant -4 : index
+    %14 = index.add %window_offset, %13 : index
+    scf.yield %14 : index
+  }
+  %last = buffer.view %input[%last_offset] : buffer -> view<1xi32>
+  func.return %last : view<1xi32>
+}
+
+
+// ====
+
+func.def @mixed_origin_domains(%input: buffer, %coordinate: index, %physical: offset, %condition: i1) -> (view<1xi32>) {
+  %signed = buffer.view %input[%coordinate] : buffer -> view<1xi32>
+  %wide = buffer.view %input[%physical] : buffer -> view<1xi32>
+  %selected = scf.select %condition, %signed, %wide : view<1xi32>
+  func.return %selected : view<1xi32>
+}
+
+// ----
+func.def @mixed_origin_domains(%input: buffer, %coordinate: index, %physical: offset, %condition: i1) -> (view<1xi32>) {
+  %9 = index.constant 1 : offset
+  %10 = index.scale %coordinate, %9 : index, offset -> offset
+  %selected_offset = scf.select %condition, %10, %physical : offset
+  %selected = buffer.view %input[%selected_offset] : buffer -> view<1xi32>
+  func.return %selected : view<1xi32>
+}

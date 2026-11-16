@@ -183,6 +183,97 @@ TEST(LowLowerSourceMemoryMatchTest, SelectsExactRejectionReason) {
             100 + LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_LAYOUT);
 }
 
+TEST(LowLowerSourceMemoryMatchTest, NativeDisplacementAndUnsignedImmediate) {
+  loom_low_lower_source_memory_diagnostics_t diagnostics = {};
+  for (uint16_t reason = 0;
+       reason < LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_COUNT; ++reason) {
+    diagnostics.rejection_diagnostic_indices[reason] = reason;
+  }
+  loom_low_lower_source_memory_t constraint = {
+      .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
+      .root_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ANY,
+      .dynamic_term_count = LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_TERM_COUNT_ANY,
+      .dynamic_view_base_term_count =
+          LOOM_LOW_LOWER_SOURCE_MEMORY_DYNAMIC_VIEW_BASE_TERM_COUNT_ANY,
+      .byte_offset_bit_count = 32,
+      .memory_space_mask = LOOM_LOW_LOWER_MEMORY_SPACE_GLOBAL,
+      .vector_lane_count = 1,
+      .element_byte_count = 1,
+  };
+  const loom_low_lower_source_memory_shape_t shape = {
+      .vector_lane_byte_stride = 1,
+      .static_byte_offset_minimum = INT64_MIN,
+      .static_byte_offset_maximum = INT64_MAX,
+  };
+  const loom_low_lower_emit_t emit = {.source_memory_ordinal = 1};
+  const auto emit_ref = MakeTestEmitRef(LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE, 0);
+  const loom_low_lower_rule_t rule = {.emit_count = 1};
+  const loom_low_lower_rule_set_t rule_set = {
+      .source_memories = &constraint,
+      .source_memory_shapes = &shape,
+      .source_memory_diagnostics = &diagnostics,
+      .emit_refs = &emit_ref,
+      .emit_ref_descriptor_bit_count = kTestEmitRefDescriptorBitCount,
+      .emits = &emit,
+  };
+  struct DisplacementCase {
+    // Complete byte-displacement interval supplied by the memory planner.
+    loom_value_facts_t facts;
+    // Whether every displacement fits a signed or unsigned native word.
+    bool matches;
+  };
+  const DisplacementCase cases[] = {
+      {loom_value_facts_make(INT32_MIN, UINT32_MAX, 1), true},
+      {loom_value_facts_make(-32, -1, 1), true},
+      {loom_value_facts_make(-32, 32, 1), true},
+      {loom_value_facts_exact_i64(0), true},
+      {loom_value_facts_exact_i64(UINT32_MAX), true},
+      {loom_value_facts_exact_i64(INT64_C(-2147483649)), false},
+      {loom_value_facts_exact_i64(INT64_C(4294967296)), false},
+      {loom_value_facts_unknown(), false},
+  };
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(::testing::Message() << test_case.facts.range_lo << ".."
+                                      << test_case.facts.range_hi);
+    loom_low_source_memory_access_plan_t access = {
+        .operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD,
+        .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
+        .element_byte_count = 1,
+        .vector_lane_count = 1,
+        .vector_lane_byte_stride = 1,
+        .dynamic_term_count = 1,
+    };
+    access.dynamic_terms[0] = {
+        .source = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE,
+        .byte_stride = 1,
+        .byte_facts = test_case.facts,
+    };
+    loom_low_lower_rule_source_memory_state_t state = {
+        .plan_attempted = true,
+        .plan_available = true,
+        .access_plan = &access,
+    };
+    const loom_low_lower_rule_match_context_t context = {
+        .source_memory_state = &state,
+    };
+    for (uint8_t dynamic_bit_count : {0, 32}) {
+      constraint.dynamic_offset_unsigned_bit_count = dynamic_bit_count;
+      loom_low_lower_rule_source_memory_match_t match;
+      IREE_ASSERT_OK(loom_low_lower_rule_source_memory_emits_match(
+          &context, &rule_set, nullptr, &rule, &match));
+      const bool expected =
+          test_case.matches &&
+          (dynamic_bit_count == 0 || test_case.facts.range_lo >= 0);
+      EXPECT_TRUE(match.constraints_compatible);
+      EXPECT_EQ(match.all_emits_match, expected);
+      EXPECT_EQ(
+          match.diagnostic_index,
+          expected ? LOOM_LOW_LOWER_DIAGNOSTIC_NONE
+                   : LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_BYTE_OFFSET_WIDTH);
+    }
+  }
+}
+
 TEST(LowLowerSourceMemoryMatchTest, MatrixStrideLegality) {
   struct StrideCase {
     // Element stride along the matrix's leading axis.

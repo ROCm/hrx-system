@@ -95,8 +95,8 @@ ERR_WASM_006 = ErrorDef(
     message=(
         "Wasm target '{target_key}' export '{export_name}' config "
         "'{config_key}' rejected '{op_name}' source memory access in "
-        "'@{function_name}': effective byte offset must be provably "
-        "representable as an unsigned {bit_count}-bit Wasm address"
+        "'@{function_name}': effective byte displacement must fit a signed "
+        "or unsigned {bit_count}-bit register"
     ),
     params=(
         *_TARGET_CONTEXT_PARAMS,

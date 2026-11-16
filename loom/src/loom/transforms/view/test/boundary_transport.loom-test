@@ -432,3 +432,32 @@ func.def public target(@carrier_target) @forward(%packets: view<4xptr<@Packet>>,
   func.call @consume(%packets, %owners, %bytes_root, %bytes_offset) : (view<4xptr<@Packet>>, view<3xref<@Packet>>, buffer, offset)
   func.return
 }
+
+
+// ====
+
+// RUN: pass specialize-target-callgraph,decompose-view-boundaries
+
+test.target<low_core> @carrier_target
+
+func.decl target(@carrier_target) @external_signed_view(%input: view<1xi32>) -> (view<1xi32>)
+
+func.def public target(@carrier_target) @signed_boundary_origin(%storage: buffer, %position: index) -> (view<1xi32>) {
+  %input = buffer.view %storage[%position] : buffer -> view<1xi32>
+  %result = func.call @external_signed_view(%input) : (view<1xi32>) -> (view<1xi32>)
+  func.return %result : view<1xi32>
+}
+
+// ----
+test.target<low_core> @carrier_target
+
+func.decl target(@carrier_target) @external_signed_view(%input_root: buffer, %input_offset: offset) -> (buffer, offset)
+
+func.def public target(@carrier_target) @signed_boundary_origin(%storage: buffer, %position: index) -> (buffer, offset) {
+  %input = buffer.view %storage[%position] : buffer -> view<1xi32>
+  %9 = index.constant 1 : offset
+  %10 = index.scale %position, %9 : index, offset -> offset
+  %result_root, %result_offset = func.call @external_signed_view(%storage, %10) : (buffer, offset) -> (buffer, offset)
+  %result = buffer.view %result_root[%result_offset] : buffer -> view<1xi32>
+  func.return %result_root, %result_offset : buffer, offset
+}

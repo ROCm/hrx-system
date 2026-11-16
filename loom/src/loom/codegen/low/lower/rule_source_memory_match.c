@@ -244,8 +244,7 @@ loom_low_lower_rule_source_memory_layout_rejection_reason(
 static bool loom_low_lower_rule_source_memory_byte_offset_matches(
     const loom_low_lower_source_memory_t* source_memory,
     const loom_low_source_memory_access_plan_t* access) {
-  const uint8_t complete_bit_count =
-      source_memory->byte_offset_unsigned_bit_count;
+  const uint8_t complete_bit_count = source_memory->byte_offset_bit_count;
   const uint8_t dynamic_bit_count =
       source_memory->dynamic_offset_unsigned_bit_count;
   if (complete_bit_count == 0 && dynamic_bit_count == 0) {
@@ -253,9 +252,12 @@ static bool loom_low_lower_rule_source_memory_byte_offset_matches(
   }
   loom_value_facts_t byte_facts = loom_low_source_memory_dynamic_offset_facts(
       access, access->static_byte_offset);
-  if (complete_bit_count != 0 && !loom_value_facts_fit_unsigned_bit_count(
-                                     byte_facts, complete_bit_count)) {
-    return false;
+  if (complete_bit_count != 0 && complete_bit_count < 64) {
+    const int64_t minimum = -(INT64_C(1) << (complete_bit_count - 1));
+    const int64_t maximum = (int64_t)(UINT64_MAX >> (64 - complete_bit_count));
+    if (byte_facts.range_lo < minimum || byte_facts.range_hi > maximum) {
+      return false;
+    }
   }
   if (dynamic_bit_count == 0) {
     return true;

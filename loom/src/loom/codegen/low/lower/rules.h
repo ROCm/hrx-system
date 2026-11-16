@@ -748,9 +748,9 @@ typedef struct loom_low_lower_source_memory_t {
   uint8_t dynamic_view_base_term_count;
   // Required provenance for each dynamic address term.
   uint8_t dynamic_index_source;
-  // Required unsigned width of the complete byte offset, or zero if
-  // unconstrained.
-  uint8_t byte_offset_unsigned_bit_count;
+  // Register width of the complete byte displacement. Its range must fit
+  // [-2^(N-1), 2^N-1]; zero leaves the width unconstrained.
+  uint8_t byte_offset_bit_count;
   // Required unsigned width excluding the selected recipe's displacement,
   // or zero if unconstrained. A retained view base includes its own bias.
   uint8_t dynamic_offset_unsigned_bit_count;

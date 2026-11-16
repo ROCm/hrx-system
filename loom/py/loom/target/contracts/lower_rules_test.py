@@ -2546,7 +2546,10 @@ def test_source_memory_constraint_rejects_dynamic_view_base_preservation() -> No
     )
 
 
-def test_source_memory_constraint_accepts_any_dynamic_stride_value_terms() -> None:
+@pytest.mark.parametrize("minimum", [0, 1])
+def test_source_memory_constraint_accepts_any_dynamic_stride_value_terms(
+    minimum,
+) -> None:
     constraint = SourceMemoryConstraint(
         operation=SourceMemoryOperation.LOAD,
         memory_spaces=("global",),
@@ -2555,12 +2558,12 @@ def test_source_memory_constraint_accepts_any_dynamic_stride_value_terms() -> No
         vector_lane_byte_stride=4,
         static_byte_offset=0,
         dynamic_term_count=None,
-        dynamic_term_count_minimum=1,
+        dynamic_term_count_minimum=minimum,
         allow_dynamic_stride_values=True,
     )
 
     assert constraint.dynamic_term_count is None
-    assert constraint.dynamic_term_count_minimum == 1
+    assert constraint.dynamic_term_count_minimum == minimum
     assert constraint.allow_dynamic_stride_values
 
 
@@ -2587,10 +2590,10 @@ def test_source_memory_constraint_rejects_stride_values_without_dynamic_terms() 
             vector_lane_count=1,
             vector_lane_byte_stride=4,
             static_byte_offset=0,
-            dynamic_term_count=None,
+            dynamic_term_count=0,
             allow_dynamic_stride_values=True,
         ),
-        "dynamic source memory stride values require at least one dynamic term",
+        "dynamic source memory stride values require a dynamic-capable recipe",
     )
 
 

@@ -88,12 +88,12 @@ TEST_F(SymbolicExprTest, ReusesCompleteCompoundRelation) {
 
   loom_value_id_t materialized = LOOM_VALUE_ID_INVALID;
   IREE_ASSERT_OK(loom_view_materialize_offset_expression(
-      &builder_, &bounded_expression, LOOM_VALUE_ID_INVALID, address,
-      &materialized));
-  const loom_op_t* cast_op =
+      &builder_, &bounded_expression, LOOM_VALUE_ID_INVALID, offset_type,
+      address, &materialized));
+  const loom_op_t* scale_op =
       loom_value_def_op(loom_module_value(module_, materialized));
-  ASSERT_TRUE(loom_index_cast_isa(cast_op));
-  EXPECT_EQ(loom_index_cast_input(cast_op), bounded);
+  ASSERT_TRUE(loom_index_scale_isa(scale_op));
+  EXPECT_EQ(loom_index_scale_index(scale_op), bounded);
 
   loom_symbolic_expr_t address_expression = {};
   IREE_ASSERT_OK(loom_symbolic_expr_from_value(&expression_context_, address,
@@ -108,8 +108,8 @@ TEST_F(SymbolicExprTest, ReusesCompleteCompoundRelation) {
 
   const iree_host_size_t value_count = module_->values.count;
   IREE_ASSERT_OK(loom_view_materialize_offset_expression(
-      &builder_, &address_expression, LOOM_VALUE_ID_INVALID, address,
-      &materialized));
+      &builder_, &address_expression, LOOM_VALUE_ID_INVALID, offset_type,
+      address, &materialized));
   EXPECT_EQ(materialized, address);
   EXPECT_EQ(module_->values.count, value_count);
 }
@@ -144,7 +144,8 @@ TEST_F(SymbolicExprTest, EmitsAffineIndicesAtCurrentInsertionPoint) {
   loom_value_id_t materialized = LOOM_VALUE_ID_INVALID;
   loom_builder_set_before(&builder_, anchor_op);
   IREE_ASSERT_OK(loom_view_emit_offset_expression(
-      &builder_, &expression, base, LOOM_LOCATION_UNKNOWN, &materialized));
+      &builder_, &expression, base, loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
+      LOOM_LOCATION_UNKNOWN, &materialized));
 
   const loom_op_t* subtract_negative =
       loom_value_def_op(loom_module_value(module_, materialized));

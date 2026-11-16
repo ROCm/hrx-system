@@ -194,11 +194,10 @@ func.def @buffer_assume_rejects_contradictory_memory_space(%size: offset) {
 
 // ====
 
-// buffer.view consumes a physical byte offset, not a logical index. Logical
-// coordinates only appear inside the view's index list consumers.
-func.def @buffer_view_rejects_index_offset(%buffer: buffer, %index: index) {
+// Signed byte displacements can describe positions before an interior origin.
+// The address-domain type stays target-selected instead of fixing an i64 ABI.
+func.def @buffer_view_accepts_signed_displacement(%buffer: buffer, %index: index) {
   %layout = encoding.layout.dense : encoding<layout>
-  // ERROR@+1: TYPE/003 "byte_offset" "index" "offset"
   %view = buffer.view %buffer[%index] : buffer -> view<4xf32, %layout>
   func.return
 }

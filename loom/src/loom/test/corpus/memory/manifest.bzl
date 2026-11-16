@@ -22,6 +22,7 @@ MEMORY_CORPUS = loom_corpus_manifest(
         "address/integer_terms.loom",
         "address/logical_shift_loop.loom",
         "address/narrow.loom",
+        "address/origins.loom",
         "address/runtime_factors.loom",
         "address/scaling.loom",
         "address/selection.loom",

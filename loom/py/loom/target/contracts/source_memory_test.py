@@ -44,6 +44,7 @@ def _validate(
     increment=None,
     increment_immediate=None,
     reuse_view_base=False,
+    minimum_dynamic_terms=1,
 ):
     if index_ref is None:
         index_ref = ValueRef.source_memory_dynamic_byte_offset()
@@ -62,7 +63,7 @@ def _validate(
             vector_lane_byte_stride=4,
             static_byte_offset=0,
             dynamic_term_count=None,
-            dynamic_term_count_minimum=1,
+            dynamic_term_count_minimum=minimum_dynamic_terms,
             reuse_view_base=reuse_view_base,
         ),
         source_memory_byte_offset_materializer=SourceMemoryByteOffsetMaterializer(
@@ -141,6 +142,23 @@ def test_complete_byte_offset_validates_fused_arithmetic_descriptors():
         _validate((), multiply_add=TEST_LOW_ADD_I32_DESCRIPTOR)
     with pytest.raises(ValueError, match=r"must use low\.op"):
         _validate((), static_bias=TEST_LOW_CONST_I32_DESCRIPTOR)
+
+
+def test_complete_byte_offset_accepts_static_and_optional_dynamic_terms():
+    emit = _validate(
+        (),
+        index_ref=ValueRef.source_memory_byte_offset(),
+        minimum_dynamic_terms=0,
+        reuse_view_base=True,
+    )
+    replace(
+        emit,
+        source_memory=replace(
+            emit.source_memory, dynamic_term_count=0, reuse_view_base=False
+        ),
+    ).validate(vector.vector_load, TEST_LOW_CORE_DESCRIPTOR_SET, set())
+    with pytest.raises(ValueError, match="needs dynamic source memory"):
+        _validate((), minimum_dynamic_terms=0)
 
 
 def test_byte_offset_increment_is_unary_and_binds_its_immediate():
@@ -335,7 +353,7 @@ def test_complete_address_validates_its_canonical_integer_conversions():
 
 
 @pytest.mark.parametrize(
-    "field", ["byte_offset_unsigned_bit_count", "dynamic_offset_unsigned_bit_count"]
+    "field", ["byte_offset_bit_count", "dynamic_offset_unsigned_bit_count"]
 )
 def test_byte_offset_widths_cover_the_integer_fact_domain(field):
     constraint = SourceMemoryConstraint(

@@ -22,6 +22,7 @@ loom_corpus_test(
         XDNA_HARDWARE_PROFILE.name: [
             "control/branch/convergence.loom",
             "function/rodata.loom",
+            "memory/address/origins.loom",
             "memory/address/tiled_channel.loom",
             "memory/buffer/null.loom",
             "memory/buffer/positions.loom",
@@ -63,6 +64,8 @@ loom_corpus_test(
             "function/rodata.loom:@rodata_copy_values": "XDNA/051",
             "function/rodata.loom:@rodata_gather_values": "XDNA/051",
             "function/rodata.loom:@rodata_values": "XDNA/051",
+            "memory/address/origins.loom:@call_signed_origin_values": "XDNA/051",
+            "memory/address/origins.loom:@signed_origin_values": "XDNA/051",
             "memory/buffer/null.loom:@nullable_buffer_values": "XDNA/051",
             "memory/buffer/positions.loom:@buffer_position_equality": "XDNA/051",
             "memory/buffer/positions.loom:@storage_domain_equality": "XDNA/051",

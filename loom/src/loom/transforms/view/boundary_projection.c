@@ -684,6 +684,15 @@ static iree_status_t loom_view_boundary_materialize_offset(
   IREE_ASSERT(state != NULL);
   loom_view_boundary_offset_t* offset = &state->offsets[region_id];
   if (offset->value_id != LOOM_VALUE_ID_INVALID) {
+    const loom_type_t type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+    if (!loom_type_equal(loom_module_value_type(plan->module, offset->value_id),
+                         type)) {
+      loom_symbolic_expr_t identity;
+      loom_symbolic_expr_constant(0, &identity);
+      IREE_RETURN_IF_ERROR(loom_view_materialize_offset_expression(
+          &plan->rewriter.builder, &identity, offset->value_id, type,
+          offset->anchor_value_id, &offset->value_id));
+    }
     *out_value = offset->value_id;
     return iree_ok_status();
   }
@@ -703,7 +712,8 @@ static iree_status_t loom_view_boundary_materialize_offset(
       expression->constant == 0 && expression->term_count == 0;
   IREE_RETURN_IF_ERROR(loom_view_materialize_offset_expression(
       &plan->rewriter.builder, expression, offset->base_value_id,
-      offset->anchor_value_id, &offset->value_id));
+      loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET), offset->anchor_value_id,
+      &offset->value_id));
   if (offset->address_term_count == 0) {
     *out_value = offset->value_id;
     return iree_ok_status();

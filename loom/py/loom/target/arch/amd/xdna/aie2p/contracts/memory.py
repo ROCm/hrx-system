@@ -259,7 +259,7 @@ def _memory_constraint(
         dynamic_byte_stride=1 if unscaled else 0,
         allow_dynamic_stride_values=dynamic and not unscaled,
         reuse_view_base=dynamic and not unscaled,
-        byte_offset_unsigned_bit_count=32,
+        byte_offset_bit_count=32,
         cache_policy_build_flags=None,
     )
 
@@ -305,7 +305,7 @@ def _view_carrier_constraint(
         dynamic_term_count_minimum=1 if dynamic else 0,
         allow_dynamic_stride_values=dynamic,
         reuse_view_base=dynamic,
-        byte_offset_unsigned_bit_count=32,
+        byte_offset_bit_count=32,
     )
 
 

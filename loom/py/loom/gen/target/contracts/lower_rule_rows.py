@@ -415,8 +415,8 @@ def source_memory_row(
     )
     _append_field(
         fields,
-        "byte_offset_unsigned_bit_count",
-        constraint.byte_offset_unsigned_bit_count,
+        "byte_offset_bit_count",
+        constraint.byte_offset_bit_count,
     )
     _append_field(
         fields,

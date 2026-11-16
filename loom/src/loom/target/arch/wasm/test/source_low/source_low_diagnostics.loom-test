@@ -224,3 +224,16 @@ func.def target(@target) @materialized_window_exceeds_operation_limit(%packet: v
   vector.store %window, %results[0] : vector<128xi8>, view<128xi8>
   func.return
 }
+
+// ====
+// RUN: emit source-low output=low
+
+wasm.target<simd128> @target
+
+func.def target(@target) @view_origin_below_wasm32(%input: buffer) -> (view<1xi32>) {
+  // ERROR@+1: WASM/003 {op_name="index.constant"}
+  %origin = index.constant -2147483649 : index
+  // ERROR@+1: WASM/006 {op_name="buffer.view", bit_count="32"}
+  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  func.return %view : view<1xi32>
+}
