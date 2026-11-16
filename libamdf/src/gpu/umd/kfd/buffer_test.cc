@@ -94,6 +94,10 @@ struct NativeBufferState {
   std::function<void()> observe_allocation;
   // Successful host unmaps at the recorded native allocation address.
   uint32_t reservation_release_count = 0;
+  // Base of the latest successfully released host interval, including padding.
+  uintptr_t released_address = 0;
+  // Complete length of that released interval, including padding.
+  size_t released_byte_length = 0;
   // Number of buffer metadata allocations returned to the host allocator.
   uint32_t metadata_free_count = 0;
   // Input map progress observed by every native call.
@@ -172,6 +176,10 @@ extern "C" int __wrap_munmap(void* address, size_t byte_length) {
     return -1;
   }
   const int result = __real_munmap(address, byte_length);
+  if (result == 0 && native_state != nullptr) {
+    native_state->released_address = reinterpret_cast<uintptr_t>(address);
+    native_state->released_byte_length = byte_length;
+  }
   if (result == 0 && native_state != nullptr &&
       address == reinterpret_cast<void*>(native_state->address)) {
     ++native_state->reservation_release_count;
@@ -379,6 +387,8 @@ class KfdBufferNativeTest : public ::testing::Test {
     device_.page_size = 4096;
     device_.topology.gpu_id = 19;
     device_.topology.virtual_address.end = UINT64_MAX;
+    device_.topology.virtual_address.alignment = 4096;
+    device_.topology.virtual_address.fragment_size = 2 * 1024 * 1024;
     create_info_.native_flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
     create_info_.byte_length = 4096;
     create_info_.alignment = 4096;
@@ -473,6 +483,83 @@ class KfdBufferNativeTest : public ::testing::Test {
   // One buffer header, plus a memory header when exercising its native owner.
   uint32_t expected_metadata_free_count_ = 1;
 };
+
+struct BufferGeometry {
+  // Page-covered physical length passed unchanged to KFD.
+  size_t byte_length;
+  // Caller-requested GPU base alignment.
+  size_t minimum_alignment;
+  // Native fragment geometry of the backing owner.
+  uint32_t fragment_size;
+  // Optional second consumer's fragment geometry, or zero without a peer.
+  uint32_t peer_fragment_size;
+  // Complete interval alignment after combining native and caller constraints.
+  size_t expected_alignment;
+};
+
+class KfdBufferGeometryTest
+    : public KfdBufferNativeTest,
+      public ::testing::WithParamInterface<BufferGeometry> {};
+
+TEST_P(KfdBufferGeometryTest, PreservesBackingAndReleasesAddressPadding) {
+  const auto geometry = GetParam();
+  device_.topology.virtual_address.fragment_size = geometry.fragment_size;
+  amdf_gpu_umd_device_t peer = device_;
+  peer.topology.gpu_id = 23;
+  peer.topology.virtual_address.fragment_size = geometry.peer_fragment_size;
+  amdf_gpu_umd_device_t* peers[] = {&peer};
+  if (geometry.peer_fragment_size) {
+    create_info_.peer_count = 1;
+    create_info_.peer_devices = peers;
+    native_.gpu_ids.push_back(peer.topology.gpu_id);
+  }
+  create_info_.byte_length = geometry.byte_length;
+  create_info_.alignment = geometry.minimum_alignment;
+  create_info_.native_flags =
+      KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+  create_info_.host_access = AMDF_GPU_KFD_BUFFER_HOST_ACCESS_MAPPED;
+  native_.byte_length = geometry.byte_length;
+  ASSERT_EQ(ftruncate(device_.render_descriptor, geometry.byte_length), 0);
+  ASSERT_EQ(Create(), AMDF_STATUS_OK);
+  EXPECT_EQ(native_.allocation.va_addr % geometry.expected_alignment, 0u);
+  EXPECT_EQ(native_.allocation.size, geometry.byte_length);
+  EXPECT_EQ(native_.allocation.flags, create_info_.native_flags);
+  EXPECT_EQ(amdf_gpu_kfd_buffer_byte_length(buffer_), geometry.byte_length);
+  EXPECT_EQ(result_.device_address,
+            reinterpret_cast<uintptr_t>(result_.host_pointer));
+  auto* bytes = static_cast<uint8_t*>(result_.host_pointer);
+  bytes[0] = 0xA7;
+  bytes[geometry.byte_length - 1] = 0x69;
+  ASSERT_EQ(Destroy(), AMDF_STATUS_OK);
+  EXPECT_EQ(
+      native_.released_byte_length,
+      geometry.byte_length + geometry.expected_alignment - device_.page_size);
+  EXPECT_LE(native_.released_address, native_.allocation.va_addr);
+  EXPECT_GE(native_.released_address + native_.released_byte_length,
+            native_.allocation.va_addr + native_.allocation.size);
+  EXPECT_EQ(native_.free_count, 1u);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    NativeFragments, KfdBufferGeometryTest,
+    ::testing::Values(BufferGeometry{3 * 4096, 4096, 65536, 0, 8192},
+                      BufferGeometry{65536 + 4096, 4096, 65536, 0, 65536},
+                      BufferGeometry{3 * 1024 * 1024 / 2, 4096, 2 * 1024 * 1024,
+                                     0, 1024 * 1024},
+                      BufferGeometry{3 * 1024 * 1024 + 4096, 4096,
+                                     2 * 1024 * 1024, 0, 2 * 1024 * 1024},
+                      BufferGeometry{3 * 1024 * 1024 + 4096, 4 * 1024 * 1024,
+                                     2 * 1024 * 1024, 0, 4 * 1024 * 1024},
+                      BufferGeometry{6 * 1024 * 1024 + 4096, 4096, 65536,
+                                     4 * 1024 * 1024, 4 * 1024 * 1024}));
+
+TEST_F(KfdBufferNativeTest, RejectsAddressPaddingOverflowBeforeAllocation) {
+  create_info_.byte_length = SIZE_MAX & ~(device_.page_size - 1);
+  expected_metadata_free_count_ = 0;
+  EXPECT_EQ(amdf_status_code(Create()), AMDF_STATUS_CODE_INVALID_ARGUMENT);
+  EXPECT_EQ(buffer_, nullptr);
+  EXPECT_TRUE(native_.allocation_attempts.empty());
+}
 
 TEST_F(KfdBufferNativeTest, MemoryCacheRequirementsReachNativeAllocation) {
   device_.native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS;
@@ -703,6 +790,7 @@ TEST_F(KfdBufferNativeTest, RegisteredGroupPreservesCallerPagesThroughUnmap) {
   EXPECT_EQ(native_.allocation_attempts.size(), 3u);
   EXPECT_EQ(native_.allocation.flags, create_info_.native_flags);
   EXPECT_EQ(native_.allocation.mmap_offset, reinterpret_cast<uintptr_t>(pages));
+  EXPECT_EQ(native_.allocation.va_addr % 8192, 0u);
   EXPECT_EQ(result_.device_address, native_.address + 2051);
   EXPECT_EQ(result_.host_pointer, create_info_.host_pointer);
   native_.unmap_completion_error = EIO;
@@ -715,6 +803,7 @@ TEST_F(KfdBufferNativeTest, RegisteredGroupPreservesCallerPagesThroughUnmap) {
   ASSERT_EQ(Destroy(), AMDF_STATUS_OK);
   EXPECT_EQ(native_.unmap_progress, (std::vector<uint32_t>{0, 2}));
   EXPECT_EQ(native_.free_count, 1u);
+  EXPECT_EQ(native_.released_byte_length, 12288u);
   std::memset(pages, 0x69, 12288);
   EXPECT_EQ(munmap(pages, 12288), 0);
 }

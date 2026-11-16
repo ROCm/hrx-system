@@ -301,6 +301,7 @@ class KfdMemoryReservationTest : public ::testing::Test {
     device_.page_size = 4096;
     device_.topology.gpu_id = 19;
     device_.topology.virtual_address.end = UINT64_C(1) << 48;
+    device_.topology.virtual_address.alignment = 4096;
     device_.topology.virtual_address.fragment_size = 2 * 1024 * 1024;
   }
 
@@ -771,8 +772,11 @@ TEST_P(KfdReservationGeometryTest, PreservesShortExtentAndPageReplacements) {
 
 INSTANTIATE_TEST_SUITE_P(
     NativePageGeometry, KfdReservationGeometryTest,
-    ::testing::Values(ReservationGeometry{3 * 4096, 4096, 65536, 4096},
+    ::testing::Values(ReservationGeometry{3 * 4096, 4096, 65536, 8192},
+                      ReservationGeometry{65536 - 4096, 4096, 65536, 32768},
                       ReservationGeometry{65536 + 4096, 4096, 65536, 65536},
+                      ReservationGeometry{3 * 1024 * 1024 / 2, 4096,
+                                          2 * 1024 * 1024, 1024 * 1024},
                       ReservationGeometry{2 * 1024 * 1024 + 4096, 4096,
                                           2 * 1024 * 1024, 2 * 1024 * 1024},
                       ReservationGeometry{2 * 1024 * 1024 + 4096,
