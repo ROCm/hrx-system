@@ -8,6 +8,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/analysis/pipeline/entries.h"
 #include "loom/ir/context.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
@@ -136,6 +137,9 @@ class PipelineControlTest : public ::testing::Test {
                                                  engines_, kEngine + 1, &arena_,
                                                  &execution_, &conflict));
     EXPECT_EQ(conflict.second_worker, IREE_HOST_SIZE_MAX);
+    IREE_ASSERT_OK(loom_pipeline_entry_scope_allocate(
+        &loom_pipeline_entry_scope_type, &realization_.invocations.lifetimes,
+        realization_.invocations.count, &module_->arena, &scope_));
   }
 
   void TearDown() override {
@@ -280,6 +284,8 @@ class PipelineControlTest : public ::testing::Test {
   iree_host_size_t engines_[4] = {kEngine, kEngine, kEngine, kEngine};
   // Retained engine participation and serial scopes.
   loom_pipeline_execution_t execution_ = {};
+  // Compilation-owned execution facts supplied by the realization owner.
+  loom_pipeline_entry_scope_t* scope_ = nullptr;
   // Ordinary operation used to make boundary operands observable in emitted IR.
   loom_symbol_ref_t observer_;
   // Preparation observer makes the projected source capture order visible.
@@ -303,9 +309,28 @@ TEST_F(PipelineControlTest, NestedBoundariesKeepTheirProjectedRuntimeState) {
   };
   loom_pipeline_control_function_t* functions;
   IREE_ASSERT_OK(loom_pipeline_control_materialize(
-      &rewriter_, &realization_, &execution_, &options, &functions));
+      &rewriter_, &realization_, &execution_, scope_, &options, &functions));
   EXPECT_EQ(boundary_count_, 8u);
   EXPECT_EQ(entry_count_, 4u);
+  const auto* scope = functions[0].entry->scope;
+  EXPECT_EQ(scope, scope_);
+  EXPECT_EQ(scope->owner_count, realization_.invocations.count);
+  EXPECT_NE(scope->lifetimes.nodes, realization_.invocations.lifetimes.nodes);
+  EXPECT_NE(scope->lifetimes.ancestry,
+            realization_.invocations.lifetimes.ancestry);
+  EXPECT_NE(scope->lifetimes.owners, realization_.invocations.lifetimes.owners);
+  EXPECT_EQ(scope->lifetimes.count, realization_.invocations.lifetimes.count);
+  for (size_t owner = 0; owner < realization_.invocations.count; ++owner) {
+    const auto& projected =
+        functions[loom_pipeline_execution_index(&execution_, owner, kEngine)];
+    ASSERT_NE(projected.entry, nullptr);
+    EXPECT_EQ(projected.entry->scope, scope);
+    EXPECT_EQ(projected.entry->owner, owner);
+    EXPECT_EQ(projected.entry->engine, kEngine);
+    EXPECT_EQ(projected.entry->role, LOOM_PIPELINE_ENTRY_COMPLETE);
+    EXPECT_EQ(scope->lifetimes.owners[owner],
+              realization_.invocations.lifetimes.owners[owner]);
+  }
   for (size_t owner : {0u, 1u, 3u}) {
     const auto& projected =
         functions[loom_pipeline_execution_index(&execution_, owner, kEngine)];
@@ -349,7 +374,7 @@ TEST_F(PipelinePreparationTest, CapturesPrepareBeforeConsumersAcrossReentry) {
   };
   loom_pipeline_control_function_t* functions;
   IREE_ASSERT_OK(loom_pipeline_control_materialize(
-      &rewriter_, &realization_, &execution_, &options, &functions));
+      &rewriter_, &realization_, &execution_, scope_, &options, &functions));
   EXPECT_EQ(preparation_count_, 2u);
   ASSERT_EQ(functions[0].argument_count, 1u);
   EXPECT_EQ(functions[0].arguments[0], 0u);

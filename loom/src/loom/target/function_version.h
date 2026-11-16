@@ -30,6 +30,7 @@ typedef uint16_t loom_target_context_ordinal_t;
 
 typedef struct loom_low_memory_access_map_t loom_low_memory_access_map_t;
 typedef struct loom_low_loop_execution_map_t loom_low_loop_execution_map_t;
+typedef struct loom_pipeline_entry_binding_t loom_pipeline_entry_binding_t;
 
 typedef enum loom_target_function_representation_flag_bits_e {
   // At least one callable, CFG, or LoopLike boundary carries vector packets
@@ -81,6 +82,11 @@ typedef struct loom_target_function_version_t {
 
   // Captured source loop execution proofs bound to current Low controls.
   loom_low_loop_execution_map_t* loop_execution;
+
+  // Source-independent execution lifetime and role of a projected pipeline
+  // entry. NULL for ordinary functions. Shared scope storage belongs to this
+  // compilation; independent module projection clones it once per scope.
+  const loom_pipeline_entry_binding_t* pipeline_entry;
 } loom_target_function_version_t;
 
 // Static identity for target-refined function versions.

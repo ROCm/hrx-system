@@ -61,14 +61,14 @@ func.decl @__test_phase_join(%46: index)
 
 func.decl @__test_phase_enter(%47: index)
 
-func.def inline @__pipeline_engine_0(%48: buffer, %50: index) {
+func.def @__pipeline_engine_0(%48: buffer, %50: index) {
   cfg.br ^_bb1
 ^_bb1:
   func.call @__pipeline_worker_1(%48, %50) : (buffer, index)
   func.return
 }
 
-func.def inline @__pipeline_engine_1(%54: buffer, %56: index) {
+func.def @__pipeline_engine_1(%54: buffer, %56: index) {
   cfg.br ^_bb1
 ^_bb1:
   func.call @__pipeline_worker_0(%54, %56) : (buffer, index)
@@ -90,6 +90,71 @@ func.def public inline @__pipeline_engine_2(%60: buffer, %61: index) {
   func.call @__pipeline_engine_0(%60, %61) : (buffer, index)
   %67 = index.constant 0 : index
   func.call @__test_phase_join(%67) : (index)
+  cfg.br ^_bb3
+^_bb3:
+  func.return
+}
+
+// ====
+// RUN: pass test.realize-pipeline,symbol-dce
+
+// A joined controller keeps the construction's numeric contract and
+// materializes its closed captures. Neither a vector literal nor an exact
+// scalar needs a runtime ABI argument just because the phase stays callable.
+func.decl @consume(%ordinal: index, %values: vector<4xi32>, %scale: f32)
+
+func.def @worker(%ordinal: index, %values: vector<4xi32>, %scale: f32) {
+  func.call @consume(%ordinal, %values, %scale) : (index, vector<4xi32>, f32)
+  func.return
+}
+
+pipeline.def @phase() run(%ordinal: index, %values: vector<4xi32>, %scale: f32) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @worker(%ordinal, %values, %scale) : (index, vector<4xi32>, f32)
+  }
+}
+
+pipeline.def public @root() run(%ordinal: index) {
+  %bounded = index.assume %ordinal [range(%ordinal, 2, 8), multiple_of(%ordinal, 2)] : index
+  %values = vector.splati 17 : vector<4xi32>
+  %scale = scalar.constant 0.5 : f32
+  pipeline.serial {
+    pipeline.compose @phase(%bounded, %values, %scale) : (index, vector<4xi32>, f32)
+  }
+}
+
+// ----
+func.decl @consume(%ordinal: index, %values: vector<4xi32>, %scale: f32)
+
+func.def @__pipeline_worker_0(%ordinal: index, %values: vector<4xi32>) {
+  %16 = scalar.constant 0.5 : f32
+  func.call @consume(%ordinal, %values, %16) : (index, vector<4xi32>, f32)
+  func.return
+}
+
+func.decl @__test_phase_join(%17: index)
+
+func.decl @__test_phase_enter(%18: index)
+
+func.def @__pipeline_engine_0(%19: index) where [range(%19, 2, 8), multiple_of(%19, 2)] {
+  %values = vector.splati 17 : vector<4xi32>
+  cfg.br ^_bb1
+^_bb1:
+  func.call @__pipeline_worker_0(%19, %values) : (index, vector<4xi32>)
+  func.return
+}
+
+func.def public inline @__pipeline_engine_1(%26: index) {
+  cfg.br ^_bb1
+^_bb1:
+  %bounded = index.assume %26 [range(%26, 2, 8), multiple_of(%26, 2)] : index
+  cfg.br ^_bb2
+^_bb2:
+  %31 = index.constant 0 : index
+  func.call @__test_phase_enter(%31) : (index)
+  func.call @__pipeline_engine_0(%bounded) : (index)
+  %32 = index.constant 0 : index
+  func.call @__test_phase_join(%32) : (index)
   cfg.br ^_bb3
 ^_bb3:
   func.return

@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "iree/base/bitmap.h"
+#include "loom/analysis/pipeline/entries.h"
 #include "loom/codegen/low/loop_execution.h"
 #include "loom/codegen/low/memory_access.h"
 #include "loom/ir/module.h"
@@ -18,6 +19,72 @@
 #include "loom/target/facts_builder.h"
 #include "loom/target/function_version.h"
 #include "loom/target/provider.h"
+#include "loom/util/adaptive_sort.h"
+
+typedef struct loom_target_function_version_scope_projection_t {
+  // Source compilation's shared immutable execution lifetime facts.
+  const loom_pipeline_entry_scope_t* source;
+  // One independently owned copy, shared by all projected entries.
+  const loom_pipeline_entry_scope_t* target;
+} loom_target_function_version_scope_projection_t;
+
+static bool loom_target_function_version_scope_less(
+    const loom_target_function_version_scope_projection_t* first,
+    const loom_target_function_version_scope_projection_t* second) {
+  return (uintptr_t)first->source < (uintptr_t)second->source;
+}
+
+LOOM_DEFINE_ADAPTIVE_SORT(loom_target_function_version_sort_scopes,
+                          loom_target_function_version_scope_projection_t,
+                          loom_target_function_version_scope_less)
+
+static iree_status_t loom_target_function_version_project_scopes(
+    const loom_function_version_list_t* versions,
+    iree_arena_allocator_t* scratch_arena, iree_arena_allocator_t* arena,
+    loom_target_function_version_scope_projection_t** out_scopes,
+    iree_host_size_t* out_count) {
+  *out_scopes = NULL;
+  *out_count = 0;
+  if (versions == NULL) {
+    return iree_ok_status();
+  }
+  iree_host_size_t entry_count = 0;
+  for (iree_host_size_t i = 0; i < versions->count; ++i) {
+    entry_count += loom_target_function_version_const_cast(versions->values[i])
+                       ->pipeline_entry != NULL;
+  }
+  if (entry_count == 0) {
+    return iree_ok_status();
+  }
+  loom_target_function_version_scope_projection_t* scopes = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      scratch_arena, entry_count, sizeof(*scopes), (void**)&scopes));
+  iree_host_size_t count = 0;
+  for (iree_host_size_t i = 0; i < versions->count; ++i) {
+    const loom_pipeline_entry_binding_t* entry =
+        loom_target_function_version_const_cast(versions->values[i])
+            ->pipeline_entry;
+    if (entry != NULL) {
+      scopes[count++] = (loom_target_function_version_scope_projection_t){
+          .source = entry->scope};
+    }
+  }
+  loom_target_function_version_sort_scopes(scopes, count);
+  iree_host_size_t unique_count = 0;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    if (unique_count && scopes[unique_count - 1].source == scopes[i].source) {
+      continue;
+    }
+    const loom_pipeline_entry_scope_t* source = scopes[i].source;
+    scopes[unique_count].source = source;
+    IREE_RETURN_IF_ERROR(loom_pipeline_entry_scope_clone(
+        source, arena, &scopes[unique_count].target));
+    ++unique_count;
+  }
+  *out_scopes = scopes;
+  *out_count = unique_count;
+  return iree_ok_status();
+}
 
 typedef struct loom_target_function_version_projection_context_table_t {
   // Context ordinals present in the function-version owner.
@@ -257,7 +324,27 @@ typedef struct loom_target_function_version_clone_t {
   iree_arena_allocator_t* scratch_arena;
   // Current callable scope, restored by the clone owner's finish notification.
   loom_target_function_version_clone_scope_t* scope;
+  // Immutable execution scopes copied once, sorted by source scope identity.
+  const loom_target_function_version_scope_projection_t* entry_scopes;
+  // Number of distinct source scopes in entry_scopes.
+  iree_host_size_t entry_scope_count;
 } loom_target_function_version_clone_t;
+
+static const loom_pipeline_entry_scope_t*
+loom_target_function_version_projected_scope(
+    const loom_target_function_version_clone_t* clone,
+    const loom_pipeline_entry_scope_t* source) {
+  iree_host_size_t begin = 0, end = clone->entry_scope_count;
+  while (begin < end) {
+    const iree_host_size_t middle = begin + (end - begin) / 2;
+    if ((uintptr_t)clone->entry_scopes[middle].source < (uintptr_t)source) {
+      begin = middle + 1;
+    } else {
+      end = middle;
+    }
+  }
+  return clone->entry_scopes[begin].target;
+}
 
 static iree_status_t loom_target_function_version_clone_string(
     loom_module_t* module, iree_string_view_t source,
@@ -384,6 +471,15 @@ static iree_status_t loom_target_function_version_clone_op(
       &target->function_target_facts));
   IREE_RETURN_IF_ERROR(loom_target_function_version_clone_schedules(
       &source->loop_pipelines, arena, &target->loop_pipelines));
+  if (source->pipeline_entry != NULL) {
+    loom_pipeline_entry_binding_t* entry = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate(arena, sizeof(*entry), (void**)&entry));
+    *entry = *source->pipeline_entry;
+    entry->scope = loom_target_function_version_projected_scope(
+        clone, source->pipeline_entry->scope);
+    target->pipeline_entry = entry;
+  }
   if (source->memory_accesses != NULL) {
     IREE_RETURN_IF_ERROR(loom_low_memory_access_map_allocate(
         &module->arena, &target->memory_accesses));
@@ -549,12 +645,21 @@ iree_status_t loom_target_function_versions_project_module(
 
   iree_status_t status = loom_target_function_version_projection_plan_build(
       source_module, function_versions, &scratch_arena, &plan);
+  loom_target_function_version_scope_projection_t* entry_scopes = NULL;
+  iree_host_size_t entry_scope_count = 0;
+  if (iree_status_is_ok(status) && out_versions != NULL) {
+    status = loom_target_function_version_project_scopes(
+        function_versions, &scratch_arena, out_versions->arena, &entry_scopes,
+        &entry_scope_count);
+  }
   if (iree_status_is_ok(status)) {
     loom_target_function_version_clone_t clone = {
         .versions = &plan.version_snapshot,
         .projection = &projection,
         .owner = out_versions,
         .scratch_arena = &scratch_arena,
+        .entry_scopes = entry_scopes,
+        .entry_scope_count = entry_scope_count,
     };
     const loom_ir_module_clone_options_t options = {
         .additional_string_capacity = plan.materialization_count,

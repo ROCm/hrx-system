@@ -25,6 +25,7 @@ iree_status_t loom_aie2p_program_capacity_admit(
       loom_param_u64(LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE),
   };
   const loom_diagnostic_emission_t emission = {
+      .module = module,
       .op = function_op,
       .error = LOOM_ERR_XDNA_058,
       .params = params,

@@ -13,8 +13,6 @@
 extern "C" {
 #endif
 
-enum { LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID = 16 };
-
 // A physical payload path eligible to carry control packets. Every geometry
 // on this path grants a complete destination record before queuing its sender.
 typedef struct loom_aie2p_native_delivery_t {
@@ -54,18 +52,24 @@ typedef struct loom_aie2p_native_grant_t {
   uint8_t packet;
 } loom_aie2p_native_grant_t;
 
-// Selects a core packet ID outside its occupied set and the payload identity.
+// Selects a compatible core packet ID, excluding the reserved payload identity.
 // When a delivery path is available, records the terminal before another core
-// can assign that ID. Returns UINT8_MAX when no compatible identity remains.
+// can assign that ID. A preferred ID is already bound to this endpoint in the
+// caller's column namespace; it may be reused even when occupied, provided the
+// delivery namespace agrees. UINT8_MAX requests a fresh ID. Returns UINT8_MAX
+// when no compatible identity remains.
 uint8_t loom_aie2p_native_delivery_packet(
     loom_aie2p_native_delivery_t* delivery, uint32_t occupied,
     const loom_aie2p_native_tile_t* tile, loom_xdna_stream_port_t port,
-    uint8_t channel);
+    uint8_t channel, uint8_t preferred);
 
-// Reserves a scalar collective ID in the core's outgoing occupied set. Selects
-// high IDs first; control routing reserves any shared payload identity there.
-// Returns UINT8_MAX without changing the set when no identity remains.
-uint8_t loom_aie2p_native_collective_packet(uint32_t* occupied);
+// Reserves a scalar collective ID in the core's outgoing occupied set,
+// excluding identities already carried by another source in its shared command
+// column. Selects high IDs first; control routing reserves shared payload
+// identities. Returns UINT8_MAX without changing the set when no identity
+// remains.
+uint8_t loom_aie2p_native_collective_packet(uint32_t* occupied,
+                                            uint32_t shared);
 
 // Selects at most one eligible payload path per control destination from the
 // retained physical distributions and exact receiver credit returns.

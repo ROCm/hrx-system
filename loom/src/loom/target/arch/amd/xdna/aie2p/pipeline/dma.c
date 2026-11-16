@@ -7,6 +7,7 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_queues.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_resources.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_submission.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
@@ -203,6 +204,99 @@ static iree_status_t loom_aie2p_native_restore_dma_controllers(
                                NULL, 0, LOOM_LOCATION_UNKNOWN, &invoke);
 }
 
+static iree_status_t loom_aie2p_native_restore_dma_descriptors(
+    loom_aie2p_native_context_t* context, loom_builder_t* caller,
+    const loom_aie2p_native_worker_t* worker) {
+  if (!worker->dma_initializers) {
+    return iree_ok_status();
+  }
+  loom_aie2p_worker_builder_t* code = &context->code;
+  loom_builder_t builder;
+  loom_symbol_ref_t symbol;
+  loom_op_t* function;
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_helper(code, NULL, 0, NULL, 0,
+                                                &builder, &symbol, &function));
+  for (const loom_aie2p_native_dma_initializer_t* initializer =
+           worker->dma_initializers;
+       initializer; initializer = initializer->next) {
+    const loom_aie2p_native_dma_descriptor_t* descriptor =
+        initializer->descriptor;
+    const loom_aie2p_native_dma_path_t* path = descriptor->path;
+    const loom_aie2p_native_tile_t* tile =
+        descriptor->shim ? path->shim : path->local;
+    const loom_aie2p_native_memory_layout_t* layout = tile->memory_layout;
+    const uint8_t packet =
+        descriptor->shim ? path->control.shim : path->control.local;
+    const loom_xdna_register_field_id_t base =
+        layout ? layout->descriptor_base
+               : LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD0_BUFFER_LENGTH;
+    const uint64_t origin =
+        (uint64_t)tile->coordinate.column << context->family->column_shift |
+        (uint64_t)tile->coordinate.row << context->family->row_shift;
+    const loom_aie2p_native_transfer_t* transfer = descriptor->first_transfer;
+    for (uint16_t segment = 0; segment < descriptor->sequence.descriptor_count;
+         ++segment, transfer = transfer->task_next) {
+      const uint16_t index = descriptor->sequence.descriptor + segment;
+      const uint32_t address =
+          (uint32_t)(loom_xdna_register_field_address(
+                         context->family, base, tile->coordinate, &index) -
+                     origin);
+      uint8_t changed = descriptor->storage->changed_words[segment];
+      loom_value_id_t values[8];
+      if (descriptor->shim) {
+        if (descriptor->address_dynamic) {
+          // Every issue already writes both address words, including this
+          // geometry's packet framing. Restore only the remaining registers.
+          changed &= ~((1u << 1) | (1u << 2));
+        } else {
+          const loom_named_attr_t address_attr = {
+              .name_id = code->integer_name,
+              .value = loom_attr_i64(transfer->relocation->load_address)};
+          loom_value_id_t relocated, offset;
+          IREE_RETURN_IF_ERROR(loom_aie2p_worker_op(
+              code, &builder,
+              AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_LOCAL_ADDRESS_I32, NULL, 0,
+              loom_make_named_attr_slice(&address_attr, 1), &code->address_type,
+              &relocated));
+          IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
+              code, &builder,
+              (int32_t)transfer->external_view->begin_byte_offset.constant,
+              &offset));
+          IREE_RETURN_IF_ERROR(loom_aie2p_worker_external_address(
+              code, &builder, relocated, offset,
+              descriptor->sequence.words[segment][2], &values[1], &values[2]));
+        }
+      }
+      for (uint8_t word = 0; word < 8;) {
+        if (!(changed & (1u << word))) {
+          ++word;
+          continue;
+        }
+        const uint8_t begin = word;
+        for (; word < 8 && word - begin < 4 && (changed & (1u << word));
+             ++word) {
+          if (descriptor->shim && !descriptor->address_dynamic &&
+              (word == 1 || word == 2)) {
+            continue;
+          }
+          IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
+              code, &builder,
+              (int32_t)loom_aie2p_native_descriptor_word(descriptor, segment,
+                                                         word),
+              &values[word]));
+        }
+        IREE_RETURN_IF_ERROR(loom_aie2p_worker_control_write(
+            code, &builder, packet, address + begin * sizeof(uint32_t),
+            &values[begin], word - begin));
+      }
+    }
+  }
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_return(&builder, NULL, 0));
+  loom_op_t* invoke;
+  return loom_low_invoke_build(caller, 0, 0, 0, 0, symbol, NULL, 0, NULL, 0,
+                               NULL, 0, LOOM_LOCATION_UNKNOWN, &invoke);
+}
+
 iree_status_t loom_aie2p_native_emit_transfers(
     loom_aie2p_native_context_t* context, loom_rewriter_t* rewriter,
     const loom_pipeline_realization_t* realization,
@@ -218,6 +312,8 @@ iree_status_t loom_aie2p_native_emit_transfers(
           ->first_op);
   IREE_RETURN_IF_ERROR(loom_aie2p_native_restore_dma_controllers(
       context, builder, worker_index));
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_native_restore_dma_descriptors(context, builder, worker));
   for (loom_aie2p_native_transfer_task_t* task = worker->transfer_tasks; task;
        task = task->next) {
     IREE_RETURN_IF_ERROR(loom_aie2p_native_emit_submission(context, task));

@@ -8,8 +8,6 @@
 
 #include "iree/base/checked_math.h"
 #include "iree/base/internal/math.h"
-#include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
-#include "loom/target/arch/amd/xdna/aie2p/pipeline/payload.h"
 
 // NPU2 switch ordinals fit in five bits, ports have at most eight channels,
 // and packet filtering can either retain or remove the one source header.
@@ -416,97 +414,25 @@ static void loom_aie2p_connectivity_verify_delivery(
   }
 }
 
-static iree_status_t loom_aie2p_native_connections_verify_impl(
-    const loom_aie2p_native_context_t* context) {
-  loom_aie2p_native_connectivity_t* connectivity;
-  iree_arena_allocator_t* arena = context->pass->arena;
-  IREE_RETURN_IF_ERROR(loom_aie2p_native_connectivity_allocate(
-      context->family, context->switches, context->routing.routes,
-      context->routing.route_count, arena, &connectivity));
-  iree_host_size_t capacity = context->control_connection_count;
-  for (const loom_aie2p_native_payload_source_t* source =
-           context->payload_sources;
-       source; source = source->next) {
-    for (const loom_aie2p_native_payload_class_t* payload = source->classes;
-         payload; payload = payload->next) {
-      capacity = iree_max(capacity, payload->destination_count);
-    }
-  }
-  loom_aie2p_native_connection_endpoint_t* destinations;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, capacity, sizeof(*destinations), (void**)&destinations));
-  for (const loom_aie2p_native_payload_source_t* source =
-           context->payload_sources;
-       source; source = source->next) {
-    for (const loom_aie2p_native_payload_class_t* payload = source->classes;
-         payload; payload = payload->next) {
-      if (!payload->routed) {
-        continue;
-      }
-      for (iree_host_size_t i = 0; i < payload->destination_count; ++i) {
-        destinations[i] = (loom_aie2p_native_connection_endpoint_t){
-            payload->destinations[i].tile->coordinate,
-            LOOM_XDNA_STREAM_PORT_DMA, payload->destinations[i].engine};
-      }
-      const loom_aie2p_native_connection_endpoint_t origin = {
-          source->endpoint.tile->coordinate, LOOM_XDNA_STREAM_PORT_DMA,
-          source->endpoint.engine};
-      loom_aie2p_connectivity_verify_delivery(
-          connectivity, origin, source->framed ? payload->packet : UINT8_MAX,
-          destinations, payload->destination_count, false);
-    }
-  }
-  // Group retained control requests by physical sender and packet identity.
-  // Destination membership comes from request ownership, never route edges.
-  iree_host_size_t group_count = 0;
-  if (!iree_host_size_checked_mul(connectivity->tile_count, 2 * 32,
-                                  &group_count)) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "connectivity control group capacity overflow");
-  }
-  iree_host_size_t* first;
-  iree_host_size_t* next;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, group_count, sizeof(*first), (void**)&first));
-  memset(first, 0xff, group_count * sizeof(*first));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, context->control_connection_count, sizeof(*next), (void**)&next));
-  for (iree_host_size_t i = 0; i < context->control_connection_count; ++i) {
-    const loom_aie2p_native_control_connection_t* request =
-        &context->control_connections[i];
-    const iree_host_size_t tile = loom_xdna_array_physical_tile_index(
-        context->family, request->source.coordinate);
-    const iree_host_size_t group =
-        (tile * 2 +
-         (request->source.port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL)) *
-            32 +
-        request->packet;
-    next[i] = first[group];
-    first[group] = i;
-  }
-  for (iree_host_size_t group = 0; group < group_count; ++group) {
-    if (first[group] == IREE_HOST_SIZE_MAX) {
-      continue;
-    }
-    const loom_aie2p_native_control_connection_t* request =
-        &context->control_connections[first[group]];
-    iree_host_size_t count = 0;
-    for (iree_host_size_t i = first[group]; i != IREE_HOST_SIZE_MAX;
-         i = next[i]) {
-      destinations[count++] = context->control_connections[i].destination;
-    }
-    loom_aie2p_connectivity_verify_delivery(connectivity, request->source,
-                                            request->packet, destinations,
-                                            count, true);
-  }
-  return iree_ok_status();
-}
-
 iree_status_t loom_aie2p_native_connections_verify(
-    const loom_aie2p_native_context_t* context) {
-  const iree_arena_checkpoint_t checkpoint =
-      iree_arena_checkpoint_save(context->pass->arena);
-  iree_status_t status = loom_aie2p_native_connections_verify_impl(context);
+    const loom_aie2p_array_route_builder_t* routing,
+    const loom_aie2p_native_switch_t* switches,
+    const loom_aie2p_native_connections_t* connections,
+    iree_arena_allocator_t* arena) {
+  const iree_arena_checkpoint_t checkpoint = iree_arena_checkpoint_save(arena);
+  loom_aie2p_native_connectivity_t* connectivity = NULL;
+  iree_status_t status = loom_aie2p_native_connectivity_allocate(
+      routing->family, switches, routing->routes, routing->route_count, arena,
+      &connectivity);
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < connections->group_count; ++i) {
+      const loom_aie2p_native_connection_t* group = &connections->groups[i];
+      loom_aie2p_connectivity_verify_delivery(
+          connectivity, group->source, group->packet,
+          &connections->destinations[group->destination_offset],
+          group->destination_count, group->retain_header);
+    }
+  }
   iree_arena_checkpoint_restore(&checkpoint);
   return status;
 }

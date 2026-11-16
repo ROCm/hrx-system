@@ -18,6 +18,8 @@
 extern "C" {
 #endif
 
+struct loom_aie2p_program_layout_t;
+
 // Final core-visible placement for one function-local storage domain.
 typedef struct loom_aie2p_tile_storage_placement_t {
   // Structural Low storage space selecting the leaf domain.
@@ -46,6 +48,9 @@ typedef struct loom_aie2p_tile_link_layout_t {
   uint32_t program_owner_offset;
   // Program-memory bytes available beginning at |program_address|.
   uint32_t program_byte_capacity;
+  // Optional independently placed code groups. NULL retains the single
+  // resident section. The physical owner admits the complete footprint first.
+  const struct loom_aie2p_program_layout_t* program_layout;
   // Function-local storage placements keyed by storage space.
   const loom_aie2p_tile_storage_placement_t* storage_placements;
   // Number of records in |storage_placements|.
@@ -56,12 +61,21 @@ typedef struct loom_aie2p_tile_link_layout_t {
   iree_host_size_t read_only_data_placement_count;
 } loom_aie2p_tile_link_layout_t;
 
+typedef enum loom_aie2p_section_load_e {
+  // Contents are installed by executable initialization.
+  LOOM_AIE2P_SECTION_LOAD_INITIAL,
+  // Contents are delivered by the resident program at a phase boundary.
+  LOOM_AIE2P_SECTION_LOAD_ON_DEMAND,
+} loom_aie2p_section_load_t;
+
 // Canonical physical placement of one linked native section.
 typedef struct loom_aie2p_linked_section_placement_t {
   // Owning tile memory interpreted by the section.
   loom_xdna_memory_space_t memory_space;
   // Byte offset in that owning memory space.
   uint32_t owner_offset;
+  // Initialization and resident loading have separate instruction lifetimes.
+  loom_aie2p_section_load_t load;
 } loom_aie2p_linked_section_placement_t;
 
 // Fully placed and fixed-up native sections for one AIE2P compute tile.

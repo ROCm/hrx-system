@@ -214,9 +214,16 @@ class PipelineRealizationTest : public ::testing::Test {
     return iree_ok_status();
   }
 
-  static iree_status_t Entry(void* data, loom_rewriter_t* rewriter,
-                             const loom_pipeline_realization_t* realization) {
+  static iree_status_t Programs(void* data, loom_rewriter_t*,
+                                const loom_pipeline_realization_t* realization,
+                                bool* valid) {
     auto* self = static_cast<PipelineRealizationTest*>(data);
+    EXPECT_EQ(self->selected_, 1u);
+    EXPECT_EQ(self->emitted_,
+              size_t(self->has_body_[0]) + size_t(self->has_body_[1]));
+    EXPECT_EQ(self->entered_, 0u);
+    EXPECT_TRUE(loom_pipeline_def_isa(realization->function.op));
+    EXPECT_EQ(self->source_version_.base.function.op, realization->function.op);
     for (size_t i = 0; i < 2; ++i) {
       EXPECT_EQ(realization->instances[i].channels.function.op,
                 self->bodies_[i]);
@@ -230,6 +237,16 @@ class PipelineRealizationTest : public ::testing::Test {
         EXPECT_EQ(loom_func_like_signature_flags(function).data_length, 0u);
       }
     }
+    ++self->programmed_;
+    *valid = self->admit_programs_;
+    return iree_ok_status();
+  }
+
+  static iree_status_t Entry(void* data, loom_rewriter_t* rewriter,
+                             const loom_pipeline_realization_t* realization) {
+    auto* self = static_cast<PipelineRealizationTest*>(data);
+    EXPECT_EQ(self->programmed_, 1u);
+    ++self->entered_;
     const auto symbol = loom_func_like_callee(realization->function);
     IREE_RETURN_IF_ERROR(
         loom_rewriter_erase(rewriter, realization->function.op));
@@ -242,12 +259,20 @@ class PipelineRealizationTest : public ::testing::Test {
     const auto symbols = module_->symbols.count;
     const auto worker = worker_version_.base.function;
     const loom_pipeline_realization_callback_t callback = {
-        Select, HasWorkerBody, Worker, Entry, this};
+        .select = Select,
+        .has_worker_body = HasWorkerBody,
+        .worker = Worker,
+        .programs = Programs,
+        .entry = Entry,
+        .user_data = this,
+    };
     IREE_ASSERT_OK(loom_pipeline_realize_invocations(
         &pass_, module_, &invocations_, source_workers_, &snapshot_,
         &callback));
     EXPECT_EQ(selected_, 1u);
     EXPECT_EQ(emitted_, size_t(has_body_[0]) + size_t(has_body_[1]));
+    EXPECT_EQ(programmed_, 1u);
+    EXPECT_EQ(entered_, size_t(admit_programs_));
     EXPECT_EQ(module_->symbols.count, symbols + emitted_);
     EXPECT_EQ(versions_.list.count, 2u + emitted_);
     EXPECT_EQ(worker_version_.base.function.op, worker.op);
@@ -299,6 +324,12 @@ class PipelineRealizationTest : public ::testing::Test {
   size_t selected_ = 0;
   // Number of instruction-bearing workers visited during emission.
   size_t emitted_ = 0;
+  // Number of program-construction callbacks after every worker is emitted.
+  size_t programmed_ = 0;
+  // Number of entry callbacks after program admission.
+  size_t entered_ = 0;
+  // Whether the selected programs admit replacement of the source entry.
+  bool admit_programs_ = true;
   // Selected instruction-body requirement for each source occurrence.
   bool has_body_[2] = {true, true};
   // Independent consuming bodies; offloaded occurrences remain null.
@@ -330,6 +361,15 @@ TEST_F(PipelineRealizationTest, OmittingBodyPreservesLaterRoleIdentity) {
       loom_string_table_get(&module_->strings,
                             module_->symbols.entries[symbol.symbol_id].name_id),
       IREE_SV("__pipeline_worker_1")));
+}
+
+TEST_F(PipelineRealizationTest, RejectedProgramsPreserveSourceEntry) {
+  const auto source = source_version_.base.function.op;
+  admit_programs_ = false;
+  Run();
+  EXPECT_EQ(source_version_.base.function.op, source);
+  EXPECT_TRUE(loom_pipeline_def_isa(source));
+  EXPECT_NE(source->parent_block, nullptr);
 }
 
 }  // namespace

@@ -254,11 +254,13 @@ static void loom_aie2p_bundle_plan_commit_alignment_storage(
 static iree_status_t loom_aie2p_bundle_plan_try_align_loop_boundary(
     loom_aie2p_bundle_plan_builder_t* builder,
     iree_host_size_t region_bundle_start,
-    iree_host_size_t boundary_bundle_index, bool* out_aligned) {
+    iree_host_size_t boundary_bundle_index, uint8_t minimum_added_byte_count,
+    bool* out_aligned) {
   loom_aie2p_bundle_alignment_storage_t storage =
       loom_aie2p_bundle_plan_alignment_storage(builder);
   IREE_RETURN_IF_ERROR(loom_aie2p_bundle_alignment_try_loop_boundary(
-      &storage, region_bundle_start, boundary_bundle_index, out_aligned));
+      &storage, region_bundle_start, boundary_bundle_index,
+      minimum_added_byte_count, out_aligned));
   loom_aie2p_bundle_plan_commit_alignment_storage(builder, &storage);
   return iree_ok_status();
 }
@@ -2058,7 +2060,7 @@ static iree_status_t loom_aie2p_bundle_plan_try_append_hardware_loop_impl(
   }
   bool setup_aligned = false;
   IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_try_align_loop_boundary(
-      builder, setup_bundle_start, builder->bundle_count, &setup_aligned));
+      builder, setup_bundle_start, builder->bundle_count, 0, &setup_aligned));
   if (!setup_aligned) {
     loom_aie2p_bundle_plan_restore_hardware_loop(builder, snapshot, loop);
     return iree_ok_status();
@@ -2108,9 +2110,21 @@ static iree_status_t loom_aie2p_bundle_plan_try_append_hardware_loop_impl(
     }
   }
   const iree_host_size_t loop_end_bundle_index = builder->bundle_count - 1u;
+  const uint32_t final_setup_byte_offset =
+      builder->bundles[setup_bundle_start + 1u].byte_offset;
+  const uint32_t minimum_end_byte_offset =
+      final_setup_byte_offset +
+      LOOM_AIE2P_HARDWARE_LOOP_MINIMUM_SETUP_TO_END_BYTES;
+  const uint32_t end_byte_offset =
+      builder->bundles[loop_end_bundle_index].byte_offset;
+  const uint8_t minimum_added_byte_count =
+      (uint8_t)(minimum_end_byte_offset > end_byte_offset
+                    ? minimum_end_byte_offset - end_byte_offset
+                    : 0);
   bool loop_end_aligned = false;
   IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_try_align_loop_boundary(
-      builder, body_bundle_start, loop_end_bundle_index, &loop_end_aligned));
+      builder, body_bundle_start, loop_end_bundle_index,
+      minimum_added_byte_count, &loop_end_aligned));
   if (!loop_end_aligned) {
     loom_aie2p_bundle_plan_restore_hardware_loop(builder, snapshot, loop);
     return iree_ok_status();
@@ -2122,19 +2136,11 @@ static iree_status_t loom_aie2p_bundle_plan_try_append_hardware_loop_impl(
   // that the hardware still repeats as part of the loop.
   bool loop_continuation_aligned = false;
   IREE_RETURN_IF_ERROR(loom_aie2p_bundle_plan_try_align_loop_boundary(
-      builder, loop_end_bundle_index, builder->bundle_count,
+      builder, loop_end_bundle_index, builder->bundle_count, 0,
       &loop_continuation_aligned));
   const uint32_t loop_end_byte_offset =
       builder->bundles[loop_end_bundle_index].byte_offset;
-  const uint32_t final_setup_byte_offset =
-      builder->bundles[setup_bundle_start + 1u].byte_offset;
-  if (!loop_continuation_aligned ||
-      builder->encoded_byte_length - loop_end_byte_offset !=
-          LOOM_AIE2P_BUNDLE_ALIGNMENT_BOUNDARY_BYTES ||
-      loop_end_byte_offset < final_setup_byte_offset ||
-      loop_end_byte_offset % LOOM_AIE2P_BUNDLE_ALIGNMENT_BOUNDARY_BYTES != 0 ||
-      loop_end_byte_offset - final_setup_byte_offset <
-          LOOM_AIE2P_HARDWARE_LOOP_MINIMUM_SETUP_TO_END_BYTES) {
+  if (!loop_continuation_aligned) {
     loom_aie2p_bundle_plan_restore_hardware_loop(builder, snapshot, loop);
     return iree_ok_status();
   }

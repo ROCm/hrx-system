@@ -32,9 +32,15 @@ typedef enum loom_aie2p_native_relocation_kind_e {
 
 // Applies all AIE2P fixups after contribution assembly and address placement.
 //
-// Section addresses and contribution layouts in |assembly| must be final. The
-// function mutates the arena-owned assembled section payloads in place. Symbol
-// and fixup layout scratch is allocated from |scratch_arena|.
+// Section addresses and contribution layouts in |assembly| must be final.
+// Native emission owns each fixup's code/data domain and in-section target;
+// placement assigns all executable sections to the same core's program memory.
+// Code references use absolute addresses across section boundaries, allowing
+// separately placed callers to share resident helpers. Section membership
+// does not establish simultaneous residency or instruction-fetch safety: the
+// execution plan owns those lifetimes before a linked program can execute.
+// The function mutates the arena-owned assembled section payloads in place.
+// Symbol and fixup layout scratch is allocated from |scratch_arena|.
 iree_status_t loom_aie2p_native_object_apply_fixups(
     const loom_native_object_contribution_t* object,
     loom_native_section_contribution_assembly_t* assembly,

@@ -60,13 +60,16 @@ typedef struct loom_aie2p_bundle_alignment_storage_t {
 } loom_aie2p_bundle_alignment_storage_t;
 
 // Widens existing packets before |boundary_bundle_index| to place that bundle,
-// or the stream endpoint, on a hardware-loop boundary. A legal selection never
-// adds an issue position. |out_aligned| is false with storage unchanged when no
-// bounded format selection exists.
+// or the stream endpoint, on a hardware-loop boundary after adding at least
+// |minimum_added_byte_count| bytes. This also satisfies minimum hardware-loop
+// setup-to-end distance without adding loop-control cycles. A legal selection
+// never adds an issue position. |out_aligned| is false with storage unchanged
+// when no bounded format selection exists.
 iree_status_t loom_aie2p_bundle_alignment_try_loop_boundary(
     loom_aie2p_bundle_alignment_storage_t* storage,
     iree_host_size_t region_bundle_start,
-    iree_host_size_t boundary_bundle_index, bool* out_aligned);
+    iree_host_size_t boundary_bundle_index, uint8_t minimum_added_byte_count,
+    bool* out_aligned);
 
 // Widens a direct call and its five architectural delay packets so the return
 // address is aligned. When widening cannot reach the required residue, inserts

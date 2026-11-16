@@ -166,7 +166,8 @@ coissued components: 7
 
 // The byte store reads r0 at cycle 7, so reusing r0 for the add's cycle-1 write
 // waits until cycle 6. That independent stall does not move the store-to-release
-// deadline from cycle 10. RET and its delay window end at cycle 14.
+// deadline from cycle 10. Return drains the release's eight-cycle resume
+// boundary, including its architectural delay window.
 // RUN: emit aie2p-leaf @independent_deadline report=emission
 
 aie2p.target<core> @target

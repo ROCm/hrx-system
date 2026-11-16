@@ -40,8 +40,14 @@ class SourceInventory {
     for (auto& function : functions_) {
       function.helpers_admitted = false;
       function.helpers = {};
+      function.entry_owners = nullptr;
       function.program_data = &function.requirements.read_only_data;
     }
+  }
+
+  void BindPipeline(size_t index,
+                    const loom_pipeline_entry_binding_t* binding) {
+    functions_[index].pipeline_entry = binding;
   }
 
   void Admit(size_t root) {

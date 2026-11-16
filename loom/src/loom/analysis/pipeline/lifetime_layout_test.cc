@@ -64,7 +64,7 @@ TEST_F(PipelineLifetimeLayoutTest, AlignmentAndOwnerLocalRangesAcrossPools) {
   };
   const loom_pipeline_lifetime_extent_t* extents = nullptr;
   IREE_ASSERT_OK(loom_pipeline_lifetime_layout(
-      &lifetimes_, requests, IREE_ARRAYSIZE(requests), 2, &arena_, &extents));
+      &lifetimes_, requests, IREE_ARRAYSIZE(requests), 3, &arena_, &extents));
   const uint64_t offsets[] = {0, 8, 8, 14, 0, 16, 16};
   for (size_t i = 0; i < IREE_ARRAYSIZE(requests); ++i) {
     EXPECT_EQ(requests[i].offset, offsets[i]);
@@ -74,6 +74,8 @@ TEST_F(PipelineLifetimeLayoutTest, AlignmentAndOwnerLocalRangesAcrossPools) {
   EXPECT_EQ(extents[0].alignment, 8u);
   EXPECT_EQ(extents[1].length, 33u);
   EXPECT_EQ(extents[1].alignment, 16u);
+  EXPECT_EQ(extents[2].length, 0u);
+  EXPECT_EQ(extents[2].alignment, 1u);
 }
 
 TEST_F(PipelineLifetimeLayoutTest, ASubsetKeepsTheCompleteOwnerLifetime) {
@@ -86,8 +88,8 @@ TEST_F(PipelineLifetimeLayoutTest, ASubsetKeepsTheCompleteOwnerLifetime) {
   const loom_pipeline_lifetime_extent_t* extents = nullptr;
   IREE_ASSERT_OK(loom_pipeline_lifetime_layout(
       &lifetimes_, requests, IREE_ARRAYSIZE(requests), 1, &arena_, &extents));
-  EXPECT_EQ(requests[0].offset, 1u);
-  EXPECT_EQ(requests[1].offset, 0u);
+  EXPECT_EQ(requests[0].offset, 0u);
+  EXPECT_EQ(requests[1].offset, 2u);
   EXPECT_EQ(extents[0].length, 3u);
 }
 
@@ -101,10 +103,10 @@ TEST_F(PipelineLifetimeLayoutTest, EmptyPoolsAndZeroLengthAlignment) {
   IREE_ASSERT_OK(loom_pipeline_lifetime_layout(&lifetimes_, requests,
                                                IREE_ARRAYSIZE(requests), 4096,
                                                &arena_, &extents));
-  EXPECT_EQ(requests[0].offset, 64u);
-  EXPECT_EQ(requests[1].offset, 0u);
-  EXPECT_EQ(requests[2].offset, 64u);
-  EXPECT_EQ(extents[4095].length, 69u);
+  EXPECT_EQ(requests[0].offset, 0u);
+  EXPECT_EQ(requests[1].offset, 5u);
+  EXPECT_EQ(requests[2].offset, 0u);
+  EXPECT_EQ(extents[4095].length, 8u);
   EXPECT_EQ(extents[4095].alignment, 64u);
   for (size_t i = 0; i < 4095; ++i) {
     EXPECT_EQ(extents[i].length, 0u);
@@ -145,12 +147,104 @@ TEST_F(PipelineLifetimeLayoutTest, MixedPoolDemandsKeepIndependentAlignment) {
   IREE_ASSERT_OK(loom_pipeline_lifetime_layout(
       &lifetimes_, requests.data(), requests.size(), 33, &arena_, &extents));
   for (const auto& request : requests) {
-    EXPECT_EQ(request.offset, request.lifetime == 1 ? 0u : 8u);
+    EXPECT_EQ(request.offset,
+              request.lifetime == 1 && request.pool % 3 ? 11u : 0u);
   }
   for (size_t pool = 0; pool < 33; ++pool) {
-    EXPECT_EQ(extents[pool].length, pool % 3 ? 19u : 3u);
+    EXPECT_EQ(extents[pool].length, pool % 3 ? 14u : 3u);
     EXPECT_EQ(extents[pool].alignment, pool % 3 ? 8u : 1u);
   }
+}
+
+TEST_F(PipelineLifetimeLayoutTest,
+       RepeatedProjectionUsesCurrentSizesAndAlignment) {
+  loom_pipeline_lifetime_request_t requests[] = {
+      {.lifetime = 6},
+      {.lifetime = 5},
+      {.lifetime = 1},
+      {.lifetime = 5},
+  };
+  loom_pipeline_lifetime_projection_t* projection = nullptr;
+  IREE_ASSERT_OK(loom_pipeline_lifetime_projection_prepare(
+      &lifetimes_, requests, IREE_ARRAYSIZE(requests), &arena_, &projection));
+  const size_t prepared_bytes = arena_.used_allocation_size;
+  const struct {
+    // Current lengths in input order, including repeated owner five.
+    uint64_t lengths[4];
+    // Current alignment requirements, including empty aligned resources.
+    uint64_t alignments[4];
+    // Absolute offsets after serial reuse and concurrent concatenation.
+    uint64_t offsets[4];
+    // Complete pool requirement including alignment gaps.
+    loom_pipeline_lifetime_extent_t extent;
+  } cases[] = {
+      {{11, 5, 3, 2}, {8, 4, 1, 2}, {0, 0, 11, 6}, {14, 8}},
+      {{0, 2, 3, 5}, {64, 2, 4, 4}, {0, 0, 12, 4}, {15, 64}},
+      {{12, 2, 4, 0}, {4, 8, 16, 32}, {0, 0, 16, 0}, {20, 32}},
+      {{0, 0, 0, 0}, {64, 16, 8, 32}, {0, 0, 0, 0}, {0, 64}},
+  };
+  // An unrepresentable proposal cannot destroy the retained topology or poison
+  // the next evaluation. Both accumulation and alignment can exceed the bound.
+  for (bool alignment_overflow : {false, true}) {
+    requests[0].length = INT64_MAX;
+    requests[0].alignment = 1;
+    requests[1].length = 0;
+    requests[1].alignment = 1;
+    requests[2].length = 1;
+    requests[2].alignment = alignment_overflow ? 8 : 1;
+    requests[3].length = 0;
+    requests[3].alignment = 1;
+    loom_pipeline_lifetime_extent_t extent;
+    EXPECT_THAT(iree::Status(loom_pipeline_lifetime_projection_evaluate(
+                    projection, requests, &extent)),
+                iree::testing::status::StatusIs(iree::StatusCode::kOutOfRange));
+    for (const auto& test_case : cases) {
+      for (size_t i = 0; i < IREE_ARRAYSIZE(requests); ++i) {
+        requests[i].length = test_case.lengths[i];
+        requests[i].alignment = test_case.alignments[i];
+      }
+      IREE_ASSERT_OK(loom_pipeline_lifetime_projection_evaluate(
+          projection, requests, &extent));
+      for (size_t i = 0; i < IREE_ARRAYSIZE(requests); ++i) {
+        EXPECT_EQ(requests[i].offset, test_case.offsets[i]);
+      }
+      EXPECT_EQ(extent.length, test_case.extent.length);
+      EXPECT_EQ(extent.alignment, test_case.extent.alignment);
+      EXPECT_EQ(arena_.used_allocation_size, prepared_bytes);
+    }
+  }
+}
+
+TEST_F(PipelineLifetimeLayoutTest, EmptyPreparedProjection) {
+  loom_pipeline_lifetime_projection_t* projection = nullptr;
+  IREE_ASSERT_OK(loom_pipeline_lifetime_projection_prepare(
+      &lifetimes_, nullptr, 0, &arena_, &projection));
+  for (int i = 0; i < 2; ++i) {
+    loom_pipeline_lifetime_extent_t extent = {64, 8};
+    IREE_ASSERT_OK(loom_pipeline_lifetime_projection_evaluate(
+        projection, nullptr, &extent));
+    EXPECT_EQ(extent.length, 0u);
+    EXPECT_EQ(extent.alignment, 1u);
+  }
+}
+
+TEST_F(PipelineLifetimeLayoutTest, SingletonSparsePoolHonorsExtentBound) {
+  loom_pipeline_lifetime_request_t request = {
+      .lifetime = 1,
+      .pool = 4095,
+      .length = uint64_t(INT64_MAX) + 1,
+      .alignment = 8,
+  };
+  const loom_pipeline_lifetime_extent_t* extents = nullptr;
+  EXPECT_THAT(iree::Status(loom_pipeline_lifetime_layout(
+                  &lifetimes_, &request, 1, 4096, &arena_, &extents)),
+              iree::testing::status::StatusIs(iree::StatusCode::kOutOfRange));
+  request.length = 3;
+  IREE_ASSERT_OK(loom_pipeline_lifetime_layout(&lifetimes_, &request, 1, 4096,
+                                               &arena_, &extents));
+  EXPECT_EQ(request.offset, 0u);
+  EXPECT_EQ(extents[4095].length, 3u);
+  EXPECT_EQ(extents[4095].alignment, 8u);
 }
 
 TEST_F(PipelineLifetimeLayoutTest, ConcurrentExtentOverflow) {
@@ -164,7 +258,7 @@ TEST_F(PipelineLifetimeLayoutTest, ConcurrentExtentOverflow) {
               iree::testing::status::StatusIs(iree::StatusCode::kOutOfRange));
 }
 
-TEST_F(PipelineLifetimeLayoutTest, NestedBranchesKeepSiblingOrder) {
+TEST_F(PipelineLifetimeLayoutTest, NestedBranchesFollowRequestOrder) {
   // A serial choice between (A, B concurrently) and C runs concurrently with
   // D. The larger alignment of B applies to the entire first serial choice.
   const loom_pipeline_lifetime_t nodes[] = {
@@ -191,11 +285,11 @@ TEST_F(PipelineLifetimeLayoutTest, NestedBranchesKeepSiblingOrder) {
   const loom_pipeline_lifetime_extent_t* extents = nullptr;
   IREE_ASSERT_OK(loom_pipeline_lifetime_layout(
       &lifetimes, requests, IREE_ARRAYSIZE(requests), 1, &arena_, &extents));
-  const uint64_t offsets[] = {8, 12, 0, 0};
+  const uint64_t offsets[] = {0, 8, 1, 0};
   for (size_t i = 0; i < IREE_ARRAYSIZE(requests); ++i) {
     EXPECT_EQ(requests[i].offset, offsets[i]);
   }
-  EXPECT_EQ(extents[0].length, 14u);
+  EXPECT_EQ(extents[0].length, 10u);
   EXPECT_EQ(extents[0].alignment, 8u);
   // Compare the indexed relation against the definition of common ancestry.
   for (size_t first = 0; first < lifetimes.count; ++first) {
@@ -245,9 +339,9 @@ TEST_F(PipelineLifetimeLayoutTest, DeepUnaryPathsDoNotChangePlacement) {
   const loom_pipeline_lifetime_extent_t* extents = nullptr;
   IREE_ASSERT_OK(loom_pipeline_lifetime_layout(&lifetimes, requests, 2, 1,
                                                &arena_, &extents));
-  EXPECT_EQ(requests[0].offset, 16u);
-  EXPECT_EQ(requests[1].offset, 0u);
-  EXPECT_EQ(extents[0].length, 19u);
+  EXPECT_EQ(requests[0].offset, 0u);
+  EXPECT_EQ(requests[1].offset, 3u);
+  EXPECT_EQ(extents[0].length, 4u);
 }
 
 TEST_F(PipelineLifetimeLayoutTest, IndependentSerialBranches) {
@@ -288,11 +382,80 @@ TEST_F(PipelineLifetimeLayoutTest, IndependentSerialBranches) {
   const loom_pipeline_lifetime_extent_t* extents = nullptr;
   IREE_ASSERT_OK(loom_pipeline_lifetime_layout(
       &lifetimes, requests, IREE_ARRAYSIZE(requests), 1, &arena_, &extents));
-  const uint64_t offsets[] = {4, 12, 4, 0, 1, 0};
+  const uint64_t offsets[] = {0, 0, 16, 32, 32, 34};
   for (size_t i = 0; i < IREE_ARRAYSIZE(requests); ++i) {
     EXPECT_EQ(requests[i].offset, offsets[i]);
   }
   EXPECT_EQ(extents[0].length, 36u);
+}
+
+TEST_F(PipelineLifetimeLayoutTest, EachPoolPreservesItsConcurrentPreferences) {
+  // Two serial phases enumerate their concurrent owners in opposite orders.
+  // Independent resource pools can prefer opposite owners without changing
+  // either phase's coexistence relation or the complete tree.
+  const std::vector<loom_pipeline_lifetime_t> requested_nodes = {
+      {LOOM_PIPELINE_LIFETIME_CONCURRENT, 0, none, 1, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 0, 0, none, 2},
+      {LOOM_PIPELINE_LIFETIME_SERIAL, 0, 0, 3, none},
+      {LOOM_PIPELINE_LIFETIME_CONCURRENT, 1, 2, 5, 4},
+      {LOOM_PIPELINE_LIFETIME_CONCURRENT, 2, 2, 7, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 1, 3, none, 6},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 3, 3, none, none},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 2, 4, none, 8},
+      {LOOM_PIPELINE_LIFETIME_OWNER, 4, 4, none, none},
+  };
+  // Unrequested nesting changes projection density without changing any
+  // resource lifetime. Both layout paths must preserve the same preferences.
+  for (size_t unused_depth : {0u, 32u}) {
+    SCOPED_TRACE(unused_depth);
+    auto nodes = requested_nodes;
+    if (unused_depth) {
+      const size_t first = nodes.size();
+      nodes[2].next_sibling = first;
+      for (size_t i = 0; i < unused_depth; ++i) {
+        nodes.push_back({i + 1 == unused_depth
+                             ? LOOM_PIPELINE_LIFETIME_OWNER
+                             : LOOM_PIPELINE_LIFETIME_CONCURRENT,
+                         5, i ? first + i - 1 : 0,
+                         i + 1 == unused_depth ? none : first + i + 1, none});
+      }
+    }
+    loom_pipeline_lifetimes_t lifetimes = {
+        .nodes = nodes.data(),
+        .count = nodes.size(),
+        .has_serial = true,
+    };
+    IREE_ASSERT_OK(loom_pipeline_lifetimes_index(&arena_, &lifetimes));
+    for (size_t pool_count : {3u, 4096u}) {
+      SCOPED_TRACE(pool_count);
+      const size_t last_pool = pool_count - 1;
+      loom_pipeline_lifetime_request_t requests[] = {
+          {.lifetime = 5, .pool = 0, .length = 1, .alignment = 1},
+          {.lifetime = 6, .pool = 0, .length = 1, .alignment = 1},
+          {.lifetime = 7, .pool = 0, .length = 1, .alignment = 1},
+          {.lifetime = 8, .pool = 0, .length = 1, .alignment = 1},
+          {.lifetime = 6, .pool = 1, .length = 1, .alignment = 1},
+          {.lifetime = 7, .pool = 1, .length = 1, .alignment = 1},
+          {.lifetime = 5, .pool = last_pool, .length = 1, .alignment = 1},
+          {.lifetime = 8, .pool = last_pool, .length = 1, .alignment = 1},
+          {.lifetime = 5, .pool = 1, .length = 1, .alignment = 1},
+          {.lifetime = 8, .pool = 1, .length = 1, .alignment = 1},
+          {.lifetime = 6, .pool = last_pool, .length = 1, .alignment = 1},
+          {.lifetime = 7, .pool = last_pool, .length = 1, .alignment = 1},
+      };
+      const loom_pipeline_lifetime_extent_t* extents = nullptr;
+      IREE_ASSERT_OK(loom_pipeline_lifetime_layout(
+          &lifetimes, requests, IREE_ARRAYSIZE(requests), pool_count, &arena_,
+          &extents));
+      const uint64_t offsets[] = {0, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1};
+      for (size_t i = 0; i < IREE_ARRAYSIZE(requests); ++i) {
+        EXPECT_EQ(requests[i].offset, offsets[i]);
+      }
+      EXPECT_EQ(extents[0].length, 2u);
+      EXPECT_EQ(extents[1].length, 2u);
+      EXPECT_EQ(extents[last_pool].length, 2u);
+    }
+  }
 }
 
 }  // namespace

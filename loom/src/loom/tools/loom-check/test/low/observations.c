@@ -15,6 +15,7 @@
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/packet_json.h"
+#include "loom/codegen/low/schedule/diagnostics.h"
 #include "loom/codegen/low/schedule/json.h"
 #include "loom/codegen/low/schedule/run.h"
 #include "loom/codegen/low/schedule/types.h"
@@ -394,6 +395,10 @@ static iree_status_t loom_check_test_low_observe_schedule(
   if (iree_status_is_ok(status) && model.context.error_count == 0) {
     status = loom_low_schedule_function(&model, &schedule_options,
                                         request->case_arena, &table);
+  }
+  if (iree_status_is_ok(status) && model.context.error_count == 0) {
+    status = loom_low_schedule_diagnostics_emit(
+        &table, options->schedule_diagnostic_flags, emitter);
   }
   if (iree_status_is_ok(status) && model.context.error_count == 0) {
     status =

@@ -43,7 +43,7 @@ func.decl @__test_phase_join(%13: index)
 
 func.decl @__test_phase_enter(%14: index)
 
-func.def inline @__pipeline_engine_0(%15: index) {
+func.def @__pipeline_engine_0(%15: index) {
   func.call @__pipeline_worker_0(%15) : (index)
   func.return
 }
@@ -122,17 +122,17 @@ func.decl @__test_phase_join(%8: index)
 
 func.decl @__test_phase_enter(%9: index)
 
-func.def inline @__pipeline_engine_0(%10: index) {
+func.def @__pipeline_engine_0(%10: index) {
   func.call @__pipeline_worker_2(%10) : (index)
   func.return
 }
 
-func.def inline @__pipeline_engine_1(%12: index) {
+func.def @__pipeline_engine_1(%12: index) {
   func.call @__pipeline_worker_1(%12) : (index)
   func.return
 }
 
-func.def inline @__pipeline_engine_2(%14: index) {
+func.def @__pipeline_engine_2(%14: index) {
   func.call @__pipeline_worker_0(%14) : (index)
   func.return
 }

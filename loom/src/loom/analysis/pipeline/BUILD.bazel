@@ -28,6 +28,29 @@ loom_cc_benchmark(
 )
 
 loom_cc_library(
+    name = "entries",
+    srcs = ["entries.c"],
+    hdrs = ["entries.h"],
+    deps = [
+        ":invocations",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "entries_test",
+    srcs = ["entries_test.cc"],
+    deps = [
+        ":entries",
+        ":invocations",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "schedule",
     srcs = ["schedule.c"],
     hdrs = ["schedule.h"],
@@ -188,6 +211,30 @@ loom_cc_library(
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "lifetime_retention",
+    srcs = ["lifetime_retention.c"],
+    hdrs = ["lifetime_retention.h"],
+    deps = [
+        ":invocations",
+        "//loom/src/loom/util:adaptive_sort",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "lifetime_retention_test",
+    srcs = ["lifetime_retention_test.cc"],
+    deps = [
+        ":invocations",
+        ":lifetime_retention",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

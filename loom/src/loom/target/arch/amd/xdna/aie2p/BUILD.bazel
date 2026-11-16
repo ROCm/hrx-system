@@ -243,6 +243,7 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/analysis:scc",
         "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/analysis/pipeline:entries",
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:function_requirements",
         "//loom/src/loom/codegen/low:loop_execution",
@@ -258,6 +259,21 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "program_clone_test",
+    srcs = ["program_clone_test.cc"],
+    deps = [
+        ":program_clone",
+        "//loom/src/loom/codegen/low:function_requirements",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -288,6 +304,8 @@ loom_cc_test(
     srcs = ["program_source_test.cc"],
     deps = [
         ":program_source_test_util",
+        "//loom/src/loom/analysis/pipeline:entries",
+        "//loom/src/loom/analysis/pipeline:invocations",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

@@ -35,6 +35,8 @@ typedef struct loom_aie2p_program_source_function_t {
   const loom_low_memory_access_map_t* memory_accesses;
   // Optional source loop execution facts.
   const loom_low_loop_execution_map_t* loop_execution;
+  // Retained phase lifetime/role, borrowing the prepared compilation owner.
+  const loom_pipeline_entry_binding_t* pipeline_entry;
   // Source imports, storage, data, and direct calls.
   loom_low_function_requirements_t requirements;
   // Unique immutable definitions used by this entry and its admitted helpers.
@@ -44,6 +46,10 @@ typedef struct loom_aie2p_program_source_function_t {
   // callee-before-caller order. Interior functions keep direct edges in
   // requirements without materializing their own transitive closures.
   loom_symbol_ref_array_t helpers;
+  // Construction owners in helper order followed by this root. Present only
+  // for a pipeline-bound root. Table-owned for a helper closure; a call-free
+  // root borrows the immutable binding's owner directly.
+  const iree_host_size_t* entry_owners;
   // Whether this function's complete program-root closure has been admitted.
   bool helpers_admitted;
 } loom_aie2p_program_source_function_t;
@@ -92,8 +98,9 @@ loom_aie2p_program_source_table_lookup(
 // helper resource imports, or authored mutable helper storage emit an XDNA
 // diagnostic and leave |out_admitted| false. Compiler-generated frames are
 // admitted separately after allocation. Shared SCC traversal consumes retained
-// direct edges; previously admitted subtrees reuse their immutable closures.
-// program_data retains the unique data union in entry-then-helper order.
+// direct edges; only requested roots retain complete closures. program_data
+// retains the unique data union in entry-then-helper order. Pipeline-bound
+// roots project their retained phase lifetimes through those same direct edges.
 iree_status_t loom_aie2p_program_source_admit_helpers(
     loom_aie2p_program_source_table_t* table,
     loom_aie2p_program_source_function_t* entry, bool* out_admitted);

@@ -20,6 +20,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/array/resident.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/array_report.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/configuration.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/program_capacity.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_compile.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/tile_link.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/xdna_product.h"
@@ -444,6 +445,7 @@ static iree_status_t loom_aie2p_xdna_plan_tile_link(
 
 static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
     const loom_aie2p_xdna_artifact_request_t* request,
+    const loom_module_t* resident_module,
     loom_aie2p_program_compiler_t* compiler,
     const loom_aie2p_array_plan_t* plan,
     const loom_aie2p_array_resident_program_set_t* resident_program_set,
@@ -504,14 +506,22 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
       }
     }
     bool program_compiled = false;
+    loom_aie2p_program_object_t program = {0};
     iree_status_t status = loom_aie2p_program_compile(
         compiler, resident->function_op, /*may_return=*/false,
         (loom_aie2p_program_helper_list_t){
             .values = helpers,
             .count = resident->helper_count,
         },
-        &resident->program_data, &worker_compile_options, &program_compiled,
-        contribution);
+        &resident->program_data, &worker_compile_options, NULL,
+        &program_compiled, &program);
+    if (iree_status_is_ok(status) && program_compiled) {
+      *contribution = program.contribution;
+      status = loom_aie2p_program_capacity_admit(
+          resident_module, resident->function_op,
+          contribution->realization.code.byte_length,
+          request->diagnostic_emitter, &program_compiled);
+    }
     if (worker_report_ptr != NULL) {
       iree_status_t report_status =
           program_compiled ? loom_target_compile_report_record_entry_report(
@@ -681,8 +691,8 @@ static iree_status_t loom_aie2p_xdna_compile_resident_entries(
     loom_aie2p_xdna_tile_t* tiles = NULL;
     bool tiles_compiled = false;
     IREE_RETURN_IF_ERROR(loom_aie2p_xdna_compile_resident_tiles(
-        request, compiler, &array_plans[i], resident_program_set, &tiles,
-        &tiles_compiled));
+        request, resident_module, compiler, &array_plans[i],
+        resident_program_set, &tiles, &tiles_compiled));
     if (!tiles_compiled) {
       return iree_ok_status();
     }
@@ -719,6 +729,13 @@ static iree_status_t loom_aie2p_xdna_compile_configuration_entries(
   return status;
 }
 
+typedef struct loom_aie2p_xdna_private_module_t {
+  // Workspace whose native compilation evidence borrows this module.
+  loom_module_t* module;
+  // Next workspace in the same artifact owner; nodes live in the first module.
+  struct loom_aie2p_xdna_private_module_t* next;
+} loom_aie2p_xdna_private_module_t;
+
 typedef struct loom_aie2p_xdna_resident_storage_t {
   // Host allocator owning this storage record and the resident module.
   iree_allocator_t allocator;
@@ -726,11 +743,17 @@ typedef struct loom_aie2p_xdna_resident_storage_t {
   iree_arena_block_pool_t block_pool;
   // Private module containing materialized resident worker functions.
   loom_module_t* module;
+  // Placement-specific workspaces borrowing the same retained block pool.
+  loom_aie2p_xdna_private_module_t* private_modules;
 } loom_aie2p_xdna_resident_storage_t;
 
 static void loom_aie2p_xdna_release_resident_storage(void* storage_ptr) {
   loom_aie2p_xdna_resident_storage_t* storage =
       (loom_aie2p_xdna_resident_storage_t*)storage_ptr;
+  for (loom_aie2p_xdna_private_module_t* item = storage->private_modules;
+       item != NULL; item = item->next) {
+    loom_module_free(item->module);
+  }
   loom_module_free(storage->module);
   iree_arena_block_pool_deinitialize(&storage->block_pool);
   iree_allocator_free(storage->allocator, storage);
@@ -762,18 +785,31 @@ static iree_status_t loom_aie2p_xdna_allocate_resident_storage(
 // Reports retain native schedule/allocation evidence that references private
 // IR. Without reports the invocation pool supplies all module storage and the
 // caller releases the module after native contributions have been materialized.
-static iree_status_t loom_aie2p_xdna_allocate_private_module(
+iree_status_t loom_aie2p_xdna_allocate_private_module(
     const loom_aie2p_xdna_artifact_request_t* request,
     loom_module_t** out_module) {
   *out_module = NULL;
   if (request->compile_report != NULL) {
-    loom_aie2p_xdna_resident_storage_t* storage = NULL;
-    IREE_RETURN_IF_ERROR(
-        loom_aie2p_xdna_allocate_resident_storage(request, &storage));
-    *out_module = storage->module;
-    loom_target_compile_report_take_storage(
-        request->compile_report, storage,
-        loom_aie2p_xdna_release_resident_storage);
+    loom_aie2p_xdna_resident_storage_t* storage =
+        request->compile_report->retained_storage.data;
+    if (storage == NULL) {
+      IREE_RETURN_IF_ERROR(
+          loom_aie2p_xdna_allocate_resident_storage(request, &storage));
+      *out_module = storage->module;
+      loom_target_compile_report_take_storage(
+          request->compile_report, storage,
+          loom_aie2p_xdna_release_resident_storage);
+    } else {
+      loom_aie2p_xdna_private_module_t* item = NULL;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate(&storage->module->arena,
+                                               sizeof(*item), (void**)&item));
+      IREE_RETURN_IF_ERROR(loom_module_allocate(
+          request->module->context, IREE_SV("aie2p.xdna.placement"),
+          &storage->block_pool, NULL, storage->allocator, &item->module));
+      item->next = storage->private_modules;
+      storage->private_modules = item;
+      *out_module = item->module;
+    }
     return iree_ok_status();
   }
   return loom_module_allocate(request->module->context,

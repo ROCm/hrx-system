@@ -9,6 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "loom/target/arch/amd/xdna/aie2p/emit/program_layout.h"
+
 typedef struct loom_aie2p_configuration_report_memory_t {
   // Physical usage accumulated exactly once at reservation and link sites.
   loom_target_compile_report_pipeline_memory_row_t row;
@@ -197,7 +199,9 @@ iree_status_t loom_aie2p_configuration_report_worker(
                                           data->byte_length);
   }
   memory->row.program_data_byte_count += data_bytes;
-  const uint32_t code_bytes = realization->code.byte_length;
+  const uint32_t code_bytes = layout->program_layout
+                                  ? layout->program_layout->byte_length
+                                  : realization->code.byte_length;
   const uint32_t code_headroom = layout->program_byte_capacity - code_bytes;
   summary->minimum_worker_code_headroom_byte_count =
       summary->worker_count

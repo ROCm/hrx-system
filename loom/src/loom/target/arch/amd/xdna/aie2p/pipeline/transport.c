@@ -101,11 +101,21 @@ bool loom_aie2p_native_select_ingress_descriptor(
 // filter identity along its complete path.
 void loom_aie2p_native_route_label(loom_aie2p_native_context_t* context,
                                    iree_host_size_t first, uint8_t packet,
+                                   bool register_command,
                                    uint32_t control_source) {
+  if (control_source != UINT32_MAX) {
+    loom_aie2p_native_control_source_t* source =
+        &context->control_sources[control_source];
+    source->packet_mask |= UINT32_C(1) << packet;
+    if (register_command) {
+      source->register_packet_mask |= UINT32_C(1) << packet;
+    }
+  }
   for (iree_host_size_t i = first; i < context->routing.route_count; ++i) {
     context->routes[i] =
         (loom_aie2p_native_route_t){.edge = &context->routing.routes[i],
                                     .packet = packet,
+                                    .register_command = register_command,
                                     .control_source = control_source};
   }
 }
@@ -135,7 +145,7 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
                                     loom_xdna_tile_coordinate_t destination,
                                     loom_xdna_stream_port_t destination_port,
                                     uint8_t packet,
-                                    loom_aie2p_native_delivery_t* delivery) {
+                                    loom_aie2p_array_route_sharing_t* sharing) {
   context->control_connections[context->control_connection_count++] =
       (loom_aie2p_native_control_connection_t){
           .source = {source, source_port, 0},
@@ -156,7 +166,7 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
                     2 +
                 (destination_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL)
           : UINT32_MAX;
-  if (!control->tree.root) {
+  if (!control->tree.root_index) {
     control->destination = destination_index;
   } else if (control->destination != destination_index) {
     control->destination = UINT32_MAX;
@@ -170,21 +180,44 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
     }
   }
   const bool routed =
-      delivery ? loom_aie2p_array_route_control(&context->routing, index,
-                                                &control->tree, source,
-                                                destination, &delivery->sharing)
-               : loom_aie2p_array_route_stream(
-                     &context->routing, index, &control->tree, source,
-                     source_port, 0, destination, destination_port, 0, true);
+      sharing ? loom_aie2p_array_route_control(
+                    &context->routing, index, &control->tree, source,
+                    source_port, 0, destination, sharing)
+              : loom_aie2p_array_route_stream(
+                    &context->routing, index, &control->tree, source,
+                    source_port, 0, destination, destination_port, 0, true);
   if (!routed) {
     return false;
   }
-  if (delivery && delivery->sharing.used) {
-    // A private endpoint still needs packet filtering when any path to it
-    // borrows payload lanes. Retain that exclusion for the entire source tree.
+  if (sharing && sharing->used) {
+    // Shared carriers merge independently addressed packets, so even a single
+    // endpoint needs filtering. Retain that exclusion for the source tree.
     control->destination = UINT32_MAX;
   }
-  loom_aie2p_native_route_label(context, first, packet, source_index);
+  loom_aie2p_native_route_label(
+      context, first, packet,
+      destination_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL, source_index);
+  const uint16_t memory_row = loom_xdna_array_tile_kind_facts(
+                                  context->family, LOOM_XDNA_TILE_KIND_MEMORY)
+                                  ->first_row;
+  if (source_port == LOOM_XDNA_STREAM_PORT_CORE &&
+      destination_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL &&
+      source.column == destination.column && source.row > memory_row &&
+      destination.row <= memory_row && (!sharing || !sharing->used)) {
+    loom_aie2p_native_control_path_t* path =
+        &context->control_paths[source.column];
+    // Before sharing begins, retain the highest source's downward suffix.
+    // Once senders join its domain, that carrier identity stays fixed.
+    if (!path->sharing.domain &&
+        (!path->count ||
+         source.row > (path->source / 2) % context->family->row_count)) {
+      *path = (loom_aie2p_native_control_path_t){
+          .first = first,
+          .count = context->routing.route_count - first,
+          .source = source_index,
+          .packets = path->packets};
+    }
+  }
   return true;
 }
 
@@ -194,7 +227,8 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
 static bool loom_aie2p_native_select_packet_route(
     loom_aie2p_native_context_t* context, iree_host_size_t worker_index,
     const loom_aie2p_native_tile_t* tile, loom_xdna_stream_port_t port,
-    uint32_t* next_source, uint8_t* out_packet) {
+    loom_aie2p_native_control_path_t* commands, uint32_t* next_source,
+    uint8_t* out_packet) {
   loom_aie2p_native_worker_t* owner =
       &context->workers[context->execution
                             .workers[context->core_engines[worker_index]]];
@@ -202,17 +236,36 @@ static bool loom_aie2p_native_select_packet_route(
     return false;
   }
   loom_aie2p_native_delivery_t* delivery =
-      loom_aie2p_native_route_delivery(context, tile->coordinate);
+      commands ? NULL
+               : loom_aie2p_native_route_delivery(context, tile->coordinate);
+  loom_aie2p_native_control_path_t* packet_scope =
+      &context->control_paths[context->workers[worker_index]
+                                  .tile->coordinate.column];
+  uint8_t* canonical =
+      context->workers[worker_index].tile->coordinate.column ==
+              tile->coordinate.column
+          ? &context->column_command_packets[tile - context->tiles]
+          : NULL;
   const uint8_t packet = loom_aie2p_native_delivery_packet(
-      delivery, owner->packet_mask, tile, port, 0);
+      delivery, owner->packet_mask | packet_scope->packets, tile, port, 0,
+      canonical ? *canonical : UINT8_MAX);
   if (packet == UINT8_MAX ||
       !loom_aie2p_native_packet_route(
           context, next_source, context->workers[worker_index].tile->coordinate,
           LOOM_XDNA_STREAM_PORT_CORE, tile->coordinate, port, packet,
-          delivery)) {
+          commands   ? &commands->sharing
+          : delivery ? &delivery->sharing
+                     : NULL)) {
     return false;
   }
   owner->packet_mask |= UINT32_C(1) << packet;
+  packet_scope->packets |= UINT32_C(1) << packet;
+  if (canonical && *canonical == UINT8_MAX) {
+    *canonical = packet;
+  }
+  if (commands && commands->sharing.used) {
+    context->control_sources[commands->source].destination = UINT32_MAX;
+  }
   if (delivery && delivery->sharing.used) {
     owner->packet_mask |= UINT32_C(1) << LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID;
   }
@@ -242,9 +295,29 @@ iree_status_t loom_aie2p_native_select_control_route(
   }
   const iree_host_size_t index = tile - context->tiles;
   if (owner->control_packets[index] == UINT8_MAX) {
+    loom_aie2p_native_control_path_t* commands = NULL;
+    const loom_xdna_tile_coordinate_t source = worker->tile->coordinate;
+    const uint16_t memory_row = loom_xdna_array_tile_kind_facts(
+                                    context->family, LOOM_XDNA_TILE_KIND_MEMORY)
+                                    ->first_row;
+    if (source.column == tile->coordinate.column &&
+        source.row > tile->coordinate.row) {
+      loom_aie2p_native_control_path_t* path =
+          &context->control_paths[source.column];
+      if (path->count) {
+        if (!path->sharing.domain) {
+          IREE_RETURN_IF_ERROR(loom_aie2p_array_route_sharing_initialize(
+              &context->routing, path->first, path->count,
+              (loom_xdna_tile_coordinate_t){source.column, memory_row},
+              LOOM_AIE2P_ARRAY_ROUTE_CARRIER_HARDWARE_COMMAND, &path->sharing));
+        }
+        path->packets |= context->control_sources[path->source].packet_mask;
+        commands = path;
+      }
+    }
     if (!loom_aie2p_native_select_packet_route(
             context, worker_index, tile, LOOM_XDNA_STREAM_PORT_TILE_CONTROL,
-            next_source, &owner->control_packets[index])) {
+            commands, next_source, &owner->control_packets[index])) {
       return loom_aie2p_native_reject(
           context, realization->workers[worker_index].source->declaration,
           IREE_SV("available worker control-packet routes"));
@@ -1020,7 +1093,8 @@ static iree_status_t loom_aie2p_native_reserve_transfer_bindings(
         &context->workers[context->execution.workers[context->core_engines[i]]];
     for (loom_aie2p_native_transfer_t* transfer = worker->transfers;
          iree_status_is_ok(status) && transfer; transfer = transfer->next) {
-      if (!transfer->shim_descriptor->address_dynamic) {
+      if (!transfer->shim_descriptor->address_dynamic &&
+          !transfer->shim_descriptor->storage) {
         continue;
       }
       status = loom_aie2p_native_reserve_binding(
@@ -1139,6 +1213,15 @@ iree_status_t loom_aie2p_native_select_transfers(
                                 (void**)&context->control_destination_sources));
   memset(context->control_destination_sources, 0xff,
          control_source_count * sizeof(*context->control_destination_sources));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate(arena, control_source_count / 2,
+                          (void**)&context->column_command_packets));
+  memset(context->column_command_packets, UINT8_MAX, control_source_count / 2);
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, context->family->column_count, sizeof(*context->control_paths),
+      (void**)&context->control_paths));
+  memset(context->control_paths, 0,
+         context->family->column_count * sizeof(*context->control_paths));
   uint32_t next_source = 0;
   uint8_t* next_controller;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, context->family->column_count,
@@ -1302,7 +1385,11 @@ iree_status_t loom_aie2p_native_select_transfers(
     }
   }
   if (iree_status_is_ok(status) && valid) {
-    status = loom_aie2p_native_refine_transfer_addresses(
+    status = loom_aie2p_native_refine_transfer_descriptors(
+        context, realization->invocations.worker_count);
+  }
+  if (iree_status_is_ok(status) && valid) {
+    status = loom_aie2p_native_finalize_dma_storage(
         context, realization->invocations.worker_count);
   }
   if (iree_status_is_ok(status) && valid) {
@@ -1353,11 +1440,33 @@ iree_status_t loom_aie2p_native_select_transfers(
   }
   if (iree_status_is_ok(status) && valid) {
     loom_aie2p_native_commit_sharing(context);
-    status = loom_aie2p_native_switches_build(context, realization->function.op,
-                                              out_valid);
+    const loom_aie2p_native_switch_input_t input = {
+        .routing = &context->routing,
+        .routes = context->routes,
+        .lifetimes = &realization->invocations.lifetimes,
+        .route_lifetimes = context->route_lifetimes,
+        .control_sources = context->control_sources,
+        .control_destination_sources = context->control_destination_sources,
+    };
+    iree_string_view_t requirement = iree_string_view_empty();
+    status = loom_aie2p_native_switches_build(&input, arena, &context->switches,
+                                              &requirement);
+    if (iree_status_is_ok(status)) {
+      if (iree_string_view_is_empty(requirement)) {
+        *out_valid = true;
+      } else {
+        status = loom_aie2p_native_reject(context, realization->function.op,
+                                          requirement);
+      }
+    }
   }
   if (iree_status_is_ok(status) && *out_valid) {
-    status = loom_aie2p_native_connections_verify(context);
+    status = loom_aie2p_native_connections_build(context);
+  }
+  if (iree_status_is_ok(status) && *out_valid) {
+    status = loom_aie2p_native_connections_verify(
+        &context->routing, context->switches, &context->connections,
+        context->pass->arena);
   }
   return status;
 }

@@ -57,6 +57,16 @@ loom_aie2p_leaf_contribution_t MakeHelper(
   };
 }
 
+std::vector<const loom_aie2p_leaf_contribution_t*> ContributionPointers(
+    const loom_aie2p_leaf_contribution_t* contributions,
+    iree_host_size_t count) {
+  std::vector<const loom_aie2p_leaf_contribution_t*> pointers(count);
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    pointers[i] = &contributions[i];
+  }
+  return pointers;
+}
+
 TEST(Aie2pProgramObjectTest, LeavesLargestAlignmentGapAfterFinalHelper) {
   const std::array<uint8_t, 6> entry_code = {};
   const std::array<uint8_t, 2> helper_a_code = {};
@@ -100,9 +110,14 @@ TEST(Aie2pProgramObjectTest, LeavesLargestAlignmentGapAfterFinalHelper) {
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool, &arena);
   loom_aie2p_program_object_t program = {};
-  IREE_ASSERT_OK(loom_aie2p_program_object_merge(
-      contributions, IREE_ARRAYSIZE(contributions), /*data=*/nullptr,
-      /*data_count=*/0, &arena, &arena, &program));
+  const auto pointers =
+      ContributionPointers(contributions, IREE_ARRAYSIZE(contributions));
+  loom_aie2p_program_native_t native;
+  IREE_ASSERT_OK(loom_aie2p_program_native_initialize(
+      pointers.data(), pointers.size(), &arena, &native));
+  IREE_ASSERT_OK(loom_aie2p_program_object_merge(&native, /*data=*/nullptr,
+                                                 /*data_count=*/0, &arena,
+                                                 &arena, &program));
 
   ASSERT_EQ(program.contribution.object.section_count, 4u);
   EXPECT_EQ(program.contribution.object.sections[0].contents.data,
@@ -188,15 +203,44 @@ TEST(Aie2pProgramObjectTest, SharesBodiesAndRebindsCallsWithSelfRelocations) {
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &block_pool);
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool, &arena);
+  iree_arena_block_pool_t scratch_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(),
+                                   &scratch_pool);
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(&scratch_pool, &scratch_arena);
   loom_aie2p_program_object_t program = {};
-  IREE_ASSERT_OK(loom_aie2p_program_object_merge(
-      contributions, IREE_ARRAYSIZE(contributions), /*data=*/nullptr,
-      /*data_count=*/0, &arena, &arena, &program));
+  const auto pointers =
+      ContributionPointers(contributions, IREE_ARRAYSIZE(contributions));
+  loom_aie2p_program_native_t native;
+  IREE_ASSERT_OK(loom_aie2p_program_native_initialize(
+      pointers.data(), pointers.size(), &arena, &native));
+  IREE_ASSERT_OK(loom_aie2p_program_object_merge(&native, /*data=*/nullptr,
+                                                 /*data_count=*/0, &arena,
+                                                 &scratch_arena, &program));
+  // Late placement consumes the exact logical identities after merge scratch
+  // is gone. Aliases remain separate entries pointing to one physical body.
+  iree_arena_deinitialize(&scratch_arena);
+  iree_arena_block_pool_deinitialize(&scratch_pool);
+  ASSERT_EQ(program.function_count, IREE_ARRAYSIZE(contributions));
+  const iree_host_size_t expected_symbols[] = {0, 3, 4, 5};
+  for (iree_host_size_t i = 0; i < program.function_count; ++i) {
+    EXPECT_EQ(program.functions[i].entry_symbol_index, expected_symbols[i]);
+    EXPECT_EQ(program.functions[i].contribution, &contributions[i]);
+  }
 
-  EXPECT_EQ(program.canonical_indices[0], 0u);
-  EXPECT_EQ(program.canonical_indices[1], 1u);
-  EXPECT_EQ(program.canonical_indices[2], 2u);
-  EXPECT_EQ(program.canonical_indices[3], 1u);
+  EXPECT_EQ(program.functions[0].canonical_index, 0u);
+  EXPECT_EQ(program.functions[1].canonical_index, 1u);
+  EXPECT_EQ(program.functions[2].canonical_index, 2u);
+  EXPECT_EQ(program.functions[3].canonical_index, 1u);
+  // Merging resolves the canonical body's self branch in the combined object.
+  // A later independent placement still has each input's local self relocation.
+  for (iree_host_size_t i : {1u, 3u}) {
+    const auto& original = program.functions[i].contribution->object;
+    ASSERT_EQ(original.fixup_count, 1u);
+    EXPECT_EQ(original.fixups[0].target_symbol_index, 0u);
+    EXPECT_TRUE(iree_string_view_equal(
+        original.symbols[0].name, contributions[i].object.symbols[0].name));
+  }
   ASSERT_EQ(program.contribution.object.section_count, 3u);
   EXPECT_EQ(program.contribution.object.sections[1].contents.data,
             other_code.data());
@@ -245,21 +289,120 @@ TEST(Aie2pProgramObjectTest, PreservesFirstIdentityAcrossInterleavedBodies) {
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool, &arena);
   loom_aie2p_program_object_t program = {};
-  IREE_ASSERT_OK(loom_aie2p_program_object_merge(
-      contributions.data(), contributions.size(), /*data=*/nullptr,
-      /*data_count=*/0, &arena, &arena, &program));
+  const auto pointers =
+      ContributionPointers(contributions.data(), contributions.size());
+  loom_aie2p_program_native_t native;
+  IREE_ASSERT_OK(loom_aie2p_program_native_initialize(
+      pointers.data(), pointers.size(), &arena, &native));
+  IREE_ASSERT_OK(loom_aie2p_program_object_merge(&native, /*data=*/nullptr,
+                                                 /*data_count=*/0, &arena,
+                                                 &arena, &program));
   ASSERT_EQ(program.contribution.object.section_count, kBodyCount + 1);
   EXPECT_EQ(program.contribution.realization.code.byte_length,
             (kBodyCount + 1) * 16);
-  EXPECT_EQ(program.canonical_indices[0], 0u);
+  EXPECT_EQ(program.functions[0].canonical_index, 0u);
   for (size_t i = 1; i < contributions.size(); ++i) {
     const size_t first = (i - 1) % kBodyCount + 1;
-    EXPECT_EQ(program.canonical_indices[i], first);
+    EXPECT_EQ(program.functions[i].canonical_index, first);
+    EXPECT_EQ(program.functions[i].equivalent_index, first);
     EXPECT_EQ(program.contribution.object.symbols[i].section_contribution_index,
               first);
   }
   iree_arena_deinitialize(&arena);
   iree_arena_block_pool_deinitialize(&block_pool);
+}
+
+TEST(Aie2pProgramObjectTest, SharesAndPacksWithinIndependentCodeGroups) {
+  const std::array<uint8_t, 14> code = {};
+  const iree_host_size_t lengths[] = {6, 2, 10, 10, 10, 14, 2};
+  const iree_host_size_t function_groups[] = {0, 0, 1, 1, 2, 1, 2};
+  const iree_string_view_t names[] = {
+      IREE_SV("entry"),  IREE_SV("shared"), IREE_SV("first"), IREE_SV("alias"),
+      IREE_SV("second"), IREE_SV("other"),  IREE_SV("local"),
+  };
+  loom_native_section_contribution_t sections[IREE_ARRAYSIZE(lengths)];
+  loom_native_object_symbol_t symbols[IREE_ARRAYSIZE(lengths)];
+  loom_aie2p_leaf_contribution_t contributions[IREE_ARRAYSIZE(lengths)];
+  const loom_native_object_fixup_t self = {
+      .section_contribution_index = 0,
+      .relocation_kind = LOOM_AIE2P_NATIVE_RELOCATION_KIND_CORE_BRANCH_ABSOLUTE,
+      .target_symbol_index = 0,
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(lengths); ++i) {
+    contributions[i] = MakeHelper(names[i], code.data(), lengths[i],
+                                  &sections[i], &symbols[i]);
+    contributions[i].object.fixups = &self;
+    contributions[i].object.fixup_count = 1;
+  }
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+  loom_aie2p_program_object_t program;
+  loom_aie2p_program_code_group_t groups[3];
+  const auto pointers =
+      ContributionPointers(contributions, IREE_ARRAYSIZE(contributions));
+  loom_aie2p_program_native_t native;
+  IREE_ASSERT_OK(loom_aie2p_program_native_initialize(
+      pointers.data(), pointers.size(), &arena, &native));
+  const iree_host_size_t equivalent[] = {0, 1, 2, 2, 2, 5, 1};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(equivalent); ++i) {
+    EXPECT_EQ(native.equivalent_indices[i], equivalent[i]);
+  }
+  IREE_ASSERT_OK(loom_aie2p_program_object_partition(
+      &native, nullptr, 0, function_groups, IREE_ARRAYSIZE(groups), &arena,
+      &arena, &program, groups));
+  const iree_host_size_t canonical[] = {0, 1, 2, 2, 4, 5, 6};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(canonical); ++i) {
+    EXPECT_EQ(program.functions[i].canonical_index, canonical[i]);
+    EXPECT_EQ(program.functions[i].equivalent_index, equivalent[i]);
+  }
+  EXPECT_EQ(program.contribution.object.section_count, 6u);
+  EXPECT_EQ(program.contribution.object.fixup_count, 6u);
+  EXPECT_EQ(program.contribution.realization.code.byte_length, 62u);
+  loom_native_section_contribution_assembly_t assembly;
+  IREE_ASSERT_OK(loom_native_assemble_section_contributions(
+      program.contribution.object.sections,
+      program.contribution.object.section_count, &arena, &assembly));
+  ASSERT_EQ(assembly.section_count, 3u);
+  const uint64_t group_lengths[] = {18, 26, 18};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(groups); ++i) {
+    const auto section =
+        assembly.contribution_layouts[groups[i].section_contribution_index]
+            .section_index;
+    EXPECT_EQ(groups[i].code.byte_length, group_lengths[i]);
+    EXPECT_EQ(groups[i].code.minimum_alignment, 16u);
+    EXPECT_EQ(assembly.sections[section].contents.data_length,
+              group_lengths[i]);
+  }
+  // Both copies of equal code keep their own local relocation. The alias in
+  // group one shares its owner's body, while group two is independently placed.
+  const auto& object = program.contribution.object;
+  for (iree_host_size_t i = 0; i < object.fixup_count; ++i) {
+    const auto& fixup = object.fixups[i];
+    EXPECT_EQ(
+        fixup.section_contribution_index,
+        object.symbols[fixup.target_symbol_index].section_contribution_index);
+  }
+  EXPECT_EQ(object.symbols[2].section_contribution_index,
+            object.symbols[3].section_contribution_index);
+  EXPECT_NE(object.symbols[2].section_contribution_index,
+            object.symbols[4].section_contribution_index);
+  // The same native inventory supports a different physical placement without
+  // recomparing code or mutating the earlier independently relocated groups.
+  loom_aie2p_program_object_t resident;
+  IREE_ASSERT_OK(loom_aie2p_program_object_merge(&native, nullptr, 0, &arena,
+                                                 &arena, &resident));
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(equivalent); ++i) {
+    EXPECT_EQ(resident.functions[i].canonical_index, equivalent[i]);
+    EXPECT_EQ(native.equivalent_indices[i], equivalent[i]);
+    EXPECT_EQ(program.functions[i].canonical_index, canonical[i]);
+  }
+  EXPECT_EQ(resident.contribution.object.section_count, 4u);
+  EXPECT_EQ(resident.contribution.object.fixup_count, 4u);
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
 }
 
 TEST(Aie2pProgramObjectTest, BindsNestedCallsBeforeAndAfterBodySharing) {
@@ -308,13 +451,18 @@ TEST(Aie2pProgramObjectTest, BindsNestedCallsBeforeAndAfterBodySharing) {
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool, &arena);
   loom_aie2p_program_object_t program = {};
-  IREE_ASSERT_OK(loom_aie2p_program_object_merge(
-      contributions, IREE_ARRAYSIZE(contributions), /*data=*/nullptr,
-      /*data_count=*/0, &arena, &arena, &program));
-  EXPECT_EQ(program.canonical_indices[1], 1u);
-  EXPECT_EQ(program.canonical_indices[2], 2u);
-  EXPECT_EQ(program.canonical_indices[3], 3u);
-  EXPECT_EQ(program.canonical_indices[4], 3u);
+  const auto pointers =
+      ContributionPointers(contributions, IREE_ARRAYSIZE(contributions));
+  loom_aie2p_program_native_t native;
+  IREE_ASSERT_OK(loom_aie2p_program_native_initialize(
+      pointers.data(), pointers.size(), &arena, &native));
+  IREE_ASSERT_OK(loom_aie2p_program_object_merge(&native, /*data=*/nullptr,
+                                                 /*data_count=*/0, &arena,
+                                                 &arena, &program));
+  EXPECT_EQ(program.functions[1].canonical_index, 1u);
+  EXPECT_EQ(program.functions[2].canonical_index, 2u);
+  EXPECT_EQ(program.functions[3].canonical_index, 3u);
+  EXPECT_EQ(program.functions[4].canonical_index, 3u);
   const auto& object = program.contribution.object;
   ASSERT_EQ(object.section_count, 4u);
   ASSERT_EQ(object.symbol_count, 9u);
@@ -374,9 +522,14 @@ TEST(Aie2pProgramObjectTest, PreservesDifferentInstructionsAndRelocations) {
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool, &arena);
   loom_aie2p_program_object_t program = {};
-  IREE_ASSERT_OK(loom_aie2p_program_object_merge(
-      contributions, IREE_ARRAYSIZE(contributions), /*data=*/nullptr,
-      /*data_count=*/0, &arena, &arena, &program));
+  const auto pointers =
+      ContributionPointers(contributions, IREE_ARRAYSIZE(contributions));
+  loom_aie2p_program_native_t native;
+  IREE_ASSERT_OK(loom_aie2p_program_native_initialize(
+      pointers.data(), pointers.size(), &arena, &native));
+  IREE_ASSERT_OK(loom_aie2p_program_object_merge(&native, /*data=*/nullptr,
+                                                 /*data_count=*/0, &arena,
+                                                 &arena, &program));
   EXPECT_EQ(program.contribution.object.section_count, 3u);
   EXPECT_EQ(program.contribution.realization.code.byte_length, 40u);
   EXPECT_EQ(program.contribution.object.symbols[1].section_contribution_index,
@@ -392,9 +545,11 @@ TEST(Aie2pProgramObjectTest, PreservesDifferentInstructionsAndRelocations) {
   // Equal entry/helper code never folds the externally entered program body.
   contributions[1].object.fixup_count = 0;
   contributions[2].object.fixup_count = 0;
-  IREE_ASSERT_OK(loom_aie2p_program_object_merge(
-      contributions, IREE_ARRAYSIZE(contributions), /*data=*/nullptr,
-      /*data_count=*/0, &arena, &arena, &program));
+  IREE_ASSERT_OK(loom_aie2p_program_native_initialize(
+      pointers.data(), pointers.size(), &arena, &native));
+  IREE_ASSERT_OK(loom_aie2p_program_object_merge(&native, /*data=*/nullptr,
+                                                 /*data_count=*/0, &arena,
+                                                 &arena, &program));
   EXPECT_EQ(program.contribution.object.section_count, 2u);
   EXPECT_EQ(program.contribution.realization.code.byte_length, 24u);
   EXPECT_EQ(program.contribution.object.symbols[0].section_contribution_index,
@@ -407,9 +562,11 @@ TEST(Aie2pProgramObjectTest, PreservesDifferentInstructionsAndRelocations) {
   const std::array<uint8_t, 8> different_code = {1};
   sections[2].contents =
       iree_make_const_byte_span(different_code.data(), different_code.size());
-  IREE_ASSERT_OK(loom_aie2p_program_object_merge(
-      contributions, IREE_ARRAYSIZE(contributions), /*data=*/nullptr,
-      /*data_count=*/0, &arena, &arena, &program));
+  IREE_ASSERT_OK(loom_aie2p_program_native_initialize(
+      pointers.data(), pointers.size(), &arena, &native));
+  IREE_ASSERT_OK(loom_aie2p_program_object_merge(&native, /*data=*/nullptr,
+                                                 /*data_count=*/0, &arena,
+                                                 &arena, &program));
   EXPECT_EQ(program.contribution.object.section_count, 3u);
   EXPECT_EQ(program.contribution.realization.code.byte_length, 40u);
   EXPECT_NE(program.contribution.object.symbols[1].section_contribution_index,
@@ -535,11 +692,16 @@ TEST_P(Aie2pProgramDataTest,
   iree_arena_initialize(&block_pool, &arena);
   iree_arena_initialize(&block_pool, &scratch_arena);
   loom_aie2p_program_object_t program = {};
+  const auto pointers =
+      ContributionPointers(contributions.data(), contributions.size());
+  loom_aie2p_program_native_t native;
+  IREE_ASSERT_OK(loom_aie2p_program_native_initialize(
+      pointers.data(), pointers.size(), &arena, &native));
   IREE_ASSERT_OK(loom_aie2p_program_object_merge(
-      contributions.data(), contributions.size(), data.data(), data.size(),
-      &arena, &scratch_arena, &program));
+      &native, data.data(), data.size(), &arena, &scratch_arena, &program));
   for (size_t i = 1; i < contribution_count; ++i) {
-    EXPECT_EQ(program.canonical_indices[i], 1 + (i - 1) % data_count);
+    EXPECT_EQ(program.functions[i].canonical_index, 1 + (i - 1) % data_count);
+    EXPECT_EQ(program.functions[i].equivalent_index, 1 + (i - 1) % data_count);
   }
   iree_arena_deinitialize(&scratch_arena);
   // Final linking may outlive both the source inventory and its temporary

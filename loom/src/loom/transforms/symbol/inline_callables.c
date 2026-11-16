@@ -650,12 +650,20 @@ static void loom_inline_resolve_entry_policy(
       (state->options.defer_callable_exits &&
        call_kind == LOOM_CALL_LIKE_KIND_SEMANTIC) ||
       call_kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL;
+  // Pipeline entries preserve independent placement opportunities after
+  // required target expansion. Their compiler-owned lifetime binding is a
+  // retention preference, not an authored noinline promise about the ABI.
+  const loom_target_function_version_t* callee_version =
+      loom_target_function_version_snapshot_at(state->options.target_versions,
+                                               entry->target_symbol_id);
+  const bool preserves_pipeline_entry =
+      callee_version != NULL && callee_version->pipeline_entry != NULL;
   // Optional body composition is local to an ordinary callable. Independent
   // execution scopes own separate scheduling and target environments; their
   // eventual outlined functions get another profitability decision. Non-
   // callable symbol owners such as test scenarios describe invocations rather
   // than bodies that may absorb the referenced function.
-  if (profitability_enabled &&
+  if (profitability_enabled && !preserves_pipeline_entry &&
       !loom_inline_temperature_is_cold(entry->effective_temperature) &&
       entry->execution_scope == 0 &&
       entry->source_symbol_id < state->module->symbols.count &&
