@@ -10,7 +10,7 @@
 #include "iree/base/api.h"
 #include "iree/vm/ref.h"
 
-typedef float vector8_t __attribute__((ext_vector_type(8)));
+typedef float vector8_t __attribute__((vector_size(32)));
 typedef struct object_t {
   // Managed objects use the ordinary runtime's intrusive prefix.
   iree_vm_ref_object_t ref_object;

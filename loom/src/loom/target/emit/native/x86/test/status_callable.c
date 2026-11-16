@@ -31,7 +31,7 @@ extern iree_status_t status_stack(uint64_t* result, uint64_t a, uint64_t b,
 extern iree_status_t status_identity(uint64_t* result, uint64_t value);
 extern iree_status_t status_void(uint64_t value);
 
-typedef float vector8_t __attribute__((ext_vector_type(8)));
+typedef float vector8_t __attribute__((vector_size(32)));
 typedef struct vector_result_t {
   // Narrow leading field makes vector padding observable.
   uint8_t first;
