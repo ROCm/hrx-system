@@ -6,6 +6,7 @@
 
 """Builders for rules using the SPIR-V logical core descriptor set."""
 
+from loom.scalar_type import scalar_type_name
 from loom.target.arch.spirv.descriptors import SPIRV_LOGICAL_CORE_DESCRIPTOR_SET
 from loom.target.contracts import (
     AttrProject,
@@ -14,11 +15,14 @@ from loom.target.contracts import (
     EmitDescriptorOp,
     Guard,
     ResultTypeBinding,
+    Scalar,
     SourceMemoryAddressMaterializer,
     SourceMemoryConstraint,
     SourceOpProject,
     SourceValueKind,
+    TypePattern,
     ValueRef,
+    Vector,
     descriptor_by_key,
 )
 from loom.target.emit.float_narrowing import (
@@ -39,6 +43,8 @@ class IntegerRecipe:
         )
         self.emits: list[EmitDescriptorOp] = []
         self.constants: dict[tuple[int, int], ValueRef] = {}
+        # Exact semantic types of synthesized values, retained for later emits.
+        self.value_types: dict[ValueRef, TypePattern] = {}
 
     def emit(
         self,
@@ -50,13 +56,30 @@ class IntegerRecipe:
         form: DescriptorEmitForm = DescriptorEmitForm.OP,
     ) -> ValueRef:
         result = result or ValueRef.temporary(f"bit_pattern_{len(self.emits)}")
+        descriptor = logical_core_descriptor(f"spirv.op_{key}")
+        result_type = _recipe_result_type(descriptor)
+        type_binding = result_type
+        if result.kind is SourceValueKind.TEMPORARY and isinstance(
+            result_type, TypePattern
+        ):
+            # Reuse an input's known type so the generated behavior row remains
+            # shared across element types. The value is already an operand.
+            type_binding = next(
+                (
+                    value
+                    for value in operands.values()
+                    if self.value_types.get(value) == result_type
+                ),
+                result_type,
+            )
+            self.value_types[result] = result_type
         self.emits.append(
             EmitDescriptorOp(
-                descriptor=logical_core_descriptor(f"spirv.op_{key}"),
+                descriptor=descriptor,
                 operands=operands,
                 results={"dst": result},
                 result_types=(
-                    {"dst": DescriptorResultType()}
+                    {"dst": type_binding}
                     if result.kind is SourceValueKind.TEMPORARY
                     else None
                 ),
@@ -144,6 +167,20 @@ class IntegerRecipe:
                 immediates={"component_index": 0},
                 result=result,
             )
+
+
+def _recipe_result_type(descriptor: Descriptor) -> ResultTypeBinding:
+    # A fixed SPIR-V result has the same semantic type in source lowering and
+    # readable assembly. Losing that type on temporaries prevents ordinary CSE
+    # from sharing otherwise identical source and recipe computations.
+    (form,) = descriptor.asm_forms
+    if not form.result_value_types or form.result_value_types[0] is None:
+        return DescriptorResultType()
+    (value_type,) = form.result_value_types
+    element = scalar_type_name(value_type.element_type)
+    if value_type.vector_lane_count:
+        return Vector(element, lanes=value_type.vector_lane_count)
+    return Scalar(element)
 
 
 def logical_core_descriptor(key: str) -> Descriptor:

@@ -1,0 +1,93 @@
+// RUN: emit spirv-dis input=source-low target=spirv:vulkan1.3+bda+extended-types @packed_dot_formats features=INTEGER_DOT_PRODUCT,INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED validate
+// REQUIRES: spirv-dis, spirv-val
+
+// A packed dot carries a format literal after its operand IDs. Its operand
+// signedness comes from the opcode, independently of the packed word's type.
+func.def @packed_dot_formats(%left_word: i32, %right_word: i32) -> (i32) {
+  %left_vector = vector.from_elements %left_word : vector<1xi32>
+  %right_vector = vector.from_elements %right_word : vector<1xi32>
+  %lhs = vector.bitcast %left_vector : vector<1xi32> to vector<4xi8>
+  %rhs = vector.bitcast %right_vector : vector<1xi32> to vector<4xi8>
+  %accumulator = vector.splati 0 : vector<1xi32>
+  %signed = vector.dot4i<s8s8> %lhs, %rhs, %accumulator : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  %unsigned = vector.dot4i<u8u8> %lhs, %rhs, %signed : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  %mixed = vector.dot4i<s8u8> %lhs, %rhs, %unsigned : vector<4xi8>, vector<4xi8>, vector<1xi32>
+  %result = vector.extract %mixed[0] : vector<1xi32> -> i32
+  func.return %result : i32
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability Float16
+               OpCapability Float64
+               OpCapability Int8
+               OpCapability Int16
+               OpCapability StorageBuffer8BitAccess
+               OpCapability StorageBuffer16BitAccess
+               OpCapability BFloat16TypeKHR
+               OpCapability DotProduct
+               OpCapability DotProductInput4x8BitPacked
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_8bit_storage"
+               OpExtension "SPV_KHR_16bit_storage"
+               OpExtension "SPV_KHR_bfloat16"
+               OpExtension "SPV_KHR_integer_dot_product"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %packed_dot_formats "packed_dot_formats"
+               OpExecutionMode %packed_dot_formats LocalSize 1 1 1
+               OpName %packed_dot_formats "packed_dot_formats"
+               OpName %left_vector "left_vector"
+               OpName %right_vector "right_vector"
+               OpName %lhs "lhs"
+               OpName %rhs "rhs"
+               OpName %accumulator "accumulator"
+               OpName %signed "signed"
+               OpName %unsigned "unsigned"
+               OpName %result "result"
+               OpMemberDecorate %_struct_5 0 Offset 0
+               OpDecorate %_struct_5 Block
+               OpDecorate %4 DescriptorSet 0
+               OpDecorate %4 Binding 0
+               OpDecorate %8 DescriptorSet 0
+               OpDecorate %8 Binding 1
+               OpDecorate %9 DescriptorSet 0
+               OpDecorate %9 Binding 2
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+  %_struct_5 = OpTypeStruct %int
+%_ptr_StorageBuffer__struct_5 = OpTypePointer StorageBuffer %_struct_5
+%_ptr_StorageBuffer_int = OpTypePointer StorageBuffer %int
+          %4 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %8 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+          %9 = OpVariable %_ptr_StorageBuffer__struct_5 StorageBuffer
+       %void = OpTypeVoid
+         %11 = OpTypeFunction %void
+       %char = OpTypeInt 8 1
+     %v4char = OpTypeVector %char 4
+%accumulator = OpConstant %int 0
+       %uint = OpTypeInt 32 0
+%packed_dot_formats = OpFunction %void None %11
+         %12 = OpLabel
+         %13 = OpAccessChain %_ptr_StorageBuffer_int %4 %int_0
+%left_vector = OpLoad %int %13 Aligned 4
+         %15 = OpAccessChain %_ptr_StorageBuffer_int %8 %int_0
+%right_vector = OpLoad %int %15 Aligned 4
+        %lhs = OpBitcast %v4char %left_vector
+        %rhs = OpBitcast %v4char %right_vector
+         %22 = OpBitcast %int %lhs
+         %23 = OpBitcast %int %rhs
+         %24 = OpSDot %int %22 %23 PackedVectorFormat4x8Bit
+     %signed = OpIAdd %int %24 %accumulator
+         %27 = OpUDot %uint %22 %23 PackedVectorFormat4x8Bit
+         %28 = OpBitcast %int %27
+   %unsigned = OpIAdd %int %28 %signed
+         %30 = OpSUDot %int %22 %23 PackedVectorFormat4x8Bit
+     %result = OpIAdd %int %30 %unsigned
+         %32 = OpAccessChain %_ptr_StorageBuffer_int %9 %int_0
+               OpStore %32 %result Aligned 4
+               OpReturn
+               OpFunctionEnd

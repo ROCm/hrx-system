@@ -20,46 +20,46 @@ func.def target(@target) @vector_f32_extrema(%value0: f32, %value1: f32, %lower0
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar_f32_extrema(%value: reg<spirv.id : f32>, %lower: reg<spirv.id : f32>, %upper: reg<spirv.id : f32>) -> (reg<spirv.id : f32>, reg<spirv.id : f32>) asm {
-  %21 = OpBitcast.f32.i32 %value : reg<spirv.id>
-  %22 = OpBitcast.f32.i32 %lower : reg<spirv.id>
-  %23 = OpConstant.i32 0 : reg<spirv.id>
-  %24 = OpBitwiseAnd %21, %22 : reg<spirv.id>
-  %25 = OpSLessThan %24, %23 : reg<spirv.id>
-  %26 = OpSLessThan %21, %22 : reg<spirv.id>
-  %27 = OpLogicalNotEqual.bool %26, %25 : reg<spirv.id>
-  %28 = OpSelect %27, %21, %22 : reg<spirv.id>
-  %29 = OpConstant.i32 2147483647 : reg<spirv.id>
-  %30 = OpBitwiseAnd %21, %29 : reg<spirv.id>
-  %31 = OpBitwiseAnd %22, %29 : reg<spirv.id>
-  %32 = OpConstant.i32 2139095040 : reg<spirv.id>
-  %33 = OpSGreaterThan %30, %32 : reg<spirv.id>
-  %34 = OpSGreaterThan %31, %32 : reg<spirv.id>
-  %35 = OpConstant.i32 2143289344 : reg<spirv.id>
-  %36 = OpSelect %34, %35, %22 : reg<spirv.id>
-  %37 = OpSelect %34, %21, %28 : reg<spirv.id>
-  %38 = OpSelect %33, %36, %37 : reg<spirv.id>
+  %21 = OpBitcast.f32.i32 %value
+  %22 = OpBitcast.f32.i32 %lower
+  %23 = OpConstant.i32 0
+  %24 = OpBitwiseAnd %21, %22
+  %25 = OpSLessThan %24, %23
+  %26 = OpSLessThan %21, %22
+  %27 = OpLogicalNotEqual.bool %26, %25
+  %28 = OpSelect %27, %21, %22
+  %29 = OpConstant.i32 2147483647
+  %30 = OpBitwiseAnd %21, %29
+  %31 = OpBitwiseAnd %22, %29
+  %32 = OpConstant.i32 2139095040
+  %33 = OpSGreaterThan %30, %32
+  %34 = OpSGreaterThan %31, %32
+  %35 = OpConstant.i32 2143289344
+  %36 = OpSelect %34, %35, %22
+  %37 = OpSelect %34, %21, %28
+  %38 = OpSelect %33, %36, %37
   %minnum = OpBitcast.i32.f32 %38
-  %42 = OpBitcast.f32.i32 %upper : reg<spirv.id>
-  %48 = OpSelect %27, %22, %21 : reg<spirv.id>
-  %55 = OpLogicalOr.bool %33, %34 : reg<spirv.id>
-  %56 = OpBitwiseOr %30, %31 : reg<spirv.id>
-  %57 = OpIEqual %56, %23 : reg<spirv.id>
-  %58 = OpLogicalOr.bool %55, %57 : reg<spirv.id>
-  %59 = OpSelect %58, %21, %48 : reg<spirv.id>
-  %60 = OpBitwiseAnd %59, %42 : reg<spirv.id>
-  %61 = OpSLessThan %60, %23 : reg<spirv.id>
-  %62 = OpSLessThan %59, %42 : reg<spirv.id>
-  %63 = OpLogicalNotEqual.bool %62, %61 : reg<spirv.id>
-  %64 = OpSelect %63, %59, %42 : reg<spirv.id>
-  %65 = OpBitwiseAnd %59, %29 : reg<spirv.id>
-  %66 = OpBitwiseAnd %42, %29 : reg<spirv.id>
-  %67 = OpSGreaterThan %65, %32 : reg<spirv.id>
-  %68 = OpSGreaterThan %66, %32 : reg<spirv.id>
-  %69 = OpLogicalOr.bool %67, %68 : reg<spirv.id>
-  %70 = OpBitwiseOr %65, %66 : reg<spirv.id>
-  %71 = OpIEqual %70, %23 : reg<spirv.id>
-  %72 = OpLogicalOr.bool %69, %71 : reg<spirv.id>
-  %73 = OpSelect %72, %59, %64 : reg<spirv.id>
+  %42 = OpBitcast.f32.i32 %upper
+  %48 = OpSelect %27, %22, %21
+  %55 = OpLogicalOr.bool %33, %34
+  %56 = OpBitwiseOr %30, %31
+  %57 = OpIEqual %56, %23
+  %58 = OpLogicalOr.bool %55, %57
+  %59 = OpSelect %58, %21, %48
+  %60 = OpBitwiseAnd %59, %42
+  %61 = OpSLessThan %60, %23
+  %62 = OpSLessThan %59, %42
+  %63 = OpLogicalNotEqual.bool %62, %61
+  %64 = OpSelect %63, %59, %42
+  %65 = OpBitwiseAnd %59, %29
+  %66 = OpBitwiseAnd %42, %29
+  %67 = OpSGreaterThan %65, %32
+  %68 = OpSGreaterThan %66, %32
+  %69 = OpLogicalOr.bool %67, %68
+  %70 = OpBitwiseOr %65, %66
+  %71 = OpIEqual %70, %23
+  %72 = OpLogicalOr.bool %69, %71
+  %73 = OpSelect %72, %59, %64
   %ordered = OpBitcast.i32.f32 %73
   return %minnum, %ordered
 }
@@ -67,27 +67,27 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @scalar
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @vector_f32_extrema(%value0: reg<spirv.id : f32>, %value1: reg<spirv.id : f32>, %lower0: reg<spirv.id : f32>, %lower1: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
   %value = OpCompositeConstruct.v2f32 %value0, %value1
   %lower = OpCompositeConstruct.v2f32 %lower0, %lower1
-  %82 = OpBitcast.v2f32.v2i32 %value : reg<spirv.id>
-  %83 = OpBitcast.v2f32.v2i32 %lower : reg<spirv.id>
-  %84 = OpConstant.i32 0 : reg<spirv.id>
-  %85 = OpCompositeConstruct.v2i32 %84, %84 : reg<spirv.id>
-  %86 = OpBitwiseAnd.v2i32 %82, %83 : reg<spirv.id>
-  %87 = OpSLessThan.v2i32 %86, %85 : reg<spirv.id>
-  %88 = OpSLessThan.v2i32 %82, %83 : reg<spirv.id>
-  %89 = OpLogicalNotEqual.v2bool %88, %87 : reg<spirv.id>
-  %90 = OpSelect.v2i32 %89, %82, %83 : reg<spirv.id>
-  %91 = OpConstant.i32 2147483647 : reg<spirv.id>
-  %92 = OpCompositeConstruct.v2i32 %91, %91 : reg<spirv.id>
-  %93 = OpBitwiseAnd.v2i32 %82, %92 : reg<spirv.id>
-  %94 = OpBitwiseAnd.v2i32 %83, %92 : reg<spirv.id>
-  %95 = OpConstant.i32 2139095040 : reg<spirv.id>
-  %96 = OpCompositeConstruct.v2i32 %95, %95 : reg<spirv.id>
-  %97 = OpSGreaterThan.v2i32 %93, %96 : reg<spirv.id>
-  %98 = OpSGreaterThan.v2i32 %94, %96 : reg<spirv.id>
-  %99 = OpLogicalOr.v2bool %97, %98 : reg<spirv.id>
-  %100 = OpConstant.i32 2143289344 : reg<spirv.id>
-  %101 = OpCompositeConstruct.v2i32 %100, %100 : reg<spirv.id>
-  %102 = OpSelect.v2i32 %99, %101, %90 : reg<spirv.id>
+  %82 = OpBitcast.v2f32.v2i32 %value
+  %83 = OpBitcast.v2f32.v2i32 %lower
+  %84 = OpConstant.i32 0
+  %85 = OpCompositeConstruct.v2i32 %84, %84
+  %86 = OpBitwiseAnd.v2i32 %82, %83
+  %87 = OpSLessThan.v2i32 %86, %85
+  %88 = OpSLessThan.v2i32 %82, %83
+  %89 = OpLogicalNotEqual.v2bool %88, %87
+  %90 = OpSelect.v2i32 %89, %82, %83
+  %91 = OpConstant.i32 2147483647
+  %92 = OpCompositeConstruct.v2i32 %91, %91
+  %93 = OpBitwiseAnd.v2i32 %82, %92
+  %94 = OpBitwiseAnd.v2i32 %83, %92
+  %95 = OpConstant.i32 2139095040
+  %96 = OpCompositeConstruct.v2i32 %95, %95
+  %97 = OpSGreaterThan.v2i32 %93, %96
+  %98 = OpSGreaterThan.v2i32 %94, %96
+  %99 = OpLogicalOr.v2bool %97, %98
+  %100 = OpConstant.i32 2143289344
+  %101 = OpCompositeConstruct.v2i32 %100, %100
+  %102 = OpSelect.v2i32 %99, %101, %90
   %minimum = OpBitcast.v2i32.v2f32 %102
   %minimum_lane = OpCompositeExtract.v2f32.f32 %minimum, 0
   return %minimum_lane
@@ -106,9 +106,9 @@ func.def target(@target) @preserving_ordered_clamp(%value: f32, %lower: f32, %up
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @preserving_ordered_clamp(%value: reg<spirv.id : f32>, %lower: reg<spirv.id : f32>, %upper: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
-  %9 = OpFOrdLessThan.preserve.f32 %value, %lower : reg<spirv.id>
-  %10 = OpSelect.f32 %9, %lower, %value : reg<spirv.id>
-  %11 = OpFOrdGreaterThan.preserve.f32 %10, %upper : reg<spirv.id>
+  %9 = OpFOrdLessThan.preserve.f32 %value, %lower
+  %10 = OpSelect.f32 %9, %lower, %value
+  %11 = OpFOrdGreaterThan.preserve.f32 %10, %upper
   %result = OpSelect.f32 %11, %upper, %10
   return %result
 }

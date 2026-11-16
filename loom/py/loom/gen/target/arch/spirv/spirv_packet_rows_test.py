@@ -72,6 +72,7 @@ from loom.target.arch.spirv.ordinary_vector_float import (
 )
 from loom.target.arch.spirv.ordinary_vector_integer import (
     INTEGER_BIT_COUNT_INSTRUCTIONS,
+    INTEGER_DOT_INSTRUCTIONS,
     ORDINARY_VECTOR_INTEGER_INSTRUCTIONS,
 )
 from loom.target.arch.spirv.scalar_alu import (
@@ -854,6 +855,19 @@ def test_generation_emits_complete_ordinary_vector_integer_matrix() -> None:
     _assert_generated_ordinary_vector_instructions(ORDINARY_VECTOR_INTEGER_INSTRUCTIONS)
 
 
+def test_byte_dots_encode_packed_format_without_packet_immediates() -> None:
+    _assert_generated_ordinary_vector_instructions(INTEGER_DOT_INSTRUCTIONS)
+    for operation in ("s_dot", "u_dot", "su_dot"):
+        vector = _packet_row(f"spirv.op_{operation}.v4i8")
+        packed = _packet_row(f"spirv.op_{operation}.packed4x8")
+        assert vector.trailing_literal is None
+        assert packed.trailing_literal == "LOOM_SPIRV_PACKED_VECTOR_FORMAT_PACKED_VECTOR_FORMAT4X8_BIT"
+        assert packed.form == "LOOM_SPIRV_PACKET_FORM_TYPED_LITERAL"
+        assert packed.immediate_count == 0
+        assert packed.operand_types == ("{.value_class = LOOM_SPIRV_VALUE_CLASS_SCALAR, .scalar_type = LOOM_SPIRV_SCALAR_TYPE_S32}",) * 2
+        assert packed.payload_initializer() == "{ .typed_literal = { .literal = LOOM_SPIRV_PACKED_VECTOR_FORMAT_PACKED_VECTOR_FORMAT4X8_BIT, } }"
+
+
 def test_floating_packets_control_operation_contraction() -> None:
     _assert_generated_ordinary_vector_instructions(
         ORDINARY_VECTOR_FLOAT_BINARY_INSTRUCTIONS,
@@ -1091,6 +1105,7 @@ def test_payload_initializers_brace_every_union_member() -> None:
     assert members == {
         "access_chain",
         "scalar_constant",
+        "typed_literal",
         "builtin_load",
         "barrier",
         "group_non_uniform",

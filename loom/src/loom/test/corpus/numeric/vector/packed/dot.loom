@@ -223,6 +223,22 @@ func.def @packed_mixed_nibble_dots_oracle(%storage_buffer: buffer) {
 }
 
 check.scenario @packed_byte_dot_values {
+  // Positive signed products cross INT_MAX; saturating accumulation would
+  // disagree with the scalar oracle's ordinary wrapping additions.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(2147483647) : tensor<160xi32>
+    check.compare<@packed_byte_dots, @packed_byte_dots_oracle>(%storage) : (tensor<160xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<160xi32>
+    }
+  }
+  // All-one words exercise unsigned accumulation across UINT_MAX while the
+  // signed and mixed forms interpret the same byte payloads differently.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(-1) : tensor<160xi32>
+    check.compare<@packed_byte_dots, @packed_byte_dots_oracle>(%storage) : (tensor<160xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<160xi32>
+    }
+  }
   check.trial[8](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
     %storage = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<160xi32>

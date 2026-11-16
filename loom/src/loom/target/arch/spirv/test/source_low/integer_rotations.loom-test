@@ -8,13 +8,13 @@ func.def @coordinate_rotation(%value: index, %amount: index) -> (index) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @coordinate_rotation(%value: reg<spirv.id : index>, %amount: reg<spirv.id : index>) -> (reg<spirv.id : index>) asm {
-  %7 = OpConstant.i32 31 : reg<spirv.id>
-  %8 = OpBitwiseAnd %amount, %7 : reg<spirv.id>
-  %9 = OpConstant.i32 0 : reg<spirv.id>
-  %10 = OpISub %9, %8 : reg<spirv.id>
-  %11 = OpBitwiseAnd %10, %7 : reg<spirv.id>
-  %12 = OpShiftLeftLogical %value, %8 : reg<spirv.id>
-  %13 = OpShiftRightLogical %value, %11 : reg<spirv.id>
+  %7 = OpConstant.i32 31
+  %8 = OpBitwiseAnd %amount, %7
+  %9 = OpConstant.i32 0
+  %10 = OpISub %9, %8
+  %11 = OpBitwiseAnd %10, %7
+  %12 = OpShiftLeftLogical %value, %8
+  %13 = OpShiftRightLogical %value, %11
   %result = OpBitwiseOr %12, %13 : reg<spirv.id : index>
   return %result
 }
@@ -30,13 +30,13 @@ func.def @byte_rotation(%value: i8, %amount: i8) -> (i8) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @byte_rotation(%value: reg<spirv.id : i8>, %amount: reg<spirv.id : i8>) -> (reg<spirv.id : i8>) asm {
-  %7 = OpConstant.i8 7 : reg<spirv.id>
-  %8 = OpBitwiseAnd.i8 %amount, %7 : reg<spirv.id>
-  %9 = OpConstant.i8 0 : reg<spirv.id>
-  %10 = OpISub.i8 %9, %8 : reg<spirv.id>
-  %11 = OpBitwiseAnd.i8 %10, %7 : reg<spirv.id>
-  %12 = OpShiftLeftLogical.i8 %value, %11 : reg<spirv.id>
-  %13 = OpShiftRightLogical.i8 %value, %8 : reg<spirv.id>
+  %7 = OpConstant.i8 7
+  %8 = OpBitwiseAnd.i8 %amount, %7
+  %9 = OpConstant.i8 0
+  %10 = OpISub.i8 %9, %8
+  %11 = OpBitwiseAnd.i8 %10, %7
+  %12 = OpShiftLeftLogical.i8 %value, %11
+  %13 = OpShiftRightLogical.i8 %value, %8
   %result = OpBitwiseOr.i8 %12, %13
   return %result
 }
@@ -57,15 +57,15 @@ func.def @vector_rotation(%first: i64, %second: i64, %third: i64) -> (i64) {
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @vector_rotation(%first: reg<spirv.id : i64>, %second: reg<spirv.id : i64>, %third: reg<spirv.id : i64>) -> (reg<spirv.id : i64>) asm {
   %values = OpCompositeConstruct.v3i64 %first, %second, %third
   %amounts = OpCompositeConstruct.v3i64 %second, %third, %first
-  %14 = OpConstant.i64 63 : reg<spirv.id>
-  %15 = OpCompositeConstruct.v3i64 %14, %14, %14 : reg<spirv.id>
-  %16 = OpBitwiseAnd.v3i64 %amounts, %15 : reg<spirv.id>
-  %17 = OpConstant.i64 0 : reg<spirv.id>
-  %18 = OpCompositeConstruct.v3i64 %17, %17, %17 : reg<spirv.id>
-  %19 = OpISub.v3i64 %18, %16 : reg<spirv.id>
-  %20 = OpBitwiseAnd.v3i64 %19, %15 : reg<spirv.id>
-  %21 = OpShiftLeftLogical.v3i64 %values, %16 : reg<spirv.id>
-  %22 = OpShiftRightLogical.v3i64 %values, %20 : reg<spirv.id>
+  %14 = OpConstant.i64 63
+  %15 = OpCompositeConstruct.v3i64 %14, %14, %14
+  %16 = OpBitwiseAnd.v3i64 %amounts, %15
+  %17 = OpConstant.i64 0
+  %18 = OpCompositeConstruct.v3i64 %17, %17, %17
+  %19 = OpISub.v3i64 %18, %16
+  %20 = OpBitwiseAnd.v3i64 %19, %15
+  %21 = OpShiftLeftLogical.v3i64 %values, %16
+  %22 = OpShiftRightLogical.v3i64 %values, %20
   %rotated = OpBitwiseOr.v3i64 %21, %22
   %result = OpCompositeExtract.v3i64.i64 %rotated, 1
   return %result

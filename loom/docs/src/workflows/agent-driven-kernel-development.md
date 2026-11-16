@@ -693,8 +693,9 @@ External compilers and runtimes can make one part of the loop independently
 observable. Each oracle keeps its own selection, provenance, and evidence
 boundary:
 
-- [RADV and Vulkan](oracles/radv.md) join an optimized Vulkan dispatch to its
-  selected SPIR-V, ACO native program, launch geometry, and score;
+- [Vulkan native-code inspection](oracles/radv.md) joins an optimized Vulkan
+  dispatch to its selected SPIR-V, driver-generated native program, launch
+  geometry, and score;
 - [LLVM MC](oracles/llvm-mc.md) independently qualifies selected native packet
   encodings;
 - [GGML and llama.cpp](oracles/ggml-llama-cpp.md) preserve model, quantized

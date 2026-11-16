@@ -66,6 +66,8 @@ enum loom_spirv_packet_form_e {
   LOOM_SPIRV_PACKET_FORM_GROUP_NON_UNIFORM_BINARY = 29,
   // Typed instruction whose result and operands are fully owned by the row.
   LOOM_SPIRV_PACKET_FORM_TYPED = 30,
+  // Typed instruction followed by one fixed literal from its shared payload.
+  LOOM_SPIRV_PACKET_FORM_TYPED_LITERAL = 31,
 };
 typedef uint8_t loom_spirv_packet_form_t;
 
@@ -127,6 +129,11 @@ typedef union loom_spirv_packet_payload_t {
     // Number of literal words emitted for the constant.
     uint8_t literal_word_count;
   } scalar_constant;
+  // Typed instruction's fixed trailing operand.
+  struct {
+    // Instruction literal following all value IDs.
+    uint32_t literal;
+  } typed_literal;
   // Built-in input packet literals.
   struct {
     // Dense builtin-variable table and cache slot.

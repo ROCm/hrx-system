@@ -93,7 +93,7 @@ nav:
       - Query compile evidence: workflows/compile-report-queries.md
       - External oracles:
           - Native schedule reconstruction: workflows/oracles/native-schedule.md
-          - RADV and Vulkan: workflows/oracles/radv.md
+          - Vulkan native-code inspection: workflows/oracles/radv.md
           - LLVM MC instruction encoding: workflows/oracles/llvm-mc.md
           - GGML and llama.cpp: workflows/oracles/ggml-llama-cpp.md
   - Integration:

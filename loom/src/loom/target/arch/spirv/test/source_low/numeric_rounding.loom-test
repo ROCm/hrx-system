@@ -13,29 +13,29 @@ func.def @truncate(%first: f32, %second: f32, %third: f32) -> (f32) {
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @truncate(%first: reg<spirv.id : f32>, %second: reg<spirv.id : f32>, %third: reg<spirv.id : f32>) -> (reg<spirv.id : f32>) asm {
   %values = OpCompositeConstruct.v3f32 %first, %second, %third
-  %12 = OpBitcast.v3f32.v3i32 %values : reg<spirv.id>
-  %13 = OpConstant.i32 0 : reg<spirv.id>
-  %14 = OpCompositeConstruct.v3i32 %13, %13, %13 : reg<spirv.id>
-  %15 = OpConstant.i32 1065353216 : reg<spirv.id>
-  %16 = OpCompositeConstruct.v3i32 %15, %15, %15 : reg<spirv.id>
-  %17 = OpConstant.i32 2147483647 : reg<spirv.id>
-  %18 = OpCompositeConstruct.v3i32 %17, %17, %17 : reg<spirv.id>
-  %19 = OpBitwiseAnd.v3i32 %12, %18 : reg<spirv.id>
-  %20 = OpConstant.i32 -2147483648 : reg<spirv.id>
-  %21 = OpCompositeConstruct.v3i32 %20, %20, %20 : reg<spirv.id>
-  %22 = OpBitwiseAnd.v3i32 %12, %21 : reg<spirv.id>
-  %23 = OpSLessThan.v3i32 %19, %16 : reg<spirv.id>
-  %24 = OpConstant.i32 1258291200 : reg<spirv.id>
-  %25 = OpCompositeConstruct.v3i32 %24, %24, %24 : reg<spirv.id>
-  %26 = OpSGreaterThanEqual.v3i32 %19, %25 : reg<spirv.id>
-  %27 = OpSelect.v3i32 %23, %16, %12 : reg<spirv.id>
-  %28 = OpSelect.v3i32 %26, %16, %27 : reg<spirv.id>
-  %29 = OpBitcast.v3i32.v3f32 %28 : reg<spirv.id>
-  %30 = OpExtInst.GLSL.std.450.Trunc.v3f32 %29 : reg<spirv.id>
-  %31 = OpBitcast.v3f32.v3i32 %30 : reg<spirv.id>
-  %32 = OpSelect.v3i32 %23, %14, %31 : reg<spirv.id>
-  %33 = OpBitwiseOr.v3i32 %32, %22 : reg<spirv.id>
-  %34 = OpSelect.v3i32 %26, %12, %33 : reg<spirv.id>
+  %12 = OpBitcast.v3f32.v3i32 %values
+  %13 = OpConstant.i32 0
+  %14 = OpCompositeConstruct.v3i32 %13, %13, %13
+  %15 = OpConstant.i32 1065353216
+  %16 = OpCompositeConstruct.v3i32 %15, %15, %15
+  %17 = OpConstant.i32 2147483647
+  %18 = OpCompositeConstruct.v3i32 %17, %17, %17
+  %19 = OpBitwiseAnd.v3i32 %12, %18
+  %20 = OpConstant.i32 -2147483648
+  %21 = OpCompositeConstruct.v3i32 %20, %20, %20
+  %22 = OpBitwiseAnd.v3i32 %12, %21
+  %23 = OpSLessThan.v3i32 %19, %16
+  %24 = OpConstant.i32 1258291200
+  %25 = OpCompositeConstruct.v3i32 %24, %24, %24
+  %26 = OpSGreaterThanEqual.v3i32 %19, %25
+  %27 = OpSelect.v3i32 %23, %16, %12
+  %28 = OpSelect.v3i32 %26, %16, %27
+  %29 = OpBitcast.v3i32.v3f32 %28
+  %30 = OpExtInst.GLSL.std.450.Trunc.v3f32 %29
+  %31 = OpBitcast.v3f32.v3i32 %30
+  %32 = OpSelect.v3i32 %23, %14, %31
+  %33 = OpBitwiseOr.v3i32 %32, %22
+  %34 = OpSelect.v3i32 %26, %12, %33
   %rounded = OpBitcast.v3i32.v3f32 %34
   %result = OpCompositeExtract.v3f32.f32 %rounded, 1
   return %result
@@ -70,24 +70,24 @@ func.def @truncate_half(%value: f16) -> (f16) {
 
 // ----
 low.func.def target<spirv.logical.core> abi(shader_entry_point) @truncate_half(%value: reg<spirv.id : f16>) -> (reg<spirv.id : f16>) asm {
-  %5 = OpBitcast.f16.i16 %value : reg<spirv.id>
-  %6 = OpConstant.i16 0 : reg<spirv.id>
-  %7 = OpConstant.i16 15360 : reg<spirv.id>
-  %8 = OpConstant.i16 32767 : reg<spirv.id>
-  %9 = OpBitwiseAnd.i16 %5, %8 : reg<spirv.id>
-  %10 = OpConstant.i16 -32768 : reg<spirv.id>
-  %11 = OpBitwiseAnd.i16 %5, %10 : reg<spirv.id>
-  %12 = OpSLessThan.i16 %9, %7 : reg<spirv.id>
-  %13 = OpConstant.i16 25600 : reg<spirv.id>
-  %14 = OpSGreaterThanEqual.i16 %9, %13 : reg<spirv.id>
-  %15 = OpSelect.i16 %12, %7, %5 : reg<spirv.id>
-  %16 = OpSelect.i16 %14, %7, %15 : reg<spirv.id>
-  %17 = OpBitcast.i16.f16 %16 : reg<spirv.id>
-  %18 = OpExtInst.GLSL.std.450.Trunc.f16 %17 : reg<spirv.id>
-  %19 = OpBitcast.f16.i16 %18 : reg<spirv.id>
-  %20 = OpSelect.i16 %12, %6, %19 : reg<spirv.id>
-  %21 = OpBitwiseOr.i16 %20, %11 : reg<spirv.id>
-  %22 = OpSelect.i16 %14, %5, %21 : reg<spirv.id>
+  %5 = OpBitcast.f16.i16 %value
+  %6 = OpConstant.i16 0
+  %7 = OpConstant.i16 15360
+  %8 = OpConstant.i16 32767
+  %9 = OpBitwiseAnd.i16 %5, %8
+  %10 = OpConstant.i16 -32768
+  %11 = OpBitwiseAnd.i16 %5, %10
+  %12 = OpSLessThan.i16 %9, %7
+  %13 = OpConstant.i16 25600
+  %14 = OpSGreaterThanEqual.i16 %9, %13
+  %15 = OpSelect.i16 %12, %7, %5
+  %16 = OpSelect.i16 %14, %7, %15
+  %17 = OpBitcast.i16.f16 %16
+  %18 = OpExtInst.GLSL.std.450.Trunc.f16 %17
+  %19 = OpBitcast.f16.i16 %18
+  %20 = OpSelect.i16 %12, %6, %19
+  %21 = OpBitwiseOr.i16 %20, %11
+  %22 = OpSelect.i16 %14, %5, %21
   %rounded = OpBitcast.i16.f16 %22
   return %rounded
 }

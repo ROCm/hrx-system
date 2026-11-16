@@ -433,18 +433,23 @@ static iree_status_t loom_spirv_emit_typed_packet(
   IREE_RETURN_IF_ERROR(loom_spirv_emit_prepare_packet_result(
       state, packet, result_type_id, loom_spirv_packet_row_result_type(row),
       &result_id));
-  uint32_t instruction_operands[2 + LOOM_SPIRV_PACKET_MAX_OPERAND_COUNT] = {
+  uint32_t instruction_operands[3 + LOOM_SPIRV_PACKET_MAX_OPERAND_COUNT] = {
       result_type_id,
       result_id,
   };
   for (uint8_t i = 0; i < row->operand_count; ++i) {
     instruction_operands[2 + i] = operands[i].id;
   }
+  uint8_t instruction_operand_count = 2 + row->operand_count;
+  if (row->form == LOOM_SPIRV_PACKET_FORM_TYPED_LITERAL) {
+    instruction_operands[instruction_operand_count++] =
+        loom_spirv_packet_row_payload(row)->typed_literal.literal;
+  }
   IREE_RETURN_IF_ERROR(
       loom_spirv_emit_arithmetic_decoration(state, packet, row, result_id));
   IREE_RETURN_IF_ERROR(loom_spirv_binary_write_instruction(
       loom_spirv_emit_section(state, LOOM_SPIRV_MODULE_SECTION_FUNCTION),
-      row->opcode, instruction_operands, 2 + row->operand_count));
+      row->opcode, instruction_operands, instruction_operand_count));
   return loom_spirv_emit_define_packet_result(
       state, packet, result_id, result_type_id,
       loom_spirv_packet_row_result_type(row));
@@ -1082,6 +1087,7 @@ static iree_status_t loom_spirv_emit_descriptor_packet(
       return loom_spirv_emit_unary_typed_packet(state, packet, row);
     case LOOM_SPIRV_PACKET_FORM_COMPOSITE_CONSTRUCT:
     case LOOM_SPIRV_PACKET_FORM_TYPED:
+    case LOOM_SPIRV_PACKET_FORM_TYPED_LITERAL:
       return loom_spirv_emit_typed_packet(state, packet, row);
     case LOOM_SPIRV_PACKET_FORM_COMPOSITE_EXTRACT:
       return loom_spirv_emit_composite_extract_packet(state, packet, row);

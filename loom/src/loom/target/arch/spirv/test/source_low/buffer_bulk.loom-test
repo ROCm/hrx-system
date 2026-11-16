@@ -201,11 +201,9 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @aligned_compare
   %97 = OpINotEqual %87, %88
   %order = low.scf.if %97 -> (reg<spirv.id : i32>) {
     %99 = OpBitwiseXor %87, %88
-    %100 = OpConstant.i32 0 : reg<spirv.id>
-    %101 = OpISub %100, %99 : reg<spirv.id>
-    %102 = OpBitwiseAnd %99, %101 : reg<spirv.id>
-    %103 = OpConstant.i32 1 : reg<spirv.id>
-    %104 = OpISub %102, %103 : reg<spirv.id>
+    %101 = OpISub %64, %99
+    %102 = OpBitwiseAnd %99, %101
+    %104 = OpISub %102, %66
     %105 = OpBitCount.i32 %104
     %106 = OpConstant.i32 -8
     %107 = OpBitwiseAnd %105, %106
