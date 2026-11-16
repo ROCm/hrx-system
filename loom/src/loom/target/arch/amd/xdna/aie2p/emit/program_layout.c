@@ -6,6 +6,8 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_layout.h"
 
+#include "loom/analysis/pipeline/lifetime_retention.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/leaf_program.h"
 #include "loom/util/adaptive_sort.h"
 
 static bool loom_aie2p_program_layout_owner_less(const iree_host_size_t* owners,
@@ -29,6 +31,7 @@ LOOM_DEFINE_ADAPTIVE_SORT_WITH_CONTEXT(loom_aie2p_program_layout_sort_owners,
                                        loom_aie2p_program_layout_owner_less)
 
 iree_status_t loom_aie2p_program_layout_initialize(
+    const loom_pipeline_lifetimes_t* lifetimes,
     const iree_host_size_t* function_owners, iree_host_size_t function_count,
     iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     loom_aie2p_program_layout_t* out_layout) {
@@ -61,33 +64,117 @@ iree_status_t loom_aie2p_program_layout_initialize(
   out_layout->function_groups = function_groups;
   out_layout->groups = groups;
   out_layout->group_count = group_count;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, group_count, sizeof(*out_layout->requests),
+      (void**)&out_layout->requests));
+  for (iree_host_size_t i = 0; i < group_count; ++i) {
+    out_layout->requests[i] = (loom_pipeline_lifetime_request_t){
+        .lifetime = lifetimes->owners[groups[i].owner], .alignment = 1};
+  }
+  return loom_pipeline_lifetime_projection_prepare(
+      lifetimes, out_layout->requests, group_count, arena,
+      &out_layout->projection);
+}
+
+typedef struct loom_aie2p_program_membership_t {
+  // Native equivalence identity from the prepared function inventory.
+  iree_host_size_t canonical;
+  // Original construction group containing this logical use.
+  iree_host_size_t group;
+} loom_aie2p_program_membership_t;
+
+static bool loom_aie2p_program_membership_less(
+    const loom_aie2p_program_membership_t* a,
+    const loom_aie2p_program_membership_t* b) {
+  return a->canonical != b->canonical ? a->canonical < b->canonical
+                                      : a->group < b->group;
+}
+
+LOOM_DEFINE_ADAPTIVE_SORT(loom_aie2p_program_sort_memberships,
+                          loom_aie2p_program_membership_t,
+                          loom_aie2p_program_membership_less)
+
+iree_status_t loom_aie2p_program_layout_retain(
+    const loom_aie2p_program_native_t* native, iree_arena_allocator_t* arena,
+    loom_aie2p_program_layout_t* layout) {
+  const iree_host_size_t count = native->function_count;
+  loom_aie2p_program_membership_t* memberships = NULL;
+  loom_pipeline_lifetime_retention_item_t* items = NULL;
+  iree_host_size_t* uses = NULL;
+  bool* retained = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, count, sizeof(*memberships), (void**)&memberships));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, count, sizeof(*items), (void**)&items));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, count, sizeof(*uses), (void**)&uses));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, count, sizeof(*retained), (void**)&retained));
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    memberships[i] = (loom_aie2p_program_membership_t){
+        .canonical = native->equivalent_indices[i],
+        .group = layout->function_groups[i],
+    };
+    items[i] = (loom_pipeline_lifetime_retention_item_t){0};
+  }
+  loom_aie2p_program_sort_memberships(memberships, count);
+  // Native emission gives every callable the same entry alignment. Complete
+  // aligned units bound storage before composition removes each group's tail
+  // padding; exact native placement remains the final capacity authority.
+  const uint64_t alignment =
+      native->contributions[0]->realization.code.minimum_alignment;
+  iree_host_size_t use_count = 0;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    if (i && memberships[i].canonical == memberships[i - 1].canonical &&
+        memberships[i].group == memberships[i - 1].group) {
+      continue;
+    }
+    const iree_host_size_t canonical = memberships[i].canonical;
+    loom_pipeline_lifetime_retention_item_t* item = &items[canonical];
+    if (!item->group_count) {
+      item->groups = uses + use_count;
+      item->length =
+          iree_host_align(
+              native->contributions[canonical]->realization.code.byte_length,
+              alignment) /
+          alignment;
+    }
+    uses[use_count++] = memberships[i].group;
+    ++item->group_count;
+  }
+  const loom_pipeline_lifetime_retention_policy_t policy = {
+      .resident_group = 0,
+      .minimum_group_length = 1,
+      .capacity = LOOM_AIE2P_CORE_PROGRAM_MEMORY_SIZE / alignment,
+  };
+  IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_retain(
+      layout->projection, layout->requests, layout->group_count, items, count,
+      &policy, arena, retained));
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    if (retained[native->equivalent_indices[i]]) {
+      layout->function_groups[i] = 0;
+    }
+  }
   return iree_ok_status();
 }
 
 iree_status_t loom_aie2p_program_layout_finish(
-    const loom_pipeline_lifetimes_t* lifetimes,
     const loom_aie2p_program_code_group_t* native_groups,
-    iree_arena_allocator_t* scratch_arena,
     loom_aie2p_program_layout_t* layout) {
   const iree_host_size_t group_count = layout->group_count;
   loom_aie2p_program_layout_group_t* groups = layout->groups;
-  loom_pipeline_lifetime_request_t* requests = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch_arena, group_count, sizeof(*requests), (void**)&requests));
+  loom_pipeline_lifetime_request_t* requests = layout->requests;
   for (iree_host_size_t i = 0; i < group_count; ++i) {
     groups[i].native = native_groups[i];
-    requests[i] = (loom_pipeline_lifetime_request_t){
-        .lifetime = lifetimes->owners[groups[i].owner],
-        .length = iree_host_align(native_groups[i].code.byte_length, 4),
-        .alignment = native_groups[i].code.minimum_alignment,
-    };
+    requests[i].length = iree_host_align(native_groups[i].code.byte_length, 4);
+    requests[i].alignment = native_groups[i].code.minimum_alignment;
   }
-  const loom_pipeline_lifetime_extent_t* extents = NULL;
-  IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_layout(
-      lifetimes, requests, group_count, 1, scratch_arena, &extents));
+  loom_pipeline_lifetime_extent_t extent;
+  IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_projection_evaluate(
+      layout->projection, requests, &extent));
   for (iree_host_size_t i = 0; i < group_count; ++i) {
     groups[i].offset = requests[i].offset;
   }
-  layout->byte_length = extents[0].length;
+  layout->byte_length = extent.length;
   return iree_ok_status();
 }

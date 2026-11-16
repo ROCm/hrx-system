@@ -28,12 +28,16 @@ typedef struct loom_aie2p_program_layout_t {
   // Complete detached program with independently relocatable code sections.
   loom_aie2p_program_object_t program;
   // Dense code group for each function in the program's retained input order.
-  const iree_host_size_t* function_groups;
+  iree_host_size_t* function_groups;
   // Root group first, then other reached construction owners in ordinal order.
   // The root's code is resident; a child group's code survives its descendants.
   loom_aie2p_program_layout_group_t* groups;
   // Number of reached construction owners, not the whole pipeline's size.
   iree_host_size_t group_count;
+  // Prepared common topology shared by retention and exact byte placement.
+  loom_pipeline_lifetime_projection_t* projection;
+  // Group requests in stable construction order; numeric requirements vary.
+  loom_pipeline_lifetime_request_t* requests;
   // Maximum simultaneous instruction footprint, including write padding.
   uint64_t byte_length;
 } loom_aie2p_program_layout_t;
@@ -43,19 +47,26 @@ typedef struct loom_aie2p_program_layout_t {
 // Result storage belongs to arena; temporary indexes belong to scratch_arena.
 // No source traversal or target-private dependence solve occurs.
 iree_status_t loom_aie2p_program_layout_initialize(
+    const loom_pipeline_lifetimes_t* lifetimes,
     const iree_host_size_t* function_owners, iree_host_size_t function_count,
     iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     loom_aie2p_program_layout_t* out_layout);
 
-// Places exact compiled group sizes with the common lifetime allocator. Parent
+// Promotes native-equivalent bodies into resident storage using the common
+// lifetime policy. Every original loading group remains nonempty, preserving
+// already-compiled caller control flow. Native composition follows selection.
+iree_status_t loom_aie2p_program_layout_retain(
+    const loom_aie2p_program_native_t* native, iree_arena_allocator_t* arena,
+    loom_aie2p_program_layout_t* layout);
+
+// Places exact compiled group sizes with the retained common projection. Parent
 // code coexists with descendants; concurrent groups remain disjoint and serial
 // groups reuse instruction memory. Native composition has populated program;
 // groups has one exact native record per initialized construction group.
 // Transport writes require four-byte lengths; entry alignment is unchanged.
 iree_status_t loom_aie2p_program_layout_finish(
-    const loom_pipeline_lifetimes_t* lifetimes,
     const loom_aie2p_program_code_group_t* groups,
-    iree_arena_allocator_t* scratch_arena, loom_aie2p_program_layout_t* layout);
+    loom_aie2p_program_layout_t* layout);
 
 #ifdef __cplusplus
 }  // extern "C"

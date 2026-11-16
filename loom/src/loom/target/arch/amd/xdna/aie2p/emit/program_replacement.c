@@ -64,8 +64,8 @@ iree_status_t loom_aie2p_program_replacement_prepare(
               ? source->entry_owners[i]
               : shared_owners[native->functions[i + 1].equivalent_index];
     }
-    status = loom_aie2p_program_layout_initialize(owners, count, arena,
-                                                  &scratch, out_layout);
+    status = loom_aie2p_program_layout_initialize(lifetimes, owners, count,
+                                                  arena, &scratch, out_layout);
   }
   iree_arena_deinitialize(&scratch);
   return status;
@@ -212,14 +212,6 @@ static iree_status_t loom_aie2p_program_replacement_compile_impl(
       .diagnostic_emitter = request->diagnostic_emitter,
       .compile_report = report,
   };
-  loom_aie2p_program_code_group_t* groups = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, layout->group_count, sizeof(*groups), (void**)&groups));
-  const loom_aie2p_program_partition_t partition = {
-      .function_groups = layout->function_groups,
-      .group_count = layout->group_count,
-      .groups = groups,
-  };
   loom_aie2p_program_compilation_t compilation;
   IREE_RETURN_IF_ERROR(loom_aie2p_program_prepare(
       compiler, module->symbols.entries[root->entry.symbol_id].defining_op,
@@ -229,10 +221,19 @@ static iree_status_t loom_aie2p_program_replacement_compile_impl(
   if (!*out_compiled) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_program_layout_retain(&compilation.native, arena, layout));
+  loom_aie2p_program_code_group_t* groups = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, layout->group_count, sizeof(*groups), (void**)&groups));
+  const loom_aie2p_program_partition_t partition = {
+      .function_groups = layout->function_groups,
+      .group_count = layout->group_count,
+      .groups = groups,
+  };
   IREE_RETURN_IF_ERROR(loom_aie2p_program_compose(
       compiler, &compilation, &partition, &layout->program));
-  IREE_RETURN_IF_ERROR(loom_aie2p_program_layout_finish(
-      &source->pipeline_entry->scope->lifetimes, groups, arena, layout));
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_layout_finish(groups, layout));
   if (report) {
     loom_target_compile_report_record_emission(
         report, report->emitted_instruction_count,

@@ -330,8 +330,10 @@ loom_cc_library(
     srcs = ["program_layout.c"],
     hdrs = ["program_layout.h"],
     deps = [
+        ":leaf_program",
         ":program_object",
         "//loom/src/loom/analysis/pipeline:invocations",
+        "//loom/src/loom/analysis/pipeline:lifetime_retention",
         "//loom/src/loom/util:adaptive_sort",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
