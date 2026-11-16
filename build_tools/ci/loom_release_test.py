@@ -438,8 +438,12 @@ class LoomReleaseTest(unittest.TestCase):
                         urllib.error.HTTPError(
                             "https://api.github.com", 404, "Not Found", {}, None
                         ),
+                        [],
                         [self.release_pull_request()],
-                        self.existing_release(draft=True),
+                        urllib.error.HTTPError(
+                            "https://api.github.com", 404, "Not Found", {}, None
+                        ),
+                        [self.existing_release(draft=True)],
                         self.records(self.assets),
                         self.existing_release(),
                     ],
@@ -728,6 +732,39 @@ class LoomReleaseTest(unittest.TestCase):
                     self.publish()
                 run.assert_not_called()
 
+    def test_release_lookup_falls_back_to_paginated_drafts(self):
+        first_page = [
+            {"tag_name": "v0.0.1"},
+            {"tag_name": "v0.0.2"},
+        ]
+        draft = self.existing_release(draft=True)
+        api = "https://api.github.com/repos/fixture/sdk"
+        with (
+            patch.object(loom_release, "GITHUB_RELEASE_PAGE_SIZE", 2),
+            patch.object(
+                github_api,
+                "get_json",
+                side_effect=[
+                    urllib.error.HTTPError(
+                        "https://api.github.com", 404, "Not Found", {}, None
+                    ),
+                    first_page,
+                    [draft],
+                ],
+            ) as get_json,
+        ):
+            self.assertIs(
+                loom_release._get_optional_release(api, self.tag, "token"),
+                draft,
+            )
+        self.assertEqual(get_json.call_count, 3)
+        self.assertEqual(
+            get_json.call_args_list[0].args[0],
+            f"{api}/releases/tags/{self.tag}",
+        )
+        self.assertTrue(get_json.call_args_list[1].args[0].endswith("&page=1"))
+        self.assertTrue(get_json.call_args_list[2].args[0].endswith("&page=2"))
+
     def pypi_records(self):
         return [
             {
@@ -846,6 +883,7 @@ class LoomReleaseTest(unittest.TestCase):
                     urllib.error.HTTPError(
                         "https://api.github.com", 404, "Not Found", {}, None
                     ),
+                    [],
                     [self.release_pull_request(body="No marked release notes")],
                 ],
             ) as github,
