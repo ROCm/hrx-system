@@ -74,7 +74,7 @@ typedef struct loom_amdgpu_loop_exit_region_plan_t {
 } loom_amdgpu_loop_exit_region_plan_t;
 
 typedef struct loom_amdgpu_loop_exit_adapter_t {
-  // Low-only block that captures one source exit edge's result tuple.
+  // Low-only block that captures one source exit region's result tuple.
   loom_low_lower_block_ref_t block;
 } loom_amdgpu_loop_exit_adapter_t;
 
@@ -128,9 +128,9 @@ struct loom_amdgpu_loop_exit_plan_t {
   uint16_t resume_arg_offset;
   // Number of resume arguments consumed by this exit's dispatch block.
   uint16_t resume_arg_count;
-  // Exit-edge adapters carrying result values into the shared capture block.
+  // Exit-region adapters carrying result values into the shared capture block.
   loom_amdgpu_loop_exit_adapter_t* adapters;
-  // Number of populated exit-edge adapters.
+  // Number of populated exit-region adapters.
   uint16_t adapter_count;
   // Completed child supplying a synthetic parent exit.
   loom_amdgpu_loop_plan_t* child_loop;

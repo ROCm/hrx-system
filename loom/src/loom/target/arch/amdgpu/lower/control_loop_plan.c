@@ -468,21 +468,25 @@ static iree_status_t loom_amdgpu_validate_loop_exit_regions(
 
 static iree_status_t loom_amdgpu_plan_loop_exit_adapter(
     loom_low_lower_context_t* context,
-    const loom_value_fact_cfg_region_t* facts, loom_cfg_edge_index_t edge_index,
+    const loom_value_fact_cfg_region_t* facts,
+    loom_cfg_edge_index_span_t retirement_edges,
     loom_low_lower_block_ref_t continuation,
     loom_amdgpu_loop_exit_plan_t* exit) {
-  const loom_cfg_edge_info_t* edge = &facts->graph.edges[edge_index];
   loom_low_lower_block_ref_t adapter = 0;
   IREE_RETURN_IF_ERROR(loom_low_lower_control_add_block(
       context, /*before=*/0, continuation, &adapter));
-  loom_low_lower_block_ref_t previous_dest = 0;
-  IREE_RETURN_IF_ERROR(loom_low_lower_control_interpose_successor(
-      context, edge->terminator, (uint8_t)edge->successor_index, adapter,
-      &previous_dest));
-  if (previous_dest != continuation) {
-    return loom_low_lower_emit_branch_constraint(
-        context, exit->source_op,
-        IREE_SV("divergent_loop_single_continuation"));
+  for (iree_host_size_t i = 0; i < retirement_edges.count; ++i) {
+    const loom_cfg_edge_info_t* edge =
+        &facts->graph.edges[retirement_edges.values[i]];
+    loom_low_lower_block_ref_t previous_dest = 0;
+    IREE_RETURN_IF_ERROR(loom_low_lower_control_interpose_successor(
+        context, edge->terminator, (uint8_t)edge->successor_index, adapter,
+        &previous_dest));
+    if (previous_dest != continuation) {
+      return loom_low_lower_emit_branch_constraint(
+          context, exit->source_op,
+          IREE_SV("divergent_loop_single_continuation"));
+    }
   }
   exit->adapters[exit->adapter_count++].block = adapter;
   return iree_ok_status();
@@ -885,11 +889,7 @@ static iree_status_t loom_amdgpu_materialize_loop_plan(
       if ((exit->exit_successor_mask & (1u << successor_index)) == 0) {
         continue;
       }
-      const loom_cfg_edge_index_t edge_index = outgoing.values[successor_index];
-      const uint16_t target = graph->edges[edge_index].target_block_index;
-      adapter_capacity += target == semantic_continuation_index
-                              ? 1
-                              : facts->regions.blocks[target].exit_edges.count;
+      ++adapter_capacity;
     }
     IREE_ASSERT_LE(adapter_capacity, UINT16_MAX);
     IREE_RETURN_IF_ERROR(loom_low_lower_allocate_plan_data(
@@ -903,8 +903,12 @@ static iree_status_t loom_amdgpu_materialize_loop_plan(
       const loom_cfg_edge_index_t edge_index = outgoing.values[successor_index];
       const uint16_t target = graph->edges[edge_index].target_block_index;
       if (target == semantic_continuation_index) {
+        const loom_cfg_edge_index_span_t retirement_edges = {
+            .values = &outgoing.values[successor_index],
+            .count = 1,
+        };
         IREE_RETURN_IF_ERROR(loom_amdgpu_plan_loop_exit_adapter(
-            context, facts, edge_index, semantic_continuation, exit));
+            context, facts, retirement_edges, semantic_continuation, exit));
         continue;
       }
       if (facts->regions.blocks[target].continuation_index !=
@@ -921,11 +925,8 @@ static iree_status_t loom_amdgpu_materialize_loop_plan(
       iree_bitmap_set(visited_targets, target);
       loom_cfg_edge_index_span_t retirement_edges =
           facts->regions.blocks[target].exit_edges;
-      for (iree_host_size_t j = 0; j < retirement_edges.count; ++j) {
-        IREE_RETURN_IF_ERROR(loom_amdgpu_plan_loop_exit_adapter(
-            context, facts, retirement_edges.values[j], semantic_continuation,
-            exit));
-      }
+      IREE_RETURN_IF_ERROR(loom_amdgpu_plan_loop_exit_adapter(
+          context, facts, retirement_edges, semantic_continuation, exit));
     }
     IREE_ASSERT_EQ(exit->adapter_count, adapter_capacity);
 

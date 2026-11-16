@@ -84,6 +84,41 @@ func.def @abnormal_exit(%condition: i1, %value: i32) -> (i32) {
   func.unreachable
 }
 
+// Target-independent facts see only uniform control, but a target may later
+// refine the loop exits to varying. Establish the loop's normal return
+// continuation structurally so that target lowering cannot lose it.
+func.def @uniform_loop_returns(%left: i32, %right: i32) -> (i32) {
+  %more = scalar.constant true : i1
+  %return_early = scalar.constant true : i1
+  cfg.br ^header
+^header:
+  cfg.cond_br %more, ^body, ^done
+^body:
+  cfg.cond_br %return_early, ^left, ^latch
+^latch:
+  cfg.br ^header
+^left:
+  func.return %left : i32
+^done:
+  func.return %right : i32
+}
+
+// A disjoint nonreturning loop also has only the synthetic postdominator, but
+// its lack of exits cannot fragment the ordinary return paths.
+func.def @disjoint_infinite_loop(%left: i32, %right: i32) -> (i32) {
+  %choose_left = scalar.constant true : i1
+  %choose_return = scalar.constant true : i1
+  cfg.cond_br %choose_left, ^left, ^remaining
+^left:
+  func.return %left : i32
+^remaining:
+  cfg.cond_br %choose_return, ^right, ^loop
+^right:
+  func.return %right : i32
+^loop:
+  cfg.br ^loop
+}
+
 // ----
 func.def @nested_returns(%first: i1, %second: i1, %left: i32, %middle: i32, %right: i32) -> (i32) {
   cfg.cond_br %first, ^left, ^remaining
@@ -95,8 +130,8 @@ func.def @nested_returns(%first: i1, %second: i1, %left: i32, %middle: i32, %rig
   cfg.br ^_bb5(%middle: i32)
 ^right:
   cfg.br ^_bb5(%right: i32)
-^_bb5(%35: i32):
-  func.return %35 : i32
+^_bb5(%45: i32):
+  func.return %45 : i32
 }
 
 func.def @tuple_returns(%condition: i1, %left: f32, %right: f32, %first: vector<4xi16>, %second: vector<4xi16>, %input: buffer, %output: buffer) -> (f32, vector<4xi16>, buffer) {
@@ -105,8 +140,8 @@ func.def @tuple_returns(%condition: i1, %left: f32, %right: f32, %first: vector<
   cfg.br ^_bb3(%left: f32, %first: vector<4xi16>, %input: buffer)
 ^right:
   cfg.br ^_bb3(%right: f32, %second: vector<4xi16>, %output: buffer)
-^_bb3(%36: f32, %37: vector<4xi16>, %38: buffer):
-  func.return %36, %37, %38 : f32, vector<4xi16>, buffer
+^_bb3(%46: f32, %47: vector<4xi16>, %48: buffer):
+  func.return %46, %47, %48 : f32, vector<4xi16>, buffer
 }
 
 func.def @void_returns(%condition: i1, %left: i32, %right: i32) {
@@ -167,6 +202,38 @@ func.def @abnormal_exit(%condition: i1, %value: i32) -> (i32) {
   func.return %value : i32
 ^unreachable:
   func.unreachable
+}
+
+func.def @uniform_loop_returns(%left: i32, %right: i32) -> (i32) {
+  %more = scalar.constant true : i1
+  %return_early = scalar.constant true : i1
+  cfg.br ^header
+^header:
+  cfg.cond_br %more, ^body, ^done
+^body:
+  cfg.cond_br %return_early, ^left, ^latch
+^latch:
+  cfg.br ^header
+^left:
+  cfg.br ^_bb6(%left: i32)
+^done:
+  cfg.br ^_bb6(%right: i32)
+^_bb6(%49: i32):
+  func.return %49 : i32
+}
+
+func.def @disjoint_infinite_loop(%left: i32, %right: i32) -> (i32) {
+  %choose_left = scalar.constant true : i1
+  %choose_return = scalar.constant true : i1
+  cfg.cond_br %choose_left, ^left, ^remaining
+^left:
+  func.return %left : i32
+^remaining:
+  cfg.cond_br %choose_return, ^right, ^loop
+^right:
+  func.return %right : i32
+^loop:
+  cfg.br ^loop
 }
 
 // ====
