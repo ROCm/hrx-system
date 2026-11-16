@@ -24,9 +24,13 @@ enum {
 
 static const iree_vm_module_signature_type_t sample_arguments[] = {
     {IREE_VM_SCALAR_TYPE_I64, 0},
-    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN | IREE_VM_SCALAR_TYPE_I32, 0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
+         (iree_vm_module_signature_type_kind_t)IREE_VM_SCALAR_TYPE_I32,
+     0},
     {IREE_VM_SCALAR_TYPE_I64, 0},
-    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN | IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
+         (iree_vm_module_signature_type_kind_t)IREE_VM_SCALAR_TYPE_I64,
+     0},
 };
 static const iree_vm_module_signature_type_t sample_results[] = {
     {IREE_VM_SCALAR_TYPE_I64, 0},
