@@ -618,11 +618,16 @@ jobs:
             command: iree-bazel-amdgpu-native-asan
             host_toolchain: clang-cl
             runner: windows-gfx1201-gpu-rocm
+            # Not every gfx1201 pool permits generated native test binaries.
+            # Select the Windows Navi4x family that provides that contract.
+            runner_family: gpu_navi4x
             target_selector: gfx120X-all
     concurrency:
       group: iree-bazel-windows-${{ matrix.command }}-${{ matrix.host_toolchain }}-${{ matrix.target_selector }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
-    runs-on: ${{ matrix.runner }}
+    runs-on:
+      - ${{ matrix.runner }}
+      - ${{ matrix.runner_family || matrix.runner }}
     timeout-minutes: ${{ matrix.kind == 'amd_client' && 45 || 60 }}
     env:
       BAZEL_LLVM: ${{ github.workspace }}\build\${{ matrix.kind == 'amd_client' && 'iree-bazel-client' || 'iree-bazel-windows' }}\rocm-root\lib\llvm
