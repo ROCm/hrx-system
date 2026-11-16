@@ -10,6 +10,32 @@
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/op_defs.h"
 
+// Target-conditioned facts can make a loop exit divergent after this generic
+// CFG pass has run. Preserve a concrete normal-return continuation whenever a
+// natural loop header would otherwise be postdominated only by the synthetic
+// graph exit; later lowering must not depend on the target-independent control
+// facts having predicted every possible distribution refinement.
+static bool loom_cfg_any_loop_needs_return_frontier(
+    const loom_value_fact_cfg_region_t* facts) {
+  const loom_cfg_postdominance_t* postdominance =
+      &facts->control_structure.postdominance;
+  if (!postdominance->available) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < facts->loops.loop_count; ++i) {
+    const loom_cfg_natural_loop_t* loop = &facts->loops.loops[i];
+    if (loop->exits.count < 2) {
+      continue;
+    }
+    const uint16_t header = loop->header_index;
+    if (postdominance->nodes[header].immediate_postdominator ==
+        postdominance->exit_node) {
+      return true;
+    }
+  }
+  return false;
+}
+
 iree_status_t loom_cfg_converge_returns(
     loom_rewriter_t* rewriter, loom_func_like_t function,
     const loom_value_fact_cfg_region_t* facts, bool* out_changed) {
@@ -38,7 +64,8 @@ iree_status_t loom_cfg_converge_returns(
         loom_value_fact_control_execution(facts->control, (uint16_t)i),
         LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP);
   }
-  if (return_count < 2 || !divergent) {
+  if (return_count < 2 ||
+      (!divergent && !loom_cfg_any_loop_needs_return_frontier(facts))) {
     return iree_ok_status();
   }
 
