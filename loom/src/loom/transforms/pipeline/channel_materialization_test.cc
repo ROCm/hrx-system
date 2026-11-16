@@ -65,8 +65,9 @@ class ChannelMaterializationTest : public ::testing::Test {
         /*source_signature=*/loom_attr_absent(), 0,
         loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
         loom_named_attr_slice_empty(), Symbol("worker"), arguments,
-        IREE_ARRAYSIZE(arguments), nullptr, 0, nullptr, 0, nullptr, 0,
-        LOOM_LOCATION_UNKNOWN, &function_));
+        IREE_ARRAYSIZE(arguments),
+        /*signature_flags=*/iree_const_byte_span_empty(), nullptr, 0, nullptr,
+        0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function_));
     region_ = loom_func_def_body(function_);
     loom_builder_enter_region(&builder_, function_, region_);
     entry_ = loom_region_entry_block(region_);
@@ -113,8 +114,9 @@ class ChannelMaterializationTest : public ::testing::Test {
         /*source_signature=*/loom_attr_absent(), 0,
         loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
         loom_named_attr_slice_empty(), symbol, arguments.data(),
-        arguments.size(), results.data(), results.size(), nullptr, 0, nullptr,
-        0, LOOM_LOCATION_UNKNOWN, &declaration));
+        arguments.size(), /*signature_flags=*/iree_const_byte_span_empty(),
+        results.data(), results.size(), nullptr, 0, nullptr, 0,
+        LOOM_LOCATION_UNKNOWN, &declaration));
     return symbol;
   }
 

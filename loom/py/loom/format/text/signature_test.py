@@ -9,6 +9,7 @@ import pytest
 from loom.assembly import AttrDict, FuncArgs, Region, SymbolRef, kw
 from loom.builtin_types import ALL_BUILTIN_TYPES
 from loom.dialect.func import ALL_FUNC_OPS
+from loom.dialect.func.defs import ArgumentAccess
 from loom.dialect.index import ALL_INDEX_OPS
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dsl import (
@@ -34,6 +35,7 @@ _partitioned_function = Op(
     attrs=[
         AttrDef("callee", "symbol"),
         AttrDef("specialization_count", "i64"),
+        AttrDef("signature_flags", "bytes", enum_def=ArgumentAccess, optional=True),
     ],
     symbol_def=SymbolDefinition(
         field="callee",
@@ -42,13 +44,18 @@ _partitioned_function = Op(
         bytecode_kind="LOOM_SYMBOL_FUNC_DEF",
     ),
     regions=[RegionDef("body", terminator="func.return")],
-    interfaces=[FuncLikeInterface(callee="callee", body="body")],
+    interfaces=[
+        FuncLikeInterface(
+            callee="callee", body="body", signature_flags="signature_flags"
+        )
+    ],
     format=[
         SymbolRef("callee"),
         FuncArgs(
             "args",
             group="specializations",
             end_attr="specialization_count",
+            access="signature_flags",
         ),
         AttrDict(),
         kw("launch"),
@@ -56,6 +63,7 @@ _partitioned_function = Op(
             "args",
             group="bindings",
             start_attr="specialization_count",
+            access="signature_flags",
         ),
         Region("body"),
     ],
@@ -186,3 +194,44 @@ def test_isolation() -> None:
 }"""
     with pytest.raises(ParseError, match="undefined SSA value '%n'"):
         _roundtrip(text)
+
+
+@pytest.mark.parametrize("access", ["none", "read", "write", "read_write"])
+def test_argument_access(access: str) -> None:
+    text = f"func.decl @access(%count: index, %data: view<[%count]xi32> {{access = {access}}})"
+    assert _roundtrip(text) == text
+
+
+@pytest.mark.parametrize("bytecode", [False, True])
+def test_partitioned_argument_access(bytecode: bool) -> None:
+    text = (
+        "signature_test.partitioned @f(%count: index) launch("
+        "%data: view<[%count]xi32> {access = write}, %other: buffer) {\n"
+        "  func.return\n}"
+    )
+    assert _roundtrip_partitioned(text, bytecode=bytecode) == text
+
+
+def test_unspecified_argument_access_elides() -> None:
+    assert _roundtrip("func.decl @f(%data: buffer {access = unspecified})") == (
+        "func.decl @f(%data: buffer)"
+    )
+
+
+def test_argument_access_rejects_unknown_keyword() -> None:
+    with pytest.raises(ParseError, match="invalid enum value"):
+        _roundtrip("func.decl @f(%data: buffer {access = capture})")
+
+
+@pytest.mark.parametrize("bytecode", [False, True])
+def test_signature_flags_include_results(bytecode: bool) -> None:
+    text = "func.decl @read(%data: buffer {access = read}) -> (i32, i32)"
+    assert _roundtrip_partitioned(text, bytecode=bytecode) == text
+
+
+def test_signature_flags_require_parameter_syntax() -> None:
+    with pytest.raises(ParseError, match="parameter access annotations"):
+        _roundtrip_partitioned(
+            'signature_test.partitioned @f() {signature_flags = "read"} '
+            "launch(%data: buffer) { func.return }"
+        )

@@ -29,6 +29,7 @@
 #include "loom/ops/builder.h"
 #include "loom/ops/format.h"
 #include "loom/ops/mutation.h"
+#include "loom/ops/signature_flags.h"
 #include "loom/ops/use_list.h"
 #include "loom/util/bstring.h"
 

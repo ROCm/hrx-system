@@ -634,6 +634,13 @@ static iree_status_t loom_refine_boundaries_remove_pruned_results(
   *out_pruned_count = 0;
   for (iree_host_size_t node = 0; node < graph->function_count; ++node) {
     const loom_refine_boundaries_prune_plan_t* plan = &plans[node];
+    // Compact both halves while their original arities still describe the
+    // payload. Result and argument removal below consume the same plan.
+    if (plan->has_prunable_arguments || plan->has_prunable_results) {
+      IREE_RETURN_IF_ERROR(loom_func_like_prune_signature_flags(
+          module, graph->functions[node].function, plan->argument_count,
+          plan->result_count, plan->prune_arguments, plan->prune_results));
+    }
     if (!plan->has_prunable_results) {
       continue;
     }

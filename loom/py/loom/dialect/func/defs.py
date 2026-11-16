@@ -114,6 +114,25 @@ EffectContract = EnumDef(
     c_include="loom/ir/ir.h",
 )
 
+ArgumentAccess = EnumDef(
+    "ArgumentAccess",
+    [
+        EnumCase("unspecified", 0, doc="No argument-specific bound."),
+        EnumCase("read", 1, doc="May read the parameter's storage during the call."),
+        EnumCase("write", 2, doc="May write the parameter's storage during the call."),
+        EnumCase("read_write", 3, doc="May read and write the parameter's storage during the call."),
+        EnumCase("none", 4, doc="May inspect shape and identity without accessing storage."),
+    ],
+    doc=(
+        "Shallow access bound for a buffer or view parameter and its aliases. "
+        "Explicit bounds prohibit escape and asynchronous use. They neither "
+        "make referenced objects immutable nor imply noalias or initialization."
+    ),
+    c_type="loom_argument_access_t",
+    c_const_prefix="LOOM_ARGUMENT_ACCESS",
+    c_include="loom/ir/argument_access.h",
+)
+
 Temperature = EnumDef(
     "Temperature",
     [
@@ -354,7 +373,7 @@ _SIGNATURE_FORMAT: list[FormatElement] = [
     SymbolRef("callee"),
     Scope(
         [
-            FuncArgs("args"),
+            FuncArgs("args", access="signature_flags"),
             OptionalGroup(
                 [ARROW, ResultTypeList("results")],
                 anchor="results",
@@ -376,6 +395,7 @@ _MODIFIER_ATTRS = [
     AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
     AttrDef("inline_policy", "enum", enum_def=InlinePolicyAttr, optional=True),
     AttrDef("predicates", "predicate_list", optional=True),
+    AttrDef("signature_flags", "bytes", enum_def=ArgumentAccess, optional=True),
 ]
 
 _CONTRACT_ATTRS = [
@@ -416,6 +436,7 @@ _DECL_ATTRS = [
     *_CONTRACT_ATTRS,
     AttrDef("predicates", "predicate_list", optional=True),
     _RETAIN_ATTR,
+    AttrDef("signature_flags", "bytes", enum_def=ArgumentAccess, optional=True),
 ]
 
 # ============================================================================
@@ -428,6 +449,7 @@ _FUNC_LIKE_COMMON: dict[str, Any] = dict(
     visibility="visibility",
     cc="cc",
     effect_contract="effect_contract",
+    signature_flags="signature_flags",
     temperature="temperature",
     inline_policy="inline_policy",
     predicates="predicates",

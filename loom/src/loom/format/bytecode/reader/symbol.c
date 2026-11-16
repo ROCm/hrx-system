@@ -96,6 +96,7 @@ static bool loom_bytecode_reader_skip_func_payload_attrs(
     loom_bytecode_symbol_validator_t* reader,
     loom_bytecode_reader_cursor_t* cursor, uint64_t symbol_index,
     const loom_op_vtable_t* vtable, const loom_func_like_vtable_t* func_like,
+    uint64_t argument_count, uint64_t result_count,
     const loom_bytecode_attribute_ssa_validation_scope_t* ssa_scope,
     iree_arena_allocator_t* retained_arena,
     loom_bytecode_symbol_metadata_t* symbol_metadata) {
@@ -169,7 +170,40 @@ static bool loom_bytecode_reader_skip_func_payload_attrs(
     const uint64_t value_offset =
         retain_attribute ? loom_bytecode_reader_cursor_absolute_position(cursor)
                          : 0;
-    if (is_product_carrier) {
+    if (attr_index == func_like->signature_flags_attr_index) {
+      if (value_kind != LOOM_BYTECODE_ATTR_BYTES) {
+        return loom_bytecode_reader_emit_invalid_field(
+            reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"),
+            symbol_index, key, key_offset,
+            IREE_SV("signature_flags_require_bytes_wire_kind"));
+      }
+      loom_attribute_t attribute;
+      LOOM_BYTECODE_RETURN_IF_REJECTED(loom_bytecode_attribute_read_bytes(
+          reader->decoder, cursor, value_kind, &attribute));
+      const iree_const_byte_span_t flags = loom_attr_as_bytes(attribute);
+      if (flags.data_length != argument_count + result_count) {
+        return loom_bytecode_reader_emit_invalid_field(
+            reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"),
+            symbol_index, key, key_offset,
+            IREE_SV("signature_flags_count_does_not_match_signature"));
+      }
+      bool accepted = true;
+      for (iree_host_size_t j = 0; j < flags.data_length && accepted; ++j) {
+        const bool valid =
+            j < argument_count
+                ? loom_signature_flags_argument_is_valid(flags.data[j])
+                : loom_signature_flags_result_is_valid(flags.data[j]);
+        if (!valid) {
+          accepted = loom_bytecode_reader_emit_invalid_field(
+              reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"),
+              symbol_index, key,
+              loom_bytecode_reader_cursor_absolute_position(cursor) -
+                  flags.data_length + j,
+              IREE_SV("unsupported_signature_flags"));
+        }
+      }
+      LOOM_BYTECODE_RETURN_IF_REJECTED(accepted);
+    } else if (is_product_carrier) {
       if (value_kind != LOOM_BYTECODE_ATTR_ENUM) {
         return loom_bytecode_reader_emit_invalid_field(
             reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"),
@@ -1265,7 +1299,8 @@ static IREE_ATTRIBUTE_ALWAYS_INLINE bool loom_bytecode_symbol_decode(
     LOOM_BYTECODE_RETURN_IF_REJECTED(
         loom_bytecode_reader_skip_func_payload_attrs(
             reader, &table->cursor, symbol_index, unused_vtable, func_like,
-            &attribute_ssa_scope, table->retained_arena, symbol_metadata));
+            arg_count, result_count, &attribute_ssa_scope,
+            table->retained_arena, symbol_metadata));
     LOOM_BYTECODE_RETURN_IF_REJECTED(
         loom_bytecode_reader_decode_region_payloads(
             reader, &table->cursor, table->ir_section, symbol_index,

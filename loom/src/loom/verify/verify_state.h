@@ -139,6 +139,9 @@ typedef struct loom_verify_state_t {
   // Scratch arena for all verification-time allocations.
   iree_arena_allocator_t arena;
 
+  // Functions awaiting access-bound checks after structural verification.
+  struct loom_verify_argument_access_t* argument_access;
+
   // Active definitions filtered by the innermost isolation boundary.
   struct {
     // Value-ID indexed definition depth plus one; zero means undefined.

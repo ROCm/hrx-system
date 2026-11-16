@@ -1796,3 +1796,110 @@ func.def public @unknown_float(%value: f32) -> (i1) {
   %finite = func.call pure @classify_unknown(%value) : (f32) -> (i1)
   func.return %finite : i1
 }
+
+// ====
+// RUN: pass refine-boundaries
+
+// Coalescing combines bounds on aliased parameters; pruning then projects
+// those bounds in the same order as the retained arguments.
+func.def @copy_used(%before: view<1xi32> {access = none}, %source: view<1xi32> {access = read}, %gap: i32, %target: view<1xi32> {access = write}, %after: view<1xi32> {access = none}) -> (i32, i32) {
+  %value = view.load %source[0] : view<1xi32> -> i32
+  view.store %value, %target[0] : i32, view<1xi32>
+  func.return %gap, %value : i32, i32
+}
+
+func.def public @copy(%source: view<1xi32>, %target: view<1xi32>) -> (i32) {
+  %gap = scalar.constant 0 : i32
+  %unused, %copied = func.call @copy_used(%source, %source, %gap, %target, %target) : (view<1xi32>, view<1xi32>, i32, view<1xi32>, view<1xi32>) -> (i32, i32)
+  func.return %copied : i32
+}
+
+// ----
+func.def @copy_used(%before: view<1xi32> {access = read}, %target: view<1xi32> {access = write}) -> (i32) {
+  %value = view.load %before[0] : view<1xi32> -> i32
+  view.store %value, %target[0] : i32, view<1xi32>
+  func.return %value : i32
+}
+
+func.def public @copy(%source: view<1xi32>, %target: view<1xi32>) -> (i32) {
+  %copied = func.call @copy_used(%source, %target) : (view<1xi32>, view<1xi32>) -> (i32)
+  func.return %copied : i32
+}
+
+// ====
+// RUN: pass refine-boundaries
+
+// Removing every bounded parameter also removes its now-empty access metadata.
+func.def @unused(%input: buffer {access = none}) {
+  func.return
+}
+
+func.def public @invoke_unused(%input: buffer) {
+  func.call @unused(%input) : (buffer)
+  func.return
+}
+
+// ----
+func.def @unused() {
+  func.return
+}
+
+func.def public @invoke_unused(%input: buffer) {
+  func.return
+}
+
+// ====
+// RUN: pass refine-boundaries
+
+// Coalesced reader/writer parameters carry their combined shallow bound.
+func.def @read_then_write(%source: view<1xi32> {access = read}, %target: view<1xi32> {access = write}) {
+  %value = view.load %source[0] : view<1xi32> -> i32
+  view.store %value, %target[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def public @update_in_place(%values: view<1xi32>) {
+  func.call @read_then_write(%values, %values) : (view<1xi32>, view<1xi32>)
+  func.return
+}
+
+// ----
+func.def @read_then_write(%source: view<1xi32> {access = read_write}) {
+  %value = view.load %source[0] : view<1xi32> -> i32
+  view.store %value, %source[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def public @update_in_place(%values: view<1xi32>) {
+  func.call @read_then_write(%values) : (view<1xi32>)
+  func.return
+}
+
+// ====
+// RUN: pass refine-boundaries
+
+// An unbounded parameter may escape even when coalesced with a bounded one.
+global.variable @saved : buffer
+
+func.def @publish_second(%ignored: buffer {access = none}, %escaping: buffer) {
+  global.store %escaping, @saved : buffer
+  func.return
+}
+
+func.def public @publish(%input: buffer) {
+  func.call @publish_second(%input, %input) : (buffer, buffer)
+  func.return
+}
+
+// ----
+global.variable @saved : buffer
+
+func.def @publish_second(%ignored: buffer) {
+  global.store %ignored, @saved : buffer
+  func.return
+}
+
+func.def public @publish(%input: buffer) {
+  func.call @publish_second(%input) : (buffer)
+  func.return
+}

@@ -8,6 +8,7 @@
 
 #include "loom/error/error_catalog.h"
 #include "loom/format/text/parser/accumulator.h"
+#include "loom/format/text/parser/attrs.h"
 #include "loom/format/text/parser/diagnostics.h"
 #include "loom/format/text/parser/regions.h"
 #include "loom/format/text/parser/scope.h"
@@ -803,6 +804,15 @@ iree_status_t loom_parse_format_func_args(loom_parser_t* parser,
                                           loom_parsed_op_t* parsed) {
   const uint32_t errors_before = parser->error_count;
   uint16_t pending_arg_start = parser->pending_func_args.count;
+  const uint8_t access_index = vtable->func_like->signature_flags_attr_index;
+  const uint16_t argument_start =
+      element->field_index == LOOM_OPERAND_INDEX_NONE
+          ? pending_arg_start - pending_func_arg_base
+          : parsed->operand_count;
+  uint8_t inline_access[32] = {0};
+  uint8_t* access_values = inline_access;
+  iree_host_size_t access_capacity = IREE_ARRAYSIZE(inline_access);
+  bool has_access = false;
   if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LPAREN)) {
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("'('"));
@@ -841,12 +851,71 @@ iree_status_t loom_parse_format_func_args(loom_parser_t* parser,
 
     IREE_RETURN_IF_ERROR(
         loom_parser_add_pending_func_arg(parser, value_id, name_token));
+    uint8_t access = 0;
+    if (access_index != LOOM_ATTR_INDEX_NONE &&
+        loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LBRACE)) {
+      if (!loom_tokenizer_try_consume_keyword(&parser->tokenizer,
+                                              IREE_SV("access"))) {
+        return loom_parser_emit_unexpected_token(
+            parser, loom_tokenizer_peek(&parser->tokenizer),
+            IREE_SV("'access'"));
+      }
+      if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_EQUALS)) {
+        return loom_parser_emit_unexpected_token(
+            parser, loom_tokenizer_peek(&parser->tokenizer), IREE_SV("'='"));
+      }
+      loom_attr_descriptor_t descriptor =
+          vtable->attr_descriptors[access_index];
+      descriptor.attr_kind = LOOM_ATTR_ENUM;
+      loom_attribute_t attribute = loom_attr_absent();
+      IREE_RETURN_IF_ERROR(
+          loom_parse_attr_value(parser, &descriptor, &attribute));
+      if (parser->error_count > errors_before) {
+        return iree_ok_status();
+      }
+      access = loom_attr_as_enum(attribute);
+      if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_RBRACE)) {
+        return loom_parser_emit_unexpected_token(
+            parser, loom_tokenizer_peek(&parser->tokenizer), IREE_SV("'}'"));
+      }
+    }
+    has_access |= access != 0;
+    if (has_access && parsed_arg_count >= access_capacity) {
+      const iree_host_size_t old_capacity = access_capacity;
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          &parser->parser_arena, old_capacity, parsed_arg_count + 1,
+          sizeof(*access_values), &access_capacity, (void**)&access_values));
+      memset(access_values + old_capacity, 0, access_capacity - old_capacity);
+    }
+    if (parsed_arg_count < access_capacity) {
+      access_values[parsed_arg_count] = access;
+    }
     ++parsed_arg_count;
   }
 
   if (!loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_RPAREN)) {
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
     return loom_parser_emit_unexpected_token(parser, peek, IREE_SV("')'"));
+  }
+  const iree_const_byte_span_t previous_access =
+      access_index < parsed->attribute_count
+          ? loom_attr_as_bytes(parsed->attributes[access_index])
+          : iree_const_byte_span_empty();
+  if (has_access || previous_access.data_length) {
+    const iree_host_size_t count = argument_start + parsed_arg_count;
+    uint8_t* values = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        &parser->parser_arena, count, sizeof(*values), (void**)&values));
+    memset(values, 0, count);
+    if (previous_access.data_length) {
+      memcpy(values, previous_access.data, previous_access.data_length);
+    }
+    if (has_access) {
+      memcpy(values + argument_start, access_values, parsed_arg_count);
+    }
+    IREE_RETURN_IF_ERROR(loom_parsed_op_set_attribute(
+        parsed, &parser->parser_arena, access_index,
+        loom_attr_bytes(values, (uint32_t)count)));
   }
   if (element->field_index != LOOM_OPERAND_INDEX_NONE) {
     for (uint16_t i = pending_arg_start; i < parser->pending_func_args.count;
@@ -885,5 +954,28 @@ iree_status_t loom_parse_format_func_args(loom_parser_t* parser,
         loom_parsed_op_set_attribute(parsed, &parser->parser_arena,
                                      end_attr_index, loom_attr_i64(boundary)));
   }
+  return iree_ok_status();
+}
+
+iree_status_t loom_parse_finalize_signature_flags(
+    loom_parser_t* parser, const loom_op_vtable_t* vtable,
+    loom_parsed_op_t* parsed) {
+  if (!vtable->func_like) {
+    return iree_ok_status();
+  }
+  const uint8_t index = vtable->func_like->signature_flags_attr_index;
+  if (index >= parsed->attribute_count ||
+      loom_attr_is_absent(parsed->attributes[index])) {
+    return iree_ok_status();
+  }
+  const iree_const_byte_span_t arguments =
+      loom_attr_as_bytes(parsed->attributes[index]);
+  const uint32_t count = (uint32_t)arguments.data_length + parsed->result_count;
+  uint8_t* values = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      &parser->module->arena, count, sizeof(*values), (void**)&values));
+  memcpy(values, arguments.data, arguments.data_length);
+  memset(values + arguments.data_length, 0, parsed->result_count);
+  parsed->attributes[index] = loom_attr_bytes(values, count);
   return iree_ok_status();
 }

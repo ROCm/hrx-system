@@ -592,6 +592,10 @@ class FuncArgs:
     ``group`` gives a projected group its semantic builder name. It has no IR
     storage of its own and defaults to ``field`` for ordinary signatures.
 
+    ``access`` names the optional FuncLike signature-flags byte array. Nonzero
+    entries print beside their parameters as ``{access = read}``; indexing is
+    over the complete argument list, including projected groups.
+
     For builders: maps to a list of (name, type) pairs.
     """
 
@@ -599,6 +603,7 @@ class FuncArgs:
     group: str | None = None
     start_attr: str | None = None
     end_attr: str | None = None
+    access: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

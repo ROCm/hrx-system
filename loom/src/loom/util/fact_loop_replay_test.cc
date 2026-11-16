@@ -58,8 +58,9 @@ class FactLoopReplayTest : public ::testing::Test {
         &builder_, 0, 0, 0, 0, 0, 0, 0, 0, loom_symbol_ref_null(),
         loom_attr_absent(), 0, loom_named_attr_slice_empty(),
         LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), {0, symbol},
-        types.data(), types.size(), nullptr, 0, nullptr, 0, nullptr, 0,
-        LOOM_LOCATION_UNKNOWN, &function));
+        types.data(), types.size(),
+        /*signature_flags=*/iree_const_byte_span_empty(), nullptr, 0, nullptr,
+        0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function));
     auto* body = loom_func_like_body(loom_func_like_cast(module_, function));
     (void)loom_builder_enter_region(&builder_, function, body);
     for (unsigned i = 0; i < types.size(); ++i) {

@@ -181,7 +181,7 @@ def generate_ops_h(
             attr_def.enum_def.c_include
             for op in ops
             for attr_def in op.attrs
-            if attr_def.attr_type in ("enum", "enum_array", "signed_enum_set", ATTR_TYPE_FLAGS) and attr_def.enum_def is not None and attr_def.enum_def.c_include is not None
+            if attr_def.attr_type in ("enum", "enum_array", "signed_enum_set", "bytes", ATTR_TYPE_FLAGS) and attr_def.enum_def is not None and attr_def.enum_def.c_include is not None
         }
         | {
             parameter.enum_def.c_include
@@ -357,7 +357,10 @@ def generate_ops_h(
     # template.def, template.ukernel), emit it once with a dialect-level
     # name (loom_func_cc_t) instead of duplicating per-op.
     open_enum_ids = {
-        id(attr_def.enum_def) for op in ops for attr_def in op.attrs if (attr_def.attr_type in ("enum", "enum_array", "signed_enum_set") and attr_def.open_enum and attr_def.enum_def is not None)
+        id(attr_def.enum_def)
+        for op in ops
+        for attr_def in op.attrs
+        if (attr_def.attr_type in ("enum", "enum_array", "signed_enum_set", "bytes") and attr_def.open_enum and attr_def.enum_def is not None)
     }
 
     # Emit shared enums first.
@@ -382,7 +385,7 @@ def generate_ops_h(
     emitted_enum_defs: set[str] = set()
     for op in ops:
         for attr_def in op.attrs:
-            if attr_def.attr_type not in ("enum", "enum_array", "signed_enum_set") or attr_def.enum_def is None:
+            if attr_def.attr_type not in ("enum", "enum_array", "signed_enum_set", "bytes") or attr_def.enum_def is None:
                 continue
             if attr_def.enum_def.c_type is not None:
                 continue

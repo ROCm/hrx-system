@@ -1355,8 +1355,10 @@ static iree_status_t loom_low_source_workload_generate_module_into(
       0, 0, target_ref, /*source_signature=*/loom_attr_absent(), 0,
       loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
       loom_named_attr_slice_empty(), func_ref, arg_types,
-      IREE_ARRAYSIZE(arg_types), result_types, IREE_ARRAYSIZE(result_types),
-      NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN, &func_op));
+      IREE_ARRAYSIZE(arg_types),
+      /*signature_flags=*/iree_const_byte_span_empty(), result_types,
+      IREE_ARRAYSIZE(result_types), NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN,
+      &func_op));
 
   loom_region_t* body = loom_func_def_body(func_op);
   loom_builder_ip_t saved_ip =

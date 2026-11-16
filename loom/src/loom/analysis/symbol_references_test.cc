@@ -392,8 +392,9 @@ TEST_F(SymbolReferencesTest, LargeProviderModuleNeedsNoDenseIndex) {
   loom_op_t* definition = nullptr;
   IREE_ASSERT_OK(loom_template_def_build(
       &builder, 0, family, 0, 0, 0, 0, 0, loom_symbol_ref_null(),
-      loom_parameterized_attr_array_empty(), 0, provider, nullptr, 0, nullptr,
-      0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &definition));
+      loom_parameterized_attr_array_empty(), 0, provider, nullptr, 0,
+      /*signature_flags=*/iree_const_byte_span_empty(), nullptr, 0, nullptr, 0,
+      nullptr, 0, LOOM_LOCATION_UNKNOWN, &definition));
   loom_builder_enter_region(&builder, definition,
                             loom_template_def_body(definition));
   loom_op_t* terminator = nullptr;
@@ -749,14 +750,16 @@ TEST_F(SymbolReferencesTest, TemplateCallCountsFollowSnapshotLifetime) {
   loom_op_t* declaration = nullptr;
   IREE_ASSERT_OK(loom_template_decl_build(
       &builder, 0, 0, 0, 0, 0, 0, loom_symbol_ref_null(),
-      loom_parameterized_attr_array_empty(), family, nullptr, 0, nullptr, 0,
-      nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &declaration));
+      loom_parameterized_attr_array_empty(), family, nullptr, 0,
+      /*signature_flags=*/iree_const_byte_span_empty(), nullptr, 0, nullptr, 0,
+      nullptr, 0, LOOM_LOCATION_UNKNOWN, &declaration));
   const auto provider = AddSymbol(module.get(), IREE_SV("provider"));
   loom_op_t* definition = nullptr;
   IREE_ASSERT_OK(loom_template_def_build(
       &builder, 0, family, 0, 0, 0, 0, 0, loom_symbol_ref_null(),
-      loom_parameterized_attr_array_empty(), 0, provider, nullptr, 0, nullptr,
-      0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &definition));
+      loom_parameterized_attr_array_empty(), 0, provider, nullptr, 0,
+      /*signature_flags=*/iree_const_byte_span_empty(), nullptr, 0, nullptr, 0,
+      nullptr, 0, LOOM_LOCATION_UNKNOWN, &definition));
   loom_builder_enter_region(&builder, definition,
                             loom_template_def_body(definition));
   loom_op_t* call = nullptr;

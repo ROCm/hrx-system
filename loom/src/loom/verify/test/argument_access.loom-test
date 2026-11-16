@@ -1,0 +1,149 @@
+// RUN: verify
+
+// Contracts bound accesses through the parameter, without restricting effects
+// on independent parameters or unrelated state.
+func.decl @native_copy(%source: view<2xi32> {access = read}, %target: view<2xi32> {access = write})
+
+func.def @forward(%source: view<2xi32> {access = read}, %target: view<2xi32> {access = write}) {
+  func.call @native_copy(%source, %target) : (view<2xi32>, view<2xi32>)
+  func.return
+}
+
+// ====
+
+// Direct stores violate a read bound.
+// ERROR@+1: STRUCTURE/070 {argument_index="0", access="read", violation="write"}
+func.def @store(%target: view<2xi32> {access = read}, %value: i32) {
+  view.store %value, %target[0] : i32, view<2xi32>
+  func.return
+}
+
+// ====
+
+// A write bound permits stores, but does not authorize loads.
+// ERROR@+1: STRUCTURE/070 {argument_index="0", access="write", violation="read"}
+func.def @read(%source: view<2xi32> {access = write}) -> (i32) {
+  %value = view.load %source[0] : view<2xi32> -> i32
+  func.return %value : i32
+}
+
+// ====
+
+// Returning a handle would publish the call-scoped parameter.
+// ERROR@+1: STRUCTURE/070 {argument_index="0", access="read"}
+func.def @escape(%source: view<2xi32> {access = read}) -> (view<2xi32>) {
+  func.return %source : view<2xi32>
+}
+
+// ====
+
+// Ordinary managed view results remain valid without a call-scoped promise.
+func.def @managed_result(%source: view<2xi32>) -> (view<2xi32>) {
+  func.return %source : view<2xi32>
+}
+
+// ====
+
+// An opaque call without a parameter contract cannot receive the borrow.
+func.decl @opaque(%source: view<2xi32>)
+// ERROR@+1: STRUCTURE/070 {argument_index="0", access="read"}
+func.def @opaque_forward(%source: view<2xi32> {access = read}) {
+  func.call @opaque(%source) : (view<2xi32>)
+  func.return
+}
+
+// ====
+
+// Bounds describe storage, rather than scalar values or opaque referents.
+// ERROR@+1: STRUCTURE/069 {argument_index="0"}
+func.decl @scalar(%value: i32 {access = read})
+
+// ====
+
+// Inference follows an unannotated helper rather than demanding annotations
+// at every edge in the source program.
+func.def @writer(%target: view<2xi32>, %value: i32) {
+  view.store %value, %target[1] : i32, view<2xi32>
+  func.return
+}
+// ERROR@+1: STRUCTURE/070 {argument_index="0", access="read", violation="write"}
+func.def @nested_writer(%target: view<2xi32> {access = read}, %value: i32) {
+  func.call @writer(%target, %value) : (view<2xi32>, i32)
+  func.return
+}
+
+// ====
+
+// Aliased actuals combine both formal effects. The reader's annotation cannot
+// hide the write through the same actual passed as the second argument.
+func.decl @native_copy(%source: view<2xi32> {access = read}, %target: view<2xi32> {access = write})
+// ERROR@+1: STRUCTURE/070 {argument_index="0", access="read", violation="write"}
+func.def @overlap(%value: view<2xi32> {access = read}) {
+  func.call @native_copy(%value, %value) : (view<2xi32>, view<2xi32>)
+  func.return
+}
+
+// ====
+
+// The bound follows slices through CFG transport and recursive forwarding.
+// ERROR@+1: STRUCTURE/070 {argument_index="0", access="read", violation="write"}
+func.def @recursive(%whole: view<2xi32> {access = read}, %again: i1, %value: i32) {
+  %part = view.subview %whole[1] : view<2xi32> -> view<1xi32>
+  cfg.br ^use(%part: view<1xi32>)
+^use(%selected: view<1xi32>):
+  view.store %value, %selected[0] : i32, view<1xi32>
+  scf.if %again {
+    %stop = scalar.constant false : i1
+    func.call @recursive(%whole, %stop, %value) : (view<2xi32>, i1, i32)
+  }
+  func.return
+}
+
+// ====
+
+global.variable @saved : buffer
+// ERROR@+1: STRUCTURE/070 {argument_index="0", access="read"}
+func.def @publish(%input: buffer {access = read}) {
+  global.store %input, @saved : buffer
+  func.return
+}
+
+// ====
+
+// A template family's promise constrains implementations even if their own
+// signatures leave access unspecified.
+template.decl @reader(%input: view<1xi32> {access = read}) -> (i32)
+
+template.def<@reader> @valid_reader(%input: view<1xi32>) -> (i32) {
+  %value = view.load %input[0] : view<1xi32> -> i32
+  template.return %value : i32
+}
+
+// ====
+
+template.decl @reader(%input: view<1xi32> {access = read})
+// ERROR@+1: STRUCTURE/070 {argument_index="0", access="read", violation="write"}
+template.def<@reader> @invalid_reader(%input: view<1xi32>) {
+  %value = scalar.constant 1 : i32
+  view.store %value, %input[0] : i32, view<1xi32>
+  template.return
+}
+
+// ====
+
+// Shape observation does not access the referenced bytes.
+func.def @length(%input: buffer {access = none}) -> (offset) {
+  %length = buffer.length %input
+  func.return %length : offset
+}
+
+// ====
+
+// Known ambient writes do not publish a distinct formal parameter.
+global.variable @counter : i32
+
+func.def @counted_read(%input: view<1xi32> {access = read}) -> (i32) {
+  %value = view.load %input[0] : view<1xi32> -> i32
+  global.store %value, @counter : i32
+  func.return %value : i32
+}

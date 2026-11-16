@@ -133,7 +133,8 @@ TEST_F(FuncPrinterTest, Definition) {
       0, 0, 0, 0, loom_symbol_ref_null(),
       /*source_signature=*/loom_attr_absent(), 0, loom_named_attr_slice_empty(),
       LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), callee, arg_types,
-      1, result_types, 1, NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
+      1, /*signature_flags=*/iree_const_byte_span_empty(), result_types, 1,
+      NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
   EXPECT_EQ(PrintOp(op),
             "func.def public @entry(%0: f32) -> (f32) {\n"
             "}\n");

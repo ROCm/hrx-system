@@ -59,9 +59,11 @@ loom_cc_library_group(
 # Value/type vocabulary and graph representation are also available without
 # storage, interning, replacement, or other out-of-line IR operations.
 _TYPE_HEADERS = [
+    "argument_access.h",
     "attribute.h",
     "memory_space.h",
     "scalar_type.h",
+    "signature_flags.h",
     "structural_hash.h",
     "type_constraint.h",
     "types.h",

@@ -24,6 +24,7 @@ exports_files(
 loom_check_test_suite(
     name = "test",
     srcs = [
+        "argument_access.loom-test",
         "byte_attributes.loom-test",
         "encoding_aliases.loom-test",
         "error_recovery.loom-test",

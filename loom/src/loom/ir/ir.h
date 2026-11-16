@@ -1344,6 +1344,10 @@ typedef struct loom_func_like_vtable_t {
   // LOOM_ATTR_INDEX_NONE if absent.
   uint8_t effect_contract_attr_index;
 
+  // Index of optional boundary flags in [arguments | results] order, or
+  // LOOM_ATTR_INDEX_NONE. The byte payload follows ir/signature_flags.h.
+  uint8_t signature_flags_attr_index;
+
   // Index of the optional temperature enum attr. LOOM_ATTR_INDEX_NONE if
   // absent.
   uint8_t temperature_attr_index;

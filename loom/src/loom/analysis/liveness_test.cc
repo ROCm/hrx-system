@@ -500,7 +500,8 @@ class LivenessStorageTest : public LivenessTest {
         /*source_signature=*/loom_attr_absent(), 0,
         loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
         loom_named_attr_slice_empty(), {0, symbol_id}, types.data(),
-        argument_count, types.data(), result_count, nullptr, 0, nullptr, 0,
+        argument_count, /*signature_flags=*/iree_const_byte_span_empty(),
+        types.data(), result_count, nullptr, 0, nullptr, 0,
         LOOM_LOCATION_UNKNOWN, &function));
     body_ = loom_func_like_body(loom_func_like_cast(module, function));
     body_->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;

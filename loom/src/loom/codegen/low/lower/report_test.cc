@@ -105,8 +105,9 @@ class LowLowerReportTest : public ::testing::Test {
         loom_symbol_ref_null(), /*source_signature=*/loom_attr_absent(),
         /*abi=*/0, loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
         loom_named_attr_slice_empty(), symbol, argument_types,
-        IREE_ARRAYSIZE(argument_types), &i32_type, 1, nullptr, 0, nullptr, 0,
-        LOOM_LOCATION_UNKNOWN, &function_op));
+        IREE_ARRAYSIZE(argument_types),
+        /*signature_flags=*/iree_const_byte_span_empty(), &i32_type, 1, nullptr,
+        0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function_op));
     function_ = loom_func_like_cast(module_, function_op);
 
     loom_block_t* entry_block =

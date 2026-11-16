@@ -233,7 +233,8 @@ static iree_status_t loom_kernel_launch_config_program_build_function(
       loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
       loom_named_attr_slice_empty(),
       (loom_symbol_ref_t){.module_id = 0, .symbol_id = target_symbol_id},
-      argument_types, source_arguments.count, result_types,
+      argument_types, source_arguments.count,
+      /*signature_flags=*/iree_const_byte_span_empty(), result_types,
       IREE_ARRAYSIZE(result_types), /*tied_results=*/NULL,
       /*tied_result_count=*/0, /*predicates=*/NULL,
       /*predicates_count=*/0, target_location, &function_op));
@@ -407,7 +408,8 @@ iree_status_t loom_kernel_launch_config_program_capture_static(
       loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
       loom_named_attr_slice_empty(),
       (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol},
-      /*arg_types=*/NULL, /*arg_count=*/0, result_types,
+      /*arg_types=*/NULL, /*arg_count=*/0,
+      /*signature_flags=*/iree_const_byte_span_empty(), result_types,
       IREE_ARRAYSIZE(result_types), /*tied_results=*/NULL,
       /*tied_result_count=*/0, /*predicates=*/NULL, /*predicates_count=*/0,
       LOOM_LOCATION_UNKNOWN, &function));

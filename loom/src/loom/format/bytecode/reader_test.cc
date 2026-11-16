@@ -490,8 +490,10 @@ class ReaderTest : public ::testing::Test {
         /*source_signature=*/loom_attr_absent(), /*abi=*/0,
         loom_named_attr_slice_empty(), /*export_symbol=*/LOOM_STRING_ID_INVALID,
         loom_named_attr_slice_empty(), callee, arg_types,
-        IREE_ARRAYSIZE(arg_types), result_types, IREE_ARRAYSIZE(result_types),
-        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &func_op));
+        IREE_ARRAYSIZE(arg_types),
+        /*signature_flags=*/iree_const_byte_span_empty(), result_types,
+        IREE_ARRAYSIZE(result_types), nullptr, 0, nullptr, 0,
+        LOOM_LOCATION_UNKNOWN, &func_op));
 
     loom_func_like_t func_like = loom_func_like_cast(module, func_op);
     uint16_t arg_count = 0;
@@ -543,8 +545,10 @@ class ReaderTest : public ::testing::Test {
         loom_symbol_ref_null(), /*source_signature=*/loom_attr_absent(),
         /*abi=*/0, loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
         loom_named_attr_slice_empty(), callee, arg_types,
-        IREE_ARRAYSIZE(arg_types), result_types, IREE_ARRAYSIZE(result_types),
-        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &decl_op));
+        IREE_ARRAYSIZE(arg_types),
+        /*signature_flags=*/iree_const_byte_span_empty(), result_types,
+        IREE_ARRAYSIZE(result_types), nullptr, 0, nullptr, 0,
+        LOOM_LOCATION_UNKNOWN, &decl_op));
     return module;
   }
 
@@ -752,7 +756,8 @@ class ReaderTest : public ::testing::Test {
         builder, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0, /*cc=*/0,
         /*effect_contract=*/0, /*temperature=*/0, loom_symbol_ref_null(),
         loom_parameterized_attr_array_empty(), family, /*arg_types=*/nullptr,
-        /*arg_types_count=*/0, /*result_types=*/nullptr, /*result_count=*/0,
+        /*arg_types_count=*/0, /*signature_flags=*/iree_const_byte_span_empty(),
+        /*result_types=*/nullptr, /*result_count=*/0,
         /*tied_results=*/nullptr, /*tied_result_count=*/0,
         /*predicates=*/nullptr, /*predicates_count=*/0, LOOM_LOCATION_UNKNOWN,
         &family_op));

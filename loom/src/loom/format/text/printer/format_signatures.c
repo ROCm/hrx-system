@@ -235,6 +235,13 @@ iree_status_t loom_print_func_args(loom_print_context_t* ctx,
   } else {
     arg_ids = loom_print_func_arg_ids(op, vtable, &arg_count);
   }
+  const iree_const_byte_span_t access = loom_func_like_signature_flags(
+      (loom_func_like_t){.op = (loom_op_t*)op, .vtable = vtable->func_like});
+  if (access.data_length &&
+      access.data_length != (uint32_t)arg_count + op->result_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "signature flags count does not match signature");
+  }
   const uint8_t start_attr_index =
       LOOM_FORMAT_FUNC_ARGS_START_ATTR_INDEX(element->data);
   const uint8_t end_attr_index =
@@ -275,6 +282,21 @@ iree_status_t loom_print_func_args(loom_print_context_t* ctx,
     IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
     IREE_RETURN_IF_ERROR(loom_print_value_type(ctx, arg_ids[j]));
     loom_print_did_write(ctx);
+    const loom_argument_access_t bound =
+        access.data_length ? loom_signature_flags_access(access.data[start + j])
+                           : LOOM_ARGUMENT_ACCESS_UNSPECIFIED;
+    if (bound != LOOM_ARGUMENT_ACCESS_UNSPECIFIED) {
+      IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "{access =", false));
+      IREE_RETURN_IF_ERROR(loom_print_space_if_needed(ctx));
+      loom_attr_descriptor_t descriptor =
+          vtable
+              ->attr_descriptors[vtable->func_like->signature_flags_attr_index];
+      descriptor.attr_kind = LOOM_ATTR_ENUM;
+      const loom_attribute_t attribute = loom_attr_enum(bound);
+      IREE_RETURN_IF_ERROR(loom_print_attr(ctx, &attribute, &descriptor));
+      loom_print_did_write(ctx);
+      IREE_RETURN_IF_ERROR(loom_print_emit_cstr(ctx, "}", false));
+    }
   }
   return loom_print_emit_cstr(ctx, ")", false);
 }

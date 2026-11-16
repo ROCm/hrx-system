@@ -530,12 +530,29 @@ iree_status_t loom_pipeline_realize_invocations(
         bool erased;
         status = loom_rewriter_erase_if_dead(&rewriter, dead, &erased);
       }
+      const uint16_t argument_count = entry->arg_count;
+      bool* removed_arguments = NULL;
+      if (iree_status_is_ok(status) &&
+          loom_func_like_signature_flags(instance->function).data_length) {
+        status = iree_arena_allocate_array(pass->arena, entry->arg_count,
+                                           sizeof(*removed_arguments),
+                                           (void**)&removed_arguments);
+      }
       for (uint16_t j = entry->arg_count; j > 0 && iree_status_is_ok(status);
            --j) {
         const loom_value_id_t argument = entry->arg_ids[j - 1];
-        if (!loom_module_value_has_uses(module, argument)) {
+        const bool removed = !loom_module_value_has_uses(module, argument);
+        if (removed_arguments) {
+          removed_arguments[j - 1] = removed;
+        }
+        if (removed) {
           status = loom_block_remove_arg(module, entry, j - 1);
         }
+      }
+      if (iree_status_is_ok(status) && removed_arguments) {
+        status = loom_func_like_prune_signature_flags(
+            module, instance->function, argument_count,
+            instance->function.op->result_count, removed_arguments, NULL);
       }
     }
   }

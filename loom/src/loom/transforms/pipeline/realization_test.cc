@@ -39,20 +39,23 @@ class PipelineRealizationTest : public ::testing::Test {
     loom_builder_initialize(module_, &module_->arena,
                             loom_module_block(module_), &builder_);
     const auto worker = Symbol("worker");
-    worker_version_.base.function = Function(&builder_, worker);
+    worker_version_.base.function = Function(&builder_, worker, true);
     worker_version_.base.type = &loom_target_function_version_type;
     worker_version_.target_context_ordinal = 3;
     const auto source = Symbol("source");
+    const auto buffer_type = loom_type_buffer();
     loom_op_t* definition;
     IREE_ASSERT_OK(loom_pipeline_def_build(
         &builder_, 0, 0, 0, 0, loom_symbol_ref_null(), source, nullptr, 0,
-        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &definition));
+        &buffer_type, 1, nullptr, 0, LOOM_LOCATION_UNKNOWN, &definition));
     source_version_.base.type = &loom_target_function_version_type;
     source_version_.base.function = loom_func_like_cast(module_, definition);
     source_version_.base.flags = LOOM_FUNCTION_VERSION_FLAG_RETAIN;
     source_version_.target_context_ordinal = 2;
     loom_builder_enter_region(&builder_, definition,
                               loom_pipeline_def_body(definition));
+    const auto input =
+        loom_region_entry_block(loom_pipeline_def_body(definition))->arg_ids[0];
     const int64_t count = 1;
     for (int64_t origin = 0; origin < 2; ++origin) {
       loom_builder_enter_region(&builder_, definition,
@@ -65,8 +68,8 @@ class PipelineRealizationTest : public ::testing::Test {
       loom_builder_enter_region(&builder_, strand,
                                 loom_pipeline_strand_body(strand));
       loom_op_t* call;
-      IREE_ASSERT_OK(loom_func_call_build(&builder_, 0, 0, 0, 0, worker,
-                                          nullptr, 0, nullptr, 0, nullptr, 0,
+      IREE_ASSERT_OK(loom_func_call_build(&builder_, 0, 0, 0, 0, worker, &input,
+                                          1, nullptr, 0, nullptr, 0,
                                           LOOM_LOCATION_UNKNOWN, &call));
       loom_op_t* terminator;
       IREE_ASSERT_OK(loom_pipeline_end_build(&builder_, LOOM_LOCATION_UNKNOWN,
@@ -140,16 +143,22 @@ class PipelineRealizationTest : public ::testing::Test {
     return {0, symbol};
   }
 
-  loom_func_like_t Function(loom_builder_t* builder, loom_symbol_ref_t symbol) {
+  loom_func_like_t Function(loom_builder_t* builder, loom_symbol_ref_t symbol,
+                            bool has_input = false) {
     loom_builder_set_block(builder, loom_module_block(module_));
     builder->ip.parent_op = nullptr;
+    const auto buffer_type = loom_type_buffer();
+    const uint8_t access = LOOM_ARGUMENT_ACCESS_NONE;
     loom_op_t* function;
     IREE_CHECK_OK(loom_func_def_build(
-        builder, 0, 0, 0, 0, 0, 0, 0, 0, loom_symbol_ref_null(),
-        loom_attr_absent(), 0, loom_named_attr_slice_empty(),
-        LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol, nullptr,
-        0, nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN,
-        &function));
+        builder, has_input ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_SIGNATURE_FLAGS : 0,
+        0, 0, 0, 0, 0, 0, 0, loom_symbol_ref_null(), loom_attr_absent(), 0,
+        loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
+        loom_named_attr_slice_empty(), symbol,
+        has_input ? &buffer_type : nullptr, has_input ? 1 : 0,
+        has_input ? iree_make_const_byte_span(&access, 1)
+                  : iree_const_byte_span_empty(),
+        nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function));
     loom_builder_enter_region(builder, function, loom_func_def_body(function));
     loom_op_t* terminator;
     IREE_CHECK_OK(loom_func_return_build(builder, nullptr, 0,
@@ -198,6 +207,8 @@ class PipelineRealizationTest : public ::testing::Test {
     EXPECT_EQ(realization->worker_versions[index]->base.function.op,
               instance->function.op);
     EXPECT_EQ(realization->worker_versions[index]->target_context_ordinal, 3);
+    EXPECT_EQ(loom_func_like_signature_flags(instance->function).data_length,
+              1u);
     self->bodies_[index] = instance->function.op;
     ++self->emitted_;
     return iree_ok_status();
@@ -211,6 +222,12 @@ class PipelineRealizationTest : public ::testing::Test {
                 self->bodies_[i]);
       if (!self->has_body_[i]) {
         EXPECT_EQ(realization->worker_versions[i], nullptr);
+      } else {
+        const auto function = realization->instances[i].channels.function;
+        EXPECT_EQ(
+            loom_region_entry_block(loom_func_like_body(function))->arg_count,
+            0u);
+        EXPECT_EQ(loom_func_like_signature_flags(function).data_length, 0u);
       }
     }
     const auto symbol = loom_func_like_callee(realization->function);
@@ -235,6 +252,9 @@ class PipelineRealizationTest : public ::testing::Test {
     EXPECT_EQ(versions_.list.count, 2u + emitted_);
     EXPECT_EQ(worker_version_.base.function.op, worker.op);
     EXPECT_NE(worker.op->parent_block, nullptr);
+    const auto source_flags = loom_func_like_signature_flags(worker);
+    ASSERT_EQ(source_flags.data_length, 1u);
+    EXPECT_EQ(source_flags.data[0], LOOM_ARGUMENT_ACCESS_NONE);
     Verify();
   }
 

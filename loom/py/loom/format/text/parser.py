@@ -2413,8 +2413,8 @@ class Parser:
                 return name == attr_name
             case AlignedRefs(alignments=name):
                 return name == attr_name
-            case FuncArgs(start_attr=start_attr, end_attr=end_attr):
-                return start_attr == attr_name or end_attr == attr_name
+            case FuncArgs(start_attr=start_attr, end_attr=end_attr, access=access):
+                return attr_name in (start_attr, end_attr, access)
             case BlockArgs(start_attr=start_attr, end_attr=end_attr):
                 return start_attr == attr_name or end_attr == attr_name
             case (
@@ -2783,6 +2783,14 @@ class Parser:
                     tok._filename,
                 )
             result_ids.append(rid)
+
+        for interface in op_decl.interfaces:
+            if isinstance(interface, FuncLikeInterface) and interface.signature_flags:
+                flags = parsed.attributes.get(interface.signature_flags)
+                if flags is not None:
+                    parsed.attributes[interface.signature_flags] = flags + bytes(
+                        len(result_ids)
+                    )
 
         op = Operation(
             name=op_name,
@@ -3329,16 +3337,44 @@ class Parser:
                     if end_attr is not None:
                         parsed.attributes[end_attr] = len(parsed.region_arg_ids)
 
-                case FuncArgs(field=name, end_attr=end_attr):
+                case FuncArgs(field=name, end_attr=end_attr, access=access):
                     tok.expect(TokenKind.LPAREN)
                     arg_ids: list[int] = []
-                    if not tok.at(TokenKind.RPAREN):
+                    access_values: list[int] = []
+                    while not tok.at(TokenKind.RPAREN):
+                        if arg_ids:
+                            tok.expect(TokenKind.COMMA)
                         _, _, vid = self._parse_func_arg()
                         arg_ids.append(vid)
-                        while tok.try_consume(TokenKind.COMMA):
-                            _, _, vid = self._parse_func_arg()
-                            arg_ids.append(vid)
+                        value = 0
+                        if access is not None and tok.try_consume(TokenKind.LBRACE):
+                            _expect_keyword(tok, "access")
+                            tok.expect(TokenKind.EQUALS)
+                            descriptor = op_decl.attr(access)
+                            assert (
+                                descriptor is not None
+                                and descriptor.enum_def is not None
+                            )
+                            parsed_access = _parse_enum_attr_value_from_tokens(
+                                tok, descriptor
+                            )
+                            value = next(
+                                case.value
+                                for case in descriptor.enum_def.cases
+                                if case.keyword == parsed_access
+                            )
+                            tok.expect(TokenKind.RBRACE)
+                        access_values.append(value)
                     tok.expect(TokenKind.RPAREN)
+                    if access is not None:
+                        previous = parsed.attributes.get(access)
+                        if previous is not None or any(access_values):
+                            prefix = (
+                                list(previous)
+                                if isinstance(previous, bytes)
+                                else [0] * len(parsed.func_arg_ids)
+                            )
+                            parsed.attributes[access] = bytes(prefix + access_values)
                     parsed.func_arg_ids.extend(arg_ids)
                     field_desc = self._layout(op_decl).fields.get(name)
                     if field_desc is not None:
@@ -4501,6 +4537,20 @@ class Parser:
             if key in seen_keys:
                 raise ParseError(
                     f"duplicate attribute dict key '{key}'",
+                    key_tok.location,
+                    tok._filename,
+                )
+            if (
+                not field
+                and op_decl is not None
+                and any(
+                    isinstance(interface, FuncLikeInterface)
+                    and interface.signature_flags == key
+                    for interface in op_decl.interfaces
+                )
+            ):
+                raise ParseError(
+                    "signature flags use parameter access annotations",
                     key_tok.location,
                     tok._filename,
                 )

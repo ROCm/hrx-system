@@ -14,6 +14,7 @@
 
 #include "loom/ir/parameterized_attr.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ir/argument_access.h"
 #include "loom/ir/ir.h"
 #include "loom/ir/location.h"
 #include "loom/target/types.h"
@@ -439,13 +440,14 @@ LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_effect_contract, 4, loom_callable_effe
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_temperature, 5, loom_func_temperature_t)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_inline_policy, 6, loom_inline_policy_t)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_func_def_predicates, 7)
-LOOM_DEFINE_ATTR_PARAMETERIZED(loom_func_def_source_signature, 8)
-LOOM_DEFINE_ATTR_SYMBOL(loom_func_def_target, 9)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_abi, 10, loom_target_abi_kind_t)
-LOOM_DEFINE_ATTR_DICT(loom_func_def_abi_attrs, 11)
-LOOM_DEFINE_ATTR_STRING(loom_func_def_export_symbol, 12)
-LOOM_DEFINE_ATTR_DICT(loom_func_def_export_attrs, 13)
-LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_retain, 14, loom_func_retain_t)
+LOOM_DEFINE_ATTR_BYTES(loom_func_def_signature_flags, 8)
+LOOM_DEFINE_ATTR_PARAMETERIZED(loom_func_def_source_signature, 9)
+LOOM_DEFINE_ATTR_SYMBOL(loom_func_def_target, 10)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_abi, 11, loom_target_abi_kind_t)
+LOOM_DEFINE_ATTR_DICT(loom_func_def_abi_attrs, 12)
+LOOM_DEFINE_ATTR_STRING(loom_func_def_export_symbol, 13)
+LOOM_DEFINE_ATTR_DICT(loom_func_def_export_attrs, 14)
+LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_def_retain, 15, loom_func_retain_t)
 LOOM_DEFINE_REGION(loom_func_def_body, 0)
 enum loom_func_def_build_flag_bits_e {
   LOOM_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
@@ -460,7 +462,8 @@ enum loom_func_def_build_flag_bits_e {
   LOOM_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 9,
   LOOM_FUNC_DEF_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 10,
   LOOM_FUNC_DEF_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 11,
-  LOOM_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 12,
+  LOOM_FUNC_DEF_BUILD_FLAG_HAS_SIGNATURE_FLAGS = 1u << 12,
+  LOOM_FUNC_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 13,
 };
 typedef uint32_t loom_func_def_build_flags_t;
 iree_status_t loom_func_def_build(
@@ -482,6 +485,7 @@ iree_status_t loom_func_def_build(
     loom_symbol_ref_t callee,
     const loom_type_t* arg_types,
     iree_host_size_t arg_types_count,
+    loom_optional iree_const_byte_span_t signature_flags,
     const loom_type_t* result_types,
     iree_host_size_t result_count,
     const loom_tied_result_t* tied_results,
@@ -515,6 +519,7 @@ LOOM_DEFINE_ATTR_STRING(loom_func_decl_export_symbol, 12)
 LOOM_DEFINE_ATTR_DICT(loom_func_decl_export_attrs, 13)
 LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_func_decl_predicates, 14)
 LOOM_DEFINE_ATTR_ENUM_TYPED(loom_func_decl_retain, 15, loom_func_retain_t)
+LOOM_DEFINE_ATTR_BYTES(loom_func_decl_signature_flags, 16)
 enum loom_func_decl_build_flag_bits_e {
   LOOM_FUNC_DECL_BUILD_FLAG_HAS_VISIBILITY = 1u << 0,
   LOOM_FUNC_DECL_BUILD_FLAG_HAS_RETAIN = 1u << 1,
@@ -529,7 +534,8 @@ enum loom_func_decl_build_flag_bits_e {
   LOOM_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_SYMBOL = 1u << 10,
   LOOM_FUNC_DECL_BUILD_FLAG_HAS_ABI_ATTRS = 1u << 11,
   LOOM_FUNC_DECL_BUILD_FLAG_HAS_EXPORT_ATTRS = 1u << 12,
-  LOOM_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 13,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_SIGNATURE_FLAGS = 1u << 13,
+  LOOM_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES = 1u << 14,
 };
 typedef uint32_t loom_func_decl_build_flags_t;
 iree_status_t loom_func_decl_build(
@@ -552,6 +558,7 @@ iree_status_t loom_func_decl_build(
     loom_symbol_ref_t callee,
     const loom_type_t* arg_types,
     iree_host_size_t arg_types_count,
+    loom_optional iree_const_byte_span_t signature_flags,
     const loom_type_t* result_types,
     iree_host_size_t result_count,
     const loom_tied_result_t* tied_results,

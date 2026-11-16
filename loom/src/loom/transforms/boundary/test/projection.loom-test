@@ -1006,3 +1006,49 @@ kernel.def target(@carrier_target) @private_observation_predicate() {
   test.use %terminal, %last : index, i1
   kernel.return
 }
+
+// ====
+// RUN: pass specialize-target-callgraph,project-boundary-representations
+
+// Expanding a view preserves access on its buffer root. Offsets are values,
+// and the adjacent unprojected buffer keeps its independent bound.
+test.target<low_core> @carrier_target
+
+func.def public target(@carrier_target) @copy_with_access(%source: view<2xi32> {access = read}, %shape: buffer {access = none}, %target: view<2xi32> {access = write}) -> (i32) {
+  %value = view.load %source[1] : view<2xi32> -> i32
+  view.store %value, %target[0] : i32, view<2xi32>
+  func.return %value : i32
+}
+
+// ----
+test.target<low_core> @carrier_target
+
+func.def public target(@carrier_target) @copy_with_access(%source_root: buffer {access = read}, %source_offset: offset, %shape: buffer {access = none}, %target_root: buffer {access = write}, %target_offset: offset) -> (i32) {
+  %source = buffer.view %source_root[%source_offset] : buffer -> view<2xi32>
+  %target = buffer.view %target_root[%target_offset] : buffer -> view<2xi32>
+  %value = view.load %source[1] : view<2xi32> -> i32
+  view.store %value, %target[0] : i32, view<2xi32>
+  func.return %value : i32
+}
+
+// ====
+// RUN: pass specialize-target-callgraph,project-boundary-representations
+
+// Projecting an independent returned view grows the result tail without
+// changing the input's call-scoped access promise.
+test.target<low_core> @carrier_target
+
+func.def public target(@carrier_target) @read_and_forward(%source: view<2xi32> {access = read}, %forward: view<2xi32>) -> (i32, view<2xi32>) {
+  %value = view.load %source[0] : view<2xi32> -> i32
+  func.return %value, %forward : i32, view<2xi32>
+}
+
+// ----
+test.target<low_core> @carrier_target
+
+func.def public target(@carrier_target) @read_and_forward(%source_root: buffer {access = read}, %source_offset: offset, %forward_root: buffer, %forward_offset: offset) -> (i32, buffer, offset) {
+  %source = buffer.view %source_root[%source_offset] : buffer -> view<2xi32>
+  %forward = buffer.view %forward_root[%forward_offset] : buffer -> view<2xi32>
+  %value = view.load %source[0] : view<2xi32> -> i32
+  func.return %value, %forward_root, %forward_offset : i32, buffer, offset
+}

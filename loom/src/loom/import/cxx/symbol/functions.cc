@@ -1898,9 +1898,10 @@ void Functions::build_declarations(Types& types, Locations& locations,
         /*effect_contract=*/0, temperature, inline_policy, target,
         source_signature, /*abi=*/0, {}, LOOM_STRING_ID_INVALID, {},
         callees_.at({symbol->canonical(), ImplicitObjectABI::None}),
-        arguments.data(), arguments.size(), results.data(), results.size(),
-        nullptr, 0, predicates.data(), predicates.size(), locations.get(source),
-        &op));
+        arguments.data(), arguments.size(),
+        /*signature_flags=*/iree_const_byte_span_empty(), results.data(),
+        results.size(), nullptr, 0, predicates.data(), predicates.size(),
+        locations.get(source), &op));
   }
 }
 
@@ -2219,8 +2220,9 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
                                            requirements.size()),
         template_definition->priority.value_or(0),
         callees_.at({symbol->canonical(), instance.receiver_abi}),
-        arguments.data(), arguments.size(), results.data(), results.size(),
-        nullptr, 0, predicates.data(), predicates.size(),
+        arguments.data(), arguments.size(),
+        /*signature_flags=*/iree_const_byte_span_empty(), results.data(),
+        results.size(), nullptr, 0, predicates.data(), predicates.size(),
         locations.get(definition), &op));
   } else {
     launches_.reject_ordinary_function(symbol);
@@ -2260,8 +2262,9 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
         /*effect_contract=*/0, temperature, inline_policy, target,
         source_signature, 0, {}, 0, {},
         callees_.at({symbol->canonical(), instance.receiver_abi}),
-        arguments.data(), arguments.size(), results.data(), results.size(),
-        nullptr, 0, predicates.data(), predicates.size(),
+        arguments.data(), arguments.size(),
+        /*signature_flags=*/iree_const_byte_span_empty(), results.data(),
+        results.size(), nullptr, 0, predicates.data(), predicates.size(),
         locations.get(definition), &op));
   }
   auto* region = check_case            ? loom_check_case_body(op)

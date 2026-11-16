@@ -13,6 +13,7 @@ loom_check_test_suite(
         "conditioned_predicates.loom-test",
         "conditioned_providers.loom-test",
         "conditioned_value_facts.loom-test",
+        "storage_argument_access.loom-test",
         "storage_calls.loom-test",
         "storage_cfg_instances.loom-test",
         "storage_globals.loom-test",

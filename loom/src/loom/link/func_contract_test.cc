@@ -10,6 +10,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/format/text/parser.h"
+#include "loom/ir/argument_access.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/link/testdata/func_contract/func_contract_testdata.h"
@@ -218,6 +219,51 @@ TEST_F(LinkFuncContractTest, MergesPipelineScopeAndPreservesStagedSignature) {
   EXPECT_EQ(staged.kind, LOOM_LINK_FUNC_CONTRACT_MISMATCH_FIELD);
   EXPECT_TRUE(iree_string_view_equal(staged.field_name,
                                      IREE_SV("specialization_count")));
+}
+
+TEST_F(LinkFuncContractTest, ArgumentAccessIsDirectional) {
+  for (const char* selected : {"access_read", "access_none"}) {
+    const auto mismatch =
+        Check(IREE_SV("access_source"), iree_make_cstring_view(selected));
+    EXPECT_EQ(mismatch.kind, LOOM_LINK_FUNC_CONTRACT_MISMATCH_NONE);
+  }
+  for (const char* selected : {"access_write", "access_read_write"}) {
+    const auto mismatch =
+        Check(IREE_SV("access_source"), iree_make_cstring_view(selected));
+    EXPECT_EQ(mismatch.kind, LOOM_LINK_FUNC_CONTRACT_MISMATCH_FIELD);
+    EXPECT_TRUE(iree_string_view_equal(mismatch.field_name,
+                                       IREE_SV("signature_flags")));
+  }
+  const auto weaker =
+      Check(IREE_SV("access_read_write"), IREE_SV("access_read"));
+  EXPECT_EQ(weaker.kind, LOOM_LINK_FUNC_CONTRACT_MISMATCH_NONE);
+}
+
+TEST_F(LinkFuncContractTest, MergePreservesIndependentParameterBounds) {
+  auto source = loom_link_func_contract_from_op(
+      module_, FindOp(IREE_SV("access_source")));
+  auto selected = loom_link_func_contract_from_op(
+      module_, FindOp(IREE_SV("access_selected")));
+  const auto checked =
+      Check(IREE_SV("access_source"), IREE_SV("access_selected"));
+  EXPECT_EQ(checked.kind, LOOM_LINK_FUNC_CONTRACT_MISMATCH_NONE);
+  const auto before = loom_attr_as_bytes(
+      selected.attributes[selected.function->signature_flags_attr_index]);
+  EXPECT_EQ(before.data[0], 0);
+  loom_ir_remap_t remap = {};
+  IREE_ASSERT_OK(loom_ir_remap_initialize(module_, module_, &scratch_arena_,
+                                          nullptr, &remap));
+  loom_link_func_contract_mismatch_t mismatch = {};
+  IREE_ASSERT_OK(
+      loom_link_func_contract_merge(&source, &selected, &remap, 0, &mismatch));
+  EXPECT_EQ(mismatch.kind, LOOM_LINK_FUNC_CONTRACT_MISMATCH_NONE);
+  const auto after = loom_attr_as_bytes(
+      selected.attributes[selected.function->signature_flags_attr_index]);
+  ASSERT_EQ(after.data_length, 2u);
+  EXPECT_EQ(after.data[0], LOOM_ARGUMENT_ACCESS_READ);
+  EXPECT_EQ(after.data[1], LOOM_ARGUMENT_ACCESS_WRITE);
+  EXPECT_EQ(before.data[0],
+            0);  // Merge does not mutate shared source arrays.
 }
 
 TEST_F(LinkFuncContractTest, ReportsArgumentCountMismatch) {

@@ -165,8 +165,8 @@ class PipelineControlTest : public ::testing::Test {
         builder, 0, 0, 0, 0, 0, 0, 0, 0, loom_symbol_ref_null(),
         loom_attr_absent(), 0, loom_named_attr_slice_empty(),
         LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol, types,
-        count, nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN,
-        &function));
+        count, /*signature_flags=*/iree_const_byte_span_empty(), nullptr, 0,
+        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function));
     loom_builder_enter_region(builder, function, loom_func_def_body(function));
     loom_op_t* op;
     IREE_CHECK_OK(loom_func_return_build(builder, nullptr, 0,

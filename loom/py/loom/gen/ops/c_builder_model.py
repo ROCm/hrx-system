@@ -697,6 +697,7 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                     group=group,
                     start_attr=start_attr,
                     end_attr=end_attr,
+                    access=access,
                 ):
                     field_desc = layout.fields.get(name)
                     operand_field = bool(field_desc is not None and field_desc.kind == FieldKind.OPERAND)
@@ -722,6 +723,9 @@ def extract_c_params(op: Op, shared_enums: SharedEnumMap) -> list[dict[str, Any]
                         covered_attrs.add(start_attr)
                     if end_attr is not None:
                         covered_attrs.add(end_attr)
+
+                    if access is not None and access not in covered_attrs:
+                        append_attr_param(access)
 
                 case PredicateList(field=name):
                     attr_def = op.attr(name)

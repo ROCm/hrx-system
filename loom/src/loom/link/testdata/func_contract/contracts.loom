@@ -36,3 +36,15 @@ pipeline.def @pipeline_selected(%width: index) run(%input: view<[%width]xi8>) {
 }
 
 pipeline.decl<kernel> @pipeline_stage_mismatch() run(%width: index, %input: view<[%width]xi8>)
+
+func.decl @access_source(%input: buffer {access = read}, %output: buffer)
+
+func.decl @access_selected(%input: buffer, %output: buffer {access = write})
+
+func.decl @access_read(%input: buffer {access = read}, %output: buffer)
+
+func.decl @access_none(%input: buffer {access = none}, %output: buffer)
+
+func.decl @access_write(%input: buffer {access = write}, %output: buffer)
+
+func.decl @access_read_write(%input: buffer {access = read_write}, %output: buffer)

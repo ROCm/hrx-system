@@ -86,7 +86,8 @@ class TemplatePrinterTest : public ::testing::Test {
         &builder_, build_flags, family, /*visibility=*/0, /*retain=*/0,
         /*cc=*/0, /*effect_contract=*/0, /*temperature=*/0, target,
         loom_parameterized_attr_array_empty(), priority, implementation, &f32,
-        1, &f32, 1, NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
+        1, /*signature_flags=*/iree_const_byte_span_empty(), &f32, 1, NULL, 0,
+        NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
     return op;
   }
 

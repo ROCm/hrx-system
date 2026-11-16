@@ -72,7 +72,8 @@ class ResolveLaunchesTest : public ::testing::Test {
         /*temperature=*/0, /*inline_policy=*/0, loom_symbol_ref_null(),
         /*source_signature=*/loom_attr_absent(), /*abi=*/0,
         loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
-        loom_named_attr_slice_empty(), symbol, &workload_type, 1, result_types,
+        loom_named_attr_slice_empty(), symbol, &workload_type, 1,
+        /*signature_flags=*/iree_const_byte_span_empty(), result_types,
         IREE_ARRAYSIZE(result_types), /*tied_results=*/nullptr,
         /*tied_result_count=*/0, /*predicates=*/nullptr,
         /*predicates_count=*/0, LOOM_LOCATION_UNKNOWN, &function));

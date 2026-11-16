@@ -16,6 +16,7 @@ loom_cc_library(
     name = "verify",
     srcs = [
         "verify.c",
+        "verify_argument_access.c",
         "verify_constraints.c",
         "verify_consumption.c",
         "verify_diagnostics.c",
@@ -26,6 +27,7 @@ loom_cc_library(
     ],
     hdrs = [
         "verify.h",
+        "verify_argument_access.h",
         "verify_constraints.h",
         "verify_consumption.h",
         "verify_diagnostics.h",
@@ -36,6 +38,7 @@ loom_cc_library(
     ],
     deps = [
         "//loom/src/loom/analysis:ownership",
+        "//loom/src/loom/analysis:storage_access",
         "//loom/src/loom/analysis:value_relation",
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:emitter",
@@ -123,6 +126,24 @@ loom_cc_test(
         "//loom/src/loom/testing:diagnostic_matchers",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "verify_argument_access_test",
+    srcs = ["verify_argument_access_test.cc"],
+    deps = [
+        ":verify",
+        "//loom/src/loom/format/bytecode:reader",
+        "//loom/src/loom/format/bytecode:writer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_registry",
+        "//loom/src/loom/ops/func:builders",
+        "//loom/src/loom/testing:diagnostic_matchers",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
