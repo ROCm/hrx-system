@@ -68,6 +68,7 @@ permissions:
 jobs:
   bazel_linux:
     name: Bazel / ${{ matrix.platform || 'Linux x86-64' }} / ${{ matrix.name }}
+    if: github.event_name != 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -561,8 +562,130 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  diagnose_gfx120x:
+    name: Capture Linux gfx120x native syscalls
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: linux-gfx120X-gpu-rocm
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: >-
+        --ipc host --group-add video --device /dev/kfd --device /dev/dri --cap-add SYSLOG
+        --group-add 993 --group-add 992 --group-add 110
+        --ulimit memlock=-1:-1 --security-opt seccomp=unconfined
+        --env-file /etc/podinfo/gha-gpu-isolation-settings --user 0:0
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Adjust git config
+        run: |
+          mkdir -p "$HOME"
+          git config --global --add safe.directory "$PWD"
+
+      - name: Configure build environment
+        run: |
+          output_dir="${GITHUB_WORKSPACE}/build/iree-bazel-gpu"
+          {
+            echo "AR=${output_dir}/rocm-root/lib/llvm/bin/llvm-ar"
+            echo "CC=${output_dir}/rocm-root/lib/llvm/bin/clang"
+            echo "CXX=${output_dir}/rocm-root/lib/llvm/bin/clang++"
+            echo "HRX_ARTIFACT_SET=core"
+            echo "HRX_DOWNLOAD_CACHE_DIR=${output_dir}/downloads"
+            echo "HRX_OUTPUT_DIR=${output_dir}"
+            echo "HRX_PYTHON=${output_dir}/python/bin/python3"
+            echo "HRX_RELEASE_TYPE=nightly"
+            echo "HRX_ROCM_ROOT=${output_dir}/rocm-root"
+            echo "PIP_CACHE_DIR=${output_dir}/caches/pip"
+          } >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Fetch ROCm toolchain
+        run: bash .github/scripts/fetch_rocm_toolchain.sh
+
+      - name: Install Bazel host tools and syscall tracer
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends strace
+          python3 dev.py bazel setup --venv
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Check tool and hardware environment
+        timeout-minutes: 1
+        run: |
+          bazel --version
+          strace --version
+          bash .github/scripts/check_host_toolchain.sh --expect-rocm
+          bash .github/scripts/check_rocm_device_toolchain.sh
+          test -d "${HRX_ROCM_ROOT}/include"
+          bash .github/scripts/check_rocm_environment.sh \
+            --export-libamdf-gpu-selection \
+            --amdgpu-target gfx120X-all
+
+      - name: Capture the native test's syscalls
+        id: gfx120x_diagnostic
+        run: |
+          python3 - <<'PYTHON'
+          import os
+          from dataclasses import replace
+          from pathlib import Path
+          from build_tools.devtools import ci
+
+          results = Path(os.environ["RUNNER_TEMP"]) / (
+              "native-test-results-" + os.environ["GITHUB_RUN_ID"]
+              + "-" + os.environ["GITHUB_RUN_ATTEMPT"]
+          )
+          arguments = ci.parse_arguments([
+              "iree-bazel-amdgpu", "--amdgpu-target", "gfx120X-all",
+              "--target", "//loom/target/amdgpu/test/corpus:"
+              "numeric_vector_packed_selection_test_execute_amd_gpu_hardware_test",
+              "--bazel-test-results-dir", str(results),
+          ])
+          steps = ci.steps_from_args(arguments)
+          assert len(steps) == 2 and steps[1].argv[1:4] == (
+              "dev.py", "bazel", "test"
+          )
+          test = steps[1]
+          steps[1] = replace(test, argv=test.argv[:4] + (
+              "--nocache_test_results", "--test_output=all",
+              "--run_under=/usr/bin/strace -f -ttt -T -yy "
+              "-e trace=ioctl,futex /bin/bash",
+          ) + test.argv[4:])
+          ci.bazel_test_results.prepare_output_directory(results)
+          raise SystemExit(ci.run_steps(
+              steps, dry_run=False, keep_going=False, verbose=True
+          ))
+          PYTHON
+
+      - name: Capture accelerator kernel errors
+        if: ${{ always() && (steps.gfx120x_diagnostic.outcome == 'failure' || steps.gfx120x_diagnostic.outcome == 'cancelled') }}
+        run: |
+          date -u
+          uname -a
+          timeout --kill-after=5s 15s dmesg --ctime --level=err,warn 2>&1 | tail -n 200
+
+      - name: Upload diagnostic test result
+        if: ${{ always() && steps.gfx120x_diagnostic.outcome != 'skipped' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gfx120x-first-stall-diagnostic-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-test-results-${{ github.run_id }}-${{ github.run_attempt }}/**/bazel-testlogs/**
+          if-no-files-found: warn
+          retention-days: 7
+
   sdk:
     name: SDK
+    if: github.event_name != 'workflow_dispatch'
     uses: $/.github/workflows/build_loom_sdk.yml
     with:
       profile: Release
@@ -589,6 +712,7 @@ jobs:
 
   bazel_windows:
     name: Bazel / Windows x86-64 / ${{ matrix.name }}
+    if: github.event_name != 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -985,7 +1109,7 @@ jobs:
 
   cmake_linux:
     name: CMake / Linux x86-64 / Clang / RelWithDebInfo
-    if: github.event_name != 'push'
+    if: github.event_name != 'push' && github.event_name != 'workflow_dispatch'
     concurrency:
       group: iree-cmake-linux-repository-build-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
@@ -1060,7 +1184,7 @@ jobs:
 
   cmake_windows_cross:
     name: CMake / Windows x86-64 (via Linux) / Clang CL / RelWithDebInfo
-    if: github.event_name != 'push'
+    if: github.event_name != 'push' && github.event_name != 'workflow_dispatch'
     concurrency:
       group: iree-cmake-windows-cross-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
