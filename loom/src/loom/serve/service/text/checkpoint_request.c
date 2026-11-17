@@ -120,8 +120,8 @@ iree_status_t loom_serve_text_checkpoint_request_submit(
     }
     if (source.cached) {
       loom_serve_text_checkpoint_entry_retain(source.cached, checkpoint);
-      loom_serve_text_checkpoint_entry_publish(checkpoint,
-                                               control->request.name);
+      loom_serve_text_checkpoint_registry_publish(registry, checkpoint,
+                                                  control->request.name);
       return loom_serve_text_checkpoint_reply(
           control, telemetry, scratch, checkpoint->position,
           loom_serve_text_checkpoint_suspended_bytes(checkpoint->state));
@@ -167,19 +167,21 @@ iree_status_t loom_serve_text_checkpoint_request_submit(
     control->checkpoint = checkpoint;
     return iree_ok_status();
   }
-  loom_serve_text_checkpoint_entry_release(checkpoint);
+  loom_serve_text_checkpoint_registry_release(registry, checkpoint);
   *trim_pending = true;
   return loom_serve_text_checkpoint_reply(control, telemetry, scratch, position,
                                           0);
 }
 
 iree_status_t loom_serve_text_checkpoint_request_complete(
-    loom_serve_text_checkpoint_operation_t* control, bool stopping,
+    loom_serve_text_checkpoint_operation_t* control,
+    loom_serve_text_checkpoint_registry_t* registry, bool stopping,
     loom_serve_text_telemetry_t* telemetry, iree_string_builder_t* scratch,
     bool* trim_pending) {
   loom_serve_text_checkpoint_entry_t* checkpoint = control->checkpoint;
   if (control->request.action == LOOM_SERVE_TEXT_CHECKPOINT_ACTION_PIN) {
-    loom_serve_text_checkpoint_entry_publish(checkpoint, control->request.name);
+    loom_serve_text_checkpoint_registry_publish(registry, checkpoint,
+                                                control->request.name);
   } else {
     loom_serve_text_checkpoint_complete_suspend(checkpoint->state);
     *trim_pending = true;

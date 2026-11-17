@@ -479,6 +479,19 @@ TEST_F(RegisteredSourceTextServiceTest,
   EXPECT_EQ(
       Read(Send("", "", "/v1/checkpoints/one", "DELETE")).find("HTTP/1.1 200"),
       0u);
+  // Reuse the freed registry slot with long and short names while the other
+  // explicit alias and automatic session still retain the original endpoint.
+  for (const auto& name : {std::string(64, 'p'), std::string("one")}) {
+    const std::string path = "/v1/checkpoints/" + name;
+    const auto pinned =
+        Read(Send("", "X-Loom-Session: conversation0\r\n", path));
+    ASSERT_EQ(pinned.find("HTTP/1.1 201"), 0u) << pinned;
+    EXPECT_EQ(Read(Send("", "X-Loom-Session: conversation0\r\n", path))
+                  .find("HTTP/1.1 409"),
+              0u);
+    EXPECT_EQ(Read(Send("", "", path, "DELETE")).find("HTTP/1.1 200"), 0u);
+    EXPECT_EQ(Read(Send("", "", path, "DELETE")).find("HTTP/1.1 404"), 0u);
+  }
   for (size_t i = 0; i < 6; ++i) {
     const auto response =
         Read(Send(Request(Message("user", prompts[i]) + "," +
