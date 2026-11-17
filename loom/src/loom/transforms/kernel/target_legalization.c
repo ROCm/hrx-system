@@ -20,6 +20,7 @@
 #include "loom/ops/vector/combining.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/transforms/kernel/subgroup_match_legalization.h"
 #include "loom/transforms/kernel/workgroup_collective_legalization.h"
 #include "loom/transforms/vector/packet_plan.h"
 
@@ -1535,6 +1536,17 @@ iree_status_t loom_kernel_target_legalize_subgroup_scan(
 }
 
 static const loom_target_legalizer_rule_t kKernelLegalizerRules[] = {
+    {
+        .root_kind = LOOM_OP_KERNEL_SUBGROUP_MATCH_ANY,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_I32,
+        .match = loom_kernel_subgroup_match_any_is_supported,
+        .legalize = loom_kernel_target_legalize_subgroup_match_any,
+    },
+    {
+        .root_kind = LOOM_OP_KERNEL_SUBGROUP_MATCH_ALL,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_I32,
+        .legalize = loom_kernel_target_legalize_subgroup_match_all,
+    },
     {
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
         .root_kind = LOOM_OP_KERNEL_SUBGROUP_REDUCE,

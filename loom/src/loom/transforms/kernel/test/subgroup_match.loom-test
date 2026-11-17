@@ -1,0 +1,124 @@
+// RUN: pass target-legalize{mode=eager,policy=reference-only},canonicalize,cse,dce
+
+// A small physical subgroup keeps the entire broadcast/ballot composition
+// visible. Each source lane is guarded by the common active mask before the
+// broadcast, so every participating invocation takes the same branch.
+test.target<low_core> @target {subgroup_size = 2}
+
+kernel.def target(@target) @equal_lanes() {
+  %unit = index.constant 1 : index
+  %items = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%value: i32) {
+  %mask = kernel.subgroup.match.any %value : i32 -> i32
+  test.use %mask : i32
+  kernel.return
+}
+
+// ----
+test.target<low_core> @target {subgroup_size = 2}
+
+kernel.def target(@target) @equal_lanes() {
+  %unit = index.constant 1 : index
+  %items = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%value: i32) {
+  %4 = kernel.subgroup.lane.id : index
+  %5 = index.cast %4 : index to i32
+  %6 = kernel.subgroup.active.mask : i32
+  %7 = scalar.constant 0 : i32
+  %9 = scalar.cmpi eq, %5, %7 : i32
+  %10 = scalar.constant 1 : i32
+  %11 = scalar.andi %6, %10 : i32
+  %12 = scalar.cmpi ne, %11, %7 : i32
+  %13 = scf.if %12 -> (i32) {
+    %14 = kernel.subgroup.broadcast %value from %7 : i32, i32
+    %15 = scalar.cmpi eq, %value, %14 : i32
+    %16 = kernel.subgroup.vote.ballot %15 : i1 -> i32
+    %17 = scf.select %9, %16, %7 : i32
+    scf.yield %17 : i32
+  } else {
+    scf.yield %7 : i32
+  }
+  %19 = scalar.cmpi eq, %5, %10 : i32
+  %20 = scalar.constant 2 : i32
+  %21 = scalar.andi %6, %20 : i32
+  %22 = scalar.cmpi ne, %21, %7 : i32
+  %mask = scf.if %22 -> (i32) {
+    %24 = kernel.subgroup.broadcast %value from %10 : i32, i32
+    %25 = scalar.cmpi eq, %value, %24 : i32
+    %26 = kernel.subgroup.vote.ballot %25 : i1 -> i32
+    %27 = scf.select %19, %26, %13 : i32
+    scf.yield %27 : i32
+  } else {
+    scf.yield %13 : i32
+  }
+  test.use %mask : i32
+  kernel.return
+}
+
+// ====
+
+// Match-all does not enumerate lanes and preserves both results. The native
+// active-mask contract supplies the physical-width and capability requirements.
+test.target<low_core> @target
+
+kernel.def target(@target) @all_equal() {
+  %unit = index.constant 1 : index
+  %items = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%value: i32) {
+  %mask, %all = kernel.subgroup.match.all %value : i32 -> i64, i1
+  test.use %mask, %all : i64, i1
+  kernel.return
+}
+
+// ----
+test.target<low_core> @target
+
+kernel.def target(@target) @all_equal() {
+  %unit = index.constant 1 : index
+  %items = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%value: i32) {
+  %5 = kernel.subgroup.broadcast.first %value : i32
+  %6 = scalar.cmpi eq, %value, %5 : i32
+  %all = kernel.subgroup.vote.all %6 : i1
+  %8 = kernel.subgroup.active.mask : i64
+  %9 = scalar.constant 0 : i64
+  %mask = scf.select %all, %8, %9 : i64
+  test.use %mask, %all : i64, i1
+  kernel.return
+}
+
+// ====
+
+// A too-small mask cannot select a partially enumerated match-any expansion.
+test.target<low_core> @target {subgroup_size = 64}
+
+kernel.def target(@target) @mask_too_small() {
+  %unit = index.constant 1 : index
+  %items = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%value: i32) {
+  %mask = kernel.subgroup.match.any %value : i32 -> i32
+  test.use %mask : i32
+  kernel.return
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager,policy=require-native}
+
+// Explicit native selection preserves both ops for target diagnostics.
+test.target<low_core> @target {subgroup_size = 2}
+
+kernel.def target(@target) @native_required() {
+  %unit = index.constant 1 : index
+  %items = index.constant 2 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%items, %unit, %unit) : index
+} launch(%value: i32) {
+  %any_mask = kernel.subgroup.match.any %value : i32 -> i64
+  %all_mask, %all = kernel.subgroup.match.all %value : i32 -> i64, i1
+  test.use %any_mask, %all_mask, %all : i64, i64, i1
+  kernel.return
+}

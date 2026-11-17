@@ -24,6 +24,21 @@ rewrite utilities without owning those utilities' portable fallback
 registration. A callback whose only action is to invoke a portable recipe is
 evidence that the shared registration is missing a case.
 
+The existing families illustrate the boundary:
+
+| Decision | Owner |
+| --- | --- |
+| Decode FP8 into BF16 using integer operations | Shared scalar reference provider |
+| Stage F16/FP8-to-I64 through exact F32 and I32/U32 | Shared conversion reference provider |
+| Compose subgroup matching from broadcasts, comparisons, votes, and masks | Shared kernel reference provider |
+| Select a physical vector packet or an available native collective | Target capability and representation policy |
+| Admit an exact floating recipe under a target's floating-control guarantees | Target math/legality policy |
+
+The subgroup recipes consume the existing indexed subgroup-size snapshot;
+they neither query a target by name nor discover target facts by walking IR.
+The common provider owns their registration and payload eligibility. Leaf
+broadcast, vote, and mask contracts retain their capability diagnostics.
+
 ## Scope and selection policy
 
 Scope describes applicability. A provider names a target family, an exact Low
