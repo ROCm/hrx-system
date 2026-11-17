@@ -14,6 +14,7 @@
 #include "loom/runtime/testing/application.h"
 #include "loom/serve/service/text/checkpoint_control.h"
 #include "loom/serve/service/text/input_count.h"
+#include "loom/serve/service/text/registration.h"
 #include "loom/serve/service/text/service.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/stream.h"
@@ -134,23 +135,31 @@ class NativeTextExecutionTest : public ::testing::Test {
         .row_count = 4,
         .checkpoint_capacity = 2,
     };
-    loom_serve_text_load_t* load = nullptr;
-    IREE_ASSERT_OK(loom_serve_text_load_allocate(
+    const loom_serve_text_registration_options_t service_options = {
+        .name = IREE_SV("fixture-text"),
+        .chunk_size = 3,
+        .default_max_tokens = 16,
+        .pending_capacity = 2,
+        .continuation_epochs = 1,
+    };
+    IREE_ASSERT_OK(loom_serve_text_registration_allocate(
         loom_runtime_test_application_device_at(application, 0),
-        loom_runtime_device_group_pool_at(group_, 0), &model_options, Wake,
-        this, iree_allocator_system(), &load));
+        loom_runtime_device_group_pool_at(group_, 0), &model_options, nullptr,
+        &service_options, {Wake, this}, iree_allocator_system(),
+        &registration_));
     bool complete = false;
     iree_status_t status = iree_ok_status();
+    loom_runtime_compilation_report_t report = {};
     while (!complete) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       status =
           iree_status_join(status, loom_runtime_device_group_advance(group_));
       status = iree_status_join(
           status,
-          loom_serve_text_load_advance(
-              load,
+          loom_serve_text_registration_prepare(
+              registration_,
               iree_status_is_ok(status) ? 0 : LOOM_SERVE_TEXT_LOAD_FLAG_CANCEL,
-              &complete));
+              &complete, &service_, &report));
       if (complete) {
         iree_notification_cancel_wait(&notification_);
       } else {
@@ -159,20 +168,7 @@ class NativeTextExecutionTest : public ::testing::Test {
                                       IREE_TIME_INFINITE_FUTURE);
       }
     }
-    model_ = loom_serve_text_load_take_model(load);
-    loom_serve_text_load_free(load);
     IREE_ASSERT_OK(status);
-
-    const loom_serve_text_service_options_t service_options = {
-        .name = IREE_SV("fixture-text"),
-        .row_count = 4,
-        .chunk_size = 3,
-        .default_max_tokens = 16,
-        .pending_capacity = 2,
-        .continuation_epochs = 1,
-    };
-    IREE_ASSERT_OK(loom_serve_text_service_allocate(
-        model_, &service_options, nullptr, iree_allocator_system(), &service_));
     runtime_ = loom_serve_text_service_interface(service_).runtime;
     loom_runtime_driver_initialize(1, &runtime_, &driver_);
     loom_runtime_driver_set_observer(&driver_, {Wake, this});
@@ -223,17 +219,17 @@ class NativeTextExecutionTest : public ::testing::Test {
       ASSERT_NO_FATAL_FAILURE(DriveUntil(
           [&] { return !runtime_.vtable->is_pending(runtime_.self); }));
       loom_runtime_driver_set_observer(&driver_, {});
-      loom_serve_text_service_free(std::exchange(service_, nullptr),
-                                   iree_status_code(driver_.status));
+      service_ = nullptr;
       driver_.services = nullptr;
       driver_.capacity = 0;
     }
-    if (model_) {
-      loom_serve_text_model_retire(model_, Wake, this);
+    if (registration_) {
       while (true) {
         const auto ticket = iree_notification_prepare_wait(&notification_);
         auto status = loom_runtime_device_group_advance(group_);
-        const bool complete = loom_serve_text_model_is_retired(model_);
+        bool complete = false;
+        status = iree_status_join(status, loom_serve_text_registration_retire(
+                                              registration_, &complete));
         if (complete || !iree_status_is_ok(status)) {
           iree_notification_cancel_wait(&notification_);
         } else {
@@ -246,8 +242,7 @@ class NativeTextExecutionTest : public ::testing::Test {
           break;
         }
       }
-      IREE_ASSERT_OK(loom_serve_text_model_free_retired(model_));
-      model_ = nullptr;
+      loom_serve_text_registration_free(std::exchange(registration_, nullptr));
     }
   }
 
@@ -305,9 +300,10 @@ class NativeTextExecutionTest : public ::testing::Test {
   iree_notification_t notification_;
   // Process-owned resources shared with other service instances.
   loom_runtime_device_group_t* group_ = nullptr;
-  // Owned model, retained through service and native queue retirement.
-  loom_serve_text_model_t* model_ = nullptr;
-  // Owned admission/session state, borrowing the model.
+  // Owned preparation, ready service, optional image, and final model
+  // retirement.
+  loom_serve_text_registration_t* registration_ = nullptr;
+  // Borrowed admission/session state, alive until registration retirement.
   loom_serve_text_service_t* service_ = nullptr;
   // Stable borrowed service slot, detached after final driver collection.
   loom_runtime_service_t runtime_ = {};
@@ -390,9 +386,10 @@ TEST_F(NativeTextExecutionTest, StalledPeerAndDetachedResults) {
   }));
   IREE_ASSERT_OK(loom_serve_text_input_count_call_status(count.get()));
   EXPECT_EQ(loom_serve_text_input_count_call_result(count.get()), 4u);
-  const auto parameters = loom_serve_text_model_parameter_activity(model_);
-  EXPECT_EQ(parameters.activations, 0u);
-  EXPECT_EQ(parameters.read_bytes, 0u);
+  const auto parameters =
+      loom_serve_text_registration_parameters(registration_);
+  EXPECT_EQ(parameters.activity.activations, 0u);
+  EXPECT_EQ(parameters.activity.read_bytes, 0u);
 
   NativeStream held(nullptr, loom_serve_text_stream_close);
   ASSERT_NO_FATAL_FAILURE(Open("held", &held));

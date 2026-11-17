@@ -401,6 +401,7 @@ loom_cc_library(
     deps = [
         ":checkpoint_control",
         ":input_count",
+        ":registration",
         ":service",
         ":source_service_fixture",
         ":stream",
@@ -1403,6 +1404,24 @@ loom_cc_library(
         "//loom/src/loom/serve/transport/http:request",
         "//loom/src/loom/serve/transport/http:server",
         "//loom/src/loom/service:kind",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "registration",
+    srcs = ["registration.c"],
+    hdrs = ["registration.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":model",
+        ":service",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/parameter:activation",
+        "//loom/src/loom/runtime/parameter:residency",
+        "//loom/src/loom/service/finite:component",
+        "//loom/src/loom/service/finite:model",
         "//runtime/src/iree/base",
     ],
 )
