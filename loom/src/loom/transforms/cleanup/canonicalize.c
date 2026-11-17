@@ -175,6 +175,17 @@ static iree_status_t loom_canonicalizer_run_pass(
         result.type_propagation_rejection_cache_hits;
   }
   loom_canonicalizer_deinitialize(&canonicalizer);
+  if (context.target_facts &&
+      !(context.flags & LOOM_CLEANUP_CONTEXT_PERSISTENT_TARGET_FACTS)) {
+    // An unrefined source invocation can own the target facts itself. No
+    // workspace may outlive those inputs, even when the pass changed no IR.
+    loom_pass_value_fact_owner_invalidate(pass->value_facts);
+  }
+  if (iree_status_is_ok(status)) {
+    // The driver publishes pending facts before detaching its scratch state.
+    // Post-run edits above explicitly invalidate the workspace when necessary.
+    pass->preserved_analyses |= LOOM_PASS_ANALYSIS_VALUE_FACTS;
+  }
   return status;
 }
 

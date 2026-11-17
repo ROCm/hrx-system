@@ -162,12 +162,6 @@ iree_status_t loom_pass_descriptor_validate_options(
   }
   iree_string_view_t trimmed_options = iree_string_view_trim(options);
   bool has_options = !iree_string_view_is_empty(trimmed_options);
-  if (has_options && !descriptor->create) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "pass '%.*s' does not accept options, got '{%.*s}'",
-                            (int)descriptor->key.size, descriptor->key.data,
-                            (int)options.size, options.data);
-  }
   if (descriptor->option_schema_count == 0) {
     if (!has_options) {
       return iree_ok_status();

@@ -16,6 +16,10 @@ static iree_status_t loom_codegen_resolve_cleanup_canonicalizer_context(
       pass, module, function, &target_resolved, &out_context->target_facts));
   if (!target_resolved) {
     out_context->target_facts = NULL;
+  } else if (loom_target_function_version_const_cast(pass->function_version)) {
+    // Function versions own their immutable facts for the pipeline lifetime.
+    // Unrefined source projections instead belong to this pass's arena.
+    out_context->flags |= LOOM_CLEANUP_CONTEXT_PERSISTENT_TARGET_FACTS;
   }
   const loom_target_math_pass_capability_t* math_capability =
       loom_target_math_pass_capability_from_pass(pass);

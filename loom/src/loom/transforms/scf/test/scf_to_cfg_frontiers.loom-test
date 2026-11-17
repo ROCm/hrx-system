@@ -1,0 +1,310 @@
+// RUN: pass scf-to-cfg
+
+// Nested selections transport each arm's result to its own join. The callable
+// exit returns directly instead of forwarding a payload to an enclosing join.
+func.def @nested_branch_results(%first: i1, %second: i1, %selector: index, %a: i32, %b: i32) -> (i32) {
+  %result = scf.if %first -> (i32) {
+    %selected = scf.switch %selector -> (i32) {
+      case 0 {
+        %nested = scf.if %second -> (i32) {
+          scf.yield %a : i32
+        } else {
+          scf.yield %b : i32
+        }
+        scf.yield %nested : i32
+      }
+      default {
+        func.exit %second : i1 {
+          func.return %b : i32
+        }
+        scf.yield %a : i32
+      }
+    }
+    scf.yield %selected : i32
+  } else {
+    scf.yield %b : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @nested_branch_results(%first: i1, %second: i1, %selector: index, %a: i32, %b: i32) -> (i32) {
+  cfg.cond_br %first, ^_bb1, ^_bb10
+^_bb1:
+  %11 = index.constant 0 : index
+  %12 = index.cmp eq, %selector, %11 : index
+  cfg.cond_br %12, ^_bb2, ^_bb6
+^_bb2:
+  cfg.cond_br %second, ^_bb3, ^_bb4
+^_bb3:
+  cfg.br ^_bb5(%a: i32)
+^_bb4:
+  cfg.br ^_bb5(%b: i32)
+^_bb5(%nested: i32):
+  cfg.br ^_bb9(%nested: i32)
+^_bb6:
+  cfg.cond_br %second, ^_bb7, ^_bb8
+^_bb7:
+  func.return %b : i32
+^_bb8:
+  cfg.br ^_bb9(%a: i32)
+^_bb9(%selected: i32):
+  cfg.br ^_bb11(%selected: i32)
+^_bb10:
+  cfg.br ^_bb11(%b: i32)
+^_bb11(%result: i32):
+  func.return %result : i32
+}
+
+// ====
+
+// The counted loop's result seeds the sibling condition loop. Branches before,
+// between, and after the loops retain their continuations and payload uses.
+func.def @mixed_frontier_results(%condition: i1, %limit: index, %seed: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %condition {
+    test.use %seed : i32
+  }
+  %total = scf.for %position = [%begin to %limit step %step](%sum = %seed : i32) -> (i32) {
+    %next_sum = test.addi %sum, %seed : i32
+    scf.yield %next_sum : i32
+  }
+  scf.switch %limit {
+    case 0 {
+      test.use %seed : i32
+    }
+    default {
+    }
+  }
+  %result = scf.while(%before = %total : i32) -> (i32) {
+    scf.condition %condition, %before : i1, i32
+  } do(%body: i32) {
+    %next = test.addi %body, %seed : i32
+    scf.yield %next : i32
+  }
+  scf.if %condition {
+    test.use %result : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @mixed_frontier_results(%condition: i1, %limit: index, %seed: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  cfg.cond_br %condition, ^_bb1, ^_bb2
+^_bb1:
+  test.use %seed : i32
+  cfg.br ^_bb2
+^_bb2:
+  cfg.br ^_bb3(%begin: index, %seed: i32)
+^_bb3(%19: index, %sum: i32):
+  %22 = index.cmp slt, %19, %limit : index
+  cfg.cond_br %22, ^_bb4, ^_bb5
+^_bb4:
+  %position = index.assume %19 [range(%19, 0, 9223372036854775806), lt(%19, %limit)] : index
+  %next_sum = test.addi %sum, %seed : i32
+  %23 = index.add %position, %step : index
+  cfg.br ^_bb3(%23: index, %next_sum: i32)
+^_bb5:
+  cfg.br ^_bb6(%sum: i32)
+^_bb6(%total: i32):
+  %16 = index.constant 0 : index
+  %17 = index.cmp eq, %limit, %16 : index
+  cfg.cond_br %17, ^_bb7, ^_bb8
+^_bb7:
+  test.use %seed : i32
+  cfg.br ^_bb9
+^_bb8:
+  cfg.br ^_bb9
+^_bb9:
+  cfg.br ^_bb10(%total: i32)
+^_bb10(%before: i32):
+  cfg.cond_br %condition, ^_bb11, ^_bb12
+^_bb11:
+  %next = test.addi %before, %seed : i32
+  cfg.br ^_bb10(%next: i32)
+^_bb12:
+  cfg.br ^_bb13(%before: i32)
+^_bb13(%result: i32):
+  cfg.cond_br %condition, ^_bb14, ^_bb15
+^_bb14:
+  test.use %result : i32
+  cfg.br ^_bb15
+^_bb15:
+  func.return %result : i32
+}
+
+// ====
+
+// Lowering the enclosing branch exposes an offset loop. Its body retains the
+// IV constraints, inner branch, and guarded terminal increment.
+func.def @loop_between_branches(%condition: i1, %limit: offset) {
+  %begin = index.constant 0 : offset
+  %step = index.constant 4 : offset
+  scf.if %condition {
+    scf.for %position = [%begin to %limit step %step] {
+      scf.if %condition {
+        test.use %position : offset
+      }
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @loop_between_branches(%condition: i1, %limit: offset) {
+  %begin = index.constant 0 : offset
+  %step = index.constant 4 : offset
+  cfg.cond_br %condition, ^_bb1, ^_bb8
+^_bb1:
+  cfg.br ^_bb2(%begin: offset)
+^_bb2(%5: offset):
+  %7 = index.cmp ult, %5, %limit : offset
+  cfg.cond_br %7, ^_bb3, ^_bb7
+^_bb3:
+  %position = index.assume %5 [range(%5, 0, 9223372036854775804), multiple_of(%5, 4), lt(%5, %limit)] : offset
+  cfg.cond_br %condition, ^_bb4, ^_bb5
+^_bb4:
+  test.use %position : offset
+  cfg.br ^_bb5
+^_bb5:
+  %8 = index.sub %limit, %position : offset
+  %9 = index.cmp ult, %step, %8 : offset
+  cfg.cond_br %9, ^_bb6, ^_bb7
+^_bb6:
+  %10 = index.add %position, %step : offset
+  cfg.br ^_bb2(%10: offset)
+^_bb7:
+  cfg.br ^_bb8
+^_bb8:
+  func.return
+}
+
+// ====
+
+// Alternating loop and branch frontiers remap the outer IV into the inner
+// loop's lower bound and retain each loop's backedge and continuation.
+func.def @alternating_frontiers(%condition: i1, %limit: index, %seed: i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %outer = [%begin to %limit step %step] {
+    scf.if %condition {
+      %result = scf.while(%before = %seed : i32) -> (i32) {
+        scf.condition %condition, %before : i1, i32
+      } do(%body: i32) {
+        scf.switch %outer {
+          case 0 {
+            scf.for %inner = [%outer to %limit step %step] {
+              test.use %inner, %body : index, i32
+            }
+          }
+          default {
+          }
+        }
+        scf.yield %body : i32
+      }
+      test.use %result : i32
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @alternating_frontiers(%condition: i1, %limit: index, %seed: i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  cfg.br ^_bb1(%begin: index)
+^_bb1(%10: index):
+  %12 = index.cmp slt, %10, %limit : index
+  cfg.cond_br %12, ^_bb2, ^_bb15
+^_bb2:
+  %outer = index.assume %10 [range(%10, 0, 9223372036854775806), lt(%10, %limit)] : index
+  cfg.cond_br %condition, ^_bb3, ^_bb14
+^_bb3:
+  cfg.br ^_bb4(%seed: i32)
+^_bb4(%before: i32):
+  cfg.cond_br %condition, ^_bb5, ^_bb12
+^_bb5:
+  %16 = index.constant 0 : index
+  %17 = index.cmp eq, %outer, %16 : index
+  cfg.cond_br %17, ^_bb6, ^_bb10
+^_bb6:
+  cfg.br ^_bb7(%outer: index)
+^_bb7(%18: index):
+  %20 = index.cmp slt, %18, %limit : index
+  cfg.cond_br %20, ^_bb8, ^_bb9
+^_bb8:
+  %inner = index.assume %18 [range(%18, 0, 9223372036854775806), ge(%18, %outer), lt(%18, %limit)] : index
+  test.use %inner, %before : index, i32
+  %21 = index.add %inner, %step : index
+  cfg.br ^_bb7(%21: index)
+^_bb9:
+  cfg.br ^_bb11
+^_bb10:
+  cfg.br ^_bb11
+^_bb11:
+  cfg.br ^_bb4(%before: i32)
+^_bb12:
+  cfg.br ^_bb13(%before: i32)
+^_bb13(%result: i32):
+  test.use %result : i32
+  cfg.br ^_bb14
+^_bb14:
+  %13 = index.add %outer, %step : index
+  cfg.br ^_bb1(%13: index)
+^_bb15:
+  func.return
+}
+
+// ====
+
+// The condition region carries a selected Boolean through its nested join
+// before deciding whether to enter the body or return the tested position.
+func.def @guarded_condition_result(%input: view<37xi32>, %start: index) -> (index) {
+  %length = index.constant 37 : index
+  %terminal = scf.while(%before = %start : index) -> (index) {
+    %inside = index.cmp ult, %before, %length : index
+    %continue = scf.if %inside -> (i1) {
+      %value = view.load %input[%before] : view<37xi32> -> i32
+      %threshold = scalar.constant 0 : i32
+      %positive = scalar.cmpi sgt, %value, %threshold : i32
+      scf.yield %positive : i1
+    } else {
+      scf.yield %inside : i1
+    }
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %step = index.constant 1 : index
+    %next = index.add %current, %step : index
+    scf.yield %next : index
+  }
+  func.return %terminal : index
+}
+
+// ----
+func.def @guarded_condition_result(%input: view<37xi32>, %start: index) -> (index) {
+  %length = index.constant 37 : index
+  cfg.br ^_bb1(%start: index)
+^_bb1(%before: index):
+  %inside = index.cmp ult, %before, %length : index
+  cfg.cond_br %inside, ^_bb2, ^_bb3
+^_bb2:
+  %value = view.load %input[%before] : view<37xi32> -> i32
+  %threshold = scalar.constant 0 : i32
+  %positive = scalar.cmpi sgt, %value, %threshold : i32
+  cfg.br ^_bb4(%positive: i1)
+^_bb3:
+  cfg.br ^_bb4(%inside: i1)
+^_bb4(%continue: i1):
+  cfg.cond_br %continue, ^_bb5, ^_bb6
+^_bb5:
+  %step = index.constant 1 : index
+  %next = index.add %before, %step : index
+  cfg.br ^_bb1(%next: index)
+^_bb6:
+  cfg.br ^_bb7(%before: index)
+^_bb7(%terminal: index):
+  func.return %terminal : index
+}

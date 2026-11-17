@@ -20,8 +20,17 @@ extern "C" {
 typedef struct loom_target_facts_t loom_target_facts_t;
 typedef struct loom_target_math_policy_t loom_target_math_policy_t;
 
+typedef uint32_t loom_cleanup_context_flags_t;
+enum loom_cleanup_context_flag_bits_e {
+  // Target facts outlive the pass invocation and may remain in its shared
+  // value-fact workspace. Otherwise that workspace must expire with the pass.
+  LOOM_CLEANUP_CONTEXT_PERSISTENT_TARGET_FACTS = 1u << 0,
+};
+
 // Function-scoped semantics resolved by the environment that owns them.
 typedef struct loom_cleanup_canonicalizer_context_t {
+  // Ownership guarantees supplied by the context resolver.
+  loom_cleanup_context_flags_t flags;
   // Immutable target facts used by target-sensitive value inference.
   const loom_target_facts_t* target_facts;
   // Target math policy used for optional arithmetic rewrites.

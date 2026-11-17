@@ -97,7 +97,8 @@ typedef struct loom_pass_descriptor_t {
     // Function-pass callback when info->kind is LOOM_PASS_FUNCTION.
     loom_function_pass_fn_t function_run;
   };
-  // Optional pass instance creation callback.
+  // Optional pass instance creation callback. Decoded options are available to
+  // the run callback regardless of whether an instance needs initialization.
   loom_pass_create_fn_t create;
   // Optional pass instance destruction callback.
   loom_pass_destroy_fn_t destroy;

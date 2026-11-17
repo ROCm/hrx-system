@@ -26,6 +26,11 @@ loom_check_test_suite(
     ],
 )
 
+loom_check_test_suite(
+    name = "value_facts_test",
+    srcs = ["value_facts.loom-test"],
+)
+
 loom_cc_library(
     name = "registry",
     srcs = ["registry.c"],
@@ -43,6 +48,8 @@ loom_cc_library(
         "//loom/src/loom/pass:report",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/util:cfg_graph",
+        "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
     ],
 )

@@ -603,7 +603,7 @@ TEST(PassRegistryCoreTest, DecodeRejectsInvalidOptions) {
   iree_arena_block_pool_deinitialize(&block_pool);
 }
 
-TEST(PassRegistryCoreTest, RejectsOptionsForDescriptorWithoutCreateCallback) {
+TEST(PassRegistryCoreTest, RejectsOptionsForDescriptorWithoutSchema) {
   const loom_pass_descriptor_t* descriptor =
       LookupTestPass(IREE_SV("test.module-noop"));
   ASSERT_NE(descriptor, nullptr);
@@ -611,6 +611,21 @@ TEST(PassRegistryCoreTest, RejectsOptionsForDescriptorWithoutCreateCallback) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_pass_descriptor_validate_options(descriptor, IREE_SV("unknown=1")));
+}
+
+TEST(PassRegistryCoreTest, AcceptsTypedOptionsWithoutCreateCallback) {
+  loom_pass_descriptor_t descriptor = *LookupTestPass(IREE_SV("test.options"));
+  descriptor.create = nullptr;
+  loom_pass_registry_t registry = {
+      .descriptors = &descriptor,
+      .descriptor_count = 1,
+  };
+  IREE_ASSERT_OK(loom_pass_registry_verify(&registry));
+  IREE_ASSERT_OK(loom_pass_descriptor_validate_options(
+      &descriptor, IREE_SV("count=4,mode=beta,string=payload")));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_pass_descriptor_validate_options(&descriptor, IREE_SV("count=0")));
 }
 
 TEST(PassRegistryCoreTest, UnavailableDescriptorKeepsAvailabilityMetadata) {

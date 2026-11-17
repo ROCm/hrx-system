@@ -60,12 +60,6 @@ static iree_status_t loom_pass_registry_verify_option_schema(
                             "pass descriptor '%.*s' has no option schema",
                             (int)descriptor->key.size, descriptor->key.data);
   }
-  if (descriptor->option_schema_count > 0 && !descriptor->create) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "pass descriptor '%.*s' declares options but has no create callback",
-        (int)descriptor->key.size, descriptor->key.data);
-  }
   for (uint16_t i = 0; i < descriptor->option_schema_count; ++i) {
     const loom_pass_option_schema_t* schema = &descriptor->option_schema[i];
     if (iree_string_view_is_empty(schema->name)) {

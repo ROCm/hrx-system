@@ -1,0 +1,404 @@
+// RUN: pass canonicalize,test.acquire-value-facts{expect=reuse},test.noop,test.acquire-value-facts{expect=reuse},canonicalize,test.acquire-value-facts{expect=reuse}
+
+// A changed canonicalizer publishes facts for its replacements. No-op passes
+// and a second canonicalizer reuse them after all earlier scratch is released.
+// Every checked acquisition also compares live facts to a fresh computation.
+func.def @folded_constants() -> (i32) {
+  %base = scalar.constant 40 : i32
+  %increment = scalar.constant 2 : i32
+  %sum = scalar.addi %base, %increment : i32
+  func.return %sum : i32
+}
+
+// ----
+func.def @folded_constants() -> (i32) {
+  %sum = scalar.constant 42 : i32
+  func.return %sum : i32
+}
+
+// ====
+// RUN: pass combine,test.acquire-value-facts{expect=reuse}
+
+// Combining through a vector splat replaces both scalar and shaped values;
+// the retained range and extension payloads must match the new program.
+func.def @widen_bounded_vector(%input: i16) -> (vector<4xi64>) {
+  %wide = scalar.extsi %input : i16 to i32
+  %bounded = scalar.assume %wide [range(%wide, 1, 6)] : i32
+  %splat = vector.splat %bounded : vector<4xi32>
+  %result = vector.extsi %splat : vector<4xi32> to vector<4xi64>
+  func.return %result : vector<4xi64>
+}
+
+// ----
+func.def @widen_bounded_vector(%input: i16) -> (vector<4xi64>) {
+  %wide = scalar.extsi %input : i16 to i32
+  %bounded = scalar.assume %wide [range(%wide, 1, 6)] : i32
+  %6 = scalar.extsi %bounded : i32 to i64
+  %result = vector.splat %6 : vector<4xi64>
+  func.return %result : vector<4xi64>
+}
+
+// ====
+// RUN: pass canonicalize{max-iterations=1},test.acquire-value-facts{expect=reuse}
+
+// Reaching the rewrite iteration limit still drains pending fact publication.
+func.def @bounded_iterations(%input: i32) -> (i32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %sum = scalar.addi %input, %c0 : i32
+  %product = scalar.muli %sum, %c1 : i32
+  func.return %product : i32
+}
+
+// ----
+func.def @bounded_iterations(%input: i32) -> (i32) {
+  func.return %input : i32
+}
+
+// ====
+// RUN: pass test.acquire-value-facts{expect=compute},canonicalize,test.acquire-value-facts{expect=reuse},test.mark-changed,test.acquire-value-facts{expect=invalidated},test.acquire-value-facts{expect=reuse}
+
+// A preservation result belongs to one invocation. A subsequent unmarked
+// change invalidates the scope, even when canonicalize preserved it earlier.
+// Each function starts with a different scope and must compute its own facts.
+func.def @first_scope() -> (i32) {
+  %lhs = scalar.constant 40 : i32
+  %rhs = scalar.constant 2 : i32
+  %sum = scalar.addi %lhs, %rhs : i32
+  func.return %sum : i32
+}
+
+func.def @second_scope() -> (i64) {
+  %lhs = scalar.constant 5 : i64
+  %rhs = scalar.constant 3 : i64
+  %product = scalar.muli %lhs, %rhs : i64
+  func.return %product : i64
+}
+
+// ----
+func.def @first_scope() -> (i32) {
+  %sum = scalar.constant 42 : i32
+  func.return %sum : i32
+}
+
+func.def @second_scope() -> (i64) {
+  %product = scalar.constant 15 : i64
+  func.return %product : i64
+}
+
+// ====
+// RUN: pass combine,test.acquire-value-facts{expect=invalidated},test.acquire-value-facts{expect=reuse}
+
+// Division pairing runs after the maintained greedy rewrite driver. Its
+// explicit invalidation remains authoritative despite pass-level preservation.
+func.def @paired_division(%lhs: i32, %rhs: i32) -> (i32, i32) {
+  %quotient = scalar.divui %lhs, %rhs : i32
+  %remainder = scalar.remui %lhs, %rhs : i32
+  func.return %quotient, %remainder : i32, i32
+}
+
+// ----
+func.def @paired_division(%lhs: i32, %rhs: i32) -> (i32, i32) {
+  %quotient, %remainder = scalar.divremui %lhs, %rhs : i32
+  func.return %quotient, %remainder : i32, i32
+}
+
+// ====
+// RUN: pass canonicalize,test.acquire-value-facts{expect=reuse}
+
+// Reference extensions retain their own storage after pass scratch teardown.
+// Folding the offset changes the view's operands while preserving its bounds.
+func.def @reference_payload() -> (view<4xi32>) {
+  %bytes = index.constant 32 : offset
+  %c0 = index.constant 0 : offset
+  %c8 = index.constant 8 : offset
+  %base = index.add %c0, %c8 : offset
+  %storage = buffer.alloca<private> align(16) %bytes : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<4xi32>
+  func.return %view : view<4xi32>
+}
+
+// ----
+func.def @reference_payload() -> (view<4xi32>) {
+  %bytes = index.constant 32 : offset
+  %base = index.constant 8 : offset
+  %storage = buffer.alloca<private> align(16) %bytes : buffer
+  %view = buffer.view %storage[%base] : buffer -> view<4xi32>
+  func.return %view : view<4xi32>
+}
+
+// ====
+// RUN: pass canonicalize,test.acquire-value-facts{expect=reuse}
+
+// A loop's induction, carried payload, nested selection, and result all remain
+// live after replacements in the body. The join cannot inherit one arm's range.
+func.def @loop_and_selection(%condition: i1, %limit: index, %seed: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %result = scf.for %position = [%begin to %limit step %step](%carried = %seed : i32) -> (i32) {
+    %selected = scf.if %condition -> (i32) {
+      %unchanged = scalar.addi %carried, %c0 : i32
+      scf.yield %unchanged : i32
+    } else {
+      %next = scalar.addi %carried, %c1 : i32
+      scf.yield %next : i32
+    }
+    scf.yield %selected : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @loop_and_selection(%condition: i1, %limit: index, %seed: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %c1 = scalar.constant 1 : i32
+  %result = scf.for %position = [%begin to %limit step %step](%carried = %seed : i32) -> (i32) {
+    %next = scalar.addi %carried, %c1 : i32
+    %selected = scf.select %condition, %carried, %next : i32
+    scf.yield %selected : i32
+  }
+  func.return %result : i32
+}
+
+// ====
+// RUN: pass canonicalize,test.acquire-value-facts{expect=reuse}
+
+// CFG snapshots borrowed by the rewriter must be detached without discarding
+// the maintained block-argument facts or retaining pointers into pass scratch.
+func.def @cfg_loop(%limit: index, %seed: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %c0 = scalar.constant 0 : i32
+  cfg.br ^header(%begin: index, %seed: i32)
+^header(%position: index, %carried: i32):
+  %continue = index.cmp slt, %position, %limit : index
+  cfg.cond_br %continue, ^body, ^exit
+^body:
+  %unchanged = scalar.addi %carried, %c0 : i32
+  %next = index.add %position, %step : index
+  cfg.br ^header(%next: index, %unchanged: i32)
+^exit:
+  func.return %carried : i32
+}
+
+// ----
+func.def @cfg_loop(%limit: index, %seed: i32) -> (i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  cfg.br ^header(%begin: index, %seed: i32)
+^header(%position: index, %carried: i32):
+  %continue = index.cmp slt, %position, %limit : index
+  cfg.cond_br %continue, ^body, ^exit
+^body:
+  %next = index.add %position, %step : index
+  cfg.br ^header(%next: index, %carried: i32)
+^exit:
+  func.return %carried : i32
+}
+
+// ====
+// RUN: pass canonicalize,test.acquire-value-facts{expect=invalidated},canonicalize,test.acquire-value-facts{expect=invalidated}
+
+// Authored target projections belong to an unrefined pass invocation. Their
+// facts expire even on the second, unchanged run; the next pass cannot borrow
+// those destroyed inputs merely because no IR changed.
+test.target<low_core> @target
+
+func.def target(@target) @authored_target() -> (i32) {
+  %lhs = scalar.constant 40 : i32
+  %rhs = scalar.constant 2 : i32
+  %sum = scalar.addi %lhs, %rhs : i32
+  func.return %sum : i32
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @authored_target() -> (i32) {
+  %sum = scalar.constant 42 : i32
+  func.return %sum : i32
+}
+
+// ====
+// RUN: pass specialize-target-callgraph,canonicalize,test.acquire-value-facts{expect=reuse},canonicalize,test.acquire-value-facts{expect=reuse}
+
+// A concrete compiler function version owns the same inputs for the whole
+// pipeline. Its changed and unchanged passes can preserve their computed facts.
+test.target<low_core> @target
+
+func.def public target(@target) @specialized_target() -> (i32) {
+  %lhs = scalar.constant 40 : i32
+  %rhs = scalar.constant 2 : i32
+  %sum = scalar.addi %lhs, %rhs : i32
+  func.return %sum : i32
+}
+
+// ----
+test.target<low_core> @target
+
+func.def public target(@target) @specialized_target() -> (i32) {
+  %sum = scalar.constant 42 : i32
+  func.return %sum : i32
+}
+
+// ====
+// RUN: pass canonicalize,test.acquire-value-facts{expect=reuse}
+
+// Condition-region replacements feed both the loop exit and the body. Pending
+// loop summaries must be published before the pass releases its scratch.
+func.def @condition_loop(%start: index, %limit: index) -> (index) {
+  %c0 = index.constant 0 : index
+  %step = index.constant 1 : index
+  %result = scf.while(%before = %start : index) -> (index) {
+    %forwarded = index.add %before, %c0 : index
+    %continue = index.cmp slt, %forwarded, %limit : index
+    scf.condition %continue, %forwarded : i1, index
+  } do(%current: index) {
+    %next = index.add %current, %step : index
+    scf.yield %next : index
+  }
+  func.return %result : index
+}
+
+// ----
+func.def @condition_loop(%start: index, %limit: index) -> (index) {
+  %step = index.constant 1 : index
+  %result = scf.while(%before = %start : index) -> (index) {
+    %continue = index.cmp slt, %before, %limit : index
+    scf.condition %continue, %before : i1, index
+  } do(%current: index) {
+    %next = index.add %current, %step : index
+    scf.yield %next : index
+  }
+  func.return %result : index
+}
+
+// ====
+// RUN: pass canonicalize,test.acquire-value-facts{expect=reuse}
+
+// A callable can have several independently rewritten regions in one fact
+// scope. Both launch configuration and body replacements survive pass teardown.
+kernel.def @multiple_regions() {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %size = index.add %c0, %c1 : index
+  kernel.launch.config workgroups(%size, %size, %size) workgroup_size(%size, %size, %size) : index
+} launch() {
+  %base = scalar.constant 40 : i32
+  %increment = scalar.constant 2 : i32
+  %sum = scalar.addi %base, %increment : i32
+  test.use %sum : i32
+  kernel.return
+}
+
+// ----
+kernel.def @multiple_regions() {
+  %size = index.constant 1 : index
+  kernel.launch.config workgroups(%size, %size, %size) workgroup_size(%size, %size, %size) : index
+} launch() {
+  %sum = scalar.constant 42 : i32
+  test.use %sum : i32
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,test.acquire-value-facts{expect=reuse}
+
+// Erasing a region retires its result and values. The surviving selection
+// result must have the selected arm's facts, without a stale alternative.
+func.def @erased_branch() -> (i32) {
+  %condition = scalar.constant 1 : i1
+  %result = scf.if %condition -> (i32) {
+    %selected = scalar.constant 42 : i32
+    scf.yield %selected : i32
+  } else {
+    %discarded = scalar.constant 13 : i32
+    scf.yield %discarded : i32
+  }
+  func.return %result : i32
+}
+
+// ----
+func.def @erased_branch() -> (i32) {
+  %selected = scalar.constant 42 : i32
+  func.return %selected : i32
+}
+
+// ====
+// RUN: pass canonicalize,test.acquire-value-facts{expect=reuse},combine,test.acquire-value-facts{expect=invalidated}
+
+// A later pass consumes retained SSA identity, not just numeric intervals, to
+// pair a quotient and remainder whose operands are distinct authored aliases.
+func.def @identity_consumer(%lhs: i32, %rhs: i32) -> (i32, i32) {
+  %assumed = scalar.assume %lhs [ne(%lhs, 0)] : i32
+  %quotient = scalar.divui %lhs, %rhs : i32
+  %remainder = scalar.remui %assumed, %rhs : i32
+  func.return %quotient, %remainder : i32, i32
+}
+
+// ----
+func.def @identity_consumer(%lhs: i32, %rhs: i32) -> (i32, i32) {
+  %quotient, %remainder = scalar.divremui %lhs, %rhs : i32
+  func.return %quotient, %remainder : i32, i32
+}
+
+// ====
+// RUN: pass canonicalize,test.acquire-value-facts{expect=reuse},canonicalize,test.acquire-value-facts{expect=reuse}
+
+// Removing a branch retires the nested CFG even without SSA identity or
+// vector-partition storage. Repeated acquisition must not retain deleted IR.
+pipeline.def @erased_cfg_subtree() run(%value: i32) {
+  %selected = scalar.constant true : i1
+  scf.if %selected {
+    test.use %value : i32
+  } else {
+    pipeline.serial {
+      cfg.br ^discarded
+    ^discarded:
+      test.use %value : i32
+    }
+  }
+}
+
+// ----
+pipeline.def @erased_cfg_subtree() run(%value: i32) {
+  test.use %value : i32
+}
+
+// ====
+// RUN: pass canonicalize,test.acquire-value-facts{expect=reuse},canonicalize,test.acquire-value-facts{expect=reuse}
+
+// Moving the selected region preserves its graph while erasing the other
+// region withdraws its snapshot. Both boundaries survive scratch teardown.
+pipeline.def @selected_cfg_subtree() run(%condition: i1, %value: i32) {
+  %selected = scalar.constant true : i1
+  scf.if %selected {
+    pipeline.serial {
+      cfg.cond_br %condition, ^taken, ^exit
+    ^taken:
+      test.use %value : i32
+      cfg.br ^exit
+    ^exit:
+    }
+  } else {
+    pipeline.serial {
+      cfg.br ^discarded
+    ^discarded:
+      test.use %value : i32
+    }
+  }
+}
+
+// ----
+pipeline.def @selected_cfg_subtree() run(%condition: i1, %value: i32) {
+  pipeline.serial {
+    cfg.cond_br %condition, ^taken, ^exit
+  ^taken:
+    test.use %value : i32
+    cfg.br ^exit
+  ^exit:
+  }
+}
