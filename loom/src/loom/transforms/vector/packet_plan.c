@@ -1653,10 +1653,14 @@ iree_status_t loom_vector_packet_select_value_shape(
         IREE_RETURN_IF_ERROR(loom_target_legalization_query_contract(
             packetization->context, op, &query_result));
         if (query_result.outcome == LOOM_TARGET_CONTRACT_QUERY_LEGAL &&
-            query_result.selected_descriptor != NULL) {
+            query_result.selected_descriptor != NULL &&
+            loom_target_legalization_op_has_source_vector_carriers(context,
+                                                                   op)) {
           // Native computation owns its width. A narrower memory or reduction
           // packet consumes slices instead of replaying the entire producer
-          // closure at that packet width.
+          // closure at that packet width. A native recipe alone does not
+          // establish carriers for its operands and result; those values must
+          // remain materializable across the captured boundary.
           source_mode = LOOM_VECTOR_PACKET_SOURCE_MODE_CAPTURED;
           packetization->contains_vector_computation = true;
           *out_selected = true;
