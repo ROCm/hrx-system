@@ -412,6 +412,21 @@ static bool loom_vector_component_origin_requires_packets(
     return false;
   }
   for (uint16_t i = 0; i < record->op->operand_count; ++i) {
+    // A retained native operand keeps its whole-value provenance even when
+    // its own input is assembled from packets. Its consumers need not inherit
+    // the packet width of that input's producer.
+    const uint32_t operand_index = loom_vector_component_record_for_value(
+        plan, loom_op_const_operands(record->op)[i]);
+    if (operand_index != LOOM_VECTOR_COMPONENT_INDEX_INVALID) {
+      const loom_vector_component_record_t* operand =
+          &plan->records[operand_index];
+      if (!operand->demanded &&
+          operand->authored_query_result.outcome ==
+              LOOM_TARGET_CONTRACT_QUERY_LEGAL &&
+          operand->authored_query_result.selected_descriptor != NULL) {
+        continue;
+      }
+    }
     loom_value_fact_exact_lane_origin_t origin;
     if (!loom_value_fact_table_query_exact_lane_origin(
             plan->context->fact_table, plan->context->module,

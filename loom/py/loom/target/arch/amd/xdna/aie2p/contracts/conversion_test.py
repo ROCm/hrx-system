@@ -51,6 +51,7 @@ from loom.target.contracts import (
     DescriptorRule,
     EmitDescriptorOp,
     EmitRegisterConcat,
+    EmitRegisterCopy,
     EmitRegisterSlice,
     Guard,
     GuardKind,
@@ -328,6 +329,11 @@ def _evaluate_packet_lane_descriptor(
     if descriptor_key in ("select.i16x32.mask64", "select.i32x16.mask64"):
         return operands["s2"] if operands["sel"] else operands["s1"]
     if descriptor_key.startswith("widen.2x.x-to-c."):
+        if state["ups-mode"] == 0 and state["saturation"] == 0:
+            value = operands["src"] & 0xFFFF
+            if ".signed." in descriptor_key:
+                value = _s16(value)
+            return (value << operands["su"]) & 0xFFFFFFFF
         if state["saturation"] == 1:
             assert state["ups-mode"] == 0
             assert operands["su"] == 0
@@ -353,13 +359,12 @@ def _evaluate_packet_lane_descriptor(
             return operands["src"] & 0xFFFF
         assert state["saturation"] == 0
         assert state["ups-mode"] == 0
-        assert operands["su"] == 0
         input_bits = 16 if descriptor_key.startswith("widen.2x.") else 8
         input_mask = (1 << input_bits) - 1
         value = operands["src"] & input_mask
         if ".signed." in descriptor_key and value & (1 << (input_bits - 1)):
             value -= 1 << input_bits
-        return value & 0xFFFFFFFF
+        return (value << operands["su"]) & 0xFFFFFFFF
     raise AssertionError(f"unmodeled packet lane descriptor {descriptor_key}")
 
 
@@ -383,6 +388,9 @@ def _evaluate_packet_lane(
         }
     state: dict[str, int] = {}
     for emit in rule.emit:
+        if isinstance(emit, EmitRegisterCopy):
+            values[emit.result] = values[emit.source]
+            continue
         if isinstance(emit, EmitRegisterSlice):
             values[emit.result] = values[emit.source]
             continue
@@ -1607,14 +1615,67 @@ def test_exact_bfloat16_packet_conversions_cover_f32_carriers() -> None:
         if Guard.low_value_register_class("result", "aie2p.ebmll") in rule.guards
     )
     result_copy = accumulator_widen.emit[-1]
-    assert isinstance(result_copy, EmitDescriptorOp)
-    assert result_copy.descriptor.key == (
-        "amd.xdna.aie2p.move.vector512.to.accumulator512.low"
+    assert isinstance(result_copy, EmitRegisterCopy)
+    assert result_copy.source == ValueRef.temporary("bf16_exact_widen_accumulator_0")
+    assert result_copy.result == ValueRef.result("result")
+
+
+def test_wide_bfloat16_widening_retains_native_conversion_priority() -> None:
+    native = _rule("native_bfloat16x33-64_to_binary32x33-64")
+    exact = _typed_rule(
+        "exact_bfloat16_to_binary32_packet",
+        Vector("bf16", minimum_lanes=33, maximum_lanes=64),
+        Vector("f32", minimum_lanes=33, maximum_lanes=64),
     )
-    assert result_copy.operands == {
-        "src": ValueRef.temporary("bf16_exact_widen_result_vector")
-    }
-    assert result_copy.results == {"dst": ValueRef.result("result")}
+    assert AIE2P_CONVERSION_RULES.index(native) < AIE2P_CONVERSION_RULES.index(exact)
+    assert (
+        Guard.value_not_subnormal_or_instance_flags_has_all("input", "subnormal", "daz")
+        in native.guards
+    )
+    assert [
+        emit.descriptor.key
+        for emit in native.emit
+        if isinstance(emit, EmitDescriptorOp)
+    ] == ["amd.xdna.aie2p.convert.bf16x32.to.f32x32"] * 2
+    for bits in (0x0000, 0x0080, 0x3F80, 0x7F80, 0x8000, 0x8080, 0xBF80):
+        for group in range(2):
+            assert (
+                _evaluate_packet_lane(native, bits, result_group_ordinal=group)
+                == bits << 16
+            )
+
+
+def test_exact_bfloat16_widening_preserves_each_native_carrier() -> None:
+    for minimum, maximum, register_class, packets in (
+        (1, 16, "aie2p.vec256", 1),
+        (1, 16, "aie2p.ebmll", 1),
+        (17, 31, None, 1),
+        (32, 32, None, 1),
+        (33, 64, None, 2),
+    ):
+        rule = _typed_rule(
+            "exact_bfloat16_to_binary32_packet",
+            Vector("bf16", minimum_lanes=minimum, maximum_lanes=maximum),
+            Vector("f32", minimum_lanes=minimum, maximum_lanes=maximum),
+            **(
+                {"register_class_field": "result", "register_class": register_class}
+                if register_class is not None
+                else {}
+            ),
+        )
+        instructions = [
+            emit for emit in rule.emit if isinstance(emit, EmitDescriptorOp)
+        ]
+        assert sum(".widen." in emit.descriptor.key for emit in instructions) == packets
+        assert all(".narrow." not in emit.descriptor.key for emit in instructions)
+        for bits in _float_encoding_boundaries(
+            next(format for format in FLOAT_PACKET_FORMATS if format.element == "bf16")
+        ):
+            for group in range(2 if maximum > 16 and maximum != 32 else 1):
+                assert (
+                    _evaluate_packet_lane(rule, bits, result_group_ordinal=group)
+                    == bits << 16
+                )
 
 
 def test_float8_packet_widening_covers_every_native_logical_width() -> None:

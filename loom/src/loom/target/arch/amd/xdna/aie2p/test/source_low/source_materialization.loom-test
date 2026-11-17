@@ -1,7 +1,7 @@
 // RUN: pass source-to-low
 
-// The native MAC reads exact BF16 origins. The whole F32 intermediate has no
-// standalone target recipe and needs no runtime storage for this consumer.
+// The native MAC reads exact BF16 origins. Its nominal F32 intermediate needs
+// no runtime storage even though a standalone widening recipe is available.
 aie2p.target<core> @core
 
 func.def target(@core) @joined_bf16_origin(%low: vector<32xbf16>, %high: vector<32xbf16>, %right: vector<64xbf16>, %seed: vector<64xf32>) -> (vector<64xf32>) {
@@ -24,14 +24,57 @@ low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @joined_bf1
 
 // ====
 
-// Returning the widened value also requires its F32 realization. The same
-// unsupported conversion must then fail with its original target diagnostic.
+// Returning the widened value also requires its F32 realization while the
+// MAC still consumes the original BF16 input.
 aie2p.target<core> @core
 
 func.def target(@core) @materialized_bf16_origin(%left: vector<64xbf16>, %right: vector<64xbf16>, %seed: vector<64xf32>) -> (vector<64xf32>, vector<64xf32>) {
-  // ERROR@+1: TARGET/002 {op_name="vector.extf"}
   %left_wide = vector.extf %left : vector<64xbf16> to vector<64xf32>
   %right_wide = vector.extf %right : vector<64xbf16> to vector<64xf32>
   %result = vector.fmaf<nnan|ninf|nsz|afn> %left_wide, %right_wide, %seed : vector<64xf32>
   func.return %result, %left_wide : vector<64xf32>, vector<64xf32>
+}
+
+// ----
+aie2p.target<core> @core
+
+low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @materialized_bf16_origin(%left: reg<aie2p.vec256 x4>, %right: reg<aie2p.vec256 x4>, %seed: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>, reg<aie2p.mbms x4>) asm {
+  set.saturation 0
+  set.ups-mode 0
+  %13 = mov.shift 16
+  %14 = slice %left[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %15 = vups.2x.x-to-c.unsigned %14, %13
+  %16 = slice %left[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %17 = vups.2x.x-to-c.unsigned %16, %13
+  %left_wide = concat(%15, %17) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  %19 = mova.i32 60
+  %result = vmac.bf16x64 %seed, %left, %right, %19
+  return %result, %left_wide
+}
+
+// ====
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+// One SSA value is both a BF16-origin multiplicand and a materialized F32
+// accumulator in the same operation. The join must survive legalization.
+func.def @mixed_accumulator(%low: vector<32xbf16>, %high: vector<32xbf16>, %right: vector<64xbf16>) -> (vector<64xf32>) {
+  %left = vector.concat<0> %low, %high : vector<32xbf16>, vector<32xbf16> -> vector<64xbf16>
+  %left_wide = vector.extf %left : vector<64xbf16> to vector<64xf32>
+  %right_wide = vector.extf %right : vector<64xbf16> to vector<64xf32>
+  %result = vector.fmaf<nnan|ninf|nsz|afn> %left_wide, %right_wide, %left_wide : vector<64xf32>
+  func.return %result : vector<64xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @mixed_accumulator(%low: reg<aie2p.vec256 x2>, %high: reg<aie2p.vec256 x2>, %right: reg<aie2p.vec256 x4>) -> (reg<aie2p.mbms x4>) asm {
+  %left = concat(%low, %high) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  set.saturation 0
+  set.ups-mode 0
+  %13 = mov.shift 16
+  %15 = vups.2x.x-to-c.unsigned %low, %13
+  %17 = vups.2x.x-to-c.unsigned %high, %13
+  %left_wide = concat(%15, %17) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  %19 = mova.i32 60
+  %result = vmac.bf16x64 %left_wide, %left, %right, %19
+  return %result
 }
