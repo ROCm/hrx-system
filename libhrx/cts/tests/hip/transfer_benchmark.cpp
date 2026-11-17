@@ -18,6 +18,9 @@
 
 IREE_FLAG(string, hip_wait_mode, "auto",
           "HIP synchronization policy: auto, spin, yield, or blocking.");
+IREE_FLAG(bool, hip_native_runtime, false,
+          "Benchmark native HIP selected by HRX_TEST_LIBAMDHIP64, without "
+          "requiring HRX's private hipHALDeinit entry point.");
 
 namespace {
 
@@ -48,6 +51,11 @@ class TransferRuntime {
       Require(false, library_.error().c_str());
     }
     Check(Resolve<decltype(&hipInit)>("hipInit")(0));
+    int runtime_version = 0;
+    Check(Resolve<decltype(&hipRuntimeGetVersion)>("hipRuntimeGetVersion")(
+        &runtime_version));
+    std::fprintf(stderr, "HIP runtime: %s, version: %d\n",
+                 FLAG_hip_native_runtime ? "native" : "HRX", runtime_version);
     const std::string wait_mode = FLAG_hip_wait_mode;
     unsigned int flags = hipDeviceScheduleAuto;
     if (wait_mode == "spin") {
@@ -85,7 +93,9 @@ class TransferRuntime {
     if (module_) {
       Check(Resolve<decltype(&hipModuleUnload)>("hipModuleUnload")(module_));
     }
-    Check(Resolve<decltype(&hipHALDeinit)>("hipHALDeinit")());
+    if (!FLAG_hip_native_runtime) {
+      Check(Resolve<decltype(&hipHALDeinit)>("hipHALDeinit")());
+    }
     if (!library_.Close()) {
       Require(false, library_.error().c_str());
     }
@@ -143,6 +153,137 @@ enum TransferFlags : uint32_t {
   kDeviceInterval = 1u << 2,
   kSynchronous = 1u << 3,
 };
+
+enum class CopyStorage {
+  kHost,
+  kPageableUpload,
+  kRegisteredUpload,
+  kPageableDownload,
+  kRegisteredDownload,
+  kDevice,
+};
+
+// Each timed iteration submits a bounded chain to one stream. Submission rows
+// pause timing only for the final wait; completion rows include that same wait.
+// Storage, payload initialization, and full output verification are untimed.
+template <bool complete>
+void ContiguousCopy(benchmark::State& state, CopyStorage storage) {
+  auto& runtime = Runtime();
+  const auto copy =
+      runtime.Resolve<decltype(&hipMemcpyAsync)>("hipMemcpyAsync");
+  const auto blocking_copy = runtime.Resolve<decltype(&hipMemcpy)>("hipMemcpy");
+  const auto allocate = runtime.Resolve<decltype(&hipMalloc)>("hipMalloc");
+  const auto release = runtime.Resolve<decltype(&hipFree)>("hipFree");
+  constexpr size_t kLength = 512;
+  constexpr size_t kCopyLength = 256;
+  constexpr size_t kSourceOffset = 7;
+  constexpr size_t kTargetOffset = 11;
+  std::vector<uint8_t> source(kLength);
+  std::vector<uint8_t> target(kLength, kPadding);
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = static_cast<uint8_t>(i * 13 + i / 32);
+  }
+  const bool device_source = storage == CopyStorage::kDevice ||
+                             storage == CopyStorage::kPageableDownload ||
+                             storage == CopyStorage::kRegisteredDownload;
+  const bool device_target = storage == CopyStorage::kDevice ||
+                             storage == CopyStorage::kPageableUpload ||
+                             storage == CopyStorage::kRegisteredUpload;
+  void* source_base = source.data();
+  void* target_base = target.data();
+  void* registered = nullptr;
+  if (storage == CopyStorage::kRegisteredUpload ||
+      storage == CopyStorage::kRegisteredDownload) {
+    Check(runtime.Resolve<decltype(&hipHostAlloc)>("hipHostMalloc")(
+        &registered, kLength, hipHostMallocDefault));
+    if (storage == CopyStorage::kRegisteredUpload) {
+      source_base = registered;
+      std::memcpy(source_base, source.data(), kLength);
+    } else {
+      target_base = registered;
+      std::memcpy(target_base, target.data(), kLength);
+    }
+  }
+  if (device_source) {
+    Check(allocate(&source_base, kLength));
+    Check(blocking_copy(source_base, source.data(), kLength,
+                        hipMemcpyHostToDevice));
+  }
+  if (device_target) {
+    Check(allocate(&target_base, kLength));
+    Check(blocking_copy(target_base, target.data(), kLength,
+                        hipMemcpyHostToDevice));
+  }
+  const hipMemcpyKind explicit_kind =
+      device_source
+          ? (device_target ? hipMemcpyDeviceToDevice : hipMemcpyDeviceToHost)
+          : (device_target ? hipMemcpyHostToDevice : hipMemcpyHostToHost);
+  const hipMemcpyKind kind = state.range(1) ? hipMemcpyDefault : explicit_kind;
+  const auto enqueue = [&] {
+    for (int64_t i = 0; i < state.range(0); ++i) {
+      Check(copy(static_cast<uint8_t*>(target_base) + kTargetOffset,
+                 static_cast<uint8_t*>(source_base) + kSourceOffset,
+                 kCopyLength, kind, runtime.stream()));
+    }
+  };
+  enqueue();
+  runtime.Wait();
+  for (auto _ : state) {
+    enqueue();
+    if constexpr (!complete) {
+      state.PauseTiming();
+    }
+    runtime.Wait();
+    if constexpr (!complete) {
+      state.ResumeTiming();
+    }
+  }
+  if (device_target) {
+    Check(blocking_copy(target.data(), target_base, kLength,
+                        hipMemcpyDeviceToHost));
+  } else if (registered) {
+    std::memcpy(target.data(), target_base, kLength);
+  }
+  for (size_t i = 0; i < target.size(); ++i) {
+    const uint8_t expected =
+        i >= kTargetOffset && i < kTargetOffset + kCopyLength
+            ? source[i - kTargetOffset + kSourceOffset]
+            : kPadding;
+    Require(target[i] == expected,
+            "contiguous copy changed payload or padding");
+  }
+  if (device_source) {
+    Check(release(source_base));
+  }
+  if (device_target) {
+    Check(release(target_base));
+  }
+  if (registered) {
+    Check(runtime.Resolve<decltype(&hipFreeHost)>("hipHostFree")(registered));
+  }
+  state.SetLabel(runtime.label());
+  state.SetItemsProcessed(state.iterations() * state.range(0));
+  state.SetBytesProcessed(state.iterations() * state.range(0) * kCopyLength);
+}
+
+#define CONTIGUOUS_CASE(storage, complete, name)             \
+  BENCHMARK_CAPTURE(ContiguousCopy<complete>, storage##name, \
+                    CopyStorage::k##storage)                 \
+      ->Name("HIP/Contiguous/" #storage "/" #name)           \
+      ->ArgNames({"copies", "default_kind"})                 \
+      ->ArgsProduct({{1, 32}, {0, 1}})                       \
+      ->UseRealTime()
+#define CONTIGUOUS_STORAGE(storage)        \
+  CONTIGUOUS_CASE(storage, false, Submit); \
+  CONTIGUOUS_CASE(storage, true, Complete)
+CONTIGUOUS_STORAGE(Host);
+CONTIGUOUS_STORAGE(PageableUpload);
+CONTIGUOUS_STORAGE(RegisteredUpload);
+CONTIGUOUS_STORAGE(PageableDownload);
+CONTIGUOUS_STORAGE(RegisteredDownload);
+CONTIGUOUS_STORAGE(Device);
+#undef CONTIGUOUS_STORAGE
+#undef CONTIGUOUS_CASE
 
 void Download(benchmark::State& state, uint32_t flags,
               size_t row_width = 4096) {

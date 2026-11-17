@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <numeric>
 #include <random>
 #include <vector>
@@ -37,7 +38,7 @@ void Check(hipError_t result) {
 }
 
 // Public graph operations use one initialized frontend/context for the process.
-// These rows construct CPU-side templates and submit no GPU work.
+// Template timings exclude GPU work; capture verification executes afterward.
 struct GraphApi {
   GraphApi() {
     if (!library.Open()) {
@@ -205,6 +206,110 @@ BENCHMARK_TEMPLATE(GraphCopyPrepare, false)
 BENCHMARK_TEMPLATE(GraphCopyPrepare, true)
     ->Name("GraphCopy/Update")
     ->ArgNames({"nodes", "dimensions", "device"})
+    ->ArgsProduct({{16, 1024}, {1, 3}, {0, 1}})
+    ->Unit(benchmark::kMicrosecond);
+
+// Captures the public copy API, including its pointer classification and
+// descriptor preparation. Compilation and execution verify the final graph
+// outside timing; they are not part of CPU-side capture construction.
+void GraphCopyCapture(benchmark::State& state) {
+  auto& api = Api();
+  const auto begin =
+      api.Resolve<decltype(&hipStreamBeginCapture)>("hipStreamBeginCapture");
+  const auto end =
+      api.Resolve<decltype(&hipStreamEndCapture)>("hipStreamEndCapture");
+  const auto copy = api.Resolve<decltype(&hipMemcpyAsync)>("hipMemcpyAsync");
+  const auto copy_3d =
+      api.Resolve<decltype(&hipMemcpy3DAsync)>("hipMemcpy3DAsync");
+  const auto query = api.Resolve<decltype(&hipGraphMemcpyNodeGetParams)>(
+      "hipGraphMemcpyNodeGetParams");
+  hipStream_t stream = nullptr;
+  Check(api.Resolve<decltype(&hipStreamCreateWithFlags)>(
+      "hipStreamCreateWithFlags")(&stream, hipStreamNonBlocking));
+  std::array<uint8_t, 1024> expected;
+  for (size_t i = 0; i < expected.size(); ++i) {
+    expected[i] = static_cast<uint8_t>(i * 13 + i / 32);
+  }
+  void* storage = nullptr;
+  Check(api.Resolve<decltype(&hipMalloc)>("hipMalloc")(&storage,
+                                                       expected.size()));
+  const auto blocking_copy = api.Resolve<decltype(&hipMemcpy)>("hipMemcpy");
+  Check(blocking_copy(storage, expected.data(), expected.size(),
+                      hipMemcpyHostToDevice));
+  const bool rectangular = state.range(1) == 3;
+  const hipMemcpyKind kind =
+      state.range(2) ? hipMemcpyDefault : hipMemcpyDeviceToDevice;
+  const hipMemcpy3DParms parameters = {
+      .srcPos = {rectangular ? size_t{1} : 0, 0, 0},
+      .srcPtr = {storage, 32, 32, rectangular ? size_t{4} : 1},
+      .dstPos = {rectangular ? size_t{2} : 0, 0, 0},
+      .dstPtr = {static_cast<uint8_t*>(storage) + 768, 32, 32,
+                 rectangular ? size_t{4} : 1},
+      .extent = {16, rectangular ? size_t{3} : 1, rectangular ? size_t{2} : 1},
+      .kind = kind,
+  };
+  hipGraph_t graph = nullptr;
+  for (auto _ : state) {
+    state.PauseTiming();
+    if (graph) {
+      Check(api.destroy(graph));
+    }
+    state.ResumeTiming();
+    Check(begin(stream, hipStreamCaptureModeThreadLocal));
+    for (int64_t i = 0; i < state.range(0); ++i) {
+      if (rectangular) {
+        Check(copy_3d(&parameters, stream));
+      } else {
+        Check(copy(parameters.dstPtr.ptr, parameters.srcPtr.ptr,
+                   parameters.extent.width, kind, stream));
+      }
+    }
+    Check(end(stream, &graph));
+    benchmark::DoNotOptimize(graph);
+  }
+  size_t node_count = 0;
+  Check(api.get_nodes(graph, nullptr, &node_count));
+  Require(node_count == static_cast<size_t>(state.range(0)),
+          "capture changed copy node count");
+  std::vector<hipGraphNode_t> nodes(node_count);
+  Check(api.get_nodes(graph, nodes.data(), &node_count));
+  hipMemcpy3DParms observed = {};
+  Check(query(nodes.back(), &observed));
+  Require(observed.srcPtr.ptr == parameters.srcPtr.ptr &&
+              observed.dstPtr.ptr == parameters.dstPtr.ptr &&
+              observed.srcPos.x == parameters.srcPos.x &&
+              observed.dstPos.x == parameters.dstPos.x &&
+              observed.extent.width == parameters.extent.width &&
+              observed.extent.height == parameters.extent.height &&
+              observed.extent.depth == parameters.extent.depth,
+          "capture changed public copy parameters");
+  hipGraphExec_t executable = nullptr;
+  Check(api.instantiate(&executable, graph, 0));
+  Check(api.Resolve<decltype(&hipGraphLaunch)>("hipGraphLaunch")(executable,
+                                                                 stream));
+  Check(api.Resolve<decltype(&hipStreamSynchronize)>("hipStreamSynchronize")(
+      stream));
+  std::array<uint8_t, 1024> actual;
+  Check(blocking_copy(actual.data(), storage, actual.size(),
+                      hipMemcpyDeviceToHost));
+  for (size_t z = 0; z < parameters.extent.depth; ++z) {
+    for (size_t y = 0; y < parameters.extent.height; ++y) {
+      const size_t position = z * 128 + y * 32;
+      std::memcpy(expected.data() + 768 + position + parameters.dstPos.x,
+                  expected.data() + position + parameters.srcPos.x, 16);
+    }
+  }
+  Require(actual == expected, "captured copy changed payload or padding");
+  Check(api.destroy_executable(executable));
+  Check(api.destroy(graph));
+  Check(api.Resolve<decltype(&hipFree)>("hipFree")(storage));
+  Check(api.Resolve<decltype(&hipStreamDestroy)>("hipStreamDestroy")(stream));
+  state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+
+BENCHMARK(GraphCopyCapture)
+    ->Name("GraphCopy/Capture")
+    ->ArgNames({"nodes", "dimensions", "default_kind"})
     ->ArgsProduct({{16, 1024}, {1, 3}, {0, 1}})
     ->Unit(benchmark::kMicrosecond);
 
