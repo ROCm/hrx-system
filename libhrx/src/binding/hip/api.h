@@ -2379,6 +2379,8 @@ HIPAPI hipError_t hipGraphMemFreeNodeGetParams(hipGraphNode_t node,
                                                void* dptr_out);
 HIPAPI hipError_t hipGraphMemcpyNodeGetParams(hipGraphNode_t node,
                                               void* pNodeParams);
+HIPAPI hipError_t hipGraphMemcpyNodeSetParams(hipGraphNode_t node,
+                                              const void* pNodeParams);
 HIPAPI hipError_t hipGraphMemcpyNodeSetParams1D(hipGraphNode_t node, void* dst,
                                                 const void* src, size_t count,
                                                 hipMemcpyKind kind);
