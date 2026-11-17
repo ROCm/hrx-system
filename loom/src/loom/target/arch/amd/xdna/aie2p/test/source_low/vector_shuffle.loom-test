@@ -31,33 +31,33 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @identity_permutat
   %step = mov.short 1
   low.br ^_bb1(%begin: reg<aie2p.er>)
 ^_bb1(%row: reg<aie2p.er>):
-  %60 = lt %row, %end
-  low.cond_br %60, ^_bb2, ^_bb3 : reg<aie2p.er>
+  %54 = lt %row, %end
+  low.cond_br %54, ^_bb2, ^_bb3 : reg<aie2p.er>
 ^_bb2:
-  %61 = mov.i32 4
-  %62 = lshl %row, %61
-  %63 = mov.address-index %62
+  %55 = mov.i32 4
+  %56 = lshl %row, %55
+  %57 = mov.address-index %56
+  %58 = lda.i32.index %source, %57
+  %59 = add.address-index.immediate %56, 4
+  %60 = lda.i32.index %source, %59
+  %61 = add.address-index.immediate %56, 8
+  %62 = lda.i32.index %source, %61
+  %63 = add.address-index.immediate %56, 12
   %64 = lda.i32.index %source, %63
-  %65 = add.address-index.immediate %62, 4
-  %66 = lda.i32.index %source, %65
-  %67 = add.address-index.immediate %62, 8
-  %68 = lda.i32.index %source, %67
-  %69 = add.address-index.immediate %62, 12
-  %70 = lda.i32.index %source, %69
-  %71 = vbcst.32 %70
-  %72 = vpush.lo.32 %68, %71
-  %73 = vpush.lo.32 %66, %72
-  %result = vpush.lo.32 %64, %73
-  %75 = vextract.32.imm %result, 0
-  %76 = vextract.32.imm %result, 1
-  %77 = vextract.32.imm %result, 2
-  %78 = vextract.32.imm %result, 3
-  st.i32.index %75, %destination, %63
-  st.i32.index %76, %destination, %65
-  st.i32.index %77, %destination, %67
-  st.i32.index %78, %destination, %69
-  %83 = add.nc %row, %step
-  low.br ^_bb1(%83: reg<aie2p.er>)
+  %65 = vbcst.32 %64
+  %66 = vpush.lo.32 %62, %65
+  %67 = vpush.lo.32 %60, %66
+  %result = vpush.lo.32 %58, %67
+  %69 = vextract.32.imm %result, 0
+  %70 = vextract.32.imm %result, 1
+  %71 = vextract.32.imm %result, 2
+  %72 = vextract.32.imm %result, 3
+  st.i32.index %69, %destination, %57
+  st.i32.index %70, %destination, %59
+  st.i32.index %71, %destination, %61
+  st.i32.index %72, %destination, %63
+  %77 = add.nc %row, %step
+  low.br ^_bb1(%77: reg<aie2p.er>)
 ^_bb3:
   return
 }

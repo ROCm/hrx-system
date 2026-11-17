@@ -1,5 +1,115 @@
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
+// The comparison first needs a semantic rewrite. Eager scalar fallback must
+// preserve the selection and widenings until packet planning can use it.
+func.def @comparison_before_widened_fma(%left: vector<64xbf16>, %right: vector<64xbf16>, %seed: vector<64xf32>) -> (vector<64xf32>) {
+  %condition = vector.cmpf olt, %left, %right : vector<64xbf16> -> vector<64xi1>
+  %selected = vector.select %condition, %left, %right : vector<64xbf16>
+  %left_wide = vector.extf %selected : vector<64xbf16> to vector<64xf32>
+  %right_wide = vector.extf %right : vector<64xbf16> to vector<64xf32>
+  %result = vector.fmaf<nnan|ninf|nsz|afn> %left_wide, %right_wide, %seed : vector<64xf32>
+  func.return %result : vector<64xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @comparison_before_widened_fma(%left: reg<aie2p.vec256 x4>, %right: reg<aie2p.vec256 x4>, %seed: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>) asm {
+  %87 = slice %left[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %88 = slice %right[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %89 = mov.i32 32767
+  %90 = vbcst.16 %89
+  %91 = vband %87, %90
+  %92 = vband %88, %90
+  %93 = mov.i32 32640
+  %94 = vbcst.16 %93
+  %95 = vlt.u16x32.el.low32 %94, %91
+  %96 = predicate.complete.zero.high32 %95, 0
+  %97 = vlt.u16x32.el.low32 %94, %92
+  %98 = predicate.complete.zero.high32 %97, 0
+  %99 = predicate.or.low32.rhs_tied %96, %98
+  %100 = predicate.or.high32.rhs_tied %96, %99
+  %101 = mov.short 0
+  %102 = vbcst.16 %101
+  %103 = mov.i32 -32768
+  %104 = vbcst.16 %103
+  %105 = mov.short -1
+  %106 = vbcst.16 %105
+  %107 = vsub.16 %91, %102
+  %108 = veqz.16.el.low32 %107
+  %109 = predicate.complete.zero.high32 %108, 0
+  %110 = vsel.16.mask64 %87, %102, %109
+  %111 = vlt.s16x32.el.low32 %110, %102
+  %112 = predicate.complete.zero.high32 %111, 0
+  %113 = vadd.16 %110, %104
+  %114 = vsub.16 %106, %110
+  %115 = vsel.16.mask64 %113, %114, %112
+  %116 = vsub.16 %92, %102
+  %117 = veqz.16.el.low32 %116
+  %118 = predicate.complete.zero.high32 %117, 0
+  %119 = vsel.16.mask64 %88, %102, %118
+  %120 = vlt.s16x32.el.low32 %119, %102
+  %121 = predicate.complete.zero.high32 %120, 0
+  %122 = vadd.16 %119, %104
+  %123 = vsub.16 %106, %119
+  %124 = vsel.16.mask64 %122, %123, %121
+  %125 = vlt.u16x32.el.low32 %115, %124
+  %126 = predicate.complete.zero.high32 %125, 0
+  %127 = predicate.and.low32.rhs_tied %126, %100
+  %128 = predicate.and.high32.rhs_tied %126, %127
+  %129 = predicate.xor.low32.rhs_tied %126, %128
+  %130 = predicate.xor.high32.rhs_tied %126, %129
+  %131 = slice %left[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %132 = slice %right[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %133 = vband %131, %90
+  %134 = vband %132, %90
+  %135 = vlt.u16x32.el.low32 %94, %133
+  %136 = predicate.complete.zero.high32 %135, 0
+  %137 = vlt.u16x32.el.low32 %94, %134
+  %138 = predicate.complete.zero.high32 %137, 0
+  %139 = predicate.or.low32.rhs_tied %136, %138
+  %140 = predicate.or.high32.rhs_tied %136, %139
+  %141 = vsub.16 %133, %102
+  %142 = veqz.16.el.low32 %141
+  %143 = predicate.complete.zero.high32 %142, 0
+  %144 = vsel.16.mask64 %131, %102, %143
+  %145 = vlt.s16x32.el.low32 %144, %102
+  %146 = predicate.complete.zero.high32 %145, 0
+  %147 = vadd.16 %144, %104
+  %148 = vsub.16 %106, %144
+  %149 = vsel.16.mask64 %147, %148, %146
+  %150 = vsub.16 %134, %102
+  %151 = veqz.16.el.low32 %150
+  %152 = predicate.complete.zero.high32 %151, 0
+  %153 = vsel.16.mask64 %132, %102, %152
+  %154 = vlt.s16x32.el.low32 %153, %102
+  %155 = predicate.complete.zero.high32 %154, 0
+  %156 = vadd.16 %153, %104
+  %157 = vsub.16 %106, %153
+  %158 = vsel.16.mask64 %156, %157, %155
+  %159 = vlt.u16x32.el.low32 %149, %158
+  %160 = predicate.complete.zero.high32 %159, 0
+  %161 = predicate.and.low32.rhs_tied %160, %140
+  %162 = predicate.and.high32.rhs_tied %160, %161
+  %163 = predicate.xor.low32.rhs_tied %160, %162
+  %164 = predicate.xor.high32.rhs_tied %160, %163
+  %165 = vsel.16.mask64 %88, %87, %130
+  %166 = slice %seed[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  %167 = concat(%166, %166) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  %168 = mova.i32 60
+  %169 = vmac.bf16x32 %167, %165, %88, %168
+  %170 = slice %169[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  %171 = copy %170 : reg<aie2p.mbms x2> -> reg<aie2p.mbms x2>
+  %172 = vsel.16.mask64 %132, %131, %164
+  %173 = slice %seed[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  %174 = concat(%173, %173) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  %176 = vmac.bf16x32 %174, %172, %132, %168
+  %177 = slice %176[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  %178 = copy %177 : reg<aie2p.mbms x2> -> reg<aie2p.mbms x2>
+  %result = concat(%171, %178) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  return %result
+}
+
+// ====
+
 func.def @widened_product_chain(%left: vector<64xbf16>, %right: vector<64xbf16>, %other: vector<64xbf16>) -> (vector<64xf32>) {
   %left_wide = vector.extf %left : vector<64xbf16> to vector<64xf32>
   %right_wide = vector.extf %right : vector<64xbf16> to vector<64xf32>

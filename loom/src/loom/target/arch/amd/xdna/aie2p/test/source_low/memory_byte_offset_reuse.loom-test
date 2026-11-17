@@ -22,27 +22,27 @@ func.def @ranked_exchange(%input: buffer, %output: buffer, %row_input: index, %c
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @ranked_exchange(%row: reg<aie2p.er>, %column: reg<aie2p.er>, %replacement: reg<aie2p.er>, %base: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %input = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %60 = mov.short 19
-  %61 = copy %column : reg<aie2p.er> -> reg<aie2p.er>
-  %62 = mac %61, %row, %60
-  %63 = mov.i32 2
-  %64 = lshl %62, %63
-  %65 = add.nc %64, %base
-  %66 = mov.address-index %65
-  %first = lda.i32.index.volatile<volatile> %input, %66
-  %69 = lda.i32.index.volatile<volatile> %input, %66
-  %70 = add.address-index.immediate %65, 4
-  %71 = lda.i32.index.volatile<volatile> %input, %70
-  %72 = add.address-index.immediate %65, 8
-  %73 = lda.i32.index.volatile<volatile> %input, %72
-  %74 = add.address-index.immediate %65, 12
-  %75 = lda.i32.index.volatile<volatile> %input, %74
-  st.i32.index.volatile<volatile> %69, %input, %66
-  st.i32.index.volatile<volatile> %71, %input, %70
-  st.i32.index.volatile<volatile> %73, %input, %72
-  st.i32.index.volatile<volatile> %75, %input, %74
-  %80 = add.address-index.immediate %65, 16
-  st.i32.index.volatile<volatile> %replacement, %output, %80
+  %51 = mov.short 19
+  %52 = copy %column : reg<aie2p.er> -> reg<aie2p.er>
+  %53 = mac %52, %row, %51
+  %54 = mov.i32 2
+  %55 = lshl %53, %54
+  %56 = add.nc %55, %base
+  %57 = mov.address-index %56
+  %first = lda.i32.index.volatile<volatile> %input, %57
+  %60 = lda.i32.index.volatile<volatile> %input, %57
+  %61 = add.address-index.immediate %56, 4
+  %62 = lda.i32.index.volatile<volatile> %input, %61
+  %63 = add.address-index.immediate %56, 8
+  %64 = lda.i32.index.volatile<volatile> %input, %63
+  %65 = add.address-index.immediate %56, 12
+  %66 = lda.i32.index.volatile<volatile> %input, %65
+  st.i32.index.volatile<volatile> %60, %input, %57
+  st.i32.index.volatile<volatile> %62, %input, %61
+  st.i32.index.volatile<volatile> %64, %input, %63
+  st.i32.index.volatile<volatile> %66, %input, %65
+  %71 = add.address-index.immediate %56, 16
+  st.i32.index.volatile<volatile> %replacement, %output, %71
   return %first
 }
 
