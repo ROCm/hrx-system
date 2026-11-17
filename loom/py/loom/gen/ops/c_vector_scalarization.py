@@ -17,7 +17,7 @@ from pathlib import Path
 from loom.dialect.index import defs as index
 from loom.dialect.scalar import ALL_SCALAR_OPS
 from loom.dialect.vector import ALL_VECTOR_OPS
-from loom.dialect.vector.defs import VECTOR_CAST_OPS
+from loom.dialect.vector.defs import VECTOR_CAST_OPS, VECTOR_FLOAT_ARITHMETIC_OPS
 from loom.dsl import ATTR_TYPE_FLAGS, Op
 from loom.gen.ops.c_names import c_enum_name
 from loom.gen.ops.c_traits import _same_shape_constraint_covers
@@ -212,15 +212,15 @@ def generate_vector_scalarization_rows() -> str:
     return "\n".join(lines)
 
 
-def generate_vector_cast_legalizer_rows() -> str:
-    """Generates target-reference fallback rows for the vector cast family."""
+def generate_vector_legalizer_rows(operations: Sequence[Op], macro_name: str) -> str:
+    """Generates target-reference fallback rows for a declared vector family."""
 
     lines = [
         *line_comment_header("//", generator=_GENERATOR),
         "// clang-format off",
         "",
     ]
-    lines.extend(f"LOOM_VECTOR_CAST_LEGALIZER_ROW({c_enum_name(op)})" for op in VECTOR_CAST_OPS)
+    lines.extend(f"{macro_name}({c_enum_name(op)})" for op in operations)
     lines.extend(["", "// clang-format on", ""])
     return "\n".join(lines)
 
@@ -234,19 +234,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Generated target-reference rows for every vector cast operation.",
     )
     parser.add_argument(
+        "--float-legalizer-rows",
+        type=Path,
+        help="Generated target-reference rows for every vector float arithmetic operation.",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
         help="Validate scalarization relations without writing output.",
     )
     args = parser.parse_args(argv)
-    has_output = args.rows is not None or args.cast_legalizer_rows is not None
+    has_output = args.rows is not None or args.cast_legalizer_rows is not None or args.float_legalizer_rows is not None
     if args.check == has_output:
         parser.error("select --check or at least one output")
     scalarization_contents = generate_vector_scalarization_rows()
     if args.rows is not None:
         write_text_file(args.rows, scalarization_contents)
     if args.cast_legalizer_rows is not None:
-        write_text_file(args.cast_legalizer_rows, generate_vector_cast_legalizer_rows())
+        write_text_file(args.cast_legalizer_rows, generate_vector_legalizer_rows(VECTOR_CAST_OPS, "LOOM_VECTOR_CAST_LEGALIZER_ROW"))
+    if args.float_legalizer_rows is not None:
+        write_text_file(args.float_legalizer_rows, generate_vector_legalizer_rows(VECTOR_FLOAT_ARITHMETIC_OPS, "LOOM_VECTOR_FLOAT_LEGALIZER_ROW"))
     return 0
 
 

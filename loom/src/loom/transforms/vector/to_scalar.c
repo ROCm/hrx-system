@@ -778,7 +778,8 @@ static iree_status_t loom_vector_to_scalar_lower_descriptor_op(
       pass, rewriter, op, &descriptor, 0, &state));
   state.capture_inputs =
       capture_inputs &&
-      descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_GENERIC;
+      (descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_GENERIC ||
+       descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_BITCAST);
   if ((descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DECODE ||
        descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_ENCODE) &&
       loom_vector_to_scalar_encoding_rejection_bits(&state) !=

@@ -86,3 +86,88 @@ func.def target(@target) @shared_multi_result(%input: vector<4xi32>, %bias: vect
   %remainder = vector.from_elements %42, %38, %34, %30 : vector<4xi32>
   func.return %quotient, %remainder : vector<4xi32>, vector<4xi32>
 }
+
+// ====
+// RUN: pass target-legalize{mode=eager,policy=reference-only},canonicalize,dce
+
+// Unary, binary, and ternary arithmetic producers lower independently. The
+// scalar relations preserve the source flags and share captured operands.
+test.target<low_core> @target
+
+func.def target(@target) @float_arithmetic(%input: vector<2xf64>, %bias: vector<2xf64>, %scale: vector<2xf64>) -> (vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>) {
+  %difference = vector.subf<nnan|nsz> %input, %bias : vector<2xf64>
+  %quotient = vector.divf %difference, %scale : vector<2xf64>
+  %remainder = vector.remf %difference, %scale : vector<2xf64>
+  %negated = vector.negf %difference : vector<2xf64>
+  %absolute = vector.absf %difference : vector<2xf64>
+  %signed = vector.copysignf %absolute, %bias : vector<2xf64>
+  %accumulated = vector.fmaf<nnan|nsz> %difference, %scale, %bias : vector<2xf64>
+  func.return %quotient, %remainder, %negated, %absolute, %signed, %accumulated : vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @float_arithmetic(%input: vector<2xf64>, %bias: vector<2xf64>, %scale: vector<2xf64>) -> (vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>) {
+  %155 = vector.extract %input[0] : vector<2xf64> -> f64
+  %156 = vector.extract %bias[0] : vector<2xf64> -> f64
+  %157 = scalar.subf<nnan|nsz> %155, %156 : f64
+  %158 = vector.extract %input[1] : vector<2xf64> -> f64
+  %159 = vector.extract %bias[1] : vector<2xf64> -> f64
+  %160 = scalar.subf<nnan|nsz> %158, %159 : f64
+  %147 = vector.extract %scale[0] : vector<2xf64> -> f64
+  %148 = scalar.divf %157, %147 : f64
+  %150 = vector.extract %scale[1] : vector<2xf64> -> f64
+  %151 = scalar.divf %160, %150 : f64
+  %153 = vector.splat %148 : vector<2xf64>
+  %quotient = vector.insert %151 into %153[1] : f64, vector<2xf64>
+  %138 = vector.extract %scale[0] : vector<2xf64> -> f64
+  %139 = scalar.remf %157, %138 : f64
+  %141 = vector.extract %scale[1] : vector<2xf64> -> f64
+  %142 = scalar.remf %160, %141 : f64
+  %144 = vector.splat %139 : vector<2xf64>
+  %remainder = vector.insert %142 into %144[1] : f64, vector<2xf64>
+  %131 = scalar.bitcast %157 : f64 to i64
+  %133 = scalar.bitcast %160 : f64 to i64
+  %186 = scalar.constant -9223372036854775808 : i64
+  %123 = scalar.xori %131, %186 : i64
+  %185 = scalar.constant -9223372036854775808 : i64
+  %126 = scalar.xori %133, %185 : i64
+  %115 = scalar.bitcast %123 : i64 to f64
+  %117 = scalar.bitcast %126 : i64 to f64
+  %119 = vector.splat %115 : vector<2xf64>
+  %negated = vector.insert %117 into %119[1] : f64, vector<2xf64>
+  %104 = scalar.bitcast %157 : f64 to i64
+  %106 = scalar.bitcast %160 : f64 to i64
+  %184 = scalar.constant 9223372036854775807 : i64
+  %96 = scalar.andi %104, %184 : i64
+  %183 = scalar.constant 9223372036854775807 : i64
+  %99 = scalar.andi %106, %183 : i64
+  %88 = scalar.bitcast %96 : i64 to f64
+  %90 = scalar.bitcast %99 : i64 to f64
+  %92 = vector.splat %88 : vector<2xf64>
+  %absolute = vector.insert %90 into %92[1] : f64, vector<2xf64>
+  %69 = vector.extract %bias[0] : vector<2xf64> -> f64
+  %70 = scalar.bitcast %69 : f64 to i64
+  %71 = vector.extract %bias[1] : vector<2xf64> -> f64
+  %72 = scalar.bitcast %71 : f64 to i64
+  %180 = scalar.constant -9223372036854775808 : i64
+  %53 = scalar.andi %70, %180 : i64
+  %179 = scalar.constant -9223372036854775808 : i64
+  %56 = scalar.andi %72, %179 : i64
+  %44 = scalar.ori %96, %53 : i64
+  %47 = scalar.ori %99, %56 : i64
+  %36 = scalar.bitcast %44 : i64 to f64
+  %38 = scalar.bitcast %47 : i64 to f64
+  %40 = vector.splat %36 : vector<2xf64>
+  %signed = vector.insert %38 into %40[1] : f64, vector<2xf64>
+  %17 = vector.extract %scale[0] : vector<2xf64> -> f64
+  %18 = vector.extract %bias[0] : vector<2xf64> -> f64
+  %19 = scalar.fmaf<nnan|nsz> %157, %17, %18 : f64
+  %21 = vector.extract %scale[1] : vector<2xf64> -> f64
+  %22 = vector.extract %bias[1] : vector<2xf64> -> f64
+  %23 = scalar.fmaf<nnan|nsz> %160, %21, %22 : f64
+  %25 = vector.splat %19 : vector<2xf64>
+  %accumulated = vector.insert %23 into %25[1] : f64, vector<2xf64>
+  func.return %quotient, %remainder, %negated, %absolute, %signed, %accumulated : vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>, vector<2xf64>
+}

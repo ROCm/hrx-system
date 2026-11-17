@@ -74,7 +74,7 @@ typedef struct loom_vector_to_scalar_state_t {
   loom_type_t result_scalar_type;
   // Optional lowering behaviors enabled for this scalarization.
   loom_vector_to_scalar_flags_t flags;
-  // Per-operation elementwise lowering retains operand producers for
+  // Per-operation elementwise and bitcast lowering retain operand producers for
   // independent target selection instead of rematerializing their scalar
   // reference graphs.
   bool capture_inputs;

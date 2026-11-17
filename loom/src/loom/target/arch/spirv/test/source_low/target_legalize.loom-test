@@ -367,12 +367,12 @@ func.def @decomposes_rank_two_divrem(%a: i32, %b: i32, %c: i32, %d: i32, %diviso
 
 // ----
 func.def @decomposes_rank_two_divrem(%a: i32, %b: i32, %c: i32, %d: i32, %divisor: i32) -> (i32) {
-  %40 = scalar.divui %b, %divisor : i32
-  %36 = scalar.divui %c, %divisor : i32
-  %37 = scalar.muli %36, %divisor : i32
-  %38 = scalar.subi %c, %37 : i32
-  %39 = scalar.assume %38 [ult(%38, %divisor)] : i32
-  %result = scalar.xori %40, %39 : i32
+  %44 = scalar.divui %b, %divisor : i32
+  %40 = scalar.divui %c, %divisor : i32
+  %41 = scalar.muli %40, %divisor : i32
+  %42 = scalar.subi %c, %41 : i32
+  %43 = scalar.assume %42 [ult(%42, %divisor)] : i32
+  %result = scalar.xori %44, %43 : i32
   func.return %result : i32
 }
 
