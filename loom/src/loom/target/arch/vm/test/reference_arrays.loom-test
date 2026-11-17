@@ -52,6 +52,48 @@ retired 0
 
 // ====
 
+// Read access through one span does not freeze a second writable alias.
+// Loading a protected pointer preserves that protection after replacement.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%value: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def noinline @clear_alias(%source: view<1xptr<@Object>> {access = read}, %target: view<1xptr<@Object>> {access = write}) {
+  %saved = view.load %source[0] : view<1xptr<@Object>> -> ptr<@Object>
+  %empty = ref.null : ptr<@Object>
+  view.store %empty, %target[0] : ptr<@Object>, view<1xptr<@Object>>
+  func.call @read(%saved) : (ptr<@Object>)
+  ref.release %saved : ptr<@Object>
+  func.return
+}
+
+func.def public @run() {
+  %identity = scalar.constant 3 : i32
+  %owner, %pointer = func.call @create(%identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %objects = view.alloca<private> : view<1xptr<@Object>>
+  view.store %pointer, %objects[0] : ptr<@Object>, view<1xptr<@Object>>
+  ref.release %pointer : ptr<@Object>
+  ref.release %owner : ref<@Object>
+  func.call @clear_alias(%objects, %objects) : (view<1xptr<@Object>>, view<1xptr<@Object>>)
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 3
+read 3
+destroy 3
+live 0
+OK 0
+retired 0
+
+// ====
+
 // Owning cells retain independently of the source SSA owner and the loaded
 // owner. Replacing the cell with null releases the array's ownership.
 // RUN: emit vm-object-lifetime
