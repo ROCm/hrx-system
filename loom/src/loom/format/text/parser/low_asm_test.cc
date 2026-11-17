@@ -1044,6 +1044,75 @@ TEST_F(LowAsmParserTest, RejectsUnknownMnemonic) {
   (void)diagnostics;
 }
 
+TEST_F(LowAsmParserTest, DispatchesDiagnosticsWithinDescriptorScope) {
+  struct DiagnosticProvider {
+    // Production registration passed to the parser's diagnostic dispatcher.
+    loom_target_low_asm_diagnostic_provider_t provider;
+    // Invocation count proves foreign callbacks never see the packet.
+    mutable unsigned call_count = 0;
+  };
+  const auto* descriptor_set = loom_test_low_core_descriptor_set();
+  const loom_low_descriptor_scope_t scopes[] = {
+      {.target_stable_id = descriptor_set->target_stable_id},
+      {.descriptor_set_stable_id = descriptor_set->stable_id},
+      {.target_stable_id = descriptor_set->target_stable_id ^ 1},
+      {
+          .descriptor_set_stable_id =
+              loom_test_low_alt_descriptor_set()->stable_id,
+      },
+  };
+  for (size_t i = 0; i < IREE_ARRAYSIZE(scopes); ++i) {
+    SCOPED_TRACE(i);
+    DiagnosticProvider provider = {
+        .provider =
+            {
+                .name = IREE_SVL("test"),
+                .scope = scopes[i],
+                .try_unknown_packet =
+                    [](const loom_target_low_asm_diagnostic_provider_t* base,
+                       const loom_low_descriptor_set_t*, iree_string_view_t,
+                       loom_text_low_asm_diagnostic_t* diagnostic) {
+                      ++reinterpret_cast<const DiagnosticProvider*>(base)
+                            ->call_count;
+                      *diagnostic = {};
+                      diagnostic->error =
+                          loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 34);
+                      diagnostic->params[0] = loom_param_string(
+                          IREE_SV("target packet diagnostic"));
+                      diagnostic->param_count = 1;
+                      return iree_ok_status();
+                    },
+            },
+    };
+    const loom_target_low_asm_diagnostic_provider_t* providers[] = {
+        &provider.provider,
+    };
+    capture_.Reset();
+    loom_text_parse_options_t options = {
+        .diagnostic_sink = capture_.sink(),
+        .max_errors = 1,
+    };
+    loom_low_descriptor_text_asm_environment_storage_t storage;
+    loom_low_descriptor_text_asm_environment_initialize_with_diagnostics(
+        &low_descriptor_registry_,
+        loom_target_low_asm_diagnostic_provider_list_make(providers, 1),
+        &storage, &options.low_asm_environment);
+    loom_module_t* module = nullptr;
+    IREE_ASSERT_OK(loom_text_parse(
+        IREE_SV("low.func.def target<test.low.core> @entry() asm {\n"
+                "  test.missing.i32\n"
+                "}\n"),
+        IREE_SV("scope.loom"), &context_, &block_pool_, &options, &module));
+    ASSERT_EQ(module, nullptr);
+    const auto* diagnostic = FindDiagnostic(
+        capture_, loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 34));
+    ASSERT_NE(diagnostic, nullptr);
+    EXPECT_EQ(provider.call_count, i < 2 ? 1u : 0u);
+    EXPECT_EQ(GetStringParam(*diagnostic, 0),
+              i < 2 ? "target packet diagnostic" : "unknown low asm mnemonic");
+  }
+}
+
 TEST_F(LowAsmParserTest, RejectsResultCountMismatch) {
   const auto& diagnostics = ParseExpectErrors(
       "low.func.def target<test.low.core> @result_count() asm {\n"

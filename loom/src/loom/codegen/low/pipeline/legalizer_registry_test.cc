@@ -91,7 +91,7 @@ TEST(LowLegalizerRegistryTest, TargetProvidersPrecedeGenericProviders) {
   };
   const loom_target_legalizer_provider_t target_provider = {
       .name = IREE_SVL("target"),
-      .scope = LOOM_LOW_DESCRIPTOR_SCOPE_SHARED,
+      .scope = {.target_stable_id = UINT64_C(1)},
       .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
       .rules = target_rules,
       .rule_count = IREE_ARRAYSIZE(target_rules),

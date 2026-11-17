@@ -433,6 +433,7 @@ loom_cc_library(
     deps = [
         ":error_defs",
         ":low_aliases",
+        ":target_info_defs",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/target:low_asm_diagnostics",

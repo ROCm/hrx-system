@@ -408,7 +408,8 @@ struct loom_target_provider_t {
       initialize_math_policy_registry;
   // Optional source legality providers contributed by this target.
   loom_target_low_legality_provider_list_t low_legality_provider_list;
-  // Optional source legalization providers contributed by this target.
+  // Optional source legalization providers scoped to this target's descriptor
+  // families or sets. Shared algorithms belong to the common Low registry.
   loom_target_legalizer_provider_list_t legalizer_provider_list;
   // Optional low-packet diagnostic providers contributed by this target.
   loom_target_low_packet_diagnostic_provider_list_t

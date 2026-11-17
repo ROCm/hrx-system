@@ -10,6 +10,7 @@
 #define LOOM_TARGET_LOW_ASM_DIAGNOSTICS_H_
 
 #include "iree/base/api.h"
+#include "loom/codegen/low/descriptor_scope.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/format/text/low_asm.h"
 
@@ -29,6 +30,8 @@ typedef iree_status_t (*loom_target_low_asm_diagnostic_try_unknown_packet_fn_t)(
 struct loom_target_low_asm_diagnostic_provider_t {
   // Stable provider name available to callbacks.
   iree_string_view_t name;
+  // Descriptor scope enforced before invoking the diagnostic callback.
+  loom_low_descriptor_scope_t scope;
   // Attempts to diagnose an unknown stable descriptor key or compact assembly
   // mnemonic. Sets |out_diagnostic->error| NULL when the name does not belong
   // to this provider.
