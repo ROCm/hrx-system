@@ -66,7 +66,7 @@ void store_compressed(Floats4 value, float* output,
 }
 
 // ----
-func.def public @load_packet(%input: buffer, %input_byte_offset: offset, %index: i64) -> (vector<2xi16>) {
+func.def public @load_packet(%input: buffer, %input_byte_offset: index, %index: i64) -> (vector<2xi16>) {
   %source_layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %input[%input_byte_offset] : buffer -> view<1024xi16, %source_layout>
   %6 = index.cast %index : i64 to index
@@ -74,7 +74,7 @@ func.def public @load_packet(%input: buffer, %input_byte_offset: offset, %index:
   func.return %7 : vector<2xi16>
 }
 
-func.def public @store_row(%value: vector<4xf32>, %output: buffer, %output_byte_offset: offset, %row: i64, %column: i64) {
+func.def public @store_row(%value: vector<4xf32>, %output: buffer, %output_byte_offset: index, %row: i64, %column: i64) {
   %destination_layout = encoding.layout.dense : encoding<layout>
   %destination = buffer.view %output[%output_byte_offset] : buffer -> view<16x32xf32, %destination_layout>
   %15 = index.cast %row : i64 to index
@@ -83,7 +83,7 @@ func.def public @store_row(%value: vector<4xf32>, %output: buffer, %output_byte_
   func.return
 }
 
-func.def public @load_dynamic_view(%input: buffer, %input_byte_offset: offset, %rows: i64, %row: i64, %column: i64) -> (vector<4xf32>) {
+func.def public @load_dynamic_view(%input: buffer, %input_byte_offset: index, %rows: i64, %row: i64, %column: i64) -> (vector<4xf32>) {
   %source_layout = encoding.layout.dense : encoding<layout>
   %source_dim0 = index.cast %rows : i64 to index
   %source = buffer.view %input[%input_byte_offset] : buffer -> view<[%source_dim0]x32xf32, %source_layout>
@@ -93,7 +93,7 @@ func.def public @load_dynamic_view(%input: buffer, %input_byte_offset: offset, %
   func.return %28 : vector<4xf32>
 }
 
-func.def public @load_volatile(%input: buffer, %input_byte_offset: offset, %index: i64) -> (vector<4xf32>) {
+func.def public @load_volatile(%input: buffer, %input_byte_offset: index, %index: i64) -> (vector<4xf32>) {
   %source_layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %input[%input_byte_offset] : buffer -> view<64xf32, %source_layout>
   %35 = index.cast %index : i64 to index
@@ -101,7 +101,7 @@ func.def public @load_volatile(%input: buffer, %input_byte_offset: offset, %inde
   func.return %36 : vector<4xf32>
 }
 
-func.def public @load_masked(%input: buffer, %input_byte_offset: offset, %index: i64, %mask: vector<4xi8>, %passthrough: vector<4xf32>) -> (vector<4xf32>) {
+func.def public @load_masked(%input: buffer, %input_byte_offset: index, %index: i64, %mask: vector<4xi8>, %passthrough: vector<4xf32>) -> (vector<4xf32>) {
   %source_layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %input[%input_byte_offset] : buffer -> view<64xf32, %source_layout>
   %45 = index.cast %index : i64 to index
@@ -111,7 +111,7 @@ func.def public @load_masked(%input: buffer, %input_byte_offset: offset, %index:
   func.return %48 : vector<4xf32>
 }
 
-func.def public @store_masked(%value: vector<4xf32>, %output: buffer, %output_byte_offset: offset, %index: i64, %mask: vector<4xi8>) {
+func.def public @store_masked(%value: vector<4xf32>, %output: buffer, %output_byte_offset: index, %index: i64, %mask: vector<4xi8>) {
   %destination_layout = encoding.layout.dense : encoding<layout>
   %destination = buffer.view %output[%output_byte_offset] : buffer -> view<64xf32, %destination_layout>
   %56 = index.cast %index : i64 to index
@@ -121,7 +121,7 @@ func.def public @store_masked(%value: vector<4xf32>, %output: buffer, %output_by
   func.return
 }
 
-func.def public @load_expanded(%input: buffer, %input_byte_offset: offset, %index: i64, %mask: vector<4xi8>, %passthrough: vector<4xf32>) -> (vector<4xf32>) {
+func.def public @load_expanded(%input: buffer, %input_byte_offset: index, %index: i64, %mask: vector<4xi8>, %passthrough: vector<4xf32>) -> (vector<4xf32>) {
   %source_layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %input[%input_byte_offset] : buffer -> view<64xf32, %source_layout>
   %67 = index.cast %index : i64 to index
@@ -131,7 +131,7 @@ func.def public @load_expanded(%input: buffer, %input_byte_offset: offset, %inde
   func.return %70 : vector<4xf32>
 }
 
-func.def public @store_compressed(%value: vector<4xf32>, %output: buffer, %output_byte_offset: offset, %index: i64, %mask: vector<4xi8>) {
+func.def public @store_compressed(%value: vector<4xf32>, %output: buffer, %output_byte_offset: index, %index: i64, %mask: vector<4xi8>) {
   %destination_layout = encoding.layout.dense : encoding<layout>
   %destination = buffer.view %output[%output_byte_offset] : buffer -> view<64xf32, %destination_layout>
   %78 = index.cast %index : i64 to index
@@ -173,7 +173,7 @@ Block load_block(const float* input, loomt::index row, loomt::index column) {
 }
 
 // ----
-func.def public @load_fragment(%input: buffer, %input_byte_offset: offset, %index: i64, %width: index) -> (%4: index, vector<[%4]xf32>) {
+func.def public @load_fragment(%input: buffer, %input_byte_offset: index, %index: i64, %width: index) -> (%4: index, vector<[%4]xf32>) {
   %source_layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %input[%input_byte_offset] : buffer -> view<4096xf32, %source_layout>
   %8 = index.cast %index : i64 to index
@@ -181,7 +181,7 @@ func.def public @load_fragment(%input: buffer, %input_byte_offset: offset, %inde
   func.return %width, %9 : index, vector<[%width]xf32>
 }
 
-func.def public @copy_fragment(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset, %index: i64, %width: index) {
+func.def public @copy_fragment(%input: buffer, %input_byte_offset: index, %output: buffer, %output_byte_offset: index, %index: i64, %width: index) {
   %source_layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %input[%input_byte_offset] : buffer -> view<4096xf32, %source_layout>
   %destination_layout = encoding.layout.dense : encoding<layout>
@@ -193,14 +193,14 @@ func.def public @copy_fragment(%input: buffer, %input_byte_offset: offset, %outp
   func.return
 }
 
-func.def public @load_tile(%input: buffer, %input_byte_offset: offset, %x: index, %y: index, %z: index, %rows: index, %columns: index) -> (%30: index, %31: index, vector<[%30]x4x[%31]xf32>) {
+func.def public @load_tile(%input: buffer, %input_byte_offset: index, %x: index, %y: index, %z: index, %rows: index, %columns: index) -> (%30: index, %31: index, vector<[%30]x4x[%31]xf32>) {
   %source_layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %input[%input_byte_offset] : buffer -> view<64x64x64xf32, %source_layout>
   %35 = vector.load<type_disjoint> %source[%x, %y, %z] : view<64x64x64xf32, %source_layout> -> vector<[%rows]x4x[%columns]xf32>
   func.return %rows, %columns, %35 : index, index, vector<[%rows]x4x[%columns]xf32>
 }
 
-func.def public @load_block(%input: buffer, %input_byte_offset: offset, %row: index, %column: index) -> (vector<2x4xf32>) {
+func.def public @load_block(%input: buffer, %input_byte_offset: index, %row: index, %column: index) -> (vector<2x4xf32>) {
   %source_layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %input[%input_byte_offset] : buffer -> view<64x64xf32, %source_layout>
   %43 = vector.load<type_disjoint> %source[%row, %column] : view<64x64xf32, %source_layout> -> vector<2x4xf32>

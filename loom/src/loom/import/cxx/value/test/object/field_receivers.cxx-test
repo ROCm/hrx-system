@@ -14,9 +14,9 @@ void run(unsigned* output) {
   cursor.reset();
 }
 // ----
-func.def public @run(%output: buffer, %output_byte_offset: offset) {
+func.def public @run(%output: buffer, %output_byte_offset: index) {
   %2 = func.call pure @Cursor__reset_value() : () -> (i32)
-  func.call @Cursor___Cursor_value(%2, %output, %output_byte_offset) : (i32, buffer, offset)
+  func.call @Cursor___Cursor_value(%2, %output, %output_byte_offset) : (i32, buffer, index)
   func.return
 }
 
@@ -25,7 +25,7 @@ func.def @Cursor__reset_value() -> (i32) {
   func.return %position : i32
 }
 
-func.def inline @Cursor___Cursor_value(%this_position: i32, %this_output: buffer, %this_output_byte_offset: offset) {
+func.def inline @Cursor___Cursor_value(%this_position: i32, %this_output: buffer, %this_output_byte_offset: index) {
   %8 = buffer.view %this_output[%this_output_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %this_position, %8[0] : i32, view<1xi32>
   func.return
@@ -216,58 +216,46 @@ float copy_receiver(float* input, int amount) {
 }
 
 // ----
-func.def public @copy_receiver(%input: buffer, %input_byte_offset: offset, %amount: i32) -> (f32) {
+func.def public @copy_receiver(%input: buffer, %input_byte_offset: index, %amount: i32) -> (f32) {
   %cursor_length$4 = scalar.constant 8 : i32
-  %shifted_pointer, %shifted_pointer_byte_offset, %shifted_length = func.call pure @Cursor__shifted_value(%input, %input_byte_offset, %cursor_length$4, %amount) : (buffer, offset, i32, i32) -> (buffer, offset, i32)
-  %previous_pointer, %previous_pointer_byte_offset, %previous_length, %cursor_pointer, %cursor_pointer_byte_offset, %cursor_length$13 = func.call pure @Cursor__advance_value(%input, %input_byte_offset, %cursor_length$4, %amount) : (buffer, offset, i32, i32) -> (buffer, offset, i32, buffer, offset, i32)
+  %shifted_pointer, %shifted_pointer_byte_offset, %shifted_length = func.call pure @Cursor__shifted_value(%input, %input_byte_offset, %cursor_length$4, %amount) : (buffer, index, i32, i32) -> (buffer, index, i32)
+  %previous_pointer, %previous_pointer_byte_offset, %previous_length, %cursor_pointer, %cursor_pointer_byte_offset, %cursor_length$13 = func.call pure @Cursor__advance_value(%input, %input_byte_offset, %cursor_length$4, %amount) : (buffer, index, i32, i32) -> (buffer, index, i32, buffer, index, i32)
   %14 = scalar.constant 0 : i32
-  %15 = scalar.extsi %14 : i32 to i64
-  %16 = scalar.constant 4 : i64
-  %17 = scalar.muli %15, %16 : i64
-  %18 = index.cast %shifted_pointer_byte_offset : offset to i64
-  %19 = scalar.addi %18, %17 : i64
-  %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
-  %21 = index.cast %20 : i64 to offset
-  %22 = buffer.view %shifted_pointer[%21] : buffer -> view<1xf32>
-  %23 = view.load<root_in_bounds|type_disjoint> %22[0] : view<1xf32> -> f32
-  %24 = scalar.constant 0 : i32
-  %25 = scalar.extsi %24 : i32 to i64
-  %26 = scalar.constant 4 : i64
-  %27 = scalar.muli %25, %26 : i64
-  %28 = index.cast %previous_pointer_byte_offset : offset to i64
-  %29 = scalar.addi %28, %27 : i64
-  %30 = scalar.assume %29 [range(%29, 0, 9223372036854775807)] : i64
-  %31 = index.cast %30 : i64 to offset
-  %32 = buffer.view %previous_pointer[%31] : buffer -> view<1xf32>
-  %33 = view.load<root_in_bounds|type_disjoint> %32[0] : view<1xf32> -> f32
-  %34 = scalar.addf %23, %33 : f32
-  %35 = scalar.sitofp %cursor_length$13 : i32 to f32
-  %36 = scalar.addf %34, %35 : f32
-  func.return %36 : f32
+  %15 = index.cast %14 : i32 to index
+  %16 = index.constant 4 : index
+  %17 = index.mul %15, %16 : index
+  %18 = index.add %shifted_pointer_byte_offset, %17 : index
+  %19 = buffer.view %shifted_pointer[%18] : buffer -> view<1xf32>
+  %20 = view.load<root_in_bounds|type_disjoint> %19[0] : view<1xf32> -> f32
+  %21 = scalar.constant 0 : i32
+  %22 = index.cast %21 : i32 to index
+  %23 = index.constant 4 : index
+  %24 = index.mul %22, %23 : index
+  %25 = index.add %previous_pointer_byte_offset, %24 : index
+  %26 = buffer.view %previous_pointer[%25] : buffer -> view<1xf32>
+  %27 = view.load<root_in_bounds|type_disjoint> %26[0] : view<1xf32> -> f32
+  %28 = scalar.addf %20, %27 : f32
+  %29 = scalar.sitofp %cursor_length$13 : i32 to f32
+  %30 = scalar.addf %28, %29 : f32
+  func.return %30 : f32
 }
 
-func.def @Cursor__shifted_value(%this_pointer: buffer, %this_pointer_byte_offset: offset, %this_length: i32, %amount: i32) -> (buffer, offset, i32) {
-  %44 = scalar.extsi %amount : i32 to i64
-  %45 = scalar.constant 4 : i64
-  %46 = scalar.muli %44, %45 : i64
-  %47 = index.cast %this_pointer_byte_offset : offset to i64
-  %48 = scalar.addi %47, %46 : i64
-  %49 = scalar.assume %48 [range(%48, 0, 9223372036854775807)] : i64
-  %copy_pointer_byte_offset = index.cast %49 : i64 to offset
+func.def @Cursor__shifted_value(%this_pointer: buffer, %this_pointer_byte_offset: index, %this_length: i32, %amount: i32) -> (buffer, index, i32) {
+  %38 = index.cast %amount : i32 to index
+  %39 = index.constant 4 : index
+  %40 = index.mul %38, %39 : index
+  %copy_pointer_byte_offset = index.add %this_pointer_byte_offset, %40 : index
   %copy_length = scalar.subi %this_length, %amount : i32
-  func.return %this_pointer, %copy_pointer_byte_offset, %copy_length : buffer, offset, i32
+  func.return %this_pointer, %copy_pointer_byte_offset, %copy_length : buffer, index, i32
 }
 
-func.def @Cursor__advance_value(%this_pointer: buffer, %this_pointer_byte_offset: offset, %this_length: i32, %amount: i32) -> (buffer, offset, i32, buffer, offset, i32) {
-  %62 = scalar.extsi %amount : i32 to i64
-  %63 = scalar.constant 4 : i64
-  %64 = scalar.muli %62, %63 : i64
-  %65 = index.cast %this_pointer_byte_offset : offset to i64
-  %66 = scalar.addi %65, %64 : i64
-  %67 = scalar.assume %66 [range(%66, 0, 9223372036854775807)] : i64
-  %pointer_byte_offset = index.cast %67 : i64 to offset
+func.def @Cursor__advance_value(%this_pointer: buffer, %this_pointer_byte_offset: index, %this_length: i32, %amount: i32) -> (buffer, index, i32, buffer, index, i32) {
+  %53 = index.cast %amount : i32 to index
+  %54 = index.constant 4 : index
+  %55 = index.mul %53, %54 : index
+  %pointer_byte_offset = index.add %this_pointer_byte_offset, %55 : index
   %length = scalar.subi %this_length, %amount : i32
-  func.return %this_pointer, %this_pointer_byte_offset, %this_length, %this_pointer, %pointer_byte_offset, %length : buffer, offset, i32, buffer, offset, i32
+  func.return %this_pointer, %this_pointer_byte_offset, %this_length, %this_pointer, %pointer_byte_offset, %length : buffer, index, i32, buffer, index, i32
 }
 
 // ====
@@ -287,8 +275,8 @@ int copy_base(int value) {
 }
 
 // ----
-func.def public @copy_storage(%input: buffer, %input_byte_offset: offset) -> (i32) {
-  %3 = func.call readonly @Base__copy_storage(%input, %input_byte_offset) : (buffer, offset) -> (i32)
+func.def public @copy_storage(%input: buffer, %input_byte_offset: index) -> (i32) {
+  %3 = func.call readonly @Base__copy_storage(%input, %input_byte_offset) : (buffer, index) -> (i32)
   func.return %3 : i32
 }
 
@@ -298,9 +286,9 @@ func.def public @copy_base(%value: i32) -> (i32) {
   func.return %7 : i32
 }
 
-func.def @Base__copy_storage(%this: buffer, %this_byte_offset: offset) -> (i32) {
-  %11 = index.constant 0 : offset
-  %12 = index.add %this_byte_offset, %11 : offset
+func.def @Base__copy_storage(%this: buffer, %this_byte_offset: index) -> (i32) {
+  %11 = index.constant 0 : index
+  %12 = index.add %this_byte_offset, %11 : index
   %13 = buffer.view %this[%12] : buffer -> view<1xi32>
   %14 = view.load<root_in_bounds|type_disjoint> %13[0] : view<1xi32> -> i32
   func.return %14 : i32

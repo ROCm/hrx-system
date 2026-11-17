@@ -38,6 +38,17 @@ func.def @shared_allocation(%lhs: buffer, %rhs: buffer, %left: offset, %right: o
   func.return %equal : i1
 }
 
+func.def @signed_origin(%root: buffer, %left: index, %right: index) -> (i1) {
+  %equal = buffer.compare.address eq, %root[%left], %root[%right]
+  func.return %equal : i1
+}
+
+func.def @mixed_origin(%root: buffer, %left: index, %right: offset) -> (i1, i1) {
+  %equal = buffer.compare.address eq, %root[%left], %root[%right]
+  %different = buffer.compare.address ne, %root[%right], %root[%left]
+  func.return %equal, %different : i1, i1
+}
+
 // ----
 func.def @same_origin(%buffer: buffer, %begin: offset, %end: offset) -> (i1, i1) {
   %equal = index.cmp eq, %begin, %end : offset
@@ -51,8 +62,8 @@ func.def @identity_through_assumption(%buffer: buffer, %begin: offset, %end: off
 }
 
 func.def @independent_roots(%lhs: buffer, %rhs: buffer, %position: offset) -> (i1) {
-  %37 = index.constant 0 : offset
-  %equal = buffer.compare.address eq, %lhs[%37], %rhs[%37]
+  %49 = index.constant 0 : offset
+  %equal = buffer.compare.address eq, %lhs[%49], %rhs[%49]
   func.return %equal : i1
 }
 
@@ -67,4 +78,19 @@ func.def @shared_allocation(%lhs: buffer, %rhs: buffer, %left: offset, %right: o
   %shared = buffer.assume.same_root %lhs, %rhs : buffer
   %equal = buffer.compare.address eq, %shared[%left], %rhs[%right]
   func.return %equal : i1
+}
+
+func.def @signed_origin(%root: buffer, %left: index, %right: index) -> (i1) {
+  %equal = index.cmp eq, %left, %right : index
+  func.return %equal : i1
+}
+
+func.def @mixed_origin(%root: buffer, %left: index, %right: offset) -> (i1, i1) {
+  %57 = index.cast %left : index to i64
+  %58 = index.cast %right : offset to i64
+  %equal = scalar.cmpi eq, %57, %58 : i64
+  %54 = index.cast %right : offset to i64
+  %55 = index.cast %left : index to i64
+  %different = scalar.cmpi ne, %54, %55 : i64
+  func.return %equal, %different : i1, i1
 }

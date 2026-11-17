@@ -171,8 +171,10 @@ buffer_compare_address = Op(
     group=buffer_ops,
     doc=(
         "Compare two byte positions without exposing their addresses. Each "
-        "nonnull buffer must be live and its offset must be in bounds or at "
-        "the one-past endpoint. A null buffer permits only offset zero and "
+        "nonnull buffer must be live and its selected position must be in bounds or at "
+        "the one-past endpoint. Signed index positions may precede an interior "
+        "origin; offset positions remain nonnegative. A null buffer permits only "
+        "position zero and "
         "differs from every nonnull buffer, including empty storage. Aliased "
         "buffers compare by their selected positions, not wrapper identity. "
         "An empty root without native storage retains a distinct logical "
@@ -181,9 +183,9 @@ buffer_compare_address = Op(
     ),
     operands=[
         Operand("lhs", BUFFER, doc="Left storage reference."),
-        Operand("lhs_offset", OFFSET, doc="Left byte position."),
+        Operand("lhs_offset", ADDRESS, doc="Left byte position."),
         Operand("rhs", BUFFER, doc="Right storage reference."),
-        Operand("rhs_offset", OFFSET, doc="Right byte position."),
+        Operand("rhs_offset", ADDRESS, doc="Right byte position."),
     ],
     results=[Result("result", I1, doc="Result of the selected predicate.")],
     attrs=[AttrDef("predicate", ATTR_TYPE_ENUM, enum_def=BufferAddressPredicate)],
@@ -226,15 +228,16 @@ buffer_distance = Op(
         "target lowering; otherwise compilation fails. Sharing an allocation "
         "without a common byte origin is insufficient. Nonnull positions must "
         "be live and in bounds or one-past. Two null positions at offset zero "
-        "have distance zero. Offset values lie in [0, INT64_MAX], so their "
-        "signed difference fits i64 and must also fit the signed result type. "
+        "have distance zero. Positions may be signed index displacements from an "
+        "interior origin or nonnegative offsets. Their mathematical difference "
+        "must fit the signed result type. "
         "No address or payload bytes are observed."
     ),
     operands=[
         Operand("lhs", BUFFER, doc="Left storage root."),
-        Operand("lhs_offset", OFFSET, doc="Left root-relative byte position."),
+        Operand("lhs_offset", ADDRESS, doc="Left root-relative byte position."),
         Operand("rhs", BUFFER, doc="Right storage root."),
-        Operand("rhs_offset", OFFSET, doc="Right root-relative byte position."),
+        Operand("rhs_offset", ADDRESS, doc="Right root-relative byte position."),
     ],
     results=[Result("result", INTEGER, doc="Signed left-minus-right byte distance.")],
     traits=[PURE],
@@ -782,7 +785,7 @@ buffer_load_i8_u = Op(
         ),
         Operand(
             "byte_offset",
-            OFFSET,
+            ADDRESS,
             doc="Byte offset into the source buffer.",
             role=OperandRole.ACCESS_PATH,
         ),
@@ -820,7 +823,7 @@ buffer_store_i8 = Op(
         ),
         Operand(
             "byte_offset",
-            OFFSET,
+            ADDRESS,
             doc="Byte offset into the target buffer.",
             role=OperandRole.ACCESS_PATH,
         ),
@@ -856,9 +859,9 @@ buffer_copy = Op(
     ),
     operands=[
         Operand("source", BUFFER, doc="Buffer root read by the copy.", role=OperandRole.ACCESS_PATH),
-        Operand("source_offset", OFFSET, doc="Source byte offset.", role=OperandRole.ACCESS_PATH),
+        Operand("source_offset", ADDRESS, doc="Source byte offset.", role=OperandRole.ACCESS_PATH),
         Operand("target", BUFFER, doc="Buffer root written by the copy.", role=OperandRole.ACCESS_PATH),
-        Operand("target_offset", OFFSET, doc="Target byte offset.", role=OperandRole.ACCESS_PATH),
+        Operand("target_offset", ADDRESS, doc="Target byte offset.", role=OperandRole.ACCESS_PATH),
         Operand("byte_length", OFFSET, doc="Number of bytes to copy.", role=OperandRole.ACCESS_PATH),
     ],
     effects=[Reads("source"), Writes("target")],
@@ -902,7 +905,7 @@ buffer_fill = Op(
             doc="Raw scalar bit pattern to repeat.",
         ),
         Operand("target", BUFFER, doc="Buffer root receiving the pattern.", role=OperandRole.ACCESS_PATH),
-        Operand("target_offset", OFFSET, doc="Target byte offset.", role=OperandRole.ACCESS_PATH),
+        Operand("target_offset", ADDRESS, doc="Target byte offset.", role=OperandRole.ACCESS_PATH),
         Operand("byte_length", OFFSET, doc="Number of bytes to fill.", role=OperandRole.ACCESS_PATH),
     ],
     effects=[Writes("target")],
@@ -934,9 +937,9 @@ buffer_compare = Op(
     doc=("Lexicographically compare equal-length ranges as unsigned bytes and return canonical i32 -1, 0, or +1. A zero byte length returns zero and performs no byte access."),
     operands=[
         Operand("lhs", BUFFER, doc="Left buffer root.", role=OperandRole.ACCESS_PATH),
-        Operand("lhs_offset", OFFSET, doc="Left byte offset.", role=OperandRole.ACCESS_PATH),
+        Operand("lhs_offset", ADDRESS, doc="Left byte offset.", role=OperandRole.ACCESS_PATH),
         Operand("rhs", BUFFER, doc="Right buffer root.", role=OperandRole.ACCESS_PATH),
-        Operand("rhs_offset", OFFSET, doc="Right byte offset.", role=OperandRole.ACCESS_PATH),
+        Operand("rhs_offset", ADDRESS, doc="Right byte offset.", role=OperandRole.ACCESS_PATH),
         Operand("byte_length", OFFSET, doc="Number of bytes to compare.", role=OperandRole.ACCESS_PATH),
     ],
     results=[

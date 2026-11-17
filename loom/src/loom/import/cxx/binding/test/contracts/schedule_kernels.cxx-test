@@ -30,53 +30,49 @@ __device__ __forceinline__ int sum(const int* input, unsigned row,
 SCHEDULED_SUM(1, 1)
 #undef SCHEDULED_SUM
 // ----
-func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: offset, %row: i32, %columns: i32, %factor: i32, %depth: i32) -> (i32) {
+func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: index, %row: i32, %columns: i32, %factor: i32, %depth: i32) -> (i32) {
   %total$7 = scalar.constant 0 : i32
-  %67 = index.constant 0 : offset
+  %63 = index.constant 0 : offset
   %10 = index.cast %columns : i32 to offset
   %11 = index.constant 1 : offset
   %12 = scalar.extui %depth : i32 to i64
   %13 = index.cast %12 : i64 to index
   %14 = scalar.extui %factor : i32 to i64
   %15 = index.cast %14 : i64 to index
-  %total$18 = scf.for %column = [%67 to %10 step %11](%total$17 = %total$7 : i32) -> (i32) pipeline(%13) unroll(%15) schedule(linear) {
+  %total$18 = scf.for %column = [%63 to %10 step %11](%total$17 = %total$7 : i32) -> (i32) pipeline(%13) unroll(%15) schedule(linear) {
     %19 = index.cast %column : offset to i32
     %20 = scalar.muli %row, %columns : i32
     %21 = scalar.addi %20, %19 : i32
     %22 = scalar.extui %21 : i32 to i64
-    %68 = scalar.constant 2 : i64
-    %69 = scalar.shli %22, %68 : i64
-    %25 = index.cast %input_byte_offset : offset to i64
-    %26 = scalar.addi %25, %69 : i64
-    %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
-    %28 = index.cast %27 : i64 to offset
-    %29 = buffer.view %input[%28] : buffer -> view<1xi32>
-    %30 = view.load<root_in_bounds|type_disjoint> %29[0] : view<1xi32> -> i32
-    %total$31 = scalar.addi %total$17, %30 : i32
-    scf.yield %total$31 : i32
+    %23 = index.cast %22 : i64 to index
+    %24 = index.constant 4 : index
+    %64 = index.madd %23, %24, %input_byte_offset : index
+    %27 = buffer.view %input[%64] : buffer -> view<1xi32>
+    %28 = view.load<root_in_bounds|type_disjoint> %27[0] : view<1xi32> -> i32
+    %total$29 = scalar.addi %total$17, %28 : i32
+    scf.yield %total$29 : i32
   }
   func.return %total$18 : i32
 }
 
 kernel.def @scheduled_sum_unroll_1_depth_1() {
-  %36 = index.constant 1 : index
-  %39 = index.constant 64 : index
-  kernel.launch.config workgroups(%36, %36, %36) workgroup_size(%39, %36, %36) : index
+  %34 = index.constant 1 : index
+  %37 = index.constant 64 : index
+  kernel.launch.config workgroups(%34, %34, %34) workgroup_size(%37, %34, %34) : index
 } launch(%input: buffer, %output: buffer, %rows: i32, %columns: i32) {
-  %input_byte_offset = index.constant 0 : offset
+  %input_byte_offset = index.constant 0 : index
   %workitem_id_x = kernel.workitem.id<x> : index
   %row = index.cast %workitem_id_x : index to i32
-  %46 = scalar.cmpi ult, %row, %rows : i32
-  scf.if %46 {
+  %44 = scalar.cmpi ult, %row, %rows : i32
+  scf.if %44 {
     %factor = scalar.constant 1 : i32
-    %58 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %factor) : (buffer, offset, i32, i32, i32, i32) -> (i32)
-    %59 = scalar.extui %row : i32 to i64
-    %73 = scalar.constant 2 : i64
-    %74 = scalar.shli %59, %73 : i64
-    %64 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
-    %65 = index.cast %64 : i64 to offset
-    %66 = buffer.view %output[%65] : buffer -> view<1xi32>
-    view.store<root_in_bounds|type_disjoint> %58, %66[0] : i32, view<1xi32>
+    %56 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %factor) : (buffer, index, i32, i32, i32, i32) -> (i32)
+    %57 = scalar.extui %row : i32 to i64
+    %58 = index.cast %57 : i64 to index
+    %59 = index.constant 4 : index
+    %60 = index.mul %58, %59 : index
+    %62 = buffer.view %output[%60] : buffer -> view<1xi32>
+    view.store<root_in_bounds|type_disjoint> %56, %62[0] : i32, view<1xi32>
   }
   kernel.return
 }
@@ -114,54 +110,50 @@ __device__ __forceinline__ int sum(const int* input, unsigned row,
 SCHEDULED_SUM(1, 2)
 #undef SCHEDULED_SUM
 // ----
-func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: offset, %row: i32, %columns: i32, %factor: i32, %depth: i32) -> (i32) {
+func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: index, %row: i32, %columns: i32, %factor: i32, %depth: i32) -> (i32) {
   %total$7 = scalar.constant 0 : i32
-  %67 = index.constant 0 : offset
+  %63 = index.constant 0 : offset
   %10 = index.cast %columns : i32 to offset
   %11 = index.constant 1 : offset
   %12 = scalar.extui %depth : i32 to i64
   %13 = index.cast %12 : i64 to index
   %14 = scalar.extui %factor : i32 to i64
   %15 = index.cast %14 : i64 to index
-  %total$18 = scf.for %column = [%67 to %10 step %11](%total$17 = %total$7 : i32) -> (i32) pipeline(%13) unroll(%15) schedule(linear) {
+  %total$18 = scf.for %column = [%63 to %10 step %11](%total$17 = %total$7 : i32) -> (i32) pipeline(%13) unroll(%15) schedule(linear) {
     %19 = index.cast %column : offset to i32
     %20 = scalar.muli %row, %columns : i32
     %21 = scalar.addi %20, %19 : i32
     %22 = scalar.extui %21 : i32 to i64
-    %68 = scalar.constant 2 : i64
-    %69 = scalar.shli %22, %68 : i64
-    %25 = index.cast %input_byte_offset : offset to i64
-    %26 = scalar.addi %25, %69 : i64
-    %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
-    %28 = index.cast %27 : i64 to offset
-    %29 = buffer.view %input[%28] : buffer -> view<1xi32>
-    %30 = view.load<root_in_bounds|type_disjoint> %29[0] : view<1xi32> -> i32
-    %total$31 = scalar.addi %total$17, %30 : i32
-    scf.yield %total$31 : i32
+    %23 = index.cast %22 : i64 to index
+    %24 = index.constant 4 : index
+    %64 = index.madd %23, %24, %input_byte_offset : index
+    %27 = buffer.view %input[%64] : buffer -> view<1xi32>
+    %28 = view.load<root_in_bounds|type_disjoint> %27[0] : view<1xi32> -> i32
+    %total$29 = scalar.addi %total$17, %28 : i32
+    scf.yield %total$29 : i32
   }
   func.return %total$18 : i32
 }
 
 kernel.def @scheduled_sum_unroll_1_depth_2() {
-  %36 = index.constant 1 : index
-  %39 = index.constant 64 : index
-  kernel.launch.config workgroups(%36, %36, %36) workgroup_size(%39, %36, %36) : index
+  %34 = index.constant 1 : index
+  %37 = index.constant 64 : index
+  kernel.launch.config workgroups(%34, %34, %34) workgroup_size(%37, %34, %34) : index
 } launch(%input: buffer, %output: buffer, %rows: i32, %columns: i32) {
-  %input_byte_offset = index.constant 0 : offset
+  %input_byte_offset = index.constant 0 : index
   %workitem_id_x = kernel.workitem.id<x> : index
   %row = index.cast %workitem_id_x : index to i32
-  %46 = scalar.cmpi ult, %row, %rows : i32
-  scf.if %46 {
+  %44 = scalar.cmpi ult, %row, %rows : i32
+  scf.if %44 {
     %factor = scalar.constant 1 : i32
     %depth = scalar.constant 2 : i32
-    %58 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %depth) : (buffer, offset, i32, i32, i32, i32) -> (i32)
-    %59 = scalar.extui %row : i32 to i64
-    %73 = scalar.constant 2 : i64
-    %74 = scalar.shli %59, %73 : i64
-    %64 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
-    %65 = index.cast %64 : i64 to offset
-    %66 = buffer.view %output[%65] : buffer -> view<1xi32>
-    view.store<root_in_bounds|type_disjoint> %58, %66[0] : i32, view<1xi32>
+    %56 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %depth) : (buffer, index, i32, i32, i32, i32) -> (i32)
+    %57 = scalar.extui %row : i32 to i64
+    %58 = index.cast %57 : i64 to index
+    %59 = index.constant 4 : index
+    %60 = index.mul %58, %59 : index
+    %62 = buffer.view %output[%60] : buffer -> view<1xi32>
+    view.store<root_in_bounds|type_disjoint> %56, %62[0] : i32, view<1xi32>
   }
   kernel.return
 }
@@ -199,54 +191,50 @@ __device__ __forceinline__ int sum(const int* input, unsigned row,
 SCHEDULED_SUM(3, 1)
 #undef SCHEDULED_SUM
 // ----
-func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: offset, %row: i32, %columns: i32, %factor: i32, %depth: i32) -> (i32) {
+func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: index, %row: i32, %columns: i32, %factor: i32, %depth: i32) -> (i32) {
   %total$7 = scalar.constant 0 : i32
-  %67 = index.constant 0 : offset
+  %63 = index.constant 0 : offset
   %10 = index.cast %columns : i32 to offset
   %11 = index.constant 1 : offset
   %12 = scalar.extui %depth : i32 to i64
   %13 = index.cast %12 : i64 to index
   %14 = scalar.extui %factor : i32 to i64
   %15 = index.cast %14 : i64 to index
-  %total$18 = scf.for %column = [%67 to %10 step %11](%total$17 = %total$7 : i32) -> (i32) pipeline(%13) unroll(%15) schedule(linear) {
+  %total$18 = scf.for %column = [%63 to %10 step %11](%total$17 = %total$7 : i32) -> (i32) pipeline(%13) unroll(%15) schedule(linear) {
     %19 = index.cast %column : offset to i32
     %20 = scalar.muli %row, %columns : i32
     %21 = scalar.addi %20, %19 : i32
     %22 = scalar.extui %21 : i32 to i64
-    %68 = scalar.constant 2 : i64
-    %69 = scalar.shli %22, %68 : i64
-    %25 = index.cast %input_byte_offset : offset to i64
-    %26 = scalar.addi %25, %69 : i64
-    %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
-    %28 = index.cast %27 : i64 to offset
-    %29 = buffer.view %input[%28] : buffer -> view<1xi32>
-    %30 = view.load<root_in_bounds|type_disjoint> %29[0] : view<1xi32> -> i32
-    %total$31 = scalar.addi %total$17, %30 : i32
-    scf.yield %total$31 : i32
+    %23 = index.cast %22 : i64 to index
+    %24 = index.constant 4 : index
+    %64 = index.madd %23, %24, %input_byte_offset : index
+    %27 = buffer.view %input[%64] : buffer -> view<1xi32>
+    %28 = view.load<root_in_bounds|type_disjoint> %27[0] : view<1xi32> -> i32
+    %total$29 = scalar.addi %total$17, %28 : i32
+    scf.yield %total$29 : i32
   }
   func.return %total$18 : i32
 }
 
 kernel.def @scheduled_sum_unroll_3_depth_1() {
-  %36 = index.constant 1 : index
-  %39 = index.constant 64 : index
-  kernel.launch.config workgroups(%36, %36, %36) workgroup_size(%39, %36, %36) : index
+  %34 = index.constant 1 : index
+  %37 = index.constant 64 : index
+  kernel.launch.config workgroups(%34, %34, %34) workgroup_size(%37, %34, %34) : index
 } launch(%input: buffer, %output: buffer, %rows: i32, %columns: i32) {
-  %input_byte_offset = index.constant 0 : offset
+  %input_byte_offset = index.constant 0 : index
   %workitem_id_x = kernel.workitem.id<x> : index
   %row = index.cast %workitem_id_x : index to i32
-  %46 = scalar.cmpi ult, %row, %rows : i32
-  scf.if %46 {
+  %44 = scalar.cmpi ult, %row, %rows : i32
+  scf.if %44 {
     %factor = scalar.constant 3 : i32
     %depth = scalar.constant 1 : i32
-    %58 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %depth) : (buffer, offset, i32, i32, i32, i32) -> (i32)
-    %59 = scalar.extui %row : i32 to i64
-    %73 = scalar.constant 2 : i64
-    %74 = scalar.shli %59, %73 : i64
-    %64 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
-    %65 = index.cast %64 : i64 to offset
-    %66 = buffer.view %output[%65] : buffer -> view<1xi32>
-    view.store<root_in_bounds|type_disjoint> %58, %66[0] : i32, view<1xi32>
+    %56 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %depth) : (buffer, index, i32, i32, i32, i32) -> (i32)
+    %57 = scalar.extui %row : i32 to i64
+    %58 = index.cast %57 : i64 to index
+    %59 = index.constant 4 : index
+    %60 = index.mul %58, %59 : index
+    %62 = buffer.view %output[%60] : buffer -> view<1xi32>
+    view.store<root_in_bounds|type_disjoint> %56, %62[0] : i32, view<1xi32>
   }
   kernel.return
 }
@@ -284,54 +272,50 @@ __device__ __forceinline__ int sum(const int* input, unsigned row,
 SCHEDULED_SUM(3, 2)
 #undef SCHEDULED_SUM
 // ----
-func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: offset, %row: i32, %columns: i32, %factor: i32, %depth: i32) -> (i32) {
+func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: index, %row: i32, %columns: i32, %factor: i32, %depth: i32) -> (i32) {
   %total$7 = scalar.constant 0 : i32
-  %67 = index.constant 0 : offset
+  %63 = index.constant 0 : offset
   %10 = index.cast %columns : i32 to offset
   %11 = index.constant 1 : offset
   %12 = scalar.extui %depth : i32 to i64
   %13 = index.cast %12 : i64 to index
   %14 = scalar.extui %factor : i32 to i64
   %15 = index.cast %14 : i64 to index
-  %total$18 = scf.for %column = [%67 to %10 step %11](%total$17 = %total$7 : i32) -> (i32) pipeline(%13) unroll(%15) schedule(linear) {
+  %total$18 = scf.for %column = [%63 to %10 step %11](%total$17 = %total$7 : i32) -> (i32) pipeline(%13) unroll(%15) schedule(linear) {
     %19 = index.cast %column : offset to i32
     %20 = scalar.muli %row, %columns : i32
     %21 = scalar.addi %20, %19 : i32
     %22 = scalar.extui %21 : i32 to i64
-    %68 = scalar.constant 2 : i64
-    %69 = scalar.shli %22, %68 : i64
-    %25 = index.cast %input_byte_offset : offset to i64
-    %26 = scalar.addi %25, %69 : i64
-    %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
-    %28 = index.cast %27 : i64 to offset
-    %29 = buffer.view %input[%28] : buffer -> view<1xi32>
-    %30 = view.load<root_in_bounds|type_disjoint> %29[0] : view<1xi32> -> i32
-    %total$31 = scalar.addi %total$17, %30 : i32
-    scf.yield %total$31 : i32
+    %23 = index.cast %22 : i64 to index
+    %24 = index.constant 4 : index
+    %64 = index.madd %23, %24, %input_byte_offset : index
+    %27 = buffer.view %input[%64] : buffer -> view<1xi32>
+    %28 = view.load<root_in_bounds|type_disjoint> %27[0] : view<1xi32> -> i32
+    %total$29 = scalar.addi %total$17, %28 : i32
+    scf.yield %total$29 : i32
   }
   func.return %total$18 : i32
 }
 
 kernel.def @scheduled_sum_unroll_3_depth_2() {
-  %36 = index.constant 1 : index
-  %39 = index.constant 64 : index
-  kernel.launch.config workgroups(%36, %36, %36) workgroup_size(%39, %36, %36) : index
+  %34 = index.constant 1 : index
+  %37 = index.constant 64 : index
+  kernel.launch.config workgroups(%34, %34, %34) workgroup_size(%37, %34, %34) : index
 } launch(%input: buffer, %output: buffer, %rows: i32, %columns: i32) {
-  %input_byte_offset = index.constant 0 : offset
+  %input_byte_offset = index.constant 0 : index
   %workitem_id_x = kernel.workitem.id<x> : index
   %row = index.cast %workitem_id_x : index to i32
-  %46 = scalar.cmpi ult, %row, %rows : i32
-  scf.if %46 {
+  %44 = scalar.cmpi ult, %row, %rows : i32
+  scf.if %44 {
     %factor = scalar.constant 3 : i32
     %depth = scalar.constant 2 : i32
-    %58 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %depth) : (buffer, offset, i32, i32, i32, i32) -> (i32)
-    %59 = scalar.extui %row : i32 to i64
-    %73 = scalar.constant 2 : i64
-    %74 = scalar.shli %59, %73 : i64
-    %64 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
-    %65 = index.cast %64 : i64 to offset
-    %66 = buffer.view %output[%65] : buffer -> view<1xi32>
-    view.store<root_in_bounds|type_disjoint> %58, %66[0] : i32, view<1xi32>
+    %56 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %depth) : (buffer, index, i32, i32, i32, i32) -> (i32)
+    %57 = scalar.extui %row : i32 to i64
+    %58 = index.cast %57 : i64 to index
+    %59 = index.constant 4 : index
+    %60 = index.mul %58, %59 : index
+    %62 = buffer.view %output[%60] : buffer -> view<1xi32>
+    view.store<root_in_bounds|type_disjoint> %56, %62[0] : i32, view<1xi32>
   }
   kernel.return
 }

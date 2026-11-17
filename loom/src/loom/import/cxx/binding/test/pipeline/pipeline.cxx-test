@@ -146,13 +146,13 @@ func.def public @pooled_allocations(%count: i64, %native_count: index, %byte_len
   %53 = index.constant 4 : offset
   %54 = index.scale %52, %53 : index, offset -> offset
   %55 = buffer.alloca<private> pool(%pool) align(4) %54 : buffer
-  %56 = index.constant 0 : offset
+  %56 = index.constant 0 : index
   %57 = index.constant 4 : offset
   %58 = index.scale %native_count, %57 : index, offset -> offset
   %59 = buffer.alloca<workgroup> pool(%pool) align(4) %58 : buffer
-  %60 = index.constant 0 : offset
+  %60 = index.constant 0 : index
   %61 = buffer.alloca<private> pool(%pool) align(1) %byte_length : buffer
-  %62 = index.constant 0 : offset
+  %62 = index.constant 0 : index
   func.return
 }
 
@@ -206,7 +206,7 @@ command.def public @launch_materialized(%input_dim0: index, %input_layout: encod
   %4 = scalar.extsi %3 : i32 to i64
   %5 = index.cast %4 : i64 to offset
   %scratch = buffer.alloca<global> align(64) %5 : buffer
-  %scratch_byte_offset = index.constant 0 : offset
+  %scratch_byte_offset = index.constant 0 : index
   kernel.launch @materialized(%input, %scratch) : (view<[%input_dim0]x4xf32, %input_layout>, buffer)
   command.return
 }
@@ -252,7 +252,7 @@ pipeline.def<kernel> public target(@worker_target) @resident(%factor: i32, %colu
   %8 = index.constant 1 : offset
   %9 = index.scale %7, %8 : index, offset -> offset
   %scratch = buffer.alloca<workgroup> pool(%pool) align(64) %9 : buffer
-  %scratch_byte_offset = index.constant 0 : offset
+  %scratch_byte_offset = index.constant 0 : index
   pipeline.compose @child[%factor](%output) : [i32](buffer)
   pipeline.strand target(@worker_target) workers([%column, 2], [%count, 1], [1, 1]) {
     %workitem_id_x = kernel.workitem.id<x> : index

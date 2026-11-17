@@ -100,27 +100,23 @@ func.def public @lane(%values: vector<4xf8E4M3>, %index: i32) -> (f8E4M3) {
   func.return %37 : f8E4M3
 }
 
-func.def public @copy(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset, %index: i32) {
+func.def public @copy(%input: buffer, %input_byte_offset: index, %output: buffer, %output_byte_offset: index, %index: i32) {
   %43 = scalar.extui %index : i32 to i64
-  %44 = scalar.constant 4 : i64
-  %45 = scalar.muli %43, %44 : i64
-  %46 = index.cast %input_byte_offset : offset to i64
-  %47 = scalar.addi %46, %45 : i64
-  %48 = scalar.assume %47 [range(%47, 0, 9223372036854775807)] : i64
-  %49 = index.cast %48 : i64 to offset
-  %50 = buffer.view %input[%49] : buffer -> view<4xf8E4M3>
-  %51 = vector.load<root_in_bounds> %50[0] : view<4xf8E4M3> -> vector<4xf8E4M3>
-  %52 = scalar.constant 1 : i32
-  %53 = scalar.addi %index, %52 : i32
-  %54 = scalar.extui %53 : i32 to i64
-  %55 = scalar.constant 4 : i64
-  %56 = scalar.muli %54, %55 : i64
-  %57 = index.cast %output_byte_offset : offset to i64
-  %58 = scalar.addi %57, %56 : i64
-  %59 = scalar.assume %58 [range(%58, 0, 9223372036854775807)] : i64
-  %60 = index.cast %59 : i64 to offset
-  %61 = buffer.view %output[%60] : buffer -> view<4xf8E4M3>
-  vector.store<root_in_bounds> %51, %61[0] : vector<4xf8E4M3>, view<4xf8E4M3>
+  %44 = index.cast %43 : i64 to index
+  %45 = index.constant 4 : index
+  %46 = index.mul %44, %45 : index
+  %47 = index.add %input_byte_offset, %46 : index
+  %48 = buffer.view %input[%47] : buffer -> view<4xf8E4M3>
+  %49 = vector.load<root_in_bounds> %48[0] : view<4xf8E4M3> -> vector<4xf8E4M3>
+  %50 = scalar.constant 1 : i32
+  %51 = scalar.addi %index, %50 : i32
+  %52 = scalar.extui %51 : i32 to i64
+  %53 = index.cast %52 : i64 to index
+  %54 = index.constant 4 : index
+  %55 = index.mul %53, %54 : index
+  %56 = index.add %output_byte_offset, %55 : index
+  %57 = buffer.view %output[%56] : buffer -> view<4xf8E4M3>
+  vector.store<root_in_bounds> %49, %57[0] : vector<4xf8E4M3>, view<4xf8E4M3>
   func.return
 }
 
@@ -150,7 +146,7 @@ float element(const float8_e4m3fn_t* input, unsigned row, unsigned column) {
   return loom::view::load(source, row, column);
 }
 // ----
-func.def public @element(%input: buffer, %input_byte_offset: offset, %row: i32, %column: i32) -> (f32) {
+func.def public @element(%input: buffer, %input_byte_offset: index, %row: i32, %column: i32) -> (f32) {
   %source_layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %input[%input_byte_offset] : buffer -> view<4x8xf8E4M3, %source_layout>
   %7 = scalar.extui %row : i32 to i64

@@ -12,26 +12,19 @@ unsigned observations(const volatile unsigned* input, volatile unsigned* output)
   return first + second;
 }
 // ----
-func.def public @observations(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) -> (i32) {
-  %9 = index.cast %input_byte_offset : offset to i64
-  %11 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
-  %12 = index.cast %11 : i64 to offset
-  %13 = buffer.view %input[%12] : buffer -> view<1xi32>
-  %14 = view.load<volatile|root_in_bounds|type_disjoint> %13[0] : view<1xi32> -> i32
-  %24 = view.load<volatile|root_in_bounds|type_disjoint> %13[0] : view<1xi32> -> i32
-  %25 = buffer.view %input[%input_byte_offset] : buffer -> view<1xi32>
-  %26 = view.load<volatile|root_in_bounds|type_disjoint> %25[0] : view<1xi32> -> i32
-  %28 = view.load<volatile|root_in_bounds|type_disjoint> %25[0] : view<1xi32> -> i32
-  %first = view.load<volatile|root_in_bounds|type_disjoint> %13[0] : view<1xi32> -> i32
-  %second = view.load<volatile|root_in_bounds|type_disjoint> %13[0] : view<1xi32> -> i32
-  %53 = index.cast %output_byte_offset : offset to i64
-  %55 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
-  %56 = index.cast %55 : i64 to offset
-  %57 = buffer.view %output[%56] : buffer -> view<1xi32>
-  view.store<volatile|root_in_bounds|type_disjoint> %first, %57[0] : i32, view<1xi32>
-  view.store<volatile|root_in_bounds|type_disjoint> %second, %57[0] : i32, view<1xi32>
-  %67 = scalar.addi %first, %second : i32
-  func.return %67 : i32
+func.def public @observations(%input: buffer, %input_byte_offset: index, %output: buffer, %output_byte_offset: index) -> (i32) {
+  %10 = buffer.view %input[%input_byte_offset] : buffer -> view<1xi32>
+  %11 = view.load<volatile|root_in_bounds|type_disjoint> %10[0] : view<1xi32> -> i32
+  %18 = view.load<volatile|root_in_bounds|type_disjoint> %10[0] : view<1xi32> -> i32
+  %20 = view.load<volatile|root_in_bounds|type_disjoint> %10[0] : view<1xi32> -> i32
+  %22 = view.load<volatile|root_in_bounds|type_disjoint> %10[0] : view<1xi32> -> i32
+  %first = view.load<volatile|root_in_bounds|type_disjoint> %10[0] : view<1xi32> -> i32
+  %second = view.load<volatile|root_in_bounds|type_disjoint> %10[0] : view<1xi32> -> i32
+  %42 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  view.store<volatile|root_in_bounds|type_disjoint> %first, %42[0] : i32, view<1xi32>
+  view.store<volatile|root_in_bounds|type_disjoint> %second, %42[0] : i32, view<1xi32>
+  %49 = scalar.addi %first, %second : i32
+  func.return %49 : i32
 }
 
 // ====
@@ -48,20 +41,14 @@ unsigned ordinary(const unsigned* input, unsigned* output) {
   return first + second;
 }
 // ----
-func.def public @ordinary(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) -> (i32) {
-  %11 = index.cast %input_byte_offset : offset to i64
-  %13 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
-  %14 = index.cast %13 : i64 to offset
-  %15 = buffer.view %input[%14] : buffer -> view<1xi32>
-  %first = view.load<root_in_bounds|type_disjoint> %15[0] : view<1xi32> -> i32
-  %31 = index.cast %output_byte_offset : offset to i64
-  %33 = scalar.assume %31 [range(%31, 0, 9223372036854775807)] : i64
-  %34 = index.cast %33 : i64 to offset
-  %35 = buffer.view %output[%34] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %first, %35[0] : i32, view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %first, %35[0] : i32, view<1xi32>
-  %45 = scalar.addi %first, %first : i32
-  func.return %45 : i32
+func.def public @ordinary(%input: buffer, %input_byte_offset: index, %output: buffer, %output_byte_offset: index) -> (i32) {
+  %12 = buffer.view %input[%input_byte_offset] : buffer -> view<1xi32>
+  %first = view.load<root_in_bounds|type_disjoint> %12[0] : view<1xi32> -> i32
+  %26 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %first, %26[0] : i32, view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %first, %26[0] : i32, view<1xi32>
+  %33 = scalar.addi %first, %first : i32
+  func.return %33 : i32
 }
 
 // ====
@@ -73,20 +60,17 @@ unsigned through_helper(const unsigned* input) {
   return read(source);
 }
 // ----
-func.def public @through_helper(%input: buffer, %input_byte_offset: offset) -> (i32) {
-  %3 = func.call @read(%input, %input_byte_offset) : (buffer, offset) -> (i32)
+func.def public @through_helper(%input: buffer, %input_byte_offset: index) -> (i32) {
+  %3 = func.call @read(%input, %input_byte_offset) : (buffer, index) -> (i32)
   func.return %3 : i32
 }
 
-func.def @read(%source_data: buffer, %source_data_byte_offset: offset) -> (i32) {
-  %17 = scalar.constant 4 : i64
-  %11 = index.cast %source_data_byte_offset : offset to i64
-  %12 = scalar.addi %11, %17 : i64
-  %13 = scalar.assume %12 [range(%12, 0, 9223372036854775807)] : i64
-  %14 = index.cast %13 : i64 to offset
-  %15 = buffer.view %source_data[%14] : buffer -> view<1xi32>
-  %16 = view.load<volatile|root_in_bounds|type_disjoint> %15[0] : view<1xi32> -> i32
-  func.return %16 : i32
+func.def @read(%source_data: buffer, %source_data_byte_offset: index) -> (i32) {
+  %14 = index.constant 4 : index
+  %11 = index.add %source_data_byte_offset, %14 : index
+  %12 = buffer.view %source_data[%11] : buffer -> view<1xi32>
+  %13 = view.load<volatile|root_in_bounds|type_disjoint> %12[0] : view<1xi32> -> i32
+  func.return %13 : i32
 }
 
 // ====
@@ -100,22 +84,15 @@ unsigned vector_observations(const volatile Words* input, volatile Words* output
   return value[2];
 }
 // ----
-func.def public @vector_observations(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) -> (i32) {
+func.def public @vector_observations(%input: buffer, %input_byte_offset: index, %output: buffer, %output_byte_offset: index) -> (i32) {
   %5 = buffer.view %input[%input_byte_offset] : buffer -> view<4xi32>
   %6 = vector.load<volatile|root_in_bounds> %5[0] : view<4xi32> -> vector<4xi32>
-  %11 = index.cast %input_byte_offset : offset to i64
-  %13 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
-  %14 = index.cast %13 : i64 to offset
-  %15 = buffer.view %input[%14] : buffer -> view<4xi32>
-  %value = vector.load<volatile|root_in_bounds> %15[0] : view<4xi32> -> vector<4xi32>
-  %21 = index.cast %output_byte_offset : offset to i64
-  %23 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
-  %24 = index.cast %23 : i64 to offset
-  %25 = buffer.view %output[%24] : buffer -> view<4xi32>
-  vector.store<volatile|root_in_bounds> %value, %25[0] : vector<4xi32>, view<4xi32>
-  vector.store<volatile|root_in_bounds> %value, %25[0] : vector<4xi32>, view<4xi32>
-  %38 = vector.extract %value[2] : vector<4xi32> -> i32
-  func.return %38 : i32
+  %value = vector.load<volatile|root_in_bounds> %5[0] : view<4xi32> -> vector<4xi32>
+  %19 = buffer.view %output[%output_byte_offset] : buffer -> view<4xi32>
+  vector.store<volatile|root_in_bounds> %value, %19[0] : vector<4xi32>, view<4xi32>
+  vector.store<volatile|root_in_bounds> %value, %19[0] : vector<4xi32>, view<4xi32>
+  %29 = vector.extract %value[2] : vector<4xi32> -> i32
+  func.return %29 : i32
 }
 
 // ====
@@ -140,7 +117,7 @@ unsigned constant_parameter_observation(const volatile unsigned value) {
 func.def public @parameter_observations(%value$0: i32) -> (i32) {
   %2 = index.constant 4 : offset
   %value_storage = buffer.alloca<private> align(4) %2 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
+  %value_storage_byte_offset = index.constant 0 : index
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
   view.store<volatile|type_disjoint> %value$0, %value_view[0] : i32, view<1xi32>
   %value$6 = view.load<volatile|type_disjoint> %value_view[0] : view<1xi32> -> i32
@@ -151,7 +128,7 @@ func.def public @parameter_observations(%value$0: i32) -> (i32) {
 func.def public @vector_parameter_observations(%value$8: vector<4xi32>) -> (vector<4xi32>) {
   %10 = index.constant 16 : offset
   %value_storage = buffer.alloca<private> align(16) %10 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
+  %value_storage_byte_offset = index.constant 0 : index
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<4xi32>
   vector.store<volatile> %value$8, %value_view[0] : vector<4xi32>, view<4xi32>
   %value$14 = vector.load<volatile> %value_view[0] : view<4xi32> -> vector<4xi32>
@@ -162,7 +139,7 @@ func.def public @vector_parameter_observations(%value$8: vector<4xi32>) -> (vect
 func.def public @boolean_parameter_observation(%value$16: i1) -> (i1) {
   %18 = index.constant 1 : offset
   %value_storage = buffer.alloca<private> align(1) %18 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
+  %value_storage_byte_offset = index.constant 0 : index
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi8>
   %22 = scalar.extui %value$16 : i1 to i8
   view.store<volatile|type_disjoint> %22, %value_view[0] : i8, view<1xi8>
@@ -175,7 +152,7 @@ func.def public @boolean_parameter_observation(%value$16: i1) -> (i1) {
 func.def public @constant_parameter_observation(%value$26: i32) -> (i32) {
   %28 = index.constant 4 : offset
   %value_storage = buffer.alloca<private> align(4) %28 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
+  %value_storage_byte_offset = index.constant 0 : index
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
   view.store<volatile|type_disjoint> %value$26, %value_view[0] : i32, view<1xi32>
   %value$32 = view.load<volatile|type_disjoint> %value_view[0] : view<1xi32> -> i32
@@ -204,7 +181,7 @@ kernel.def @parameter_observations() {
 } launch(%output: buffer, %vector_output: buffer, %value$2: i32, %vector$3: vector<4xi32>) {
   %12 = index.constant 4 : offset
   %value_storage = buffer.alloca<private> align(4) %12 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
+  %value_storage_byte_offset = index.constant 0 : index
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
   view.store<volatile|type_disjoint> %value$2, %value_view[0] : i32, view<1xi32>
   %16 = index.constant 16 : offset
@@ -213,12 +190,12 @@ kernel.def @parameter_observations() {
   vector.store<volatile> %vector$3, %vector_view[0] : vector<4xi32>, view<4xi32>
   %value$20 = view.load<volatile|type_disjoint> %value_view[0] : view<1xi32> -> i32
   %value$21 = view.load<volatile|type_disjoint> %value_view[0] : view<1xi32> -> i32
-  %30 = buffer.view %output[%value_storage_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %value$21, %30[0] : i32, view<1xi32>
-  %vector$31 = vector.load<volatile> %vector_view[0] : view<4xi32> -> vector<4xi32>
-  %vector$32 = vector.load<volatile> %vector_view[0] : view<4xi32> -> vector<4xi32>
-  %41 = buffer.view %vector_output[%value_storage_byte_offset] : buffer -> view<4xi32>
-  vector.store<root_in_bounds> %vector$32, %41[0] : vector<4xi32>, view<4xi32>
+  %27 = buffer.view %output[%value_storage_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %value$21, %27[0] : i32, view<1xi32>
+  %vector$28 = vector.load<volatile> %vector_view[0] : view<4xi32> -> vector<4xi32>
+  %vector$29 = vector.load<volatile> %vector_view[0] : view<4xi32> -> vector<4xi32>
+  %35 = buffer.view %vector_output[%value_storage_byte_offset] : buffer -> view<4xi32>
+  vector.store<root_in_bounds> %vector$29, %35[0] : vector<4xi32>, view<4xi32>
   kernel.return
 }
 
@@ -239,14 +216,14 @@ kernel.def @shared_observations() {
 } launch(%output: buffer, %value: i32) {
   %9 = index.constant 16 : offset
   %table = buffer.alloca<workgroup> align(4) %9 : buffer
-  %table_byte_offset = index.constant 0 : offset
+  %table_byte_offset = index.constant 0 : index
   %table_view = buffer.view %table[%table_byte_offset] : buffer -> view<4xi32>
-  %39 = index.constant 2 : index
-  view.store<volatile|type_disjoint> %value, %table_view[%39] : i32, view<4xi32>
-  %21 = view.load<volatile|type_disjoint> %table_view[%39] : view<4xi32> -> i32
-  %26 = view.load<volatile|type_disjoint> %table_view[%39] : view<4xi32> -> i32
-  %35 = buffer.view %output[%table_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %26, %35[0] : i32, view<1xi32>
+  %36 = index.constant 2 : index
+  view.store<volatile|type_disjoint> %value, %table_view[%36] : i32, view<4xi32>
+  %21 = view.load<volatile|type_disjoint> %table_view[%36] : view<4xi32> -> i32
+  %26 = view.load<volatile|type_disjoint> %table_view[%36] : view<4xi32> -> i32
+  %32 = buffer.view %output[%table_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %26, %32[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -269,13 +246,13 @@ kernel.def @shared_scalar() {
 } launch(%output: buffer, %value: i32) {
   %9 = index.constant 4 : offset
   %slot_storage = buffer.alloca<workgroup> align(4) %9 : buffer
-  %slot_storage_byte_offset = index.constant 0 : offset
+  %slot_storage_byte_offset = index.constant 0 : index
   %slot_view = buffer.view %slot_storage[%slot_storage_byte_offset] : buffer -> view<1xi32>
   view.store<volatile|type_disjoint> %value, %slot_view[0] : i32, view<1xi32>
   %slot$13 = view.load<volatile|type_disjoint> %slot_view[0] : view<1xi32> -> i32
   %slot$14 = view.load<volatile|type_disjoint> %slot_view[0] : view<1xi32> -> i32
-  %23 = buffer.view %output[%slot_storage_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %slot$14, %23[0] : i32, view<1xi32>
+  %20 = buffer.view %output[%slot_storage_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %slot$14, %20[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -285,7 +262,7 @@ void discarded_return(volatile unsigned* output) {
   return static_cast<void>(*output = 7);
 }
 // ----
-func.def public @discarded_return(%output: buffer, %output_byte_offset: offset) {
+func.def public @discarded_return(%output: buffer, %output_byte_offset: index) {
   %2 = scalar.constant 7 : i32
   %3 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
   view.store<volatile|root_in_bounds|type_disjoint> %2, %3[0] : i32, view<1xi32>
@@ -306,7 +283,7 @@ unsigned c_parameter_observation(volatile unsigned value) {
   return value;
 }
 // ----
-func.def public source_signature(#func.abi.c.signature<arguments = [0, 1], results = [2], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @c_observations(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) -> (i32) {
+func.def public source_signature(#func.abi.c.signature<arguments = [0, 1], results = [2], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @c_observations(%input: buffer, %input_byte_offset: index, %output: buffer, %output_byte_offset: index) -> (i32) {
   %5 = buffer.view %input[%input_byte_offset] : buffer -> view<1xi32>
   %6 = view.load<volatile|root_in_bounds> %5[0] : view<1xi32> -> i32
   %value = view.load<volatile|root_in_bounds> %5[0] : view<1xi32> -> i32
@@ -318,7 +295,7 @@ func.def public source_signature(#func.abi.c.signature<arguments = [0, 1], resul
 func.def public source_signature(#func.abi.c.signature<arguments = [0], results = [0], types = [#func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @c_parameter_observation(%value$10: i32) -> (i32) {
   %12 = index.constant 4 : offset
   %value_storage = buffer.alloca<private> align(4) %12 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
+  %value_storage_byte_offset = index.constant 0 : index
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
   view.store<volatile> %value$10, %value_view[0] : i32, view<1xi32>
   %value$16 = view.load<volatile> %value_view[0] : view<1xi32> -> i32
@@ -335,14 +312,14 @@ unsigned record_object(volatile Record input) { return input.values[1]; }
 func.def public @record_object(%input_values_0: i32, %input_values_1: i32) -> (i32) {
   %3 = index.constant 8 : offset
   %input_storage = buffer.alloca<private> align(4) %3 : buffer
-  %30 = index.constant 0 : offset
-  %10 = buffer.view %input_storage[%30] : buffer -> view<1xi32>
+  %27 = index.constant 0 : index
+  %10 = buffer.view %input_storage[%27] : buffer -> view<1xi32>
   view.store<volatile|type_disjoint> %input_values_0, %10[0] : i32, view<1xi32>
-  %29 = index.constant 4 : offset
-  %14 = buffer.view %input_storage[%29] : buffer -> view<1xi32>
+  %26 = index.constant 4 : index
+  %14 = buffer.view %input_storage[%26] : buffer -> view<1xi32>
   view.store<volatile|type_disjoint> %input_values_1, %14[0] : i32, view<1xi32>
-  %27 = view.load<volatile|type_disjoint> %14[0] : view<1xi32> -> i32
-  func.return %27 : i32
+  %24 = view.load<volatile|type_disjoint> %14[0] : view<1xi32> -> i32
+  func.return %24 : i32
 }
 
 // ====
@@ -357,23 +334,23 @@ unsigned record_initializer(unsigned input) {
 func.def public @record_initializer(%input: i32) -> (i32) {
   %2 = index.constant 16 : offset
   %value_storage = buffer.alloca<private> align(4) %2 : buffer
-  %73 = index.constant 0 : offset
-  %9 = buffer.view %value_storage[%73] : buffer -> view<1xi32>
+  %61 = index.constant 0 : index
+  %9 = buffer.view %value_storage[%61] : buffer -> view<1xi32>
   view.store<volatile|type_disjoint> %input, %9[0] : i32, view<1xi32>
   %12 = scalar.constant 7 : i32
-  %72 = index.constant 4 : offset
-  %14 = buffer.view %value_storage[%72] : buffer -> view<1xi32>
+  %60 = index.constant 4 : index
+  %14 = buffer.view %value_storage[%60] : buffer -> view<1xi32>
   view.store<volatile|type_disjoint> %12, %14[0] : i32, view<1xi32>
   %17 = scalar.constant 11 : i32
-  %71 = index.constant 8 : offset
-  %19 = buffer.view %value_storage[%71] : buffer -> view<1xi32>
+  %59 = index.constant 8 : index
+  %19 = buffer.view %value_storage[%59] : buffer -> view<1xi32>
   view.store<volatile|type_disjoint> %17, %19[0] : i32, view<1xi32>
   %22 = scalar.constant 13 : i32
-  %70 = index.constant 12 : offset
-  %24 = buffer.view %value_storage[%70] : buffer -> view<1xi32>
+  %58 = index.constant 12 : index
+  %24 = buffer.view %value_storage[%58] : buffer -> view<1xi32>
   view.store<volatile|type_disjoint> %22, %24[0] : i32, view<1xi32>
-  %45 = view.load<volatile|type_disjoint> %9[0] : view<1xi32> -> i32
-  %66 = view.load<volatile|type_disjoint> %24[0] : view<1xi32> -> i32
-  %67 = scalar.addi %45, %66 : i32
-  func.return %67 : i32
+  %39 = view.load<volatile|type_disjoint> %9[0] : view<1xi32> -> i32
+  %54 = view.load<volatile|type_disjoint> %24[0] : view<1xi32> -> i32
+  %55 = scalar.addi %39, %54 : i32
+  func.return %55 : i32
 }

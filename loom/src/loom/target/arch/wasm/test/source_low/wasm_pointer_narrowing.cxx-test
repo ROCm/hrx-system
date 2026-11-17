@@ -7,12 +7,12 @@ int read_at(const int* pointer, int position) {
 
 // ----
 low.func.def public target<wasm.core.simd128> abi(wasm_function) @read_at(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>, %position: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
-  %25 = i32.const 2
-  %26 = i32.shl %position, %25
-  %27 = i32.add %pointer_byte_offset, %26
-  %28 = i32.add %pointer, %27
-  %29 = i32.load %28
-  return %29
+  %15 = i32.const 4
+  %16 = i32.mul %position, %15
+  %17 = i32.add %16, %pointer_byte_offset
+  %18 = i32.add %pointer, %17
+  %19 = i32.load %18
+  return %19
 }
 
 // ====
@@ -25,11 +25,49 @@ int exchange(int* pointer, int position, int replacement) {
 
 // ----
 low.func.def public target<wasm.core.simd128> abi(wasm_function) @exchange(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>, %position: reg<wasm.i32>, %replacement: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
-  %43 = i32.const 2
-  %44 = i32.shl %position, %43
-  %45 = i32.add %pointer_byte_offset, %44
-  %46 = i32.add %pointer, %45
-  %previous = i32.load %46
-  i32.store %46, %replacement
+  %23 = i32.const 4
+  %24 = i32.mul %position, %23
+  %25 = i32.add %24, %pointer_byte_offset
+  %26 = i32.add %pointer, %25
+  %previous = i32.load %26
+  i32.store %26, %replacement
   return %previous
+}
+
+// ====
+
+// The source data model does not widen the target's native pointer carrier.
+// INPUT: cxx data-model=lp64
+int read(const int* pointer) { return *pointer; }
+
+// ----
+low.func.def public target<wasm.core.simd128> abi(wasm_function) @read(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %8 = i32.add %pointer, %pointer_byte_offset
+  %9 = i32.load %8
+  return %9
+}
+
+// ====
+
+// Unsigned and wide source indices still use the native memory32 carrier.
+int read_pair(const int* pointer, unsigned first, long long second) {
+  return pointer[first] + pointer[second];
+}
+
+// ----
+low.func.def public target<wasm.core.simd128> abi(wasm_function) @read_pair(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>, %first: reg<wasm.i32>, %second: reg<wasm.i64>) -> (reg<wasm.i32>) asm {
+  %26 = i64.extend_i32_u %first
+  %27 = i32.wrap_i64 %26
+  %28 = i32.const 4
+  %29 = i32.mul %27, %28
+  %30 = i32.add %29, %pointer_byte_offset
+  %31 = i32.add %pointer, %30
+  %32 = i32.load %31
+  %33 = i32.wrap_i64 %second
+  %34 = i32.mul %33, %28
+  %35 = i32.add %34, %pointer_byte_offset
+  %36 = i32.add %pointer, %35
+  %37 = i32.load %36
+  %38 = i32.add %32, %37
+  return %38
 }

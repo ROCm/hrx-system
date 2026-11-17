@@ -54,25 +54,26 @@ kernel.def @configured_workgroup_storage() {
   %workitem_id_x = kernel.workitem.id<x> : index
   %lane = index.cast %workitem_id_x : index to i32
   %stage_count = config.get @test.buffer.stage_count : i32
-  %78 = scalar.constant 5 : i32
-  %79 = scalar.shli %stage_count, %78 : i32
-  %14 = scalar.extui %79 : i32 to i64
+  %73 = scalar.constant 5 : i32
+  %74 = scalar.shli %stage_count, %73 : i32
+  %14 = scalar.extui %74 : i32 to i64
   %15 = index.cast %14 : i64 to index
   %16 = index.constant 4 : offset
   %17 = index.scale %15, %16 : index, offset -> offset
   %stages = buffer.alloca<workgroup> align(64) %17 : buffer
-  %stages_byte_offset = index.constant 0 : offset
+  %stages_byte_offset = index.constant 0 : index
   %stage_view_layout = encoding.layout.dense : encoding<layout>
   %stage_view = buffer.view %stages[%stages_byte_offset] : buffer -> view<[%15]xi32, %stage_view_layout>
+  %66 = index.constant 0 : offset
   %30 = index.cast %stage_count : i32 to offset
   %31 = index.constant 1 : offset
-  scf.for %stage = [%stages_byte_offset to %30 step %31] {
+  scf.for %stage = [%66 to %30 step %31] {
     %33 = index.cast %stage : offset to i32
     func.call @store_stage(%15, %stage_view_layout, %stage_view, %33, %lane) : (index, encoding<layout>, view<[%15]xi32, %stage_view_layout>, i32, i32)
   }
-  %74 = scalar.constant -1 : i32
-  %75 = scalar.addi %stage_count, %74 : i32
-  %final_stage_base = scalar.shli %75, %78 : i32
+  %69 = scalar.constant -1 : i32
+  %70 = scalar.addi %stage_count, %69 : i32
+  %final_stage_base = scalar.shli %70, %73 : i32
   kernel.barrier<global> scope(workgroup) ordering(acq_rel)
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   %39 = scalar.addi %final_stage_base, %lane : i32
@@ -80,28 +81,27 @@ kernel.def @configured_workgroup_storage() {
   %41 = index.cast %40 : i64 to index
   %42 = view.load<type_disjoint> %stage_view[%41] : view<[%15]xi32, %stage_view_layout> -> i32
   %43 = scalar.extui %lane : i32 to i64
-  %70 = scalar.constant 2 : i64
-  %71 = scalar.shli %43, %70 : i64
-  %48 = scalar.assume %71 [range(%71, 0, 9223372036854775807)] : i64
-  %49 = index.cast %48 : i64 to offset
-  %50 = buffer.view %output[%49] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %42, %50[0] : i32, view<1xi32>
+  %44 = index.cast %43 : i64 to index
+  %45 = index.constant 4 : index
+  %46 = index.mul %44, %45 : index
+  %48 = buffer.view %output[%46] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %42, %48[0] : i32, view<1xi32>
   kernel.return
 }
 
 func.def inline @store_stage(%stages_dim0: index, %stages_layout: encoding<layout>, %stages: view<[%stages_dim0]xi32, %stages_layout>, %stage: i32, %lane: i32) {
-  %56 = scalar.constant 1 : i32
-  %57 = scalar.addi %lane, %56 : i32
-  %84 = scalar.constant 31 : i32
-  %consumer_lane = scalar.andi %57, %84 : i32
-  %60 = scalar.constant 8 : i32
-  %82 = scalar.addi %stage, %consumer_lane : i32
-  %83 = scalar.addi %82, %60 : i32
-  %80 = scalar.constant 5 : i32
-  %81 = scalar.shli %stage, %80 : i32
-  %65 = scalar.addi %81, %consumer_lane : i32
-  %66 = scalar.extui %65 : i32 to i64
-  %67 = index.cast %66 : i64 to index
-  view.store<type_disjoint> %83, %stages[%67] : i32, view<[%stages_dim0]xi32, %stages_layout>
+  %54 = scalar.constant 1 : i32
+  %55 = scalar.addi %lane, %54 : i32
+  %79 = scalar.constant 31 : i32
+  %consumer_lane = scalar.andi %55, %79 : i32
+  %58 = scalar.constant 8 : i32
+  %77 = scalar.addi %stage, %consumer_lane : i32
+  %78 = scalar.addi %77, %58 : i32
+  %75 = scalar.constant 5 : i32
+  %76 = scalar.shli %stage, %75 : i32
+  %63 = scalar.addi %76, %consumer_lane : i32
+  %64 = scalar.extui %63 : i32 to i64
+  %65 = index.cast %64 : i64 to index
+  view.store<type_disjoint> %78, %stages[%65] : i32, view<[%stages_dim0]xi32, %stages_layout>
   func.return
 }

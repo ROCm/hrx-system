@@ -19,6 +19,10 @@
 #include "loom/util/fact_table.h"
 #include "loom/util/predicate_facts.h"
 
+// Index facts describe mathematical results of non-overflowing executions.
+// A target may admit native arithmetic without proving every input safe; an
+// overflowing execution has no defined numeric result. Only offset arithmetic
+// promises wrapping, and its result facts are normalized separately below.
 #define LOOM_INDEX_BINARY_FACTS(name, transfer_fn, neutral, symmetric)   \
   iree_status_t name(loom_fact_context_t* context,                       \
                      const loom_module_t* module, const loom_op_t* op,   \

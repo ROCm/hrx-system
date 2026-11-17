@@ -524,6 +524,11 @@ loom_check_test(
 )
 
 loom_check_test(
+    name = "buffer_positions_test",
+    src = "buffer_positions_test.loom-test",
+)
+
+loom_check_test(
     name = "control_operands_test",
     src = "control_operands_test.loom-test",
 )

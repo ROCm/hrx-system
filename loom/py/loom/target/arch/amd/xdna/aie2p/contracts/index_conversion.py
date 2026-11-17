@@ -132,11 +132,12 @@ def _address_to_boolean_rule(input_type: TypePattern) -> DescriptorRule:
 
 def _i64_to_address_rule(
     result_type: TypePattern,
-    range_guard: Guard,
+    *,
+    extra_guards: tuple[Guard, ...] = (),
 ) -> DescriptorRule:
     return DescriptorRule(
         source_op=index.index_cast,
-        guards=(*_typed_guards(_I64, result_type), range_guard),
+        guards=(*_typed_guards(_I64, result_type), *extra_guards),
         emit=(
             EmitRegisterSlice(
                 source=ValueRef.operand("input"),
@@ -220,10 +221,7 @@ def _signed_payload_rules() -> tuple[DescriptorRule | ValueAliasRule, ...]:
             "amd.xdna.aie2p.extend.signed.i16",
         ),
         _alias_rule(_I32, _INDEX),
-        _i64_to_address_rule(
-            _INDEX,
-            Guard.value_signed_bit_count("input", 32),
-        ),
+        _i64_to_address_rule(_INDEX),
         _alias_rule(_INDEX, _I8),
         _alias_rule(_INDEX, _I16),
         _alias_rule(_INDEX, _I32),
@@ -246,7 +244,7 @@ def _unsigned_payload_rules() -> tuple[DescriptorRule | ValueAliasRule, ...]:
         _alias_rule(_I32, _OFFSET),
         _i64_to_address_rule(
             _OFFSET,
-            Guard.value_unsigned_bit_count("input", 32),
+            extra_guards=(Guard.value_unsigned_bit_count("input", 32),),
         ),
         _alias_rule(_OFFSET, _I8),
         _alias_rule(_OFFSET, _I16),
@@ -269,11 +267,7 @@ AIE2P_INDEX_CONVERSION_RULES: tuple[DescriptorRule | ValueAliasRule, ...] = (
         _OFFSET,
         extra_guards=(Guard.value_i64_range("input", 0, _I32_MAX),),
     ),
-    _alias_rule(
-        _OFFSET,
-        _INDEX,
-        extra_guards=(Guard.value_i64_range("input", 0, _I32_MAX),),
-    ),
+    _alias_rule(_OFFSET, _INDEX),
 )
 
 
@@ -542,16 +536,16 @@ AIE2P_VECTOR_INDEX_CONVERSION_RULES: tuple[DescriptorRule | ValueAliasRule, ...]
     _vector_alias_rule("i32", "offset"),
     *(
         rule
-        for result_element, range_guard in (
-            ("index", Guard.value_signed_bit_count("input", 32)),
-            ("offset", Guard.value_unsigned_bit_count("input", 32)),
+        for result_element, extra_guards in (
+            ("index", ()),
+            ("offset", (Guard.value_unsigned_bit_count("input", 32),)),
         )
         for rule in _vector_truncation_rules(
             "i64",
             result_element,
             "i64",
             "i32",
-            extra_guards=(range_guard,),
+            extra_guards=extra_guards,
             report_strategy="i64_to_address",
         )
     ),
@@ -596,9 +590,5 @@ AIE2P_VECTOR_INDEX_CONVERSION_RULES: tuple[DescriptorRule | ValueAliasRule, ...]
         "offset",
         extra_guards=(Guard.value_i64_range("input", 0, _I32_MAX),),
     ),
-    _vector_alias_rule(
-        "offset",
-        "index",
-        extra_guards=(Guard.value_i64_range("input", 0, _I32_MAX),),
-    ),
+    _vector_alias_rule("offset", "index"),
 )

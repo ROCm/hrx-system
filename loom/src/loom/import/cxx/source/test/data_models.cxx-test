@@ -6,35 +6,29 @@ int read(const int* input, long index, unsigned large,
   return input[index] + input[large] + input[wide];
 }
 // ----
-func.def public @read(%input: buffer, %input_byte_offset: offset, %index: i64, %large: i32, %wide: i64) -> (i32) {
-  %6 = scalar.constant 4 : i64
-  %7 = scalar.muli %index, %6 : i64
-  %8 = index.cast %input_byte_offset : offset to i64
-  %9 = scalar.addi %8, %7 : i64
-  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
-  %11 = index.cast %10 : i64 to offset
-  %12 = buffer.view %input[%11] : buffer -> view<1xi32>
-  %13 = view.load<root_in_bounds|type_disjoint> %12[0] : view<1xi32> -> i32
-  %14 = scalar.extui %large : i32 to i64
-  %15 = scalar.constant 4 : i64
-  %16 = scalar.muli %14, %15 : i64
-  %17 = index.cast %input_byte_offset : offset to i64
-  %18 = scalar.addi %17, %16 : i64
-  %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
-  %20 = index.cast %19 : i64 to offset
-  %21 = buffer.view %input[%20] : buffer -> view<1xi32>
-  %22 = view.load<root_in_bounds|type_disjoint> %21[0] : view<1xi32> -> i32
-  %23 = scalar.addi %13, %22 : i32
-  %24 = scalar.constant 4 : i64
-  %25 = scalar.muli %wide, %24 : i64
-  %26 = index.cast %input_byte_offset : offset to i64
-  %27 = scalar.addi %26, %25 : i64
-  %28 = scalar.assume %27 [range(%27, 0, 9223372036854775807)] : i64
-  %29 = index.cast %28 : i64 to offset
-  %30 = buffer.view %input[%29] : buffer -> view<1xi32>
-  %31 = view.load<root_in_bounds|type_disjoint> %30[0] : view<1xi32> -> i32
-  %32 = scalar.addi %23, %31 : i32
-  func.return %32 : i32
+func.def public @read(%input: buffer, %input_byte_offset: index, %index: i64, %large: i32, %wide: i64) -> (i32) {
+  %6 = index.cast %index : i64 to index
+  %7 = index.constant 4 : index
+  %8 = index.mul %6, %7 : index
+  %9 = index.add %input_byte_offset, %8 : index
+  %10 = buffer.view %input[%9] : buffer -> view<1xi32>
+  %11 = view.load<root_in_bounds|type_disjoint> %10[0] : view<1xi32> -> i32
+  %12 = scalar.extui %large : i32 to i64
+  %13 = index.cast %12 : i64 to index
+  %14 = index.constant 4 : index
+  %15 = index.mul %13, %14 : index
+  %16 = index.add %input_byte_offset, %15 : index
+  %17 = buffer.view %input[%16] : buffer -> view<1xi32>
+  %18 = view.load<root_in_bounds|type_disjoint> %17[0] : view<1xi32> -> i32
+  %19 = scalar.addi %11, %18 : i32
+  %20 = index.cast %wide : i64 to index
+  %21 = index.constant 4 : index
+  %22 = index.mul %20, %21 : index
+  %23 = index.add %input_byte_offset, %22 : index
+  %24 = buffer.view %input[%23] : buffer -> view<1xi32>
+  %25 = view.load<root_in_bounds|type_disjoint> %24[0] : view<1xi32> -> i32
+  %26 = scalar.addi %19, %25 : i32
+  func.return %26 : i32
 }
 
 // ====
@@ -46,36 +40,29 @@ int read(const int* input, long index, unsigned large,
   return input[index] + input[large] + input[wide];
 }
 // ----
-func.def public @read(%input: buffer, %input_byte_offset: offset, %index: i32, %large: i32, %wide: i64) -> (i32) {
-  %6 = scalar.extsi %index : i32 to i64
-  %7 = scalar.constant 4 : i64
-  %8 = scalar.muli %6, %7 : i64
-  %9 = index.cast %input_byte_offset : offset to i64
-  %10 = scalar.addi %9, %8 : i64
-  %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
-  %12 = index.cast %11 : i64 to offset
-  %13 = buffer.view %input[%12] : buffer -> view<1xi32>
-  %14 = view.load<root_in_bounds|type_disjoint> %13[0] : view<1xi32> -> i32
-  %15 = scalar.extui %large : i32 to i64
-  %16 = scalar.constant 4 : i64
-  %17 = scalar.muli %15, %16 : i64
-  %18 = index.cast %input_byte_offset : offset to i64
-  %19 = scalar.addi %18, %17 : i64
-  %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
-  %21 = index.cast %20 : i64 to offset
-  %22 = buffer.view %input[%21] : buffer -> view<1xi32>
-  %23 = view.load<root_in_bounds|type_disjoint> %22[0] : view<1xi32> -> i32
-  %24 = scalar.addi %14, %23 : i32
-  %25 = scalar.constant 4 : i64
-  %26 = scalar.muli %wide, %25 : i64
-  %27 = index.cast %input_byte_offset : offset to i64
-  %28 = scalar.addi %27, %26 : i64
-  %29 = scalar.assume %28 [range(%28, 0, 9223372036854775807)] : i64
-  %30 = index.cast %29 : i64 to offset
-  %31 = buffer.view %input[%30] : buffer -> view<1xi32>
-  %32 = view.load<root_in_bounds|type_disjoint> %31[0] : view<1xi32> -> i32
-  %33 = scalar.addi %24, %32 : i32
-  func.return %33 : i32
+func.def public @read(%input: buffer, %input_byte_offset: index, %index: i32, %large: i32, %wide: i64) -> (i32) {
+  %6 = index.cast %index : i32 to index
+  %7 = index.constant 4 : index
+  %8 = index.mul %6, %7 : index
+  %9 = index.add %input_byte_offset, %8 : index
+  %10 = buffer.view %input[%9] : buffer -> view<1xi32>
+  %11 = view.load<root_in_bounds|type_disjoint> %10[0] : view<1xi32> -> i32
+  %12 = scalar.extui %large : i32 to i64
+  %13 = index.cast %12 : i64 to index
+  %14 = index.constant 4 : index
+  %15 = index.mul %13, %14 : index
+  %16 = index.add %input_byte_offset, %15 : index
+  %17 = buffer.view %input[%16] : buffer -> view<1xi32>
+  %18 = view.load<root_in_bounds|type_disjoint> %17[0] : view<1xi32> -> i32
+  %19 = scalar.addi %11, %18 : i32
+  %20 = index.cast %wide : i64 to index
+  %21 = index.constant 4 : index
+  %22 = index.mul %20, %21 : index
+  %23 = index.add %input_byte_offset, %22 : index
+  %24 = buffer.view %input[%23] : buffer -> view<1xi32>
+  %25 = view.load<root_in_bounds|type_disjoint> %24[0] : view<1xi32> -> i32
+  %26 = scalar.addi %19, %25 : i32
+  func.return %26 : i32
 }
 
 // ====
@@ -87,36 +74,29 @@ int read(const int* input, long index, unsigned large,
   return input[index] + input[large] + input[wide];
 }
 // ----
-func.def public @read(%input: buffer, %input_byte_offset: offset, %index: i32, %large: i32, %wide: i64) -> (i32) {
-  %6 = scalar.extsi %index : i32 to i64
-  %7 = scalar.constant 4 : i64
-  %8 = scalar.muli %6, %7 : i64
-  %9 = index.cast %input_byte_offset : offset to i64
-  %10 = scalar.addi %9, %8 : i64
-  %11 = scalar.assume %10 [range(%10, 0, 4294967295)] : i64
-  %12 = index.cast %11 : i64 to offset
-  %13 = buffer.view %input[%12] : buffer -> view<1xi32>
-  %14 = view.load<root_in_bounds|type_disjoint> %13[0] : view<1xi32> -> i32
-  %15 = scalar.extui %large : i32 to i64
-  %16 = scalar.constant 4 : i64
-  %17 = scalar.muli %15, %16 : i64
-  %18 = index.cast %input_byte_offset : offset to i64
-  %19 = scalar.addi %18, %17 : i64
-  %20 = scalar.assume %19 [range(%19, 0, 4294967295)] : i64
-  %21 = index.cast %20 : i64 to offset
-  %22 = buffer.view %input[%21] : buffer -> view<1xi32>
-  %23 = view.load<root_in_bounds|type_disjoint> %22[0] : view<1xi32> -> i32
-  %24 = scalar.addi %14, %23 : i32
-  %25 = scalar.constant 4 : i64
-  %26 = scalar.muli %wide, %25 : i64
-  %27 = index.cast %input_byte_offset : offset to i64
-  %28 = scalar.addi %27, %26 : i64
-  %29 = scalar.assume %28 [range(%28, 0, 4294967295)] : i64
-  %30 = index.cast %29 : i64 to offset
-  %31 = buffer.view %input[%30] : buffer -> view<1xi32>
-  %32 = view.load<root_in_bounds|type_disjoint> %31[0] : view<1xi32> -> i32
-  %33 = scalar.addi %24, %32 : i32
-  func.return %33 : i32
+func.def public @read(%input: buffer, %input_byte_offset: index, %index: i32, %large: i32, %wide: i64) -> (i32) {
+  %6 = index.cast %index : i32 to index
+  %7 = index.constant 4 : index
+  %8 = index.mul %6, %7 : index
+  %9 = index.add %input_byte_offset, %8 : index
+  %10 = buffer.view %input[%9] : buffer -> view<1xi32>
+  %11 = view.load<root_in_bounds|type_disjoint> %10[0] : view<1xi32> -> i32
+  %12 = scalar.extui %large : i32 to i64
+  %13 = index.cast %12 : i64 to index
+  %14 = index.constant 4 : index
+  %15 = index.mul %13, %14 : index
+  %16 = index.add %input_byte_offset, %15 : index
+  %17 = buffer.view %input[%16] : buffer -> view<1xi32>
+  %18 = view.load<root_in_bounds|type_disjoint> %17[0] : view<1xi32> -> i32
+  %19 = scalar.addi %11, %18 : i32
+  %20 = index.cast %wide : i64 to index
+  %21 = index.constant 4 : index
+  %22 = index.mul %20, %21 : index
+  %23 = index.add %input_byte_offset, %22 : index
+  %24 = buffer.view %input[%23] : buffer -> view<1xi32>
+  %25 = view.load<root_in_bounds|type_disjoint> %24[0] : view<1xi32> -> i32
+  %26 = scalar.addi %19, %25 : i32
+  func.return %26 : i32
 }
 
 // ====

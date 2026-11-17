@@ -164,8 +164,8 @@ check.scenario @signed_index_values {
   check.return
 }
 
-// Ordinary signed coordinates remain native on 32-bit targets. The scalar
-// oracle shares no index arithmetic with the subject.
+// Runtime words have no static bounds; valid inputs still use ordinary native
+// arithmetic on 32-bit targets. The oracle uses only fixed-width arithmetic.
 func.def @native_index_observations(%input: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %begin = index.constant 0 : index
@@ -177,8 +177,7 @@ func.def @native_index_observations(%input: buffer, %output: buffer) {
   %results = buffer.view %output[%origin] : buffer -> view<7x5xi32>
   scf.for %row = [%begin to %end step %step] {
     %input_value = view.load %inputs[%row] : view<7xi32> -> i32
-    %bounded = scalar.assume %input_value [range(%input_value, -3, 3)] : i32
-    %coordinate = index.cast %bounded : i32 to index
+    %coordinate = index.cast %input_value : i32 to index
     %scaled = index.mul %coordinate, %factor : index
     %negative = index.sub %scaled, %bias : index
     %shifted = index.shrsi %negative, %step : index
@@ -326,6 +325,53 @@ check.scenario @assumed_index_values {
     %output = check.tensor.view %storage offset(16) : tensor<36xi64> -> tensor<4x8xi64>
     check.compare<@assumed_index_observations, @assumed_index_oracle>(%input, %output) : (tensor<4x3xi32>, tensor<4x8xi64>) -> () {
       check.expect.bitwise actual(%storage) expected(%storage) : tensor<36xi64>
+    }
+  }
+  check.return
+}
+
+// Source integers enter the target's index carrier before native arithmetic.
+// Runtime inputs fit every target; the subject has no static range promise.
+func.def @native_index_entry(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 7 : index
+  %step = index.constant 1 : index
+  %inputs = buffer.view %input[%origin] : buffer -> view<7xi64>
+  %scalar_results = buffer.view %output[%origin] : buffer -> view<7xi64>
+  scf.for %row = [%begin to %end step %step] {
+    %word = view.load %inputs[%row] : view<7xi64> -> i64
+    %position = index.cast %word : i64 to index
+    %advanced = index.add %position, %step : index
+    %result = index.cast %advanced : index to i64
+    view.store %result, %scalar_results[%row] : i64, view<7xi64>
+  }
+  func.return
+}
+
+func.def @native_index_entry_oracle(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 7 : index
+  %step = index.constant 1 : index
+  %c1 = scalar.constant 1 : i64
+  %inputs = buffer.view %input[%origin] : buffer -> view<7xi64>
+  %results = buffer.view %output[%origin] : buffer -> view<7xi64>
+  scf.for %row = [%begin to %end step %step] {
+    %word = view.load %inputs[%row] : view<7xi64> -> i64
+    %advanced = scalar.addi %word, %c1 : i64
+    view.store %advanced, %results[%row] : i64, view<7xi64>
+  }
+  func.return
+}
+
+check.scenario @native_index_entry_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-3) step(1) : tensor<7xi64>
+    %storage = check.generate.fill value(-123) : tensor<9xi64>
+    %output = check.tensor.view %storage offset(8) : tensor<9xi64> -> tensor<7xi64>
+    check.compare<@native_index_entry, @native_index_entry_oracle>(%input, %output) : (tensor<7xi64>, tensor<7xi64>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<9xi64>
     }
   }
   check.return

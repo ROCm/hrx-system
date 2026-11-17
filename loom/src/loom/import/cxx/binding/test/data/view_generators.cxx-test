@@ -24,11 +24,12 @@ func.def public @volatile_input_value(%position: i32) -> (i32) {
 }
 
 func.def public @volatile_input(%input: buffer) {
-  %8 = index.constant 0 : offset
+  %8 = index.constant 0 : index
   %values = buffer.view %input[%8] : buffer -> view<64xi32>
+  %21 = index.constant 0 : offset
   %20 = index.constant 64 : offset
   %14 = index.constant 1 : offset
-  scf.for %position = [%8 to %20 step %14] {
+  scf.for %position = [%21 to %20 step %14] {
     %16 = index.cast %position : offset to i32
     %17 = func.call pure @volatile_input_value(%16) : (i32) -> (i32)
     %18 = scalar.extui %16 : i32 to i64
@@ -91,11 +92,10 @@ func.def public @volatile_parameter_value(%trial: index) -> (i32) {
 }
 
 func.def public @volatile_scalar_input(%input: buffer, %trial: index) {
-  %26 = index.constant 0 : offset
+  %26 = index.constant 0 : index
   %value = buffer.view %input[%26] : buffer -> view<1xi32>
   %28 = func.call pure @volatile_parameter_value(%trial) : (index) -> (i32)
-  %36 = index.constant 0 : index
-  view.store<type_disjoint> %28, %value[%36] : i32, view<1xi32>
+  view.store<type_disjoint> %28, %value[%26] : i32, view<1xi32>
   func.return
 }
 
@@ -115,11 +115,10 @@ void volatile_parameter_input(loom::type::buffer<unsigned> input) {
 
 // ----
 func.def public @volatile_parameter_input(%input: buffer) {
-  %2 = index.constant 0 : offset
+  %2 = index.constant 0 : index
   %values = buffer.view %input[%2] : buffer -> view<4xi32>
   %4 = scalar.constant 0 : i32
-  %22 = index.constant 0 : index
-  view.store<type_disjoint> %4, %values[%22] : i32, view<4xi32>
+  view.store<type_disjoint> %4, %values[%2] : i32, view<4xi32>
   %7 = scalar.constant 37 : i32
   %21 = index.constant 1 : index
   view.store<type_disjoint> %7, %values[%21] : i32, view<4xi32>
@@ -218,15 +217,14 @@ func.def public @volatile_input_value(%position: i32) -> (i32) {
 }
 
 func.def public @volatile_vector_input(%input: buffer, %trial: index) {
-  %9 = index.constant 0 : offset
+  %9 = index.constant 0 : index
   %values = buffer.view %input[%9] : buffer -> view<4xi32>
   %11 = index.cast %trial : index to i64
   %67 = scalar.constant 0 : i64
   %14 = scalar.cmpi eq, %11, %67 : i64
   scf.if %14 {
     %15 = scalar.constant 0 : i32
-    %66 = index.constant 0 : index
-    view.store<type_disjoint> %15, %values[%66] : i32, view<4xi32>
+    view.store<type_disjoint> %15, %values[%9] : i32, view<4xi32>
     %18 = scalar.constant 1 : i32
     %65 = index.constant 1 : index
     view.store<type_disjoint> %18, %values[%65] : i32, view<4xi32>
@@ -241,8 +239,7 @@ func.def public @volatile_vector_input(%input: buffer, %trial: index) {
     %30 = scalar.cmpi eq, %11, %62 : i64
     scf.if %30 {
       %31 = scalar.constant 37 : i32
-      %61 = index.constant 0 : index
-      view.store<type_disjoint> %31, %values[%61] : i32, view<4xi32>
+      view.store<type_disjoint> %31, %values[%9] : i32, view<4xi32>
       %60 = scalar.constant -128 : i32
       %59 = index.constant 1 : index
       view.store<type_disjoint> %60, %values[%59] : i32, view<4xi32>
@@ -253,9 +250,10 @@ func.def public @volatile_vector_input(%input: buffer, %trial: index) {
       %57 = index.constant 3 : index
       view.store<type_disjoint> %42, %values[%57] : i32, view<4xi32>
     } else {
+      %56 = index.constant 0 : offset
       %55 = index.constant 4 : offset
       %49 = index.constant 1 : offset
-      scf.for %position = [%9 to %55 step %49] {
+      scf.for %position = [%56 to %55 step %49] {
         %51 = index.cast %position : offset to i32
         %52 = func.call pure @volatile_input_value(%51) : (i32) -> (i32)
         %53 = scalar.extui %51 : i32 to i64

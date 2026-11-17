@@ -167,3 +167,12 @@ loom::type::buffer<unsigned> invalid(ReadOnly source) {
   // ERROR@+1: LOWERING/059 "buffer.cast cannot discard element qualifiers"
   return loom::buffer::cast<unsigned>(source);
 }
+
+// ====
+// Byte positions retain a nominal address domain instead of silently
+// interpreting ordinary integers as either signed or unsigned positions.
+#include <loomcxx/view.h>
+auto invalid(loom::type::buffer<float> source, int position) {
+  // ERROR@+1: LOWERING/059 "buffer.view byte position must use the index or offset domain"
+  return loom::buffer::view<4>(source, position, {});
+}

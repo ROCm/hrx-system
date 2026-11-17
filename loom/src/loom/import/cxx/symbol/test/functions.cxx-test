@@ -3,23 +3,21 @@
 [[gnu::visibility("hidden")]] void helper(float* p) { p[0u] = 1.0f; }
 void entry(float* p) { helper(p); }
 // ----
-func.def public @entry(%p: buffer, %p_byte_offset: offset) {
-  func.call @helper(%p, %p_byte_offset) : (buffer, offset)
+func.def public @entry(%p: buffer, %p_byte_offset: index) {
+  func.call @helper(%p, %p_byte_offset) : (buffer, index)
   func.return
 }
 
-func.def @helper(%p: buffer, %p_byte_offset: offset) {
+func.def @helper(%p: buffer, %p_byte_offset: index) {
   %4 = scalar.constant 1.0 : f32
   %5 = scalar.constant 0 : i32
   %6 = scalar.extui %5 : i32 to i64
-  %7 = scalar.constant 4 : i64
-  %8 = scalar.muli %6, %7 : i64
-  %9 = index.cast %p_byte_offset : offset to i64
-  %10 = scalar.addi %9, %8 : i64
-  %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
-  %12 = index.cast %11 : i64 to offset
-  %13 = buffer.view %p[%12] : buffer -> view<1xf32>
-  view.store<root_in_bounds|type_disjoint> %4, %13[0] : f32, view<1xf32>
+  %7 = index.cast %6 : i64 to index
+  %8 = index.constant 4 : index
+  %9 = index.mul %7, %8 : index
+  %10 = index.add %p_byte_offset, %9 : index
+  %11 = buffer.view %p[%10] : buffer -> view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %4, %11[0] : f32, view<1xf32>
   func.return
 }
 
@@ -186,42 +184,33 @@ void retained_calls(const unsigned* input, unsigned* sums, unsigned* mixed,
   mixed[index] = first.mixed + second.mixed;
 }
 // ----
-func.def public @retained_calls(%input: buffer, %input_byte_offset: offset, %sums: buffer, %sums_byte_offset: offset, %mixed: buffer, %mixed_byte_offset: offset, %index: i32) {
+func.def public @retained_calls(%input: buffer, %input_byte_offset: index, %sums: buffer, %sums_byte_offset: index, %mixed: buffer, %mixed_byte_offset: index, %index: i32) {
   %7 = scalar.constant 7 : i32
-  %first_sum, %first_mixed = func.call readonly @update(%input, %input_byte_offset, %index, %7) : (buffer, offset, i32, i32) -> (i32, i32)
+  %first_sum, %first_mixed = func.call readonly @update(%input, %input_byte_offset, %index, %7) : (buffer, index, i32, i32) -> (i32, i32)
   %10 = scalar.constant 13 : i32
-  %second_sum, %second_mixed = func.call readonly @update(%input, %input_byte_offset, %index, %10) : (buffer, offset, i32, i32) -> (i32, i32)
+  %second_sum, %second_mixed = func.call readonly @update(%input, %input_byte_offset, %index, %10) : (buffer, index, i32, i32) -> (i32, i32)
   %13 = scalar.addi %first_sum, %second_sum : i32
   %14 = scalar.extui %index : i32 to i64
-  %50 = scalar.constant 2 : i64
-  %51 = scalar.shli %14, %50 : i64
-  %17 = index.cast %sums_byte_offset : offset to i64
-  %18 = scalar.addi %17, %51 : i64
-  %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
-  %20 = index.cast %19 : i64 to offset
-  %21 = buffer.view %sums[%20] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %13, %21[0] : i32, view<1xi32>
-  %22 = scalar.addi %first_mixed, %second_mixed : i32
-  %26 = index.cast %mixed_byte_offset : offset to i64
-  %27 = scalar.addi %26, %51 : i64
-  %28 = scalar.assume %27 [range(%27, 0, 9223372036854775807)] : i64
-  %29 = index.cast %28 : i64 to offset
-  %30 = buffer.view %mixed[%29] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %22, %30[0] : i32, view<1xi32>
+  %15 = index.cast %14 : i64 to index
+  %16 = index.constant 4 : index
+  %43 = index.madd %15, %16, %sums_byte_offset : index
+  %19 = buffer.view %sums[%43] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %13, %19[0] : i32, view<1xi32>
+  %20 = scalar.addi %first_mixed, %second_mixed : i32
+  %42 = index.madd %15, %16, %mixed_byte_offset : index
+  %26 = buffer.view %mixed[%42] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %20, %26[0] : i32, view<1xi32>
   func.return
 }
 
-func.def noinline @update(%input: buffer, %input_byte_offset: offset, %index: i32, %bias: i32) -> (i32, i32) {
-  %37 = scalar.extui %index : i32 to i64
-  %52 = scalar.constant 2 : i64
-  %53 = scalar.shli %37, %52 : i64
-  %40 = index.cast %input_byte_offset : offset to i64
-  %41 = scalar.addi %40, %53 : i64
-  %42 = scalar.assume %41 [range(%41, 0, 9223372036854775807)] : i64
-  %43 = index.cast %42 : i64 to offset
-  %44 = buffer.view %input[%43] : buffer -> view<1xi32>
-  %value = view.load<root_in_bounds|type_disjoint> %44[0] : view<1xi32> -> i32
-  %46 = scalar.addi %value, %bias : i32
-  %47 = scalar.xori %value, %bias : i32
-  func.return %46, %47 : i32, i32
+func.def noinline @update(%input: buffer, %input_byte_offset: index, %index: i32, %bias: i32) -> (i32, i32) {
+  %33 = scalar.extui %index : i32 to i64
+  %34 = index.cast %33 : i64 to index
+  %35 = index.constant 4 : index
+  %44 = index.madd %34, %35, %input_byte_offset : index
+  %38 = buffer.view %input[%44] : buffer -> view<1xi32>
+  %value = view.load<root_in_bounds|type_disjoint> %38[0] : view<1xi32> -> i32
+  %40 = scalar.addi %value, %bias : i32
+  %41 = scalar.xori %value, %bias : i32
+  func.return %40, %41 : i32, i32
 }

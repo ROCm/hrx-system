@@ -26,10 +26,10 @@ unsigned memory(Both* value) {
   return value->Left::value + value->Right::value * value->tag + value->extra;
 }
 // ----
-func.def public @memory(%value$0: buffer, %value_byte_offset: offset) -> (i32) {
+func.def public @memory(%value$0: buffer, %value_byte_offset: index) -> (i32) {
   %3 = scalar.constant 3 : i32
-  %4 = index.constant 8 : offset
-  %5 = index.add %value_byte_offset, %4 : offset
+  %4 = index.constant 8 : index
+  %5 = index.add %value_byte_offset, %4 : index
   %8 = buffer.view %value$0[%5] : buffer -> view<1xi32>
   %9 = view.load<root_in_bounds|type_disjoint> %8[0] : view<1xi32> -> i32
   %10 = scalar.addi %9, %3 : i32
@@ -37,14 +37,14 @@ func.def public @memory(%value$0: buffer, %value_byte_offset: offset) -> (i32) {
   %15 = buffer.view %value$0[%value_byte_offset] : buffer -> view<1xi32>
   %value$16 = view.load<root_in_bounds|type_disjoint> %15[0] : view<1xi32> -> i32
   %value$22 = view.load<root_in_bounds|type_disjoint> %8[0] : view<1xi32> -> i32
-  %23 = index.constant 4 : offset
-  %24 = index.add %value_byte_offset, %23 : offset
+  %23 = index.constant 4 : index
+  %24 = index.add %value_byte_offset, %23 : index
   %25 = buffer.view %value$0[%24] : buffer -> view<1xi32>
   %tag = view.load<root_in_bounds|type_disjoint> %25[0] : view<1xi32> -> i32
   %27 = scalar.muli %value$22, %tag : i32
   %28 = scalar.addi %value$16, %27 : i32
-  %29 = index.constant 12 : offset
-  %30 = index.add %value_byte_offset, %29 : offset
+  %29 = index.constant 12 : index
+  %30 = index.add %value_byte_offset, %29 : index
   %31 = buffer.view %value$0[%30] : buffer -> view<1xi32>
   %extra = view.load<root_in_bounds|type_disjoint> %31[0] : view<1xi32> -> i32
   %33 = scalar.addi %28, %extra : i32
@@ -106,21 +106,21 @@ unsigned padding(Child* value) {
   return value->word + value->tag + value->extra;
 }
 // ----
-func.def public @padding(%value: buffer, %value_byte_offset: offset) -> (i32) {
+func.def public @padding(%value: buffer, %value_byte_offset: index) -> (i32) {
   %31 = scalar.constant 0 : i32
   %34 = scalar.constant 0 : i8
   %9 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %31, %9[0] : i32, view<1xi32>
-  %10 = index.constant 4 : offset
-  %11 = index.add %value_byte_offset, %10 : offset
+  %10 = index.constant 4 : index
+  %11 = index.add %value_byte_offset, %10 : index
   %12 = buffer.view %value[%11] : buffer -> view<1xi8>
   view.store<root_in_bounds> %34, %12[0] : i8, view<1xi8>
   %word = view.load<root_in_bounds|type_disjoint> %9[0] : view<1xi32> -> i32
   %tag = view.load<root_in_bounds> %12[0] : view<1xi8> -> i8
   %21 = scalar.extui %tag : i8 to i32
   %22 = scalar.addi %word, %21 : i32
-  %23 = index.constant 5 : offset
-  %24 = index.add %value_byte_offset, %23 : offset
+  %23 = index.constant 5 : index
+  %24 = index.add %value_byte_offset, %23 : index
   %25 = buffer.view %value[%24] : buffer -> view<1xi8>
   %extra = view.load<root_in_bounds> %25[0] : view<1xi8> -> i8
   %27 = scalar.extui %extra : i8 to i32
@@ -148,15 +148,15 @@ unsigned enclosing(unsigned input) {
 func.def public @enclosing(%input: i32) -> (i32) {
   %2 = index.constant 12 : offset
   %value_storage = buffer.alloca<private> align(4) %2 : buffer
-  %80 = index.constant 0 : offset
+  %80 = index.constant 0 : index
   %11 = buffer.view %value_storage[%80] : buffer -> view<1xi32>
   view.store<type_disjoint> %input, %11[0] : i32, view<1xi32>
   %16 = scalar.constant 2 : i32
-  %79 = index.constant 4 : offset
+  %79 = index.constant 4 : index
   %18 = buffer.view %value_storage[%79] : buffer -> view<1xi32>
   view.store<type_disjoint> %16, %18[0] : i32, view<1xi32>
   %21 = scalar.constant 3 : i32
-  %78 = index.constant 8 : offset
+  %78 = index.constant 8 : index
   %23 = buffer.view %value_storage[%78] : buffer -> view<1xi32>
   view.store<type_disjoint> %21, %23[0] : i32, view<1xi32>
   %51 = scalar.constant 5 : i32
@@ -302,9 +302,9 @@ unsigned read(Device* device) {
   return before + device->Base::status;
 }
 // ----
-func.def public @read(%device: buffer, %device_byte_offset: offset) -> (i32) {
-  %3 = index.constant 4 : offset
-  %4 = index.add %device_byte_offset, %3 : offset
+func.def public @read(%device: buffer, %device_byte_offset: index) -> (i32) {
+  %3 = index.constant 4 : index
+  %4 = index.add %device_byte_offset, %3 : index
   %5 = buffer.view %device[%4] : buffer -> view<1xi32>
   %status$6 = view.load<volatile|root_in_bounds|type_disjoint> %5[0] : view<1xi32> -> i32
   %7 = scalar.constant 7 : i32
@@ -353,11 +353,11 @@ func.def public @capture(%input: i32) -> (i32) {
   %2 = index.constant 8 : offset
   %value_storage = buffer.alloca<private> align(4) %2 : buffer
   %12 = scalar.constant 7 : i32
-  %53 = index.constant 0 : offset
+  %53 = index.constant 0 : index
   %14 = buffer.view %value_storage[%53] : buffer -> view<1xi32>
   view.store<type_disjoint> %12, %14[0] : i32, view<1xi32>
   %21 = scalar.constant 11 : i32
-  %52 = index.constant 4 : offset
+  %52 = index.constant 4 : index
   %23 = buffer.view %value_storage[%52] : buffer -> view<1xi32>
   view.store<type_disjoint> %21, %23[0] : i32, view<1xi32>
   %46 = view.load<root_in_bounds|type_disjoint> %23[0] : view<1xi32> -> i32
@@ -414,9 +414,9 @@ unsigned base_lookup(unsigned index) {
 // ----
 func.def public @base_lookup(%index: i32) -> (i32) {
   %base_table_storage = global.load @base_table : buffer
-  %19 = index.constant 4 : offset
-  %17 = buffer.view %base_table_storage[%19] : buffer -> view<1xi32>
-  %other = view.load<type_disjoint> %17[0] : view<1xi32> -> i32
+  %17 = index.constant 4 : index
+  %15 = buffer.view %base_table_storage[%17] : buffer -> view<1xi32>
+  %other = view.load<type_disjoint> %15[0] : view<1xi32> -> i32
   func.return %other : i32
 }
 
@@ -428,13 +428,13 @@ struct [[gnu::packed]] Base { unsigned char tag; unsigned value; };
 struct Derived : Base { unsigned short extra; };
 unsigned packed(const Derived* value) { return value->value + value->extra; }
 // ----
-func.def public @packed(%value$0: buffer, %value_byte_offset: offset) -> (i32) {
-  %3 = index.constant 1 : offset
-  %4 = index.add %value_byte_offset, %3 : offset
+func.def public @packed(%value$0: buffer, %value_byte_offset: index) -> (i32) {
+  %3 = index.constant 1 : index
+  %4 = index.add %value_byte_offset, %3 : index
   %5 = buffer.view %value$0[%4] : buffer -> view<1xi32, align(1)>
   %value$6 = view.load<root_in_bounds|type_disjoint> %5[0] : view<1xi32, align(1)> -> i32
-  %7 = index.constant 6 : offset
-  %8 = index.add %value_byte_offset, %7 : offset
+  %7 = index.constant 6 : index
+  %8 = index.add %value_byte_offset, %7 : index
   %9 = buffer.view %value$0[%8] : buffer -> view<1xi16>
   %extra = view.load<root_in_bounds|type_disjoint> %9[0] : view<1xi16> -> i16
   %11 = scalar.extui %extra : i16 to i32
@@ -509,9 +509,9 @@ unsigned template_base_member(TemplateDerived<unsigned>* object) {
   return object->read();
 }
 // ----
-func.def public @template_base_member(%object: buffer, %object_byte_offset: offset) -> (i32) {
-  %7 = index.constant 12 : offset
-  %8 = index.add %object_byte_offset, %7 : offset
+func.def public @template_base_member(%object: buffer, %object_byte_offset: index) -> (i32) {
+  %7 = index.constant 12 : index
+  %8 = index.add %object_byte_offset, %7 : index
   %15 = buffer.view %object[%8] : buffer -> view<1xi32>
   %value = view.load<root_in_bounds|type_disjoint> %15[0] : view<1xi32> -> i32
   func.return %value : i32

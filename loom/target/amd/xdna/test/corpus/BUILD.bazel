@@ -84,6 +84,7 @@ loom_corpus_test(
             "numeric/integer/division.loom:@guarded_narrow_lookup_values": "XDNA/051",
             "numeric/integer/division.loom:@integer_division_i32_values": "XDNA/051",
             "numeric/integer/division.loom:@integer_division_i64_values": "XDNA/051",
+            "numeric/integer/division.loom:@native_index_division_values": "XDNA/051",
             "numeric/integer/division.loom:@runtime_coordinate_lookup_values": "XDNA/051",
             "numeric/integer/division.loom:@runtime_group_lookup_values": "XDNA/051",
             "numeric/integer/division.loom:@runtime_remainder_lookup_values": "XDNA/051",

@@ -5,7 +5,7 @@ unsigned add_new(volatile unsigned* state, unsigned value) {
   return __atomic_add_fetch(state, value, __ATOMIC_SEQ_CST);
 }
 // ----
-func.def public source_signature(#func.abi.c.signature<arguments = [0, 1], results = [1], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @add_new(%state: buffer, %state_byte_offset: offset, %value: i32) -> (i32) {
+func.def public source_signature(#func.abi.c.signature<arguments = [0, 1], results = [1], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @add_new(%state: buffer, %state_byte_offset: index, %value: i32) -> (i32) {
   %4 = buffer.view %state[%state_byte_offset] : buffer -> view<1xi32>
   %5 = view.atomic.rmw<addi, root_in_bounds> %value, %4[0] {ordering = seq_cst, scope = system} : i32, view<1xi32> -> i32
   %6 = scalar.addi %5, %value : i32
@@ -20,7 +20,7 @@ bool compare(volatile unsigned long long* state, unsigned long long* expected,
                                     __ATOMIC_ACQ_REL, __ATOMIC_CONSUME);
 }
 // ----
-func.def public source_signature(#func.abi.c.signature<arguments = [0, 1, 2, 3], results = [4], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 8, byte_alignment = 8, component_count = 1, bitwidth = 64>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<boolean, byte_length = 1, byte_alignment = 1, component_count = 1>]>) @compare(%state: buffer, %state_byte_offset: offset, %expected: buffer, %expected_byte_offset: offset, %value: i64, %calls: buffer, %calls_byte_offset: offset) -> (i1) {
+func.def public source_signature(#func.abi.c.signature<arguments = [0, 1, 2, 3], results = [4], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 8, byte_alignment = 8, component_count = 1, bitwidth = 64>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<boolean, byte_length = 1, byte_alignment = 1, component_count = 1>]>) @compare(%state: buffer, %state_byte_offset: index, %expected: buffer, %expected_byte_offset: index, %value: i64, %calls: buffer, %calls_byte_offset: index) -> (i1) {
   %8 = buffer.view %calls[%calls_byte_offset] : buffer -> view<1xi32>
   %9 = view.load<root_in_bounds> %8[0] : view<1xi32> -> i32
   %10 = scalar.constant 1 : i32

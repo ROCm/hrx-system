@@ -16,6 +16,7 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/spirv/descriptors/descriptors.h"
+#include "loom/target/arch/spirv/lower/index_operands.h"
 #include "loom/target/arch/spirv/lower/workgroup_layout.h"
 #include "loom/target/arch/spirv/lower/workgroup_reduce.h"
 #include "loom/util/fact_table.h"
@@ -43,6 +44,8 @@ typedef struct loom_spirv_workgroup_view_plan_t {
 typedef struct loom_spirv_workgroup_compare_plan_t {
   // Exact source allocation roots; INVALID denotes a different storage domain.
   loom_value_id_t roots[2];
+  // Byte-position conversions retained once producer carriers are final.
+  const void* positions[2];
 } loom_spirv_workgroup_compare_plan_t;
 
 static bool loom_spirv_workgroup_i64_is_power_of_two(int64_t value) {
@@ -260,6 +263,22 @@ iree_status_t loom_spirv_select_workgroup_plan(
   }
 }
 
+iree_status_t loom_spirv_finalize_workgroup_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_plan_t plan) {
+  if (plan.id != LOOM_SPIRV_WORKGROUP_PLAN_COMPARE) {
+    return iree_ok_status();
+  }
+  loom_spirv_workgroup_compare_plan_t* compare =
+      (loom_spirv_workgroup_compare_plan_t*)plan.target_data;
+  IREE_RETURN_IF_ERROR(loom_spirv_prepare_byte_position(
+      context, loom_buffer_compare_address_lhs_offset(source_op),
+      &compare->positions[0]));
+  return loom_spirv_prepare_byte_position(
+      context, loom_buffer_compare_address_rhs_offset(source_op),
+      &compare->positions[1]);
+}
+
 void loom_spirv_mark_workgroup_plan_storage_demands(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_plan_t plan) {
@@ -409,9 +428,10 @@ static iree_status_t loom_spirv_lower_workgroup_view(
 // position. No pointer bits or storage-layout reconstruction are required.
 static iree_status_t loom_spirv_lower_workgroup_position(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_value_id_t root, loom_value_id_t offset,
+    loom_value_id_t root, loom_value_id_t offset, const void* position_plan,
     loom_value_id_t* out_position) {
-  *out_position = loom_low_lower_lookup_value(context, offset);
+  IREE_RETURN_IF_ERROR(loom_spirv_emit_index_operand(
+      context, source_op, offset, position_plan, out_position));
   const uint64_t bias =
       loom_spirv_workgroup_layout_root_byte_offset(context, root);
   if (!bias) {
@@ -419,8 +439,8 @@ static iree_status_t loom_spirv_lower_workgroup_position(
   }
   const loom_low_descriptor_set_t* descriptors =
       loom_low_lower_context_descriptor_set(context);
-  const loom_type_t offset_type =
-      loom_low_lower_value_binding_type(context, offset);
+  const loom_type_t offset_type = loom_spirv_materialized_index_operand_type(
+      context, offset, position_plan);
   loom_string_id_t key;
   IREE_RETURN_IF_ERROR(loom_module_intern_string(
       loom_low_lower_context_module(context), IREE_SV("offset64_value"), &key));
@@ -478,10 +498,12 @@ static iree_status_t loom_spirv_lower_workgroup_compare(
     loom_value_id_t positions[2];
     IREE_RETURN_IF_ERROR(loom_spirv_lower_workgroup_position(
         context, source_op, plan->roots[0],
-        loom_buffer_compare_address_lhs_offset(source_op), &positions[0]));
+        loom_buffer_compare_address_lhs_offset(source_op), plan->positions[0],
+        &positions[0]));
     IREE_RETURN_IF_ERROR(loom_spirv_lower_workgroup_position(
         context, source_op, plan->roots[1],
-        loom_buffer_compare_address_rhs_offset(source_op), &positions[1]));
+        loom_buffer_compare_address_rhs_offset(source_op), plan->positions[1],
+        &positions[1]));
     const loom_low_lower_resolved_descriptor_t compare = {
         .descriptor = loom_low_descriptor_set_descriptor_at(
             descriptors,

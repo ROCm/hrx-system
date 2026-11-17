@@ -160,13 +160,13 @@ struct Derived : Prefix, Base {};
 Base* pointer(Derived* value) { return value; }
 
 // ----
-func.def public @pointer(%value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
-  %4 = index.constant 4 : offset
-  %5 = index.add %value_byte_offset, %4 : offset
+func.def public @pointer(%value: buffer, %value_byte_offset: index) -> (buffer, index) {
+  %4 = index.constant 4 : index
+  %5 = index.add %value_byte_offset, %4 : index
   %6 = buffer.compare.null %value : buffer
-  %7 = index.constant 0 : offset
-  %8 = scf.select %6, %7, %5 : offset
-  func.return %value, %8 : buffer, offset
+  %7 = index.constant 0 : index
+  %8 = scf.select %6, %7, %5 : index
+  func.return %value, %8 : buffer, index
 }
 
 // ====
@@ -179,10 +179,10 @@ struct Derived : Prefix, Base {};
 Derived* pointer(Base* value) { return static_cast<Derived*>(value); }
 
 // ----
-func.def public @pointer(%value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
-  %4 = index.constant 4 : offset
+func.def public @pointer(%value: buffer, %value_byte_offset: index) -> (buffer, index) {
+  %4 = index.constant 4 : index
   %5 = buffer.compare.null %value : buffer
-  %6 = scf.select %5, %4, %value_byte_offset : offset
-  %7 = index.sub %6, %4 : offset
-  func.return %value, %7 : buffer, offset
+  %6 = scf.select %5, %4, %value_byte_offset : index
+  %7 = index.sub %6, %4 : index
+  func.return %value, %7 : buffer, index
 }

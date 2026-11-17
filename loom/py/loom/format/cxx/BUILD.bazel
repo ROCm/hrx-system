@@ -163,8 +163,8 @@ iree_py_test(
         "$(rootpath //loom/src/loom/tools/loom-test)",
         "$(rootpath control_flow.cxx)",
         "$(rootpath control_flow_checks.cxx)",
-        "8",
-        "31",
+        "9",
+        "35",
     ],
     data = [
         "control_flow.cxx",

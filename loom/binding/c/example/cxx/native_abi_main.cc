@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cstdio>
+#include <initializer_list>
 
 #include "loom/binding/c/example/cxx/native_abi.h"
 
@@ -34,6 +35,10 @@ extern "C" const unsigned* native_advance(const unsigned* base) {
   return base + 4;
 }
 
+extern "C" const unsigned* native_retreat(const unsigned* interior) {
+  return interior - 1;
+}
+
 static bool require(bool condition, const char* message) {
   if (!condition) {
     std::fprintf(stderr, "failed: %s\n", message);
@@ -61,9 +66,25 @@ int main() {
       words[0] == 2u && words[1] == 4u && words[2] == 6u && words[3] == 8u,
       "native caller to Loom SIMD definition");
 
-  unsigned values[8] = {};
+  unsigned values[8] = {3, 5, 7, 11, 13, 17, 19, 23};
   ok &= require(loom_advance(values) == values + 3,
                 "native caller to Loom pointer definition");
+  ok &= require(loom_read_previous(values + 1) == values[0],
+                "read before a supplied interior pointer");
+  for (int count : {-3, -1, 0, 1, 3}) {
+    ok &= require(loom_retreat(values + 3, count) == values + 3 - count,
+                  "signed pointer displacement through native call and return");
+  }
+  Complete object = {{29}, {31}};
+  auto* payload = static_cast<Payload*>(&object);
+  ok &= require(static_cast<void*>(payload) != static_cast<void*>(&object),
+                "second base occupies a nonzero byte position");
+  ok &= require(
+      loom_payload(&object) == payload && loom_complete(payload) == &object,
+      "nullable class adjustment preserves supplied interior origin");
+  ok &= require(
+      loom_payload(nullptr) == nullptr && loom_complete(nullptr) == nullptr,
+      "class adjustment preserves null");
 
   pair = loom_call_native_pair({0x12345678u, 17u});
   ok &= require(pair.first == 0x479e03d2u && pair.second == 58u,
@@ -85,6 +106,8 @@ int main() {
 
   ok &= require(loom_call_native_advance(values) == values + 5,
                 "Loom caller to native pointer definition");
+  ok &= require(loom_call_native_retreat(values + 3) == values + 1,
+                "negative position after native pointer return");
 
   if (ok) {
     std::puts("Loom and native C++ exchanged every value correctly.");

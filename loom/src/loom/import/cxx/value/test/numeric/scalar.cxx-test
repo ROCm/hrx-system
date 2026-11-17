@@ -132,7 +132,7 @@ double post_increment(double* value) { return (*value)++; }
 _Float16 pre_decrement(_Float16 value) { return --value; }
 
 // ----
-func.def public @post_increment(%value: buffer, %value_byte_offset: offset) -> (f64) {
+func.def public @post_increment(%value: buffer, %value_byte_offset: index) -> (f64) {
   %3 = buffer.view %value[%value_byte_offset] : buffer -> view<1xf64>
   %4 = view.load<root_in_bounds|type_disjoint> %3[0] : view<1xf64> -> f64
   %5 = scalar.constant 1 : i32

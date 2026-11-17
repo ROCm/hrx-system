@@ -418,17 +418,30 @@ static iree_status_t loom_func_c_abi_projection_emit(
       return iree_ok_status();
     }
     case LOOM_FUNC_ABI_C_TYPE_KIND_POINTER: {
-      const loom_type_t expected_types[] = {
-          loom_type_buffer(),
-          loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
-      };
-      for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(expected_types); ++i) {
-        const loom_type_t actual_type = loom_module_value_type(
-            module, values.values[(*inout_value_index)++]);
-        if (!loom_type_equal(actual_type, expected_types[i])) {
-          return loom_func_source_signature_emit_type_mismatch(
-              emitter, op, value_name, actual_type, expected_types[i]);
-        }
+      const loom_type_t root_type =
+          loom_module_value_type(module, values.values[(*inout_value_index)++]);
+      if (!loom_type_is_buffer(root_type)) {
+        return loom_func_source_signature_emit_type_mismatch(
+            emitter, op, value_name, root_type, loom_type_buffer());
+      }
+      const loom_type_t position_type =
+          loom_module_value_type(module, values.values[(*inout_value_index)++]);
+      if (!loom_type_equal(position_type,
+                           loom_type_scalar(LOOM_SCALAR_TYPE_INDEX)) &&
+          !loom_type_equal(position_type,
+                           loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET))) {
+        const loom_diagnostic_param_t params[] = {
+            loom_param_string(value_name),
+            loom_param_type(position_type),
+            loom_param_string(IREE_SV("index or offset pointer position")),
+        };
+        const loom_diagnostic_emission_t emission = {
+            .op = op,
+            .error = LOOM_ERR_TYPE_003,
+            .params = params,
+            .param_count = IREE_ARRAYSIZE(params),
+        };
+        return iree_diagnostic_emit(emitter, &emission);
       }
       return iree_ok_status();
     }

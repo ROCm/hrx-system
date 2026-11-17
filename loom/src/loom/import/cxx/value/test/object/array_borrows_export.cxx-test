@@ -25,16 +25,16 @@ int update(int* output, int value, bool upper) {
 #include <loomcxx/index.h>
 
 [[loom::symbol("update")]]
-unsigned update(loom::type::buffer<unsigned char> output, loom::type::offset output_byte_offset, unsigned value, bool upper);
+unsigned update(loom::type::buffer<unsigned char> output, loom::type::index output_byte_offset, unsigned value, bool upper);
 
 [[loom::symbol("Box__data_value")]]
 static unsigned Box__data_value(unsigned this_lower_0, unsigned this_lower_1, unsigned this_upper_0, unsigned this_upper_1, bool upper);
 
 [[loom::symbol("element")]]
-static unsigned element(loom::type::buffer<unsigned char> state_output, loom::type::offset state_output_byte_offset, unsigned state_box_lower_0, unsigned state_box_lower_1, unsigned state_box_upper_0, unsigned state_box_upper_1, bool upper, unsigned index);
+static unsigned element(loom::type::buffer<unsigned char> state_output, loom::type::index state_output_byte_offset, unsigned state_box_lower_0, unsigned state_box_lower_1, unsigned state_box_upper_0, unsigned state_box_upper_1, bool upper, unsigned index);
 
 [[loom::symbol("update")]]
-unsigned update(loom::type::buffer<unsigned char> output, loom::type::offset output_byte_offset, unsigned value, bool upper) {
+unsigned update(loom::type::buffer<unsigned char> output, loom::type::index output_byte_offset, unsigned value, bool upper) {
   unsigned v8 = Box__data_value(value, 2u, 3u, 4u, upper);
   unsigned v13{};
   if (v8 == 0u) {
@@ -103,7 +103,7 @@ static unsigned Box__data_value(unsigned this_lower_0, unsigned this_lower_1, un
 }
 
 [[loom::symbol("element")]]
-static unsigned element(loom::type::buffer<unsigned char> state_output, loom::type::offset state_output_byte_offset, unsigned state_box_lower_0, unsigned state_box_lower_1, unsigned state_box_upper_0, unsigned state_box_upper_1, bool upper, unsigned index) {
+static unsigned element(loom::type::buffer<unsigned char> state_output, loom::type::index state_output_byte_offset, unsigned state_box_lower_0, unsigned state_box_lower_1, unsigned state_box_upper_0, unsigned state_box_upper_1, bool upper, unsigned index) {
   unsigned v74 = Box__data_value(state_box_lower_0, state_box_lower_1, state_box_upper_0, state_box_upper_1, upper);
   return ((v74 * 2u) + index);
 }

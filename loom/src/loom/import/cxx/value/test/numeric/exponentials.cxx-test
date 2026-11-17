@@ -141,7 +141,7 @@ unsigned poisson(double lambda, const double* uniforms) {
   return count - 1;
 }
 // ----
-func.def public @poisson(%lambda: f64, %uniforms: buffer, %uniforms_byte_offset: offset) -> (i32) {
+func.def public @poisson(%lambda: f64, %uniforms: buffer, %uniforms_byte_offset: index) -> (i32) {
   %4 = scalar.negf %lambda : f64
   %limit = scalar.expf<afn> %4 : f64
   %count$6 = scalar.constant 0 : i32
@@ -150,21 +150,19 @@ func.def public @poisson(%lambda: f64, %uniforms: buffer, %uniforms_byte_offset:
     %14 = scalar.constant 1 : i32
     %count$15 = scalar.addi %count$8, %14 : i32
     %16 = scalar.extui %count$8 : i32 to i64
-    %17 = scalar.constant 8 : i64
-    %18 = scalar.muli %16, %17 : i64
-    %19 = index.cast %uniforms_byte_offset : offset to i64
-    %20 = scalar.addi %19, %18 : i64
-    %21 = scalar.assume %20 [range(%20, 0, 9223372036854775807)] : i64
-    %22 = index.cast %21 : i64 to offset
-    %23 = buffer.view %uniforms[%22] : buffer -> view<1xf64>
-    %24 = view.load<root_in_bounds|type_disjoint> %23[0] : view<1xf64> -> f64
-    %product$25 = scalar.mulf %product$9, %24 : f64
-    %26 = scalar.cmpf ogt, %product$25, %limit : f64
-    scf.condition %26, %count$15, %product$25 : i1, i32, f64
+    %17 = index.cast %16 : i64 to index
+    %18 = index.constant 8 : index
+    %19 = index.mul %17, %18 : index
+    %20 = index.add %uniforms_byte_offset, %19 : index
+    %21 = buffer.view %uniforms[%20] : buffer -> view<1xf64>
+    %22 = view.load<root_in_bounds|type_disjoint> %21[0] : view<1xf64> -> f64
+    %product$23 = scalar.mulf %product$9, %22 : f64
+    %24 = scalar.cmpf ogt, %product$23, %limit : f64
+    scf.condition %24, %count$15, %product$23 : i1, i32, f64
   } do(%count: i32, %product: f64) {
     scf.yield %count, %product : i32, f64
   }
-  %27 = scalar.constant 1 : i32
-  %28 = scalar.subi %count$12, %27 : i32
-  func.return %28 : i32
+  %25 = scalar.constant 1 : i32
+  %26 = scalar.subi %count$12, %25 : i32
+  func.return %26 : i32
 }

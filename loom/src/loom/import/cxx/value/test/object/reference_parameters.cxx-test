@@ -168,8 +168,8 @@ unsigned stale_pointer_copy(unsigned* pointer) {
 }
 
 // ----
-func.def public @stale_pointer_copy(%pointer$0: buffer, %pointer_byte_offset$1: offset) -> (i32) {
-  %pointer$3, %pointer_byte_offset$4 = func.call pure @advance_pointer(%pointer$0, %pointer_byte_offset$1) : (buffer, offset) -> (buffer, offset)
+func.def public @stale_pointer_copy(%pointer$0: buffer, %pointer_byte_offset$1: index) -> (i32) {
+  %pointer$3, %pointer_byte_offset$4 = func.call pure @advance_pointer(%pointer$0, %pointer_byte_offset$1) : (buffer, index) -> (buffer, index)
   %5 = buffer.view %pointer$0[%pointer_byte_offset$1] : buffer -> view<1xi32>
   %6 = view.load<root_in_bounds|type_disjoint> %5[0] : view<1xi32> -> i32
   %7 = buffer.view %pointer$3[%pointer_byte_offset$4] : buffer -> view<1xi32>
@@ -178,16 +178,13 @@ func.def public @stale_pointer_copy(%pointer$0: buffer, %pointer_byte_offset$1: 
   func.return %9 : i32
 }
 
-func.def @advance_pointer(%pointer: buffer, %pointer_byte_offset$11: offset) -> (buffer, offset) {
+func.def @advance_pointer(%pointer: buffer, %pointer_byte_offset$11: index) -> (buffer, index) {
   %14 = scalar.constant 1 : i32
-  %15 = scalar.extsi %14 : i32 to i64
-  %16 = scalar.constant 4 : i64
-  %17 = scalar.muli %15, %16 : i64
-  %18 = index.cast %pointer_byte_offset$11 : offset to i64
-  %19 = scalar.addi %18, %17 : i64
-  %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
-  %pointer_byte_offset$21 = index.cast %20 : i64 to offset
-  func.return %pointer, %pointer_byte_offset$21 : buffer, offset
+  %15 = index.cast %14 : i32 to index
+  %16 = index.constant 4 : index
+  %17 = index.mul %15, %16 : index
+  %pointer_byte_offset$18 = index.add %pointer_byte_offset$11, %17 : index
+  func.return %pointer, %pointer_byte_offset$18 : buffer, index
 }
 
 // ====
@@ -245,16 +242,16 @@ double immutable_references(double input, unsigned index) {
 // ----
 func.def public @immutable_references(%input: f64, %index: i32) -> (f64) {
   %table_storage = global.load @table : buffer
-  %table_storage_byte_offset = index.constant 0 : offset
+  %table_storage_byte_offset = index.constant 0 : index
   %table_view = buffer.view %table_storage[%table_storage_byte_offset] : buffer -> view<8xf64>
   %6 = scalar.constant 7 : i32
   %7 = scalar.andi %index, %6 : i32
-  %first = func.call readonly @lookup(%table_storage, %table_storage_byte_offset, %7) : (buffer, offset, i32) -> (f64)
+  %first = func.call readonly @lookup(%table_storage, %table_storage_byte_offset, %7) : (buffer, index, i32) -> (f64)
   %9 = scalar.constant 1 : i32
   %10 = scalar.addi %index, %9 : i32
   %11 = scalar.constant 7 : i32
   %12 = scalar.andi %10, %11 : i32
-  %second = func.call readonly @lookup_template_8(%table_storage, %table_storage_byte_offset, %12) : (buffer, offset, i32) -> (f64)
+  %second = func.call readonly @lookup_template_8(%table_storage, %table_storage_byte_offset, %12) : (buffer, index, i32) -> (f64)
   %14 = scalar.addf %first, %second : f64
   %15 = scalar.constant 2 : i32
   %16 = scalar.addi %index, %15 : i32
@@ -269,30 +266,26 @@ func.def public @immutable_references(%input: f64, %index: i32) -> (f64) {
   func.return %24 : f64
 }
 
-func.def @lookup(%values: buffer, %values_byte_offset: offset, %index: i32) -> (f64) {
+func.def @lookup(%values: buffer, %values_byte_offset: index, %index: i32) -> (f64) {
   %29 = scalar.extui %index : i32 to i64
-  %30 = scalar.constant 8 : i64
-  %31 = scalar.muli %29, %30 : i64
-  %32 = index.cast %values_byte_offset : offset to i64
-  %33 = scalar.addi %32, %31 : i64
-  %34 = scalar.assume %33 [range(%33, 0, 9223372036854775807)] : i64
-  %35 = index.cast %34 : i64 to offset
-  %36 = buffer.view %values[%35] : buffer -> view<1xf64>
-  %37 = view.load<root_in_bounds|type_disjoint> %36[0] : view<1xf64> -> f64
-  func.return %37 : f64
+  %30 = index.cast %29 : i64 to index
+  %31 = index.constant 8 : index
+  %32 = index.mul %30, %31 : index
+  %33 = index.add %values_byte_offset, %32 : index
+  %34 = buffer.view %values[%33] : buffer -> view<1xf64>
+  %35 = view.load<root_in_bounds|type_disjoint> %34[0] : view<1xf64> -> f64
+  func.return %35 : f64
 }
 
-func.def @lookup_template_8(%values: buffer, %values_byte_offset: offset, %index: i32) -> (f64) {
-  %42 = scalar.extui %index : i32 to i64
-  %43 = scalar.constant 8 : i64
-  %44 = scalar.muli %42, %43 : i64
-  %45 = index.cast %values_byte_offset : offset to i64
-  %46 = scalar.addi %45, %44 : i64
-  %47 = scalar.assume %46 [range(%46, 0, 9223372036854775807)] : i64
-  %48 = index.cast %47 : i64 to offset
-  %49 = buffer.view %values[%48] : buffer -> view<1xf64>
-  %50 = view.load<root_in_bounds|type_disjoint> %49[0] : view<1xf64> -> f64
-  func.return %50 : f64
+func.def @lookup_template_8(%values: buffer, %values_byte_offset: index, %index: i32) -> (f64) {
+  %40 = scalar.extui %index : i32 to i64
+  %41 = index.cast %40 : i64 to index
+  %42 = index.constant 8 : index
+  %43 = index.mul %41, %42 : index
+  %44 = index.add %values_byte_offset, %43 : index
+  %45 = buffer.view %values[%44] : buffer -> view<1xf64>
+  %46 = view.load<root_in_bounds|type_disjoint> %45[0] : view<1xf64> -> f64
+  func.return %46 : f64
 }
 
 global.rodata.def @table = align(8) bytes("9a9999999999b93f9a9999999999c93f9a9999999999d93f9a9999999999e93f9a9999999999f93f9a999999999909409a999999999919409a99999999992940")
@@ -454,22 +447,20 @@ unsigned pointer_reference(unsigned* pointer, unsigned amount) {
 }
 
 // ----
-func.def public @pointer_reference(%pointer$0: buffer, %pointer_byte_offset$1: offset, %amount: i32) -> (i32) {
-  %pointer$4, %pointer_byte_offset$5 = func.call pure @advance(%pointer$0, %pointer_byte_offset$1, %amount) : (buffer, offset, i32) -> (buffer, offset)
+func.def public @pointer_reference(%pointer$0: buffer, %pointer_byte_offset$1: index, %amount: i32) -> (i32) {
+  %pointer$4, %pointer_byte_offset$5 = func.call pure @advance(%pointer$0, %pointer_byte_offset$1, %amount) : (buffer, index, i32) -> (buffer, index)
   %6 = buffer.view %pointer$4[%pointer_byte_offset$5] : buffer -> view<1xi32>
   %7 = view.load<root_in_bounds|type_disjoint> %6[0] : view<1xi32> -> i32
   func.return %7 : i32
 }
 
-func.def @advance(%pointer: buffer, %pointer_byte_offset$9: offset, %amount: i32) -> (buffer, offset) {
+func.def @advance(%pointer: buffer, %pointer_byte_offset$9: index, %amount: i32) -> (buffer, index) {
   %13 = scalar.extui %amount : i32 to i64
-  %14 = scalar.constant 4 : i64
-  %15 = scalar.muli %13, %14 : i64
-  %16 = index.cast %pointer_byte_offset$9 : offset to i64
-  %17 = scalar.addi %16, %15 : i64
-  %18 = scalar.assume %17 [range(%17, 0, 9223372036854775807)] : i64
-  %pointer_byte_offset$19 = index.cast %18 : i64 to offset
-  func.return %pointer, %pointer_byte_offset$19 : buffer, offset
+  %14 = index.cast %13 : i64 to index
+  %15 = index.constant 4 : index
+  %16 = index.mul %14, %15 : index
+  %pointer_byte_offset$17 = index.add %pointer_byte_offset$9, %16 : index
+  func.return %pointer, %pointer_byte_offset$17 : buffer, index
 }
 
 // ====
@@ -614,8 +605,8 @@ kernel.def @dynamic_view_reference() {
   %8 = index.constant 1 : index
   kernel.launch.config workgroups(%3, %4, %5) workgroup_size(%6, %7, %8) : index
 } launch(%input: buffer, %output: buffer, %rows: i32) {
-  %input_byte_offset = index.constant 0 : offset
-  %output_byte_offset = index.constant 0 : offset
+  %input_byte_offset = index.constant 0 : index
+  %output_byte_offset = index.constant 0 : index
   %layout = encoding.layout.dense : encoding<layout>
   %12 = scalar.extui %rows : i32 to i64
   %source_dim0$13 = index.cast %12 : i64 to index
@@ -630,28 +621,25 @@ kernel.def @dynamic_view_reference() {
   %24 = index.cast %22 : i32 to index
   %25 = view.load<type_disjoint> %source$20[%23, %24] : view<[%source_dim0$18]x4xf32, %source_layout> -> f32
   %26 = scalar.constant 0 : i32
-  %27 = scalar.extsi %26 : i32 to i64
-  %28 = scalar.constant 4 : i64
-  %29 = scalar.muli %27, %28 : i64
-  %30 = index.cast %output_byte_offset : offset to i64
-  %31 = scalar.addi %30, %29 : i64
-  %32 = scalar.assume %31 [range(%31, 0, 9223372036854775807)] : i64
-  %33 = index.cast %32 : i64 to offset
-  %34 = buffer.view %output[%33] : buffer -> view<1xf32>
-  view.store<root_in_bounds|type_disjoint> %25, %34[0] : f32, view<1xf32>
+  %27 = index.cast %26 : i32 to index
+  %28 = index.constant 4 : index
+  %29 = index.mul %27, %28 : index
+  %30 = index.add %output_byte_offset, %29 : index
+  %31 = buffer.view %output[%30] : buffer -> view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %25, %31[0] : f32, view<1xf32>
   kernel.return
 }
 
-func.def @trim(%rows_dim0$35: index, %rows_layout: encoding<layout>, %rows$37: view<[%rows_dim0$35]x4xf32, %rows_layout>, %first: i32, %remaining: i32) -> (%40: index, %41: encoding<layout>, view<[%40]x4xf32, %41>) {
-  %43 = scalar.extui %first : i32 to i64
-  %44 = scalar.constant 0 : i32
-  %45 = scalar.extsi %44 : i32 to i64
-  %46 = scalar.extui %remaining : i32 to i64
-  %rows_dim0$47 = index.cast %46 : i64 to index
-  %48 = index.cast %43 : i64 to index
-  %49 = index.cast %45 : i64 to index
-  %rows$50 = view.subview %rows$37[%48, %49] : view<[%rows_dim0$35]x4xf32, %rows_layout> -> view<[%rows_dim0$47]x4xf32, %rows_layout>
-  func.return %rows_dim0$47, %rows_layout, %rows$50 : index, encoding<layout>, view<[%rows_dim0$47]x4xf32, %rows_layout>
+func.def @trim(%rows_dim0$32: index, %rows_layout: encoding<layout>, %rows$34: view<[%rows_dim0$32]x4xf32, %rows_layout>, %first: i32, %remaining: i32) -> (%37: index, %38: encoding<layout>, view<[%37]x4xf32, %38>) {
+  %40 = scalar.extui %first : i32 to i64
+  %41 = scalar.constant 0 : i32
+  %42 = scalar.extsi %41 : i32 to i64
+  %43 = scalar.extui %remaining : i32 to i64
+  %rows_dim0$44 = index.cast %43 : i64 to index
+  %45 = index.cast %40 : i64 to index
+  %46 = index.cast %42 : i64 to index
+  %rows$47 = view.subview %rows$34[%45, %46] : view<[%rows_dim0$32]x4xf32, %rows_layout> -> view<[%rows_dim0$44]x4xf32, %rows_layout>
+  func.return %rows_dim0$44, %rows_layout, %rows$47 : index, encoding<layout>, view<[%rows_dim0$44]x4xf32, %rows_layout>
 }
 
 // ====
@@ -684,8 +672,8 @@ kernel.def @dynamic_view_copy() {
   %8 = index.constant 1 : index
   kernel.launch.config workgroups(%3, %4, %5) workgroup_size(%6, %7, %8) : index
 } launch(%input: buffer, %output: buffer, %rows: i32) {
-  %input_byte_offset = index.constant 0 : offset
-  %output_byte_offset = index.constant 0 : offset
+  %input_byte_offset = index.constant 0 : index
+  %output_byte_offset = index.constant 0 : index
   %layout = encoding.layout.dense : encoding<layout>
   %12 = scalar.extui %rows : i32 to i64
   %source_dim0$13 = index.cast %12 : i64 to index
@@ -705,29 +693,26 @@ kernel.def @dynamic_view_copy() {
   %29 = view.load<type_disjoint> %source$19[%27, %28] : view<[%source_dim0$17]x4xf32, %source_layout> -> f32
   %30 = scalar.addf %24, %29 : f32
   %31 = scalar.constant 0 : i32
-  %32 = scalar.extsi %31 : i32 to i64
-  %33 = scalar.constant 4 : i64
-  %34 = scalar.muli %32, %33 : i64
-  %35 = index.cast %output_byte_offset : offset to i64
-  %36 = scalar.addi %35, %34 : i64
-  %37 = scalar.assume %36 [range(%36, 0, 9223372036854775807)] : i64
-  %38 = index.cast %37 : i64 to offset
-  %39 = buffer.view %output[%38] : buffer -> view<1xf32>
-  view.store<root_in_bounds|type_disjoint> %30, %39[0] : f32, view<1xf32>
+  %32 = index.cast %31 : i32 to index
+  %33 = index.constant 4 : index
+  %34 = index.mul %32, %33 : index
+  %35 = index.add %output_byte_offset, %34 : index
+  %36 = buffer.view %output[%35] : buffer -> view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %30, %36[0] : f32, view<1xf32>
   kernel.return
 }
 
-func.def @trim_copy(%rows_dim0$40: index, %rows_layout: encoding<layout>, %rows$42: view<[%rows_dim0$40]x4xf32, %rows_layout>, %remaining: i32) -> (%44: index, %45: encoding<layout>, view<[%44]x4xf32, %45>) {
-  %47 = scalar.constant 1 : i32
-  %48 = scalar.extsi %47 : i32 to i64
-  %49 = scalar.constant 0 : i32
-  %50 = scalar.extsi %49 : i32 to i64
-  %51 = scalar.extui %remaining : i32 to i64
-  %rows_dim0$52 = index.cast %51 : i64 to index
-  %53 = index.cast %48 : i64 to index
-  %54 = index.cast %50 : i64 to index
-  %rows$55 = view.subview %rows$42[%53, %54] : view<[%rows_dim0$40]x4xf32, %rows_layout> -> view<[%rows_dim0$52]x4xf32, %rows_layout>
-  func.return %rows_dim0$52, %rows_layout, %rows$55 : index, encoding<layout>, view<[%rows_dim0$52]x4xf32, %rows_layout>
+func.def @trim_copy(%rows_dim0$37: index, %rows_layout: encoding<layout>, %rows$39: view<[%rows_dim0$37]x4xf32, %rows_layout>, %remaining: i32) -> (%41: index, %42: encoding<layout>, view<[%41]x4xf32, %42>) {
+  %44 = scalar.constant 1 : i32
+  %45 = scalar.extsi %44 : i32 to i64
+  %46 = scalar.constant 0 : i32
+  %47 = scalar.extsi %46 : i32 to i64
+  %48 = scalar.extui %remaining : i32 to i64
+  %rows_dim0$49 = index.cast %48 : i64 to index
+  %50 = index.cast %45 : i64 to index
+  %51 = index.cast %47 : i64 to index
+  %rows$52 = view.subview %rows$39[%50, %51] : view<[%rows_dim0$37]x4xf32, %rows_layout> -> view<[%rows_dim0$49]x4xf32, %rows_layout>
+  func.return %rows_dim0$49, %rows_layout, %rows$52 : index, encoding<layout>, view<[%rows_dim0$49]x4xf32, %rows_layout>
 }
 
 // ====
@@ -762,108 +747,99 @@ unsigned storage_reference_members(MemberState* state) {
 }
 
 // ----
-func.def public @storage_reference_members(%state: buffer, %state_byte_offset: offset) -> (i32) {
-  %before = func.call readonly @inspect_members(%state, %state_byte_offset) : (buffer, offset) -> (i32)
-  func.call @update_members(%state, %state_byte_offset) : (buffer, offset)
-  %4 = index.constant 0 : offset
-  %5 = index.add %state_byte_offset, %4 : offset
+func.def public @storage_reference_members(%state: buffer, %state_byte_offset: index) -> (i32) {
+  %before = func.call readonly @inspect_members(%state, %state_byte_offset) : (buffer, index) -> (i32)
+  func.call @update_members(%state, %state_byte_offset) : (buffer, index)
+  %4 = index.constant 0 : index
+  %5 = index.add %state_byte_offset, %4 : index
   %6 = buffer.view %state[%5] : buffer -> view<1xi32>
   %scalar = view.load<root_in_bounds|type_disjoint> %6[0] : view<1xi32> -> i32
   %8 = scalar.addi %before, %scalar : i32
-  %9 = index.constant 4 : offset
-  %lanes_byte_offset = index.add %state_byte_offset, %9 : offset
+  %9 = index.constant 4 : index
+  %lanes_byte_offset = index.add %state_byte_offset, %9 : index
   %11 = scalar.constant 1 : i32
-  %12 = scalar.extsi %11 : i32 to i64
-  %13 = scalar.constant 4 : i64
-  %14 = scalar.muli %12, %13 : i64
-  %15 = index.cast %lanes_byte_offset : offset to i64
-  %16 = scalar.addi %15, %14 : i64
-  %17 = scalar.assume %16 [range(%16, 0, 9223372036854775807)] : i64
-  %18 = index.cast %17 : i64 to offset
-  %19 = buffer.view %state[%18] : buffer -> view<1xi32>
-  %20 = view.load<root_in_bounds|type_disjoint> %19[0] : view<1xi32> -> i32
-  %21 = scalar.addi %8, %20 : i32
-  %22 = index.constant 16 : offset
-  %23 = index.add %state_byte_offset, %22 : offset
-  %24 = index.constant 0 : offset
-  %25 = index.add %23, %24 : offset
-  %26 = buffer.view %state[%25] : buffer -> view<1xi32>
-  %value = view.load<root_in_bounds|type_disjoint> %26[0] : view<1xi32> -> i32
-  %28 = scalar.addi %21, %value : i32
-  func.return %28 : i32
+  %12 = index.cast %11 : i32 to index
+  %13 = index.constant 4 : index
+  %14 = index.mul %12, %13 : index
+  %15 = index.add %lanes_byte_offset, %14 : index
+  %16 = buffer.view %state[%15] : buffer -> view<1xi32>
+  %17 = view.load<root_in_bounds|type_disjoint> %16[0] : view<1xi32> -> i32
+  %18 = scalar.addi %8, %17 : i32
+  %19 = index.constant 16 : index
+  %20 = index.add %state_byte_offset, %19 : index
+  %21 = index.constant 0 : index
+  %22 = index.add %20, %21 : index
+  %23 = buffer.view %state[%22] : buffer -> view<1xi32>
+  %value = view.load<root_in_bounds|type_disjoint> %23[0] : view<1xi32> -> i32
+  %25 = scalar.addi %18, %value : i32
+  func.return %25 : i32
 }
 
-func.def @inspect_members(%state: buffer, %state_byte_offset: offset) -> (i32) {
-  %32 = index.constant 0 : offset
-  %33 = index.add %state_byte_offset, %32 : offset
-  %34 = buffer.view %state[%33] : buffer -> view<1xi32>
-  %35 = view.load<root_in_bounds|type_disjoint> %34[0] : view<1xi32> -> i32
-  %36 = func.call pure @observe_member(%35) : (i32) -> (i32)
-  %37 = index.constant 4 : offset
-  %38 = index.add %state_byte_offset, %37 : offset
-  %39 = func.call readonly @sum_members(%state, %38) : (buffer, offset) -> (i32)
-  %40 = scalar.addi %36, %39 : i32
-  %41 = index.constant 16 : offset
-  %42 = index.add %state_byte_offset, %41 : offset
-  %43 = index.constant 0 : offset
-  %44 = index.add %42, %43 : offset
-  %45 = buffer.view %state[%44] : buffer -> view<1xi32>
-  %46 = view.load<root_in_bounds|type_disjoint> %45[0] : view<1xi32> -> i32
-  %47 = func.call pure @observe_member(%46) : (i32) -> (i32)
-  %48 = scalar.addi %40, %47 : i32
-  func.return %48 : i32
+func.def @inspect_members(%state: buffer, %state_byte_offset: index) -> (i32) {
+  %29 = index.constant 0 : index
+  %30 = index.add %state_byte_offset, %29 : index
+  %31 = buffer.view %state[%30] : buffer -> view<1xi32>
+  %32 = view.load<root_in_bounds|type_disjoint> %31[0] : view<1xi32> -> i32
+  %33 = func.call pure @observe_member(%32) : (i32) -> (i32)
+  %34 = index.constant 4 : index
+  %35 = index.add %state_byte_offset, %34 : index
+  %36 = func.call readonly @sum_members(%state, %35) : (buffer, index) -> (i32)
+  %37 = scalar.addi %33, %36 : i32
+  %38 = index.constant 16 : index
+  %39 = index.add %state_byte_offset, %38 : index
+  %40 = index.constant 0 : index
+  %41 = index.add %39, %40 : index
+  %42 = buffer.view %state[%41] : buffer -> view<1xi32>
+  %43 = view.load<root_in_bounds|type_disjoint> %42[0] : view<1xi32> -> i32
+  %44 = func.call pure @observe_member(%43) : (i32) -> (i32)
+  %45 = scalar.addi %37, %44 : i32
+  func.return %45 : i32
 }
 
-func.def @update_members(%state: buffer, %state_byte_offset: offset) {
-  %51 = index.constant 16 : offset
-  %52 = index.add %state_byte_offset, %51 : offset
-  %53 = index.constant 0 : offset
-  %54 = index.add %52, %53 : offset
-  %55 = buffer.view %state[%54] : buffer -> view<1xi32>
-  %56 = view.load<root_in_bounds|type_disjoint> %55[0] : view<1xi32> -> i32
-  %57 = func.call pure @observe_member(%56) : (i32) -> (i32)
-  %58 = index.constant 0 : offset
-  %59 = index.add %state_byte_offset, %58 : offset
-  %60 = buffer.view %state[%59] : buffer -> view<1xi32>
-  %61 = view.load<root_in_bounds|type_disjoint> %60[0] : view<1xi32> -> i32
-  %62 = scalar.addi %61, %57 : i32
-  view.store<root_in_bounds|type_disjoint> %62, %60[0] : i32, view<1xi32>
-  %63 = index.constant 0 : offset
-  %64 = index.add %state_byte_offset, %63 : offset
-  %65 = buffer.view %state[%64] : buffer -> view<1xi32>
-  %66 = view.load<root_in_bounds|type_disjoint> %65[0] : view<1xi32> -> i32
-  %67 = func.call pure @observe_member(%66) : (i32) -> (i32)
-  %68 = index.constant 4 : offset
-  %lanes_byte_offset$69 = index.add %state_byte_offset, %68 : offset
-  %70 = scalar.constant 1 : i32
-  %71 = scalar.extsi %70 : i32 to i64
-  %72 = scalar.constant 4 : i64
-  %73 = scalar.muli %71, %72 : i64
-  %74 = index.cast %lanes_byte_offset$69 : offset to i64
-  %75 = scalar.addi %74, %73 : i64
-  %76 = scalar.assume %75 [range(%75, 0, 9223372036854775807)] : i64
-  %77 = index.cast %76 : i64 to offset
-  %78 = buffer.view %state[%77] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %67, %78[0] : i32, view<1xi32>
-  %79 = index.constant 4 : offset
-  %lanes_byte_offset$80 = index.add %state_byte_offset, %79 : offset
-  %81 = scalar.constant 2 : i32
-  %82 = scalar.extsi %81 : i32 to i64
-  %83 = scalar.constant 4 : i64
-  %84 = scalar.muli %82, %83 : i64
-  %85 = index.cast %lanes_byte_offset$80 : offset to i64
-  %86 = scalar.addi %85, %84 : i64
-  %87 = scalar.assume %86 [range(%86, 0, 9223372036854775807)] : i64
-  %88 = index.cast %87 : i64 to offset
-  %89 = buffer.view %state[%88] : buffer -> view<1xi32>
-  %90 = view.load<root_in_bounds|type_disjoint> %89[0] : view<1xi32> -> i32
-  %91 = func.call pure @observe_member(%90) : (i32) -> (i32)
-  %92 = index.constant 16 : offset
-  %93 = index.add %state_byte_offset, %92 : offset
-  %94 = index.constant 0 : offset
-  %95 = index.add %93, %94 : offset
-  %96 = buffer.view %state[%95] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %91, %96[0] : i32, view<1xi32>
+func.def @update_members(%state: buffer, %state_byte_offset: index) {
+  %48 = index.constant 16 : index
+  %49 = index.add %state_byte_offset, %48 : index
+  %50 = index.constant 0 : index
+  %51 = index.add %49, %50 : index
+  %52 = buffer.view %state[%51] : buffer -> view<1xi32>
+  %53 = view.load<root_in_bounds|type_disjoint> %52[0] : view<1xi32> -> i32
+  %54 = func.call pure @observe_member(%53) : (i32) -> (i32)
+  %55 = index.constant 0 : index
+  %56 = index.add %state_byte_offset, %55 : index
+  %57 = buffer.view %state[%56] : buffer -> view<1xi32>
+  %58 = view.load<root_in_bounds|type_disjoint> %57[0] : view<1xi32> -> i32
+  %59 = scalar.addi %58, %54 : i32
+  view.store<root_in_bounds|type_disjoint> %59, %57[0] : i32, view<1xi32>
+  %60 = index.constant 0 : index
+  %61 = index.add %state_byte_offset, %60 : index
+  %62 = buffer.view %state[%61] : buffer -> view<1xi32>
+  %63 = view.load<root_in_bounds|type_disjoint> %62[0] : view<1xi32> -> i32
+  %64 = func.call pure @observe_member(%63) : (i32) -> (i32)
+  %65 = index.constant 4 : index
+  %lanes_byte_offset$66 = index.add %state_byte_offset, %65 : index
+  %67 = scalar.constant 1 : i32
+  %68 = index.cast %67 : i32 to index
+  %69 = index.constant 4 : index
+  %70 = index.mul %68, %69 : index
+  %71 = index.add %lanes_byte_offset$66, %70 : index
+  %72 = buffer.view %state[%71] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %64, %72[0] : i32, view<1xi32>
+  %73 = index.constant 4 : index
+  %lanes_byte_offset$74 = index.add %state_byte_offset, %73 : index
+  %75 = scalar.constant 2 : i32
+  %76 = index.cast %75 : i32 to index
+  %77 = index.constant 4 : index
+  %78 = index.mul %76, %77 : index
+  %79 = index.add %lanes_byte_offset$74, %78 : index
+  %80 = buffer.view %state[%79] : buffer -> view<1xi32>
+  %81 = view.load<root_in_bounds|type_disjoint> %80[0] : view<1xi32> -> i32
+  %82 = func.call pure @observe_member(%81) : (i32) -> (i32)
+  %83 = index.constant 16 : index
+  %84 = index.add %state_byte_offset, %83 : index
+  %85 = index.constant 0 : index
+  %86 = index.add %84, %85 : index
+  %87 = buffer.view %state[%86] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %82, %87[0] : i32, view<1xi32>
   func.return
 }
 
@@ -871,40 +847,31 @@ func.def @observe_member(%value: i32) -> (i32) {
   func.return %value : i32
 }
 
-func.def @sum_members(%values: buffer, %values_byte_offset: offset) -> (i32) {
-  %102 = scalar.constant 0 : i32
-  %103 = scalar.extsi %102 : i32 to i64
-  %104 = scalar.constant 4 : i64
-  %105 = scalar.muli %103, %104 : i64
-  %106 = index.cast %values_byte_offset : offset to i64
-  %107 = scalar.addi %106, %105 : i64
-  %108 = scalar.assume %107 [range(%107, 0, 9223372036854775807)] : i64
-  %109 = index.cast %108 : i64 to offset
-  %110 = buffer.view %values[%109] : buffer -> view<1xi32>
-  %111 = view.load<root_in_bounds|type_disjoint> %110[0] : view<1xi32> -> i32
-  %112 = scalar.constant 1 : i32
-  %113 = scalar.extsi %112 : i32 to i64
-  %114 = scalar.constant 4 : i64
-  %115 = scalar.muli %113, %114 : i64
-  %116 = index.cast %values_byte_offset : offset to i64
-  %117 = scalar.addi %116, %115 : i64
-  %118 = scalar.assume %117 [range(%117, 0, 9223372036854775807)] : i64
-  %119 = index.cast %118 : i64 to offset
-  %120 = buffer.view %values[%119] : buffer -> view<1xi32>
-  %121 = view.load<root_in_bounds|type_disjoint> %120[0] : view<1xi32> -> i32
-  %122 = scalar.addi %111, %121 : i32
-  %123 = scalar.constant 2 : i32
-  %124 = scalar.extsi %123 : i32 to i64
-  %125 = scalar.constant 4 : i64
-  %126 = scalar.muli %124, %125 : i64
-  %127 = index.cast %values_byte_offset : offset to i64
-  %128 = scalar.addi %127, %126 : i64
-  %129 = scalar.assume %128 [range(%128, 0, 9223372036854775807)] : i64
-  %130 = index.cast %129 : i64 to offset
-  %131 = buffer.view %values[%130] : buffer -> view<1xi32>
-  %132 = view.load<root_in_bounds|type_disjoint> %131[0] : view<1xi32> -> i32
-  %133 = scalar.addi %122, %132 : i32
-  func.return %133 : i32
+func.def @sum_members(%values: buffer, %values_byte_offset: index) -> (i32) {
+  %93 = scalar.constant 0 : i32
+  %94 = index.cast %93 : i32 to index
+  %95 = index.constant 4 : index
+  %96 = index.mul %94, %95 : index
+  %97 = index.add %values_byte_offset, %96 : index
+  %98 = buffer.view %values[%97] : buffer -> view<1xi32>
+  %99 = view.load<root_in_bounds|type_disjoint> %98[0] : view<1xi32> -> i32
+  %100 = scalar.constant 1 : i32
+  %101 = index.cast %100 : i32 to index
+  %102 = index.constant 4 : index
+  %103 = index.mul %101, %102 : index
+  %104 = index.add %values_byte_offset, %103 : index
+  %105 = buffer.view %values[%104] : buffer -> view<1xi32>
+  %106 = view.load<root_in_bounds|type_disjoint> %105[0] : view<1xi32> -> i32
+  %107 = scalar.addi %99, %106 : i32
+  %108 = scalar.constant 2 : i32
+  %109 = index.cast %108 : i32 to index
+  %110 = index.constant 4 : index
+  %111 = index.mul %109, %110 : index
+  %112 = index.add %values_byte_offset, %111 : index
+  %113 = buffer.view %values[%112] : buffer -> view<1xi32>
+  %114 = view.load<root_in_bounds|type_disjoint> %113[0] : view<1xi32> -> i32
+  %115 = scalar.addi %107, %114 : i32
+  func.return %115 : i32
 }
 
 // ====
@@ -922,15 +889,15 @@ unsigned overlapping_scalar_reference(unsigned value) {
 func.def public @overlapping_scalar_reference(%value$0: i32) -> (i32) {
   %2 = index.constant 4 : offset
   %value_storage = buffer.alloca<private> align(4) %2 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
+  %value_storage_byte_offset = index.constant 0 : index
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
   view.store<type_disjoint> %value$0, %value_view[0] : i32, view<1xi32>
-  func.call @sequence_alias(%value_storage, %value_storage_byte_offset, %value_storage, %value_storage_byte_offset) : (buffer, offset, buffer, offset)
+  func.call @sequence_alias(%value_storage, %value_storage_byte_offset, %value_storage, %value_storage_byte_offset) : (buffer, index, buffer, index)
   %value$6 = view.load<type_disjoint> %value_view[0] : view<1xi32> -> i32
   func.return %value$6 : i32
 }
 
-func.def @sequence_alias(%output: buffer, %output_byte_offset: offset, %input$9: buffer, %input_byte_offset: offset) {
+func.def @sequence_alias(%output: buffer, %output_byte_offset: index, %input$9: buffer, %input_byte_offset: index) {
   %11 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
   %12 = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xi32> -> i32
   %13 = scalar.constant 1 : i32
@@ -968,35 +935,35 @@ AliasedPair overlapping_member_reference(AliasedPair value) {
 func.def public @overlapping_member_reference(%value_first$0: i32, %value_second$1: i32) -> (i32, i32) {
   %4 = index.constant 8 : offset
   %value_storage = buffer.alloca<private> align(4) %4 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
+  %value_storage_byte_offset = index.constant 0 : index
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<8xi8>
-  %8 = index.constant 0 : offset
-  %9 = index.add %value_storage_byte_offset, %8 : offset
-  %10 = index.assume %9 [range(%9, 0, 4)] : offset
+  %8 = index.constant 0 : index
+  %9 = index.add %value_storage_byte_offset, %8 : index
+  %10 = index.assume %9 [range(%9, 0, 4)] : index
   %11 = buffer.view %value_storage[%10] : buffer -> view<1xi32>
   view.store<type_disjoint> %value_first$0, %11[0] : i32, view<1xi32>
-  %12 = index.constant 4 : offset
-  %13 = index.add %value_storage_byte_offset, %12 : offset
-  %14 = index.assume %13 [range(%13, 0, 4)] : offset
+  %12 = index.constant 4 : index
+  %13 = index.add %value_storage_byte_offset, %12 : index
+  %14 = index.assume %13 [range(%13, 0, 4)] : index
   %15 = buffer.view %value_storage[%14] : buffer -> view<1xi32>
   view.store<type_disjoint> %value_second$1, %15[0] : i32, view<1xi32>
-  %16 = index.constant 4 : offset
-  %17 = index.add %value_storage_byte_offset, %16 : offset
-  func.call @update_alias(%value_storage, %value_storage_byte_offset, %value_storage, %17) : (buffer, offset, buffer, offset)
-  %18 = index.constant 0 : offset
-  %19 = index.add %value_storage_byte_offset, %18 : offset
-  %20 = index.assume %19 [range(%19, 0, 4)] : offset
+  %16 = index.constant 4 : index
+  %17 = index.add %value_storage_byte_offset, %16 : index
+  func.call @update_alias(%value_storage, %value_storage_byte_offset, %value_storage, %17) : (buffer, index, buffer, index)
+  %18 = index.constant 0 : index
+  %19 = index.add %value_storage_byte_offset, %18 : index
+  %20 = index.assume %19 [range(%19, 0, 4)] : index
   %21 = buffer.view %value_storage[%20] : buffer -> view<1xi32>
   %value_first$22 = view.load<type_disjoint> %21[0] : view<1xi32> -> i32
-  %23 = index.constant 4 : offset
-  %24 = index.add %value_storage_byte_offset, %23 : offset
-  %25 = index.assume %24 [range(%24, 0, 4)] : offset
+  %23 = index.constant 4 : index
+  %24 = index.add %value_storage_byte_offset, %23 : index
+  %25 = index.assume %24 [range(%24, 0, 4)] : index
   %26 = buffer.view %value_storage[%25] : buffer -> view<1xi32>
   %value_second$27 = view.load<type_disjoint> %26[0] : view<1xi32> -> i32
   func.return %value_first$22, %value_second$27 : i32, i32
 }
 
-func.def @update_alias(%whole: buffer, %whole_byte_offset: offset, %selected$30: buffer, %selected_byte_offset: offset) {
+func.def @update_alias(%whole: buffer, %whole_byte_offset: index, %selected$30: buffer, %selected_byte_offset: index) {
   %32 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
   %33 = view.load<root_in_bounds|type_disjoint> %32[0] : view<1xi32> -> i32
   %34 = scalar.constant 1 : i32
@@ -1005,18 +972,18 @@ func.def @update_alias(%whole: buffer, %whole_byte_offset: offset, %selected$30:
   view.store<root_in_bounds|type_disjoint> %35, %36[0] : i32, view<1xi32>
   %37 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
   %selected$38 = view.load<root_in_bounds|type_disjoint> %37[0] : view<1xi32> -> i32
-  %39 = index.constant 0 : offset
-  %40 = index.add %whole_byte_offset, %39 : offset
+  %39 = index.constant 0 : index
+  %40 = index.add %whole_byte_offset, %39 : index
   %41 = buffer.view %whole[%40] : buffer -> view<1xi32>
   %42 = view.load<root_in_bounds|type_disjoint> %41[0] : view<1xi32> -> i32
   %43 = scalar.addi %42, %selected$38 : i32
   view.store<root_in_bounds|type_disjoint> %43, %41[0] : i32, view<1xi32>
-  %44 = index.constant 0 : offset
-  %45 = index.add %whole_byte_offset, %44 : offset
+  %44 = index.constant 0 : index
+  %45 = index.add %whole_byte_offset, %44 : index
   %46 = buffer.view %whole[%45] : buffer -> view<1xi32>
   %whole_first = view.load<root_in_bounds|type_disjoint> %46[0] : view<1xi32> -> i32
-  %48 = index.constant 4 : offset
-  %49 = index.add %whole_byte_offset, %48 : offset
+  %48 = index.constant 4 : index
+  %49 = index.add %whole_byte_offset, %48 : index
   %50 = buffer.view %whole[%49] : buffer -> view<1xi32>
   %whole_second = view.load<root_in_bounds|type_disjoint> %50[0] : view<1xi32> -> i32
   %52 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
@@ -1074,16 +1041,16 @@ unsigned overlapping_reference_result(unsigned value) {
 func.def public @overlapping_reference_result(%value$0: i32) -> (i32) {
   %2 = index.constant 4 : offset
   %value_storage = buffer.alloca<private> align(4) %2 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
+  %value_storage_byte_offset = index.constant 0 : index
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
   view.store<type_disjoint> %value$0, %value_view[0] : i32, view<1xi32>
-  func.call pure @exact_alias(%value_storage, %value_storage_byte_offset) : (buffer, offset)
-  func.call @update_nested_alias(%value_storage, %value_storage_byte_offset, %value_storage, %value_storage_byte_offset) : (buffer, offset, buffer, offset)
+  func.call pure @exact_alias(%value_storage, %value_storage_byte_offset) : (buffer, index)
+  func.call @update_nested_alias(%value_storage, %value_storage_byte_offset, %value_storage, %value_storage_byte_offset) : (buffer, index, buffer, index)
   %value$6 = view.load<type_disjoint> %value_view[0] : view<1xi32> -> i32
   func.return %value$6 : i32
 }
 
-func.def @update_nested_alias(%output: buffer, %output_byte_offset: offset, %input$9: buffer, %input_byte_offset: offset) {
+func.def @update_nested_alias(%output: buffer, %output_byte_offset: index, %input$9: buffer, %input_byte_offset: index) {
   %11 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
   %12 = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xi32> -> i32
   %13 = scalar.constant 1 : i32
@@ -1100,7 +1067,7 @@ func.def @update_nested_alias(%output: buffer, %output_byte_offset: offset, %inp
   func.return
 }
 
-func.def @exact_alias(%value: buffer, %value_byte_offset: offset) {
+func.def @exact_alias(%value: buffer, %value_byte_offset: index) {
   func.return
 }
 
@@ -1339,7 +1306,7 @@ unsigned overlapping_storage_result(bool condition, unsigned value) {
 func.def public @overlapping_conditional_result(%condition: i1) -> (i32) {
   %2 = index.constant 4 : offset
   %first_storage = buffer.alloca<private> align(4) %2 : buffer
-  %first_storage_byte_offset = index.constant 0 : offset
+  %first_storage_byte_offset = index.constant 0 : index
   %first_view = buffer.view %first_storage[%first_storage_byte_offset] : buffer -> view<1xi32>
   %6 = scalar.constant 5 : i32
   view.store<type_disjoint> %6, %first_view[0] : i32, view<1xi32>
@@ -1347,8 +1314,8 @@ func.def public @overlapping_conditional_result(%condition: i1) -> (i32) {
   %second_view = buffer.view %second_storage[%first_storage_byte_offset] : buffer -> view<1xi32>
   %11 = scalar.constant 7 : i32
   view.store<type_disjoint> %11, %second_view[0] : i32, view<1xi32>
-  %12, %13 = func.call pure @choose_overlapping_alias(%condition, %first_storage, %first_storage_byte_offset, %second_storage, %first_storage_byte_offset) : (i1, buffer, offset, buffer, offset) -> (buffer, offset)
-  func.call @sequence_overlapping_alias(%12, %13, %first_storage, %first_storage_byte_offset) : (buffer, offset, buffer, offset)
+  %12, %13 = func.call pure @choose_overlapping_alias(%condition, %first_storage, %first_storage_byte_offset, %second_storage, %first_storage_byte_offset) : (i1, buffer, index, buffer, index) -> (buffer, index)
+  func.call @sequence_overlapping_alias(%12, %13, %first_storage, %first_storage_byte_offset) : (buffer, index, buffer, index)
   %first = view.load<type_disjoint> %first_view[0] : view<1xi32> -> i32
   %15 = scalar.constant 100 : i32
   %16 = scalar.muli %first, %15 : i32
@@ -1360,16 +1327,16 @@ func.def public @overlapping_conditional_result(%condition: i1) -> (i32) {
 func.def public @overlapping_storage_result(%condition: i1, %value$20: i32) -> (i32) {
   %22 = index.constant 4 : offset
   %value_storage = buffer.alloca<private> align(4) %22 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
+  %value_storage_byte_offset = index.constant 0 : index
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
   view.store<type_disjoint> %value$20, %value_view[0] : i32, view<1xi32>
-  %26, %27 = func.call pure @choose_overlapping_alias(%condition, %value_storage, %value_storage_byte_offset, %value_storage, %value_storage_byte_offset) : (i1, buffer, offset, buffer, offset) -> (buffer, offset)
-  func.call @sequence_overlapping_alias(%26, %27, %value_storage, %value_storage_byte_offset) : (buffer, offset, buffer, offset)
+  %26, %27 = func.call pure @choose_overlapping_alias(%condition, %value_storage, %value_storage_byte_offset, %value_storage, %value_storage_byte_offset) : (i1, buffer, index, buffer, index) -> (buffer, index)
+  func.call @sequence_overlapping_alias(%26, %27, %value_storage, %value_storage_byte_offset) : (buffer, index, buffer, index)
   %value$28 = view.load<type_disjoint> %value_view[0] : view<1xi32> -> i32
   func.return %value$28 : i32
 }
 
-func.def @sequence_overlapping_alias(%output: buffer, %output_byte_offset: offset, %input$31: buffer, %input_byte_offset: offset) {
+func.def @sequence_overlapping_alias(%output: buffer, %output_byte_offset: index, %input$31: buffer, %input_byte_offset: index) {
   %33 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
   %34 = view.load<root_in_bounds|type_disjoint> %33[0] : view<1xi32> -> i32
   %35 = scalar.constant 1 : i32
@@ -1383,10 +1350,10 @@ func.def @sequence_overlapping_alias(%output: buffer, %output_byte_offset: offse
   func.return
 }
 
-func.def @choose_overlapping_alias(%condition: i1, %first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) -> (buffer, offset) {
+func.def @choose_overlapping_alias(%condition: i1, %first: buffer, %first_byte_offset: index, %second: buffer, %second_byte_offset: index) -> (buffer, index) {
   %53 = scf.select %condition, %first, %second : buffer
-  %54 = scf.select %condition, %first_byte_offset, %second_byte_offset : offset
-  func.return %53, %54 : buffer, offset
+  %54 = scf.select %condition, %first_byte_offset, %second_byte_offset : index
+  func.return %53, %54 : buffer, index
 }
 
 // ====
@@ -1410,11 +1377,11 @@ unsigned overlapping_mutable_references() {
 func.def public @overlapping_mutable_references() -> (i32) {
   %1 = index.constant 4 : offset
   %first_storage = buffer.alloca<private> align(4) %1 : buffer
-  %first_storage_byte_offset = index.constant 0 : offset
+  %first_storage_byte_offset = index.constant 0 : index
   %first_view = buffer.view %first_storage[%first_storage_byte_offset] : buffer -> view<1xi32>
   %5 = scalar.constant 2 : i32
   view.store<type_disjoint> %5, %first_view[0] : i32, view<1xi32>
-  func.call @update_overlapping_references(%first_storage, %first_storage_byte_offset, %first_storage, %first_storage_byte_offset) : (buffer, offset, buffer, offset)
+  func.call @update_overlapping_references(%first_storage, %first_storage_byte_offset, %first_storage, %first_storage_byte_offset) : (buffer, index, buffer, index)
   %first = view.load<type_disjoint> %first_view[0] : view<1xi32> -> i32
   %10 = scalar.constant 1000 : i32
   %11 = scalar.muli %first, %10 : i32
@@ -1423,7 +1390,7 @@ func.def public @overlapping_mutable_references() -> (i32) {
   func.return %37 : i32
 }
 
-func.def @update_overlapping_references(%first$19: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) {
+func.def @update_overlapping_references(%first$19: buffer, %first_byte_offset: index, %second: buffer, %second_byte_offset: index) {
   %23 = buffer.view %first$19[%first_byte_offset] : buffer -> view<1xi32>
   %24 = view.load<root_in_bounds|type_disjoint> %23[0] : view<1xi32> -> i32
   %25 = scalar.constant 1 : i32

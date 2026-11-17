@@ -429,3 +429,15 @@ func.def public @wrong_layout(%layout: encoding<layout>, %other: encoding<layout
   %value = func.call @read(%layout, %input) : (encoding<layout>, view<4xf32, %other>) -> (f32)
   func.return %value : f32
 }
+
+// ====
+
+// A native pointer is one source object, projected as an opaque origin and a
+// byte position. Both address domains are valid on arguments and results.
+func.decl source_signature(#func.abi.c.signature<arguments = [0, 0], results = [0, 0], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>]>) @pointer_domains(%signed_root: buffer, %signed_position: index, %unsigned_root: buffer, %unsigned_position: offset) -> (buffer, index, buffer, offset)
+
+// ====
+
+// A fixed-width integer is not a target-selected pointer position.
+// ERROR@+1: TYPE/003 {operand_name="argument", actual_type="i64", expected_constraint="index or offset pointer position"}
+func.decl source_signature(#func.abi.c.signature<arguments = [0], results = [], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>]>) @fixed_pointer_position(%root: buffer, %position: i64)

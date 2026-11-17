@@ -186,7 +186,6 @@ void entry(unsigned* output, unsigned value) {
 
 // ----
 #include <loomcxx/kernel.h>
-#include <loomcxx/numeric.h>
 
 [[loom::symbol("helper"), loom::noinline]]
 static unsigned helper(unsigned value);
@@ -201,7 +200,7 @@ static unsigned helper(unsigned value) {
 void entry(unsigned* output, unsigned value) {
   unsigned v9 = helper(value);
   unsigned workitem = static_cast<unsigned>(loom::kernel::workitem::id.x);
-  unsigned long long output_byte_offset_1 = loom::offset::cast<unsigned long long>(loom::type::offset{0}) + (loom::convert<unsigned long long>(workitem) * 4ull);
-  auto output_view = loom::buffer::view<1>(reinterpret_cast<unsigned*>(reinterpret_cast<unsigned char*>(output) + static_cast<unsigned long long>(loom::offset::cast(output_byte_offset_1))), {});
+  loom::type::index output_byte_offset_1 = loom::type::index{0} + (loom::index::cast(workitem) * loom::type::index{4});
+  auto output_view = loom::buffer::view<1>(reinterpret_cast<unsigned*>(reinterpret_cast<unsigned char*>(output) + static_cast<long long>(output_byte_offset_1)), {});
   loom::view::store<loom::memory_access::root_in_bounds>(v9, output_view, 0);
 }

@@ -2,27 +2,6 @@
 
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @i64_index_cast_unknown_range_rejected(%value: i64) -> (index) {
-  // ERROR@+1: AMDGPU/033 {source_type="i64", result_type="index", carrier_bitwidth="32", required_range_lo="-2147483648", required_range_hi="4294967295", accepted_proof_sources="[scalar.assume on the integer source before index.cast, config or kernel boundary facts on the integer source]"}
-  %index = index.cast %value : i64 to index
-  func.return %index : index
-}
-
-// ====
-
-amdgpu.target<gfx11-generic> @target
-
-func.def target(@target) @i64_index_cast_result_assume_rejected(%value: i64) -> (index) {
-  // ERROR@+1: AMDGPU/033 {source_type="i64", result_type="index", carrier_bitwidth="32", required_range_lo="-2147483648", required_range_hi="4294967295", accepted_proof_sources="[scalar.assume on the integer source before index.cast, config or kernel boundary facts on the integer source]"}
-  %index0 = index.cast %value : i64 to index
-  %index = index.assume %index0 [range(%index0, 0, 1023)] : index
-  func.return %index : index
-}
-
-// ====
-
-amdgpu.target<gfx11-generic> @target
-
 func.def target(@target) @address_constant_storage_boundaries() -> (index, index, index, offset, offset) {
   %signed_min = index.constant -2147483648 : index
   %all_bits_set = index.constant -1 : index

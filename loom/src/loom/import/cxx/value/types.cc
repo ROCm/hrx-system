@@ -1946,7 +1946,7 @@ void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
       return;
     case ValueKind::Pointer:
       output.push_back(loom_type_buffer());
-      output.push_back(loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET));
+      output.push_back(loom_type_scalar(LOOM_SCALAR_TYPE_INDEX));
       return;
     case ValueKind::Encoding:
       output.push_back(loom_type_encoding_with_role(

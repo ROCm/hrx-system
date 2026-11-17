@@ -55,7 +55,8 @@ bool loom_index_value_facts_fit_unsigned_target_carrier(
 // 64-bit width, a full unknown range returns zero: it cannot establish a width,
 // even when other facts such as divisibility remain known. Single-carrier
 // targets also preserve native nonnegative raw bit patterns. Returns -1 for an
-// unsupported range.
+// unrepresentable range. This is a numeric proof, not an admission requirement:
+// dynamic arithmetic may overflow the target's carriers at runtime.
 int32_t loom_index_facts_carrier_bitwidth(loom_value_facts_t facts,
                                           uint32_t native_bitwidth,
                                           uint32_t maximum_bitwidth);

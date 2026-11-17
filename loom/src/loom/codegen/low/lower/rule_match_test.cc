@@ -219,7 +219,7 @@ TEST(LowLowerSourceMemoryMatchTest, NativeDisplacementAndUnsignedImmediate) {
   struct DisplacementCase {
     // Complete byte-displacement interval supplied by the memory planner.
     loom_value_facts_t facts;
-    // Whether every displacement fits a signed or unsigned native word.
+    // Whether every displacement fits a signed or unsigned 32-bit field.
     bool matches;
   };
   const DisplacementCase cases[] = {
@@ -253,23 +253,34 @@ TEST(LowLowerSourceMemoryMatchTest, NativeDisplacementAndUnsignedImmediate) {
         .plan_available = true,
         .access_plan = &access,
     };
-    const loom_low_lower_rule_match_context_t context = {
-        .source_memory_state = &state,
-    };
-    for (uint8_t dynamic_bit_count : {0, 32}) {
-      constraint.dynamic_offset_unsigned_bit_count = dynamic_bit_count;
-      loom_low_lower_rule_source_memory_match_t match;
-      IREE_ASSERT_OK(loom_low_lower_rule_source_memory_emits_match(
-          &context, &rule_set, nullptr, &rule, &match));
-      const bool expected =
-          test_case.matches &&
-          (dynamic_bit_count == 0 || test_case.facts.range_lo >= 0);
-      EXPECT_TRUE(match.constraints_compatible);
-      EXPECT_EQ(match.all_emits_match, expected);
-      EXPECT_EQ(
-          match.diagnostic_index,
-          expected ? LOOM_LOW_LOWER_DIAGNOSTIC_NONE
-                   : LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_BYTE_OFFSET_WIDTH);
+    for (uint32_t address_bitwidth : {32, 64}) {
+      SCOPED_TRACE(address_bitwidth);
+      const loom_target_snapshot_t snapshot = {
+          .index_bitwidth = address_bitwidth,
+          .offset_bitwidth = address_bitwidth,
+      };
+      const loom_target_bundle_t bundle = {.snapshot = &snapshot};
+      const loom_low_lower_rule_match_context_t context = {
+          .bundle = &bundle,
+          .source_memory_state = &state,
+      };
+      for (uint8_t dynamic_bit_count : {0, 32}) {
+        constraint.dynamic_offset_unsigned_bit_count = dynamic_bit_count;
+        loom_low_lower_rule_source_memory_match_t match;
+        IREE_ASSERT_OK(loom_low_lower_rule_source_memory_emits_match(
+            &context, &rule_set, nullptr, &rule, &match));
+        const bool expected = (address_bitwidth == 32 || test_case.matches) &&
+                              (dynamic_bit_count == 0 ||
+                               (test_case.facts.range_lo >= 0 &&
+                                test_case.facts.range_hi <= UINT32_MAX));
+        EXPECT_TRUE(match.constraints_compatible);
+        EXPECT_EQ(match.all_emits_match, expected);
+        EXPECT_EQ(
+            match.diagnostic_index,
+            expected
+                ? LOOM_LOW_LOWER_DIAGNOSTIC_NONE
+                : LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_BYTE_OFFSET_WIDTH);
+      }
     }
   }
 }

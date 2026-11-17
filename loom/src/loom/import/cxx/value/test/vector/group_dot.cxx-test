@@ -163,7 +163,7 @@ kernel.def @mxfp4_decode_dot() {
 } launch(%0: buffer, %1: buffer, %2: buffer, %3: buffer) {
   %10 = buffer.assume.alignment %0 {minimum_alignment = 64} : buffer
   %payload = buffer.assume.noalias %10 : buffer
-  %payload_byte_offset = index.constant 0 : offset
+  %payload_byte_offset = index.constant 0 : index
   %13 = buffer.assume.alignment %1 {minimum_alignment = 64} : buffer
   %scale = buffer.assume.noalias %13 : buffer
   %16 = buffer.assume.alignment %2 {minimum_alignment = 64} : buffer
@@ -235,7 +235,7 @@ kernel.def @mxfp8_decode_dot() {
 } launch(%0: buffer, %1: buffer, %2: buffer, %3: buffer) {
   %10 = buffer.assume.alignment %0 {minimum_alignment = 64} : buffer
   %payload = buffer.assume.noalias %10 : buffer
-  %payload_byte_offset = index.constant 0 : offset
+  %payload_byte_offset = index.constant 0 : index
   %13 = buffer.assume.alignment %1 {minimum_alignment = 64} : buffer
   %scale = buffer.assume.noalias %13 : buffer
   %16 = buffer.assume.alignment %2 {minimum_alignment = 64} : buffer
@@ -302,7 +302,7 @@ kernel.def @mxfp4_group_bits() {
 } launch(%0: buffer, %1: buffer, %2: buffer) {
   %9 = buffer.assume.alignment %0 {minimum_alignment = 64} : buffer
   %payload = buffer.assume.noalias %9 : buffer
-  %payload_byte_offset = index.constant 0 : offset
+  %payload_byte_offset = index.constant 0 : index
   %12 = buffer.assume.alignment %1 {minimum_alignment = 64} : buffer
   %scale = buffer.assume.noalias %12 : buffer
   %15 = buffer.assume.alignment %2 {minimum_alignment = 64} : buffer
@@ -364,7 +364,7 @@ kernel.def @mxfp8_group_bits() {
 } launch(%0: buffer, %1: buffer, %2: buffer) {
   %9 = buffer.assume.alignment %0 {minimum_alignment = 64} : buffer
   %payload = buffer.assume.noalias %9 : buffer
-  %payload_byte_offset = index.constant 0 : offset
+  %payload_byte_offset = index.constant 0 : index
   %12 = buffer.assume.alignment %1 {minimum_alignment = 64} : buffer
   %scale = buffer.assume.noalias %12 : buffer
   %15 = buffer.assume.alignment %2 {minimum_alignment = 64} : buffer
@@ -437,7 +437,7 @@ kernel.def @decode_dot() {
 } launch(%0: buffer, %1: buffer, %2: buffer, %3: buffer, %4: buffer, %scale: f32, %seed: f32) {
   %13 = buffer.assume.alignment %0 {minimum_alignment = 64} : buffer
   %table = buffer.assume.noalias %13 : buffer
-  %table_byte_offset = index.constant 0 : offset
+  %table_byte_offset = index.constant 0 : index
   %16 = buffer.assume.alignment %1 {minimum_alignment = 64} : buffer
   %packed = buffer.assume.noalias %16 : buffer
   %19 = buffer.assume.alignment %2 {minimum_alignment = 64} : buffer

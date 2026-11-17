@@ -16,6 +16,7 @@ from loom.target.arch.spirv.contracts.descriptor_rule import (
     descriptor_feature_guards,
     logical_core_descriptor,
 )
+from loom.target.arch.spirv.contracts.index import BYTE_POSITION_MATERIALIZER
 from loom.target.arch.spirv.contracts.memory import (
     STORAGE_BUFFER_MEMORY_SPACES,
     storage_buffer_address_materializer,
@@ -359,7 +360,9 @@ def private_reference_rules() -> tuple[DescriptorRule, ...]:
                 "iadd.offset64",
                 {
                     "lhs": private_operand(side),
-                    "rhs": ValueRef.operand(f"{side}_offset"),
+                    "rhs": ValueRef.operand(
+                        f"{side}_offset", materializer=BYTE_POSITION_MATERIALIZER.name
+                    ),
                 },
                 ValueRef.temporary(f"{side}_address"),
             )

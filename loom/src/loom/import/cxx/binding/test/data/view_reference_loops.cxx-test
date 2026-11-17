@@ -30,12 +30,13 @@ void scan_u32_oracle(loom::type::buffer<unsigned> input,
 
 // ----
 func.def public @scan_u32_oracle(%input: buffer, %output: buffer) {
-  %3 = index.constant 0 : offset
+  %3 = index.constant 0 : index
   %source = buffer.view %input[%3] : buffer -> view<242xi32>
   %destination = buffer.view %output[%3] : buffer -> view<1202xi32>
+  %91 = index.constant 0 : offset
   %90 = index.constant 240 : offset
   %12 = index.constant 1 : offset
-  scf.for %item = [%3 to %90 step %12] {
+  scf.for %item = [%91 to %90 step %12] {
     %14 = index.cast %item : offset to i32
     %15 = scalar.constant 80 : i32
     %16 = scalar.divui %14, %15 : i32
@@ -134,12 +135,13 @@ void scan_u64_oracle(loom::type::buffer<unsigned long long> input,
 
 // ----
 func.def public @scan_u64_oracle(%input: buffer, %output: buffer) {
-  %3 = index.constant 0 : offset
+  %3 = index.constant 0 : index
   %source = buffer.view %input[%3] : buffer -> view<242xi64>
   %destination = buffer.view %output[%3] : buffer -> view<1202xi64>
+  %91 = index.constant 0 : offset
   %90 = index.constant 240 : offset
   %12 = index.constant 1 : offset
-  scf.for %item = [%3 to %90 step %12] {
+  scf.for %item = [%91 to %90 step %12] {
     %14 = index.cast %item : offset to i32
     %15 = scalar.constant 80 : i32
     %16 = scalar.divui %14, %15 : i32
@@ -238,12 +240,13 @@ void scan_f32_oracle(loom::type::buffer<float> input,
 
 // ----
 func.def public @scan_f32_oracle(%input: buffer, %output: buffer) {
-  %3 = index.constant 0 : offset
+  %3 = index.constant 0 : index
   %source = buffer.view %input[%3] : buffer -> view<242xf32>
   %destination = buffer.view %output[%3] : buffer -> view<1202xf32>
+  %95 = index.constant 0 : offset
   %94 = index.constant 240 : offset
   %12 = index.constant 1 : offset
-  scf.for %item = [%3 to %94 step %12] {
+  scf.for %item = [%95 to %94 step %12] {
     %14 = index.cast %item : offset to i32
     %15 = scalar.constant 80 : i32
     %16 = scalar.divui %14, %15 : i32
@@ -331,21 +334,22 @@ void exchange_oracle(loom::type::buffer<unsigned long long> input,
 
 // ----
 func.def public @exchange_oracle(%input: buffer, %output: buffer) {
-  %3 = index.constant 0 : offset
+  %3 = index.constant 0 : index
   %values = buffer.view %output[%3] : buffer -> view<5978xi32>
+  %46 = index.constant 0 : offset
   %45 = index.constant 18 : offset
   %9 = index.constant 1 : offset
-  scf.for %distance = [%3 to %45 step %9] {
+  scf.for %distance = [%46 to %45 step %9] {
     %11 = index.cast %distance : offset to i32
     %43 = index.constant 83 : offset
-    scf.for %item = [%3 to %43 step %9] {
+    scf.for %item = [%46 to %43 step %9] {
       %18 = index.cast %item : offset to i32
       %51 = scalar.constant 3 : i32
       %52 = scalar.andi %18, %51 : i32
       %22 = scalar.cmpi ne, %52, %51 : i32
       scf.if %22 {
         %41 = index.constant 4 : offset
-        scf.for %mode = [%3 to %41 step %9] {
+        scf.for %mode = [%46 to %41 step %9] {
           %29 = index.cast %mode : offset to i32
           %30 = scalar.constant 0 : i32
           %31 = scalar.constant 1 : i32
@@ -403,22 +407,22 @@ func.def public @volatile_vector_parameter_oracle(%input: buffer, %output: buffe
 }
 
 func.def @volatile_copy_oracle_1(%input: buffer, %output: buffer) {
-  %7 = index.constant 0 : offset
+  %7 = index.constant 0 : index
   %input_values = buffer.view %input[%7] : buffer -> view<1xi32>
   %output_values = buffer.view %output[%7] : buffer -> view<1xi32>
-  %45 = index.constant 0 : index
-  %21 = view.load<type_disjoint> %input_values[%45] : view<1xi32> -> i32
-  view.store<type_disjoint> %21, %output_values[%45] : i32, view<1xi32>
+  %21 = view.load<type_disjoint> %input_values[%7] : view<1xi32> -> i32
+  view.store<type_disjoint> %21, %output_values[%7] : i32, view<1xi32>
   func.return
 }
 
 func.def @volatile_copy_oracle_4(%input: buffer, %output: buffer) {
-  %27 = index.constant 0 : offset
+  %27 = index.constant 0 : index
   %input_values = buffer.view %input[%27] : buffer -> view<4xi32>
   %output_values = buffer.view %output[%27] : buffer -> view<4xi32>
+  %49 = index.constant 0 : offset
   %48 = index.constant 4 : offset
   %36 = index.constant 1 : offset
-  scf.for %position = [%27 to %48 step %36] {
+  scf.for %position = [%49 to %48 step %36] {
     %38 = index.cast %position : offset to i32
     %39 = scalar.extui %38 : i32 to i64
     %40 = index.cast %39 : i64 to index
@@ -452,12 +456,13 @@ void volatile_memory_oracle(loom::type::buffer<unsigned> input,
 // ----
 func.def public @volatile_memory_oracle(%input: buffer, %output: buffer, %count$2: i32) {
   %count$3 = scalar.assume %count$2 [range(%count$2, 0, 64)] : i32
-  %5 = index.constant 0 : offset
+  %5 = index.constant 0 : index
   %input_values = buffer.view %input[%5] : buffer -> view<64xi32>
   %output_values = buffer.view %output[%5] : buffer -> view<128xi32>
+  %30 = index.constant 0 : offset
   %12 = index.cast %count$3 : i32 to offset
   %13 = index.constant 1 : offset
-  scf.for %position$14 = [%5 to %12 step %13] {
+  scf.for %position$14 = [%30 to %12 step %13] {
     %15 = index.cast %position$14 : offset to i32
     %position$16 = scalar.assume %15 [range(%15, 0, 63)] : i32
     %17 = scalar.extui %position$16 : i32 to i64
@@ -496,12 +501,13 @@ void volatile_shared_oracle(loom::type::buffer<unsigned> input,
 
 // ----
 func.def public @volatile_shared_oracle(%input: buffer, %output: buffer) {
-  %3 = index.constant 0 : offset
+  %3 = index.constant 0 : index
   %input_values = buffer.view %input[%3] : buffer -> view<64xi32>
   %output_values = buffer.view %output[%3] : buffer -> view<64xi32>
+  %23 = index.constant 0 : offset
   %22 = index.constant 64 : offset
   %12 = index.constant 1 : offset
-  scf.for %position = [%3 to %22 step %12] {
+  scf.for %position = [%23 to %22 step %12] {
     %14 = index.cast %position : offset to i32
     %15 = scalar.extui %14 : i32 to i64
     %16 = index.cast %15 : i64 to index
@@ -532,7 +538,7 @@ void volatile_views_oracle(loom::type::buffer<unsigned> input,
 
 // ----
 func.def public @volatile_views_oracle(%input: buffer, %output: buffer, %origin: i32, %stride: i32) {
-  %5 = index.constant 0 : offset
+  %5 = index.constant 0 : index
   %input_values = buffer.view %input[%5] : buffer -> view<64xi32>
   %output_values = buffer.view %output[%5] : buffer -> view<4xi32>
   %10 = scalar.addi %origin, %stride : i32

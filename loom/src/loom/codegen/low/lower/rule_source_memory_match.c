@@ -242,6 +242,7 @@ loom_low_lower_rule_source_memory_layout_rejection_reason(
 }
 
 static bool loom_low_lower_rule_source_memory_byte_offset_matches(
+    const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_source_memory_t* source_memory,
     const loom_low_source_memory_access_plan_t* access) {
   const uint8_t complete_bit_count = source_memory->byte_offset_bit_count;
@@ -250,9 +251,20 @@ static bool loom_low_lower_rule_source_memory_byte_offset_matches(
   if (complete_bit_count == 0 && dynamic_bit_count == 0) {
     return true;
   }
+  const loom_target_snapshot_t* snapshot = match_context->bundle->snapshot;
+  const uint32_t address_bitwidth =
+      iree_max(snapshot->offset_bitwidth,
+               loom_target_snapshot_maximum_index_bitwidth(snapshot));
+  // A full address carrier implements the target's arithmetic, including
+  // overflow. Only a narrower instruction form needs a range proof.
+  const bool needs_complete_range =
+      complete_bit_count != 0 && complete_bit_count < address_bitwidth;
+  if (!needs_complete_range && dynamic_bit_count == 0) {
+    return true;
+  }
   loom_value_facts_t byte_facts = loom_low_source_memory_dynamic_offset_facts(
       access, access->static_byte_offset);
-  if (complete_bit_count != 0 && complete_bit_count < 64) {
+  if (needs_complete_range) {
     const int64_t minimum = -(INT64_C(1) << (complete_bit_count - 1));
     const int64_t maximum = (int64_t)(UINT64_MAX >> (64 - complete_bit_count));
     if (byte_facts.range_lo < minimum || byte_facts.range_hi > maximum) {
@@ -285,8 +297,13 @@ static bool loom_low_lower_rule_source_memory_address_input_matches(
            (conversion->required_features & ~match_context->feature_bits) == 0;
   }
   if (scalar_type == LOOM_SCALAR_TYPE_INDEX) {
-    // Unlike fixed integers, index has a target-selected source width. Its
-    // mapped input must represent the value before coordinate arithmetic.
+    // A single-carrier target realizes every index in its native carrier.
+    // Targets with a wider carrier must also provide its numeric conversion.
+    const loom_target_snapshot_t* snapshot = match_context->bundle->snapshot;
+    if (loom_target_snapshot_maximum_index_bitwidth(snapshot) ==
+        snapshot->index_bitwidth) {
+      return true;
+    }
     const loom_value_facts_t facts = loom_value_fact_table_lookup(
         match_context->fact_table, source_value_id);
     if (loom_value_facts_fit_signed_bit_count(
@@ -352,8 +369,8 @@ static bool loom_low_lower_rule_source_memory_address_matches(
     const loom_low_lower_source_memory_diagnostics_t* diagnostics,
     const loom_low_source_memory_access_plan_t* access,
     uint16_t* out_diagnostic_index) {
-  if (!loom_low_lower_rule_source_memory_byte_offset_matches(source_memory,
-                                                             access)) {
+  if (!loom_low_lower_rule_source_memory_byte_offset_matches(
+          match_context, source_memory, access)) {
     return loom_low_lower_rule_source_memory_reject(
         diagnostics, LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_BYTE_OFFSET_WIDTH,
         out_diagnostic_index);

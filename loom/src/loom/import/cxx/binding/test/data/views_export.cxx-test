@@ -136,3 +136,44 @@ void page_weighted_dot(const int* page_table, const float* lhs, const float* rhs
     loom::view::store(weight, result, loom::type::index{0});
   }
 }
+
+// ====
+// RUN: emit cxx roundtrip
+// Signed positions retain their domain through static/dynamic and
+// plain/encoded views, including explicit dimensions in either source form.
+#include <loomcxx/view.h>
+
+float signed_views(loom::type::buffer<const float> input, loom::type::index position, loom::type::index count, unsigned rows) {
+  auto plain = loom::buffer::view<4>(input, position, {});
+  auto encoded = loom::buffer::view<4>(input, position, {}, loom::encoding::layout::dense<1>());
+  auto dynamic_plain = loom::buffer::view<loom::type::dynamic>(input, position, loom::type::indices{count});
+  auto dynamic_encoded = loom::buffer::view<loom::type::dynamic>(input, position, loom::type::indices{count}, loom::encoding::layout::dense<1>());
+  auto integer_plain = loom::buffer::view<loom::type::dynamic>(input, position, {rows});
+  auto integer_encoded = loom::buffer::view<loom::type::dynamic>(input, position, {rows}, loom::encoding::layout::dense<1>());
+  return loom::view::load(plain, 0) + loom::view::load(encoded, 0) + loom::view::load(dynamic_plain, 0) + loom::view::load(dynamic_encoded, 0) + loom::view::load(integer_plain, 0) + loom::view::load(integer_encoded, 0);
+}
+
+// ----
+#include <loomcxx/view.h>
+
+[[loom::symbol("signed_views")]]
+float signed_views(loom::type::buffer<float> input, loom::type::index position, loom::type::index count, unsigned rows);
+
+[[loom::symbol("signed_views")]]
+float signed_views(loom::type::buffer<float> input, loom::type::index position, loom::type::index count, unsigned rows) {
+  auto plain = loom::buffer::view<4>(loom::buffer::cast<const float>(input), position, {});
+  auto encoded = loom::buffer::view<4>(loom::buffer::cast<const float>(input), position, {}, loom::encoding::layout::dense<1>());
+  auto dynamic_plain = loom::buffer::view<loom::type::dynamic>(loom::buffer::cast<const float>(input), position, loom::type::indices{count});
+  auto dynamic_encoded = loom::buffer::view<loom::type::dynamic>(loom::buffer::cast<const float>(input), position, loom::type::indices{count}, loom::encoding::layout::dense<1>());
+  loom::type::index integer_plain_dim0 = loom::index::cast(rows);
+  auto integer_plain = loom::buffer::view<loom::type::dynamic>(loom::buffer::cast<const float>(input), position, loom::type::indices{integer_plain_dim0});
+  loom::type::index integer_encoded_dim0 = loom::index::cast(rows);
+  auto integer_encoded = loom::buffer::view<loom::type::dynamic>(loom::buffer::cast<const float>(input), position, loom::type::indices{integer_encoded_dim0}, loom::encoding::layout::dense<1>());
+  float v20 = loom::view::load(plain, loom::type::index{0});
+  float v23 = loom::view::load(encoded, loom::type::index{0});
+  float v27 = loom::view::load(dynamic_plain, loom::type::index{0});
+  float v31 = loom::view::load(dynamic_encoded, loom::type::index{0});
+  float v35 = loom::view::load(integer_plain, loom::type::index{0});
+  float v39 = loom::view::load(integer_encoded, loom::type::index{0});
+  return (((((v20 + v23) + v27) + v31) + v35) + v39);
+}

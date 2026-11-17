@@ -5,15 +5,17 @@ func.def @byte_checksum(%byte_count: i64, %byte_start: i64, %pattern: i32) -> (i
   %start = index.cast %start_input : i64 to offset
   %extent = index.add %length, %start : offset
   %storage = buffer.alloca<private> align(8) %extent : buffer
-  %begin = index.constant 0 : offset
-  %stride = index.constant 1 : offset
-  scf.for %i = [%begin to %length step %stride] {
-    %position = index.add %start, %i : offset
+  %signed_start = index.cast %start_input : i64 to index
+  %end = index.cast %count_input : i64 to index
+  %begin = index.constant 0 : index
+  %stride = index.constant 1 : index
+  scf.for %i = [%begin to %end step %stride] {
+    %position = index.add %signed_start, %i : index
     buffer.store.i8 %pattern, %storage[%position]
   }
   %initial = scalar.constant 0 : i32
-  %checksum = scf.for %i = [%begin to %length step %stride](%sum = %initial : i32) -> (i32) {
-    %position = index.add %start, %i : offset
+  %checksum = scf.for %i = [%begin to %end step %stride](%sum = %initial : i32) -> (i32) {
+    %position = index.add %signed_start, %i : index
     %byte = buffer.load.i8.u %storage[%position]
     %next = scalar.addi %sum, %byte : i32
     scf.yield %next : i32
@@ -33,12 +35,24 @@ func.def @byte_checksum_observations(%ordinal: index, %pattern_entropy: i64, %ou
   func.return
 }
 
+func.def @byte_checksum_oracle(%ordinal: index, %pattern_entropy: i64, %output: buffer) {
+  %count = index.cast %ordinal : index to i32
+  %pattern = scalar.trunci %pattern_entropy : i64 to i32
+  %mask = scalar.constant 255 : i32
+  %byte = scalar.andi %pattern, %mask : i32
+  %checksum = scalar.muli %count, %byte : i32
+  %origin = index.constant 0 : offset
+  %results = buffer.view %output[%origin] : buffer -> view<1xi32>
+  view.store %checksum, %results[0] : i32, view<1xi32>
+  func.return
+}
+
 check.scenario @byte_checksum_values {
   check.trial[66](%trial: index, %entropy: check.entropy) {
     %pattern_source = check.entropy.fork %entropy name("pattern") : check.entropy
     %pattern = check.entropy.read %pattern_source[%trial] : check.entropy -> i64
     %output = check.generate.fill value(0) : tensor<1xi32>
-    check.compare<@byte_checksum_observations>(%trial, %pattern, %output) : (index, i64, tensor<1xi32>) -> () {
+    check.compare<@byte_checksum_observations, @byte_checksum_oracle>(%trial, %pattern, %output) : (index, i64, tensor<1xi32>) -> () {
       check.expect.bitwise actual(%output) expected(%output) : tensor<1xi32>
     }
   }

@@ -21,9 +21,9 @@ REFINE(descriptor, descriptor)
 REFINE(generic, generic)
 
 // ----
-func.def public @global_pointer(%source: buffer, %source_byte_offset: offset) -> (buffer, offset) {
+func.def public @global_pointer(%source: buffer, %source_byte_offset: index) -> (buffer, index) {
   %4 = buffer.assume.memory_space<global> %source : buffer
-  func.return %4, %source_byte_offset : buffer, offset
+  func.return %4, %source_byte_offset : buffer, index
 }
 
 func.def public @global_buffer(%source: buffer) -> (buffer) {
@@ -31,9 +31,9 @@ func.def public @global_buffer(%source: buffer) -> (buffer) {
   func.return %7 : buffer
 }
 
-func.def public @workgroup_pointer(%source: buffer, %source_byte_offset: offset) -> (buffer, offset) {
+func.def public @workgroup_pointer(%source: buffer, %source_byte_offset: index) -> (buffer, index) {
   %12 = buffer.assume.memory_space<workgroup> %source : buffer
-  func.return %12, %source_byte_offset : buffer, offset
+  func.return %12, %source_byte_offset : buffer, index
 }
 
 func.def public @workgroup_buffer(%source: buffer) -> (buffer) {
@@ -41,9 +41,9 @@ func.def public @workgroup_buffer(%source: buffer) -> (buffer) {
   func.return %15 : buffer
 }
 
-func.def public @private_storage_pointer(%source: buffer, %source_byte_offset: offset) -> (buffer, offset) {
+func.def public @private_storage_pointer(%source: buffer, %source_byte_offset: index) -> (buffer, index) {
   %20 = buffer.assume.memory_space<private> %source : buffer
-  func.return %20, %source_byte_offset : buffer, offset
+  func.return %20, %source_byte_offset : buffer, index
 }
 
 func.def public @private_storage_buffer(%source: buffer) -> (buffer) {
@@ -51,9 +51,9 @@ func.def public @private_storage_buffer(%source: buffer) -> (buffer) {
   func.return %23 : buffer
 }
 
-func.def public @constant_pointer(%source: buffer, %source_byte_offset: offset) -> (buffer, offset) {
+func.def public @constant_pointer(%source: buffer, %source_byte_offset: index) -> (buffer, index) {
   %28 = buffer.assume.memory_space<constant> %source : buffer
-  func.return %28, %source_byte_offset : buffer, offset
+  func.return %28, %source_byte_offset : buffer, index
 }
 
 func.def public @constant_buffer(%source: buffer) -> (buffer) {
@@ -61,9 +61,9 @@ func.def public @constant_buffer(%source: buffer) -> (buffer) {
   func.return %31 : buffer
 }
 
-func.def public @host_pointer(%source: buffer, %source_byte_offset: offset) -> (buffer, offset) {
+func.def public @host_pointer(%source: buffer, %source_byte_offset: index) -> (buffer, index) {
   %36 = buffer.assume.memory_space<host> %source : buffer
-  func.return %36, %source_byte_offset : buffer, offset
+  func.return %36, %source_byte_offset : buffer, index
 }
 
 func.def public @host_buffer(%source: buffer) -> (buffer) {
@@ -71,9 +71,9 @@ func.def public @host_buffer(%source: buffer) -> (buffer) {
   func.return %39 : buffer
 }
 
-func.def public @descriptor_pointer(%source: buffer, %source_byte_offset: offset) -> (buffer, offset) {
+func.def public @descriptor_pointer(%source: buffer, %source_byte_offset: index) -> (buffer, index) {
   %44 = buffer.assume.memory_space<descriptor> %source : buffer
-  func.return %44, %source_byte_offset : buffer, offset
+  func.return %44, %source_byte_offset : buffer, index
 }
 
 func.def public @descriptor_buffer(%source: buffer) -> (buffer) {
@@ -81,9 +81,9 @@ func.def public @descriptor_buffer(%source: buffer) -> (buffer) {
   func.return %47 : buffer
 }
 
-func.def public @generic_pointer(%source: buffer, %source_byte_offset: offset) -> (buffer, offset) {
+func.def public @generic_pointer(%source: buffer, %source_byte_offset: index) -> (buffer, index) {
   %52 = buffer.assume.memory_space<generic> %source : buffer
-  func.return %52, %source_byte_offset : buffer, offset
+  func.return %52, %source_byte_offset : buffer, index
 }
 
 func.def public @generic_buffer(%source: buffer) -> (buffer) {
@@ -111,38 +111,32 @@ unsigned observe_buffer(loom::type::buffer<const volatile unsigned> source) {
 }
 
 // ----
-func.def public @observe_pointer(%source: buffer, %source_byte_offset: offset) -> (i32) {
+func.def public @observe_pointer(%source: buffer, %source_byte_offset: index) -> (i32) {
   %3 = scalar.constant 3 : i32
-  %4 = scalar.extsi %3 : i32 to i64
-  %5 = scalar.constant 4 : i64
-  %6 = scalar.muli %4, %5 : i64
-  %7 = index.cast %source_byte_offset : offset to i64
-  %8 = scalar.addi %7, %6 : i64
-  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
-  %refined_byte_offset = index.cast %9 : i64 to offset
+  %4 = index.cast %3 : i32 to index
+  %5 = index.constant 4 : index
+  %6 = index.mul %4, %5 : index
+  %refined_byte_offset = index.add %source_byte_offset, %6 : index
   %refined = buffer.assume.memory_space<global> %source : buffer
-  %12 = scalar.constant 2 : i32
-  %13 = scalar.extsi %12 : i32 to i64
-  %14 = scalar.constant 4 : i64
-  %15 = scalar.muli %13, %14 : i64
-  %16 = index.cast %refined_byte_offset : offset to i64
-  %17 = scalar.addi %16, %15 : i64
-  %18 = scalar.assume %17 [range(%17, 0, 9223372036854775807)] : i64
-  %19 = index.cast %18 : i64 to offset
-  %20 = buffer.view %refined[%19] : buffer -> view<1xi32>
-  %21 = view.load<volatile|root_in_bounds|type_disjoint> %20[0] : view<1xi32> -> i32
-  func.return %21 : i32
+  %9 = scalar.constant 2 : i32
+  %10 = index.cast %9 : i32 to index
+  %11 = index.constant 4 : index
+  %12 = index.mul %10, %11 : index
+  %13 = index.add %refined_byte_offset, %12 : index
+  %14 = buffer.view %refined[%13] : buffer -> view<1xi32>
+  %15 = view.load<volatile|root_in_bounds|type_disjoint> %14[0] : view<1xi32> -> i32
+  func.return %15 : i32
 }
 
 func.def public @observe_buffer(%source: buffer) -> (i32) {
   %refined = buffer.assume.memory_space<global> %source : buffer
   %view_layout = encoding.layout.dense : encoding<layout>
-  %26 = index.constant 0 : offset
-  %view = buffer.view %refined[%26] : buffer -> view<4xi32, %view_layout>
-  %28 = scalar.constant 2 : i32
-  %29 = index.cast %28 : i32 to index
-  %30 = view.load<volatile|type_disjoint> %view[%29] : view<4xi32, %view_layout> -> i32
-  func.return %30 : i32
+  %20 = index.constant 0 : index
+  %view = buffer.view %refined[%20] : buffer -> view<4xi32, %view_layout>
+  %22 = scalar.constant 2 : i32
+  %23 = index.cast %22 : i32 to index
+  %24 = view.load<volatile|type_disjoint> %view[%23] : view<4xi32, %view_layout> -> i32
+  func.return %24 : i32
 }
 
 // ====
@@ -160,7 +154,7 @@ unsigned private_element() {
 func.def public @private_element() -> (i32) {
   %1 = index.constant 16 : offset
   %values_storage = buffer.alloca<private> align(4) %1 : buffer
-  %values_storage_byte_offset = index.constant 0 : offset
+  %values_storage_byte_offset = index.constant 0 : index
   %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<4xi32>
   %5 = scalar.constant 7 : i32
   %6 = index.constant 0 : index
@@ -176,17 +170,14 @@ func.def public @private_element() -> (i32) {
   view.store<type_disjoint> %11, %values_view[%12] : i32, view<4xi32>
   %refined = buffer.assume.memory_space<private> %values_storage : buffer
   %14 = scalar.constant 2 : i32
-  %15 = scalar.extsi %14 : i32 to i64
-  %16 = scalar.constant 4 : i64
-  %17 = scalar.muli %15, %16 : i64
-  %18 = index.cast %values_storage_byte_offset : offset to i64
-  %19 = scalar.addi %18, %17 : i64
-  %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
-  %21 = index.cast %20 : i64 to offset
-  %22 = index.assume %21 [range(%21, 0, 12)] : offset
-  %23 = buffer.view %refined[%22] : buffer -> view<1xi32>
-  %24 = view.load<type_disjoint> %23[0] : view<1xi32> -> i32
-  func.return %24 : i32
+  %15 = index.cast %14 : i32 to index
+  %16 = index.constant 4 : index
+  %17 = index.mul %15, %16 : index
+  %18 = index.add %values_storage_byte_offset, %17 : index
+  %19 = index.assume %18 [range(%18, 0, 12)] : index
+  %20 = buffer.view %refined[%19] : buffer -> view<1xi32>
+  %21 = view.load<type_disjoint> %20[0] : view<1xi32> -> i32
+  func.return %21 : i32
 }
 
 // ====
@@ -222,45 +213,41 @@ kernel.def @borrowed_storage() {
 } launch(%input_pointer: buffer, %input_buffer: buffer, %output: buffer) {
   %workgroup_id_x = kernel.workgroup.id<x> : index
   %12 = index.cast %workgroup_id_x : index to i32
-  %81 = scalar.constant 5 : i32
-  %82 = scalar.shli %12, %81 : i32
+  %66 = scalar.constant 5 : i32
+  %67 = scalar.shli %12, %66 : i32
   %workitem_id_x = kernel.workitem.id<x> : index
   %16 = index.cast %workitem_id_x : index to i32
-  %item = scalar.addi %82, %16 : i32
+  %item = scalar.addi %67, %16 : i32
+  %interior_byte_offset = index.constant 12 : index
   %interior = buffer.assume.memory_space<constant> %input_pointer : buffer
   %buffer = buffer.assume.memory_space<constant> %input_buffer : buffer
-  %29 = index.constant 0 : offset
-  %source = buffer.view %buffer[%29] : buffer -> view<70xi32>
-  %31 = scalar.extui %item : i32 to i64
-  %79 = scalar.constant 2 : i64
-  %80 = scalar.shli %31, %79 : i64
-  %78 = scalar.constant 12 : i64
-  %77 = scalar.addi %80, %78 : i64
-  %36 = scalar.assume %77 [range(%77, 0, 9223372036854775807)] : i64
-  %37 = index.cast %36 : i64 to offset
-  %38 = buffer.view %interior[%37] : buffer -> view<1xi32>
-  %39 = view.load<root_in_bounds|type_disjoint> %38[0] : view<1xi32> -> i32
-  %75 = scalar.constant 1 : i32
-  %76 = scalar.shli %item, %75 : i32
-  %43 = scalar.addi %76, %75 : i32
-  %44 = scalar.extui %43 : i32 to i64
-  %74 = scalar.shli %44, %79 : i64
-  %49 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
-  %50 = index.cast %49 : i64 to offset
-  %51 = buffer.view %output[%50] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %39, %51[0] : i32, view<1xi32>
-  %52 = scalar.constant 3 : i32
-  %53 = scalar.addi %item, %52 : i32
+  %26 = index.constant 0 : index
+  %source = buffer.view %buffer[%26] : buffer -> view<70xi32>
+  %28 = scalar.extui %item : i32 to i64
+  %29 = index.cast %28 : i64 to index
+  %30 = index.constant 4 : index
+  %64 = index.madd %29, %30, %interior_byte_offset : index
+  %33 = buffer.view %interior[%64] : buffer -> view<1xi32>
+  %34 = view.load<root_in_bounds|type_disjoint> %33[0] : view<1xi32> -> i32
+  %62 = scalar.constant 1 : i32
+  %63 = scalar.shli %item, %62 : i32
+  %38 = scalar.addi %63, %62 : i32
+  %39 = scalar.extui %38 : i32 to i64
+  %40 = index.cast %39 : i64 to index
+  %42 = index.mul %40, %30 : index
+  %44 = buffer.view %output[%42] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %34, %44[0] : i32, view<1xi32>
+  %45 = scalar.constant 3 : i32
+  %46 = scalar.addi %item, %45 : i32
+  %47 = scalar.extui %46 : i32 to i64
+  %48 = index.cast %47 : i64 to index
+  %49 = view.load<type_disjoint> %source[%48] : view<70xi32> -> i32
+  %52 = scalar.constant 2 : i32
+  %53 = scalar.addi %63, %52 : i32
   %54 = scalar.extui %53 : i32 to i64
   %55 = index.cast %54 : i64 to index
-  %56 = view.load<type_disjoint> %source[%55] : view<70xi32> -> i32
-  %59 = scalar.constant 2 : i32
-  %60 = scalar.addi %76, %59 : i32
-  %61 = scalar.extui %60 : i32 to i64
-  %70 = scalar.shli %61, %79 : i64
-  %66 = scalar.assume %70 [range(%70, 0, 9223372036854775807)] : i64
-  %67 = index.cast %66 : i64 to offset
-  %68 = buffer.view %output[%67] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %56, %68[0] : i32, view<1xi32>
+  %57 = index.mul %55, %30 : index
+  %59 = buffer.view %output[%57] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %49, %59[0] : i32, view<1xi32>
   kernel.return
 }

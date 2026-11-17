@@ -63,19 +63,19 @@ void aggregate_destruction() {
 func.def public @aggregate_destruction() {
   %0 = index.constant 8 : offset
   %array_storage = buffer.alloca<private> align(4) %0 : buffer
-  %array_storage_byte_offset = index.constant 0 : offset
+  %array_storage_byte_offset = index.constant 0 : index
   %6 = scalar.constant 4 : i32
   %8 = buffer.view %array_storage[%array_storage_byte_offset] : buffer -> view<1xi32>
   view.store<type_disjoint> %6, %8[0] : i32, view<1xi32>
   %13 = scalar.constant 5 : i32
-  %31 = index.constant 4 : offset
+  %31 = index.constant 4 : index
   %15 = buffer.view %array_storage[%31] : buffer -> view<1xi32>
   view.store<type_disjoint> %13, %15[0] : i32, view<1xi32>
   %pair_first_digit = scalar.constant 6 : i32
   %pair_second_digit = scalar.constant 7 : i32
   func.call @Pair___Pair_value(%pair_first_digit, %pair_second_digit) : (i32, i32)
-  func.call @Guard___Guard_storage(%array_storage, %31) : (buffer, offset)
-  func.call @Guard___Guard_storage(%array_storage, %array_storage_byte_offset) : (buffer, offset)
+  func.call @Guard___Guard_storage(%array_storage, %31) : (buffer, index)
+  func.call @Guard___Guard_storage(%array_storage, %array_storage_byte_offset) : (buffer, index)
   func.return
 }
 
@@ -85,7 +85,7 @@ func.def inline @Pair___Pair_value(%this_first_digit: i32, %this_second_digit: i
   func.return
 }
 
-func.def inline @Guard___Guard_storage(%this: buffer, %this_byte_offset: offset) {
+func.def inline @Guard___Guard_storage(%this: buffer, %this_byte_offset: index) {
   %26 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
   %digit = view.load<root_in_bounds|type_disjoint> %26[0] : view<1xi32> -> i32
   func.call @observe(%digit) : (i32)
@@ -267,7 +267,7 @@ func.def public @full_expression_temporaries(%choose: i1) {
   %5 = scalar.constant 5 : i32
   %6 = index.constant 4 : offset
   %7 = buffer.alloca<private> align(4) %6 : buffer
-  %8 = index.constant 0 : offset
+  %8 = index.constant 0 : index
   %13 = buffer.view %7[%8] : buffer -> view<1xi32>
   view.store<type_disjoint> %5, %13[0] : i32, view<1xi32>
   %15 = scalar.constant 6 : i32
@@ -303,7 +303,7 @@ func.def public @full_expression_temporaries(%choose: i1) {
   %39 = view.load<type_disjoint> %29[0] : view<1xi8> -> i8
   %41 = scalar.cmpi ne, %39, %122 : i8
   scf.if %41 {
-    func.call @Guard___Guard_storage(%23, %8) : (buffer, offset)
+    func.call @Guard___Guard_storage(%23, %8) : (buffer, index)
   }
   %42 = scalar.constant 13 : i32
   %43 = func.call pure @make(%42) : (i32) -> (i32)
@@ -313,7 +313,7 @@ func.def public @full_expression_temporaries(%choose: i1) {
   %45 = func.call @make_with_side(%44) : (i32) -> (i32)
   func.call @consume(%45) : (i32)
   func.call @Guard___Guard_value(%45) : (i32)
-  func.call @Guard___Guard_storage(%7, %8) : (buffer, offset)
+  func.call @Guard___Guard_storage(%7, %8) : (buffer, index)
   func.call @Guard___Guard_value(%local_digit) : (i32)
   func.return
 }
@@ -322,7 +322,7 @@ func.def public @direct_result_ownership(%choose: i1) {
   %nested_digit = scalar.constant 15 : i32
   %48 = index.constant 4 : offset
   %holder_storage = buffer.alloca<private> align(4) %48 : buffer
-  %holder_storage_byte_offset = index.constant 0 : offset
+  %holder_storage_byte_offset = index.constant 0 : index
   %54 = scalar.constant 18 : i32
   %58 = buffer.view %holder_storage[%holder_storage_byte_offset] : buffer -> view<1xi32>
   view.store<type_disjoint> %54, %58[0] : i32, view<1xi32>
@@ -350,11 +350,11 @@ func.def public @direct_result_ownership(%choose: i1) {
   %95 = scalar.constant 40 : i32
   %96 = scalar.addi %comma_extended_digit, %95 : i32
   func.call @observe(%96) : (i32)
-  func.call @Guard___Guard_storage(%83, %holder_storage_byte_offset) : (buffer, offset)
+  func.call @Guard___Guard_storage(%83, %holder_storage_byte_offset) : (buffer, index)
   func.call @Guard___Guard_value(%source_digit) : (i32)
   func.call @Guard___Guard_value(%source_digit) : (i32)
-  func.call @Guard___Guard_storage(%63, %holder_storage_byte_offset) : (buffer, offset)
-  func.call @Holder___Holder_storage(%holder_storage, %holder_storage_byte_offset) : (buffer, offset)
+  func.call @Guard___Guard_storage(%63, %holder_storage_byte_offset) : (buffer, index)
+  func.call @Holder___Holder_storage(%holder_storage, %holder_storage_byte_offset) : (buffer, index)
   func.call @Guard___Guard_value(%nested_digit) : (i32)
   func.return
 }
@@ -379,7 +379,7 @@ func.def @consume_value(%guard_digit: i32) {
   func.return
 }
 
-func.def inline @Guard___Guard_storage(%this: buffer, %this_byte_offset: offset) {
+func.def inline @Guard___Guard_storage(%this: buffer, %this_byte_offset: index) {
   %108 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
   %digit = view.load<root_in_bounds|type_disjoint> %108[0] : view<1xi32> -> i32
   func.call @observe(%digit) : (i32)
@@ -396,8 +396,8 @@ func.def @make_with_side(%digit: i32) -> (i32) {
   func.return %digit : i32
 }
 
-func.def inline @Holder___Holder_storage(%this: buffer, %this_byte_offset: offset) {
-  func.call @Guard___Guard_storage(%this, %this_byte_offset) : (buffer, offset)
+func.def inline @Holder___Holder_storage(%this: buffer, %this_byte_offset: index) {
+  func.call @Guard___Guard_storage(%this, %this_byte_offset) : (buffer, index)
   func.return
 }
 
@@ -483,57 +483,50 @@ void default_array_lifetime() { Owner value; }
 func.def public @default_array_lifetime() {
   %0 = index.constant 8 : offset
   %value_storage = buffer.alloca<private> align(4) %0 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
-  func.call @Owner__Owner_storage(%value_storage, %value_storage_byte_offset) : (buffer, offset)
-  func.call @Owner___Owner_storage(%value_storage, %value_storage_byte_offset) : (buffer, offset)
+  %value_storage_byte_offset = index.constant 0 : index
+  func.call @Owner__Owner_storage(%value_storage, %value_storage_byte_offset) : (buffer, index)
+  func.call @Owner___Owner_storage(%value_storage, %value_storage_byte_offset) : (buffer, index)
   func.return
 }
 
-func.def inline @Owner__Owner_storage(%this: buffer, %this_byte_offset: offset) {
+func.def inline @Owner__Owner_storage(%this: buffer, %this_byte_offset: index) {
   %8 = scalar.constant 3 : i32
-  func.call @Guard__Guard_storage(%this, %this_byte_offset, %8) : (buffer, offset, i32)
-  %9 = index.constant 4 : offset
-  %10 = index.add %this_byte_offset, %9 : offset
+  func.call @Guard__Guard_storage(%this, %this_byte_offset, %8) : (buffer, index, i32)
+  %9 = index.constant 4 : index
+  %10 = index.add %this_byte_offset, %9 : index
   %11 = scalar.constant 5 : i32
-  func.call @Guard__Guard_storage(%this, %10, %11) : (buffer, offset, i32)
-  %18 = index.cast %this_byte_offset : offset to i64
-  %20 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
-  %21 = index.cast %20 : i64 to offset
-  %24 = buffer.view %this[%21] : buffer -> view<1xi32>
-  %value$25 = view.load<root_in_bounds|type_disjoint> %24[0] : view<1xi32> -> i32
-  %62 = scalar.constant 4 : i64
-  %33 = scalar.addi %20, %62 : i64
-  %34 = scalar.assume %33 [range(%33, 0, 9223372036854775807)] : i64
-  %35 = index.cast %34 : i64 to offset
-  %38 = buffer.view %this[%35] : buffer -> view<1xi32>
-  %value$39 = view.load<root_in_bounds|type_disjoint> %38[0] : view<1xi32> -> i32
-  %40 = scalar.addi %value$25, %value$39 : i32
-  func.call @observe(%40) : (i32)
+  func.call @Guard__Guard_storage(%this, %10, %11) : (buffer, index, i32)
+  %21 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  %value$22 = view.load<root_in_bounds|type_disjoint> %21[0] : view<1xi32> -> i32
+  %32 = buffer.view %this[%10] : buffer -> view<1xi32>
+  %value$33 = view.load<root_in_bounds|type_disjoint> %32[0] : view<1xi32> -> i32
+  %34 = scalar.addi %value$22, %value$33 : i32
+  func.call @observe(%34) : (i32)
   func.return
 }
 
-func.def inline @Owner___Owner_storage(%this: buffer, %this_byte_offset: offset) {
-  %45 = index.constant 4 : offset
-  %46 = index.add %this_byte_offset, %45 : offset
-  func.call @Guard___Guard_storage(%this, %46) : (buffer, offset)
-  func.call @Guard___Guard_storage(%this, %this_byte_offset) : (buffer, offset)
+func.def inline @Owner___Owner_storage(%this: buffer, %this_byte_offset: index) {
+  %39 = index.constant 4 : index
+  %40 = index.add %this_byte_offset, %39 : index
+  func.call @Guard___Guard_storage(%this, %40) : (buffer, index)
+  func.call @Guard___Guard_storage(%this, %this_byte_offset) : (buffer, index)
   func.return
 }
 
-func.def inline @Guard__Guard_storage(%this: buffer, %this_byte_offset: offset, %input: i32) {
-  %52 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %input, %52[0] : i32, view<1xi32>
+func.def inline @Guard__Guard_storage(%this: buffer, %this_byte_offset: index, %input: i32) {
+  %46 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %input, %46[0] : i32, view<1xi32>
   func.call @observe(%input) : (i32)
   func.return
 }
 
-func.def inline @Guard___Guard_storage(%this: buffer, %this_byte_offset: offset) {
-  %57 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
-  %value = view.load<root_in_bounds|type_disjoint> %57[0] : view<1xi32> -> i32
-  %59 = scalar.constant 100 : i32
-  %60 = scalar.addi %value, %59 : i32
-  func.call @observe(%60) : (i32)
+func.def inline @Guard___Guard_storage(%this: buffer, %this_byte_offset: index) {
+  %51 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  %value = view.load<root_in_bounds|type_disjoint> %51[0] : view<1xi32> -> i32
+  %53 = scalar.constant 100 : i32
+  %54 = scalar.addi %value, %53 : i32
+  func.call @observe(%54) : (i32)
   func.return
 }
 
-func.decl @observe(%61: i32)
+func.decl @observe(%55: i32)

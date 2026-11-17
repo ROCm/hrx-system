@@ -8,7 +8,7 @@ kernel.def @shared_positions() {
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%output: buffer, %position_input: i32, %other_input: i32) {
   %bounded = scalar.assume %position_input [range(%position_input, 0, 16)] : i32
-  %position = index.cast %bounded : i32 to offset
+  %position = index.cast %position_input : i32 to index
   %other_bounded = scalar.assume %other_input [range(%other_input, 0, 16)] : i32
   %other = index.cast %other_bounded : i32 to offset
   %origin = index.constant 0 : offset
@@ -32,30 +32,60 @@ kernel.def @shared_positions() {
 low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, i32, i32) -> ()}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @shared_positions(%bounded: reg<spirv.id : i32>, %other_bounded: reg<spirv.id : i32>) asm {
   %output = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
   %second = storage {byte_alignment = 16, byte_length = 32} : low.storage<workgroup>
-  %29 = OpBitcast.i32.u32 %bounded
-  %position = OpUConvert.u32.offset64 %29
-  %31 = OpBitcast.i32.u32 %other_bounded
-  %other = OpUConvert.u32.offset64 %31
+  %position = OpCopyObject.i32 %bounded : reg<spirv.id : index>
+  %30 = OpBitcast.i32.u32 %other_bounded
+  %other = OpUConvert.u32.offset64 %30
   %first_view = storage_address %second : low.storage<workgroup> -> reg<spirv.ptr.workgroup.array.i32>
-  %35 = OpConstant.i32 0 : reg<spirv.id : index>
-  %36 = OpAccessChain.workgroup.i32.element_index %first_view, %35
-  OpStore.workgroup.i32<volatile> %36, %bounded
-  %37 = OpConstant.i32 4 : reg<spirv.id : index>
-  %38 = OpAccessChain.workgroup.i32.element_index %first_view, %37
-  OpStore.workgroup.i32<volatile> %38, %bounded
+  %34 = OpConstant.i32 0 : reg<spirv.id : index>
+  %35 = OpAccessChain.workgroup.i32.element_index %first_view, %34
+  OpStore.workgroup.i32<volatile> %35, %bounded
+  %36 = OpConstant.i32 4 : reg<spirv.id : index>
+  %37 = OpAccessChain.workgroup.i32.element_index %first_view, %36
+  OpStore.workgroup.i32<volatile> %37, %bounded
+  %38 = OpSConvert.i32.offset64 %position
   %39 = OpConstant.offset64 16
   %40 = OpIAdd.offset64 %other, %39
-  %equal = OpIEqual.offset64 %position, %40
-  %different = OpINotEqual.offset64 %position, %40
-  %45 = OpConstant.i32 1
-  %46 = OpConstant.i32 0
-  %equal_word = OpSelect %equal, %45, %46
-  %different_word = OpSelect %different, %45, %46
-  %49 = OpConstant.offset64 0
-  %50 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %49
-  OpStore.storage_buffer.i32 %50, %equal_word
-  %51 = OpConstant.offset64 4
-  %52 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %51
-  OpStore.storage_buffer.i32 %52, %different_word
+  %equal = OpIEqual.offset64 %38, %40
+  %different = OpINotEqual.offset64 %38, %40
+  %46 = OpConstant.i32 1
+  %47 = OpConstant.i32 0
+  %equal_word = OpSelect %equal, %46, %47
+  %different_word = OpSelect %different, %46, %47
+  %50 = OpConstant.offset64 0
+  %51 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %50
+  OpStore.storage_buffer.i32 %51, %equal_word
+  %52 = OpConstant.offset64 4
+  %53 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %52
+  OpStore.storage_buffer.i32 %53, %different_word
+  return
+}
+
+// ====
+
+// Physical storage pointers keep their address width while a signed native
+// coordinate extends only at the address use.
+func.def @physical_positions(%left: buffer, %position: index, %right: buffer, %offset: offset, %output: buffer) {
+  %same = buffer.compare.address eq, %left[%position], %right[%offset]
+  %word = scalar.extui %same : i1 to i32
+  %origin = index.constant 0 : offset
+  %result = buffer.view %output[%origin] : buffer -> view<1xi32>
+  view.store %word, %result[0] : i32, view<1xi32>
+  func.return
+}
+// ----
+low.func.def target<spirv.logical.core> abi(hal_kernel) @physical_positions(%position: reg<spirv.id : index>, %offset: reg<spirv.offset64>) asm {
+  %left = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %right = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %17 = OpSConvert.i32.offset64 %position
+  %18 = OpIAdd.storage_buffer.byte_offset %left, %17
+  %19 = OpIAdd.storage_buffer.byte_offset %right, %offset
+  %same = OpIEqual.storage_buffer %18, %19
+  %21 = OpConstant.i32 1
+  %22 = OpConstant.i32 0
+  %word = OpSelect %same, %21, %22
+  %24 = OpConstant.offset64 0
+  %25 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %24
+  OpStore.storage_buffer.i32 %25, %word
   return
 }

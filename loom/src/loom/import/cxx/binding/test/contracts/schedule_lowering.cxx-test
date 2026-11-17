@@ -22,61 +22,57 @@ int serial_find(const int* values, unsigned count) {
 }
 
 // ----
-func.def public @serial_find(%values: buffer, %values_byte_offset: offset, %count: i32) -> (i32) {
+func.def public @serial_find(%values: buffer, %values_byte_offset: index, %count: i32) -> (i32) {
   %index = scalar.constant 0 : i32
   %5 = index.cast %index : i32 to offset
   %6 = index.cast %count : i32 to offset
   %7 = index.constant 1 : offset
   %8 = scalar.constant 2 : i32
   %9 = index.cast %8 : i32 to index
-  %27 = index.constant 2 : offset
-  scf.for %index = [%5 to %6 step %27] {
-    %29 = index.cast %index : offset to i32
-    %30 = scalar.extui %29 : i32 to i64
-    %31 = scalar.constant 4 : i64
-    %32 = scalar.muli %30, %31 : i64
-    %33 = index.cast %values_byte_offset : offset to i64
-    %34 = scalar.addi %33, %32 : i64
-    %35 = scalar.assume %34 [range(%34, 0, 9223372036854775807)] : i64
-    %36 = index.cast %35 : i64 to offset
-    %37 = buffer.view %values[%36] : buffer -> view<1xi32>
-    %38 = view.load<root_in_bounds|type_disjoint> %37[0] : view<1xi32> -> i32
-    %39 = scalar.constant 0 : i32
-    %40 = scalar.cmpi slt, %38, %39 : i32
-    scf.if %40 {
-      %41 = scalar.constant 1 : i1
-      func.exit %41 : i1 {
-        func.return %29 : i32
+  %25 = index.constant 2 : offset
+  scf.for %index = [%5 to %6 step %25] {
+    %27 = index.cast %index : offset to i32
+    %28 = scalar.extui %27 : i32 to i64
+    %29 = index.cast %28 : i64 to index
+    %30 = index.constant 4 : index
+    %31 = index.mul %29, %30 : index
+    %32 = index.add %values_byte_offset, %31 : index
+    %33 = buffer.view %values[%32] : buffer -> view<1xi32>
+    %34 = view.load<root_in_bounds|type_disjoint> %33[0] : view<1xi32> -> i32
+    %35 = scalar.constant 0 : i32
+    %36 = scalar.cmpi slt, %34, %35 : i32
+    scf.if %36 {
+      %37 = scalar.constant 1 : i1
+      func.exit %37 : i1 {
+        func.return %27 : i32
       }
     }
-    %42 = index.constant 1 : offset
-    %index_1 = index.add %index, %42 : offset
-    %44 = index.cmp ult, %index_1, %6 : offset
-    scf.if %44 {
-      %45 = index.cast %index_1 : offset to i32
-      %46 = scalar.extui %45 : i32 to i64
-      %47 = scalar.constant 4 : i64
-      %48 = scalar.muli %46, %47 : i64
-      %49 = index.cast %values_byte_offset : offset to i64
-      %50 = scalar.addi %49, %48 : i64
-      %51 = scalar.assume %50 [range(%50, 0, 9223372036854775807)] : i64
-      %52 = index.cast %51 : i64 to offset
-      %53 = buffer.view %values[%52] : buffer -> view<1xi32>
-      %54 = view.load<root_in_bounds|type_disjoint> %53[0] : view<1xi32> -> i32
-      %55 = scalar.constant 0 : i32
-      %56 = scalar.cmpi slt, %54, %55 : i32
-      scf.if %56 {
-        %57 = scalar.constant 1 : i1
-        func.exit %57 : i1 {
-          func.return %45 : i32
+    %38 = index.constant 1 : offset
+    %index_1 = index.add %index, %38 : offset
+    %40 = index.cmp ult, %index_1, %6 : offset
+    scf.if %40 {
+      %41 = index.cast %index_1 : offset to i32
+      %42 = scalar.extui %41 : i32 to i64
+      %43 = index.cast %42 : i64 to index
+      %44 = index.constant 4 : index
+      %45 = index.mul %43, %44 : index
+      %46 = index.add %values_byte_offset, %45 : index
+      %47 = buffer.view %values[%46] : buffer -> view<1xi32>
+      %48 = view.load<root_in_bounds|type_disjoint> %47[0] : view<1xi32> -> i32
+      %49 = scalar.constant 0 : i32
+      %50 = scalar.cmpi slt, %48, %49 : i32
+      scf.if %50 {
+        %51 = scalar.constant 1 : i1
+        func.exit %51 : i1 {
+          func.return %41 : i32
         }
       }
     }
   }
-  %24 = scalar.constant 1 : i32
-  %25 = scalar.constant 0 : i32
-  %26 = scalar.subi %25, %24 : i32
-  func.return %26 : i32
+  %22 = scalar.constant 1 : i32
+  %23 = scalar.constant 0 : i32
+  %24 = scalar.subi %23, %22 : i32
+  func.return %24 : i32
 }
 
 // ====

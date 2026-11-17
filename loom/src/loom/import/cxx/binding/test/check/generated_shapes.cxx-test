@@ -104,54 +104,50 @@ LOOM_CHECK_SCENARIO(scheduled_sum_values) {
 }
 
 // ----
-func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: offset, %row: i32, %columns: i32, %factor: i32, %depth: i32) -> (i32) {
+func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: index, %row: i32, %columns: i32, %factor: i32, %depth: i32) -> (i32) {
   %total$7 = scalar.constant 0 : i32
-  %170 = index.constant 0 : offset
+  %166 = index.constant 0 : offset
   %10 = index.cast %columns : i32 to offset
   %11 = index.constant 1 : offset
   %12 = scalar.extui %depth : i32 to i64
   %13 = index.cast %12 : i64 to index
   %14 = scalar.extui %factor : i32 to i64
   %15 = index.cast %14 : i64 to index
-  %total$18 = scf.for %column = [%170 to %10 step %11](%total$17 = %total$7 : i32) -> (i32) pipeline(%13) unroll(%15) schedule(linear) {
+  %total$18 = scf.for %column = [%166 to %10 step %11](%total$17 = %total$7 : i32) -> (i32) pipeline(%13) unroll(%15) schedule(linear) {
     %19 = index.cast %column : offset to i32
     %20 = scalar.muli %row, %columns : i32
     %21 = scalar.addi %20, %19 : i32
     %22 = scalar.extui %21 : i32 to i64
-    %171 = scalar.constant 2 : i64
-    %172 = scalar.shli %22, %171 : i64
-    %25 = index.cast %input_byte_offset : offset to i64
-    %26 = scalar.addi %25, %172 : i64
-    %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
-    %28 = index.cast %27 : i64 to offset
-    %29 = buffer.view %input[%28] : buffer -> view<1xi32>
-    %30 = view.load<root_in_bounds|type_disjoint> %29[0] : view<1xi32> -> i32
-    %total$31 = scalar.addi %total$17, %30 : i32
-    scf.yield %total$31 : i32
+    %23 = index.cast %22 : i64 to index
+    %24 = index.constant 4 : index
+    %167 = index.madd %23, %24, %input_byte_offset : index
+    %27 = buffer.view %input[%167] : buffer -> view<1xi32>
+    %28 = view.load<root_in_bounds|type_disjoint> %27[0] : view<1xi32> -> i32
+    %total$29 = scalar.addi %total$17, %28 : i32
+    scf.yield %total$29 : i32
   }
   func.return %total$18 : i32
 }
 
 kernel.def @scheduled_sum_unroll_3_depth_2() {
-  %36 = index.constant 1 : index
-  %39 = index.constant 64 : index
-  kernel.launch.config workgroups(%36, %36, %36) workgroup_size(%39, %36, %36) : index
+  %34 = index.constant 1 : index
+  %37 = index.constant 64 : index
+  kernel.launch.config workgroups(%34, %34, %34) workgroup_size(%37, %34, %34) : index
 } launch(%input: buffer, %output: buffer, %rows: i32, %columns: i32) {
-  %input_byte_offset = index.constant 0 : offset
+  %input_byte_offset = index.constant 0 : index
   %workitem_id_x = kernel.workitem.id<x> : index
   %row = index.cast %workitem_id_x : index to i32
-  %46 = scalar.cmpi ult, %row, %rows : i32
-  scf.if %46 {
+  %44 = scalar.cmpi ult, %row, %rows : i32
+  scf.if %44 {
     %factor = scalar.constant 3 : i32
     %depth = scalar.constant 2 : i32
-    %58 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %depth) : (buffer, offset, i32, i32, i32, i32) -> (i32)
-    %59 = scalar.extui %row : i32 to i64
-    %176 = scalar.constant 2 : i64
-    %177 = scalar.shli %59, %176 : i64
-    %64 = scalar.assume %177 [range(%177, 0, 9223372036854775807)] : i64
-    %65 = index.cast %64 : i64 to offset
-    %66 = buffer.view %output[%65] : buffer -> view<1xi32>
-    view.store<root_in_bounds|type_disjoint> %58, %66[0] : i32, view<1xi32>
+    %56 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %depth) : (buffer, index, i32, i32, i32, i32) -> (i32)
+    %57 = scalar.extui %row : i32 to i64
+    %58 = index.cast %57 : i64 to index
+    %59 = index.constant 4 : index
+    %60 = index.mul %58, %59 : index
+    %62 = buffer.view %output[%60] : buffer -> view<1xi32>
+    view.store<root_in_bounds|type_disjoint> %56, %62[0] : i32, view<1xi32>
   }
   kernel.return
 }
@@ -162,8 +158,8 @@ check.scenario public @scheduled_sum_values {
     %input = check.generate.iota offset(-100) step(37) : tensor<[%configuration_input_count]xi32>
     %storage = check.generate.fill value(-123) : tensor<39xi32>
     %output = check.tensor.view %storage offset(64) : tensor<39xi32> -> tensor<7xi32>
-    %74 = check.literal value(7) : i32
-    check.compare<@scheduled_sum_unroll_3_depth_2, @scheduled_sum_oracle>(%input, %output, %74, %configuration_columns) : (tensor<[%configuration_input_count]xi32>, tensor<7xi32>, i32, i32) -> () {
+    %70 = check.literal value(7) : i32
+    check.compare<@scheduled_sum_unroll_3_depth_2, @scheduled_sum_oracle>(%input, %output, %70, %configuration_columns) : (tensor<[%configuration_input_count]xi32>, tensor<7xi32>, i32, i32) -> () {
       check.expect.bitwise actual(%input) expected(%input) : tensor<[%configuration_input_count]xi32>
       check.expect.bitwise actual(%storage) expected(%storage) : tensor<39xi32>
     }
@@ -171,101 +167,102 @@ check.scenario public @scheduled_sum_values {
   check.return
 }
 
-func.def @scheduled_sum_configuration(%trial: index) -> (%76: i32, index) where [range(%76, 0, 33)] {
-  %78 = index.cast %trial : index to i64
-  %trial_value = scalar.trunci %78 : i64 to i32
-  %80 = scalar.constant 0 : i32
-  %81 = scalar.cmpi eq, %trial_value, %80 : i32
-  %82, %83 = scf.if %81 -> (i32, index) {
-    %85 = scalar.constant 7 : i32
-    %86, %87 = func.call pure @make_configuration(%80, %85) : (i32, i32) -> (i32, index)
-    scf.yield %86, %87 : i32, index
+func.def @scheduled_sum_configuration(%trial: index) -> (%72: i32, index) where [range(%72, 0, 33)] {
+  %74 = index.cast %trial : index to i64
+  %trial_value = scalar.trunci %74 : i64 to i32
+  %76 = scalar.constant 0 : i32
+  %77 = scalar.cmpi eq, %trial_value, %76 : i32
+  %78, %79 = scf.if %77 -> (i32, index) {
+    %81 = scalar.constant 7 : i32
+    %82, %83 = func.call pure @make_configuration(%76, %81) : (i32, i32) -> (i32, index)
+    scf.yield %82, %83 : i32, index
   } else {
-    %178 = scalar.assume %trial_value [ne(%trial_value, 0)] : i32
-    %88 = scalar.constant 1 : i32
-    %89 = scalar.cmpi eq, %178, %88 : i32
-    %90, %91 = scf.if %89 -> (i32, index) {
-      %93 = scalar.constant 7 : i32
-      %94, %95 = func.call pure @make_configuration(%88, %93) : (i32, i32) -> (i32, index)
-      scf.yield %94, %95 : i32, index
+    %170 = scalar.assume %trial_value [ne(%trial_value, 0)] : i32
+    %84 = scalar.constant 1 : i32
+    %85 = scalar.cmpi eq, %170, %84 : i32
+    %86, %87 = scf.if %85 -> (i32, index) {
+      %89 = scalar.constant 7 : i32
+      %90, %91 = func.call pure @make_configuration(%84, %89) : (i32, i32) -> (i32, index)
+      scf.yield %90, %91 : i32, index
     } else {
-      %179 = scalar.assume %178 [ne(%178, 1)] : i32
-      %96 = scalar.constant 2 : i32
-      %97 = scalar.cmpi eq, %179, %96 : i32
-      %98, %99 = scf.if %97 -> (i32, index) {
-        %101 = scalar.constant 14 : i32
-        %102, %103 = func.call pure @make_configuration(%96, %101) : (i32, i32) -> (i32, index)
-        scf.yield %102, %103 : i32, index
+      %171 = scalar.assume %170 [ne(%170, 1)] : i32
+      %92 = scalar.constant 2 : i32
+      %93 = scalar.cmpi eq, %171, %92 : i32
+      %94, %95 = scf.if %93 -> (i32, index) {
+        %97 = scalar.constant 14 : i32
+        %98, %99 = func.call pure @make_configuration(%92, %97) : (i32, i32) -> (i32, index)
+        scf.yield %98, %99 : i32, index
       } else {
-        %180 = scalar.assume %179 [ne(%179, 2)] : i32
-        %104 = scalar.constant 3 : i32
-        %105 = scalar.cmpi eq, %180, %104 : i32
-        %106, %107 = scf.if %105 -> (i32, index) {
-          %108 = scalar.constant 5 : i32
-          %109 = scalar.constant 35 : i32
-          %110, %111 = func.call pure @make_configuration(%108, %109) : (i32, i32) -> (i32, index)
-          scf.yield %110, %111 : i32, index
+        %172 = scalar.assume %171 [ne(%171, 2)] : i32
+        %100 = scalar.constant 3 : i32
+        %101 = scalar.cmpi eq, %172, %100 : i32
+        %102, %103 = scf.if %101 -> (i32, index) {
+          %104 = scalar.constant 5 : i32
+          %105 = scalar.constant 35 : i32
+          %106, %107 = func.call pure @make_configuration(%104, %105) : (i32, i32) -> (i32, index)
+          scf.yield %106, %107 : i32, index
         } else {
-          %181 = scalar.assume %180 [ne(%180, 3)] : i32
-          %112 = scalar.constant 4 : i32
-          %113 = scalar.cmpi eq, %181, %112 : i32
-          %114, %115 = scf.if %113 -> (i32, index) {
-            %116 = scalar.constant 17 : i32
-            %117 = scalar.constant 119 : i32
+          %173 = scalar.assume %172 [ne(%172, 3)] : i32
+          %108 = scalar.constant 4 : i32
+          %109 = scalar.cmpi eq, %173, %108 : i32
+          %110, %111 = scf.if %109 -> (i32, index) {
+            %112 = scalar.constant 17 : i32
+            %113 = scalar.constant 119 : i32
+            %114, %115 = func.call pure @make_configuration(%112, %113) : (i32, i32) -> (i32, index)
+            scf.yield %114, %115 : i32, index
+          } else {
+            %116 = scalar.constant 33 : i32
+            %117 = scalar.constant 231 : i32
             %118, %119 = func.call pure @make_configuration(%116, %117) : (i32, i32) -> (i32, index)
             scf.yield %118, %119 : i32, index
-          } else {
-            %120 = scalar.constant 33 : i32
-            %121 = scalar.constant 231 : i32
-            %122, %123 = func.call pure @make_configuration(%120, %121) : (i32, i32) -> (i32, index)
-            scf.yield %122, %123 : i32, index
           }
-          scf.yield %114, %115 : i32, index
+          scf.yield %110, %111 : i32, index
         }
-        scf.yield %106, %107 : i32, index
+        scf.yield %102, %103 : i32, index
       }
-      scf.yield %98, %99 : i32, index
+      scf.yield %94, %95 : i32, index
     }
-    scf.yield %90, %91 : i32, index
+    scf.yield %86, %87 : i32, index
   }
-  func.return %82, %83 : i32, index
+  func.return %78, %79 : i32, index
 }
 
-func.def @scheduled_sum_oracle(%input: buffer, %output: buffer, %rows$126: i32, %columns$127: i32) {
-  %rows$185 = scalar.constant 7 : i32
-  %columns$129 = scalar.assume %columns$127 [range(%columns$127, 0, 33)] : i32
-  %input_count = scalar.muli %rows$185, %columns$129 : i32
-  %131 = scalar.extui %input_count : i32 to i64
-  %input_extent$132 = index.cast %131 : i64 to index
-  %134 = index.constant 0 : offset
-  %output_values = buffer.view %output[%134] : buffer -> view<7xi32>
-  %183 = index.constant 7 : offset
-  %139 = index.constant 1 : offset
-  scf.for %row = [%134 to %183 step %139] {
-    %141 = index.cast %row : offset to i32
-    %total$142 = scalar.constant 0 : i32
-    %145 = index.cast %columns$129 : i32 to offset
-    %total$149 = scf.for %column = [%134 to %145 step %139](%total$148 = %total$142 : i32) -> (i32) {
-      %150 = index.cast %column : offset to i32
-      %151 = scalar.muli %141, %columns$129 : i32
-      %position = scalar.addi %151, %150 : i32
-      %153 = scalar.extui %position : i32 to i64
-      %input_position$154 = index.cast %153 : i64 to index
-      %input_position$155, %input_extent = index.assume %input_position$154, %input_extent$132 [lt(%input_position$154, %input_extent$132)] : index, index
-      %input_values = buffer.view %input[%134] : buffer -> view<[%input_extent]xi32>
-      %160 = view.load<type_disjoint> %input_values[%input_position$155] : view<[%input_extent]xi32> -> i32
-      %total$161 = scalar.addi %total$148, %160 : i32
-      scf.yield %total$161 : i32
+func.def @scheduled_sum_oracle(%input: buffer, %output: buffer, %rows$122: i32, %columns$123: i32) {
+  %rows$177 = scalar.constant 7 : i32
+  %columns$125 = scalar.assume %columns$123 [range(%columns$123, 0, 33)] : i32
+  %input_count = scalar.muli %rows$177, %columns$125 : i32
+  %127 = scalar.extui %input_count : i32 to i64
+  %input_extent$128 = index.cast %127 : i64 to index
+  %130 = index.constant 0 : index
+  %output_values = buffer.view %output[%130] : buffer -> view<7xi32>
+  %176 = index.constant 0 : offset
+  %175 = index.constant 7 : offset
+  %135 = index.constant 1 : offset
+  scf.for %row = [%176 to %175 step %135] {
+    %137 = index.cast %row : offset to i32
+    %total$138 = scalar.constant 0 : i32
+    %141 = index.cast %columns$125 : i32 to offset
+    %total$145 = scf.for %column = [%176 to %141 step %135](%total$144 = %total$138 : i32) -> (i32) {
+      %146 = index.cast %column : offset to i32
+      %147 = scalar.muli %137, %columns$125 : i32
+      %position = scalar.addi %147, %146 : i32
+      %149 = scalar.extui %position : i32 to i64
+      %input_position$150 = index.cast %149 : i64 to index
+      %input_position$151, %input_extent = index.assume %input_position$150, %input_extent$128 [lt(%input_position$150, %input_extent$128)] : index, index
+      %input_values = buffer.view %input[%130] : buffer -> view<[%input_extent]xi32>
+      %156 = view.load<type_disjoint> %input_values[%input_position$151] : view<[%input_extent]xi32> -> i32
+      %total$157 = scalar.addi %total$144, %156 : i32
+      scf.yield %total$157 : i32
     }
-    %162 = scalar.extui %141 : i32 to i64
-    %163 = index.cast %162 : i64 to index
-    view.store<type_disjoint> %total$149, %output_values[%163] : i32, view<7xi32>
+    %158 = scalar.extui %137 : i32 to i64
+    %159 = index.cast %158 : i64 to index
+    view.store<type_disjoint> %total$145, %output_values[%159] : i32, view<7xi32>
   }
   func.return
 }
 
 func.def inline @make_configuration(%columns: i32, %input_count: i32) -> (i32, index) {
-  %168 = scalar.extui %input_count : i32 to i64
-  %169 = index.cast %168 : i64 to index
-  func.return %columns, %169 : i32, index
+  %164 = scalar.extui %input_count : i32 to i64
+  %165 = index.cast %164 : i64 to index
+  func.return %columns, %165 : i32, index
 }

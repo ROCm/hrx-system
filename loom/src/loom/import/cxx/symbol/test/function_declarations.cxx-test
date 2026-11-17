@@ -110,16 +110,16 @@ func.def public @root(%value: f64) -> (f64) {
   func.return %2 : f64
 }
 
-func.def public @copy(%destination: buffer, %destination_byte_offset: offset, %source: buffer, %source_byte_offset: offset) {
+func.def public @copy(%destination: buffer, %destination_byte_offset: index, %source: buffer, %source_byte_offset: index) {
   %7 = scalar.constant 8 : i32
   %8 = scalar.extsi %7 : i32 to i64
-  %9, %10 = func.call @memcpy(%destination, %destination_byte_offset, %source, %source_byte_offset, %8) : (buffer, offset, buffer, offset, i64) -> (buffer, offset)
+  %9, %10 = func.call @memcpy(%destination, %destination_byte_offset, %source, %source_byte_offset, %8) : (buffer, index, buffer, index, i64) -> (buffer, index)
   func.return
 }
 
 func.decl import("math") source_signature(#func.abi.c.signature<arguments = [0], results = [0], types = [#func.abi.c.type<floating, byte_length = 8, byte_alignment = 8, component_count = 1, format = f64>]>) @sqrt(%11: f64) -> (f64)
 
-func.decl import("memory") source_signature(#func.abi.c.signature<arguments = [0, 1, 2], results = [0], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 8, byte_alignment = 8, component_count = 1, bitwidth = 64>]>) @memcpy(%13: buffer, %14: offset, %15: buffer, %16: offset, %17: i64) -> (buffer, offset)
+func.decl import("memory") source_signature(#func.abi.c.signature<arguments = [0, 1, 2], results = [0], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 8, byte_alignment = 8, component_count = 1, bitwidth = 64>]>) @memcpy(%13: buffer, %14: index, %15: buffer, %16: index, %17: i64) -> (buffer, index)
 
 // ====
 // Calling an explicitly specialized member uses its retained definition.

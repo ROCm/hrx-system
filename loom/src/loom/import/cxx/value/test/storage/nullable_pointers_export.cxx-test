@@ -17,9 +17,13 @@ auto distance(const int* first, const int* last) { return last - first; }
 short byte_distance(Buffer source, loom::type::offset left, loom::type::offset right) {
   return loom::buffer::distance<short>(source, left, source, right);
 }
+bool signed_position(Buffer first, loom::type::index left, Buffer second, loom::type::offset right) {
+  return loom::buffer::compare::address<loom::buffer::compare::predicate::eq>(first, left, second, right);
+}
+int signed_distance(Buffer source, loom::type::index left, loom::type::index right) {
+  return loom::buffer::distance<int>(source, left, source, right);
+}
 // ----
-#include <loomcxx/numeric.h>
-#include <loomcxx/predicate.h>
 #include <loomcxx/view.h>
 
 [[loom::symbol("optional")]]
@@ -29,19 +33,25 @@ loom::type::buffer<unsigned char> optional(loom::type::buffer<unsigned char> inp
 bool missing(loom::type::buffer<unsigned char> input);
 
 [[loom::symbol("same")]]
-bool same(loom::type::buffer<unsigned char> first, loom::type::offset first_byte_offset, loom::type::buffer<unsigned char> second, loom::type::offset second_byte_offset);
+bool same(loom::type::buffer<unsigned char> first, loom::type::index first_byte_offset, loom::type::buffer<unsigned char> second, loom::type::index second_byte_offset);
 
 [[loom::symbol("different")]]
 bool different(loom::type::buffer<unsigned char> first, loom::type::offset first_offset, loom::type::buffer<unsigned char> second, loom::type::offset second_offset);
 
 [[loom::symbol("guarded")]]
-unsigned guarded(loom::type::buffer<unsigned> input, loom::type::offset input_byte_offset);
+unsigned guarded(loom::type::buffer<unsigned> input, loom::type::index input_byte_offset);
 
 [[loom::symbol("distance")]]
-unsigned long long distance(loom::type::buffer<unsigned char> first, loom::type::offset first_byte_offset, loom::type::buffer<unsigned char> last, loom::type::offset last_byte_offset);
+unsigned long long distance(loom::type::buffer<unsigned char> first, loom::type::index first_byte_offset, loom::type::buffer<unsigned char> last, loom::type::index last_byte_offset);
 
 [[loom::symbol("byte_distance")]]
 unsigned short byte_distance(loom::type::buffer<unsigned char> source, loom::type::offset left, loom::type::offset right);
+
+[[loom::symbol("signed_position")]]
+bool signed_position(loom::type::buffer<unsigned char> first, loom::type::index left, loom::type::buffer<unsigned char> second, loom::type::offset right);
+
+[[loom::symbol("signed_distance")]]
+unsigned signed_distance(loom::type::buffer<unsigned char> source, loom::type::index left, loom::type::index right);
 
 [[loom::symbol("optional")]]
 loom::type::buffer<unsigned char> optional(loom::type::buffer<unsigned char> input, bool use) {
@@ -62,7 +72,7 @@ bool missing(loom::type::buffer<unsigned char> input) {
 }
 
 [[loom::symbol("same")]]
-bool same(loom::type::buffer<unsigned char> first, loom::type::offset first_byte_offset, loom::type::buffer<unsigned char> second, loom::type::offset second_byte_offset) {
+bool same(loom::type::buffer<unsigned char> first, loom::type::index first_byte_offset, loom::type::buffer<unsigned char> second, loom::type::index second_byte_offset) {
   bool v13 = loom::buffer::compare::address<loom::buffer::compare::predicate::eq>(first, first_byte_offset, second, second_byte_offset);
   return v13;
 }
@@ -74,14 +84,12 @@ bool different(loom::type::buffer<unsigned char> first, loom::type::offset first
 }
 
 [[loom::symbol("guarded")]]
-unsigned guarded(loom::type::buffer<unsigned> input, loom::type::offset input_byte_offset) {
+unsigned guarded(loom::type::buffer<unsigned> input, loom::type::index input_byte_offset) {
   bool v23 = loom::buffer::compare::null(loom::buffer::cast<unsigned char>(input));
   unsigned v26{};
   if (v23 ^ 1) {
-    unsigned long long v32 = loom::offset::cast<unsigned long long>(input_byte_offset) + (loom::convert<long long>(0) * 4ull);
-    loom::assume(v32 <= 9223372036854775807ull);
-    auto v35 = loom::buffer::view<1>(loom::buffer::cast<const unsigned>(input), loom::offset::cast(v32), {});
-    v26 = loom::view::load<loom::memory_access::root_in_bounds>(v35, 0);
+    auto v32 = loom::buffer::view<1>(loom::buffer::cast<const unsigned>(input), (input_byte_offset + (loom::type::index{0} * loom::type::index{4})), {});
+    v26 = loom::view::load<loom::memory_access::root_in_bounds>(v32, 0);
   } else {
     v26 = 7u;
   }
@@ -89,13 +97,25 @@ unsigned guarded(loom::type::buffer<unsigned> input, loom::type::offset input_by
 }
 
 [[loom::symbol("distance")]]
-unsigned long long distance(loom::type::buffer<unsigned char> first, loom::type::offset first_byte_offset, loom::type::buffer<unsigned char> last, loom::type::offset last_byte_offset) {
-  long long v43 = loom::buffer::distance<long long>(last, last_byte_offset, first, first_byte_offset);
-  return static_cast<unsigned long long>((v43 / 4ll));
+unsigned long long distance(loom::type::buffer<unsigned char> first, loom::type::index first_byte_offset, loom::type::buffer<unsigned char> last, loom::type::index last_byte_offset) {
+  long long v40 = loom::buffer::distance<long long>(last, last_byte_offset, first, first_byte_offset);
+  return static_cast<unsigned long long>((v40 / 4ll));
 }
 
 [[loom::symbol("byte_distance")]]
 unsigned short byte_distance(loom::type::buffer<unsigned char> source, loom::type::offset left, loom::type::offset right) {
-  short v50 = loom::buffer::distance<short>(source, left, source, right);
-  return static_cast<unsigned short>(v50);
+  short v47 = loom::buffer::distance<short>(source, left, source, right);
+  return static_cast<unsigned short>(v47);
+}
+
+[[loom::symbol("signed_position")]]
+bool signed_position(loom::type::buffer<unsigned char> first, loom::type::index left, loom::type::buffer<unsigned char> second, loom::type::offset right) {
+  bool v53 = loom::buffer::compare::address<loom::buffer::compare::predicate::eq>(first, left, second, right);
+  return v53;
+}
+
+[[loom::symbol("signed_distance")]]
+unsigned signed_distance(loom::type::buffer<unsigned char> source, loom::type::index left, loom::type::index right) {
+  int v58 = loom::buffer::distance<int>(source, left, source, right);
+  return static_cast<unsigned>(v58);
 }

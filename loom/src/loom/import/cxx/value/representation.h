@@ -15,12 +15,12 @@
 
 namespace loom::cxx_import {
 
-// An interior source pointer retains its allocation identity separately from
-// its nonnegative object-relative byte origin. Neither component is an address.
+// A source pointer retains an opaque supplied origin separately from its
+// signed byte displacement. Neither component exposes a native address.
 struct Pointer {
-  // Native buffer identifying the original storage allocation.
+  // Opaque buffer origin, which may itself denote an interior native pointer.
   loom_value_id_t root;
-  // Native offset from that root, including a possible one-past origin.
+  // Signed index displacement from that origin, including one-past positions.
   loom_value_id_t byte_offset;
 };
 

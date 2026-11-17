@@ -2,28 +2,6 @@
 
 wasm.target<simd128> @target
 
-func.def target(@target) @view_origin_exceeds_wasm32(%input: buffer, %origin_input: offset) -> (view<1xi32>) {
-  %origin = index.assume %origin_input [range(%origin_input, 4294967296, 8589934591)] : offset
-  // ERROR@+1: WASM/006 {op_name="buffer.view", bit_count="32"}
-  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
-  func.return %view : view<1xi32>
-}
-
-// ====
-
-wasm.target<simd128> @target
-
-func.def target(@target) @view_origin_may_overflow_wasm32(%input: buffer, %origin_input: offset) -> (view<1xi32>) {
-  %origin = index.assume %origin_input [range(%origin_input, 0, 4294967296)] : offset
-  // ERROR@+1: WASM/006 {op_name="buffer.view", bit_count="32"}
-  %view = buffer.view %input[%origin] : buffer -> view<1xi32>
-  func.return %view : view<1xi32>
-}
-
-// ====
-
-wasm.target<simd128> @target
-
 func.def target(@target) @scalar_powf_rejected_by_math_policy(%base: f32, %exponent: f32) -> (f32) {
   // ERROR@+1: LOWERING/036 {op_name="scalar.powf", phase_name="legalize-math", policy_name="wasm-math", math_op="powf", lane_domain="scalar", element_type="f32", constraint_key="math.op.supported"}
   %result = scalar.powf<afn> %base, %exponent : f32
@@ -62,127 +40,11 @@ CHECK-NOT: COMPILE-REPORT: target_legalization*
 
 wasm.target<simd128> @target
 
-func.def target(@target) @rejects_wasm32_address_overflow(%input: buffer, %i: index) -> (vector<4xi32>) {
-  %bounded_i = index.assume %i [range(%i, 0, 1073741824)] : index
-  %input_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%input_base] : buffer -> view<1073741828xi32>
-  // ERROR@+1: WASM/006 {bit_count="32"}
-  %loaded = vector.load %input_view[%bounded_i] : view<1073741828xi32> -> vector<4xi32>
-  func.return %loaded : vector<4xi32>
-}
-
-// ====
-
-wasm.target<simd128> @target
-
 func.def target(@target) @negative_index_offset(%input: index) -> (offset) {
   %negative = index.assume %input [range(%input, -7, -1)] : index
   // ERROR@+1: TARGET/005 {op_name="index.cast", subject_role="operand", subject_name="input", constraint_key="index_cast.offset_non_negative", minimum="0", maximum="9223372036854775807"}
   %result = index.cast %negative : index to offset
   func.return %result : offset
-}
-
-// ====
-
-wasm.target<simd128> @target
-
-func.def target(@target) @index_division_unproven_dividend(%value: index) -> (index) {
-  %divisor = index.constant 3 : index
-  // ERROR@+1: TARGET/005 {op_name="index.div", subject_name="lhs", minimum="0", maximum="4294967295"}
-  %quotient = index.div %value, %divisor : index
-  func.return %quotient : index
-}
-
-// ====
-
-wasm.target<simd128> @target
-
-func.def target(@target) @index_remainder_unproven_divisor(%value: index, %divisor: index) -> (index) {
-  %bounded_value = index.assume %value [range(%value, 0, 4294967295)] : index
-  // ERROR@+1: TARGET/005 {op_name="index.rem", subject_name="rhs", minimum="0", maximum="4294967295"}
-  %remainder = index.rem %bounded_value, %divisor : index
-  func.return %remainder : index
-}
-
-// ====
-
-wasm.target<simd128> @target
-
-func.def target(@target) @index_multiply_wide_result(%lhs: index, %rhs: index) -> (index) where [range(%lhs, 65536, 65537), range(%rhs, 65536, 65537)] {
-  // ERROR@+1: TARGET/005 {op_name="index.mul", subject_role="result", subject_name="product", constraint_key="index.maximum_carrier", minimum="-2147483648", maximum="4294967295"}
-  %product = index.mul %lhs, %rhs : index
-  func.return %product : index
-}
-
-// ====
-
-wasm.target<simd128> @target
-
-func.def target(@target) @index_shift_wide_result(%value: index, %amount: index) -> (index) where [range(%value, 0, 65535), range(%amount, 0, 31)] {
-  // ERROR@+1: TARGET/005 {op_name="index.shli", subject_role="result", subject_name="shifted", constraint_key="index.maximum_carrier", minimum="-2147483648", maximum="4294967295"}
-  %shifted = index.shli %value, %amount : index
-  func.return %shifted : index
-}
-
-// ====
-
-wasm.target<simd128> @target
-
-func.def target(@target) @offset_outside_signed_index(%input: offset) -> (index) {
-  %wide = index.assume %input [range(%input, 2147483648, 4294967295)] : offset
-  // ERROR@+1: TARGET/005 {op_name="index.cast", subject_name="input", minimum="0", maximum="2147483647"}
-  %position = index.cast %wide : offset to index
-  func.return %position : index
-}
-
-// ====
-
-wasm.target<simd128> @target
-
-func.def target(@target) @offset_cast_result_cannot_prove_input(%input: offset) -> (index) {
-  // ERROR@+1: TARGET/005 {op_name="index.cast", subject_name="input", minimum="0", maximum="2147483647"}
-  %position = index.cast %input : offset to index
-  %assumed = index.assume %position [range(%position, 0, 7)] : index
-  func.return %assumed : index
-}
-
-// ====
-
-wasm.target<simd128> @target
-
-func.def target(@target) @static_base_plus_index_overflows_wasm32(%input: buffer, %position_input: index) -> (i32) {
-  %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
-  %position = index.assume %position_input [range(%position_input, 0, 7)] : index
-  %base = index.constant 4294967268 : offset
-  %view = buffer.view %aligned[%base] : buffer -> view<8xi32>
-  // ERROR@+1: WASM/006 {bit_count="32"}
-  %value = view.load %view[%position] : view<8xi32> -> i32
-  func.return %value : i32
-}
-
-// ====
-
-wasm.target<simd128> @target
-
-func.def target(@target) @dynamic_base_plus_index_overflows_wasm32(%input: buffer, %base_input: offset, %position_input: index) -> (i32) {
-  %aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
-  %base = index.assume %base_input [range(%base_input, 4294967264, 4294967268), multiple_of(%base_input, 4)] : offset
-  %position = index.assume %position_input [range(%position_input, 0, 7)] : index
-  %view = buffer.view %aligned[%base] : buffer -> view<8xi32>
-  // ERROR@+1: WASM/006 {bit_count="32"}
-  %value = view.load %view[%position] : view<8xi32> -> i32
-  func.return %value : i32
-}
-
-// ====
-
-wasm.target<simd128> @target
-
-func.def target(@target) @wide_index_cast_result_cannot_prove_input(%input: i64) -> (index) {
-  // ERROR@+1: TARGET/005 {op_name="index.cast", subject_name="input", minimum="-2147483648", maximum="2147483647"}
-  %position = index.cast %input : i64 to index
-  %assumed = index.assume %position [range(%position, 0, 7)] : index
-  func.return %assumed : index
 }
 
 // ====
@@ -233,7 +95,6 @@ wasm.target<simd128> @target
 func.def target(@target) @view_origin_below_wasm32(%input: buffer) -> (view<1xi32>) {
   // ERROR@+1: WASM/003 {op_name="index.constant"}
   %origin = index.constant -2147483649 : index
-  // ERROR@+1: WASM/006 {op_name="buffer.view", bit_count="32"}
   %view = buffer.view %input[%origin] : buffer -> view<1xi32>
   func.return %view : view<1xi32>
 }

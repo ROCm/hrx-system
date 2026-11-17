@@ -2,12 +2,12 @@
 // independent byte observations detect both overrun and wrong tail handling.
 // Copying disjoint ranges of one root is legal; overlapping ranges are not.
 func.def @partial_pattern_copy(%pattern: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32) {
-  %c0 = index.constant 0 : offset
+  %c0 = index.constant 0 : index
   %c1 = index.constant 1 : offset
   %c2 = index.constant 2 : offset
   %c3 = index.constant 3 : offset
   %c5 = index.constant 5 : offset
-  %c6 = index.constant 6 : offset
+  %c6 = index.constant 6 : index
   %c10 = index.constant 10 : offset
   %c11 = index.constant 11 : offset
   %length = index.constant 12 : offset

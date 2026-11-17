@@ -29,10 +29,10 @@ kernel.def @buffers() {
 } launch(%input: buffer, %output: buffer) {
   %retained = func.call pure @forward(%input) : (buffer) -> (buffer)
   %source_layout = encoding.layout.dense : encoding<layout>
-  %10 = index.constant 0 : offset
+  %10 = index.constant 0 : index
   %source = buffer.view %retained[%10] : buffer -> view<4xi32, %source_layout>
   %target_layout = encoding.layout.dense : encoding<layout>
-  %13 = index.constant 0 : offset
+  %13 = index.constant 0 : index
   %target = buffer.view %output[%13] : buffer -> view<4xi32, %target_layout>
   %15 = scalar.constant 2 : i32
   %16 = index.cast %15 : i32 to index
@@ -71,7 +71,7 @@ kernel.def @addresses() {
   %8 = index.constant 1 : index
   kernel.launch.config workgroups(%3, %4, %5) workgroup_size(%6, %7, %8) : index
 } launch(%position: index, %displacement: offset, %output: buffer) {
-  %output_byte_offset = index.constant 0 : offset
+  %output_byte_offset = index.constant 0 : index
   %10 = scalar.constant 1 : i32
   %11 = scalar.extsi %10 : i32 to i64
   %12 = index.cast %11 : i64 to index
@@ -82,26 +82,20 @@ kernel.def @addresses() {
   %bytes = index.add %displacement, %16 : offset
   %18 = index.cast %next : index to i64
   %19 = scalar.constant 0 : i32
-  %20 = scalar.extsi %19 : i32 to i64
-  %21 = scalar.constant 8 : i64
-  %22 = scalar.muli %20, %21 : i64
-  %23 = index.cast %output_byte_offset : offset to i64
-  %24 = scalar.addi %23, %22 : i64
-  %25 = scalar.assume %24 [range(%24, 0, 9223372036854775807)] : i64
-  %26 = index.cast %25 : i64 to offset
-  %27 = buffer.view %output[%26] : buffer -> view<1xi64>
-  view.store<root_in_bounds|type_disjoint> %18, %27[0] : i64, view<1xi64>
-  %28 = index.cast %bytes : offset to i64
-  %29 = scalar.constant 1 : i32
-  %30 = scalar.extsi %29 : i32 to i64
-  %31 = scalar.constant 8 : i64
-  %32 = scalar.muli %30, %31 : i64
-  %33 = index.cast %output_byte_offset : offset to i64
-  %34 = scalar.addi %33, %32 : i64
-  %35 = scalar.assume %34 [range(%34, 0, 9223372036854775807)] : i64
-  %36 = index.cast %35 : i64 to offset
-  %37 = buffer.view %output[%36] : buffer -> view<1xi64>
-  view.store<root_in_bounds|type_disjoint> %28, %37[0] : i64, view<1xi64>
+  %20 = index.cast %19 : i32 to index
+  %21 = index.constant 8 : index
+  %22 = index.mul %20, %21 : index
+  %23 = index.add %output_byte_offset, %22 : index
+  %24 = buffer.view %output[%23] : buffer -> view<1xi64>
+  view.store<root_in_bounds|type_disjoint> %18, %24[0] : i64, view<1xi64>
+  %25 = index.cast %bytes : offset to i64
+  %26 = scalar.constant 1 : i32
+  %27 = index.cast %26 : i32 to index
+  %28 = index.constant 8 : index
+  %29 = index.mul %27, %28 : index
+  %30 = index.add %output_byte_offset, %29 : index
+  %31 = buffer.view %output[%30] : buffer -> view<1xi64>
+  view.store<root_in_bounds|type_disjoint> %25, %31[0] : i64, view<1xi64>
   kernel.return
 }
 
@@ -132,30 +126,24 @@ kernel.def @vectors() {
   %9 = index.constant 1 : index
   kernel.launch.config workgroups(%4, %5, %6) workgroup_size(%7, %8, %9) : index
 } launch(%semantic: vector<4xi32>, %native: vector<4xi32>, %seed: i32, %output: buffer) {
-  %output_byte_offset = index.constant 0 : offset
+  %output_byte_offset = index.constant 0 : index
   %11 = func.call pure @forward(%semantic) : (vector<4xi32>) -> (vector<4xi32>)
   %12 = vector.reduce<addi> %11, %seed : vector<4xi32>, i32
   %13 = scalar.constant 0 : i32
-  %14 = scalar.extsi %13 : i32 to i64
-  %15 = scalar.constant 4 : i64
-  %16 = scalar.muli %14, %15 : i64
-  %17 = index.cast %output_byte_offset : offset to i64
-  %18 = scalar.addi %17, %16 : i64
-  %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
-  %20 = index.cast %19 : i64 to offset
-  %21 = buffer.view %output[%20] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %12, %21[0] : i32, view<1xi32>
-  %22 = vector.reduce<addi> %native, %seed : vector<4xi32>, i32
-  %23 = scalar.constant 1 : i32
-  %24 = scalar.extsi %23 : i32 to i64
-  %25 = scalar.constant 4 : i64
-  %26 = scalar.muli %24, %25 : i64
-  %27 = index.cast %output_byte_offset : offset to i64
-  %28 = scalar.addi %27, %26 : i64
-  %29 = scalar.assume %28 [range(%28, 0, 9223372036854775807)] : i64
-  %30 = index.cast %29 : i64 to offset
-  %31 = buffer.view %output[%30] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %22, %31[0] : i32, view<1xi32>
+  %14 = index.cast %13 : i32 to index
+  %15 = index.constant 4 : index
+  %16 = index.mul %14, %15 : index
+  %17 = index.add %output_byte_offset, %16 : index
+  %18 = buffer.view %output[%17] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %12, %18[0] : i32, view<1xi32>
+  %19 = vector.reduce<addi> %native, %seed : vector<4xi32>, i32
+  %20 = scalar.constant 1 : i32
+  %21 = index.cast %20 : i32 to index
+  %22 = index.constant 4 : index
+  %23 = index.mul %21, %22 : index
+  %24 = index.add %output_byte_offset, %23 : index
+  %25 = buffer.view %output[%24] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %19, %25[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -223,41 +211,32 @@ kernel.def @pointers() {
   %8 = index.constant 1 : index
   kernel.launch.config workgroups(%3, %4, %5) workgroup_size(%6, %7, %8) : index
 } launch(%input: buffer, %output: buffer, %increment: i32) {
-  %input_byte_offset = index.constant 0 : offset
-  %output_byte_offset = index.constant 0 : offset
+  %input_byte_offset = index.constant 0 : index
+  %output_byte_offset = index.constant 0 : index
   %11 = scalar.constant 1 : i32
-  %12 = scalar.extsi %11 : i32 to i64
-  %13 = scalar.constant 4 : i64
-  %14 = scalar.muli %12, %13 : i64
-  %15 = index.cast %input_byte_offset : offset to i64
-  %16 = scalar.addi %15, %14 : i64
-  %17 = scalar.assume %16 [range(%16, 0, 9223372036854775807)] : i64
-  %18 = index.cast %17 : i64 to offset
-  %19 = func.call readonly @read(%input, %18) : (buffer, offset) -> (i32)
-  %20 = scalar.addi %19, %increment : i32
-  %21 = scalar.constant 0 : i32
-  %22 = scalar.extsi %21 : i32 to i64
-  %23 = scalar.constant 4 : i64
-  %24 = scalar.muli %22, %23 : i64
-  %25 = index.cast %output_byte_offset : offset to i64
-  %26 = scalar.addi %25, %24 : i64
-  %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
-  %28 = index.cast %27 : i64 to offset
-  %29 = buffer.view %output[%28] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %20, %29[0] : i32, view<1xi32>
+  %12 = index.cast %11 : i32 to index
+  %13 = index.constant 4 : index
+  %14 = index.mul %12, %13 : index
+  %15 = index.add %input_byte_offset, %14 : index
+  %16 = func.call readonly @read(%input, %15) : (buffer, index) -> (i32)
+  %17 = scalar.addi %16, %increment : i32
+  %18 = scalar.constant 0 : i32
+  %19 = index.cast %18 : i32 to index
+  %20 = index.constant 4 : index
+  %21 = index.mul %19, %20 : index
+  %22 = index.add %output_byte_offset, %21 : index
+  %23 = buffer.view %output[%22] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %17, %23[0] : i32, view<1xi32>
   kernel.return
 }
 
-func.def @read(%pointer: buffer, %pointer_byte_offset: offset) -> (i32) {
-  %33 = scalar.constant 1 : i32
-  %34 = scalar.extsi %33 : i32 to i64
-  %35 = scalar.constant 4 : i64
-  %36 = scalar.muli %34, %35 : i64
-  %37 = index.cast %pointer_byte_offset : offset to i64
-  %38 = scalar.addi %37, %36 : i64
-  %39 = scalar.assume %38 [range(%38, 0, 9223372036854775807)] : i64
-  %40 = index.cast %39 : i64 to offset
-  %41 = buffer.view %pointer[%40] : buffer -> view<1xi32>
-  %42 = view.load<root_in_bounds|type_disjoint> %41[0] : view<1xi32> -> i32
-  func.return %42 : i32
+func.def @read(%pointer: buffer, %pointer_byte_offset: index) -> (i32) {
+  %27 = scalar.constant 1 : i32
+  %28 = index.cast %27 : i32 to index
+  %29 = index.constant 4 : index
+  %30 = index.mul %28, %29 : index
+  %31 = index.add %pointer_byte_offset, %30 : index
+  %32 = buffer.view %pointer[%31] : buffer -> view<1xi32>
+  %33 = view.load<root_in_bounds|type_disjoint> %32[0] : view<1xi32> -> i32
+  func.return %33 : i32
 }

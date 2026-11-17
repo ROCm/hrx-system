@@ -118,20 +118,26 @@ template <class T>
 [[loom::op("buffer.compare.null")]] bool null(loom::type::buffer<T> source);
 
 // Compares live byte positions, including one-past endpoints. Null permits
-// only offset zero; native addresses are never exposed to the source program.
-template <predicate Predicate, class Left, class Right>
+// only position zero. Positions may be signed indices or nonnegative offsets;
+// native addresses are never exposed to the source program.
+template <predicate Predicate, class Left, class Right,
+          class LeftPosition = loom::type::offset,
+          class RightPosition = loom::type::offset>
 [[loom::op("buffer.compare.address")]] bool address(
-    loom::type::buffer<Left> left, loom::type::offset left_offset,
-    loom::type::buffer<Right> right, loom::type::offset right_offset);
+    loom::type::buffer<Left> left, LeftPosition left_offset,
+    loom::type::buffer<Right> right, RightPosition right_offset);
 
 }  // namespace compare
 
 // Returns left_offset - right_offset in bytes. Compilation must prove both
 // positions share a byte origin; the signed distance must fit Result.
-template <class Result = long long, class Left, class Right>
-[[loom::op("buffer.distance")]] Result distance(
-    loom::type::buffer<Left> left, loom::type::offset left_offset,
-    loom::type::buffer<Right> right, loom::type::offset right_offset);
+template <class Result = long long, class Left, class Right,
+          class LeftPosition = loom::type::offset,
+          class RightPosition = loom::type::offset>
+[[loom::op("buffer.distance")]] Result distance(loom::type::buffer<Left> left,
+                                                LeftPosition left_offset,
+                                                loom::type::buffer<Right> right,
+                                                RightPosition right_offset);
 
 // Recovers the zero-origin Loom buffer root carried by a source pointer. The
 // pointer expression is evaluated normally; its interior byte origin is not

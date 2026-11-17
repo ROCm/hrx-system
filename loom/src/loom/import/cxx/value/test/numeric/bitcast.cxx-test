@@ -410,7 +410,7 @@ void store(unsigned bits, float* output) {
 }
 
 // ----
-func.def public @store(%bits: i32, %output: buffer, %output_byte_offset: offset) {
+func.def public @store(%bits: i32, %output: buffer, %output_byte_offset: index) {
   %3 = vector.from_elements %bits : vector<1xi32>
   %bytes = vector.bitcast %3 : vector<1xi32> to vector<4xi8>
   %5 = vector.bitcast %bytes : vector<4xi8> to vector<1xf32>
@@ -430,7 +430,7 @@ unsigned load(const float* input) {
 }
 
 // ----
-func.def public @load(%input: buffer, %input_byte_offset: offset) -> (i32) {
+func.def public @load(%input: buffer, %input_byte_offset: index) -> (i32) {
   %3 = buffer.view %input[%input_byte_offset] : buffer -> view<1xf32>
   %4 = view.load<root_in_bounds|type_disjoint> %3[0] : view<1xf32> -> f32
   %5 = vector.from_elements %4 : vector<1xf32>
@@ -450,7 +450,7 @@ void store(unsigned long long bits, double* output) {
 }
 
 // ----
-func.def public @store(%bits: i64, %output: buffer, %output_byte_offset: offset) {
+func.def public @store(%bits: i64, %output: buffer, %output_byte_offset: index) {
   %3 = vector.from_elements %bits : vector<1xi64>
   %words = vector.bitcast %3 : vector<1xi64> to vector<2xi32>
   %5 = vector.bitcast %words : vector<2xi32> to vector<1xf64>

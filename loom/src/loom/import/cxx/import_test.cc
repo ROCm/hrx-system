@@ -179,7 +179,7 @@ TEST_F(ImportTest, RecordComponentsOutliveSourceAndFunctionBindingStorage) {
   ASSERT_NE(module_, nullptr);
   source.assign(source.size(), '?');
   auto text = Print();
-  EXPECT_NE(text.find("-> (i32, buffer, offset, i1)"), std::string::npos);
+  EXPECT_NE(text.find("-> (i32, buffer, index, i1)"), std::string::npos);
   EXPECT_NE(text.find("func.call pure @advance"), std::string::npos);
   EXPECT_NE(text.find("func.def public @consume"), std::string::npos);
   EXPECT_EQ(diagnostic_count_, 0);

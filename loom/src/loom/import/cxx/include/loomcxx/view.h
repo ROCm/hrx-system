@@ -150,35 +150,39 @@ loom::type::view<loom::type::shape<Extents...>, T> view(
     loom::type::buffer<T> data,
     loom::detail::view_index_dimensions<Extents...> dimensions);
 
-// Forms a view at a byte offset within a typed buffer. The offset remains in
-// Loom's physical address domain and does not become pointer arithmetic.
-template <loom::type::size_type... Extents, class T>
+// Forms a view at a byte position relative to a typed buffer origin. Position
+// is a signed index or nonnegative offset; the view retains that domain.
+template <loom::type::size_type... Extents, class T,
+          class Position = loom::type::offset>
 [[loom::op("buffer.view")]]
 loom::type::view<loom::type::shape<Extents...>, T> view(
-    loom::type::buffer<T> data, loom::type::offset byte_offset,
+    loom::type::buffer<T> data, Position byte_offset,
     loom::detail::view_dimensions<Extents...> dimensions);
 
-template <loom::type::size_type... Extents, class T>
+template <loom::type::size_type... Extents, class T,
+          class Position = loom::type::offset>
   requires((Extents == loom::type::dynamic) || ...)
 [[loom::op("buffer.view")]]
 loom::type::view<loom::type::shape<Extents...>, T> view(
-    loom::type::buffer<T> data, loom::type::offset byte_offset,
+    loom::type::buffer<T> data, Position byte_offset,
     loom::detail::view_index_dimensions<Extents...> dimensions);
 
-template <loom::type::size_type... Extents, class T, loom::encoding::role Role>
+template <loom::type::size_type... Extents, class T, loom::encoding::role Role,
+          class Position = loom::type::offset>
 [[loom::op("buffer.view")]]
 loom::type::view<loom::type::shape<Extents...>, T,
                  loom::type::encoding<Role, sizeof...(Extents)>>
-view(loom::type::buffer<T> data, loom::type::offset byte_offset,
+view(loom::type::buffer<T> data, Position byte_offset,
      loom::detail::view_dimensions<Extents...> dimensions,
      loom::type::encoding<Role, sizeof...(Extents)> encoding);
 
-template <loom::type::size_type... Extents, class T, loom::encoding::role Role>
+template <loom::type::size_type... Extents, class T, loom::encoding::role Role,
+          class Position = loom::type::offset>
   requires((Extents == loom::type::dynamic) || ...)
 [[loom::op("buffer.view")]]
 loom::type::view<loom::type::shape<Extents...>, T,
                  loom::type::encoding<Role, sizeof...(Extents)>>
-view(loom::type::buffer<T> data, loom::type::offset byte_offset,
+view(loom::type::buffer<T> data, Position byte_offset,
      loom::detail::view_index_dimensions<Extents...> dimensions,
      loom::type::encoding<Role, sizeof...(Extents)> encoding);
 

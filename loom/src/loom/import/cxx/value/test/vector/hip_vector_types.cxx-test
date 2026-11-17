@@ -69,7 +69,7 @@ unsigned construct(unsigned input) {
 }
 
 // ----
-func.def public @transport(%source: buffer, %source_byte_offset: offset, %destination: buffer, %destination_byte_offset: offset, %replacement: i32) -> (i32) {
+func.def public @transport(%source: buffer, %source_byte_offset: index, %destination: buffer, %destination_byte_offset: index, %replacement: i32) -> (i32) {
   %6 = buffer.view %source[%source_byte_offset] : buffer -> view<4xi32>
   %value$7 = vector.load<root_in_bounds> %6[0] : view<4xi32> -> vector<4xi32>
   %value$8 = vector.insert %replacement into %value$7[0] : i32, vector<4xi32>
@@ -107,204 +107,204 @@ kernel.def @hip_vector_values() {
   %2 = index.constant 1 : index
   kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
 } launch(%input: buffer, %output: buffer) {
-  %input_byte_offset = index.constant 0 : offset
+  %input_byte_offset = index.constant 0 : index
   %10 = buffer.view %input[%input_byte_offset] : buffer -> view<4xi32>
   %words$11 = vector.load<root_in_bounds> %10[0] : view<4xi32> -> vector<4xi32>
   %12 = vector.extract %words$11[3] : vector<4xi32> -> i32
   %13 = vector.extract %words$11[1] : vector<4xi32> -> i32
   %14 = scalar.addi %12, %13 : i32
   %words$15 = vector.insert %14 into %words$11[0] : i32, vector<4xi32>
-  %592 = index.constant 16 : offset
-  %24 = buffer.view %input[%592] : buffer -> view<1xi32>
-  %25 = view.load<root_in_bounds|type_disjoint> %24[0] : view<1xi32> -> i32
-  %27 = scalar.xori %13, %25 : i32
-  %words$28 = vector.insert %27 into %words$15[1] : i32, vector<4xi32>
-  %544 = vector.extract %words$11[2] : vector<4xi32> -> i32
-  %31 = scalar.addi %544, %27 : i32
-  %words$32 = vector.insert %31 into %words$28[2] : i32, vector<4xi32>
-  %35 = scalar.subi %12, %14 : i32
-  %words$36 = vector.insert %35 into %words$32[3] : i32, vector<4xi32>
-  %37 = buffer.view %output[%input_byte_offset] : buffer -> view<4xi32>
-  vector.store<root_in_bounds> %words$36, %37[0] : vector<4xi32>, view<4xi32>
-  %47 = view.load<root_in_bounds|type_disjoint> %24[0] : view<1xi32> -> i32
-  %590 = index.constant 8 : offset
-  %56 = buffer.view %input[%590] : buffer -> view<1xi32>
-  %57 = view.load<root_in_bounds|type_disjoint> %56[0] : view<1xi32> -> i32
-  %pair$58 = func.call pure @make_uint2(%47, %57) : (i32, i32) -> (vector<2xi32>)
-  %59 = vector.extract %pair$58[1] : vector<2xi32> -> i32
-  %60 = vector.extract %pair$58[0] : vector<2xi32> -> i32
-  %61 = scalar.xori %60, %59 : i32
-  %pair$62 = vector.insert %61 into %pair$58[0] : i32, vector<2xi32>
-  %589 = index.constant 4 : offset
-  %71 = buffer.view %input[%589] : buffer -> view<1xi32>
-  %72 = view.load<root_in_bounds|type_disjoint> %71[0] : view<1xi32> -> i32
-  %74 = scalar.addi %59, %72 : i32
-  %pair$75 = vector.insert %74 into %pair$62[1] : i32, vector<2xi32>
-  %84 = buffer.view %output[%592] : buffer -> view<2xi32>
-  vector.store<root_in_bounds> %pair$75, %84[0] : vector<2xi32>, view<2xi32>
-  %94 = view.load<root_in_bounds|type_disjoint> %71[0] : view<1xi32> -> i32
-  %104 = view.load<root_in_bounds|type_disjoint> %56[0] : view<1xi32> -> i32
-  %585 = index.constant 12 : offset
-  %113 = buffer.view %input[%585] : buffer -> view<1xi32>
-  %114 = view.load<root_in_bounds|type_disjoint> %113[0] : view<1xi32> -> i32
-  %triple_x$115, %triple_y$116, %triple_z$117 = func.call pure @make_uint3(%94, %104, %114) : (i32, i32, i32) -> (i32, i32, i32)
-  %118 = scalar.constant 6 : i32
-  %triple_x$119 = scalar.addi %triple_x$115, %118 : i32
-  %triple_y$120 = scalar.subi %triple_y$116, %triple_x$119 : i32
-  %triple_z$121 = scalar.xori %triple_z$117, %triple_y$120 : i32
-  %584 = index.constant 24 : offset
-  %130 = buffer.view %output[%584] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %triple_x$119, %130[0] : i32, view<1xi32>
-  %583 = index.constant 28 : offset
-  %139 = buffer.view %output[%583] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %triple_y$120, %139[0] : i32, view<1xi32>
-  %582 = index.constant 32 : offset
-  %148 = buffer.view %output[%582] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %triple_z$121, %148[0] : i32, view<1xi32>
-  %158 = view.load<root_in_bounds|type_disjoint> %113[0] : view<1xi32> -> i32
-  %159 = scalar.trunci %158 : i32 to i8
-  %byte_x$160 = func.call pure @make_uchar1(%159) : (i8) -> (i8)
-  %161 = scalar.constant 2 : i32
-  %162 = scalar.extui %byte_x$160 : i8 to i32
-  %163 = scalar.addi %162, %161 : i32
-  %byte_x$164 = scalar.trunci %163 : i32 to i8
-  %165 = scalar.extui %byte_x$164 : i8 to i32
-  %580 = index.constant 36 : offset
-  %174 = buffer.view %output[%580] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %165, %174[0] : i32, view<1xi32>
-  %579 = scalar.constant -32768 : i16
-  %578 = scalar.constant -1 : i16
-  %577 = scalar.constant 32767 : i16
-  %signed_values_x, %signed_values_y$186, %signed_values_z$187 = func.call pure @make_short3(%579, %578, %577) : (i16, i16, i16) -> (i16, i16, i16)
-  %189 = scalar.extsi %signed_values_y$186 : i16 to i32
-  %190 = scalar.addi %189, %161 : i32
-  %signed_values_y$191 = scalar.trunci %190 : i32 to i16
-  %193 = scalar.extsi %signed_values_z$187 : i16 to i32
-  %594 = scalar.constant -7 : i32
-  %595 = scalar.addi %193, %594 : i32
-  %signed_values_z$195 = scalar.trunci %595 : i32 to i16
-  %196 = scalar.extsi %signed_values_x : i16 to i32
-  %576 = index.constant 40 : offset
-  %205 = buffer.view %output[%576] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %196, %205[0] : i32, view<1xi32>
-  %206 = scalar.extsi %signed_values_y$191 : i16 to i32
-  %575 = index.constant 44 : offset
-  %215 = buffer.view %output[%575] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %206, %215[0] : i32, view<1xi32>
-  %216 = scalar.extsi %signed_values_z$195 : i16 to i32
-  %574 = index.constant 48 : offset
-  %225 = buffer.view %output[%574] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %216, %225[0] : i32, view<1xi32>
-  %235 = view.load<root_in_bounds|type_disjoint> %56[0] : view<1xi32> -> i32
-  %236 = scalar.extui %235 : i32 to i64
-  %572 = scalar.constant 32 : i64
-  %239 = scalar.shli %236, %572 : i64
-  %249 = view.load<root_in_bounds|type_disjoint> %113[0] : view<1xi32> -> i32
-  %250 = scalar.extui %249 : i32 to i64
-  %251 = scalar.ori %239, %250 : i64
-  %261 = view.load<root_in_bounds|type_disjoint> %24[0] : view<1xi32> -> i32
-  %262 = scalar.extui %261 : i32 to i64
-  %265 = scalar.shli %262, %572 : i64
-  %275 = view.load<root_in_bounds|type_disjoint> %71[0] : view<1xi32> -> i32
-  %276 = scalar.extui %275 : i32 to i64
-  %277 = scalar.ori %265, %276 : i64
-  %wide = func.call pure @make_ulonglong2(%251, %277) : (i64, i64) -> (vector<2xi64>)
-  %279 = vector.extract %wide[1] : vector<2xi64> -> i64
-  %280 = vector.extract %wide[0] : vector<2xi64> -> i64
-  %281 = scalar.xori %280, %279 : i64
-  %283 = scalar.constant 4294967295 : i64
-  %285 = scalar.addi %279, %283 : i64
-  %288 = scalar.trunci %281 : i64 to i32
-  %567 = index.constant 52 : offset
-  %297 = buffer.view %output[%567] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %288, %297[0] : i32, view<1xi32>
-  %301 = scalar.shrui %281, %572 : i64
-  %302 = scalar.trunci %301 : i64 to i32
-  %565 = index.constant 56 : offset
-  %311 = buffer.view %output[%565] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %302, %311[0] : i32, view<1xi32>
-  %313 = scalar.trunci %285 : i64 to i32
-  %564 = index.constant 60 : offset
-  %322 = buffer.view %output[%564] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %313, %322[0] : i32, view<1xi32>
-  %326 = scalar.shrui %285, %572 : i64
-  %327 = scalar.trunci %326 : i64 to i32
-  %562 = index.constant 64 : offset
-  %336 = buffer.view %output[%562] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %327, %336[0] : i32, view<1xi32>
-  %346 = view.load<root_in_bounds|type_disjoint> %71[0] : view<1xi32> -> i32
-  %347 = scalar.sitofp %346 : i32 to f32
-  %348 = scalar.constant 2.0 : f32
-  %560 = scalar.constant -3.5 : f32
-  %351 = scalar.constant 4.0 : f32
-  %floating = func.call pure @make_float4(%347, %348, %560, %351) : (f32, f32, f32, f32) -> (vector<4xf32>)
-  %353 = vector.extract %floating[0] : vector<4xf32> -> f32
-  %354 = scalar.negf %353 : f32
-  %533 = vector.extract %floating[2] : vector<4xf32> -> f32
-  %532 = vector.extract %floating[3] : vector<4xf32> -> f32
-  %358 = scalar.addf %532, %533 : f32
-  %361 = scalar.bitcast %354 : f32 to i32
-  %559 = index.constant 68 : offset
-  %370 = buffer.view %output[%559] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %361, %370[0] : i32, view<1xi32>
-  %372 = scalar.bitcast %358 : f32 to i32
-  %558 = index.constant 72 : offset
-  %381 = buffer.view %output[%558] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %372, %381[0] : i32, view<1xi32>
-  %391 = view.load<root_in_bounds|type_disjoint> %71[0] : view<1xi32> -> i32
-  %392 = scalar.uitofp %391 : i32 to f64
-  %556 = scalar.constant -0.0 : f64
-  %doubles = func.call pure @make_double2(%392, %556) : (f64, f64) -> (vector<2xf64>)
-  %396 = scalar.constant 0.5 : f64
-  %397 = vector.extract %doubles[0] : vector<2xf64> -> f64
-  %398 = scalar.addf %397, %396 : f64
-  %530 = vector.extract %doubles[1] : vector<2xf64> -> f64
-  %double_bits = scalar.bitcast %530 : f64 to i64
-  %403 = scalar.constant 2.0 : f64
-  %404 = scalar.mulf %398, %403 : f64
-  %405 = scalar.fptoui %404 : f64 to i32
-  %555 = index.constant 76 : offset
-  %414 = buffer.view %output[%555] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %405, %414[0] : i32, view<1xi32>
-  %415 = scalar.trunci %double_bits : i64 to i32
-  %554 = index.constant 80 : offset
-  %424 = buffer.view %output[%554] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %415, %424[0] : i32, view<1xi32>
-  %427 = scalar.shrui %double_bits, %572 : i64
-  %428 = scalar.trunci %427 : i64 to i32
-  %552 = index.constant 84 : offset
-  %437 = buffer.view %output[%552] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %428, %437[0] : i32, view<1xi32>
-  %551 = scalar.constant -9223372036854775807 : i64
-  %signed_wide_x$441 = func.call pure @make_longlong1(%551) : (i64) -> (i64)
-  %550 = scalar.constant 7 : i64
-  %signed_wide_x$444 = scalar.addi %signed_wide_x$441, %550 : i64
-  %549 = scalar.constant 0 : i64
-  %447 = scalar.cmpi slt, %signed_wide_x$444, %549 : i64
-  %449 = scalar.constant 1 : i32
-  %450 = scalar.constant 0 : i32
-  %593 = scf.select %447, %449, %450 : i32
-  %548 = index.constant 88 : offset
-  %459 = buffer.view %output[%548] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %593, %459[0] : i32, view<1xi32>
-  %469 = view.load<root_in_bounds|type_disjoint> %71[0] : view<1xi32> -> i32
-  %470 = scalar.extui %469 : i32 to i64
-  %472 = scalar.constant 4294967296 : i64
-  %473 = scalar.constant -1 : i64
-  %counters = func.call pure @make_ulonglong4(%470, %283, %472, %473) : (i64, i64, i64, i64) -> (vector<4xi64>)
-  %475 = vector.extract %counters[0] : vector<4xi64> -> i64
-  %476 = vector.extract %counters[3] : vector<4xi64> -> i64
-  %477 = scalar.addi %476, %475 : i64
-  %480 = scalar.trunci %477 : i64 to i32
-  %546 = index.constant 92 : offset
-  %489 = buffer.view %output[%546] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %480, %489[0] : i32, view<1xi32>
+  %490 = index.constant 16 : index
+  %21 = buffer.view %input[%490] : buffer -> view<1xi32>
+  %22 = view.load<root_in_bounds|type_disjoint> %21[0] : view<1xi32> -> i32
+  %24 = scalar.xori %13, %22 : i32
+  %words$25 = vector.insert %24 into %words$15[1] : i32, vector<4xi32>
+  %442 = vector.extract %words$11[2] : vector<4xi32> -> i32
+  %28 = scalar.addi %442, %24 : i32
+  %words$29 = vector.insert %28 into %words$25[2] : i32, vector<4xi32>
+  %32 = scalar.subi %12, %14 : i32
+  %words$33 = vector.insert %32 into %words$29[3] : i32, vector<4xi32>
+  %34 = buffer.view %output[%input_byte_offset] : buffer -> view<4xi32>
+  vector.store<root_in_bounds> %words$33, %34[0] : vector<4xi32>, view<4xi32>
+  %41 = view.load<root_in_bounds|type_disjoint> %21[0] : view<1xi32> -> i32
+  %488 = index.constant 8 : index
+  %47 = buffer.view %input[%488] : buffer -> view<1xi32>
+  %48 = view.load<root_in_bounds|type_disjoint> %47[0] : view<1xi32> -> i32
+  %pair$49 = func.call pure @make_uint2(%41, %48) : (i32, i32) -> (vector<2xi32>)
+  %50 = vector.extract %pair$49[1] : vector<2xi32> -> i32
+  %51 = vector.extract %pair$49[0] : vector<2xi32> -> i32
+  %52 = scalar.xori %51, %50 : i32
+  %pair$53 = vector.insert %52 into %pair$49[0] : i32, vector<2xi32>
+  %487 = index.constant 4 : index
+  %59 = buffer.view %input[%487] : buffer -> view<1xi32>
+  %60 = view.load<root_in_bounds|type_disjoint> %59[0] : view<1xi32> -> i32
+  %62 = scalar.addi %50, %60 : i32
+  %pair$63 = vector.insert %62 into %pair$53[1] : i32, vector<2xi32>
+  %69 = buffer.view %output[%490] : buffer -> view<2xi32>
+  vector.store<root_in_bounds> %pair$63, %69[0] : vector<2xi32>, view<2xi32>
+  %76 = view.load<root_in_bounds|type_disjoint> %59[0] : view<1xi32> -> i32
+  %83 = view.load<root_in_bounds|type_disjoint> %47[0] : view<1xi32> -> i32
+  %483 = index.constant 12 : index
+  %89 = buffer.view %input[%483] : buffer -> view<1xi32>
+  %90 = view.load<root_in_bounds|type_disjoint> %89[0] : view<1xi32> -> i32
+  %triple_x$91, %triple_y$92, %triple_z$93 = func.call pure @make_uint3(%76, %83, %90) : (i32, i32, i32) -> (i32, i32, i32)
+  %94 = scalar.constant 6 : i32
+  %triple_x$95 = scalar.addi %triple_x$91, %94 : i32
+  %triple_y$96 = scalar.subi %triple_y$92, %triple_x$95 : i32
+  %triple_z$97 = scalar.xori %triple_z$93, %triple_y$96 : i32
+  %482 = index.constant 24 : index
+  %103 = buffer.view %output[%482] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %triple_x$95, %103[0] : i32, view<1xi32>
+  %481 = index.constant 28 : index
+  %109 = buffer.view %output[%481] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %triple_y$96, %109[0] : i32, view<1xi32>
+  %480 = index.constant 32 : index
+  %115 = buffer.view %output[%480] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %triple_z$97, %115[0] : i32, view<1xi32>
+  %122 = view.load<root_in_bounds|type_disjoint> %89[0] : view<1xi32> -> i32
+  %123 = scalar.trunci %122 : i32 to i8
+  %byte_x$124 = func.call pure @make_uchar1(%123) : (i8) -> (i8)
+  %125 = scalar.constant 2 : i32
+  %126 = scalar.extui %byte_x$124 : i8 to i32
+  %127 = scalar.addi %126, %125 : i32
+  %byte_x$128 = scalar.trunci %127 : i32 to i8
+  %129 = scalar.extui %byte_x$128 : i8 to i32
+  %478 = index.constant 36 : index
+  %135 = buffer.view %output[%478] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %129, %135[0] : i32, view<1xi32>
+  %477 = scalar.constant -32768 : i16
+  %476 = scalar.constant -1 : i16
+  %475 = scalar.constant 32767 : i16
+  %signed_values_x, %signed_values_y$147, %signed_values_z$148 = func.call pure @make_short3(%477, %476, %475) : (i16, i16, i16) -> (i16, i16, i16)
+  %150 = scalar.extsi %signed_values_y$147 : i16 to i32
+  %151 = scalar.addi %150, %125 : i32
+  %signed_values_y$152 = scalar.trunci %151 : i32 to i16
+  %154 = scalar.extsi %signed_values_z$148 : i16 to i32
+  %492 = scalar.constant -7 : i32
+  %493 = scalar.addi %154, %492 : i32
+  %signed_values_z$156 = scalar.trunci %493 : i32 to i16
+  %157 = scalar.extsi %signed_values_x : i16 to i32
+  %474 = index.constant 40 : index
+  %163 = buffer.view %output[%474] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %157, %163[0] : i32, view<1xi32>
+  %164 = scalar.extsi %signed_values_y$152 : i16 to i32
+  %473 = index.constant 44 : index
+  %170 = buffer.view %output[%473] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %164, %170[0] : i32, view<1xi32>
+  %171 = scalar.extsi %signed_values_z$156 : i16 to i32
+  %472 = index.constant 48 : index
+  %177 = buffer.view %output[%472] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %171, %177[0] : i32, view<1xi32>
+  %184 = view.load<root_in_bounds|type_disjoint> %47[0] : view<1xi32> -> i32
+  %185 = scalar.extui %184 : i32 to i64
+  %470 = scalar.constant 32 : i64
+  %188 = scalar.shli %185, %470 : i64
+  %195 = view.load<root_in_bounds|type_disjoint> %89[0] : view<1xi32> -> i32
+  %196 = scalar.extui %195 : i32 to i64
+  %197 = scalar.ori %188, %196 : i64
+  %204 = view.load<root_in_bounds|type_disjoint> %21[0] : view<1xi32> -> i32
+  %205 = scalar.extui %204 : i32 to i64
+  %208 = scalar.shli %205, %470 : i64
+  %215 = view.load<root_in_bounds|type_disjoint> %59[0] : view<1xi32> -> i32
+  %216 = scalar.extui %215 : i32 to i64
+  %217 = scalar.ori %208, %216 : i64
+  %wide = func.call pure @make_ulonglong2(%197, %217) : (i64, i64) -> (vector<2xi64>)
+  %219 = vector.extract %wide[1] : vector<2xi64> -> i64
+  %220 = vector.extract %wide[0] : vector<2xi64> -> i64
+  %221 = scalar.xori %220, %219 : i64
+  %223 = scalar.constant 4294967295 : i64
+  %225 = scalar.addi %219, %223 : i64
+  %228 = scalar.trunci %221 : i64 to i32
+  %465 = index.constant 52 : index
+  %234 = buffer.view %output[%465] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %228, %234[0] : i32, view<1xi32>
+  %238 = scalar.shrui %221, %470 : i64
+  %239 = scalar.trunci %238 : i64 to i32
+  %463 = index.constant 56 : index
+  %245 = buffer.view %output[%463] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %239, %245[0] : i32, view<1xi32>
+  %247 = scalar.trunci %225 : i64 to i32
+  %462 = index.constant 60 : index
+  %253 = buffer.view %output[%462] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %247, %253[0] : i32, view<1xi32>
+  %257 = scalar.shrui %225, %470 : i64
+  %258 = scalar.trunci %257 : i64 to i32
+  %460 = index.constant 64 : index
+  %264 = buffer.view %output[%460] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %258, %264[0] : i32, view<1xi32>
+  %271 = view.load<root_in_bounds|type_disjoint> %59[0] : view<1xi32> -> i32
+  %272 = scalar.sitofp %271 : i32 to f32
+  %273 = scalar.constant 2.0 : f32
+  %458 = scalar.constant -3.5 : f32
+  %276 = scalar.constant 4.0 : f32
+  %floating = func.call pure @make_float4(%272, %273, %458, %276) : (f32, f32, f32, f32) -> (vector<4xf32>)
+  %278 = vector.extract %floating[0] : vector<4xf32> -> f32
+  %279 = scalar.negf %278 : f32
+  %431 = vector.extract %floating[2] : vector<4xf32> -> f32
+  %430 = vector.extract %floating[3] : vector<4xf32> -> f32
+  %283 = scalar.addf %430, %431 : f32
+  %286 = scalar.bitcast %279 : f32 to i32
+  %457 = index.constant 68 : index
+  %292 = buffer.view %output[%457] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %286, %292[0] : i32, view<1xi32>
+  %294 = scalar.bitcast %283 : f32 to i32
+  %456 = index.constant 72 : index
+  %300 = buffer.view %output[%456] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %294, %300[0] : i32, view<1xi32>
+  %307 = view.load<root_in_bounds|type_disjoint> %59[0] : view<1xi32> -> i32
+  %308 = scalar.uitofp %307 : i32 to f64
+  %454 = scalar.constant -0.0 : f64
+  %doubles = func.call pure @make_double2(%308, %454) : (f64, f64) -> (vector<2xf64>)
+  %312 = scalar.constant 0.5 : f64
+  %313 = vector.extract %doubles[0] : vector<2xf64> -> f64
+  %314 = scalar.addf %313, %312 : f64
+  %428 = vector.extract %doubles[1] : vector<2xf64> -> f64
+  %double_bits = scalar.bitcast %428 : f64 to i64
+  %319 = scalar.constant 2.0 : f64
+  %320 = scalar.mulf %314, %319 : f64
+  %321 = scalar.fptoui %320 : f64 to i32
+  %453 = index.constant 76 : index
+  %327 = buffer.view %output[%453] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %321, %327[0] : i32, view<1xi32>
+  %328 = scalar.trunci %double_bits : i64 to i32
+  %452 = index.constant 80 : index
+  %334 = buffer.view %output[%452] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %328, %334[0] : i32, view<1xi32>
+  %337 = scalar.shrui %double_bits, %470 : i64
+  %338 = scalar.trunci %337 : i64 to i32
+  %450 = index.constant 84 : index
+  %344 = buffer.view %output[%450] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %338, %344[0] : i32, view<1xi32>
+  %449 = scalar.constant -9223372036854775807 : i64
+  %signed_wide_x$348 = func.call pure @make_longlong1(%449) : (i64) -> (i64)
+  %448 = scalar.constant 7 : i64
+  %signed_wide_x$351 = scalar.addi %signed_wide_x$348, %448 : i64
+  %447 = scalar.constant 0 : i64
+  %354 = scalar.cmpi slt, %signed_wide_x$351, %447 : i64
+  %356 = scalar.constant 1 : i32
+  %357 = scalar.constant 0 : i32
+  %491 = scf.select %354, %356, %357 : i32
+  %446 = index.constant 88 : index
+  %363 = buffer.view %output[%446] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %491, %363[0] : i32, view<1xi32>
+  %370 = view.load<root_in_bounds|type_disjoint> %59[0] : view<1xi32> -> i32
+  %371 = scalar.extui %370 : i32 to i64
+  %373 = scalar.constant 4294967296 : i64
+  %374 = scalar.constant -1 : i64
+  %counters = func.call pure @make_ulonglong4(%371, %223, %373, %374) : (i64, i64, i64, i64) -> (vector<4xi64>)
+  %376 = vector.extract %counters[0] : vector<4xi64> -> i64
+  %377 = vector.extract %counters[3] : vector<4xi64> -> i64
+  %378 = scalar.addi %377, %376 : i64
+  %381 = scalar.trunci %378 : i64 to i32
+  %444 = index.constant 92 : index
+  %387 = buffer.view %output[%444] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %381, %387[0] : i32, view<1xi32>
   kernel.return
 }
 
 func.def device inline @make_uint2(%x: i32, %y: i32) -> (vector<2xi32>) {
-  %493 = vector.from_elements %x, %y : vector<2xi32>
-  func.return %493 : vector<2xi32>
+  %391 = vector.from_elements %x, %y : vector<2xi32>
+  func.return %391 : vector<2xi32>
 }
 
 func.def device inline @make_uint3(%x: i32, %y: i32, %z: i32) -> (i32, i32, i32) {
@@ -320,18 +320,18 @@ func.def device inline @make_short3(%x: i16, %y: i16, %z: i16) -> (i16, i16, i16
 }
 
 func.def device inline @make_ulonglong2(%x: i64, %y: i64) -> (vector<2xi64>) {
-  %511 = vector.from_elements %x, %y : vector<2xi64>
-  func.return %511 : vector<2xi64>
+  %409 = vector.from_elements %x, %y : vector<2xi64>
+  func.return %409 : vector<2xi64>
 }
 
 func.def device inline @make_float4(%x: f32, %y: f32, %z: f32, %w: f32) -> (vector<4xf32>) {
-  %517 = vector.from_elements %x, %y, %z, %w : vector<4xf32>
-  func.return %517 : vector<4xf32>
+  %415 = vector.from_elements %x, %y, %z, %w : vector<4xf32>
+  func.return %415 : vector<4xf32>
 }
 
 func.def device inline @make_double2(%x: f64, %y: f64) -> (vector<2xf64>) {
-  %521 = vector.from_elements %x, %y : vector<2xf64>
-  func.return %521 : vector<2xf64>
+  %419 = vector.from_elements %x, %y : vector<2xf64>
+  func.return %419 : vector<2xf64>
 }
 
 func.def device inline @make_longlong1(%x: i64) -> (i64) {
@@ -339,8 +339,8 @@ func.def device inline @make_longlong1(%x: i64) -> (i64) {
 }
 
 func.def device inline @make_ulonglong4(%x: i64, %y: i64, %z: i64, %w: i64) -> (vector<4xi64>) {
-  %529 = vector.from_elements %x, %y, %z, %w : vector<4xi64>
-  func.return %529 : vector<4xi64>
+  %427 = vector.from_elements %x, %y, %z, %w : vector<4xi64>
+  func.return %427 : vector<4xi64>
 }
 
 // ====
@@ -351,7 +351,7 @@ func.def device inline @make_ulonglong4(%x: i64, %y: i64, %z: i64, %w: i64) -> (
 
 // ----
 func.def public @hip_vector_oracle(%input: buffer, %output: buffer) {
-  %3 = index.constant 0 : offset
+  %3 = index.constant 0 : index
   %source = buffer.view %input[%3] : buffer -> view<8xi32>
   %result = buffer.view %output[%3] : buffer -> view<24xi32>
   %155 = index.constant 1 : index
@@ -366,8 +366,7 @@ func.def public @hip_vector_oracle(%input: buffer, %output: buffer) {
   %word1 = scalar.xori %input1, %input4 : i32
   %word2 = scalar.addi %input2, %word1 : i32
   %word3 = scalar.subi %input3, %word0 : i32
-  %151 = index.constant 0 : index
-  view.store<type_disjoint> %word0, %result[%151] : i32, view<24xi32>
+  view.store<type_disjoint> %word0, %result[%3] : i32, view<24xi32>
   view.store<type_disjoint> %word1, %result[%155] : i32, view<24xi32>
   view.store<type_disjoint> %word2, %result[%154] : i32, view<24xi32>
   view.store<type_disjoint> %word3, %result[%153] : i32, view<24xi32>
@@ -459,11 +458,10 @@ func.def public @hip_vector_oracle(%input: buffer, %output: buffer) {
 
 // ----
 func.def public @hip_vector_input(%input: buffer) {
-  %2 = index.constant 0 : offset
+  %2 = index.constant 0 : index
   %values = buffer.view %input[%2] : buffer -> view<8xi32>
   %4 = scalar.constant 0 : i32
-  %35 = index.constant 0 : index
-  view.store<type_disjoint> %4, %values[%35] : i32, view<8xi32>
+  view.store<type_disjoint> %4, %values[%2] : i32, view<8xi32>
   %7 = scalar.constant 1 : i32
   %34 = index.constant 1 : index
   view.store<type_disjoint> %7, %values[%34] : i32, view<8xi32>

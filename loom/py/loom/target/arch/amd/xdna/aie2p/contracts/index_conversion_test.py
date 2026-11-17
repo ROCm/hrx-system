@@ -107,10 +107,7 @@ def test_i64_address_boundaries_use_structural_register_units() -> None:
     assert isinstance(to_offset.emit[0], EmitRegisterSlice)
     assert to_index.emit[0].unit_offset == 0
     assert to_offset.emit[0].unit_offset == 0
-    assert any(
-        guard.kind is GuardKind.VALUE_SIGNED_BIT_COUNT and guard.count == 32
-        for guard in to_index.guards
-    )
+    assert all(guard.kind is GuardKind.VALUE_TYPE for guard in to_index.guards)
     assert any(
         guard.kind is GuardKind.VALUE_UNSIGNED_BIT_COUNT and guard.count == 32
         for guard in to_offset.guards
@@ -154,9 +151,12 @@ def test_same_carrier_casts_are_aliases_with_exact_domain_guards() -> None:
         range_guards = [
             guard for guard in rule.guards if guard.kind is GuardKind.VALUE_I64_RANGE
         ]
-        assert len(range_guards) == 1
-        assert range_guards[0].minimum == 0
-        assert range_guards[0].maximum == (2**31) - 1
+        if pair[1] == "offset":
+            assert len(range_guards) == 1
+            assert range_guards[0].minimum == 0
+            assert range_guards[0].maximum == (2**31) - 1
+        else:
+            assert not range_guards
 
 
 def test_vector_index_conversion_covers_every_address_boundary_pair() -> None:
@@ -253,16 +253,17 @@ def test_vector_index_conversion_uses_each_physical_mechanism() -> None:
 
         i64_rules = _vector_rules_for("i64", result_type)
         assert i64_rules
-        expected_guard = (
-            GuardKind.VALUE_SIGNED_BIT_COUNT
-            if result_type == "index"
-            else GuardKind.VALUE_UNSIGNED_BIT_COUNT
-        )
         for rule in i64_rules:
             assert isinstance(rule, DescriptorRule)
             assert rule.descriptor is not None
             assert rule.descriptor.key == "amd.xdna.aie2p.shuffle.x.configured"
-            assert any(guard.kind is expected_guard for guard in rule.guards)
+            if result_type == "index":
+                assert all(guard.kind is GuardKind.VALUE_TYPE for guard in rule.guards)
+            else:
+                assert any(
+                    guard.kind is GuardKind.VALUE_UNSIGNED_BIT_COUNT
+                    for guard in rule.guards
+                )
 
     for input_type in ("index", "offset"):
         predicate_rules = _vector_rules_for(input_type, "i1")
@@ -311,6 +312,9 @@ def test_vector_same_carrier_aliases_preserve_address_domain_guards() -> None:
         range_guards = [
             guard for guard in rule.guards if guard.kind is GuardKind.VALUE_I64_RANGE
         ]
-        assert len(range_guards) == 1
-        assert range_guards[0].minimum == 0
-        assert range_guards[0].maximum == (2**31) - 1
+        if pair[1] == "offset":
+            assert len(range_guards) == 1
+            assert range_guards[0].minimum == 0
+            assert range_guards[0].maximum == (2**31) - 1
+        else:
+            assert not range_guards

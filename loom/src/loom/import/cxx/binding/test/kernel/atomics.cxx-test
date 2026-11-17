@@ -25,36 +25,33 @@ unsigned long long replace(unsigned long long expected,
 }
 
 // ----
-func.def public @claim(%counter: buffer, %counter_byte_offset: offset) -> (i32) {
+func.def public @claim(%counter: buffer, %counter_byte_offset: index) -> (i32) {
   %3 = scalar.constant 1 : i32
-  %4 = scalar.extsi %3 : i32 to i64
-  %5 = scalar.constant 4 : i64
-  %6 = scalar.muli %4, %5 : i64
-  %7 = index.cast %counter_byte_offset : offset to i64
-  %8 = scalar.addi %7, %6 : i64
-  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
-  %10 = index.cast %9 : i64 to offset
-  %11 = func.call @ticket(%counter, %10) : (buffer, offset) -> (i32)
-  func.return %11 : i32
+  %4 = index.cast %3 : i32 to index
+  %5 = index.constant 4 : index
+  %6 = index.mul %4, %5 : index
+  %7 = index.add %counter_byte_offset, %6 : index
+  %8 = func.call @ticket(%counter, %7) : (buffer, index) -> (i32)
+  func.return %8 : i32
 }
 
-func.def public @accumulate(%value: i64, %destination: buffer, %destination_byte_offset: offset) {
-  %15 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
-  view.atomic.reduce<maxsi, root_in_bounds|type_disjoint> %value, %15[0] {ordering = release, scope = workgroup} : i64, view<1xi64>
+func.def public @accumulate(%value: i64, %destination: buffer, %destination_byte_offset: index) {
+  %12 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
+  view.atomic.reduce<maxsi, root_in_bounds|type_disjoint> %value, %12[0] {ordering = release, scope = workgroup} : i64, view<1xi64>
   func.return
 }
 
-func.def public @replace(%expected: i64, %replacement: i64, %destination: buffer, %destination_byte_offset: offset) -> (i64) {
-  %21 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
-  %22 = view.atomic.cmpxchg<root_in_bounds|type_disjoint> %expected, %replacement, %21[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : i64, view<1xi64> -> i64
-  func.return %22 : i64
+func.def public @replace(%expected: i64, %replacement: i64, %destination: buffer, %destination_byte_offset: index) -> (i64) {
+  %18 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
+  %19 = view.atomic.cmpxchg<root_in_bounds|type_disjoint> %expected, %replacement, %18[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : i64, view<1xi64> -> i64
+  func.return %19 : i64
 }
 
-func.def @ticket(%counter: buffer, %counter_byte_offset: offset) -> (i32) {
-  %26 = scalar.constant 1 : i32
-  %27 = buffer.view %counter[%counter_byte_offset] : buffer -> view<1xi32>
-  %28 = view.atomic.rmw<addi, root_in_bounds|type_disjoint> %26, %27[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
-  func.return %28 : i32
+func.def @ticket(%counter: buffer, %counter_byte_offset: index) -> (i32) {
+  %23 = scalar.constant 1 : i32
+  %24 = buffer.view %counter[%counter_byte_offset] : buffer -> view<1xi32>
+  %25 = view.atomic.rmw<addi, root_in_bounds|type_disjoint> %23, %24[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  func.return %25 : i32
 }
 
 // ====
@@ -78,13 +75,13 @@ unsigned short replace_half(unsigned short expected,
 }
 
 // ----
-func.def public @add_byte(%value: i8, %destination: buffer, %destination_byte_offset: offset) -> (i8) {
+func.def public @add_byte(%value: i8, %destination: buffer, %destination_byte_offset: index) -> (i8) {
   %4 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi8>
   %5 = view.atomic.rmw<addi, root_in_bounds> %value, %4[0] {ordering = relaxed, scope = device} : i8, view<1xi8> -> i8
   func.return %5 : i8
 }
 
-func.def public @replace_half(%expected: i16, %replacement: i16, %destination: buffer, %destination_byte_offset: offset) -> (i16) {
+func.def public @replace_half(%expected: i16, %replacement: i16, %destination: buffer, %destination_byte_offset: index) -> (i16) {
   %11 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi16>
   %12 = view.atomic.cmpxchg<root_in_bounds|type_disjoint> %expected, %replacement, %11[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i16, view<1xi16> -> i16
   func.return %12 : i16
@@ -116,15 +113,15 @@ void publish(unsigned value, volatile unsigned* destination) {
 }
 
 // ----
-func.def public @observe(%source: buffer, %source_byte_offset: offset) -> (i32) {
-  %3 = index.constant 4 : offset
-  %4 = index.add %source_byte_offset, %3 : offset
+func.def public @observe(%source: buffer, %source_byte_offset: index) -> (i32) {
+  %3 = index.constant 4 : index
+  %4 = index.add %source_byte_offset, %3 : index
   %5 = buffer.view %source[%4] : buffer -> view<1xi32>
   %6 = view.atomic.load<root_in_bounds|type_disjoint> %5[0] {ordering = acquire, scope = system} : view<1xi32> -> i32
   func.return %6 : i32
 }
 
-func.def public @publish(%value: i32, %destination: buffer, %destination_byte_offset: offset) {
+func.def public @publish(%value: i32, %destination: buffer, %destination_byte_offset: index) {
   buffer.fence scope(system) ordering(release)
   %10 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi32>
   view.atomic.store<root_in_bounds|type_disjoint> %value, %10[0] {ordering = relaxed, scope = system} : i32, view<1xi32>
@@ -150,32 +147,26 @@ void fences_builtin() {
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
 }
 // ----
-func.def public @observe_builtin(%source: buffer, %source_byte_offset: offset) -> (i32) {
+func.def public @observe_builtin(%source: buffer, %source_byte_offset: index) -> (i32) {
   %3 = scalar.constant 1 : i32
-  %4 = scalar.extsi %3 : i32 to i64
-  %5 = scalar.constant 4 : i64
-  %6 = scalar.muli %4, %5 : i64
-  %7 = index.cast %source_byte_offset : offset to i64
-  %8 = scalar.addi %7, %6 : i64
-  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
-  %10 = index.cast %9 : i64 to offset
-  %11 = buffer.view %source[%10] : buffer -> view<1xi32>
-  %12 = view.atomic.load<root_in_bounds|type_disjoint> %11[0] {ordering = acquire, scope = system} : view<1xi32> -> i32
-  func.return %12 : i32
+  %4 = index.cast %3 : i32 to index
+  %5 = index.constant 4 : index
+  %6 = index.mul %4, %5 : index
+  %7 = index.add %source_byte_offset, %6 : index
+  %8 = buffer.view %source[%7] : buffer -> view<1xi32>
+  %9 = view.atomic.load<root_in_bounds|type_disjoint> %8[0] {ordering = acquire, scope = system} : view<1xi32> -> i32
+  func.return %9 : i32
 }
 
-func.def public @publish_builtin(%value: i32, %destination: buffer, %destination_byte_offset: offset) {
+func.def public @publish_builtin(%value: i32, %destination: buffer, %destination_byte_offset: index) {
   buffer.fence scope(system) ordering(release)
-  %16 = scalar.constant 1 : i32
-  %17 = scalar.extsi %16 : i32 to i64
-  %18 = scalar.constant 4 : i64
-  %19 = scalar.muli %17, %18 : i64
-  %20 = index.cast %destination_byte_offset : offset to i64
-  %21 = scalar.addi %20, %19 : i64
-  %22 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
-  %23 = index.cast %22 : i64 to offset
-  %24 = buffer.view %destination[%23] : buffer -> view<1xi32>
-  view.atomic.store<root_in_bounds|type_disjoint> %value, %24[0] {ordering = relaxed, scope = system} : i32, view<1xi32>
+  %13 = scalar.constant 1 : i32
+  %14 = index.cast %13 : i32 to index
+  %15 = index.constant 4 : index
+  %16 = index.mul %14, %15 : index
+  %17 = index.add %destination_byte_offset, %16 : index
+  %18 = buffer.view %destination[%17] : buffer -> view<1xi32>
+  view.atomic.store<root_in_bounds|type_disjoint> %value, %18[0] {ordering = relaxed, scope = system} : i32, view<1xi32>
   func.return
 }
 
@@ -196,7 +187,7 @@ unsigned advance(unsigned* destination) {
   return value;
 }
 // ----
-func.def public source_signature(#func.abi.c.signature<arguments = [0], results = [1], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @advance(%destination: buffer, %destination_byte_offset: offset) -> (i32) {
+func.def public source_signature(#func.abi.c.signature<arguments = [0], results = [1], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @advance(%destination: buffer, %destination_byte_offset: index) -> (i32) {
   %3 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi32>
   %4 = view.atomic.load<root_in_bounds> %3[0] {ordering = seq_cst, scope = system} : view<1xi32> -> i32
   %5 = scalar.constant 1 : i32
@@ -228,13 +219,13 @@ ptrdiff_t add_difference(ptrdiff_t value, ptrdiff_t* destination) {
 }
 
 // ----
-func.def public @replace_size(%expected: i64, %replacement: i64, %destination: buffer, %destination_byte_offset: offset) -> (i64) {
+func.def public @replace_size(%expected: i64, %replacement: i64, %destination: buffer, %destination_byte_offset: index) -> (i64) {
   %5 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
   %6 = view.atomic.cmpxchg<root_in_bounds|type_disjoint> %expected, %replacement, %5[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : i64, view<1xi64> -> i64
   func.return %6 : i64
 }
 
-func.def public @add_difference(%value: i64, %destination: buffer, %destination_byte_offset: offset) -> (i64) {
+func.def public @add_difference(%value: i64, %destination: buffer, %destination_byte_offset: index) -> (i64) {
   %11 = buffer.view %destination[%destination_byte_offset] : buffer -> view<1xi64>
   %12 = view.atomic.rmw<addi, root_in_bounds|type_disjoint> %value, %11[0] {ordering = relaxed, scope = device} : i64, view<1xi64> -> i64
   func.return %12 : i64
@@ -268,7 +259,7 @@ unsigned update_volatile_view(volatile unsigned* storage, loom::type::index inde
 }
 
 // ----
-func.def public @update_view(%storage: buffer, %storage_byte_offset: offset, %row: i32, %column: index) {
+func.def public @update_view(%storage: buffer, %storage_byte_offset: index, %row: i32, %column: index) {
   %values_layout = encoding.layout.dense : encoding<layout>
   %values = buffer.view %storage[%storage_byte_offset] : buffer -> view<4x8xi32, %values_layout>
   %6 = scalar.extui %row : i32 to i64
@@ -290,14 +281,14 @@ func.def public @update_view(%storage: buffer, %storage_byte_offset: offset, %ro
   func.return
 }
 
-func.def public @observe_const_view(%storage: buffer, %storage_byte_offset: offset, %index: index) -> (i32) {
+func.def public @observe_const_view(%storage: buffer, %storage_byte_offset: index, %index: index) -> (i32) {
   %values_layout = encoding.layout.dense : encoding<layout>
   %values = buffer.view %storage[%storage_byte_offset] : buffer -> view<16xi32, %values_layout>
   %26 = view.atomic.load<type_disjoint> %values[%index] {ordering = seq_cst, scope = system} : view<16xi32, %values_layout> -> i32
   func.return %26 : i32
 }
 
-func.def public @update_volatile_view(%storage: buffer, %storage_byte_offset: offset, %index: index) -> (i32) {
+func.def public @update_volatile_view(%storage: buffer, %storage_byte_offset: index, %index: index) -> (i32) {
   %values_layout = encoding.layout.dense : encoding<layout>
   %values = buffer.view %storage[%storage_byte_offset] : buffer -> view<16xi32, %values_layout>
   %33 = scalar.constant 1 : i32

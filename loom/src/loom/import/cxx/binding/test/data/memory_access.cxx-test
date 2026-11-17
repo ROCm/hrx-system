@@ -111,7 +111,7 @@ func.def public @alias_contracts(%bytes: view<4xi8>, %words: view<4xi32>) -> (i3
   func.return %15 : i32
 }
 
-func.def public @attributed_access(%source: buffer, %source_byte_offset: offset) -> (i32) {
+func.def public @attributed_access(%source: buffer, %source_byte_offset: index) -> (i32) {
   %19 = buffer.view %source[%source_byte_offset] : buffer -> view<1xi32>
   %20 = view.load<root_in_bounds> %19[0] : view<1xi32> -> i32
   func.return %20 : i32

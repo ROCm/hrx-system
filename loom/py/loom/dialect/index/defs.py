@@ -61,7 +61,16 @@ __all__ = [
 index_ops = Dialect(
     "index",
     dialect_id=0x0F,
-    doc=("Scalar address-domain operations over index, offset, and explicit integer boundary casts."),
+    doc=(
+        "Scalar address-domain operations over index, offset, and explicit "
+        "integer boundary casts. Index arithmetic uses mathematical values "
+        "within the target's supported carriers. Overflow beyond those "
+        "carriers has no defined numeric result and does not require a "
+        "compile-time range proof or runtime check. Targets may use native "
+        "arithmetic; folding and facts describe non-overflowing executions. "
+        "Offset arithmetic wraps in its unsigned target carrier. Neither "
+        "contract changes memory bounds or reference safety."
+    ),
 )
 
 IndexPredicate = EnumDef(
@@ -122,13 +131,15 @@ index_cast = cast_op(
         "bits of narrower fixed-width payloads; an i64 payload must already "
         "be nonnegative because offset's source fact domain is [0, INT64_MAX]. A "
         "range proof must describe the input; an assumption on the cast result "
-        "cannot justify the conversion. A "
-        "target requiring a narrower address carrier accepts only values proven "
-        "representable in that carrier. Leaving an address domain follows its "
+        "cannot justify an offset conversion. Entering index uses the target's "
+        "available carrier without requiring a range proof; a value beyond "
+        "that carrier follows the index overflow contract. Entering offset "
+        "requires the value to fit its target carrier. Leaving an address "
+        "domain follows its "
         "signedness and preserves the low destination-width bits when "
-        "narrowing, including casts to i1. Conversion between index and offset "
-        "requires the numeric value to be representable in the destination "
-        "domain. Pure fixed-width integer changes use scalar.extsi, "
+        "narrowing, including casts to i1. Conversion from index to offset "
+        "requires a nonnegative value representable in the destination "
+        "carrier. Pure fixed-width integer changes use scalar.extsi, "
         "scalar.extui, or scalar.trunci."
     ),
     canonicalize="loom_index_cast_canonicalize",

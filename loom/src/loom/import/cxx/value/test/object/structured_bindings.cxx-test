@@ -89,36 +89,36 @@ unsigned nested_array_value_binding(unsigned value) {
 
 // ----
 func.def public @array_value_binding(%first: i32, %second: i32) -> (i32, i32, i32) {
-  %43 = scalar.constant 3 : i32
-  %47 = scalar.addi %first, %43 : i32
-  %50 = scalar.constant 5 : i32
-  %56 = scalar.addi %first, %50 : i32
-  func.return %56, %47, %second : i32, i32, i32
+  %39 = scalar.constant 3 : i32
+  %43 = scalar.addi %first, %39 : i32
+  %46 = scalar.constant 5 : i32
+  %52 = scalar.addi %first, %46 : i32
+  func.return %52, %43, %second : i32, i32, i32
 }
 
 func.def public @array_reference_binding(%first: i32, %second: i32) -> (i32, i32, i32) {
-  %93 = scalar.constant 3 : i32
-  %97 = scalar.addi %first, %93 : i32
-  %100 = scalar.constant 5 : i32
-  %104 = scalar.addi %second, %100 : i32
-  func.return %97, %97, %104 : i32, i32, i32
+  %85 = scalar.constant 3 : i32
+  %89 = scalar.addi %first, %85 : i32
+  %92 = scalar.constant 5 : i32
+  %96 = scalar.addi %second, %92 : i32
+  func.return %89, %89, %96 : i32, i32, i32
 }
 
 func.def public @record_array_value_binding(%first: i32, %second: i32) -> (i32) {
-  %201 = scalar.constant 1 : i32
-  %428 = scalar.addi %first, %second : i32
-  %430 = scalar.addi %428, %second : i32
-  %432 = scalar.addi %430, %first : i32
-  %433 = scalar.addi %432, %201 : i32
-  func.return %433 : i32
+  %189 = scalar.constant 1 : i32
+  %391 = scalar.addi %first, %second : i32
+  %393 = scalar.addi %391, %second : i32
+  %395 = scalar.addi %393, %first : i32
+  %396 = scalar.addi %395, %189 : i32
+  func.return %396 : i32
 }
 
 func.def public @nested_array_value_binding(%value: i32) -> (i32) {
-  %459 = scalar.addi %value, %value : i32
-  %461 = scalar.addi %459, %value : i32
-  %463 = scalar.constant 15 : i32
-  %464 = scalar.addi %461, %463 : i32
-  func.return %464 : i32
+  %422 = scalar.addi %value, %value : i32
+  %424 = scalar.addi %422, %value : i32
+  %426 = scalar.constant 15 : i32
+  %427 = scalar.addi %424, %426 : i32
+  func.return %427 : i32
 }
 
 // ====

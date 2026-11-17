@@ -21,16 +21,16 @@ unsigned roundtrip(unsigned value) {
 // ----
 func.def public @roundtrip(%value: i32) -> (i32) {
   %values = view.alloca<private> : view<4xi32>
-  %38 = index.constant 1 : index
-  view.store<type_disjoint> %value, %values[%38] : i32, view<4xi32>
-  %37 = index.constant 16 : offset
-  %elements = buffer.alloca<private> align(4) %37 : buffer
-  %14 = view.load<type_disjoint> %values[%38] : view<4xi32> -> i32
-  %35 = index.constant 0 : offset
-  %23 = buffer.view %elements[%35] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %14, %23[0] : i32, view<1xi32>
-  %33 = view.load<root_in_bounds|type_disjoint> %23[0] : view<1xi32> -> i32
-  func.return %33 : i32
+  %32 = index.constant 1 : index
+  view.store<type_disjoint> %value, %values[%32] : i32, view<4xi32>
+  %31 = index.constant 16 : offset
+  %elements = buffer.alloca<private> align(4) %31 : buffer
+  %14 = view.load<type_disjoint> %values[%32] : view<4xi32> -> i32
+  %29 = index.constant 0 : index
+  %20 = buffer.view %elements[%29] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %14, %20[0] : i32, view<1xi32>
+  %27 = view.load<root_in_bounds|type_disjoint> %20[0] : view<1xi32> -> i32
+  func.return %27 : i32
 }
 
 // ====
@@ -49,11 +49,11 @@ unsigned char bytes(loom::type::offset count, unsigned char value) {
 // ----
 func.def public @bytes(%count: offset, %value: i8) -> (i8) {
   %storage = buffer.alloca<private> align(1) %count : buffer
-  %25 = index.constant 0 : offset
-  %13 = buffer.view %storage[%25] : buffer -> view<1xi8>
-  view.store<root_in_bounds> %value, %13[0] : i8, view<1xi8>
-  %23 = view.load<root_in_bounds> %13[0] : view<1xi8> -> i8
-  func.return %23 : i8
+  %19 = index.constant 0 : index
+  %10 = buffer.view %storage[%19] : buffer -> view<1xi8>
+  view.store<root_in_bounds> %value, %10[0] : i8, view<1xi8>
+  %17 = view.load<root_in_bounds> %10[0] : view<1xi8> -> i8
+  func.return %17 : i8
 }
 
 // ====
@@ -75,14 +75,14 @@ unsigned roundtrip(unsigned value) {
 // ----
 func.def public @roundtrip(%value: i32) -> (i32) {
   %values = view.alloca<private> : view<4xi32>
-  %38 = index.constant 1 : index
-  view.store<type_disjoint> %value, %values[%38] : i32, view<4xi32>
-  %37 = index.constant 16 : offset
-  %elements = buffer.alloca<private> align(4) %37 : buffer
-  %14 = view.load<type_disjoint> %values[%38] : view<4xi32> -> i32
-  %35 = index.constant 0 : offset
-  %23 = buffer.view %elements[%35] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %14, %23[0] : i32, view<1xi32>
-  %33 = view.load<root_in_bounds|type_disjoint> %23[0] : view<1xi32> -> i32
-  func.return %33 : i32
+  %32 = index.constant 1 : index
+  view.store<type_disjoint> %value, %values[%32] : i32, view<4xi32>
+  %31 = index.constant 16 : offset
+  %elements = buffer.alloca<private> align(4) %31 : buffer
+  %14 = view.load<type_disjoint> %values[%32] : view<4xi32> -> i32
+  %29 = index.constant 0 : index
+  %20 = buffer.view %elements[%29] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %14, %20[0] : i32, view<1xi32>
+  %27 = view.load<root_in_bounds|type_disjoint> %20[0] : view<1xi32> -> i32
+  func.return %27 : i32
 }
