@@ -1,0 +1,236 @@
+// RUN: pass target=amdgpu:gfx11-generic source-to-low,low-dce
+
+amdgpu.target<gfx11-generic> @target
+
+// Uniform quotients and remainders enter a wider, varying loop domain. The
+// producer stays word-sized; the receiving edge owns widening and transfer.
+func.def target(@target) @constant_division_into_wide_loop(%increment_word: i64, %again: i1) -> (i64, i64) {
+  %worker = kernel.workgroup.id<x> : index
+  %input = index.assume %worker [range(%worker, 0, 2147483647)] : index
+  %divisor = index.constant 192 : index
+  %modulus = index.constant 7 : index
+  %quotient = index.div %input, %divisor : index
+  %remainder = index.rem %input, %modulus : index
+  %increment = index.cast %increment_word : i64 to index
+  cfg.br ^loop(%quotient: index, %remainder: index)
+^loop(%first: index, %second: index):
+  cfg.cond_br %again, ^advance, ^exit
+^advance:
+  %next_first = index.add %first, %increment : index
+  %next_second = index.add %second, %increment : index
+  cfg.br ^loop(%next_first: index, %next_second: index)
+^exit:
+  %first_word = index.cast %first : index to i64
+  %second_word = index.cast %second : index to i64
+  func.return %first_word, %second_word : i64, i64
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @constant_division_into_wide_loop(%increment: reg<amdgpu.vgpr x2>, %again: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %input = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
+  %modulus = s_mov_b32 7
+  %27 = s_mov_b32 715827883
+  %28 = s_mul_hi_u32 %input, %27
+  %29 = s_mov_b32 5
+  %quotient = s_lshr_b32 %28, %29
+  %31 = s_mov_b32 2454267027
+  %32 = s_mul_hi_u32 %input, %31
+  %33 = s_mov_b32 2
+  %34 = s_lshr_b32 %32, %33
+  %35 = s_mul_i32 %34, %modulus
+  %remainder = s_sub_u32 %input, %35
+  %37 = v_mov_b32_copy %quotient
+  %38 = v_mov_b32 0
+  %39 = concat(%37, %38) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %40 = v_mov_b32_copy %remainder
+  %41 = v_mov_b32 0
+  %42 = concat(%40, %41) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^_bb4(%39: reg<amdgpu.vgpr x2>, %42: reg<amdgpu.vgpr x2>)
+^_bb4(%first: reg<amdgpu.vgpr x2>, %second: reg<amdgpu.vgpr x2>):
+  %43 = s_mov_b64_exec_read
+  low.br ^loop(%first: reg<amdgpu.vgpr x2>, %second: reg<amdgpu.vgpr x2>)
+^loop(%first_word: reg<amdgpu.vgpr x2>, %second_word: reg<amdgpu.vgpr x2>):
+  %44, %45 = s_and_saveexec_b64 %again
+  low.cond_br %45, ^advance, ^_bb5 : reg<amdgpu.scc>
+^advance:
+  %46 = slice %first_word[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %47 = slice %first_word[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %48 = slice %increment[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %49 = slice %increment[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %50, %51 = v_add_co_u32 %46, %48
+  %52, %53 = v_add_co_ci_u32 %47, %49, %51
+  %next_first = concat(%50, %52) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %55 = slice %second_word[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %56 = slice %second_word[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %57 = slice %increment[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %58 = slice %increment[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %59, %60 = v_add_co_u32 %55, %57
+  %61, %62 = v_add_co_ci_u32 %56, %58, %60
+  %next_second = concat(%59, %61) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^loop(%next_first: reg<amdgpu.vgpr x2>, %next_second: reg<amdgpu.vgpr x2>)
+^_bb5:
+  s_mov_b64_exec %43
+  low.br ^exit
+^exit:
+  return %first_word, %second_word
+}
+
+// ====
+
+// RUN: pass target=amdgpu:gfx11-generic source-to-low,low-dce
+
+amdgpu.target<gfx11-generic> @target
+
+// Power-of-two recipes have the same producer contract in the vector bank.
+func.def target(@target) @power_of_two_into_wide_loop(%input_value: index, %increment_word: i64, %again: i1) -> (i64, i64) {
+  %input = index.assume %input_value [range(%input_value, 0, 4294967295)] : index
+  %divisor = index.constant 32 : index
+  %modulus = index.constant 64 : index
+  %quotient = index.div %input, %divisor : index
+  %remainder = index.rem %input, %modulus : index
+  %increment = index.cast %increment_word : i64 to index
+  cfg.br ^loop(%quotient: index, %remainder: index)
+^loop(%first: index, %second: index):
+  cfg.cond_br %again, ^advance, ^exit
+^advance:
+  %next_first = index.add %first, %increment : index
+  %next_second = index.add %second, %increment : index
+  cfg.br ^loop(%next_first: index, %next_second: index)
+^exit:
+  %first_word = index.cast %first : index to i64
+  %second_word = index.cast %second : index to i64
+  func.return %first_word, %second_word : i64, i64
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @power_of_two_into_wide_loop(%input: reg<amdgpu.vgpr>, %increment: reg<amdgpu.vgpr x2>, %again: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %quotient = v_lshrrev_b32_src0_inline %input, 5
+  %remainder = v_and_b32_lit %input, 63
+  %28 = v_mov_b32 0
+  %29 = concat(%quotient, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %30 = v_mov_b32 0
+  %31 = concat(%remainder, %30) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^_bb4(%29: reg<amdgpu.vgpr x2>, %31: reg<amdgpu.vgpr x2>)
+^_bb4(%first: reg<amdgpu.vgpr x2>, %second: reg<amdgpu.vgpr x2>):
+  %32 = s_mov_b64_exec_read
+  low.br ^loop(%first: reg<amdgpu.vgpr x2>, %second: reg<amdgpu.vgpr x2>)
+^loop(%first_word: reg<amdgpu.vgpr x2>, %second_word: reg<amdgpu.vgpr x2>):
+  %33, %34 = s_and_saveexec_b64 %again
+  low.cond_br %34, ^advance, ^_bb5 : reg<amdgpu.scc>
+^advance:
+  %35 = slice %first_word[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %36 = slice %first_word[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %37 = slice %increment[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %38 = slice %increment[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %39, %40 = v_add_co_u32 %35, %37
+  %41, %42 = v_add_co_ci_u32 %36, %38, %40
+  %next_first = concat(%39, %41) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %44 = slice %second_word[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %45 = slice %second_word[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %46 = slice %increment[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %47 = slice %increment[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %48, %49 = v_add_co_u32 %44, %46
+  %50, %51 = v_add_co_ci_u32 %45, %47, %49
+  %next_second = concat(%48, %50) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^loop(%next_first: reg<amdgpu.vgpr x2>, %next_second: reg<amdgpu.vgpr x2>)
+^_bb5:
+  s_mov_b64_exec %32
+  low.br ^exit
+^exit:
+  return %first_word, %second_word
+}
+
+// ====
+
+// RUN: pass target=amdgpu:gfx11-generic scf-to-cfg,source-to-low,low-dce
+
+amdgpu.target<gfx11-generic> @target
+
+// Runtime division publishes two independent word results before SCF widens
+// its initial values. The loop may execute zero times.
+func.def target(@target) @runtime_division_into_wide_loop(%input_value: index, %divisor_value: index, %increment_word: i64, %count: index) -> (i64, i64) {
+  %input = index.assume %input_value [range(%input_value, 0, 4294967295)] : index
+  %divisor = index.assume %divisor_value [range(%divisor_value, 1, 4294967295)] : index
+  %quotient, %remainder = index.divrem %input, %divisor : index
+  %increment = index.cast %increment_word : i64 to index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %first, %second = scf.for %iteration = [%c0 to %count step %c1](%first_value = %quotient : index, %second_value = %remainder : index) -> (index, index) {
+    %next_first = index.add %first_value, %increment : index
+    %next_second = index.add %second_value, %increment : index
+    scf.yield %next_first, %next_second : index, index
+  }
+  %first_word = index.cast %first : index to i64
+  %second_word = index.cast %second : index to i64
+  func.return %first_word, %second_word : i64, i64
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @runtime_division_into_wide_loop(%input: reg<amdgpu.vgpr>, %divisor: reg<amdgpu.vgpr>, %increment: reg<amdgpu.vgpr x2>, %count: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %44 = v_mov_b32 0
+  %45 = v_mov_b32 1
+  %46 = v_cvt_f32_u32 %divisor
+  %47 = v_rcp_f32 %46
+  %48 = v_mul_f32_lit %47, 1333788670
+  %49 = v_cvt_u32_f32 %48
+  %50 = v_mul_lo_u32 %divisor, %49
+  %51 = v_sub_nc_u32 %44, %50
+  %52 = v_mul_hi_u32 %49, %51
+  %53 = v_add_u32 %49, %52
+  %54 = v_mul_hi_u32 %input, %53
+  %55 = v_mul_lo_u32 %54, %divisor
+  %56 = v_sub_nc_u32 %input, %55
+  %57 = v_add_u32 %54, %45
+  %58, %59 = v_sub_co_u32 %56, %divisor
+  %60 = v_cndmask_b32 %57, %54, %59
+  %61 = v_cndmask_b32 %58, %56, %59
+  %62 = v_add_u32 %60, %45
+  %63, %64 = v_sub_co_u32 %61, %divisor
+  %quotient = v_cndmask_b32 %62, %60, %64
+  %remainder = v_cndmask_b32 %63, %61, %64
+  %c0 = s_mov_b32 0
+  %c1 = s_mov_b32 1
+  %69 = v_mov_b32_copy %c0
+  %70 = v_mov_b32 0
+  %71 = concat(%quotient, %70) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %72 = v_mov_b32 0
+  %73 = concat(%remainder, %72) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  low.br ^_bb5(%69: reg<amdgpu.vgpr>, %71: reg<amdgpu.vgpr x2>, %73: reg<amdgpu.vgpr x2>)
+^_bb5(%41: reg<amdgpu.vgpr>, %first_value$42: reg<amdgpu.vgpr x2>, %second_value$43: reg<amdgpu.vgpr x2>):
+  %75 = s_mov_b64_exec_read
+  low.br ^_bb1(%41: reg<amdgpu.vgpr>, %first_value$42: reg<amdgpu.vgpr x2>, %second_value$43: reg<amdgpu.vgpr x2>)
+^_bb1(%iteration: reg<amdgpu.vgpr>, %first_value$37: reg<amdgpu.vgpr x2>, %second_value$38: reg<amdgpu.vgpr x2>):
+  %74 = v_cmp_lt_i32 %iteration, %count
+  %76, %77 = s_and_saveexec_b64 %74
+  low.cond_br %77, ^_bb2, ^_bb6 : reg<amdgpu.scc>
+^_bb2:
+  %78 = slice %first_value$37[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %79 = slice %first_value$37[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %80 = slice %increment[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %81 = slice %increment[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %82, %83 = v_add_co_u32 %78, %80
+  %84, %85 = v_add_co_ci_u32 %79, %81, %83
+  %next_first = concat(%82, %84) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %87 = slice %second_value$38[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %88 = slice %second_value$38[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %89 = slice %increment[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %90 = slice %increment[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %91, %92 = v_add_co_u32 %87, %89
+  %93, %94 = v_add_co_ci_u32 %88, %90, %92
+  %next_second = concat(%91, %93) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %96 = v_add_u32 %c1, %iteration
+  low.br ^_bb1(%96: reg<amdgpu.vgpr>, %next_first: reg<amdgpu.vgpr x2>, %next_second: reg<amdgpu.vgpr x2>)
+^_bb6:
+  s_mov_b64_exec %75
+  low.br ^_bb3
+^_bb3:
+  low.br ^_bb4(%first_value$37: reg<amdgpu.vgpr x2>, %second_value$38: reg<amdgpu.vgpr x2>)
+^_bb4(%first_word: reg<amdgpu.vgpr x2>, %second_word: reg<amdgpu.vgpr x2>):
+  return %first_word, %second_word
+}

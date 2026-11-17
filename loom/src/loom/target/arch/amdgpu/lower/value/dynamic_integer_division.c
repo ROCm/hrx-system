@@ -164,10 +164,16 @@ iree_status_t loom_amdgpu_select_dynamic_u32_division_plan(
         loom_amdgpu_low_result_type(context, source_op, results[i], &low_type));
     uint16_t result_class_id = 0;
     if (loom_amdgpu_low_type_is_register_class_count(
-            context, low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1)) {
+            context, low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1) ||
+        (is_index &&
+         loom_amdgpu_low_type_is_register_class_count(
+             context, low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2))) {
       result_class_id = LOOM_AMDGPU_REG_CLASS_ID_SGPR;
     } else if (loom_amdgpu_low_type_is_register_class_count(
-                   context, low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1)) {
+                   context, low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1) ||
+               (is_index &&
+                loom_amdgpu_low_type_is_register_class_count(
+                    context, low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR, 2))) {
       result_class_id = LOOM_AMDGPU_REG_CLASS_ID_VGPR;
     } else {
       return iree_ok_status();
@@ -321,6 +327,8 @@ static iree_status_t loom_amdgpu_initialize_division_reciprocal(
 iree_status_t loom_amdgpu_finalize_dynamic_u32_division_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_dynamic_u32_division_plan_t* plan) {
+  // Facts prove word-sized results even when a receiving loop or callable
+  // carries a wider domain. Boundary planning extends this producer's carrier.
   const loom_type_t result_type = loom_low_register_type(
       loom_low_lower_context_descriptor_set(context)->stable_id,
       plan->register_class_id, 1);

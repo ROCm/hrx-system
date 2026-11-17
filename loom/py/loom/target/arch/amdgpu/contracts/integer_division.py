@@ -157,7 +157,7 @@ def _magic_division_sgpr_emits(
         EmitDescriptorOp(
             descriptor=move,
             results={"dst": ValueRef.temporary("magic")},
-            result_types={"dst": _RESULT},
+            result_types={"dst": DescriptorResultType()},
             immediates={
                 "imm32": ValueProject.u32_divisor_magic_multiplier("lhs", "rhs")
             },
@@ -171,7 +171,7 @@ def _magic_division_sgpr_emits(
             results={
                 "dst": ValueRef.temporary("quotient") if kind.has_shift else result
             },
-            result_types={"dst": _RESULT},
+            result_types={"dst": DescriptorResultType()},
         ),
     ]
     if kind.has_add:
@@ -184,12 +184,12 @@ def _magic_division_sgpr_emits(
                         "rhs": ValueRef.temporary("quotient"),
                     },
                     results={"dst": ValueRef.temporary("npq")},
-                    result_types={"dst": _RESULT},
+                    result_types={"dst": DescriptorResultType()},
                 ),
                 EmitDescriptorOp(
                     descriptor=move,
                     results={"dst": ValueRef.temporary("one")},
-                    result_types={"dst": _RESULT},
+                    result_types={"dst": DescriptorResultType()},
                     immediates={"imm32": 1},
                 ),
                 EmitDescriptorOp(
@@ -199,7 +199,7 @@ def _magic_division_sgpr_emits(
                         "rhs": ValueRef.temporary("one"),
                     },
                     results={"dst": ValueRef.temporary("npq_half")},
-                    result_types={"dst": _RESULT},
+                    result_types={"dst": DescriptorResultType()},
                 ),
                 EmitDescriptorOp(
                     descriptor=add,
@@ -208,7 +208,7 @@ def _magic_division_sgpr_emits(
                         "rhs": ValueRef.temporary("quotient"),
                     },
                     results={"dst": ValueRef.temporary("adjusted_quotient")},
-                    result_types={"dst": _RESULT},
+                    result_types={"dst": DescriptorResultType()},
                 ),
             ]
         )
@@ -219,7 +219,7 @@ def _magic_division_sgpr_emits(
             EmitDescriptorOp(
                 descriptor=move,
                 results={"dst": ValueRef.temporary("post_shift")},
-                result_types={"dst": _RESULT},
+                result_types={"dst": DescriptorResultType()},
                 immediates={
                     "imm32": ValueProject.u32_divisor_magic_shift(
                         "lhs", "rhs", product_bit_width=32
@@ -233,7 +233,7 @@ def _magic_division_sgpr_emits(
                     "rhs": ValueRef.temporary("post_shift"),
                 },
                 results={"dst": result},
-                result_types={"dst": _RESULT},
+                result_types={"dst": DescriptorResultType()},
             ),
         ]
     )
@@ -278,7 +278,7 @@ def _magic_division_vgpr_emits(
         EmitDescriptorOp(
             descriptor=move,
             results={"dst": ValueRef.temporary("magic")},
-            result_types={"dst": _RESULT},
+            result_types={"dst": DescriptorResultType()},
             immediates={
                 "imm32": ValueProject.u32_divisor_magic_multiplier("lhs", "rhs")
             },
@@ -292,7 +292,7 @@ def _magic_division_vgpr_emits(
             results={
                 "dst": ValueRef.temporary("quotient") if kind.has_shift else result
             },
-            result_types={"dst": _RESULT},
+            result_types={"dst": DescriptorResultType()},
             form=DescriptorEmitForm.OP,
         ),
     ]
@@ -309,14 +309,14 @@ def _magic_division_vgpr_emits(
                         "rhs": ValueRef.temporary("quotient"),
                     },
                     results={"dst": ValueRef.temporary("npq")},
-                    result_types={"dst": _RESULT},
+                    result_types={"dst": DescriptorResultType()},
                     form=DescriptorEmitForm.OP,
                 ),
                 EmitDescriptorOp(
                     descriptor=shift,
                     operands={"value": ValueRef.temporary("npq")},
                     results={"dst": ValueRef.temporary("npq_half")},
-                    result_types={"dst": _RESULT},
+                    result_types={"dst": DescriptorResultType()},
                     immediates={"imm32": 1},
                     form=DescriptorEmitForm.OP,
                 ),
@@ -327,7 +327,7 @@ def _magic_division_vgpr_emits(
                         "rhs": ValueRef.temporary("quotient"),
                     },
                     results={"dst": ValueRef.temporary("adjusted_quotient")},
-                    result_types={"dst": _RESULT},
+                    result_types={"dst": DescriptorResultType()},
                     form=DescriptorEmitForm.OP,
                 ),
             ]
@@ -339,7 +339,7 @@ def _magic_division_vgpr_emits(
             descriptor=shift,
             operands={"value": quotient_value},
             results={"dst": result},
-            result_types={"dst": _RESULT},
+            result_types={"dst": DescriptorResultType()},
             immediates={
                 "imm32": ValueProject.u32_divisor_magic_shift(
                     "lhs", "rhs", product_bit_width=32
@@ -466,7 +466,7 @@ def _magic_remainder_sgpr_rule(
                     "rhs": _sgpr_operand("rhs", type_pattern),
                 },
                 results={"dst": ValueRef.temporary("product")},
-                result_types={"dst": _RESULT},
+                result_types={"dst": DescriptorResultType()},
             ),
             EmitDescriptorOp(
                 descriptor=subtract,
@@ -475,6 +475,7 @@ def _magic_remainder_sgpr_rule(
                     "rhs": ValueRef.temporary("product"),
                 },
                 results={"dst": _RESULT},
+                result_types={"dst": DescriptorResultType()},
             ),
         ),
     )
@@ -537,7 +538,7 @@ def _magic_remainder_vgpr_rule(
                 descriptor=product_descriptor,
                 operands=product_operands,
                 results={"dst": ValueRef.temporary("product")},
-                result_types={"dst": _RESULT},
+                result_types={"dst": DescriptorResultType()},
                 immediates=product_immediates,
                 form=DescriptorEmitForm.OP,
             ),
@@ -548,6 +549,7 @@ def _magic_remainder_vgpr_rule(
                     "rhs": ValueRef.temporary("product"),
                 },
                 results={"dst": _RESULT},
+                result_types={"dst": DescriptorResultType()},
                 form=DescriptorEmitForm.OP,
             ),
         ),

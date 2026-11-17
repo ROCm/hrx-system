@@ -44,6 +44,7 @@ from loom.target.contracts import (
     Buffer,
     ContractFragment,
     DescriptorEmitForm,
+    DescriptorResultType,
     DescriptorRule,
     EmitDescriptorOp,
     EmitRegisterSlice,
@@ -1804,7 +1805,6 @@ def _index_div_power_of_two_sgpr_rule() -> DescriptorRule:
                 unsigned_diagnostic=_ADDRESS_U32_DIAGNOSTIC,
             ),
             Guard.low_value_register_class("result", "amdgpu.sgpr"),
-            Guard.low_value_register_unit_count("result", 1),
             Guard.value_materializable("lhs", ADDRESS_SGPR_MATERIALIZER.name),
             Guard.value_unsigned_bit_count(
                 "lhs",
@@ -1828,7 +1828,7 @@ def _index_div_power_of_two_sgpr_rule() -> DescriptorRule:
             EmitDescriptorOp(
                 descriptor=move,
                 results={"dst": ValueRef.temporary("shift")},
-                result_types={"dst": _RESULT},
+                result_types={"dst": DescriptorResultType()},
                 immediates={"imm32": ValueProject.exact_i64_log2("rhs")},
             ),
             EmitDescriptorOp(
@@ -1838,6 +1838,7 @@ def _index_div_power_of_two_sgpr_rule() -> DescriptorRule:
                     "rhs": ValueRef.temporary("shift"),
                 },
                 results={"dst": _RESULT},
+                result_types={"dst": DescriptorResultType()},
             ),
         ),
     )
@@ -1883,6 +1884,7 @@ def _index_div_power_of_two_vgpr_rule() -> DescriptorRule:
                     )
                 },
                 results={"dst": _RESULT},
+                result_types={"dst": DescriptorResultType()},
                 immediates={"imm32": ValueProject.exact_i64_log2("rhs")},
                 form=DescriptorEmitForm.OP,
             ),
@@ -1903,7 +1905,6 @@ def _index_rem_power_of_two_sgpr_rule() -> DescriptorRule:
                 unsigned_diagnostic=_ADDRESS_U32_DIAGNOSTIC,
             ),
             Guard.low_value_register_class("result", "amdgpu.sgpr"),
-            Guard.low_value_register_unit_count("result", 1),
             Guard.value_materializable("lhs", ADDRESS_SGPR_MATERIALIZER.name),
             Guard.value_unsigned_bit_count(
                 "lhs",
@@ -1927,7 +1928,7 @@ def _index_rem_power_of_two_sgpr_rule() -> DescriptorRule:
             EmitDescriptorOp(
                 descriptor=move,
                 results={"dst": ValueRef.temporary("mask")},
-                result_types={"dst": _RESULT},
+                result_types={"dst": DescriptorResultType()},
                 immediates={"imm32": ValueProject.exact_i64_minus_one("rhs")},
             ),
             EmitDescriptorOp(
@@ -1937,6 +1938,7 @@ def _index_rem_power_of_two_sgpr_rule() -> DescriptorRule:
                     "rhs": ValueRef.temporary("mask"),
                 },
                 results={"dst": _RESULT},
+                result_types={"dst": DescriptorResultType()},
             ),
         ),
     )
@@ -1982,6 +1984,7 @@ def _index_rem_power_of_two_vgpr_rule() -> DescriptorRule:
                     )
                 },
                 results={"dst": _RESULT},
+                result_types={"dst": DescriptorResultType()},
                 immediates={"imm32": ValueProject.exact_i64_minus_one("rhs")},
                 form=DescriptorEmitForm.OP,
             ),
