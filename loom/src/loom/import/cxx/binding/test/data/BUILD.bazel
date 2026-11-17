@@ -45,6 +45,8 @@ loom_check_test_suite(
         "view_dimensions_invalid.cxx-test",
         "view_generators.cxx-test",
         "view_reference_loops.cxx-test",
+        "view_subscripts.cxx-test",
+        "view_subscripts_invalid.cxx-test",
         "view_values.cxx-test",
         "view_values_invalid.cxx-test",
     ],

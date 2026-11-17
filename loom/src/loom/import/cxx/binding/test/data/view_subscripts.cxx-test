@@ -1,0 +1,206 @@
+// RUN: roundtrip
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+
+using Values = loom::type::view<loom::type::shape<4>, unsigned>;
+
+unsigned exchange(Values values, unsigned index, unsigned replacement) {
+  auto previous = values[index];
+  values[index] = replacement;
+  return previous;
+}
+
+unsigned advance_once(Values values, unsigned index) {
+  values[index++] = 7;
+  return index;
+}
+
+unsigned accumulate(Values values, unsigned index, unsigned increment) {
+  return values[index] += increment;
+}
+
+// ----
+func.def public @exchange(%values: view<4xi32>, %index: i32, %replacement: i32) -> (i32) {
+  %4 = scalar.extui %index : i32 to i64
+  %5 = index.cast %4 : i64 to index
+  %previous = view.load<type_disjoint> %values[%5] : view<4xi32> -> i32
+  %7 = scalar.extui %index : i32 to i64
+  %8 = index.cast %7 : i64 to index
+  view.store<type_disjoint> %replacement, %values[%8] : i32, view<4xi32>
+  func.return %previous : i32
+}
+
+func.def public @advance_once(%values: view<4xi32>, %index$10: i32) -> (i32) {
+  %12 = scalar.constant 7 : i32
+  %13 = scalar.constant 1 : i32
+  %index$14 = scalar.addi %index$10, %13 : i32
+  %15 = scalar.extui %index$10 : i32 to i64
+  %16 = index.cast %15 : i64 to index
+  view.store<type_disjoint> %12, %values[%16] : i32, view<4xi32>
+  func.return %index$14 : i32
+}
+
+func.def public @accumulate(%values: view<4xi32>, %index: i32, %increment: i32) -> (i32) {
+  %21 = scalar.extui %index : i32 to i64
+  %22 = index.cast %21 : i64 to index
+  %23 = view.load<type_disjoint> %values[%22] : view<4xi32> -> i32
+  %24 = scalar.addi %23, %increment : i32
+  %25 = scalar.extui %index : i32 to i64
+  %26 = index.cast %25 : i64 to index
+  view.store<type_disjoint> %24, %values[%26] : i32, view<4xi32>
+  func.return %24 : i32
+}
+
+// ====
+// RUN: roundtrip
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+
+struct [[loom::import("hal", "buffer")]] Buffer;
+struct Binding {
+  loom::ptr<Buffer> buffer;
+  unsigned long long offset;
+  unsigned long long length;
+};
+using Bindings =
+    loom::type::view<loom::type::shape<loom::type::dynamic>, Binding>;
+
+Binding update(Bindings bindings, unsigned index, Binding replacement) {
+  bindings[index] = replacement;
+  bindings[index].offset = bindings[index].length;
+  return bindings[index];
+}
+
+// ----
+type.decl import("hal", "buffer") @Buffer
+
+func.def public @update(%bindings_dim0: index, %bindings_buffer: view<[%bindings_dim0]xptr<@Buffer>>, %bindings_offset: view<[%bindings_dim0]xi64>, %bindings_length: view<[%bindings_dim0]xi64>, %index: i32, %replacement_buffer: ptr<@Buffer>, %replacement_offset: i64, %replacement_length: i64) -> (ptr<@Buffer>, i64, i64) {
+  %11 = scalar.extui %index : i32 to i64
+  %12 = index.cast %11 : i64 to index
+  view.store %replacement_buffer, %bindings_buffer[%12] : ptr<@Buffer>, view<[%bindings_dim0]xptr<@Buffer>>
+  view.store %replacement_offset, %bindings_offset[%12] : i64, view<[%bindings_dim0]xi64>
+  view.store %replacement_length, %bindings_length[%12] : i64, view<[%bindings_dim0]xi64>
+  %13 = scalar.extui %index : i32 to i64
+  %14 = index.cast %13 : i64 to index
+  %length = view.load %bindings_length[%14] : view<[%bindings_dim0]xi64> -> i64
+  %16 = scalar.extui %index : i32 to i64
+  %17 = index.cast %16 : i64 to index
+  view.store %length, %bindings_offset[%17] : i64, view<[%bindings_dim0]xi64>
+  %18 = scalar.extui %index : i32 to i64
+  %19 = index.cast %18 : i64 to index
+  %20 = view.load %bindings_buffer[%19] : view<[%bindings_dim0]xptr<@Buffer>> -> ptr<@Buffer>
+  %21 = view.load %bindings_offset[%19] : view<[%bindings_dim0]xi64> -> i64
+  %22 = view.load %bindings_length[%19] : view<[%bindings_dim0]xi64> -> i64
+  func.return %20, %21, %22 : ptr<@Buffer>, i64, i64
+}
+
+// ====
+// RUN: roundtrip
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+
+struct [[loom::import("hal", "buffer")]] Buffer;
+struct Binding {
+  loom::ptr<Buffer> buffer;
+  unsigned long long offset;
+  unsigned long long length;
+};
+using Bindings = loom::type::view<loom::type::shape<2>, Binding>;
+
+Binding construct(loom::ptr<Buffer> buffer) {
+  auto bindings = loom::view::alloca<Bindings>();
+  bindings[1] = Binding{buffer, 16, 32};
+  Binding value = bindings[1];
+  return value;
+}
+
+// ----
+type.decl import("hal", "buffer") @Buffer
+
+func.def public @construct(%buffer: ptr<@Buffer>) -> (ptr<@Buffer>, i64, i64) {
+  %bindings_buffer = view.alloca<private> : view<2xptr<@Buffer>>
+  %bindings_offset = view.alloca<private> : view<2xi64>
+  %bindings_length = view.alloca<private> : view<2xi64>
+  %7 = scalar.constant 16 : i32
+  %8 = scalar.extsi %7 : i32 to i64
+  %9 = scalar.constant 32 : i32
+  %10 = scalar.extsi %9 : i32 to i64
+  %11 = scalar.constant 1 : i32
+  %12 = index.cast %11 : i32 to index
+  view.store %buffer, %bindings_buffer[%12] : ptr<@Buffer>, view<2xptr<@Buffer>>
+  view.store %8, %bindings_offset[%12] : i64, view<2xi64>
+  view.store %10, %bindings_length[%12] : i64, view<2xi64>
+  %13 = scalar.constant 1 : i32
+  %14 = index.cast %13 : i32 to index
+  %value_buffer = view.load %bindings_buffer[%14] : view<2xptr<@Buffer>> -> ptr<@Buffer>
+  %value_offset = view.load %bindings_offset[%14] : view<2xi64> -> i64
+  %value_length = view.load %bindings_length[%14] : view<2xi64> -> i64
+  func.return %value_buffer, %value_offset, %value_length : ptr<@Buffer>, i64, i64
+}
+
+// ====
+// RUN: roundtrip
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+
+struct [[loom::import("hal", "semaphore")]] Semaphore;
+using Handle = loom::ptr<Semaphore>;
+using Layout = loom::type::encoding<loom::encoding::role::layout, 3>;
+using Grid = loom::type::view<
+    loom::type::shape<loom::type::dynamic, 2, 3>, Handle, Layout>;
+
+Handle route(Grid grid, unsigned z, unsigned y, unsigned x,
+             Handle replacement) {
+  auto previous = grid[z, y, x];
+  grid[z, y, x] = replacement;
+  return previous;
+}
+
+// ----
+type.decl import("hal", "semaphore") @Semaphore
+
+func.def public @route(%grid_dim0: index, %grid_layout: encoding<layout>, %grid: view<[%grid_dim0]x2x3xptr<@Semaphore>, %grid_layout>, %z: i32, %y: i32, %x: i32, %replacement: ptr<@Semaphore>) -> (ptr<@Semaphore>) {
+  %8 = scalar.extui %z : i32 to i64
+  %9 = index.cast %8 : i64 to index
+  %10 = scalar.extui %y : i32 to i64
+  %11 = index.cast %10 : i64 to index
+  %12 = scalar.extui %x : i32 to i64
+  %13 = index.cast %12 : i64 to index
+  %previous = view.load %grid[%9, %11, %13] : view<[%grid_dim0]x2x3xptr<@Semaphore>, %grid_layout> -> ptr<@Semaphore>
+  %15 = scalar.extui %z : i32 to i64
+  %16 = index.cast %15 : i64 to index
+  %17 = scalar.extui %y : i32 to i64
+  %18 = index.cast %17 : i64 to index
+  %19 = scalar.extui %x : i32 to i64
+  %20 = index.cast %19 : i64 to index
+  view.store %replacement, %grid[%16, %18, %20] : ptr<@Semaphore>, view<[%grid_dim0]x2x3xptr<@Semaphore>, %grid_layout>
+  func.return %previous : ptr<@Semaphore>
+}
+
+// ====
+// RUN: roundtrip
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+
+struct [[loom::import("lifetime", "object")]] Object;
+using Owner = loom::type::ref<Object>;
+using Owners = loom::type::view<loom::type::shape<4>, Owner>;
+
+Owner exchange_owner(Owners owners, unsigned index, Owner replacement) {
+  auto previous = owners[index];
+  owners[index] = replacement;
+  return previous;
+}
+
+// ----
+type.decl import("lifetime", "object") @Object
+
+func.def public @exchange_owner(%owners: view<4xref<@Object>>, %index: i32, %replacement: ref<@Object>) -> (ref<@Object>) {
+  %4 = scalar.extui %index : i32 to i64
+  %5 = index.cast %4 : i64 to index
+  %previous = view.load %owners[%5] : view<4xref<@Object>> -> ref<@Object>
+  %7 = scalar.extui %index : i32 to i64
+  %8 = index.cast %7 : i64 to index
+  view.store %replacement, %owners[%8] : ref<@Object>, view<4xref<@Object>>
+  func.return %previous : ref<@Object>
+}

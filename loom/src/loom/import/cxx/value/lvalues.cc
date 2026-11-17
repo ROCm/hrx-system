@@ -96,6 +96,13 @@ Lvalue Lvalue::project(const SubobjectProjection& selected,
     return {std::make_shared<const SelectedLvalue>(choices->selector, type,
                                                    std::move(alternatives))};
   }
+  if (const auto* element = std::get_if<ViewElementLvalue>(&projection)) {
+    auto result = *element;
+    result.type = type;
+    result.partition = selected.partition;
+    result.component_offset += selected.component_offset;
+    return {std::move(result)};
+  }
   const auto& object = std::get<ObjectLvalue>(projection);
   if (std::holds_alternative<CurrentReceiver>(object.location)) {
     return {ObjectLvalue{type, Destination{selected.root->source,

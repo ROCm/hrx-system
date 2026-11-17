@@ -50,6 +50,26 @@ class ViewIntrinsic {
                             cxx::AST* owner, loom_builder_t* builder,
                             loom_location_id_t location) const;
 
+  // Returns whether this binding names the synthetic source element lvalue.
+  bool is_element() const { return operation_ == Operation::Element; }
+
+  // Loads a complete element or one immediately selected subobject. The
+  // selected component interval follows the element's ordinary flattened
+  // value projection and therefore maps directly to columnar view storage.
+  Value load_element(Value source, std::span<const Value> indices,
+                     const Partition& result, size_t component_offset,
+                     ValueArena& arena, loom_builder_t* builder,
+                     loom_location_id_t location) const;
+
+  // Stores a complete element or one immediately selected subobject.
+  void store_element(Value value, Value destination,
+                     std::span<const Value> indices, size_t component_offset,
+                     loom_builder_t* builder,
+                     loom_location_id_t location) const;
+
+  // Returns whether every column in the selected element interval is mutable.
+  bool element_writable(size_t component_offset, size_t component_count) const;
+
   // Compares the complete concrete contract for one canonical declaration.
   bool equivalent(const ViewIntrinsic& other) const;
 
@@ -63,11 +83,21 @@ class ViewIntrinsic {
     AsConst,
     Bitcast,
     Dim,
+    Element,
     Load,
     Store,
   };
 
   static std::optional<Operation> parse_operation(std::string_view name);
+
+  Value build_load(Value source, std::span<const Value> indices,
+                   size_t index_argument_offset, const Partition& result,
+                   size_t component_offset, ValueArena& arena,
+                   loom_builder_t* builder, loom_location_id_t location) const;
+  void build_store(Value value, Value destination,
+                   std::span<const Value> indices, size_t index_argument_offset,
+                   size_t component_offset, loom_builder_t* builder,
+                   loom_location_id_t location) const;
 
   explicit ViewIntrinsic(Operation operation) : operation_(operation) {}
 
@@ -88,7 +118,7 @@ class ViewIntrinsic {
   int64_t alignment_bytes_ = 1;
   // Whether the allocation borrows an explicit backing pool.
   bool has_pool_ = false;
-  // Admitted source view for subview/load/store.
+  // Admitted source view for subview, element, load, and store operations.
   const ViewPartition* source_view_ = nullptr;
   // Static extent selected by view.dim, or -1 for a transported dimension.
   int64_t dimension_extent_ = -1;
@@ -102,8 +132,11 @@ class ViewIntrinsic {
   uint16_t unsigned_dimension_mask_ = 0;
   // Flattened subview origin components whose integer values are unsigned.
   uint16_t unsigned_origin_mask_ = 0;
-  // Source representation retained at admission for a loaded element.
+  // Source representation retained at admission for one element value.
   const Partition* element_partition_ = nullptr;
+  // Whether a primitive element accepts source writes. Columnar elements
+  // retain this independently on each ViewColumn.
+  bool element_writable_ = false;
   // Inferred and explicitly selected semantics for one memory observation.
   loom_memory_access_flags_t memory_flags_ = 0;
 };

@@ -570,7 +570,28 @@ Intrinsics::Binding* Intrinsics::concrete_binding(cxx::FunctionSymbol* function,
 
 Intrinsics::Binding* Intrinsics::lookup(cxx::FunctionSymbol* function,
                                         cxx::AST* owner) {
-  return concrete_binding(function, owner);
+  if (auto* binding = concrete_binding(function, owner)) {
+    return binding;
+  }
+  // A member-function template instantiated from within a class-template
+  // specialization retains its semantic operation annotation, but CXX does
+  // not classify that nested instance as a FunctionSymbol specialization.
+  // Admit the source-only view element adapter from the retained concrete
+  // declaration. All executable intrinsic families continue to require their
+  // ordinary primary-template binding above.
+  auto* attribute = operation_attribute(function->attributes());
+  if (!attribute || attribute->arguments.size() != 1 ||
+      attribute->arguments[0]->name() != "view.element") {
+    return nullptr;
+  }
+  auto view = ViewIntrinsic::resolve(unit_, diagnostics_, types_, function,
+                                     *attribute, owner);
+  if (!view || !view->is_element()) {
+    diagnostics_.reject(unit_, owner,
+                        "view.element has no source lvalue projection");
+  }
+  return &bindings_.try_emplace(function->canonical(), std::move(*view))
+              .first->second;
 }
 
 Intrinsics::TemplateFamily Intrinsics::bind_template_family(
@@ -636,6 +657,12 @@ IntrinsicCallResult Intrinsics::call(const Binding& admitted,
     return {refinement->call(arguments, arena, builder, location)};
   }
   if (auto* view = std::get_if<ViewIntrinsic>(binding)) {
+    if (view->is_element()) {
+      diagnostics_.reject(
+          unit_, owner,
+          "view.element requires subscript syntax and an immediate lvalue "
+          "use");
+    }
     return {view->call(arguments, types_, arena, storage, owner, builder,
                        location)};
   }
