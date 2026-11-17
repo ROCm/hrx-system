@@ -40,6 +40,12 @@ iree_status_t loom_spirv_prepare_wide_index(loom_low_lower_context_t* context,
                                             loom_value_id_t source_value,
                                             const void** out_plan);
 
+// Extends a signed coordinate or preserves an unsigned byte position for a
+// physical address use. The source value keeps its selected carrier.
+iree_status_t loom_spirv_prepare_byte_position(
+    loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void** out_plan);
+
 // Returns the type retained by preparation, or the producer's existing carrier.
 loom_type_t loom_spirv_materialized_index_operand_type(
     const loom_low_lower_context_t* context, loom_value_id_t source_value,

@@ -206,8 +206,8 @@ def test_compact_offset_comparisons_preserve_unsigned_magnitude() -> None:
 
 
 def test_buffer_positions_cover_address_offset_and_predicate_carriers() -> None:
-    # Each full-address addition accepts independently narrow or wide byte
-    # displacements. Segment coordinates use the existing narrow carrier.
+    # Full-address additions materialize both signed and unsigned positions.
+    # Segment coordinates use the existing narrow carrier.
     signatures = []
     for rule in AMDGPU_BUFFER_CONTRACT_FRAGMENT.cases:
         if (
@@ -241,11 +241,21 @@ def test_buffer_positions_cover_address_offset_and_predicate_carriers() -> None:
             if guard.field == "result"
             and guard.kind is GuardKind.LOW_VALUE_REGISTER_CLASS
         )
+        if counts["lhs"] == 2:
+            positions = {
+                guard.field: guard.materializer
+                for guard in rule.guards
+                if guard.kind is GuardKind.VALUE_MATERIALIZABLE
+            }
+            materializer = (
+                "address_vgpr64" if counts["result"] == 2 else "address_sgpr64"
+            )
+            assert positions["lhs_offset"] == positions["rhs_offset"] == materializer
+        else:
+            assert counts["lhs_offset"] == counts["rhs_offset"] == 1
         signatures.append(
             (
                 spaces["lhs"][0],
-                counts["lhs_offset"],
-                counts["rhs_offset"],
                 predicate,
                 result_class,
                 counts["result"],
@@ -253,10 +263,8 @@ def test_buffer_positions_cover_address_offset_and_predicate_carriers() -> None:
         )
     assert len(signatures) == len(set(signatures))
     assert set(signatures) == {
-        (space, left, right, predicate, register_class, result_units)
+        (space, predicate, register_class, result_units)
         for space in ("unknown", "private", "workgroup")
-        for left in ((1, 2) if space == "unknown" else (1,))
-        for right in ((1, 2) if space == "unknown" else (1,))
         for predicate in ("eq", "ne")
         for register_class, result_units in (
             ("amdgpu.scc", 1),

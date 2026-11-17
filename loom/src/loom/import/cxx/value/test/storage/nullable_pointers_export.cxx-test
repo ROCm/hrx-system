@@ -17,6 +17,12 @@ auto distance(const int* first, const int* last) { return last - first; }
 short byte_distance(Buffer source, loom::type::offset left, loom::type::offset right) {
   return loom::buffer::distance<short>(source, left, source, right);
 }
+bool signed_position(Buffer first, loom::type::index left, Buffer second, loom::type::offset right) {
+  return loom::buffer::compare::address<loom::buffer::compare::predicate::eq>(first, left, second, right);
+}
+int signed_distance(Buffer source, loom::type::index left, loom::type::index right) {
+  return loom::buffer::distance<int>(source, left, source, right);
+}
 // ----
 #include <loomcxx/numeric.h>
 #include <loomcxx/predicate.h>
@@ -42,6 +48,12 @@ unsigned long long distance(loom::type::buffer<unsigned char> first, loom::type:
 
 [[loom::symbol("byte_distance")]]
 unsigned short byte_distance(loom::type::buffer<unsigned char> source, loom::type::offset left, loom::type::offset right);
+
+[[loom::symbol("signed_position")]]
+bool signed_position(loom::type::buffer<unsigned char> first, loom::type::index left, loom::type::buffer<unsigned char> second, loom::type::offset right);
+
+[[loom::symbol("signed_distance")]]
+unsigned signed_distance(loom::type::buffer<unsigned char> source, loom::type::index left, loom::type::index right);
 
 [[loom::symbol("optional")]]
 loom::type::buffer<unsigned char> optional(loom::type::buffer<unsigned char> input, bool use) {
@@ -98,4 +110,16 @@ unsigned long long distance(loom::type::buffer<unsigned char> first, loom::type:
 unsigned short byte_distance(loom::type::buffer<unsigned char> source, loom::type::offset left, loom::type::offset right) {
   short v50 = loom::buffer::distance<short>(source, left, source, right);
   return static_cast<unsigned short>(v50);
+}
+
+[[loom::symbol("signed_position")]]
+bool signed_position(loom::type::buffer<unsigned char> first, loom::type::index left, loom::type::buffer<unsigned char> second, loom::type::offset right) {
+  bool v56 = loom::buffer::compare::address<loom::buffer::compare::predicate::eq>(first, left, second, right);
+  return v56;
+}
+
+[[loom::symbol("signed_distance")]]
+unsigned signed_distance(loom::type::buffer<unsigned char> source, loom::type::index left, loom::type::index right) {
+  int v61 = loom::buffer::distance<int>(source, left, source, right);
+  return static_cast<unsigned>(v61);
 }

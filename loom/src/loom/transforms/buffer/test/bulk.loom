@@ -83,3 +83,31 @@ func.def public @bulk_compare5(%left: buffer, %left_offset: offset, %right: buff
   %order = buffer.compare %left[%left_offset], %right[%right_offset], %length
   func.return %order : i32
 }
+
+// The supplied origins may be interior native pointers. Byte positions retain
+// their sign through bulk legalization; lengths remain unsigned.
+func.def public @signed_copy(%source: buffer, %source_position: index, %target: buffer, %target_position: index, %length: offset) {
+  buffer.copy %source[%source_position], %target[%target_position], %length
+  func.return
+}
+
+func.def public @signed_fill(%target: buffer, %position: index, %length: offset, %pattern: i32) {
+  buffer.fill %pattern, %target[%position], %length : i32
+  func.return
+}
+
+func.def public @signed_compare(%left: buffer, %left_position: index, %right: buffer, %right_position: index, %length: offset) -> (i32) {
+  %order = buffer.compare %left[%left_position], %right[%right_position], %length
+  func.return %order : i32
+}
+
+func.def public @signed_byte(%source: buffer, %position: index, %target: buffer, %target_position: offset) -> (i32) {
+  %byte = buffer.load.i8.u %source[%position]
+  buffer.store.i8 %byte, %target[%target_position]
+  func.return %byte : i32
+}
+
+func.def public @signed_address_equal(%left: buffer, %left_position: index, %right: buffer, %right_position: offset) -> (i1) {
+  %same = buffer.compare.address eq, %left[%left_position], %right[%right_position]
+  func.return %same : i1
+}

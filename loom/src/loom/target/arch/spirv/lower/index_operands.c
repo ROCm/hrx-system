@@ -40,6 +40,12 @@ iree_status_t loom_spirv_prepare_control_operand(
       SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_U_CONVERT_U32_U64;
   static const uint32_t kPrivateNull =
       SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_CONSTANT_OFFSET64;
+  static const uint32_t kNativeToPosition =
+      SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_S_CONVERT_I32_OFFSET64;
+  static const uint32_t kWideToPosition =
+      SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_BITCAST_I64_OFFSET64;
+  static const uint32_t kUnsignedToPosition =
+      SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_UCONVERT_U32_OFFSET64;
   if (loom_type_is_buffer(loom_module_value_type(
           loom_low_lower_context_module(context), source_value)) &&
       loom_low_register_type_class_id(required_type) ==
@@ -59,6 +65,15 @@ iree_status_t loom_spirv_prepare_control_operand(
   }
   const loom_value_facts_t facts = loom_value_fact_table_lookup(
       loom_low_lower_context_fact_table(context), source_value);
+  if (loom_low_register_type_class_id(required_type) ==
+      SPIRV_LOGICAL_CORE_REG_CLASS_ID_OFFSET64) {
+    *out_plan = loom_type_equal(actual_type, required_type) ? NULL
+                : actual_wide                               ? &kWideToPosition
+                : facts.range_lo >= 0 && facts.range_hi > INT32_MAX
+                    ? &kUnsignedToPosition
+                    : &kNativeToPosition;
+    return iree_ok_status();
+  }
   if (!actual_wide && required_wide && facts.range_lo >= 0 &&
       facts.range_hi > INT32_MAX) {
     *out_plan = &kZeroExtend;
@@ -103,7 +118,9 @@ iree_status_t loom_spirv_emit_control_operand(
     return loom_spirv_emit_private_null(context, source_op, out_value);
   }
   if (*(const uint32_t*)plan ==
-      SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_U_CONVERT_U32_U64) {
+          SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_U_CONVERT_U32_U64 ||
+      *(const uint32_t*)plan ==
+          SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_UCONVERT_U32_OFFSET64) {
     const loom_type_t native_type = loom_module_value_type(
         loom_low_lower_context_module(context), low_value);
     IREE_RETURN_IF_ERROR(loom_spirv_index_emit_descriptor(
@@ -113,6 +130,11 @@ iree_status_t loom_spirv_emit_control_operand(
     IREE_RETURN_IF_ERROR(loom_spirv_index_emit_descriptor(
         context, source_op, *(const uint32_t*)plan, &low_value, 1,
         required_type, &low_value));
+    if (*(const uint32_t*)plan ==
+        SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_UCONVERT_U32_OFFSET64) {
+      *out_value = low_value;
+      return iree_ok_status();
+    }
     return loom_spirv_index_emit_descriptor(
         context, source_op,
         SPIRV_LOGICAL_CORE_DESCRIPTOR_REF_OP_BITCAST_U64_I64, &low_value, 1,
@@ -226,6 +248,28 @@ iree_status_t loom_spirv_prepare_wide_index(loom_low_lower_context_t* context,
                                             const void** out_plan) {
   return loom_spirv_prepare_index_operand(context, source_value, true,
                                           out_plan);
+}
+
+iree_status_t loom_spirv_prepare_byte_position(
+    loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void** out_plan) {
+  *out_plan = NULL;
+  const loom_type_t actual_type =
+      loom_low_lower_value_binding_type(context, source_value);
+  if (loom_low_register_type_class_id(actual_type) ==
+      SPIRV_LOGICAL_CORE_REG_CLASS_ID_OFFSET64) {
+    return iree_ok_status();
+  }
+  loom_spirv_index_operand_plan_t* plan = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_allocate_plan_data(context, sizeof(*plan), (void**)&plan));
+  IREE_RETURN_IF_ERROR(loom_low_lower_make_register_type(
+      context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_OFFSET64, 1, &plan->type));
+  IREE_RETURN_IF_ERROR(loom_spirv_prepare_control_operand(
+      NULL, context, NULL, source_value, actual_type, plan->type,
+      &plan->conversion));
+  *out_plan = plan;
+  return iree_ok_status();
 }
 
 loom_type_t loom_spirv_materialized_index_operand_type(

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from enum import Enum
+from itertools import product
 
 from loom.dialect.buffer import ALL_BUFFER_OPS
 from loom.dialect.buffer import defs as buffer
@@ -1370,49 +1371,59 @@ def _view_carrier_rules() -> Iterable[DescriptorRule]:
 def _buffer_compare_address_rules() -> tuple[DescriptorRule, ...]:
     # Widen before adding: memory32's valid one-past endpoint can be 2**32
     # and must not wrap onto the null address.
-    emits = []
-    for side in ("lhs", "rhs"):
-        emits.extend(
-            EmitDescriptorOp(
-                descriptor=_descriptor("wasm.i64.extend_i32_u"),
-                operands={"input": ValueRef.operand(field)},
-                results={"dst": ValueRef.temporary(f"{field}_wide")},
-                result_types={"dst": _I64},
-                form=DescriptorEmitForm.OP,
-            )
-            for field in (side, f"{side}_offset")
-        )
-        emits.append(
-            EmitDescriptorOp(
-                descriptor=_descriptor("wasm.i64.add"),
-                operands={
-                    "lhs": ValueRef.temporary(f"{side}_wide"),
-                    "rhs": ValueRef.temporary(f"{side}_offset_wide"),
-                },
-                results={"dst": ValueRef.temporary(f"{side}_address")},
-                result_types={"dst": _I64},
-                form=DescriptorEmitForm.OP,
-            )
-        )
-    return tuple(
-        DescriptorRule(
-            source_op=buffer.buffer_compare_address,
-            guards=(Guard.enum_attr_equals("predicate", predicate),),
-            emit=(
-                *emits,
+    rules = []
+    for left_type, right_type in product((_INDEX, _OFFSET), repeat=2):
+        emits = []
+        for side, position_type in (("lhs", left_type), ("rhs", right_type)):
+            for field in (side, f"{side}_offset"):
+                signed = field != side and position_type == _INDEX
+                emits.append(
+                    EmitDescriptorOp(
+                        descriptor=_descriptor(
+                            f"wasm.i64.extend_i32_{'s' if signed else 'u'}"
+                        ),
+                        operands={"input": ValueRef.operand(field)},
+                        results={"dst": ValueRef.temporary(f"{field}_wide")},
+                        result_types={"dst": _I64},
+                        form=DescriptorEmitForm.OP,
+                    )
+                )
+            emits.append(
                 EmitDescriptorOp(
-                    descriptor=_descriptor(f"wasm.i64.{predicate}"),
+                    descriptor=_descriptor("wasm.i64.add"),
                     operands={
-                        "lhs": ValueRef.temporary("lhs_address"),
-                        "rhs": ValueRef.temporary("rhs_address"),
+                        "lhs": ValueRef.temporary(f"{side}_wide"),
+                        "rhs": ValueRef.temporary(f"{side}_offset_wide"),
                     },
-                    results={"dst": ValueRef.result("result")},
+                    results={"dst": ValueRef.temporary(f"{side}_address")},
+                    result_types={"dst": _I64},
                     form=DescriptorEmitForm.OP,
+                )
+            )
+        rules.extend(
+            DescriptorRule(
+                source_op=buffer.buffer_compare_address,
+                guards=(
+                    Guard.enum_attr_equals("predicate", predicate),
+                    _value_type("lhs_offset", left_type),
+                    _value_type("rhs_offset", right_type),
                 ),
-            ),
+                emit=(
+                    *emits,
+                    EmitDescriptorOp(
+                        descriptor=_descriptor(f"wasm.i64.{predicate}"),
+                        operands={
+                            "lhs": ValueRef.temporary("lhs_address"),
+                            "rhs": ValueRef.temporary("rhs_address"),
+                        },
+                        results={"dst": ValueRef.result("result")},
+                        form=DescriptorEmitForm.OP,
+                    ),
+                ),
+            )
+            for predicate in ("eq", "ne")
         )
-        for predicate in ("eq", "ne")
-    )
+    return tuple(rules)
 
 
 def _buffer_byte_address_emits(
@@ -1439,10 +1450,7 @@ def _buffer_load_i8_u_rule() -> DescriptorRule:
     return DescriptorRule(
         source_op=buffer.buffer_load_i8_u,
         descriptor=descriptor,
-        guards=(
-            _value_type("byte_offset", _OFFSET),
-            _value_type("result", _I32),
-        ),
+        guards=(_value_type("result", _I32),),
         emit=(
             *address_emits,
             EmitDescriptorOp(
@@ -1461,10 +1469,7 @@ def _buffer_store_i8_rule() -> DescriptorRule:
     return DescriptorRule(
         source_op=buffer.buffer_store_i8,
         descriptor=descriptor,
-        guards=(
-            _value_type("value", _I32),
-            _value_type("byte_offset", _OFFSET),
-        ),
+        guards=(_value_type("value", _I32),),
         emit=(
             *address_emits,
             EmitDescriptorOp(

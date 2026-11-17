@@ -47,23 +47,31 @@ iree_status_t loom_buffer_distance_canonicalize(loom_op_t* op,
   }
   loom_builder_set_before(&rewriter->builder, op);
   const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
-  const loom_type_t integer_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
-  const loom_type_t offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+  const loom_type_t result_type = loom_module_value_type(
+      rewriter->builder.module, loom_buffer_distance_result(op));
+  const loom_type_t integer_type =
+      loom_scalar_type_bitwidth(loom_type_element_type(result_type)) < 32
+          ? loom_type_scalar(LOOM_SCALAR_TYPE_I32)
+          : result_type;
+  const loom_value_id_t left_position = loom_buffer_distance_lhs_offset(op);
+  const loom_value_id_t right_position = loom_buffer_distance_rhs_offset(op);
   loom_op_t* left = NULL;
   loom_op_t* right = NULL;
   loom_op_t* difference = NULL;
   IREE_RETURN_IF_ERROR(loom_index_cast_build(
-      &rewriter->builder, loom_buffer_distance_lhs_offset(op), offset_type,
+      &rewriter->builder, left_position,
+      loom_module_value_type(rewriter->builder.module, left_position),
       integer_type, op->location, &left));
   IREE_RETURN_IF_ERROR(loom_index_cast_build(
-      &rewriter->builder, loom_buffer_distance_rhs_offset(op), offset_type,
+      &rewriter->builder, right_position,
+      loom_module_value_type(rewriter->builder.module, right_position),
       integer_type, op->location, &right));
   IREE_RETURN_IF_ERROR(loom_scalar_subi_build(
       &rewriter->builder, 0, loom_index_cast_result(left),
       loom_index_cast_result(right), integer_type, op->location, &difference));
+  // The distance must fit its result type. Individual positions need not:
+  // narrowing their low bits before subtraction preserves that difference.
   loom_value_id_t replacement = loom_scalar_subi_result(difference);
-  const loom_type_t result_type = loom_module_value_type(
-      rewriter->builder.module, loom_buffer_distance_result(op));
   if (!loom_type_equal(result_type, integer_type)) {
     loom_op_t* narrowed = NULL;
     IREE_RETURN_IF_ERROR(
@@ -112,16 +120,41 @@ iree_status_t loom_buffer_compare_address_canonicalize(
   }
   loom_builder_set_before(&rewriter->builder, op);
   const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
-  const loom_index_cmp_predicate_t predicate =
-      loom_buffer_compare_address_predicate(op) ==
-              LOOM_BUFFER_COMPARE_ADDRESS_PREDICATE_EQ
-          ? LOOM_INDEX_CMP_PREDICATE_EQ
-          : LOOM_INDEX_CMP_PREDICATE_NE;
+  const bool equal = loom_buffer_compare_address_predicate(op) ==
+                     LOOM_BUFFER_COMPARE_ADDRESS_PREDICATE_EQ;
+  const loom_value_id_t left_position =
+      loom_buffer_compare_address_lhs_offset(op);
+  const loom_value_id_t right_position =
+      loom_buffer_compare_address_rhs_offset(op);
+  const loom_type_t left_type =
+      loom_module_value_type(rewriter->builder.module, left_position);
+  const loom_type_t right_type =
+      loom_module_value_type(rewriter->builder.module, right_position);
   loom_op_t* comparison = NULL;
-  IREE_RETURN_IF_ERROR(loom_index_cmp_build(
-      &rewriter->builder, predicate, loom_buffer_compare_address_lhs_offset(op),
-      loom_buffer_compare_address_rhs_offset(op), op->location, &comparison));
-  const loom_value_id_t replacement = loom_index_cmp_result(comparison);
+  if (loom_type_equal(left_type, right_type)) {
+    IREE_RETURN_IF_ERROR(loom_index_cmp_build(
+        &rewriter->builder,
+        equal ? LOOM_INDEX_CMP_PREDICATE_EQ : LOOM_INDEX_CMP_PREDICATE_NE,
+        left_position, right_position, op->location, &comparison));
+  } else {
+    // Neither target-selected domain necessarily contains the other. Both
+    // source fact domains fit i64, including negative signed positions.
+    const loom_type_t integer_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
+    loom_op_t* left = NULL;
+    loom_op_t* right = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_index_cast_build(&rewriter->builder, left_position, left_type,
+                              integer_type, op->location, &left));
+    IREE_RETURN_IF_ERROR(
+        loom_index_cast_build(&rewriter->builder, right_position, right_type,
+                              integer_type, op->location, &right));
+    IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(
+        &rewriter->builder,
+        equal ? LOOM_SCALAR_CMPI_PREDICATE_EQ : LOOM_SCALAR_CMPI_PREDICATE_NE,
+        loom_index_cast_result(left), loom_index_cast_result(right),
+        op->location, &comparison));
+  }
+  const loom_value_id_t replacement = loom_op_const_results(comparison)[0];
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, checkpoint));
   return loom_rewriter_replace_all_uses_and_erase(rewriter, op, &replacement,

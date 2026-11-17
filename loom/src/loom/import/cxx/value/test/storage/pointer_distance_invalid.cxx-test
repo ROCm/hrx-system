@@ -34,7 +34,7 @@ constexpr Target target{"low_core"};
 #include <loomcxx/index.h>
 using Buffer = loom::type::buffer<int>;
 using Offset = loom::type::offset;
-// ERROR@+1: LOWERING/059 "buffer.distance requires two typed buffer and offset pairs and an integer result"
+// ERROR@+1: LOWERING/059 "buffer.distance requires two typed buffer and index/offset pairs and an integer result"
 [[loom::op("buffer.distance")]] float wrong_result(Buffer, Offset, Buffer, Offset);
 float entry(Buffer source, Offset position) { return wrong_result(source, position, source, position); }
 
@@ -42,6 +42,6 @@ float entry(Buffer source, Offset position) { return wrong_result(source, positi
 
 #include <loomcxx/buffer.h>
 using Buffer = loom::type::buffer<int>;
-// ERROR@+1: LOWERING/059 "buffer.distance requires two typed buffer and offset pairs and an integer result"
+// ERROR@+1: LOWERING/059 "buffer.distance requires two typed buffer and index/offset pairs and an integer result"
 [[loom::op("buffer.distance")]] long long wrong_offset(Buffer, int, Buffer, int);
 long long entry(Buffer source) { return wrong_offset(source, 0, source, 0); }

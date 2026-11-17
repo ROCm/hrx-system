@@ -74,6 +74,11 @@ NATIVE_INDEX_ARITHMETIC_MATERIALIZER = replace(
     name="spirv.native_index_arithmetic",
     can_materialize="loom_spirv_can_materialize_native_index_arithmetic",
 )
+BYTE_POSITION_MATERIALIZER = replace(
+    NATIVE_INDEX_MATERIALIZER,
+    name="spirv.byte_position",
+    prepare="loom_spirv_prepare_byte_position",
+)
 WIDE_INDEX_ARITHMETIC_MATERIALIZER = replace(
     NATIVE_INDEX_MATERIALIZER,
     name="spirv.wide_index_arithmetic",

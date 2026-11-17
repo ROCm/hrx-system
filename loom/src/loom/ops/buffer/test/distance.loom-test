@@ -60,11 +60,31 @@ func.def @copied_dynamic_root(%first: buffer, %second: buffer, %choose: i1, %lef
   func.return %distance : i64
 }
 
+// Signed supplied-origin positions and mixed domains share one subtraction.
+func.def @signed_positions(%root: buffer, %left: index, %right: index) -> (i32) {
+  %distance = buffer.distance %root[%left], %root[%right] : i32
+  func.return %distance : i32
+}
+
+func.def @mixed_positions(%root: buffer, %left: index, %right: offset) -> (i64) {
+  %distance = buffer.distance %root[%left], %root[%right] : i64
+  func.return %distance : i64
+}
+
+// Narrow differences can fit even when the endpoint values do not.
+func.def @narrow_difference(%root: buffer) -> (i8, i32) {
+  %left = index.constant 4294967297 : index
+  %right = index.constant 4294967294 : offset
+  %byte = buffer.distance %root[%left], %root[%right] : i8
+  %word = buffer.distance %root[%right], %root[%left] : i32
+  func.return %byte, %word : i8, i32
+}
+
 // ----
 func.def @dynamic(%root: buffer, %left: offset, %right: offset) -> (i64) {
-  %59 = index.cast %left : offset to i64
-  %60 = index.cast %right : offset to i64
-  %distance = scalar.subi %59, %60 : i64
+  %76 = index.cast %left : offset to i64
+  %77 = index.cast %right : offset to i64
+  %distance = scalar.subi %76, %77 : i64
   func.return %distance : i64
 }
 
@@ -90,9 +110,9 @@ func.def @allocation_only(%left: buffer, %right: buffer, %position: offset) -> (
 }
 
 func.def @joined_origin(%root: buffer, %choose: i1, %left: offset, %right: offset) -> (i64) {
-  %94 = index.cast %left : offset to i64
-  %95 = index.cast %right : offset to i64
-  %distance = scalar.subi %94, %95 : i64
+  %110 = index.cast %left : offset to i64
+  %111 = index.cast %right : offset to i64
+  %distance = scalar.subi %110, %111 : i64
   func.return %distance : i64
 }
 
@@ -103,8 +123,33 @@ func.def @wide_endpoints(%root: buffer) -> (i64, i64) {
 }
 
 func.def @copied_dynamic_root(%first: buffer, %second: buffer, %choose: i1, %left: offset, %right: offset) -> (i64) {
-  %105 = index.cast %left : offset to i64
-  %106 = index.cast %right : offset to i64
-  %distance = scalar.subi %105, %106 : i64
+  %121 = index.cast %left : offset to i64
+  %122 = index.cast %right : offset to i64
+  %distance = scalar.subi %121, %122 : i64
   func.return %distance : i64
+}
+
+func.def @signed_positions(%root: buffer, %left: index, %right: index) -> (i32) {
+  %124 = index.cast %left : index to i32
+  %125 = index.cast %right : index to i32
+  %distance = scalar.subi %124, %125 : i32
+  func.return %distance : i32
+}
+
+func.def @mixed_positions(%root: buffer, %left: index, %right: offset) -> (i64) {
+  %127 = index.cast %left : index to i64
+  %128 = index.cast %right : offset to i64
+  %distance = scalar.subi %127, %128 : i64
+  func.return %distance : i64
+}
+
+func.def @narrow_difference(%root: buffer) -> (i8, i32) {
+  %left = index.constant 4294967297 : index
+  %right = index.constant 4294967294 : offset
+  %133 = index.cast %left : index to i32
+  %134 = index.cast %right : offset to i32
+  %135 = scalar.subi %133, %134 : i32
+  %byte = scalar.trunci %135 : i32 to i8
+  %word = scalar.subi %134, %133 : i32
+  func.return %byte, %word : i8, i32
 }

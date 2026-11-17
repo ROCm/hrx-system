@@ -24,7 +24,7 @@ unsigned entry(loom::type::buffer<int> input) {
 // ====
 #include <loomcxx/buffer.h>
 #include <loomcxx/index.h>
-// ERROR@+1: LOWERING/059 "buffer.compare.address requires two typed buffer and offset pairs and a bool result"
+// ERROR@+1: LOWERING/059 "buffer.compare.address requires two typed buffer and index/offset pairs and a bool result"
 [[loom::op("buffer.compare.address")]] unsigned wrong_address(loom::type::buffer<int>, loom::type::offset, loom::type::buffer<int>, loom::type::offset);
 unsigned entry(loom::type::buffer<int> left, loom::type::buffer<int> right) {
   return wrong_address(left, loom::type::offset{0}, right, loom::type::offset{0});

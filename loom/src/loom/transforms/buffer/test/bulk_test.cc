@@ -50,6 +50,20 @@ extern "C" int32_t bulk_compare3(const void* left, uint64_t left_offset,
 extern "C" int32_t bulk_compare5(const void* left, uint64_t left_offset,
                                  const void* right, uint64_t right_offset);
 
+extern "C" void signed_copy(const void* source, int64_t source_position,
+                            void* target, int64_t target_position,
+                            uint64_t length);
+extern "C" void signed_fill(void* target, int64_t position, uint64_t length,
+                            uint32_t pattern);
+extern "C" int32_t signed_compare(const void* left, int64_t left_position,
+                                  const void* right, int64_t right_position,
+                                  uint64_t length);
+extern "C" int32_t signed_byte(const void* source, int64_t position,
+                               void* target, uint64_t target_position);
+extern "C" bool signed_address_equal(const void* left, int64_t left_position,
+                                     const void* right,
+                                     uint64_t right_position);
+
 namespace {
 
 class GuardedPage {
@@ -96,6 +110,42 @@ class BulkMemoryTest : public ::testing::Test {
 #endif
   }
 };
+
+TEST_F(BulkMemoryTest, SignedInteriorOrigins) {
+  alignas(64) std::array<uint8_t, 256> source;
+  alignas(64) std::array<uint8_t, 256> target;
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = (i * 29 + 17) & 255;
+  }
+  for (int64_t position : {-64, -31, -1, 0, 1, 31, 64}) {
+    for (uint64_t length : {0, 1, 3, 4, 15, 16, 31, 64}) {
+      target.fill(0xA5);
+      auto expected = target;
+      const auto start = static_cast<size_t>(64 + position);
+      std::memcpy(expected.data() + start, source.data() + start, length);
+      signed_copy(source.data() + 64, position, target.data() + 64, position,
+                  length);
+      ASSERT_EQ(target, expected);
+      ASSERT_EQ(signed_compare(source.data() + 64, position,
+                               target.data() + start, 0, length),
+                0);
+      const uint32_t pattern = 0x1234ABCD;
+      for (size_t i = 0; i < length; ++i) {
+        expected[start + i] = pattern >> (8 * (i % 4));
+      }
+      signed_fill(target.data() + 64, position, length, pattern);
+      ASSERT_EQ(target, expected);
+    }
+    const auto start = static_cast<size_t>(64 + position);
+    ASSERT_EQ(signed_byte(source.data() + 64, position, target.data(), 7),
+              source[start]);
+    ASSERT_EQ(target[7], source[start]);
+    ASSERT_TRUE(signed_address_equal(source.data() + 64, position,
+                                     source.data(), start));
+    ASSERT_FALSE(signed_address_equal(source.data() + 64, position,
+                                      source.data(), start + 1));
+  }
+}
 
 TEST_F(BulkMemoryTest, CopyExactRange) {
   alignas(64) std::array<uint8_t, 256> source;

@@ -2,17 +2,35 @@
 
 wasm.target<simd128> @target
 
-func.def target(@target) @raw_byte_roundtrip(%source: buffer, %source_offset: offset, %target: buffer, %target_offset: offset) -> (i32) {
+func.def target(@target) @raw_byte_roundtrip(%source: buffer, %source_offset: index, %target: buffer, %target_offset: offset) -> (i32) {
   %byte = buffer.load.i8.u %source[%source_offset]
   buffer.store.i8 %byte, %target[%target_offset]
   func.return %byte : i32
 }
 
+// Signed positions extend before adding an unsigned memory32 root. Keeping
+// the 33rd bit distinguishes the valid one-past endpoint from null.
+func.def target(@target) @same_position(%left: buffer, %position: index, %right: buffer, %offset: offset) -> (i1) {
+  %same = buffer.compare.address eq, %left[%position], %right[%offset]
+  func.return %same : i1
+}
+
 // ----
 low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @raw_byte_roundtrip(%source: reg<wasm.i32>, %source_offset: reg<wasm.i32>, %target: reg<wasm.i32>, %target_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
-  %11 = i32.add %source, %source_offset
-  %byte = i32.load8_u %11
-  %13 = i32.add %target, %target_offset
-  i32.store8 %13, %byte
+  %17 = i32.add %source, %source_offset
+  %byte = i32.load8_u %17
+  %19 = i32.add %target, %target_offset
+  i32.store8 %19, %byte
   return %byte
+}
+
+low.func.def target<wasm.core.simd128>(@target) abi(wasm_function) @same_position(%left: reg<wasm.i32>, %position: reg<wasm.i32>, %right: reg<wasm.i32>, %offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %25 = i64.extend_i32_u %left
+  %26 = i64.extend_i32_s %position
+  %27 = i64.add %25, %26
+  %28 = i64.extend_i32_u %right
+  %29 = i64.extend_i32_u %offset
+  %30 = i64.add %28, %29
+  %same = i64.eq %27, %30
+  return %same
 }

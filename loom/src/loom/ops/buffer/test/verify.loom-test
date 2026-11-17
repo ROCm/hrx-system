@@ -58,8 +58,8 @@ func.def @fill_rejects_offset_pattern(%target: buffer, %target_offset: offset, %
 
 // ====
 
-func.def @load_i8_u_requires_offset(%source: buffer, %byte_offset: index) -> (i32) {
-  // ERROR@+1: TYPE/003 "byte_offset" "index" "offset"
+func.def @load_i8_u_requires_address(%source: buffer, %byte_offset: i64) -> (i32) {
+  // ERROR@+1: TYPE/003 "byte_offset" "i64" "address"
   %byte = buffer.load.i8.u %source[%byte_offset]
   func.return %byte : i32
 }
@@ -82,8 +82,8 @@ func.def @positions_do_not_order_roots(%lhs: buffer, %rhs: buffer, %position: of
 
 // ====
 
-func.def @positions_require_byte_offsets(%lhs: buffer, %rhs: buffer, %position: index, %origin: offset) -> (i1) {
-  // ERROR@+1: TYPE/003 "lhs_offset" "index" "offset"
+func.def @positions_require_addresses(%lhs: buffer, %rhs: buffer, %position: i64, %origin: offset) -> (i1) {
+  // ERROR@+1: TYPE/003 "lhs_offset" "i64" "address"
   %equal = buffer.compare.address eq, %lhs[%position], %rhs[%origin]
   func.return %equal : i1
 }

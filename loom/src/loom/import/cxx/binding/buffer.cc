@@ -82,12 +82,14 @@ std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
     if (attribute.arguments.size() != 1 || signature->isVariadic() ||
         parameters.size() != 4 ||
         types.partition(parameters[0], owner).kind != ValueKind::Buffer ||
-        !types.is_offset(parameters[1], owner) ||
+        types.address_domain(parameters[1], owner) == LOOM_SCALAR_TYPE_NONE ||
         types.partition(parameters[2], owner).kind != ValueKind::Buffer ||
-        !types.is_offset(parameters[3], owner) || !valid_result) {
+        types.address_domain(parameters[3], owner) == LOOM_SCALAR_TYPE_NONE ||
+        !valid_result) {
       diagnostics.reject(
           unit, owner,
-          std::string(name) + " requires two typed buffer and offset pairs " +
+          std::string(name) +
+              " requires two typed buffer and index/offset pairs " +
               (distance ? "and an integer result" : "and a bool result"));
     }
     if (distance) {

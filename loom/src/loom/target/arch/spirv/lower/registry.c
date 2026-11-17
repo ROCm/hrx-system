@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include "loom/ir/module.h"
+#include "loom/ops/buffer/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/vector/fragment.h"
 #include "loom/target/arch/spirv/contracts/logical_core.h"
@@ -511,6 +512,9 @@ static iree_status_t loom_spirv_finalize_plan(void* user_data,
   (void)user_data;
   if (loom_spirv_private_alloca_plan_isa(plan)) {
     return loom_spirv_finalize_private_alloca(context, source_op, plan);
+  }
+  if (loom_buffer_compare_address_isa(source_op)) {
+    return loom_spirv_finalize_workgroup_plan(context, source_op, plan);
   }
   return iree_ok_status();
 }

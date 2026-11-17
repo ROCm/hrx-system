@@ -1,5 +1,5 @@
 // Runtime-selected roots and byte positions retain equality through a helper.
-func.def @same_position(%left: buffer, %left_offset: offset, %right: buffer, %right_offset: offset) -> (i1) {
+func.def @same_position(%left: buffer, %left_offset: index, %right: buffer, %right_offset: offset) -> (i1) {
   %same = buffer.compare.address eq, %left[%left_offset], %right[%right_offset]
   func.return %same : i1
 }
@@ -23,9 +23,10 @@ func.def @position_observations(%ordinals: buffer, %first: buffer, %second: buff
     %use_first = scalar.cmpi eq, %parity, %c0 : i32
     %word = scalar.divui %bounded, %c2 : i32
     %position = index.cast %word : i32 to offset
+    %signed_position = index.cast %word : i32 to index
     %selected = scf.select %use_first, %first, %second : buffer
-    %same = func.call @same_position(%selected, %position, %first, %position) : (buffer, offset, buffer, offset) -> (i1)
-    %different = buffer.compare.address ne, %selected[%position], %first[%position]
+    %same = func.call @same_position(%selected, %signed_position, %first, %position) : (buffer, index, buffer, offset) -> (i1)
+    %different = buffer.compare.address ne, %selected[%signed_position], %first[%position]
     %at_end = buffer.compare.address eq, %selected[%position], %selected[%endpoint]
     %interior_word = scalar.andi %word, %mask : i32
     %interior = index.cast %interior_word : i32 to offset
@@ -126,7 +127,7 @@ func.def @shared_position_observations(%input: buffer, %output: buffer) {
   %right_word = view.load %inputs[1] : view<2xi32> -> i32
   %left_bounded = scalar.assume %left_word [range(%left_word, 0, 15)] : i32
   %right_bounded = scalar.assume %right_word [range(%right_word, 0, 15)] : i32
-  %left = index.cast %left_bounded : i32 to offset
+  %left = index.cast %left_word : i32 to index
   %right = index.cast %right_bounded : i32 to offset
   %extent = index.constant 16 : offset
   %first = buffer.alloca<workgroup> align(16) %extent : buffer
@@ -215,7 +216,7 @@ func.def @wide_position_observations(%positions: buffer, %first: buffer, %second
   %right_word = view.load %inputs[1] : view<2xi64> -> i64
   %left_unsigned = scalar.assume %left_word [range(%left_word, 0, 9223372036854775807)] : i64
   %right_unsigned = scalar.assume %right_word [range(%right_word, 0, 9223372036854775807)] : i64
-  %left = index.cast %left_unsigned : i64 to offset
+  %left = index.cast %left_unsigned : i64 to index
   %right = index.cast %right_unsigned : i64 to offset
   %c1 = scalar.constant 1 : i64
   %c0 = scalar.constant 0 : i64
@@ -281,7 +282,7 @@ func.def @position_distances(%ordinals: buffer, %storage: buffer, %output: buffe
   scf.for %row = [%begin to %end step %step] {
     %ordinal = view.load %controls[%row] : view<9xi32> -> i32
     %bounded = scalar.assume %ordinal [range(%ordinal, 0, 8)] : i32
-    %position = index.cast %bounded : i32 to offset
+    %position = index.cast %bounded : i32 to index
     %remaining = buffer.distance %refined[%endpoint], %storage[%position] : i64
     %reverse = buffer.distance %storage[%position], %refined[%endpoint] : i64
     %zero = buffer.distance %storage[%position], %refined[%position] : i64

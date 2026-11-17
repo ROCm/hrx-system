@@ -808,10 +808,7 @@ def _buffer_load_i8_u_rule(
     return DescriptorRule(
         source_op=buffer.buffer_load_i8_u,
         descriptor=descriptor,
-        guards=(
-            Guard.value_type("byte_offset", _OFFSET),
-            Guard.value_type("result", _I32),
-        ),
+        guards=(Guard.value_type("result", _I32),),
         emit=(
             _op_emit(
                 descriptor=descriptor,
@@ -833,10 +830,7 @@ def _buffer_store_i8_rule(
     return DescriptorRule(
         source_op=buffer.buffer_store_i8,
         descriptor=descriptor,
-        guards=(
-            Guard.value_type("value", _I32),
-            Guard.value_type("byte_offset", _OFFSET),
-        ),
+        guards=(Guard.value_type("value", _I32),),
         emit=(
             _op_emit(
                 descriptor=descriptor,

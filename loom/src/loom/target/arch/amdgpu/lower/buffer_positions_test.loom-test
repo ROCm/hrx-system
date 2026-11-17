@@ -1,0 +1,74 @@
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+
+// A narrow signed displacement needs a sign word before adding to the flat
+// address. The unsigned peer's high word stays zero.
+func.def @varying_positions(%left: buffer, %position: index, %right: buffer, %offset_input: i32) -> (i1) {
+  %offset = index.cast %offset_input : i32 to offset
+  %same = buffer.compare.address eq, %left[%position], %right[%offset]
+  func.return %same : i1
+}
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @varying_positions(%position: reg<amdgpu.vgpr>, %offset: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) asm {
+  %left = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %right = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %12 = slice %left[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %13 = v_mov_b32_copy %12
+  %20 = slice %left[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %21 = v_mov_b32_copy %20
+  %27 = v_ashrrev_i32_src0_inline %position, 31
+  %30, %31 = v_add_co_u32 %13, %position
+  %32, %33 = v_add_co_ci_u32 %21, %27, %31
+  %35 = slice %right[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %36 = v_mov_b32_copy %35
+  %43 = slice %right[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %44 = v_mov_b32_copy %43
+  %50 = v_mov_b32 0
+  %53, %54 = v_add_co_u32 %36, %offset
+  %55, %56 = v_add_co_ci_u32 %44, %50, %54
+  %60 = v_cmp_eq_i32 %30, %53
+  %63 = v_cmp_eq_i32 %32, %55
+  %same = s_and_b64 %60, %63
+  return %same
+}
+
+// ====
+
+// Kernel scalar arguments exercise the same contract in the uniform bank.
+kernel.def @uniform_positions() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%left: buffer, %right: buffer, %position_input: i32, %offset_input: i32, %output: buffer) {
+  %position = index.cast %position_input : i32 to index
+  %offset = index.cast %offset_input : i32 to offset
+  %same = buffer.compare.address eq, %left[%position], %right[%offset]
+  %value = scalar.extui %same : i1 to i32
+  %origin = index.constant 0 : offset
+  %result = buffer.view %output[%origin] : buffer -> view<1xi32>
+  view.store %value, %result[0] : i32, view<1xi32>
+  kernel.return
+}
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 2, direct_arg_count = 2, direct_arg_names = {arg0 = "position_input", arg1 = "offset_input"}, direct_arg_offsets = [16, 20], direct_arg_parameter_indices = [2, 3], direct_arg_sizes = [4, 4], parameter_count = 5, resource_count = 3, resource_offsets = [0, 8, 24], resource_parameter_indices = [0, 1, 4], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @uniform_positions(%position: reg<amdgpu.sgpr>, %offset: reg<amdgpu.sgpr>) asm {
+  %left = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %right = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %result = resource<hal_binding> {extent = 4, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %20 = slice %left[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %21 = slice %left[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = s_ashr_i32_rhs_inline %position, 31
+  %28, %29 = s_add_co_u32 %20, %position
+  %30, %31 = s_addc_u32 %21, %25, %29
+  %32 = concat(%28, %30) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %33 = slice %right[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34 = slice %right[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38 = s_mov_b32 0
+  %41, %42 = s_add_co_u32 %33, %offset
+  %43, %44 = s_addc_u32 %34, %38, %42
+  %45 = concat(%41, %43) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %same = s_cmp_eq_u64 %32, %45
+  %47 = s_mov_b32 1
+  %value = s_cselect_b32 %47, %38, %same
+  %50 = v_mov_b32_copy %value
+  %51 = v_mov_b32 0
+  global_store_b32_saddr %51, %50, %result
+  return
+}

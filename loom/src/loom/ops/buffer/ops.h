@@ -447,7 +447,7 @@ iree_status_t loom_buffer_compare_null_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_BUFFER_COMPARE_ADDRESS: Compare two byte positions without exposing their addresses. Each nonnull buffer must be live and its offset must be in bounds or at the one-past endpoint. A null buffer permits only offset zero and differs from every nonnull buffer, including empty storage. Aliased buffers compare by their selected positions, not wrapper identity. An empty root without native storage retains a distinct logical position shared by its subspans. The operation reads no payload bytes and changes no ownership.
+// LOOM_OP_BUFFER_COMPARE_ADDRESS: Compare two byte positions without exposing their addresses. Each nonnull buffer must be live and its selected position must be in bounds or at the one-past endpoint. Signed index positions may precede an interior origin; offset positions remain nonnegative. A null buffer permits only position zero and differs from every nonnull buffer, including empty storage. Aliased buffers compare by their selected positions, not wrapper identity. An empty root without native storage retains a distinct logical position shared by its subspans. The operation reads no payload bytes and changes no ownership.
 // %done = buffer.compare.address eq, %cursor[%position], %end[%limit]
 LOOM_DEFINE_ISA(loom_buffer_compare_address_isa, LOOM_OP_BUFFER_COMPARE_ADDRESS)
 LOOM_DEFINE_OPERAND(loom_buffer_compare_address_lhs, 0)
@@ -472,7 +472,7 @@ iree_status_t loom_buffer_compare_address_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_BUFFER_DISTANCE: Return lhs_offset minus rhs_offset as a signed byte distance. Both positions must derive from the same buffer byte origin, proven before target lowering; otherwise compilation fails. Sharing an allocation without a common byte origin is insufficient. Nonnull positions must be live and in bounds or one-past. Two null positions at offset zero have distance zero. Offset values lie in [0, INT64_MAX], so their signed difference fits i64 and must also fit the signed result type. No address or payload bytes are observed.
+// LOOM_OP_BUFFER_DISTANCE: Return lhs_offset minus rhs_offset as a signed byte distance. Both positions must derive from the same buffer byte origin, proven before target lowering; otherwise compilation fails. Sharing an allocation without a common byte origin is insufficient. Nonnull positions must be live and in bounds or one-past. Two null positions at offset zero have distance zero. Positions may be signed index displacements from an interior origin or nonnegative offsets. Their mathematical difference must fit the signed result type. No address or payload bytes are observed.
 // %bytes = buffer.distance %buffer[%end], %buffer[%begin] : i64
 LOOM_DEFINE_ISA(loom_buffer_distance_isa, LOOM_OP_BUFFER_DISTANCE)
 LOOM_DEFINE_OPERAND(loom_buffer_distance_lhs, 0)

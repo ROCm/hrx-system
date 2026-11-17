@@ -72,6 +72,7 @@ from loom.target.arch.spirv.contracts.float_width import (
 )
 from loom.target.arch.spirv.contracts.fused_arithmetic import fused_multiply_add_rules
 from loom.target.arch.spirv.contracts.index import (
+    BYTE_POSITION_MATERIALIZER,
     NATIVE_INDEX_ARITHMETIC_MATERIALIZER,
     NATIVE_INDEX_MATERIALIZER,
     SPIRV_INDEX_CONVERSION_RULES,
@@ -769,7 +770,9 @@ def _buffer_compare_address_rules() -> tuple[DescriptorRule, ...]:
             descriptor=_descriptor("spirv.op_iadd.storage_buffer.byte_offset"),
             operands={
                 "lhs": ValueRef.operand(side),
-                "rhs": ValueRef.operand(f"{side}_offset"),
+                "rhs": ValueRef.operand(
+                    f"{side}_offset", materializer=BYTE_POSITION_MATERIALIZER.name
+                ),
             },
             results={"dst": ValueRef.temporary(f"{side}_address")},
             result_types={"dst": DescriptorResultType()},
@@ -817,7 +820,6 @@ def _raw_storage_buffer_byte_load_rule() -> DescriptorRule:
         descriptor=load_descriptor,
         guards=(
             Guard.value_memory_space("source", _STORAGE_BUFFER_MEMORY_SPACES),
-            Guard.value_type("byte_offset", _OFFSET),
             Guard.value_type("result", _I32),
             *_feature_guards(load_descriptor),
         ),
@@ -826,7 +828,9 @@ def _raw_storage_buffer_byte_load_rule() -> DescriptorRule:
                 descriptor=address_descriptor,
                 operands={
                     "base": ValueRef.operand("source"),
-                    "byte_offset": ValueRef.operand("byte_offset"),
+                    "byte_offset": ValueRef.operand(
+                        "byte_offset", materializer=BYTE_POSITION_MATERIALIZER.name
+                    ),
                 },
                 results={"ptr": ValueRef.temporary("byte_address")},
                 result_types={"ptr": DescriptorResultType()},
@@ -867,7 +871,6 @@ def _raw_storage_buffer_byte_store_rule() -> DescriptorRule:
         guards=(
             Guard.value_memory_space("target", _WRITABLE_STORAGE_BUFFER_MEMORY_SPACES),
             Guard.value_type("value", _I32),
-            Guard.value_type("byte_offset", _OFFSET),
             *_feature_guards(store_descriptor),
         ),
         emit=(
@@ -875,7 +878,9 @@ def _raw_storage_buffer_byte_store_rule() -> DescriptorRule:
                 descriptor=address_descriptor,
                 operands={
                     "base": ValueRef.operand("target"),
-                    "byte_offset": ValueRef.operand("byte_offset"),
+                    "byte_offset": ValueRef.operand(
+                        "byte_offset", materializer=BYTE_POSITION_MATERIALIZER.name
+                    ),
                 },
                 results={"ptr": ValueRef.temporary("byte_address")},
                 result_types={"ptr": DescriptorResultType()},
@@ -1482,6 +1487,7 @@ SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT = ContractFragment(
         *PRIVATE_STORAGE_MATERIALIZERS,
         COOPERATIVE_INITIALIZER_MATERIALIZER,
         NATIVE_INDEX_MATERIALIZER,
+        BYTE_POSITION_MATERIALIZER,
         NATIVE_INDEX_ARITHMETIC_MATERIALIZER,
         WIDE_INDEX_ARITHMETIC_MATERIALIZER,
     ),

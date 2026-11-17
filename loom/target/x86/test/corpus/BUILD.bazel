@@ -39,6 +39,7 @@ loom_corpus_test(
             "memory/address/origins.loom",
             "memory/address/uniform_loads.loom",
             "memory/buffer/boundaries.loom",
+            "memory/buffer/buffer_access.loom",
             "memory/buffer/null.loom",
             "memory/buffer/positions.loom",
             "memory/packed/transport.loom",

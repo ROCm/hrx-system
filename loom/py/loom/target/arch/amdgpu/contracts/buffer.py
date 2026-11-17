@@ -16,7 +16,11 @@ from loom.dialect.buffer import defs as buffer
 from loom.dialect.globals import ALL_GLOBAL_OPS
 from loom.dialect.globals import defs as globals
 from loom.error.amdgpu import ERR_AMDGPU_001
-from loom.target.arch.amdgpu.contracts.materializers import REGISTERS_VGPR_MATERIALIZER
+from loom.target.arch.amdgpu.contracts.materializers import (
+    ADDRESS_SGPR64_MATERIALIZER,
+    ADDRESS_VGPR64_MATERIALIZER,
+    REGISTERS_VGPR_MATERIALIZER,
+)
 from loom.target.arch.amdgpu.contracts.memory import BYTE_ADDRESSABLE_SCALAR_ELEMENTS
 from loom.target.arch.amdgpu.descriptors import build_amdgpu_contract_descriptor_set
 from loom.target.contracts import (
@@ -279,19 +283,28 @@ def _source(field: str, bank: str) -> ValueRef:
 
 
 def _position(
-    side: str, bank: str, unit_count: int, offset_units: int
+    side: str, bank: str, unit_count: int
 ) -> tuple[EmitDescriptorOp | EmitRegisterSlice | EmitRegisterConcat, ...]:
     base = _source(side, bank)
-    offset = _source(f"{side}_offset", bank)
+    offset = (
+        ValueRef.operand(
+            f"{side}_offset",
+            materializer=(
+                ADDRESS_SGPR64_MATERIALIZER.name
+                if bank == "sgpr"
+                else ADDRESS_VGPR64_MATERIALIZER.name
+            ),
+        )
+        if unit_count == 2
+        else _source(f"{side}_offset", bank)
+    )
     address = ValueRef.temporary(f"{side}_address")
     if unit_count == 1:
         return (
             _op(f"{bank[0]}_add_u32", {"lhs": base, "rhs": offset}, {"dst": address}),
         )
     emits = []
-    for name, source, units in (("base", base, 2), ("offset", offset, offset_units)):
-        if units == 1:
-            emits.append(_constant(bank, f"{side}_{name}_high", 0))
+    for name, source in (("base", base), ("offset", offset)):
         emits.extend(
             EmitRegisterSlice(
                 source=source,
@@ -301,7 +314,7 @@ def _position(
                 unit_offset=word,
                 unit_count=1,
             )
-            for word in range(units)
+            for word in range(2)
         )
     carry = ValueRef.temporary(f"{side}_carry")
     low = ValueRef.temporary(f"{side}_low")
@@ -404,41 +417,53 @@ def _address_rules() -> Iterator[DescriptorRule]:
     for (spaces, units), (bank, result_kind), predicate in product(
         _DOMAINS, (("sgpr", "scc"), ("sgpr", "bool"), ("vgpr", "mask")), ("eq", "ne")
     ):
-        for offset_units in product((1, 2) if units == 2 else (1,), repeat=2):
-            guards = [
-                Guard.enum_attr_equals("predicate", predicate),
-                Guard.low_value_register_class(
-                    "result", "amdgpu.scc" if result_kind == "scc" else "amdgpu.sgpr"
-                ),
-                Guard.low_value_register_unit_count(
-                    "result", 2 if result_kind == "mask" else 1
-                ),
-            ]
-            for side, offset_count in zip(("lhs", "rhs"), offset_units, strict=True):
+        guards = [
+            Guard.enum_attr_equals("predicate", predicate),
+            Guard.low_value_register_class(
+                "result", "amdgpu.scc" if result_kind == "scc" else "amdgpu.sgpr"
+            ),
+            Guard.low_value_register_unit_count(
+                "result", 2 if result_kind == "mask" else 1
+            ),
+        ]
+        for side in ("lhs", "rhs"):
+            guards.extend(
+                (
+                    Guard.value_memory_space(side, spaces),
+                    Guard.low_value_register_unit_count(side, units),
+                    Guard.value_materializable(side, REGISTERS_VGPR_MATERIALIZER.name)
+                    if bank == "vgpr"
+                    else Guard.low_value_register_class(side, "amdgpu.sgpr"),
+                )
+            )
+            position = f"{side}_offset"
+            if units == 2:
+                materializer = (
+                    ADDRESS_SGPR64_MATERIALIZER
+                    if bank == "sgpr"
+                    else ADDRESS_VGPR64_MATERIALIZER
+                )
+                guards.append(Guard.value_materializable(position, materializer.name))
+            else:
                 guards.extend(
                     (
-                        Guard.value_memory_space(side, spaces),
-                        Guard.low_value_register_unit_count(side, units),
-                        Guard.low_value_register_unit_count(
-                            f"{side}_offset", offset_count
-                        ),
+                        Guard.low_value_register_unit_count(position, 1),
+                        Guard.value_materializable(
+                            position, REGISTERS_VGPR_MATERIALIZER.name
+                        )
+                        if bank == "vgpr"
+                        else Guard.low_value_register_class(position, "amdgpu.sgpr"),
                     )
                 )
-                guards.extend(
-                    Guard.value_materializable(field, REGISTERS_VGPR_MATERIALIZER.name)
-                    if bank == "vgpr"
-                    else Guard.low_value_register_class(field, "amdgpu.sgpr")
-                    for field in (side, f"{side}_offset")
-                )
-            yield DescriptorRule(
-                source_op=buffer.buffer_compare_address,
-                guards=tuple(guards),
-                emit=(
-                    *_position("lhs", bank, units, offset_units[0]),
-                    *_position("rhs", bank, units, offset_units[1]),
-                    *_comparison(bank, units, predicate, result_kind),
-                ),
-            )
+        yield DescriptorRule(
+            source_op=buffer.buffer_compare_address,
+            guards=tuple(guards),
+            emit=(
+                *_position("lhs", bank, units),
+                *_position("rhs", bank, units),
+                *_comparison(bank, units, predicate, result_kind),
+            ),
+        )
 
 
 def _cross_domain_address_rules() -> Iterator[DescriptorRule]:
@@ -540,7 +565,11 @@ AMDGPU_BUFFER_CONTRACT_FRAGMENT = ContractFragment(
     name="amdgpu.buffer",
     descriptor_set=_DESCRIPTOR_SET,
     public_header="loom/target/arch/amdgpu/contracts/buffer.h",
-    materializers=(REGISTERS_VGPR_MATERIALIZER,),
+    materializers=(
+        REGISTERS_VGPR_MATERIALIZER,
+        ADDRESS_SGPR64_MATERIALIZER,
+        ADDRESS_VGPR64_MATERIALIZER,
+    ),
     cases=(
         *_address_rules(),
         *_cross_domain_address_rules(),

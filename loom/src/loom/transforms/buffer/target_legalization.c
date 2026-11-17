@@ -143,9 +143,16 @@ static iree_status_t loom_buffer_legalize_build_byte_offset(
     loom_value_id_t relative_offset, loom_location_id_t location,
     loom_value_id_t* out_byte_offset) {
   loom_op_t* op = NULL;
+  const loom_type_t position_type =
+      loom_module_value_type(builder->module, base_offset);
+  const loom_type_t offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+  if (!loom_type_equal(position_type, offset_type)) {
+    IREE_RETURN_IF_ERROR(loom_index_cast_build(
+        builder, relative_offset, offset_type, position_type, location, &op));
+    relative_offset = loom_index_cast_result(op);
+  }
   IREE_RETURN_IF_ERROR(loom_index_add_build(
-      builder, base_offset, relative_offset,
-      loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET), location, &op));
+      builder, base_offset, relative_offset, position_type, location, &op));
   *out_byte_offset = loom_index_add_result(op);
   return iree_ok_status();
 }
