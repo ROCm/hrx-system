@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/runtime/testing/worker_gate.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/telemetry.h"
 
@@ -29,6 +30,19 @@ class AdmissionServiceTest : public SourceTextServiceTest {
     auto options = SourceTextServiceTest::ServiceOptions();
     options.row_count = 2;
     return options;
+  }
+
+  // A newly queued request has no borrower yet. Give admission an owner turn
+  // before waiting for outstanding work to retire or stop on capacity pressure.
+  void AdvanceToQuiescence(const loom_serve_service_t& interface) {
+    bool progress = false;
+    IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self, 0,
+                                                     &progress));
+    AdvanceUntil(interface, [&] {
+      return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
+             std::string(interface.snapshot(interface.runtime.self).phase) ==
+                 "idle";
+    });
   }
 
   void CheckBackfill(size_t budget, OverlapAction action,
@@ -96,7 +110,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
         stalled.Send(server_, Request(Message("user", "abxa"), 25)));
     loom_serve_http_connection_t* active = nullptr;
     ASSERT_NO_FATAL_FAILURE(AcceptLoopback(interface, &active));
-    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, quiescent));
+    ASSERT_NO_FATAL_FAILURE(AdvanceToQuiescence(interface));
     ASSERT_EQ(interface.telemetry.counters->output_tokens,
               initial.output_tokens + 1);
     ASSERT_FALSE(loom_serve_http_connection_can_send(active));
@@ -106,7 +120,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
     const int head = Send(Request(head_messages, head_limit), head_headers);
     loom_serve_http_connection_t* head_connection = nullptr;
     ASSERT_NO_FATAL_FAILURE(Accept(head, interface, &head_connection));
-    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, quiescent));
+    ASSERT_NO_FATAL_FAILURE(AdvanceToQuiescence(interface));
     ASSERT_EQ(interface.snapshot(interface.runtime.self).queued_requests, 1u);
     for (size_t i = 0; i < budget; ++i) {
       const int tail = Send(Request(Message("user", "a"), 4));
@@ -125,7 +139,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
     // A new arrival cannot replenish the oldest request's overtake budget.
     const int extra = Send(Request(Message("user", "b"), 4));
     ASSERT_NO_FATAL_FAILURE(Accept(extra, interface, &connection));
-    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, quiescent));
+    ASSERT_NO_FATAL_FAILURE(AdvanceToQuiescence(interface));
     bool progress = false;
     IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self, 0,
                                                      &progress));
@@ -244,12 +258,12 @@ class AdmissionServiceTest : public SourceTextServiceTest {
         stalled.Send(server_, Request(Message("user", "abxa"), 25)));
     loom_serve_http_connection_t* connection = nullptr;
     ASSERT_NO_FATAL_FAILURE(AcceptLoopback(interface, &connection));
-    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, quiescent));
+    ASSERT_NO_FATAL_FAILURE(AdvanceToQuiescence(interface));
     const int head = Send(Request(Message("user", std::string(32, 'a')), 33),
                           "X-Loom-Session: recycled\r\n");
     loom_serve_http_connection_t* head_connection = nullptr;
     ASSERT_NO_FATAL_FAILURE(Accept(head, interface, &head_connection));
-    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, quiescent));
+    ASSERT_NO_FATAL_FAILURE(AdvanceToQuiescence(interface));
     const int tail = Send(Request(Message("user", "a"), 4));
     if (action == OverlapAction::kDisconnect) {
       loom_serve_http_connection_t* tail_connection = nullptr;
@@ -261,44 +275,48 @@ class AdmissionServiceTest : public SourceTextServiceTest {
       const loom_serve_http_request_t* replacement_request = nullptr;
       IREE_ASSERT_OK(http_.TakeRequest(replacement, &replacement_connection,
                                        &replacement_request));
-      const linger reset = {1, 0};
-      ASSERT_EQ(setsockopt(head, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
-                0);
-      ASSERT_EQ(close(head), 0);
-      iree_notification_await(
-          loom_serve_http_server_notification(server_),
-          [](void* self) {
-            return loom_serve_http_connection_failed(
-                static_cast<loom_serve_http_connection_t*>(self));
-          },
-          head_connection, iree_infinite_timeout());
-      // The sole worker cannot execute the preparation this turn accepts.
-      // Cancel the unborrowed head and reuse its exact queue credit/name
-      // while the selected tail still owns an outstanding CPU borrow.
-      loom_serve::testing::text::OwnerTurn::Run(
-          loom_runtime_host_executor(host_), [&] {
-            IREE_ASSERT_OK(interface.accept(interface.runtime.self,
-                                            tail_connection, tail_request, 0));
-            EXPECT_TRUE(
-                interface.runtime.vtable->is_pending(interface.runtime.self));
-            EXPECT_EQ(
-                interface.snapshot(interface.runtime.self).queued_requests, 2u);
-            bool progress = false;
-            IREE_ASSERT_OK(interface.runtime.vtable->advance(
-                interface.runtime.self, 0, &progress));
-            EXPECT_TRUE(progress);
-            EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
-            EXPECT_EQ(
-                interface.snapshot(interface.runtime.self).queued_requests, 1u);
-            EXPECT_TRUE(
-                interface.runtime.vtable->is_pending(interface.runtime.self));
-            IREE_ASSERT_OK(interface.accept(interface.runtime.self,
-                                            replacement_connection,
-                                            replacement_request, 0));
-            EXPECT_EQ(
-                interface.snapshot(interface.runtime.self).queued_requests, 2u);
-            EXPECT_EQ(interface.telemetry.counters->rejected, 0u);
-          });
+      {
+        // Hold preparation across the actual transport disconnect. The owner
+        // cancels the unborrowed head and reuses its exact queue credit/name
+        // while the selected tail still owns an outstanding CPU borrow.
+        loom_runtime::testing::WorkerGate gate(
+            loom_runtime_host_executor(host_));
+        IREE_ASSERT_OK(interface.accept(interface.runtime.self, tail_connection,
+                                        tail_request, 0));
+        bool progress = false;
+        IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
+                                                         0, &progress));
+        EXPECT_TRUE(progress);
+        EXPECT_TRUE(
+            interface.runtime.vtable->is_pending(interface.runtime.self));
+        EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests,
+                  2u);
+        const linger reset = {1, 0};
+        ASSERT_EQ(
+            setsockopt(head, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)), 0);
+        ASSERT_EQ(close(head), 0);
+        iree_notification_await(
+            loom_serve_http_server_notification(server_),
+            [](void* self) {
+              return loom_serve_http_connection_failed(
+                  static_cast<loom_serve_http_connection_t*>(self));
+            },
+            head_connection, iree_infinite_timeout());
+        IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
+                                                         0, &progress));
+        EXPECT_TRUE(progress);
+        EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
+        EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests,
+                  1u);
+        EXPECT_TRUE(
+            interface.runtime.vtable->is_pending(interface.runtime.self));
+        IREE_ASSERT_OK(interface.accept(interface.runtime.self,
+                                        replacement_connection,
+                                        replacement_request, 0));
+        EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests,
+                  2u);
+        EXPECT_EQ(interface.telemetry.counters->rejected, 0u);
+      }
       ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
         return !interface.snapshot(interface.runtime.self).queued_requests &&
                quiescent();
@@ -307,6 +325,10 @@ class AdmissionServiceTest : public SourceTextServiceTest {
       EXPECT_EQ(Content(Read(replacement)), Oracle::Complete("bx", 4));
     } else {
       ASSERT_NO_FATAL_FAILURE(Accept(tail, interface, &connection));
+      bool progress = false;
+      IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
+                                                       0, &progress));
+      EXPECT_TRUE(progress);
       ASSERT_TRUE(interface.runtime.vtable->is_pending(interface.runtime.self));
       EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests, 2u);
     }

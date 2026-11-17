@@ -58,8 +58,8 @@ iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
                                             loom_runtime_service_flags_t flags,
                                             bool allow_preparation);
 
-// Transfers a validated receipt into a stable queue slot and offers
-// preparation.
+// Transfers a validated receipt into a stable queue slot. Preparation begins
+// when the service owner advances, independently of request arrival.
 void loom_serve_text_pending_push(
     loom_serve_text_service_t* service, loom_serve_text_consumer_t consumer,
     iree_string_view_t body, iree_string_view_t name,

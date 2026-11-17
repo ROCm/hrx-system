@@ -201,6 +201,7 @@ loom_cc_library(
     deps = [
         ":source_service_fixture",
         ":telemetry",
+        "//loom/src/loom/runtime/testing:worker_gate",
     ],
     alwayslink = True,
 )
