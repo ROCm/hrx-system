@@ -716,8 +716,8 @@ static void iree_hal_amd_gpu_file_staging_attach_view(
           view->bucket->proactor, &registrations, block->preparation,
           IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
               IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
-          &view->registration);
-      if (iree_status_is_ok(status)) {
+          IREE_ASYNC_BUFFER_REGISTRATION_FLAG_OPTIONAL, &view->registration);
+      if (iree_status_is_ok(status) && view->registration) {
         iree_slim_mutex_lock(&staging->mutex);
         view->registration->next = block->memory.registrations.head;
         block->memory.registrations.head = view->registration;
@@ -1553,12 +1553,14 @@ iree_status_t iree_hal_amd_gpu_file_staging_allocate(
   staging->byte_budget = iree_hal_amd_gpu_file_staging_native_length(
       staging, (uint64_t)staging->lane_capacity * staging->lane_count);
   // Retained pins accelerate repeated I/O but are not required for ordinary
-  // host spans. Older kernels cannot attach pins from the allocation owner.
+  // host spans. Older kernels cannot attach pins from the allocation owner;
+  // newer ones may still decline preparation under a limited pin budget.
   if (iree_any_bit_set(
           iree_async_proactor_query_capabilities(proactor),
           IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION)) {
     staging->memory.io.proactor_count = 1;
     staging->memory.io.proactors = &staging->proactor;
+    staging->memory.io.flags = IREE_ASYNC_BUFFER_REGISTRATION_FLAG_OPTIONAL;
   }
   *out_staging = staging;
   return iree_ok_status();

@@ -252,6 +252,7 @@ iree_status_t iree_hal_amd_fabric_slab_provider_create(
       (void*)((uint8_t*)provider + io_proactors_offset);
   provider->options.memory.io.proactor_count = 0;
   provider->options.memory.io.proactors = io_proactors;
+  provider->options.memory.io.flags = IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE;
   iree_hal_amd_fabric_memory_scope_facts_t* scope_facts =
       (void*)((uint8_t*)provider + scope_facts_offset);
   if (options->scope_count) {

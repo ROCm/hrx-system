@@ -276,7 +276,7 @@ class PreparedBufferOwnerTest : public IoUringRegistrationOwnerTest {
         iree_make_byte_span(backing_, sizeof(backing_)),
         IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
             IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
-        &entry_));
+        IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &entry_));
   }
 
   void Attach() {
@@ -377,7 +377,8 @@ TEST_F(PreparedBufferOwnerTest, PreparationAndTransitionsReturnWhileOwnerHeld) {
   IREE_EXPECT_OK(iree_async_proactor_prepare_buffer(
       proactor_, &other_registrations,
       iree_make_byte_span(other_backing, sizeof(other_backing)),
-      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &other_entry));
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ,
+      IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &other_entry));
   iree_async_buffer_registration_state_deinitialize(&other_registrations);
   ReleaseOwner();
   ASSERT_NO_FATAL_FAILURE(attached.Wait());

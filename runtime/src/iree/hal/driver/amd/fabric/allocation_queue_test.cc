@@ -449,7 +449,9 @@ TEST_F(RegisteredAllocationQueueTest, FailedPinPreparationReleasesBacking) {
       .prepare_buffer =
           [](iree_async_proactor_t*, iree_async_buffer_registration_state_t*,
              iree_byte_span_t, iree_async_buffer_access_flags_t,
+             iree_async_buffer_registration_flags_t flags,
              iree_async_buffer_registration_entry_t**) {
+            EXPECT_EQ(flags, IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE);
             return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED);
           },
   };
