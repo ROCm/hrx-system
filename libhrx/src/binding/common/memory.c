@@ -2782,11 +2782,6 @@ static iree_status_t iree_hal_streaming_enqueue_buffer_copy(
                             "copy operands are not queue-compatible buffers");
   }
 
-  IREE_RETURN_IF_ERROR(
-      iree_hal_streaming_buffer_ref_validate_range(&src_ref, size));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_streaming_buffer_ref_validate_range(&dst_ref, size));
-
   const iree_hal_transfer_operation_t operation = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
       .copy =
@@ -2829,15 +2824,15 @@ iree_status_t iree_hal_streaming_memory_memcpy(
   // Look up buffers from device pointers.
   iree_hal_streaming_buffer_ref_t dst_ref;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_memory_lookup(context, dst, &dst_ref),
+      z0, iree_hal_streaming_memory_lookup_range(context, dst, size, &dst_ref),
       "resolving `dst` buffer ref %p", (void*)dst);
   iree_hal_streaming_buffer_ref_t src_ref;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, iree_hal_streaming_memory_lookup(context, src, &src_ref),
+      z0, iree_hal_streaming_memory_lookup_range(context, src, size, &src_ref),
       "resolving `src` buffer ref %p", (void*)src);
 
-  iree_status_t status =
-      iree_hal_streaming_enqueue_buffer_copy(stream, src_ref, dst_ref, size);
+  iree_status_t status = iree_hal_streaming_memcpy_device_to_device_resolved(
+      context, dst_ref, src_ref, size, stream);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 
   IREE_TRACE_ZONE_END(z0);
@@ -3054,10 +3049,11 @@ static iree_status_t iree_hal_streaming_prepare_host_transfer(
   return status;
 }
 
-static iree_status_t iree_hal_streaming_memcpy_host_to_device_resolved(
+iree_status_t iree_hal_streaming_memcpy_host_to_device_resolved(
     iree_hal_streaming_context_t* context,
     iree_hal_streaming_buffer_ref_t dst_ref, const void* src,
-    iree_device_size_t size, iree_hal_streaming_stream_t* stream) {
+    iree_hal_streaming_buffer_ref_t src_ref, iree_device_size_t size,
+    iree_hal_streaming_stream_t* stream) {
   // A foreign device's buffer is not necessarily accessible from this stream's
   // queue. Keep the copy on its owning device, with a stream timeline point
   // spanning the blocking transfer instead of joining unrelated contexts.
@@ -3096,9 +3092,7 @@ static iree_status_t iree_hal_streaming_memcpy_host_to_device_resolved(
   }
 
   if (stream) {
-    iree_hal_streaming_buffer_ref_t src_ref;
-    if (iree_hal_streaming_memory_try_lookup(
-            stream->context, (iree_hal_streaming_deviceptr_t)src, &src_ref)) {
+    if (src_ref.buffer) {
       if (src_ref.buffer->memory_kind ==
           IREE_HAL_STREAMING_MEMORY_KIND_DEVICE) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -3167,16 +3161,26 @@ iree_status_t iree_hal_streaming_memcpy_host_to_device(
   iree_status_t status = iree_hal_streaming_prepare_host_transfer(
       context, dst, size, stream, &owner_context, &dst_ref);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_memcpy_host_to_device_resolved(
-        owner_context ? owner_context : context, dst_ref, src, size, stream);
+    iree_hal_streaming_buffer_ref_t src_ref = {0};
+    if (stream &&
+        iree_hal_streaming_memory_try_lookup(
+            stream->context, (iree_hal_streaming_deviceptr_t)src, &src_ref)) {
+      status = iree_hal_streaming_buffer_ref_validate_range(&src_ref, size);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_memcpy_host_to_device_resolved(
+          owner_context ? owner_context : context, dst_ref, src, src_ref, size,
+          stream);
+    }
   }
   iree_hal_streaming_context_release(owner_context);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
 
-static iree_status_t iree_hal_streaming_memcpy_device_to_host_resolved(
+iree_status_t iree_hal_streaming_memcpy_device_to_host_resolved(
     iree_hal_streaming_context_t* context, void* dst,
+    iree_hal_streaming_buffer_ref_t dst_ref,
     iree_hal_streaming_buffer_ref_t src_ref, iree_device_size_t size,
     iree_hal_streaming_stream_t* stream) {
   if (stream && context->device != stream->context->device) {
@@ -3210,11 +3214,7 @@ static iree_status_t iree_hal_streaming_memcpy_device_to_host_resolved(
   }
 
   if (stream) {
-    iree_hal_streaming_buffer_ref_t dst_ref;
-    if (iree_hal_streaming_memory_try_lookup(
-            stream->context, (iree_hal_streaming_deviceptr_t)dst, &dst_ref)) {
-      IREE_RETURN_IF_ERROR(
-          iree_hal_streaming_buffer_ref_validate_range(&dst_ref, size));
+    if (dst_ref.buffer) {
       if (dst_ref.buffer->memory_kind ==
           IREE_HAL_STREAMING_MEMORY_KIND_DEVICE) {
         return iree_make_status(
@@ -3282,8 +3282,17 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host(
   iree_status_t status = iree_hal_streaming_prepare_host_transfer(
       context, src, size, stream, &owner_context, &src_ref);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_streaming_memcpy_device_to_host_resolved(
-        owner_context ? owner_context : context, dst, src_ref, size, stream);
+    iree_hal_streaming_buffer_ref_t dst_ref = {0};
+    if (stream &&
+        iree_hal_streaming_memory_try_lookup(
+            stream->context, (iree_hal_streaming_deviceptr_t)dst, &dst_ref)) {
+      status = iree_hal_streaming_buffer_ref_validate_range(&dst_ref, size);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_streaming_memcpy_device_to_host_resolved(
+          owner_context ? owner_context : context, dst, dst_ref, src_ref, size,
+          stream);
+    }
   }
   iree_hal_streaming_context_release(owner_context);
   IREE_TRACE_ZONE_END(z0);
@@ -3390,6 +3399,20 @@ iree_status_t iree_hal_streaming_memcpy_device_to_host_2d(
   return status;
 }
 
+iree_status_t iree_hal_streaming_memcpy_device_to_device_resolved(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_buffer_ref_t dst_ref,
+    iree_hal_streaming_buffer_ref_t src_ref, iree_device_size_t size,
+    iree_hal_streaming_stream_t* stream) {
+  if (stream) {
+    return iree_hal_streaming_enqueue_buffer_copy(stream, src_ref, dst_ref,
+                                                  size);
+  }
+  return iree_hal_streaming_direct_transfer_d2d(
+      context, src_ref.buffer->buffer, src_ref.offset, dst_ref.buffer->buffer,
+      dst_ref.offset, size);
+}
+
 iree_status_t iree_hal_streaming_memcpy_device_to_device(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t dst,
     iree_hal_streaming_deviceptr_t src, iree_device_size_t size,
@@ -3403,18 +3426,19 @@ iree_status_t iree_hal_streaming_memcpy_device_to_device(
     // Look up buffers from device pointers.
     iree_hal_streaming_buffer_ref_t dst_ref;
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_memory_lookup(context, dst, &dst_ref),
+        z0,
+        iree_hal_streaming_memory_lookup_range(context, dst, size, &dst_ref),
         "resolving `dst` buffer ref %p", (void*)dst);
     iree_hal_streaming_buffer_ref_t src_ref;
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_memory_lookup(context, src, &src_ref),
+        z0,
+        iree_hal_streaming_memory_lookup_range(context, src, size, &src_ref),
         "resolving `src` buffer ref %p", (void*)src);
 
     // Transfer.
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_hal_streaming_direct_transfer_d2d(
-                context, src_ref.buffer->buffer, src_ref.offset,
-                dst_ref.buffer->buffer, dst_ref.offset, size));
+        z0, iree_hal_streaming_memcpy_device_to_device_resolved(
+                context, dst_ref, src_ref, size, NULL));
   } else {
     // Device-to-device copy is the same as memcpy with offset 0.
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
