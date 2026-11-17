@@ -1105,6 +1105,80 @@ resolution and the physical ABI. Import annotations require nonempty string
 literals on bodyless functions with external linkage; conflicting
 redeclarations diagnose during source admission.
 
+## Kernel record values
+
+Kernel parameters can group values in records and by-value lambda captures. A
+record is decomposed into ordinary kernel arguments in base/member order; fixed
+arrays contribute their elements in order, and empty subobjects contribute no
+arguments. The kernel body receives an SSA record, so reading members does not
+allocate or load an object from memory.
+
+```cpp
+#include <loomcxx/kernel.h>
+
+struct Saxpy {
+  float scale;
+  const float* input;
+  float* output;
+  void operator()(unsigned i) const { output[i] += scale * input[i]; }
+};
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(64, 1, 1)]]
+void saxpy(unsigned count, Saxpy body) {
+  unsigned i = static_cast<unsigned>(loom::kernel::workitem::id.x);
+  if (i < count) body(i);
+}
+```
+
+The launch signature is `(count: i32, body_scale: f32, body_input: buffer,
+body_output: buffer)`. Each resource remains an explicit buffer argument. Each
+pointer's signed `index` displacement starts at zero relative to the supplied
+buffer origin, just as for a direct pointer parameter. An external custom-dispatch
+caller can supply interior native addresses; backward indexing within their
+allocation retains signed arithmetic. Native argument offsets come from the
+compiled executable's reflection, not the host layout of `Saxpy`. That caller
+owns resource accessibility and lifetime through completion.
+
+Source launches through `loom::kernel::launch`, `loom::check::launch`, and check
+actions accept records containing scalars, static vectors, `index`/`offset`
+values, and typed buffers. For example, a command program can capture its input
+binding and a scalar in a closure:
+
+```cpp
+#include <loomcxx/command.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/view.h>
+
+using Input = loom::type::buffer<const float>;
+using Output = loom::type::buffer<float>;
+
+template <class F>
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void apply(Output output, F body) { body(output); }
+
+[[loom::command_program]]
+void scale(float factor, [[loom::launch]] Input input, Output output) {
+  auto body = [input, factor](Output output) {
+    auto source = loom::buffer::view<1>(input, {});
+    auto target = loom::buffer::view<1>(output, {});
+    loom::view::store(loom::view::load(source, 0) * factor, target, 0);
+  };
+  loom::kernel::launch<apply<decltype(body)>>(output, body);
+}
+```
+
+The launch passes `(output: buffer, body_input: buffer, body_factor: f32)`.
+Source launches require typed buffer members instead of native pointer members.
+External callers can supply the flattened arguments through ordinary buffer
+bindings or the explicit custom-dispatch ABI. Record argument types must match
+their kernel parameters. Reference members, by-reference captures, and dependent
+shaped members diagnose at the kernel boundary. Passing a record by value does
+not enable loads of pointer-bearing objects from memory.
+
+Export emits the explicit leaf signature as ordinary C++ parameters. The
+grouping into the original record or lambda is not required to reimport the
+program, and vector fields retain their vector types.
+
 ## Kernel pointer contracts
 
 Kernel pointer parameters can state the byte alignment supplied by their caller:

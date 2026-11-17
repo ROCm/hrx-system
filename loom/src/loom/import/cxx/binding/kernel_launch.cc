@@ -32,6 +32,27 @@ bool is_workload_type(Types& types, const cxx::Type* type) {
 
 }  // namespace
 
+const KernelRecordProjection* admit_kernel_record_argument(
+    cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
+    const cxx::Type* expected, const cxx::Type* actual, cxx::AST* owner) {
+  const auto* projection = types.kernel_record(expected, owner);
+  if (!projection) {
+    return nullptr;
+  }
+  if (types.unqualified_value(expected) != types.unqualified_value(actual)) {
+    diagnostics.reject(unit, owner,
+                       "kernel record arguments must match the parameter's "
+                       "source type");
+  }
+  if (projection->argument_indices.size() != projection->types.size()) {
+    diagnostics.reject(
+        unit, owner,
+        "kernel record launches require typed buffer members instead of "
+        "native pointer members");
+  }
+  return projection;
+}
+
 bool KernelLaunchIntrinsic::supports(std::string_view name) {
   return name == "kernel.launch";
 }
@@ -131,6 +152,11 @@ std::optional<KernelLaunchIntrinsic> KernelLaunchIntrinsic::resolve(
     fail("kernel.launch arguments must match the kernel signature");
   }
   for (size_t index = 0; index < kernel_parameters.size(); ++index) {
+    if (admit_kernel_record_argument(
+            unit, diagnostics, types, kernel_parameters[index],
+            parameters[index + parameter_offset], owner)) {
+      continue;
+    }
     const auto expected = types.get(kernel_parameters[index], owner);
     const auto& actual =
         types.partition(parameters[index + parameter_offset], owner);

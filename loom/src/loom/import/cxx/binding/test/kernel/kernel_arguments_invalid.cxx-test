@@ -51,3 +51,41 @@ LOOM_KERNEL void entry(Input input) {}
 struct Node { float* data; Node* next; };
 // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
 LOOM_KERNEL void entry(const Node* input, float* output) { output[0] = input->data[0]; }
+
+// ====
+// Source launches cannot carry native pointers hidden inside record constants.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+struct Input { const float* data; };
+LOOM_KERNEL void entry(Input input) {}
+LOOM_CHECK_CASE(native_pointer) {
+  Input input{nullptr};
+  // ERROR@+1: LOWERING/059 "kernel record launches require typed buffer members instead of native pointer members"
+  loom::check::launch<entry>(input);
+}
+
+// ====
+// A lambda's reference capture needs an object identity across the dispatch.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+template <class F>
+LOOM_KERNEL void entry(F body) { body(); }
+LOOM_CHECK_CASE(reference_capture) {
+  unsigned value = 3;
+  auto body = [&value] { value += 1; };
+  // ERROR@+1: LOWERING/059 "kernel record parameters cannot contain reference members or by-reference lambda captures"
+  loom::check::launch<entry<decltype(body)>>(body);
+}
+
+// ====
+// Matching physical leaves do not erase a record's source type.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+struct Input { unsigned value; };
+struct Other { unsigned value; };
+LOOM_KERNEL void entry(Input input) {}
+LOOM_CHECK_CASE(wrong_record) {
+  Other input{3};
+  // ERROR@+1: LOWERING/059 "kernel record arguments must match the parameter's source type"
+  loom::check::launch<entry>(input);
+}

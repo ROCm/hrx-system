@@ -771,9 +771,16 @@ class CheckBody {
     for (size_t index = 0; index < parameters.size(); ++index) {
       auto* parameter_type = parameters[index]->type();
       auto* argument_type = source_arguments[index]->type;
-      auto expected = types_.get(parameter_type, source);
+      if (kernel && admit_kernel_record_argument(unit_, diagnostics_, types_,
+                                                 parameter_type, argument_type,
+                                                 source_arguments[index])) {
+        continue;
+      }
       const auto& expected_partition =
           types_.partition(parameter_type, source_arguments[index]);
+      auto expected = expected_partition.kind == ValueKind::Record
+                          ? loom_type_t{}
+                          : types_.get(parameter_type, source);
       if (values[index].is_tensor() &&
           loom_type_kind(expected) == LOOM_TYPE_BUFFER) {
         const auto& tensor =
@@ -1013,9 +1020,11 @@ class CheckBody {
     std::vector<loom_value_id_t> arguments;
     for (; argument; argument = argument->next) {
       auto value = expression(argument->value);
-      if (!value.is_tensor() && value.partition().kind != ValueKind::SSA) {
+      if (!value.is_tensor() && !value.is_record() && !value.is_vector() &&
+          !value.is_address() && value.partition().kind != ValueKind::SSA) {
         fail(argument->value,
-             "check kernel arguments require tensors or scalar values");
+             "check kernel arguments require tensors, scalar/vector values, "
+             "or admitted records");
       }
       append_subject_value(value, arguments);
     }

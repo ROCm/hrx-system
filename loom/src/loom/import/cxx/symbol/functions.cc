@@ -26,6 +26,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 
 #include "loom/import/cxx/binding/template_inputs.h"
 #include "loom/import/cxx/source/attributes.h"
@@ -385,24 +386,43 @@ void Functions::select(std::span<const iree_string_view_t> roots,
   }
 }
 
-bool Functions::ordinary_analysis_call(const DirectCall& call) {
+ControlFlow* Functions::prepare_callee_analysis(
+    const DirectCall& call, Types& types,
+    std::vector<AnalyzedFunction>& functions,
+    std::vector<AnalyzedCall>& calls) {
   auto* function = call.function;
   if (!function || annotated(function, "kernel") ||
       command_programs_.contains(function) ||
       pipeline_contracts_.contains(function) ||
       launches_.is_configuration(function) || is_check_record(function) ||
-      annotated(function, "check_benchmark") ||
-      intrinsics_.lookup(function, call.source)) {
-    return false;
+      annotated(function, "check_benchmark")) {
+    return nullptr;
+  }
+  if (const auto* binding = intrinsics_.lookup(function, call.source)) {
+    // Intrinsic admission already resolved the selected source functions.
+    // Their bodies are separate invocations, not ordinary caller/callee
+    // edges with a shared source argument representation.
+    if (const auto* launch = std::get_if<KernelLaunchIntrinsic>(binding)) {
+      prepare_analysis(launch->kernel, types, functions, calls);
+    } else if (const auto* check = std::get_if<CheckIntrinsic>(binding)) {
+      if (check->subject) {
+        prepare_analysis(check->subject, types, functions, calls);
+      }
+      if (check->oracle) {
+        prepare_analysis(check->oracle, types, functions, calls);
+      }
+    }
+    return nullptr;
   }
   if (definition(function)) {
-    return true;
+    prepare_analysis(function, types, functions, calls);
+    return mutable_control_flow(function);
   }
   if (!imports_.lookup(function) &&
       !explicit_names_.contains(function->canonical())) {
     intrinsics_.bind_math(function, call.source);
   }
-  return false;
+  return nullptr;
 }
 
 void Functions::prepare_analysis(cxx::FunctionSymbol* function, Types& types,
@@ -440,12 +460,9 @@ void Functions::prepare_analysis(cxx::FunctionSymbol* function, Types& types,
   control_flows_.emplace(canonical, std::move(analysis));
   functions.emplace_back(canonical, retained);
   for (const auto& call : retained->calls()) {
-    if (ordinary_analysis_call(call)) {
-      prepare_analysis(call.function, types, functions, calls);
-      if (auto* callee = mutable_control_flow(call.function)) {
-        calls.push_back({retained, &call, callee});
-        continue;
-      }
+    if (auto* callee = prepare_callee_analysis(call, types, functions, calls)) {
+      calls.push_back({retained, &call, callee});
+      continue;
     }
     // Only an analyzed source body proves that an indirect argument remains
     // unchanged. Intrinsics and external calls keep their conservative ABI.

@@ -4968,6 +4968,10 @@ class Translator final : private Initialization::Evaluation {
     size_t ordinal = 0;
     for (; argument; argument = argument->next, ++ordinal) {
       auto value = expression(argument->value);
+      if (value.is_record()) {
+        value.append_to(arguments);
+        continue;
+      }
       auto expected = types_.get(kernel_parameters[ordinal], argument->value);
       if (loom_type_kind(expected) == LOOM_TYPE_BUFFER) {
         if (!value.is_buffer()) {
