@@ -13,8 +13,10 @@
 #include <utility>
 #include <vector>
 
+#include "iree/async/util/proactor_pool.h"
 #include "iree/hal/cts/util/pool_test_util.h"
 #include "iree/hal/cts/util/test_base.h"
+#include "iree/hal/utils/fd_file.h"
 #include "iree/io/file_contents.h"
 #include "iree/io/file_handle.h"
 #include "iree/testing/temp_file.h"
@@ -30,6 +32,9 @@ struct FileHandleDeleter {
 };
 
 using FileHandlePtr = std::unique_ptr<iree_io_file_handle_t, FileHandleDeleter>;
+using ProactorPoolPtr =
+    std::unique_ptr<iree_async_proactor_pool_t,
+                    decltype(&iree_async_proactor_pool_release)>;
 
 struct ResourceRefCountObservation {
   // Borrowed resource kept live by the test until observation completes.
@@ -56,6 +61,7 @@ class VulkanFileTest : public CtsTestBase<> {
   iree_status_t ImportNativeFile(const std::vector<uint8_t>& file_contents,
                                  const char* temp_file_stem,
                                  iree_io_file_mode_t extra_mode,
+                                 iree_async_proactor_t* proactor,
                                  Ref<iree_hal_file_t>* out_file,
                                  FileHandlePtr* out_handle) {
     iree::testing::TempFilePath path(temp_file_stem);
@@ -74,10 +80,16 @@ class VulkanFileTest : public CtsTestBase<> {
     FileHandlePtr handle(raw_handle);
 
     Ref<iree_hal_file_t> file;
-    IREE_RETURN_IF_ERROR(iree_hal_file_import(
-        device_, /*storage_pool=*/nullptr, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
-        IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
-        handle.get(), IREE_HAL_EXTERNAL_FILE_FLAG_NONE, file.out()));
+    if (proactor) {
+      IREE_RETURN_IF_ERROR(iree_hal_fd_file_from_handle(
+          IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+          handle.get(), proactor, iree_allocator_system(), file.out()));
+    } else {
+      IREE_RETURN_IF_ERROR(iree_hal_file_import(
+          device_, /*storage_pool=*/nullptr, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+          IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+          handle.get(), IREE_HAL_EXTERNAL_FILE_FLAG_NONE, file.out()));
+    }
     *out_file = std::move(file);
     if (out_handle) {
       *out_handle = std::move(handle);
@@ -86,14 +98,15 @@ class VulkanFileTest : public CtsTestBase<> {
   }
 
   void NativeFileRoundTrip(iree_device_size_t file_length,
-                           const char* temp_file_stem) {
+                           const char* temp_file_stem,
+                           iree_async_proactor_t* proactor = nullptr) {
     const std::vector<uint8_t> file_contents(file_length, 0);
     const std::vector<uint8_t> source_contents =
         MakeDeterministicBytes(file_length);
 
     Ref<iree_hal_file_t> file;
-    IREE_ASSERT_OK(
-        ImportNativeFile(file_contents, temp_file_stem, 0, &file, nullptr));
+    IREE_ASSERT_OK(ImportNativeFile(file_contents, temp_file_stem, 0, proactor,
+                                    &file, nullptr));
 
     Ref<iree_hal_buffer_t> source_buffer;
     IREE_ASSERT_OK(CreateDeviceBufferWithData(
@@ -114,6 +127,7 @@ class VulkanFileTest : public CtsTestBase<> {
         /*source_offset=*/0, target_buffer.get(),
         /*target_offset=*/0, file_length, /*barriers=*/NULL,
         IREE_HAL_READ_FLAG_NONE));
+    file.reset();
     IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
         read_signal, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
 
@@ -130,9 +144,17 @@ TEST_P(VulkanFileTest, NativeFileLargeRangeRoundTrip) {
   NativeFileRoundTrip(file_length, "iree_vulkan_hal_cts_native_file");
 }
 
-TEST_P(VulkanFileTest, NativeFileRoundTripExceedsStagingRing) {
+TEST_P(VulkanFileTest, NativeFileIndependentOwnerRoundTripExceedsStagingRing) {
+  iree_async_proactor_pool_t* raw_pool = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_pool_create(
+      1, nullptr, iree_async_proactor_pool_options_default(),
+      iree_allocator_system(), &raw_pool));
+  ProactorPoolPtr pool(raw_pool, iree_async_proactor_pool_release);
+  iree_async_proactor_t* proactor = nullptr;
+  IREE_ASSERT_OK(iree_async_proactor_pool_get(pool.get(), 0, &proactor));
   const iree_device_size_t file_length = 20 * 1024 * 1024 + 31;
-  NativeFileRoundTrip(file_length, "iree_vulkan_hal_cts_native_file_staging");
+  NativeFileRoundTrip(file_length, "iree_vulkan_hal_cts_native_file_staging",
+                      proactor);
 }
 
 TEST_P(VulkanFileTest, NativeFileShortReadExceedsStagingRingFails) {
@@ -276,14 +298,15 @@ class VulkanImportedFileTest : public VulkanFileTest {
     Ref<iree_hal_file_t> output;
     const auto mode = direct ? IREE_IO_FILE_MODE_DIRECT : 0;
     iree::Status import_status = ImportNativeFile(
-        expected, "iree_vulkan_imported_input", mode, &input, nullptr);
+        expected, "iree_vulkan_imported_input", mode, nullptr, &input, nullptr);
     if (direct && (import_status.code() == iree::StatusCode::kUnavailable ||
                    import_status.code() == iree::StatusCode::kUnimplemented)) {
       GTEST_SKIP() << import_status.ToString();
     }
     IREE_ASSERT_OK(import_status);
-    IREE_ASSERT_OK(ImportNativeFile(
-        expected_file, "iree_vulkan_imported_output", mode, &output, nullptr));
+    IREE_ASSERT_OK(ImportNativeFile(expected_file,
+                                    "iree_vulkan_imported_output", mode,
+                                    nullptr, &output, nullptr));
     const auto& read = iree_hal_file_requirements(input)->read;
     const auto& write = iree_hal_file_requirements(output)->write;
     const uint64_t alignment =
@@ -435,8 +458,8 @@ class VulkanImportedFileTest : public VulkanFileTest {
     Ref<iree_hal_file_t> file;
     FileHandlePtr handle;
     IREE_ASSERT_OK(ImportNativeFile(std::vector<uint8_t>(length, 0xAB),
-                                    "iree_vulkan_imported_failure", 0, &file,
-                                    &handle));
+                                    "iree_vulkan_imported_failure", 0, nullptr,
+                                    &file, &handle));
     if (!fail_dependency) {
       // The imported extent is still valid, but native I/O must report EOF
       // after successful partial requests and retire the other accepted lanes.
