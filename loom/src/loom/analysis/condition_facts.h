@@ -168,6 +168,8 @@ typedef struct loom_condition_query_t {
   const loom_module_t* module;
   // Optional active domain mapping module value IDs to compact local ordinals.
   loom_local_value_domain_t* value_domain;
+  // Lazily allocated relation-construction capacity, owned by arena.
+  loom_condition_composition_scratch_t* composition_scratch;
   // Arena retaining indexed state and worklist capacity.
   iree_arena_allocator_t* arena;
   // Per-value visitation or memo state indexed by storage ordinal.

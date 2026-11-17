@@ -1147,7 +1147,8 @@ iree_status_t loom_condition_facts_query_complete(
       &out_derivation->integer_facts, out_derivation,
       /*out_refinements=*/NULL, &complete);
   if (iree_status_is_ok(status)) {
-    status = loom_condition_derivation_complete(fact_table, out_derivation);
+    status = loom_condition_derivation_complete(
+        fact_table, query->arena, &query->composition_scratch, out_derivation);
   }
   return status;
 }
@@ -1169,7 +1170,8 @@ iree_status_t loom_condition_facts_query_conjunction_complete(
         /*out_refinements=*/NULL, &complete);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_condition_derivation_complete(fact_table, out_derivation);
+    status = loom_condition_derivation_complete(
+        fact_table, query->arena, &query->composition_scratch, out_derivation);
   }
   return status;
 }

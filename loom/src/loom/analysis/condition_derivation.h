@@ -112,12 +112,25 @@ iree_status_t loom_condition_derivation_append_boolean_fact(
     loom_condition_derivation_t* derivation, loom_value_id_t value_id,
     bool value);
 
+// Reusable construction storage. Its arena may outlive individual results;
+// no relation or result pointer survives a completed or failed query. Releasing
+// that arena requires resetting the owner pointer to NULL before reuse.
+typedef struct loom_condition_composition_scratch_t
+    loom_condition_composition_scratch_t;
+
 // Composes condition-owned anchors through original local and ambient alias
 // relations, then sorts and deduplicates both result classes. Every published
 // consequence retains an original condition operand; two ambient-only values
-// are never connected. Allocation failure leaves an incomplete derivation.
+// are never connected. Scratch is allocated lazily in |scratch_arena| and
+// retains high-water capacities through |inout_scratch|. Results live only in
+// the derivation arena; separate result storage survives releasing scratch.
+// Allocation failure leaves an incomplete derivation; resetting the derivation
+// permits a fresh query with the same scratch. Scratch and result arenas may be
+// the same.
 iree_status_t loom_condition_derivation_complete(
     const loom_value_fact_table_t* fact_table,
+    iree_arena_allocator_t* scratch_arena,
+    loom_condition_composition_scratch_t** inout_scratch,
     loom_condition_derivation_t* derivation);
 
 // Applies a single integer relation to scalar range facts for |value_id| when

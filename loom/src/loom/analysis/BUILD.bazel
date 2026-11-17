@@ -378,13 +378,44 @@ loom_cc_library(
     hdrs = ["condition_derivation.h"],
     deps = [
         ":integer_relation",
+        "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ir:type_headers",
         "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:fact_relation",
         "//loom/src/loom/util:fact_table_api",
+        "//loom/src/loom/util:segmented_storage",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "condition_derivation_test",
+    srcs = ["condition_derivation_test.cc"],
+    deps = [
+        ":condition_derivation",
+        ":integer_relation",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/util:fact_relation",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_benchmark(
+    name = "condition_derivation_benchmark",
+    srcs = ["condition_derivation_benchmark.cc"],
+    deps = [
+        ":condition_derivation",
+        "//loom/src/loom/util:fact_table",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:benchmark",
+        "//runtime/src/iree/testing:benchmark_main",
     ],
 )
 
