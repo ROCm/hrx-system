@@ -1782,6 +1782,182 @@ unsigned lookup(unsigned value);
     )
 
 
+def test_projects_external_object_identity_and_borrowed_import() -> None:
+    source = """\
+type.decl import("hal", "buffer") @Buffer
+type.decl import("hal", "buffer") @BufferAlias
+type.decl import("unused", "object") @Unused
+
+func.def public @read(%buffer: ptr<@BufferAlias>, %bias: i32) -> (i32) {
+  %value = func.call @hal.buffer.length(%buffer, %bias) : (ptr<@BufferAlias>, i32) -> (i32)
+  func.return %value : i32
+}
+
+func.decl import("hal", "buffer.length.v1") @hal.buffer.length(%buffer: ptr<@Buffer>, %bias: i32) -> (i32)
+"""
+
+    result = render_module(load_module(source.encode()), roots=("read",))
+
+    assert (
+        result
+        == """\
+#include <loomcxx/object.h>
+
+struct [[loom::import("hal", "buffer")]] BufferAlias;
+
+[[loom::symbol("read")]]
+unsigned read(loom::ptr<BufferAlias> buffer, unsigned bias);
+
+[[loom::symbol("hal.buffer.length"), loom::import("hal", "buffer.length.v1")]]
+unsigned hal_buffer_length(loom::ptr<BufferAlias> buffer, unsigned bias);
+
+[[loom::symbol("read")]]
+unsigned read(loom::ptr<BufferAlias> buffer, unsigned bias) {
+  unsigned value = hal_buffer_length(buffer, bias);
+  return value;
+}
+"""
+    )
+
+
+def test_projects_external_object_aliases_as_one_cpp_payload_type() -> None:
+    source = """\
+type.decl import("hal", "buffer") @Buffer
+type.decl import("hal", "buffer") @BufferAlias
+
+func.decl import("hal", "consume") @consume(%buffer: ptr<@BufferAlias>)
+"""
+
+    result = render_module(load_module(source.encode()))
+
+    assert 'struct [[loom::import("hal", "buffer")]] Buffer;' in result
+    assert "using BufferAlias = Buffer;" in result
+    assert "void consume(loom::ptr<BufferAlias> buffer);" in result
+
+
+@pytest.mark.parametrize(
+    ("access", "qualification"),
+    [
+        ("read", "const "),
+        ("write", ""),
+        ("read_write", ""),
+        ("none", "const "),
+    ],
+)
+def test_projects_reference_span_access_contracts(
+    access: str, qualification: str
+) -> None:
+    source = f"""\
+type.decl import("hal", "buffer") @Buffer
+func.decl import("hal", "consume") @consume(
+    %count: index,
+    %values: view<[%count]xptr<@Buffer>> {{access = {access}}},
+    %storage: buffer {{access = {access}}})
+"""
+
+    result = render_module(load_module(source.encode()))
+
+    assert (
+        f'[[loom::access("{access}")]] '
+        "loom::type::view<loom::type::shape<loom::type::dynamic>, "
+        f"{qualification}loom::ptr<Buffer>> values" in result
+    )
+    assert (
+        f'[[loom::access("{access}")]] '
+        f"loom::type::buffer<{qualification}unsigned char> storage" in result
+    )
+
+
+def test_read_only_import_does_not_freeze_mutable_caller_view() -> None:
+    source = """\
+func.def public @mutate_then_read(%values: view<4xi32> {access = read_write}) {
+  %value = scalar.constant 1 : i32
+  view.store %value, %values[0] : i32, view<4xi32>
+  func.call @observe(%values) : (view<4xi32>)
+  func.return
+}
+
+func.decl import("native", "observe") @observe(%values: view<4xi32> {access = read})
+"""
+
+    result = render_module(load_module(source.encode()))
+
+    assert (
+        'void mutate_then_read([[loom::access("read_write")]] '
+        "loom::type::view<loom::type::shape<4>, unsigned> values)" in result
+    )
+    assert (
+        'void observe([[loom::access("read")]] '
+        "loom::type::view<loom::type::shape<4>, const unsigned> values);" in result
+    )
+    assert "observe(loom::view::as_const(values));" in result
+
+
+def test_mutable_import_rejects_immutable_caller_view() -> None:
+    source = """\
+func.def public @invalid(%values: view<4xi32> {access = read}) {
+  func.call @overwrite(%values) : (view<4xi32>)
+  func.return
+}
+
+func.decl import("native", "overwrite") @overwrite(%values: view<4xi32> {access = write})
+"""
+
+    with pytest.raises(CxxRenderError) as error:
+        render_module(load_module(source.encode()))
+
+    assert "mutable access" in str(error.value)
+    assert "aliases immutable" in str(error.value)
+
+
+def test_projects_complete_reference_operation_family() -> None:
+    source = """\
+type.decl import("hal", "buffer") @Buffer
+func.def public @inspect(%owner: ref<@Buffer>, %pointer: ptr<@Buffer>) -> (i1) {
+  %copy = ref.duplicate %owner : ref<@Buffer>
+  %saved = ref.duplicate %pointer : ptr<@Buffer>
+  %borrow = ref.borrow %copy : ref<@Buffer> -> ptr<@Buffer>
+  %empty_owner = ref.null : ref<@Buffer>
+  %empty_pointer = ref.null : ptr<@Buffer>
+  %missing = ref.compare.null %empty_owner : ref<@Buffer>
+  %same = ref.compare.eq %copy, %saved : ref<@Buffer>, ptr<@Buffer>
+  ref.release %borrow : ptr<@Buffer>
+  ref.release %empty_owner : ref<@Buffer>
+  ref.release %empty_pointer : ptr<@Buffer>
+  ref.release %copy : ref<@Buffer>
+  ref.release %saved : ptr<@Buffer>
+  ref.release %owner : ref<@Buffer>
+  ref.release %pointer : ptr<@Buffer>
+  func.return %same : i1
+}
+"""
+
+    result = render_module(load_module(source.encode()))
+
+    assert (
+        "loom::type::ref<Buffer> copy = "
+        "loom::detail::object_duplicate(owner);" in result
+    )
+    assert (
+        "loom::ptr<Buffer> saved = loom::detail::object_duplicate(pointer);" in result
+    )
+    assert "loom::ptr<Buffer> borrow = loom::detail::object_borrow(copy);" in result
+    assert (
+        "loom::type::ref<Buffer> empty_owner = "
+        "loom::detail::object_null<Buffer>();" in result
+    )
+    assert "loom::ptr<Buffer> empty_pointer = loom::ptr<Buffer>{};" in result
+    assert "bool missing = loom::detail::object_is_null(empty_owner);" in result
+    assert "bool same = loom::detail::object_equal(copy, saved);" in result
+    assert "loom::detail::object_release(borrow);" in result
+    assert "loom::detail::object_release(empty_owner);" in result
+    assert "loom::detail::object_release(empty_pointer);" in result
+    assert "loom::detail::object_release(copy);" in result
+    assert "loom::detail::object_release(saved);" in result
+    assert "loom::detail::object_release(owner);" in result
+    assert "loom::detail::object_release(pointer);" in result
+
+
 @pytest.mark.parametrize("type_name", ["hal.buffer", "hal.buffer_view", "hal.fence"])
 @pytest.mark.parametrize(
     "declaration",

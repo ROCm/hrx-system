@@ -87,7 +87,7 @@ bool different(loom::type::buffer<unsigned char> first, loom::type::offset first
 unsigned guarded(loom::type::buffer<unsigned> input, loom::type::index input_byte_offset) {
   bool v23 = loom::buffer::compare::null(loom::buffer::cast<unsigned char>(input));
   unsigned v26{};
-  if (v23 ^ 1) {
+  if (v23 != true) {
     auto v32 = loom::buffer::view<1>(loom::buffer::cast<const unsigned>(input), (input_byte_offset + (loom::type::index{0} * loom::type::index{4})), {});
     v26 = loom::view::load<loom::memory_access::root_in_bounds>(v32, 0);
   } else {

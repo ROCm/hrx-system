@@ -33,6 +33,7 @@ namespace detail {
 // loom::ref<T> supplies its ordinary C++ lifetime around this semantic value.
 template <class T>
 class [[loom::type("ref")]] object_owner {
+  // Source-only carrier storage; the importer replaces it with one SSA handle.
   T* data_;
 };
 
@@ -44,15 +45,51 @@ template <class T>
     object_owner<T> value);
 
 template <class T>
+[[loom::op("ref.duplicate")]] ptr<T> object_duplicate(ptr<T> value);
+
+template <class T>
 [[loom::op("ref.borrow")]] ptr<T> object_borrow(object_owner<T> value);
 
 template <class T>
 [[loom::op("ref.release")]] void object_release(object_owner<T> value);
 
+// Explicitly ends a borrowed carrier when semantic C++ projection must retain
+// an IR lifetime boundary. Ordinary source borrows usually rely on final use.
+template <class T>
+[[loom::op("ref.release")]] void object_release(ptr<T> value);
+
 template <class T>
 [[loom::op("ref.compare.null")]] bool object_is_null(object_owner<T> value);
 
+template <class T>
+[[loom::op("ref.compare.null")]] bool object_is_null(ptr<T> value);
+
+template <class T, class U>
+[[loom::op("ref.compare.eq")]] bool object_equal(object_owner<T> left,
+                                                 object_owner<U> right);
+
+template <class T, class U>
+[[loom::op("ref.compare.eq")]] bool object_equal(object_owner<T> left,
+                                                 ptr<U> right);
+
+template <class T, class U>
+[[loom::op("ref.compare.eq")]] bool object_equal(ptr<T> left,
+                                                 object_owner<U> right);
+
+template <class T, class U>
+[[loom::op("ref.compare.eq")]] bool object_equal(ptr<T> left, ptr<U> right);
+
 }  // namespace detail
+
+namespace type {
+
+// Trivial semantic carrier for one owning managed-object reference. This is
+// the explicit-lifetime spelling used by generated C++ and low-level source;
+// loom::ref<T> layers ordinary C++ RAII over the same IR type.
+template <class T>
+using ref = detail::object_owner<T>;
+
+}  // namespace type
 
 // An owning handle to an incomplete payload declared with loom::import.
 // Copies retain independent ownership, moves transfer it, and destruction

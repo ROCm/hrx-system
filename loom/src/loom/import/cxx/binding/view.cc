@@ -176,6 +176,9 @@ std::optional<ViewIntrinsic::Operation> ViewIntrinsic::parse_operation(
   if (name == "view.subview") {
     return Operation::Subview;
   }
+  if (name == "view.as_const") {
+    return Operation::AsConst;
+  }
   if (name == "view.bitcast") {
     return Operation::Bitcast;
   }
@@ -418,6 +421,34 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
                                dynamic_extent_count(*result.result_view_),
                                owner, "subview dimensions");
       result.result_source_type_ = signature->returnType();
+      return result;
+    }
+    case Operation::AsConst: {
+      require_count(1);
+      result.source_view_ =
+          &require_view(unit, diagnostics, types, parameters[0], owner);
+      result.result_view_ = &require_view(unit, diagnostics, types,
+                                          signature->returnType(), owner);
+      auto traits = unit.typeTraits();
+      const auto* source_element = result.source_view_->element_type;
+      const auto* result_element = result.result_view_->element_type;
+      if (traits.is_const(source_element) || !traits.is_const(result_element) ||
+          traits.is_volatile(source_element) !=
+              traits.is_volatile(result_element) ||
+          !traits.is_same(traits.remove_cv(source_element),
+                          traits.remove_cv(result_element)) ||
+          result.source_view_->extents.size() !=
+              result.result_view_->extents.size() ||
+          !std::equal(result.source_view_->extents.begin(),
+                      result.source_view_->extents.end(),
+                      result.result_view_->extents.begin()) ||
+          result.source_view_->encoding != result.result_view_->encoding ||
+          result.source_view_->component_count !=
+              result.result_view_->component_count) {
+        diagnostics.reject(
+            unit, owner,
+            "view.as_const must only add shallow const element access");
+      }
       return result;
     }
     case Operation::Bitcast: {
@@ -669,6 +700,8 @@ std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
       }
       return arena.capture(*result_view_, components);
     }
+    case Operation::AsConst:
+      return arena.capture(*result_view_, arguments[0].components());
     case Operation::Bitcast: {
       std::vector<loom_type_t> result_types;
       types.append(result_source_type_, owner, result_types);

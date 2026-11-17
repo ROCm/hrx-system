@@ -245,6 +245,6 @@ kernel.def @identity_header_loop() {
     result = render_module(load_module(source.encode()))
 
     assert result.count("while (") == 1
-    assert "bool active = 1;" in result
+    assert "bool active = true;" in result
     assert "while (active) {" in result
     assert "loop_continues" not in result

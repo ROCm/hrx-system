@@ -190,6 +190,14 @@ view(loom::type::buffer<T> data, Position byte_offset,
 
 namespace loom::view {
 
+// Adds shallow read-only access to a view without changing its storage,
+// dimensions, encoding, or element identity. Objects referenced by handle
+// elements retain their own independent mutability.
+template <class Shape, class T, class Encoding>
+[[loom::op("view.as_const")]]
+loom::type::view<Shape, const T, Encoding> as_const(
+    loom::type::view<Shape, T, Encoding> source);
+
 // Returns the captured logical extent of one source axis. Dynamic extents
 // reuse their existing identity; static extents are constants.
 template <loom::type::size_type Axis, class Shape, class T, class Encoding>

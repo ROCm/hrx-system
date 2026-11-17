@@ -164,6 +164,7 @@ def render_preamble(
     uses_views: bool,
     uses_encodings: bool,
     vector_aliases: dict[tuple[str, tuple[int, ...], bool], str],
+    object_declarations: tuple[str, ...],
     record_declarations: dict[str, tuple[tuple[str, str], ...]],
     table_lookup_declarations: set[tuple[str, str, str, str]],
     targets: tuple[tuple[str, str | None, TargetInfo], ...],
@@ -200,6 +201,8 @@ def render_preamble(
         headers.add("loomcxx/encoding.h")
     if uses_numeric_conversion:
         headers.add("loomcxx/numeric.h")
+    if object_declarations:
+        headers.add("loomcxx/object.h")
     uses_fragment_header = bool(
         operation_names
         & {
@@ -301,6 +304,10 @@ def render_preamble(
             definition = f"loom::type::vector<loom::type::shape<{dimensions}>, {base}>"
         preamble.append(f"using {alias} = {definition};")
     if vector_aliases:
+        preamble.append("")
+
+    if object_declarations:
+        preamble.extend(object_declarations)
         preamble.append("")
 
     for record_name, fields in record_declarations.items():

@@ -1768,9 +1768,18 @@ class CxxExpressionRenderer(CxxRenderContext):
         }
         if name in scalar_binary:
             fastmath = self._fastmath_contract(operation)
+            token = scalar_binary[name]
+            if (
+                name == "scalar.xori"
+                and self.module.values[operation.results[0]].type == I1
+            ):
+                # C++ integral promotion makes `bool ^ bool` an `int`. Spell the
+                # equivalent Boolean operation directly so structured-result
+                # initialization does not require a narrowing conversion.
+                token = "!="
             self._declare(
                 operation.results[0],
-                self._binary_expression(operation, scalar_binary[name]),
+                self._binary_expression(operation, token),
                 inlineable=True,
                 statement_attribute=fastmath,
             )

@@ -72,11 +72,6 @@ std::optional<ObjectIntrinsic> ObjectIntrinsic::resolve(
   if (returns_void != (*operation == Operation::Release)) {
     diagnostics.reject(unit, owner, "object operation has an invalid result");
   }
-  if (*operation == Operation::Release &&
-      loom_type_reference_ownership(operands[0]) !=
-          LOOM_REFERENCE_OWNERSHIP_OWNED) {
-    diagnostics.reject(unit, owner, "object release requires an owning handle");
-  }
   if (returns_void) {
     return ObjectIntrinsic(*operation, nullptr, {});
   }
@@ -94,12 +89,10 @@ std::optional<ObjectIntrinsic> ObjectIntrinsic::resolve(
                        "object operation requires a handle result");
   }
   if (*operation == Operation::Duplicate &&
-      (loom_type_reference_ownership(operands[0]) !=
-           LOOM_REFERENCE_OWNERSHIP_OWNED ||
-       !loom_type_equal(operands[0], result_type))) {
+      !loom_type_equal(operands[0], result_type)) {
     diagnostics.reject(
         unit, owner,
-        "object duplication requires and preserves an owning handle");
+        "object duplication must preserve handle type and ownership");
   }
   if (*operation == Operation::Borrow ||
       *operation == Operation::CompareEqual) {

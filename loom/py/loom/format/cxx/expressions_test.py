@@ -11,6 +11,23 @@ import pytest
 from loom.format.cxx import load_module, render_module
 
 
+def test_boolean_literals_and_xor_remain_boolean_expressions() -> None:
+    source = """\
+func.def @exclusive(%lhs: i1, %rhs: i1) -> (i1, i1, i1) {
+  %false = scalar.constant 0 : i1
+  %true = scalar.constant 1 : i1
+  %different = scalar.xori %lhs, %rhs : i1
+  func.return %false, %true, %different : i1, i1, i1
+}
+"""
+
+    result = render_module(load_module(source.encode()))
+
+    assert "bool different = lhs != rhs;" in result
+    assert "return {false, true, different};" in result
+    assert "^" not in result
+
+
 @pytest.mark.parametrize("width", [8, 16, 32, 64])
 @pytest.mark.parametrize("vector", [False, True])
 def test_integer_division_preserves_each_uses_signedness(

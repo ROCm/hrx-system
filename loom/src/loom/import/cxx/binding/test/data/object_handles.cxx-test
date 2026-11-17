@@ -157,3 +157,53 @@ func.def inline @loom__ref___ref_value(%this_owner_: ref<@Object>) {
 func.decl import("lifetime", "create_owner") @create_owner(%83: i32) -> (ref<@Object>)
 
 func.decl import("lifetime", "read") @read(%85: ptr<@Object>)
+
+// ====
+// RUN: roundtrip
+#include <loomcxx/object.h>
+
+struct [[loom::import("lifetime", "object")]] Object;
+
+using Owner = loom::type::ref<Object>;
+
+bool inspect(Owner owner, loom::ptr<Object> pointer) {
+  auto copy = loom::detail::object_duplicate(owner);
+  auto saved = loom::detail::object_duplicate(pointer);
+  auto borrow = loom::detail::object_borrow(copy);
+  auto empty_owner = loom::detail::object_null<Object>();
+  loom::ptr<Object> empty_pointer{};
+  bool missing = loom::detail::object_is_null(empty_owner);
+  bool same = loom::detail::object_equal(copy, saved);
+  loom::detail::object_release(borrow);
+  loom::detail::object_release(empty_owner);
+  loom::detail::object_release(empty_pointer);
+  loom::detail::object_release(copy);
+  loom::detail::object_release(saved);
+  loom::detail::object_release(owner);
+  loom::detail::object_release(pointer);
+  return missing != same;
+}
+
+// ----
+type.decl import("lifetime", "object") @Object
+
+func.def public @inspect(%owner: ref<@Object>, %pointer: ptr<@Object>) -> (i1) {
+  %copy = ref.duplicate %owner : ref<@Object>
+  %saved = ref.duplicate %pointer : ptr<@Object>
+  %borrow = ref.borrow %copy : ref<@Object> -> ptr<@Object>
+  %empty_owner = ref.null : ref<@Object>
+  %empty_pointer = ref.null : ptr<@Object>
+  %missing = ref.compare.null %empty_owner : ref<@Object>
+  %same = ref.compare.eq %copy, %saved : ref<@Object>, ptr<@Object>
+  ref.release %borrow : ptr<@Object>
+  ref.release %empty_owner : ref<@Object>
+  ref.release %empty_pointer : ptr<@Object>
+  ref.release %copy : ref<@Object>
+  ref.release %saved : ptr<@Object>
+  ref.release %owner : ref<@Object>
+  ref.release %pointer : ptr<@Object>
+  %10 = scalar.extui %missing : i1 to i32
+  %11 = scalar.extui %same : i1 to i32
+  %12 = scalar.cmpi ne, %10, %11 : i32
+  func.return %12 : i1
+}
