@@ -4059,7 +4059,8 @@ vector_index_cast = Op(
         "signed target-selected carrier and offset uses an independently "
         "selected unsigned carrier. Each lane follows index.cast semantics, "
         "including 0/1 conversion for i1, source-domain signedness, low-bit "
-        "preservation when narrowing, and destination representability. "
+        "preservation when narrowing, native index overflow, and offset "
+        "representability. "
         "Source and result shapes match exactly. Pure fixed-width integer "
         "changes use the ordinary vector extension and truncation ops."
     ),

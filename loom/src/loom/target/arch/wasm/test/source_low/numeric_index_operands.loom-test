@@ -228,3 +228,18 @@ func.def @bounded_addresses(%row: index, %column: index, %byte_offset: offset) -
 low.func.def target<wasm.core.simd128> abi(wasm_function) @bounded_addresses(%bounded_row: reg<wasm.i32>, %bounded_column: reg<wasm.i32>, %aligned_offset: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) asm {
   return %bounded_row, %bounded_column, %aligned_offset
 }
+
+// ====
+
+// Index entry uses native arithmetic without a promise about runtime inputs.
+func.def @index_entry(%wide: i64, %byte_offset: offset) -> (index, index) {
+  %from_integer = index.cast %wide : i64 to index
+  %from_offset = index.cast %byte_offset : offset to index
+  func.return %from_integer, %from_offset : index, index
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @index_entry(%wide: reg<wasm.i64>, %from_offset: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) asm {
+  %from_integer = i32.wrap_i64 %wide
+  return %from_integer, %from_offset
+}

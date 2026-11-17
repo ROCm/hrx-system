@@ -3138,7 +3138,7 @@ iree_status_t loom_vector_bitcast_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_INDEX_CAST: Lanewise integer conversion at an address boundary. Index uses a signed target-selected carrier and offset uses an independently selected unsigned carrier. Each lane follows index.cast semantics, including 0/1 conversion for i1, source-domain signedness, low-bit preservation when narrowing, and destination representability. Source and result shapes match exactly. Pure fixed-width integer changes use the ordinary vector extension and truncation ops.
+// LOOM_OP_VECTOR_INDEX_CAST: Lanewise integer conversion at an address boundary. Index uses a signed target-selected carrier and offset uses an independently selected unsigned carrier. Each lane follows index.cast semantics, including 0/1 conversion for i1, source-domain signedness, low-bit preservation when narrowing, native index overflow, and offset representability. Source and result shapes match exactly. Pure fixed-width integer changes use the ordinary vector extension and truncation ops.
 // %indices = vector.index_cast %lanes : vector<16xi32> to vector<16xindex>
 LOOM_DEFINE_ISA(loom_vector_index_cast_isa, LOOM_OP_VECTOR_INDEX_CAST)
 LOOM_DEFINE_OPERAND(loom_vector_index_cast_input, 0)

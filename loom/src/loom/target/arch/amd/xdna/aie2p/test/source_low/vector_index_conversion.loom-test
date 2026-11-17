@@ -83,9 +83,8 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @index_to_narrow(%
 
 // ====
 
-func.def @i64_to_addresses(%index: index, %offset: offset) -> (vector<9xindex>, vector<9xoffset>) {
-  %bounded_index, %bounded_offset = index.assume %index, %offset [range(%index, -2147483648, 2147483647), range(%offset, 0, 4294967295)] : index, offset
-  %wide_index = index.cast %bounded_index : index to i64
+func.def @i64_to_addresses(%wide_index: i64, %offset: offset) -> (vector<9xindex>, vector<9xoffset>) {
+  %bounded_offset = index.assume %offset [range(%offset, 0, 4294967295)] : offset
   %wide_offset = index.cast %bounded_offset : offset to i64
   %signed = vector.splat %wide_index : vector<9xi64>
   %unsigned = vector.splat %wide_offset : vector<9xi64>
@@ -95,17 +94,14 @@ func.def @i64_to_addresses(%index: index, %offset: offset) -> (vector<9xindex>, 
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i64_to_addresses(%bounded_index: reg<aie2p.er>, %bounded_offset: reg<aie2p.er>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
-  %22 = mov.short -31
-  %23 = ashl %bounded_index, %22
-  %wide_index = concat(%bounded_index, %23) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
-  %25 = mov.short 0
-  %wide_offset = concat(%bounded_offset, %25) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
-  %27 = vbcst.64 %wide_index
-  %30 = vbcst.64 %wide_offset
-  %35 = mova.i32 4
-  %indices = vshuffle %27, %27, %35
-  %offsets = vshuffle %30, %30, %35
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i64_to_addresses(%wide_index: reg<aie2p.er x2>, %bounded_offset: reg<aie2p.er>) -> (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) asm {
+  %20 = mov.short 0
+  %wide_offset = concat(%bounded_offset, %20) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %22 = vbcst.64 %wide_index
+  %25 = vbcst.64 %wide_offset
+  %30 = mova.i32 4
+  %indices = vshuffle %22, %22, %30
+  %offsets = vshuffle %25, %25, %30
   return %indices, %offsets
 }
 

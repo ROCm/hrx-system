@@ -2074,16 +2074,14 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 (_I32, _INDEX),
                 (_OFFSET, _I32),
                 (_I32, _OFFSET),
+                (_OFFSET, _INDEX),
             )
         ),
-        *(
-            _conversion_alias_rule(
-                index.index_cast,
-                source_type,
-                result_type,
-                guards=(Guard.value_i64_range("input", 0, (1 << 31) - 1),),
-            )
-            for source_type, result_type in ((_INDEX, _OFFSET), (_OFFSET, _INDEX))
+        _conversion_alias_rule(
+            index.index_cast,
+            _INDEX,
+            _OFFSET,
+            guards=(Guard.value_i64_range("input", 0, (1 << 31) - 1),),
         ),
         *(
             _conversion_rule(
@@ -2100,11 +2098,11 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
                 _I64,
                 result_type,
                 "wasm.i32.wrap_i64",
-                guards=(Guard.value_i64_range("input", minimum, maximum),),
+                guards=guards,
             )
-            for result_type, minimum, maximum in (
-                (_INDEX, -(1 << 31), (1 << 31) - 1),
-                (_OFFSET, 0, (1 << 32) - 1),
+            for result_type, guards in (
+                (_INDEX, ()),
+                (_OFFSET, (Guard.value_i64_range("input", 0, (1 << 32) - 1),)),
             )
         ),
         _binary_rule(index.index_add, _INDEX, "wasm.i32.add"),
