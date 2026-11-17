@@ -33,6 +33,7 @@
 namespace loom::cxx_import {
 
 class ObjectIdentity;
+class Imports;
 
 struct DirectOperatorCall;
 class RangeLoops;
@@ -269,7 +270,7 @@ struct SwitchLayout {
 class ControlFlow final : private cxx::ASTVisitor {
  public:
   ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
-              Types& types, cxx::StatementAST* body,
+              Types& types, const Imports& imports, cxx::StatementAST* body,
               cxx::FunctionSymbol* function = nullptr);
   ~ControlFlow();
   ControlFlow(const ControlFlow&) = delete;
@@ -584,6 +585,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool record(cxx::ExpressionAST* expression,
               WriteEffect effect = WriteEffect::Scoped);
   void record(cxx::Symbol* binding);
+  // Whether a call can transport one or more managed-owner SSA columns even
+  // when the source object is semantically read-only.
+  bool may_transport_owner(const cxx::Type* type, cxx::AST* owner);
   void record_implicit_object_call(cxx::CallExpressionAST* call,
                                    cxx::FunctionSymbol* callee);
   bool require_identity(cxx::ExpressionAST* expression);
@@ -643,6 +647,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   void append_receiver_identity(CallArgument& argument,
                                 ReferenceProjection projection);
   void retain_call(cxx::CallExpressionAST* call, cxx::FunctionSymbol* function);
+  void retain_object_method_call(cxx::CallExpressionAST* call,
+                                 cxx::FunctionSymbol* function,
+                                 cxx::ExpressionAST* receiver);
   void retain_call(cxx::SubscriptExpressionAST* call,
                    cxx::FunctionSymbol* function);
   void retain_call(const DirectOperatorCall& call, cxx::AST* source);
@@ -732,6 +739,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   Diagnostics& diagnostics_;
   // Admitted source member partitions outlive all retained destination slices.
   Types& types_;
+  // Imported object-method bindings identify syntax-only arrow receivers.
+  const Imports& imports_;
   // Source definition whose implicit object fields participate in SSA flow.
   cxx::FunctionSymbol* function_;
   // Canonical construction and lifetime-extension facts from this source walk.

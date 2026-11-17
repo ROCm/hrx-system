@@ -109,6 +109,13 @@ Lvalue Lvalue::project(const SubobjectProjection& selected,
                                                selected.component_offset,
                                            selected.partition}}};
   }
+  if (const auto* storage =
+          std::get_if<ReferenceStorageProjection>(&object.location)) {
+    auto projected = *storage;
+    projected.component_offset += selected.component_offset;
+    projected.partition = selected.partition;
+    return {ObjectLvalue{type, std::move(projected)}};
+  }
   const auto& address = std::get<StorageProjection>(object.location);
   return {ObjectLvalue{
       type, storage.subobject(address, selected.byte_offset, owner)}};

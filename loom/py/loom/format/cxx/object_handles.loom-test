@@ -1,0 +1,80 @@
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx roundtrip @route
+
+type.decl import("hal", "buffer.v1") @Buffer
+
+func.def public @route(%count: index, %values: view<[%count]xptr<@Buffer>> {access = read_write}, %buffer: ptr<@Buffer>) -> (i32) {
+  %result = func.call @hal.consume(%count, %values, %buffer) : (index, view<[%count]xptr<@Buffer>>, ptr<@Buffer>) -> (i32)
+  func.return %result : i32
+}
+
+func.decl import("hal", "consume.v1") @hal.consume(%count: index, %values: view<[%count]xptr<@Buffer>> {access = read}, %buffer: ptr<@Buffer>) -> (i32)
+
+// ----
+#include <loomcxx/object.h>
+#include <loomcxx/view.h>
+
+struct [[loom::import("hal", "buffer.v1")]] Buffer;
+
+[[loom::symbol("route")]]
+unsigned route([[loom::access("read_write")]] loom::type::view<loom::type::shape<loom::type::dynamic>, loom::ptr<Buffer>> values, loom::ptr<Buffer> buffer);
+
+[[loom::symbol("hal.consume"), loom::import("hal", "consume.v1")]]
+unsigned hal_consume([[loom::access("read")]] loom::type::view<loom::type::shape<loom::type::dynamic>, const loom::ptr<Buffer>> values, loom::ptr<Buffer> buffer);
+
+[[loom::symbol("route")]]
+unsigned route([[loom::access("read_write")]] loom::type::view<loom::type::shape<loom::type::dynamic>, loom::ptr<Buffer>> values, loom::ptr<Buffer> buffer) {
+  unsigned result = hal_consume(loom::view::as_const(values), buffer);
+  return result;
+}
+
+// ====
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx roundtrip @inspect
+
+type.decl import("hal", "buffer.v1") @Buffer
+
+func.def public @inspect(%owner: ref<@Buffer>, %pointer: ptr<@Buffer>) -> (i1) {
+  %copy = ref.duplicate %owner : ref<@Buffer>
+  %saved = ref.duplicate %pointer : ptr<@Buffer>
+  %borrow = ref.borrow %copy : ref<@Buffer> -> ptr<@Buffer>
+  %empty_owner = ref.null : ref<@Buffer>
+  %empty_pointer = ref.null : ptr<@Buffer>
+  %missing = ref.compare.null %empty_owner : ref<@Buffer>
+  %same = ref.compare.eq %copy, %saved : ref<@Buffer>, ptr<@Buffer>
+  ref.release %borrow : ptr<@Buffer>
+  ref.release %empty_owner : ref<@Buffer>
+  ref.release %empty_pointer : ptr<@Buffer>
+  ref.release %copy : ref<@Buffer>
+  ref.release %saved : ptr<@Buffer>
+  ref.release %owner : ref<@Buffer>
+  ref.release %pointer : ptr<@Buffer>
+  func.return %same : i1
+}
+
+// ----
+#include <loomcxx/object.h>
+
+struct [[loom::import("hal", "buffer.v1")]] Buffer;
+
+[[loom::symbol("inspect")]]
+bool inspect(loom::type::ref<Buffer> owner, loom::ptr<Buffer> pointer);
+
+[[loom::symbol("inspect")]]
+bool inspect(loom::type::ref<Buffer> owner, loom::ptr<Buffer> pointer) {
+  loom::type::ref<Buffer> copy = loom::detail::object_duplicate(owner);
+  loom::ptr<Buffer> saved = loom::detail::object_duplicate(pointer);
+  loom::ptr<Buffer> borrow = loom::detail::object_borrow(copy);
+  loom::type::ref<Buffer> empty_owner = loom::detail::object_null<Buffer>();
+  loom::ptr<Buffer> empty_pointer = loom::ptr<Buffer>{};
+  bool missing = loom::detail::object_is_null(empty_owner);
+  bool same = loom::detail::object_equal(copy, saved);
+  loom::detail::object_release(borrow);
+  loom::detail::object_release(empty_owner);
+  loom::detail::object_release(empty_pointer);
+  loom::detail::object_release(copy);
+  loom::detail::object_release(saved);
+  loom::detail::object_release(owner);
+  loom::detail::object_release(pointer);
+  return same;
+}

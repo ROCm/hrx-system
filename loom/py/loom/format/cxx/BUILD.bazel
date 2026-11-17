@@ -114,6 +114,17 @@ loom_check_test(
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
+loom_check_test(
+    name = "object_handles_test",
+    src = "object_handles.loom-test",
+    data = ["//loom/py/loom/tools:loom-export-cxx"],
+    env = {
+        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+    },
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
 iree_py_test(
     name = "external_declarations_test",
     size = "small",

@@ -12,12 +12,17 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from loom.builtin_types import ChannelReadMode
+from loom.dialect.func.defs import ArgumentAccess
 from loom.dsl import EffectKind
 from loom.format.cxx.errors import CxxRenderError
 from loom.format.cxx.registry import source_ops
 from loom.ir import Module, Operation, ParameterizedType, ShapedType, TypeKind
 
 _CHANNEL_READ_MUTABLE_MODE = ChannelReadMode.case("mutable").value
+_READ_ACCESS = ArgumentAccess.case("read").value
+_WRITE_ACCESS = ArgumentAccess.case("write").value
+_READ_WRITE_ACCESS = ArgumentAccess.case("read_write").value
+_NONE_ACCESS = ArgumentAccess.case("none").value
 
 
 def _walk(
@@ -44,6 +49,7 @@ class ViewAccessPlan:
         }
         self._mutable_sources: dict[int, Operation] = {}
         self._immutable_sources: dict[int, Operation] = {}
+        self._mutable_dependencies: list[tuple[int, int, Operation]] = []
         self._mutable_roots: set[int] | None = None
 
     def _find(self, value_id: int) -> int:
@@ -71,11 +77,34 @@ class ViewAccessPlan:
         if value_id in self._parent:
             self._immutable_sources.setdefault(value_id, operation)
 
+    def require_mutability_from(
+        self, source_id: int, target_id: int, operation: Operation
+    ) -> None:
+        """Makes target mutable whenever source requires mutable access."""
+
+        if source_id in self._parent and target_id in self._parent:
+            self._mutable_dependencies.append((source_id, target_id, operation))
+
     def finish(self) -> None:
         mutable_roots: dict[int, tuple[int, Operation]] = {}
         immutable_roots: dict[int, tuple[int, Operation]] = {}
         for value_id, operation in self._mutable_sources.items():
             mutable_roots.setdefault(self._find(value_id), (value_id, operation))
+        dependencies: dict[int, list[tuple[int, int, Operation]]] = {}
+        for source_id, target_id, operation in self._mutable_dependencies:
+            source_root = self._find(source_id)
+            target_root = self._find(target_id)
+            dependencies.setdefault(source_root, []).append(
+                (target_root, target_id, operation)
+            )
+        pending = list(mutable_roots)
+        while pending:
+            source_root = pending.pop()
+            for target_root, target_id, operation in dependencies.get(source_root, ()):
+                if target_root in mutable_roots:
+                    continue
+                mutable_roots[target_root] = (target_id, operation)
+                pending.append(target_root)
         for value_id, operation in self._immutable_sources.items():
             immutable_roots.setdefault(self._find(value_id), (value_id, operation))
         conflicts = mutable_roots.keys() & immutable_roots.keys()
@@ -101,6 +130,52 @@ class ViewAccessPlan:
 def _connect_columns(plan: ViewAccessPlan, columns: Iterable[Iterable[int]]) -> None:
     for column in columns:
         plan.connect(*column)
+
+
+def _function_signatures(
+    plan: ViewAccessPlan,
+    module: Module,
+    resolve: Callable[[Operation], Any],
+    flat_source_parameters: Callable[[Operation, list[int]], list[Any]],
+) -> tuple[dict[str, list[Any]], dict[str, list[Any]]]:
+    """Plans function view contracts and returns source signature mappings."""
+
+    functions = {
+        str(resolve(operation).attr("callee")): operation
+        for operation in module.body.ops
+        if operation.name in {"func.def", "func.decl"}
+    }
+    function_parameters: dict[str, list[Any]] = {}
+    function_results: dict[str, list[Any]] = {}
+    for symbol, function in functions.items():
+        body = resolve(function).region("body") if function.name == "func.def" else None
+        if function.name == "func.def" and (body is None or len(body.blocks) != 1):
+            continue
+        arguments = (
+            list(body.blocks[0].arg_ids)
+            if body is not None
+            else list(function.operands)
+        )
+        function_parameters[symbol] = flat_source_parameters(function, arguments)
+        function_results[symbol] = flat_source_parameters(
+            function, list(function.results)
+        )
+        signature_flags = function.attributes.get("signature_flags", b"")
+        for position, argument in enumerate(arguments):
+            argument_type = module.values[argument].type
+            if not (
+                isinstance(argument_type, ShapedType)
+                and argument_type.type_kind == TypeKind.VIEW
+            ):
+                continue
+            access = signature_flags[position] if signature_flags else 0
+            if access in {_READ_ACCESS, _NONE_ACCESS}:
+                plan.require_immutable(argument, function)
+            elif access in {_WRITE_ACCESS, _READ_WRITE_ACCESS} or (
+                function.name == "func.decl" and access == 0
+            ):
+                plan.require_mutable(argument, function)
+    return function_parameters, function_results
 
 
 def plan_view_access(
@@ -224,23 +299,9 @@ def plan_view_access(
             else:
                 plan.require_immutable(result, operation)
 
-    functions = {
-        str(resolve(operation).attr("callee")): operation
-        for operation in module.body.ops
-        if operation.name == "func.def"
-    }
-    function_parameters: dict[str, list[Any]] = {}
-    function_results: dict[str, list[Any]] = {}
-    for symbol, function in functions.items():
-        body = resolve(function).region("body")
-        if body is None or len(body.blocks) != 1:
-            continue
-        function_parameters[symbol] = flat_source_parameters(
-            function, list(body.blocks[0].arg_ids)
-        )
-        function_results[symbol] = flat_source_parameters(
-            function, list(function.results)
-        )
+    function_parameters, function_results = _function_signatures(
+        plan, module, resolve, flat_source_parameters
+    )
 
     for operation, owner in operations:
         if operation.name == "func.call":
@@ -251,13 +312,10 @@ def plan_view_access(
                 continue
             actuals = flat_source_parameters(operation, list(operation.operands))
             actual_results = flat_source_parameters(operation, list(operation.results))
-            _connect_columns(
-                plan,
-                (
-                    (actual.value_id, formal.value_id)
-                    for actual, formal in zip(actuals, formals, strict=True)
-                ),
-            )
+            for actual, formal in zip(actuals, formals, strict=True):
+                plan.require_mutability_from(
+                    formal.value_id, actual.value_id, operation
+                )
             _connect_columns(
                 plan,
                 (

@@ -12,7 +12,21 @@ from loom.format.cxx.configs import CxxConfigRenderer
 from loom.format.cxx.context import cxx_string_literal
 from loom.format.cxx.errors import CxxRenderError
 from loom.format.cxx.naming import clean_identifier
-from loom.ir import BufferType, Operation
+from loom.ir import (
+    BufferType,
+    Operation,
+    ReferenceOwnership,
+    ReferenceType,
+    ShapedType,
+    TypeKind,
+)
+
+_ACCESS_SPELLINGS = {
+    1: "read",
+    2: "write",
+    3: "read_write",
+    4: "none",
+}
 
 
 class CxxFunctionRenderer(CxxConfigRenderer):
@@ -100,6 +114,56 @@ class CxxFunctionRenderer(CxxConfigRenderer):
             return expression
         return f"loom::buffer::cast<{element}>({expression})"
 
+    def _transfer_expression(self, value_id: int, expression: str | None = None) -> str:
+        """Transfers an owning source carrier without adding an owner."""
+
+        expression = self.expression(value_id) if expression is None else expression
+        value_type = self.module.values[value_id].type
+        if (
+            isinstance(value_type, ReferenceType)
+            and value_type.ownership == ReferenceOwnership.OWNED
+        ):
+            return f"static_cast<{self.cpp_type(value_id)}&&>({expression})"
+        return expression
+
+    def _function_argument(self, value_id: int, formal_id: int) -> str:
+        """Projects one exact function argument, including ownership transfer."""
+
+        value_type = self.module.values[value_id].type
+        formal_type = self.module.values[formal_id].type
+        if isinstance(value_type, ReferenceType):
+            if not isinstance(formal_type, ReferenceType) or value_type != formal_type:
+                raise CxxRenderError(
+                    None,
+                    "managed function argument does not match its formal type",
+                )
+            return self._transfer_expression(value_id)
+        if isinstance(value_type, ShapedType) and value_type.type_kind == TypeKind.VIEW:
+            if not (
+                isinstance(formal_type, ShapedType)
+                and formal_type.type_kind == TypeKind.VIEW
+            ):
+                raise CxxRenderError(
+                    None,
+                    "view function argument does not match its formal type",
+                )
+            if self.view_access is None:
+                raise RuntimeError("view access plan has not been initialized")
+            actual_mutable = self.view_access.is_mutable(value_id)
+            formal_mutable = self.view_access.is_mutable(formal_id)
+            if not actual_mutable and formal_mutable:
+                raise CxxRenderError(
+                    None,
+                    "immutable view argument cannot satisfy a mutable parameter",
+                )
+            expression = self.expression(value_id)
+            return (
+                f"loom::view::as_const({expression})"
+                if actual_mutable and not formal_mutable
+                else expression
+            )
+        return self.numeric_argument(value_id, self.cpp_type(formal_id))
+
     def _declare_loop_carrier(self, result: int, source: int) -> None:
         if isinstance(self.module.values[result].type, BufferType):
             element = self._buffer_element(result)
@@ -109,7 +173,10 @@ class CxxFunctionRenderer(CxxConfigRenderer):
                 expression_type=f"loom::type::buffer<{element}>",
             )
         else:
-            self._declare(result, self._loop_initializer(source))
+            self._declare(
+                result,
+                self._transfer_expression(source, self._loop_initializer(source)),
+            )
 
     def _render_function_call(self, operation: Operation) -> tuple[str, ...]:
         resolved = self._resolved(operation)
@@ -160,9 +227,7 @@ class CxxFunctionRenderer(CxxConfigRenderer):
                     )
                 expression = self._buffer_argument(operand, expected_element)
             else:
-                expression = self.numeric_argument(
-                    operand, self.cpp_type(formals[index].value_id)
-                )
+                expression = self._function_argument(operand, formals[index].value_id)
             arguments_list.append(expression)
         arguments = ", ".join(arguments_list)
         call = f"{callee}({arguments})"
@@ -197,7 +262,9 @@ class CxxFunctionRenderer(CxxConfigRenderer):
             for index, result in enumerate(source_results):
                 self._declare(
                     result.value_id,
-                    f"{record_name}.value{index}",
+                    self._transfer_expression(
+                        result.value_id, f"{record_name}.value{index}"
+                    ),
                     expression_type=fields[index][1],
                 )
         projected_attributes = ["callee"]
@@ -266,6 +333,15 @@ class CxxFunctionRenderer(CxxConfigRenderer):
             argument_ids = list(body.blocks[0].arg_ids)
         parameters: list[str] = []
         buffer_elements: list[str | None] = []
+        positions = {
+            value_id: position for position, value_id in enumerate(argument_ids)
+        }
+        signature_flags = function.attributes.get("signature_flags", b"")
+        if signature_flags and any(signature_flags[len(argument_ids) :]):
+            raise CxxRenderError(
+                function,
+                "function result access facts have no C++ source projection",
+            )
         source_parameters = self._flat_source_parameters(function, argument_ids)
         for parameter in source_parameters:
             argument = parameter.value_id
@@ -277,7 +353,11 @@ class CxxFunctionRenderer(CxxConfigRenderer):
                 else None
             )
             name = self.names[argument]
-            parameters.append(f"{type_name} {name}")
+            access = signature_flags[positions[argument]] if signature_flags else 0
+            access_attribute = (
+                f'[[loom::access("{_ACCESS_SPELLINGS[access]}")]] ' if access else ""
+            )
+            parameters.append(f"{access_attribute}{type_name} {name}")
             if bind_parameters:
                 self._hide_source_dependencies(parameter)
                 self.expressions[argument] = name
@@ -311,6 +391,7 @@ class CxxFunctionRenderer(CxxConfigRenderer):
                     "retain",
                     "target",
                     "temperature",
+                    "signature_flags",
                 ),
             )
         self._analyze_buffers(function)
@@ -330,7 +411,7 @@ class CxxFunctionRenderer(CxxConfigRenderer):
                 result.value_id, self._buffer_element(formal.value_id)
             )
             if isinstance(self.module.values[result.value_id].type, BufferType)
-            else self.numeric_argument(result.value_id, self.cpp_type(formal.value_id))
+            else self._function_argument(result.value_id, formal.value_id)
             for result, formal in zip(results, signature, strict=True)
         ]
         if not results:
@@ -364,6 +445,7 @@ class CxxFunctionRenderer(CxxConfigRenderer):
                 "retain",
                 "target",
                 "temperature",
+                "signature_flags",
             ),
         )
         self._analyze_buffers(function)

@@ -39,7 +39,23 @@ void Types::declare_object_import(cxx::ClassSymbol* source,
                                   namespace_id, payload_id, symbol.symbol_id));
 }
 
+loom_type_t Types::borrowed_object_type(cxx::ClassSymbol* payload,
+                                        cxx::AST* owner) const {
+  auto found = object_imports_.find(payload->canonical());
+  if (found == object_imports_.end()) {
+    diagnostics_.reject(
+        unit_, owner,
+        "object payload requires an explicit loom::import identity");
+  }
+  const auto identity = found->second;
+  return loom_type_reference(LOOM_REFERENCE_OWNERSHIP_BORROWED,
+                             loom_type_reference_namespace_id(identity),
+                             loom_type_reference_name_id(identity),
+                             loom_type_reference_declaration_id(identity));
+}
+
 const ObjectPartition* Types::object(const cxx::ClassType* input,
+                                     loom_reference_ownership_t ownership,
                                      cxx::AST* owner) {
   auto* source = input->definition();
   if (auto found = objects_.find(source); found != objects_.end()) {
@@ -54,7 +70,7 @@ const ObjectPartition* Types::object(const cxx::ClassType* input,
       !source->baseClasses().empty() || !traits.is_trivially_copyable(input) ||
       !traits.has_trivial_destructor(input)) {
     diagnostics_.reject(unit_, owner,
-                        "borrowed object handles require a complete trivial "
+                        "object handle primitives require a complete trivial "
                         "class without bases");
   }
   auto arguments = source->templateArguments();
@@ -63,21 +79,18 @@ const ObjectPartition* Types::object(const cxx::ClassType* input,
                             cxx::template_argument_type(arguments[0]))
                       : nullptr;
   if (!payload) {
-    diagnostics_.reject(
-        unit_, owner,
-        "borrowed object handles require one imported payload class");
-  }
-  auto found = object_imports_.find(payload->symbol()->canonical());
-  if (found == object_imports_.end()) {
-    diagnostics_.reject(
-        unit_, owner,
-        "object payload requires an explicit loom::import identity");
+    diagnostics_.reject(unit_, owner,
+                        "object handles require one imported payload class");
   }
   auto result = std::make_unique<ObjectPartition>();
   result->kind = ValueKind::Object;
   result->component_count = 1;
   result->source = source;
-  result->type = found->second;
+  const auto identity = borrowed_object_type(payload->symbol(), owner);
+  result->type =
+      loom_type_reference(ownership, loom_type_reference_namespace_id(identity),
+                          loom_type_reference_name_id(identity),
+                          loom_type_reference_declaration_id(identity));
   auto* admitted = result.get();
   objects_.emplace(source, std::move(result));
   return admitted;

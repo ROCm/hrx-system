@@ -1,0 +1,33 @@
+// RUN: verify
+#include <loomcxx/object.h>
+
+struct [[loom::import("lifetime", "object")]] Object;
+
+namespace primitive {
+template <class T>
+struct [[loom::type("ref")]] Owner {
+  T* identity;
+};
+template <class T>
+[[loom::op("ref.release")]] void release(Owner<T>);
+}  // namespace primitive
+
+template <class T>
+class Ref {
+ public:
+  explicit Ref(primitive::Owner<T> owner) : owner_(owner) {}
+  ~Ref() { primitive::release(owner_); }
+
+ private:
+  primitive::Owner<T> owner_;
+};
+
+[[loom::noinline]] static Ref<Object>& passthrough(Ref<Object>& value) {
+  return value;
+}
+
+void route(primitive::Owner<Object> owner) {
+  Ref<Object> value(owner);
+  // ERROR@+1: LOWERING/059 "functions cannot return a reference to borrowed reference cells"
+  passthrough(value);
+}

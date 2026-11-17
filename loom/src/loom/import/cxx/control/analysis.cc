@@ -25,6 +25,7 @@
 #include <string_view>
 #include <utility>
 
+#include "loom/import/cxx/binding/imports.h"
 #include "loom/import/cxx/control/call_aliases.h"
 #include "loom/import/cxx/control/object_identity.h"
 #include "loom/import/cxx/source/attributes.h"
@@ -411,11 +412,12 @@ std::optional<bool> constant_truth(cxx::TranslationUnit& unit,
 }  // namespace
 
 ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
-                         Types& types, cxx::StatementAST* body,
-                         cxx::FunctionSymbol* function)
+                         Types& types, const Imports& imports,
+                         cxx::StatementAST* body, cxx::FunctionSymbol* function)
     : unit_(unit),
       diagnostics_(diagnostics),
       types_(types),
+      imports_(imports),
       function_(function),
       temporary_origins_(unit, types) {
   if (function_) {
@@ -2187,6 +2189,16 @@ void ControlFlow::visit(cxx::CallExpressionAST* ast) {
     diagnostics_.reject(unit_, ast, "virtual member dispatch is not admitted");
   }
   auto* function = direct_callee(ast);
+  auto object_receiver =
+      function ? imports_.object_method_receiver(function, ast) : std::nullopt;
+  if (object_receiver) {
+    accept(object_receiver->handle);
+    for (auto* argument : cxx::ListView{ast->expressionList}) {
+      accept(argument);
+    }
+    retain_object_method_call(ast, function, object_receiver->handle);
+    return;
+  }
   if (!function) {
     cxx::ASTVisitor::visit(ast);
   } else {
@@ -2531,6 +2543,24 @@ void ControlFlow::retain_call(cxx::CallExpressionAST* call,
   calls_.push_back(std::move(retained));
 }
 
+void ControlFlow::retain_object_method_call(cxx::CallExpressionAST* call,
+                                            cxx::FunctionSymbol* function,
+                                            cxx::ExpressionAST* receiver) {
+  DirectCall retained = {
+      .function = function,
+      .source = call,
+      .arguments = {},
+      .receiver = retain_call_argument(receiver),
+      .current_receiver = false,
+      .storage_receiver = false,
+  };
+  for (auto* argument : cxx::ListView{call->expressionList}) {
+    retained.arguments.push_back(retain_call_argument(argument));
+  }
+  retain_reference_arguments(retained);
+  calls_.push_back(std::move(retained));
+}
+
 void ControlFlow::retain_call(cxx::SubscriptExpressionAST* call,
                               cxx::FunctionSymbol* function) {
   DirectCall retained = {function, call, {}, std::nullopt, false, false};
@@ -2581,9 +2611,13 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
   if (!call.receiver || !call.function->isImplicitObjectMemberFunction()) {
     return;
   }
+  const bool transports_owner =
+      may_transport_owner(implicit_object_type(unit_, call.function), source) &&
+      !call.function->isDestructor();
   if (!is_current_object(unit_, call.receiver)) {
     if (call.receiver->valueCategory != cxx::ValueCategory::kPrValue) {
-      if (types_.implicit_object_may_mutate(call.function, source)) {
+      if (types_.implicit_object_may_mutate(call.function, source) ||
+          transports_owner) {
         record(call.receiver);
       } else {
         retain_destination(call.receiver);
@@ -2591,7 +2625,9 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
     }
     return;
   }
-  if (!types_.implicit_object_may_mutate(call.function, source)) {
+  const bool may_mutate =
+      types_.implicit_object_may_mutate(call.function, source);
+  if (!may_mutate && !transports_owner) {
     return;
   }
   auto* object_type = implicit_object_type(unit_, function_);
@@ -2604,7 +2640,9 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
                         "object");
   }
   for (const auto& member : receiver->members) {
-    record(member.source);
+    if (may_mutate || may_transport_owner(member.type(), source)) {
+      record(member.source);
+    }
   }
 }
 
@@ -2628,7 +2666,8 @@ void ControlFlow::retain_reference_arguments(DirectCall& call) {
         argument->valueCategory == cxx::ValueCategory::kPrValue) {
       continue;
     }
-    if (traits.is_const(traits.remove_reference(parameter_type))) {
+    if (traits.is_const(traits.remove_reference(parameter_type)) &&
+        !may_transport_owner(parameter_type, argument)) {
       retain_destination(argument);
     } else {
       record(argument);
@@ -4088,6 +4127,24 @@ CallPropagation ControlFlow::propagate_overlapping_indirect_parameters(
     return unit_.typeTraits().is_reference(parameter->type()) ||
            borrowed_pointer(parameter);
   };
+  auto transfers_owner = [&](cxx::Symbol* parameter) {
+    if (!unit_.typeTraits().is_reference(parameter->type())) {
+      return false;
+    }
+    // Parameter input facts are still converging while call aliases select
+    // identity. Querying them here can suppress selection before later call
+    // effects arrive, so any owning group is identity-sensitive during this
+    // fixed point. Only overlapping arguments materialize shared cells.
+    auto* object_type = types_.unqualified(
+        unit_.typeTraits().remove_reference(parameter->type()));
+    const auto groups = types_.projections(object_type, call.source);
+    return std::ranges::any_of(
+        groups, [](const auto& group) { return group.carries_owner; });
+  };
+  auto requires_shared_identity = [&](cxx::Symbol* parameter) {
+    return callee.indirect_parameter_written(parameter) ||
+           transfers_owner(parameter);
+  };
   auto select_storage = [&](size_t ordinal) {
     auto* parameter = parameters[ordinal];
     callee_changed =
@@ -4100,8 +4157,9 @@ CallPropagation ControlFlow::propagate_overlapping_indirect_parameters(
   };
 
   // A value-indirect call represents each mutable parameter as an independent
-  // result writeback. Overlapping source intervals require one shared storage
-  // identity so reads and writes observe the source language's aliasing order.
+  // result writeback and transports each managed owner through one argument.
+  // Overlapping source intervals require one shared storage identity so reads,
+  // writes, and owner transfer observe the source language's aliasing order.
   const size_t parameter_count =
       std::min(parameters.size(), call.arguments.size());
   size_t indirect_count = 0;
@@ -4109,7 +4167,7 @@ CallPropagation ControlFlow::propagate_overlapping_indirect_parameters(
   for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
     if (indirect_parameter(parameters[ordinal])) {
       ++indirect_count;
-      written_count += callee.indirect_parameter_written(parameters[ordinal]);
+      written_count += requires_shared_identity(parameters[ordinal]);
     }
   }
   const size_t alias_count = indirect_count + indexed_receiver;
@@ -4145,7 +4203,7 @@ CallPropagation ControlFlow::propagate_overlapping_indirect_parameters(
     for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
       if (indirect_parameter(parameters[ordinal])) {
         retain_alias(call.arguments[ordinal],
-                     callee.indirect_parameter_written(parameters[ordinal]));
+                     requires_shared_identity(parameters[ordinal]));
       }
     }
     if (indexed_receiver) {
@@ -5132,15 +5190,28 @@ void ControlFlow::record(cxx::Symbol* binding) {
   record_scoped_write(binding, owners_);
 }
 
+bool ControlFlow::may_transport_owner(const cxx::Type* type, cxx::AST* owner) {
+  if (!type) {
+    return false;
+  }
+  auto groups = types_.projections(types_.unqualified_value(type), owner);
+  return std::ranges::any_of(
+      groups, [](const auto& group) { return group.carries_owner; });
+}
+
 void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
                                               cxx::FunctionSymbol* callee) {
   if (!callee->isImplicitObjectMemberFunction()) {
     return;
   }
+  const bool transports_owner =
+      may_transport_owner(implicit_object_type(unit_, callee), call) &&
+      !callee->isDestructor();
+  const bool may_mutate = types_.implicit_object_may_mutate(callee, call);
   auto* base = unwrap_expression(call->baseExpression);
   if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(base);
       id && id->subobjectPath) {
-    if (types_.implicit_object_may_mutate(callee, call)) {
+    if (may_mutate || transports_owner) {
       record(types_.projection(id->subobjectPath, id).root->source);
     }
     return;
@@ -5150,7 +5221,7 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
     auto* receiver = selected.object;
     auto* projection = selected.projection ? &*selected.projection : nullptr;
     if (projection && is_current_object(unit_, receiver)) {
-      if (types_.implicit_object_may_mutate(callee, call)) {
+      if (may_mutate || transports_owner) {
         record(projection->root->source);
       }
       return;
@@ -5158,7 +5229,7 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
     if (!is_current_object(unit_, receiver)) {
       if (member->accessOp == cxx::TokenKind::T_DOT &&
           receiver->valueCategory != cxx::ValueCategory::kPrValue) {
-        if (types_.implicit_object_may_mutate(callee, call)) {
+        if (may_mutate || transports_owner) {
           record(receiver);
         } else {
           retain_destination(receiver);
@@ -5167,7 +5238,7 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
       return;
     }
   }
-  if (!types_.implicit_object_may_mutate(callee, call)) {
+  if (!may_mutate && !transports_owner) {
     return;
   }
   auto* object_type = implicit_object_type(unit_, function_);
@@ -5180,7 +5251,9 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
                         "object");
   }
   for (const auto& member : receiver->members) {
-    record(member.source);
+    if (may_mutate || may_transport_owner(member.type(), call)) {
+      record(member.source);
+    }
   }
 }
 

@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
 from loom.format.cxx.buffer_access import BufferAccessPlan
@@ -31,15 +31,20 @@ from loom.format.cxx.view_access import plan_view_access
 from loom.ir import (
     Block,
     BufferType,
+    DialectType,
     DynamicDim,
     DynamicEncoding,
     EncodingInstance,
     EncodingType,
+    FunctionType,
     Module,
     Operation,
     ParameterizedType,
     PoolType,
     PredicateListAttr,
+    ReferenceOwnership,
+    ReferenceType,
+    RegisterType,
     ScalarType,
     ShapedType,
     StaticDim,
@@ -48,6 +53,82 @@ from loom.ir import (
 
 
 class CxxRenderer(CxxFunctionRenderer):
+    def _render_reference(self, operation: Operation) -> tuple[str, ...] | None:
+        """Projects managed-handle identity and lifetime operations."""
+
+        if not operation.name.startswith("ref."):
+            return None
+        if operation.name == "ref.duplicate":
+            for source, result in zip(
+                operation.operands, operation.results, strict=True
+            ):
+                source_type = self.module.values[source].type
+                expression = self.expression(source)
+                if isinstance(source_type, ReferenceType):
+                    expression = f"loom::detail::object_duplicate({expression})"
+                self._declare(result, expression)
+            return ()
+        if operation.name == "ref.borrow":
+            source = operation.operands[0]
+            self._declare(
+                operation.results[0],
+                f"loom::detail::object_borrow({self.expression(source)})",
+            )
+            return ()
+        if operation.name == "ref.release":
+            source = operation.operands[0]
+            source_type = self.module.values[source].type
+            if not isinstance(source_type, ReferenceType):
+                raise CxxRenderError(operation, "released value is not a handle")
+            expression = self.expression(source)
+            self.writer.line(f"loom::detail::object_release({expression});")
+            return ()
+        if operation.name == "ref.null":
+            result = operation.results[0]
+            result_type = self.module.values[result].type
+            if not isinstance(result_type, ReferenceType):
+                raise CxxRenderError(operation, "null result is not a handle")
+            type_name = self.cpp_type(result)
+            initializer = f"{type_name}{{}}"
+            if result_type.ownership == ReferenceOwnership.OWNED:
+                payload = self.reference_type_names.get(str(result_type.declaration))
+                if payload is None:
+                    raise CxxRenderError(
+                        operation,
+                        "null managed type declaration has no C++ projection",
+                    )
+                initializer = f"loom::detail::object_null<{payload}>()"
+            self._declare(
+                result,
+                initializer,
+                declaration_type=type_name,
+                expression_type=type_name,
+            )
+            return ()
+        if operation.name == "ref.compare.null":
+            source = operation.operands[0]
+            source_type = self.module.values[source].type
+            if not isinstance(source_type, ReferenceType):
+                raise CxxRenderError(operation, "compared value is not a handle")
+            expression = self.expression(source)
+            comparison = f"loom::detail::object_is_null({expression})"
+            self._declare(operation.results[0], comparison, inlineable=True)
+            return ()
+        if operation.name == "ref.compare.eq":
+            handles: list[str] = []
+            for source in operation.operands:
+                source_type = self.module.values[source].type
+                if not isinstance(source_type, ReferenceType):
+                    raise CxxRenderError(operation, "compared value is not a handle")
+                handles.append(self.expression(source))
+            self._declare(
+                operation.results[0],
+                f"loom::detail::object_equal({handles[0]}, {handles[1]})",
+                inlineable=True,
+            )
+            return ()
+        raise CxxRenderError(operation, "reference operation has no C++ projection")
+
     def _static_view_encoding_expression(
         self, operation: Operation, view_type: ShapedType
     ) -> str:
@@ -112,6 +193,8 @@ class CxxRenderer(CxxFunctionRenderer):
         rhs_type = self.module.values[rhs].type
         if isinstance(lhs_type, BufferType) and isinstance(rhs_type, BufferType):
             return self._buffer_element(lhs) == self._buffer_element(rhs)
+        if isinstance(lhs_type, ReferenceType) and isinstance(rhs_type, ReferenceType):
+            return lhs_type == rhs_type
         if repr(lhs_type) == repr(rhs_type):
             return True
         if not (
@@ -988,7 +1071,7 @@ class CxxRenderer(CxxFunctionRenderer):
         initializer = ""
         if isinstance(value_type, ScalarType):
             initializer = "{0}" if repr(value_type) in {"index", "offset"} else "{}"
-        elif (
+        elif isinstance(value_type, ReferenceType) or (
             isinstance(value_type, ShapedType)
             and value_type.type_kind == TypeKind.VECTOR
             and value_type.rank == 1
@@ -1005,27 +1088,31 @@ class CxxRenderer(CxxFunctionRenderer):
     ) -> None:
         assignments = [
             (
+                target,
                 self.expression(target),
                 self._buffer_argument(source, self._buffer_element(target))
                 if isinstance(self.module.values[target].type, BufferType)
+                else self._transfer_expression(source)
+                if isinstance(self.module.values[target].type, ReferenceType)
                 else self.numeric_argument(source, self.expression_type(target)),
             )
             for target, source in zip(targets, sources, strict=True)
             if target is not None and self.expression(target) != self.expression(source)
         ]
         if len(assignments) == 1:
-            target, source = assignments[0]
+            _, target, source = assignments[0]
             self.writer.line(f"{target} = {_strip_outer_parentheses(source)};")
             return
-        temporaries: list[tuple[str, str]] = []
-        for target, source in assignments:
+        temporaries: list[tuple[int, str, str]] = []
+        for target_id, target, source in assignments:
             temporary = self._temporary_name(
                 f"next_{clean_identifier(target, 'value')}"
             )
             self.writer.line(f"auto {temporary} = {_strip_outer_parentheses(source)};")
-            temporaries.append((target, temporary))
-        for target, temporary in temporaries:
-            self.writer.line(f"{target} = {temporary};")
+            temporaries.append((target_id, target, temporary))
+        for target_id, target, temporary in temporaries:
+            source = self._transfer_expression(target_id, temporary)
+            self.writer.line(f"{target} = {source};")
 
     def _transport_targets(self, values: Sequence[int]) -> list[int | None]:
         return [
@@ -1393,6 +1480,10 @@ class CxxRenderer(CxxFunctionRenderer):
                 if projected is not None:
                     self._validate_projected_attributes(operation, projected)
                     continue
+                projected = self._render_reference(operation)
+                if projected is not None:
+                    self._validate_projected_attributes(operation, projected)
+                    continue
                 projected = self._render_simple(operation)
                 if projected is not None:
                     self._validate_projected_attributes(operation, projected)
@@ -1501,14 +1592,52 @@ class CxxRenderer(CxxFunctionRenderer):
         self._render_block(entry)
         self.writer.close()
 
+    def _plan_object_names(
+        self, declarations: list[Operation], used_names: set[str]
+    ) -> None:
+        canonical_names: dict[tuple[str, str], str] = {}
+        for declaration in declarations:
+            self._validate_projected_attributes(
+                declaration, ("name", "namespace", "type_name")
+            )
+            symbol = str(declaration.attributes["name"])
+            base = clean_identifier(symbol, "object")
+            name = base
+            ordinal = 2
+            while name in used_names:
+                name = f"{base}_{ordinal}"
+                ordinal += 1
+            used_names.add(name)
+            self.reference_type_names[symbol] = name
+
+            namespace = str(declaration.attributes["namespace"])
+            payload = str(declaration.attributes["type_name"])
+            key = (namespace, payload)
+            canonical = canonical_names.get(key)
+            if canonical is None:
+                canonical_names[key] = name
+                arguments = ", ".join(
+                    (
+                        cxx_string_literal(namespace.encode("utf-8")),
+                        cxx_string_literal(payload.encode("utf-8")),
+                    )
+                )
+                self.object_declarations.append(
+                    f"struct [[loom::import({arguments})]] {name};"
+                )
+            else:
+                self.object_declarations.append(f"using {name} = {canonical};")
+
     def _plan_callable_names(
         self,
+        objects: list[Operation],
         kernels: list[Operation],
         functions: list[Operation],
         commands: list[Operation],
         pipelines: list[Operation],
     ) -> None:
         used_names: set[str] = set()
+        self._plan_object_names(objects, used_names)
         for kernel in kernels:
             symbol = str(self._resolved(kernel).attr("callee"))
             base = clean_identifier(symbol, "kernel")
@@ -1606,6 +1735,11 @@ class CxxRenderer(CxxFunctionRenderer):
         self.translation_unit_names = used_names
 
     def render(self) -> str:
+        objects = [
+            operation
+            for operation in self.module.body.ops
+            if operation.name == "type.decl"
+        ]
         kernels = [
             operation
             for operation in self.module.body.ops
@@ -1648,13 +1782,14 @@ class CxxRenderer(CxxFunctionRenderer):
                 "pipeline.decl",
                 "config.decl",
                 "config.def",
+                "type.decl",
             } or is_target_operation(operation):
                 continue
             raise CxxRenderError(
                 operation,
                 "a top-level definition would be omitted from the C++ projection",
             )
-        self._plan_callable_names(kernels, functions, commands, pipelines)
+        self._plan_callable_names(objects, kernels, functions, commands, pipelines)
         self._plan_kernel_configurations(kernels)
         self.suppressed_forwarding_values = plan_value_transport(
             self.module,
@@ -1805,6 +1940,7 @@ class CxxRenderer(CxxFunctionRenderer):
                 isinstance(value.type, EncodingType) for value in self.module.values
             ),
             vector_aliases=self.types.vector_aliases,
+            object_declarations=tuple(self.object_declarations),
             record_declarations=self.record_declarations,
             table_lookup_declarations=self.table_lookup_declarations,
             targets=tuple(
@@ -1820,6 +1956,60 @@ class CxxRenderer(CxxFunctionRenderer):
             uses_predicate_functions=uses_predicate_functions,
         )
         return "\n".join((*preamble, *self.writer.lines)) + "\n"
+
+
+def _reference_declarations(value: object) -> set[str]:
+    """Returns managed declaration symbols reached through one type graph."""
+
+    declarations: set[str] = set()
+    pending = [value]
+    visited: set[int] = set()
+    while pending:
+        current = pending.pop()
+        identity = id(current)
+        if identity in visited:
+            continue
+        visited.add(identity)
+        if isinstance(current, ReferenceType):
+            declarations.add(str(current.declaration))
+        elif isinstance(current, ShapedType):
+            pending.extend((current.element_type, current.encoding))
+        elif isinstance(current, FunctionType):
+            pending.extend((*current.arg_types, *current.result_types))
+        elif isinstance(current, DialectType):
+            pending.extend(current.params)
+        elif isinstance(current, ParameterizedType):
+            pending.extend(slot for slot in current.slots if slot is not None)
+        elif isinstance(current, RegisterType) and current.value_type is not None:
+            pending.append(current.value_type)
+        elif isinstance(current, EncodingInstance):
+            pending.extend(child for _, child in current.params)
+        elif isinstance(current, Mapping):
+            pending.extend(current.values())
+        elif isinstance(current, (list, tuple)):
+            pending.extend(current)
+    return declarations
+
+
+def _operation_reference_declarations(module: Module, operation: Operation) -> set[str]:
+    """Returns managed declarations required by one complete operation tree."""
+
+    declarations: set[str] = set()
+
+    def visit(current: Operation) -> None:
+        for value_id in (*current.operands, *current.results):
+            declarations.update(_reference_declarations(module.values[value_id].type))
+        for region in current.regions:
+            for block in region.blocks:
+                for argument in block.arg_ids:
+                    declarations.update(
+                        _reference_declarations(module.values[argument].type)
+                    )
+                for child in block.ops:
+                    visit(child)
+
+    visit(operation)
+    return declarations
 
 
 def _select_callable_roots(module: Module, roots: Sequence[str]) -> Module:
@@ -1896,10 +2086,21 @@ def _select_callable_roots(module: Module, roots: Sequence[str]) -> Module:
                     if isinstance(callee, str):
                         pending.append((callee, False))
 
+    required_type_declarations: set[str] = set()
+    for operation in module.body.ops:
+        if id(operation) in selected_operation_ids:
+            required_type_declarations.update(
+                _operation_reference_declarations(module, operation)
+            )
+
     selected_operations = [
         operation
         for operation in module.body.ops
         if id(operation) in selected_operation_ids
+        or (
+            operation.name == "type.decl"
+            and operation.attributes.get("name") in required_type_declarations
+        )
         or (
             is_target_operation(operation)
             and operation.attributes.get("symbol") in target_names

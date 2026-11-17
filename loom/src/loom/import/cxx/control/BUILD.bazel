@@ -135,6 +135,7 @@ loom_cc_library(
         ":call_aliases",
         ":construction",
         ":object_identity",
+        "//loom/src/loom/import/cxx/binding:imports",
         "//loom/src/loom/import/cxx/lifetime:destruction",
         "//loom/src/loom/import/cxx/lifetime:origins",
         "//loom/src/loom/import/cxx/source",
@@ -175,6 +176,7 @@ loom_cc_test(
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
         ":analysis",
+        "//loom/src/loom/import/cxx/binding:imports",
         "//loom/src/loom/import/cxx/source",
         "//loom/src/loom/import/cxx/source:expressions",
         "//loom/src/loom/import/cxx/source:options",

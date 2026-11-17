@@ -37,6 +37,7 @@
 #include "loom/ir/ir.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/signature_flags.h"
 #include "loom/sanitizer/options.h"
 #include "loom/target/abi/c/signature_layout.h"
 #include "loom/target/low_legality.h"
@@ -1398,6 +1399,14 @@ loom_builder_t* loom_low_lower_context_builder(
 // Returns the source function being lowered.
 loom_func_like_t loom_low_lower_context_source_function(
     const loom_low_lower_context_t* context);
+
+// Returns an authored access bound or infers one from a visible source body.
+// Inference consumes the shared immutable-source storage graph. It leaves the
+// source signature unchanged and returns UNSPECIFIED when access may escape.
+// Graph construction can fail allocation; repeated queries reuse its facts.
+iree_status_t loom_low_lower_context_argument_access(
+    loom_low_lower_context_t* context, uint16_t argument_index,
+    loom_argument_access_t* out_access);
 
 // Returns whether source inlining retained a direct semantic caller of the
 // source function. This is false for standalone lowering without module call

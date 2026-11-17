@@ -13,10 +13,15 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from loom.dialect.func.defs import ArgumentAccess
 from loom.ir import BufferType, Module, Operation
 
 # Other origins are formal buffer parameter value IDs in the owning callable.
 _IMMUTABLE_STORAGE = -1
+_READ_ACCESS = ArgumentAccess.case("read").value
+_WRITE_ACCESS = ArgumentAccess.case("write").value
+_READ_WRITE_ACCESS = ArgumentAccess.case("read_write").value
+_NONE_ACCESS = ArgumentAccess.case("none").value
 
 
 @dataclass(eq=False)
@@ -65,6 +70,8 @@ class BufferAccessPlan:
         }
         self._parameters: dict[str, tuple[int, ...]] = {}
         self._calls: dict[str | None, list[Operation]] = defaultdict(list)
+        self._fixed_immutable_arguments: dict[str, frozenset[int]] = {}
+        self._fixed_mutable_arguments: dict[str, frozenset[int]] = {}
         self._projections: dict[tuple[str, frozenset[int]], BufferProjection] = {}
         self.projections: dict[str, list[BufferProjection]] = defaultdict(list)
         self.calls: dict[int, BufferProjection] = {}
@@ -82,6 +89,21 @@ class BufferAccessPlan:
                 else resolve(function).region("body").blocks[0].arg_ids
             )
             self._parameters[symbol] = tuple(parameters)
+            signature_flags = function.attributes.get("signature_flags", b"")
+            immutable_arguments: set[int] = set()
+            mutable_arguments: set[int] = set()
+            for position, parameter in enumerate(parameters):
+                if parameter not in self._origins:
+                    continue
+                access = signature_flags[position] if signature_flags else 0
+                if access in {_READ_ACCESS, _NONE_ACCESS}:
+                    immutable_arguments.add(parameter)
+                elif access in {_WRITE_ACCESS, _READ_WRITE_ACCESS} or (
+                    function.name == "func.decl" and access == 0
+                ):
+                    mutable_arguments.add(parameter)
+            self._fixed_immutable_arguments[symbol] = frozenset(immutable_arguments)
+            self._fixed_mutable_arguments[symbol] = frozenset(mutable_arguments)
             for parameter in parameters:
                 if parameter in self._origins:
                     self._origins[parameter] = frozenset({parameter})
@@ -230,6 +252,10 @@ class BufferAccessPlan:
         pending: deque[BufferProjection] = deque()
 
         def get(symbol: str, immutable: frozenset[int]) -> BufferProjection:
+            immutable = frozenset(
+                (immutable | self._fixed_immutable_arguments[symbol])
+                - self._fixed_mutable_arguments[symbol]
+            )
             key = (symbol, immutable)
             if key not in self._projections:
                 projection = BufferProjection(self._functions[symbol], immutable)
@@ -252,9 +278,6 @@ class BufferAccessPlan:
                     )
                     if self.is_immutable(actual, projection)
                 )
-                # Bodyless declarations have an opaque, fixed source ABI.
-                if function.name == "func.decl":
-                    immutable = frozenset()
                 bindings[id(call)] = get(symbol, immutable)
 
         def drain() -> None:

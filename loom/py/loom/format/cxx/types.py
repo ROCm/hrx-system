@@ -18,6 +18,8 @@ from loom.ir import (
     Module,
     ParameterizedType,
     PoolType,
+    ReferenceOwnership,
+    ReferenceType,
     ScalarType,
     ShapedType,
     StaticDim,
@@ -67,9 +69,15 @@ def uses_native_vector(value_type: ShapedType) -> bool:
 class CxxTypes:
     """Plans deterministic C++ carrier names for one verified module."""
 
-    def __init__(self, module: Module, signed_values: set[int]):
+    def __init__(
+        self,
+        module: Module,
+        signed_values: set[int],
+        reference_names: dict[str, str],
+    ):
         self.module = module
         self.signed_values = signed_values
+        self.reference_names = reference_names
         self.vector_aliases: dict[tuple[str, tuple[int, ...], bool], str] = {}
 
     def scalar(self, value_type: ScalarType, signed: bool = False) -> str:
@@ -133,7 +141,7 @@ class CxxTypes:
             for dimension in value_type.dims
         )
         shape = f"loom::type::shape<{dimensions}>"
-        element = self.scalar(value_type.element_type, signed)
+        element = self.type(value_type.element_type, signed)
         if const:
             element = f"const {element}"
 
@@ -227,6 +235,20 @@ class CxxTypes:
             return f"loom::type::encoding<loom::encoding::role::{role}>"
         if isinstance(value_type, PoolType):
             return "loom::type::pool"
+        if isinstance(value_type, ReferenceType):
+            payload = self.reference_names.get(str(value_type.declaration))
+            if payload is None:
+                raise CxxRenderError(
+                    None,
+                    f"managed type declaration @{value_type.declaration} "
+                    "has no C++ projection",
+                )
+            carrier = (
+                "type::ref"
+                if value_type.ownership == ReferenceOwnership.OWNED
+                else "ptr"
+            )
+            return f"loom::{carrier}<{payload}>"
         if isinstance(value_type, ParameterizedType):
             return self.parameterized(value_type, signed)
         raise CxxRenderError(

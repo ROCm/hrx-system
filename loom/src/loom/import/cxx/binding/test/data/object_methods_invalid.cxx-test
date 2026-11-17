@@ -1,0 +1,111 @@
+// RUN: verify
+#include <loomcxx/object.h>
+
+struct [[loom::import("hal", "buffer")]] Buffer;
+
+template <>
+class loom::protocol<Buffer> {
+ public:
+  // ERROR@+1: LOWERING/059 "import bindings require bodyless functions"
+  [[loom::import("hal", "buffer.length")]] unsigned length() const { return 0; }
+};
+
+// ====
+#include <loomcxx/object.h>
+
+struct [[loom::import("hal", "buffer")]] Buffer;
+
+template <>
+class loom::protocol<Buffer> {
+ public:
+  // ERROR@+1: LOWERING/059 "protocol method imports require ordinary nonvirtual instance methods on a class without bases"
+  [[loom::import("hal", "buffer.length")]] virtual unsigned length() const;
+};
+
+// ====
+#include <loomcxx/object.h>
+
+struct [[loom::import("hal", "buffer")]] Buffer;
+
+template <>
+class loom::protocol<Buffer> {
+ public:
+  // ERROR@+2: LOWERING/059 "protocols cannot contain instance storage"
+  unsigned state;
+  [[loom::import("hal", "buffer.length")]] unsigned length() const;
+};
+
+// ====
+#include <loomcxx/object.h>
+
+struct [[loom::import("hal", "buffer")]] Buffer;
+
+template <>
+class loom::protocol<Buffer> {
+ public:
+  [[loom::import("hal", "buffer.length")]] unsigned length() const;
+};
+
+void escape(loom::ptr<Buffer> buffer) {
+  // ERROR@+1: LOWERING/059 "protocol operator-> is only valid as imported method syntax"
+  (void)buffer.operator->();
+}
+
+// ====
+#include <loomcxx/object.h>
+
+struct [[loom::import("hal", "buffer")]] Buffer;
+
+template <>
+class loom::protocol<Buffer> {
+ public:
+  [[loom::import("hal", "buffer.length")]] unsigned length() const;
+};
+
+unsigned invalid(loom::protocol<Buffer>* proxy) {
+  // ERROR@+1: LOWERING/059 "protocol methods require a matching loom::ptr receiver"
+  return proxy->length();
+}
+
+// ====
+#include <loomcxx/object.h>
+
+struct [[loom::import("hal", "buffer")]] Buffer;
+struct [[loom::import("hal", "semaphore")]] Semaphore;
+
+template <>
+class loom::protocol<Buffer> {
+ public:
+  [[loom::import("hal", "buffer.length")]] unsigned length() const;
+};
+
+template <class T>
+class [[loom::type("ptr")]] WrongHandle {
+ public:
+  loom::protocol<Buffer>* operator->() const;
+
+ private:
+  T* data_;
+};
+
+unsigned invalid(WrongHandle<Semaphore> handle) {
+  // ERROR@+1: LOWERING/059 "protocol methods require a matching loom::ptr receiver"
+  return handle->length();
+}
+
+// ====
+#include <loomcxx/object.h>
+
+struct [[loom::import("hal", "buffer")]] Buffer;
+
+template <>
+class loom::protocol<Buffer> {
+ public:
+  [[loom::import("hal", "buffer.raw")]]
+  loom::protocol<Buffer>* raw() const;
+};
+
+void invalid(loom::ptr<Buffer> buffer) {
+  // ERROR@+1: LOWERING/059 "protocol types are compile-time-only method contracts"
+  (void)buffer->raw();
+}

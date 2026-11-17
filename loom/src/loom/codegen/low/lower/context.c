@@ -265,6 +265,44 @@ loom_func_like_t loom_low_lower_context_source_function(
   return context->source_function;
 }
 
+iree_status_t loom_low_lower_context_argument_access(
+    loom_low_lower_context_t* context, uint16_t argument_index,
+    loom_argument_access_t* out_access) {
+  const iree_const_byte_span_t flags =
+      loom_func_like_signature_flags(context->source_function);
+  *out_access = flags.data_length
+                    ? loom_signature_flags_access(flags.data[argument_index])
+                    : LOOM_ARGUMENT_ACCESS_UNSPECIFIED;
+  if (*out_access != LOOM_ARGUMENT_ACCESS_UNSPECIFIED ||
+      !loom_func_like_body(context->source_function)) {
+    return iree_ok_status();
+  }
+  if (context->function_analysis.storage_access_function == NULL) {
+    IREE_RETURN_IF_ERROR(loom_storage_access_require_function(
+        context->storage_access, context->source_function,
+        loom_local_value_domain_is_acquired(&context->lowering->value_domain)
+            ? &context->lowering->value_domain
+            : NULL,
+        &context->function_analysis.storage_access_function));
+  }
+  const loom_storage_reference_t* reference =
+      context->function_analysis.storage_access_function
+          ->arguments[argument_index];
+  if (reference != NULL &&
+      !iree_any_bit_set(reference->effects, LOOM_STORAGE_ACCESS_ESCAPE |
+                                                LOOM_STORAGE_ACCESS_ASYNC)) {
+    const uint8_t access = reference->effects & (LOOM_STORAGE_ACCESS_READ |
+                                                 LOOM_STORAGE_ACCESS_WRITE);
+    *out_access =
+        access == LOOM_STORAGE_ACCESS_READ    ? LOOM_ARGUMENT_ACCESS_READ
+        : access == LOOM_STORAGE_ACCESS_WRITE ? LOOM_ARGUMENT_ACCESS_WRITE
+        : access == (LOOM_STORAGE_ACCESS_READ | LOOM_STORAGE_ACCESS_WRITE)
+            ? LOOM_ARGUMENT_ACCESS_READ_WRITE
+            : LOOM_ARGUMENT_ACCESS_NONE;
+  }
+  return iree_ok_status();
+}
+
 bool loom_low_lower_context_source_has_direct_callers(
     const loom_low_lower_context_t* context) {
   return context->options != NULL &&

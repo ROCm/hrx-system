@@ -20,6 +20,7 @@
 #include <limits>
 #include <optional>
 
+#include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/source/objects.h"
@@ -50,24 +51,7 @@ bool same_subobject_path(cxx::List<cxx::Symbol*>* left,
 }
 
 const cxx::Attribute* type_binding(cxx::ClassSymbol* source) {
-  auto find = [](cxx::ClassSymbol* symbol) -> const cxx::Attribute* {
-    if (!symbol || !symbol->attributes()) {
-      return nullptr;
-    }
-    for (const auto& attribute : *symbol->attributes()) {
-      if (attribute.attributeNamespace && attribute.name &&
-          attribute.attributeNamespace->name() == "loom" &&
-          attribute.name->name() == "type") {
-        return &attribute;
-      }
-    }
-    return nullptr;
-  };
-  if (auto* binding = find(source)) {
-    return binding;
-  }
-  auto* primary = cxx::class_template_of(source);
-  return primary == source ? nullptr : find(primary);
+  return template_annotation(source, "type");
 }
 
 const cxx::ParameterPackSymbol* template_argument_pack(
@@ -434,6 +418,45 @@ bool Types::requires_value_transport(const cxx::Type* input) {
   return object_properties(input).value_transport;
 }
 
+const ReferenceStorageLayout* Types::reference_storage(const cxx::Type* input,
+                                                       cxx::AST* owner) {
+  input = unqualified(input);
+  if (auto found = reference_storage_layouts_.find(input);
+      found != reference_storage_layouts_.end()) {
+    return found->second.get();
+  }
+
+  auto layout = std::make_unique<ReferenceStorageLayout>();
+  layout->value_partition = &partition(input, owner);
+  if (requires_binding(input, owner)) {
+    reference_storage_layouts_.emplace(input, nullptr);
+    return nullptr;
+  }
+  layout->element_types.reserve(layout->value_partition->component_count);
+  append(input, owner, layout->element_types);
+  if (layout->element_types.empty() ||
+      layout->element_types.size() !=
+          layout->value_partition->component_count ||
+      std::ranges::any_of(layout->element_types, [](loom_type_t type) {
+        return !loom_type_is_reference(type);
+      })) {
+    reference_storage_layouts_.emplace(input, nullptr);
+    return nullptr;
+  }
+
+  const uint64_t dimension = loom_dim_pack_static(1);
+  const auto* dimensions = layout->type_storage.retain_dimensions(
+      std::span<const uint64_t>(&dimension, 1));
+  layout->cell_types.reserve(layout->element_types.size());
+  for (const auto& element_type : layout->element_types) {
+    layout->cell_types.push_back(
+        loom_type_reference_view(&element_type, 1, dimensions, 0, 0));
+  }
+  auto* admitted = layout.get();
+  reference_storage_layouts_.emplace(input, std::move(layout));
+  return admitted;
+}
+
 bool Types::has_volatile_subobject(const cxx::Type* input) {
   return unit_.typeTraits().is_volatile(input) ||
          object_properties(input).volatile_subobject;
@@ -532,7 +555,17 @@ std::span<const ValueProjection> Types::projections(const cxx::Type* input,
       byte_offset += element_bytes;
     }
   } else {
-    result.push_back({input, &admitted, 0});
+    const bool carries_owner =
+        admitted.kind == ValueKind::Object &&
+        loom_type_reference_ownership(
+            static_cast<const ObjectPartition&>(admitted).type) ==
+            LOOM_REFERENCE_OWNERSHIP_OWNED;
+    result.push_back({
+        .type = input,
+        .partition = &admitted,
+        .component_offset = 0,
+        .carries_owner = carries_owner,
+    });
   }
   return construction_groups_.emplace(input, std::move(result)).first->second;
 }
@@ -571,6 +604,10 @@ const Partition* Types::special(const cxx::Type* input, cxx::AST* owner) {
     return nullptr;
   }
   auto* source = type->definition();
+  if (template_annotation(source, "protocol")) {
+    diagnostics_.reject(
+        unit_, owner, "protocol types are compile-time-only method contracts");
+  }
   auto* binding = type_binding(source);
   if (!binding) {
     return nullptr;
@@ -585,8 +622,11 @@ const Partition* Types::special(const cxx::Type* input, cxx::AST* owner) {
                         "loom source types require one string type binding");
   }
   auto name = binding->arguments[0]->name();
-  if (name == "ptr") {
-    return object(type, owner);
+  if (name == "ptr" || name == "ref") {
+    return object(type,
+                  name == "ref" ? LOOM_REFERENCE_OWNERSHIP_OWNED
+                                : LOOM_REFERENCE_OWNERSHIP_BORROWED,
+                  owner);
   }
   if (name == "buffer") {
     return buffer(type, owner);
@@ -1716,6 +1756,13 @@ loom_type_t Types::get(const cxx::Type* input, cxx::AST* ast) {
         diagnostics_.reject(
             unit_, ast,
             "function pointers have no object pointer representation");
+      }
+      auto* pointee =
+          cxx::type_cast<cxx::ClassType>(unqualified(pointer->elementType()));
+      if (pointee && template_annotation(pointee->definition(), "protocol")) {
+        diagnostics_.reject(
+            unit_, ast,
+            "protocol types are compile-time-only method contracts");
       }
       return loom_type_buffer();
     }

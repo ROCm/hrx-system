@@ -1,0 +1,239 @@
+// Visible helpers infer access through nested calls. Aliased view arguments
+// share the same owner cell; a saved pointer protects the displaced payload.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%value: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def noinline @read_owner(%owners: view<1xref<@Object>>) -> (ptr<@Object>) {
+  %owner = view.load %owners[0] : view<1xref<@Object>> -> ref<@Object>
+  // REMARK@+1: DOMINANCE/021
+  %pointer = ref.borrow %owner : ref<@Object> -> ptr<@Object>
+  ref.release %owner : ref<@Object>
+  func.return %pointer : ptr<@Object>
+}
+
+func.def noinline @replace(%target: view<1xref<@Object>>, %alias: view<1xref<@Object>>, %replacement: ref<@Object>) {
+  %previous = func.call @read_owner(%alias) : (view<1xref<@Object>>) -> (ptr<@Object>)
+  view.store %replacement, %target[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %replacement : ref<@Object>
+  %current = func.call @read_owner(%alias) : (view<1xref<@Object>>) -> (ptr<@Object>)
+  func.call @read(%current) : (ptr<@Object>)
+  func.call @read(%previous) : (ptr<@Object>)
+  ref.release %current : ptr<@Object>
+  ref.release %previous : ptr<@Object>
+  func.return
+}
+
+func.def public @run() {
+  %first = scalar.constant 1 : i32
+  %second = scalar.constant 2 : i32
+  %original, %original_pointer = func.call @create(%first) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %replacement, %replacement_pointer = func.call @create(%second) : (i32) -> (ref<@Object>, ptr<@Object>)
+  ref.release %original_pointer : ptr<@Object>
+  ref.release %replacement_pointer : ptr<@Object>
+  %owners = view.alloca<private> : view<1xref<@Object>>
+  view.store %original, %owners[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %original : ref<@Object>
+  func.call @replace(%owners, %owners, %replacement) : (view<1xref<@Object>>, view<1xref<@Object>>, ref<@Object>)
+  %empty = ref.null : ref<@Object>
+  view.store %empty, %owners[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %empty : ref<@Object>
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 1
+create 2
+read 2
+read 1
+destroy 1
+destroy 2
+live 0
+OK 0
+retired 0
+
+// ====
+
+// A stored pointer outlives its writer and keeps protection in the cell.
+// Passing that cell through a reader does not copy the whole reference span.
+// RUN: emit vm-object-lifetime borrowed-argument
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "count") @count(%value: ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%value: ptr<@Object>)
+
+func.def noinline @write_pointer(%objects: view<1xptr<@Object>>, %value: ptr<@Object>) {
+  view.store %value, %objects[0] : ptr<@Object>, view<1xptr<@Object>>
+  func.return
+}
+
+func.def noinline @read_pointer(%objects: view<1xptr<@Object>>) {
+  %value = view.load %objects[0] : view<1xptr<@Object>> -> ptr<@Object>
+  func.call @count(%value) : (ptr<@Object>)
+  func.call @read(%value) : (ptr<@Object>)
+  func.return
+}
+
+func.def public @run(%value: ptr<@Object>) {
+  %objects = view.alloca<private> : view<1xptr<@Object>>
+  func.call @write_pointer(%objects, %value) : (view<1xptr<@Object>>, ptr<@Object>)
+  func.call @read_pointer(%objects) : (view<1xptr<@Object>>)
+  func.call @count(%value) : (ptr<@Object>)
+  func.return
+}
+
+// ----
+create 1
+references 3
+read 1
+references 2
+OK 1
+destroy 1
+retired 0
+
+// ====
+
+// A root without annotations also obtains its borrowed ABI from its body.
+// A stronger authored access promise retains its public boundary meaning.
+// RUN: emit vm-dis
+vm.target<core> @vm
+
+type.decl import("arrays", "object") @Object
+
+func.def public target(@vm) @read(%objects: view<1xptr<@Object>>) -> (ptr<@Object>) {
+  %value = view.load %objects[0] : view<1xptr<@Object>> -> ptr<@Object>
+  func.return %value : ptr<@Object>
+}
+
+func.def public target(@vm) @write(%objects: view<1xptr<@Object>>, %value: ptr<@Object>) {
+  view.store %value, %objects[0] : ptr<@Object>, view<1xptr<@Object>>
+  func.return
+}
+
+func.def public target(@vm) @read_write(%objects: view<1xref<@Object>>) -> (ref<@Object>) {
+  %previous = view.load %objects[0] : view<1xref<@Object>> -> ref<@Object>
+  %empty = ref.null : ref<@Object>
+  view.store %empty, %objects[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %empty : ref<@Object>
+  func.return %previous : ref<@Object>
+}
+
+func.def public target(@vm) @unused(%objects: view<1xptr<@Object>>) {
+  func.return
+}
+
+func.def public target(@vm) @authored(%objects: view<1xptr<@Object>> {access = read_write}) -> (ptr<@Object>) {
+  %value = view.load %objects[0] : view<1xptr<@Object>> -> ptr<@Object>
+  func.return %value : ptr<@Object>
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "authored"
+    string @string1 = "read"
+    string @string2 = "read_write"
+    string @string3 = "unused"
+    string @string4 = "write"
+    string @string5 = "arrays"
+    string @string6 = "object"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string5) {
+      ref_type @ref_type0 name(@string6)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (span<ref(@ref_type0)>) -> (ref(@ref_type0))
+    signature @signature1 (span<ptr(@ref_type0)>) -> (ptr(@ref_type0))
+    signature @signature2 (span<ptr(@ref_type0), read>) -> (ptr(@ref_type0))
+    signature @signature3 (span<ptr(@ref_type0), none>) -> ()
+    signature @signature4 (span<ptr(@ref_type0), write>, ptr(@ref_type0)) -> ()
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+    callable @callable1 flags([]) depth(0) : @signature1
+    callable @callable2 flags([]) depth(0) : @signature2
+    callable @callable3 flags([]) depth(0) : @signature3
+    callable @callable4 flags([]) depth(0) : @signature4
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable1 = @function4
+    export @export1 name(@string1) : @callable2 = @function0
+    export @export2 name(@string2) : @callable0 = @function2
+    export @export3 name(@string3) : @callable3 = @function3
+    export @export4 name(@string4) : @callable4 = @function1
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable2 flags([]) frame(local_bytes = 0, value_registers = 2, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
+    ^bb0:
+      control.block
+      %v1 = constant.zero
+      %v0 = integer.add.i64 %v0, %v1
+      %r0 = span.ref.load %v0
+      control.return
+    }
+    func @function1 : @callable4 flags([]) frame(local_bytes = 0, value_registers = 2, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
+    ^bb0:
+      control.block
+      %v1 = constant.zero
+      %v0 = integer.add.i64 %v0, %v1
+      span.ref.store %r0, %v0
+      ref.discard %r0
+      control.return
+    }
+    func @function2 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 2, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
+    ^bb0:
+      control.block
+      %v1 = constant.zero
+      %v0 = integer.add.i64 %v0, %v1
+      %r0 = span.ref.load %v0
+      %r1 = ref.null
+      span.ref.store %r1, %v0
+      ref.discard %r1
+      control.return
+    }
+    func @function3 : @callable3 flags([]) frame(local_bytes = 0, value_registers = 2, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
+    ^bb0:
+      control.block
+      control.return
+    }
+    func @function4 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 2, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0, call_values = 0) {
+    ^bb0:
+      control.block
+      %v1 = constant.zero
+      %v0 = integer.add.i64 %v0, %v1
+      %r0 = span.ref.load %v0
+      control.return
+    }
+  }
+
+}
+
+// ====
+
+// A borrowed reference span cannot escape its dynamic call extent. Returning
+// the source view therefore withholds the inferred span ABI, and the result is
+// rejected instead of manufacturing a capturable native pointer.
+// RUN: emit source-low target=vm:core output=low
+vm.target<core> @vm
+
+type.decl import("arrays", "object") @Object
+
+// ERROR@+1: TARGET/033 {op_name="func.def", actual_type="view<1xptr<@Object>>"}
+func.def target(@vm) @return_borrowed(%objects: view<1xptr<@Object>>) -> (view<1xptr<@Object>>) {
+  // ERROR@+1: TARGET/033 {op_name="func.return", actual_type="view<1xptr<@Object>>"}
+  func.return %objects : view<1xptr<@Object>>
+}

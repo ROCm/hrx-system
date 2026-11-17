@@ -1,0 +1,394 @@
+// RUN: roundtrip
+#include <loomcxx/object.h>
+
+struct [[loom::import("lifetime", "object")]] Object;
+
+namespace primitive {
+template <class T>
+struct [[loom::type("ref")]] Owner {
+  T* identity;
+};
+template <class T>
+[[loom::op("ref.null")]] Owner<T> null();
+template <class T>
+[[loom::op("ref.duplicate")]] Owner<T> duplicate(Owner<T>);
+template <class T>
+[[loom::op("ref.borrow")]] loom::ptr<T> borrow(Owner<T>);
+template <class T>
+[[loom::op("ref.release")]] void release(Owner<T>);
+}  // namespace primitive
+
+template <class T>
+class Ref {
+ public:
+  Ref() : owner_(primitive::null<T>()) {}
+  explicit Ref(primitive::Owner<T> owner) : owner_(owner) {}
+  Ref(const Ref& other) : owner_(primitive::duplicate(other.owner_)) {}
+  Ref(Ref&& other) : owner_(other.owner_) {
+    other.owner_ = primitive::null<T>();
+  }
+  ~Ref() { primitive::release(owner_); }
+  Ref& operator=(Ref other) {
+    auto next = other.owner_;
+    other.owner_ = primitive::null<T>();
+    auto previous = owner_;
+    owner_ = next;
+    primitive::release(previous);
+    return *this;
+  }
+  loom::ptr<T> get() const { return primitive::borrow(owner_); }
+
+ private:
+  primitive::Owner<T> owner_;
+};
+
+struct Handles {
+  Handles(primitive::Owner<Object> owner, loom::ptr<Object> pointer)
+      : owner(owner), pointer(pointer) {}
+  ~Handles() { primitive::release(owner); }
+
+  primitive::Owner<Object> owner;
+  loom::ptr<Object> pointer;
+};
+
+struct RefArray {
+  RefArray(primitive::Owner<Object> first,
+           primitive::Owner<Object> second)
+      : values{Ref<Object>(first), Ref<Object>(second)} {}
+
+  Ref<Object> values[2];
+};
+
+[[loom::import("lifetime", "read_pair")]]
+void read_pair(loom::ptr<Object> first, loom::ptr<Object> second);
+
+[[loom::noinline]] static void inspect(const Ref<Object>& first,
+                                       const Ref<Object>& second) {
+  read_pair(first.get(), second.get());
+}
+
+[[loom::noinline]] static void replace(Ref<Object>& first,
+                                       const Ref<Object>& second,
+                                       const Ref<Object>& replacement) {
+  auto saved = second.get();
+  first = replacement;
+  read_pair(second.get(), saved);
+}
+
+[[loom::noinline]] static Ref<Object> identity(Ref<Object> owner) {
+  return owner;
+}
+
+void route(primitive::Owner<Object> first,
+           primitive::Owner<Object> second) {
+  Ref<Object> owner(first);
+  Ref<Object> replacement(second);
+  inspect(owner, owner);
+  replace(owner, owner, replacement);
+  auto result = identity(static_cast<Ref<Object>&&>(owner));
+  read_pair(result.get(), replacement.get());
+}
+
+[[loom::noinline]] static void alias_handles(Handles& target,
+                                             const Handles& source) {
+  target.pointer = source.pointer;
+}
+
+void route_columns(primitive::Owner<Object> owner,
+                   loom::ptr<Object> pointer) {
+  Handles handles{owner, pointer};
+  alias_handles(handles, handles);
+}
+
+[[loom::noinline]] static void inspect_array(const RefArray& first,
+                                             const RefArray& second) {
+  read_pair(first.values[0].get(), second.values[1].get());
+}
+
+void route_array(primitive::Owner<Object> first,
+                 primitive::Owner<Object> second) {
+  RefArray owners(first, second);
+  inspect_array(owners, owners);
+}
+
+// ----
+type.decl import("lifetime", "object") @Object
+
+func.def public @route(%first: ref<@Object>, %second: ref<@Object>) {
+  %2 = func.call pure @Ref__Ref_value(%first) : (ref<@Object>) -> (ref<@Object>)
+  %owner_cell = view.alloca<private> : view<1xref<@Object>>
+  view.store %2, %owner_cell[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %2 : ref<@Object>
+  %replacement_owner_$4 = func.call pure @Ref__Ref_value(%second) : (ref<@Object>) -> (ref<@Object>)
+  func.call @inspect(%owner_cell, %owner_cell) : (view<1xref<@Object>>, view<1xref<@Object>>)
+  %replacement_owner_$5 = func.call @replace(%owner_cell, %owner_cell, %replacement_owner_$4) : (view<1xref<@Object>>, view<1xref<@Object>>, ref<@Object>) -> (ref<@Object>)
+  %6 = func.call @Ref__Ref_value_1(%owner_cell) : (view<1xref<@Object>>) -> (ref<@Object>)
+  %result_owner_$7 = func.call @identity(%6) : (ref<@Object>) -> (ref<@Object>)
+  %8, %result_owner_$9 = func.call @Ref__get_value(%result_owner_$7) : (ref<@Object>) -> (ptr<@Object>, ref<@Object>)
+  %10, %replacement_owner_$11 = func.call @Ref__get_value(%replacement_owner_$5) : (ref<@Object>) -> (ptr<@Object>, ref<@Object>)
+  func.call @read_pair(%8, %10) : (ptr<@Object>, ptr<@Object>)
+  func.call @Ref___Ref_value(%result_owner_$9) : (ref<@Object>)
+  func.call @Ref___Ref_value(%replacement_owner_$11) : (ref<@Object>)
+  %12 = view.load %owner_cell[0] : view<1xref<@Object>> -> ref<@Object>
+  %13 = ref.null : ref<@Object>
+  view.store %13, %owner_cell[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %13 : ref<@Object>
+  func.call @Ref___Ref_value(%12) : (ref<@Object>)
+  func.return
+}
+
+func.def public @route_columns(%owner: ref<@Object>, %pointer: ptr<@Object>) {
+  %16, %17 = func.call pure @Handles__Handles_value(%owner, %pointer) : (ref<@Object>, ptr<@Object>) -> (ref<@Object>, ptr<@Object>)
+  %handles_cell0 = view.alloca<private> : view<1xref<@Object>>
+  %handles_cell1 = view.alloca<private> : view<1xptr<@Object>>
+  view.store %16, %handles_cell0[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %16 : ref<@Object>
+  view.store %17, %handles_cell1[0] : ptr<@Object>, view<1xptr<@Object>>
+  func.call @alias_handles(%handles_cell0, %handles_cell1, %handles_cell0, %handles_cell1) : (view<1xref<@Object>>, view<1xptr<@Object>>, view<1xref<@Object>>, view<1xptr<@Object>>)
+  %20 = view.load %handles_cell0[0] : view<1xref<@Object>> -> ref<@Object>
+  %21 = view.load %handles_cell1[0] : view<1xptr<@Object>> -> ptr<@Object>
+  %22 = ref.null : ref<@Object>
+  view.store %22, %handles_cell0[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %22 : ref<@Object>
+  %23 = ref.null : ptr<@Object>
+  view.store %23, %handles_cell1[0] : ptr<@Object>, view<1xptr<@Object>>
+  func.call @Handles___Handles_value(%20) : (ref<@Object>)
+  func.return
+}
+
+func.def public @route_array(%first: ref<@Object>, %second: ref<@Object>) {
+  %26, %27 = func.call pure @RefArray__RefArray_value(%first, %second) : (ref<@Object>, ref<@Object>) -> (ref<@Object>, ref<@Object>)
+  %owners_cell0 = view.alloca<private> : view<1xref<@Object>>
+  %owners_cell1 = view.alloca<private> : view<1xref<@Object>>
+  view.store %26, %owners_cell0[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %26 : ref<@Object>
+  view.store %27, %owners_cell1[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %27 : ref<@Object>
+  func.call @inspect_array(%owners_cell0, %owners_cell1, %owners_cell0, %owners_cell1) : (view<1xref<@Object>>, view<1xref<@Object>>, view<1xref<@Object>>, view<1xref<@Object>>)
+  %30 = view.load %owners_cell0[0] : view<1xref<@Object>> -> ref<@Object>
+  %31 = view.load %owners_cell1[0] : view<1xref<@Object>> -> ref<@Object>
+  %32 = ref.null : ref<@Object>
+  view.store %32, %owners_cell0[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %32 : ref<@Object>
+  %33 = ref.null : ref<@Object>
+  view.store %33, %owners_cell1[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %33 : ref<@Object>
+  func.call @RefArray___RefArray_value(%30, %31) : (ref<@Object>, ref<@Object>)
+  func.return
+}
+
+func.def inline @Ref__Ref_value(%owner: ref<@Object>) -> (ref<@Object>) {
+  func.return %owner : ref<@Object>
+}
+
+func.def noinline @inspect(%first: view<1xref<@Object>>, %second: view<1xref<@Object>>) {
+  %38 = view.load %first[0] : view<1xref<@Object>> -> ref<@Object>
+  %39, %40 = func.call @Ref__get_value(%38) : (ref<@Object>) -> (ptr<@Object>, ref<@Object>)
+  view.store %40, %first[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %40 : ref<@Object>
+  %41 = view.load %second[0] : view<1xref<@Object>> -> ref<@Object>
+  %42, %43 = func.call @Ref__get_value(%41) : (ref<@Object>) -> (ptr<@Object>, ref<@Object>)
+  view.store %43, %second[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %43 : ref<@Object>
+  func.call @read_pair(%39, %42) : (ptr<@Object>, ptr<@Object>)
+  func.return
+}
+
+func.def noinline @replace(%first: view<1xref<@Object>>, %second: view<1xref<@Object>>, %replacement_owner_$46: ref<@Object>) -> (ref<@Object>) {
+  %48 = view.load %second[0] : view<1xref<@Object>> -> ref<@Object>
+  %saved, %50 = func.call @Ref__get_value(%48) : (ref<@Object>) -> (ptr<@Object>, ref<@Object>)
+  view.store %50, %second[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %50 : ref<@Object>
+  %51, %replacement_owner_$52 = func.call @Ref__Ref_value_2(%replacement_owner_$46) : (ref<@Object>) -> (ref<@Object>, ref<@Object>)
+  %53 = view.load %first[0] : view<1xref<@Object>> -> ref<@Object>
+  %54 = func.call @Ref__operator_assign_value(%53, %51) : (ref<@Object>, ref<@Object>) -> (ref<@Object>)
+  view.store %54, %first[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %54 : ref<@Object>
+  %55 = view.load %second[0] : view<1xref<@Object>> -> ref<@Object>
+  %56, %57 = func.call @Ref__get_value(%55) : (ref<@Object>) -> (ptr<@Object>, ref<@Object>)
+  view.store %57, %second[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %57 : ref<@Object>
+  func.call @read_pair(%56, %saved) : (ptr<@Object>, ptr<@Object>)
+  func.return %replacement_owner_$52 : ref<@Object>
+}
+
+func.def noinline @identity(%owner_owner_: ref<@Object>) -> (ref<@Object>) {
+  %owner_cell = view.alloca<private> : view<1xref<@Object>>
+  view.store %owner_owner_, %owner_cell[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %owner_owner_ : ref<@Object>
+  %61 = func.call @Ref__Ref_value_1(%owner_cell) : (view<1xref<@Object>>) -> (ref<@Object>)
+  %62 = view.load %owner_cell[0] : view<1xref<@Object>> -> ref<@Object>
+  %63 = ref.null : ref<@Object>
+  view.store %63, %owner_cell[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %63 : ref<@Object>
+  func.call @Ref___Ref_value(%62) : (ref<@Object>)
+  func.return %61 : ref<@Object>
+}
+
+func.def inline @Ref__Ref_value_1(%other: view<1xref<@Object>>) -> (ref<@Object>) {
+  %66 = view.load %other[0] : view<1xref<@Object>> -> ref<@Object>
+  %67 = ref.null : ref<@Object>
+  view.store %67, %other[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %67 : ref<@Object>
+  func.return %66 : ref<@Object>
+}
+
+func.def @Ref__get_value(%this_owner_: ref<@Object>) -> (ptr<@Object>, ref<@Object>) {
+  %71 = ref.borrow %this_owner_ : ref<@Object> -> ptr<@Object>
+  func.return %71, %this_owner_ : ptr<@Object>, ref<@Object>
+}
+
+func.def inline @Ref___Ref_value(%this_owner_: ref<@Object>) {
+  ref.release %this_owner_ : ref<@Object>
+  func.return
+}
+
+func.def inline @Handles__Handles_value(%owner: ref<@Object>, %pointer: ptr<@Object>) -> (ref<@Object>, ptr<@Object>) {
+  func.return %owner, %pointer : ref<@Object>, ptr<@Object>
+}
+
+func.def noinline @alias_handles(%target_cell0: view<1xref<@Object>>, %target_cell1: view<1xptr<@Object>>, %source_cell0: view<1xref<@Object>>, %source_cell1: view<1xptr<@Object>>) {
+  %81 = view.load %source_cell1[0] : view<1xptr<@Object>> -> ptr<@Object>
+  view.store %81, %target_cell1[0] : ptr<@Object>, view<1xptr<@Object>>
+  func.return
+}
+
+func.def inline @Handles___Handles_value(%this_owner: ref<@Object>) {
+  ref.release %this_owner : ref<@Object>
+  func.return
+}
+
+func.def inline @RefArray__RefArray_value(%first: ref<@Object>, %second: ref<@Object>) -> (ref<@Object>, ref<@Object>) {
+  %87 = func.call pure @Ref__Ref_value(%first) : (ref<@Object>) -> (ref<@Object>)
+  %88 = func.call pure @Ref__Ref_value(%second) : (ref<@Object>) -> (ref<@Object>)
+  func.return %87, %88 : ref<@Object>, ref<@Object>
+}
+
+func.def noinline @inspect_array(%first_cell0: view<1xref<@Object>>, %first_cell1: view<1xref<@Object>>, %second_cell0: view<1xref<@Object>>, %second_cell1: view<1xref<@Object>>) {
+  %93 = scalar.constant 0 : i32
+  %94 = view.load %first_cell0[0] : view<1xref<@Object>> -> ref<@Object>
+  %95, %96 = func.call @Ref__get_value(%94) : (ref<@Object>) -> (ptr<@Object>, ref<@Object>)
+  view.store %96, %first_cell0[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %96 : ref<@Object>
+  %97 = scalar.constant 1 : i32
+  %98 = view.load %second_cell1[0] : view<1xref<@Object>> -> ref<@Object>
+  %99, %100 = func.call @Ref__get_value(%98) : (ref<@Object>) -> (ptr<@Object>, ref<@Object>)
+  view.store %100, %second_cell1[0] : ref<@Object>, view<1xref<@Object>>
+  ref.release %100 : ref<@Object>
+  func.call @read_pair(%95, %99) : (ptr<@Object>, ptr<@Object>)
+  func.return
+}
+
+func.def inline @RefArray___RefArray_value(%this_values_0_owner_: ref<@Object>, %this_values_1_owner_: ref<@Object>) {
+  func.call @Ref___Ref_value(%this_values_1_owner_) : (ref<@Object>)
+  func.call @Ref___Ref_value(%this_values_0_owner_) : (ref<@Object>)
+  func.return
+}
+
+func.def inline @Ref__Ref_value_2(%other_owner_: ref<@Object>) -> (ref<@Object>, ref<@Object>) {
+  %106 = ref.duplicate %other_owner_ : ref<@Object>
+  func.return %106, %other_owner_ : ref<@Object>, ref<@Object>
+}
+
+func.def @Ref__operator_assign_value(%this_owner_: ref<@Object>, %other_owner_$108: ref<@Object>) -> (ref<@Object>) {
+  %other_owner_$110 = ref.null : ref<@Object>
+  ref.release %this_owner_ : ref<@Object>
+  func.call @Ref___Ref_value(%other_owner_$110) : (ref<@Object>)
+  func.return %other_owner_$108 : ref<@Object>
+}
+
+func.decl import("lifetime", "read_pair") @read_pair(%111: ptr<@Object>, %112: ptr<@Object>)
+
+// ====
+// RUN: emit vm-object-lifetime
+#include <loomcxx/object.h>
+
+struct [[loom::import("lifetime", "object")]] Object;
+
+namespace primitive {
+template <class T>
+struct [[loom::type("ref")]] Owner {
+  T* identity;
+};
+template <class T>
+[[loom::op("ref.null")]] Owner<T> null();
+template <class T>
+[[loom::op("ref.duplicate")]] Owner<T> duplicate(Owner<T>);
+template <class T>
+[[loom::op("ref.borrow")]] loom::ptr<T> borrow(Owner<T>);
+template <class T>
+[[loom::op("ref.release")]] void release(Owner<T>);
+}  // namespace primitive
+
+template <class T>
+class Ref {
+ public:
+  explicit Ref(primitive::Owner<T> owner) : owner_(owner) {}
+  Ref(const Ref& other) : owner_(primitive::duplicate(other.owner_)) {}
+  Ref(Ref&& other) : owner_(other.owner_) {
+    other.owner_ = primitive::null<T>();
+  }
+  ~Ref() { primitive::release(owner_); }
+  // REMARK@+2: DOMINANCE/021 "pointer protection acquired here"
+  // REMARK@+1: DOMINANCE/021 "pointer protection acquired here"
+  loom::ptr<T> get() const { return primitive::borrow(owner_); }
+
+ private:
+  primitive::Owner<T> owner_;
+};
+
+struct Created {
+  primitive::Owner<Object> owner;
+  loom::ptr<Object> borrow;
+};
+
+struct Handles {
+  Handles(primitive::Owner<Object> owner, loom::ptr<Object> pointer)
+      : owner(owner), pointer(pointer) {}
+  ~Handles() { primitive::release(owner); }
+
+  primitive::Owner<Object> owner;
+  loom::ptr<Object> pointer;
+};
+
+[[loom::import("lifetime", "create")]] Created create(unsigned identity);
+[[loom::import("lifetime", "read")]] void read(loom::ptr<Object> value);
+[[loom::import("lifetime", "fail")]] void fail();
+
+[[loom::noinline]] static void inspect(const Ref<Object>& first,
+                                       const Ref<Object>& second) {
+  read(first.get());
+  read(second.get());
+}
+
+[[loom::noinline]] static Ref<Object> identity(Ref<Object> owner) {
+  return owner;
+}
+
+[[loom::noinline]] static void alias_handles(Handles& target,
+                                             const Handles& source) {
+  target.pointer = source.pointer;
+}
+
+void run() {
+  auto created = create(1);
+  Handles handles(primitive::duplicate(created.owner), created.borrow);
+  alias_handles(handles, handles);
+  read(handles.pointer);
+  Ref<Object> owner(created.owner);
+  inspect(owner, owner);
+  auto result = identity(static_cast<Ref<Object>&&>(owner));
+  read(result.get());
+  fail();
+}
+
+// ----
+create 1
+read 1
+read 1
+read 1
+read 1
+fail 1
+destroy 1
+ABORTED 0
+retired 0

@@ -33,6 +33,7 @@
 #include "loom/import/cxx/binding/kernel_launch.h"
 #include "loom/import/cxx/binding/launch.h"
 #include "loom/import/cxx/binding/numeric_conversion.h"
+#include "loom/import/cxx/binding/object.h"
 #include "loom/import/cxx/binding/pipeline.h"
 #include "loom/import/cxx/binding/pipeline_contracts.h"
 #include "loom/import/cxx/binding/refinement.h"
@@ -104,7 +105,7 @@ class Intrinsics {
       CheckIntrinsic, KernelLaunchIntrinsic, CommandLaunchIntrinsic,
       CommandParameterIntrinsic, PipelineMemoryIntrinsic,
       PipelineComposeIntrinsic, AddressIntrinsic, NumericConversionIntrinsic,
-      ExponentIntrinsic>;
+      ExponentIntrinsic, ObjectIntrinsic>;
 
   Intrinsics(cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
              Scalars& scalars, Vectors& vectors, Locations& locations,

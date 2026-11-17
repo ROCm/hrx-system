@@ -23,10 +23,18 @@ unsigned entry(unsigned value) { return inspect(Identity{value}); }
 
 // ====
 struct Identity { unsigned value; ~Identity() {} };
+// ERROR@+1: LOWERING/059 "nontrivial external results require reference-only source values"
 Identity external(unsigned);
 unsigned entry(unsigned value) {
-  // ERROR@+1: LOWERING/059 "nontrivial object transport requires a source function definition"
   return external(value).value;
+}
+
+// ====
+struct Identity { unsigned value; ~Identity() {} };
+unsigned external(Identity value);
+unsigned entry(unsigned value) {
+  // ERROR@+1: LOWERING/059 "nontrivial object inputs require a source function definition"
+  return external(Identity{value});
 }
 
 // ====

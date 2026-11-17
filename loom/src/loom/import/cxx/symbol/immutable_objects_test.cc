@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 
+#include "loom/import/cxx/binding/imports.h"
 #include "loom/import/cxx/control/analysis.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/value/builder_test.h"
@@ -215,6 +216,7 @@ TEST_F(ImmutableObjectsTest, RetainsLocalIdentityAndSourceLinkage) {
   )"),
                 IREE_SV("local_immutable_objects.cxx"), options());
   Types types(source.unit(), source.diagnostics());
+  Imports imports(source.unit(), source.diagnostics());
   Locations locations(source.unit(), source.diagnostics(), module_);
   SymbolNames names(source.unit(), source.diagnostics());
   ImmutableObjects objects(source.unit(), source.diagnostics(), locations,
@@ -229,7 +231,7 @@ TEST_F(ImmutableObjectsTest, RetainsLocalIdentityAndSourceLinkage) {
     auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
         definition->functionBody);
     ASSERT_NE(body, nullptr);
-    ControlFlow control(source.unit(), source.diagnostics(), types,
+    ControlFlow control(source.unit(), source.diagnostics(), types, imports,
                         body->statement, definition->symbol);
     objects.retain_locals(definition->symbol, control.static_locals());
     objects.retain_locals(definition->symbol, control.static_locals());

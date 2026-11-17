@@ -102,13 +102,13 @@ unsigned total(loom::type::index selector);
 unsigned total(loom::type::index selector) {
   switch (static_cast<long long>(selector)) {
     case 0ll: {
-      if (1) {
+      if (true) {
         return 11u;
       }
       break;
     }
     default: {
-      if (1) {
+      if (true) {
         return 22u;
       }
       break;

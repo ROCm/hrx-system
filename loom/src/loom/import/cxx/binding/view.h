@@ -60,6 +60,7 @@ class ViewIntrinsic {
     Alloca,
     BufferView,
     Subview,
+    AsConst,
     Bitcast,
     Dim,
     Load,

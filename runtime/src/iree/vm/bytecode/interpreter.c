@@ -1504,9 +1504,9 @@ iree_vm_bytecode_dispatch_span_ref_load: {
       state, values[record->address_v8], IREE_VM_SPAN_REF_STRIDE, true,
       IREE_VM_SPAN_ACCESS_READ, &data, &region));
   const iree_vm_ref_t source = *(const iree_vm_ref_t*)data;
-  if ((region->element_kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR &&
-       !(region->access & IREE_VM_SPAN_ACCESS_WRITE)) ||
-      iree_vm_ref_is_borrowed_only(source)) {
+  // Read permission constrains this span, not other aliases of its cells.
+  // Preserve protection when a writable alias can replace the stored handle.
+  if (iree_vm_ref_is_borrowed_only(source)) {
     iree_vm_bytecode_ref_borrow(&refs[record->destination_r8], source);
   } else {
     IREE_RETURN_IF_ERROR(

@@ -210,7 +210,8 @@ class CxxRenderContext:
         self.uses_numeric_conversion = False
         self.uses_predicate_functions = False
         self.signed_values = self._analyze_signed_values()
-        self.types = CxxTypes(module, self.signed_values)
+        self.reference_type_names: dict[str, str] = {}
+        self.types = CxxTypes(module, self.signed_values, self.reference_type_names)
         self.view_access: ViewAccessPlan | None = None
         self.buffer_access: BufferAccessPlan | None = None
         self.buffer_projection: BufferProjection | None = None
@@ -252,6 +253,7 @@ class CxxRenderContext:
         self.target_names: dict[str, str] = {}
         self.target_type_names: dict[str, str] = {}
         self.function_names: dict[str, str] = {}
+        self.object_declarations: list[str] = []
         self.kernel_names: dict[str, str] = {}
         self.function_buffer_elements: dict[
             BufferProjection, tuple[str | None, ...]
@@ -1051,6 +1053,8 @@ class CxxRenderContext:
         if isinstance(value, int):
             if isinstance(literal_type, ScalarType):
                 name = repr(literal_type)
+                if name == "i1":
+                    return "true" if value else "false"
                 if name == "index":
                     return f"loom::type::index{{{value}}}"
                 if name == "offset":

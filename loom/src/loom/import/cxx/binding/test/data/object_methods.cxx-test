@@ -1,0 +1,58 @@
+// RUN: roundtrip
+#include <loomcxx/object.h>
+
+struct [[loom::import("hal", "buffer")]] Buffer;
+
+template <>
+class loom::protocol<Buffer> {
+ public:
+  [[loom::import("hal", "buffer.length")]]
+  unsigned length(unsigned bias) const;
+};
+
+[[loom::import("hal", "buffer.create")]]
+loom::ref<Buffer> create_buffer();
+
+unsigned borrowed(loom::ptr<Buffer> buffer, unsigned bias) {
+  return buffer->length(bias);
+}
+
+unsigned owned(unsigned bias) {
+  auto buffer = create_buffer();
+  return buffer->length(bias);
+}
+
+// ----
+type.decl import("hal", "buffer") @Buffer
+
+func.def public @borrowed(%buffer: ptr<@Buffer>, %bias: i32) -> (i32) {
+  %3 = func.call @hal.buffer.length(%buffer, %bias) : (ptr<@Buffer>, i32) -> (i32)
+  func.return %3 : i32
+}
+
+func.def public @owned(%bias: i32) -> (i32) {
+  %buffer_owner_$6 = func.call @create_buffer() : () -> (ref<@Buffer>)
+  %7, %buffer_owner_$8 = func.call @loom__ref__operator_arrow_value(%buffer_owner_$6) : (ref<@Buffer>) -> (ptr<@Buffer>, ref<@Buffer>)
+  %9 = func.call @hal.buffer.length(%7, %bias) : (ptr<@Buffer>, i32) -> (i32)
+  func.call @loom__ref___ref_value(%buffer_owner_$8) : (ref<@Buffer>)
+  func.return %9 : i32
+}
+
+func.def inline @loom__ref__operator_arrow_value(%this_owner_: ref<@Buffer>) -> (ptr<@Buffer>, ref<@Buffer>) {
+  %13, %owner_ = func.call @loom__ref__get_value(%this_owner_) : (ref<@Buffer>) -> (ptr<@Buffer>, ref<@Buffer>)
+  func.return %13, %owner_ : ptr<@Buffer>, ref<@Buffer>
+}
+
+func.def inline @loom__ref___ref_value(%this_owner_: ref<@Buffer>) {
+  ref.release %this_owner_ : ref<@Buffer>
+  func.return
+}
+
+func.def inline @loom__ref__get_value(%this_owner_: ref<@Buffer>) -> (ptr<@Buffer>, ref<@Buffer>) {
+  %19 = ref.borrow %this_owner_ : ref<@Buffer> -> ptr<@Buffer>
+  func.return %19, %this_owner_ : ptr<@Buffer>, ref<@Buffer>
+}
+
+func.decl import("hal", "buffer.length") @hal.buffer.length(%20: ptr<@Buffer>, %21: i32) -> (i32)
+
+func.decl import("hal", "buffer.create") @create_buffer() -> (ref<@Buffer>)
