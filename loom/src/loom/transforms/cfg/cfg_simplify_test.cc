@@ -188,39 +188,5 @@ test.split_func @target() {
             7);
 }
 
-TEST_F(CFGSimplifyFactsTest, ChangedControlInvalidatesFacts) {
-  Parse(IREE_SV(R"(
-test.func @choose() -> (i32) {
-  %condition = scalar.constant true : i1
-  cfg.cond_br %condition, ^left, ^right
-^left:
-  %left = scalar.constant 7 : i32
-  test.yield %left : i32
-^right:
-  %right = scalar.constant 11 : i32
-  test.yield %right : i32
-}
-)"));
-  ASSERT_NE(module_, nullptr);
-  bool changed = false;
-  IREE_ASSERT_OK(Simplify(&changed));
-  ASSERT_TRUE(changed);
-  EXPECT_EQ(owner_.active_scope.kind, LOOM_PASS_VALUE_FACT_SCOPE_NONE);
-  const auto recomputations = counts_.recomputation_count;
-  loom_value_fact_table_t* facts = nullptr;
-  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
-      &owner_, module_, loom_pass_value_fact_scope_function(function_),
-      &facts));
-  EXPECT_EQ(counts_.recomputation_count, recomputations + 1);
-  auto* body = loom_func_like_body(function_);
-  ASSERT_EQ(body->block_count, 1);
-  const auto value =
-      loom_op_operands(loom_region_entry_block(body)->last_op)[0];
-  int64_t constant = 0;
-  ASSERT_TRUE(loom_value_facts_as_exact_i64(
-      loom_value_fact_table_lookup(facts, value), &constant));
-  EXPECT_EQ(constant, 7);
-}
-
 }  // namespace
 }  // namespace loom

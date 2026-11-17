@@ -1932,7 +1932,7 @@ static iree_status_t loom_cfg_simplify_function_with_statistics(
 
   *out_changed = any_changed;
   loom_rewriter_deinitialize(&rewriter);
-  if (any_changed || !iree_status_is_ok(status)) {
+  if (!iree_status_is_ok(status)) {
     loom_pass_value_fact_owner_invalidate(value_facts);
   }
   loom_local_value_domain_release(&state.value_domain);
@@ -1961,5 +1961,6 @@ iree_status_t loom_cfg_simplify_run(loom_pass_t* pass, loom_module_t* module,
   if (changed) {
     loom_pass_mark_changed(pass);
   }
+  pass->preserved_analyses |= LOOM_PASS_ANALYSIS_VALUE_FACTS;
   return iree_ok_status();
 }

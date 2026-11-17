@@ -1,4 +1,4 @@
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // A returned identity must remain downstream of its ownership transfer.
 // A payload-equality proof alone cannot bypass that boundary.
@@ -33,7 +33,7 @@ func.def @forward_ref(%input: ref<@Object>) -> (ref<@Object>) {
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // A returned identity must remain downstream of its ownership transfer.
 // A payload-equality proof alone cannot bypass that boundary.

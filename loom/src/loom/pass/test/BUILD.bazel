@@ -50,6 +50,7 @@ loom_cc_library(
         "//loom/src/loom/pass:value_facts",
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
     ],
 )

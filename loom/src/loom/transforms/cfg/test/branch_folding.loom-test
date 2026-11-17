@@ -1,4 +1,4 @@
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Constant conditions and equal destinations preserve the live side effects.
 func.def @constant_batch(%condition: i1, %input: i32) -> (i32) {
@@ -34,7 +34,7 @@ func.def @constant_batch(%condition: i1, %input: i32) -> (i32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // The entry condition proves all three later branches before any edge changes.
 // The side effects require executing each block instead of threading around it.
@@ -70,7 +70,7 @@ func.def @path_batch(%condition: i1, %input: i32) -> (i32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Opposite branch proofs can fold together without escaping through their join.
 func.def @joined_conditions(%condition: i1, %left: i32, %right: i32) -> (i32) {
@@ -120,7 +120,7 @@ func.def @joined_conditions(%condition: i1, %left: i32, %right: i32) -> (i32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Folding several branches in a cycle retains its backedge and carried values.
 func.def @loop_batch(%count: i32, %input: i32) -> (i32) {

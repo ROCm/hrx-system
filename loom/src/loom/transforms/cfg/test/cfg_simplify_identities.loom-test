@@ -1,4 +1,4 @@
-// RUN: with-low-asm pass cfg-simplify
+// RUN: with-low-asm pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Each iteration consumes its own block argument, not the invariant source.
 test.target<low_core> @target
@@ -32,7 +32,7 @@ low.func.def target<test.low.core>(@target) @retains_consumed_loop_argument(%rep
 
 // Equal incoming values still give the two arguments independent ownership.
 // A read-only argument must not be folded into its consumed sibling.
-// RUN: with-low-asm pass cfg-simplify
+// RUN: with-low-asm pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 test.target<low_core> @target
 
 low.func.def target<test.low.core>(@target) @retains_independent_equal_arguments(%choose: reg<test.i32>, %left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.i32>) asm {
@@ -66,7 +66,7 @@ low.func.def target<test.low.core>(@target) @retains_independent_equal_arguments
 
 // The required alias has no direct consuming uses, but its source does.
 // Capturing it through a block argument keeps that observation independent.
-// RUN: with-low-asm pass cfg-simplify
+// RUN: with-low-asm pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 test.target<low_core> @target
 
 low.func.def target<test.low.core>(@target) @retains_alias_capture(%seed: reg<test.i32>) -> (reg<test.i32>) asm {
@@ -120,7 +120,7 @@ low.func.def target<test.low.core>(@test_target) @compacts_cyclic_equal_argument
 
 // ====
 
-// RUN: with-low-asm pass cfg-simplify
+// RUN: with-low-asm pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Several external paths may select different values while preserving equality
 // between all three columns on every path and around the feedback edge.
@@ -163,7 +163,7 @@ low.func.def target<test.low.core>(@test_target) @compacts_cyclic_equal_argument
 
 // ====
 
-// RUN: with-low-asm pass cfg-simplify
+// RUN: with-low-asm pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Distinct initial values keep rotated columns separate.
 test.target<low_core> @test_target
@@ -181,7 +181,7 @@ low.func.def target<test.low.core>(@test_target) @preserves_rotated_distinct_ini
 
 // ====
 
-// RUN: with-low-asm pass cfg-simplify
+// RUN: with-low-asm pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Equal initial values do not hide a distinct external transition.
 test.target<low_core> @test_target
@@ -199,7 +199,7 @@ low.func.def target<test.low.core>(@test_target) @preserves_distinct_external_tr
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Dependent view types follow their correlated layout argument replacement.
 // Different external paths keep one physical layout/view pair at the join.
@@ -238,7 +238,7 @@ func.def @compacts_cyclic_dependent_arguments(%select: i1, %again: i1, %left_lay
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // A dead carrier may precede its dead provider in the block signature. The
 // complete dependent set is removed while an unrelated live argument keeps
@@ -266,7 +266,7 @@ func.def @removes_closed_forward_dependent_set(%choose: i1, %left_layout: encodi
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // A live carrier keeps its otherwise-unused provider while an independent
 // dead argument is still removed from the same signature.
@@ -295,7 +295,7 @@ func.def @retains_provider_of_live_carrier(%choose: i1, %left_layout: encoding<l
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Repeated callback children share a canonical type. Their external dimension
 // is unaffected by comparing the carried arguments with one another.
@@ -332,7 +332,7 @@ func.def @compacts_cyclic_callback_arguments(%select: i1, %again: i1, %width: in
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Replacing an earlier loop argument also changes the representative used by
 // the later loop. The returned recurrence remains observable, and no
@@ -392,7 +392,7 @@ func.def @forwards_replaced_identity_across_nested_loops(%n: i32, %inner_again: 
 
 // ====
 
-// RUN: with-low-asm pass cfg-simplify
+// RUN: with-low-asm pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // The same lifetime contract applies to physical register values.
 test.target<low_core> @test_target
@@ -454,7 +454,7 @@ low.func.def target<test.low.core>(@test_target) @forwards_low_identity_across_n
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Replacements update captures and dependent view types together. The outer
 // loop selects between distinct layout/view pairs, so only forwarded arguments

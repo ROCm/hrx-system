@@ -1,4 +1,4 @@
-// RUN: with-low-asm pass cfg-simplify
+// RUN: with-low-asm pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // An unknown external predicate participates in the loop merge. The constant
 // backedge does not prove that the first iteration is skipped.
@@ -30,7 +30,7 @@ low.func.def target<test.low.core>(@test_target) @external_loop_input(%again: re
 }
 
 // ====
-// RUN: with-low-asm pass cfg-simplify
+// RUN: with-low-asm pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // An unused cursor update can leave a diamond after inlining. Both edges
 // reach the same return and the predicate must disappear with the diamond.
@@ -57,7 +57,7 @@ low.func.def target<test.low.core>(@test_target) @unused_cursor(%wrap: reg<test.
 }
 
 // ====
-// RUN: with-low-asm pass cfg-simplify
+// RUN: with-low-asm pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // A repeated predicate is known on each incoming path. The second test must
 // disappear without making either external return unconditional.
@@ -89,7 +89,7 @@ low.func.def target<test.low.core>(@test_target) @path_predicates(%choose: reg<t
 }
 
 // ====
-// RUN: with-low-asm pass cfg-simplify
+// RUN: with-low-asm pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // A forwarded payload must remain on its conditional edge. Otherwise a
 // forwarding transform would change which carried value enters the loop.
@@ -131,7 +131,7 @@ low.func.def target<test.low.core>(@test_target) @carried_value(%choose: reg<tes
 }
 
 // ====
-// RUN: with-low-asm pass cfg-simplify
+// RUN: with-low-asm pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Fold a batch of exact register predicates without changing the returned
 // value or removing the externally controlled loop.
@@ -163,7 +163,7 @@ low.func.def target<test.low.core>(@test_target) @constant_predicates(%again: re
 }
 
 // ====
-// RUN: with-low-asm pass cfg-simplify
+// RUN: with-low-asm pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // A forwarding cycle with several incoming edges retains one self-loop.
 test.target<low_core> @test_target

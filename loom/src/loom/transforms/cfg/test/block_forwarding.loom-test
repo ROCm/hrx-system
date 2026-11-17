@@ -1,4 +1,4 @@
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // All three forwarding blocks have conditional or shared incoming edges.
 // Resolving their common tail preserves the observable branch prefixes.
@@ -42,7 +42,7 @@ func.def @shared_forwarding_tail(%first: i1, %second: i1, %third: i1, %value: i3
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // A direct predecessor takes the payload; a conditional predecessor must keep
 // the block that supplies it. The payload retains a dependent layout type.
@@ -82,7 +82,7 @@ func.def @conditional_payload_boundary(%choose: i1, %pick: i1, %layout: encoding
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Odd cycles must terminate simplification with one self-loop, rather than
 // repeatedly rotating the forwarding edges around the cycle.
@@ -110,7 +110,7 @@ func.def @odd_forwarding_cycle(%enter: i1, %value: i32) -> (i32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // A forwarding cycle preserves effects in its header. Simplification keeps
 // the function entry outside the loop.
@@ -134,7 +134,7 @@ func.def @effectful_cycle() {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // A structured diamond exits through one gateway before entering the loop.
 // Keep that gateway so forwarding does not manufacture two external entries.
@@ -174,7 +174,7 @@ func.def @preserves_unique_loop_entry(%choose: i1, %again: i1, %initial: i32) ->
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Two body paths reconverge before the backedge. Keep their latch gateway so
 // the loop retains one backedge instead of acquiring one from each body path.
@@ -220,7 +220,7 @@ func.def @preserves_unique_loop_backedge(%choose: i1, %again: i1, %initial: i32)
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Every cycle member has an external incoming edge, so chain fusion cannot
 // remove a member before the forwarding resolver sees the whole odd cycle.
@@ -244,7 +244,7 @@ func.def @multiple_entry_odd_cycle(%first_entry: i1, %second_entry: i1) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 func.def @shared_tail(%first: i1, %second: i1, %third: i1, %value: i32) -> (i32) {
   cfg.cond_br %first, ^shortcut_first, ^dispatch_second

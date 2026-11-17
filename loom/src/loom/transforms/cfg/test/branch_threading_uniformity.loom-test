@@ -1,4 +1,4 @@
-// RUN: pass scf-to-cfg,cfg-simplify,cfg-converge,kernel-synchronization-legality
+// RUN: pass scf-to-cfg,cfg-simplify,test.acquire-value-facts{expect=reuse},cfg-converge,kernel-synchronization-legality
 
 // Partially active writer lanes reconverge before whole-wave publication.
 kernel.def @subgroup_publication() {
@@ -52,7 +52,7 @@ kernel.def @subgroup_publication() {
 
 // ====
 
-// RUN: pass scf-to-cfg,cfg-simplify,cfg-converge,kernel-synchronization-legality
+// RUN: pass scf-to-cfg,cfg-simplify,test.acquire-value-facts{expect=reuse},cfg-converge,kernel-synchronization-legality
 
 // A known-false incoming edge cannot skip subgroup reconvergence either.
 kernel.def @subgroup_false_edge() {
@@ -111,7 +111,7 @@ kernel.def @subgroup_false_edge() {
 
 // ====
 
-// RUN: pass scf-to-cfg,cfg-simplify,cfg-converge,kernel-synchronization-legality
+// RUN: pass scf-to-cfg,cfg-simplify,test.acquire-value-facts{expect=reuse},cfg-converge,kernel-synchronization-legality
 
 // Whole-wave writers still reconverge before a workgroup-wide decision.
 kernel.def @workgroup_publication() {
@@ -165,7 +165,7 @@ kernel.def @workgroup_publication() {
 
 // ====
 
-// RUN: pass scf-to-cfg,cfg-simplify,cfg-converge
+// RUN: pass scf-to-cfg,cfg-simplify,test.acquire-value-facts{expect=reuse},cfg-converge
 
 // Cluster-uniform decisions retain the same boundary across selected groups.
 kernel.def @cluster_decision() {
@@ -219,7 +219,7 @@ kernel.def @cluster_decision() {
 
 // ====
 
-// RUN: pass scf-to-cfg,cfg-simplify,cfg-converge
+// RUN: pass scf-to-cfg,cfg-simplify,test.acquire-value-facts{expect=reuse},cfg-converge
 
 // Equally uniform predecessors can still bypass a proven decision.
 kernel.def @uniform_predecessor() {
@@ -272,7 +272,7 @@ kernel.def @uniform_predecessor() {
 }
 
 // ====
-// RUN: pass scf-to-cfg,cfg-simplify,cfg-converge
+// RUN: pass scf-to-cfg,cfg-simplify,test.acquire-value-facts{expect=reuse},cfg-converge
 
 // A uniform selector retains its control owner under partial participation.
 // Both known-false and known-true incoming paths must reach that decision

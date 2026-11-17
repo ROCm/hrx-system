@@ -1,4 +1,4 @@
-// RUN: pass scf-to-cfg,cfg-simplify
+// RUN: pass scf-to-cfg,cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 func.def @folds_lowered_switch_constant_case(%a: i32, %b: i32) -> (i32) {
   %selector = index.constant 2 : index

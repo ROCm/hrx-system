@@ -1,4 +1,4 @@
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Each selected dispatch removes its redundant comparison and failure edge.
 func.def @independent_conditional_edges(%x: i32, %y: i32, %value: i32) -> (i32) {
@@ -67,7 +67,7 @@ func.def @independent_conditional_edges(%x: i32, %y: i32, %value: i32) -> (i32) 
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Each selected dispatch removes its redundant comparison and failure edge.
 func.def @independent_payload_edges(%x: i32, %y: i32, %value: i32) -> (i32) {
@@ -142,7 +142,7 @@ func.def @independent_payload_edges(%x: i32, %y: i32, %value: i32) -> (i32) {
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Both successor slots of the same conditional branch retain their edge facts.
 func.def @opposite_edge_facts(%x: i32, %y: i32, %value: i32) -> (i32) {
@@ -172,7 +172,7 @@ func.def @opposite_edge_facts(%x: i32, %y: i32, %value: i32) -> (i32) {
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // A selected destination survives when another edit bypasses that block.
 func.def @overlapping_bypasses(%x: i32, %y: i32, %value: i32) -> (i32) {
@@ -200,7 +200,7 @@ func.def @overlapping_bypasses(%x: i32, %y: i32, %value: i32) -> (i32) {
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Opposite edge facts select different destinations while both payloads disappear.
 func.def @opposite_payload_facts(%x: i32, %y: i32, %value: i32) -> (i32) {
@@ -231,7 +231,7 @@ func.def @opposite_payload_facts(%x: i32, %y: i32, %value: i32) -> (i32) {
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Thread the loop-body dispatch while preserving the changing header argument.
 func.def @loop_body_dispatch(%x: i32, %y: i32) -> (i32) {
@@ -265,7 +265,7 @@ func.def @loop_body_dispatch(%x: i32, %y: i32) -> (i32) {
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // A bypass to the same block makes no progress; branch folding owns the loop.
 func.def @repeat_while_selected(%condition: i1) {
