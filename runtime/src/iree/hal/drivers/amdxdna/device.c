@@ -111,6 +111,14 @@ static void iree_hal_amdxdna_device_deinitialize(
   device->context_cache = NULL;
 }
 
+static const iree_hal_amdxdna_timeout_recovery_ops_t
+    iree_hal_amdxdna_timeout_recovery_ops = {
+        iree_hal_amdxdna_completion_queue_note_timeout_recovery,
+        iree_hal_amdxdna_completion_queue_arm_recovery_closer,
+        iree_hal_amdxdna_completion_queue_disarm_recovery_closer,
+        iree_hal_amdxdna_completion_queue_note_closer_completed,
+};
+
 static iree_status_t iree_hal_amdxdna_device_initialize_hal_resources(
     iree_hal_amdxdna_device* device) {
   IREE_ASSERT_ARGUMENT(device);
@@ -121,8 +129,12 @@ static iree_status_t iree_hal_amdxdna_device_initialize_hal_resources(
       &device->block_pool, device->host_allocator, &device->async_queue));
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_completion_queue_create(
       device->host_allocator, &device->completion_queue));
+  // The function pointers live in this archive, next to the completion queue.
+  // Publishing them lets the native library call back without linking this
+  // archive a second time after the native objects.
   iree_hal_amdxdna_native_device_c_set_completion_queue(
-      device->native_device, device->completion_queue);
+      device->native_device, device->completion_queue,
+      &iree_hal_amdxdna_timeout_recovery_ops);
   return iree_ok_status();
 }
 
@@ -1786,7 +1798,7 @@ static void iree_hal_amdxdna_device_destroy(iree_hal_device_t* base_device) {
   }
   if (device->native_device) {
     iree_hal_amdxdna_native_device_c_set_completion_queue(device->native_device,
-                                                         NULL);
+                                                         NULL, NULL);
   }
   if (device->completion_queue) {
     iree_hal_amdxdna_completion_queue_destroy(device->completion_queue);

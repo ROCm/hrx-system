@@ -23,6 +23,18 @@ typedef struct iree_hal_amdxdna_native_device_t
     iree_hal_amdxdna_native_device_t;
 typedef struct iree_hal_amdxdna_completion_queue_t
     iree_hal_amdxdna_completion_queue_t;
+// Implemented next to the completion queue and installed with it. The native
+// library calls through this table, so it does not link back to the archive
+// that publishes the queue.
+typedef struct iree_hal_amdxdna_timeout_recovery_ops_t {
+  void (*note_timeout_recovery)(iree_hal_amdxdna_completion_queue_t* queue);
+  bool (*arm_recovery_closer)(iree_hal_amdxdna_completion_queue_t* queue,
+                              uint64_t* out_generation);
+  void (*disarm_recovery_closer)(iree_hal_amdxdna_completion_queue_t* queue,
+                                 uint64_t generation);
+  void (*note_closer_completed)(iree_hal_amdxdna_completion_queue_t* queue,
+                                uint64_t generation);
+} iree_hal_amdxdna_timeout_recovery_ops_t;
 typedef struct iree_hal_amdxdna_native_buffer_t
     iree_hal_amdxdna_native_buffer_t;
 typedef struct iree_hal_amdxdna_native_context_ref_t
@@ -317,11 +329,13 @@ iree_status_t iree_hal_amdxdna_native_device_c_set_power_mode(
     iree_hal_amdxdna_native_device_t* device,
     iree_hal_amdxdna_native_c_power_mode_t power_mode);
 
-// Linux KMQ records timeout recovery on this queue. NULL clears it. Windows
-// keeps the pointer unused; it does not recreate hardware contexts.
+// Linux KMQ records timeout recovery on this queue and calls |timeout_recovery|
+// for the window. NULL clears both. Windows keeps the pointers unused; it does
+// not recreate hardware contexts.
 void iree_hal_amdxdna_native_device_c_set_completion_queue(
     iree_hal_amdxdna_native_device_t* device,
-    iree_hal_amdxdna_completion_queue_t* completion_queue);
+    iree_hal_amdxdna_completion_queue_t* completion_queue,
+    const iree_hal_amdxdna_timeout_recovery_ops_t* timeout_recovery);
 
 iree_status_t iree_hal_amdxdna_native_device_c_query_caps(
     iree_hal_amdxdna_native_device_t* device,

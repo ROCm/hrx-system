@@ -21,7 +21,6 @@
 #include <vector>
 
 #include "iree/base/internal/atomics.h"
-#include "iree/hal/drivers/amdxdna/completion_queue.h"
 #include "iree/hal/drivers/amdxdna/native.h"
 #include "iree/hal/drivers/amdxdna/native_linux_kmq_internal.h"
 #include "iree/hal/drivers/amdxdna/shim/linux/kmq/amdxdna_accel.h"
@@ -46,9 +45,11 @@ struct iree_hal_amdxdna_native_device_t {
   // creation from the NPU architecture (the KMD has no query for it). 0 when
   // the architecture is unrecognized. See query_caps.
   uint32_t hardware_context_budget = 0;
-  // The HAL device's completion queue. Timeout recovery is recorded here, not
-  // in a process-wide flag. NULL until the HAL device publishes it.
+  // The HAL device's completion queue and the window operations it installed.
+  // NULL until the HAL device publishes them. Calls go through the ops so this
+  // library does not reference the amdxdna archive that defines them.
   iree_hal_amdxdna_completion_queue_t* completion_queue = nullptr;
+  const iree_hal_amdxdna_timeout_recovery_ops_t* timeout_recovery = nullptr;
   std::atomic<iree_host_size_t> live_context_image_bytes{0};
   bool is_aie4 = false;
   std::mutex command_pool_mutex;
@@ -1354,16 +1355,23 @@ iree_status_t iree_hal_amdxdna_native_command_prepare_chain(
   return iree_ok_status();
 }
 
+static const iree_hal_amdxdna_timeout_recovery_ops_t*
+iree_hal_amdxdna_native_command_recovery_ops(
+    iree_hal_amdxdna_native_command_t* command) {
+  if (!command->device || !command->device->completion_queue) return nullptr;
+  return command->device->timeout_recovery;
+}
+
 static void iree_hal_amdxdna_native_command_arm_recovery_closer(
     iree_hal_amdxdna_native_command_t* command) {
   command->recovery_closer = false;
   command->recovery_generation = 0;
-  iree_hal_amdxdna_completion_queue_t* queue =
-      command->device ? command->device->completion_queue : nullptr;
-  if (!queue) return;
+  const iree_hal_amdxdna_timeout_recovery_ops_t* ops =
+      iree_hal_amdxdna_native_command_recovery_ops(command);
+  if (!ops || !ops->arm_recovery_closer) return;
   uint64_t generation = 0;
-  if (iree_hal_amdxdna_completion_queue_arm_recovery_closer(queue,
-                                                           &generation)) {
+  if (ops->arm_recovery_closer(command->device->completion_queue,
+                               &generation)) {
     command->recovery_closer = true;
     command->recovery_generation = generation;
   }
@@ -1371,24 +1379,25 @@ static void iree_hal_amdxdna_native_command_arm_recovery_closer(
 
 static void iree_hal_amdxdna_native_command_disarm_recovery_closer(
     iree_hal_amdxdna_native_command_t* command) {
-  if (!command->recovery_closer || !command->device ||
-      !command->device->completion_queue) {
-    command->recovery_closer = false;
-    return;
+  if (!command->recovery_closer) return;
+  const iree_hal_amdxdna_timeout_recovery_ops_t* ops =
+      iree_hal_amdxdna_native_command_recovery_ops(command);
+  if (ops && ops->disarm_recovery_closer) {
+    ops->disarm_recovery_closer(command->device->completion_queue,
+                                command->recovery_generation);
   }
-  iree_hal_amdxdna_completion_queue_disarm_recovery_closer(
-      command->device->completion_queue, command->recovery_generation);
   command->recovery_closer = false;
 }
 
 static void iree_hal_amdxdna_native_command_note_closer_completed(
     iree_hal_amdxdna_native_command_t* command) {
-  if (!command->recovery_closer || !command->device ||
-      !command->device->completion_queue) {
-    return;
+  if (!command->recovery_closer) return;
+  const iree_hal_amdxdna_timeout_recovery_ops_t* ops =
+      iree_hal_amdxdna_native_command_recovery_ops(command);
+  if (ops && ops->note_closer_completed) {
+    ops->note_closer_completed(command->device->completion_queue,
+                               command->recovery_generation);
   }
-  iree_hal_amdxdna_completion_queue_note_closer_completed(
-      command->device->completion_queue, command->recovery_generation);
   command->recovery_closer = false;
 }
 
@@ -1479,9 +1488,10 @@ static iree_status_t iree_hal_amdxdna_native_queue_wait_issued(
     // A follow-on NEW stays command-scoped until a command submitted after
     // this timeout actually completes. A closer that itself comes back NEW
     // releases the slot on the path below, so the next submit can take it.
-    if (command->device && command->device->completion_queue) {
-      iree_hal_amdxdna_completion_queue_note_timeout_recovery(
-          command->device->completion_queue);
+    const iree_hal_amdxdna_timeout_recovery_ops_t* ops =
+        iree_hal_amdxdna_native_command_recovery_ops(command);
+    if (ops && ops->note_timeout_recovery) {
+      ops->note_timeout_recovery(command->device->completion_queue);
     }
     size_t recovered = 0;
     const int recover_err =
@@ -1780,9 +1790,11 @@ extern "C" void iree_hal_amdxdna_native_device_c_destroy(
 
 extern "C" void iree_hal_amdxdna_native_device_c_set_completion_queue(
     iree_hal_amdxdna_native_device_t* device,
-    iree_hal_amdxdna_completion_queue_t* completion_queue) {
+    iree_hal_amdxdna_completion_queue_t* completion_queue,
+    const iree_hal_amdxdna_timeout_recovery_ops_t* timeout_recovery) {
   if (!device) return;
   device->completion_queue = completion_queue;
+  device->timeout_recovery = completion_queue ? timeout_recovery : nullptr;
 }
 
 extern "C" iree_status_t iree_hal_amdxdna_native_device_c_set_power_mode(
