@@ -27,6 +27,7 @@ loom_check_test_suite(
         "managed_references.cxx-test",
         "managed_references_invalid.cxx-test",
         "memory_access.cxx-test",
+        "object_handles.cxx-test",
         "object_views.cxx-test",
         "object_views_invalid.cxx-test",
         "observations.cxx-test",

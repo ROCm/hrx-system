@@ -2581,9 +2581,13 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
   if (!call.receiver || !call.function->isImplicitObjectMemberFunction()) {
     return;
   }
+  const bool transports_owner =
+      may_transport_owner(implicit_object_type(unit_, call.function), source) &&
+      !call.function->isDestructor();
   if (!is_current_object(unit_, call.receiver)) {
     if (call.receiver->valueCategory != cxx::ValueCategory::kPrValue) {
-      if (types_.implicit_object_may_mutate(call.function, source)) {
+      if (types_.implicit_object_may_mutate(call.function, source) ||
+          transports_owner) {
         record(call.receiver);
       } else {
         retain_destination(call.receiver);
@@ -2591,7 +2595,9 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
     }
     return;
   }
-  if (!types_.implicit_object_may_mutate(call.function, source)) {
+  const bool may_mutate =
+      types_.implicit_object_may_mutate(call.function, source);
+  if (!may_mutate && !transports_owner) {
     return;
   }
   auto* object_type = implicit_object_type(unit_, function_);
@@ -2604,7 +2610,9 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
                         "object");
   }
   for (const auto& member : receiver->members) {
-    record(member.source);
+    if (may_mutate || may_transport_owner(member.type(), source)) {
+      record(member.source);
+    }
   }
 }
 
@@ -2628,7 +2636,8 @@ void ControlFlow::retain_reference_arguments(DirectCall& call) {
         argument->valueCategory == cxx::ValueCategory::kPrValue) {
       continue;
     }
-    if (traits.is_const(traits.remove_reference(parameter_type))) {
+    if (traits.is_const(traits.remove_reference(parameter_type)) &&
+        !may_transport_owner(parameter_type, argument)) {
       retain_destination(argument);
     } else {
       record(argument);
@@ -5151,15 +5160,28 @@ void ControlFlow::record(cxx::Symbol* binding) {
   record_scoped_write(binding, owners_);
 }
 
+bool ControlFlow::may_transport_owner(const cxx::Type* type, cxx::AST* owner) {
+  if (!type) {
+    return false;
+  }
+  auto groups = types_.projections(types_.unqualified_value(type), owner);
+  return std::ranges::any_of(
+      groups, [](const auto& group) { return group.carries_owner; });
+}
+
 void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
                                               cxx::FunctionSymbol* callee) {
   if (!callee->isImplicitObjectMemberFunction()) {
     return;
   }
+  const bool transports_owner =
+      may_transport_owner(implicit_object_type(unit_, callee), call) &&
+      !callee->isDestructor();
+  const bool may_mutate = types_.implicit_object_may_mutate(callee, call);
   auto* base = unwrap_expression(call->baseExpression);
   if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(base);
       id && id->subobjectPath) {
-    if (types_.implicit_object_may_mutate(callee, call)) {
+    if (may_mutate || transports_owner) {
       record(types_.projection(id->subobjectPath, id).root->source);
     }
     return;
@@ -5169,7 +5191,7 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
     auto* receiver = selected.object;
     auto* projection = selected.projection ? &*selected.projection : nullptr;
     if (projection && is_current_object(unit_, receiver)) {
-      if (types_.implicit_object_may_mutate(callee, call)) {
+      if (may_mutate || transports_owner) {
         record(projection->root->source);
       }
       return;
@@ -5177,7 +5199,7 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
     if (!is_current_object(unit_, receiver)) {
       if (member->accessOp == cxx::TokenKind::T_DOT &&
           receiver->valueCategory != cxx::ValueCategory::kPrValue) {
-        if (types_.implicit_object_may_mutate(callee, call)) {
+        if (may_mutate || transports_owner) {
           record(receiver);
         } else {
           retain_destination(receiver);
@@ -5186,7 +5208,7 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
       return;
     }
   }
-  if (!types_.implicit_object_may_mutate(callee, call)) {
+  if (!may_mutate && !transports_owner) {
     return;
   }
   auto* object_type = implicit_object_type(unit_, function_);
@@ -5199,7 +5221,9 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
                         "object");
   }
   for (const auto& member : receiver->members) {
-    record(member.source);
+    if (may_mutate || may_transport_owner(member.type(), call)) {
+      record(member.source);
+    }
   }
 }
 

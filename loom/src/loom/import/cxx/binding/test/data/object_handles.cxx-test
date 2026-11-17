@@ -1,0 +1,159 @@
+// RUN: roundtrip
+#include <loomcxx/object.h>
+
+struct [[loom::import("lifetime", "object")]] Object;
+
+[[loom::import("lifetime", "create_owner")]]
+loom::ref<Object> create_owner(unsigned identity);
+[[loom::import("lifetime", "read")]]
+void read(loom::ptr<Object> value);
+
+[[loom::noinline]] static loom::ref<Object> identity(loom::ref<Object> owner) {
+  return owner;
+}
+
+[[loom::noinline]] static bool present(const loom::ref<Object>& owner) {
+  return static_cast<bool>(owner);
+}
+
+void run(unsigned identity_value, bool replace) {
+  auto owner = create_owner(identity_value);
+  auto copy = owner;
+  if (copy && present(copy)) {
+    read(copy.get());
+  }
+  auto moved = identity(static_cast<loom::ref<Object>&&>(copy));
+  if (replace) {
+    owner = moved;
+  }
+  moved.reset();
+  read(owner.get());
+}
+
+void drain(unsigned identity_value, unsigned iterations) {
+  auto owner = create_owner(identity_value);
+  while (iterations-- && owner) {
+    read(owner.get());
+    owner.reset();
+  }
+  read(owner.get());
+}
+
+// ----
+type.decl import("lifetime", "object") @Object
+
+func.def public @run(%identity_value: i32, %replace: i1) {
+  %owner_owner_$2 = func.call @create_owner(%identity_value) : (i32) -> (ref<@Object>)
+  %copy_owner_$3, %owner_owner_$4 = func.call @loom__ref__ref_value(%owner_owner_$2) : (ref<@Object>) -> (ref<@Object>, ref<@Object>)
+  %5, %copy_owner_$6 = func.call pure @loom__ref__operator_bool_value(%copy_owner_$3) : (ref<@Object>) -> (i1, ref<@Object>)
+  %7, %copy_owner_$8 = scf.if %5 -> (i1, ref<@Object>) {
+    %9, %copy_owner_ = func.call pure @present(%copy_owner_$6) : (ref<@Object>) -> (i1, ref<@Object>)
+    scf.yield %9, %copy_owner_ : i1, ref<@Object>
+  } else {
+    scf.yield %5, %copy_owner_$6 : i1, ref<@Object>
+  }
+  %copy_owner_$11 = scf.if %7 -> (ref<@Object>) {
+    %12, %copy_owner_ = func.call @loom__ref__get_value(%copy_owner_$8) : (ref<@Object>) -> (ptr<@Object>, ref<@Object>)
+    func.call @read(%12) : (ptr<@Object>)
+    scf.yield %copy_owner_ : ref<@Object>
+  } else {
+    scf.yield %copy_owner_$8 : ref<@Object>
+  }
+  %14, %copy_owner_$15 = func.call @loom__ref__ref_value_1(%copy_owner_$11) : (ref<@Object>) -> (ref<@Object>, ref<@Object>)
+  %moved_owner_$16 = func.call @identity(%14) : (ref<@Object>) -> (ref<@Object>)
+  %moved_owner_$17, %owner_owner_$18 = scf.if %replace -> (ref<@Object>, ref<@Object>) {
+    %19, %moved_owner_ = func.call @loom__ref__ref_value(%moved_owner_$16) : (ref<@Object>) -> (ref<@Object>, ref<@Object>)
+    %owner_owner_ = func.call @loom__ref__operator_assign_value(%owner_owner_$4, %19) : (ref<@Object>, ref<@Object>) -> (ref<@Object>)
+    scf.yield %moved_owner_, %owner_owner_ : ref<@Object>, ref<@Object>
+  } else {
+    scf.yield %moved_owner_$16, %owner_owner_$4 : ref<@Object>, ref<@Object>
+  }
+  %moved_owner_$22 = func.call @loom__ref__reset_value(%moved_owner_$17) : (ref<@Object>) -> (ref<@Object>)
+  %23, %owner_owner_$24 = func.call @loom__ref__get_value(%owner_owner_$18) : (ref<@Object>) -> (ptr<@Object>, ref<@Object>)
+  func.call @read(%23) : (ptr<@Object>)
+  func.call @loom__ref___ref_value(%moved_owner_$22) : (ref<@Object>)
+  func.call @loom__ref___ref_value(%copy_owner_$15) : (ref<@Object>)
+  func.call @loom__ref___ref_value(%owner_owner_$24) : (ref<@Object>)
+  func.return
+}
+
+func.def public @drain(%identity_value: i32, %iterations$26: i32) {
+  %owner_owner_$27 = func.call @create_owner(%identity_value) : (i32) -> (ref<@Object>)
+  %iterations$32, %owner_owner_$33 = scf.while(%iterations$28 = %iterations$26 : i32, %owner_owner_$29 = %owner_owner_$27 : ref<@Object>) -> (i32, ref<@Object>) {
+    %34 = scalar.constant 1 : i32
+    %iterations$35 = scalar.subi %iterations$28, %34 : i32
+    %36 = scalar.constant 0 : i32
+    %37 = scalar.cmpi ne, %iterations$28, %36 : i32
+    %38, %iterations$39, %owner_owner_$40 = scf.if %37 -> (i1, i32, ref<@Object>) {
+      %41, %owner_owner_ = func.call pure @loom__ref__operator_bool_value(%owner_owner_$29) : (ref<@Object>) -> (i1, ref<@Object>)
+      scf.yield %41, %iterations$35, %owner_owner_ : i1, i32, ref<@Object>
+    } else {
+      scf.yield %37, %iterations$35, %owner_owner_$29 : i1, i32, ref<@Object>
+    }
+    scf.condition %38, %iterations$39, %owner_owner_$40 : i1, i32, ref<@Object>
+  } do(%iterations: i32, %owner_owner_$31: ref<@Object>) {
+    %43, %owner_owner_$44 = func.call @loom__ref__get_value(%owner_owner_$31) : (ref<@Object>) -> (ptr<@Object>, ref<@Object>)
+    func.call @read(%43) : (ptr<@Object>)
+    %owner_owner_$45 = func.call @loom__ref__reset_value(%owner_owner_$44) : (ref<@Object>) -> (ref<@Object>)
+    scf.yield %iterations, %owner_owner_$45 : i32, ref<@Object>
+  }
+  %46, %owner_owner_$47 = func.call @loom__ref__get_value(%owner_owner_$33) : (ref<@Object>) -> (ptr<@Object>, ref<@Object>)
+  func.call @read(%46) : (ptr<@Object>)
+  func.call @loom__ref___ref_value(%owner_owner_$47) : (ref<@Object>)
+  func.return
+}
+
+func.def inline @loom__ref__ref_value(%other_owner_: ref<@Object>) -> (ref<@Object>, ref<@Object>) {
+  %51 = ref.duplicate %other_owner_ : ref<@Object>
+  func.return %51, %other_owner_ : ref<@Object>, ref<@Object>
+}
+
+func.def inline @loom__ref__operator_bool_value(%this_owner_: ref<@Object>) -> (i1, ref<@Object>) {
+  %55 = ref.compare.null %this_owner_ : ref<@Object>
+  %56 = scalar.constant 1 : i1
+  %57 = scalar.xori %55, %56 : i1
+  func.return %57, %this_owner_ : i1, ref<@Object>
+}
+
+func.def noinline @present(%owner_owner_$58: ref<@Object>) -> (i1, ref<@Object>) {
+  %61, %owner_owner_$62 = func.call pure @loom__ref__operator_bool_value(%owner_owner_$58) : (ref<@Object>) -> (i1, ref<@Object>)
+  func.return %61, %owner_owner_$62 : i1, ref<@Object>
+}
+
+func.def inline @loom__ref__get_value(%this_owner_: ref<@Object>) -> (ptr<@Object>, ref<@Object>) {
+  %66 = ref.borrow %this_owner_ : ref<@Object> -> ptr<@Object>
+  func.return %66, %this_owner_ : ptr<@Object>, ref<@Object>
+}
+
+func.def noinline @identity(%owner_owner_$67: ref<@Object>) -> (ref<@Object>) {
+  %69, %owner_owner_$70 = func.call @loom__ref__ref_value_1(%owner_owner_$67) : (ref<@Object>) -> (ref<@Object>, ref<@Object>)
+  func.call @loom__ref___ref_value(%owner_owner_$70) : (ref<@Object>)
+  func.return %69 : ref<@Object>
+}
+
+func.def inline @loom__ref__ref_value_1(%other_owner_$71: ref<@Object>) -> (ref<@Object>, ref<@Object>) {
+  %other_owner_$74 = ref.null : ref<@Object>
+  func.return %other_owner_$71, %other_owner_$74 : ref<@Object>, ref<@Object>
+}
+
+func.def inline @loom__ref__operator_assign_value(%this_owner_: ref<@Object>, %other_owner_$76: ref<@Object>) -> (ref<@Object>) {
+  %other_owner_$78 = ref.null : ref<@Object>
+  ref.release %this_owner_ : ref<@Object>
+  func.call @loom__ref___ref_value(%other_owner_$78) : (ref<@Object>)
+  func.return %other_owner_$76 : ref<@Object>
+}
+
+func.def inline @loom__ref__reset_value(%this_owner_: ref<@Object>) -> (ref<@Object>) {
+  %owner_ = ref.null : ref<@Object>
+  ref.release %this_owner_ : ref<@Object>
+  func.return %owner_ : ref<@Object>
+}
+
+func.def inline @loom__ref___ref_value(%this_owner_: ref<@Object>) {
+  ref.release %this_owner_ : ref<@Object>
+  func.return
+}
+
+func.decl import("lifetime", "create_owner") @create_owner(%83: i32) -> (ref<@Object>)
+
+func.decl import("lifetime", "read") @read(%85: ptr<@Object>)

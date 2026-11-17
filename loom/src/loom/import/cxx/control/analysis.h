@@ -584,6 +584,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool record(cxx::ExpressionAST* expression,
               WriteEffect effect = WriteEffect::Scoped);
   void record(cxx::Symbol* binding);
+  // Whether a call can transport one or more managed-owner SSA columns even
+  // when the source object is semantically read-only.
+  bool may_transport_owner(const cxx::Type* type, cxx::AST* owner);
   void record_implicit_object_call(cxx::CallExpressionAST* call,
                                    cxx::FunctionSymbol* callee);
   bool require_identity(cxx::ExpressionAST* expression);

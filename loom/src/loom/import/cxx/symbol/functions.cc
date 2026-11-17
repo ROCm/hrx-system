@@ -1496,16 +1496,13 @@ void Functions::admit_reference_parameters(cxx::FunctionSymbol* symbol,
   }
   auto traits = unit_.typeTraits();
   if (!definition(symbol)) {
-    auto requires_owned_identity = [&](const cxx::Type* type) {
-      return traits.is_class(type) && traits.is_non_trivial_for_calls(type);
-    };
-    if (requires_owned_identity(signature->returnType()) ||
-        std::ranges::any_of(symbol->parameters(), [&](auto* parameter) {
-          return requires_owned_identity(parameter->type());
+    if (std::ranges::any_of(symbol->parameters(), [&](auto* parameter) {
+          auto* type = parameter->type();
+          return traits.is_class(type) && traits.is_non_trivial_for_calls(type);
         })) {
       diagnostics_.reject(unit_, source,
-                          "nontrivial object transport requires a source "
-                          "function definition");
+                          "nontrivial object inputs require a source function "
+                          "definition");
     }
   }
   if (traits.is_reference(signature->returnType()) &&
@@ -1690,6 +1687,14 @@ BoundSignature Functions::bind_callable_signature(
   const bool returns_void = unit_.typeTraits().is_void(signature->returnType());
   const bool returns_reference =
       unit_.typeTraits().is_reference(signature->returnType());
+  if (external_.contains(symbol->canonical()) &&
+      unit_.typeTraits().is_class(signature->returnType()) &&
+      unit_.typeTraits().is_non_trivial_for_calls(signature->returnType()) &&
+      !types.reference_storage(signature->returnType(), source)) {
+    diagnostics_.reject(unit_, source,
+                        "nontrivial external results require reference-only "
+                        "source values");
+  }
   const bool returns_parameter_alias =
       returns_reference && reference_return_parameter(symbol).has_value();
   const auto projected_reference_origins = projected_reference_return_origins(
