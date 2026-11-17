@@ -318,3 +318,68 @@ func.def @bounded_signed_lanes(%raw_amount: vector<4xi16>) -> (i64, i64, i64, i6
   %hi = scalar.constant 32767 : i64
   func.return %lo, %negative_hi, %positive_lo, %hi : i64, i64, i64, i64
 }
+
+// ====
+
+// Signed widening derives the source element domain without enumerating an
+// unknown vector. Predicate payloads use signed one-bit values, [-1, 0].
+func.def @signed_widening_domains(%bits: vector<4xi1>, %bytes: vector<17xi8>, %halves: vector<2x16xi16>, %words: vector<64xi32>) -> (i64, i64, i64, i64, i64, i64, i64, i64, i1) {
+  %wide_bits = vector.extsi %bits : vector<4xi1> to vector<4xi64>
+  %wide_bytes = vector.extsi %bytes : vector<17xi8> to vector<17xi64>
+  %wide_halves = vector.extsi %halves : vector<2x16xi16> to vector<2x16xi64>
+  %wide_words = vector.extsi %words : vector<64xi32> to vector<64xi64>
+  %bit = vector.extract %wide_bits[3] : vector<4xi64> -> i64
+  %byte = vector.extract %wide_bytes[16] : vector<17xi64> -> i64
+  %half = vector.extract %wide_halves[1, 15] : vector<2x16xi64> -> i64
+  %word = vector.extract %wide_words[63] : vector<64xi64> -> i64
+  %bit_lo = test.fact_range_lo %bit : i64 -> i64
+  %bit_hi = test.fact_range_hi %bit : i64 -> i64
+  %byte_lo = test.fact_range_lo %byte : i64 -> i64
+  %byte_hi = test.fact_range_hi %byte : i64 -> i64
+  %half_lo = test.fact_range_lo %half : i64 -> i64
+  %half_hi = test.fact_range_hi %half : i64 -> i64
+  %word_lo = test.fact_range_lo %word : i64 -> i64
+  %word_hi = test.fact_range_hi %word : i64 -> i64
+  %uniform = test.fact_subgroup_uniform %wide_words : vector<64xi64> -> i1
+  func.return %bit_lo, %bit_hi, %byte_lo, %byte_hi, %half_lo, %half_hi, %word_lo, %word_hi, %uniform : i64, i64, i64, i64, i64, i64, i64, i64, i1
+}
+
+// ----
+func.def @signed_widening_domains(%bits: vector<4xi1>, %bytes: vector<17xi8>, %halves: vector<2x16xi16>, %words: vector<64xi32>) -> (i64, i64, i64, i64, i64, i64, i64, i64, i1) {
+  %bit_lo = scalar.constant -1 : i64
+  %bit_hi = scalar.constant 0 : i64
+  %byte_lo = scalar.constant -128 : i64
+  %byte_hi = scalar.constant 127 : i64
+  %half_lo = scalar.constant -32768 : i64
+  %half_hi = scalar.constant 32767 : i64
+  %word_lo = scalar.constant -2147483648 : i64
+  %word_hi = scalar.constant 2147483647 : i64
+  %uniform = scalar.constant false : i1
+  func.return %bit_lo, %bit_hi, %byte_lo, %byte_hi, %half_lo, %half_hi, %word_lo, %word_hi, %uniform : i64, i64, i64, i64, i64, i64, i64, i64, i1
+}
+
+// ====
+
+// Independent lanes keep their tighter bounds when only another lane needs
+// the complete source-type domain.
+func.def @signed_widening_partial_lanes(%input: i16, %bounded_input: i16) -> (i64, i64, i64, i64) {
+  %bounded = scalar.assume %bounded_input [range(%bounded_input, -7, 11)] : i16
+  %pair = vector.from_elements %input, %bounded : vector<2xi16>
+  %wide = vector.extsi %pair : vector<2xi16> to vector<2xi64>
+  %first = vector.extract %wide[0] : vector<2xi64> -> i64
+  %second = vector.extract %wide[1] : vector<2xi64> -> i64
+  %first_lo = test.fact_range_lo %first : i64 -> i64
+  %first_hi = test.fact_range_hi %first : i64 -> i64
+  %second_lo = test.fact_range_lo %second : i64 -> i64
+  %second_hi = test.fact_range_hi %second : i64 -> i64
+  func.return %first_lo, %first_hi, %second_lo, %second_hi : i64, i64, i64, i64
+}
+
+// ----
+func.def @signed_widening_partial_lanes(%input: i16, %bounded_input: i16) -> (i64, i64, i64, i64) {
+  %first_lo = scalar.constant -32768 : i64
+  %first_hi = scalar.constant 32767 : i64
+  %second_lo = scalar.constant -7 : i64
+  %second_hi = scalar.constant 11 : i64
+  func.return %first_lo, %first_hi, %second_lo, %second_hi : i64, i64, i64, i64
+}

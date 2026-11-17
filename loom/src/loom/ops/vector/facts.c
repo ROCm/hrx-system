@@ -1860,18 +1860,19 @@ static void loom_vector_signi_transfer(const loom_value_facts_t* input,
   loom_value_facts_signi(input, out);
 }
 
-static void loom_vector_passthrough_transfer(const loom_value_facts_t* input,
+static void loom_vector_sign_extend_transfer(const loom_value_facts_t* input,
                                              int32_t bit_count,
                                              loom_value_facts_t* out) {
-  (void)bit_count;
-  *out = *input;
-}
-
-static void loom_vector_sign_extend_i1_transfer(const loom_value_facts_t* input,
-                                                int32_t bit_count,
-                                                loom_value_facts_t* out) {
-  (void)bit_count;
-  *out = loom_value_facts_sign_extend(*input, 1);
+  if (bit_count == 1) {
+    *out = loom_value_facts_sign_extend(*input, bit_count);
+    return;
+  }
+  // The source element type bounds every lane even when the vector carries
+  // no component facts. Widening preserves that domain, not the result width.
+  const loom_value_facts_t domain =
+      loom_value_facts_make_signed_bit_count_range(bit_count);
+  *out =
+      loom_value_facts_clamp_domain(*input, domain.range_lo, domain.range_hi);
 }
 
 typedef struct loom_vector_integer_to_float_transfer_t {
@@ -3285,8 +3286,11 @@ static iree_status_t loom_vector_integer_unary_summary_facts(
   loom_value_fact_small_static_lanes_t input_lanes = {0};
   if (!loom_vector_facts_query_small_lanes(context, operand_facts[0],
                                            &input_lanes)) {
-    result_facts[0] = loom_value_facts_unknown();
-    return iree_ok_status();
+    input = loom_value_facts_unknown();
+    loom_value_facts_t element = loom_value_facts_unknown();
+    transfer_fn(&input, bit_count, &element);
+    return loom_value_facts_make_uniform_element(context, element,
+                                                 &result_facts[0]);
   }
   loom_value_facts_t lanes[LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT] = {{0}};
   for (iree_host_size_t i = 0; i < input_lanes.count; ++i) {
@@ -4444,14 +4448,9 @@ iree_status_t loom_vector_extsi_facts(loom_fact_context_t* context,
   const loom_value_id_t result = loom_vector_extsi_result(op);
   const loom_scalar_type_t input_scalar_type =
       loom_type_element_type(loom_module_value_type(module, input));
-  const loom_vector_integer_unary_transfer_fn_t transfer_fn =
-      input_scalar_type == LOOM_SCALAR_TYPE_I1
-          ? loom_vector_sign_extend_i1_transfer
-          : loom_vector_passthrough_transfer;
   IREE_RETURN_IF_ERROR(loom_vector_integer_unary_summary_facts(
-      context,
-      loom_scalar_type_bitwidth(loom_vector_result_element_type(module, op)),
-      operand_facts, result_facts, transfer_fn));
+      context, loom_scalar_type_bitwidth(input_scalar_type), operand_facts,
+      result_facts, loom_vector_sign_extend_transfer));
   IREE_RETURN_IF_ERROR(
       loom_vector_try_define_same_lane_origin(context, module, result, input));
   return loom_vector_try_define_exact_same_lane_origin(context, module, result,
