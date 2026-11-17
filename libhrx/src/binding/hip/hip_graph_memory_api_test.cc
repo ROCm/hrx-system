@@ -2003,8 +2003,8 @@ TEST_F(HipGraphMemoryApiTest, ZeroLengthCopiesKeepDirectForms) {
 }
 
 TEST_F(HipGraphMemoryApiTest, CopyPreparationRespectsLogicalPoolBounds) {
-  // Small HIP pool allocations have a larger physical extent. Graph copies
-  // must use the requested length even when the backing contains more bytes.
+  // Small HIP pool allocations have a larger physical extent. Direct and graph
+  // copies use the requested length even when the backing contains more bytes.
   constexpr size_t length = 3;
   ASSERT_EQ(hipSuccess, api_.allocate_async(&device_, length, stream_));
   ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
@@ -2027,6 +2027,12 @@ TEST_F(HipGraphMemoryApiTest, CopyPreparationRespectsLogicalPoolBounds) {
           .kind = kind,
       };
       hipGraphNode_t rejected = nullptr;
+      EXPECT_EQ(
+          hipErrorInvalidValue,
+          api_.copy(parameters.dstPtr.ptr, parameters.srcPtr.ptr, 1, kind));
+      EXPECT_EQ(hipErrorInvalidValue,
+                api_.copy_async(parameters.dstPtr.ptr, parameters.srcPtr.ptr, 1,
+                                kind, stream_));
       EXPECT_EQ(hipErrorInvalidValue,
                 api_.add_copy(&rejected, graph_, nullptr, 0, &parameters));
       EXPECT_EQ(
@@ -2122,6 +2128,78 @@ TEST_F(HipGraphMemoryApiTest, RegisteredHostCopiesPreserveCaptureAndUpdates) {
   for (size_t i = 0; i < source_.size(); ++i) {
     EXPECT_EQ(i >= offset && i < offset + length ? replacement_[i] : 0xCC,
               destination[i]);
+  }
+}
+
+TEST_F(HipGraphMemoryApiTest,
+       DirectCopiesPreserveSnapshotsAndRegisteredStreamOrder) {
+  const size_t length = source_.size();
+  ASSERT_EQ(hipSuccess, api_.allocate(&device_, 2 * length));
+  for (auto& buffer : host_buffers_) {
+    ASSERT_EQ(hipSuccess,
+              api_.allocate_host(&buffer, length, hipHostMallocDefault));
+  }
+  auto* second = static_cast<uint8_t*>(device_) + length;
+  std::memcpy(host_buffers_[0], replacement_.data(), length);
+  for (bool inferred : {false, true}) {
+    SCOPED_TRACE(inferred);
+    auto pageable = source_;
+    std::memset(host_buffers_[1], 0, length);
+    HoldStreamAtGate();
+    ASSERT_FALSE(HasFatalFailure());
+    ASSERT_EQ(hipSuccess, api_.copy_async(device_, pageable.data(), length,
+                                          inferred ? hipMemcpyDefault
+                                                   : hipMemcpyHostToDevice,
+                                          stream_));
+    // The small pageable upload owns a snapshot when the API returns, even
+    // though the GPU cannot consume it until the preceding callback finishes.
+    pageable.fill(0xCC);
+    ASSERT_EQ(hipSuccess, api_.copy_async(second, host_buffers_[0], length,
+                                          inferred ? hipMemcpyDefault
+                                                   : hipMemcpyHostToDevice,
+                                          stream_));
+    ASSERT_EQ(hipSuccess, api_.copy_async(host_buffers_[1], device_, length,
+                                          inferred ? hipMemcpyDefault
+                                                   : hipMemcpyDeviceToHost,
+                                          stream_));
+    EXPECT_EQ(hipErrorNotReady, api_.stream_query(stream_));
+    // Both registered operations must return while their predecessor remains
+    // blocked. Their caller-owned storage stays live through completion.
+    ReleaseStreamGate();
+    ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+    EXPECT_EQ(0, std::memcmp(source_.data(), host_buffers_[1], length));
+    ASSERT_EQ(hipSuccess, api_.copy(destination_.data(), second, length,
+                                    hipMemcpyDeviceToHost));
+    EXPECT_EQ(replacement_, destination_);
+  }
+}
+
+TEST_F(HipGraphMemoryApiTest, ManagedCopiesPreserveCheckedInteriorRanges) {
+  const auto allocate_managed =
+      dso_.Resolve<decltype(&hipMallocManaged)>("hipMallocManaged");
+  ASSERT_NE(nullptr, allocate_managed);
+  const size_t length = source_.size();
+  ASSERT_EQ(hipSuccess,
+            allocate_managed(&device_, 2 * length, hipMemAttachGlobal));
+  auto* bytes = static_cast<uint8_t*>(device_);
+  for (auto kind : {hipMemcpyDeviceToDevice, hipMemcpyDefault,
+                    hipMemcpyDeviceToDeviceNoCU}) {
+    for (bool asynchronous : {false, true}) {
+      std::memcpy(bytes, source_.data(), length);
+      std::memset(bytes + length, 0xCC, length);
+      const hipError_t result =
+          asynchronous
+              ? api_.copy_async(bytes + length + 2, bytes + 1, length - 3, kind,
+                                stream_)
+              : api_.copy(bytes + length + 2, bytes + 1, length - 3, kind);
+      ASSERT_EQ(hipSuccess, result);
+      ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+      EXPECT_EQ(0, std::memcmp(bytes, source_.data(), length));
+      for (size_t i = 0; i < length; ++i) {
+        EXPECT_EQ(i >= 2 && i < length - 1 ? source_[i - 1] : 0xCC,
+                  bytes[length + i]);
+      }
+    }
   }
 }
 

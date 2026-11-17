@@ -24,7 +24,8 @@ typedef struct iree_hip_copy_endpoint_t {
   iree_hal_streaming_context_t* context;
 } iree_hip_copy_endpoint_t;
 
-// Temporary preparation state shared by copy recording and parameter updates.
+// Temporary preparation state shared by direct execution, copy recording, and
+// parameter updates.
 typedef struct iree_hip_copy_endpoints_t {
   // Effective direction, with Default classified and NoCU normalized.
   hipMemcpyKind kind;

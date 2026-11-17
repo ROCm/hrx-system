@@ -474,6 +474,36 @@ iree_status_t iree_hal_streaming_memcpy_device_to_device(
     iree_hal_streaming_deviceptr_t src, iree_device_size_t size,
     iree_hal_streaming_stream_t* stream);
 
+// Executes already-resolved, range-checked copy operands without pointer-table
+// lookups or capture recording. References and host storage are borrowed under
+// the same asynchronous/snapshot/blocking rules as the pointer helpers above.
+// |context| owns the device operand(s); an empty host reference denotes
+// pageable storage. The caller has handled capture and established any
+// preceding dependencies, including context synchronization for NULL-stream
+// copies.
+iree_status_t iree_hal_streaming_memcpy_host_to_device_resolved(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_buffer_ref_t dst_ref, const void* src,
+    iree_hal_streaming_buffer_ref_t src_ref, iree_device_size_t size,
+    iree_hal_streaming_stream_t* stream);
+
+// Downloads a checked source to either the registered |dst_ref| or pageable
+// |dst|. Same ownership, ordering, and capture preconditions as upload above.
+iree_status_t iree_hal_streaming_memcpy_device_to_host_resolved(
+    iree_hal_streaming_context_t* context, void* dst,
+    iree_hal_streaming_buffer_ref_t dst_ref,
+    iree_hal_streaming_buffer_ref_t src_ref, iree_device_size_t size,
+    iree_hal_streaming_stream_t* stream);
+
+// Copies checked device references belonging to |context|. Same ordering and
+// capture preconditions as upload above; no pointer or allocation ownership is
+// recovered during submission.
+iree_status_t iree_hal_streaming_memcpy_device_to_device_resolved(
+    iree_hal_streaming_context_t* context,
+    iree_hal_streaming_buffer_ref_t dst_ref,
+    iree_hal_streaming_buffer_ref_t src_ref, iree_device_size_t size,
+    iree_hal_streaming_stream_t* stream);
+
 typedef struct iree_hal_streaming_memory_range_request_t {
   // First device or host address in the requested range.
   uint64_t address;
