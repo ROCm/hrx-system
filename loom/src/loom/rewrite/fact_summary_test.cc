@@ -237,8 +237,9 @@ TEST_P(NestedSummaryTest, ResultDependencies) {
     }
     loom_pass_value_fact_owner_deinitialize(&fresh_owner);
   }
-  // A direct selector edit still refreshes nested context. Coalesce it with
-  // the yielded-value edit in either order, then compare every live fact.
+  // A direct selector edit changes the result join, not the facts of an
+  // independent branch body. Coalesce it with the yielded-value edit in
+  // either order, then compare every live fact.
   for (bool selector_first : {false, true}) {
     auto change_selector = [&]() {
       return loom_test_constant_rewrite_value(
@@ -254,7 +255,7 @@ TEST_P(NestedSummaryTest, ResultDependencies) {
     }
     observer.sibling_count = 0;
     IREE_ASSERT_OK(loom_rewriter_propagate_value_facts(&rewriter));
-    EXPECT_EQ(observer.sibling_count, 1u);
+    EXPECT_EQ(observer.sibling_count, 0u);
     loom_pass_value_fact_owner_t fresh_owner;
     loom_pass_value_fact_owner_initialize(&block_pool_, &fresh_owner);
     loom_value_fact_table_t* fresh = nullptr;
@@ -493,9 +494,12 @@ TEST_P(NestedFeedbackTest, RestoresExactState) {
     return op;
   };
   const auto begin = loom_test_constant_result(constant(0, index));
-  const auto limit = loom_test_constant_result(constant(4, index));
+  auto* limit_op = constant(4, index);
+  const auto limit = loom_test_constant_result(limit_op);
   const auto step = loom_test_constant_result(constant(1, index));
-  const auto initial = loom_test_constant_result(constant(2, i32));
+  auto* initial_op = constant(2, i32);
+  const auto initial = loom_test_constant_result(initial_op);
+  const auto stable = loom_test_constant_result(constant(2, i32));
   const auto selector = loom_test_constant_result(constant(1, i32));
   auto* increment = constant(0, i32);
   loom_block_t* cfg_header = nullptr;
@@ -556,6 +560,12 @@ TEST_P(NestedFeedbackTest, RestoresExactState) {
   auto body_builder = builder_;
   loom_builder_enter_region(&body_builder, loop, body);
   loom_builder_set_block(&body_builder, block);
+  loom_op_t* iv_user = nullptr;
+  if (!is_conditional_loop) {
+    IREE_ASSERT_OK(loom_test_addi_build(
+        &body_builder, loom_loop_like_iv(loom_loop_like_cast(module_, loop)),
+        step, index, LOOM_LOCATION_UNKNOWN, &iv_user));
+  }
   loom_op_t* branch = nullptr;
   IREE_ASSERT_OK(loom_test_branch_build(&body_builder, selector, &i32, 1,
                                         nullptr, 0, LOOM_LOCATION_UNKNOWN,
@@ -583,7 +593,7 @@ TEST_P(NestedFeedbackTest, RestoresExactState) {
     loom_builder_enter_region(&nested, independent,
                               loom_op_regions(independent)[i]);
     loom_op_t* yield = nullptr;
-    IREE_ASSERT_OK(loom_test_yield_build(&nested, &initial, 1,
+    IREE_ASSERT_OK(loom_test_yield_build(&nested, &stable, 1,
                                          LOOM_LOCATION_UNKNOWN, &yield));
   }
   loom_op_t* yield = nullptr;
@@ -620,21 +630,27 @@ TEST_P(NestedFeedbackTest, RestoresExactState) {
   struct Observer {
     // Production completion consumer that retires pending equations.
     decltype(facts->summary_computed) previous;
+    // Loop whose maintained solve must consume its own region publication.
+    const loom_op_t* loop;
     // Body independent of loop feedback, including its execution scope.
     const loom_op_t* independent;
+    // Complete evaluations of the maintained loop summary.
+    size_t loop_count = 0;
     // Complete evaluations of that body's result join.
     size_t independent_count = 0;
-  } observer{facts->summary_computed, independent};
+  } observer{facts->summary_computed, loop, independent};
   facts->summary_computed = {
       .user_data = &observer,
       .fn =
           [](void* user_data, const loom_op_t* op) {
             auto* observer = static_cast<Observer*>(user_data);
+            observer->loop_count += op == observer->loop;
             observer->independent_count += op == observer->independent;
             observer->previous.fn(observer->previous.user_data, op);
           },
   };
   for (int64_t delta : {1, 0, 1, 0}) {
+    observer.loop_count = 0;
     observer.independent_count = 0;
     IREE_ASSERT_OK(loom_test_constant_rewrite_value(&rewriter, increment,
                                                     loom_attr_i64(delta)));
@@ -661,7 +677,8 @@ TEST_P(NestedFeedbackTest, RestoresExactState) {
 #endif
     while (loom_rewriter_pop(&rewriter)) {
     }
-    if (!is_conditional_loop && branch_edit == PendingBranchEdit::kKeep) {
+    if (branch_edit == PendingBranchEdit::kKeep) {
+      EXPECT_EQ(observer.loop_count, 1u);
       EXPECT_EQ(observer.independent_count, 0u);
     }
     loom_pass_value_fact_owner_t fresh_owner;
@@ -699,6 +716,47 @@ TEST_P(NestedFeedbackTest, RestoresExactState) {
                     .range_hi);
     }
     loom_pass_value_fact_owner_deinitialize(&fresh_owner);
+  }
+  if (branch_edit == PendingBranchEdit::kKeep) {
+    auto check_input_edit = [&](loom_op_t* input, int64_t value) {
+      observer.loop_count = 0;
+      observer.independent_count = 0;
+      IREE_ASSERT_OK(loom_test_constant_rewrite_value(&rewriter, input,
+                                                      loom_attr_i64(value)));
+      IREE_ASSERT_OK(loom_rewriter_propagate_value_facts(&rewriter));
+      while (loom_rewriter_pop(&rewriter)) {
+      }
+      EXPECT_EQ(observer.loop_count, 1u);
+      EXPECT_EQ(observer.independent_count, 0u);
+
+      loom_pass_value_fact_owner_t fresh_owner;
+      loom_pass_value_fact_owner_initialize(&block_pool_, &fresh_owner);
+      loom_value_fact_table_t* fresh = nullptr;
+      IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(&fresh_owner, module_,
+                                                        scope, &fresh));
+      loom_value_fact_scope_iterator_t iterator;
+      loom_value_fact_table_scope_begin(fresh, &iterator);
+      for (loom_value_id_t fact_value = loom_value_fact_scope_next(&iterator);
+           fact_value != LOOM_VALUE_ID_INVALID;
+           fact_value = loom_value_fact_scope_next(&iterator)) {
+        EXPECT_TRUE(loom_value_fact_table_facts_equal_for_type(
+            module_, loom_module_value_type(module_, fact_value), facts,
+            loom_value_fact_table_lookup(facts, fact_value), fresh,
+            loom_value_fact_table_lookup(fresh, fact_value)))
+            << fact_value;
+      }
+      loom_pass_value_fact_owner_deinitialize(&fresh_owner);
+    };
+    // Initial state changes update both loop forms without revisiting an
+    // independent nested branch.
+    check_input_edit(initial_op, 3);
+    check_input_edit(initial_op, 2);
+    if (iv_user) {
+      // Counted-domain changes also republish IV users even when they are not
+      // part of the loop's carried result tuple.
+      check_input_edit(limit_op, 5);
+      check_input_edit(limit_op, 4);
+    }
   }
   loom_rewriter_deinitialize(&rewriter);
   loom_pass_value_fact_owner_deinitialize(&owner);

@@ -445,10 +445,36 @@ static iree_status_t loom_rewriter_add_changed_fact_equation(
   return iree_ok_status();
 }
 
+// Condition-region equations contribute relational transfer facts even when
+// their scalar result range remains unchanged. Publish the structured owner
+// directly so an ambient bound change cannot leave a stale loop induction.
+static iree_status_t loom_rewriter_add_condition_region_summary(
+    loom_rewriter_t* rewriter, loom_op_t* op) {
+  loom_op_t* child = op;
+  for (loom_op_t* parent = op->parent_op; parent;
+       child = parent, parent = parent->parent_op) {
+    const loom_loop_like_t loop = loom_loop_like_cast(rewriter->module, parent);
+    loom_region_t* condition = loom_loop_like_condition_region(loop);
+    if (condition && child->parent_block->parent_region == condition) {
+      const loom_rewriter_fact_entry_t* entry =
+          loom_rewriter_find_fact_entry(rewriter, parent);
+      if (entry && (entry->flags & LOOM_REWRITER_FACT_ACTIVE)) {
+        continue;
+      }
+      IREE_RETURN_IF_ERROR(loom_rewriter_add_changed_fact_equation(
+          rewriter, parent, LOOM_REWRITER_USER_CHANGE_FLAG_SEMANTIC,
+          /*inputs_changed=*/true));
+    }
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_rewriter_add_changed_fact_user(
     loom_rewriter_t* rewriter, loom_op_t* op,
     loom_rewriter_user_change_flags_t flags) {
-  return loom_rewriter_add_changed_fact_equation(rewriter, op, flags, true);
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_add_changed_fact_equation(rewriter, op, flags, true));
+  return loom_rewriter_add_condition_region_summary(rewriter, op);
 }
 
 iree_status_t loom_rewriter_add_fact_block(loom_rewriter_t* rewriter,
@@ -1185,7 +1211,7 @@ static iree_status_t loom_rewriter_release_fact_summaries(
   return status;
 }
 
-static iree_status_t loom_rewriter_update_loop_body(
+static iree_status_t loom_rewriter_update_loop_region(
     void* user_data, loom_region_t* region, uint16_t arg_offset,
     const loom_value_facts_t* facts, uint16_t count) {
   loom_rewriter_t* rewriter = user_data;
@@ -1197,10 +1223,13 @@ static iree_status_t loom_rewriter_update_loop_body(
     const loom_value_id_t argument = loom_block_arg_id(block, arg_offset + i);
     const loom_value_facts_t previous =
         loom_value_fact_table_lookup(rewriter->fact_table, argument);
+    const loom_value_facts_t current =
+        loom_value_fact_table_refine_definition_domain(rewriter->module,
+                                                       argument, facts[i]);
     status =
-        loom_value_fact_table_define(rewriter->fact_table, argument, facts[i]);
+        loom_value_fact_table_define(rewriter->fact_table, argument, current);
     if (iree_status_is_ok(status) &&
-        !loom_value_facts_equal(previous, facts[i])) {
+        !loom_value_facts_equal(previous, current)) {
       status =
           loom_rewriter_add_users_to_worklist(rewriter, argument, /*flags=*/0);
     }
@@ -1251,7 +1280,7 @@ static iree_status_t loom_rewriter_compute_updated_loop_facts(
   pending->ready = NULL;
   loom_value_fact_loop_update_t* previous_update = table->loop_update;
   loom_value_fact_loop_update_t update = {
-      .op = op, .user_data = rewriter, .fn = loom_rewriter_update_loop_body};
+      .op = op, .user_data = rewriter, .fn = loom_rewriter_update_loop_region};
   table->loop_update = &update;
   iree_status_t status = loom_value_fact_table_compute_op_summary(
       table, rewriter->module, op, out_changed);
@@ -1295,15 +1324,55 @@ static iree_status_t loom_rewriter_update_op_facts(loom_rewriter_t* rewriter,
   }
   bool facts_changed = false;
   iree_status_t status;
-  const loom_loop_like_t loop = !inputs_changed && op->region_count
-                                    ? loom_loop_like_cast(rewriter->module, op)
-                                    : (loom_loop_like_t){0};
-  if (loom_loop_like_isa(loop) && loom_loop_like_has_counted_range(loop) &&
-      !loom_loop_like_condition_region(loop) &&
-      !rewriter->fact_table->context.refine_operands.fn) {
+  const loom_op_vtable_t* vtable =
+      op->region_count ? loom_op_vtable(rewriter->module, op) : NULL;
+  const loom_loop_like_t loop =
+      vtable && vtable->loop_like
+          ? (loom_loop_like_t){.op = op, .vtable = vtable->loop_like}
+          : (loom_loop_like_t){0};
+  const bool maintains_structured_facts =
+      !rewriter->fact_table->context.refine_operands.fn;
+  const bool maintains_loop = maintains_structured_facts &&
+                              loom_loop_like_isa(loop) &&
+                              (loom_loop_like_has_counted_range(loop) ||
+                               loom_loop_like_condition_region(loop));
+  if (inputs_changed && (maintains_loop || (maintains_structured_facts &&
+                                            vtable && vtable->region_branch))) {
+    loom_value_facts_t previous_iv = loom_value_facts_unknown();
+    const loom_value_id_t iv = loom_loop_like_iv(loop);
+    if (iv != LOOM_VALUE_ID_INVALID) {
+      previous_iv = loom_value_fact_table_lookup(rewriter->fact_table, iv);
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_rewriter_seed_nested_execution_facts(rewriter, op));
+    if (iv != LOOM_VALUE_ID_INVALID) {
+      const loom_value_facts_t current_iv =
+          loom_value_fact_table_lookup(rewriter->fact_table, iv);
+      const loom_rewriter_fact_entry_t* entry =
+          loom_rewriter_find_fact_entry(rewriter, op);
+      const bool semantics_changed =
+          entry && (entry->flags & LOOM_REWRITER_FACT_INVALIDATED);
+      if (semantics_changed ||
+          !loom_value_fact_table_facts_equal_for_type(
+              rewriter->module, loom_module_value_type(rewriter->module, iv),
+              rewriter->fact_table, previous_iv, rewriter->fact_table,
+              current_iv)) {
+        IREE_RETURN_IF_ERROR(loom_rewriter_add_users_to_worklist(
+            rewriter, iv,
+            semantics_changed ? LOOM_REWRITER_USER_CHANGE_FLAG_SEMANTIC : 0));
+      }
+    }
+  }
+  if (maintains_loop) {
     rewriter->fact_table->replaying = true;
     status =
         loom_rewriter_compute_updated_loop_facts(rewriter, op, &facts_changed);
+  } else if (maintains_structured_facts && vtable && vtable->region_branch) {
+    // Branch inputs select the result join; ordinary value facts inside each
+    // disjoint SSA region remain current. Conditioned analysis retains its
+    // recursive path above because its callback can refine every body value.
+    status = loom_value_fact_table_compute_op_summary(
+        rewriter->fact_table, rewriter->module, op, &facts_changed);
   } else {
     status =
         inputs_changed

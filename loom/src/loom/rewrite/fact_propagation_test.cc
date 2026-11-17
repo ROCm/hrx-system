@@ -20,6 +20,7 @@
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/pass/value_facts.h"
@@ -75,6 +76,9 @@ class FactPropagationTest : public ::testing::Test {
     vtables = loom_index_dialect_vtables(&vtable_count);
     IREE_ASSERT_OK(loom_context_register_dialect(
         &context_, LOOM_DIALECT_INDEX, vtables, (uint16_t)vtable_count));
+    vtables = loom_scalar_dialect_vtables(&vtable_count);
+    IREE_ASSERT_OK(loom_context_register_dialect(
+        &context_, LOOM_DIALECT_SCALAR, vtables, (uint16_t)vtable_count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"),
                                         &block_pool_, NULL,
@@ -1777,6 +1781,171 @@ INSTANTIATE_TEST_SUITE_P(
                                          LOOM_SCALAR_TYPE_OFFSET),
                        ::testing::Values(uint8_t{32}, uint8_t{64}),
                        ::testing::Bool()));
+
+// An inner condition loop can consume the evolving induction value of its
+// enclosing loop without carrying that value itself. Re-evaluating the outer
+// feedback must rebuild the inner recurrence for each outer state; facts from
+// the first inner iteration cannot escape as its maintained summary.
+class NestedConditionLoopFactsRewriteTest
+    : public FactPropagationTest,
+      public ::testing::WithParamInterface<bool> {};
+
+TEST_P(NestedConditionLoopFactsRewriteTest,
+       MaintainsInnerSummaryWhileOuterFactsWiden) {
+  const bool scalar = GetParam();
+  const auto type =
+      loom_type_scalar(scalar ? LOOM_SCALAR_TYPE_I64 : LOOM_SCALAR_TYPE_INDEX);
+  auto constant = [&](int64_t value) {
+    loom_op_t* op = nullptr;
+    IREE_EXPECT_OK(loom_test_constant_build(&builder_, loom_attr_i64(value),
+                                            type, LOOM_LOCATION_UNKNOWN, &op));
+    return op;
+  };
+  auto* zero = constant(0);
+  auto* outer_step = constant(1);
+  auto* limit = constant(4);
+  auto* inner_step = constant(1);
+  struct LoopBody {
+    loom_op_t* loop;
+    loom_value_id_t position;
+    loom_builder_t builder;
+  };
+  auto build_loop = [&](loom_builder_t* parent, loom_value_id_t initial,
+                        loom_value_id_t limit) {
+    loom_op_t* loop = nullptr;
+    IREE_EXPECT_OK(
+        loom_scf_while_build(parent, &initial, 1, /*iter_args_types=*/nullptr,
+                             /*result_types=*/nullptr, /*result_count=*/1,
+                             nullptr, 0, LOOM_LOCATION_UNKNOWN, &loop));
+    const auto loop_like = loom_loop_like_cast(module_, loop);
+    auto* before = loom_loop_like_condition_region(loop_like);
+    auto* before_block = loom_region_entry_block(before);
+    const auto counter = loom_block_arg_id(before_block, 0);
+    auto before_builder = *parent;
+    loom_builder_enter_region(&before_builder, loop, before);
+    loom_builder_set_block(&before_builder, before_block);
+    loom_op_t* compare = nullptr;
+    if (scalar) {
+      IREE_EXPECT_OK(loom_scalar_cmpi_build(
+          &before_builder, LOOM_SCALAR_CMPI_PREDICATE_SLT, counter, limit,
+          LOOM_LOCATION_UNKNOWN, &compare));
+    } else {
+      IREE_EXPECT_OK(loom_index_cmp_build(
+          &before_builder, LOOM_INDEX_CMP_PREDICATE_SLT, counter, limit,
+          LOOM_LOCATION_UNKNOWN, &compare));
+    }
+    loom_op_t* condition_op = nullptr;
+    IREE_EXPECT_OK(loom_scf_condition_build(
+        &before_builder, *loom_op_results(compare), &counter, 1,
+        LOOM_LOCATION_UNKNOWN, &condition_op));
+
+    auto* body = loom_loop_like_body(loop_like);
+    auto* body_block = loom_region_entry_block(body);
+    auto body_builder = *parent;
+    loom_builder_enter_region(&body_builder, loop, body);
+    loom_builder_set_block(&body_builder, body_block);
+    return LoopBody{loop, loom_block_arg_id(body_block, 0), body_builder};
+  };
+
+  const auto zero_value = loom_test_constant_result(zero);
+  auto outer =
+      build_loop(&builder_, zero_value, loom_test_constant_result(limit));
+  auto inner = build_loop(&outer.builder, zero_value, outer.position);
+  loom_op_t* inner_next = nullptr;
+  if (scalar) {
+    IREE_ASSERT_OK(loom_scalar_addi_build(&inner.builder, 0, inner.position,
+                                          loom_test_constant_result(inner_step),
+                                          type, LOOM_LOCATION_UNKNOWN,
+                                          &inner_next));
+  } else {
+    IREE_ASSERT_OK(loom_index_add_build(
+        &inner.builder, inner.position, loom_test_constant_result(inner_step),
+        type, LOOM_LOCATION_UNKNOWN, &inner_next));
+  }
+  const auto inner_next_value = *loom_op_results(inner_next);
+  loom_op_t* inner_yield = nullptr;
+  IREE_ASSERT_OK(loom_scf_yield_build(&inner.builder, &inner_next_value, 1,
+                                      LOOM_LOCATION_UNKNOWN, &inner_yield));
+
+  loom_op_t* outer_next = nullptr;
+  if (scalar) {
+    IREE_ASSERT_OK(loom_scalar_addi_build(&outer.builder, 0, outer.position,
+                                          loom_test_constant_result(outer_step),
+                                          type, LOOM_LOCATION_UNKNOWN,
+                                          &outer_next));
+  } else {
+    IREE_ASSERT_OK(loom_index_add_build(
+        &outer.builder, outer.position, loom_test_constant_result(outer_step),
+        type, LOOM_LOCATION_UNKNOWN, &outer_next));
+  }
+  const auto outer_next_value = *loom_op_results(outer_next);
+  loom_op_t* outer_yield = nullptr;
+  IREE_ASSERT_OK(loom_scf_yield_build(&outer.builder, &outer_next_value, 1,
+                                      LOOM_LOCATION_UNKNOWN, &outer_yield));
+  loom_op_t* return_op = nullptr;
+  IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &return_op));
+
+  const auto scope = loom_pass_value_fact_scope_function(function_);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&block_pool_, &arena);
+  loom_pass_value_fact_owner_t owner;
+  loom_pass_value_fact_owner_initialize(&block_pool_, &owner);
+  loom_value_fact_table_t* facts = nullptr;
+  IREE_ASSERT_OK(
+      loom_pass_value_fact_owner_acquire(&owner, module_, scope, &facts));
+  loom_rewriter_t rewriter;
+  loom_rewriter_initialize(&rewriter, module_, &arena);
+  IREE_ASSERT_OK(loom_rewriter_enable_worklist(&rewriter));
+  loom_rewriter_attach_value_facts(&rewriter, facts);
+
+  for (int iteration = 0; iteration < 2; ++iteration) {
+    IREE_ASSERT_OK(
+        loom_rewriter_add_fact_user_to_worklist(&rewriter, outer.loop));
+    IREE_ASSERT_OK(loom_rewriter_propagate_value_facts(&rewriter));
+    bool observed_inner_update = false;
+    while (loom_op_t* op = loom_rewriter_pop(&rewriter)) {
+      // The greedy driver publishes pending facts before each rewrite
+      // observation. A provisional zero-trip inner summary must not escape
+      // while the enclosing loop is still widening its captured bound.
+      IREE_ASSERT_OK(loom_rewriter_propagate_value_facts(&rewriter));
+      if (op == inner_next) {
+        observed_inner_update = true;
+        EXPECT_FALSE(loom_value_facts_is_exact(
+            loom_value_fact_table_lookup(facts, inner.position)));
+      }
+    }
+    EXPECT_TRUE(observed_inner_update);
+
+    loom_pass_value_fact_owner_t fresh_owner;
+    loom_pass_value_fact_owner_initialize(&block_pool_, &fresh_owner);
+    loom_value_fact_table_t* fresh = nullptr;
+    IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(&fresh_owner, module_,
+                                                      scope, &fresh));
+    loom_value_fact_scope_iterator_t iterator;
+    loom_value_fact_table_scope_begin(fresh, &iterator);
+    for (loom_value_id_t value = loom_value_fact_scope_next(&iterator);
+         value != LOOM_VALUE_ID_INVALID;
+         value = loom_value_fact_scope_next(&iterator)) {
+      const auto actual = loom_value_fact_table_lookup(facts, value);
+      const auto expected = loom_value_fact_table_lookup(fresh, value);
+      EXPECT_TRUE(loom_value_fact_table_facts_equal_for_type(
+          module_, loom_module_value_type(module_, value), facts, actual, fresh,
+          expected))
+          << iteration << ":" << value << " actual [" << actual.range_lo << ", "
+          << actual.range_hi << "] expected [" << expected.range_lo << ", "
+          << expected.range_hi << "]";
+    }
+    loom_pass_value_fact_owner_deinitialize(&fresh_owner);
+  }
+
+  loom_rewriter_deinitialize(&rewriter);
+  loom_pass_value_fact_owner_deinitialize(&owner);
+  iree_arena_deinitialize(&arena);
+}
+
+INSTANTIATE_TEST_SUITE_P(IndexAndScalar, NestedConditionLoopFactsRewriteTest,
+                         ::testing::Bool());
 
 class StructuredForwardingFactsRewriteTest
     : public FactPropagationTest,

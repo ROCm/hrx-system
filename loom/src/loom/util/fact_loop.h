@@ -18,17 +18,17 @@
 extern "C" {
 #endif
 
-// Scoped evaluator for a counted loop whose body equations are already current.
-// The solver retains widening, recurrence, and exact-replay policy; the updater
-// publishes changed carried arguments and all affected body facts before
+// Scoped evaluator for a loop whose independent region equations are already
+// current. The solver retains widening, recurrence, and exact-replay policy;
+// the updater publishes changed region arguments and all dependent facts before
 // return. Nested loops keep their own evaluator unless explicitly bound in
 // turn.
 typedef struct loom_value_fact_loop_update_t {
-  // Counted loop whose body is maintained by this updater.
+  // Loop whose regions are maintained by this updater.
   loom_op_t* op;
   // Borrowed owner of the maintained dependency/publication machinery.
   void* user_data;
-  // Defines the carried arguments and completes their dependent equations.
+  // Defines region arguments and completes their dependent equations.
   iree_status_t (*fn)(void* user_data, loom_region_t* region,
                       uint16_t argument_offset, const loom_value_facts_t* facts,
                       uint16_t count);

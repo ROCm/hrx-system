@@ -171,6 +171,15 @@ static loom_value_facts_t loom_value_fact_table_clamp_extent_domain(
       type, loom_value_facts_non_negative_extent(facts));
 }
 
+loom_value_facts_t loom_value_fact_table_refine_definition_domain(
+    const loom_module_t* module, loom_value_id_t value_id,
+    loom_value_facts_t facts) {
+  const loom_type_t type = loom_module_value_type(module, value_id);
+  return loom_value_fact_table_has_extent_domain(module, value_id, type)
+             ? loom_value_fact_table_clamp_extent_domain(type, facts)
+             : loom_value_fact_table_clamp_scalar_type_domain(type, facts);
+}
+
 static iree_status_t loom_value_fact_table_seed_value_arg(
     loom_value_fact_table_t* table, const loom_module_t* module,
     loom_value_id_t value_id, const loom_target_facts_t* parameter_target) {
@@ -431,12 +440,10 @@ static iree_status_t loom_value_fact_table_seed_block_args(
             loom_value_fact_table_define(table, value_id, facts));
       }
     }
-    if (loom_value_fact_table_has_extent_domain(module, value_id, type)) {
-      IREE_RETURN_IF_ERROR(loom_value_fact_table_define(
-          table, value_id,
-          loom_value_fact_table_clamp_extent_domain(
-              type, loom_value_fact_table_lookup(table, value_id))));
-    }
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_define(
+        table, value_id,
+        loom_value_fact_table_refine_definition_domain(
+            module, value_id, loom_value_fact_table_lookup(table, value_id))));
   }
   return loom_value_fact_table_seed_loop_iv_arg(table, module, block,
                                                 parent_op);
@@ -660,12 +667,8 @@ static iree_status_t loom_value_fact_table_compute_cfg_block_arg(
         component ? region->arguments[component->nodes[member]].value_id
                   : arg_id;
     loom_type_t member_type = loom_module_value_type(module, value_id);
-    const bool is_extent =
-        loom_value_fact_table_has_extent_domain(module, value_id, member_type);
-    loom_value_facts_t facts = incoming_facts;
-    if (is_extent) {
-      facts = loom_value_fact_table_clamp_extent_domain(member_type, facts);
-    }
+    loom_value_facts_t facts = loom_value_fact_table_refine_definition_domain(
+        module, value_id, incoming_facts);
     if (widen && !exits_at_header &&
         loom_value_fact_table_has_entry(table, value_id)) {
       loom_value_facts_t current_facts =
@@ -673,9 +676,8 @@ static iree_status_t loom_value_fact_table_compute_cfg_block_arg(
       IREE_RETURN_IF_ERROR(loom_value_fact_table_widen_for_type(
           table, module, member_type, table, current_facts, table, facts,
           feedback_round, &facts));
-      if (is_extent) {
-        facts = loom_value_fact_table_clamp_extent_domain(member_type, facts);
-      }
+      facts = loom_value_fact_table_refine_definition_domain(module, value_id,
+                                                             facts);
     }
     facts = loom_value_fact_table_refine_cfg_recurrence(table, module, region,
                                                         value_id, facts);
@@ -1169,11 +1171,8 @@ loom_value_fact_table_publish_result(loom_value_fact_table_t* table,
                                      loom_value_facts_t facts,
                                      bool* out_changed) {
   const loom_type_t type = loom_module_value_type(module, result);
-  if (loom_value_fact_table_has_extent_domain(module, result, type)) {
-    facts = loom_value_facts_non_negative_extent(facts);
-  }
-  // Inference may be less precise than the verified scalar result type.
-  facts = loom_value_fact_table_clamp_scalar_type_domain(type, facts);
+  // Inference may be less precise than the verified definition domain.
+  facts = loom_value_fact_table_refine_definition_domain(module, result, facts);
   table->result_type_kind_bits |= UINT32_C(1) << loom_type_kind(type);
   loom_value_facts_t previous;
   const bool defined =
