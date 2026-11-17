@@ -485,8 +485,7 @@ command.def public @dynamic_counts() launch(%storage: buffer) {
   EXPECT_FALSE(loomc_cmd_program_product_layout(product.get(), 4, &layout));
   EXPECT_FALSE(loomc_cmd_program_product_layout(product.get(), 0, nullptr));
   EXPECT_EQ(layout.command_count, 999u);
-  loomc_cmd_command_t invalid_command = {};
-  invalid_command.argument_count = 999;
+  loomc_cmd_command_t invalid_command = {.argument_count = 999};
   EXPECT_FALSE(loomc_cmd_program_product_command_at(product.get(), 0, SIZE_MAX,
                                                     &invalid_command));
   EXPECT_EQ(invalid_command.argument_count, 999u);
