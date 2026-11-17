@@ -398,6 +398,13 @@ static iree_status_t loom_target_pipeline_build_cleanup_body(
   return loom_target_pipeline_build_cleanup(builder);
 }
 
+static iree_status_t loom_target_pipeline_build_combining_cleanup_body(
+    loom_builder_t* builder, void* user_data) {
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_combine_body(builder, user_data));
+  return loom_target_pipeline_build_run(builder, IREE_SV("cse"));
+}
+
 static iree_status_t loom_target_pipeline_build_cleanup_if_changed(
     loom_builder_t* builder) {
   loom_op_t* if_changed_op = NULL;
@@ -497,7 +504,12 @@ static iree_status_t loom_target_pipeline_build_source_loop_unrolling(
   (void)user_data;
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_run(builder, IREE_SV("unroll-scf-for")));
-  return loom_target_pipeline_build_cleanup_if_changed(builder);
+  // Expansion exposes source combines across iterations, including complete
+  // vector constructions that native lowering must see as one operation.
+  loom_op_t* if_changed_op = NULL;
+  return loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_combining_cleanup_body, NULL,
+      &if_changed_op);
 }
 
 static iree_status_t
