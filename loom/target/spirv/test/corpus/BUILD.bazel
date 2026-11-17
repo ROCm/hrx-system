@@ -548,7 +548,7 @@ _SPIRV_EXECUTION_XFAILS = {
     "numeric/float/scalar_f32.loom:@scalar_f32_values": "LOWERING/036",
     "numeric/float/trigonometry.loom:@ordinary_trigonometry": "LOWERING/036",
     "numeric/float/turns.loom:@turn_values": "LOWERING/036",
-    "numeric/matrix/nvfp4.loom:@nvfp4_matrix_values": "TARGET/002",
+    "numeric/matrix/nvfp4.loom:@nvfp4_matrix_values": "TARGET/031",
     # BF16-capable profiles reject unsupported BF16 FMA; other devices reject
     # the narrow carrier before arithmetic selection.
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16_values": "TARGET/002,TARGET/003",
