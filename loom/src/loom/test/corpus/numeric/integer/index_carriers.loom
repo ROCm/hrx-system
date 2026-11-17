@@ -164,8 +164,8 @@ check.scenario @signed_index_values {
   check.return
 }
 
-// Ordinary signed coordinates remain native on 32-bit targets. The scalar
-// oracle shares no index arithmetic with the subject.
+// Runtime words have no static bounds; valid inputs still use ordinary native
+// arithmetic on 32-bit targets. The oracle uses only fixed-width arithmetic.
 func.def @native_index_observations(%input: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %begin = index.constant 0 : index
@@ -177,8 +177,7 @@ func.def @native_index_observations(%input: buffer, %output: buffer) {
   %results = buffer.view %output[%origin] : buffer -> view<7x5xi32>
   scf.for %row = [%begin to %end step %step] {
     %input_value = view.load %inputs[%row] : view<7xi32> -> i32
-    %bounded = scalar.assume %input_value [range(%input_value, -3, 3)] : i32
-    %coordinate = index.cast %bounded : i32 to index
+    %coordinate = index.cast %input_value : i32 to index
     %scaled = index.mul %coordinate, %factor : index
     %negative = index.sub %scaled, %bias : index
     %shifted = index.shrsi %negative, %step : index

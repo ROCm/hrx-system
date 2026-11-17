@@ -148,3 +148,26 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @copy_signed_origin(%a
   v128.store %22, %values
   return
 }
+
+// ====
+
+// A supplied origin may be an interior pointer. Native memory arithmetic does
+// not need a proof that every possible dynamic displacement fits the carrier.
+func.def @dynamic_signed_origin(%input: buffer, %origin: index, %position: i32) -> (i32) {
+  %coordinate = index.cast %position : i32 to index
+  %bytes = index.constant 4 : index
+  %displacement = index.madd %coordinate, %bytes, %origin : index
+  %view = buffer.view %input[%displacement] : buffer -> view<1xi32>
+  %value = view.load %view[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @dynamic_signed_origin(%input: reg<wasm.i32>, %origin: reg<wasm.i32>, %coordinate: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %bytes = i32.const 4
+  %14 = i32.mul %coordinate, %bytes
+  %displacement = i32.add %14, %origin
+  %16 = i32.add %input, %displacement
+  %value = i32.load %16
+  return %value
+}

@@ -111,8 +111,8 @@ func.def target(@target) @mixed_intervals(%left: index, %right: index) -> (i64, 
 
 // ====
 
-// A target with no wide carrier cannot assign narrow facts to unsupported wide
-// values. Legality diagnoses the unsupported producer; analysis stays unknown.
+// A target with no wide carrier cannot assign narrow facts to overflowing
+// values. Native arithmetic is permitted; its numeric result is unspecified.
 test.target<quirky> @target
 
 func.def target(@target) @unsupported_wide_intervals(%left: index, %right: index) -> (i64, i64, i64, i64) {

@@ -342,3 +342,40 @@ func.def target(@nested_narrow) @nested_conditioned_index(%input: index) -> (ind
   %selected = index.assume %19 [range(%19, 0, 9)] : index
   func.return %selected : index
 }
+
+// ====
+
+// Runtime overflow is permitted without a compile-time proof, but that does
+// not make index arithmetic safe to execute speculatively on another edge.
+// RUN: pass canonicalize,canonicalize
+
+test.target<quirky> @target
+
+func.def target(@target) @native_index_stays_guarded(%condition: i1, %input: i32) -> (index) {
+  %position = index.cast %input : i32 to index
+  %factor = index.constant 4 : index
+  %c0 = index.constant 0 : index
+  %selected = scf.if %condition -> (index) {
+    %scaled = index.mul %position, %factor : index
+    scf.yield %scaled : index
+  } else {
+    scf.yield %c0 : index
+  }
+  func.return %selected : index
+}
+
+// ----
+test.target<quirky> @target
+
+func.def target(@target) @native_index_stays_guarded(%condition: i1, %input: i32) -> (index) {
+  %position = index.cast %input : i32 to index
+  %c0 = index.constant 0 : index
+  %selected = scf.if %condition -> (index) {
+    %8 = index.constant 2 : index
+    %scaled = index.shli %position, %8 : index
+    scf.yield %scaled : index
+  } else {
+    scf.yield %c0 : index
+  }
+  func.return %selected : index
+}

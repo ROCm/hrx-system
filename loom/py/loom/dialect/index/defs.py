@@ -61,7 +61,16 @@ __all__ = [
 index_ops = Dialect(
     "index",
     dialect_id=0x0F,
-    doc=("Scalar address-domain operations over index, offset, and explicit integer boundary casts."),
+    doc=(
+        "Scalar address-domain operations over index, offset, and explicit "
+        "integer boundary casts. Index arithmetic uses mathematical values "
+        "within the target's supported carriers. Overflow beyond those "
+        "carriers has no defined numeric result and does not require a "
+        "compile-time range proof or runtime check. Targets may use native "
+        "arithmetic; folding and facts describe non-overflowing executions. "
+        "Offset arithmetic wraps in its unsigned target carrier. Neither "
+        "contract changes memory bounds or reference safety."
+    ),
 )
 
 IndexPredicate = EnumDef(

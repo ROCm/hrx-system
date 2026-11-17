@@ -33,3 +33,16 @@ low.func.def public target<wasm.core.simd128> abi(wasm_function) @exchange(%poin
   i32.store %46, %replacement
   return %previous
 }
+
+// ====
+
+// The source data model does not widen the target's native pointer carrier.
+// INPUT: cxx data-model=lp64
+int read(const int* pointer) { return *pointer; }
+
+// ----
+low.func.def public target<wasm.core.simd128> abi(wasm_function) @read(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %8 = i32.add %pointer, %pointer_byte_offset
+  %9 = i32.load %8
+  return %9
+}

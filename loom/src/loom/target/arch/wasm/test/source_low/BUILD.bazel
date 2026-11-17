@@ -21,7 +21,6 @@ loom_check_test_suite(
     name = "cxx_test",
     srcs = [
         "wasm_lowering.cxx-test",
-        "wasm_lowering_invalid.cxx-test",
         "wasm_pointer_narrowing.cxx-test",
     ],
     target_compatible_with = loom_config_compatible_with([
