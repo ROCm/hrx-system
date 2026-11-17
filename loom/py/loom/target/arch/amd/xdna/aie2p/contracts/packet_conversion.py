@@ -14,6 +14,9 @@ from itertools import product
 from loom.dialect.encoding import defs as encoding
 from loom.dialect.vector import defs as vector
 from loom.dsl import EncodingOperandSummaryDef, Op
+from loom.target.arch.amd.xdna.aie2p.contracts.bfloat_widening import (
+    AIE2P_BFLOAT_WIDENING_RULES,
+)
 from loom.target.arch.amd.xdna.aie2p.contracts.data_path import (
     BF16_CONVERSION_ROUNDING,
     I8_INTERLEAVE_CONTROL,
@@ -3293,108 +3296,6 @@ class _ExactBF16NarrowingState:
     quiet_nan_bit: ValueRef
 
 
-def _bind_exact_bf16_widening_results(
-    program: PacketProgram,
-    results: tuple[ValueRef, ...],
-    rule_shape: FloatPacketRuleShape,
-) -> None:
-    """Binds one or two exact binary32 packet results to the source result."""
-
-    if len(results) == 1:
-        return
-    if rule_shape.minimum_lane_count == rule_shape.maximum_lane_count == 32:
-        accumulator_results = tuple(
-            program.operation(
-                f"chunk_{index}_accumulator",
-                "move.vector512.to.accumulator512",
-                "dst",
-                src=result,
-            )
-            for index, result in enumerate(results)
-        )
-        program.emits.append(
-            EmitRegisterConcat(
-                sources=accumulator_results,
-                result=ValueRef.result("result"),
-                result_type=_exact_vector("f32", 32),
-            )
-        )
-    else:
-        program.emits.append(
-            EmitRegisterConcat(sources=results, result=ValueRef.result("result"))
-        )
-
-
-def _exact_bf16_to_f32_emits(
-    rule_shape: FloatPacketRuleShape,
-    *,
-    result_in_accumulator: bool = False,
-) -> tuple[ContractEmit, ...]:
-    """Widens bfloat16 bits exactly, including bfloat16 subnormals."""
-
-    program = PacketProgram(32, "bf16_exact_widen_")
-    program.state("saturation", 1)
-    program.state("ups-mode", 0)
-    chunks = _float_source_i32_chunks(program, _BF16_PACKET_FORMAT, rule_shape)
-    direct_result = len(chunks) == 1
-    results = tuple(
-        shift_integer_packet_fixed(
-            program,
-            (
-                None
-                if direct_result and not result_in_accumulator
-                else ("result_vector" if direct_result else f"chunk_{index}_result")
-            ),
-            chunk,
-            16,
-        )
-        for index, chunk in enumerate(chunks)
-    )
-    _bind_exact_bf16_widening_results(program, results, rule_shape)
-    if result_in_accumulator:
-        program.emits.append(
-            EmitDescriptorOp(
-                descriptor=_descriptor(
-                    "amd.xdna.aie2p.move.vector512.to.accumulator512.low"
-                ),
-                operands={"src": results[0]},
-                results={"dst": ValueRef.result("result")},
-                form=DescriptorEmitForm.OP,
-            )
-        )
-    return tuple(program.emits)
-
-
-def _exact_bf16_to_f32_vector_rule(
-    rule_shape: FloatPacketRuleShape,
-    *,
-    result_in_accumulator: bool = False,
-) -> DescriptorRule:
-    return DescriptorRule(
-        source_op=vector.vector_extf,
-        descriptor=_descriptor("amd.xdna.aie2p.narrow.2x.c-to-x.unsigned.configured"),
-        guards=(
-            Guard.value_type("input", rule_shape.vector_type("bf16")),
-            Guard.value_type("result", rule_shape.vector_type("f32")),
-            *(
-                (
-                    Guard.low_value_register_class(
-                        "result",
-                        ("aie2p.ebmll" if result_in_accumulator else "aie2p.vec256"),
-                    ),
-                )
-                if rule_shape.native_lane_count == 16
-                else ()
-            ),
-        ),
-        emit=_exact_bf16_to_f32_emits(
-            rule_shape,
-            result_in_accumulator=result_in_accumulator,
-        ),
-        report_key="exact_bfloat16_to_binary32_packet",
-    )
-
-
 def _exact_f32_chunk_to_bf16(
     program: PacketProgram,
     source: ValueRef,
@@ -4316,22 +4217,16 @@ AIE2P_PACKET_CONVERSION_RULES = (
         )
     ),
     *(
-        rule
+        _exact_f32_to_bf16_vector_rule(
+            rule_shape,
+            input_in_accumulator=carrier_in_accumulator,
+        )
         for rule_shape in _EXACT_FLOAT_PACKET_RULE_SHAPES
         for carrier_in_accumulator in (
             (False, True) if rule_shape.native_lane_count == 16 else (False,)
         )
-        for rule in (
-            _exact_f32_to_bf16_vector_rule(
-                rule_shape,
-                input_in_accumulator=carrier_in_accumulator,
-            ),
-            _exact_bf16_to_f32_vector_rule(
-                rule_shape,
-                result_in_accumulator=carrier_in_accumulator,
-            ),
-        )
     ),
+    *AIE2P_BFLOAT_WIDENING_RULES,
     *(
         rule
         for float16_format in _EXACT_FLOAT16_PACKET_FORMATS

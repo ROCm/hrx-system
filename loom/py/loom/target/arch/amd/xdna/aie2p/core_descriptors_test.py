@@ -42,6 +42,7 @@ from loom.target.low_descriptors import (
     EffectKind,
     ImmediateFlag,
     ImmediateKind,
+    InstructionClass,
     OperandFlag,
     OperandRole,
     RegClassAltFlag,
@@ -1215,6 +1216,8 @@ def test_state_free_vector_broadcasts_can_rematerialize() -> None:
             OperandFlag.IMPLICIT not in operand.flags for operand in descriptor.operands
         )
         assert rematerializable in descriptor.constraints
+        if ".splat." in descriptor.semantic_tag:
+            assert InstructionClass.REGISTER_MOVE in descriptor.instruction_classes
 
 
 def test_state_free_vector_bitwise_results_can_rematerialize() -> None:

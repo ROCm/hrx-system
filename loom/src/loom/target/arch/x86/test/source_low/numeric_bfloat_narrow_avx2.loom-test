@@ -56,3 +56,53 @@ low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = 
   %result = vpunpcklqdq.xmm %21, %22
   return %result
 }
+
+// ====
+
+// A conversion recipe can admit three logical lanes without an aggregate
+// carrier. Keep the two-lane packet and scalar tail through their stores.
+func.def @narrow_odd_memory(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<3xf32>
+  %outputs = buffer.view %output[%origin] : buffer -> view<3xbf16>
+  %values = vector.load %inputs[0] : view<3xf32> -> vector<3xf32>
+  %result = vector.fptrunc %values : vector<3xf32> to vector<3xbf16>
+  vector.store %result, %outputs[0] : vector<3xbf16>, view<3xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) @narrow_odd_memory(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %15 = vpbroadcastd.load.xmm %input {disp32 = 8}
+  %16 = vmovsd.load.xmm %input {disp32 = 0}
+  %17 = avx2.vmovdqu.rodata.xmm @__low_rodata_584ef5ef
+  %18 = avx2.vmovdqu.rodata.xmm @__low_rodata_476c7367
+  %19 = avx2.vmovdqu.rodata.xmm @__low_rodata_233509ff
+  %20 = avx2.vmovdqu.rodata.xmm @__low_rodata_d04f526f
+  %21 = avx2.vmovdqu.rodata.xmm @__low_rodata_199e8f8f
+  %22 = vpsrld.xmm %16, 16
+  %23 = vpand.xmm %22, %17
+  %24 = vpaddd.xmm %23, %18
+  %25 = vpaddd.xmm %16, %24
+  %26 = vpsrld.xmm %25, 16
+  %27 = vpand.xmm %16, %19
+  %28 = vpcmpgtd.xmm %27, %20
+  %29 = vpor.xmm %22, %21
+  %30 = vpblendvb.xmm %26, %29, %28
+  %31 = avx2.vmovdqu.rodata.xmm @__low_rodata_aa06e16f
+  %32 = vpshufb.xmm %30, %31
+  %38 = vpsrld.xmm %15, 16
+  %39 = vpand.xmm %38, %17
+  %40 = vpaddd.xmm %39, %18
+  %41 = vpaddd.xmm %15, %40
+  %42 = vpsrld.xmm %41, 16
+  %43 = vpand.xmm %15, %19
+  %44 = vpcmpgtd.xmm %43, %20
+  %45 = vpor.xmm %38, %21
+  %46 = vpblendvb.xmm %42, %45, %44
+  %48 = vpshufb.xmm %46, %31
+  vmovss.store.xmm %32, %output {disp32 = 0}
+  %49 = vpextrw.xmm %48, 0
+  mov.store.u16.gpr32 %49, %output {disp32 = 4}
+  return
+}

@@ -1380,14 +1380,17 @@ static iree_status_t loom_low_lower_record_static_launch_config(
   return iree_ok_status();
 }
 
-static bool loom_low_lower_can_defer_missing_contract(void* user_data,
-                                                      const loom_op_t* op) {
-  const loom_low_lower_context_t* context =
-      (const loom_low_lower_context_t*)user_data;
-  return loom_op_semantics(context->module, op).phase ==
-             LOOM_OP_PHASE_EXECUTABLE &&
-         !loom_low_lower_source_value_storage_op_requires_emission(
-             op, loom_op_effective_traits(context->module, op));
+static iree_status_t loom_low_lower_defer_missing_contract(
+    void* user_data, const loom_op_t* op,
+    const loom_target_contract_query_result_t* result, bool* out_deferred) {
+  loom_low_lower_context_t* context = (loom_low_lower_context_t*)user_data;
+  *out_deferred =
+      loom_op_semantics(context->module, op).phase == LOOM_OP_PHASE_EXECUTABLE;
+  if (!*out_deferred) {
+    return iree_ok_status();
+  }
+  return loom_low_lower_source_query_retain_rejection(context, op,
+                                                      result->rejection);
 }
 
 // Plans borrow stable storage from the caller owning the lowering transaction.
@@ -1551,7 +1554,7 @@ static iree_status_t loom_low_lower_function_plan_build(
         .contract_query = loom_low_lower_source_query_callback(context),
         .defer_missing_contract =
             {
-                .fn = loom_low_lower_can_defer_missing_contract,
+                .fn = loom_low_lower_defer_missing_contract,
                 .user_data = context,
             },
         .type_supported = context->policy->source_type_supported,

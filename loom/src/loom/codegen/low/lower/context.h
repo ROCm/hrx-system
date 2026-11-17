@@ -157,6 +157,8 @@ struct loom_low_lower_context_t {
   loom_low_lower_function_analysis_t function_analysis;
   // Source-graph coverage for the primary fact table, owned by analysis_arena.
   loom_low_lower_source_query_coverage_t* source_query_coverage;
+  // Sparse deferred capability diagnostics owned by analysis_arena.
+  struct loom_low_lower_source_graph_node_index_t* source_query_rejections;
   // Lazy source-graph emission placement state owned by analysis_arena.
   loom_low_lower_source_graph_placement_t* source_graph_placement;
   // Arena reset after each source-op planning callback.

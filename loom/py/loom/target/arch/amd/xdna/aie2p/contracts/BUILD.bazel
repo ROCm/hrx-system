@@ -16,6 +16,7 @@ iree_py_library(
     srcs = [
         "__init__.py",
         "accumulator_structural.py",
+        "bfloat_widening.py",
         "bfp.py",
         "carrier.py",
         "conversion.py",

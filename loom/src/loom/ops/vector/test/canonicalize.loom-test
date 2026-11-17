@@ -525,21 +525,35 @@ func.def @float_resize_roundtrip(%x: vector<4xf16>) -> (vector<4xf16>) {
 
 // ====
 
-// Subnormal permissions prevent exact resize-roundtrip cancellation.
-func.def @relaxed_float_resize_roundtrip(%x: vector<4xf16>) -> (vector<4xf16>, vector<4xf16>) {
+// Other users can observe a relaxed widening's flushed value. Exact widening
+// can be canceled even when the narrowing permits flushing its result.
+func.def @relaxed_float_resize_roundtrip(%x: vector<4xf16>) -> (vector<4xf32>, vector<4xf16>, vector<4xf16>) {
   %wide_input = vector.extf<daz> %x : vector<4xf16> to vector<4xf32>
   %back_input = vector.fptrunc %wide_input : vector<4xf32> to vector<4xf16>
   %wide_result = vector.extf %x : vector<4xf16> to vector<4xf32>
   %back_result = vector.fptrunc<ftz> %wide_result : vector<4xf32> to vector<4xf16>
-  func.return %back_input, %back_result : vector<4xf16>, vector<4xf16>
+  func.return %wide_input, %back_input, %back_result : vector<4xf32>, vector<4xf16>, vector<4xf16>
 }
 // ----
-func.def @relaxed_float_resize_roundtrip(%x: vector<4xf16>) -> (vector<4xf16>, vector<4xf16>) {
+func.def @relaxed_float_resize_roundtrip(%x: vector<4xf16>) -> (vector<4xf32>, vector<4xf16>, vector<4xf16>) {
   %wide_input = vector.extf<daz> %x : vector<4xf16> to vector<4xf32>
   %back_input = vector.fptrunc %wide_input : vector<4xf32> to vector<4xf16>
-  %wide_result = vector.extf %x : vector<4xf16> to vector<4xf32>
-  %back_result = vector.fptrunc<ftz> %wide_result : vector<4xf32> to vector<4xf16>
-  func.return %back_input, %back_result : vector<4xf16>, vector<4xf16>
+  func.return %wide_input, %back_input, %x : vector<4xf32>, vector<4xf16>, vector<4xf16>
+}
+
+// ====
+
+// Wide and ranked vectors retain the same permission semantics as scalars.
+func.def @relaxed_narrowing_permissions(%bfloat: vector<64xbf16>, %single: vector<2x3xf32>) -> (vector<64xbf16>, vector<2x3xf32>) {
+  %wide_bfloat = vector.extf %bfloat : vector<64xbf16> to vector<64xf32>
+  %back_bfloat = vector.fptrunc<daz> %wide_bfloat : vector<64xf32> to vector<64xbf16>
+  %wide_single = vector.extf %single : vector<2x3xf32> to vector<2x3xf64>
+  %back_single = vector.fptrunc<daz|ftz> %wide_single : vector<2x3xf64> to vector<2x3xf32>
+  func.return %back_bfloat, %back_single : vector<64xbf16>, vector<2x3xf32>
+}
+// ----
+func.def @relaxed_narrowing_permissions(%bfloat: vector<64xbf16>, %single: vector<2x3xf32>) -> (vector<64xbf16>, vector<2x3xf32>) {
+  func.return %bfloat, %single : vector<64xbf16>, vector<2x3xf32>
 }
 
 // ====

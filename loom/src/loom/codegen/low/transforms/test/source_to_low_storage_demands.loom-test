@@ -106,3 +106,148 @@ func.def target(@target) @reported_proof(%storage: buffer) {
 COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
 COMPILE-REPORT: source_low selected_ops=1 emitted_ops=0 rows=1 unkeyed_maximum_emitted_ops=0
 COMPILE-REPORT: source_low[0] function=reported_proof source_op=buffer.length selection=plan emitted_ops=0
+
+// ====
+// RUN: pass source-to-low
+
+// A recognized arithmetic family can lack a recipe for a supported carrier.
+// Detailed selection failures obey the same demand rule as missing families.
+test.target<low_core> @target
+
+func.def target(@target) @dead_arithmetic(%left: i8, %right: i8) -> (i8) {
+  %sum = scalar.addi %left, %right : i8
+  func.return %left : i8
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) abi(object_function) @dead_arithmetic(%left: reg<test.i8>, %right: reg<test.i8>) -> (reg<test.i8>) asm {
+  return %left
+}
+
+// ====
+// RUN: pass source-to-low
+
+// An assumption observes the sum as a source predicate, without materializing
+// it. Its returned value still requires the original argument's storage.
+test.target<low_core> @target
+
+func.def target(@target) @arithmetic_proof(%left: i8, %right: i8) -> (i8) {
+  %sum = scalar.addi %left, %right : i8
+  %bounded = scalar.assume %left [lt(%left, %sum)] : i8
+  func.return %bounded : i8
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) abi(object_function) @arithmetic_proof(%bounded: reg<test.i8>, %right: reg<test.i8>) -> (reg<test.i8>) asm {
+  return %bounded
+}
+
+// ====
+// RUN: pass source-to-low
+
+// A native graph can coexist with an unsupported pure producer. Selection of
+// that graph must not force the otherwise unobserved result to materialize.
+test.target<low_core> @target
+
+func.def target(@target) @graph_with_dead_arithmetic(%left: i8, %right: i8, %first: i32, %second: i32, %factor: i32) -> (i32) {
+  %unused = scalar.addi %left, %right : i8
+  %sum = scalar.addi %first, %second : i32
+  %product = scalar.muli %sum, %factor : i32
+  func.return %product : i32
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) abi(object_function) @graph_with_dead_arithmetic(%left: reg<test.i8>, %right: reg<test.i8>, %first: reg<test.i32>, %second: reg<test.i32>, %factor: reg<test.i32>) -> (reg<test.i32>) asm {
+  %product = test.add_mul.i32 %first, %second, %factor
+  return %product
+}
+
+// ====
+// RUN: pass source-to-low
+
+// A guard-specific rejection is retained even when no result needs storage.
+test.target<low_core> @target
+
+func.def target(@target) @dead_offset_view(%storage: buffer) {
+  %offset = index.constant 4 : offset
+  %unused = buffer.view %storage[%offset] : buffer -> view<4xi32>
+  func.return
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) abi(object_function) @dead_offset_view() asm {
+  %storage = resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  return
+}
+
+// ====
+// RUN: pass source-to-low
+
+// The same unsupported arithmetic is an error when its result is observed.
+test.target<low_core> @target
+
+func.def target(@target) @required_arithmetic(%left: i8, %right: i8) -> (i8) {
+  // ERROR@+1: TARGET/002 {op_name="scalar.addi"}
+  %sum = scalar.addi %left, %right : i8
+  func.return %sum : i8
+}
+
+// ====
+// RUN: pass source-to-low
+
+// A surviving graph does not hide a separately demanded unsupported value.
+test.target<low_core> @target
+
+func.def target(@target) @graph_with_required_arithmetic(%left: i8, %right: i8, %first: i32, %second: i32, %factor: i32) -> (i8, i32) {
+  // ERROR@+1: TARGET/002 {op_name="scalar.addi"}
+  %narrow_sum = scalar.addi %left, %right : i8
+  %sum = scalar.addi %first, %second : i32
+  %product = scalar.muli %sum, %factor : i32
+  func.return %narrow_sum, %product : i8, i32
+}
+
+// ====
+// RUN: pass source-to-low
+
+// Descriptor-matrix providers have the same demand boundary as generated
+// rules. The default test target has no native matrix primitive.
+test.target<low_core> @target
+
+func.def target(@target) @dead_matrix(%left_data: vector<4xi32>, %right_data: vector<4xi32>, %seed_data: vector<4xi32>) {
+  %size = index.constant 2 : index
+  %left = vector.fragment<lhs> %left_data shape [%size, %size] : vector<4xi32>
+  %right = vector.fragment<rhs> %right_data shape [%size, %size] : vector<4xi32>
+  %seed = vector.fragment<init> %seed_data shape [%size, %size] : vector<4xi32>
+  %unused = vector.mma %left, %right, %seed : vector<4xi32>, vector<4xi32>, vector<4xi32>
+  func.return
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) abi(object_function) @dead_matrix(%left: reg<test.i32 x4>, %right: reg<test.i32 x4>, %seed: reg<test.i32 x4>) asm {
+  return
+}
+
+// ====
+// RUN: pass source-to-low
+
+test.target<low_core> @target
+
+func.def target(@target) @required_matrix(%left_data: vector<4xi32>, %right_data: vector<4xi32>, %seed_data: vector<4xi32>) -> (vector<4xi32>) {
+  %size = index.constant 2 : index
+  %left = vector.fragment<lhs> %left_data shape [%size, %size] : vector<4xi32>
+  %right = vector.fragment<rhs> %right_data shape [%size, %size] : vector<4xi32>
+  %seed = vector.fragment<init> %seed_data shape [%size, %size] : vector<4xi32>
+  // ERROR@+1: TARGET/001 {op_name="vector.mma"}
+  %result = vector.mma %left, %right, %seed : vector<4xi32>, vector<4xi32>, vector<4xi32>
+  func.return %result : vector<4xi32>
+}

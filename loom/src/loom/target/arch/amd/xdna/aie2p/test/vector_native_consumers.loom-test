@@ -1,0 +1,137 @@
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final},canonicalize,dce
+
+// The multiply-accumulate is native at 32 lanes. Its terminal memory uses
+// 16-lane packets and consumes slices of that result without replaying it.
+func.def @native_store(%first: bf16, %second: bf16, %source: buffer, %destination: buffer) {
+  %input_buffer, %output_buffer = buffer.assume.alignment %source, %destination {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %input = buffer.view %input_buffer[%origin] : buffer -> view<32xf32>
+  %output = buffer.view %output_buffer[%origin] : buffer -> view<32xf32>
+  %seed = vector.load %input[0] : view<32xf32> -> vector<32xf32>
+  %first_wide = scalar.extf %first : bf16 to f32
+  %second_wide = scalar.extf %second : bf16 to f32
+  %left = vector.splat %first_wide : vector<32xf32>
+  %right = vector.splat %second_wide : vector<32xf32>
+  %result = vector.fmaf<nnan|ninf|nsz|afn> %left, %right, %seed : vector<32xf32>
+  vector.store %result, %output[0] : vector<32xf32>, view<32xf32>
+  func.return
+}
+
+// ----
+func.def @native_store(%first: bf16, %second: bf16, %source: buffer, %destination: buffer) {
+  %input_buffer, %output_buffer = buffer.assume.alignment %source, %destination {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %input = buffer.view %input_buffer[%origin] : buffer -> view<32xf32>
+  %output = buffer.view %output_buffer[%origin] : buffer -> view<32xf32>
+  %17 = vector.load %input[0] : view<32xf32> -> vector<16xf32>
+  %18 = vector.load %input[16] : view<32xf32> -> vector<16xf32>
+  %seed = vector.concat<0> %17, %18 : vector<16xf32>, vector<16xf32> -> vector<32xf32>
+  %first_wide = scalar.extf %first : bf16 to f32
+  %second_wide = scalar.extf %second : bf16 to f32
+  %left = vector.splat %first_wide : vector<32xf32>
+  %right = vector.splat %second_wide : vector<32xf32>
+  %result = vector.fmaf<nnan|ninf|nsz|afn> %left, %right, %seed : vector<32xf32>
+  %15 = vector.slice %result[0] : vector<32xf32> -> vector<16xf32>
+  vector.store %15, %output[0] : vector<16xf32>, view<32xf32>
+  %16 = vector.slice %result[16] : vector<32xf32> -> vector<16xf32>
+  vector.store %16, %output[16] : vector<16xf32>, view<32xf32>
+  func.return
+}
+
+// ====
+
+// A scalar reduction consumes the full native result without replaying the
+// multiply-accumulate for each scalar lane.
+func.def @native_reduce(%first: bf16, %second: bf16, %source: buffer, %initial: f32) -> (f32) {
+  %input_buffer = buffer.assume.alignment %source {minimum_alignment = 64} : buffer
+  %origin = index.constant 0 : offset
+  %input = buffer.view %input_buffer[%origin] : buffer -> view<32xf32>
+  %seed = vector.load %input[0] : view<32xf32> -> vector<32xf32>
+  %first_wide = scalar.extf %first : bf16 to f32
+  %second_wide = scalar.extf %second : bf16 to f32
+  %left = vector.splat %first_wide : vector<32xf32>
+  %right = vector.splat %second_wide : vector<32xf32>
+  %values = vector.fmaf<nnan|ninf|nsz|afn> %left, %right, %seed : vector<32xf32>
+  %result = vector.reduce<addf, reassoc> %values, %initial : vector<32xf32>, f32
+  func.return %result : f32
+}
+
+// ----
+func.def @native_reduce(%first: bf16, %second: bf16, %source: buffer, %initial: f32) -> (f32) {
+  %input_buffer = buffer.assume.alignment %source {minimum_alignment = 64} : buffer
+  %origin = index.constant 0 : offset
+  %input = buffer.view %input_buffer[%origin] : buffer -> view<32xf32>
+  %111 = vector.load %input[0] : view<32xf32> -> vector<16xf32>
+  %112 = vector.load %input[16] : view<32xf32> -> vector<16xf32>
+  %seed = vector.concat<0> %111, %112 : vector<16xf32>, vector<16xf32> -> vector<32xf32>
+  %first_wide = scalar.extf %first : bf16 to f32
+  %second_wide = scalar.extf %second : bf16 to f32
+  %left = vector.splat %first_wide : vector<32xf32>
+  %right = vector.splat %second_wide : vector<32xf32>
+  %values = vector.fmaf<nnan|ninf|nsz|afn> %left, %right, %seed : vector<32xf32>
+  %145 = vector.extract %values[0] : vector<32xf32> -> f32
+  %17 = scalar.addf<reassoc> %initial, %145 : f32
+  %144 = vector.extract %values[1] : vector<32xf32> -> f32
+  %20 = scalar.addf<reassoc> %17, %144 : f32
+  %143 = vector.extract %values[2] : vector<32xf32> -> f32
+  %23 = scalar.addf<reassoc> %20, %143 : f32
+  %142 = vector.extract %values[3] : vector<32xf32> -> f32
+  %26 = scalar.addf<reassoc> %23, %142 : f32
+  %141 = vector.extract %values[4] : vector<32xf32> -> f32
+  %29 = scalar.addf<reassoc> %26, %141 : f32
+  %140 = vector.extract %values[5] : vector<32xf32> -> f32
+  %32 = scalar.addf<reassoc> %29, %140 : f32
+  %139 = vector.extract %values[6] : vector<32xf32> -> f32
+  %35 = scalar.addf<reassoc> %32, %139 : f32
+  %138 = vector.extract %values[7] : vector<32xf32> -> f32
+  %38 = scalar.addf<reassoc> %35, %138 : f32
+  %137 = vector.extract %values[8] : vector<32xf32> -> f32
+  %41 = scalar.addf<reassoc> %38, %137 : f32
+  %136 = vector.extract %values[9] : vector<32xf32> -> f32
+  %44 = scalar.addf<reassoc> %41, %136 : f32
+  %135 = vector.extract %values[10] : vector<32xf32> -> f32
+  %47 = scalar.addf<reassoc> %44, %135 : f32
+  %134 = vector.extract %values[11] : vector<32xf32> -> f32
+  %50 = scalar.addf<reassoc> %47, %134 : f32
+  %133 = vector.extract %values[12] : vector<32xf32> -> f32
+  %53 = scalar.addf<reassoc> %50, %133 : f32
+  %132 = vector.extract %values[13] : vector<32xf32> -> f32
+  %56 = scalar.addf<reassoc> %53, %132 : f32
+  %131 = vector.extract %values[14] : vector<32xf32> -> f32
+  %59 = scalar.addf<reassoc> %56, %131 : f32
+  %130 = vector.extract %values[15] : vector<32xf32> -> f32
+  %62 = scalar.addf<reassoc> %59, %130 : f32
+  %129 = vector.extract %values[16] : vector<32xf32> -> f32
+  %65 = scalar.addf<reassoc> %62, %129 : f32
+  %128 = vector.extract %values[17] : vector<32xf32> -> f32
+  %68 = scalar.addf<reassoc> %65, %128 : f32
+  %127 = vector.extract %values[18] : vector<32xf32> -> f32
+  %71 = scalar.addf<reassoc> %68, %127 : f32
+  %126 = vector.extract %values[19] : vector<32xf32> -> f32
+  %74 = scalar.addf<reassoc> %71, %126 : f32
+  %125 = vector.extract %values[20] : vector<32xf32> -> f32
+  %77 = scalar.addf<reassoc> %74, %125 : f32
+  %124 = vector.extract %values[21] : vector<32xf32> -> f32
+  %80 = scalar.addf<reassoc> %77, %124 : f32
+  %123 = vector.extract %values[22] : vector<32xf32> -> f32
+  %83 = scalar.addf<reassoc> %80, %123 : f32
+  %122 = vector.extract %values[23] : vector<32xf32> -> f32
+  %86 = scalar.addf<reassoc> %83, %122 : f32
+  %121 = vector.extract %values[24] : vector<32xf32> -> f32
+  %89 = scalar.addf<reassoc> %86, %121 : f32
+  %120 = vector.extract %values[25] : vector<32xf32> -> f32
+  %92 = scalar.addf<reassoc> %89, %120 : f32
+  %119 = vector.extract %values[26] : vector<32xf32> -> f32
+  %95 = scalar.addf<reassoc> %92, %119 : f32
+  %118 = vector.extract %values[27] : vector<32xf32> -> f32
+  %98 = scalar.addf<reassoc> %95, %118 : f32
+  %117 = vector.extract %values[28] : vector<32xf32> -> f32
+  %101 = scalar.addf<reassoc> %98, %117 : f32
+  %116 = vector.extract %values[29] : vector<32xf32> -> f32
+  %104 = scalar.addf<reassoc> %101, %116 : f32
+  %115 = vector.extract %values[30] : vector<32xf32> -> f32
+  %107 = scalar.addf<reassoc> %104, %115 : f32
+  %114 = vector.extract %values[31] : vector<32xf32> -> f32
+  %result = scalar.addf<reassoc> %107, %114 : f32
+  func.return %result : f32
+}

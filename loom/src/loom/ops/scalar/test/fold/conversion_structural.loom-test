@@ -39,21 +39,35 @@ func.def @float_resize_roundtrip(%x: f16) -> (f16) {
 
 // ====
 
-// Subnormal permissions prevent exact resize-roundtrip cancellation.
-func.def @relaxed_float_resize_roundtrip(%x: f16) -> (f16, f16) {
+// Other users can observe a relaxed widening's flushed value. Exact widening
+// can be canceled even when the narrowing permits flushing its result.
+func.def @relaxed_float_resize_roundtrip(%x: f16) -> (f32, f16, f16) {
   %wide_input = scalar.extf<daz> %x : f16 to f32
   %back_input = scalar.fptrunc %wide_input : f32 to f16
   %wide_result = scalar.extf %x : f16 to f32
   %back_result = scalar.fptrunc<ftz> %wide_result : f32 to f16
-  func.return %back_input, %back_result : f16, f16
+  func.return %wide_input, %back_input, %back_result : f32, f16, f16
 }
 // ----
-func.def @relaxed_float_resize_roundtrip(%x: f16) -> (f16, f16) {
+func.def @relaxed_float_resize_roundtrip(%x: f16) -> (f32, f16, f16) {
   %wide_input = scalar.extf<daz> %x : f16 to f32
   %back_input = scalar.fptrunc %wide_input : f32 to f16
-  %wide_result = scalar.extf %x : f16 to f32
-  %back_result = scalar.fptrunc<ftz> %wide_result : f32 to f16
-  func.return %back_input, %back_result : f16, f16
+  func.return %wide_input, %back_input, %x : f32, f16, f16
+}
+
+// ====
+
+// Both input and result flushing permissions allow an exact round trip.
+func.def @relaxed_narrowing_permissions(%bfloat: bf16, %single: f32) -> (bf16, f32) {
+  %wide_bfloat = scalar.extf %bfloat : bf16 to f32
+  %back_bfloat = scalar.fptrunc<daz> %wide_bfloat : f32 to bf16
+  %wide_single = scalar.extf %single : f32 to f64
+  %back_single = scalar.fptrunc<daz|ftz> %wide_single : f64 to f32
+  func.return %back_bfloat, %back_single : bf16, f32
+}
+// ----
+func.def @relaxed_narrowing_permissions(%bfloat: bf16, %single: f32) -> (bf16, f32) {
+  func.return %bfloat, %single : bf16, f32
 }
 
 // ====

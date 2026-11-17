@@ -2204,8 +2204,9 @@ static iree_status_t loom_vector_canonicalize_fptrunc(loom_op_t* op,
   if (!input_def) {
     return iree_ok_status();
   }
-  if (op->instance_flags == 0 && loom_vector_extf_isa(input_def) &&
-      input_def->instance_flags == 0) {
+  // Relaxed narrowing permits preserving the original value. The widening
+  // must remain exact so its other users observe the same value.
+  if (loom_vector_extf_isa(input_def) && input_def->instance_flags == 0) {
     loom_value_id_t inner_input = loom_vector_extf_input(input_def);
     if (loom_type_equal(loom_module_value_type(rewriter->module, inner_input),
                         result_type)) {

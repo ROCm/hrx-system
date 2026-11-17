@@ -1095,6 +1095,15 @@ static iree_status_t loom_low_target_legalize_query_contract(
       (loom_low_target_legalize_function_state_t*)user_data;
   IREE_RETURN_IF_ERROR(loom_low_target_legalize_ensure_query_scope(
       state, environment->fact_table));
+  if (environment->vector_lane_projection.source_lane_count == 0) {
+    const loom_target_contract_query_result_t* authored_result =
+        loom_vector_component_packet_query_cache_lookup(
+            &state->packet_query_cache, source_op);
+    if (authored_result != NULL) {
+      *out_result = *authored_result;
+      return iree_ok_status();
+    }
+  }
   const loom_target_contract_query_callback_t callback =
       loom_low_lower_source_query_scope_callback(state->query_scope);
   IREE_RETURN_IF_ERROR(
@@ -1313,14 +1322,10 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
   state->legalization_context.arena = driver->scratch_arena;
   loom_target_contract_query_result_t query_result_storage =
       loom_target_contract_query_result_empty();
+  IREE_RETURN_IF_ERROR(loom_target_legalization_query_contract(
+      &state->legalization_context, op, &query_result_storage));
   const loom_target_contract_query_result_t* query_result =
-      loom_vector_component_packet_query_cache_lookup(
-          &state->packet_query_cache, op);
-  if (query_result == NULL) {
-    IREE_RETURN_IF_ERROR(loom_target_legalization_query_contract(
-        &state->legalization_context, op, &query_result_storage));
-    query_result = &query_result_storage;
-  }
+      &query_result_storage;
   if (loom_target_contract_query_result_is_terminal_rejection(query_result)) {
     const bool final =
         state->legalization_context.mode == LOOM_TARGET_LEGALIZATION_MODE_FINAL;

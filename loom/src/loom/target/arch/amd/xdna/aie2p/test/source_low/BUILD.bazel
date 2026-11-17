@@ -139,6 +139,7 @@ loom_check_test_suite(
         "selected_payload_transport.loom-test",
         "semantic_assertions.loom-test",
         "shared_conditional_values.loom-test",
+        "source_materialization.loom-test",
         "split_barrier.loom-test",
         "static_vector_shape.loom-test",
         "store_fifo_state.loom-test",

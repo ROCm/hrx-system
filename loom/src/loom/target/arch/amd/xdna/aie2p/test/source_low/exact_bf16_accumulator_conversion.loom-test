@@ -10,62 +10,50 @@ func.def @exact_bf16_accumulator_conversion(%lhs: vector<16xbf16>, %rhs: vector<
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @exact_bf16_accumulator_conversion(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  set.saturation 1
-  set.ups-mode 0
-  %10 = slice %lhs[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %11 = mov.shift 0
-  %12 = vups.2x.w-to-b.unsigned %10, %11
-  %13 = vmov.accumulator512.to.vector512 %12
   set.saturation 0
-  set.ups-mode 1
-  set.srs-mode 1
+  set.ups-mode 0
+  %10 = mov.shift 16
+  %11 = slice %lhs[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %12 = vups.2x.w-to-b.unsigned %11, %10
+  %lhs_wide = copy %12 : reg<aie2p.mbms> -> reg<aie2p.ebmll>
+  %15 = slice %rhs[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %16 = vups.2x.w-to-b.unsigned %15, %10
+  %rhs_wide = copy %16 : reg<aie2p.mbms> -> reg<aie2p.ebmll>
+  %18 = mova.i32 60
+  %19 = vadd.f32x16 %lhs_wide, %rhs_wide, %18
+  %20 = slice %19[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %sum = copy %20 : reg<aie2p.mbms> -> reg<aie2p.ebmll>
+  %22 = copy %sum : reg<aie2p.ebmll> -> reg<aie2p.mbms>
+  %23 = vmov.accumulator512.to.vector512 %22
   set.rounding 0
-  %14 = mov.shift 16
-  %15 = vups.2x.x-to-c.unsigned %13, %14
-  %16 = vsrs.2x.c-to-x.unsigned %15, %11
-  %lhs_wide = vmov.vector512.to.accumulator512.low %16
-  set.saturation 1
-  set.ups-mode 0
-  %18 = slice %rhs[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %20 = vups.2x.w-to-b.unsigned %18, %11
-  %21 = vmov.accumulator512.to.vector512 %20
-  set.saturation 0
-  set.ups-mode 1
-  %23 = vups.2x.x-to-c.unsigned %21, %14
-  %24 = vsrs.2x.c-to-x.unsigned %23, %11
-  %rhs_wide = vmov.vector512.to.accumulator512.low %24
-  %26 = mova.i32 60
-  %27 = vadd.f32x16 %lhs_wide, %rhs_wide, %26
-  %28 = slice %27[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %sum = copy %28 : reg<aie2p.mbms> -> reg<aie2p.ebmll>
-  %30 = copy %sum : reg<aie2p.ebmll> -> reg<aie2p.mbms>
-  %31 = vmov.accumulator512.to.vector512 %30
   set.srs-mode 0
-  %32 = mov.short 1
+  %24 = mov.short 1
+  %25 = vbcst.32 %24
+  %26 = mov.i32 32767
+  %27 = vbcst.32 %26
+  %28 = mov.i32 2147483647
+  %29 = vbcst.32 %28
+  %30 = mov.i32 2139095040
+  %31 = vbcst.32 %30
+  %32 = mov.i32 4194304
   %33 = vbcst.32 %32
-  %34 = mov.i32 32767
-  %35 = vbcst.32 %34
-  %36 = mov.i32 2147483647
-  %37 = vbcst.32 %36
-  %38 = mov.i32 2139095040
-  %39 = vbcst.32 %38
-  %40 = mov.i32 4194304
-  %41 = vbcst.32 %40
+  set.ups-mode 1
   set.srs-mode 1
-  %43 = vups.2x.x-to-c.unsigned %31, %11
-  %45 = vsrs.2x.c-to-x.unsigned %43, %14
-  %46 = vband %45, %33
-  %47 = vadd.32 %35, %46
-  %48 = vadd.32 %31, %47
-  %49 = vband %31, %37
-  %50 = vlt.u32x16.el.low32 %39, %49
-  %51 = predicate.complete.zero.high32 %50, 0
-  %52 = vbor %31, %41
-  %53 = vsel.32.mask64 %48, %52, %51
+  %34 = mov.shift 0
+  %35 = vups.2x.x-to-c.unsigned %23, %34
+  %37 = vsrs.2x.c-to-x.unsigned %35, %10
+  %38 = vband %37, %25
+  %39 = vadd.32 %27, %38
+  %40 = vadd.32 %23, %39
+  %41 = vband %23, %29
+  %42 = vlt.u32x16.el.low32 %31, %41
+  %43 = predicate.complete.zero.high32 %42, 0
+  %44 = vbor %23, %33
+  %45 = vsel.32.mask64 %40, %44, %43
   set.srs-mode 0
-  %54 = slice %53[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %55 = vmov.vector512.to.accumulator512 %53
-  %56 = vsrs.2x.b-to-w.unsigned %55, %14
-  %result = concat(%56, %54) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %46 = slice %45[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %47 = vmov.vector512.to.accumulator512 %45
+  %48 = vsrs.2x.b-to-w.unsigned %47, %10
+  %result = concat(%48, %46) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   return %result
 }

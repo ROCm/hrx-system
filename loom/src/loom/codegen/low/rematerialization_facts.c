@@ -88,6 +88,16 @@ loom_low_rematerialization_closure_cursor_initialize(
   };
 }
 
+static uint64_t loom_low_rematerialization_storage_bit_count(
+    const loom_low_rematerialization_scope_t* scope, loom_value_id_t value_id) {
+  const loom_type_t type = loom_module_value_type(scope->module, value_id);
+  const loom_low_reg_class_t* register_class =
+      &scope->target->descriptor_set
+           ->reg_classes[loom_low_register_type_class_id(type)];
+  return (uint64_t)loom_low_register_type_unit_count(type) *
+         register_class->spill_unit_bits;
+}
+
 static iree_status_t loom_low_rematerialization_classify(
     const loom_low_rematerialization_scope_t* scope, bool reconstruct_constants,
     uint8_t* value_flags, iree_arena_allocator_t* arena) {
@@ -195,12 +205,14 @@ static iree_status_t loom_low_rematerialization_classify(
                      loom_low_register_type_class_id(loom_module_value_type(
                          module, scope->value_ids[cursor->ordinal]))) {
         cursor->is_closed = false;
-      } else if (loom_low_register_type_unit_count(
-                     loom_module_value_type(module, input)) >
-                 loom_low_register_type_unit_count(loom_module_value_type(
-                     module, scope->value_ids[cursor->ordinal]))) {
+      } else if (loom_low_rematerialization_storage_bit_count(scope, input) >
+                 loom_low_rematerialization_storage_bit_count(
+                     scope, scope->value_ids[cursor->ordinal])) {
         // A narrow projection must not reconstruct its wider input. Retain
         // that input as a capture instead of multiplying its materialization.
+        // Compare memory-transfer widths across banks: allocation units can
+        // differ, and a subword register can still require a full-word
+        // transfer.
         cursor->is_closed = false;
       } else if (!iree_any_bit_set(
                      input_flags,

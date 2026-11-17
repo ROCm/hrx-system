@@ -1,5 +1,26 @@
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
+// A partial prefix of the full accumulator retains both native BF16 packets.
+func.def @widen_accumulator_prefix(%input: vector<33xbf16>) -> (vector<33xf32>) {
+  %result = vector.extf %input : vector<33xbf16> to vector<33xf32>
+  func.return %result : vector<33xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @widen_accumulator_prefix(%input: reg<aie2p.vec256 x4>) -> (reg<aie2p.mbms x4>) asm {
+  set.saturation 0
+  set.ups-mode 0
+  %5 = mov.shift 16
+  %6 = slice %input[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %7 = vups.2x.x-to-c.unsigned %6, %5
+  %8 = slice %input[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %9 = vups.2x.x-to-c.unsigned %8, %5
+  %result = concat(%7, %9) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  return %result
+}
+
+// ====
+
 // Arithmetic already produces an accumulator; NaN restoration must not send
 // the conversion operand through the vector register file and back.
 func.def @narrow_accumulator_bf16(%lhs: vector<16xf32>, %rhs: vector<16xf32>) -> (vector<16xbf16>) {
@@ -45,19 +66,12 @@ func.def @widen_partial_bf16(%input: vector<4xbf16>) -> (vector<4xf32>) {
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @widen_partial_bf16(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  set.saturation 1
-  set.ups-mode 0
-  %5 = slice %input[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %6 = mov.shift 0
-  %7 = vups.2x.w-to-b.unsigned %5, %6
-  %8 = vmov.accumulator512.to.vector512 %7
   set.saturation 0
-  set.ups-mode 1
-  set.srs-mode 1
-  set.rounding 0
-  %9 = mov.shift 16
-  %10 = vups.2x.x-to-c.unsigned %8, %9
-  %result = vsrs.2x.c-to-x.unsigned %10, %6
+  set.ups-mode 0
+  %5 = mov.shift 16
+  %6 = slice %input[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %7 = vups.2x.w-to-b.unsigned %6, %5
+  %result = vmov.accumulator512.to.vector512 %7
   return %result
 }
 

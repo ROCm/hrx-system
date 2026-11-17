@@ -41,7 +41,8 @@ typedef struct loom_low_lower_source_graph_node_index_t {
   loom_low_lower_source_graph_node_t* first;
   // Last participating node in insertion order.
   loom_low_lower_source_graph_node_t* last;
-  // Function-local source value identities borrowed from the lowering frame.
+  // Optional function-local identities. NULL keeps every node pointer-indexed
+  // when a sparse consumer cannot amortize a function-sized value table.
   const loom_local_value_domain_t* value_domain;
   // Arena owning nodes and index storage.
   iree_arena_allocator_t* arena;
@@ -59,7 +60,7 @@ typedef struct loom_low_lower_source_graph_node_index_t {
   uint32_t count;
 } loom_low_lower_source_graph_node_index_t;
 
-// Initializes an empty sparse node index borrowing value_domain.
+// Initializes an empty sparse node index borrowing optional value_domain.
 void loom_low_lower_source_graph_node_index_initialize(
     const loom_local_value_domain_t* value_domain,
     iree_arena_allocator_t* arena,
