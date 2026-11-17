@@ -118,8 +118,6 @@ typedef struct loom_low_source_invocation_worklist_t {
   iree_host_size_t call_bucket_count;
   // Number of retained semantic call sites.
   iree_host_size_t call_count;
-  // Whether direct distributions are in the weakening solve phase.
-  bool weaken_direct_distributions;
   // First function awaiting changed-input analysis.
   loom_low_source_invocation_function_t* first;
   // Last pending function, or NULL for an empty worklist.
@@ -177,6 +175,15 @@ static loom_value_facts_t loom_low_source_invocation_unknown(
 static bool loom_low_source_invocation_has_direct_distribution(
     loom_type_t type) {
   return loom_type_is_scalar(type) || loom_type_is_vector(type);
+}
+
+static void loom_low_source_invocation_mark_complete_distribution(
+    const loom_module_t* module, loom_value_id_t value,
+    loom_value_facts_t* facts) {
+  if (loom_low_source_invocation_has_direct_distribution(
+          loom_module_value_type(module, value))) {
+    loom_value_facts_mark_cluster_uniform(facts);
+  }
 }
 
 static iree_status_t loom_low_source_invocation_collect_function(
@@ -385,7 +392,7 @@ static iree_status_t loom_low_source_invocation_arguments(
         loom_value_fact_table_lookup(facts, arguments[i]);
     IREE_RETURN_IF_ERROR(loom_low_source_invocation_update_boundary(
         work->module, facts, type, facts, joined,
-        work->weaken_direct_distributions, &previous, changed));
+        /*weaken_direct_distribution=*/true, &previous, changed));
     IREE_RETURN_IF_ERROR(
         loom_value_fact_table_define(facts, arguments[i], previous));
   }
@@ -458,8 +465,8 @@ static iree_status_t loom_low_source_invocation_publish_arguments(
     for (uint16_t i = 0; i < count; ++i) {
       IREE_RETURN_IF_ERROR(loom_low_source_invocation_update_boundary(
           work->module, facts, loom_module_value_type(work->module, formals[i]),
-          facts, call->observed_arguments[i], work->weaken_direct_distributions,
-          &call->arguments[i], &changed));
+          facts, call->observed_arguments[i],
+          /*weaken_direct_distribution=*/true, &call->arguments[i], &changed));
     }
     if (changed) {
       loom_low_source_invocation_enqueue(work, call->callee);
@@ -501,9 +508,8 @@ static iree_status_t loom_low_source_invocation_publish_results(
     }
     IREE_RETURN_IF_ERROR(loom_low_source_invocation_update_boundary(
         work->module, facts, loom_module_value_type(work->module, results[i]),
-        facts, joined,
-        work->weaken_direct_distributions && function->complete_invocations,
-        &function->results[i], &changed));
+        facts, joined, function->complete_invocations, &function->results[i],
+        &changed));
   }
   if (!changed) {
     return iree_ok_status();
@@ -524,9 +530,8 @@ static iree_status_t loom_low_source_invocation_publish_results(
       IREE_RETURN_IF_ERROR(loom_low_source_invocation_update_boundary(
           work->module, facts,
           loom_module_value_type(work->module, actual_results.values[i]), facts,
-          incoming,
-          work->weaken_direct_distributions && function->complete_invocations,
-          &previous, &caller_changed));
+          incoming, function->complete_invocations, &previous,
+          &caller_changed));
       IREE_RETURN_IF_ERROR(loom_value_fact_table_define(
           facts, actual_results.values[i], previous));
     }
@@ -588,6 +593,10 @@ static iree_status_t loom_low_source_invocation_initialize_function(
     seeds[i] = arguments[i];
     loom_value_facts_t initial = loom_low_source_invocation_unknown(
         module, arguments[i], function->selection);
+    if (function->complete_invocations && function->incoming) {
+      loom_low_source_invocation_mark_complete_distribution(
+          module, arguments[i], &initial);
+    }
     IREE_RETURN_IF_ERROR(
         loom_value_fact_table_define(facts, arguments[i], initial));
   }
@@ -635,10 +644,21 @@ static iree_status_t loom_low_source_invocation_initialize_function(
     call->next_bucket = work->call_buckets[bucket];
     work->call_buckets[bucket] = call;
     const loom_value_slice_t results = loom_call_like_results(call->source);
+    if (call->callee->complete_invocations) {
+      const loom_value_slice_t operands = loom_call_like_operands(call->source);
+      for (uint16_t i = 0; i < operands.count; ++i) {
+        loom_low_source_invocation_mark_complete_distribution(
+            module, operands.values[i], &call->arguments[i]);
+      }
+    }
     for (uint16_t i = 0; i < results.count; ++i) {
       seeds[next_seed++] = results.values[i];
-      const loom_value_facts_t initial = loom_low_source_invocation_unknown(
+      loom_value_facts_t initial = loom_low_source_invocation_unknown(
           module, results.values[i], function->selection);
+      if (call->callee->complete_invocations) {
+        loom_low_source_invocation_mark_complete_distribution(
+            module, results.values[i], &initial);
+      }
       IREE_RETURN_IF_ERROR(
           loom_value_fact_table_define(facts, results.values[i], initial));
     }
@@ -656,8 +676,12 @@ static iree_status_t loom_low_source_invocation_initialize_function(
     function->results[i] = loom_low_source_invocation_unknown(
         module, loom_op_const_results(function->source.op)[i],
         function->selection);
+    if (function->complete_invocations && function->incoming) {
+      loom_low_source_invocation_mark_complete_distribution(
+          module, loom_op_const_results(function->source.op)[i],
+          &function->results[i]);
+    }
   }
-  loom_low_source_invocation_enqueue(work, function);
   return iree_ok_status();
 }
 
@@ -724,94 +748,6 @@ static iree_status_t loom_low_source_invocation_analyze(
   return iree_ok_status();
 }
 
-static bool loom_low_source_invocation_reset_direct_distribution(
-    const loom_module_t* module, loom_value_id_t value,
-    loom_value_facts_t* facts) {
-  if (!loom_low_source_invocation_has_direct_distribution(
-          loom_module_value_type(module, value))) {
-    return false;
-  }
-  loom_value_facts_mark_cluster_uniform(facts);
-  return true;
-}
-
-static iree_status_t loom_low_source_invocation_reset_boundary_distribution(
-    loom_low_source_invocation_worklist_t* work, loom_value_id_t value,
-    bool* reset) {
-  loom_value_fact_table_t* facts = &work->facts->boundaries;
-  loom_value_facts_t value_facts = loom_value_fact_table_lookup(facts, value);
-  if (!loom_low_source_invocation_reset_direct_distribution(work->module, value,
-                                                            &value_facts)) {
-    return iree_ok_status();
-  }
-  *reset = true;
-  return loom_value_fact_table_define(facts, value, value_facts);
-}
-
-// Numeric, extension, and decomposed reference facts first reach their
-// ordinary conservative fixed point. Direct scalar/vector distribution can
-// then start from uniform without being poisoned by transient reference facts
-// and monotonically weaken through every retained call equation.
-static iree_status_t loom_low_source_invocation_begin_distribution_solve(
-    loom_low_source_invocation_worklist_t* work, uint16_t function_count,
-    bool* out_required) {
-  *out_required = false;
-  work->weaken_direct_distributions = true;
-  for (uint16_t i = 0; i < function_count; ++i) {
-    const loom_call_graph_node_t* node = &work->facts->call_graph.nodes[i];
-    loom_low_source_invocation_function_t* function =
-        &work->functions[node->symbol_id];
-    if (!function->complete_invocations || !function->incoming) {
-      continue;
-    }
-
-    bool function_reset = false;
-    uint16_t argument_count = 0;
-    const loom_value_id_t* arguments =
-        loom_func_like_arg_ids(function->source, &argument_count);
-    for (uint16_t j = 0; j < argument_count; ++j) {
-      IREE_RETURN_IF_ERROR(
-          loom_low_source_invocation_reset_boundary_distribution(
-              work, arguments[j], &function_reset));
-    }
-
-    const uint16_t result_count = function->source.op->result_count;
-    const loom_value_id_t* results = loom_op_const_results(function->source.op);
-    for (uint16_t j = 0; j < result_count; ++j) {
-      function_reset |= loom_low_source_invocation_reset_direct_distribution(
-          work->module, results[j], &function->results[j]);
-    }
-
-    for (loom_low_source_invocation_call_t* call = function->incoming; call;
-         call = call->next_incoming) {
-      bool call_reset = false;
-      for (uint16_t j = 0; j < argument_count; ++j) {
-        call_reset |= loom_low_source_invocation_reset_direct_distribution(
-            work->module, arguments[j], &call->arguments[j]);
-      }
-      const loom_value_slice_t actual_results =
-          loom_call_like_results(call->source);
-      for (uint16_t j = 0; j < actual_results.count; ++j) {
-        IREE_RETURN_IF_ERROR(
-            loom_low_source_invocation_reset_boundary_distribution(
-                work, actual_results.values[j], &call_reset));
-      }
-      if (call_reset) {
-        function_reset = true;
-        call->caller->analyzed = false;
-        loom_low_source_invocation_enqueue(work, call->caller);
-      }
-    }
-
-    if (function_reset) {
-      *out_required = true;
-      function->analyzed = false;
-      loom_low_source_invocation_enqueue(work, function);
-    }
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_low_source_invocation_solve(
     loom_pass_t* pass, loom_low_source_invocation_worklist_t* work) {
   iree_status_t status = iree_ok_status();
@@ -822,11 +758,9 @@ static iree_status_t loom_low_source_invocation_solve(
       work->last = NULL;
     }
     function->pending = false;
-    const bool restart =
-        work->weaken_direct_distributions && !function->analyzed;
     bool changed = function->changed_results || !function->analyzed;
     function->changed_results = false;
-    bool changed_arguments = restart;
+    bool changed_arguments = false;
     status = loom_low_source_invocation_arguments(work, function,
                                                   &changed_arguments);
     if (!iree_status_is_ok(status) || (!changed && !changed_arguments)) {
@@ -931,16 +865,24 @@ iree_status_t loom_low_source_invocation_facts_compute(
     status = loom_low_source_invocation_initialize_function(
         &work, &out_facts->call_graph.nodes[i], arena);
   }
-  if (iree_status_is_ok(status)) {
-    status = loom_low_source_invocation_solve(pass, &work);
+  // Complete callees weaken optimistic direct distributions, so every caller
+  // must first publish its stable argument and launch context. Reversing the
+  // retained callee-first components establishes that order without another
+  // call-graph walk. Recursive components remain conservative.
+  for (iree_host_size_t i = out_facts->call_graph.components.count;
+       i > 0 && iree_status_is_ok(status); --i) {
+    const loom_scc_t* component =
+        &out_facts->call_graph.components.values[i - 1];
+    for (iree_host_size_t j = 0; j < component->node_count; ++j) {
+      loom_low_source_invocation_function_t* function =
+          &work.functions[out_facts->call_graph.nodes[component->nodes[j]]
+                              .symbol_id];
+      if (function->incoming || function->outgoing) {
+        loom_low_source_invocation_enqueue(&work, function);
+      }
+    }
   }
-  bool distribution_solve_required = false;
   if (iree_status_is_ok(status)) {
-    status = loom_low_source_invocation_begin_distribution_solve(
-        &work, function_count, &distribution_solve_required);
-  }
-  if (iree_status_is_ok(status) && distribution_solve_required) {
-    loom_pass_value_fact_owner_invalidate(pass->value_facts);
     status = loom_low_source_invocation_solve(pass, &work);
   }
   pass->value_facts->table.context.resolve_call_results =

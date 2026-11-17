@@ -434,6 +434,8 @@ class LowLowerPassTest : public ::testing::Test {
     iree_arena_initialize(&block_pool_, &arena);
     loom_pass_value_fact_owner_t value_facts = {};
     loom_pass_value_fact_owner_initialize(&block_pool_, &value_facts);
+    loom_pass_value_fact_lifecycle_counts_t lifecycle_counts = {};
+    value_facts.lifecycle_counts = &lifecycle_counts;
     loom_pass_t pass = {
         .value_facts = &value_facts,
     };
@@ -473,6 +475,12 @@ class LowLowerPassTest : public ::testing::Test {
       EXPECT_EQ(facts.range_hi, 7);
     }
 
+    // Each retained endpoint is prepared once. Complete call distributions
+    // converge within that solve instead of repeating every local analysis.
+    EXPECT_EQ(lifecycle_counts.preparation_count,
+              expect_direct_callers ? 2u : 0u);
+
+    value_facts.lifecycle_counts = nullptr;
     loom_pass_value_fact_owner_deinitialize(&value_facts);
     iree_arena_deinitialize(&arena);
   }
