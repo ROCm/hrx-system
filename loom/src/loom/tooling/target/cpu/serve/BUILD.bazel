@@ -413,7 +413,7 @@ loom_py_test(
     main = "build_fetch_model_card_test.py",
     tags = ["skip-bazel_to_cmake"],
     target_compatible_with = loom_config_compatible_with([
-        "//loom/config/serve:image_input_enabled",
+        "//loom/config/media:image_input_enabled",
         "//loom/config/execute:x86_task_hal",
     ]) + ["@platforms//cpu:x86_64"] + select({
         "@platforms//os:linux": [],
@@ -1000,21 +1000,21 @@ loom_py_test(
     args = [
         "$(rootpath :loom-serve-test-tool)",
         "$(rootpath //loom/src/loom/serve/fixture/recognition:prepare.loom)",
-        "$(rootpath //loom/src/loom/serve/media/testdata/audio:sample.flac)",
+        "$(rootpath //runtime/src/iree/codec/audio/testdata:sample.flac)",
     ] + iree_select({
-        "//loom/config/serve:wav": ["--wav"],
+        "//runtime/config/codec:wav": ["--wav"],
         "//conditions:default": [],
     }) + iree_select({
-        "//loom/config/serve:mp3": ["--mp3"],
+        "//runtime/config/codec:mp3": ["--mp3"],
         "//conditions:default": [],
     }) + iree_select({
-        "//loom/config/serve:flac": ["--flac"],
+        "//runtime/config/codec:flac": ["--flac"],
         "//conditions:default": [],
     }),
     data = RECOGNITION_SOURCES + [
         ":loom-serve-test-tool",
-        "//loom/src/loom/serve/media/testdata/audio:sample.flac",
-        "//loom/src/loom/serve/media/testdata/audio:sample.mp3",
+        "//runtime/src/iree/codec/audio/testdata:sample.flac",
+        "//runtime/src/iree/codec/audio/testdata:sample.mp3",
     ],
     main = "client_test.py",
     target_compatible_with = loom_config_compatible_with([

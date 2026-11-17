@@ -10,7 +10,7 @@ function(iree_configure_miniaudio)
   if(TARGET iree::third_party::miniaudio)
     return()
   endif()
-  # This narrow configuration is part of the serving library's ABI. An
+  # This narrow configuration is part of the runtime codec library's ABI. An
   # arbitrary installed miniaudio target may include device IO and workers.
   iree_dependency_require_pinned_source_allowed("miniaudio")
   iree_populate_locked_fetch_content(miniaudio _miniaudio_source_dir)
@@ -24,7 +24,7 @@ function(iree_configure_miniaudio)
     MA_NO_NODE_GRAPH MA_NO_RESOURCE_MANAGER MA_NO_RUNTIME_LINKING
     MA_NO_THREADING)
   foreach(_codec WAV MP3 FLAC)
-    if(NOT LOOM_SERVE_AUDIO_CODEC_${_codec})
+    if(NOT IREE_CODEC_AUDIO_CODEC_${_codec})
       target_compile_definitions(iree_miniaudio_decoder PUBLIC MA_NO_${_codec})
     endif()
   endforeach()

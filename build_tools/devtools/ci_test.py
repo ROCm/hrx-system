@@ -308,16 +308,16 @@ class CiTest(unittest.TestCase):
                         ("image", bazel_list),
                         ("audio", "voice" if selection == "1" else ""),
                     ):
-                        prefix = "--//loom/config/serve:" + kind + "_codecs="
+                        prefix = "--//runtime/config/codec:" + kind + "_codecs="
                         self.assertEqual(
                             [arg for arg in step.argv if arg.startswith(prefix)],
                             [prefix + codecs],
                         )
                 self.assertIn(
-                    "-DLOOM_SERVE_IMAGE_CODECS=" + cmake_list, cmake_step.argv
+                    "-DIREE_CODEC_IMAGE_CODECS=" + cmake_list, cmake_step.argv
                 )
                 self.assertIn(
-                    "-DLOOM_SERVE_AUDIO_CODECS="
+                    "-DIREE_CODEC_AUDIO_CODECS="
                     + ("voice" if selection == "1" else ""),
                     cmake_step.argv,
                 )
@@ -1654,9 +1654,11 @@ class CiTest(unittest.TestCase):
         self.assertEqual(fuzz_step.argv[-1], "//...")
         self.assertIn("--//loom/config/import:enable=cxx", fuzz_step.argv)
         self.assertIn(
-            "--//loom/config/serve:image_codecs=png,jpeg,gif,webp", fuzz_step.argv
+            "--//runtime/config/codec:image_codecs=png,jpeg,gif,webp", fuzz_step.argv
         )
-        self.assertIn("--//loom/config/serve:audio_codecs=wav,mp3,flac", fuzz_step.argv)
+        self.assertIn(
+            "--//runtime/config/codec:audio_codecs=wav,mp3,flac", fuzz_step.argv
+        )
 
     def test_focused_cpu_sanitizer_builds_only_its_selected_test_closures(self):
         with (

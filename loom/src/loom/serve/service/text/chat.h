@@ -47,7 +47,7 @@ typedef struct loom_serve_text_chat_policy_t {
     // Maximum image occurrences in one request.
     iree_host_size_t maximum_count;
     // Per-image compressed-byte and encoded-geometry bounds.
-    loom_serve_media_image_limits_t limits;
+    loom_service_media_image_limits_t limits;
   } images;
   // Initial prompt fragment and opaque rendering state.
   iree_vm_function_t chat_begin;

@@ -15,7 +15,6 @@
 #include "loom/runtime/host/host.h"
 #include "loom/runtime/host/readiness.h"
 #include "loom/runtime/wake.h"
-#include "loom/serve/media/image_codec.h"
 #include "loom/serve/service/endpoint.h"
 #include "loom/serve/service/text/admission.h"
 #include "loom/serve/service/text/chat.h"
@@ -44,6 +43,7 @@
 #include "loom/serve/service/text/telemetry.h"
 #include "loom/service/execution_reconfiguration.h"
 #include "loom/service/kind.h"
+#include "loom/service/media/image_codecs.h"
 #include "loom/service/telemetry/record.h"
 #include "loom/service/telemetry/tracing.h"
 
@@ -1447,11 +1447,11 @@ loom_serve_service_t loom_serve_text_service_interface(
       IREE_SVL("activations")};
   const bool encodes =
       service->scheduling.model_mode == LOOM_SERVE_TEXT_MODE_ENCODE;
-  const loom_serve_media_image_codec_t* const* codecs = NULL;
+  const iree_codec_image_codec_t* const* codecs = NULL;
   const bool images =
       service->image &&
       loom_serve_text_model_chat_policy(service->model)->images.maximum_count &&
-      loom_serve_media_image_codecs(&codecs);
+      loom_service_media_image_codecs(&codecs);
   return (loom_serve_service_t){
       .name = service->name,
       .runtime = {.self = service, .vtable = &vtable},

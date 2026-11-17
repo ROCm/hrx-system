@@ -8,7 +8,7 @@
 #define LOOM_SERVE_SERVICE_RECOGNITION_TRANSCRIPTION_H_
 
 #include "iree/base/api.h"
-#include "loom/serve/media/audio_source.h"
+#include "iree/codec/audio/source.h"
 #include "loom/serve/service/recognition/document.h"
 #include "loom/serve/service/recognition/input.h"
 #include "loom/serve/service/recognition/request.h"
@@ -23,7 +23,7 @@ typedef struct loom_serve_transcription_t {
   // Source-owned language, context, and decoding policy.
   loom_serve_recognition_request_t request;
   // Shared recording declaration; file contents borrow the multipart claim.
-  loom_serve_audio_source_t audio;
+  iree_codec_audio_source_t audio;
   // Exact normalized frame count for raw PCM; zero for an encoded upload.
   uint64_t normalized_frame_count;
   // Plain UTF-8 text instead of the default JSON object containing text.

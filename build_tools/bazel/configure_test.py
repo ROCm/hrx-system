@@ -68,7 +68,7 @@ class ConfigureBazelTest(unittest.TestCase):
                         "-DIREE_HAL_DRIVER_AMD_XDNA=OFF",
                         "-DAMDF_FAMILY_CDNA=OFF",
                         "-DLOOM_TARGET_ALL_CPU=ON",
-                        "-DLOOM_SERVE_IMAGE_INPUT=OFF",
+                        "-DLOOM_MEDIA_IMAGE_INPUT=OFF",
                         "-DIREE_ENABLE_VULKAN=OFF",
                         f"-DIREE_ROCM_PATH={rocm_root}",
                     ]
@@ -81,7 +81,7 @@ class ConfigureBazelTest(unittest.TestCase):
             "build --//libamdf/config:families=rdna,xdna",
             "build --//build_tools/vulkan/config:enabled=false",
             "build --//loom/config/arch:enable=vm,x86",
-            "build --//loom/config/serve:image_input=false",
+            "build --//loom/config/media:image_input=false",
             "common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm",
         ):
             self.assertIn(expected + "\n", config)

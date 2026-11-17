@@ -44,7 +44,7 @@ TEST(SpeechVoiceHttpTest, CopiesOriginalRecordingAndUsesExplicitPcmGeometry) {
   IREE_ASSERT_OK(Upload(body, &request));
   body.assign(body.size(), 'x');
   EXPECT_EQ(std::string(iree_string_builder_buffer(&request.id)), "my voice");
-  EXPECT_EQ(request.audio.encoding, LOOM_SERVE_AUDIO_ENCODING_S16LE);
+  EXPECT_EQ(request.audio.encoding, IREE_CODEC_AUDIO_ENCODING_S16LE);
   EXPECT_EQ(request.audio.sample_rate, 44100u);
   EXPECT_EQ(request.audio.channels, 2u);
   EXPECT_EQ(request.audio.frame_count, 1u);
