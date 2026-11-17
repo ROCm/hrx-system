@@ -104,9 +104,44 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
       loom_serve_http_server_request_stop(server_);
       IREE_EXPECT_OK(http_.Join());
     }
+    loom_runtime_device_group_set_observer(group_, {});
     IREE_EXPECT_OK(loom_serve_http_listener_free(listener_));
     loom_serve_http_server_free(server_);
     IREE_EXPECT_OK(loom_serve_image_model_free(model_));
+  }
+
+  void Observe(const loom_serve_service_t& interface) {
+    const loom_runtime_wake_callback_t observer = {
+        [](void* self) {
+          iree_notification_post(static_cast<iree_notification_t*>(self),
+                                 IREE_ALL_WAITERS);
+        },
+        loom_serve_http_server_notification(server_),
+    };
+    loom_runtime_device_group_set_observer(group_, observer);
+    interface.runtime.vtable->set_observer(interface.runtime.self, observer);
+  }
+
+  template <typename Predicate>
+  void AdvanceUntil(const loom_serve_service_t& interface, Predicate ready,
+                    loom_runtime_service_flags_t flags = 0) {
+    auto* notification = loom_serve_http_server_notification(server_);
+    while (!ready()) {
+      const auto ticket = iree_notification_prepare_wait(notification);
+      iree_status_t status = loom_runtime_device_group_advance(group_);
+      bool progress = false;
+      if (iree_status_is_ok(status)) {
+        status = interface.runtime.vtable->advance(interface.runtime.self,
+                                                   flags, &progress);
+      }
+      if (!iree_status_is_ok(status) || ready() || progress) {
+        iree_notification_cancel_wait(notification);
+      } else {
+        iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
+                                      IREE_TIME_INFINITE_FUTURE);
+      }
+      IREE_ASSERT_OK(status);
+    }
   }
 
   void Start() {
@@ -360,13 +395,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
           host_allocator_, &value));
       service.reset(value);
       interface = loom_serve_image_service_interface(value);
-      interface.runtime.vtable->set_observer(
-          interface.runtime.self,
-          {[](void* self) {
-             iree_notification_post(static_cast<iree_notification_t*>(self),
-                                    IREE_ALL_WAITERS);
-           },
-           notification});
+      Observe(interface);
     };
     ASSERT_NO_FATAL_FAILURE(create_service());
     auto accept = [&](int client, loom_serve_http_connection_t** connection) {
@@ -374,22 +403,6 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
       IREE_ASSERT_OK(http_.TakeRequest(client, connection, &request));
       IREE_ASSERT_OK(
           interface.accept(interface.runtime.self, *connection, request, 0));
-    };
-    auto advance_until = [&](auto ready,
-                             loom_runtime_service_flags_t flags = 0) {
-      while (!ready()) {
-        const auto ticket = iree_notification_prepare_wait(notification);
-        bool progress = false;
-        IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
-                                                         flags, &progress));
-        if (ready() || progress) {
-          iree_notification_cancel_wait(notification);
-        } else {
-          iree_notification_commit_wait(notification, ticket,
-                                        IREE_DURATION_ZERO,
-                                        IREE_TIME_INFINITE_FUTURE);
-        }
-      }
     };
 
     std::array<int, 2> clients;
@@ -399,7 +412,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
                         R"({"model":"fixture-image","prompt":"ab"})");
       ASSERT_NO_FATAL_FAILURE(accept(clients[i], &connections[i]));
     }
-    ASSERT_NO_FATAL_FAILURE(advance_until([&] {
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
       return std::string(interface.snapshot(interface.runtime.self).phase) ==
              "generating";
     }));
@@ -423,13 +436,14 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     // Retire the accepted first part and its workspace before releasing the
     // pin. Split execution must skip the second kernel and output feedback;
     // neither path needs a PNG/base64 borrower for an absent consumer.
-    ASSERT_NO_FATAL_FAILURE(advance_until(
-        [&] { return interface.telemetry.counters->cancelled == 2; }, flags));
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+        interface, [&] { return interface.telemetry.counters->cancelled == 2; },
+        flags));
     EXPECT_EQ(interface.telemetry.counters->batches, 1u);
     EXPECT_STREQ(interface.snapshot(interface.runtime.self).phase, "idle");
     EXPECT_FALSE(interface.runtime.vtable->is_pending(interface.runtime.self));
     EXPECT_EQ(interface.telemetry.counters->cancelled, 2u);
-    ASSERT_NO_FATAL_FAILURE(advance_until([&] {
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
       return !interface.runtime.vtable->is_pending(interface.runtime.self);
     }));
     if (iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
@@ -447,8 +461,9 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
         Send("POST", "/v1/images/generations",
              R"({"model":"fixture-image","prompt":"aba","seed":1})");
     ASSERT_NO_FATAL_FAILURE(accept(next, &connections[0]));
-    ASSERT_NO_FATAL_FAILURE(advance_until(
-        [&] { return interface.telemetry.counters->completed == 1; }));
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
+      return interface.telemetry.counters->completed == 1;
+    }));
     EXPECT_NE(Read(next).find("\"b64_json\":\"" + EncodedPixels(3, 1) + "\""),
               std::string::npos);
     EXPECT_EQ(interface.telemetry.counters->failed, 0u);
@@ -469,35 +484,15 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
         host_allocator_, &value));
     const auto interface = loom_serve_image_service_interface(value);
     auto* notification = loom_serve_http_server_notification(server_);
-    interface.runtime.vtable->set_observer(
-        interface.runtime.self, {[](void* self) {
-                                   iree_notification_post(
-                                       static_cast<iree_notification_t*>(self),
-                                       IREE_ALL_WAITERS);
-                                 },
-                                 notification});
-    auto advance_until = [&](auto ready,
-                             loom_runtime_service_flags_t flags = 0) {
-      while (!ready()) {
-        const auto ticket = iree_notification_prepare_wait(notification);
-        bool progress = false;
-        IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
-                                                         flags, &progress));
-        if (ready() || progress) {
-          iree_notification_cancel_wait(notification);
-        } else {
-          iree_notification_commit_wait(notification, ticket,
-                                        IREE_DURATION_ZERO,
-                                        IREE_TIME_INFINITE_FUTURE);
-        }
-      }
-    };
+    Observe(interface);
+
     auto destroy = [&](loom_serve_image_service_t* service) {
       bool progress = false;
       IREE_EXPECT_OK(interface.runtime.vtable->advance(
           interface.runtime.self, LOOM_RUNTIME_SERVICE_FLAG_STOPPING,
           &progress));
-      advance_until(
+      AdvanceUntil(
+          interface,
           [&] {
             return !interface.runtime.vtable->is_pending(
                 interface.runtime.self);
@@ -533,7 +528,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     loom_serve_http_connection_t* overflow_connection = nullptr;
     ASSERT_NO_FATAL_FAILURE(accept(overflow.get(), &overflow_connection));
     EXPECT_EQ(Read(overflow.release()).find("HTTP/1.1 503"), 0u);
-    ASSERT_NO_FATAL_FAILURE(advance_until([&] {
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
       return std::string(interface.snapshot(interface.runtime.self).phase) ==
              "generating";
     }));
@@ -555,7 +550,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
         interface.inspection.request_at(interface.runtime.self, 2, &request));
     EXPECT_EQ(request.id, 3u);
     if (reset_phase) {
-      ASSERT_NO_FATAL_FAILURE(advance_until([&] {
+      ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
         return std::string(interface.snapshot(interface.runtime.self).phase) ==
                reset_phase;
       }));
@@ -572,7 +567,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
           },
           connections[0], iree_infinite_timeout());
     }
-    ASSERT_NO_FATAL_FAILURE(advance_until([&] {
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
       return interface.telemetry.counters->completed +
                  interface.telemetry.counters->cancelled ==
              3;
@@ -928,28 +923,8 @@ TEST_P(SourceImageServiceTest, SelectionWaitsForWholeImageAndEncoderRelease) {
                   decltype(&loom_serve_image_service_free)>
       service(value, loom_serve_image_service_free);
   const auto interface = loom_serve_image_service_interface(value);
-  auto* notification = loom_serve_http_server_notification(server_);
-  interface.runtime.vtable->set_observer(
-      interface.runtime.self, {[](void* self) {
-                                 iree_notification_post(
-                                     static_cast<iree_notification_t*>(self),
-                                     IREE_ALL_WAITERS);
-                               },
-                               notification});
-  auto advance_until = [&](auto ready) {
-    while (!ready()) {
-      const auto ticket = iree_notification_prepare_wait(notification);
-      bool progress = false;
-      IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
-                                                       0, &progress));
-      if (ready() || progress) {
-        iree_notification_cancel_wait(notification);
-      } else {
-        iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
-                                      IREE_TIME_INFINITE_FUTURE);
-      }
-    }
-  };
+  Observe(interface);
+
   loom_serve::testing::ModelDocument document;
   IREE_ASSERT_OK(document.Load(directory_ + "/model.json"));
   auto sources = document.value().sources;
@@ -961,7 +936,7 @@ TEST_P(SourceImageServiceTest, SelectionWaitsForWholeImageAndEncoderRelease) {
   IREE_ASSERT_OK(configuration.stage_native(configuration.self, original,
                                             &sources, &candidate));
   loom_runtime_variant_snapshot_t snapshot;
-  ASSERT_NO_FATAL_FAILURE(advance_until([&] {
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
     return loom_runtime_variant_pool_snapshot(configuration.pool, candidate,
                                               &snapshot) &&
            snapshot.phase != LOOM_RUNTIME_VARIANT_COMPILING;
@@ -977,7 +952,7 @@ TEST_P(SourceImageServiceTest, SelectionWaitsForWholeImageAndEncoderRelease) {
   IREE_ASSERT_OK(http_.TakeRequest(client, &connection, &request));
   IREE_ASSERT_OK(
       interface.accept(interface.runtime.self, connection, request, 0));
-  ASSERT_NO_FATAL_FAILURE(advance_until([&] {
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
     return std::string(interface.snapshot(interface.runtime.self).phase) ==
            "generating";
   }));
@@ -1002,7 +977,8 @@ TEST_P(SourceImageServiceTest, SelectionWaitsForWholeImageAndEncoderRelease) {
       },
       &selection));
   EXPECT_FALSE(selection.complete);
-  ASSERT_NO_FATAL_FAILURE(advance_until([&] { return selection.complete; }));
+  ASSERT_NO_FATAL_FAILURE(
+      AdvanceUntil(interface, [&] { return selection.complete; }));
   EXPECT_EQ(configuration.selected(configuration.self), candidate);
   EXPECT_NE(Read(client).find("\"b64_json\":\"" + EncodedPixels(3, 1) + "\""),
             std::string::npos);

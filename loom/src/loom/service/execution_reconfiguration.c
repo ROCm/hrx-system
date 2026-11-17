@@ -17,6 +17,10 @@ struct loom_service_execution_reconfiguration_t {
   loom_runtime_wake_callback_t observer;
   // Acquired choice currently used by subsequent service invocations.
   loom_runtime_variant_entry_t* selected;
+  // First captured compilation awaiting admission by the service owner.
+  struct loom_service_execution_reconfiguration_job_t* pending_head;
+  // Last queued compilation; NULL when no construction awaits admission.
+  struct loom_service_execution_reconfiguration_job_t* pending_tail;
   // One accepted policy change, applied only at the service's quiescent
   // boundary.
   struct {
@@ -34,6 +38,8 @@ struct loom_service_execution_reconfiguration_t {
 typedef struct loom_service_execution_reconfiguration_job_t {
   // Allocator retained independently of service retirement.
   iree_allocator_t host_allocator;
+  // Next captured compilation, used only before worker submission.
+  struct loom_service_execution_reconfiguration_job_t* next;
   // Stable pending entry, published only after the job relinquishes inputs.
   loom_runtime_variant_entry_t* entry;
   // Owned provider locators, filesystem base and retained package, independent
@@ -83,14 +89,16 @@ static iree_status_t loom_service_execution_reconfiguration_stage(
   }
   if (iree_status_is_ok(status)) {
     *out_id = loom_runtime_variant_entry_id(job->entry);
-    // From here the pool owns terminal observation, including submission
-    // rejection. The caller receives a stable ID for every accepted attempt.
-    status = reconfiguration->update.compile(
-        reconfiguration->update.self, job->sources,
-        loom_service_execution_reconfiguration_complete, job);
-    if (!iree_status_is_ok(status)) {
-      loom_service_execution_reconfiguration_complete(job, status, NULL, NULL);
-      status = iree_ok_status();
+    // The pool retains this accepted attempt through queued cancellation or
+    // compiler completion. Only the service owner admits work to the workers.
+    if (reconfiguration->pending_tail) {
+      reconfiguration->pending_tail->next = job;
+    } else {
+      reconfiguration->pending_head = job;
+    }
+    reconfiguration->pending_tail = job;
+    if (reconfiguration->observer.wake) {
+      reconfiguration->observer.wake(reconfiguration->observer.user_data);
     }
   } else {
     loom_service_execution_reconfiguration_job_free(job);
@@ -188,7 +196,32 @@ bool loom_service_execution_reconfiguration_advance(
     return false;
   }
   reconfiguration->stopping |= stopping;
-  bool progress = loom_runtime_variant_pool_collect(reconfiguration->pool);
+  bool progress = false;
+  loom_service_execution_reconfiguration_job_t* job =
+      reconfiguration->pending_head;
+  if (job) {
+    // Unlink before submission: inline completion may release the job before
+    // compile returns. Later jobs remain eligible while this one compiles.
+    reconfiguration->pending_head = job->next;
+    if (!reconfiguration->pending_head) {
+      reconfiguration->pending_tail = NULL;
+    }
+    if (reconfiguration->stopping) {
+      loom_service_execution_reconfiguration_complete(
+          job, iree_make_status(IREE_STATUS_CANCELLED, "service is stopping"),
+          NULL, NULL);
+    } else {
+      iree_status_t status = reconfiguration->update.compile(
+          reconfiguration->update.self, job->sources,
+          loom_service_execution_reconfiguration_complete, job);
+      if (!iree_status_is_ok(status)) {
+        loom_service_execution_reconfiguration_complete(job, status, NULL,
+                                                        NULL);
+      }
+    }
+    progress = true;
+  }
+  progress |= loom_runtime_variant_pool_collect(reconfiguration->pool);
   loom_runtime_variant_entry_t* entry = reconfiguration->selection.entry;
   if (!entry || (!quiescent && !reconfiguration->stopping)) {
     return progress;

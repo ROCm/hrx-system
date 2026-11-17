@@ -576,14 +576,47 @@ TEST_F(ReconfigurationTextServiceTest,
 }
 
 TEST_F(ReconfigurationTextServiceTest,
+       StopCancelsQueuedCandidatesBeforeCompilation) {
+  loom_runtime_variant_id_t candidates[3] = {};
+  auto* notification = loom_serve_http_server_notification(server_);
+  const auto ticket = iree_notification_prepare_wait(notification);
+  Stage(directory_ + "/advance.loom", original_, &candidates[0]);
+  // Staging posts the idle owner synchronously; this only tests that published
+  // wake and never waits for compiler execution.
+  EXPECT_TRUE(iree_notification_commit_wait(
+      notification, ticket, IREE_DURATION_ZERO, IREE_TIME_INFINITE_PAST));
+  ASSERT_FALSE(HasFatalFailure());
+  ASSERT_NO_FATAL_FAILURE(
+      Stage(directory_ + "/missing.loom", original_, &candidates[1]));
+  ASSERT_NO_FATAL_FAILURE(
+      Stage(directory_ + "/advance.loom", original_, &candidates[2]));
+  EXPECT_TRUE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
+
+  // Shutdown before the first owner turn cancels captured construction intent.
+  // Neither a valid source nor a missing source reaches the compiler.
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      interface_, [&] { return Idle(); }, LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
+  for (loom_runtime_variant_id_t id : candidates) {
+    loom_runtime_variant_snapshot_t snapshot = {};
+    ASSERT_TRUE(
+        loom_runtime_variant_pool_snapshot(configuration_.pool, id, &snapshot));
+    EXPECT_EQ(snapshot.phase, LOOM_RUNTIME_VARIANT_FAILED);
+    EXPECT_EQ(snapshot.code, IREE_STATUS_CANCELLED);
+  }
+  EXPECT_EQ(configuration_.selected(configuration_.self), original_);
+}
+
+TEST_F(ReconfigurationTextServiceTest,
        StopCancelsSelectionButJoinsAcceptedCompilerBorrow) {
   loom_runtime_variant_id_t id = 0;
   loom_serve::testing::text::OwnerTurn::Run(
       loom_runtime_host_executor(host_), [&] {
         ASSERT_NO_FATAL_FAILURE(
             Stage(directory_ + "/advance.loom", original_, &id));
-        ASSERT_NO_FATAL_FAILURE(Select(original_));
         bool progress = false;
+        IREE_ASSERT_OK(interface_.runtime.vtable->advance(
+            interface_.runtime.self, 0, &progress));
+        ASSERT_NO_FATAL_FAILURE(Select(original_));
         IREE_ASSERT_OK(interface_.runtime.vtable->advance(
             interface_.runtime.self, LOOM_RUNTIME_SERVICE_FLAG_STOPPING,
             &progress));
