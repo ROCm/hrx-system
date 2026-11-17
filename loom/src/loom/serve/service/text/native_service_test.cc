@@ -482,10 +482,14 @@ TEST_F(NativeTextRegistryTest, AbortRetiresAcceptedWorkBeforeReleasingInput) {
   OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
     IREE_ASSERT_OK(Open(body_, "second", &second));
     ASSERT_NE(second, nullptr);
+    auto& runtime = Model()->service.runtime;
+    bool progress = false;
+    IREE_ASSERT_OK(runtime.vtable->advance(runtime.self, 0, &progress));
+    EXPECT_TRUE(progress);
     EXPECT_EQ(Model()->service.telemetry.counters->batches, 0u);
-    // Admission has accepted the independent preparation loan. With one worker
-    // it cannot start until this owner turn returns; additional workers may
-    // already be reading the body. Neither case may release it at close.
+    // The owner has accepted the independent preparation loan. With one worker
+    // it cannot start until this turn returns; additional workers may already
+    // be reading the body. Neither case may release it at close.
     second.reset();
     IREE_ASSERT_OK(
         loom_serve_registry_remove(Model(), LOOM_SERVE_REMOVAL_ABORT));
@@ -573,7 +577,10 @@ TEST_F(NativeTextRegistryTest, NativeFinalOutputMatchesHttp) {
   NativeStream stream(nullptr, loom_serve_text_stream_close);
   IREE_ASSERT_OK(Open(body_, "native", &stream));
   ASSERT_NE(stream, nullptr);
+  const auto& runtime = Model()->service.runtime;
+  EXPECT_FALSE(runtime.vtable->is_pending(runtime.self));
   ASSERT_NO_FATAL_FAILURE(StartHttp(body_));
+  EXPECT_FALSE(runtime.vtable->is_pending(runtime.self));
   ASSERT_NO_FATAL_FAILURE(ReadFinal(stream));
   ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] { return Idle(); }));
   const auto* result = loom_serve_text_stream_result(stream.get());

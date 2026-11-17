@@ -516,6 +516,7 @@ class SourceTextServiceTest : public ::testing::Test {
                            "X-Loom-Session: first\r\n");
     loom_serve_http_connection_t* connection = nullptr;
     ASSERT_NO_FATAL_FAILURE(Accept(first, interface, &connection));
+    EXPECT_FALSE(interface.runtime.vtable->is_pending(interface.runtime.self));
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
         interface,
         [&] {
@@ -533,6 +534,11 @@ class SourceTextServiceTest : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(Accept(second, interface, &connection));
     EXPECT_EQ(interface.telemetry.counters->batches, 0u);
     EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests, 1u);
+    bool progress = false;
+    IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self, 0,
+                                                     &progress));
+    EXPECT_TRUE(progress);
+    EXPECT_EQ(interface.telemetry.counters->batches, 0u);
     // Metadata stays owner-readable while preparation borrows the second
     // prompt and the device still owns the first epoch's rows.
     loom_service_request_snapshot_t queued_snapshot = {};

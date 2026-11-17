@@ -173,9 +173,14 @@ TEST_F(InputCountTest, StopJoinsBorrowedHeadAndCancelsQueuedQueries) {
       IREE_ASSERT_OK(interface_.accept(interface_.runtime.self, connections[i],
                                        requests[i], 0));
     }
+    bool progress = false;
+    EXPECT_FALSE(
+        interface_.runtime.vtable->is_pending(interface_.runtime.self));
+    IREE_ASSERT_OK(interface_.runtime.vtable->advance(interface_.runtime.self,
+                                                      0, &progress));
+    EXPECT_TRUE(progress);
     // The sole worker is still running this owner turn, so the first query
     // cannot have released its CPU loan. Stopping may cancel only the tail.
-    bool progress = false;
     IREE_ASSERT_OK(interface_.runtime.vtable->advance(
         interface_.runtime.self, LOOM_RUNTIME_SERVICE_FLAG_STOPPING,
         &progress));
@@ -208,6 +213,14 @@ TEST_F(InputCountTest, FullQueueRejectsWithoutDisturbingAcceptedQueries) {
       IREE_ASSERT_OK(interface_.accept(interface_.runtime.self, connections[i],
                                        requests[i], 0));
     }
+    EXPECT_EQ(interface_.snapshot(interface_.runtime.self).queued_requests, 2u);
+    EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 0u);
+    EXPECT_FALSE(
+        interface_.runtime.vtable->is_pending(interface_.runtime.self));
+    bool progress = false;
+    IREE_ASSERT_OK(interface_.runtime.vtable->advance(interface_.runtime.self,
+                                                      0, &progress));
+    EXPECT_TRUE(progress);
     EXPECT_EQ(interface_.snapshot(interface_.runtime.self).queued_requests, 1u);
     EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 1u);
     EXPECT_EQ(interface_.telemetry.counters->rejected, 1u);
@@ -236,6 +249,11 @@ TEST_F(InputCountTest, DisconnectRetiresTheHeadBeforeReusingItsClaim) {
       IREE_ASSERT_OK(interface_.accept(interface_.runtime.self, connections[i],
                                        requests[i], 0));
     }
+    bool progress = false;
+    IREE_ASSERT_OK(interface_.runtime.vtable->advance(interface_.runtime.self,
+                                                      0, &progress));
+    EXPECT_TRUE(progress);
+    EXPECT_TRUE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
   });
   const linger reset = {1, 0};
   ASSERT_EQ(setsockopt(first, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)), 0);

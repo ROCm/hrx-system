@@ -555,8 +555,13 @@ TEST_F(ReconfigurationTextServiceTest,
       loom_runtime_host_executor(host_), [&] {
         IREE_ASSERT_OK(
             interface_.accept(interface_.runtime.self, connection, request, 0));
-        ASSERT_NO_FATAL_FAILURE(Select(id));
         bool progress = false;
+        IREE_ASSERT_OK(interface_.runtime.vtable->advance(
+            interface_.runtime.self, 0, &progress));
+        EXPECT_TRUE(progress);
+        EXPECT_TRUE(
+            interface_.runtime.vtable->is_pending(interface_.runtime.self));
+        ASSERT_NO_FATAL_FAILURE(Select(id));
         IREE_ASSERT_OK(interface_.runtime.vtable->advance(
             interface_.runtime.self, 0, &progress));
         EXPECT_FALSE(selection_.called);

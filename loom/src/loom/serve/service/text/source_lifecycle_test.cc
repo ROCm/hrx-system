@@ -413,6 +413,11 @@ TEST_F(SourceTextServiceTest, CheckpointClaimSurvivesDisconnectAndStopping) {
     const int pin =
         Send("", "X-Loom-Session: root\r\n", "/v1/checkpoints/base");
     ASSERT_NO_FATAL_FAILURE(Accept(pin, interface, &connection));
+    EXPECT_FALSE(interface.runtime.vtable->is_pending(interface.runtime.self));
+    bool progress = false;
+    IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self, 0,
+                                                     &progress));
+    EXPECT_TRUE(progress);
     // Pin ownership has been accepted. The owner has not consumed readiness,
     // even if the device/proactor has already completed its work.
     // Request-backed names must survive peer failure until the endpoint can be
@@ -678,6 +683,11 @@ TEST_F(SourceTextServiceTest, StoppingAccountsForQueuedControlAndCpuBorrowers) {
   const int generation =
       Send(Request(Message("user", "ab")), "X-Loom-Session: first\r\n");
   ASSERT_NO_FATAL_FAILURE(accept(generation));
+  bool progress = false;
+  IREE_ASSERT_OK(
+      interface.runtime.vtable->advance(interface.runtime.self, 0, &progress));
+  EXPECT_TRUE(progress);
+  EXPECT_TRUE(interface.runtime.vtable->is_pending(interface.runtime.self));
   // CPU completion may already be posted, but only the owner can consume it.
   // Checkpoint and generation claims queue behind that real accepted borrower.
   const int control =
@@ -1061,31 +1071,24 @@ TEST_F(SourceTextServiceTest,
         claim.connection, iree_infinite_timeout());
   }
   // Failure can arrive after the router claims a request but before the model
-  // accepts it. A single-worker turn cannot run the preparation it just queued:
-  // that borrowed head must survive, while both unborrowed tails retire now.
-  loom_serve::testing::text::OwnerTurn::Run(
-      loom_runtime_host_executor(host_), [&] {
-        for (const auto& claim : claims) {
-          IREE_ASSERT_OK(interface.accept(interface.runtime.self,
-                                          claim.connection, claim.request, 0));
-        }
-        EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests,
-                  3u);
-        bool progress = false;
-        IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
-                                                         0, &progress));
-        // The first heartbeat precedes borrower collection. It must include
-        // arrivals after preparation began, not just the initial FIFO head.
-        read_snapshots();
-        EXPECT_EQ(reported_queued, 3u);
-        EXPECT_TRUE(progress);
-        EXPECT_GE(interface.telemetry.counters->cancelled, 2u);
-        EXPECT_EQ(interface.telemetry.counters->cancelled, 2u);
-        EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests,
-                  1u);
-        EXPECT_TRUE(
-            interface.runtime.vtable->is_pending(interface.runtime.self));
-      });
+  // accepts it. Admission queues all claims without starting preparation; the
+  // owner returns every disconnected claim before borrowing any input.
+  for (const auto& claim : claims) {
+    IREE_ASSERT_OK(interface.accept(interface.runtime.self, claim.connection,
+                                    claim.request, 0));
+  }
+  EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests, 3u);
+  EXPECT_FALSE(interface.runtime.vtable->is_pending(interface.runtime.self));
+  bool progress = false;
+  IREE_ASSERT_OK(
+      interface.runtime.vtable->advance(interface.runtime.self, 0, &progress));
+  // The first heartbeat precedes cancellation and includes every arrival.
+  read_snapshots();
+  EXPECT_EQ(reported_queued, 3u);
+  EXPECT_TRUE(progress);
+  EXPECT_EQ(interface.telemetry.counters->cancelled, 3u);
+  EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests, 0u);
+  EXPECT_FALSE(interface.runtime.vtable->is_active(interface.runtime.self));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
     read_snapshots();
     return reported_queued == 0 &&

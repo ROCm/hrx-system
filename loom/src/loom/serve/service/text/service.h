@@ -79,8 +79,9 @@ iree_status_t loom_serve_text_service_allocate(
 // Enqueues native chat on the same serialized owner and bounded arrival queue
 // as HTTP. Success with a stream moves request and copies its selectors; NULL
 // success is queue pressure. Pressure and failure leave request untouched and
-// do not count a receipt. Source validation occurs on a shared CPU task after
-// acceptance. The caller advances the service and owns the handle until close.
+// do not count a receipt. Acceptance starts no source work; the caller advances
+// the service to start validation on a shared CPU task and subsequent model
+// execution. The caller owns the handle until close.
 iree_status_t loom_serve_text_service_try_open(
     loom_serve_text_service_t* service, loom_serve_text_request_t* request,
     loom_serve_text_stream_t** out_stream);
@@ -148,6 +149,10 @@ iree_status_t loom_serve_text_service_try_open_checkpoint(
 // This policy does not alter epoch shapes or wait for matching requests.
 // Peer cancellation discards its live row, not independently pinned endpoints,
 // at a completed stage boundary. Capacities match the created model.
+//
+// HTTP and native acceptance queue demand without starting source work. The
+// owner advances the service to start preparation, counting, and checkpoint
+// operations.
 loom_serve_service_t loom_serve_text_service_interface(
     loom_serve_text_service_t* service);
 
