@@ -84,6 +84,8 @@ typedef struct loom_low_lower_function_analysis_t {
   loom_control_participant_table_t* participant_zeros;
   // Shared source allocation provenance, accesses, and instance lifetimes.
   loom_storage_interference_t* storage_interference;
+  // Canonical access graph borrowed from the immutable-source scope.
+  const loom_storage_access_function_t* storage_access_function;
 } loom_low_lower_function_analysis_t;
 
 typedef struct loom_low_lowering_frame_t {

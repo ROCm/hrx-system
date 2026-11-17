@@ -12,7 +12,6 @@
 #include "loom/ir/module.h"
 #include "loom/ops/global/ops.h"
 #include "loom/ops/low/ops.h"
-#include "loom/ops/signature_flags.h"
 #include "loom/target/arch/vm/contracts/core.h"
 #include "loom/target/arch/vm/contracts/core_lower_rules.h"
 #include "loom/target/arch/vm/descriptors/descriptors.h"
@@ -81,15 +80,6 @@ static iree_status_t loom_vm_map_type(void* user_data,
 
 #include "loom/target/arch/vm/contracts/tables.inl"
 
-static loom_argument_access_t loom_vm_argument_access(
-    loom_low_lower_context_t* context, uint16_t argument_index) {
-  const iree_const_byte_span_t flags = loom_func_like_signature_flags(
-      loom_low_lower_context_source_function(context));
-  return flags.data_length
-             ? loom_signature_flags_access(flags.data[argument_index])
-             : LOOM_ARGUMENT_ACCESS_UNSPECIFIED;
-}
-
 static iree_status_t loom_vm_map_span(loom_low_lower_context_t* context,
                                       loom_type_t source_type,
                                       loom_argument_access_t access,
@@ -151,11 +141,11 @@ static iree_status_t loom_vm_map_value(void* user_data,
           arguments - loom_op_const_operands(function.op);
       const loom_use_t* definition =
           loom_value_single_use(loom_module_value(module, source_value));
-      return loom_vm_map_span(
-          context, source_type,
-          loom_vm_argument_access(
-              context, loom_use_operand_index(*definition) - operand_offset),
-          out_low_type);
+      loom_argument_access_t access;
+      IREE_RETURN_IF_ERROR(loom_low_lower_context_argument_access(
+          context, loom_use_operand_index(*definition) - operand_offset,
+          &access));
+      return loom_vm_map_span(context, source_type, access, out_low_type);
     }
     return loom_vm_map_type(user_data, context, source_op, source_type,
                             out_low_type);
@@ -175,8 +165,9 @@ static iree_status_t loom_vm_map_value(void* user_data,
     const loom_value_t* entry =
         loom_module_value(loom_low_lower_context_module(context),
                           reference.origin.entry_value_id);
-    const loom_argument_access_t access =
-        loom_vm_argument_access(context, loom_value_def_index(entry));
+    loom_argument_access_t access;
+    IREE_RETURN_IF_ERROR(loom_low_lower_context_argument_access(
+        context, loom_value_def_index(entry), &access));
     if (access != LOOM_ARGUMENT_ACCESS_UNSPECIFIED) {
       // Body views retain a storage root; their shape and subview offsets live
       // in source memory facts. Only a call boundary materializes a span pair.
@@ -199,8 +190,11 @@ static iree_status_t loom_vm_map_argument(
     loom_low_lower_abi_argument_t* out_argument) {
   const loom_type_t type = loom_module_value_type(
       loom_low_lower_context_module(context), source_argument_id);
-  const loom_argument_access_t access =
-      loom_vm_argument_access(context, source_argument_index);
+  loom_argument_access_t access = LOOM_ARGUMENT_ACCESS_UNSPECIFIED;
+  if (loom_type_is_view(type)) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_context_argument_access(
+        context, source_argument_index, &access));
+  }
   if (loom_type_is_view(type) &&
       (access != LOOM_ARGUMENT_ACCESS_UNSPECIFIED ||
        loom_func_like_import_symbol(loom_low_lower_context_source_function(
@@ -226,10 +220,13 @@ static iree_status_t loom_vm_emit_entry_setup(
   const loom_block_t* entry = loom_region_entry_block(
       loom_low_func_def_body(loom_low_lower_context_low_function(context)));
   const loom_module_t* module = loom_low_lower_context_module(context);
+  uint16_t argument_map_count = 0;
+  const loom_low_lower_abi_argument_t* argument_map =
+      loom_low_lower_context_argument_map(context, &argument_map_count);
+  IREE_ASSERT_EQ(argument_count, argument_map_count);
   for (uint16_t i = 0; i < argument_count; ++i) {
     if (!loom_type_is_view(loom_module_value_type(module, arguments[i])) ||
-        loom_vm_argument_access(context, i) ==
-            LOOM_ARGUMENT_ACCESS_UNSPECIFIED) {
+        loom_type_kind(argument_map[i].body_type) == LOOM_TYPE_NONE) {
       continue;
     }
     loom_op_t* root = NULL;
