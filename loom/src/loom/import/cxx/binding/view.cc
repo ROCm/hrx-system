@@ -363,9 +363,10 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
       }
       result.has_buffer_byte_offset_ = parameters.size() == base_count + 1;
       if (result.has_buffer_byte_offset_ &&
-          !types.is_offset(parameters[1], owner)) {
+          types.address_domain(parameters[1], owner) == LOOM_SCALAR_TYPE_NONE) {
         diagnostics.reject(
-            unit, owner, "buffer.view byte offset must use the offset domain");
+            unit, owner,
+            "buffer.view byte position must use the index or offset domain");
       }
       const size_t dimensions_index = result.has_buffer_byte_offset_ ? 2 : 1;
       result.unsigned_dimension_mask_ = require_index_record(
