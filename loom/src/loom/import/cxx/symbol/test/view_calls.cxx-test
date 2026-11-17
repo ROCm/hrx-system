@@ -38,7 +38,7 @@ unsigned read_layouts(const unsigned char* dense_values,
   return read_byte(dense, position) + read_byte(strided, position);
 }
 // ----
-func.def public @read_layouts(%dense_values: buffer, %dense_values_byte_offset: offset, %strided_values: buffer, %strided_values_byte_offset: offset, %position: i32) -> (i32) {
+func.def public @read_layouts(%dense_values: buffer, %dense_values_byte_offset: index, %strided_values: buffer, %strided_values_byte_offset: index, %position: i32) -> (i32) {
   %dense_layout = encoding.layout.dense : encoding<layout>
   %dense = buffer.view %dense_values[%dense_values_byte_offset] : buffer -> view<4xi8, %dense_layout>
   %20 = index.constant 2 : index
@@ -81,7 +81,7 @@ unsigned read_dynamic(const unsigned char* values, unsigned count) {
   return read_dynamic_byte(view);
 }
 // ----
-func.def public @read_dynamic(%values: buffer, %values_byte_offset: offset, %count: i32) -> (i32) {
+func.def public @read_dynamic(%values: buffer, %values_byte_offset: index, %count: i32) -> (i32) {
   %4 = scalar.extui %count : i32 to i64
   %view_layout = encoding.layout.dense : encoding<layout>
   %view_dim0 = index.cast %4 : i64 to index
@@ -128,24 +128,21 @@ unsigned observe_crop(const unsigned char* values, unsigned columns) {
   return loom::view::load(result, 1u, 1u);
 }
 // ----
-func.def public @observe_crop(%values: buffer, %values_byte_offset: offset, %columns: i32) -> (i32) {
-  %33 = scalar.constant 2 : i64
-  %8 = index.cast %values_byte_offset : offset to i64
-  %9 = scalar.addi %8, %33 : i64
-  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
-  %11 = index.cast %10 : i64 to offset
-  %12 = scalar.extui %columns : i32 to i64
+func.def public @observe_crop(%values: buffer, %values_byte_offset: index, %columns: i32) -> (i32) {
+  %32 = index.constant 2 : index
+  %31 = index.add %values_byte_offset, %32 : index
+  %9 = scalar.extui %columns : i32 to i64
   %source_layout = encoding.layout.dense : encoding<layout>
-  %source_dim1 = index.cast %12 : i64 to index
-  %source = buffer.view %values[%11] : buffer -> view<4x[%source_dim1]xi8, %source_layout>
+  %source_dim1 = index.cast %9 : i64 to index
+  %source = buffer.view %values[%31] : buffer -> view<4x[%source_dim1]xi8, %source_layout>
   %result_layout, %result = func.call @library.crop_2x3(%source_dim1, %source_layout, %source) : (index, encoding<layout>, view<4x[%source_dim1]xi8, %source_layout>) -> (encoding<layout>, view<2x3xi8, %result_layout>)
-  %32 = index.constant 1 : index
-  %24 = view.load %result[%32, %32] : view<2x3xi8, %result_layout> -> i8
-  %25 = scalar.extui %24 : i8 to i32
-  func.return %25 : i32
+  %29 = index.constant 1 : index
+  %21 = view.load %result[%29, %29] : view<2x3xi8, %result_layout> -> i8
+  %22 = scalar.extui %21 : i8 to i32
+  func.return %22 : i32
 }
 
-func.decl @library.crop_2x3(%26: index, %27: encoding<layout>, %28: view<4x[%26]xi8, %27>) -> (%29: encoding<layout>, view<2x3xi8, %29>)
+func.decl @library.crop_2x3(%23: index, %24: encoding<layout>, %25: view<4x[%23]xi8, %24>) -> (%26: encoding<layout>, view<2x3xi8, %26>)
 
 // ====
 // RUN: pass canonicalize,cse,dce
@@ -173,11 +170,10 @@ unsigned observe_linked_views(unsigned position) {
 func.def public @observe_linked_views(%position: i32) -> (i32) {
   %2 = index.constant 4 : offset
   %dense_values_storage = buffer.alloca<private> align(1) %2 : buffer
-  %dense_values_storage_byte_offset = index.constant 0 : offset
+  %dense_values_storage_byte_offset = index.constant 0 : index
   %dense_values_view = buffer.view %dense_values_storage[%dense_values_storage_byte_offset] : buffer -> view<4xi8>
   %72 = scalar.constant 2 : i8
-  %8 = index.constant 0 : index
-  view.store %72, %dense_values_view[%8] : i8, view<4xi8>
+  view.store %72, %dense_values_view[%dense_values_storage_byte_offset] : i8, view<4xi8>
   %71 = scalar.constant 3 : i8
   %11 = index.constant 1 : index
   view.store %71, %dense_values_view[%11] : i8, view<4xi8>
@@ -191,7 +187,7 @@ func.def public @observe_linked_views(%position: i32) -> (i32) {
   %strided_values_storage = buffer.alloca<private> align(1) %18 : buffer
   %strided_values_view = buffer.view %strided_values_storage[%dense_values_storage_byte_offset] : buffer -> view<8xi8>
   %68 = scalar.constant 11 : i8
-  view.store %68, %strided_values_view[%8] : i8, view<8xi8>
+  view.store %68, %strided_values_view[%dense_values_storage_byte_offset] : i8, view<8xi8>
   %67 = scalar.constant 0 : i8
   view.store %67, %strided_values_view[%11] : i8, view<8xi8>
   %66 = scalar.constant 13 : i8
@@ -243,11 +239,10 @@ unsigned observe_linked_dynamic_view() {
 func.def public @observe_linked_dynamic_view() -> (i32) {
   %1 = index.constant 6 : offset
   %values_storage = buffer.alloca<private> align(1) %1 : buffer
-  %values_storage_byte_offset = index.constant 0 : offset
+  %values_storage_byte_offset = index.constant 0 : index
   %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<6xi8>
   %39 = scalar.constant 29 : i8
-  %7 = index.constant 0 : index
-  view.store %39, %values_view[%7] : i8, view<6xi8>
+  view.store %39, %values_view[%values_storage_byte_offset] : i8, view<6xi8>
   %38 = scalar.constant 31 : i8
   %10 = index.constant 1 : index
   view.store %38, %values_view[%10] : i8, view<6xi8>
@@ -304,10 +299,11 @@ unsigned observe_linked_crop(unsigned columns) {
 func.def public @observe_linked_crop(%columns: i32) -> (i32) {
   %2 = index.constant 46 : offset
   %values_storage = buffer.alloca<private> align(1) %2 : buffer
-  %values_storage_byte_offset = index.constant 0 : offset
+  %values_storage_byte_offset = index.constant 0 : index
   %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<46xi8>
+  %45 = index.constant 0 : offset
   %10 = index.constant 1 : offset
-  scf.for %index = [%values_storage_byte_offset to %2 step %10] {
+  scf.for %index = [%45 to %2 step %10] {
     %12 = index.cast %index : offset to i32
     %13 = scalar.trunci %12 : i32 to i8
     %14 = scalar.extui %12 : i32 to i64
@@ -315,16 +311,16 @@ func.def public @observe_linked_crop(%columns: i32) -> (i32) {
     %16 = index.cast %15 : i64 to index
     view.store %13, %values_view[%16] : i8, view<46xi8>
   }
-  %input_byte_offset = index.constant 2 : offset
-  %25 = scalar.extui %columns : i32 to i64
+  %input_byte_offset = index.constant 2 : index
+  %22 = scalar.extui %columns : i32 to i64
   %source_layout = encoding.layout.dense : encoding<layout>
-  %source_dim1 = index.cast %25 : i64 to index
+  %source_dim1 = index.cast %22 : i64 to index
   %source = buffer.view %values_storage[%input_byte_offset] : buffer -> view<4x[%source_dim1]xi8, %source_layout>
   %crop_layout, %crop = func.call @library.crop_2x3(%source_dim1, %source_layout, %source) : (index, encoding<layout>, view<4x[%source_dim1]xi8, %source_layout>) -> (encoding<layout>, view<2x3xi8, %crop_layout>)
-  %45 = index.constant 1 : index
-  %37 = view.load %crop[%45, %45] : view<2x3xi8, %crop_layout> -> i8
-  %38 = scalar.extui %37 : i8 to i32
-  func.return %38 : i32
+  %42 = index.constant 1 : index
+  %34 = view.load %crop[%42, %42] : view<2x3xi8, %crop_layout> -> i8
+  %35 = scalar.extui %34 : i8 to i32
+  func.return %35 : i32
 }
 
-func.decl @library.crop_2x3(%39: index, %40: encoding<layout>, %41: view<4x[%39]xi8, %40>) -> (%42: encoding<layout>, view<2x3xi8, %42>)
+func.decl @library.crop_2x3(%36: index, %37: encoding<layout>, %38: view<4x[%36]xi8, %37>) -> (%39: encoding<layout>, view<2x3xi8, %39>)

@@ -7,7 +7,7 @@ void apply_scale(const Float4* input, Float4* output) {
 }
 
 // ----
-func.def public @apply_scale(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) {
+func.def public @apply_scale(%input: buffer, %input_byte_offset: index, %output: buffer, %output_byte_offset: index) {
   %4 = buffer.view %input[%input_byte_offset] : buffer -> view<4xf32>
   %5 = vector.load<root_in_bounds> %4[0] : view<4xf32> -> vector<4xf32>
   %10 = vector.constantf [0.5, 1.0, 1.5, 2.0] : vector<4xf32>

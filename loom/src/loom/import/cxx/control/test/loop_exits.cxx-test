@@ -25,7 +25,7 @@ unsigned entry(const unsigned* input, unsigned count, unsigned choose) {
   return total;
 }
 // ----
-func.def public @entry(%input: buffer, %input_byte_offset: offset, %count: i32, %choose: i32) -> (i32) {
+func.def public @entry(%input: buffer, %input_byte_offset: index, %count: i32, %choose: i32) -> (i32) {
   %total$5 = scalar.constant 0 : i32
   %index$6 = scalar.constant 0 : i32
   %7 = index.cast %index$6 : i32 to offset
@@ -45,61 +45,60 @@ func.def public @entry(%input: buffer, %input_byte_offset: offset, %count: i32, 
       scf.yield %23, %total$15 : i1, i32
     } else {
       %24 = scalar.extui %17 : i32 to i64
-      %25 = scalar.constant 4 : i64
-      %26 = scalar.muli %24, %25 : i64
-      %27 = index.cast %input_byte_offset : offset to i64
-      %28 = scalar.addi %27, %26 : i64
-      %29 = scalar.assume %28 [range(%28, 0, 9223372036854775807)] : i64
-      %30 = index.cast %29 : i64 to offset
-      %31 = buffer.view %input[%30] : buffer -> view<1xi32>
-      %32 = view.load<root_in_bounds|type_disjoint> %31[0] : view<1xi32> -> i32
-      %total = scalar.addi %total$15, %32 : i32
-      %34 = scalar.constant 1 : i1
-      scf.yield %34, %total : i1, i32
+      %25 = index.cast %24 : i64 to index
+      %26 = index.constant 4 : index
+      %27 = index.mul %25, %26 : index
+      %28 = index.add %input_byte_offset, %27 : index
+      %29 = buffer.view %input[%28] : buffer -> view<1xi32>
+      %30 = view.load<root_in_bounds|type_disjoint> %29[0] : view<1xi32> -> i32
+      %total = scalar.addi %total$15, %30 : i32
+      %32 = scalar.constant 1 : i1
+      scf.yield %32, %total : i1, i32
     }
     scf.yield %total$22 : i32
   }
-  %index$35 = scalar.constant 0 : i32
-  %index$40, %total$41 = scf.while(%index$36 = %index$35 : i32, %total = %total$16 : i32) -> (i32, i32) {
-    %42 = scalar.constant 1 : i32
-    %index$43 = scalar.addi %index$36, %42 : i32
-    %44 = scalar.cmpi ult, %index$36, %count : i32
-    scf.condition %44, %index$43, %total : i1, i32, i32
-  } do(%index: i32, %total$39: i32) {
-    %45 = scalar.andi %index, %choose : i32
-    %46 = scalar.constant 0 : i32
-    %47 = scalar.cmpi ne, %45, %46 : i32
-    %48, %total$49 = scf.if %47 -> (i1, i32) {
-      %50 = scalar.constant 0 : i1
-      scf.yield %50, %total$39 : i1, i32
+  %index$33 = scalar.constant 0 : i32
+  %index$38, %total$39 = scf.while(%index$34 = %index$33 : i32, %total = %total$16 : i32) -> (i32, i32) {
+    %40 = scalar.constant 1 : i32
+    %index$41 = scalar.addi %index$34, %40 : i32
+    %42 = scalar.cmpi ult, %index$34, %count : i32
+    scf.condition %42, %index$41, %total : i1, i32, i32
+  } do(%index: i32, %total$37: i32) {
+    %43 = scalar.andi %index, %choose : i32
+    %44 = scalar.constant 0 : i32
+    %45 = scalar.cmpi ne, %43, %44 : i32
+    %46, %total$47 = scf.if %45 -> (i1, i32) {
+      %48 = scalar.constant 0 : i1
+      scf.yield %48, %total$37 : i1, i32
     } else {
-      %total = scalar.addi %total$39, %index : i32
-      %52 = scalar.constant 1 : i1
-      scf.yield %52, %total : i1, i32
+      %total = scalar.addi %total$37, %index : i32
+      %50 = scalar.constant 1 : i1
+      scf.yield %50, %total : i1, i32
     }
-    scf.yield %index, %total$49 : i32, i32
+    scf.yield %index, %total$47 : i32, i32
   }
-  %total$57, %index$58 = scf.while(%total$53 = %total$41 : i32, %index$54 = %index$40 : i32) -> (i32, i32) {
-    %59 = scalar.andi %index$54, %choose : i32
-    %60 = scalar.constant 0 : i32
-    %61 = scalar.cmpi ne, %59, %60 : i32
-    %62, %total$63 = scf.if %61 -> (i1, i32) {
-      %64 = scalar.constant 0 : i1
-      scf.yield %64, %total$53 : i1, i32
+  %total$55, %index$56 = scf.while(%total$51 = %total$39 : i32, %index$52 = %index$38 : i32) -> (i32, i32) {
+    %57 = scalar.andi %index$52, %choose : i32
+    %58 = scalar.constant 0 : i32
+    %59 = scalar.cmpi ne, %57, %58 : i32
+    %60, %total$61 = scf.if %59 -> (i1, i32) {
+      %62 = scalar.constant 0 : i1
+      scf.yield %62, %total$51 : i1, i32
     } else {
-      %total = scalar.addi %total$53, %index$54 : i32
-      %66 = scalar.constant 1 : i1
-      scf.yield %66, %total : i1, i32
+      %total = scalar.addi %total$51, %index$52 : i32
+      %64 = scalar.constant 1 : i1
+      scf.yield %64, %total : i1, i32
     }
-    %67 = scalar.constant 1 : i32
-    %index$68 = scalar.addi %index$54, %67 : i32
-    %69 = scalar.cmpi ult, %index$68, %count : i32
-    scf.condition %69, %total$63, %index$68 : i1, i32, i32
+    %65 = scalar.constant 1 : i32
+    %index$66 = scalar.addi %index$52, %65 : i32
+    %67 = scalar.cmpi ult, %index$66, %count : i32
+    scf.condition %67, %total$61, %index$66 : i1, i32, i32
   } do(%total: i32, %index: i32) {
     scf.yield %total, %index : i32, i32
   }
-  func.return %total$57 : i32
+  func.return %total$55 : i32
 }
+
 // ====
 // RUN: roundtrip
 // A while break suppresses the next source-condition evaluation while a
@@ -271,7 +270,7 @@ func.def public @staged(%tail: i32) -> (i32) {
   func.return %total$10 : i32
 }
 
-func.def public @spin(%value: buffer, %value_byte_offset: offset) {
+func.def public @spin(%value: buffer, %value_byte_offset: index) {
   scf.while {
     %33 = scalar.constant 1 : i1
     scf.condition %33 : i1
@@ -839,7 +838,7 @@ void copy_odd(const unsigned* input, unsigned* output) {
   }
 }
 // ----
-func.def public @copy_odd(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) {
+func.def public @copy_odd(%input: buffer, %input_byte_offset: index, %output: buffer, %output_byte_offset: index) {
   %index = scalar.constant 0 : i32
   %5 = index.cast %index : i32 to offset
   %6 = scalar.constant 16 : i32
@@ -856,25 +855,21 @@ func.def public @copy_odd(%input: buffer, %input_byte_offset: offset, %output: b
       scf.yield %16 : i1
     } else {
       %17 = scalar.extui %10 : i32 to i64
-      %18 = scalar.constant 4 : i64
-      %19 = scalar.muli %17, %18 : i64
-      %20 = index.cast %input_byte_offset : offset to i64
-      %21 = scalar.addi %20, %19 : i64
-      %22 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
-      %23 = index.cast %22 : i64 to offset
-      %24 = buffer.view %input[%23] : buffer -> view<1xi32>
-      %25 = view.load<root_in_bounds|type_disjoint> %24[0] : view<1xi32> -> i32
-      %26 = scalar.extui %10 : i32 to i64
-      %27 = scalar.constant 4 : i64
-      %28 = scalar.muli %26, %27 : i64
-      %29 = index.cast %output_byte_offset : offset to i64
-      %30 = scalar.addi %29, %28 : i64
-      %31 = scalar.assume %30 [range(%30, 0, 9223372036854775807)] : i64
-      %32 = index.cast %31 : i64 to offset
-      %33 = buffer.view %output[%32] : buffer -> view<1xi32>
-      view.store<root_in_bounds|type_disjoint> %25, %33[0] : i32, view<1xi32>
-      %34 = scalar.constant 1 : i1
-      scf.yield %34 : i1
+      %18 = index.cast %17 : i64 to index
+      %19 = index.constant 4 : index
+      %20 = index.mul %18, %19 : index
+      %21 = index.add %input_byte_offset, %20 : index
+      %22 = buffer.view %input[%21] : buffer -> view<1xi32>
+      %23 = view.load<root_in_bounds|type_disjoint> %22[0] : view<1xi32> -> i32
+      %24 = scalar.extui %10 : i32 to i64
+      %25 = index.cast %24 : i64 to index
+      %26 = index.constant 4 : index
+      %27 = index.mul %25, %26 : index
+      %28 = index.add %output_byte_offset, %27 : index
+      %29 = buffer.view %output[%28] : buffer -> view<1xi32>
+      view.store<root_in_bounds|type_disjoint> %23, %29[0] : i32, view<1xi32>
+      %30 = scalar.constant 1 : i1
+      scf.yield %30 : i1
     }
   }
   func.return
@@ -1071,55 +1066,49 @@ unsigned select_values(const unsigned* input, unsigned* output,
   return stored;
 }
 // ----
-func.def public @select_values(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset, %length: i32, %choose: i32) -> (i32) {
+func.def public @select_values(%input: buffer, %input_byte_offset: index, %output: buffer, %output_byte_offset: index, %length: i32, %choose: i32) -> (i32) {
   %stored$7 = scalar.constant 0 : i32
   %index = scalar.constant 0 : i32
   %9 = index.cast %index : i32 to offset
   %10 = scalar.constant 33 : i32
   %11 = index.cast %10 : i32 to offset
   %12 = index.constant 1 : offset
-  %cursor, %cursor_byte_offset, %result, %result_byte_offset, %stored$23 = scf.for %index = [%9 to %11 step %12](%cursor$14 = %input : buffer, %cursor_byte_offset$15 = %input_byte_offset : offset, %result$16 = %output : buffer, %result_byte_offset$17 = %output_byte_offset : offset, %stored$18 = %stored$7 : i32) -> (buffer, offset, buffer, offset, i32) {
+  %cursor, %cursor_byte_offset, %result, %result_byte_offset, %stored$23 = scf.for %index = [%9 to %11 step %12](%cursor$14 = %input : buffer, %cursor_byte_offset$15 = %input_byte_offset : index, %result$16 = %output : buffer, %result_byte_offset$17 = %output_byte_offset : index, %stored$18 = %stored$7 : i32) -> (buffer, index, buffer, index, i32) {
     %24 = index.cast %index : offset to i32
     %25 = scalar.cmpi uge, %24, %length : i32
-    %26, %cursor$27, %cursor_byte_offset$28, %result$29, %result_byte_offset$30, %stored$31 = scf.if %25 -> (i1, buffer, offset, buffer, offset, i32) {
+    %26, %cursor$27, %cursor_byte_offset$28, %result$29, %result_byte_offset$30, %stored$31 = scf.if %25 -> (i1, buffer, index, buffer, index, i32) {
       %32 = scalar.constant 0 : i1
-      scf.yield %32, %cursor$14, %cursor_byte_offset$15, %result$16, %result_byte_offset$17, %stored$18 : i1, buffer, offset, buffer, offset, i32
+      scf.yield %32, %cursor$14, %cursor_byte_offset$15, %result$16, %result_byte_offset$17, %stored$18 : i1, buffer, index, buffer, index, i32
     } else {
       %33 = scalar.constant 1 : i32
-      %34 = scalar.extsi %33 : i32 to i64
-      %35 = scalar.constant 4 : i64
-      %36 = scalar.muli %34, %35 : i64
-      %37 = index.cast %cursor_byte_offset$15 : offset to i64
-      %38 = scalar.addi %37, %36 : i64
-      %39 = scalar.assume %38 [range(%38, 0, 9223372036854775807)] : i64
-      %cursor_byte_offset$40 = index.cast %39 : i64 to offset
-      %41 = buffer.view %cursor$14[%cursor_byte_offset$15] : buffer -> view<1xi32>
-      %value = view.load<root_in_bounds|type_disjoint> %41[0] : view<1xi32> -> i32
-      %43 = scalar.andi %value, %choose : i32
-      %44 = scalar.constant 0 : i32
-      %45 = scalar.cmpi eq, %43, %44 : i32
-      %46, %cursor, %cursor_byte_offset$48, %result, %result_byte_offset, %stored = scf.if %45 -> (i1, buffer, offset, buffer, offset, i32) {
-        %52 = scalar.constant 0 : i1
-        scf.yield %52, %cursor$14, %cursor_byte_offset$40, %result$16, %result_byte_offset$17, %stored$18 : i1, buffer, offset, buffer, offset, i32
+      %34 = index.cast %33 : i32 to index
+      %35 = index.constant 4 : index
+      %36 = index.mul %34, %35 : index
+      %cursor_byte_offset$37 = index.add %cursor_byte_offset$15, %36 : index
+      %38 = buffer.view %cursor$14[%cursor_byte_offset$15] : buffer -> view<1xi32>
+      %value = view.load<root_in_bounds|type_disjoint> %38[0] : view<1xi32> -> i32
+      %40 = scalar.andi %value, %choose : i32
+      %41 = scalar.constant 0 : i32
+      %42 = scalar.cmpi eq, %40, %41 : i32
+      %43, %cursor, %cursor_byte_offset$45, %result, %result_byte_offset, %stored = scf.if %42 -> (i1, buffer, index, buffer, index, i32) {
+        %49 = scalar.constant 0 : i1
+        scf.yield %49, %cursor$14, %cursor_byte_offset$37, %result$16, %result_byte_offset$17, %stored$18 : i1, buffer, index, buffer, index, i32
       } else {
-        %53 = scalar.constant 1 : i32
-        %54 = scalar.extsi %53 : i32 to i64
-        %55 = scalar.constant 4 : i64
-        %56 = scalar.muli %54, %55 : i64
-        %57 = index.cast %result_byte_offset$17 : offset to i64
-        %58 = scalar.addi %57, %56 : i64
-        %59 = scalar.assume %58 [range(%58, 0, 9223372036854775807)] : i64
-        %result_byte_offset = index.cast %59 : i64 to offset
-        %61 = buffer.view %result$16[%result_byte_offset$17] : buffer -> view<1xi32>
-        view.store<root_in_bounds|type_disjoint> %value, %61[0] : i32, view<1xi32>
-        %62 = scalar.constant 1 : i32
-        %stored = scalar.addi %stored$18, %62 : i32
-        %64 = scalar.constant 1 : i1
-        scf.yield %64, %cursor$14, %cursor_byte_offset$40, %result$16, %result_byte_offset, %stored : i1, buffer, offset, buffer, offset, i32
+        %50 = scalar.constant 1 : i32
+        %51 = index.cast %50 : i32 to index
+        %52 = index.constant 4 : index
+        %53 = index.mul %51, %52 : index
+        %result_byte_offset = index.add %result_byte_offset$17, %53 : index
+        %55 = buffer.view %result$16[%result_byte_offset$17] : buffer -> view<1xi32>
+        view.store<root_in_bounds|type_disjoint> %value, %55[0] : i32, view<1xi32>
+        %56 = scalar.constant 1 : i32
+        %stored = scalar.addi %stored$18, %56 : i32
+        %58 = scalar.constant 1 : i1
+        scf.yield %58, %cursor$14, %cursor_byte_offset$37, %result$16, %result_byte_offset, %stored : i1, buffer, index, buffer, index, i32
       }
-      scf.yield %46, %cursor, %cursor_byte_offset$48, %result, %result_byte_offset, %stored : i1, buffer, offset, buffer, offset, i32
+      scf.yield %43, %cursor, %cursor_byte_offset$45, %result, %result_byte_offset, %stored : i1, buffer, index, buffer, index, i32
     }
-    scf.yield %cursor$27, %cursor_byte_offset$28, %result$29, %result_byte_offset$30, %stored$31 : buffer, offset, buffer, offset, i32
+    scf.yield %cursor$27, %cursor_byte_offset$28, %result$29, %result_byte_offset$30, %stored$31 : buffer, index, buffer, index, i32
   }
   func.return %stored$23 : i32
 }
@@ -1196,7 +1185,7 @@ Prefix lookback(unsigned group, const unsigned* states,
   return result;
 }
 // ----
-func.def public @lookback(%group: i32, %states: buffer, %states_byte_offset: offset, %aggregates: buffer, %aggregates_byte_offset: offset, %prefixes: buffer, %prefixes_byte_offset: offset) -> (i32, i32, i32) {
+func.def public @lookback(%group: i32, %states: buffer, %states_byte_offset: index, %aggregates: buffer, %aggregates_byte_offset: index, %prefixes: buffer, %prefixes_byte_offset: index) -> (i32, i32, i32) {
   %result_carry$10 = scalar.constant 0 : i32
   %result_visits$11 = scalar.constant 0 : i32
   %12 = scalar.constant 1 : i1
@@ -1214,60 +1203,54 @@ func.def public @lookback(%group: i32, %states: buffer, %states_byte_offset: off
     %30 = scalar.constant 1 : i32
     %result_previous$31 = scalar.subi %result_previous$18, %30 : i32
     %32 = scalar.extui %result_previous$31 : i32 to i64
-    %33 = scalar.constant 4 : i64
-    %34 = scalar.muli %32, %33 : i64
-    %35 = index.cast %states_byte_offset : offset to i64
-    %36 = scalar.addi %35, %34 : i64
-    %37 = scalar.assume %36 [range(%36, 0, 9223372036854775807)] : i64
-    %38 = index.cast %37 : i64 to offset
-    %39 = buffer.view %states[%38] : buffer -> view<1xi32>
-    %state = view.load<root_in_bounds|type_disjoint> %39[0] : view<1xi32> -> i32
-    %value$41 = scalar.constant 0 : i32
-    %42 = scalar.constant 1 : i32
-    %43 = scalar.cmpi eq, %state, %42 : i32
-    %value$44 = scf.if %43 -> (i32) {
-      %45 = scalar.extui %result_previous$31 : i32 to i64
-      %46 = scalar.constant 4 : i64
-      %47 = scalar.muli %45, %46 : i64
-      %48 = index.cast %aggregates_byte_offset : offset to i64
-      %49 = scalar.addi %48, %47 : i64
-      %50 = scalar.assume %49 [range(%49, 0, 9223372036854775807)] : i64
-      %51 = index.cast %50 : i64 to offset
-      %52 = buffer.view %aggregates[%51] : buffer -> view<1xi32>
-      %value = view.load<root_in_bounds|type_disjoint> %52[0] : view<1xi32> -> i32
+    %33 = index.cast %32 : i64 to index
+    %34 = index.constant 4 : index
+    %35 = index.mul %33, %34 : index
+    %36 = index.add %states_byte_offset, %35 : index
+    %37 = buffer.view %states[%36] : buffer -> view<1xi32>
+    %state = view.load<root_in_bounds|type_disjoint> %37[0] : view<1xi32> -> i32
+    %value$39 = scalar.constant 0 : i32
+    %40 = scalar.constant 1 : i32
+    %41 = scalar.cmpi eq, %state, %40 : i32
+    %value$42 = scf.if %41 -> (i32) {
+      %43 = scalar.extui %result_previous$31 : i32 to i64
+      %44 = index.cast %43 : i64 to index
+      %45 = index.constant 4 : index
+      %46 = index.mul %44, %45 : index
+      %47 = index.add %aggregates_byte_offset, %46 : index
+      %48 = buffer.view %aggregates[%47] : buffer -> view<1xi32>
+      %value = view.load<root_in_bounds|type_disjoint> %48[0] : view<1xi32> -> i32
       scf.yield %value : i32
     } else {
-      scf.yield %value$41 : i32
+      scf.yield %value$39 : i32
     }
-    %54 = scalar.constant 2 : i32
-    %55 = scalar.cmpi eq, %state, %54 : i32
-    %value$56 = scf.if %55 -> (i32) {
-      %57 = scalar.extui %result_previous$31 : i32 to i64
-      %58 = scalar.constant 4 : i64
-      %59 = scalar.muli %57, %58 : i64
-      %60 = index.cast %prefixes_byte_offset : offset to i64
-      %61 = scalar.addi %60, %59 : i64
-      %62 = scalar.assume %61 [range(%61, 0, 9223372036854775807)] : i64
-      %63 = index.cast %62 : i64 to offset
-      %64 = buffer.view %prefixes[%63] : buffer -> view<1xi32>
-      %value = view.load<root_in_bounds|type_disjoint> %64[0] : view<1xi32> -> i32
+    %50 = scalar.constant 2 : i32
+    %51 = scalar.cmpi eq, %state, %50 : i32
+    %value$52 = scf.if %51 -> (i32) {
+      %53 = scalar.extui %result_previous$31 : i32 to i64
+      %54 = index.cast %53 : i64 to index
+      %55 = index.constant 4 : index
+      %56 = index.mul %54, %55 : index
+      %57 = index.add %prefixes_byte_offset, %56 : index
+      %58 = buffer.view %prefixes[%57] : buffer -> view<1xi32>
+      %value = view.load<root_in_bounds|type_disjoint> %58[0] : view<1xi32> -> i32
       scf.yield %value : i32
     } else {
-      scf.yield %value$44 : i32
+      scf.yield %value$42 : i32
     }
-    %result_carry$66 = scalar.addi %value$56, %result_carry$17 : i32
-    %67 = scalar.constant 1 : i32
-    %result_visits$68 = scalar.addi %result_visits$19, %67 : i32
-    %69 = scalar.constant 2 : i32
-    %70 = scalar.cmpi eq, %state, %69 : i32
-    %71, %72 = scf.if %70 -> (i1, i1) {
-      %73 = scalar.constant 0 : i1
-      scf.yield %73, %73 : i1, i1
+    %result_carry$60 = scalar.addi %value$52, %result_carry$17 : i32
+    %61 = scalar.constant 1 : i32
+    %result_visits$62 = scalar.addi %result_visits$19, %61 : i32
+    %63 = scalar.constant 2 : i32
+    %64 = scalar.cmpi eq, %state, %63 : i32
+    %65, %66 = scf.if %64 -> (i1, i1) {
+      %67 = scalar.constant 0 : i1
+      scf.yield %67, %67 : i1, i1
     } else {
-      %74 = scalar.constant 1 : i1
-      scf.yield %74, %74 : i1, i1
+      %68 = scalar.constant 1 : i1
+      scf.yield %68, %68 : i1, i1
     }
-    scf.yield %result_carry$66, %result_previous$31, %result_visits$68, %72 : i32, i32, i32, i1
+    scf.yield %result_carry$60, %result_previous$31, %result_visits$62, %66 : i32, i32, i32, i1
   }
   func.return %result_carry$20, %result_previous, %result_visits$22 : i32, i32, i32
 }

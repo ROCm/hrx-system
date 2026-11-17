@@ -23,23 +23,22 @@ static SequenceObservation<int> observe_i32() {
 func.def public @observe_i32() -> (i32, i32, i32, i32) {
   %4 = index.constant 12 : offset
   %storage_storage = buffer.alloca<private> align(4) %4 : buffer
-  %storage_storage_byte_offset = index.constant 0 : offset
+  %storage_storage_byte_offset = index.constant 0 : index
   %storage_view = buffer.view %storage_storage[%storage_storage_byte_offset] : buffer -> view<3xi32>
   %8 = scalar.constant 37 : i32
-  %9 = index.constant 0 : index
-  view.store<type_disjoint> %8, %storage_view[%9] : i32, view<3xi32>
+  view.store<type_disjoint> %8, %storage_view[%storage_storage_byte_offset] : i32, view<3xi32>
   %11 = index.constant 1 : index
   view.store<type_disjoint> %8, %storage_view[%11] : i32, view<3xi32>
   %13 = index.constant 2 : index
   view.store<type_disjoint> %8, %storage_view[%13] : i32, view<3xi32>
-  %passed = func.call @atomic_i32(%storage_storage, %storage_storage_byte_offset) : (buffer, offset) -> (i32)
-  %19 = view.load<type_disjoint> %storage_view[%9] : view<3xi32> -> i32
+  %passed = func.call @atomic_i32(%storage_storage, %storage_storage_byte_offset) : (buffer, index) -> (i32)
+  %19 = view.load<type_disjoint> %storage_view[%storage_storage_byte_offset] : view<3xi32> -> i32
   %24 = view.load<type_disjoint> %storage_view[%11] : view<3xi32> -> i32
   %29 = view.load<type_disjoint> %storage_view[%13] : view<3xi32> -> i32
   func.return %passed, %19, %24, %29 : i32, i32, i32, i32
 }
 
-func.decl @atomic_i32(%30: buffer, %31: offset) -> (i32)
+func.decl @atomic_i32(%30: buffer, %31: index) -> (i32)
 
 // ====
 // RUN: pass canonicalize,cse,dce
@@ -67,23 +66,22 @@ static SequenceObservation<unsigned> observe_u32() {
 func.def public @observe_u32() -> (i32, i32, i32, i32) {
   %4 = index.constant 12 : offset
   %storage_storage = buffer.alloca<private> align(4) %4 : buffer
-  %storage_storage_byte_offset = index.constant 0 : offset
+  %storage_storage_byte_offset = index.constant 0 : index
   %storage_view = buffer.view %storage_storage[%storage_storage_byte_offset] : buffer -> view<3xi32>
   %8 = scalar.constant 37 : i32
-  %9 = index.constant 0 : index
-  view.store<type_disjoint> %8, %storage_view[%9] : i32, view<3xi32>
+  view.store<type_disjoint> %8, %storage_view[%storage_storage_byte_offset] : i32, view<3xi32>
   %11 = index.constant 1 : index
   view.store<type_disjoint> %8, %storage_view[%11] : i32, view<3xi32>
   %13 = index.constant 2 : index
   view.store<type_disjoint> %8, %storage_view[%13] : i32, view<3xi32>
-  %passed = func.call @atomic_u32(%storage_storage, %storage_storage_byte_offset) : (buffer, offset) -> (i32)
-  %19 = view.load<type_disjoint> %storage_view[%9] : view<3xi32> -> i32
+  %passed = func.call @atomic_u32(%storage_storage, %storage_storage_byte_offset) : (buffer, index) -> (i32)
+  %19 = view.load<type_disjoint> %storage_view[%storage_storage_byte_offset] : view<3xi32> -> i32
   %24 = view.load<type_disjoint> %storage_view[%11] : view<3xi32> -> i32
   %29 = view.load<type_disjoint> %storage_view[%13] : view<3xi32> -> i32
   func.return %passed, %19, %24, %29 : i32, i32, i32, i32
 }
 
-func.decl @atomic_u32(%30: buffer, %31: offset) -> (i32)
+func.decl @atomic_u32(%30: buffer, %31: index) -> (i32)
 
 // ====
 // RUN: pass canonicalize,cse,dce
@@ -111,23 +109,22 @@ static SequenceObservation<long long> observe_i64() {
 func.def public @observe_i64() -> (i32, i64, i64, i64) {
   %4 = index.constant 24 : offset
   %storage_storage = buffer.alloca<private> align(8) %4 : buffer
-  %storage_storage_byte_offset = index.constant 0 : offset
+  %storage_storage_byte_offset = index.constant 0 : index
   %storage_view = buffer.view %storage_storage[%storage_storage_byte_offset] : buffer -> view<3xi64>
   %41 = scalar.constant 37 : i64
-  %10 = index.constant 0 : index
-  view.store<type_disjoint> %41, %storage_view[%10] : i64, view<3xi64>
+  view.store<type_disjoint> %41, %storage_view[%storage_storage_byte_offset] : i64, view<3xi64>
   %13 = index.constant 1 : index
   view.store<type_disjoint> %41, %storage_view[%13] : i64, view<3xi64>
   %16 = index.constant 2 : index
   view.store<type_disjoint> %41, %storage_view[%16] : i64, view<3xi64>
-  %passed = func.call @atomic_i64(%storage_storage, %storage_storage_byte_offset) : (buffer, offset) -> (i32)
-  %22 = view.load<type_disjoint> %storage_view[%10] : view<3xi64> -> i64
+  %passed = func.call @atomic_i64(%storage_storage, %storage_storage_byte_offset) : (buffer, index) -> (i32)
+  %22 = view.load<type_disjoint> %storage_view[%storage_storage_byte_offset] : view<3xi64> -> i64
   %27 = view.load<type_disjoint> %storage_view[%13] : view<3xi64> -> i64
   %32 = view.load<type_disjoint> %storage_view[%16] : view<3xi64> -> i64
   func.return %passed, %22, %27, %32 : i32, i64, i64, i64
 }
 
-func.decl @atomic_i64(%33: buffer, %34: offset) -> (i32)
+func.decl @atomic_i64(%33: buffer, %34: index) -> (i32)
 
 // ====
 // RUN: pass canonicalize,cse,dce
@@ -155,23 +152,22 @@ static SequenceObservation<unsigned long long> observe_u64() {
 func.def public @observe_u64() -> (i32, i64, i64, i64) {
   %4 = index.constant 24 : offset
   %storage_storage = buffer.alloca<private> align(8) %4 : buffer
-  %storage_storage_byte_offset = index.constant 0 : offset
+  %storage_storage_byte_offset = index.constant 0 : index
   %storage_view = buffer.view %storage_storage[%storage_storage_byte_offset] : buffer -> view<3xi64>
   %41 = scalar.constant 37 : i64
-  %10 = index.constant 0 : index
-  view.store<type_disjoint> %41, %storage_view[%10] : i64, view<3xi64>
+  view.store<type_disjoint> %41, %storage_view[%storage_storage_byte_offset] : i64, view<3xi64>
   %13 = index.constant 1 : index
   view.store<type_disjoint> %41, %storage_view[%13] : i64, view<3xi64>
   %16 = index.constant 2 : index
   view.store<type_disjoint> %41, %storage_view[%16] : i64, view<3xi64>
-  %passed = func.call @atomic_u64(%storage_storage, %storage_storage_byte_offset) : (buffer, offset) -> (i32)
-  %22 = view.load<type_disjoint> %storage_view[%10] : view<3xi64> -> i64
+  %passed = func.call @atomic_u64(%storage_storage, %storage_storage_byte_offset) : (buffer, index) -> (i32)
+  %22 = view.load<type_disjoint> %storage_view[%storage_storage_byte_offset] : view<3xi64> -> i64
   %27 = view.load<type_disjoint> %storage_view[%13] : view<3xi64> -> i64
   %32 = view.load<type_disjoint> %storage_view[%16] : view<3xi64> -> i64
   func.return %passed, %22, %27, %32 : i32, i64, i64, i64
 }
 
-func.decl @atomic_u64(%33: buffer, %34: offset) -> (i32)
+func.decl @atomic_u64(%33: buffer, %34: index) -> (i32)
 
 // ====
 // RUN: pass canonicalize,cse,dce
@@ -216,11 +212,10 @@ static CountedObservation observe_builtin_compare() {
 func.def public @observe_builtin_compare() -> (i32, i32, i32, i32, i32, i32) {
   %6 = index.constant 40 : offset
   %storage_storage = buffer.alloca<private> align(4) %6 : buffer
-  %storage_storage_byte_offset = index.constant 0 : offset
+  %storage_storage_byte_offset = index.constant 0 : index
   %storage_view = buffer.view %storage_storage[%storage_storage_byte_offset] : buffer -> view<10xi32>
   %10 = scalar.constant 37 : i32
-  %11 = index.constant 0 : index
-  view.store<type_disjoint> %10, %storage_view[%11] : i32, view<10xi32>
+  view.store<type_disjoint> %10, %storage_view[%storage_storage_byte_offset] : i32, view<10xi32>
   %13 = index.constant 1 : index
   view.store<type_disjoint> %10, %storage_view[%13] : i32, view<10xi32>
   %15 = index.constant 2 : index
@@ -240,37 +235,37 @@ func.def public @observe_builtin_compare() -> (i32, i32, i32, i32, i32, i32) {
   view.store<type_disjoint> %zero$i32, %storage_view[%27] : i32, view<10xi32>
   %29 = index.constant 9 : index
   view.store<type_disjoint> %zero$i32, %storage_view[%29] : i32, view<10xi32>
-  %96 = index.constant 16 : offset
-  %failures = func.call @builtin_compare_values(%storage_storage, %storage_storage_byte_offset, %storage_storage, %96) : (buffer, offset, buffer, offset) -> (i32)
-  %95 = index.constant 4 : offset
-  %94 = index.constant 10 : offset
-  %44 = index.constant 1 : offset
-  %evaluation_failures = scf.for %index = [%95 to %94 step %44](%evaluation_failures$46 = %zero$i32 : i32) -> (i32) {
-    %48 = index.cast %index : offset to i32
-    %49 = scalar.constant 5 : i32
-    %50 = scalar.cmpi uge, %48, %49 : i32
-    %52 = scalar.constant 9 : i32
-    %53 = scalar.cmpi ult, %48, %52 : i32
-    %98 = scf.select %50, %53, %50 : i1
-    %55 = scalar.constant 2 : i32
-    %wanted = scf.select %98, %55, %zero$i32 : i32
-    %57 = scalar.extui %48 : i32 to i64
-    %58 = scalar.assume %57 [range(%57, 0, 9)] : i64
-    %59 = index.cast %58 : i64 to index
-    %60 = view.load<type_disjoint> %storage_view[%59] : view<10xi32> -> i32
-    %61 = scalar.cmpi ne, %60, %wanted : i32
-    %62 = scalar.extui %61 : i1 to i32
-    %evaluation_failures$63 = scalar.addi %evaluation_failures$46, %62 : i32
-    scf.yield %evaluation_failures$63 : i32
+  %93 = index.constant 16 : index
+  %failures = func.call @builtin_compare_values(%storage_storage, %storage_storage_byte_offset, %storage_storage, %93) : (buffer, index, buffer, index) -> (i32)
+  %92 = index.constant 4 : offset
+  %91 = index.constant 10 : offset
+  %41 = index.constant 1 : offset
+  %evaluation_failures = scf.for %index = [%92 to %91 step %41](%evaluation_failures$43 = %zero$i32 : i32) -> (i32) {
+    %45 = index.cast %index : offset to i32
+    %46 = scalar.constant 5 : i32
+    %47 = scalar.cmpi uge, %45, %46 : i32
+    %49 = scalar.constant 9 : i32
+    %50 = scalar.cmpi ult, %45, %49 : i32
+    %95 = scf.select %47, %50, %47 : i1
+    %52 = scalar.constant 2 : i32
+    %wanted = scf.select %95, %52, %zero$i32 : i32
+    %54 = scalar.extui %45 : i32 to i64
+    %55 = scalar.assume %54 [range(%54, 0, 9)] : i64
+    %56 = index.cast %55 : i64 to index
+    %57 = view.load<type_disjoint> %storage_view[%56] : view<10xi32> -> i32
+    %58 = scalar.cmpi ne, %57, %wanted : i32
+    %59 = scalar.extui %58 : i1 to i32
+    %evaluation_failures$60 = scalar.addi %evaluation_failures$43, %59 : i32
+    scf.yield %evaluation_failures$60 : i32
   }
-  %68 = view.load<type_disjoint> %storage_view[%11] : view<10xi32> -> i32
-  %73 = view.load<type_disjoint> %storage_view[%13] : view<10xi32> -> i32
-  %78 = view.load<type_disjoint> %storage_view[%15] : view<10xi32> -> i32
-  %83 = view.load<type_disjoint> %storage_view[%17] : view<10xi32> -> i32
-  func.return %failures, %68, %73, %78, %83, %evaluation_failures : i32, i32, i32, i32, i32, i32
+  %65 = view.load<type_disjoint> %storage_view[%storage_storage_byte_offset] : view<10xi32> -> i32
+  %70 = view.load<type_disjoint> %storage_view[%13] : view<10xi32> -> i32
+  %75 = view.load<type_disjoint> %storage_view[%15] : view<10xi32> -> i32
+  %80 = view.load<type_disjoint> %storage_view[%17] : view<10xi32> -> i32
+  func.return %failures, %65, %70, %75, %80, %evaluation_failures : i32, i32, i32, i32, i32, i32
 }
 
-func.decl @builtin_compare_values(%84: buffer, %85: offset, %86: buffer, %87: offset) -> (i32)
+func.decl @builtin_compare_values(%81: buffer, %82: index, %83: buffer, %84: index) -> (i32)
 
 // ====
 // RUN: pass canonicalize,cse,dce
@@ -307,23 +302,22 @@ static CompareObservation<unsigned long long> observe_builtin_wide() {
 func.def public @observe_builtin_wide() -> (i32, i64, i64, i64, i64) {
   %5 = index.constant 32 : offset
   %storage_storage = buffer.alloca<private> align(8) %5 : buffer
-  %storage_storage_byte_offset = index.constant 0 : offset
+  %storage_storage_byte_offset = index.constant 0 : index
   %storage_view = buffer.view %storage_storage[%storage_storage_byte_offset] : buffer -> view<4xi64>
   %52 = scalar.constant 37 : i64
-  %11 = index.constant 0 : index
-  view.store<type_disjoint> %52, %storage_view[%11] : i64, view<4xi64>
+  view.store<type_disjoint> %52, %storage_view[%storage_storage_byte_offset] : i64, view<4xi64>
   %14 = index.constant 1 : index
   view.store<type_disjoint> %52, %storage_view[%14] : i64, view<4xi64>
   %17 = index.constant 2 : index
   view.store<type_disjoint> %52, %storage_view[%17] : i64, view<4xi64>
   %20 = index.constant 3 : index
   view.store<type_disjoint> %52, %storage_view[%20] : i64, view<4xi64>
-  %failures = func.call @builtin_wide_values(%storage_storage, %storage_storage_byte_offset) : (buffer, offset) -> (i32)
-  %26 = view.load<type_disjoint> %storage_view[%11] : view<4xi64> -> i64
+  %failures = func.call @builtin_wide_values(%storage_storage, %storage_storage_byte_offset) : (buffer, index) -> (i32)
+  %26 = view.load<type_disjoint> %storage_view[%storage_storage_byte_offset] : view<4xi64> -> i64
   %31 = view.load<type_disjoint> %storage_view[%14] : view<4xi64> -> i64
   %36 = view.load<type_disjoint> %storage_view[%17] : view<4xi64> -> i64
   %41 = view.load<type_disjoint> %storage_view[%20] : view<4xi64> -> i64
   func.return %failures, %26, %31, %36, %41 : i32, i64, i64, i64, i64
 }
 
-func.decl @builtin_wide_values(%42: buffer, %43: offset) -> (i32)
+func.decl @builtin_wide_values(%42: buffer, %43: index) -> (i32)

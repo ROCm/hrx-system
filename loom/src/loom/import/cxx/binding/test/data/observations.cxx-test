@@ -26,11 +26,10 @@ void schedule_observations(unsigned count,
 
 // ----
 func.def public @schedule_observations(%count: i32, %output: buffer) {
-  %3 = index.constant 0 : offset
+  %3 = index.constant 0 : index
   %values = buffer.view %output[%3] : buffer -> view<8xi32>
   %5 = func.call @schedule_call(%count) : (i32) -> (i32)
-  %52 = index.constant 0 : index
-  view.store<type_disjoint> %5, %values[%52] : i32, view<8xi32>
+  view.store<type_disjoint> %5, %values[%3] : i32, view<8xi32>
   %8 = func.call @schedule_snapshot(%count) : (i32) -> (i32)
   %51 = index.constant 1 : index
   view.store<type_disjoint> %8, %values[%51] : i32, view<8xi32>
@@ -92,15 +91,14 @@ void schedule_oracle(unsigned count, loom::type::buffer<unsigned> output) {
 
 // ----
 func.def public @schedule_oracle(%count: i32, %output: buffer) {
-  %3 = index.constant 0 : offset
+  %3 = index.constant 0 : index
   %values = buffer.view %output[%3] : buffer -> view<8xi32>
   %42 = scalar.constant -1 : i32
   %43 = scalar.addi %count, %42 : i32
   %7 = scalar.muli %count, %43 : i32
   %40 = scalar.constant 1 : i32
   %sum = scalar.shrui %7, %40 : i32
-  %39 = index.constant 0 : index
-  view.store<type_disjoint> %sum, %values[%39] : i32, view<8xi32>
+  view.store<type_disjoint> %sum, %values[%3] : i32, view<8xi32>
   %12 = scalar.addi %sum, %count : i32
   %13 = scalar.constant 3 : i32
   %14 = scalar.addi %12, %13 : i32

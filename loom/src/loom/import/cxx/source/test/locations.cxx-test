@@ -77,10 +77,10 @@ const char* filename() {
 }
 
 // ----
-func.def public @filename() -> (buffer, offset) {
+func.def public @filename() -> (buffer, index) {
   %2 = buffer.constant align(1) utf8("presumed.cc\u0000") : buffer loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":3:10 to 3:18)
-  %3 = index.constant 0 : offset loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":3:10 to 3:18)
-  func.return %2, %3 : buffer, offset loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":3:3 to 3:19)
+  %3 = index.constant 0 : index loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":3:10 to 3:18)
+  func.return %2, %3 : buffer, index loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":3:3 to 3:19)
 } loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":2:1 to 4:2)
 
 // ====

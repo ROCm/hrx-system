@@ -118,7 +118,7 @@ TEST_F(ReceiverScopesTest, ExplicitClausesKeepLexicalWritesWhenResumed) {
 TEST_F(ReceiverScopesTest, StorageReceiversRetainIdentityWithoutValueBindings) {
   auto* observed_type =
       source_.unit().typeTraits().add_volatile(record_->source->type());
-  const StorageProjection destination = {{11, 12}, 4, true};
+  const StorageProjection destination = {{11, 12}, 4};
   scopes_.enter(*record_, destination, observed_type);
   scopes_.mark_complete(first_);
   EXPECT_TRUE(scopes_.is_complete(first_));
@@ -127,7 +127,6 @@ TEST_F(ReceiverScopesTest, StorageReceiversRetainIdentityWithoutValueBindings) {
   EXPECT_EQ(scopes_.find(first_)->storage->pointer.root, 11u);
   EXPECT_EQ(scopes_.find(first_)->storage->pointer.byte_offset, 12u);
   EXPECT_EQ(scopes_.find(first_)->storage->alignment, 4u);
-  EXPECT_TRUE(scopes_.find(first_)->storage->pointer_width_constrained);
   EXPECT_FALSE(values_.contains(first_));
 
   scopes_.enter(*record_, std::nullopt, record_->source->type());

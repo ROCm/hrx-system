@@ -41,36 +41,32 @@ static unsigned* next(unsigned* input) { return input + 1; }
 void write(unsigned* input) { *next(input) = 7u; }
 
 // ----
-#include <loomcxx/numeric.h>
-#include <loomcxx/predicate.h>
 #include <loomcxx/view.h>
 
 struct next_result {
   loom::type::buffer<unsigned char> value0;
-  loom::type::offset value1;
+  loom::type::index value1;
 };
 
 [[loom::symbol("write")]]
-void write(loom::type::buffer<unsigned char> input, loom::type::offset input_byte_offset);
+void write(loom::type::buffer<unsigned char> input, loom::type::index input_byte_offset);
 
 [[loom::symbol("next")]]
-static next_result next(loom::type::buffer<unsigned char> input, loom::type::offset input_byte_offset);
+static next_result next(loom::type::buffer<unsigned char> input, loom::type::index input_byte_offset);
 
 [[loom::symbol("write")]]
-void write(loom::type::buffer<unsigned char> input, loom::type::offset input_byte_offset) {
+void write(loom::type::buffer<unsigned char> input, loom::type::index input_byte_offset) {
   next_result call_result = next(input, input_byte_offset);
   auto v3 = call_result.value0;
-  loom::type::offset v4 = call_result.value1;
+  loom::type::index v4 = call_result.value1;
   auto v5 = loom::buffer::view<1>(loom::buffer::cast<unsigned>(v3), v4, {});
   loom::view::store<loom::memory_access::root_in_bounds>(7u, v5, 0);
   return;
 }
 
 [[loom::symbol("next")]]
-static next_result next(loom::type::buffer<unsigned char> input, loom::type::offset input_byte_offset) {
-  unsigned long long v15 = loom::offset::cast<unsigned long long>(input_byte_offset) + (loom::convert<long long>(1) * 4ull);
-  loom::assume(v15 <= 9223372036854775807ull);
-  return {input, loom::offset::cast(v15)};
+static next_result next(loom::type::buffer<unsigned char> input, loom::type::index input_byte_offset) {
+  return {input, (input_byte_offset + (loom::type::index{1} * loom::type::index{4}))};
 }
 
 // ====
@@ -83,13 +79,13 @@ unsigned* identity(unsigned* input) { return input; }
 
 struct identity_result {
   loom::type::buffer<unsigned char> value0;
-  loom::type::offset value1;
+  loom::type::index value1;
 };
 
 [[loom::symbol("identity")]]
-identity_result identity(loom::type::buffer<unsigned char> input, loom::type::offset input_byte_offset);
+identity_result identity(loom::type::buffer<unsigned char> input, loom::type::index input_byte_offset);
 
 [[loom::symbol("identity")]]
-identity_result identity(loom::type::buffer<unsigned char> input, loom::type::offset input_byte_offset) {
+identity_result identity(loom::type::buffer<unsigned char> input, loom::type::index input_byte_offset) {
   return {input, input_byte_offset};
 }

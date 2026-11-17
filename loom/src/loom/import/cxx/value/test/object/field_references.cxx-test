@@ -51,23 +51,20 @@ float read_advanced(float* data) {
   return *slice.data;
 }
 // ----
-func.def public @read_advanced(%data: buffer, %data_byte_offset: offset) -> (f32) {
-  %3, %4 = func.call pure @advance(%data, %data_byte_offset) : (buffer, offset) -> (buffer, offset)
+func.def public @read_advanced(%data: buffer, %data_byte_offset: index) -> (f32) {
+  %3, %4 = func.call pure @advance(%data, %data_byte_offset) : (buffer, index) -> (buffer, index)
   %5 = buffer.view %3[%4] : buffer -> view<1xf32>
   %6 = view.load<root_in_bounds|type_disjoint> %5[0] : view<1xf32> -> f32
   func.return %6 : f32
 }
 
-func.def @advance(%slice_data: buffer, %slice_data_byte_offset: offset) -> (buffer, offset) {
+func.def @advance(%slice_data: buffer, %slice_data_byte_offset: index) -> (buffer, index) {
   %11 = scalar.constant 2 : i32
-  %12 = scalar.extsi %11 : i32 to i64
-  %13 = scalar.constant 4 : i64
-  %14 = scalar.muli %12, %13 : i64
-  %15 = index.cast %slice_data_byte_offset : offset to i64
-  %16 = scalar.addi %15, %14 : i64
-  %17 = scalar.assume %16 [range(%16, 0, 9223372036854775807)] : i64
-  %18 = index.cast %17 : i64 to offset
-  func.return %slice_data, %18 : buffer, offset
+  %12 = index.cast %11 : i32 to index
+  %13 = index.constant 4 : index
+  %14 = index.mul %12, %13 : index
+  %15 = index.add %slice_data_byte_offset, %14 : index
+  func.return %slice_data, %15 : buffer, index
 }
 
 // ====
@@ -92,47 +89,47 @@ unsigned recursive(unsigned count) {
 func.def public @recursive(%count: i32) -> (i32) {
   %2 = index.constant 8 : offset
   %pair_storage = buffer.alloca<private> align(4) %2 : buffer
-  %pair_storage_byte_offset = index.constant 0 : offset
+  %pair_storage_byte_offset = index.constant 0 : index
   %pair_view = buffer.view %pair_storage[%pair_storage_byte_offset] : buffer -> view<8xi8>
   %6 = scalar.constant 3 : i32
-  %7 = index.constant 0 : offset
-  %8 = index.add %pair_storage_byte_offset, %7 : offset
-  %9 = index.assume %8 [range(%8, 0, 4)] : offset
+  %7 = index.constant 0 : index
+  %8 = index.add %pair_storage_byte_offset, %7 : index
+  %9 = index.assume %8 [range(%8, 0, 4)] : index
   %10 = buffer.view %pair_storage[%9] : buffer -> view<1xi32>
   view.store<type_disjoint> %6, %10[0] : i32, view<1xi32>
-  func.call @even(%pair_storage, %pair_storage_byte_offset, %count) : (buffer, offset, i32)
-  %11 = index.constant 0 : offset
-  %12 = index.add %pair_storage_byte_offset, %11 : offset
-  %13 = index.assume %12 [range(%12, 0, 4)] : offset
+  func.call @even(%pair_storage, %pair_storage_byte_offset, %count) : (buffer, index, i32)
+  %11 = index.constant 0 : index
+  %12 = index.add %pair_storage_byte_offset, %11 : index
+  %13 = index.assume %12 [range(%12, 0, 4)] : index
   %14 = buffer.view %pair_storage[%13] : buffer -> view<1xi32>
   %first = view.load<type_disjoint> %14[0] : view<1xi32> -> i32
   func.return %first : i32
 }
 
-func.def @even(%pair: buffer, %pair_byte_offset: offset, %count: i32) {
+func.def @even(%pair: buffer, %pair_byte_offset: index, %count: i32) {
   %19 = scalar.constant 0 : i32
   %20 = scalar.cmpi ne, %count, %19 : i32
   scf.if %20 {
     %21 = scalar.constant 1 : i32
     %22 = scalar.subi %count, %21 : i32
-    func.call @odd(%pair, %pair_byte_offset, %22) : (buffer, offset, i32)
+    func.call @odd(%pair, %pair_byte_offset, %22) : (buffer, index, i32)
   } else {
     %23 = scalar.constant 7 : i32
-    %24 = index.constant 0 : offset
-    %25 = index.add %pair_byte_offset, %24 : offset
+    %24 = index.constant 0 : index
+    %25 = index.add %pair_byte_offset, %24 : index
     %26 = buffer.view %pair[%25] : buffer -> view<1xi32>
     view.store<root_in_bounds|type_disjoint> %23, %26[0] : i32, view<1xi32>
   }
   func.return
 }
 
-func.def @odd(%pair: buffer, %pair_byte_offset: offset, %count: i32) {
+func.def @odd(%pair: buffer, %pair_byte_offset: index, %count: i32) {
   %30 = scalar.constant 0 : i32
   %31 = scalar.cmpi ne, %count, %30 : i32
   scf.if %31 {
     %32 = scalar.constant 1 : i32
     %33 = scalar.subi %count, %32 : i32
-    func.call @even(%pair, %pair_byte_offset, %33) : (buffer, offset, i32)
+    func.call @even(%pair, %pair_byte_offset, %33) : (buffer, index, i32)
   }
   func.return
 }
@@ -149,22 +146,20 @@ unsigned ordered(unsigned* output, unsigned input) {
   return state.length;
 }
 // ----
-func.def public @ordered(%output: buffer, %output_byte_offset: offset, %input: i32) -> (i32) {
-  %state_length = func.call @store(%output, %output_byte_offset, %input) : (buffer, offset, i32) -> (i32)
+func.def public @ordered(%output: buffer, %output_byte_offset: index, %input: i32) -> (i32) {
+  %state_length = func.call @store(%output, %output_byte_offset, %input) : (buffer, index, i32) -> (i32)
   func.return %state_length : i32
 }
 
-func.def @store(%output: buffer, %output_byte_offset: offset, %state_length$7: i32) -> (i32) {
+func.def @store(%output: buffer, %output_byte_offset: index, %state_length$7: i32) -> (i32) {
   %state_length$9 = scalar.constant 1 : i32
   %10 = scalar.extui %state_length$9 : i32 to i64
-  %11 = scalar.constant 4 : i64
-  %12 = scalar.muli %10, %11 : i64
-  %13 = index.cast %output_byte_offset : offset to i64
-  %14 = scalar.addi %13, %12 : i64
-  %15 = scalar.assume %14 [range(%14, 0, 9223372036854775807)] : i64
-  %16 = index.cast %15 : i64 to offset
-  %17 = buffer.view %output[%16] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %state_length$7, %17[0] : i32, view<1xi32>
+  %11 = index.cast %10 : i64 to index
+  %12 = index.constant 4 : index
+  %13 = index.mul %11, %12 : index
+  %14 = index.add %output_byte_offset, %13 : index
+  %15 = buffer.view %output[%14] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %state_length$7, %15[0] : i32, view<1xi32>
   func.return %state_length$9 : i32
 }
 
@@ -419,7 +414,7 @@ unsigned selected_pointer(bool choose, const unsigned* first, const unsigned* se
   return *left.data + *right.data;
 }
 // ----
-func.def public @selected_pointer(%choose: i1, %first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) -> (i32) {
+func.def public @selected_pointer(%choose: i1, %first: buffer, %first_byte_offset: index, %second: buffer, %second_byte_offset: index) -> (i32) {
   %8 = scf.if %choose -> (i32) {
     %6 = scalar.constant 0 : i32
     scf.yield %6 : i32
@@ -429,25 +424,25 @@ func.def public @selected_pointer(%choose: i1, %first: buffer, %first_byte_offse
   }
   %9 = scalar.constant 0 : i32
   %10 = scalar.cmpi eq, %8, %9 : i32
-  %11, %12 = scf.if %10 -> (buffer, offset) {
-    scf.yield %first, %first_byte_offset : buffer, offset
+  %11, %12 = scf.if %10 -> (buffer, index) {
+    scf.yield %first, %first_byte_offset : buffer, index
   } else {
-    scf.yield %second, %second_byte_offset : buffer, offset
+    scf.yield %second, %second_byte_offset : buffer, index
   }
-  %13, %14 = func.call pure @advance(%11, %12) : (buffer, offset) -> (buffer, offset)
+  %13, %14 = func.call pure @advance(%11, %12) : (buffer, index) -> (buffer, index)
   %15 = scalar.constant 0 : i32
   %16 = scalar.cmpi eq, %8, %15 : i32
-  %17, %18 = scf.if %16 -> (buffer, offset) {
-    scf.yield %13, %14 : buffer, offset
+  %17, %18 = scf.if %16 -> (buffer, index) {
+    scf.yield %13, %14 : buffer, index
   } else {
-    scf.yield %first, %first_byte_offset : buffer, offset
+    scf.yield %first, %first_byte_offset : buffer, index
   }
   %19 = scalar.constant 0 : i32
   %20 = scalar.cmpi eq, %8, %19 : i32
-  %21, %22 = scf.if %20 -> (buffer, offset) {
-    scf.yield %second, %second_byte_offset : buffer, offset
+  %21, %22 = scf.if %20 -> (buffer, index) {
+    scf.yield %second, %second_byte_offset : buffer, index
   } else {
-    scf.yield %13, %14 : buffer, offset
+    scf.yield %13, %14 : buffer, index
   }
   %23 = buffer.view %17[%18] : buffer -> view<1xi32>
   %24 = view.load<root_in_bounds|type_disjoint> %23[0] : view<1xi32> -> i32
@@ -457,16 +452,13 @@ func.def public @selected_pointer(%choose: i1, %first: buffer, %first_byte_offse
   func.return %27 : i32
 }
 
-func.def @advance(%slice_data: buffer, %slice_data_byte_offset: offset) -> (buffer, offset) {
+func.def @advance(%slice_data: buffer, %slice_data_byte_offset: index) -> (buffer, index) {
   %32 = scalar.constant 1 : i32
-  %33 = scalar.extsi %32 : i32 to i64
-  %34 = scalar.constant 4 : i64
-  %35 = scalar.muli %33, %34 : i64
-  %36 = index.cast %slice_data_byte_offset : offset to i64
-  %37 = scalar.addi %36, %35 : i64
-  %38 = scalar.assume %37 [range(%37, 0, 9223372036854775807)] : i64
-  %39 = index.cast %38 : i64 to offset
-  func.return %slice_data, %39 : buffer, offset
+  %33 = index.cast %32 : i32 to index
+  %34 = index.constant 4 : index
+  %35 = index.mul %33, %34 : index
+  %36 = index.add %slice_data_byte_offset, %35 : index
+  func.return %slice_data, %36 : buffer, index
 }
 
 // ====
@@ -550,38 +542,34 @@ unsigned selected_element(bool choose, unsigned* first, unsigned first_index,
   return update(choose ? first[first_index] : second[second_index]);
 }
 // ----
-func.def public @selected_element(%choose: i1, %first: buffer, %first_byte_offset: offset, %first_index: i32, %second: buffer, %second_byte_offset: offset, %second_index: i32) -> (i32) {
-  %22, %23 = scf.if %choose -> (buffer, offset) {
+func.def public @selected_element(%choose: i1, %first: buffer, %first_byte_offset: index, %first_index: i32, %second: buffer, %second_byte_offset: index, %second_index: i32) -> (i32) {
+  %18, %19 = scf.if %choose -> (buffer, index) {
     %8 = scalar.extui %first_index : i32 to i64
-    %9 = scalar.constant 4 : i64
-    %10 = scalar.muli %8, %9 : i64
-    %11 = index.cast %first_byte_offset : offset to i64
-    %12 = scalar.addi %11, %10 : i64
-    %13 = scalar.assume %12 [range(%12, 0, 9223372036854775807)] : i64
-    %14 = index.cast %13 : i64 to offset
-    scf.yield %first, %14 : buffer, offset
+    %9 = index.cast %8 : i64 to index
+    %10 = index.constant 4 : index
+    %11 = index.mul %9, %10 : index
+    %12 = index.add %first_byte_offset, %11 : index
+    scf.yield %first, %12 : buffer, index
   } else {
-    %15 = scalar.extui %second_index : i32 to i64
-    %16 = scalar.constant 4 : i64
-    %17 = scalar.muli %15, %16 : i64
-    %18 = index.cast %second_byte_offset : offset to i64
-    %19 = scalar.addi %18, %17 : i64
-    %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
-    %21 = index.cast %20 : i64 to offset
-    scf.yield %second, %21 : buffer, offset
+    %13 = scalar.extui %second_index : i32 to i64
+    %14 = index.cast %13 : i64 to index
+    %15 = index.constant 4 : index
+    %16 = index.mul %14, %15 : index
+    %17 = index.add %second_byte_offset, %16 : index
+    scf.yield %second, %17 : buffer, index
   }
-  %24 = func.call @update(%22, %23) : (buffer, offset) -> (i32)
-  func.return %24 : i32
+  %20 = func.call @update(%18, %19) : (buffer, index) -> (i32)
+  func.return %20 : i32
 }
 
-func.def @update(%value: buffer, %value_byte_offset: offset) -> (i32) {
-  %28 = scalar.constant 5 : i32
-  %29 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
-  %30 = view.load<root_in_bounds|type_disjoint> %29[0] : view<1xi32> -> i32
-  %31 = scalar.addi %30, %28 : i32
-  %32 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %31, %32[0] : i32, view<1xi32>
-  func.return %31 : i32
+func.def @update(%value: buffer, %value_byte_offset: index) -> (i32) {
+  %24 = scalar.constant 5 : i32
+  %25 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
+  %26 = view.load<root_in_bounds|type_disjoint> %25[0] : view<1xi32> -> i32
+  %27 = scalar.addi %26, %24 : i32
+  %28 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %27, %28[0] : i32, view<1xi32>
+  func.return %27 : i32
 }
 
 // ====
@@ -608,7 +596,7 @@ int discarded_reference(int value) {
 func.def public @discarded_reference(%value: i32) -> (i32) {
   %2 = index.constant 8 : offset
   %unused_storage = buffer.alloca<private> align(4) %2 : buffer
-  %unused_storage_byte_offset = index.constant 0 : offset
+  %unused_storage_byte_offset = index.constant 0 : index
   %unused_view = buffer.view %unused_storage[%unused_storage_byte_offset] : buffer -> view<8xi8>
   %holder_p_y = scalar.constant 1 : i32
   %holder_q_x = scalar.constant 2 : i32
@@ -727,13 +715,13 @@ unsigned discarded_effects(int* input, bool choose) {
   return count * 10 + index;
 }
 // ----
-func.def public @discarded_effects(%input: buffer, %input_byte_offset: offset, %choose: i1) -> (i32) {
+func.def public @discarded_effects(%input: buffer, %input_byte_offset: index, %choose: i1) -> (i32) {
   %count$4 = scalar.constant 0 : i32
   %index$5 = scalar.constant 0 : i32
   %6 = scalar.constant 1 : i32
   %index$7 = scalar.addi %index$5, %6 : i32
   %count$8, %index$9 = scf.if %choose -> (i32, i32) {
-    %10, %11, %count = func.call pure @touched(%input, %input_byte_offset, %count$4) : (buffer, offset, i32) -> (buffer, offset, i32)
+    %10, %11, %count = func.call pure @touched(%input, %input_byte_offset, %count$4) : (buffer, index, i32) -> (buffer, index, i32)
     scf.yield %count, %index$7 : i32, i32
   } else {
     %13 = scalar.constant 1 : i32
@@ -748,8 +736,8 @@ func.def public @discarded_effects(%input: buffer, %input_byte_offset: offset, %
   func.return %19 : i32
 }
 
-func.def @touched(%input: buffer, %input_byte_offset: offset, %count$22: i32) -> (buffer, offset, i32) {
+func.def @touched(%input: buffer, %input_byte_offset: index, %count$22: i32) -> (buffer, index, i32) {
   %26 = scalar.constant 1 : i32
   %count$27 = scalar.addi %count$22, %26 : i32
-  func.return %input, %input_byte_offset, %count$27 : buffer, offset, i32
+  func.return %input, %input_byte_offset, %count$27 : buffer, index, i32
 }

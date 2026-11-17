@@ -91,3 +91,14 @@ LOOM_CHECK_CASE(null_comparison_preserves_effects) {
   loom::check::expect_equal(absent, 101u);
   loom::check::expect_equal(present, 100u);
 }
+
+LOOM_CHECK_CASE(signed_pointer_call_and_return) {
+  const auto backward = observe_signed_pointer(3u, -2);
+  const auto forward = observe_signed_pointer(1u, 3);
+  const auto unchanged = observe_signed_pointer(2u, 0);
+  const auto from_one_past = observe_signed_pointer(5u, -1);
+  loom::check::expect_equal(backward, 23u);
+  loom::check::expect_equal(forward, 59u);
+  loom::check::expect_equal(unchanged, 37u);
+  loom::check::expect_equal(from_one_past, 59u);
+}

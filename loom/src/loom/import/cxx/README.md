@@ -2690,7 +2690,7 @@ The private `initialize` takes one `i32` and returns the initialized `i32`;
 `length` also takes and returns one `i32`. Neither reads `slice.data`, allocates
 storage for `slice`, or requires inlining. Forwarding calls and control-flow
 joins use the same field contracts. A conditional update takes the previous
-field value when an untaken path must preserve it. Pointer buffer/offset pairs
+field value when an untaken path must preserve it. Pointer buffer/index pairs
 and views with their dimensions and encodings remain complete value groups.
 Public signatures, source predicates, and reference-returning helpers preserve
 their complete source contracts. Observable addresses and overlapping
@@ -2714,7 +2714,7 @@ void initialize(unsigned* output) {
 ```
 
 `reset()` needs no receiver inputs and returns the new position. The destructor
-takes that position and the output pointer's buffer/offset pair. The unused
+takes that position and the output pointer's buffer/index pair. The unused
 `data` field stays uninitialized, and `cursor` needs no allocation. Cleanup
 reads the current fields at scope exit, including early returns, `break`, and
 `continue`; nested members and bases retain their destruction order. Reading
@@ -3590,13 +3590,18 @@ general `for` loops, `while` and `do/while` loops,
 scalar/vector/fixed-array workgroup storage, direct calls, and ordinary
 overloaded value operators.
 Unsupported reachable types and statements produce source diagnostics. Integral
-subscripts preserve their source width and signedness. Interior pointers carry a
-buffer root and an
-object-relative byte offset through helper arguments, returns, conditional
-regions, and loop-carried values. Kernel pointer parameters retain their
-single-buffer binding ABI. Signed displacements are combined with the current
-origin before entering the nonnegative offset domain, so an interior pointer
-can move backward within its allocation.
+subscripts preserve their source width and signedness. Pointers carry an opaque
+`buffer` origin and a signed `index` byte displacement through helper arguments,
+returns, conditional regions, and loop-carried values. The origin may itself be
+an interior pointer supplied by native code: `input[-1]` then uses displacement
+`-sizeof(*input)`. The target selects the index carrier width. Allocation lengths,
+extents, and byte counts remain nonnegative `offset` values.
+
+Kernel pointer parameters retain their single-buffer binding ABI, and native C
+calls still exchange one native pointer. The VM transports an opaque bounded
+reference and its signed position; backward access must stay within that
+reference's admitted bounds. A subspan cannot expose bytes preceding its start,
+even when the underlying allocation contains them.
 
 Optional pointers use ordinary C++ null spellings: `nullptr`, zero conversion,
 and value initialization. Comparisons against null, `!pointer`, and implicit or
@@ -3625,7 +3630,7 @@ bool same_element(const int* left, const int* right) {
 }
 ```
 
-The importer emits `buffer.compare.address eq` or `ne` with both buffer/offset
+The importer emits `buffer.compare.address eq` or `ne` with both buffer/index
 pairs. Independently supplied buffers may alias or describe overlapping storage;
 equality compares their selected positions, not their wrapper identities. When
 cleanup proves a common byte origin, it reduces the operation to `index.cmp`
@@ -3634,7 +3639,8 @@ inlining a helper whose `first` and `last` arguments came from one array.
 
 Exported C++ preserves unresolved comparisons through
 `loom::buffer::compare::address<loom::buffer::compare::predicate::eq>` or `ne`.
-The explicit facade takes two typed buffers and two `loom::type::offset` values.
+The explicit facade takes two typed buffers and independently deduces each
+position as `loom::type::index` or `loom::type::offset`.
 Dereferencing null remains invalid. Ordered pointer comparisons are diagnosed.
 
 Pointer subtraction returns a signed element count when the compiler can prove
@@ -3652,7 +3658,7 @@ auto remaining(const int* data, int position, int count) {
 
 Inlining establishes the shared root here. Member arrays, nested projections,
 pointer copies, and control flow can preserve that proof. The importer retains
-both buffer/offset pairs in `buffer.distance`, divides the signed byte distance
+both buffer/index pairs in `buffer.distance`, divides the signed byte distance
 by the source element size, and converts to the source `ptrdiff_t` width. Once
 the roots are proven equal, shared cleanup replaces `buffer.distance` with
 signed integer arithmetic. Reverse distances are negative, one-past endpoints

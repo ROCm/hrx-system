@@ -30,7 +30,7 @@ void resident([[loom::launch]] Bytes output) {
 // ----
 pipeline.def public @child() run(%output: buffer, %phase: i32) {
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
-    %2 = index.constant 0 : offset
+    %2 = index.constant 0 : index
     %values = buffer.view %output[%2] : buffer -> view<4xi32>
     %4 = scalar.constant 1 : i32
     %5 = scalar.addi %phase, %4 : i32

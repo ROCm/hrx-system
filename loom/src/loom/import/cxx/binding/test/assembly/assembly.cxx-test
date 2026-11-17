@@ -183,9 +183,9 @@ low.func.def target<test.low.core> @__loom_assembly$_2(%value: reg<test.ptr>) ->
   return %value
 }
 
-func.def public @cursor(%value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
-  %23, %24 = low.invoke pure inline @__loom_assembly$_3(%value, %value_byte_offset) : (buffer, offset) -> (buffer, offset)
-  func.return %23, %24 : buffer, offset
+func.def public @cursor(%value: buffer, %value_byte_offset: index) -> (buffer, index) {
+  %23, %24 = low.invoke pure inline @__loom_assembly$_3(%value, %value_byte_offset) : (buffer, index) -> (buffer, index)
+  func.return %23, %24 : buffer, index
 }
 
 low.func.def target<test.low.core> @__loom_assembly$_3(%root: reg<test.ptr>, %offset: reg<test.i32>) -> (reg<test.ptr>, reg<test.i32>) asm {

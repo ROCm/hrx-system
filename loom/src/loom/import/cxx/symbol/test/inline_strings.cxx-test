@@ -13,70 +13,70 @@ const char32_t* utf32() { return U"L\U0001F9F5"; }
 const wchar_t* wide() { return L"Loom"; }
 
 // ----
-func.def public @empty() -> (buffer, offset) {
+func.def public @empty() -> (buffer, index) {
   %2 = buffer.constant align(1) utf8("\u0000") : buffer
-  %3 = index.constant 0 : offset
-  func.return %2, %3 : buffer, offset
+  %3 = index.constant 0 : index
+  func.return %2, %3 : buffer, index
 }
 
-func.def public @ordinary() -> (buffer, offset) {
+func.def public @ordinary() -> (buffer, index) {
   %7 = buffer.constant align(1) utf8("Loom\u0000") : buffer
-  %8 = index.constant 0 : offset
-  func.return %7, %8 : buffer, offset
+  %8 = index.constant 0 : index
+  func.return %7, %8 : buffer, index
 }
 
-func.def public @concatenated() -> (buffer, offset) {
+func.def public @concatenated() -> (buffer, index) {
   %12 = buffer.constant align(1) utf8("one two\u0000") : buffer
-  %13 = index.constant 0 : offset
-  func.return %12, %13 : buffer, offset
+  %13 = index.constant 0 : index
+  func.return %12, %13 : buffer, index
 }
 
-func.def public @raw() -> (buffer, offset) {
+func.def public @raw() -> (buffer, index) {
   %17 = buffer.constant align(1) utf8("one\\two\u0000") : buffer
-  %18 = index.constant 0 : offset
-  func.return %17, %18 : buffer, offset
+  %18 = index.constant 0 : index
+  func.return %17, %18 : buffer, index
 }
 
-func.def public @embedded_nul() -> (buffer, offset) {
+func.def public @embedded_nul() -> (buffer, index) {
   %22 = buffer.constant align(1) utf8("a\u0000b\u0000") : buffer
-  %23 = index.constant 0 : offset
-  func.return %22, %23 : buffer, offset
+  %23 = index.constant 0 : index
+  func.return %22, %23 : buffer, index
 }
 
-func.def public @binary() -> (buffer, offset) {
+func.def public @binary() -> (buffer, index) {
   %27 = buffer.constant align(1) bytes("ff00") : buffer
-  %28 = index.constant 0 : offset
-  func.return %27, %28 : buffer, offset
+  %28 = index.constant 0 : index
+  func.return %27, %28 : buffer, index
 }
 
-func.def public @unicode() -> (buffer, offset) {
+func.def public @unicode() -> (buffer, index) {
   %32 = buffer.constant align(1) utf8("café 🧵\u0000") : buffer
-  %33 = index.constant 0 : offset
-  func.return %32, %33 : buffer, offset
+  %33 = index.constant 0 : index
+  func.return %32, %33 : buffer, index
 }
 
-func.def public @binary_utf8() -> (buffer, offset) {
+func.def public @binary_utf8() -> (buffer, index) {
   %37 = buffer.constant align(1) bytes("ff00") : buffer
-  %38 = index.constant 0 : offset
-  func.return %37, %38 : buffer, offset
+  %38 = index.constant 0 : index
+  func.return %37, %38 : buffer, index
 }
 
-func.def public @utf16() -> (buffer, offset) {
+func.def public @utf16() -> (buffer, index) {
   %42 = buffer.constant align(2) bytes("4c003ed8f5dd0000") : buffer
-  %43 = index.constant 0 : offset
-  func.return %42, %43 : buffer, offset
+  %43 = index.constant 0 : index
+  func.return %42, %43 : buffer, index
 }
 
-func.def public @utf32() -> (buffer, offset) {
+func.def public @utf32() -> (buffer, index) {
   %47 = buffer.constant align(4) bytes("4c000000f5f9010000000000") : buffer
-  %48 = index.constant 0 : offset
-  func.return %47, %48 : buffer, offset
+  %48 = index.constant 0 : index
+  func.return %47, %48 : buffer, index
 }
 
-func.def public @wide() -> (buffer, offset) {
+func.def public @wide() -> (buffer, index) {
   %52 = buffer.constant align(4) bytes("4c0000006f0000006f0000006d00000000000000") : buffer
-  %53 = index.constant 0 : offset
-  func.return %52, %53 : buffer, offset
+  %53 = index.constant 0 : index
+  func.return %52, %53 : buffer, index
 }
 
 // ====
@@ -86,15 +86,15 @@ const wchar_t* wide_windows() { return L"L\uffff"; }
 unsigned wide_load(unsigned position) { return L"\uffffL"[position % 3u]; }
 
 // ----
-func.def public @wide_windows() -> (buffer, offset) {
+func.def public @wide_windows() -> (buffer, index) {
   %2 = buffer.constant align(2) bytes("4c00ffff0000") : buffer
-  %3 = index.constant 0 : offset
-  func.return %2, %3 : buffer, offset
+  %3 = index.constant 0 : index
+  func.return %2, %3 : buffer, index
 }
 
 func.def public @wide_load(%position: i32) -> (i32) {
   %7 = buffer.constant align(2) bytes("ffff4c000000") : buffer
-  %8 = index.constant 0 : offset
+  %8 = index.constant 0 : index
   %9 = buffer.view %7[%8] : buffer -> view<3xi16>
   %10 = scalar.constant 3 : i32
   %11 = scalar.remui %position, %10 : i32
@@ -119,7 +119,7 @@ unsigned references(unsigned position) {
 // ----
 func.def public @references(%position: i32) -> (i32) {
   %2 = buffer.constant align(1) utf8("abc\u0000") : buffer
-  %3 = index.constant 0 : offset
+  %3 = index.constant 0 : index
   %4 = buffer.view %2[%3] : buffer -> view<4xi8>
   %whole = buffer.constant align(1) utf8("def\u0000") : buffer
   %7 = buffer.view %whole[%3] : buffer -> view<4xi8>
@@ -149,7 +149,7 @@ unsigned writable(unsigned position, unsigned replacement) {
 // ----
 func.def public @writable(%position: i32, %replacement: i32) -> (i32) {
   %first_storage = buffer.alloca.init<private> align(16) utf8("abc\u0000\u0000\u0000\u0000\u0000") : buffer
-  %first_storage_byte_offset = index.constant 0 : offset
+  %first_storage_byte_offset = index.constant 0 : index
   %first_view = buffer.view %first_storage[%first_storage_byte_offset] : buffer -> view<8xi8>
   %second_storage = buffer.alloca.init<private> align(1) utf8("abc\u0000\u0000\u0000\u0000\u0000") : buffer
   %second_view = buffer.view %second_storage[%first_storage_byte_offset] : buffer -> view<8xi8>
@@ -189,12 +189,13 @@ func.def public @nested(%row: i32, %position: i32) -> (i32) {
   %record_value = scalar.constant 7 : i32
   %8 = index.constant 8 : offset
   %nested_storage = buffer.alloca<private> align(1) %8 : buffer
-  %nested_storage_byte_offset = index.constant 0 : offset
+  %nested_storage_byte_offset = index.constant 0 : index
   %12 = buffer.constant align(1) utf8("def\u0000") : buffer
   %14 = index.constant 4 : offset
   buffer.copy %12[%nested_storage_byte_offset], %nested_storage[%nested_storage_byte_offset], %14
+  %54 = index.constant 4 : index
   %17 = buffer.constant align(1) utf8("ghi\u0000") : buffer
-  buffer.copy %17[%nested_storage_byte_offset], %nested_storage[%14], %14
+  buffer.copy %17[%nested_storage_byte_offset], %nested_storage[%54], %14
   %20 = scalar.constant 3 : i32
   %21 = scalar.andi %position, %20 : i32
   %22 = scalar.constant 2 : i32
@@ -202,30 +203,25 @@ func.def public @nested(%row: i32, %position: i32) -> (i32) {
   %25 = scalar.constant 0 : i32
   %26 = scalar.cmpi eq, %21, %25 : i32
   %29 = scalar.cmpi eq, %21, %22 : i32
-  %68 = scf.select %23, %26, %29 : i1
-  %69 = scf.select %23, %record_label_0, %record_label_2 : i8
-  %70 = scf.select %23, %record_label_1, %record_label_3 : i8
-  %67 = scf.select %68, %69, %70 : i8
-  %31 = scalar.extui %67 : i8 to i32
+  %62 = scf.select %23, %26, %29 : i1
+  %63 = scf.select %23, %record_label_0, %record_label_2 : i8
+  %64 = scf.select %23, %record_label_1, %record_label_3 : i8
+  %61 = scf.select %62, %63, %64 : i8
+  %31 = scalar.extui %61 : i8 to i32
   %32 = scalar.constant 1 : i32
   %33 = scalar.andi %row, %32 : i32
   %34 = scalar.extui %33 : i32 to i64
-  %62 = scalar.constant 2 : i64
-  %63 = scalar.shli %34, %62 : i64
-  %39 = scalar.assume %63 [range(%63, 0, 9223372036854775807)] : i64
-  %40 = index.cast %39 : i64 to offset
-  %43 = scalar.extui %21 : i32 to i64
-  %46 = index.cast %40 : offset to i64
-  %47 = scalar.addi %46, %43 : i64
-  %48 = scalar.assume %47 [range(%47, 0, 9223372036854775807)] : i64
-  %49 = index.cast %48 : i64 to offset
-  %50 = index.assume %49 [range(%49, 0, 7)] : offset
-  %51 = buffer.view %nested_storage[%50] : buffer -> view<1xi8>
-  %52 = view.load %51[0] : view<1xi8> -> i8
-  %53 = scalar.extui %52 : i8 to i32
-  %54 = scalar.addi %31, %53 : i32
-  %55 = scalar.addi %54, %record_value : i32
-  func.return %55 : i32
+  %35 = index.cast %34 : i64 to index
+  %41 = scalar.extui %21 : i32 to i64
+  %42 = index.cast %41 : i64 to index
+  %57 = index.madd %35, %54, %42 : index
+  %46 = index.assume %57 [range(%57, 0, 7)] : index
+  %47 = buffer.view %nested_storage[%46] : buffer -> view<1xi8>
+  %48 = view.load %47[0] : view<1xi8> -> i8
+  %49 = scalar.extui %48 : i8 to i32
+  %50 = scalar.addi %31, %49 : i32
+  %51 = scalar.addi %50, %record_value : i32
+  func.return %51 : i32
 }
 
 // ====
@@ -239,17 +235,17 @@ unsigned volatile_string(unsigned position) {
 func.def public @volatile_string(%position: i32) -> (i32) {
   %2 = index.constant 3 : offset
   %text_storage = buffer.alloca<private> align(1) %2 : buffer
-  %text_storage_byte_offset = index.constant 0 : offset
+  %text_storage_byte_offset = index.constant 0 : index
   %text_view = buffer.view %text_storage[%text_storage_byte_offset] : buffer -> view<3xi8>
   %6 = scalar.constant 97 : i8
   %8 = buffer.view %text_storage[%text_storage_byte_offset] : buffer -> view<1xi8>
   view.store<volatile> %6, %8[0] : i8, view<1xi8>
   %9 = scalar.constant 98 : i8
-  %27 = index.constant 1 : offset
+  %27 = index.constant 1 : index
   %13 = buffer.view %text_storage[%27] : buffer -> view<1xi8>
   view.store<volatile> %9, %13[0] : i8, view<1xi8>
   %14 = scalar.constant 0 : i8
-  %26 = index.constant 2 : offset
+  %26 = index.constant 2 : index
   %18 = buffer.view %text_storage[%26] : buffer -> view<1xi8>
   view.store<volatile> %14, %18[0] : i8, view<1xi8>
   %19 = scalar.constant 3 : i32
@@ -275,7 +271,7 @@ unsigned one_row(unsigned position) {
 func.def public @one_row(%position: i32) -> (i32) {
   %2 = index.constant 4 : offset
   %table_storage = buffer.alloca<private> align(1) %2 : buffer
-  %table_storage_byte_offset = index.constant 0 : offset
+  %table_storage_byte_offset = index.constant 0 : index
   %6 = buffer.constant align(1) utf8("abc\u0000") : buffer
   buffer.copy %6[%table_storage_byte_offset], %table_storage[%table_storage_byte_offset], %2
   %observed_storage = buffer.alloca<private> align(1) %2 : buffer
@@ -283,31 +279,30 @@ func.def public @one_row(%position: i32) -> (i32) {
   %15 = buffer.view %observed_storage[%table_storage_byte_offset] : buffer -> view<1xi8>
   view.store<volatile> %13, %15[0] : i8, view<1xi8>
   %16 = scalar.constant 101 : i8
-  %76 = index.constant 1 : offset
-  %20 = buffer.view %observed_storage[%76] : buffer -> view<1xi8>
+  %66 = index.constant 1 : index
+  %20 = buffer.view %observed_storage[%66] : buffer -> view<1xi8>
   view.store<volatile> %16, %20[0] : i8, view<1xi8>
   %21 = scalar.constant 102 : i8
-  %75 = index.constant 2 : offset
-  %25 = buffer.view %observed_storage[%75] : buffer -> view<1xi8>
+  %65 = index.constant 2 : index
+  %25 = buffer.view %observed_storage[%65] : buffer -> view<1xi8>
   view.store<volatile> %21, %25[0] : i8, view<1xi8>
   %26 = scalar.constant 0 : i8
-  %74 = index.constant 3 : offset
-  %30 = buffer.view %observed_storage[%74] : buffer -> view<1xi8>
+  %64 = index.constant 3 : index
+  %30 = buffer.view %observed_storage[%64] : buffer -> view<1xi8>
   view.store<volatile> %26, %30[0] : i8, view<1xi8>
-  %39 = scalar.constant 3 : i32
-  %40 = scalar.andi %position, %39 : i32
-  %41 = scalar.extui %40 : i32 to i64
-  %46 = scalar.assume %41 [range(%41, 0, 9223372036854775807)] : i64
-  %47 = index.cast %46 : i64 to offset
-  %48 = index.assume %47 [range(%47, 0, 3)] : offset
-  %49 = buffer.view %table_storage[%48] : buffer -> view<1xi8>
-  %50 = view.load %49[0] : view<1xi8> -> i8
-  %51 = scalar.extsi %50 : i8 to i32
-  %70 = buffer.view %observed_storage[%48] : buffer -> view<1xi8>
-  %71 = view.load<volatile> %70[0] : view<1xi8> -> i8
-  %72 = scalar.extsi %71 : i8 to i32
-  %73 = scalar.addi %51, %72 : i32
-  func.return %73 : i32
+  %36 = scalar.constant 3 : i32
+  %37 = scalar.andi %position, %36 : i32
+  %38 = scalar.extui %37 : i32 to i64
+  %39 = index.cast %38 : i64 to index
+  %43 = index.assume %39 [range(%39, 0, 3)] : index
+  %44 = buffer.view %table_storage[%43] : buffer -> view<1xi8>
+  %45 = view.load %44[0] : view<1xi8> -> i8
+  %46 = scalar.extsi %45 : i8 to i32
+  %60 = buffer.view %observed_storage[%43] : buffer -> view<1xi8>
+  %61 = view.load<volatile> %60[0] : view<1xi8> -> i8
+  %62 = scalar.extsi %61 : i8 to i32
+  %63 = scalar.addi %46, %62 : i32
+  func.return %63 : i32
 }
 
 // ====
@@ -327,7 +322,7 @@ unsigned character_arrays(unsigned position) {
 // ----
 func.def public @character_arrays(%position: i32) -> (i32) {
   %signed_bytes_storage = buffer.alloca.init<private> align(1) bytes("ff00") : buffer
-  %signed_bytes_storage_byte_offset = index.constant 0 : offset
+  %signed_bytes_storage_byte_offset = index.constant 0 : index
   %signed_bytes_view = buffer.view %signed_bytes_storage[%signed_bytes_storage_byte_offset] : buffer -> view<2xi8>
   %unsigned_bytes_storage = buffer.alloca.init<private> align(1) bytes("ff00") : buffer
   %unsigned_bytes_view = buffer.view %unsigned_bytes_storage[%signed_bytes_storage_byte_offset] : buffer -> view<2xi8>
@@ -380,35 +375,33 @@ unsigned code_units(unsigned position) {
 // ----
 func.def public @code_units(%position$0: i32) -> (i32) {
   %position$2 = scalar.assume %position$0 [range(%position$0, 0, 2)] : i32
-  %3, %4 = func.call pure @text() : () -> (buffer, offset)
+  %3, %4 = func.call pure @text() : () -> (buffer, index)
   %5 = scalar.extui %position$2 : i32 to i64
-  %8 = index.cast %4 : offset to i64
-  %9 = scalar.addi %8, %5 : i64
-  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
-  %11 = index.cast %10 : i64 to offset
-  %12 = buffer.view %3[%11] : buffer -> view<1xi8>
-  %13 = view.load<root_in_bounds> %12[0] : view<1xi8> -> i8
-  %14 = scalar.extui %13 : i8 to i32
-  %15 = buffer.constant align(1) utf8("é\u0000") : buffer
-  %16 = index.constant 0 : offset
-  %17 = buffer.view %15[%16] : buffer -> view<3xi8>
-  %19 = scalar.assume %5 [range(%5, 0, 2)] : i64
-  %20 = index.cast %19 : i64 to index
-  %21 = view.load<type_disjoint> %17[%20] : view<3xi8> -> i8
-  %22 = scalar.extui %21 : i8 to i32
-  %23 = scalar.addi %14, %22 : i32
-  %24 = buffer.constant align(2) bytes("3ed8f5dd0000") : buffer
-  %26 = buffer.view %24[%16] : buffer -> view<3xi16>
-  %30 = view.load<type_disjoint> %26[%20] : view<3xi16> -> i16
-  %31 = scalar.extui %30 : i16 to i32
-  %32 = scalar.addi %23, %31 : i32
-  func.return %32 : i32
+  %6 = index.cast %5 : i64 to index
+  %9 = index.add %4, %6 : index
+  %10 = buffer.view %3[%9] : buffer -> view<1xi8>
+  %11 = view.load<root_in_bounds> %10[0] : view<1xi8> -> i8
+  %12 = scalar.extui %11 : i8 to i32
+  %13 = buffer.constant align(1) utf8("é\u0000") : buffer
+  %14 = index.constant 0 : index
+  %15 = buffer.view %13[%14] : buffer -> view<3xi8>
+  %17 = scalar.assume %5 [range(%5, 0, 2)] : i64
+  %18 = index.cast %17 : i64 to index
+  %19 = view.load<type_disjoint> %15[%18] : view<3xi8> -> i8
+  %20 = scalar.extui %19 : i8 to i32
+  %21 = scalar.addi %12, %20 : i32
+  %22 = buffer.constant align(2) bytes("3ed8f5dd0000") : buffer
+  %24 = buffer.view %22[%14] : buffer -> view<3xi16>
+  %28 = view.load<type_disjoint> %24[%18] : view<3xi16> -> i16
+  %29 = scalar.extui %28 : i16 to i32
+  %30 = scalar.addi %21, %29 : i32
+  func.return %30 : i32
 }
 
-func.def @text() -> (buffer, offset) {
-  %35 = buffer.constant align(1) utf8("a\u0000b\u0000") : buffer
-  %36 = index.constant 0 : offset
-  func.return %35, %36 : buffer, offset
+func.def @text() -> (buffer, index) {
+  %33 = buffer.constant align(1) utf8("a\u0000b\u0000") : buffer
+  %34 = index.constant 0 : index
+  func.return %33, %34 : buffer, index
 }
 
 // ====
@@ -422,20 +415,20 @@ unsigned volatile_wide(unsigned position) {
 func.def public @volatile_wide(%position: i32) -> (i32) {
   %2 = index.constant 8 : offset
   %observed_storage = buffer.alloca<private> align(2) %2 : buffer
-  %observed_storage_byte_offset = index.constant 0 : offset
+  %observed_storage_byte_offset = index.constant 0 : index
   %observed_view = buffer.view %observed_storage[%observed_storage_byte_offset] : buffer -> view<4xi16>
   %6 = scalar.constant -10178 : i16
   %8 = buffer.view %observed_storage[%observed_storage_byte_offset] : buffer -> view<1xi16>
   view.store<volatile|type_disjoint> %6, %8[0] : i16, view<1xi16>
   %9 = scalar.constant -8715 : i16
-  %33 = index.constant 2 : offset
+  %33 = index.constant 2 : index
   %13 = buffer.view %observed_storage[%33] : buffer -> view<1xi16>
   view.store<volatile|type_disjoint> %9, %13[0] : i16, view<1xi16>
   %14 = scalar.constant 0 : i16
-  %32 = index.constant 4 : offset
+  %32 = index.constant 4 : index
   %18 = buffer.view %observed_storage[%32] : buffer -> view<1xi16>
   view.store<volatile|type_disjoint> %14, %18[0] : i16, view<1xi16>
-  %31 = index.constant 6 : offset
+  %31 = index.constant 6 : index
   %23 = buffer.view %observed_storage[%31] : buffer -> view<1xi16>
   view.store<volatile|type_disjoint> %14, %23[0] : i16, view<1xi16>
   %24 = scalar.constant 3 : i32
@@ -460,37 +453,33 @@ unsigned literal_aliases() {
 }
 // ----
 func.def public @literal_aliases() -> (i32) {
-  %escaped, %escaped_byte_offset = func.call pure @text() : () -> (buffer, offset)
+  %escaped, %escaped_byte_offset = func.call pure @text() : () -> (buffer, index)
   %3 = buffer.constant align(1) utf8("xyz\u0000") : buffer
-  %4 = index.constant 0 : offset
+  %4 = index.constant 0 : index
   %5 = buffer.view %3[%4] : buffer -> view<4xi8>
-  %52 = scalar.constant 2 : i64
-  %13 = index.cast %escaped_byte_offset : offset to i64
-  %14 = scalar.addi %13, %52 : i64
-  %15 = scalar.assume %14 [range(%14, 0, 9223372036854775807)] : i64
-  %16 = index.cast %15 : i64 to offset
-  %17 = buffer.view %escaped[%16] : buffer -> view<1xi8>
-  %18 = view.load<root_in_bounds> %17[0] : view<1xi8> -> i8
-  %19 = scalar.extsi %18 : i8 to i32
-  %51 = index.constant 1 : index
-  %24 = view.load %5[%51] : view<4xi8> -> i8
-  %25 = scalar.extsi %24 : i8 to i32
-  %26 = scalar.addi %19, %25 : i32
-  %50 = index.constant 3 : index
-  %31 = view.load %5[%50] : view<4xi8> -> i8
-  %32 = scalar.extsi %31 : i8 to i32
-  %33 = scalar.addi %26, %32 : i32
-  %34 = buffer.constant align(1) utf8("\u0000") : buffer
-  %36 = buffer.view %34[%4] : buffer -> view<1xi8>
-  %49 = index.constant 0 : index
-  %41 = view.load %36[%49] : view<1xi8> -> i8
-  %42 = scalar.extsi %41 : i8 to i32
-  %43 = scalar.addi %33, %42 : i32
-  func.return %43 : i32
+  %51 = index.constant 2 : index
+  %50 = index.add %escaped_byte_offset, %51 : index
+  %14 = buffer.view %escaped[%50] : buffer -> view<1xi8>
+  %15 = view.load<root_in_bounds> %14[0] : view<1xi8> -> i8
+  %16 = scalar.extsi %15 : i8 to i32
+  %48 = index.constant 1 : index
+  %21 = view.load %5[%48] : view<4xi8> -> i8
+  %22 = scalar.extsi %21 : i8 to i32
+  %23 = scalar.addi %16, %22 : i32
+  %47 = index.constant 3 : index
+  %28 = view.load %5[%47] : view<4xi8> -> i8
+  %29 = scalar.extsi %28 : i8 to i32
+  %30 = scalar.addi %23, %29 : i32
+  %31 = buffer.constant align(1) utf8("\u0000") : buffer
+  %33 = buffer.view %31[%4] : buffer -> view<1xi8>
+  %38 = view.load %33[%4] : view<1xi8> -> i8
+  %39 = scalar.extsi %38 : i8 to i32
+  %40 = scalar.addi %30, %39 : i32
+  func.return %40 : i32
 }
 
-func.def @text() -> (buffer, offset) {
-  %46 = buffer.constant align(1) utf8("a\u0000b\u0000") : buffer
-  %47 = index.constant 0 : offset
-  func.return %46, %47 : buffer, offset
+func.def @text() -> (buffer, index) {
+  %43 = buffer.constant align(1) utf8("a\u0000b\u0000") : buffer
+  %44 = index.constant 0 : index
+  func.return %43, %44 : buffer, index
 }

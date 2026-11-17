@@ -31,19 +31,19 @@ const int* borrowed_null_buffer() {
 }
 
 // ----
-func.def public @borrowed_read(%data: buffer, %data_byte_offset: offset, %index: i32) -> (i32) {
+func.def public @borrowed_read(%data: buffer, %data_byte_offset: index, %index: i32) -> (i32) {
   %state_marker = scalar.constant 7 : i32
   %5 = func.call pure @forward_index(%index) : (i32) -> (i32)
   func.return %5 : i32
 }
 
-func.def public @borrowed_null_buffer() -> (buffer, offset) {
+func.def public @borrowed_null_buffer() -> (buffer, index) {
   %state_data = buffer.null : buffer
-  %state_data_byte_offset = index.constant 0 : offset
+  %state_data_byte_offset = index.constant 0 : index
   %state_index = scalar.constant 3 : i32
   %state_marker = scalar.constant 7 : i32
-  %12, %13 = func.call pure @read_data(%state_data, %state_data_byte_offset) : (buffer, offset) -> (buffer, offset)
-  func.return %12, %13 : buffer, offset
+  %12, %13 = func.call pure @read_data(%state_data, %state_data_byte_offset) : (buffer, index) -> (buffer, index)
+  func.return %12, %13 : buffer, index
 }
 
 func.def noinline @forward_index(%state_index: i32) -> (i32) {
@@ -51,8 +51,8 @@ func.def noinline @forward_index(%state_index: i32) -> (i32) {
   func.return %16 : i32
 }
 
-func.def noinline @read_data(%state_data: buffer, %state_data_byte_offset: offset) -> (buffer, offset) {
-  func.return %state_data, %state_data_byte_offset : buffer, offset
+func.def noinline @read_data(%state_data: buffer, %state_data_byte_offset: index) -> (buffer, index) {
+  func.return %state_data, %state_data_byte_offset : buffer, index
 }
 
 func.def noinline @read_index(%state_index: i32) -> (i32) {
@@ -119,7 +119,7 @@ int borrowed_disjoint(int source_index, int target_index) {
 // ----
 func.def public @borrowed_write(%marker: i32) -> (i32) {
   %state_data = buffer.null : buffer
-  %state_data_byte_offset = index.constant 0 : offset
+  %state_data_byte_offset = index.constant 0 : index
   %state_index = scalar.constant 2 : i32
   %state_marker$5 = scalar.constant 1 : i32
   %state_marker$6 = func.call pure @replace_marker(%marker) : (i32) -> (i32)
@@ -128,7 +128,7 @@ func.def public @borrowed_write(%marker: i32) -> (i32) {
 
 func.def public @borrowed_conditional_write(%replace: i1, %marker: i32) -> (i32) {
   %state_data = buffer.null : buffer
-  %state_data_byte_offset = index.constant 0 : offset
+  %state_data_byte_offset = index.constant 0 : index
   %state_index = scalar.constant 2 : i32
   %state_marker$13 = scalar.constant 1 : i32
   %state_marker$14 = func.call pure @replace_marker_if(%state_marker$13, %replace, %marker) : (i32, i1, i32) -> (i32)
@@ -137,7 +137,7 @@ func.def public @borrowed_conditional_write(%replace: i1, %marker: i32) -> (i32)
 
 func.def public @borrowed_argument_order(%value: i32) -> (i32) {
   %state_data = buffer.null : buffer
-  %state_data_byte_offset = index.constant 0 : offset
+  %state_data_byte_offset = index.constant 0 : index
   %state_index = scalar.constant 1 : i32
   %state_marker = scalar.constant 2 : i32
   %21 = func.call pure @read_after_argument(%value, %value) : (i32, i32) -> (i32)
@@ -146,10 +146,10 @@ func.def public @borrowed_argument_order(%value: i32) -> (i32) {
 
 func.def public @borrowed_disjoint(%source_index: i32, %target_index: i32) -> (i32) {
   %source_data = buffer.null : buffer
-  %source_data_byte_offset = index.constant 0 : offset
+  %source_data_byte_offset = index.constant 0 : index
   %source_marker = scalar.constant 0 : i32
   %target_data = buffer.null : buffer
-  %target_data_byte_offset = index.constant 0 : offset
+  %target_data_byte_offset = index.constant 0 : index
   %target_marker$30 = scalar.constant 1 : i32
   %target_marker$31 = func.call pure @copy_index(%source_index) : (i32) -> (i32)
   func.return %target_marker$31 : i32

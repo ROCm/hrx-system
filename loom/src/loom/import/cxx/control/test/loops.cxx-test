@@ -93,10 +93,10 @@ unsigned pre_test(unsigned* value, unsigned count) {
   return total;
 }
 // ----
-func.def public @pre_test(%value: buffer, %value_byte_offset: offset, %count: i32) -> (i32) {
+func.def public @pre_test(%value: buffer, %value_byte_offset: index, %count: i32) -> (i32) {
   %total$4 = scalar.constant 0 : i32
   %total$7 = scf.while(%total = %total$4 : i32) -> (i32) {
-    %8 = func.call @next(%value, %value_byte_offset, %count) : (buffer, offset, i32) -> (i1)
+    %8 = func.call @next(%value, %value_byte_offset, %count) : (buffer, index, i32) -> (i1)
     scf.condition %8, %total : i1, i32
   } do(%total$6: i32) {
     %9 = scalar.constant 1 : i32
@@ -106,7 +106,7 @@ func.def public @pre_test(%value: buffer, %value_byte_offset: offset, %count: i3
   func.return %total$7 : i32
 }
 
-func.decl import("effects") @next(%11: buffer, %12: offset, %13: i32) -> (i1)
+func.decl import("effects") @next(%11: buffer, %12: index, %13: i32) -> (i1)
 
 // ====
 // RUN: roundtrip
@@ -118,12 +118,12 @@ unsigned post_test(unsigned* value, unsigned count) {
   return total;
 }
 // ----
-func.def public @post_test(%value: buffer, %value_byte_offset: offset, %count: i32) -> (i32) {
+func.def public @post_test(%value: buffer, %value_byte_offset: index, %count: i32) -> (i32) {
   %total$4 = scalar.constant 0 : i32
   %total$7 = scf.while(%total$5 = %total$4 : i32) -> (i32) {
     %8 = scalar.constant 1 : i32
     %total$9 = scalar.addi %total$5, %8 : i32
-    %10 = func.call @next(%value, %value_byte_offset, %count) : (buffer, offset, i32) -> (i1)
+    %10 = func.call @next(%value, %value_byte_offset, %count) : (buffer, index, i32) -> (i1)
     scf.condition %10, %total$9 : i1, i32
   } do(%total: i32) {
     scf.yield %total : i32
@@ -131,7 +131,7 @@ func.def public @post_test(%value: buffer, %value_byte_offset: offset, %count: i
   func.return %total$7 : i32
 }
 
-func.decl import("effects") @next(%11: buffer, %12: offset, %13: i32) -> (i1)
+func.decl import("effects") @next(%11: buffer, %12: index, %13: i32) -> (i1)
 
 // ====
 // RUN: roundtrip
@@ -145,7 +145,7 @@ unsigned mutable_bound(const unsigned* input, unsigned start) {
   return total + bound;
 }
 // ----
-func.def public @mutable_bound(%input: buffer, %input_byte_offset: offset, %start: i32) -> (i32) {
+func.def public @mutable_bound(%input: buffer, %input_byte_offset: index, %start: i32) -> (i32) {
   %bound$4 = scalar.constant 20 : i32
   %total$5 = scalar.constant 0 : i32
   %bound$12, %total$13, %index = scf.while(%bound$6 = %bound$4 : i32, %total = %total$5 : i32, %index = %start : i32) -> (i32, i32, i32) {
@@ -155,19 +155,17 @@ func.def public @mutable_bound(%input: buffer, %input_byte_offset: offset, %star
     scf.condition %17, %bound$16, %total, %index : i1, i32, i32, i32
   } do(%bound: i32, %total$10: i32, %index$11: i32) {
     %18 = scalar.extui %index$11 : i32 to i64
-    %19 = scalar.constant 4 : i64
-    %20 = scalar.muli %18, %19 : i64
-    %21 = index.cast %input_byte_offset : offset to i64
-    %22 = scalar.addi %21, %20 : i64
-    %23 = scalar.assume %22 [range(%22, 0, 9223372036854775807)] : i64
-    %24 = index.cast %23 : i64 to offset
-    %25 = buffer.view %input[%24] : buffer -> view<1xi32>
-    %26 = view.load<root_in_bounds|type_disjoint> %25[0] : view<1xi32> -> i32
-    %total$27 = scalar.addi %total$10, %26 : i32
-    %28 = scalar.constant 1 : i32
-    %index$29 = scalar.addi %index$11, %28 : i32
-    scf.yield %bound, %total$27, %index$29 : i32, i32, i32
+    %19 = index.cast %18 : i64 to index
+    %20 = index.constant 4 : index
+    %21 = index.mul %19, %20 : index
+    %22 = index.add %input_byte_offset, %21 : index
+    %23 = buffer.view %input[%22] : buffer -> view<1xi32>
+    %24 = view.load<root_in_bounds|type_disjoint> %23[0] : view<1xi32> -> i32
+    %total$25 = scalar.addi %total$10, %24 : i32
+    %26 = scalar.constant 1 : i32
+    %index$27 = scalar.addi %index$11, %26 : i32
+    scf.yield %bound, %total$25, %index$27 : i32, i32, i32
   }
-  %30 = scalar.addi %total$13, %bound$12 : i32
-  func.return %30 : i32
+  %28 = scalar.addi %total$13, %bound$12 : i32
+  func.return %28 : i32
 }

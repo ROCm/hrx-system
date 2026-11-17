@@ -66,10 +66,10 @@ kernel.def @aligned_array() {
   %6 = index.constant 1 : index
   kernel.launch.config workgroups(%1, %2, %3) workgroup_size(%4, %5, %6) : index
 } launch(%output: buffer) {
-  %output_byte_offset = index.constant 0 : offset
+  %output_byte_offset = index.constant 0 : index
   %8 = index.constant 16 : offset
   %values = buffer.alloca<workgroup> align(32) %8 : buffer
-  %values_byte_offset = index.constant 0 : offset
+  %values_byte_offset = index.constant 0 : index
   %values_view = buffer.view %values[%values_byte_offset] : buffer -> view<4xi32>
   %12 = scalar.constant 7 : i32
   %13 = scalar.constant 0 : i32
@@ -83,14 +83,11 @@ kernel.def @aligned_array() {
   %20 = index.cast %19 : i64 to index
   %21 = view.load<type_disjoint> %values_view[%20] : view<4xi32> -> i32
   %22 = scalar.constant 0 : i32
-  %23 = scalar.extsi %22 : i32 to i64
-  %24 = scalar.constant 4 : i64
-  %25 = scalar.muli %23, %24 : i64
-  %26 = index.cast %output_byte_offset : offset to i64
-  %27 = scalar.addi %26, %25 : i64
-  %28 = scalar.assume %27 [range(%27, 0, 9223372036854775807)] : i64
-  %29 = index.cast %28 : i64 to offset
-  %30 = buffer.view %output[%29] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %21, %30[0] : i32, view<1xi32>
+  %23 = index.cast %22 : i32 to index
+  %24 = index.constant 4 : index
+  %25 = index.mul %23, %24 : index
+  %26 = index.add %output_byte_offset, %25 : index
+  %27 = buffer.view %output[%26] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %21, %27[0] : i32, view<1xi32>
   kernel.return
 }

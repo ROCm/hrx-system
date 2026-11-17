@@ -296,11 +296,9 @@ TEST_F(StorageTest, ArrayAliasesRetainTheirElementTypeAndInteriorOrigin) {
   ASSERT_EQ(predicates.count, 1u);
   EXPECT_EQ(predicates.predicate_list[0].args[1], 0);
   EXPECT_EQ(predicates.predicate_list[0].args[2], 252);
-  auto* origin = producer(loom_op_operands(access_origin)[0]);
-  auto* assumed = producer(loom_index_cast_input(origin));
-  auto* sum = producer(loom_op_operands(assumed)[0]);
-  EXPECT_EQ(loom_index_cast_input(producer(loom_op_operands(sum)[0])),
-            interior.pointer.byte_offset);
+  auto* sum = producer(loom_op_operands(access_origin)[0]);
+  ASSERT_TRUE(loom_index_add_isa(sum));
+  EXPECT_EQ(loom_index_add_lhs(sum), interior.pointer.byte_offset);
 }
 
 TEST_F(StorageTest, InteriorPointersRetainSignedDisplacementsAndRootIdentity) {
@@ -332,27 +330,16 @@ TEST_F(StorageTest, InteriorPointersRetainSignedDisplacementsAndRootIdentity) {
   ASSERT_EQ(access_predicates.count, 1u);
   EXPECT_EQ(access_predicates.predicate_list[0].args[1], 0);
   EXPECT_EQ(access_predicates.predicate_list[0].args[2], 252);
-  auto* offset = producer(loom_op_operands(access_origin)[0]);
-  ASSERT_TRUE(loom_index_cast_isa(offset));
-  auto* assumed_origin = producer(loom_index_cast_input(offset));
-  ASSERT_TRUE(loom_scalar_assume_isa(assumed_origin));
-  auto predicates = loom_scalar_assume_predicates(assumed_origin);
-  ASSERT_EQ(predicates.count, 1u);
-  EXPECT_EQ(predicates.predicate_list[0].kind, LOOM_PREDICATE_RANGE);
-  EXPECT_EQ(predicates.predicate_list[0].args[0],
-            loom_op_operands(assumed_origin)[0]);
-  EXPECT_EQ(predicates.predicate_list[0].args[1], 0);
-  EXPECT_EQ(predicates.predicate_list[0].args[2], INT64_MAX);
-  auto* sum = producer(loom_op_operands(assumed_origin)[0]);
-  ASSERT_TRUE(loom_scalar_addi_isa(sum));
-  auto* scale = producer(loom_op_operands(sum)[1]);
-  ASSERT_TRUE(loom_scalar_muli_isa(scale));
-  auto* extension = producer(loom_op_operands(scale)[0]);
-  EXPECT_TRUE(loom_scalar_extsi_isa(extension));
-  EXPECT_EQ(loom_op_operands(extension)[0], retreat);
+  auto* sum = producer(loom_op_operands(access_origin)[0]);
+  ASSERT_TRUE(loom_index_add_isa(sum));
+  auto* scale = producer(loom_index_add_rhs(sum));
+  ASSERT_TRUE(loom_index_mul_isa(scale));
+  auto* coordinate = producer(loom_index_mul_lhs(scale));
+  ASSERT_TRUE(loom_index_cast_isa(coordinate));
+  EXPECT_EQ(loom_index_cast_input(coordinate), retreat);
   EXPECT_EQ(loom_type_element_type(
                 loom_module_value_type(module_, loom_op_results(scale)[0])),
-            LOOM_SCALAR_TYPE_I64);
+            LOOM_SCALAR_TYPE_INDEX);
 
   // Two aliases share their root but retain independent origins when flattened
   // for calls and control-flow edges.
@@ -370,7 +357,7 @@ TEST_F(StorageTest, InteriorPointersRetainSignedDisplacementsAndRootIdentity) {
   EXPECT_NE(restored.pointer().byte_offset, first.pointer().byte_offset);
 }
 
-TEST_F(StorageTest, ILP32PointersPublishTheirSourceRepresentationRange) {
+TEST_F(StorageTest, ILP32PointersRetainSignedPositions) {
   auto source_options = options();
   source_options.data_model = LOOM_CXX_DATA_MODEL_ILP32;
   Source source(IREE_SV("int entry();"), IREE_SV("storage_ilp32.cpp"),
@@ -386,32 +373,20 @@ TEST_F(StorageTest, ILP32PointersPublishTheirSourceRepresentationRange) {
   auto allocation =
       storage.allocate(control->getBoundedArrayType(control->getIntType(), 64),
                        LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP, 0, owner);
-  auto origin = scalars.integer(16, LOOM_SCALAR_TYPE_OFFSET);
-  auto constrained =
-      storage.constrain_origin({allocation.pointer.root, origin}, owner);
-  EXPECT_EQ(constrained.root, allocation.pointer.root);
-  auto* assumed = producer(constrained.byte_offset);
-  ASSERT_TRUE(loom_index_assume_isa(assumed));
-  auto predicates = loom_index_assume_predicates(assumed);
-  ASSERT_EQ(predicates.count, 1u);
-  EXPECT_EQ(predicates.predicate_list[0].args[0], loom_op_operands(assumed)[0]);
-  EXPECT_EQ(predicates.predicate_list[0].args[1], 0);
-  EXPECT_EQ(predicates.predicate_list[0].args[2], UINT32_MAX);
-  EXPECT_EQ(loom_op_operands(assumed)[0], origin);
-
   auto* pointer_type = control->getPointerType(control->getIntType());
+  auto origin = scalars.integer(16, LOOM_SCALAR_TYPE_INDEX);
   auto advanced =
       storage.advance(storage.project({allocation.pointer.root, origin},
                                       control->getIntType(), owner),
                       scalars.integer(1, LOOM_SCALAR_TYPE_I32), pointer_type,
-                      control->getIntType(), cxx::TokenKind::T_PLUS, owner);
-  EXPECT_TRUE(advanced.pointer_width_constrained);
-  auto* advanced_assume =
-      producer(loom_index_cast_input(producer(advanced.pointer.byte_offset)));
-  ASSERT_TRUE(loom_scalar_assume_isa(advanced_assume));
-  predicates = loom_scalar_assume_predicates(advanced_assume);
-  ASSERT_EQ(predicates.count, 1u);
-  EXPECT_EQ(predicates.predicate_list[0].args[2], UINT32_MAX);
+                      control->getIntType(), cxx::TokenKind::T_MINUS, owner);
+  EXPECT_EQ(advanced.pointer.root, allocation.pointer.root);
+  auto* difference = producer(advanced.pointer.byte_offset);
+  ASSERT_TRUE(loom_index_sub_isa(difference));
+  EXPECT_EQ(loom_index_sub_lhs(difference), origin);
+  EXPECT_EQ(loom_type_element_type(
+                loom_module_value_type(module_, advanced.pointer.byte_offset)),
+            LOOM_SCALAR_TYPE_INDEX);
 }
 
 TEST_F(StorageTest, UnsignedDisplacementsExtendBeforeScaling) {
@@ -430,11 +405,14 @@ TEST_F(StorageTest, UnsignedDisplacementsExtendBeforeScaling) {
       storage.project(allocation.pointer, control->getFloatType(), owner),
       scalars.integer(17, LOOM_SCALAR_TYPE_I32), pointer,
       control->getUnsignedIntType(), cxx::TokenKind::T_PLUS, owner);
-  auto* assumed_origin =
-      producer(loom_op_operands(producer(advanced.pointer.byte_offset))[0]);
-  auto* sum = producer(loom_op_operands(assumed_origin)[0]);
-  auto* scale = producer(loom_op_operands(sum)[1]);
-  EXPECT_TRUE(loom_scalar_extui_isa(producer(loom_op_operands(scale)[0])));
+  auto* sum = producer(advanced.pointer.byte_offset);
+  ASSERT_TRUE(loom_index_add_isa(sum));
+  auto* scale = producer(loom_index_add_rhs(sum));
+  ASSERT_TRUE(loom_index_mul_isa(scale));
+  auto* coordinate = producer(loom_index_mul_lhs(scale));
+  ASSERT_TRUE(loom_index_cast_isa(coordinate));
+  EXPECT_TRUE(
+      loom_scalar_extui_isa(producer(loom_index_cast_input(coordinate))));
   auto invalid = scalars.integer(1, LOOM_SCALAR_TYPE_I32);
   EXPECT_THROW(storage.advance(storage.project(allocation.pointer,
                                                control->getFloatType(), owner),

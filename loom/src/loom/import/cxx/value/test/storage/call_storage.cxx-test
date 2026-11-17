@@ -28,69 +28,66 @@ kernel.def @call_lifetimes_kernel() {
 } launch(%parameters: buffer, %output: buffer) {
   %index$10 = scalar.constant 0 : i32
   %index$13 = scf.while(%index = %index$10 : i32) -> (i32) {
-    %99 = index.constant 0 : offset
-    %22 = buffer.view %parameters[%99] : buffer -> view<1xi32>
-    %23 = view.load<root_in_bounds|type_disjoint> %22[0] : view<1xi32> -> i32
-    %24 = scalar.cmpi ult, %index, %23 : i32
-    scf.condition %24, %index : i1, i32
+    %84 = index.constant 0 : index
+    %19 = buffer.view %parameters[%84] : buffer -> view<1xi32>
+    %20 = view.load<root_in_bounds|type_disjoint> %19[0] : view<1xi32> -> i32
+    %21 = scalar.cmpi ult, %index, %20 : i32
+    scf.condition %21, %index : i1, i32
   } do(%index$12: i32) {
-    %25 = index.constant 8 : offset
-    %values_storage = buffer.alloca<private> align(4) %25 : buffer
-    %values_storage_byte_offset = index.constant 0 : offset
+    %22 = index.constant 8 : offset
+    %values_storage = buffer.alloca<private> align(4) %22 : buffer
+    %values_storage_byte_offset = index.constant 0 : index
     %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<2xi32>
-    %29 = index.constant 0 : index
-    view.store<type_disjoint> %index$12, %values_view[%29] : i32, view<2xi32>
-    %30 = scalar.constant 7 : i32
-    %31 = scalar.addi %index$12, %30 : i32
-    %32 = index.constant 1 : index
-    view.store<type_disjoint> %31, %values_view[%32] : i32, view<2xi32>
-    %33 = scalar.extui %index$12 : i32 to i64
-    %102 = scalar.constant 2 : i64
-    %103 = scalar.shli %33, %102 : i64
-    %38 = scalar.assume %103 [range(%103, 0, 9223372036854775807)] : i64
-    %39 = index.cast %38 : i64 to offset
-    %97 = index.constant 4 : offset
-    %48 = buffer.view %parameters[%97] : buffer -> view<1xi32>
-    %49 = view.load<root_in_bounds|type_disjoint> %48[0] : view<1xi32> -> i32
-    %50 = scalar.constant 1 : i32
-    %51 = scalar.andi %49, %50 : i32
-    %52 = scalar.extui %51 : i32 to i64
-    %53 = scalar.assume %52 [range(%52, 0, 1)] : i64
-    %54 = index.cast %53 : i64 to index
-    %55 = view.load<type_disjoint> %values_view[%54] : view<2xi32> -> i32
-    func.call @publish(%output, %39, %55) : (buffer, offset, i32)
-    %counter_storage = buffer.alloca<private> align(4) %97 : buffer
+    view.store<type_disjoint> %index$12, %values_view[%values_storage_byte_offset] : i32, view<2xi32>
+    %27 = scalar.constant 7 : i32
+    %28 = scalar.addi %index$12, %27 : i32
+    %29 = index.constant 1 : index
+    view.store<type_disjoint> %28, %values_view[%29] : i32, view<2xi32>
+    %30 = scalar.extui %index$12 : i32 to i64
+    %31 = index.cast %30 : i64 to index
+    %32 = index.constant 4 : index
+    %33 = index.mul %31, %32 : index
+    %40 = buffer.view %parameters[%32] : buffer -> view<1xi32>
+    %41 = view.load<root_in_bounds|type_disjoint> %40[0] : view<1xi32> -> i32
+    %42 = scalar.constant 1 : i32
+    %43 = scalar.andi %41, %42 : i32
+    %44 = scalar.extui %43 : i32 to i64
+    %45 = scalar.assume %44 [range(%44, 0, 1)] : i64
+    %46 = index.cast %45 : i64 to index
+    %47 = view.load<type_disjoint> %values_view[%46] : view<2xi32> -> i32
+    func.call @publish(%output, %33, %47) : (buffer, index, i32)
+    %48 = index.constant 4 : offset
+    %counter_storage = buffer.alloca<private> align(4) %48 : buffer
     %counter_view = buffer.view %counter_storage[%values_storage_byte_offset] : buffer -> view<1xi32>
     view.store<type_disjoint> %index$12, %counter_view[0] : i32, view<1xi32>
-    %updated = func.call @increment(%counter_storage, %values_storage_byte_offset) : (buffer, offset) -> (i32)
+    %updated = func.call @increment(%counter_storage, %values_storage_byte_offset) : (buffer, index) -> (i32)
     %counter = view.load<type_disjoint> %counter_view[0] : view<1xi32> -> i32
-    %62 = scalar.addi %updated, %counter : i32
-    %71 = buffer.view %parameters[%values_storage_byte_offset] : buffer -> view<1xi32>
-    %72 = view.load<root_in_bounds|type_disjoint> %71[0] : view<1xi32> -> i32
-    %73 = scalar.addi %72, %index$12 : i32
-    %74 = scalar.extui %73 : i32 to i64
-    %101 = scalar.shli %74, %102 : i64
-    %79 = scalar.assume %101 [range(%101, 0, 9223372036854775807)] : i64
-    %80 = index.cast %79 : i64 to offset
-    %81 = buffer.view %output[%80] : buffer -> view<1xi32>
-    view.store<root_in_bounds|type_disjoint> %62, %81[0] : i32, view<1xi32>
-    %index$83 = scalar.addi %index$12, %50 : i32
-    scf.yield %index$83 : i32
+    %54 = scalar.addi %updated, %counter : i32
+    %60 = buffer.view %parameters[%values_storage_byte_offset] : buffer -> view<1xi32>
+    %61 = view.load<root_in_bounds|type_disjoint> %60[0] : view<1xi32> -> i32
+    %62 = scalar.addi %61, %index$12 : i32
+    %63 = scalar.extui %62 : i32 to i64
+    %64 = index.cast %63 : i64 to index
+    %66 = index.mul %64, %32 : index
+    %68 = buffer.view %output[%66] : buffer -> view<1xi32>
+    view.store<root_in_bounds|type_disjoint> %54, %68[0] : i32, view<1xi32>
+    %index$70 = scalar.addi %index$12, %42 : i32
+    scf.yield %index$70 : i32
   }
   kernel.return
 }
 
-func.def noinline @publish(%output: buffer, %output_byte_offset: offset, %value: i32) {
-  %87 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %value, %87[0] : i32, view<1xi32>
+func.def noinline @publish(%output: buffer, %output_byte_offset: index, %value: i32) {
+  %74 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %value, %74[0] : i32, view<1xi32>
   func.return
 }
 
-func.def noinline @increment(%value: buffer, %value_byte_offset: offset) -> (i32) {
-  %91 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
-  %92 = view.load<root_in_bounds|type_disjoint> %91[0] : view<1xi32> -> i32
-  %93 = scalar.constant 1 : i32
-  %94 = scalar.addi %92, %93 : i32
-  view.store<root_in_bounds|type_disjoint> %94, %91[0] : i32, view<1xi32>
-  func.return %94 : i32
+func.def noinline @increment(%value: buffer, %value_byte_offset: index) -> (i32) {
+  %78 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
+  %79 = view.load<root_in_bounds|type_disjoint> %78[0] : view<1xi32> -> i32
+  %80 = scalar.constant 1 : i32
+  %81 = scalar.addi %79, %80 : i32
+  view.store<root_in_bounds|type_disjoint> %81, %78[0] : i32, view<1xi32>
+  func.return %81 : i32
 }

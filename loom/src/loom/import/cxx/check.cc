@@ -657,7 +657,7 @@ class CheckBody {
         workloads.push_back(tensor.tensor_value(value.components()));
         if (parameter_partition.kind == ValueKind::Pointer) {
           workloads.push_back(scalars_.integer(
-              0, LOOM_SCALAR_TYPE_OFFSET, locations_.get(argument->value)));
+              0, LOOM_SCALAR_TYPE_INDEX, locations_.get(argument->value)));
         }
         argument = argument->next;
         continue;

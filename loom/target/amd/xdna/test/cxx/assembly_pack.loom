@@ -1,11 +1,11 @@
-func.decl @pack_blocks(%input: buffer, %input_origin: offset, %output: buffer, %output_origin: offset)
+func.decl @pack_blocks(%input: buffer, %input_origin: index, %output: buffer, %output_origin: index)
 
 aie2p.target<array> @npu
 
 pipeline.def<kernel> public retain target(@npu) @pack_signed_nibbles() run(%input: buffer, %output: buffer) {
   %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
   %memory = pipeline.memory<workgroup>[0, 3] : pool
-  %origin = index.constant 0 : offset
+  %origin = index.constant 0 : index
   %input_bytes = index.constant 256 : offset
   %output_bytes = index.constant 384 : offset
   %capacity = index.constant 1 : index
@@ -32,7 +32,7 @@ pipeline.def<kernel> public retain target(@npu) @pack_signed_nibbles() run(%inpu
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
     %read, %incoming = channel.acquire %inputs : channel<tile<256xi8>> -> (read<tile<256xi8>>, view<256xi8>)
     %write, %outgoing = channel.reserve %outputs : channel<tile<384xi8>> -> (write<tile<384xi8>>, view<384xi8>)
-    func.call @pack_blocks(%input_storage, %origin, %output_storage, %origin) : (buffer, offset, buffer, offset)
+    func.call @pack_blocks(%input_storage, %origin, %output_storage, %origin) : (buffer, index, buffer, index)
     channel.publish %write : write<tile<384xi8>>
     channel.release %read : read<tile<256xi8>>
   }

@@ -54,26 +54,22 @@ int entry(int* const output, const int* input) {
   return value;
 }
 // ----
-func.def public @entry(%output: buffer, %output_byte_offset: offset, %input: buffer, %input_byte_offset: offset) -> (i32) {
+func.def public @entry(%output: buffer, %output_byte_offset: index, %input: buffer, %input_byte_offset: index) -> (i32) {
   %5 = scalar.constant 0 : i32
   %6 = scalar.extui %5 : i32 to i64
-  %7 = scalar.constant 4 : i64
-  %8 = scalar.muli %6, %7 : i64
-  %9 = index.cast %input_byte_offset : offset to i64
-  %10 = scalar.addi %9, %8 : i64
-  %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
-  %12 = index.cast %11 : i64 to offset
-  %13 = buffer.view %input[%12] : buffer -> view<1xi32>
-  %value = view.load<root_in_bounds|type_disjoint> %13[0] : view<1xi32> -> i32
-  %15 = scalar.constant 0 : i32
-  %16 = scalar.extui %15 : i32 to i64
-  %17 = scalar.constant 4 : i64
-  %18 = scalar.muli %16, %17 : i64
-  %19 = index.cast %output_byte_offset : offset to i64
-  %20 = scalar.addi %19, %18 : i64
-  %21 = scalar.assume %20 [range(%20, 0, 9223372036854775807)] : i64
-  %22 = index.cast %21 : i64 to offset
-  %23 = buffer.view %output[%22] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %value, %23[0] : i32, view<1xi32>
+  %7 = index.cast %6 : i64 to index
+  %8 = index.constant 4 : index
+  %9 = index.mul %7, %8 : index
+  %10 = index.add %input_byte_offset, %9 : index
+  %11 = buffer.view %input[%10] : buffer -> view<1xi32>
+  %value = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xi32> -> i32
+  %13 = scalar.constant 0 : i32
+  %14 = scalar.extui %13 : i32 to i64
+  %15 = index.cast %14 : i64 to index
+  %16 = index.constant 4 : index
+  %17 = index.mul %15, %16 : index
+  %18 = index.add %output_byte_offset, %17 : index
+  %19 = buffer.view %output[%18] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %value, %19[0] : i32, view<1xi32>
   func.return %value : i32
 }

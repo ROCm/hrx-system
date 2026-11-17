@@ -116,8 +116,8 @@ kernel.def @copy() {
   %8 = index.constant 1 : index
   kernel.launch.config workgroups(%3, %4, %5) workgroup_size(%6, %7, %8) : index
 } launch(%count: i32, %input: buffer, %output: buffer) {
-  %input_byte_offset = index.constant 0 : offset
-  %output_byte_offset = index.constant 0 : offset
+  %input_byte_offset = index.constant 0 : index
+  %output_byte_offset = index.constant 0 : index
   kernel.return
 }
 
@@ -175,7 +175,7 @@ static loom::kernel::configuration configure(unsigned count, const unsigned* cou
 }
 
 // ----
-kernel.def @configured(%count: i32, %counts: buffer, %counts_byte_offset: offset) {
+kernel.def @configured(%count: i32, %counts: buffer, %counts_byte_offset: index) {
   %4 = scalar.constant 1 : i32
   %5 = scalar.constant 1 : i32
   %6 = scalar.constant 64 : i32
@@ -195,13 +195,13 @@ kernel.def @configured(%count: i32, %counts: buffer, %counts_byte_offset: offset
   %20 = index.cast %19 : i64 to index
   kernel.launch.config workgroups(%10, %12, %14) workgroup_size(%16, %18, %20) : index
 } launch(%output: buffer) {
-  %output_byte_offset = index.constant 0 : offset
+  %output_byte_offset = index.constant 0 : index
   kernel.return
 }
 
 command.def public @run_configured(%count: i32) launch(%counts: buffer, %output: buffer) {
-  %counts_byte_offset = index.constant 0 : offset
-  kernel.launch @configured[%count, %counts, %counts_byte_offset](%output) : [i32, buffer, offset](buffer)
+  %counts_byte_offset = index.constant 0 : index
+  kernel.launch @configured[%count, %counts, %counts_byte_offset](%output) : [i32, buffer, index](buffer)
   command.return
 }
 

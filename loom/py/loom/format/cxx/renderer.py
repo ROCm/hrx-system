@@ -164,6 +164,8 @@ class CxxRenderer(CxxFunctionRenderer):
         byte_base = f"reinterpret_cast<{byte_type}>({base})"
         if self.expression_type(byte_offset_id) == "loom::type::offset":
             offset = f"static_cast<unsigned long long>({offset})"
+        elif self.expression_type(byte_offset_id) == "loom::type::index":
+            offset = f"static_cast<long long>({offset})"
         address = byte_base if zero_offset else f"{byte_base} + {offset}"
         if byte_type == target_type:
             return address

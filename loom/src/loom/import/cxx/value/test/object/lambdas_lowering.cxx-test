@@ -14,25 +14,32 @@ int dependent_operations(const int* input, int index) {
 }
 
 // ----
-func.def public @dependent_operations(%input: buffer, %input_byte_offset: offset, %index: i32) -> (i32) {
-  %12 = scalar.extsi %index : i32 to i64
-  %114 = scalar.constant 2 : i64
-  %115 = scalar.shli %12, %114 : i64
-  %15 = index.cast %input_byte_offset : offset to i64
-  %16 = scalar.addi %15, %115 : i64
-  %17 = scalar.assume %16 [range(%16, 0, 9223372036854775807)] : i64
-  %next_byte_offset = index.cast %17 : i64 to offset
-  %23 = scalar.subi %15, %115 : i64
-  %24 = scalar.assume %23 [range(%23, 0, 9223372036854775807)] : i64
-  %previous_byte_offset = index.cast %24 : i64 to offset
-  %33 = buffer.view %input[%next_byte_offset] : buffer -> view<1xi32>
-  %34 = view.load<root_in_bounds|type_disjoint> %33[0] : view<1xi32> -> i32
-  %37 = scalar.addi %34, %34 : i32
-  %38 = buffer.view %input[%previous_byte_offset] : buffer -> view<1xi32>
-  %39 = view.load<root_in_bounds|type_disjoint> %38[0] : view<1xi32> -> i32
-  %40 = scalar.addi %37, %39 : i32
-  %42 = scalar.addi %40, %34 : i32
-  %7 = scalar.addi %42, %42 : i32
+func.def public @dependent_operations(%input: buffer, %input_byte_offset: index, %index: i32) -> (i32) {
+  %12 = index.cast %index : i32 to index
+  %13 = index.constant 4 : index
+  %next_byte_offset$85 = index.madd %12, %13, %input_byte_offset : index
+  %18 = index.mul %12, %13 : index
+  %previous_byte_offset$19 = index.sub %input_byte_offset, %18 : index
+  %24 = buffer.view %input[%next_byte_offset$85] : buffer -> view<1xi32>
+  %25 = view.load<root_in_bounds|type_disjoint> %24[0] : view<1xi32> -> i32
+  %28 = scalar.addi %25, %25 : i32
+  %29 = buffer.view %input[%previous_byte_offset$19] : buffer -> view<1xi32>
+  %30 = view.load<root_in_bounds|type_disjoint> %29[0] : view<1xi32> -> i32
+  %31 = scalar.addi %28, %30 : i32
+  %33 = scalar.addi %31, %25 : i32
+  %5 = scalar.extsi %index : i32 to i64
+  %38 = index.cast %5 : i64 to index
+  %next_byte_offset$82 = index.madd %38, %13, %input_byte_offset : index
+  %44 = index.mul %38, %13 : index
+  %previous_byte_offset$45 = index.sub %input_byte_offset, %44 : index
+  %50 = buffer.view %input[%next_byte_offset$82] : buffer -> view<1xi32>
+  %51 = view.load<root_in_bounds|type_disjoint> %50[0] : view<1xi32> -> i32
+  %54 = scalar.addi %51, %51 : i32
+  %55 = buffer.view %input[%previous_byte_offset$45] : buffer -> view<1xi32>
+  %56 = view.load<root_in_bounds|type_disjoint> %55[0] : view<1xi32> -> i32
+  %57 = scalar.addi %54, %56 : i32
+  %59 = scalar.addi %57, %51 : i32
+  %7 = scalar.addi %33, %59 : i32
   func.return %7 : i32
 }
 
@@ -55,16 +62,12 @@ int discarded_mutation(const int* input, int index) {
 }
 
 // ----
-func.def public @discarded_mutation(%input: buffer, %input_byte_offset: offset, %index: i32) -> (i32) {
-  %19 = scalar.extsi %index : i32 to i64
-  %53 = scalar.constant 2 : i64
-  %54 = scalar.shli %19, %53 : i64
-  %22 = index.cast %input_byte_offset : offset to i64
-  %23 = scalar.addi %22, %54 : i64
-  %24 = scalar.assume %23 [range(%23, 0, 9223372036854775807)] : i64
-  %25 = index.cast %24 : i64 to offset
-  %26 = buffer.view %input[%25] : buffer -> view<1xi32>
-  %27 = view.load<root_in_bounds|type_disjoint> %26[0] : view<1xi32> -> i32
-  %11 = scalar.addi %27, %27 : i32
+func.def public @discarded_mutation(%input: buffer, %input_byte_offset: index, %index: i32) -> (i32) {
+  %19 = index.cast %index : i32 to index
+  %20 = index.constant 4 : index
+  %46 = index.madd %19, %20, %input_byte_offset : index
+  %23 = buffer.view %input[%46] : buffer -> view<1xi32>
+  %24 = view.load<root_in_bounds|type_disjoint> %23[0] : view<1xi32> -> i32
+  %11 = scalar.addi %24, %24 : i32
   func.return %11 : i32
 }

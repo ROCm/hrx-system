@@ -41,7 +41,7 @@ bool observed(bool input) {
 func.def public @observed(%input: i1) -> (i1) {
   %2 = index.constant 1 : offset
   %value_storage = buffer.alloca<private> align(1) %2 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
+  %value_storage_byte_offset = index.constant 0 : index
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi8>
   %6 = scalar.extui %input : i1 to i8
   view.store<volatile|type_disjoint> %6, %value_view[0] : i8, view<1xi8>
@@ -118,7 +118,7 @@ bool observed(unsigned input) {
 func.def public @observed(%input: i32) -> (i1) {
   %2 = index.constant 1 : offset
   %value_storage = buffer.alloca<private> align(1) %2 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
+  %value_storage_byte_offset = index.constant 0 : index
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi8>
   %6 = scalar.constant 0 : i32
   %7 = scalar.cmpi ne, %input, %6 : i32

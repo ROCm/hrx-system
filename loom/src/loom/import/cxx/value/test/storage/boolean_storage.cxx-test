@@ -6,7 +6,7 @@ bool exchange(bool* output, const bool* input) {
   return value;
 }
 // ----
-func.def public @exchange(%output: buffer, %output_byte_offset: offset, %input: buffer, %input_byte_offset: offset) -> (i1) {
+func.def public @exchange(%output: buffer, %output_byte_offset: index, %input: buffer, %input_byte_offset: index) -> (i1) {
   %5 = buffer.view %input[%input_byte_offset] : buffer -> view<1xi8>
   %6 = view.load<root_in_bounds|type_disjoint> %5[0] : view<1xi8> -> i8
   %7 = scalar.constant 0 : i8
@@ -25,7 +25,7 @@ bool load(const void* storage) {
   return *static_cast<const bool*>(storage);
 }
 // ----
-func.def public @load(%storage: buffer, %storage_byte_offset: offset) -> (i1) {
+func.def public @load(%storage: buffer, %storage_byte_offset: index) -> (i1) {
   %3 = buffer.view %storage[%storage_byte_offset] : buffer -> view<1xi8>
   %4 = view.load<root_in_bounds|type_disjoint> %3[0] : view<1xi8> -> i8
   %5 = scalar.constant 0 : i8
@@ -38,7 +38,7 @@ func.def public @load(%storage: buffer, %storage_byte_offset: offset) -> (i1) {
 // C truth conversion tests the whole integer before writing a canonical byte.
 void initialize(bool* output, unsigned value) { *output = value; }
 // ----
-func.def public source_signature(#func.abi.c.signature<arguments = [0, 1], results = [], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @initialize(%output: buffer, %output_byte_offset: offset, %value: i32) {
+func.def public source_signature(#func.abi.c.signature<arguments = [0, 1], results = [], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @initialize(%output: buffer, %output_byte_offset: index, %value: i32) {
   %3 = scalar.constant 0 : i32
   %4 = scalar.cmpi ne, %value, %3 : i32
   %5 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi8>
@@ -56,7 +56,7 @@ Flag exchange(Flag* output, const Flag* input) {
   return value;
 }
 // ----
-func.def public @exchange(%output: buffer, %output_byte_offset: offset, %input: buffer, %input_byte_offset: offset) -> (i1) {
+func.def public @exchange(%output: buffer, %output_byte_offset: index, %input: buffer, %input_byte_offset: index) -> (i1) {
   %5 = buffer.view %input[%input_byte_offset] : buffer -> view<1xi8>
   %6 = view.load<root_in_bounds|type_disjoint> %5[0] : view<1xi8> -> i8
   %7 = scalar.constant 0 : i8
@@ -77,7 +77,7 @@ bool local_array(bool input, unsigned index) {
 func.def public @local_array(%input: i1, %index: i32) -> (i1) {
   %3 = index.constant 4 : offset
   %values_storage = buffer.alloca<private> align(1) %3 : buffer
-  %values_storage_byte_offset = index.constant 0 : offset
+  %values_storage_byte_offset = index.constant 0 : index
   %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<4xi8>
   %7 = index.constant 0 : index
   %8 = scalar.extui %input : i1 to i8
@@ -117,30 +117,28 @@ bool read(const Record* record, unsigned index) {
   return record->value != record->values[index];
 }
 // ----
-func.def public @read(%record: buffer, %record_byte_offset: offset, %index: i32) -> (i1) {
-  %4 = index.constant 1 : offset
-  %5 = index.add %record_byte_offset, %4 : offset
+func.def public @read(%record: buffer, %record_byte_offset: index, %index: i32) -> (i1) {
+  %4 = index.constant 1 : index
+  %5 = index.add %record_byte_offset, %4 : index
   %6 = buffer.view %record[%5] : buffer -> view<1xi8>
   %7 = view.load<root_in_bounds|type_disjoint> %6[0] : view<1xi8> -> i8
   %8 = scalar.constant 0 : i8
   %value = scalar.cmpi ne, %7, %8 : i8
   %10 = scalar.extui %value : i1 to i32
-  %11 = index.constant 2 : offset
-  %values_byte_offset = index.add %record_byte_offset, %11 : offset
+  %11 = index.constant 2 : index
+  %values_byte_offset = index.add %record_byte_offset, %11 : index
   %13 = scalar.extui %index : i32 to i64
-  %14 = scalar.constant 1 : i64
-  %15 = scalar.muli %13, %14 : i64
-  %16 = index.cast %values_byte_offset : offset to i64
-  %17 = scalar.addi %16, %15 : i64
-  %18 = scalar.assume %17 [range(%17, 0, 9223372036854775807)] : i64
-  %19 = index.cast %18 : i64 to offset
-  %20 = buffer.view %record[%19] : buffer -> view<1xi8>
-  %21 = view.load<root_in_bounds|type_disjoint> %20[0] : view<1xi8> -> i8
-  %22 = scalar.constant 0 : i8
-  %23 = scalar.cmpi ne, %21, %22 : i8
-  %24 = scalar.extui %23 : i1 to i32
-  %25 = scalar.cmpi ne, %10, %24 : i32
-  func.return %25 : i1
+  %14 = index.cast %13 : i64 to index
+  %15 = index.constant 1 : index
+  %16 = index.mul %14, %15 : index
+  %17 = index.add %values_byte_offset, %16 : index
+  %18 = buffer.view %record[%17] : buffer -> view<1xi8>
+  %19 = view.load<root_in_bounds|type_disjoint> %18[0] : view<1xi8> -> i8
+  %20 = scalar.constant 0 : i8
+  %21 = scalar.cmpi ne, %19, %20 : i8
+  %22 = scalar.extui %21 : i1 to i32
+  %23 = scalar.cmpi ne, %10, %22 : i32
+  func.return %23 : i1
 }
 
 // ====
@@ -160,10 +158,10 @@ kernel.def @shared() {
   %workgroup_size_z = config.get @shared.workgroup_size.z : index
   kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%workgroup_size_x, %workgroup_size_y, %workgroup_size_z) : index
 } launch(%output: buffer) {
-  %output_byte_offset = index.constant 0 : offset
+  %output_byte_offset = index.constant 0 : index
   %14 = index.constant 1 : offset
   %slot_storage = buffer.alloca<workgroup> align(1) %14 : buffer
-  %slot_storage_byte_offset = index.constant 0 : offset
+  %slot_storage_byte_offset = index.constant 0 : index
   %slot_view = buffer.view %slot_storage[%slot_storage_byte_offset] : buffer -> view<1xi8>
   %18 = scalar.constant 1 : i1
   %19 = scalar.extui %18 : i1 to i8
@@ -203,35 +201,33 @@ bool array_value(unsigned input, unsigned index) {
 func.def public @array_value(%input: i32, %index: i32) -> (i1) {
   %3 = index.constant 4 : offset
   %values_storage = buffer.alloca<private> align(1) %3 : buffer
-  %values_storage_byte_offset = index.constant 0 : offset
+  %values_storage_byte_offset = index.constant 0 : index
   %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<4xi8>
   %7 = scalar.constant 0 : i32
   %8 = scalar.cmpi ne, %input, %7 : i32
-  %9 = index.constant 0 : index
   %10 = scalar.extui %8 : i1 to i8
-  view.store<type_disjoint> %10, %values_view[%9] : i8, view<4xi8>
+  view.store<type_disjoint> %10, %values_view[%values_storage_byte_offset] : i8, view<4xi8>
   %12 = index.constant 1 : index
-  %50 = scalar.constant 1 : i8
-  view.store<type_disjoint> %50, %values_view[%12] : i8, view<4xi8>
+  %47 = scalar.constant 1 : i8
+  view.store<type_disjoint> %47, %values_view[%12] : i8, view<4xi8>
   %15 = index.constant 2 : index
-  %49 = scalar.constant 0 : i8
-  view.store<type_disjoint> %49, %values_view[%15] : i8, view<4xi8>
+  %46 = scalar.constant 0 : i8
+  view.store<type_disjoint> %46, %values_view[%15] : i8, view<4xi8>
   %18 = index.constant 3 : index
-  view.store<type_disjoint> %49, %values_view[%18] : i8, view<4xi8>
-  %32 = view.load<type_disjoint> %values_view[%9] : view<4xi8> -> i8
-  %34 = scalar.cmpi ne, %32, %49 : i8
-  %35 = scalar.constant 1 : i1
-  %36 = scalar.xori %34, %35 : i1
-  %46 = index.constant 1 : offset
-  %38 = buffer.view %values_storage[%46] : buffer -> view<1xi8>
-  %39 = scalar.extui %36 : i1 to i8
-  view.store<type_disjoint> %39, %38[0] : i8, view<1xi8>
-  %40 = scalar.extui %index : i32 to i64
-  %41 = scalar.assume %40 [range(%40, 0, 3)] : i64
-  %42 = index.cast %41 : i64 to index
-  %43 = view.load<type_disjoint> %values_view[%42] : view<4xi8> -> i8
-  %45 = scalar.cmpi ne, %43, %49 : i8
-  func.return %45 : i1
+  view.store<type_disjoint> %46, %values_view[%18] : i8, view<4xi8>
+  %29 = view.load<type_disjoint> %values_view[%values_storage_byte_offset] : view<4xi8> -> i8
+  %31 = scalar.cmpi ne, %29, %46 : i8
+  %32 = scalar.constant 1 : i1
+  %33 = scalar.xori %31, %32 : i1
+  %35 = buffer.view %values_storage[%12] : buffer -> view<1xi8>
+  %36 = scalar.extui %33 : i1 to i8
+  view.store<type_disjoint> %36, %35[0] : i8, view<1xi8>
+  %37 = scalar.extui %index : i32 to i64
+  %38 = scalar.assume %37 [range(%37, 0, 3)] : i64
+  %39 = index.cast %38 : i64 to index
+  %40 = view.load<type_disjoint> %values_view[%39] : view<4xi8> -> i8
+  %42 = scalar.cmpi ne, %40, %46 : i8
+  func.return %42 : i1
 }
 
 // ====
@@ -247,11 +243,10 @@ unsigned enum_array(bool input, unsigned index) {
 func.def public @enum_array(%input: i1, %index: i32) -> (i32) {
   %3 = index.constant 3 : offset
   %values_storage = buffer.alloca<private> align(1) %3 : buffer
-  %values_storage_byte_offset = index.constant 0 : offset
+  %values_storage_byte_offset = index.constant 0 : index
   %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<3xi8>
-  %7 = index.constant 0 : index
   %8 = scalar.extui %input : i1 to i8
-  view.store<type_disjoint> %8, %values_view[%7] : i8, view<3xi8>
+  view.store<type_disjoint> %8, %values_view[%values_storage_byte_offset] : i8, view<3xi8>
   %10 = index.constant 1 : index
   %23 = scalar.constant 1 : i8
   view.store<type_disjoint> %23, %values_view[%10] : i8, view<3xi8>
@@ -298,7 +293,7 @@ void boolean_objects(const volatile bool* input, volatile bool* output,
   output[4] = initialized;
 }
 // ----
-func.def public @boolean_transfer(%destination: buffer, %destination_byte_offset: offset, %source: buffer, %source_byte_offset: offset) -> (i1) {
+func.def public @boolean_transfer(%destination: buffer, %destination_byte_offset: index, %source: buffer, %source_byte_offset: index) -> (i1) {
   %5 = buffer.view %source[%source_byte_offset] : buffer -> view<1xi8>
   %6 = view.load<volatile|root_in_bounds|type_disjoint> %5[0] : view<1xi8> -> i8
   %7 = scalar.constant 0 : i8
@@ -313,30 +308,30 @@ kernel.def @boolean_objects() {
   %14 = index.constant 1 : index
   kernel.launch.config workgroups(%14, %14, %14) workgroup_size(%14, %14, %14) : index
 } launch(%input: buffer, %output: buffer, %number: i32) {
-  %input_byte_offset = index.constant 0 : offset
-  %22 = index.constant 1 : offset
-  %141 = buffer.view %input[%input_byte_offset] : buffer -> view<1xi8>
-  %142 = view.load<volatile|root_in_bounds|type_disjoint> %141[0] : view<1xi8> -> i8
-  %143 = scalar.constant 0 : i8
-  %value = scalar.cmpi ne, %142, %143 : i8
-  %145 = buffer.view %output[%22] : buffer -> view<1xi8>
-  %146 = scalar.extui %value : i1 to i8
-  view.store<volatile|root_in_bounds|type_disjoint> %146, %145[0] : i8, view<1xi8>
-  %84 = scalar.constant 1 : i1
-  %85 = scalar.xori %value, %84 : i1
-  %155 = index.constant 2 : offset
-  %47 = buffer.view %output[%155] : buffer -> view<1xi8>
-  %48 = scalar.extui %85 : i1 to i8
-  view.store<volatile|root_in_bounds|type_disjoint> %48, %47[0] : i8, view<1xi8>
-  %91 = index.constant 4 : offset
-  %95 = scalar.constant 0 : i32
-  %96 = scalar.cmpi ne, %number, %95 : i32
-  %148 = index.constant 3 : offset
-  %59 = buffer.view %output[%148] : buffer -> view<1xi8>
-  view.store<volatile|root_in_bounds|type_disjoint> %143, %59[0] : i8, view<1xi8>
-  %76 = buffer.view %output[%91] : buffer -> view<1xi8>
-  %77 = scalar.extui %96 : i1 to i8
-  view.store<volatile|root_in_bounds|type_disjoint> %77, %76[0] : i8, view<1xi8>
+  %input_byte_offset = index.constant 0 : index
+  %141 = index.constant 1 : index
+  %126 = buffer.view %input[%input_byte_offset] : buffer -> view<1xi8>
+  %127 = view.load<volatile|root_in_bounds|type_disjoint> %126[0] : view<1xi8> -> i8
+  %128 = scalar.constant 0 : i8
+  %value = scalar.cmpi ne, %127, %128 : i8
+  %130 = buffer.view %output[%141] : buffer -> view<1xi8>
+  %131 = scalar.extui %value : i1 to i8
+  view.store<volatile|root_in_bounds|type_disjoint> %131, %130[0] : i8, view<1xi8>
+  %72 = scalar.constant 1 : i1
+  %73 = scalar.xori %value, %72 : i1
+  %140 = index.constant 2 : index
+  %41 = buffer.view %output[%140] : buffer -> view<1xi8>
+  %42 = scalar.extui %73 : i1 to i8
+  view.store<volatile|root_in_bounds|type_disjoint> %42, %41[0] : i8, view<1xi8>
+  %83 = scalar.constant 0 : i32
+  %84 = scalar.cmpi ne, %number, %83 : i32
+  %94 = index.constant 3 : index
+  %50 = buffer.view %output[%94] : buffer -> view<1xi8>
+  view.store<volatile|root_in_bounds|type_disjoint> %128, %50[0] : i8, view<1xi8>
+  %132 = index.constant 4 : index
+  %64 = buffer.view %output[%132] : buffer -> view<1xi8>
+  %65 = scalar.extui %84 : i1 to i8
+  view.store<volatile|root_in_bounds|type_disjoint> %65, %64[0] : i8, view<1xi8>
   kernel.return
 }
 
@@ -373,43 +368,43 @@ kernel.def @boolean_records() {
   %2 = index.constant 1 : index
   kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
 } launch(%input: buffer, %output: buffer) {
-  %180 = index.constant 8 : offset
-  %20 = buffer.view %input[%180] : buffer -> view<1xi8>
-  %21 = view.load<root_in_bounds|type_disjoint> %20[0] : view<1xi8> -> i8
-  %22 = scalar.constant 0 : i8
-  %enabled = scalar.cmpi ne, %21, %22 : i8
-  %24 = scalar.constant 1 : i1
-  %25 = scalar.xori %enabled, %24 : i1
-  %36 = buffer.view %output[%180] : buffer -> view<1xi8>
-  %37 = scalar.extui %25 : i1 to i8
-  view.store<root_in_bounds|type_disjoint> %37, %36[0] : i8, view<1xi8>
-  %178 = index.constant 9 : offset
-  %48 = buffer.view %input[%178] : buffer -> view<1xi8>
-  %49 = view.load<root_in_bounds|type_disjoint> %48[0] : view<1xi8> -> i8
-  %selected = scalar.cmpi ne, %49, %22 : i8
-  %62 = buffer.view %output[%178] : buffer -> view<1xi8>
-  %63 = scalar.extui %selected : i1 to i8
-  view.store<root_in_bounds|type_disjoint> %63, %62[0] : i8, view<1xi8>
-  %176 = index.constant 5 : offset
-  %82 = buffer.view %input[%176] : buffer -> view<1xi8>
-  %83 = view.load<root_in_bounds|type_disjoint> %82[0] : view<1xi8> -> i8
-  %85 = scalar.cmpi ne, %83, %22 : i8
-  %175 = index.constant 10 : offset
-  %104 = buffer.view %output[%175] : buffer -> view<1xi8>
-  %105 = scalar.extui %85 : i1 to i8
-  view.store<root_in_bounds|type_disjoint> %105, %104[0] : i8, view<1xi8>
-  %124 = buffer.view %input[%175] : buffer -> view<1xi8>
-  %125 = view.load<root_in_bounds|type_disjoint> %124[0] : view<1xi8> -> i8
-  %127 = scalar.cmpi ne, %125, %22 : i8
-  %129 = scalar.xori %127, %24 : i1
-  %173 = index.constant 11 : offset
-  %148 = buffer.view %output[%173] : buffer -> view<1xi8>
-  %149 = scalar.extui %129 : i1 to i8
-  view.store<root_in_bounds|type_disjoint> %149, %148[0] : i8, view<1xi8>
-  %172 = index.constant 12 : offset
-  %169 = buffer.view %output[%172] : buffer -> view<1xi8>
-  %171 = scalar.constant 1 : i8
-  view.store<root_in_bounds|type_disjoint> %171, %169[0] : i8, view<1xi8>
+  %138 = index.constant 8 : index
+  %17 = buffer.view %input[%138] : buffer -> view<1xi8>
+  %18 = view.load<root_in_bounds|type_disjoint> %17[0] : view<1xi8> -> i8
+  %19 = scalar.constant 0 : i8
+  %enabled = scalar.cmpi ne, %18, %19 : i8
+  %21 = scalar.constant 1 : i1
+  %22 = scalar.xori %enabled, %21 : i1
+  %30 = buffer.view %output[%138] : buffer -> view<1xi8>
+  %31 = scalar.extui %22 : i1 to i8
+  view.store<root_in_bounds|type_disjoint> %31, %30[0] : i8, view<1xi8>
+  %136 = index.constant 9 : index
+  %39 = buffer.view %input[%136] : buffer -> view<1xi8>
+  %40 = view.load<root_in_bounds|type_disjoint> %39[0] : view<1xi8> -> i8
+  %selected = scalar.cmpi ne, %40, %19 : i8
+  %50 = buffer.view %output[%136] : buffer -> view<1xi8>
+  %51 = scalar.extui %selected : i1 to i8
+  view.store<root_in_bounds|type_disjoint> %51, %50[0] : i8, view<1xi8>
+  %134 = index.constant 5 : index
+  %64 = buffer.view %input[%134] : buffer -> view<1xi8>
+  %65 = view.load<root_in_bounds|type_disjoint> %64[0] : view<1xi8> -> i8
+  %67 = scalar.cmpi ne, %65, %19 : i8
+  %133 = index.constant 10 : index
+  %80 = buffer.view %output[%133] : buffer -> view<1xi8>
+  %81 = scalar.extui %67 : i1 to i8
+  view.store<root_in_bounds|type_disjoint> %81, %80[0] : i8, view<1xi8>
+  %94 = buffer.view %input[%133] : buffer -> view<1xi8>
+  %95 = view.load<root_in_bounds|type_disjoint> %94[0] : view<1xi8> -> i8
+  %97 = scalar.cmpi ne, %95, %19 : i8
+  %99 = scalar.xori %97, %21 : i1
+  %131 = index.constant 11 : index
+  %112 = buffer.view %output[%131] : buffer -> view<1xi8>
+  %113 = scalar.extui %99 : i1 to i8
+  view.store<root_in_bounds|type_disjoint> %113, %112[0] : i8, view<1xi8>
+  %130 = index.constant 12 : index
+  %127 = buffer.view %output[%130] : buffer -> view<1xi8>
+  %129 = scalar.constant 1 : i8
+  view.store<root_in_bounds|type_disjoint> %129, %127[0] : i8, view<1xi8>
   kernel.return
 }
 
@@ -433,32 +428,31 @@ kernel.def @boolean_shared() {
 } launch(%input: buffer, %output: buffer) {
   %10 = index.constant 2 : offset
   %slots = buffer.alloca<workgroup> align(1) %10 : buffer
-  %slots_byte_offset = index.constant 0 : offset
+  %slots_byte_offset = index.constant 0 : index
   %slots_view = buffer.view %slots[%slots_byte_offset] : buffer -> view<2xi8>
-  %22 = buffer.view %input[%slots_byte_offset] : buffer -> view<1xi8>
-  %23 = view.load<root_in_bounds|type_disjoint> %22[0] : view<1xi8> -> i8
-  %24 = scalar.constant 0 : i8
-  %25 = scalar.cmpi ne, %23, %24 : i8
-  %85 = index.constant 0 : index
-  %30 = scalar.extui %25 : i1 to i8
-  view.store<type_disjoint> %30, %slots_view[%85] : i8, view<2xi8>
-  %35 = view.load<type_disjoint> %slots_view[%85] : view<2xi8> -> i8
-  %37 = scalar.cmpi ne, %35, %24 : i8
-  %38 = scalar.constant 1 : i1
-  %39 = scalar.xori %37, %38 : i1
-  %83 = index.constant 1 : index
-  %44 = scalar.extui %39 : i1 to i8
-  view.store<type_disjoint> %44, %slots_view[%83] : i8, view<2xi8>
-  %49 = view.load<type_disjoint> %slots_view[%85] : view<2xi8> -> i8
-  %51 = scalar.cmpi ne, %49, %24 : i8
-  %81 = index.constant 1 : offset
-  %60 = buffer.view %output[%81] : buffer -> view<1xi8>
-  %61 = scalar.extui %51 : i1 to i8
-  view.store<root_in_bounds|type_disjoint> %61, %60[0] : i8, view<1xi8>
-  %66 = view.load<type_disjoint> %slots_view[%83] : view<2xi8> -> i8
-  %68 = scalar.cmpi ne, %66, %24 : i8
-  %77 = buffer.view %output[%10] : buffer -> view<1xi8>
-  %78 = scalar.extui %68 : i1 to i8
-  view.store<root_in_bounds|type_disjoint> %78, %77[0] : i8, view<1xi8>
+  %19 = buffer.view %input[%slots_byte_offset] : buffer -> view<1xi8>
+  %20 = view.load<root_in_bounds|type_disjoint> %19[0] : view<1xi8> -> i8
+  %21 = scalar.constant 0 : i8
+  %22 = scalar.cmpi ne, %20, %21 : i8
+  %27 = scalar.extui %22 : i1 to i8
+  view.store<type_disjoint> %27, %slots_view[%slots_byte_offset] : i8, view<2xi8>
+  %32 = view.load<type_disjoint> %slots_view[%slots_byte_offset] : view<2xi8> -> i8
+  %34 = scalar.cmpi ne, %32, %21 : i8
+  %35 = scalar.constant 1 : i1
+  %36 = scalar.xori %34, %35 : i1
+  %74 = index.constant 1 : index
+  %41 = scalar.extui %36 : i1 to i8
+  view.store<type_disjoint> %41, %slots_view[%74] : i8, view<2xi8>
+  %46 = view.load<type_disjoint> %slots_view[%slots_byte_offset] : view<2xi8> -> i8
+  %48 = scalar.cmpi ne, %46, %21 : i8
+  %54 = buffer.view %output[%74] : buffer -> view<1xi8>
+  %55 = scalar.extui %48 : i1 to i8
+  view.store<root_in_bounds|type_disjoint> %55, %54[0] : i8, view<1xi8>
+  %60 = view.load<type_disjoint> %slots_view[%74] : view<2xi8> -> i8
+  %62 = scalar.cmpi ne, %60, %21 : i8
+  %70 = index.constant 2 : index
+  %68 = buffer.view %output[%70] : buffer -> view<1xi8>
+  %69 = scalar.extui %62 : i1 to i8
+  view.store<root_in_bounds|type_disjoint> %69, %68[0] : i8, view<1xi8>
   kernel.return
 }

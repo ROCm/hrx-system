@@ -119,11 +119,11 @@ static_assert(algorithm::combine(11u, 3u) == 27);
 func.def public @specialized_values(%value: i32, %output: buffer) {
   %2 = index.constant 4 : offset
   %selected_storage = buffer.alloca<private> align(4) %2 : buffer
-  %selected_storage_byte_offset = index.constant 0 : offset
+  %selected_storage_byte_offset = index.constant 0 : index
   %selected_view = buffer.view %selected_storage[%selected_storage_byte_offset] : buffer -> view<1xi32>
   view.store<type_disjoint> %value, %selected_view[0] : i32, view<1xi32>
   %values_layout = encoding.layout.dense : encoding<layout>
-  %7 = index.constant 0 : offset
+  %7 = index.constant 0 : index
   %values = buffer.view %output[%7] : buffer -> view<10xi32, %values_layout>
   %9 = func.call pure @rotation____unsigned_int(%value) : (i32) -> (i32)
   %10 = scalar.constant 0 : i32
@@ -151,11 +151,11 @@ func.def public @specialized_values(%value: i32, %output: buffer) {
   %27 = scalar.constant 5 : i32
   %28 = index.cast %27 : i32 to index
   view.store<type_disjoint> %26, %values[%28] : i32, view<10xi32, %values_layout>
-  %29 = func.call readonly @select____unsigned_int(%selected_storage, %selected_storage_byte_offset) : (buffer, offset) -> (i32)
+  %29 = func.call readonly @select____unsigned_int(%selected_storage, %selected_storage_byte_offset) : (buffer, index) -> (i32)
   %30 = scalar.constant 6 : i32
   %31 = index.cast %30 : i32 to index
   view.store<type_disjoint> %29, %values[%31] : i32, view<10xi32, %values_layout>
-  %32 = func.call readonly @select____unsigned_int(%selected_storage, %selected_storage_byte_offset) : (buffer, offset) -> (i32)
+  %32 = func.call readonly @select____unsigned_int(%selected_storage, %selected_storage_byte_offset) : (buffer, index) -> (i32)
   %33 = scalar.constant 7 : i32
   %34 = index.cast %33 : i32 to index
   view.store<type_disjoint> %32, %values[%34] : i32, view<10xi32, %values_layout>
@@ -203,7 +203,7 @@ func.def @select_unsigned_int(%value: i32) -> (i32) {
   func.return %65 : i32
 }
 
-func.def @select____unsigned_int(%value: buffer, %value_byte_offset: offset) -> (i32) {
+func.def @select____unsigned_int(%value: buffer, %value_byte_offset: index) -> (i32) {
   %69 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
   %70 = view.load<root_in_bounds|type_disjoint> %69[0] : view<1xi32> -> i32
   %71 = scalar.constant 17 : i32
@@ -234,7 +234,7 @@ func.def @algorithm__combine____unsigned_int_1(%value: i32, %bias: i32) -> (i32)
 // ----
 func.def public @specialization_oracle(%value: i32, %output: buffer) {
   %values_layout = encoding.layout.dense : encoding<layout>
-  %3 = index.constant 0 : offset
+  %3 = index.constant 0 : index
   %values = buffer.view %output[%3] : buffer -> view<10xi32, %values_layout>
   %5 = scalar.constant 3 : i32
   %6 = scalar.addi %value, %5 : i32

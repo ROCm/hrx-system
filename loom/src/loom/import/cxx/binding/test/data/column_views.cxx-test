@@ -213,30 +213,30 @@ void copy(Rows rows) {
 func.def public @copy(%rows_observed: view<2xi32>, %rows_ordinary: view<2xi32>) {
   %2 = index.constant 8 : offset
   %row_storage = buffer.alloca<private> align(4) %2 : buffer
-  %row_storage_byte_offset = index.constant 0 : offset
+  %row_storage_byte_offset = index.constant 0 : index
   %row_view = buffer.view %row_storage[%row_storage_byte_offset] : buffer -> view<8xi8>
   %6 = scalar.constant 0 : i32
   %7 = index.cast %6 : i32 to index
   %8 = view.load<volatile> %rows_observed[%7] : view<2xi32> -> i32
   %9 = view.load %rows_ordinary[%7] : view<2xi32> -> i32
-  %10 = index.constant 0 : offset
-  %11 = index.add %row_storage_byte_offset, %10 : offset
-  %12 = index.assume %11 [range(%11, 0, 4)] : offset
+  %10 = index.constant 0 : index
+  %11 = index.add %row_storage_byte_offset, %10 : index
+  %12 = index.assume %11 [range(%11, 0, 4)] : index
   %13 = buffer.view %row_storage[%12] : buffer -> view<1xi32>
   view.store<volatile|type_disjoint> %8, %13[0] : i32, view<1xi32>
-  %14 = index.constant 4 : offset
-  %15 = index.add %row_storage_byte_offset, %14 : offset
-  %16 = index.assume %15 [range(%15, 0, 4)] : offset
+  %14 = index.constant 4 : index
+  %15 = index.add %row_storage_byte_offset, %14 : index
+  %16 = index.assume %15 [range(%15, 0, 4)] : index
   %17 = buffer.view %row_storage[%16] : buffer -> view<1xi32>
   view.store<type_disjoint> %9, %17[0] : i32, view<1xi32>
-  %18 = index.constant 0 : offset
-  %19 = index.add %row_storage_byte_offset, %18 : offset
-  %20 = index.assume %19 [range(%19, 0, 4)] : offset
+  %18 = index.constant 0 : index
+  %19 = index.add %row_storage_byte_offset, %18 : index
+  %20 = index.assume %19 [range(%19, 0, 4)] : index
   %21 = buffer.view %row_storage[%20] : buffer -> view<1xi32>
   %row_observed = view.load<volatile|type_disjoint> %21[0] : view<1xi32> -> i32
-  %23 = index.constant 4 : offset
-  %24 = index.add %row_storage_byte_offset, %23 : offset
-  %25 = index.assume %24 [range(%24, 0, 4)] : offset
+  %23 = index.constant 4 : index
+  %24 = index.add %row_storage_byte_offset, %23 : index
+  %25 = index.assume %24 [range(%24, 0, 4)] : index
   %26 = buffer.view %row_storage[%25] : buffer -> view<1xi32>
   %row_ordinary = view.load<type_disjoint> %26[0] : view<1xi32> -> i32
   %28 = scalar.constant 1 : i32

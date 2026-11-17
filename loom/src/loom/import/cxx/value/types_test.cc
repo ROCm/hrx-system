@@ -511,7 +511,7 @@ TEST(TypesTest, ObjectPointersDoNotRequirePointeeStorage) {
     types.append(pointer, owner, components);
     ASSERT_EQ(components.size(), 2u);
     EXPECT_EQ(loom_type_kind(components[0]), LOOM_TYPE_BUFFER);
-    EXPECT_EQ(loom_type_element_type(components[1]), LOOM_SCALAR_TYPE_OFFSET);
+    EXPECT_EQ(loom_type_element_type(components[1]), LOOM_SCALAR_TYPE_INDEX);
   }
   EXPECT_THROW(types.storage_size(control->getVoidType(), owner),
                SourceRejected);
@@ -565,7 +565,7 @@ TEST(TypesTest, RecordPartitionsRetainNominalMembersAndStaticTransport) {
   ASSERT_EQ(signature.size(), 5u);
   EXPECT_EQ(loom_type_element_type(signature[0]), LOOM_SCALAR_TYPE_I32);
   EXPECT_EQ(loom_type_kind(signature[2]), LOOM_TYPE_BUFFER);
-  EXPECT_EQ(loom_type_element_type(signature[3]), LOOM_SCALAR_TYPE_OFFSET);
+  EXPECT_EQ(loom_type_element_type(signature[3]), LOOM_SCALAR_TYPE_INDEX);
   EXPECT_EQ(loom_type_element_type(signature[4]), LOOM_SCALAR_TYPE_I1);
 }
 

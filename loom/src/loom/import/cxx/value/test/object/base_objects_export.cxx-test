@@ -91,26 +91,26 @@ int stored_record(const Record* record) { return read(*record) + reference(*reco
 
 struct reference_result {
   loom::type::buffer<unsigned char> value0;
-  loom::type::offset value1;
+  loom::type::index value1;
 };
 
 [[loom::symbol("stored_record")]]
-unsigned stored_record(loom::type::buffer<unsigned> record, loom::type::offset record_byte_offset);
+unsigned stored_record(loom::type::buffer<unsigned> record, loom::type::index record_byte_offset);
 
 [[loom::symbol("read")]]
 static unsigned read(unsigned record_Bounds_upper);
 
 [[loom::symbol("reference")]]
-static reference_result reference(loom::type::buffer<unsigned char> record, loom::type::offset record_byte_offset);
+static reference_result reference(loom::type::buffer<unsigned char> record, loom::type::index record_byte_offset);
 
 [[loom::symbol("stored_record")]]
-unsigned stored_record(loom::type::buffer<unsigned> record, loom::type::offset record_byte_offset) {
-  auto v5 = loom::buffer::view<1>(loom::buffer::cast<const unsigned>(record), (record_byte_offset + loom::type::offset{8}), {});
+unsigned stored_record(loom::type::buffer<unsigned> record, loom::type::index record_byte_offset) {
+  auto v5 = loom::buffer::view<1>(loom::buffer::cast<const unsigned>(record), (record_byte_offset + loom::type::index{8}), {});
   unsigned v6 = loom::view::load<loom::memory_access::root_in_bounds>(v5, 0);
   unsigned v7 = read(v6);
   reference_result call_result = reference(loom::buffer::cast<unsigned char>(record), record_byte_offset);
   auto v8 = call_result.value0;
-  loom::type::offset v9 = call_result.value1;
+  loom::type::index v9 = call_result.value1;
   auto v10 = loom::buffer::view<1>(loom::buffer::cast<const unsigned>(v8), v9, {});
   unsigned v11 = loom::view::load<loom::memory_access::root_in_bounds>(v10, 0);
   return (v7 + v11);
@@ -122,6 +122,6 @@ static unsigned read(unsigned record_Bounds_upper) {
 }
 
 [[loom::symbol("reference")]]
-static reference_result reference(loom::type::buffer<unsigned char> record, loom::type::offset record_byte_offset) {
-  return {record, (record_byte_offset + loom::type::offset{8})};
+static reference_result reference(loom::type::buffer<unsigned char> record, loom::type::index record_byte_offset) {
+  return {record, (record_byte_offset + loom::type::index{8})};
 }

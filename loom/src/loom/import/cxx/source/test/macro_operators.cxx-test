@@ -70,10 +70,10 @@ const char* quoted() {
 }
 
 // ----
-func.def public @quoted() -> (buffer, offset) {
+func.def public @quoted() -> (buffer, index) {
   %2 = buffer.constant align(1) utf8("ab\u0000") : buffer loc("loom/src/loom/import/cxx/source/test/macro_operators.cxx-test":3:10 to 3:15)
-  %3 = index.constant 0 : offset loc("loom/src/loom/import/cxx/source/test/macro_operators.cxx-test":3:10 to 3:15)
-  func.return %2, %3 : buffer, offset loc("loom/src/loom/import/cxx/source/test/macro_operators.cxx-test":3:3 to 3:20)
+  %3 = index.constant 0 : index loc("loom/src/loom/import/cxx/source/test/macro_operators.cxx-test":3:10 to 3:15)
+  func.return %2, %3 : buffer, index loc("loom/src/loom/import/cxx/source/test/macro_operators.cxx-test":3:3 to 3:20)
 } loc("loom/src/loom/import/cxx/source/test/macro_operators.cxx-test":2:1 to 4:2)
 
 // ====
@@ -85,8 +85,8 @@ const char* empty() {
 }
 
 // ----
-func.def public @empty() -> (buffer, offset) {
+func.def public @empty() -> (buffer, index) {
   %2 = buffer.constant align(1) utf8("\u0000") : buffer loc("loom/src/loom/import/cxx/source/test/macro_operators.cxx-test":4:18 to 4:23)
-  %3 = index.constant 0 : offset loc("loom/src/loom/import/cxx/source/test/macro_operators.cxx-test":4:18 to 4:23)
-  func.return %2, %3 : buffer, offset loc("loom/src/loom/import/cxx/source/test/macro_operators.cxx-test":4:3 to 4:27)
+  %3 = index.constant 0 : index loc("loom/src/loom/import/cxx/source/test/macro_operators.cxx-test":4:18 to 4:23)
+  func.return %2, %3 : buffer, index loc("loom/src/loom/import/cxx/source/test/macro_operators.cxx-test":4:3 to 4:27)
 } loc("loom/src/loom/import/cxx/source/test/macro_operators.cxx-test":3:1 to 5:2)

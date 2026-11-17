@@ -42,7 +42,7 @@ loom_type_t object_storage_type(loom_type_t value_type) {
 
 Pointer Storage::root(loom_value_id_t buffer, cxx::AST* owner) {
   auto byte_offset =
-      scalars_.integer(0, LOOM_SCALAR_TYPE_OFFSET, locations_.get(owner));
+      scalars_.integer(0, LOOM_SCALAR_TYPE_INDEX, locations_.get(owner));
   zero_origin_offsets_.insert(byte_offset);
   return {buffer, byte_offset};
 }
@@ -113,29 +113,6 @@ loom_value_id_t Storage::distance(Pointer left, Pointer right,
                           result_type, owner);
 }
 
-Pointer Storage::constrain_origin(Pointer pointer, cxx::AST* owner) {
-  if (unit_.control()->memoryLayout()->sizeOfPointer() != 4) {
-    return pointer;
-  }
-  auto source = locations_.get(owner);
-  auto offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
-  loom_predicate_t range = {
-      .kind = LOOM_PREDICATE_RANGE,
-      .arg_count = 3,
-      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
-                   LOOM_PRED_ARG_CONST},
-      .args = {pointer.byte_offset, 0, UINT32_MAX},
-  };
-  loom_op_t* op;
-  check(loom_index_assume_build(&builder_, &pointer.byte_offset, 1, &range, 1,
-                                &offset_type, 1, source, &op));
-  auto byte_offset = loom_op_results(op)[0];
-  if (zero_origin_offsets_.contains(pointer.byte_offset)) {
-    zero_origin_offsets_.insert(byte_offset);
-  }
-  return {pointer.root, byte_offset};
-}
-
 std::optional<Pointer> Storage::constrain_known_access(Pointer pointer,
                                                        int64_t access_bytes,
                                                        cxx::AST* owner) {
@@ -145,7 +122,7 @@ std::optional<Pointer> Storage::constrain_known_access(Pointer pointer,
     return std::nullopt;
   }
   auto source = locations_.get(owner);
-  auto offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+  auto index_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   loom_predicate_t range = {
       .kind = LOOM_PREDICATE_RANGE,
       .arg_count = 3,
@@ -156,7 +133,7 @@ std::optional<Pointer> Storage::constrain_known_access(Pointer pointer,
   };
   loom_op_t* op;
   check(loom_index_assume_build(&builder_, &pointer.byte_offset, 1, &range, 1,
-                                &offset_type, 1, source, &op));
+                                &index_type, 1, source, &op));
   auto byte_offset = loom_op_results(op)[0];
   if (zero_origin_offsets_.contains(pointer.byte_offset)) {
     zero_origin_offsets_.insert(byte_offset);
@@ -193,42 +170,30 @@ StorageProjection Storage::advance(StorageProjection base,
   auto* element_type = pointer ? pointer->elementType() : array->elementType();
   auto bytes = types_.storage_size(element_type, owner);
   auto source = locations_.get(owner);
-  auto wide_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
-  auto offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
-  // The fixed-width arithmetic retains the signed displacement until it is
-  // combined with the existing origin. Defined C++ pointer arithmetic remains
-  // within the allocation (or one-past), so that final origin is nonnegative.
-  auto wide = scalars_.convert(displacement, index_type,
-                               unit_.control()->getLongLongIntType(), owner);
-  auto size = scalars_.integer(bytes, LOOM_SCALAR_TYPE_I64, source);
+  auto position_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  auto input_type = types_.get(index_type, owner);
+  // Index casts interpret nonboolean integers as signed. Preserve the high bit
+  // of an unsigned source before entering that domain; signed and boolean
+  // sources enter directly and retain their native-width lowering.
+  if (loom_type_element_type(input_type) != LOOM_SCALAR_TYPE_I1 &&
+      types_.is_unsigned(index_type)) {
+    displacement = scalars_.convert(
+        displacement, index_type, unit_.control()->getLongLongIntType(), owner);
+    input_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
+  }
   loom_op_t* op;
-  check(
-      loom_scalar_muli_build(&builder_, 0, wide, size, wide_type, source, &op));
-  auto delta = loom_op_results(op)[0];
-  check(loom_index_cast_build(&builder_, base.pointer.byte_offset, offset_type,
-                              wide_type, source, &op));
-  auto origin = loom_op_results(op)[0];
-  auto build = operation == cxx::TokenKind::T_MINUS ? loom_scalar_subi_build
-                                                    : loom_scalar_addi_build;
-  check(build(&builder_, 0, origin, delta, wide_type, source, &op));
-  auto byte_offset = loom_op_results(op)[0];
-  loom_predicate_t range = {
-      .kind = LOOM_PREDICATE_RANGE,
-      .arg_count = 3,
-      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
-                   LOOM_PRED_ARG_CONST},
-      .args = {byte_offset, 0,
-               unit_.control()->memoryLayout()->sizeOfPointer() == 4
-                   ? UINT32_MAX
-                   : INT64_MAX},
-  };
-  check(loom_scalar_assume_build(&builder_, &byte_offset, 1, &range, 1,
-                                 &wide_type, 1, source, &op));
-  check(loom_index_cast_build(&builder_, loom_op_results(op)[0], wide_type,
-                              offset_type, source, &op));
+  check(loom_index_cast_build(&builder_, displacement, input_type,
+                              position_type, source, &op));
+  auto coordinate = loom_index_cast_result(op);
+  auto size = scalars_.integer(bytes, LOOM_SCALAR_TYPE_INDEX, source);
+  check(loom_index_mul_build(&builder_, coordinate, size, source, &op));
+  auto delta = loom_index_mul_result(op);
+  auto build = operation == cxx::TokenKind::T_MINUS ? loom_index_sub_build
+                                                    : loom_index_add_build;
+  check(build(&builder_, base.pointer.byte_offset, delta, position_type, source,
+              &op));
   return {{base.pointer.root, loom_op_results(op)[0]},
-          std::gcd(base.alignment, static_cast<uint64_t>(bytes)),
-          true};
+          std::gcd(base.alignment, static_cast<uint64_t>(bytes))};
 }
 
 StorageProjection Storage::member(StorageProjection base, cxx::Symbol* field,
@@ -250,14 +215,13 @@ StorageProjection Storage::subobject(StorageProjection base,
                                      uint64_t byte_offset, cxx::AST* owner) {
   auto source = locations_.get(owner);
   auto field_offset =
-      scalars_.integer(byte_offset, LOOM_SCALAR_TYPE_OFFSET, source);
+      scalars_.integer(byte_offset, LOOM_SCALAR_TYPE_INDEX, source);
   loom_op_t* op;
   check(loom_index_add_build(&builder_, base.pointer.byte_offset, field_offset,
-                             loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET), source,
+                             loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), source,
                              &op));
-  Pointer pointer =
-      constrain_origin({base.pointer.root, loom_op_results(op)[0]}, owner);
-  return {pointer, std::gcd(base.alignment, byte_offset), true};
+  return {{base.pointer.root, loom_op_results(op)[0]},
+          std::gcd(base.alignment, byte_offset)};
 }
 
 Pointer Storage::subobject(Pointer base, uint64_t byte_offset,
@@ -266,32 +230,31 @@ Pointer Storage::subobject(Pointer base, uint64_t byte_offset,
     return base;
   }
   auto source = locations_.get(owner);
-  auto offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+  auto position_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   auto displacement =
-      scalars_.integer(byte_offset, LOOM_SCALAR_TYPE_OFFSET, source);
+      scalars_.integer(byte_offset, LOOM_SCALAR_TYPE_INDEX, source);
   loom_op_t* op;
   check(loom_index_add_build(&builder_, base.byte_offset, displacement,
-                             offset_type, source, &op));
+                             position_type, source, &op));
   auto adjusted = loom_op_results(op)[0];
   auto is_null = compare_null(base.root, true, owner);
-  auto origin = scalars_.integer(0, LOOM_SCALAR_TYPE_OFFSET, source);
-  check(loom_scf_select_build(&builder_, is_null, origin, adjusted, offset_type,
-                              source, &op));
-  return constrain_origin({base.root, loom_scf_select_result(op)}, owner);
+  auto origin = scalars_.integer(0, LOOM_SCALAR_TYPE_INDEX, source);
+  check(loom_scf_select_build(&builder_, is_null, origin, adjusted,
+                              position_type, source, &op));
+  return {base.root, loom_scf_select_result(op)};
 }
 
 StorageProjection Storage::enclosing(StorageProjection base,
                                      uint64_t byte_offset, cxx::AST* owner) {
   auto source = locations_.get(owner);
   auto displacement =
-      scalars_.integer(byte_offset, LOOM_SCALAR_TYPE_OFFSET, source);
+      scalars_.integer(byte_offset, LOOM_SCALAR_TYPE_INDEX, source);
   loom_op_t* op;
   check(loom_index_sub_build(&builder_, base.pointer.byte_offset, displacement,
-                             loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET), source,
+                             loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), source,
                              &op));
-  auto pointer =
-      constrain_origin({base.pointer.root, loom_op_results(op)[0]}, owner);
-  return {pointer, std::gcd(base.alignment, byte_offset), true};
+  return {{base.pointer.root, loom_op_results(op)[0]},
+          std::gcd(base.alignment, byte_offset)};
 }
 
 Pointer Storage::enclosing(Pointer base, uint64_t byte_offset,
@@ -300,25 +263,22 @@ Pointer Storage::enclosing(Pointer base, uint64_t byte_offset,
     return base;
   }
   auto source = locations_.get(owner);
-  auto offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+  auto position_type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
   auto displacement =
-      scalars_.integer(byte_offset, LOOM_SCALAR_TYPE_OFFSET, source);
+      scalars_.integer(byte_offset, LOOM_SCALAR_TYPE_INDEX, source);
   auto is_null = compare_null(base.root, true, owner);
   loom_op_t* op;
   check(loom_scf_select_build(&builder_, is_null, displacement,
-                              base.byte_offset, offset_type, source, &op));
+                              base.byte_offset, position_type, source, &op));
   auto origin = loom_scf_select_result(op);
-  check(loom_index_sub_build(&builder_, origin, displacement, offset_type,
+  check(loom_index_sub_build(&builder_, origin, displacement, position_type,
                              source, &op));
-  return constrain_origin({base.root, loom_op_results(op)[0]}, owner);
+  return {base.root, loom_op_results(op)[0]};
 }
 
 StorageAccess Storage::dereference(StorageProjection base,
                                    const cxx::Type* element_type,
                                    cxx::AST* owner) {
-  if (!base.pointer_width_constrained) {
-    base.pointer = constrain_origin(base.pointer, owner);
-  }
   auto element = object_storage_type(types_.get(element_type, owner));
   const auto constrained = constrain_known_access(
       base.pointer, types_.storage_size(element_type, owner), owner);
@@ -532,7 +492,7 @@ StorageAllocation Storage::record_fixed(
     uint64_t natural_alignment, cxx::AST* owner) {
   loom_op_t* op;
   auto base =
-      scalars_.integer(0, LOOM_SCALAR_TYPE_OFFSET, locations_.get(owner));
+      scalars_.integer(0, LOOM_SCALAR_TYPE_INDEX, locations_.get(owner));
   zero_origin_offsets_.insert(base);
   auto* array = cxx::type_cast<cxx::BoundedArrayType>(types_.unqualified(type));
   auto* view_source_type = array ? array->elementType() : type;
@@ -618,7 +578,7 @@ Pointer Storage::allocate_elements(const cxx::Type* element_type,
       byte_length, loom_type_buffer(), source, &op));
   auto root = loom_op_results(op)[0];
   roots_[root] = {.memory_space = memory_space, .allocation = std::nullopt};
-  auto base = scalars_.integer(0, LOOM_SCALAR_TYPE_OFFSET, source);
+  auto base = scalars_.integer(0, LOOM_SCALAR_TYPE_INDEX, source);
   zero_origin_offsets_.insert(base);
   return {root, base};
 }
@@ -637,7 +597,7 @@ Pointer Storage::allocate_bytes(loom_value_id_t byte_length,
                                  loom_type_buffer(), source, &op));
   auto root = loom_op_results(op)[0];
   roots_[root] = {.memory_space = memory_space, .allocation = std::nullopt};
-  auto base = scalars_.integer(0, LOOM_SCALAR_TYPE_OFFSET, source);
+  auto base = scalars_.integer(0, LOOM_SCALAR_TYPE_INDEX, source);
   zero_origin_offsets_.insert(base);
   return {root, base};
 }

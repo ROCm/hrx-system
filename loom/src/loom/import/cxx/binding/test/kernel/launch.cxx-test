@@ -109,7 +109,7 @@ kernel.def @kernels.entry.f32() {
   %workgroup_size_z = config.get @kernels.entry.f32.workgroup_size.z : index
   kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%workgroup_size_x, %workgroup_size_y, %workgroup_size_z) : index
 } launch(%output: buffer) {
-  %output_byte_offset = index.constant 0 : offset
+  %output_byte_offset = index.constant 0 : index
   kernel.return
 }
 
@@ -134,7 +134,7 @@ kernel.def @kernels.entry.i32() {
   %workgroup_size_z = config.get @kernels.entry.i32.workgroup_size.z : index
   kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%workgroup_size_x, %workgroup_size_y, %workgroup_size_z) : index
 } launch(%output: buffer) {
-  %output_byte_offset = index.constant 0 : offset
+  %output_byte_offset = index.constant 0 : index
   kernel.return
 }
 

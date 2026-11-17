@@ -181,7 +181,7 @@ unsigned update(int* data, unsigned choice, unsigned next) {
 }
 
 // ----
-func.def public @update(%data: buffer, %data_byte_offset: offset, %choice: i32, %next: i32) -> (i32) {
+func.def public @update(%data: buffer, %data_byte_offset: index, %choice: i32, %next: i32) -> (i32) {
   %items_first_value$5 = scalar.constant 1 : i32
   %items_second_value$6 = scalar.constant 2 : i32
   %items_third_value$7 = scalar.constant 3 : i32
@@ -332,11 +332,11 @@ unsigned projected_call_reference(unsigned* data, unsigned index,
 }
 
 // ----
-func.def public @projected_call_reference(%data: buffer, %data_byte_offset: offset, %index: i32, %next: i32) -> (i32) {
+func.def public @projected_call_reference(%data: buffer, %data_byte_offset: index, %index: i32, %next: i32) -> (i32) {
   %array_values_0_marker$5 = scalar.constant 1 : i32
   %array_values_1_marker$6 = scalar.constant 2 : i32
   %array_values_2_marker$7 = scalar.constant 3 : i32
-  %8 = func.call pure @forward_projected_cell(%data, %data_byte_offset, %array_values_0_marker$5, %data, %data_byte_offset, %array_values_1_marker$6, %data, %data_byte_offset, %array_values_2_marker$7, %index) : (buffer, offset, i32, buffer, offset, i32, buffer, offset, i32, i32) -> (i32)
+  %8 = func.call pure @forward_projected_cell(%data, %data_byte_offset, %array_values_0_marker$5, %data, %data_byte_offset, %array_values_1_marker$6, %data, %data_byte_offset, %array_values_2_marker$7, %index) : (buffer, index, i32, buffer, index, i32, buffer, index, i32, i32) -> (i32)
   %9 = scalar.constant 0 : i32
   %10 = scalar.cmpi eq, %8, %9 : i32
   %array_values_0_marker$11 = scf.if %10 -> (i32) {
@@ -370,12 +370,12 @@ func.def public @projected_call_reference(%data: buffer, %data_byte_offset: offs
   func.return %26 : i32
 }
 
-func.def noinline @forward_projected_cell(%array_values_0_data: buffer, %array_values_0_data_byte_offset: offset, %array_values_0_marker: i32, %array_values_1_data: buffer, %array_values_1_data_byte_offset: offset, %array_values_1_marker: i32, %array_values_2_data: buffer, %array_values_2_data_byte_offset: offset, %array_values_2_marker: i32, %index: i32) -> (i32) {
-  %38 = func.call pure @ProjectedArray__operator_subscript_value(%array_values_0_data, %array_values_0_data_byte_offset, %array_values_0_marker, %array_values_1_data, %array_values_1_data_byte_offset, %array_values_1_marker, %array_values_2_data, %array_values_2_data_byte_offset, %array_values_2_marker, %index) : (buffer, offset, i32, buffer, offset, i32, buffer, offset, i32, i32) -> (i32)
+func.def noinline @forward_projected_cell(%array_values_0_data: buffer, %array_values_0_data_byte_offset: index, %array_values_0_marker: i32, %array_values_1_data: buffer, %array_values_1_data_byte_offset: index, %array_values_1_marker: i32, %array_values_2_data: buffer, %array_values_2_data_byte_offset: index, %array_values_2_marker: i32, %index: i32) -> (i32) {
+  %38 = func.call pure @ProjectedArray__operator_subscript_value(%array_values_0_data, %array_values_0_data_byte_offset, %array_values_0_marker, %array_values_1_data, %array_values_1_data_byte_offset, %array_values_1_marker, %array_values_2_data, %array_values_2_data_byte_offset, %array_values_2_marker, %index) : (buffer, index, i32, buffer, index, i32, buffer, index, i32, i32) -> (i32)
   func.return %38 : i32
 }
 
-func.def noinline @ProjectedArray__operator_subscript_value(%this_values_0_data: buffer, %this_values_0_data_byte_offset: offset, %this_values_0_marker: i32, %this_values_1_data: buffer, %this_values_1_data_byte_offset: offset, %this_values_1_marker: i32, %this_values_2_data: buffer, %this_values_2_data_byte_offset: offset, %this_values_2_marker: i32, %index: i32) -> (i32) {
+func.def noinline @ProjectedArray__operator_subscript_value(%this_values_0_data: buffer, %this_values_0_data_byte_offset: index, %this_values_0_marker: i32, %this_values_1_data: buffer, %this_values_1_data_byte_offset: index, %this_values_1_marker: i32, %this_values_2_data: buffer, %this_values_2_data_byte_offset: index, %this_values_2_marker: i32, %index: i32) -> (i32) {
   func.return %index : i32
 }
 
@@ -399,17 +399,17 @@ unsigned mixed_storage_reference_call(StoredPair* pair, bool stored,
 }
 
 // ----
-func.def public @mixed_storage_reference_call(%pair: buffer, %pair_byte_offset: offset, %stored: i1, %value$3: i32, %next: i32) -> (i32) {
+func.def public @mixed_storage_reference_call(%pair: buffer, %pair_byte_offset: index, %stored: i1, %value$3: i32, %next: i32) -> (i32) {
   %6 = index.constant 4 : offset
   %value_storage = buffer.alloca<private> align(4) %6 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
+  %value_storage_byte_offset = index.constant 0 : index
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
   view.store<type_disjoint> %value$3, %value_view[0] : i32, view<1xi32>
-  %10, %11 = func.call pure @mixed_storage_reference(%stored, %pair, %pair_byte_offset, %value_storage, %value_storage_byte_offset) : (i1, buffer, offset, buffer, offset) -> (buffer, offset)
+  %10, %11 = func.call pure @mixed_storage_reference(%stored, %pair, %pair_byte_offset, %value_storage, %value_storage_byte_offset) : (i1, buffer, index, buffer, index) -> (buffer, index)
   %12 = buffer.view %10[%11] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %next, %12[0] : i32, view<1xi32>
-  %13 = index.constant 4 : offset
-  %14 = index.add %pair_byte_offset, %13 : offset
+  %13 = index.constant 4 : index
+  %14 = index.add %pair_byte_offset, %13 : index
   %15 = buffer.view %pair[%14] : buffer -> view<1xi32>
   %second = view.load<root_in_bounds|type_disjoint> %15[0] : view<1xi32> -> i32
   %value$17 = view.load<type_disjoint> %value_view[0] : view<1xi32> -> i32
@@ -417,13 +417,13 @@ func.def public @mixed_storage_reference_call(%pair: buffer, %pair_byte_offset: 
   func.return %18 : i32
 }
 
-func.def noinline @mixed_storage_reference(%stored: i1, %pair: buffer, %pair_byte_offset: offset, %value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
-  %26, %27 = scf.if %stored -> (buffer, offset) {
-    %28 = index.constant 4 : offset
-    %29 = index.add %pair_byte_offset, %28 : offset
-    scf.yield %pair, %29 : buffer, offset
+func.def noinline @mixed_storage_reference(%stored: i1, %pair: buffer, %pair_byte_offset: index, %value: buffer, %value_byte_offset: index) -> (buffer, index) {
+  %26, %27 = scf.if %stored -> (buffer, index) {
+    %28 = index.constant 4 : index
+    %29 = index.add %pair_byte_offset, %28 : index
+    scf.yield %pair, %29 : buffer, index
   } else {
-    scf.yield %value, %value_byte_offset : buffer, offset
+    scf.yield %value, %value_byte_offset : buffer, index
   }
-  func.return %26, %27 : buffer, offset
+  func.return %26, %27 : buffer, index
 }

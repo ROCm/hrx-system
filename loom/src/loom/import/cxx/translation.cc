@@ -3419,13 +3419,10 @@ class Translator final : private Initialization::Evaluation {
     auto* results = loom_op_results(op);
     bind_values(written, results + result_count);
     if (addressable) {
-      return {ObjectLvalue{
-          expression->type,
-          StorageProjection{
-              {results[0], results[1]},
-              std::min(storage[0]->alignment, storage[1]->alignment),
-              storage[0]->pointer_width_constrained &&
-                  storage[1]->pointer_width_constrained}}};
+      return {ObjectLvalue{expression->type,
+                           StorageProjection{{results[0], results[1]},
+                                             std::min(storage[0]->alignment,
+                                                      storage[1]->alignment)}}};
     }
     std::optional<loom_value_id_t> coordinate;
     if (has_lane) {
@@ -4555,7 +4552,7 @@ class Translator final : private Initialization::Evaluation {
                "configuration pointer element type");
         }
         workloads.push_back(value.ssa());
-        auto byte_offset = scalars_.integer(0, LOOM_SCALAR_TYPE_OFFSET,
+        auto byte_offset = scalars_.integer(0, LOOM_SCALAR_TYPE_INDEX,
                                             locations_.get(argument->value));
         workloads.push_back(name(
             byte_offset,

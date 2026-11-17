@@ -25,53 +25,53 @@ using Packet = unsigned __attribute__((ext_vector_type(4)));
 low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @sum_packets() asm {
   %input = resource<hal_binding> {extent = 64, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %314 = s_mov_b32 0
-  %315 = s_load_dword %input, %314
-  %317 = s_load_dword %input, %314 {offset = 4}
-  %319 = s_load_dword %input, %314 {offset = 8}
-  %321 = s_load_dword %input, %314 {offset = 12}
-  %323 = s_load_dword %input, %314 {offset = 16}
-  %325 = s_load_dword %input, %314 {offset = 20}
-  %327 = s_load_dword %input, %314 {offset = 24}
-  %329 = s_load_dword %input, %314 {offset = 28}
-  %331 = s_load_dword %input, %314 {offset = 32}
-  %333 = s_load_dword %input, %314 {offset = 36}
-  %335 = s_load_dword %input, %314 {offset = 40}
-  %337 = s_load_dword %input, %314 {offset = 44}
-  %339 = s_load_dword %input, %314 {offset = 48}
-  %341 = s_load_dword %input, %314 {offset = 52}
-  %343 = s_load_dword %input, %314 {offset = 56}
-  %345 = s_load_dword %input, %314 {offset = 60}
-  %346 = v_mov_b32_copy %315
-  %347 = v_mov_b32_copy %317
-  %348 = v_mov_b32_copy %319
-  %349 = v_mov_b32_copy %321
-  %351 = v_mov_b32_copy %323
-  %352 = v_mov_b32_copy %325
-  %353 = v_mov_b32_copy %327
-  %354 = v_mov_b32_copy %329
-  %358 = v_add_u32 %346, %351
-  %361 = v_add_u32 %347, %352
-  %364 = v_add_u32 %348, %353
-  %367 = v_add_u32 %349, %354
-  %369 = v_mov_b32_copy %331
-  %370 = v_mov_b32_copy %333
-  %371 = v_mov_b32_copy %335
-  %372 = v_mov_b32_copy %337
-  %376 = v_add_u32 %358, %369
-  %379 = v_add_u32 %361, %370
-  %382 = v_add_u32 %364, %371
-  %385 = v_add_u32 %367, %372
-  %387 = v_mov_b32_copy %339
-  %388 = v_mov_b32_copy %341
-  %389 = v_mov_b32_copy %343
-  %390 = v_mov_b32_copy %345
-  %394 = v_add_u32 %376, %387
-  %397 = v_add_u32 %379, %388
-  %400 = v_add_u32 %382, %389
-  %403 = v_add_u32 %385, %390
-  %sum_3 = concat(%394, %397, %400, %403) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %405 = v_mov_b32 0
-  global_store_b128_saddr %405, %sum_3, %output
+  %251 = s_mov_b32 0
+  %252 = s_load_dword %input, %251
+  %254 = s_load_dword %input, %251 {offset = 4}
+  %256 = s_load_dword %input, %251 {offset = 8}
+  %258 = s_load_dword %input, %251 {offset = 12}
+  %260 = s_load_dword %input, %251 {offset = 16}
+  %262 = s_load_dword %input, %251 {offset = 20}
+  %264 = s_load_dword %input, %251 {offset = 24}
+  %266 = s_load_dword %input, %251 {offset = 28}
+  %268 = s_load_dword %input, %251 {offset = 32}
+  %270 = s_load_dword %input, %251 {offset = 36}
+  %272 = s_load_dword %input, %251 {offset = 40}
+  %274 = s_load_dword %input, %251 {offset = 44}
+  %276 = s_load_dword %input, %251 {offset = 48}
+  %278 = s_load_dword %input, %251 {offset = 52}
+  %280 = s_load_dword %input, %251 {offset = 56}
+  %282 = s_load_dword %input, %251 {offset = 60}
+  %283 = v_mov_b32_copy %252
+  %284 = v_mov_b32_copy %254
+  %285 = v_mov_b32_copy %256
+  %286 = v_mov_b32_copy %258
+  %288 = v_mov_b32_copy %260
+  %289 = v_mov_b32_copy %262
+  %290 = v_mov_b32_copy %264
+  %291 = v_mov_b32_copy %266
+  %295 = v_add_u32 %283, %288
+  %298 = v_add_u32 %284, %289
+  %301 = v_add_u32 %285, %290
+  %304 = v_add_u32 %286, %291
+  %306 = v_mov_b32_copy %268
+  %307 = v_mov_b32_copy %270
+  %308 = v_mov_b32_copy %272
+  %309 = v_mov_b32_copy %274
+  %313 = v_add_u32 %295, %306
+  %316 = v_add_u32 %298, %307
+  %319 = v_add_u32 %301, %308
+  %322 = v_add_u32 %304, %309
+  %324 = v_mov_b32_copy %276
+  %325 = v_mov_b32_copy %278
+  %326 = v_mov_b32_copy %280
+  %327 = v_mov_b32_copy %282
+  %331 = v_add_u32 %313, %324
+  %334 = v_add_u32 %316, %325
+  %337 = v_add_u32 %319, %326
+  %340 = v_add_u32 %322, %327
+  %sum_3 = concat(%331, %334, %337, %340) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %342 = v_mov_b32 0
+  global_store_b128_saddr %342, %sum_3, %output
   return
 }

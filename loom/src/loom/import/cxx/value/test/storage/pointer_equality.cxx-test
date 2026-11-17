@@ -13,61 +13,51 @@ bool same_base(const int* data, unsigned left, unsigned right) {
 bool one_past(const int* begin, const int* end) { return begin + 3 == end; }
 
 // ----
-func.def public @equal(%left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (i1) {
+func.def public @equal(%left: buffer, %left_byte_offset: index, %right: buffer, %right_byte_offset: index) -> (i1) {
   %5 = buffer.compare.address eq, %left[%left_byte_offset], %right[%right_byte_offset]
   func.return %5 : i1
 }
 
-func.def public @unequal(%left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (i1) {
+func.def public @unequal(%left: buffer, %left_byte_offset: index, %right: buffer, %right_byte_offset: index) -> (i1) {
   %11 = buffer.compare.address ne, %left[%left_byte_offset], %right[%right_byte_offset]
   func.return %11 : i1
 }
 
-func.def public @qualification(%left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset) -> (i1) {
+func.def public @qualification(%left: buffer, %left_byte_offset: index, %right: buffer, %right_byte_offset: index) -> (i1) {
   %17 = buffer.compare.address eq, %left[%left_byte_offset], %right[%right_byte_offset]
   func.return %17 : i1
 }
 
-func.def public @selected(%left: buffer, %left_byte_offset: offset, %right: buffer, %right_byte_offset: offset, %choose: i1) -> (i1) {
-  %24, %25 = scf.if %choose -> (buffer, offset) {
-    %69 = scalar.constant 4 : i64
-    %30 = index.cast %left_byte_offset : offset to i64
-    %31 = scalar.addi %30, %69 : i64
-    %32 = scalar.assume %31 [range(%31, 0, 9223372036854775807)] : i64
-    %33 = index.cast %32 : i64 to offset
-    scf.yield %left, %33 : buffer, offset
+func.def public @selected(%left: buffer, %left_byte_offset: index, %right: buffer, %right_byte_offset: index, %choose: i1) -> (i1) {
+  %24, %25 = scf.if %choose -> (buffer, index) {
+    %59 = index.constant 4 : index
+    %30 = index.add %left_byte_offset, %59 : index
+    scf.yield %left, %30 : buffer, index
   } else {
-    scf.yield %right, %right_byte_offset : buffer, offset
+    scf.yield %right, %right_byte_offset : buffer, index
   }
-  %34 = buffer.compare.address eq, %24[%25], %right[%right_byte_offset]
-  func.return %34 : i1
+  %31 = buffer.compare.address eq, %24[%25], %right[%right_byte_offset]
+  func.return %31 : i1
 }
 
-func.def public @same_base(%data: buffer, %data_byte_offset: offset, %left: i32, %right: i32) -> (i1) {
-  %40 = scalar.extui %left : i32 to i64
-  %73 = scalar.constant 2 : i64
-  %74 = scalar.shli %40, %73 : i64
-  %43 = index.cast %data_byte_offset : offset to i64
-  %44 = scalar.addi %43, %74 : i64
-  %45 = scalar.assume %44 [range(%44, 0, 9223372036854775807)] : i64
-  %46 = index.cast %45 : i64 to offset
-  %47 = scalar.extui %right : i32 to i64
-  %72 = scalar.shli %47, %73 : i64
-  %51 = scalar.addi %43, %72 : i64
-  %52 = scalar.assume %51 [range(%51, 0, 9223372036854775807)] : i64
-  %53 = index.cast %52 : i64 to offset
-  %70 = index.cmp eq, %46, %53 : offset
-  func.return %70 : i1
+func.def public @same_base(%data: buffer, %data_byte_offset: index, %left: i32, %right: i32) -> (i1) {
+  %37 = scalar.extui %left : i32 to i64
+  %38 = index.cast %37 : i64 to index
+  %39 = index.constant 4 : index
+  %62 = index.madd %38, %39, %data_byte_offset : index
+  %42 = scalar.extui %right : i32 to i64
+  %43 = index.cast %42 : i64 to index
+  %61 = index.madd %43, %39, %data_byte_offset : index
+  %60 = index.cmp eq, %62, %61 : index
+  func.return %60 : i1
 }
 
-func.def public @one_past(%begin: buffer, %begin_byte_offset: offset, %end: buffer, %end_byte_offset: offset) -> (i1) {
-  %75 = scalar.constant 12 : i64
-  %64 = index.cast %begin_byte_offset : offset to i64
-  %65 = scalar.addi %64, %75 : i64
-  %66 = scalar.assume %65 [range(%65, 0, 9223372036854775807)] : i64
-  %67 = index.cast %66 : i64 to offset
-  %68 = buffer.compare.address eq, %begin[%67], %end[%end_byte_offset]
-  func.return %68 : i1
+func.def public @one_past(%begin: buffer, %begin_byte_offset: index, %end: buffer, %end_byte_offset: index) -> (i1) {
+  %64 = index.constant 3 : index
+  %55 = index.constant 4 : index
+  %63 = index.madd %55, %64, %begin_byte_offset : index
+  %58 = buffer.compare.address eq, %begin[%63], %end[%end_byte_offset]
+  func.return %58 : i1
 }
 
 // ====
@@ -94,36 +84,32 @@ kernel.def @k() {
 } launch(%out: buffer, %a: i64, %b: i64, %c: i64) {
   %11 = index.constant 24 : offset
   %values_storage = buffer.alloca<private> align(8) %11 : buffer
-  %values_storage_byte_offset = index.constant 0 : offset
+  %values_storage_byte_offset = index.constant 0 : index
   %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<3xi64>
-  %15 = index.constant 0 : index
-  view.store<type_disjoint> %a, %values_view[%15] : i64, view<3xi64>
+  view.store<type_disjoint> %a, %values_view[%values_storage_byte_offset] : i64, view<3xi64>
   %16 = index.constant 1 : index
   view.store<type_disjoint> %b, %values_view[%16] : i64, view<3xi64>
   %17 = index.constant 2 : index
   view.store<type_disjoint> %c, %values_view[%17] : i64, view<3xi64>
-  %p_byte_offset$83 = index.constant 8 : offset
-  %best, %best_byte_offset, %p, %p_byte_offset$64 = scf.while(%best = %values_storage : buffer, %best_byte_offset = %values_storage_byte_offset : offset, %p = %values_storage : buffer, %p_byte_offset = %p_byte_offset$83 : offset) -> (buffer, offset, buffer, offset) {
-    %65 = buffer.compare.address ne, %p[%p_byte_offset], %values_storage[%11]
-    scf.condition %65, %best, %best_byte_offset, %p, %p_byte_offset : i1, buffer, offset, buffer, offset
-  } do(%best$57: buffer, %best_byte_offset$58: offset, %p: buffer, %p_byte_offset$60: offset) {
-    %66 = buffer.view %best$57[%best_byte_offset$58] : buffer -> view<1xi64>
-    %67 = view.load<root_in_bounds|type_disjoint> %66[0] : view<1xi64> -> i64
-    %68 = buffer.view %p[%p_byte_offset$60] : buffer -> view<1xi64>
-    %69 = view.load<root_in_bounds|type_disjoint> %68[0] : view<1xi64> -> i64
-    %70 = scalar.cmpi slt, %67, %69 : i64
-    %best$85 = scf.select %70, %p, %best$57 : buffer
-    %best_byte_offset$86 = scf.select %70, %p_byte_offset$60, %best_byte_offset$58 : offset
-    %82 = scalar.constant 8 : i64
-    %77 = index.cast %p_byte_offset$60 : offset to i64
-    %78 = scalar.addi %77, %82 : i64
-    %79 = scalar.assume %78 [range(%78, 0, 9223372036854775807)] : i64
-    %p_byte_offset$80 = index.cast %79 : i64 to offset
-    scf.yield %best$85, %best_byte_offset$86, %p, %p_byte_offset$80 : buffer, offset, buffer, offset
+  %72 = index.constant 24 : index
+  %p_byte_offset$71 = index.constant 8 : index
+  %best, %best_byte_offset, %p, %p_byte_offset$55 = scf.while(%best = %values_storage : buffer, %best_byte_offset = %values_storage_byte_offset : index, %p = %values_storage : buffer, %p_byte_offset = %p_byte_offset$71 : index) -> (buffer, index, buffer, index) {
+    %56 = buffer.compare.address ne, %p[%p_byte_offset], %values_storage[%72]
+    scf.condition %56, %best, %best_byte_offset, %p, %p_byte_offset : i1, buffer, index, buffer, index
+  } do(%best$48: buffer, %best_byte_offset$49: index, %p: buffer, %p_byte_offset$51: index) {
+    %57 = buffer.view %best$48[%best_byte_offset$49] : buffer -> view<1xi64>
+    %58 = view.load<root_in_bounds|type_disjoint> %57[0] : view<1xi64> -> i64
+    %59 = buffer.view %p[%p_byte_offset$51] : buffer -> view<1xi64>
+    %60 = view.load<root_in_bounds|type_disjoint> %59[0] : view<1xi64> -> i64
+    %61 = scalar.cmpi slt, %58, %60 : i64
+    %best$73 = scf.select %61, %p, %best$48 : buffer
+    %best_byte_offset$74 = scf.select %61, %p_byte_offset$51, %best_byte_offset$49 : index
+    %p_byte_offset$68 = index.add %p_byte_offset$51, %p_byte_offset$71 : index
+    scf.yield %best$73, %best_byte_offset$74, %p, %p_byte_offset$68 : buffer, index, buffer, index
   }
-  %28 = buffer.view %best[%best_byte_offset] : buffer -> view<1xi64>
-  %29 = view.load<root_in_bounds|type_disjoint> %28[0] : view<1xi64> -> i64
-  %38 = buffer.view %out[%values_storage_byte_offset] : buffer -> view<1xi64>
-  view.store<root_in_bounds|type_disjoint> %29, %38[0] : i64, view<1xi64>
+  %25 = buffer.view %best[%best_byte_offset] : buffer -> view<1xi64>
+  %26 = view.load<root_in_bounds|type_disjoint> %25[0] : view<1xi64> -> i64
+  %32 = buffer.view %out[%values_storage_byte_offset] : buffer -> view<1xi64>
+  view.store<root_in_bounds|type_disjoint> %26, %32[0] : i64, view<1xi64>
   kernel.return
 }

@@ -202,84 +202,80 @@ kernel.def @record_control() {
   %16 = scalar.constant 3 : i32
   %17 = scalar.addi %seed, %16 : i32
   %initial_lanes = vector.from_elements %seed, %13, %15, %17 : vector<4xi32>
-  %initial_cursor_byte_offset = index.constant 12 : offset
+  %initial_cursor_byte_offset = index.constant 12 : index
   %initial_valid = scalar.constant 1 : i1
-  %189 = index.constant 0 : offset
-  %156 = index.cast %count : i32 to offset
-  %157 = index.constant 1 : offset
-  %copy_lanes, %copy_cursor_byte_offset, %copy_valid = scf.for %index = [%189 to %156 step %157](%copy_lanes$196 = %initial_lanes : vector<4xi32>, %copy_cursor_byte_offset$197 = %initial_cursor_byte_offset : offset, %copy_valid$198 = %initial_valid : i1) -> (vector<4xi32>, offset, i1) {
-    %188 = scalar.constant 4 : i64
-    %172 = index.cast %copy_cursor_byte_offset$197 : offset to i64
-    %173 = scalar.addi %172, %188 : i64
-    %174 = scalar.assume %173 [range(%173, 0, 9223372036854775807)] : i64
-    %copy_cursor_byte_offset$175 = index.cast %174 : i64 to offset
-    %176 = vector.constanti [1, 2, 3, 4] : vector<4xi32>
-    %copy_lanes$177 = vector.addi %copy_lanes$196, %176 : vector<4xi32>
-    %copy_valid$179 = scalar.xori %copy_valid$198, %initial_valid : i1
-    scf.yield %copy_lanes$177, %copy_cursor_byte_offset$175, %copy_valid$179 : vector<4xi32>, offset, i1
+  %167 = index.constant 0 : offset
+  %137 = index.cast %count : i32 to offset
+  %138 = index.constant 1 : offset
+  %copy_lanes, %copy_cursor_byte_offset, %copy_valid = scf.for %index = [%167 to %137 step %138](%copy_lanes$174 = %initial_lanes : vector<4xi32>, %copy_cursor_byte_offset$175 = %initial_cursor_byte_offset : index, %copy_valid$176 = %initial_valid : i1) -> (vector<4xi32>, index, i1) {
+    %166 = index.constant 4 : index
+    %copy_cursor_byte_offset$153 = index.add %copy_cursor_byte_offset$175, %166 : index
+    %154 = vector.constanti [1, 2, 3, 4] : vector<4xi32>
+    %copy_lanes$155 = vector.addi %copy_lanes$174, %154 : vector<4xi32>
+    %copy_valid$157 = scalar.xori %copy_valid$176, %initial_valid : i1
+    scf.yield %copy_lanes$155, %copy_cursor_byte_offset$153, %copy_valid$157 : vector<4xi32>, index, i1
   }
-  %180 = scalar.constant 0 : i32
-  %181 = scalar.cmpi ne, %count, %180 : i32
-  %result_lanes = scf.select %181, %copy_lanes, %initial_lanes : vector<4xi32>
-  %result_cursor_byte_offset = scf.select %181, %copy_cursor_byte_offset, %initial_cursor_byte_offset : offset
-  %result_valid = scf.select %181, %copy_valid, %initial_valid : i1
-  %40 = buffer.view %output[%189] : buffer -> view<4xi32>
-  vector.store<root_in_bounds> %result_lanes, %40[0] : vector<4xi32>, view<4xi32>
-  %41 = buffer.view %input[%result_cursor_byte_offset] : buffer -> view<1xi32>
-  %42 = view.load<root_in_bounds|type_disjoint> %41[0] : view<1xi32> -> i32
-  %43 = scalar.extui %result_valid : i1 to i32
-  %44 = buffer.view %input[%initial_cursor_byte_offset] : buffer -> view<1xi32>
-  %45 = view.load<root_in_bounds|type_disjoint> %44[0] : view<1xi32> -> i32
-  %46 = vector.from_elements %42, %43, %45, %seed : vector<4xi32>
-  %186 = index.constant 16 : offset
-  %55 = buffer.view %output[%186] : buffer -> view<4xi32>
-  vector.store<root_in_bounds> %46, %55[0] : vector<4xi32>, view<4xi32>
+  %158 = scalar.constant 0 : i32
+  %159 = scalar.cmpi ne, %count, %158 : i32
+  %result_lanes = scf.select %159, %copy_lanes, %initial_lanes : vector<4xi32>
+  %result_cursor_byte_offset = scf.select %159, %copy_cursor_byte_offset, %initial_cursor_byte_offset : index
+  %result_valid = scf.select %159, %copy_valid, %initial_valid : i1
+  %165 = index.constant 0 : index
+  %35 = buffer.view %output[%165] : buffer -> view<4xi32>
+  vector.store<root_in_bounds> %result_lanes, %35[0] : vector<4xi32>, view<4xi32>
+  %36 = buffer.view %input[%result_cursor_byte_offset] : buffer -> view<1xi32>
+  %37 = view.load<root_in_bounds|type_disjoint> %36[0] : view<1xi32> -> i32
+  %38 = scalar.extui %result_valid : i1 to i32
+  %39 = buffer.view %input[%initial_cursor_byte_offset] : buffer -> view<1xi32>
+  %40 = view.load<root_in_bounds|type_disjoint> %39[0] : view<1xi32> -> i32
+  %41 = vector.from_elements %37, %38, %40, %seed : vector<4xi32>
+  %164 = index.constant 16 : index
+  %47 = buffer.view %output[%164] : buffer -> view<4xi32>
+  vector.store<root_in_bounds> %41, %47[0] : vector<4xi32>, view<4xi32>
   kernel.return
 }
 
 kernel.def @leaf_control() {
-  %60 = index.constant 1 : index
-  kernel.launch.config workgroups(%60, %60, %60) workgroup_size(%60, %60, %60) : index
+  %52 = index.constant 1 : index
+  kernel.launch.config workgroups(%52, %52, %52) workgroup_size(%52, %52, %52) : index
 } launch(%input: buffer, %output: buffer, %seed: i32, %count: i32) {
-  %68 = scalar.constant 1 : i32
-  %69 = scalar.addi %seed, %68 : i32
-  %70 = scalar.constant 2 : i32
-  %71 = scalar.addi %seed, %70 : i32
-  %72 = scalar.constant 3 : i32
-  %73 = scalar.addi %seed, %72 : i32
-  %original = vector.from_elements %seed, %69, %71, %73 : vector<4xi32>
-  %start_byte_offset = index.constant 12 : offset
-  %valid$83 = scalar.constant 1 : i1
-  %205 = index.constant 0 : offset
-  %86 = index.cast %count : i32 to offset
-  %87 = index.constant 1 : offset
-  %cursor_byte_offset, %lanes, %valid$217 = scf.for %index = [%205 to %86 step %87](%cursor_byte_offset$212 = %start_byte_offset : offset, %lanes$213 = %original : vector<4xi32>, %valid$214 = %valid$83 : i1) -> (offset, vector<4xi32>, i1) {
-    %204 = scalar.constant 4 : i64
-    %102 = index.cast %cursor_byte_offset$212 : offset to i64
-    %103 = scalar.addi %102, %204 : i64
-    %104 = scalar.assume %103 [range(%103, 0, 9223372036854775807)] : i64
-    %cursor_byte_offset$105 = index.cast %104 : i64 to offset
-    %106 = vector.constanti [1, 2, 3, 4] : vector<4xi32>
-    %lanes$107 = vector.addi %lanes$213, %106 : vector<4xi32>
-    %valid$109 = scalar.xori %valid$214, %valid$83 : i1
-    scf.yield %cursor_byte_offset$105, %lanes$107, %valid$109 : offset, vector<4xi32>, i1
+  %60 = scalar.constant 1 : i32
+  %61 = scalar.addi %seed, %60 : i32
+  %62 = scalar.constant 2 : i32
+  %63 = scalar.addi %seed, %62 : i32
+  %64 = scalar.constant 3 : i32
+  %65 = scalar.addi %seed, %64 : i32
+  %original = vector.from_elements %seed, %61, %63, %65 : vector<4xi32>
+  %start_byte_offset = index.constant 12 : index
+  %valid$73 = scalar.constant 1 : i1
+  %183 = index.constant 0 : offset
+  %76 = index.cast %count : i32 to offset
+  %77 = index.constant 1 : offset
+  %cursor_byte_offset, %lanes, %valid$195 = scf.for %index = [%183 to %76 step %77](%cursor_byte_offset$190 = %start_byte_offset : index, %lanes$191 = %original : vector<4xi32>, %valid$192 = %valid$73 : i1) -> (index, vector<4xi32>, i1) {
+    %182 = index.constant 4 : index
+    %cursor_byte_offset$92 = index.add %cursor_byte_offset$190, %182 : index
+    %93 = vector.constanti [1, 2, 3, 4] : vector<4xi32>
+    %lanes$94 = vector.addi %lanes$191, %93 : vector<4xi32>
+    %valid$96 = scalar.xori %valid$192, %valid$73 : i1
+    scf.yield %cursor_byte_offset$92, %lanes$94, %valid$96 : index, vector<4xi32>, i1
   }
-  %110 = scalar.constant 0 : i32
-  %111 = scalar.cmpi ne, %count, %110 : i32
-  %selected_lanes = scf.select %111, %lanes, %original : vector<4xi32>
-  %selected_cursor_byte_offset = scf.select %111, %cursor_byte_offset, %start_byte_offset : offset
-  %selected_valid = scf.select %111, %valid$217, %valid$83 : i1
-  %129 = buffer.view %output[%205] : buffer -> view<4xi32>
-  vector.store<root_in_bounds> %selected_lanes, %129[0] : vector<4xi32>, view<4xi32>
-  %130 = buffer.view %input[%selected_cursor_byte_offset] : buffer -> view<1xi32>
-  %131 = view.load<root_in_bounds|type_disjoint> %130[0] : view<1xi32> -> i32
-  %132 = scalar.extui %selected_valid : i1 to i32
-  %133 = buffer.view %input[%start_byte_offset] : buffer -> view<1xi32>
-  %134 = view.load<root_in_bounds|type_disjoint> %133[0] : view<1xi32> -> i32
-  %135 = vector.from_elements %131, %132, %134, %seed : vector<4xi32>
-  %202 = index.constant 16 : offset
-  %144 = buffer.view %output[%202] : buffer -> view<4xi32>
-  vector.store<root_in_bounds> %135, %144[0] : vector<4xi32>, view<4xi32>
+  %97 = scalar.constant 0 : i32
+  %98 = scalar.cmpi ne, %count, %97 : i32
+  %selected_lanes = scf.select %98, %lanes, %original : vector<4xi32>
+  %selected_cursor_byte_offset = scf.select %98, %cursor_byte_offset, %start_byte_offset : index
+  %selected_valid = scf.select %98, %valid$195, %valid$73 : i1
+  %181 = index.constant 0 : index
+  %113 = buffer.view %output[%181] : buffer -> view<4xi32>
+  vector.store<root_in_bounds> %selected_lanes, %113[0] : vector<4xi32>, view<4xi32>
+  %114 = buffer.view %input[%selected_cursor_byte_offset] : buffer -> view<1xi32>
+  %115 = view.load<root_in_bounds|type_disjoint> %114[0] : view<1xi32> -> i32
+  %116 = scalar.extui %selected_valid : i1 to i32
+  %117 = buffer.view %input[%start_byte_offset] : buffer -> view<1xi32>
+  %118 = view.load<root_in_bounds|type_disjoint> %117[0] : view<1xi32> -> i32
+  %119 = vector.from_elements %115, %116, %118, %seed : vector<4xi32>
+  %180 = index.constant 16 : index
+  %125 = buffer.view %output[%180] : buffer -> view<4xi32>
+  vector.store<root_in_bounds> %119, %125[0] : vector<4xi32>, view<4xi32>
   kernel.return
 }
 
@@ -395,151 +391,148 @@ kernel.def @record_values() {
   %17 = scalar.constant 3 : i32
   %18 = scalar.addi %seed, %17 : i32
   %state_lanes = vector.from_elements %seed, %14, %16, %18 : vector<4xi32>
-  %state_cursor_byte_offset = index.constant 12 : offset
+  %state_cursor_byte_offset = index.constant 12 : index
   %state_valid = scalar.constant 1 : i1
-  %29 = scalar.constant 7 : i32
-  %original_pair_second = scalar.addi %seed, %29 : i32
-  %copy_state_lanes$31, %copy_state_cursor, %copy_state_cursor_byte_offset, %copy_state_valid = func.call pure @advance_state(%state_lanes, %input, %state_cursor_byte_offset, %state_valid, %count) : (vector<4xi32>, buffer, offset, i1, i32) -> (vector<4xi32>, buffer, offset, i1)
-  %copy_pair_first$35, %copy_pair_second$36 = func.call pure @update_pair(%seed, %original_pair_second, %count) : (i32, i32, i32) -> (i32, i32)
-  %38 = scalar.andi %choose, %13 : i32
-  %39 = scalar.constant 0 : i32
-  %40 = scalar.cmpi ne, %38, %39 : i32
-  %copy_pair_first$48 = scalar.addi %copy_pair_first$35, %13 : i32
-  %49 = vector.constanti [5, 6, 7, 8] : vector<4xi32>
-  %copy_state_lanes$50 = vector.addi %copy_state_lanes$31, %49 : vector<4xi32>
-  %copy_pair_second$52 = scalar.muli %copy_pair_second$36, %17 : i32
-  %copy_pair_first$380 = scf.select %40, %copy_pair_first$48, %copy_pair_first$35 : i32
-  %copy_pair_second$381 = scf.select %40, %copy_pair_second$36, %copy_pair_second$52 : i32
-  %copy_state_lanes$382 = scf.select %40, %copy_state_lanes$50, %copy_state_lanes$31 : vector<4xi32>
-  %54 = scalar.cmpi ne, %choose, %39 : i32
-  %selected_pair_first = scf.select %54, %copy_pair_first$380, %seed : i32
-  %selected_pair_second = scf.select %54, %copy_pair_second$381, %original_pair_second : i32
-  %selected_state_lanes = scf.select %54, %copy_state_lanes$382, %state_lanes : vector<4xi32>
-  %selected_state_cursor = scf.select %54, %copy_state_cursor, %input : buffer
-  %selected_state_cursor_byte_offset = scf.select %54, %copy_state_cursor_byte_offset, %state_cursor_byte_offset : offset
-  %365 = index.constant 0 : offset
-  %69 = buffer.view %output[%365] : buffer -> view<4xi32>
-  vector.store<root_in_bounds> %copy_state_lanes$382, %69[0] : vector<4xi32>, view<4xi32>
-  %364 = index.constant 16 : offset
-  %78 = buffer.view %output[%364] : buffer -> view<4xi32>
-  vector.store<root_in_bounds> %state_lanes, %78[0] : vector<4xi32>, view<4xi32>
-  %363 = index.constant 32 : offset
-  %87 = buffer.view %output[%363] : buffer -> view<4xi32>
-  vector.store<root_in_bounds> %selected_state_lanes, %87[0] : vector<4xi32>, view<4xi32>
-  %88 = buffer.view %copy_state_cursor[%copy_state_cursor_byte_offset] : buffer -> view<1xi32>
-  %89 = view.load<root_in_bounds|type_disjoint> %88[0] : view<1xi32> -> i32
-  %362 = index.constant 48 : offset
-  %98 = buffer.view %output[%362] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %89, %98[0] : i32, view<1xi32>
-  %99 = buffer.view %input[%state_cursor_byte_offset] : buffer -> view<1xi32>
-  %100 = view.load<root_in_bounds|type_disjoint> %99[0] : view<1xi32> -> i32
-  %361 = index.constant 52 : offset
-  %109 = buffer.view %output[%361] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %100, %109[0] : i32, view<1xi32>
-  %110 = buffer.view %selected_state_cursor[%selected_state_cursor_byte_offset] : buffer -> view<1xi32>
-  %111 = view.load<root_in_bounds|type_disjoint> %110[0] : view<1xi32> -> i32
-  %360 = index.constant 56 : offset
-  %120 = buffer.view %output[%360] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %111, %120[0] : i32, view<1xi32>
-  %121 = scalar.extui %copy_state_valid : i1 to i32
-  %359 = index.constant 60 : offset
-  %130 = buffer.view %output[%359] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %121, %130[0] : i32, view<1xi32>
-  %357 = index.constant 64 : offset
-  %140 = buffer.view %output[%357] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %13, %140[0] : i32, view<1xi32>
-  %356 = index.constant 68 : offset
-  %149 = buffer.view %output[%356] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %copy_pair_first$380, %149[0] : i32, view<1xi32>
-  %355 = index.constant 72 : offset
-  %158 = buffer.view %output[%355] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %copy_pair_second$381, %158[0] : i32, view<1xi32>
-  %354 = index.constant 76 : offset
-  %167 = buffer.view %output[%354] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %selected_pair_first, %167[0] : i32, view<1xi32>
-  %353 = index.constant 80 : offset
-  %176 = buffer.view %output[%353] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %selected_pair_second, %176[0] : i32, view<1xi32>
-  %177 = func.call @record_pairs(%seed, %count) : (i32, i32) -> (i32)
-  %352 = index.constant 84 : offset
-  %186 = buffer.view %output[%352] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %177, %186[0] : i32, view<1xi32>
-  %187 = func.call @record_defaults(%seed) : (i32) -> (i32)
-  %351 = index.constant 88 : offset
-  %196 = buffer.view %output[%351] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %187, %196[0] : i32, view<1xi32>
-  %197 = func.call @record_sequencing(%seed, %choose) : (i32, i32) -> (i32)
-  %350 = index.constant 92 : offset
-  %206 = buffer.view %output[%350] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %197, %206[0] : i32, view<1xi32>
-  %pointers_first_byte_offset = index.constant 4 : offset
-  %pointers_second_byte_offset = index.constant 28 : offset
-  %231 = buffer.view %input[%pointers_first_byte_offset] : buffer -> view<1xi32>
-  %232 = view.load<root_in_bounds|type_disjoint> %231[0] : view<1xi32> -> i32
-  %346 = index.constant 96 : offset
-  %241 = buffer.view %output[%346] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %232, %241[0] : i32, view<1xi32>
-  %242 = buffer.view %input[%363] : buffer -> view<1xi32>
-  %243 = view.load<root_in_bounds|type_disjoint> %242[0] : view<1xi32> -> i32
-  %345 = index.constant 100 : offset
-  %252 = buffer.view %output[%345] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %243, %252[0] : i32, view<1xi32>
-  %253 = buffer.view %input[%pointers_second_byte_offset] : buffer -> view<1xi32>
-  %254 = view.load<root_in_bounds|type_disjoint> %253[0] : view<1xi32> -> i32
-  %344 = index.constant 104 : offset
-  %263 = buffer.view %output[%344] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %254, %263[0] : i32, view<1xi32>
+  %27 = scalar.constant 7 : i32
+  %original_pair_second = scalar.addi %seed, %27 : i32
+  %copy_state_lanes$29, %copy_state_cursor, %copy_state_cursor_byte_offset, %copy_state_valid = func.call pure @advance_state(%state_lanes, %input, %state_cursor_byte_offset, %state_valid, %count) : (vector<4xi32>, buffer, index, i1, i32) -> (vector<4xi32>, buffer, index, i1)
+  %copy_pair_first$33, %copy_pair_second$34 = func.call pure @update_pair(%seed, %original_pair_second, %count) : (i32, i32, i32) -> (i32, i32)
+  %36 = scalar.andi %choose, %13 : i32
+  %37 = scalar.constant 0 : i32
+  %38 = scalar.cmpi ne, %36, %37 : i32
+  %copy_pair_first$46 = scalar.addi %copy_pair_first$33, %13 : i32
+  %47 = vector.constanti [5, 6, 7, 8] : vector<4xi32>
+  %copy_state_lanes$48 = vector.addi %copy_state_lanes$29, %47 : vector<4xi32>
+  %copy_pair_second$50 = scalar.muli %copy_pair_second$34, %17 : i32
+  %copy_pair_first$314 = scf.select %38, %copy_pair_first$46, %copy_pair_first$33 : i32
+  %copy_pair_second$315 = scf.select %38, %copy_pair_second$34, %copy_pair_second$50 : i32
+  %copy_state_lanes$316 = scf.select %38, %copy_state_lanes$48, %copy_state_lanes$29 : vector<4xi32>
+  %52 = scalar.cmpi ne, %choose, %37 : i32
+  %selected_pair_first = scf.select %52, %copy_pair_first$314, %seed : i32
+  %selected_pair_second = scf.select %52, %copy_pair_second$315, %original_pair_second : i32
+  %selected_state_lanes = scf.select %52, %copy_state_lanes$316, %state_lanes : vector<4xi32>
+  %selected_state_cursor = scf.select %52, %copy_state_cursor, %input : buffer
+  %selected_state_cursor_byte_offset = scf.select %52, %copy_state_cursor_byte_offset, %state_cursor_byte_offset : index
+  %299 = index.constant 0 : index
+  %64 = buffer.view %output[%299] : buffer -> view<4xi32>
+  vector.store<root_in_bounds> %copy_state_lanes$316, %64[0] : vector<4xi32>, view<4xi32>
+  %298 = index.constant 16 : index
+  %70 = buffer.view %output[%298] : buffer -> view<4xi32>
+  vector.store<root_in_bounds> %state_lanes, %70[0] : vector<4xi32>, view<4xi32>
+  %297 = index.constant 32 : index
+  %76 = buffer.view %output[%297] : buffer -> view<4xi32>
+  vector.store<root_in_bounds> %selected_state_lanes, %76[0] : vector<4xi32>, view<4xi32>
+  %77 = buffer.view %copy_state_cursor[%copy_state_cursor_byte_offset] : buffer -> view<1xi32>
+  %78 = view.load<root_in_bounds|type_disjoint> %77[0] : view<1xi32> -> i32
+  %296 = index.constant 48 : index
+  %84 = buffer.view %output[%296] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %78, %84[0] : i32, view<1xi32>
+  %85 = buffer.view %input[%state_cursor_byte_offset] : buffer -> view<1xi32>
+  %86 = view.load<root_in_bounds|type_disjoint> %85[0] : view<1xi32> -> i32
+  %295 = index.constant 52 : index
+  %92 = buffer.view %output[%295] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %86, %92[0] : i32, view<1xi32>
+  %93 = buffer.view %selected_state_cursor[%selected_state_cursor_byte_offset] : buffer -> view<1xi32>
+  %94 = view.load<root_in_bounds|type_disjoint> %93[0] : view<1xi32> -> i32
+  %294 = index.constant 56 : index
+  %100 = buffer.view %output[%294] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %94, %100[0] : i32, view<1xi32>
+  %101 = scalar.extui %copy_state_valid : i1 to i32
+  %293 = index.constant 60 : index
+  %107 = buffer.view %output[%293] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %101, %107[0] : i32, view<1xi32>
+  %291 = index.constant 64 : index
+  %114 = buffer.view %output[%291] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %13, %114[0] : i32, view<1xi32>
+  %290 = index.constant 68 : index
+  %120 = buffer.view %output[%290] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %copy_pair_first$314, %120[0] : i32, view<1xi32>
+  %289 = index.constant 72 : index
+  %126 = buffer.view %output[%289] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %copy_pair_second$315, %126[0] : i32, view<1xi32>
+  %288 = index.constant 76 : index
+  %132 = buffer.view %output[%288] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %selected_pair_first, %132[0] : i32, view<1xi32>
+  %287 = index.constant 80 : index
+  %138 = buffer.view %output[%287] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %selected_pair_second, %138[0] : i32, view<1xi32>
+  %139 = func.call @record_pairs(%seed, %count) : (i32, i32) -> (i32)
+  %286 = index.constant 84 : index
+  %145 = buffer.view %output[%286] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %139, %145[0] : i32, view<1xi32>
+  %146 = func.call @record_defaults(%seed) : (i32) -> (i32)
+  %285 = index.constant 88 : index
+  %152 = buffer.view %output[%285] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %146, %152[0] : i32, view<1xi32>
+  %153 = func.call @record_sequencing(%seed, %choose) : (i32, i32) -> (i32)
+  %284 = index.constant 92 : index
+  %159 = buffer.view %output[%284] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %153, %159[0] : i32, view<1xi32>
+  %pointers_first_byte_offset = index.constant 4 : index
+  %pointers_second_byte_offset = index.constant 28 : index
+  %177 = buffer.view %input[%pointers_first_byte_offset] : buffer -> view<1xi32>
+  %178 = view.load<root_in_bounds|type_disjoint> %177[0] : view<1xi32> -> i32
+  %280 = index.constant 96 : index
+  %184 = buffer.view %output[%280] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %178, %184[0] : i32, view<1xi32>
+  %185 = buffer.view %input[%297] : buffer -> view<1xi32>
+  %186 = view.load<root_in_bounds|type_disjoint> %185[0] : view<1xi32> -> i32
+  %279 = index.constant 100 : index
+  %192 = buffer.view %output[%279] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %186, %192[0] : i32, view<1xi32>
+  %193 = buffer.view %input[%pointers_second_byte_offset] : buffer -> view<1xi32>
+  %194 = view.load<root_in_bounds|type_disjoint> %193[0] : view<1xi32> -> i32
+  %278 = index.constant 104 : index
+  %200 = buffer.view %output[%278] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %194, %200[0] : i32, view<1xi32>
   kernel.return
 }
 
-func.def inline @advance_state(%value_lanes: vector<4xi32>, %value_cursor: buffer, %value_cursor_byte_offset: offset, %value_valid: i1, %count: i32) -> (vector<4xi32>, buffer, offset, i1) {
-  %384 = index.constant 0 : offset
-  %275 = index.cast %count : i32 to offset
-  %276 = index.constant 1 : offset
-  %copy_lanes, %copy_cursor_byte_offset, %copy_valid = scf.for %index = [%384 to %275 step %276](%copy_lanes$390 = %value_lanes : vector<4xi32>, %copy_cursor_byte_offset$391 = %value_cursor_byte_offset : offset, %copy_valid$392 = %value_valid : i1) -> (vector<4xi32>, offset, i1) {
-    %383 = scalar.constant 4 : i64
-    %291 = index.cast %copy_cursor_byte_offset$391 : offset to i64
-    %292 = scalar.addi %291, %383 : i64
-    %293 = scalar.assume %292 [range(%292, 0, 9223372036854775807)] : i64
-    %copy_cursor_byte_offset$294 = index.cast %293 : i64 to offset
-    %295 = vector.constanti [1, 2, 3, 4] : vector<4xi32>
-    %copy_lanes$296 = vector.addi %copy_lanes$390, %295 : vector<4xi32>
-    %297 = scalar.constant 1 : i1
-    %copy_valid$298 = scalar.xori %copy_valid$392, %297 : i1
-    scf.yield %copy_lanes$296, %copy_cursor_byte_offset$294, %copy_valid$298 : vector<4xi32>, offset, i1
+func.def inline @advance_state(%value_lanes: vector<4xi32>, %value_cursor: buffer, %value_cursor_byte_offset: index, %value_valid: i1, %count: i32) -> (vector<4xi32>, buffer, index, i1) {
+  %318 = index.constant 0 : offset
+  %212 = index.cast %count : i32 to offset
+  %213 = index.constant 1 : offset
+  %copy_lanes, %copy_cursor_byte_offset, %copy_valid = scf.for %index = [%318 to %212 step %213](%copy_lanes$324 = %value_lanes : vector<4xi32>, %copy_cursor_byte_offset$325 = %value_cursor_byte_offset : index, %copy_valid$326 = %value_valid : i1) -> (vector<4xi32>, index, i1) {
+    %317 = index.constant 4 : index
+    %copy_cursor_byte_offset$228 = index.add %copy_cursor_byte_offset$325, %317 : index
+    %229 = vector.constanti [1, 2, 3, 4] : vector<4xi32>
+    %copy_lanes$230 = vector.addi %copy_lanes$324, %229 : vector<4xi32>
+    %231 = scalar.constant 1 : i1
+    %copy_valid$232 = scalar.xori %copy_valid$326, %231 : i1
+    scf.yield %copy_lanes$230, %copy_cursor_byte_offset$228, %copy_valid$232 : vector<4xi32>, index, i1
   }
-  %299 = scalar.constant 0 : i32
-  %300 = scalar.cmpi ne, %count, %299 : i32
-  %385 = scf.select %300, %copy_lanes, %value_lanes : vector<4xi32>
-  %387 = scf.select %300, %copy_cursor_byte_offset, %value_cursor_byte_offset : offset
-  %388 = scf.select %300, %copy_valid, %value_valid : i1
-  func.return %385, %value_cursor, %387, %388 : vector<4xi32>, buffer, offset, i1
+  %233 = scalar.constant 0 : i32
+  %234 = scalar.cmpi ne, %count, %233 : i32
+  %319 = scf.select %234, %copy_lanes, %value_lanes : vector<4xi32>
+  %321 = scf.select %234, %copy_cursor_byte_offset, %value_cursor_byte_offset : index
+  %322 = scf.select %234, %copy_valid, %value_valid : i1
+  func.return %319, %value_cursor, %321, %322 : vector<4xi32>, buffer, index, i1
 }
 
 func.def inline @update_pair(%value_first: i32, %value_second: i32, %count: i32) -> (i32, i32) {
-  %396 = index.constant 0 : offset
-  %312 = index.cast %count : i32 to offset
-  %313 = index.constant 1 : offset
-  %copy_first, %copy_second = scf.for %index = [%396 to %312 step %313](%copy_first$315 = %value_first : i32, %copy_second$316 = %value_second : i32) -> (i32, i32) {
-    %319 = index.cast %index : offset to i32
-    %copy_first$320 = scalar.addi %copy_first$315, %319 : i32
-    %321 = scalar.constant 1 : i32
-    %322 = scalar.andi %319, %321 : i32
-    %323 = scalar.constant 0 : i32
-    %324 = scalar.cmpi ne, %322, %323 : i32
-    %copy_second$330 = scalar.addi %copy_second$316, %321 : i32
-    %copy_second$398 = scf.select %324, %copy_second$316, %copy_second$330 : i32
-    scf.yield %copy_first$320, %copy_second$398 : i32, i32
+  %330 = index.constant 0 : offset
+  %246 = index.cast %count : i32 to offset
+  %247 = index.constant 1 : offset
+  %copy_first, %copy_second = scf.for %index = [%330 to %246 step %247](%copy_first$249 = %value_first : i32, %copy_second$250 = %value_second : i32) -> (i32, i32) {
+    %253 = index.cast %index : offset to i32
+    %copy_first$254 = scalar.addi %copy_first$249, %253 : i32
+    %255 = scalar.constant 1 : i32
+    %256 = scalar.andi %253, %255 : i32
+    %257 = scalar.constant 0 : i32
+    %258 = scalar.cmpi ne, %256, %257 : i32
+    %copy_second$264 = scalar.addi %copy_second$250, %255 : i32
+    %copy_second$332 = scf.select %258, %copy_second$250, %copy_second$264 : i32
+    scf.yield %copy_first$254, %copy_second$332 : i32, i32
   }
-  %332 = scalar.constant 0 : i32
-  %333 = scalar.cmpi ne, %count, %332 : i32
-  %399 = scf.select %333, %copy_first, %value_first : i32
-  %400 = scf.select %333, %copy_second, %value_second : i32
-  func.return %399, %400 : i32, i32
+  %266 = scalar.constant 0 : i32
+  %267 = scalar.cmpi ne, %count, %266 : i32
+  %333 = scf.select %267, %copy_first, %value_first : i32
+  %334 = scf.select %267, %copy_second, %value_second : i32
+  func.return %333, %334 : i32, i32
 }
 
-func.decl @record_pairs(%336: i32, %337: i32) -> (i32)
+func.decl @record_pairs(%270: i32, %271: i32) -> (i32)
 
-func.decl @record_defaults(%339: i32) -> (i32)
+func.decl @record_defaults(%273: i32) -> (i32)
 
-func.decl @record_sequencing(%341: i32, %342: i32) -> (i32)
+func.decl @record_sequencing(%275: i32, %276: i32) -> (i32)

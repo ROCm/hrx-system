@@ -45,55 +45,53 @@ kernel.def @typed_view_static_layouts() {
 } launch(%input: buffer, %output: buffer, %input_origin$2: i32) {
   %input_origin$11 = scalar.assume %input_origin$2 [range(%input_origin$2, 0, 15)] : i32
   %12 = scalar.extui %input_origin$11 : i32 to i64
-  %103 = scalar.constant 2 : i64
-  %104 = scalar.shli %12, %103 : i64
-  %17 = scalar.assume %104 [range(%104, 0, 9223372036854775807)] : i64
-  %18 = index.cast %17 : i64 to offset
-  %dense_source_layout, %dense_source = func.call pure @make_view_0(%input, %18) : (buffer, offset) -> (encoding<layout>, view<3x8xf32, %dense_source_layout>)
-  %28, %29, %30 = func.call pure @make_view_1(%input, %18) : (buffer, offset) -> (index, encoding<layout>, view<[%28]x8xf32, %29>)
-  %strided_source_dim0, %strided_source_layout, %strided_source = func.call pure @preserve_view(%28, %29, %30) : (index, encoding<layout>, view<[%28]x8xf32, %29>) -> (index, encoding<layout>, view<[%strided_source_dim0]x8xf32, %strided_source_layout>)
-  %34 = func.call readonly @read_view___loom__type__view___loom__type__shape_3__8___const_float____loom__type__encoding_0__2__(%dense_source_layout, %dense_source) : (encoding<layout>, view<3x8xf32, %dense_source_layout>) -> (f32)
-  %100 = index.constant 0 : offset
-  %43 = buffer.view %output[%100] : buffer -> view<1xf32>
-  view.store<root_in_bounds|type_disjoint> %34, %43[0] : f32, view<1xf32>
-  %44 = func.call readonly @read_view___loom__type__view___loom__type__shape_18446744073709551615__8___const_float____loom__type__encoding_0__2__(%strided_source_dim0, %strided_source_layout, %strided_source) : (index, encoding<layout>, view<[%strided_source_dim0]x8xf32, %strided_source_layout>) -> (f32)
-  %99 = index.constant 4 : offset
-  %53 = buffer.view %output[%99] : buffer -> view<1xf32>
-  view.store<root_in_bounds|type_disjoint> %44, %53[0] : f32, view<1xf32>
+  %13 = index.cast %12 : i64 to index
+  %14 = index.constant 4 : index
+  %15 = index.mul %13, %14 : index
+  %dense_source_layout, %dense_source = func.call pure @make_view_0(%input, %15) : (buffer, index) -> (encoding<layout>, view<3x8xf32, %dense_source_layout>)
+  %24, %25, %26 = func.call pure @make_view_1(%input, %15) : (buffer, index) -> (index, encoding<layout>, view<[%24]x8xf32, %25>)
+  %strided_source_dim0, %strided_source_layout, %strided_source = func.call pure @preserve_view(%24, %25, %26) : (index, encoding<layout>, view<[%24]x8xf32, %25>) -> (index, encoding<layout>, view<[%strided_source_dim0]x8xf32, %strided_source_layout>)
+  %30 = func.call readonly @read_view___loom__type__view___loom__type__shape_3__8___const_float____loom__type__encoding_0__2__(%dense_source_layout, %dense_source) : (encoding<layout>, view<3x8xf32, %dense_source_layout>) -> (f32)
+  %90 = index.constant 0 : index
+  %36 = buffer.view %output[%90] : buffer -> view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %30, %36[0] : f32, view<1xf32>
+  %37 = func.call readonly @read_view___loom__type__view___loom__type__shape_18446744073709551615__8___const_float____loom__type__encoding_0__2__(%strided_source_dim0, %strided_source_layout, %strided_source) : (index, encoding<layout>, view<[%strided_source_dim0]x8xf32, %strided_source_layout>) -> (f32)
+  %43 = buffer.view %output[%14] : buffer -> view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %37, %43[0] : f32, view<1xf32>
   kernel.return
 }
 
-func.def @make_view_0(%input: buffer, %input_byte_offset: offset) -> (%56: encoding<layout>, view<3x8xf32, %56>) {
+func.def @make_view_0(%input: buffer, %input_byte_offset: index) -> (%46: encoding<layout>, view<3x8xf32, %46>) {
   %layout = encoding.layout.dense : encoding<layout>
-  %59 = buffer.view %input[%input_byte_offset] : buffer -> view<3x8xf32, %layout>
-  func.return %layout, %59 : encoding<layout>, view<3x8xf32, %layout>
+  %49 = buffer.view %input[%input_byte_offset] : buffer -> view<3x8xf32, %layout>
+  func.return %layout, %49 : encoding<layout>, view<3x8xf32, %layout>
 }
 
-func.def @preserve_view(%source_dim0: index, %source_layout: encoding<layout>, %source: view<[%source_dim0]x8xf32, %source_layout>) -> (%63: index, %64: encoding<layout>, view<[%63]x8xf32, %64>) {
+func.def @preserve_view(%source_dim0: index, %source_layout: encoding<layout>, %source: view<[%source_dim0]x8xf32, %source_layout>) -> (%53: index, %54: encoding<layout>, view<[%53]x8xf32, %54>) {
   func.return %source_dim0, %source_layout, %source : index, encoding<layout>, view<[%source_dim0]x8xf32, %source_layout>
 }
 
-func.def @make_view_1(%input: buffer, %input_byte_offset: offset) -> (%68: index, %69: encoding<layout>, view<[%68]x8xf32, %69>) {
-  %107 = index.constant 11 : index
-  %106 = index.constant 1 : index
-  %layout = encoding.layout.strided [%107, %106] : encoding<layout>
-  %105 = index.constant 3 : index
-  %81 = buffer.view %input[%input_byte_offset] : buffer -> view<[%105]x8xf32, %layout>
-  func.return %105, %layout, %81 : index, encoding<layout>, view<[%105]x8xf32, %layout>
+func.def @make_view_1(%input: buffer, %input_byte_offset: index) -> (%58: index, %59: encoding<layout>, view<[%58]x8xf32, %59>) {
+  %93 = index.constant 11 : index
+  %92 = index.constant 1 : index
+  %layout = encoding.layout.strided [%93, %92] : encoding<layout>
+  %91 = index.constant 3 : index
+  %71 = buffer.view %input[%input_byte_offset] : buffer -> view<[%91]x8xf32, %layout>
+  func.return %91, %layout, %71 : index, encoding<layout>, view<[%91]x8xf32, %layout>
 }
 
 func.def @read_view___loom__type__view___loom__type__shape_3__8___const_float____loom__type__encoding_0__2__(%source_layout: encoding<layout>, %source: view<3x8xf32, %source_layout>) -> (f32) {
-  %109 = index.constant 2 : index
-  %108 = index.constant 3 : index
-  %89 = view.load<type_disjoint> %source[%109, %108] : view<3x8xf32, %source_layout> -> f32
-  func.return %89 : f32
+  %95 = index.constant 2 : index
+  %94 = index.constant 3 : index
+  %79 = view.load<type_disjoint> %source[%95, %94] : view<3x8xf32, %source_layout> -> f32
+  func.return %79 : f32
 }
 
 func.def @read_view___loom__type__view___loom__type__shape_18446744073709551615__8___const_float____loom__type__encoding_0__2__(%source_dim0: index, %source_layout: encoding<layout>, %source: view<[%source_dim0]x8xf32, %source_layout>) -> (f32) {
-  %111 = index.constant 2 : index
-  %110 = index.constant 3 : index
-  %98 = view.load<type_disjoint> %source[%111, %110] : view<[%source_dim0]x8xf32, %source_layout> -> f32
-  func.return %98 : f32
+  %97 = index.constant 2 : index
+  %96 = index.constant 3 : index
+  %88 = view.load<type_disjoint> %source[%97, %96] : view<[%source_dim0]x8xf32, %source_layout> -> f32
+  func.return %88 : f32
 }
 
 // ====
@@ -153,47 +151,45 @@ kernel.def @typed_view_copy() {
   %output_origin$17 = scalar.assume %output_origin$5 [range(%output_origin$5, 0, 15)] : i32
   %19 = scalar.extui %input_stride$15 : i32 to i64
   %20 = index.cast %19 : i64 to index
-  %78 = index.constant 1 : index
-  %input_layout = encoding.layout.strided [%20, %78] : encoding<layout>
+  %72 = index.constant 1 : index
+  %input_layout = encoding.layout.strided [%20, %72] : encoding<layout>
   %output_layout = encoding.layout.dense : encoding<layout>
   %25 = scalar.extui %rows$14 : i32 to i64
   %row_count = index.cast %25 : i64 to index
   %27 = scalar.extui %input_origin$16 : i32 to i64
-  %81 = scalar.constant 2 : i64
-  %82 = scalar.shli %27, %81 : i64
-  %32 = scalar.assume %82 [range(%82, 0, 9223372036854775807)] : i64
-  %33 = index.cast %32 : i64 to offset
-  %34 = buffer.view %input[%33] : buffer -> view<[%row_count]x8xf32, %input_layout>
-  %source_dim0, %source_layout, %source = func.call pure @preserve_view(%row_count, %input_layout, %34) : (index, encoding<layout>, view<[%row_count]x8xf32, %input_layout>) -> (index, encoding<layout>, view<[%source_dim0]x8xf32, %source_layout>)
-  %38 = scalar.extui %output_origin$17 : i32 to i64
-  %80 = scalar.shli %38, %81 : i64
-  %43 = scalar.assume %80 [range(%80, 0, 9223372036854775807)] : i64
-  %44 = index.cast %43 : i64 to offset
-  %destination = buffer.view %output[%44] : buffer -> view<[%row_count]x8xf32, %output_layout>
+  %28 = index.cast %27 : i64 to index
+  %29 = index.constant 4 : index
+  %30 = index.mul %28, %29 : index
+  %32 = buffer.view %input[%30] : buffer -> view<[%row_count]x8xf32, %input_layout>
+  %source_dim0, %source_layout, %source = func.call pure @preserve_view(%row_count, %input_layout, %32) : (index, encoding<layout>, view<[%row_count]x8xf32, %input_layout>) -> (index, encoding<layout>, view<[%source_dim0]x8xf32, %source_layout>)
+  %36 = scalar.extui %output_origin$17 : i32 to i64
+  %37 = index.cast %36 : i64 to index
+  %39 = index.mul %37, %29 : index
+  %destination = buffer.view %output[%39] : buffer -> view<[%row_count]x8xf32, %output_layout>
   %workitem_id_y = kernel.workitem.id<y> : index
   %row = index.cast %workitem_id_y : index to i32
   %workitem_id_x = kernel.workitem.id<x> : index
   %column = index.cast %workitem_id_x : index to i32
-  %50 = scalar.extui %row : i32 to i64
-  %51 = index.cast %50 : i64 to index
-  %52 = index.cmp slt, %51, %row_count : index
-  scf.if %52 {
+  %46 = scalar.extui %row : i32 to i64
+  %47 = index.cast %46 : i64 to index
+  %48 = index.cmp slt, %47, %row_count : index
+  scf.if %48 {
     func.call @copy_view_element___loom__type__view___loom__type__shape_18446744073709551615__8___const_float____loom__type__encoding_0__2_____loom__type__view___loom__type__shape_18446744073709551615__8___float____loom__type__encoding_0__2__(%source_dim0, %source_layout, %source, %row_count, %output_layout, %destination, %row, %column) : (index, encoding<layout>, view<[%source_dim0]x8xf32, %source_layout>, index, encoding<layout>, view<[%row_count]x8xf32, %output_layout>, i32, i32)
   }
   kernel.return
 }
 
-func.def @preserve_view(%source_dim0: index, %source_layout: encoding<layout>, %source: view<[%source_dim0]x8xf32, %source_layout>) -> (%56: index, %57: encoding<layout>, view<[%56]x8xf32, %57>) {
+func.def @preserve_view(%source_dim0: index, %source_layout: encoding<layout>, %source: view<[%source_dim0]x8xf32, %source_layout>) -> (%52: index, %53: encoding<layout>, view<[%52]x8xf32, %53>) {
   func.return %source_dim0, %source_layout, %source : index, encoding<layout>, view<[%source_dim0]x8xf32, %source_layout>
 }
 
 func.def @copy_view_element___loom__type__view___loom__type__shape_18446744073709551615__8___const_float____loom__type__encoding_0__2_____loom__type__view___loom__type__shape_18446744073709551615__8___float____loom__type__encoding_0__2__(%source_dim0: index, %source_layout: encoding<layout>, %source: view<[%source_dim0]x8xf32, %source_layout>, %destination_dim0: index, %destination_layout: encoding<layout>, %destination: view<[%destination_dim0]x8xf32, %destination_layout>, %row: i32, %column: i32) {
-  %67 = scalar.extui %row : i32 to i64
-  %68 = index.cast %67 : i64 to index
-  %69 = scalar.extui %column : i32 to i64
-  %70 = index.cast %69 : i64 to index
-  %71 = view.load<type_disjoint> %source[%68, %70] : view<[%source_dim0]x8xf32, %source_layout> -> f32
-  view.store<type_disjoint> %71, %destination[%68, %70] : f32, view<[%destination_dim0]x8xf32, %destination_layout>
+  %63 = scalar.extui %row : i32 to i64
+  %64 = index.cast %63 : i64 to index
+  %65 = scalar.extui %column : i32 to i64
+  %66 = index.cast %65 : i64 to index
+  %67 = view.load<type_disjoint> %source[%64, %66] : view<[%source_dim0]x8xf32, %source_layout> -> f32
+  view.store<type_disjoint> %67, %destination[%64, %66] : f32, view<[%destination_dim0]x8xf32, %destination_layout>
   func.return
 }
 
@@ -238,38 +234,38 @@ kernel.def @typed_view_loop() {
   %iterations$21 = scalar.assume %iterations$5 [range(%iterations$5, 0, 2)] : i32
   %23 = scalar.extui %stride$20 : i32 to i64
   %24 = index.cast %23 : i64 to index
-  %112 = index.constant 1 : index
-  %layout = encoding.layout.strided [%24, %112] : encoding<layout>
+  %105 = index.constant 1 : index
+  %layout = encoding.layout.strided [%24, %105] : encoding<layout>
   %right_root = scf.select %share_root, %left, %right : buffer
-  %source, %source_byte_offset = scf.if %use_right -> (buffer, offset) {
-    %111 = index.constant 12 : offset
-    scf.yield %right_root, %111 : buffer, offset
+  %source, %source_byte_offset = scf.if %use_right -> (buffer, index) {
+    %104 = index.constant 12 : index
+    scf.yield %right_root, %104 : buffer, index
   } else {
-    %110 = index.constant 8 : offset
-    scf.yield %left, %110 : buffer, offset
+    %103 = index.constant 8 : index
+    scf.yield %left, %103 : buffer, index
   }
-  %48 = scalar.extui %rows$18 : i32 to i64
-  %selected_dim0$49 = index.cast %48 : i64 to index
-  %selected$50 = buffer.view %source[%source_byte_offset] : buffer -> view<[%selected_dim0$49]x7xi32, %layout>
-  %109 = index.constant 0 : offset
-  %53 = index.cast %iterations$21 : i32 to offset
-  %54 = index.constant 1 : offset
-  %rows$119, %selected_dim0$120, %selected$121 = scf.for %i = [%109 to %53 step %54](%rows$116 = %rows$18 : i32, %selected_dim0$117 = %selected_dim0$49 : index, %selected$118 = %selected$50 : view<[%selected_dim0$49]x7xi32, %layout>) -> (i32, index, view<[%selected_dim0$120]x7xi32, %layout>) {
-    %113 = scalar.constant -1 : i32
-    %rows$114 = scalar.addi %rows$116, %113 : i32
-    %rows$67 = scalar.assume %rows$114 [ne(%rows$114, 0)] : i32
-    %rows$68 = scalar.assume %rows$67 [range(%rows$67, 0, 8)] : i32
-    %73 = scalar.extui %rows$68 : i32 to i64
-    %selected_dim0$74 = index.cast %73 : i64 to index
-    %107 = index.constant 0 : index
-    %selected$77 = view.subview %selected$118[%112, %107] : view<[%selected_dim0$117]x7xi32, %layout> -> view<[%selected_dim0$74]x7xi32, %layout>
-    scf.yield %rows$68, %selected_dim0$74, %selected$77 : i32, index, view<[%selected_dim0$74]x7xi32, %layout>
+  %44 = scalar.extui %rows$18 : i32 to i64
+  %selected_dim0$45 = index.cast %44 : i64 to index
+  %selected$46 = buffer.view %source[%source_byte_offset] : buffer -> view<[%selected_dim0$45]x7xi32, %layout>
+  %102 = index.constant 0 : offset
+  %49 = index.cast %iterations$21 : i32 to offset
+  %50 = index.constant 1 : offset
+  %rows$112, %selected_dim0$113, %selected$114 = scf.for %i = [%102 to %49 step %50](%rows$109 = %rows$18 : i32, %selected_dim0$110 = %selected_dim0$45 : index, %selected$111 = %selected$46 : view<[%selected_dim0$45]x7xi32, %layout>) -> (i32, index, view<[%selected_dim0$113]x7xi32, %layout>) {
+    %106 = scalar.constant -1 : i32
+    %rows$107 = scalar.addi %rows$109, %106 : i32
+    %rows$63 = scalar.assume %rows$107 [ne(%rows$107, 0)] : i32
+    %rows$64 = scalar.assume %rows$63 [range(%rows$63, 0, 8)] : i32
+    %69 = scalar.extui %rows$64 : i32 to i64
+    %selected_dim0$70 = index.cast %69 : i64 to index
+    %100 = index.constant 0 : index
+    %selected$73 = view.subview %selected$111[%105, %100] : view<[%selected_dim0$110]x7xi32, %layout> -> view<[%selected_dim0$70]x7xi32, %layout>
+    scf.yield %rows$64, %selected_dim0$70, %selected$73 : i32, index, view<[%selected_dim0$70]x7xi32, %layout>
   }
-  %106 = index.constant 0 : index
-  %cell, %cell_layout = view.subview %selected$121[%106, %106] : view<[%selected_dim0$120]x7xi32, %layout> -> view<1x1xi32, %cell_layout>
-  %92 = view.load<type_disjoint> %cell[%106, %106] : view<1x1xi32, %cell_layout> -> i32
-  %101 = buffer.view %output[%109] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %92, %101[0] : i32, view<1xi32>
+  %99 = index.constant 0 : index
+  %cell, %cell_layout = view.subview %selected$114[%99, %99] : view<[%selected_dim0$113]x7xi32, %layout> -> view<1x1xi32, %cell_layout>
+  %88 = view.load<type_disjoint> %cell[%99, %99] : view<1x1xi32, %cell_layout> -> i32
+  %94 = buffer.view %output[%99] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %88, %94[0] : i32, view<1xi32>
   kernel.return
 }
 
@@ -311,7 +307,7 @@ kernel.def @typed_storage_rank3() {
 } launch(%0: buffer, %1: buffer, %rows$2: i32, %tiles$3: i32) {
   %10 = buffer.assume.alignment %0 {minimum_alignment = 64} : buffer
   %input = buffer.assume.noalias %10 : buffer
-  %input_byte_offset = index.constant 0 : offset
+  %input_byte_offset = index.constant 0 : index
   %13 = buffer.assume.alignment %1 {minimum_alignment = 64} : buffer
   %output = buffer.assume.noalias %13 : buffer
   %rows$16 = scalar.assume %rows$2 [ne(%rows$2, 0)] : i32
@@ -324,13 +320,11 @@ kernel.def @typed_storage_rank3() {
   %source_dim1 = index.cast %24 : i64 to index
   %source = buffer.view %input[%input_byte_offset] : buffer -> view<[%source_dim0]x[%source_dim1]x16xf8E4M3, #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.f8e4m3fn<affine=scale_only, payload_elements=16, scale_format=e8m0, scale_group_elements=16, scale_operands=1, scale_topology=block_1d>>>
   %workitem_id_x = kernel.workitem.id<x> : index
-  %44 = index.constant 0 : index
-  %33 = view.load<type_disjoint> %source[%44, %44, %workitem_id_x] : view<[%source_dim0]x[%source_dim1]x16xf8E4M3, #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.f8e4m3fn<affine=scale_only, payload_elements=16, scale_format=e8m0, scale_group_elements=16, scale_operands=1, scale_topology=block_1d>>> -> f8E4M3
+  %33 = view.load<type_disjoint> %source[%input_byte_offset, %input_byte_offset, %workitem_id_x] : view<[%source_dim0]x[%source_dim1]x16xf8E4M3, #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.f8e4m3fn<affine=scale_only, payload_elements=16, scale_format=e8m0, scale_group_elements=16, scale_operands=1, scale_topology=block_1d>>> -> f8E4M3
   %34 = index.cast %workitem_id_x : index to i32
   %35 = scalar.extui %34 : i32 to i64
-  %40 = scalar.assume %35 [range(%35, 0, 9223372036854775807)] : i64
-  %41 = index.cast %40 : i64 to offset
-  %42 = buffer.view %output[%41] : buffer -> view<1xf8E4M3>
-  view.store<root_in_bounds|type_disjoint> %33, %42[0] : f8E4M3, view<1xf8E4M3>
+  %36 = index.cast %35 : i64 to index
+  %40 = buffer.view %output[%36] : buffer -> view<1xf8E4M3>
+  view.store<root_in_bounds|type_disjoint> %33, %40[0] : f8E4M3, view<1xf8E4M3>
   kernel.return
 }

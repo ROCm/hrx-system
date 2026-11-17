@@ -97,30 +97,24 @@ func.def public @add(%value: i8) -> (i32) {
 
 func.def public @subtract(%value: i8) -> (i32) {
   %7 = scalar.extsi %value : i8 to i32
-  %35 = scalar.constant -1 : i32
-  %36 = scalar.addi %7, %35 : i32
-  func.return %36 : i32
+  %29 = scalar.constant -1 : i32
+  %30 = scalar.addi %7, %29 : i32
+  func.return %30 : i32
 }
 
-func.def public @load_next(%values: buffer, %values_byte_offset: offset) -> (i8) {
-  %37 = scalar.constant 1 : i64
-  %17 = index.cast %values_byte_offset : offset to i64
-  %18 = scalar.addi %17, %37 : i64
-  %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
-  %20 = index.cast %19 : i64 to offset
-  %21 = buffer.view %values[%20] : buffer -> view<1xi8>
-  %22 = view.load<root_in_bounds|type_disjoint> %21[0] : view<1xi8> -> i8
-  func.return %22 : i8
+func.def public @load_next(%values: buffer, %values_byte_offset: index) -> (i8) {
+  %31 = index.constant 1 : index
+  %17 = index.add %values_byte_offset, %31 : index
+  %18 = buffer.view %values[%17] : buffer -> view<1xi8>
+  %19 = view.load<root_in_bounds|type_disjoint> %18[0] : view<1xi8> -> i8
+  func.return %19 : i8
 }
 
-func.def public @store_next(%values: buffer, %values_byte_offset: offset, %value: i8) {
-  %38 = scalar.constant 1 : i64
-  %30 = index.cast %values_byte_offset : offset to i64
-  %31 = scalar.addi %30, %38 : i64
-  %32 = scalar.assume %31 [range(%31, 0, 9223372036854775807)] : i64
-  %33 = index.cast %32 : i64 to offset
-  %34 = buffer.view %values[%33] : buffer -> view<1xi8>
-  view.store<root_in_bounds|type_disjoint> %value, %34[0] : i8, view<1xi8>
+func.def public @store_next(%values: buffer, %values_byte_offset: index, %value: i8) {
+  %32 = index.constant 1 : index
+  %27 = index.add %values_byte_offset, %32 : index
+  %28 = buffer.view %values[%27] : buffer -> view<1xi8>
+  view.store<root_in_bounds|type_disjoint> %value, %28[0] : i8, view<1xi8>
   func.return
 }
 

@@ -6,18 +6,15 @@ static_assert(first(arr) == 1);
 void k(int* out) { out[0] = first(arr); }
 
 // ----
-func.def public @k(%out: buffer, %out_byte_offset: offset) {
+func.def public @k(%out: buffer, %out_byte_offset: index) {
   %2 = scalar.constant 1 : i32
   %3 = scalar.constant 0 : i32
-  %4 = scalar.extsi %3 : i32 to i64
-  %5 = scalar.constant 4 : i64
-  %6 = scalar.muli %4, %5 : i64
-  %7 = index.cast %out_byte_offset : offset to i64
-  %8 = scalar.addi %7, %6 : i64
-  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
-  %10 = index.cast %9 : i64 to offset
-  %11 = buffer.view %out[%10] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %2, %11[0] : i32, view<1xi32>
+  %4 = index.cast %3 : i32 to index
+  %5 = index.constant 4 : index
+  %6 = index.mul %4, %5 : index
+  %7 = index.add %out_byte_offset, %6 : index
+  %8 = buffer.view %out[%7] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %2, %8[0] : i32, view<1xi32>
   func.return
 }
 
@@ -56,18 +53,15 @@ static_assert(identity(3) == 3);
 void entry(int* output) { output[0] = identity(3); }
 
 // ----
-func.def public @entry(%output: buffer, %output_byte_offset: offset) {
+func.def public @entry(%output: buffer, %output_byte_offset: index) {
   %2 = scalar.constant 3 : i32
   %3 = scalar.constant 0 : i32
-  %4 = scalar.extsi %3 : i32 to i64
-  %5 = scalar.constant 4 : i64
-  %6 = scalar.muli %4, %5 : i64
-  %7 = index.cast %output_byte_offset : offset to i64
-  %8 = scalar.addi %7, %6 : i64
-  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
-  %10 = index.cast %9 : i64 to offset
-  %11 = buffer.view %output[%10] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %2, %11[0] : i32, view<1xi32>
+  %4 = index.cast %3 : i32 to index
+  %5 = index.constant 4 : index
+  %6 = index.mul %4, %5 : index
+  %7 = index.add %output_byte_offset, %6 : index
+  %8 = buffer.view %output[%7] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %2, %8[0] : i32, view<1xi32>
   func.return
 }
 

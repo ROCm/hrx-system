@@ -11,26 +11,23 @@ unsigned publication_value(unsigned* storage) {
   return __atomic_load_n(destination, __ATOMIC_SEQ_CST);
 }
 // ----
-func.def public @publication_value(%storage: buffer, %storage_byte_offset: offset) -> (i32) {
-  %22 = scalar.constant 4 : i64
-  %7 = index.cast %storage_byte_offset : offset to i64
-  %8 = scalar.addi %7, %22 : i64
-  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
-  %destination_byte_offset = index.cast %9 : i64 to offset
-  %11 = func.call @observe(%storage, %destination_byte_offset) : (buffer, offset) -> (i32)
-  %12 = scalar.constant -2147483648 : i32
-  %value = scalar.xori %11, %12 : i32
-  %14 = buffer.view %storage[%destination_byte_offset] : buffer -> view<1xi32>
-  view.atomic.store<root_in_bounds|type_disjoint> %value, %14[0] {ordering = release, scope = system} : i32, view<1xi32>
+func.def public @publication_value(%storage: buffer, %storage_byte_offset: index) -> (i32) {
+  %19 = index.constant 4 : index
+  %destination_byte_offset = index.add %storage_byte_offset, %19 : index
+  %8 = func.call @observe(%storage, %destination_byte_offset) : (buffer, index) -> (i32)
+  %9 = scalar.constant -2147483648 : i32
+  %value = scalar.xori %8, %9 : i32
+  %11 = buffer.view %storage[%destination_byte_offset] : buffer -> view<1xi32>
+  view.atomic.store<root_in_bounds|type_disjoint> %value, %11[0] {ordering = release, scope = system} : i32, view<1xi32>
   buffer.fence scope(system) ordering(acq_rel)
-  %16 = view.atomic.load<root_in_bounds|type_disjoint> %14[0] {ordering = seq_cst, scope = system} : view<1xi32> -> i32
-  func.return %16 : i32
+  %13 = view.atomic.load<root_in_bounds|type_disjoint> %11[0] {ordering = seq_cst, scope = system} : view<1xi32> -> i32
+  func.return %13 : i32
 }
 
-func.def @observe(%source: buffer, %source_byte_offset: offset) -> (i32) {
-  %20 = buffer.view %source[%source_byte_offset] : buffer -> view<1xi32>
-  %21 = view.atomic.load<root_in_bounds|type_disjoint> %20[0] {ordering = acquire, scope = system} : view<1xi32> -> i32
-  func.return %21 : i32
+func.def @observe(%source: buffer, %source_byte_offset: index) -> (i32) {
+  %17 = buffer.view %source[%source_byte_offset] : buffer -> view<1xi32>
+  %18 = view.atomic.load<root_in_bounds|type_disjoint> %17[0] {ordering = acquire, scope = system} : view<1xi32> -> i32
+  func.return %18 : i32
 }
 
 // ====
@@ -49,17 +46,17 @@ kernel.def @wide_publication() {
   %2 = index.constant 1 : index
   kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
 } launch(%storage: buffer, %output: buffer) {
-  %destination_byte_offset = index.constant 8 : offset
-  %18 = buffer.view %storage[%destination_byte_offset] : buffer -> view<1xi64>
-  %19 = view.atomic.load<root_in_bounds|type_disjoint> %18[0] {ordering = acquire, scope = system} : view<1xi64> -> i64
-  %43 = index.constant 0 : offset
-  %28 = buffer.view %output[%43] : buffer -> view<1xi64>
-  view.store<root_in_bounds|type_disjoint> %19, %28[0] : i64, view<1xi64>
-  %29 = scalar.constant 1311768467139281697 : i64
-  view.atomic.store<root_in_bounds|type_disjoint> %29, %18[0] {ordering = release, scope = system} : i64, view<1xi64>
+  %destination_byte_offset = index.constant 8 : index
+  %15 = buffer.view %storage[%destination_byte_offset] : buffer -> view<1xi64>
+  %16 = view.atomic.load<root_in_bounds|type_disjoint> %15[0] {ordering = acquire, scope = system} : view<1xi64> -> i64
+  %34 = index.constant 0 : index
+  %22 = buffer.view %output[%34] : buffer -> view<1xi64>
+  view.store<root_in_bounds|type_disjoint> %16, %22[0] : i64, view<1xi64>
+  %23 = scalar.constant 1311768467139281697 : i64
+  view.atomic.store<root_in_bounds|type_disjoint> %23, %15[0] {ordering = release, scope = system} : i64, view<1xi64>
   buffer.fence scope(system) ordering(acq_rel)
-  %32 = view.atomic.load<root_in_bounds|type_disjoint> %18[0] {ordering = seq_cst, scope = system} : view<1xi64> -> i64
-  %41 = buffer.view %output[%destination_byte_offset] : buffer -> view<1xi64>
-  view.store<root_in_bounds|type_disjoint> %32, %41[0] : i64, view<1xi64>
+  %26 = view.atomic.load<root_in_bounds|type_disjoint> %15[0] {ordering = seq_cst, scope = system} : view<1xi64> -> i64
+  %32 = buffer.view %output[%destination_byte_offset] : buffer -> view<1xi64>
+  view.store<root_in_bounds|type_disjoint> %26, %32[0] : i64, view<1xi64>
   kernel.return
 }

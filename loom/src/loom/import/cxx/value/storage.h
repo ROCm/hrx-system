@@ -25,12 +25,10 @@ struct ObjectRepresentation;
 // Alignment belongs to this object projection, not to the two-component
 // pointer value transported by the ABI.
 struct StorageProjection {
-  // Allocation identity and byte origin of the projected object.
+  // Opaque origin and signed byte displacement of the projected object.
   Pointer pointer;
   // Source-layout byte alignment retained through fields and array indexing.
   uint64_t alignment;
-  // Whether the emitted origin already carries the source pointer-width fact.
-  bool pointer_width_constrained = false;
 };
 
 // One typed access, either a dynamic element of a retained array view or a
@@ -98,20 +96,15 @@ class Storage {
   loom_value_id_t distance(Pointer left, Pointer right,
                            const cxx::Type* element_type,
                            const cxx::Type* result_type, cxx::AST* owner);
-  // Refines an opaque pointer origin to the configured source pointer width.
-  // The allocation root remains independent; this only publishes the range
-  // every valid source pointer representation already satisfies.
-  Pointer constrain_origin(Pointer pointer, cxx::AST* owner);
   // Admits the object's storage layout and starts a projection with its
   // ordinary source ABI alignment. Opaque pointer transport needs neither.
   // Nested fields use member() instead of resetting to their nominal type.
   StorageProjection project(Pointer pointer, const cxx::Type* object_type,
                             cxx::AST* owner);
-  // Computes an object-relative byte origin using the source integer's width
+  // Computes a signed byte displacement using the source integer's width
   // and signedness. Subtraction is represented by T_MINUS; addition by T_PLUS.
-  // Only the final origin enters offset, allowing negative displacements from
-  // interior pointers without forming negative offset values. Its nonnegative
-  // range is published from the source language's within-object precondition.
+  // Index arithmetic preserves negative positions relative to a supplied
+  // interior origin; access bounds belong to the originating buffer.
   StorageProjection advance(StorageProjection base,
                             loom_value_id_t displacement,
                             const cxx::Type* base_type,
@@ -142,8 +135,8 @@ class Storage {
   StorageProjection element(StorageProjection base,
                             const cxx::BoundedArrayType* type, size_t index,
                             cxx::AST* owner);
-  // Constructs addressing for an integral subscript without narrowing pointer
-  // byte arithmetic through target-selected index.
+  // Constructs addressing for an integral subscript using signed index byte
+  // positions, whose carrier is selected by the target.
   // Unsupported source types are diagnosed at owner. The C++ driver separately
   // admits builtin indexing and evaluates base before index.
   StorageAccess subscript(StorageProjection base, loom_value_id_t index,

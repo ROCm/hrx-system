@@ -10,11 +10,11 @@ void copy([[loom::noalias]] const unsigned* input,
 low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @copy() asm {
   %input = resource<hal_binding> {extent = 24, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %37 = s_mov_b32 0
-  %38 = s_load_dword %input, %37 {offset = 20}
-  %39 = v_mov_b32_copy %38
-  %40 = v_mov_b32 0
-  global_store_b32_saddr %40, %39, %output {offset = 8}
+  %29 = s_mov_b32 0
+  %30 = s_load_dword %input, %29 {offset = 20}
+  %31 = v_mov_b32_copy %30
+  %32 = v_mov_b32 0
+  global_store_b32_saddr %32, %31, %output {offset = 8}
   return
 }
 
@@ -29,11 +29,11 @@ void copy([[loom::noalias]] const unsigned* input, unsigned* output) {
 low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @copy() asm {
   %input = resource<hal_binding> {extent = 24, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %36 = s_mov_b32 0
-  %37 = s_load_dword %input, %36 {offset = 20}
-  %38 = v_mov_b32_copy %37
-  %39 = v_mov_b32 0
-  global_store_b32_saddr %39, %38, %output {offset = 8}
+  %28 = s_mov_b32 0
+  %29 = s_load_dword %input, %28 {offset = 20}
+  %30 = v_mov_b32_copy %29
+  %31 = v_mov_b32 0
+  global_store_b32_saddr %31, %30, %output {offset = 8}
   return
 }
 
@@ -52,15 +52,15 @@ void copy([[loom::noalias]] unsigned* input,
 low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @copy() asm {
   %input = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %71 = s_mov_b32 0
-  %before = s_load_dword %input, %71 {offset = 4}
-  %73 = s_mov_b32 1
-  %74 = s_add_u32 %before, %73
-  %75 = v_mov_b32_copy %74
-  %76 = v_mov_b32 0
-  global_store_b32_saddr %76, %75, %input {offset = 4}
-  %78 = global_load_b32_saddr %76, %input {offset = 4}
-  global_store_b32_saddr %76, %78, %output {offset = 8}
+  %51 = s_mov_b32 0
+  %before = s_load_dword %input, %51 {offset = 4}
+  %53 = s_mov_b32 1
+  %54 = s_add_u32 %before, %53
+  %55 = v_mov_b32_copy %54
+  %56 = v_mov_b32 0
+  global_store_b32_saddr %56, %55, %input {offset = 4}
+  %58 = global_load_b32_saddr %56, %input {offset = 4}
+  global_store_b32_saddr %56, %58, %output {offset = 8}
   return
 }
 
@@ -79,15 +79,15 @@ void copy([[loom::noalias]] const unsigned* input,
 low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 3, resource_count = 3, resource_offsets = [0, 8, 16], resource_parameter_indices = [0, 1, 2], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @copy() asm {
   %output = resource<hal_binding> {extent = 12, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %replacement = resource<hal_binding> {extent = 4, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %65 = s_mov_b32 0
-  %before = s_load_dword %replacement, %65
-  %67 = s_mov_b32 1
-  %68 = s_add_u32 %before, %67
-  %69 = v_mov_b32_copy %68
-  %70 = v_mov_b32 0
-  global_store_b32_saddr %70, %69, %output
-  %72 = global_load_b32_saddr %70, %replacement
-  global_store_b32_saddr %70, %72, %output {offset = 8}
+  %49 = s_mov_b32 0
+  %before = s_load_dword %replacement, %49
+  %51 = s_mov_b32 1
+  %52 = s_add_u32 %before, %51
+  %53 = v_mov_b32_copy %52
+  %54 = v_mov_b32 0
+  global_store_b32_saddr %54, %53, %output
+  %56 = global_load_b32_saddr %54, %replacement
+  global_store_b32_saddr %54, %56, %output {offset = 8}
   return
 }
 
@@ -118,37 +118,37 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 0, direc
   %weights = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %row_ids = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %89 = s_lshl_b32_rhs_inline %row, 2
-  %source_row = s_load_dword %row_ids, %89
-  %98 = v_lshlrev_b32_src0_inline %workitem_id_x, 3
-  %99 = s_lshl_b32_rhs_inline %workgroup_id_x, 11
-  %100 = s_mov_b32 6144
-  %101 = s_mul_i32 %source_row, %100
-  %102 = s_add_u32 %99, %101
-  %103 = slice %weights[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %104 = slice %weights[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %105 = s_mov_b32 0
-  %106, %107 = s_add_co_u32 %103, %102
-  %108, %109 = s_addc_u32 %104, %105, %107
-  %110 = concat(%106, %108) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %111 = global_load_b64_saddr %98, %110
-  %112 = slice %111[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %113 = v_cvt_f32_f16 %112
-  %115 = v_cvt_f32_f16_input_high %112
-  %116 = slice %111[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %117 = v_cvt_f32_f16 %116
-  %119 = v_cvt_f32_f16_input_high %116
-  %120 = concat(%113, %115, %117, %119) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %127 = v_lshlrev_b32_src0_inline %workitem_id_x, 4
-  %128 = s_mov_b32 12288
-  %129 = s_mul_i32 %row, %128
-  %130 = s_lshl_b32_rhs_inline %workgroup_id_x, 12
-  %131 = s_add_u32 %129, %130
-  %132 = slice %output[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %133 = slice %output[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %135, %136 = s_add_co_u32 %132, %131
-  %137, %138 = s_addc_u32 %133, %105, %136
-  %139 = concat(%135, %137) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  global_store_b128_saddr %127, %120, %139
+  %74 = s_lshl_b32_rhs_inline %row, 2
+  %source_row = s_load_dword %row_ids, %74
+  %83 = v_lshlrev_b32_src0_inline %workitem_id_x, 3
+  %84 = s_lshl_b32_rhs_inline %workgroup_id_x, 11
+  %85 = s_mov_b32 6144
+  %86 = s_mul_i32 %source_row, %85
+  %87 = s_add_u32 %84, %86
+  %88 = slice %weights[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %89 = slice %weights[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %90 = s_mov_b32 0
+  %91, %92 = s_add_co_u32 %88, %87
+  %93, %94 = s_addc_u32 %89, %90, %92
+  %95 = concat(%91, %93) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %96 = global_load_b64_saddr %83, %95
+  %97 = slice %96[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %98 = v_cvt_f32_f16 %97
+  %100 = v_cvt_f32_f16_input_high %97
+  %101 = slice %96[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %102 = v_cvt_f32_f16 %101
+  %104 = v_cvt_f32_f16_input_high %101
+  %105 = concat(%98, %100, %102, %104) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %112 = v_lshlrev_b32_src0_inline %workitem_id_x, 4
+  %113 = s_mov_b32 12288
+  %114 = s_mul_i32 %row, %113
+  %115 = s_lshl_b32_rhs_inline %workgroup_id_x, 12
+  %116 = s_add_u32 %114, %115
+  %117 = slice %output[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %118 = slice %output[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %120, %121 = s_add_co_u32 %117, %116
+  %122, %123 = s_addc_u32 %118, %90, %121
+  %124 = concat(%120, %122) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b128_saddr %112, %105, %124
   return
 }

@@ -192,3 +192,13 @@ unsigned observe_null_effect(bool use) {
   const bool missing = pointer == observed_null(&calls);
   return calls * 100u + missing;
 }
+
+[[loom::noinline]] const unsigned* step_pointer(const unsigned* pointer,
+                                                int count) {
+  return pointer + count;
+}
+
+unsigned observe_signed_pointer(unsigned position, int displacement) {
+  const unsigned values[] = {11u, 23u, 37u, 41u, 59u};
+  return *step_pointer(values + position, displacement);
+}

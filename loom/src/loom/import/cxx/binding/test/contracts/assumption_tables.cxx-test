@@ -42,120 +42,98 @@ kernel.def @assumed_table_u32() {
   %5 = index.constant 32 : index
   kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%5, %2, %2) : index
 } launch(%input: buffer, %output: buffer) {
-  %input_byte_offset = index.constant 0 : offset
-  func.call @assumed_table_indices_unsigned_int(%input, %input_byte_offset, %output, %input_byte_offset) : (buffer, offset, buffer, offset)
+  %input_byte_offset = index.constant 0 : index
+  func.call @assumed_table_indices_unsigned_int(%input, %input_byte_offset, %output, %input_byte_offset) : (buffer, index, buffer, index)
   kernel.return
 }
 
-func.def inline @assumed_table_indices_unsigned_int(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) {
+func.def inline @assumed_table_indices_unsigned_int(%input: buffer, %input_byte_offset: index, %output: buffer, %output_byte_offset: index) {
   %workitem_id_x = kernel.workitem.id<x> : index
   %lane = index.cast %workitem_id_x : index to i32
-  %184 = index.constant 24 : offset
-  %table = buffer.alloca<workgroup> align(16) %184 : buffer
+  %154 = index.constant 24 : offset
+  %table = buffer.alloca<workgroup> align(16) %154 : buffer
   %23 = scalar.constant 6 : i32
   %24 = scalar.cmpi ult, %lane, %23 : i32
   scf.if %24 {
-    %177 = scalar.assume %lane [ge(%lane, 0), lt(%lane, 6)] : i32
+    %151 = scalar.assume %lane [ge(%lane, 0), lt(%lane, 6)] : i32
     %25 = scalar.constant 10 : i32
-    %26 = scalar.addi %177, %25 : i32
-    %27 = scalar.extui %177 : i32 to i64
-    %178 = scalar.assume %27 [lt(%27, 6)] : i64
-    %185 = scalar.constant 2 : i64
-    %186 = scalar.shli %178, %185 : i64
-    %32 = scalar.assume %186 [range(%186, 0, 9223372036854775807)] : i64
-    %33 = index.cast %32 : i64 to offset
-    %34 = buffer.view %table[%33] : buffer -> view<1xi32>
-    view.store<root_in_bounds|type_disjoint> %26, %34[0] : i32, view<1xi32>
+    %26 = scalar.addi %151, %25 : i32
+    %27 = scalar.extui %151 : i32 to i64
+    %152 = scalar.assume %27 [lt(%27, 6)] : i64
+    %28 = index.cast %152 : i64 to index
+    %153 = index.assume %28 [lt(%28, 6)] : index
+    %29 = index.constant 4 : index
+    %30 = index.mul %153, %29 : index
+    %32 = buffer.view %table[%30] : buffer -> view<1xi32>
+    view.store<root_in_bounds|type_disjoint> %26, %32[0] : i32, view<1xi32>
   }
   kernel.barrier<global> scope(workgroup) ordering(acq_rel)
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  %225 = scalar.constant 2 : i32
-  %226 = scalar.shli %lane, %225 : i32
-  %37 = scalar.extui %226 : i32 to i64
-  %223 = scalar.constant 2 : i64
-  %224 = scalar.shli %37, %223 : i64
-  %40 = index.cast %input_byte_offset : offset to i64
-  %41 = scalar.addi %40, %224 : i64
-  %42 = scalar.assume %41 [range(%41, 0, 9223372036854775807)] : i64
-  %43 = index.cast %42 : i64 to offset
-  %44 = buffer.view %input[%43] : buffer -> view<1xi32>
-  %first$45 = view.load<root_in_bounds|type_disjoint> %44[0] : view<1xi32> -> i32
-  %48 = scalar.constant 1 : i32
-  %49 = scalar.addi %226, %48 : i32
-  %50 = scalar.extui %49 : i32 to i64
-  %220 = scalar.shli %50, %223 : i64
-  %54 = scalar.addi %40, %220 : i64
-  %55 = scalar.assume %54 [range(%54, 0, 9223372036854775807)] : i64
-  %56 = index.cast %55 : i64 to offset
-  %57 = buffer.view %input[%56] : buffer -> view<1xi32>
-  %second$58 = view.load<root_in_bounds|type_disjoint> %57[0] : view<1xi32> -> i32
-  %62 = scalar.addi %226, %225 : i32
-  %63 = scalar.extui %62 : i32 to i64
-  %216 = scalar.shli %63, %223 : i64
-  %67 = scalar.addi %40, %216 : i64
-  %68 = scalar.assume %67 [range(%67, 0, 9223372036854775807)] : i64
-  %69 = index.cast %68 : i64 to offset
-  %70 = buffer.view %input[%69] : buffer -> view<1xi32>
-  %third$71 = view.load<root_in_bounds|type_disjoint> %70[0] : view<1xi32> -> i32
-  %74 = scalar.constant 3 : i32
-  %75 = scalar.addi %226, %74 : i32
-  %76 = scalar.extui %75 : i32 to i64
-  %212 = scalar.shli %76, %223 : i64
-  %80 = scalar.addi %40, %212 : i64
-  %81 = scalar.assume %80 [range(%80, 0, 9223372036854775807)] : i64
-  %82 = index.cast %81 : i64 to offset
-  %83 = buffer.view %input[%82] : buffer -> view<1xi32>
-  %fourth$84 = view.load<root_in_bounds|type_disjoint> %83[0] : view<1xi32> -> i32
-  %last$86 = scalar.constant 5 : i32
-  %first$87, %count$88 = scalar.assume %first$45, %23 [ult(%first$45, %23)] : i32, i32
-  %second$89, %last$90 = scalar.assume %second$58, %last$86 [ule(%second$58, %last$86)] : i32, i32
-  %count$91, %third$92 = scalar.assume %count$88, %third$71 [ugt(%count$88, %third$71)] : i32, i32
-  %last$93, %fourth$94 = scalar.assume %last$90, %fourth$84 [uge(%last$90, %fourth$84)] : i32, i32
-  %95 = scalar.extui %first$87 : i32 to i64
-  %210 = scalar.shli %95, %223 : i64
-  %100 = scalar.assume %210 [range(%210, 0, 9223372036854775807)] : i64
-  %101 = index.cast %100 : i64 to offset
-  %102 = buffer.view %table[%101] : buffer -> view<1xi32>
-  %103 = view.load<root_in_bounds|type_disjoint> %102[0] : view<1xi32> -> i32
-  %109 = index.cast %output_byte_offset : offset to i64
-  %110 = scalar.addi %109, %224 : i64
-  %111 = scalar.assume %110 [range(%110, 0, 9223372036854775807)] : i64
-  %112 = index.cast %111 : i64 to offset
-  %113 = buffer.view %output[%112] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %103, %113[0] : i32, view<1xi32>
-  %114 = scalar.extui %second$89 : i32 to i64
-  %204 = scalar.shli %114, %223 : i64
-  %119 = scalar.assume %204 [range(%204, 0, 9223372036854775807)] : i64
-  %120 = index.cast %119 : i64 to offset
-  %121 = buffer.view %table[%120] : buffer -> view<1xi32>
-  %122 = view.load<root_in_bounds|type_disjoint> %121[0] : view<1xi32> -> i32
-  %131 = scalar.addi %109, %220 : i64
-  %132 = scalar.assume %131 [range(%131, 0, 9223372036854775807)] : i64
-  %133 = index.cast %132 : i64 to offset
-  %134 = buffer.view %output[%133] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %122, %134[0] : i32, view<1xi32>
-  %135 = scalar.extui %third$92 : i32 to i64
-  %198 = scalar.shli %135, %223 : i64
-  %140 = scalar.assume %198 [range(%198, 0, 9223372036854775807)] : i64
-  %141 = index.cast %140 : i64 to offset
-  %142 = buffer.view %table[%141] : buffer -> view<1xi32>
-  %143 = view.load<root_in_bounds|type_disjoint> %142[0] : view<1xi32> -> i32
-  %152 = scalar.addi %109, %216 : i64
-  %153 = scalar.assume %152 [range(%152, 0, 9223372036854775807)] : i64
-  %154 = index.cast %153 : i64 to offset
-  %155 = buffer.view %output[%154] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %143, %155[0] : i32, view<1xi32>
-  %156 = scalar.extui %fourth$94 : i32 to i64
-  %192 = scalar.shli %156, %223 : i64
-  %161 = scalar.assume %192 [range(%192, 0, 9223372036854775807)] : i64
-  %162 = index.cast %161 : i64 to offset
-  %163 = buffer.view %table[%162] : buffer -> view<1xi32>
-  %164 = view.load<root_in_bounds|type_disjoint> %163[0] : view<1xi32> -> i32
-  %173 = scalar.addi %109, %212 : i64
-  %174 = scalar.assume %173 [range(%173, 0, 9223372036854775807)] : i64
-  %175 = index.cast %174 : i64 to offset
-  %176 = buffer.view %output[%175] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %164, %176[0] : i32, view<1xi32>
+  %177 = scalar.constant 2 : i32
+  %178 = scalar.shli %lane, %177 : i32
+  %35 = scalar.extui %178 : i32 to i64
+  %36 = index.cast %35 : i64 to index
+  %37 = index.constant 4 : index
+  %176 = index.madd %36, %37, %input_byte_offset : index
+  %40 = buffer.view %input[%176] : buffer -> view<1xi32>
+  %first$41 = view.load<root_in_bounds|type_disjoint> %40[0] : view<1xi32> -> i32
+  %44 = scalar.constant 1 : i32
+  %45 = scalar.addi %178, %44 : i32
+  %46 = scalar.extui %45 : i32 to i64
+  %47 = index.cast %46 : i64 to index
+  %173 = index.madd %47, %37, %input_byte_offset : index
+  %51 = buffer.view %input[%173] : buffer -> view<1xi32>
+  %second$52 = view.load<root_in_bounds|type_disjoint> %51[0] : view<1xi32> -> i32
+  %56 = scalar.addi %178, %177 : i32
+  %57 = scalar.extui %56 : i32 to i64
+  %58 = index.cast %57 : i64 to index
+  %170 = index.madd %58, %37, %input_byte_offset : index
+  %62 = buffer.view %input[%170] : buffer -> view<1xi32>
+  %third$63 = view.load<root_in_bounds|type_disjoint> %62[0] : view<1xi32> -> i32
+  %66 = scalar.constant 3 : i32
+  %67 = scalar.addi %178, %66 : i32
+  %68 = scalar.extui %67 : i32 to i64
+  %69 = index.cast %68 : i64 to index
+  %167 = index.madd %69, %37, %input_byte_offset : index
+  %73 = buffer.view %input[%167] : buffer -> view<1xi32>
+  %fourth$74 = view.load<root_in_bounds|type_disjoint> %73[0] : view<1xi32> -> i32
+  %last$76 = scalar.constant 5 : i32
+  %first$77, %count$78 = scalar.assume %first$41, %23 [ult(%first$41, %23)] : i32, i32
+  %second$79, %last$80 = scalar.assume %second$52, %last$76 [ule(%second$52, %last$76)] : i32, i32
+  %count$81, %third$82 = scalar.assume %count$78, %third$63 [ugt(%count$78, %third$63)] : i32, i32
+  %last$83, %fourth$84 = scalar.assume %last$80, %fourth$74 [uge(%last$80, %fourth$74)] : i32, i32
+  %85 = scalar.extui %first$77 : i32 to i64
+  %86 = index.cast %85 : i64 to index
+  %88 = index.mul %86, %37 : index
+  %90 = buffer.view %table[%88] : buffer -> view<1xi32>
+  %91 = view.load<root_in_bounds|type_disjoint> %90[0] : view<1xi32> -> i32
+  %164 = index.madd %36, %37, %output_byte_offset : index
+  %99 = buffer.view %output[%164] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %91, %99[0] : i32, view<1xi32>
+  %100 = scalar.extui %second$79 : i32 to i64
+  %101 = index.cast %100 : i64 to index
+  %103 = index.mul %101, %37 : index
+  %105 = buffer.view %table[%103] : buffer -> view<1xi32>
+  %106 = view.load<root_in_bounds|type_disjoint> %105[0] : view<1xi32> -> i32
+  %161 = index.madd %47, %37, %output_byte_offset : index
+  %116 = buffer.view %output[%161] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %106, %116[0] : i32, view<1xi32>
+  %117 = scalar.extui %third$82 : i32 to i64
+  %118 = index.cast %117 : i64 to index
+  %120 = index.mul %118, %37 : index
+  %122 = buffer.view %table[%120] : buffer -> view<1xi32>
+  %123 = view.load<root_in_bounds|type_disjoint> %122[0] : view<1xi32> -> i32
+  %158 = index.madd %58, %37, %output_byte_offset : index
+  %133 = buffer.view %output[%158] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %123, %133[0] : i32, view<1xi32>
+  %134 = scalar.extui %fourth$84 : i32 to i64
+  %135 = index.cast %134 : i64 to index
+  %137 = index.mul %135, %37 : index
+  %139 = buffer.view %table[%137] : buffer -> view<1xi32>
+  %140 = view.load<root_in_bounds|type_disjoint> %139[0] : view<1xi32> -> i32
+  %155 = index.madd %69, %37, %output_byte_offset : index
+  %150 = buffer.view %output[%155] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %140, %150[0] : i32, view<1xi32>
   func.return
 }
 
@@ -204,121 +182,95 @@ kernel.def @assumed_table_u64() {
   %5 = index.constant 32 : index
   kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%5, %2, %2) : index
 } launch(%input: buffer, %output: buffer) {
-  %input_byte_offset = index.constant 0 : offset
-  func.call @assumed_table_indices_unsigned_long_long(%input, %input_byte_offset, %output, %input_byte_offset) : (buffer, offset, buffer, offset)
+  %input_byte_offset = index.constant 0 : index
+  func.call @assumed_table_indices_unsigned_long_long(%input, %input_byte_offset, %output, %input_byte_offset) : (buffer, index, buffer, index)
   kernel.return
 }
 
-func.def inline @assumed_table_indices_unsigned_long_long(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) {
+func.def inline @assumed_table_indices_unsigned_long_long(%input: buffer, %input_byte_offset: index, %output: buffer, %output_byte_offset: index) {
   %workitem_id_x = kernel.workitem.id<x> : index
   %lane = index.cast %workitem_id_x : index to i32
-  %184 = index.constant 24 : offset
-  %table = buffer.alloca<workgroup> align(16) %184 : buffer
+  %154 = index.constant 24 : offset
+  %table = buffer.alloca<workgroup> align(16) %154 : buffer
   %23 = scalar.constant 6 : i32
   %24 = scalar.cmpi ult, %lane, %23 : i32
   scf.if %24 {
-    %175 = scalar.assume %lane [ge(%lane, 0), lt(%lane, 6)] : i32
+    %149 = scalar.assume %lane [ge(%lane, 0), lt(%lane, 6)] : i32
     %25 = scalar.constant 10 : i32
-    %26 = scalar.addi %175, %25 : i32
-    %27 = scalar.extui %175 : i32 to i64
-    %176 = scalar.assume %27 [lt(%27, 6)] : i64
-    %185 = scalar.constant 2 : i64
-    %186 = scalar.shli %176, %185 : i64
-    %32 = scalar.assume %186 [range(%186, 0, 9223372036854775807)] : i64
-    %33 = index.cast %32 : i64 to offset
-    %34 = buffer.view %table[%33] : buffer -> view<1xi32>
-    view.store<root_in_bounds|type_disjoint> %26, %34[0] : i32, view<1xi32>
+    %26 = scalar.addi %149, %25 : i32
+    %27 = scalar.extui %149 : i32 to i64
+    %150 = scalar.assume %27 [lt(%27, 6)] : i64
+    %28 = index.cast %150 : i64 to index
+    %151 = index.assume %28 [lt(%28, 6)] : index
+    %29 = index.constant 4 : index
+    %30 = index.mul %151, %29 : index
+    %32 = buffer.view %table[%30] : buffer -> view<1xi32>
+    view.store<root_in_bounds|type_disjoint> %26, %32[0] : i32, view<1xi32>
   }
   kernel.barrier<global> scope(workgroup) ordering(acq_rel)
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  %225 = scalar.constant 2 : i32
-  %226 = scalar.shli %lane, %225 : i32
-  %37 = scalar.extui %226 : i32 to i64
-  %223 = scalar.constant 3 : i64
-  %224 = scalar.shli %37, %223 : i64
-  %40 = index.cast %input_byte_offset : offset to i64
-  %41 = scalar.addi %40, %224 : i64
-  %42 = scalar.assume %41 [range(%41, 0, 9223372036854775807)] : i64
-  %43 = index.cast %42 : i64 to offset
-  %44 = buffer.view %input[%43] : buffer -> view<1xi64>
-  %first$45 = view.load<root_in_bounds|type_disjoint> %44[0] : view<1xi64> -> i64
-  %48 = scalar.constant 1 : i32
-  %49 = scalar.addi %226, %48 : i32
-  %50 = scalar.extui %49 : i32 to i64
-  %220 = scalar.shli %50, %223 : i64
-  %54 = scalar.addi %40, %220 : i64
-  %55 = scalar.assume %54 [range(%54, 0, 9223372036854775807)] : i64
-  %56 = index.cast %55 : i64 to offset
-  %57 = buffer.view %input[%56] : buffer -> view<1xi64>
-  %second$58 = view.load<root_in_bounds|type_disjoint> %57[0] : view<1xi64> -> i64
-  %62 = scalar.addi %226, %225 : i32
-  %63 = scalar.extui %62 : i32 to i64
-  %216 = scalar.shli %63, %223 : i64
-  %67 = scalar.addi %40, %216 : i64
-  %68 = scalar.assume %67 [range(%67, 0, 9223372036854775807)] : i64
-  %69 = index.cast %68 : i64 to offset
-  %70 = buffer.view %input[%69] : buffer -> view<1xi64>
-  %third$71 = view.load<root_in_bounds|type_disjoint> %70[0] : view<1xi64> -> i64
-  %74 = scalar.constant 3 : i32
-  %75 = scalar.addi %226, %74 : i32
-  %76 = scalar.extui %75 : i32 to i64
-  %212 = scalar.shli %76, %223 : i64
-  %80 = scalar.addi %40, %212 : i64
-  %81 = scalar.assume %80 [range(%80, 0, 9223372036854775807)] : i64
-  %82 = index.cast %81 : i64 to offset
-  %83 = buffer.view %input[%82] : buffer -> view<1xi64>
-  %fourth$84 = view.load<root_in_bounds|type_disjoint> %83[0] : view<1xi64> -> i64
-  %count$182 = scalar.constant 6 : i64
-  %last$181 = scalar.constant 5 : i64
-  %first$89, %count$90 = scalar.assume %first$45, %count$182 [ult(%first$45, %count$182)] : i64, i64
-  %second$91, %last$92 = scalar.assume %second$58, %last$181 [ule(%second$58, %last$181)] : i64, i64
-  %count$93, %third$94 = scalar.assume %count$90, %third$71 [ugt(%count$90, %third$71)] : i64, i64
-  %last$95, %fourth$96 = scalar.assume %last$92, %fourth$84 [uge(%last$92, %fourth$84)] : i64, i64
-  %209 = scalar.constant 2 : i64
-  %210 = scalar.shli %first$89, %209 : i64
-  %101 = scalar.assume %210 [range(%210, 0, 9223372036854775807)] : i64
-  %102 = index.cast %101 : i64 to offset
-  %103 = buffer.view %table[%102] : buffer -> view<1xi32>
-  %104 = view.load<root_in_bounds|type_disjoint> %103[0] : view<1xi32> -> i32
-  %206 = scalar.shli %37, %209 : i64
-  %110 = index.cast %output_byte_offset : offset to i64
-  %111 = scalar.addi %110, %206 : i64
-  %112 = scalar.assume %111 [range(%111, 0, 9223372036854775807)] : i64
-  %113 = index.cast %112 : i64 to offset
-  %114 = buffer.view %output[%113] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %104, %114[0] : i32, view<1xi32>
-  %204 = scalar.shli %second$91, %209 : i64
-  %119 = scalar.assume %204 [range(%204, 0, 9223372036854775807)] : i64
-  %120 = index.cast %119 : i64 to offset
-  %121 = buffer.view %table[%120] : buffer -> view<1xi32>
+  %177 = scalar.constant 2 : i32
+  %178 = scalar.shli %lane, %177 : i32
+  %35 = scalar.extui %178 : i32 to i64
+  %36 = index.cast %35 : i64 to index
+  %37 = index.constant 8 : index
+  %176 = index.madd %36, %37, %input_byte_offset : index
+  %40 = buffer.view %input[%176] : buffer -> view<1xi64>
+  %first$41 = view.load<root_in_bounds|type_disjoint> %40[0] : view<1xi64> -> i64
+  %44 = scalar.constant 1 : i32
+  %45 = scalar.addi %178, %44 : i32
+  %46 = scalar.extui %45 : i32 to i64
+  %47 = index.cast %46 : i64 to index
+  %173 = index.madd %47, %37, %input_byte_offset : index
+  %51 = buffer.view %input[%173] : buffer -> view<1xi64>
+  %second$52 = view.load<root_in_bounds|type_disjoint> %51[0] : view<1xi64> -> i64
+  %56 = scalar.addi %178, %177 : i32
+  %57 = scalar.extui %56 : i32 to i64
+  %58 = index.cast %57 : i64 to index
+  %170 = index.madd %58, %37, %input_byte_offset : index
+  %62 = buffer.view %input[%170] : buffer -> view<1xi64>
+  %third$63 = view.load<root_in_bounds|type_disjoint> %62[0] : view<1xi64> -> i64
+  %66 = scalar.constant 3 : i32
+  %67 = scalar.addi %178, %66 : i32
+  %68 = scalar.extui %67 : i32 to i64
+  %69 = index.cast %68 : i64 to index
+  %167 = index.madd %69, %37, %input_byte_offset : index
+  %73 = buffer.view %input[%167] : buffer -> view<1xi64>
+  %fourth$74 = view.load<root_in_bounds|type_disjoint> %73[0] : view<1xi64> -> i64
+  %count$153 = scalar.constant 6 : i64
+  %last$152 = scalar.constant 5 : i64
+  %first$79, %count$80 = scalar.assume %first$41, %count$153 [ult(%first$41, %count$153)] : i64, i64
+  %second$81, %last$82 = scalar.assume %second$52, %last$152 [ule(%second$52, %last$152)] : i64, i64
+  %count$83, %third$84 = scalar.assume %count$80, %third$63 [ugt(%count$80, %third$63)] : i64, i64
+  %last$85, %fourth$86 = scalar.assume %last$82, %fourth$74 [uge(%last$82, %fourth$74)] : i64, i64
+  %87 = index.cast %first$79 : i64 to index
+  %88 = index.constant 4 : index
+  %89 = index.mul %87, %88 : index
+  %91 = buffer.view %table[%89] : buffer -> view<1xi32>
+  %92 = view.load<root_in_bounds|type_disjoint> %91[0] : view<1xi32> -> i32
+  %164 = index.madd %36, %88, %output_byte_offset : index
+  %100 = buffer.view %output[%164] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %92, %100[0] : i32, view<1xi32>
+  %101 = index.cast %second$81 : i64 to index
+  %103 = index.mul %101, %88 : index
+  %105 = buffer.view %table[%103] : buffer -> view<1xi32>
+  %106 = view.load<root_in_bounds|type_disjoint> %105[0] : view<1xi32> -> i32
+  %161 = index.madd %47, %88, %output_byte_offset : index
+  %116 = buffer.view %output[%161] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %106, %116[0] : i32, view<1xi32>
+  %117 = index.cast %third$84 : i64 to index
+  %119 = index.mul %117, %88 : index
+  %121 = buffer.view %table[%119] : buffer -> view<1xi32>
   %122 = view.load<root_in_bounds|type_disjoint> %121[0] : view<1xi32> -> i32
-  %200 = scalar.shli %50, %209 : i64
-  %131 = scalar.addi %110, %200 : i64
-  %132 = scalar.assume %131 [range(%131, 0, 9223372036854775807)] : i64
-  %133 = index.cast %132 : i64 to offset
-  %134 = buffer.view %output[%133] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %122, %134[0] : i32, view<1xi32>
-  %198 = scalar.shli %third$94, %209 : i64
-  %139 = scalar.assume %198 [range(%198, 0, 9223372036854775807)] : i64
-  %140 = index.cast %139 : i64 to offset
-  %141 = buffer.view %table[%140] : buffer -> view<1xi32>
-  %142 = view.load<root_in_bounds|type_disjoint> %141[0] : view<1xi32> -> i32
-  %194 = scalar.shli %63, %209 : i64
-  %151 = scalar.addi %110, %194 : i64
-  %152 = scalar.assume %151 [range(%151, 0, 9223372036854775807)] : i64
-  %153 = index.cast %152 : i64 to offset
-  %154 = buffer.view %output[%153] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %142, %154[0] : i32, view<1xi32>
-  %192 = scalar.shli %fourth$96, %209 : i64
-  %159 = scalar.assume %192 [range(%192, 0, 9223372036854775807)] : i64
-  %160 = index.cast %159 : i64 to offset
-  %161 = buffer.view %table[%160] : buffer -> view<1xi32>
-  %162 = view.load<root_in_bounds|type_disjoint> %161[0] : view<1xi32> -> i32
-  %188 = scalar.shli %76, %209 : i64
-  %171 = scalar.addi %110, %188 : i64
-  %172 = scalar.assume %171 [range(%171, 0, 9223372036854775807)] : i64
-  %173 = index.cast %172 : i64 to offset
-  %174 = buffer.view %output[%173] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %162, %174[0] : i32, view<1xi32>
+  %158 = index.madd %58, %88, %output_byte_offset : index
+  %132 = buffer.view %output[%158] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %122, %132[0] : i32, view<1xi32>
+  %133 = index.cast %fourth$86 : i64 to index
+  %135 = index.mul %133, %88 : index
+  %137 = buffer.view %table[%135] : buffer -> view<1xi32>
+  %138 = view.load<root_in_bounds|type_disjoint> %137[0] : view<1xi32> -> i32
+  %155 = index.madd %69, %88, %output_byte_offset : index
+  %148 = buffer.view %output[%155] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %138, %148[0] : i32, view<1xi32>
   func.return
 }

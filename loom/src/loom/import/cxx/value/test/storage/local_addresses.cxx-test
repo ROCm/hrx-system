@@ -38,7 +38,7 @@ uint4 copy(uint4 input) {
 func.def public @select(%first: i1, %left: f64, %right: f64) -> (f64) {
   %4 = index.constant 8 : offset
   %result_storage = buffer.alloca<private> align(8) %4 : buffer
-  %result_storage_byte_offset = index.constant 0 : offset
+  %result_storage_byte_offset = index.constant 0 : index
   %result_view = buffer.view %result_storage[%result_storage_byte_offset] : buffer -> view<1xf64>
   scf.if %first {
     view.store<type_disjoint> %left, %result_view[0] : f64, view<1xf64>
@@ -52,7 +52,7 @@ func.def public @select(%first: i1, %left: f64, %right: f64) -> (f64) {
 func.def public @copy(%input: vector<4xi32>) -> (vector<4xi32>) {
   %11 = index.constant 16 : offset
   %result_storage = buffer.alloca<private> align(16) %11 : buffer
-  %result_storage_byte_offset = index.constant 0 : offset
+  %result_storage_byte_offset = index.constant 0 : index
   %result_view = buffer.view %result_storage[%result_storage_byte_offset] : buffer -> view<4xi32>
   vector.store %input, %result_view[0] : vector<4xi32>, view<4xi32>
   %result = vector.load %result_view[0] : view<4xi32> -> vector<4xi32>
@@ -73,15 +73,15 @@ unsigned output_parameter() {
 func.def public @output_parameter() -> (i32) {
   %1 = index.constant 2 : offset
   %value_storage = buffer.alloca<private> align(32) %1 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
+  %value_storage_byte_offset = index.constant 0 : index
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi16>
-  func.call @initialize(%value_storage, %value_storage_byte_offset) : (buffer, offset)
+  func.call @initialize(%value_storage, %value_storage_byte_offset) : (buffer, index)
   %value = view.load<type_disjoint> %value_view[0] : view<1xi16> -> i16
   %6 = scalar.extui %value : i16 to i32
   func.return %6 : i32
 }
 
-func.def inline @initialize(%value: buffer, %value_byte_offset: offset) {
+func.def inline @initialize(%value: buffer, %value_byte_offset: index) {
   %9 = scalar.constant 7 : i32
   %10 = scalar.trunci %9 : i32 to i16
   %11 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi16>
@@ -102,7 +102,7 @@ unsigned observations(unsigned input) {
 func.def public @observations(%input: i32) -> (i32) {
   %2 = index.constant 4 : offset
   %value_storage = buffer.alloca<private> align(4) %2 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
+  %value_storage_byte_offset = index.constant 0 : index
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
   view.store<volatile|type_disjoint> %input, %value_view[0] : i32, view<1xi32>
   %value$6 = view.load<volatile|type_disjoint> %value_view[0] : view<1xi32> -> i32
@@ -351,7 +351,7 @@ unsigned atomic_local(unsigned input) {
 func.def public @atomic_local(%input: i32) -> (i32) {
   %2 = index.constant 4 : offset
   %value_storage = buffer.alloca<private> align(4) %2 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
+  %value_storage_byte_offset = index.constant 0 : index
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
   view.store<type_disjoint> %input, %value_view[0] : i32, view<1xi32>
   %10 = scalar.constant 1 : i32
@@ -394,7 +394,7 @@ unsigned vector_local(unsigned input) {
 func.def public @vector_local(%input: i32) -> (i32) {
   %2 = index.constant 16 : offset
   %value_storage = buffer.alloca<private> align(16) %2 : buffer
-  %value_storage_byte_offset = index.constant 0 : offset
+  %value_storage_byte_offset = index.constant 0 : index
   %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<4xi32>
   %40 = vector.splat %input : vector<4xi32>
   vector.store %40, %value_view[0] : vector<4xi32>, view<4xi32>

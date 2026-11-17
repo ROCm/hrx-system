@@ -26,6 +26,20 @@ extern "C" const unsigned* loom_advance(const unsigned* base) {
   return base + 3;
 }
 
+extern "C" const unsigned* loom_retreat(const unsigned* interior, int count) {
+  return interior - count;
+}
+
+extern "C" unsigned loom_read_previous(const unsigned* interior) {
+  return interior[-1];
+}
+
+extern "C" Payload* loom_payload(Complete* object) { return object; }
+
+extern "C" Complete* loom_complete(Payload* object) {
+  return static_cast<Complete*>(object);
+}
+
 extern "C" Pair loom_call_native_pair(Pair value) { return native_pair(value); }
 
 extern "C" Mixed loom_call_native_mixed(Mixed value) {
@@ -42,4 +56,8 @@ extern "C" Words4 loom_call_native_words(Words4 value) {
 
 extern "C" const unsigned* loom_call_native_advance(const unsigned* base) {
   return native_advance(base + 1);
+}
+
+extern "C" const unsigned* loom_call_native_retreat(const unsigned* interior) {
+  return native_retreat(interior) - 1;
 }

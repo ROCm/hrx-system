@@ -7,28 +7,28 @@ const unsigned char* empty() { return loom::buffer::constant(""); }
 const unsigned char* zero() { return loom::buffer::constant(u8"\0"); }
 
 // ----
-func.def public @raw() -> (buffer, offset) {
+func.def public @raw() -> (buffer, index) {
   %2 = buffer.constant align(16) bytes("6100ff") : buffer
-  %3 = index.constant 0 : offset
-  func.return %2, %3 : buffer, offset
+  %3 = index.constant 0 : index
+  func.return %2, %3 : buffer, index
 }
 
-func.def public @text() -> (buffer, offset) {
+func.def public @text() -> (buffer, index) {
   %6 = buffer.constant align(1) utf8("café 🧵") : buffer
-  %7 = index.constant 0 : offset
-  func.return %6, %7 : buffer, offset
+  %7 = index.constant 0 : index
+  func.return %6, %7 : buffer, index
 }
 
-func.def public @empty() -> (buffer, offset) {
+func.def public @empty() -> (buffer, index) {
   %10 = buffer.constant align(1) bytes("") : buffer
-  %11 = index.constant 0 : offset
-  func.return %10, %11 : buffer, offset
+  %11 = index.constant 0 : index
+  func.return %10, %11 : buffer, index
 }
 
-func.def public @zero() -> (buffer, offset) {
+func.def public @zero() -> (buffer, index) {
   %14 = buffer.constant align(1) utf8("\u0000") : buffer
-  %15 = index.constant 0 : offset
-  func.return %14, %15 : buffer, offset
+  %15 = index.constant 0 : index
+  func.return %14, %15 : buffer, index
 }
 
 // ====
@@ -47,18 +47,17 @@ func.def public @initialized(%position: i32, %replacement: i32) -> (i32) {
   %second = buffer.alloca.init<private> align(8) bytes("61626364") : buffer
   %7 = scalar.trunci %replacement : i32 to i8
   %8 = scalar.extui %position : i32 to i64
-  %13 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
-  %14 = index.cast %13 : i64 to offset
-  %15 = index.assume %14 [range(%14, 0, 3)] : offset
-  %16 = buffer.view %first[%15] : buffer -> view<1xi8>
-  view.store %7, %16[0] : i8, view<1xi8>
-  %26 = view.load %16[0] : view<1xi8> -> i8
-  %27 = scalar.extui %26 : i8 to i32
-  %36 = buffer.view %second[%15] : buffer -> view<1xi8>
-  %37 = view.load %36[0] : view<1xi8> -> i8
-  %38 = scalar.extui %37 : i8 to i32
-  %39 = scalar.addi %27, %38 : i32
-  func.return %39 : i32
+  %9 = index.cast %8 : i64 to index
+  %13 = index.assume %9 [range(%9, 0, 3)] : index
+  %14 = buffer.view %first[%13] : buffer -> view<1xi8>
+  view.store %7, %14[0] : i8, view<1xi8>
+  %22 = view.load %14[0] : view<1xi8> -> i8
+  %23 = scalar.extui %22 : i8 to i32
+  %30 = buffer.view %second[%13] : buffer -> view<1xi8>
+  %31 = view.load %30[0] : view<1xi8> -> i8
+  %32 = scalar.extui %31 : i8 to i32
+  %33 = scalar.addi %23, %32 : i32
+  func.return %33 : i32
 }
 
 // ====
@@ -101,10 +100,10 @@ unsigned char* readonly_space() {
 const unsigned char* compatibility() { return loom::buffer::constant("abc"); }
 
 // ----
-func.def public @compatibility() -> (buffer, offset) {
+func.def public @compatibility() -> (buffer, index) {
   %2 = buffer.constant align(1) bytes("616263") : buffer
-  %3 = index.constant 0 : offset
-  func.return %2, %3 : buffer, offset
+  %3 = index.constant 0 : index
+  func.return %2, %3 : buffer, index
 }
 
 // ====
@@ -145,24 +144,23 @@ func.def public @payloads(%position$0: i32, %replacement: i32) -> (i32) {
   %second = buffer.alloca.init<private> align(16) bytes("6100ff5a") : buffer
   %10 = scalar.trunci %replacement : i32 to i8
   %11 = scalar.extui %position$3 : i32 to i64
-  %16 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
-  %17 = index.cast %16 : i64 to offset
-  %18 = index.assume %17 [range(%17, 0, 3)] : offset
-  %19 = buffer.view %first[%18] : buffer -> view<1xi8>
-  view.store %10, %19[0] : i8, view<1xi8>
-  %29 = view.load %19[0] : view<1xi8> -> i8
-  %30 = scalar.extui %29 : i8 to i32
-  %40 = buffer.view %second[%18] : buffer -> view<1xi8>
-  %41 = view.load %40[0] : view<1xi8> -> i8
-  %42 = scalar.extui %41 : i8 to i32
-  %61 = scalar.constant 8 : i32
-  %62 = scalar.shli %42, %61 : i32
-  %44 = scalar.addi %30, %62 : i32
-  %54 = buffer.view %original[%18] : buffer -> view<1xi8>
-  %55 = view.load %54[0] : view<1xi8> -> i8
-  %56 = scalar.extui %55 : i8 to i32
-  %59 = scalar.constant 16 : i32
-  %60 = scalar.shli %56, %59 : i32
-  %58 = scalar.addi %44, %60 : i32
-  func.return %58 : i32
+  %12 = index.cast %11 : i64 to index
+  %16 = index.assume %12 [range(%12, 0, 3)] : index
+  %17 = buffer.view %first[%16] : buffer -> view<1xi8>
+  view.store %10, %17[0] : i8, view<1xi8>
+  %25 = view.load %17[0] : view<1xi8> -> i8
+  %26 = scalar.extui %25 : i8 to i32
+  %34 = buffer.view %second[%16] : buffer -> view<1xi8>
+  %35 = view.load %34[0] : view<1xi8> -> i8
+  %36 = scalar.extui %35 : i8 to i32
+  %53 = scalar.constant 8 : i32
+  %54 = scalar.shli %36, %53 : i32
+  %38 = scalar.addi %26, %54 : i32
+  %46 = buffer.view %original[%16] : buffer -> view<1xi8>
+  %47 = view.load %46[0] : view<1xi8> -> i8
+  %48 = scalar.extui %47 : i8 to i32
+  %51 = scalar.constant 16 : i32
+  %52 = scalar.shli %48, %51 : i32
+  %50 = scalar.addi %38, %52 : i32
+  func.return %50 : i32
 }

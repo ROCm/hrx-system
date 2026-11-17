@@ -104,42 +104,39 @@ kernel.def @write_value() {
   %7 = index.constant 1 : index
   kernel.launch.config workgroups(%2, %3, %4) workgroup_size(%5, %6, %7) : index
 } launch(%output: buffer, %value: i32) {
-  %output_byte_offset = index.constant 0 : offset
+  %output_byte_offset = index.constant 0 : index
   %9 = scalar.constant 0 : i32
-  %10 = scalar.extsi %9 : i32 to i64
-  %11 = scalar.constant 4 : i64
-  %12 = scalar.muli %10, %11 : i64
-  %13 = index.cast %output_byte_offset : offset to i64
-  %14 = scalar.addi %13, %12 : i64
-  %15 = scalar.assume %14 [range(%14, 0, 9223372036854775807)] : i64
-  %16 = index.cast %15 : i64 to offset
-  %17 = buffer.view %output[%16] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %value, %17[0] : i32, view<1xi32>
+  %10 = index.cast %9 : i32 to index
+  %11 = index.constant 4 : index
+  %12 = index.mul %10, %11 : index
+  %13 = index.add %output_byte_offset, %12 : index
+  %14 = buffer.view %output[%13] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %value, %14[0] : i32, view<1xi32>
   kernel.return
 }
 
 func.def public @write_value_oracle(%output: buffer, %value: i32) {
   %values_layout = encoding.layout.dense : encoding<layout>
-  %21 = index.constant 0 : offset
-  %values = buffer.view %output[%21] : buffer -> view<1xi32, %values_layout>
-  %23 = scalar.constant 0 : i32
-  %24 = index.cast %23 : i32 to index
-  view.store<type_disjoint> %value, %values[%24] : i32, view<1xi32, %values_layout>
+  %18 = index.constant 0 : index
+  %values = buffer.view %output[%18] : buffer -> view<1xi32, %values_layout>
+  %20 = scalar.constant 0 : i32
+  %21 = index.cast %20 : i32 to index
+  view.store<type_disjoint> %value, %values[%21] : i32, view<1xi32, %values_layout>
   func.return
 }
 
 check.scenario public @tensor_actions {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %storage = check.generate.fill value(0) : tensor<1xi32>
-    %28 = check.literal value(7) : i32
-    check.compare<@write_value, @write_value_oracle>(%storage, %28) : (tensor<1xi32>, i32) -> () {
+    %25 = check.literal value(7) : i32
+    check.compare<@write_value, @write_value_oracle>(%storage, %25) : (tensor<1xi32>, i32) -> () {
       check.expect.bitwise actual(%storage) expected(%storage) : tensor<1xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %storage = check.generate.fill value(0) : tensor<1xi32>
-    %32 = check.literal value(11) : i32
-    check.invoke<@write_value>(%storage, %32) : (tensor<1xi32>, i32) -> ()
+    %29 = check.literal value(11) : i32
+    check.invoke<@write_value>(%storage, %29) : (tensor<1xi32>, i32) -> ()
   }
   check.return
 }
@@ -194,28 +191,22 @@ kernel.def @copy_first() {
   %13 = index.constant 1 : index
   kernel.launch.config workgroups(%8, %9, %10) workgroup_size(%11, %12, %13) : index
 } launch(%input: buffer, %output: buffer) {
-  %input_byte_offset = index.constant 0 : offset
-  %output_byte_offset = index.constant 0 : offset
+  %input_byte_offset = index.constant 0 : index
+  %output_byte_offset = index.constant 0 : index
   %16 = scalar.constant 0 : i32
-  %17 = scalar.extsi %16 : i32 to i64
-  %18 = scalar.constant 4 : i64
-  %19 = scalar.muli %17, %18 : i64
-  %20 = index.cast %input_byte_offset : offset to i64
-  %21 = scalar.addi %20, %19 : i64
-  %22 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
-  %23 = index.cast %22 : i64 to offset
-  %24 = buffer.view %input[%23] : buffer -> view<1xi32>
-  %25 = view.load<root_in_bounds|type_disjoint> %24[0] : view<1xi32> -> i32
-  %26 = scalar.constant 0 : i32
-  %27 = scalar.extsi %26 : i32 to i64
-  %28 = scalar.constant 4 : i64
-  %29 = scalar.muli %27, %28 : i64
-  %30 = index.cast %output_byte_offset : offset to i64
-  %31 = scalar.addi %30, %29 : i64
-  %32 = scalar.assume %31 [range(%31, 0, 9223372036854775807)] : i64
-  %33 = index.cast %32 : i64 to offset
-  %34 = buffer.view %output[%33] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %25, %34[0] : i32, view<1xi32>
+  %17 = index.cast %16 : i32 to index
+  %18 = index.constant 4 : index
+  %19 = index.mul %17, %18 : index
+  %20 = index.add %input_byte_offset, %19 : index
+  %21 = buffer.view %input[%20] : buffer -> view<1xi32>
+  %22 = view.load<root_in_bounds|type_disjoint> %21[0] : view<1xi32> -> i32
+  %23 = scalar.constant 0 : i32
+  %24 = index.cast %23 : i32 to index
+  %25 = index.constant 4 : index
+  %26 = index.mul %24, %25 : index
+  %27 = index.add %output_byte_offset, %26 : index
+  %28 = buffer.view %output[%27] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %22, %28[0] : i32, view<1xi32>
   kernel.return
 }
 

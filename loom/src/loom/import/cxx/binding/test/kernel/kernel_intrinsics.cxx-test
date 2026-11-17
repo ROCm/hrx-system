@@ -26,22 +26,21 @@ kernel.def @entry() {
   %13 = scalar.constant 32 : i32
   %14 = scalar.cmpi ult, %lane, %13 : i32
   scf.if %14 {
-    %46 = scalar.assume %lane [lt(%lane, 32)] : i32
-    %49 = scalar.constant 65 : i32
+    %42 = scalar.assume %lane [lt(%lane, 32)] : i32
+    %43 = scalar.constant 65 : i32
     %23 = kernel.subgroup.size : index
     %24 = index.cast %23 : index to i32
-    %54 = scalar.addi %24, %49 : i32
-    %26 = scalar.extui %46 : i32 to i64
-    %52 = scalar.constant 2 : i64
-    %53 = scalar.shli %26, %52 : i64
-    %31 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
-    %32 = index.cast %31 : i64 to offset
-    %33 = buffer.view %coordinates[%32] : buffer -> view<1xi32>
-    view.store<root_in_bounds|type_disjoint> %54, %33[0] : i32, view<1xi32>
-    %34 = scalar.constant 1 : i32
-    %36, %37 = kernel.subgroup.shuffle<xor> %value, %34, %13 : f32, i32, i32
-    %45 = buffer.view %output[%32] : buffer -> view<1xf32>
-    view.store<root_in_bounds|type_disjoint> %36, %45[0] : f32, view<1xf32>
+    %44 = scalar.addi %24, %43 : i32
+    %26 = scalar.extui %42 : i32 to i64
+    %27 = index.cast %26 : i64 to index
+    %28 = index.constant 4 : index
+    %29 = index.mul %27, %28 : index
+    %31 = buffer.view %coordinates[%29] : buffer -> view<1xi32>
+    view.store<root_in_bounds|type_disjoint> %44, %31[0] : i32, view<1xi32>
+    %32 = scalar.constant 1 : i32
+    %34, %35 = kernel.subgroup.shuffle<xor> %value, %32, %13 : f32, i32, i32
+    %41 = buffer.view %output[%29] : buffer -> view<1xf32>
+    view.store<root_in_bounds|type_disjoint> %34, %41[0] : f32, view<1xf32>
   }
   func.call @synchronize() : ()
   kernel.return
@@ -68,25 +67,22 @@ void guarded_barrier(const unsigned* header) {
   }
 }
 // ----
-func.def public linkonce inline @header_enables_barrier(%header: buffer, %header_byte_offset: offset) -> (i1) {
-  %7 = index.cast %header_byte_offset : offset to i64
-  %9 = scalar.assume %7 [range(%7, 0, 9223372036854775807)] : i64
-  %10 = index.cast %9 : i64 to offset
-  %11 = buffer.view %header[%10] : buffer -> view<1xi32>
-  %12 = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xi32> -> i32
-  %13 = scalar.constant 0 : i32
-  %14 = scalar.cmpi ne, %12, %13 : i32
-  func.return %14 : i1
+func.def public linkonce inline @header_enables_barrier(%header: buffer, %header_byte_offset: index) -> (i1) {
+  %8 = buffer.view %header[%header_byte_offset] : buffer -> view<1xi32>
+  %9 = view.load<root_in_bounds|type_disjoint> %8[0] : view<1xi32> -> i32
+  %10 = scalar.constant 0 : i32
+  %11 = scalar.cmpi ne, %9, %10 : i32
+  func.return %11 : i1
 }
 
 kernel.def @guarded_barrier() {
-  %16 = index.constant 1 : index
-  %19 = index.constant 64 : index
-  kernel.launch.config workgroups(%16, %16, %16) workgroup_size(%19, %16, %16) : index
+  %13 = index.constant 1 : index
+  %16 = index.constant 64 : index
+  kernel.launch.config workgroups(%13, %13, %13) workgroup_size(%16, %13, %13) : index
 } launch(%header: buffer) {
-  %header_byte_offset = index.constant 0 : offset
-  %23 = func.call readonly @header_enables_barrier(%header, %header_byte_offset) : (buffer, offset) -> (i1)
-  scf.if %23 {
+  %header_byte_offset = index.constant 0 : index
+  %20 = func.call readonly @header_enables_barrier(%header, %header_byte_offset) : (buffer, index) -> (i1)
+  scf.if %20 {
     kernel.barrier<global> scope(workgroup) ordering(acq_rel)
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
   }
@@ -120,41 +116,40 @@ kernel.def @entry() {
   %lane = index.cast %workitem_id_x : index to i32
   %13 = func.call pure @topology() : () -> (i32)
   %14 = scalar.extui %lane : i32 to i64
-  %54 = scalar.constant 2 : i64
-  %55 = scalar.shli %14, %54 : i64
-  %19 = scalar.assume %55 [range(%55, 0, 9223372036854775807)] : i64
-  %20 = index.cast %19 : i64 to offset
-  %21 = buffer.view %coordinates[%20] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %13, %21[0] : i32, view<1xi32>
-  %22 = func.call @exchange(%value) : (f32) -> (f32)
-  %30 = buffer.view %output[%20] : buffer -> view<1xf32>
-  view.store<root_in_bounds|type_disjoint> %22, %30[0] : f32, view<1xf32>
+  %15 = index.cast %14 : i64 to index
+  %16 = index.constant 4 : index
+  %17 = index.mul %15, %16 : index
+  %19 = buffer.view %coordinates[%17] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %13, %19[0] : i32, view<1xi32>
+  %20 = func.call @exchange(%value) : (f32) -> (f32)
+  %26 = buffer.view %output[%17] : buffer -> view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %20, %26[0] : f32, view<1xf32>
   kernel.return
 }
 
 func.def inline @topology() -> (i32) {
   %workitem_id_x = kernel.workitem.id<x> : index
-  %33 = index.cast %workitem_id_x : index to i32
+  %29 = index.cast %workitem_id_x : index to i32
   %workgroup_id_x = kernel.workgroup.id<x> : index
-  %35 = index.cast %workgroup_id_x : index to i32
-  %36 = scalar.addi %33, %35 : i32
+  %31 = index.cast %workgroup_id_x : index to i32
+  %32 = scalar.addi %29, %31 : i32
   %workgroup_size_x = kernel.workgroup.size<x> : index
-  %38 = index.cast %workgroup_size_x : index to i32
-  %39 = scalar.addi %36, %38 : i32
+  %34 = index.cast %workgroup_size_x : index to i32
+  %35 = scalar.addi %32, %34 : i32
   %workgroup_count_x = kernel.workgroup.count<x> : index
-  %41 = index.cast %workgroup_count_x : index to i32
-  %42 = scalar.addi %39, %41 : i32
-  %43 = kernel.subgroup.size : index
-  %44 = index.cast %43 : index to i32
-  %45 = scalar.addi %42, %44 : i32
-  func.return %45 : i32
+  %37 = index.cast %workgroup_count_x : index to i32
+  %38 = scalar.addi %35, %37 : i32
+  %39 = kernel.subgroup.size : index
+  %40 = index.cast %39 : index to i32
+  %41 = scalar.addi %38, %40 : i32
+  func.return %41 : i32
 }
 
 func.def device inline @exchange(%value: f32) -> (f32) {
-  %48 = scalar.constant 1 : i32
-  %49 = scalar.constant 32 : i32
-  %50, %51 = kernel.subgroup.shuffle<xor> %value, %48, %49 : f32, i32, i32
-  func.return %50 : f32
+  %44 = scalar.constant 1 : i32
+  %45 = scalar.constant 32 : i32
+  %46, %47 = kernel.subgroup.shuffle<xor> %value, %44, %45 : f32, i32, i32
+  func.return %46 : f32
 }
 
 // ====
@@ -192,7 +187,7 @@ kernel.def @topology_identity() {
   %4 = index.constant 4 : index
   kernel.launch.config workgroups(%1, %1, %1) workgroup_size(%4, %1, %1) : index
 } launch(%output: buffer) {
-  %output_byte_offset = index.constant 0 : offset
+  %output_byte_offset = index.constant 0 : index
   %workitem_id_x = kernel.workitem.id<x> : index
   %coordinate = index.assume %workitem_id_x [range(%workitem_id_x, 0, 3)] : index
   %subgroup = kernel.subgroup.id : index
@@ -209,17 +204,15 @@ kernel.def @topology_identity() {
   %23 = index.cast %22 : i64 to index
   view.store<type_disjoint> %lane, %values_view[%23] : i32, view<4xi32>
   %33 = view.load<type_disjoint> %values_view[%23] : view<4xi32> -> i32
-  %55 = scalar.addi %lane, %33 : i32
-  %53 = scalar.constant 2 : i64
-  %54 = scalar.shli %22, %53 : i64
-  %41 = scalar.assume %54 [range(%54, 0, 9223372036854775807)] : i64
-  %42 = index.cast %41 : i64 to offset
-  %43 = buffer.view %output[%42] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %55, %43[0] : i32, view<1xi32>
+  %51 = scalar.addi %lane, %33 : i32
+  %38 = index.constant 4 : index
+  %39 = index.mul %23, %38 : index
+  %41 = buffer.view %output[%39] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %51, %41[0] : i32, view<1xi32>
   %output_view = buffer.view %output[%output_byte_offset] : buffer -> view<4xi32>
   view.store<type_disjoint> %lane, %output_view[%coordinate] : i32, view<4xi32>
-  %50 = index.add %subgroup, %subgroup_count : index
-  %subgroup_topology = index.add %50, %subgroup_size : index
+  %48 = index.add %subgroup, %subgroup_count : index
+  %subgroup_topology = index.add %48, %subgroup_size : index
   %subgroup_value = index.cast %subgroup_topology : index to i32
   view.store<type_disjoint> %subgroup_value, %output_view[%subgroup_lane$14] : i32, view<4xi32>
   kernel.return

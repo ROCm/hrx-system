@@ -11,15 +11,15 @@ bool boolean_transfer(volatile bool* destination, const volatile bool* source) {
 low.func.def public target<amd.xdna.aie2p.core> abi(object_function) @boolean_transfer(%destination_byte_offset: reg<aie2p.er>, %source_byte_offset: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
   %destination = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %source = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
-  %25 = mov.address-index %source_byte_offset
-  %26 = lda.i8.index.volatile<volatile> %source, %25
-  %27 = extend.u8 %26
-  %value = nez %27
-  %29 = mov.short 1
-  %30 = mov.short 0
-  %31 = copy %value : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %32 = sel.nez %29, %30, %31
-  %33 = mov.address-index %destination_byte_offset
-  st.i8.index.volatile<volatile> %32, %destination, %33
+  %23 = mov.address-index %source_byte_offset
+  %24 = lda.i8.index.volatile<volatile> %source, %23
+  %25 = extend.u8 %24
+  %value = nez %25
+  %27 = mov.short 1
+  %28 = mov.short 0
+  %29 = copy %value : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %30 = sel.nez %27, %28, %29
+  %31 = mov.address-index %destination_byte_offset
+  st.i8.index.volatile<volatile> %30, %destination, %31
   return %value
 }

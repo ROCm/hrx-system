@@ -17,34 +17,34 @@ bool returned_identity(unsigned value) {
 func.def public @returned_identity(%value: i32) -> (i1) {
   %4 = index.constant 4 : offset
   %object_storage = buffer.alloca<private> align(4) %4 : buffer
-  %object_storage_byte_offset = index.constant 0 : offset
-  %observed, %observed_byte_offset = func.call @forward(%object_storage, %object_storage_byte_offset, %value) : (buffer, offset, i32) -> (buffer, offset)
+  %object_storage_byte_offset = index.constant 0 : index
+  %observed, %observed_byte_offset = func.call @forward(%object_storage, %object_storage_byte_offset, %value) : (buffer, index, i32) -> (buffer, index)
   %12 = buffer.compare.address eq, %observed[%observed_byte_offset], %object_storage[%object_storage_byte_offset]
-  func.call @Identity___Identity_storage(%object_storage, %object_storage_byte_offset) : (buffer, offset)
+  func.call @Identity___Identity_storage(%object_storage, %object_storage_byte_offset) : (buffer, index)
   func.return %12 : i1
 }
 
-func.def noinline @forward(%result: buffer, %result_byte_offset: offset, %value: i32) -> (buffer, offset) {
-  %observed, %observed_byte_offset = func.call @make(%result, %result_byte_offset, %value) : (buffer, offset, i32) -> (buffer, offset)
-  func.return %observed, %observed_byte_offset : buffer, offset
+func.def noinline @forward(%result: buffer, %result_byte_offset: index, %value: i32) -> (buffer, index) {
+  %observed, %observed_byte_offset = func.call @make(%result, %result_byte_offset, %value) : (buffer, index, i32) -> (buffer, index)
+  func.return %observed, %observed_byte_offset : buffer, index
 }
 
-func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: offset) {
+func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: index) {
   %22 = scalar.constant 0 : i32
   %25 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %22, %25[0] : i32, view<1xi32>
   func.return
 }
 
-func.def noinline @make(%result: buffer, %result_byte_offset: offset, %value: i32) -> (buffer, offset) {
-  %observed, %observed_byte_offset = func.call @Identity__Identity_storage(%result, %result_byte_offset, %value) : (buffer, offset, i32) -> (buffer, offset)
-  func.return %observed, %observed_byte_offset : buffer, offset
+func.def noinline @make(%result: buffer, %result_byte_offset: index, %value: i32) -> (buffer, index) {
+  %observed, %observed_byte_offset = func.call @Identity__Identity_storage(%result, %result_byte_offset, %value) : (buffer, index, i32) -> (buffer, index)
+  func.return %observed, %observed_byte_offset : buffer, index
 }
 
-func.def inline @Identity__Identity_storage(%this: buffer, %this_byte_offset: offset, %input: i32) -> (buffer, offset) {
+func.def inline @Identity__Identity_storage(%this: buffer, %this_byte_offset: index, %input: i32) -> (buffer, index) {
   %40 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %input, %40[0] : i32, view<1xi32>
-  func.return %this, %this_byte_offset : buffer, offset
+  func.return %this, %this_byte_offset : buffer, index
 }
 
 // ====
@@ -70,9 +70,9 @@ func.def public @parameter_identity(%value: i32) -> (i1) {
   %count$4 = scalar.constant 0 : i32
   %5 = index.constant 4 : offset
   %6 = buffer.alloca<private> align(4) %5 : buffer
-  %7 = index.constant 0 : offset
-  %observed, %observed_byte_offset = func.call @Identity__Identity_storage(%6, %7, %value) : (buffer, offset, i32) -> (buffer, offset)
-  %same, %count$12 = func.call @consume(%6, %7, %observed, %observed_byte_offset, %count$4) : (buffer, offset, buffer, offset, i32) -> (i1, i32)
+  %7 = index.constant 0 : index
+  %observed, %observed_byte_offset = func.call @Identity__Identity_storage(%6, %7, %value) : (buffer, index, i32) -> (buffer, index)
+  %same, %count$12 = func.call @consume(%6, %7, %observed, %observed_byte_offset, %count$4) : (buffer, index, buffer, index, i32) -> (i1, i32)
   %14 = scalar.constant 1 : i32
   %15 = scalar.cmpi eq, %count$12, %14 : i32
   %45 = scalar.constant false : i1
@@ -80,21 +80,21 @@ func.def public @parameter_identity(%value: i32) -> (i1) {
   func.return %46 : i1
 }
 
-func.def noinline @consume(%object: buffer, %object_byte_offset: offset, %observed: buffer, %observed_byte_offset: offset, %count$20: i32) -> (i1, i32) {
+func.def noinline @consume(%object: buffer, %object_byte_offset: index, %observed: buffer, %observed_byte_offset: index, %count$20: i32) -> (i1, i32) {
   %23 = scalar.constant 1 : i32
   %count$24 = scalar.addi %count$20, %23 : i32
   %27 = buffer.compare.address eq, %observed[%observed_byte_offset], %object[%object_byte_offset]
-  func.call @Identity___Identity_storage(%object, %object_byte_offset) : (buffer, offset)
+  func.call @Identity___Identity_storage(%object, %object_byte_offset) : (buffer, index)
   func.return %27, %count$24 : i1, i32
 }
 
-func.def inline @Identity__Identity_storage(%this: buffer, %this_byte_offset: offset, %input: i32) -> (buffer, offset) {
+func.def inline @Identity__Identity_storage(%this: buffer, %this_byte_offset: index, %input: i32) -> (buffer, index) {
   %35 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %input, %35[0] : i32, view<1xi32>
-  func.return %this, %this_byte_offset : buffer, offset
+  func.return %this, %this_byte_offset : buffer, index
 }
 
-func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: offset) {
+func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: index) {
   %40 = scalar.constant 0 : i32
   %43 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %40, %43[0] : i32, view<1xi32>
@@ -123,52 +123,52 @@ bool nested_identity(bool condition, unsigned value) {
 func.def public @nested_identity(%condition: i1, %value: i32) -> (i1) {
   %5 = index.constant 8 : offset
   %object_storage = buffer.alloca<private> align(4) %5 : buffer
-  %object_storage_byte_offset = index.constant 0 : offset
-  %observed, %observed_byte_offset = func.call @choose(%object_storage, %object_storage_byte_offset, %condition, %value) : (buffer, offset, i1, i32) -> (buffer, offset)
+  %object_storage_byte_offset = index.constant 0 : index
+  %observed, %observed_byte_offset = func.call @choose(%object_storage, %object_storage_byte_offset, %condition, %value) : (buffer, index, i1, i32) -> (buffer, index)
   %15 = buffer.compare.address eq, %observed[%observed_byte_offset], %object_storage[%object_storage_byte_offset]
-  func.call @Outer___Outer_storage(%object_storage, %object_storage_byte_offset) : (buffer, offset)
+  func.call @Outer___Outer_storage(%object_storage, %object_storage_byte_offset) : (buffer, index)
   func.return %15 : i1
 }
 
-func.def @choose(%result: buffer, %result_byte_offset: offset, %condition: i1, %value: i32) -> (buffer, offset) {
-  %observed, %observed_byte_offset = scf.if %condition -> (buffer, offset) {
-    %observed, %observed_byte_offset = func.call @make(%result, %result_byte_offset, %value) : (buffer, offset, i32) -> (buffer, offset)
-    scf.yield %observed, %observed_byte_offset : buffer, offset
+func.def @choose(%result: buffer, %result_byte_offset: index, %condition: i1, %value: i32) -> (buffer, index) {
+  %observed, %observed_byte_offset = scf.if %condition -> (buffer, index) {
+    %observed, %observed_byte_offset = func.call @make(%result, %result_byte_offset, %value) : (buffer, index, i32) -> (buffer, index)
+    scf.yield %observed, %observed_byte_offset : buffer, index
   } else {
     %28 = scalar.constant 1 : i32
     %29 = scalar.addi %value, %28 : i32
-    %observed, %observed_byte_offset = func.call @make(%result, %result_byte_offset, %29) : (buffer, offset, i32) -> (buffer, offset)
-    scf.yield %observed, %observed_byte_offset : buffer, offset
+    %observed, %observed_byte_offset = func.call @make(%result, %result_byte_offset, %29) : (buffer, index, i32) -> (buffer, index)
+    scf.yield %observed, %observed_byte_offset : buffer, index
   }
-  %32 = index.constant 4 : offset
-  %33 = index.add %result_byte_offset, %32 : offset
+  %32 = index.constant 4 : index
+  %33 = index.add %result_byte_offset, %32 : index
   %34 = scalar.constant 3 : i32
   %35 = buffer.view %result[%33] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %34, %35[0] : i32, view<1xi32>
-  func.return %observed, %observed_byte_offset : buffer, offset
+  func.return %observed, %observed_byte_offset : buffer, index
 }
 
-func.def inline @Outer___Outer_storage(%this: buffer, %this_byte_offset: offset) {
-  func.call @Identity___Identity_storage(%this, %this_byte_offset) : (buffer, offset)
+func.def inline @Outer___Outer_storage(%this: buffer, %this_byte_offset: index) {
+  func.call @Identity___Identity_storage(%this, %this_byte_offset) : (buffer, index)
   func.return
 }
 
-func.def noinline @make(%result: buffer, %result_byte_offset: offset, %value: i32) -> (buffer, offset) {
-  %observed, %observed_byte_offset = func.call @Identity__Identity_storage(%result, %result_byte_offset, %value) : (buffer, offset, i32) -> (buffer, offset)
-  func.return %observed, %observed_byte_offset : buffer, offset
+func.def noinline @make(%result: buffer, %result_byte_offset: index, %value: i32) -> (buffer, index) {
+  %observed, %observed_byte_offset = func.call @Identity__Identity_storage(%result, %result_byte_offset, %value) : (buffer, index, i32) -> (buffer, index)
+  func.return %observed, %observed_byte_offset : buffer, index
 }
 
-func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: offset) {
+func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: index) {
   %49 = scalar.constant 0 : i32
   %52 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %49, %52[0] : i32, view<1xi32>
   func.return
 }
 
-func.def inline @Identity__Identity_storage(%this: buffer, %this_byte_offset: offset, %input: i32) -> (buffer, offset) {
+func.def inline @Identity__Identity_storage(%this: buffer, %this_byte_offset: index, %input: i32) -> (buffer, index) {
   %60 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %input, %60[0] : i32, view<1xi32>
-  func.return %this, %this_byte_offset : buffer, offset
+  func.return %this, %this_byte_offset : buffer, index
 }
 
 // ====
@@ -185,29 +185,29 @@ void discarded_identity(unsigned value) { make(value); make(value + 1); }
 func.def public @discarded_identity(%value: i32) {
   %1 = index.constant 4 : offset
   %2 = buffer.alloca<private> align(4) %1 : buffer
-  %3 = index.constant 0 : offset
-  func.call @make(%2, %3, %value) : (buffer, offset, i32)
-  func.call @Identity___Identity_storage(%2, %3) : (buffer, offset)
+  %3 = index.constant 0 : index
+  func.call @make(%2, %3, %value) : (buffer, index, i32)
+  func.call @Identity___Identity_storage(%2, %3) : (buffer, index)
   %6 = buffer.alloca<private> align(4) %1 : buffer
   %9 = scalar.constant 1 : i32
   %10 = scalar.addi %value, %9 : i32
-  func.call @make(%6, %3, %10) : (buffer, offset, i32)
-  func.call @Identity___Identity_storage(%6, %3) : (buffer, offset)
+  func.call @make(%6, %3, %10) : (buffer, index, i32)
+  func.call @Identity___Identity_storage(%6, %3) : (buffer, index)
   func.return
 }
 
-func.def noinline @make(%result: buffer, %result_byte_offset: offset, %value: i32) {
+func.def noinline @make(%result: buffer, %result_byte_offset: index, %value: i32) {
   %16 = buffer.view %result[%result_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %value, %16[0] : i32, view<1xi32>
   func.return
 }
 
-func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: offset) {
-  func.call @observe(%this, %this_byte_offset) : (buffer, offset)
+func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: index) {
+  func.call @observe(%this, %this_byte_offset) : (buffer, index)
   func.return
 }
 
-func.decl @observe(%21: buffer, %22: offset)
+func.decl @observe(%21: buffer, %22: index)
 
 // ====
 // Nontrivial lifetime alone does not force storage or a destination parameter.
@@ -252,56 +252,56 @@ bool overloaded_identity(unsigned input) {
 func.def public @overloaded_identity(%input: i32) -> (i1) {
   %2 = index.constant 4 : offset
   %3 = buffer.alloca<private> align(4) %2 : buffer
-  %4 = index.constant 0 : offset
+  %4 = index.constant 0 : index
   %6 = scalar.constant 3 : i32
-  func.call @Factory__operator_subscript_value(%3, %4, %input, %6) : (buffer, offset, i32, i32)
+  func.call @Factory__operator_subscript_value(%3, %4, %input, %6) : (buffer, index, i32, i32)
   %8 = buffer.alloca<private> align(4) %2 : buffer
-  func.call @Factory__operator___Identity_value(%8, %4, %input) : (buffer, offset, i32)
-  %11, %12 = func.call pure @address(%3, %4) : (buffer, offset) -> (buffer, offset)
+  func.call @Factory__operator___Identity_value(%8, %4, %input) : (buffer, index, i32)
+  %11, %12 = func.call pure @address(%3, %4) : (buffer, index) -> (buffer, index)
   %15 = buffer.compare.address eq, %11[%12], %3[%4]
   %16 = scf.if %15 -> (i1) {
-    %17, %18 = func.call pure @address(%8, %4) : (buffer, offset) -> (buffer, offset)
+    %17, %18 = func.call pure @address(%8, %4) : (buffer, index) -> (buffer, index)
     %21 = buffer.compare.address eq, %17[%18], %8[%4]
     scf.yield %21 : i1
   } else {
     %62 = scalar.constant false : i1
     scf.yield %62 : i1
   }
-  func.call @Identity___Identity_storage(%8, %4) : (buffer, offset)
-  func.call @Identity___Identity_storage(%3, %4) : (buffer, offset)
+  func.call @Identity___Identity_storage(%8, %4) : (buffer, index)
+  func.call @Identity___Identity_storage(%3, %4) : (buffer, index)
   func.return %16 : i1
 }
 
-func.def noinline @Factory__operator_subscript_value(%result: buffer, %result_byte_offset: offset, %this_value: i32, %input: i32) {
+func.def noinline @Factory__operator_subscript_value(%result: buffer, %result_byte_offset: index, %this_value: i32, %input: i32) {
   %26 = index.constant 4 : offset
   %result_storage = buffer.alloca<private> align(4) %26 : buffer
-  %result_storage_byte_offset = index.constant 0 : offset
+  %result_storage_byte_offset = index.constant 0 : index
   %32 = scalar.addi %this_value, %input : i32
   %34 = buffer.view %result_storage[%result_storage_byte_offset] : buffer -> view<1xi32>
   view.store<type_disjoint> %32, %34[0] : i32, view<1xi32>
   %result_value = view.load<type_disjoint> %34[0] : view<1xi32> -> i32
   %42 = buffer.view %result[%result_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %result_value, %42[0] : i32, view<1xi32>
-  func.call @Identity___Identity_storage(%result_storage, %result_storage_byte_offset) : (buffer, offset)
+  func.call @Identity___Identity_storage(%result_storage, %result_storage_byte_offset) : (buffer, index)
   func.return
 }
 
-func.def noinline @Factory__operator___Identity_value(%result: buffer, %result_byte_offset: offset, %this_value: i32) {
+func.def noinline @Factory__operator___Identity_value(%result: buffer, %result_byte_offset: index, %this_value: i32) {
   %48 = buffer.view %result[%result_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %this_value, %48[0] : i32, view<1xi32>
   func.return
 }
 
-func.def @address(%value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
-  func.return %value, %value_byte_offset : buffer, offset
+func.def @address(%value: buffer, %value_byte_offset: index) -> (buffer, index) {
+  func.return %value, %value_byte_offset : buffer, index
 }
 
-func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: offset) {
-  func.call @observe(%this, %this_byte_offset) : (buffer, offset)
+func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: index) {
+  func.call @observe(%this, %this_byte_offset) : (buffer, index)
   func.return
 }
 
-func.decl @observe(%59: buffer, %60: offset)
+func.decl @observe(%59: buffer, %60: index)
 
 // ====
 // Destination transport leaves scalar predicates at their source positions.
@@ -320,26 +320,26 @@ unsigned constrained(unsigned input) {
 func.def public @constrained(%input: i32) -> (i32) {
   %2 = index.constant 4 : offset
   %object_storage = buffer.alloca<private> align(4) %2 : buffer
-  %object_storage_byte_offset = index.constant 0 : offset
-  func.call @make(%object_storage, %object_storage_byte_offset, %input) : (buffer, offset, i32)
-  %6, %7 = func.call pure @address(%object_storage, %object_storage_byte_offset) : (buffer, offset) -> (buffer, offset)
+  %object_storage_byte_offset = index.constant 0 : index
+  func.call @make(%object_storage, %object_storage_byte_offset, %input) : (buffer, index, i32)
+  %6, %7 = func.call pure @address(%object_storage, %object_storage_byte_offset) : (buffer, index) -> (buffer, index)
   %8 = buffer.view %6[%7] : buffer -> view<1xi32>
   %9 = view.load<root_in_bounds|type_disjoint> %8[0] : view<1xi32> -> i32
-  func.call @Identity___Identity_storage(%object_storage, %object_storage_byte_offset) : (buffer, offset)
+  func.call @Identity___Identity_storage(%object_storage, %object_storage_byte_offset) : (buffer, index)
   func.return %9 : i32
 }
 
-func.def @make(%result: buffer, %result_byte_offset: offset, %input: i32) where [gt(%input, 0)] {
+func.def @make(%result: buffer, %result_byte_offset: index, %input: i32) where [gt(%input, 0)] {
   %15 = buffer.view %result[%result_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %input, %15[0] : i32, view<1xi32>
   func.return
 }
 
-func.def @address(%value: buffer, %value_byte_offset: offset) -> (buffer, offset) {
-  func.return %value, %value_byte_offset : buffer, offset
+func.def @address(%value: buffer, %value_byte_offset: index) -> (buffer, index) {
+  func.return %value, %value_byte_offset : buffer, index
 }
 
-func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: offset) {
+func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: index) {
   %24 = scalar.constant 0 : i32
   %27 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %24, %27[0] : i32, view<1xi32>
@@ -366,42 +366,42 @@ unsigned copy_parameter(unsigned input) {
 func.def public @copy_parameter(%input: i32) -> (i32) {
   %2 = index.constant 4 : offset
   %original_storage = buffer.alloca<private> align(4) %2 : buffer
-  %original_storage_byte_offset = index.constant 0 : offset
-  func.call @Identity__Identity_storage(%original_storage, %original_storage_byte_offset, %input) : (buffer, offset, i32)
+  %original_storage_byte_offset = index.constant 0 : index
+  func.call @Identity__Identity_storage(%original_storage, %original_storage_byte_offset, %input) : (buffer, index, i32)
   %7 = buffer.alloca<private> align(4) %2 : buffer
-  func.call @Identity__Identity_storage_1(%7, %original_storage_byte_offset, %original_storage, %original_storage_byte_offset) : (buffer, offset, buffer, offset)
-  %10 = func.call @consume(%7, %original_storage_byte_offset) : (buffer, offset) -> (i32)
-  func.call @Identity___Identity_storage(%original_storage, %original_storage_byte_offset) : (buffer, offset)
+  func.call @Identity__Identity_storage_1(%7, %original_storage_byte_offset, %original_storage, %original_storage_byte_offset) : (buffer, index, buffer, index)
+  %10 = func.call @consume(%7, %original_storage_byte_offset) : (buffer, index) -> (i32)
+  func.call @Identity___Identity_storage(%original_storage, %original_storage_byte_offset) : (buffer, index)
   func.return %10 : i32
 }
 
-func.def inline @Identity__Identity_storage(%this: buffer, %this_byte_offset: offset, %input: i32) {
+func.def inline @Identity__Identity_storage(%this: buffer, %this_byte_offset: index, %input: i32) {
   %16 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %input, %16[0] : i32, view<1xi32>
   func.return
 }
 
-func.def noinline @consume(%object: buffer, %object_byte_offset: offset) -> (i32) {
+func.def noinline @consume(%object: buffer, %object_byte_offset: index) -> (i32) {
   %22 = buffer.view %object[%object_byte_offset] : buffer -> view<1xi32>
   %value = view.load<root_in_bounds|type_disjoint> %22[0] : view<1xi32> -> i32
-  func.call @Identity___Identity_storage(%object, %object_byte_offset) : (buffer, offset)
+  func.call @Identity___Identity_storage(%object, %object_byte_offset) : (buffer, index)
   func.return %value : i32
 }
 
-func.def inline @Identity__Identity_storage_1(%this: buffer, %this_byte_offset: offset, %other: buffer, %other_byte_offset: offset) {
+func.def inline @Identity__Identity_storage_1(%this: buffer, %this_byte_offset: index, %other: buffer, %other_byte_offset: index) {
   %32 = buffer.view %other[%other_byte_offset] : buffer -> view<1xi32>
   %other_value = view.load<root_in_bounds|type_disjoint> %32[0] : view<1xi32> -> i32
   %34 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %other_value, %34[0] : i32, view<1xi32>
-  func.call @copied(%other, %other_byte_offset, %this, %this_byte_offset) : (buffer, offset, buffer, offset)
+  func.call @copied(%other, %other_byte_offset, %this, %this_byte_offset) : (buffer, index, buffer, index)
   func.return
 }
 
-func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: offset) {
-  func.call @destroyed(%this, %this_byte_offset) : (buffer, offset)
+func.def inline @Identity___Identity_storage(%this: buffer, %this_byte_offset: index) {
+  func.call @destroyed(%this, %this_byte_offset) : (buffer, index)
   func.return
 }
 
-func.decl @copied(%39: buffer, %40: offset, %41: buffer, %42: offset)
+func.decl @copied(%39: buffer, %40: index, %41: buffer, %42: index)
 
-func.decl @destroyed(%43: buffer, %44: offset)
+func.decl @destroyed(%43: buffer, %44: index)

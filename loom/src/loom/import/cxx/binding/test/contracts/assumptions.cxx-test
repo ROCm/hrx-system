@@ -307,7 +307,7 @@ int pointer_member_bounds(int index, Bounds* mutable_bounds,
   return index + mutable_bounds->limits.count + const_bounds->limits.count;
 }
 // ----
-func.def public @pointer_member_bounds(%index$0: i32, %mutable_bounds: buffer, %mutable_bounds_byte_offset: offset, %const_bounds: buffer, %const_bounds_byte_offset: offset) -> (i32) {
+func.def public @pointer_member_bounds(%index$0: i32, %mutable_bounds: buffer, %mutable_bounds_byte_offset: index, %const_bounds: buffer, %const_bounds_byte_offset: index) -> (i32) {
   %index$6 = scalar.assume %index$0 [ge(%index$0, 0)] : i32
   %11 = buffer.view %mutable_bounds[%mutable_bounds_byte_offset] : buffer -> view<1xi32>
   %count$12 = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xi32> -> i32

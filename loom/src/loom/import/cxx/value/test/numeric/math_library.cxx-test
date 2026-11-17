@@ -81,7 +81,7 @@ float decompose_float(float value, int power, int* exponent) { return ldexpf(fre
 void exponent_only(double value, int* exponent) { frexp(value, exponent); }
 
 // ----
-func.def public @decompose(%value: f64, %power: i32, %exponent: buffer, %exponent_byte_offset: offset) -> (f64) {
+func.def public @decompose(%value: f64, %power: i32, %exponent: buffer, %exponent_byte_offset: index) -> (f64) {
   %5, %6 = scalar.frexpf %value : f64, i32
   %7 = buffer.view %exponent[%exponent_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %6, %7[0] : i32, view<1xi32>
@@ -89,7 +89,7 @@ func.def public @decompose(%value: f64, %power: i32, %exponent: buffer, %exponen
   func.return %8 : f64
 }
 
-func.def public @decompose_float(%value: f32, %power: i32, %exponent: buffer, %exponent_byte_offset: offset) -> (f32) {
+func.def public @decompose_float(%value: f32, %power: i32, %exponent: buffer, %exponent_byte_offset: index) -> (f32) {
   %14, %15 = scalar.frexpf %value : f32, i32
   %16 = buffer.view %exponent[%exponent_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %15, %16[0] : i32, view<1xi32>
@@ -97,7 +97,7 @@ func.def public @decompose_float(%value: f32, %power: i32, %exponent: buffer, %e
   func.return %17 : f32
 }
 
-func.def public @exponent_only(%value: f64, %exponent: buffer, %exponent_byte_offset: offset) {
+func.def public @exponent_only(%value: f64, %exponent: buffer, %exponent_byte_offset: index) {
   %21, %22 = scalar.frexpf %value : f64, i32
   %23 = buffer.view %exponent[%exponent_byte_offset] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %22, %23[0] : i32, view<1xi32>
@@ -178,9 +178,9 @@ func.def public @integer(%value: i32) -> (i32) {
   func.return %2 : i32
 }
 
-func.def public @other(%value: f64, %power: i32, %exponent: buffer, %exponent_byte_offset: offset) -> (f64) {
+func.def public @other(%value: f64, %power: i32, %exponent: buffer, %exponent_byte_offset: index) -> (f64) {
   %8 = func.call @pow(%value, %power) : (f64, i32) -> (f64)
-  %9 = func.call @frexp(%value, %exponent, %exponent_byte_offset) : (f64, buffer, offset) -> (f64)
+  %9 = func.call @frexp(%value, %exponent, %exponent_byte_offset) : (f64, buffer, index) -> (f64)
   %10 = scalar.addf %8, %9 : f64
   func.return %10 : f64
 }
@@ -189,7 +189,7 @@ func.decl source_signature(#func.abi.c.signature<arguments = [0], results = [0],
 
 func.decl source_signature(#func.abi.c.signature<arguments = [0, 1], results = [0], types = [#func.abi.c.type<floating, byte_length = 8, byte_alignment = 8, component_count = 1, format = f64>, #func.abi.c.type<signed_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @pow(%13: f64, %14: i32) -> (f64)
 
-func.decl source_signature(#func.abi.c.signature<arguments = [0, 1], results = [0], types = [#func.abi.c.type<floating, byte_length = 8, byte_alignment = 8, component_count = 1, format = f64>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>]>) @frexp(%16: f64, %17: buffer, %18: offset) -> (f64)
+func.decl source_signature(#func.abi.c.signature<arguments = [0, 1], results = [0], types = [#func.abi.c.type<floating, byte_length = 8, byte_alignment = 8, component_count = 1, format = f64>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>]>) @frexp(%16: f64, %17: buffer, %18: index) -> (f64)
 
 // ====
 // Integer absolute values preserve the source data model.

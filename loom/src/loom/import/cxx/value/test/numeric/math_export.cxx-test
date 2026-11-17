@@ -46,10 +46,10 @@ double rebuild(double value, int power, int* exponent) { return ldexp(frexp(valu
 #include <loomcxx/view.h>
 
 [[loom::symbol("rebuild")]]
-double rebuild(double value, int power, loom::type::buffer<int> exponent, loom::type::offset exponent_byte_offset);
+double rebuild(double value, int power, loom::type::buffer<int> exponent, loom::type::index exponent_byte_offset);
 
 [[loom::symbol("rebuild")]]
-double rebuild(double value, int power, loom::type::buffer<int> exponent, loom::type::offset exponent_byte_offset) {
+double rebuild(double value, int power, loom::type::buffer<int> exponent, loom::type::index exponent_byte_offset) {
   auto decomposition = loom::scalar::frexpf(value);
   auto exponent_view = loom::buffer::view<1>(exponent, exponent_byte_offset, {});
   loom::view::store<loom::memory_access::root_in_bounds>(decomposition.exponent, exponent_view, 0);

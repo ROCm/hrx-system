@@ -76,7 +76,7 @@ unsigned add_observed(unsigned lhs, unsigned rhs, unsigned carry_in,
 }
 
 // ----
-func.def public @add_byte(%lhs: i8, %rhs: i8, %carry_in: i8, %carry_out: buffer, %carry_out_byte_offset: offset) -> (i8) {
+func.def public @add_byte(%lhs: i8, %rhs: i8, %carry_in: i8, %carry_out: buffer, %carry_out_byte_offset: index) -> (i8) {
   %6, %7 = scalar.addcarryui %lhs, %rhs : i8
   %8, %9 = scalar.addcarryui %6, %carry_in : i8
   %10 = scalar.ori %7, %9 : i1
@@ -86,7 +86,7 @@ func.def public @add_byte(%lhs: i8, %rhs: i8, %carry_in: i8, %carry_out: buffer,
   func.return %8 : i8
 }
 
-func.def public @add_short(%lhs: i16, %rhs: i16, %carry_in: i16, %carry_out: buffer, %carry_out_byte_offset: offset) -> (i16) {
+func.def public @add_short(%lhs: i16, %rhs: i16, %carry_in: i16, %carry_out: buffer, %carry_out_byte_offset: index) -> (i16) {
   %19, %20 = scalar.addcarryui %lhs, %rhs : i16
   %21, %22 = scalar.addcarryui %19, %carry_in : i16
   %23 = scalar.ori %20, %22 : i1
@@ -96,7 +96,7 @@ func.def public @add_short(%lhs: i16, %rhs: i16, %carry_in: i16, %carry_out: buf
   func.return %21 : i16
 }
 
-func.def public @add_int(%lhs: i32, %rhs: i32, %carry_in: i32, %carry_out: buffer, %carry_out_byte_offset: offset) -> (i32) {
+func.def public @add_int(%lhs: i32, %rhs: i32, %carry_in: i32, %carry_out: buffer, %carry_out_byte_offset: index) -> (i32) {
   %32, %33 = scalar.addcarryui %lhs, %rhs : i32
   %34, %35 = scalar.addcarryui %32, %carry_in : i32
   %36 = scalar.ori %33, %35 : i1
@@ -106,7 +106,7 @@ func.def public @add_int(%lhs: i32, %rhs: i32, %carry_in: i32, %carry_out: buffe
   func.return %34 : i32
 }
 
-func.def public @add_long(%lhs: i64, %rhs: i64, %carry_in: i64, %carry_out: buffer, %carry_out_byte_offset: offset) -> (i64) {
+func.def public @add_long(%lhs: i64, %rhs: i64, %carry_in: i64, %carry_out: buffer, %carry_out_byte_offset: index) -> (i64) {
   %45, %46 = scalar.addcarryui %lhs, %rhs : i64
   %47, %48 = scalar.addcarryui %45, %carry_in : i64
   %49 = scalar.ori %46, %48 : i1
@@ -116,7 +116,7 @@ func.def public @add_long(%lhs: i64, %rhs: i64, %carry_in: i64, %carry_out: buff
   func.return %47 : i64
 }
 
-func.def public @add_long_long(%lhs: i64, %rhs: i64, %carry_in: i64, %carry_out: buffer, %carry_out_byte_offset: offset) -> (i64) {
+func.def public @add_long_long(%lhs: i64, %rhs: i64, %carry_in: i64, %carry_out: buffer, %carry_out_byte_offset: index) -> (i64) {
   %58, %59 = scalar.addcarryui %lhs, %rhs : i64
   %60, %61 = scalar.addcarryui %58, %carry_in : i64
   %62 = scalar.ori %59, %61 : i1
@@ -126,7 +126,7 @@ func.def public @add_long_long(%lhs: i64, %rhs: i64, %carry_in: i64, %carry_out:
   func.return %60 : i64
 }
 
-func.def public @subtract_byte(%lhs: i8, %rhs: i8, %borrow_in: i8, %borrow_out: buffer, %borrow_out_byte_offset: offset) -> (i8) {
+func.def public @subtract_byte(%lhs: i8, %rhs: i8, %borrow_in: i8, %borrow_out: buffer, %borrow_out_byte_offset: index) -> (i8) {
   %71, %72 = scalar.subborrowui %lhs, %rhs : i8
   %73, %74 = scalar.subborrowui %71, %borrow_in : i8
   %75 = scalar.ori %72, %74 : i1
@@ -136,7 +136,7 @@ func.def public @subtract_byte(%lhs: i8, %rhs: i8, %borrow_in: i8, %borrow_out: 
   func.return %73 : i8
 }
 
-func.def public @subtract_short(%lhs: i16, %rhs: i16, %borrow_in: i16, %borrow_out: buffer, %borrow_out_byte_offset: offset) -> (i16) {
+func.def public @subtract_short(%lhs: i16, %rhs: i16, %borrow_in: i16, %borrow_out: buffer, %borrow_out_byte_offset: index) -> (i16) {
   %84, %85 = scalar.subborrowui %lhs, %rhs : i16
   %86, %87 = scalar.subborrowui %84, %borrow_in : i16
   %88 = scalar.ori %85, %87 : i1
@@ -146,7 +146,7 @@ func.def public @subtract_short(%lhs: i16, %rhs: i16, %borrow_in: i16, %borrow_o
   func.return %86 : i16
 }
 
-func.def public @subtract_int(%lhs: i32, %rhs: i32, %borrow_in: i32, %borrow_out: buffer, %borrow_out_byte_offset: offset) -> (i32) {
+func.def public @subtract_int(%lhs: i32, %rhs: i32, %borrow_in: i32, %borrow_out: buffer, %borrow_out_byte_offset: index) -> (i32) {
   %97, %98 = scalar.subborrowui %lhs, %rhs : i32
   %99, %100 = scalar.subborrowui %97, %borrow_in : i32
   %101 = scalar.ori %98, %100 : i1
@@ -156,7 +156,7 @@ func.def public @subtract_int(%lhs: i32, %rhs: i32, %borrow_in: i32, %borrow_out
   func.return %99 : i32
 }
 
-func.def public @subtract_long(%lhs: i64, %rhs: i64, %borrow_in: i64, %borrow_out: buffer, %borrow_out_byte_offset: offset) -> (i64) {
+func.def public @subtract_long(%lhs: i64, %rhs: i64, %borrow_in: i64, %borrow_out: buffer, %borrow_out_byte_offset: index) -> (i64) {
   %110, %111 = scalar.subborrowui %lhs, %rhs : i64
   %112, %113 = scalar.subborrowui %110, %borrow_in : i64
   %114 = scalar.ori %111, %113 : i1
@@ -166,7 +166,7 @@ func.def public @subtract_long(%lhs: i64, %rhs: i64, %borrow_in: i64, %borrow_ou
   func.return %112 : i64
 }
 
-func.def public @subtract_long_long(%lhs: i64, %rhs: i64, %borrow_in: i64, %borrow_out: buffer, %borrow_out_byte_offset: offset) -> (i64) {
+func.def public @subtract_long_long(%lhs: i64, %rhs: i64, %borrow_in: i64, %borrow_out: buffer, %borrow_out_byte_offset: index) -> (i64) {
   %123, %124 = scalar.subborrowui %lhs, %rhs : i64
   %125, %126 = scalar.subborrowui %123, %borrow_in : i64
   %127 = scalar.ori %124, %126 : i1
@@ -176,7 +176,7 @@ func.def public @subtract_long_long(%lhs: i64, %rhs: i64, %borrow_in: i64, %borr
   func.return %125 : i64
 }
 
-func.def public @observe(%value: i32, %count: buffer, %count_byte_offset: offset) -> (i32) {
+func.def public @observe(%value: i32, %count: buffer, %count_byte_offset: index) -> (i32) {
   %134 = buffer.view %count[%count_byte_offset] : buffer -> view<1xi32>
   %135 = view.load<root_in_bounds|type_disjoint> %134[0] : view<1xi32> -> i32
   %136 = scalar.constant 1 : i32
@@ -185,20 +185,20 @@ func.def public @observe(%value: i32, %count: buffer, %count_byte_offset: offset
   func.return %value : i32
 }
 
-func.def public @observe_output(%output: buffer, %output_byte_offset: offset, %count: buffer, %count_byte_offset: offset) -> (buffer, offset) {
+func.def public @observe_output(%output: buffer, %output_byte_offset: index, %count: buffer, %count_byte_offset: index) -> (buffer, index) {
   %144 = buffer.view %count[%count_byte_offset] : buffer -> view<1xi32>
   %145 = view.load<root_in_bounds|type_disjoint> %144[0] : view<1xi32> -> i32
   %146 = scalar.constant 1 : i32
   %147 = scalar.addi %145, %146 : i32
   view.store<root_in_bounds|type_disjoint> %147, %144[0] : i32, view<1xi32>
-  func.return %output, %output_byte_offset : buffer, offset
+  func.return %output, %output_byte_offset : buffer, index
 }
 
-func.def public @add_observed(%lhs: i32, %rhs: i32, %carry_in: i32, %count: buffer, %count_byte_offset: offset, %carry_out: buffer, %carry_out_byte_offset: offset) -> (i32) {
-  %156 = func.call @observe(%lhs, %count, %count_byte_offset) : (i32, buffer, offset) -> (i32)
-  %157 = func.call @observe(%rhs, %count, %count_byte_offset) : (i32, buffer, offset) -> (i32)
-  %158 = func.call @observe(%carry_in, %count, %count_byte_offset) : (i32, buffer, offset) -> (i32)
-  %159, %160 = func.call @observe_output(%carry_out, %carry_out_byte_offset, %count, %count_byte_offset) : (buffer, offset, buffer, offset) -> (buffer, offset)
+func.def public @add_observed(%lhs: i32, %rhs: i32, %carry_in: i32, %count: buffer, %count_byte_offset: index, %carry_out: buffer, %carry_out_byte_offset: index) -> (i32) {
+  %156 = func.call @observe(%lhs, %count, %count_byte_offset) : (i32, buffer, index) -> (i32)
+  %157 = func.call @observe(%rhs, %count, %count_byte_offset) : (i32, buffer, index) -> (i32)
+  %158 = func.call @observe(%carry_in, %count, %count_byte_offset) : (i32, buffer, index) -> (i32)
+  %159, %160 = func.call @observe_output(%carry_out, %carry_out_byte_offset, %count, %count_byte_offset) : (buffer, index, buffer, index) -> (buffer, index)
   %161, %162 = scalar.addcarryui %156, %157 : i32
   %163, %164 = scalar.addcarryui %161, %158 : i32
   %165 = scalar.ori %162, %164 : i1
@@ -224,7 +224,7 @@ unsigned long subtract_long(unsigned long lhs, unsigned long rhs,
 }
 
 // ----
-func.def public @add_long(%lhs: i32, %rhs: i32, %carry_in: i32, %carry_out: buffer, %carry_out_byte_offset: offset) -> (i32) {
+func.def public @add_long(%lhs: i32, %rhs: i32, %carry_in: i32, %carry_out: buffer, %carry_out_byte_offset: index) -> (i32) {
   %6, %7 = scalar.addcarryui %lhs, %rhs : i32
   %8, %9 = scalar.addcarryui %6, %carry_in : i32
   %10 = scalar.ori %7, %9 : i1
@@ -234,7 +234,7 @@ func.def public @add_long(%lhs: i32, %rhs: i32, %carry_in: i32, %carry_out: buff
   func.return %8 : i32
 }
 
-func.def public @subtract_long(%lhs: i32, %rhs: i32, %borrow_in: i32, %borrow_out: buffer, %borrow_out_byte_offset: offset) -> (i32) {
+func.def public @subtract_long(%lhs: i32, %rhs: i32, %borrow_in: i32, %borrow_out: buffer, %borrow_out_byte_offset: index) -> (i32) {
   %19, %20 = scalar.subborrowui %lhs, %rhs : i32
   %21, %22 = scalar.subborrowui %19, %borrow_in : i32
   %23 = scalar.ori %20, %22 : i1

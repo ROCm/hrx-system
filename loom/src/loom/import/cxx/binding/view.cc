@@ -611,7 +611,7 @@ std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
                       ? has_buffer_byte_offset_
                             ? Pointer{arguments[0].ssa(), arguments[1].ssa()}
                             : storage.root(arguments[0].ssa(), owner)
-                      : storage.constrain_origin(arguments[0].pointer(), owner);
+                      : arguments[0].pointer();
       }
 
       const bool capture_physical_encoding =

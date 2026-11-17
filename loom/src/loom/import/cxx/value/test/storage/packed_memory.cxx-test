@@ -6,18 +6,15 @@ unsigned read(const Record* records, unsigned index) {
 }
 
 // ----
-func.def public @read(%records: buffer, %records_byte_offset: offset, %index: i32) -> (i32) {
+func.def public @read(%records: buffer, %records_byte_offset: index, %index: i32) -> (i32) {
   %4 = scalar.extui %index : i32 to i64
-  %5 = scalar.constant 5 : i64
-  %6 = scalar.muli %4, %5 : i64
-  %7 = index.cast %records_byte_offset : offset to i64
-  %8 = scalar.addi %7, %6 : i64
-  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
-  %10 = index.cast %9 : i64 to offset
-  %11 = index.constant 1 : offset
-  %12 = index.add %10, %11 : offset
-  %13 = buffer.view %records[%12] : buffer -> view<1xi32, align(1)>
-  %value = view.load<root_in_bounds|type_disjoint> %13[0] : view<1xi32, align(1)> -> i32
+  %5 = index.cast %4 : i64 to index
+  %6 = index.constant 5 : index
+  %13 = index.madd %5, %6, %records_byte_offset : index
+  %9 = index.constant 1 : index
+  %10 = index.add %13, %9 : index
+  %11 = buffer.view %records[%10] : buffer -> view<1xi32, align(1)>
+  %value = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xi32, align(1)> -> i32
   func.return %value : i32
 }
 
@@ -27,19 +24,16 @@ struct Record { unsigned char tag; unsigned value [[gnu::packed]]; };
 void update(Record* records) { records[1].value /= 2u; }
 
 // ----
-func.def public @update(%records: buffer, %records_byte_offset: offset) {
-  %18 = scalar.constant 5 : i64
-  %7 = index.cast %records_byte_offset : offset to i64
-  %8 = scalar.addi %7, %18 : i64
-  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
-  %10 = index.cast %9 : i64 to offset
-  %11 = index.constant 1 : offset
-  %12 = index.add %10, %11 : offset
-  %13 = buffer.view %records[%12] : buffer -> view<1xi32, align(1)>
-  %14 = view.load<root_in_bounds|type_disjoint> %13[0] : view<1xi32, align(1)> -> i32
-  %16 = scalar.constant 1 : i32
-  %17 = scalar.shrui %14, %16 : i32
-  view.store<root_in_bounds|type_disjoint> %17, %13[0] : i32, view<1xi32, align(1)>
+func.def public @update(%records: buffer, %records_byte_offset: index) {
+  %15 = index.constant 5 : index
+  %7 = index.add %records_byte_offset, %15 : index
+  %8 = index.constant 1 : index
+  %9 = index.add %7, %8 : index
+  %10 = buffer.view %records[%9] : buffer -> view<1xi32, align(1)>
+  %11 = view.load<root_in_bounds|type_disjoint> %10[0] : view<1xi32, align(1)> -> i32
+  %13 = scalar.constant 1 : i32
+  %14 = scalar.shrui %11, %13 : i32
+  view.store<root_in_bounds|type_disjoint> %14, %10[0] : i32, view<1xi32, align(1)>
   func.return
 }
 
@@ -52,21 +46,18 @@ struct Record { unsigned char tag; Payload payload; };
 void update(volatile Record* records) { records[1].payload.value += 2.0f; }
 
 // ----
-func.def public @update(%records: buffer, %records_byte_offset: offset) {
+func.def public @update(%records: buffer, %records_byte_offset: index) {
   %2 = scalar.constant 2.0 : f32
-  %18 = scalar.constant 10 : i64
-  %7 = index.cast %records_byte_offset : offset to i64
-  %8 = scalar.addi %7, %18 : i64
-  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
-  %10 = index.cast %9 : i64 to offset
-  %11 = index.constant 2 : offset
-  %12 = index.add %10, %11 : offset
-  %13 = index.constant 4 : offset
-  %14 = index.add %12, %13 : offset
-  %15 = buffer.view %records[%14] : buffer -> view<1xf32, align(2)>
-  %16 = view.load<volatile|root_in_bounds|type_disjoint> %15[0] : view<1xf32, align(2)> -> f32
-  %17 = scalar.addf %16, %2 : f32
-  view.store<volatile|root_in_bounds|type_disjoint> %17, %15[0] : f32, view<1xf32, align(2)>
+  %15 = index.constant 10 : index
+  %7 = index.add %records_byte_offset, %15 : index
+  %8 = index.constant 2 : index
+  %9 = index.add %7, %8 : index
+  %10 = index.constant 4 : index
+  %11 = index.add %9, %10 : index
+  %12 = buffer.view %records[%11] : buffer -> view<1xf32, align(2)>
+  %13 = view.load<volatile|root_in_bounds|type_disjoint> %12[0] : view<1xf32, align(2)> -> f32
+  %14 = scalar.addf %13, %2 : f32
+  view.store<volatile|root_in_bounds|type_disjoint> %14, %12[0] : f32, view<1xf32, align(2)>
   func.return
 }
 
@@ -81,24 +72,18 @@ void copy(Record* output, const Record* input) {
 }
 
 // ----
-func.def public @copy(%output: buffer, %output_byte_offset: offset, %input: buffer, %input_byte_offset: offset) {
-  %28 = scalar.constant 32 : i64
-  %8 = index.cast %input_byte_offset : offset to i64
-  %9 = scalar.addi %8, %28 : i64
-  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
-  %11 = index.cast %10 : i64 to offset
-  %12 = index.constant 1 : offset
-  %13 = index.add %11, %12 : offset
-  %14 = buffer.view %input[%13] : buffer -> view<1xf64, align(1)>
-  %value = view.load<root_in_bounds|type_disjoint> %14[0] : view<1xf64, align(1)> -> f64
-  %27 = scalar.constant 16 : i64
-  %20 = index.cast %output_byte_offset : offset to i64
-  %21 = scalar.addi %20, %27 : i64
-  %22 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
-  %23 = index.cast %22 : i64 to offset
-  %25 = index.add %23, %12 : offset
-  %26 = buffer.view %output[%25] : buffer -> view<1xf64, align(1)>
-  view.store<root_in_bounds|type_disjoint> %value, %26[0] : f64, view<1xf64, align(1)>
+func.def public @copy(%output: buffer, %output_byte_offset: index, %input: buffer, %input_byte_offset: index) {
+  %23 = index.constant 2 : index
+  %6 = index.constant 16 : index
+  %22 = index.madd %6, %23, %input_byte_offset : index
+  %9 = index.constant 1 : index
+  %10 = index.add %22, %9 : index
+  %11 = buffer.view %input[%10] : buffer -> view<1xf64, align(1)>
+  %value = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xf64, align(1)> -> f64
+  %17 = index.add %output_byte_offset, %6 : index
+  %19 = index.add %17, %9 : index
+  %20 = buffer.view %output[%19] : buffer -> view<1xf64, align(1)>
+  view.store<root_in_bounds|type_disjoint> %value, %20[0] : f64, view<1xf64, align(1)>
   func.return
 }
 
@@ -109,12 +94,12 @@ struct [[gnu::packed]] Record { unsigned char tag; U4 value; };
 void copy(Record* output, const Record* input) { output->value = input->value; }
 
 // ----
-func.def public @copy(%output: buffer, %output_byte_offset: offset, %input: buffer, %input_byte_offset: offset) {
-  %4 = index.constant 1 : offset
-  %5 = index.add %input_byte_offset, %4 : offset
+func.def public @copy(%output: buffer, %output_byte_offset: index, %input: buffer, %input_byte_offset: index) {
+  %4 = index.constant 1 : index
+  %5 = index.add %input_byte_offset, %4 : index
   %6 = buffer.view %input[%5] : buffer -> view<4xi32, align(1)>
   %value = vector.load<root_in_bounds> %6[0] : view<4xi32, align(1)> -> vector<4xi32>
-  %9 = index.add %output_byte_offset, %4 : offset
+  %9 = index.add %output_byte_offset, %4 : index
   %10 = buffer.view %output[%9] : buffer -> view<4xi32, align(1)>
   vector.store<root_in_bounds> %value, %10[0] : vector<4xi32>, view<4xi32, align(1)>
   func.return
@@ -162,79 +147,66 @@ void packed_copy_kernel(const unsigned char* input, unsigned char* output) {
   packed_copy(input, output);
 }
 // ----
-func.def public @packed_copy(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) {
-  %144 = index.constant 0 : offset
-  %143 = index.constant 256 : offset
+func.def public @packed_copy(%input: buffer, %input_byte_offset: index, %output: buffer, %output_byte_offset: index) {
+  %120 = index.constant 0 : offset
+  %119 = index.constant 256 : offset
   %8 = index.constant 1 : offset
-  scf.for %i = [%144 to %143 step %8] {
+  scf.for %i = [%120 to %119 step %8] {
     %10 = index.cast %i : offset to i32
-    %142 = scalar.constant 37 : i8
+    %118 = scalar.constant 37 : i8
     %13 = scalar.extui %10 : i32 to i64
-    %16 = index.cast %output_byte_offset : offset to i64
-    %17 = scalar.addi %16, %13 : i64
-    %18 = scalar.assume %17 [range(%17, 0, 9223372036854775807)] : i64
-    %19 = index.cast %18 : i64 to offset
-    %20 = buffer.view %output[%19] : buffer -> view<1xi8>
-    view.store<root_in_bounds> %142, %20[0] : i8, view<1xi8>
+    %14 = index.cast %13 : i64 to index
+    %17 = index.add %output_byte_offset, %14 : index
+    %18 = buffer.view %output[%17] : buffer -> view<1xi8>
+    view.store<root_in_bounds> %118, %18[0] : i8, view<1xi8>
   }
-  %141 = scalar.constant 1 : i64
-  %25 = index.cast %input_byte_offset : offset to i64
-  %26 = scalar.addi %25, %141 : i64
-  %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
-  %source_byte_offset = index.cast %27 : i64 to offset
-  %140 = scalar.constant 5 : i64
-  %33 = index.cast %output_byte_offset : offset to i64
-  %34 = scalar.addi %33, %140 : i64
-  %35 = scalar.assume %34 [range(%34, 0, 9223372036854775807)] : i64
-  %destination_byte_offset = index.cast %35 : i64 to offset
-  %138 = index.constant 8 : offset
-  scf.for %i = [%144 to %138 step %8] {
-    %43 = index.cast %i : offset to i32
-    %44 = scalar.extui %43 : i32 to i64
-    %45 = scalar.constant 15 : i64
-    %46 = scalar.muli %44, %45 : i64
-    %47 = index.cast %source_byte_offset : offset to i64
-    %48 = scalar.addi %47, %46 : i64
-    %49 = scalar.assume %48 [range(%48, 0, 9223372036854775807)] : i64
-    %50 = index.cast %49 : i64 to offset
-    %53 = buffer.view %input[%50] : buffer -> view<1xi64, align(1)>
-    %wide = view.load<root_in_bounds|type_disjoint> %53[0] : view<1xi64, align(1)> -> i64
-    %58 = index.cast %destination_byte_offset : offset to i64
-    %59 = scalar.addi %58, %46 : i64
-    %60 = scalar.assume %59 [range(%59, 0, 9223372036854775807)] : i64
-    %61 = index.cast %60 : i64 to offset
-    %64 = buffer.view %output[%61] : buffer -> view<1xi64, align(1)>
-    view.store<root_in_bounds|type_disjoint> %wide, %64[0] : i64, view<1xi64, align(1)>
-    %73 = index.add %50, %138 : offset
-    %74 = buffer.view %input[%73] : buffer -> view<1xf32, align(1)>
-    %real = view.load<root_in_bounds|type_disjoint> %74[0] : view<1xf32, align(1)> -> f32
-    %84 = index.add %61, %138 : offset
-    %85 = buffer.view %output[%84] : buffer -> view<1xf32, align(1)>
-    view.store<root_in_bounds|type_disjoint> %real, %85[0] : f32, view<1xf32, align(1)>
-    %93 = index.constant 12 : offset
-    %94 = index.add %50, %93 : offset
-    %95 = buffer.view %input[%94] : buffer -> view<1xi16, align(1)>
-    %narrow = view.load<root_in_bounds|type_disjoint> %95[0] : view<1xi16, align(1)> -> i16
-    %105 = index.add %61, %93 : offset
-    %106 = buffer.view %output[%105] : buffer -> view<1xi16, align(1)>
-    view.store<root_in_bounds|type_disjoint> %narrow, %106[0] : i16, view<1xi16, align(1)>
-    %114 = index.constant 14 : offset
-    %115 = index.add %50, %114 : offset
-    %116 = buffer.view %input[%115] : buffer -> view<1xi8>
-    %byte = view.load<root_in_bounds> %116[0] : view<1xi8> -> i8
-    %126 = index.add %61, %114 : offset
-    %127 = buffer.view %output[%126] : buffer -> view<1xi8>
-    view.store<root_in_bounds> %byte, %127[0] : i8, view<1xi8>
+  %117 = index.constant 1 : index
+  %source_byte_offset = index.add %input_byte_offset, %117 : index
+  %116 = index.constant 5 : index
+  %destination_byte_offset = index.add %output_byte_offset, %116 : index
+  %114 = index.constant 8 : offset
+  scf.for %i = [%120 to %114 step %8] {
+    %35 = index.cast %i : offset to i32
+    %36 = scalar.extui %35 : i32 to i64
+    %37 = index.cast %36 : i64 to index
+    %38 = index.constant 15 : index
+    %128 = index.madd %37, %38, %source_byte_offset : index
+    %43 = buffer.view %input[%128] : buffer -> view<1xi64, align(1)>
+    %wide = view.load<root_in_bounds|type_disjoint> %43[0] : view<1xi64, align(1)> -> i64
+    %127 = index.madd %37, %38, %destination_byte_offset : index
+    %52 = buffer.view %output[%127] : buffer -> view<1xi64, align(1)>
+    view.store<root_in_bounds|type_disjoint> %wide, %52[0] : i64, view<1xi64, align(1)>
+    %58 = index.constant 8 : index
+    %59 = index.add %128, %58 : index
+    %60 = buffer.view %input[%59] : buffer -> view<1xf32, align(1)>
+    %real = view.load<root_in_bounds|type_disjoint> %60[0] : view<1xf32, align(1)> -> f32
+    %68 = index.add %127, %58 : index
+    %69 = buffer.view %output[%68] : buffer -> view<1xf32, align(1)>
+    view.store<root_in_bounds|type_disjoint> %real, %69[0] : f32, view<1xf32, align(1)>
+    %75 = index.constant 12 : index
+    %76 = index.add %128, %75 : index
+    %77 = buffer.view %input[%76] : buffer -> view<1xi16, align(1)>
+    %narrow = view.load<root_in_bounds|type_disjoint> %77[0] : view<1xi16, align(1)> -> i16
+    %85 = index.add %127, %75 : index
+    %86 = buffer.view %output[%85] : buffer -> view<1xi16, align(1)>
+    view.store<root_in_bounds|type_disjoint> %narrow, %86[0] : i16, view<1xi16, align(1)>
+    %92 = index.constant 14 : index
+    %93 = index.add %128, %92 : index
+    %94 = buffer.view %input[%93] : buffer -> view<1xi8>
+    %byte = view.load<root_in_bounds> %94[0] : view<1xi8> -> i8
+    %102 = index.add %127, %92 : index
+    %103 = buffer.view %output[%102] : buffer -> view<1xi8>
+    view.store<root_in_bounds> %byte, %103[0] : i8, view<1xi8>
   }
   func.return
 }
 
 kernel.def @packed_copy_kernel() {
-  %130 = index.constant 1 : index
-  kernel.launch.config workgroups(%130, %130, %130) workgroup_size(%130, %130, %130) : index
+  %106 = index.constant 1 : index
+  kernel.launch.config workgroups(%106, %106, %106) workgroup_size(%106, %106, %106) : index
 } launch(%input: buffer, %output: buffer) {
-  %input_byte_offset = index.constant 0 : offset
-  func.call @packed_copy(%input, %input_byte_offset, %output, %input_byte_offset) : (buffer, offset, buffer, offset)
+  %input_byte_offset = index.constant 0 : index
+  func.call @packed_copy(%input, %input_byte_offset, %output, %input_byte_offset) : (buffer, index, buffer, index)
   kernel.return
 }
 
@@ -290,53 +262,50 @@ void packed_update_kernel(volatile Envelope* output) {
   packed_update(output);
 }
 // ----
-func.def public @packed_update(%output: buffer, %output_byte_offset: offset) {
+func.def public @packed_update(%output: buffer, %output_byte_offset: index) {
   %2 = scalar.constant 1.25 : f32
-  %138 = scalar.constant 26 : i64
-  %7 = index.cast %output_byte_offset : offset to i64
-  %8 = scalar.addi %7, %138 : i64
-  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
-  %10 = index.cast %9 : i64 to offset
-  %11 = index.constant 1 : offset
-  %12 = index.add %10, %11 : offset
-  %13 = index.constant 2 : offset
-  %14 = index.add %12, %13 : offset
-  %15 = buffer.view %output[%14] : buffer -> view<1xf32, align(1)>
-  view.store<volatile|root_in_bounds|type_disjoint> %2, %15[0] : f32, view<1xf32, align(1)>
-  %16 = scalar.constant 2.0 : f32
-  %30 = view.load<volatile|root_in_bounds|type_disjoint> %15[0] : view<1xf32, align(1)> -> f32
-  %31 = scalar.mulf %30, %16 : f32
-  view.store<volatile|root_in_bounds|type_disjoint> %31, %15[0] : f32, view<1xf32, align(1)>
-  %32 = scalar.constant -2147483648 : i32
-  %43 = index.constant 6 : offset
-  %44 = index.add %12, %43 : offset
-  %46 = index.add %44, %11 : offset
-  %47 = buffer.view %output[%46] : buffer -> view<1xi32, align(1)>
-  view.store<volatile|root_in_bounds|type_disjoint> %32, %47[0] : i32, view<1xi32, align(1)>
-  %64 = view.load<volatile|root_in_bounds|type_disjoint> %47[0] : view<1xi32, align(1)> -> i32
-  %133 = scalar.constant 1 : i32
-  %134 = scalar.shrui %64, %133 : i32
-  view.store<volatile|root_in_bounds|type_disjoint> %134, %47[0] : i32, view<1xi32, align(1)>
-  %82 = view.load<volatile|root_in_bounds|type_disjoint> %47[0] : view<1xi32, align(1)> -> i32
-  %83 = scalar.ori %82, %133 : i32
-  view.store<volatile|root_in_bounds|type_disjoint> %83, %47[0] : i32, view<1xi32, align(1)>
-  %131 = scalar.constant -1 : i8
-  %100 = buffer.view %output[%44] : buffer -> view<1xi8>
-  view.store<volatile|root_in_bounds> %131, %100[0] : i8, view<1xi8>
-  %116 = view.load<volatile|root_in_bounds> %100[0] : view<1xi8> -> i8
-  %117 = scalar.extui %116 : i8 to i32
-  %119 = scalar.addi %117, %133 : i32
-  %120 = scalar.trunci %119 : i32 to i8
-  view.store<volatile|root_in_bounds> %120, %100[0] : i8, view<1xi8>
+  %124 = index.constant 2 : index
+  %5 = index.constant 13 : index
+  %123 = index.madd %5, %124, %output_byte_offset : index
+  %8 = index.constant 1 : index
+  %9 = index.add %123, %8 : index
+  %11 = index.add %9, %124 : index
+  %12 = buffer.view %output[%11] : buffer -> view<1xf32, align(1)>
+  view.store<volatile|root_in_bounds|type_disjoint> %2, %12[0] : f32, view<1xf32, align(1)>
+  %13 = scalar.constant 2.0 : f32
+  %24 = view.load<volatile|root_in_bounds|type_disjoint> %12[0] : view<1xf32, align(1)> -> f32
+  %25 = scalar.mulf %24, %13 : f32
+  view.store<volatile|root_in_bounds|type_disjoint> %25, %12[0] : f32, view<1xf32, align(1)>
+  %26 = scalar.constant -2147483648 : i32
+  %34 = index.constant 6 : index
+  %35 = index.add %9, %34 : index
+  %37 = index.add %35, %8 : index
+  %38 = buffer.view %output[%37] : buffer -> view<1xi32, align(1)>
+  view.store<volatile|root_in_bounds|type_disjoint> %26, %38[0] : i32, view<1xi32, align(1)>
+  %52 = view.load<volatile|root_in_bounds|type_disjoint> %38[0] : view<1xi32, align(1)> -> i32
+  %115 = scalar.constant 1 : i32
+  %116 = scalar.shrui %52, %115 : i32
+  view.store<volatile|root_in_bounds|type_disjoint> %116, %38[0] : i32, view<1xi32, align(1)>
+  %67 = view.load<volatile|root_in_bounds|type_disjoint> %38[0] : view<1xi32, align(1)> -> i32
+  %68 = scalar.ori %67, %115 : i32
+  view.store<volatile|root_in_bounds|type_disjoint> %68, %38[0] : i32, view<1xi32, align(1)>
+  %112 = scalar.constant -1 : i8
+  %82 = buffer.view %output[%35] : buffer -> view<1xi8>
+  view.store<volatile|root_in_bounds> %112, %82[0] : i8, view<1xi8>
+  %95 = view.load<volatile|root_in_bounds> %82[0] : view<1xi8> -> i8
+  %96 = scalar.extui %95 : i8 to i32
+  %98 = scalar.addi %96, %115 : i32
+  %99 = scalar.trunci %98 : i32 to i8
+  view.store<volatile|root_in_bounds> %99, %82[0] : i8, view<1xi8>
   func.return
 }
 
 kernel.def @packed_update_kernel() {
-  %122 = index.constant 1 : index
-  kernel.launch.config workgroups(%122, %122, %122) workgroup_size(%122, %122, %122) : index
+  %101 = index.constant 1 : index
+  kernel.launch.config workgroups(%101, %101, %101) workgroup_size(%101, %101, %101) : index
 } launch(%output: buffer) {
-  %output_byte_offset = index.constant 0 : offset
-  func.call @packed_update(%output, %output_byte_offset) : (buffer, offset)
+  %output_byte_offset = index.constant 0 : index
+  func.call @packed_update(%output, %output_byte_offset) : (buffer, index)
   kernel.return
 }
 
@@ -362,7 +331,7 @@ kernel.def @packed_vector_kernel() {
   %2 = index.constant 1 : index
   kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
 } launch(%input: buffer, %output: buffer) {
-  %18 = index.constant 1 : offset
+  %18 = index.constant 1 : index
   %12 = buffer.view %input[%18] : buffer -> view<4xi32, align(1)>
   %value = vector.load<root_in_bounds> %12[0] : view<4xi32, align(1)> -> vector<4xi32>
   %16 = buffer.view %output[%18] : buffer -> view<4xi32, align(1)>
@@ -405,102 +374,69 @@ void packed_array_kernel(const ArrayPacket* input, volatile ArrayPacket* output,
   packed_array_copy(input, output, observations);
 }
 // ----
-func.def public @packed_array_copy(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset, %observations: buffer, %observations_byte_offset: offset) {
-  %188 = index.constant 0 : offset
-  %187 = index.constant 2 : offset
+func.def public @packed_array_copy(%input: buffer, %input_byte_offset: index, %output: buffer, %output_byte_offset: index, %observations: buffer, %observations_byte_offset: index) {
+  %154 = index.constant 0 : offset
+  %153 = index.constant 2 : offset
   %10 = index.constant 1 : offset
-  scf.for %row = [%188 to %187 step %10] {
+  scf.for %row = [%154 to %153 step %10] {
     %12 = index.cast %row : offset to i32
-    %185 = index.constant 3 : offset
-    scf.for %column = [%188 to %185 step %10] {
+    %151 = index.constant 3 : offset
+    scf.for %column = [%154 to %151 step %10] {
       %19 = index.cast %column : offset to i32
-      %values_byte_offset$21 = index.add %input_byte_offset, %10 : offset
+      %20 = index.constant 1 : index
+      %values_byte_offset$21 = index.add %input_byte_offset, %20 : index
       %22 = scalar.extui %12 : i32 to i64
-      %23 = scalar.constant 12 : i64
-      %24 = scalar.muli %22, %23 : i64
-      %25 = index.cast %values_byte_offset$21 : offset to i64
-      %26 = scalar.addi %25, %24 : i64
-      %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
-      %28 = index.cast %27 : i64 to offset
-      %29 = scalar.extui %19 : i32 to i64
-      %191 = scalar.constant 2 : i64
-      %192 = scalar.shli %29, %191 : i64
-      %32 = index.cast %28 : offset to i64
-      %33 = scalar.addi %32, %192 : i64
-      %34 = scalar.assume %33 [range(%33, 0, 9223372036854775807)] : i64
-      %35 = index.cast %34 : i64 to offset
-      %36 = buffer.view %input[%35] : buffer -> view<1xi32, align(1)>
-      %37 = view.load<root_in_bounds|type_disjoint> %36[0] : view<1xi32, align(1)> -> i32
-      %values_byte_offset$39 = index.add %output_byte_offset, %10 : offset
-      %43 = index.cast %values_byte_offset$39 : offset to i64
-      %44 = scalar.addi %43, %24 : i64
-      %45 = scalar.assume %44 [range(%44, 0, 9223372036854775807)] : i64
-      %46 = index.cast %45 : i64 to offset
-      %50 = index.cast %46 : offset to i64
-      %51 = scalar.addi %50, %192 : i64
-      %52 = scalar.assume %51 [range(%51, 0, 9223372036854775807)] : i64
-      %53 = index.cast %52 : i64 to offset
-      %54 = buffer.view %output[%53] : buffer -> view<1xi32, align(1)>
-      view.store<volatile|root_in_bounds|type_disjoint> %37, %54[0] : i32, view<1xi32, align(1)>
+      %23 = index.cast %22 : i64 to index
+      %24 = index.constant 12 : index
+      %158 = index.madd %23, %24, %values_byte_offset$21 : index
+      %27 = scalar.extui %19 : i32 to i64
+      %28 = index.cast %27 : i64 to index
+      %29 = index.constant 4 : index
+      %157 = index.madd %28, %29, %158 : index
+      %32 = buffer.view %input[%157] : buffer -> view<1xi32, align(1)>
+      %33 = view.load<root_in_bounds|type_disjoint> %32[0] : view<1xi32, align(1)> -> i32
+      %values_byte_offset$35 = index.add %output_byte_offset, %20 : index
+      %156 = index.madd %23, %24, %values_byte_offset$35 : index
+      %155 = index.madd %28, %29, %156 : index
+      %46 = buffer.view %output[%155] : buffer -> view<1xi32, align(1)>
+      view.store<volatile|root_in_bounds|type_disjoint> %33, %46[0] : i32, view<1xi32, align(1)>
     }
   }
-  %58 = scalar.constant 1 : i32
-  %64 = index.cast %output_byte_offset : offset to i64
-  %66 = scalar.assume %64 [range(%64, 0, 9223372036854775807)] : i64
-  %67 = index.cast %66 : i64 to offset
-  %values_byte_offset = index.add %67, %10 : offset
-  %75 = index.cast %values_byte_offset : offset to i64
-  %77 = scalar.assume %75 [range(%75, 0, 9223372036854775807)] : i64
-  %78 = index.cast %77 : i64 to offset
-  %84 = index.cast %78 : offset to i64
-  %86 = scalar.assume %84 [range(%84, 0, 9223372036854775807)] : i64
-  %87 = index.cast %86 : i64 to offset
-  %88 = buffer.view %output[%87] : buffer -> view<1xi32, align(1)>
-  %89 = view.load<volatile|root_in_bounds|type_disjoint> %88[0] : view<1xi32, align(1)> -> i32
-  %90 = scalar.addi %89, %58 : i32
-  view.store<volatile|root_in_bounds|type_disjoint> %90, %88[0] : i32, view<1xi32, align(1)>
-  %92 = scalar.constant 2 : i32
-  %176 = scalar.constant 12 : i64
-  %110 = scalar.addi %77, %176 : i64
-  %111 = scalar.assume %110 [range(%110, 0, 9223372036854775807)] : i64
-  %112 = index.cast %111 : i64 to offset
-  %116 = index.cast %112 : offset to i64
-  %118 = scalar.assume %116 [range(%116, 0, 9223372036854775807)] : i64
-  %119 = index.cast %118 : i64 to offset
-  %120 = buffer.view %output[%119] : buffer -> view<1xi32, align(1)>
-  %121 = view.load<volatile|root_in_bounds|type_disjoint> %120[0] : view<1xi32, align(1)> -> i32
-  %122 = scalar.addi %121, %92 : i32
-  view.store<volatile|root_in_bounds|type_disjoint> %122, %120[0] : i32, view<1xi32, align(1)>
-  %127 = index.cast %observations_byte_offset : offset to i64
-  %129 = scalar.assume %127 [range(%127, 0, 9223372036854775807)] : i64
-  %130 = index.cast %129 : i64 to offset
-  %131 = buffer.view %observations[%130] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %58, %131[0] : i32, view<1xi32>
-  %173 = scalar.constant 4 : i64
-  %137 = scalar.addi %129, %173 : i64
-  %138 = scalar.assume %137 [range(%137, 0, 9223372036854775807)] : i64
-  %139 = index.cast %138 : i64 to offset
-  %140 = buffer.view %observations[%139] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %58, %140[0] : i32, view<1xi32>
-  %172 = scalar.constant 8 : i64
-  %146 = scalar.addi %129, %172 : i64
-  %147 = scalar.assume %146 [range(%146, 0, 9223372036854775807)] : i64
-  %148 = index.cast %147 : i64 to offset
-  %149 = buffer.view %observations[%148] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %58, %149[0] : i32, view<1xi32>
-  %155 = scalar.addi %129, %176 : i64
-  %156 = scalar.assume %155 [range(%155, 0, 9223372036854775807)] : i64
-  %157 = index.cast %156 : i64 to offset
-  %158 = buffer.view %observations[%157] : buffer -> view<1xi32>
-  view.store<root_in_bounds|type_disjoint> %58, %158[0] : i32, view<1xi32>
+  %50 = scalar.constant 1 : i32
+  %58 = index.constant 1 : index
+  %values_byte_offset = index.add %output_byte_offset, %58 : index
+  %74 = buffer.view %output[%values_byte_offset] : buffer -> view<1xi32, align(1)>
+  %75 = view.load<volatile|root_in_bounds|type_disjoint> %74[0] : view<1xi32, align(1)> -> i32
+  %76 = scalar.addi %75, %50 : i32
+  view.store<volatile|root_in_bounds|type_disjoint> %76, %74[0] : i32, view<1xi32, align(1)>
+  %78 = scalar.constant 2 : i32
+  %142 = index.constant 12 : index
+  %92 = index.add %values_byte_offset, %142 : index
+  %98 = buffer.view %output[%92] : buffer -> view<1xi32, align(1)>
+  %99 = view.load<volatile|root_in_bounds|type_disjoint> %98[0] : view<1xi32, align(1)> -> i32
+  %100 = scalar.addi %99, %78 : i32
+  view.store<volatile|root_in_bounds|type_disjoint> %100, %98[0] : i32, view<1xi32, align(1)>
+  %106 = buffer.view %observations[%observations_byte_offset] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %50, %106[0] : i32, view<1xi32>
+  %139 = index.constant 4 : index
+  %111 = index.add %observations_byte_offset, %139 : index
+  %112 = buffer.view %observations[%111] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %50, %112[0] : i32, view<1xi32>
+  %138 = index.constant 8 : index
+  %117 = index.add %observations_byte_offset, %138 : index
+  %118 = buffer.view %observations[%117] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %50, %118[0] : i32, view<1xi32>
+  %123 = index.add %observations_byte_offset, %142 : index
+  %124 = buffer.view %observations[%123] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %50, %124[0] : i32, view<1xi32>
   func.return
 }
 
 kernel.def @packed_array_kernel() {
-  %162 = index.constant 1 : index
-  kernel.launch.config workgroups(%162, %162, %162) workgroup_size(%162, %162, %162) : index
+  %128 = index.constant 1 : index
+  kernel.launch.config workgroups(%128, %128, %128) workgroup_size(%128, %128, %128) : index
 } launch(%input: buffer, %output: buffer, %observations: buffer) {
-  %input_byte_offset = index.constant 0 : offset
-  func.call @packed_array_copy(%input, %input_byte_offset, %output, %input_byte_offset, %observations, %input_byte_offset) : (buffer, offset, buffer, offset, buffer, offset)
+  %input_byte_offset = index.constant 0 : index
+  func.call @packed_array_copy(%input, %input_byte_offset, %output, %input_byte_offset, %observations, %input_byte_offset) : (buffer, index, buffer, index, buffer, index)
   kernel.return
 }

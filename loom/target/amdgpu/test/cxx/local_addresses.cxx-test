@@ -20,19 +20,19 @@ low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 0, direct_
   %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %62 = v_lshlrev_b32_src0_inline %lane, 3
-  %lhs = global_load_b64_saddr %62, %input
-  %64 = v_mov_b32 0
-  %65 = v_mov_b32 1072693248
-  %rhs = concat(%64, %65) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %67 = v_cmp_lt_f64 %lhs, %rhs
-  %70 = v_cndmask_b32_src0_lit_src1_inline %67 {imm32 = 1, true_value = 0}
-  %71 = v_cmp_eq_i32_src1_inline %70 {rhs = 0}
-  %73 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %74 = v_cndmask_b32 %73, %64, %71
-  %76 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %77 = v_cndmask_b32 %76, %65, %71
-  %78 = concat(%74, %77) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b64_saddr %62, %78, %output
+  %50 = v_lshlrev_b32_src0_inline %lane, 3
+  %lhs = global_load_b64_saddr %50, %input
+  %52 = v_mov_b32 0
+  %53 = v_mov_b32 1072693248
+  %rhs = concat(%52, %53) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %55 = v_cmp_lt_f64 %lhs, %rhs
+  %58 = v_cndmask_b32_src0_lit_src1_inline %55 {imm32 = 1, true_value = 0}
+  %59 = v_cmp_eq_i32_src1_inline %58 {rhs = 0}
+  %61 = slice %lhs[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %62 = v_cndmask_b32 %61, %52, %59
+  %64 = slice %lhs[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %65 = v_cndmask_b32 %64, %53, %59
+  %66 = concat(%62, %65) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b64_saddr %50, %66, %output
   return
 }
