@@ -374,7 +374,7 @@ iree_status_t loom_value_fact_cfg_region_initialize(
 
 static iree_host_size_t loom_value_fact_cfg_aligned_size(
     iree_host_size_t size) {
-  return iree_host_align(size, iree_alignof(iree_max_align_t));
+  return iree_host_align(size, iree_max_align_t);
 }
 
 static void* loom_value_fact_cfg_pack_array(uint8_t** cursor,
