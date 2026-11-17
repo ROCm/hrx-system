@@ -30,7 +30,9 @@ enum {
   TEXT_HOST_STATE_ORIGINS = 9,
   // LE u32 continuation flags indexed by first-plan ordinal, not resident ID.
   TEXT_HOST_CONTINUATIONS = 10,
-  TEXT_HOST_BUFFER_COUNT = 11,
+  // LE u32 actual candidate counts, indexed by first-plan ordinal.
+  TEXT_HOST_PROPOSAL_COUNTS = 11,
+  TEXT_HOST_BUFFER_COUNT = 12,
 };
 
 // Linked model-wide VM control and its borrowed native capabilities. The

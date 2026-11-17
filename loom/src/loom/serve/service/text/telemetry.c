@@ -181,6 +181,7 @@ void loom_serve_text_telemetry_epoch(
       options->schedule_mode == LOOM_SERVICE_TEXT_SCHEDULE_PACKED;
   iree_host_size_t prefill_count = 0, decode_count = 0, output_count = 0;
   iree_host_size_t verification_count = 0, accepted_drafts = 0;
+  uint64_t proposed_tokens = 0;
   loom_service_text_statistics_t* state = &heartbeat->snapshot;
   const iree_time_t completed = iree_time_now();
   for (iree_host_size_t i = 0; i < count; ++i) {
@@ -193,6 +194,7 @@ void loom_serve_text_telemetry_epoch(
         results[i].consumed_count - (prefill ? results[i].known_count : 0);
     output_count += results[i].output_count;
     verification_count += results[i].verification_count;
+    proposed_tokens += results[i].proposal_count;
     accepted_drafts += results[i].consumed_count - results[i].known_count -
                        results[i].verification_count;
     session->request.counters.input_tokens += results[i].consumed_count;
@@ -216,6 +218,7 @@ void loom_serve_text_telemetry_epoch(
         .output_limit = output_limits[i],
         .known_tokens = results[i].known_count,
         .verification_epochs = results[i].verification_count,
+        .proposed_tokens = results[i].proposal_count,
         .prefill = prefill,
         .select = select};
     loom_service_text_record(telemetry->stream, &LOOM_SERVICE_TEXT_SPAN,
@@ -227,7 +230,7 @@ void loom_serve_text_telemetry_epoch(
   state->prefill_tokens += prefill_count;
   state->decode_tokens += decode_count;
   state->model_duration += completed - start;
-  state->draft.proposed_tokens += verification_count * options->draft_depth;
+  state->draft.proposed_tokens += proposed_tokens;
   state->draft.accepted_inputs += accepted_drafts;
   state->last_completion = completed;
   iree_slim_mutex_unlock(&heartbeat->mutex);
@@ -237,7 +240,9 @@ void loom_serve_text_telemetry_epoch(
   const loom_service_text_epoch_record_t value = {
       .epoch = epoch,
       .spans = count,
-      .shape = shape_index,
+      .shape = (uint32_t)shape_index,
+      .schedule_mode = options->schedule_mode,
+      .packing_mode = options->packing_mode,
       .token_capacity = options->shapes[shape_index].token_capacity,
       .token_slots = cohort->token_slots,
       .span_capacity = options->shapes[shape_index].span_capacity,
@@ -250,9 +255,7 @@ void loom_serve_text_telemetry_epoch(
       .continued_prefill_tokens = continued_prefill_count,
       .verifications = verification_count,
       .accepted_draft_inputs = accepted_drafts,
-      .schedule_mode = options->schedule_mode,
-      .packing_mode = options->packing_mode,
-      .draft_depth = (uint8_t)options->draft_depth};
+      .proposed_tokens = proposed_tokens};
   loom_service_text_record(telemetry->stream, &LOOM_SERVICE_TEXT_EPOCH, 0,
                            &value, sizeof(value));
 }

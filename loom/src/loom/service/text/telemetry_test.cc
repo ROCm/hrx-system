@@ -15,7 +15,7 @@
 
 namespace {
 
-TEST(TextTelemetry, EpochPreservesModeAvailabilityAndDerivedDraftWork) {
+TEST(TextTelemetry, EpochPreservesModeAvailabilityAndActualDraftWork) {
   for (const auto mode :
        {LOOM_SERVICE_TEXT_SCHEDULE_PACKED, LOOM_SERVICE_TEXT_SCHEDULE_ISOLATED,
         LOOM_SERVICE_TEXT_SCHEDULE_MATCHED}) {
@@ -27,6 +27,8 @@ TEST(TextTelemetry, EpochPreservesModeAvailabilityAndDerivedDraftWork) {
       loom_service_text_epoch_record_t epoch = {
           .epoch = 7,
           .spans = 2,
+          .schedule_mode = static_cast<uint8_t>(mode),
+          .packing_mode = static_cast<uint8_t>(packing),
           .token_capacity = 8,
           .token_slots = mode == LOOM_SERVICE_TEXT_SCHEDULE_PACKED ? 16u : 0u,
           .span_capacity = 2,
@@ -37,9 +39,7 @@ TEST(TextTelemetry, EpochPreservesModeAvailabilityAndDerivedDraftWork) {
           .device_epochs = 2,
           .verifications = 2,
           .accepted_draft_inputs = 4,
-          .schedule_mode = static_cast<uint8_t>(mode),
-          .packing_mode = static_cast<uint8_t>(packing),
-          .draft_depth = 3,
+          .proposed_tokens = 5,
       };
       loom_service_text_record(stream, &LOOM_SERVICE_TEXT_EPOCH, 0, &epoch,
                                sizeof(epoch));
@@ -91,7 +91,7 @@ TEST(TextTelemetry, EpochPreservesModeAvailabilityAndDerivedDraftWork) {
                  EXPECT_EQ(field.value.object_value.count, 3u);
                  const auto* draft = field.value.object_value.fields;
                  EXPECT_STREQ(draft[1].name, "proposed_tokens");
-                 EXPECT_EQ(draft[1].value.uint64_value, 6u);
+                 EXPECT_EQ(draft[1].value.uint64_value, 5u);
                  EXPECT_EQ(draft[2].value.uint64_value, 4u);
                }
              }

@@ -1596,6 +1596,9 @@ iree_status_t loom_serve_text_model_complete_epoch(
       iree_vm_buffer_variant_from_ptr_borrowed(
           &model->source.vm_types,
           model->control.host.buffers[TEXT_HOST_PROGRESS]),
+      iree_vm_buffer_variant_from_ptr_borrowed(
+          &model->source.vm_types,
+          model->control.host.buffers[TEXT_HOST_PROPOSAL_COUNTS]),
   };
   IREE_RETURN_IF_ERROR(
       loom_serve_text_invoke(model, model->control.publish_epoch,
@@ -1607,6 +1610,9 @@ iree_status_t loom_serve_text_model_complete_epoch(
     loom_serve_text_result_t result;
     uint32_t source_position = 0;
     loom_serve_text_epoch_plan_read_progress(record, &result, &source_position);
+    result.proposal_count = iree_unaligned_load_le_u32(
+        model->control.host.bytes[TEXT_HOST_PROPOSAL_COUNTS].data +
+        i * sizeof(uint32_t));
     if (out_results) {
       out_results[i] = result;
     }

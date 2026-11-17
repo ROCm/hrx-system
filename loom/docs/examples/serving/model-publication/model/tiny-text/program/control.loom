@@ -395,7 +395,7 @@ func.def public @text_encode_epoch_v1(%control_state: buffer, %plan: buffer, %in
   func.return %first_count, %control_state, %transfer_begin, %transfer_length : i32, buffer, i64, i64
 }
 
-func.def public @text_publish_epoch_v1(%control_state: buffer, %plan: buffer, %media_plan: buffer, %count: i32, %first_media_count: i32, %next_media_count: i32, %verified: i32, %continues: i32, %next_speculative: buffer, %ordinary: buffer, %first_results: buffer, %next_results: buffer, %progress: buffer) {
+func.def public @text_publish_epoch_v1(%control_state: buffer, %plan: buffer, %media_plan: buffer, %count: i32, %first_media_count: i32, %next_media_count: i32, %verified: i32, %continues: i32, %next_speculative: buffer, %ordinary: buffer, %first_results: buffer, %next_results: buffer, %progress: buffer, %proposal_counts: buffer) {
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -410,7 +410,9 @@ func.def public @text_publish_epoch_v1(%control_state: buffer, %plan: buffer, %m
   %requests = buffer.view %plan[%origin] : buffer -> view<[%plan_extent]x9xi32>
   %outputs = buffer.view %ordinary[%origin] : buffer -> view<[%length]xi32>
   %published = buffer.view %progress[%origin] : buffer -> view<[%length]x21xi32>
+  %proposals = buffer.view %proposal_counts[%origin] : buffer -> view<[%length]xi32>
   scf.for %i = [%c0 to %length step %c1] {
+    view.store %c0_i32, %proposals[%i] : i32, view<[%length]xi32>
     %request = index.assume %i [lt(%i, %plan_extent)] : index
     %consumed = view.load %requests[%request, 0] : view<[%plan_extent]x9xi32> -> i32
     %source_position = view.load %requests[%request, 2] : view<[%plan_extent]x9xi32> -> i32

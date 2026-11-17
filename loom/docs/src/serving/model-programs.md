@@ -560,6 +560,17 @@ layout and carries it through control-state growth. Submitted device work uses
 its already-captured inputs; publication does not change those inputs or the
 completed feedback banks.
 
+Its final two arguments are writable host buffers: `progress`, containing the
+semantic progress records, and `proposal_counts`, containing one little-endian
+u32 per first-plan span. The source writes every live proposal-count entry,
+including zero for ordinary input. Counts cover the candidates actually
+presented to verification across both completed epochs, including rejected
+and lookup-supplied candidates and excluding pending anchors. Compacted
+continuations accumulate into their original first-plan owner. The configured
+draft depth is a ceiling and cannot substitute for these counts. Serving
+telemetry consumes this semantic output without decoding device-private packets
+or issuing another readback.
+
 `encode_epoch` receives the selected first-epoch and continuation token
 capacities as `first_packet_capacity` and `next_packet_capacity`. These are
 the prepared shapes, independent of live token counts and whether the inputs

@@ -94,7 +94,11 @@ typedef struct loom_service_text_epoch_record_t {
   // Completed cohort span count.
   uint64_t spans;
   // Selected first-epoch bucket index.
-  uint64_t shape;
+  uint32_t shape;
+  // Packed execution or an isolated/matched control.
+  uint8_t schedule_mode;
+  // Whether prompt inputs and verifiers may share a cohort.
+  uint8_t packing_mode;
   // Compiled token capacity of the first-epoch bucket, not the whole cohort.
   uint64_t token_capacity;
   // Sum of issued packed bucket capacities across the cohort. Zero means
@@ -120,12 +124,8 @@ typedef struct loom_service_text_epoch_record_t {
   uint64_t verifications;
   // Draft inputs accepted by the target, excluding pending anchors.
   uint64_t accepted_draft_inputs;
-  // Packed execution or an isolated/matched control.
-  uint8_t schedule_mode;
-  // Whether prompt inputs and verifiers may share a cohort.
-  uint8_t packing_mode;
-  // Candidates after each anchor; multiplied by verifications for totals.
-  uint8_t draft_depth;
+  // Actual candidates presented to the target, including rejected candidates.
+  uint64_t proposed_tokens;
 } loom_service_text_epoch_record_t;
 
 typedef struct loom_service_text_span_record_t {
@@ -149,6 +149,8 @@ typedef struct loom_service_text_span_record_t {
   uint64_t known_tokens;
   // Completed verifications for this span.
   uint64_t verification_epochs;
+  // Actual candidates presented to the target across this span's verifications.
+  uint64_t proposed_tokens;
   // Whether the span was consuming prompt input at submission.
   uint64_t prefill;
   // Whether the first traversal requested token selection.
