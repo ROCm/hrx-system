@@ -492,10 +492,9 @@ void GpuNativeTest::SetUp() {
       if (!is_selected || !supported) {
         continue;
       }
-      iree::Status context_status =
-          iree_hal_amd_gpu_context_allocate(fabric_, &fabric_->endpoints[i].id,
-                                            iree_hal_device_event_sink_stderr(),
-                                            iree_allocator_system(), &context_);
+      iree::Status context_status = iree_hal_amd_gpu_context_allocate(
+          fabric_, &fabric_->endpoints[i].id, event_sink(),
+          iree_allocator_system(), &context_);
       // Independent native lifetime is optional. Ordinary PROCESS fixtures
       // still require activation to succeed for their advertised queue family.
       if (native_lifetime() == AMDF_NATIVE_LIFETIME_INSTANCE &&

@@ -13,8 +13,6 @@
 typedef struct iree_hal_amd_gpu_file_transfer_t {
   // Borrowed queue-owned services, live through operation retirement.
   const iree_hal_amd_gpu_file_executor_t* executor;
-  // Borrowed parent, kept alive by the application through completion.
-  iree_hal_device_t* device;
   // Exact capture extent returned to the reusable metadata pool.
   iree_host_size_t allocation_size;
   // Retained file/buffer, partial I/O state, and optional owned host staging.
@@ -159,8 +157,8 @@ static void iree_hal_amd_gpu_file_transfer_retire(void* user_data,
             : NULL);
   }
   if (!iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_context_report_status(operation->executor->context,
-                                           operation->device, status);
+    // File/dependency failures belong to this operation. Native queue owners
+    // report their own device failures; a propagated status is not a new one.
     iree_hal_semaphore_list_fail(operation->signals, status);
   }
   IREE_TRACE_ZONE_END(z0);
@@ -439,7 +437,6 @@ iree_status_t iree_hal_amd_gpu_file_transfer_submit(
   iree_hal_amd_gpu_file_transfer_t* operation = (void*)storage.data;
   *operation = (iree_hal_amd_gpu_file_transfer_t){
       .executor = executor,
-      .device = executor->queue->queue_family->device,
       .allocation_size = storage.data_length,
       .waits = {.count = waits.count,
                 .semaphores = (void*)(storage.data + wait_semaphores_offset),

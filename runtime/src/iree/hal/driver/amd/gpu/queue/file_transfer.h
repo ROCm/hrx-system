@@ -25,7 +25,7 @@ extern "C" {
 typedef struct iree_hal_amd_gpu_file_executor_t {
   // Borrowed exact queue whose native transfer engine moves buffer bytes.
   iree_hal_queue_t* queue;
-  // Borrowed diagnostics, dominated by the application's device ownership.
+  // Borrowed native API context, live through the queue's accepted operations.
   const iree_hal_amd_gpu_context_t* context;
   // Queue-owned reusable CPU metadata storage.
   iree_hal_amd_gpu_capture_pool_t* captures;

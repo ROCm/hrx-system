@@ -251,7 +251,7 @@ class FileTransferTest : public ::testing::Test {
     EXPECT_EQ(queue.host_owners.load(), 0);
     iree_hal_device_release(device.get());
     EXPECT_TRUE(device.destroyed);
-    EXPECT_EQ(failures, reject ? 1u : 0u);
+    EXPECT_EQ(failures, 0u);
     uint64_t completed_value = 0;
     if (reject) {
       EXPECT_THAT(
@@ -389,7 +389,9 @@ void FileTransferTest::FailedNativeWork(iree_hal_memory_access_t access) {
   iree_hal_device_release(device.get());
   EXPECT_TRUE(device.destroyed);
   EXPECT_EQ(queue.submissions, 1u);
-  EXPECT_EQ(failures, 1u);
+  // The native dependency owns fault reporting. Propagating its status through
+  // the file operation must not report it a second time as a driver fault.
+  EXPECT_EQ(failures, 0u);
 }
 
 TEST_F(FileTransferTest, FailedNativeReadPublishesOnlyAfterRetirement) {
