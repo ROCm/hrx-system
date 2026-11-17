@@ -52,13 +52,14 @@ static bool loom_inline_symbol_is_transferable(const loom_module_t* module,
 // Execution planning
 //===----------------------------------------------------------------------===//
 
-static bool loom_inline_symbol_can_transfer(
-    const loom_inline_callables_plan_t* state, loom_symbol_id_t symbol_id) {
+bool loom_inline_symbol_can_transfer_after_removing(
+    const loom_inline_callables_plan_t* state, loom_symbol_id_t symbol_id,
+    uint32_t planned_call_removals) {
   if (symbol_id >= state->module->symbols.count) {
     return false;
   }
   const loom_inline_symbol_info_t* info = &state->symbols[symbol_id];
-  if (info->incoming_call_count != info->planned_call_removals) {
+  if (info->incoming_call_count != planned_call_removals) {
     return false;
   }
   if (info->incoming_non_call_ref_count != 0) {
@@ -105,7 +106,9 @@ static iree_status_t loom_inline_select_transfer_actions(
          entry_index = state->entries[entry_index].next_required_in_component) {
       loom_inline_plan_entry_t* entry = &state->entries[entry_index];
       if (entry->action == LOOM_INLINE_PLAN_ACTION_REQUIRED &&
-          loom_inline_symbol_can_transfer(state, entry->target_symbol_id)) {
+          loom_inline_symbol_can_transfer_after_removing(
+              state, entry->target_symbol_id,
+              state->symbols[entry->target_symbol_id].planned_call_removals)) {
         final_entry_by_symbol[entry->target_symbol_id] = entry_index;
       }
     }

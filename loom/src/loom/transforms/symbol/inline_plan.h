@@ -198,6 +198,9 @@ struct loom_inline_callables_plan_t {
   uint32_t* first_graph_by_source;
   // Lazily allocated optional-inline summaries indexed by symbol id.
   loom_inline_profitability_symbol_t* profitability_symbols;
+  // Authored body costs cached by native-frontier selection, or NULL when
+  // that selection did not need to inventory bodies.
+  uint32_t* direct_body_costs;
   // Lazily allocated optional-call links indexed by plan entry ordinal.
   uint32_t* next_candidate_by_target;
   // Required-inline SCCs in callee-before-caller order.

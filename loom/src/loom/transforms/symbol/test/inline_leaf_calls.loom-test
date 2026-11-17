@@ -33,6 +33,119 @@ func.def public target(@target) @entry(%value: i32) -> (i32) {
 
 // ====
 
+// RUN: pass specialize-target-callgraph,inline-callables{policy=target,budget=4,hot-budget=4}
+
+// A small inner helper expands into its reusable parent before ordinary
+// profitability prices the parent. The direct parent costs four units and
+// would fit the budget, but its legal expanded body costs eight.
+test.target<low_leaf> @target
+
+func.def target(@target) @small_leaf(%value: i32) -> (i32) {
+  %a = test.addi %value, %value : i32
+  %b = test.addi %a, %value : i32
+  %c = test.addi %b, %value : i32
+  %result = test.addi %c, %value : i32
+  func.return %result : i32
+}
+
+func.def target(@target) @reusable_parent(%value: i32) -> (i32) {
+  %inner = func.call @small_leaf(%value) : (i32) -> (i32)
+  %first = test.addi %inner, %value : i32
+  %second = test.addi %first, %value : i32
+  func.return %second : i32
+}
+
+func.def inline target(@target) @required_wrapper(%value: i32) -> (i32) {
+  %result = func.call @reusable_parent(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public target(@target) @frontier_entry(%value: i32) -> (i32, i32, i32) {
+  %first = func.call @required_wrapper(%value) : (i32) -> (i32)
+  %second = func.call @required_wrapper(%value) : (i32) -> (i32)
+  %third = func.call @required_wrapper(%value) : (i32) -> (i32)
+  func.return %first, %second, %third : i32, i32, i32
+}
+
+// ----
+test.target<low_leaf> @target
+
+func.def target(@target) @reusable_parent(%value: i32) -> (i32) {
+  %a = test.addi %value, %value : i32
+  %b = test.addi %a, %value : i32
+  %c = test.addi %b, %value : i32
+  %result = test.addi %c, %value : i32
+  %first = test.addi %result, %value : i32
+  %second = test.addi %first, %value : i32
+  func.return %second : i32
+}
+
+func.def public target(@target) @frontier_entry(%value: i32) -> (i32, i32, i32) {
+  %result$22 = func.call @reusable_parent(%value) : (i32) -> (i32)
+  %result$21 = func.call @reusable_parent(%value) : (i32) -> (i32)
+  %result$13 = func.call @reusable_parent(%value) : (i32) -> (i32)
+  func.return %result$22, %result$21, %result$13 : i32, i32, i32
+}
+
+// ====
+
+// RUN: pass specialize-target-callgraph,inline-callables{policy=target,budget=0,hot-budget=0}
+
+// Legal-frontier selection converges bottom-up through multiple helper layers.
+// Each selected inner expansion makes its parent a reusable leaf in the next
+// round instead of cloning the whole chain through the required wrapper.
+test.target<low_leaf> @target
+
+func.def target(@target) @small_leaf(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def target(@target) @codec(%value: i32) -> (i32) {
+  %inner = func.call @small_leaf(%value) : (i32) -> (i32)
+  %result = test.addi %inner, %value : i32
+  func.return %result : i32
+}
+
+func.def target(@target) @reusable_accessor(%value: i32) -> (i32) {
+  %decoded = func.call @codec(%value) : (i32) -> (i32)
+  %first = test.addi %decoded, %value : i32
+  %second = test.addi %first, %value : i32
+  func.return %second : i32
+}
+
+func.def inline target(@target) @required_wrapper(%value: i32) -> (i32) {
+  %result = func.call @reusable_accessor(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public target(@target) @multilevel_entry(%value: i32) -> (i32, i32, i32) {
+  %first = func.call @required_wrapper(%value) : (i32) -> (i32)
+  %second = func.call @required_wrapper(%value) : (i32) -> (i32)
+  %third = func.call @required_wrapper(%value) : (i32) -> (i32)
+  func.return %first, %second, %third : i32, i32, i32
+}
+
+// ----
+test.target<low_leaf> @target
+
+func.def target(@target) @reusable_accessor(%value: i32) -> (i32) {
+  %result$2 = test.addi %value, %value : i32
+  %result$6 = test.addi %result$2, %value : i32
+  %first = test.addi %result$6, %value : i32
+  %second = test.addi %first, %value : i32
+  func.return %second : i32
+}
+
+func.def public target(@target) @multilevel_entry(%value: i32) -> (i32, i32, i32) {
+  %result$23 = func.call @reusable_accessor(%value) : (i32) -> (i32)
+  %result$22 = func.call @reusable_accessor(%value) : (i32) -> (i32)
+  %result$14 = func.call @reusable_accessor(%value) : (i32) -> (i32)
+  func.return %result$23, %result$22, %result$14 : i32, i32, i32
+}
+
+// ====
+
 // An authored outer boundary instead expands its cold inner helper.
 test.target<low_leaf> @target
 
