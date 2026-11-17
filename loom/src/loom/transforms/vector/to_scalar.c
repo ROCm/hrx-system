@@ -760,7 +760,8 @@ static iree_status_t loom_vector_to_scalar_try_direct_lowerer(
 }
 
 static iree_status_t loom_vector_to_scalar_lower_descriptor_op(
-    loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op) {
+    loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
+    bool capture_inputs) {
   loom_vector_to_scalar_descriptor_t descriptor = {0};
   if (!loom_vector_to_scalar_resolve_descriptor(op->kind, &descriptor)) {
     return iree_ok_status();
@@ -775,6 +776,10 @@ static iree_status_t loom_vector_to_scalar_lower_descriptor_op(
   loom_vector_to_scalar_state_t state = {0};
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_prepare_state(
       pass, rewriter, op, &descriptor, 0, &state));
+  state.capture_inputs =
+      capture_inputs &&
+      (descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_GENERIC ||
+       descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_BITCAST);
   if ((descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_DECODE ||
        descriptor.lane_kind == LOOM_VECTOR_TO_SCALAR_LANE_ENCODE) &&
       loom_vector_to_scalar_encoding_rejection_bits(&state) !=
@@ -803,9 +808,9 @@ static iree_status_t loom_vector_to_scalar_lower_descriptor_op(
   return loom_vector_to_scalar_replace_one_result(&state, replacement);
 }
 
-static iree_status_t loom_vector_to_scalar_lower_op(loom_pass_t* pass,
-                                                    loom_rewriter_t* rewriter,
-                                                    loom_op_t* op) {
+static iree_status_t loom_vector_to_scalar_lower_op_with_input_mode(
+    loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
+    bool capture_inputs) {
   loom_builder_set_before(&rewriter->builder, op);
   bool handled = false;
   IREE_RETURN_IF_ERROR(
@@ -813,7 +818,15 @@ static iree_status_t loom_vector_to_scalar_lower_op(loom_pass_t* pass,
   if (handled) {
     return iree_ok_status();
   }
-  return loom_vector_to_scalar_lower_descriptor_op(pass, rewriter, op);
+  return loom_vector_to_scalar_lower_descriptor_op(pass, rewriter, op,
+                                                   capture_inputs);
+}
+
+static iree_status_t loom_vector_to_scalar_lower_op(loom_pass_t* pass,
+                                                    loom_rewriter_t* rewriter,
+                                                    loom_op_t* op) {
+  return loom_vector_to_scalar_lower_op_with_input_mode(
+      pass, rewriter, op, /*capture_inputs=*/false);
 }
 
 static iree_status_t loom_vector_reduce_axes_to_scalar_lower_op(
@@ -976,7 +989,8 @@ iree_status_t loom_vector_to_scalar_rewrite_op(loom_pass_t* pass,
       return iree_ok_status();
     }
   }
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_lower_op(pass, rewriter, op));
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_lower_op_with_input_mode(
+      pass, rewriter, op, /*capture_inputs=*/true));
   if (!loom_pass_has_error_diagnostics(pass) &&
       iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
     loom_vector_to_scalar_record_rewrite(rewriter, out_rewritten);
@@ -990,7 +1004,8 @@ iree_status_t loom_vector_descriptor_to_scalar_rewrite_op(
   *out_rewritten = false;
   loom_builder_set_before(&rewriter->builder, op);
   IREE_RETURN_IF_ERROR(
-      loom_vector_to_scalar_lower_descriptor_op(pass, rewriter, op));
+      loom_vector_to_scalar_lower_descriptor_op(pass, rewriter, op,
+                                                /*capture_inputs=*/true));
   if (!loom_pass_has_error_diagnostics(pass) &&
       iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
     loom_vector_to_scalar_record_rewrite(rewriter, out_rewritten);
@@ -1047,7 +1062,8 @@ iree_status_t loom_vector_decode_to_scalar_rewrite_op(loom_pass_t* pass,
   }
   loom_builder_set_before(&rewriter->builder, op);
   IREE_RETURN_IF_ERROR(
-      loom_vector_to_scalar_lower_descriptor_op(pass, rewriter, op));
+      loom_vector_to_scalar_lower_descriptor_op(pass, rewriter, op,
+                                                /*capture_inputs=*/true));
   if (!loom_pass_has_error_diagnostics(pass) &&
       iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
     loom_vector_to_scalar_record_rewrite(rewriter, out_rewritten);
@@ -1283,7 +1299,8 @@ static iree_status_t loom_vector_memory_to_scalar_lower_op(
   if (handled) {
     return iree_ok_status();
   }
-  return loom_vector_to_scalar_lower_descriptor_op(pass, rewriter, op);
+  return loom_vector_to_scalar_lower_descriptor_op(pass, rewriter, op,
+                                                   /*capture_inputs=*/false);
 }
 
 typedef iree_status_t (*loom_vector_to_scalar_lower_op_fn_t)(

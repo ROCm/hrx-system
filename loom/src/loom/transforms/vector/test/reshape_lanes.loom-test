@@ -323,9 +323,9 @@ test.target<low_core> @target
 
 func.def target(@target) @reshaped_shared_predicates(%first: i1, %second: i1, %third: i1, %fourth: i1) -> (vector<2x2xi1>, vector<4xi1>) {
   %matrix = vector.from_elements %first, %second, %third, %fourth : vector<2x2xi1>
-  %10 = vector.splat %first : vector<4xi1>
-  %11 = vector.insert %third into %10[1] : i1, vector<4xi1>
-  %12 = vector.insert %second into %11[2] : i1, vector<4xi1>
-  %flat = vector.insert %fourth into %12[3] : i1, vector<4xi1>
+  %14 = vector.splat %first : vector<4xi1>
+  %15 = vector.insert %third into %14[1] : i1, vector<4xi1>
+  %16 = vector.insert %second into %15[2] : i1, vector<4xi1>
+  %flat = vector.insert %fourth into %16[3] : i1, vector<4xi1>
   func.return %matrix, %flat : vector<2x2xi1>, vector<4xi1>
 }

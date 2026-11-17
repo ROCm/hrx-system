@@ -1,0 +1,122 @@
+// RUN: emit source-low output=low
+
+// Unrolling exposes a complete vector construction. Keep that construction
+// visible to native selection instead of lowering each temporary lane update.
+test.target<low_core> @target
+
+func.def public noinline target(@target) @unrolled_lanes(%input: vector<4xi32>, %bias: i32) -> (vector<4xi32>) {
+  %initial_lane = scalar.constant 0 : i32
+  %initial = vector.splat %initial_lane : vector<4xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %result = scf.for %lane = [%begin to %end step %step](%values = %initial : vector<4xi32>) -> (vector<4xi32>) unroll {
+    %input_lane = vector.extract %input[%lane] : vector<4xi32> -> i32
+    %value = scalar.addi %input_lane, %bias : i32
+    %updated = vector.insert %value into %values[%lane] : i32, vector<4xi32>
+    scf.yield %updated : vector<4xi32>
+  }
+  func.return %result : vector<4xi32>
+}
+
+// ----
+low.func.def public noinline target<test.low.core>(@target) abi(object_function) @unrolled_lanes(%input: reg<test.i32 x4>, %bias: reg<test.i32>) -> (reg<test.i32 x4>) asm {
+  %input_lane = slice %input[0] : reg<test.i32 x4> -> reg<test.i32>
+  %value = test.add.i32 %input_lane, %bias
+  %input_lane_1 = slice %input[1] : reg<test.i32 x4> -> reg<test.i32>
+  %value_1 = test.add.i32 %input_lane_1, %bias
+  %input_lane_2 = slice %input[2] : reg<test.i32 x4> -> reg<test.i32>
+  %value_2 = test.add.i32 %input_lane_2, %bias
+  %input_lane_3 = slice %input[3] : reg<test.i32 x4> -> reg<test.i32>
+  %value_3 = test.add.i32 %input_lane_3, %bias
+  %updated_3 = test.from_elements.v4i32 %value, %value_1, %value_2, %value_3
+  return %updated_3
+}
+
+// ====
+// RUN: emit source-low output=low
+
+// Each retained iteration constructs all lanes from the previous iteration.
+// The unrolled updates must combine without losing that outer recurrence.
+test.target<low_core> @target
+
+func.def public noinline target(@target) @repeated_lanes(%input: vector<4xi32>, %bias: i32, %count: index) -> (vector<4xi32>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %result = scf.for %iteration = [%begin to %count step %step](%state = %input : vector<4xi32>) -> (vector<4xi32>) {
+    %mapped = scf.for %lane = [%begin to %end step %step](%values = %state : vector<4xi32>) -> (vector<4xi32>) unroll {
+      %input_lane = vector.extract %state[%lane] : vector<4xi32> -> i32
+      %value = scalar.addi %input_lane, %bias : i32
+      %updated = vector.insert %value into %values[%lane] : i32, vector<4xi32>
+      scf.yield %updated : vector<4xi32>
+    }
+    scf.yield %mapped : vector<4xi32>
+  }
+  func.return %result : vector<4xi32>
+}
+
+// ----
+low.func.def public noinline target<test.low.core>(@target) abi(object_function) @repeated_lanes(%input: reg<test.i32 x4>, %bias: reg<test.i32>, %count: reg<test.i32>) -> (reg<test.i32 x4>) asm {
+  %begin = test.const.i32 0
+  %step = test.const.i32 1
+  %input_slot_0 = slice %input[0] : reg<test.i32 x4> -> reg<test.i32>
+  %input_slot_1 = slice %input[1] : reg<test.i32 x4> -> reg<test.i32>
+  %input_slot_2 = slice %input[2] : reg<test.i32 x4> -> reg<test.i32>
+  %input_slot_3 = slice %input[3] : reg<test.i32 x4> -> reg<test.i32>
+  low.br ^_bb1(%begin: reg<test.i32>, %input_slot_0: reg<test.i32>, %input_slot_1: reg<test.i32>, %input_slot_2: reg<test.i32>, %input_slot_3: reg<test.i32>)
+^_bb1(%iteration: reg<test.i32>, %state_slot_0: reg<test.i32>, %state_slot_1: reg<test.i32>, %state_slot_2: reg<test.i32>, %state_slot_3: reg<test.i32>):
+  %87 = test.cmp.slt.i32 %iteration, %count
+  low.cond_br %87, ^_bb2, ^_bb3 : reg<test.i32>
+^_bb2:
+  %value = test.add.i32 %state_slot_0, %bias
+  %value_1 = test.add.i32 %state_slot_1, %bias
+  %value_2 = test.add.i32 %state_slot_2, %bias
+  %value_3 = test.add.i32 %state_slot_3, %bias
+  %92 = test.add.i32 %iteration, %step
+  low.br ^_bb1(%92: reg<test.i32>, %value: reg<test.i32>, %value_1: reg<test.i32>, %value_2: reg<test.i32>, %value_3: reg<test.i32>)
+^_bb3:
+  %result = test.from_elements.v4i32 %state_slot_0, %state_slot_1, %state_slot_2, %state_slot_3
+  return %result
+}
+
+// ====
+// RUN: emit source-low output=low control-flow=structured-low
+
+// Targets retaining structured control receive the same complete construction.
+test.target<low_core> @target
+
+func.def public noinline target(@target) @repeated_lanes(%input: vector<4xi32>, %bias: i32, %count: index) -> (vector<4xi32>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %result = scf.for %iteration = [%begin to %count step %step](%state = %input : vector<4xi32>) -> (vector<4xi32>) {
+    %mapped = scf.for %lane = [%begin to %end step %step](%values = %state : vector<4xi32>) -> (vector<4xi32>) unroll {
+      %input_lane = vector.extract %state[%lane] : vector<4xi32> -> i32
+      %value = scalar.addi %input_lane, %bias : i32
+      %updated = vector.insert %value into %values[%lane] : i32, vector<4xi32>
+      scf.yield %updated : vector<4xi32>
+    }
+    scf.yield %mapped : vector<4xi32>
+  }
+  func.return %result : vector<4xi32>
+}
+
+// ----
+low.func.def public noinline target<test.low.core>(@target) abi(object_function) @repeated_lanes(%input: reg<test.i32 x4>, %bias: reg<test.i32>, %count: reg<test.i32>) -> (reg<test.i32 x4>) asm {
+  %begin = test.const.i32 0
+  %step = test.const.i32 1
+  %input_slot_0 = slice %input[0] : reg<test.i32 x4> -> reg<test.i32>
+  %input_slot_1 = slice %input[1] : reg<test.i32 x4> -> reg<test.i32>
+  %input_slot_2 = slice %input[2] : reg<test.i32 x4> -> reg<test.i32>
+  %input_slot_3 = slice %input[3] : reg<test.i32 x4> -> reg<test.i32>
+  %result_slot_0, %result_slot_1, %result_slot_2, %result_slot_3 = low.scf.for signed [%begin to %count step %step] iter_args(%input_slot_0: reg<test.i32>, %input_slot_1: reg<test.i32>, %input_slot_2: reg<test.i32>, %input_slot_3: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) do(%iteration: reg<test.i32>, %state_slot_0: reg<test.i32>, %state_slot_1: reg<test.i32>, %state_slot_2: reg<test.i32>, %state_slot_3: reg<test.i32>) {
+    %value = test.add.i32 %state_slot_0, %bias
+    %value_1 = test.add.i32 %state_slot_1, %bias
+    %value_2 = test.add.i32 %state_slot_2, %bias
+    %value_3 = test.add.i32 %state_slot_3, %bias
+    low.scf.yield %value, %value_1, %value_2, %value_3 : reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>
+  }
+  %result = test.from_elements.v4i32 %result_slot_0, %result_slot_1, %result_slot_2, %result_slot_3
+  return %result
+}

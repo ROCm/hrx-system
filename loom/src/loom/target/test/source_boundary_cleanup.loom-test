@@ -281,3 +281,61 @@ func.def public target(@target) @unused_result(%x: i32, %y: i32, %z: i32) {
 low.func.def public target<test.low.core>(@target) abi(object_function) @unused_result(%x: reg<test.i32>, %y: reg<test.i32>, %z: reg<test.i32>) asm {
   return
 }
+
+// ====
+// RUN: emit source-low output=low
+
+// Stores retain their vector shape through eager legalization. The scalar
+// accesses exposed at final legalization still promote across aliases.
+test.target<low_core> @target
+
+func.def public target(@target) @late_private_cells(%x: i32, %y: i32, %z: i32) -> (i32, i32) {
+  %bytes = index.constant 12 : offset
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %origin = index.constant 0 : offset
+  %tail_offset = index.constant 8 : offset
+  %pair = buffer.view %storage[%origin] : buffer -> view<2xi32>
+  %tail = buffer.view %storage[%tail_offset] : buffer -> view<1xi32>
+  %values = vector.from_elements %x, %y : vector<2xi32>
+  vector.store %values, %pair[0] : vector<2xi32>, view<2xi32>
+  view.store %z, %tail[0] : i32, view<1xi32>
+  %first = view.load %pair[0] : view<2xi32> -> i32
+  %second = view.load %pair[1] : view<2xi32> -> i32
+  %sum = scalar.addi %first, %second : i32
+  %last = view.load %tail[0] : view<1xi32> -> i32
+  func.return %sum, %last : i32, i32
+}
+
+// ----
+low.func.def public target<test.low.core>(@target) abi(object_function) @late_private_cells(%x: reg<test.i32>, %y: reg<test.i32>, %z: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %sum = test.add.i32 %x, %y
+  return %sum, %z
+}
+
+// ====
+// RUN: emit source-low output=low control-flow=structured-low
+
+test.target<low_core> @target
+
+func.def public target(@target) @late_private_cells(%x: i32, %y: i32, %z: i32) -> (i32, i32) {
+  %bytes = index.constant 12 : offset
+  %storage = buffer.alloca<private> align(4) %bytes : buffer
+  %origin = index.constant 0 : offset
+  %tail_offset = index.constant 8 : offset
+  %pair = buffer.view %storage[%origin] : buffer -> view<2xi32>
+  %tail = buffer.view %storage[%tail_offset] : buffer -> view<1xi32>
+  %values = vector.from_elements %x, %y : vector<2xi32>
+  vector.store %values, %pair[0] : vector<2xi32>, view<2xi32>
+  view.store %z, %tail[0] : i32, view<1xi32>
+  %first = view.load %pair[0] : view<2xi32> -> i32
+  %second = view.load %pair[1] : view<2xi32> -> i32
+  %sum = scalar.addi %first, %second : i32
+  %last = view.load %tail[0] : view<1xi32> -> i32
+  func.return %sum, %last : i32, i32
+}
+
+// ----
+low.func.def public target<test.low.core>(@target) abi(object_function) @late_private_cells(%x: reg<test.i32>, %y: reg<test.i32>, %z: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %sum = test.add.i32 %x, %y
+  return %sum, %z
+}

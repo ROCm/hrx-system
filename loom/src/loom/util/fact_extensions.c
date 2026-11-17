@@ -890,14 +890,13 @@ bool loom_value_facts_query_uniform_element(
 iree_status_t loom_value_facts_make_small_static_lanes(
     loom_fact_context_t* context, loom_value_fact_small_static_lanes_t lanes,
     loom_value_facts_t* out) {
-  if (lanes.count > LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT) {
-    *out = loom_value_facts_unknown();
-    return iree_ok_status();
+  *out = loom_value_facts_unknown();
+  if (lanes.count <= LOOM_VALUE_FACT_SMALL_STATIC_LANE_LIMIT) {
+    loom_value_fact_extension_entry_t entry = {0};
+    entry.kind = LOOM_VALUE_FACT_EXTENSION_SMALL_STATIC_LANES;
+    entry.payload.small_static_lanes = lanes;
+    IREE_RETURN_IF_ERROR(loom_value_facts_make_extension(context, &entry, out));
   }
-  loom_value_fact_extension_entry_t entry = {0};
-  entry.kind = LOOM_VALUE_FACT_EXTENSION_SMALL_STATIC_LANES;
-  entry.payload.small_static_lanes = lanes;
-  IREE_RETURN_IF_ERROR(loom_value_facts_make_extension(context, &entry, out));
   if (lanes.count > 0) {
     // Intersect flags before decoding formats so this stays one bitwise
     // reduction. The first component's numeric payload is not projected.

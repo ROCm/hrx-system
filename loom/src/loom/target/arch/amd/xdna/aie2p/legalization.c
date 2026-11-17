@@ -124,6 +124,19 @@ static iree_status_t loom_aie2p_legalize_linear_vector_shape(
   return iree_ok_status();
 }
 
+// Semantic rewrites can expose native packet candidates in a later iteration.
+// Preserve their producer graph until complete legalization; scalar expansion
+// during eager legalization would discard whole-vector arithmetic origins.
+static bool loom_aie2p_defer_scalarization(
+    const loom_target_legalization_context_t* context,
+    loom_target_legalizer_result_t* out_result) {
+  if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_EAGER) {
+    return false;
+  }
+  out_result->action = LOOM_TARGET_LEGALIZER_ACTION_DEFER;
+  return true;
+}
+
 static iree_status_t loom_aie2p_legalize_vector_to_scalar(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
@@ -133,6 +146,9 @@ static iree_status_t loom_aie2p_legalize_vector_to_scalar(
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
   if (!loom_target_legalization_op_has_source_vector_carriers(context, op)) {
+    return iree_ok_status();
+  }
+  if (loom_aie2p_defer_scalarization(context, out_result)) {
     return iree_ok_status();
   }
 
@@ -160,7 +176,7 @@ static iree_status_t loom_aie2p_legalize_static_vector_shape_or_scalarize(
   bool rewritten = false;
   IREE_RETURN_IF_ERROR(
       loom_vector_static_shape_rewrite_op(context, op, &rewritten));
-  if (!rewritten) {
+  if (!rewritten && !loom_aie2p_defer_scalarization(context, out_result)) {
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_rewrite_op(
         context->pass, context->rewriter, op, &rewritten));
   }
@@ -225,7 +241,7 @@ static iree_status_t loom_aie2p_legalize_vector_insert(
         context, op, context->vector_packet_policy,
         /*insert_materializer=*/NULL, &rewritten));
   }
-  if (!rewritten) {
+  if (!rewritten && !loom_aie2p_defer_scalarization(context, out_result)) {
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_rewrite_op(
         context->pass, context->rewriter, op, &rewritten));
   }
@@ -324,7 +340,8 @@ static iree_status_t loom_aie2p_legalize_vector_select(
         loom_vector_static_shape_rewrite_op(context, op, &rewritten));
   }
   if (!rewritten &&
-      loom_target_legalization_op_has_source_vector_carriers(context, op)) {
+      loom_target_legalization_op_has_source_vector_carriers(context, op) &&
+      !loom_aie2p_defer_scalarization(context, out_result)) {
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_rewrite_op(
         context->pass, context->rewriter, op, &rewritten));
   }
@@ -372,7 +389,8 @@ static iree_status_t loom_aie2p_legalize_table_lookup(
         loom_vector_static_shape_rewrite_op(context, op, &rewritten));
   }
   if (!rewritten &&
-      loom_target_legalization_op_has_source_vector_carriers(context, op)) {
+      loom_target_legalization_op_has_source_vector_carriers(context, op) &&
+      !loom_aie2p_defer_scalarization(context, out_result)) {
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_rewrite_op(
         context->pass, context->rewriter, op, &rewritten));
   }
@@ -450,7 +468,8 @@ static iree_status_t loom_aie2p_legalize_vector_load(
     IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_load(
         context, op, context->vector_packet_policy, &rewritten));
   }
-  if (!rewritten && can_rewrite_memory) {
+  if (!rewritten && can_rewrite_memory &&
+      !loom_aie2p_defer_scalarization(context, out_result)) {
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_rewrite_op(
         context->pass, context->rewriter, op, &rewritten));
   }
@@ -530,7 +549,8 @@ static iree_status_t loom_aie2p_legalize_vector_store(
     IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_store(
         context, op, context->vector_packet_policy, &rewritten));
   }
-  if (!rewritten && !has_native_store && can_rewrite_memory) {
+  if (!rewritten && !has_native_store && can_rewrite_memory &&
+      !loom_aie2p_defer_scalarization(context, out_result)) {
     IREE_RETURN_IF_ERROR(loom_vector_store_captured_to_scalar_rewrite_op(
         context->pass, context->rewriter, op, &rewritten));
   }
@@ -555,7 +575,9 @@ static iree_status_t loom_aie2p_legalize_vector_reduce(
       context, op, context->vector_packet_policy, &packet_result));
   bool rewritten = packet_result == LOOM_VECTOR_PACKET_REDUCE_RESULT_REWRITTEN;
   const bool may_scalarize =
-      loom_target_legalization_op_has_source_vector_carriers(context, op);
+      !rewritten &&
+      loom_target_legalization_op_has_source_vector_carriers(context, op) &&
+      !loom_aie2p_defer_scalarization(context, out_result);
   if (packet_result == LOOM_VECTOR_PACKET_REDUCE_RESULT_CAPTURE_INPUT &&
       may_scalarize) {
     IREE_RETURN_IF_ERROR(loom_vector_reduce_captured_to_scalar_rewrite_op(
@@ -587,7 +609,7 @@ static iree_status_t loom_aie2p_legalize_vector_reduce_axes(
   bool rewritten = false;
   IREE_RETURN_IF_ERROR(loom_vector_reduce_axes_to_vector_rewrite_op(
       context->rewriter, op, &rewritten));
-  if (!rewritten) {
+  if (!rewritten && !loom_aie2p_defer_scalarization(context, out_result)) {
     IREE_RETURN_IF_ERROR(loom_vector_reduce_axes_to_scalar_rewrite_op(
         context->pass, context->rewriter, op, &rewritten));
   }

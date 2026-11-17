@@ -142,3 +142,46 @@ func.def @reinterpreted_classes(%lhs: vector<32xf32>, %rhs: vector<32xf32>) -> (
   %finite = vector.isfinitef %halves : vector<64xf16> -> vector<64xi1>
   func.return %finite : vector<64xi1>
 }
+
+// ====
+
+// Construction retains common precision beyond the per-lane detail budget.
+// A wider final lane removes only the formats that cannot represent it.
+func.def @constructed_formats(%first: bf16, %last: bf16, %wide: f32) -> (i64, i64) {
+  %first_wide = scalar.extf %first : bf16 to f32
+  %last_wide = scalar.extf %last : bf16 to f32
+  %narrow_values = vector.from_elements %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %last_wide : vector<17xf32>
+  %mixed_values = vector.from_elements %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %first_wide, %wide : vector<17xf32>
+  %narrow_formats = test.fact_exact_float_types %narrow_values : vector<17xf32> -> i64
+  %mixed_formats = test.fact_exact_float_types %mixed_values : vector<17xf32> -> i64
+  func.return %narrow_formats, %mixed_formats : i64, i64
+}
+
+// ----
+func.def @constructed_formats(%first: bf16, %last: bf16, %wide: f32) -> (i64, i64) {
+  %narrow_formats = scalar.constant 14336 : i64
+  %mixed_formats = scalar.constant 0 : i64
+  func.return %narrow_formats, %mixed_formats : i64, i64
+}
+
+// ====
+
+// Common classes require every lane, including the first unretained lane.
+func.def @constructed_classes(%first: f32, %last: f32, %unknown: f32) -> (vector<17xi1>, vector<17xi1>) {
+  %sum = scalar.addf<nnan|ninf> %first, %last : f32
+  %difference = scalar.subf<nnan|ninf> %first, %last : f32
+  %finite_values = vector.from_elements %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %difference : vector<17xf32>
+  %mixed_values = vector.from_elements %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %unknown : vector<17xf32>
+  %finite = vector.isfinitef %finite_values : vector<17xf32> -> vector<17xi1>
+  %mixed = vector.isfinitef %mixed_values : vector<17xf32> -> vector<17xi1>
+  func.return %finite, %mixed : vector<17xi1>, vector<17xi1>
+}
+
+// ----
+func.def @constructed_classes(%first: f32, %last: f32, %unknown: f32) -> (vector<17xi1>, vector<17xi1>) {
+  %sum = scalar.addf<nnan|ninf> %first, %last : f32
+  %mixed_values = vector.from_elements %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %sum, %unknown : vector<17xf32>
+  %finite = vector.splati 1 : vector<17xi1>
+  %mixed = vector.isfinitef %mixed_values : vector<17xf32> -> vector<17xi1>
+  func.return %finite, %mixed : vector<17xi1>, vector<17xi1>
+}

@@ -50,35 +50,35 @@ func.def target(@target) @avx512_single_rsqrt_refinement(%value: vector<1xf64>) 
 
 // ----
 low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = (vector<1xf64>) -> (vector<1xf64>)}) @avx512_single_rsqrt_refinement(%value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
-  %35 = mov.imm64 4602678819172646912
-  %36 = vmovq.xmm.gpr64 %35
-  %37 = avx2.vpbroadcastq.xmm %36
-  %38 = mov.imm64 4609434218613702656
-  %39 = vmovq.xmm.gpr64 %38
-  %40 = avx2.vpbroadcastq.xmm %39
-  %41 = vrsqrt14pd.xmm %value
-  %42 = vmulpd.xmm %value, %41
-  %43 = vmulpd.xmm %42, %41
-  %44 = vmulpd.xmm %37, %43
-  %45 = vsubpd.xmm %40, %44
-  %46 = vmulpd.xmm %41, %45
-  %47 = vmulpd.xmm %value, %46
-  %48 = vmulpd.xmm %47, %46
-  %49 = vmulpd.xmm %37, %48
-  %50 = vsubpd.xmm %40, %49
-  %51 = vmulpd.xmm %46, %50
-  %52 = vpermilpd.xmm %value, 0
-  %53 = avx512.vmovq.gpr64.xmm %52
-  %54 = mov.imm64 -4503599627370496
-  %55 = copy %53 : reg<x86.gpr64> -> reg<x86.gpr64>
-  %56 = add.gpr64 %55, %54
-  %57 = mov.imm64 9214364837600034815
-  %58 = cmp.gpr64 %56, %57, "ule"
-  %59 = mov.imm32 0
-  %60 = sub.gpr32 %59, %58
-  %61 = vmovd.xmm.gpr32 %60
-  %62 = avx2.vpbroadcastd.xmm %61
-  %result = vpblendvb.xmm %41, %51, %62
+  %31 = mov.imm64 4602678819172646912
+  %32 = vmovq.xmm.gpr64 %31
+  %33 = avx2.vpbroadcastq.xmm %32
+  %34 = mov.imm64 4609434218613702656
+  %35 = vmovq.xmm.gpr64 %34
+  %36 = avx2.vpbroadcastq.xmm %35
+  %37 = vrsqrt14pd.xmm %value
+  %38 = vmulpd.xmm %value, %37
+  %39 = vmulpd.xmm %38, %37
+  %40 = vmulpd.xmm %33, %39
+  %41 = vsubpd.xmm %36, %40
+  %42 = vmulpd.xmm %37, %41
+  %43 = vmulpd.xmm %value, %42
+  %44 = vmulpd.xmm %43, %42
+  %45 = vmulpd.xmm %33, %44
+  %46 = vsubpd.xmm %36, %45
+  %47 = vmulpd.xmm %42, %46
+  %48 = mov.imm64 4503599627370496
+  %49 = vmovq.xmm.gpr64 %48
+  %50 = avx2.vpbroadcastq.xmm %49
+  %51 = vpsubq.xmm %value, %50
+  %52 = vpextrq.xmm %51, 0
+  %53 = mov.imm64 9214364837600034815
+  %54 = cmp.gpr64 %52, %53, "ule"
+  %55 = mov.imm32 0
+  %56 = sub.gpr32 %55, %54
+  %57 = vmovd.xmm.gpr32 %56
+  %58 = avx2.vpbroadcastd.xmm %57
+  %result = vpblendvb.xmm %37, %47, %58
   return %result
 }
 

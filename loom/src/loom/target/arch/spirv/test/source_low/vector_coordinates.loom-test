@@ -51,15 +51,15 @@ func.def @index_coordinates(%base: index, %step: index, %output: buffer) {
 func.def @index_coordinates(%base: index, %step: index, %output: buffer) {
   %origin = index.constant 0 : offset
   %destination = buffer.view %output[%origin] : buffer -> view<3xi64>
-  %13 = index.cast %base : index to i64
-  %16 = index.add %base, %step : index
-  %17 = index.cast %16 : index to i64
-  %18 = index.constant 2 : index
-  %23 = index.madd %step, %18, %base : index
-  %21 = index.cast %23 : index to i64
-  view.store %13, %destination[0] : i64, view<3xi64>
-  view.store %17, %destination[1] : i64, view<3xi64>
-  view.store %21, %destination[2] : i64, view<3xi64>
+  %22 = index.add %base, %step : index
+  %23 = index.constant 2 : index
+  %27 = index.madd %step, %23, %base : index
+  %11 = index.cast %base : index to i64
+  %13 = index.cast %22 : index to i64
+  %15 = index.cast %27 : index to i64
+  view.store %11, %destination[0] : i64, view<3xi64>
+  view.store %13, %destination[1] : i64, view<3xi64>
+  view.store %15, %destination[2] : i64, view<3xi64>
   func.return
 }
 

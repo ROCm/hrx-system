@@ -398,6 +398,13 @@ static iree_status_t loom_target_pipeline_build_cleanup_body(
   return loom_target_pipeline_build_cleanup(builder);
 }
 
+static iree_status_t loom_target_pipeline_build_combining_cleanup_body(
+    loom_builder_t* builder, void* user_data) {
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_combine_body(builder, user_data));
+  return loom_target_pipeline_build_run(builder, IREE_SV("cse"));
+}
+
 static iree_status_t loom_target_pipeline_build_cleanup_if_changed(
     loom_builder_t* builder) {
   loom_op_t* if_changed_op = NULL;
@@ -497,7 +504,12 @@ static iree_status_t loom_target_pipeline_build_source_loop_unrolling(
   (void)user_data;
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_run(builder, IREE_SV("unroll-scf-for")));
-  return loom_target_pipeline_build_cleanup_if_changed(builder);
+  // Expansion exposes source combines across iterations, including complete
+  // vector constructions that native lowering must see as one operation.
+  loom_op_t* if_changed_op = NULL;
+  return loom_pass_ir_build_if_changed(
+      builder, loom_target_pipeline_build_combining_cleanup_body, NULL,
+      &if_changed_op);
 }
 
 static iree_status_t
@@ -507,6 +519,25 @@ loom_target_pipeline_build_post_expansion_private_storage_promotion(
   IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
       builder, IREE_SV("promote-private-fragments")));
   return loom_target_pipeline_build_cleanup_if_changed(builder);
+}
+
+static iree_status_t loom_target_pipeline_build_legalized_source_cleanup_body(
+    loom_builder_t* builder, void* user_data) {
+  (void)user_data;
+  // Final legalization can expose scalar cells by decomposing vector accesses
+  // and private atomics. Promote those cells before physical storage selection.
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
+      builder, IREE_SV("promote-private-fragments")));
+  return loom_target_pipeline_build_cleanup(builder);
+}
+
+static iree_status_t loom_target_pipeline_build_legalized_source_cleanup(
+    loom_builder_t* builder, void* user_data) {
+  loom_op_t* for_op = NULL;
+  return loom_target_pipeline_build_for_target_functions(
+      builder, IREE_SV("source"),
+      loom_target_pipeline_build_legalized_source_cleanup_body, user_data,
+      &for_op);
 }
 
 // Motion consumes structured loop entry and effect facts before CFG conversion
@@ -667,7 +698,8 @@ loom_target_pipeline_build_source_legalization_cleanup_body(
     IREE_RETURN_IF_ERROR(
         loom_target_pipeline_build_run(builder, IREE_SV("cfg-simplify")));
   }
-  return loom_target_pipeline_build_cleanup(builder);
+  return loom_target_pipeline_build_legalized_source_cleanup_body(builder,
+                                                                  user_data);
 }
 
 static iree_status_t loom_target_pipeline_build_source_legalization_cleanup(
@@ -1003,7 +1035,7 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
   // target set only when it did so before function-local CFG finalization.
   loom_op_t* if_changed_op = NULL;
   IREE_RETURN_IF_ERROR(loom_pass_ir_build_if_changed(
-      builder, loom_target_pipeline_build_cleanup_target_functions, NULL,
+      builder, loom_target_pipeline_build_legalized_source_cleanup, NULL,
       &if_changed_op));
   if (control_flow_lowering == LOOM_TARGET_CONTROL_FLOW_LOWERING_CFG) {
     IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(

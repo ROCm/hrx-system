@@ -23,6 +23,7 @@ loom_check_test_suite(
         "callgraph_specialization.loom-test",
         "execution_unit_count.loom-test",
         "source_boundary_cleanup.loom-test",
+        "source_loop_expansion.loom-test",
         "source_motion.loom-test",
         "source_switch_projection.loom-test",
         "source_target_aliases.loom-test",

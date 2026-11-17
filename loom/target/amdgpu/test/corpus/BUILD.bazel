@@ -158,7 +158,7 @@ _COMPILE_XFAILS = {
         "kernel/subgroup/transport.loom:@subgroup_transport_address_5": "TARGET/002,AMDGPU/023",
     },
     "//loom/target/amdgpu:without_bf16_fma": {
-        "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16": "TARGET/003",
+        "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16": "TARGET/002",
     },
 }
 
@@ -269,7 +269,6 @@ loom_corpus_test(
             "numeric/float/error_functions.loom:@ordinary_error_functions": "LOWERING/036",
             "numeric/float/exponential.loom:@exponential_difference_values": "LOWERING/036",
             "numeric/float/exponential.loom:@power_values": "LOWERING/036",
-            "numeric/float/fused_arithmetic.loom:@fma_nan_f64_values": "TARGET/002",
             "numeric/float/hyperbolic.loom:@ordinary_hyperbolic": "LOWERING/036",
             "numeric/float/inverse_trigonometry.loom:@ordinary_inverse_trigonometry": "LOWERING/036",
             "numeric/float/logarithm.loom:@logarithm_bf16_family_values": "LOWERING/036",
@@ -309,14 +308,7 @@ loom_corpus_test(
             "numeric/float/trigonometry_narrow.loom:@trigonometry_f16_special": "LOWERING/036",
             "numeric/float/trigonometry_narrow.loom:@trigonometry_f16_values": "LOWERING/036",
             "numeric/float/turns.loom:@turn_values": "LOWERING/036",
-            "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16_values": "TARGET/003",
-            "numeric/vector/float_extrema.loom:@vector_float_extrema_bf16_values": "TARGET/002,TARGET/003",
-            "numeric/vector/float_extrema.loom:@vector_float_extrema_f16_values": "TARGET/002,TARGET/003",
-            "numeric/vector/float_extrema.loom:@vector_float_extrema_f64_values": "TARGET/002,TARGET/003",
-            "numeric/vector/float_extrema.loom:@vector_float_extrema_f8e4m3_values": "TARGET/002,TARGET/003",
-            "numeric/vector/float_extrema.loom:@vector_float_extrema_f8e5m2_values": "TARGET/002,TARGET/003",
-            "numeric/vector/float_extrema.loom:@vector_float_extrema_finite_f16_values": "TARGET/002,TARGET/003",
-            "numeric/vector/float_extrema.loom:@vector_float_extrema_finite_f64_values": "TARGET/002",
+            "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16_values": "TARGET/002",
         },
     },
 )

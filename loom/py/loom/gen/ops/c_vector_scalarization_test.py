@@ -12,7 +12,7 @@ import pytest
 
 from loom.dialect.scalar.math import scalar_frexpf
 from loom.dialect.vector import ALL_VECTOR_OPS
-from loom.dialect.vector.defs import VECTOR_CAST_OPS, vector_frexpf
+from loom.dialect.vector.defs import VECTOR_CAST_OPS, VECTOR_FLOAT_ARITHMETIC_OPS, vector_frexpf
 from loom.gen.ops.c_traits import (
     _is_shape_preserving_elementwise_vector_decomposable,
 )
@@ -41,6 +41,13 @@ def test_vector_casts_have_reference_lane_programs() -> None:
     cast_ops = {op.name for op in VECTOR_CAST_OPS}
 
     assert cast_ops - generated_scalarizations == {"vector.bitcast"}
+
+
+def test_vector_float_arithmetic_has_reference_lane_programs() -> None:
+    generated_scalarizations = {row.vector_op.name for row in collect_vector_scalarization_rows()}
+    float_ops = {op.name for op in VECTOR_FLOAT_ARITHMETIC_OPS}
+
+    assert float_ops <= generated_scalarizations
 
 
 def test_multi_result_vector_ops_share_scalar_semantics() -> None:

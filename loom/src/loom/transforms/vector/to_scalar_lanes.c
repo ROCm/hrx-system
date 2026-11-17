@@ -1386,6 +1386,10 @@ iree_status_t loom_vector_to_scalar_materialize_lane(
     *out_lane = value;
     return iree_ok_status();
   }
+  if (state->capture_inputs) {
+    return loom_vector_to_scalar_build_terminal_extract(state, value, indices,
+                                                        out_lane);
+  }
   bool materialized = false;
   loom_value_id_t source = value;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_try_materialize_def_lane(

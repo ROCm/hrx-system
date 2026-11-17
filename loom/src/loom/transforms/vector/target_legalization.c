@@ -1919,26 +1919,15 @@ static const loom_target_legalizer_rule_t kVectorLegalizerRules[] = {
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
         .legalize = loom_vector_legalize_descriptor,
     },
-    // Combining operations share one complete reference family. Native target
-    // contracts retain precedence; explicit rejection selects the ordinary
-    // scalar lane recipe. Keep this list aligned with loom_combining_kind_t.
+    // Integer combining operations retain native target precedence; explicit
+    // rejection selects the ordinary scalar lane recipe.
     {
         .root_kind = LOOM_OP_VECTOR_ADDI,
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
         .legalize = loom_vector_legalize_descriptor,
     },
     {
-        .root_kind = LOOM_OP_VECTOR_ADDF,
-        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
-        .legalize = loom_vector_legalize_descriptor,
-    },
-    {
         .root_kind = LOOM_OP_VECTOR_MULI,
-        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
-        .legalize = loom_vector_legalize_descriptor,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_MULF,
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
         .legalize = loom_vector_legalize_descriptor,
     },
@@ -1977,26 +1966,17 @@ static const loom_target_legalizer_rule_t kVectorLegalizerRules[] = {
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
         .legalize = loom_vector_legalize_descriptor,
     },
-    {
-        .root_kind = LOOM_OP_VECTOR_MINIMUMF,
-        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
-        .legalize = loom_vector_legalize_descriptor,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_MAXIMUMF,
-        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
-        .legalize = loom_vector_legalize_descriptor,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_MINNUMF,
-        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
-        .legalize = loom_vector_legalize_descriptor,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_MAXNUMF,
-        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
-        .legalize = loom_vector_legalize_descriptor,
-    },
+// Each arithmetic producer needs its own fallback after consumers capture
+// vector operands. Keep the family tied to the source dialect, with native
+// contracts and semantic extrema rewrites retaining precedence.
+#define LOOM_VECTOR_FLOAT_LEGALIZER_ROW(op_kind)                            \
+  {                                                                         \
+      .root_kind = (op_kind),                                               \
+      .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION, \
+      .legalize = loom_vector_legalize_descriptor,                          \
+  },
+#include "loom/ops/vector/float_legalizer_rows.inl"
+#undef LOOM_VECTOR_FLOAT_LEGALIZER_ROW
     {
         .root_kind = LOOM_OP_VECTOR_ISNANF,
         .first_operand_element_types = LOOM_SCALAR_TYPE_SET_FLOAT,

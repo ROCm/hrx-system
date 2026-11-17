@@ -17,10 +17,12 @@ loom_generated_source_family(
     generator = "//loom/py/loom/gen/ops:c_vector_scalarization",
     output_flags = [
         "--cast-legalizer-rows",
+        "--float-legalizer-rows",
         "--rows",
     ],
     outputs = [
         "cast_legalizer_rows.inl",
+        "float_legalizer_rows.inl",
         "scalarization_rows.inl",
     ],
 )
@@ -126,6 +128,7 @@ loom_generated_cc_library(
     generator = "//loom/py/loom/gen/ops:c_tables_vector_generator",
     textual_hdrs = [
         ":cast_legalizer_rows.inl",
+        ":float_legalizer_rows.inl",
         "ops.inc",
         ":scalarization_rows.inl",
     ],
