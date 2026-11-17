@@ -376,3 +376,124 @@ check.scenario @native_index_entry_values {
   }
   check.return
 }
+
+// Wide bitwise results preserve both words. Mixed-width inputs must extend
+// according to their sign, while a small mask can narrow the result again.
+func.def @wide_index_bitwise(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<2xi64>
+  %results = buffer.view %output[%origin] : buffer -> view<12xi64>
+  %left_bits = view.load %inputs[0] : view<2xi64> -> i64
+  %right_bits = view.load %inputs[1] : view<2xi64> -> i64
+  %word = scalar.trunci %right_bits : i64 to i32
+  %unsigned_word = scalar.extui %word : i32 to i64
+  %left = index.cast %left_bits : i64 to index
+  %right = index.cast %right_bits : i64 to index
+  %signed = index.cast %word : i32 to index
+  %unsigned = index.cast %unsigned_word : i64 to index
+  %positive_mask = index.constant 6148914691236517205 : index
+  %negative_mask = index.constant -6148914691236517206 : index
+  %byte_mask = index.constant 255 : index
+  %wide_and = index.andi %left, %right : index
+  %wide_or = index.ori %left, %right : index
+  %wide_xor = index.xori %left, %right : index
+  %signed_and = index.andi %left, %signed : index
+  %signed_or = index.ori %left, %signed : index
+  %signed_xor = index.xori %left, %signed : index
+  %unsigned_and = index.andi %left, %unsigned : index
+  %unsigned_or = index.ori %left, %unsigned : index
+  %unsigned_xor = index.xori %left, %unsigned : index
+  %masked = index.andi %left, %positive_mask : index
+  %toggled = index.xori %left, %negative_mask : index
+  %byte = index.andi %left, %byte_mask : index
+  %wide_and_bits = index.cast %wide_and : index to i64
+  %wide_or_bits = index.cast %wide_or : index to i64
+  %wide_xor_bits = index.cast %wide_xor : index to i64
+  %signed_and_bits = index.cast %signed_and : index to i64
+  %signed_or_bits = index.cast %signed_or : index to i64
+  %signed_xor_bits = index.cast %signed_xor : index to i64
+  %unsigned_and_bits = index.cast %unsigned_and : index to i64
+  %unsigned_or_bits = index.cast %unsigned_or : index to i64
+  %unsigned_xor_bits = index.cast %unsigned_xor : index to i64
+  %masked_bits = index.cast %masked : index to i64
+  %toggled_bits = index.cast %toggled : index to i64
+  %byte_bits = index.cast %byte : index to i64
+  view.store %wide_and_bits, %results[0] : i64, view<12xi64>
+  view.store %wide_or_bits, %results[1] : i64, view<12xi64>
+  view.store %wide_xor_bits, %results[2] : i64, view<12xi64>
+  view.store %signed_and_bits, %results[3] : i64, view<12xi64>
+  view.store %signed_or_bits, %results[4] : i64, view<12xi64>
+  view.store %signed_xor_bits, %results[5] : i64, view<12xi64>
+  view.store %unsigned_and_bits, %results[6] : i64, view<12xi64>
+  view.store %unsigned_or_bits, %results[7] : i64, view<12xi64>
+  view.store %unsigned_xor_bits, %results[8] : i64, view<12xi64>
+  view.store %masked_bits, %results[9] : i64, view<12xi64>
+  view.store %toggled_bits, %results[10] : i64, view<12xi64>
+  view.store %byte_bits, %results[11] : i64, view<12xi64>
+  func.return
+}
+
+func.def @wide_index_bitwise_oracle(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<2xi64>
+  %results = buffer.view %output[%origin] : buffer -> view<12xi64>
+  %left = view.load %inputs[0] : view<2xi64> -> i64
+  %right = view.load %inputs[1] : view<2xi64> -> i64
+  %word = scalar.trunci %right : i64 to i32
+  %signed = scalar.extsi %word : i32 to i64
+  %unsigned = scalar.extui %word : i32 to i64
+  %positive_mask = scalar.constant 6148914691236517205 : i64
+  %negative_mask = scalar.constant -6148914691236517206 : i64
+  %byte_mask = scalar.constant 255 : i64
+  %wide_and = scalar.andi %left, %right : i64
+  %wide_or = scalar.ori %left, %right : i64
+  %wide_xor = scalar.xori %left, %right : i64
+  %signed_and = scalar.andi %left, %signed : i64
+  %signed_or = scalar.ori %left, %signed : i64
+  %signed_xor = scalar.xori %left, %signed : i64
+  %unsigned_and = scalar.andi %left, %unsigned : i64
+  %unsigned_or = scalar.ori %left, %unsigned : i64
+  %unsigned_xor = scalar.xori %left, %unsigned : i64
+  %masked = scalar.andi %left, %positive_mask : i64
+  %toggled = scalar.xori %left, %negative_mask : i64
+  %byte = scalar.andi %left, %byte_mask : i64
+  view.store %wide_and, %results[0] : i64, view<12xi64>
+  view.store %wide_or, %results[1] : i64, view<12xi64>
+  view.store %wide_xor, %results[2] : i64, view<12xi64>
+  view.store %signed_and, %results[3] : i64, view<12xi64>
+  view.store %signed_or, %results[4] : i64, view<12xi64>
+  view.store %signed_xor, %results[5] : i64, view<12xi64>
+  view.store %unsigned_and, %results[6] : i64, view<12xi64>
+  view.store %unsigned_or, %results[7] : i64, view<12xi64>
+  view.store %unsigned_xor, %results[8] : i64, view<12xi64>
+  view.store %masked, %results[9] : i64, view<12xi64>
+  view.store %toggled, %results[10] : i64, view<12xi64>
+  view.store %byte, %results[11] : i64, view<12xi64>
+  func.return
+}
+
+check.scenario @wide_index_bitwise_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-1) step(4294967296) : tensor<2xi64>
+    %output = check.generate.fill value(-123) : tensor<12xi64>
+    check.compare<@wide_index_bitwise, @wide_index_bitwise_oracle>(%input, %output) : (tensor<2xi64>, tensor<12xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<12xi64>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(0) step(-9223372036854775808) : tensor<2xi64>
+    %output = check.generate.fill value(-123) : tensor<12xi64>
+    check.compare<@wide_index_bitwise, @wide_index_bitwise_oracle>(%input, %output) : (tensor<2xi64>, tensor<12xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<12xi64>
+    }
+  }
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-9223372036854775808 to 9223372036854775807) : tensor<2xi64>
+    %output = check.generate.fill value(-123) : tensor<12xi64>
+    check.compare<@wide_index_bitwise, @wide_index_bitwise_oracle>(%input, %output) : (tensor<2xi64>, tensor<12xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<12xi64>
+    }
+  }
+  check.return
+}

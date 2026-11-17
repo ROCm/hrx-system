@@ -91,6 +91,7 @@ loom_corpus_test(
             "numeric/integer/division.loom:@wide_division_correction_values": "XDNA/051",
             "numeric/integer/division.loom:@wide_index_division_values": "XDNA/051",
             "numeric/integer/index_carriers.loom:@signed_index_values": "TARGET/005",
+            "numeric/integer/index_carriers.loom:@wide_index_bitwise_values": "TARGET/005",
             "numeric/integer/wide/shifts.loom:@integer_shift_directions_values": "XDNA/051",
             "numeric/vector/constants.loom:@vector_coordinate_constant_values": "XDNA/051",
             "numeric/vector/constants.loom:@vector_f64_constant_selection_values": "XDNA/051",

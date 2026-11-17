@@ -484,26 +484,16 @@ func.def @dynamic_index_division(%dividend_bits: i64, %divisor_bits: i64) -> (in
   func.return %quotient, %remainder : index, index
 }
 
-// Subtracting from the largest signed index makes the full-width requirement
-// explicit while retaining every nonnegative dividend in the input domain.
+// Masking in the index domain makes the full-width carrier requirement explicit.
 func.def @wide_index_division(%dividend_bits: i64, %divisor_bits: i64) -> (index, index) {
-  %mask = scalar.constant 9223372036854775807 : i64
-  %unit = scalar.constant 1 : i64
-  %positive_dividend = scalar.andi %dividend_bits, %mask : i64
-  %positive_divisor = scalar.andi %divisor_bits, %mask : i64
-  %nonzero_divisor = scalar.ori %positive_divisor, %unit : i64
-  %raw_dividend = index.cast %positive_dividend : i64 to index
-  %maximum = index.constant 9223372036854775807 : index
-  %dividend = index.sub %maximum, %raw_dividend : index
-  %divisor = index.cast %nonzero_divisor : i64 to index
-  %quotient, %remainder = index.divrem %dividend, %divisor : index
-  func.return %quotient, %remainder : index, index
-}
-
-func.def @wide_index_division_oracle(%dividend_bits: i64, %divisor_bits: i64) -> (index, index) {
-  %mask = scalar.constant 9223372036854775807 : i64
-  %complement = scalar.xori %dividend_bits, %mask : i64
-  %quotient, %remainder = func.call @dynamic_index_division(%complement, %divisor_bits) : (i64, i64) -> (index, index)
+  %mask = index.constant 9223372036854775807 : index
+  %unit = index.constant 1 : index
+  %dividend = index.cast %dividend_bits : i64 to index
+  %divisor = index.cast %divisor_bits : i64 to index
+  %positive_dividend = index.andi %dividend, %mask : index
+  %positive_divisor = index.andi %divisor, %mask : index
+  %nonzero_divisor = index.ori %positive_divisor, %unit : index
+  %quotient, %remainder = index.divrem %positive_dividend, %nonzero_divisor : index
   func.return %quotient, %remainder : index, index
 }
 
@@ -1238,14 +1228,14 @@ check.scenario @native_index_division_values {
   check.return
 }
 
-// The subject's subtraction requires the full signed 64-bit index carrier.
+// The full-width mask makes the required index carrier explicit in the subject.
 check.scenario @wide_index_division_values {
   check.trial[32](%trial: index, %entropy: check.entropy) {
     %dividend_entropy = check.entropy.fork %entropy name("index-dividend") : check.entropy
     %divisor_entropy = check.entropy.fork %entropy name("index-divisor") : check.entropy
     %dividend = check.entropy.read %dividend_entropy[%trial] : check.entropy -> i64
     %divisor = check.entropy.read %divisor_entropy[%trial] : check.entropy -> i64
-    check.compare<@wide_index_division, @wide_index_division_oracle>(%dividend, %divisor) : (i64, i64) -> [actual(%actual_quotient: index, %actual_remainder: index), expected(%expected_quotient: index, %expected_remainder: index)] {
+    check.compare<@wide_index_division, @dynamic_index_division>(%dividend, %divisor) : (i64, i64) -> [actual(%actual_quotient: index, %actual_remainder: index), expected(%expected_quotient: index, %expected_remainder: index)] {
       check.expect.equal actual(%actual_quotient) expected(%expected_quotient) : index
       check.expect.equal actual(%actual_remainder) expected(%expected_remainder) : index
     }
