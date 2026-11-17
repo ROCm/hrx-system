@@ -2991,17 +2991,19 @@ class Translator final : private Initialization::Evaluation {
         }
         auto traits = unit_.typeTraits();
         if (!preserve_identity && !traits.is_class(element_type) &&
-            !traits.is_array(element_type)) {
+            !traits.is_array(element_type) && !operands->subtract) {
           return Lvalue{ObjectLvalue{
               element_type,
               storage_.subscript(*storage, index_value->ssa(), operands->type,
                                  operands->index->type, owner)}};
         }
-        return Lvalue{
-            ObjectLvalue{element_type,
-                         storage_.advance(*storage, index_value->ssa(),
-                                          operands->type, operands->index->type,
-                                          cxx::TokenKind::T_PLUS, owner)}};
+        return Lvalue{ObjectLvalue{
+            element_type,
+            storage_.advance(*storage, index_value->ssa(), operands->type,
+                             operands->index->type,
+                             operands->subtract ? cxx::TokenKind::T_MINUS
+                                                : cxx::TokenKind::T_PLUS,
+                             owner)}};
       }
     }
     auto* array = types_.array(operands->type, owner);
@@ -3021,6 +3023,12 @@ class Translator final : private Initialization::Evaluation {
     auto* ordinal_type = unit_.control()->getUnsignedIntType();
     auto selector = scalars_.convert(index_value->ssa(), operands->index->type,
                                      ordinal_type, owner);
+    if (operands->subtract) {
+      auto zero =
+          scalars_.integer(0, LOOM_SCALAR_TYPE_I32, locations_.get(owner));
+      selector = scalars_.binary(cxx::TokenKind::T_MINUS, zero, selector,
+                                 ordinal_type, ordinal_type, owner);
+    }
     std::vector<Lvalue> alternatives;
     std::optional<loom_value_id_t> lane;
     if (const auto* outer = array_target->selection()) {

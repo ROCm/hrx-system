@@ -12,8 +12,8 @@ int update(int* output, int value, bool upper) {
   State state{output, {{value, 2}, {3, 4}}};
   int* pointer = state.box.data(upper);
   pointer[0] += 7;
-  *state.box.lower += 2;
-  return *state.box.lower * 3 + *state.box.upper * 5;
+  *(state.box.lower + 0) += 2;
+  return *(0 + state.box.lower) * 3 + *(state.box.upper - 0) * 5;
 }
 // ----
 #include <loomcxx/buffer.h>
@@ -53,11 +53,11 @@ unsigned update(loom::type::buffer<unsigned char> output, loom::type::offset out
 
 [[loom::symbol("Box__data_value")]]
 static unsigned Box__data_value(unsigned this_lower_0, unsigned this_lower_1, unsigned this_upper_0, unsigned this_upper_1, bool upper) {
-  unsigned v34{};
+  unsigned v37{};
   if (upper) {
-    v34 = 0u;
+    v37 = 0u;
   } else {
-    v34 = 1u;
+    v37 = 1u;
   }
-  return v34;
+  return v37;
 }

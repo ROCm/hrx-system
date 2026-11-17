@@ -52,6 +52,8 @@ struct ArraySelection {
   const cxx::Type* type;
   // Whether the array precedes the selector in source evaluation order.
   bool array_first;
+  // Whether pointer subtraction negates the source selector.
+  bool subtract = false;
   // Known in-range element ordinal, absent for a runtime selection.
   std::optional<size_t> constant_index;
 };
@@ -624,6 +626,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Array borrows retain their complete owner even before the callee's
   // fixed-point summary supplies its extent.
   cxx::ExpressionAST* array_borrow_origin(cxx::ExpressionAST* expression) const;
+  void analyze_array_selection(cxx::ExpressionAST* expression,
+                               ArraySelection selection);
   CallArgument retain_array_identity(cxx::ExpressionAST* expression);
   CallArgument retain_member_receiver(cxx::ExpressionAST* expression,
                                       const SubobjectProjection* projection);

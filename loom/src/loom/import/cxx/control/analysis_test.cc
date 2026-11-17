@@ -777,6 +777,39 @@ TEST(ControlFlowTest, ArraySelectionRetainsValuesUntilAnAddressIsObserved) {
   EXPECT_EQ(selected->member->component_count, 1u);
 }
 
+TEST(ControlFlowTest, PointerSubtractionRetainsAnArrayOrdinal) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct State { int* output; int values[2]; };
+    int entry(State& state) { return *(state.values - -1); }
+  )"),
+                IREE_SV("array_subtraction.cxx"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+  auto* returned =
+      cxx::ast_cast<cxx::ReturnStatementAST>(body->statementList->value);
+  ASSERT_NE(returned, nullptr);
+  auto* expression = unwrap_expression(returned->expression);
+  const auto* selection = analysis.array_selection(expression);
+  ASSERT_NE(selection, nullptr);
+  EXPECT_TRUE(selection->array_first);
+  EXPECT_TRUE(selection->subtract);
+  EXPECT_EQ(selection->constant_index, 1u);
+  auto destination = analysis.destination(expression);
+  ASSERT_TRUE(destination.has_value());
+  EXPECT_EQ(destination->binding, function->symbol->parameters()[0]);
+  EXPECT_EQ(destination->component_offset, 3u);
+  EXPECT_EQ(destination->member->component_count, 1u);
+  EXPECT_FALSE(analysis.reference_requires_storage(destination->binding));
+}
+
 TEST(ControlFlowTest, StructuredBindingsAnalyzeTheSynthesizedDeclarationOnce) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);

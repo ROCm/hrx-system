@@ -1626,9 +1626,11 @@ void ControlFlow::visit(cxx::AssignmentExpressionAST* ast) {
   accept(ast->leftExpression);
   auto* subscript =
       cxx::ast_cast<cxx::SubscriptExpressionAST>(ast->leftExpression);
-  const auto* selection = subscript ? array_selection(subscript) : nullptr;
+  const auto* selection =
+      array_selection(unwrap_object_identity(unit_, ast->leftExpression));
   if (!ordinary_call &&
-      ((subscript && (!selection || !selection->constant_index)) ||
+      (((selection && !selection->constant_index) ||
+        (subscript && !selection)) ||
        (cxx::ast_cast<cxx::MemberExpressionAST>(ast->leftExpression) &&
         cxx::ast_cast<cxx::MemberExpressionAST>(ast->leftExpression)
                 ->vectorComponentKind != cxx::VectorComponentKind::kNone))) {
@@ -1706,6 +1708,28 @@ void ControlFlow::visit(cxx::UnaryExpressionAST* ast) {
       return;
     }
   }
+  if (!ast->symbol && ast->op == cxx::TokenKind::T_STAR) {
+    auto* source = unwrap_expression(ast->expression);
+    ArraySelection selection{ast->expression, nullptr, nullptr, true, false, 0};
+    if (auto* arithmetic = cxx::ast_cast<cxx::BinaryExpressionAST>(source);
+        arithmetic && !arithmetic->symbol &&
+        unit_.typeTraits().is_pointer(arithmetic->type) &&
+        (arithmetic->op == cxx::TokenKind::T_PLUS ||
+         arithmetic->op == cxx::TokenKind::T_MINUS)) {
+      selection.array_first =
+          unit_.typeTraits().is_pointer(arithmetic->leftExpression->type);
+      selection.array = selection.array_first ? arithmetic->leftExpression
+                                              : arithmetic->rightExpression;
+      selection.index = selection.array_first ? arithmetic->rightExpression
+                                              : arithmetic->leftExpression;
+      selection.subtract = arithmetic->op == cxx::TokenKind::T_MINUS;
+    }
+    if (array_borrow_origin(selection.array)) {
+      selection.type = borrowed_array_type(selection.array);
+      analyze_array_selection(ast, selection);
+      return;
+    }
+  }
   auto* alias_binding = [&]() -> cxx::Symbol* {
     if (ast->symbol || ast->op != cxx::TokenKind::T_STAR) {
       return nullptr;
@@ -1718,26 +1742,11 @@ void ControlFlow::visit(cxx::UnaryExpressionAST* ast) {
                : nullptr;
   }();
   auto* saved_alias_use = pointer_alias_use_;
-  auto* saved_borrowed_expression = borrowed_pointer_expression_;
-  const bool borrows_array = !ast->symbol &&
-                             ast->op == cxx::TokenKind::T_STAR &&
-                             array_borrow_origin(ast->expression);
   if (alias_binding) {
     pointer_alias_use_ = alias_binding;
   }
-  if (borrows_array) {
-    borrowed_pointer_expression_ = unwrap_expression(ast->expression);
-  }
   cxx::ASTVisitor::visit(ast);
   pointer_alias_use_ = saved_alias_use;
-  borrowed_pointer_expression_ = saved_borrowed_expression;
-  if (borrows_array) {
-    array_selections_.emplace(
-        ast, ArraySelection{unwrap_expression(ast->expression), nullptr,
-                            borrowed_array_type(ast->expression), true, 0});
-    retain_destination(unwrap_expression(ast->expression));
-    retain_destination(ast);
-  }
   if (auto call = direct_operator_call(ast)) {
     retain_call(*call, ast);
     return;
@@ -2282,62 +2291,76 @@ void ControlFlow::visit(cxx::LambdaExpressionAST* ast) {
 }
 
 void ControlFlow::visit(cxx::SubscriptExpressionAST* ast) {
-  auto* saved_alias_use = pointer_alias_use_;
-  auto* saved_borrowed_expression = borrowed_pointer_expression_;
-  cxx::ExpressionAST* borrowed_array = nullptr;
-  const cxx::Type* borrowed_type = nullptr;
-  auto* index = subscript_index(ast);
   if (!ast->symbol) {
+    auto traits = unit_.typeTraits();
+    auto* index = subscript_index(ast);
     for (auto* operand : {ast->baseExpression, index}) {
-      if (!unit_.typeTraits().is_pointer(operand->type) ||
-          !array_borrow_origin(operand)) {
+      const auto* type = traits.remove_reference(operand->type);
+      if (!traits.is_array(type) &&
+          !(traits.is_pointer(type) && array_borrow_origin(operand))) {
         continue;
       }
-      borrowed_array = operand;
-      borrowed_type = borrowed_array_type(operand);
-      auto* source = unwrap_expression(operand);
-      borrowed_pointer_expression_ = source;
-      if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(source)) {
-        pointer_alias_use_ = id->symbol;
-      }
-      break;
+      const bool array_first = operand == ast->baseExpression;
+      analyze_array_selection(
+          ast, {operand, array_first ? index : ast->baseExpression,
+                traits.is_array(type) ? type : borrowed_array_type(operand),
+                array_first, false, std::nullopt});
+      return;
     }
   }
   cxx::ASTVisitor::visit(ast);
-  pointer_alias_use_ = saved_alias_use;
-  borrowed_pointer_expression_ = saved_borrowed_expression;
   if (auto* function = cxx::symbol_cast<cxx::FunctionSymbol>(ast->symbol)) {
     retain_call(ast, function);
-    return;
   }
-  auto traits = unit_.typeTraits();
-  auto* base_type = traits.remove_reference(ast->baseExpression->type);
-  auto* index_type = traits.remove_reference(index->type);
-  const bool array_first =
-      traits.is_array(base_type) || borrowed_array == ast->baseExpression;
-  if (!array_first && !traits.is_array(index_type) && !borrowed_array) {
-    return;
+}
+
+void ControlFlow::analyze_array_selection(cxx::ExpressionAST* expression,
+                                          ArraySelection selection) {
+  auto analyze_array = [&] {
+    auto* saved_alias_use = pointer_alias_use_;
+    auto* saved_borrowed_expression = borrowed_pointer_expression_;
+    borrowed_pointer_expression_ = unwrap_expression(selection.array);
+    if (auto* id =
+            cxx::ast_cast<cxx::IdExpressionAST>(borrowed_pointer_expression_)) {
+      pointer_alias_use_ = id->symbol;
+    }
+    accept(selection.array);
+    pointer_alias_use_ = saved_alias_use;
+    borrowed_pointer_expression_ = saved_borrowed_expression;
+  };
+  if (selection.array_first) {
+    analyze_array();
+    accept(selection.index);
+  } else {
+    accept(selection.index);
+    analyze_array();
   }
-  ArraySelection selection{
-      array_first ? ast->baseExpression : index,
-      array_first ? index : ast->baseExpression,
-      borrowed_array ? borrowed_type : (array_first ? base_type : index_type),
-      array_first, std::nullopt};
-  auto* type = cxx::type_cast<cxx::BoundedArrayType>(
-      selection.type ? types_.unqualified(selection.type) : nullptr);
-  if (type || !selection.type) {
-    cxx::ASTInterpreter interpreter(&unit_);
-    auto constant = interpreter.evaluate(selection.index);
-    auto* integer = constant ? std::get_if<cxx::ConstInt>(&*constant) : nullptr;
-    if (integer && !integer->isNegative() &&
-        (!type || integer->toUWide() <
-                      static_cast<cxx::ConstInt::UWide>(type->size()))) {
-      selection.constant_index = static_cast<size_t>(integer->toUIntMax());
+  // Visit conversions before selecting their array origin so lifetime facts
+  // retain materializations. Translation borrows the array, not its decay.
+  if (unit_.typeTraits().is_pointer(selection.array->type)) {
+    selection.array = unwrap_expression(selection.array);
+  }
+  if (selection.index) {
+    selection.constant_index.reset();
+    const auto* type = cxx::type_cast<cxx::BoundedArrayType>(
+        selection.type ? types_.unqualified(selection.type) : nullptr);
+    if (type || !selection.type) {
+      cxx::ASTInterpreter interpreter(&unit_);
+      auto constant = interpreter.evaluate(selection.index);
+      auto* integer =
+          constant ? std::get_if<cxx::ConstInt>(&*constant) : nullptr;
+      if (integer &&
+          (integer->isZero() || integer->isNegative() == selection.subtract) &&
+          integer->magnitude() <= static_cast<cxx::ConstInt::UWide>(SIZE_MAX) &&
+          (!type || integer->magnitude() <
+                        static_cast<cxx::ConstInt::UWide>(type->size()))) {
+        selection.constant_index = static_cast<size_t>(integer->magnitude());
+      }
     }
   }
-  array_selections_.emplace(ast, selection);
+  array_selections_.emplace(expression, selection);
   retain_destination(selection.array);
-  retain_destination(ast);
+  retain_destination(expression);
 }
 
 const ArraySelection* ControlFlow::array_selection(
