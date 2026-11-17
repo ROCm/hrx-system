@@ -344,3 +344,61 @@ func.def @identity_consumer(%lhs: i32, %rhs: i32) -> (i32, i32) {
   %quotient, %remainder = scalar.divremui %lhs, %rhs : i32
   func.return %quotient, %remainder : i32, i32
 }
+
+// ====
+// RUN: pass canonicalize,test.acquire-value-facts{expect=reuse},canonicalize,test.acquire-value-facts{expect=reuse}
+
+// Removing a branch retires the nested CFG even without SSA identity or
+// vector-partition storage. Repeated acquisition must not retain deleted IR.
+pipeline.def @erased_cfg_subtree() run(%value: i32) {
+  %selected = scalar.constant true : i1
+  scf.if %selected {
+    test.use %value : i32
+  } else {
+    pipeline.serial {
+      cfg.br ^discarded
+    ^discarded:
+      test.use %value : i32
+    }
+  }
+}
+
+// ----
+pipeline.def @erased_cfg_subtree() run(%value: i32) {
+  test.use %value : i32
+}
+
+// ====
+// RUN: pass canonicalize,test.acquire-value-facts{expect=reuse},canonicalize,test.acquire-value-facts{expect=reuse}
+
+// Moving the selected region preserves its graph while erasing the other
+// region withdraws its snapshot. Both boundaries survive scratch teardown.
+pipeline.def @selected_cfg_subtree() run(%condition: i1, %value: i32) {
+  %selected = scalar.constant true : i1
+  scf.if %selected {
+    pipeline.serial {
+      cfg.cond_br %condition, ^taken, ^exit
+    ^taken:
+      test.use %value : i32
+      cfg.br ^exit
+    ^exit:
+    }
+  } else {
+    pipeline.serial {
+      cfg.br ^discarded
+    ^discarded:
+      test.use %value : i32
+    }
+  }
+}
+
+// ----
+pipeline.def @selected_cfg_subtree() run(%condition: i1, %value: i32) {
+  pipeline.serial {
+    cfg.cond_br %condition, ^taken, ^exit
+  ^taken:
+    test.use %value : i32
+    cfg.br ^exit
+  ^exit:
+  }
+}

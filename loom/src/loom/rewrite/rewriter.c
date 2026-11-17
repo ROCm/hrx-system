@@ -623,13 +623,15 @@ iree_status_t loom_rewriter_try_set_derived_value_name(
 // Mini-DCE
 //===----------------------------------------------------------------------===//
 
-// SSA identities and materializations borrow live definitions, unlike facts
-// that remain meaningful after their producer is removed. The erasing mutation
-// owns withdrawal for the complete removed subtree.
+// SSA identities, materializations, and CFG snapshots borrow live IR, unlike
+// numeric facts that remain meaningful after their producer is removed. The
+// erasing mutation owns withdrawal for the complete removed subtree.
 static void loom_rewriter_erase_value_facts(loom_rewriter_t* rewriter,
                                             loom_op_t* op) {
-  if (!rewriter->fact_table || (!rewriter->fact_table->identities.nodes &&
-                                !rewriter->fact_table->vector_partitions)) {
+  if (!rewriter->fact_table ||
+      (!rewriter->fact_table->identities.nodes &&
+       !rewriter->fact_table->vector_partitions &&
+       (!op->region_count || !rewriter->fact_table->regions.cfg_count))) {
     return;
   }
   const loom_value_id_t* results = loom_op_const_results(op);
@@ -644,6 +646,7 @@ static void loom_rewriter_erase_value_facts(loom_rewriter_t* rewriter,
     if (!region) {
       continue;
     }
+    loom_value_fact_table_forget_cfg_region(rewriter->fact_table, region);
     loom_block_t* block = NULL;
     loom_region_for_each_block(region, block) {
       for (uint16_t j = 0; j < block->arg_count; ++j) {
