@@ -461,3 +461,77 @@ check.scenario @bfloat_packet_exact_widening_bits {
   }
   check.return
 }
+
+// Exact widening followed by relaxed narrowing can preserve the source or
+// flush a subnormal to its signed zero. Observe that permission independently
+// of whether a target cancels the conversions or executes them.
+func.def @bfloat_relaxed_roundtrip(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<16xi16>
+  %destination = buffer.view %output[%base] : buffer -> view<32xi16>
+  %bits = vector.load %source[0] : view<16xi16> -> vector<16xi16>
+  %values = vector.bitcast %bits : vector<16xi16> to vector<16xbf16>
+  %wide = vector.extf %values : vector<16xbf16> to vector<16xf32>
+  %narrow = vector.fptrunc<daz> %wide : vector<16xf32> to vector<16xbf16>
+  %begin = index.constant 0 : index
+  %end = index.constant 16 : index
+  %step = index.constant 1 : index
+  %shift = scalar.constant 16 : i32
+  scf.for %position = [%begin to %end step %step] {
+    %input_bits = view.load %source[%position] : view<16xi16> -> i16
+    %extended_bits = scalar.extui %input_bits : i16 to i32
+    %float_bits = scalar.shli %extended_bits, %shift : i32
+    %input_value = scalar.bitcast %input_bits : i16 to bf16
+    %scalar_wide = scalar.extf %input_value : bf16 to f32
+    %scalar_narrow = scalar.fptrunc<ftz> %scalar_wide : f32 to bf16
+    %packet_lane = vector.extract %narrow[%position] : vector<16xbf16> -> bf16
+    %packet_result = func.call @observe_daz_bfloat(%float_bits, %packet_lane) : (i32, bf16) -> (i16)
+    %scalar_result = func.call @observe_daz_bfloat(%float_bits, %scalar_narrow) : (i32, bf16) -> (i16)
+    %scalar_position = index.add %position, %end : index
+    view.store %packet_result, %destination[%position] : i16, view<32xi16>
+    view.store %scalar_result, %destination[%scalar_position] : i16, view<32xi16>
+  }
+  func.return
+}
+
+func.def @bfloat_relaxed_roundtrip_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<16xi16>
+  %destination = buffer.view %output[%base] : buffer -> view<32xi16>
+  %begin = index.constant 0 : index
+  %end = index.constant 16 : index
+  %step = index.constant 1 : index
+  scf.for %position = [%begin to %end step %step] {
+    %bits = view.load %source[%position] : view<16xi16> -> i16
+    %scalar_position = index.add %position, %end : index
+    view.store %bits, %destination[%position] : i16, view<32xi16>
+    view.store %bits, %destination[%scalar_position] : i16, view<32xi16>
+  }
+  func.return
+}
+
+check.scenario @bfloat_relaxed_roundtrip_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(0) step(1) : tensor<16xi16>
+    %output = check.generate.fill value(-1) : tensor<32xi16>
+    check.compare<@bfloat_relaxed_roundtrip, @bfloat_relaxed_roundtrip_oracle>(%input, %output) : (tensor<16xi16>, tensor<32xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi16>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-32768) step(1) : tensor<16xi16>
+    %output = check.generate.fill value(-1) : tensor<32xi16>
+    check.compare<@bfloat_relaxed_roundtrip, @bfloat_relaxed_roundtrip_oracle>(%input, %output) : (tensor<16xi16>, tensor<32xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi16>
+    }
+  }
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(0 to 32640) : tensor<16xi16>
+    %output = check.generate.fill value(-1) : tensor<32xi16>
+    check.compare<@bfloat_relaxed_roundtrip, @bfloat_relaxed_roundtrip_oracle>(%input, %output) : (tensor<16xi16>, tensor<32xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi16>
+    }
+  }
+  check.return
+}

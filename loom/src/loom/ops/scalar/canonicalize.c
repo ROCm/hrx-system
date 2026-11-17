@@ -1823,7 +1823,9 @@ iree_status_t loom_scalar_fptrunc_canonicalize(loom_op_t* op,
                                                loom_rewriter_t* rewriter) {
   loom_value_id_t input = loom_scalar_fptrunc_input(op);
   loom_op_t* input_def = loom_rewriter_value_defining_op(rewriter, input);
-  if (op->instance_flags == 0 && input_def && loom_scalar_extf_isa(input_def) &&
+  // Relaxed narrowing permits preserving the original value. The widening
+  // must remain exact so its other users observe the same value.
+  if (input_def && loom_scalar_extf_isa(input_def) &&
       input_def->instance_flags == 0) {
     loom_value_id_t inner_input = loom_scalar_extf_input(input_def);
     if (loom_type_equal(loom_module_value_type(rewriter->module, inner_input),
