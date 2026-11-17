@@ -16,7 +16,7 @@
 #include "loom/util/fact_cfg.h"
 #include "loom/util/fact_loop.h"
 #include "loom/util/fact_loop_replay.h"
-#include "loom/util/fact_relation.h"
+#include "loom/util/fact_relation_inference.h"
 #include "loom/util/fact_vector_partition.h"
 
 struct loom_value_fact_definition_distributions_t {

@@ -114,6 +114,42 @@ TEST(IntegerCastTest, IntervalTransferContainsEveryConcreteResult) {
   }
 }
 
+TEST(IntegerCastTest, LowBitMasksComposeAtEveryPayloadWidth) {
+  for (uint8_t bits = 1; bits < 64; ++bits) {
+    const int64_t mask = static_cast<int64_t>((UINT64_C(1) << bits) - 1);
+    const int64_t sources[] = {0,     1,         -1,        mask,     mask - 1,
+                               -mask, -mask - 1, INT64_MIN, INT64_MAX};
+    for (uint8_t carrier : {1, 8, 16, 32, 64}) {
+      for (bool is_unsigned : {false, true}) {
+        const auto cast = loom_integer_cast_compose(
+            Cast(carrier, is_unsigned), LOOM_INTEGER_CAST_UNSIGNED, bits);
+        for (int64_t source : sources) {
+          const int64_t expected = static_cast<int64_t>(
+              Interpret(source, carrier, is_unsigned) & mask);
+          const auto facts = loom_integer_cast_apply(
+              &cast, loom_value_facts_exact_i64(source));
+          ASSERT_EQ(facts.range_lo, expected)
+              << +carrier << "/" << +bits << " source=" << source;
+          ASSERT_EQ(facts.range_hi, expected);
+        }
+      }
+    }
+    // Saturated lattice endpoints may lose precision, but must contain every
+    // concrete result. Interior intervals exercise exact modular boundaries.
+    const auto cast = Cast(bits, true);
+    for (int64_t lower :
+         {INT64_MIN, INT64_C(-4), INT64_C(-1), INT64_C(0), INT64_MAX - 2}) {
+      const auto facts = loom_integer_cast_apply(
+          &cast, loom_value_facts_make(lower, lower + 2, 1));
+      for (int64_t offset = 0; offset < 3; ++offset) {
+        const int64_t expected = (lower + offset) & mask;
+        ASSERT_LE(facts.range_lo, expected) << +bits << " lower=" << lower;
+        ASSERT_GE(facts.range_hi, expected);
+      }
+    }
+  }
+}
+
 TEST(IntegerCastTest, SignedPayloadNeedsItsUnsignedExtensionWidth) {
   const auto byte = Cast(8, false);
   const auto halfword =

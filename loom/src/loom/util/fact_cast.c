@@ -6,6 +6,7 @@
 
 #include "loom/util/fact_cast.h"
 
+#include "iree/base/internal/math.h"
 #include "loom/ir/structural_hash.h"
 #include "loom/util/fact_table.h"
 
@@ -178,6 +179,26 @@ iree_status_t loom_value_fact_table_define_operand_cast(
   };
   return loom_value_fact_table_define_integer_cast(
       table, loom_op_const_results(publication->op)[result_ordinal], cast);
+}
+
+iree_status_t loom_value_fact_table_define_binary_mask_cast(
+    loom_fact_context_t* context, const loom_value_facts_t* operand_facts) {
+  if (!context->publication) {
+    return iree_ok_status();
+  }
+  for (uint16_t i = 0; i < 2; ++i) {
+    if (!loom_value_facts_is_exact(operand_facts[i]) ||
+        operand_facts[i].range_lo <= 0) {
+      continue;
+    }
+    const uint64_t mask = (uint64_t)operand_facts[i].range_lo;
+    if ((mask & (mask + 1)) == 0) {
+      return loom_value_fact_table_define_operand_cast(
+          context, 0, 1 - i, LOOM_INTEGER_CAST_UNSIGNED,
+          (uint8_t)(64 - iree_math_count_leading_zeros_u64(mask)));
+    }
+  }
+  return iree_ok_status();
 }
 
 bool loom_value_fact_table_query_integer_cast_from(

@@ -15,7 +15,7 @@
 #include "loom/ops/index/cast.h"
 #include "loom/ops/index/compare.h"
 #include "loom/ops/index/ops.h"
-#include "loom/util/fact_relation.h"
+#include "loom/util/fact_relation_inference.h"
 #include "loom/util/fact_table.h"
 #include "loom/util/predicate_facts.h"
 
@@ -384,6 +384,8 @@ iree_status_t loom_index_andi_facts(loom_fact_context_t* context,
   if (!context->publication) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(
+      loom_value_fact_table_define_binary_mask_cast(context, operand_facts));
   const loom_value_id_t upper_bounds[] = {
       operand_facts[0].range_lo >= 0 || operand_facts[1].range_hi < 0
           ? loom_index_andi_lhs(op)

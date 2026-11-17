@@ -15,7 +15,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/util/fact_induction.h"
 #include "loom/util/fact_loop_replay.h"
-#include "loom/util/fact_relation.h"
+#include "loom/util/fact_relation_inference.h"
 
 #define LOOM_VALUE_FACT_LOOP_MAX_ITERATIONS 8
 

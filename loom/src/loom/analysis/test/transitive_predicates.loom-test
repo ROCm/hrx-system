@@ -168,3 +168,102 @@ func.def @changing_endpoint(%raw: index, %middle: index, %limit_bits: index) {
   }
   func.return
 }
+
+// ====
+
+// The conjunction is deliberately ordered from its last comparison backward,
+// and repeats one edge. Strictness must reach the first endpoint through all
+// three dynamic endpoints. Neither the false edge nor the following sibling
+// inherits the conjunction's consequence.
+func.def @compound_window(%begin: index, %cursor: index, %end: index, %limit: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %last = index.cmp sge, %limit, %c0 : index
+  %end_after = index.cmp sge, %end, %limit : index
+  %cursor_after = index.cmp sgt, %cursor, %end : index
+  %begin_after = index.cmp sge, %begin, %cursor : index
+  %tail = scalar.andi %last, %end_after : i1
+  %middle = scalar.andi %tail, %cursor_after : i1
+  %selected = scalar.andi %middle, %begin_after : i1
+  %repeated = scalar.andi %selected, %end_after : i1
+  scf.if %repeated {
+    %positive = test.fact_positive %begin : index -> i1
+    %count = index.cast %positive : i1 to index
+    scf.for %inside = [%c0 to %count step %c1] unroll {
+      test.use %inside : index
+    }
+  } else {
+    %positive = test.fact_positive %begin : index -> i1
+    %count = index.cast %positive : i1 to index
+    scf.for %opposite = [%c0 to %count step %c1] unroll {
+      test.use %opposite : index
+    }
+  }
+  %positive = test.fact_positive %begin : index -> i1
+  %count = index.cast %positive : i1 to index
+  scf.for %outside = [%c0 to %count step %c1] unroll {
+    test.use %outside : index
+  }
+  func.return
+}
+
+// ----
+func.def @compound_window(%begin: index, %cursor: index, %end: index, %limit: index) {
+  %c0 = index.constant 0 : index
+  %last = index.cmp sge, %limit, %c0 : index
+  %end_after = index.cmp sge, %end, %limit : index
+  %cursor_after = index.cmp sgt, %cursor, %end : index
+  %begin_after = index.cmp sge, %begin, %cursor : index
+  %tail = scalar.andi %last, %end_after : i1
+  %middle = scalar.andi %tail, %cursor_after : i1
+  %selected = scalar.andi %middle, %begin_after : i1
+  %repeated = scalar.andi %selected, %end_after : i1
+  scf.if %repeated {
+    %inside_0 = index.constant 0 : index
+    test.use %inside_0 : index
+  } else {
+  }
+  func.return
+}
+
+// ====
+
+// A false disjunction supplies a conjunction of negated predicates. The
+// equality connects the full-width dynamic endpoint to the literal bound.
+func.def @rejected_disjunction(%value: i64, %equal: i64, %bound: i64) {
+  %c0 = scalar.constant 0 : i64
+  %different = scalar.cmpi ne, %value, %equal : i64
+  %too_small = scalar.cmpi slt, %equal, %bound : i64
+  %nonpositive = scalar.cmpi sle, %bound, %c0 : i64
+  %failed_bound = scalar.ori %nonpositive, %too_small : i1
+  %rejected = scalar.ori %different, %failed_bound : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %rejected {
+    test.use %value : i64
+  } else {
+    %positive = test.fact_positive %value : i64 -> i1
+    %count = index.cast %positive : i1 to index
+    scf.for %inside = [%begin to %count step %step] unroll {
+      test.use %inside : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @rejected_disjunction(%value: i64, %equal: i64, %bound: i64) {
+  %c0 = scalar.constant 0 : i64
+  %different = scalar.cmpi ne, %value, %equal : i64
+  %too_small = scalar.cmpi slt, %equal, %bound : i64
+  %nonpositive = scalar.cmpi sle, %bound, %c0 : i64
+  %failed_bound = scalar.ori %nonpositive, %too_small : i1
+  %rejected = scalar.ori %different, %failed_bound : i1
+  scf.if %rejected {
+    test.use %value : i64
+  } else {
+    %inside_0 = index.constant 0 : index
+    test.use %inside_0 : index
+  }
+  func.return
+}

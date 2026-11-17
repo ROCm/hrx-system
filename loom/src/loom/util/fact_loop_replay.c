@@ -6,11 +6,10 @@
 
 #include "loom/util/fact_loop_replay.h"
 
-#include <string.h>
-
 #include "iree/base/internal/math.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
+#include "loom/util/fact_loop_reads.h"
 #include "loom/util/fact_snapshot.h"
 #include "loom/util/walk.h"
 
@@ -23,21 +22,6 @@ typedef struct loom_value_fact_loop_input_t {
   loom_value_fact_auxiliary_snapshot_t auxiliary;
 } loom_value_fact_loop_input_t;
 
-struct loom_value_fact_loop_reads_t {
-  // Immutable ownership index shared by every nested solve.
-  const loom_value_fact_loop_replay_index_t* index;
-  // Loop using this depth's buffers, or NULL while the buffers are idle.
-  const loom_value_fact_loop_replay_record_t* record;
-  // Value-ID membership bits, allocated before entering an infallible query.
-  uint64_t* bits;
-  // Nonzero words, so clearing and publication visit only observed inputs.
-  uint32_t* words;
-  // Number of nonzero words in words.
-  iree_host_size_t word_count;
-  // Reusable buffers at the next nesting depth, shared by sibling loops.
-  loom_value_fact_loop_reads_t* child;
-};
-
 struct loom_value_fact_loop_replay_record_t {
   // Body bound to this record through the table's existing region index.
   const loom_region_t* body;
@@ -45,10 +29,8 @@ struct loom_value_fact_loop_replay_record_t {
   loom_value_fact_loop_replay_record_t* parent;
   // Next root-owned record, including partially constructed records on failure.
   loom_value_fact_loop_replay_record_t* next;
-  // One-based preorder owner ordinal; zero denotes an external definition.
-  uint32_t ordinal;
-  // Exclusive end of this loop's descendant-owner interval.
-  uint32_t subtree_end;
+  // Preorder interval excluding this solve's definitions from its inputs.
+  loom_value_fact_loop_subtree_t subtree;
   // Structural region depth used only during the single ownership walk.
   uint32_t depth;
   // Complete solves published after this root's withdrawal serial.
@@ -76,10 +58,8 @@ struct loom_value_fact_loop_replay_index_t {
   loom_value_fact_table_t* table;
   // Module whose immutable definitions establish ownership.
   const loom_module_t* module;
-  // Nearest loop owner for each definition in the root's value range.
-  uint32_t* owners;
-  // Root definitions only; values outside the root cannot change in this solve.
-  loom_value_fact_range_t range;
+  // Root ownership view shared by every nested solve's read collector.
+  loom_value_fact_loop_owners_t owners;
   // Next one-based loop ordinal assigned by the ownership walk.
   uint32_t next_ordinal;
   // Active ownership-walk ancestor, consumed only during index construction.
@@ -93,10 +73,11 @@ struct loom_value_fact_loop_replay_index_t {
 static iree_status_t loom_value_fact_loop_index_define(
     loom_value_fact_loop_replay_index_t* index, loom_value_id_t value,
     uint32_t owner) {
-  IREE_RETURN_IF_ERROR(
-      loom_value_fact_range_grow(index->arena, value, sizeof(*index->owners),
-                                 NULL, &index->range, (void**)&index->owners));
-  index->owners[loom_value_fact_range_offset(index->range, value)] = owner;
+  IREE_RETURN_IF_ERROR(loom_value_fact_range_grow(
+      index->arena, value, sizeof(*index->owners.values), NULL,
+      &index->owners.range, (void**)&index->owners.values));
+  index->owners
+      .values[loom_value_fact_range_offset(index->owners.range, value)] = owner;
   return iree_ok_status();
 }
 
@@ -105,7 +86,7 @@ static iree_status_t loom_value_fact_loop_index_define(
 static iree_status_t loom_value_fact_loop_index_op(
     loom_value_fact_loop_replay_index_t* index, loom_op_t* op, uint32_t depth) {
   while (index->walking && index->walking->depth >= depth) {
-    index->walking->subtree_end = index->next_ordinal;
+    index->walking->subtree.end = index->next_ordinal;
     index->walking = index->walking->parent;
   }
   const loom_loop_like_t loop = loom_loop_like_cast(index->module, op);
@@ -118,7 +99,7 @@ static iree_status_t loom_value_fact_loop_index_op(
         .body = loom_loop_like_body(loop),
         .parent = index->walking,
         .next = index->records,
-        .ordinal = index->next_ordinal++,
+        .subtree.ordinal = index->next_ordinal++,
         .depth = depth,
     };
     index->records = record;
@@ -127,14 +108,14 @@ static iree_status_t loom_value_fact_loop_index_op(
     if (!*reads) {
       IREE_RETURN_IF_ERROR(
           iree_arena_allocate(index->arena, sizeof(**reads), (void**)reads));
-      **reads = (loom_value_fact_loop_reads_t){.index = index};
+      **reads = (loom_value_fact_loop_reads_t){.owners = &index->owners};
     }
     record->reads = *reads;
     IREE_RETURN_IF_ERROR(loom_value_fact_table_set_loop_replay(
         index->table, record->body, record));
     index->walking = record;
   }
-  const uint32_t owner = index->walking->ordinal;
+  const uint32_t owner = index->walking->subtree.ordinal;
   const loom_value_id_t* results = loom_op_const_results(op);
   for (uint16_t i = 0; i < op->result_count; ++i) {
     IREE_RETURN_IF_ERROR(
@@ -193,39 +174,10 @@ static iree_status_t loom_value_fact_loop_index_initialize(
   }
   for (loom_value_fact_loop_replay_record_t* record = index->walking; record;
        record = record->parent) {
-    record->subtree_end = index->next_ordinal;
+    record->subtree.end = index->next_ordinal;
   }
   index->walking = NULL;
   return status;
-}
-
-void loom_value_fact_loop_record_read(loom_value_fact_loop_reads_t* reads,
-                                      loom_value_id_t value_id) {
-  if (!loom_value_fact_range_contains(reads->index->range, value_id)) {
-    return;
-  }
-  const iree_host_size_t offset =
-      loom_value_fact_range_offset(reads->index->range, value_id);
-  const uint32_t owner = reads->index->owners[offset];
-  if (!owner ||
-      (owner >= reads->record->ordinal && owner < reads->record->subtree_end)) {
-    return;
-  }
-  const uint32_t word = offset / 64;
-  const uint64_t bit = UINT64_C(1) << (offset % 64);
-  if (!reads->bits[word]) {
-    reads->words[reads->word_count++] = word;
-  }
-  reads->bits[word] |= bit;
-}
-
-static void loom_value_fact_loop_reads_reset(
-    loom_value_fact_loop_reads_t* reads) {
-  for (iree_host_size_t i = 0; i < reads->word_count; ++i) {
-    reads->bits[reads->words[i]] = 0;
-  }
-  reads->word_count = 0;
-  reads->record = NULL;
 }
 
 static void loom_value_fact_loop_input_snapshot(
@@ -238,9 +190,10 @@ static void loom_value_fact_loop_input_snapshot(
 
 static bool loom_value_fact_loop_inputs_equal(
     const loom_value_fact_table_t* table,
-    const loom_value_fact_loop_replay_record_t* record, loom_op_t* op) {
+    const loom_value_fact_loop_replay_record_t* record, loom_op_t* op,
+    uint64_t withdrawal) {
   if (!table->replaying || !record->completed ||
-      record->withdrawal != record->reads->index->withdrawal ||
+      record->withdrawal != withdrawal ||
       record->target != table->context.target_facts ||
       record->temporal !=
           loom_value_fact_table_block_temporal_scope(table, op->parent_block)
@@ -300,7 +253,8 @@ iree_status_t loom_value_fact_loop_replay_begin(
   // Comparison is not a solve dependency. Its retained inputs are forwarded
   // explicitly, whether this call reuses the publication or computes it again.
   table->replay.reads = NULL;
-  *out_reused = loom_value_fact_loop_inputs_equal(table, record, op);
+  *out_reused = loom_value_fact_loop_inputs_equal(
+      table, record, op, replay->root->index->withdrawal);
   table->replay.reads = replay->parent_reads;
   if (*out_reused) {
     loom_value_fact_loop_forward_reads(replay->parent_reads, record);
@@ -308,18 +262,8 @@ iree_status_t loom_value_fact_loop_replay_begin(
     return iree_ok_status();
   }
   loom_value_fact_loop_reads_t* reads = record->reads;
-  if (!reads->bits) {
-    const iree_host_size_t word_count =
-        (reads->index->range.capacity + 63) / 64;
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        replay->root->arena, word_count, sizeof(*reads->words),
-        (void**)&reads->words));
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(replay->root->arena, word_count,
-                                  sizeof(*reads->bits), (void**)&reads->bits));
-    memset(reads->bits, 0, word_count * sizeof(*reads->bits));
-  }
-  reads->record = record;
+  IREE_RETURN_IF_ERROR(loom_value_fact_loop_reads_begin(reads, &record->subtree,
+                                                        replay->root->arena));
   // Preserve dependencies of equations that can themselves reuse prior facts.
   loom_value_fact_loop_forward_reads(reads, record);
   replay->record = record;
@@ -346,7 +290,7 @@ static iree_status_t loom_value_fact_loop_publish_inputs(
     const uint32_t word = reads->words[i];
     uint64_t bits = reads->bits[word];
     while (bits) {
-      const loom_value_id_t value = reads->index->range.first_value_id +
+      const loom_value_id_t value = reads->owners->range.first_value_id +
                                     word * 64 +
                                     iree_math_count_trailing_zeros_u64(bits);
       bits &= bits - 1;

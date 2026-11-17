@@ -12,7 +12,7 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/vector/ops.h"
-#include "loom/util/fact_relation.h"
+#include "loom/util/fact_relation_inference.h"
 #include "loom/util/fact_table.h"
 
 namespace loom {

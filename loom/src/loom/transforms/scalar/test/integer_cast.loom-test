@@ -247,3 +247,40 @@ func.def @predicate_before_truncation(%source: i8) -> (i8, i1) {
   %is_seven = scalar.constant false : i1
   func.return %9, %is_seven : i8, i1
 }
+
+// ====
+
+// RUN: pass combine,unroll-scf-for,dce
+
+// A non-type-width mask composes with later byte conversion. The source is
+// outside both payload domains, so neither operation is a global identity.
+func.def @combined_masked_payload(%input: i32) {
+  %mask = scalar.constant 2047 : i32
+  %masked = scalar.andi %mask, %input : i32
+  %byte = scalar.trunci %masked : i32 to i8
+  %payload = scalar.extui %byte : i8 to i32
+  %selected = scalar.constant 2050 : i32
+  %matches = scalar.cmpi eq, %input, %selected : i32
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %matches {
+    %count = index.cast %payload : i32 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @combined_masked_payload(%input: i32) {
+  %selected = scalar.constant 2050 : i32
+  %matches = scalar.cmpi eq, %input, %selected : i32
+  scf.if %matches {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+    %iteration_1 = index.constant 1 : index
+    test.use %iteration_1 : index
+  }
+  func.return
+}

@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Scope-owned integer interpretations published by conversion inference.
+// Scope-owned interpretations of retained integer payload bits.
 
 #ifndef LOOM_UTIL_FACT_CAST_H_
 #define LOOM_UTIL_FACT_CAST_H_
@@ -54,6 +54,13 @@ iree_status_t loom_value_fact_table_define_integer_cast(
 iree_status_t loom_value_fact_table_define_operand_cast(
     loom_fact_context_t* context, uint16_t result_ordinal,
     uint16_t operand_ordinal, loom_integer_cast_kind_t kind, uint8_t bit_count);
+
+// Publishes result zero of a binary AND as the unsigned interpretation of its
+// other operand when either operand is an exact positive contiguous low-bit
+// mask. Zero and all-ones masks belong to ordinary constant/identity inference;
+// noncontiguous and nonexact masks have no integer-cast interpretation.
+iree_status_t loom_value_fact_table_define_binary_mask_cast(
+    loom_fact_context_t* context, const loom_value_facts_t* operand_facts);
 
 // Expresses an observed cast as a conversion of source. This can use their
 // shared payload root when source retains every low bit required by the cast.

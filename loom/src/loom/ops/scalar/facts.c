@@ -30,7 +30,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/compare.h"
 #include "loom/ops/scalar/ops.h"
-#include "loom/util/fact_relation.h"
+#include "loom/util/fact_relation_inference.h"
 #include "loom/util/fact_table.h"
 #include "loom/util/predicate_facts.h"
 
@@ -628,6 +628,8 @@ iree_status_t loom_scalar_andi_facts(loom_fact_context_t* context,
   if (!context->publication) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(
+      loom_value_fact_table_define_binary_mask_cast(context, operand_facts));
   // Clearing bits cannot increase a nonnegative operand. A negative mask
   // preserves the other operand's sign, so that bound also holds across zero.
   const loom_value_id_t upper_bounds[] = {
@@ -721,9 +723,10 @@ static bool loom_scalar_integer_bitwidth(loom_type_t type,
 }
 
 static iree_status_t loom_scalar_bitfield_extract_facts(
-    const loom_module_t* module, const loom_value_facts_t* operand_facts,
-    loom_value_id_t source_id, loom_value_id_t result_id, int64_t offset,
-    int64_t width, bool signed_extract, loom_value_facts_t* result_facts) {
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_value_facts_t* operand_facts, loom_value_id_t source_id,
+    loom_value_id_t result_id, int64_t offset, int64_t width,
+    bool signed_extract, loom_value_facts_t* result_facts) {
   int32_t source_width = 0;
   int32_t result_width = 0;
   if (!loom_scalar_integer_bitwidth(loom_module_value_type(module, source_id),
@@ -751,7 +754,18 @@ static iree_status_t loom_scalar_bitfield_extract_facts(
       loom_value_facts_wrap_integer(result_facts[0], result_width);
   loom_value_facts_propagate_unary_distribution(operand_facts[0],
                                                 &result_facts[0]);
-  return iree_ok_status();
+  if (offset != 0) {
+    return iree_ok_status();
+  }
+  // Low fields are integer interpretations, including non-type payload widths.
+  // A field filling the result uses its signed representation except for i1,
+  // whose numeric domain is Boolean even after a signed extraction.
+  const loom_integer_cast_kind_t kind =
+      result_width == 1 || (!signed_extract && width < result_width)
+          ? LOOM_INTEGER_CAST_UNSIGNED
+          : LOOM_INTEGER_CAST_SIGNED;
+  return loom_value_fact_table_define_operand_cast(context, 0, 0, kind,
+                                                   (uint8_t)width);
 }
 
 iree_status_t loom_scalar_bitfield_extractu_facts(
@@ -759,7 +773,7 @@ iree_status_t loom_scalar_bitfield_extractu_facts(
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts) {
   return loom_scalar_bitfield_extract_facts(
-      module, operand_facts, loom_scalar_bitfield_extractu_source(op),
+      context, module, operand_facts, loom_scalar_bitfield_extractu_source(op),
       loom_scalar_bitfield_extractu_result(op),
       loom_scalar_bitfield_extractu_offset(op),
       loom_scalar_bitfield_extractu_width(op), /*signed_extract=*/false,
@@ -771,7 +785,7 @@ iree_status_t loom_scalar_bitfield_extracts_facts(
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts) {
   return loom_scalar_bitfield_extract_facts(
-      module, operand_facts, loom_scalar_bitfield_extracts_source(op),
+      context, module, operand_facts, loom_scalar_bitfield_extracts_source(op),
       loom_scalar_bitfield_extracts_result(op),
       loom_scalar_bitfield_extracts_offset(op),
       loom_scalar_bitfield_extracts_width(op), /*signed_extract=*/true,

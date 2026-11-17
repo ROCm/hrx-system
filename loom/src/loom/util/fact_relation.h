@@ -25,6 +25,127 @@ typedef struct loom_value_fact_relation_roots_t {
   uint32_t excluded_literal_equal;
 } loom_value_fact_relation_roots_t;
 
+// Persistent set root containing interned relation-atom IDs. Empty is zero,
+// the high bit tags an inline singleton, and other values name canonical
+// set-index roots. Interning preserves the full 32-bit SSA value-ID and 64-bit
+// literal domains while keeping one-counterpart relations out of the index.
+typedef uint32_t loom_value_fact_relation_root_t;
+
+typedef struct loom_value_fact_relation_entry_t {
+  // Scoped alias whose canonical relation sets are retained.
+  loom_value_id_t value_id;
+  // Current publication; zero roots retain reusable empty entries.
+  loom_value_fact_relation_roots_t roots;
+} loom_value_fact_relation_entry_t;
+
+typedef enum loom_value_fact_relation_atom_kind_e {
+  LOOM_VALUE_FACT_RELATION_ATOM_VALUE = 0,
+  LOOM_VALUE_FACT_RELATION_ATOM_LITERAL = 1,
+} loom_value_fact_relation_atom_kind_t;
+
+// One interned counterpart identity or signed literal. IDs are one-based and
+// remain stable as storage grows. Hash chains are populated only after the
+// bounded linear-scan path fills.
+typedef struct loom_value_fact_relation_atom_t {
+  // Counterpart value ID or the bit pattern of a signed literal.
+  uint64_t bits;
+  // Next one-based atom ID in its hash collision chain, or zero.
+  uint32_t next;
+  // Whether bits represents an SSA identity or a signed literal.
+  uint8_t kind;
+  // Padding kept zero when an atom is constructed.
+  uint8_t reserved[3];
+} loom_value_fact_relation_atom_t;
+
+static_assert(sizeof(loom_value_fact_relation_roots_t) == 16,
+              "relation roots must remain 16 bytes");
+static_assert(sizeof(loom_value_fact_relation_entry_t) == 20,
+              "sparse relation entries must remain 20 bytes");
+static_assert(sizeof(loom_value_fact_relation_atom_t) == 16,
+              "relation atoms must remain 16 bytes");
+
+struct loom_value_fact_integer_relations_t {
+  // Canonical atom sets shared by every sparse entry. Allocated only when one
+  // root grows beyond its inline singleton.
+  loom_value_set_index_t* index;
+
+  // Sparse entries sorted by scoped alias value ID.
+  loom_value_fact_relation_entry_t* entries;
+
+  // Number of sparse entries, including reusable zero-root tombstones.
+  iree_host_size_t count;
+
+  // Allocated sparse entry capacity.
+  iree_host_size_t capacity;
+
+  // Interned counterpart identities and literal disequalities.
+  struct {
+    // Interned atom records in ID order.
+    loom_value_fact_relation_atom_t* values;
+
+    // Number of interned atom records.
+    iree_host_size_t value_count;
+
+    // Allocated atom record capacity.
+    iree_host_size_t value_capacity;
+
+    // One-based atom-ID heads for hash collision chains.
+    uint32_t* buckets;
+
+    // Power-of-two bucket count, or zero on the bounded linear scan path.
+    iree_host_size_t bucket_count;
+
+  } atoms;
+
+  // Reusable storage for identity-operation plans larger than the stack path.
+  struct {
+    // Canonical source identity per result ordinal.
+    loom_value_id_t* identities;
+
+    // Inherited roots and completed roots per result ordinal.
+    loom_value_fact_relation_roots_t* plans;
+
+    // Predicate-local roots keyed by first canonical identity ordinal.
+    loom_value_fact_relation_roots_t* locals;
+
+    // Allocated entries in each parallel scratch array.
+    uint16_t capacity;
+  } scratch;
+};
+
+// Inline singleton encoding shared by publication and query operations.
+#define LOOM_VALUE_FACT_RELATION_ROOT_SINGLETON_BIT UINT32_C(0x80000000)
+
+static inline bool loom_value_fact_relation_root_is_singleton(
+    loom_value_fact_relation_root_t root) {
+  return (root & LOOM_VALUE_FACT_RELATION_ROOT_SINGLETON_BIT) != 0;
+}
+
+static inline uint32_t loom_value_fact_relation_singleton_id(
+    loom_value_fact_relation_root_t root) {
+  IREE_ASSERT(loom_value_fact_relation_root_is_singleton(root));
+  return root & ~LOOM_VALUE_FACT_RELATION_ROOT_SINGLETON_BIT;
+}
+
+// Finds an alias's sparse entry or its insertion position.
+iree_host_size_t loom_value_fact_relation_entry_lower_bound(
+    const loom_value_fact_integer_relations_t* relations,
+    loom_value_id_t value_id, bool* out_found);
+
+// Hashes a retained counterpart identity or signed literal.
+uint32_t loom_value_fact_relation_atom_hash(
+    loom_value_fact_relation_atom_kind_t kind, uint64_t bits);
+
+// Finds an interned counterpart without allocating; zero denotes absence.
+uint32_t loom_value_fact_relation_atom_find(
+    const loom_value_fact_integer_relations_t* relations,
+    loom_value_fact_relation_atom_kind_t kind, uint64_t bits);
+
+// Tests membership in an inline singleton or canonical retained set.
+bool loom_value_fact_relation_root_contains(
+    const loom_value_fact_integer_relations_t* relations,
+    loom_value_fact_relation_root_t root, uint32_t atom_id);
+
 // Captures the retained relation sets without enumerating their counterparts.
 loom_value_fact_relation_roots_t loom_value_fact_integer_relations_snapshot(
     const loom_value_fact_table_t* table, loom_value_id_t value_id);
@@ -68,63 +189,6 @@ typedef bool (*loom_value_fact_signed_integer_relation_visit_fn_t)(
 bool loom_value_fact_table_for_each_signed_integer_relation_while(
     const loom_value_fact_table_t* table, loom_value_id_t value,
     loom_value_fact_signed_integer_relation_visit_fn_t visit, void* user_data);
-
-// Clears all scope-local retained relation state. The caller releases the
-// transient arena after clearing the complete fact-table scope.
-void loom_value_fact_integer_relations_clear_scope(
-    loom_value_fact_table_t* table);
-
-// Withdraws relations published for |value_id| before cyclic or incremental
-// recomputation. The sparse entry remains reusable within the current scope.
-void loom_value_fact_integer_relations_undefine(loom_value_fact_table_t* table,
-                                                loom_value_id_t value_id);
-
-// Rebuilds one selected alias's canonical relation sets in |target|.
-iree_status_t loom_value_fact_integer_relations_clone_value(
-    loom_value_fact_table_t* target, const loom_value_fact_table_t* source,
-    loom_value_id_t value_id);
-
-// Replaces the counted induction value's relations with lower <= value < upper
-// and their consequences through the endpoints' retained relations. The loop
-// owner publishes these body-local facts when it seeds the argument; aliases
-// inherit them through the ordinary relation lifecycle.
-iree_status_t loom_value_fact_integer_relations_define_counted_range(
-    loom_value_fact_table_t* table, loom_value_id_t value,
-    loom_value_id_t lower_bound, loom_value_id_t upper_bound);
-
-// Replaces a result's relations with upper bounds and their transitive
-// consequences. |relation| is LT or LE. The producer supplies the current
-// definition-scope result and endpoint facts; result facts need not have been
-// published yet. Disjoint intervals need no retained relation unless an
-// endpoint carries further dynamic constraints. INVALID endpoints are omitted,
-// and an empty publication withdraws prior relations. Optional |equivalents|
-// names additional endpoints equal to the corresponding bounds in this
-// definition's scope. Both endpoints retain their own transitive relations;
-// their equality is not published for uses outside the scope. The caller owns
-// publication and includes auxiliary changes in its ordinary inference change
-// accumulator.
-iree_status_t loom_value_fact_integer_relations_define_upper_bounds(
-    loom_value_fact_table_t* table, loom_value_id_t value,
-    const loom_value_id_t* upper_bounds, const loom_value_id_t* equivalents,
-    const loom_value_facts_t* upper_facts, iree_host_size_t bound_count,
-    loom_symbolic_integer_relation_t relation,
-    const loom_value_facts_t* value_facts, bool* inout_changed);
-
-// Propagates inherited alias relations and retains signed consequences of a
-// value-identity operation's predicates. Unsigned order contributes only when
-// scoped numeric facts and the predicate place both values in one sign
-// partition. Consequences through each incoming endpoint share its retained
-// sets, without following producer chains. All result plans are completed
-// before any relation is published.
-iree_status_t loom_value_fact_integer_relations_propagate_origins(
-    loom_value_fact_table_t* table, const loom_module_t* module,
-    const loom_op_t* op, loom_trait_flags_t traits, bool* inout_changed);
-
-// Shares immutable relation roots after the producer proves numeric equality.
-// INVALID source withdraws prior roots without changing SSA identity.
-iree_status_t loom_value_fact_integer_relations_forward_alias(
-    loom_value_fact_table_t* table, loom_value_id_t source,
-    loom_value_id_t result, bool* inout_changed);
 
 #ifdef __cplusplus
 }  // extern "C"
