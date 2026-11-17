@@ -1,0 +1,473 @@
+// RUN: pass unroll-scf-for,dce
+
+// Each payload is defined before its source guard. The inner range observations
+// must agree with the concrete low-bit interpretation, proving one iteration.
+// Exact output checks both bounds and prevents an unrefined or empty proof from
+// passing just because the source still prints.
+
+func.def @guarded_byte_mask(%input: i8) {
+  %mask = scalar.constant 7 : i8
+  %payload = scalar.andi %input, %mask : i8
+  %lower = scalar.constant 4 : i8
+  %upper = scalar.constant 6 : i8
+  %above = scalar.cmpi sge, %input, %lower : i8
+  %below = scalar.cmpi sle, %input, %upper : i8
+  %valid = scalar.andi %above, %below : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %lo = test.fact_range_lo %payload : i8 -> i64
+    %hi = test.fact_range_hi %payload : i8 -> i64
+    %expected_lo = scalar.constant 4 : i64
+    %expected_hi = scalar.constant 6 : i64
+    %low_matches = scalar.cmpi eq, %lo, %expected_lo : i64
+    %high_matches = scalar.cmpi eq, %hi, %expected_hi : i64
+    %matches = scalar.andi %low_matches, %high_matches : i1
+    %count = index.cast %matches : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @guarded_byte_mask(%input: i8) {
+  %lower = scalar.constant 4 : i8
+  %upper = scalar.constant 6 : i8
+  %above = scalar.cmpi sge, %input, %lower : i8
+  %below = scalar.cmpi sle, %input, %upper : i8
+  %valid = scalar.andi %above, %below : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+func.def @guarded_commuted_halfword_mask(%input: i16) {
+  %mask = scalar.constant 2047 : i16
+  %payload = scalar.andi %mask, %input : i16
+  %lower = scalar.constant -32767 : i16
+  %upper = scalar.constant -32765 : i16
+  %above = scalar.cmpi sge, %input, %lower : i16
+  %below = scalar.cmpi sle, %input, %upper : i16
+  %valid = scalar.andi %above, %below : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %lo = test.fact_range_lo %payload : i16 -> i64
+    %hi = test.fact_range_hi %payload : i16 -> i64
+    %expected_lo = scalar.constant 1 : i64
+    %expected_hi = scalar.constant 3 : i64
+    %low_matches = scalar.cmpi eq, %lo, %expected_lo : i64
+    %high_matches = scalar.cmpi eq, %hi, %expected_hi : i64
+    %matches = scalar.andi %low_matches, %high_matches : i1
+    %count = index.cast %matches : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @guarded_commuted_halfword_mask(%input: i16) {
+  %lower = scalar.constant -32767 : i16
+  %upper = scalar.constant -32765 : i16
+  %above = scalar.cmpi sge, %input, %lower : i16
+  %below = scalar.cmpi sle, %input, %upper : i16
+  %valid = scalar.andi %above, %below : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+func.def @guarded_word_sign_mask(%input: i32) {
+  %mask = scalar.constant 2147483647 : i32
+  %payload = scalar.andi %input, %mask : i32
+  %lower = scalar.constant -2147483647 : i32
+  %upper = scalar.constant -2147483645 : i32
+  %above = scalar.cmpi sge, %input, %lower : i32
+  %below = scalar.cmpi sle, %input, %upper : i32
+  %valid = scalar.andi %above, %below : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %lo = test.fact_range_lo %payload : i32 -> i64
+    %hi = test.fact_range_hi %payload : i32 -> i64
+    %expected_lo = scalar.constant 1 : i64
+    %expected_hi = scalar.constant 3 : i64
+    %low_matches = scalar.cmpi eq, %lo, %expected_lo : i64
+    %high_matches = scalar.cmpi eq, %hi, %expected_hi : i64
+    %matches = scalar.andi %low_matches, %high_matches : i1
+    %count = index.cast %matches : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @guarded_word_sign_mask(%input: i32) {
+  %lower = scalar.constant -2147483647 : i32
+  %upper = scalar.constant -2147483645 : i32
+  %above = scalar.cmpi sge, %input, %lower : i32
+  %below = scalar.cmpi sle, %input, %upper : i32
+  %valid = scalar.andi %above, %below : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+func.def @guarded_wide_sign_mask(%input: i64) {
+  %mask = scalar.constant 9223372036854775807 : i64
+  %payload = scalar.andi %mask, %input : i64
+  %lower = scalar.constant -9223372036854775807 : i64
+  %upper = scalar.constant -9223372036854775805 : i64
+  %above = scalar.cmpi sge, %input, %lower : i64
+  %below = scalar.cmpi sle, %input, %upper : i64
+  %valid = scalar.andi %above, %below : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %lo = test.fact_range_lo %payload : i64 -> i64
+    %hi = test.fact_range_hi %payload : i64 -> i64
+    %expected_lo = scalar.constant 1 : i64
+    %expected_hi = scalar.constant 3 : i64
+    %low_matches = scalar.cmpi eq, %lo, %expected_lo : i64
+    %high_matches = scalar.cmpi eq, %hi, %expected_hi : i64
+    %matches = scalar.andi %low_matches, %high_matches : i1
+    %count = index.cast %matches : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @guarded_wide_sign_mask(%input: i64) {
+  %lower = scalar.constant -9223372036854775807 : i64
+  %upper = scalar.constant -9223372036854775805 : i64
+  %above = scalar.cmpi sge, %input, %lower : i64
+  %below = scalar.cmpi sle, %input, %upper : i64
+  %valid = scalar.andi %above, %below : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+func.def @guarded_index_mask(%input: index) {
+  %mask = index.constant 65535 : index
+  %payload = index.andi %input, %mask : index
+  %lower = index.constant -9223372036854775807 : index
+  %upper = index.constant -9223372036854775805 : index
+  %above = index.cmp sge, %input, %lower : index
+  %below = index.cmp sle, %input, %upper : index
+  %valid = scalar.andi %above, %below : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %lo = test.fact_range_lo %payload : index -> i64
+    %hi = test.fact_range_hi %payload : index -> i64
+    %expected_lo = scalar.constant 1 : i64
+    %expected_hi = scalar.constant 3 : i64
+    %low_matches = scalar.cmpi eq, %lo, %expected_lo : i64
+    %high_matches = scalar.cmpi eq, %hi, %expected_hi : i64
+    %matches = scalar.andi %low_matches, %high_matches : i1
+    %count = index.cast %matches : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @guarded_index_mask(%input: index) {
+  %lower = index.constant -9223372036854775807 : index
+  %upper = index.constant -9223372036854775805 : index
+  %above = index.cmp sge, %input, %lower : index
+  %below = index.cmp sle, %input, %upper : index
+  %valid = scalar.andi %above, %below : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+func.def @guarded_signed_field(%input: i16) {
+  %payload = scalar.bitfield.extracts %input {offset = 0, width = 7} : i16 -> i8
+  %lower = scalar.constant 125 : i16
+  %upper = scalar.constant 127 : i16
+  %above = scalar.cmpi sge, %input, %lower : i16
+  %below = scalar.cmpi sle, %input, %upper : i16
+  %valid = scalar.andi %above, %below : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %lo = test.fact_range_lo %payload : i8 -> i64
+    %hi = test.fact_range_hi %payload : i8 -> i64
+    %expected_lo = scalar.constant -3 : i64
+    %expected_hi = scalar.constant -1 : i64
+    %low_matches = scalar.cmpi eq, %lo, %expected_lo : i64
+    %high_matches = scalar.cmpi eq, %hi, %expected_hi : i64
+    %matches = scalar.andi %low_matches, %high_matches : i1
+    %count = index.cast %matches : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @guarded_signed_field(%input: i16) {
+  %lower = scalar.constant 125 : i16
+  %upper = scalar.constant 127 : i16
+  %above = scalar.cmpi sge, %input, %lower : i16
+  %below = scalar.cmpi sle, %input, %upper : i16
+  %valid = scalar.andi %above, %below : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+func.def @guarded_full_result_field(%input: i16) {
+  %payload = scalar.bitfield.extractu %input {offset = 0, width = 8} : i16 -> i8
+  %lower = scalar.constant 253 : i16
+  %upper = scalar.constant 255 : i16
+  %above = scalar.cmpi sge, %input, %lower : i16
+  %below = scalar.cmpi sle, %input, %upper : i16
+  %valid = scalar.andi %above, %below : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %lo = test.fact_range_lo %payload : i8 -> i64
+    %hi = test.fact_range_hi %payload : i8 -> i64
+    %expected_lo = scalar.constant -3 : i64
+    %expected_hi = scalar.constant -1 : i64
+    %low_matches = scalar.cmpi eq, %lo, %expected_lo : i64
+    %high_matches = scalar.cmpi eq, %hi, %expected_hi : i64
+    %matches = scalar.andi %low_matches, %high_matches : i1
+    %count = index.cast %matches : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @guarded_full_result_field(%input: i16) {
+  %lower = scalar.constant 253 : i16
+  %upper = scalar.constant 255 : i16
+  %above = scalar.cmpi sge, %input, %lower : i16
+  %below = scalar.cmpi sle, %input, %upper : i16
+  %valid = scalar.andi %above, %below : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+func.def @guarded_boolean_field(%input: i32) {
+  %payload = scalar.bitfield.extracts %input {offset = 0, width = 1} : i32 -> i1
+  %lower = scalar.constant -2147483647 : i32
+  %upper = scalar.constant -2147483645 : i32
+  %above = scalar.cmpi sge, %input, %lower : i32
+  %below = scalar.cmpi sle, %input, %upper : i32
+  %valid = scalar.andi %above, %below : i1
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %valid {
+    %lo = test.fact_range_lo %payload : i1 -> i64
+    %hi = test.fact_range_hi %payload : i1 -> i64
+    %expected_lo = scalar.constant 0 : i64
+    %expected_hi = scalar.constant 1 : i64
+    %low_matches = scalar.cmpi eq, %lo, %expected_lo : i64
+    %high_matches = scalar.cmpi eq, %hi, %expected_hi : i64
+    %matches = scalar.andi %low_matches, %high_matches : i1
+    %count = index.cast %matches : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @guarded_boolean_field(%input: i32) {
+  %lower = scalar.constant -2147483647 : i32
+  %upper = scalar.constant -2147483645 : i32
+  %above = scalar.cmpi sge, %input, %lower : i32
+  %below = scalar.cmpi sle, %input, %upper : i32
+  %valid = scalar.andi %above, %below : i1
+  scf.if %valid {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// The holes in this mask matter: input two produces zero, not a three-bit
+// interpretation of two. A later source guard cannot claim the latter.
+func.def @noncontiguous_mask(%input: i16) {
+  %mask = scalar.constant 5 : i16
+  %payload = scalar.andi %input, %mask : i16
+  %selected = scalar.constant 2 : i16
+  %matches = scalar.cmpi eq, %input, %selected : i16
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %matches {
+    %lo = test.fact_range_lo %payload : i16 -> i64
+    %expected = scalar.constant 0 : i64
+    %contains_zero = scalar.cmpi eq, %lo, %expected : i64
+    %count = index.cast %contains_zero : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @noncontiguous_mask(%input: i16) {
+  %selected = scalar.constant 2 : i16
+  %matches = scalar.cmpi eq, %input, %selected : i16
+  scf.if %matches {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// An interval of masks is not one exact mask. Input two can produce zero or
+// two, and the proof must retain zero as a possible result under the guard.
+func.def @dynamic_mask(%input: i16, %mask: i16) where [range(%mask, 1, 7)] {
+  %payload = scalar.andi %mask, %input : i16
+  %selected = scalar.constant 2 : i16
+  %matches = scalar.cmpi eq, %input, %selected : i16
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %matches {
+    %lo = test.fact_range_lo %payload : i16 -> i64
+    %expected = scalar.constant 0 : i64
+    %contains_zero = scalar.cmpi eq, %lo, %expected : i64
+    %count = index.cast %contains_zero : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @dynamic_mask(%input: i16, %mask: i16) where [range(%mask, 1, 7)] {
+  %selected = scalar.constant 2 : i16
+  %matches = scalar.cmpi eq, %input, %selected : i16
+  scf.if %matches {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// A sign-preserving mask must still admit the negative concrete result.
+func.def @negative_mask(%input: i16) {
+  %mask = scalar.constant -8 : i16
+  %payload = scalar.andi %input, %mask : i16
+  %selected = scalar.constant -1 : i16
+  %matches = scalar.cmpi eq, %input, %selected : i16
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %matches {
+    %lo = test.fact_range_lo %payload : i16 -> i64
+    %hi = test.fact_range_hi %payload : i16 -> i64
+    %expected = scalar.constant -8 : i64
+    %low_contains = scalar.cmpi sle, %lo, %expected : i64
+    %high_contains = scalar.cmpi sge, %hi, %expected : i64
+    %contains = scalar.andi %low_contains, %high_contains : i1
+    %count = index.cast %contains : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @negative_mask(%input: i16) {
+  %selected = scalar.constant -1 : i16
+  %matches = scalar.cmpi eq, %input, %selected : i16
+  scf.if %matches {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
+
+// ====
+
+// A shifted field is not the low payload of its source. Input eight extracts
+// one; interpreting its low three bits instead would incorrectly prove zero.
+func.def @shifted_field(%input: i16) {
+  %payload = scalar.bitfield.extractu %input {offset = 3, width = 3} : i16 -> i16
+  %selected = scalar.constant 8 : i16
+  %matches = scalar.cmpi eq, %input, %selected : i16
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.if %matches {
+    %hi = test.fact_range_hi %payload : i16 -> i64
+    %expected = scalar.constant 1 : i64
+    %contains_one = scalar.cmpi sge, %hi, %expected : i64
+    %count = index.cast %contains_one : i1 to index
+    scf.for %iteration = [%begin to %count step %step] unroll {
+      test.use %iteration : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @shifted_field(%input: i16) {
+  %selected = scalar.constant 8 : i16
+  %matches = scalar.cmpi eq, %input, %selected : i16
+  scf.if %matches {
+    %iteration_0 = index.constant 0 : index
+    test.use %iteration_0 : index
+  }
+  func.return
+}
