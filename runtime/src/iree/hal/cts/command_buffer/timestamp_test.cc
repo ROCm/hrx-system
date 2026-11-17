@@ -143,6 +143,36 @@ class CommandBufferTimestampTest : public CtsTestBase<> {
                                   0);
   }
 
+  void ExecuteWithClockBounds(iree_hal_command_buffer_t* command_buffer,
+                              iree_hal_buffer_binding_t binding,
+                              std::array<uint64_t, 2>* out_bounds) {
+    Ref<iree_hal_buffer_t> outer;
+    Allocate(sizeof(*out_bounds), outer.out());
+    ASSERT_FALSE(HasFatalFailure());
+    SemaphoreList before(device_, {0}, {1});
+    SemaphoreList after(device_, {0}, {1});
+    SemaphoreList done(device_, {0}, {1});
+    IREE_ASSERT_OK(
+        iree_hal_queue_timestamp(queue_, {}, before, outer, 0, nullptr, 0));
+    IREE_ASSERT_OK(iree_hal_queue_execute(
+        queue_, before, after, command_buffer,
+        {indirect() ? 1u : 0u, indirect() ? &binding : nullptr}, 0));
+    IREE_ASSERT_OK(
+        iree_hal_queue_timestamp(queue_, after, done, outer, 8, nullptr, 0));
+    IREE_ASSERT_OK(iree_hal_semaphore_list_wait(done, iree_infinite_timeout(),
+                                                IREE_ASYNC_WAIT_FLAG_NONE));
+    IREE_ASSERT_OK(
+        DownloadBufferData(outer, 0, out_bounds->data(), sizeof(*out_bounds)));
+  }
+
+  void CheckClockBounds(uint64_t tick, const std::array<uint64_t, 2>& bounds) {
+    SCOPED_TRACE(::testing::Message()
+                 << "queue=[" << bounds[0] << ", " << bounds[1]
+                 << "] command=" << tick << " mask=" << tick_mask_);
+    EXPECT_LE((tick - bounds[0]) & tick_mask_,
+              (bounds[1] - bounds[0]) & tick_mask_);
+  }
+
   std::array<uint64_t, 2> CheckRange(iree_hal_buffer_t* buffer,
                                      iree_device_size_t offset) {
     std::vector<uint64_t> words(kRangeLength / 8);
@@ -184,22 +214,13 @@ TEST_P(CommandBufferTimestampTest, TransferConsumerAndQueueClock) {
   Record(buffer, indirect() ? 0 : IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
          command_buffer.out());
   ASSERT_FALSE(HasFatalFailure());
-  Ref<iree_hal_buffer_t> outer;
-  Allocate(16, outer.out());
-  ASSERT_FALSE(HasFatalFailure());
-  SemaphoreList before(device_, {0}, {1});
-  SemaphoreList after(device_, {0}, {1});
-  SemaphoreList done(device_, {0}, {1});
-  IREE_ASSERT_OK(
-      iree_hal_queue_timestamp(queue_, {}, before, outer, 0, nullptr, 0));
-  IREE_ASSERT_OK(Submit(queue_, command_buffer, buffer, 0, before, after));
-  IREE_ASSERT_OK(
-      iree_hal_queue_timestamp(queue_, after, done, outer, 8, nullptr, 0));
-  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(done, iree_infinite_timeout(),
-                                              IREE_ASYNC_WAIT_FLAG_NONE));
-  const auto ticks = CheckRange(buffer, 0);
   std::array<uint64_t, 2> bounds;
-  IREE_ASSERT_OK(DownloadBufferData(outer, 0, bounds.data(), sizeof(bounds)));
+  ExecuteWithClockBounds(command_buffer, {buffer, 0, kRangeLength}, &bounds);
+  ASSERT_FALSE(HasFatalFailure());
+  const auto ticks = CheckRange(buffer, 0);
+  SCOPED_TRACE(::testing::Message()
+               << "queue=[" << bounds[0] << ", " << bounds[1] << "] command=["
+               << ticks[0] << ", " << ticks[1] << "] mask=" << tick_mask_);
   const uint64_t duration = (bounds[1] - bounds[0]) & tick_mask_;
   EXPECT_LE((ticks[0] - bounds[0]) & tick_mask_, duration);
   EXPECT_LE((ticks[1] - ticks[0]) & tick_mask_, duration);
@@ -224,18 +245,15 @@ TEST_P(CommandBufferTimestampTest, BatchedCompletionPreservesInterleavedBytes) {
           commands, 0, 0, RefAt(buffer, 8 + i * 16), 0));
     }
     IREE_ASSERT_OK(iree_hal_command_buffer_end(commands));
-    const iree_hal_buffer_binding_t binding = {buffer, 0, length};
-    SemaphoreList done(device_, {0}, {1});
-    IREE_ASSERT_OK(iree_hal_queue_execute(
-        queue_, {}, done, commands,
-        {indirect() ? 1u : 0u, indirect() ? &binding : nullptr}, 0));
-    IREE_ASSERT_OK(iree_hal_semaphore_list_wait(done, iree_infinite_timeout(),
-                                                IREE_ASYNC_WAIT_FLAG_NONE));
+    std::array<uint64_t, 2> bounds;
+    ExecuteWithClockBounds(commands, {buffer, 0, length}, &bounds);
+    ASSERT_FALSE(HasFatalFailure());
     const auto words = ReadBufferData<uint64_t>(buffer);
     ASSERT_EQ(words.size(), length / 8);
     for (uint32_t i = 0; i < count; ++i) {
+      SCOPED_TRACE(i);
       EXPECT_EQ(words[i * 2], kGuard);
-      EXPECT_NE(words[i * 2 + 1], kGuard);
+      CheckClockBounds(words[i * 2 + 1], bounds);
     }
     EXPECT_EQ(words[count * 2], kGuard);
     EXPECT_EQ(words[count * 2 + 1], kGuard);
@@ -277,20 +295,50 @@ TEST_P(CommandBufferTimestampTest, RangedConsumerAndOverwrite) {
   IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
       commands, RefAt(buffer, 24), &kPattern, sizeof(kPattern), 0));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(commands));
-  const iree_hal_buffer_binding_t binding = {buffer, 0, 64};
-  SemaphoreList done(device_, {0}, {1});
-  IREE_ASSERT_OK(iree_hal_queue_execute(
-      queue_, {}, done, commands,
-      {indirect() ? 1u : 0u, indirect() ? &binding : nullptr}, 0));
-  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(done, iree_infinite_timeout(),
-                                              IREE_ASYNC_WAIT_FLAG_NONE));
+  std::array<uint64_t, 2> bounds;
+  ExecuteWithClockBounds(commands, {buffer, 0, 64}, &bounds);
+  ASSERT_FALSE(HasFatalFailure());
   const auto words = ReadBufferData<uint64_t>(buffer);
   ASSERT_EQ(words.size(), 8u);
-  EXPECT_NE(words[1], kGuard);
-  EXPECT_NE(words[6], kGuard);
+  CheckClockBounds(words[1], bounds);
+  CheckClockBounds(words[6], bounds);
   EXPECT_EQ(words[3], (uint64_t{kPattern} << 32) | kPattern);
   for (uint32_t i : {0u, 2u, 4u, 5u, 7u}) {
     EXPECT_EQ(words[i], kGuard);
+  }
+}
+
+TEST_P(CommandBufferTimestampTest, BindingReusePreservesPriorResults) {
+  if (!indirect()) {
+    GTEST_SKIP() << "Independent targets require indirect bindings";
+  }
+  Ref<iree_hal_buffer_t> buffer;
+  Allocate(3 * 32, buffer.out());
+  ASSERT_FALSE(HasFatalFailure());
+  Ref<iree_hal_command_buffer_t> command_buffer;
+  Begin(0, command_buffer.out());
+  ASSERT_FALSE(HasFatalFailure());
+  // Timestamp-only recordings can replay by republishing binding addresses,
+  // without rerecording native commands for binding-relative copies or fills.
+  IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(command_buffer, 0, 0,
+                                                   RefAt(buffer, 8), 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(command_buffer, 0, 0,
+                                                   RefAt(buffer, 24), 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
+  std::array<std::array<uint64_t, 2>, 3> bounds;
+  for (size_t i = 0; i < bounds.size(); ++i) {
+    SCOPED_TRACE(i);
+    ExecuteWithClockBounds(command_buffer, {buffer, i * 32, 32}, &bounds[i]);
+    ASSERT_FALSE(HasFatalFailure());
+  }
+  const auto words = ReadBufferData<uint64_t>(buffer);
+  ASSERT_EQ(words.size(), 12u);
+  for (size_t i = 0; i < bounds.size(); ++i) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(words[i * 4], kGuard);
+    EXPECT_EQ(words[i * 4 + 2], kGuard);
+    CheckClockBounds(words[i * 4 + 1], bounds[i]);
+    CheckClockBounds(words[i * 4 + 3], bounds[i]);
   }
 }
 
