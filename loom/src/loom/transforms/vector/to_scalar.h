@@ -74,7 +74,9 @@ iree_status_t loom_vector_transform_to_scalar_rewrite_op(
 // reference lowerers as the standalone pass. Rank-one scalar insertions are
 // terminal in this per-op interface so target legalization converges with
 // aggregate construction linearization. The standalone pass can still compose
-// these insertions into a complete scalar lane program.
+// these insertions into a complete scalar lane program. Elementwise operations
+// capture their input aggregates so each producer retains its own
+// target selection instead of expanding through the consumer's fallback.
 iree_status_t loom_vector_to_scalar_rewrite_op(loom_pass_t* pass,
                                                loom_rewriter_t* rewriter,
                                                loom_op_t* op,
@@ -83,7 +85,9 @@ iree_status_t loom_vector_to_scalar_rewrite_op(loom_pass_t* pass,
 // Rewrites one descriptor-backed vector op using scalar reference semantics.
 // This is the generic lane-by-lane expansion used by the standalone pass for
 // arithmetic, bitwise, structural, and packed vector ops represented in the
-// vector-to-scalar descriptor table.
+// vector-to-scalar descriptor table. Elementwise operands remain captured
+// aggregates whose producers are legalized independently. Structural lane
+// programs retain their coordinate composition.
 iree_status_t loom_vector_descriptor_to_scalar_rewrite_op(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
     bool* out_rewritten);

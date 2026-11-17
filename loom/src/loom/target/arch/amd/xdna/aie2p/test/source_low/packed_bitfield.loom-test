@@ -9,11 +9,11 @@ func.def @i32_bitfield_extractu(%value: i32) -> (i32) {
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32_bitfield_extractu(%value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
-  %10 = mov.short 24
-  %11 = lshl %value, %10
-  %12 = mov.short -28
-  %13 = lshl %11, %12
-  return %13
+  %11 = mov.short 24
+  %12 = lshl %value, %11
+  %13 = mov.short -28
+  %14 = lshl %12, %13
+  return %14
 }
 
 // ====
@@ -27,11 +27,11 @@ func.def @i32_bitfield_extracts(%value: i32) -> (i32) {
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32_bitfield_extracts(%value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
-  %10 = mov.short 24
-  %11 = lshl %value, %10
-  %12 = mov.short -28
-  %13 = ashl %11, %12
-  return %13
+  %11 = mov.short 24
+  %12 = lshl %value, %11
+  %13 = mov.short -28
+  %14 = ashl %12, %13
+  return %14
 }
 
 // ====
@@ -59,11 +59,11 @@ func.def @i32_bitfield_extracts_top_aligned(%value: i32) -> (i32) {
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32_bitfield_extracts_top_aligned(%value: reg<aie2p.er>) -> (reg<aie2p.er>) asm {
-  %10 = mov.short 0
-  %11 = lshl %value, %10
-  %12 = mov.short -28
-  %13 = ashl %11, %12
-  return %13
+  %11 = mov.short 0
+  %12 = lshl %value, %11
+  %13 = mov.short -28
+  %14 = ashl %12, %13
+  return %14
 }
 
 // ====

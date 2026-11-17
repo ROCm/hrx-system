@@ -1,0 +1,88 @@
+// A scalar-only division consumes the shared vector result. Its fallback
+// must not replace the native producer DAG with repeated scalar computations.
+// RUN: pass target-legalize{mode=final},canonicalize,dce
+
+test.target<low_core> @target
+
+func.def target(@target) @shared_arithmetic(%input: vector<4xi32>, %bias: vector<4xi32>) -> (vector<4xi32>) {
+  %sum = vector.addi %input, %bias : vector<4xi32>
+  %square = vector.muli %sum, %sum : vector<4xi32>
+  %shifted = vector.addi %square, %sum : vector<4xi32>
+  %product = vector.muli %shifted, %square : vector<4xi32>
+  %result = vector.divui %product, %bias : vector<4xi32>
+  func.return %result : vector<4xi32>
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @shared_arithmetic(%input: vector<4xi32>, %bias: vector<4xi32>) -> (vector<4xi32>) {
+  %sum = vector.addi %input, %bias : vector<4xi32>
+  %square = vector.muli %sum, %sum : vector<4xi32>
+  %shifted = vector.addi %square, %sum : vector<4xi32>
+  %product = vector.muli %shifted, %square : vector<4xi32>
+  %8 = vector.extract %product[0] : vector<4xi32> -> i32
+  %9 = vector.extract %bias[0] : vector<4xi32> -> i32
+  %10 = scalar.divui %8, %9 : i32
+  %11 = vector.extract %product[1] : vector<4xi32> -> i32
+  %12 = vector.extract %bias[1] : vector<4xi32> -> i32
+  %13 = scalar.divui %11, %12 : i32
+  %14 = vector.extract %product[2] : vector<4xi32> -> i32
+  %15 = vector.extract %bias[2] : vector<4xi32> -> i32
+  %16 = scalar.divui %14, %15 : i32
+  %17 = vector.extract %product[3] : vector<4xi32> -> i32
+  %18 = vector.extract %bias[3] : vector<4xi32> -> i32
+  %19 = scalar.divui %17, %18 : i32
+  %result = vector.from_elements %10, %13, %16, %19 : vector<4xi32>
+  func.return %result : vector<4xi32>
+}
+
+// ====
+
+// Both scalar results share the same captured operand lanes. Keeping the
+// quotient and remainder together preserves the original operation's tuple.
+// RUN: pass target-legalize{mode=final},canonicalize,dce
+
+test.target<low_core> @target
+
+func.def target(@target) @shared_multi_result(%input: vector<4xi32>, %bias: vector<4xi32>, %divisor: vector<4xi32>) -> (vector<4xi32>, vector<4xi32>) {
+  %sum = vector.addi %input, %bias : vector<4xi32>
+  %square = vector.muli %sum, %sum : vector<4xi32>
+  %quotient, %remainder = vector.divremui %square, %divisor : vector<4xi32>
+  func.return %quotient, %remainder : vector<4xi32>, vector<4xi32>
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @shared_multi_result(%input: vector<4xi32>, %bias: vector<4xi32>, %divisor: vector<4xi32>) -> (vector<4xi32>, vector<4xi32>) {
+  %sum = vector.addi %input, %bias : vector<4xi32>
+  %square = vector.muli %sum, %sum : vector<4xi32>
+  %9 = vector.extract %square[0] : vector<4xi32> -> i32
+  %10 = vector.extract %divisor[0] : vector<4xi32> -> i32
+  %39 = scalar.divui %9, %10 : i32
+  %40 = scalar.muli %39, %10 : i32
+  %41 = scalar.subi %9, %40 : i32
+  %42 = scalar.assume %41 [ult(%41, %10)] : i32
+  %13 = vector.extract %square[1] : vector<4xi32> -> i32
+  %14 = vector.extract %divisor[1] : vector<4xi32> -> i32
+  %35 = scalar.divui %13, %14 : i32
+  %36 = scalar.muli %35, %14 : i32
+  %37 = scalar.subi %13, %36 : i32
+  %38 = scalar.assume %37 [ult(%37, %14)] : i32
+  %17 = vector.extract %square[2] : vector<4xi32> -> i32
+  %18 = vector.extract %divisor[2] : vector<4xi32> -> i32
+  %31 = scalar.divui %17, %18 : i32
+  %32 = scalar.muli %31, %18 : i32
+  %33 = scalar.subi %17, %32 : i32
+  %34 = scalar.assume %33 [ult(%33, %18)] : i32
+  %21 = vector.extract %square[3] : vector<4xi32> -> i32
+  %22 = vector.extract %divisor[3] : vector<4xi32> -> i32
+  %27 = scalar.divui %21, %22 : i32
+  %28 = scalar.muli %27, %22 : i32
+  %29 = scalar.subi %21, %28 : i32
+  %30 = scalar.assume %29 [ult(%29, %22)] : i32
+  %quotient = vector.from_elements %39, %35, %31, %27 : vector<4xi32>
+  %remainder = vector.from_elements %42, %38, %34, %30 : vector<4xi32>
+  func.return %quotient, %remainder : vector<4xi32>, vector<4xi32>
+}

@@ -78,15 +78,15 @@ func.def @vector_extf_f8e5m2x3_to_f16x3(%first: f8E5M2, %second: f8E5M2, %third:
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @vector_extf_f8e5m2x3_to_f16x3(%first: reg<aie2p.er>, %second: reg<aie2p.er>, %third: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
-  %21 = mov.short 255
-  %22 = and %first, %21
-  %23 = mov.short 8
-  %24 = lshl %22, %23
-  %26 = and %second, %21
-  %28 = lshl %26, %23
-  %30 = and %third, %21
-  %32 = lshl %30, %23
-  return %24, %28, %32
+  %24 = mov.short 255
+  %25 = and %first, %24
+  %26 = mov.short 8
+  %27 = lshl %25, %26
+  %29 = and %second, %24
+  %31 = lshl %29, %26
+  %33 = and %third, %24
+  %35 = lshl %33, %26
+  return %27, %31, %35
 }
 
 // ====

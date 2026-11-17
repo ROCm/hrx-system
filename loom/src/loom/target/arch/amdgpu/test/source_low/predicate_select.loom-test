@@ -123,66 +123,52 @@ low.kernel.def target<amdgpu.rdna3_5.core> abi_layout({constant_count = 1, direc
   %true_value_view = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %false_value_view = resource<hal_binding> {extent = 256, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %result_view_0 = resource<hal_binding> {extent = 256, index = 2, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %164 = v_lshlrev_b32_src0_inline %fixture_lane, 2
-  %true_value_bits = global_load_b32_saddr %164, %true_value_view
-  %166 = v_and_b32_lit %true_value_bits, 255
-  %167 = v_and_b32_src0_inline %166, 1
-  %168 = v_and_b32_lit %167, 255
-  %169 = v_cmp_ne_i32_src1_inline %168 {rhs = 0}
-  %170 = v_bfe_u32_offset_width_inline %true_value_bits {offset = 8, width = 8}
-  %171 = v_and_b32_src0_inline %170, 1
-  %172 = v_and_b32_lit %171, 255
-  %173 = v_cmp_ne_i32_src1_inline %172 {rhs = 0}
-  %174 = v_bfe_u32_offset_width_inline %true_value_bits {offset = 16, width = 8}
-  %175 = v_and_b32_src0_inline %174, 1
-  %176 = v_and_b32_lit %175, 255
-  %177 = v_cmp_ne_i32_src1_inline %176 {rhs = 0}
-  %178 = v_bfe_u32_offset_width_inline %true_value_bits {offset = 24, width = 8}
-  %179 = v_and_b32_src0_inline %178, 1
-  %180 = v_and_b32_lit %179, 255
-  %181 = v_cmp_ne_i32_src1_inline %180 {rhs = 0}
-  %false_value_bits = global_load_b32_saddr %164, %false_value_view
-  %185 = v_and_b32_lit %false_value_bits, 255
-  %186 = v_and_b32_src0_inline %185, 1
-  %187 = v_and_b32_lit %186, 255
-  %188 = v_cmp_ne_i32_src1_inline %187 {rhs = 0}
-  %189 = v_bfe_u32_offset_width_inline %false_value_bits {offset = 8, width = 8}
-  %190 = v_and_b32_src0_inline %189, 1
-  %191 = v_and_b32_lit %190, 255
-  %192 = v_cmp_ne_i32_src1_inline %191 {rhs = 0}
-  %193 = v_bfe_u32_offset_width_inline %false_value_bits {offset = 16, width = 8}
-  %194 = v_and_b32_src0_inline %193, 1
-  %195 = v_and_b32_lit %194, 255
-  %196 = v_cmp_ne_i32_src1_inline %195 {rhs = 0}
-  %197 = v_bfe_u32_offset_width_inline %false_value_bits {offset = 24, width = 8}
-  %198 = v_and_b32_src0_inline %197, 1
-  %199 = v_and_b32_lit %198, 255
-  %200 = v_cmp_ne_i32_src1_inline %199 {rhs = 0}
+  %108 = v_mov_b32 16843009
+  %109 = v_lshlrev_b32_src0_inline %fixture_lane, 2
+  %true_value_bits = global_load_b32_saddr %109, %true_value_view
+  %111 = v_and_b32 %true_value_bits, %108
+  %112 = v_and_b32_lit %111, 255
+  %113 = v_cmp_ne_i32_src1_inline %112 {rhs = 0}
+  %114 = v_bfe_u32_offset_width_inline %111 {offset = 8, width = 8}
+  %115 = v_cmp_ne_i32_src1_inline %114 {rhs = 0}
+  %116 = v_bfe_u32_offset_width_inline %111 {offset = 16, width = 8}
+  %117 = v_cmp_ne_i32_src1_inline %116 {rhs = 0}
+  %118 = v_bfe_u32_offset_width_inline %111 {offset = 24, width = 8}
+  %119 = v_cmp_ne_i32_src1_inline %118 {rhs = 0}
+  %false_value_bits = global_load_b32_saddr %109, %false_value_view
+  %123 = v_and_b32 %false_value_bits, %108
+  %124 = v_and_b32_lit %123, 255
+  %125 = v_cmp_ne_i32_src1_inline %124 {rhs = 0}
+  %126 = v_bfe_u32_offset_width_inline %123 {offset = 8, width = 8}
+  %127 = v_cmp_ne_i32_src1_inline %126 {rhs = 0}
+  %128 = v_bfe_u32_offset_width_inline %123 {offset = 16, width = 8}
+  %129 = v_cmp_ne_i32_src1_inline %128 {rhs = 0}
+  %130 = v_bfe_u32_offset_width_inline %123 {offset = 24, width = 8}
+  %131 = v_cmp_ne_i32_src1_inline %130 {rhs = 0}
   %condition = v_cmp_ne_i32_src1_inline %selector {rhs = 0}
-  %203 = s_mov_b64_exec_read
-  %204 = s_xor_b64 %condition, %203
-  %206 = s_and_b64 %condition, %169
-  %208 = s_and_b64 %204, %188
-  %209 = s_or_b64 %206, %208
-  %211 = s_and_b64 %condition, %173
-  %213 = s_and_b64 %204, %192
-  %214 = s_or_b64 %211, %213
-  %216 = s_and_b64 %condition, %177
-  %218 = s_and_b64 %204, %196
-  %219 = s_or_b64 %216, %218
-  %221 = s_and_b64 %condition, %181
-  %223 = s_and_b64 %204, %200
-  %224 = s_or_b64 %221, %223
-  %226 = v_mov_b32 16843009
-  %227 = v_mov_b32 0
-  %229 = v_cndmask_b32 %227, %226, %209
-  %231 = v_cndmask_b32 %227, %226, %214
-  %232 = v_bfi_b32_src0_lit %231, %229, 65280
-  %234 = v_cndmask_b32 %227, %226, %219
-  %235 = v_bfi_b32_src0_lit %234, %232, 16711680
-  %237 = v_cndmask_b32 %227, %226, %224
-  %result_bits_1_0 = v_bfi_b32_src0_lit %237, %235, 4278190080
-  global_store_b32_saddr %164, %result_bits_1_0, %result_view_0
+  %134 = s_mov_b64_exec_read
+  %135 = s_xor_b64 %condition, %134
+  %137 = s_and_b64 %condition, %113
+  %139 = s_and_b64 %135, %125
+  %140 = s_or_b64 %137, %139
+  %142 = s_and_b64 %condition, %115
+  %144 = s_and_b64 %135, %127
+  %145 = s_or_b64 %142, %144
+  %147 = s_and_b64 %condition, %117
+  %149 = s_and_b64 %135, %129
+  %150 = s_or_b64 %147, %149
+  %152 = s_and_b64 %condition, %119
+  %154 = s_and_b64 %135, %131
+  %155 = s_or_b64 %152, %154
+  %157 = v_mov_b32 0
+  %159 = v_cndmask_b32 %157, %108, %140
+  %161 = v_cndmask_b32 %157, %108, %145
+  %162 = v_bfi_b32_src0_lit %161, %159, 65280
+  %164 = v_cndmask_b32 %157, %108, %150
+  %165 = v_bfi_b32_src0_lit %164, %162, 16711680
+  %167 = v_cndmask_b32 %157, %108, %155
+  %result_bits_1_0 = v_bfi_b32_src0_lit %167, %165, 4278190080
+  global_store_b32_saddr %109, %result_bits_1_0, %result_view_0
   return
 }
 
