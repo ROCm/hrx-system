@@ -958,6 +958,46 @@ TEST_F(HipArrayCopySptApiTest, ContiguousCopyWaitsForLegacyProducer) {
   EXPECT_EQ(0, std::memcmp(source, destination, kWidth * kHeight));
 }
 
+TEST_F(HipArrayCopySptApiTest, PitchedVolumePreservesIndependentOrigins) {
+  AllocateHost(256);
+  ASSERT_FALSE(HasFatalFailure());
+  ASSERT_EQ(hipSuccess, api_.malloc(&device_pointer_, 128));
+  ASSERT_EQ(hipSuccess, api_.stream_create(&stream_));
+  auto* source = static_cast<uint8_t*>(host_pointer_);
+  auto* destination = source + 128;
+  for (size_t i = 0; i < 128; ++i) {
+    source[i] = static_cast<uint8_t>(i + 1);
+  }
+  std::memset(destination, 0, 128);
+  hipMemcpy3DParms upload = {
+      .srcPos = {1, 1, 1},
+      .srcPtr = {source, 8, 8, 3},
+      .dstPos = {2, 1, 1},
+      .dstPtr = {device_pointer_, 10, 10, 4},
+      .extent = {4, 2, 2},
+      .kind = hipMemcpyHostToDevice,
+  };
+  hipMemcpy3DParms download = {
+      .srcPos = {2, 1, 1},
+      .srcPtr = {device_pointer_, 10, 10, 4},
+      .dstPos = {3, 1, 0},
+      .dstPtr = {destination, 12, 12, 4},
+      .extent = {4, 2, 2},
+      .kind = hipMemcpyDeviceToHost,
+  };
+  ASSERT_EQ(hipSuccess, api_.memcpy_3d_async(&upload, stream_));
+  ASSERT_EQ(hipSuccess, api_.memcpy_3d_async(&download, stream_));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+  std::array<uint8_t, 128> expected = {};
+  constexpr size_t source_offsets[] = {33, 41, 57, 65};
+  constexpr size_t target_offsets[] = {15, 27, 63, 75};
+  for (size_t i = 0; i < 4; ++i) {
+    std::memcpy(expected.data() + target_offsets[i], source + source_offsets[i],
+                4);
+  }
+  EXPECT_EQ(0, std::memcmp(destination, expected.data(), expected.size()));
+}
+
 TEST_F(HipArrayCopySptApiTest, PageableCopiesWaitOnlyForTheirSelectedStream) {
   constexpr size_t kWidth = 8;
   constexpr size_t kHeight = 3;

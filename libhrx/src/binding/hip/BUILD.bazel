@@ -35,6 +35,20 @@ _HIP_GPU_COMPATIBILITY = _LINUX_COMPATIBILITY + select({
 })
 
 hrx_cc_library(
+    name = "copy_geometry",
+    srcs = ["copy_geometry.c"],
+    hdrs = [
+        "api.h",
+        "copy_geometry.h",
+    ],
+    includes = ["../.."],
+    visibility = ["//libhrx/src/binding/hip:__pkg__"],
+    deps = [
+        "//runtime/src/iree/base",
+    ],
+)
+
+hrx_cc_library(
     name = "array_lifetime",
     srcs = ["array_lifetime.c"],
     hdrs = ["array_lifetime.h"],
@@ -42,6 +56,16 @@ hrx_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
+    ],
+)
+
+hrx_cc_test(
+    name = "copy_geometry_test",
+    srcs = ["copy_geometry_test.cc"],
+    deps = [
+        ":copy_geometry",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
@@ -424,6 +448,7 @@ hrx_cc_shared_library(
     deps = [
         ":array_lifetime",
         ":blocking_printf_provider",
+        ":copy_geometry",
         ":device_properties",
         ":device_selection",
         ":error_state",
@@ -488,6 +513,7 @@ hrx_cc_shared_library(
     deps = [
         ":array_lifetime",
         ":blocking_printf_provider",
+        ":copy_geometry",
         ":device_properties",
         ":device_selection",
         ":error_state",
