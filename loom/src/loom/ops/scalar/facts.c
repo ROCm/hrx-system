@@ -30,7 +30,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/scalar/compare.h"
 #include "loom/ops/scalar/ops.h"
-#include "loom/util/fact_relation.h"
+#include "loom/util/fact_relation_inference.h"
 #include "loom/util/fact_table.h"
 #include "loom/util/predicate_facts.h"
 

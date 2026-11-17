@@ -15,6 +15,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
+#include "loom/util/fact_relation_inference.h"
 #include "loom/util/fact_snapshot.h"
 #include "loom/util/fact_table.h"
 #include "loom/util/predicate_facts.h"

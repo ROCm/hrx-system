@@ -9,7 +9,7 @@
 #include <string.h>
 
 #include "loom/ir/module.h"
-#include "loom/util/fact_relation.h"
+#include "loom/util/fact_relation_inference.h"
 #include "loom/util/fact_table.h"
 
 struct loom_value_fact_exact_lane_origin_entry_t {

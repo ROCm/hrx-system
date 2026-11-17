@@ -411,7 +411,6 @@ loom_cc_benchmark(
     srcs = ["condition_derivation_benchmark.cc"],
     deps = [
         ":condition_derivation",
-        "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:benchmark",

@@ -15,7 +15,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/util/fact_relation.h"
+#include "loom/util/fact_relation_inference.h"
 
 namespace loom {
 namespace {

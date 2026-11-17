@@ -45,6 +45,7 @@
 #include "loom/util/fact_extensions.h"
 #include "loom/util/fact_identity.h"
 #include "loom/util/fact_layout.h"
+#include "loom/util/fact_loop_reads.h"
 #include "loom/util/fact_origin.h"
 #include "loom/util/fact_range.h"
 #include "loom/util/fact_select_dependencies.h"
@@ -76,7 +77,6 @@ typedef struct loom_condition_edge_projection_t
 typedef struct loom_cfg_graph_t loom_cfg_graph_t;
 typedef struct loom_target_facts_t loom_target_facts_t;
 typedef struct loom_value_fact_loop_replay_t loom_value_fact_loop_replay_t;
-typedef struct loom_value_fact_loop_reads_t loom_value_fact_loop_reads_t;
 typedef struct loom_value_fact_definition_distributions_t
     loom_value_fact_definition_distributions_t;
 
@@ -584,9 +584,6 @@ loom_value_id_t loom_value_fact_scope_next(
 // Retains a dependency in a preallocated active collector. Reads allocate
 // nothing; their owning solve publishes complete snapshots at completion.
 // Keep this bookkeeping out of the many inlined numeric query callsites.
-IREE_ATTRIBUTE_NOINLINE void loom_value_fact_loop_record_read(
-    loom_value_fact_loop_reads_t* reads, loom_value_id_t value_id);
-
 static inline void loom_value_fact_table_record_read(
     const loom_value_fact_table_t* table, loom_value_id_t value_id) {
   if (table && table->replay.reads) {

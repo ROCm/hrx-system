@@ -308,6 +308,28 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "fact_range",
+    srcs = ["fact_range.c"],
+    hdrs = ["fact_range.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "fact_loop_reads",
+    srcs = ["fact_loop_reads.c"],
+    hdrs = ["fact_loop_reads.h"],
+    deps = [
+        ":fact_range",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "fact_table_api",
     hdrs = [
         "fact_cast.h",
@@ -316,11 +338,12 @@ loom_cc_library(
         "fact_layout.h",
         "fact_observation.h",
         "fact_origin.h",
-        "fact_range.h",
         "fact_select_dependencies.h",
         "fact_table.h",
     ],
     deps = [
+        ":fact_loop_reads",
+        ":fact_range",
         ":numeric_format",
         ":reference_facts",
         "//loom/src/loom/ir",
@@ -348,7 +371,6 @@ loom_cc_library(
     srcs = ["fact_relation.c"],
     hdrs = ["fact_relation.h"],
     deps = [
-        ":fact_ordinal_map",
         ":fact_table_api",
         "//loom/src/loom/analysis:integer_relation",
         "//loom/src/loom/ir",
@@ -370,8 +392,8 @@ loom_cc_library(
         "fact_loop.c",
         "fact_loop_replay.c",
         "fact_origin.c",
-        "fact_range.c",
         "fact_recurrence.c",
+        "fact_relation_inference.c",
         "fact_select_dependencies.c",
         "fact_snapshot.c",
         "fact_table.c",
@@ -390,8 +412,8 @@ loom_cc_library(
         "fact_loop_replay.h",
         "fact_observation.h",
         "fact_origin.h",
-        "fact_range.h",
         "fact_recurrence.h",
+        "fact_relation_inference.h",
         "fact_select_dependencies.h",
         "fact_snapshot.h",
         "fact_table.h",
@@ -405,7 +427,9 @@ loom_cc_library(
         ":cfg_loop_nest",
         ":cfg_regions",
         ":fact_control",
+        ":fact_loop_reads",
         ":fact_ordinal_map",
+        ":fact_range",
         ":fact_relation",
         ":fact_table_api",
         ":numeric_format",
@@ -432,10 +456,22 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "fact_loop_reads_test",
+    srcs = ["fact_loop_reads_test.cc"],
+    deps = [
+        ":fact_loop_reads",
+        ":fact_table_api",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "fact_range_test",
     srcs = ["fact_range_test.cc"],
     deps = [
-        ":fact_table",
+        ":fact_range",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
