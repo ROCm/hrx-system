@@ -14,6 +14,7 @@ IREE_API_EXPORT iree_status_t iree_async_proactor_prepare_buffer(
     iree_async_proactor_t* proactor,
     iree_async_buffer_registration_state_t* state, iree_byte_span_t buffer,
     iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_flags_t flags,
     iree_async_buffer_registration_entry_t** out_entry) {
   *out_entry = NULL;
   if (!buffer.data || !buffer.data_length ||
@@ -29,11 +30,14 @@ IREE_API_EXPORT iree_status_t iree_async_proactor_prepare_buffer(
                             "buffer preparation range overflows address space");
   }
   if (!proactor->vtable->prepare_buffer) {
+    if (iree_any_bit_set(flags, IREE_ASYNC_BUFFER_REGISTRATION_FLAG_OPTIONAL)) {
+      return iree_ok_status();
+    }
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "proactor does not support prepared buffers");
   }
   return proactor->vtable->prepare_buffer(proactor, state, buffer, access_flags,
-                                          out_entry);
+                                          flags, out_entry);
 }
 
 IREE_API_EXPORT iree_status_t iree_async_proactor_clone_buffer_registration(
@@ -41,6 +45,7 @@ IREE_API_EXPORT iree_status_t iree_async_proactor_clone_buffer_registration(
     iree_async_buffer_registration_state_t* state,
     const iree_async_buffer_registration_entry_t* source_entry,
     iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_flags_t flags,
     iree_async_buffer_registration_entry_t** out_entry) {
   *out_entry = NULL;
   if (!source_entry ||
@@ -53,11 +58,14 @@ IREE_API_EXPORT iree_status_t iree_async_proactor_clone_buffer_registration(
                             "contained in the source registration");
   }
   if (!proactor->vtable->clone_buffer_registration) {
+    if (iree_any_bit_set(flags, IREE_ASYNC_BUFFER_REGISTRATION_FLAG_OPTIONAL)) {
+      return iree_ok_status();
+    }
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "proactor cannot clone prepared registrations");
   }
   return proactor->vtable->clone_buffer_registration(
-      proactor, state, source_entry, access_flags, out_entry);
+      proactor, state, source_entry, access_flags, flags, out_entry);
 }
 
 IREE_API_EXPORT void iree_async_proactor_attach_buffer(
@@ -90,7 +98,9 @@ iree_status_t iree_async_proactor_prepare_buffer_emulated(
     iree_async_proactor_t* proactor,
     iree_async_buffer_registration_state_t* state, iree_byte_span_t buffer,
     iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_flags_t flags,
     iree_async_buffer_registration_entry_t** out_entry) {
+  (void)flags;
   return proactor->vtable->register_buffer(proactor, state, buffer,
                                            access_flags, out_entry);
 }
@@ -100,9 +110,13 @@ iree_status_t iree_async_proactor_clone_buffer_registration_emulated(
     iree_async_buffer_registration_state_t* state,
     const iree_async_buffer_registration_entry_t* source_entry,
     iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_flags_t flags,
     iree_async_buffer_registration_entry_t** out_entry) {
   if (source_entry->proactor->vtable->clone_buffer_registration !=
       iree_async_proactor_clone_buffer_registration_emulated) {
+    if (iree_any_bit_set(flags, IREE_ASYNC_BUFFER_REGISTRATION_FLAG_OPTIONAL)) {
+      return iree_ok_status();
+    }
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "source preparation is incompatible with proactor");
   }

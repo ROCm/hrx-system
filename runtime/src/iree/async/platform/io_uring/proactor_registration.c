@@ -323,8 +323,9 @@ static void iree_async_io_uring_prepared_buffer_cleanup(void* entry_ptr,
 static iree_status_t iree_async_io_uring_prepared_pins_acquire(
     const iree_async_buffer_registration_state_t* state,
     iree_byte_span_t contents, const struct iovec* buffers,
-    uint32_t buffer_count, iree_allocator_t allocator,
+    uint32_t buffer_count, iree_allocator_t allocator, bool optional,
     iree_async_io_uring_prepared_pins_t** out_pins) {
+  *out_pins = NULL;
   // State mutation and cleanup are caller-serialized. Native pinning is
   // independent of per-region access flags and destination fixed-table slots.
   for (iree_async_buffer_registration_entry_t* entry = state->head; entry;
@@ -352,17 +353,22 @@ static iree_status_t iree_async_io_uring_prepared_pins_acquire(
   pins->allocator = allocator;
   const int result = iree_io_uring_registration_prepare_buffers(
       buffers, buffer_count, &pins->source_fd);
-  iree_status_t status = iree_ok_status();
   if (result < 0) {
-    status = iree_make_status(iree_status_code_from_errno(-result),
-                              "buffer pin preparation failed (%d)", -result);
-  }
-  if (iree_status_is_ok(status)) {
-    *out_pins = pins;
-  } else {
     iree_allocator_free(allocator, pins);
+    // A native pin owner is optional for ordinary host-span I/O. Registration
+    // may exceed a shared pin/descriptor budget or be denied by syscall policy.
+    // The native helper has already closed any partially prepared owner. Keep
+    // malformed ranges and bad addresses as errors, including EINVAL/EFAULT.
+    if (optional &&
+        (result == -ENOMEM || result == -EMFILE || result == -ENFILE ||
+         result == -EPERM || result == -EACCES || result == -EOPNOTSUPP)) {
+      return iree_ok_status();
+    }
+    return iree_make_status(iree_status_code_from_errno(-result),
+                            "buffer pin preparation failed (%d)", -result);
   }
-  return status;
+  *out_pins = pins;
+  return iree_ok_status();
 }
 
 // Reserves detached metadata and slots without acquiring native pins. Geometry
@@ -370,24 +376,34 @@ static iree_status_t iree_async_io_uring_prepared_pins_acquire(
 static iree_status_t iree_async_io_uring_prepared_buffer_allocate(
     iree_async_proactor_t* base_proactor, iree_byte_span_t contents,
     iree_host_size_t buffer_size, iree_host_size_t buffer_count,
-    iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_access_flags_t access_flags, bool optional,
     iree_async_io_uring_prepared_buffer_t** out_buffer) {
+  *out_buffer = NULL;
   iree_async_proactor_io_uring_t* proactor =
       iree_async_proactor_io_uring_cast(base_proactor);
   if (!iree_any_bit_set(
           proactor->capabilities,
           IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION)) {
+    if (optional) {
+      return iree_ok_status();
+    }
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "kernel cannot attach prepared buffer pins");
   }
   if (buffer_count >
       iree_io_uring_sparse_table_capacity(proactor->buffer_table)) {
+    if (optional) {
+      return iree_ok_status();
+    }
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "prepared buffer exceeds fixed table capacity");
   }
   int32_t base = iree_io_uring_sparse_table_acquire(proactor->buffer_table,
                                                     (uint16_t)buffer_count);
   if (base < 0) {
+    if (optional) {
+      return iree_ok_status();
+    }
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "fixed buffer table has no contiguous slots");
   }
@@ -432,7 +448,10 @@ iree_status_t iree_async_proactor_io_uring_prepare_buffer(
     iree_async_proactor_t* base_proactor,
     iree_async_buffer_registration_state_t* state, iree_byte_span_t contents,
     iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_flags_t flags,
     iree_async_buffer_registration_entry_t** out_entry) {
+  const bool optional =
+      iree_any_bit_set(flags, IREE_ASYNC_BUFFER_REGISTRATION_FLAG_OPTIONAL);
   const iree_host_size_t buffer_size =
       iree_min(contents.data_length, (iree_host_size_t)(UINT32_C(1) << 30));
   const iree_host_size_t buffer_count =
@@ -440,7 +459,10 @@ iree_status_t iree_async_proactor_io_uring_prepare_buffer(
   iree_async_io_uring_prepared_buffer_t* buffer = NULL;
   IREE_RETURN_IF_ERROR(iree_async_io_uring_prepared_buffer_allocate(
       base_proactor, contents, buffer_size, buffer_count, access_flags,
-      &buffer));
+      optional, &buffer));
+  if (!buffer) {
+    return iree_ok_status();
+  }
   for (iree_host_size_t i = 0; i < buffer_count; ++i) {
     buffer->buffers[i] = (struct iovec){
         .iov_base = contents.data + i * buffer_size,
@@ -450,8 +472,8 @@ iree_status_t iree_async_proactor_io_uring_prepare_buffer(
   }
   iree_status_t status = iree_async_io_uring_prepared_pins_acquire(
       state, contents, buffer->buffers, (uint32_t)buffer_count,
-      base_proactor->allocator, &buffer->pins);
-  if (iree_status_is_ok(status)) {
+      base_proactor->allocator, optional, &buffer->pins);
+  if (iree_status_is_ok(status) && buffer->pins) {
     memset(buffer->buffers, 0, buffer_count * sizeof(buffer->buffers[0]));
     iree_async_buffer_registration_state_add(state, &buffer->entry);
     *out_entry = &buffer->entry;
@@ -466,8 +488,14 @@ iree_status_t iree_async_proactor_io_uring_clone_buffer_registration(
     iree_async_buffer_registration_state_t* state,
     const iree_async_buffer_registration_entry_t* source_entry,
     iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_flags_t flags,
     iree_async_buffer_registration_entry_t** out_entry) {
+  const bool optional =
+      iree_any_bit_set(flags, IREE_ASYNC_BUFFER_REGISTRATION_FLAG_OPTIONAL);
   if (source_entry->cleanup_fn != iree_async_io_uring_prepared_buffer_cleanup) {
+    if (optional) {
+      return iree_ok_status();
+    }
     return iree_make_status(
         IREE_STATUS_UNAVAILABLE,
         "source registration has no prepared io_uring pins");
@@ -479,7 +507,10 @@ iree_status_t iree_async_proactor_io_uring_clone_buffer_registration(
       base_proactor,
       iree_make_byte_span(source->region.base_ptr, source->region.length),
       source->region.buffer_size, source->region.buffer_count, access_flags,
-      &buffer));
+      optional, &buffer));
+  if (!buffer) {
+    return iree_ok_status();
+  }
   buffer->pins = source->pins;
   iree_atomic_ref_count_inc(&buffer->pins->ref_count);
   iree_async_buffer_registration_state_add(state, &buffer->entry);

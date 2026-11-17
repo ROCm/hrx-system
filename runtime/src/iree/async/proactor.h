@@ -718,6 +718,7 @@ typedef struct iree_async_proactor_vtable_t {
       iree_async_proactor_t* proactor,
       iree_async_buffer_registration_state_t* state, iree_byte_span_t buffer,
       iree_async_buffer_access_flags_t access_flags,
+      iree_async_buffer_registration_flags_t flags,
       iree_async_buffer_registration_entry_t** out_entry);
   // Creates an independent attachment view without acquiring new native pins.
   iree_status_t (*clone_buffer_registration)(
@@ -725,6 +726,7 @@ typedef struct iree_async_proactor_vtable_t {
       iree_async_buffer_registration_state_t* state,
       const iree_async_buffer_registration_entry_t* source_entry,
       iree_async_buffer_access_flags_t access_flags,
+      iree_async_buffer_registration_flags_t flags,
       iree_async_buffer_registration_entry_t** out_entry);
   // Attaches prepared pins without waiting for another owner.
   void (*attach_buffer)(iree_async_proactor_t* proactor,
@@ -1161,11 +1163,16 @@ void iree_async_cancel_request_complete(iree_async_cancel_request_t* request);
 
 // Prepares a nonempty host range for asynchronous registration attachment.
 // Performs cold page pinning and reserves attachment/release storage on the
-// caller, without waiting for the polling owner. Failure publishes no entry.
-// Success links an owned entry into |state|; its region must not be used for
-// I/O until attach_buffer completes successfully. The proactor and borrowed
-// host range must outlive the entry, all accepted I/O, and
-// attachment/detachment.
+// caller, without waiting for the polling owner. A prepared entry is linked
+// into |state| and returned in |out_entry|. Its region must not be used for I/O
+// until attach_buffer completes successfully. The proactor and borrowed host
+// range must outlive the entry, all accepted I/O, and attachment/detachment.
+//
+// With OPTIONAL, unavailable native registration, pin/descriptor quota, or
+// fixed table capacity returns OK with |out_entry| NULL and leaves |state|
+// unchanged. The caller can use ordinary I/O spans over the same host range.
+// Invalid input and metadata allocation failures remain errors. Without
+// OPTIONAL, success always returns an entry. Failure never publishes an entry.
 //
 // io_uring requires CONCURRENT_BUFFER_REGISTRATION and retains an independent
 // native pin owner. Prepared entries for the same exact range in |state| share
@@ -1178,6 +1185,7 @@ IREE_API_EXPORT iree_status_t iree_async_proactor_prepare_buffer(
     iree_async_proactor_t* proactor,
     iree_async_buffer_registration_state_t* state, iree_byte_span_t buffer,
     iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_flags_t flags,
     iree_async_buffer_registration_entry_t** out_entry);
 
 // Creates a detached registration for the exact host range of |source_entry|.
@@ -1187,6 +1195,9 @@ IREE_API_EXPORT iree_status_t iree_async_proactor_prepare_buffer(
 // allocation or slot exhaustion returns RESOURCE_EXHAUSTED. Failure publishes
 // no entry. Success links an owned entry into |state|, ready for attach_buffer.
 // |access_flags| must include READ or WRITE and be a subset of source access.
+// OPTIONAL permits OK with no entry for incompatible preparation or exhausted
+// table capacity, as in prepare_buffer. Metadata allocation failures remain
+// errors. Cloning does not acquire new pins or consume another pin budget.
 //
 // The caller serializes |state| mutation and keeps |source_entry| alive through
 // this call. The source entry and its proactor may then be cleaned up normally.
@@ -1200,6 +1211,7 @@ IREE_API_EXPORT iree_status_t iree_async_proactor_clone_buffer_registration(
     iree_async_buffer_registration_state_t* state,
     const iree_async_buffer_registration_entry_t* source_entry,
     iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_flags_t flags,
     iree_async_buffer_registration_entry_t** out_entry);
 
 // Attaches a prepared entry without pinning or waiting for polling progress.
@@ -1233,12 +1245,14 @@ iree_status_t iree_async_proactor_prepare_buffer_emulated(
     iree_async_proactor_t* proactor,
     iree_async_buffer_registration_state_t* state, iree_byte_span_t buffer,
     iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_flags_t flags,
     iree_async_buffer_registration_entry_t** out_entry);
 iree_status_t iree_async_proactor_clone_buffer_registration_emulated(
     iree_async_proactor_t* proactor,
     iree_async_buffer_registration_state_t* state,
     const iree_async_buffer_registration_entry_t* source_entry,
     iree_async_buffer_access_flags_t access_flags,
+    iree_async_buffer_registration_flags_t flags,
     iree_async_buffer_registration_entry_t** out_entry);
 void iree_async_proactor_transition_buffer_emulated(
     iree_async_proactor_t* proactor,

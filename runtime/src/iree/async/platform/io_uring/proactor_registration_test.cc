@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <condition_variable>
 #include <cstring>
@@ -162,13 +163,16 @@ TEST_P(SlabRegistrationFaultTest,
   ASSERT_EQ(mprotect(fault_page, page_size_, PROT_NONE), 0);
   iree_async_buffer_registration_state_t state = {};
   iree_async_buffer_registration_entry_t* entry = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      iree_async_proactor_prepare_buffer(
-          proactor_, &state, iree_make_byte_span(mapping_, mapping_length_),
-          IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &entry));
-  EXPECT_EQ(entry, nullptr);
-  EXPECT_TRUE(iree_async_buffer_registration_state_is_empty(&state));
+  for (auto flags : {IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE,
+                     IREE_ASYNC_BUFFER_REGISTRATION_FLAG_OPTIONAL}) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        iree_async_proactor_prepare_buffer(
+            proactor_, &state, iree_make_byte_span(mapping_, mapping_length_),
+            IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, flags, &entry));
+    EXPECT_EQ(entry, nullptr);
+    EXPECT_TRUE(iree_async_buffer_registration_state_is_empty(&state));
+  }
   iree_async_buffer_registration_state_deinitialize(&state);
 
   // A failed preparation publishes nothing and returns the reserved fixed
@@ -216,7 +220,8 @@ TEST_F(SlabRegistrationTest,
   iree_async_buffer_registration_entry_t* first_entry = nullptr;
   IREE_ASSERT_OK(iree_async_proactor_prepare_buffer(
       proactor_, &state, iree_make_byte_span(mapping_, page_size_),
-      IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &first_entry));
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+      IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &first_entry));
   EXPECT_EQ(first_entry->region->handles.iouring.base_buffer_index, 0);
 
   // Existing descriptors remain valid at a zero soft limit. The next pin
@@ -229,10 +234,18 @@ TEST_F(SlabRegistrationTest,
       proactor_, &state,
       iree_make_byte_span(static_cast<uint8_t*>(mapping_) + page_size_,
                           page_size_),
-      IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &entry);
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+      IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &entry);
+  iree_status_t optional_status = iree_async_proactor_prepare_buffer(
+      proactor_, &state,
+      iree_make_byte_span(static_cast<uint8_t*>(mapping_) + page_size_,
+                          page_size_),
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+      IREE_ASYNC_BUFFER_REGISTRATION_FLAG_OPTIONAL, &entry);
   // Restore the process limit before assertion/reporting infrastructure runs.
   EXPECT_EQ(setrlimit(RLIMIT_NOFILE, &descriptor_limit), 0);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+  IREE_EXPECT_OK(optional_status);
   EXPECT_EQ(entry, nullptr);
   EXPECT_EQ(state.head, first_entry);
   EXPECT_EQ(first_entry->next, nullptr);
@@ -241,7 +254,8 @@ TEST_F(SlabRegistrationTest,
       proactor_, &state,
       iree_make_byte_span(static_cast<uint8_t*>(mapping_) + page_size_,
                           page_size_),
-      IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE, &entry));
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+      IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &entry));
   EXPECT_EQ(entry->region->handles.iouring.base_buffer_index, 1);
   EXPECT_EQ(entry->next, first_entry);
   cleanup.reset();
@@ -303,6 +317,62 @@ TEST_F(SlabRegistrationTest, PinLimitReleasesPartialRegistration) {
   ASSERT_NO_FATAL_FAILURE(RegisterAtFirstSlot());
 }
 
+class PreparedBufferPinLimitTest
+    : public SlabRegistrationTest,
+      public ::testing::WithParamInterface<rlim_t> {};
+
+TEST_P(PreparedBufferPinLimitTest, OptionalPreparationPreservesBacking) {
+  if (!iree_any_bit_set(
+          iree_async_proactor_query_capabilities(proactor_),
+          IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION)) {
+    GTEST_SKIP() << "kernel cannot attach prepared registrations";
+  }
+  constexpr size_t kLength = 16 * 1024 * 1024;
+  ASSERT_NO_FATAL_FAILURE(CreateSlab(kLength, 1));
+  memset(mapping_, 0x53, mapping_length_);
+  struct rlimit limit = original_limit_;
+  limit.rlim_cur = std::min(limit.rlim_cur, GetParam());
+  ASSERT_EQ(setrlimit(RLIMIT_MEMLOCK, &limit), 0);
+  limit_changed_ = true;
+
+  iree_async_buffer_registration_state_t state = {};
+  std::unique_ptr<iree_async_buffer_registration_state_t,
+                  decltype(&iree_async_buffer_registration_state_deinitialize)>
+      cleanup(&state, iree_async_buffer_registration_state_deinitialize);
+  iree_async_buffer_registration_entry_t* entry = nullptr;
+  // Required preparation still rejects a range exceeding the entire budget.
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_async_proactor_prepare_buffer(
+          proactor_, &state, iree_make_byte_span(mapping_, mapping_length_),
+          IREE_ASYNC_BUFFER_ACCESS_FLAG_READ,
+          IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &entry));
+  EXPECT_EQ(entry, nullptr);
+  EXPECT_EQ(state.head, nullptr);
+  IREE_ASSERT_OK(iree_async_proactor_prepare_buffer(
+      proactor_, &state, iree_make_byte_span(mapping_, mapping_length_),
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ,
+      IREE_ASYNC_BUFFER_REGISTRATION_FLAG_OPTIONAL, &entry));
+  EXPECT_EQ(entry, nullptr);
+  EXPECT_EQ(state.head, nullptr);
+  EXPECT_EQ(static_cast<uint8_t*>(mapping_)[0], 0x53);
+  EXPECT_EQ(static_cast<uint8_t*>(mapping_)[mapping_length_ - 1], 0x53);
+
+  // Declining optional pins returns every reserved slot. The same backing can
+  // still be prepared normally once the caller has sufficient pin budget.
+  ASSERT_EQ(setrlimit(RLIMIT_MEMLOCK, &original_limit_), 0);
+  limit_changed_ = false;
+  IREE_ASSERT_OK(iree_async_proactor_prepare_buffer(
+      proactor_, &state, iree_make_byte_span(mapping_, page_size_),
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ,
+      IREE_ASYNC_BUFFER_REGISTRATION_FLAG_OPTIONAL, &entry));
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(entry->region->handles.iouring.base_buffer_index, 0);
+}
+
+INSTANTIATE_TEST_SUITE_P(Memlock, PreparedBufferPinLimitTest,
+                         ::testing::Values(0, 8 * 1024 * 1024));
+
 enum class FileRegistrationKind {
   kIndexedSlab,
   kHostBuffer,
@@ -363,14 +433,16 @@ class FileRegistrationTest
     ASSERT_EQ(madvise(mapping_, mapping_length_, MADV_NOHUGEPAGE), 0);
     if (GetParam() != FileRegistrationKind::kIndexedSlab) {
       iree_async_buffer_registration_entry_t* entry = nullptr;
-      auto register_buffer = IsPrepared() ? iree_async_proactor_prepare_buffer
-                                          : iree_async_proactor_register_buffer;
+      const auto contents = iree_make_byte_span(mapping_, mapping_length_);
+      const auto access = IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
+                          IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE;
       IREE_ASSERT_OK(
-          register_buffer(proactor_, &registration_state_,
-                          iree_make_byte_span(mapping_, mapping_length_),
-                          IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
-                              IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
-                          &entry));
+          IsPrepared()
+              ? iree_async_proactor_prepare_buffer(
+                    proactor_, &registration_state_, contents, access,
+                    IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &entry)
+              : iree_async_proactor_register_buffer(
+                    proactor_, &registration_state_, contents, access, &entry));
       if (IsPrepared()) {
         Completion completion;
         iree_async_proactor_attach_buffer(
@@ -735,7 +807,7 @@ class PreparedSlotReuseTest : public FileRegistrationTest {
                             page_size_),
         IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
             IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
-        &upper_entry_));
+        IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &upper_entry_));
     ASSERT_GT(upper_entry_->region->handles.iouring.base_buffer_index,
               region_->handles.iouring.base_buffer_index);
     Completion completion;
@@ -930,7 +1002,8 @@ TEST_P(SharedPreparedRegistrationTest, PinsOutliveFirstProactor) {
   iree_status_t status = iree_async_proactor_prepare_buffer(
       second_proactor_, &registration_state_,
       iree_make_byte_span(mapping_, mapping_length_),
-      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &second_entry_);
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ,
+      IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &second_entry_);
   EXPECT_EQ(setrlimit(RLIMIT_NOFILE, &descriptor_limit), 0);
   IREE_ASSERT_OK(status);
   EXPECT_EQ(second_entry_->region->access_flags,
@@ -984,7 +1057,8 @@ TEST_P(SharedPreparedRegistrationTest, DistinctAllocatorOwnsSeparatePins) {
   iree_status_t status = iree_async_proactor_prepare_buffer(
       second_proactor_, &registration_state_,
       iree_make_byte_span(mapping_, mapping_length_),
-      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &second_entry_);
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ,
+      IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &second_entry_);
   EXPECT_EQ(setrlimit(RLIMIT_NOFILE, &descriptor_limit), 0);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
   EXPECT_EQ(second_entry_, nullptr);
@@ -992,7 +1066,8 @@ TEST_P(SharedPreparedRegistrationTest, DistinctAllocatorOwnsSeparatePins) {
   IREE_ASSERT_OK(iree_async_proactor_prepare_buffer(
       second_proactor_, &registration_state_,
       iree_make_byte_span(mapping_, mapping_length_),
-      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &second_entry_));
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ,
+      IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &second_entry_));
   EXPECT_EQ(second_entry_->region->handles.iouring.base_buffer_index, 0);
   ASSERT_NO_FATAL_FAILURE(DestroyFirstProactor());
   ASSERT_NO_FATAL_FAILURE(AttachSecond());
@@ -1022,7 +1097,17 @@ TEST_P(SharedPreparedRegistrationTest, ExplicitCloneOutlivesSourceProactor) {
   iree_status_t allocation_status =
       iree_async_proactor_clone_buffer_registration(
           second_proactor_, &registration_state_, prepared_entry_,
-          IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &second_entry_);
+          IREE_ASYNC_BUFFER_ACCESS_FLAG_READ,
+          IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &second_entry_);
+  second_allocations_allowed_ = true;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, allocation_status);
+  EXPECT_EQ(second_entry_, nullptr);
+  EXPECT_EQ(registration_state_.head, prepared_entry_);
+  second_allocations_allowed_ = false;
+  allocation_status = iree_async_proactor_clone_buffer_registration(
+      second_proactor_, &registration_state_, prepared_entry_,
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ,
+      IREE_ASYNC_BUFFER_REGISTRATION_FLAG_OPTIONAL, &second_entry_);
   second_allocations_allowed_ = true;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, allocation_status);
   EXPECT_EQ(second_entry_, nullptr);
@@ -1034,7 +1119,8 @@ TEST_P(SharedPreparedRegistrationTest, ExplicitCloneOutlivesSourceProactor) {
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &exhausted_limit), 0);
   iree_status_t status = iree_async_proactor_clone_buffer_registration(
       second_proactor_, &registration_state_, prepared_entry_,
-      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &second_entry_);
+      IREE_ASYNC_BUFFER_ACCESS_FLAG_READ,
+      IREE_ASYNC_BUFFER_REGISTRATION_FLAG_OPTIONAL, &second_entry_);
   EXPECT_EQ(setrlimit(RLIMIT_NOFILE, &descriptor_limit), 0);
   IREE_ASSERT_OK(status);
   EXPECT_EQ(second_entry_->region->access_flags,
@@ -1058,10 +1144,17 @@ TEST_F(SlabRegistrationTest, CloneRejectsOrdinaryRegistration) {
       proactor_, &state, iree_make_byte_span(mapping_, mapping_length_),
       IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &entry));
   iree_async_buffer_registration_entry_t* clone = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
-                        iree_async_proactor_clone_buffer_registration(
-                            proactor_, &state, entry,
-                            IREE_ASYNC_BUFFER_ACCESS_FLAG_READ, &clone));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      iree_async_proactor_clone_buffer_registration(
+          proactor_, &state, entry, IREE_ASYNC_BUFFER_ACCESS_FLAG_READ,
+          IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &clone));
+  EXPECT_EQ(clone, nullptr);
+  EXPECT_EQ(state.head, entry);
+  EXPECT_EQ(entry->next, nullptr);
+  IREE_ASSERT_OK(iree_async_proactor_clone_buffer_registration(
+      proactor_, &state, entry, IREE_ASYNC_BUFFER_ACCESS_FLAG_READ,
+      IREE_ASYNC_BUFFER_REGISTRATION_FLAG_OPTIONAL, &clone));
   EXPECT_EQ(clone, nullptr);
   EXPECT_EQ(state.head, entry);
   EXPECT_EQ(entry->next, nullptr);

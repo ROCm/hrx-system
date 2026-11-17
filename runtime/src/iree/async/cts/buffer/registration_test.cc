@@ -93,7 +93,11 @@ static StatusOr<AsyncRegionPtr> RegisterSlab(
   return AsyncRegionPtr(region);
 }
 
-class BufferRegistrationTest : public SocketTestBase<> {};
+class BufferRegistrationTest : public SocketTestBase<> {
+ protected:
+  void CheckPreparedHostBufferLifecycle(
+      iree_async_buffer_registration_flags_t flags);
+};
 
 //===----------------------------------------------------------------------===//
 // Host buffer registration tests
@@ -119,7 +123,8 @@ TEST_P(BufferRegistrationTest, RegisterHostBuffer) {
   iree_async_buffer_registration_state_deinitialize(&state);
 }
 
-TEST_P(BufferRegistrationTest, PreparedHostBufferLifecycle) {
+void BufferRegistrationTest::CheckPreparedHostBufferLifecycle(
+    iree_async_buffer_registration_flags_t flags) {
   if (!iree_any_bit_set(
           iree_async_proactor_query_capabilities(proactor_),
           IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION)) {
@@ -131,7 +136,7 @@ TEST_P(BufferRegistrationTest, PreparedHostBufferLifecycle) {
   IREE_ASSERT_OK(iree_async_proactor_prepare_buffer(
       proactor_, &state, iree_make_byte_span(buffer.data(), buffer.size()),
       IREE_ASYNC_BUFFER_ACCESS_FLAG_READ | IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
-      &entry));
+      flags, &entry));
   ASSERT_NE(entry, nullptr);
   EXPECT_EQ(entry->region->base_ptr, buffer.data());
   EXPECT_EQ(entry->region->length, buffer.size());
@@ -166,6 +171,15 @@ TEST_P(BufferRegistrationTest, PreparedHostBufferLifecycle) {
   EXPECT_TRUE(iree_async_buffer_registration_state_is_empty(&state));
   EXPECT_EQ(region->base_ptr, buffer.data());
   EXPECT_EQ(region->length, buffer.size());
+}
+
+TEST_P(BufferRegistrationTest, PreparedHostBufferLifecycle) {
+  CheckPreparedHostBufferLifecycle(IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE);
+}
+
+TEST_P(BufferRegistrationTest, OptionalPreparedHostBufferLifecycle) {
+  CheckPreparedHostBufferLifecycle(
+      IREE_ASYNC_BUFFER_REGISTRATION_FLAG_OPTIONAL);
 }
 
 // Multiple buffer registrations in the same state.

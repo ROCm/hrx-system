@@ -162,20 +162,21 @@ TEST_P(PreparedFileTest, CloneReadsAfterSourceProactorDestruction) {
       source_proactor_, &source_state_,
       iree_make_byte_span(buffer_.data(), buffer_.size()),
       IREE_ASYNC_BUFFER_ACCESS_FLAG_READ | IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
-      &source_entry));
+      IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &source_entry));
 
   for (auto access : {IREE_ASYNC_BUFFER_ACCESS_FLAG_NONE,
                       IREE_ASYNC_BUFFER_ACCESS_FLAG_REMOTE_WRITE}) {
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
         iree_async_proactor_clone_buffer_registration(
-            proactor_, &state_, source_entry, access, &entry_));
+            proactor_, &state_, source_entry, access,
+            IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &entry_));
     EXPECT_EQ(entry_, nullptr);
     EXPECT_TRUE(iree_async_buffer_registration_state_is_empty(&state_));
   }
   IREE_ASSERT_OK(iree_async_proactor_clone_buffer_registration(
       proactor_, &state_, source_entry, IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
-      &entry_));
+      IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &entry_));
   EXPECT_EQ(entry_->region->base_ptr, buffer_.data());
   EXPECT_EQ(entry_->region->length, buffer_.size());
   EXPECT_EQ(entry_->region->access_flags, IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE);
@@ -184,7 +185,7 @@ TEST_P(PreparedFileTest, CloneReadsAfterSourceProactorDestruction) {
       IREE_STATUS_INVALID_ARGUMENT,
       iree_async_proactor_clone_buffer_registration(
           proactor_, &state_, entry_, IREE_ASYNC_BUFFER_ACCESS_FLAG_READ,
-          &widened_entry));
+          IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &widened_entry));
   EXPECT_EQ(widened_entry, nullptr);
   EXPECT_EQ(state_.head, entry_);
   EXPECT_EQ(entry_->next, nullptr);

@@ -37,6 +37,17 @@ typedef struct iree_async_region_t iree_async_region_t;
 // Buffer registration types
 //===----------------------------------------------------------------------===//
 
+// Controls admission of prepared buffer registrations.
+enum iree_async_buffer_registration_flag_bits_t {
+  IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE = 0u,
+  // Preparation or cloning may return OK with no entry when native registration
+  // is unavailable or its pin/descriptor/slot budget is exhausted. The caller
+  // can use an ordinary host span instead. Invalid inputs, metadata allocation
+  // failures, and subsequent attachment/detachment failures remain errors.
+  IREE_ASYNC_BUFFER_REGISTRATION_FLAG_OPTIONAL = 1u << 0,
+};
+typedef uint32_t iree_async_buffer_registration_flags_t;
+
 // Cleanup function for registration entries.
 // Called when the owning buffer is destroyed or explicitly unregistered.
 // Has no failure return. Kernel ownership must be settled before the referenced

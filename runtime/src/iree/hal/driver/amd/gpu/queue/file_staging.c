@@ -716,7 +716,7 @@ static void iree_hal_amd_gpu_file_staging_attach_view(
           view->bucket->proactor, &registrations, block->preparation,
           IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
               IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
-          &view->registration);
+          IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &view->registration);
       if (iree_status_is_ok(status)) {
         iree_slim_mutex_lock(&staging->mutex);
         view->registration->next = block->memory.registrations.head;
