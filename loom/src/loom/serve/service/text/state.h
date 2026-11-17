@@ -139,7 +139,8 @@ struct loom_serve_text_state_t {
   struct {
     // Free slot IDs; release follows retirement or completed capture.
     loom_runtime_block_pool_t pool;
-    // Owned arena subviews, stable through final queue retirement.
+    // Owned arena subviews, materialized on first use and cached until final
+    // queue retirement. Unused slot identities have no native view.
     iree_hal_buffer_t** buffers;
     // Number of rows with unpublished origins; zero skips the row scan.
     iree_host_size_t dirty_count;

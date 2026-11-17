@@ -1109,13 +1109,19 @@ TEST_F(SourceTextServiceTest, UnusedCheckpointsDoNotAllocateContextMaps) {
   options.pool_capacity = 262144;
   // Four-token pages permit 65536 map entries per checkpoint. Reserving those
   // entries for every unused endpoint would request 4 GiB or more at load.
-  for (const iree_host_size_t count : {16384u, 65536u, 65537u}) {
+  int64_t small_capacity_allocations = 0;
+  for (const iree_host_size_t count : {2u, 16384u, 65536u, 65537u}) {
     SCOPED_TRACE(count);
     options.checkpoint_capacity = count;
     allocations.rejected_bytes.store(0);
     loom_serve_text_model_t* model = nullptr;
     IREE_ASSERT_OK(loom_serve_text_model_allocate(device_, storage_owner_,
                                                   &options, allocator, &model));
+    if (count == 2) {
+      small_capacity_allocations = allocations.live_count.load();
+    } else {
+      EXPECT_LE(allocations.live_count.load(), small_capacity_allocations);
+    }
     const int32_t tokens[] = {0, 1, 2, 0};
     auto* row = loom_serve_text_model_row(model, 0);
     IREE_ASSERT_OK(
