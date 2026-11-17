@@ -1451,7 +1451,7 @@ def _instruction_classes(
     )
     result = [InstructionClass.VECTOR_ALU if is_vector else InstructionClass.SCALAR_ALU]
     if has_property(form, "isMoveImm") or spec.semantic_tag.startswith(
-        "register.move."
+        ("register.move.", "integer.splat.")
     ):
         result.append(InstructionClass.REGISTER_MOVE)
     return tuple(result)

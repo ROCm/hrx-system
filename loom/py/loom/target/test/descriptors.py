@@ -69,6 +69,10 @@ from loom.target.low_descriptors import (
     StorageLeaseReleaseScope,
     TimingEvent,
 )
+from loom.target.test.register_transport import (
+    TEST_REGISTER_TRANSPORT_CLASSES,
+    TEST_REGISTER_TRANSPORT_DESCRIPTORS,
+)
 
 _REG_I32 = "test.i32"
 _REG_I8 = "test.i8"
@@ -3035,6 +3039,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             ),
             physical_registers=("test.r0",),
         ),
+        *TEST_REGISTER_TRANSPORT_CLASSES,
     ),
     physical_registers=(
         PhysicalRegister("test.r0", (1,)),
@@ -3341,6 +3346,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_RECOLOR_CONSUME_DESCRIPTOR,
         TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
         TEST_LOW_REMATERIALIZE_SPILLABLE_EXPLICIT32_DESCRIPTOR,
+        *TEST_REGISTER_TRANSPORT_DESCRIPTORS,
         TEST_LOW_REMATERIALIZE_EXPLICIT32_DESCRIPTOR,
         TEST_LOW_REMATERIALIZE_TIED_EXPLICIT32_DESCRIPTOR,
         TEST_LOW_STREAM_STEP_I32_DESCRIPTOR,

@@ -393,3 +393,131 @@ low.func.def target<test.low.core>(@target) @loop_register_constant(%again: reg<
 ^exit:
   return %sum
 }
+
+// ====
+
+// Two 32-bit units and one 64-bit unit carry the same bits. A detached copy
+// requires reconstructing the complete constant recipe; replaying only the
+// copy would undo its lifetime separation from the original wide value.
+// RUN: with-low-asm pass low-materialize-allocation{budgets=test.i64=1}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @equal_bit_transport(%other: reg<test.i32 x2>) -> (reg<test.i32 x2>, reg<test.i32 x2>) asm {
+  %word0 = test.const.i32 11
+  %word1 = test.const.i32 12
+  %pair = concat(%word0, %word1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %wide = test.move.pair.to.wide %pair
+  %saved = copy %wide {detached = true} : reg<test.i64> -> reg<test.i64>
+  low.br ^work
+^work:
+  %temporary = test.move.pair.to.wide %other
+  %output = test.move.wide.to.pair %temporary
+  low.br ^consume
+^consume:
+  %result = test.move.wide.to.pair %saved
+  return %output, %result
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @equal_bit_transport(%other: reg<test.i32 x2>) -> (reg<test.i32 x2>, reg<test.i32 x2>) asm {
+  low.br ^work
+^work:
+  %temporary = test.move.pair.to.wide %other
+  %output = test.move.wide.to.pair %temporary
+  low.br ^consume
+^consume:
+  %word0_remat = test.const.i32 11
+  %word1_remat = test.const.i32 12
+  %pair_remat = concat(%word0_remat, %word1_remat) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %wide_remat = test.move.pair.to.wide %pair_remat
+  %saved_remat = copy %wide_remat {detached = true} : reg<test.i64> -> reg<test.i64>
+  %result = test.move.wide.to.pair %saved_remat
+  return %output, %result
+}
+
+// ====
+
+// One 64-bit unit narrowed to one 32-bit unit is a proper subrange, despite
+// equal unit counts. Reconstructing a detached copy would also replay the wide
+// recipe, so it retains its spill instead of multiplying wider setup work.
+// RUN: with-low-asm pass low-materialize-allocation{budgets=test.i32=1}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @narrow_bit_transport(%other: reg<test.i64>) -> (reg<test.i64>, reg<test.i64>) asm {
+  %literal = test.const.i32 11
+  %wide = test.move.word.to.wide %literal
+  %word = test.move.wide.to.word %wide
+  %saved = copy %word {detached = true} : reg<test.i32> -> reg<test.i32>
+  low.br ^work
+^work:
+  %temporary = test.move.wide.to.word %other
+  %output = test.move.word.to.wide %temporary
+  low.br ^consume
+^consume:
+  %result = test.move.word.to.wide %saved
+  return %output, %result
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @narrow_bit_transport(%other: reg<test.i64>) -> (reg<test.i64>, reg<test.i64>) asm {
+  %narrow_bit_transport_spill_storage_0 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %literal = test.const.i32 11
+  %wide = test.move.word.to.wide %literal
+  %word = test.move.wide.to.word %wide
+  %saved = copy %word {detached = true} : reg<test.i32> -> reg<test.i32>
+  low.spill %saved, %narrow_bit_transport_spill_storage_0 : reg<test.i32>, low.storage<private>
+  low.br ^work
+^work:
+  %temporary = test.move.wide.to.word %other
+  %output = test.move.word.to.wide %temporary
+  low.br ^consume
+^consume:
+  %11 = low.reload %narrow_bit_transport_spill_storage_0 : low.storage<private> -> reg<test.i32>
+  %result = test.move.word.to.wide %11
+  return %output, %result
+}
+
+// ====
+
+// A subword register still transfers a full memory word. Moving a word-sized
+// constant into it does not amplify storage traffic when reconstructed.
+// RUN: with-low-asm pass low-materialize-allocation{budgets=test.index20=1}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @subword_transport(%other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %literal = test.const.i32 11
+  %index = test.move.word.to.index %literal
+  %saved = copy %index {detached = true} : reg<test.index20> -> reg<test.index20>
+  low.br ^work
+^work:
+  %temporary = test.move.word.to.index %other
+  %output = test.move.index.to.word %temporary
+  low.br ^consume
+^consume:
+  %result = test.move.index.to.word %saved
+  return %output, %result
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @subword_transport(%other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  low.br ^work
+^work:
+  %temporary = test.move.word.to.index %other
+  %output = test.move.index.to.word %temporary
+  low.br ^consume
+^consume:
+  %literal_remat = test.const.i32 11
+  %index_remat = test.move.word.to.index %literal_remat
+  %saved_remat = copy %index_remat {detached = true} : reg<test.index20> -> reg<test.index20>
+  %result = test.move.index.to.word %saved_remat
+  return %output, %result
+}

@@ -16,6 +16,7 @@ iree_py_library(
     srcs = [
         "__init__.py",
         "descriptors.py",
+        "register_transport.py",
     ],
     deps = [
         "//loom/py/loom:core",
