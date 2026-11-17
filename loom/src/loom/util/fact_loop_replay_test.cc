@@ -560,6 +560,26 @@ TEST_F(FactLoopDependencyTest, ReusedChildForwardsItsDependencies) {
   Visit(false, [&] { inner_query(false); });
 }
 
+TEST_F(FactLoopDependencyTest, OwnershipStorageIsReusedAcrossRootSolves) {
+  auto query = [&] { (void)loom_value_fact_table_lookup(&table_, inputs_[3]); };
+  Visit(false, query);
+  const auto* entries = table_.scratch.loop_owners.entries;
+  const uint32_t generation = table_.scratch.loop_owners.generation;
+  ASSERT_NE(entries, nullptr);
+
+  IREE_ASSERT_OK(
+      loom_value_fact_loop_replay_end(&table_, &outer_replay_, true));
+  iree_arena_reset(&solve_arena_);
+  bool reused = true;
+  IREE_ASSERT_OK(loom_value_fact_loop_replay_begin(
+      &table_, module_, outer_, &solve_arena_, &outer_replay_, &reused));
+  EXPECT_FALSE(reused);
+  Visit(false, query);
+
+  EXPECT_EQ(table_.scratch.loop_owners.entries, entries);
+  EXPECT_GT(table_.scratch.loop_owners.generation, generation);
+}
+
 TEST_F(FactLoopDependencyTest, AbsentAndPublishedUnknownAreDistinctInputs) {
   auto query = [&] {
     (void)loom_value_fact_table_has_entry(&table_, inputs_[3]);

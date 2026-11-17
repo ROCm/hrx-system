@@ -21,14 +21,17 @@ class FactLoopReadsTest : public ::testing::Test {
     iree_arena_block_pool_initialize(sizeof(iree_arena_block_t),
                                      {this, Allocate}, &pool_);
     iree_arena_initialize(&pool_, &arena_);
-    owners_ = {values_.data(), {1024, values_.size()}};
+    owners_ = {values_.data(),
+               {1024, values_.size()},
+               {1024, values_.size()},
+               kGeneration};
     reads_.owners = &owners_;
-    values_[0] = 1;
-    values_[1] = 4;
-    values_[63] = 5;
-    values_[64] = 6;
-    values_[128] = 2;
-    values_[192] = 3;
+    values_[0] = loom_value_fact_loop_owner_make(kGeneration, 1);
+    values_[1] = loom_value_fact_loop_owner_make(kGeneration, 4);
+    values_[63] = loom_value_fact_loop_owner_make(kGeneration, 5);
+    values_[64] = loom_value_fact_loop_owner_make(kGeneration, 6);
+    values_[128] = loom_value_fact_loop_owner_make(kGeneration, 2);
+    values_[192] = loom_value_fact_loop_owner_make(kGeneration, 3);
   }
 
   void TearDown() override {
@@ -55,7 +58,7 @@ class FactLoopReadsTest : public ::testing::Test {
   // Owns all collection buffers until the outer solve ends.
   iree_arena_allocator_t arena_ = {};
   // Root ownership includes a parent, siblings, a descendant, and absent IDs.
-  std::array<uint32_t, 193> values_ = {};
+  std::array<loom_value_fact_loop_owner_t, 193> values_ = {};
   // Borrowed immutable root ownership shared by nested collectors.
   loom_value_fact_loop_owners_t owners_ = {};
   // Current loop and its one descendant.
@@ -64,6 +67,8 @@ class FactLoopReadsTest : public ::testing::Test {
   loom_value_fact_loop_reads_t reads_ = {};
   // Successful backing allocations permitted before injecting failure.
   size_t allocations_remaining_ = SIZE_MAX;
+  // Active root generation assigned to fixture ownership entries.
+  static constexpr uint32_t kGeneration = 7;
 };
 
 TEST_F(FactLoopReadsTest, QueriesRecordOnlyExternalMutableDefinitions) {
@@ -141,9 +146,25 @@ TEST_F(FactLoopReadsTest, NestedScopesObserveIndependentInputSets) {
   EXPECT_EQ(child.bits[3], 0u);
 }
 
+TEST_F(FactLoopReadsTest, PreviousRootEntriesAreNotCurrentDefinitions) {
+  ++owners_.generation;
+  IREE_ASSERT_OK(loom_value_fact_loop_reads_begin(&reads_, &subtree_, &arena_));
+  for (auto value : {1024u, 1088u, 1152u, 1216u}) {
+    loom_value_fact_loop_record_read(&reads_, value);
+  }
+  EXPECT_EQ(reads_.word_count, 0u);
+
+  values_[64] = loom_value_fact_loop_owner_make(owners_.generation, 6);
+  loom_value_fact_loop_record_read(&reads_, 1088);
+  EXPECT_EQ(reads_.word_count, 1u);
+  EXPECT_EQ(reads_.words[0], 1u);
+  EXPECT_EQ(reads_.bits[1], 1u);
+}
+
 TEST_F(FactLoopReadsTest, SparseHighIdsUseOnlyTheRootRange) {
-  owners_.range = {UINT32_MAX - 128, 128};
-  values_[127] = 1;
+  owners_.storage_range = {UINT32_MAX - 128, 128};
+  owners_.root_range = owners_.storage_range;
+  values_[127] = loom_value_fact_loop_owner_make(kGeneration, 1);
   IREE_ASSERT_OK(loom_value_fact_loop_reads_begin(&reads_, &subtree_, &arena_));
   for (auto value :
        {0u, UINT32_MAX - 129, UINT32_MAX - 128, UINT32_MAX - 1, UINT32_MAX}) {

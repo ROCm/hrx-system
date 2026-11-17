@@ -13,12 +13,34 @@
 extern "C" {
 #endif
 
+// Packed generation and nearest-loop ordinal for one indexed definition.
+typedef uint64_t loom_value_fact_loop_owner_t;
+
+static inline loom_value_fact_loop_owner_t loom_value_fact_loop_owner_make(
+    uint32_t generation, uint32_t ordinal) {
+  return ((uint64_t)generation << 32) | ordinal;
+}
+
+static inline uint32_t loom_value_fact_loop_owner_generation(
+    loom_value_fact_loop_owner_t owner) {
+  return (uint32_t)(owner >> 32);
+}
+
+static inline uint32_t loom_value_fact_loop_owner_ordinal(
+    loom_value_fact_loop_owner_t owner) {
+  return (uint32_t)owner;
+}
+
 // Ownership assigned once by the outer solve's immutable definition walk.
 typedef struct loom_value_fact_loop_owners_t {
-  // Nearest one-based loop ordinal per definition; zero denotes no owner.
-  uint32_t* values;
-  // Root definitions only; definitions outside this range cannot change.
-  loom_value_fact_range_t range;
+  // Scope-owned packed ownership entries indexed through storage_range.
+  const loom_value_fact_loop_owner_t* entries;
+  // Scope-wide value-ID range covering entries.
+  loom_value_fact_range_t storage_range;
+  // Current root definitions; definitions outside this range cannot change.
+  loom_value_fact_range_t root_range;
+  // Nonzero generation selecting entries written for the current root.
+  uint32_t generation;
 } loom_value_fact_loop_owners_t;
 
 // Contiguous preorder interval containing a loop and all of its descendants.
@@ -37,7 +59,7 @@ typedef struct loom_value_fact_loop_reads_t {
   const loom_value_fact_loop_owners_t* owners;
   // Borrowed active subtree, or NULL while the buffers are idle.
   const loom_value_fact_loop_subtree_t* subtree;
-  // Value-ID membership bits covering the root ownership range.
+  // Value-ID membership bits covering the current root range.
   uint64_t* bits;
   // Nonzero words, so clearing and publication visit only observed inputs.
   uint32_t* words;

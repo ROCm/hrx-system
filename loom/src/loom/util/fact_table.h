@@ -490,6 +490,15 @@ struct loom_value_fact_table_t {
       // Allocated bucket count, grown geometrically with alias cardinality.
       iree_host_size_t capacity;
     } alias_ordinals;
+    // Definition ownership reused across sequential structured-loop solves.
+    struct {
+      // Packed root generation and nearest-loop ordinal by value ID.
+      loom_value_fact_loop_owner_t* entries;
+      // Value-ID range covered by entries, retained for the populated scope.
+      loom_value_fact_range_t range;
+      // Nonzero generation assigned to the most recently indexed root.
+      uint32_t generation;
+    } loop_owners;
     // Lazily allocated query scratch for condition-loop edge projections.
     loom_value_fact_condition_scratch_t* condition;
   } scratch;

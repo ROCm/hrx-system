@@ -14,7 +14,7 @@ iree_status_t loom_value_fact_loop_reads_begin(
     iree_arena_allocator_t* arena) {
   if (!reads->bits) {
     const iree_host_size_t word_count =
-        (reads->owners->range.capacity + 63) / 64;
+        (reads->owners->root_range.capacity + 63) / 64;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         arena, word_count, sizeof(*reads->words), (void**)&reads->words));
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -27,16 +27,23 @@ iree_status_t loom_value_fact_loop_reads_begin(
 
 void loom_value_fact_loop_record_read(loom_value_fact_loop_reads_t* reads,
                                       loom_value_id_t value_id) {
-  if (!loom_value_fact_range_contains(reads->owners->range, value_id)) {
+  if (!loom_value_fact_range_contains(reads->owners->root_range, value_id)) {
+    return;
+  }
+  const iree_host_size_t storage_offset =
+      loom_value_fact_range_offset(reads->owners->storage_range, value_id);
+  const loom_value_fact_loop_owner_t entry =
+      reads->owners->entries[storage_offset];
+  if (loom_value_fact_loop_owner_generation(entry) !=
+      reads->owners->generation) {
+    return;
+  }
+  const uint32_t owner = loom_value_fact_loop_owner_ordinal(entry);
+  if (owner >= reads->subtree->ordinal && owner < reads->subtree->end) {
     return;
   }
   const iree_host_size_t offset =
-      loom_value_fact_range_offset(reads->owners->range, value_id);
-  const uint32_t owner = reads->owners->values[offset];
-  if (!owner ||
-      (owner >= reads->subtree->ordinal && owner < reads->subtree->end)) {
-    return;
-  }
+      loom_value_fact_range_offset(reads->owners->root_range, value_id);
   const uint32_t word = offset / 64;
   const uint64_t bit = UINT64_C(1) << (offset % 64);
   if (!reads->bits[word]) {

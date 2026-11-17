@@ -6,6 +6,8 @@
 
 #include "loom/util/fact_loop_replay.h"
 
+#include <string.h>
+
 #include "iree/base/internal/math.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
@@ -70,14 +72,32 @@ struct loom_value_fact_loop_replay_index_t {
   uint64_t withdrawal;
 };
 
+static void loom_value_fact_loop_range_include(loom_value_fact_range_t* range,
+                                               loom_value_id_t value) {
+  if (!range->capacity) {
+    *range = (loom_value_fact_range_t){value, 1};
+    return;
+  }
+  const loom_value_id_t first_value_id = iree_min(range->first_value_id, value);
+  const uint64_t end_value_id = iree_max(
+      (uint64_t)range->first_value_id + range->capacity, (uint64_t)value + 1);
+  range->first_value_id = first_value_id;
+  range->capacity = (iree_host_size_t)(end_value_id - first_value_id);
+}
+
 static iree_status_t loom_value_fact_loop_index_define(
     loom_value_fact_loop_replay_index_t* index, loom_value_id_t value,
     uint32_t owner) {
+  loom_value_fact_loop_range_include(&index->owners.root_range, value);
   IREE_RETURN_IF_ERROR(loom_value_fact_range_grow(
-      index->arena, value, sizeof(*index->owners.values), NULL,
-      &index->owners.range, (void**)&index->owners.values));
-  index->owners
-      .values[loom_value_fact_range_offset(index->owners.range, value)] = owner;
+      index->table->transient_arena, value,
+      sizeof(*index->table->scratch.loop_owners.entries), NULL,
+      &index->table->scratch.loop_owners.range,
+      (void**)&index->table->scratch.loop_owners.entries));
+  const iree_host_size_t offset = loom_value_fact_range_offset(
+      index->table->scratch.loop_owners.range, value);
+  index->table->scratch.loop_owners.entries[offset] =
+      loom_value_fact_loop_owner_make(index->owners.generation, owner);
   return iree_ok_status();
 }
 
@@ -156,8 +176,20 @@ static iree_status_t loom_value_fact_loop_index_initialize(
       .arena = root->arena,
       .table = table,
       .module = module,
+      .owners =
+          {
+              .generation = ++table->scratch.loop_owners.generation,
+          },
       .next_ordinal = 1,
   };
+  if (!index->owners.generation) {
+    if (table->scratch.loop_owners.range.capacity) {
+      memset(table->scratch.loop_owners.entries, 0,
+             table->scratch.loop_owners.range.capacity *
+                 sizeof(*table->scratch.loop_owners.entries));
+    }
+    index->owners.generation = table->scratch.loop_owners.generation = 1;
+  }
   IREE_RETURN_IF_ERROR(loom_value_fact_loop_index_op(index, root->op, 0));
   loom_region_t* const* regions = loom_op_regions(root->op);
   iree_status_t status = iree_ok_status();
@@ -177,6 +209,8 @@ static iree_status_t loom_value_fact_loop_index_initialize(
     record->subtree.end = index->next_ordinal;
   }
   index->walking = NULL;
+  index->owners.entries = table->scratch.loop_owners.entries;
+  index->owners.storage_range = table->scratch.loop_owners.range;
   return status;
 }
 
@@ -290,7 +324,7 @@ static iree_status_t loom_value_fact_loop_publish_inputs(
     const uint32_t word = reads->words[i];
     uint64_t bits = reads->bits[word];
     while (bits) {
-      const loom_value_id_t value = reads->owners->range.first_value_id +
+      const loom_value_id_t value = reads->owners->root_range.first_value_id +
                                     word * 64 +
                                     iree_math_count_trailing_zeros_u64(bits);
       bits &= bits - 1;
