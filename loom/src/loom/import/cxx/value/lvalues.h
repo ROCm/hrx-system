@@ -13,7 +13,7 @@
 #include <vector>
 
 #include "loom/import/cxx/value/bindings.h"
-#include "loom/import/cxx/value/storage.h"
+#include "loom/import/cxx/value/objects.h"
 
 namespace loom::cxx_import {
 
@@ -28,8 +28,9 @@ struct CurrentReceiver {
 struct ObjectLvalue {
   // Source object type retains qualifiers and storage access rules.
   const cxx::Type* type;
-  // An automatic SSA partition or an evaluated storage projection.
-  std::variant<Destination, StorageAccess, StorageProjection, CurrentReceiver>
+  // An automatic SSA partition or an evaluated physical/semantic projection.
+  std::variant<Destination, StorageAccess, StorageProjection,
+               ReferenceStorageProjection, CurrentReceiver>
       location;
 };
 

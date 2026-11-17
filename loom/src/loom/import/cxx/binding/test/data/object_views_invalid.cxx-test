@@ -5,6 +5,47 @@ struct Buffer;
 void route(loom::ptr<Buffer> value) {}
 
 // ====
+#include <loomcxx/object.h>
+struct [[loom::import("hal", "buffer")]] Buffer;
+// ERROR@+1: LOWERING/059 "object release requires an owning handle"
+[[loom::op("ref.release")]] void release(loom::ptr<Buffer> value);
+
+// ====
+#include <loomcxx/object.h>
+struct [[loom::import("hal", "buffer")]] Buffer;
+// ERROR@+1: LOWERING/059 "object duplication requires and preserves an owning handle"
+[[loom::op("ref.duplicate")]] loom::ptr<Buffer> duplicate(loom::ptr<Buffer> value);
+
+// ====
+#include <loomcxx/object.h>
+struct [[loom::import("hal", "buffer")]] Buffer;
+// ERROR@+1: LOWERING/059 "object operation must preserve payload identity and ownership"
+[[loom::op("ref.borrow")]] loom::ptr<Buffer> borrow(loom::ptr<Buffer> value);
+
+// ====
+#include <loomcxx/object.h>
+struct [[loom::import("hal", "buffer")]] Buffer;
+struct [[loom::import("hal", "semaphore")]] Semaphore;
+template <class T>
+struct [[loom::type("ref")]] Owner {
+  T* identity;
+};
+// ERROR@+1: LOWERING/059 "object duplication requires and preserves an owning handle"
+[[loom::op("ref.duplicate")]] Owner<Semaphore> duplicate(Owner<Buffer> value);
+
+// ====
+#include <loomcxx/object.h>
+struct [[loom::import("hal", "buffer")]] Buffer;
+struct [[loom::import("hal", "semaphore")]] Semaphore;
+template <class T>
+struct [[loom::type("ref")]] Owner {
+  T* identity;
+};
+// ERROR@+1: LOWERING/059 "object operation must preserve payload identity and ownership"
+[[loom::op("ref.compare.eq")]] bool equal(Owner<Buffer> left,
+                                          loom::ptr<Semaphore> right);
+
+// ====
 // ERROR@+1: LOWERING/059 "object imports require incomplete namespace-scope classes"
 struct [[loom::import("hal", "buffer")]] Buffer {};
 
@@ -28,7 +69,7 @@ struct [[loom::import("hal", "buffer\0trailing")]] Buffer;
 
 // ====
 #include <loomcxx/object.h>
-// ERROR@+1: LOWERING/059 "borrowed object handles require one imported payload class"
+// ERROR@+1: LOWERING/059 "object handles require one imported payload class"
 void route(loom::ptr<unsigned> value) {}
 
 // ====

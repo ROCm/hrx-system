@@ -4088,6 +4088,24 @@ CallPropagation ControlFlow::propagate_overlapping_indirect_parameters(
     return unit_.typeTraits().is_reference(parameter->type()) ||
            borrowed_pointer(parameter);
   };
+  auto transfers_owner = [&](cxx::Symbol* parameter) {
+    if (!unit_.typeTraits().is_reference(parameter->type())) {
+      return false;
+    }
+    // Parameter input facts are still converging while call aliases select
+    // identity. Querying them here can suppress selection before later call
+    // effects arrive, so any owning group is identity-sensitive during this
+    // fixed point. Only overlapping arguments materialize shared cells.
+    auto* object_type = types_.unqualified(
+        unit_.typeTraits().remove_reference(parameter->type()));
+    const auto groups = types_.projections(object_type, call.source);
+    return std::ranges::any_of(
+        groups, [](const auto& group) { return group.carries_owner; });
+  };
+  auto requires_shared_identity = [&](cxx::Symbol* parameter) {
+    return callee.indirect_parameter_written(parameter) ||
+           transfers_owner(parameter);
+  };
   auto select_storage = [&](size_t ordinal) {
     auto* parameter = parameters[ordinal];
     callee_changed =
@@ -4100,8 +4118,9 @@ CallPropagation ControlFlow::propagate_overlapping_indirect_parameters(
   };
 
   // A value-indirect call represents each mutable parameter as an independent
-  // result writeback. Overlapping source intervals require one shared storage
-  // identity so reads and writes observe the source language's aliasing order.
+  // result writeback and transports each managed owner through one argument.
+  // Overlapping source intervals require one shared storage identity so reads,
+  // writes, and owner transfer observe the source language's aliasing order.
   const size_t parameter_count =
       std::min(parameters.size(), call.arguments.size());
   size_t indirect_count = 0;
@@ -4109,7 +4128,7 @@ CallPropagation ControlFlow::propagate_overlapping_indirect_parameters(
   for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
     if (indirect_parameter(parameters[ordinal])) {
       ++indirect_count;
-      written_count += callee.indirect_parameter_written(parameters[ordinal]);
+      written_count += requires_shared_identity(parameters[ordinal]);
     }
   }
   const size_t alias_count = indirect_count + indexed_receiver;
@@ -4145,7 +4164,7 @@ CallPropagation ControlFlow::propagate_overlapping_indirect_parameters(
     for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
       if (indirect_parameter(parameters[ordinal])) {
         retain_alias(call.arguments[ordinal],
-                     callee.indirect_parameter_written(parameters[ordinal]));
+                     requires_shared_identity(parameters[ordinal]));
       }
     }
     if (indexed_receiver) {

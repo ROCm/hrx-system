@@ -175,6 +175,7 @@ void Intrinsics::declaration(cxx::FunctionSymbol* function,
                 !VectorMemoryIntrinsic::supports(
                     selected->arguments[0]->name()) &&
                 !AddressIntrinsic::supports(selected->arguments[0]->name()) &&
+                !ObjectIntrinsic::supports(selected->arguments[0]->name()) &&
                 !DecodeIntrinsic::supports(selected->arguments[0]->name()) &&
                 !AsyncIntrinsic::supports(selected->arguments[0]->name()) &&
                 !AtomicIntrinsic::supports(selected->arguments[0]->name()) &&
@@ -282,6 +283,10 @@ Intrinsics::Binding Intrinsics::resolve(cxx::FunctionSymbol* function,
   if (auto index = AddressIntrinsic::resolve(unit_, diagnostics_, types_,
                                              function, attribute, owner)) {
     return *index;
+  }
+  if (auto object = ObjectIntrinsic::resolve(unit_, diagnostics_, types_,
+                                             function, attribute, owner)) {
+    return *object;
   }
   if (auto* scalar =
           loom_cxx_scalar_binding_find(view(attribute.arguments[0]->name()))) {
@@ -623,6 +628,9 @@ IntrinsicCallResult Intrinsics::call(const Binding& admitted,
   }
   if (auto* channel = std::get_if<ChannelIntrinsic>(binding)) {
     return {channel->call(arguments, arena, builder, location)};
+  }
+  if (auto* object = std::get_if<ObjectIntrinsic>(binding)) {
+    return {object->call(arguments, arena, builder, location)};
   }
   if (auto* refinement = std::get_if<RefinementIntrinsic>(binding)) {
     return {refinement->call(arguments, arena, builder, location)};

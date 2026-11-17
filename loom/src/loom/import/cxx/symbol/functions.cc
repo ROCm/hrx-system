@@ -57,6 +57,61 @@ struct AnalysisScratch {
   ~AnalysisScratch() { iree_arena_deinitialize(&arena); }
 };
 
+// One source-derived value or one already-projected native signature value.
+// Native values are used only for compiler-selected reference-cell storage;
+// every ordinary value continues through the canonical source type binder.
+struct CallableSignatureEntry {
+  // Source type to flatten and bind, or null for one exact native type.
+  const cxx::Type* source_type;
+  // Exact native type when |source_type| is null.
+  loom_type_t native_type;
+};
+
+BoundSignature bind_callable_entries(
+    Types& types, std::span<const CallableSignatureEntry> entries,
+    cxx::AST* owner, loom_builder_t* builder,
+    SignatureIdentityRequirement identities) {
+  size_t component_count = 0;
+  bool requires_binding = identities == SignatureIdentityRequirement::Required;
+  for (const auto& entry : entries) {
+    if (entry.source_type) {
+      component_count +=
+          types.partition(entry.source_type, owner).component_count;
+      requires_binding |= types.requires_binding(entry.source_type, owner);
+    } else {
+      ++component_count;
+    }
+  }
+
+  BoundSignature result;
+  result.types.reserve(component_count);
+  if (requires_binding) {
+    result.identities.resize(component_count);
+    check(loom_builder_reserve_values(builder, component_count,
+                                      result.identities.data()));
+  }
+  size_t component_offset = 0;
+  for (const auto& entry : entries) {
+    if (!entry.source_type) {
+      result.types.push_back(entry.native_type);
+      ++component_offset;
+      continue;
+    }
+    const size_t count =
+        types.partition(entry.source_type, owner).component_count;
+    if (requires_binding) {
+      types.append_bound(
+          entry.source_type, owner,
+          std::span(result.identities).subspan(component_offset, count),
+          result.type_storage, result.types);
+    } else {
+      types.append(entry.source_type, owner, result.types);
+    }
+    component_offset += count;
+  }
+  return result;
+}
+
 std::string_view private_operator_name(cxx::FunctionSymbol* function) {
   auto* operator_id = cxx::name_cast<cxx::OperatorId>(function->name());
   if (!operator_id) {
@@ -549,11 +604,18 @@ void Functions::analyze(Types& types) {
            unit_.typeTraits().is_non_trivial_for_calls(parameter->type()) ||
            types.has_volatile_subobject(
                types.unqualified(parameter->type())))) {
+        // Reference-only objects retain their by-value callable ABI and gain
+        // frame-local semantic cells on entry. They have no valid byte-storage
+        // representation to pass by pointer.
+        const auto abi =
+            types.reference_storage(parameter->type(), function->declaration())
+                ? IndirectParameterABI::Value
+                : IndirectParameterABI::Storage;
         indirect_parameters.push_back({
             .ordinal = ordinal,
             .object_type = parameter->type(),
             .borrowed_pointer = false,
-            .abi = IndirectParameterABI::Storage,
+            .abi = abi,
             .mutable_access = false,
             .owned = true,
         });
@@ -572,38 +634,54 @@ void Functions::analyze(Types& types) {
           source_reference
               ? unit_.typeTraits().remove_reference(parameter->type())
               : borrowed_object_type;
+      const bool source_storage =
+          source_reference &&
+          (analysis->reference_requires_storage(parameter) ||
+           unit_.typeTraits().is_volatile(object_type) ||
+           unit_.typeTraits().is_array(object_type));
+      const auto abi =
+          !source_storage ? IndirectParameterABI::Value
+          : types.reference_storage(object_type, function->declaration())
+              ? IndirectParameterABI::ReferenceStorage
+              : IndirectParameterABI::Storage;
       indirect_parameters.push_back(
-          {ordinal, object_type, !source_reference,
-           (source_reference &&
-            (analysis->reference_requires_storage(parameter) ||
-             unit_.typeTraits().is_volatile(object_type) ||
-             unit_.typeTraits().is_array(object_type)))
-               ? IndirectParameterABI::Storage
-               : IndirectParameterABI::Value,
+          {ordinal, object_type, !source_reference, abi,
            analysis->indirect_parameter_written(parameter)});
       auto& indirect_parameter = indirect_parameters.back();
-      if (indirect_parameter.abi != IndirectParameterABI::Value || whole) {
+      if (indirect_parameter.abi != IndirectParameterABI::Value) {
         continue;
       }
       const auto groups = types.projections(types.unqualified(object_type),
                                             function->declaration());
+      auto input = [&](const auto& group) {
+        return whole || analysis->parameter_input(parameter, group);
+      };
+      auto output = [&](const auto& group) {
+        return (indirect_parameter.mutable_access &&
+                (whole || analysis->parameter_output(parameter, group))) ||
+               (group.carries_owner && input(group));
+      };
+      const bool transfers_ownership =
+          std::ranges::any_of(groups, [&](const auto& group) {
+            return group.carries_owner && input(group);
+          });
       const bool complete = std::ranges::all_of(groups, [&](const auto& group) {
-        return analysis->parameter_input(parameter, group) &&
-               (!indirect_parameter.mutable_access ||
-                analysis->parameter_output(parameter, group));
+        return input(group) &&
+               (!indirect_parameter.mutable_access || output(group));
       });
-      if (complete) {
+      if ((whole || complete) && !transfers_ownership) {
         continue;
       }
       auto projection = std::make_unique<ParameterProjection>();
       for (const auto& group : groups) {
-        if (analysis->parameter_input(parameter, group)) {
+        if (input(group)) {
           projection->inputs.push_back(group);
           projection->input_component_count += group.partition->component_count;
         }
-        if (indirect_parameter.mutable_access &&
-            analysis->parameter_output(parameter, group)) {
+        if (output(group)) {
           projection->outputs.push_back(group);
+          projection->output_component_count +=
+              group.partition->component_count;
         }
       }
       indirect_parameter.projection = std::move(projection);
@@ -658,17 +736,22 @@ void Functions::analyze(Types& types) {
       }
     };
     bool complete = true;
+    bool transfers_ownership = false;
     visit_groups([&](const auto& member, const auto& group, bool output) {
+      transfers_ownership |= group.carries_owner &&
+                             analysis->parameter_input(member.source, group) &&
+                             !function->isDestructor();
       complete &= analysis->parameter_input(member.source, group) &&
                   (!output || analysis->parameter_output(member.source, group));
     });
-    if (complete && !function->isConstructor()) {
+    if (complete && !function->isConstructor() && !transfers_ownership) {
       continue;
     }
     ParameterProjection projection;
     visit_groups([&](const auto& member, auto group, bool output) {
       const bool input = analysis->parameter_input(member.source, group);
       output &= analysis->parameter_output(member.source, group);
+      output |= group.carries_owner && input && !function->isDestructor();
       group.component_offset += member.component_offset;
       group.byte_offset += member.byte_offset();
       if (input) {
@@ -1593,7 +1676,13 @@ BoundSignature Functions::bind_callable_signature(
           "contracts; kernel parameters are supported");
     }
   }
-  std::vector<const cxx::Type*> sources;
+  std::vector<CallableSignatureEntry> entries;
+  auto append_source = [&](const cxx::Type* type) {
+    entries.push_back({type, {}});
+  };
+  auto append_native = [&](loom_type_t type) {
+    entries.push_back({nullptr, type});
+  };
   auto parameters = symbol->parameters();
   auto indirect_parameters = this->indirect_parameters(symbol);
   auto receiver = implicit_object(instance, source);
@@ -1615,18 +1704,18 @@ BoundSignature Functions::bind_callable_signature(
   const bool has_ordinary_result =
       !result_storage && !returns_void && !returns_receiver_alias &&
       !returns_parameter_alias && !returns_exact_projection;
-  sources.reserve(receiver.has_value() + parameters.size() +
+  entries.reserve(receiver.has_value() + parameters.size() +
                   has_ordinary_result + indirect_parameters.size() +
                   (receiver ? receiver->written_fields.size() : 0));
   size_t argument_count = 0;
   size_t receiver_argument_count = 0;
   if (result_storage) {
-    sources.push_back(unit_.typeTraits().add_pointer(signature->returnType()));
+    append_source(unit_.typeTraits().add_pointer(signature->returnType()));
     argument_count = kPointerPartition.component_count;
   }
   if (receiver && receiver->projection) {
     for (const auto& group : receiver->projection->inputs) {
-      sources.push_back(group.type);
+      append_source(group.type);
     }
     receiver_argument_count = receiver->projection->input_component_count;
     argument_count += receiver_argument_count;
@@ -1635,7 +1724,7 @@ BoundSignature Functions::bind_callable_signature(
         receiver->abi == ImplicitObjectABI::Value
             ? types.unqualified(receiver->object_type)
             : unit_.typeTraits().add_pointer(receiver->object_type);
-    sources.push_back(receiver_type);
+    append_source(receiver_type);
     receiver_argument_count =
         types.partition(receiver_type, source).component_count;
     argument_count += receiver_argument_count;
@@ -1664,23 +1753,28 @@ BoundSignature Functions::bind_callable_signature(
                           "volatile object transport requires a source "
                           "function definition");
     }
-    auto* value_type =
-        !is_indirect ? types.unqualified(parameter->type())
-        : indirect_parameters[indirect_parameter_index].abi ==
-                IndirectParameterABI::Storage
-            ? unit_.typeTraits().add_pointer(
-                  indirect_parameters[indirect_parameter_index].object_type)
-            : types.unqualified(
-                  indirect_parameters[indirect_parameter_index].object_type);
-    if (is_indirect &&
-        indirect_parameters[indirect_parameter_index].projection) {
-      for (const auto& group :
-           indirect_parameters[indirect_parameter_index].projection->inputs) {
-        sources.push_back(group.type);
+    const auto* indirect =
+        is_indirect ? &indirect_parameters[indirect_parameter_index] : nullptr;
+    if (indirect && indirect->abi == IndirectParameterABI::ReferenceStorage) {
+      const auto* layout =
+          types.reference_storage(indirect->object_type, source);
+      IREE_ASSERT(layout);
+      for (auto cell_type : layout->cell_types) {
+        append_native(cell_type);
+      }
+      argument_count += layout->cell_types.size();
+    } else if (indirect && indirect->projection) {
+      for (const auto& group : indirect->projection->inputs) {
+        append_source(group.type);
         argument_count += group.partition->component_count;
       }
     } else {
-      sources.push_back(value_type);
+      auto* value_type =
+          !indirect ? types.unqualified(parameter->type())
+          : indirect->abi == IndirectParameterABI::Storage
+              ? unit_.typeTraits().add_pointer(indirect->object_type)
+              : types.unqualified(indirect->object_type);
+      append_source(value_type);
       argument_count += types.partition(value_type, source).component_count;
     }
     indirect_parameter_index += is_indirect;
@@ -1706,34 +1800,34 @@ BoundSignature Functions::bind_callable_signature(
       result_type = unit_.typeTraits().add_pointer(
           unit_.typeTraits().remove_reference(result_type));
     }
-    sources.push_back(result_type);
+    append_source(result_type);
     ordinary_result_count =
         types.partition(result_type, source).component_count;
   }
   if (receiver && receiver->projection) {
     for (const auto& group : receiver->projection->outputs) {
-      sources.push_back(group.type);
+      append_source(group.type);
     }
   } else if (receiver && receiver->abi == ImplicitObjectABI::Value) {
     for (auto* field : receiver->written_fields) {
-      sources.push_back(types.unqualified_value(source_object_type(field)));
+      append_source(types.unqualified_value(source_object_type(field)));
     }
   }
   for (const auto& indirect_parameter : indirect_parameters) {
     if (indirect_parameter.abi == IndirectParameterABI::Value &&
-        indirect_parameter.mutable_access) {
+        indirect_parameter.requires_writeback()) {
       if (indirect_parameter.projection) {
         for (const auto& group : indirect_parameter.projection->outputs) {
-          sources.push_back(group.type);
+          append_source(group.type);
         }
       } else {
-        sources.push_back(types.unqualified(indirect_parameter.object_type));
+        append_source(types.unqualified(indirect_parameter.object_type));
       }
     }
   }
   const bool has_predicates = function_contracts_.has_predicates(symbol);
-  auto callable = bind_signature(
-      types, sources, source, builder,
+  auto callable = bind_callable_entries(
+      types, entries, source, builder,
       has_predicates ? SignatureIdentityRequirement::Required
                      : SignatureIdentityRequirement::DependentTypes);
   if (!access_ranges.empty()) {
@@ -1771,9 +1865,11 @@ BoundSignature Functions::bind_callable_signature(
       const bool indirect =
           indirect_index < indirect_parameters.size() &&
           indirect_parameters[indirect_index].ordinal == ordinal;
+      const auto indirect_abi = indirect
+                                    ? indirect_parameters[indirect_index].abi
+                                    : IndirectParameterABI::Value;
       const bool storage =
-          indirect && indirect_parameters[indirect_index].abi ==
-                          IndirectParameterABI::Storage;
+          indirect && indirect_abi != IndirectParameterABI::Value;
       const size_t count =
           types
               .partition(types.unqualified_value(parameters[ordinal]->type()),
@@ -1782,7 +1878,9 @@ BoundSignature Functions::bind_callable_signature(
       if (storage) {
         projected_predicate_identities.insert(
             projected_predicate_identities.end(), count, LOOM_VALUE_ID_INVALID);
-        native_offset += kPointerPartition.component_count;
+        native_offset += indirect_abi == IndirectParameterABI::ReferenceStorage
+                             ? count
+                             : kPointerPartition.component_count;
       } else {
         auto identities = predicate_identities.subspan(native_offset, count);
         projected_predicate_identities.insert(

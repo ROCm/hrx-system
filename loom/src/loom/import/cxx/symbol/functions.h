@@ -89,6 +89,8 @@ struct ImplicitObjectParameter {
 enum class IndirectParameterABI {
   // Nonescaping referent transported as flattened values with exact writeback.
   Value,
+  // Nonescaping managed referent transported through typed reference cells.
+  ReferenceStorage,
   // Durable identity transported as the existing buffer-plus-offset pointer.
   Storage,
 };
@@ -110,6 +112,11 @@ struct ParameterProjection {
 // indexed by semantic ordinal so redeclarations need not share parameter
 // symbol identities.
 struct IndirectParameter {
+  // Functional transport may replace an unchanged owner identity without
+  // permitting source mutation through a const reference.
+  bool requires_writeback() const {
+    return mutable_access || (projection && !projection->outputs.empty());
+  }
   // Ordinal in the source function parameter list.
   size_t ordinal;
   // Complete object transported by the selected indirect ABI.
@@ -119,12 +126,13 @@ struct IndirectParameter {
   bool borrowed_pointer;
   // Native identity transport selected by the retained callable analysis.
   IndirectParameterABI abi;
-  // Whether a value ABI callee returns and the caller writes back the result.
+  // Whether source code may change the referent, independently of ownership
+  // transfer through a value ABI call.
   bool mutable_access;
   // Sparse source contract, absent when the complete existing ABI is needed.
   std::unique_ptr<const ParameterProjection> projection;
   // A by-value object constructed by the caller and destroyed by the callee.
-  // Its storage ABI preserves construction identity without a value writeback.
+  // Its selected local storage preserves identity without a value writeback.
   bool owned = false;
 };
 

@@ -114,7 +114,7 @@ class Translator final : private Initialization::Evaluation {
         template_definitions_(unit, diagnostics),
         vectors_(unit, diagnostics, types_, scalars_, locations_, builder_),
         storage_(unit, diagnostics, types_, scalars_, locations_, builder_),
-        objects_(unit, types_, storage_, value_arena_),
+        objects_(unit, types_, storage_, value_arena_, locations_, builder_),
         initialization_(unit, diagnostics, types_, scalars_, vectors_, storage_,
                         objects_, value_arena_, locations_, builder_, *this),
         launches_(unit, diagnostics),
@@ -779,6 +779,10 @@ class Translator final : private Initialization::Evaluation {
         destroy_storage(local_object(active.binding, active.source),
                         source_object_type(active.binding), active.destruction,
                         active.source);
+      } else if (auto reference = reference_locals_.find(active.binding);
+                 reference != reference_locals_.end()) {
+        destroy_value(objects_.take(reference->second, active.source),
+                      active.destruction, active.source);
       } else {
         destroy_binding(active.binding, active.destruction, active.source);
       }
@@ -1177,7 +1181,7 @@ class Translator final : private Initialization::Evaluation {
     }
     for (const auto& parameter : current_function_.indirect_parameters) {
       if (parameter.abi == IndirectParameterABI::Value &&
-          parameter.mutable_access) {
+          parameter.requires_writeback()) {
         if (parameter.projection) {
           for (const auto& group : parameter.projection->outputs) {
             sources.push_back(group.type);
@@ -1210,7 +1214,7 @@ class Translator final : private Initialization::Evaluation {
     auto parameters = current_function_.source->symbol->parameters();
     for (const auto& parameter : current_function_.indirect_parameters) {
       if (parameter.abi == IndirectParameterABI::Value &&
-          parameter.mutable_access) {
+          parameter.requires_writeback()) {
         if (parameter.projection) {
           for (const auto& group : parameter.projection->outputs) {
             auto value =
@@ -1640,6 +1644,7 @@ class Translator final : private Initialization::Evaluation {
     auto saved = loom_builder_enter_region(&builder_, op, region);
     values_.clear();
     locals_.clear();
+    reference_locals_.clear();
     active_destructions_.clear();
     temporary_destructions_.clear();
     temporary_results_.clear();
@@ -1720,6 +1725,28 @@ class Translator final : private Initialization::Evaluation {
               parameter_index) {
         indirect = &defined.indirect_parameters[indirect_index++];
       }
+      if (indirect && indirect->abi == IndirectParameterABI::ReferenceStorage) {
+        const auto* layout =
+            types_.reference_storage(indirect->object_type, defined.source);
+        IREE_ASSERT(layout);
+        auto* block = loom_region_entry_block(region);
+        auto arguments =
+            std::span<const loom_value_id_t>(block->arg_ids, block->arg_count)
+                .subspan(argument_index, layout->cell_types.size());
+        argument_index += layout->cell_types.size();
+        auto storage = objects_.admit_reference(*layout, arguments);
+        auto parameter_name = cxx::to_string(parameter->name());
+        for (size_t index = 0; index < arguments.size(); ++index) {
+          name(arguments[index],
+               arguments.size() == 1
+                   ? parameter_name
+                   : parameter_name + "_cell" + std::to_string(index));
+        }
+        references_[parameter] = {
+            ObjectLvalue{indirect->object_type, std::move(storage)}};
+        ++parameter_index;
+        continue;
+      }
       auto* value_type =
           !indirect ? types_.unqualified(parameter->type())
           : indirect->abi == IndirectParameterABI::Storage
@@ -1788,6 +1815,25 @@ class Translator final : private Initialization::Evaluation {
         value = storage_.root(buffer, defined.source);
       }
       value = name(value, cxx::to_string(parameter->name()));
+      if (indirect && indirect->owned &&
+          indirect->abi == IndirectParameterABI::Value) {
+        const auto* layout =
+            types_.reference_storage(indirect->object_type, defined.source);
+        IREE_ASSERT(layout);
+        auto storage =
+            objects_.allocate_reference(*layout, value, defined.source);
+        auto parameter_name = cxx::to_string(parameter->name());
+        for (size_t index = 0; index < storage.storage->cells.size(); ++index) {
+          name(storage.storage->cells[index],
+               storage.storage->cells.size() == 1
+                   ? parameter_name + "_cell"
+                   : parameter_name + "_cell" + std::to_string(index));
+        }
+        reference_locals_.emplace(parameter, std::move(storage));
+        activate_automatic_destruction(parameter, defined.source);
+        ++parameter_index;
+        continue;
+      }
       if (indirect && indirect->abi == IndirectParameterABI::Storage) {
         auto projection = storage_.project(
             value.pointer(), indirect->object_type, defined.source);
@@ -1995,6 +2041,11 @@ class Translator final : private Initialization::Evaluation {
   }
 
   Value binding(cxx::Symbol* symbol, cxx::AST* owner) {
+    if (auto found = reference_locals_.find(symbol);
+        found != reference_locals_.end()) {
+      return name(objects_.load(found->second, owner),
+                  cxx::to_string(symbol->name()));
+    }
     auto found = locals_.find(symbol);
     if (found == locals_.end()) {
       if (!values_.initialized(symbol)) {
@@ -2095,6 +2146,45 @@ class Translator final : private Initialization::Evaluation {
         initializer || record_constructor_call ||
         control_->default_constructor_initializes(variable->constructor());
     if (control_->storage_backed(variable)) {
+      if (const auto* layout =
+              types_.reference_storage(variable->type(), owner)) {
+        if (!requires_initialization) {
+          fail(owner,
+               "reference-cell objects require source initialization before "
+               "their identity is observed");
+        }
+        types_.partition(variable->type(), owner);
+        auto* folded_constant = folded_variable_constant(variable);
+        if (!folded_constant &&
+            types_.address_domain(types_.unqualified(variable->type()),
+                                  owner) == LOOM_SCALAR_TYPE_NONE) {
+          types_.admit_construction(variable->constructor(), variable->type(),
+                                    owner);
+        }
+        auto value = apply_constexpr_contract(
+            folded_constant ? initialization_.constant(*folded_constant,
+                                                       variable->type(), owner)
+            : record_constructor_call
+                ? initialization_.value(variable->type(), initializer,
+                                        variable->constructor(), owner)
+            : initializer
+                ? expression(initializer)
+                : initialization_.value(variable->type(), nullptr,
+                                        variable->constructor(), owner),
+            constexpr_contract);
+        adopt_temporary_result(initializer);
+        auto storage = objects_.allocate_reference(*layout, value, owner);
+        auto spelling = cxx::to_string(variable->name());
+        for (size_t index = 0; index < storage.storage->cells.size(); ++index) {
+          name(storage.storage->cells[index],
+               storage.storage->cells.size() == 1
+                   ? spelling + "_cell"
+                   : spelling + "_cell" + std::to_string(index));
+        }
+        reference_locals_.emplace(variable, std::move(storage));
+        activate_automatic_destruction(variable, owner);
+        return;
+      }
       auto contents =
           unit_.typeTraits().is_volatile(variable->type())
               ? std::nullopt
@@ -2791,6 +2881,38 @@ class Translator final : private Initialization::Evaluation {
                  owner);
   }
 
+  std::optional<ReferenceStorageProjection> reference_storage_projection(
+      cxx::ExpressionAST* expression) {
+    expression = unwrap_object_identity(unit_, expression);
+    if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
+      if (auto found = reference_locals_.find(id->symbol);
+          found != reference_locals_.end()) {
+        return found->second;
+      }
+      auto found = references_.find(id->symbol);
+      if (found == references_.end() || found->second.selection()) {
+        return std::nullopt;
+      }
+      const auto* object = std::get_if<ObjectLvalue>(&found->second.projection);
+      const auto* retained =
+          object ? std::get_if<ReferenceStorageProjection>(&object->location)
+                 : nullptr;
+      return retained ? std::optional(*retained) : std::nullopt;
+    }
+    auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression);
+    if (!member || member->accessOp != cxx::TokenKind::T_DOT ||
+        member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
+      return std::nullopt;
+    }
+    auto base = reference_storage_projection(member->baseExpression);
+    if (!base) {
+      return std::nullopt;
+    }
+    const auto& selected = types_.selection(member, member);
+    return objects_.project_reference(std::move(*base), *selected.partition,
+                                      selected.component_offset);
+  }
+
   ObjectLvalue object_destination(
       cxx::ExpressionAST* expression, cxx::AST* owner,
       LvalueAccess access = LvalueAccess::Write,
@@ -2830,6 +2952,33 @@ class Translator final : private Initialization::Evaluation {
             return {target_type, object_address(expression)};
           }
           return {target_type, address(expression)};
+        }
+      }
+      if (auto found = reference_locals_.find(destination->binding);
+          found != reference_locals_.end()) {
+        auto projection = found->second;
+        if (destination->member) {
+          projection = objects_.project_reference(
+              std::move(projection), *destination->member,
+              destination->component_offset);
+        }
+        return {expression->type, std::move(projection)};
+      }
+      if (auto found = references_.find(destination->binding);
+          found != references_.end() && !found->second.selection()) {
+        const auto* object =
+            std::get_if<ObjectLvalue>(&found->second.projection);
+        const auto* retained =
+            object ? std::get_if<ReferenceStorageProjection>(&object->location)
+                   : nullptr;
+        if (retained) {
+          auto projection = *retained;
+          if (destination->member) {
+            projection = objects_.project_reference(
+                std::move(projection), *destination->member,
+                destination->component_offset);
+          }
+          return {expression->type, std::move(projection)};
         }
       }
       if (!locals_.contains(destination->binding)) {
@@ -2882,6 +3031,10 @@ class Translator final : private Initialization::Evaluation {
     if (auto* object = std::get_if<StorageProjection>(&target.location)) {
       return objects_.load(*object, target.type, owner);
     }
+    if (auto* object =
+            std::get_if<ReferenceStorageProjection>(&target.location)) {
+      return objects_.load(*object, owner);
+    }
     return storage_.load(std::get<StorageAccess>(target.location), target.type,
                          owner);
   }
@@ -2907,6 +3060,9 @@ class Translator final : private Initialization::Evaluation {
     } else if (auto* object =
                    std::get_if<StorageProjection>(&target.location)) {
       objects_.store(*object, value, target.type, owner);
+    } else if (auto* object =
+                   std::get_if<ReferenceStorageProjection>(&target.location)) {
+      objects_.store(*object, value, owner);
     } else {
       storage_.store(std::get<StorageAccess>(target.location), value.ssa(),
                      target.type, owner);
@@ -2949,6 +3105,12 @@ class Translator final : private Initialization::Evaluation {
       return {
           ObjectLvalue{element_type,
                        storage_.element(*storage, array.source, index, owner)}};
+    }
+    if (const auto* storage =
+            std::get_if<ReferenceStorageProjection>(&object->location)) {
+      return {ObjectLvalue{element_type,
+                           objects_.project_reference(*storage, *array.element,
+                                                      component_offset)}};
     }
     fail(owner, "array element lost its retained source owner");
   }
@@ -3641,7 +3803,8 @@ class Translator final : private Initialization::Evaluation {
       }
       const auto& object = alternative.object();
       if (std::holds_alternative<StorageAccess>(object.location) ||
-          std::holds_alternative<StorageProjection>(object.location)) {
+          std::holds_alternative<StorageProjection>(object.location) ||
+          std::holds_alternative<ReferenceStorageProjection>(object.location)) {
         auto condition = combine_selection_condition(
             outer_condition, selection_condition(selected, ordinal, owner),
             owner);
@@ -3797,6 +3960,9 @@ class Translator final : private Initialization::Evaluation {
     // Admitted value structure of an indirect parameter, including read-only
     // ones.
     const Partition* indirect_partition = nullptr;
+    // Borrowed typed cells for a managed-reference parameter. The call passes
+    // these views directly and never returns an independent writeback value.
+    std::optional<ReferenceStorageProjection> reference_storage;
     // Unqualified value type of a mutable indirect parameter.
     const cxx::Type* writeback_type = nullptr;
     // Exact temporary construction evaluated for this argument.
@@ -3813,7 +3979,7 @@ class Translator final : private Initialization::Evaluation {
       adopt_temporary_result(argument);
       return {.value = value};
     }
-    if (indirect->owned) {
+    if (indirect->owned && indirect->abi == IndirectParameterABI::Storage) {
       auto allocation =
           storage_.allocate(indirect->object_type,
                             LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, argument);
@@ -3823,11 +3989,39 @@ class Translator final : private Initialization::Evaluation {
                              argument);
       return {.value = Value(object.pointer)};
     }
+    if (indirect->owned) {
+      auto value = expression(argument);
+      adopt_temporary_result(argument);
+      return {.value = value};
+    }
     auto* expected_type = types_.unqualified(indirect->object_type);
     const auto& expected_partition =
         indirect->abi == IndirectParameterABI::Storage
             ? kPointerPartition
             : types_.partition(expected_type, owner);
+    if (indirect->abi == IndirectParameterABI::ReferenceStorage) {
+      auto target = reference_lvalue(
+          argument, owner,
+          indirect->mutable_access ? LvalueAccess::Write : LvalueAccess::Read);
+      if (target.selection()) {
+        fail(argument,
+             "reference-cell arguments require one resolved source object");
+      }
+      auto* object = std::get_if<ObjectLvalue>(&target.projection);
+      auto* storage =
+          object ? std::get_if<ReferenceStorageProjection>(&object->location)
+                 : nullptr;
+      if (!storage) {
+        fail(argument,
+             "managed reference argument lost its typed cell identity");
+      }
+      auto retained_storage = *storage;
+      return {
+          .target = std::move(target),
+          .indirect_partition = &expected_partition,
+          .reference_storage = std::move(retained_storage),
+      };
+    }
     if (indirect->abi == IndirectParameterABI::Storage) {
       auto target = reference_lvalue(argument, argument, LvalueAccess::Read);
       return {
@@ -3874,7 +4068,8 @@ class Translator final : private Initialization::Evaluation {
         .value = value,
         .target = std::move(target),
         .indirect_partition = &expected_partition,
-        .writeback_type = indirect->mutable_access ? expected_type : nullptr,
+        .writeback_type =
+            indirect->requires_writeback() ? expected_type : nullptr,
         .temporary = temporary,
         .projection = indirect->projection.get(),
     };
@@ -3952,6 +4147,12 @@ class Translator final : private Initialization::Evaluation {
                                                        member->component_offset,
                                                    group.partition}}};
     }
+    if (auto* storage =
+            std::get_if<ReferenceStorageProjection>(&object->location)) {
+      return {ObjectLvalue{
+          group.type, objects_.project_reference(*storage, *group.partition,
+                                                 group.component_offset)}};
+    }
     if (group.component_offset == 0 &&
         group.partition ==
             &types_.partition(types_.unqualified_value(object->type), owner)) {
@@ -3973,7 +4174,7 @@ class Translator final : private Initialization::Evaluation {
 
   void materialize_call_argument(EvaluatedCallArgument& argument,
                                  cxx::AST* owner) {
-    if (argument.projection) {
+    if (argument.projection || argument.reference_storage) {
       return;
     }
     if (!argument.value) {
@@ -3993,7 +4194,13 @@ class Translator final : private Initialization::Evaluation {
                             std::vector<IndirectWriteback>& writebacks,
                             cxx::AST* owner) {
     const size_t argument_offset = receiver_argument_count + arguments.size();
-    if (argument.projection) {
+    if (argument.reference_storage) {
+      const auto& storage = *argument.reference_storage;
+      const auto cells = std::span(storage.storage->cells)
+                             .subspan(storage.component_offset,
+                                      storage.partition->component_count);
+      arguments.insert(arguments.end(), cells.begin(), cells.end());
+    } else if (argument.projection) {
       for (const auto& group : argument.projection->inputs) {
         auto input =
             argument.value
@@ -5235,7 +5442,9 @@ class Translator final : private Initialization::Evaluation {
     }
     if (returns_receiver_alias) {
       return {
-          .value = receiver_result ? *receiver_result : *receiver->value,
+          // A cell-backed receiver returns its retained lvalue without
+          // materializing an independent owner value.
+          .value = receiver_result ? receiver_result : receiver->value,
           .reference_target =
               receiver->current
                   ? Lvalue{ObjectLvalue{
@@ -5432,6 +5641,11 @@ class Translator final : private Initialization::Evaluation {
     for (size_t ordinal = 0; ordinal < evaluated_arguments.size(); ++ordinal) {
       auto& evaluated = evaluated_arguments[ordinal];
       if (return_parameter == ordinal) {
+        if (!evaluated.value) {
+          fail(call,
+               "functions cannot return a reference to borrowed reference "
+               "cells");
+        }
         reference_result_alias = {*evaluated.value, evaluated.target,
                                   receiver_argument_count + arguments.size(),
                                   evaluated.temporary};
@@ -6365,6 +6579,9 @@ class Translator final : private Initialization::Evaluation {
       if (values_.contains(id->symbol)) {
         fail(ast, "source value is read before initialization");
       }
+      if (reference_locals_.contains(id->symbol)) {
+        return binding(id->symbol, ast);
+      }
       if (locals_.contains(id->symbol)) {
         return binding(id->symbol, ast);
       }
@@ -6463,6 +6680,9 @@ class Translator final : private Initialization::Evaluation {
       if (is_array_element(member->baseExpression)) {
         return name(read(destination(member, ast, LvalueAccess::Read), ast),
                     cxx::to_string(member->symbol->name()));
+      }
+      if (auto retained = reference_storage_projection(member)) {
+        return read(ObjectLvalue{member->type, std::move(*retained)}, member);
       }
       if (control_->storage_backed(member) ||
           unit_.typeTraits().is_array(member->type)) {
@@ -7441,6 +7661,7 @@ class Translator final : private Initialization::Evaluation {
     if (auto* decision = condition_declaration(selection->condition)) {
       values_.erase(decision->symbol);
       locals_.erase(decision->symbol);
+      reference_locals_.erase(decision->symbol);
     }
     return flow;
   }
@@ -8195,6 +8416,7 @@ class Translator final : private Initialization::Evaluation {
       if (decision) {
         values_.erase(decision);
         locals_.erase(decision);
+        reference_locals_.erase(decision);
       }
       return;
     }
@@ -8249,6 +8471,7 @@ class Translator final : private Initialization::Evaluation {
     if (decision) {
       values_.erase(decision);
       locals_.erase(decision);
+      reference_locals_.erase(decision);
     }
   }
 
@@ -8798,7 +9021,8 @@ class Translator final : private Initialization::Evaluation {
   Storage storage_;
   // Immutable large source bindings, released after each function's maps.
   ValueArena value_arena_;
-  // Source-layout object snapshots share the callable value partitions.
+  // Source-layout snapshots and semantic reference cells share value
+  // partitions with callable transport.
   Objects objects_;
   // Aggregate clauses preserve in-place initialization and copy ordering.
   Initialization initialization_;
@@ -8835,6 +9059,10 @@ class Translator final : private Initialization::Evaluation {
   // Storage-backed automatic objects retain one allocation across direct and
   // aliased accesses. They are not mutable SSA bindings at region edges.
   std::unordered_map<cxx::Symbol*, StorageAllocation> locals_;
+  // Managed-reference automatic objects retain typed cells across aliases.
+  // Their source values never enter physical byte storage or region joins.
+  std::unordered_map<cxx::Symbol*, ReferenceStorageProjection>
+      reference_locals_;
   // Completed automatic objects and destructor subobjects active at the
   // current source insertion point, in construction order.
   std::vector<DestructionAction> active_destructions_;

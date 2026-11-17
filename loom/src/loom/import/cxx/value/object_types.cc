@@ -40,6 +40,7 @@ void Types::declare_object_import(cxx::ClassSymbol* source,
 }
 
 const ObjectPartition* Types::object(const cxx::ClassType* input,
+                                     loom_reference_ownership_t ownership,
                                      cxx::AST* owner) {
   auto* source = input->definition();
   if (auto found = objects_.find(source); found != objects_.end()) {
@@ -54,7 +55,7 @@ const ObjectPartition* Types::object(const cxx::ClassType* input,
       !source->baseClasses().empty() || !traits.is_trivially_copyable(input) ||
       !traits.has_trivial_destructor(input)) {
     diagnostics_.reject(unit_, owner,
-                        "borrowed object handles require a complete trivial "
+                        "object handle primitives require a complete trivial "
                         "class without bases");
   }
   auto arguments = source->templateArguments();
@@ -63,9 +64,8 @@ const ObjectPartition* Types::object(const cxx::ClassType* input,
                             cxx::template_argument_type(arguments[0]))
                       : nullptr;
   if (!payload) {
-    diagnostics_.reject(
-        unit_, owner,
-        "borrowed object handles require one imported payload class");
+    diagnostics_.reject(unit_, owner,
+                        "object handles require one imported payload class");
   }
   auto found = object_imports_.find(payload->symbol()->canonical());
   if (found == object_imports_.end()) {
@@ -77,7 +77,11 @@ const ObjectPartition* Types::object(const cxx::ClassType* input,
   result->kind = ValueKind::Object;
   result->component_count = 1;
   result->source = source;
-  result->type = found->second;
+  const auto identity = found->second;
+  result->type =
+      loom_type_reference(ownership, loom_type_reference_namespace_id(identity),
+                          loom_type_reference_name_id(identity),
+                          loom_type_reference_declaration_id(identity));
   auto* admitted = result.get();
   objects_.emplace(source, std::move(result));
   return admitted;

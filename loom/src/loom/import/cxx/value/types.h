@@ -28,7 +28,7 @@
 
 namespace loom::cxx_import {
 
-// A borrowed runtime object, identified independently of any native layout.
+// A runtime object handle, identified independently of any native layout.
 struct ObjectPartition final : Partition {
   // Complete source wrapper retaining trivial-copy semantics.
   cxx::ClassSymbol* source;
@@ -63,6 +63,9 @@ struct ValueProjection {
   // Physical displacement when the enclosing object admits native storage.
   // Semantic handles and reference snapshots use only the component offset.
   uint64_t byte_offset = 0;
+  // Passing this group transfers a managed owner. A C++ reference parameter
+  // must receive the current owner back even when its referent is unchanged.
+  bool carries_owner = false;
 };
 
 // Canonical source record structure, built once at admission. Members retain
@@ -193,6 +196,20 @@ class BoundTypeStorage {
   // Each node keeps one complete shaped-type payload at a stable address.
   std::forward_list<std::array<loom_overflow_dim_t, LOOM_TYPE_MAX_RANK>>
       dimension_payloads_;
+};
+
+// Static columnar storage for a source value represented entirely by managed
+// references. Each flattened source component has one rank-one cell view;
+// source records and arrays retain their ordinary component ordering.
+struct ReferenceStorageLayout {
+  // Complete source value reconstructed by loads from the component cells.
+  const Partition* value_partition;
+  // Exact managed-reference element types in flattened source order.
+  std::vector<loom_type_t> element_types;
+  // Rank-one cell-view types in the same order as |element_types|.
+  std::vector<loom_type_t> cell_types;
+  // Stable out-of-line reference-view payloads owned with this layout.
+  BoundTypeStorage type_storage;
 };
 
 // Bounded shaped-value extents with the former rank-two representation inline.
@@ -461,6 +478,10 @@ class Types {
   // Whether this source type contains handles without a native byte-storage
   // representation. Native objects retain their ordinary storage semantics.
   bool requires_value_transport(const cxx::Type* input);
+  // Returns columnar reference-cell storage when every flattened component is
+  // a managed ref or ptr. Other semantic values have no such representation.
+  const ReferenceStorageLayout* reference_storage(const cxx::Type* input,
+                                                  cxx::AST* owner);
   // Whether this object or an owned subobject is volatile. References and
   // pointers do not inherit the properties of the objects they designate.
   bool has_volatile_subobject(const cxx::Type* input);
@@ -600,7 +621,9 @@ class Types {
   ObjectProperties object_properties(const cxx::Type* input);
   void require_record_storage(const cxx::ClassType* input, cxx::AST* owner);
   const Partition* special(const cxx::Type* input, cxx::AST* owner);
-  const ObjectPartition* object(const cxx::ClassType* input, cxx::AST* owner);
+  const ObjectPartition* object(const cxx::ClassType* input,
+                                loom_reference_ownership_t ownership,
+                                cxx::AST* owner);
   const BufferPartition* buffer(const cxx::ClassType* input, cxx::AST* owner);
   const AddressPartition* address(const cxx::ClassType* input,
                                   loom_scalar_type_t element_type,
@@ -712,6 +735,10 @@ class Types {
   // Flattened construction groups computed once by source type admission.
   std::unordered_map<const cxx::Type*, std::vector<ValueProjection>>
       construction_groups_;
+  // Reference-only source values admitted to typed cell storage. Null entries
+  // memoize source values containing a non-reference component.
+  std::unordered_map<const cxx::Type*, std::unique_ptr<ReferenceStorageLayout>>
+      reference_storage_layouts_;
 };
 
 }  // namespace loom::cxx_import
