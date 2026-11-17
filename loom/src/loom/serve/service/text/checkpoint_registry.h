@@ -14,12 +14,11 @@
 extern "C" {
 #endif
 
-// One named immutable endpoint. The serialized model owner mutates the record;
-// a preparation job may borrow its canonical history until CPU release. Native
-// branches retain independent state references after their admission.
+// One immutable endpoint shared by named checkpoints and detached sessions.
+// The serialized model owner mutates the record; a preparation job may borrow
+// its canonical history until CPU release. Native branches retain independent
+// state references after their admission. Names belong to the retaining owner.
 typedef struct loom_serve_text_checkpoint_entry_t {
-  // Published identifier; empty until successful pin readiness.
-  char name[65];
   // Owned native endpoint, including accepted but unpublished pin work.
   loom_serve_text_checkpoint_t* state;
   // Owned canonical transcript, independent of the originating session.
@@ -37,10 +36,12 @@ typedef struct loom_serve_text_checkpoint_entry_t {
 // Fixed host records over the model's native pin capacity. This is not a second
 // device block allocator. Record pointers remain stable until deinitialization.
 typedef struct loom_serve_text_checkpoint_registry_t {
-  // Allocator owning entries.
+  // Allocator owning the combined record and name storage.
   iree_allocator_t host_allocator;
-  // Owned records, allocated once during service construction.
+  // Owned records at the base of the service construction allocation.
   loom_serve_text_checkpoint_entry_t* entries;
+  // Trailing identifiers in the entries allocation, empty until pin readiness.
+  char (*names)[65];
   // Number of allocated records, independent of resident session rows.
   iree_host_size_t capacity;
 } loom_serve_text_checkpoint_registry_t;
@@ -74,6 +75,17 @@ loom_serve_text_checkpoint_entry_t*
 loom_serve_text_checkpoint_registry_available(
     loom_serve_text_checkpoint_registry_t* registry);
 
+// Publishes a successfully ready registry entry under a validated, unique name.
+void loom_serve_text_checkpoint_registry_publish(
+    loom_serve_text_checkpoint_registry_t* registry,
+    loom_serve_text_checkpoint_entry_t* entry, iree_string_view_t name);
+
+// Removes an unborrowed registry entry and its name at a completed model
+// boundary. Live branches keep their independent references.
+void loom_serve_text_checkpoint_registry_release(
+    loom_serve_text_checkpoint_registry_t* registry,
+    loom_serve_text_checkpoint_entry_t* entry);
+
 // Submits into an available record and retains the row's canonical transcript.
 // Native capacity denial leaves state NULL without acquiring host ownership.
 // The owner excludes model mutation until successful ALL readiness; failure
@@ -82,10 +94,6 @@ iree_status_t loom_serve_text_checkpoint_entry_submit_pin(
     loom_serve_text_checkpoint_entry_t* entry, loom_serve_text_row_t* row,
     const loom_serve_text_chat_completion_t* completion,
     loom_runtime_execution_frontier_t* out_frontier);
-
-// Publishes a successfully ready pin under a validated, unique identifier.
-void loom_serve_text_checkpoint_entry_publish(
-    loom_serve_text_checkpoint_entry_t* entry, iree_string_view_t name);
 
 // Retains a ready endpoint and its canonical history in an available record.
 // Names and queued borrowers are independent; no device work is submitted.

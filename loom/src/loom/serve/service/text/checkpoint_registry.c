@@ -16,9 +16,17 @@ iree_status_t loom_serve_text_checkpoint_registry_initialize(
   if (!capacity) {
     return iree_ok_status();
   }
-  return iree_allocator_malloc_array(host_allocator, capacity,
-                                     sizeof(*out_registry->entries),
-                                     (void**)&out_registry->entries);
+  iree_host_size_t storage_length = 0, names_offset = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      0, &storage_length,
+      IREE_STRUCT_FIELD(capacity, loom_serve_text_checkpoint_entry_t, NULL),
+      IREE_STRUCT_ARRAY_FIELD(capacity, sizeof(*out_registry->names), char,
+                              &names_offset)));
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, storage_length,
+                                             (void**)&out_registry->entries));
+  out_registry->names =
+      (char (*)[65])((uint8_t*)out_registry->entries + names_offset);
+  return iree_ok_status();
 }
 
 void loom_serve_text_checkpoint_registry_reset(
@@ -32,6 +40,7 @@ void loom_serve_text_checkpoint_registry_reset(
     }
     loom_serve_text_chat_completion_deinitialize(&entry->completion);
     memset(entry, 0, sizeof(*entry));
+    registry->names[i][0] = 0;
   }
 }
 
@@ -44,12 +53,27 @@ void loom_serve_text_checkpoint_registry_deinitialize(
 loom_serve_text_checkpoint_entry_t* loom_serve_text_checkpoint_registry_find(
     loom_serve_text_checkpoint_registry_t* registry, iree_string_view_t name) {
   for (iree_host_size_t i = 0; name.size && i < registry->capacity; ++i) {
-    loom_serve_text_checkpoint_entry_t* entry = &registry->entries[i];
-    if (iree_string_view_equal(name, iree_make_cstring_view(entry->name))) {
-      return entry;
+    if (iree_string_view_equal(name,
+                               iree_make_cstring_view(registry->names[i]))) {
+      return &registry->entries[i];
     }
   }
   return NULL;
+}
+
+void loom_serve_text_checkpoint_registry_publish(
+    loom_serve_text_checkpoint_registry_t* registry,
+    loom_serve_text_checkpoint_entry_t* entry, iree_string_view_t name) {
+  char* target = registry->names[entry - registry->entries];
+  memcpy(target, name.data, name.size);
+  target[name.size] = 0;
+}
+
+void loom_serve_text_checkpoint_registry_release(
+    loom_serve_text_checkpoint_registry_t* registry,
+    loom_serve_text_checkpoint_entry_t* entry) {
+  loom_serve_text_checkpoint_entry_release(entry);
+  registry->names[entry - registry->entries][0] = 0;
 }
 
 loom_serve_text_checkpoint_entry_t*
@@ -78,12 +102,6 @@ iree_status_t loom_serve_text_checkpoint_entry_submit_pin(
                           : LOOM_SERVE_TEXT_CHAT_BOUNDARY_OPEN;
   }
   return iree_ok_status();
-}
-
-void loom_serve_text_checkpoint_entry_publish(
-    loom_serve_text_checkpoint_entry_t* entry, iree_string_view_t name) {
-  memcpy(entry->name, name.data, name.size);
-  entry->name[name.size] = 0;
 }
 
 void loom_serve_text_checkpoint_entry_retain(

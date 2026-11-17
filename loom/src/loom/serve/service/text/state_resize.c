@@ -141,6 +141,9 @@ static iree_status_t loom_serve_text_state_resize_views(
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0;
        i < state->recurrent.pool.capacity && iree_status_is_ok(status); ++i) {
+    if (!state->recurrent.buffers[i]) {
+      continue;
+    }
     iree_hal_buffer_t* replacement = NULL;
     status = iree_hal_buffer_subspan(
         state->row_arena,

@@ -1064,8 +1064,10 @@ TEST_F(SourceTextServiceTest,
   EXPECT_NE(actual, Oracle::Complete(prompt, 16, 2));
 }
 
-TEST_F(SourceTextServiceTest, CheckpointMapExtentFailureRetiresTheLoad) {
+TEST_F(SourceTextServiceTest, UnusedCheckpointsDoNotAllocateContextMaps) {
   struct Allocations {
+    // Largest permitted allocation; zero injects a pin-time host failure.
+    std::atomic<uint64_t> maximum_bytes = 64 * 1024 * 1024;
     // Oversized byte extent rejected without allocating its payload.
     std::atomic<uint64_t> rejected_bytes = 0;
     // Successful allocations still owned by the native model load.
@@ -1080,7 +1082,7 @@ TEST_F(SourceTextServiceTest, CheckpointMapExtentFailureRetiresTheLoad) {
           const auto length =
               static_cast<const iree_allocator_alloc_params_t*>(params)
                   ->byte_length;
-          if (length > 64 * 1024 * 1024) {
+          if (length > allocations->maximum_bytes.load()) {
             allocations->rejected_bytes.store(length);
             return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
           }
@@ -1105,43 +1107,48 @@ TEST_F(SourceTextServiceTest, CheckpointMapExtentFailureRetiresTheLoad) {
   auto options = ModelOptions();
   options.context_capacity = 262144;
   options.pool_capacity = 262144;
-  // Four-token pages require 65536 map entries per checkpoint. Cover byte
-  // extent overflow, element-count wrap to zero, and a wrapped nonzero count.
-  for (const iree_host_size_t count : {16384u, 65536u, 65537u}) {
+  // Four-token pages permit 65536 map entries per checkpoint. Reserving those
+  // entries for every unused endpoint would request 4 GiB or more at load.
+  int64_t small_capacity_allocations = 0;
+  for (const iree_host_size_t count : {2u, 16384u, 65536u, 65537u}) {
     SCOPED_TRACE(count);
     options.checkpoint_capacity = count;
     allocations.rejected_bytes.store(0);
-    loom_serve_text_model_t* rejected = nullptr;
-    const auto expected_status = sizeof(iree_host_size_t) == 4
-                                     ? IREE_STATUS_OUT_OF_RANGE
-                                     : IREE_STATUS_RESOURCE_EXHAUSTED;
-    IREE_EXPECT_STATUS_IS(expected_status, loom_serve_text_model_allocate(
-                                               device_, storage_owner_,
-                                               &options, allocator, &rejected));
-    EXPECT_EQ(rejected, nullptr);
-    IREE_EXPECT_OK(loom_serve_text_model_free(rejected));
-    EXPECT_EQ(allocations.rejected_bytes.load(),
-              sizeof(iree_host_size_t) == 4
-                  ? 0
-                  : uint64_t{count} * 65536 * sizeof(uint32_t));
+    loom_serve_text_model_t* model = nullptr;
+    IREE_ASSERT_OK(loom_serve_text_model_allocate(device_, storage_owner_,
+                                                  &options, allocator, &model));
+    if (count == 2) {
+      small_capacity_allocations = allocations.live_count.load();
+    } else {
+      EXPECT_LE(allocations.live_count.load(), small_capacity_allocations);
+    }
+    const int32_t tokens[] = {0, 1, 2, 0};
+    auto* row = loom_serve_text_model_row(model, 0);
+    IREE_ASSERT_OK(
+        loom_serve_text_row_prefill(row, IREE_ARRAYSIZE(tokens), tokens));
+    Oracle reference;
+    reference.Consume("abxa");
+    loom_serve_text_checkpoint_t* checkpoint = nullptr;
+    EXPECT_EQ(allocations.rejected_bytes.load(), 0);
+    allocations.maximum_bytes.store(0);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          loom_serve_text_row_try_pin(row, &checkpoint));
+    EXPECT_EQ(checkpoint, nullptr);
+    EXPECT_GT(allocations.rejected_bytes.load(), 0);
+    allocations.maximum_bytes.store(64 * 1024 * 1024);
+    allocations.rejected_bytes.store(0);
+    IREE_ASSERT_OK(loom_serve_text_row_try_pin(row, &checkpoint));
+    ASSERT_NE(checkpoint, nullptr);
+    IREE_ASSERT_OK(loom_serve_text_row_decode(row));
+    bool restored = false;
+    IREE_ASSERT_OK(loom_serve_text_row_try_restore(row, checkpoint, &restored));
+    ASSERT_TRUE(restored);
+    EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
+    loom_serve_text_checkpoint_release(checkpoint);
+    IREE_EXPECT_OK(loom_serve_text_model_free(model));
+    EXPECT_EQ(allocations.rejected_bytes.load(), 0);
     EXPECT_EQ(allocations.live_count.load(), 0);
   }
-
-  // Failure leaves the native device and allocator available for another
-  // load. The same long-context source works with a representable map count.
-  options.checkpoint_capacity = 2;
-  loom_serve_text_model_t* recovered = nullptr;
-  IREE_ASSERT_OK(loom_serve_text_model_allocate(
-      device_, storage_owner_, &options, allocator, &recovered));
-  const int32_t tokens[] = {0, 1, 2, 0};
-  auto* row = loom_serve_text_model_row(recovered, 0);
-  IREE_EXPECT_OK(
-      loom_serve_text_row_prefill(row, IREE_ARRAYSIZE(tokens), tokens));
-  Oracle reference;
-  reference.Consume("abxa");
-  EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
-  IREE_EXPECT_OK(loom_serve_text_model_free(recovered));
-  EXPECT_EQ(allocations.live_count.load(), 0);
 }
 
 TEST_F(SourceTextServiceTest, RejectsImagesWithoutProjection) {

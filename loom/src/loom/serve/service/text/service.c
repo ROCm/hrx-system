@@ -1102,7 +1102,7 @@ static iree_status_t loom_serve_text_advance_work(
         break;
       case TEXT_WORK_CHECKPOINT:
         status = loom_serve_text_checkpoint_request_complete(
-            &service->control,
+            &service->control, &service->checkpoints,
             iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING),
             &service->telemetry, &service->scratch,
             &service->pool.trim.pending);

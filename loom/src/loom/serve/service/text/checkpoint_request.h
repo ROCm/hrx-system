@@ -62,7 +62,8 @@ iree_status_t loom_serve_text_checkpoint_request_submit(
 // once after successful ALL readiness, including when the peer has
 // disconnected.
 iree_status_t loom_serve_text_checkpoint_request_complete(
-    loom_serve_text_checkpoint_operation_t* control, bool stopping,
+    loom_serve_text_checkpoint_operation_t* control,
+    loom_serve_text_checkpoint_registry_t* registry, bool stopping,
     loom_serve_text_telemetry_t* telemetry, iree_string_builder_t* scratch,
     bool* trim_pending);
 

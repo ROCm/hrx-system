@@ -39,6 +39,9 @@ typedef enum loom_serve_text_request_phase_e {
 typedef struct loom_serve_text_session_lifetime_t {
   // Chat cache key or server-issued sequence identity; empty means untagged.
   char name[65];
+  // Last completed position within the model's i32 context bound, retained
+  // even when replacement resets the row.
+  uint32_t position;
   // Last admitted request serial, also the idle-session LRU ordering key.
   uint64_t serial;
   // ID assigned by the first admitted request; zero before first admission.
@@ -46,8 +49,6 @@ typedef struct loom_serve_text_session_lifetime_t {
   // Cumulative work across retained continuations, independent of log
   // retention.
   loom_service_telemetry_counters_t counters;
-  // Last completed endpoint, retained even when replacement resets the row.
-  iree_host_size_t position;
   // Owned positions at that endpoint, including any shared prefix.
   iree_host_size_t resident_tokens;
 } loom_serve_text_session_lifetime_t;
