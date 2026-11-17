@@ -1,4 +1,4 @@
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // An incoming tensor is a snapshot, not an ownership transfer from the source.
 // Even a single-predecessor block must preserve this destructive-use boundary.
@@ -44,7 +44,7 @@ func.def @dependent_chain(%layout: encoding<layout>, %view: view<4xf32, %layout>
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Parallel contractions preserve a shared join and rewrite references inside
 // predicates and nested regions before the old block arguments are detached.
@@ -92,7 +92,7 @@ func.def @sibling_chains_with_nested_references(%choose: i1, %pick: i1, %offset:
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // The loop header survives while its body chain contracts in dominance order.
 func.def @cyclic_region_body_chain(%again: i1, %seed: index) -> (index) {
@@ -129,7 +129,7 @@ func.def @cyclic_region_body_chain(%again: i1, %seed: index) -> (index) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Moving a region owner preserves references to an ancestor CFG definition
 // in nested block argument types and predicate attributes.
@@ -177,7 +177,7 @@ func.def @ancestor_types_and_attributes(%choose: i1, %element: f32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Fusing the chain preserves each side effect and its forwarded payload.
 func.def @chain_payloads(%input: i32) -> (i32) {
@@ -202,7 +202,7 @@ func.def @chain_payloads(%input: i32) -> (i32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Each terminal path retains its side effect and return.
 func.def @terminal_paths(%choose_side: i1, %choose_value: i1, %value: i32) {
@@ -255,7 +255,7 @@ func.def @terminal_paths(%choose_side: i1, %choose_value: i1, %value: i32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 test.target<low_core> @target
 
@@ -278,7 +278,7 @@ low.kernel.def target<test.low.core>(@target) @terminal_chain() asm {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 test.target<low_core> @target
 
@@ -305,7 +305,7 @@ low.func.def target<test.low.core>(@target) @low_chain(%input: reg<test.i32>) ->
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 test.target<low_core> @target
 
@@ -344,7 +344,7 @@ low.func.def target<test.low.core>(@target) @low_loop_chain(%again: reg<test.i32
 }
 
 // ====
-// RUN: pass inline-callables,cfg-simplify
+// RUN: pass inline-callables,cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 test.target<low_core> @target
 
@@ -384,7 +384,7 @@ low.func.def public target<test.low.core>(@target) @prepared_caller(%choose: reg
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Fusion preserves the dominating producer and inferred Low operand types.
 test.target<low_core> @target

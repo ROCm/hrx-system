@@ -393,6 +393,16 @@ iree_status_t loom_value_fact_table_reserve(loom_value_fact_table_t* table,
 }
 
 void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
+  if (table->regions.cfg_count &&
+      (table->regions.storage_flags &
+       LOOM_VALUE_FACT_REGION_STORAGE_FLAG_RECLAIM_CFG)) {
+    for (iree_host_size_t i = 0; i < table->regions.bucket_count; ++i) {
+      for (loom_value_fact_region_entry_t* entry = table->regions.buckets[i];
+           entry; entry = entry->next_bucket) {
+        loom_value_fact_table_release_cfg_region(table, entry->structure);
+      }
+    }
+  }
 #ifndef NDEBUG
   ++table->observation.generation;
   table->observation.pending = false;
@@ -875,6 +885,36 @@ const loom_loop_domain_t* loom_value_fact_table_lookup_counted_loop_domain(
              : NULL;
 }
 
+void loom_value_fact_table_release_cfg_region(
+    loom_value_fact_table_t* table,
+    const loom_value_fact_cfg_region_t* structure) {
+  if (structure && (table->regions.storage_flags &
+                    LOOM_VALUE_FACT_REGION_STORAGE_FLAG_RECLAIM_CFG)) {
+    iree_allocator_free(table->transient_arena->block_pool->block_allocator,
+                        (void*)structure);
+  }
+}
+
+iree_status_t loom_value_fact_table_create_cfg_region(
+    loom_value_fact_table_t* table, const loom_module_t* module,
+    const loom_region_t* region, iree_arena_allocator_t* scratch,
+    loom_value_fact_cfg_region_t** out_region) {
+  *out_region = NULL;
+  if (table->regions.storage_flags &
+      LOOM_VALUE_FACT_REGION_STORAGE_FLAG_RECLAIM_CFG) {
+    return loom_value_fact_cfg_region_create_packed(
+        module, region, scratch,
+        table->transient_arena->block_pool->block_allocator, out_region);
+  }
+  loom_value_fact_cfg_region_t* structure = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      table->transient_arena, sizeof(*structure), (void**)&structure));
+  IREE_RETURN_IF_ERROR(loom_value_fact_cfg_region_initialize(
+      module, region, table->transient_arena, structure));
+  *out_region = structure;
+  return iree_ok_status();
+}
+
 iree_status_t loom_value_fact_table_set_cfg_region(
     loom_value_fact_table_t* table, const loom_module_t* module,
     const loom_region_t* region,
@@ -899,6 +939,7 @@ void loom_value_fact_table_forget_cfg_region(loom_value_fact_table_t* table,
   loom_value_fact_region_entry_t* entry =
       loom_value_fact_table_lookup_region_entry(table, region);
   if (entry && entry->structure) {
+    loom_value_fact_table_release_cfg_region(table, entry->structure);
     entry->structure = NULL;
     --table->regions.cfg_count;
   }
@@ -916,12 +957,24 @@ iree_status_t loom_value_fact_table_get_or_build_cfg_region(
   }
 
   loom_value_fact_cfg_region_t* structure = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate(
-      table->transient_arena, sizeof(*structure), (void**)&structure));
-  IREE_RETURN_IF_ERROR(loom_value_fact_cfg_region_initialize(
-      module, region, table->transient_arena, structure));
-  IREE_RETURN_IF_ERROR(
-      loom_value_fact_table_set_cfg_region(table, module, region, structure));
+  // Structural construction publishes no value facts. Its temporary arrays
+  // may therefore share and restore the table arena before publication.
+  const iree_arena_checkpoint_t checkpoint =
+      iree_arena_checkpoint_save(table->transient_arena);
+  iree_status_t status = loom_value_fact_table_create_cfg_region(
+      table, module, region, table->transient_arena, &structure);
+  if (table->regions.storage_flags &
+      LOOM_VALUE_FACT_REGION_STORAGE_FLAG_RECLAIM_CFG) {
+    iree_arena_checkpoint_restore(&checkpoint);
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_value_fact_table_set_cfg_region(table, module, region, structure);
+  }
+  if (!iree_status_is_ok(status)) {
+    loom_value_fact_table_release_cfg_region(table, structure);
+    return status;
+  }
   *out_region = structure;
   return iree_ok_status();
 }

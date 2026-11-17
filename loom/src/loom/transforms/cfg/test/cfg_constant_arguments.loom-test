@@ -1,4 +1,4 @@
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Hoisting an exact constant must not replace a freshly consumed loop owner.
 test.decl @consume_index(%input: index) -> (%input as index)

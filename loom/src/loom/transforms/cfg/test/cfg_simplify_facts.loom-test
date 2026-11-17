@@ -1,4 +1,4 @@
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Independent strands share a captured condition. Constant folding and
 // dependent Boolean replacement preserve the unchanged sibling's analysis,
@@ -301,7 +301,7 @@ func.def @forwarding_cycle_after_edge_removal(%again: i1, %good: i32, %bad: i32)
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 func.def @attribute_only_join(%offset: index, %choose: i1, %left_value: i32, %right_value: i32) -> (i32) {
   %true = scalar.constant true : i1
@@ -349,7 +349,7 @@ func.def @attribute_only_join(%offset: index, %choose: i1, %left_value: i32, %ri
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 func.def @nested_branch_feedback(%choose: i1, %again: i1, %good: i32, %bad: i32) -> (i32) {
   %true = scalar.constant true : i1
@@ -432,7 +432,7 @@ func.def @nested_loop_feedback(%limit: index, %again: i1, %good: i32, %bad: i32)
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Fusion retires the argument retained by the bound's identity before the next
 // induction refresh. The assumption's operand and retained representative must
@@ -474,7 +474,7 @@ func.def @fused_loop_bound(%bound: index) {
 
 // ====
 
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Removing an invariant carried argument has the same lifetime contract as
 // block fusion. A transitive alias keeps its predicate while the canonical

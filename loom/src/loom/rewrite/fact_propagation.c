@@ -588,85 +588,6 @@ iree_status_t loom_rewriter_seed_nested_execution_facts(
   return iree_ok_status();
 }
 
-struct loom_rewriter_cfg_region_t {
-  // Region represented by the published snapshot.
-  const loom_region_t* region;
-  // Owned resettable snapshot storage.
-  iree_arena_allocator_t arena;
-  // Next entry in the address hash bucket.
-  loom_rewriter_cfg_region_t* next_bucket;
-  // Next entry in the complete list for cleanup.
-  loom_rewriter_cfg_region_t* next_entry;
-};
-
-static iree_host_size_t loom_rewriter_cfg_region_hash(
-    const loom_region_t* region) {
-  uintptr_t bits = (uintptr_t)region;
-  bits ^= bits >> 17;
-  bits *= (uintptr_t)0xed5ad4bbU;
-  return bits ^ (bits >> 11);
-}
-
-void loom_rewriter_release_cfg_facts(loom_rewriter_t* rewriter) {
-  for (loom_rewriter_cfg_region_t* entry = rewriter->cfg_facts.entries; entry;
-       entry = entry->next_entry) {
-    loom_value_fact_table_forget_cfg_region(rewriter->fact_table,
-                                            entry->region);
-    iree_arena_deinitialize(&entry->arena);
-  }
-  memset(&rewriter->cfg_facts, 0, sizeof(rewriter->cfg_facts));
-}
-
-static iree_status_t loom_rewriter_cfg_region_storage(
-    loom_rewriter_t* rewriter, const loom_region_t* region,
-    loom_rewriter_cfg_region_t** out_entry) {
-  if (rewriter->cfg_facts.bucket_count) {
-    iree_host_size_t bucket = loom_rewriter_cfg_region_hash(region) &
-                              (rewriter->cfg_facts.bucket_count - 1);
-    for (loom_rewriter_cfg_region_t* entry =
-             rewriter->cfg_facts.buckets[bucket];
-         entry; entry = entry->next_bucket) {
-      if (entry->region == region) {
-        *out_entry = entry;
-        return iree_ok_status();
-      }
-    }
-  }
-  if (rewriter->cfg_facts.count >= rewriter->cfg_facts.bucket_count / 2) {
-    iree_host_size_t bucket_count = rewriter->cfg_facts.bucket_count
-                                        ? rewriter->cfg_facts.bucket_count * 2
-                                        : 8;
-    loom_rewriter_cfg_region_t** buckets = NULL;
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        rewriter->arena, bucket_count, sizeof(*buckets), (void**)&buckets));
-    memset(buckets, 0, bucket_count * sizeof(*buckets));
-    for (loom_rewriter_cfg_region_t* entry = rewriter->cfg_facts.entries; entry;
-         entry = entry->next_entry) {
-      iree_host_size_t bucket =
-          loom_rewriter_cfg_region_hash(entry->region) & (bucket_count - 1);
-      entry->next_bucket = buckets[bucket];
-      buckets[bucket] = entry;
-    }
-    rewriter->cfg_facts.buckets = buckets;
-    rewriter->cfg_facts.bucket_count = bucket_count;
-  }
-  loom_rewriter_cfg_region_t* entry = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate(rewriter->arena, sizeof(*entry), (void**)&entry));
-  memset(entry, 0, sizeof(*entry));
-  entry->region = region;
-  iree_arena_initialize(rewriter->arena->block_pool, &entry->arena);
-  iree_host_size_t bucket = loom_rewriter_cfg_region_hash(region) &
-                            (rewriter->cfg_facts.bucket_count - 1);
-  entry->next_bucket = rewriter->cfg_facts.buckets[bucket];
-  rewriter->cfg_facts.buckets[bucket] = entry;
-  entry->next_entry = rewriter->cfg_facts.entries;
-  rewriter->cfg_facts.entries = entry;
-  ++rewriter->cfg_facts.count;
-  *out_entry = entry;
-  return iree_ok_status();
-}
-
 static void loom_rewriter_on_summary_computed(void* user_data,
                                               const loom_op_t* op) {
   loom_rewriter_t* rewriter = user_data;
@@ -678,11 +599,12 @@ static void loom_rewriter_on_summary_computed(void* user_data,
   }
 }
 
-void loom_rewriter_attach_value_facts(loom_rewriter_t* rewriter,
-                                      loom_value_fact_table_t* facts) {
+// Attachment runs at rewriter lifetime boundaries. Keep its lifecycle work
+// out of line instead of duplicating it throughout transform callers.
+IREE_ATTRIBUTE_NOINLINE void loom_rewriter_attach_value_facts(
+    loom_rewriter_t* rewriter, loom_value_fact_table_t* facts) {
   IREE_ASSERT(!facts || !facts->has_conditioned_results);
   loom_rewriter_clear_pending_facts(rewriter);
-  loom_rewriter_release_cfg_facts(rewriter);
   if (rewriter->fact_table) {
     rewriter->fact_table->summary_computed.fn = NULL;
     rewriter->fact_table->summary_computed.user_data = NULL;
@@ -914,48 +836,38 @@ iree_status_t loom_rewriter_refresh_cfg_facts(loom_rewriter_t* rewriter,
   if (!rewriter->fact_table) {
     return iree_ok_status();
   }
-  loom_rewriter_cfg_region_t* storage = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_rewriter_cfg_region_storage(rewriter, region, &storage));
   const loom_value_fact_cfg_region_t* old_structure =
       loom_value_fact_table_lookup_cfg_region(rewriter->fact_table, region);
-  iree_arena_allocator_t next_arena;
-  iree_arena_initialize(rewriter->arena->block_pool, &next_arena);
+  IREE_ASSERT(rewriter->fact_table->regions.storage_flags &
+              LOOM_VALUE_FACT_REGION_STORAGE_FLAG_RECLAIM_CFG);
+  iree_arena_allocator_t scratch;
+  iree_arena_initialize(rewriter->arena->block_pool, &scratch);
   loom_value_fact_cfg_region_t* structure = NULL;
-  iree_status_t status =
-      iree_arena_allocate(&next_arena, sizeof(*structure), (void**)&structure);
-  if (iree_status_is_ok(status)) {
-    status = loom_value_fact_cfg_region_initialize(rewriter->module, region,
-                                                   &next_arena, structure);
-  }
+  iree_status_t status = loom_value_fact_table_create_cfg_region(
+      rewriter->fact_table, rewriter->module, region, &scratch, &structure);
+  iree_arena_reset(&scratch);
   if (iree_status_is_ok(status)) {
     status = loom_value_fact_table_set_cfg_region(
         rewriter->fact_table, rewriter->module, region, structure);
   }
   if (iree_status_is_ok(status)) {
-    iree_arena_checkpoint_t checkpoint =
-        iree_arena_checkpoint_save(&next_arena);
-    // The fresh snapshot starts with optimistic control distributions. Its
-    // initial selector seed is consumed by the old/new predecessor comparison
-    // below, not an incremental change to the retained facts. Only changes
-    // during the refresh need subsequent worklist publication.
+    // Initial selector seeding participates in predecessor comparison; only
+    // subsequent control changes enter the incremental worklist.
     uint16_t initialized_block = 0;
     while (loom_value_fact_control_take_changed_block(structure->control,
                                                       &initialized_block)) {
     }
-    // Publish semantic edits against the replacement graph before solving
-    // it. Pending work for other owners remains queued for observation.
     status = loom_rewriter_publish_fact_invalidations(rewriter);
     if (iree_status_is_ok(status)) {
       status = loom_rewriter_refresh_cfg_block_facts(rewriter, old_structure,
-                                                     structure, &next_arena);
+                                                     structure, &scratch);
     }
-    iree_arena_checkpoint_restore(&checkpoint);
-    iree_arena_deinitialize(&storage->arena);
-    storage->arena = next_arena;
+    loom_value_fact_table_release_cfg_region(rewriter->fact_table,
+                                             old_structure);
   } else {
-    iree_arena_deinitialize(&next_arena);
+    loom_value_fact_table_release_cfg_region(rewriter->fact_table, structure);
   }
+  iree_arena_deinitialize(&scratch);
   return status;
 }
 

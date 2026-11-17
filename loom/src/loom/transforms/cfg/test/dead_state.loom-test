@@ -1,4 +1,4 @@
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Projecting the only sequence-counter consumer away leaves a closed
 // recurrence. Request/model effects and the request-selected branch survive.
@@ -38,7 +38,7 @@ func.def @peer() {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Mutually dependent scalar/vector updates are dead together. The analysis
 // follows SSA dependencies, independently of element width or arithmetic kind.
@@ -68,7 +68,7 @@ func.def @dead_tuple(%again: i1, %integer: i64, %real: f64, %vector: vector<4xf3
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // The control recurrence, returned state, and observed state remain live.
 // A separate recurrence can die despite sharing the same loop and initial value.
@@ -111,7 +111,7 @@ func.def @live_tuple(%limit: i32) -> (i32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Read-only loads disappear with an unobserved recurrence. Volatile reads and
 // convergent operations keep their operands even when their results are unused.
@@ -147,7 +147,7 @@ func.def @read_effects(%again: i1, %input: view<8xi32>, %seed: i32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // A nested region captures the recurrence through a live operation. Its
 // conditional execution and hint must remain at the authored control point.
@@ -185,7 +185,7 @@ func.def @nested_capture(%again: i1, %select: i1, %seed: i32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // An attribute-only dimension use keeps the width recurrence live. The
 // neighboring attribute owner's unused recurrence and dimension may disappear.
@@ -221,7 +221,7 @@ func.def @attribute_uses(%again: i1, %initial: index, %value: f32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // A dependent type can be the only observer of a width recurrence. Removing
 // that carrier also removes the width, without substituting a fabricated value.
@@ -250,7 +250,7 @@ func.def @dead_dependent_type(%again: i1, %initial: index, %storage: buffer) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // A live dependent carrier keeps its width and the matching incoming tuple.
 func.def @live_dependent_type(%again: i1, %initial: index, %storage: buffer) {
@@ -287,7 +287,7 @@ func.def @live_dependent_type(%again: i1, %initial: index, %storage: buffer) {
 }
 
 // ====
-// RUN: with-low-asm pass cfg-simplify
+// RUN: with-low-asm pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // The same closed-state rule applies after target lowering. Neither the
 // external predicate nor the live recurrence may change with the dead register.
@@ -320,7 +320,7 @@ low.func.def target<test.low.core>(@device) @register_state(%again: reg<test.i32
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Observing a later result retains the whole producer, including its unused
 // first result and their dependent type relationship. Only the dead recurrence

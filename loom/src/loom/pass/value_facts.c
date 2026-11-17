@@ -109,6 +109,8 @@ static iree_status_t loom_pass_value_fact_owner_initialize_table_storage(
   IREE_RETURN_IF_ERROR(loom_value_fact_table_initialize_with_arenas(
       &owner->table, &owner->storage_arena, &owner->transient_arena,
       initial_capacity));
+  owner->table.regions.storage_flags =
+      LOOM_VALUE_FACT_REGION_STORAGE_FLAG_RECLAIM_CFG;
   loom_type_registry_configure_fact_context(&owner->table.context);
   owner->table.context.resolve_region_target.fn =
       loom_pass_value_fact_resolve_region_target;
@@ -129,6 +131,10 @@ static iree_status_t loom_pass_value_fact_owner_ensure_table(
   }
 
   loom_pass_value_fact_owner_record_scope_clear(owner);
+  if (iree_any_bit_set(owner->flags,
+                       LOOM_PASS_VALUE_FACT_OWNER_FLAG_TABLE_INITIALIZED)) {
+    loom_value_fact_table_clear_scope(&owner->table);
+  }
   iree_arena_reset(&owner->storage_arena);
   iree_arena_reset(&owner->transient_arena);
   owner->module = module;

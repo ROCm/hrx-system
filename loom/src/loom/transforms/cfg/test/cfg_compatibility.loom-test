@@ -1,4 +1,4 @@
-// RUN: pass cse,dce,cfg-simplify
+// RUN: pass cse,dce,cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 func.def @structured_region_stays_structured(%cond: i1, %input: i32) -> (i32) {
   %result = scf.if %cond -> (i32) {

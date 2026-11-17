@@ -109,6 +109,14 @@ iree_status_t loom_value_fact_cfg_region_initialize(
     const loom_module_t* module, const loom_region_t* region,
     iree_arena_allocator_t* arena, loom_value_fact_cfg_region_t* out_region);
 
+// Constructs and packs a fresh snapshot into one allocator-owned payload.
+// Temporary construction arrays use scratch; the completed result retains no
+// scratch pointers. Free the returned result with the supplied allocator.
+iree_status_t loom_value_fact_cfg_region_create_packed(
+    const loom_module_t* module, const loom_region_t* region,
+    iree_arena_allocator_t* scratch, iree_allocator_t allocator,
+    loom_value_fact_cfg_region_t** out_region);
+
 // Refreshes the recurrence equation if block_index is a natural-loop header.
 // Called by the owning CFG solve after predecessor facts become available.
 void loom_value_fact_cfg_update_induction(
@@ -162,9 +170,22 @@ iree_status_t loom_value_fact_table_get_or_build_cfg_region(
     const loom_region_t* region,
     const loom_value_fact_cfg_region_t** out_region);
 
-// Publishes caller-owned structure for a region after a completed CFG edit.
-// The caller keeps the structure alive until replacing it again or forgetting
-// it. This changes only structural analysis; existing value facts are retained.
+// Constructs a snapshot using the table owner's allocation lifetime. Mutable
+// tables use compact owned payloads; arena-lifetime tables keep their contract.
+iree_status_t loom_value_fact_table_create_cfg_region(
+    loom_value_fact_table_t* table, const loom_module_t* module,
+    const loom_region_t* region, iree_arena_allocator_t* scratch,
+    loom_value_fact_cfg_region_t** out_region);
+
+// Releases a snapshot after replacement comparison or scope retirement. For
+// arena-lifetime tables, storage is reclaimed with the caller's arena instead.
+void loom_value_fact_table_release_cfg_region(
+    loom_value_fact_table_t* table,
+    const loom_value_fact_cfg_region_t* structure);
+
+// Publishes structure constructed with this table's allocation lifetime.
+// The caller retains the previous snapshot through replacement comparison and
+// releases it afterward. Existing value facts are retained.
 iree_status_t loom_value_fact_table_set_cfg_region(
     loom_value_fact_table_t* table, const loom_module_t* module,
     const loom_region_t* region, const loom_value_fact_cfg_region_t* structure);

@@ -1,4 +1,4 @@
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // The dominating condition folds the repeated predicates without changing sums.
 func.def @fold_independent_comparisons(%x: i32, %y: i32, %value: i32) -> (i32) {
@@ -45,7 +45,7 @@ func.def @fold_independent_comparisons(%x: i32, %y: i32, %value: i32) -> (i32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // The dominating condition folds the repeated predicates without changing sums.
 func.def @fold_dependent_conjunctions(%x: i32, %y: i32, %value: i32) -> (i32) {
@@ -92,7 +92,7 @@ func.def @fold_dependent_conjunctions(%x: i32, %y: i32, %value: i32) -> (i32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Entry facts do not prove comparisons against an independent value.
 func.def @preserve_unproved_comparisons(%x: i32, %y: i32, %value: i32) -> (i32) {
@@ -111,7 +111,7 @@ func.def @preserve_unproved_comparisons(%x: i32, %y: i32, %value: i32) -> (i32) 
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Opposite entry facts remain distinct while dependent users see new constants.
 func.def @fold_opposite_entry_facts(%x: i32, %y: i32, %value: i32) -> (i32) {
@@ -159,7 +159,7 @@ func.def @fold_opposite_entry_facts(%x: i32, %y: i32, %value: i32) -> (i32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Substitutions update branch conditions and payloads before the structural
 // simplifications consume them.
@@ -198,7 +198,7 @@ func.def @fold_branch_payload(%x: i32, %y: i32, %value: i32) -> (i32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Loop-carried Boolean payloads preserve their meaning across substitutions.
 func.def @fold_loop_payload(%y: i32, %value: i32) -> (i32) {

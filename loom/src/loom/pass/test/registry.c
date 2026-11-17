@@ -19,6 +19,7 @@
 #include "loom/util/cfg_graph.h"
 #include "loom/util/fact_extensions.h"
 #include "loom/util/fact_table.h"
+#include "loom/util/walk.h"
 
 static bool loom_test_pass_target_record_satisfies_requirement(
     const loom_pass_environment_capability_t* capability,
@@ -242,6 +243,50 @@ static iree_status_t loom_test_compare_value_fact_cfg(
   return status;
 }
 
+typedef struct loom_test_retained_cfg_context_t {
+  // Module containing the compared function.
+  const loom_module_t* module;
+  // Freshly computed scope, which may omit straight-line CFG snapshots.
+  const loom_value_fact_table_t* fresh;
+  // Maintained scope whose extra snapshots must still describe live regions.
+  const loom_value_fact_table_t* retained;
+  // Scratch for independent reconstruction of optional cached graphs.
+  iree_arena_allocator_t* arena;
+  // Retained snapshots found in the current function's live region tree.
+  iree_host_size_t live_count;
+} loom_test_retained_cfg_context_t;
+
+static iree_status_t loom_test_compare_retained_cfg_regions(
+    void* user_data, loom_op_t* op, const loom_walk_context_t* walk_context,
+    loom_walk_result_t* out_result) {
+  (void)walk_context;
+  *out_result = LOOM_WALK_CONTINUE;
+  loom_test_retained_cfg_context_t* context = user_data;
+  iree_status_t status = iree_ok_status();
+  for (uint8_t i = 0; i < op->region_count && iree_status_is_ok(status); ++i) {
+    const loom_region_t* region = loom_op_regions(op)[i];
+    if (!region ||
+        !loom_value_fact_table_lookup_cfg_graph(context->retained, region)) {
+      continue;
+    }
+    ++context->live_count;
+    if (loom_value_fact_table_lookup_cfg_graph(context->fresh, region)) {
+      continue;
+    }
+    // A region may become straight-line while retaining a valid graph. Check
+    // that graph against live IR without requiring a fresh numeric solve to
+    // reproduce the retained scope's cache population decisions.
+    loom_cfg_graph_t fresh = {0};
+    status =
+        loom_cfg_graph_build(context->module, region, context->arena, &fresh);
+    if (iree_status_is_ok(status)) {
+      status =
+          loom_test_compare_value_fact_cfg((void*)context->retained, &fresh);
+    }
+  }
+  return status;
+}
+
 // Runs after the preceding pass has destroyed its invocation scratch. Compare
 // semantic payloads, not table-local extension IDs, against an independent
 // solve of every live value and CFG snapshot in the same scope.
@@ -281,9 +326,28 @@ static iree_status_t loom_test_compare_value_facts(
   }
   if (iree_status_is_ok(status) &&
       retained_facts->regions.cfg_count != fresh_facts->regions.cfg_count) {
-    status = iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "retained CFG snapshot count differs from fresh computation");
+    loom_test_retained_cfg_context_t context = {
+        .module = module,
+        .fresh = fresh_facts,
+        .retained = retained_facts,
+        .arena = pass->arena,
+    };
+    loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
+    status = loom_test_compare_retained_cfg_regions(&context, scope.function.op,
+                                                    NULL, &walk_result);
+    if (iree_status_is_ok(status)) {
+      status = loom_walk_function(
+          module, scope.function, LOOM_WALK_PRE_ORDER,
+          (loom_walk_callback_t){.fn = loom_test_compare_retained_cfg_regions,
+                                 .user_data = &context},
+          &walk_result);
+    }
+    if (iree_status_is_ok(status) &&
+        context.live_count != retained_facts->regions.cfg_count) {
+      status =
+          iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                           "retained CFG snapshot belongs to a removed region");
+    }
   }
   loom_pass_value_fact_owner_deinitialize(&fresh_owner);
   return status;

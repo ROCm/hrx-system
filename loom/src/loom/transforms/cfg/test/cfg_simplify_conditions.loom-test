@@ -1,4 +1,4 @@
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 func.def @and_with_unproven_disjunction(%left: i1, %right: i1, %gate: i1, %yes: i32, %no: i32) -> (i32) {
   %inner = scalar.ori %left, %right : i1

@@ -185,6 +185,14 @@ struct loom_fact_context_t {
 uint32_t loom_fact_context_element_bitwidth(const loom_fact_context_t* context,
                                             loom_type_t type);
 
+enum loom_value_fact_region_storage_flag_bits_e {
+  LOOM_VALUE_FACT_REGION_STORAGE_FLAG_NONE = 0u,
+  // CFG snapshots own compact allocations. Clear the scope before destroying
+  // backing table arenas. Ordinary arena-lifetime tables leave this unset.
+  LOOM_VALUE_FACT_REGION_STORAGE_FLAG_RECLAIM_CFG = 1u << 0,
+};
+typedef uint32_t loom_value_fact_region_storage_flags_t;
+
 struct loom_value_fact_table_t {
   // Arena for reusable fact segments, their pointer directory, and oversized
   // extension storage.
@@ -307,6 +315,8 @@ struct loom_value_fact_table_t {
     // True after encountering an independent execution target. Ordinary
     // function inference bypasses per-operation region target lookup.
     bool has_independent_targets;
+    // Allocation lifetime selected by the table owner before inference.
+    loom_value_fact_region_storage_flags_t storage_flags;
   } regions;
 
   // Interned fact extension payloads. Extension IDs stored in

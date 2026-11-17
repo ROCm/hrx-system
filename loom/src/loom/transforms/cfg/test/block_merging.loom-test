@@ -1,4 +1,4 @@
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Equivalent terminal paths share their computation and return.
 func.def @merge_terminal_paths(%selector: i32, %value: i32) -> (i32) {
@@ -57,7 +57,7 @@ func.def @merge_terminal_paths(%selector: i32, %value: i32) -> (i32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Equivalent terminal paths share their computation and return.
 func.def @merge_alpha_paths(%selector: i32, %value: i32) -> (i32) {
@@ -123,7 +123,7 @@ func.def @merge_alpha_paths(%selector: i32, %value: i32) -> (i32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // A removed predecessor and its destination belong to separate merge groups.
 // All redirects use original edge slots before either block is removed.
@@ -166,7 +166,7 @@ func.def @merge_adjacent_groups(%choose: i1, %pick: i1, %a: i32, %b: i32) -> (i3
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Equivalent loop paths preserve the carried value and shared loop header.
 func.def @merge_loop_paths(%choose: i1, %limit: i32) -> (i32) {
@@ -204,7 +204,7 @@ func.def @merge_loop_paths(%choose: i1, %limit: i32) -> (i32) {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // The initial sum is used in another block and cannot become a discarded
 // definition, even though the repeat block computes the same expression.
@@ -230,7 +230,7 @@ func.def @preserve_nonlocal_definition(%choose: i1, %repeat: i1, %a: i32, %b: i3
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Convergent returns remain distinct program points.
 kernel.def @preserve_convergent_returns() {
@@ -245,7 +245,7 @@ kernel.def @preserve_convergent_returns() {
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Equivalent decision tails share the complete selector chain.
 func.def @merge_decision_tails(%choice: i32, %selector: i32, %value: i32) -> (i32) {
@@ -302,7 +302,7 @@ func.def @merge_decision_tails(%choice: i32, %selector: i32, %value: i32) -> (i3
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Equivalent decision tails share the complete selector chain.
 func.def @merge_reordered_decision_tails(%choice: i32, %selector: i32, %value: i32) -> (i32) {
@@ -359,7 +359,7 @@ func.def @merge_reordered_decision_tails(%choice: i32, %selector: i32, %value: i
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Positional arguments remain attached to the original incoming edges.
 func.def @merge_argument_tails(%choice: i32, %selector: i32, %value: i32) -> (i32) {
@@ -405,7 +405,7 @@ func.def @merge_argument_tails(%choice: i32, %selector: i32, %value: i32) -> (i3
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // A shared cyclic successor keeps its identity while acyclic tails merge.
 func.def @merge_tails_entering_loop(%choice: i32, %selector: i32, %value: i32) -> (i32) {
@@ -460,7 +460,7 @@ func.def @merge_tails_entering_loop(%choice: i32, %selector: i32, %value: i32) -
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Equivalent decision tails merge while preserving the loop recurrence.
 func.def @merge_loop_decision_tails(%choice: i32, %selector: i32, %value: i32) -> (i32) {
@@ -536,7 +536,7 @@ func.def @merge_loop_decision_tails(%choice: i32, %selector: i32, %value: i32) -
 }
 
 // ====
-// RUN: pass cfg-simplify
+// RUN: pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Reversed branch slots and block order preserve the loop recurrence.
 func.def @merge_reordered_loop_tails(%choice: i32, %selector: i32, %value: i32) -> (i32) {
@@ -612,7 +612,7 @@ func.def @merge_reordered_loop_tails(%choice: i32, %selector: i32, %value: i32) 
 }
 
 // ====
-// RUN: with-low-asm pass cfg-simplify
+// RUN: with-low-asm pass cfg-simplify,test.acquire-value-facts{expect=reuse}
 
 // Equivalent Low blocks may share one body even when the incoming direct
 // branches retain a physical-storage identity contract. Retargeting preserves
