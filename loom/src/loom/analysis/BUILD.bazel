@@ -373,10 +373,27 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "condition_derivation",
+    srcs = ["condition_derivation.c"],
+    hdrs = ["condition_derivation.h"],
+    deps = [
+        ":integer_relation",
+        "//loom/src/loom/ir:facts",
+        "//loom/src/loom/ir:type_headers",
+        "//loom/src/loom/util:adaptive_sort",
+        "//loom/src/loom/util:fact_relation",
+        "//loom/src/loom/util:fact_table_api",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "condition_facts",
     srcs = ["condition_facts.c"],
     hdrs = ["condition_facts.h"],
     deps = [
+        ":condition_derivation",
         ":integer_relation",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:facts",
@@ -385,8 +402,6 @@ loom_cc_library(
         "//loom/src/loom/ops/scalar:comparison",
         "//loom/src/loom/ops/scalar:op_defs",
         "//loom/src/loom/ops/scf:op_defs",
-        "//loom/src/loom/util:adaptive_sort",
-        "//loom/src/loom/util:fact_relation",
         "//loom/src/loom/util:fact_table_api",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
