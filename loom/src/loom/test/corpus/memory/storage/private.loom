@@ -380,3 +380,72 @@ check.scenario @private_payload_bits {
   }
   check.return
 }
+
+// One retained helper serves both invocation-private and external storage.
+// Read back the private store and its neighboring sentinel in the caller.
+func.def noinline @store_storage_buffer(%destination: buffer, %byte_offset: index, %input: i32) {
+  %increment = scalar.constant 5 : i32
+  %value = scalar.addi %input, %increment : i32
+  %view = buffer.view %destination[%byte_offset] : buffer -> view<1xi32>
+  view.store %value, %view[0] : i32, view<1xi32>
+  func.return
+}
+
+kernel.def @shared_storage_helpers() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : index
+  %limit = index.constant 8 : index
+  %step = index.constant 1 : index
+  %row_bytes = index.constant 12 : index
+  %private_bytes = index.constant 8 : offset
+  %private = buffer.alloca<private> align(4) %private_bytes : buffer
+  %scratch = buffer.view %private[%origin] : buffer -> view<2xi32>
+  %inputs = buffer.view %input[%origin] : buffer -> view<8xi32>
+  %outputs = buffer.view %output[%origin] : buffer -> view<8x3xi32>
+  %sentinel = scalar.constant 90 : i32
+  view.store %sentinel, %scratch[1] : i32, view<2xi32>
+  scf.for %row = [%origin to %limit step %step] {
+    %value = view.load %inputs[%row] : view<8xi32> -> i32
+    %byte_offset = index.mul %row, %row_bytes : index
+    func.call @store_storage_buffer(%private, %origin, %value) : (buffer, index, i32)
+    func.call @store_storage_buffer(%output, %byte_offset, %value) : (buffer, index, i32)
+    %observed = view.load<volatile> %scratch[0] : view<2xi32> -> i32
+    %neighbor = view.load<volatile> %scratch[1] : view<2xi32> -> i32
+    view.store %observed, %outputs[%row, 1] : i32, view<8x3xi32>
+    view.store %neighbor, %outputs[%row, 2] : i32, view<8x3xi32>
+  }
+  kernel.return
+}
+
+func.def @shared_storage_oracle(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : index
+  %limit = index.constant 8 : index
+  %step = index.constant 1 : index
+  %inputs = buffer.view %input[%origin] : buffer -> view<8xi32>
+  %outputs = buffer.view %output[%origin] : buffer -> view<8x3xi32>
+  %increment = scalar.constant 5 : i32
+  %sentinel = scalar.constant 90 : i32
+  scf.for %row = [%origin to %limit step %step] {
+    %input_value = view.load %inputs[%row] : view<8xi32> -> i32
+    %value = scalar.addi %input_value, %increment : i32
+    view.store %value, %outputs[%row, 0] : i32, view<8x3xi32>
+    view.store %value, %outputs[%row, 1] : i32, view<8x3xi32>
+    view.store %sentinel, %outputs[%row, 2] : i32, view<8x3xi32>
+  }
+  func.return
+}
+
+check.scenario @shared_storage_values {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-1000 to 1000) : tensor<8xi32>
+    %output = check.generate.fill value(-1) : tensor<8x3xi32>
+    check.compare<@shared_storage_helpers, @shared_storage_oracle>(%input, %output) : (tensor<8xi32>, tensor<8x3xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<8x3xi32>
+    }
+  }
+  check.return
+}

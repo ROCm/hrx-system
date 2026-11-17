@@ -14,10 +14,26 @@
 #include "loom/target/arch/amdgpu/lower/value/integer64.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
-bool loom_amdgpu_control_operand_accepts(loom_type_t source_type,
-                                         loom_value_facts_t source_facts,
-                                         loom_type_t actual_type,
-                                         loom_type_t required_type) {
+bool loom_amdgpu_control_operand_accepts(
+    const loom_fact_context_t* fact_context, loom_type_t source_type,
+    loom_value_facts_t source_facts, loom_type_t actual_type,
+    loom_type_t required_type) {
+  if (loom_type_is_buffer(source_type)) {
+    loom_value_fact_buffer_reference_t reference;
+    if (loom_value_facts_query_buffer_reference(fact_context, source_facts,
+                                                &reference) &&
+        reference.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NULL) {
+      const uint16_t required_class =
+          loom_low_register_type_class_id(required_type);
+      const uint32_t required_count =
+          loom_low_register_type_unit_count(required_type);
+      // Null is rematerialized in the receiver's address space: all-ones for
+      // local addresses, zero for global addresses. It is not a bitwise move.
+      return (required_class == LOOM_AMDGPU_REG_CLASS_ID_SGPR ||
+              required_class == LOOM_AMDGPU_REG_CLASS_ID_VGPR) &&
+             (required_count == 1 || required_count == 2);
+    }
+  }
   const loom_type_t common_type =
       loom_amdgpu_join_result_type(source_type, actual_type, required_type);
   if (loom_type_kind(common_type) == LOOM_TYPE_NONE) {

@@ -293,10 +293,12 @@ loom_type_t loom_spirv_join_carrier_type(loom_type_t source_type,
   return loom_spirv_join_index_type(source_type, lhs, rhs);
 }
 
-bool loom_spirv_control_operand_accepts(loom_type_t source_type,
+bool loom_spirv_control_operand_accepts(const loom_fact_context_t* fact_context,
+                                        loom_type_t source_type,
                                         loom_value_facts_t source_facts,
                                         loom_type_t actual_type,
                                         loom_type_t required_type) {
+  (void)fact_context;
   if (loom_type_is_buffer(source_type)) {
     return loom_low_register_type_class_id(required_type) ==
            SPIRV_LOGICAL_CORE_REG_CLASS_ID_OFFSET64;

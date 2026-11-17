@@ -361,17 +361,25 @@ static iree_status_t loom_vm_reject_span_operand(
                                        params, IREE_ARRAYSIZE(params));
 }
 
+static bool loom_vm_span_operand_accepts(
+    const loom_fact_context_t* fact_context, loom_type_t source_type,
+    loom_value_facts_t source_facts, loom_type_t actual_type,
+    loom_type_t required_type) {
+  (void)fact_context;
+  (void)source_facts;
+  (void)actual_type;
+  const loom_type_t* payload = loom_type_register_value_type(required_type);
+  // Source views retain storage roots. Calls materialize a typed offset/count
+  // pair; preparation checks that their layout is contiguous.
+  return loom_type_is_view(source_type) && loom_type_rank(source_type) == 1 &&
+         payload && loom_vm_span_type_isa(*payload);
+}
+
 static iree_status_t loom_vm_prepare_span_operand(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_op, loom_value_id_t source_value,
     loom_type_t actual_type, loom_type_t required_type, const void** out_plan) {
   (void)user_data;
-  const loom_type_t* payload = loom_type_register_value_type(required_type);
-  if (!payload || !loom_vm_span_type_isa(*payload)) {
-    return loom_vm_reject_span_operand(
-        context, source_op, source_value,
-        IREE_SV("the receiving signature is not a native span"));
-  }
   const loom_type_t type = loom_module_value_type(
       loom_low_lower_context_module(context), source_value);
   const loom_value_fact_table_t* facts =
@@ -512,7 +520,8 @@ static const loom_low_lower_policy_t kPolicy = {
     .map_value = {.fn = loom_vm_map_value},
     .map_argument = {.fn = loom_vm_map_argument},
     .entry_setup = {.emit = loom_vm_emit_entry_setup},
-    .control_operand = {.prepare = loom_vm_prepare_span_operand,
+    .control_operand = {.accepts = loom_vm_span_operand_accepts,
+                        .prepare = loom_vm_prepare_span_operand,
                         .emit = loom_vm_emit_span_operand},
     .function_storage = {.mappings = kFunctionStorage,
                          .count = IREE_ARRAYSIZE(kFunctionStorage)},
