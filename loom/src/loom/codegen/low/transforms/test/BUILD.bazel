@@ -58,6 +58,7 @@ loom_check_test_suite(
         "target_legalize_index_cast.loom-test",
         "target_legalize_index_rotation.loom-test",
         "target_legalize_integer_division.loom-test",
+        "target_legalize_invocation_branches.loom-test",
         "target_legalize_kernel_reduce.loom-test",
         "target_legalize_kernel_scan.loom-test",
         "target_legalize_kernel_shuffle.loom-test",

@@ -1583,14 +1583,76 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_target_legalize_packet_components(
+typedef struct loom_low_target_legalize_branch_folding_t {
+  // Existing rewriter and invocation-refined facts for this function.
+  loom_greedy_rewrite_driver_t* driver;
+  // Mutation accounting shared with ordinary legalization.
+  loom_greedy_rewrite_result_t* result;
+} loom_low_target_legalize_branch_folding_t;
+
+static iree_status_t loom_low_target_legalize_fold_region_branch(
+    void* user_data, loom_op_t* op, const loom_walk_context_t* context,
+    loom_walk_result_t* out_result) {
+  (void)context;
+  *out_result = LOOM_WALK_CONTINUE;
+  if (!op->region_count) {
+    return iree_ok_status();
+  }
+  loom_low_target_legalize_branch_folding_t* folding = user_data;
+  loom_rewriter_t* rewriter = &folding->driver->rewriter;
+  const loom_op_vtable_t* vtable = loom_op_vtable(rewriter->module, op);
+  if (!vtable || !vtable->region_branch || !vtable->canonicalize) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_rewriter_propagate_value_facts(rewriter));
+  loom_value_id_t selector =
+      loom_op_operands(op)[vtable->region_branch->selector_operand_index];
+  if (!loom_value_facts_is_exact(
+          loom_rewriter_value_facts(rewriter, selector))) {
+    return iree_ok_status();
+  }
+  rewriter->flags = 0;
+  IREE_RETURN_IF_ERROR(vtable->canonicalize(op, rewriter));
+  if (iree_any_bit_set(rewriter->flags, LOOM_REWRITER_FLAG_CHANGED)) {
+    loom_greedy_rewrite_result_record_change(
+        folding->result, rewriter,
+        LOOM_GREEDY_REWRITE_CHANGE_FLAG_COUNT_MODIFIED_OP);
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_low_target_legalize_begin_iteration(
     void* user_data, loom_greedy_rewrite_driver_t* driver,
     loom_region_t* region, loom_greedy_rewrite_result_t* result,
     bool* out_changed) {
-  (void)region;
   *out_changed = false;
   loom_low_target_legalize_function_state_t* state =
       (loom_low_target_legalize_function_state_t*)user_data;
+  // Invocation summaries can prove a branch unreachable after ordinary source
+  // cleanup. Fold exact decisions before checking their contents, using the
+  // existing facts and dialect rewrite instead of another canonicalizer run.
+  // Postorder visits nested decisions before a selected arm moves into its
+  // parent. Flat functions and scopes without invocation seeds skip the walk.
+  if (driver->fact_table->seeds.word_count &&
+      driver->fact_table->regions.has_structured_summaries) {
+    const int64_t previous_modified = result->ops_modified;
+    loom_low_target_legalize_branch_folding_t folding = {
+        .driver = driver,
+        .result = result,
+    };
+    loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
+    IREE_RETURN_IF_ERROR(loom_walk_region(
+        driver->module, region, LOOM_WALK_POST_ORDER,
+        (loom_walk_callback_t){loom_low_target_legalize_fold_region_branch,
+                               &folding},
+        &walk_result));
+    *out_changed = result->ops_modified != previous_modified;
+    if (*out_changed) {
+      loom_low_target_legalize_reset_query_scope(state);
+      IREE_RETURN_IF_ERROR(
+          loom_rewriter_propagate_value_facts(&driver->rewriter));
+    }
+  }
   state->pending_packet_plan_values.count = 0;
   if (state->preflight.error_count != 0 ||
       state->legalization_context.vector_packet_policy == NULL ||
@@ -1823,7 +1885,7 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_target_legalize_function(
   const loom_greedy_rewrite_callbacks_t rewrite_callbacks = {
       .user_data = &state,
       .prepare_region = loom_low_target_legalize_prepare_rewriter,
-      .before_worklist = loom_low_target_legalize_packet_components,
+      .before_worklist = loom_low_target_legalize_begin_iteration,
       .rewrite_op = loom_low_target_legalize_rewrite_op,
       .changed = loom_low_target_legalize_changed,
   };
