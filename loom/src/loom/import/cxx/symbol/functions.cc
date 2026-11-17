@@ -430,8 +430,9 @@ void Functions::prepare_analysis(cxx::FunctionSymbol* function, Types& types,
   if (!body && !defaulted_destructor) {
     return;
   }
-  auto analysis = std::make_unique<ControlFlow>(
-      unit_, diagnostics_, types, body ? body->statement : nullptr, concrete);
+  auto analysis =
+      std::make_unique<ControlFlow>(unit_, diagnostics_, types, imports_,
+                                    body ? body->statement : nullptr, concrete);
   if (exported_.contains(concrete) || template_definitions_.lookup(concrete)) {
     analysis->require_pointer_result_storage();
   }
@@ -867,16 +868,24 @@ void Functions::collect(cxx::DeclarationAST* declaration,
           cxx::symbol_cast<cxx::FunctionSymbol>(declarator->symbol);
       bool is_module_metadata = admit_declaration(
           declarator->symbol, simple->attributeList, declarator, scope);
-      if (scope != DeclarationScope::Namespace) {
+      const bool imported_object_method =
+          function && imports_.object_method(function);
+      if (scope != DeclarationScope::Namespace && !imported_object_method) {
         continue;
       }
       if (function) {
-        intrinsic_declarations_.push_back(
-            {function, simple->attributeList, declarator});
-        launches_.declaration(function, simple->attributeList);
+        if (!imported_object_method) {
+          intrinsic_declarations_.push_back(
+              {function, simple->attributeList, declarator});
+          launches_.declaration(function, simple->attributeList);
+        }
         if (!function->isTemplatePattern()) {
-          declarations_.try_emplace(function->canonical(),
-                                    FunctionDeclaration{function, declarator});
+          declarations_.try_emplace(
+              function->canonical(),
+              FunctionDeclaration{function, declarator,
+                                  imported_object_method
+                                      ? ImplicitObjectABI::BorrowedHandle
+                                      : ImplicitObjectABI::None});
         }
       }
       auto* variable =
@@ -1363,17 +1372,25 @@ loom_symbol_ref_t Functions::retain(FunctionInstance instance,
   }
   auto* body = definition(function);
   if (!body) {
-    if (instance.receiver_abi != ImplicitObjectABI::None) {
-      diagnostics_.reject(
-          unit_, owner, "non-static member call requires a source definition");
-    }
     auto found = declarations_.find(function->canonical());
     if (found == declarations_.end()) {
+      if (instance.receiver_abi != ImplicitObjectABI::None) {
+        diagnostics_.reject(
+            unit_, owner,
+            "non-static member call requires a source definition");
+      }
       diagnostics_.reject(
           unit_, owner,
           "call requires a concrete namespace-scope function declaration");
     }
     const auto& declaration = found->second;
+    if (instance.receiver_abi != declaration.receiver_abi) {
+      diagnostics_.reject(
+          unit_, owner,
+          declaration.receiver_abi == ImplicitObjectABI::BorrowedHandle
+              ? "protocol method requires a borrowed handle receiver"
+              : "non-static member call requires a source definition");
+    }
     if (cxx::has_internal_linkage(declaration.function)) {
       diagnostics_.reject(
           unit_, owner,
@@ -1386,7 +1403,7 @@ loom_symbol_ref_t Functions::retain(FunctionInstance instance,
                                  owner ? owner : declaration.source);
     }
     auto callee = create_symbol(
-        {declaration.function->canonical(), ImplicitObjectABI::None},
+        {declaration.function->canonical(), declaration.receiver_abi},
         declaration.source);
     pending_declarations_.push_back(declaration);
     return callee;
@@ -1425,6 +1442,15 @@ loom_symbol_ref_t Functions::create_symbol(FunctionInstance instance,
   if (auto found = explicit_names_.find(function->canonical());
       found != explicit_names_.end()) {
     spelling = found->second;
+  } else if (const auto* import = imports_.object_method(function)) {
+    IREE_ASSERT(import->symbol);
+    spelling = import->module + "." + *import->symbol;
+    if (!is_symbol_name(spelling)) {
+      diagnostics_.reject(unit_, source,
+                          "protocol method import names must form a valid "
+                          "Loom symbol");
+    }
+    names_.reserve(spelling, source);
   } else if (exported_.contains(function) ||
              external_.contains(function->canonical())) {
     bool overloaded = false;
@@ -1474,6 +1500,8 @@ loom_symbol_ref_t Functions::create_symbol(FunctionInstance instance,
       spelling += "_value";
     } else if (instance.receiver_abi == ImplicitObjectABI::Storage) {
       spelling += "_storage";
+    } else if (instance.receiver_abi == ImplicitObjectABI::BorrowedHandle) {
+      spelling += "_borrowed_handle";
     }
     spelling = names_.unique(std::move(spelling));
   }
@@ -1607,6 +1635,19 @@ std::optional<ImplicitObjectParameter> Functions::implicit_object(
   if (instance.receiver_abi == ImplicitObjectABI::None) {
     return std::nullopt;
   }
+  if (const auto* import = imports_.object_method(symbol)) {
+    if (instance.receiver_abi != ImplicitObjectABI::BorrowedHandle) {
+      diagnostics_.reject(
+          unit_, source, "protocol method requires a borrowed handle receiver");
+    }
+    return ImplicitObjectParameter{
+        instance.receiver_abi, import->receiver_payload->type(), {}, nullptr};
+  }
+  if (instance.receiver_abi == ImplicitObjectABI::BorrowedHandle) {
+    diagnostics_.reject(unit_, source,
+                        "borrowed handle receivers require an imported "
+                        "protocol method");
+  }
   auto* object_type = cxx_import::implicit_object_type(unit_, symbol);
   if (!object_type) {
     diagnostics_.reject(unit_, source,
@@ -1718,7 +1759,13 @@ BoundSignature Functions::bind_callable_signature(
     append_source(unit_.typeTraits().add_pointer(signature->returnType()));
     argument_count = kPointerPartition.component_count;
   }
-  if (receiver && receiver->projection) {
+  if (receiver && receiver->abi == ImplicitObjectABI::BorrowedHandle) {
+    const auto* import = imports_.object_method(symbol);
+    IREE_ASSERT(import && import->receiver_payload);
+    append_native(types.borrowed_object_type(import->receiver_payload, source));
+    receiver_argument_count = 1;
+    argument_count = 1;
+  } else if (receiver && receiver->projection) {
     for (const auto& group : receiver->projection->inputs) {
       append_source(group.type);
     }
@@ -1920,6 +1967,7 @@ void Functions::build_declarations(Types& types, Locations& locations,
   for (const auto& declaration : pending_declarations_) {
     auto* symbol = declaration.function;
     auto* source = declaration.source;
+    const FunctionInstance instance = {symbol, declaration.receiver_abi};
     launches_.reject_ordinary_function(symbol);
     if (function_contracts_.has_requirements(symbol)) {
       diagnostics_.reject(
@@ -2003,9 +2051,8 @@ void Functions::build_declarations(Types& types, Locations& locations,
     // Dependent type payloads in this signature must outlive the declaration
     // builder call below. Bind the collected source occurrence: an implicit
     // builtin libcall can be canonical without owning parameter symbols.
-    auto bound_signature =
-        bind_callable_signature({symbol, ImplicitObjectABI::None}, source,
-                                types, builder, arguments, results, predicates);
+    auto bound_signature = bind_callable_signature(
+        instance, source, types, builder, arguments, results, predicates);
     const loom_attribute_t source_signature = build_c_source_signature(
         unit_, diagnostics_, module_, symbol, source, types);
     loom_func_decl_build_flags_t flags = 0;
@@ -2052,8 +2099,7 @@ void Functions::build_declarations(Types& types, Locations& locations,
         annotated(symbol, "device") ? LOOM_FUNC_CC_DEVICE : 0,
         /*effect_contract=*/0, temperature, inline_policy, target,
         source_signature, /*abi=*/0, {}, LOOM_STRING_ID_INVALID, {},
-        callees_.at({symbol->canonical(), ImplicitObjectABI::None}),
-        arguments.data(), arguments.size(),
+        callees_.at(instance), arguments.data(), arguments.size(),
         iree_make_const_byte_span(bound_signature.signature_flags.data(),
                                   bound_signature.signature_flags.size()),
         results.data(), results.size(), nullptr, 0, predicates.data(),

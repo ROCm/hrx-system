@@ -20,6 +20,7 @@
 #include <limits>
 #include <optional>
 
+#include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/source/objects.h"
@@ -50,24 +51,7 @@ bool same_subobject_path(cxx::List<cxx::Symbol*>* left,
 }
 
 const cxx::Attribute* type_binding(cxx::ClassSymbol* source) {
-  auto find = [](cxx::ClassSymbol* symbol) -> const cxx::Attribute* {
-    if (!symbol || !symbol->attributes()) {
-      return nullptr;
-    }
-    for (const auto& attribute : *symbol->attributes()) {
-      if (attribute.attributeNamespace && attribute.name &&
-          attribute.attributeNamespace->name() == "loom" &&
-          attribute.name->name() == "type") {
-        return &attribute;
-      }
-    }
-    return nullptr;
-  };
-  if (auto* binding = find(source)) {
-    return binding;
-  }
-  auto* primary = cxx::class_template_of(source);
-  return primary == source ? nullptr : find(primary);
+  return template_annotation(source, "type");
 }
 
 const cxx::ParameterPackSymbol* template_argument_pack(
@@ -620,6 +604,10 @@ const Partition* Types::special(const cxx::Type* input, cxx::AST* owner) {
     return nullptr;
   }
   auto* source = type->definition();
+  if (template_annotation(source, "protocol")) {
+    diagnostics_.reject(
+        unit_, owner, "protocol types are compile-time-only method contracts");
+  }
   auto* binding = type_binding(source);
   if (!binding) {
     return nullptr;
@@ -1768,6 +1756,13 @@ loom_type_t Types::get(const cxx::Type* input, cxx::AST* ast) {
         diagnostics_.reject(
             unit_, ast,
             "function pointers have no object pointer representation");
+      }
+      auto* pointee =
+          cxx::type_cast<cxx::ClassType>(unqualified(pointer->elementType()));
+      if (pointee && template_annotation(pointee->definition(), "protocol")) {
+        diagnostics_.reject(
+            unit_, ast,
+            "protocol types are compile-time-only method contracts");
       }
       return loom_type_buffer();
     }

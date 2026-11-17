@@ -39,6 +39,21 @@ void Types::declare_object_import(cxx::ClassSymbol* source,
                                   namespace_id, payload_id, symbol.symbol_id));
 }
 
+loom_type_t Types::borrowed_object_type(cxx::ClassSymbol* payload,
+                                        cxx::AST* owner) const {
+  auto found = object_imports_.find(payload->canonical());
+  if (found == object_imports_.end()) {
+    diagnostics_.reject(
+        unit_, owner,
+        "object payload requires an explicit loom::import identity");
+  }
+  const auto identity = found->second;
+  return loom_type_reference(LOOM_REFERENCE_OWNERSHIP_BORROWED,
+                             loom_type_reference_namespace_id(identity),
+                             loom_type_reference_name_id(identity),
+                             loom_type_reference_declaration_id(identity));
+}
+
 const ObjectPartition* Types::object(const cxx::ClassType* input,
                                      loom_reference_ownership_t ownership,
                                      cxx::AST* owner) {
@@ -67,17 +82,11 @@ const ObjectPartition* Types::object(const cxx::ClassType* input,
     diagnostics_.reject(unit_, owner,
                         "object handles require one imported payload class");
   }
-  auto found = object_imports_.find(payload->symbol()->canonical());
-  if (found == object_imports_.end()) {
-    diagnostics_.reject(
-        unit_, owner,
-        "object payload requires an explicit loom::import identity");
-  }
   auto result = std::make_unique<ObjectPartition>();
   result->kind = ValueKind::Object;
   result->component_count = 1;
   result->source = source;
-  const auto identity = found->second;
+  const auto identity = borrowed_object_type(payload->symbol(), owner);
   result->type =
       loom_type_reference(ownership, loom_type_reference_namespace_id(identity),
                           loom_type_reference_name_id(identity),

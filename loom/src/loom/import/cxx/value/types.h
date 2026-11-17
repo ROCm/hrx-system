@@ -611,6 +611,11 @@ class Types {
                              std::string_view payload_name,
                              std::string_view declaration_name);
 
+  // Exact borrowed reference type for one admitted incomplete payload. This
+  // bypasses any source proxy layout while preserving nominal object identity.
+  loom_type_t borrowed_object_type(cxx::ClassSymbol* payload,
+                                   cxx::AST* owner) const;
+
  private:
   struct ObjectProperties {
     // Whether any owned component lacks a native byte-storage representation.

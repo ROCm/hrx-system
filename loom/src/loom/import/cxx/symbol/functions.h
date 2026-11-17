@@ -62,6 +62,8 @@ enum class ImplicitObjectABI {
   Value,
   // Original pointer root and byte offset with in-place storage effects.
   Storage,
+  // Imported payload identity transported as one borrowed managed handle.
+  BorrowedHandle,
 };
 
 // One reachable source function under its native implicit-object transport.
@@ -78,7 +80,8 @@ struct ParameterProjection;
 struct ImplicitObjectParameter {
   // Native transport selected by the call site's owned representation.
   ImplicitObjectABI abi;
-  // Cv-qualified complete source object type governing member observations.
+  // Cv-qualified complete source object for Value/Storage, or the incomplete
+  // imported payload named by a BorrowedHandle receiver.
   const cxx::Type* object_type;
   // Exact top-level fields replaced by a value receiver, in declaration order.
   std::span<cxx::Symbol* const> written_fields;
@@ -229,6 +232,20 @@ class Functions {
   bool is_command_program(cxx::FunctionSymbol* function) const {
     return command_programs_.contains(function);
   }
+  // Returns the original borrowed handle selected by an imported object
+  // method's compile-time arrow adapter, or no value for ordinary calls.
+  std::optional<ObjectMethodReceiver> object_method_receiver(
+      cxx::FunctionSymbol* function, cxx::CallExpressionAST* call) const {
+    return imports_.object_method_receiver(function, call);
+  }
+  // Whether this bodyless operator is the terminal protocol arrow
+  // adapter and cannot be evaluated as an ordinary function call.
+  bool is_protocol_operator(cxx::FunctionSymbol* function) const {
+    return imports_.is_protocol_operator(function);
+  }
+  // Collected import contracts shared with fallback body analysis performed
+  // during translation.
+  const Imports& imports() const { return imports_; }
   // Returns the retained command source/native signature projection.
   const StagedSignatureProjection& command_program(
       cxx::FunctionSymbol* function, Types& types, cxx::AST* owner) {
@@ -373,8 +390,11 @@ class Functions {
     cxx::FunctionSymbol* function;
     // Declarator owning source location and late type diagnostics.
     cxx::InitDeclaratorAST* source;
+    // Native implicit-object transport selected during declaration admission.
+    ImplicitObjectABI receiver_abi = ImplicitObjectABI::None;
   };
-  // Namespace prototypes available to satisfy reachable bodyless calls.
+  // Prototypes available to satisfy reachable bodyless ordinary and imported
+  // object-method calls.
   std::unordered_map<cxx::FunctionSymbol*, FunctionDeclaration> declarations_;
   struct RetainedRoot {
     // Semantic callable selected independently of visibility and root lists.

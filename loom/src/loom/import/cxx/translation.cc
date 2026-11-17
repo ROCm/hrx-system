@@ -1635,8 +1635,8 @@ class Translator final : private Initialization::Evaluation {
     if (defined.control) {
       control_ = defined.control;
     } else {
-      owned_control_.emplace(unit_, diagnostics_, types_, body,
-                             defined.source->symbol);
+      owned_control_.emplace(unit_, diagnostics_, types_, functions_.imports(),
+                             body, defined.source->symbol);
       control_ = &*owned_control_;
     }
     immutable_objects_.retain_locals(defined.source->symbol,
@@ -4515,6 +4515,17 @@ class Translator final : private Initialization::Evaluation {
 
   ReceiverArgument receiver_argument(cxx::CallExpressionAST* call,
                                      cxx::FunctionSymbol* function) {
+    if (auto imported = functions_.object_method_receiver(function, call)) {
+      return ReceiverArgument{
+          .abi = ImplicitObjectABI::BorrowedHandle,
+          .value = expression(imported->handle),
+          .record = nullptr,
+          .target = std::nullopt,
+          .current = false,
+          .written_fields = {},
+          .temporary = std::nullopt,
+      };
+    }
     auto* base = unwrap_expression(call->baseExpression);
     auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(base);
     auto* id = cxx::ast_cast<cxx::IdExpressionAST>(base);
@@ -4546,6 +4557,9 @@ class Translator final : private Initialization::Evaluation {
     if (!receiver) {
       return 0;
     }
+    if (receiver->abi == ImplicitObjectABI::BorrowedHandle) {
+      return 1;
+    }
     if (receiver->abi == ImplicitObjectABI::Storage) {
       return kPointerPartition.component_count;
     }
@@ -4555,6 +4569,11 @@ class Translator final : private Initialization::Evaluation {
   }
 
   Value materialize_receiver(ReceiverArgument& receiver, cxx::AST* owner) {
+    if (receiver.abi == ImplicitObjectABI::BorrowedHandle) {
+      IREE_ASSERT(receiver.value);
+      IREE_ASSERT_EQ(receiver.value->partition().component_count, 1u);
+      return *receiver.value;
+    }
     if (receiver.abi == ImplicitObjectABI::Storage) {
       IREE_ASSERT(receiver.value && receiver.value->is_pointer());
       return *receiver.value;
@@ -4619,6 +4638,11 @@ class Translator final : private Initialization::Evaluation {
     }
     if (function->hasExplicitObjectParameter()) {
       fail(call, "explicit object member functions are not admitted");
+    }
+    if (functions_.is_protocol_operator(function)) {
+      fail(call,
+           "protocol operator-> is only valid as imported method "
+           "syntax");
     }
     if (!destination && functions_.result_requires_storage(function)) {
       return {

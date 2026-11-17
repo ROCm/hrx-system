@@ -9,11 +9,20 @@
 
 namespace loom {
 
+// Compile-time-only method contract for one imported payload. Specializations
+// declare bodyless imported methods; no protocol value exists at runtime.
+template <class T>
+class [[loom::protocol]] protocol;
+
 // A borrowed handle to an incomplete payload declared with loom::import.
 // Copying the handle preserves the borrow; it cannot extend payload lifetime.
 // The handle exposes neither the payload's layout nor a native address.
 template <class T>
 class [[loom::type("ptr")]] ptr {
+ public:
+  protocol<T>* operator->() const;
+
+ private:
   // Source representation retaining ordinary trivial-copy semantics.
   T* data_;
 };
@@ -95,6 +104,11 @@ class ref {
   [[loom::inline]]
   ptr<T> get() const {
     return detail::object_borrow(owner_);
+  }
+
+  [[loom::inline]]
+  ptr<T> operator->() const {
+    return get();
   }
 
  private:

@@ -48,6 +48,17 @@ inline const cxx::Attribute* annotation(cxx::Symbol* symbol,
   return semantic_attribute(symbol, "loom", spelling);
 }
 
+// Returns a Loom annotation attached to a class specialization or its primary
+// template. Specialization annotations take precedence when both are present.
+inline const cxx::Attribute* template_annotation(cxx::ClassSymbol* source,
+                                                 std::string_view spelling) {
+  if (auto* attribute = annotation(source, spelling)) {
+    return attribute;
+  }
+  auto* primary = cxx::class_template_of(source);
+  return primary == source ? nullptr : annotation(primary, spelling);
+}
+
 // Source positions with distinct binding owners. Namespace declarations,
 // function prototypes, parameters and automatic declarations each admit their
 // own leading attributes; all other source positions are local and unowned.

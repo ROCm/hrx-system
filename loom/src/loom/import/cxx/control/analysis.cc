@@ -25,6 +25,7 @@
 #include <string_view>
 #include <utility>
 
+#include "loom/import/cxx/binding/imports.h"
 #include "loom/import/cxx/control/call_aliases.h"
 #include "loom/import/cxx/control/object_identity.h"
 #include "loom/import/cxx/source/attributes.h"
@@ -411,11 +412,12 @@ std::optional<bool> constant_truth(cxx::TranslationUnit& unit,
 }  // namespace
 
 ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
-                         Types& types, cxx::StatementAST* body,
-                         cxx::FunctionSymbol* function)
+                         Types& types, const Imports& imports,
+                         cxx::StatementAST* body, cxx::FunctionSymbol* function)
     : unit_(unit),
       diagnostics_(diagnostics),
       types_(types),
+      imports_(imports),
       function_(function),
       temporary_origins_(unit, types) {
   if (function_) {
@@ -2187,6 +2189,16 @@ void ControlFlow::visit(cxx::CallExpressionAST* ast) {
     diagnostics_.reject(unit_, ast, "virtual member dispatch is not admitted");
   }
   auto* function = direct_callee(ast);
+  auto object_receiver =
+      function ? imports_.object_method_receiver(function, ast) : std::nullopt;
+  if (object_receiver) {
+    accept(object_receiver->handle);
+    for (auto* argument : cxx::ListView{ast->expressionList}) {
+      accept(argument);
+    }
+    retain_object_method_call(ast, function, object_receiver->handle);
+    return;
+  }
   if (!function) {
     cxx::ASTVisitor::visit(ast);
   } else {
@@ -2527,6 +2539,24 @@ void ControlFlow::retain_call(cxx::CallExpressionAST* call,
     }
   }
   retain_reference_receiver_write(retained);
+  retain_reference_arguments(retained);
+  calls_.push_back(std::move(retained));
+}
+
+void ControlFlow::retain_object_method_call(cxx::CallExpressionAST* call,
+                                            cxx::FunctionSymbol* function,
+                                            cxx::ExpressionAST* receiver) {
+  DirectCall retained = {
+      .function = function,
+      .source = call,
+      .arguments = {},
+      .receiver = retain_call_argument(receiver),
+      .current_receiver = false,
+      .storage_receiver = false,
+  };
+  for (auto* argument : cxx::ListView{call->expressionList}) {
+    retained.arguments.push_back(retain_call_argument(argument));
+  }
   retain_reference_arguments(retained);
   calls_.push_back(std::move(retained));
 }

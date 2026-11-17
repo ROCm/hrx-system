@@ -30,6 +30,18 @@ struct ImportBinding {
   std::optional<std::string> symbol;
   // Attribute owning diagnostics and source location provenance.
   cxx::AttributeAST* source;
+  // Imported payload supplied as a borrowed implicit object, or null for an
+  // ordinary namespace-scope function.
+  cxx::ClassSymbol* receiver_payload = nullptr;
+};
+
+// Original semantic handle selected by one compile-time protocol
+// arrow. The protocol pointer itself never acquires a native value.
+struct ObjectMethodReceiver {
+  // Source handle expression evaluated exactly once by the ordinary caller.
+  cxx::ExpressionAST* handle;
+  // Canonical imported payload shared by the handle and method declaration.
+  cxx::ClassSymbol* payload;
 };
 
 // An incomplete source payload naming an exact external object identity.
@@ -48,13 +60,28 @@ class Imports {
   Imports(cxx::TranslationUnit& unit, Diagnostics& diagnostics)
       : unit_(unit), diagnostics_(diagnostics) {}
 
-  // Admits an import on a namespace-scope callable or incomplete payload class.
+  // Admits an import on a namespace-scope callable, a protocol
+  // method, or an incomplete payload class.
   void declaration(cxx::Symbol* symbol,
                    cxx::List<cxx::AttributeSpecifierAST*>* attributes,
                    cxx::AST* owner);
 
   // Returns the runtime binding for this canonical function, when present.
   const ImportBinding* lookup(cxx::FunctionSymbol* function) const;
+
+  // Returns the import when the function is a method on one
+  // protocol<T> specialization, or null for an ordinary import.
+  const ImportBinding* object_method(cxx::FunctionSymbol* function) const;
+
+  // Recognizes the frontend-inserted terminal operator-> call for an imported
+  // object method and returns its original borrowed handle. Non-method calls
+  // return no value; malformed method receivers diagnose.
+  std::optional<ObjectMethodReceiver> object_method_receiver(
+      cxx::FunctionSymbol* function, cxx::CallExpressionAST* call) const;
+
+  // Whether this bodyless operator-> is the compile-time adapter from a
+  // borrowed object handle to its matching protocol.
+  bool is_protocol_operator(cxx::FunctionSymbol* function) const;
 
   // Object declarations in source order, independent of hash-table iteration.
   std::span<const ObjectImport> objects() const { return objects_; }
