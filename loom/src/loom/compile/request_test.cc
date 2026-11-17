@@ -910,7 +910,7 @@ kernel.def @Untargeted() {
   EXPECT_EQ(request.target_profile, &kTargetProfile);
   EXPECT_EQ(request.target_emitter, &kDiagnosticEmitter);
   EXPECT_EQ(request.selection.target_fact_type, &loom_test_target_fact_type);
-  EXPECT_EQ(request.selection.untargeted_kernel_count, 1u);
+  EXPECT_EQ(request.selection.unbound_kernel_count, 1u);
   EXPECT_EQ(request.selection.roots.count, 2u);
 }
 

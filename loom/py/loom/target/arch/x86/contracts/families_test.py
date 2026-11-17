@@ -744,6 +744,10 @@ def test_scalar_compare_select_rules_cover_native_carrier_matrix() -> None:
         else:
             assert emit.operands["rhs"] == ValueRef.operand("rhs")
         result_width = 32 if result_type == gpr32_result_types else 64
+        assert (
+            Guard.low_value_register_class("result", f"x86.gpr{result_width}")
+            in select.guards
+        )
         actual_cells.add(
             (
                 rule.source_op,

@@ -93,7 +93,7 @@ func.def @wide_word_snapshot(%input: buffer) -> (i32, i32, i32) {
 // ----
 low.func.def target<x86.avx512.core> abi(object_function) @wide_word_snapshot(%input: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
   %22 = vmovdqu32.load %input {disp32 = 0}
-  %tail = mov.load.gpr32 %input {disp32 = 64}
+  %23 = mov.load.gpr32 %input {disp32 = 64}
   %replacement = mov.imm32 0
   mov.store.gpr32 %replacement, %input {disp32 = 28}
   mov.store.gpr32 %replacement, %input {disp32 = 32}
@@ -102,5 +102,5 @@ low.func.def target<x86.avx512.core> abi(object_function) @wide_word_snapshot(%i
   %first = vpextrd.xmm %25, 3
   %27 = vextractf32x4.xmm %22, 2
   %second = vpextrd.xmm %27, 0
-  return %first, %second, %tail
+  return %first, %second, %23
 }

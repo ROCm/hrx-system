@@ -164,18 +164,18 @@ func.def target(@target) @wide_tail(%input: buffer, %output: buffer) {
 
 // ----
 low.func.def target<x86.avx2.core>(@target) abi(object_function) @wide_tail(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
-  %22 = vmovsd.load.xmm %input {disp32 = 64}
-  %23 = vmovss.load.xmm %input {disp32 = 72}
-  %24 = vmovdqu32.load.ymm %input {disp32 = 0}
-  %25 = vroundps.ymm %24, 9
-  %26 = vmovdqu32.load.ymm %input {disp32 = 32}
+  %24 = vmovsd.load.xmm %input {disp32 = 64}
+  %25 = vpbroadcastd.load.xmm %input {disp32 = 72}
+  %26 = vmovdqu32.load.ymm %input {disp32 = 0}
   %27 = vroundps.ymm %26, 9
-  vmovdqu32.store.ymm %25, %output {disp32 = 0}
-  vmovdqu32.store.ymm %27, %output {disp32 = 32}
-  %28 = vroundps.xmm %22, 9
-  vmovsd.store.xmm %28, %output {disp32 = 64}
-  %29 = vroundss.xmm %23, %23, 9
-  %30 = vpermilps.xmm %29, 0
-  vmovss.store.xmm %30, %output {disp32 = 72}
+  %28 = vmovdqu32.load.ymm %input {disp32 = 32}
+  %29 = vroundps.ymm %28, 9
+  vmovdqu32.store.ymm %27, %output {disp32 = 0}
+  vmovdqu32.store.ymm %29, %output {disp32 = 32}
+  %30 = vroundps.xmm %24, 9
+  vmovsd.store.xmm %30, %output {disp32 = 64}
+  %31 = vroundss.xmm %25, %25, 9
+  %32 = vpermilps.xmm %31, 0
+  vmovss.store.xmm %32, %output {disp32 = 72}
   return
 }

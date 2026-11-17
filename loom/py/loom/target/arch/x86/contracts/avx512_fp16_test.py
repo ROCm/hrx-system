@@ -338,8 +338,14 @@ def test_conversions_cover_every_representable_native_width() -> None:
         )
     }
     assert scalar_pairs == {
-        scalar_conversion.scalar_extf: {(Scalar("f16"), Scalar("f32"))},
-        scalar_conversion.scalar_fptrunc: {(Scalar("f32"), Scalar("f16"))},
+        scalar_conversion.scalar_extf: {
+            (Scalar("f16"), Scalar("f32")),
+            (Scalar("f16"), Scalar("f64")),
+        },
+        scalar_conversion.scalar_fptrunc: {
+            (Scalar("f32"), Scalar("f16")),
+            (Scalar("f64"), Scalar("f16")),
+        },
     }
 
     vector_pairs = {
@@ -355,12 +361,18 @@ def test_conversions_cover_every_representable_native_width() -> None:
             (Vector("f16", lanes=4), Vector("f32", lanes=4)),
             (Vector("f16", lanes=8), Vector("f32", lanes=8)),
             (Vector("f16", lanes=16), Vector("f32", lanes=16)),
+            (Vector("f16", lanes=2), Vector("f64", lanes=2)),
+            (Vector("f16", lanes=4), Vector("f64", lanes=4)),
+            (Vector("f16", lanes=8), Vector("f64", lanes=8)),
         },
         vector.vector_fptrunc: {
             (Vector("f32", lanes=2), Vector("f16", lanes=2)),
             (Vector("f32", lanes=4), Vector("f16", lanes=4)),
             (Vector("f32", lanes=8), Vector("f16", lanes=8)),
             (Vector("f32", lanes=16), Vector("f16", lanes=16)),
+            (Vector("f64", lanes=2), Vector("f16", lanes=2)),
+            (Vector("f64", lanes=4), Vector("f16", lanes=4)),
+            (Vector("f64", lanes=8), Vector("f16", lanes=8)),
         },
     }
 
@@ -448,6 +460,34 @@ def test_lane_movement_preserves_the_xmm_scalar_carrier() -> None:
             (Vector("f16", lanes=32), Scalar("f16")),
         }
         assert all(transport_key in _descriptor_keys(rule) for rule in rules)
+
+
+def test_singleton_transport_aliases_the_native_half_carrier() -> None:
+    for source_op, vector_field, scalar_field in (
+        (vector.vector_splat, "result", "scalar"),
+        (vector.vector_from_elements, "result", "elements"),
+        (vector.vector_extract, "source", "result"),
+        (vector.vector_insert, "dest", "value"),
+    ):
+        rules = tuple(
+            case
+            for case in X86_AVX512_FP16_CONTRACT_FRAGMENT.cases
+            if isinstance(case, ValueAliasRule) and case.source_op is source_op
+        )
+        assert len(rules) == 1
+        assert _value_type(rules[0], vector_field) == Vector("f16", lanes=1)
+        assert _value_type(rules[0], scalar_field) == Scalar("f16")
+
+
+def test_singleton_arithmetic_uses_scalar_instructions() -> None:
+    for family in AVX512_FP16_SCALAR_FLOAT_BINARY_FAMILIES:
+        rules = tuple(
+            rule
+            for rule in _rules_for(getattr(vector, f"vector_{family.source_operation}"))
+            if _value_type(rule, "result") == Vector("f16", lanes=1)
+        )
+        assert len(rules) == 1
+        assert _descriptor_keys(rules[0]) == (f"x86.avx512_fp16.{family.mnemonic}.xmm",)
 
 
 def test_zero_insert_covers_every_wide_native_fp16_lane() -> None:

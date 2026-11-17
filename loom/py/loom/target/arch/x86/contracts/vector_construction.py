@@ -304,6 +304,7 @@ def _vector_splat_rules(
                     broadcast_operand="value",
                     lane_type=lane_type,
                     priority=priority,
+                    scalar_register_class=f"x86.gpr{max(32, element.bit_width)}",
                     result_register_class=carrier.register_class,
                 )
             )

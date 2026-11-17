@@ -197,3 +197,44 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @scalar_partial_field_width(%i
   %value = s_bfe_i32_lit_low16 %input {imm32 = 1114112}
   return %value
 }
+
+// ====
+
+amdgpu.target<gfx1170> @target
+
+// Byte and packed decodes need only the selected half, including SGPR sources.
+low.func.def target<amdgpu.rdna4m.core>(@target) @partial_float8_decodes(%uniform: reg<amdgpu.sgpr>, %varying: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>) asm {
+  %packed = v_cvt_pk_fp8_f32_low %varying, %varying
+  %first = v_cvt_f32_fp8 %packed
+  %second = v_cvt_f32_fp8_byte1 %packed
+  %pair = v_cvt_pk_f32_fp8 %packed
+  %uniform_half = s_cvt_f16_f32 %uniform
+  %scalar = v_cvt_f32_bf8 %uniform_half
+  return %first, %second, %pair, %scalar
+}
+
+// ====
+
+amdgpu.target<gfx1170> @target
+
+low.func.def target<amdgpu.rdna4m.core>(@target) @float8_high_decodes_need_high_part(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
+  %packed = v_cvt_pk_fp8_f32_low %input, %input
+  // ERROR@+1: DOMINANCE/011 {op_name="amdgpu.v_cvt_f32_fp8.ocp.byte2", field_name="input"}
+  %third = v_cvt_f32_fp8_byte2 %packed
+  // ERROR@+1: DOMINANCE/011 {op_name="amdgpu.v_cvt_f32_bf8.ocp.byte3", field_name="input"}
+  %fourth = v_cvt_f32_bf8_byte3 %packed
+  // ERROR@+1: DOMINANCE/011 {op_name="amdgpu.v_cvt_pk_f32_fp8.ocp.high", field_name="input"}
+  %pair = v_cvt_pk_f32_fp8_high %packed
+  return %third, %fourth, %pair
+}
+
+// ====
+
+amdgpu.target<gfx1170> @target
+
+low.func.def target<amdgpu.rdna4m.core>(@target) @partial_unsigned_byte_decodes(%input: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %half = s_cvt_f16_f32 %input
+  %first = v_cvt_f32_ubyte0 %half
+  %second = v_cvt_f32_ubyte1 %half
+  return %first, %second
+}

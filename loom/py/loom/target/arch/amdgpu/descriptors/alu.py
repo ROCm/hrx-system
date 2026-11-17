@@ -6016,10 +6016,33 @@ def _v_pack_b32_f16_overlay() -> AmdgpuDescriptorOverlay:
     )
 
 
-_PACKED8_SOURCE_SIZE_REASON = "packed8-conversion-reads-byte-lanes-of-b32-source"
+_BYTE_CONVERSION_SOURCE_SIZE_REASON = "conversion-reads-selected-halfword-of-source"
 # Compact packed conversion sources use bit 7 to select a register half,
 # leaving seven bits for the physical register index.
 _PACKED8_COMPACT_SOURCE_ADDRESSABLE_UNIT_COUNT = 128
+
+
+def _byte_source_operand(byte_selector: int) -> Operand:
+    # Register definedness tracks halfwords; each selected byte is wholly
+    # contained in one half, as are the aligned packed conversion pairs.
+    return Operand(
+        "input",
+        OperandRole.OPERAND,
+        (
+            RegClassAlt(
+                _REG_SGPR,
+                register_part=(
+                    _REG_PART_SGPR_LOW16 if byte_selector < 2 else _REG_PART_SGPR_HIGH16
+                ),
+            ),
+            RegClassAlt(
+                _REG_VGPR,
+                register_part=(
+                    _REG_PART_VGPR_LOW16 if byte_selector < 2 else _REG_PART_VGPR_HIGH16
+                ),
+            ),
+        ),
+    )
 
 
 def _v_cvt_f32_packed8_overlay(
@@ -6036,8 +6059,8 @@ def _v_cvt_f32_packed8_overlay(
             AmdgpuOperandOverlay("VDST", _vgpr_result()),
             AmdgpuOperandOverlay(
                 "SRC0",
-                _sgpr_vgpr_operand("input"),
-                size_exception_reason=_PACKED8_SOURCE_SIZE_REASON,
+                _byte_source_operand(0),
+                size_exception_reason=_BYTE_CONVERSION_SOURCE_SIZE_REASON,
             ),
         ),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
@@ -6059,13 +6082,12 @@ def _v_cvt_pk_f32_packed8_overlay(
             AmdgpuOperandOverlay(
                 "SRC0",
                 replace(
-                    _sgpr_vgpr_operand("input"),
+                    _byte_source_operand(0),
                     address_map_kind=OperandAddressMapKind.LOW_SUBSET,
                     addressable_unit_count=(
                         _PACKED8_COMPACT_SOURCE_ADDRESSABLE_UNIT_COUNT
                     ),
                 ),
-                size_exception_reason=_PACKED8_SOURCE_SIZE_REASON,
             ),
         ),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
@@ -6094,7 +6116,7 @@ def _v_cvt_pk_f16_packed8_overlay(
                         _PACKED8_COMPACT_SOURCE_ADDRESSABLE_UNIT_COUNT
                     ),
                 ),
-                size_exception_reason=_PACKED8_SOURCE_SIZE_REASON,
+                size_exception_reason=_BYTE_CONVERSION_SOURCE_SIZE_REASON,
             ),
         ),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
@@ -6135,8 +6157,8 @@ def _v_cvt_f32_packed8_byte_overlay(
             AmdgpuOperandOverlay("VDST", _vgpr_result()),
             AmdgpuOperandOverlay(
                 "SRC0",
-                _sgpr_vgpr_operand("input"),
-                size_exception_reason=_PACKED8_SOURCE_SIZE_REASON,
+                _byte_source_operand(byte_selector),
+                size_exception_reason=_BYTE_CONVERSION_SOURCE_SIZE_REASON,
             ),
         ),
         fixed_encoding_fields=(
@@ -6170,8 +6192,7 @@ def _v_cvt_pk_f32_packed8_high_overlay(
             AmdgpuOperandOverlay("VDST", _vgpr_result(units=2)),
             AmdgpuOperandOverlay(
                 "SRC0",
-                _sgpr_vgpr_operand("input"),
-                size_exception_reason=_PACKED8_SOURCE_SIZE_REASON,
+                _byte_source_operand(2),
             ),
         ),
         fixed_encoding_fields=((op_sel_field, _PACKED8_BYTE_SELECTOR_OPSEL_VALUES[2]),),
@@ -6215,7 +6236,11 @@ def _v_cvt_f16_packed8_byte_overlay(
                     ),
                 ),
             ),
-            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),
+            AmdgpuOperandOverlay(
+                "SRC0",
+                _byte_source_operand(byte_selector),
+                size_exception_reason=_BYTE_CONVERSION_SOURCE_SIZE_REASON,
+            ),
         ),
         fixed_encoding_fields=(
             (("OPSEL", _PACKED8_BYTE_SELECTOR_OPSEL_VALUES[byte_selector]),)
@@ -6304,8 +6329,12 @@ def _v_cvt_scalef32_pk_packed8_overlay(
             AmdgpuOperandOverlay("VDST", _vgpr_result(units=result_units)),
             AmdgpuOperandOverlay(
                 "SRC0",
-                _sgpr_vgpr_operand("input"),
-                size_exception_reason=_PACKED8_SOURCE_SIZE_REASON,
+                _byte_source_operand(byte_selector),
+                size_exception_reason=(
+                    _BYTE_CONVERSION_SOURCE_SIZE_REASON
+                    if source_type == "fp4"
+                    else None
+                ),
             ),
             AmdgpuOperandOverlay("SRC1", _sgpr_vgpr_operand("scale")),
         ),
@@ -6740,7 +6769,11 @@ def _v_cvt_f32_ubyte_overlay(byte_ordinal: int) -> AmdgpuDescriptorOverlay:
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _vgpr_result()),
-            AmdgpuOperandOverlay("SRC0", _sgpr_vgpr_operand("input")),
+            AmdgpuOperandOverlay(
+                "SRC0",
+                _byte_source_operand(byte_ordinal),
+                size_exception_reason=_BYTE_CONVERSION_SOURCE_SIZE_REASON,
+            ),
         ),
         constraints=_REMATERIALIZABLE_RESULT_CONSTRAINTS,
         flags=(DescriptorFlag.DEAD_REMOVABLE,),

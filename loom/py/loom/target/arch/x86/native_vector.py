@@ -572,6 +572,20 @@ VCVTPS2PHX = _instruction(
     _IMMEDIATES_0,
     _encoding(_EVEX, _MAP_5, 1, 0, 0x1D, (128, 256, 512)),
 )
+VCVTPH2PD = _instruction(
+    "vcvtph2pd",
+    _UNARY,
+    _OPERANDS_13,
+    _IMMEDIATES_0,
+    _encoding(_EVEX, _MAP_5, 0, 0, 0x5A, (128, 256, 512)),
+)
+VCVTPD2PH = _instruction(
+    "vcvtpd2ph",
+    _UNARY,
+    _OPERANDS_13,
+    _IMMEDIATES_0,
+    _encoding(_EVEX, _MAP_5, 1, 1, 0x5A, (128, 256, 512)),
+)
 VCVTSH2SS = _instruction(
     "vcvtsh2ss",
     _NDS,
@@ -585,6 +599,20 @@ VCVTSS2SH = _instruction(
     _OPERANDS_16,
     _IMMEDIATES_0,
     _encoding(_EVEX, _MAP_5, 0, 0, 0x1D, (128,)),
+)
+VCVTSH2SD = _instruction(
+    "vcvtsh2sd",
+    _NDS,
+    _OPERANDS_16,
+    _IMMEDIATES_0,
+    _encoding(_EVEX, _MAP_5, 2, 0, 0x5A, (128,)),
+)
+VCVTSD2SH = _instruction(
+    "vcvtsd2sh",
+    _NDS,
+    _OPERANDS_16,
+    _IMMEDIATES_0,
+    _encoding(_EVEX, _MAP_5, 3, 1, 0x5A, (128,)),
 )
 VDIVPD = _instruction(
     "vdivpd",
@@ -2364,8 +2392,12 @@ AVX512_FP16_SCALAR_FLOAT_COMPARE = VCMPSH
 AVX512_FP16_CONVERSIONS = (
     VCVTPH2PSX,
     VCVTPS2PHX,
+    VCVTPH2PD,
+    VCVTPD2PH,
     VCVTSH2SS,
     VCVTSS2SH,
+    VCVTSH2SD,
+    VCVTSD2SH,
 )
 AVX_NE_CONVERT_MEMORY = (
     VBCSTNEBF162PS_MEMORY,

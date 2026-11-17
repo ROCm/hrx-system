@@ -595,13 +595,16 @@ func.def @roundtrip_f64_f16(%input: buffer, %output: buffer) {
   %scalar_step = index.constant 1 : index
   %packet_step = index.constant 4 : index
   %wide_step = index.constant 8 : index
+  %pair_step = index.constant 2 : index
   %packet_base = index.constant 512 : offset
   %wide_base = index.constant 1024 : offset
+  %pair_base = index.constant 1536 : offset
   %nan = scalar.constant 9221120237041090560 : i64
   %source = buffer.view %input[%base] : buffer -> view<64xf64>
   %scalar_output = buffer.view %output[%base] : buffer -> view<64xi64>
   %packet_output = buffer.view %output[%packet_base] : buffer -> view<64xi64>
   %wide_output = buffer.view %output[%wide_base] : buffer -> view<64xi64>
+  %pair_output = buffer.view %output[%pair_base] : buffer -> view<64xi64>
   scf.for %i = [%begin to %end step %scalar_step] {
     %value = view.load %source[%i] : view<64xf64> -> f64
     %narrow = scalar.fptrunc %value : f64 to f16
@@ -631,6 +634,16 @@ func.def @roundtrip_f64_f16(%input: buffer, %output: buffer) {
     %result = vector.select %is_nan, %wide_nan, %bits : vector<8xi64>
     vector.store %result, %wide_output[%i] : vector<8xi64>, view<64xi64>
   }
+  %pair_nan = vector.splat %nan : vector<2xi64>
+  scf.for %i = [%begin to %end step %pair_step] {
+    %value = vector.load %source[%i] : view<64xf64> -> vector<2xf64>
+    %narrow = vector.fptrunc %value : vector<2xf64> to vector<2xf16>
+    %wide = vector.extf %narrow : vector<2xf16> to vector<2xf64>
+    %bits = vector.bitcast %wide : vector<2xf64> to vector<2xi64>
+    %is_nan = vector.isnanf %wide : vector<2xf64> -> vector<2xi1>
+    %result = vector.select %is_nan, %pair_nan, %bits : vector<2xi64>
+    vector.store %result, %pair_output[%i] : vector<2xi64>, view<64xi64>
+  }
   func.return
 }
 
@@ -638,16 +651,16 @@ check.scenario @roundtrip_f64_f16_values {
   check.trial[8](%trial: index, %entropy: check.entropy) {
     %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
     %input = check.generate.random.uniform seed(%seed) range(-9223372036854775808 to 9223372036854775807) : tensor<64xi64>
-    %output = check.generate.fill value(-1) : tensor<192xi64>
-    check.compare<@roundtrip_f64_f16>(%input, %output) : (tensor<64xi64>, tensor<192xi64>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<192xi64>
+    %output = check.generate.fill value(-1) : tensor<256xi64>
+    check.compare<@roundtrip_f64_f16>(%input, %output) : (tensor<64xi64>, tensor<256xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<256xi64>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(4607184617823272928) step(1) : tensor<64xi64>
-    %output = check.generate.fill value(-1) : tensor<192xi64>
-    check.compare<@roundtrip_f64_f16>(%input, %output) : (tensor<64xi64>, tensor<192xi64>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<192xi64>
+    %output = check.generate.fill value(-1) : tensor<256xi64>
+    check.compare<@roundtrip_f64_f16>(%input, %output) : (tensor<64xi64>, tensor<256xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<256xi64>
     }
   }
   check.return

@@ -87,6 +87,7 @@ from loom.target.contracts import (
     GuardDiagnostic,
     Scalar,
     TypePattern,
+    ValueAliasRule,
     ValueProject,
     ValueRef,
     Vector,
@@ -101,6 +102,7 @@ _I16 = Scalar("i16")
 _I32 = Scalar("i32")
 _F16 = Scalar("f16")
 _F32 = Scalar("f32")
+_F64 = Scalar("f64")
 _REGISTER_SUFFIXES = {
     32: "xmm",
     64: "xmm",
@@ -227,43 +229,56 @@ def _scalar_rules() -> tuple[DescriptorRule, ...]:
             _F16,
             "x86.avx512_fp16.vcvtss2sh.xmm",
         ),
+        _scalar_float_conversion_rule(
+            scalar_conversion.scalar_extf,
+            _F16,
+            _F64,
+            "x86.avx512_fp16.vcvtsh2sd.xmm",
+        ),
+        _scalar_float_conversion_rule(
+            scalar_conversion.scalar_fptrunc,
+            _F64,
+            _F16,
+            "x86.avx512_fp16.vcvtsd2sh.xmm",
+        ),
     )
 
 
 def _vector_conversion_rules() -> tuple[DescriptorRule, ...]:
     cases: list[DirectDescriptorCase] = []
-    for lane_count, input_suffix, result_suffix in (
-        (2, "xmm", "xmm"),
-        (4, "xmm", "xmm"),
-        (8, "xmm", "ymm"),
-        (16, "ymm", "zmm"),
+    for element, element_bit_width, extend, truncate, lane_counts in (
+        ("f32", 32, "vcvtph2psx", "vcvtps2phx", (2, 4, 8, 16)),
+        ("f64", 64, "vcvtph2pd", "vcvtpd2ph", (2, 4, 8)),
     ):
-        cases.append(
-            DirectDescriptorCase(
-                vector.vector_extf,
-                _descriptor(
-                    f"x86.avx512_fp16.vcvtph2psx.{result_suffix}.{input_suffix}"
-                ),
-                {
-                    "input": Vector("f16", lanes=lane_count),
-                    "result": Vector("f32", lanes=lane_count),
-                },
-                priority=1,
+        for lane_count in lane_counts:
+            input_suffix = _REGISTER_SUFFIXES[max(128, lane_count * 16)]
+            result_suffix = _REGISTER_SUFFIXES[max(128, lane_count * element_bit_width)]
+            cases.append(
+                DirectDescriptorCase(
+                    vector.vector_extf,
+                    _descriptor(
+                        f"x86.avx512_fp16.{extend}.{result_suffix}.{input_suffix}"
+                    ),
+                    {
+                        "input": Vector("f16", lanes=lane_count),
+                        "result": Vector(element, lanes=lane_count),
+                    },
+                    priority=1,
+                )
             )
-        )
-        cases.append(
-            DirectDescriptorCase(
-                vector.vector_fptrunc,
-                _descriptor(
-                    f"x86.avx512_fp16.vcvtps2phx.{input_suffix}.{result_suffix}"
-                ),
-                {
-                    "input": Vector("f32", lanes=lane_count),
-                    "result": Vector("f16", lanes=lane_count),
-                },
-                priority=1,
+            cases.append(
+                DirectDescriptorCase(
+                    vector.vector_fptrunc,
+                    _descriptor(
+                        f"x86.avx512_fp16.{truncate}.{input_suffix}.{result_suffix}"
+                    ),
+                    {
+                        "input": Vector(element, lanes=lane_count),
+                        "result": Vector("f16", lanes=lane_count),
+                    },
+                    priority=1,
+                )
             )
-        )
     return tuple(
         replace(
             rule, guards=(*rule.guards, Guard.descriptor_available(rule.descriptor))
@@ -274,6 +289,18 @@ def _vector_conversion_rules() -> tuple[DescriptorRule, ...]:
 
 def _vector_rules() -> tuple[DescriptorRule, ...]:
     return (
+        *binary_descriptor_rules(
+            tuple(
+                DirectDescriptorCase(
+                    getattr(vector, f"vector_{row.source_operation}"),
+                    _descriptor(f"x86.avx512_fp16.{row.mnemonic}.xmm"),
+                    Vector("f16", lanes=1),
+                    priority=1,
+                )
+                for row in AVX512_FP16_SCALAR_FLOAT_BINARY_FAMILIES
+            ),
+            form=DescriptorEmitForm.OP,
+        ),
         *direct_vector_family_rules(
             _descriptor,
             descriptor_key_prefix="x86.avx512_fp16",
@@ -305,8 +332,56 @@ def _vector_rules() -> tuple[DescriptorRule, ...]:
     )
 
 
-def _transport_rules() -> tuple[DescriptorRule, ...]:
+def _transport_rules() -> tuple[ContractCase, ...]:
+    # A scalar and a singleton vector share the low 16 bits of an XMM register.
+    # Packet tails therefore need no GPR transport or lane instruction.
+    singleton = Vector("f16", lanes=1)
+    static_index_guards = (
+        Guard.operand_segment_count("indices", 0),
+        Guard.i64_array_count("static_indices", 1),
+        Guard.i64_array_element_range("static_indices", 0, 0, 0),
+    )
     return (
+        ValueAliasRule(
+            source_op=vector.vector_splat,
+            source=ValueRef.operand("scalar"),
+            result=ValueRef.result("result"),
+            guards=(
+                Guard.value_type("scalar", _F16),
+                Guard.value_type("result", singleton),
+            ),
+        ),
+        ValueAliasRule(
+            source_op=vector.vector_from_elements,
+            source=ValueRef.operand("elements", element=0),
+            result=ValueRef.result("result"),
+            guards=(
+                Guard.operand_segment_count("elements", 1),
+                Guard.value_type("elements", _F16),
+                Guard.value_type("result", singleton),
+            ),
+        ),
+        ValueAliasRule(
+            source_op=vector.vector_extract,
+            source=ValueRef.operand("source"),
+            result=ValueRef.result("result"),
+            guards=(
+                Guard.value_type("source", singleton),
+                Guard.value_type("result", _F16),
+                *static_index_guards,
+            ),
+        ),
+        ValueAliasRule(
+            source_op=vector.vector_insert,
+            source=ValueRef.operand("value"),
+            result=ValueRef.result("result"),
+            guards=(
+                Guard.value_type("value", _F16),
+                Guard.value_type("dest", singleton),
+                Guard.value_type("result", singleton),
+                *static_index_guards,
+            ),
+        ),
         *x86_scalar_xmm_word_memory_rules(
             _descriptor,
             value_type=_F16,

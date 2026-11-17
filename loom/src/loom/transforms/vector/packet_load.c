@@ -33,7 +33,7 @@ static iree_status_t loom_vector_packet_exact_memory_load_plan(
     IREE_RETURN_IF_ERROR(loom_vector_packet_memory_chunk_lane_count_select(
         context, load_op, policy, vector_type, packet_lane_count,
         &packet_lane_count));
-    if (packet_lane_count == 0) {
+    if (packet_lane_count <= 1u) {
       iree_host_size_t scalar_op_count = 0;
       if (!iree_host_size_checked_add(fact_component_count,
                                       remaining_lane_count,
@@ -103,6 +103,11 @@ iree_status_t loom_vector_packet_load_plan_allocate(
     if (component_count == 0) {
       return iree_ok_status();
     }
+  } else if (shape->chunk_lane_count == 1u) {
+    component_count = 1u;
+    scalar_lane_count = shape->lane_count;
+  } else if (shape->lane_count % shape->chunk_lane_count == 1u) {
+    scalar_lane_count = 1u;
   }
 
   iree_host_size_t allocation_size = 0;
@@ -142,6 +147,9 @@ iree_status_t loom_vector_packet_load_plan_allocate(
       retained_lane_counts[i] =
           iree_min(shape->lane_count - i * shape->chunk_lane_count,
                    shape->chunk_lane_count);
+      if (retained_lane_counts[i] == 1u) {
+        retained_lane_counts[i] = 0;
+      }
     }
   }
   *out_plan = plan;

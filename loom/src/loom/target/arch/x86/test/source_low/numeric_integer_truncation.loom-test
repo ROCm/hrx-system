@@ -234,21 +234,21 @@ func.def public target(@target) @truncate_loaded_tail(%input: buffer, %output: b
 
 // ----
 low.func.def public target<x86.avx2.core>(@target) abi(object_function) @truncate_loaded_tail(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
-  %20 = vmovdqu32.load.xmm %input {disp32 = 32}
-  %21 = vmovsd.load.xmm %input {disp32 = 48}
-  %22 = vmovdqu32.load.ymm %input {disp32 = 0}
-  %23 = avx2.vmovdqu.rodata.ymm @__low_rodata_f2cabc4f
-  %24 = vpshufb.ymm %22, %23
-  %25 = vextractf128.xmm %24, 0
-  %26 = vextractf128.xmm %24, 1
-  %27 = vpunpcklqdq.xmm %25, %26
-  vmovdqu32.store.xmm %27, %output {disp32 = 0}
-  %28 = avx2.vmovdqu.rodata.xmm @__low_rodata_01a66567
-  %29 = vpshufb.xmm %20, %28
-  vmovsd.store.xmm %29, %output {disp32 = 16}
-  %30 = avx2.vmovdqu.rodata.xmm @__low_rodata_8c4a0ac3
-  %31 = vpshufb.xmm %21, %30
-  %32 = vpextrd.xmm %31, 0
-  mov.store.gpr32 %32, %output {disp32 = 24}
+  %22 = vmovdqu32.load.xmm %input {disp32 = 32}
+  %23 = vpbroadcastq.load.xmm %input {disp32 = 48}
+  %24 = vmovdqu32.load.ymm %input {disp32 = 0}
+  %25 = avx2.vmovdqu.rodata.ymm @__low_rodata_f2cabc4f
+  %26 = vpshufb.ymm %24, %25
+  %27 = vextractf128.xmm %26, 0
+  %28 = vextractf128.xmm %26, 1
+  %29 = vpunpcklqdq.xmm %27, %28
+  vmovdqu32.store.xmm %29, %output {disp32 = 0}
+  %30 = avx2.vmovdqu.rodata.xmm @__low_rodata_01a66567
+  %31 = vpshufb.xmm %22, %30
+  vmovsd.store.xmm %31, %output {disp32 = 16}
+  %32 = avx2.vmovdqu.rodata.xmm @__low_rodata_8c4a0ac3
+  %33 = vpshufb.xmm %23, %32
+  %34 = vpextrd.xmm %33, 0
+  mov.store.gpr32 %34, %output {disp32 = 24}
   return
 }
