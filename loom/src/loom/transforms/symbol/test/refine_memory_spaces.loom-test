@@ -1,0 +1,244 @@
+// RUN: pass refine-boundaries{mode=encodings},symbol-dce
+
+// Every known memory space gets a receiving body. Repeated spaces share one
+// body, and unknown and null callers share the unconstrained group.
+func.def @observe(%storage: buffer, %value: i32) {
+  test.use %storage, %value : buffer, i32
+  func.return
+}
+
+func.def public @spaces(%storage: buffer, %device: buffer, %shared: buffer, %local: buffer, %readonly: buffer, %hosted: buffer, %descriptors: buffer, %unified: buffer, %value: i32) {
+  %global = buffer.assume.memory_space<global> %device : buffer
+  %workgroup = buffer.assume.memory_space<workgroup> %shared : buffer
+  %private = buffer.assume.memory_space<private> %local : buffer
+  %constant = buffer.assume.memory_space<constant> %readonly : buffer
+  %host = buffer.assume.memory_space<host> %hosted : buffer
+  %descriptor = buffer.assume.memory_space<descriptor> %descriptors : buffer
+  %generic = buffer.assume.memory_space<generic> %unified : buffer
+  %null = buffer.null : buffer
+  func.call @observe(%storage, %value) : (buffer, i32)
+  func.call @observe(%global, %value) : (buffer, i32)
+  func.call @observe(%workgroup, %value) : (buffer, i32)
+  func.call @observe(%private, %value) : (buffer, i32)
+  func.call @observe(%constant, %value) : (buffer, i32)
+  func.call @observe(%host, %value) : (buffer, i32)
+  func.call @observe(%descriptor, %value) : (buffer, i32)
+  func.call @observe(%generic, %value) : (buffer, i32)
+  func.call @observe(%global, %value) : (buffer, i32)
+  func.call @observe(%null, %value) : (buffer, i32)
+  func.return
+}
+
+// ----
+func.def @observe_spec0(%storage: buffer, %value: i32) {
+  test.use %storage, %value : buffer, i32
+  func.return
+}
+
+func.def @observe_spec1(%storage: buffer, %value: i32) {
+  test.use %storage, %value : buffer, i32
+  func.return
+}
+
+func.def @observe_spec2(%storage: buffer, %value: i32) {
+  test.use %storage, %value : buffer, i32
+  func.return
+}
+
+func.def @observe_spec3(%storage: buffer, %value: i32) {
+  test.use %storage, %value : buffer, i32
+  func.return
+}
+
+func.def @observe_spec4(%storage: buffer, %value: i32) {
+  test.use %storage, %value : buffer, i32
+  func.return
+}
+
+func.def @observe_spec5(%storage: buffer, %value: i32) {
+  test.use %storage, %value : buffer, i32
+  func.return
+}
+
+func.def @observe_spec6(%storage: buffer, %value: i32) {
+  test.use %storage, %value : buffer, i32
+  func.return
+}
+
+func.def @observe_spec7(%storage: buffer, %value: i32) {
+  test.use %storage, %value : buffer, i32
+  func.return
+}
+
+func.def public @spaces(%storage: buffer, %device: buffer, %shared: buffer, %local: buffer, %readonly: buffer, %hosted: buffer, %descriptors: buffer, %unified: buffer, %value: i32) {
+  %global = buffer.assume.memory_space<global> %device : buffer
+  %workgroup = buffer.assume.memory_space<workgroup> %shared : buffer
+  %private = buffer.assume.memory_space<private> %local : buffer
+  %constant = buffer.assume.memory_space<constant> %readonly : buffer
+  %host = buffer.assume.memory_space<host> %hosted : buffer
+  %descriptor = buffer.assume.memory_space<descriptor> %descriptors : buffer
+  %generic = buffer.assume.memory_space<generic> %unified : buffer
+  %null = buffer.null : buffer
+  func.call @observe_spec0(%storage, %value) : (buffer, i32)
+  func.call @observe_spec1(%global, %value) : (buffer, i32)
+  func.call @observe_spec2(%workgroup, %value) : (buffer, i32)
+  func.call @observe_spec3(%private, %value) : (buffer, i32)
+  func.call @observe_spec4(%constant, %value) : (buffer, i32)
+  func.call @observe_spec5(%host, %value) : (buffer, i32)
+  func.call @observe_spec6(%descriptor, %value) : (buffer, i32)
+  func.call @observe_spec7(%generic, %value) : (buffer, i32)
+  func.call @observe_spec1(%global, %value) : (buffer, i32)
+  func.call @observe_spec0(%null, %value) : (buffer, i32)
+  func.return
+}
+
+// ====
+
+// A split propagates through nested helpers. Views inherit their root's space,
+// while the numeric callee remains shared across both storage paths.
+func.def @increment(%value: i32) -> (i32) {
+  %step = scalar.constant 1 : i32
+  %result = scalar.addi %value, %step : i32
+  func.return %result : i32
+}
+
+func.def @store(%values: view<1xi32>, %value: i32) {
+  %result = func.call @increment(%value) : (i32) -> (i32)
+  view.store %result, %values[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @forward(%values: view<1xi32>, %value: i32) {
+  func.call @store(%values, %value) : (view<1xi32>, i32)
+  func.return
+}
+
+func.def public @nested(%storage: buffer, %value: i32) {
+  %origin = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %output = buffer.view %global[%origin] : buffer -> view<1xi32>
+  %local = view.alloca<private> : view<1xi32>
+  %alias = view.subview %local[0] : view<1xi32> -> view<1xi32>
+  func.call @forward(%output, %value) : (view<1xi32>, i32)
+  func.call @forward(%local, %value) : (view<1xi32>, i32)
+  func.call @forward(%alias, %value) : (view<1xi32>, i32)
+  func.return
+}
+
+// ----
+func.def @increment(%value: i32) -> (i32) {
+  %step = scalar.constant 1 : i32
+  %result = scalar.addi %value, %step : i32
+  func.return %result : i32
+}
+
+func.def @store_spec1(%values: view<1xi32>, %value: i32) {
+  %result = func.call @increment(%value) : (i32) -> (i32)
+  view.store %result, %values[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @store_spec2(%values: view<1xi32>, %value: i32) {
+  %result = func.call @increment(%value) : (i32) -> (i32)
+  view.store %result, %values[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @forward_spec0(%values: view<1xi32>, %value: i32) {
+  func.call @store_spec1(%values, %value) : (view<1xi32>, i32)
+  func.return
+}
+
+func.def @forward_spec1(%values: view<1xi32>, %value: i32) {
+  func.call @store_spec2(%values, %value) : (view<1xi32>, i32)
+  func.return
+}
+
+func.def public @nested(%storage: buffer, %value: i32) {
+  %origin = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %output = buffer.view %global[%origin] : buffer -> view<1xi32>
+  %local = view.alloca<private> : view<1xi32>
+  %alias = view.subview %local[0] : view<1xi32> -> view<1xi32>
+  func.call @forward_spec0(%output, %value) : (view<1xi32>, i32)
+  func.call @forward_spec1(%local, %value) : (view<1xi32>, i32)
+  func.call @forward_spec1(%alias, %value) : (view<1xi32>, i32)
+  func.return
+}
+
+// ====
+
+// The key is the argument tuple, not a union of the spaces seen by a function.
+func.def @pair(%left: buffer, %right: buffer) {
+  test.use %left, %right : buffer, buffer
+  func.return
+}
+
+func.def public @pairs(%storage: buffer) {
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %extent = index.constant 4 : offset
+  %local = buffer.alloca<private> align(4) %extent : buffer
+  func.call @pair(%local, %global) : (buffer, buffer)
+  func.call @pair(%global, %local) : (buffer, buffer)
+  func.call @pair(%local, %local) : (buffer, buffer)
+  func.call @pair(%local, %global) : (buffer, buffer)
+  func.return
+}
+
+// ----
+func.def @pair_spec0(%left: buffer, %right: buffer) {
+  test.use %left, %right : buffer, buffer
+  func.return
+}
+
+func.def @pair_spec1(%left: buffer, %right: buffer) {
+  test.use %left, %right : buffer, buffer
+  func.return
+}
+
+func.def @pair_spec2(%left: buffer, %right: buffer) {
+  test.use %left, %right : buffer, buffer
+  func.return
+}
+
+func.def public @pairs(%storage: buffer) {
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %extent = index.constant 4 : offset
+  %local = buffer.alloca<private> align(4) %extent : buffer
+  func.call @pair_spec0(%local, %global) : (buffer, buffer)
+  func.call @pair_spec1(%global, %local) : (buffer, buffer)
+  func.call @pair_spec2(%local, %local) : (buffer, buffer)
+  func.call @pair_spec0(%local, %global) : (buffer, buffer)
+  func.return
+}
+
+// ====
+
+// Public and recursive boundaries retain their declared contract.
+func.def public @external(%storage: buffer) {
+  test.use %storage : buffer
+  func.return
+}
+
+func.def @recursive(%storage: buffer, %depth: i32) {
+  test.use %storage : buffer
+  %end = scalar.constant 0 : i32
+  %more = scalar.cmpi sgt, %depth, %end : i32
+  scf.if %more {
+    %step = scalar.constant 1 : i32
+    %next = scalar.subi %depth, %step : i32
+    func.call @recursive(%storage, %next) : (buffer, i32)
+  }
+  func.return
+}
+
+func.def public @boundaries(%storage: buffer, %depth: i32) {
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %extent = index.constant 4 : offset
+  %local = buffer.alloca<private> align(4) %extent : buffer
+  func.call @external(%global) : (buffer)
+  func.call @external(%local) : (buffer)
+  func.call @recursive(%global, %depth) : (buffer, i32)
+  func.call @recursive(%local, %depth) : (buffer, i32)
+  func.return
+}

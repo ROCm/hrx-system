@@ -23,10 +23,13 @@ typedef struct loom_refine_boundaries_specialization_group_t {
   // Fact-specialized argument types normalized to callee argument identities.
   loom_type_t* argument_types;
 
+  // Argument storage spaces; NULL when every space is unknown.
+  uint8_t* argument_memory_spaces;
+
   // Fact-specialized result types normalized to callee boundary identities.
   loom_type_t* result_types;
 
-  // Calls whose normalized argument and result types match this group.
+  // Calls whose normalized boundary types and argument spaces match.
   loom_op_t** calls;
 
   // Number of entries in |calls|.
@@ -73,9 +76,11 @@ static iree_status_t loom_refine_boundaries_specialize_call_boundary_types(
     const loom_refine_boundaries_function_t* callee_info,
     loom_value_slice_t operands, loom_value_slice_t results,
     bool encodings_only, iree_arena_allocator_t* arena,
-    loom_type_t** out_argument_types, loom_type_t** out_result_types) {
+    loom_type_t** out_argument_types, loom_type_t** out_result_types,
+    uint8_t** out_argument_memory_spaces) {
   *out_argument_types = NULL;
   *out_result_types = NULL;
+  *out_argument_memory_spaces = NULL;
 
   loom_ir_remap_t remap = {0};
   const loom_ir_remap_options_t remap_options = {
@@ -99,6 +104,32 @@ static iree_status_t loom_refine_boundaries_specialize_call_boundary_types(
   for (iree_host_size_t i = 0; i < operands.count; ++i) {
     loom_type_t specialized_type =
         loom_module_value_type(module, operands.values[i]);
+    if (callee_info->can_refine_argument_facts &&
+        (loom_type_is_buffer(specialized_type) ||
+         loom_type_is_view(specialized_type))) {
+      const loom_value_facts_t value_facts =
+          loom_value_fact_table_lookup(facts, operands.values[i]);
+      loom_value_fact_memory_space_t space =
+          LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN;
+      loom_value_fact_buffer_reference_t buffer_reference;
+      loom_value_fact_view_reference_t view_reference;
+      if (loom_value_facts_query_buffer_reference(&facts->context, value_facts,
+                                                  &buffer_reference)) {
+        space = buffer_reference.memory_space;
+      } else if (loom_value_facts_query_view_reference(
+                     &facts->context, value_facts, &view_reference)) {
+        space = view_reference.memory_space;
+      }
+      if (space != LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN) {
+        if (*out_argument_memory_spaces == NULL) {
+          IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+              arena, operands.count, sizeof(**out_argument_memory_spaces),
+              (void**)out_argument_memory_spaces));
+          memset(*out_argument_memory_spaces, 0, operands.count);
+        }
+        (*out_argument_memory_spaces)[i] = space;
+      }
+    }
     loom_type_refinement_result_t result = LOOM_TYPE_REFINEMENT_UNCHANGED;
     if (encodings_only) {
       IREE_RETURN_IF_ERROR(loom_type_specialize_encoding_with_value_facts(
@@ -153,7 +184,16 @@ static iree_status_t loom_refine_boundaries_specialize_call_boundary_types(
 static bool loom_refine_boundaries_group_matches_call_boundary(
     const loom_refine_boundaries_specialization_group_t* group,
     const loom_type_t* argument_types, const loom_type_t* result_types,
-    uint16_t result_count) {
+    const uint8_t* argument_memory_spaces, uint16_t result_count) {
+  if ((group->argument_memory_spaces == NULL) !=
+      (argument_memory_spaces == NULL)) {
+    return false;
+  }
+  if (argument_memory_spaces != NULL &&
+      memcmp(group->argument_memory_spaces, argument_memory_spaces,
+             group->argument_count) != 0) {
+    return false;
+  }
   for (uint16_t i = 0; i < group->argument_count; ++i) {
     if (!loom_type_equal(group->argument_types[i], argument_types[i])) {
       return false;
@@ -182,7 +222,8 @@ static iree_status_t loom_refine_boundaries_append_specialization_call(
 static iree_status_t loom_refine_boundaries_add_specialization_group(
     loom_refine_boundaries_specialization_function_plan_t* plan,
     uint16_t argument_count, loom_type_t* argument_types,
-    loom_type_t* result_types, iree_arena_allocator_t* arena,
+    loom_type_t* result_types, uint8_t* argument_memory_spaces,
+    iree_arena_allocator_t* arena,
     loom_refine_boundaries_specialization_group_t** out_group) {
   *out_group = NULL;
   if (plan->group_count >= plan->group_capacity) {
@@ -197,6 +238,7 @@ static iree_status_t loom_refine_boundaries_add_specialization_group(
   group->symbol_ref = loom_symbol_ref_null();
   group->argument_count = argument_count;
   group->argument_types = argument_types;
+  group->argument_memory_spaces = argument_memory_spaces;
   group->result_types = result_types;
 
   *out_group = group;
@@ -211,14 +253,16 @@ static iree_status_t loom_refine_boundaries_record_specialization_call(
     iree_arena_allocator_t* arena) {
   loom_type_t* argument_types = NULL;
   loom_type_t* result_types = NULL;
+  uint8_t* argument_memory_spaces = NULL;
   IREE_RETURN_IF_ERROR(loom_refine_boundaries_specialize_call_boundary_types(
       module, facts, callee_info, operands, results, encodings_only, arena,
-      &argument_types, &result_types));
+      &argument_types, &result_types, &argument_memory_spaces));
 
   for (iree_host_size_t i = 0; i < plan->group_count; ++i) {
     loom_refine_boundaries_specialization_group_t* group = &plan->groups[i];
     if (!loom_refine_boundaries_group_matches_call_boundary(
-            group, argument_types, result_types, callee_info->result_count)) {
+            group, argument_types, result_types, argument_memory_spaces,
+            callee_info->result_count)) {
       continue;
     }
     return loom_refine_boundaries_append_specialization_call(group, call_op,
@@ -227,8 +271,8 @@ static iree_status_t loom_refine_boundaries_record_specialization_call(
 
   loom_refine_boundaries_specialization_group_t* group = NULL;
   IREE_RETURN_IF_ERROR(loom_refine_boundaries_add_specialization_group(
-      plan, callee_info->argument_count, argument_types, result_types, arena,
-      &group));
+      plan, callee_info->argument_count, argument_types, result_types,
+      argument_memory_spaces, arena, &group));
   return loom_refine_boundaries_append_specialization_call(group, call_op,
                                                            arena);
 }

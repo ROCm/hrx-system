@@ -80,8 +80,8 @@ func.def public @record_properties(%pick_first: i1) -> (offset, i1, index) {
 
 // RUN: pass refine-boundaries
 
-// An unconstrained caller participates in the join. A known allocation cannot
-// narrow the helper's buffer extent for all callers.
+// The workgroup allocation specializes independently of the unconstrained
+// caller. Its known length cannot replace the external caller's dynamic length.
 func.def noinline @record_length(%record: buffer) -> (offset) {
   %length = buffer.length %record
   func.return %length : offset
@@ -96,17 +96,23 @@ func.def public @mixed_records(%external: buffer) -> (offset, offset) {
 }
 
 // ----
-func.def noinline @record_length(%record: buffer) -> (offset) {
+func.def noinline @record_length() {
+  func.return
+}
+
+func.def noinline @record_length_spec0() {
+  func.return
+}
+
+func.def noinline @record_length_spec1(%record: buffer) -> (offset) {
   %length = buffer.length %record
   func.return %length : offset
 }
 
 func.def public @mixed_records(%external: buffer) -> (offset, offset) {
-  %bytes = index.constant 256 : offset
-  %local = buffer.alloca<workgroup> align(64) %bytes : buffer
-  %local_length = func.call pure @record_length(%local) : (buffer) -> (offset)
-  %external_length = func.call pure @record_length(%external) : (buffer) -> (offset)
-  func.return %local_length, %external_length : offset, offset
+  %17 = index.constant 256 : offset
+  %external_length = func.call pure @record_length_spec1(%external) : (buffer) -> (offset)
+  func.return %17, %external_length : offset, offset
 }
 
 // ====

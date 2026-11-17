@@ -25,7 +25,8 @@ iree_status_t loom_refine_boundaries_specialization_plans_allocate(
 
 // Records |op| when it is a specializable call using the caller's
 // already-computed local value facts. Boundary types are normalized to callee
-// identities before entering the plan.
+// identities; reference argument memory spaces distinguish receiving bodies
+// without splitting unrelated numeric facts into separate specializations.
 iree_status_t loom_refine_boundaries_specialization_plans_collect_call(
     loom_module_t* module, const loom_refine_boundaries_graph_t* graph,
     loom_refine_boundaries_specialization_plans_t* plans,
