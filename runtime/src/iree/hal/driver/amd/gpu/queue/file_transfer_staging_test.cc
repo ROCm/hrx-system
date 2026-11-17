@@ -382,6 +382,35 @@ class FileTransferStagingTest : public MemoryBackendTest,
     }
   }
 
+  void CompleteAndCheckTransfer() {
+    ExpectPending();
+    ASSERT_NO_FATAL_FAILURE(ExecuteAcceptedCopy());
+    retired_ = submitted_;
+    PollCopies();
+    PumpUntil([&] { return queue_.host_owners == 0; });
+    ExpectCompletion(IREE_STATUS_OK);
+    EXPECT_EQ(file_failures_, 0u);
+    EXPECT_EQ(queue_.boundaries, 2u);
+    if (GetParam()) {
+      // Close the caller's exclusive handle before reopening the completed
+      // file.
+      file_.reset();
+      iree_io_file_contents_t* contents = nullptr;
+      IREE_ASSERT_OK(iree_io_file_contents_read(file_path_.path_view(),
+                                                allocator_, &contents));
+      EXPECT_EQ(contents->buffer.data_length, expected_.size());
+      if (contents->buffer.data_length == expected_.size()) {
+        EXPECT_EQ(std::memcmp(contents->buffer.data, expected_.data(),
+                              expected_.size()),
+                  0);
+      }
+      iree_io_file_contents_free(contents);
+    } else {
+      EXPECT_EQ(
+          std::memcmp(buffer_contents_, expected_.data(), expected_.size()), 0);
+    }
+  }
+
   void ExpectPending() {
     uint64_t value = UINT64_MAX;
     IREE_EXPECT_OK(iree_hal_semaphore_query(completion_, &value));
@@ -516,32 +545,63 @@ class FileTransferStagingTest : public MemoryBackendTest,
 
 TEST_P(FileTransferStagingTest, HealthyCopyPublishesBytesBeforeCompletion) {
   ASSERT_NO_FATAL_FAILURE(Submit(false));
-  ExpectPending();
-  ASSERT_NO_FATAL_FAILURE(ExecuteAcceptedCopy());
-  retired_ = submitted_;
-  PollCopies();
-  PumpUntil([&] { return queue_.host_owners == 0; });
-  ExpectCompletion(IREE_STATUS_OK);
-  EXPECT_EQ(file_failures_, 0u);
-  EXPECT_EQ(queue_.boundaries, 2u);
-  if (GetParam()) {
-    // Close the caller's exclusive handle before reopening the completed file.
-    file_.reset();
-    iree_io_file_contents_t* contents = nullptr;
-    IREE_ASSERT_OK(iree_io_file_contents_read(file_path_.path_view(),
-                                              allocator_, &contents));
-    EXPECT_EQ(contents->buffer.data_length, expected_.size());
-    if (contents->buffer.data_length == expected_.size()) {
-      EXPECT_EQ(std::memcmp(contents->buffer.data, expected_.data(),
-                            expected_.size()),
-                0);
-    }
-    iree_io_file_contents_free(contents);
-  } else {
-    EXPECT_EQ(std::memcmp(buffer_contents_, expected_.data(), expected_.size()),
-              0);
-  }
+  ASSERT_NO_FATAL_FAILURE(CompleteAndCheckTransfer());
 }
+
+// The registration dependency can decline an optional preparation while every
+// file operation, staging allocation, copy, and completion remains real.
+class FileTransferUnregisteredStagingTest : public FileTransferStagingTest {
+ protected:
+  void SetUp() override {
+    FileTransferStagingTest::SetUp();
+    if (HasFatalFailure() || IsSkipped()) {
+      return;
+    }
+    if (!iree_any_bit_set(
+            iree_async_proactor_query_capabilities(proactor_),
+            IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION)) {
+      GTEST_SKIP() << "Backend does not attempt prepared registration";
+    }
+    registration_.vtable = *proactor_->vtable;
+    registration_.vtable.prepare_buffer =
+        [](iree_async_proactor_t* proactor,
+           iree_async_buffer_registration_state_t*, iree_byte_span_t,
+           iree_async_buffer_access_flags_t,
+           iree_async_buffer_registration_flags_t flags,
+           iree_async_buffer_registration_entry_t** out_entry) {
+          const auto* registration =
+              reinterpret_cast<const Registration*>(proactor->vtable);
+          registration->preparations.fetch_add(1, std::memory_order_relaxed);
+          *out_entry = nullptr;
+          if (iree_any_bit_set(flags,
+                               IREE_ASYNC_BUFFER_REGISTRATION_FLAG_OPTIONAL)) {
+            return iree_ok_status();
+          }
+          return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                  "required registration exceeds pin budget");
+        };
+    proactor_->vtable = &registration_.vtable;
+  }
+
+  struct Registration {
+    // Native proactor methods except for optional preparation admission.
+    iree_async_proactor_vtable_t vtable = {};
+    // Actual cold preparation calls, observed after transfer completion.
+    mutable std::atomic<uint32_t> preparations = 0;
+  };
+  // Forwarding registration policy, alive through proactor destruction.
+  Registration registration_;
+};
+
+TEST_P(FileTransferUnregisteredStagingTest, ReadWriteAndTrimWithoutPins) {
+  ASSERT_NO_FATAL_FAILURE(Submit(false, 8192));
+  ASSERT_NO_FATAL_FAILURE(CompleteAndCheckTransfer());
+  EXPECT_GT(registration_.preparations.load(), 0u);
+  iree_hal_amd_gpu_file_staging_trim(staging_);
+}
+
+INSTANTIATE_TEST_SUITE_P(ReadAndWrite, FileTransferUnregisteredStagingTest,
+                         ::testing::Bool());
 
 TEST_P(FileTransferStagingTest, EarlyErrorKeepsPublicCompletionPending) {
   ASSERT_NO_FATAL_FAILURE(Submit(true));

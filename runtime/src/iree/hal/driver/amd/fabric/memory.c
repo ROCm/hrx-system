@@ -555,7 +555,7 @@ iree_status_t iree_hal_amd_fabric_memory_allocate(
         options->io.proactors[i], &memory.registrations, memory.contents,
         IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
             IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
-        IREE_ASYNC_BUFFER_REGISTRATION_FLAG_NONE, &entry);
+        options->io.flags, &entry);
   }
   if (iree_status_is_ok(status)) {
     *out_memory = memory;

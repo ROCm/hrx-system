@@ -150,10 +150,13 @@ typedef struct iree_hal_amd_fabric_memory_options_t {
   // Owned allocation prepares detached I/O pins against its persistent host
   // view. Imports leave registration to their consumer.
   struct {
-    // Number of distinct proactors requiring prepared pins on owned backing.
+    // Number of distinct proactors requesting prepared pins on owned backing.
     iree_host_size_t proactor_count;
     // Borrowed proactors, live through native backing and pin release.
     iree_async_proactor_t* const* proactors;
+    // Zero requires registration; OPTIONAL preserves backing without pins when
+    // the consumer can use ordinary I/O instead.
+    iree_async_buffer_registration_flags_t flags;
   } io;
 } iree_hal_amd_fabric_memory_options_t;
 

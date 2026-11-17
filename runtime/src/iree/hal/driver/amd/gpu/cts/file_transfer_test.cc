@@ -11,6 +11,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "iree/async/operations/scheduling.h"
@@ -1290,7 +1291,7 @@ class FileDetachGate {
     armed_ = false;
     closed_ = false;
     completed_ = false;
-    following_ = false;
+    file_completed_ = false;
     duplicates_ = 0;
     entry_ = nullptr;
     callback_ = {};
@@ -1304,21 +1305,36 @@ class FileDetachGate {
       owner_->armed_ = true;
       owner_->closed_ = true;
     }
-    ~Hold() { owner_->Open(); }
+    ~Hold() {
+      owner_->Open();
+      if (observer_.joinable()) {
+        observer_.join();
+      }
+    }
+
+    // Start only after the file operation is accepted. Optional registrations
+    // may all be declined, so public completion is an alternative to detach.
+    void ObserveCompletion(iree_hal_semaphore_t* semaphore, uint64_t value) {
+      observer_ = std::thread([this, semaphore, value] {
+        IREE_EXPECT_OK(iree_hal_semaphore_wait(semaphore, value,
+                                               iree_infinite_timeout(), 0));
+        std::lock_guard<std::mutex> lock(owner_->mutex_);
+        owner_->file_completed_ = true;
+        owner_->condition_.notify_all();
+      });
+    }
 
    private:
     // Fixture-owned gate, alive until all proactor references are released.
     FileDetachGate* owner_;
+    // Joins the accepted file operation after releasing the held callback.
+    std::thread observer_;
   };
 
-  void WaitForCompletedDetach() {
+  bool WaitForCompletedDetach() {
     std::unique_lock<std::mutex> lock(mutex_);
-    condition_.wait(lock, [&] { return completed_; });
-  }
-
-  void WaitForFollowingDetach() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    condition_.wait(lock, [&] { return following_; });
+    condition_.wait(lock, [&] { return completed_ || file_completed_; });
+    return completed_;
   }
 
   uint32_t duplicates() {
@@ -1331,6 +1347,7 @@ class FileDetachGate {
     iree_status_t status = iree_ok_status();
     {
       std::lock_guard<std::mutex> lock(mutex_);
+      armed_ = false;
       closed_ = false;
       if (completed_) {
         callback = callback_;
@@ -1358,9 +1375,7 @@ class FileDetachGate {
         self->entry_ = entry;
         self->callback_ = callback;
       } else if (self->entry_) {
-        self->following_ = true;
         self->duplicates_ += entry == self->entry_ && self->callback_.fn;
-        self->condition_.notify_all();
       }
     }
     self->native_->detach_buffer(
@@ -1398,7 +1413,7 @@ class FileDetachGate {
   iree_async_proactor_pool_runner_factory_t runner_;
   // Serializes callback ownership and test observations.
   std::mutex mutex_;
-  // Publishes actual native completion and subsequent detach attempts.
+  // Wakes waits for native detach or public file completion.
   std::condition_variable condition_;
   // Next detach is intercepted once after Hold begins.
   bool armed_ = false;
@@ -1406,8 +1421,8 @@ class FileDetachGate {
   bool closed_ = false;
   // Native detach has completed and published status_.
   bool completed_ = false;
-  // Another detach was requested after the held one.
-  bool following_ = false;
+  // The public file operation completed, possibly without any registration.
+  bool file_completed_ = false;
   // Number of duplicate requests while the original callback is retained.
   uint32_t duplicates_ = 0;
   // Identity of the intercepted registration, borrowed through completion.
@@ -1705,13 +1720,14 @@ TEST_P(GpuSharedVirtualFileStagingTest,
     FileDetachGate::Hold detach(detach_gate_);
     // One operation crosses physical ranges: the first uses the prepared small
     // block, and the second grows staging while retaining the first view. Hold
-    // old-block detach until final completion also relinquishes the new view.
+    // one actual detach; either block may instead use unregistered I/O.
     IREE_ASSERT_OK(iree_hal_queue_read(
         queues_[0], {}, {1, &completed_handle, &one}, extra_file, 0, buffer,
         offset, length, &barriers_, 0));
-    detach_gate_->WaitForCompletedDetach();
-    detach_gate_->WaitForFollowingDetach();
-    EXPECT_EQ(detach_gate_->duplicates(), 0u);
+    detach.ObserveCompletion(completed, one);
+    if (!detach_gate_->WaitForCompletedDetach()) {
+      GTEST_SKIP() << "Staging completed without retained I/O registrations";
+    }
     uint64_t value = UINT64_MAX;
     IREE_ASSERT_OK(iree_hal_semaphore_query(completed, &value));
     EXPECT_EQ(value, 0u);
@@ -1725,6 +1741,7 @@ TEST_P(GpuSharedVirtualFileStagingTest,
     detach_gate_->Open();
     IREE_ASSERT_OK(
         iree_hal_semaphore_wait(completed, one, iree_infinite_timeout(), 0));
+    EXPECT_EQ(detach_gate_->duplicates(), 0u);
     IREE_ASSERT_OK(iree_hal_semaphore_query(allocated, &value));
     EXPECT_EQ(value, 0u);
   }
