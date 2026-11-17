@@ -56,15 +56,15 @@ func.def public @update(%input: buffer, %input_byte_offset: index, %output: buff
   %6 = scalar.extui %lane : i32 to i64
   %7 = index.cast %6 : i64 to index
   %8 = index.constant 2 : index
-  %43 = index.madd %7, %8, %output_byte_offset : index
-  %cursor_byte_offset = index.add %43, %8 : index
-  %41 = index.madd %7, %8, %input_byte_offset : index
-  %21 = buffer.view %input[%41] : buffer -> view<1xi16>
+  %44 = index.madd %7, %8, %output_byte_offset : index
+  %cursor_byte_offset = index.add %44, %8 : index
+  %42 = index.madd %7, %8, %input_byte_offset : index
+  %21 = buffer.view %input[%42] : buffer -> view<1xi16>
   %22 = view.load<root_in_bounds|type_disjoint> %21[0] : view<1xi16> -> i16
   %23 = func.call pure @add___Value(%22, %delta) : (i16, i16) -> (i16)
-  %40 = index.constant -1 : index
-  %39 = index.madd %40, %8, %cursor_byte_offset : index
-  %31 = buffer.view %output[%39] : buffer -> view<1xi16>
+  %40 = index.constant -2 : index
+  %41 = index.add %cursor_byte_offset, %40 : index
+  %31 = buffer.view %output[%41] : buffer -> view<1xi16>
   view.store<root_in_bounds|type_disjoint> %23, %31[0] : i16, view<1xi16>
   func.return
 }
@@ -96,15 +96,15 @@ func.def public @update(%input: buffer, %input_byte_offset: index, %output: buff
   %6 = scalar.extui %lane : i32 to i64
   %7 = index.cast %6 : i64 to index
   %8 = index.constant 4 : index
-  %43 = index.madd %7, %8, %output_byte_offset : index
-  %cursor_byte_offset = index.add %43, %8 : index
-  %41 = index.madd %7, %8, %input_byte_offset : index
-  %21 = buffer.view %input[%41] : buffer -> view<1xi32>
+  %44 = index.madd %7, %8, %output_byte_offset : index
+  %cursor_byte_offset = index.add %44, %8 : index
+  %42 = index.madd %7, %8, %input_byte_offset : index
+  %21 = buffer.view %input[%42] : buffer -> view<1xi32>
   %22 = view.load<root_in_bounds|type_disjoint> %21[0] : view<1xi32> -> i32
   %23 = func.call pure @add___Value(%22, %delta) : (i32, i32) -> (i32)
-  %40 = index.constant -1 : index
-  %39 = index.madd %40, %8, %cursor_byte_offset : index
-  %31 = buffer.view %output[%39] : buffer -> view<1xi32>
+  %40 = index.constant -4 : index
+  %41 = index.add %cursor_byte_offset, %40 : index
+  %31 = buffer.view %output[%41] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %23, %31[0] : i32, view<1xi32>
   func.return
 }
@@ -136,15 +136,15 @@ func.def public @update(%input: buffer, %input_byte_offset: index, %output: buff
   %6 = scalar.extui %lane : i32 to i64
   %7 = index.cast %6 : i64 to index
   %8 = index.constant 8 : index
-  %40 = index.madd %7, %8, %output_byte_offset : index
-  %cursor_byte_offset = index.add %40, %8 : index
-  %38 = index.madd %7, %8, %input_byte_offset : index
-  %21 = buffer.view %input[%38] : buffer -> view<1xi64>
+  %41 = index.madd %7, %8, %output_byte_offset : index
+  %cursor_byte_offset = index.add %41, %8 : index
+  %39 = index.madd %7, %8, %input_byte_offset : index
+  %21 = buffer.view %input[%39] : buffer -> view<1xi64>
   %22 = view.load<root_in_bounds|type_disjoint> %21[0] : view<1xi64> -> i64
   %23 = func.call pure @add___Value(%22, %delta) : (i64, i64) -> (i64)
-  %37 = index.constant -1 : index
-  %36 = index.madd %37, %8, %cursor_byte_offset : index
-  %31 = buffer.view %output[%36] : buffer -> view<1xi64>
+  %37 = index.constant -8 : index
+  %38 = index.add %cursor_byte_offset, %37 : index
+  %31 = buffer.view %output[%38] : buffer -> view<1xi64>
   view.store<root_in_bounds|type_disjoint> %23, %31[0] : i64, view<1xi64>
   func.return
 }

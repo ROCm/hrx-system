@@ -574,9 +574,9 @@ func.def @Region__upper_storage(%this: buffer, %this_byte_offset: index) -> (i32
   %41 = index.add %this_byte_offset, %40 : index
   %42 = index.constant 4 : index
   %limits_byte_offset = index.add %41, %42 : index
-  %54 = index.constant 2 : index
-  %53 = index.madd %42, %54, %limits_byte_offset : index
-  %49 = buffer.view %this[%53] : buffer -> view<1xi32>
+  %54 = index.constant 8 : index
+  %55 = index.add %limits_byte_offset, %54 : index
+  %49 = buffer.view %this[%55] : buffer -> view<1xi32>
   %50 = view.load<root_in_bounds|type_disjoint> %49[0] : view<1xi32> -> i32
   func.return %50 : i32
 }

@@ -190,11 +190,11 @@ unsigned scoped(const unsigned* input, unsigned* output) {
 
 // ----
 func.def public @scoped(%input: buffer, %input_byte_offset: index, %output: buffer, %output_byte_offset: index) -> (i32) {
-  %39 = index.constant 4 : index
-  %unique_input_byte_offset = index.add %input_byte_offset, %39 : index
+  %40 = index.constant 4 : index
+  %unique_input_byte_offset = index.add %input_byte_offset, %40 : index
   %unique_input = buffer.assume.noalias %input : buffer
-  %38 = index.constant 2 : index
-  %unique_output_byte_offset = index.madd %39, %38, %output_byte_offset : index
+  %38 = index.constant 8 : index
+  %unique_output_byte_offset = index.add %output_byte_offset, %38 : index
   %unique_output = buffer.assume.noalias %output : buffer
   %22 = buffer.view %unique_input[%unique_input_byte_offset] : buffer -> view<1xi32>
   %23 = view.load<root_in_bounds|type_disjoint> %22[0] : view<1xi32> -> i32

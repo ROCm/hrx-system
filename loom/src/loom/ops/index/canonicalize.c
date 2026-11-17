@@ -1256,21 +1256,30 @@ iree_status_t loom_index_madd_canonicalize(loom_op_t* op,
   loom_value_id_t a = loom_index_madd_a(op);
   loom_value_id_t b = loom_index_madd_b(op);
   loom_value_id_t c = loom_index_madd_c(op);
-  if (loom_index_value_facts_are_exact_i64(rewriter, a, 0) ||
-      loom_index_value_facts_are_exact_i64(rewriter, b, 0)) {
+  int64_t a_constant = 0;
+  int64_t b_constant = 0;
+  bool a_is_exact = loom_index_query_exact_i64(rewriter, a, &a_constant);
+  bool b_is_exact = loom_index_query_exact_i64(rewriter, b, &b_constant);
+  if ((a_is_exact && a_constant == 0) || (b_is_exact && b_constant == 0)) {
     return loom_index_replace_single_result_with_value(op, rewriter, c);
   }
   if (loom_index_value_facts_are_exact_i64(rewriter, c, 0)) {
     return loom_index_replace_single_result_with_binary_op(
         op, rewriter, LOOM_OP_INDEX_MUL, a, b);
   }
-  if (loom_index_value_facts_are_exact_i64(rewriter, a, 1)) {
+  if (a_is_exact && a_constant == 1) {
     return loom_index_replace_single_result_with_binary_op(
         op, rewriter, LOOM_OP_INDEX_ADD, c, b);
   }
-  if (loom_index_value_facts_are_exact_i64(rewriter, b, 1)) {
+  if (b_is_exact && b_constant == 1) {
     return loom_index_replace_single_result_with_binary_op(
         op, rewriter, LOOM_OP_INDEX_ADD, c, a);
+  }
+  int64_t product = 0;
+  if (a_is_exact && b_is_exact &&
+      iree_checked_mul_i64(a_constant, b_constant, &product)) {
+    return loom_index_replace_single_result_with_binary_constant_op(
+        op, rewriter, LOOM_OP_INDEX_ADD, c, product, LOOM_VALUE_ID_INVALID);
   }
 
   loom_type_t result_type =

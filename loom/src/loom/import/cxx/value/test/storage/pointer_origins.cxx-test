@@ -26,10 +26,9 @@ func.def public @read_next(%pointer: buffer, %pointer_byte_offset: index) -> (i3
 }
 
 func.def public @read_previous(%pointer: buffer, %pointer_byte_offset: index) -> (i32) {
-  %39 = index.constant -1 : index
-  %32 = index.constant 4 : index
-  %38 = index.madd %39, %32, %pointer_byte_offset : index
-  %35 = buffer.view %pointer[%38] : buffer -> view<1xi32>
+  %39 = index.constant -4 : index
+  %40 = index.add %pointer_byte_offset, %39 : index
+  %35 = buffer.view %pointer[%40] : buffer -> view<1xi32>
   %36 = view.load<root_in_bounds|type_disjoint> %35[0] : view<1xi32> -> i32
   func.return %36 : i32
 }

@@ -78,16 +78,16 @@ func.def public @element(%matrices: buffer, %matrices_byte_offset: index, %matri
   %23 = scalar.extui %matrix : i32 to i64
   %24 = index.cast %23 : i64 to index
   %25 = index.constant 36 : index
-  %63 = index.madd %24, %25, %matrices_byte_offset : index
+  %64 = index.madd %24, %25, %matrices_byte_offset : index
   %28 = index.constant 4 : index
-  %rows_byte_offset = index.add %63, %28 : index
+  %rows_byte_offset = index.add %64, %28 : index
   %30 = scalar.extui %index : i32 to i64
   %31 = index.cast %30 : i64 to index
   %32 = index.constant 10 : index
-  %62 = index.madd %31, %32, %rows_byte_offset : index
-  %37 = index.constant 2 : index
-  %60 = index.madd %37, %28, %62 : index
-  %40 = buffer.view %matrices[%60] : buffer -> view<1xi16>
+  %63 = index.madd %31, %32, %rows_byte_offset : index
+  %61 = index.constant 8 : index
+  %62 = index.add %63, %61 : index
+  %40 = buffer.view %matrices[%62] : buffer -> view<1xi16>
   %41 = view.load<root_in_bounds|type_disjoint> %40[0] : view<1xi16> -> i16
   func.return %41 : i16
 }
@@ -96,12 +96,12 @@ func.def public @update(%rows: buffer, %rows_byte_offset: index, %row: i32, %col
   %47 = scalar.extui %row : i32 to i64
   %48 = index.cast %47 : i64 to index
   %49 = index.constant 10 : index
-  %65 = index.madd %48, %49, %rows_byte_offset : index
+  %66 = index.madd %48, %49, %rows_byte_offset : index
   %52 = scalar.extui %column : i32 to i64
   %53 = index.cast %52 : i64 to index
   %54 = index.constant 2 : index
-  %64 = index.madd %53, %54, %65 : index
-  %57 = buffer.view %rows[%64] : buffer -> view<1xi16>
+  %65 = index.madd %53, %54, %66 : index
+  %57 = buffer.view %rows[%65] : buffer -> view<1xi16>
   view.store<root_in_bounds|type_disjoint> %value, %57[0] : i16, view<1xi16>
   func.return
 }

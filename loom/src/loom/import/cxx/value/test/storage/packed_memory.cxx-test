@@ -73,14 +73,14 @@ void copy(Record* output, const Record* input) {
 
 // ----
 func.def public @copy(%output: buffer, %output_byte_offset: index, %input: buffer, %input_byte_offset: index) {
-  %23 = index.constant 2 : index
-  %6 = index.constant 16 : index
-  %22 = index.madd %6, %23, %input_byte_offset : index
+  %23 = index.constant 32 : index
+  %24 = index.add %input_byte_offset, %23 : index
   %9 = index.constant 1 : index
-  %10 = index.add %22, %9 : index
+  %10 = index.add %24, %9 : index
   %11 = buffer.view %input[%10] : buffer -> view<1xf64, align(1)>
   %value = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xf64, align(1)> -> f64
-  %17 = index.add %output_byte_offset, %6 : index
+  %21 = index.constant 16 : index
+  %17 = index.add %output_byte_offset, %21 : index
   %19 = index.add %17, %9 : index
   %20 = buffer.view %output[%19] : buffer -> view<1xf64, align(1)>
   view.store<root_in_bounds|type_disjoint> %value, %20[0] : f64, view<1xf64, align(1)>
@@ -264,12 +264,12 @@ void packed_update_kernel(volatile Envelope* output) {
 // ----
 func.def public @packed_update(%output: buffer, %output_byte_offset: index) {
   %2 = scalar.constant 1.25 : f32
-  %124 = index.constant 2 : index
-  %5 = index.constant 13 : index
-  %123 = index.madd %5, %124, %output_byte_offset : index
+  %130 = index.constant 26 : index
+  %131 = index.add %output_byte_offset, %130 : index
   %8 = index.constant 1 : index
-  %9 = index.add %123, %8 : index
-  %11 = index.add %9, %124 : index
+  %9 = index.add %131, %8 : index
+  %10 = index.constant 2 : index
+  %11 = index.add %9, %10 : index
   %12 = buffer.view %output[%11] : buffer -> view<1xf32, align(1)>
   view.store<volatile|root_in_bounds|type_disjoint> %2, %12[0] : f32, view<1xf32, align(1)>
   %13 = scalar.constant 2.0 : f32
@@ -283,18 +283,18 @@ func.def public @packed_update(%output: buffer, %output_byte_offset: index) {
   %38 = buffer.view %output[%37] : buffer -> view<1xi32, align(1)>
   view.store<volatile|root_in_bounds|type_disjoint> %26, %38[0] : i32, view<1xi32, align(1)>
   %52 = view.load<volatile|root_in_bounds|type_disjoint> %38[0] : view<1xi32, align(1)> -> i32
-  %115 = scalar.constant 1 : i32
-  %116 = scalar.shrui %52, %115 : i32
-  view.store<volatile|root_in_bounds|type_disjoint> %116, %38[0] : i32, view<1xi32, align(1)>
+  %118 = scalar.constant 1 : i32
+  %119 = scalar.shrui %52, %118 : i32
+  view.store<volatile|root_in_bounds|type_disjoint> %119, %38[0] : i32, view<1xi32, align(1)>
   %67 = view.load<volatile|root_in_bounds|type_disjoint> %38[0] : view<1xi32, align(1)> -> i32
-  %68 = scalar.ori %67, %115 : i32
+  %68 = scalar.ori %67, %118 : i32
   view.store<volatile|root_in_bounds|type_disjoint> %68, %38[0] : i32, view<1xi32, align(1)>
-  %112 = scalar.constant -1 : i8
+  %114 = scalar.constant -1 : i8
   %82 = buffer.view %output[%35] : buffer -> view<1xi8>
-  view.store<volatile|root_in_bounds> %112, %82[0] : i8, view<1xi8>
+  view.store<volatile|root_in_bounds> %114, %82[0] : i8, view<1xi8>
   %95 = view.load<volatile|root_in_bounds> %82[0] : view<1xi8> -> i8
   %96 = scalar.extui %95 : i8 to i32
-  %98 = scalar.addi %96, %115 : i32
+  %98 = scalar.addi %96, %118 : i32
   %99 = scalar.trunci %98 : i32 to i8
   view.store<volatile|root_in_bounds> %99, %82[0] : i8, view<1xi8>
   func.return

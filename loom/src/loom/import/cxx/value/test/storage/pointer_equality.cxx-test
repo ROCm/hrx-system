@@ -53,10 +53,9 @@ func.def public @same_base(%data: buffer, %data_byte_offset: index, %left: i32, 
 }
 
 func.def public @one_past(%begin: buffer, %begin_byte_offset: index, %end: buffer, %end_byte_offset: index) -> (i1) {
-  %64 = index.constant 3 : index
-  %55 = index.constant 4 : index
-  %63 = index.madd %55, %64, %begin_byte_offset : index
-  %58 = buffer.compare.address eq, %begin[%63], %end[%end_byte_offset]
+  %64 = index.constant 12 : index
+  %65 = index.add %begin_byte_offset, %64 : index
+  %58 = buffer.compare.address eq, %begin[%65], %end[%end_byte_offset]
   func.return %58 : i1
 }
 

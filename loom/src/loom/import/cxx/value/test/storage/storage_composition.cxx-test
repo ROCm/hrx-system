@@ -57,14 +57,14 @@ kernel.def @storage_words_kernel() {
 
 func.def @update_words_unsigned_int(%words: buffer, %words_byte_offset: index) -> (i32) {
   %24 = scalar.constant 7 : i32
-  %117 = index.constant 4 : index
-  %29 = index.add %words_byte_offset, %117 : index
+  %118 = index.constant 4 : index
+  %29 = index.add %words_byte_offset, %118 : index
   %30 = buffer.view %words[%29] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %24, %30[0] : i32, view<1xi32>
   %31 = scalar.constant 11 : i32
-  %116 = index.constant 2 : index
-  %115 = index.madd %117, %116, %words_byte_offset : index
-  %37 = buffer.view %words[%115] : buffer -> view<1xi32>
+  %116 = index.constant 8 : index
+  %117 = index.add %words_byte_offset, %116 : index
+  %37 = buffer.view %words[%117] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %31, %37[0] : i32, view<1xi32>
   %38 = scalar.constant 1 : i32
   %39 = scalar.constant 8 : i32
@@ -80,8 +80,8 @@ func.def @bitmap_update_unsigned_int(%words: buffer, %words_byte_offset: index, 
   %55 = scalar.extui %index : i32 to i64
   %56 = index.cast %55 : i64 to index
   %57 = index.constant 4 : index
-  %118 = index.madd %56, %57, %words_byte_offset : index
-  %60 = buffer.view %words[%118] : buffer -> view<1xi32>
+  %119 = index.madd %56, %57, %words_byte_offset : index
+  %60 = buffer.view %words[%119] : buffer -> view<1xi32>
   %61 = view.load<root_in_bounds|type_disjoint> %60[0] : view<1xi32> -> i32
   %62 = scalar.ori %61, %mask : i32
   view.store<root_in_bounds|type_disjoint> %62, %60[0] : i32, view<1xi32>
@@ -90,22 +90,22 @@ func.def @bitmap_update_unsigned_int(%words: buffer, %words_byte_offset: index, 
 
 func.def @sequenced_update_unsigned_int(%words: buffer, %words_byte_offset: index) -> (i32) {
   %68 = scalar.constant 32 : i32
-  %121 = index.constant 4 : index
-  %73 = index.add %words_byte_offset, %121 : index
+  %122 = index.constant 4 : index
+  %73 = index.add %words_byte_offset, %122 : index
   %74 = buffer.view %words[%73] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %68, %74[0] : i32, view<1xi32>
   %75 = scalar.constant 5 : i32
   %84 = view.load<root_in_bounds|type_disjoint> %74[0] : view<1xi32> -> i32
   %result = scalar.ori %84, %75 : i32
   view.store<root_in_bounds|type_disjoint> %result, %74[0] : i32, view<1xi32>
-  %119 = scalar.constant 200 : i32
-  %88 = scalar.addi %result, %119 : i32
+  %120 = scalar.constant 200 : i32
+  %88 = scalar.addi %result, %120 : i32
   func.return %88 : i32
 }
 
 func.def @increment_storage_unsigned_int(%words: buffer, %words_byte_offset$90: index) -> (i32) {
-  %122 = index.constant 4 : index
-  %words_byte_offset$96 = index.add %words_byte_offset$90, %122 : index
+  %123 = index.constant 4 : index
+  %words_byte_offset$96 = index.add %words_byte_offset$90, %123 : index
   %97 = buffer.view %words[%words_byte_offset$90] : buffer -> view<1xi32>
   %previous = view.load<root_in_bounds|type_disjoint> %97[0] : view<1xi32> -> i32
   %99 = scalar.constant 1 : i32
@@ -183,14 +183,14 @@ kernel.def @storage_volatile_kernel() {
 
 func.def @update_words_volatile_unsigned_int(%words: buffer, %words_byte_offset: index) -> (i32) {
   %24 = scalar.constant 7 : i32
-  %117 = index.constant 4 : index
-  %29 = index.add %words_byte_offset, %117 : index
+  %118 = index.constant 4 : index
+  %29 = index.add %words_byte_offset, %118 : index
   %30 = buffer.view %words[%29] : buffer -> view<1xi32>
   view.store<volatile|root_in_bounds|type_disjoint> %24, %30[0] : i32, view<1xi32>
   %31 = scalar.constant 11 : i32
-  %116 = index.constant 2 : index
-  %115 = index.madd %117, %116, %words_byte_offset : index
-  %37 = buffer.view %words[%115] : buffer -> view<1xi32>
+  %116 = index.constant 8 : index
+  %117 = index.add %words_byte_offset, %116 : index
+  %37 = buffer.view %words[%117] : buffer -> view<1xi32>
   view.store<volatile|root_in_bounds|type_disjoint> %31, %37[0] : i32, view<1xi32>
   %38 = scalar.constant 1 : i32
   %39 = scalar.constant 8 : i32
@@ -206,8 +206,8 @@ func.def @bitmap_update_volatile_unsigned_int(%words: buffer, %words_byte_offset
   %55 = scalar.extui %index : i32 to i64
   %56 = index.cast %55 : i64 to index
   %57 = index.constant 4 : index
-  %118 = index.madd %56, %57, %words_byte_offset : index
-  %60 = buffer.view %words[%118] : buffer -> view<1xi32>
+  %119 = index.madd %56, %57, %words_byte_offset : index
+  %60 = buffer.view %words[%119] : buffer -> view<1xi32>
   %61 = view.load<volatile|root_in_bounds|type_disjoint> %60[0] : view<1xi32> -> i32
   %62 = scalar.ori %61, %mask : i32
   view.store<volatile|root_in_bounds|type_disjoint> %62, %60[0] : i32, view<1xi32>
@@ -216,22 +216,22 @@ func.def @bitmap_update_volatile_unsigned_int(%words: buffer, %words_byte_offset
 
 func.def @sequenced_update_volatile_unsigned_int(%words: buffer, %words_byte_offset: index) -> (i32) {
   %68 = scalar.constant 32 : i32
-  %121 = index.constant 4 : index
-  %73 = index.add %words_byte_offset, %121 : index
+  %122 = index.constant 4 : index
+  %73 = index.add %words_byte_offset, %122 : index
   %74 = buffer.view %words[%73] : buffer -> view<1xi32>
   view.store<volatile|root_in_bounds|type_disjoint> %68, %74[0] : i32, view<1xi32>
   %75 = scalar.constant 5 : i32
   %84 = view.load<volatile|root_in_bounds|type_disjoint> %74[0] : view<1xi32> -> i32
   %result = scalar.ori %84, %75 : i32
   view.store<volatile|root_in_bounds|type_disjoint> %result, %74[0] : i32, view<1xi32>
-  %119 = scalar.constant 200 : i32
-  %88 = scalar.addi %result, %119 : i32
+  %120 = scalar.constant 200 : i32
+  %88 = scalar.addi %result, %120 : i32
   func.return %88 : i32
 }
 
 func.def @increment_storage_volatile_unsigned_int(%words: buffer, %words_byte_offset$90: index) -> (i32) {
-  %122 = index.constant 4 : index
-  %words_byte_offset$96 = index.add %words_byte_offset$90, %122 : index
+  %123 = index.constant 4 : index
+  %words_byte_offset$96 = index.add %words_byte_offset$90, %123 : index
   %97 = buffer.view %words[%words_byte_offset$90] : buffer -> view<1xi32>
   %previous = view.load<volatile|root_in_bounds|type_disjoint> %97[0] : view<1xi32> -> i32
   %99 = scalar.constant 1 : i32
@@ -426,21 +426,21 @@ void storage_floats_kernel(float* values, float* output) {
 // ----
 func.def public @storage_floats(%values: buffer, %values_byte_offset: index) -> (f32) {
   %3 = scalar.constant 1.5 : f32
-  %85 = index.constant 4 : index
-  %8 = index.add %values_byte_offset, %85 : index
+  %88 = index.constant 4 : index
+  %8 = index.add %values_byte_offset, %88 : index
   %9 = buffer.view %values[%8] : buffer -> view<1xf32>
   view.store<root_in_bounds|type_disjoint> %3, %9[0] : f32, view<1xf32>
-  %84 = scalar.constant -3.0 : f32
-  %83 = index.constant 2 : index
-  %82 = index.madd %85, %83, %values_byte_offset : index
-  %17 = buffer.view %values[%82] : buffer -> view<1xf32>
-  view.store<root_in_bounds|type_disjoint> %84, %17[0] : f32, view<1xf32>
-  %81 = scalar.constant 2.0 : f32
+  %87 = scalar.constant -3.0 : f32
+  %85 = index.constant 8 : index
+  %86 = index.add %values_byte_offset, %85 : index
+  %17 = buffer.view %values[%86] : buffer -> view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %87, %17[0] : f32, view<1xf32>
+  %83 = scalar.constant 2.0 : f32
   %26 = view.load<root_in_bounds|type_disjoint> %9[0] : view<1xf32> -> f32
-  %first = scalar.mulf %26, %81 : f32
+  %first = scalar.mulf %26, %83 : f32
   view.store<root_in_bounds|type_disjoint> %first, %9[0] : f32, view<1xf32>
   %36 = view.load<root_in_bounds|type_disjoint> %17[0] : view<1xf32> -> f32
-  %second = scalar.divf %36, %81 : f32
+  %second = scalar.divf %36, %83 : f32
   view.store<root_in_bounds|type_disjoint> %second, %17[0] : f32, view<1xf32>
   %38 = scalar.constant 0.25 : f32
   %45 = view.load<root_in_bounds|type_disjoint> %9[0] : view<1xf32> -> f32
@@ -460,8 +460,8 @@ kernel.def @storage_floats_kernel() {
 } launch(%values: buffer, %output: buffer) {
   %values_byte_offset = index.constant 0 : index
   %67 = func.call @storage_floats(%values, %values_byte_offset) : (buffer, index) -> (f32)
-  %86 = index.constant 4 : index
-  %73 = buffer.view %output[%86] : buffer -> view<1xf32>
+  %89 = index.constant 4 : index
+  %73 = buffer.view %output[%89] : buffer -> view<1xf32>
   view.store<root_in_bounds|type_disjoint> %67, %73[0] : f32, view<1xf32>
   kernel.return
 }

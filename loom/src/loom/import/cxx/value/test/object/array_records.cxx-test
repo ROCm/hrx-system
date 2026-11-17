@@ -668,10 +668,9 @@ float gather(float* input) {
 
 // ----
 func.def public @gather(%input: buffer, %input_byte_offset: index) -> (f32) {
-  %14 = index.constant 2 : index
-  %8 = index.constant 4 : index
-  %13 = index.madd %8, %14, %input_byte_offset : index
-  %11 = buffer.view %input[%13] : buffer -> view<1xf32>
+  %14 = index.constant 8 : index
+  %15 = index.add %input_byte_offset, %14 : index
+  %11 = buffer.view %input[%15] : buffer -> view<1xf32>
   %12 = view.load<root_in_bounds|type_disjoint> %11[0] : view<1xf32> -> f32
   func.return %12 : f32
 }

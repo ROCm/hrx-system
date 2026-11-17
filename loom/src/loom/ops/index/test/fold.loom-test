@@ -592,6 +592,52 @@ func.def @madd_identity_multiplier(%a: index, %c: index) -> (index) {
 
 // ====
 
+// Exact products become one constant displacement even when the addend is
+// dynamic. Signed factors and exact facts use the same arithmetic contract.
+func.def @madd_constant_products(%base: index, %scale: index) -> (index, index, index, index) {
+  %element_count = index.constant 3 : index
+  %element_bytes = index.constant 4 : index
+  %reverse_bytes = index.constant -4 : index
+  %exact = index.assume %scale [range(%scale, 4, 4)] : index
+  %positive = index.madd %element_count, %element_bytes, %base : index
+  %backward = index.madd %element_count, %reverse_bytes, %base : index
+  %reversed = index.madd %reverse_bytes, %element_count, %base : index
+  %proven = index.madd %element_count, %exact, %base : index
+  func.return %positive, %backward, %reversed, %proven : index, index, index, index
+}
+// ----
+func.def @madd_constant_products(%base: index, %scale: index) -> (index, index, index, index) {
+  %20 = index.constant 12 : index
+  %positive = index.add %base, %20 : index
+  %18 = index.constant -12 : index
+  %backward = index.add %base, %18 : index
+  %16 = index.constant -12 : index
+  %reversed = index.add %base, %16 : index
+  %14 = index.constant 12 : index
+  %proven = index.add %base, %14 : index
+  func.return %positive, %backward, %reversed, %proven : index, index, index, index
+}
+
+// ====
+
+// The folder does not substitute a wrapped product when its mathematical
+// constant cannot be represented in the compiler's exact integer facts.
+func.def @madd_unrepresentable_constant_product(%base: index) -> (index) {
+  %maximum = index.constant 9223372036854775807 : index
+  %factor = index.constant 2 : index
+  %result = index.madd %maximum, %factor, %base : index
+  func.return %result : index
+}
+// ----
+func.def @madd_unrepresentable_constant_product(%base: index) -> (index) {
+  %maximum = index.constant 9223372036854775807 : index
+  %factor = index.constant 2 : index
+  %result = index.madd %maximum, %factor, %base : index
+  func.return %result : index
+}
+
+// ====
+
 // index.add absorbs a multiply into index.madd so address expressions stay as a
 // single explicit a*b+c op instead of a loose mul/add pair.
 func.def @add_mul_canonicalizes_to_madd(%i: index, %j: index) -> (index) {

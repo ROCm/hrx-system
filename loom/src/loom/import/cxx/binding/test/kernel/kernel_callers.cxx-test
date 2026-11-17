@@ -337,9 +337,9 @@ kernel.def @enum_storage_u16() {
   %30 = buffer.view %input[%28] : buffer -> view<1xi16>
   %31 = view.load<root_in_bounds|type_disjoint> %30[0] : view<1xi16> -> i16
   %32 = func.call pure @add___Short(%31, %delta) : (i16, i16) -> (i16)
-  %49 = index.constant -1 : index
-  %48 = index.madd %49, %15, %cursor_byte_offset : index
-  %40 = buffer.view %output[%48] : buffer -> view<1xi16>
+  %49 = index.constant -2 : index
+  %50 = index.add %cursor_byte_offset, %49 : index
+  %40 = buffer.view %output[%50] : buffer -> view<1xi16>
   view.store<root_in_bounds|type_disjoint> %32, %40[0] : i16, view<1xi16>
   kernel.return
 }
@@ -384,9 +384,9 @@ kernel.def @enum_storage_u32() {
   %30 = buffer.view %input[%28] : buffer -> view<1xi32>
   %31 = view.load<root_in_bounds|type_disjoint> %30[0] : view<1xi32> -> i32
   %32 = func.call pure @add___Word(%31, %delta) : (i32, i32) -> (i32)
-  %49 = index.constant -1 : index
-  %48 = index.madd %49, %15, %cursor_byte_offset : index
-  %40 = buffer.view %output[%48] : buffer -> view<1xi32>
+  %49 = index.constant -4 : index
+  %50 = index.add %cursor_byte_offset, %49 : index
+  %40 = buffer.view %output[%50] : buffer -> view<1xi32>
   view.store<root_in_bounds|type_disjoint> %32, %40[0] : i32, view<1xi32>
   kernel.return
 }
@@ -431,9 +431,9 @@ kernel.def @enum_storage_u64() {
   %30 = buffer.view %input[%28] : buffer -> view<1xi64>
   %31 = view.load<root_in_bounds|type_disjoint> %30[0] : view<1xi64> -> i64
   %32 = func.call pure @add___Long(%31, %delta) : (i64, i64) -> (i64)
-  %46 = index.constant -1 : index
-  %45 = index.madd %46, %15, %cursor_byte_offset : index
-  %40 = buffer.view %output[%45] : buffer -> view<1xi64>
+  %46 = index.constant -8 : index
+  %47 = index.add %cursor_byte_offset, %46 : index
+  %40 = buffer.view %output[%47] : buffer -> view<1xi64>
   view.store<root_in_bounds|type_disjoint> %32, %40[0] : i64, view<1xi64>
   kernel.return
 }

@@ -383,13 +383,13 @@ func.def public @mutate_pointer(%input: buffer, %input_byte_offset: index, %amou
 }
 
 func.def public @copied_pointer(%input: buffer, %input_byte_offset: index) -> (f32) {
-  %99 = index.constant 4 : index
-  %pointer_byte_offset$56 = index.add %input_byte_offset, %99 : index
-  %98 = index.constant 2 : index
-  %pointer_byte_offset$97 = index.madd %99, %98, %pointer_byte_offset$56 : index
+  %100 = index.constant 4 : index
+  %pointer_byte_offset$56 = index.add %input_byte_offset, %100 : index
+  %98 = index.constant 8 : index
+  %pointer_byte_offset$99 = index.add %pointer_byte_offset$56, %98 : index
   %62 = buffer.view %input[%pointer_byte_offset$56] : buffer -> view<1xf32>
   %63 = view.load<root_in_bounds|type_disjoint> %62[0] : view<1xf32> -> f32
-  %64 = buffer.view %input[%pointer_byte_offset$97] : buffer -> view<1xf32>
+  %64 = buffer.view %input[%pointer_byte_offset$99] : buffer -> view<1xf32>
   %65 = view.load<root_in_bounds|type_disjoint> %64[0] : view<1xf32> -> f32
   %66 = scalar.addf %63, %65 : f32
   func.return %66 : f32
@@ -411,8 +411,8 @@ func.def public @ordered_pointer(%input: buffer, %input_byte_offset: index, %eva
 }
 
 func.def public @null_pointer() -> (i1) {
-  %101 = scalar.constant true : i1
-  func.return %101 : i1
+  %102 = scalar.constant true : i1
+  func.return %102 : i1
 }
 
 // ====
