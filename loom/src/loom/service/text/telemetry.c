@@ -127,8 +127,8 @@ static iree_status_t loom_service_text_epoch_fields(
                                                                   : "isolated";
   const loom_runtime_telemetry_field_t draft[] = {
       loom_runtime_telemetry_field_uint64("verifications", value.verifications),
-      loom_runtime_telemetry_field_uint64(
-          "proposed_tokens", value.verifications * value.draft_depth),
+      loom_runtime_telemetry_field_uint64("proposed_tokens",
+                                          value.proposed_tokens),
       loom_runtime_telemetry_field_uint64("accepted_draft_inputs",
                                           value.accepted_draft_inputs),
   };
@@ -190,6 +190,8 @@ static iree_status_t loom_service_text_span_fields(
       loom_runtime_telemetry_field_uint64("known_tokens", value.known_tokens),
       loom_runtime_telemetry_field_uint64("verification_epochs",
                                           value.verification_epochs),
+      loom_runtime_telemetry_field_uint64("proposed_tokens",
+                                          value.proposed_tokens),
   };
   return sink.emit(sink.self, IREE_ARRAYSIZE(fields), fields);
 }

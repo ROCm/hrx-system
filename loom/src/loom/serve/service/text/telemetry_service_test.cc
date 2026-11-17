@@ -58,8 +58,93 @@ void ExpectEpochFields(const loom_service_text_epoch_record_t& expected,
                 draft->value.object_value.fields, "proposed_tokens");
   ASSERT_NE(proposed, nullptr);
   EXPECT_EQ(proposed->kind, LOOM_RUNTIME_TELEMETRY_FIELD_UINT64);
-  EXPECT_EQ(proposed->value.uint64_value,
-            expected.verifications * expected.draft_depth);
+  EXPECT_EQ(proposed->value.uint64_value, expected.proposed_tokens);
+}
+
+TEST_F(SourceTextServiceTest, ActualDraftCountsReachSpansEpochAndHeartbeat) {
+  loom_serve_text_telemetry_t telemetry = {};
+  IREE_ASSERT_OK(loom_serve_text_telemetry_initialize(nullptr, host_allocator_,
+                                                      &telemetry));
+  loom_serve_text_heartbeat_t heartbeat;
+  loom_serve_text_heartbeat_initialize(&heartbeat);
+  loom_serve_text_session_t sessions[3] = {};
+  loom_serve_text_session_t* session_table[3];
+  for (size_t i = 0; i < IREE_ARRAYSIZE(sessions); ++i) {
+    sessions[i].row = loom_serve_text_model_row(model_, i);
+    sessions[i].lifetime.id = 100 + i;
+    session_table[i] = &sessions[i];
+  }
+  // Completed source publication: unequal candidate counts, ordinary input,
+  // and two verifications for one request. The ceiling cannot recover these.
+  loom_serve_text_span_t spans[] = {
+      {.row_index = 2, .token_count = 4},
+      {.row_index = 0, .token_count = 4},
+      {.row_index = 1, .token_count = 7},
+  };
+  loom_serve_text_result_t results[] = {
+      {
+          .consumed_count = 2,
+          .output_count = 2,
+          .verification_count = 1,
+          .proposal_count = 3,
+      },
+      {.consumed_count = 4, .known_count = 4, .output_count = 1},
+      {
+          .consumed_count = 3,
+          .output_count = 3,
+          .verification_count = 2,
+          .proposal_count = 8,
+      },
+  };
+  iree_host_size_t positions[] = {10, 20, 30};
+  uint32_t limits[] = {5, 0, 9};
+  bool prefill[] = {false, true, false};
+  const loom_serve_text_epoch_options_t options = {
+      .draft_depth = 7,
+      .schedule_mode = LOOM_SERVICE_TEXT_SCHEDULE_PACKED,
+      .shapes = shapes_,
+      .shape_count = IREE_ARRAYSIZE(shapes_),
+  };
+  const loom_serve_text_epoch_t cohort = {
+      .count = IREE_ARRAYSIZE(spans),
+      .shape_index = 1,
+      .start = {.serial = 7, .time = iree_time_now()},
+      .device_epochs = 2,
+      .spans = spans,
+      .results = results,
+      .positions = positions,
+      .output_limits = limits,
+      .prefill = prefill,
+  };
+  uint64_t cursor = loom_runtime_telemetry_stream_head(telemetry.stream);
+  loom_serve_text_telemetry_epoch(&telemetry, &heartbeat, &options, &cohort,
+                                  session_table);
+  for (size_t i = 0; i < IREE_ARRAYSIZE(spans); ++i) {
+    loom_runtime_telemetry_record_t record;
+    ASSERT_EQ(
+        loom_runtime_telemetry_stream_read(telemetry.stream, &cursor, &record),
+        LOOM_RUNTIME_TELEMETRY_READ_RECORD);
+    ASSERT_EQ(record.event, &LOOM_SERVICE_TEXT_SPAN);
+    loom_service_text_span_record_t span;
+    std::memcpy(&span, record.data.words, sizeof(span));
+    EXPECT_EQ(span.session, sessions[spans[i].row_index].lifetime.id);
+    EXPECT_EQ(span.proposed_tokens, results[i].proposal_count);
+  }
+  loom_runtime_telemetry_record_t record;
+  ASSERT_EQ(
+      loom_runtime_telemetry_stream_read(telemetry.stream, &cursor, &record),
+      LOOM_RUNTIME_TELEMETRY_READ_RECORD);
+  ASSERT_EQ(record.event, &LOOM_SERVICE_TEXT_EPOCH);
+  loom_service_text_epoch_record_t epoch;
+  std::memcpy(&epoch, record.data.words, sizeof(epoch));
+  EXPECT_EQ(epoch.proposed_tokens, 11u);
+  EXPECT_EQ(epoch.verifications, 3u);
+  EXPECT_EQ(epoch.accepted_draft_inputs, 2u);
+  const auto snapshot = loom_serve_text_heartbeat_read(&heartbeat);
+  EXPECT_EQ(snapshot.draft.proposed_tokens, 11u);
+  EXPECT_EQ(snapshot.draft.accepted_inputs, 2u);
+  loom_serve_text_heartbeat_deinitialize(&heartbeat);
+  loom_serve_text_telemetry_deinitialize(&telemetry);
 }
 
 TEST_F(SourceTextServiceTest, CopiedTelemetryOutlivesOwnersAndNameReuse) {

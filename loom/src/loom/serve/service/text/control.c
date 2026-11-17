@@ -72,6 +72,7 @@ iree_status_t loom_serve_text_control_initialize(
                         .data_length
                   : 0,
       span_capacity * sizeof(int32_t),
+      span_capacity * sizeof(uint32_t),
   };
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
@@ -160,8 +161,8 @@ iree_status_t loom_serve_text_control_initialize(
       i32,    i32,    i32,    i32,    i32, buffer, buffer};
   const iree_vm_signature_type_t encode_results[] = {i32, buffer, i64, i64};
   const iree_vm_signature_type_t publish_arguments[] = {
-      buffer, buffer, buffer, i32,    i32,    i32,   i32,
-      i32,    buffer, buffer, buffer, buffer, buffer};
+      buffer, buffer, buffer, i32,    i32,    i32,    i32,
+      i32,    buffer, buffer, buffer, buffer, buffer, buffer};
   const iree_vm_signature_type_t state_arguments[] = {buffer, i32, buffer};
   const iree_vm_signature_type_t resize_arguments[] = {buffer, i64};
   const iree_vm_signature_type_t resize_results[] = {buffer, buffer, buffer,
