@@ -253,8 +253,8 @@ _ALL_PROFILE_XFAILS = {
     "memory/atomic/narrow/cmpxchg.loom:@subword_global_cmpxchg_i16": "TARGET/003",
     "memory/atomic/narrow/cmpxchg.loom:@subword_global_cmpxchg_i8": "TARGET/003",
     "memory/atomic/narrow/contention.loom:@contended_byte_counters": "TARGET/002,TARGET/003",
-    "memory/atomic/narrow/float.loom:@narrow_float_updates": "TARGET/003",
-    "memory/atomic/narrow/observations.loom:@narrow_atomic_publication": "TARGET/003",
+    "memory/atomic/narrow/float.loom:@narrow_float_updates": "TARGET/032",
+    "memory/atomic/narrow/observations.loom:@narrow_atomic_publication": "TARGET/032",
     "memory/atomic/narrow/observations.loom:@narrow_float_observations": "TARGET/003,TARGET/032",
     "memory/atomic/narrow/observations.loom:@narrow_observations_i16": "TARGET/003,TARGET/032",
     "memory/atomic/narrow/observations.loom:@narrow_observations_i8": "TARGET/003,TARGET/032",
@@ -283,7 +283,7 @@ _ALL_PROFILE_XFAILS = {
     "memory/storage/stability/selection.loom:@retained_typed_prefix": "LOWERING/044",
     "memory/storage/workgroup.loom:@initialized_workgroup_buffers": "TARGET/001",
     "memory/view/subview.loom:@subview_atomic_origins": "TARGET/003",
-    "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_bf16": "TARGET/002",
+    "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_bf16": "TARGET/031",
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_wide_bf16": "TARGET/002",
     "numeric/matrix/epilogue.loom:@matrix_epilogue": "TARGET/039",
     "numeric/matrix/epilogue.loom:@matrix_half_minimum": "TARGET/039",
@@ -293,8 +293,8 @@ _ALL_PROFILE_XFAILS = {
 
 _EXTENDED_TYPES_XFAILS = {
     "control/branch/guards.loom:@mixed_carriers": "TARGET/031,TARGET/002",
-    # Fragment memory descriptors require matching register and storage types.
-    "control/branch/guards.loom:@selected_fragment_scale": "TARGET/002",
+    # Cooperative arithmetic requires compatible selected fragment types.
+    "control/branch/guards.loom:@selected_fragment_scale": "TARGET/039",
     "control/loop/condition.loom:@condition_broadcast": "TARGET/003",
     "control/loop/condition.loom:@condition_nested_broadcast": "TARGET/003",
     "kernel/subgroup/ballot.loom:@subgroup_ballot_divergent": "SUBRANGE/024",
@@ -306,7 +306,7 @@ _EXTENDED_TYPES_XFAILS = {
     "memory/atomic/add_f32_subnormals.loom:@global_atomic_add_f32_subnormal": "TARGET/003",
     "memory/atomic/workgroup/observations.loom:@lds_observations_i64": "TARGET/032",
     "memory/storage/byte_banks.loom:@raw_byte_spaces": "TARGET/003",
-    "memory/storage/workgroup.loom:@workgroup_packet_exchange": "TARGET/003",
+    "memory/storage/workgroup.loom:@workgroup_packet_exchange": "TARGET/033",
     "numeric/conversion/float8_dequantization.loom:@float8_dequantization": "TARGET/002",
     "numeric/matrix/publication.loom:@matrix_publication": "TARGET/002",
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16": "TARGET/002",
@@ -338,7 +338,7 @@ _NO_EXTENDED_TYPES_XFAILS = {
     "memory/atomic/private.loom:@private_f8e5m2_number": "TARGET/003",
     "memory/atomic/private.loom:@private_float8_compare": "TARGET/003",
     "memory/atomic/private.loom:@private_half_number": "TARGET/003",
-    "memory/atomic/workgroup/observations.loom:@lds_observations_i64": "TARGET/003",
+    "memory/atomic/workgroup/observations.loom:@lds_observations_i64": "TARGET/032",
     "memory/packed/alignment.loom:@copy_byte_origins": "TARGET/003",
     "memory/packed/alignment.loom:@copy_uniform_word_payloads": "TARGET/003",
     "memory/packed/alignment.loom:@gather_uniform_word_payloads": "TARGET/003",
@@ -381,14 +381,14 @@ _NO_EXTENDED_TYPES_XFAILS = {
     "memory/storage/private.loom:@private_payloads": "TARGET/003",
     "memory/storage/private.loom:@private_rotating_aliases": "TARGET/003",
     "memory/storage/workgroup.loom:@workgroup_bfloat_payload_exchange": "TARGET/003",
-    "memory/storage/workgroup.loom:@workgroup_packet_exchange": "TARGET/003",
+    "memory/storage/workgroup.loom:@workgroup_packet_exchange": "TARGET/033",
     "memory/view/strided_vectors.loom:@strided_vector_bytes": "TARGET/003",
     "memory/view/strided_vectors.loom:@strided_vector_doublewords": "TARGET/003",
     "memory/view/strided_vectors.loom:@strided_vector_halfwords": "TARGET/003",
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp8_bf16": "TARGET/003",
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp8_grouped": "TARGET/003",
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp8_wide_bf16": "TARGET/003",
-    "numeric/conversion/float8_dequantization.loom:@float8_dequantization": "TARGET/003",
+    "numeric/conversion/float8_dequantization.loom:@float8_dequantization": "TARGET/002",
     "numeric/conversion/float8_facts.loom:@float8_facts": "TARGET/003",
     "numeric/conversion/integer_floating.loom:@floating_integer_shapes": "TARGET/003",
     "numeric/conversion/integer_floating.loom:@integer_floating_shapes": "TARGET/003",
@@ -410,8 +410,8 @@ _NO_EXTENDED_TYPES_XFAILS = {
 
 _SUBGROUP_XFAILS = dict(list(_NO_EXTENDED_TYPES_XFAILS.items()) + list({
     "control/branch/guards.loom:@mixed_carriers": "TARGET/003",
-    # Fixed-width native fragment selection requires cooperative capabilities.
-    "control/branch/guards.loom:@selected_fragment_scale": "TARGET/003",
+    # Cooperative arithmetic requires compatible selected fragment types.
+    "control/branch/guards.loom:@selected_fragment_scale": "TARGET/039",
     "control/loop/carried_lane_liveness.loom:@loop_carried_lane_liveness": "TARGET/003",
     "kernel/subgroup/scan.loom:@subgroup_scan_wide_sums": "TARGET/003",
     "memory/packed/tails.loom:@stage_private_i8_3": "TARGET/003",
@@ -422,8 +422,8 @@ _SUBGROUP_XFAILS = dict(list(_NO_EXTENDED_TYPES_XFAILS.items()) + list({
 
 _BDA_XFAILS = dict(list(_NO_EXTENDED_TYPES_XFAILS.items()) + list({
     "control/branch/guards.loom:@mixed_carriers": "TARGET/031,TARGET/002",
-    # Fragment memory descriptors require matching register and storage types.
-    "control/branch/guards.loom:@selected_fragment_scale": "TARGET/002",
+    # Cooperative arithmetic requires compatible selected fragment types.
+    "control/branch/guards.loom:@selected_fragment_scale": "TARGET/039",
     "control/loop/carried_lane_liveness.loom:@loop_carried_lane_liveness": "TARGET/003",
     "control/loop/condition.loom:@condition_broadcast": "TARGET/003",
     "control/loop/condition.loom:@condition_nested_broadcast": "TARGET/003",
@@ -469,8 +469,8 @@ _ALL_ROOTS_XFAIL = [
 
 _SPIRV_EXECUTION_XFAILS = {
     "control/branch/convergence.loom:@return_convergence_values": "TARGET/033",
-    # Native fragment loads require 16-byte alignment; this source proves four.
-    "control/branch/guards.loom:@selected_fragment_scale_values": "TARGET/050",
+    # Cooperative arithmetic requires compatible selected fragment types.
+    "control/branch/guards.loom:@selected_fragment_scale_values": "TARGET/039",
     "function/buffer/arguments.loom:@buffer_extent_values": "TARGET/001",
     "function/buffer/call_overflow.loom:@buffer_overflow_values": "LOWERING/044",
     "function/buffer/calls.loom:@buffer_call_values": "LOWERING/044",
@@ -510,14 +510,14 @@ _SPIRV_EXECUTION_XFAILS = {
     "memory/storage/private.loom:@shared_storage_values": "LOWERING/044",
     "memory/storage/stability/selection.loom:@retained_typed_prefix_values": "LOWERING/044",
     "memory/storage/workgroup.loom:@initialized_workgroup_values": "TARGET/001",
-    "memory/storage/workgroup.loom:@workgroup_packet_exchange_bits": "TARGET/003",
+    "memory/storage/workgroup.loom:@workgroup_packet_exchange_bits": "TARGET/033",
     "memory/view/borrowed_transport.loom:@borrowed_transport_values": "LOWERING/044",
     "memory/view/boundary_transport.loom:@boundary_transport_values": "LOWERING/044",
     "memory/view/nested_selection.loom:@nested_selection_values": "LOWERING/044",
     "memory/view/offset_recurrence.loom:@window_recurrence_values": "LOWERING/044",
     "memory/view/selected_crops.loom:@selected_crop_values": "LOWERING/044",
-    "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_bf16_subnormal_values": "TARGET/002",
-    "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_bf16_values": "TARGET/002",
+    "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_bf16_subnormal_values": "TARGET/031",
+    "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_bf16_values": "TARGET/031",
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_wide_bf16_values": "TARGET/002",
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp8_grouped_values": "EXPECT/006",
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp8_wide_bf16_values": "EXPECT/006",
@@ -576,11 +576,11 @@ _SPIRV_EXECUTION_ALLOWED_FAILURES = {
     "memory/atomic/narrow/cmpxchg.loom:@subword_global_cmpxchg_values_i16": "TARGET/003",
     "memory/atomic/narrow/cmpxchg.loom:@subword_global_cmpxchg_values_i8": "TARGET/003",
     "memory/atomic/narrow/contention.loom:@contended_byte_tickets": "TARGET/002,TARGET/003",
-    "memory/atomic/narrow/float.loom:@narrow_float_payloads": "TARGET/003",
+    "memory/atomic/narrow/float.loom:@narrow_float_payloads": "TARGET/032",
     "memory/atomic/narrow/observations.loom:@narrow_float_observation_bits": "TARGET/003,TARGET/032",
     "memory/atomic/narrow/observations.loom:@narrow_observation_values_i16": "TARGET/003,TARGET/032",
     "memory/atomic/narrow/observations.loom:@narrow_observation_values_i8": "TARGET/003,TARGET/032",
-    "memory/atomic/narrow/observations.loom:@narrow_publication_values": "TARGET/003",
+    "memory/atomic/narrow/observations.loom:@narrow_publication_values": "TARGET/032",
     "memory/atomic/narrow/scopes.loom:@lds_broad_scope_values": "TARGET/032",
     "memory/atomic/narrow/scopes.loom:@subgroup_atomic_handoff_values": "TARGET/032",
     "memory/atomic/narrow/scopes.loom:@thread_atomic_sequence_values": "TARGET/032",
