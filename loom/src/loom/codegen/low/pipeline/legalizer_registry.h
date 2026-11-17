@@ -18,9 +18,10 @@ extern "C" {
 
 // Prepares the immutable legalizer registry shared by pass executions.
 //
-// Target-specific providers are ordered before the generic buffer, scalar,
-// vector, and view reference providers. The initialized storage must be
-// deinitialized before |allocator| is released.
+// Target-specific providers are ordered before shared providers. All shared
+// legalizers are composed here, independently of the optional target packages
+// linked into the compiler. The initialized storage must be deinitialized
+// before |allocator| is released.
 iree_status_t loom_low_legalizer_registry_storage_initialize(
     loom_target_legalizer_provider_list_t target_provider_list,
     iree_allocator_t allocator,

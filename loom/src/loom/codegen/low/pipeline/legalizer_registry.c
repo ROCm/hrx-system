@@ -12,6 +12,7 @@
 #include "loom/transforms/kernel/target_legalization.h"
 #include "loom/transforms/math/legalize.h"
 #include "loom/transforms/scalar/target_legalization.h"
+#include "loom/transforms/scalar/wide_division_legalization.h"
 #include "loom/transforms/vector/coordinate_legalization.h"
 #include "loom/transforms/vector/grouped_packet_legalization.h"
 #include "loom/transforms/vector/target_legalization.h"
@@ -22,6 +23,9 @@ iree_status_t loom_low_legalizer_registry_storage_initialize(
     iree_allocator_t allocator,
     loom_target_legalizer_registry_storage_t* out_storage) {
   const loom_target_legalizer_provider_t* generic_providers[] = {
+      // Rejected wide pairs share quotient/remainder arithmetic before the
+      // generic index/scalar providers split them into separate operations.
+      loom_scalar_wide_division_legalizer_provider(),
       loom_buffer_target_legalizer_provider(),
       loom_conversion_target_legalizer_provider(),
       loom_index_target_legalizer_provider(),

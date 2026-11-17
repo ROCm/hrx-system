@@ -347,7 +347,6 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amd/xdna/aie2p/lower",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/ops",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/pipeline:pass",
-        "//loom/src/loom/transforms/scalar:wide_division_legalization",
         "//runtime/src/iree/base",
     ],
 )
