@@ -239,8 +239,6 @@ TEST_P(FactLoopProjectionTest, NestedSolveRefreshesPredicatePreimages) {
     loom_value_id_t input;
     // Outer carried bound that changes while the predicate stays unknown.
     loom_value_id_t induction;
-    // Ancestor equation at which the scope computes a retained refinement.
-    const loom_op_t* shifted;
     // Numeric refinement cached before entering the innermost loop.
     loom_value_facts_t cached_bound;
     // Whether the solve consumes cached refinements.
@@ -253,21 +251,25 @@ TEST_P(FactLoopProjectionTest, NestedSolveRefreshesPredicatePreimages) {
     bool saw_five;
     // Whether the next exact bound was observed.
     bool saw_six;
-  } observation = {&table_, inner,      after,   input, induction, shifted,
-                   {},      GetParam(), refined, 0,     false,     false};
+  } observation = {&table_,    inner,   after, input, induction, {},
+                   GetParam(), refined, 0,     false, false};
   table_.context.refine_operands.user_data = &observation;
   if (GetParam()) {
     table_.context.refine_operands.fn =
-        [](void* opaque, const loom_value_fact_table_t* table,
-           const loom_op_t* op, loom_value_facts_t* operands) {
+        [](void* opaque, const loom_value_fact_table_t*, const loom_op_t* op,
+           loom_value_facts_t* operands) {
           auto* state = static_cast<Observation*>(opaque);
-          if (op == state->shifted) {
-            state->cached_bound =
-                loom_value_fact_table_lookup(table, state->induction);
-          } else if (op == state->refined) {
+          if (op == state->refined) {
             operands[0] = state->cached_bound;
           }
           return loom_op_const_operands(op);
+        };
+    table_.context.refine_operands.replay_prepare_fn =
+        [](void* opaque, const loom_value_fact_table_t* table,
+           const loom_op_t*) {
+          auto* state = static_cast<Observation*>(opaque);
+          state->cached_bound =
+              loom_value_fact_table_lookup(table, state->induction);
         };
   }
   table_.summary_computed.user_data = &observation;
@@ -558,6 +560,55 @@ TEST_F(FactLoopDependencyTest, ReusedChildForwardsItsDependencies) {
   IREE_ASSERT_OK(loom_value_fact_table_define(&table_, inputs_[3],
                                               loom_value_facts_exact_i64(1)));
   Visit(false, [&] { inner_query(false); });
+}
+
+TEST_F(FactLoopDependencyTest, OpaqueRefinementDisablesReuse) {
+  table_.context.refine_operands.fn =
+      [](void*, const loom_value_fact_table_t*, const loom_op_t* op,
+         loom_value_facts_t*) { return loom_op_const_operands(op); };
+  auto query = [&] { (void)loom_value_fact_table_lookup(&table_, inputs_[3]); };
+  Visit(false, query);
+  Visit(false, query);
+}
+
+TEST_F(FactLoopDependencyTest, RefinementPreparationProvidesDependencies) {
+  loom_value_id_t dependency = inputs_[3];
+  table_.context.refine_operands.user_data = &dependency;
+  table_.context.refine_operands.fn =
+      [](void*, const loom_value_fact_table_t*, const loom_op_t* op,
+         loom_value_facts_t*) { return loom_op_const_operands(op); };
+  table_.context.refine_operands.replay_prepare_fn =
+      [](void* opaque, const loom_value_fact_table_t* table, const loom_op_t*) {
+        (void)loom_value_fact_table_lookup(
+            table, *static_cast<loom_value_id_t*>(opaque));
+      };
+  auto query = [] {};
+  Visit(false, query);
+  Visit(true, query);
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table_, dependency,
+                                              loom_value_facts_exact_i64(1)));
+  Visit(false, query);
+  Visit(true, query);
+}
+
+TEST_F(FactLoopDependencyTest, OwnershipStorageIsReusedAcrossRootSolves) {
+  auto query = [&] { (void)loom_value_fact_table_lookup(&table_, inputs_[3]); };
+  Visit(false, query);
+  const auto* entries = table_.scratch.loop_owners.entries;
+  const uint32_t generation = table_.scratch.loop_owners.generation;
+  ASSERT_NE(entries, nullptr);
+
+  IREE_ASSERT_OK(
+      loom_value_fact_loop_replay_end(&table_, &outer_replay_, true));
+  iree_arena_reset(&solve_arena_);
+  bool reused = true;
+  IREE_ASSERT_OK(loom_value_fact_loop_replay_begin(
+      &table_, module_, outer_, &solve_arena_, &outer_replay_, &reused));
+  EXPECT_FALSE(reused);
+  Visit(false, query);
+
+  EXPECT_EQ(table_.scratch.loop_owners.entries, entries);
+  EXPECT_GT(table_.scratch.loop_owners.generation, generation);
 }
 
 TEST_F(FactLoopDependencyTest, AbsentAndPublishedUnknownAreDistinctInputs) {

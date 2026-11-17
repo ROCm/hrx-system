@@ -684,6 +684,16 @@ static const loom_value_id_t* loom_conditioned_value_facts_refine_operands(
   return state->numeric_operands ? state->numeric_operands : values;
 }
 
+static void loom_conditioned_value_facts_prepare_replay(
+    void* user_data, const loom_value_fact_table_t* table,
+    const loom_op_t* op) {
+  loom_conditioned_value_facts_t* state = user_data;
+  if (state->local_condition_scope_count) {
+    loom_conditioned_value_facts_transition_local_scope(state, NULL, table);
+  }
+  (void)loom_conditioned_value_facts_enter_operation(state, table, op);
+}
+
 // Composes the two exact-identity domains once before indexing conditions.
 // Both mappings select an available predecessor identity, so alternating them
 // reaches a fixed point. Reusing the CFG table storage keeps operand lookup
@@ -1007,10 +1017,13 @@ static iree_status_t loom_conditioned_value_facts_solve(
       loom_conditioned_value_facts_refine_operands;
   state->table->context.refine_operands.value_fn =
       loom_conditioned_value_facts_refine_value;
+  state->table->context.refine_operands.replay_prepare_fn =
+      loom_conditioned_value_facts_prepare_replay;
   iree_status_t status =
       loom_value_fact_table_compute(state->table, state->module, function);
   state->table->context.refine_operands.fn = NULL;
   state->table->context.refine_operands.value_fn = NULL;
+  state->table->context.refine_operands.replay_prepare_fn = NULL;
   state->table->context.refine_operands.user_data = NULL;
   return status;
 }

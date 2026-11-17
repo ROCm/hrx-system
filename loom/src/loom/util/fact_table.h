@@ -170,6 +170,13 @@ struct loom_fact_context_t {
                                 const loom_value_fact_table_t* table,
                                 const loom_op_t* op, loom_value_id_t value,
                                 loom_value_facts_t* facts);
+    // Rebuilds all cached refinement state visible to |op| while a nested
+    // solve's fact-read collector is active. Every dependency must be exposed
+    // through table queries. Owners without this exact preparation contract
+    // leave it NULL; nested loop solves then retain ordinary recomputation.
+    void (*replay_prepare_fn)(void* user_data,
+                              const loom_value_fact_table_t* table,
+                              const loom_op_t* op);
   } refine_operands;
 
   // Stack-owned result publication during a complete inference callback.
@@ -490,6 +497,15 @@ struct loom_value_fact_table_t {
       // Allocated bucket count, grown geometrically with alias cardinality.
       iree_host_size_t capacity;
     } alias_ordinals;
+    // Definition ownership reused across sequential structured-loop solves.
+    struct {
+      // Packed root generation and nearest-loop ordinal by value ID.
+      loom_value_fact_loop_owner_t* entries;
+      // Value-ID range covered by entries, retained for the populated scope.
+      loom_value_fact_range_t range;
+      // Nonzero generation assigned to the most recently indexed root.
+      uint32_t generation;
+    } loop_owners;
     // Lazily allocated query scratch for condition-loop edge projections.
     loom_value_fact_condition_scratch_t* condition;
   } scratch;

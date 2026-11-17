@@ -249,6 +249,7 @@ static iree_status_t loom_scf_if_preview_selectification_impl(
   preview.facts.context.table = &preview.facts;
   preview.facts.context.refine_operands.fn = NULL;
   preview.facts.context.refine_operands.value_fn = NULL;
+  preview.facts.context.refine_operands.replay_prepare_fn = NULL;
   preview.facts.context.refine_operands.user_data = NULL;
   preview.facts.context.publication = NULL;
 
