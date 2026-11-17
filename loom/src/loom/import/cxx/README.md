@@ -1105,6 +1105,89 @@ resolution and the physical ABI. Import annotations require nonempty string
 literals on bodyless functions with external linkage; conflicting
 redeclarations diagnose during source admission.
 
+## Kernel record values
+
+Kernel parameters can group values in records and by-value lambda captures. A
+record is decomposed into ordinary kernel arguments in base/member order; fixed
+arrays contribute their elements in order, and empty subobjects contribute no
+arguments. The kernel body receives an SSA record, so reading members does not
+allocate or load an object from memory.
+
+```cpp
+#include <loomcxx/kernel.h>
+
+struct Saxpy {
+  float scale;
+  const float* input;
+  float* output;
+  void operator()(unsigned i) const { output[i] += scale * input[i]; }
+};
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(64, 1, 1)]]
+void saxpy(unsigned count, Saxpy body) {
+  unsigned i = static_cast<unsigned>(loom::kernel::workitem::id.x);
+  if (i < count) body(i);
+}
+```
+
+The launch signature is `(count: i32, body_scale: f32, body_input: buffer,
+body_output: buffer)`. Each resource remains an explicit buffer argument. Each
+pointer's signed `index` displacement starts at zero relative to the supplied
+buffer origin, just as for a direct pointer parameter. An external custom-dispatch
+caller can supply interior native addresses; backward indexing within their
+allocation retains signed arithmetic. Native argument offsets come from the
+compiled executable's reflection, not the host layout of `Saxpy`. That caller
+owns resource accessibility and lifetime through completion.
+
+Source launches through `loom::kernel::launch`, `loom::check::launch`, and check
+actions accept records containing scalars, static vectors, `index`/`offset`
+values, and typed buffers. For example, a command program can capture its input
+binding and a scalar in a closure:
+
+```cpp
+#include <loomcxx/command.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/view.h>
+
+using Input = loom::type::buffer<const float>;
+using Output = loom::type::buffer<float>;
+
+template <class F>
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void apply(Output output, F body) { body(output); }
+
+[[loom::command_program]]
+void scale(float factor, [[loom::launch]] Input input, Output output) {
+  auto body = [input, factor](Output output) {
+    auto source = loom::buffer::view<1>(input, {});
+    auto target = loom::buffer::view<1>(output, {});
+    loom::view::store(loom::view::load(source, 0) * factor, target, 0);
+  };
+  loom::kernel::launch<apply<decltype(body)>>(output, body);
+}
+```
+
+The launch passes `(output: buffer, body_input: buffer, body_factor: f32)`.
+Source launches require typed buffer members instead of native pointer members.
+External callers can supply the flattened arguments through ordinary buffer
+bindings or the explicit custom-dispatch ABI. Record argument types must match
+their kernel parameters. Reference members, by-reference captures, and dependent
+shaped members diagnose at the kernel boundary. Passing a record by value does
+not enable loads of pointer-bearing objects from memory.
+
+This is a value boundary: unions, bitfields, virtual bases, and polymorphic
+objects have no admitted record-value representation. Views and encoding handles
+also cannot cross this kernel argument boundary, even with static shapes;
+construct them inside the kernel from explicit buffer and scalar arguments.
+Within the kernel, records can be copied, mutated, passed to ordinary helpers,
+and destroyed. Addressing an individual member can require object storage;
+records containing pointers cannot currently supply that storage. In particular,
+passing an array member as `const T*` differs from indexing that array directly.
+
+Export emits the explicit leaf signature as ordinary C++ parameters. The
+grouping into the original record or lambda is not required to reimport the
+program, and vector fields retain their vector types.
+
 ## Kernel pointer contracts
 
 Kernel pointer parameters can state the byte alignment supplied by their caller:
@@ -2278,9 +2361,9 @@ in the same translation unit. The benchmark runner owns timing and iteration
 policy and applies its existing correctness gate.
 
 Case bodies admit scalar constants, initialized automatic `const` or `constexpr`
-bindings, direct calls to defined ordinary functions, and terminal
-`loom::check::expect_equal` observations. Ordinary calls can return and accept
-plain records of scalars, including nested and empty records. Immutable copies
+bindings, by-value lambda closures, direct calls to defined ordinary functions,
+and terminal `loom::check::expect_equal` observations. Ordinary calls can return
+and accept plain records of scalars, including nested and empty records. Immutable copies
 and member reads retain each field's source type and value; expectations compare
 individual scalar fields:
 
@@ -2403,6 +2486,15 @@ a case can contain further expectations, inline `fill` and `slice` calls, and an
 optional final bare `return`, but no further ordinary calls, launches or bindings.
 Mutable locals, branches, loops and pointer operations in the case body produce
 source diagnostics during import.
+
+Check values require trivial destruction because a check recipe has no C++
+cleanup scope. Constructors and destructors with observable work belong inside
+ordinary called functions; their results can expose plain value records to the
+recipe. Direct closure construction accepts empty, simple, and initialized
+by-value captures, including nested closures. Reference captures belong only to
+the inline regions of `check::trial` and `check::compare`, where the enclosing
+check bindings remain available; they cannot become standalone closure values
+or cross a kernel launch.
 
 These restrictions describe the harness body. The implementation under test
 can use the importer's ordinary control flow, helpers, templates and vector

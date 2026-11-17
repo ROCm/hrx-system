@@ -302,7 +302,11 @@ class Functions {
   void prepare_analysis(cxx::FunctionSymbol* symbol, Types& types,
                         std::vector<AnalyzedFunction>& functions,
                         std::vector<AnalyzedCall>& calls);
-  bool ordinary_analysis_call(const DirectCall& call);
+  // Discovers ordinary callees and independent roots named by admitted
+  // launch/check intrinsics. Only ordinary calls return a joinable callee.
+  ControlFlow* prepare_callee_analysis(const DirectCall& call, Types& types,
+                                       std::vector<AnalyzedFunction>& functions,
+                                       std::vector<AnalyzedCall>& calls);
   ControlFlow* mutable_control_flow(cxx::FunctionSymbol* symbol);
   const ControlFlow* control_flow(cxx::FunctionSymbol* symbol) const;
   BoundSignature bind_callable_signature(

@@ -1573,7 +1573,11 @@ class CxxRenderer(CxxFunctionRenderer):
                 self.expressions[argument] = info.name
                 continue
             value_type = self.module.values[argument].type
-            if not isinstance(value_type, ScalarType):
+            if not isinstance(value_type, ScalarType) and not (
+                isinstance(value_type, ShapedType)
+                and value_type.type_kind == TypeKind.VECTOR
+                and value_type.is_all_static
+            ):
                 raise CxxRenderError(
                     kernel,
                     f"kernel argument type {value_type!r} has no C++ ABI projection",

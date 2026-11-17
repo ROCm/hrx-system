@@ -424,6 +424,39 @@ constexpr SourceToModuleInput kPipeline = {
     SourceLanguage::kCxx, "#include <loomcxx/pipeline.h>\n", nullptr, nullptr};
 constexpr SourceToModuleInput kKernel = {
     SourceLanguage::kCxx, "#include <loomcxx/kernel.h>\n", nullptr, nullptr};
+constexpr SourceToModuleInput kKernelFlatParameters = {
+    SourceLanguage::kCxx,
+    R"cxx([[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void read(float scale, const float* input, int first, int second, float* output) {
+  output[0] = scale * input[first] + input[second];
+}
+)cxx",
+    nullptr, nullptr};
+constexpr SourceToModuleInput kKernelRecordParameters = {
+    SourceLanguage::kCxx,
+    R"cxx(struct Input { const float* data; int shifts[2]; };
+struct Parameters { float scale; Input input; };
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void read(Parameters parameters, float* output) {
+  output[0] = parameters.scale * parameters.input.data[parameters.input.shifts[0]] +
+              parameters.input.data[parameters.input.shifts[1]];
+}
+)cxx",
+    nullptr, nullptr};
+// The flat entry reconstructs the same record used by KernelRecordParameters,
+// separating kernel boundary transport from ordinary record handling.
+constexpr SourceToModuleInput kKernelReconstructedRecord = {
+    SourceLanguage::kCxx,
+    R"cxx(struct Input { const float* data; int shifts[2]; };
+struct Parameters { float scale; Input input; };
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void read(float scale, const float* input, int first, int second, float* output) {
+  Parameters parameters{scale, {input, {first, second}}};
+  output[0] = parameters.scale * parameters.input.data[parameters.input.shifts[0]] +
+              parameters.input.data[parameters.input.shifts[1]];
+}
+)cxx",
+    nullptr, nullptr};
 constexpr SourceToModuleInput kKernelPipeline = {
     SourceLanguage::kCxx,
     "#include <loomcxx/kernel.h>\n#include <loomcxx/pipeline.h>\n", nullptr,
@@ -534,6 +567,14 @@ BENCHMARK_CAPTURE(SourceToModule, Predicate, &kPredicate)
 BENCHMARK_CAPTURE(SourceToModule, Pipeline, &kPipeline)
     ->Unit(::benchmark::kMicrosecond);
 BENCHMARK_CAPTURE(SourceToModule, Kernel, &kKernel)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(SourceToModule, KernelFlatParameters, &kKernelFlatParameters)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(SourceToModule, KernelRecordParameters,
+                  &kKernelRecordParameters)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(SourceToModule, KernelReconstructedRecord,
+                  &kKernelReconstructedRecord)
     ->Unit(::benchmark::kMicrosecond);
 BENCHMARK_CAPTURE(SourceToModule, KernelPipeline, &kKernelPipeline)
     ->Unit(::benchmark::kMicrosecond);

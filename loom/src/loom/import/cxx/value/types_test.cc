@@ -214,6 +214,50 @@ TEST_F(TypesWithModuleTest, ConstructionGroupsKeepDependentHandlesWhole) {
   EXPECT_EQ(bindings[2].component_offset, 4u);
 }
 
+TEST_F(TypesWithModuleTest, KernelRecordsRetainArgumentAndSourcePositions) {
+  Source source(IREE_SV(R"(
+    using Words = unsigned __attribute__((ext_vector_type(4)));
+    template<class T> struct [[loom::type("buffer")]] Buffer { T* data; };
+    struct [[loom::type("index")]] Index {};
+    struct Empty {};
+    struct Input { const unsigned* data; unsigned count; };
+    struct Arguments : Empty {
+      Input inputs[2];
+      Words weights;
+      Buffer<unsigned> output;
+      Index position;
+    };
+  )"),
+                IREE_SV("kernel_records.cxx"), options());
+  Types types(source.unit(), source.diagnostics(), module_);
+  auto* owner = source.unit().ast();
+  auto source_type = [&](const char* name) {
+    return (*source.unit().globalScope()->find(name).begin())->type();
+  };
+  auto* arguments_type = source_type("Arguments");
+  const auto* projection = types.kernel_record(arguments_type, owner);
+  ASSERT_NE(projection, nullptr);
+  EXPECT_EQ(projection, types.kernel_record(arguments_type, owner));
+  EXPECT_EQ(
+      projection->argument_indices,
+      (std::vector<size_t>{0, KernelRecordProjection::kZeroOrigin, 1, 2,
+                           KernelRecordProjection::kZeroOrigin, 3, 4, 5, 6}));
+  ASSERT_EQ(projection->types.size(), 7u);
+  EXPECT_EQ(loom_type_kind(projection->types[0]), LOOM_TYPE_BUFFER);
+  EXPECT_EQ(loom_type_element_type(projection->types[1]), LOOM_SCALAR_TYPE_I32);
+  EXPECT_EQ(loom_type_kind(projection->types[2]), LOOM_TYPE_BUFFER);
+  EXPECT_EQ(loom_type_element_type(projection->types[3]), LOOM_SCALAR_TYPE_I32);
+  EXPECT_EQ(loom_type_kind(projection->types[4]), LOOM_TYPE_VECTOR);
+  EXPECT_EQ(loom_type_kind(projection->types[5]), LOOM_TYPE_BUFFER);
+  EXPECT_EQ(loom_type_element_type(projection->types[6]),
+            LOOM_SCALAR_TYPE_INDEX);
+  auto* empty_type = source_type("Empty");
+  EXPECT_TRUE(types.kernel_record(empty_type, owner)->types.empty());
+  EXPECT_TRUE(types.kernel_record(empty_type, owner)->argument_indices.empty());
+  EXPECT_EQ(types.kernel_record(source.unit().control()->getIntType(), owner),
+            nullptr);
+}
+
 TEST_F(TypesWithModuleTest, ProjectsSpecialAndRegisteredOpaqueHandles) {
   Source source(IREE_SV(R"(
     template<class T> struct [[loom::type("buffer")]] Buffer { T* data; };

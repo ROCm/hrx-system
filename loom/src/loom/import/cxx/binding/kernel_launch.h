@@ -8,6 +8,7 @@
 #define LOOM_IMPORT_CXX_BINDING_KERNEL_LAUNCH_H_
 
 #include <cxx/attributes.h>
+#include <cxx/types_fwd.h>
 
 #include <cstdint>
 #include <optional>
@@ -21,6 +22,15 @@ class LaunchContracts;
 class PipelineContracts;
 class Types;
 struct StagedSignatureProjection;
+struct KernelRecordProjection;
+
+// Admits a record-valued source launch argument and returns its retained
+// projection, or null for a non-record parameter. Records preserve nominal
+// source type and supply every resource as a typed buffer. Native pointer
+// fields cannot provide that binding contract at a source launch site.
+const KernelRecordProjection* admit_kernel_record_argument(
+    cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
+    const cxx::Type* expected, const cxx::Type* actual, cxx::AST* owner);
 
 // Source contract shared by check-runner and command-program kernel launches.
 // Admission resolves the selected kernel, configuration, workload bundle, and

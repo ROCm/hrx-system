@@ -1,0 +1,426 @@
+// RUN: roundtrip
+// Pointer origins are supplied as buffers, including inside nested records;
+// the source value retains signed displacement for backward access.
+#include <loomcxx/kernel.h>
+#include <loomcxx/predicate.h>
+
+struct Input { const float* data; unsigned count; };
+struct Parameters { float scale; Input input; int shifts[2]; };
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void read(Parameters parameters, float* output) [[loom::where(parameters.input.count > 0u)]] {
+  output[0] = parameters.scale * parameters.input.data[parameters.shifts[0]] + parameters.shifts[1];
+}
+
+// ----
+kernel.def @read() {
+  %6 = index.constant 1 : index
+  %7 = index.constant 1 : index
+  %8 = index.constant 1 : index
+  %9 = index.constant 1 : index
+  %10 = index.constant 1 : index
+  %11 = index.constant 1 : index
+  kernel.launch.config workgroups(%6, %7, %8) workgroup_size(%9, %10, %11) : index
+} launch(%parameters_scale: f32, %parameters_input_data: buffer, %parameters_input_count: i32, %parameters_shifts_0: i32, %parameters_shifts_1: i32, %output: buffer) where [ne(%parameters_input_count, 0)] {
+  %parameters_input_data_byte_offset = index.constant 0 : index
+  %output_byte_offset = index.constant 0 : index
+  %14 = scalar.constant 0 : i32
+  %15 = index.cast %parameters_shifts_0 : i32 to index
+  %16 = index.constant 4 : index
+  %17 = index.mul %15, %16 : index
+  %18 = index.add %parameters_input_data_byte_offset, %17 : index
+  %19 = buffer.view %parameters_input_data[%18] : buffer -> view<1xf32>
+  %20 = view.load<root_in_bounds|type_disjoint> %19[0] : view<1xf32> -> f32
+  %21 = scalar.mulf %parameters_scale, %20 : f32
+  %22 = scalar.constant 1 : i32
+  %23 = scalar.sitofp %parameters_shifts_1 : i32 to f32
+  %24 = scalar.addf %21, %23 : f32
+  %25 = scalar.constant 0 : i32
+  %26 = index.cast %25 : i32 to index
+  %27 = index.constant 4 : index
+  %28 = index.mul %26, %27 : index
+  %29 = index.add %output_byte_offset, %28 : index
+  %30 = buffer.view %output[%29] : buffer -> view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %24, %30[0] : f32, view<1xf32>
+  kernel.return
+}
+
+// ====
+// Nominal address domains, static vectors, and empty base subobjects retain
+// their ordinary leaf types at the kernel boundary.
+#include <loomcxx/kernel.h>
+#include <loomcxx/vector.h>
+
+using Words = unsigned __attribute__((ext_vector_type(4)));
+struct Empty {};
+struct Parameters : Empty { Words values; loom::type::index position; };
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void scatter(Parameters parameters, unsigned* output) {
+  output[loom::index::cast<int>(parameters.position)] = parameters.values[2];
+}
+
+// ----
+kernel.def @scatter() {
+  %3 = index.constant 1 : index
+  %4 = index.constant 1 : index
+  %5 = index.constant 1 : index
+  %6 = index.constant 1 : index
+  %7 = index.constant 1 : index
+  %8 = index.constant 1 : index
+  kernel.launch.config workgroups(%3, %4, %5) workgroup_size(%6, %7, %8) : index
+} launch(%parameters_values: vector<4xi32>, %parameters_position: index, %output: buffer) {
+  %output_byte_offset = index.constant 0 : index
+  %10 = scalar.constant 2 : i32
+  %11 = index.cast %10 : i32 to index
+  %12 = vector.extract %parameters_values[%11] : vector<4xi32> -> i32
+  %13 = index.cast %parameters_position : index to i32
+  %14 = index.cast %13 : i32 to index
+  %15 = index.constant 4 : index
+  %16 = index.mul %14, %15 : index
+  %17 = index.add %output_byte_offset, %16 : index
+  %18 = buffer.view %output[%17] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %12, %18[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// A launch's admitted kernel is an independent callable-analysis root. Its
+// closure helper must be analyzed even when only the launch names the template.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+
+template <class F>
+[[loom::kernel, loom::workgroup_size(4, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void apply(float* output, F body) {
+  unsigned i = static_cast<unsigned>(loom::kernel::workitem::id.x);
+  output[i] = body(output[i]);
+}
+
+static auto make_affine(float scale, float bias) {
+  return [scale, bias](float value) { return scale * value + bias; };
+}
+
+LOOM_CHECK_CASE(closure_launch) {
+  const auto output = loom::check::fill<4, float>(1.0f);
+  const auto body = make_affine(3.0f, 2.0f);
+  loom::check::launch<apply<decltype(body)>>(output, body);
+  loom::check::expect_bitwise(output, loom::check::fill<4, float>(5.0f));
+}
+
+// ----
+check.case public @closure_launch {
+  %output = check.generate.fill value(1.0) : tensor<4xf32>
+  %1 = check.literal value(3.0) : f32
+  %2 = check.literal value(2.0) : f32
+  %body_scale, %body_bias = func.call @make_affine(%1, %2) : (f32, f32) -> (f32, f32)
+  kernel.launch @apply_const__lambda_float__float__const_(%output, %body_scale, %body_bias) : (tensor<4xf32>, f32, f32)
+  %5 = check.generate.fill value(5.0) : tensor<4xf32>
+  check.expect.bitwise actual(%output) expected(%5) : tensor<4xf32>
+  check.return
+}
+
+func.def @make_affine(%scale: f32, %bias: f32) -> (f32, f32) {
+  func.return %scale, %bias : f32, f32
+}
+
+kernel.def @apply_const__lambda_float__float__const_() {
+  %13 = index.constant 1 : index
+  %14 = index.constant 1 : index
+  %15 = index.constant 1 : index
+  %16 = index.constant 4 : index
+  %17 = index.constant 1 : index
+  %18 = index.constant 1 : index
+  kernel.launch.config workgroups(%13, %14, %15) workgroup_size(%16, %17, %18) : index
+} launch(%output: buffer, %body_scale: f32, %body_bias: f32) {
+  %output_byte_offset = index.constant 0 : index
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %i = index.cast %workitem_id_x : index to i32
+  %22 = scalar.extui %i : i32 to i64
+  %23 = index.cast %22 : i64 to index
+  %24 = index.constant 4 : index
+  %25 = index.mul %23, %24 : index
+  %26 = index.add %output_byte_offset, %25 : index
+  %27 = buffer.view %output[%26] : buffer -> view<1xf32>
+  %28 = view.load<root_in_bounds|type_disjoint> %27[0] : view<1xf32> -> f32
+  %29 = func.call pure @operator_call_value(%body_scale, %body_bias, %28) : (f32, f32, f32) -> (f32)
+  %30 = scalar.extui %i : i32 to i64
+  %31 = index.cast %30 : i64 to index
+  %32 = index.constant 4 : index
+  %33 = index.mul %31, %32 : index
+  %34 = index.add %output_byte_offset, %33 : index
+  %35 = buffer.view %output[%34] : buffer -> view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %29, %35[0] : f32, view<1xf32>
+  kernel.return
+}
+
+func.def @operator_call_value(%this_scale: f32, %this_bias: f32, %value: f32) -> (f32) {
+  %40 = scalar.mulf %this_scale, %value : f32
+  %41 = scalar.addf %40, %this_bias : f32
+  func.return %41 : f32
+}
+
+// ====
+// A command closure carries explicit typed buffers; no resource is hidden in
+// scalar constants when the record is decomposed at the launch boundary.
+#include <loomcxx/command.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/view.h>
+
+using Input = loom::type::buffer<const float>;
+using Output = loom::type::buffer<float>;
+
+template <class F>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void apply(Output output, F body) { body(output); }
+
+static auto make_body(Input input, float factor) {
+  return [input, factor](Output output) {
+    auto source = loom::buffer::view<1>(input, {});
+    auto target = loom::buffer::view<1>(output, {});
+    loom::view::store(loom::view::load(source, 0) * factor, target, 0);
+  };
+}
+
+[[loom::command_program]]
+void launch(float factor, [[loom::launch]] Input input, Output output) {
+  const auto body = make_body(input, factor);
+  loom::kernel::launch<apply<decltype(body)>>(output, body);
+}
+
+// ----
+command.def public @launch(%factor: f32) launch(%input: buffer, %output: buffer) {
+  %body_input, %body_factor = func.call pure @make_body(%input, %factor) : (buffer, f32) -> (buffer, f32)
+  kernel.launch @apply_const__lambda_void____loom__type__buffer_float___const_(%output, %body_input, %body_factor) : (buffer, buffer, f32)
+  command.return
+}
+
+func.def @make_body(%input: buffer, %factor: f32) -> (buffer, f32) {
+  func.return %input, %factor : buffer, f32
+}
+
+kernel.def @apply_const__lambda_void____loom__type__buffer_float___const_() {
+  %12 = index.constant 1 : index
+  %13 = index.constant 1 : index
+  %14 = index.constant 1 : index
+  %15 = index.constant 1 : index
+  %16 = index.constant 1 : index
+  %17 = index.constant 1 : index
+  kernel.launch.config workgroups(%12, %13, %14) workgroup_size(%15, %16, %17) : index
+} launch(%output: buffer, %body_input: buffer, %body_factor: f32) {
+  func.call @operator_call_value(%body_input, %body_factor, %output) : (buffer, f32, buffer)
+  kernel.return
+}
+
+func.def @operator_call_value(%this_input: buffer, %this_factor: f32, %output: buffer) {
+  %21 = index.constant 0 : index
+  %source = buffer.view %this_input[%21] : buffer -> view<1xf32>
+  %23 = index.constant 0 : index
+  %target = buffer.view %output[%23] : buffer -> view<1xf32>
+  %25 = scalar.constant 0 : i32
+  %26 = index.cast %25 : i32 to index
+  %27 = view.load<type_disjoint> %source[%26] : view<1xf32> -> f32
+  %28 = scalar.mulf %27, %this_factor : f32
+  %29 = scalar.constant 0 : i32
+  %30 = index.cast %29 : i32 to index
+  view.store<type_disjoint> %28, %target[%30] : f32, view<1xf32>
+  func.return
+}
+
+// ====
+// Check actions pass the same record to a kernel and an ordinary oracle.
+#include <loomcxx/check.h>
+#include <loomcxx/view.h>
+
+struct Parameters { unsigned first, second; };
+static Parameters make_parameters() { return {3u, 5u}; }
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void write(unsigned* output, Parameters parameters) { output[0] = parameters.first + parameters.second; }
+
+template <class P>
+void oracle(loom::type::buffer<unsigned> output, P parameters) {
+  auto values = loom::buffer::view<1>(output, {});
+  loom::view::store(parameters.first + parameters.second, values, 0);
+}
+
+LOOM_CHECK_SCENARIO(record_actions) {
+  loom::check::trial<1>([](loom::check::ordinal trial, loom::check::entropy entropy) {
+    const auto output = loom::check::fill<1, unsigned>(0u);
+    const auto expected = loom::check::fill<1, unsigned>(8u);
+    const auto parameters = loom::check::generate<make_parameters>();
+    loom::check::compare<write, oracle<Parameters>>(output, parameters, [&] {
+      loom::check::expect_bitwise(output, expected);
+    });
+  });
+}
+// ----
+kernel.def @write() {
+  %3 = index.constant 1 : index
+  %4 = index.constant 1 : index
+  %5 = index.constant 1 : index
+  %6 = index.constant 1 : index
+  %7 = index.constant 1 : index
+  %8 = index.constant 1 : index
+  kernel.launch.config workgroups(%3, %4, %5) workgroup_size(%6, %7, %8) : index
+} launch(%output: buffer, %parameters_first: i32, %parameters_second: i32) {
+  %output_byte_offset = index.constant 0 : index
+  %10 = scalar.addi %parameters_first, %parameters_second : i32
+  %11 = scalar.constant 0 : i32
+  %12 = index.cast %11 : i32 to index
+  %13 = index.constant 4 : index
+  %14 = index.mul %12, %13 : index
+  %15 = index.add %output_byte_offset, %14 : index
+  %16 = buffer.view %output[%15] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %10, %16[0] : i32, view<1xi32>
+  kernel.return
+}
+
+check.scenario public @record_actions {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %output = check.generate.fill value(0) : tensor<1xi32>
+    %expected = check.generate.fill value(8) : tensor<1xi32>
+    %parameters_first, %parameters_second = check.generate<@make_parameters>() : () -> (i32, i32)
+    check.compare<@write, @oracle___Parameters>(%output, %parameters_first, %parameters_second) : (tensor<1xi32>, i32, i32) -> () {
+      check.expect.bitwise actual(%output) expected(%expected) : tensor<1xi32>
+    }
+  }
+  check.return
+}
+
+func.def @make_parameters() -> (i32, i32) {
+  %25 = scalar.constant 3 : i32
+  %26 = scalar.constant 5 : i32
+  func.return %25, %26 : i32, i32
+}
+
+func.def @oracle___Parameters(%output: buffer, %parameters_first: i32, %parameters_second: i32) {
+  %30 = index.constant 0 : index
+  %values = buffer.view %output[%30] : buffer -> view<1xi32>
+  %32 = scalar.addi %parameters_first, %parameters_second : i32
+  %33 = scalar.constant 0 : i32
+  %34 = index.cast %33 : i32 to index
+  view.store<type_disjoint> %32, %values[%34] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// Inline closures capture immutable check values; the kernel owns its mutable
+// copy. Initialized captures preserve nested closure state across calls.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+
+template <class F>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void accumulate(float* output, F body) {
+  auto callable = body;
+  int first = callable(2);
+  int second = callable(3);
+  output[0] = first + second;
+}
+
+LOOM_CHECK_CASE(inline_closure) {
+  const auto output = loom::check::fill<1, float>(0.0f);
+  const auto inner = [sum = 4](int step) mutable { sum += step; return sum; };
+  const auto body = [inner = inner](int step) mutable { return inner(step); };
+  loom::check::launch<accumulate<decltype(body)>>(output, body);
+  loom::check::expect_bitwise(output, loom::check::fill<1, float>(15.0f));
+}
+
+// ----
+check.case public @inline_closure {
+  %output = check.generate.fill value(0.0) : tensor<1xf32>
+  %inner_sum = check.literal value(4) : i32
+  kernel.launch @accumulate_const__lambda_int__int__(%output, %inner_sum) : (tensor<1xf32>, i32)
+  %2 = check.generate.fill value(15.0) : tensor<1xf32>
+  check.expect.bitwise actual(%output) expected(%2) : tensor<1xf32>
+  check.return
+}
+
+kernel.def @accumulate_const__lambda_int__int__() {
+  %5 = index.constant 1 : index
+  %6 = index.constant 1 : index
+  %7 = index.constant 1 : index
+  %8 = index.constant 1 : index
+  %9 = index.constant 1 : index
+  %10 = index.constant 1 : index
+  kernel.launch.config workgroups(%5, %6, %7) workgroup_size(%8, %9, %10) : index
+} launch(%output: buffer, %body_inner_sum: i32) {
+  %output_byte_offset = index.constant 0 : index
+  %12 = scalar.constant 2 : i32
+  %first, %callable_inner_sum$14 = func.call pure @operator_call_value(%body_inner_sum, %12) : (i32, i32) -> (i32, i32)
+  %15 = scalar.constant 3 : i32
+  %second, %callable_inner_sum$17 = func.call pure @operator_call_value(%callable_inner_sum$14, %15) : (i32, i32) -> (i32, i32)
+  %18 = scalar.addi %first, %second : i32
+  %19 = scalar.sitofp %18 : i32 to f32
+  %20 = scalar.constant 0 : i32
+  %21 = index.cast %20 : i32 to index
+  %22 = index.constant 4 : index
+  %23 = index.mul %21, %22 : index
+  %24 = index.add %output_byte_offset, %23 : index
+  %25 = buffer.view %output[%24] : buffer -> view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %19, %25[0] : f32, view<1xf32>
+  kernel.return
+}
+
+func.def @operator_call_value(%this_inner_sum: i32, %step: i32) -> (i32, i32) {
+  %30, %inner_sum = func.call pure @operator_call_value_1(%this_inner_sum, %step) : (i32, i32) -> (i32, i32)
+  func.return %30, %inner_sum : i32, i32
+}
+
+func.def @operator_call_value_1(%this_sum: i32, %step: i32) -> (i32, i32) {
+  %sum = scalar.addi %this_sum, %step : i32
+  func.return %sum, %sum : i32, i32
+}
+
+// ====
+// Empty closures contribute no physical arguments, including when constructed
+// directly in the check recipe.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+
+template <class F>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void initialize(float* output, F body) { output[0] = body(); }
+
+LOOM_CHECK_CASE(empty_closure) {
+  const auto output = loom::check::fill<1, float>(0.0f);
+  const auto body = [] { return 7.0f; };
+  loom::check::launch<initialize<decltype(body)>>(output, body);
+  loom::check::expect_bitwise(output, loom::check::fill<1, float>(7.0f));
+}
+
+// ----
+check.case public @empty_closure {
+  %output = check.generate.fill value(0.0) : tensor<1xf32>
+  kernel.launch @initialize_const__lambda_float____const_(%output) : (tensor<1xf32>)
+  %1 = check.generate.fill value(7.0) : tensor<1xf32>
+  check.expect.bitwise actual(%output) expected(%1) : tensor<1xf32>
+  check.return
+}
+
+kernel.def @initialize_const__lambda_float____const_() {
+  %3 = index.constant 1 : index
+  %4 = index.constant 1 : index
+  %5 = index.constant 1 : index
+  %6 = index.constant 1 : index
+  %7 = index.constant 1 : index
+  %8 = index.constant 1 : index
+  kernel.launch.config workgroups(%3, %4, %5) workgroup_size(%6, %7, %8) : index
+} launch(%output: buffer) {
+  %output_byte_offset = index.constant 0 : index
+  %10 = func.call pure @operator_call_value() : () -> (f32)
+  %11 = scalar.constant 0 : i32
+  %12 = index.cast %11 : i32 to index
+  %13 = index.constant 4 : index
+  %14 = index.mul %12, %13 : index
+  %15 = index.add %output_byte_offset, %14 : index
+  %16 = buffer.view %output[%15] : buffer -> view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %10, %16[0] : f32, view<1xf32>
+  kernel.return
+}
+
+func.def @operator_call_value() -> (f32) {
+  %18 = scalar.constant 7.0 : f32
+  func.return %18 : f32
+}
