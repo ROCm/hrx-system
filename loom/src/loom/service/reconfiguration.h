@@ -31,9 +31,11 @@ typedef struct loom_service_reconfiguration_t {
   // Owned by the service; completed choices and diagnostics outlive requests.
   // NULL means this service has not enabled reconfiguration.
   loom_runtime_variant_pool_t* pool;
-  // Snapshots native provider locators and starts independent compilation
-  // against a ready base's retained resource contract. prepare/control must be
-  // empty: this capability keeps source declarations, VM and state unchanged.
+  // Snapshots native provider locators and queues independent compilation
+  // against a ready base's retained resource contract. The service owner starts
+  // queued work during advance; shutdown cancels unstarted construction.
+  // prepare/control must be empty: this capability keeps source declarations,
+  // VM and state unchanged.
   // Success returns an observable entry, not a selected executable; compiler
   // failure remains on that entry and does not fail the running service.
   // Source and bytecode providers use the same contract. No file payload is

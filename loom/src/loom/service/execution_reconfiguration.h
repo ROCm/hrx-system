@@ -53,9 +53,11 @@ void loom_service_execution_reconfiguration_set_observer(
 bool loom_service_execution_reconfiguration_pending(
     const loom_service_execution_reconfiguration_t* reconfiguration);
 
-// Collects compiler results independently of inference. Selects only when the
-// service declares quiescence. Stopping cancels selection and joins producers
-// without binding anything. Failures stay with management, not inference.
+// Admits at most one queued compilation and collects completed results
+// independently of inference. Selects only when the service declares
+// quiescence. Stopping cancels queued construction and selection while joining
+// submitted producers without binding anything. Failures stay with management,
+// not inference.
 bool loom_service_execution_reconfiguration_advance(
     loom_service_execution_reconfiguration_t* reconfiguration, bool quiescent,
     bool stopping);
