@@ -653,15 +653,17 @@ typedef struct amdf_gpu_aql_scratch_service_info_t {
 
 /// One firmware request for retained scratch covering all physical wave slots.
 ///
-/// A zero byte_length means no request is pending; the other payload fields
-/// are then zero. A nonzero request surrenders the previous scratch backing:
+/// A zero byte_length means no request is pending; the request geometry is
+/// then zero, but host_notification_address remains available for observation.
+/// A nonzero request surrenders the previous scratch backing:
 /// the caller may release or reuse it before acquiring the replacement.
 /// The queue stays paused until a successful resume. This surrender does not
 /// establish completion of unrelated resources or other queues.
 typedef struct amdf_gpu_aql_scratch_request_t {
   /// Must be `AMDF_STRUCTURE_TYPE_GPU_AQL_SCRATCH_REQUEST`.
   amdf_structure_type_t type;
-  /// Must be at least `sizeof(amdf_gpu_aql_scratch_request_t)`.
+  /// Size of the caller's output. Records ending after reserved are accepted;
+  /// host_notification_address is written only when the complete field fits.
   uint32_t structure_size;
   /// Optional output extension chain. No extensions are currently defined.
   void* next;
@@ -677,6 +679,15 @@ typedef struct amdf_gpu_aql_scratch_request_t {
   uint32_t wave_count;
   /// Reserved for compatible growth; always zero.
   uint32_t reserved;
+  /// Optional borrowed address of an aligned, CPU-cacheable coherent uint64_t
+  /// word, valid until queue destruction. Supplied even for an empty request.
+  /// An acquire load of zero means no firmware request; nonzero requires
+  /// user_queue_query_scratch and may indicate a firmware error. The caller
+  /// neither decodes nor writes this word. Only a successful nonempty query
+  /// surrenders backing. While servicing that request, its notification remains
+  /// asserted until resume; observing it again does not represent new work.
+  /// Zero address means observation requires the event or an explicit query.
+  uint64_t host_notification_address;
 } amdf_gpu_aql_scratch_request_t;
 
 /// Initial options selected when a directly published GPU queue is created.

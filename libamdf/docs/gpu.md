@@ -395,6 +395,28 @@ rejected by this format. There is no hidden scratch growth or reclaim handler.
 The runtime can choose a queue capacity from its executable set before creating
 the queue and reuse it across dispatches.
 
+## Caller-serviced private memory
+
+An AQL family advertising `SCRATCH_SERVICE` also permits an initially empty
+scratch binding. The caller enables this with
+`amdf_gpu_aql_scratch_service_info_t` at queue creation. Firmware pauses only
+that queue when a dispatch exceeds its current binding and notifies the
+supplied event. `user_queue_query_scratch` reports the required geometry and
+surrenders the previous binding; the caller can release it before acquiring
+replacement backing. `user_queue_resume_scratch` installs that backing and
+resumes firmware. The library creates no worker or allocation policy.
+
+An empty scratch query can also return `host_notification_address`, a borrowed
+coherent host word in queue-owned control storage. An active waiter observes
+this word alongside its execution-completion words: nonzero requests another
+authoritative scratch query, including delivery of firmware errors. Watching
+completion alone can miss a request that prevents the dispatch from completing.
+The host neither writes the notification nor interprets its native bits.
+While a request is being serviced, the allocation/resumption owner provides
+progress; the still-asserted notification is not a second request. A zero
+address requires event-based waiting or explicit queries. The observation
+address survives scratch replacement and trim and expires at queue destruction.
+
 ## Kernel-mediated submission
 
 `gpu->kernel_queue_create` takes a KERNEL family's ordinal and the maximum

@@ -66,6 +66,8 @@ struct FakeNativeState {
   uint64_t waited_index = 0;
   // Last caller backing resolved before native resume.
   amdf_gpu_umd_queue_scratch_t resumed_scratch = {};
+  // Queue-owned coherent notification returned by the native scratch query.
+  uint64_t scratch_notification = 0;
   // Timestamp selections that reached the native dependency.
   uint32_t timestamp_call_count = 0;
   // Last validated timestamp selection passed to the native dependency.
@@ -720,6 +722,23 @@ TEST_F(GpuUserQueueTest, ScratchServiceValidatesExactEventAndBacking) {
   EXPECT_EQ(amdf_gpu_user_queue_trim_scratch(queue_), AMDF_STATUS_OK);
   EXPECT_EQ(request.byte_length, 4096u);
   EXPECT_EQ(request.structure_size, sizeof(request));
+  EXPECT_EQ(request.host_notification_address,
+            reinterpret_cast<uintptr_t>(&consumer_state_.scratch_notification));
+  for (const uint32_t size : {
+           uint32_t{offsetof(amdf_gpu_aql_scratch_request_t,
+                             host_notification_address)},
+           uint32_t{sizeof(request) - 1},
+       }) {
+    auto prefix = request;
+    prefix.structure_size = size;
+    prefix.byte_length = 0;
+    prefix.host_notification_address = UINT64_MAX;
+    ASSERT_EQ(amdf_gpu_user_queue_query_scratch(queue_, &prefix),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(prefix.byte_length, 4096u);
+    EXPECT_EQ(prefix.structure_size, size);
+    EXPECT_EQ(prefix.host_notification_address, UINT64_MAX);
+  }
   const auto saved = request;
   consumer_state_.query_status =
       amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
@@ -1024,6 +1043,8 @@ amdf_status_t amdf_gpu_umd_user_queue_query_scratch(
     amdf_gpu_umd_user_queue_t* queue,
     amdf_gpu_aql_scratch_request_t* out_request) {
   out_request->byte_length = 4096;
+  out_request->host_notification_address =
+      reinterpret_cast<uintptr_t>(&queue->state->scratch_notification);
   return queue->state->query_status;
 }
 

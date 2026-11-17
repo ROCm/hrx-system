@@ -560,7 +560,7 @@ amdf_gpu_user_queue_query_scratch(amdf_user_queue_t* base_queue,
   }
   amdf_status_t status = amdf_structure_validate_output(
       out_request, AMDF_STRUCTURE_TYPE_GPU_AQL_SCRATCH_REQUEST,
-      sizeof(*out_request));
+      offsetof(amdf_gpu_aql_scratch_request_t, host_notification_address));
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -571,7 +571,11 @@ amdf_gpu_user_queue_query_scratch(amdf_user_queue_t* base_queue,
     request.type = out_request->type;
     request.structure_size = out_request->structure_size;
     request.next = out_request->next;
-    *out_request = request;
+    const size_t copy_size = request.structure_size >= sizeof(request)
+                                 ? sizeof(request)
+                                 : offsetof(amdf_gpu_aql_scratch_request_t,
+                                            host_notification_address);
+    memcpy(out_request, &request, copy_size);
   }
   return status;
 }
