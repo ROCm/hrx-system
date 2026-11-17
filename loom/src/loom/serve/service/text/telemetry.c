@@ -201,7 +201,8 @@ void loom_serve_text_telemetry_epoch(
     session->lifetime.counters.input_tokens += results[i].consumed_count;
     session->lifetime.counters.output_tokens += results[i].output_count;
     ++session->lifetime.counters.batches;
-    session->lifetime.position = loom_serve_text_row_position(session->row);
+    session->lifetime.position =
+        (uint32_t)loom_serve_text_row_position(session->row);
     session->lifetime.resident_tokens =
         loom_serve_text_row_pool_usage(session->row);
     const loom_service_text_span_record_t value = {
