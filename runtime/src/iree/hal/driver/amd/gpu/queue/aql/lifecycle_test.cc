@@ -202,8 +202,11 @@ class AqlLifecycleTest : public ::testing::Test {
                       iree_memory_order_release);
     queue_.growth.context = &context_;
     gpu_.user_queue_query_scratch =
-        [](amdf_user_queue_t*, amdf_gpu_aql_scratch_request_t* request) {
+        [](amdf_user_queue_t* native, amdf_gpu_aql_scratch_request_t* request) {
+          auto* self = reinterpret_cast<AqlLifecycleTest*>(native);
           request->byte_length = 0;
+          request->host_notification_address =
+              reinterpret_cast<uintptr_t>(&self->scratch_notification_);
           return AMDF_STATUS_OK;
         };
     iree_hal_amd_gpu_aql_scratch_initialize(
@@ -327,6 +330,8 @@ class AqlLifecycleTest : public ::testing::Test {
   iree_hal_amd_gpu_aql_function_t function_ = {};
   // Native completion cells, changed only by the controlled dependency.
   std::array<uint64_t, 4> native_values_ = {};
+  // Native firmware-service word, independent of execution completion.
+  uint64_t scratch_notification_ = 0;
   // Real independent dependency metadata, not borrowed capture pointers.
   std::array<iree_hal_amd_gpu_signal_t, 4> native_signals_ = {};
   // Prepared native causal vectors for each dependency cell.

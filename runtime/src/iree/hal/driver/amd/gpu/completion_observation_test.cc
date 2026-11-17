@@ -123,6 +123,115 @@ TEST_P(CompletionObservationTest, HostWakeInterruptsObservation) {
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
 }
 
+TEST_P(CompletionObservationTest, ServiceNotificationInterruptsObservation) {
+  iree_atomic_int32_t word32 = IREE_ATOMIC_VAR_INIT(0);
+  iree_atomic_int64_t word64 = IREE_ATOMIC_VAR_INIT(0);
+  iree_atomic_int64_t notification = IREE_ATOMIC_VAR_INIT(0);
+  const bool wide = GetParam();
+  std::binary_semaphore servicing{0};
+  bool first_round = true;
+  bool service_pending = false;
+  WaitCallback outstanding = [&](amdf_status_t,
+                                 iree_hal_amd_gpu_completion_wait_t* wait) {
+    const int64_t value =
+        wide ? iree_atomic_load(&word64, iree_memory_order_acquire)
+             : iree_atomic_load(&word32, iree_memory_order_acquire);
+    if (value) {
+      return false;
+    }
+    if (!service_pending &&
+        iree_atomic_load(&notification, iree_memory_order_acquire)) {
+      service_pending = true;
+      servicing.release();
+    }
+    *wait = {
+        .address = wide ? static_cast<const void*>(&word64)
+                        : static_cast<const void*>(&word32),
+        .value = 0,
+        .notification_address =
+            service_pending ? nullptr
+                            : reinterpret_cast<const uint64_t*>(&notification),
+        .is_64_bit = wide,
+        .pending = true,
+    };
+    return std::exchange(first_round, false);
+  };
+  auto source = Source(outstanding);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, 1, &source, IREE_DURATION_INFINITE, {},
+      iree_allocator_system(), &completion_));
+  AwaitObservation();
+  // Firmware requests service after observation starts. Completion and the
+  // host wake epoch stay unchanged, and no deadline can force a native query.
+  iree_atomic_store(&notification, INT64_C(1) << 40, iree_memory_order_release);
+  servicing.acquire();
+  EXPECT_EQ(iree_atomic_load(&word32, iree_memory_order_relaxed), 0);
+  EXPECT_EQ(iree_atomic_load(&word64, iree_memory_order_relaxed), 0);
+  EXPECT_EQ(iree_atomic_load(&context_.wake_epoch, iree_memory_order_relaxed),
+            0);
+  EXPECT_EQ(event_.signal_count(), 0u);
+
+  // Resumption clears the firmware request and allows execution to complete.
+  iree_atomic_store(&notification, 0, iree_memory_order_release);
+  if (wide) {
+    iree_atomic_store(&word64, 1, iree_memory_order_release);
+  } else {
+    iree_atomic_store(&word32, 1, iree_memory_order_release);
+  }
+  event_.AwaitWaitCount(1);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+}
+
+TEST_F(CompletionTest, ServiceNotificationDuringSourceDrainRemainsObservable) {
+  iree_atomic_int64_t completion_word = IREE_ATOMIC_VAR_INIT(0);
+  iree_atomic_int64_t notification = IREE_ATOMIC_VAR_INIT(0);
+  std::binary_semaphore queried{0};
+  std::binary_semaphore resume{0};
+  std::binary_semaphore servicing{0};
+  uint32_t round = 0;
+  bool reported = false;
+  WaitCallout outstanding = [&](iree_hal_amd_gpu_completion_scope_t* scope,
+                                iree_hal_amd_gpu_completion_wait_t* wait) {
+    const int64_t request =
+        iree_atomic_load(&notification, iree_memory_order_acquire);
+    if (request) {
+      if (!std::exchange(reported, true)) {
+        servicing.release();
+      }
+      return false;
+    }
+    *wait = {
+        .address = &completion_word,
+        .value = 0,
+        .notification_address =
+            reinterpret_cast<const uint64_t*>(&notification),
+        .is_64_bit = true,
+        .pending = true,
+    };
+    const uint32_t current_round = round++;
+    if (current_round == 1) {
+      iree_hal_amd_gpu_completion_scope_unlock(scope);
+      queried.release();
+      resume.acquire();
+    }
+    return current_round == 0;
+  };
+  auto source = Source(outstanding);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, 1, &source, IREE_DURATION_INFINITE, {},
+      iree_allocator_system(), &completion_));
+  queried.acquire();
+  // Publication between the empty query and arming observation must not become
+  // an already-consumed snapshot. Nonzero still requires an authoritative
+  // query.
+  iree_atomic_store(&notification, 1, iree_memory_order_release);
+  resume.release();
+  servicing.acquire();
+  EXPECT_EQ(iree_atomic_load(&completion_word, iree_memory_order_relaxed), 0);
+  EXPECT_EQ(event_.signal_count(), 0u);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+}
+
 TEST_F(CompletionTest, HostWakeDuringSourceDrainRemainsObservable) {
   iree_atomic_int32_t word = IREE_ATOMIC_VAR_INIT(0);
   std::atomic<bool> ready{false};

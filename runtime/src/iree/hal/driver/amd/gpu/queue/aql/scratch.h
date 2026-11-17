@@ -49,8 +49,12 @@ void iree_hal_amd_gpu_aql_scratch_initialize(
 // Completion-owner observation after a native wake. Empty/pending service
 // performs no allocation. A genuine request surrenders existing backing and
 // submits only typed memory operations; the result returns via publication.
+// An empty query returns its borrowed coherent notification word when
+// available. Pending service returns NULL: its existing owner wakes completion
+// after resuming firmware, including a request raised during that handoff.
 amdf_status_t iree_hal_amd_gpu_aql_scratch_poll(
-    iree_hal_amd_gpu_aql_scratch_t* scratch);
+    iree_hal_amd_gpu_aql_scratch_t* scratch,
+    const uint64_t** out_notification_address);
 
 // Publisher consumes a completed acquisition and resumes firmware without a
 // kernel call. Failure leaves service terminal and backing owned for teardown.
@@ -63,7 +67,7 @@ iree_status_t iree_hal_amd_gpu_aql_scratch_resume(
 void iree_hal_amd_gpu_aql_scratch_abandon(
     iree_hal_amd_gpu_aql_scratch_t* scratch);
 
-// Cold predicate after accepted work and service publication have joined.
+// Whether an existing service owner will wake completion on its handoff.
 bool iree_hal_amd_gpu_aql_scratch_is_pending(
     const iree_hal_amd_gpu_aql_scratch_t* scratch);
 

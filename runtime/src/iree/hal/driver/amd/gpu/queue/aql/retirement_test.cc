@@ -61,8 +61,10 @@ class AqlRetirementTest : public ::testing::Test {
         iree_async_proactor_options_default(), iree_allocator_system(),
         &proactor_));
     gpu_.user_queue_query_scratch =
-        [](amdf_user_queue_t*, amdf_gpu_aql_scratch_request_t* request) {
+        [](amdf_user_queue_t* queue, amdf_gpu_aql_scratch_request_t* request) {
           request->byte_length = 0;
+          request->host_notification_address =
+              reinterpret_cast<uintptr_t>(queue);
           return AMDF_STATUS_OK;
         };
     context_.gpu = &gpu_;
@@ -97,8 +99,10 @@ class AqlRetirementTest : public ::testing::Test {
     arguments_.address = 0x50000;
     arguments_.memory.contents =
         iree_make_byte_span(argument_bytes_.data(), argument_bytes_.size());
-    iree_hal_amd_gpu_aql_scratch_initialize(&queue_.growth, nullptr, nullptr,
-                                            &queue_.scratch);
+    iree_hal_amd_gpu_aql_scratch_initialize(
+        &queue_.growth,
+        reinterpret_cast<amdf_user_queue_t*>(&scratch_notification_), nullptr,
+        &queue_.scratch);
     iree_hal_amd_gpu_publisher_initialize(&queue_.publisher);
     iree_hal_amd_gpu_capture_pool_initialize(512, iree_allocator_system(),
                                              &queue_.captures);
@@ -223,7 +227,7 @@ class AqlRetirementTest : public ::testing::Test {
                       iree_memory_order_release);
   }
 
-  bool Poll() {
+  bool Poll(iree_hal_amd_gpu_completion_wait_t* out_wait = nullptr) {
     auto source = iree_hal_amd_gpu_aql_queue_completion_source(&queue_.base);
     iree_slim_mutex_lock(&completion_.drain_mutex);
     iree_hal_amd_gpu_completion_scope_t scope = {
@@ -236,6 +240,9 @@ class AqlRetirementTest : public ::testing::Test {
         source.fn(source.user_data, AMDF_STATUS_OK, &scope, &wait, nullptr);
     EXPECT_FALSE(iree_hal_amd_gpu_completion_scope_finish(&scope));
     iree_slim_mutex_unlock(&completion_.drain_mutex);
+    if (out_wait) {
+      *out_wait = wait;
+    }
     return progressed;
   }
 
@@ -289,6 +296,8 @@ class AqlRetirementTest : public ::testing::Test {
   iree_atomic_int64_t read_index_ = 0;
   // Host reservation extent.
   iree_atomic_int64_t write_index_ = 0;
+  // Native firmware-service notification independent of execution completion.
+  uint64_t scratch_notification_ = 0;
   // Native notification operand.
   uint64_t doorbell_ = 0;
   // Dedicated ABI backing, with enough bytes for all live retirement slots.
@@ -443,7 +452,11 @@ TEST_F(AqlRetirementTest, PendingPhysicalRunKeepsPayloadAndPublicTimeline) {
         Publish(semaphore, value, value > 1 ? semaphore : nullptr, value - 1));
   }
   ASSERT_EQ(iree_hal_amd_gpu_aql_publish_run(&queue_), AMDF_STATUS_OK);
-  EXPECT_FALSE(Poll());
+  iree_hal_amd_gpu_completion_wait_t wait = {};
+  EXPECT_FALSE(Poll(&wait));
+  EXPECT_TRUE(wait.pending);
+  EXPECT_EQ(wait.address, readers_[0]->host_value);
+  EXPECT_EQ(wait.notification_address, &scratch_notification_);
   EXPECT_EQ(destroyed_, 0u);
   iree_atomic_store(
       reinterpret_cast<iree_atomic_int64_t*>(readers_[0]->host_value), 0,
@@ -459,6 +472,26 @@ TEST_F(AqlRetirementTest, PendingPhysicalRunKeepsPayloadAndPublicTimeline) {
   }
   CompleteAll();
   ASSERT_TRUE(Poll());
+  ExpectRetired(0, IREE_STATUS_OK);
+}
+
+TEST_F(AqlRetirementTest, PendingWithoutCoherentNotificationRequiresEvent) {
+  gpu_.user_queue_query_scratch = [](amdf_user_queue_t*,
+                                     amdf_gpu_aql_scratch_request_t* request) {
+    request->byte_length = 0;
+    request->host_notification_address = 0;
+    return AMDF_STATUS_OK;
+  };
+  Publish(Semaphore(), 1);
+  ASSERT_EQ(iree_hal_amd_gpu_aql_publish_run(&queue_), AMDF_STATUS_OK);
+  iree_hal_amd_gpu_completion_wait_t wait = {};
+  EXPECT_FALSE(Poll(&wait));
+  EXPECT_TRUE(wait.pending);
+  EXPECT_EQ(wait.address, nullptr);
+  EXPECT_EQ(wait.notification_address, nullptr);
+  EXPECT_EQ(wait.signal, nullptr);
+  CompleteAll();
+  EXPECT_TRUE(Poll());
   ExpectRetired(0, IREE_STATUS_OK);
 }
 

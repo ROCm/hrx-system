@@ -70,7 +70,9 @@ static void iree_hal_amd_gpu_aql_scratch_acquire(void* user_data) {
 }
 
 amdf_status_t iree_hal_amd_gpu_aql_scratch_poll(
-    iree_hal_amd_gpu_aql_scratch_t* scratch) {
+    iree_hal_amd_gpu_aql_scratch_t* scratch,
+    const uint64_t** out_notification_address) {
+  *out_notification_address = NULL;
   if (iree_atomic_load(&scratch->phase, iree_memory_order_acquire) !=
       IREE_HAL_AMD_GPU_AQL_SCRATCH_IDLE) {
     return AMDF_STATUS_OK;
@@ -81,8 +83,13 @@ amdf_status_t iree_hal_amd_gpu_aql_scratch_poll(
   amdf_status_t status =
       scratch->growth->context->gpu->user_queue_query_scratch(scratch->queue,
                                                               &request);
-  if (!amdf_status_is_ok(status) || !request.byte_length) {
+  if (!amdf_status_is_ok(status)) {
     return status;
+  }
+  if (!request.byte_length) {
+    *out_notification_address =
+        (const uint64_t*)(uintptr_t)request.host_notification_address;
+    return AMDF_STATUS_OK;
   }
   scratch->request = request;
   iree_atomic_store(&scratch->phase, IREE_HAL_AMD_GPU_AQL_SCRATCH_ACQUIRING,
