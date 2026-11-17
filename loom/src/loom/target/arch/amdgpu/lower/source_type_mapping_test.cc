@@ -77,6 +77,10 @@ class AmdgpuSourceTypeMappingTest : public ::testing::Test {
     mapping_.function_arena = &mapping_.analysis_arena;
     IREE_ASSERT_OK(
         loom_value_fact_table_initialize(&facts_, &module_->arena, 0));
+    target_facts_.storage.snapshot.index_bitwidth = 32;
+    target_facts_.storage.snapshot.maximum_index_bitwidth = 64;
+    target_facts_.storage.snapshot.offset_bitwidth = 64;
+    facts_.context.target_facts = &target_facts_;
   }
 
   void TearDown() override {

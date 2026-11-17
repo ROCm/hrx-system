@@ -93,7 +93,9 @@ bool loom_amdgpu_source_address_value_needs_64bit(
   // established wide signed range needs both words; unresolved ranges inherit
   // their producer width from representation planning.
   return element_type == LOOM_SCALAR_TYPE_INDEX &&
-         loom_index_facts_carrier_bitwidth(facts, 32, 64) == 64;
+         loom_index_value_fact_carrier_bitwidth(&fact_table->context, module,
+                                                source_value_id, element_type,
+                                                facts) == 64;
 }
 
 bool loom_amdgpu_type_is_f32(loom_type_t type) {

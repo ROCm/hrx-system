@@ -182,10 +182,15 @@ static iree_status_t loom_value_fact_table_seed_value_arg(
     // as though it were feedback whose producer had not executed yet.
     return loom_value_fact_table_define(table, value_id, facts);
   }
-  if (loom_value_facts_is_unknown(facts) && parameter_target &&
-      loom_type_element_type(type) == LOOM_SCALAR_TYPE_INDEX) {
-    facts = loom_value_facts_make_signed_bit_count_range(
-        parameter_target->storage.snapshot.index_bitwidth);
+  if (parameter_target &&
+      loom_type_element_type(type) == LOOM_SCALAR_TYPE_INDEX &&
+      facts.range_lo == INT64_MIN && facts.range_hi == INT64_MAX &&
+      !loom_value_fact_table_has_seed(table, value_id)) {
+    const loom_value_facts_t native =
+        loom_value_facts_make_signed_bit_count_range(
+            parameter_target->storage.snapshot.index_bitwidth);
+    facts =
+        loom_value_facts_clamp_domain(facts, native.range_lo, native.range_hi);
   }
   return loom_value_fact_table_define(
       table, value_id,
@@ -337,9 +342,7 @@ static iree_status_t loom_value_fact_table_seed_entry_inputs(
   for (uint16_t i = 0; i < block->arg_count && iree_status_is_ok(status); ++i) {
     const loom_value_id_t argument = loom_block_arg_id(block, i);
     loom_value_fact_table_undefine(table, argument);
-    if (argument / 64 < table->seeds.word_count &&
-        (table->seeds.selected_bits[argument / 64] &
-         (UINT64_C(1) << (argument % 64)))) {
+    if (loom_value_fact_table_has_seed(table, argument)) {
       status = loom_value_fact_table_clone_values(
           table,
           (loom_value_fact_table_view_t){table->seeds.table, &argument, 1},
@@ -1431,9 +1434,7 @@ static iree_status_t loom_value_fact_table_compute_ordinary_op(
     for (uint16_t i = 0; i < op->result_count && iree_status_is_ok(status);
          ++i) {
       const loom_value_id_t result = results[i];
-      if (result / 64 < table->seeds.word_count &&
-          (table->seeds.selected_bits[result / 64] &
-           (UINT64_C(1) << (result % 64)))) {
+      if (loom_value_fact_table_has_seed(table, result)) {
         status = loom_value_fact_table_clone_origins(table, table->seeds.table,
                                                      result);
         if (iree_status_is_ok(status)) {

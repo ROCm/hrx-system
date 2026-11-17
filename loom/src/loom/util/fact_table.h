@@ -936,6 +936,16 @@ iree_status_t loom_value_fact_table_seed_values(
     loom_value_fact_table_t* target, loom_value_fact_table_view_t source,
     const loom_module_t* module);
 
+// Returns whether an enclosing analysis supplies the value's complete input
+// facts. A supplied full domain is distinct from an unseeded input whose native
+// domain still has to be established by the local entry owner.
+static inline bool loom_value_fact_table_has_seed(
+    const loom_value_fact_table_t* table, loom_value_id_t value) {
+  return value / 64 < table->seeds.word_count &&
+         (table->seeds.selected_bits[value / 64] &
+          (UINT64_C(1) << (value % 64))) != 0;
+}
+
 // Propagates SSA identities and retained materialization and contextual origins
 // through declared value-alias and fact-identity operations. Numeric facts are
 // computed separately. Identity changes set |inout_changed| when non-NULL

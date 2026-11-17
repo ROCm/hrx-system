@@ -70,9 +70,8 @@ bool loom_low_lower_source_call_requires_projection(
              callee.symbol_id) != NULL;
 }
 
-static const loom_low_lower_call_interface_t*
-loom_low_lower_source_call_interface(const loom_low_lower_context_t* context,
-                                     loom_call_like_t call) {
+const loom_low_lower_call_interface_t* loom_low_lower_source_call_interface(
+    const loom_low_lower_context_t* context, loom_call_like_t call) {
   const loom_symbol_ref_t callee = loom_call_like_callee(call);
   return loom_symbol_ref_is_valid(callee) && callee.module_id == 0
              ? loom_low_lower_call_interface_index_find(

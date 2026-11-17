@@ -591,6 +591,15 @@ static iree_status_t loom_low_source_invocation_initialize_function(
       function->selection ? function->selection->target_facts : NULL;
   for (uint16_t i = 0; i < seed_argument_count; ++i) {
     seeds[i] = arguments[i];
+    // The local entry owner establishes an externally supplied index domain
+    // from the target and authored predicates. Only a complete caller summary
+    // replaces that contract; an unknown distribution seed is not a wide
+    // numeric input domain.
+    if (!(function->complete_invocations && function->incoming) &&
+        loom_type_equal(loom_module_value_type(module, arguments[i]),
+                        loom_type_scalar(LOOM_SCALAR_TYPE_INDEX))) {
+      continue;
+    }
     loom_value_facts_t initial = loom_low_source_invocation_unknown(
         module, arguments[i], function->selection);
     if (function->complete_invocations && function->incoming) {
