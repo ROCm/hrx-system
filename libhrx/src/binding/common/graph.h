@@ -638,8 +638,8 @@ iree_status_t iree_hal_streaming_graph_add_staged_copy_node(
     iree_host_size_t dependency_count,
     iree_hal_streaming_graph_node_t* preparation,
     iree_hal_streaming_graph_staging_direction_t direction,
-    iree_hal_streaming_deviceptr_t local_pointer, iree_device_size_t local_span,
-    iree_device_size_t size, iree_host_size_t parameter_offset,
+    iree_hal_streaming_buffer_ref_t local_ref, iree_device_size_t size,
+    iree_host_size_t parameter_offset,
     iree_hal_streaming_graph_node_t** out_node);
 
 iree_status_t iree_hal_streaming_graph_add_fill_ptr_node(

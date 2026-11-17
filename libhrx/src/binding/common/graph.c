@@ -1673,15 +1673,12 @@ iree_status_t iree_hal_streaming_graph_add_staged_copy_node(
     iree_host_size_t dependency_count,
     iree_hal_streaming_graph_node_t* preparation,
     iree_hal_streaming_graph_staging_direction_t direction,
-    iree_hal_streaming_deviceptr_t local_pointer, iree_device_size_t local_span,
-    iree_device_size_t size, iree_host_size_t parameter_offset,
+    iree_hal_streaming_buffer_ref_t local_ref, iree_device_size_t size,
+    iree_host_size_t parameter_offset,
     iree_hal_streaming_graph_node_t** out_node) {
   *out_node = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_validate_dependencies(
       graph, dependencies, dependency_count));
-  iree_hal_streaming_buffer_ref_t local_ref;
-  IREE_RETURN_IF_ERROR(iree_hal_streaming_memory_lookup_range(
-      graph->context, local_pointer, local_span, &local_ref));
   const iree_hal_streaming_buffer_ref_t empty_ref = {0};
   const bool upload = direction == IREE_HAL_STREAMING_GRAPH_STAGING_UPLOAD;
   iree_hal_streaming_graph_node_t* node = NULL;

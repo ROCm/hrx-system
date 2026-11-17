@@ -264,6 +264,17 @@ bool iree_hal_streaming_memory_try_lookup(
     iree_hal_streaming_deviceptr_t pointer,
     iree_hal_streaming_buffer_ref_t* out_ref);
 
+// Finds an allocation in any other live context without an error for a miss.
+// The caller has already queried |excluded_context| and does not query it
+// again. The wrapper is borrowed; the caller keeps its allocation alive. On
+// success, |out_context| receives a retained reference that the caller must
+// release. Synchronization: global context-list lock during lookup.
+bool iree_hal_streaming_memory_try_lookup_across_contexts(
+    iree_hal_streaming_context_t* excluded_context,
+    iree_hal_streaming_deviceptr_t pointer,
+    iree_hal_streaming_context_t** out_context,
+    iree_hal_streaming_buffer_ref_t* out_ref);
+
 // Looks up a buffer by device pointer.
 // Returns a borrowed reference to the buffer (does not transfer ownership).
 // Returns an error if the device pointer is not found.
