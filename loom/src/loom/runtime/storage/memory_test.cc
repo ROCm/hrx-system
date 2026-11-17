@@ -317,12 +317,12 @@ TEST_F(MemoryTest, PhysicalPeakSurvivesCachedSlabDisposal) {
       pool, loom_runtime_pool_state_geometry(storage_owner), kSlabSize, 256,
       &statistics[1], &second));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, kSlabSize));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(second, 0, kSlabSize));
   loom_runtime_virtual_buffer_begin_trim(first);
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(first));
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(second, 0, kSlabSize));
   RoundTrip(loom_runtime_virtual_buffer_handle(second), 0, 0x12345678);
-  // Neither reservation ever owns more than one slab's worth of bytes, but
-  // the native source owns both the live state class and the idle weight class.
+  // The peak includes both live reservations. Returning one to the native
+  // cache, then disposing it, must preserve that physical high-water mark.
   auto memory = loom_runtime_memory_pool_statistics(pool);
   EXPECT_EQ(memory.committed_bytes, 2 * kSlabSize);
   EXPECT_EQ(memory.cached_bytes, kSlabSize);
@@ -469,8 +469,10 @@ TEST_F(MemoryTest, NativeReturnAdmitsGrowthWhileIndependentAcquisitionIsHeld) {
       pool, bulk, kSlabSize, 256, &statistics[0], &first));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
       pool, bulk, kSlabSize, 256, &statistics[1], &second));
+  // An exact bulk tail needs a dedicated native extent. Packed pages can
+  // reuse the first parent's free slots without any native return.
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
-      pool, state, state.mapping_size, 256, &statistics[2], &third));
+      pool, bulk, state.backing_size, 256, &statistics[2], &third));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, kSlabSize));
   deferred_backing->defer = true;
   const loom_runtime_memory_range_t held = {second, 0, kSlabSize};
@@ -485,7 +487,7 @@ TEST_F(MemoryTest, NativeReturnAdmitsGrowthWhileIndependentAcquisitionIsHeld) {
   first = nullptr;
   const auto demand = loom_runtime_virtual_buffer_missing_demand(third);
   IREE_ASSERT_OK(loom_runtime_memory_pool_prepare(pool, demand, &admission));
-  EXPECT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_DEFERRED);
+  ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_DEFERRED);
   deferred_backing->WaitForReturn();
 
   iree_notification_t notification;
@@ -575,13 +577,14 @@ TEST_F(MemoryTest, PackedPageWordBoundariesReuseWithoutNewNativeBacking) {
 TEST_F(DedicatedNativeWorkerMemoryTest,
        HeldGrowthAndUnrelatedReturnDoNotCreateOtherClassCredit) {
   const auto bulk = loom_runtime_pool_weight_geometry(storage_owner);
-  const auto state = loom_runtime_pool_state_geometry(storage_owner);
+  auto dedicated = bulk;
+  dedicated.mapping_size = kSlabSize / 2;
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
       pool, bulk, kSlabSize, 256, &statistics[0], &first));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
       pool, bulk, kSlabSize, 256, &statistics[1], &second));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
-      pool, state, 2 * kSlabSize, 256, &statistics[2], &third));
+      pool, dedicated, 2 * kSlabSize, 256, &statistics[2], &third));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, kSlabSize));
   loom_runtime_memory_operation_t* operation = nullptr;
   {
@@ -620,11 +623,12 @@ TEST_F(DedicatedNativeWorkerMemoryTest,
 TEST_F(DedicatedNativeWorkerMemoryTest,
        IncompatibleIdleSlabsStayChargedUntilNativeDisposal) {
   const auto bulk = loom_runtime_pool_weight_geometry(storage_owner);
-  const auto state = loom_runtime_pool_state_geometry(storage_owner);
+  auto dedicated = bulk;
+  dedicated.mapping_size = kSlabSize / 2;
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
       pool, bulk, 3 * kSlabSize, 256, &statistics[0], &first));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
-      pool, state, 2 * kSlabSize, 256, &statistics[1], &second));
+      pool, dedicated, 2 * kSlabSize, 256, &statistics[1], &second));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, 3 * kSlabSize));
   RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
   loom_runtime_virtual_buffer_begin_trim(first);
@@ -636,7 +640,7 @@ TEST_F(DedicatedNativeWorkerMemoryTest,
     loom_runtime_memory_admission_t admission;
     IREE_ASSERT_OK(loom_runtime_memory_pool_prepare(
         pool, loom_runtime_virtual_buffer_missing_demand(second), &admission));
-    EXPECT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_DEFERRED);
+    ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_DEFERRED);
     hold.WaitEntered();
     const auto memory = loom_runtime_memory_pool_statistics(pool);
     EXPECT_EQ(memory.committed_bytes, 3 * kSlabSize);
@@ -655,13 +659,14 @@ TEST_F(MemoryTest, PendingDisposalSatisfiesRepeatedEvictionDemand) {
   ASSERT_NO_FATAL_FAILURE(
       UseDeferredBacking(3 * kSlabSize, nullptr, /*distinct_classes=*/true));
   const auto bulk = loom_runtime_pool_weight_geometry(storage_owner);
-  const auto state = loom_runtime_pool_state_geometry(storage_owner);
+  auto dedicated = bulk;
+  dedicated.mapping_size = kSlabSize / 2;
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
       pool, bulk, 3 * kSlabSize, 256, &statistics[0], &first));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
-      pool, state, 2 * kSlabSize, 256, &statistics[1], &second));
+      pool, dedicated, 2 * kSlabSize, 256, &statistics[1], &second));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
-      pool, state, kSlabSize, 256, &statistics[2], &third));
+      pool, dedicated, kSlabSize, 256, &statistics[2], &third));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, 3 * kSlabSize));
   RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
   loom_runtime_virtual_buffer_begin_trim(first);
@@ -809,8 +814,10 @@ TEST_F(DedicatedNativeWorkerMemoryTest,
   const auto state = loom_runtime_pool_state_geometry(storage_owner);
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
       pool, bulk, bulk.mapping_size, 256, &statistics[0], &first));
+  // Force an independent native acquisition while the idle bulk parent is
+  // available; a packed page would now reuse that parent immediately.
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
-      pool, state, state.mapping_size, 256, &statistics[1], &second));
+      pool, bulk, state.backing_size, 256, &statistics[1], &second));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
       pool, bulk, 2 * bulk.mapping_size, 256, &statistics[2], &third));
   IREE_ASSERT_OK(
@@ -873,8 +880,7 @@ TEST_F(DedicatedNativeWorkerMemoryTest,
     loom_runtime::testing::ScopedNativeHold hold(native,
                                                  IREE_ALLOCATOR_COMMAND_CALLOC);
     IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
-        shared_memory, state, state.mapping_size, 256, &statistics[1],
-        &second));
+        shared_memory, bulk, state.backing_size, 256, &statistics[1], &second));
     const loom_runtime_memory_range_t growth = {second, 0, state.mapping_size};
     loom_runtime_memory_admission_t admission;
     IREE_ASSERT_OK(loom_runtime_memory_pool_commit_async(
@@ -979,41 +985,49 @@ TEST_F(MemoryTest, WeightTailAndStateMappingsShareOnePhysicalParent) {
 }
 
 TEST_F(MemoryTest, IdleWeightExtentBecomesPackedStateParent) {
-  ASSERT_NO_FATAL_FAILURE(UseBacking(false, kSlabSize, nullptr,
-                                     /*distinct_classes=*/false));
-  const auto bulk = loom_runtime_pool_weight_geometry(storage_owner);
-  const auto state = loom_runtime_pool_state_geometry(storage_owner);
-  ASSERT_LT(state.mapping_size, bulk.mapping_size);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
-      pool, bulk, bulk.mapping_size, 256, &statistics[0], &first));
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
-      pool, state, state.mapping_size, 256, &statistics[1], &second));
+  for (bool distinct_classes : {false, true}) {
+    SCOPED_TRACE(distinct_classes);
+    ASSERT_NO_FATAL_FAILURE(
+        UseBacking(false, kSlabSize, nullptr, distinct_classes));
+    const auto bulk = loom_runtime_pool_weight_geometry(storage_owner);
+    const auto state = loom_runtime_pool_state_geometry(storage_owner);
+    ASSERT_LT(state.mapping_size, bulk.mapping_size);
+    IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+        pool, bulk, bulk.mapping_size, 256, &statistics[0], &first));
+    IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+        pool, state, state.mapping_size, 256, &statistics[1], &second));
 
-  IREE_ASSERT_OK(
-      loom_runtime_virtual_buffer_commit(first, 0, bulk.mapping_size));
-  RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
-  loom_runtime_virtual_buffer_begin_trim(first);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(first));
-  const auto cached = loom_runtime_memory_pool_statistics(pool);
-  EXPECT_EQ(cached.committed_bytes, bulk.mapping_size);
-  EXPECT_EQ(cached.cached_bytes, bulk.mapping_size);
+    IREE_ASSERT_OK(
+        loom_runtime_virtual_buffer_commit(first, 0, bulk.mapping_size));
+    RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
+    loom_runtime_virtual_buffer_begin_trim(first);
+    IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(first));
+    const auto cached = loom_runtime_memory_pool_statistics(pool);
+    EXPECT_EQ(cached.committed_bytes, bulk.mapping_size);
+    EXPECT_EQ(cached.cached_bytes, bulk.mapping_size);
 
-  // Reclassifying the idle outer extent as a packed state parent consumes no
-  // native budget and must remain admissible at the one-parent limit.
-  IREE_ASSERT_OK(
-      loom_runtime_virtual_buffer_commit(second, 0, state.mapping_size));
-  const auto reused = loom_runtime_memory_pool_statistics(pool);
-  EXPECT_EQ(reused.committed_bytes, bulk.mapping_size);
-  EXPECT_EQ(reused.cached_bytes, bulk.mapping_size - state.mapping_size);
-  RoundTrip(loom_runtime_virtual_buffer_handle(second), 0, 0x87654321);
+    // Reclassifying the idle outer extent as a packed state parent consumes no
+    // native budget and must remain admissible at the one-parent limit.
+    IREE_ASSERT_OK(
+        loom_runtime_virtual_buffer_commit(second, 0, state.mapping_size));
+    const auto reused = loom_runtime_memory_pool_statistics(pool);
+    EXPECT_EQ(reused.committed_bytes, bulk.mapping_size);
+    EXPECT_EQ(reused.cached_bytes, bulk.mapping_size - state.mapping_size);
+    RoundTrip(loom_runtime_virtual_buffer_handle(second), 0, 0x87654321);
 
-  loom_runtime_virtual_buffer_begin_trim(second);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(second));
-  IREE_ASSERT_OK(
-      loom_runtime_virtual_buffer_commit(first, 0, bulk.mapping_size));
-  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool).committed_bytes,
-            bulk.mapping_size);
-  RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0xABCDEF01);
+    loom_runtime_virtual_buffer_begin_trim(second);
+    IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(second));
+    IREE_ASSERT_OK(
+        loom_runtime_virtual_buffer_commit(first, 0, bulk.mapping_size));
+    EXPECT_EQ(loom_runtime_memory_pool_statistics(pool).committed_bytes,
+              bulk.mapping_size);
+    RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0xABCDEF01);
+    IREE_ASSERT_OK(loom_runtime_virtual_buffer_free(first));
+    first = nullptr;
+    IREE_ASSERT_OK(loom_runtime_virtual_buffer_free(second));
+    second = nullptr;
+    IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
+  }
 }
 
 TEST_F(MemoryTest, WeightTailsShareBackingAtNativeMappingGranularity) {
