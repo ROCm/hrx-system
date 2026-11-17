@@ -736,6 +736,12 @@ const loom_cfg_graph_t* loom_value_fact_table_lookup_cfg_graph(
 loom_op_t* loom_value_fact_table_region_parent(
     const loom_value_fact_table_t* table, const loom_region_t* region);
 
+// Refines |facts| to the canonical domain retained for |value_id|. This
+// includes its scalar type range and any same-block shaped extent constraint.
+loom_value_facts_t loom_value_fact_table_refine_definition_domain(
+    const loom_module_t* module, loom_value_id_t value_id,
+    loom_value_facts_t facts);
+
 // Rebuilds independent entry arguments from immutable inputs and contracts.
 iree_status_t loom_value_fact_table_refresh_entry_args(
     loom_value_fact_table_t* table, const loom_module_t* module,

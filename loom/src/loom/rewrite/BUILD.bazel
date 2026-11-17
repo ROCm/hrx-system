@@ -155,6 +155,7 @@ loom_cc_test(
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/scalar",
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/pass:value_facts",
