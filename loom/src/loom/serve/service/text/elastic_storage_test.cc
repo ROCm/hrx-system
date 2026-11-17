@@ -732,10 +732,11 @@ TEST_F(ElasticTextServiceTest,
 TEST_F(ElasticTextServiceTest,
        RetirementJoinsStateTrimWithoutWaitingForNativeFree) {
   auto options = ModelOptions();
-  // Occupy a full KV parent so the warm model below cannot share it. Returning
-  // this reservation then leaves a whole parent for explicit pool trim.
+  // Span two KV parents so at least one fills entirely with retiring state,
+  // even when its boundaries share packed storage/workspace pages. Returning
+  // this reservation leaves a whole parent for explicit native pool trim.
   options.pool_capacity =
-      loom_runtime_test_application_options_default().slab_size / 4;
+      2 * loom_runtime_test_application_options_default().slab_size / 4;
   options.context_capacity = options.pool_capacity;
   loom_serve_text_model_t* retiring = nullptr;
   IREE_ASSERT_OK(loom_serve_text_model_allocate(

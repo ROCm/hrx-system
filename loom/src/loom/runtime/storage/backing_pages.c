@@ -57,9 +57,9 @@ struct loom_runtime_backing_pages_t {
   iree_hal_pool_t* source;
   // Borrowed device constructing private allocation readiness semaphores.
   iree_hal_device_t* device;
-  // Packed mapping parents and optional distinct whole-weight parents.
+  // Parent size classes sharing the same packed mapping granularity.
   loom_runtime_backing_class_t classes[2];
-  // Weight class ordinal; zero enables whole-parent/page reuse.
+  // Class whose full extent can satisfy a weight mapping.
   uint8_t weight_class;
   // All retained parents, including failed or retiring acquisitions.
   loom_runtime_backing_parent_t* parents;
@@ -114,7 +114,7 @@ struct loom_runtime_backing_parent_t {
   uint64_t observation;
   // Number of leases, including mappings whose private unmap is pending.
   iree_host_size_t occupied;
-  // Usable fixed slots; dedicated and distinct whole parents have one.
+  // Usable packed slots; dedicated parents have one.
   iree_host_size_t slot_count;
   // Number of hierarchy levels in trailing storage.
   iree_host_size_t level_count;
@@ -260,7 +260,7 @@ iree_status_t loom_runtime_backing_pages_allocate(
   pages->classes[0].request = parent;
   pages->classes[0].slot_size = packed.allocation_size;
   pages->classes[1].request = weight;
-  pages->classes[1].slot_size = weight.allocation_size;
+  pages->classes[1].slot_size = packed.allocation_size;
   iree_status_t status = iree_ok_status();
   for (int i = 0; i <= pages->weight_class && iree_status_is_ok(status); ++i) {
     status = iree_hal_slab_pool_query_allocation_cost(
@@ -305,10 +305,11 @@ uint64_t loom_runtime_backing_pages_growth_cost(
   uint64_t total = loom_runtime_backing_add_cost(
       dedicated_cost, weight_count - reused_weight, weight->cost);
   const uint64_t slots = packed->request.allocation_size / packed->slot_size;
-  uint64_t available = packed->free_count;
-  if (!pages->weight_class) {
-    available -= reused_weight * slots;
-  }
+  const uint64_t weight_slots =
+      weight->request.allocation_size / weight->slot_size;
+  const uint64_t available = pages->classes[0].free_count +
+                             pages->classes[1].free_count -
+                             reused_weight * weight_slots;
   const uint64_t missing =
       packed_count > available ? packed_count - available : 0;
   return loom_runtime_backing_add_cost(
@@ -400,11 +401,21 @@ iree_status_t loom_runtime_backing_pages_claim(
                                 ? pages->weight_class
                                 : 0];
   loom_runtime_backing_parent_t* parent = NULL;
-  if (category) {
-    loom_runtime_backing_parent_t** list = kind == LOOM_RUNTIME_BACKING_WEIGHT
-                                               ? category->idle
-                                               : category->available;
-    parent = list[1] ? list[1] : list[0];
+  if (kind == LOOM_RUNTIME_BACKING_PACKED) {
+    // Ready pages take priority over pending parents, regardless of the size
+    // of the native allocation that supplied them. New packed growth still
+    // uses its independently configured parent size.
+    for (int ready = 1; ready >= 0 && !parent; --ready) {
+      for (int ordinal = 0; ordinal <= pages->weight_class && !parent;
+           ++ordinal) {
+        parent = pages->classes[ordinal].available[ready];
+      }
+    }
+    if (parent) {
+      category = parent->category;
+    }
+  } else if (category) {
+    parent = category->idle[1] ? category->idle[1] : category->idle[0];
   }
   if (!parent) {
     IREE_RETURN_IF_ERROR(loom_runtime_backing_parent_allocate(
@@ -612,6 +623,13 @@ void loom_runtime_backing_pages_trim(loom_runtime_backing_pages_t* pages,
                                      uint64_t protected_weight_count) {
   // Reserve whole-parent reuse for the incoming weight cohort before spending
   // the remaining free slots on its packed pages. Selection is owner-local.
+  const loom_runtime_backing_class_t* weight =
+      &pages->classes[pages->weight_class];
+  const uint64_t protected_weights =
+      iree_min(protected_weight_count, weight->idle_count);
+  uint64_t available =
+      pages->classes[0].free_count + pages->classes[1].free_count -
+      protected_weights * (weight->request.allocation_size / weight->slot_size);
   for (int ordinal = 1; ordinal >= 0 && native_bytes_to_return; --ordinal) {
     loom_runtime_backing_class_t* category = &pages->classes[ordinal];
     const uint64_t slots =
@@ -620,17 +638,13 @@ void loom_runtime_backing_pages_trim(loom_runtime_backing_pages_t* pages,
         ordinal == pages->weight_class
             ? iree_min(protected_weight_count, category->idle_count)
             : 0;
-    uint64_t protected_slots = weights * slots;
-    if (!ordinal) {
-      protected_slots += protected_packed_count;
-    }
     while (native_bytes_to_return && category->idle_count > weights &&
-           category->free_count >= slots &&
-           category->free_count - slots >= protected_slots) {
+           available >= slots && available - slots >= protected_packed_count) {
       loom_runtime_backing_parent_t* parent =
           category->idle[1] ? category->idle[1] : category->idle[0];
       const uint64_t cost = parent->cost;
       loom_runtime_backing_forget_capacity(parent);
+      available -= slots;
       parent->retiring = true;
       loom_runtime_backing_forget_charge(parent);
       if (parent->state != LOOM_RUNTIME_BACKING_PENDING) {

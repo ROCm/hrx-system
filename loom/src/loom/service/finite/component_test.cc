@@ -891,9 +891,9 @@ TEST_F(FiniteComponentTest, PeerAdmissionWaitsForCapturedOutputRetirement) {
   loom_service_finite_model_t* peer_model = nullptr;
   IREE_ASSERT_OK(Prepare(peer, &peer_model));
   auto* peer_residency = loom_service_finite_model_residency(peer_model);
-  // Carried output plus peer input, output, and scratch crosses a workspace
-  // slab boundary. Adding the peer's weights then exceeds the ceiling.
-  ASSERT_NO_FATAL_FAILURE(PrepareBatch(peer_model, 0, kSlabSize));
+  // Each output occupies half the budget. Their live payloads plus the
+  // peer's weights exceed the ceiling even with tightly packed workspace.
+  ASSERT_NO_FATAL_FAILURE(PrepareBatch(peer_model, 0, 2 * kSlabSize));
   loom_runtime_residency_admission_t admission;
   IREE_ASSERT_OK(loom_runtime_residency_try_admit(peer_residency, &admission));
   EXPECT_EQ(admission, loom_runtime_pool_memory(storage_owner_)

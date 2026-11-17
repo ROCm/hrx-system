@@ -270,4 +270,51 @@ TEST_F(MemoryMappingTest, FailedRunDetachRetainsEveryPageForCheckedCleanup) {
   CheckRetained(loom_runtime_virtual_buffer_handle(second), 0, 0x12345678);
 }
 
+TEST_F(MemoryMappingTest, WholeAndPackedClaimsShareDistinctParentClasses) {
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking(2 * kSlabSize, &mapping_queue,
+                                             /*distinct_classes=*/true));
+  const auto bulk = loom_runtime_pool_weight_geometry(storage_owner);
+  const auto packed = loom_runtime_pool_state_geometry(storage_owner);
+  ASSERT_LT(packed.backing_size, bulk.mapping_size);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, bulk, 2 * kSlabSize, 256, &statistics[0], &first));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, bulk, kSlabSize, 256, &statistics[1], &second));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, packed, kSlabSize / 2, 256, &statistics[2], &third));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, 2 * kSlabSize));
+  loom_runtime_virtual_buffer_begin_trim(first);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(first));
+  iree_hal_pool_stats_t before;
+  iree_hal_pool_query_stats(deferred_backing, &before);
+
+  // Whole-parent claims must be assigned before sharing the other parent's
+  // pages. Admission and capture agree without another native allocation.
+  const loom_runtime_memory_range_t ranges[] = {{third, 0, kSlabSize / 2},
+                                                {second, 0, kSlabSize}};
+  bool admitted = false;
+  IREE_ASSERT_OK(loom_runtime_memory_pool_try_commit(
+      pool, IREE_ARRAYSIZE(ranges), ranges, &admitted));
+  ASSERT_TRUE(admitted);
+  const auto observations = mapping_queue.WaitForMappings(3);
+  ASSERT_EQ(observations[2].updates.size(), 2u);
+  iree_hal_pool_stats_t after;
+  iree_hal_pool_query_stats(deferred_backing, &after);
+  EXPECT_EQ(after.reserve_count, before.reserve_count);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool).committed_bytes,
+            2 * kSlabSize);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool).cached_bytes,
+            kSlabSize / 2);
+  RoundTrip(loom_runtime_virtual_buffer_handle(second), 0, 0x12345678);
+  RoundTrip(loom_runtime_virtual_buffer_handle(third), 0, 0x87654321);
+
+  loom_runtime_virtual_buffer_begin_trim(second);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(second));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, kSlabSize));
+  RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0xabcdef01);
+  CheckRetained(loom_runtime_virtual_buffer_handle(third), 0, 0x87654321);
+  iree_hal_pool_query_stats(deferred_backing, &after);
+  EXPECT_EQ(after.reserve_count, before.reserve_count);
+}
+
 }  // namespace
