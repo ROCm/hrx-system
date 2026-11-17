@@ -107,6 +107,12 @@ def _byte_offset_materializer(
                 "i1", descriptor_lookup("x86.scalar.movzx.gpr64.gpr32")
             ),
             SourceMemoryIntegerConversion(
+                "i8", descriptor_lookup("x86.scalar.movsx.i8.gpr64")
+            ),
+            SourceMemoryIntegerConversion(
+                "i16", descriptor_lookup("x86.scalar.movsx.i16.gpr64")
+            ),
+            SourceMemoryIntegerConversion(
                 "i32", descriptor_lookup("x86.scalar.movsxd.gpr64.gpr32")
             ),
         ),

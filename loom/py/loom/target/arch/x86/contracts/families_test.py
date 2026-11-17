@@ -315,6 +315,33 @@ def test_scalar_float_comparisons_cover_types_predicates_and_selects() -> None:
         }
 
 
+def test_address_materializers_cover_canonical_integer_domains() -> None:
+    for fragment in (
+        X86_SCALAR_CONTRACT_FRAGMENT,
+        X86_AVX2_CONTRACT_FRAGMENT,
+        X86_AVX512_CONTRACT_FRAGMENT,
+    ):
+        materializers = tuple(
+            emit.source_memory_byte_offset_materializer
+            for rule in fragment.cases
+            if isinstance(rule, DescriptorRule)
+            for emit in rule.emit
+            if isinstance(emit, EmitDescriptorOp)
+            and emit.source_memory_byte_offset_materializer is not None
+        )
+        assert materializers
+        for materializer in materializers:
+            assert {
+                conversion.source_type: conversion.descriptor.semantic_tag
+                for conversion in materializer.integer_conversions
+            } == {
+                "i1": "integer.extui.i32.i64",
+                "i8": "integer.extsi.i8.i64",
+                "i16": "integer.extsi.i16.i64",
+                "i32": "integer.extsi.i32.i64",
+            }
+
+
 def test_scalar_integer_conversions_cover_native_carrier_matrix() -> None:
     conversion_ops = (
         scalar_conversion.scalar_trunci,

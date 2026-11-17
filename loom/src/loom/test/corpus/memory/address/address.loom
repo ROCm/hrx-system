@@ -99,3 +99,79 @@ check.scenario @address_cast_values {
   }
   check.return
 }
+
+// Address factoring must preserve the signed narrow domain, including after
+// guards prove that arithmetic and unsigned widening preserve its value.
+func.def @narrow_address_arithmetic(%input: buffer, %table: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<256xi32>
+  %lookup = buffer.view %table[%origin] : buffer -> view<65536xi32>
+  %results = buffer.view %output[%origin] : buffer -> view<1024xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 1 : index
+  scf.for %lane = [%begin to %end step %step] {
+    %raw = view.load %inputs[%lane] : view<256xi32> -> i32
+    %byte = scalar.trunci %raw : i32 to i8
+    %spread = scalar.constant 257 : i32
+    %bias = scalar.constant 128 : i32
+    %scaled = scalar.muli %raw, %spread : i32
+    %halfword_bits = scalar.addi %scaled, %bias : i32
+    %halfword = scalar.trunci %halfword_bits : i32 to i16
+    %byte_index = index.cast %byte : i8 to index
+    %halfword_index = index.cast %halfword : i16 to index
+    %byte_bias = index.constant 128 : index
+    %halfword_bias = index.constant 32768 : index
+    %byte_position = index.add %byte_index, %byte_bias : index
+    %halfword_position = index.add %halfword_index, %halfword_bias : index
+    %byte_value = view.load %lookup[%byte_position] : view<65536xi32> -> i32
+    %halfword_value = view.load %lookup[%halfword_position] : view<65536xi32> -> i32
+    %bank = index.constant 256 : index
+    %halfword_lane = index.add %lane, %bank : index
+    %byte_guarded_lane = index.add %halfword_lane, %bank : index
+    %halfword_guarded_lane = index.add %byte_guarded_lane, %bank : index
+    view.store %byte_value, %results[%lane] : i32, view<1024xi32>
+    view.store %halfword_value, %results[%halfword_lane] : i32, view<1024xi32>
+    %byte_sign_boundary = scalar.constant 0 : i8
+    %byte_limit = scalar.constant 64 : i8
+    %byte_nonnegative = scalar.cmpi sge, %byte, %byte_sign_boundary : i8
+    %byte_below_limit = scalar.cmpi slt, %byte, %byte_limit : i8
+    %byte_in_range = scalar.andi %byte_nonnegative, %byte_below_limit : i1
+    scf.if %byte_in_range {
+      %doubled_byte = scalar.addi %byte, %byte : i8
+      %wide_byte = scalar.extui %doubled_byte : i8 to i32
+      %position = index.cast %wide_byte : i32 to index
+      %value = view.load %lookup[%position] : view<65536xi32> -> i32
+      view.store %value, %results[%byte_guarded_lane] : i32, view<1024xi32>
+    } else {
+    }
+    %halfword_sign_boundary = scalar.constant 0 : i16
+    %halfword_limit = scalar.constant 16384 : i16
+    %halfword_nonnegative = scalar.cmpi sge, %halfword, %halfword_sign_boundary : i16
+    %halfword_below_limit = scalar.cmpi slt, %halfword, %halfword_limit : i16
+    %halfword_in_range = scalar.andi %halfword_nonnegative, %halfword_below_limit : i1
+    scf.if %halfword_in_range {
+      %doubled_halfword = scalar.addi %halfword, %halfword : i16
+      %wide_halfword = scalar.extui %doubled_halfword : i16 to i32
+      %position = index.cast %wide_halfword : i32 to index
+      %value = view.load %lookup[%position] : view<65536xi32> -> i32
+      view.store %value, %results[%halfword_guarded_lane] : i32, view<1024xi32>
+    } else {
+    }
+  }
+  func.return
+}
+
+check.scenario @narrow_address_arithmetic_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(1) : tensor<256xi32>
+    %table = check.generate.iota offset(11) step(7) : tensor<65536xi32>
+    %output = check.generate.fill value(-1) : tensor<1024xi32>
+    check.compare<@narrow_address_arithmetic>(%input, %table, %output) : (tensor<256xi32>, tensor<65536xi32>, tensor<1024xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<256xi32>
+      check.expect.bitwise actual(%table) expected(%table) : tensor<65536xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1024xi32>
+    }
+  }
+  check.return
+}
