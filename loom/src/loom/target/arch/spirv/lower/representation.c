@@ -23,6 +23,7 @@ typedef enum loom_spirv_index_boundary_action_e {
   LOOM_SPIRV_INDEX_BOUNDARY_LOOP = 1,
   LOOM_SPIRV_INDEX_BOUNDARY_ARITHMETIC = 2,
   LOOM_SPIRV_INDEX_BOUNDARY_SHIFT = 3,
+  LOOM_SPIRV_INDEX_BOUNDARY_CAST = 4,
 } loom_spirv_index_boundary_action_t;
 
 static bool loom_spirv_is_index(loom_low_lower_context_t* context,
@@ -122,6 +123,24 @@ static void loom_spirv_representation_observe_boundary(
     return;
   }
   const loom_value_id_t* operands = loom_op_const_operands(source_op);
+  if (action == LOOM_SPIRV_INDEX_BOUNDARY_CAST) {
+    const loom_value_id_t result = loom_index_cast_result(source_op);
+    if (loom_spirv_is_index(context, result) &&
+        loom_type_element_type(loom_module_value_type(
+            loom_low_lower_context_module(context), operands[0])) ==
+            LOOM_SCALAR_TYPE_I64 &&
+        !loom_value_facts_fit_signed_bit_count(
+            loom_value_fact_table_lookup(
+                loom_low_lower_context_fact_table(context), operands[0]),
+            32)) {
+      // The fixed-width source resolves an otherwise ambiguous full interval.
+      const loom_low_representation_candidate_t candidate = {
+          .representation = LOOM_SPIRV_INDEX_REPRESENTATION_WIDE};
+      loom_low_lower_representation_record_candidates(recorder, result,
+                                                      &candidate, 1);
+    }
+    return;
+  }
   if (action != LOOM_SPIRV_INDEX_BOUNDARY_LOOP) {
     const loom_value_id_t result = loom_op_const_results(source_op)[0];
     const loom_value_fact_table_t* facts =
@@ -185,7 +204,7 @@ static const loom_low_lower_representation_boundary_t
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
         {LOOM_OP_INDEX_CONSTANT, LOOM_SPIRV_INDEX_BOUNDARY_RESULT,
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
-        {LOOM_OP_INDEX_CAST, LOOM_SPIRV_INDEX_BOUNDARY_RESULT,
+        {LOOM_OP_INDEX_CAST, LOOM_SPIRV_INDEX_BOUNDARY_CAST,
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
         {LOOM_OP_INDEX_ASSUME, LOOM_SPIRV_INDEX_BOUNDARY_RESULT,
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},

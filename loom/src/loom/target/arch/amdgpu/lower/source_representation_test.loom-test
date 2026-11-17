@@ -75,3 +75,23 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @shared_
 ^exit:
   return %next, %winner
 }
+
+// ====
+
+// A fixed i64 source establishes a wide carrier without a range annotation.
+// A bounded i64 source and an unconstrained native index keep native storage.
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @cast_carriers(%wide_input: i64, %bounded_input: i64, %native: index) -> (index, index, index) {
+  %bounded = scalar.assume %bounded_input [range(%bounded_input, -16, 16)] : i64
+  %wide = index.cast %wide_input : i64 to index
+  %narrow = index.cast %bounded : i64 to index
+  func.return %wide, %narrow, %native : index, index, index
+}
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @cast_carriers(%wide: reg<amdgpu.vgpr x2>, %bounded: reg<amdgpu.vgpr x2>, %native: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %narrow = slice %bounded[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  return %wide, %narrow, %native
+}

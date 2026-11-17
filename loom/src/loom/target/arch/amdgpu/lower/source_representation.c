@@ -39,6 +39,7 @@ typedef enum loom_amdgpu_matrix_representation_action_e {
   LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_FRAGMENT = 3,
   LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_SELECT = 4,
   LOOM_AMDGPU_SOURCE_REPRESENTATION_ACTION_LOOP = 11,
+  LOOM_AMDGPU_SOURCE_REPRESENTATION_ACTION_ADDRESS_CAST = 12,
 } loom_amdgpu_matrix_representation_action_t;
 static_assert(
     (uint8_t)LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_FLEXIBLE_RESULT >
@@ -237,6 +238,33 @@ static void loom_amdgpu_address_representation_observe_loop(
   };
   loom_low_lower_representation_record_candidates(recorder, body->arg_ids[0],
                                                   &candidate, 1);
+}
+
+static void loom_amdgpu_address_representation_observe_cast(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_representation_recorder_t* recorder) {
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  const loom_value_id_t input = loom_index_cast_input(source_op);
+  const loom_value_id_t result = loom_index_cast_result(source_op);
+  if (loom_type_element_type(loom_module_value_type(module, input)) !=
+          LOOM_SCALAR_TYPE_I64 ||
+      loom_type_element_type(loom_module_value_type(module, result)) !=
+          LOOM_SCALAR_TYPE_INDEX) {
+    return;
+  }
+  const loom_value_facts_t facts = loom_value_fact_table_lookup(
+      loom_low_lower_context_fact_table(context), input);
+  if (loom_value_facts_fit_signed_bit_count(facts, 32) ||
+      loom_value_facts_fit_unsigned_bit_count(facts, 32)) {
+    return;
+  }
+  // An explicit wide payload establishes its width even when the full signed
+  // interval is indistinguishable from an unknown native index parameter.
+  const loom_low_representation_candidate_t candidate = {
+      .representation = LOOM_AMDGPU_ADDRESS_REPRESENTATION_WIDE,
+  };
+  loom_low_lower_representation_record_candidates(recorder, result, &candidate,
+                                                  1);
 }
 
 static bool loom_amdgpu_address_representation_relation_is_exact(
@@ -587,6 +615,13 @@ static void loom_amdgpu_source_representation_observe_boundary(
     return;
   }
   switch ((loom_amdgpu_matrix_representation_action_t)action) {
+    case LOOM_AMDGPU_SOURCE_REPRESENTATION_ACTION_ADDRESS_CAST:
+      loom_amdgpu_address_representation_observe_cast(context, source_op,
+                                                      recorder);
+      loom_amdgpu_source_integer_representation_observe_boundary(
+          LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_SIGN_EXTENDED_RESULT,
+          context, source_op, recorder);
+      return;
     case LOOM_AMDGPU_SOURCE_REPRESENTATION_ACTION_LOOP:
       loom_amdgpu_address_representation_observe_loop(context, source_op,
                                                       recorder);
@@ -766,7 +801,7 @@ static const loom_low_lower_representation_boundary_t
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_OPERANDS |
              LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
         {LOOM_OP_INDEX_CAST,
-         LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_SIGN_EXTENDED_RESULT,
+         LOOM_AMDGPU_SOURCE_REPRESENTATION_ACTION_ADDRESS_CAST,
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
         {LOOM_OP_KERNEL_SUBGROUP_SHUFFLE,
          LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_TRANSPORT_PAYLOAD,

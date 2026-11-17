@@ -214,9 +214,8 @@ func.def @wide_position_observations(%positions: buffer, %first: buffer, %second
   %inputs = buffer.view %positions[%origin] : buffer -> view<2xi64>
   %left_word = view.load %inputs[0] : view<2xi64> -> i64
   %right_word = view.load %inputs[1] : view<2xi64> -> i64
-  %left_unsigned = scalar.assume %left_word [range(%left_word, 0, 9223372036854775807)] : i64
   %right_unsigned = scalar.assume %right_word [range(%right_word, 0, 9223372036854775807)] : i64
-  %left = index.cast %left_unsigned : i64 to index
+  %left = index.cast %left_word : i64 to index
   %right = index.cast %right_unsigned : i64 to offset
   %c1 = scalar.constant 1 : i64
   %c0 = scalar.constant 0 : i64

@@ -331,30 +331,20 @@ func.def target(@target) @int64_operation_requires_target_feature(%lhs: i64, %rh
 }
 
 // ====
-
-spirv.target<vulkan1_3> @target {contract_feature_bits = 4}
-
-func.def target(@target) @i64_to_index_requires_s32_proof(%input: i64) -> (index) {
-  // ERROR@+1: SPIRV/026 {source_type="i64", result_type="index", required_range_lo="-2147483648", required_range_hi="2147483647", constraint_key="index_cast.s32_exact"}
-  %result = index.cast %input : i64 to index
-  func.return %result : index
-}
-
-// ====
 // RUN: emit source-low output=low control-flow=structured-low
 
-spirv.target<vulkan1_3> @target {contract_feature_bits = 4}
+spirv.target<vulkan1_3> @target
 
-func.def target(@target) @structured_join_preserves_producer_diagnostic(%condition: i1, %input: i64) -> (index) {
-  %joined = scf.if %condition -> (index) {
-    // ERROR@+1: SPIRV/026 {source_type="i64", result_type="index", required_range_lo="-2147483648", required_range_hi="2147483647", constraint_key="index_cast.s32_exact"}
-    %converted = index.cast %input : i64 to index
-    scf.yield %converted : index
+func.def target(@target) @structured_join_preserves_producer_diagnostic(%condition: i1, %input: i64) -> (offset) {
+  %joined = scf.if %condition -> (offset) {
+    // ERROR@+1: TARGET/005 {op_name="index.cast", subject_role="operand", subject_name="input", constraint_key="index_cast.offset_non_negative", minimum="0", maximum="9223372036854775807"}
+    %converted = index.cast %input : i64 to offset
+    scf.yield %converted : offset
   } else {
-    %fallback = index.constant 0 : index
-    scf.yield %fallback : index
+    %fallback = index.constant 0 : offset
+    scf.yield %fallback : offset
   }
-  func.return %joined : index
+  func.return %joined : offset
 }
 
 // ====

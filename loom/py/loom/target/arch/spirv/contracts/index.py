@@ -325,14 +325,7 @@ def _signed_payload_index_cast_rules(
             if width == 64:
                 rules.extend(
                     (
-                        replace(
-                            _cast_alias_rule(payload_type, _INDEX),
-                            guards=(
-                                Guard.value_type("input", payload_type),
-                                Guard.value_type("result", _INDEX),
-                                Guard.value_i64_range("input", _S32_MIN, (1 << 63) - 1),
-                            ),
-                        ),
+                        _cast_alias_rule(payload_type, _INDEX),
                         _cast_alias_rule(_INDEX, payload_type),
                     )
                 )

@@ -230,3 +230,23 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @widen_
   %result = low.func.call @wide_coordinate(%7) : (reg<spirv.id : i64>) -> (reg<spirv.id : i64>)
   return %result
 }
+
+// ====
+
+// A fixed i64 source establishes a wide carrier without a range annotation.
+// A bounded i64 source and an unconstrained native index keep native storage.
+spirv.target<vulkan1_3> @target
+
+func.def target(@target) @cast_carriers(%wide_input: i64, %bounded_input: i64, %native: index) -> (index, index, index) {
+  %bounded = scalar.assume %bounded_input [range(%bounded_input, -16, 16)] : i64
+  %wide = index.cast %wide_input : i64 to index
+  %narrow = index.cast %bounded : i64 to index
+  func.return %wide, %narrow, %native : index, index, index
+}
+// ----
+spirv.target<vulkan1_3> @target
+
+low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @cast_carriers(%wide: reg<spirv.id : i64>, %bounded: reg<spirv.id : i64>, %native: reg<spirv.id : index>) -> (reg<spirv.id : i64>, reg<spirv.id : index>, reg<spirv.id : index>) asm {
+  %narrow = OpSConvert.i64.i32 %bounded : reg<spirv.id : index>
+  return %wide, %narrow, %native
+}
