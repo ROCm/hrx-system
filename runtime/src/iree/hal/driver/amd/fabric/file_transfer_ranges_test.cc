@@ -163,11 +163,12 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
     EXPECT_EQ(range.access_ordinal, 0u);
     EXPECT_EQ(range.region, nullptr);
     EXPECT_EQ(range.effects.bits, 0u);
-    transfer.async.request.offset = 0;
+    transfer.async.request.file_offset = transfer.file_offset;
     if (host && !direct) {
       IREE_ASSERT_OK(
           iree_hal_amd_fabric_file_transfer_prepare_range(&transfer, &range));
-      EXPECT_EQ(transfer.async.request.span.length, end - start);
+      EXPECT_EQ(iree_hal_file_request_span(&transfer.async.request).length,
+                end - start);
     }
     // Resolution and request preparation neither copy nor mutate payloads.
     for (uint64_t j = 0; j < 2 * kUnit; ++j) {
@@ -302,7 +303,7 @@ TEST_F(MemoryBackendTest, ExplicitSourcesPreserveIoCoordinatesAcrossLayouts) {
             // range.
             iree_status_t status = iree_ok_status();
           } completion;
-          IREE_ASSERT_OK(iree_hal_amd_fabric_file_request_submit(
+          IREE_ASSERT_OK(iree_hal_file_request_submit(
               &transfer.async.request,
               {+[](void* user_data, iree_status_t status) {
                  auto* completion = static_cast<Completion*>(user_data);

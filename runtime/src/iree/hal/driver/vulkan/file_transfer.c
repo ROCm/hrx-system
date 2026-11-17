@@ -6,8 +6,7 @@
 
 #include "iree/hal/driver/vulkan/file_transfer.h"
 
-#include "iree/async/operations/file.h"
-#include "iree/async/proactor.h"
+#include "iree/hal/utils/file_request.h"
 
 // Request records, not payload slots. Each continuation advances by one stripe
 // in the caller's final backing; no staging resource or copy submission exists.
@@ -21,15 +20,8 @@ typedef struct iree_hal_vulkan_file_transfer_lane_t {
   iree_hal_vulkan_file_transfer_t* transfer;
   // Start of this lane's current chunk in the prepared buffer span.
   iree_host_size_t offset;
-  // Bytes completed within the current chunk.
-  iree_host_size_t progress;
-  // Native operation storage reused only after terminal completion.
-  union {
-    // File-to-buffer request.
-    iree_async_file_read_operation_t read;
-    // Buffer-to-file request.
-    iree_async_file_write_operation_t write;
-  } operation;
+  // Placed exact-range request, reused after its terminal completion.
+  iree_hal_file_request_t request;
 } iree_hal_vulkan_file_transfer_lane_t;
 
 struct iree_hal_vulkan_file_transfer_t {
@@ -140,36 +132,16 @@ static void iree_hal_vulkan_file_transfer_lane_finish(
 static iree_status_t iree_hal_vulkan_file_transfer_issue(
     iree_hal_vulkan_file_transfer_lane_t* lane);
 
-static void iree_hal_vulkan_file_transfer_complete(
-    void* user_data, iree_async_operation_t* operation, iree_status_t status,
-    iree_async_completion_flags_t flags) {
-  (void)operation;
-  (void)flags;
+static void iree_hal_vulkan_file_transfer_complete(void* user_data,
+                                                   iree_status_t status) {
   iree_hal_vulkan_file_transfer_lane_t* lane = user_data;
   iree_hal_vulkan_file_transfer_t* transfer = lane->transfer;
   if (iree_status_is_ok(status)) {
-    const iree_host_size_t count =
-        transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ
-            ? lane->operation.read.bytes_read
-            : lane->operation.write.bytes_written;
-    lane->progress += count;
-    if (count == 0) {
-      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                                "native file transfer stopped before its "
-                                "requested range completed");
-    } else {
-      const iree_host_size_t chunk_length =
-          iree_min(transfer->chunk_size,
-                   transfer->span.contents.data_length - lane->offset);
-      if (lane->progress == chunk_length) {
-        lane->offset += transfer->lane_count * transfer->chunk_size;
-        lane->progress = 0;
-      }
-      if (lane->offset < transfer->span.contents.data_length) {
-        status = iree_hal_vulkan_file_transfer_issue(lane);
-        if (iree_status_is_ok(status)) {
-          return;
-        }
+    lane->offset += transfer->lane_count * transfer->chunk_size;
+    if (lane->offset < transfer->span.contents.data_length) {
+      status = iree_hal_vulkan_file_transfer_issue(lane);
+      if (iree_status_is_ok(status)) {
+        return;
       }
     }
   }
@@ -179,43 +151,17 @@ static void iree_hal_vulkan_file_transfer_complete(
 static iree_status_t iree_hal_vulkan_file_transfer_issue(
     iree_hal_vulkan_file_transfer_lane_t* lane) {
   iree_hal_vulkan_file_transfer_t* transfer = lane->transfer;
-  const bool reading = transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ;
-  const iree_host_size_t offset = lane->offset + lane->progress;
-  const iree_host_size_t chunk_length = iree_min(
+  const iree_host_size_t length = iree_min(
       transfer->chunk_size, transfer->span.contents.data_length - lane->offset);
-  const iree_async_file_requirements_t* requirements =
-      iree_hal_file_requirements(transfer->file);
-  iree_host_size_t length = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_file_prepare_transfer(
-      reading ? &requirements->read : &requirements->write,
-      transfer->file_offset + offset, transfer->span.contents.data + offset,
-      chunk_length - lane->progress, transfer->chunk_size, &length));
-  iree_async_file_t* file = iree_hal_file_async_handle(transfer->file);
-  iree_async_operation_t* operation = NULL;
-  if (reading) {
-    iree_async_file_read_operation_t* read = &lane->operation.read;
-    iree_async_operation_zero(&read->base, sizeof(*read));
-    read->file = file;
-    read->offset = transfer->file_offset + offset;
-    read->buffer =
-        iree_async_span_from_ptr(transfer->span.contents.data + offset, length);
-    operation = &read->base;
-  } else {
-    iree_async_file_write_operation_t* write = &lane->operation.write;
-    iree_async_operation_zero(&write->base, sizeof(*write));
-    write->file = file;
-    write->offset = transfer->file_offset + offset;
-    write->buffer =
-        iree_async_span_from_ptr(transfer->span.contents.data + offset, length);
-    operation = &write->base;
-  }
-  iree_async_operation_initialize(operation,
-                                  reading
-                                      ? IREE_ASYNC_OPERATION_TYPE_FILE_READ
-                                      : IREE_ASYNC_OPERATION_TYPE_FILE_WRITE,
-                                  IREE_ASYNC_OPERATION_FLAG_NONE,
-                                  iree_hal_vulkan_file_transfer_complete, lane);
-  return iree_async_proactor_submit_one(file->proactor, operation);
+  IREE_RETURN_IF_ERROR(iree_hal_file_request_prepare(
+      transfer->file, transfer->file_access,
+      transfer->file_offset + lane->offset, length,
+      iree_async_span_from_ptr(transfer->span.contents.data + lane->offset,
+                               length),
+      &lane->request));
+  return iree_hal_file_request_submit(
+      &lane->request, (iree_hal_file_transfer_callback_t){
+                          iree_hal_vulkan_file_transfer_complete, lane});
 }
 
 static void iree_hal_vulkan_file_transfer_start(

@@ -824,9 +824,9 @@ static void iree_hal_amd_xdna_host_worker_complete(
         &operation->continuation, IREE_ASYNC_OPERATION_TYPE_NOP,
         IREE_ASYNC_OPERATION_FLAG_NONE, iree_hal_amd_xdna_queue_file_complete,
         operation);
-    operation->status = iree_hal_amd_fabric_file_request_submit(
+    operation->status = iree_hal_file_request_submit(
         &operation->file.transfer->async.request,
-        (iree_hal_amd_fabric_file_transfer_callback_t){
+        (iree_hal_file_transfer_callback_t){
             .fn = iree_hal_amd_xdna_operation_resume,
             .user_data = operation,
         });

@@ -28,6 +28,7 @@
 #include "iree/hal/driver/task/executable/executable.h"
 #include "iree/hal/driver/task/queue/memory_barrier.h"
 #include "iree/hal/driver/task/transient_buffer.h"
+#include "iree/hal/utils/file_request.h"
 #include "iree/hal/utils/resource_set.h"
 
 #if !defined(NDEBUG)
@@ -2518,74 +2519,33 @@ static void iree_hal_task_queue_compute_process_release(
 // File I/O (proactor-based async read/write)
 //===----------------------------------------------------------------------===//
 
-// Context for an in-flight file read or write operation. Arena-allocated from
-// the queue operation's arena and valid until the proactor completion callback
-// fires. The operation retains the buffer object; explicit backing retirement
-// is ordered after completion by the caller. Completing/destroying the
-// operation frees the arena (and this context with it).
+// Arena-owned request storage lives through all accepted native I/O. The queue
+// operation retains the file and buffer and owns final cache publication.
 typedef struct iree_hal_task_queue_io_context_t {
-  // Owning queue operation and buffer references.
+  // Enclosing operation whose arena owns this placed request.
   iree_hal_task_queue_op_t* operation;
-  // Borrowed progress owner of the native file.
-  iree_async_proactor_t* proactor;
-  // Total bytes transferred across all resubmissions (the operation's
-  // bytes_read/bytes_written field is per-submission).
-  iree_host_size_t total_bytes_transferred;
-  // Original requested length (for short read detection at completion).
-  iree_host_size_t requested_length;
-  union {
-    // Native read operation, reused for partial completions.
-    iree_async_file_read_operation_t read_op;
-    // Native write operation, reused for partial completions.
-    iree_async_file_write_operation_t write_op;
-  };
+  // Independent progress within the current bounded native chunk.
+  iree_hal_file_request_t request;
 } iree_hal_task_queue_io_context_t;
 
-static void iree_hal_task_queue_io_read_completion(
-    void* user_data, iree_async_operation_t* base_op, iree_status_t status,
-    iree_async_completion_flags_t flags);
-static void iree_hal_task_queue_io_write_completion(
-    void* user_data, iree_async_operation_t* base_op, iree_status_t status,
-    iree_async_completion_flags_t flags);
+static void iree_hal_task_queue_io_completion(void* user_data,
+                                              iree_status_t status);
 
-static iree_status_t iree_hal_task_queue_io_submit_read(
-    iree_hal_task_queue_io_context_t* context, uint64_t offset, void* buffer) {
-  iree_host_size_t length = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_file_prepare_transfer(
-      &iree_hal_file_requirements(context->operation->read.hal_file)->read,
-      offset, buffer,
-      context->requested_length - context->total_bytes_transferred,
-      UINT32_C(1) << 30, &length));
-  iree_async_operation_zero(&context->read_op.base, sizeof(context->read_op));
-  iree_async_operation_initialize(
-      &context->read_op.base, IREE_ASYNC_OPERATION_TYPE_FILE_READ,
-      IREE_ASYNC_OPERATION_FLAG_NONE, iree_hal_task_queue_io_read_completion,
-      context);
-  context->read_op.file = context->operation->read.async_file;
-  context->read_op.offset = offset;
-  context->read_op.buffer = iree_async_span_from_ptr(buffer, length);
-  return iree_async_proactor_submit_one(context->proactor,
-                                        &context->read_op.base);
-}
-
-static iree_status_t iree_hal_task_queue_io_submit_write(
-    iree_hal_task_queue_io_context_t* context, uint64_t offset, void* buffer) {
-  iree_host_size_t length = 0;
-  IREE_RETURN_IF_ERROR(iree_hal_file_prepare_transfer(
-      &iree_hal_file_requirements(context->operation->write.hal_file)->write,
-      offset, buffer,
-      context->requested_length - context->total_bytes_transferred,
-      UINT32_C(1) << 30, &length));
-  iree_async_operation_zero(&context->write_op.base, sizeof(context->write_op));
-  iree_async_operation_initialize(
-      &context->write_op.base, IREE_ASYNC_OPERATION_TYPE_FILE_WRITE,
-      IREE_ASYNC_OPERATION_FLAG_NONE, iree_hal_task_queue_io_write_completion,
-      context);
-  context->write_op.file = context->operation->write.async_file;
-  context->write_op.offset = offset;
-  context->write_op.buffer = iree_async_span_from_ptr(buffer, length);
-  return iree_async_proactor_submit_one(context->proactor,
-                                        &context->write_op.base);
+static iree_status_t iree_hal_task_queue_io_submit(
+    iree_hal_task_queue_io_context_t* context, uint64_t offset,
+    iree_byte_span_t span) {
+  iree_hal_task_queue_op_t* operation = context->operation;
+  const bool reading = operation->type == IREE_HAL_TASK_QUEUE_OP_READ;
+  IREE_RETURN_IF_ERROR(iree_hal_file_request_prepare(
+      reading ? operation->read.hal_file : operation->write.hal_file,
+      reading ? IREE_HAL_MEMORY_ACCESS_READ : IREE_HAL_MEMORY_ACCESS_WRITE,
+      offset, span.data_length,
+      iree_async_span_from_ptr(span.data,
+                               iree_min(span.data_length, UINT32_C(1) << 30)),
+      &context->request));
+  return iree_hal_file_request_submit(
+      &context->request, (iree_hal_file_transfer_callback_t){
+                             iree_hal_task_queue_io_completion, context});
 }
 
 // A native completion runs on the proactor. Cache API calls belong to the
@@ -2600,80 +2560,30 @@ static void iree_hal_task_queue_io_complete(
   }
 }
 
-// Proactor completion callback for file read operations. Handles partial
-// reads by advancing the buffer/offset and resubmitting until the full
-// requested length is transferred (or EOF/error).
-static void iree_hal_task_queue_io_read_completion(
-    void* user_data, iree_async_operation_t* base_op, iree_status_t status,
-    iree_async_completion_flags_t flags) {
-  iree_hal_task_queue_io_context_t* io_context =
-      (iree_hal_task_queue_io_context_t*)user_data;
-  iree_hal_task_queue_op_t* operation = io_context->operation;
-
-  // Accumulate bytes from this submission and check for partial reads.
-  if (iree_status_is_ok(status) && io_context->read_op.bytes_read > 0) {
-    iree_host_size_t bytes_read = io_context->read_op.bytes_read;
-    io_context->total_bytes_transferred += bytes_read;
-
-    // If we haven't read the full amount, advance and resubmit.
-    if (io_context->total_bytes_transferred < io_context->requested_length) {
-      status = iree_hal_task_queue_io_submit_read(
-          io_context, io_context->read_op.offset + bytes_read,
-          (uint8_t*)iree_async_span_ptr(io_context->read_op.buffer) +
-              bytes_read);
-      if (iree_status_is_ok(status)) {
-        return;
-      }
-    }
-  } else if (iree_status_is_ok(status) && io_context->total_bytes_transferred <
-                                              io_context->requested_length) {
-    // bytes_read == 0 but we haven't reached the requested length: EOF.
-    status = iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "short read: requested %" PRIhsz " bytes, got %" PRIhsz,
-        io_context->requested_length, io_context->total_bytes_transferred);
-  }
-
-  // Complete or fail the operation. This frees the arena (and io_context).
+static void iree_hal_task_queue_io_completion(void* user_data,
+                                              iree_status_t status) {
+  iree_hal_task_queue_io_context_t* context = user_data;
+  iree_hal_task_queue_op_t* operation = context->operation;
   if (iree_status_is_ok(status)) {
-    iree_hal_task_queue_io_complete(operation);
-  } else {
-    iree_hal_task_queue_op_fail(operation, status);
-  }
-}
-
-// Proactor completion callback for file write operations.
-static void iree_hal_task_queue_io_write_completion(
-    void* user_data, iree_async_operation_t* base_op, iree_status_t status,
-    iree_async_completion_flags_t flags) {
-  iree_hal_task_queue_io_context_t* io_context =
-      (iree_hal_task_queue_io_context_t*)user_data;
-  iree_hal_task_queue_op_t* operation = io_context->operation;
-
-  // Accumulate bytes from this submission and check for partial writes.
-  if (iree_status_is_ok(status) && io_context->write_op.bytes_written > 0) {
-    iree_host_size_t bytes_written = io_context->write_op.bytes_written;
-    io_context->total_bytes_transferred += bytes_written;
-
-    // If we haven't written the full amount, advance and resubmit.
-    if (io_context->total_bytes_transferred < io_context->requested_length) {
-      status = iree_hal_task_queue_io_submit_write(
-          io_context, io_context->write_op.offset + bytes_written,
-          (uint8_t*)iree_async_span_ptr(io_context->write_op.buffer) +
-              bytes_written);
+    const bool reading = operation->type == IREE_HAL_TASK_QUEUE_OP_READ;
+    const uint64_t end =
+        context->request.file_offset + context->request.bytes_transferred;
+    const uint64_t file_offset =
+        reading ? operation->read.file_offset : operation->write.file_offset;
+    const iree_host_size_t length =
+        reading ? operation->read.length : operation->write.length;
+    const iree_host_size_t remaining = length - (end - file_offset);
+    if (remaining) {
+      uint8_t* next = (uint8_t*)iree_async_span_ptr(
+                          iree_hal_file_request_span(&context->request)) +
+                      context->request.bytes_transferred;
+      status = iree_hal_task_queue_io_submit(
+          context, end, iree_make_byte_span(next, remaining));
       if (iree_status_is_ok(status)) {
         return;
       }
     }
-  } else if (iree_status_is_ok(status) && io_context->total_bytes_transferred <
-                                              io_context->requested_length) {
-    status = iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "short write: requested %" PRIhsz " bytes, wrote %" PRIhsz,
-        io_context->requested_length, io_context->total_bytes_transferred);
   }
-
-  // Complete or fail the operation. This frees the arena (and io_context).
   if (iree_status_is_ok(status)) {
     iree_hal_task_queue_io_complete(operation);
   } else {
@@ -2716,18 +2626,15 @@ static iree_status_t iree_hal_task_queue_drain_read(
   iree_hal_task_queue_io_context_t* io_context = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(
       &operation->arena, sizeof(*io_context), (void**)&io_context));
-  memset(io_context, 0, sizeof(*io_context));
   io_context->operation = operation;
-  io_context->proactor = operation->read.async_file->proactor;
-  io_context->requested_length = (iree_host_size_t)operation->read.length;
 
   iree_byte_span_t span;
   IREE_RETURN_IF_ERROR(iree_hal_buffer_native_host_span(
       operation->read.buffer, operation->read.buffer_offset,
       operation->read.length, &span));
 
-  return iree_hal_task_queue_io_submit_read(
-      io_context, operation->read.file_offset, span.data);
+  return iree_hal_task_queue_io_submit(io_context, operation->read.file_offset,
+                                       span);
 }
 
 // Synchronous fallback for WRITE when no async file handle is available.
@@ -2763,18 +2670,15 @@ static iree_status_t iree_hal_task_queue_drain_write(
   iree_hal_task_queue_io_context_t* io_context = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(
       &operation->arena, sizeof(*io_context), (void**)&io_context));
-  memset(io_context, 0, sizeof(*io_context));
   io_context->operation = operation;
-  io_context->proactor = operation->write.async_file->proactor;
-  io_context->requested_length = (iree_host_size_t)operation->write.length;
 
   iree_byte_span_t span;
   IREE_RETURN_IF_ERROR(iree_hal_buffer_native_host_span(
       operation->write.buffer, operation->write.buffer_offset,
       operation->write.length, &span));
 
-  return iree_hal_task_queue_io_submit_write(
-      io_context, operation->write.file_offset, span.data);
+  return iree_hal_task_queue_io_submit(io_context, operation->write.file_offset,
+                                       span);
 }
 
 //===----------------------------------------------------------------------===//

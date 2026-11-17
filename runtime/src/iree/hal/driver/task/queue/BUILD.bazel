@@ -43,6 +43,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/driver/task/command:block_command_ops",
         "//runtime/src/iree/hal/driver/task/command:block_processor",
         "//runtime/src/iree/hal/driver/task/executable",
+        "//runtime/src/iree/hal/utils:file_request",
         "//runtime/src/iree/hal/utils:files",
         "//runtime/src/iree/hal/utils:resource_set",
         "//runtime/src/iree/task",
