@@ -174,12 +174,12 @@ void ContiguousCopy(benchmark::State& state, CopyStorage storage) {
   const auto blocking_copy = runtime.Resolve<decltype(&hipMemcpy)>("hipMemcpy");
   const auto allocate = runtime.Resolve<decltype(&hipMalloc)>("hipMalloc");
   const auto release = runtime.Resolve<decltype(&hipFree)>("hipFree");
-  constexpr size_t kLength = 512;
-  constexpr size_t kCopyLength = 256;
+  const size_t copy_length = state.range(2);
+  const size_t length = std::max(size_t{512}, copy_length + 32);
   constexpr size_t kSourceOffset = 7;
   constexpr size_t kTargetOffset = 11;
-  std::vector<uint8_t> source(kLength);
-  std::vector<uint8_t> target(kLength, kPadding);
+  std::vector<uint8_t> source(length);
+  std::vector<uint8_t> target(length, kPadding);
   for (size_t i = 0; i < source.size(); ++i) {
     source[i] = static_cast<uint8_t>(i * 13 + i / 32);
   }
@@ -195,23 +195,23 @@ void ContiguousCopy(benchmark::State& state, CopyStorage storage) {
   if (storage == CopyStorage::kRegisteredUpload ||
       storage == CopyStorage::kRegisteredDownload) {
     Check(runtime.Resolve<decltype(&hipHostAlloc)>("hipHostMalloc")(
-        &registered, kLength, hipHostMallocDefault));
+        &registered, length, hipHostMallocDefault));
     if (storage == CopyStorage::kRegisteredUpload) {
       source_base = registered;
-      std::memcpy(source_base, source.data(), kLength);
+      std::memcpy(source_base, source.data(), length);
     } else {
       target_base = registered;
-      std::memcpy(target_base, target.data(), kLength);
+      std::memcpy(target_base, target.data(), length);
     }
   }
   if (device_source) {
-    Check(allocate(&source_base, kLength));
-    Check(blocking_copy(source_base, source.data(), kLength,
+    Check(allocate(&source_base, length));
+    Check(blocking_copy(source_base, source.data(), length,
                         hipMemcpyHostToDevice));
   }
   if (device_target) {
-    Check(allocate(&target_base, kLength));
-    Check(blocking_copy(target_base, target.data(), kLength,
+    Check(allocate(&target_base, length));
+    Check(blocking_copy(target_base, target.data(), length,
                         hipMemcpyHostToDevice));
   }
   const hipMemcpyKind explicit_kind =
@@ -223,7 +223,7 @@ void ContiguousCopy(benchmark::State& state, CopyStorage storage) {
     for (int64_t i = 0; i < state.range(0); ++i) {
       Check(copy(static_cast<uint8_t*>(target_base) + kTargetOffset,
                  static_cast<uint8_t*>(source_base) + kSourceOffset,
-                 kCopyLength, kind, runtime.stream()));
+                 copy_length, kind, runtime.stream()));
     }
   };
   enqueue();
@@ -239,14 +239,14 @@ void ContiguousCopy(benchmark::State& state, CopyStorage storage) {
     }
   }
   if (device_target) {
-    Check(blocking_copy(target.data(), target_base, kLength,
+    Check(blocking_copy(target.data(), target_base, length,
                         hipMemcpyDeviceToHost));
   } else if (registered) {
-    std::memcpy(target.data(), target_base, kLength);
+    std::memcpy(target.data(), target_base, length);
   }
   for (size_t i = 0; i < target.size(); ++i) {
     const uint8_t expected =
-        i >= kTargetOffset && i < kTargetOffset + kCopyLength
+        i >= kTargetOffset && i < kTargetOffset + copy_length
             ? source[i - kTargetOffset + kSourceOffset]
             : kPadding;
     Require(target[i] == expected,
@@ -263,15 +263,16 @@ void ContiguousCopy(benchmark::State& state, CopyStorage storage) {
   }
   state.SetLabel(runtime.label());
   state.SetItemsProcessed(state.iterations() * state.range(0));
-  state.SetBytesProcessed(state.iterations() * state.range(0) * kCopyLength);
+  state.SetBytesProcessed(state.iterations() * state.range(0) * copy_length);
 }
 
-#define CONTIGUOUS_CASE(storage, complete, name)             \
-  BENCHMARK_CAPTURE(ContiguousCopy<complete>, storage##name, \
-                    CopyStorage::k##storage)                 \
-      ->Name("HIP/Contiguous/" #storage "/" #name)           \
-      ->ArgNames({"copies", "default_kind"})                 \
-      ->ArgsProduct({{1, 32}, {0, 1}})                       \
+#define CONTIGUOUS_CASE(storage, complete, name)                      \
+  BENCHMARK_CAPTURE(ContiguousCopy<complete>, storage##name,          \
+                    CopyStorage::k##storage)                          \
+      ->Name("HIP/Contiguous/" #storage "/" #name)                    \
+      ->ArgNames({"copies", "default_kind", "bytes"})                 \
+      ->ArgsProduct(                                                  \
+          {{1, 32}, {0, 1}, {4, 16, 64, 256, 4096, 262144, 1048576}}) \
       ->UseRealTime()
 #define CONTIGUOUS_STORAGE(storage)        \
   CONTIGUOUS_CASE(storage, false, Submit); \

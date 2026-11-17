@@ -53,25 +53,29 @@ TEST(TransferTest, ProgramPromotionRequiresAnExecutingFamily) {
             },
     };
   }
-  iree_hal_amd_gpu_transfer_layout_t capture_layout;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_transfer_measure(
-      operations.size(), operations.data(), &capture_layout));
-  std::vector<uint64_t> storage((capture_layout.byte_length + 7) / 8);
-  for (const bool dispatch : {false, true}) {
-    iree_hal_queue_family_spec_t spec = {};
-    spec.role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
-                      (dispatch ? IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH : 0);
-    const iree_hal_queue_family_t family = {
-        .spec = &spec,
-        .memory = {.domain = &layout, .queue_scope_id = 1},
-    };
-    iree_hal_amd_gpu_transfer_t transfer;
-    iree_status_t status = iree_hal_amd_gpu_transfer_initialize(
-        &family, IREE_HAL_MEMORY_SITE_QUEUE, {}, operations.size(),
-        operations.data(), capture_layout, storage.data(), &transfer);
-    IREE_EXPECT_OK(status);
-    EXPECT_EQ(transfer.program_accessible, dispatch);
-    iree_hal_amd_gpu_transfer_deinitialize(&transfer);
+  for (iree_host_size_t count : {1u, 2u}) {
+    SCOPED_TRACE(count);
+    iree_hal_amd_gpu_transfer_layout_t capture_layout;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_transfer_measure(count, operations.data(),
+                                                     &capture_layout));
+    std::vector<uint64_t> storage((capture_layout.byte_length + 7) / 8);
+    for (const bool dispatch : {false, true}) {
+      iree_hal_queue_family_spec_t spec = {};
+      spec.role_flags =
+          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER |
+          (dispatch ? IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH : 0);
+      const iree_hal_queue_family_t family = {
+          .spec = &spec,
+          .memory = {.domain = &layout, .queue_scope_id = 1},
+      };
+      iree_hal_amd_gpu_transfer_t transfer;
+      iree_status_t status = iree_hal_amd_gpu_transfer_initialize(
+          &family, IREE_HAL_MEMORY_SITE_QUEUE, {}, count, operations.data(),
+          capture_layout, storage.data(), &transfer);
+      IREE_EXPECT_OK(status);
+      EXPECT_EQ(transfer.program_accessible, dispatch);
+      iree_hal_amd_gpu_transfer_deinitialize(&transfer);
+    }
   }
   EXPECT_EQ(iree_atomic_ref_count_load(&buffer.resource.ref_count), 1);
   iree_hal_buffer_release(&buffer);

@@ -148,10 +148,8 @@ iree_status_t iree_hal_amd_gpu_transfer_initialize(
     iree_hal_amd_gpu_transfer_t* out_transfer) {
   *out_transfer = (iree_hal_amd_gpu_transfer_t){
       .operations = storage,
-      .program_accessible =
-          layout.count > 1 &&
-          iree_any_bit_set(family->spec->role_flags,
-                           IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH),
+      .program_accessible = iree_any_bit_set(
+          family->spec->role_flags, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH),
   };
   uint8_t* bytes = (uint8_t*)(out_transfer->operations + layout.count);
   iree_status_t status = iree_ok_status();

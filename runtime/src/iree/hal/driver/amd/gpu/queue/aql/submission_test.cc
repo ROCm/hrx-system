@@ -548,7 +548,14 @@ TEST(AqlTransferSubmissionTest, RejectedSuffixWaitsForAcceptedHostWrites) {
       &buffer.base);
   // The native binding belongs to the dependency, not the capture under test.
   // Address commitment is deliberately deferred until native publication.
-  const iree_hal_queue_family_t family = {.memory = {.queue_scope_id = 1}};
+  const iree_hal_queue_family_spec_t spec = {
+      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
+  };
+  const iree_hal_queue_family_t family = {
+      .spec = &spec,
+      .memory = {.queue_scope_id = 1},
+  };
   std::array<iree_hal_memory_scope_access_t, 3> scopes = {};
   scopes[2].bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS] = 0;
   iree_hal_memory_contract_t contract = {.scopes = scopes.data()};
