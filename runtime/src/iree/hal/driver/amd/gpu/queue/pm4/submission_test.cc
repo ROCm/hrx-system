@@ -1037,15 +1037,15 @@ TEST_P(SubmissionTest, CopyBatchesCaptureProgramCompatibilityAndKeepOwnership) {
             },
         };
         for (size_t count : {size_t{1}, size_t{2}}) {
+          SCOPED_TRACE(count);
           iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
           IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_transfer(
-              &pool_, GetParam(), &family, {}, {}, count, operations, &profile_,
-              nullptr, {}, &capture));
+              &pool_, GetParam(), &family, {}, {}, count,
+              operations + 2 - count, &profile_, nullptr, {}, &capture));
           const auto usage = source ? IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE
                                     : IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET;
-          EXPECT_EQ(
-              capture->transfer.program_accessible,
-              count > 1 && program_binding == 0 && (program_usage & usage));
+          EXPECT_EQ(capture->transfer.program_accessible,
+                    program_binding == 0 && (program_usage & usage));
           EXPECT_EQ(capture->transfer.staging_capacity, 0u);
           if (count == 2) {
             for (auto* buffer : buffers) {

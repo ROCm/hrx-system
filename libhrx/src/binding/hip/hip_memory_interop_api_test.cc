@@ -59,6 +59,8 @@ class HipMemoryInteropApiTest : public testing::Test {
         dso_.Resolve<decltype(&hipDeviceSynchronize)>("hipDeviceSynchronize");
     stream_destroy_ =
         dso_.Resolve<decltype(&hipStreamDestroy)>("hipStreamDestroy");
+    event_destroy_ =
+        dso_.Resolve<decltype(&hipEventDestroy)>("hipEventDestroy");
     graph_destroy_ =
         dso_.Resolve<decltype(&hipGraphDestroy)>("hipGraphDestroy");
     graph_exec_destroy_ =
@@ -75,6 +77,7 @@ class HipMemoryInteropApiTest : public testing::Test {
     ASSERT_NE(copy_, nullptr);
     ASSERT_NE(synchronize_, nullptr);
     ASSERT_NE(stream_destroy_, nullptr);
+    ASSERT_NE(event_destroy_, nullptr);
     ASSERT_NE(graph_destroy_, nullptr);
     ASSERT_NE(graph_exec_destroy_, nullptr);
     ready_ = true;
@@ -84,6 +87,9 @@ class HipMemoryInteropApiTest : public testing::Test {
     if (ready_) {
       ReleaseCallback();
       EXPECT_EQ(hipSuccess, synchronize_());
+      if (copy_event_) {
+        EXPECT_EQ(hipSuccess, event_destroy_(copy_event_));
+      }
       if (graph_executable_) {
         EXPECT_EQ(hipSuccess, graph_exec_destroy_(graph_executable_));
       }
@@ -209,8 +215,10 @@ class HipMemoryInteropApiTest : public testing::Test {
   hipDeviceptr_t device_memory_ = nullptr;
   // Stream carrying bounded registered-host transfers and graph replay.
   hipStream_t copy_stream_ = nullptr;
-  // Distinct nonblocking stream carrying the held application callback.
+  // Distinct nonblocking stream for dependencies and held callbacks.
   hipStream_t callback_stream_ = nullptr;
+  // Transfer completion handed from the producer stream to another queue.
+  hipEvent_t copy_event_ = nullptr;
   // Borrowed primary context owning the test's device allocation.
   hipCtx_t allocation_context_ = nullptr;
   // Compatibility context sharing the native device, released after its
@@ -261,6 +269,8 @@ class HipMemoryInteropApiTest : public testing::Test {
   decltype(&hipDeviceSynchronize) synchronize_ = nullptr;
   // Releases streams only after the device has completed their work.
   decltype(&hipStreamDestroy) stream_destroy_ = nullptr;
+  // Releases an event after all streams have completed their uses.
+  decltype(&hipEventDestroy) event_destroy_ = nullptr;
   // Releases the captured native-copy template.
   decltype(&hipGraphDestroy) graph_destroy_ = nullptr;
   // Releases a compiled native-copy capture.
@@ -477,6 +487,73 @@ TEST_F(HipMemoryInteropApiTest,
     EXPECT_EQ(0, std::memcmp(input, owned_output, kLength));
     EXPECT_EQ(0, std::memcmp(input, storage_.data(), kLength));
     EXPECT_EQ(0xcd, storage_.back());
+  }
+}
+
+TEST_F(HipMemoryInteropApiTest, CopyChainPublishesToAnotherQueueAndHost) {
+  const auto create_stream =
+      dso_.Resolve<decltype(&hipStreamCreateWithPriority)>(
+          "hipStreamCreateWithPriority");
+  const auto copy_async =
+      dso_.Resolve<decltype(&hipMemcpyAsync)>("hipMemcpyAsync");
+  const auto create_event = dso_.Resolve<decltype(&hipEventCreateWithFlags)>(
+      "hipEventCreateWithFlags");
+  const auto record_event =
+      dso_.Resolve<decltype(&hipEventRecord)>("hipEventRecord");
+  const auto wait_event =
+      dso_.Resolve<decltype(&hipStreamWaitEvent)>("hipStreamWaitEvent");
+  const auto synchronize_stream =
+      dso_.Resolve<decltype(&hipStreamSynchronize)>("hipStreamSynchronize");
+  ASSERT_NE(nullptr, create_stream);
+  ASSERT_NE(nullptr, copy_async);
+  ASSERT_NE(nullptr, create_event);
+  ASSERT_NE(nullptr, record_event);
+  ASSERT_NE(nullptr, wait_event);
+  ASSERT_NE(nullptr, synchronize_stream);
+
+  constexpr size_t kCopies = 32;
+  constexpr size_t kLength = 257;
+  constexpr size_t kStride = 272;
+  constexpr size_t kOffset = 7;
+  constexpr size_t kStorageLength = (kCopies + 1) * kStride;
+  ASSERT_EQ(hipSuccess, allocate_(&device_memory_, kStorageLength));
+  ASSERT_EQ(hipSuccess,
+            allocate_host_(&host_memory_, kStorageLength, hipHostMallocMapped));
+  ASSERT_EQ(hipSuccess, create_stream(&copy_stream_, hipStreamNonBlocking, 0));
+  // Distinct priorities use different native queues; a shared FIFO cannot
+  // supply the event dependency or make stale consumer cache lines harmless.
+  ASSERT_EQ(hipSuccess,
+            create_stream(&callback_stream_, hipStreamNonBlocking, -1));
+  ASSERT_EQ(hipSuccess, create_event(&copy_event_, hipEventDisableTiming));
+  auto* device = static_cast<uint8_t*>(device_memory_);
+  auto* host = static_cast<uint8_t*>(host_memory_);
+  for (uint8_t iteration = 0; iteration < 3; ++iteration) {
+    std::memset(host, 0xCD, kStorageLength);
+    for (size_t i = 0; i < kLength; ++i) {
+      host[kOffset + i] = static_cast<uint8_t>(i * 17 + iteration);
+    }
+    ASSERT_EQ(hipSuccess, copy_async(device, host, kStorageLength,
+                                     hipMemcpyHostToDevice, copy_stream_));
+    for (size_t i = 0; i < kCopies; ++i) {
+      ASSERT_EQ(hipSuccess, copy_async(device + (i + 1) * kStride + kOffset,
+                                       device + i * kStride + kOffset, kLength,
+                                       hipMemcpyDeviceToDevice, copy_stream_));
+    }
+    ASSERT_EQ(hipSuccess, record_event(copy_event_, copy_stream_));
+    ASSERT_EQ(hipSuccess, wait_event(callback_stream_, copy_event_, 0));
+    ASSERT_EQ(hipSuccess, copy_async(host, device, kStorageLength,
+                                     hipMemcpyDeviceToHost, callback_stream_));
+    ASSERT_EQ(hipSuccess, synchronize_stream(callback_stream_));
+    // Read registered host storage directly: no extra download or device-wide
+    // synchronization can mask missing publication at the stream boundary.
+    for (size_t i = 0; i < kStorageLength; ++i) {
+      const size_t offset = i % kStride;
+      const uint8_t expected =
+          offset >= kOffset && offset < kOffset + kLength
+              ? static_cast<uint8_t>((offset - kOffset) * 17 + iteration)
+              : 0xCD;
+      ASSERT_EQ(expected, host[i]) << "byte " << i;
+    }
   }
 }
 

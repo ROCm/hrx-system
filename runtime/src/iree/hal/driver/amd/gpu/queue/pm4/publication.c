@@ -286,9 +286,9 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
   iree_hal_amd_gpu_transfer_t* transfer = &submission->transfer;
   const bool first = !transfer->cursor.index && !transfer->cursor.offset;
   iree_hal_amd_gpu_byte_storage_t* arguments = queue->producer.arguments;
-  // Independent copies can overlap on shaders. Scalar copies keep their
-  // compact DMA packet; incompatible program views and rings too small for
-  // one shader argument record retain the queue path without extra backing.
+  // Shader copies avoid CP-DMA's synchronous transfer and drain costs.
+  // Incompatible program views and rings too small for one shader argument
+  // record retain the queue path without extra backing.
   const bool program =
       transfer->program_accessible &&
       arguments->capacity >= sizeof(iree_hal_amd_gpu_blit_arguments_t) &&
@@ -380,7 +380,13 @@ iree_hal_amd_gpu_pm4_publication_result_t iree_hal_amd_gpu_pm4_publish_transfer(
   }
   iree_hal_amd_gpu_pm4_barrier_t after =
       terminal ? submission->after : (iree_hal_amd_gpu_pm4_barrier_t){0};
-  after.execution |= IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
+  // Earlier publications drain their own DMA. A shader-only piece has no
+  // DMA producer to join; RELEASE_MEM joins its dispatch before signaling.
+  if (program) {
+    after.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
+  } else {
+    after.execution |= IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
+  }
   if (chunk.download.length) {
     after.release_cache_control |= queue->options.barriers.release;
   }

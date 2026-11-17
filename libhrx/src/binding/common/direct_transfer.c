@@ -130,9 +130,20 @@ static iree_status_t iree_hal_streaming_direct_transfer_submit(
           .payload_values = signal_values,
       };
     }
+    // Publish transfer writes before the stream value can escape through a
+    // wait, query, event, or host callback. The next operation acquires its
+    // inputs; this exit has no consumer requiring an additional acquisition.
+    static const iree_hal_barrier_t release = {
+        .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+    };
+    static const iree_hal_barrier_list_t after = {
+        .count = 1,
+        .values = &release,
+    };
+    static const iree_hal_queue_barriers_t barriers = {.after = &after};
     status = iree_hal_queue_transfer(submission.queue, waits, signals,
-                                     operation_count, operations,
-                                     /*barriers=*/NULL);
+                                     operation_count, operations, &barriers);
   }
   const bool accepted = iree_status_is_ok(status);
   iree_hal_streaming_submission_finish_locked(stream, &submission, accepted);
