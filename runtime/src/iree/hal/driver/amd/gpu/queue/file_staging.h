@@ -54,7 +54,7 @@ typedef struct iree_hal_amd_gpu_file_staging_request_t {
   // GPU address corresponding to transfer-relative byte zero.
   uint64_t device_address;
   // Terminal callback after every accepted I/O and GPU use has retired.
-  iree_hal_amd_fabric_file_transfer_callback_t completion;
+  iree_hal_file_transfer_callback_t completion;
   // First terminal failure, owned until final callback delivery.
   iree_status_t status;
   // Active slots plus the submitting caller's temporary ownership.
@@ -117,7 +117,7 @@ iree_status_t iree_hal_amd_gpu_file_staging_acquire(
 void iree_hal_amd_gpu_file_staging_submit(
     iree_hal_amd_gpu_file_staging_request_t* request, uint64_t offset,
     uint64_t length, uint64_t device_address,
-    iree_hal_amd_fabric_file_transfer_callback_t completion);
+    iree_hal_file_transfer_callback_t completion);
 
 // Releases the complete file operation after every range retires. Consumes
 // status and delivers it after relinquishing foreign-proactor registrations.
@@ -125,7 +125,7 @@ void iree_hal_amd_gpu_file_staging_submit(
 // file owner. The request storage remains live through this final completion.
 void iree_hal_amd_gpu_file_staging_release(
     iree_hal_amd_gpu_file_staging_request_t* request, iree_status_t status,
-    iree_hal_amd_fabric_file_transfer_callback_t completion);
+    iree_hal_file_transfer_callback_t completion);
 
 // Returns cached backing when whole file operations quiesce without
 // invalidating reusable live storage. Already prepared work progresses while

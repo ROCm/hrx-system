@@ -45,6 +45,9 @@ IREE_FLAG(int64_t, file_proactors, 0,
 IREE_FLAG(bool, direct, false, "Open the source for native uncached I/O.");
 IREE_FLAG(bool, registered_io, false,
           "Require retained REGISTERED_IO bindings from the buffer pool.");
+IREE_FLAG(bool, host_import, false,
+          "Import aligned host allocations as destination buffers instead of "
+          "allocating device storage.");
 IREE_FLAG(int64_t, queue_family, -1,
           "Transfer-capable queue family ordinal; -1 selects the first "
           "available family. Dynamically acquired queues are retained for "
@@ -225,6 +228,49 @@ class FileReads {
     uint64_t length = 0;
   };
 
+  iree_status_t ImportBuffer(
+      const iree_hal_pool_reservation_request_t& request,
+      const iree_hal_pool_import_requirements_t& requirements,
+      iree_hal_buffer_t** out_buffer) {
+    const auto alignment =
+        std::max(request.min_alignment, requirements.base_alignment);
+    uint64_t storage_length = 0;
+    if (!iree_checked_align_u64(
+            std::max(request.allocation_size, requirements.min_byte_length),
+            requirements.byte_length_granularity, &storage_length) ||
+        storage_length > IREE_HOST_SIZE_MAX || alignment > IREE_HOST_SIZE_MAX) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "host buffer storage exceeds host size");
+    }
+    void* pointer = nullptr;
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_aligned(
+        device_allocator_.allocator(),
+        static_cast<iree_host_size_t>(storage_length),
+        static_cast<iree_host_size_t>(alignment), 0, &pointer));
+    iree_hal_external_storage_t storage = {
+        .storage_class = iree_hal_make_external_storage_class(
+            IREE_HAL_EXTERNAL_STORAGE_TYPE_HOST_POINTER),
+        .payload = {.host_pointer = pointer},
+        .byte_length = storage_length,
+        .host_properties = IREE_HAL_HOST_MEMORY_PROPERTY_READ_CACHED |
+                           IREE_HAL_HOST_MEMORY_PROPERTY_WRITE_BACK,
+        .maintenance_range = iree_hal_make_buffer_range(0, storage_length),
+        .release =
+            [](void* user_data, iree_hal_external_storage_class_t,
+               iree_hal_external_storage_payload_t payload) {
+              iree_allocator_free_aligned(
+                  static_cast<TrackedAllocator*>(user_data)->allocator(),
+                  payload.host_pointer);
+            },
+        .release_user_data = &device_allocator_,
+    };
+    iree_status_t status = iree_hal_pool_import_buffer(
+        pool_, &storage, iree_hal_make_buffer_range(0, request.allocation_size),
+        out_buffer);
+    iree_hal_external_storage_release(&storage);
+    return status;
+  }
+
   iree_status_t Initialize() {
     if (!FLAG_file[0] || FLAG_file_length < 0 || FLAG_read_bytes <= 0 ||
         FLAG_read_depth <= 0 || FLAG_buffer_bytes < 0 ||
@@ -367,8 +413,24 @@ class FileReads {
     const iree_hal_pool_scope_t scope = {1, &access, {}};
     iree_hal_slab_pool_options_t options;
     iree_hal_slab_pool_options_initialize(&options);
+    const iree_hal_pool_import_class_t import_class = {
+        .storage_class = iree_hal_make_external_storage_class(
+            IREE_HAL_EXTERNAL_STORAGE_TYPE_HOST_POINTER),
+    };
+    if (FLAG_host_import) {
+      options.owned.mode = IREE_HAL_SLAB_POOL_IMPORT_ONLY;
+      options.imports.class_count = 1;
+      options.imports.classes = &import_class;
+    }
     IREE_RETURN_IF_ERROR(
         iree_hal_slab_pool_create(group_, scope, &options, allocator, &pool_));
+    iree_hal_pool_import_requirements_t import_requirements = {};
+    if (FLAG_host_import &&
+        !iree_hal_pool_query_import_requirements(
+            pool_, import_class.storage_class, &import_requirements)) {
+      return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "buffer pool does not support host imports");
+    }
     const auto buffer_length = FLAG_buffer_bytes ? FLAG_buffer_bytes : extent_;
     const auto request = iree_hal_make_pool_reservation_request(
         buffer_length,
@@ -377,8 +439,11 @@ class FileReads {
     verification_.resize(extent_);
     for (size_t i = 0; i < lanes_.size() && iree_status_is_ok(status); ++i) {
       lanes_[i].file = files_[i % files_.size()];
-      status = iree_hal_pool_allocate_buffer(
-          pool_, request, iree_infinite_timeout(), &lanes_[i].buffer);
+      status =
+          FLAG_host_import
+              ? ImportBuffer(request, import_requirements, &lanes_[i].buffer)
+              : iree_hal_pool_allocate_buffer(
+                    pool_, request, iree_infinite_timeout(), &lanes_[i].buffer);
       if (iree_status_is_ok(status)) {
         retained_bytes_ += iree_hal_buffer_allocation_size(lanes_[i].buffer);
         status = iree_hal_semaphore_create(device_, affinity, 0,
@@ -523,6 +588,7 @@ void Read(benchmark::State& state, bool stream, int64_t idle_ns = 0) {
   state.counters["retained_bytes"] = reads->retained_bytes();
   state.counters["direct"] = FLAG_direct;
   state.counters["registered_io"] = FLAG_registered_io;
+  state.counters["host_import"] = FLAG_host_import;
   state.counters["queue_family"] = reads->queue_family();
   state.counters["idle_ns"] = idle_ns;
 }

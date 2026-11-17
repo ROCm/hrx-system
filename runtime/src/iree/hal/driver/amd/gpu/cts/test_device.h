@@ -228,6 +228,12 @@ class GpuNativeTest : public ::testing::Test {
     return AMDF_NATIVE_LIFETIME_PROCESS;
   }
 
+  // Device diagnostics retain their production delivery path; fixtures may
+  // observe events through the same sink supplied by an application.
+  virtual iree_hal_device_event_sink_t event_sink() {
+    return iree_hal_device_event_sink_stderr();
+  }
+
   void SetUp() override;
 
   void TearDown() override;

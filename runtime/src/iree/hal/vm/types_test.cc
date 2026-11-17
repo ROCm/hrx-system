@@ -38,6 +38,8 @@ TEST(HALVMTypesTest, RegistersCanonicalHandlesAcrossEnvironments) {
   EXPECT_EQ(types.buffer_view->table, first);
   EXPECT_NE(types.fence, types.buffer);
   EXPECT_EQ(types.fence->table, first);
+  EXPECT_NE(types.file, types.fence);
+  EXPECT_EQ(types.file->table, first);
 }
 
 // Valid alternate provider tables exercise consumer prefix compatibility at
@@ -46,9 +48,9 @@ struct Provider {
   // Complete provider table, borrowed by its environment.
   iree_vm_ref_type_table_t table = {};
   // Immutable descriptors after registration.
-  std::array<iree_vm_ref_type_descriptor_t, 4> descriptors = {};
+  std::array<iree_vm_ref_type_descriptor_t, 5> descriptors = {};
   // Dense append-order type handles.
-  std::array<iree_vm_ref_type_t, 4> types = {};
+  std::array<iree_vm_ref_type_t, 5> types = {};
 
   Provider(iree_string_view_t namespace_name,
            std::initializer_list<iree_string_view_t> names) {
@@ -66,8 +68,9 @@ struct Provider {
 };
 
 TEST(HALVMTypesTest, ResolvesKnownPrefixFromNewerProvider) {
-  Provider provider(IREE_SV("hal"), {IREE_SV("buffer"), IREE_SV("buffer_view"),
-                                     IREE_SV("fence"), IREE_SV("device")});
+  Provider provider(IREE_SV("hal"),
+                    {IREE_SV("buffer"), IREE_SV("buffer_view"),
+                     IREE_SV("fence"), IREE_SV("file"), IREE_SV("device")});
   iree_vm_environment_t* environment = nullptr;
   IREE_ASSERT_OK(
       iree_vm_environment_allocate(iree_allocator_system(), &environment));
@@ -80,15 +83,16 @@ TEST(HALVMTypesTest, ResolvesKnownPrefixFromNewerProvider) {
   EXPECT_EQ(types.buffer, provider.types[0]);
   EXPECT_EQ(types.buffer_view, provider.types[1]);
   EXPECT_EQ(types.fence, provider.types[2]);
+  EXPECT_EQ(types.file, provider.types[3]);
   iree_vm_environment_free(environment);
 }
 
 TEST(HALVMTypesTest, RejectsIncompatiblePrefixesWithoutPublishing) {
   Provider short_prefix(IREE_SV("hal"), {IREE_SV("buffer")});
   Provider reordered(IREE_SV("hal"), {IREE_SV("buffer_view"), IREE_SV("buffer"),
-                                      IREE_SV("fence")});
-  Provider other(IREE_SV("other"),
-                 {IREE_SV("buffer"), IREE_SV("buffer_view"), IREE_SV("fence")});
+                                      IREE_SV("fence"), IREE_SV("file")});
+  Provider other(IREE_SV("other"), {IREE_SV("buffer"), IREE_SV("buffer_view"),
+                                    IREE_SV("fence"), IREE_SV("file")});
   for (auto* provider : {&short_prefix, &reordered, &other}) {
     iree_vm_environment_t* environment = nullptr;
     IREE_ASSERT_OK(
@@ -96,12 +100,13 @@ TEST(HALVMTypesTest, RejectsIncompatiblePrefixesWithoutPublishing) {
     IREE_ASSERT_OK(iree_vm_environment_register_ref_type_table(
         environment, &provider->table));
     iree_hal_vm_types_t types = {provider->types[0], provider->types[0],
-                                 provider->types[0]};
+                                 provider->types[0], provider->types[0]};
     IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                           iree_hal_vm_types_resolve(&provider->table, &types));
     EXPECT_EQ(types.buffer, provider->types[0]);
     EXPECT_EQ(types.buffer_view, provider->types[0]);
     EXPECT_EQ(types.fence, provider->types[0]);
+    EXPECT_EQ(types.file, provider->types[0]);
     iree_vm_environment_free(environment);
   }
 }

@@ -89,6 +89,7 @@ class ParameterModuleTest : public loom_runtime::testing::ParameterTest {
       iree_hal_semaphore_release(gates_[i]);
       iree_hal_semaphore_release(produced_[i]);
       iree_hal_semaphore_release(consumed_[i]);
+      iree_hal_file_release(files_[i]);
       if (paths_[i].Exists()) {
         EXPECT_TRUE(paths_[i].Remove());
       }
@@ -176,6 +177,45 @@ class ParameterModuleTest : public loom_runtime::testing::ParameterTest {
     iree_hal_buffer_release(std::exchange(targets_[domain], nullptr));
   }
 
+  iree_status_t ResolveFile(int32_t source, iree_string_view_t key,
+                            iree_hal_file_t** out_file, uint64_t* out_offset,
+                            uint64_t* out_length) {
+    iree_vm_function_t function = {};
+    IREE_RETURN_IF_ERROR(iree_vm_process_lookup_function(
+        loom_runtime_program_process(program_), IREE_SV("parameters"),
+        IREE_SV("file"), &function));
+    iree_vm_buffer_t* key_buffer = nullptr;
+    IREE_RETURN_IF_ERROR(
+        iree_vm_buffer_clone(IREE_VM_BUFFER_ACCESS_FLAG_READ,
+                             iree_make_const_byte_span(key.data, key.size), 1,
+                             allocator_, &key_buffer));
+    iree_vm_variant_t arguments[] = {
+        iree_vm_variant_from_i32(source),
+        iree_vm_buffer_variant_from_ptr_move(&vm_types_, &key_buffer)};
+    iree_vm_variant_t results[3] = {};
+    auto status =
+        iree_vm_invoke(loom_runtime_program_invocation(program_), function,
+                       iree_vm_variant_span_from_array(arguments),
+                       iree_vm_variant_span_from_array(results));
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+    int64_t offset = 0;
+    int64_t length = 0;
+    if (iree_status_is_ok(status)) {
+      status = iree_vm_i64_from_variant(results[1], &offset);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_vm_i64_from_variant(results[2], &length);
+    }
+    if (iree_status_is_ok(status)) {
+      status =
+          iree_hal_file_ptr_from_variant_move(&types_, &results[0], out_file);
+      *out_offset = (uint64_t)offset;
+      *out_length = (uint64_t)length;
+    }
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+    return status;
+  }
+
   // Canonical type owner outliving the module and escaped fence references.
   iree_vm_environment_t* environment_ = nullptr;
   // Device reference identities supplied to the native capability.
@@ -190,6 +230,8 @@ class ParameterModuleTest : public loom_runtime::testing::ParameterTest {
   loom_runtime_program_t* program_ = nullptr;
   // Process-bound callable, valid only through DropModule.
   iree_vm_function_t gather_ = {};
+  // Escaped file capabilities, retaining their exact checkpoint identities.
+  std::array<iree_hal_file_t*, 2> files_ = {};
   // Exact buffer captures joined even on an early test assertion.
   loom_runtime_retirement_t retirement_;
   // Independent producer prerequisites, released by the outer test owner.
@@ -230,6 +272,66 @@ TEST_P(ParameterModuleTest, RebindingAndRemovalPreserveAcceptedReads) {
       EXPECT_FALSE(loom_runtime_retirement_is_idle(&retirement_));
     }
   }
+}
+
+TEST_P(ParameterModuleTest, WholeFilesSurviveSourceReplacementAndRemoval) {
+  std::array<uint64_t, 2> offsets = {};
+  std::array<uint64_t, 2> lengths = {};
+  ASSERT_NO_FATAL_FAILURE(SelectSource(0));
+  IREE_ASSERT_OK(ResolveFile(0, IREE_SV("same-key"), &files_[0], &offsets[0],
+                             &lengths[0]));
+  // Both source lookups share the provider's imported whole-file cache.
+  IREE_ASSERT_OK(ResolveFile(0, IREE_SV("same-key"), &files_[1], &offsets[1],
+                             &lengths[1]));
+  EXPECT_EQ(files_[0], files_[1]);
+  EXPECT_EQ(offsets[0], offsets[1]);
+  iree_hal_file_release(std::exchange(files_[1], nullptr));
+  ASSERT_NO_FATAL_FAILURE(SelectSource(1));
+  IREE_ASSERT_OK(ResolveFile(0, IREE_SV("same-key"), &files_[1], &offsets[1],
+                             &lengths[1]));
+  EXPECT_NE(files_[0], files_[1]);
+  DropModule();
+  for (size_t domain : {1u, 0u}) {
+    EXPECT_GT(offsets[domain], 0u);
+    EXPECT_EQ(lengths[domain], 16u);
+    EXPECT_EQ(iree_hal_file_length(files_[domain]),
+              offsets[domain] + lengths[domain]);
+    uint64_t one = 1;
+    IREE_ASSERT_OK(iree_hal_queue_read(
+        queue_, {}, {1, &produced_[domain], &one}, files_[domain],
+        offsets[domain], targets_[domain], 0, lengths[domain], nullptr,
+        IREE_HAL_READ_FLAG_NONE));
+    iree_hal_file_release(std::exchange(files_[domain], nullptr));
+    IREE_ASSERT_OK(iree_hal_queue_download(
+        queue_, {1, &produced_[domain], &one}, {1, &consumed_[domain], &one},
+        targets_[domain], 0, output_[domain].data(), output_[domain].size(),
+        nullptr));
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(consumed_[domain], 1,
+                                           iree_infinite_timeout(), 0));
+    for (size_t i = 0; i < output_[domain].size(); ++i) {
+      EXPECT_EQ(output_[domain][i], Byte(domain, i));
+    }
+  }
+}
+
+TEST_P(ParameterModuleTest, FileResolutionRejectsUnknownSourceAndKey) {
+  ASSERT_NO_FATAL_FAILURE(SelectSource(0));
+  uint64_t offset = 0;
+  uint64_t length = 0;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      ResolveFile(-1, IREE_SV("same-key"), &files_[0], &offset, &length));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      ResolveFile(1, IREE_SV("same-key"), &files_[0], &offset, &length));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_NOT_FOUND,
+      ResolveFile(0, IREE_SV("missing"), &files_[0], &offset, &length));
+  loom_runtime_parameters_module_bind_sources(module_, nullptr);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      ResolveFile(0, IREE_SV("same-key"), &files_[0], &offset, &length));
+  EXPECT_EQ(files_[0], nullptr);
 }
 
 TEST_P(ParameterModuleTest, RejectsInvalidSourcesAndCountsBeforeSubmission) {

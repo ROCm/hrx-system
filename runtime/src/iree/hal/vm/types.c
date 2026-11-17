@@ -31,6 +31,10 @@ static void iree_hal_vm_fence_destroy(void* object) {
   iree_hal_fence_destroy((iree_hal_fence_t*)object);
 }
 
+static void iree_hal_vm_file_destroy(void* object) {
+  iree_hal_file_destroy((iree_hal_file_t*)object);
+}
+
 static const iree_vm_ref_type_table_t iree_hal_vm_type_table_;
 static const iree_vm_ref_type_descriptor_t iree_hal_vm_buffer_type_ = {
     iree_hal_vm_buffer_destroy,
@@ -47,10 +51,16 @@ static const iree_vm_ref_type_descriptor_t iree_hal_vm_fence_type_ = {
     &iree_hal_vm_type_table_,
     IREE_SVL("fence"),
 };
+static const iree_vm_ref_type_descriptor_t iree_hal_vm_file_type_ = {
+    iree_hal_vm_file_destroy,
+    &iree_hal_vm_type_table_,
+    IREE_SVL("file"),
+};
 static const iree_hal_vm_types_t iree_hal_vm_types_ = {
     &iree_hal_vm_buffer_type_,
     &iree_hal_vm_buffer_view_type_,
     &iree_hal_vm_fence_type_,
+    &iree_hal_vm_file_type_,
 };
 static const iree_vm_ref_type_table_t iree_hal_vm_type_table_ = {
     sizeof(iree_hal_vm_type_table_),

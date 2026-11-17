@@ -95,6 +95,7 @@ iree_executable_test(
         "--read_depth=2",
         "--initial_read_bytes=512",
         "--file_proactors=2",
+        "--host_import",
         "--benchmark_dry_run",
     ],
     data = ["file_benchmark.cc"],

@@ -25,7 +25,7 @@ extern "C" {
 typedef struct iree_hal_amd_gpu_file_executor_t {
   // Borrowed exact queue whose native transfer engine moves buffer bytes.
   iree_hal_queue_t* queue;
-  // Borrowed diagnostics, dominated by the application's device ownership.
+  // Borrowed native API context, live through the queue's accepted operations.
   const iree_hal_amd_gpu_context_t* context;
   // Queue-owned reusable CPU metadata storage.
   iree_hal_amd_gpu_capture_pool_t* captures;
@@ -55,7 +55,9 @@ typedef struct iree_hal_amd_gpu_file_executor_t {
   void (*add_effects)(iree_hal_queue_t* queue,
                       iree_hal_memory_effects_t effects, void* barrier);
   // Captures one transfer or, for NULL operation, a barrier. The caller has
-  // resolved dependencies and prepared immutable cache recipes. Success owns
+  // already accepted the file operation, resolved dependencies, and prepared
+  // immutable cache recipes. Public queue closure does not reject these
+  // continuations; native queue failure still does. Success owns
   // captured arguments until callback reports retirement; failure retains no
   // borrowed payload and invokes no callback. An early failure notification
   // does not end borrowed payload lifetime.

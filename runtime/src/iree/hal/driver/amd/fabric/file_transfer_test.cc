@@ -294,7 +294,7 @@ class FileTransferTest : public ::testing::TestWithParam<
   }
 
   iree_status_t Submit() {
-    return iree_hal_amd_fabric_file_request_submit(
+    return iree_hal_file_request_submit(
         &transfer_.async.request,
         {+[](void* user_data, iree_status_t status) {
            auto* self = static_cast<FileTransferTest*>(user_data);
@@ -317,7 +317,8 @@ class FileTransferTest : public ::testing::TestWithParam<
           &transfer_, offset,
           iree_async_span_make(&request_region_, offset, kLength - offset),
           &requests_[i]));
-      EXPECT_EQ(requests_[i].span.length, request_region_.buffer_size);
+      EXPECT_EQ(iree_hal_file_request_span(&requests_[i]).length,
+                request_region_.buffer_size);
     }
     // Only the enclosing transfer owns the file and buffer. Native requests
     // borrow them until that owner has joined every accepted request.
@@ -328,7 +329,7 @@ class FileTransferTest : public ::testing::TestWithParam<
   }
 
   iree_status_t SubmitRequest(size_t index) {
-    return iree_hal_amd_fabric_file_request_submit(
+    return iree_hal_file_request_submit(
         &requests_[index],
         {RequestCompletion::Complete, &request_completions_[index]});
   }
@@ -356,7 +357,7 @@ class FileTransferTest : public ::testing::TestWithParam<
   // Borrowed registration surviving every accepted independent request.
   iree_async_region_t request_region_ = {};
   // Independent placed requests retired by teardown even on an assertion exit.
-  std::array<iree_hal_amd_fabric_file_request_t, 2> requests_ = {};
+  std::array<iree_hal_file_request_t, 2> requests_ = {};
   // Terminal observations independent of submission/completion order.
   std::array<RequestCompletion, 2> request_completions_ = {};
   // True after operand capture owns references.
@@ -514,8 +515,10 @@ TEST_P(FileTransferTest, RegisteredChunksPreserveSlotsAndShortIoOffsets) {
     IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_chunk(
         &transfer_,
         iree_async_span_make(&region, region_offset, kLength - offset)));
-    EXPECT_EQ(transfer_.async.request.span.length, chunk_length);
-    EXPECT_EQ(transfer_.async.request.span.region, &region);
+    EXPECT_EQ(iree_hal_file_request_span(&transfer_.async.request).length,
+              chunk_length);
+    EXPECT_EQ(iree_hal_file_request_span(&transfer_.async.request).region,
+              &region);
     const size_t first_request = provider_.requests.size();
     IREE_ASSERT_OK(Submit());
     const size_t prefix = std::min(chunk_length, size_t{7});
@@ -618,8 +621,9 @@ TEST_P(FileTransferTest, EngineStagingDoesNotRequireOrTouchAHostBufferView) {
     }
     IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_chunk(
         &transfer_, iree_async_span_from_ptr(staging.data(), staging.size())));
-    EXPECT_EQ(transfer_.async.request.offset, offset);
-    EXPECT_EQ(iree_async_span_ptr(transfer_.async.request.span),
+    EXPECT_EQ(transfer_.async.request.file_offset, kFileOffset + offset);
+    EXPECT_EQ(iree_async_span_ptr(
+                  iree_hal_file_request_span(&transfer_.async.request)),
               staging.data());
     IREE_ASSERT_OK(Submit());
     provider_.Complete(7);

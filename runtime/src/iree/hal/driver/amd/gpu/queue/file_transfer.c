@@ -13,8 +13,6 @@
 typedef struct iree_hal_amd_gpu_file_transfer_t {
   // Borrowed queue-owned services, live through operation retirement.
   const iree_hal_amd_gpu_file_executor_t* executor;
-  // Borrowed parent, kept alive by the application through completion.
-  iree_hal_device_t* device;
   // Exact capture extent returned to the reusable metadata pool.
   iree_host_size_t allocation_size;
   // Retained file/buffer, partial I/O state, and optional owned host staging.
@@ -159,8 +157,8 @@ static void iree_hal_amd_gpu_file_transfer_retire(void* user_data,
             : NULL);
   }
   if (!iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_context_report_status(operation->executor->context,
-                                           operation->device, status);
+    // File/dependency failures belong to this operation. Native queue owners
+    // report their own device failures; a propagated status is not a new one.
     iree_hal_semaphore_list_fail(operation->signals, status);
   }
   IREE_TRACE_ZONE_END(z0);
@@ -184,7 +182,7 @@ static void iree_hal_amd_gpu_file_transfer_complete(
   if (operation->staging.bucket) {
     iree_hal_amd_gpu_file_staging_release(
         &operation->staging, status,
-        (iree_hal_amd_fabric_file_transfer_callback_t){
+        (iree_hal_file_transfer_callback_t){
             iree_hal_amd_gpu_file_transfer_staging_released, operation});
   } else {
     iree_hal_amd_gpu_file_transfer_staging_released(operation, status);
@@ -210,9 +208,9 @@ static void iree_hal_amd_gpu_file_transfer_issue(
     iree_hal_amd_gpu_file_transfer_t* operation) {
   operation->resume = iree_hal_amd_gpu_file_transfer_io_complete;
   iree_atomic_store(&operation->pending, 2, iree_memory_order_relaxed);
-  iree_status_t status = iree_hal_amd_fabric_file_request_submit(
+  iree_status_t status = iree_hal_file_request_submit(
       &operation->transfer.async.request,
-      (iree_hal_amd_fabric_file_transfer_callback_t){
+      (iree_hal_file_transfer_callback_t){
           .fn = iree_hal_amd_gpu_file_transfer_step_complete,
           .user_data = operation,
       });
@@ -265,7 +263,8 @@ static void iree_hal_amd_gpu_file_transfer_staged(void* user_data,
     iree_hal_amd_gpu_file_transfer_complete(operation, status);
     return;
   }
-  operation->transfer.async.request.offset = operation->staging.end;
+  operation->transfer.async.request.file_offset =
+      operation->transfer.file_offset + operation->staging.end;
   operation->transfer.async.request.bytes_transferred = 0;
   iree_hal_amd_gpu_file_transfer_advance(operation);
 }
@@ -298,7 +297,7 @@ static void iree_hal_amd_gpu_file_transfer_advance(
     iree_atomic_store(&operation->pending, 2, iree_memory_order_relaxed);
     iree_hal_amd_gpu_file_staging_submit(
         &operation->staging, 0, transfer->length, address,
-        (iree_hal_amd_fabric_file_transfer_callback_t){
+        (iree_hal_file_transfer_callback_t){
             iree_hal_amd_gpu_file_transfer_step_complete, operation});
     iree_hal_amd_gpu_file_transfer_join(operation);
     return;
@@ -438,7 +437,6 @@ iree_status_t iree_hal_amd_gpu_file_transfer_submit(
   iree_hal_amd_gpu_file_transfer_t* operation = (void*)storage.data;
   *operation = (iree_hal_amd_gpu_file_transfer_t){
       .executor = executor,
-      .device = executor->queue->queue_family->device,
       .allocation_size = storage.data_length,
       .waits = {.count = waits.count,
                 .semaphores = (void*)(storage.data + wait_semaphores_offset),

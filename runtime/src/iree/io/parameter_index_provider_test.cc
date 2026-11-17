@@ -387,6 +387,52 @@ static iree_status_t CaptureLoadedBuffer(void* user_data, iree_host_size_t i,
   return iree_ok_status();
 }
 
+TEST_F(ParameterIndexProviderTest, ResolveWholeFileRetainsSourceAndGeometry) {
+  std::array<uint8_t, 32> bytes = {};
+  for (size_t i = 0; i < bytes.size(); ++i) {
+    bytes[i] = 3 * i + 7;
+  }
+  Ref<iree_io_file_handle_t, iree_io_file_handle_release> source;
+  IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+      IREE_IO_FILE_ACCESS_READ, iree_make_byte_span(bytes.data(), bytes.size()),
+      iree_io_file_handle_release_callback_null(), iree_allocator_system(),
+      source.out()));
+  Ref<iree_io_parameter_index_t, iree_io_parameter_index_release> index;
+  IREE_ASSERT_OK(
+      iree_io_parameter_index_create(iree_allocator_system(), index.out()));
+  IREE_ASSERT_OK(
+      AddFileEntry(index.get(), IREE_SV("slice"), 7, 13, source.get()));
+  IREE_ASSERT_OK(AddSplatEntry(index.get(), IREE_SV("synthetic"), 13, 42));
+  Ref<iree_io_parameter_provider_t, iree_io_parameter_provider_release>
+      provider;
+  IREE_ASSERT_OK(iree_io_parameter_index_provider_create(
+      IREE_SV("model"), index.get(), 1, iree_allocator_system(),
+      provider.out()));
+  Ref<iree_hal_file_t, iree_hal_file_release> file;
+  uint64_t offset = 99;
+  uint64_t length = 99;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        iree_io_parameter_index_provider_resolve_file(
+                            provider.get(), queue(), IREE_SV("synthetic"),
+                            file.out(), &offset, &length));
+  EXPECT_EQ(file.get(), nullptr);
+  EXPECT_EQ(offset, 0u);
+  EXPECT_EQ(length, 0u);
+  IREE_ASSERT_OK(iree_io_parameter_index_provider_resolve_file(
+      provider.get(), queue(), IREE_SV("slice"), file.out(), &offset, &length));
+  provider.reset();
+  index.reset();
+  source.reset();
+  EXPECT_EQ(offset, 7u);
+  EXPECT_EQ(length, 13u);
+  EXPECT_EQ(iree_hal_file_length(file.get()), bytes.size());
+  EXPECT_EQ(iree_hal_file_requirements(file.get())->read.offset_alignment, 1u);
+  std::array<uint8_t, 13> actual = {};
+  IREE_ASSERT_OK(iree_hal_file_read(
+      file.get(), offset, iree_make_byte_span(actual.data(), actual.size())));
+  EXPECT_TRUE(std::equal(actual.begin(), actual.end(), bytes.begin() + offset));
+}
+
 TEST_F(ParameterIndexProviderTest, LoadImportsExactParameterRange) {
   uint8_t source_data[12] = {
       0x10, 0x11, 0x12, 0x13, 0x20, 0x21, 0x22, 0x23, 0x30, 0x31, 0x32, 0x33,

@@ -145,6 +145,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/amd:status",
+        "//runtime/src/iree/hal/utils:file_request",
         "//runtime/src/iree/hal/utils:files",
     ],
 )

@@ -68,7 +68,7 @@ typedef struct iree_hal_amd_gpu_file_staging_slot_t {
   uint64_t offset;
   union {
     // Placed native file request, reused only after its preceding use retires.
-    iree_hal_amd_fabric_file_request_t io;
+    iree_hal_file_request_t io;
     // Coalesced early-error and final-retirement handoff to the file owner.
     iree_hal_amd_gpu_file_completion_t failure;
   };
@@ -309,8 +309,7 @@ static bool iree_hal_amd_gpu_file_staging_transfer_released(
 
 static void iree_hal_amd_gpu_file_staging_request_complete(
     iree_hal_amd_gpu_file_staging_request_t* request) {
-  const iree_hal_amd_fabric_file_transfer_callback_t callback =
-      request->completion;
+  const iree_hal_file_transfer_callback_t callback = request->completion;
   iree_status_t status = request->status;
   request->status = iree_ok_status();
   callback.fn(callback.user_data, status);
@@ -452,8 +451,8 @@ static void iree_hal_amd_gpu_file_staging_issue_io(
     void (*resume)(iree_hal_amd_gpu_file_staging_slot_t*, iree_status_t)) {
   slot->resume = resume;
   iree_atomic_store(&slot->pending, 2, iree_memory_order_relaxed);
-  iree_status_t status = iree_hal_amd_fabric_file_request_submit(
-      &slot->io, (iree_hal_amd_fabric_file_transfer_callback_t){
+  iree_status_t status = iree_hal_file_request_submit(
+      &slot->io, (iree_hal_file_transfer_callback_t){
                      iree_hal_amd_gpu_file_staging_step_completed, slot});
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_file_staging_step_completed(slot, status);
@@ -482,15 +481,19 @@ static void iree_hal_amd_gpu_file_staging_copy(
   const bool read =
       request->transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ;
   const uint64_t staging_address = slot->block->address + slot->offset;
-  const uint64_t device_address = request->device_address + slot->io.offset;
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, slot->io.span.length);
+  const uint64_t device_address = request->device_address +
+                                  slot->io.file_offset -
+                                  request->transfer->file_offset;
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(
+      z0, iree_hal_file_request_span(&slot->io).length);
   slot->resume = read ? iree_hal_amd_gpu_file_staging_slot_finish
                       : iree_hal_amd_gpu_file_staging_downloaded;
   slot->failure_initialized = false;
   iree_atomic_store(&slot->pending, 2, iree_memory_order_relaxed);
   status = request->copy(
       request->copy_user_data, read ? staging_address : device_address,
-      read ? device_address : staging_address, slot->io.span.length,
+      read ? device_address : staging_address,
+      iree_hal_file_request_span(&slot->io).length,
       read ? slot->block->effects.read : (iree_hal_memory_effects_t){0},
       read ? (iree_hal_memory_effects_t){0} : slot->block->effects.write,
       (iree_hal_amd_gpu_retirement_callback_t){
@@ -1246,7 +1249,7 @@ static void iree_hal_amd_gpu_file_staging_progress(
                   block->memory.contents.data + slot->offset, length),
         &slot->io);
     if (iree_status_is_ok(status)) {
-      request->cursor += slot->io.span.length;
+      request->cursor += iree_hal_file_request_span(&slot->io).length;
       iree_hal_amd_gpu_file_staging_list_remove(
           iree_hal_amd_gpu_file_staging_request_list(request), request);
       if (request->cursor < request->end) {
@@ -1323,7 +1326,7 @@ iree_status_t iree_hal_amd_gpu_file_staging_acquire(
 void iree_hal_amd_gpu_file_staging_submit(
     iree_hal_amd_gpu_file_staging_request_t* request, uint64_t offset,
     uint64_t length, uint64_t device_address,
-    iree_hal_amd_fabric_file_transfer_callback_t completion) {
+    iree_hal_file_transfer_callback_t completion) {
   iree_hal_amd_gpu_file_staging_t* staging = request->staging;
   request->cursor = offset;
   request->end = offset + length;
@@ -1375,7 +1378,7 @@ void iree_hal_amd_gpu_file_staging_submit(
 
 void iree_hal_amd_gpu_file_staging_release(
     iree_hal_amd_gpu_file_staging_request_t* request, iree_status_t status,
-    iree_hal_amd_fabric_file_transfer_callback_t completion) {
+    iree_hal_file_transfer_callback_t completion) {
   iree_hal_amd_gpu_file_staging_t* staging = request->staging;
   request->status = status;
   request->completion = completion;

@@ -1531,7 +1531,7 @@ static iree_status_t iree_hal_amd_gpu_aql_file_submit(
     const iree_hal_amd_gpu_transfer_operation_t* operation, const void* before,
     const void* after, iree_hal_amd_gpu_retirement_callback_t callback) {
   iree_hal_amd_gpu_aql_queue_t* queue = (void*)base;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_check_acceptance(queue));
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_check_failure(queue));
   iree_hal_amd_gpu_aql_submission_t* submission = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_file(
       &queue->captures, operation, before ? *(const uint32_t*)before : 0,
