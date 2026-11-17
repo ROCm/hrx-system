@@ -125,7 +125,6 @@ loom_cc_library(
         "//loom/src/loom/target/arch/wasm/lower",
         "//loom/src/loom/target/arch/wasm/ops",
         "//loom/src/loom/target/arch/wasm/records:target_records",
-        "//loom/src/loom/transforms/scalar:target_legalization",
         "//loom/src/loom/transforms/vector:packet_legalization",
         "//loom/src/loom/transforms/vector:shape_legalization",
         "//loom/src/loom/transforms/vector:target_legalization",

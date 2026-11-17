@@ -478,23 +478,7 @@ static iree_status_t loom_scalar_legalize_build_fp8_storage_byte(
   return iree_ok_status();
 }
 
-bool loom_scalar_match_float8_to_bfloat_extension(
-    const loom_target_legalizer_entry_t* entry,
-    const loom_target_legalization_context_t* context, const loom_op_t* op) {
-  (void)entry;
-  const loom_value_id_t input = loom_scalar_extf_input(op);
-  const loom_type_t input_type = loom_module_value_type(context->module, input);
-  const loom_type_t result_type =
-      loom_module_value_type(context->module, loom_scalar_extf_result(op));
-  return loom_type_is_scalar(input_type) &&
-         loom_scalar_type_set_contains(
-             LOOM_SCALAR_TYPE_SET_F8E4M3 | LOOM_SCALAR_TYPE_SET_F8E5M2,
-             loom_type_element_type(input_type)) &&
-         loom_type_is_scalar(result_type) &&
-         loom_type_element_type(result_type) == LOOM_SCALAR_TYPE_BF16;
-}
-
-iree_status_t loom_scalar_rewrite_float8_extension(
+static iree_status_t loom_scalar_rewrite_float8_extension(
     loom_target_legalization_context_t* context, loom_op_t* op) {
   loom_rewriter_t* rewriter = context->rewriter;
   loom_builder_t* builder = &rewriter->builder;
@@ -546,6 +530,7 @@ static bool loom_scalar_match_extf(
              LOOM_SCALAR_TYPE_SET_F8E4M3 | LOOM_SCALAR_TYPE_SET_F8E5M2,
              input_element) &&
          (result_element == LOOM_SCALAR_TYPE_F16 ||
+          result_element == LOOM_SCALAR_TYPE_BF16 ||
           result_element == LOOM_SCALAR_TYPE_F32);
 }
 
@@ -1505,7 +1490,7 @@ static iree_status_t loom_scalar_legalize_build_number_extremum(
       lhs_nan_result, rhs_checked, out_result);
 }
 
-iree_status_t loom_scalar_legalize_number_extremum(
+static iree_status_t loom_scalar_legalize_number_extremum(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {
@@ -1662,7 +1647,7 @@ static iree_status_t loom_scalar_legalize_exact_narrow_float(
 // Number-preferring extrema already implement signed-zero ordering. An
 // unordered comparison adds the IEEE NaN policy without changing numeric
 // operands or exposing a NaN payload guarantee.
-iree_status_t loom_scalar_legalize_ieee_extrema(
+static iree_status_t loom_scalar_legalize_ieee_extrema(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {
