@@ -111,6 +111,15 @@ struct ControlFlow::ProjectedReferenceReturnFacts {
     size_t propagated_origin_count = SIZE_MAX;
   };
 
+  struct ArrayResult {
+    // Returned element expression indexing its retained array selection.
+    cxx::ExpressionAST* expression;
+    // Array subobject within the call's complete returned reference.
+    ReferenceProjection projection;
+    // Callee origins already expanded into this element selection.
+    size_t propagated_origin_count = 0;
+  };
+
   // Possible caller-owned subobjects in source selection order.
   std::vector<ReferenceResultOrigin> origins;
   // Canonicalization index created only after the bounded linear prefix.
@@ -119,6 +128,8 @@ struct ControlFlow::ProjectedReferenceReturnFacts {
   // A forwarded call can gain origins over several fixed-point iterations
   // without moving other leaves.
   std::unordered_map<cxx::AST*, Selection> selections;
+  // Element returns waiting on an accessor's origins, indexed by that call.
+  std::unordered_map<cxx::AST*, std::vector<ArrayResult>> array_results;
   // Whole-parameter leaves promoted into a mixed projected result.
   std::unordered_map<cxx::Symbol*, size_t> complete_parameter_indices;
   // Whole current-object leaf promoted into a mixed projected result.
@@ -751,6 +762,9 @@ bool ControlFlow::promote_projected_reference_storage(
       identity_call_results_.insert(expression);
     }
   }
+  for (const auto& [call, results] : facts.array_results) {
+    identity_call_results_.insert(call);
+  }
   return true;
 }
 
@@ -831,6 +845,13 @@ void ControlFlow::merge_projected_reference_returns(
     target.selections.emplace(expression, std::move(selection));
     if (target.requires_storage && propagated) {
       identity_call_results_.insert(expression);
+    }
+  }
+  for (auto& [call, results] : source.array_results) {
+    auto& target_results = target.array_results[call];
+    target_results.insert(target_results.end(), results.begin(), results.end());
+    if (target.requires_storage) {
+      identity_call_results_.insert(call);
     }
   }
   for (const auto& [parameter, index] : source.complete_parameter_indices) {
@@ -1226,11 +1247,8 @@ void ControlFlow::postVisit(cxx::AST* ast) {
                binary && !binary->symbol &&
                binary->op == cxx::TokenKind::T_COMMA) {
       owner = object_owner(binary->rightExpression);
-    } else if (auto* subscript =
-                   cxx::ast_cast<cxx::SubscriptExpressionAST>(expression)) {
-      if (auto* selection = array_subscript(subscript)) {
-        owner = object_owner(selection->array);
-      }
+    } else if (auto* selection = array_selection(expression)) {
+      owner = object_owner(selection->array);
     }
     if (owner) {
       object_owners_.emplace(expression, owner);
@@ -1629,10 +1647,11 @@ void ControlFlow::visit(cxx::AssignmentExpressionAST* ast) {
   accept(ast->leftExpression);
   auto* subscript =
       cxx::ast_cast<cxx::SubscriptExpressionAST>(ast->leftExpression);
-  const auto* array_selection =
-      subscript ? array_subscript(subscript) : nullptr;
+  const auto* selection =
+      array_selection(unwrap_object_identity(unit_, ast->leftExpression));
   if (!ordinary_call &&
-      ((subscript && (!array_selection || !array_selection->constant_index)) ||
+      (((selection && !selection->constant_index) ||
+        (subscript && !selection)) ||
        (cxx::ast_cast<cxx::MemberExpressionAST>(ast->leftExpression) &&
         cxx::ast_cast<cxx::MemberExpressionAST>(ast->leftExpression)
                 ->vectorComponentKind != cxx::VectorComponentKind::kNone))) {
@@ -1698,6 +1717,40 @@ void ControlFlow::visit(cxx::PostIncrExpressionAST* ast) {
 }
 
 void ControlFlow::visit(cxx::UnaryExpressionAST* ast) {
+  if (!ast->symbol && ast->op == cxx::TokenKind::T_AMP &&
+      ast != borrowed_pointer_expression_ && ast != borrowed_call_address_) {
+    auto* dereference = cxx::ast_cast<cxx::UnaryExpressionAST>(
+        unwrap_expression(ast->expression));
+    if (dereference && !dereference->symbol &&
+        dereference->op == cxx::TokenKind::T_STAR) {
+      // &* observes the pointer, not its pointee. In particular, an opaque
+      // pointee needs no array partition or source-storage representation.
+      accept(dereference->expression);
+      return;
+    }
+  }
+  if (!ast->symbol && ast->op == cxx::TokenKind::T_STAR) {
+    auto* source = unwrap_expression(ast->expression);
+    ArraySelection selection{ast->expression, nullptr, nullptr, true, false, 0};
+    if (auto* arithmetic = cxx::ast_cast<cxx::BinaryExpressionAST>(source);
+        arithmetic && !arithmetic->symbol &&
+        unit_.typeTraits().is_pointer(arithmetic->type) &&
+        (arithmetic->op == cxx::TokenKind::T_PLUS ||
+         arithmetic->op == cxx::TokenKind::T_MINUS)) {
+      selection.array_first =
+          unit_.typeTraits().is_pointer(arithmetic->leftExpression->type);
+      selection.array = selection.array_first ? arithmetic->leftExpression
+                                              : arithmetic->rightExpression;
+      selection.index = selection.array_first ? arithmetic->rightExpression
+                                              : arithmetic->leftExpression;
+      selection.subtract = arithmetic->op == cxx::TokenKind::T_MINUS;
+    }
+    if (array_borrow_origin(selection.array)) {
+      selection.type = borrowed_array_type(selection.array);
+      analyze_array_selection(ast, selection);
+      return;
+    }
+  }
   auto* alias_binding = [&]() -> cxx::Symbol* {
     if (ast->symbol || ast->op != cxx::TokenKind::T_STAR) {
       return nullptr;
@@ -1721,18 +1774,6 @@ void ControlFlow::visit(cxx::UnaryExpressionAST* ast) {
   }
   if (!ast->symbol && ast->op == cxx::TokenKind::T_AMP) {
     if (ast != borrowed_pointer_expression_ && ast != borrowed_call_address_) {
-      if (auto* dereference = cxx::ast_cast<cxx::UnaryExpressionAST>(
-              unwrap_expression(ast->expression));
-          dereference && !dereference->symbol &&
-          dereference->op == cxx::TokenKind::T_STAR) {
-        if (auto* source = cxx::ast_cast<cxx::IdExpressionAST>(
-                unwrap_expression(dereference->expression))) {
-          if (auto found = pointer_aliases_.find(source->symbol);
-              found != pointer_aliases_.end()) {
-            found->second.transparent = false;
-          }
-        }
-      }
       require_identity(ast->expression);
     }
   }
@@ -1874,7 +1915,8 @@ bool ControlFlow::collect_projected_reference_return(
 
   auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(expression);
   auto traits = unit_.typeTraits();
-  if (!subscript || subscript->symbol) {
+  const auto* selection = array_selection(expression);
+  if (!selection) {
     bool reference_call = false;
     if (subscript && subscript->symbol) {
       auto* signature =
@@ -1906,14 +1948,27 @@ bool ControlFlow::collect_projected_reference_return(
     }
     return reference_call;
   }
-  const auto* selection = array_subscript(subscript);
-  if (!selection) {
-    return false;
-  }
   auto* source = array_borrow_origin(selection->array);
   auto target = source ? classify_destination(source) : std::nullopt;
-  if (!target || !selection->type ||
-      argument_requires_storage(retain_array_identity(selection->array))) {
+  auto identity = retain_array_identity(selection->array);
+  if (argument_requires_storage(identity)) {
+    return false;
+  }
+  if (!target) {
+    if (identity.reference_calls.size() != 1 ||
+        !identity.identity_bindings.empty() || identity.identity_intervals) {
+      return false;
+    }
+    const auto& reference = identity.reference_calls.front();
+    facts.array_results[reference.call].push_back(
+        {expression, reference.projection});
+    facts.selections.try_emplace(expression);
+    if (facts.requires_storage) {
+      identity_call_results_.insert(reference.call);
+    }
+    return true;
+  }
+  if (!selection->type) {
     return false;
   }
   const auto* array = types_.array(selection->type, expression);
@@ -2045,6 +2100,9 @@ void ControlFlow::visit(cxx::ReturnStatementAST* ast) {
         if (selection.propagated_origin_count != SIZE_MAX) {
           identity_call_results_.insert(expression);
         }
+      }
+      for (const auto& [call, results] : projected->array_results) {
+        identity_call_results_.insert(call);
       }
     } else if (origin == ReferenceReturn::Parameter) {
       for (size_t ordinal : ordinals) {
@@ -2274,68 +2332,86 @@ void ControlFlow::visit(cxx::LambdaExpressionAST* ast) {
 }
 
 void ControlFlow::visit(cxx::SubscriptExpressionAST* ast) {
-  auto* saved_alias_use = pointer_alias_use_;
-  auto* saved_borrowed_expression = borrowed_pointer_expression_;
-  cxx::ExpressionAST* borrowed_array = nullptr;
-  const cxx::Type* borrowed_type = nullptr;
-  auto* index = subscript_index(ast);
   if (!ast->symbol) {
+    auto traits = unit_.typeTraits();
+    auto* index = subscript_index(ast);
     for (auto* operand : {ast->baseExpression, index}) {
-      if (!unit_.typeTraits().is_pointer(operand->type) ||
-          !array_borrow_origin(operand)) {
+      const auto* type = traits.remove_reference(operand->type);
+      if (!traits.is_array(type) &&
+          !(traits.is_pointer(type) && array_borrow_origin(operand))) {
         continue;
       }
-      borrowed_array = operand;
-      borrowed_type = borrowed_array_type(operand);
-      auto* source = unwrap_expression(operand);
-      borrowed_pointer_expression_ = source;
-      if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(source)) {
-        pointer_alias_use_ = id->symbol;
-      }
-      break;
+      const bool array_first = operand == ast->baseExpression;
+      analyze_array_selection(
+          ast, {operand, array_first ? index : ast->baseExpression,
+                traits.is_array(type) ? type : borrowed_array_type(operand),
+                array_first, false, std::nullopt});
+      return;
     }
   }
   cxx::ASTVisitor::visit(ast);
-  pointer_alias_use_ = saved_alias_use;
-  borrowed_pointer_expression_ = saved_borrowed_expression;
   if (auto* function = cxx::symbol_cast<cxx::FunctionSymbol>(ast->symbol)) {
     retain_call(ast, function);
-    return;
   }
-  auto traits = unit_.typeTraits();
-  auto* base_type = traits.remove_reference(ast->baseExpression->type);
-  auto* index_type = traits.remove_reference(index->type);
-  const bool array_first =
-      traits.is_array(base_type) || borrowed_array == ast->baseExpression;
-  if (!array_first && !traits.is_array(index_type) && !borrowed_array) {
-    return;
-  }
-  ArraySubscript selection{
-      array_first ? ast->baseExpression : index,
-      array_first ? index : ast->baseExpression,
-      borrowed_array ? borrowed_type : (array_first ? base_type : index_type),
-      array_first, std::nullopt};
-  auto* type = cxx::type_cast<cxx::BoundedArrayType>(
-      selection.type ? types_.unqualified(selection.type) : nullptr);
-  if (type || !selection.type) {
-    cxx::ASTInterpreter interpreter(&unit_);
-    auto constant = interpreter.evaluate(selection.index);
-    auto* integer = constant ? std::get_if<cxx::ConstInt>(&*constant) : nullptr;
-    if (integer && !integer->isNegative() &&
-        (!type || integer->toUWide() <
-                      static_cast<cxx::ConstInt::UWide>(type->size()))) {
-      selection.constant_index = static_cast<size_t>(integer->toUIntMax());
-    }
-  }
-  array_subscripts_.emplace(ast, selection);
-  retain_destination(selection.array);
-  retain_destination(ast);
 }
 
-const ArraySubscript* ControlFlow::array_subscript(
-    cxx::SubscriptExpressionAST* expression) const {
-  auto found = array_subscripts_.find(expression);
-  if (found != array_subscripts_.end() &&
+void ControlFlow::analyze_array_selection(cxx::ExpressionAST* expression,
+                                          ArraySelection selection) {
+  auto analyze_array = [&] {
+    auto* saved_alias_use = pointer_alias_use_;
+    auto* saved_borrowed_expression = borrowed_pointer_expression_;
+    borrowed_pointer_expression_ = unwrap_expression(selection.array);
+    if (auto* id =
+            cxx::ast_cast<cxx::IdExpressionAST>(borrowed_pointer_expression_)) {
+      pointer_alias_use_ = id->symbol;
+    }
+    accept(selection.array);
+    pointer_alias_use_ = saved_alias_use;
+    borrowed_pointer_expression_ = saved_borrowed_expression;
+  };
+  if (selection.array_first) {
+    analyze_array();
+    accept(selection.index);
+  } else {
+    accept(selection.index);
+    analyze_array();
+  }
+  // Visit conversions before selecting their array origin so lifetime facts
+  // retain materializations. Translation borrows the array, not its decay.
+  if (unit_.typeTraits().is_pointer(selection.array->type)) {
+    selection.array = unwrap_expression(selection.array);
+  }
+  if (selection.index) {
+    selection.constant_index.reset();
+    const auto* type = cxx::type_cast<cxx::BoundedArrayType>(
+        selection.type ? types_.unqualified(selection.type) : nullptr);
+    if (type || !selection.type) {
+      cxx::ASTInterpreter interpreter(&unit_);
+      auto constant = interpreter.evaluate(selection.index);
+      auto* integer =
+          constant ? std::get_if<cxx::ConstInt>(&*constant) : nullptr;
+      if (integer &&
+          (integer->isZero() || integer->isNegative() == selection.subtract) &&
+          integer->magnitude() <= static_cast<cxx::ConstInt::UWide>(SIZE_MAX) &&
+          (!type || integer->magnitude() <
+                        static_cast<cxx::ConstInt::UWide>(type->size()))) {
+        selection.constant_index = static_cast<size_t>(integer->magnitude());
+      }
+    }
+  }
+  array_selections_.emplace(expression, selection);
+  retain_destination(selection.array);
+  retain_destination(expression);
+}
+
+const ArraySelection* ControlFlow::array_selection(
+    cxx::ExpressionAST* expression) const {
+  if (expression->kind() != cxx::ASTKind::SubscriptExpression &&
+      expression->kind() != cxx::ASTKind::UnaryExpression) {
+    return nullptr;
+  }
+  auto found = array_selections_.find(expression);
+  if (found != array_selections_.end() &&
       unit_.typeTraits().is_pointer(found->second.array->type)) {
     auto* id = cxx::ast_cast<cxx::IdExpressionAST>(
         unwrap_expression(found->second.array));
@@ -2347,7 +2423,7 @@ const ArraySubscript* ControlFlow::array_subscript(
       }
     }
   }
-  return found == array_subscripts_.end() ? nullptr : &found->second;
+  return found == array_selections_.end() ? nullptr : &found->second;
 }
 
 void ControlFlow::analyze_default_constructor(const cxx::Type* type,
@@ -3035,11 +3111,12 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
       }
       return;
     }
-    const auto* selection = array_subscript(subscript);
-    if (!selection) {
+    if (!array_selection(subscript)) {
       argument.inherent_storage = true;
       return;
     }
+  }
+  if (const auto* selection = array_selection(expression)) {
     auto array_identity = retain_array_identity(selection->array);
     if (argument_requires_storage(array_identity)) {
       append_identity(array_identity, argument);
@@ -3048,7 +3125,7 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
     }
     if (!selection->type) {
       const size_t count =
-          types_.partition(subscript->type, expression).component_count;
+          types_.partition(expression->type, expression).component_count;
       append_identity(
           array_identity, argument,
           selection->constant_index
@@ -3675,13 +3752,35 @@ bool ControlFlow::propagate_projected_reference_return(
       !projected_reference_return_facts_) {
     return false;
   }
-  auto selection =
-      projected_reference_return_facts_->selections.find(call.source);
-  if (selection == projected_reference_return_facts_->selections.end()) {
-    return false;
-  }
   auto& facts = *projected_reference_return_facts_;
-  auto& propagated_count = selection->second.propagated_origin_count;
+  bool changed = false;
+  if (auto selection = facts.selections.find(call.source);
+      selection != facts.selections.end()) {
+    changed = propagate_projected_reference_selection(
+        call, callee, call.source, {},
+        selection->second.propagated_origin_count);
+  }
+  if (!facts.array_results.empty()) {
+    auto found = facts.array_results.find(call.source);
+    if (found != facts.array_results.end()) {
+      for (auto& result : found->second) {
+        changed = propagate_projected_reference_selection(
+                      call, callee, result.expression, result.projection,
+                      result.propagated_origin_count) ||
+                  changed;
+      }
+    }
+  }
+  return changed;
+}
+
+bool ControlFlow::propagate_projected_reference_selection(
+    const DirectCall& call, const ControlFlow& callee, cxx::AST* expression,
+    ReferenceProjection projection, size_t& propagated_count) {
+  auto& facts = *projected_reference_return_facts_;
+  auto& selection = facts.selections.find(expression)->second;
+  const auto* array_element =
+      array_selection(cxx::ast_cast<cxx::ExpressionAST>(expression));
   IREE_ASSERT(propagated_count != SIZE_MAX);
   bool changed = false;
   auto select_storage = [&] {
@@ -3728,11 +3827,7 @@ bool ControlFlow::propagate_projected_reference_return(
     }
     return translated;
   };
-  size_t source_count = 0;
-  auto append = [&](const ReferenceResultOrigin& source) {
-    if (source_count++ < propagated_count) {
-      return;
-    }
+  auto append_origin = [&](const ReferenceResultOrigin& source) {
     TranslatedReferenceOrigins translated;
     if (source.owner_ordinal == ReferenceResultOrigin::kReceiver) {
       if (call.current_receiver) {
@@ -3751,15 +3846,40 @@ bool ControlFlow::propagate_projected_reference_return(
     for (auto& origin : translated.values()) {
       const size_t index =
           retain_projected_reference_origin(facts, std::move(origin)).first;
-      selection->second.origins.push_back(index);
+      selection.origins.push_back(index);
       // The selection itself is fixed-point state even when another leaf
       // already retained the same canonical origin.
       changed = true;
     }
   };
+  size_t source_count = 0;
+  auto append = [&](const ReferenceResultOrigin& source) {
+    if (source_count++ < propagated_count) {
+      return;
+    }
+    if (!array_element) {
+      append_origin(source);
+      return;
+    }
+    const auto* array = types_.array(
+        array_element->type ? array_element->type : source.projection.type,
+        expression);
+    const bool constant =
+        array_element->constant_index &&
+        *array_element->constant_index < array->source->size();
+    const size_t first = constant ? *array_element->constant_index : 0;
+    const size_t end = constant ? first + 1 : array->source->size();
+    for (size_t index = first; index < end; ++index) {
+      append_origin(
+          {source.owner_ordinal,
+           {array->source->elementType(), array->element,
+            source.projection.component_offset + projection.component_offset +
+                index * array->element->component_count}});
+    }
+  };
 
   if (callee.reference_return_ == ReferenceReturn::Projected) {
-    selection->second.origins.reserve(
+    selection.origins.reserve(
         callee.projected_reference_return_facts_->origins.size());
     for (const auto& origin :
          callee.projected_reference_return_facts_->origins) {
@@ -3767,8 +3887,7 @@ bool ControlFlow::propagate_projected_reference_return(
     }
   } else if (callee.reference_return_ == ReferenceReturn::Parameter) {
     auto parameters = callee.function_->parameters();
-    selection->second.origins.reserve(
-        callee.reference_return_parameters().size());
+    selection.origins.reserve(callee.reference_return_parameters().size());
     for (size_t ordinal : callee.reference_return_parameters()) {
       auto* type = callee.types_.unqualified_value(parameters[ordinal]->type());
       append({ordinal, {type, &callee.types_.partition(type, call.source), 0}});
@@ -3780,7 +3899,7 @@ bool ControlFlow::propagate_projected_reference_return(
                           callee.types_.unqualified(object_type), call.source)
                     : nullptr;
     if (record) {
-      selection->second.origins.reserve(1);
+      selection.origins.reserve(1);
       append({ReferenceResultOrigin::kReceiver,
               {callee.types_.unqualified(object_type), record, 0}});
     }
@@ -4524,8 +4643,8 @@ bool ControlFlow::propagate_field_inputs() {
 }
 
 void ControlFlow::finalize_callable_effects() {
-  for (auto entry = array_subscripts_.begin();
-       entry != array_subscripts_.end();) {
+  for (auto entry = array_selections_.begin();
+       entry != array_selections_.end();) {
     auto& selection = entry->second;
     if (selection.type) {
       ++entry;
@@ -4533,7 +4652,7 @@ void ControlFlow::finalize_callable_effects() {
     }
     selection.type = borrowed_array_type(selection.array);
     if (!selection.type) {
-      entry = array_subscripts_.erase(entry);
+      entry = array_selections_.erase(entry);
       continue;
     }
     const auto* array = cxx::type_cast<cxx::BoundedArrayType>(
@@ -4551,6 +4670,7 @@ void ControlFlow::finalize_callable_effects() {
   }
   if (projected_reference_return_facts_) {
     auto& facts = *projected_reference_return_facts_;
+    facts.array_results = {};
     facts.origin_indices = {};
     facts.parameter_ordinals = {};
     facts.receiver_offsets = {};
@@ -5130,8 +5250,9 @@ std::optional<Destination> ControlFlow::classify_destination(
     if (types_.native_vector(index->type)) {
       return classify_destination(index);
     }
-    if (auto* selection = array_subscript(subscript);
-        selection && selection->constant_index) {
+  }
+  if (auto* selection = array_selection(expression)) {
+    if (selection->constant_index) {
       auto* source = array_borrow_origin(selection->array);
       auto target = source ? classify_destination(source) : std::nullopt;
       if (target && selection->type) {
@@ -5275,11 +5396,11 @@ bool ControlFlow::classify_storage(cxx::ExpressionAST* expression) const {
   if (auto* operand = explicit_reference_operand(unit_, expression)) {
     return storage_expressions_.contains(operand);
   }
+  if (auto* selection = array_selection(expression)) {
+    return storage_expressions_.contains(selection->array);
+  }
   if (auto* subscript =
           cxx::ast_cast<cxx::SubscriptExpressionAST>(expression)) {
-    if (auto* selection = array_subscript(subscript)) {
-      return storage_expressions_.contains(selection->array);
-    }
     return !subscript->symbol;
   }
   if (auto* unary = cxx::ast_cast<cxx::UnaryExpressionAST>(expression)) {

@@ -705,7 +705,7 @@ TEST(ControlFlowTest, ArraySelectionRetainsValuesUntilAnAddressIsObserved) {
       View value{data, {1, 2, 3}};
       Box addressed{{4, 5, 6}};
       consume(addressed.values);
-      return value.values[index] + 1[value.values];
+      return (value.values[index] + 1[value.values]) + *value.values;
     }
   )"),
                 IREE_SV("array_selection.cxx"), options);
@@ -737,7 +737,23 @@ TEST(ControlFlowTest, ArraySelectionRetainsValuesUntilAnAddressIsObserved) {
   EXPECT_TRUE(analysis.addressed(bindings[1]));
 
   ASSERT_NE(returned, nullptr);
-  auto* sum = cxx::ast_cast<cxx::BinaryExpressionAST>(returned->expression);
+  auto* combined =
+      cxx::ast_cast<cxx::BinaryExpressionAST>(returned->expression);
+  ASSERT_NE(combined, nullptr);
+  auto* dereference = cxx::ast_cast<cxx::UnaryExpressionAST>(
+      unwrap_expression(combined->rightExpression));
+  ASSERT_NE(dereference, nullptr);
+  auto* first = analysis.array_selection(dereference);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->index, nullptr);
+  EXPECT_EQ(first->constant_index, 0u);
+  auto first_destination = analysis.destination(dereference);
+  ASSERT_TRUE(first_destination.has_value());
+  EXPECT_EQ(first_destination->binding, bindings[0]);
+  EXPECT_EQ(first_destination->component_offset, 2u);
+  EXPECT_EQ(first_destination->member->component_count, 1u);
+  auto* sum = cxx::ast_cast<cxx::BinaryExpressionAST>(
+      unwrap_expression(combined->leftExpression));
   ASSERT_NE(sum, nullptr);
   auto* dynamic = cxx::ast_cast<cxx::SubscriptExpressionAST>(
       unwrap_expression(sum->leftExpression));
@@ -745,8 +761,8 @@ TEST(ControlFlowTest, ArraySelectionRetainsValuesUntilAnAddressIsObserved) {
       unwrap_expression(sum->rightExpression));
   ASSERT_NE(dynamic, nullptr);
   ASSERT_NE(constant, nullptr);
-  auto* dynamic_selection = analysis.array_subscript(dynamic);
-  auto* constant_selection = analysis.array_subscript(constant);
+  auto* dynamic_selection = analysis.array_selection(dynamic);
+  auto* constant_selection = analysis.array_selection(constant);
   ASSERT_NE(dynamic_selection, nullptr);
   ASSERT_NE(constant_selection, nullptr);
   EXPECT_TRUE(dynamic_selection->array_first);
@@ -759,6 +775,39 @@ TEST(ControlFlowTest, ArraySelectionRetainsValuesUntilAnAddressIsObserved) {
   EXPECT_EQ(selected->binding, bindings[0]);
   EXPECT_EQ(selected->component_offset, 3u);
   EXPECT_EQ(selected->member->component_count, 1u);
+}
+
+TEST(ControlFlowTest, PointerSubtractionRetainsAnArrayOrdinal) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct State { int* output; int values[2]; };
+    int entry(State& state) { return *(state.values - -1); }
+  )"),
+                IREE_SV("array_subtraction.cxx"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+  auto* returned =
+      cxx::ast_cast<cxx::ReturnStatementAST>(body->statementList->value);
+  ASSERT_NE(returned, nullptr);
+  auto* expression = unwrap_expression(returned->expression);
+  const auto* selection = analysis.array_selection(expression);
+  ASSERT_NE(selection, nullptr);
+  EXPECT_TRUE(selection->array_first);
+  EXPECT_TRUE(selection->subtract);
+  EXPECT_EQ(selection->constant_index, 1u);
+  auto destination = analysis.destination(expression);
+  ASSERT_TRUE(destination.has_value());
+  EXPECT_EQ(destination->binding, function->symbol->parameters()[0]);
+  EXPECT_EQ(destination->component_offset, 3u);
+  EXPECT_EQ(destination->member->component_count, 1u);
+  EXPECT_FALSE(analysis.reference_requires_storage(destination->binding));
 }
 
 TEST(ControlFlowTest, StructuredBindingsAnalyzeTheSynthesizedDeclarationOnce) {

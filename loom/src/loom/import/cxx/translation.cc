@@ -2915,8 +2915,7 @@ class Translator final : private Initialization::Evaluation {
 
   bool is_array_element(cxx::ExpressionAST* expression) {
     expression = unwrap_object_identity(unit_, expression);
-    auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(expression);
-    return subscript && control_->array_subscript(subscript);
+    return control_->array_selection(expression) != nullptr;
   }
 
   Lvalue project_array_element(const Lvalue& target,
@@ -2954,10 +2953,10 @@ class Translator final : private Initialization::Evaluation {
     fail(owner, "array element lost its retained source owner");
   }
 
-  std::optional<Lvalue> array_element(cxx::SubscriptExpressionAST* subscript,
+  std::optional<Lvalue> array_element(cxx::ExpressionAST* selection,
                                       cxx::AST* owner, LvalueAccess access,
                                       bool preserve_identity = false) {
-    const auto* operands = control_->array_subscript(subscript);
+    const auto* operands = control_->array_selection(selection);
     if (!operands) {
       return std::nullopt;
     }
@@ -2972,32 +2971,39 @@ class Translator final : private Initialization::Evaluation {
     };
     if (operands->array_first) {
       array_target = evaluate_array();
-      index_value = expression(operands->index);
+      if (operands->index) {
+        index_value = expression(operands->index);
+      }
     } else {
       index_value = expression(operands->index);
       array_target = evaluate_array();
     }
 
-    const auto* element_type = subscript->type;
+    const auto* element_type = selection->type;
     if (auto* object = std::get_if<ObjectLvalue>(&array_target->projection)) {
       if (auto* storage = std::get_if<StorageProjection>(&object->location)) {
         if (auto* member =
                 cxx::ast_cast<cxx::MemberExpressionAST>(operands->array)) {
           name(storage->pointer, cxx::to_string(member->symbol->name()));
         }
+        if (!operands->index) {
+          return Lvalue{ObjectLvalue{element_type, *storage}};
+        }
         auto traits = unit_.typeTraits();
         if (!preserve_identity && !traits.is_class(element_type) &&
-            !traits.is_array(element_type)) {
+            !traits.is_array(element_type) && !operands->subtract) {
           return Lvalue{ObjectLvalue{
               element_type,
               storage_.subscript(*storage, index_value->ssa(), operands->type,
                                  operands->index->type, owner)}};
         }
-        return Lvalue{
-            ObjectLvalue{element_type,
-                         storage_.advance(*storage, index_value->ssa(),
-                                          operands->type, operands->index->type,
-                                          cxx::TokenKind::T_PLUS, owner)}};
+        return Lvalue{ObjectLvalue{
+            element_type,
+            storage_.advance(*storage, index_value->ssa(), operands->type,
+                             operands->index->type,
+                             operands->subtract ? cxx::TokenKind::T_MINUS
+                                                : cxx::TokenKind::T_PLUS,
+                             owner)}};
       }
     }
     auto* array = types_.array(operands->type, owner);
@@ -3017,6 +3023,12 @@ class Translator final : private Initialization::Evaluation {
     auto* ordinal_type = unit_.control()->getUnsignedIntType();
     auto selector = scalars_.convert(index_value->ssa(), operands->index->type,
                                      ordinal_type, owner);
+    if (operands->subtract) {
+      auto zero =
+          scalars_.integer(0, LOOM_SCALAR_TYPE_I32, locations_.get(owner));
+      selector = scalars_.binary(cxx::TokenKind::T_MINUS, zero, selector,
+                                 ordinal_type, ordinal_type, owner);
+    }
     std::vector<Lvalue> alternatives;
     std::optional<loom_value_id_t> lane;
     if (const auto* outer = array_target->selection()) {
@@ -3233,12 +3245,9 @@ class Translator final : private Initialization::Evaluation {
     if (cxx::ast_cast<cxx::ConditionalExpressionAST>(projected)) {
       return reference_lvalue(projected, owner, access);
     }
-    if (auto* subscript =
-            cxx::ast_cast<cxx::SubscriptExpressionAST>(projected)) {
-      if (auto target =
-              array_element(subscript, owner, access, preserve_identity)) {
-        return std::move(*target);
-      }
+    if (auto target =
+            array_element(projected, owner, access, preserve_identity)) {
+      return std::move(*target);
     }
     if (auto called = reference_call(projected)) {
       if (called->reference_target) {
@@ -6695,6 +6704,9 @@ class Translator final : private Initialization::Evaluation {
         return object_address(unary->expression).pointer;
       }
       if (unary->op == cxx::TokenKind::T_STAR) {
+        if (auto target = array_element(unary, ast, LvalueAccess::Read)) {
+          return read(*target, ast);
+        }
         if (auto* alias = pointer_alias_lvalue(unary->expression)) {
           return read(pointer_alias_pointee(*alias, ast), ast);
         }
@@ -8496,6 +8508,18 @@ class Translator final : private Initialization::Evaluation {
       if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(ast);
           cast && !cast->conversionFunction) {
         effect(cast->expression);
+        return;
+      }
+      if (const auto* selection = control_->array_selection(ast)) {
+        if (selection->array_first) {
+          effect(selection->array);
+          if (selection->index) {
+            effect(selection->index);
+          }
+        } else {
+          effect(selection->index);
+          effect(selection->array);
+        }
         return;
       }
       if (auto* unary = cxx::ast_cast<cxx::UnaryExpressionAST>(ast);

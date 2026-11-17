@@ -2565,6 +2565,36 @@ construction such as `Result()` executes the frontend's declaration-order
 member-initialization plan, including nested records and arrays. Bitfields
 require an additional object representation and receive source diagnostics.
 
+Fixed-array members also remain values when selected through `*array`,
+`*(array + index)`, `*(index + array)`, or `*(array - index)`. These builtin
+forms use the same element projection as subscripts, including mutation and
+references to selected elements:
+
+```cpp
+struct Bounds {
+  float* data;
+  int lower[3];
+  int* begin() { return lower; }
+};
+
+static int first(const Bounds& bounds) { return *bounds.lower; }
+static int& lower(Bounds& bounds, unsigned axis) { return bounds.begin()[axis]; }
+
+int update(float* data, int value, unsigned axis) {
+  Bounds bounds{data, {value, value + 1, value + 2}};
+  lower(bounds, axis) += 4;
+  return first(bounds);
+}
+```
+
+The pointer field remains a buffer and byte origin, while the array elements
+remain scalar values. The `first` helper receives only the element it reads.
+Selecting an element creates no allocation; observing an actual pointer address
+still requires addressable storage. Accessor calls retain their side effects
+and execute once before the selected element is read or written. Returning an
+element reference through a helper preserves the selected caller-owned field,
+including nested arrays and arrays of records containing vectors.
+
 Nonvirtual inheritance uses the same value and storage model as composition.
 Direct bases precede fields in aggregate initialization and callable signatures;
 destruction visits fields and then bases in reverse order. Inherited fields,
@@ -2590,10 +2620,10 @@ reused base tail padding remains untouched.
 Derived-to-base references select the existing subobject. An explicit
 base-to-derived reference cast retains the enclosing object's storage and
 requires a live object of the requested derived type, as in C++. Inherited
-access through a derived pointer is supported. Standalone derived/base pointer
-conversions receive a diagnostic until buffer identity can preserve null during
-address adjustment. Virtual bases and virtual dispatch require a dynamic
-object representation and receive source diagnostics.
+access through a derived pointer is supported. Derived/base pointer conversions
+preserve null and adjust only the byte origin of a nonnull pointer. Virtual bases
+and virtual dispatch require a dynamic object representation and receive source
+diagnostics.
 
 A record can also define its own constructors. The selected constructor runs
 its declaration-ordered member initializers and then its ordinary C++ body

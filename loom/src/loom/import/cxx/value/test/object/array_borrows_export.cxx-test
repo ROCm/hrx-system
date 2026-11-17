@@ -8,11 +8,17 @@ struct Box {
   int* data(bool upper) { if (upper) return this->upper; return lower; }
 };
 struct State { int* output; Box box; };
+static int& element(State& state, bool upper, unsigned index) {
+  int* pointer = state.box.data(upper);
+  return pointer[index];
+}
 int update(int* output, int value, bool upper) {
   State state{output, {{value, 2}, {3, 4}}};
   int* pointer = state.box.data(upper);
   pointer[0] += 7;
-  return state.box.lower[0] * 3 + state.box.upper[0] * 5;
+  element(state, upper, 0) += 9;
+  *(state.box.lower + 0) += 2;
+  return *(0 + state.box.lower) * 3 + *(state.box.upper - 0) * 5;
 }
 // ----
 #include <loomcxx/buffer.h>
@@ -23,6 +29,9 @@ unsigned update(loom::type::buffer<unsigned char> output, loom::type::offset out
 
 [[loom::symbol("Box__data_value")]]
 static unsigned Box__data_value(unsigned this_lower_0, unsigned this_lower_1, unsigned this_upper_0, unsigned this_upper_1, bool upper);
+
+[[loom::symbol("element")]]
+static unsigned element(loom::type::buffer<unsigned char> state_output, loom::type::offset state_output_byte_offset, unsigned state_box_lower_0, unsigned state_box_lower_1, unsigned state_box_upper_0, unsigned state_box_upper_1, bool upper, unsigned index);
 
 [[loom::symbol("update")]]
 unsigned update(loom::type::buffer<unsigned char> output, loom::type::offset output_byte_offset, unsigned value, bool upper) {
@@ -46,16 +55,55 @@ unsigned update(loom::type::buffer<unsigned char> output, loom::type::offset out
   } else {
     state_box_lower_0 = v14;
   }
-  return ((state_box_lower_0 * 3u) + (state_box_upper_0_1 * 5u));
+  unsigned v23 = element(output, output_byte_offset, state_box_lower_0, 2u, state_box_upper_0_1, 4u, upper, 0u);
+  unsigned v26{};
+  if (v23 < 2u) {
+    if (v23 == 0u) {
+      v26 = state_box_upper_0_1;
+    } else {
+      v26 = 4u;
+    }
+  } else {
+    if (v23 == 2u) {
+      v26 = state_box_lower_0;
+    } else {
+      v26 = 2u;
+    }
+  }
+  unsigned v33 = v26 + 9u;
+  unsigned state_box_upper_0_2{};
+  if (v23 == 0u) {
+    state_box_upper_0_2 = v33;
+  } else {
+    state_box_upper_0_2 = state_box_upper_0_1;
+  }
+  if (v23 == 1u) {
+  }
+  unsigned state_box_lower_0_1{};
+  if (v23 == 2u) {
+    state_box_lower_0_1 = v33;
+  } else {
+    state_box_lower_0_1 = state_box_lower_0;
+  }
+  if (v23 == 3u) {
+  }
+  unsigned state_box_lower_0_2 = state_box_lower_0_1 + 2u;
+  return ((state_box_lower_0_2 * 3u) + (state_box_upper_0_2 * 5u));
 }
 
 [[loom::symbol("Box__data_value")]]
 static unsigned Box__data_value(unsigned this_lower_0, unsigned this_lower_1, unsigned this_upper_0, unsigned this_upper_1, bool upper) {
-  unsigned v34{};
+  unsigned v62{};
   if (upper) {
-    v34 = 0u;
+    v62 = 0u;
   } else {
-    v34 = 1u;
+    v62 = 1u;
   }
-  return v34;
+  return v62;
+}
+
+[[loom::symbol("element")]]
+static unsigned element(loom::type::buffer<unsigned char> state_output, loom::type::offset state_output_byte_offset, unsigned state_box_lower_0, unsigned state_box_lower_1, unsigned state_box_upper_0, unsigned state_box_upper_1, bool upper, unsigned index) {
+  unsigned v74 = Box__data_value(state_box_lower_0, state_box_lower_1, state_box_upper_0, state_box_upper_1, upper);
+  return ((v74 * 2u) + index);
 }
