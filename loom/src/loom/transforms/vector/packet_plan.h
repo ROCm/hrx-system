@@ -93,6 +93,10 @@ typedef enum loom_vector_packet_selection_flag_bits_e {
   // a producer graph. The operation retains its authored result and its own
   // legalizer remains responsible for realizing that value.
   LOOM_VECTOR_PACKET_SELECTION_FLAG_CAPTURE_NON_DECOMPOSABLE = 1u << 1,
+  // The consumer observes every source lane. Already-native computation can
+  // remain whole while narrower packets consume its result. Subset windows
+  // omit this flag so their producer graph can compute only observed lanes.
+  LOOM_VECTOR_PACKET_SELECTION_FLAG_CONSUME_ALL_LANES = 1u << 2,
 } loom_vector_packet_selection_flag_bits_t;
 typedef uint8_t loom_vector_packet_selection_flags_t;
 
@@ -145,7 +149,7 @@ typedef struct loom_vector_packetization_t {
   uint32_t value_count;
   // Number of allocated value entries.
   uint32_t value_capacity;
-  // Whether selection retained a decomposable producer operation.
+  // Whether selection retained streamed or captured decomposable computation.
   bool contains_vector_computation;
 } loom_vector_packetization_t;
 

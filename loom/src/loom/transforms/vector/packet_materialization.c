@@ -1377,13 +1377,13 @@ static bool loom_vector_packet_reduce_can_fold_packets(
 static iree_status_t loom_vector_packet_reduce_vector_component(
     loom_target_legalization_context_t* context, loom_op_t* reduce_op,
     loom_value_id_t input, loom_value_id_t* inout_accumulator) {
+  const loom_type_t result_type = loom_module_value_type(
+      context->module, loom_vector_reduce_result(reduce_op));
   loom_op_t* component_reduce_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_reduce_build(
       &context->rewriter->builder, loom_vector_reduce_kind(reduce_op),
       loom_vector_reduce_fastmath(reduce_op), input, *inout_accumulator,
-      loom_module_value_type(context->module,
-                             loom_vector_reduce_result(reduce_op)),
-      reduce_op->location, &component_reduce_op));
+      result_type, reduce_op->location, &component_reduce_op));
   *inout_accumulator = loom_vector_reduce_result(component_reduce_op);
   return iree_ok_status();
 }
@@ -1779,8 +1779,6 @@ iree_status_t loom_vector_packet_static_reduce(
   loom_builder_t* builder = &packetization->context->rewriter->builder;
   const loom_combining_kind_t kind = loom_vector_reduce_kind(reduce_op);
   const uint8_t fastmath_flags = loom_vector_reduce_fastmath(reduce_op);
-  const loom_type_t result_type = loom_module_value_type(
-      packetization->context->module, loom_vector_reduce_result(reduce_op));
   const loom_value_id_t initial_accumulator =
       loom_vector_reduce_init(reduce_op);
   const bool fold_packets =
@@ -1805,11 +1803,21 @@ iree_status_t loom_vector_packet_static_reduce(
         packetization->context->module, packetized_input->packet.vector);
 
     if (!fold_packets) {
-      loom_op_t* packet_reduce_op = NULL;
-      IREE_RETURN_IF_ERROR(loom_vector_reduce_build(
-          builder, kind, fastmath_flags, packetized_input->packet.vector,
-          accumulator, result_type, reduce_op->location, &packet_reduce_op));
-      accumulator = loom_vector_reduce_result(packet_reduce_op);
+      if (!fold_packet_inputs && slice.lane_count == 1) {
+        // A scalar packet is already a selected observation. Reintroducing a
+        // one-lane vector reduction would let scalar fallback rematerialize
+        // its native producer instead of consuming that observation.
+        loom_value_id_t scalar = LOOM_VALUE_ID_INVALID;
+        IREE_RETURN_IF_ERROR(loom_vector_packet_extract_single_lane(
+            packetization, packetized_input->packet, reduce_op->location,
+            &scalar));
+        IREE_RETURN_IF_ERROR(loom_vector_packet_reduce_scalar_component(
+            packetization->context, reduce_op, scalar, &accumulator));
+      } else {
+        IREE_RETURN_IF_ERROR(loom_vector_packet_reduce_vector_component(
+            packetization->context, reduce_op, packetized_input->packet.vector,
+            &accumulator));
+      }
       continue;
     }
 
@@ -1823,22 +1831,16 @@ iree_status_t loom_vector_packet_static_reduce(
     }
 
     if (folded_packet != LOOM_VALUE_ID_INVALID) {
-      loom_op_t* packet_reduce_op = NULL;
-      IREE_RETURN_IF_ERROR(loom_vector_reduce_build(
-          builder, kind, fastmath_flags, folded_packet, accumulator,
-          result_type, reduce_op->location, &packet_reduce_op));
-      accumulator = loom_vector_reduce_result(packet_reduce_op);
+      IREE_RETURN_IF_ERROR(loom_vector_packet_reduce_vector_component(
+          packetization->context, reduce_op, folded_packet, &accumulator));
     }
     folded_packet = packetized_input->packet.vector;
     folded_packet_type = packet_type;
   }
 
   if (folded_packet != LOOM_VALUE_ID_INVALID) {
-    loom_op_t* packet_reduce_op = NULL;
-    IREE_RETURN_IF_ERROR(loom_vector_reduce_build(
-        builder, kind, fastmath_flags, folded_packet, accumulator, result_type,
-        reduce_op->location, &packet_reduce_op));
-    accumulator = loom_vector_reduce_result(packet_reduce_op);
+    IREE_RETURN_IF_ERROR(loom_vector_packet_reduce_vector_component(
+        packetization->context, reduce_op, folded_packet, &accumulator));
   }
   *out_accumulator = accumulator;
   return iree_ok_status();

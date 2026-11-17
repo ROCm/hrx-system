@@ -99,6 +99,7 @@ loom_check_test_suite(
         "vector_insert_packetization.loom-test",
         "vector_literal_patch_selection.loom-test",
         "vector_memory_packetization.loom-test",
+        "vector_native_consumers.loom-test",
         "vector_reduce_axes.loom-test",
     ],
     target_compatible_with = _XDNA_TARGET_COMPATIBLE_WITH,

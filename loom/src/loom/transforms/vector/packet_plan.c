@@ -1342,7 +1342,8 @@ static iree_status_t loom_vector_packet_reserve(
 
 static iree_status_t loom_vector_packet_record(
     loom_vector_packetization_t* packetization, loom_value_id_t source,
-    loom_type_t source_type, loom_vector_packet_source_action_t source_action) {
+    loom_type_t source_type, loom_vector_packet_source_action_t source_action,
+    loom_vector_packet_source_mode_t source_mode) {
   IREE_RETURN_IF_ERROR(loom_vector_packet_reserve(
       packetization, packetization->value_count + 1u));
   uint32_t* index = loom_vector_packet_find_index(packetization, source);
@@ -1352,6 +1353,7 @@ static iree_status_t loom_vector_packet_record(
       .source = source,
       .source_type = source_type,
       .source_action = source_action,
+      .source_mode = source_mode,
       .packet =
           (loom_vector_packet_value_t){
               .vector = LOOM_VALUE_ID_INVALID,
@@ -1385,11 +1387,8 @@ static iree_status_t loom_vector_packet_record_captured(
   }
   IREE_RETURN_IF_ERROR(
       loom_vector_packet_record(packetization, source, source_type,
-                                LOOM_VECTOR_PACKET_SOURCE_ACTION_OPERATION));
-  loom_vector_packetized_value_t* packetized_value =
-      loom_vector_packet_find(packetization, source);
-  IREE_ASSERT(packetized_value != NULL);
-  packetized_value->source_mode = LOOM_VECTOR_PACKET_SOURCE_MODE_CAPTURED;
+                                LOOM_VECTOR_PACKET_SOURCE_ACTION_OPERATION,
+                                LOOM_VECTOR_PACKET_SOURCE_MODE_CAPTURED));
   *out_selected = true;
   return iree_ok_status();
 }
@@ -1579,6 +1578,8 @@ iree_status_t loom_vector_packet_select_value_shape(
       packetization, source, inout_shape, &source_partition);
   loom_vector_packet_source_action_t source_action =
       LOOM_VECTOR_PACKET_SOURCE_ACTION_OPERATION;
+  loom_vector_packet_source_mode_t source_mode =
+      LOOM_VECTOR_PACKET_SOURCE_MODE_STREAMED;
   switch (op->kind) {
     case LOOM_OP_VECTOR_LOAD: {
       source_action = LOOM_VECTOR_PACKET_SOURCE_ACTION_MEMORY_LOAD;
@@ -1644,6 +1645,24 @@ iree_status_t loom_vector_packet_select_value_shape(
         return loom_vector_packet_record_captured(packetization, source,
                                                   source_type, out_selected);
       }
+      if (iree_any_bit_set(
+              packetization->selection_flags,
+              LOOM_VECTOR_PACKET_SELECTION_FLAG_CONSUME_ALL_LANES)) {
+        loom_target_contract_query_result_t query_result =
+            loom_target_contract_query_result_empty();
+        IREE_RETURN_IF_ERROR(loom_target_legalization_query_contract(
+            packetization->context, op, &query_result));
+        if (query_result.outcome == LOOM_TARGET_CONTRACT_QUERY_LEGAL &&
+            query_result.selected_descriptor != NULL) {
+          // Native computation owns its width. A narrower memory or reduction
+          // packet consumes slices instead of replaying the entire producer
+          // closure at that packet width.
+          source_mode = LOOM_VECTOR_PACKET_SOURCE_MODE_CAPTURED;
+          packetization->contains_vector_computation = true;
+          *out_selected = true;
+          break;
+        }
+      }
       IREE_RETURN_IF_ERROR(loom_vector_packet_select_decomposable_op_shape(
           packetization, op, inout_shape, out_selected));
       packetization->contains_vector_computation |= *out_selected;
@@ -1651,8 +1670,8 @@ iree_status_t loom_vector_packet_select_value_shape(
     }
   }
   if (*out_selected) {
-    IREE_RETURN_IF_ERROR(loom_vector_packet_record(packetization, source,
-                                                   source_type, source_action));
+    IREE_RETURN_IF_ERROR(loom_vector_packet_record(
+        packetization, source, source_type, source_action, source_mode));
     loom_vector_packetized_value_t* packetized_value =
         loom_vector_packet_find(packetization, source);
     IREE_ASSERT(packetized_value != NULL);

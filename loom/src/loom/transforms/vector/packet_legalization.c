@@ -1054,7 +1054,8 @@ iree_status_t loom_vector_packet_legalize_table_lookup(
   loom_vector_packetization_t packetization = {0};
   loom_vector_packetization_initialize(context, policy, &packetization);
   packetization.selection_flags =
-      LOOM_VECTOR_PACKET_SELECTION_FLAG_CAPTURE_EXTERNAL;
+      LOOM_VECTOR_PACKET_SELECTION_FLAG_CAPTURE_EXTERNAL |
+      LOOM_VECTOR_PACKET_SELECTION_FLAG_CONSUME_ALL_LANES;
   packetization.captured_value_location = op->location;
   bool producer_selected = false;
   IREE_RETURN_IF_ERROR(loom_vector_packet_select_value_shape(
@@ -1522,7 +1523,8 @@ iree_status_t loom_vector_packet_legalize_store(
   loom_vector_packetization_t packetization = {0};
   loom_vector_packetization_initialize(context, policy, &packetization);
   packetization.selection_flags =
-      LOOM_VECTOR_PACKET_SELECTION_FLAG_CAPTURE_NON_DECOMPOSABLE;
+      LOOM_VECTOR_PACKET_SELECTION_FLAG_CAPTURE_NON_DECOMPOSABLE |
+      LOOM_VECTOR_PACKET_SELECTION_FLAG_CONSUME_ALL_LANES;
   packetization.captured_value_location = op->location;
   bool producer_selected = false;
   IREE_RETURN_IF_ERROR(loom_vector_packet_select_value_shape(
@@ -1739,7 +1741,8 @@ static iree_status_t loom_vector_packet_preserve_reduce_loads(
   loom_vector_packetization_t packetization = {0};
   loom_vector_packetization_initialize(context, policy, &packetization);
   packetization.selection_flags =
-      LOOM_VECTOR_PACKET_SELECTION_FLAG_CAPTURE_EXTERNAL;
+      LOOM_VECTOR_PACKET_SELECTION_FLAG_CAPTURE_EXTERNAL |
+      LOOM_VECTOR_PACKET_SELECTION_FLAG_CONSUME_ALL_LANES;
   packetization.captured_value_location = reduce_op->location;
   bool producer_selected = false;
   IREE_RETURN_IF_ERROR(loom_vector_packet_select_value_shape(
@@ -1830,10 +1833,9 @@ iree_status_t loom_vector_packet_legalize_reduce(
     return iree_ok_status();
   }
   if (!packet_reduction_supported) {
-    // Keep the reduction and its decomposable producer graph under one plan.
-    // A scalar-width packet lets the same graph materializer rebuild source
-    // lanes without first constructing a native vector that the reduction
-    // would immediately extract again.
+    // A scalar-width packet combines one observed lane at a time. Selection
+    // retains native producers and decomposes only the remaining computation,
+    // so scalar reduction does not force native arithmetic into scalar lanes.
     shape.chunk_lane_count = 1;
     shape.chunk_count = shape.lane_count;
   }
@@ -1841,7 +1843,8 @@ iree_status_t loom_vector_packet_legalize_reduce(
   loom_vector_packetization_t packetization = {0};
   loom_vector_packetization_initialize(context, policy, &packetization);
   packetization.selection_flags =
-      LOOM_VECTOR_PACKET_SELECTION_FLAG_CAPTURE_EXTERNAL;
+      LOOM_VECTOR_PACKET_SELECTION_FLAG_CAPTURE_EXTERNAL |
+      LOOM_VECTOR_PACKET_SELECTION_FLAG_CONSUME_ALL_LANES;
   packetization.captured_value_location = op->location;
   bool producer_selected = false;
   IREE_RETURN_IF_ERROR(loom_vector_packet_select_value_shape(

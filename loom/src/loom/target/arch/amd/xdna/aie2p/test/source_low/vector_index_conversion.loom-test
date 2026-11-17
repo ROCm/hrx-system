@@ -251,49 +251,45 @@ func.def @index_table_selector(%table: vector<4xi16>, %input: vector<17xi8>) -> 
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @index_table_selector(%table: reg<aie2p.vec256 x2>, %input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
-  %54 = slice %input[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %55 = mov.shift 0
+  %52 = slice %input[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %53 = mov.shift 0
   set.saturation 0
   set.ups-mode 0
-  %56 = vups.4x.w-to-c.signed %54, %55
-  %57 = slice %56[0] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
+  %54 = vups.4x.w-to-c.signed %52, %53
+  %55 = slice %54[0] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
+  %56 = vmov.accumulator512.to.vector512 %55
+  %57 = slice %54[1] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
   %58 = vmov.accumulator512.to.vector512 %57
-  %59 = mov.short 0
-  %60 = vbcst.32 %59
-  %61 = mov.short 1
+  %61 = mov.short 0
   %62 = vbcst.32 %61
-  %63 = vband %58, %62
-  %64 = vlt.u32x16.el.low32 %60, %63
-  %65 = predicate.complete.zero.high32 %64, 0
-  %66 = mov.short 2
-  %67 = vbcst.32 %66
-  %68 = vband %58, %67
-  %69 = vlt.u32x16.el.low32 %60, %68
-  %70 = predicate.complete.zero.high32 %69, 0
-  %71 = vextbcst.16 %table, 0
-  %72 = vextbcst.16 %table, 1
-  %73 = vsel.16.mask64 %71, %72, %65
-  %74 = vextbcst.16 %table, 2
-  %75 = vextbcst.16 %table, 3
-  %76 = vsel.16.mask64 %74, %75, %65
-  %77 = vsel.16.mask64 %73, %76, %70
-  %78 = mova.i32 16
-  %79 = vshift %input, %input, %78
-  %80 = slice %79[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %82 = vups.4x.w-to-c.signed %80, %55
-  %83 = slice %82[0] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
-  %84 = vmov.accumulator512.to.vector512 %83
-  %89 = vband %84, %62
-  %90 = vlt.u32x16.el.low32 %60, %89
-  %91 = predicate.complete.zero.high32 %90, 0
-  %94 = vband %84, %67
-  %95 = vlt.u32x16.el.low32 %60, %94
-  %96 = predicate.complete.zero.high32 %95, 0
-  %99 = vsel.16.mask64 %71, %72, %91
-  %102 = vsel.16.mask64 %74, %75, %91
-  %103 = vsel.16.mask64 %99, %102, %96
-  %104 = slice %77[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %105 = slice %103[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %result = concat(%104, %105) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %63 = mov.short 1
+  %64 = vbcst.32 %63
+  %65 = vband %56, %64
+  %66 = vlt.u32x16.el.low32 %62, %65
+  %67 = predicate.complete.zero.high32 %66, 0
+  %68 = mov.short 2
+  %69 = vbcst.32 %68
+  %70 = vband %56, %69
+  %71 = vlt.u32x16.el.low32 %62, %70
+  %72 = predicate.complete.zero.high32 %71, 0
+  %73 = vextbcst.16 %table, 0
+  %74 = vextbcst.16 %table, 1
+  %75 = vsel.16.mask64 %73, %74, %67
+  %76 = vextbcst.16 %table, 2
+  %77 = vextbcst.16 %table, 3
+  %78 = vsel.16.mask64 %76, %77, %67
+  %79 = vsel.16.mask64 %75, %78, %72
+  %85 = vband %58, %64
+  %86 = vlt.u32x16.el.low32 %62, %85
+  %87 = predicate.complete.zero.high32 %86, 0
+  %90 = vband %58, %69
+  %91 = vlt.u32x16.el.low32 %62, %90
+  %92 = predicate.complete.zero.high32 %91, 0
+  %95 = vsel.16.mask64 %73, %74, %87
+  %98 = vsel.16.mask64 %76, %77, %87
+  %99 = vsel.16.mask64 %95, %98, %92
+  %100 = slice %79[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %101 = slice %99[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %result = concat(%100, %101) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   return %result
 }
