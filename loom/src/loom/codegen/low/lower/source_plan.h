@@ -33,6 +33,8 @@ typedef struct loom_low_lower_source_invoke_plan_t
     loom_low_lower_source_invoke_plan_t;
 typedef struct loom_low_lower_projected_call_plan_t
     loom_low_lower_projected_call_plan_t;
+typedef struct loom_low_lower_source_rejection_t
+    loom_low_lower_source_rejection_t;
 
 enum loom_low_lower_value_flag_bits_e {
   // The source value must be materialized as a target-Low SSA value.
@@ -84,8 +86,9 @@ enum loom_low_lower_selected_plan_kind_e {
   LOOM_LOW_LOWER_SELECTED_PLAN_PROJECTED_CALL = 5,
   // Shared structural lowering retained as an exact-cover alternative.
   LOOM_LOW_LOWER_SELECTED_PLAN_STRUCTURAL = 6,
-  // No target recipe exists. Demand analysis must elide this pure operation;
-  // a retained runtime demand is rejected before any Low IR is constructed.
+  // No target recipe exists. A runtime demand, including every observable
+  // operation, is rejected before any Low IR is constructed. Only pure plans
+  // with no materialized result can be elided.
   LOOM_LOW_LOWER_SELECTED_PLAN_UNAVAILABLE = 7,
   // Direct semantic call with prepared receiving-carrier conversions.
   LOOM_LOW_LOWER_SELECTED_PLAN_CALL = 8,
@@ -142,6 +145,8 @@ typedef struct loom_low_lower_selected_plan_t {
     const loom_low_lower_projected_call_plan_t* projected_call;
     // Shared bounded-allocation plan owned by the function lowering arena.
     loom_low_lower_function_storage_plan_t* function_storage;
+    // Cold diagnostic retained until an unavailable operation is demanded.
+    const loom_low_lower_source_rejection_t* rejection;
   } data;
   // Selected plan representation.
   loom_low_lower_selected_plan_kind_t kind;

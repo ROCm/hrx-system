@@ -1,10 +1,13 @@
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
+// Predicate uniformity does not supply a tile contract for SIMT work-item
+// identities or global-memory accesses. Each required operation rejects.
 kernel.def @uniform_select_guard() {
   %unit = index.constant 1 : index
   %width = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
 } launch(%mode: i32, %input: buffer, %output: buffer) {
+  // ERROR@+1: TARGET/001 {op_name="kernel.workitem.id"}
   %lane = kernel.workitem.id<x> : index
   %number = index.cast %lane : index to i32
   %threshold = scalar.constant 0 : i32
@@ -37,6 +40,7 @@ kernel.def @uniform_float_guard() {
   %width = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
 } launch(%mode: f32, %input: buffer, %output: buffer) {
+  // ERROR@+1: TARGET/001 {op_name="kernel.workitem.id"}
   %lane = kernel.workitem.id<x> : index
   %number = index.cast %lane : index to i32
   %threshold = scalar.constant 0.0 : f32
@@ -69,6 +73,7 @@ kernel.def @varying_select_guard() {
   %width = index.constant 64 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
 } launch(%mode: i32, %input: buffer, %output: buffer) {
+  // ERROR@+1: TARGET/001 {op_name="kernel.workitem.id"}
   %lane = kernel.workitem.id<x> : index
   %number = index.cast %lane : index to i32
   %negative = scalar.constant -1 : i32

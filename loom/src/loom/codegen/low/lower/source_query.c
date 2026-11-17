@@ -26,6 +26,41 @@ typedef struct loom_low_lower_contract_query_state_t {
   const loom_target_contract_query_environment_t* environment;
 } loom_low_lower_contract_query_state_t;
 
+iree_status_t loom_low_lower_source_query_retain_rejection(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_target_contract_rejection_t* rejection) {
+  if (context->source_query_rejections == NULL) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(
+        &context->analysis_arena, sizeof(*context->source_query_rejections),
+        (void**)&context->source_query_rejections));
+    loom_low_lower_source_graph_node_index_initialize(
+        /*value_domain=*/NULL, &context->analysis_arena,
+        context->source_query_rejections);
+  }
+  loom_low_lower_source_graph_node_t* node = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_source_graph_node_index_get_or_add(
+      context->source_query_rejections, source_op, &node));
+  node->user_data = (void*)rejection;
+  return iree_ok_status();
+}
+
+bool loom_low_lower_source_query_deferred_rejection(
+    const loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_target_contract_rejection_t** out_rejection) {
+  *out_rejection = NULL;
+  if (context->source_query_rejections == NULL) {
+    return false;
+  }
+  const loom_low_lower_source_graph_node_t* node =
+      loom_low_lower_source_graph_node_index_lookup(
+          context->source_query_rejections, source_op);
+  if (node == NULL) {
+    return false;
+  }
+  *out_rejection = (const loom_target_contract_rejection_t*)node->user_data;
+  return true;
+}
+
 typedef struct loom_low_lower_source_query_alternative_t
     loom_low_lower_source_query_alternative_t;
 

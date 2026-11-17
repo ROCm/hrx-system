@@ -210,11 +210,17 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
 
 amdgpu.target<gfx11-generic> @target
 
-func.def target(@target) @buffer_view_i1_rejected(%input: buffer) {
+func.def target(@target) @unused_subbyte_view(%input: buffer) {
   %input_base = index.constant 0 : offset
-  // ERROR@+1: AMDGPU/001 {field_name="result", required_storage="byte-addressable scalar elements"}
   %input_view = buffer.view %input[%input_base] : buffer -> view<8xi1>
   func.return
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @unused_subbyte_view() asm {
+  return
 }
 
 // ====
@@ -376,7 +382,6 @@ kernel.def target(@target) @lds_i1x8_memory_rejected() {
   %bytes = index.constant 4096 : offset
   %layout = encoding.layout.strided [8, 2] : encoding<layout>
   %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
-  // ERROR@+1: AMDGPU/001 "not a typed view over byte-addressable scalar elements"
   %scratch_view = buffer.view %scratch[%scratch_base] : buffer -> view<64x8xi1, %layout>
   // ERROR@+1: AMDGPU/023 {constraint_key="source_memory.element_width"}
   %loaded = vector.load %scratch_view[%tid, 0] : view<64x8xi1, %layout> -> vector<8xi1>
@@ -646,6 +651,7 @@ kernel.def target(@target) @fragment_tf32_schema_required() {
 
 amdgpu.target<gfx942> @target
 
+// Memory ownership is rejected before native arithmetic planning.
 kernel.def target(@target) @cdna_legacy_mfma_fragment_layout_rejected() {
   %unit = index.constant 1 : index
   %threads = index.constant 64 : index
@@ -665,11 +671,27 @@ kernel.def target(@target) @cdna_legacy_mfma_fragment_layout_rejected() {
   %rhs = vector.fragment.load<rhs> %rhs_view[0, 0] shape [%k, %n] : view<4x16xf16, %rhs_layout> -> vector<4xf16>
   %zero_acc = vector.splatf 0.0 : vector<16xf32>
   %init = vector.fragment<init> %zero_acc shape [%m, %n] : vector<16xf32>
-  // ERROR@+1: AMDGPU/021 {matrix_constraint="payload_shape"}
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<16xf32>
   // ERROR@+1: AMDGPU/023 {constraint_key="fragment_memory.payload_layout"}
   vector.fragment.store<result> %result, %out_view[0, 0] shape [%m, %n] : vector<16xf32>, view<16x16xf32>
   kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+// Required arithmetic is diagnosed independently of fragment memory setup.
+func.def target(@target) @cdna_legacy_mfma_payload_rejected(%left_data: vector<4xf16>, %right_data: vector<4xf16>, %seed_data: vector<16xf32>) -> (vector<16xf32>) {
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 4 : index
+  %left = vector.fragment<lhs> %left_data shape [%m, %k] : vector<4xf16>
+  %right = vector.fragment<rhs> %right_data shape [%k, %n] : vector<4xf16>
+  %seed = vector.fragment<init> %seed_data shape [%m, %n] : vector<16xf32>
+  // ERROR@+1: AMDGPU/021 {matrix_constraint="payload_shape"}
+  %result = vector.mma %left, %right, %seed : vector<4xf16>, vector<4xf16>, vector<16xf32>
+  func.return %result : vector<16xf32>
 }
 
 // ====

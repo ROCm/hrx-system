@@ -1,0 +1,37 @@
+// RUN: pass source-to-low
+
+// The native MAC reads exact BF16 origins. The whole F32 intermediate has no
+// standalone target recipe and needs no runtime storage for this consumer.
+aie2p.target<core> @core
+
+func.def target(@core) @joined_bf16_origin(%low: vector<32xbf16>, %high: vector<32xbf16>, %right: vector<64xbf16>, %seed: vector<64xf32>) -> (vector<64xf32>) {
+  %left = vector.concat<0> %low, %high : vector<32xbf16>, vector<32xbf16> -> vector<64xbf16>
+  %left_wide = vector.extf %left : vector<64xbf16> to vector<64xf32>
+  %right_wide = vector.extf %right : vector<64xbf16> to vector<64xf32>
+  %result = vector.fmaf<nnan|ninf|nsz|afn> %left_wide, %right_wide, %seed : vector<64xf32>
+  func.return %result : vector<64xf32>
+}
+
+// ----
+aie2p.target<core> @core
+
+low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @joined_bf16_origin(%low: reg<aie2p.vec256 x2>, %high: reg<aie2p.vec256 x2>, %right: reg<aie2p.vec256 x4>, %seed: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>) asm {
+  %left = concat(%low, %high) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  %15 = mova.i32 60
+  %result = vmac.bf16x64 %seed, %left, %right, %15
+  return %result
+}
+
+// ====
+
+// Returning the widened value also requires its F32 realization. The same
+// unsupported conversion must then fail with its original target diagnostic.
+aie2p.target<core> @core
+
+func.def target(@core) @materialized_bf16_origin(%left: vector<64xbf16>, %right: vector<64xbf16>, %seed: vector<64xf32>) -> (vector<64xf32>, vector<64xf32>) {
+  // ERROR@+1: TARGET/002 {op_name="vector.extf"}
+  %left_wide = vector.extf %left : vector<64xbf16> to vector<64xf32>
+  %right_wide = vector.extf %right : vector<64xbf16> to vector<64xf32>
+  %result = vector.fmaf<nnan|ninf|nsz|afn> %left_wide, %right_wide, %seed : vector<64xf32>
+  func.return %result, %left_wide : vector<64xf32>, vector<64xf32>
+}

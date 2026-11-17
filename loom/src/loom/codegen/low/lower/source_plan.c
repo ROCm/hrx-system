@@ -103,14 +103,18 @@ typedef struct loom_low_lower_source_candidate_graph_t {
   const loom_op_t* source_nodes[];
 } loom_low_lower_source_candidate_graph_t;
 
-typedef struct loom_low_lower_source_candidate_rejection_t {
+struct loom_low_lower_source_rejection_t {
+  // Structured capability failure established before materialization planning.
+  const loom_target_contract_rejection_t* query_rejection;
   // Best generated-rule rejection when no candidate covers this node.
   const loom_low_lower_rule_set_t* failed_rule_set;
   // Best generated-rule failure detail.
   loom_low_lower_rule_failure_t rule_failure;
   // Descriptor-matrix rejection retained until coverage is resolved.
   loom_target_contract_query_result_t matrix_rejection;
-} loom_low_lower_source_candidate_rejection_t;
+  // Canonical memory facts needed to report a demanded unavailable recipe.
+  const loom_low_lower_source_memory_record_t* memory_record;
+};
 
 typedef struct loom_low_lower_source_candidate_node_t {
   // Ordinary source operation represented by this node.
@@ -120,7 +124,7 @@ typedef struct loom_low_lower_source_candidate_node_t {
   // Root-adjusted canonical memory selection shared by rule alternatives.
   const loom_low_lower_selected_source_memory_t* matched_source_memory;
   // Cold rejection detail allocated only for uncovered operations.
-  loom_low_lower_source_candidate_rejection_t* rejection;
+  loom_low_lower_source_rejection_t* rejection;
 } loom_low_lower_source_candidate_node_t;
 
 typedef struct loom_low_lower_source_candidate_root_t {
@@ -562,19 +566,56 @@ static void loom_low_lower_record_elided_hint_plan(
           LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED, loom_low_lower_plan_empty()));
 }
 
-static iree_status_t loom_low_lower_record_unavailable_plan(
-    loom_low_lower_context_t* context, const loom_op_t* source_op) {
-  if (loom_low_lower_source_value_storage_op_requires_emission(
-          source_op, loom_op_effective_traits(context->module, source_op))) {
-    return loom_low_lower_emit_no_target_contract(context, source_op);
+static iree_status_t loom_low_lower_emit_contract_query_rejection(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_target_contract_query_result_t* result) {
+  if (result->rejection != NULL) {
+    return loom_low_lower_emit_error_ref(
+        context, source_op, result->rejection->error_ref,
+        result->rejection->params, result->rejection->param_count);
   }
-  context->lowering->source_plan.has_unavailable_plans = true;
-  loom_low_lower_record_selected_plan(
-      context, (loom_low_lower_selected_plan_t){
-                   .source_op = source_op,
-                   .kind = LOOM_LOW_LOWER_SELECTED_PLAN_UNAVAILABLE,
-               });
-  return iree_ok_status();
+  return loom_low_lower_emit_no_target_contract(context, source_op);
+}
+
+static iree_status_t loom_low_lower_emit_source_rejection(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_source_rejection_t* rejection) {
+  if (rejection != NULL) {
+    if (rejection->query_rejection != NULL) {
+      const loom_target_contract_rejection_t* query_rejection =
+          rejection->query_rejection;
+      return loom_low_lower_emit_error_ref(
+          context, source_op, query_rejection->error_ref,
+          query_rejection->params, query_rejection->param_count);
+    }
+    if (rejection->matrix_rejection.outcome ==
+            LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED ||
+        rejection->matrix_rejection.outcome ==
+            LOOM_TARGET_CONTRACT_QUERY_INVALID_IR) {
+      return loom_low_lower_emit_contract_query_rejection(
+          context, source_op, &rejection->matrix_rejection);
+    }
+    if (rejection->failed_rule_set != NULL) {
+      loom_low_source_memory_access_plan_t source_memory_access;
+      loom_low_lower_rule_source_memory_state_t source_memory_state;
+      loom_low_lower_rule_source_memory_state_initialize(
+          source_op, &source_memory_access, &source_memory_state);
+      const loom_low_lower_source_memory_record_t* memory_record =
+          rejection->memory_record;
+      if (memory_record != NULL) {
+        if (memory_record->available) {
+          source_memory_state.retained_access = &memory_record->access;
+        } else {
+          source_memory_state.plan_attempted = true;
+          source_memory_state.diagnostic = memory_record->diagnostic;
+        }
+      }
+      return loom_low_lower_rule_set_emit_selection_failure(
+          context, rejection->failed_rule_set, source_op,
+          rejection->rule_failure, &source_memory_state);
+    }
+  }
+  return loom_low_lower_emit_no_target_contract(context, source_op);
 }
 
 static bool loom_low_lower_selected_plan_preserves_volatile_memory(
@@ -759,11 +800,13 @@ static iree_status_t loom_low_lower_reject_unavailable_plans(
        i < source_plan->selected_plan_count && iree_status_is_ok(status) &&
        !loom_low_lower_context_diagnostic_limit_reached(context);
        ++i) {
-    const loom_low_lower_selected_plan_t* plan =
-        &source_plan->selected_plans[i];
-    if (plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_UNAVAILABLE &&
-        !iree_any_bit_set(plan->flags, LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED)) {
-      status = loom_low_lower_emit_no_target_contract(context, plan->source_op);
+    loom_low_lower_selected_plan_t* plan = &source_plan->selected_plans[i];
+    if (plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_UNAVAILABLE) {
+      if (!iree_any_bit_set(plan->flags, LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED)) {
+        status = loom_low_lower_emit_source_rejection(context, plan->source_op,
+                                                      plan->data.rejection);
+      }
+      plan->data.rejection = NULL;
     }
   }
   return status;
@@ -1036,6 +1079,33 @@ static iree_status_t loom_low_lower_select_fixed_plan(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_lower_select_unavailable_plan(
+    loom_low_lower_context_t* context,
+    loom_low_lower_source_candidate_plan_t* candidate_plan,
+    const loom_op_t* source_op,
+    const loom_low_lower_source_rejection_t* rejection) {
+  if (rejection != NULL && rejection->matrix_rejection.outcome ==
+                               LOOM_TARGET_CONTRACT_QUERY_INVALID_IR) {
+    return loom_low_lower_emit_source_rejection(context, source_op, rejection);
+  }
+  loom_low_lower_source_rejection_t* retained_rejection = NULL;
+  if (rejection != NULL) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(&context->analysis_arena,
+                                             sizeof(*retained_rejection),
+                                             (void**)&retained_rejection));
+    *retained_rejection = *rejection;
+  }
+  context->lowering->source_plan.has_unavailable_plans = true;
+  const loom_low_lower_selected_plan_t selected_plan = {
+      .source_op = source_op,
+      .data.rejection = retained_rejection,
+      .kind = LOOM_LOW_LOWER_SELECTED_PLAN_UNAVAILABLE,
+  };
+  return loom_low_lower_select_fixed_plan(
+      context, candidate_plan, &selected_plan,
+      LOOM_LOW_LOWER_SOURCE_GRAPH_ALTERNATIVE_FIXED);
+}
+
 static iree_status_t loom_low_lower_try_select_op_callback(
     loom_low_lower_context_t* context,
     loom_low_lower_source_candidate_plan_t* candidate_plan,
@@ -1090,17 +1160,6 @@ static iree_status_t loom_low_lower_source_candidate_add_callback(
   return loom_low_lower_source_candidate_add(
       candidate_plan, source_nodes, /*source_node_count=*/1,
       /*edges=*/NULL, /*priority=*/0, source_candidate);
-}
-
-static iree_status_t loom_low_lower_emit_contract_query_rejection(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    const loom_target_contract_query_result_t* result) {
-  if (result->rejection != NULL) {
-    return loom_low_lower_emit_error_ref(
-        context, source_op, result->rejection->error_ref,
-        result->rejection->params, result->rejection->param_count);
-  }
-  return loom_low_lower_emit_no_target_contract(context, source_op);
 }
 
 static iree_status_t loom_low_lower_create_descriptor_matrix_plan(
@@ -1189,7 +1248,7 @@ static iree_status_t loom_low_lower_plan_primary_descriptor_available(
 }
 
 static void loom_low_lower_source_contract_retain_rule_failure(
-    loom_low_lower_source_candidate_rejection_t* rejection,
+    loom_low_lower_source_rejection_t* rejection,
     const loom_low_lower_contract_case_match_t* match) {
   if (loom_low_lower_rule_failure_is_better(match->selection.failure,
                                             rejection->rule_failure)) {
@@ -1212,7 +1271,7 @@ typedef struct loom_low_lower_source_candidate_contract_state_t {
   // Match context used for primary descriptor availability queries.
   loom_low_lower_rule_match_context_t* match_context;
   // Best generated rejection seen when no candidate matched.
-  loom_low_lower_source_candidate_rejection_t rejection;
+  loom_low_lower_source_rejection_t rejection;
   // Current generated contract iteration mode.
   loom_low_lower_contract_case_iteration_mode_t iteration_mode;
   // True when collection found at least one legal alternative.
@@ -1294,7 +1353,7 @@ typedef struct loom_low_lower_source_stream_contract_state_t {
   // Match context used for primary descriptor availability queries.
   loom_low_lower_rule_match_context_t* match_context;
   // Best generated rejection seen when no candidate matched.
-  loom_low_lower_source_candidate_rejection_t rejection;
+  loom_low_lower_source_rejection_t rejection;
   // Caller-owned scratch populated only when fallback_rule_set is non-NULL.
   loom_low_lower_rule_selection_t* fallback_selection;
   // Rule set owning |fallback_selection|.
@@ -1330,8 +1389,13 @@ static iree_status_t loom_low_lower_source_stream_visit_contract_case(
     } else if (match->result.outcome ==
                    LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED ||
                match->result.outcome == LOOM_TARGET_CONTRACT_QUERY_INVALID_IR) {
-      IREE_RETURN_IF_ERROR(loom_low_lower_emit_contract_query_rejection(
-          state->context, state->source_op, &match->result));
+      const loom_low_lower_source_rejection_t rejection = {
+          .matrix_rejection = match->result,
+          .memory_record = state->context->lowering->source_plan.memory.current,
+      };
+      IREE_RETURN_IF_ERROR(loom_low_lower_select_unavailable_plan(
+          state->context, /*candidate_plan=*/NULL, state->source_op,
+          &rejection));
       state->selected = true;
       *out_stop = true;
     }
@@ -1470,7 +1534,7 @@ static iree_status_t loom_low_lower_plan_op_from_contract_index(
 static iree_status_t loom_low_lower_source_candidate_retain_rejection(
     loom_low_lower_source_candidate_plan_t* candidate_plan,
     loom_low_lower_source_candidate_node_t* candidate_node,
-    loom_low_lower_source_candidate_rejection_t** out_rejection) {
+    loom_low_lower_source_rejection_t** out_rejection) {
   if (candidate_node->rejection == NULL) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate(
         &candidate_plan->arena, sizeof(*candidate_node->rejection),
@@ -1555,7 +1619,7 @@ static iree_status_t loom_low_lower_source_candidate_collect_contract(
           LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED ||
       collect_state.rejection.matrix_rejection.outcome ==
           LOOM_TARGET_CONTRACT_QUERY_INVALID_IR) {
-    loom_low_lower_source_candidate_rejection_t* rejection = NULL;
+    loom_low_lower_source_rejection_t* rejection = NULL;
     IREE_RETURN_IF_ERROR(loom_low_lower_source_candidate_retain_rejection(
         candidate_plan, candidate_node, &rejection));
     *rejection = collect_state.rejection;
@@ -1677,6 +1741,17 @@ static iree_status_t loom_low_lower_plan_op(
   }
   if (loom_low_lower_source_plan_op_is_metadata(source_op->kind)) {
     return iree_ok_status();
+  }
+
+  const loom_target_contract_rejection_t* query_rejection = NULL;
+  if (loom_low_lower_source_query_deferred_rejection(context, source_op,
+                                                     &query_rejection)) {
+    const loom_low_lower_source_rejection_t rejection = {
+        .query_rejection = query_rejection,
+    };
+    return loom_low_lower_select_unavailable_plan(
+        context, candidate_plan, source_op,
+        query_rejection != NULL ? &rejection : NULL);
   }
 
   loom_low_lower_source_candidate_node_t* candidate_node = NULL;
@@ -1852,9 +1927,13 @@ static iree_status_t loom_low_lower_plan_op(
       return iree_ok_status();
     }
     if (failed_rule_set != NULL) {
-      return loom_low_lower_rule_set_emit_selection_failure(
-          context, failed_rule_set, source_op, rule_failure,
-          &source_memory_state);
+      const loom_low_lower_source_rejection_t rejection = {
+          .failed_rule_set = failed_rule_set,
+          .rule_failure = rule_failure,
+          .memory_record = memory_record,
+      };
+      return loom_low_lower_select_unavailable_plan(
+          context, /*candidate_plan=*/NULL, source_op, &rejection);
     }
   }
 
@@ -1869,7 +1948,8 @@ static iree_status_t loom_low_lower_plan_op(
     loom_low_lower_record_elided_hint_plan(context, source_op);
     return iree_ok_status();
   }
-  return loom_low_lower_record_unavailable_plan(context, source_op);
+  return loom_low_lower_select_unavailable_plan(
+      context, /*candidate_plan=*/NULL, source_op, /*rejection=*/NULL);
 }
 
 static iree_status_t loom_low_lower_source_graph_collect_region(
@@ -2042,39 +2122,18 @@ static iree_status_t loom_low_lower_source_candidate_resolve(
   }
 }
 
-static iree_status_t loom_low_lower_source_candidate_emit_rejection(
+static iree_status_t loom_low_lower_source_candidate_record_unavailable(
     loom_low_lower_context_t* context,
     const loom_low_lower_source_candidate_node_t* candidate_node) {
-  const loom_low_lower_source_candidate_rejection_t* rejection =
-      candidate_node->rejection;
-  if (rejection != NULL && (rejection->matrix_rejection.outcome ==
-                                LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED ||
-                            rejection->matrix_rejection.outcome ==
-                                LOOM_TARGET_CONTRACT_QUERY_INVALID_IR)) {
-    return loom_low_lower_emit_contract_query_rejection(
-        context, candidate_node->source_op, &rejection->matrix_rejection);
+  if (candidate_node->rejection == NULL) {
+    return loom_low_lower_select_unavailable_plan(
+        context, /*candidate_plan=*/NULL, candidate_node->source_op,
+        /*rejection=*/NULL);
   }
-  if (rejection != NULL && rejection->failed_rule_set != NULL) {
-    loom_low_source_memory_access_plan_t source_memory_access;
-    loom_low_lower_rule_source_memory_state_t source_memory_state;
-    loom_low_lower_rule_source_memory_state_initialize(
-        candidate_node->source_op, &source_memory_access, &source_memory_state);
-    if (candidate_node->memory_record != NULL) {
-      if (candidate_node->memory_record->available) {
-        source_memory_state.retained_access =
-            &candidate_node->memory_record->access;
-      } else {
-        source_memory_state.plan_attempted = true;
-        source_memory_state.diagnostic =
-            candidate_node->memory_record->diagnostic;
-      }
-    }
-    return loom_low_lower_rule_set_emit_selection_failure(
-        context, rejection->failed_rule_set, candidate_node->source_op,
-        rejection->rule_failure, &source_memory_state);
-  }
-  return loom_low_lower_record_unavailable_plan(context,
-                                                candidate_node->source_op);
+  loom_low_lower_source_rejection_t rejection = *candidate_node->rejection;
+  rejection.memory_record = candidate_node->memory_record;
+  return loom_low_lower_select_unavailable_plan(
+      context, /*candidate_plan=*/NULL, candidate_node->source_op, &rejection);
 }
 
 static iree_status_t loom_low_lower_source_candidate_materialize_node(
@@ -2088,8 +2147,8 @@ static iree_status_t loom_low_lower_source_candidate_materialize_node(
       loom_low_lower_source_graph_plan_selected_alternative(
           candidate_plan->graph_plan, node_index);
   if (alternative == NULL) {
-    return loom_low_lower_source_candidate_emit_rejection(context,
-                                                          candidate_node);
+    return loom_low_lower_source_candidate_record_unavailable(context,
+                                                              candidate_node);
   }
   const loom_low_lower_source_graph_candidate_t* graph_candidate =
       loom_low_lower_source_graph_alternative_candidate(alternative);

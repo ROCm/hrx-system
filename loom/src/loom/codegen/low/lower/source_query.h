@@ -41,6 +41,22 @@ iree_status_t loom_low_lower_source_query_environment_initialize(
 loom_target_contract_query_callback_t loom_low_lower_source_query_callback(
     loom_low_lower_context_t* context);
 
+// Retains a deferred capability rejection for immutable source. The rejection
+// borrows the query environment's arena; a sparse index in the context's
+// analysis arena preserves its identity until materialization demand is known.
+// A NULL rejection retains the unavailable operation without diagnostic detail.
+iree_status_t loom_low_lower_source_query_retain_rejection(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_target_contract_rejection_t* rejection);
+
+// Returns whether the source operation has a deferred capability rejection and
+// its original diagnostic detail, which may be NULL. An unavailable operation
+// cannot select an executable plan even when a target callback could produce
+// one; only elimination after demand analysis can discharge the rejection.
+bool loom_low_lower_source_query_deferred_rejection(
+    const loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_target_contract_rejection_t** out_rejection);
+
 // Creates a read-only target contract query scope for |source_function|.
 //
 // The scope uses the same generated rules, policy callbacks, descriptor

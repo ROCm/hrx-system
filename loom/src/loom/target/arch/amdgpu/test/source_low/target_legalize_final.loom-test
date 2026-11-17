@@ -179,13 +179,9 @@ kernel.def @rejected_address_payload() {
   %a = index.cast %left : i32 to offset
   %b = index.cast %middle : i32 to offset
   %c = index.cast %right : i32 to offset
-  // ERROR@+1: TARGET/002 {field_name="result", actual_type="vector<3xoffset>"}
   %values = vector.from_elements %a, %b, %c : vector<3xoffset>
   // ERROR@+1: AMDGPU/023 {constraint_key="subgroup_broadcast_first.payload"}
   %first = kernel.subgroup.broadcast.first %values : vector<3xoffset>
-  // ERROR@+3: TARGET/002 {field_name="source", actual_type="vector<3xoffset>"}
-  // ERROR@+2: TARGET/002 {field_name="source", actual_type="vector<3xoffset>"}
-  // ERROR@+1: TARGET/002 {field_name="source", actual_type="vector<3xoffset>"}
   %bits = vector.index_cast %first : vector<3xoffset> to vector<3xi64>
   vector.store %bits, %destination[%lane, 0] : vector<3xi64>, view<32x3xi64>
   kernel.return

@@ -19,7 +19,7 @@ static bool loom_low_lower_source_graph_node_value_ordinal(
     const loom_low_lower_source_graph_node_index_t* index,
     const loom_op_t* source_op, loom_value_ordinal_t* out_ordinal) {
   *out_ordinal = LOOM_VALUE_ORDINAL_INVALID;
-  if (source_op->result_count == 0 ||
+  if (source_op->result_count == 0 || index->value_domain == NULL ||
       !loom_local_value_domain_is_acquired(index->value_domain)) {
     return false;
   }

@@ -285,6 +285,35 @@ TEST_F(LowLowerSourceQueryTest, NativeMappingAgreesWithRequiredLowering) {
   EXPECT_EQ(mapping_result_.error_count, 0u);
 }
 
+TEST_F(LowLowerSourceQueryTest, RetainsDeferredRejectionsBySourceIdentity) {
+  const loom_target_contract_rejection_t* rejection = nullptr;
+  EXPECT_FALSE(loom_low_lower_source_query_deferred_rejection(
+      &mapping_context_, source_op_, &rejection));
+  EXPECT_EQ(mapping_context_.source_query_rejections, nullptr);
+  IREE_ASSERT_OK(loom_low_lower_source_query_retain_rejection(
+      &mapping_context_, source_op_, nullptr));
+  EXPECT_TRUE(loom_low_lower_source_query_deferred_rejection(
+      &mapping_context_, source_op_, &rejection));
+  EXPECT_EQ(rejection, nullptr);
+
+  CreateQueryScope();
+  const loom_op_t* unsupported_op =
+      loom_value_def_op(loom_module_value(module_, unsupported_value_id_));
+  loom_target_contract_query_result_t result =
+      loom_target_contract_query_result_empty();
+  IREE_ASSERT_OK(QueryContract(unsupported_op, &result));
+  ASSERT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED);
+  ASSERT_NE(result.rejection, nullptr);
+  IREE_ASSERT_OK(loom_low_lower_source_query_retain_rejection(
+      &mapping_context_, unsupported_op, result.rejection));
+  EXPECT_TRUE(loom_low_lower_source_query_deferred_rejection(
+      &mapping_context_, unsupported_op, &rejection));
+  EXPECT_EQ(rejection, result.rejection);
+  EXPECT_FALSE(loom_low_lower_source_query_deferred_rejection(
+      &mapping_context_, mapped_source_op_, &rejection));
+  EXPECT_EQ(rejection, nullptr);
+}
+
 TEST_F(LowLowerSourceQueryTest, ContractQueriesRetainSourceScopeState) {
   static const uint8_t state_key = 0;
   struct MappingProbe {

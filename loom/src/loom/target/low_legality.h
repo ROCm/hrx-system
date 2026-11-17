@@ -98,8 +98,13 @@ typedef struct loom_target_low_legality_type_supported_callback_t {
 
 typedef struct loom_target_low_legality_defer_missing_contract_callback_t {
   // Returns whether source planning can defer a missing target recipe until
-  // materialization demand is established.
-  bool (*fn)(void* user_data, const loom_op_t* op);
+  // materialization demand is established. This includes unsupported recipes
+  // with structured diagnostics; invalid IR and terminal rejections remain
+  // immediate errors.
+  // The owner retains any structured rejection for a later required value.
+  iree_status_t (*fn)(void* user_data, const loom_op_t* op,
+                      const loom_target_contract_query_result_t* result,
+                      bool* out_deferred);
   // Borrowed source-planning owner passed to |fn|.
   void* user_data;
 } loom_target_low_legality_defer_missing_contract_callback_t;
