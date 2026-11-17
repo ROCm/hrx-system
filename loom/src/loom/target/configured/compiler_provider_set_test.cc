@@ -6,6 +6,8 @@
 
 #include "loom/target/configured/compiler_provider_set.h"
 
+#include <unordered_set>
+
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/descriptor_scope.h"
@@ -34,11 +36,97 @@ namespace loom {
 namespace {
 
 template <typename ProviderList>
-void ExpectExplicitScopes(ProviderList providers) {
+void ExpectOwnedScopes(ProviderList providers,
+                       const loom_target_low_descriptor_registry_t& descriptors,
+                       std::unordered_set<const void*>& contributed_providers) {
   for (iree_host_size_t i = 0; i < providers.count; ++i) {
     const auto* provider = providers.values[i];
-    EXPECT_TRUE(loom_low_descriptor_scope_is_valid(provider->scope))
-        << std::string(provider->name.data, provider->name.size);
+    SCOPED_TRACE(std::string(provider->name.data, provider->name.size));
+    EXPECT_TRUE(contributed_providers.insert(provider).second);
+    EXPECT_TRUE(loom_low_descriptor_scope_is_valid(provider->scope));
+    EXPECT_NE(provider->scope.target_stable_id, UINT64_MAX)
+        << "shared providers belong to common registry composition";
+    bool owned = false;
+    for (iree_host_size_t j = 0; j < descriptors.descriptor_set_provider_count;
+         ++j) {
+      owned |= loom_low_descriptor_scope_matches(
+          provider->scope, descriptors.descriptor_set_providers[j]());
+    }
+    EXPECT_TRUE(owned) << "scope must belong to the contributing target";
+  }
+}
+
+template <typename Registry>
+void ExpectOwnedPolicies(
+    const Registry& policies,
+    const loom_target_low_descriptor_registry_t& descriptors,
+    std::unordered_set<uint64_t>& contributed_keys) {
+  for (iree_host_size_t i = 0; i < policies.entry_count; ++i) {
+    const auto& entry = policies.entries[i];
+    SCOPED_TRACE(entry.contract_set_stable_id);
+    EXPECT_TRUE(contributed_keys.insert(entry.contract_set_stable_id).second);
+    EXPECT_NE(entry.policy, nullptr);
+    bool owned = false;
+    for (iree_host_size_t j = 0; j < descriptors.descriptor_set_provider_count;
+         ++j) {
+      owned |= descriptors.descriptor_set_providers[j]()->stable_id ==
+               entry.contract_set_stable_id;
+    }
+    EXPECT_TRUE(owned)
+        << "policy must name a descriptor set owned by its target";
+  }
+}
+
+TEST(ConfiguredCompilerProviderSetTest, ContributionsHaveUniqueTargetOwners) {
+  const auto* providers = loom_configured_compiler_provider_set();
+  std::unordered_set<uint64_t> descriptor_keys;
+  std::unordered_set<uint64_t> lower_policy_keys;
+  std::unordered_set<uint64_t> math_policy_keys;
+  std::unordered_set<const void*> legalizers;
+  std::unordered_set<const void*> legality;
+  std::unordered_set<const void*> packet_diagnostics;
+  std::unordered_set<const void*> asm_diagnostics;
+  std::unordered_set<const void*> verifiers;
+  for (iree_host_size_t i = 0; i < providers->provider_count; ++i) {
+    SCOPED_TRACE(i);
+    const auto* provider = providers->providers[i];
+    loom_target_low_descriptor_registry_t descriptors = {};
+    if (provider->initialize_low_descriptor_registry) {
+      provider->initialize_low_descriptor_registry(&descriptors);
+    }
+    for (iree_host_size_t j = 0; j < descriptors.descriptor_set_provider_count;
+         ++j) {
+      EXPECT_TRUE(
+          descriptor_keys
+              .insert(descriptors.descriptor_set_providers[j]()->stable_id)
+              .second);
+    }
+    ExpectOwnedScopes(provider->legalizer_provider_list, descriptors,
+                      legalizers);
+    ExpectOwnedScopes(provider->low_legality_provider_list, descriptors,
+                      legality);
+    ExpectOwnedScopes(provider->low_packet_diagnostic_provider_list,
+                      descriptors, packet_diagnostics);
+    ExpectOwnedScopes(provider->low_asm_diagnostic_provider_list, descriptors,
+                      asm_diagnostics);
+    for (iree_host_size_t j = 0;
+         j < provider->low_asm_diagnostic_provider_list.count; ++j) {
+      EXPECT_NE(provider->low_asm_diagnostic_provider_list.values[j]
+                    ->try_unknown_packet,
+                nullptr);
+    }
+    ExpectOwnedScopes(provider->low_verify_provider_list, descriptors,
+                      verifiers);
+    if (provider->initialize_low_lower_policy_registry) {
+      loom_low_lower_policy_registry_t policies = {};
+      provider->initialize_low_lower_policy_registry(&policies);
+      ExpectOwnedPolicies(policies, descriptors, lower_policy_keys);
+    }
+    if (provider->initialize_math_policy_registry) {
+      loom_target_math_policy_registry_t policies = {};
+      provider->initialize_math_policy_registry(&policies);
+      ExpectOwnedPolicies(policies, descriptors, math_policy_keys);
+    }
   }
 }
 
@@ -63,15 +151,6 @@ TEST(ConfiguredCompilerProviderSetTest, ComposesSelectedTargetCompilers) {
   loom_target_environment_t environment;
   IREE_ASSERT_OK(
       loom_target_environment_initialize(compiler_provider_set, &environment));
-  ExpectExplicitScopes(
-      loom_target_environment_legalizer_provider_list(&environment));
-  ExpectExplicitScopes(
-      loom_target_environment_low_legality_provider_list(&environment));
-  ExpectExplicitScopes(
-      loom_target_environment_low_packet_diagnostic_provider_list(
-          &environment));
-  ExpectExplicitScopes(
-      loom_target_environment_low_verify_provider_list(&environment));
   EXPECT_EQ(loom_target_environment_lookup_emitter(&environment,
                                                    IREE_SV("x86-elf")) != NULL,
             static_cast<bool>(LOOM_CONFIG_COMPILER_HAVE_X86));

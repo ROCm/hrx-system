@@ -133,17 +133,11 @@ static iree_status_t loom_low_descriptor_text_asm_diagnose_unknown_packet(
       loom_low_descriptor_text_asm_state_storage(state);
   const loom_low_descriptor_set_t* descriptor_set =
       loom_low_descriptor_text_asm_descriptor_set(descriptor_set_handle);
-  if (storage->diagnostic_provider_list.count != 0 &&
-      storage->diagnostic_provider_list.values == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "low asm diagnostic provider list has no provider table");
-  }
   for (iree_host_size_t i = 0; i < storage->diagnostic_provider_list.count;
        ++i) {
     const loom_target_low_asm_diagnostic_provider_t* provider =
         storage->diagnostic_provider_list.values[i];
-    if (provider == NULL || provider->try_unknown_packet == NULL) {
+    if (!loom_low_descriptor_scope_matches(provider->scope, descriptor_set)) {
       continue;
     }
     IREE_RETURN_IF_ERROR(provider->try_unknown_packet(

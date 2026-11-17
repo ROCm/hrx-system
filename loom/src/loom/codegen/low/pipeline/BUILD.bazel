@@ -47,6 +47,7 @@ loom_cc_library(
         "//loom/src/loom/transforms/kernel:target_legalization",
         "//loom/src/loom/transforms/math:legalize",
         "//loom/src/loom/transforms/scalar:target_legalization",
+        "//loom/src/loom/transforms/scalar:wide_division_legalization",
         "//loom/src/loom/transforms/vector:target_legalization",
         "//loom/src/loom/transforms/view:target_legalization",
         "//runtime/src/iree/base",

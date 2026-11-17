@@ -20,7 +20,6 @@
 #include "loom/target/arch/wasm/ops/ops.h"
 #include "loom/target/arch/wasm/ops/registry.h"
 #include "loom/target/arch/wasm/records/target_records.h"
-#include "loom/transforms/scalar/target_legalization.h"
 #include "loom/transforms/vector/packet_insert_legalization.h"
 #include "loom/transforms/vector/packet_legalization.h"
 #include "loom/transforms/vector/shape_legalization.h"
@@ -133,19 +132,6 @@ static uint64_t loom_wasm_vector_type_payload_bit_count(loom_type_t type) {
     return UINT64_MAX;
   }
   return payload_bit_count;
-}
-
-static iree_status_t loom_wasm_legalize_float8_to_bfloat_extension(
-    const loom_target_legalizer_entry_t* entry,
-    loom_target_legalization_context_t* context, loom_op_t* op,
-    loom_target_legalizer_result_t* out_result) {
-  *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
-  };
-  (void)entry;
-  IREE_RETURN_IF_ERROR(loom_scalar_rewrite_float8_extension(context, op));
-  out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
-  return iree_ok_status();
 }
 
 static iree_status_t loom_wasm_legalize_vector_load(
@@ -385,13 +371,6 @@ static iree_status_t loom_wasm_legalize_vector_reduce(
 }
 
 static const loom_target_legalizer_rule_t kLoomWasmLegalizerRules[] = {
-    {
-        .root_kind = LOOM_OP_SCALAR_EXTF,
-        .first_operand_element_types =
-            LOOM_SCALAR_TYPE_SET_F8E4M3 | LOOM_SCALAR_TYPE_SET_F8E5M2,
-        .match = loom_scalar_match_float8_to_bfloat_extension,
-        .legalize = loom_wasm_legalize_float8_to_bfloat_extension,
-    },
     {
         .root_kind = LOOM_OP_SCALAR_MINIMUMF,
         .first_operand_element_types = LOOM_SCALAR_TYPE_SET_FLOAT,

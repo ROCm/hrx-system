@@ -183,8 +183,7 @@ _ALL_PROFILE_XFAILS = {
     "control/schedule/ordered_read_ahead.loom:@ordered_guarded_then_depth_2": "TARGET/003",
     "control/schedule/ordered_read_ahead.loom:@ordered_guarded_then_depth_3": "TARGET/003",
     "kernel/subgroup/active_predicate.loom:@subgroup_active_predicate": "TARGET/003",
-    "kernel/subgroup/match.loom:@subgroup_match_all_i32": "TARGET/032",
-    "kernel/subgroup/match.loom:@subgroup_match_any_i32": "TARGET/032",
+    "kernel/subgroup/match.loom:@subgroup_match_all_i32": "TARGET/003",
     "kernel/subgroup/reduce.loom:@subgroup_converted_components": "TARGET/003",
     "kernel/subgroup/reduce.loom:@subgroup_extended_reductions": "TARGET/003",
     "kernel/subgroup/reduce.loom:@subgroup_float_reductions": "TARGET/003",
@@ -301,6 +300,8 @@ _EXTENDED_TYPES_XFAILS = {
     "kernel/subgroup/ballot.loom:@subgroup_ballot_helpers_and_loop": "TARGET/003",
     "kernel/subgroup/ballot.loom:@subgroup_ballot_masks": "SUBRANGE/024",
     "kernel/subgroup/ballot.loom:@subgroup_mask_loop_observations": "SUBRANGE/024",
+    # These profiles lack a fixed subgroup size and subgroup capabilities.
+    "kernel/subgroup/match.loom:@subgroup_match_any_i32": "TARGET/032",
     "kernel/subgroup/reduce.loom:@subgroup_packet_reductions": "TARGET/002",
     "kernel/subgroup/scan.loom:@subgroup_scan_wide_sums": "TARGET/002",
     "memory/atomic/add_f32_subnormals.loom:@global_atomic_add_f32_subnormal": "TARGET/003",
@@ -413,6 +414,8 @@ _SUBGROUP_XFAILS = dict(list(_NO_EXTENDED_TYPES_XFAILS.items()) + list({
     # Cooperative arithmetic requires compatible selected fragment types.
     "control/branch/guards.loom:@selected_fragment_scale": "TARGET/039",
     "control/loop/carried_lane_liveness.loom:@loop_carried_lane_liveness": "TARGET/003",
+    # Broadcast lowering also requires subgroup shuffle support.
+    "kernel/subgroup/match.loom:@subgroup_match_any_i32": "TARGET/003",
     "kernel/subgroup/scan.loom:@subgroup_scan_wide_sums": "TARGET/003",
     "memory/packed/tails.loom:@stage_private_i8_3": "TARGET/003",
     "numeric/vector/integer_widening.loom:@vector_widen_i16": "TARGET/003",
@@ -431,6 +434,8 @@ _BDA_XFAILS = dict(list(_NO_EXTENDED_TYPES_XFAILS.items()) + list({
     "kernel/subgroup/ballot.loom:@subgroup_ballot_helpers_and_loop": "TARGET/003",
     "kernel/subgroup/ballot.loom:@subgroup_ballot_masks": "SUBRANGE/024",
     "kernel/subgroup/ballot.loom:@subgroup_mask_loop_observations": "SUBRANGE/024",
+    # These profiles lack a fixed subgroup size and subgroup capabilities.
+    "kernel/subgroup/match.loom:@subgroup_match_any_i32": "TARGET/032",
     "kernel/subgroup/scan.loom:@subgroup_scan_wide_sums": "TARGET/002",
     "memory/packed/tails.loom:@stage_private_i8_3": "TARGET/003",
     "numeric/vector/integer_widening.loom:@vector_widen_i16": "TARGET/003",
@@ -484,8 +489,6 @@ _SPIRV_EXECUTION_XFAILS = {
     "function/rodata.loom:@rodata_gather_values": "TARGET/001,TARGET/003",
     "function/rodata.loom:@rodata_values": "TARGET/001",
     "function/template/expansion.loom:@template_cfg_expansion_values": "TARGET/089",
-    "kernel/subgroup/match.loom:@subgroup_match_all_i32_values": "TARGET/032",
-    "kernel/subgroup/match.loom:@subgroup_match_any_i32_values": "TARGET/032",
     "kernel/workgroup/reduce_partial.loom:@workgroup_reduce_partial_float_values": "TARGET/003",
     "kernel/workgroup/reduce_tree.loom:@workgroup_tree_three_waves_values": "TARGET/003",
     "kernel/workgroup/scan.loom:@workgroup_scan_float_values": "TARGET/032",

@@ -671,6 +671,7 @@ loom_cc_library(
     name = "low_asm_diagnostics",
     hdrs = ["low_asm_diagnostics.h"],
     deps = [
+        "//loom/src/loom/codegen/low:descriptor_scope",
         "//loom/src/loom/codegen/low:descriptors",
         "//loom/src/loom/format/text:low_asm",
         "//runtime/src/iree/base",

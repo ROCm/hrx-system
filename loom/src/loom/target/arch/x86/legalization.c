@@ -12,7 +12,6 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/target/arch/x86/records/target_records.h"
 #include "loom/target/arch/x86/vector_insert.h"
-#include "loom/transforms/scalar/target_legalization.h"
 #include "loom/transforms/vector/cast_packet_legalization.h"
 #include "loom/transforms/vector/packet_legalization.h"
 #include "loom/transforms/vector/shape_legalization.h"
@@ -59,19 +58,6 @@ static bool loom_x86_match_vector_narrow_float_truncation(
                                            LOOM_SCALAR_TYPE_SET_F8E5M2 |
                                            LOOM_SCALAR_TYPE_SET_16BIT_FLOAT,
                                        loom_type_element_type(result_type));
-}
-
-static iree_status_t loom_x86_legalize_float8_to_bfloat_extension(
-    const loom_target_legalizer_entry_t* entry,
-    loom_target_legalization_context_t* context, loom_op_t* op,
-    loom_target_legalizer_result_t* out_result) {
-  (void)entry;
-  *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
-  };
-  IREE_RETURN_IF_ERROR(loom_scalar_rewrite_float8_extension(context, op));
-  out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
-  return iree_ok_status();
 }
 
 static iree_status_t loom_x86_legalize_vector_conversion(
@@ -243,13 +229,6 @@ static const loom_target_legalizer_rule_t kX86LegalizerRules[] = {
     {
         .root_kind = LOOM_OP_VECTOR_INSERT,
         .legalize = loom_x86_legalize_vector_packets,
-    },
-    {
-        .root_kind = LOOM_OP_SCALAR_EXTF,
-        .first_operand_element_types =
-            LOOM_SCALAR_TYPE_SET_F8E4M3 | LOOM_SCALAR_TYPE_SET_F8E5M2,
-        .match = loom_scalar_match_float8_to_bfloat_extension,
-        .legalize = loom_x86_legalize_float8_to_bfloat_extension,
     },
     {
         .root_kind = LOOM_OP_VECTOR_EXTF,

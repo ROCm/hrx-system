@@ -83,11 +83,11 @@ static iree_status_t loom_conversion_stage_through(
                                      stage_kinds, out_result);
 }
 
-iree_status_t loom_conversion_legalize_narrow_float_to_i64(
-    const loom_target_legalizer_entry_t* entry,
+// F16/FP8 finite values fit I32 (or U32 for defined unsigned conversions).
+// Keep the intermediate narrow instead of requiring an F32-to-I64 instruction.
+static iree_status_t loom_conversion_legalize_narrow_float_to_i64(
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {
-  (void)entry;
   const bool is_signed =
       op->kind == LOOM_OP_SCALAR_FPTOSI || op->kind == LOOM_OP_VECTOR_FPTOSI;
   const bool is_vector = loom_type_is_vector(
@@ -179,6 +179,18 @@ static iree_status_t loom_conversion_legalize_float_to_integer(
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {
   (void)entry;
+  const loom_scalar_type_t input_element = loom_type_element_type(
+      loom_module_value_type(context->module, loom_op_operands(op)[0]));
+  const loom_scalar_type_t result_element = loom_type_element_type(
+      loom_module_value_type(context->module, loom_op_results(op)[0]));
+  if (result_element == LOOM_SCALAR_TYPE_I64 &&
+      loom_scalar_type_set_contains(LOOM_SCALAR_TYPE_SET_F16 |
+                                        LOOM_SCALAR_TYPE_SET_F8E4M3 |
+                                        LOOM_SCALAR_TYPE_SET_F8E5M2,
+                                    input_element)) {
+    return loom_conversion_legalize_narrow_float_to_i64(context, op,
+                                                        out_result);
+  }
   const bool is_signed =
       op->kind == LOOM_OP_SCALAR_FPTOSI || op->kind == LOOM_OP_VECTOR_FPTOSI;
   const bool is_vector = loom_type_is_vector(

@@ -8,19 +8,7 @@
 
 #include "loom/target/arch/amdgpu/error_catalog.h"
 #include "loom/target/arch/amdgpu/low_aliases.h"
-
-static bool loom_amdgpu_low_asm_descriptor_set_is_amdgpu(
-    const loom_low_descriptor_set_t* descriptor_set,
-    iree_string_view_t* out_descriptor_set_name) {
-  *out_descriptor_set_name = iree_string_view_empty();
-  if (descriptor_set == NULL) {
-    return false;
-  }
-  *out_descriptor_set_name = loom_low_descriptor_set_string(
-      descriptor_set, descriptor_set->key_string_ref);
-  return iree_string_view_starts_with(*out_descriptor_set_name,
-                                      IREE_SV("amdgpu."));
-}
+#include "loom/target/arch/amdgpu/target_info_defs.h"
 
 static iree_status_t loom_amdgpu_low_asm_try_unknown_packet(
     const loom_target_low_asm_diagnostic_provider_t* provider,
@@ -29,12 +17,6 @@ static iree_status_t loom_amdgpu_low_asm_try_unknown_packet(
     loom_text_low_asm_diagnostic_t* out_diagnostic) {
   (void)provider;
   *out_diagnostic = (loom_text_low_asm_diagnostic_t){0};
-  iree_string_view_t descriptor_set_name = iree_string_view_empty();
-  if (!loom_amdgpu_low_asm_descriptor_set_is_amdgpu(descriptor_set,
-                                                    &descriptor_set_name)) {
-    return iree_ok_status();
-  }
-
   const loom_amdgpu_low_blocked_alias_t* alias =
       loom_amdgpu_low_blocked_alias_lookup(packet_name);
   if (alias == NULL) {
@@ -42,7 +24,8 @@ static iree_status_t loom_amdgpu_low_asm_try_unknown_packet(
   }
 
   out_diagnostic->error = LOOM_ERR_AMDGPU_032;
-  out_diagnostic->params[0] = loom_param_string(descriptor_set_name);
+  out_diagnostic->params[0] = loom_param_string(loom_low_descriptor_set_string(
+      descriptor_set, descriptor_set->key_string_ref));
   out_diagnostic->params[1] = loom_param_string(alias->alias_mnemonic);
   out_diagnostic->params[2] = loom_param_string(alias->alias_semantics);
   out_diagnostic->params[3] =
@@ -57,5 +40,6 @@ static iree_status_t loom_amdgpu_low_asm_try_unknown_packet(
 const loom_target_low_asm_diagnostic_provider_t
     loom_amdgpu_low_asm_diagnostic_provider = {
         .name = IREE_SVL("amdgpu"),
+        .scope = {.target_stable_id = LOOM_AMDGPU_TARGET_STABLE_ID},
         .try_unknown_packet = loom_amdgpu_low_asm_try_unknown_packet,
 };

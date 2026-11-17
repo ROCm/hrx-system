@@ -1,0 +1,134 @@
+// RUN: pass target-legalize{mode=eager,policy=reference-only},canonicalize,cse,dce
+
+// BF16 extension is a shared reference recipe, independent of target packages.
+// The two FP8 formats have different subnormal and special-value encodings.
+test.target<low_core> @target
+
+func.def target(@target) @exponent_four(%input: f8E4M3) -> (bf16) {
+  %result = scalar.extf %input : f8E4M3 to bf16
+  func.return %result : bf16
+}
+
+func.def target(@target) @exponent_five(%input: f8E5M2) -> (bf16) {
+  %result = scalar.extf %input : f8E5M2 to bf16
+  func.return %result : bf16
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @exponent_four(%input: f8E4M3) -> (bf16) {
+  %6 = scalar.bitcast %input : f8E4M3 to i8
+  %7 = scalar.extui %6 : i8 to i32
+  %8 = scalar.constant 128 : i32
+  %9 = scalar.andi %7, %8 : i32
+  %10 = scalar.constant 8 : i32
+  %11 = scalar.shli %9, %10 : i32
+  %12 = scalar.constant 120 : i32
+  %13 = scalar.andi %7, %12 : i32
+  %14 = scalar.constant 3 : i32
+  %15 = scalar.shrui %13, %14 : i32
+  %16 = scalar.constant 7 : i32
+  %17 = scalar.andi %7, %16 : i32
+  %19 = scalar.addi %15, %12 : i32
+  %21 = scalar.shli %19, %16 : i32
+  %22 = scalar.constant 4 : i32
+  %23 = scalar.shli %17, %22 : i32
+  %24 = scalar.ori %11, %21 : i32
+  %25 = scalar.ori %24, %23 : i32
+  %26 = scalar.constant 0 : i32
+  %27 = scalar.constant 2 : i32
+  %28 = scalar.andi %17, %27 : i32
+  %30 = scalar.cmpi ne, %28, %26 : i32
+  %31 = scalar.constant 1 : i32
+  %32 = scf.select %30, %31, %26 : i32
+  %34 = scalar.andi %17, %22 : i32
+  %36 = scalar.cmpi ne, %34, %26 : i32
+  %38 = scf.select %36, %27, %32 : i32
+  %39 = scalar.constant 118 : i32
+  %40 = scalar.addi %38, %39 : i32
+  %42 = scalar.shli %40, %16 : i32
+  %44 = scalar.subi %16, %38 : i32
+  %45 = scalar.shli %17, %44 : i32
+  %46 = scalar.constant 127 : i32
+  %47 = scalar.andi %45, %46 : i32
+  %48 = scalar.ori %11, %42 : i32
+  %49 = scalar.ori %48, %47 : i32
+  %51 = scalar.cmpi eq, %17, %26 : i32
+  %52 = scf.select %51, %11, %49 : i32
+  %54 = scalar.cmpi eq, %15, %26 : i32
+  %55 = scf.select %54, %52, %25 : i32
+  %56 = scalar.constant 15 : i32
+  %57 = scalar.cmpi eq, %15, %56 : i32
+  %58 = scalar.constant 32704 : i32
+  %60 = scalar.cmpi eq, %17, %16 : i32
+  %61 = scalar.constant 0 : i1
+  %62 = scf.select %57, %60, %61 : i1
+  %63 = scf.select %62, %58, %55 : i32
+  %64 = scalar.trunci %63 : i32 to i16
+  %result = scalar.bitcast %64 : i16 to bf16
+  func.return %result : bf16
+}
+
+func.def target(@target) @exponent_five(%input: f8E5M2) -> (bf16) {
+  %66 = scalar.bitcast %input : f8E5M2 to i8
+  %67 = scalar.extui %66 : i8 to i32
+  %68 = scalar.constant 128 : i32
+  %69 = scalar.andi %67, %68 : i32
+  %70 = scalar.constant 8 : i32
+  %71 = scalar.shli %69, %70 : i32
+  %72 = scalar.constant 124 : i32
+  %73 = scalar.andi %67, %72 : i32
+  %74 = scalar.constant 2 : i32
+  %75 = scalar.shrui %73, %74 : i32
+  %76 = scalar.constant 3 : i32
+  %77 = scalar.andi %67, %76 : i32
+  %78 = scalar.constant 112 : i32
+  %79 = scalar.addi %75, %78 : i32
+  %80 = scalar.constant 7 : i32
+  %81 = scalar.shli %79, %80 : i32
+  %82 = scalar.constant 5 : i32
+  %83 = scalar.shli %77, %82 : i32
+  %84 = scalar.ori %71, %81 : i32
+  %85 = scalar.ori %84, %83 : i32
+  %86 = scalar.constant 0 : i32
+  %88 = scalar.andi %77, %74 : i32
+  %90 = scalar.cmpi ne, %88, %86 : i32
+  %91 = scalar.constant 1 : i32
+  %92 = scf.select %90, %91, %86 : i32
+  %93 = scalar.constant 111 : i32
+  %94 = scalar.addi %92, %93 : i32
+  %96 = scalar.shli %94, %80 : i32
+  %98 = scalar.subi %80, %92 : i32
+  %99 = scalar.shli %77, %98 : i32
+  %100 = scalar.constant 127 : i32
+  %101 = scalar.andi %99, %100 : i32
+  %102 = scalar.ori %71, %96 : i32
+  %103 = scalar.ori %102, %101 : i32
+  %105 = scalar.cmpi eq, %77, %86 : i32
+  %106 = scf.select %105, %71, %103 : i32
+  %108 = scalar.cmpi eq, %75, %86 : i32
+  %109 = scf.select %108, %106, %85 : i32
+  %110 = scalar.constant 31 : i32
+  %111 = scalar.cmpi eq, %75, %110 : i32
+  %112 = scalar.constant 32704 : i32
+  %113 = scalar.constant 32640 : i32
+  %114 = scalar.ori %71, %113 : i32
+  %117 = scf.select %105, %114, %112 : i32
+  %118 = scf.select %111, %117, %109 : i32
+  %119 = scalar.trunci %118 : i32 to i16
+  %result = scalar.bitcast %119 : i16 to bf16
+  func.return %result : bf16
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager,policy=require-native}
+
+// Requiring native conversion leaves the operation for target diagnostics
+// instead of silently accepting a portable expansion.
+test.target<low_core> @target
+
+func.def target(@target) @native_required(%input: f8E4M3) -> (bf16) {
+  %result = scalar.extf %input : f8E4M3 to bf16
+  func.return %result : bf16
+}

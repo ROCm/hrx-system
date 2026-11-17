@@ -49,7 +49,7 @@ kernel.def target(@target) @report_subgroup_match_any_i32_wave32() {
 
 // ----
 CHECK: COMPILE-REPORT: source_low_target[*] * subgroup_size=32
-CHECK: COMPILE-REPORT: target_legalization[*] function=report_subgroup_match_any_i32_wave32 source_op=kernel.subgroup.match.any * action=rewritten outcome=target-rewrite * legalizer=amdgpu strategy=target * created_ops=388 erased_ops=1
+CHECK: COMPILE-REPORT: target_legalization[*] function=report_subgroup_match_any_i32_wave32 source_op=kernel.subgroup.match.any * action=rewritten outcome=reference-fallback * legalizer=kernel strategy=reference * created_ops=388 erased_ops=1
 
 // ====
 

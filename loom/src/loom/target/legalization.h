@@ -254,8 +254,12 @@ struct loom_target_legalizer_provider_t {
   // Stable provider name for cold reports and diagnostics.
   iree_string_view_t name;
   // Required descriptor scope enforced before any matcher or rewrite callback.
+  // SHARED providers are composed once by codegen/low/pipeline's registry;
+  // optional target providers contribute only their own family or set scopes.
   loom_low_descriptor_scope_t scope;
-  // Strategy shared by legalizer rows from this provider.
+  // Selection policy shared by all rows: TARGET realizes native capabilities,
+  // REFERENCE supplies a portable semantic fallback. Scope and strategy are
+  // independent; shared packet realization can still have TARGET strategy.
   loom_target_legalizer_strategy_t strategy;
   // Legalizer rules contributed by this provider.
   const loom_target_legalizer_rule_t* rules;

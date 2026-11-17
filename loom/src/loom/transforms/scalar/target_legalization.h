@@ -34,29 +34,8 @@ bool loom_scalar_match_multiply_add(
 iree_status_t loom_scalar_fuse_multiply_add_match(
     loom_rewriter_t* rewriter, const loom_scalar_multiply_add_match_t* match);
 
-// Matches an FP8-to-BF16 scalar extension.
-bool loom_scalar_match_float8_to_bfloat_extension(
-    const loom_target_legalizer_entry_t* entry,
-    const loom_target_legalization_context_t* context, const loom_op_t* op);
-
-// Rewrites a matched FP8 extension with an exact integer-carried decode.
-iree_status_t loom_scalar_rewrite_float8_extension(
-    loom_target_legalization_context_t* context, loom_op_t* op);
-
-// Applies the exact shared number-preferring extremum recipe.
-iree_status_t loom_scalar_legalize_number_extremum(
-    const loom_target_legalizer_entry_t* entry,
-    loom_target_legalization_context_t* context, loom_op_t* op,
-    loom_target_legalizer_result_t* out_result);
-
 // Applies the exact shared floating-point clamp recipe.
 iree_status_t loom_scalar_legalize_clamp(
-    const loom_target_legalizer_entry_t* entry,
-    loom_target_legalization_context_t* context, loom_op_t* op,
-    loom_target_legalizer_result_t* out_result);
-
-// Applies the exact shared IEEE extremum recipe.
-iree_status_t loom_scalar_legalize_ieee_extrema(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result);

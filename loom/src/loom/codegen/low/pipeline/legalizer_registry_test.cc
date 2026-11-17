@@ -91,7 +91,7 @@ TEST(LowLegalizerRegistryTest, TargetProvidersPrecedeGenericProviders) {
   };
   const loom_target_legalizer_provider_t target_provider = {
       .name = IREE_SVL("target"),
-      .scope = LOOM_LOW_DESCRIPTOR_SCOPE_SHARED,
+      .scope = {.target_stable_id = UINT64_C(1)},
       .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
       .rules = target_rules,
       .rule_count = IREE_ARRAYSIZE(target_rules),
@@ -211,6 +211,62 @@ TEST(LowLegalizerRegistryTest, TargetProvidersPrecedeGenericProviders) {
   EXPECT_EQ(unsigned_predicate_extension[1].flags,
             LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION);
 
+  loom_target_legalizer_registry_storage_deinitialize(&storage);
+}
+
+TEST(LowLegalizerRegistryTest, WideDivisionNeedsNoTargetProviders) {
+  loom_target_legalizer_registry_storage_t storage = {};
+  IREE_ASSERT_OK(loom_low_legalizer_registry_storage_initialize(
+      loom_target_legalizer_provider_list_empty(), iree_allocator_system(),
+      &storage));
+  const loom_target_legalizer_registry_t* registry =
+      loom_target_legalizer_registry_storage_registry(&storage);
+
+  const loom_op_kind_t scalar_kinds[] = {
+      LOOM_OP_SCALAR_DIVSI, LOOM_OP_SCALAR_DIVUI,    LOOM_OP_SCALAR_REMSI,
+      LOOM_OP_SCALAR_REMUI, LOOM_OP_SCALAR_DIVREMSI, LOOM_OP_SCALAR_DIVREMUI,
+  };
+  const loom_op_kind_t index_kinds[] = {
+      LOOM_OP_INDEX_DIV,
+      LOOM_OP_INDEX_REM,
+      LOOM_OP_INDEX_DIVREM,
+  };
+  auto expect_wide_provider = [&](loom_op_kind_t kind,
+                                  loom_scalar_type_set_t element_types) {
+    SCOPED_TRACE(kind);
+    const auto op_entry =
+        loom_target_legalizer_registry_lookup_kind(registry, kind);
+    ASSERT_GT(op_entry.entry_count, 0u);
+    const auto& first_entry = registry->entries[op_entry.entry_start];
+    EXPECT_TRUE(iree_string_view_equal(first_entry.provider->name,
+                                       IREE_SV("wide-integer-division")));
+    EXPECT_TRUE(loom_low_descriptor_scope_matches(first_entry.provider->scope,
+                                                  nullptr));
+    EXPECT_EQ(first_entry.provider->strategy,
+              LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE);
+    EXPECT_EQ(first_entry.first_operand_element_types, element_types);
+    EXPECT_NE(first_entry.match, nullptr);
+    // The fused fallback precedes general pair decomposition, but only owns
+    // contracts rejected by the target. An unhandled pair can still decompose
+    // to native quotient/remainder operations.
+    const bool fused = kind == LOOM_OP_SCALAR_DIVREMSI ||
+                       kind == LOOM_OP_SCALAR_DIVREMUI ||
+                       kind == LOOM_OP_INDEX_DIVREM;
+    EXPECT_EQ(first_entry.flags,
+              fused
+                  ? LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION
+                  : 0);
+    for (uint16_t i = 1; i < op_entry.entry_count; ++i) {
+      EXPECT_NE(registry->entries[op_entry.entry_start + i].provider,
+                first_entry.provider);
+    }
+  };
+  for (auto kind : scalar_kinds) {
+    expect_wide_provider(kind, LOOM_SCALAR_TYPE_SET_I64);
+  }
+  for (auto kind : index_kinds) {
+    expect_wide_provider(kind, LOOM_SCALAR_TYPE_SET_INDEX);
+  }
   loom_target_legalizer_registry_storage_deinitialize(&storage);
 }
 

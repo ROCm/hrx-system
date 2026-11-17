@@ -15,10 +15,11 @@
 extern "C" {
 #endif
 
-// Reference provider registered by target environments needing exact
-// signed/unsigned i64 and wide-index division over i32 arithmetic contracts.
-extern const loom_target_legalizer_provider_t
-    loom_scalar_wide_division_legalizer_provider_storage;
+// Returns the shared reference provider for exact signed/unsigned i64 and
+// nonnegative index division over i32 arithmetic contracts. Compose it after
+// target-specific providers and before generic quotient/remainder splitting.
+const loom_target_legalizer_provider_t*
+loom_scalar_wide_division_legalizer_provider(void);
 
 #ifdef __cplusplus
 }  // extern "C"

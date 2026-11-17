@@ -18,7 +18,6 @@
 #include "loom/target/arch/spirv/features.h"
 #include "loom/target/arch/spirv/value_types.h"
 #include "loom/transforms/kernel/target_legalization.h"
-#include "loom/transforms/scalar/target_legalization.h"
 #include "loom/transforms/vector/cast_packet_legalization.h"
 #include "loom/transforms/vector/packet_insert_legalization.h"
 #include "loom/transforms/vector/packet_legalization.h"
@@ -337,19 +336,6 @@ static iree_status_t loom_spirv_legalize_vector_slice(
   return iree_ok_status();
 }
 
-static iree_status_t loom_spirv_legalize_float8_to_bfloat_extension(
-    const loom_target_legalizer_entry_t* entry,
-    loom_target_legalization_context_t* context, loom_op_t* op,
-    loom_target_legalizer_result_t* out_result) {
-  *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
-  };
-  (void)entry;
-  IREE_RETURN_IF_ERROR(loom_scalar_rewrite_float8_extension(context, op));
-  out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_spirv_legalize_vector_insert(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
@@ -618,13 +604,6 @@ static const loom_target_legalizer_rule_t kSpirvLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_VECTOR_INSERT,
         .legalize = loom_spirv_legalize_vector_insert,
-    },
-    {
-        .root_kind = LOOM_OP_SCALAR_EXTF,
-        .first_operand_element_types =
-            LOOM_SCALAR_TYPE_SET_F8E4M3 | LOOM_SCALAR_TYPE_SET_F8E5M2,
-        .match = loom_scalar_match_float8_to_bfloat_extension,
-        .legalize = loom_spirv_legalize_float8_to_bfloat_extension,
     },
     {
         .root_kind = LOOM_OP_VECTOR_LOAD,

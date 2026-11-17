@@ -361,10 +361,28 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "subgroup_match_legalization",
+    srcs = ["subgroup_match_legalization.c"],
+    hdrs = ["subgroup_match_legalization.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
+        "//loom/src/loom/ops/scalar",
+        "//loom/src/loom/ops/scf",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:legalization",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "target_legalization",
     srcs = ["target_legalization.c"],
     hdrs = ["target_legalization.h"],
     deps = [
+        ":subgroup_match_legalization",
         ":workgroup_collective_legalization",
         "//loom/src/loom/analysis:control_uniformity",
         "//loom/src/loom/ir",
