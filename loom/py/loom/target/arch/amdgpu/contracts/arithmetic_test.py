@@ -912,18 +912,40 @@ def test_vector_i32_constants_prefer_inline_without_changing_operand_storage() -
             assert projection.value_ref_index == exact.value_ref_index
 
 
-def test_scalar_i64_bitwise_preserves_either_uniform_source() -> None:
+def test_wide_bitwise_preserves_either_uniform_source() -> None:
     compiled = _COMPILED_INTEGER_RULES
-    for source_op, mnemonic in (
-        (scalar_bitwise.scalar_andi, "and"),
-        (scalar_bitwise.scalar_ori, "or"),
-        (scalar_bitwise.scalar_xori, "xor"),
+    materializer_names = {
+        ordinal: materializer.name
+        for ordinal, materializer in enumerate(
+            AMDGPU_INTEGER_CONTRACT_FRAGMENT.materializers, start=1
+        )
+    }
+    for source_op, element_type, mnemonic in (
+        (scalar_bitwise.scalar_andi, "i64", "and"),
+        (scalar_bitwise.scalar_ori, "i64", "or"),
+        (scalar_bitwise.scalar_xori, "i64", "xor"),
+        (index.index_andi, "index", "and"),
+        (index.index_ori, "index", "or"),
+        (index.index_xori, "index", "xor"),
     ):
+        scalar_materializer, vector_materializer = {
+            "i64": ("registers_sgpr", "i64_vgpr"),
+            "index": ("address_sgpr64", "address_vgpr64"),
+        }[element_type]
         rules = tuple(
             rule
             for rule in _rules_for_source_op(compiled, source_op)
-            if set(_rule_type_patterns(compiled, rule)) == {Scalar("i64")}
+            if set(_rule_type_patterns(compiled, rule)) == {Scalar(element_type)}
             and _rule_descriptor_keys(compiled, rule)
+            and any(
+                guard.kind is GuardKind.LOW_VALUE_REGISTER_UNIT_COUNT
+                and compiled.value_refs[guard.value_ref_index].kind
+                is SourceValueKind.RESULT
+                and guard.u64 == 2
+                for guard in compiled.guards[
+                    rule.guard_start : rule.guard_start + rule.guard_count
+                ]
+            )
         )
         assert tuple(_rule_descriptor_keys(compiled, rule) for rule in rules) == (
             (f"amdgpu.s_{mnemonic}_b64",),
@@ -938,11 +960,22 @@ def test_scalar_i64_bitwise_preserves_either_uniform_source() -> None:
                 emit.operand_ref_start : emit.operand_ref_start + emit.operand_ref_count
             ]
             assert tuple(source.index for source in sources) == expected_sources
-            assert sources[1].materializer_index != 0
+            assert (
+                materializer_names[sources[1].materializer_index] == vector_materializer
+            )
             if rule == rules[-1]:
-                assert sources[0].materializer_index != 0
+                assert (
+                    materializer_names[sources[0].materializer_index]
+                    == vector_materializer
+                )
             else:
-                assert sources[0].materializer_index == 0
+                if element_type == "i64":
+                    assert sources[0].materializer_index == 0
+                else:
+                    assert (
+                        materializer_names[sources[0].materializer_index]
+                        == scalar_materializer
+                    )
                 guards = compiled.guards[
                     rule.guard_start : rule.guard_start + rule.guard_count
                 ]

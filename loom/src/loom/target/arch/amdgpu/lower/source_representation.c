@@ -40,6 +40,7 @@ typedef enum loom_amdgpu_matrix_representation_action_e {
   LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_SELECT = 4,
   LOOM_AMDGPU_SOURCE_REPRESENTATION_ACTION_LOOP = 11,
   LOOM_AMDGPU_SOURCE_REPRESENTATION_ACTION_ADDRESS_CAST = 12,
+  LOOM_AMDGPU_SOURCE_REPRESENTATION_ACTION_ADDRESS_BITWISE = 13,
 } loom_amdgpu_matrix_representation_action_t;
 static_assert(
     (uint8_t)LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_FLEXIBLE_RESULT >
@@ -265,6 +266,37 @@ static void loom_amdgpu_address_representation_observe_cast(
   };
   loom_low_lower_representation_record_candidates(recorder, result, &candidate,
                                                   1);
+}
+
+static bool loom_amdgpu_address_representation_fits_word(
+    loom_value_facts_t facts) {
+  return loom_value_facts_fit_signed_bit_count(facts, 32) ||
+         loom_value_facts_fit_unsigned_bit_count(facts, 32);
+}
+
+static void loom_amdgpu_address_representation_observe_bitwise(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_representation_recorder_t* recorder) {
+  const loom_value_fact_table_t* facts =
+      loom_low_lower_context_fact_table(context);
+  const loom_value_id_t result = loom_op_const_results(source_op)[0];
+  if (loom_amdgpu_address_representation_fits_word(
+          loom_value_fact_table_lookup(facts, result))) {
+    return;
+  }
+  // An unknown result range cannot discard an explicitly wide input. Join
+  // only unresolved/wide carriers: proven word-sized operands can extend at
+  // the consumer, and a narrowing mask starts an independent component.
+  loom_amdgpu_address_representation_constrain_value(context, result, recorder);
+  const loom_value_id_t* operands = loom_op_const_operands(source_op);
+  for (uint16_t i = 0; i < source_op->operand_count; ++i) {
+    if (!loom_amdgpu_address_representation_fits_word(
+            loom_value_fact_table_lookup(facts, operands[i]))) {
+      loom_amdgpu_address_representation_constrain_value(context, operands[i],
+                                                         recorder);
+      loom_low_lower_representation_record_union(recorder, operands[i], result);
+    }
+  }
 }
 
 static bool loom_amdgpu_address_representation_relation_is_exact(
@@ -615,6 +647,10 @@ static void loom_amdgpu_source_representation_observe_boundary(
     return;
   }
   switch ((loom_amdgpu_matrix_representation_action_t)action) {
+    case LOOM_AMDGPU_SOURCE_REPRESENTATION_ACTION_ADDRESS_BITWISE:
+      loom_amdgpu_address_representation_observe_bitwise(context, source_op,
+                                                         recorder);
+      return;
     case LOOM_AMDGPU_SOURCE_REPRESENTATION_ACTION_ADDRESS_CAST:
       loom_amdgpu_address_representation_observe_cast(context, source_op,
                                                       recorder);
@@ -803,6 +839,15 @@ static const loom_low_lower_representation_boundary_t
         {LOOM_OP_INDEX_CAST,
          LOOM_AMDGPU_SOURCE_REPRESENTATION_ACTION_ADDRESS_CAST,
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS},
+        {LOOM_OP_INDEX_ANDI,
+         LOOM_AMDGPU_SOURCE_REPRESENTATION_ACTION_ADDRESS_BITWISE,
+         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_ALL},
+        {LOOM_OP_INDEX_ORI,
+         LOOM_AMDGPU_SOURCE_REPRESENTATION_ACTION_ADDRESS_BITWISE,
+         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_ALL},
+        {LOOM_OP_INDEX_XORI,
+         LOOM_AMDGPU_SOURCE_REPRESENTATION_ACTION_ADDRESS_BITWISE,
+         LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_ALL},
         {LOOM_OP_KERNEL_SUBGROUP_SHUFFLE,
          LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_TRANSPORT_PAYLOAD,
          LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_ALL},
@@ -820,10 +865,10 @@ static const loom_low_lower_representation_boundary_span_t
         [LOOM_DIALECT_SCF - LOOM_DIALECT_SCALAR] = {9, 2},
         [LOOM_DIALECT_VIEW - LOOM_DIALECT_SCALAR] = {11, 3},
         [LOOM_DIALECT_VECTOR - LOOM_DIALECT_SCALAR] = {14, 13},
-        [LOOM_DIALECT_INDEX - LOOM_DIALECT_SCALAR] = {27, 1},
-        [LOOM_DIALECT_KERNEL - LOOM_DIALECT_SCALAR] = {28, 3},
+        [LOOM_DIALECT_INDEX - LOOM_DIALECT_SCALAR] = {27, 4},
+        [LOOM_DIALECT_KERNEL - LOOM_DIALECT_SCALAR] = {31, 3},
 };
-static_assert(9 + 2 + 3 + 13 + 1 + 3 ==
+static_assert(9 + 2 + 3 + 13 + 4 + 3 ==
                   IREE_ARRAYSIZE(kAmdgpuSourceRepresentationBoundaries),
               "AMDGPU representation spans must cover every boundary");
 static_assert((loom_op_kind_t)LOOM_OP_SCALAR_SITOFP <
@@ -881,6 +926,12 @@ static_assert((loom_op_kind_t)LOOM_OP_SCALAR_SITOFP <
                   (loom_op_kind_t)LOOM_OP_VECTOR_FRAGMENT_REPACK <
                       (loom_op_kind_t)LOOM_OP_INDEX_CAST &&
                   (loom_op_kind_t)LOOM_OP_INDEX_CAST <
+                      (loom_op_kind_t)LOOM_OP_INDEX_ANDI &&
+                  (loom_op_kind_t)LOOM_OP_INDEX_ANDI <
+                      (loom_op_kind_t)LOOM_OP_INDEX_ORI &&
+                  (loom_op_kind_t)LOOM_OP_INDEX_ORI <
+                      (loom_op_kind_t)LOOM_OP_INDEX_XORI &&
+                  (loom_op_kind_t)LOOM_OP_INDEX_XORI <
                       (loom_op_kind_t)LOOM_OP_KERNEL_SUBGROUP_SHUFFLE &&
                   (loom_op_kind_t)LOOM_OP_KERNEL_SUBGROUP_SHUFFLE <
                       (loom_op_kind_t)LOOM_OP_KERNEL_SUBGROUP_BROADCAST &&

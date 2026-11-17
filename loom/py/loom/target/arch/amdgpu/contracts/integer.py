@@ -26,7 +26,9 @@ from loom.target.arch.amdgpu.contracts.integer64 import (
 )
 from loom.target.arch.amdgpu.contracts.integer_division import integer_division_rules
 from loom.target.arch.amdgpu.contracts.materializers import (
+    ADDRESS_SGPR64_MATERIALIZER,
     ADDRESS_SGPR_MATERIALIZER,
+    ADDRESS_VGPR64_MATERIALIZER,
     ADDRESS_VGPR_MATERIALIZER,
     I1_NATIVE_MASK_MATERIALIZER,
     I32_VGPR_MATERIALIZER,
@@ -2289,21 +2291,21 @@ def _rules() -> tuple[DescriptorRule, ...]:
             index.index_max, "amdgpu.s_max_i32", "amdgpu.v_max_i32"
         )
     )
-    rules.extend(
-        _commutative_index_binary_rules(
-            index.index_andi, "amdgpu.s_and_b32", "amdgpu.v_and_b32"
+    for source_op, mnemonic in (
+        (index.index_andi, "and"),
+        (index.index_ori, "or"),
+        (index.index_xori, "xor"),
+    ):
+        rules.extend(
+            _commutative_index_binary_rules(
+                source_op, f"amdgpu.s_{mnemonic}_b32", f"amdgpu.v_{mnemonic}_b32"
+            )
         )
-    )
-    rules.extend(
-        _commutative_index_binary_rules(
-            index.index_ori, "amdgpu.s_or_b32", "amdgpu.v_or_b32"
+        rules.extend(
+            integer64_bitwise_rules(
+                _DESCRIPTOR_SET, source_op, mnemonic, element_type="index"
+            )
         )
-    )
-    rules.extend(
-        _commutative_index_binary_rules(
-            index.index_xori, "amdgpu.s_xor_b32", "amdgpu.v_xor_b32"
-        )
-    )
     rules.extend(
         _index_shift_rules(
             index.index_shli,
@@ -2398,6 +2400,8 @@ AMDGPU_INTEGER_CONTRACT_FRAGMENT = ContractFragment(
         WIDE_INDEX_SGPR_MATERIALIZER,
         WIDE_INDEX_VGPR_MATERIALIZER,
         I1_NATIVE_MASK_MATERIALIZER,
+        ADDRESS_SGPR64_MATERIALIZER,
+        ADDRESS_VGPR64_MATERIALIZER,
     ),
     cases=_rules(),
 )

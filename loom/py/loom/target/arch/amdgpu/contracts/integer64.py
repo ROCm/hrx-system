@@ -4,13 +4,15 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Fixed-width wide bitwise operations and disjoint-word register transport."""
+"""Wide integer operations and disjoint-word register transport."""
 
 from loom.dialect.index import defs as index
 from loom.dialect.scalar import bitwise
 from loom.dsl import Op
 from loom.target.arch.amdgpu.contracts.materializers import (
+    ADDRESS_SGPR64_MATERIALIZER,
     ADDRESS_SGPR_MATERIALIZER,
+    ADDRESS_VGPR64_MATERIALIZER,
     ADDRESS_VGPR_MATERIALIZER,
     I64_VGPR_MATERIALIZER,
     REGISTERS_SGPR_MATERIALIZER,
@@ -270,12 +272,24 @@ def index64_shift_rules(descriptor_set: DescriptorSet) -> tuple[DescriptorRule, 
 
 
 def integer64_bitwise_rules(
-    descriptor_set: DescriptorSet, source_op: Op, mnemonic: str
+    descriptor_set: DescriptorSet,
+    source_op: Op,
+    mnemonic: str,
+    *,
+    element_type: str = "i64",
 ) -> tuple[DescriptorRule, ...]:
+    scalar_materializer, vector_materializer = {
+        "i64": (REGISTERS_SGPR_MATERIALIZER, I64_VGPR_MATERIALIZER),
+        "index": (ADDRESS_SGPR64_MATERIALIZER, ADDRESS_VGPR64_MATERIALIZER),
+    }[element_type]
+    # Fixed i64 sources already occupy two words. An index source can still
+    # occupy one word when its consumer requires a wide result.
+    uniform_materializer = scalar_materializer if element_type == "index" else None
     rules: list[DescriptorRule] = []
     result = ValueRef.result("result")
     typed_guards = tuple(
-        Guard.value_type(field, Scalar("i64")) for field in ("lhs", "rhs", "result")
+        Guard.value_type(field, Scalar(element_type))
+        for field in ("lhs", "rhs", "result")
     )
     scalar_descriptor = descriptor_by_key(descriptor_set, f"amdgpu.s_{mnemonic}_b64")
     rules.append(
@@ -285,10 +299,9 @@ def integer64_bitwise_rules(
             guards=(
                 *typed_guards,
                 Guard.low_value_register_class("result", "amdgpu.sgpr"),
-                Guard.value_materializable("lhs", REGISTERS_SGPR_MATERIALIZER.name),
-                Guard.value_materializable("rhs", REGISTERS_SGPR_MATERIALIZER.name),
-                Guard.low_value_register_unit_count_eq("result", "lhs"),
-                Guard.low_value_register_unit_count_eq("result", "rhs"),
+                Guard.low_value_register_unit_count("result", 2),
+                Guard.value_materializable("lhs", scalar_materializer.name),
+                Guard.value_materializable("rhs", scalar_materializer.name),
                 Guard.descriptor_available(scalar_descriptor),
             ),
             emit=(
@@ -296,7 +309,7 @@ def integer64_bitwise_rules(
                     descriptor=scalar_descriptor,
                     operands={
                         field: ValueRef.operand(
-                            field, materializer=REGISTERS_SGPR_MATERIALIZER.name
+                            field, materializer=scalar_materializer.name
                         )
                         for field in ("lhs", "rhs")
                     },
@@ -308,11 +321,25 @@ def integer64_bitwise_rules(
     vector_descriptor = descriptor_by_key(descriptor_set, f"amdgpu.v_{mnemonic}_b32")
     # Only the first vector source accepts SGPRs or encoded literals. Keep
     # either uniform operand there so word slicing preserves those choices.
+    # Index operands may have different carrier widths; their materializers
+    # extend a narrow operand in its original register bank before slicing.
     for first, second, preserve_uniform in (
         ("lhs", "rhs", True),
         ("rhs", "lhs", True),
         ("lhs", "rhs", False),
     ):
+        first_materializer = (
+            uniform_materializer if preserve_uniform else vector_materializer
+        )
+        first_guards = (
+            (Guard.low_value_register_class(first, "amdgpu.sgpr"),)
+            if preserve_uniform
+            else ()
+        )
+        if first_materializer is not None:
+            first_guards += (
+                Guard.value_materializable(first, first_materializer.name),
+            )
         rules.append(
             DescriptorRule(
                 source_op=source_op,
@@ -321,10 +348,8 @@ def integer64_bitwise_rules(
                     *typed_guards,
                     Guard.low_value_register_class("result", "amdgpu.vgpr"),
                     Guard.low_value_register_unit_count("result", 2),
-                    Guard.low_value_register_class(first, "amdgpu.sgpr")
-                    if preserve_uniform
-                    else Guard.value_materializable(first, I64_VGPR_MATERIALIZER.name),
-                    Guard.value_materializable(second, I64_VGPR_MATERIALIZER.name),
+                    *first_guards,
+                    Guard.value_materializable(second, vector_materializer.name),
                     Guard.descriptor_available(vector_descriptor),
                 ),
                 emit=(
@@ -333,12 +358,12 @@ def integer64_bitwise_rules(
                         operands={
                             "lhs": ValueRef.operand(
                                 first,
-                                materializer=None
-                                if preserve_uniform
-                                else I64_VGPR_MATERIALIZER.name,
+                                materializer=first_materializer.name
+                                if first_materializer is not None
+                                else None,
                             ),
                             "rhs": ValueRef.operand(
-                                second, materializer=I64_VGPR_MATERIALIZER.name
+                                second, materializer=vector_materializer.name
                             ),
                         },
                         results={"dst": result},
