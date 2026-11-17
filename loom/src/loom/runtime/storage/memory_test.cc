@@ -1510,8 +1510,8 @@ TEST_F(DeviceMemoryTest, StateAndWorkspaceReuseOnePhysicalSlab) {
   RoundTrip(workspace, 0, 0xABCDEF01);
   const auto active = loom_runtime_pool_statistics(storage_owner);
   EXPECT_EQ(active.retained.committed_bytes, kSlabSize);
-  EXPECT_EQ(active.retained.cached_bytes, 0u);
-  EXPECT_EQ(active.workspace.bytes_committed, kSlabSize);
+  EXPECT_EQ(active.retained.cached_bytes, kSlabSize / 2);
+  EXPECT_EQ(active.workspace.bytes_committed, kSlabSize / 2);
 
   uint64_t completion = 0;
   IREE_ASSERT_OK(
@@ -1538,7 +1538,7 @@ TEST_F(DeviceMemoryTest, StateAndWorkspaceReuseOnePhysicalSlab) {
   EXPECT_EQ(loom_runtime_memory_pool_statistics(pool).cached_bytes, 0u);
 }
 
-TEST_F(DeviceMemoryTest, AdmissionIncludesWorkspaceSlabGranularity) {
+TEST_F(DeviceMemoryTest, SmallWorkspaceFitsAlongsideLiveState) {
   const uint64_t state_bytes = 5 * kSlabSize / 2;
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
       pool, loom_runtime_pool_state_geometry(storage_owner), state_bytes, 256,
@@ -1554,21 +1554,16 @@ TEST_F(DeviceMemoryTest, AdmissionIncludesWorkspaceSlabGranularity) {
   IREE_ASSERT_OK(loom_runtime_residency_prepare_working_set(residency, 256, 0));
   loom_runtime_residency_admission_t admission;
   IREE_ASSERT_OK(loom_runtime_residency_try_admit(residency, &admission));
-  // Half a slab remains, but even this small invocation needs one whole
-  // workspace slab. Reject it before any queue allocation is accepted.
-  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
-  if (admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED) {
-    loom_runtime_residency_release(residency);
-  }
+  // Half a slab remains. A small invocation needs only one native page,
+  // so it can execute without reclaiming the independently live state.
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
   EXPECT_EQ(loom_runtime_execution_frontier(execution).values[0], 0u);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_free(first));
-  first = nullptr;
-  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
-  IREE_ASSERT_OK(loom_runtime_residency_acquire_wait(residency));
+  RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x87654321);
   const auto request = iree_hal_make_pool_reservation_request(256, 256);
   IREE_ASSERT_OK(
       loom_runtime_execution_alloca(execution, 1, &request, &workspace));
   RoundTrip(workspace, 0, 0x12345678);
+  CheckRetained(loom_runtime_virtual_buffer_handle(first), 0, 0x87654321);
   uint64_t completion = 0;
   IREE_ASSERT_OK(
       loom_runtime_execution_dealloca(execution, workspace, &completion));

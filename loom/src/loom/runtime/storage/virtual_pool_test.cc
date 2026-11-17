@@ -9,6 +9,90 @@
 namespace {
 
 using VirtualPoolTest = loom_runtime::testing::memory::MemoryTest;
+using DeviceMemoryTest = loom_runtime::testing::memory::DeviceMemoryTest;
+
+TEST_F(VirtualPoolTest, RoundsRequestsToWholeNativeExtents) {
+  auto geometry = loom_runtime_pool_weight_geometry(storage_owner);
+  // A backing source may require a larger minimum allocation than its mapping
+  // alignment. Logical rounding still matches the independently reusable slot.
+  geometry.minimum_size = 3 * geometry.granularity;
+  geometry.backing_size =
+      iree_max(geometry.backing_size, 4 * geometry.granularity);
+  IREE_ASSERT_OK(loom_runtime_virtual_pool_allocate(
+      pool, geometry, iree_allocator_system(), &virtual_pool));
+  const uint64_t extent = geometry.minimum_size;
+  const std::array<std::array<uint64_t, 2>, 6> cases = {{
+      {0, 0},
+      {1, extent},
+      {extent - 1, extent},
+      {extent, extent},
+      {extent + 1, 2 * extent},
+      {2 * extent, 2 * extent},
+  }};
+  for (const auto& [length, expected] : cases) {
+    EXPECT_EQ(loom_runtime_virtual_pool_round_size(virtual_pool, length),
+              expected);
+  }
+  EXPECT_EQ(loom_runtime_virtual_pool_round_size(virtual_pool, UINT64_MAX),
+            UINT64_MAX);
+}
+
+TEST_F(DeviceMemoryTest, StorageAndWorkspaceSharePackedPhysicalParents) {
+  const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
+  const uint64_t page = geometry.minimum_size;
+  auto* shared_workspace = loom_runtime_pool_workspace(storage_owner);
+  EXPECT_EQ(loom_runtime_workspace_round_size(shared_workspace, 0), 0u);
+  EXPECT_EQ(loom_runtime_workspace_round_size(shared_workspace, 256), page);
+  EXPECT_EQ(loom_runtime_workspace_round_size(shared_workspace, page + 1),
+            2 * page);
+  const auto storage_request = iree_hal_make_pool_reservation_request(256, 256);
+  iree_hal_buffer_t* storage = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_alloca_from_pool(
+      execution, loom_runtime_pool_storage(storage_owner), 1, &storage_request,
+      &storage));
+  std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>
+      persistent(storage, iree_hal_buffer_release);
+  RoundTrip(storage, 0, 0x12345678);
+
+  // Separate logical sources share physical pages. Neither source rounds its
+  // reservation to a physical parent, and workspace may outgrow one page.
+  for (const uint64_t length : {3 * page + 1, 7 * page + 1}) {
+    const auto request = iree_hal_make_pool_reservation_request(length, 256);
+    IREE_ASSERT_OK(
+        loom_runtime_execution_alloca(execution, 1, &request, &workspace));
+    RoundTrip(workspace, page, 0x87654321);
+    CheckRetained(storage, 0, 0x12345678);
+    const auto active = loom_runtime_pool_statistics(storage_owner);
+    EXPECT_EQ(active.storage.bytes_committed, page);
+    EXPECT_EQ(active.workspace.bytes_committed,
+              iree_device_align(length, page));
+    EXPECT_EQ(active.retained.committed_bytes,
+              iree_device_align(page + iree_device_align(length, page),
+                                geometry.backing_size));
+
+    uint64_t completion = 0;
+    IREE_ASSERT_OK(
+        loom_runtime_execution_dealloca(execution, workspace, &completion));
+    iree_hal_buffer_release(workspace);
+    workspace = nullptr;
+    IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
+    IREE_ASSERT_OK(loom_runtime_test_pool_trim_and_drain(storage_owner, 0));
+    CheckRetained(storage, 0, 0x12345678);
+    const auto trimmed = loom_runtime_pool_statistics(storage_owner);
+    EXPECT_EQ(trimmed.workspace.bytes_committed, 0u);
+    EXPECT_EQ(trimmed.retained.committed_bytes, geometry.backing_size);
+    EXPECT_EQ(trimmed.retained.cached_bytes, geometry.backing_size - page);
+  }
+
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_runtime_execution_dealloca(execution, storage, &completion));
+  persistent.reset();
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
+  IREE_ASSERT_OK(loom_runtime_test_pool_trim_and_drain(storage_owner, 0));
+  EXPECT_EQ(
+      loom_runtime_pool_statistics(storage_owner).retained.committed_bytes, 0u);
+}
 
 TEST_F(VirtualPoolTest,
        VirtualCommandPoolReusesRetainedSlabsAcrossTrimAndRegrowth) {
@@ -391,7 +475,7 @@ TEST_F(VirtualPoolTest, VirtualBackingBatchDenialPreservesWarmPrefix) {
   EXPECT_EQ(loom_runtime_virtual_pool_source_protected_bytes(source), 0u);
 }
 
-TEST_F(VirtualPoolTest, VirtualBackingWaitsForIncompatibleNativeReturn) {
+TEST_F(VirtualPoolTest, VirtualBackingReusesStatePagesWithoutNativeReturn) {
   ASSERT_NO_FATAL_FAILURE(
       UseDeferredBacking(3 * kSlabSize, nullptr, /*distinct_classes=*/true));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
@@ -429,22 +513,25 @@ TEST_F(VirtualPoolTest, VirtualBackingWaitsForIncompatibleNativeReturn) {
       iree_hal_make_pool_reservation_request(2 * kSlabSize, 256);
   iree_hal_pool_reservation_t reservation = {};
   iree_hal_pool_acquire_info_t info = {};
-  deferred_backing->DeferReturns();
+  iree_hal_pool_stats_t before;
+  iree_hal_pool_query_stats(deferred_backing, &before);
+  deferred_backing->reject_next_acquisition = true;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
       source, 1, &request, nullptr, callback, IREE_HAL_POOL_RESERVE_FLAG_NONE,
       &reservation, &info));
   IREE_ASSERT_OK(loom_runtime_virtual_pool_advance(virtual_pool));
-  ASSERT_EQ(completion.count, 0u);
-  deferred_backing->WaitForReturn();
-  EXPECT_TRUE(loom_runtime_virtual_pool_is_pending(virtual_pool));
-  EXPECT_GT(deferred_backing->PendingReturnCount(), 0u);
+  EXPECT_EQ(deferred_backing->PendingReturnCount(), 0u);
   ASSERT_NO_FATAL_FAILURE(
       CheckRetained(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678));
-  deferred_backing->CompleteReturns();
   ASSERT_NO_FATAL_FAILURE(AwaitVirtualPool());
   ASSERT_EQ(completion.count, 1u);
   IREE_ASSERT_OK(completion.status);
   ASSERT_EQ(completion.result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
+  iree_hal_pool_stats_t after;
+  iree_hal_pool_query_stats(deferred_backing, &after);
+  EXPECT_EQ(after.reserve_count, before.reserve_count);
+  EXPECT_TRUE(deferred_backing->reject_next_acquisition);
+  deferred_backing->reject_next_acquisition = false;
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_materialize_reservations(
       source, 1, &request, &reservation,

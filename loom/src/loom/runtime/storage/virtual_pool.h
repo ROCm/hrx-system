@@ -43,9 +43,10 @@ iree_hal_pool_t* loom_runtime_virtual_pool_handle(
 iree_status_t loom_runtime_virtual_pool_create_source(
     loom_runtime_virtual_pool_t* pool, iree_hal_pool_t** out_source);
 
-// Rounds logical bytes to this source's physical slab granularity. Saturates
-// at UINT64_MAX when the rounded extent is not representable; no allocation
-// or availability query occurs.
+// Rounds logical bytes to whole minimum native extents, independently of the
+// physical parent size. Zero remains zero. Saturates at UINT64_MAX when the
+// rounded extent is not representable; no allocation or availability query
+// occurs.
 uint64_t loom_runtime_virtual_pool_round_size(
     const loom_runtime_virtual_pool_t* pool, uint64_t byte_length);
 

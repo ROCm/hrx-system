@@ -225,11 +225,11 @@ static loom_runtime_virtual_pool_entry_t* loom_runtime_virtual_pool_take(
     const iree_async_frontier_t* requester, iree_hal_pool_reserve_flags_t flags,
     loom_runtime_virtual_pool_entry_state_t state) {
   loom_runtime_virtual_pool_entry_t* selected = NULL;
-  bool selected_ready = false;
+  const iree_device_size_t length = loom_runtime_virtual_pool_round_size(
+      source->owner, request->allocation_size);
   for (loom_runtime_virtual_pool_entry_t* entry = source->entries; entry;
        entry = entry->next) {
-    if (entry->state != state ||
-        entry->range.length < request->allocation_size) {
+    if (entry->state != state || entry->range.length != length) {
       continue;
     }
     const bool ready = loom_runtime_virtual_pool_frontier_is_satisfied(
@@ -238,11 +238,11 @@ static loom_runtime_virtual_pool_entry_t* loom_runtime_virtual_pool_take(
                       flags, IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER)) {
       continue;
     }
-    if (!selected || (ready && !selected_ready) ||
-        (ready == selected_ready &&
-         entry->range.length < selected->range.length)) {
+    if (!selected || ready) {
       selected = entry;
-      selected_ready = ready;
+    }
+    if (ready) {
+      break;
     }
   }
   if (selected) {
@@ -559,7 +559,8 @@ static const iree_hal_pool_vtable_t loom_runtime_virtual_pool_vtable = {
 };
 
 // Owner-only address creation; publication into the shared list is the only
-// mutex-protected part. Rounded physical slabs are reusable across all roles.
+// mutex-protected part. Extents round only to native mapping requirements;
+// packed pages share physical parents across independent logical sources.
 static iree_status_t loom_runtime_virtual_pool_create_entry(
     loom_runtime_virtual_pool_source_t* source, iree_device_size_t length,
     loom_runtime_virtual_pool_entry_t** out_entry) {
@@ -610,12 +611,15 @@ iree_status_t loom_runtime_virtual_pool_allocate(
   pool->host_allocator = host_allocator;
   pool->memory_pool = memory_pool;
   pool->geometry = geometry;
+  // Commit exact native pages and let the physical owner pack them into
+  // parents. Adjacent pages coalesce into native mapping runs during capture.
+  pool->geometry.mapping_size = geometry.minimum_size;
   pool->tail = &pool->first;
   iree_slim_mutex_initialize(&pool->mutex);
   iree_notification_initialize(&pool->notification);
   loom_runtime_virtual_pool_entry_t* entry = NULL;
   iree_status_t status = loom_runtime_virtual_pool_create_entry(
-      pool->source, geometry.mapping_size, &entry);
+      pool->source, geometry.minimum_size, &entry);
   if (iree_status_is_ok(status)) {
     const iree_hal_pool_buffer_range_t* range = &entry->range;
     pool->capabilities = (iree_hal_pool_capabilities_t){
@@ -681,10 +685,14 @@ iree_status_t loom_runtime_virtual_pool_create_source(
 
 uint64_t loom_runtime_virtual_pool_round_size(
     const loom_runtime_virtual_pool_t* pool, uint64_t byte_length) {
-  const uint64_t padding = pool->geometry.mapping_size - 1;
+  if (!byte_length) {
+    return 0;
+  }
+  const uint64_t extent = pool->geometry.mapping_size;
+  const uint64_t padding = extent - 1;
   return byte_length > UINT64_MAX - padding
              ? UINT64_MAX
-             : iree_device_align(byte_length, pool->geometry.mapping_size);
+             : (byte_length + padding) / extent * extent;
 }
 
 loom_runtime_storage_usage_t loom_runtime_virtual_pool_memory_usage(

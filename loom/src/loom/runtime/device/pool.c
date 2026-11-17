@@ -146,17 +146,18 @@ static iree_status_t loom_runtime_pool_initialize_elastic(
   IREE_RETURN_IF_ERROR(loom_runtime_virtual_pool_create_source(
       pool->virtual_pool, &pool->storage.source));
   const iree_hal_tlsf_pool_options_t storage_options = {
-      .tlsf_options = {.range_length = pool->weight_geometry.mapping_size,
+      .tlsf_options = {.range_length = pool->weight_geometry.minimum_size,
                        .alignment = 256},
       .trace_name = IREE_SVL("loom-serve-storage"),
   };
   IREE_RETURN_IF_ERROR(iree_hal_tlsf_pool_create(
       pool->storage.source, &storage_options, pool->host_allocator,
       &pool->storage.allocator));
-  // Small command allocations pack into a logical slab. Larger requirements
-  // use dedicated virtual ranges drawing from the same physical owner.
+  // Pack small allocations within one native page. Larger requirements use
+  // exact virtual ranges; physical parent geometry does not round logical
+  // storage or workspace demand up to a whole parent.
   const iree_hal_pool_reservation_request_t range = {
-      .allocation_size = pool->weight_geometry.mapping_size,
+      .allocation_size = pool->weight_geometry.minimum_size,
       .min_alignment = 256,
   };
   return loom_runtime_workspace_create_from_virtual(
