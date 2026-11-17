@@ -401,6 +401,12 @@ static bool iree_hal_amd_gpu_completion_observe(
           return true;
         }
       }
+      if (wait->notification_address &&
+          iree_atomic_load(
+              (const iree_atomic_int64_t*)wait->notification_address,
+              iree_memory_order_acquire) != 0) {
+        return true;
+      }
     }
     iree_processor_yield();
   }

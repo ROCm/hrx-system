@@ -1601,6 +1601,11 @@ TEST_F(KfdUserQueueTest, AqlScratchServicePreservesOwnershipAcrossGrowth) {
     ASSERT_EQ(amdf_gpu_umd_user_queue_query_scratch(queue_, &request),
               AMDF_STATUS_OK);
     EXPECT_EQ(request.byte_length, 0u);
+    const auto* notification = reinterpret_cast<const amdf_atomic_uint64_t*>(
+        request.host_notification_address);
+    ASSERT_EQ(notification,
+              reinterpret_cast<const amdf_atomic_uint64_t*>(&signal->value));
+    EXPECT_EQ(amdf_atomic_uint64_load_acquire(notification), 0u);
     const uint32_t alignment = wavefront_size == 32 ? 256 : 1024;
     for (const uint32_t private_bytes : {17u, 33u, 65u}) {
       // A preceding barrier and invalid slot exercise EOP lag and ring wrap.
@@ -1612,8 +1617,11 @@ TEST_F(KfdUserQueueTest, AqlScratchServicePreservesOwnershipAcrossGrowth) {
       amdf_atomic_uint64_store_release(ReadIndex(), 62);
       amdf_atomic_uint64_store_release(WriteIndex(), 65);
       signal->value = wavefront_size == 32 ? 0x401 : 1;
+      EXPECT_NE(amdf_atomic_uint64_load_acquire(notification), 0u);
       ASSERT_EQ(amdf_gpu_umd_user_queue_query_scratch(queue_, &request),
                 AMDF_STATUS_OK);
+      EXPECT_EQ(request.host_notification_address,
+                reinterpret_cast<uintptr_t>(notification));
       const uint64_t wave_bytes =
           (private_bytes * wavefront_size + alignment - 1) & ~(alignment - 1);
       EXPECT_EQ(request.dispatch_index, 64u);
@@ -1645,6 +1653,7 @@ TEST_F(KfdUserQueueTest, AqlScratchServicePreservesOwnershipAcrossGrowth) {
       ASSERT_EQ(amdf_gpu_umd_user_queue_resume_scratch(queue_, &scratch),
                 AMDF_STATUS_OK);
       EXPECT_EQ(signal->value, 0u);
+      EXPECT_EQ(amdf_atomic_uint64_load_acquire(notification), 0u);
       EXPECT_EQ(descriptor->scratch_backing_address, scratch.device_address);
       EXPECT_EQ(descriptor->scratch_resource_descriptor[1] & 0xffff,
                 scratch.device_address >> 32);
@@ -1659,6 +1668,8 @@ TEST_F(KfdUserQueueTest, AqlScratchServicePreservesOwnershipAcrossGrowth) {
       ASSERT_EQ(amdf_gpu_umd_user_queue_query_scratch(queue_, &request),
                 AMDF_STATUS_OK);
       EXPECT_EQ(request.byte_length, 0u);
+      EXPECT_EQ(request.host_notification_address,
+                reinterpret_cast<uintptr_t>(notification));
       EXPECT_EQ(amdf_gpu_umd_user_queue_resume_scratch(queue_, &scratch),
                 amdf_make_api_status(AMDF_STATUS_CODE_FAILED_PRECONDITION));
     }

@@ -62,6 +62,11 @@ typedef struct iree_hal_amd_gpu_completion_wait_t {
   // Optional borrowed signal owning the word. The worker retains it under the
   // drain mutex before observing, preventing reuse or trim during those reads.
   struct iree_hal_amd_gpu_signal_t* signal;
+  // Optional CPU-cacheable coherent 64-bit service notification. Nonzero
+  // requests another source drain even when execution has not completed.
+  // Borrowed queue storage, live through source replacement or worker join.
+  // Sources omit it while an existing callout services the asserted request.
+  const uint64_t* notification_address;
   // Word width; false selects a signed 32-bit load, true a signed 64-bit load.
   bool is_64_bit;
   // Outstanding accepted work. This selects bounded native-event rechecks;

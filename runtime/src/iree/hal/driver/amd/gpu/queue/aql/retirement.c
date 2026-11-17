@@ -117,9 +117,11 @@ bool iree_hal_amd_gpu_aql_retirement_poll(
                                                  iree_memory_order_relaxed);
   const uint64_t published = (uint64_t)iree_atomic_load(
       &queue->producer.count, iree_memory_order_acquire);
+  const uint64_t* notification_address = NULL;
   if (amdf_status_is_ok(wait_status) && position != published) {
     iree_hal_amd_gpu_completion_scope_unlock(scope);
-    wait_status = iree_hal_amd_gpu_aql_scratch_poll(&queue->scratch);
+    wait_status = iree_hal_amd_gpu_aql_scratch_poll(&queue->scratch,
+                                                    &notification_address);
   }
   if (!amdf_status_is_ok(wait_status)) {
     iree_hal_amd_gpu_completion_scope_unlock(scope);
@@ -169,10 +171,17 @@ bool iree_hal_amd_gpu_aql_retirement_poll(
         iree_hal_amd_gpu_completion_scope_unlock(scope);
         iree_hal_amd_gpu_aql_queue_enqueue_entry(queue, &queue->run.entry);
       }
-      out_wait->address = action->signal->host_value;
-      out_wait->value = 1;
-      out_wait->signal = action->signal;
-      out_wait->is_64_bit = true;
+      // Firmware service must remain observable while completion is stalled.
+      // An in-progress allocation already has a host wake owner. Providers
+      // without a coherent notification require the native event instead.
+      if (notification_address ||
+          iree_hal_amd_gpu_aql_scratch_is_pending(&queue->scratch)) {
+        out_wait->address = action->signal->host_value;
+        out_wait->value = 1;
+        out_wait->signal = action->signal;
+        out_wait->is_64_bit = true;
+        out_wait->notification_address = notification_address;
+      }
       out_wait->pending = true;
       break;
     }

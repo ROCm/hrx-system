@@ -5,6 +5,9 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cstring>
+#include <string>
+#include <thread>
+#include <tuple>
 
 #include "libamdf/cts/gpu/aql/dispatch_fixture.h"
 #include "libamdf/cts/gpu/kernels/private_roundtrip.h"
@@ -13,8 +16,9 @@
 
 namespace {
 
-class AqlScratchServiceTest : public GpuEventTest<AqlDispatchTest>,
-                              public ::testing::WithParamInterface<bool> {
+class AqlScratchServiceTest
+    : public GpuEventTest<AqlDispatchTest>,
+      public ::testing::WithParamInterface<std::tuple<bool, bool>> {
  protected:
   void CreateScratch(uint64_t byte_length, GpuMemory** out_memory) {
     const amdf_memory_device_access_t attachment = {
@@ -77,7 +81,7 @@ TEST_P(AqlScratchServiceTest, FirmwareRequestsBackingAndReleasesPreviousRange) {
   // published kernel legally asks firmware for a larger private segment.
   GpuMemory* scratch_memory = nullptr;
   amdf_gpu_queue_scratch_t initial = {};
-  if (GetParam()) {
+  if (std::get<0>(GetParam())) {
     const auto& topology = gpu_endpoint_info_.topology;
     const auto& compute = gpu_endpoint_info_.compute;
     const uint32_t engines =
@@ -119,6 +123,14 @@ TEST_P(AqlScratchServiceTest, FirmwareRequestsBackingAndReleasesPreviousRange) {
   ASSERT_EQ(gpu_api_->user_queue_query_scratch(queue->queue, &request),
             AMDF_STATUS_OK);
   ASSERT_EQ(request.byte_length, 0u);
+  const uint64_t notification_address = request.host_notification_address;
+  const bool observe = std::get<1>(GetParam());
+  if (observe && !notification_address) {
+    GTEST_SKIP() << "queue has no coherent scratch notification";
+  }
+  if (notification_address) {
+    EXPECT_EQ(GpuLoadAcquire<uint64_t>(notification_address), 0u);
+  }
   for (uint32_t round = 0; round < 5; ++round) {
     SCOPED_TRACE(round);
     const uint32_t seed = 0x13579bdf + round;
@@ -147,12 +159,21 @@ TEST_P(AqlScratchServiceTest, FirmwareRequestsBackingAndReleasesPreviousRange) {
 
     uint32_t requests = 0;
     do {
-      // Both request and completion use the event. Only acquiring their
-      // respective predicates determines which ownership transition occurred.
-      ASSERT_EQ(gpu_api_->event_wait(event_, AMDF_TIMEOUT_INFINITE),
-                AMDF_STATUS_OK);
+      // Both request and completion must interrupt observation. Only querying
+      // their predicates determines which ownership transition occurred.
+      if (observe) {
+        while (GpuLoadAcquire<uint64_t>(notification_address) == 0 &&
+               GpuLoadAcquire<int64_t>(
+                   reinterpret_cast<uintptr_t>(&signal.value)) != 0) {
+          std::this_thread::yield();
+        }
+      } else {
+        ASSERT_EQ(gpu_api_->event_wait(event_, AMDF_TIMEOUT_INFINITE),
+                  AMDF_STATUS_OK);
+      }
       ASSERT_EQ(gpu_api_->user_queue_query_scratch(queue->queue, &request),
                 AMDF_STATUS_OK);
+      EXPECT_EQ(request.host_notification_address, notification_address);
       if (request.byte_length == 0) {
         continue;
       }
@@ -175,6 +196,9 @@ TEST_P(AqlScratchServiceTest, FirmwareRequestsBackingAndReleasesPreviousRange) {
       };
       ASSERT_EQ(gpu_api_->user_queue_resume_scratch(queue->queue, &scratch),
                 AMDF_STATUS_OK);
+      if (notification_address) {
+        EXPECT_EQ(GpuLoadAcquire<uint64_t>(notification_address), 0u);
+      }
     } while (GpuLoadAcquire<int64_t>(
                  reinterpret_cast<uintptr_t>(&signal.value)) != 0);
 
@@ -199,6 +223,10 @@ TEST_P(AqlScratchServiceTest, FirmwareRequestsBackingAndReleasesPreviousRange) {
       // publication. Detach firmware's cached binding before freeing it.
       ASSERT_EQ(gpu_api_->user_queue_trim_scratch(queue->queue),
                 AMDF_STATUS_OK);
+      ASSERT_EQ(gpu_api_->user_queue_query_scratch(queue->queue, &request),
+                AMDF_STATUS_OK);
+      EXPECT_EQ(request.host_notification_address, notification_address);
+      EXPECT_EQ(request.byte_length, 0u);
       ASSERT_TRUE(scratch_memory->Release(api_));
       scratch_memory = nullptr;
       ASSERT_EQ(gpu_api_->user_queue_trim_scratch(queue->queue),
@@ -211,9 +239,12 @@ TEST_P(AqlScratchServiceTest, FirmwareRequestsBackingAndReleasesPreviousRange) {
   RecordProperty("scratch_trim_count", 1);
 }
 
-INSTANTIATE_TEST_SUITE_P(InitialBacking, AqlScratchServiceTest,
-                         ::testing::Bool(), [](const auto& info) {
-                           return info.param ? "Smaller" : "Empty";
-                         });
+INSTANTIATE_TEST_SUITE_P(
+    InitialBacking, AqlScratchServiceTest,
+    ::testing::Combine(::testing::Bool(), ::testing::Bool()),
+    [](const auto& info) {
+      return std::string(std::get<0>(info.param) ? "Smaller" : "Empty") +
+             (std::get<1>(info.param) ? "Observed" : "Event");
+    });
 
 }  // namespace

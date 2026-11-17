@@ -763,12 +763,14 @@ amdf_status_t amdf_gpu_umd_user_queue_query_scratch(
   if (!amdf_status_is_ok(terminal_status)) {
     return terminal_status;
   }
-  const uint64_t inactive_value =
-      amdf_atomic_uint64_load_acquire(amdf_gpu_kfd_user_queue_control_value(
+  const amdf_atomic_uint64_t* notification =
+      amdf_gpu_kfd_user_queue_control_value(
           queue, queue->plan.aql.inactive_signal_byte_offset +
-                     offsetof(amdf_gpu_kfd_aql_signal_t, value)));
+                     offsetof(amdf_gpu_kfd_aql_signal_t, value));
+  const uint64_t inactive_value = amdf_atomic_uint64_load_acquire(notification);
   if (inactive_value == 0) {
-    *out_request = (amdf_gpu_aql_scratch_request_t){0};
+    *out_request = (amdf_gpu_aql_scratch_request_t){
+        .host_notification_address = (uintptr_t)notification};
     return AMDF_STATUS_OK;
   }
   if (!amdf_gpu_kfd_aql_is_scratch_request(inactive_value)) {
@@ -810,6 +812,7 @@ amdf_status_t amdf_gpu_umd_user_queue_query_scratch(
       return status;
     }
     request.dispatch_index = read_index + i;
+    request.host_notification_address = (uintptr_t)notification;
     *out_request = request;
     return AMDF_STATUS_OK;
   }
