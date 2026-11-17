@@ -439,6 +439,20 @@ struct TensorPartition final : Partition {
   uint64_t element_bytes;
 };
 
+// Retained projection of an ordinary record onto explicit kernel arguments.
+// Native object padding and pointer displacements are absent from this ABI:
+// each pointer contributes a buffer whose source displacement starts at zero.
+struct KernelRecordProjection {
+  // A source pointer displacement supplied by the entry instead of a caller.
+  static constexpr size_t kZeroOrigin = SIZE_MAX;
+
+  // High kernel argument types in base/member/array-element order.
+  std::vector<loom_type_t> types;
+  // One native argument ordinal per source value component, or kZeroOrigin
+  // for the displacement immediately following a pointer's buffer component.
+  std::vector<size_t> argument_indices;
+};
+
 // Projects resolved C++ types using the translation unit's explicit data model.
 // Source signedness remains available even when both types share one IR
 // carrier. Enums use their resolved underlying integer representation; nominal
@@ -564,9 +578,23 @@ class Types {
   // Appends today's admitted static High signature for an ordinary function
   // or structured result. A dependent source value requires destination SSA
   // identities before type binding and cannot use this static projection.
-  // Kernel parameters instead use get(), retaining the launch binding ABI.
+  // Kernel parameters instead use append_kernel_parameter().
   void append(const cxx::Type* input, cxx::AST* owner,
               std::vector<loom_type_t>& output);
+  // Appends the launch binding ABI of one kernel parameter. Leaf parameters
+  // keep their single High type. Records (including lambda closures) are
+  // flattened in member declaration order; each pointer member contributes
+  // one buffer and no byte offset. Record members must be scalars, native
+  // vectors, typed buffers, index/offset values, object pointers, or nested
+  // records and fixed arrays of those; references and dependent shaped values
+  // diagnose.
+  void append_kernel_parameter(const cxx::Type* input, cxx::AST* owner,
+                               std::vector<loom_type_t>& output);
+  // Returns a record's cached kernel projection, or null for a non-record.
+  // Admission walks source partitions once; entry construction and predicates
+  // share the retained source-to-argument mapping.
+  const KernelRecordProjection* kernel_record(const cxx::Type* input,
+                                              cxx::AST* owner);
   // Appends a High signature bound to this destination's flattened component
   // IDs. Static leaves ignore their IDs; dependent shaped values and handles
   // reference their own dynamic extents and encoding. |identities| is either
@@ -740,6 +768,11 @@ class Types {
   // Flattened construction groups computed once by source type admission.
   std::unordered_map<const cxx::Type*, std::vector<ValueProjection>>
       construction_groups_;
+  using KernelRecordMap =
+      std::unordered_map<const RecordPartition*, KernelRecordProjection>;
+  // Allocated only when a record crosses a kernel entry boundary. Ordinary
+  // callables and scalar/pointer kernel parameters allocate no projection.
+  std::unique_ptr<KernelRecordMap> kernel_records_;
   // Reference-only source values admitted to typed cell storage. Null entries
   // memoize source values containing a non-reference component.
   std::unordered_map<const cxx::Type*, std::unique_ptr<ReferenceStorageLayout>>

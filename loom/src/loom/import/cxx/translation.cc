@@ -605,6 +605,27 @@ class Translator final : private Initialization::Evaluation {
     return value_arena_.capture(partition, components);
   }
 
+  // Reconstructs a record kernel parameter from its launch binding ABI. Each
+  // pointer member's buffer argument receives a zero byte origin.
+  Value kernel_record_value(loom_region_t* region, size_t& index,
+                            const cxx::Type* type, const Partition& partition,
+                            cxx::AST* owner) {
+    auto* block = loom_region_entry_block(region);
+    auto arguments =
+        std::span<const loom_value_id_t>(block->arg_ids, block->arg_count);
+    std::vector<loom_value_id_t> components;
+    components.reserve(partition.component_count);
+    const auto& projection = *types_.kernel_record(type, owner);
+    for (auto argument : projection.argument_indices) {
+      components.push_back(
+          argument == KernelRecordProjection::kZeroOrigin
+              ? storage_.root(components.back(), owner).byte_offset
+              : arguments[index + argument]);
+    }
+    index += projection.types.size();
+    return value_arena_.capture(partition, components);
+  }
+
   Value staged_region_value(loom_region_t* region,
                             const StagedSignatureProjection& signature,
                             const StagedParameterProjection& parameter,
@@ -1784,8 +1805,11 @@ class Translator final : private Initialization::Evaluation {
       }
       bool kernel_pointer = defined.kind == FunctionKind::Kernel &&
                             partition.kind == ValueKind::Pointer;
+      bool kernel_record = defined.kind == FunctionKind::Kernel &&
+                           partition.kind == ValueKind::Record;
       // Only pointers change representation at kernel entry: the ABI supplies
       // one buffer, and source pointer transport adds its zero byte origin.
+      // Record parameters apply the same rule to each pointer member.
       const auto& incoming_partition =
           defined.template_family
               ? types_.partition(cxx::type_cast<cxx::FunctionType>(
@@ -1799,6 +1823,9 @@ class Translator final : private Initialization::Evaluation {
                     region, *defined.staged_signature,
                     defined.staged_signature->parameters[parameter_index],
                     partition)
+          : kernel_record
+              ? kernel_record_value(region, argument_index, value_type,
+                                    partition, defined.source)
               : region_value(region, argument_index, incoming_partition);
       if (defined.template_family) {
         value = bind_template_input(value, value_type, types_, value_arena_,

@@ -1963,6 +1963,90 @@ void Types::append(const cxx::Type* input, cxx::AST* owner,
   append_bound(input, owner, {}, storage, output);
 }
 
+void Types::append_kernel_parameter(const cxx::Type* input, cxx::AST* owner,
+                                    std::vector<loom_type_t>& output) {
+  if (const auto* projection = kernel_record(input, owner)) {
+    output.insert(output.end(), projection->types.begin(),
+                  projection->types.end());
+  } else {
+    output.push_back(get(input, owner));
+  }
+}
+
+const KernelRecordProjection* Types::kernel_record(const cxx::Type* input,
+                                                   cxx::AST* owner) {
+  const auto* source = record(unqualified(input), owner);
+  if (!source) {
+    return nullptr;
+  }
+  if (kernel_records_) {
+    if (auto found = kernel_records_->find(source);
+        found != kernel_records_->end()) {
+      return &found->second;
+    }
+  }
+  if (source->requires_binding) {
+    diagnostics_.reject(unit_, owner,
+                        "kernel record parameters cannot contain dependent "
+                        "shaped values");
+  }
+  KernelRecordProjection projection;
+  projection.types.reserve(source->component_count);
+  projection.argument_indices.reserve(source->component_count);
+  auto append_partition = [&](auto& self, const cxx::Type* type,
+                              const Partition& admitted) -> void {
+    switch (admitted.kind) {
+      case ValueKind::Record: {
+        const auto& record = static_cast<const RecordPartition&>(admitted);
+        for (const auto& member : record.members) {
+          if (unit_.typeTraits().is_reference(member.type())) {
+            diagnostics_.reject(
+                unit_, owner,
+                "kernel record parameters cannot contain reference members "
+                "or by-reference lambda captures");
+          }
+          self(self, member.type(), *member.partition);
+        }
+        break;
+      }
+      case ValueKind::Array: {
+        const auto& array = static_cast<const ArrayPartition&>(admitted);
+        const size_t element_count =
+            array.element->component_count
+                ? admitted.component_count / array.element->component_count
+                : 0;
+        for (size_t index = 0; index < element_count; ++index) {
+          self(self, array.source->elementType(), *array.element);
+        }
+        break;
+      }
+      case ValueKind::Pointer:
+      case ValueKind::SSA:
+      case ValueKind::Vector:
+      case ValueKind::Buffer:
+      case ValueKind::Address:
+        projection.argument_indices.push_back(projection.types.size());
+        projection.types.push_back(get(type, owner));
+        if (admitted.kind == ValueKind::Pointer) {
+          projection.argument_indices.push_back(
+              KernelRecordProjection::kZeroOrigin);
+        }
+        break;
+      default:
+        diagnostics_.reject(
+            unit_, owner,
+            "kernel record parameter members require scalars, vectors, typed "
+            "buffers, pointers, index/offset values, or nested records of "
+            "those");
+    }
+  };
+  append_partition(append_partition, input, *source);
+  if (!kernel_records_) {
+    kernel_records_ = std::make_unique<KernelRecordMap>();
+  }
+  return &kernel_records_->emplace(source, std::move(projection)).first->second;
+}
+
 void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
                          std::span<const loom_value_id_t> identities,
                          BoundTypeStorage& storage,

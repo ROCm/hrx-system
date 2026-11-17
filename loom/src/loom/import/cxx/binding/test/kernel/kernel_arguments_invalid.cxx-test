@@ -31,13 +31,23 @@ using Input = loom::type::encoding<loom::encoding::role::layout, 1>;
 LOOM_KERNEL void entry(Input input) {}
 
 // ====
-// Records are not implicitly flattened at the kernel entry ABI.
+// A reference member has no cross-dispatch object identity.
 #include <loomcxx/kernel.h>
-struct Input {
-  // First independent scalar component.
-  unsigned first;
-  // Second independent scalar component.
-  unsigned second;
-};
-// ERROR@+1: LOWERING/059 "unsupported C++ type: ::Input"
+struct Input { unsigned& value; };
+// ERROR@+1: LOWERING/059 "kernel record parameters cannot contain reference members or by-reference lambda captures"
 LOOM_KERNEL void entry(Input input) {}
+
+// ====
+// Nested dependent handles cannot use a static kernel argument projection.
+#include <loomcxx/kernel.h>
+#include <loomcxx/vector.h>
+struct Input { loom::type::vector<loom::type::shape<loom::type::dynamic>, float> values; };
+// ERROR@+1: LOWERING/059 "kernel record parameters cannot contain dependent shaped values"
+LOOM_KERNEL void entry(Input input) {}
+
+// ====
+// A record does not make native pointer-bearing memory addressable.
+#include <loomcxx/kernel.h>
+struct Node { float* data; Node* next; };
+// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+LOOM_KERNEL void entry(const Node* input, float* output) { output[0] = input->data[0]; }

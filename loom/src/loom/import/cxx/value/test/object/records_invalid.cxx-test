@@ -42,12 +42,6 @@ struct Value { unsigned member; };
 unsigned entry(Value value) { return __builtin_bit_cast(unsigned, value); }
 
 // ====
-// Ordinary record arguments do not change the kernel launch ABI.
-struct Value { unsigned member; };
-// ERROR@+1: LOWERING/059 "unsupported C++ type: ::Value"
-[[loom::kernel]] void entry(Value value, unsigned* output) { output[0]=value.member; }
-
-// ====
 // A constant address retains source storage identity and cannot be flattened
 // into the immutable component transport used by record values.
 constexpr unsigned storage = 7;

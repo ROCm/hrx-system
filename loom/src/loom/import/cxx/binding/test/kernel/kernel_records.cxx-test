@@ -1,0 +1,85 @@
+// RUN: roundtrip
+// Pointer origins are supplied as buffers, including inside nested records;
+// the source value retains signed displacement for backward access.
+#include <loomcxx/kernel.h>
+#include <loomcxx/predicate.h>
+
+struct Input { const float* data; unsigned count; };
+struct Parameters { float scale; Input input; int shifts[2]; };
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void read(Parameters parameters, float* output) [[loom::where(parameters.input.count > 0u)]] {
+  output[0] = parameters.scale * parameters.input.data[parameters.shifts[0]] + parameters.shifts[1];
+}
+
+// ----
+kernel.def @read() {
+  %6 = index.constant 1 : index
+  %7 = index.constant 1 : index
+  %8 = index.constant 1 : index
+  %9 = index.constant 1 : index
+  %10 = index.constant 1 : index
+  %11 = index.constant 1 : index
+  kernel.launch.config workgroups(%6, %7, %8) workgroup_size(%9, %10, %11) : index
+} launch(%parameters_scale: f32, %parameters_input_data: buffer, %parameters_input_count: i32, %parameters_shifts_0: i32, %parameters_shifts_1: i32, %output: buffer) where [ne(%parameters_input_count, 0)] {
+  %parameters_input_data_byte_offset = index.constant 0 : index
+  %output_byte_offset = index.constant 0 : index
+  %14 = scalar.constant 0 : i32
+  %15 = index.cast %parameters_shifts_0 : i32 to index
+  %16 = index.constant 4 : index
+  %17 = index.mul %15, %16 : index
+  %18 = index.add %parameters_input_data_byte_offset, %17 : index
+  %19 = buffer.view %parameters_input_data[%18] : buffer -> view<1xf32>
+  %20 = view.load<root_in_bounds|type_disjoint> %19[0] : view<1xf32> -> f32
+  %21 = scalar.mulf %parameters_scale, %20 : f32
+  %22 = scalar.constant 1 : i32
+  %23 = scalar.sitofp %parameters_shifts_1 : i32 to f32
+  %24 = scalar.addf %21, %23 : f32
+  %25 = scalar.constant 0 : i32
+  %26 = index.cast %25 : i32 to index
+  %27 = index.constant 4 : index
+  %28 = index.mul %26, %27 : index
+  %29 = index.add %output_byte_offset, %28 : index
+  %30 = buffer.view %output[%29] : buffer -> view<1xf32>
+  view.store<root_in_bounds|type_disjoint> %24, %30[0] : f32, view<1xf32>
+  kernel.return
+}
+
+// ====
+// Nominal address domains, static vectors, and empty base subobjects retain
+// their ordinary leaf types at the kernel boundary.
+#include <loomcxx/kernel.h>
+#include <loomcxx/vector.h>
+
+using Words = unsigned __attribute__((ext_vector_type(4)));
+struct Empty {};
+struct Parameters : Empty { Words values; loom::type::index position; };
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void scatter(Parameters parameters, unsigned* output) {
+  output[loom::index::cast<int>(parameters.position)] = parameters.values[2];
+}
+
+// ----
+kernel.def @scatter() {
+  %3 = index.constant 1 : index
+  %4 = index.constant 1 : index
+  %5 = index.constant 1 : index
+  %6 = index.constant 1 : index
+  %7 = index.constant 1 : index
+  %8 = index.constant 1 : index
+  kernel.launch.config workgroups(%3, %4, %5) workgroup_size(%6, %7, %8) : index
+} launch(%parameters_values: vector<4xi32>, %parameters_position: index, %output: buffer) {
+  %output_byte_offset = index.constant 0 : index
+  %10 = scalar.constant 2 : i32
+  %11 = index.cast %10 : i32 to index
+  %12 = vector.extract %parameters_values[%11] : vector<4xi32> -> i32
+  %13 = index.cast %parameters_position : index to i32
+  %14 = index.cast %13 : i32 to index
+  %15 = index.constant 4 : index
+  %16 = index.mul %14, %15 : index
+  %17 = index.add %output_byte_offset, %16 : index
+  %18 = buffer.view %output[%17] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %12, %18[0] : i32, view<1xi32>
+  kernel.return
+}

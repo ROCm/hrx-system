@@ -28,7 +28,8 @@ class Types;
 
 // Selects the native transport shape whose identities back one source
 // function contract. Ordinary callables flatten source values; kernel launch
-// bindings retain one native value per source parameter.
+// bindings supply one native value per leaf, with pointer displacements
+// reconstructed inside the kernel instead of transported by its caller.
 enum class FunctionContractSignature {
   Flattened,
   Kernel,

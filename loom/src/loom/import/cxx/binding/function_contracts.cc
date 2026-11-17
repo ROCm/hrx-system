@@ -220,14 +220,13 @@ std::vector<loom_predicate_t> FunctionContracts::bind(
   size_t component_count = 0;
   for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
     parameter_offsets[ordinal] = component_count;
-    component_count +=
-        signature == FunctionContractSignature::Kernel
-            ? 1
-            : types
-                  .partition(
-                      types.unqualified_value(parameters[ordinal]->type()),
-                      owner)
-                  .component_count;
+    auto* type = types.unqualified_value(parameters[ordinal]->type());
+    if (signature == FunctionContractSignature::Kernel) {
+      const auto* projection = types.kernel_record(type, owner);
+      component_count += projection ? projection->types.size() : 1;
+    } else {
+      component_count += types.partition(type, owner).component_count;
+    }
   }
   const size_t result_offset = component_count;
   const bool returns_void =
@@ -270,6 +269,7 @@ std::vector<loom_predicate_t> FunctionContracts::bind(
       }
     }
 
+    size_t member_offset = 0;
     const Partition* partition = &types.partition(root_type, owner);
     for (auto* field : value.members) {
       if (partition->kind != ValueKind::Record ||
@@ -280,7 +280,7 @@ std::vector<loom_predicate_t> FunctionContracts::bind(
                             "record type");
       }
       const auto& member = types.member(field, value.source);
-      component_offset += member.component_offset;
+      member_offset += member.component_offset;
       partition = member.partition;
     }
     if ((partition->kind != ValueKind::SSA &&
@@ -297,7 +297,12 @@ std::vector<loom_predicate_t> FunctionContracts::bind(
           "function predicates cannot retain a value-changing implicit "
           "conversion; use a type-matched predicate helper");
     }
-    auto identity = identities[component_offset];
+    if (signature == FunctionContractSignature::Kernel) {
+      if (const auto* projection = types.kernel_record(root_type, owner)) {
+        member_offset = projection->argument_indices[member_offset];
+      }
+    }
+    auto identity = identities[component_offset + member_offset];
     if (identity == LOOM_VALUE_ID_INVALID) {
       diagnostics_.reject(unit_, value.source,
                           "callable predicates cannot select a value stored "

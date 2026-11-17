@@ -2181,8 +2181,8 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
   BoundStagedSignature staged_signature;
   if (kernel) {
     for (auto* parameter : parameters) {
-      arguments.push_back(
-          types.get(types.unqualified(parameter->type()), definition));
+      types.append_kernel_parameter(types.unqualified(parameter->type()),
+                                    definition, arguments);
     }
     if (auto* configuration = launches_.configuration_function(symbol)) {
       auto* configuration_symbol = this->definition(configuration);
