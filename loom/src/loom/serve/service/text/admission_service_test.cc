@@ -58,7 +58,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
     };
     std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
         value, destroy);
-    const auto interface = loom_serve_text_service_interface(value);
+    const auto interface = loom_serve_text_http_interface(value);
     Observe(interface);
     auto quiescent = [&] {
       return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
@@ -246,7 +246,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
     };
     std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
         value, destroy);
-    const auto interface = loom_serve_text_service_interface(value);
+    const auto interface = loom_serve_text_http_interface(value);
     Observe(interface);
     auto quiescent = [&] {
       return !interface.runtime.vtable->is_pending(interface.runtime.self) &&

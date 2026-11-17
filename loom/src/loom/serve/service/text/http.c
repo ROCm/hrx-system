@@ -42,7 +42,7 @@ static iree_status_t loom_serve_text_http_error(iree_status_t failure,
   return status;
 }
 
-static iree_status_t loom_serve_text_http_reply_failure(
+iree_status_t loom_serve_text_http_reply_failure(
     loom_serve_text_telemetry_t* telemetry,
     loom_serve_http_connection_t* connection, loom_serve_text_receipt_t receipt,
     int code, const char* reason, iree_status_t failure,

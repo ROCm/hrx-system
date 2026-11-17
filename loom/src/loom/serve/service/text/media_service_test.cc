@@ -46,7 +46,7 @@ class MediaServiceTest : public SourceTextServiceTest {
     service_options.image = image_;
     IREE_ASSERT_OK(loom_serve_text_service_allocate(
         model_, &service_options, nullptr, host_allocator_, &service_));
-    interface_ = loom_serve_text_service_interface(service_);
+    interface_ = loom_serve_text_http_interface(service_);
     Observe(interface_);
   }
 

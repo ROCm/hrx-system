@@ -273,7 +273,7 @@ TEST_F(SourceSequenceServiceTest,
   };
   std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
       value, destroy);
-  const auto interface = loom_serve_text_service_interface(value);
+  const auto interface = loom_serve_text_http_interface(value);
   Observe(interface);
   const auto idle = [&] {
     return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
@@ -361,7 +361,7 @@ TEST_F(SourceSequenceServiceTest, NativeChatRejectionPreservesOwnedInput) {
   };
   std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
       value, destroy);
-  const auto interface = loom_serve_text_service_interface(value);
+  const auto interface = loom_serve_text_http_interface(value);
   EXPECT_EQ(interface.try_open_text, nullptr);
   EXPECT_NE(interface.try_open_text_checkpoint, nullptr);
 
@@ -395,7 +395,7 @@ TEST_F(SourceSequenceServiceTest,
   };
   std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
       value, destroy);
-  const auto interface = loom_serve_text_service_interface(value);
+  const auto interface = loom_serve_text_http_interface(value);
   Observe(interface);
   const auto idle = [&] {
     return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
@@ -491,7 +491,7 @@ TEST_F(CachedSequenceCohortTest, FittingCachedCohortTrimsAtEpochBoundary) {
   };
   std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
       value, destroy);
-  const auto interface = loom_serve_text_service_interface(value);
+  const auto interface = loom_serve_text_http_interface(value);
   Observe(interface);
   const auto idle = [&] {
     return !interface.runtime.vtable->is_pending(interface.runtime.self) &&

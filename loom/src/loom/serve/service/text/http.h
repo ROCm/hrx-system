@@ -21,6 +21,15 @@ iree_status_t loom_serve_text_http_consumer_allocate(
     loom_serve_http_connection_t* connection, bool sequence,
     iree_allocator_t host_allocator, loom_serve_text_consumer_t* out_consumer);
 
+// Delivers an already-accounted rejection, consuming failure and the connection
+// claim. Send errors are diagnosed locally; response-allocation failure returns
+// to the owner. The native service owns receipt and terminal accounting.
+iree_status_t loom_serve_text_http_reply_failure(
+    loom_serve_text_telemetry_t* telemetry,
+    loom_serve_http_connection_t* connection, loom_serve_text_receipt_t receipt,
+    int code, const char* reason, iree_status_t failure,
+    iree_allocator_t host_allocator);
+
 // Ends a rejected protocol receipt, consumes failure and relinquishes its
 // connection claim. Independent scratch permits rejection during CPU output.
 iree_status_t loom_serve_text_http_reject(

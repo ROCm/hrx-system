@@ -54,9 +54,10 @@ iree_status_t loom_serve_text_telemetry_initialize(
 void loom_serve_text_telemetry_deinitialize(
     loom_serve_text_telemetry_t* telemetry);
 
-// Counts a protocol receipt exactly once, before validation and admission.
+// Counts an accepted or rejected protocol receipt exactly once, using the
+// frontend's original arrival time even when preflight preceded accounting.
 loom_serve_text_receipt_t loom_serve_text_telemetry_begin(
-    loom_serve_text_telemetry_t* telemetry);
+    loom_serve_text_telemetry_t* telemetry, iree_time_t arrival_time);
 
 // Records the final protocol outcome; status is borrowed, not consumed.
 void loom_serve_text_telemetry_end(loom_serve_text_telemetry_t* telemetry,

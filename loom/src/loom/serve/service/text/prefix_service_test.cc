@@ -204,7 +204,7 @@ TEST_P(PrefixCaptureRetirementTest,
   loom_serve_text_service_t* service = nullptr;
   IREE_ASSERT_OK(loom_serve_text_service_allocate(model_, &options, nullptr,
                                                   host_allocator_, &service));
-  const auto interface = loom_serve_text_service_interface(service);
+  const auto interface = loom_serve_text_http_interface(service);
   Observe(interface);
   const int client = Send(Request(Message("user", "abxabbxaxa"), 12));
   loom_serve_http_connection_t* connection = nullptr;

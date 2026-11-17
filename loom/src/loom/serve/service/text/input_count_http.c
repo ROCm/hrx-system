@@ -62,38 +62,13 @@ static iree_status_t loom_serve_text_input_count_http_end(
   return iree_ok_status();
 }
 
-iree_status_t loom_serve_text_input_count_http_enqueue(
-    loom_serve_text_input_count_t* queue,
-    loom_serve_http_connection_t* connection,
-    const loom_serve_http_request_t* request, loom_serve_text_receipt_t receipt,
-    loom_serve_text_telemetry_t* telemetry) {
-  iree_string_view_t header;
-  if (loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Session"),
-                                            &header) ||
-      loom_serve_http_request_lookup_header(
-          request, IREE_SV("X-Loom-Checkpoint"), &header)) {
-    return loom_serve_text_http_reject(
-        telemetry, connection, receipt, 400, "Bad Request",
-        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                         "input counting is stateless; omit X-Loom-Session "
-                         "and X-Loom-Checkpoint"),
-        queue->host_allocator);
-  }
-  if (queue->count == queue->capacity) {
-    return loom_serve_text_http_reject(
-        telemetry, connection, receipt, 503, "Service Unavailable",
-        iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                         "input counting queue is full"),
-        queue->host_allocator);
-  }
+loom_serve_text_input_count_consumer_t
+loom_serve_text_input_count_http_consumer(
+    loom_serve_http_connection_t* connection) {
   static const loom_serve_text_input_count_consumer_vtable_t vtable = {
       .is_open = loom_serve_text_input_count_http_open,
       .end = loom_serve_text_input_count_http_end,
       .abort = loom_serve_text_input_count_http_abort};
-  loom_serve_text_input_count_enqueue(
-      queue, request->body,
-      (loom_serve_text_input_count_consumer_t){.self = connection,
-                                               .vtable = &vtable},
-      receipt);
-  return iree_ok_status();
+  return (loom_serve_text_input_count_consumer_t){.self = connection,
+                                                  .vtable = &vtable};
 }

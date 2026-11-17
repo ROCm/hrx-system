@@ -16,19 +16,15 @@
 #include "loom/runtime/host/readiness.h"
 #include "loom/runtime/wake.h"
 #include "loom/serve/media/image_codec.h"
-#include "loom/serve/service/endpoint.h"
 #include "loom/serve/service/text/admission.h"
 #include "loom/serve/service/text/chat.h"
-#include "loom/serve/service/text/checkpoint_http.h"
 #include "loom/serve/service/text/checkpoint_registry.h"
 #include "loom/serve/service/text/checkpoint_request.h"
 #include "loom/serve/service/text/consumer.h"
 #include "loom/serve/service/text/epoch.h"
 #include "loom/serve/service/text/heartbeat.h"
-#include "loom/serve/service/text/http.h"
 #include "loom/serve/service/text/input.h"
 #include "loom/serve/service/text/input_count.h"
-#include "loom/serve/service/text/input_count_http.h"
 #include "loom/serve/service/text/media_projector.h"
 #include "loom/serve/service/text/packing.h"
 #include "loom/serve/service/text/pending_continuation.h"
@@ -184,7 +180,7 @@ iree_status_t loom_serve_text_service_try_open(
   const loom_serve_text_request_t* input =
       loom_serve_text_stream_request(*out_stream);
   const loom_serve_text_receipt_t receipt =
-      loom_serve_text_telemetry_begin(&service->telemetry);
+      loom_serve_text_telemetry_begin(&service->telemetry, iree_time_now());
   loom_serve_text_pending_push(service, consumer,
                                iree_string_builder_view(&input->body),
                                input->session, checkpoint, NULL, receipt);
@@ -210,7 +206,8 @@ iree_status_t loom_serve_text_service_try_open_checkpoint(
   service->control = (loom_serve_text_checkpoint_operation_t){
       .consumer = consumer,
       .request = *loom_serve_text_checkpoint_control_request(*out_control),
-      .receipt = loom_serve_text_telemetry_begin(&service->telemetry)};
+      .receipt = loom_serve_text_telemetry_begin(&service->telemetry,
+                                                 iree_time_now())};
   return iree_ok_status();
 }
 
@@ -234,147 +231,139 @@ iree_status_t loom_serve_text_service_try_open_input_count(
       body, service->host_allocator, out_call, &consumer));
   loom_serve_text_input_count_enqueue(
       &service->input_counts, loom_serve_text_input_count_call_body(*out_call),
-      consumer, loom_serve_text_telemetry_begin(&service->telemetry));
+      consumer,
+      loom_serve_text_telemetry_begin(&service->telemetry, iree_time_now()));
   loom_serve_text_pending_observe(service);
   return iree_ok_status();
 }
 
-static iree_status_t loom_serve_text_enqueue(
-    loom_serve_text_service_t* service,
-    loom_serve_http_connection_t* connection,
-    const loom_serve_http_request_t* request,
-    loom_serve_text_receipt_t receipt) {
-  iree_string_view_t checkpoint_name = request->target;
-  if (iree_string_view_consume_prefix(&checkpoint_name,
-                                      IREE_SV("/v1/checkpoints/"))) {
-    if (service->control.consumer.self) {
-      return loom_serve_text_http_reject(
-          &service->telemetry, connection, receipt, 503, "Service Unavailable",
-          iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                           "model control queue is full"),
-          service->host_allocator);
-    }
-    loom_serve_text_checkpoint_request_t input;
-    iree_status_t status =
-        loom_serve_text_checkpoint_http_parse(request, &input);
-    if (!iree_status_is_ok(status)) {
-      return loom_serve_text_http_reject(&service->telemetry, connection,
-                                         receipt, 400, "Bad Request", status,
-                                         service->host_allocator);
-    }
-    service->control = (loom_serve_text_checkpoint_operation_t){
-        .consumer = loom_serve_text_checkpoint_http_consumer(connection),
-        .request = input,
-        .receipt = receipt};
-    return iree_ok_status();
+loom_service_kind_t loom_serve_text_service_kind(
+    const loom_serve_text_service_t* service) {
+  return service->scheduling.model_mode == LOOM_SERVE_TEXT_MODE_ENCODE
+             ? LOOM_SERVICE_KIND_SEQUENCE
+             : LOOM_SERVICE_KIND_TEXT;
+}
+
+void loom_serve_text_service_stop(loom_serve_text_service_t* service) {
+  service->stopping = true;
+}
+
+bool loom_serve_text_service_is_accepting(
+    const loom_serve_text_service_t* service) {
+  return !service->stopping;
+}
+
+iree_status_t loom_serve_text_service_try_accept(
+    loom_serve_text_service_t* service, iree_string_view_t body,
+    iree_string_view_t session, iree_string_view_t checkpoint_name,
+    iree_time_t arrival_time,
+    iree_status_t (*create)(void* user_data, iree_allocator_t host_allocator,
+                            loom_serve_text_consumer_t* out_consumer),
+    void* user_data, bool* out_accepted) {
+  *out_accepted = false;
+  if (service->stopping) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "text service is stopping");
   }
-  const bool input_count = iree_string_view_equal(
-      request->target, IREE_SV("/v1/chat/completions/input_tokens"));
   const bool encodes =
       service->scheduling.model_mode == LOOM_SERVE_TEXT_MODE_ENCODE;
-  const bool sequence_endpoint =
-      iree_string_view_equal(request->target, IREE_SV("/v1/sequences"));
-  if (!iree_string_view_equal(request->method, IREE_SV("POST")) ||
-      (encodes ? !sequence_endpoint
-               : (!input_count &&
-                  !iree_string_view_equal(request->target,
-                                          IREE_SV("/v1/chat/completions"))))) {
-    return loom_serve_text_http_reject(
-        &service->telemetry, connection, receipt, 404, "Not Found",
-        iree_make_status(
-            IREE_STATUS_NOT_FOUND,
-            "use the model's declared endpoint or /v1/checkpoints/NAME; "
-            "generative models also support /v1/chat/completions/input_tokens"),
-        service->host_allocator);
-  }
-  iree_string_view_t content_type;
-  if (!loom_serve_http_request_lookup_header(request, IREE_SV("Content-Type"),
-                                             &content_type) ||
-      !(iree_string_view_equal_case(content_type,
-                                    IREE_SV("application/json")) ||
-        iree_string_view_equal_case(
-            content_type, IREE_SV("application/json; charset=utf-8")))) {
-    return loom_serve_text_http_reject(
-        &service->telemetry, connection, receipt, 415, "Unsupported Media Type",
-        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                         "Content-Type must be application/json"),
-        service->host_allocator);
-  }
-  if (input_count) {
-    iree_status_t status = loom_serve_text_input_count_http_enqueue(
-        &service->input_counts, connection, request, receipt,
-        &service->telemetry);
-    loom_serve_text_pending_observe(service);
-    return status;
-  }
-  iree_string_view_t name;
-  const bool named = loom_serve_http_request_lookup_header(
-      request, IREE_SV("X-Loom-Session"), &name);
   loom_serve_text_sequence_t sequence = {0};
   if (encodes) {
-    iree_status_t status =
-        named ? iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                 "sequences use a body session handle, not "
-                                 "X-Loom-Session")
-              : loom_serve_text_sequence_parse(request->body, &sequence);
-    if (!iree_status_is_ok(status)) {
-      return loom_serve_text_http_reject(&service->telemetry, connection,
-                                         receipt, 400, "Bad Request", status,
-                                         service->host_allocator);
+    if (session.size) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "sequences use a body session handle");
     }
-    name = iree_make_cstring_view(sequence.handle);
-  }
-  if (loom_serve_http_request_lookup_header(
-          request, IREE_SV("X-Loom-Checkpoint"), &checkpoint_name) &&
-      !checkpoint_name.size) {
-    return loom_serve_text_http_reject(
-        &service->telemetry, connection, receipt, 400, "Bad Request",
-        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                         "X-Loom-Checkpoint requires a nonempty identifier"),
-        service->host_allocator);
-  }
-  if (encodes && sequence.append && checkpoint_name.size) {
-    return loom_serve_text_http_reject(
-        &service->telemetry, connection, receipt, 400, "Bad Request",
-        iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "checkpoint forks create a new sequence; omit session"),
-        service->host_allocator);
+    IREE_RETURN_IF_ERROR(loom_serve_text_sequence_parse(body, &sequence));
+    if (sequence.append && checkpoint_name.size) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "checkpoint forks create a new sequence; omit "
+                              "session");
+    }
+    session = iree_make_cstring_view(sequence.handle);
   }
   loom_serve_text_checkpoint_entry_t* checkpoint = NULL;
-  iree_status_t status = loom_serve_text_pending_queue_select_request(
-      &service->pending, name, checkpoint_name, service->row_count,
-      service->sessions, &service->checkpoints, &checkpoint);
-  if (!iree_status_is_ok(status)) {
-    const bool missing = iree_status_is_not_found(status);
-    const bool conflict = iree_status_is_already_exists(status);
-    return loom_serve_text_http_reject(&service->telemetry, connection, receipt,
-                                       missing    ? 404
-                                       : conflict ? 409
-                                                  : 400,
-                                       missing    ? "Not Found"
-                                       : conflict ? "Conflict"
-                                                  : "Bad Request",
-                                       status, service->host_allocator);
-  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_pending_queue_select_request(
+      &service->pending, session, checkpoint_name, service->row_count,
+      service->sessions, &service->checkpoints, &checkpoint));
   if (service->pending.count == service->pending.capacity) {
-    return loom_serve_text_http_reject(
-        &service->telemetry, connection, receipt, 503, "Service Unavailable",
-        iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                         "pending request queue is full"),
-        service->host_allocator);
+    return iree_ok_status();
   }
   loom_serve_text_consumer_t consumer;
-  status = loom_serve_text_http_consumer_allocate(
-      connection, encodes, service->host_allocator, &consumer);
-  if (!iree_status_is_ok(status)) {
-    return loom_serve_text_http_reject(&service->telemetry, connection, receipt,
-                                       503, "Service Unavailable", status,
-                                       service->host_allocator);
-  }
-  loom_serve_text_pending_push(service, consumer, request->body, name,
-                               checkpoint, encodes ? &sequence : NULL, receipt);
+  IREE_RETURN_IF_ERROR(create(user_data, service->host_allocator, &consumer));
+  const loom_serve_text_receipt_t receipt =
+      loom_serve_text_telemetry_begin(&service->telemetry, arrival_time);
+  loom_serve_text_pending_push(service, consumer, body, session, checkpoint,
+                               encodes ? &sequence : NULL, receipt);
+  *out_accepted = true;
   return iree_ok_status();
+}
+
+iree_status_t loom_serve_text_service_try_accept_input_count(
+    loom_serve_text_service_t* service, iree_string_view_t body,
+    iree_time_t arrival_time, loom_serve_text_input_count_consumer_t consumer,
+    bool* out_accepted) {
+  *out_accepted = false;
+  if (service->stopping) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "text service is stopping");
+  }
+  if (service->scheduling.model_mode == LOOM_SERVE_TEXT_MODE_ENCODE) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "known-input sequences do not accept chat input");
+  }
+  if (service->input_counts.count == service->input_counts.capacity) {
+    return iree_ok_status();
+  }
+  loom_serve_text_input_count_enqueue(
+      &service->input_counts, body, consumer,
+      loom_serve_text_telemetry_begin(&service->telemetry, arrival_time));
+  loom_serve_text_pending_observe(service);
+  *out_accepted = true;
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_text_service_try_accept_checkpoint(
+    loom_serve_text_service_t* service,
+    const loom_serve_text_checkpoint_request_t* request,
+    iree_time_t arrival_time, loom_serve_text_checkpoint_consumer_t consumer,
+    bool* out_accepted) {
+  *out_accepted = false;
+  if (service->stopping) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "text service is stopping");
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_checkpoint_request_validate(request));
+  if (service->control.consumer.self) {
+    return iree_ok_status();
+  }
+  service->control = (loom_serve_text_checkpoint_operation_t){
+      .consumer = consumer,
+      .request = *request,
+      .receipt =
+          loom_serve_text_telemetry_begin(&service->telemetry, arrival_time)};
+  *out_accepted = true;
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_text_service_reject(
+    loom_serve_text_service_t* service, iree_time_t arrival_time,
+    iree_status_t failure,
+    iree_status_t (*reply)(void* user_data, iree_status_t failure,
+                           loom_serve_text_telemetry_t* telemetry,
+                           loom_serve_text_receipt_t receipt,
+                           iree_allocator_t host_allocator),
+    void* user_data) {
+  const loom_serve_text_receipt_t receipt =
+      loom_serve_text_telemetry_begin(&service->telemetry, arrival_time);
+  loom_serve_text_telemetry_end(&service->telemetry, receipt,
+                                LOOM_SERVICE_TELEMETRY_REJECTED, 0, failure);
+  iree_status_t status = reply(user_data, failure, &service->telemetry, receipt,
+                               service->host_allocator);
+  if (!iree_status_is_ok(status)) {
+    service->stopping = true;
+    loom_serve_text_telemetry_fail(&service->telemetry, status);
+  }
+  return status;
 }
 
 // Delivery owns a published slot and a staging slot. An empty stage permits
@@ -1313,43 +1302,6 @@ static iree_status_t loom_serve_text_advance(void* self,
   return iree_status_join(status, work_status);
 }
 
-static iree_status_t loom_serve_text_accept(
-    void* self, loom_serve_http_connection_t* connection,
-    const loom_serve_http_request_t* request,
-    loom_runtime_service_flags_t flags) {
-  loom_serve_text_service_t* service = self;
-  const loom_serve_text_receipt_t receipt =
-      loom_serve_text_telemetry_begin(&service->telemetry);
-  if (service->stopping ||
-      iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
-    service->stopping = true;
-    return loom_serve_text_http_reject(
-        &service->telemetry, connection, receipt, 503, "Service Unavailable",
-        iree_make_status(IREE_STATUS_UNAVAILABLE, "text service is stopping"),
-        service->host_allocator);
-  }
-  iree_status_t status =
-      loom_serve_text_enqueue(service, connection, request, receipt);
-  if (!iree_status_is_ok(status)) {
-    service->stopping = true;
-    loom_serve_text_telemetry_fail(&service->telemetry, status);
-  }
-  return status;
-}
-
-static iree_status_t loom_serve_text_open(
-    void* self, loom_serve_text_request_t* request,
-    loom_serve_text_stream_t** out_stream) {
-  return loom_serve_text_service_try_open(self, request, out_stream);
-}
-
-static iree_status_t loom_serve_text_open_checkpoint(
-    void* self, const loom_serve_text_checkpoint_request_t* request,
-    loom_serve_text_checkpoint_control_t** out_control) {
-  return loom_serve_text_service_try_open_checkpoint(self, request,
-                                                     out_control);
-}
-
 static iree_status_t loom_serve_text_sample(
     void* self, loom_runtime_telemetry_sample_sink_t sink) {
   loom_serve_text_service_t* service = self;
@@ -1455,7 +1407,7 @@ static bool loom_serve_text_session_at(
       out_snapshot);
 }
 
-loom_serve_service_t loom_serve_text_service_interface(
+loom_serve_text_service_interface_t loom_serve_text_service_interface(
     loom_serve_text_service_t* service) {
   static const loom_runtime_service_vtable_t vtable = {
       .set_observer = loom_serve_text_set_observer,
@@ -1464,12 +1416,6 @@ loom_serve_service_t loom_serve_text_service_interface(
       .is_active = loom_serve_text_is_active,
       .advance = loom_serve_text_advance,
   };
-  static const iree_string_view_t modalities[] = {IREE_SVL("text")};
-  static const iree_string_view_t image_modalities[] = {IREE_SVL("text"),
-                                                        IREE_SVL("image")};
-  static const iree_string_view_t token_modalities[] = {IREE_SVL("tokens")};
-  static const iree_string_view_t activation_modalities[] = {
-      IREE_SVL("activations")};
   const bool encodes =
       service->scheduling.model_mode == LOOM_SERVE_TEXT_MODE_ENCODE;
   const loom_serve_media_image_codec_t* const* codecs = NULL;
@@ -1477,32 +1423,17 @@ loom_serve_service_t loom_serve_text_service_interface(
       service->image &&
       loom_serve_text_model_chat_policy(service->model)->images.maximum_count &&
       loom_serve_media_image_codecs(&codecs);
-  return (loom_serve_service_t){
+  return (loom_serve_text_service_interface_t){
       .name = service->name,
       .runtime = {.self = service, .vtable = &vtable},
-      .accept = loom_serve_text_accept,
-      .try_open_text = encodes ? NULL : loom_serve_text_open,
-      .try_open_text_checkpoint = loom_serve_text_open_checkpoint,
+      .kind = loom_serve_text_service_kind(service),
       .tokenizer = loom_serve_text_model_tokenizer(service->model),
-      .kind = encodes ? LOOM_SERVICE_KIND_SEQUENCE : LOOM_SERVICE_KIND_TEXT,
-      .endpoint = loom_serve_service_endpoint(
-          encodes ? LOOM_SERVICE_KIND_SEQUENCE : LOOM_SERVICE_KIND_TEXT),
-      .capabilities =
-          {.input_modalities = {images ? IREE_ARRAYSIZE(image_modalities)
-                                       : IREE_ARRAYSIZE(modalities),
-                                images    ? image_modalities
-                                : encodes ? token_modalities
-                                          : modalities},
-           .output_modalities = {IREE_ARRAYSIZE(modalities),
-                                 encodes ? activation_modalities : modalities},
-           .context_length = service->scheduling.context_capacity,
-           .max_output_tokens =
-               encodes ? 0 : service->scheduling.context_capacity,
-           .input_token_count = !encodes,
-           .reasoning = encodes
-                            ? (loom_serve_reasoning_t){0}
-                            : loom_serve_text_model_chat_policy(service->model)
-                                  ->reasoning},
+      .context_length = service->scheduling.context_capacity,
+      .image_input = images,
+      .reasoning =
+          encodes
+              ? (loom_serve_reasoning_t){0}
+              : loom_serve_text_model_chat_policy(service->model)->reasoning,
       .snapshot = loom_serve_text_snapshot,
       .inspection = {.request_at = loom_serve_text_request_at,
                      .session_at = loom_serve_text_session_at},

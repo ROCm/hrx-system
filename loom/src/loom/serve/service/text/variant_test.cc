@@ -301,7 +301,7 @@ class ReconfigurationTextServiceTest : public SourceTextServiceTest {
     options.variant_capacity = 6;
     IREE_ASSERT_OK(loom_serve_text_service_allocate(
         model_, &options, nullptr, host_allocator_, &service_));
-    interface_ = loom_serve_text_service_interface(service_);
+    interface_ = loom_serve_text_http_interface(service_);
     configuration_ = interface_.reconfiguration;
     ASSERT_NE(configuration_.pool, nullptr);
     original_ = configuration_.selected(configuration_.self);

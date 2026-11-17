@@ -42,7 +42,7 @@ class TextHttpFixture : public ::testing::Test {
                    client_.put()));
     const loom_serve_http_request_t* request = nullptr;
     IREE_ASSERT_OK(http_.TakeRequest(client_.get(), &connection_, &request));
-    receipt_ = loom_serve_text_telemetry_begin(&telemetry_);
+    receipt_ = loom_serve_text_telemetry_begin(&telemetry_, iree_time_now());
   }
 
   void AllocateConsumer() {

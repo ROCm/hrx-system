@@ -31,6 +31,7 @@
 #include "loom/serve/service/text/input.h"
 #include "loom/serve/service/text/owner_turn_test_util.h"
 #include "loom/serve/service/text/service.h"
+#include "loom/serve/service/text/service_http.h"
 #include "loom/serve/service/text/source_test_oracle.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/model.h"
@@ -138,7 +139,7 @@ class SourceTextServiceTest : public ::testing::Test {
       iree_status_t status = loom_serve_text_service_allocate(
           model_, &options, nullptr, host_allocator_, &service);
       if (iree_status_is_ok(status)) {
-        const auto interface = loom_serve_text_service_interface(service);
+        const auto interface = loom_serve_text_http_interface(service);
         loom_serve_registry_t* registry = nullptr;
         status = loom_serve_registry_allocate(1, &interface, 0, {},
                                               host_allocator_, &registry);
@@ -508,7 +509,7 @@ class SourceTextServiceTest : public ::testing::Test {
     };
     std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
         value, destroy);
-    const auto interface = loom_serve_text_service_interface(value);
+    const auto interface = loom_serve_text_http_interface(value);
     auto* notification = loom_serve_http_server_notification(server_);
     Observe(interface);
     const std::string first_prompt = "abxabbax";
@@ -634,7 +635,7 @@ class SourceTextServiceTest : public ::testing::Test {
     };
     std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
         value, destroy);
-    const auto interface = loom_serve_text_service_interface(value);
+    const auto interface = loom_serve_text_http_interface(value);
     auto* notification = loom_serve_http_server_notification(server_);
     Observe(interface);
     auto idle = [&] {

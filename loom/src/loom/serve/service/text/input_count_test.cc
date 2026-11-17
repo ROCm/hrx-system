@@ -35,7 +35,7 @@ class InputCountTest : public SourceTextServiceTest {
     options.pending_capacity = 2;
     IREE_ASSERT_OK(loom_serve_text_service_allocate(
         model_, &options, nullptr, host_allocator_, &service_));
-    interface_ = loom_serve_text_service_interface(service_);
+    interface_ = loom_serve_text_http_interface(service_);
     Observe(interface_);
   }
 
@@ -498,9 +498,10 @@ class InputCountOutcomeTest : public SourceTextServiceTest {
     loom_serve_http_connection_t* connection = nullptr;
     const loom_serve_http_request_t* request = nullptr;
     IREE_ASSERT_OK(http_.TakeRequest(*out_client, &connection, &request));
-    IREE_ASSERT_OK(loom_serve_text_input_count_http_enqueue(
-        &queries_, connection, request,
-        loom_serve_text_telemetry_begin(&telemetry_), &telemetry_));
+    loom_serve_text_input_count_enqueue(
+        &queries_, request->body,
+        loom_serve_text_input_count_http_consumer(connection),
+        loom_serve_text_telemetry_begin(&telemetry_, iree_time_now()));
   }
 
   // Real HTTP claims retained until their task outcomes are consumed.
@@ -560,7 +561,7 @@ TEST_F(InputCountOutcomeTest, NativeResultRetainsFatalSourceFailure) {
   iree_string_builder_deinitialize(&body);
   loom_serve_text_input_count_enqueue(
       &queries_, loom_serve_text_input_count_call_body(call), consumer,
-      loom_serve_text_telemetry_begin(&telemetry_));
+      loom_serve_text_telemetry_begin(&telemetry_, iree_time_now()));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INTERNAL,
       loom_serve_text_input_count_complete(

@@ -60,7 +60,7 @@ class FailedTextDiagnosticsTest : public SourceTextServiceTest {
     options.max_sessions = 1;
     IREE_ASSERT_OK(loom_serve_text_service_allocate(
         model_, &options, stream_, host_allocator_, &service_));
-    interface_ = loom_serve_text_service_interface(service_);
+    interface_ = loom_serve_text_http_interface(service_);
     Observe(interface_);
   }
 
@@ -225,7 +225,7 @@ TEST_F(SourceTextServiceTest, FirstOutputExcludesFramingAndEmptyCompletions) {
     };
     std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
         value, destroy);
-    const auto interface = loom_serve_text_service_interface(value);
+    const auto interface = loom_serve_text_http_interface(value);
     Observe(interface);
     const auto idle = [&] {
       return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
@@ -326,7 +326,7 @@ TEST_F(SourceTextServiceTest, NonstreamingDisconnectRetiresAnAcceptedEpoch) {
   };
   std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
       value, destroy);
-  const auto interface = loom_serve_text_service_interface(value);
+  const auto interface = loom_serve_text_http_interface(value);
   Observe(interface);
   const std::string request =
       R"({"model":"fixture-text","messages":[{"role":"user","content":"abxa"}],"max_tokens":2})";
@@ -395,7 +395,7 @@ TEST_F(SourceTextServiceTest, CheckpointClaimSurvivesDisconnectAndStopping) {
     };
     std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
         value, destroy);
-    const auto interface = loom_serve_text_service_interface(value);
+    const auto interface = loom_serve_text_http_interface(value);
     Observe(interface);
     const auto idle = [&] {
       return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
@@ -569,7 +569,7 @@ TEST_F(SourceTextServiceTest, RejectedInputBacklogYieldsToReadyDecode) {
   };
   std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
       value, destroy);
-  const auto interface = loom_serve_text_service_interface(value);
+  const auto interface = loom_serve_text_http_interface(value);
   Observe(interface);
 
   StalledClient stalled;
@@ -667,7 +667,7 @@ TEST_F(SourceTextServiceTest, StoppingAccountsForQueuedControlAndCpuBorrowers) {
   };
   std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> owner(service,
                                                                       destroy);
-  const auto interface = loom_serve_text_service_interface(service);
+  const auto interface = loom_serve_text_http_interface(service);
   auto* notification = loom_serve_http_server_notification(server_);
   interface.runtime.vtable->set_observer(
       interface.runtime.self, {[](void* payload) {
@@ -1025,7 +1025,7 @@ TEST_F(SourceTextServiceTest,
   };
   std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
       value, destroy);
-  auto interface = loom_serve_text_service_interface(value);
+  auto interface = loom_serve_text_http_interface(value);
   Observe(interface);
   auto* notification = loom_serve_http_server_notification(server_);
   uint64_t cursor = 0;

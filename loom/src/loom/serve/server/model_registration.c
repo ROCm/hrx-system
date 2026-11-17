@@ -19,6 +19,7 @@
 #include "loom/serve/service/text/cache_policy.h"
 #include "loom/serve/service/text/schedule.h"
 #include "loom/serve/service/text/service.h"
+#include "loom/serve/service/text/service_http.h"
 #include "loom/service/finite/component.h"
 #include "loom/service/finite/decision/protocol.h"
 #include "loom/service/finite/embedding/protocol.h"
@@ -774,7 +775,7 @@ static iree_status_t loom_serve_text_registration_prepare(
         registration->host_allocator, &registration->service);
   }
   if (iree_status_is_ok(status)) {
-    *out_service = loom_serve_text_service_interface(registration->service);
+    *out_service = loom_serve_text_http_interface(registration->service);
   }
   return status;
 }

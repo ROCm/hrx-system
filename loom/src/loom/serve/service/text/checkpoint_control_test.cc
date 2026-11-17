@@ -71,7 +71,7 @@ class TextCheckpointControlTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_serve_text_checkpoint_request_validate(&request));
     IREE_ASSERT_OK(loom_serve_text_checkpoint_control_allocate(
         &request, allocator_, &control_, &consumer_));
-    receipt_ = loom_serve_text_telemetry_begin(&telemetry_);
+    receipt_ = loom_serve_text_telemetry_begin(&telemetry_, iree_time_now());
   }
 
   void TearDown() override {

@@ -92,7 +92,7 @@ TEST_F(SourceTextServiceTest, CopiedTelemetryOutlivesOwnersAndNameReuse) {
     };
     std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
         service_value, destroy);
-    const auto interface = loom_serve_text_service_interface(service.get());
+    const auto interface = loom_serve_text_http_interface(service.get());
     Observe(interface);
     Batch batch{loom_runtime_telemetry_stream_identity(stream.get()),
                 std::string(options.name.data, options.name.size),

@@ -451,6 +451,7 @@ loom_cc_library(
         "//loom/src/loom/serve/service/text:model",
         "//loom/src/loom/serve/service/text:schedule",
         "//loom/src/loom/serve/service/text:service",
+        "//loom/src/loom/serve/service/text:service_http",
         "//loom/src/loom/service/finite:component",
         "//loom/src/loom/service/finite:model",
         "//loom/src/loom/service/finite:registration",

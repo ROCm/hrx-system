@@ -14,15 +14,12 @@
 extern "C" {
 #endif
 
-// Takes the HTTP claim, including immediate rejection of stateful headers or
-// a full queue. The caller has validated the route and JSON content type.
-// Accepted input borrows the connection directly; no receipt allocation or
-// body copy is needed for the native counting queue.
-iree_status_t loom_serve_text_input_count_http_enqueue(
-    loom_serve_text_input_count_t* queue,
-    loom_serve_http_connection_t* connection,
-    const loom_serve_http_request_t* request, loom_serve_text_receipt_t receipt,
-    loom_serve_text_telemetry_t* telemetry);
+// Delivery operations borrowing an already claimed connection. The caller
+// transfers the claim only after native admission accepts it; pressure and
+// failure leave the connection with the frontend. No allocation or body copy.
+loom_serve_text_input_count_consumer_t
+loom_serve_text_input_count_http_consumer(
+    loom_serve_http_connection_t* connection);
 
 #ifdef __cplusplus
 }  // extern "C"

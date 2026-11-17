@@ -7,13 +7,17 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_SERVICE_H_
 #define LOOM_SERVE_SERVICE_TEXT_SERVICE_H_
 
-#include "loom/serve/service/service.h"
+#include "loom/runtime/service.h"
+#include "loom/runtime/telemetry/sample.h"
 #include "loom/serve/service/text/checkpoint_control.h"
 #include "loom/serve/service/text/input_count.h"
 #include "loom/serve/service/text/model.h"
 #include "loom/serve/service/text/schedule.h"
 #include "loom/serve/service/text/stream.h"
 #include "loom/service/finite/component.h"
+#include "loom/service/inspection.h"
+#include "loom/service/kind.h"
+#include "loom/service/reconfiguration.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -54,7 +58,7 @@ typedef struct loom_serve_text_service_options_t {
   iree_host_size_t prefix_cache_capacity;
   // Reporting interval in nanoseconds; zero disables periodic heartbeats.
   iree_duration_t heartbeat_interval;
-  // Execution choice; the planner and HTTP lifecycle are shared by all modes.
+  // Execution choice within the shared admission and retirement lifecycle.
   loom_service_text_schedule_mode_t schedule_mode;
   // Whether prompt and decode inputs may share an epoch, independent of math.
   loom_service_text_packing_mode_t packing_mode;
@@ -64,6 +68,43 @@ typedef struct loom_serve_text_service_options_t {
 } loom_serve_text_service_options_t;
 
 typedef struct loom_serve_text_service_t loom_serve_text_service_t;
+
+// Borrowed text capabilities on the service's serialized owner. Frontends own
+// transport routes and delivery; none of these observations starts model work.
+typedef struct loom_serve_text_service_interface_t {
+  // Deployment identifier, borrowed through service retirement.
+  iree_string_view_t name;
+  // Shared progress and notification, using this service as runtime.self.
+  loom_runtime_service_t runtime;
+  // Generative text or known-input sequence semantics.
+  loom_service_kind_t kind;
+  // Immutable input tokenizer, or NULL for known-input sequences.
+  const iree_tokenizer_t* tokenizer;
+  // Logical input plus output token bound for one retained session.
+  iree_host_size_t context_length;
+  // Source accepts images through the optional prepared finite component.
+  bool image_input;
+  // Immutable source-declared reasoning capabilities.
+  loom_serve_reasoning_t reasoning;
+  // Copies ownership facts without inspecting accepted task payloads.
+  loom_service_snapshot_t (*snapshot)(void* self);
+  // Bounded copied request and retained-session observations.
+  loom_service_inspection_t inspection;
+  // Executable choices and queued safe-point selection.
+  loom_service_reconfiguration_t reconfiguration;
+  // Read-only history and accounting, borrowed through service retirement.
+  struct {
+    // Bounded immutable-record history with independent reader cursors.
+    const loom_runtime_telemetry_stream_t* stream;
+    // Cumulative work, independent of retained history.
+    const loom_service_telemetry_counters_t* counters;
+    // Cumulative terminal-request latency.
+    const loom_service_telemetry_latency_t* latency;
+    // Source observations copied synchronously on the serialized owner.
+    iree_status_t (*sample)(void* self,
+                            loom_runtime_telemetry_sample_sink_t sink);
+  } telemetry;
+} loom_serve_text_service_interface_t;
 
 // Creates host session/admission state around a borrowed model. CPU work shares
 // the host executor; reporting shares its proactor. No per-model thread is
@@ -76,6 +117,58 @@ iree_status_t loom_serve_text_service_allocate(
     const loom_serve_text_service_options_t* options,
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_text_service_t** out_service);
+
+// Immutable semantic role, also used by frontend route selection.
+loom_service_kind_t loom_serve_text_service_kind(
+    const loom_serve_text_service_t* service);
+
+// Closes admission irreversibly without advancing or waiting for accepted
+// work. Subsequent owner turns retire that work using the normal stop path.
+void loom_serve_text_service_stop(loom_serve_text_service_t* service);
+
+// Whether ingress remains open; bounded queue credit is checked by acceptance.
+bool loom_serve_text_service_is_accepting(
+    const loom_serve_text_service_t* service);
+
+// Validates selectors and bounded queue credit before constructing a delivery
+// receipt. create runs synchronously at most once; it retains the immutable
+// body and returns the modality's consumer, or fails without taking ownership.
+// It neither reenters the service nor starts source work. Successful acceptance
+// transfers that receipt; pressure returns OK/false without calling create.
+// arrival_time is the frontend's monotonic receipt time, before preflight.
+iree_status_t loom_serve_text_service_try_accept(
+    loom_serve_text_service_t* service, iree_string_view_t body,
+    iree_string_view_t session, iree_string_view_t checkpoint,
+    iree_time_t arrival_time,
+    iree_status_t (*create)(void* user_data, iree_allocator_t host_allocator,
+                            loom_serve_text_consumer_t* out_consumer),
+    void* user_data, bool* out_accepted);
+
+// Borrows immutable input through a typed delivery receipt, transferred only
+// on acceptance. Pressure and failure preserve caller ownership and do not
+// count a receipt. These operations queue demand without starting source work.
+iree_status_t loom_serve_text_service_try_accept_input_count(
+    loom_serve_text_service_t* service, iree_string_view_t body,
+    iree_time_t arrival_time, loom_serve_text_input_count_consumer_t consumer,
+    bool* out_accepted);
+iree_status_t loom_serve_text_service_try_accept_checkpoint(
+    loom_serve_text_service_t* service,
+    const loom_serve_text_checkpoint_request_t* request,
+    iree_time_t arrival_time, loom_serve_text_checkpoint_consumer_t consumer,
+    bool* out_accepted);
+
+// Records a frontend rejection and consumes failure through the synchronous
+// reply. The reply borrows accounting only to diagnose delivery failure. It
+// consumes its context's receipt on every return; an allocation failure ends
+// admission and propagates, while disconnected delivery remains request-local.
+iree_status_t loom_serve_text_service_reject(
+    loom_serve_text_service_t* service, iree_time_t arrival_time,
+    iree_status_t failure,
+    iree_status_t (*reply)(void* user_data, iree_status_t failure,
+                           loom_serve_text_telemetry_t* telemetry,
+                           loom_serve_text_receipt_t receipt,
+                           iree_allocator_t host_allocator),
+    void* user_data);
 
 // Enqueues native chat on the same serialized owner and bounded arrival queue
 // as HTTP. Success with a stream moves request and copies its selectors; NULL
@@ -106,64 +199,26 @@ iree_status_t loom_serve_text_service_try_open_input_count(
     loom_serve_text_service_t* service, iree_string_builder_t* body,
     loom_serve_text_input_count_call_t** out_call);
 
-// Returns borrowed callbacks for the shared owner loop. HTTP and native
-// admission preserve model-local sessions/checkpoints. Each epoch gathers
-// credited ready rows, executes their known/verifier spans asynchronously and
-// commits outputs after readiness
-// before reusing feedback. Other services can advance while an epoch executes.
-// Heartbeats observe a copied snapshot and continue during model waits.
-// Admission owns and physically backs the exact completion high-water, private
-// recurrent writer and partial-tail COW while pinning required parameters.
-// Shared prefixes are counted once. Excess work waits in an arrival-ordered
-// bounded queue. admission_overtakes permits fitting tails to pass a blocked
-// oldest request; only successful admissions spend its budget. A new arrival
-// or cancelled tail never resets it. The bound is on overtakes, not wait time:
-// slow output consumers may retain active reservations indefinitely.
-// Invalid requests reject before altering retained state and yield to ready
-// epochs before preparing another input. Idle cache yields to admission
-// pressure, including peer models sharing the physical pool, but explicit pins
-// remain protected until deletion. Peer reclamation releases logical ownership
-// only at an unborrowed boundary and schedules this model's asynchronous trim.
-// Evicted/cancelled rows and unused completion credit trigger physical trim
-// outside ordinary decoding. Compaction admits its temporary destination union
-// before moving. state_trim events report copy, release
-// and maintenance costs separately from model epochs.
-// X-Loom-Session selects retained state, not a durable session. Active or
-// queued named sessions reject overlapping requests. X-Loom-Checkpoint selects
-// an explicit pinned endpoint only after full canonical-history validation.
-// With session_cache_capacity, completed named histories detach only when their
-// row must be recycled. They resume automatically without a checkpoint header,
-// preserving session accounting. LRU eviction yields to the shared pool budget.
-// Explicit pins and the current preparation/reservation borrower remain
-// protected. Image requests retain their exact logical text continuation
-// before projection, without activating language parameters. The destination
-// row and source history remain protected through projection and admission;
-// cancellation returns the prepared plan. Other parked inputs retain host
-// tokens; idle history eviction invalidates their suffix and requires fresh
-// preparation. Unchanged capacity retries never tokenize again.
-// POST/DELETE /v1/checkpoints/NAME pin an idle completed X-Loom-Session or
-// release that pin. Deletion refuses while queued requests borrow the endpoint.
-// A detached session shares its immutable endpoint with a new explicit pin;
-// deleting that pin does not discard automatic or other explicit ownership.
-// POST /v1/checkpoints/NAME/suspend explicitly parks the pin in DRAM on elastic
-// backing without changing live branches or queued identity. Wake admission
-// includes missing prefix pages and preserves the selected row until its
-// replacement fits. Host image bytes are reported separately from device pages.
-// prefix_cache_capacity enables exact consumed-token reuse across fresh named
-// and untagged requests. Natural intermediate prefill frontiers cover new
-// branches. Spare records can retain a descendant near the prompt's end;
-// extending an existing branch never evicts another endpoint.
-// Lookup leaves at least one known input to establish selection normally.
-// Automatic prefixes yield before idle histories under admission pressure,
-// including replaying a selected prefix if keeping it prevents admission.
-// This policy does not alter epoch shapes or wait for matching requests.
-// Peer cancellation discards its live row, not independently pinned endpoints,
-// at a completed stage boundary. Capacities match the created model.
+// Returns borrowed callbacks for the shared owner loop. Each epoch gathers
+// credited rows, submits known/verifier spans, and commits output only after
+// readiness. Independent services continue while that work executes.
+// Admission physically backs completion and speculative high-water, private
+// recurrent writers, and partial-tail copies; shared prefixes count once.
+// Bounded arrival-order queues allow only the configured successful overtakes
+// of a blocked oldest request. Stalled output can retain reservations until
+// consumption or cancellation; cancellation joins actual accepted borrowers.
 //
-// HTTP and native acceptance queue demand without starting source work. The
-// owner advances the service to start preparation, counting, and checkpoint
-// operations.
-loom_serve_service_t loom_serve_text_service_interface(
+// Request session selectors resume retained canonical history. Checkpoint
+// selectors fork explicit immutable endpoints after full history validation.
+// Idle histories and intermediate prefixes yield to shared pool pressure;
+// explicit pins and accepted preparation/reservation borrowers remain
+// protected. Optional image projection retains the exact text continuation and
+// device dependencies without activating language parameters. Capacity retries
+// reuse prepared input until history eviction invalidates its selected prefix.
+//
+// Acceptance queues demand without starting source work. The owner advances
+// preparation, counting, checkpoint operations, and model work explicitly.
+loom_serve_text_service_interface_t loom_serve_text_service_interface(
     loom_serve_text_service_t* service);
 
 // Relinquishes the idle projector's model borrow before independent image
@@ -180,8 +235,8 @@ void loom_serve_text_service_release_projector(
 // failure. The owner has consumed all CPU, device, compiler and heartbeat
 // callbacks, including queued selection and timer cancellation receipts, before
 // this call. Null is accepted.
-// The borrowed model and any HTTP transport both outlive this call. Native
-// caller handles retain final results independently of this service.
+// The borrowed model and each delivery owner outlive their final callback.
+// Native caller handles retain results independently of this service.
 void loom_serve_text_service_free(loom_serve_text_service_t* service,
                                   iree_status_code_t terminal_code);
 

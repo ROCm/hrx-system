@@ -38,9 +38,9 @@ void loom_serve_text_telemetry_deinitialize(
 }
 
 loom_serve_text_receipt_t loom_serve_text_telemetry_begin(
-    loom_serve_text_telemetry_t* telemetry) {
+    loom_serve_text_telemetry_t* telemetry, iree_time_t arrival_time) {
   const loom_serve_text_receipt_t receipt = {++telemetry->next_serial,
-                                             iree_time_now()};
+                                             arrival_time};
   ++telemetry->counters.requests;
   const loom_runtime_telemetry_record_t begin = {
       .time_ns = receipt.arrival_time,
