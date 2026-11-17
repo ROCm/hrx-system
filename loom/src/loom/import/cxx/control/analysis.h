@@ -701,6 +701,11 @@ class ControlFlow final : private cxx::ASTVisitor {
       ProjectedReferenceReturnFacts& facts);
   bool propagate_projected_reference_return(const DirectCall& call,
                                             const ControlFlow& callee);
+  bool propagate_projected_reference_selection(const DirectCall& call,
+                                               const ControlFlow& callee,
+                                               cxx::AST* expression,
+                                               ReferenceProjection projection,
+                                               size_t& propagated_count);
   std::span<const size_t> reference_return_parameters() const;
   bool classify_storage(cxx::ExpressionAST* expression) const;
   bool is_captured_object_field(cxx::Symbol* field) const;

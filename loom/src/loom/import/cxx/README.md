@@ -2571,22 +2571,29 @@ forms use the same element projection as subscripts, including mutation and
 references to selected elements:
 
 ```cpp
-struct Bounds { float* data; int lower[3]; };
+struct Bounds {
+  float* data;
+  int lower[3];
+  int* begin() { return lower; }
+};
 
 static int first(const Bounds& bounds) { return *bounds.lower; }
+static int& lower(Bounds& bounds, unsigned axis) { return bounds.begin()[axis]; }
 
 int update(float* data, int value, unsigned axis) {
   Bounds bounds{data, {value, value + 1, value + 2}};
-  *(bounds.lower + axis) += 4;
+  lower(bounds, axis) += 4;
   return first(bounds);
 }
 ```
 
 The pointer field remains a buffer and byte origin, while the array elements
-remain scalar values. The helper receives only the first element it reads.
+remain scalar values. The `first` helper receives only the element it reads.
 Selecting an element creates no allocation; observing an actual pointer address
 still requires addressable storage. Accessor calls retain their side effects
-and execute once before the selected element is read or written.
+and execute once before the selected element is read or written. Returning an
+element reference through a helper preserves the selected caller-owned field,
+including nested arrays and arrays of records containing vectors.
 
 Nonvirtual inheritance uses the same value and storage model as composition.
 Direct bases precede fields in aggregate initialization and callable signatures;

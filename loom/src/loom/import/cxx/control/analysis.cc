@@ -111,6 +111,15 @@ struct ControlFlow::ProjectedReferenceReturnFacts {
     size_t propagated_origin_count = SIZE_MAX;
   };
 
+  struct ArrayResult {
+    // Returned element expression indexing its retained array selection.
+    cxx::ExpressionAST* expression;
+    // Array subobject within the call's complete returned reference.
+    ReferenceProjection projection;
+    // Callee origins already expanded into this element selection.
+    size_t propagated_origin_count = 0;
+  };
+
   // Possible caller-owned subobjects in source selection order.
   std::vector<ReferenceResultOrigin> origins;
   // Canonicalization index created only after the bounded linear prefix.
@@ -119,6 +128,8 @@ struct ControlFlow::ProjectedReferenceReturnFacts {
   // A forwarded call can gain origins over several fixed-point iterations
   // without moving other leaves.
   std::unordered_map<cxx::AST*, Selection> selections;
+  // Element returns waiting on an accessor's origins, indexed by that call.
+  std::unordered_map<cxx::AST*, std::vector<ArrayResult>> array_results;
   // Whole-parameter leaves promoted into a mixed projected result.
   std::unordered_map<cxx::Symbol*, size_t> complete_parameter_indices;
   // Whole current-object leaf promoted into a mixed projected result.
@@ -751,6 +762,9 @@ bool ControlFlow::promote_projected_reference_storage(
       identity_call_results_.insert(expression);
     }
   }
+  for (const auto& [call, results] : facts.array_results) {
+    identity_call_results_.insert(call);
+  }
   return true;
 }
 
@@ -831,6 +845,13 @@ void ControlFlow::merge_projected_reference_returns(
     target.selections.emplace(expression, std::move(selection));
     if (target.requires_storage && propagated) {
       identity_call_results_.insert(expression);
+    }
+  }
+  for (auto& [call, results] : source.array_results) {
+    auto& target_results = target.array_results[call];
+    target_results.insert(target_results.end(), results.begin(), results.end());
+    if (target.requires_storage) {
+      identity_call_results_.insert(call);
     }
   }
   for (const auto& [parameter, index] : source.complete_parameter_indices) {
@@ -1929,8 +1950,25 @@ bool ControlFlow::collect_projected_reference_return(
   }
   auto* source = array_borrow_origin(selection->array);
   auto target = source ? classify_destination(source) : std::nullopt;
-  if (!target || !selection->type ||
-      argument_requires_storage(retain_array_identity(selection->array))) {
+  auto identity = retain_array_identity(selection->array);
+  if (argument_requires_storage(identity)) {
+    return false;
+  }
+  if (!target) {
+    if (identity.reference_calls.size() != 1 ||
+        !identity.identity_bindings.empty() || identity.identity_intervals) {
+      return false;
+    }
+    const auto& reference = identity.reference_calls.front();
+    facts.array_results[reference.call].push_back(
+        {expression, reference.projection});
+    facts.selections.try_emplace(expression);
+    if (facts.requires_storage) {
+      identity_call_results_.insert(reference.call);
+    }
+    return true;
+  }
+  if (!selection->type) {
     return false;
   }
   const auto* array = types_.array(selection->type, expression);
@@ -2062,6 +2100,9 @@ void ControlFlow::visit(cxx::ReturnStatementAST* ast) {
         if (selection.propagated_origin_count != SIZE_MAX) {
           identity_call_results_.insert(expression);
         }
+      }
+      for (const auto& [call, results] : projected->array_results) {
+        identity_call_results_.insert(call);
       }
     } else if (origin == ReferenceReturn::Parameter) {
       for (size_t ordinal : ordinals) {
@@ -3711,13 +3752,35 @@ bool ControlFlow::propagate_projected_reference_return(
       !projected_reference_return_facts_) {
     return false;
   }
-  auto selection =
-      projected_reference_return_facts_->selections.find(call.source);
-  if (selection == projected_reference_return_facts_->selections.end()) {
-    return false;
-  }
   auto& facts = *projected_reference_return_facts_;
-  auto& propagated_count = selection->second.propagated_origin_count;
+  bool changed = false;
+  if (auto selection = facts.selections.find(call.source);
+      selection != facts.selections.end()) {
+    changed = propagate_projected_reference_selection(
+        call, callee, call.source, {},
+        selection->second.propagated_origin_count);
+  }
+  if (!facts.array_results.empty()) {
+    auto found = facts.array_results.find(call.source);
+    if (found != facts.array_results.end()) {
+      for (auto& result : found->second) {
+        changed = propagate_projected_reference_selection(
+                      call, callee, result.expression, result.projection,
+                      result.propagated_origin_count) ||
+                  changed;
+      }
+    }
+  }
+  return changed;
+}
+
+bool ControlFlow::propagate_projected_reference_selection(
+    const DirectCall& call, const ControlFlow& callee, cxx::AST* expression,
+    ReferenceProjection projection, size_t& propagated_count) {
+  auto& facts = *projected_reference_return_facts_;
+  auto& selection = facts.selections.find(expression)->second;
+  const auto* array_element =
+      array_selection(cxx::ast_cast<cxx::ExpressionAST>(expression));
   IREE_ASSERT(propagated_count != SIZE_MAX);
   bool changed = false;
   auto select_storage = [&] {
@@ -3764,11 +3827,7 @@ bool ControlFlow::propagate_projected_reference_return(
     }
     return translated;
   };
-  size_t source_count = 0;
-  auto append = [&](const ReferenceResultOrigin& source) {
-    if (source_count++ < propagated_count) {
-      return;
-    }
+  auto append_origin = [&](const ReferenceResultOrigin& source) {
     TranslatedReferenceOrigins translated;
     if (source.owner_ordinal == ReferenceResultOrigin::kReceiver) {
       if (call.current_receiver) {
@@ -3787,15 +3846,40 @@ bool ControlFlow::propagate_projected_reference_return(
     for (auto& origin : translated.values()) {
       const size_t index =
           retain_projected_reference_origin(facts, std::move(origin)).first;
-      selection->second.origins.push_back(index);
+      selection.origins.push_back(index);
       // The selection itself is fixed-point state even when another leaf
       // already retained the same canonical origin.
       changed = true;
     }
   };
+  size_t source_count = 0;
+  auto append = [&](const ReferenceResultOrigin& source) {
+    if (source_count++ < propagated_count) {
+      return;
+    }
+    if (!array_element) {
+      append_origin(source);
+      return;
+    }
+    const auto* array = types_.array(
+        array_element->type ? array_element->type : source.projection.type,
+        expression);
+    const bool constant =
+        array_element->constant_index &&
+        *array_element->constant_index < array->source->size();
+    const size_t first = constant ? *array_element->constant_index : 0;
+    const size_t end = constant ? first + 1 : array->source->size();
+    for (size_t index = first; index < end; ++index) {
+      append_origin(
+          {source.owner_ordinal,
+           {array->source->elementType(), array->element,
+            source.projection.component_offset + projection.component_offset +
+                index * array->element->component_count}});
+    }
+  };
 
   if (callee.reference_return_ == ReferenceReturn::Projected) {
-    selection->second.origins.reserve(
+    selection.origins.reserve(
         callee.projected_reference_return_facts_->origins.size());
     for (const auto& origin :
          callee.projected_reference_return_facts_->origins) {
@@ -3803,8 +3887,7 @@ bool ControlFlow::propagate_projected_reference_return(
     }
   } else if (callee.reference_return_ == ReferenceReturn::Parameter) {
     auto parameters = callee.function_->parameters();
-    selection->second.origins.reserve(
-        callee.reference_return_parameters().size());
+    selection.origins.reserve(callee.reference_return_parameters().size());
     for (size_t ordinal : callee.reference_return_parameters()) {
       auto* type = callee.types_.unqualified_value(parameters[ordinal]->type());
       append({ordinal, {type, &callee.types_.partition(type, call.source), 0}});
@@ -3816,7 +3899,7 @@ bool ControlFlow::propagate_projected_reference_return(
                           callee.types_.unqualified(object_type), call.source)
                     : nullptr;
     if (record) {
-      selection->second.origins.reserve(1);
+      selection.origins.reserve(1);
       append({ReferenceResultOrigin::kReceiver,
               {callee.types_.unqualified(object_type), record, 0}});
     }
@@ -4587,6 +4670,7 @@ void ControlFlow::finalize_callable_effects() {
   }
   if (projected_reference_return_facts_) {
     auto& facts = *projected_reference_return_facts_;
+    facts.array_results = {};
     facts.origin_indices = {};
     facts.parameter_ordinals = {};
     facts.receiver_offsets = {};
