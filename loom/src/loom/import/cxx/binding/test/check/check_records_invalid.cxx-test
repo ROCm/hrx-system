@@ -1,0 +1,98 @@
+// RUN: verify
+#include <loomcxx/check.h>
+struct Borrowed { unsigned* pointer; };
+static Borrowed borrowed() { return {}; }
+LOOM_CHECK_CASE(pointer_record) {
+  // ERROR@+1: LOWERING/059 "check call results require scalars or records of scalars"
+  const auto value = borrowed();
+}
+
+// ====
+#include <loomcxx/check.h>
+typedef unsigned U4 __attribute__((vector_size(16)));
+struct Vector { U4 lanes; };
+Vector vector() { return {}; }
+LOOM_CHECK_CASE(vector_record) {
+  // ERROR@+1: LOWERING/059 "check call results require scalars or records of scalars"
+  const auto value = vector();
+}
+
+// ====
+#include <loomcxx/check.h>
+struct Pair { unsigned first, second; };
+Pair pair() { return {7u, 11u}; }
+LOOM_CHECK_CASE(volatile_record) {
+  // ERROR@+1: LOWERING/059 "check locals require initialized automatic non-volatile const values"
+  const volatile auto actual = pair();
+}
+
+// ====
+#include <loomcxx/check.h>
+struct Pair { unsigned first, second; };
+Pair pair() { return {7u, 11u}; }
+LOOM_CHECK_CASE(late_invocation) {
+  loom::check::expect_equal(1u, 1u);
+  // ERROR@+1: LOWERING/059 "check expectations must be terminal"
+  loom::check::expect_equal(pair().second, 11u);
+}
+
+// ====
+// A check recipe has no C++ cleanup scope for returned records.
+#include <loomcxx/check.h>
+[[loom::import("test", "release")]] void release(unsigned value);
+struct Owned { unsigned value; ~Owned() { release(value); } };
+static Owned make() { return {3}; }
+LOOM_CHECK_CASE(owned_local) {
+  // ERROR@+1: LOWERING/059 "check values require trivial destruction; keep object lifetimes inside ordinary functions called by the check"
+  const auto owned = make();
+}
+
+// ====
+// Reading a member of a temporary must not silently discard its cleanup.
+#include <loomcxx/check.h>
+[[loom::import("test", "release")]] void release(unsigned value);
+struct Owned { unsigned value; ~Owned() { release(value); } };
+static Owned make() { return {3}; }
+LOOM_CHECK_CASE(owned_temporary) {
+  // ERROR@+1: LOWERING/059 "check values require trivial destruction; keep object lifetimes inside ordinary functions called by the check"
+  loom::check::expect_equal(make().value, 3u);
+}
+
+// ====
+// Trial generators use the same check-value lifetime contract.
+#include <loomcxx/check.h>
+[[loom::import("test", "release")]] void release(unsigned value);
+struct Owned { unsigned value; ~Owned() { release(value); } };
+static Owned make() { return {3}; }
+static void subject() {}
+LOOM_CHECK_SCENARIO(owned_generator) {
+  loom::check::trial<1>([](loom::check::ordinal ordinal, loom::check::entropy entropy) {
+    // ERROR@+1: LOWERING/059 "check values require trivial destruction; keep object lifetimes inside ordinary functions called by the check"
+    const auto owned = loom::check::generate<make>();
+    loom::check::invoke<subject>();
+  });
+}
+
+// ====
+// Standalone closure values cannot extend a check local's reference identity.
+#include <loomcxx/check.h>
+LOOM_CHECK_CASE(reference_closure) {
+  const unsigned value = 3;
+  // ERROR@+1: LOWERING/059 "check closure values require by-value captures; reference captures are confined to inline check regions"
+  const auto body = [&value] { return value; };
+}
+
+// ====
+// Capturing a record cannot erase a user-provided copy constructor.
+#include <loomcxx/check.h>
+struct Counted {
+  unsigned value;
+  Counted(unsigned initial) : value(initial) {}
+  Counted(const Counted& other) : value(other.value + 1) {}
+};
+static Counted make() { return Counted(3); }
+LOOM_CHECK_CASE(copying_capture) {
+  const auto original = make();
+  // ERROR@+1: LOWERING/059 "record constructor calls require an ordinary function called by the check case"
+  const auto body = [copy = original] { return copy.value; };
+}

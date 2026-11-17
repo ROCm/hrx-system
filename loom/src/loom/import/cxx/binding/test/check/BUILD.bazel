@@ -19,6 +19,7 @@ loom_check_test_suite(
         "check_approximate.cxx-test",
         "check_approximate_invalid.cxx-test",
         "check_records.cxx-test",
+        "check_records_invalid.cxx-test",
         "check_resources.cxx-test",
         "check_scenarios.cxx-test",
         "check_scenarios_invalid.cxx-test",

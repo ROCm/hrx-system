@@ -230,3 +230,48 @@ void record_value(unsigned* parameters_output, UInt32x4 parameters_values, unsig
   auto parameters_output_view = loom::buffer::view<1>(reinterpret_cast<unsigned*>(reinterpret_cast<unsigned char*>(parameters_output) + static_cast<long long>(parameters_output_byte_offset_1)), {});
   loom::view::store<loom::memory_access::root_in_bounds>((parameters_values[static_cast<long long>(loom::type::index{2})] + parameters_bias), parameters_output_view, 0);
 }
+
+// ====
+// RUN: emit cxx roundtrip
+// Parameter cleanup remains explicit after record grouping and RAII syntax are
+// erased. Both early and ordinary exits preserve the current member value.
+#include <loomcxx/kernel.h>
+struct State {
+  int* output;
+  int value;
+  ~State() { output[1] = value; }
+};
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void cleanup(State state) {
+  state.value += 1;
+  if (state.value < 0) return;
+  state.output[0] = state.value;
+}
+
+// ----
+#include <loomcxx/kernel.h>
+
+[[loom::symbol("State___State_value"), loom::inline]]
+static void State___State_value(loom::type::buffer<unsigned> this_output, loom::type::index this_output_byte_offset, unsigned this_value);
+
+[[loom::symbol("State___State_value"), loom::inline]]
+static void State___State_value(loom::type::buffer<unsigned> this_output, loom::type::index this_output_byte_offset, unsigned this_value) {
+  loom::type::index this_output_byte_offset_1 = this_output_byte_offset + (loom::type::index{1} * loom::type::index{4});
+  auto this_output_view = loom::buffer::view<1>(this_output, this_output_byte_offset_1, {});
+  loom::view::store<loom::memory_access::root_in_bounds>(this_value, this_output_view, 0);
+  return;
+}
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void cleanup(int* state_output, int state_value) {
+  int state_value_1 = state_value + 1;
+  if (state_value_1 < 0) {
+    State___State_value(loom::buffer::cast<unsigned>(loom::buffer::root(state_output)), loom::type::index{0}, static_cast<unsigned>(state_value_1));
+  } else {
+    loom::type::index state_output_byte_offset_1 = loom::type::index{0} + (loom::type::index{0} * loom::type::index{4});
+    auto state_output_view = loom::buffer::view<1>(reinterpret_cast<int*>(reinterpret_cast<unsigned char*>(state_output) + static_cast<long long>(state_output_byte_offset_1)), {});
+    loom::view::store<loom::memory_access::root_in_bounds>(state_value_1, state_output_view, 0);
+    State___State_value(loom::buffer::cast<unsigned>(loom::buffer::root(state_output)), loom::type::index{0}, static_cast<unsigned>(state_value_1));
+  }
+}

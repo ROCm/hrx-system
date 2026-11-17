@@ -10,6 +10,7 @@
 #include <cxx/ast_visitor.h>
 #include <cxx/control.h>
 #include <cxx/initialization.h>
+#include <cxx/lambda_captures.h>
 #include <cxx/literals.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
@@ -234,29 +235,18 @@ class CheckBody {
       cxx::LambdaExpressionAST* lambda) {
     std::unordered_map<cxx::Symbol*, Value> result;
     for (auto* capture : cxx::ListView{lambda->captureList}) {
-      cxx::FieldSymbol* field = nullptr;
-      cxx::ExpressionAST* initializer = nullptr;
-      if (auto* simple = cxx::ast_cast<cxx::SimpleLambdaCaptureAST>(capture)) {
-        field = simple->symbol;
-        initializer = simple->initializer;
-      } else if (auto* reference =
-                     cxx::ast_cast<cxx::RefLambdaCaptureAST>(capture)) {
-        field = reference->symbol;
-        initializer = reference->initializer;
-      } else if (auto* initialized =
-                     cxx::ast_cast<cxx::InitLambdaCaptureAST>(capture)) {
-        field = initialized->symbol;
-        initializer = initialized->initializer;
-      } else if (auto* initialized =
-                     cxx::ast_cast<cxx::RefInitLambdaCaptureAST>(capture)) {
-        field = initialized->symbol;
-        initializer = initialized->initializer;
-      } else {
-        fail(capture, "check lambdas cannot capture this");
-      }
+      auto* field = cxx::capture_field(capture);
+      auto* initializer = cxx::capture_initializer(capture);
       if (!field || !initializer) {
         fail(capture, "check lambda capture has no resolved initializer");
       }
+      if (types_.record_constructor_requires_call(
+              field->type(), field->constructor(), capture)) {
+        fail(capture,
+             "record constructor calls require an ordinary function called "
+             "by the check case");
+      }
+      types_.admit_construction(field->constructor(), field->type(), capture);
       result.emplace(field, expression(initializer));
     }
     return result;
@@ -753,6 +743,7 @@ class CheckBody {
       if (is_kernel(function)) {
         fail(source, "check kernels cannot return values");
       }
+      admit_value_type(signature->returnType(), source);
       types_.append(signature->returnType(), source, results);
     }
     return results;
@@ -1324,7 +1315,20 @@ class CheckBody {
     return op;
   }
 
+  // Check regions describe recipes, not C++ scopes. Lifecycle work belongs
+  // inside an ordinary function called by the recipe; retaining only a value's
+  // components must not discard an observable destructor.
+  void admit_value_type(const cxx::Type* type, cxx::AST* source) {
+    if (type && cxx::type_cast<cxx::ClassType>(types_.unqualified(type)) &&
+        !unit_.typeTraits().has_trivial_destructor(type)) {
+      fail(source,
+           "check values require trivial destruction; keep object lifetimes "
+           "inside ordinary functions called by the check");
+    }
+  }
+
   Value expression(cxx::ExpressionAST* source) {
+    admit_value_type(source->type, source);
     if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(source)) {
       return expression(nested->expression);
     }
@@ -1350,6 +1354,23 @@ class CheckBody {
               types_.unqualified(arguments->value->type)) {
         return expression(arguments->value);
       }
+    }
+    if (auto* lambda = cxx::ast_cast<cxx::LambdaExpressionAST>(source)) {
+      const auto& record = *types_.record(lambda->type, lambda);
+      for (const auto& member : record.members) {
+        if (unit_.typeTraits().is_reference(member.type())) {
+          fail(lambda,
+               "check closure values require by-value captures; reference "
+               "captures are confined to inline check regions");
+        }
+      }
+      auto captures = capture_values(lambda);
+      std::vector<loom_value_id_t> components;
+      components.reserve(record.component_count);
+      for (const auto& member : record.members) {
+        captures.find(member.source)->second.append_to(components);
+      }
+      return value_arena_.capture(record, components);
     }
     if (auto* call = cxx::ast_cast<cxx::CallExpressionAST>(source)) {
       auto* function = callee(call);
