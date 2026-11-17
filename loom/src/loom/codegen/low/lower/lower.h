@@ -321,11 +321,12 @@ typedef iree_status_t (*loom_low_lower_emit_control_operand_fn_t)(
     const void* plan, loom_value_id_t* out_low_value_id);
 
 typedef struct loom_low_lower_control_operand_t {
-  // Admits a conversion across an authored native argument or result boundary.
+  // Admits a conversion across a call argument or native result boundary.
   // Consumes retained facts without inspecting IR; missing requires equality.
-  // Compiler-selected branch, call, and return receivers already own this
-  // proof and go directly to preparation instead of repeating admission.
-  bool (*accepts)(loom_type_t source_type, loom_value_facts_t source_facts,
+  // Caller and callee carriers are selected independently. Branch and return
+  // receivers already own their join proof and go directly to preparation.
+  bool (*accepts)(const loom_fact_context_t* fact_context,
+                  loom_type_t source_type, loom_value_facts_t source_facts,
                   loom_type_t actual_type, loom_type_t required_type);
   // Prepares a branch, call, or callable-exit operand, or a native call result,
   // whose producer carrier differs from its receiving storage. Source facts

@@ -341,6 +341,17 @@ iree_status_t loom_low_lower_source_call_plan(
   *plan = (loom_low_lower_source_call_plan_t){
       .interface = loom_low_lower_source_call_interface(context, call),
   };
+  const loom_value_slice_t operands = loom_call_like_operands(call);
+  if (plan->interface != NULL &&
+      plan->interface->argument_count != operands.count) {
+    // An authored entry ABI may import resources instead of receiving them
+    // as arguments. Such an entry cannot be called through a direct edge.
+    return loom_low_source_call_emit_count_error(
+        context, source_op,
+        loom_low_source_call_symbol_name(context->module,
+                                         loom_call_like_callee(call)),
+        IREE_SV("operand"), operands.count, plan->interface->argument_count);
+  }
   const loom_value_slice_t results = loom_call_like_results(call);
   iree_status_t status = iree_ok_status();
   for (uint16_t i = 0; i < results.count && iree_status_is_ok(status) &&
@@ -383,28 +394,52 @@ static iree_status_t loom_low_source_call_prepare_operand(
   return iree_ok_status();
 }
 
+// Callee selection fixes the receiver independently of the caller's selected
+// producer. Admission is the one boundary where both carriers are available.
+static iree_status_t loom_low_source_call_finalize_operand(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_symbol_ref_t callee, loom_value_slice_t operands,
+    uint16_t operand_index, loom_type_t required_type,
+    const void*** inout_recipes) {
+  const loom_value_id_t operand = operands.values[operand_index];
+  const loom_type_t actual_type =
+      loom_low_lower_value_binding_type(context, operand);
+  if (loom_type_equal(actual_type, required_type)) {
+    return iree_ok_status();
+  }
+  if (!context->policy->control_operand.accepts ||
+      !context->policy->control_operand.accepts(
+          &context->fact_table->context,
+          loom_module_value_type(context->module, operand),
+          loom_value_fact_table_lookup_at(context->fact_table, context->module,
+                                          operand, source_op),
+          actual_type, required_type)) {
+    return loom_low_source_call_emit_type_error(
+        context, source_op,
+        loom_low_source_call_symbol_name(context->module, callee),
+        IREE_SV("operand"), actual_type, required_type);
+  }
+  return loom_low_source_call_prepare_operand(context, source_op, operands,
+                                              operand_index, actual_type,
+                                              required_type, inout_recipes);
+}
+
 iree_status_t loom_low_lower_source_call_finalize(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_source_call_plan_t* plan) {
-  if (plan->interface == NULL ||
-      context->policy->control_operand.prepare == NULL) {
+  if (plan->interface == NULL) {
     return iree_ok_status();
   }
-  const loom_value_slice_t operands = loom_call_like_operands(
-      loom_call_like_const_cast(context->module, source_op));
+  const loom_call_like_t call =
+      loom_call_like_const_cast(context->module, source_op);
+  const loom_value_slice_t operands = loom_call_like_operands(call);
   iree_status_t status = iree_ok_status();
   for (uint16_t i = 0; i < operands.count && iree_status_is_ok(status) &&
                        context->result->error_count == 0;
        ++i) {
-    const loom_type_t required_type = plan->interface->argument_types[i];
-    const loom_type_t actual_type =
-        loom_low_lower_value_binding_type(context, operands.values[i]);
-    if (loom_type_equal(actual_type, required_type)) {
-      continue;
-    }
-    status = loom_low_source_call_prepare_operand(context, source_op, operands,
-                                                  i, actual_type, required_type,
-                                                  &plan->operands);
+    status = loom_low_source_call_finalize_operand(
+        context, source_op, loom_call_like_callee(call), operands, i,
+        plan->interface->argument_types[i], &plan->operands);
   }
   return status;
 }
@@ -718,6 +753,7 @@ iree_status_t loom_low_lower_source_invoke_plan(
     if (!loom_type_equal(result_type, expected_type) &&
         (!context->policy->control_operand.accepts ||
          !context->policy->control_operand.accepts(
+             &context->fact_table->context,
              loom_module_value_type(module, source_results.values[i]),
              loom_value_fact_table_lookup(context->fact_table,
                                           source_results.values[i]),
@@ -755,32 +791,10 @@ iree_status_t loom_low_lower_source_invoke_finalize(
   for (uint16_t i = 0; i < operands.count && iree_status_is_ok(status) &&
                        context->result->error_count == 0;
        ++i) {
-    const loom_type_t actual_type =
-        loom_low_lower_value_binding_type(context, operands.values[i]);
-    const loom_type_t expected_type =
-        loom_type_table_get(&context->module->types, type_ids[i]);
-    if (loom_type_equal(actual_type, expected_type)) {
-      continue;
-    }
-    const loom_type_t source_type =
-        loom_module_value_type(context->module, operands.values[i]);
-    if (!context->policy->control_operand.accepts ||
-        !context->policy->control_operand.accepts(
-            source_type,
-            loom_value_fact_table_lookup_at(context->fact_table,
-                                            context->module, operands.values[i],
-                                            source_op),
-            actual_type, expected_type)) {
-      status = loom_low_source_call_emit_type_error(
-          context, source_op,
-          loom_low_source_call_symbol_name(context->module,
-                                           loom_low_invoke_callee(source_op)),
-          IREE_SV("operand"), actual_type, expected_type);
-    } else {
-      status = loom_low_source_call_prepare_operand(
-          context, source_op, operands, i, actual_type, expected_type,
-          &plan->operands);
-    }
+    status = loom_low_source_call_finalize_operand(
+        context, source_op, loom_low_invoke_callee(source_op), operands, i,
+        loom_type_table_get(&context->module->types, type_ids[i]),
+        &plan->operands);
   }
   return status;
 }

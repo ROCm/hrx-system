@@ -39,8 +39,8 @@ iree_status_t loom_low_lower_source_call_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_source_call_plan_t** out_plan);
 
-// Prepares receiving-carrier conversions after source selection has finalized
-// operand bindings. Only nonempty recipes consume additional retained storage.
+// Admits and prepares receiving-carrier conversions after source selection has
+// finalized operand bindings. Only nonempty recipes consume retained storage.
 iree_status_t loom_low_lower_source_call_finalize(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_source_call_plan_t* plan);

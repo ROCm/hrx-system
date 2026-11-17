@@ -22,7 +22,8 @@ extern const loom_low_lower_source_plan_observer_t
 // private component without changing the representation of its other uses.
 loom_type_t loom_spirv_join_carrier_type(loom_type_t source_type,
                                          loom_type_t lhs, loom_type_t rhs);
-bool loom_spirv_control_operand_accepts(loom_type_t source_type,
+bool loom_spirv_control_operand_accepts(const loom_fact_context_t* fact_context,
+                                        loom_type_t source_type,
                                         loom_value_facts_t source_facts,
                                         loom_type_t actual_type,
                                         loom_type_t required_type);
