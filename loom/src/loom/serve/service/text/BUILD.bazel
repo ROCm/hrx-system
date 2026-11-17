@@ -720,6 +720,7 @@ loom_cc_library(
         "stages.c",
         "state.c",
         "state_resize.c",
+        "state_storage.c",
         "variant.c",
         "warmup.c",
     ],
