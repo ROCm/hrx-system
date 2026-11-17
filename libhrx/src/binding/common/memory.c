@@ -198,6 +198,13 @@ static iree_status_t iree_hal_streaming_capture_build_host_to_device(
     iree_hal_streaming_graph_node_t** out_terminal_node) {
   iree_hal_streaming_capture_host_to_device_t* capture =
       (iree_hal_streaming_capture_host_to_device_t*)user_data;
+  iree_hal_streaming_buffer_ref_t device_ref;
+  IREE_RETURN_IF_ERROR(
+      capture->size
+          ? iree_hal_streaming_memory_lookup_range(graph->context, capture->dst,
+                                                   capture->size, &device_ref)
+          : iree_hal_streaming_memory_lookup(graph->context, capture->dst,
+                                             &device_ref));
   iree_hal_streaming_buffer_ref_t source_ref;
   if (iree_hal_streaming_memory_try_lookup(
           graph->context, (iree_hal_streaming_deviceptr_t)capture->src,
@@ -209,10 +216,18 @@ static iree_status_t iree_hal_streaming_capture_build_host_to_device(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "host-to-device source is not host memory");
     }
-    return iree_hal_streaming_graph_add_copy_ptr_node(
-        graph, dependencies, dependency_count, capture->dst,
-        (iree_hal_streaming_deviceptr_t)capture->src, capture->size,
-        out_terminal_node);
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_add_copy_buffer_node(
+        graph, dependencies, dependency_count, device_ref, source_ref,
+        capture->size, out_terminal_node));
+    iree_hal_streaming_graph_memcpy_node_attrs_t* attrs =
+        iree_hal_streaming_graph_node_memcpy(*out_terminal_node);
+    attrs->hip_dst = (void*)capture->dst;
+    attrs->hip_src = (const void*)capture->src;
+    return iree_ok_status();
+  }
+  if (capture->size == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "staged copy range must be nonempty");
   }
 
   iree_hal_streaming_host_memcpy_callback_data_t* callback_data = NULL;
@@ -231,8 +246,7 @@ static iree_status_t iree_hal_streaming_capture_build_host_to_device(
 
   IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_add_staged_copy_node(
       graph, dependencies, dependency_count, callback_node,
-      IREE_HAL_STREAMING_GRAPH_STAGING_UPLOAD, capture->dst, capture->size,
-      capture->size,
+      IREE_HAL_STREAMING_GRAPH_STAGING_UPLOAD, device_ref, capture->size,
       offsetof(iree_hal_streaming_host_memcpy_callback_data_t, dst),
       out_terminal_node));
   iree_hal_streaming_graph_attach_copy_callback(*out_terminal_node,
@@ -268,6 +282,13 @@ static iree_status_t iree_hal_streaming_capture_build_device_to_host(
     iree_hal_streaming_graph_node_t** out_terminal_node) {
   iree_hal_streaming_capture_device_to_host_t* capture =
       (iree_hal_streaming_capture_device_to_host_t*)user_data;
+  iree_hal_streaming_buffer_ref_t device_ref;
+  IREE_RETURN_IF_ERROR(
+      capture->size
+          ? iree_hal_streaming_memory_lookup_range(graph->context, capture->src,
+                                                   capture->size, &device_ref)
+          : iree_hal_streaming_memory_lookup(graph->context, capture->src,
+                                             &device_ref));
   iree_hal_streaming_buffer_ref_t destination_ref;
   if (iree_hal_streaming_memory_try_lookup(
           graph->context, (iree_hal_streaming_deviceptr_t)capture->dst,
@@ -279,17 +300,24 @@ static iree_status_t iree_hal_streaming_capture_build_device_to_host(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "device-to-host destination is not host memory");
     }
-    return iree_hal_streaming_graph_add_copy_ptr_node(
-        graph, dependencies, dependency_count,
-        (iree_hal_streaming_deviceptr_t)capture->dst, capture->src,
-        capture->size, out_terminal_node);
+    IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_add_copy_buffer_node(
+        graph, dependencies, dependency_count, destination_ref, device_ref,
+        capture->size, out_terminal_node));
+    iree_hal_streaming_graph_memcpy_node_attrs_t* attrs =
+        iree_hal_streaming_graph_node_memcpy(*out_terminal_node);
+    attrs->hip_dst = (void*)capture->dst;
+    attrs->hip_src = (const void*)capture->src;
+    return iree_ok_status();
+  }
+  if (capture->size == 0) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "staged copy range must be nonempty");
   }
 
   iree_hal_streaming_graph_node_t* copy_node = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_streaming_graph_add_staged_copy_node(
       graph, dependencies, dependency_count, NULL,
-      IREE_HAL_STREAMING_GRAPH_STAGING_DOWNLOAD, capture->src, capture->size,
-      capture->size,
+      IREE_HAL_STREAMING_GRAPH_STAGING_DOWNLOAD, device_ref, capture->size,
       offsetof(iree_hal_streaming_host_memcpy_callback_data_t, src),
       &copy_node));
 
@@ -681,6 +709,34 @@ iree_status_t iree_hal_streaming_memory_lookup_range(
       (void**)&out_ref->buffer)));
   out_ref->offset = (iree_device_size_t)offset;
   return iree_ok_status();
+}
+
+bool iree_hal_streaming_memory_try_lookup_across_contexts(
+    iree_hal_streaming_context_t* excluded_context,
+    iree_hal_streaming_deviceptr_t pointer,
+    iree_hal_streaming_context_t** out_context,
+    iree_hal_streaming_buffer_ref_t* out_ref) {
+  *out_context = NULL;
+  *out_ref = (iree_hal_streaming_buffer_ref_t){0};
+  iree_hal_streaming_device_registry_t* registry =
+      iree_hal_streaming_device_registry();
+  if (!registry) {
+    return false;
+  }
+  iree_slim_mutex_lock(&registry->context_list.mutex);
+  for (iree_hal_streaming_context_t* context = registry->context_list.head;
+       context; context = context->context_list_entry.next) {
+    if (context == excluded_context) {
+      continue;
+    }
+    if (iree_hal_streaming_memory_try_lookup(context, pointer, out_ref)) {
+      iree_hal_streaming_context_retain(context);
+      *out_context = context;
+      break;
+    }
+  }
+  iree_slim_mutex_unlock(&registry->context_list.mutex);
+  return *out_context != NULL;
 }
 
 iree_status_t iree_hal_streaming_memory_lookup_range_across_contexts(

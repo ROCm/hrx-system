@@ -1974,6 +1974,91 @@ TEST_F(HipGraphMemoryApiTest, PendingUpdatesChangeStagingAndDependencyOrder) {
   EXPECT_EQ(destination_, source_);
 }
 
+TEST_F(HipGraphMemoryApiTest, ZeroLengthCopiesKeepDirectForms) {
+  ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
+  ASSERT_EQ(hipSuccess, api_.allocate_host(&host_buffers_[0], source_.size(),
+                                           hipHostMallocDefault));
+  hipGraphNode_t node = nullptr;
+  EXPECT_EQ(hipSuccess,
+            api_.add_copy_1d(&node, graph_, nullptr, 0, destination_.data(),
+                             source_.data(), 0, hipMemcpyHostToHost));
+  EXPECT_EQ(hipSuccess, api_.add_copy_1d(&node, graph_, nullptr, 0, device_,
+                                         device_, 0, hipMemcpyDeviceToDevice));
+  for (bool registered : {false, true}) {
+    void* host = registered ? host_buffers_[0] : source_.data();
+    const hipError_t expected = registered ? hipSuccess : hipErrorInvalidValue;
+    EXPECT_EQ(expected, api_.add_copy_1d(&node, graph_, nullptr, 0, device_,
+                                         host, 0, hipMemcpyHostToDevice));
+    EXPECT_EQ(expected, api_.add_copy_1d(&node, graph_, nullptr, 0, host,
+                                         device_, 0, hipMemcpyDeviceToHost));
+  }
+  hipMemcpy3DParms empty = {
+      .srcPtr = {device_, 1, 1, 1},
+      .dstPtr = {device_, 1, 1, 1},
+      .extent = {0, 1, 1},
+      .kind = hipMemcpyDeviceToDevice,
+  };
+  EXPECT_EQ(hipErrorInvalidValue,
+            api_.add_copy(&node, graph_, nullptr, 0, &empty));
+}
+
+TEST_F(HipGraphMemoryApiTest, CopyPreparationRespectsLogicalPoolBounds) {
+  // Small HIP pool allocations have a larger physical extent. Graph copies
+  // must use the requested length even when the backing contains more bytes.
+  constexpr size_t length = 3;
+  ASSERT_EQ(hipSuccess, api_.allocate_async(&device_, length, stream_));
+  ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
+  ASSERT_EQ(hipSuccess,
+            api_.copy(device_, source_.data(), length, hipMemcpyHostToDevice));
+  auto* pointer = static_cast<uint8_t*>(device_);
+  hipGraphNode_t node = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_copy_1d(&node, graph_, nullptr, 0, pointer + 2,
+                                         pointer, 1, hipMemcpyDeviceToDevice));
+  ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+  for (hipMemcpyKind kind : {hipMemcpyDeviceToDevice, hipMemcpyDefault,
+                             hipMemcpyDeviceToDeviceNoCU}) {
+    for (bool source_overrun : {false, true}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "kind=" << kind << " source_overrun=" << source_overrun);
+      hipMemcpy3DParms parameters = {
+          .srcPtr = {pointer + (source_overrun ? length : 0), 1, 1, 1},
+          .dstPtr = {pointer + (source_overrun ? 0 : length), 1, 1, 1},
+          .extent = {1, 1, 1},
+          .kind = kind,
+      };
+      hipGraphNode_t rejected = nullptr;
+      EXPECT_EQ(hipErrorInvalidValue,
+                api_.add_copy(&rejected, graph_, nullptr, 0, &parameters));
+      EXPECT_EQ(
+          hipErrorInvalidValue,
+          api_.add_copy_1d(&rejected, graph_, nullptr, 0, parameters.dstPtr.ptr,
+                           parameters.srcPtr.ptr, 1, kind));
+      EXPECT_EQ(hipErrorInvalidValue,
+                api_.set_copy(node, parameters.dstPtr.ptr,
+                              parameters.srcPtr.ptr, 1, kind));
+      EXPECT_EQ(
+          hipErrorInvalidValue,
+          api_.set_executable_copy(executable_, node, parameters.dstPtr.ptr,
+                                   parameters.srcPtr.ptr, 1, kind));
+    }
+  }
+  size_t node_count = 0;
+  ASSERT_EQ(hipSuccess, api_.get_nodes(graph_, nullptr, &node_count));
+  EXPECT_EQ(1u, node_count);
+  hipMemcpy3DParms observed = {};
+  ASSERT_EQ(hipSuccess, api_.get_copy(node, &observed));
+  EXPECT_EQ(pointer, observed.srcPtr.ptr);
+  EXPECT_EQ(pointer + 2, observed.dstPtr.ptr);
+  EXPECT_EQ(hipMemcpyDeviceToDevice, observed.kind);
+  Replay();
+  ASSERT_FALSE(HasFatalFailure());
+  std::array<uint8_t, length> output = {};
+  ASSERT_EQ(hipSuccess,
+            api_.copy(output.data(), pointer, length, hipMemcpyDeviceToHost));
+  EXPECT_EQ(output,
+            (std::array<uint8_t, length>{source_[0], source_[1], source_[0]}));
+}
+
 TEST_F(HipGraphMemoryApiTest, RegisteredHostCopiesPreserveCaptureAndUpdates) {
   ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
   for (auto& buffer : host_buffers_) {
@@ -2155,79 +2240,106 @@ TEST_F(HipGraphMemoryApiTest, PeerCopiesCompleteAcrossCompatibilityContexts) {
 
   // Exercise source-local, destination-local, and neither-local graph
   // representations with one physical device and two compatibility contexts.
-  for (int placement = 0; placement < 3; ++placement) {
-    hipDeviceptr_t source = placement == 0 ? device_ : remote_buffers_[0];
-    hipDeviceptr_t destination = placement == 1 ? device_ : remote_buffers_[1];
-    ASSERT_EQ(hipSuccess, api_.set_context(placement == 0 ? primary_context_
-                                                          : remote_context_));
-    ASSERT_EQ(hipSuccess, api_.copy(source, source_.data(), source_.size(),
-                                    hipMemcpyHostToDevice));
-    ASSERT_EQ(hipSuccess, api_.set_context(primary_context_));
-    hipGraphNode_t node = nullptr;
-    ASSERT_EQ(hipSuccess,
-              api_.add_copy_1d(&node, graph_, nullptr, 0, destination, source,
-                               source_.size(), hipMemcpyDeviceToDevice));
-    ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
-    ASSERT_EQ(hipSuccess, api_.set_context(placement == 1 ? primary_context_
-                                                          : remote_context_));
-    destination_.fill(0xCC);
-    const auto untouched = destination_;
-    ASSERT_EQ(hipSuccess,
-              api_.copy(destination, destination_.data(), destination_.size(),
-                        hipMemcpyHostToDevice));
-    ASSERT_EQ(hipSuccess, api_.set_context(primary_context_));
-    ASSERT_EQ(hipSuccess, api_.set_enabled(executable_, node, 0));
-    Replay();
-    ASSERT_FALSE(HasFatalFailure());
-    ASSERT_EQ(hipSuccess, api_.set_context(placement == 1 ? primary_context_
-                                                          : remote_context_));
-    ASSERT_EQ(hipSuccess,
-              api_.copy(destination_.data(), destination, destination_.size(),
-                        hipMemcpyDeviceToHost));
-    EXPECT_EQ(destination_, untouched) << placement;
-    ASSERT_EQ(hipSuccess, api_.set_context(primary_context_));
-    ASSERT_EQ(hipSuccess, api_.set_enabled(executable_, node, 1));
-    Replay();
-    ASSERT_FALSE(HasFatalFailure());
-    ASSERT_EQ(hipSuccess, api_.set_context(placement == 1 ? primary_context_
-                                                          : remote_context_));
-    ASSERT_EQ(hipSuccess,
-              api_.copy(destination_.data(), destination, destination_.size(),
-                        hipMemcpyDeviceToHost));
-    EXPECT_EQ(destination_, source_) << placement;
-    ASSERT_EQ(hipSuccess, api_.set_context(primary_context_));
-    ASSERT_EQ(hipSuccess,
-              api_.set_executable_copy(executable_, node,
-                                       static_cast<uint8_t*>(destination) + 16,
-                                       static_cast<const uint8_t*>(source) + 8,
-                                       32, hipMemcpyDeviceToDevice));
-    ASSERT_EQ(hipSuccess, api_.set_context(placement == 1 ? primary_context_
-                                                          : remote_context_));
-    destination_.fill(0xA7);
-    auto expected = destination_;
-    for (size_t i = 0; i < 32; ++i) {
-      expected[16 + i] = source_[8 + i];
+  for (hipMemcpyKind kind : {hipMemcpyDeviceToDevice, hipMemcpyDefault,
+                             hipMemcpyDeviceToDeviceNoCU}) {
+    for (int placement = 0; placement < 3; ++placement) {
+      hipDeviceptr_t source = placement == 0 ? device_ : remote_buffers_[0];
+      hipDeviceptr_t destination =
+          placement == 1 ? device_ : remote_buffers_[1];
+      ASSERT_EQ(hipSuccess, api_.set_context(placement == 0 ? primary_context_
+                                                            : remote_context_));
+      ASSERT_EQ(hipSuccess, api_.copy(source, source_.data(), source_.size(),
+                                      hipMemcpyHostToDevice));
+      ASSERT_EQ(hipSuccess, api_.set_context(primary_context_));
+      hipGraphNode_t node = nullptr;
+      SCOPED_TRACE(::testing::Message()
+                   << "kind=" << kind << " placement=" << placement);
+      if (kind == hipMemcpyDeviceToDevice) {
+        ASSERT_EQ(hipSuccess,
+                  api_.add_copy_1d(&node, graph_, nullptr, 0, destination,
+                                   source, source_.size(), kind));
+      } else {
+        hipMemcpy3DParms parameters = {
+            .srcPtr = {source, 8, 8, 4},
+            .dstPtr = {destination, 8, 8, 4},
+            .extent = {4, 4, 2},
+            .kind = kind,
+        };
+        ASSERT_EQ(hipSuccess,
+                  api_.add_copy(&node, graph_, nullptr, 0, &parameters));
+      }
+      ASSERT_EQ(hipSuccess, api_.instantiate(&executable_, graph_, 0));
+      ASSERT_EQ(hipSuccess, api_.set_context(placement == 1 ? primary_context_
+                                                            : remote_context_));
+      destination_.fill(0xCC);
+      const auto untouched = destination_;
+      ASSERT_EQ(hipSuccess,
+                api_.copy(destination, destination_.data(), destination_.size(),
+                          hipMemcpyHostToDevice));
+      ASSERT_EQ(hipSuccess, api_.set_context(primary_context_));
+      ASSERT_EQ(hipSuccess, api_.set_enabled(executable_, node, 0));
+      Replay();
+      ASSERT_FALSE(HasFatalFailure());
+      ASSERT_EQ(hipSuccess, api_.set_context(placement == 1 ? primary_context_
+                                                            : remote_context_));
+      ASSERT_EQ(hipSuccess,
+                api_.copy(destination_.data(), destination, destination_.size(),
+                          hipMemcpyDeviceToHost));
+      EXPECT_EQ(destination_, untouched) << placement;
+      ASSERT_EQ(hipSuccess, api_.set_context(primary_context_));
+      ASSERT_EQ(hipSuccess, api_.set_enabled(executable_, node, 1));
+      Replay();
+      ASSERT_FALSE(HasFatalFailure());
+      ASSERT_EQ(hipSuccess, api_.set_context(placement == 1 ? primary_context_
+                                                            : remote_context_));
+      ASSERT_EQ(hipSuccess,
+                api_.copy(destination_.data(), destination, destination_.size(),
+                          hipMemcpyDeviceToHost));
+      auto initial_expected = untouched;
+      for (size_t i = 0; i < source_.size(); ++i) {
+        if (kind == hipMemcpyDeviceToDevice || i % 8 < 4) {
+          initial_expected[i] = source_[i];
+        }
+      }
+      EXPECT_EQ(destination_, initial_expected) << placement;
+      ASSERT_EQ(hipSuccess, api_.set_context(primary_context_));
+      EXPECT_EQ(hipErrorInvalidValue,
+                api_.set_executable_copy(
+                    executable_, node, destination,
+                    static_cast<const uint8_t*>(source) + source_.size() - 1, 2,
+                    kind));
+      ASSERT_EQ(hipSuccess,
+                api_.set_executable_copy(
+                    executable_, node, static_cast<uint8_t*>(destination) + 16,
+                    static_cast<const uint8_t*>(source) + 8, 32, kind));
+      ASSERT_EQ(hipSuccess, api_.set_context(placement == 1 ? primary_context_
+                                                            : remote_context_));
+      destination_.fill(0xA7);
+      auto expected = destination_;
+      for (size_t i = 0; i < 32; ++i) {
+        expected[16 + i] = source_[8 + i];
+      }
+      ASSERT_EQ(hipSuccess,
+                api_.copy(destination, destination_.data(), destination_.size(),
+                          hipMemcpyHostToDevice));
+      ASSERT_EQ(hipSuccess, api_.set_context(primary_context_));
+      Replay();
+      ASSERT_FALSE(HasFatalFailure());
+      ASSERT_EQ(hipSuccess, api_.set_context(placement == 1 ? primary_context_
+                                                            : remote_context_));
+      ASSERT_EQ(hipSuccess,
+                api_.copy(destination_.data(), destination, destination_.size(),
+                          hipMemcpyDeviceToHost));
+      EXPECT_EQ(destination_, expected) << placement;
+      ASSERT_EQ(hipSuccess, api_.set_context(primary_context_));
+      ASSERT_EQ(hipSuccess, api_.executable_destroy(executable_));
+      executable_ = nullptr;
+      ASSERT_EQ(hipSuccess, api_.graph_destroy(graph_));
+      graph_ = nullptr;
+      ASSERT_EQ(hipSuccess, api_.graph_create(&graph_, 0));
+      source_ = replacement_;
+      destination_.fill(0);
     }
-    ASSERT_EQ(hipSuccess,
-              api_.copy(destination, destination_.data(), destination_.size(),
-                        hipMemcpyHostToDevice));
-    ASSERT_EQ(hipSuccess, api_.set_context(primary_context_));
-    Replay();
-    ASSERT_FALSE(HasFatalFailure());
-    ASSERT_EQ(hipSuccess, api_.set_context(placement == 1 ? primary_context_
-                                                          : remote_context_));
-    ASSERT_EQ(hipSuccess,
-              api_.copy(destination_.data(), destination, destination_.size(),
-                        hipMemcpyDeviceToHost));
-    EXPECT_EQ(destination_, expected) << placement;
-    ASSERT_EQ(hipSuccess, api_.set_context(primary_context_));
-    ASSERT_EQ(hipSuccess, api_.executable_destroy(executable_));
-    executable_ = nullptr;
-    ASSERT_EQ(hipSuccess, api_.graph_destroy(graph_));
-    graph_ = nullptr;
-    ASSERT_EQ(hipSuccess, api_.graph_create(&graph_, 0));
-    source_ = replacement_;
-    destination_.fill(0);
   }
 }
 

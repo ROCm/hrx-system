@@ -501,7 +501,7 @@ TEST_F(GraphExecTest, RejectedCopyConstructionPreservesTopologyAndBacking) {
             sizeof(parameters);
         status = iree_hal_streaming_graph_add_staged_copy_node(
             graph, nullptr, 0, prepare, IREE_HAL_STREAMING_GRAPH_STAGING_UPLOAD,
-            destination->device_ptr, sizeof(value), sizeof(value),
+            {destination, 0}, sizeof(value),
             offsetof(CopyParameters, destination), &copy);
       }
       if (iree_status_is_ok(status)) {

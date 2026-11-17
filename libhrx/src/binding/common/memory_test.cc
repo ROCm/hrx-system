@@ -1268,6 +1268,63 @@ TEST_F(CpuStreamingMemoryTest,
   }
 }
 
+TEST_F(CpuStreamingMemoryTest, CapturedDirectNoOpsPreservePointerMetadata) {
+  IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
+      context_, registered_storage_.size(), IREE_HAL_STREAMING_MEMORY_FLAG_NONE,
+      &buffer_));
+  IREE_ASSERT_OK(iree_hal_streaming_memory_register_host(
+      context_, registered_storage_.data(), registered_storage_.size(),
+      IREE_HAL_STREAMING_HOST_REGISTER_FLAG_DEFAULT, &host_buffer_));
+  device_pointer_ = iree_hal_streaming_buffer_device_pointer(buffer_);
+  ASSERT_NE(buffer_->host_ptr, nullptr);
+  std::memset(buffer_->host_ptr, 0x93, registered_storage_.size());
+  registered_storage_.fill(0x61);
+  IREE_ASSERT_OK(iree_hal_streaming_begin_capture(
+      stream_, IREE_HAL_STREAMING_CAPTURE_MODE_GLOBAL));
+  iree_status_t status = iree_hal_streaming_memcpy_host_to_device(
+      context_, device_pointer_, registered_storage_.data(), 0, stream_);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_memcpy_device_to_host(
+        context_, registered_storage_.data(), device_pointer_, 0, stream_);
+  }
+  iree_hal_streaming_graph_t* graph = nullptr;
+  status =
+      iree_status_join(status, iree_hal_streaming_end_capture(stream_, &graph));
+  std::unique_ptr<iree_hal_streaming_graph_t,
+                  decltype(&iree_hal_streaming_graph_release)>
+      graph_owner(graph, iree_hal_streaming_graph_release);
+  IREE_ASSERT_OK(status);
+  // The compatibility query surface exposes supplied pointer aliases even
+  // when recording consumes only already-resolved buffer references.
+  size_t node_count = 0;
+  for (auto* block = graph->node_blocks; block; block = block->next) {
+    for (size_t i = 0; i < block->count; ++i) {
+      const auto* attrs = iree_hal_streaming_graph_node_memcpy(block->nodes[i]);
+      const bool upload = node_count++ == 0;
+      EXPECT_EQ(upload ? (void*)device_pointer_ : registered_storage_.data(),
+                attrs->hip_dst);
+      EXPECT_EQ(upload ? registered_storage_.data() : (void*)device_pointer_,
+                attrs->hip_src);
+      EXPECT_EQ(0u, attrs->command.copy.length);
+    }
+  }
+  EXPECT_EQ(2u, node_count);
+  iree_hal_streaming_graph_exec_t* executable = nullptr;
+  IREE_ASSERT_OK(iree_hal_streaming_graph_instantiate(
+      graph, IREE_HAL_STREAMING_GRAPH_INSTANTIATE_FLAG_NONE, &executable));
+  iree_hal_streaming_graph_exec_launch_result_t launch_result;
+  status =
+      iree_hal_streaming_graph_exec_launch(executable, stream_, &launch_result);
+  status =
+      iree_status_join(status, iree_hal_streaming_stream_synchronize(stream_));
+  iree_hal_streaming_graph_exec_release(executable);
+  IREE_ASSERT_OK(status);
+  for (size_t i = 0; i < registered_storage_.size(); ++i) {
+    EXPECT_EQ(0x61, registered_storage_[i]);
+    EXPECT_EQ(0x93, static_cast<uint8_t*>(buffer_->host_ptr)[i]);
+  }
+}
+
 TEST_F(CpuStreamingMemoryTest, ExecutableCopiesOwnDistinctStaging) {
   constexpr size_t kSize = 16;
   IREE_ASSERT_OK(iree_hal_streaming_memory_allocate_device(
