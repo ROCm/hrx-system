@@ -16,8 +16,8 @@ extern "C" {
 // A physical payload path eligible to carry control packets. Every geometry
 // on this path grants a complete destination record before queuing its sender.
 typedef struct loom_aie2p_native_delivery_t {
-  // Uniform unicast path shared by all selected child geometries.
-  loom_aie2p_native_distribution_path_t* path;
+  // Uniform physical destination and switch edges used by all granted phases.
+  struct loom_aie2p_native_payload_class_t* payload;
   // Independent task/reader continuations for the path's geometry variants.
   struct loom_aie2p_native_grant_t* grants;
   // Directed lanes and actual-use result owned by route admission.

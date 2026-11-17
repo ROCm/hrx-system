@@ -486,8 +486,6 @@ typedef struct loom_aie2p_native_distribution_path_t {
   struct loom_aie2p_native_payload_class_t** payloads;
   // First geometry, retaining the physical endpoint order.
   struct loom_aie2p_native_distribution_t* first;
-  // All selected geometries, including the first, for common framing selection.
-  struct loom_aie2p_native_distribution_t* geometries;
   // Highest construction ordinal assigned to this path. Later selection
   // sweeps cannot alias an earlier construction back onto its live queues.
   const loom_pipeline_invocation_t* last;
@@ -498,13 +496,6 @@ typedef struct loom_aie2p_native_distribution_path_t {
   loom_aie2p_native_distribution_packet_t* packets;
   // Number of logical packet identities mapped through payloads.
   uint8_t packet_count;
-  // Exact route-edge interval produced for a uniform source's fanout.
-  struct {
-    // First edge in the route builder's stable append-only table.
-    iree_host_size_t first;
-    // Number of edges, excluding routes owned by other paths.
-    iree_host_size_t count;
-  } routes;
 } loom_aie2p_native_distribution_path_t;
 
 // One source DMA program multicast to independently completing destination
@@ -516,8 +507,8 @@ typedef struct loom_aie2p_native_distribution_t {
   struct loom_aie2p_native_distribution_t* next_demand;
   // Interned physical geometry, populated during descriptor selection.
   struct loom_aie2p_native_distribution_t* selected;
-  // Next geometry sharing this physical path, independent of transport owner.
-  struct loom_aie2p_native_distribution_t* next_geometry;
+  // Next selected geometry issuing to the same physical payload sender.
+  struct loom_aie2p_native_distribution_t* next_on_sender;
   // Static queues and routes, independent of logical channel identity.
   loom_aie2p_native_distribution_path_t* path;
   // First invocation selecting this geometry; later uses retain its identity.

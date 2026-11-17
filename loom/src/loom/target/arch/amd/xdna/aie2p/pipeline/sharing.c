@@ -80,7 +80,9 @@ static bool loom_aie2p_native_select_grant_reader(
           distribution->invocation &&
       context->workers[reader->worker].execution ==
           LOOM_AIE2P_NATIVE_EXECUTION_CORE;
-  if (channel->replay.record_count ||
+  // A channel release replenishes one sender. A shared writer cursor cannot
+  // identify which producer should receive that credit.
+  if (channel->cursor.writer.shared || channel->replay.record_count ||
       (distribution->repetitions > 1 && !core_receiver &&
        (channel->source->capacity != 1 ||
         channel->configuration_returns.count != distribution->repetitions)) ||
@@ -109,42 +111,33 @@ iree_status_t loom_aie2p_native_prepare_sharing(
                                                  sizeof(*context->deliveries),
                                                  (void**)&context->deliveries));
   memset(context->deliveries, 0, tile_count * sizeof(*context->deliveries));
-  for (iree_host_size_t i = 0; i < realization->invocations.worker_count; ++i) {
-    for (loom_aie2p_native_distribution_t* first =
-             context->workers[i].distributions;
-         first; first = first->next) {
-      loom_aie2p_native_distribution_path_t* path = first->path;
-      if (path->first != first || !path->routes.count) {
-        continue;
+  for (loom_aie2p_native_payload_source_t* sender = context->payload_sources;
+       sender; sender = sender->next) {
+    loom_aie2p_native_payload_class_t* payload = sender->classes;
+    if (sender->class_count != 1 || !payload->distribution_only) {
+      continue;
+    }
+    bool eligible = true;
+    for (loom_aie2p_native_distribution_t* geometry = sender->distributions;
+         geometry; geometry = geometry->next_on_sender) {
+      if (!loom_aie2p_native_select_grant_reader(context, realization,
+                                                 geometry)) {
+        eligible = false;
+        break;
       }
-      const loom_aie2p_native_payload_class_t* payload = path->payloads[0];
-      if (!payload->distribution_only || payload->source->class_count != 1 ||
-          payload->distribution_path_count != 1) {
-        continue;
-      }
-      bool eligible = true;
-      for (loom_aie2p_native_distribution_t* geometry = path->geometries;
-           geometry; geometry = geometry->next_geometry) {
-        if (!loom_aie2p_native_select_grant_reader(context, realization,
-                                                   geometry)) {
-          eligible = false;
-          break;
-        }
-      }
-      if (!eligible) {
-        continue;
-      }
-      const iree_host_size_t tile_index =
-          first->receivers[0].tile - context->tiles;
-      loom_aie2p_native_delivery_t** selected =
-          &context->deliveries[tile_index];
-      if (!*selected) {
-        IREE_RETURN_IF_ERROR(
-            iree_arena_allocate(arena, sizeof(**selected), (void**)selected));
-        **selected = (loom_aie2p_native_delivery_t){.path = path};
-      } else if (path->routes.count < (*selected)->path->routes.count) {
-        (*selected)->path = path;
-      }
+    }
+    if (!eligible) {
+      continue;
+    }
+    const iree_host_size_t tile_index =
+        payload->destinations[0].tile - context->tiles;
+    loom_aie2p_native_delivery_t** selected = &context->deliveries[tile_index];
+    if (!*selected) {
+      IREE_RETURN_IF_ERROR(
+          iree_arena_allocate(arena, sizeof(**selected), (void**)selected));
+      **selected = (loom_aie2p_native_delivery_t){.payload = payload};
+    } else if (payload->route_count < (*selected)->payload->route_count) {
+      (*selected)->payload = payload;
     }
   }
   for (iree_host_size_t i = 0; i < tile_count; ++i) {
@@ -152,13 +145,14 @@ iree_status_t loom_aie2p_native_prepare_sharing(
     if (!delivery) {
       continue;
     }
-    const loom_aie2p_native_distribution_path_t* path = delivery->path;
+    const loom_aie2p_native_payload_class_t* payload = delivery->payload;
     IREE_RETURN_IF_ERROR(loom_aie2p_array_route_sharing_initialize(
-        &context->routing, path->routes.first, path->routes.count,
-        path->first->receivers[0].tile->coordinate,
+        &context->routing, payload->route_first, payload->route_count,
+        payload->destinations[0].tile->coordinate,
         LOOM_AIE2P_ARRAY_ROUTE_CARRIER_GRANTED_PAYLOAD, &delivery->sharing));
-    for (loom_aie2p_native_distribution_t* geometry = path->geometries;
-         geometry; geometry = geometry->next_geometry) {
+    for (loom_aie2p_native_distribution_t* geometry =
+             payload->source->distributions;
+         geometry; geometry = geometry->next_on_sender) {
       loom_aie2p_native_grant_t* grant;
       IREE_RETURN_IF_ERROR(
           iree_arena_allocate(arena, sizeof(*grant), (void**)&grant));
@@ -220,13 +214,13 @@ void loom_aie2p_native_commit_sharing(loom_aie2p_native_context_t* context) {
           distribution->receivers[0].channel - context->channels;
       context->channels[channel_index].grant = grant;
     }
-    const loom_aie2p_native_distribution_path_t* path = delivery->path;
+    loom_aie2p_native_payload_class_t* payload = delivery->payload;
     // This granted singleton is now a framed sender in the shared control
     // namespace. Retain that decision alongside its descriptor and routes.
-    path->payloads[0]->source->framed = true;
-    path->payloads[0]->packet = payload_packet;
-    for (iree_host_size_t j = path->routes.first;
-         j < path->routes.first + path->routes.count; ++j) {
+    payload->source->framed = true;
+    payload->packet = payload_packet;
+    for (iree_host_size_t j = payload->route_first;
+         j < payload->route_first + payload->route_count; ++j) {
       context->routes[j].packet = payload_packet;
     }
   }
