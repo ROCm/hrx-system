@@ -463,7 +463,7 @@ static iree_status_t loom_serve_text_prepare_media(
         loom_service_finite_component_prepare(service->image, &model);
     if (!iree_status_is_ok(status)) {
       // Registration/source preparation is service availability, not a defect
-      // in this HTTP payload. Preserve the component's original diagnostic.
+      // in this request. Preserve the component's original diagnostic.
       return iree_status_join(
           iree_make_status(IREE_STATUS_UNAVAILABLE,
                            "image component is unavailable"),

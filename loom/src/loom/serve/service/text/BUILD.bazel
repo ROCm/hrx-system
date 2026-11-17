@@ -106,11 +106,11 @@ loom_cc_library(
     hdrs = [
         "owner_turn_test_util.h",
         "service_test_fixture.h",
-        "source_test_oracle.h",
     ],
     target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
     visibility = ["//visibility:private"],
     deps = [
+        ":source_test_oracle",
         "//loom/binding/c:loomc",
         "//loom/src/loom/runtime/device",
         "//loom/src/loom/runtime/host",
@@ -274,6 +274,7 @@ loom_cc_library(
     target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
+        ":native_registry_tests",
         ":source_execution_tests",
         ":source_lifecycle_tests",
     ],
@@ -393,24 +394,18 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "native_service_tests",
+    name = "native_registry_tests",
     testonly = True,
     srcs = ["native_service_test.cc"],
     target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
         ":checkpoint_control",
-        ":input_count",
-        ":registration",
-        ":service",
         ":source_service_fixture",
         ":stream",
-        "//loom/src/loom/runtime:driver",
         "//loom/src/loom/runtime/device",
-        "//loom/src/loom/runtime/testing:application",
         "//loom/src/loom/service/telemetry:record",
         "//loom/src/loom/util:json",
-        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/base/tooling:flags",
     ],
     alwayslink = True,
@@ -1424,4 +1419,31 @@ loom_cc_library(
         "//loom/src/loom/service/finite:model",
         "//runtime/src/iree/base",
     ],
+)
+
+loom_cc_library(
+    name = "source_test_oracle",
+    testonly = True,
+    hdrs = ["source_test_oracle.h"],
+)
+
+loom_cc_library(
+    name = "native_service_tests",
+    testonly = True,
+    srcs = ["registration_test.cc"],
+    target_compatible_with = _SOURCE_TEST_COMPATIBILITY,
+    deps = [
+        ":registration",
+        ":source_test_oracle",
+        "//loom/src/loom/runtime:driver",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/testing:application",
+        "//loom/src/loom/serve/media:image_codec",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+    alwayslink = True,
 )

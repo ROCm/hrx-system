@@ -1416,9 +1416,10 @@ loom_cc_test(
 
 loom_cc_test(
     name = "native_text_service_test",
-    data = TEXT_SOURCES,
+    data = TEXT_SOURCES + PROJECTOR_SOURCES,
     env = {
         "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
+        "LOOM_SERVE_TEST_PROJECTOR_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/projector:model.json)",
     },
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/execute:x86_task_hal",
