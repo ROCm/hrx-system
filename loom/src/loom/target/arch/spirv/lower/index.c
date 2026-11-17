@@ -19,11 +19,13 @@ iree_status_t loom_spirv_map_index_value(loom_low_lower_context_t* context,
   loom_low_representation_id_t representation = LOOM_LOW_REPRESENTATION_ID_NONE;
   loom_low_lower_representation_lookup_if_ready(context, value,
                                                 &representation);
+  const loom_value_fact_table_t* facts =
+      loom_low_lower_context_fact_table(context);
   const bool wide = representation == LOOM_SPIRV_INDEX_REPRESENTATION_WIDE ||
-                    loom_index_facts_carrier_bitwidth(
-                        loom_value_fact_table_lookup(
-                            loom_low_lower_context_fact_table(context), value),
-                        32, 64) == 64;
+                    loom_index_value_fact_carrier_bitwidth(
+                        &facts->context, loom_low_lower_context_module(context),
+                        value, LOOM_SCALAR_TYPE_INDEX,
+                        loom_value_fact_table_lookup(facts, value)) == 64;
   return loom_low_lower_make_typed_register_type(
       context, SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, 1,
       loom_type_scalar(wide ? LOOM_SCALAR_TYPE_I64 : LOOM_SCALAR_TYPE_INDEX),

@@ -13,6 +13,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cfg/ops.h"
+#include "loom/ops/index/carrier.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
@@ -1196,6 +1197,87 @@ TEST_F(FactTableComputeTest, EntryParticipationPreservesStrongerInputScopes) {
           EXPECT_EQ(loom_value_facts_uniform_scope(loom_value_fact_table_lookup(
                         &table_, loom_block_arg_id(entry_block, i))),
                     expected_scope);
+        }
+      }
+    }
+  }
+}
+
+TEST_P(FactEntryInputTest, IndexEntryDomainsDistinguishCompleteSeeds) {
+  loom_string_id_t name = LOOM_STRING_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_intern_string(&builder_, IREE_SV("index_entry"), &name));
+  uint16_t symbol = LOOM_SYMBOL_ID_INVALID;
+  IREE_ASSERT_OK(loom_module_add_symbol(module_, name, &symbol));
+  loom_op_t* definition = nullptr;
+  IREE_ASSERT_OK(loom_test_func_build(&builder_, 0, 0, 0, {0, symbol}, &type_,
+                                      1, nullptr, 0, nullptr, 0, nullptr, 0,
+                                      LOOM_LOCATION_UNKNOWN, &definition));
+  const auto function = loom_func_like_cast(module_, definition);
+  loom_region_t* body = loom_func_like_body(function);
+  if (GetParam()) {
+    body->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;
+  }
+  const loom_value_id_t argument = loom_region_entry_arg_id(body, 0);
+  loom_builder_enter_region(&builder_, definition, body);
+  loom_op_t* sum = nullptr;
+  IREE_ASSERT_OK(loom_index_add_build(&builder_, argument, argument, type_,
+                                      LOOM_LOCATION_UNKNOWN, &sum));
+  loom_op_t* terminator = nullptr;
+  IREE_ASSERT_OK(loom_test_yield_build(&builder_, nullptr, 0,
+                                       LOOM_LOCATION_UNKNOWN, &terminator));
+  loom_value_fact_table_t inputs;
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&inputs, &arena_, 0));
+  for (uint32_t native_width : {32u, 64u}) {
+    for (uint32_t maximum_width : {native_width, 64u}) {
+      for (uint32_t subgroup_size : {1u, 32u}) {
+        for (bool seeded : {false, true}) {
+          for (const auto input :
+               {loom_value_facts_unknown(), loom_value_facts_make(-8, 64, 4)}) {
+            SCOPED_TRACE(::testing::Message()
+                         << native_width << '/' << maximum_width << ' '
+                         << subgroup_size << ' ' << seeded << ' '
+                         << input.range_lo << ':' << input.range_hi);
+            loom_value_fact_table_clear_scope(&inputs);
+            loom_value_fact_table_clear_scope(&table_);
+            if (seeded) {
+              IREE_ASSERT_OK(
+                  loom_value_fact_table_define(&inputs, argument, input));
+              IREE_ASSERT_OK(loom_value_fact_table_seed_values(
+                  &table_, {&inputs, &argument, 1}, module_));
+            }
+            loom_target_facts_t target = {};
+            target.storage.snapshot.index_bitwidth = native_width;
+            target.storage.snapshot.maximum_index_bitwidth = maximum_width;
+            target.storage.snapshot.subgroup_size = subgroup_size;
+            table_.context.target_facts = &target;
+            const auto expected =
+                seeded ? input
+                       : loom_value_facts_make_signed_bit_count_range(
+                             native_width);
+            for (unsigned refresh = 0; refresh < 2; ++refresh) {
+              IREE_ASSERT_OK(
+                  loom_value_fact_table_compute(&table_, module_, function));
+              const auto facts =
+                  loom_value_fact_table_lookup(&table_, argument);
+              EXPECT_EQ(facts.range_lo, expected.range_lo);
+              EXPECT_EQ(facts.range_hi, expected.range_hi);
+              EXPECT_EQ(facts.known_divisor, expected.known_divisor);
+              EXPECT_EQ(loom_value_fact_table_has_seed(&table_, argument),
+                        seeded);
+              EXPECT_EQ(loom_index_value_fact_carrier_bitwidth(
+                            &table_.context, module_, argument,
+                            LOOM_SCALAR_TYPE_INDEX, facts),
+                        seeded && loom_value_facts_is_unknown(input)
+                            ? maximum_width
+                            : native_width);
+              EXPECT_EQ(
+                  loom_index_value_fact_carrier_bitwidth(
+                      &table_.context, module_, loom_index_add_result(sum),
+                      LOOM_SCALAR_TYPE_INDEX, loom_value_facts_unknown()),
+                  native_width == 64 ? 64 : 0);
+            }
+          }
         }
       }
     }

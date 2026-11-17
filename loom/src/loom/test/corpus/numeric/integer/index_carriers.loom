@@ -332,6 +332,12 @@ check.scenario @assumed_index_values {
 
 // Source integers enter the target's index carrier before native arithmetic.
 // Runtime inputs fit every target; the subject has no static range promise.
+func.def noinline @index_entry_advance(%position: index) -> (index) {
+  %step = index.constant 1 : index
+  %advanced = index.add %position, %step : index
+  func.return %advanced : index
+}
+
 func.def @native_index_entry(%input: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %begin = index.constant 0 : index
@@ -342,7 +348,7 @@ func.def @native_index_entry(%input: buffer, %output: buffer) {
   scf.for %row = [%begin to %end step %step] {
     %word = view.load %inputs[%row] : view<7xi64> -> i64
     %position = index.cast %word : i64 to index
-    %advanced = index.add %position, %step : index
+    %advanced = func.call @index_entry_advance(%position) : (index) -> (index)
     %result = index.cast %advanced : index to i64
     view.store %result, %scalar_results[%row] : i64, view<7xi64>
   }
@@ -493,6 +499,104 @@ check.scenario @wide_index_bitwise_values {
     %output = check.generate.fill value(-123) : tensor<12xi64>
     check.compare<@wide_index_bitwise, @wide_index_bitwise_oracle>(%input, %output) : (tensor<2xi64>, tensor<12xi64>) -> () {
       check.expect.bitwise actual(%output) expected(%output) : tensor<12xi64>
+    }
+  }
+  check.return
+}
+
+// Complete caller domains cross retained calls, including full-width loads,
+// arithmetic on either side of a call, returned values, and narrow arguments to
+// a helper shared with wide callers. No input range annotations supply a width.
+func.def noinline @index_call_advance(%position: index, %distance: index) -> (index) {
+  %result = index.add %position, %distance : index
+  func.return %result : index
+}
+
+func.def noinline @index_call_scale(%position: index, %distance: index) -> (index) {
+  %scale = index.constant 4 : index
+  %scaled = index.mul %position, %scale : index
+  %result = index.add %scaled, %distance : index
+  func.return %result : index
+}
+
+func.def @wide_index_calls(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<2xi64>
+  %results = buffer.view %output[%origin] : buffer -> view<7xi64>
+  %position_bits = view.load %inputs[0] : view<2xi64> -> i64
+  %distance_bits = view.load %inputs[1] : view<2xi64> -> i64
+  %word_bits = scalar.trunci %position_bits : i64 to i32
+  %position = index.cast %position_bits : i64 to index
+  %distance = index.cast %distance_bits : i64 to index
+  %word = index.cast %word_bits : i32 to index
+  %scale = index.constant 4 : index
+  %wide_bias = index.constant 4294967296 : index
+  %direct = func.call @index_call_advance(%position, %distance) : (index, index) -> (index)
+  %callee_scaled = func.call @index_call_scale(%position, %distance) : (index, index) -> (index)
+  %scaled = index.mul %position, %scale : index
+  %caller_scaled = func.call @index_call_advance(%scaled, %distance) : (index, index) -> (index)
+  %mixed = func.call @index_call_advance(%word, %distance) : (index, index) -> (index)
+  %returned = func.call @index_call_advance(%direct, %distance) : (index, index) -> (index)
+  %biased = func.call @index_call_advance(%position, %wide_bias) : (index, index) -> (index)
+  %after_return = index.mul %direct, %scale : index
+  %after_return_bits = index.cast %after_return : index to i64
+  %direct_bits = index.cast %direct : index to i64
+  %callee_scaled_bits = index.cast %callee_scaled : index to i64
+  %caller_scaled_bits = index.cast %caller_scaled : index to i64
+  %mixed_bits = index.cast %mixed : index to i64
+  %returned_bits = index.cast %returned : index to i64
+  %biased_bits = index.cast %biased : index to i64
+  view.store %direct_bits, %results[0] : i64, view<7xi64>
+  view.store %callee_scaled_bits, %results[1] : i64, view<7xi64>
+  view.store %caller_scaled_bits, %results[2] : i64, view<7xi64>
+  view.store %mixed_bits, %results[3] : i64, view<7xi64>
+  view.store %returned_bits, %results[4] : i64, view<7xi64>
+  view.store %biased_bits, %results[5] : i64, view<7xi64>
+  view.store %after_return_bits, %results[6] : i64, view<7xi64>
+  func.return
+}
+
+func.def @wide_index_calls_oracle(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<2xi64>
+  %results = buffer.view %output[%origin] : buffer -> view<7xi64>
+  %position = view.load %inputs[0] : view<2xi64> -> i64
+  %distance = view.load %inputs[1] : view<2xi64> -> i64
+  %word_bits = scalar.trunci %position : i64 to i32
+  %word = scalar.extsi %word_bits : i32 to i64
+  %scale = scalar.constant 4 : i64
+  %wide_bias = scalar.constant 4294967296 : i64
+  %direct = scalar.addi %position, %distance : i64
+  %scaled = scalar.muli %position, %scale : i64
+  %advanced = scalar.addi %scaled, %distance : i64
+  %mixed = scalar.addi %word, %distance : i64
+  %returned = scalar.addi %direct, %distance : i64
+  %biased = scalar.addi %position, %wide_bias : i64
+  %after_return = scalar.muli %direct, %scale : i64
+  view.store %direct, %results[0] : i64, view<7xi64>
+  view.store %advanced, %results[1] : i64, view<7xi64>
+  view.store %advanced, %results[2] : i64, view<7xi64>
+  view.store %mixed, %results[3] : i64, view<7xi64>
+  view.store %returned, %results[4] : i64, view<7xi64>
+  view.store %biased, %results[5] : i64, view<7xi64>
+  view.store %after_return, %results[6] : i64, view<7xi64>
+  func.return
+}
+
+check.scenario @wide_index_call_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-1099511627777) step(2199023255552) : tensor<2xi64>
+    %output = check.generate.fill value(-123) : tensor<7xi64>
+    check.compare<@wide_index_calls, @wide_index_calls_oracle>(%input, %output) : (tensor<2xi64>, tensor<7xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<7xi64>
+    }
+  }
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-1099511627776 to 1099511627776) : tensor<2xi64>
+    %output = check.generate.fill value(-123) : tensor<7xi64>
+    check.compare<@wide_index_calls, @wide_index_calls_oracle>(%input, %output) : (tensor<2xi64>, tensor<7xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<7xi64>
     }
   }
   check.return

@@ -7,6 +7,7 @@
 #include "loom/target/arch/spirv/lower/representation.h"
 
 #include "loom/codegen/low/lower/representation_observer.h"
+#include "loom/codegen/low/lower/source_call.h"
 #include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/index/carrier.h"
@@ -39,14 +40,19 @@ static void loom_spirv_index_constrain(
   if (!loom_spirv_is_index(context, value)) {
     return;
   }
-  const loom_value_facts_t facts = loom_value_fact_table_lookup(
-      loom_low_lower_context_fact_table(context), value);
+  const loom_value_fact_table_t* fact_table =
+      loom_low_lower_context_fact_table(context);
+  const loom_value_facts_t facts =
+      loom_value_fact_table_lookup(fact_table, value);
   const loom_low_representation_candidate_t candidates[] = {
       {.representation = LOOM_SPIRV_INDEX_REPRESENTATION_NATIVE},
       {.representation = LOOM_SPIRV_INDEX_REPRESENTATION_WIDE,
        .cost = {.runtime = 1}},
   };
-  const bool wide = loom_index_facts_carrier_bitwidth(facts, 32, 64) == 64;
+  const bool wide =
+      loom_index_value_fact_carrier_bitwidth(
+          &fact_table->context, loom_low_lower_context_module(context), value,
+          LOOM_SCALAR_TYPE_INDEX, facts) == 64;
   if (!wide &&
       loom_low_lower_representation_component_is_constrained(recorder, value)) {
     return;
@@ -99,6 +105,45 @@ static void loom_spirv_representation_observe_operand(
     loom_spirv_private_observe_operand(context, source_op, operand, recorder);
   } else if (loom_type_equal(type, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX))) {
     loom_spirv_index_constrain(context, value, recorder);
+  }
+}
+
+static void loom_spirv_representation_observe_callable(
+    void* user_data,
+    loom_low_lower_representation_callable_boundary_kind_t kind,
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_representation_recorder_t* recorder) {
+  (void)user_data;
+  for (uint16_t i = 0; i < source_op->operand_count; ++i) {
+    loom_spirv_representation_observe_operand(NULL, context, source_op, i,
+                                              recorder);
+  }
+  if (kind != LOOM_LOW_LOWER_REPRESENTATION_CALLABLE_CALL) {
+    return;
+  }
+  const loom_call_like_t call = loom_call_like_const_cast(
+      loom_low_lower_context_module(context), source_op);
+  if (!loom_call_like_is_direct_semantic(call)) {
+    return;
+  }
+  const loom_low_lower_call_interface_t* interface =
+      loom_low_lower_source_call_interface(context, call);
+  if (!interface) {
+    return;
+  }
+  const loom_value_slice_t results = loom_call_like_results(call);
+  for (uint16_t i = 0; i < results.count; ++i) {
+    if (!loom_spirv_is_index(context, results.values[i])) {
+      continue;
+    }
+    const loom_type_t* payload =
+        loom_type_register_value_type(interface->result_types[i]);
+    if (payload && loom_type_element_type(*payload) == LOOM_SCALAR_TYPE_I64) {
+      const loom_low_representation_candidate_t candidate = {
+          .representation = LOOM_SPIRV_INDEX_REPRESENTATION_WIDE};
+      loom_low_lower_representation_record_candidates(
+          recorder, results.values[i], &candidate, 1);
+    }
   }
 }
 
@@ -280,6 +325,7 @@ static const loom_low_lower_representation_provider_t kRepresentationProvider =
     {
         .relation = loom_spirv_representation_relation,
         .observe_boundary = loom_spirv_representation_observe_boundary,
+        .observe_callable_boundary = loom_spirv_representation_observe_callable,
         .observe_unclaimed_operand = loom_spirv_representation_observe_operand,
         .boundaries = kRepresentationBoundaries,
         .boundary_spans = kRepresentationSpans,

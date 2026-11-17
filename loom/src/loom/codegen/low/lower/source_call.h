@@ -34,6 +34,12 @@ bool loom_low_lower_source_call_is_direct(const loom_module_t* module,
 bool loom_low_lower_source_call_requires_projection(
     const loom_low_lower_context_t* context, const loom_op_t* source_op);
 
+// Returns the callee's published physical interface, or NULL when it has not
+// been planned (for example, a recursive edge). Source observation uses this
+// immutable result to retain return representations before selecting consumers.
+const loom_low_lower_call_interface_t* loom_low_lower_source_call_interface(
+    const loom_low_lower_context_t* context, loom_call_like_t call);
+
 // Retains the direct callee interface and fixes its result carriers.
 iree_status_t loom_low_lower_source_call_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,

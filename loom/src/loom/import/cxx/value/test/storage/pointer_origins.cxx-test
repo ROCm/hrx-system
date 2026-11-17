@@ -132,3 +132,54 @@ low.func.def public target<amdgpu.cdna2.core> abi(hal_kernel) @local_pointer_bou
   %56 = scratch_load_dword_vaddr %55 : reg<amdgpu.vgpr>
   return %56
 }
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Retained helpers carry signed origins for both byte and scaled pointers.
+template <typename T> [[loom::noinline]] static T* advance(T* pointer, int distance) {
+  return pointer + distance;
+}
+void byte_call(char* base, const long long* offsets, int distance) {
+  *advance(base + offsets[0], distance) = 1;
+}
+void word_call(int* base, const long long* offsets, int distance) {
+  *advance(base + offsets[0], distance) = 1;
+}
+// ----
+func.def public @byte_call(%base: buffer, %base_byte_offset: index, %offsets: buffer, %offsets_byte_offset: index, %distance: i32) {
+  %59 = scalar.constant 1 : i8
+  %12 = buffer.view %offsets[%offsets_byte_offset] : buffer -> view<1xi64>
+  %13 = view.load<root_in_bounds|type_disjoint> %12[0] : view<1xi64> -> i64
+  %14 = index.cast %13 : i64 to index
+  %17 = index.add %base_byte_offset, %14 : index
+  %18, %19 = func.call pure @advance_char(%base, %17, %distance) : (buffer, index, i32) -> (buffer, index)
+  %20 = buffer.view %18[%19] : buffer -> view<1xi8>
+  view.store<root_in_bounds> %59, %20[0] : i8, view<1xi8>
+  func.return
+}
+
+func.def public @word_call(%base: buffer, %base_byte_offset: index, %offsets: buffer, %offsets_byte_offset: index, %distance: i32) {
+  %26 = scalar.constant 1 : i32
+  %32 = buffer.view %offsets[%offsets_byte_offset] : buffer -> view<1xi64>
+  %33 = view.load<root_in_bounds|type_disjoint> %32[0] : view<1xi64> -> i64
+  %34 = index.cast %33 : i64 to index
+  %35 = index.constant 4 : index
+  %60 = index.madd %34, %35, %base_byte_offset : index
+  %38, %39 = func.call pure @advance_int(%base, %60, %distance) : (buffer, index, i32) -> (buffer, index)
+  %40 = buffer.view %38[%39] : buffer -> view<1xi32>
+  view.store<root_in_bounds|type_disjoint> %26, %40[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def noinline @advance_char(%pointer: buffer, %pointer_byte_offset: index, %distance: i32) -> (buffer, index) {
+  %46 = index.cast %distance : i32 to index
+  %49 = index.add %pointer_byte_offset, %46 : index
+  func.return %pointer, %49 : buffer, index
+}
+
+func.def noinline @advance_int(%pointer: buffer, %pointer_byte_offset: index, %distance: i32) -> (buffer, index) {
+  %55 = index.cast %distance : i32 to index
+  %56 = index.constant 4 : index
+  %61 = index.madd %55, %56, %pointer_byte_offset : index
+  func.return %pointer, %61 : buffer, index
+}

@@ -149,8 +149,17 @@ int32_t loom_index_value_fact_carrier_bitwidth(
       !loom_index_value_has_producer(module, value_id)) {
     return native_bitwidth;
   }
-  return loom_index_facts_carrier_bitwidth(
-      facts, (uint32_t)native_bitwidth,
-      loom_target_snapshot_maximum_index_bitwidth(
-          &context->target_facts->storage.snapshot));
+  const uint32_t maximum_bitwidth = loom_target_snapshot_maximum_index_bitwidth(
+      &context->target_facts->storage.snapshot);
+  const int32_t bitwidth = loom_index_facts_carrier_bitwidth(
+      facts, (uint32_t)native_bitwidth, maximum_bitwidth);
+  // A complete incoming domain may include every wide integer. It cannot use
+  // the native default reserved for unseeded parameters. Computed envelopes
+  // still need their producer's retained representation to resolve the width.
+  if (bitwidth == 0 && context->table &&
+      loom_value_is_block_arg(loom_module_value(module, value_id)) &&
+      loom_value_fact_table_has_seed(context->table, value_id)) {
+    return (int32_t)maximum_bitwidth;
+  }
+  return bitwidth;
 }

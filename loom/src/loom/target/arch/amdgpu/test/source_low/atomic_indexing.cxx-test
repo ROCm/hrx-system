@@ -18,18 +18,18 @@ low.kernel.def target<amdgpu.cdna2.core> abi_layout({constant_count = 0, direct_
   %counts = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %37 = v_lshlrev_b32_src0_inline %workitem_id_x, 3
   %index = global_load_dwordx2_saddr %37, %indices : reg<amdgpu.vgpr x2>
-  %42 = v_mov_b32 2
-  %43 = v_lshlrev_b64 %42, %index
-  %44 = slice %43[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %45 = slice %43[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %46 = slice %counts[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %47 = slice %counts[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %48, %49 = v_add_co_u32 %46, %44
-  %50 = v_mov_b32_copy %47
-  %51, %52 = v_addc_co_u32 %50, %45, %49
-  %53 = concat(%48, %51) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %54 = v_mov_b32 1
-  %55 = global_atomic_add_rtn_vaddr %53, %54 : reg<amdgpu.vgpr>
+  %43 = v_mov_b32 2
+  %44 = v_lshlrev_b64 %43, %index
+  %45 = slice %44[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %46 = slice %44[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %47 = slice %counts[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %48 = slice %counts[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %49, %50 = v_add_co_u32 %47, %45
+  %51 = v_mov_b32_copy %48
+  %52, %53 = v_addc_co_u32 %51, %46, %50
+  %54 = concat(%49, %52) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %55 = v_mov_b32 1
+  %56 = global_atomic_add_rtn_vaddr %54, %55 : reg<amdgpu.vgpr>
   return
 }
 
@@ -50,24 +50,24 @@ low.kernel.def target<amdgpu.cdna2.core> abi_layout({constant_count = 0, direct_
   %workitem_id_x = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %indices = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %words = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %51 = v_lshlrev_b32_src0_inline %workitem_id_x, 3
-  %index = global_load_dwordx2_saddr %51, %indices : reg<amdgpu.vgpr x2>
-  %61 = v_mov_b32 3
-  %62 = v_lshlrev_b64 %61, %index
-  %63 = slice %62[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %64 = slice %62[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %65 = slice %words[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %66 = slice %words[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %67, %68 = v_add_co_u32 %65, %63
-  %69 = v_mov_b32_copy %66
-  %70, %71 = v_addc_co_u32 %69, %64, %68
-  %72 = concat(%67, %70) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %73 = v_mov_b32 0
-  %75 = concat(%73, %73) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %76 = v_mov_b32 1
-  %78 = concat(%76, %73) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %79 = concat(%78, %75) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
-  %80 = global_atomic_cmpswap_x2_rtn_vaddr %72, %79 : reg<amdgpu.vgpr x2>
+  %52 = v_lshlrev_b32_src0_inline %workitem_id_x, 3
+  %index = global_load_dwordx2_saddr %52, %indices : reg<amdgpu.vgpr x2>
+  %62 = v_mov_b32 3
+  %63 = v_lshlrev_b64 %62, %index
+  %64 = slice %63[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %65 = slice %63[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %66 = slice %words[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %67 = slice %words[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %68, %69 = v_add_co_u32 %66, %64
+  %70 = v_mov_b32_copy %67
+  %71, %72 = v_addc_co_u32 %70, %65, %69
+  %73 = concat(%68, %71) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %74 = v_mov_b32 0
+  %76 = concat(%74, %74) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %77 = v_mov_b32 1
+  %79 = concat(%77, %74) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %80 = concat(%79, %76) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %81 = global_atomic_cmpswap_x2_rtn_vaddr %73, %80 : reg<amdgpu.vgpr x2>
   return
 }
 
@@ -90,18 +90,18 @@ low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 0, direct_
   %counts = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %37 = v_lshlrev_b32_src0_inline %workitem_id_x, 3
   %index = global_load_b64_saddr %37, %indices
-  %42 = v_mov_b32 2
-  %43 = v_lshlrev_b64 %42, %index
-  %44 = slice %43[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %45 = slice %43[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %46 = slice %counts[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %47 = slice %counts[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %48, %49 = v_add_co_u32 %46, %44
-  %50 = v_mov_b32_copy %47
-  %51, %52 = v_add_co_ci_u32 %50, %45, %49
-  %53 = concat(%48, %51) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %54 = v_mov_b32 1
-  %55 = global_atomic_add_u32_rtn_vaddr %53, %54 {scope = 3}
+  %43 = v_mov_b32 2
+  %44 = v_lshlrev_b64 %43, %index
+  %45 = slice %44[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %46 = slice %44[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %47 = slice %counts[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %48 = slice %counts[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %49, %50 = v_add_co_u32 %47, %45
+  %51 = v_mov_b32_copy %48
+  %52, %53 = v_add_co_ci_u32 %51, %46, %50
+  %54 = concat(%49, %52) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %55 = v_mov_b32 1
+  %56 = global_atomic_add_u32_rtn_vaddr %54, %55 {scope = 3}
   return
 }
 
@@ -123,23 +123,23 @@ low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 0, direct_
   %workitem_id_x = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %indices = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %words = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %51 = v_lshlrev_b32_src0_inline %workitem_id_x, 3
-  %index = global_load_b64_saddr %51, %indices
-  %61 = v_mov_b32 3
-  %62 = v_lshlrev_b64 %61, %index
-  %63 = slice %62[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %64 = slice %62[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %65 = slice %words[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %66 = slice %words[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %67, %68 = v_add_co_u32 %65, %63
-  %69 = v_mov_b32_copy %66
-  %70, %71 = v_add_co_ci_u32 %69, %64, %68
-  %72 = concat(%67, %70) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %73 = v_mov_b32 0
-  %75 = concat(%73, %73) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %76 = v_mov_b32 1
-  %78 = concat(%76, %73) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %79 = concat(%78, %75) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
-  %80 = global_atomic_cmpswap_b64_rtn_vaddr %72, %79 {scope = 3}
+  %52 = v_lshlrev_b32_src0_inline %workitem_id_x, 3
+  %index = global_load_b64_saddr %52, %indices
+  %62 = v_mov_b32 3
+  %63 = v_lshlrev_b64 %62, %index
+  %64 = slice %63[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %65 = slice %63[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %66 = slice %words[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %67 = slice %words[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %68, %69 = v_add_co_u32 %66, %64
+  %70 = v_mov_b32_copy %67
+  %71, %72 = v_add_co_ci_u32 %70, %65, %69
+  %73 = concat(%68, %71) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %74 = v_mov_b32 0
+  %76 = concat(%74, %74) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %77 = v_mov_b32 1
+  %79 = concat(%77, %74) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %80 = concat(%79, %76) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x4>
+  %81 = global_atomic_cmpswap_b64_rtn_vaddr %73, %80 {scope = 3}
   return
 }
