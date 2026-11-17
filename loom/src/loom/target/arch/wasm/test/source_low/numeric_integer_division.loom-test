@@ -39,3 +39,30 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @integer_division_i64(
   %unsigned_remainder = i64.sub %dividend, %42
   return %signed_quotient, %signed_remainder, %unsigned_quotient, %unsigned_remainder
 }
+
+// ====
+
+// Valid native index inputs need no static range proof or wide emulation.
+func.def @index_division(%dividend: index, %divisor: index) -> (index) {
+  %quotient = index.div %dividend, %divisor : index
+  func.return %quotient : index
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @index_division(%dividend: reg<wasm.i32>, %divisor: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %quotient = i32.div_u %dividend, %divisor
+  return %quotient
+}
+
+// ====
+
+func.def @index_remainder(%dividend: index, %divisor: index) -> (index) {
+  %remainder = index.rem %dividend, %divisor : index
+  func.return %remainder : index
+}
+
+// ----
+low.func.def target<wasm.core.simd128> abi(wasm_function) @index_remainder(%dividend: reg<wasm.i32>, %divisor: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
+  %remainder = i32.rem_u %dividend, %divisor
+  return %remainder
+}

@@ -484,6 +484,29 @@ func.def @dynamic_index_division(%dividend_bits: i64, %divisor_bits: i64) -> (in
   func.return %quotient, %remainder : index, index
 }
 
+// Subtracting from the largest signed index makes the full-width requirement
+// explicit while retaining every nonnegative dividend in the input domain.
+func.def @wide_index_division(%dividend_bits: i64, %divisor_bits: i64) -> (index, index) {
+  %mask = scalar.constant 9223372036854775807 : i64
+  %unit = scalar.constant 1 : i64
+  %positive_dividend = scalar.andi %dividend_bits, %mask : i64
+  %positive_divisor = scalar.andi %divisor_bits, %mask : i64
+  %nonzero_divisor = scalar.ori %positive_divisor, %unit : i64
+  %raw_dividend = index.cast %positive_dividend : i64 to index
+  %maximum = index.constant 9223372036854775807 : index
+  %dividend = index.sub %maximum, %raw_dividend : index
+  %divisor = index.cast %nonzero_divisor : i64 to index
+  %quotient, %remainder = index.divrem %dividend, %divisor : index
+  func.return %quotient, %remainder : index, index
+}
+
+func.def @wide_index_division_oracle(%dividend_bits: i64, %divisor_bits: i64) -> (index, index) {
+  %mask = scalar.constant 9223372036854775807 : i64
+  %complement = scalar.xori %dividend_bits, %mask : i64
+  %quotient, %remainder = func.call @dynamic_index_division(%complement, %divisor_bits) : (i64, i64) -> (index, index)
+  func.return %quotient, %remainder : index, index
+}
+
 func.def @division_i64_boundary(%ordinal: index) -> (i64, i64, i64, i64) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -1190,14 +1213,39 @@ check.scenario @wide_vector_division_buffer_values {
   check.return
 }
 
-// This scenario requires the full signed 64-bit index carrier.
+// Runtime inputs fit every supported index carrier without constraining the
+// compiled subject's scalar arguments or specializing its division.
+func.def @native_index_division_inputs(%dividend_bits: i64, %divisor_bits: i64) -> (i64, i64) {
+  %mask = scalar.constant 2147483647 : i64
+  %dividend = scalar.andi %dividend_bits, %mask : i64
+  %divisor = scalar.andi %divisor_bits, %mask : i64
+  func.return %dividend, %divisor : i64, i64
+}
+
+check.scenario @native_index_division_values {
+  check.trial[32](%trial: index, %entropy: check.entropy) {
+    %dividend_entropy = check.entropy.fork %entropy name("index-dividend") : check.entropy
+    %divisor_entropy = check.entropy.fork %entropy name("index-divisor") : check.entropy
+    %dividend_bits = check.entropy.read %dividend_entropy[%trial] : check.entropy -> i64
+    %divisor_bits = check.entropy.read %divisor_entropy[%trial] : check.entropy -> i64
+    %dividend, %divisor = check.generate<@native_index_division_inputs>(%dividend_bits, %divisor_bits) : (i64, i64) -> (i64, i64)
+    check.compare<@dynamic_index_division>(%dividend, %divisor) : (i64, i64) -> [actual(%actual_quotient: index, %actual_remainder: index), expected(%expected_quotient: index, %expected_remainder: index)] {
+      check.expect.equal actual(%actual_quotient) expected(%expected_quotient) : index
+      check.expect.equal actual(%actual_remainder) expected(%expected_remainder) : index
+    }
+  }
+
+  check.return
+}
+
+// The subject's subtraction requires the full signed 64-bit index carrier.
 check.scenario @wide_index_division_values {
   check.trial[32](%trial: index, %entropy: check.entropy) {
     %dividend_entropy = check.entropy.fork %entropy name("index-dividend") : check.entropy
     %divisor_entropy = check.entropy.fork %entropy name("index-divisor") : check.entropy
     %dividend = check.entropy.read %dividend_entropy[%trial] : check.entropy -> i64
     %divisor = check.entropy.read %divisor_entropy[%trial] : check.entropy -> i64
-    check.compare<@dynamic_index_division>(%dividend, %divisor) : (i64, i64) -> [actual(%actual_quotient: index, %actual_remainder: index), expected(%expected_quotient: index, %expected_remainder: index)] {
+    check.compare<@wide_index_division, @wide_index_division_oracle>(%dividend, %divisor) : (i64, i64) -> [actual(%actual_quotient: index, %actual_remainder: index), expected(%expected_quotient: index, %expected_remainder: index)] {
       check.expect.equal actual(%actual_quotient) expected(%expected_quotient) : index
       check.expect.equal actual(%actual_remainder) expected(%expected_remainder) : index
     }

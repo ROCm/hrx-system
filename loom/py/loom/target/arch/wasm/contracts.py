@@ -2136,15 +2136,7 @@ WASM_CORE_SIMD128_CONTRACT_FRAGMENT = ContractFragment(
             )
         ),
         *(
-            _binary_rule(
-                source_op,
-                _INDEX,
-                descriptor_key,
-                guards=tuple(
-                    Guard.value_i64_range(field, 0, (1 << 32) - 1)
-                    for field in ("lhs", "rhs")
-                ),
-            )
+            _binary_rule(source_op, _INDEX, descriptor_key)
             for source_op, descriptor_key in (
                 (index.index_div, "wasm.i32.div_u"),
                 (index.index_rem, "wasm.i32.rem_u"),
