@@ -177,3 +177,29 @@ float signed_views(loom::type::buffer<float> input, loom::type::index position, 
   float v39 = loom::view::load(integer_encoded, loom::type::index{0});
   return (((((v20 + v23) + v27) + v31) + v35) + v39);
 }
+
+// ====
+// RUN: emit cxx
+// REQUIRES: loom-export-cxx
+#include <loomcxx/view.h>
+
+using Values = loom::type::view<loom::type::shape<4>, unsigned>;
+
+unsigned exchange(Values values, unsigned index, unsigned replacement) {
+  auto previous = values[index];
+  values[index] = replacement;
+  return previous;
+}
+
+// ----
+#include <loomcxx/view.h>
+
+[[loom::symbol("exchange")]]
+unsigned exchange(loom::type::view<loom::type::shape<4>, unsigned> values, unsigned index, unsigned replacement);
+
+[[loom::symbol("exchange")]]
+unsigned exchange(loom::type::view<loom::type::shape<4>, unsigned> values, unsigned index, unsigned replacement) {
+  unsigned previous = loom::view::load(values, loom::index::cast(index));
+  loom::view::store(replacement, values, loom::index::cast(index));
+  return previous;
+}

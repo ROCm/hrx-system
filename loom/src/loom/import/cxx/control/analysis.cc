@@ -282,6 +282,27 @@ bool operation_is(cxx::Symbol* symbol, std::string_view operation,
          binding->arguments[1]->name() == parameter;
 }
 
+// Returns the overloaded subscript at the root of an immediate view element
+// projection. Value conversion and dot field selection consume the synthetic
+// lvalue without giving its source reference an independent identity.
+cxx::SubscriptExpressionAST* view_element_origin(
+    cxx::TranslationUnit& unit, cxx::ExpressionAST* expression) {
+  expression = unwrap_object_identity(unit, expression);
+  if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression);
+      cast && !cast->conversionFunction &&
+      cast->castKind == cxx::ImplicitCastKind::kLValueToRValueConversion) {
+    return view_element_origin(unit, cast->expression);
+  }
+  if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression);
+      member && member->accessOp == cxx::TokenKind::T_DOT) {
+    return view_element_origin(unit, member->baseExpression);
+  }
+  auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(expression);
+  return subscript && operation_is(subscript->symbol, "view.element")
+             ? subscript
+             : nullptr;
+}
+
 // CXX materializes trivial by-value class arguments as an implicit copy around
 // a one-element paren initializer. Peel only those same-type copies so loop
 // admission still reasons about the resolved source binding identity.
@@ -1649,11 +1670,13 @@ void ControlFlow::visit(cxx::AssignmentExpressionAST* ast) {
   accept(ast->leftExpression);
   auto* subscript =
       cxx::ast_cast<cxx::SubscriptExpressionAST>(ast->leftExpression);
+  const bool view_element =
+      view_element_origin(unit_, ast->leftExpression) != nullptr;
   const auto* selection =
       array_selection(unwrap_object_identity(unit_, ast->leftExpression));
   if (!ordinary_call &&
       (((selection && !selection->constant_index) ||
-        (subscript && !selection)) ||
+        (subscript && !selection && !view_element)) ||
        (cxx::ast_cast<cxx::MemberExpressionAST>(ast->leftExpression) &&
         cxx::ast_cast<cxx::MemberExpressionAST>(ast->leftExpression)
                 ->vectorComponentKind != cxx::VectorComponentKind::kNone))) {
@@ -1913,6 +1936,10 @@ bool ControlFlow::collect_projected_reference_return(
       append(expression, *value);
       return true;
     }
+  }
+
+  if (view_element_origin(unit_, expression)) {
+    return false;
   }
 
   auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(expression);
@@ -2344,6 +2371,13 @@ void ControlFlow::visit(cxx::LambdaExpressionAST* ast) {
 }
 
 void ControlFlow::visit(cxx::SubscriptExpressionAST* ast) {
+  if (operation_is(ast->symbol, "view.element")) {
+    accept(ast->baseExpression);
+    for (auto* index : cxx::ListView{ast->expressionList}) {
+      accept(index);
+    }
+    return;
+  }
   if (!ast->symbol) {
     auto traits = unit_.typeTraits();
     auto* index = subscript_index(ast);
@@ -2684,6 +2718,9 @@ void ControlFlow::record_parameter_read(cxx::ExpressionAST* expression) {
   // initializer beneath its frontend conversion (including semantic handles).
   cxx::Initializer initializer(expression);
   auto* value = initializer.singleExpression();
+  if (value && view_element_origin(unit_, value)) {
+    return;
+  }
   if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(
           value ? unwrap_expression(value) : nullptr);
       id && pointer_alias_use_ == id->symbol) {
@@ -2775,6 +2812,9 @@ void ControlFlow::record_copy_read(const cxx::Type* type,
 
 void ControlFlow::record_parameter_assignment(cxx::ExpressionAST* expression) {
   if (!construction_.has_bindings()) {
+    return;
+  }
+  if (view_element_origin(unit_, expression)) {
     return;
   }
   auto* identity = unwrap_object_identity(unit_, expression);
@@ -3004,6 +3044,10 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
     return;
   }
   expression = unwrap_object_identity(unit_, expression);
+  if (view_element_origin(unit_, expression)) {
+    argument.inherent_storage = true;
+    return;
+  }
   auto append_destination = [&](Destination destination) {
     auto interval = project_interval(
         {destination.binding, destination.component_offset,
@@ -5173,6 +5217,12 @@ std::optional<Destination> ControlFlow::retain_destination(
 }
 
 bool ControlFlow::record(cxx::ExpressionAST* expression, WriteEffect effect) {
+  if (view_element_origin(unit_, expression)) {
+    if (effect == WriteEffect::Callable) {
+      record_memory_write();
+    }
+    return true;
+  }
   auto target = retain_destination(expression);
   if (!target) {
     auto argument = retain_call_argument(expression);

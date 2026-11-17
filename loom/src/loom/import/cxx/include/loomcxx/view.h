@@ -29,6 +29,12 @@ class [[loom::type("view")]] view {
  public:
   using shape_type = Shape;
 
+  // Selects one logical element. Loom treats the result as an immediate
+  // source lvalue: value reads and writes lower directly to view.load and
+  // view.store, while its C++ address and reference identity do not exist.
+  template <class... Indices>
+  [[loom::op("view.element")]] T& operator[](Indices... indices) const;
+
  private:
   // Borrowed base pointer retained by ordinary source-language copies.
   T* data_;

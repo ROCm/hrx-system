@@ -2087,8 +2087,9 @@ class Translator final : private Initialization::Evaluation {
       if (auto* alias = pointer_alias_lvalue(referent)) {
         pointer_aliases_.emplace(variable, *alias);
       } else {
-        pointer_aliases_.emplace(
-            variable, reference_lvalue(referent, owner, LvalueAccess::Read));
+        auto target = reference_lvalue(referent, owner, LvalueAccess::Read);
+        reject_view_element_escape(target, initializer);
+        pointer_aliases_.emplace(variable, std::move(target));
       }
       return;
     }
@@ -2121,6 +2122,7 @@ class Translator final : private Initialization::Evaluation {
                                            ? LvalueAccess::Read
                                            : LvalueAccess::Write);
         materialized_reference_ = previous;
+        reject_view_element_escape(target, initializer);
         bind_temporary_materialization(referent_expression, variable, owner);
         references_.emplace(variable, std::move(target));
         return;
@@ -2136,6 +2138,7 @@ class Translator final : private Initialization::Evaluation {
                                  unit_.typeTraits().is_const(referent)
                                      ? LvalueAccess::Read
                                      : LvalueAccess::Write);
+      reject_view_element_escape(target, initializer);
       references_.emplace(variable, std::move(target));
       return;
     }
@@ -2574,6 +2577,60 @@ class Translator final : private Initialization::Evaluation {
     return {base, index.ssa(), index_type, base_type};
   }
 
+  const ViewIntrinsic* view_element_binding(
+      cxx::SubscriptExpressionAST* subscript) {
+    auto* function = cxx::symbol_cast<cxx::FunctionSymbol>(subscript->symbol);
+    auto* binding =
+        function ? intrinsics_.lookup(function, subscript) : nullptr;
+    auto* view = binding ? std::get_if<ViewIntrinsic>(binding) : nullptr;
+    return view && view->is_element() ? view : nullptr;
+  }
+
+  // Returns whether |expression| is an immediate projection rooted at a
+  // synthetic view element. Ordinary lvalue-to-rvalue conversions and dot
+  // field selection preserve that origin; no other operation does.
+  bool has_view_element_origin(cxx::ExpressionAST* expression) {
+    expression = unwrap_object_identity(unit_, expression);
+    if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression);
+        cast && !cast->conversionFunction &&
+        cast->castKind == cxx::ImplicitCastKind::kLValueToRValueConversion) {
+      return has_view_element_origin(cast->expression);
+    }
+    if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression);
+        member && member->accessOp == cxx::TokenKind::T_DOT) {
+      return has_view_element_origin(member->baseExpression);
+    }
+    auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(expression);
+    return subscript && view_element_binding(subscript);
+  }
+
+  Lvalue view_element_destination(cxx::SubscriptExpressionAST* subscript) {
+    const auto* binding = view_element_binding(subscript);
+    IREE_ASSERT(binding);
+    auto source_view = expression(subscript->baseExpression);
+    std::vector<Value> indices;
+    for (auto* index : cxx::ListView{subscript->expressionList}) {
+      indices.push_back(expression(index));
+    }
+    const auto* type = types_.unqualified_value(subscript->type);
+    const auto& partition = types_.partition(type, subscript);
+    return {ViewElementLvalue{
+        .binding = binding,
+        .view = source_view,
+        .indices = std::move(indices),
+        .type = subscript->type,
+        .partition = &partition,
+    }};
+  }
+
+  void reject_view_element_escape(const Lvalue& target, cxx::AST* owner) {
+    if (std::holds_alternative<ViewElementLvalue>(target.projection)) {
+      fail(owner,
+           "view element references are immediate and cannot escape their "
+           "read or write");
+    }
+  }
+
   StorageAccess address(cxx::ExpressionAST* ast) {
     if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(ast)) {
       return address(nested->expression);
@@ -2629,6 +2686,9 @@ class Translator final : private Initialization::Evaluation {
 
   StorageProjection object_address(cxx::ExpressionAST* ast) {
     ast = unwrap_object_identity(unit_, ast);
+    if (has_view_element_origin(ast)) {
+      fail(ast, "view elements have no source address or reference identity");
+    }
     if (auto* binary = cxx::ast_cast<cxx::BinaryExpressionAST>(ast);
         binary && !binary->symbol && binary->op == cxx::TokenKind::T_COMMA) {
       effect(binary->leftExpression);
@@ -3407,6 +3467,10 @@ class Translator final : private Initialization::Evaluation {
     if (cxx::ast_cast<cxx::ConditionalExpressionAST>(projected)) {
       return reference_lvalue(projected, owner, access);
     }
+    if (auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(projected);
+        subscript && view_element_binding(subscript)) {
+      return view_element_destination(subscript);
+    }
     if (auto target =
             array_element(projected, owner, access, preserve_identity)) {
       return std::move(*target);
@@ -3496,6 +3560,10 @@ class Translator final : private Initialization::Evaluation {
       targets[arm] = reference_lvalue(arm == 0 ? expression->iftrueExpression
                                                : expression->iffalseExpression,
                                       owner, access, force_ordinal);
+      if (std::holds_alternative<ViewElementLvalue>(targets[arm]->projection)) {
+        fail(expression,
+             "view elements cannot form a conditional lvalue selection");
+      }
       materialize_conditional_temporaries(temporary_mark);
       mutations[arm] = current(written);
       loom_builder_restore(&builder_, saved);
@@ -3674,6 +3742,9 @@ class Translator final : private Initialization::Evaluation {
   }
 
   StorageProjection reference_address(const Lvalue& target, cxx::AST* owner) {
+    if (std::holds_alternative<ViewElementLvalue>(target.projection)) {
+      fail(owner, "view elements have no source address or reference identity");
+    }
     const auto* object = std::get_if<ObjectLvalue>(&target.projection);
     const auto* projection =
         object ? std::get_if<StorageProjection>(&object->location) : nullptr;
@@ -3743,6 +3814,13 @@ class Translator final : private Initialization::Evaluation {
       return Value(vectors_.extract(vector.ssa(), lane->index,
                                     lane->destination.type, lane->index_type,
                                     owner));
+    }
+    if (const auto* element =
+            std::get_if<ViewElementLvalue>(&target.projection)) {
+      return element->binding->load_element(
+          element->view, element->indices, *element->partition,
+          element->component_offset, value_arena_, &builder_,
+          locations_.get(owner));
     }
     const auto& component = std::get<VectorComponentLvalue>(target.projection);
     auto vector =
@@ -3897,6 +3975,17 @@ class Translator final : private Initialization::Evaluation {
       write(lane->destination, Value(updated), owner);
       return;
     }
+    if (const auto* element =
+            std::get_if<ViewElementLvalue>(&target.projection)) {
+      if (!element->binding->element_writable(
+              element->component_offset, element->partition->component_count)) {
+        fail(owner, "view element selection is read-only");
+      }
+      element->binding->store_element(value, element->view, element->indices,
+                                      element->component_offset, &builder_,
+                                      locations_.get(owner));
+      return;
+    }
     const auto& component = std::get<VectorComponentLvalue>(target.projection);
     auto vector =
         component.value ? *component.value : read(component.destination, owner);
@@ -4003,6 +4092,7 @@ class Translator final : private Initialization::Evaluation {
       auto target = reference_lvalue(
           argument, owner,
           indirect->mutable_access ? LvalueAccess::Write : LvalueAccess::Read);
+      reject_view_element_escape(target, argument);
       if (target.selection()) {
         fail(argument,
              "reference-cell arguments require one resolved source object");
@@ -4063,6 +4153,9 @@ class Translator final : private Initialization::Evaluation {
     } else {
       value = expression(argument);
       temporary = temporary_result(argument);
+    }
+    if (target) {
+      reject_view_element_escape(*target, argument);
     }
     return {
         .value = value,
@@ -4289,6 +4382,9 @@ class Translator final : private Initialization::Evaluation {
     if (auto* subscript =
             cxx::ast_cast<cxx::SubscriptExpressionAST>(expression);
         subscript && subscript->symbol) {
+      if (view_element_binding(subscript)) {
+        return std::nullopt;
+      }
       auto* signature =
           cxx::type_cast<cxx::FunctionType>(subscript->symbol->type());
       if (signature &&
@@ -4342,6 +4438,9 @@ class Translator final : private Initialization::Evaluation {
     if (auto* subscript =
             cxx::ast_cast<cxx::SubscriptExpressionAST>(expression);
         subscript && subscript->symbol) {
+      if (view_element_binding(subscript)) {
+        return false;
+      }
       if (!functions_.result_requires_storage(subscript->symbol)) {
         return false;
       }
@@ -4399,6 +4498,7 @@ class Translator final : private Initialization::Evaluation {
     auto from_target = [&](Lvalue target,
                            std::optional<TemporaryReference> temporary =
                                std::nullopt) {
+      reject_view_element_escape(target, receiver);
       if (target.selection()) {
         return admit(ReceiverArgument{ImplicitObjectABI::Value, std::nullopt,
                                       record, std::move(target), false,
@@ -4694,6 +4794,11 @@ class Translator final : private Initialization::Evaluation {
       std::optional<StorageProjection> destination = std::nullopt) {
     auto* function = call->symbol;
     IREE_ASSERT(function);
+    if (view_element_binding(call)) {
+      fail(call,
+           "view element subscripts must be consumed as immediate reads or "
+           "writes");
+    }
     if (intrinsics_.check_binding(function, call) ||
         functions_.is_check_case(function) ||
         annotated(function, "check_benchmark")) {
@@ -6700,6 +6805,10 @@ class Translator final : private Initialization::Evaluation {
               pointer_alias_member_lvalue(member, ast, LvalueAccess::Read)) {
         return name(read(*alias, ast), cxx::to_string(member->symbol->name()));
       }
+      if (has_view_element_origin(member)) {
+        return name(read(destination(member, ast, LvalueAccess::Read), ast),
+                    cxx::to_string(member->symbol->name()));
+      }
       auto* base = cxx::ast_cast<cxx::IdExpressionAST>(member->baseExpression);
       if (is_array_element(member->baseExpression)) {
         return name(read(destination(member, ast, LvalueAccess::Read), ast),
@@ -7000,6 +7109,9 @@ class Translator final : private Initialization::Evaluation {
     }
     if (auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(ast)) {
       if (subscript->symbol) {
+        if (view_element_binding(subscript)) {
+          return read(view_element_destination(subscript), ast);
+        }
         auto called = overloaded_subscript_call(subscript);
         if (called.reference_target) {
           return read(*called.reference_target, ast);

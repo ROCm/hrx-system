@@ -17,6 +17,8 @@
 
 namespace loom::cxx_import {
 
+class ViewIntrinsic;
+
 // The current value receiver is partitioned into its own field bindings.
 struct CurrentReceiver {
   // Retained structure whose direct fields own the receiver's current values.
@@ -57,6 +59,24 @@ struct VectorComponentLvalue {
   cxx::MemberExpressionAST* selection;
 };
 
+// One synthetic C++ view element evaluated into its semantic view and logical
+// coordinates. The source reference has no address or durable identity;
+// immediate reads, writes, and field projections consume this plan directly.
+struct ViewElementLvalue {
+  // Admitted element operation owning rank, access, and column semantics.
+  const ViewIntrinsic* binding;
+  // Once-evaluated complete source view.
+  Value view;
+  // Once-evaluated logical coordinates in source-axis order.
+  std::vector<Value> indices;
+  // Source type of the complete element or immediately selected subobject.
+  const cxx::Type* type;
+  // Value projection of the complete element or selected subobject.
+  const Partition* partition;
+  // First selected component in the complete element's column order.
+  size_t component_offset = 0;
+};
+
 struct SelectedLvalue;
 
 // An evaluated reference retains source identity separately from the current
@@ -66,7 +86,7 @@ struct SelectedLvalue;
 struct Lvalue {
   // Complete object or one evaluated projection of a complete vector object.
   std::variant<ObjectLvalue, VectorLaneLvalue, VectorComponentLvalue,
-               std::shared_ptr<const SelectedLvalue>>
+               ViewElementLvalue, std::shared_ptr<const SelectedLvalue>>
       projection;
 
   const SelectedLvalue* selection() const;

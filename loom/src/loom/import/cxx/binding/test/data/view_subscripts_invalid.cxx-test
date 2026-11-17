@@ -1,0 +1,124 @@
+// RUN: verify
+#include <loomcxx/view.h>
+
+using Values = loom::type::view<loom::type::shape<4>, unsigned>;
+
+void retain(Values values) {
+  // ERROR@+1: LOWERING/059 "view elements have no source address or reference identity"
+  auto& element = values[0];
+  (void)element;
+}
+
+// ====
+#include <loomcxx/view.h>
+
+using Values = loom::type::view<loom::type::shape<4>, unsigned>;
+
+unsigned* address(Values values) {
+  // ERROR@+1: LOWERING/059 "view elements have no source address or reference identity"
+  return &values[0];
+}
+
+// ====
+#include <loomcxx/view.h>
+
+using Values = loom::type::view<loom::type::shape<4>, unsigned>;
+
+[[loom::noinline]] static unsigned inspect(const unsigned& value) {
+  return value;
+}
+
+unsigned pass_reference(Values values) {
+  // ERROR@+1: LOWERING/059 "view element references are immediate and cannot escape their read or write"
+  return inspect(values[0]);
+}
+
+// ====
+#include <loomcxx/view.h>
+
+using Values = loom::type::view<loom::type::shape<4>, unsigned>;
+
+[[loom::noinline]] static const unsigned& return_reference(Values values) {
+  // ERROR@+1: LOWERING/059 "view elements have no source address or reference identity"
+  return values[0];
+}
+
+unsigned use_returned_reference(Values values) {
+  return return_reference(values);
+}
+
+// ====
+#include <loomcxx/view.h>
+
+using Values = loom::type::view<loom::type::shape<4>, const unsigned>;
+
+void write_const(Values values) {
+  // ERROR@+1: PARSE/036 "cannot assign to a non-modifiable lvalue of type 'const unsigned int'"
+  values[0] = 1;
+}
+
+// ====
+#include <loomcxx/view.h>
+
+using Values = loom::type::view<loom::type::shape<4>, unsigned>;
+
+unsigned capture(Values values) {
+  // ERROR@+1: LOWERING/059 "view elements have no source address or reference identity"
+  auto closure = [&element = values[0]] { return element; };
+  return closure();
+}
+
+// ====
+#include <loomcxx/view.h>
+
+using Values = loom::type::view<loom::type::shape<4>, unsigned>;
+
+unsigned explicit_operator(Values values) {
+  // ERROR@+1: LOWERING/059 "view.element requires subscript syntax and an immediate lvalue use"
+  return values.operator[](0);
+}
+
+// ====
+#include <loomcxx/view.h>
+
+using Values = loom::type::view<loom::type::shape<4>, unsigned>;
+
+[[loom::noinline]] static const unsigned& select_reference(
+    Values first, Values second, bool use_first) {
+  // ERROR@+1: LOWERING/059 "view elements have no source address or reference identity"
+  return use_first ? first[0] : second[0];
+}
+
+unsigned use_selected_reference(Values first, Values second, bool use_first) {
+  return select_reference(first, second, use_first);
+}
+
+// ====
+#include <loomcxx/view.h>
+
+using Values = loom::type::view<loom::type::shape<4>, unsigned>;
+
+void select_destination(Values first, Values second, bool use_first) {
+  // ERROR@+1: LOWERING/059 "view elements cannot form a conditional lvalue selection"
+  (use_first ? first[0] : second[0]) = 1;
+}
+
+// ====
+#include <loomcxx/view.h>
+
+using Values = loom::type::view<loom::type::shape<4>, unsigned>;
+
+unsigned wrong_rank(Values values) {
+  // ERROR@+1: LOWERING/059 "view subscript requires one index per axis"
+  return values[0, 1];
+}
+
+// ====
+#include <loomcxx/view.h>
+
+using Values = loom::type::view<loom::type::shape<4>, unsigned>;
+
+unsigned nonintegral_index(Values values) {
+  // ERROR@+1: LOWERING/059 "view index requires an integer value"
+  return values[1.0f];
+}

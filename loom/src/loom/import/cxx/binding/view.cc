@@ -22,6 +22,7 @@
 #include "loom/import/cxx/binding/index_values.h"
 #include "loom/import/cxx/binding/memory_access.h"
 #include "loom/import/cxx/source/error.h"
+#include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/value/storage.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/encoding/ops.h"
@@ -184,6 +185,9 @@ std::optional<ViewIntrinsic::Operation> ViewIntrinsic::parse_operation(
   }
   if (name == "view.dim") {
     return Operation::Dim;
+  }
+  if (name == "view.element") {
+    return Operation::Element;
   }
   if (name == "view.load") {
     return Operation::Load;
@@ -485,6 +489,48 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
       result.result_source_type_ = signature->returnType();
       return result;
     }
+    case Operation::Element: {
+      if (!function->isImplicitObjectMemberFunction()) {
+        diagnostics.reject(unit, owner,
+                           "view.element requires an implicit view receiver");
+      }
+      result.source_view_ =
+          &require_view(unit, diagnostics, types,
+                        implicit_object_type(unit, function), owner);
+      if (parameters.size() != result.source_view_->extents.size()) {
+        diagnostics.reject(unit, owner,
+                           "view subscript requires one index per axis");
+      }
+      for (size_t index = 0; index < parameters.size(); ++index) {
+        if (require_index_value(unit, diagnostics, types, parameters[index],
+                                owner, "view index")) {
+          result.unsigned_argument_mask_ |= uint32_t{1} << index;
+        }
+      }
+      auto traits = unit.typeTraits();
+      if (!traits.is_lvalue_reference(signature->returnType()) ||
+          types.unqualified_value(signature->returnType()) !=
+              types.unqualified(result.source_view_->element_type)) {
+        diagnostics.reject(
+            unit, owner,
+            "view.element must return an lvalue reference to its element");
+      }
+      result.result_source_type_ =
+          types.unqualified_value(signature->returnType());
+      result.element_partition_ =
+          &types.partition(result.result_source_type_, owner);
+      if (result.element_partition_->component_count !=
+          result.source_view_->column_count()) {
+        diagnostics.reject(
+            unit, owner,
+            "view.element result must preserve every element column");
+      }
+      result.memory_flags_ =
+          types.memory_access_flags(result.source_view_->element_type);
+      result.element_writable_ =
+          !traits.is_const(result.source_view_->element_type);
+      return result;
+    }
     case Operation::Load: {
       if (parameters.empty()) {
         diagnostics.reject(unit, owner,
@@ -557,6 +603,126 @@ std::optional<ViewIntrinsic> ViewIntrinsic::resolve(
   }
   IREE_ASSERT_UNREACHABLE("unknown view intrinsic operation");
   IREE_BUILTIN_UNREACHABLE();
+}
+
+Value ViewIntrinsic::build_load(Value source, std::span<const Value> indices,
+                                size_t index_argument_offset,
+                                const Partition& result,
+                                size_t component_offset, ValueArena& arena,
+                                loom_builder_t* builder,
+                                loom_location_id_t location) const {
+  IREE_ASSERT(source_view_);
+  IREE_ASSERT_EQ(indices.size(), source_view_->extents.size());
+  IREE_ASSERT_LE(component_offset, source_view_->column_count());
+  IREE_ASSERT_LE(result.component_count,
+                 source_view_->column_count() - component_offset);
+  std::array<loom_value_id_t, LOOM_TYPE_MAX_RANK> index_values;
+  std::array<int64_t, LOOM_TYPE_MAX_RANK> static_indices;
+  static_indices.fill(std::numeric_limits<int64_t>::min());
+  for (size_t axis = 0; axis < indices.size(); ++axis) {
+    const size_t argument_index = axis + index_argument_offset;
+    index_values[axis] = cast_index(
+        indices[axis],
+        is_unsigned_component(unsigned_argument_mask_, argument_index), builder,
+        location);
+  }
+
+  std::array<loom_value_id_t, 4> inline_columns;
+  std::vector<loom_value_id_t> overflow_columns;
+  if (result.component_count > inline_columns.size()) {
+    overflow_columns.resize(result.component_count);
+  }
+  auto columns = overflow_columns.empty()
+                     ? std::span(inline_columns).first(result.component_count)
+                     : std::span(overflow_columns);
+  loom_op_t* op;
+  for (size_t relative_column = 0; relative_column < result.component_count;
+       ++relative_column) {
+    const size_t column = component_offset + relative_column;
+    check(loom_view_load_build(
+        builder, 0, source_view_->column_access_flags(column) | memory_flags_,
+        view_component(source, column), index_values.data(),
+        source_view_->extents.size(), static_indices.data(),
+        source_view_->extents.size(), 0, 0,
+        source_view_->column_element(column), location, &op));
+    columns[relative_column] = loom_op_results(op)[0];
+  }
+  return arena.capture(result, columns);
+}
+
+void ViewIntrinsic::build_store(Value value, Value destination,
+                                std::span<const Value> indices,
+                                size_t index_argument_offset,
+                                size_t component_offset,
+                                loom_builder_t* builder,
+                                loom_location_id_t location) const {
+  IREE_ASSERT(source_view_);
+  IREE_ASSERT_EQ(indices.size(), source_view_->extents.size());
+  IREE_ASSERT_LE(component_offset, source_view_->column_count());
+  IREE_ASSERT_LE(value.partition().component_count,
+                 source_view_->column_count() - component_offset);
+  std::array<loom_value_id_t, LOOM_TYPE_MAX_RANK> index_values;
+  std::array<int64_t, LOOM_TYPE_MAX_RANK> static_indices;
+  static_indices.fill(std::numeric_limits<int64_t>::min());
+  for (size_t axis = 0; axis < indices.size(); ++axis) {
+    const size_t argument_index = axis + index_argument_offset;
+    index_values[axis] = cast_index(
+        indices[axis],
+        is_unsigned_component(unsigned_argument_mask_, argument_index), builder,
+        location);
+  }
+
+  loom_op_t* op;
+  for (size_t relative_column = 0;
+       relative_column < value.partition().component_count; ++relative_column) {
+    const size_t column = component_offset + relative_column;
+    check(loom_view_store_build(
+        builder, 0, source_view_->column_access_flags(column) | memory_flags_,
+        value.components()[relative_column],
+        view_component(destination, column), index_values.data(),
+        source_view_->extents.size(), static_indices.data(),
+        source_view_->extents.size(), 0, 0, location, &op));
+  }
+}
+
+Value ViewIntrinsic::load_element(Value source, std::span<const Value> indices,
+                                  const Partition& result,
+                                  size_t component_offset, ValueArena& arena,
+                                  loom_builder_t* builder,
+                                  loom_location_id_t location) const {
+  IREE_ASSERT_EQ(operation_, Operation::Element);
+  return build_load(source, indices, 0, result, component_offset, arena,
+                    builder, location);
+}
+
+void ViewIntrinsic::store_element(Value value, Value destination,
+                                  std::span<const Value> indices,
+                                  size_t component_offset,
+                                  loom_builder_t* builder,
+                                  loom_location_id_t location) const {
+  IREE_ASSERT_EQ(operation_, Operation::Element);
+  IREE_ASSERT(
+      element_writable(component_offset, value.partition().component_count));
+  build_store(value, destination, indices, 0, component_offset, builder,
+              location);
+}
+
+bool ViewIntrinsic::element_writable(size_t component_offset,
+                                     size_t component_count) const {
+  IREE_ASSERT_EQ(operation_, Operation::Element);
+  IREE_ASSERT(source_view_);
+  IREE_ASSERT_LE(component_offset, source_view_->column_count());
+  IREE_ASSERT_LE(component_count,
+                 source_view_->column_count() - component_offset);
+  if (!source_view_->is_columnar()) {
+    IREE_ASSERT_EQ(component_offset, 0u);
+    IREE_ASSERT_EQ(component_count, 1u);
+    return element_writable_;
+  }
+  return std::all_of(
+      source_view_->columns.begin() + component_offset,
+      source_view_->columns.begin() + component_offset + component_count,
+      [](const ViewColumn& column) { return column.writable; });
 }
 
 std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
@@ -709,58 +875,17 @@ std::optional<Value> ViewIntrinsic::call(std::span<const Value> arguments,
                                     result_types.back(), location, &op));
       return arena.capture(*result_view_, {loom_op_results(op), 1});
     }
+    case Operation::Element:
+      IREE_ASSERT_UNREACHABLE(
+          "view.element must be consumed as a source lvalue");
+      IREE_BUILTIN_UNREACHABLE();
     case Operation::Load: {
-      std::array<loom_value_id_t, LOOM_TYPE_MAX_RANK> indices;
-      std::array<int64_t, LOOM_TYPE_MAX_RANK> static_indices;
-      static_indices.fill(std::numeric_limits<int64_t>::min());
-      for (size_t axis = 0; axis < source_view_->extents.size(); ++axis) {
-        size_t argument_index = axis + 1;
-        indices[axis] = cast_index(
-            arguments[argument_index],
-            is_unsigned_component(unsigned_argument_mask_, argument_index),
-            builder, location);
-      }
-      std::array<loom_value_id_t, 4> inline_columns;
-      std::vector<loom_value_id_t> overflow_columns;
-      if (source_view_->column_count() > inline_columns.size()) {
-        overflow_columns.resize(source_view_->column_count());
-      }
-      auto columns =
-          overflow_columns.empty()
-              ? std::span(inline_columns).first(source_view_->column_count())
-              : std::span(overflow_columns);
-      for (size_t column = 0; column < source_view_->column_count(); ++column) {
-        check(loom_view_load_build(
-            builder, 0,
-            source_view_->column_access_flags(column) | memory_flags_,
-            view_component(arguments[0], column), indices.data(),
-            source_view_->extents.size(), static_indices.data(),
-            source_view_->extents.size(), 0, 0,
-            source_view_->column_element(column), location, &op));
-        columns[column] = loom_op_results(op)[0];
-      }
-      return arena.capture(*element_partition_, columns);
+      return build_load(arguments[0], arguments.subspan(1), 1,
+                        *element_partition_, 0, arena, builder, location);
     }
     case Operation::Store: {
-      std::array<loom_value_id_t, LOOM_TYPE_MAX_RANK> indices;
-      std::array<int64_t, LOOM_TYPE_MAX_RANK> static_indices;
-      static_indices.fill(std::numeric_limits<int64_t>::min());
-      for (size_t axis = 0; axis < source_view_->extents.size(); ++axis) {
-        size_t argument_index = axis + 2;
-        indices[axis] = cast_index(
-            arguments[argument_index],
-            is_unsigned_component(unsigned_argument_mask_, argument_index),
-            builder, location);
-      }
-      for (size_t column = 0; column < source_view_->column_count(); ++column) {
-        check(loom_view_store_build(
-            builder, 0,
-            source_view_->column_access_flags(column) | memory_flags_,
-            arguments[0].components()[column],
-            view_component(arguments[1], column), indices.data(),
-            source_view_->extents.size(), static_indices.data(),
-            source_view_->extents.size(), 0, 0, location, &op));
-      }
+      build_store(arguments[0], arguments[1], arguments.subspan(2), 2, 0,
+                  builder, location);
       return std::nullopt;
     }
   }
@@ -784,7 +909,8 @@ bool ViewIntrinsic::equivalent(const ViewIntrinsic& other) const {
          unsigned_dimension_mask_ == other.unsigned_dimension_mask_ &&
          unsigned_origin_mask_ == other.unsigned_origin_mask_ &&
          memory_flags_ == other.memory_flags_ &&
-         element_partition_ == other.element_partition_;
+         element_partition_ == other.element_partition_ &&
+         element_writable_ == other.element_writable_;
 }
 
 }  // namespace loom::cxx_import
