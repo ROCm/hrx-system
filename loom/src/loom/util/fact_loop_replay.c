@@ -270,10 +270,17 @@ iree_status_t loom_value_fact_loop_replay_begin(
       .parent_reads = table->replay.reads,
   };
   replay->root = replay->parent ? replay->parent->root : replay;
+  if (!replay->parent) {
+    table->replay.loop = replay;
+    return iree_ok_status();
+  }
   // Operand refinements can consume cached constraints whose table reads
-  // occurred before this nested solve. Their owning analysis must recompute
-  // the body; observations here cannot establish that scope's dependencies.
-  if (!replay->parent || table->context.refine_operands.fn) {
+  // occurred before this nested solve. An exact preparation callback rebuilds
+  // that state under this solve's collector; opaque owners retain ordinary
+  // recomputation.
+  if ((table->context.refine_operands.fn ||
+       table->context.refine_operands.value_fn) &&
+      !table->context.refine_operands.replay_prepare_fn) {
     table->replay.loop = replay;
     return iree_ok_status();
   }
@@ -303,6 +310,10 @@ iree_status_t loom_value_fact_loop_replay_begin(
   replay->record = record;
   table->replay.loop = replay;
   table->replay.reads = reads;
+  if (table->context.refine_operands.replay_prepare_fn) {
+    table->context.refine_operands.replay_prepare_fn(
+        table->context.refine_operands.user_data, table, op);
+  }
   return iree_ok_status();
 }
 

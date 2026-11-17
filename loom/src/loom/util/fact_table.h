@@ -170,6 +170,13 @@ struct loom_fact_context_t {
                                 const loom_value_fact_table_t* table,
                                 const loom_op_t* op, loom_value_id_t value,
                                 loom_value_facts_t* facts);
+    // Rebuilds all cached refinement state visible to |op| while a nested
+    // solve's fact-read collector is active. Every dependency must be exposed
+    // through table queries. Owners without this exact preparation contract
+    // leave it NULL; nested loop solves then retain ordinary recomputation.
+    void (*replay_prepare_fn)(void* user_data,
+                              const loom_value_fact_table_t* table,
+                              const loom_op_t* op);
   } refine_operands;
 
   // Stack-owned result publication during a complete inference callback.

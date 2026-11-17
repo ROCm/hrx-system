@@ -42,9 +42,9 @@ struct loom_value_fact_loop_replay_t {
 };
 
 // Enters an immutable solve, observing its fact dependencies unless its last
-// complete publication is reusable. Operand-refinement scopes retain ordinary
-// solving because their cached constraints are owned outside this boundary.
-// Failure leaves the caller's frame active.
+// complete publication is reusable. Operand-refinement owners must rebuild
+// cached constraints under this solve's observation collector; opaque owners
+// retain ordinary solving. Failure leaves the caller's frame active.
 iree_status_t loom_value_fact_loop_replay_begin(
     loom_value_fact_table_t* table, const loom_module_t* module, loom_op_t* op,
     iree_arena_allocator_t* arena, loom_value_fact_loop_replay_t* replay,
