@@ -91,7 +91,7 @@ typedef struct loom_serve_text_state_checkpoint_t {
   uint32_t recurrent_slot;
   // Number of retained physical pages; zero while suspended.
   uint32_t block_count;
-  // Logical-order IDs borrowing the owner's fixed checkpoint map bank.
+  // Owned logical-order IDs for this immutable endpoint's live extent.
   uint32_t* blocks;
   // Owned capture payload independent of active rows. Successful suspension
   // releases physical IDs; terminal failure retains them until teardown.
@@ -134,8 +134,6 @@ struct loom_serve_text_state_t {
     loom_runtime_block_pool_t pool;
     // Owned records indexed by checkpoint ID.
     loom_serve_text_state_checkpoint_t* values;
-    // Owned logical page maps for all checkpoint records.
-    uint32_t* maps;
   } checkpoints;
   // Recurrent ownership is independent of row-private control and KV maps.
   struct {

@@ -370,9 +370,12 @@ resident KV pages. Counts are independent of `rows` and
 `max_sessions`: evicting a saved history does not limit active concurrency.
 The selected declaration alone proceeds to device JIT and parameter loading.
 
-`cache_target_bytes` measures additional source-declared state extents and
+`cache_target_bytes` estimates additional source-declared state extents and
 native checkpoint maps over the explicit configuration, including initial
-copy-on-write headroom. It is neither a physical reservation nor a lifetime
+copy-on-write headroom. The estimate allows a full-context map per endpoint;
+map memory is allocated only when an endpoint is captured, in proportion to its
+consumed context, and released with that endpoint. It is neither a physical
+reservation nor a lifetime
 memory cap. Elastic backing commits slabs as they are used, subject to the
 shared physical budget; fixed backing allocates the declared extents. Growing
 resident sessions adds working-set headroom through ordinary admission. KV

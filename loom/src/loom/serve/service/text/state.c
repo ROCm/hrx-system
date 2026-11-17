@@ -245,18 +245,10 @@ iree_status_t loom_serve_text_state_allocate(
                                            sizeof(*state->checkpoints.values),
                                            (void**)&state->checkpoints.values);
     }
-    if (iree_status_is_ok(status)) {
-      status = iree_allocator_malloc_array(
-          state->host_allocator, state->checkpoints.capacity,
-          state->storage.blocks_per_row * sizeof(*state->checkpoints.maps),
-          (void**)&state->checkpoints.maps);
-    }
     for (uint32_t i = 0;
          i < state->checkpoints.capacity && iree_status_is_ok(status); ++i) {
       state->checkpoints.values[i].owner = state;
       state->checkpoints.values[i].recurrent_slot = UINT32_MAX;
-      state->checkpoints.values[i].blocks =
-          state->checkpoints.maps + i * state->storage.blocks_per_row;
     }
   }
   for (iree_host_size_t i = 0;
@@ -412,8 +404,12 @@ iree_status_t loom_serve_text_state_deinitialize(
     iree_allocator_free(state->host_allocator, state->recurrent.buffers);
     loom_runtime_block_pool_deinitialize(&state->recurrent.pool);
     loom_runtime_block_pool_deinitialize(&state->checkpoints.pool);
+    for (uint32_t i = 0;
+         state->checkpoints.values && i < state->checkpoints.capacity; ++i) {
+      iree_allocator_free(state->host_allocator,
+                          state->checkpoints.values[i].blocks);
+    }
     iree_allocator_free(state->host_allocator, state->checkpoints.values);
-    iree_allocator_free(state->host_allocator, state->checkpoints.maps);
     iree_allocator_free(state->host_allocator, state->cache.destinations);
     loom_runtime_block_pool_deinitialize(&state->cache.pool);
     iree_allocator_free(state->host_allocator, state->rows);
@@ -1209,13 +1205,21 @@ iree_status_t loom_serve_text_state_row_submit_pin(
   loom_runtime_block_pool_acquire(&state->checkpoints.pool, 1, &index);
   loom_serve_text_state_checkpoint_t* checkpoint =
       &state->checkpoints.values[index];
+  const uint32_t block_count = (uint32_t)iree_host_size_ceil_div(
+      row->position, state->storage.block_size);
+  iree_status_t status = iree_allocator_malloc_array_uninitialized(
+      state->host_allocator, block_count, sizeof(*checkpoint->blocks),
+      (void**)&checkpoint->blocks);
+  if (!iree_status_is_ok(status)) {
+    loom_runtime_block_pool_release(&state->checkpoints.pool, 1, &index);
+    return status;
+  }
   checkpoint->position = row->position;
   checkpoint->source_position = row->source_position;
   checkpoint->recurrent_slot = row->recurrent.anchor != UINT32_MAX
                                    ? row->recurrent.anchor
                                    : row->recurrent.slot;
-  checkpoint->block_count = (uint32_t)iree_host_size_ceil_div(
-      row->position, state->storage.block_size);
+  checkpoint->block_count = block_count;
   const iree_host_size_t row_index = row->index;
   memcpy(checkpoint->blocks,
          state->cache.maps + row_index * state->storage.blocks_per_row,
@@ -1229,7 +1233,6 @@ iree_status_t loom_serve_text_state_row_submit_pin(
   // either backs the complete continuation or leaves the original row intact.
   loom_runtime_memory_admission_t admission =
       LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE;
-  iree_status_t status = iree_ok_status();
   if (row->reserved_extent) {
     status = loom_serve_text_state_row_submit_reserve(
         row, LOOM_SERVE_TEXT_RESERVE_CONTINUE, NULL, row->reserved_extent, NULL,
@@ -1260,6 +1263,9 @@ void loom_serve_text_state_checkpoint_release(
   }
   loom_runtime_snapshot_release(checkpoint->snapshot);
   checkpoint->snapshot = NULL;
+  iree_allocator_free(state->host_allocator, checkpoint->blocks);
+  checkpoint->blocks = NULL;
+  checkpoint->block_count = 0;
   const uint32_t index = (uint32_t)(checkpoint - state->checkpoints.values);
   loom_runtime_block_pool_release(&state->checkpoints.pool, 1, &index);
 }

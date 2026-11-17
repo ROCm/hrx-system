@@ -269,6 +269,9 @@ static iree_status_t loom_serve_text_source_evaluate_cache(
   uint64_t bytes = 0;
   IREE_RETURN_IF_ERROR(loom_serve_text_storage_declared_bytes(storage, &bytes));
   uint64_t checkpoint_bytes = 0;
+  // Retain the full-context map bound in cold cache sizing. Materializing maps
+  // only for live endpoints reduces initial commitment without spending those
+  // savings on additional source-declared slots that fixed backing must own.
   const uint64_t checkpoint_stride =
       (uint64_t)storage->blocks_per_row * sizeof(uint32_t) +
       sizeof(loom_serve_text_state_checkpoint_t);

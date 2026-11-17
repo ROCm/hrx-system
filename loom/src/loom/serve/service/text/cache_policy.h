@@ -39,12 +39,13 @@ typedef struct loom_serve_text_cache_selection_t {
   iree_host_size_t checkpoint_capacity;
   // Soft target used for automatic selection, not a lifetime memory ceiling.
   uint64_t target_bytes;
-  // Additional initial declared state and checkpoint maps over explicit counts.
+  // Additional declared state and full-context map allowance over explicit
+  // counts; map allocation follows each live endpoint's actual context.
   uint64_t additional_bytes;
 } loom_serve_text_cache_selection_t;
 
 typedef struct loom_serve_text_cache_cost_t {
-  // Exact declared state extents plus native checkpoint directory storage.
+  // Declared state extents plus native endpoint records and map allowance.
   uint64_t storage_bytes;
 } loom_serve_text_cache_cost_t;
 
