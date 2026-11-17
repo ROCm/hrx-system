@@ -96,3 +96,21 @@ LOOM_CHECK_CASE(copying_capture) {
   // ERROR@+1: LOWERING/059 "record constructor calls require an ordinary function called by the check case"
   const auto body = [copy = original] { return copy.value; };
 }
+
+// ====
+// A check launch cannot replace a source copy constructor with field copies.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+struct Counted {
+  unsigned value;
+  Counted(unsigned initial) : value(initial) {}
+  Counted(const Counted& other) : value(other.value + 5) {}
+};
+static Counted make() { return Counted(2); }
+LOOM_KERNEL void copy_launch(unsigned* output, Counted body) { output[0] = body.value; }
+LOOM_CHECK_CASE(copying_launch) {
+  const auto output = loom::check::fill<1, unsigned>(0u);
+  const auto body = make();
+  // ERROR@+1: LOWERING/059 "record constructor calls require an ordinary function called by the check case"
+  loom::check::launch<copy_launch>(output, body);
+}

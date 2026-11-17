@@ -36,6 +36,7 @@ loom_check_test_suite(
         "kernel_callers.cxx-test",
         "kernel_intrinsics.cxx-test",
         "kernel_intrinsics_invalid.cxx-test",
+        "kernel_record_authoring.cxx-test",
         "kernel_records.cxx-test",
         "launch.cxx-test",
         "launch_invalid.cxx-test",

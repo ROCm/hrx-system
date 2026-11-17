@@ -1,0 +1,310 @@
+// RUN: verify
+// Admission coverage complements the exact argument/launch IR in kernel_records
+// and the cleanup roundtrips in kernel_export. Each case imports independently;
+// XFAIL cases require successful import, so implementing them produces XPASS.
+// Repeated record types, nonempty bases, arrays of records, and multidimensional
+// arrays retain their independent projections between ordinary arguments.
+#include <loomcxx/kernel.h>
+struct Base { int bias; };
+struct Cell { const float* values; int shift; };
+struct Body : Base { Cell cells[2]; int offsets[2][2]; };
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void nested_records(int prefix, Body first, float* output, Body second, int suffix) {
+  output[0] = prefix + first.bias + first.cells[1].values[first.offsets[1][0]] + second.cells[0].values[second.cells[0].shift] + suffix;
+}
+
+// ====
+// Copies and mutable references coexist with retained read-only helpers.
+#include <loomcxx/kernel.h>
+struct Body { float* output; int position; };
+static void advance(Body& body) { ++body.position; }
+[[loom::noinline]] static int read(const Body& body) { return body.position; }
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void mutable_record(Body body) {
+  auto copy = body;
+  advance(body);
+  copy.position += 2;
+  body.output[0] = read(body) + read(copy);
+}
+
+// ====
+// A factory-returned nested closure retains mutable state between calls.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+template<class F>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void accumulate(float* output, F body) {
+  const auto first = body(2);
+  const auto second = body(3);
+  output[0] = first + second;
+}
+static auto make(int bias) {
+  auto inner = [bias](int value) mutable { bias += value; return bias; };
+  return [inner](int value) mutable { return inner(value); };
+}
+LOOM_CHECK_CASE(nested_mutable_closure) {
+  const auto output = loom::check::fill<1, float>(0.0f);
+  const auto body = make(4);
+  loom::check::launch<accumulate<decltype(make(4))>>(output, body);
+  loom::check::expect_bitwise(output, loom::check::fill<1, float>(15.0f));
+}
+
+// ====
+// Runtime subscripts select among the fixed array's projected elements.
+#include <loomcxx/kernel.h>
+struct Body { float* output; int values[4]; unsigned index; };
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void read_array(Body body) { body.output[0] = body.values[body.index & 3u]; }
+
+// ====
+// A dynamic member write preserves the other array elements.
+#include <loomcxx/kernel.h>
+struct Body { float* output; int values[4]; unsigned index; };
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void write_array(Body body) {
+  body.values[body.index & 3u] = 12;
+  body.output[0] = body.values[(body.index + 1) & 3u] + body.values[body.index & 3u];
+}
+
+// ====
+// Borrowing the whole record works without storing its pointer members.
+#include <loomcxx/kernel.h>
+struct Body { float* output; int count; };
+static void mutate(Body* body) { body->count += 3; }
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void borrow_record(Body body) { mutate(&body); body.output[0] = body.count; }
+
+// ====
+// XFAIL: Borrowing an array member forces storage of the whole pointer-bearing record.
+#include <loomcxx/kernel.h>
+struct Body { float* output; int values[4]; };
+static int first(const int* values) { return values[0]; }
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void borrow_array(Body body) { body.output[0] = first(body.values); }
+
+// ====
+// XFAIL: Borrowing a scalar member forces storage of the whole pointer-bearing record.
+#include <loomcxx/kernel.h>
+struct Body { float* output; int count; };
+static void mutate(int* value) { *value += 3; }
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void borrow_field(Body body) { mutate(&body.count); body.output[0] = body.count; }
+
+// ====
+// Every pointer array element supplies an independent buffer origin.
+#include <loomcxx/kernel.h>
+struct Body { const float* inputs[2]; float* output; };
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void pointer_array(Body body) { body.output[0] = body.inputs[0][0] + body.inputs[1][0]; }
+
+// ====
+// Selecting a pointer dynamically retains both its buffer and displacement.
+#include <loomcxx/kernel.h>
+struct Body { const float* inputs[2]; float* output; unsigned index; };
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void select_pointer(Body body) { body.output[0] = body.inputs[body.index & 1u][0]; }
+
+// ====
+// Copy construction and destruction apply to local and parameter objects.
+#include <loomcxx/kernel.h>
+struct Body {
+  float* output;
+  int count;
+  Body(const Body& other) : output(other.output), count(other.count + 5) {}
+  ~Body() { output[0] += count; }
+};
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void copy_parameter(Body body) {
+  Body other(body);
+  other.count += 2;
+  body.output[0] = 10;
+}
+
+// ====
+// Value transport is independent of a packed record's native byte padding.
+#include <loomcxx/kernel.h>
+struct __attribute__((packed)) Body { unsigned char tag; float* output; float value; };
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void packed_record(Body body) { body.output[0] = body.tag + body.value; }
+
+// ====
+// Empty factory results contribute no physical closure arguments.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+template<class F>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void initialize(float* output, F body) { output[0] = body(); }
+static auto make() { return [] { return 7.0f; }; }
+LOOM_CHECK_CASE(empty_factory_closure) {
+  const auto output = loom::check::fill<1, float>(0.0f);
+  const auto body = make();
+  loom::check::launch<initialize<decltype(body)>>(output, body);
+}
+
+// ====
+// Command bodies run the source copy constructor before projecting arguments.
+#include <loomcxx/command.h>
+#include <loomcxx/kernel.h>
+struct Body {
+  int value;
+  Body(int initial) : value(initial) {}
+  Body(const Body& other) : value(other.value + 5) {}
+};
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void copy_launch(float* output, Body body) { output[0] = body.value; }
+[[loom::command_program]]
+void command_copy(int value, [[loom::launch]] loom::type::buffer<float> output) {
+  Body body(value);
+  loom::kernel::launch<copy_launch>(output, body);
+}
+
+// ====
+// A command can construct an empty closure directly at its launch site.
+#include <loomcxx/command.h>
+#include <loomcxx/kernel.h>
+template<class F>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void initialize(float* output, F body) { output[0] = body(); }
+[[loom::command_program]]
+void command_empty([[loom::launch]] loom::type::buffer<float> output) {
+  auto body = [] { return 7; };
+  loom::kernel::launch<initialize<decltype(body)>>(output, body);
+}
+
+// ====
+// Workload arguments remain distinct from the projected launch payload.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+struct Body { float value; };
+static loom::kernel::configuration config(unsigned count) { return {{count, 1, 1}, {1, 1, 1}}; }
+[[loom::kernel(config)]] void configured(float* output, Body body) { output[0] = body.value; }
+static Body make() { return {7.0f}; }
+LOOM_CHECK_CASE(configured_record) {
+  const auto output = loom::check::fill<1, float>(0.0f);
+  const auto body = make();
+  loom::check::launch<configured>(loom::kernel::workload(1u), output, body);
+}
+
+// ====
+// Ordinary receiver copies are a control for the receiver-capture failures.
+#include <loomcxx/kernel.h>
+struct Body { int bias; Body copy() const { return *this; } };
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void copy_receiver(float* output, Body body) { output[0] = body.copy().bias; }
+
+// ====
+// XFAIL: The C++ frontend does not bind a by-value *this capture.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+struct Body { int bias; auto capture() const { return [*this](int value) { return value + bias; }; } };
+template<class F>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void apply(float* output, F body) { output[0] = body(2); }
+static auto make() { return Body{4}.capture(); }
+LOOM_CHECK_CASE(capture_receiver) {
+  const auto output = loom::check::fill<1, float>(0.0f);
+  const auto body = make();
+  loom::check::launch<apply<decltype(body)>>(output, body);
+}
+
+// ====
+// XFAIL: An initialized receiver capture loses the temporary receiver's initialized state.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+struct Body { int bias; auto capture() const { return [self = *this](int value) { return value + self.bias; }; } };
+template<class F>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void apply(float* output, F body) { output[0] = body(2); }
+static auto make() { return Body{4}.capture(); }
+LOOM_CHECK_CASE(capture_temporary_receiver) {
+  const auto output = loom::check::fill<1, float>(0.0f);
+  const auto body = make();
+  loom::check::launch<apply<decltype(body)>>(output, body);
+}
+
+// ====
+// XFAIL: An initialized receiver capture also loses a named receiver's initialized state.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+struct Body { int bias; auto capture() const { return [self = *this](int value) { return value + self.bias; }; } };
+template<class F>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void apply(float* output, F body) { output[0] = body(2); }
+static auto make() { Body body{4}; return body.capture(); }
+LOOM_CHECK_CASE(capture_named_receiver) {
+  const auto output = loom::check::fill<1, float>(0.0f);
+  const auto body = make();
+  loom::check::launch<apply<decltype(body)>>(output, body);
+}
+
+// ====
+// Ordinary folds separate pack expression support from closure construction.
+#include <loomcxx/kernel.h>
+template<class... T> static int sum(T... values) { return (values + ...); }
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void fold(float* output) { output[0] = sum(2, 3, 4); }
+
+// ====
+// XFAIL: Pack init-captures are not expanded before closure return-type deduction.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+template<class... T> static auto make(T... values) { return [...items = values](int value) { return value + (items + ...); }; }
+template<class F>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void apply(float* output, F body) { output[0] = body(1); }
+LOOM_CHECK_CASE(capture_pack) {
+  const auto output = loom::check::fill<1, float>(0.0f);
+  const auto body = make(2, 3, 4);
+  loom::check::launch<apply<decltype(body)>>(output, body);
+}
+
+// ====
+// XFAIL: An explicit return type still leaves the closure's pack captures unexpanded.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+template<class... T> static auto make(T... values) { return [...items = values](int value) -> int { return value + (items + ...); }; }
+template<class F>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void apply(float* output, F body) { output[0] = body(1); }
+LOOM_CHECK_CASE(capture_pack_explicit_return) {
+  const auto output = loom::check::fill<1, float>(0.0f);
+  const auto body = make(2, 3, 4);
+  loom::check::launch<apply<decltype(body)>>(output, body);
+}
+
+// ====
+// XFAIL: Even unused pack captures require expansion before closure construction.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+template<class... T> static auto make(T... values) { return [...items = values](int value) { return value + 7; }; }
+template<class F>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void apply(float* output, F body) { output[0] = body(1); }
+LOOM_CHECK_CASE(capture_pack_unused) {
+  const auto output = loom::check::fill<1, float>(0.0f);
+  const auto body = make(2, 3, 4);
+  loom::check::launch<apply<decltype(body)>>(output, body);
+}
+
+// ====
+// A check-local default capture supplies the same values as an explicit list.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+template<class F>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void apply(float* output, F body) { output[0] = body(1); }
+LOOM_CHECK_CASE(default_capture) {
+  const auto output = loom::check::fill<1, float>(0.0f);
+  const int value = 5;
+  const auto body = [=](int input) { return input + value; };
+  loom::check::launch<apply<decltype(body)>>(output, body);
+}
+
+// ====
+// Nested fixed arrays scale to hundreds of scalar leaves without a byte-buffer
+// fallback. Verifier coverage avoids an unhelpful 512-argument text golden.
+#include <loomcxx/kernel.h>
+struct Cell { int values[16]; };
+struct Body { Cell cells[32]; float* output; };
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void large_record(Body body) { body.output[0] = body.cells[31].values[15]; }

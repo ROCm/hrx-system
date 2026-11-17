@@ -89,3 +89,33 @@ LOOM_CHECK_CASE(wrong_record) {
   // ERROR@+1: LOWERING/059 "kernel record arguments must match the parameter's source type"
   loom::check::launch<entry>(input);
 }
+
+// ====
+// A kernel receives a record value, not an identity borrowed from its caller.
+#include <loomcxx/kernel.h>
+struct Body { float* output; int count; };
+// ERROR@+1: LOWERING/059 "runtime reference signatures require an internal ordinary function definition"
+LOOM_KERNEL void borrow_parameter(const Body& body) { body.output[0] = body.count; }
+
+// ====
+// Nesting a view in a record does not admit an unsupported kernel leaf type.
+#include <loomcxx/kernel.h>
+#include <loomcxx/view.h>
+struct Body { loom::type::view<loom::type::shape<4>, float> values; };
+// ERROR@+1: LOWERING/059 "kernel record parameter members require scalars, vectors, typed buffers, pointers, index/offset values, or nested records of those"
+LOOM_KERNEL void view_member(Body body, float* output) { output[0] = loom::view::load(body.values, 0); }
+
+// ====
+// Record value admission also applies to a kernel's bitfields.
+#include <loomcxx/kernel.h>
+struct Body { unsigned flag : 3; float* output; };
+// ERROR@+1: LOWERING/059 "record value fields cannot be bitfields"
+LOOM_KERNEL void bitfield_member(Body body) { body.output[0] = body.flag; }
+
+// ====
+// A union member has no unconditional partition into kernel argument leaves.
+#include <loomcxx/kernel.h>
+union Number { int integer; float real; };
+struct Body { Number number; float* output; };
+// ERROR@+1: LOWERING/059 "record values require a complete non-union type without virtual members"
+LOOM_KERNEL void union_member(Body body) { body.output[0] = body.number.real; }
