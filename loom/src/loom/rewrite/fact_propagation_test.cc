@@ -363,8 +363,8 @@ TEST_F(FactPropagationTest, CyclicFactsNarrowAfterSemanticUpdates) {
     EXPECT_EQ(facts->touched_count, touched_count);
     loom_pass_value_fact_owner_deinitialize(&fresh_owner);
   }
-  // Structural snapshots belong to the rewriter and leave the caller-owned
-  // table before their backing arenas are released or the table is reattached.
+  // Structural snapshots belong to the fact owner and survive rewriter
+  // detachment. Scope invalidation retires them before table storage resets.
   std::vector<const loom_cfg_graph_t*> graphs;
   loom_value_fact_cfg_graph_callback_t callback = {
       .user_data = &graphs,
@@ -397,11 +397,25 @@ TEST_F(FactPropagationTest, CyclicFactsNarrowAfterSemanticUpdates) {
   IREE_ASSERT_OK(loom_rewriter_enable_analysis(&rewriter, function_, facts));
   IREE_ASSERT_OK(loom_rewriter_refresh_cfg_facts(&rewriter, body));
   loom_rewriter_deinitialize(&rewriter);
-  EXPECT_EQ(loom_value_fact_table_lookup_cfg_graph(facts, body), nullptr);
+  EXPECT_NE(loom_value_fact_table_lookup_cfg_graph(facts, body), nullptr);
   graphs.clear();
   IREE_ASSERT_OK(loom_value_fact_table_enumerate_cfg_graphs(facts, callback));
-  EXPECT_TRUE(graphs.empty());
+  EXPECT_THAT(graphs, ::testing::ElementsAre(
+                          loom_value_fact_table_lookup_cfg_graph(facts, body)));
+  loom_pass_value_fact_owner_invalidate(&owner);
+  EXPECT_EQ(loom_value_fact_table_lookup_cfg_graph(facts, body), nullptr);
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &owner, module_, loom_pass_value_fact_scope_function(function_), &facts));
+  ASSERT_NE(loom_value_fact_table_lookup_cfg_graph(facts, body), nullptr);
+  loom_module_t* second_module = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("second"),
+                                      &block_pool_, nullptr,
+                                      iree_allocator_system(), &second_module));
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire(
+      &owner, second_module, loom_pass_value_fact_scope_module(), &facts));
+  EXPECT_EQ(loom_value_fact_table_lookup_cfg_graph(facts, body), nullptr);
   loom_pass_value_fact_owner_deinitialize(&owner);
+  loom_module_free(second_module);
   iree_arena_deinitialize(&arena);
 }
 

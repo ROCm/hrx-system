@@ -102,9 +102,6 @@ iree_status_t loom_rewriter_recompute_op_facts(loom_rewriter_t* rewriter,
 iree_status_t loom_rewriter_seed_nested_execution_facts(
     loom_rewriter_t* rewriter, loom_op_t* op);
 
-// Withdraws owned structural snapshots and releases their arenas.
-void loom_rewriter_release_cfg_facts(loom_rewriter_t* rewriter);
-
 // Refreshes dirty CFG equations reached by a terminator visit.
 iree_status_t loom_rewriter_update_successor_facts(loom_rewriter_t* rewriter,
                                                    loom_op_t* op);

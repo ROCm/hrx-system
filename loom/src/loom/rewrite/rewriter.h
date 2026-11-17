@@ -117,7 +117,6 @@ typedef struct loom_rewriter_operation_creation_callback_t {
                       loom_op_t* created_op);
 } loom_rewriter_operation_creation_callback_t;
 
-typedef struct loom_rewriter_cfg_region_t loom_rewriter_cfg_region_t;
 typedef struct loom_rewriter_worklist_chunk_t loom_rewriter_worklist_chunk_t;
 typedef struct loom_rewriter_pending_facts_t loom_rewriter_pending_facts_t;
 
@@ -174,18 +173,6 @@ struct loom_rewriter_t {
   // Resolved target bundle paired with |math_policy|. NULL denotes a
   // target-neutral rewrite scope.
   const struct loom_target_bundle_t* math_target_bundle;
-
-  // Structural snapshots published into the fact table for edited regions.
-  struct {
-    // Region-address hash buckets for O(1) snapshot storage lookup.
-    loom_rewriter_cfg_region_t** buckets;
-    // Power-of-two bucket count.
-    iree_host_size_t bucket_count;
-    // Number of regions with replaceable snapshots.
-    iree_host_size_t count;
-    // All region records for snapshot withdrawal and arena teardown.
-    loom_rewriter_cfg_region_t* entries;
-  } cfg_facts;
 
   // Dialect-provided constant materialization policy. Set by the pass before
   // enabling analysis. A zero policy leaves facts computed and propagated but

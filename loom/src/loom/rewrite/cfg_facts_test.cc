@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <unordered_map>
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -12,6 +14,7 @@
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/util/fact_cfg.h"
 
 namespace loom {
 namespace {
@@ -21,8 +24,36 @@ namespace {
 // payload, numeric, control, and topology edits through the public rewriter.
 class CFGFactsTest : public ::testing::Test {
  protected:
+  static iree_status_t Allocate(void* self, iree_allocator_command_t command,
+                                const void* params, void** inout_ptr) {
+    auto* fixture = static_cast<CFGFactsTest*>(self);
+    if (command != IREE_ALLOCATOR_COMMAND_FREE &&
+        command != IREE_ALLOCATOR_COMMAND_TRIM && fixture->fail_allocation_) {
+      return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+    }
+    void* old_pointer = inout_ptr ? *inout_ptr : nullptr;
+    const auto delegate = iree_allocator_system();
+    IREE_RETURN_IF_ERROR(
+        delegate.ctl(delegate.self, command, params, inout_ptr));
+    if (command != IREE_ALLOCATOR_COMMAND_TRIM) {
+      if (old_pointer) {
+        fixture->live_bytes_ -= fixture->allocations_.at(old_pointer);
+        fixture->allocations_.erase(old_pointer);
+      }
+      if (command != IREE_ALLOCATOR_COMMAND_FREE) {
+        const auto size =
+            static_cast<const iree_allocator_alloc_params_t*>(params)
+                ->byte_length;
+        fixture->allocations_[*inout_ptr] = size;
+        fixture->live_bytes_ += size;
+      }
+    }
+    return iree_ok_status();
+  }
+
   void SetUp() override {
-    iree_arena_block_pool_initialize(4096, iree_allocator_system(), &pool_);
+    iree_arena_block_pool_initialize(4096, {.self = this, .ctl = Allocate},
+                                     &pool_);
     iree_arena_initialize(&pool_, &arena_);
     loom_context_initialize(iree_allocator_system(), &context_);
     iree_host_size_t count = 0;
@@ -100,6 +131,8 @@ class CFGFactsTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_test_yield_build(&builder, nullptr, 0,
                                          LOOM_LOCATION_UNKNOWN, &branch));
     IREE_ASSERT_OK(loom_value_fact_table_initialize(&facts_, &arena_, 0));
+    facts_.regions.storage_flags =
+        LOOM_VALUE_FACT_REGION_STORAGE_FLAG_RECLAIM_CFG;
     IREE_ASSERT_OK(loom_value_fact_table_compute(&facts_, module_, function_));
     loom_rewriter_initialize(&rewriter_, module_, &arena_);
     IREE_ASSERT_OK(loom_rewriter_enable_worklist(&rewriter_));
@@ -108,10 +141,13 @@ class CFGFactsTest : public ::testing::Test {
 
   void TearDown() override {
     loom_rewriter_deinitialize(&rewriter_);
+    loom_value_fact_table_clear_scope(&facts_);
     loom_module_free(module_);
     loom_context_deinitialize(&context_);
     iree_arena_deinitialize(&arena_);
     iree_arena_block_pool_deinitialize(&pool_);
+    EXPECT_EQ(live_bytes_, 0u);
+    EXPECT_TRUE(allocations_.empty());
   }
 
   void CheckFresh(bool uniform) {
@@ -135,6 +171,12 @@ class CFGFactsTest : public ::testing::Test {
     iree_arena_deinitialize(&arena);
   }
 
+  // Requested backing bytes still owned by the pool or retained snapshots.
+  iree_host_size_t live_bytes_ = 0;
+  // Current backing allocations, including reusable pool blocks.
+  std::unordered_map<void*, iree_host_size_t> allocations_;
+  // Inject a backing allocation failure while preserving deallocation.
+  bool fail_allocation_ = false;
   // Shared backing for IR, retained facts, and temporary fresh analyses.
   iree_arena_block_pool_t pool_ = {};
   // Fact and rewriter storage for this fixture.
@@ -220,6 +262,66 @@ TEST_F(CFGFactsTest, NonlocalControlAndTopologyEditsMatchFreshAnalysis) {
     IREE_ASSERT_OK(loom_rewriter_refresh_cfg_facts(&rewriter_, region_));
     CheckFresh(successor == right_);
   }
+}
+
+TEST_F(CFGFactsTest, ReplacedSnapshotsHaveBoundedStorage) {
+  auto replace = [&]() {
+    for (loom_block_t* successor : {right_, left_}) {
+      loom_op_successors(selector_)[0] = successor;
+      IREE_ASSERT_OK(loom_rewriter_refresh_cfg_facts(&rewriter_, region_));
+      CheckFresh(true);
+    }
+  };
+  // Warm both graph shapes, their propagation queues, and shared scratch.
+  replace();
+  const auto retained_bytes = live_bytes_;
+  for (int i = 0; i < 16; ++i) {
+    replace();
+    EXPECT_EQ(live_bytes_, retained_bytes);
+  }
+  loom_value_fact_table_forget_cfg_region(&facts_, region_);
+  EXPECT_EQ(loom_value_fact_table_lookup_cfg_region(&facts_, region_), nullptr);
+  EXPECT_LT(live_bytes_, retained_bytes);
+  const auto retired_bytes = live_bytes_;
+  loom_value_fact_table_forget_cfg_region(&facts_, region_);
+  EXPECT_EQ(live_bytes_, retired_bytes);
+}
+
+TEST_F(CFGFactsTest, SnapshotAllocationFailurePreservesCurrentFacts) {
+  IREE_ASSERT_OK(loom_rewriter_refresh_cfg_facts(&rewriter_, region_));
+  CheckFresh(true);
+  const auto* previous =
+      loom_value_fact_table_lookup_cfg_region(&facts_, region_);
+  const auto retained_bytes = live_bytes_;
+  fail_allocation_ = true;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_rewriter_refresh_cfg_facts(&rewriter_, region_));
+  fail_allocation_ = false;
+  EXPECT_EQ(loom_value_fact_table_lookup_cfg_region(&facts_, region_),
+            previous);
+  EXPECT_EQ(live_bytes_, retained_bytes);
+  CheckFresh(true);
+  IREE_ASSERT_OK(loom_rewriter_refresh_cfg_facts(&rewriter_, region_));
+  CheckFresh(true);
+  EXPECT_EQ(live_bytes_, retained_bytes);
+}
+
+TEST_F(CFGFactsTest, FailedInitialSnapshotCanBeRetried) {
+  loom_value_fact_table_forget_cfg_region(&facts_, region_);
+  const auto retained_bytes = live_bytes_;
+  const loom_value_fact_cfg_region_t* structure = nullptr;
+  fail_allocation_ = true;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_value_fact_table_get_or_build_cfg_region(
+                            &facts_, module_, region_, &structure));
+  fail_allocation_ = false;
+  EXPECT_EQ(structure, nullptr);
+  EXPECT_EQ(loom_value_fact_table_lookup_cfg_region(&facts_, region_), nullptr);
+  EXPECT_EQ(live_bytes_, retained_bytes);
+  IREE_ASSERT_OK(loom_value_fact_table_get_or_build_cfg_region(
+      &facts_, module_, region_, &structure));
+  ASSERT_NE(structure, nullptr);
+  CheckFresh(true);
 }
 
 }  // namespace

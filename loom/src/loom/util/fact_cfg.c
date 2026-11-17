@@ -326,3 +326,137 @@ iree_status_t loom_value_fact_cfg_region_initialize(
   }
   return iree_ok_status();
 }
+
+// Retained arrays in construction order, shared by sizing and copying. Control
+// state follows its header so its member pointers can be assigned directly.
+// Nested member spans and snapshot-local pointers are rebound after copying.
+#define LOOM_CFG_PACK_FIELDS(F)                                              \
+  F(graph.blocks, source->graph.block_count)                                 \
+  F(graph.edges, source->graph.edge_count)                                   \
+  F(graph.successor_indices, source->graph.edge_count)                       \
+  F(graph.successor_edge_indices, source->graph.edge_count)                  \
+  F(graph.predecessor_indices, source->graph.edge_count)                     \
+  F(graph.predecessor_edge_indices, source->graph.edge_count)                \
+  F(graph.reverse_postorder.values, source->graph.reverse_postorder.count)   \
+  F(dominance.immediate_dominators, source->graph.block_count)               \
+  F(dominance.intervals, source->graph.block_count)                          \
+  F(dominance.entry_predecessors, source->graph.block_count)                 \
+  F(dominance.preorder.values, source->dominance.preorder.count)             \
+  F(regions.blocks, source->graph.block_count)                               \
+  F(regions.incoming_edges, source->graph.edge_count)                        \
+  F(regions.incoming_offsets, source->graph.block_count + 1)                 \
+  F(loops.loops, source->loops.loop_count)                                   \
+  F(loops.innermost_loop_indices, source->graph.block_count)                 \
+  F(inductions, source->loops.loop_count)                                    \
+  F(recurrences, source->loops.loop_count)                                   \
+  F(control_structure.postdominance.nodes, source->graph.block_count + 1)    \
+  F(control_structure.blocks, source->graph.block_count)                     \
+  F(control_structure.nodes, source->control_structure.node_count)           \
+  F(control_structure.bindings, source->control_structure.binding_count)     \
+  F(control_structure.inputs, source->control_structure.input_count)         \
+  F(control_structure.components, source->control_structure.component_count) \
+  F(control, 1)                                                              \
+  F(control->inputs, source->control_structure.input_count)                  \
+  F(control->components, source->control_structure.component_count)          \
+  F(control->blocks, source->graph.block_count)                              \
+  F(control->worklist, source->control_structure.component_count)            \
+  F(control->pending_blocks, source->graph.block_count)                      \
+  F(argument_offsets, source->graph.block_count)                             \
+  F(arguments, source->argument_count)                                       \
+  F(components, source->argument_count)                                      \
+  F(component_nodes, source->argument_count)                                 \
+  F(argument_components, source->argument_count)                             \
+  F(control_flow.components.values, source->control_flow.components.count)   \
+  F(control_flow.forwarding, source->control_flow.components.count)          \
+  F(control_flow.anchors, source->control_flow.components.count)             \
+  F(control_flow.dirty.words,                                                \
+    iree_bitmap_calculate_words(source->control_flow.dirty.bit_count))
+
+static iree_host_size_t loom_value_fact_cfg_aligned_size(
+    iree_host_size_t size) {
+  return iree_host_align(size, iree_alignof(iree_max_align_t));
+}
+
+static void* loom_value_fact_cfg_pack_array(uint8_t** cursor,
+                                            const void* source,
+                                            iree_host_size_t size) {
+  if (!size) {
+    return NULL;
+  }
+  void* result = *cursor;
+  memcpy(result, source, size);
+  *cursor += loom_value_fact_cfg_aligned_size(size);
+  return result;
+}
+
+iree_status_t loom_value_fact_cfg_region_create_packed(
+    const loom_module_t* module, const loom_region_t* region,
+    iree_arena_allocator_t* scratch, iree_allocator_t allocator,
+    loom_value_fact_cfg_region_t** out_region) {
+  *out_region = NULL;
+  loom_value_fact_cfg_region_t constructed;
+  IREE_RETURN_IF_ERROR(loom_value_fact_cfg_region_initialize(
+      module, region, scratch, &constructed));
+  // Construction precedes numeric publication. Recurrence slots therefore
+  // contain no borrowed solve storage, and control worklists are empty.
+  const loom_value_fact_cfg_region_t* source = &constructed;
+  iree_host_size_t size = loom_value_fact_cfg_aligned_size(sizeof(*source));
+#define LOOM_CFG_PACK_SIZE(member, count)                         \
+  size += source->member ? loom_value_fact_cfg_aligned_size(      \
+                               (count) * sizeof(*source->member)) \
+                         : 0;
+  LOOM_CFG_PACK_FIELDS(LOOM_CFG_PACK_SIZE)
+#undef LOOM_CFG_PACK_SIZE
+  const iree_host_size_t member_count =
+      source->control_flow.components.count
+          ? source->graph.reverse_postorder.count
+          : 0;
+  size +=
+      loom_value_fact_cfg_aligned_size(member_count * sizeof(iree_host_size_t));
+  loom_value_fact_cfg_region_t* result = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc_uninitialized(allocator, size, (void**)&result));
+  *result = *source;
+  uint8_t* cursor =
+      (uint8_t*)result + loom_value_fact_cfg_aligned_size(sizeof(*result));
+#define LOOM_CFG_PACK_COPY(member, count)          \
+  result->member = loom_value_fact_cfg_pack_array( \
+      &cursor, source->member,                     \
+      source->member ? (count) * sizeof(*source->member) : 0);
+  LOOM_CFG_PACK_FIELDS(LOOM_CFG_PACK_COPY)
+#undef LOOM_CFG_PACK_COPY
+  const iree_host_size_t* source_members =
+      member_count ? source->control_flow.components.values[0].nodes : NULL;
+  const iree_host_size_t* result_members = loom_value_fact_cfg_pack_array(
+      &cursor, source_members, member_count * sizeof(*source_members));
+
+  // External IR identities remain borrowed. Only aliases within the completed
+  // snapshot move with its retained arrays.
+  result->loops.graph = &result->graph;
+  result->control_structure.graph = &result->graph;
+  result->control->structure = &result->control_structure;
+  for (iree_host_size_t i = 0;
+       result->regions.blocks && i < result->graph.block_count; ++i) {
+    if (source->regions.blocks[i].exit_edges.values) {
+      result->regions.blocks[i].exit_edges.values =
+          result->regions.incoming_edges +
+          (source->regions.blocks[i].exit_edges.values -
+           source->regions.incoming_edges);
+    }
+  }
+  for (iree_host_size_t i = 0; i < result->argument_count; ++i) {
+    result->components[i].nodes =
+        result->component_nodes +
+        (source->components[i].nodes - source->component_nodes);
+  }
+  loom_scc_t* components = (loom_scc_t*)result->control_flow.components.values;
+  for (iree_host_size_t i = 0; i < result->control_flow.components.count; ++i) {
+    components[i].nodes =
+        result_members +
+        (source->control_flow.components.values[i].nodes - source_members);
+  }
+  *out_region = result;
+  return iree_ok_status();
+}
+
+#undef LOOM_CFG_PACK_FIELDS
