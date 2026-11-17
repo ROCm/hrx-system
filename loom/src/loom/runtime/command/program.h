@@ -78,6 +78,16 @@ typedef enum loom_cmd_program_argument_kind_e {
   LOOM_CMD_PROGRAM_ARGUMENT_KIND_OFFSET = 7,
 } loom_cmd_program_argument_kind_t;
 
+// One decoded logical ABI argument. Scalars retain their exact carrier bits;
+// INDEX uses canonical signed two's-complement i64, OFFSET unsigned u64.
+typedef struct loom_cmd_program_argument_t {
+  loom_cmd_program_argument_kind_t kind;
+  union {
+    uint64_t scalar_bits;
+    loom_cmd_program_buffer_ref_t buffer;
+  } value;
+} loom_cmd_program_argument_t;
+
 // Logical argument schema for one executable-entry requirement.
 //
 // The schema identifies a program-local entry and describes every logical
@@ -378,6 +388,13 @@ loom_cmd_program_argument_kind_t loom_cmd_program_entry_schema_kind_at(
 iree_const_byte_span_t loom_cmd_program_command_argument_data(
     const loom_cmd_program_t* program,
     const loom_cmd_program_command_t* command);
+
+// Returns one argument from a validated dispatch command. The argument ordinal
+// must be less than its entry schema's argument_count. Does not infer source
+// semantic types from fixed-width ABI carriers.
+loom_cmd_program_argument_t loom_cmd_program_command_argument_at(
+    const loom_cmd_program_t* program,
+    const loom_cmd_program_command_t* command, uint32_t argument_index);
 
 // Returns one validated command table entry.
 loom_cmd_program_command_t loom_cmd_program_command_at(

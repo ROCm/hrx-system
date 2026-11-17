@@ -35,6 +35,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/link:module_index",
         "//loom/src/loom/pass:builtin_registry",
+        "//loom/src/loom/runtime/command:program",
         "//loom/src/loom/target/arch/cmd:artifact_set",
         "//loom/src/loom/target/arch/cmd/lower:program_plan_index",
         "//loom/src/loom/transforms/cleanup:configured",

@@ -25,6 +25,7 @@
 #include "loom/ir/module.h"
 #include "loom/link/module_index.h"
 #include "loom/pass/builtin_registry.h"
+#include "loom/runtime/command/program.h"
 #include "loom/target/arch/cmd/artifact_set.h"
 #include "loom/target/arch/cmd/lower/program_plan_index.h"
 #include "loom/transforms/cleanup/configured.h"
@@ -46,6 +47,9 @@ typedef struct loomc_cmd_program_product_impl_t {
 
   // Owned serialized programs and copied requirement metadata.
   loom_cmd_program_artifact_set_t artifact_set;
+
+  // Validated zero-copy views borrowing artifact_set program bytes.
+  loom_cmd_program_t* programs;
 } loomc_cmd_program_product_impl_t;
 
 static void loomc_cmd_program_product_destroy(loomc_product_t* base_product) {
@@ -53,6 +57,7 @@ static void loomc_cmd_program_product_destroy(loomc_product_t* base_product) {
       (loomc_cmd_program_product_impl_t*)base_product;
   loomc_allocator_t allocator = product->allocator;
   loom_cmd_program_artifact_set_deinitialize(&product->artifact_set);
+  loomc_allocator_free(allocator, product->programs);
   loomc_allocator_free(allocator, product);
 }
 
@@ -612,10 +617,37 @@ static loomc_status_t loomc_cmd_program_product_create(
   product->artifact_set = *artifact_set;
   *artifact_set = (loom_cmd_program_artifact_set_t){0};
 
+  iree_host_size_t program_storage_size = 0;
+  if (!iree_host_size_checked_mul(product->artifact_set.programs.count,
+                                  sizeof(*product->programs),
+                                  &program_storage_size)) {
+    loomc_cmd_program_product_destroy(&product->base);
+    return loomc_make_status(LOOMC_STATUS_RESOURCE_EXHAUSTED,
+                             "command inspection metadata is too large");
+  }
+  loomc_status_t status = loomc_allocator_malloc_uninitialized(
+      allocator, program_storage_size, (void**)&product->programs);
+  if (!loomc_status_is_ok(status)) {
+    loomc_cmd_program_product_destroy(&product->base);
+    return status;
+  }
+
   loomc_artifact_t* artifacts = (loomc_artifact_t*)(product + 1);
   for (iree_host_size_t i = 0; i < product->artifact_set.programs.count; ++i) {
     const loom_cmd_program_artifact_t* program =
         &product->artifact_set.programs.values[i];
+    iree_const_byte_span_t bytes = iree_const_byte_span_empty();
+    if (!iree_byte_sequence_try_get_contiguous_span(program->data, &bytes)) {
+      loomc_cmd_program_product_destroy(&product->base);
+      return loomc_make_status(LOOMC_STATUS_INTERNAL,
+                               "command product bytes must be contiguous");
+    }
+    iree_status_t parse_status =
+        loom_cmd_program_parse(bytes, &product->programs[i]);
+    if (!iree_status_is_ok(parse_status)) {
+      loomc_cmd_program_product_destroy(&product->base);
+      return loomc_status_from_iree(parse_status);
+    }
     const loomc_string_view_t symbol =
         loomc_string_view_from_iree(program->symbol);
     artifacts[i] = (loomc_artifact_t){
@@ -1071,6 +1103,286 @@ bool loomc_cmd_program_product_entry_requirement_at(
       &product->artifact_set.entries.values[ordinal];
   *out_requirement = (loomc_cmd_entry_requirement_t){
       .symbol = loomc_string_view_from_iree(entry->symbol),
+  };
+  return true;
+}
+
+static const loom_cmd_program_t* loomc_cmd_program_product_view(
+    const loomc_product_t* base_product, loomc_host_size_t program_ordinal) {
+  const loomc_cmd_program_product_impl_t* product =
+      loomc_cmd_program_product_const_cast(base_product);
+  if (product == NULL ||
+      program_ordinal >= product->artifact_set.programs.count) {
+    return NULL;
+  }
+  return &product->programs[program_ordinal];
+}
+
+static loomc_cmd_buffer_role_t loomc_cmd_buffer_role(
+    loom_cmd_program_buffer_role_t role) {
+  return role == LOOM_CMD_PROGRAM_BUFFER_ROLE_FIXED
+             ? LOOMC_CMD_BUFFER_ROLE_FIXED
+             : LOOMC_CMD_BUFFER_ROLE_REBINDABLE;
+}
+
+static loomc_cmd_buffer_ref_t loomc_cmd_buffer_ref(
+    loom_cmd_program_buffer_ref_t ref) {
+  return (loomc_cmd_buffer_ref_t){
+      .role = loomc_cmd_buffer_role(ref.role),
+      .root_index = ref.root_index,
+      .byte_offset = ref.byte_offset,
+      .byte_length = ref.byte_length,
+  };
+}
+
+bool loomc_cmd_program_product_layout(const loomc_product_t* product,
+                                      loomc_host_size_t program_ordinal,
+                                      loomc_cmd_program_layout_t* out_layout) {
+  const loom_cmd_program_t* program =
+      loomc_cmd_program_product_view(product, program_ordinal);
+  if (program == NULL || out_layout == NULL) {
+    return false;
+  }
+  const loom_cmd_program_requirements_t* requirements = &program->requirements;
+  *out_layout = (loomc_cmd_program_layout_t){
+      .fixed_buffer_count = requirements->fixed_buffer_count,
+      .rebindable_binding_count = requirements->rebindable_binding_count,
+      .executable_count = requirements->executable_count,
+      .entry_count = requirements->entry_count,
+      .transient =
+          {
+              .binding_index = requirements->transient.binding_index,
+              .required_byte_length =
+                  requirements->transient.required_byte_length,
+              .minimum_alignment = requirements->transient.minimum_alignment,
+          },
+      .launch_counts =
+          {
+              .binding_index = requirements->launch_counts.binding_index,
+              .required_byte_length =
+                  requirements->launch_counts.required_byte_length,
+              .minimum_alignment =
+                  requirements->launch_counts.minimum_alignment,
+          },
+      .command_count = program->commands.count,
+      .launch_binding_count = program->launch_bindings.count,
+      .parameter_root_count = program->parameter_roots.count,
+      .parameter_count = program->parameters.count,
+  };
+  return true;
+}
+
+bool loomc_cmd_program_product_command_at(const loomc_product_t* base_product,
+                                          loomc_host_size_t program_ordinal,
+                                          loomc_host_size_t command_ordinal,
+                                          loomc_cmd_command_t* out_command) {
+  const loom_cmd_program_t* program =
+      loomc_cmd_program_product_view(base_product, program_ordinal);
+  if (program == NULL || out_command == NULL ||
+      command_ordinal >= program->commands.count) {
+    return false;
+  }
+  const loom_cmd_program_command_t command =
+      loom_cmd_program_command_at(program, (uint32_t)command_ordinal);
+  loomc_cmd_command_t row = {
+      .begins_barrier_wave =
+          loom_cmd_program_command_kind_begins_barrier_wave(command.kind),
+  };
+  const loom_cmd_program_command_kind_t kind =
+      loom_cmd_program_command_kind_base(command.kind);
+  switch (kind) {
+    case LOOM_CMD_PROGRAM_COMMAND_KIND_FILL:
+      row.kind = LOOMC_CMD_COMMAND_KIND_FILL;
+      row.payload.fill.target =
+          loomc_cmd_buffer_ref(loom_cmd_program_buffer_ref_at(
+              program, command.payload.fill.target_buffer_ref));
+      row.payload.fill.pattern = command.payload.fill.pattern;
+      row.payload.fill.pattern_length = command.payload.fill.pattern_length;
+      break;
+    case LOOM_CMD_PROGRAM_COMMAND_KIND_COPY:
+      row.kind = LOOMC_CMD_COMMAND_KIND_COPY;
+      row.payload.copy.source =
+          loomc_cmd_buffer_ref(loom_cmd_program_buffer_ref_at(
+              program, command.payload.copy.source_buffer_ref));
+      row.payload.copy.target =
+          loomc_cmd_buffer_ref(loom_cmd_program_buffer_ref_at(
+              program, command.payload.copy.target_buffer_ref));
+      break;
+    case LOOM_CMD_PROGRAM_COMMAND_KIND_TIMESTAMP:
+      row.kind = LOOMC_CMD_COMMAND_KIND_TIMESTAMP;
+      row.payload.timestamp.target =
+          loomc_cmd_buffer_ref(loom_cmd_program_buffer_ref_at(
+              program, command.payload.timestamp.target_buffer_ref));
+      break;
+    case LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER_EXECUTION:
+      row.kind = LOOMC_CMD_COMMAND_KIND_BARRIER_EXECUTION;
+      break;
+    case LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT:
+      row.kind = LOOMC_CMD_COMMAND_KIND_DISPATCH_DIRECT;
+      row.payload.dispatch.executable_ordinal =
+          command.payload.dispatch_direct.executable_index;
+      row.payload.dispatch.entry_ordinal =
+          command.payload.dispatch_direct.entry_index;
+      row.payload.dispatch.workgroup_count[0] =
+          command.payload.dispatch_direct.workgroup_count_x;
+      row.payload.dispatch.workgroup_count[1] =
+          command.payload.dispatch_direct.workgroup_count_y;
+      row.payload.dispatch.workgroup_count[2] =
+          command.payload.dispatch_direct.workgroup_count_z;
+      break;
+    case LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC:
+    case LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC:
+      row.kind = kind == LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC
+                     ? LOOMC_CMD_COMMAND_KIND_DISPATCH_INDIRECT_STATIC
+                     : LOOMC_CMD_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC;
+      row.payload.dispatch.executable_ordinal =
+          command.payload.dispatch_indirect.executable_index;
+      row.payload.dispatch.entry_ordinal =
+          command.payload.dispatch_indirect.entry_index;
+      row.payload.dispatch.workgroup_count_buffer =
+          loomc_cmd_buffer_ref(loom_cmd_program_buffer_ref_at(
+              program,
+              command.payload.dispatch_indirect.workgroup_count_buffer_ref));
+      break;
+    default:
+      return false;
+  }
+  if (kind == LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT ||
+      kind == LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC ||
+      kind == LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC) {
+    const loomc_cmd_program_product_impl_t* product =
+        loomc_cmd_program_product_const_cast(base_product);
+    const loom_cmd_program_artifact_t* artifact =
+        &product->artifact_set.programs.values[program_ordinal];
+    if (row.payload.dispatch.entry_ordinal >=
+        artifact->entry_requirement_count) {
+      return false;
+    }
+    row.payload.dispatch.requirement_ordinal =
+        artifact->entry_requirement_indices[row.payload.dispatch.entry_ordinal];
+    row.argument_count =
+        loom_cmd_program_entry_schema_at(program, command.argument_schema_index)
+            .argument_count;
+  }
+  *out_command = row;
+  return true;
+}
+
+bool loomc_cmd_program_product_argument_at(const loomc_product_t* base_product,
+                                           loomc_host_size_t program_ordinal,
+                                           loomc_host_size_t command_ordinal,
+                                           loomc_host_size_t argument_ordinal,
+                                           loomc_cmd_argument_t* out_argument) {
+  const loom_cmd_program_t* program =
+      loomc_cmd_program_product_view(base_product, program_ordinal);
+  if (program == NULL || out_argument == NULL ||
+      command_ordinal >= program->commands.count) {
+    return false;
+  }
+  const loom_cmd_program_command_t command =
+      loom_cmd_program_command_at(program, (uint32_t)command_ordinal);
+  const loom_cmd_program_command_kind_t kind =
+      loom_cmd_program_command_kind_base(command.kind);
+  if (kind != LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_DIRECT &&
+      kind != LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC &&
+      kind != LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC) {
+    return false;
+  }
+  const loom_cmd_program_entry_schema_t schema =
+      loom_cmd_program_entry_schema_at(program, command.argument_schema_index);
+  if (argument_ordinal >= schema.argument_count) {
+    return false;
+  }
+  const loom_cmd_program_argument_t argument =
+      loom_cmd_program_command_argument_at(program, &command,
+                                           (uint32_t)argument_ordinal);
+  loomc_cmd_argument_t row = {0};
+  switch (argument.kind) {
+    case LOOM_CMD_PROGRAM_ARGUMENT_KIND_BUFFER:
+      row.kind = LOOMC_CMD_ARGUMENT_KIND_BUFFER;
+      row.value.buffer = loomc_cmd_buffer_ref(argument.value.buffer);
+      *out_argument = row;
+      return true;
+    case LOOM_CMD_PROGRAM_ARGUMENT_KIND_B8:
+      row.kind = LOOMC_CMD_ARGUMENT_KIND_B8;
+      break;
+    case LOOM_CMD_PROGRAM_ARGUMENT_KIND_B16:
+      row.kind = LOOMC_CMD_ARGUMENT_KIND_B16;
+      break;
+    case LOOM_CMD_PROGRAM_ARGUMENT_KIND_B32:
+      row.kind = LOOMC_CMD_ARGUMENT_KIND_B32;
+      break;
+    case LOOM_CMD_PROGRAM_ARGUMENT_KIND_B64:
+      row.kind = LOOMC_CMD_ARGUMENT_KIND_B64;
+      break;
+    case LOOM_CMD_PROGRAM_ARGUMENT_KIND_INDEX:
+      row.kind = LOOMC_CMD_ARGUMENT_KIND_INDEX;
+      break;
+    case LOOM_CMD_PROGRAM_ARGUMENT_KIND_OFFSET:
+      row.kind = LOOMC_CMD_ARGUMENT_KIND_OFFSET;
+      break;
+    default:
+      return false;
+  }
+  row.value.scalar_bits = argument.value.scalar_bits;
+  *out_argument = row;
+  return true;
+}
+
+bool loomc_cmd_program_product_launch_binding_at(
+    const loomc_product_t* product, loomc_host_size_t program_ordinal,
+    loomc_host_size_t ordinal, loomc_cmd_launch_binding_t* out_binding) {
+  const loom_cmd_program_t* program =
+      loomc_cmd_program_product_view(product, program_ordinal);
+  if (program == NULL || out_binding == NULL ||
+      ordinal >= program->launch_bindings.count) {
+    return false;
+  }
+  const loom_cmd_program_launch_binding_t binding =
+      loom_cmd_program_launch_binding_at(program, (uint32_t)ordinal);
+  *out_binding = (loomc_cmd_launch_binding_t){
+      .role = loomc_cmd_buffer_role(binding.role),
+      .root_index = binding.root_index,
+  };
+  return true;
+}
+
+bool loomc_cmd_program_product_parameter_root_at(
+    const loomc_product_t* product, loomc_host_size_t program_ordinal,
+    loomc_host_size_t ordinal, loomc_cmd_parameter_root_t* out_root) {
+  const loom_cmd_program_t* program =
+      loomc_cmd_program_product_view(product, program_ordinal);
+  if (program == NULL || out_root == NULL ||
+      ordinal >= program->parameter_roots.count) {
+    return false;
+  }
+  const loom_cmd_program_parameter_root_t root =
+      loom_cmd_program_parameter_root_at(program, (uint32_t)ordinal);
+  *out_root = (loomc_cmd_parameter_root_t){
+      .fixed_buffer_index = root.fixed_buffer_index,
+      .required_byte_length = root.required_byte_length,
+      .minimum_alignment = root.minimum_alignment,
+  };
+  return true;
+}
+
+bool loomc_cmd_program_product_parameter_at(
+    const loomc_product_t* product, loomc_host_size_t program_ordinal,
+    loomc_host_size_t ordinal, loomc_cmd_parameter_t* out_parameter) {
+  const loom_cmd_program_t* program =
+      loomc_cmd_program_product_view(product, program_ordinal);
+  if (program == NULL || out_parameter == NULL ||
+      ordinal >= program->parameters.count) {
+    return false;
+  }
+  const loom_cmd_program_parameter_t parameter =
+      loom_cmd_program_parameter_at(program, (uint32_t)ordinal);
+  *out_parameter = (loomc_cmd_parameter_t){
+      .key = loomc_string_view_from_iree(parameter.key),
+      .fixed_buffer_index = parameter.fixed_buffer_index,
+      .byte_offset = parameter.byte_offset,
+      .byte_length = parameter.byte_length,
+      .minimum_alignment = parameter.minimum_alignment,
   };
   return true;
 }

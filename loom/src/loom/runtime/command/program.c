@@ -95,6 +95,39 @@ iree_const_byte_span_t loom_cmd_program_command_argument_data(
       schema.argument_byte_length);
 }
 
+static uint32_t loom_cmd_program_argument_byte_length(
+    loom_cmd_program_argument_kind_t kind);
+
+loom_cmd_program_argument_t loom_cmd_program_command_argument_at(
+    const loom_cmd_program_t* program,
+    const loom_cmd_program_command_t* command, uint32_t argument_index) {
+  const loom_cmd_program_entry_schema_t schema =
+      loom_cmd_program_entry_schema_at(program, command->argument_schema_index);
+  IREE_ASSERT_LT(argument_index, schema.argument_count);
+  const iree_const_byte_span_t data =
+      loom_cmd_program_command_argument_data(program, command);
+  uint32_t offset = 0;
+  for (uint32_t i = 0; i < argument_index; ++i) {
+    offset += loom_cmd_program_argument_byte_length(
+        loom_cmd_program_entry_schema_kind_at(program, &schema, i));
+  }
+  loom_cmd_program_argument_t argument = {
+      .kind = loom_cmd_program_entry_schema_kind_at(program, &schema,
+                                                    argument_index),
+  };
+  if (argument.kind == LOOM_CMD_PROGRAM_ARGUMENT_KIND_BUFFER) {
+    argument.value.buffer =
+        loom_cmd_program_decode_buffer_ref(data.data + offset);
+  } else {
+    const uint32_t length =
+        loom_cmd_program_argument_byte_length(argument.kind);
+    for (uint32_t i = 0; i < length; ++i) {
+      argument.value.scalar_bits |= (uint64_t)data.data[offset + i] << (i * 8);
+    }
+  }
+  return argument;
+}
+
 loom_cmd_program_command_t loom_cmd_program_command_at(
     const loom_cmd_program_t* program, uint32_t index) {
   IREE_ASSERT_ARGUMENT(program);

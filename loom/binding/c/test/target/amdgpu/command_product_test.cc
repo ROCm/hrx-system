@@ -40,6 +40,115 @@ loomc_status_t CaptureKernelRequest(void* user_data, loomc_request_t* request) {
   return loomc_ok_status();
 }
 
+TEST(AmdgpuCommandInspectionTest,
+     IncludesGeneratedCountProducerAndRequestJoins) {
+  TargetEnvironmentPtr target_environment = CreateAmdgpuTargetEnvironment();
+  ContextPtr context = CreateAmdgpuContext(target_environment.get());
+  WorkspacePtr workspace = CreateWorkspace();
+  TargetProfilePtr profile =
+      CreateTargetProfile(target_environment.get(), "gfx1151");
+  SourcePtr source = CreateTextSource("generated_count_inspection.loom", R"(
+target.decl @device
+kernel.def target(@device) @consume(%count_storage: buffer) {
+  %offset = index.constant 0 : offset
+  %index = index.constant 0 : index
+  %counts = buffer.view %count_storage[%offset] : buffer -> view<1xi32>
+  %raw_count = view.load %counts[%index] : view<1xi32> -> i32
+  %wide_count = scalar.extui %raw_count : i32 to i64
+  %count = index.cast %wide_count : i64 to index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  kernel.return
+}
+command.def public @root() launch(%count_storage: buffer) {
+  kernel.launch @consume[%count_storage]() : [buffer]()
+  command.return
+}
+)");
+  LinkIndexPtr index = CreateLinkIndex(context.get(), source.get());
+  CommandCompilerPtr command_compiler = CreateCommandCompiler(index.get());
+  KernelRequestCapture capture;
+  const loomc_cmd_program_product_options_t options = {
+      .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
+      .structure_size = sizeof(options),
+      .compiler = command_compiler.get(),
+      .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
+      .target_profile = profile.get(),
+      .request_sink = {CaptureKernelRequest, &capture},
+  };
+  loomc_product_t* raw_product = nullptr;
+  loomc_result_t* raw_result = nullptr;
+  LOOMC_ASSERT_OK(loomc_cmd_program_product_build(workspace.get(), &options,
+                                                  loomc_allocator_system(),
+                                                  &raw_product, &raw_result));
+  ProductPtr product(raw_product);
+  ResultPtr result(raw_result);
+  ExpectSucceededResult(result.get());
+  ASSERT_NE(product, nullptr);
+  ASSERT_EQ(capture.requests.size(), 2u);
+  result.reset();
+  command_compiler.reset();
+  index.reset();
+  source.reset();
+  profile.reset();
+  workspace.reset();
+  context.reset();
+
+  loomc_cmd_program_layout_t layout = {};
+  ASSERT_TRUE(loomc_cmd_program_product_layout(product.get(), 0, &layout));
+  ASSERT_EQ(layout.command_count, 2u);
+  EXPECT_GE(layout.transient.required_byte_length, 12u);
+  loomc_cmd_command_t producer = {}, consumer = {};
+  ASSERT_TRUE(
+      loomc_cmd_program_product_command_at(product.get(), 0, 0, &producer));
+  ASSERT_TRUE(
+      loomc_cmd_program_product_command_at(product.get(), 0, 1, &consumer));
+  EXPECT_EQ(producer.kind, LOOMC_CMD_COMMAND_KIND_DISPATCH_DIRECT);
+  EXPECT_EQ(consumer.kind, LOOMC_CMD_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC);
+  EXPECT_TRUE(consumer.begins_barrier_wave);
+  const auto& counts = consumer.payload.dispatch.workgroup_count_buffer;
+  EXPECT_EQ(counts.role, LOOMC_CMD_BUFFER_ROLE_REBINDABLE);
+  EXPECT_EQ(counts.root_index, layout.transient.binding_index);
+  EXPECT_EQ(counts.byte_length, 12u);
+  bool producer_writes_count_root = false;
+  for (uint32_t i = 0; i < producer.argument_count; ++i) {
+    loomc_cmd_argument_t argument = {};
+    ASSERT_TRUE(loomc_cmd_program_product_argument_at(product.get(), 0, 0, i,
+                                                      &argument));
+    producer_writes_count_root |=
+        argument.kind == LOOMC_CMD_ARGUMENT_KIND_BUFFER &&
+        argument.value.buffer.role == counts.role &&
+        argument.value.buffer.root_index == counts.root_index &&
+        argument.value.buffer.byte_offset <= counts.byte_offset;
+  }
+  EXPECT_TRUE(producer_writes_count_root);
+  // Both the generated helper and source consumer have independently owned
+  // requests; neither a symbol-name heuristic nor request-count multiplicity is
+  // used to associate the final dispatches.
+  for (const auto* command : {&producer, &consumer}) {
+    uint32_t matching_bindings = 0;
+    for (const auto& request : capture.requests) {
+      for (loomc_host_size_t i = 0;
+           i < loomc_request_binding_count(request.get()); ++i) {
+        loomc_request_binding_t binding = {};
+        ASSERT_TRUE(loomc_request_binding_at(request.get(), i, &binding));
+        if (binding.requirement_ordinal !=
+            command->payload.dispatch.requirement_ordinal) {
+          continue;
+        }
+        ++matching_bindings;
+        loomc_request_root_t root = {};
+        EXPECT_TRUE(
+            loomc_request_root_at(request.get(), binding.root_ordinal, &root));
+        EXPECT_EQ(loomc_source_format(loomc_request_source(request.get())),
+                  LOOMC_SOURCE_FORMAT_BYTECODE);
+      }
+    }
+    EXPECT_EQ(matching_bindings, 1u);
+  }
+}
+
 class AmdgpuCommandProductTest
     : public ::testing::TestWithParam<std::tuple<bool, bool>> {};
 

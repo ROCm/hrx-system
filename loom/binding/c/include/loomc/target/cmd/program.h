@@ -420,6 +420,163 @@ LOOMC_API_EXPORT loomc_status_t loomc_cmd_program_product_build_module(
     loomc_allocator_t allocator, loomc_product_t** out_product,
     loomc_result_t** out_result);
 
+/// Materialization role of a final command buffer root.
+typedef enum loomc_cmd_buffer_role_e {
+  LOOMC_CMD_BUFFER_ROLE_FIXED = 1,
+  LOOMC_CMD_BUFFER_ROLE_REBINDABLE = 2,
+} loomc_cmd_buffer_role_t;
+
+/// Exact root-relative range. byte_length == UINT64_MAX means remaining root
+/// storage; the caller must supply that root's capacity. Roles have separate
+/// root ordinal spaces. Overlapping ranges in one root alias.
+typedef struct loomc_cmd_buffer_ref_t {
+  loomc_cmd_buffer_role_t role;
+  uint32_t root_index;
+  uint64_t byte_offset;
+  uint64_t byte_length;
+} loomc_cmd_buffer_ref_t;
+
+/// One launch buffer placement, in source signature order.
+typedef struct loomc_cmd_launch_binding_t {
+  loomc_cmd_buffer_role_t role;
+  uint32_t root_index;
+} loomc_cmd_launch_binding_t;
+
+/// Storage supplied for a compiler-owned rebindable slab/table.
+typedef struct loomc_cmd_storage_requirement_t {
+  /// UINT32_MAX when no storage is required.
+  uint32_t binding_index;
+  uint64_t required_byte_length;
+  uint64_t minimum_alignment;
+} loomc_cmd_storage_requirement_t;
+
+/// Final resource and inspection-table sizes for one program.
+typedef struct loomc_cmd_program_layout_t {
+  uint32_t fixed_buffer_count;
+  uint32_t rebindable_binding_count;
+  uint32_t executable_count;
+  uint32_t entry_count;
+  loomc_cmd_storage_requirement_t transient;
+  loomc_cmd_storage_requirement_t launch_counts;
+  uint32_t command_count;
+  uint32_t launch_binding_count;
+  uint32_t parameter_root_count;
+  uint32_t parameter_count;
+} loomc_cmd_program_layout_t;
+
+/// Final issue semantics. A row's begins_barrier_wave also preserves a barrier
+/// folded into its payload. Same-wave traversal order does not imply a serial
+/// GPU dependency between every pair of rows.
+typedef enum loomc_cmd_command_kind_e {
+  LOOMC_CMD_COMMAND_KIND_FILL = 1,
+  LOOMC_CMD_COMMAND_KIND_COPY = 2,
+  LOOMC_CMD_COMMAND_KIND_DISPATCH_DIRECT = 3,
+  LOOMC_CMD_COMMAND_KIND_DISPATCH_INDIRECT_STATIC = 4,
+  LOOMC_CMD_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC = 5,
+  LOOMC_CMD_COMMAND_KIND_BARRIER_EXECUTION = 6,
+  LOOMC_CMD_COMMAND_KIND_TIMESTAMP = 7,
+} loomc_cmd_command_kind_t;
+
+/// One final command, addressed by program-local traversal ordinal. Every
+/// dispatch is present, including compiler-generated helper dispatches.
+/// Original logical workload tuples and call stacks are not reconstructed.
+typedef struct loomc_cmd_command_t {
+  loomc_cmd_command_kind_t kind;
+  bool begins_barrier_wave;
+  uint32_t argument_count;
+  union {
+    struct {
+      uint32_t executable_ordinal;
+      uint32_t entry_ordinal;
+      /// Product-wide requirement; join through loomc_request_binding_t.
+      loomc_requirement_ordinal_t requirement_ordinal;
+      /// Used by DIRECT only, in XYZ order.
+      uint32_t workgroup_count[3];
+      /// Used by either INDIRECT kind. Tuple is three little-endian u32s,
+      /// 12 bytes aligned to 4. Dynamic values must come from valid
+      /// input/setup.
+      loomc_cmd_buffer_ref_t workgroup_count_buffer;
+    } dispatch;
+    struct {
+      loomc_cmd_buffer_ref_t target;
+      uint32_t pattern;
+      uint32_t pattern_length;
+    } fill;
+    struct {
+      loomc_cmd_buffer_ref_t source;
+      loomc_cmd_buffer_ref_t target;
+    } copy;
+    struct {
+      loomc_cmd_buffer_ref_t target;
+    } timestamp;
+  } payload;
+} loomc_cmd_command_t;
+
+/// Exact logical ABI payload carrier. B32, for example, does not distinguish
+/// source f32 from i32: replay its bits without guessing a source scalar type.
+typedef enum loomc_cmd_argument_kind_e {
+  LOOMC_CMD_ARGUMENT_KIND_BUFFER = 1,
+  LOOMC_CMD_ARGUMENT_KIND_B8 = 2,
+  LOOMC_CMD_ARGUMENT_KIND_B16 = 3,
+  LOOMC_CMD_ARGUMENT_KIND_B32 = 4,
+  LOOMC_CMD_ARGUMENT_KIND_B64 = 5,
+  LOOMC_CMD_ARGUMENT_KIND_INDEX = 6,
+  LOOMC_CMD_ARGUMENT_KIND_OFFSET = 7,
+} loomc_cmd_argument_kind_t;
+
+typedef struct loomc_cmd_argument_t {
+  loomc_cmd_argument_kind_t kind;
+  union {
+    /// Exact low payload bits; INDEX preserves signed two's-complement i64.
+    uint64_t scalar_bits;
+    loomc_cmd_buffer_ref_t buffer;
+  } value;
+} loomc_cmd_argument_t;
+
+/// Minimum storage for one fixed root containing immutable parameters.
+typedef struct loomc_cmd_parameter_root_t {
+  uint32_t fixed_buffer_index;
+  uint64_t required_byte_length;
+  uint64_t minimum_alignment;
+} loomc_cmd_parameter_root_t;
+
+/// One concrete immutable parameter placement. key is fully substituted and
+/// borrowed from the retained product. No GGUF naming convention is inferred.
+typedef struct loomc_cmd_parameter_t {
+  loomc_string_view_t key;
+  uint32_t fixed_buffer_index;
+  uint64_t byte_offset;
+  uint64_t byte_length;
+  uint64_t minimum_alignment;
+} loomc_cmd_parameter_t;
+
+/// Queries below inspect the final selected product, never raw source launches.
+/// Views/strings remain valid while product is retained, independently of its
+/// compiler, module, workspace and result. Queries are read-only and
+/// thread-safe. A wrong product kind, NULL output or invalid ordinal returns
+/// false without modifying the output. No source semantic types, access effects
+/// or erased workload/provenance reconstruction is implied by these exact ABI
+/// records.
+LOOMC_API_EXPORT bool loomc_cmd_program_product_layout(
+    const loomc_product_t* product, loomc_host_size_t program_ordinal,
+    loomc_cmd_program_layout_t* out_layout);
+LOOMC_API_EXPORT bool loomc_cmd_program_product_command_at(
+    const loomc_product_t* product, loomc_host_size_t program_ordinal,
+    loomc_host_size_t command_ordinal, loomc_cmd_command_t* out_command);
+LOOMC_API_EXPORT bool loomc_cmd_program_product_argument_at(
+    const loomc_product_t* product, loomc_host_size_t program_ordinal,
+    loomc_host_size_t command_ordinal, loomc_host_size_t argument_ordinal,
+    loomc_cmd_argument_t* out_argument);
+LOOMC_API_EXPORT bool loomc_cmd_program_product_launch_binding_at(
+    const loomc_product_t* product, loomc_host_size_t program_ordinal,
+    loomc_host_size_t ordinal, loomc_cmd_launch_binding_t* out_binding);
+LOOMC_API_EXPORT bool loomc_cmd_program_product_parameter_root_at(
+    const loomc_product_t* product, loomc_host_size_t program_ordinal,
+    loomc_host_size_t ordinal, loomc_cmd_parameter_root_t* out_root);
+LOOMC_API_EXPORT bool loomc_cmd_program_product_parameter_at(
+    const loomc_product_t* product, loomc_host_size_t program_ordinal,
+    loomc_host_size_t ordinal, loomc_cmd_parameter_t* out_parameter);
+
 /// Returns the process-local command-product descriptor.
 ///
 /// The returned pointer may be compared with `loomc_product_descriptor` to

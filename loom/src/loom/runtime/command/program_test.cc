@@ -453,6 +453,44 @@ TEST(CmdProgramTest, ParsesCanonicalProgram) {
   EXPECT_EQ(parameter.minimum_alignment, 256u);
 }
 
+TEST(CmdProgramTest, DecodesExactArgumentCarriersAndBufferAliases) {
+  for (uint32_t bits : {UINT32_C(0x80000000), UINT32_C(0x7fc01234)}) {
+    std::vector<uint8_t> data = BuildValidProgram();
+    const uint32_t argument_offset = iree_unaligned_load_le_u32(
+        data.data() + LOOM_CMD_PROGRAM_HEADER_ARGUMENT_DATA_OFFSET);
+    iree_unaligned_store_le_u32(data.data() + argument_offset, bits);
+    iree_unaligned_store_le_u64(data.data() + argument_offset + 12,
+                                UINT64_MAX - 2);
+    loom_cmd_program_t program = {};
+    IREE_ASSERT_OK(loom_cmd_program_parse(AsByteSpan(data), &program));
+    const auto command = loom_cmd_program_command_at(&program, 2);
+    const auto raw =
+        loom_cmd_program_command_argument_at(&program, &command, 0);
+    EXPECT_EQ(raw.kind, LOOM_CMD_PROGRAM_ARGUMENT_KIND_B32);
+    EXPECT_EQ(raw.value.scalar_bits, bits);
+    const auto wide =
+        loom_cmd_program_command_argument_at(&program, &command, 1);
+    EXPECT_EQ(wide.kind, LOOM_CMD_PROGRAM_ARGUMENT_KIND_B64);
+    EXPECT_EQ(wide.value.scalar_bits, UINT64_C(0x123456789));
+    const auto index =
+        loom_cmd_program_command_argument_at(&program, &command, 2);
+    EXPECT_EQ(index.kind, LOOM_CMD_PROGRAM_ARGUMENT_KIND_INDEX);
+    EXPECT_EQ(index.value.scalar_bits, UINT64_MAX - 2);
+    const auto offset =
+        loom_cmd_program_command_argument_at(&program, &command, 3);
+    EXPECT_EQ(offset.kind, LOOM_CMD_PROGRAM_ARGUMENT_KIND_OFFSET);
+    EXPECT_EQ(offset.value.scalar_bits, 4096u);
+    const auto buffer =
+        loom_cmd_program_command_argument_at(&program, &command, 4);
+    EXPECT_EQ(buffer.kind, LOOM_CMD_PROGRAM_ARGUMENT_KIND_BUFFER);
+    EXPECT_EQ(buffer.value.buffer.role,
+              LOOM_CMD_PROGRAM_BUFFER_ROLE_REBINDABLE);
+    EXPECT_EQ(buffer.value.buffer.root_index, 0u);
+    EXPECT_EQ(buffer.value.buffer.byte_offset, 4u);
+    EXPECT_EQ(buffer.value.buffer.byte_length, 8u);
+  }
+}
+
 TEST(CmdProgramTest, IteratesCanonicalBarrierWavesOnce) {
   std::vector<uint8_t> data = BuildValidProgram();
   const uint32_t command_table_offset = iree_unaligned_load_le_u32(

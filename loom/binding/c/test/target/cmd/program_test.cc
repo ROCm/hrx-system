@@ -305,6 +305,204 @@ command.def public @public_root() launch(%storage: buffer) {
             image_contents);
 }
 
+TEST(TargetCmdProgramTest, ReflectsFinalPayloadsParametersAndIndirectCounts) {
+  ContextPtr context = CreateContext();
+  WorkspacePtr workspace = CreateWorkspace();
+  SourcePtr source = CreateTextSource("inspection.loom", R"(
+kernel.entry.decl @mixed(%idx: index, %off: offset, %raw: i64, %small: i8, %half: i16, %float: f32, %weight: view<3xi32>, %out: buffer)
+kernel.entry.decl @counted()
+command.def public @direct() launch(%parameters: buffer, %output: buffer) {
+  %layer = index.constant 3 : index
+  %groups = index.constant 7 : index
+  %idx = index.constant -3 : index
+  %off = index.constant 4294967296 : offset
+  %raw = scalar.constant 4886718345 : i64
+  %small = scalar.constant -1 : i8
+  %half = scalar.constant -2 : i16
+  %float = scalar.constant -0.0 : f32
+  %weight = command.parameter %parameters, "blk.{}.weight"[%layer] : view<3xi32>
+  command.concurrent {
+    kernel.dispatch @mixed[%groups](%idx, %off, %raw, %small, %half, %float, %weight, %output) : [index](index, offset, i64, i8, i16, f32, view<3xi32>, buffer)
+    kernel.dispatch @mixed[%groups](%idx, %off, %raw, %small, %half, %float, %weight, %output) : [index](index, offset, i64, i8, i16, f32, view<3xi32>, buffer)
+  }
+  kernel.dispatch @mixed[%groups](%idx, %off, %raw, %small, %half, %float, %weight, %output) : [index](index, offset, i64, i8, i16, f32, view<3xi32>, buffer)
+  command.return
+}
+command.def public @static_counts() launch(%parameters: buffer) {
+  %counts = command.parameter %parameters, "counts" : view<3xi32>
+  kernel.dispatch @counted[%counts]() : [view<3xi32>]()
+  command.return
+}
+command.def public @dynamic_counts() launch(%storage: buffer) {
+  %zero = index.constant 0 : offset
+  %counts = buffer.view %storage[%zero] : buffer -> view<3xi32>
+  kernel.dispatch @counted[%counts]() : [view<3xi32>]()
+  command.return
+}
+)");
+  ModulePtr module =
+      DeserializeModule(context.get(), workspace.get(), source.get());
+  const loomc_string_view_t roots[] = {
+      loomc_make_cstring_view("direct"),
+      loomc_make_cstring_view("static_counts"),
+      loomc_make_cstring_view("dynamic_counts"),
+      loomc_make_cstring_view("direct"),
+  };
+  const loomc_cmd_program_module_options_t options = {
+      .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_MODULE_OPTIONS,
+      .structure_size = sizeof(options),
+      .root_symbols = roots,
+      .root_symbol_count = std::size(roots),
+  };
+  loomc_product_t* product_raw = nullptr;
+  loomc_result_t* result_raw = nullptr;
+  LOOMC_ASSERT_OK(loomc_cmd_program_product_build_module(
+      workspace.get(), module.get(), &options, loomc_allocator_system(),
+      &product_raw, &result_raw));
+  ProductPtr product(product_raw);
+  ResultPtr result(result_raw);
+  ExpectSucceededResult(result.get());
+  ASSERT_NE(product, nullptr);
+  ASSERT_EQ(loomc_cmd_program_product_program_count(product.get()), 4u);
+
+  // All inspection storage survives its source/compiler invocation.
+  result.reset();
+  module.reset();
+  source.reset();
+  workspace.reset();
+  context.reset();
+
+  loomc_cmd_program_layout_t layout = {};
+  ASSERT_TRUE(loomc_cmd_program_product_layout(product.get(), 0, &layout));
+  EXPECT_EQ(layout.fixed_buffer_count, 1u);
+  EXPECT_EQ(layout.rebindable_binding_count, 1u);
+  EXPECT_EQ(layout.launch_binding_count, 2u);
+  EXPECT_EQ(layout.parameter_root_count, 1u);
+  EXPECT_EQ(layout.parameter_count, 1u);
+  EXPECT_EQ(layout.transient.binding_index, UINT32_MAX);
+  EXPECT_EQ(layout.transient.required_byte_length, 0u);
+  loomc_cmd_launch_binding_t binding = {};
+  ASSERT_TRUE(loomc_cmd_program_product_launch_binding_at(product.get(), 0, 0,
+                                                          &binding));
+  EXPECT_EQ(binding.role, LOOMC_CMD_BUFFER_ROLE_FIXED);
+  EXPECT_EQ(binding.root_index, 0u);
+  ASSERT_TRUE(loomc_cmd_program_product_launch_binding_at(product.get(), 0, 1,
+                                                          &binding));
+  EXPECT_EQ(binding.role, LOOMC_CMD_BUFFER_ROLE_REBINDABLE);
+  EXPECT_EQ(binding.root_index, 0u);
+  loomc_cmd_parameter_root_t parameter_root = {};
+  ASSERT_TRUE(loomc_cmd_program_product_parameter_root_at(product.get(), 0, 0,
+                                                          &parameter_root));
+  EXPECT_EQ(parameter_root.fixed_buffer_index, 0u);
+  EXPECT_GE(parameter_root.required_byte_length, 12u);
+  EXPECT_GE(parameter_root.minimum_alignment, 4u);
+  loomc_cmd_parameter_t parameter = {};
+  ASSERT_TRUE(
+      loomc_cmd_program_product_parameter_at(product.get(), 0, 0, &parameter));
+  EXPECT_EQ(ToString(parameter.key), "blk.3.weight");
+  EXPECT_EQ(parameter.byte_length, 12u);
+  EXPECT_EQ(parameter.fixed_buffer_index, 0u);
+
+  uint32_t dispatches = 0;
+  uint32_t wave_starts = 0;
+  for (uint32_t i = 0; i < layout.command_count; ++i) {
+    loomc_cmd_command_t command = {};
+    ASSERT_TRUE(
+        loomc_cmd_program_product_command_at(product.get(), 0, i, &command));
+    wave_starts += command.begins_barrier_wave ? 1u : 0u;
+    if (command.kind == LOOMC_CMD_COMMAND_KIND_BARRIER_EXECUTION) {
+      continue;
+    }
+    ASSERT_EQ(command.kind, LOOMC_CMD_COMMAND_KIND_DISPATCH_DIRECT);
+    ++dispatches;
+    EXPECT_EQ(command.argument_count, 8u);
+    EXPECT_EQ(command.payload.dispatch.workgroup_count[0], 7u);
+    EXPECT_EQ(command.payload.dispatch.workgroup_count[1], 1u);
+    EXPECT_EQ(command.payload.dispatch.workgroup_count[2], 1u);
+    loomc_cmd_program_t program = {};
+    ASSERT_TRUE(
+        loomc_cmd_program_product_program_at(product.get(), 0, &program));
+    EXPECT_EQ(command.payload.dispatch.requirement_ordinal,
+              program.entry_requirement_ordinals[command.payload.dispatch
+                                                     .entry_ordinal]);
+    const loomc_cmd_argument_kind_t kinds[] = {
+        LOOMC_CMD_ARGUMENT_KIND_INDEX, LOOMC_CMD_ARGUMENT_KIND_OFFSET,
+        LOOMC_CMD_ARGUMENT_KIND_B64,   LOOMC_CMD_ARGUMENT_KIND_B8,
+        LOOMC_CMD_ARGUMENT_KIND_B16,   LOOMC_CMD_ARGUMENT_KIND_B32,
+    };
+    const uint64_t bits[] = {
+        UINT64_MAX - 2, UINT64_C(4294967296), UINT64_C(4886718345), 255,
+        65534,          UINT64_C(0x80000000)};
+    for (uint32_t arg = 0; arg < std::size(kinds); ++arg) {
+      loomc_cmd_argument_t value = {};
+      ASSERT_TRUE(loomc_cmd_program_product_argument_at(product.get(), 0, i,
+                                                        arg, &value));
+      EXPECT_EQ(value.kind, kinds[arg]);
+      EXPECT_EQ(value.value.scalar_bits, bits[arg]);
+    }
+    loomc_cmd_argument_t weight = {}, output = {};
+    ASSERT_TRUE(
+        loomc_cmd_program_product_argument_at(product.get(), 0, i, 6, &weight));
+    ASSERT_TRUE(
+        loomc_cmd_program_product_argument_at(product.get(), 0, i, 7, &output));
+    EXPECT_EQ(weight.kind, LOOMC_CMD_ARGUMENT_KIND_BUFFER);
+    EXPECT_EQ(weight.value.buffer.role, LOOMC_CMD_BUFFER_ROLE_FIXED);
+    EXPECT_EQ(weight.value.buffer.byte_offset, parameter.byte_offset);
+    EXPECT_EQ(weight.value.buffer.byte_length, parameter.byte_length);
+    EXPECT_EQ(output.kind, LOOMC_CMD_ARGUMENT_KIND_BUFFER);
+    EXPECT_EQ(output.value.buffer.role, LOOMC_CMD_BUFFER_ROLE_REBINDABLE);
+    EXPECT_EQ(output.value.buffer.root_index, 0u);
+    EXPECT_EQ(output.value.buffer.byte_length, UINT64_MAX);
+  }
+  EXPECT_EQ(dispatches, 3u);
+  EXPECT_GE(wave_starts, 1u);
+
+  for (uint32_t root : {1u, 2u}) {
+    loomc_cmd_program_layout_t indirect_layout = {};
+    ASSERT_TRUE(loomc_cmd_program_product_layout(product.get(), root,
+                                                 &indirect_layout));
+    ASSERT_EQ(indirect_layout.command_count, 1u);
+    loomc_cmd_command_t command = {};
+    ASSERT_TRUE(
+        loomc_cmd_program_product_command_at(product.get(), root, 0, &command));
+    EXPECT_EQ(command.kind,
+              root == 1 ? LOOMC_CMD_COMMAND_KIND_DISPATCH_INDIRECT_STATIC
+                        : LOOMC_CMD_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC);
+    EXPECT_EQ(command.argument_count, 0u);
+    EXPECT_EQ(command.payload.dispatch.workgroup_count_buffer.role,
+              root == 1 ? LOOMC_CMD_BUFFER_ROLE_FIXED
+                        : LOOMC_CMD_BUFFER_ROLE_REBINDABLE);
+    EXPECT_EQ(command.payload.dispatch.workgroup_count_buffer.byte_length, 12u);
+  }
+  loomc_cmd_program_layout_t repeated_layout = {};
+  ASSERT_TRUE(
+      loomc_cmd_program_product_layout(product.get(), 3, &repeated_layout));
+  EXPECT_EQ(repeated_layout.command_count, layout.command_count);
+
+  // Invalid queries leave caller storage unchanged.
+  layout.command_count = 999;
+  EXPECT_FALSE(loomc_cmd_program_product_layout(nullptr, 0, &layout));
+  EXPECT_FALSE(loomc_cmd_program_product_layout(product.get(), 4, &layout));
+  EXPECT_FALSE(loomc_cmd_program_product_layout(product.get(), 0, nullptr));
+  EXPECT_EQ(layout.command_count, 999u);
+  loomc_cmd_command_t invalid_command = {};
+  invalid_command.argument_count = 999;
+  EXPECT_FALSE(loomc_cmd_program_product_command_at(product.get(), 0, SIZE_MAX,
+                                                    &invalid_command));
+  EXPECT_EQ(invalid_command.argument_count, 999u);
+  loomc_cmd_argument_t invalid_argument = {};
+  invalid_argument.value.scalar_bits = 999;
+  EXPECT_FALSE(loomc_cmd_program_product_argument_at(product.get(), 0, 0, 8,
+                                                     &invalid_argument));
+  EXPECT_EQ(invalid_argument.value.scalar_bits, 999u);
+  EXPECT_FALSE(loomc_cmd_program_product_launch_binding_at(product.get(), 0, 2,
+                                                           &binding));
+  EXPECT_FALSE(
+      loomc_cmd_program_product_parameter_at(product.get(), 0, 1, &parameter));
+  EXPECT_FALSE(loomc_cmd_program_product_parameter_root_at(product.get(), 0, 1,
+                                                           &parameter_root));
+}
+
 TEST(TargetCmdProgramTest,
      ComposesMixedProvidersAndPublishesDurableKernelRequests) {
   ContextPtr context = CreateContext();
