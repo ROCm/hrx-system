@@ -1,7 +1,6 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
-#include "buffer_table.h"
 #include "hrx_internal.h"
 
 //===----------------------------------------------------------------------===//
@@ -482,57 +481,6 @@ hrx_status_t hrx_graph_add_fill_buffer_node(
         graph, deps, dep_count, attrs->dst, attrs->pattern, attrs->pattern_size,
         out_node);
   }
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
-hrx_status_t hrx_graph_add_copy_ptr_node(
-    hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
-    const hrx_graph_copy_ptr_node_attrs_t* attrs, hrx_graph_node_t* out_node) {
-  IREE_ASSERT_ARGUMENT(graph);
-  IREE_ASSERT_ARGUMENT(attrs);
-  IREE_TRACE_ZONE_BEGIN(z0);
-  hrx_buffer_t dst_buf = NULL;
-  size_t dst_offset = 0;
-  HRX_RETURN_AND_END_ZONE(
-      z0, hrx_buffer_table_find(&graph->device->buffer_table,
-                                (uint64_t)(uintptr_t)attrs->dst, &dst_buf,
-                                &dst_offset, NULL));
-  hrx_buffer_t src_buf = NULL;
-  size_t src_offset = 0;
-  HRX_RETURN_AND_END_ZONE(
-      z0, hrx_buffer_table_find(&graph->device->buffer_table,
-                                (uint64_t)(uintptr_t)attrs->src, &src_buf,
-                                &src_offset, NULL));
-  const hrx_graph_copy_buffer_node_attrs_t native_attrs = {
-      .src = {src_buf, src_offset, attrs->size},
-      .dst = {dst_buf, dst_offset, attrs->size},
-  };
-  hrx_status_t status = hrx_graph_add_copy_buffer_node(graph, deps, dep_count,
-                                                       &native_attrs, out_node);
-  IREE_TRACE_ZONE_END(z0);
-  return status;
-}
-
-hrx_status_t hrx_graph_add_fill_ptr_node(
-    hrx_graph_t graph, const hrx_graph_node_t* deps, size_t dep_count,
-    const hrx_graph_fill_ptr_node_attrs_t* attrs, hrx_graph_node_t* out_node) {
-  IREE_ASSERT_ARGUMENT(graph);
-  IREE_ASSERT_ARGUMENT(attrs);
-  IREE_TRACE_ZONE_BEGIN(z0);
-  hrx_buffer_t dst_buf = NULL;
-  size_t dst_offset = 0;
-  HRX_RETURN_AND_END_ZONE(
-      z0, hrx_buffer_table_find(&graph->device->buffer_table,
-                                (uint64_t)(uintptr_t)attrs->dst, &dst_buf,
-                                &dst_offset, NULL));
-  const hrx_graph_fill_buffer_node_attrs_t native_attrs = {
-      .dst = {dst_buf, dst_offset, attrs->count},
-      .pattern = attrs->value,
-      .pattern_size = 1,
-  };
-  hrx_status_t status = hrx_graph_add_fill_buffer_node(graph, deps, dep_count,
-                                                       &native_attrs, out_node);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }

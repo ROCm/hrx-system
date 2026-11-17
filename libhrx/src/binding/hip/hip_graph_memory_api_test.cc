@@ -121,6 +121,8 @@ struct HipGraphApi {
   decltype(&hipStreamGetCaptureInfo_v2) capture_info = nullptr;
   // Records or submits a contiguous streaming copy.
   decltype(&hipMemcpyAsync) copy_async = nullptr;
+  // Records or submits a pitched multidimensional streaming copy.
+  decltype(&hipMemcpy3DAsync) copy_3d_async = nullptr;
   // Enumerates only public graph operations.
   decltype(&hipGraphGetNodes) get_nodes = nullptr;
   // Adds an independently described nested graph.
@@ -200,6 +202,7 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     RESOLVE(end_capture, "hipStreamEndCapture");
     RESOLVE(capture_info, "hipStreamGetCaptureInfo_v2");
     RESOLVE(copy_async, "hipMemcpyAsync");
+    RESOLVE(copy_3d_async, "hipMemcpy3DAsync");
     RESOLVE(get_nodes, "hipGraphGetNodes");
     RESOLVE(add_child, "hipGraphAddChildGraphNode");
     RESOLVE(get_child, "hipGraphChildGraphNodeGetGraph");
@@ -335,20 +338,40 @@ class HipGraphMemoryApiTest : public ::testing::Test {
 
   void CheckPendingStagedCopyUpdates(bool pitched) {
     ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
-    const size_t width = pitched ? 16 : source_.size();
+    const size_t width = pitched ? 4 : source_.size();
     const size_t height = pitched ? 2 : 1;
     const size_t depth = pitched ? 2 : 1;
+    const size_t pitch = pitched ? 8 : width;
+    const size_t slice_height = pitched ? 3 : height;
     hipMemcpy3DParms upload_params = {
-        .srcPtr = {source_.data(), width, width, height},
-        .dstPtr = {device_, width, width, height},
+        .srcPos = {pitched ? size_t{1} : 0, pitched ? size_t{1} : 0, 0},
+        .srcPtr = {source_.data(), pitch, pitch, slice_height},
+        .dstPos = {pitched ? size_t{1} : 0, pitched ? size_t{1} : 0, 0},
+        .dstPtr = {device_, pitch, pitch, slice_height},
         .extent = {width, height, depth},
         .kind = hipMemcpyHostToDevice,
     };
     hipMemcpy3DParms download_params = {
-        .srcPtr = {device_, width, width, height},
-        .dstPtr = {destination_.data(), width, width, height},
+        .srcPos = {pitched ? size_t{1} : 0, pitched ? size_t{1} : 0, 0},
+        .srcPtr = {device_, pitch, pitch, slice_height},
+        .dstPos = {pitched ? size_t{2} : 0, pitched ? size_t{1} : 0, 0},
+        .dstPtr = {destination_.data(), pitched ? 10 : width,
+                   pitched ? 10 : width, slice_height},
         .extent = {width, height, depth},
         .kind = hipMemcpyDeviceToHost,
+    };
+    const auto expected = [pitched](const std::array<uint8_t, 64>& input) {
+      if (!pitched) {
+        return input;
+      }
+      std::array<uint8_t, 64> output = {};
+      constexpr size_t source_offsets[] = {9, 17, 33, 41};
+      constexpr size_t target_offsets[] = {12, 22, 42, 52};
+      for (size_t i = 0; i < 4; ++i) {
+        std::copy_n(input.data() + source_offsets[i], 4,
+                    output.data() + target_offsets[i]);
+      }
+      return output;
     };
     hipGraphNode_t upload = nullptr;
     hipGraphNode_t download = nullptr;
@@ -384,13 +407,18 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     invalid_params.dstPtr.pitch = 1;
     EXPECT_EQ(hipErrorInvalidValue, api_.set_executable_copy_3d(
                                         executable_, upload, &invalid_params));
+    invalid_params = upload_params;
+    invalid_params.srcPtr.ysize = 0;
+    invalid_params.srcPos.y = SIZE_MAX;
+    EXPECT_EQ(hipErrorInvalidValue, api_.set_executable_copy_3d(
+                                        executable_, upload, &invalid_params));
     hipMemcpy3DParms queried_params = {};
     ASSERT_EQ(hipSuccess, api_.get_copy(upload, &queried_params));
     EXPECT_EQ(queried_params.srcPtr.ptr, source_.data());
-    EXPECT_EQ(queried_params.dstPtr.pitch, width);
+    EXPECT_EQ(queried_params.dstPtr.pitch, pitch);
     ReleaseStreamGate();
     ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
-    EXPECT_EQ(destination_, source_);
+    EXPECT_EQ(destination_, expected(source_));
     EXPECT_EQ(observed_, (std::array<uint8_t, 64>{}));
 
     // Replacing the entire private graph releases its node references while
@@ -405,11 +433,11 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     EXPECT_EQ(result, hipGraphExecUpdateSuccess);
     ReleaseStreamGate();
     ASSERT_EQ(hipSuccess, api_.stream_synchronize(stream_));
-    EXPECT_EQ(observed_, replacement_);
+    EXPECT_EQ(observed_, expected(replacement_));
     destination_.fill(0);
     Replay();
     ASSERT_FALSE(HasFatalFailure());
-    EXPECT_EQ(destination_, source_);
+    EXPECT_EQ(destination_, expected(source_));
   }
 
   static void Increment(void* user_data) { ++*static_cast<int*>(user_data); }
@@ -424,7 +452,8 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     test->source_ = test->replacement_;
   }
 
-  void CheckPitchedCopyClone(bool implicit_slice_height, bool registered_host) {
+  void CheckPitchedCopyClone(bool implicit_slice_height, bool registered_host,
+                             bool capture = false) {
     ASSERT_EQ(hipSuccess, api_.allocate(&device_, source_.size()));
     void* source = source_.data();
     void* destination = destination_.data();
@@ -450,16 +479,27 @@ class HipGraphMemoryApiTest : public ::testing::Test {
         .extent = {4, 2, 2},
         .kind = hipMemcpyHostToDevice,
     };
-    hipGraphNode_t upload_node = nullptr;
-    ASSERT_EQ(hipSuccess,
-              api_.add_copy(&upload_node, graph_, nullptr, 0, &upload));
     hipMemcpy3DParms download = upload;
     download.srcPtr.ptr = device_;
     download.dstPtr.ptr = destination;
     download.kind = hipMemcpyDeviceToHost;
-    hipGraphNode_t download_node = nullptr;
-    ASSERT_EQ(hipSuccess, api_.add_copy(&download_node, graph_, &upload_node, 1,
-                                        &download));
+    if (capture) {
+      ASSERT_EQ(hipSuccess,
+                api_.begin_capture_to_graph(stream_, graph_, nullptr, nullptr,
+                                            0, hipStreamCaptureModeGlobal));
+      EXPECT_EQ(hipSuccess, api_.copy_3d_async(&upload, stream_));
+      EXPECT_EQ(hipSuccess, api_.copy_3d_async(&download, stream_));
+      hipGraph_t captured_graph = nullptr;
+      ASSERT_EQ(hipSuccess, api_.end_capture(stream_, &captured_graph));
+      ASSERT_EQ(graph_, captured_graph);
+    } else {
+      hipGraphNode_t upload_node = nullptr;
+      ASSERT_EQ(hipSuccess,
+                api_.add_copy(&upload_node, graph_, nullptr, 0, &upload));
+      hipGraphNode_t download_node = nullptr;
+      ASSERT_EQ(hipSuccess, api_.add_copy(&download_node, graph_, &upload_node,
+                                          1, &download));
+    }
     ASSERT_EQ(hipSuccess, api_.graph_clone(&clone_, graph_));
     ASSERT_EQ(hipSuccess, api_.graph_destroy(graph_));
     graph_ = nullptr;
@@ -1456,6 +1496,14 @@ TEST_F(HipGraphMemoryApiTest, ImplicitSliceHeightIncludesStagedCopyOrigins) {
 TEST_F(HipGraphMemoryApiTest,
        ImplicitSliceHeightIncludesRegisteredCopyOrigins) {
   CheckPitchedCopyClone(true, true);
+}
+
+TEST_F(HipGraphMemoryApiTest, CapturedPitchedCopiesPreserveStagedOrigins) {
+  CheckPitchedCopyClone(true, false, true);
+}
+
+TEST_F(HipGraphMemoryApiTest, CapturedPitchedCopiesPreserveRegisteredOrigins) {
+  CheckPitchedCopyClone(true, true, true);
 }
 
 TEST_F(HipGraphMemoryApiTest, StagedCopiesFollowPublicEnableAndDeletion) {

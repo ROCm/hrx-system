@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -122,6 +123,90 @@ GraphApi& Api() {
   static GraphApi api;
   return api;
 }
+
+// Measures public copy preparation separately from compilation and execution.
+// Both endpoints and the source alternatives outlive every measured template.
+template <bool update>
+void GraphCopyPrepare(benchmark::State& state) {
+  auto& api = Api();
+  const auto add =
+      api.Resolve<decltype(&hipGraphAddMemcpyNode)>("hipGraphAddMemcpyNode");
+  const auto replace = api.Resolve<decltype(&hipGraphMemcpyNodeSetParams)>(
+      "hipGraphMemcpyNodeSetParams");
+  const auto query = api.Resolve<decltype(&hipGraphMemcpyNodeGetParams)>(
+      "hipGraphMemcpyNodeGetParams");
+  const bool device = state.range(2) != 0;
+  const bool rectangular = state.range(1) == 3;
+  std::array<uint8_t, 1024> host_storage = {};
+  void* storage = host_storage.data();
+  if (device) {
+    Check(api.Resolve<decltype(&hipMalloc)>("hipMalloc")(&storage,
+                                                         host_storage.size()));
+  }
+  hipMemcpy3DParms parameters = {
+      .srcPos = {rectangular ? size_t{1} : 0, 0, 0},
+      .srcPtr = {storage, 32, 32, rectangular ? size_t{4} : 1},
+      .dstPos = {rectangular ? size_t{2} : 0, 0, 0},
+      .dstPtr = {static_cast<uint8_t*>(storage) + 768, 32, 32,
+                 rectangular ? size_t{4} : 1},
+      .extent = {16, rectangular ? size_t{3} : 1, rectangular ? size_t{2} : 1},
+      .kind = device ? hipMemcpyDeviceToDevice : hipMemcpyHostToHost,
+  };
+  std::vector<hipGraphNode_t> nodes(state.range(0));
+  const auto construct = [&]() {
+    hipGraph_t graph = nullptr;
+    Check(api.create(&graph, 0));
+    for (size_t i = 0; i < nodes.size(); ++i) {
+      Check(add(&nodes[i], graph, i ? &nodes[i - 1] : nullptr, i ? 1 : 0,
+                &parameters));
+    }
+    return graph;
+  };
+  hipGraph_t graph = construct();
+  size_t source_bank = 0;
+  for (auto _ : state) {
+    if constexpr (update) {
+      source_bank ^= 1;
+      parameters.srcPtr.ptr =
+          static_cast<uint8_t*>(storage) + source_bank * 256;
+      for (hipGraphNode_t node : nodes) {
+        Check(replace(node, &parameters));
+      }
+    } else {
+      state.PauseTiming();
+      Check(api.destroy(graph));
+      state.ResumeTiming();
+      graph = construct();
+    }
+    benchmark::DoNotOptimize(graph);
+  }
+  hipMemcpy3DParms observed = {};
+  Check(query(nodes.back(), &observed));
+  Require(observed.srcPtr.ptr == parameters.srcPtr.ptr &&
+              observed.dstPtr.ptr == parameters.dstPtr.ptr &&
+              observed.srcPos.x == parameters.srcPos.x &&
+              observed.dstPos.x == parameters.dstPos.x &&
+              observed.extent.width == parameters.extent.width &&
+              observed.extent.height == parameters.extent.height &&
+              observed.extent.depth == parameters.extent.depth,
+          "copy preparation changed public parameters");
+  Check(api.destroy(graph));
+  if (device) {
+    Check(api.Resolve<decltype(&hipFree)>("hipFree")(storage));
+  }
+  state.SetItemsProcessed(state.iterations() * state.range(0));
+}
+
+BENCHMARK_TEMPLATE(GraphCopyPrepare, false)
+    ->Name("GraphCopy/Construct")
+    ->ArgNames({"nodes", "dimensions", "device"})
+    ->ArgsProduct({{16, 1024}, {1, 3}, {0, 1}})
+    ->Unit(benchmark::kMicrosecond);
+BENCHMARK_TEMPLATE(GraphCopyPrepare, true)
+    ->Name("GraphCopy/Update")
+    ->ArgNames({"nodes", "dimensions", "device"})
+    ->ArgsProduct({{16, 1024}, {1, 3}, {0, 1}})
+    ->Unit(benchmark::kMicrosecond);
 
 enum class Topology { kIndependent, kChain, kFanIn, kFanOut };
 enum class Edges {
