@@ -28,6 +28,49 @@ typedef struct loom_inline_callables_eligibility_callback_t {
   void* user_data;
 } loom_inline_callables_eligibility_callback_t;
 
+// Simplifies a completed source closure before another caller clones it.
+// The composition plan owns traversal and calls this once at closure
+// completion.
+typedef struct loom_inline_callables_refinement_callback_t {
+  // Optional source cleanup; prepared Low closures never use this callback.
+  iree_status_t (*fn)(void* user_data, loom_module_t* module,
+                      loom_func_like_t function);
+  // Borrowed cleanup owner, live until plan execution completes.
+  void* user_data;
+} loom_inline_callables_refinement_callback_t;
+
+typedef struct loom_target_environment_t loom_target_environment_t;
+
+// Invocation resources borrowed by one composition plan. Both pass execution
+// and independent source materialization use the same planner and scheduler.
+typedef struct loom_inline_callables_environment_t {
+  // Scratch storage for planning and execution.
+  iree_arena_allocator_t* arena;
+  // Available targets for resolving independent execution scopes.
+  const loom_target_environment_t* targets;
+  // Mutable compiler versions, or NULL outside target compilation.
+  loom_function_version_owner_t* version_owner;
+  // Destination for structured rejection diagnostics.
+  iree_diagnostic_emitter_t diagnostics;
+  // Owning transform name used in rejection diagnostics.
+  iree_string_view_t diagnostic_name;
+  // Owner of completed-source cleanup.
+  loom_inline_callables_refinement_callback_t refinement;
+} loom_inline_callables_environment_t;
+
+// Borrows pass resources and its configured canonicalizer for closure cleanup.
+loom_inline_callables_environment_t loom_inline_callables_environment_from_pass(
+    loom_pass_t* pass);
+
+typedef uint8_t loom_inline_callables_result_flags_t;
+enum loom_inline_callables_result_flag_bits_e {
+  // Composition changed the module or retained compiler versions.
+  LOOM_INLINE_CALLABLES_RESULT_CHANGED = 1u << 0,
+  // Authored call policy or body structure prevented composition. Diagnostics
+  // have been emitted; status remains reserved for infrastructure failure.
+  LOOM_INLINE_CALLABLES_RESULT_REJECTED = 1u << 1,
+};
+
 // Inputs for one transient call plan. All snapshots describe the same module
 // and remain valid until execution completes; symbols must not be compacted
 // between construction and execution.
@@ -37,6 +80,7 @@ typedef struct loom_inline_callables_plan_options_t {
   // Borrowed function versions for target policy and consuming-inline cleanup.
   const loom_target_function_version_snapshot_t* target_versions;
   // Optional byte per symbol restricting planning to live source definitions.
+  // Excluded definitions retain their references without expansion obligations.
   // NULL includes all definitions. Module-root references are always included.
   const uint8_t* live_symbols;
   // Optional bit per family with remaining template.apply demands. Such a
@@ -61,12 +105,12 @@ typedef struct loom_inline_callables_plan_options_t {
 typedef struct loom_inline_callables_plan_t loom_inline_callables_plan_t;
 
 // Builds the common inline plan using producer-owned references and facts.
-// Planning borrows |options|' snapshots and allocates in |pass->arena|. It does
+// Planning borrows |environment| and |options|' snapshots. It does
 // not mutate the module. The caller may then replace selected applications
 // with exact calls and append them without rebuilding the reference snapshot.
 iree_status_t loom_inline_callables_plan_allocate(
-    loom_pass_t* pass, loom_module_t* module,
-    const loom_inline_callables_plan_options_t* options,
+    const loom_inline_callables_environment_t* environment,
+    loom_module_t* module, const loom_inline_callables_plan_options_t* options,
     loom_inline_callables_plan_t** out_plan);
 
 // Appends an applicable template call replacing an application in the original
@@ -81,11 +125,12 @@ void loom_inline_callables_plan_append(
 // Checks required-edge cycles and body legality, then executes the existing
 // clone/consume scheduler. Completed source closures are simplified before
 // their callers clone them; prepared Low closures retain their machine plans.
-// Emits diagnostics through the owning pass and marks that pass changed on
-// mutation. The caller owns pruning and symbol compaction after this returns;
+// Emits diagnostics through the invocation environment and reports mutation or
+// rejection in |out_flags|. The caller owns pruning and symbol compaction;
 // the plan and borrowed snapshots are then no longer used.
 iree_status_t loom_inline_callables_plan_execute(
-    loom_inline_callables_plan_t* plan);
+    loom_inline_callables_plan_t* plan,
+    loom_inline_callables_result_flags_t* out_flags);
 
 // Returns the callable inliner pass metadata.
 const loom_pass_info_t* loom_inline_callables_pass_info(void);

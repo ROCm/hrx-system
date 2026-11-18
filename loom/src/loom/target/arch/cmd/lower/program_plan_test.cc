@@ -64,7 +64,7 @@ static iree_status_t CaptureKernelRequest(
   KernelRequestCapture* capture = static_cast<KernelRequestCapture*>(user_data);
   loom_kernel_class_product_t product = {0};
   IREE_RETURN_IF_ERROR(loom_cmd_program_kernel_request_materialize(
-      request, capture->block_pool, iree_allocator_system(), &product));
+      request, {}, capture->block_pool, iree_allocator_system(), &product));
   capture->requests.push_back(CapturedKernelRequest{
       .entry_requirement_index = request->entry_requirement_index,
       .kind = request->kind,
@@ -244,7 +244,8 @@ kernel.def @generated() {
   };
   loom_kernel_class_product_t materialized_product = {};
   IREE_ASSERT_OK(loom_cmd_program_kernel_request_materialize(
-      &request, &block_pool_, iree_allocator_system(), &materialized_product));
+      &request, {}, &block_pool_, iree_allocator_system(),
+      &materialized_product));
   ASSERT_NE(materialized_product.module, nullptr);
   EXPECT_NE(materialized_product.module, source_module.get());
   EXPECT_EQ(materialized_product.kernel.symbol_id,

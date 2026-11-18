@@ -15,6 +15,8 @@ package(
 loom_check_test_suite(
     name = "test",
     srcs = [
+        "class_publication.loom-test",
+        "class_shapes.loom-test",
         "kernel_async_calls.loom-test",
         "kernel_async_control.loom-test",
         "kernel_async_memory.loom-test",

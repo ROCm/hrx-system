@@ -261,14 +261,28 @@ iree_status_t loom_dce_run(loom_pass_t* pass, loom_module_t* module,
 iree_status_t loom_dce_run_with_deadness_query(
     loom_pass_t* pass, loom_module_t* module, loom_func_like_t function,
     loom_dce_deadness_query_callback_t deadness_query) {
+  loom_dce_result_t result = {0};
+  iree_status_t status = loom_dce_eliminate(module, function, deadness_query,
+                                            pass->arena, &result);
+  if (result.removed_operation_count || result.removed_argument_count) {
+    loom_pass_mark_changed(pass);
+    loom_dce_statistics(pass)->ops_eliminated += result.removed_operation_count;
+  }
+  return status;
+}
+
+iree_status_t loom_dce_eliminate(
+    loom_module_t* module, loom_func_like_t function,
+    loom_dce_deadness_query_callback_t deadness_query,
+    iree_arena_allocator_t* scratch_arena, loom_dce_result_t* out_result) {
+  *out_result = (loom_dce_result_t){0};
   loom_region_t* body = loom_func_like_body(function);
   if (!body) {
     return iree_ok_status();
   }
-  loom_dce_statistics_t* statistics = loom_dce_statistics(pass);
 
   loom_dce_worklist_t worklist = {0};
-  iree_status_t status = loom_dce_worklist_initialize(pass->arena, &worklist);
+  iree_status_t status = loom_dce_worklist_initialize(scratch_arena, &worklist);
   for (uint8_t region_index = 0;
        region_index < loom_func_like_region_count(function) &&
        iree_status_is_ok(status);
@@ -277,7 +291,7 @@ iree_status_t loom_dce_run_with_deadness_query(
     if (!region) {
       continue;
     }
-    status = loom_dce_seed_worklist(pass->arena, module, region,
+    status = loom_dce_seed_worklist(scratch_arena, module, region,
                                     &deadness_query, &worklist);
   }
 
@@ -292,7 +306,7 @@ iree_status_t loom_dce_run_with_deadness_query(
       continue;
     }
 
-    status = loom_dce_add_subtree_providers_to_worklist(pass->arena, module,
+    status = loom_dce_add_subtree_providers_to_worklist(scratch_arena, module,
                                                         &worklist, op);
     if (!iree_status_is_ok(status)) {
       break;
@@ -301,13 +315,12 @@ iree_status_t loom_dce_run_with_deadness_query(
     if (!iree_status_is_ok(status)) {
       break;
     }
-    loom_pass_mark_changed(pass);
-    ++statistics->ops_eliminated;
+    ++out_result->removed_operation_count;
   }
 
   loom_dce_worklist_deinitialize(&worklist);
   iree_arena_allocator_t arena;
-  iree_arena_initialize(pass->arena->block_pool, &arena);
+  iree_arena_initialize(scratch_arena->block_pool, &arena);
   // Nested regions are independent scopes. Their captures remain live in the
   // enclosing scope until structured control is lowered to ordinary CFG.
   for (iree_host_size_t i = 0;
@@ -337,10 +350,8 @@ iree_status_t loom_dce_run_with_deadness_query(
     }
     loom_rewriter_deinitialize(&rewriter);
     loom_local_value_domain_release(&domain);
-    if (removed_arguments || removed_operations) {
-      loom_pass_mark_changed(pass);
-      statistics->ops_eliminated += removed_operations;
-    }
+    out_result->removed_argument_count += removed_arguments;
+    out_result->removed_operation_count += removed_operations;
   }
   iree_arena_deinitialize(&arena);
   return status;

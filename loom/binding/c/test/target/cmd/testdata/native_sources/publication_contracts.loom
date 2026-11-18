@@ -1,0 +1,70 @@
+// Native publication must preserve both the caller's memory proof and a
+// residual family demand exposed by an already-selected provider.
+template.decl @payload(%position: index, %input: view<16xi32>) -> (i32)
+
+template.def<@payload> @bounded_payload(%position: index, %input: view<16xi32>) -> (i32) where [ge(%position, 4)] {
+  %value = view.load %input[%position] : view<16xi32> -> i32
+  template.return %value : i32
+}
+
+template.decl @inner(%position: index) -> (i32)
+
+template.def<@inner> priority(10) @special(%position: index) -> (i32) where [eq(%position, 8)] {
+  %value = scalar.constant 19 : i32
+  template.return %value : i32
+}
+
+template.def<@inner> @fallback(%position: index) -> (i32) {
+  %value = scalar.constant 7 : i32
+  template.return %value : i32
+}
+
+template.decl @outer(%position: index) -> (i32)
+
+template.def<@outer> @selected(%position: index) -> (i32) where [ge(%position, 4)] {
+  %value = template.apply<@inner>(%position) : (index) -> (i32)
+  template.return %value : i32
+}
+
+kernel.def @consume_contracts() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%position: index, %input: view<16xi32>, %output: view<2xi32>) {
+  %payload = template.apply<@payload>(%position, %input) : (index, view<16xi32>) -> (i32)
+  %nested = template.apply<@outer>(%position) : (index) -> (i32)
+  view.store %payload, %output[0] : i32, view<2xi32>
+  view.store %nested, %output[1] : i32, view<2xi32>
+  kernel.return
+}
+
+command.def @run_contracts() launch(%input_storage: buffer, %output_storage: buffer) {
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<16xi32>
+  %output = buffer.view %output_storage[%base] : buffer -> view<2xi32>
+  %position = index.constant 8 : index
+  kernel.launch @consume_contracts(%position, %input, %output) : (index, view<16xi32>, view<2xi32>)
+  command.return
+}
+
+func.def @expected(%input_storage: buffer, %output_storage: buffer) {
+  %base = index.constant 0 : offset
+  %input = buffer.view %input_storage[%base] : buffer -> view<16xi32>
+  %output = buffer.view %output_storage[%base] : buffer -> view<2xi32>
+  %payload = view.load %input[8] : view<16xi32> -> i32
+  %nested = scalar.constant 19 : i32
+  view.store %payload, %output[0] : i32, view<2xi32>
+  view.store %nested, %output[1] : i32, view<2xi32>
+  func.return
+}
+
+check.scenario @caller_contracts {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-1000 to 1000) : tensor<16xi32>
+    %output = check.generate.fill value(-1) : tensor<2xi32>
+    check.compare<@run_contracts, @expected>(%input, %output) : (tensor<16xi32>, tensor<2xi32>) -> () {
+      check.expect.equal actual(%output) expected(%output) : tensor<2xi32>
+    }
+  }
+  check.return
+}

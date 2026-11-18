@@ -1,0 +1,434 @@
+// Accepted provider choices consume their selectors before caller facts enter
+// the published source. Duplicate operands and dead selector arithmetic must
+// not leave a launch-specific precondition on the kernel's unchanged ABI.
+// RUN: emit command-program @selected kernels
+
+template.decl @classify(%value: index, %duplicate: index) -> (i32)
+
+template.def<@classify> priority(10) @large(%value: index, %duplicate: index) -> (i32) where [ge(%value, 4)] {
+  %result = scalar.constant 2 : i32
+  template.return %result : i32
+}
+
+template.def<@classify> @small(%value: index, %duplicate: index) -> (i32) {
+  %result = scalar.constant 1 : i32
+  template.return %result : i32
+}
+
+kernel.def @observe() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%value: index, %padding: index, %output: view<1xi32>) {
+  %selector = index.add %value, %padding : index
+  %result = template.apply<@classify>(%selector, %selector) : (index, index) -> (i32)
+  view.store %result, %output[0] : i32, view<1xi32>
+  kernel.return
+}
+
+command.def public @selected() launch(%output: view<1xi32>) {
+  %first_selector = index.constant 4 : index
+  %second_selector = index.constant 8 : index
+  %padding = index.constant 0 : index
+  kernel.launch @observe(%first_selector, %padding, %output) : (index, index, view<1xi32>)
+  kernel.launch @observe(%second_selector, %padding, %output) : (index, index, view<1xi32>)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 1}) @selected() asm {
+  %21 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %22 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %23 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %24 = cmd.constant.u64 0
+  %25 = cmd.constant.u64 -1
+  %26 = cmd.constant.u32 1
+  %27 = cmd.constant.index 4
+  %28 = cmd.constant.index 0
+  cmd.dispatch.direct<%22, %23>[%26, %26, %26](%27, %28, %21, %24, %25)
+  %29 = cmd.constant.index 8
+  cmd.dispatch.direct.barrier<%22, %23>[%26, %26, %26](%29, %28, %21, %24, %25)
+  return
+}
+template.decl @classify(%value: index, %duplicate: index) -> (i32)
+
+template.def<@classify> @small(%value: index, %duplicate: index) -> (i32) {
+  %result = scalar.constant 1 : i32
+  template.return %result : i32
+}
+
+kernel.def retain @observe() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%value: index, %padding: index, %output: view<1xi32>) {
+  %result = scalar.constant 2 : i32
+  view.store %result, %output[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+
+// The selected provider proves a lower bound only. The caller's upper bound
+// remains necessary for the payload access after composition.
+// RUN: emit command-program @bounded kernels
+
+template.decl @read(%position: index, %input: view<16xi32>) -> (i32)
+
+template.def<@read> @selected_read(%position: index, %input: view<16xi32>) -> (i32) where [ge(%position, 4)] {
+  %result = view.load %input[%position] : view<16xi32> -> i32
+  template.return %result : i32
+}
+
+kernel.def @read_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%position: index, %input: view<16xi32>, %output: view<1xi32>) {
+  %result = template.apply<@read>(%position, %input) : (index, view<16xi32>) -> (i32)
+  view.store %result, %output[0] : i32, view<1xi32>
+  kernel.return
+}
+
+command.def public @bounded() launch(%input: view<16xi32>, %output: view<1xi32>) {
+  %position = index.constant 8 : index
+  kernel.launch @read_kernel(%position, %input, %output) : (index, view<16xi32>, view<1xi32>)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 2}) @bounded() asm {
+  %16 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %17 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %18 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %19 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %20 = cmd.constant.u64 0
+  %21 = cmd.constant.u64 -1
+  %22 = cmd.constant.u32 1
+  %23 = cmd.constant.index 8
+  cmd.dispatch.direct<%18, %19>[%22, %22, %22](%23, %16, %20, %21, %17, %20, %21)
+  return
+}
+template.decl @read(%position: index, %input: view<16xi32>) -> (i32)
+
+kernel.def retain @read_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%position: index, %input: view<16xi32>, %output: view<1xi32>) where [eq(%position, 8)] {
+  %position_specialized = index.assume %position [ge(%position, 4)] : index
+  %result = view.load %input[%position_specialized] : view<16xi32> -> i32
+  view.store %result, %output[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+
+// A selected body with an impossible required call reports its source location
+// during publication. No bytecode request or command product can escape.
+// RUN: emit command-program @invalid_selected kernels
+
+func.decl inline @missing()
+
+template.decl @choose(%selector: index)
+
+template.def<@choose> @broken(%selector: index) where [ge(%selector, 4)] {
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="kernel-class-materialize", callee_name="missing", failure_code="callee_missing_body"}
+  func.call @missing() : ()
+  template.return
+}
+
+kernel.def @invalid_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%selector: index) {
+  template.apply<@choose>(%selector) : (index)
+  kernel.return
+}
+
+command.def public @invalid_selected() launch() {
+  %selector = index.constant 8 : index
+  kernel.launch @invalid_kernel(%selector) : (index)
+  command.return
+}
+
+// ====
+
+// A provider can expose another family whose decision still needs caller facts.
+// That demand and all of its providers survive publication.
+// RUN: emit command-program @nested kernels
+
+template.decl @inner(%value: index) -> (i32)
+
+template.def<@inner> priority(10) @eight(%value: index) -> (i32) where [eq(%value, 8)] {
+  %result = scalar.constant 8 : i32
+  template.return %result : i32
+}
+
+template.def<@inner> @other(%value: index) -> (i32) {
+  %result = scalar.constant 4 : i32
+  template.return %result : i32
+}
+
+template.decl @outer(%value: index) -> (i32)
+
+template.def<@outer> @selected(%value: index) -> (i32) where [ge(%value, 4)] {
+  %result = template.apply<@inner>(%value) : (index) -> (i32)
+  template.return %result : i32
+}
+
+kernel.def @nested_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%value: index, %output: view<1xi32>) {
+  %result = template.apply<@outer>(%value) : (index) -> (i32)
+  view.store %result, %output[0] : i32, view<1xi32>
+  kernel.return
+}
+
+command.def public @nested() launch(%output: view<1xi32>) {
+  %value = index.constant 8 : index
+  kernel.launch @nested_kernel(%value, %output) : (index, view<1xi32>)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 1}) @nested() asm {
+  %13 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %14 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %15 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %16 = cmd.constant.u64 0
+  %17 = cmd.constant.u64 -1
+  %18 = cmd.constant.u32 1
+  %19 = cmd.constant.index 8
+  cmd.dispatch.direct<%14, %15>[%18, %18, %18](%19, %13, %16, %17)
+  return
+}
+template.decl @inner(%value: index) -> (i32)
+
+template.def<@inner> priority(10) @eight(%value: index) -> (i32) where [eq(%value, 8)] {
+  %result = scalar.constant 8 : i32
+  template.return %result : i32
+}
+
+template.def<@inner> @other(%value: index) -> (i32) {
+  %result = scalar.constant 4 : i32
+  template.return %result : i32
+}
+
+template.decl @outer(%value: index) -> (i32)
+
+kernel.def retain @nested_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%value: index, %output: view<1xi32>) where [eq(%value, 8)] {
+  %value_specialized = index.assume %value [ge(%value, 4)] : index
+  %result = template.apply<@inner>(%value_specialized) : (index) -> (i32)
+  view.store %result, %output[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+
+// Authored preconditions remain meaningful even for an unused argument. A
+// retained semantic call also keeps its operand and the caller's refinement.
+// RUN: emit command-program @retained kernels
+
+func.def noinline @identity(%value: index) -> (index) {
+  func.return %value : index
+}
+
+template.decl @call(%value: index) -> (index)
+
+template.def<@call> @selected(%value: index) -> (index) where [ge(%value, 4)] {
+  %result = func.call @identity(%value) : (index) -> (index)
+  template.return %result : index
+}
+
+kernel.def @retained_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%value: index, %unused: index, %output: view<1xi64>) where [range(%unused, 0, 15), multiple_of(%unused, 4)] {
+  %result = template.apply<@call>(%value) : (index) -> (index)
+  %stored = index.cast %result : index to i64
+  view.store %stored, %output[0] : i64, view<1xi64>
+  kernel.return
+}
+
+command.def public @retained() launch(%output: view<1xi64>) {
+  %value = index.constant 8 : index
+  %unused = index.constant 4 : index
+  kernel.launch @retained_kernel(%value, %unused, %output) : (index, index, view<1xi64>)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 1}) @retained() asm {
+  %16 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %17 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %18 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %19 = cmd.constant.u64 0
+  %20 = cmd.constant.u64 -1
+  %21 = cmd.constant.u32 1
+  %22 = cmd.constant.index 8
+  %23 = cmd.constant.index 4
+  cmd.dispatch.direct<%17, %18>[%21, %21, %21](%22, %23, %16, %19, %20)
+  return
+}
+func.def noinline @identity(%value: index) -> (index) {
+  func.return %value : index
+}
+
+template.decl @call(%value: index) -> (index)
+
+kernel.def retain @retained_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%value: index, %unused: index, %output: view<1xi64>) where [range(%unused, 0, 15), multiple_of(%unused, 4), eq(%value, 8), eq(%unused, 4)] {
+  %value_specialized = index.assume %value [ge(%value, 4)] : index
+  %result = func.call @identity(%value_specialized) : (index) -> (index)
+  %stored = index.cast %result : index to i64
+  view.store %stored, %output[0] : i64, view<1xi64>
+  kernel.return
+}
+
+// ====
+
+// Zero-result selections carry effects, and scalar and predicate selectors
+// become unused only after those selected effects enter the kernel body.
+// RUN: emit command-program @effects kernels
+
+template.decl @store_sign(%value: i32, %output: view<2xi32>)
+
+template.def<@store_sign> @negative(%value: i32, %output: view<2xi32>) where [lt(%value, 0)] {
+  %result = scalar.constant -1 : i32
+  view.store %result, %output[0] : i32, view<2xi32>
+  template.return
+}
+
+template.def<@store_sign> @nonnegative(%value: i32, %output: view<2xi32>) where [ge(%value, 0)] {
+  %result = scalar.constant 1 : i32
+  view.store %result, %output[0] : i32, view<2xi32>
+  template.return
+}
+
+template.decl @store_flag(%flag: i1, %output: view<2xi32>)
+
+template.def<@store_flag> @enabled(%flag: i1, %output: view<2xi32>) where [eq(%flag, 1)] {
+  %result = scalar.constant 17 : i32
+  view.store %result, %output[1] : i32, view<2xi32>
+  template.return
+}
+
+kernel.def @effects_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%sign: i32, %enabled: i1, %output: view<2xi32>) {
+  template.apply<@store_sign>(%sign, %output) : (i32, view<2xi32>)
+  template.apply<@store_flag>(%enabled, %output) : (i1, view<2xi32>)
+  kernel.return
+}
+
+command.def public @effects() launch(%output: view<2xi32>) {
+  %sign = scalar.constant -3 : i32
+  %enabled = scalar.constant true : i1
+  kernel.launch @effects_kernel(%sign, %enabled, %output) : (i32, i1, view<2xi32>)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 1}) @effects() asm {
+  %16 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %17 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %18 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %19 = cmd.constant.u64 0
+  %20 = cmd.constant.u64 -1
+  %21 = cmd.constant.u32 1
+  %22 = cmd.constant.b32 4294967293
+  %23 = cmd.constant.b8 1
+  cmd.dispatch.direct<%17, %18>[%21, %21, %21](%22, %23, %16, %19, %20)
+  return
+}
+template.decl @store_sign(%value: i32, %output: view<2xi32>)
+
+template.def<@store_sign> @nonnegative(%value: i32, %output: view<2xi32>) where [ge(%value, 0)] {
+  %result = scalar.constant 1 : i32
+  view.store %result, %output[0] : i32, view<2xi32>
+  template.return
+}
+
+template.decl @store_flag(%flag: i1, %output: view<2xi32>)
+
+kernel.def retain @effects_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%sign: i32, %enabled: i1, %output: view<2xi32>) {
+  %result$11 = scalar.constant -1 : i32
+  view.store %result$11, %output[0] : i32, view<2xi32>
+  %result$12 = scalar.constant 17 : i32
+  view.store %result$12, %output[1] : i32, view<2xi32>
+  kernel.return
+}
+
+// ====
+
+// Unselected providers can depend on unavailable implementations. Their bodies
+// impose no composition obligation until a caller actually selects them.
+// RUN: emit command-program @available kernels
+
+func.decl inline @unavailable()
+
+template.decl @choose(%selector: index) -> (i32)
+
+template.def<@choose> priority(10) @available_body(%selector: index) -> (i32) where [ge(%selector, 4)] {
+  %result = scalar.constant 2 : i32
+  template.return %result : i32
+}
+
+template.def<@choose> @unavailable_body(%selector: index) -> (i32) {
+  func.call @unavailable() : ()
+  %result = scalar.constant 1 : i32
+  template.return %result : i32
+}
+
+kernel.def @available_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%selector: index, %output: view<1xi32>) {
+  %result = template.apply<@choose>(%selector) : (index) -> (i32)
+  view.store %result, %output[0] : i32, view<1xi32>
+  kernel.return
+}
+
+command.def public @available() launch(%output: view<1xi32>) {
+  %selector = index.constant 8 : index
+  kernel.launch @available_kernel(%selector, %output) : (index, view<1xi32>)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 1}) @available() asm {
+  %13 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %14 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %15 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %16 = cmd.constant.u64 0
+  %17 = cmd.constant.u64 -1
+  %18 = cmd.constant.u32 1
+  %19 = cmd.constant.index 8
+  cmd.dispatch.direct<%14, %15>[%18, %18, %18](%19, %13, %16, %17)
+  return
+}
+func.decl inline @unavailable()
+
+template.decl @choose(%selector: index) -> (i32)
+
+template.def<@choose> @unavailable_body(%selector: index) -> (i32) {
+  func.call @unavailable() : ()
+  %result = scalar.constant 1 : i32
+  template.return %result : i32
+}
+
+kernel.def retain @available_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%selector: index, %output: view<1xi32>) {
+  %result = scalar.constant 2 : i32
+  view.store %result, %output[0] : i32, view<1xi32>
+  kernel.return
+}

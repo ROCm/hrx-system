@@ -317,22 +317,23 @@ iree_status_t loom_inline_select_native_frontier(
   uint8_t* leaf_forced_entries = NULL;
   loom_inline_frontier_symbol_t* symbols = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->pass->arena, state->entry_count, sizeof(*selected_entries),
+      state->environment->arena, state->entry_count, sizeof(*selected_entries),
       (void**)&selected_entries));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->pass->arena, state->entry_count, sizeof(*can_require_entries),
-      (void**)&can_require_entries));
+      state->environment->arena, state->entry_count,
+      sizeof(*can_require_entries), (void**)&can_require_entries));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->pass->arena, state->entry_count, sizeof(*required_entries),
+      state->environment->arena, state->entry_count, sizeof(*required_entries),
       (void**)&required_entries));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->pass->arena, state->entry_count, sizeof(*leaf_forced_entries),
-      (void**)&leaf_forced_entries));
+      state->environment->arena, state->entry_count,
+      sizeof(*leaf_forced_entries), (void**)&leaf_forced_entries));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(state->environment->arena,
+                                                 symbol_count, sizeof(*symbols),
+                                                 (void**)&symbols));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->pass->arena, symbol_count, sizeof(*symbols), (void**)&symbols));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->pass->arena, symbol_count, sizeof(*state->direct_body_costs),
-      (void**)&state->direct_body_costs));
+      state->environment->arena, symbol_count,
+      sizeof(*state->direct_body_costs), (void**)&state->direct_body_costs));
   memset(selected_entries, 0, state->entry_count * sizeof(*selected_entries));
   for (iree_host_size_t symbol_id = 0; symbol_id < symbol_count; ++symbol_id) {
     loom_inline_symbol_info_t* source = &state->symbols[symbol_id];

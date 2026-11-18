@@ -88,6 +88,13 @@ loom_test(
     execution_profiles = GPU_HARDWARE_PROFILES + [X86_TASK_HARDWARE_PROFILE],
 )
 
+loom_test(
+    name = "native_source_contracts_test",
+    srcs = ["//loom/binding/c/test/target/cmd/testdata/native_sources:publication_contracts.loom"],
+    benchmark_smoke = False,
+    execution_profiles = GPU_HARDWARE_PROFILES + [X86_TASK_HARDWARE_PROFILE],
+)
+
 # Kernel-scoped pipelines use the GPU workgroup realization contract.
 loom_test(
     name = "native_staged_source_test",

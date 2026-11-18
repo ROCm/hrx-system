@@ -34,11 +34,14 @@ void loom_kernel_class_product_deinitialize(
 // Materializes one independently owned kernel source module for
 // |class_ordinal|.
 //
-// Accepted provider decisions become ordinary input assumptions followed by
-// exact template calls. Decisions intentionally skipped during collection
-// remain generic template applications. No classifier or collection state is
-// retained by the returned product. The caller must release it with
-// loom_kernel_class_product_deinitialize().
+// Accepted local providers compose through the shared callable planner before
+// caller facts are exported. Only arguments still used by the specialized
+// program receive caller refinements; authored contracts remain intact.
+// Decisions intentionally skipped during collection remain generic template
+// applications. No classifier or collection state is retained by the returned
+// product. The caller must release it with
+// loom_kernel_class_product_deinitialize(). Rejection emits structured
+// diagnostics and returns OK with a NULL product module.
 //
 // The classifier, collection, and source module must describe the same
 // immutable compiler snapshot. |class_ordinal| must name a live class in
@@ -48,8 +51,8 @@ iree_status_t loom_kernel_class_materialize(
     const loom_kernel_class_classifier_t* classifier,
     const loom_kernel_class_collection_t* collection,
     loom_decision_class_ordinal_t class_ordinal,
-    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_kernel_class_product_t* out_product);
+    iree_diagnostic_emitter_t diagnostics, iree_arena_block_pool_t* block_pool,
+    iree_allocator_t allocator, loom_kernel_class_product_t* out_product);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -1,0 +1,365 @@
+// Fixed and dynamic provider bodies retain their three distinct structural
+// classes while offsets and decompositions of an extent vary within a class.
+// RUN: emit command-program @cohort_sequence kernels
+
+// Three computational shapes share one source kernel. Changing output offsets
+// and the two terms forming a width must not change the resulting computation.
+func.def inline @cohort_width(%width: index, %unused_offset: offset) -> (index) {
+  func.return %width : index
+}
+
+func.def inline @write_cohort(%width: index, %offset: offset, %output: buffer) {
+  %extent = func.call @cohort_width(%width, %offset) : (index, offset) -> (index)
+  %values = vector.splati 7 : vector<[%extent]xi32>
+  %destination = buffer.view %output[%offset] : buffer -> view<[%extent]xi32>
+  vector.store %values, %destination[0] : vector<[%extent]xi32>, view<[%extent]xi32>
+  func.return
+}
+
+template.decl @cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer)
+
+template.def<@cohort> priority(10) @fixed_cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer) where [eq(%fixed, 1)] {
+  %extent = index.constant 4 : index
+  func.call @write_cohort(%extent, %offset, %output) : (index, offset, buffer)
+  template.return
+}
+
+template.def<@cohort> priority(1) @dynamic_cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer) {
+  func.call @write_cohort(%width, %offset, %output) : (index, offset, buffer)
+  template.return
+}
+
+kernel.def @cohort_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%rows: index, %padding: index, %fixed: i1, %offset: offset, %output: buffer) {
+  %width = index.add %rows, %padding : index
+  template.apply<@cohort>(%width, %fixed, %offset, %output) : (index, i1, offset, buffer)
+  kernel.return
+}
+
+command.def @cohort_sequence() launch(%output: buffer) {
+  %narrow_width = index.constant 8 : index
+  %wide_width = index.constant 16 : index
+  %unused_width = index.constant 37 : index
+  %no_padding = index.constant 0 : index
+  %shift_padding = index.constant 3 : index
+  %first_rows = index.constant 5 : index
+  %second_rows = index.constant 13 : index
+  %dynamic = scalar.constant false : i1
+  %fixed = scalar.constant true : i1
+  %first = index.constant 0 : offset
+  %second = index.constant 128 : offset
+  %third = index.constant 256 : offset
+  %fourth = index.constant 384 : offset
+  %fifth = index.constant 512 : offset
+  %sixth = index.constant 640 : offset
+  kernel.launch @cohort_kernel(%narrow_width, %no_padding, %dynamic, %first, %output) : (index, index, i1, offset, buffer)
+  kernel.launch @cohort_kernel(%wide_width, %no_padding, %dynamic, %second, %output) : (index, index, i1, offset, buffer)
+  kernel.launch @cohort_kernel(%unused_width, %no_padding, %fixed, %third, %output) : (index, index, i1, offset, buffer)
+  kernel.launch @cohort_kernel(%first_rows, %shift_padding, %dynamic, %fourth, %output) : (index, index, i1, offset, buffer)
+  kernel.launch @cohort_kernel(%second_rows, %shift_padding, %dynamic, %fifth, %output) : (index, index, i1, offset, buffer)
+  kernel.launch @cohort_kernel(%unused_width, %shift_padding, %fixed, %sixth, %output) : (index, index, i1, offset, buffer)
+  command.return
+}
+
+// ----
+low.func.def retain target<cmd.core> abi(command_program) abi_layout({entry_count = 3, executable_count = 3, fixed_buffer_count = 0, rebindable_binding_count = 1}) @cohort_sequence() asm {
+  %53 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %54 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %55 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %56 = resource<command_input> {index = 2, source_type = index} : reg<cmd.executable>
+  %57 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %58 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %59 = resource<command_input> {index = 2, source_type = index} : reg<cmd.entry>
+  %60 = cmd.constant.u64 0
+  %61 = cmd.constant.u64 -1
+  %62 = cmd.constant.u32 1
+  %63 = cmd.constant.index 8
+  %64 = cmd.constant.index 0
+  %65 = cmd.constant.b8 0
+  %66 = cmd.constant.offset 0
+  cmd.dispatch.direct<%54, %57>[%62, %62, %62](%63, %64, %65, %66, %53, %60, %61)
+  %67 = cmd.constant.index 16
+  %68 = cmd.constant.offset 128
+  cmd.dispatch.direct.barrier<%55, %58>[%62, %62, %62](%67, %64, %65, %68, %53, %60, %61)
+  %69 = cmd.constant.index 37
+  %70 = cmd.constant.b8 1
+  %71 = cmd.constant.offset 256
+  cmd.dispatch.direct.barrier<%56, %59>[%62, %62, %62](%69, %64, %70, %71, %53, %60, %61)
+  %72 = cmd.constant.index 5
+  %73 = cmd.constant.index 3
+  %74 = cmd.constant.offset 384
+  cmd.dispatch.direct.barrier<%54, %57>[%62, %62, %62](%72, %73, %65, %74, %53, %60, %61)
+  %75 = cmd.constant.index 13
+  %76 = cmd.constant.offset 512
+  cmd.dispatch.direct.barrier<%55, %58>[%62, %62, %62](%75, %73, %65, %76, %53, %60, %61)
+  %77 = cmd.constant.offset 640
+  cmd.dispatch.direct.barrier<%56, %59>[%62, %62, %62](%69, %73, %70, %77, %53, %60, %61)
+  return
+}
+func.def inline @write_cohort(%width: index, %offset: offset, %output: buffer) {
+  %values = vector.splati 7 : vector<[%width]xi32>
+  %destination = buffer.view %output[%offset] : buffer -> view<[%width]xi32>
+  vector.store %values, %destination[0] : vector<[%width]xi32>, view<[%width]xi32>
+  func.return
+}
+
+template.decl @cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer)
+
+template.def<@cohort> priority(10) @fixed_cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer) where [eq(%fixed, 1)] {
+  %extent = index.constant 4 : index
+  func.call @write_cohort(%extent, %offset, %output) : (index, offset, buffer)
+  template.return
+}
+
+kernel.def retain @cohort_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%rows: index, %padding: index, %fixed: i1, %offset: offset, %output: buffer) where [range(%offset, 0, 384), multiple_of(%offset, 384)] {
+  %20 = index.constant 8 : index
+  %values = vector.splati 7 : vector<[%20]xi32>
+  %destination = buffer.view %output[%offset] : buffer -> view<[%20]xi32>
+  vector.store %values, %destination[0] : vector<[%20]xi32>, view<[%20]xi32>
+  kernel.return
+}
+func.def inline @write_cohort(%width: index, %offset: offset, %output: buffer) {
+  %values = vector.splati 7 : vector<[%width]xi32>
+  %destination = buffer.view %output[%offset] : buffer -> view<[%width]xi32>
+  vector.store %values, %destination[0] : vector<[%width]xi32>, view<[%width]xi32>
+  func.return
+}
+
+template.decl @cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer)
+
+template.def<@cohort> priority(10) @fixed_cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer) where [eq(%fixed, 1)] {
+  %extent = index.constant 4 : index
+  func.call @write_cohort(%extent, %offset, %output) : (index, offset, buffer)
+  template.return
+}
+
+kernel.def retain @cohort_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%rows: index, %padding: index, %fixed: i1, %offset: offset, %output: buffer) where [range(%offset, 128, 512), multiple_of(%offset, 128), power_of_two(%offset)] {
+  %20 = index.constant 16 : index
+  %values = vector.splati 7 : vector<[%20]xi32>
+  %destination = buffer.view %output[%offset] : buffer -> view<[%20]xi32>
+  vector.store %values, %destination[0] : vector<[%20]xi32>, view<[%20]xi32>
+  kernel.return
+}
+func.def inline @write_cohort(%width: index, %offset: offset, %output: buffer) {
+  %values = vector.splati 7 : vector<[%width]xi32>
+  %destination = buffer.view %output[%offset] : buffer -> view<[%width]xi32>
+  vector.store %values, %destination[0] : vector<[%width]xi32>, view<[%width]xi32>
+  func.return
+}
+
+template.decl @cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer)
+
+template.def<@cohort> priority(1) @dynamic_cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer) {
+  func.call @write_cohort(%width, %offset, %output) : (index, offset, buffer)
+  template.return
+}
+
+kernel.def retain @cohort_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%rows: index, %padding: index, %fixed: i1, %offset: offset, %output: buffer) where [range(%offset, 256, 640), multiple_of(%offset, 128)] {
+  %extent = index.constant 4 : index
+  %values = vector.splati 7 : vector<[%extent]xi32>
+  %destination = buffer.view %output[%offset] : buffer -> view<[%extent]xi32>
+  vector.store %values, %destination[0] : vector<[%extent]xi32>, view<[%extent]xi32>
+  kernel.return
+}
+
+// ====
+
+// The full staged encoding and runtime extent participate in provider choice.
+// Declaration order deliberately differs from first-use order of the encodings.
+// RUN: emit command-program @encoded_shapes kernels
+
+template.decl @encoded(%extent: index, %layout: encoding<layout>, %input: view<[%extent]xi32, %layout>) -> (i32)
+
+template.def<@encoded> @strided_wide(%extent: index, %layout: encoding<layout>, %input: view<32xi32, #encoding.layout.strided<strides=[1]>>) -> (i32) {
+  %value = view.load %input[31] : view<32xi32, #encoding.layout.strided<strides=[1]>> -> i32
+  template.return %value : i32
+}
+
+template.def<@encoded> @strided_narrow(%extent: index, %layout: encoding<layout>, %input: view<16xi32, #encoding.layout.strided<strides=[1]>>) -> (i32) {
+  %value = view.load %input[15] : view<16xi32, #encoding.layout.strided<strides=[1]>> -> i32
+  template.return %value : i32
+}
+
+template.def<@encoded> @dense_wide(%extent: index, %layout: encoding<layout>, %input: view<32xi32>) -> (i32) {
+  %value = view.load %input[31] : view<32xi32> -> i32
+  template.return %value : i32
+}
+
+template.def<@encoded> @dense_narrow(%extent: index, %layout: encoding<layout>, %input: view<16xi32>) -> (i32) {
+  %value = view.load %input[15] : view<16xi32> -> i32
+  template.return %value : i32
+}
+
+pipeline.def<kernel> @encoded_kernel(%layout: encoding<layout>) run(%extent: index, %storage: buffer, %output: view<1xi32>) {
+  %base = index.constant 0 : offset
+  %input = buffer.view %storage[%base] : buffer -> view<[%extent]xi32, %layout>
+  pipeline.strand<cooperative> workers([0], [1], [1]) {
+    %value = template.apply<@encoded>(%extent, %layout, %input) : (index, encoding<layout>, view<[%extent]xi32, %layout>) -> (i32)
+    view.store %value, %output[0] : i32, view<1xi32>
+  }
+}
+
+command.def public @encoded_shapes() launch(%input: buffer, %output: view<1xi32>) {
+  %dense = encoding.layout.dense : encoding<layout>
+  %strided = encoding.layout.strided [1] : encoding<layout>
+  %narrow = index.constant 16 : index
+  %wide = index.constant 32 : index
+  kernel.launch @encoded_kernel[%dense](%narrow, %input, %output) : [encoding<layout>](index, buffer, view<1xi32>)
+  kernel.launch @encoded_kernel[%dense](%wide, %input, %output) : [encoding<layout>](index, buffer, view<1xi32>)
+  kernel.launch @encoded_kernel[%strided](%narrow, %input, %output) : [encoding<layout>](index, buffer, view<1xi32>)
+  kernel.launch @encoded_kernel[%strided](%wide, %input, %output) : [encoding<layout>](index, buffer, view<1xi32>)
+  kernel.launch @encoded_kernel[%dense](%narrow, %input, %output) : [encoding<layout>](index, buffer, view<1xi32>)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 4, executable_count = 4, fixed_buffer_count = 0, rebindable_binding_count = 2}) @encoded_shapes() asm {
+  %10 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %11 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %12 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %13 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %14 = resource<command_input> {index = 2, source_type = index} : reg<cmd.executable>
+  %15 = resource<command_input> {index = 3, source_type = index} : reg<cmd.executable>
+  %16 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %17 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %18 = resource<command_input> {index = 2, source_type = index} : reg<cmd.entry>
+  %19 = resource<command_input> {index = 3, source_type = index} : reg<cmd.entry>
+  %20 = cmd.constant.u64 0
+  %21 = cmd.constant.u64 -1
+  %22 = cmd.constant.u32 1
+  %23 = cmd.constant.index 16
+  cmd.dispatch.direct<%12, %16>[%22, %22, %22](%23, %10, %20, %21, %11, %20, %21)
+  %24 = cmd.constant.index 32
+  cmd.dispatch.direct.barrier<%13, %17>[%22, %22, %22](%24, %10, %20, %21, %11, %20, %21)
+  cmd.dispatch.direct.barrier<%14, %18>[%22, %22, %22](%23, %10, %20, %21, %11, %20, %21)
+  cmd.dispatch.direct.barrier<%15, %19>[%22, %22, %22](%24, %10, %20, %21, %11, %20, %21)
+  cmd.dispatch.direct.barrier<%12, %16>[%22, %22, %22](%23, %10, %20, %21, %11, %20, %21)
+  return
+}
+template.decl @encoded(%extent: index, %layout: encoding<layout>, %input: view<[%extent]xi32, %layout>) -> (i32)
+
+template.def<@encoded> @strided_wide(%extent: index, %layout: encoding<layout>, %input: view<32xi32, #encoding.layout.strided<strides=[1]>>) -> (i32) {
+  %value = view.load %input[31] : view<32xi32, #encoding.layout.strided<strides=[1]>> -> i32
+  template.return %value : i32
+}
+
+template.def<@encoded> @strided_narrow(%extent: index, %layout: encoding<layout>, %input: view<16xi32, #encoding.layout.strided<strides=[1]>>) -> (i32) {
+  %value = view.load %input[15] : view<16xi32, #encoding.layout.strided<strides=[1]>> -> i32
+  template.return %value : i32
+}
+
+template.def<@encoded> @dense_wide(%extent: index, %layout: encoding<layout>, %input: view<32xi32>) -> (i32) {
+  %value = view.load %input[31] : view<32xi32> -> i32
+  template.return %value : i32
+}
+
+pipeline.def<kernel> retain @encoded_kernel() run(%extent: index, %storage: buffer, %output: view<1xi32>) where [eq(%extent, 16)] {
+  %22 = encoding.layout.dense : encoding<layout>
+  %base = index.constant 0 : offset
+  %input = buffer.view %storage[%base] : buffer -> view<[%extent]xi32, %22>
+  pipeline.strand<cooperative> workers([0], [1], [1]) {
+    %extent_specialized = index.assume %extent [eq(%extent, %extent), eq(%extent, 16)] : index
+    %26 = view.refine %input : view<[%extent]xi32, %22> -> view<[%extent_specialized]xi32, %22>
+    %27 = view.refine %26 : view<[%extent_specialized]xi32, %22> -> view<16xi32>
+    %value = view.load %27[15] : view<16xi32> -> i32
+    view.store %value, %output[0] : i32, view<1xi32>
+  }
+}
+template.decl @encoded(%extent: index, %layout: encoding<layout>, %input: view<[%extent]xi32, %layout>) -> (i32)
+
+template.def<@encoded> @strided_wide(%extent: index, %layout: encoding<layout>, %input: view<32xi32, #encoding.layout.strided<strides=[1]>>) -> (i32) {
+  %value = view.load %input[31] : view<32xi32, #encoding.layout.strided<strides=[1]>> -> i32
+  template.return %value : i32
+}
+
+template.def<@encoded> @strided_narrow(%extent: index, %layout: encoding<layout>, %input: view<16xi32, #encoding.layout.strided<strides=[1]>>) -> (i32) {
+  %value = view.load %input[15] : view<16xi32, #encoding.layout.strided<strides=[1]>> -> i32
+  template.return %value : i32
+}
+
+template.def<@encoded> @dense_narrow(%extent: index, %layout: encoding<layout>, %input: view<16xi32>) -> (i32) {
+  %value = view.load %input[15] : view<16xi32> -> i32
+  template.return %value : i32
+}
+
+pipeline.def<kernel> retain @encoded_kernel() run(%extent: index, %storage: buffer, %output: view<1xi32>) where [eq(%extent, 32)] {
+  %22 = encoding.layout.dense : encoding<layout>
+  %base = index.constant 0 : offset
+  %input = buffer.view %storage[%base] : buffer -> view<[%extent]xi32, %22>
+  pipeline.strand<cooperative> workers([0], [1], [1]) {
+    %extent_specialized = index.assume %extent [eq(%extent, %extent), eq(%extent, 32)] : index
+    %26 = view.refine %input : view<[%extent]xi32, %22> -> view<[%extent_specialized]xi32, %22>
+    %27 = view.refine %26 : view<[%extent_specialized]xi32, %22> -> view<32xi32>
+    %value = view.load %27[31] : view<32xi32> -> i32
+    view.store %value, %output[0] : i32, view<1xi32>
+  }
+}
+template.decl @encoded(%extent: index, %layout: encoding<layout>, %input: view<[%extent]xi32, %layout>) -> (i32)
+
+template.def<@encoded> @strided_wide(%extent: index, %layout: encoding<layout>, %input: view<32xi32, #encoding.layout.strided<strides=[1]>>) -> (i32) {
+  %value = view.load %input[31] : view<32xi32, #encoding.layout.strided<strides=[1]>> -> i32
+  template.return %value : i32
+}
+
+template.def<@encoded> @dense_wide(%extent: index, %layout: encoding<layout>, %input: view<32xi32>) -> (i32) {
+  %value = view.load %input[31] : view<32xi32> -> i32
+  template.return %value : i32
+}
+
+template.def<@encoded> @dense_narrow(%extent: index, %layout: encoding<layout>, %input: view<16xi32>) -> (i32) {
+  %value = view.load %input[15] : view<16xi32> -> i32
+  template.return %value : i32
+}
+
+pipeline.def<kernel> retain @encoded_kernel() run(%extent: index, %storage: buffer, %output: view<1xi32>) where [eq(%extent, 16)] {
+  %22 = encoding.layout.strided [1] : encoding<layout>
+  %base = index.constant 0 : offset
+  %input = buffer.view %storage[%base] : buffer -> view<[%extent]xi32, %22>
+  pipeline.strand<cooperative> workers([0], [1], [1]) {
+    %extent_specialized = index.assume %extent [eq(%extent, %extent), eq(%extent, 16)] : index
+    %26 = view.refine %input : view<[%extent]xi32, %22> -> view<[%extent_specialized]xi32, %22>
+    %27 = view.refine %26 : view<[%extent_specialized]xi32, %22> -> view<16xi32, #encoding.layout.strided<strides=[1]>>
+    %value = view.load %27[15] : view<16xi32, #encoding.layout.strided<strides=[1]>> -> i32
+    view.store %value, %output[0] : i32, view<1xi32>
+  }
+}
+template.decl @encoded(%extent: index, %layout: encoding<layout>, %input: view<[%extent]xi32, %layout>) -> (i32)
+
+template.def<@encoded> @strided_narrow(%extent: index, %layout: encoding<layout>, %input: view<16xi32, #encoding.layout.strided<strides=[1]>>) -> (i32) {
+  %value = view.load %input[15] : view<16xi32, #encoding.layout.strided<strides=[1]>> -> i32
+  template.return %value : i32
+}
+
+template.def<@encoded> @dense_wide(%extent: index, %layout: encoding<layout>, %input: view<32xi32>) -> (i32) {
+  %value = view.load %input[31] : view<32xi32> -> i32
+  template.return %value : i32
+}
+
+template.def<@encoded> @dense_narrow(%extent: index, %layout: encoding<layout>, %input: view<16xi32>) -> (i32) {
+  %value = view.load %input[15] : view<16xi32> -> i32
+  template.return %value : i32
+}
+
+pipeline.def<kernel> retain @encoded_kernel() run(%extent: index, %storage: buffer, %output: view<1xi32>) where [eq(%extent, 32)] {
+  %22 = encoding.layout.strided [1] : encoding<layout>
+  %base = index.constant 0 : offset
+  %input = buffer.view %storage[%base] : buffer -> view<[%extent]xi32, %22>
+  pipeline.strand<cooperative> workers([0], [1], [1]) {
+    %extent_specialized = index.assume %extent [eq(%extent, %extent), eq(%extent, 32)] : index
+    %26 = view.refine %input : view<[%extent]xi32, %22> -> view<[%extent_specialized]xi32, %22>
+    %27 = view.refine %26 : view<[%extent_specialized]xi32, %22> -> view<32xi32, #encoding.layout.strided<strides=[1]>>
+    %value = view.load %27[31] : view<32xi32, #encoding.layout.strided<strides=[1]>> -> i32
+    view.store %value, %output[0] : i32, view<1xi32>
+  }
+}

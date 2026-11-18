@@ -19,13 +19,10 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/low/capture.h"
 #include "loom/ops/low/ops.h"
-#include "loom/pass/value_facts.h"
 #include "loom/rewrite/callable.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/facts.h"
 #include "loom/target/function_version.h"
-#include "loom/transforms/cleanup/canonicalizer.h"
-#include "loom/transforms/cleanup/pass_environment.h"
 #include "loom/transforms/symbol/inline_plan.h"
 
 static bool loom_inline_symbol_is_transferable(const loom_module_t* module,
@@ -72,7 +69,7 @@ bool loom_inline_symbol_can_transfer_after_removing(
       loom_target_function_version_snapshot_handle_at(
           state->options.target_versions, symbol_id);
   if (version != NULL &&
-      (state->version_owner == NULL ||
+      (state->environment->version_owner == NULL ||
        iree_any_bit_set(version->flags, LOOM_FUNCTION_VERSION_FLAG_RETAIN))) {
     return false;
   }
@@ -91,7 +88,7 @@ static iree_status_t loom_inline_select_transfer_actions(
   uint32_t* final_entry_by_symbol = NULL;
   if (state->module->symbols.count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->pass->arena, state->module->symbols.count,
+        state->environment->arena, state->module->symbols.count,
         sizeof(*final_entry_by_symbol), (void**)&final_entry_by_symbol));
     for (iree_host_size_t i = 0; i < state->module->symbols.count; ++i) {
       final_entry_by_symbol[i] = LOOM_INLINE_PLAN_ENTRY_INVALID;
@@ -189,8 +186,8 @@ static iree_status_t loom_inline_low_products(
     return iree_ok_status();
   }
   loom_inline_low_product_clone_t* clone = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate(state->pass->arena, sizeof(*clone), (void**)&clone));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(state->environment->arena,
+                                           sizeof(*clone), (void**)&clone));
   *clone = (loom_inline_low_product_clone_t){0};
   if (callee->memory_accesses != NULL) {
     if (caller->memory_accesses == NULL) {
@@ -198,8 +195,8 @@ static iree_status_t loom_inline_low_products(
           &state->module->arena, &caller->memory_accesses));
     }
     IREE_RETURN_IF_ERROR(loom_low_memory_access_clone_allocate(
-        callee->memory_accesses, caller->memory_accesses, state->pass->arena,
-        &clone->memory));
+        callee->memory_accesses, caller->memory_accesses,
+        state->environment->arena, &clone->memory));
   }
   if (callee->loop_execution != NULL) {
     if (caller->loop_execution == NULL) {
@@ -207,8 +204,8 @@ static iree_status_t loom_inline_low_products(
           &state->module->arena, &caller->loop_execution));
     }
     IREE_RETURN_IF_ERROR(loom_low_loop_execution_clone_allocate(
-        callee->loop_execution, caller->loop_execution, state->pass->arena,
-        &clone->loop_execution));
+        callee->loop_execution, caller->loop_execution,
+        state->environment->arena, &clone->loop_execution));
   }
   *out_observer = (loom_ir_clone_observer_t){
       .fn = loom_inline_clone_low_products,
@@ -235,7 +232,7 @@ static iree_status_t loom_inline_execute_entry(
       IREE_RETURN_IF_ERROR(loom_callable_inline_call_with_branch(
           rewriter, entry->call_op, entry->callee, build_branch,
           clone_observer));
-      loom_pass_mark_changed(state->pass);
+      state->result_flags |= LOOM_INLINE_CALLABLES_RESULT_CHANGED;
       ++state->statistics.calls_cloned;
       *out_changed_cfg_topology = !body_is_linear;
       return iree_ok_status();
@@ -257,7 +254,7 @@ static iree_status_t loom_inline_execute_entry(
       if (version != NULL) {
         ++state->erased_version_count;
       }
-      loom_pass_mark_changed(state->pass);
+      state->result_flags |= LOOM_INLINE_CALLABLES_RESULT_CHANGED;
       ++state->statistics.calls_transferred;
       ++state->statistics.symbols_transferred;
       *out_changed_cfg_topology = !use_linear_move;
@@ -307,7 +304,7 @@ static iree_status_t loom_inline_materialize_command_schedule(
     status = loom_rewriter_move_before(rewriter, op, yield_op);
     op = next_op;
   }
-  loom_pass_mark_changed(state->pass);
+  state->result_flags |= LOOM_INLINE_CALLABLES_RESULT_CHANGED;
   return status;
 }
 
@@ -405,7 +402,7 @@ static iree_status_t loom_inline_materialize_boundaries(
         &rewriter->builder, schedule, body->blocks, body->block_count));
     IREE_RETURN_IF_ERROR(loom_low_func_def_rewrite_schedule(
         rewriter, entry->callee.op, loom_attr_absent()));
-    loom_pass_mark_changed(state->pass);
+    state->result_flags |= LOOM_INLINE_CALLABLES_RESULT_CHANGED;
   }
   return iree_ok_status();
 }
@@ -467,9 +464,6 @@ static void loom_inline_enqueue_ready_entry(
   }
 }
 
-static iree_status_t loom_inline_refine_source_closure(
-    loom_inline_callables_plan_t* state, loom_func_like_t function);
-
 // Completes one executed call edge and propagates closure completion through
 // wrappers that were already transferred outward. A transfer may move its body
 // before calls carried by that body execute, but its caller must continue to
@@ -492,13 +486,16 @@ static iree_status_t loom_inline_complete_execution_entry(
         source->first_clone_entry != LOOM_INLINE_PLAN_ENTRY_INVALID) {
       const loom_func_like_t function =
           state->symbols[entry->source_symbol_id].function;
-      // Source composition exposes constant arguments inside the completed
-      // callee. Fold those expressions once before its callers copy them.
+      // Refine the completed source closure once before its callers copy it.
       // Prepared Low bodies carry retained machine plans and are already past
       // source refinement; their clone observers preserve those plans intact.
       if (!loom_low_func_def_isa(function.op)) {
-        IREE_RETURN_IF_ERROR(
-            loom_inline_refine_source_closure(state, function));
+        const loom_inline_callables_refinement_callback_t refinement =
+            state->environment->refinement;
+        if (refinement.fn) {
+          IREE_RETURN_IF_ERROR(
+              refinement.fn(refinement.user_data, state->module, function));
+        }
         const loom_inline_plan_entry_t* first_clone =
             &state->entries[source->first_clone_entry];
         if (loom_call_like_kind(first_clone->call) ==
@@ -552,36 +549,6 @@ static iree_status_t loom_inline_finish_clone(
   return iree_ok_status();
 }
 
-static iree_status_t loom_inline_refine_source_closure(
-    loom_inline_callables_plan_t* state, loom_func_like_t function) {
-  const loom_cleanup_pass_capability_t* capability =
-      loom_cleanup_pass_capability_from_pass(state->pass);
-  const loom_cleanup_pattern_registry_t* registry =
-      loom_cleanup_pass_capability_pattern_registry(capability);
-  loom_cleanup_canonicalizer_context_t context = {0};
-  IREE_RETURN_IF_ERROR(
-      loom_cleanup_pass_capability_resolve_canonicalizer_context(
-          capability, state->pass, state->module, function, &context));
-  const loom_canonicalizer_options_t options = {
-      .patterns =
-          loom_canonicalizer_pattern_registries_from_cleanup_registry(registry),
-      .target_facts = context.target_facts,
-      .math_policy = context.math_policy,
-  };
-  loom_pass_value_fact_owner_invalidate(state->pass->value_facts);
-  loom_canonicalizer_t canonicalizer;
-  IREE_RETURN_IF_ERROR(loom_canonicalizer_initialize(
-      state->module, state->pass->arena, state->pass->value_facts,
-      registry ? registry->special_value_policy : NULL,
-      registry ? registry->fact_refinement_policy : NULL, &canonicalizer));
-  loom_canonicalizer_result_t result;
-  iree_status_t status = loom_canonicalizer_run_function(
-      &canonicalizer, function, &options, &result);
-  loom_canonicalizer_deinitialize(&canonicalizer);
-  loom_pass_value_fact_owner_invalidate(state->pass->value_facts);
-  return status;
-}
-
 // Executes required edges without repeatedly cloning a growing callee closure.
 // A clone waits for the target's outgoing edges so it observes the complete
 // flattened body. The target's unique transfer waits for all clone uses, but
@@ -609,21 +576,21 @@ iree_status_t loom_inline_execute_plan(loom_inline_callables_plan_t* state) {
   }
 
   loom_rewriter_t rewriter = {0};
-  loom_rewriter_initialize(&rewriter, state->module, state->pass->arena);
+  loom_rewriter_initialize(&rewriter, state->module, state->environment->arena);
 
   iree_status_t status = loom_inline_materialize_boundaries(state, &rewriter);
   const iree_host_size_t symbol_count = state->module->symbols.count;
   loom_inline_execution_symbol_t* execution_symbols = NULL;
   loom_inline_execution_entry_t* execution_entries = NULL;
   if (iree_status_is_ok(status) && symbol_count > 0) {
-    status = iree_arena_allocate_array(state->pass->arena, symbol_count,
+    status = iree_arena_allocate_array(state->environment->arena, symbol_count,
                                        sizeof(*execution_symbols),
                                        (void**)&execution_symbols);
   }
   if (iree_status_is_ok(status) && state->entry_count > 0) {
-    status = iree_arena_allocate_array(state->pass->arena, state->entry_count,
-                                       sizeof(*execution_entries),
-                                       (void**)&execution_entries);
+    status = iree_arena_allocate_array(
+        state->environment->arena, state->entry_count,
+        sizeof(*execution_entries), (void**)&execution_entries);
   }
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < symbol_count; ++i) {
@@ -703,9 +670,9 @@ iree_status_t loom_inline_execute_plan(loom_inline_callables_plan_t* state) {
           ready.cfg_count > 0)) {
     if (ready.linear_count == 0 && ready.clone_count > 1) {
       if (!clone_sites) {
-        status = iree_arena_allocate_array(state->pass->arena, execution_count,
-                                           sizeof(*clone_sites),
-                                           (void**)&clone_sites);
+        status = iree_arena_allocate_array(
+            state->environment->arena, execution_count, sizeof(*clone_sites),
+            (void**)&clone_sites);
         if (!iree_status_is_ok(status)) {
           break;
         }
@@ -736,7 +703,7 @@ iree_status_t loom_inline_execute_plan(loom_inline_callables_plan_t* state) {
       if (!iree_status_is_ok(status)) {
         break;
       }
-      loom_pass_mark_changed(state->pass);
+      state->result_flags |= LOOM_INLINE_CALLABLES_RESULT_CHANGED;
       state->statistics.calls_cloned += clone_count;
       executed_count += clone_count;
       transfer_availability_valid = false;
@@ -771,7 +738,7 @@ iree_status_t loom_inline_execute_plan(loom_inline_callables_plan_t* state) {
     if (body_is_linear && !transfer_availability_valid &&
         !cfg_topology_changed) {
       status = loom_availability_analysis_initialize(
-          state->module, state->pass->arena, &transfer_availability);
+          state->module, state->environment->arena, &transfer_availability);
       if (!iree_status_is_ok(status)) {
         break;
       }
@@ -817,7 +784,8 @@ iree_status_t loom_inline_execute_plan(loom_inline_callables_plan_t* state) {
 
   const iree_host_size_t removed_version_count =
       state->erased_version_count > 0
-          ? loom_function_version_owner_prune_erased(state->version_owner)
+          ? loom_function_version_owner_prune_erased(
+                state->environment->version_owner)
           : 0;
   IREE_ASSERT_EQ(removed_version_count, state->erased_version_count);
   loom_rewriter_deinitialize(&rewriter);
