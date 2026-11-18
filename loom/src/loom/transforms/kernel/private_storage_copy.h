@@ -15,7 +15,7 @@ extern "C" {
 #endif
 
 // A copy transfers the reaching values at this point in the program. Only
-// cells observed by scalar accesses occupy plan space, even for a large copy.
+// cells demanded by scalar accesses occupy plan space, even across copy chains.
 struct loom_private_storage_copy_t {
   // Operation erased when both allocations are promoted.
   loom_op_t* op;
@@ -57,8 +57,8 @@ iree_status_t loom_private_storage_record_copy_loop(
     loom_private_storage_allocation_t* target,
     loom_private_storage_copy_t** out_copy);
 
-// Maps byte ranges to the completed sparse scalar partition before value flow.
-iree_status_t loom_private_storage_partition_copies(
+// Freezes each allocation's direct representative after transfer discovery.
+void loom_private_storage_finalize_copy_components(
     loom_private_storage_plan_t* plan);
 
 // Keeps an entire connected component in memory if any member must retain an

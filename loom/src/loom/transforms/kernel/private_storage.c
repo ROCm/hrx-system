@@ -19,6 +19,7 @@
 #include "loom/ops/view/ops.h"
 #include "loom/pass/value_facts.h"
 #include "loom/transforms/kernel/private_storage_copy.h"
+#include "loom/transforms/kernel/private_storage_partition.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/dominance.h"
 #include "loom/util/walk.h"
@@ -74,19 +75,6 @@ struct loom_private_storage_region_t {
   loom_private_storage_cell_span_t writes;
 };
 
-typedef struct loom_private_storage_interval_t {
-  // Access awaiting byte-cell partitioning.
-  loom_private_storage_access_t* access;
-  // Allocation root supplied by shared region facts.
-  loom_private_storage_allocation_t* allocation;
-  // Exact inclusive root-relative byte offset.
-  int64_t begin;
-  // Exact exclusive root-relative byte offset.
-  int64_t end;
-  // Accessed scalar representation.
-  loom_type_t type;
-} loom_private_storage_interval_t;
-
 typedef struct loom_private_storage_builder_t {
   // Result representation owned by the pass arena.
   loom_private_storage_plan_t* plan;
@@ -100,12 +88,8 @@ typedef struct loom_private_storage_builder_t {
   loom_dominance_info_t dominance;
   // Allocation by local value ordinal, including typed projections.
   loom_private_storage_allocation_t** allocations;
-  // Collected intervals sorted once to create exact typed cells.
-  loom_private_storage_interval_t* intervals;
-  // Number of collected intervals.
-  iree_host_size_t interval_count;
-  // Allocated interval capacity.
-  iree_host_size_t interval_capacity;
+  // Typed access intervals collected before copy demands are propagated.
+  loom_private_storage_intervals_t intervals;
   // Capacity of the plan's projection list.
   iree_host_size_t projection_capacity;
   // All flow nodes in dense solver order.
@@ -133,10 +117,12 @@ static iree_status_t loom_private_storage_collect_allocation(
   loom_private_storage_allocation_t* allocation = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(plan->arena, sizeof(*allocation),
                                            (void**)&allocation));
-  *allocation = (loom_private_storage_allocation_t){.op = op,
-                                                    .next = plan->allocations,
-                                                    .selected = true,
-                                                    .write_only = true};
+  *allocation =
+      (loom_private_storage_allocation_t){.op = op,
+                                          .next = plan->allocations,
+                                          .copy_component = allocation,
+                                          .selected = true,
+                                          .write_only = true};
   plan->allocations = allocation;
   return iree_ok_status();
 }
@@ -261,20 +247,14 @@ static iree_status_t loom_private_storage_collect_access(
   if (!exact_cell) {
     return iree_ok_status();
   }
-  if (builder->interval_count == builder->interval_capacity) {
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        builder->plan->arena, builder->interval_count,
-        builder->interval_count + 1, sizeof(*builder->intervals),
-        &builder->interval_capacity, (void**)&builder->intervals));
-  }
-  builder->intervals[builder->interval_count++] =
+  return loom_private_storage_intervals_append(
+      builder->scratch_arena, &builder->intervals,
       (loom_private_storage_interval_t){
           .access = access,
           .allocation = allocation,
           .begin = region.begin_byte_offset.constant,
           .end = region.end_byte_offset.constant,
-          .type = type};
-  return iree_ok_status();
+          .type = type});
 }
 
 static iree_status_t loom_private_storage_collect_region(
@@ -403,66 +383,6 @@ static iree_status_t loom_private_storage_collect_region(
     }
   }
   *out_region = result;
-  return iree_ok_status();
-}
-
-static int loom_private_storage_compare_intervals(const void* left_pointer,
-                                                  const void* right_pointer) {
-  const loom_private_storage_interval_t* left = left_pointer;
-  const loom_private_storage_interval_t* right = right_pointer;
-  if (left->allocation != right->allocation) {
-    return (uintptr_t)left->allocation < (uintptr_t)right->allocation ? -1 : 1;
-  }
-  if (left->begin != right->begin) {
-    return left->begin < right->begin ? -1 : 1;
-  }
-  if (left->end != right->end) {
-    return left->end < right->end ? -1 : 1;
-  }
-  return 0;
-}
-
-static iree_status_t loom_private_storage_partition(
-    loom_private_storage_builder_t* builder) {
-  loom_private_storage_plan_t* plan = builder->plan;
-  if (!builder->interval_count) {
-    return iree_ok_status();
-  }
-  qsort(builder->intervals, builder->interval_count,
-        sizeof(*builder->intervals), loom_private_storage_compare_intervals);
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(plan->arena, builder->interval_count,
-                                sizeof(*plan->cells), (void**)&plan->cells));
-  loom_private_storage_cell_t* previous = NULL;
-  for (iree_host_size_t i = 0; i < builder->interval_count; ++i) {
-    const loom_private_storage_interval_t* interval = &builder->intervals[i];
-    if (!interval->allocation->selected || interval->allocation->write_only) {
-      continue;
-    }
-    loom_private_storage_cell_t* cell = previous;
-    if (previous && previous->allocation == interval->allocation &&
-        interval->begin < previous->end) {
-      if (interval->begin != previous->begin ||
-          interval->end != previous->end ||
-          !loom_type_equal(interval->type, previous->type)) {
-        interval->allocation->selected = false;
-        continue;
-      }
-    } else {
-      cell = &plan->cells[plan->cell_count];
-      if (!interval->allocation->cell_count) {
-        interval->allocation->cell_begin = plan->cell_count;
-      }
-      ++interval->allocation->cell_count;
-      *cell = (loom_private_storage_cell_t){.allocation = interval->allocation,
-                                            .begin = interval->begin,
-                                            .end = interval->end,
-                                            .type = interval->type,
-                                            .index = plan->cell_count++};
-      previous = cell;
-    }
-    interval->access->cell = cell;
-  }
   return iree_ok_status();
 }
 
@@ -1207,11 +1127,8 @@ static iree_status_t loom_private_storage_analyze(
   loom_private_storage_region_t* region = NULL;
   IREE_RETURN_IF_ERROR(loom_private_storage_collect_region(
       &builder, loom_func_like_body(function), true, &region));
-  IREE_RETURN_IF_ERROR(loom_private_storage_partition(&builder));
-  if (plan->copies) {
-    loom_private_storage_resolve_copy_selection(plan);
-    IREE_RETURN_IF_ERROR(loom_private_storage_partition_copies(plan));
-  }
+  IREE_RETURN_IF_ERROR(loom_private_storage_partition(plan, &builder.intervals,
+                                                      builder.scratch_arena));
   if (!plan->cell_count) {
     return iree_ok_status();
   }
