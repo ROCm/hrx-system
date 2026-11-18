@@ -505,11 +505,6 @@ std::optional<PredicateValue> predicate_value(
         "predicate expressions cannot read volatile values because no "
         "runtime comparison is emitted");
   }
-  if (expression_policy == PredicateExpressionPolicy::MaterializableValues &&
-      value.origin == PredicateValueOrigin::Binding && !value.members.empty()) {
-    return MaterializablePredicateExpression(unit, diagnostics)
-        .project(expression);
-  }
   return value;
 }
 

@@ -100,17 +100,19 @@ using shape_dimensions =
 
 namespace loom::index {
 
-// Converts a non-Boolean C++ integer to Loom's target-independent index type.
-// Unsigned narrow integers are widened before conversion so their high bit
-// retains ordinary C++ value semantics.
+// Explicitly converts a non-Boolean C++ integer or enumeration to Loom's
+// target-independent index type. Unsigned narrow values are widened before
+// conversion so their high bit retains ordinary C++ value semantics.
 template <class Integer>
-  requires(__is_integral(Integer) && !__is_same(Integer, bool))
+  requires((__is_integral(Integer) || __is_enum(Integer)) &&
+           !__is_same(Integer, bool))
 [[loom::op("index.cast")]] loom::type::index cast(Integer value);
 
-// Converts a logical coordinate to a fixed-width C++ integer. The explicit
-// result type records the source program's intended width and signedness.
+// Converts a logical coordinate to a fixed-width C++ integer or enumeration.
+// The explicit result type records the intended width and signedness.
 template <class Integer>
-  requires(__is_integral(Integer) && !__is_same(Integer, bool))
+  requires((__is_integral(Integer) || __is_enum(Integer)) &&
+           !__is_same(Integer, bool))
 [[loom::op("index.cast")]] Integer cast(loom::type::index value);
 
 // Converts a physical byte quantity to a logical coordinate. Target lowering
@@ -156,17 +158,19 @@ template <class Integer>
 
 namespace loom::offset {
 
-// Converts a non-Boolean C++ integer to Loom's target-independent unsigned
-// byte-offset type.
+// Explicitly converts a non-Boolean C++ integer or enumeration to Loom's
+// target-independent unsigned byte-offset type.
 template <class Integer>
-  requires(__is_integral(Integer) && !__is_same(Integer, bool))
+  requires((__is_integral(Integer) || __is_enum(Integer)) &&
+           !__is_same(Integer, bool))
 [[loom::op("index.cast")]] loom::type::offset cast(Integer value);
 
-// Converts a physical byte quantity to a fixed-width C++ integer. The
-// explicit result type records the source program's intended width and
+// Converts a physical byte quantity to a fixed-width C++ integer or
+// enumeration. The explicit result type records the intended width and
 // signedness.
 template <class Integer>
-  requires(__is_integral(Integer) && !__is_same(Integer, bool))
+  requires((__is_integral(Integer) || __is_enum(Integer)) &&
+           !__is_same(Integer, bool))
 [[loom::op("index.cast")]] Integer cast(loom::type::offset value);
 
 // Converts a logical coordinate to a physical byte quantity. Target lowering

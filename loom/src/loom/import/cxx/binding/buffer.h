@@ -19,10 +19,10 @@
 
 namespace loom::cxx_import {
 
-// An admitted buffer allocation or scoped pointer contract. Allocations retain
-// their logical or physical count domain, memory space, and minimum alignment.
-// Assumptions refine the buffer root while preserving the source pointer's byte
-// origin.
+// An admitted buffer operation. Allocations retain their logical or physical
+// count domain, memory space, and minimum alignment. Byte-range operations
+// preserve independent origins and physical extents. Assumptions refine the
+// buffer root while preserving the source pointer's byte origin.
 class BufferIntrinsic {
  public:
   static bool supports(std::string_view name);
@@ -38,8 +38,8 @@ class BufferIntrinsic {
 
   // Emits the selected buffer operation after arguments have been evaluated
   // using normal C++ rules.
-  Value call(std::span<const Value> arguments, ValueArena& arena,
-             Storage& storage, cxx::AST* owner) const;
+  std::optional<Value> call(std::span<const Value> arguments, ValueArena& arena,
+                            Storage& storage, cxx::AST* owner) const;
 
   // Literal bindings consume source bytes before runtime argument evaluation.
   bool has_literal() const {
@@ -68,6 +68,10 @@ class BufferIntrinsic {
     CompareAddressEqual,
     CompareAddressUnequal,
     Distance,
+    Length,
+    Copy,
+    Fill,
+    CompareBytes,
   };
 
   BufferIntrinsic(Operation operation,
@@ -104,8 +108,8 @@ class BufferIntrinsic {
       : operation_(Operation::AssumeMemorySpace),
         element_type_(element_type),
         memory_space_(memory_space) {}
-  BufferIntrinsic(Operation operation, const BufferPartition* result_buffer)
-      : operation_(operation), result_buffer_(result_buffer) {}
+  BufferIntrinsic(Operation operation, const Partition* result_partition)
+      : operation_(operation), result_partition_(result_partition) {}
   explicit BufferIntrinsic(loom_scalar_type_t result_scalar)
       : operation_(Operation::Distance), result_scalar_(result_scalar) {}
 
@@ -120,8 +124,8 @@ class BufferIntrinsic {
   const cxx::Type* element_type_ = nullptr;
   // Source size or native index type accepted by the runtime operand.
   const cxx::Type* element_count_type_ = nullptr;
-  // Source-only element interpretation produced by root, cast, or null.
-  const BufferPartition* result_buffer_ = nullptr;
+  // Source interpretation of a produced buffer root or physical byte extent.
+  const Partition* result_partition_ = nullptr;
   // High storage domain selected for allocation or refinement.
   loom_value_fact_memory_space_t memory_space_ =
       LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN;

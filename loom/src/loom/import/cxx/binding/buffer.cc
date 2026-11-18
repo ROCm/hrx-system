@@ -23,6 +23,7 @@
 #include "loom/import/cxx/binding/allocation.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
+#include "loom/ir/type_constraint.h"
 
 namespace loom::cxx_import {
 
@@ -33,7 +34,9 @@ bool BufferIntrinsic::supports(std::string_view name) {
          name == "buffer.assume.memory_space" || name == "buffer.cast" ||
          name == "buffer.root" || name == "buffer.null" ||
          name == "buffer.compare.null" || name == "buffer.compare.address" ||
-         name == "buffer.distance";
+         name == "buffer.distance" || name == "buffer.length" ||
+         name == "buffer.copy" || name == "buffer.fill" ||
+         name == "buffer.compare";
 }
 
 std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
@@ -48,6 +51,88 @@ std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
   auto parameters = signature->parameterTypes();
   auto* result = cxx::type_cast<cxx::PointerType>(
       types.unqualified(signature->returnType()));
+  if (name == "buffer.length") {
+    if (attribute.arguments.size() != 1 || signature->isVariadic() ||
+        parameters.size() != 1 ||
+        types.partition(parameters[0], owner).kind != ValueKind::Buffer ||
+        types.address_domain(signature->returnType(), owner) !=
+            LOOM_SCALAR_TYPE_OFFSET) {
+      diagnostics.reject(unit, owner,
+                         "buffer.length requires one typed buffer operand "
+                         "and an offset result");
+    }
+    return BufferIntrinsic(Operation::Length,
+                           &types.partition(signature->returnType(), owner));
+  }
+  if (name == "buffer.copy" || name == "buffer.fill" ||
+      name == "buffer.compare") {
+    const auto operation = name == "buffer.copy"   ? Operation::Copy
+                           : name == "buffer.fill" ? Operation::Fill
+                                                   : Operation::CompareBytes;
+    const size_t parameter_count = operation == Operation::Fill ? 4 : 5;
+    if (attribute.arguments.size() != 1 || signature->isVariadic() ||
+        parameters.size() != parameter_count) {
+      diagnostics.reject(
+          unit, owner,
+          std::string(name) +
+              (operation == Operation::Fill
+                   ? " requires a pattern, typed buffer, byte position, and "
+                     "byte length"
+                   : " requires two typed buffer and byte position pairs "
+                     "and a byte length"));
+    }
+    if (types.address_domain(parameters.back(), owner) !=
+        LOOM_SCALAR_TYPE_OFFSET) {
+      diagnostics.reject(unit, owner,
+                         std::string(name) + " requires an offset byte length");
+    }
+    auto* return_type = types.unqualified(signature->returnType());
+    if (operation == Operation::CompareBytes
+            ? return_type != unit.control()->getIntType()
+            : return_type->kind() != cxx::TypeKind::kVoid) {
+      diagnostics.reject(
+          unit, owner,
+          std::string(name) + (operation == Operation::CompareBytes
+                                   ? " requires an int result"
+                                   : " requires a void result"));
+    }
+    auto require_range = [&](size_t buffer_index) -> const BufferPartition& {
+      const auto& partition = types.partition(parameters[buffer_index], owner);
+      if (partition.kind != ValueKind::Buffer ||
+          types.address_domain(parameters[buffer_index + 1], owner) ==
+              LOOM_SCALAR_TYPE_NONE) {
+        diagnostics.reject(unit, owner,
+                           std::string(name) +
+                               " requires typed buffers with index or offset "
+                               "byte positions");
+      }
+      const auto& buffer = static_cast<const BufferPartition&>(partition);
+      if (unit.typeTraits().is_volatile(buffer.element_type)) {
+        diagnostics.reject(
+            unit, owner,
+            std::string(name) + " does not support volatile byte accesses");
+      }
+      return buffer;
+    };
+    if (operation == Operation::Fill &&
+        !loom_type_satisfies_constraint(
+            types.get(parameters[0], owner),
+            LOOM_TYPE_CONSTRAINT_BYTE_PATTERN_SCALAR)) {
+      diagnostics.reject(unit, owner,
+                         "buffer.fill requires an 8-, 16-, 32-, or 64-bit "
+                         "integer or floating-point pattern");
+    }
+    if (operation != Operation::Fill) {
+      require_range(0);
+    }
+    const auto& target = require_range(operation == Operation::Fill ? 1 : 2);
+    if (operation != Operation::CompareBytes &&
+        unit.typeTraits().is_const(target.element_type)) {
+      diagnostics.reject(unit, owner,
+                         std::string(name) + " requires a mutable target");
+    }
+    return BufferIntrinsic(operation, nullptr);
+  }
   if (name == "buffer.null" || name == "buffer.compare.null") {
     const bool construct = name == "buffer.null";
     if (attribute.arguments.size() != 1 || signature->isVariadic() ||
@@ -396,11 +481,33 @@ std::optional<BufferIntrinsic> BufferIntrinsic::resolve(
                                static_cast<int64_t>(alignment_bytes), has_pool);
 }
 
-Value BufferIntrinsic::call(std::span<const Value> arguments, ValueArena& arena,
-                            Storage& storage, cxx::AST* owner) const {
+std::optional<Value> BufferIntrinsic::call(std::span<const Value> arguments,
+                                           ValueArena& arena, Storage& storage,
+                                           cxx::AST* owner) const {
+  if (operation_ == Operation::Length) {
+    auto byte_length = storage.byte_length(arguments[0].ssa(), owner);
+    return arena.capture(*result_partition_, {&byte_length, 1});
+  }
+  if (operation_ == Operation::Copy) {
+    storage.copy_bytes({arguments[0].ssa(), arguments[1].ssa()},
+                       {arguments[2].ssa(), arguments[3].ssa()},
+                       arguments[4].ssa(), owner);
+    return std::nullopt;
+  }
+  if (operation_ == Operation::Fill) {
+    storage.fill_bytes(arguments[0].ssa(),
+                       {arguments[1].ssa(), arguments[2].ssa()},
+                       arguments[3].ssa(), owner);
+    return std::nullopt;
+  }
+  if (operation_ == Operation::CompareBytes) {
+    return storage.compare_bytes({arguments[0].ssa(), arguments[1].ssa()},
+                                 {arguments[2].ssa(), arguments[3].ssa()},
+                                 arguments[4].ssa(), owner);
+  }
   if (operation_ == Operation::Null) {
     auto root = storage.null_root(owner);
-    return arena.capture(*result_buffer_, {&root, 1});
+    return arena.capture(*result_partition_, {&root, 1});
   }
   if (operation_ == Operation::CompareNull) {
     return storage.compare_null(arguments[0].ssa(), true, owner);
@@ -418,11 +525,11 @@ Value BufferIntrinsic::call(std::span<const Value> arguments, ValueArena& arena,
                                    owner);
   }
   if (operation_ == Operation::Cast) {
-    return arena.capture(*result_buffer_, arguments[0].components());
+    return arena.capture(*result_partition_, arguments[0].components());
   }
   if (operation_ == Operation::Root) {
     auto root = arguments[0].pointer().root;
-    return arena.capture(*result_buffer_, {&root, 1});
+    return arena.capture(*result_partition_, {&root, 1});
   }
   if (operation_ == Operation::AssumeMemorySpace) {
     auto source = arguments[0];
@@ -488,7 +595,7 @@ bool BufferIntrinsic::equivalent(const BufferIntrinsic& other) const {
          result_scalar_ == other.result_scalar_ &&
          element_type_ == other.element_type_ &&
          element_count_type_ == other.element_count_type_ &&
-         result_buffer_ == other.result_buffer_ &&
+         result_partition_ == other.result_partition_ &&
          memory_space_ == other.memory_space_ &&
          alignment_ == other.alignment_ && has_pool_ == other.has_pool_;
 }

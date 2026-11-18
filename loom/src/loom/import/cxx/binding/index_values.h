@@ -23,14 +23,15 @@
 
 namespace loom::cxx_import {
 
-// Requires one non-Boolean source integer and returns whether its C++
-// interpretation is unsigned.
+// Requires one non-Boolean source integer or enumeration and returns whether
+// its underlying C++ interpretation is unsigned. Explicit address casts admit
+// scoped enumerations; implicit coordinates use require_index_value instead.
 bool require_integral(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
                       Types& types, const cxx::Type* type, cxx::AST* owner,
                       std::string_view role);
 
-// Requires one Loom index or non-Boolean C++ integer. Returns whether an
-// ordinary integer operand has unsigned C++ value semantics.
+// Requires one Loom index, non-Boolean C++ integer, or unscoped enumeration.
+// Returns whether an ordinary operand has unsigned C++ value semantics.
 bool require_index_value(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
                          Types& types, const cxx::Type* type, cxx::AST* owner,
                          std::string_view role);

@@ -275,3 +275,43 @@ func.def public @read_width() -> (index) {
   %width = index.constant 64 : index
   func.return %width : index
 }
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Explicit address casts accept scoped enums in both directions. Their
+// underlying widths and signedness remain the source conversion contract.
+#include <loomcxx/index.h>
+enum class Logical : short { Start = 0 };
+enum class Physical : unsigned { Start = 0 };
+loom::type::index logical_enum(Logical value) {
+  return loom::index::cast(value);
+}
+Logical logical_result(loom::type::index value) {
+  return loom::index::cast<Logical>(value);
+}
+loom::type::offset physical_enum(Physical value) {
+  return loom::offset::cast(value);
+}
+Physical physical_result(loom::type::offset value) {
+  return loom::offset::cast<Physical>(value);
+}
+// ----
+func.def public @logical_enum(%value: i16) -> (index) {
+  %2 = index.cast %value : i16 to index
+  func.return %2 : index
+}
+
+func.def public @logical_result(%value: index) -> (i16) {
+  %5 = index.cast %value : index to i16
+  func.return %5 : i16
+}
+
+func.def public @physical_enum(%value: i32) -> (offset) {
+  %8 = index.cast %value : i32 to offset
+  func.return %8 : offset
+}
+
+func.def public @physical_result(%value: offset) -> (i32) {
+  %11 = index.cast %value : offset to i32
+  func.return %11 : i32
+}

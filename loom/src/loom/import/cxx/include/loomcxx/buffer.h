@@ -108,6 +108,35 @@ namespace buffer {
 template <class T>
 [[loom::op("buffer.null")]] loom::type::buffer<T> null();
 
+// Queries the complete root's physical byte length without reading its
+// contents. Null has zero length; element type and qualifiers do not affect
+// the byte extent.
+template <class T>
+[[loom::op("buffer.length")]] loom::type::offset length(
+    loom::type::buffer<T> source);
+
+// Copies exactly byte_length bytes between non-overlapping ranges. Origins
+// are byte positions, independently of the source and target element types.
+// A zero length performs no byte access. Source may be const; target must be
+// mutable. Neither element type may be volatile.
+template <class Source, class Target, class SourcePosition = loom::type::offset,
+          class TargetPosition = loom::type::offset>
+[[loom::op("buffer.copy")]] void copy(loom::type::buffer<Source> source,
+                                      SourcePosition source_offset,
+                                      loom::type::buffer<Target> target,
+                                      TargetPosition target_offset,
+                                      loom::type::offset byte_length);
+
+// Repeats the raw little-endian bytes of an 8-, 16-, 32-, or 64-bit integer
+// or floating-point pattern. A partial final repetition writes the low-address
+// prefix of the pattern. The range and origin are in bytes, independently of
+// T; zero length performs no access. T must be mutable and non-volatile.
+template <class Pattern, class T, class Position = loom::type::offset>
+[[loom::op("buffer.fill")]] void fill(Pattern pattern,
+                                      loom::type::buffer<T> target,
+                                      Position target_offset,
+                                      loom::type::offset byte_length);
+
 namespace compare {
 
 // Closed predicate family for opaque byte-position comparisons.
@@ -126,6 +155,17 @@ template <predicate Predicate, class Left, class Right,
 [[loom::op("buffer.compare.address")]] bool address(
     loom::type::buffer<Left> left, LeftPosition left_offset,
     loom::type::buffer<Right> right, RightPosition right_offset);
+
+// Compares equal-length ranges as unsigned bytes, returning exactly -1, 0,
+// or +1. Zero length returns zero without accessing either root. Element
+// types may be const but not volatile; origins and length are in bytes.
+template <class Left, class Right, class LeftPosition = loom::type::offset,
+          class RightPosition = loom::type::offset>
+[[loom::op("buffer.compare")]] int bytes(loom::type::buffer<Left> left,
+                                         LeftPosition left_offset,
+                                         loom::type::buffer<Right> right,
+                                         RightPosition right_offset,
+                                         loom::type::offset byte_length);
 
 }  // namespace compare
 

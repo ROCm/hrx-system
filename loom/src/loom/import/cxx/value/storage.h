@@ -77,6 +77,21 @@ class Storage {
   Pointer null(cxx::AST* owner);
   // Constructs the opaque null root for source-level typed buffer values.
   loom_value_id_t null_root(cxx::AST* owner);
+  // Queries the complete root's physical byte extent without accessing its
+  // payload. A null root has zero extent.
+  loom_value_id_t byte_length(loom_value_id_t root, cxx::AST* owner);
+  // Copies disjoint byte ranges. Origins retain their address domains and
+  // the length is a physical offset; zero length performs no access.
+  void copy_bytes(Pointer source, Pointer target, loom_value_id_t byte_length,
+                  cxx::AST* owner);
+  // Repeats the pattern's raw little-endian bytes, including a partial tail.
+  // The source binding admits the pattern type and writable target.
+  void fill_bytes(loom_value_id_t pattern, Pointer target,
+                  loom_value_id_t byte_length, cxx::AST* owner);
+  // Compares unsigned byte sequences, returning canonical i32 -1, 0, or +1.
+  // Zero length returns zero without accessing either root.
+  loom_value_id_t compare_bytes(Pointer left, Pointer right,
+                                loom_value_id_t byte_length, cxx::AST* owner);
   // Tests the root's null identity without observing its extent or contents.
   // The caller has already evaluated the source pointer expression.
   loom_value_id_t compare_null(loom_value_id_t root, bool equal,

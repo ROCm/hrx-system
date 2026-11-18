@@ -140,9 +140,9 @@ bool require_integral(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
                       Types& types, const cxx::Type* type, cxx::AST* owner,
                       std::string_view role) {
   auto projected = types.get(type, owner);
-  if (!unit.typeTraits().is_integral(type) ||
+  if (!unit.typeTraits().is_integral_or_enum(type) ||
       loom_type_kind(projected) != LOOM_TYPE_SCALAR ||
-      loom_type_element_type(projected) == LOOM_SCALAR_TYPE_I1) {
+      types.unqualified(type)->kind() == cxx::TypeKind::kBool) {
     diagnostics.reject(unit, owner,
                        std::string(role) + " requires an integer value");
   }
@@ -152,6 +152,11 @@ bool require_integral(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
 bool require_index_value(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
                          Types& types, const cxx::Type* type, cxx::AST* owner,
                          std::string_view role) {
+  if (types.unqualified(type)->kind() == cxx::TypeKind::kScopedEnum) {
+    diagnostics.reject(
+        unit, owner,
+        std::string(role) + " requires an explicit scoped enum conversion");
+  }
   return types.is_index(type, owner)
              ? false
              : require_integral(unit, diagnostics, types, type, owner, role);

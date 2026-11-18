@@ -260,3 +260,191 @@ func.def public inline @bound_unsigned(%tokens$0: i32, %capacity$1: i32) -> (i32
   %5 = scalar.xori %tokens$3, %capacity$4 : i32
   func.return %5 : i32
 }
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Refining a nested member preserves its siblings and survives a whole-record
+// return without introducing aggregate storage.
+#include <loomcxx/predicate.h>
+struct Count {
+  // Selected nested member.
+  int value;
+  // Sibling left unconstrained.
+  int capacity;
+};
+struct Arguments {
+  // Sibling before the nested record.
+  unsigned tag;
+  // Group containing the constrained leaf.
+  Count count;
+};
+Arguments bound_member(Arguments arguments) {
+  loom::assume(arguments.count.value >= 0);
+  return arguments;
+}
+// ----
+func.def public @bound_member(%arguments_tag: i32, %arguments_count_value$1: i32, %arguments_count_capacity: i32) -> (i32, i32, i32) {
+  %arguments_count_value$6 = scalar.assume %arguments_count_value$1 [ge(%arguments_count_value$1, 0)] : i32
+  func.return %arguments_tag, %arguments_count_value$6, %arguments_count_capacity : i32, i32, i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Both leaves of a relation must be replaced in the same record. A subsequent
+// member/scalar relation consumes those refined identities.
+#include <loomcxx/predicate.h>
+struct Bounds {
+  // Lower member participating in the first relation.
+  unsigned lower;
+  // Upper member participating in both relations.
+  unsigned upper;
+  // Sibling updated from the refined scalar argument.
+  unsigned tag;
+};
+Bounds bound_members(Bounds bounds, unsigned capacity) {
+  loom::assume(bounds.lower <= bounds.upper && bounds.upper < capacity);
+  bounds.tag += capacity;
+  return bounds;
+}
+// ----
+func.def public @bound_members(%bounds_lower$0: i32, %bounds_upper$1: i32, %bounds_tag$2: i32, %capacity$3: i32) -> (i32, i32, i32) {
+  %bounds_lower$7, %bounds_upper$8 = scalar.assume %bounds_lower$0, %bounds_upper$1 [ule(%bounds_lower$0, %bounds_upper$1)] : i32, i32
+  %bounds_upper$9, %capacity$10 = scalar.assume %bounds_upper$8, %capacity$3 [ult(%bounds_upper$8, %capacity$3)] : i32, i32
+  %bounds_tag$11 = scalar.addi %bounds_tag$2, %capacity$10 : i32
+  func.return %bounds_lower$7, %bounds_upper$9, %bounds_tag$11 : i32, i32, i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Qualified inherited fields retain their distinct subobject identities even
+// when both leaves have the same declaration and name.
+#include <loomcxx/predicate.h>
+struct Base {
+  // Same declaration reached through two distinct base paths.
+  unsigned count;
+};
+struct Left : Base {};
+struct Right : Base {};
+struct Counts : Left, Right {
+  // Sibling outside either inherited subobject.
+  unsigned tag;
+};
+Counts bound_bases(Counts counts) {
+  loom::assume(counts.Left::count <= counts.Right::count);
+  return counts;
+}
+// ----
+func.def public @bound_bases(%counts_Left_Base_count$0: i32, %counts_Right_Base_count$1: i32, %counts_tag: i32) -> (i32, i32, i32) {
+  %counts_Left_Base_count$6, %counts_Right_Base_count$7 = scalar.assume %counts_Left_Base_count$0, %counts_Right_Base_count$1 [ule(%counts_Left_Base_count$0, %counts_Right_Base_count$1)] : i32, i32
+  func.return %counts_Left_Base_count$6, %counts_Right_Base_count$7, %counts_tag : i32, i32, i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// C++ promotes narrow members before comparison; each refined result returns
+// to its original component type without replacing adjacent components.
+#include <loomcxx/predicate.h>
+struct Counts {
+  // Sign-extended comparison operand.
+  short signed_count;
+  // Zero-extended comparison operand.
+  unsigned char byte_count;
+  // Sibling left unconstrained.
+  unsigned tag;
+};
+Counts bound_promoted(Counts counts) {
+  loom::assume(counts.signed_count > 0 && counts.byte_count <= 127);
+  return counts;
+}
+// ----
+func.def public @bound_promoted(%counts_signed_count$0: i16, %counts_byte_count$1: i8, %counts_tag: i32) -> (i16, i8, i32) {
+  %6 = scalar.extsi %counts_signed_count$0 : i16 to i32
+  %7 = scalar.assume %6 [gt(%6, 0)] : i32
+  %counts_signed_count$8 = scalar.trunci %7 : i32 to i16
+  %9 = scalar.extui %counts_byte_count$1 : i8 to i32
+  %10 = scalar.assume %9 [le(%9, 127)] : i32
+  %counts_byte_count$11 = scalar.trunci %10 : i32 to i8
+  func.return %counts_signed_count$8, %counts_byte_count$11, %counts_tag : i16, i8, i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Address-domain members retain index/offset predicates rather than passing
+// through fixed-width scalar conversions.
+#include <loomcxx/index.h>
+#include <loomcxx/predicate.h>
+struct Range {
+  // Lower logical bound.
+  loom::type::index begin;
+  // Upper logical bound.
+  loom::type::index end;
+};
+struct Storage {
+  // Nested logical coordinates.
+  Range range;
+  // Physical extent with its own divisibility contract.
+  loom::type::offset bytes;
+};
+Storage bound_storage(Storage storage) {
+  loom::assume(loom::predicate::le(storage.range.begin, storage.range.end));
+  loom::assume(loom::predicate::multiple_of(storage.bytes, 16));
+  return storage;
+}
+// ----
+func.def public @bound_storage(%storage_range_begin$0: index, %storage_range_end$1: index, %storage_bytes$2: offset) -> (index, index, offset) {
+  %storage_range_begin$6, %storage_range_end$7 = index.assume %storage_range_begin$0, %storage_range_end$1 [le(%storage_range_begin$0, %storage_range_end$1)] : index, index
+  %storage_bytes$8 = index.assume %storage_bytes$2 [multiple_of(%storage_bytes$2, 16)] : offset
+  func.return %storage_range_begin$6, %storage_range_end$7, %storage_bytes$8 : index, index, offset
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Refinement changes the current member identity, not earlier snapshots. A
+// later assignment replaces that identity without inheriting its old bound.
+#include <loomcxx/predicate.h>
+struct State {
+  // Member whose identity changes through refinement and assignment.
+  int count;
+  // Snapshot taken before refinement.
+  int before;
+  // Snapshot taken after refinement.
+  int bounded;
+};
+State replace_member(State state, int next) {
+  state.before = state.count;
+  loom::assume(state.count >= 0);
+  state.bounded = state.count;
+  state.count = next;
+  return state;
+}
+// ----
+func.def public @replace_member(%state_count$0: i32, %state_before: i32, %state_bounded: i32, %next: i32) -> (i32, i32, i32) {
+  %state_count$7 = scalar.assume %state_count$0 [ge(%state_count$0, 0)] : i32
+  func.return %next, %state_count$0, %state_count$7 : i32, i32, i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A member can be refined before the remaining record is initialized; the
+// assumption does not read or manufacture those missing components.
+#include <loomcxx/predicate.h>
+#include <loomcxx/view.h>
+using Rows = loom::type::view<loom::type::shape<loom::type::dynamic>, int>;
+struct Counts {
+  // Initialized and refined before the other member exists.
+  int value;
+  // Complete dependent group initialized after the refinement.
+  Rows rows;
+};
+Counts construct_bound(int value, Rows rows) {
+  Counts counts;
+  counts.value = value;
+  loom::assume(counts.value >= 0);
+  counts.rows = rows;
+  return counts;
+}
+// ----
+func.def public @construct_bound(%value: i32, %rows_dim0: index, %rows: view<[%rows_dim0]xi32>) -> (i32, %4: index, view<[%4]xi32>) {
+  %counts_value = scalar.assume %value [ge(%value, 0)] : i32
+  func.return %counts_value, %rows_dim0, %rows : i32, index, view<[%rows_dim0]xi32>
+}
