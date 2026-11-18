@@ -433,8 +433,10 @@ typedef struct iree_async_proactor_options_t {
   iree_async_proactor_threading_mode_t threading_mode;
 
   // Affinity applied before backend-owned worker threads begin executing.
-  // Creation fails if a worker cannot apply it. Zero leaves worker placement
-  // unspecified. The caller separately controls the polling thread's affinity.
+  // Creation validates the request; backends with poll-owner kernel workers
+  // apply it before the first I/O and report native setup errors from poll.
+  // Zero leaves worker placement unspecified. The caller separately controls
+  // the polling thread's affinity.
   iree_thread_affinity_t worker_affinity;
 
   // Optional CPU budget bounding backend-owned worker affinity. Native CPU IDs

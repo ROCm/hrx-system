@@ -75,8 +75,9 @@ struct Completion {
 // still in flight; returning through their stack storage would be unsafe.
 class ReceiveHarness {
  public:
-  explicit ReceiveHarness(bool expect_io_uring = true) {
-    auto options = iree_async_proactor_options_default();
+  explicit ReceiveHarness(bool expect_io_uring = true,
+                          iree_async_proactor_options_t options =
+                              iree_async_proactor_options_default()) {
     options.max_concurrent_operations = 8;
     IREE_CHECK_OK(iree_async_proactor_create_platform(
         options, iree_allocator_system(), &proactor));
@@ -208,6 +209,68 @@ class IoUringCapabilityDeathTest : public ::testing::Test {
         ::testing::ExitedWithCode(0), "");
   }
 };
+
+class IoUringAffinityCapabilityDeathTest : public IoUringCapabilityDeathTest {
+ protected:
+  void SetUp() override {
+    IREE_ASSERT_OK(iree_thread_affinity_query_current(&budget_));
+    iree_async_proactor_t* proactor = nullptr;
+    iree_status_t status = iree_async_proactor_create_io_uring(
+        Options(), iree_allocator_system(), &proactor);
+    if (iree_status_is_unavailable(status)) {
+      iree_status_free(status);
+      GTEST_SKIP() << "native worker affinity unavailable before restriction";
+    }
+    IREE_ASSERT_OK(status);
+    iree_async_proactor_release(proactor);
+  }
+
+  iree_async_proactor_options_t Options() const {
+    auto options = iree_async_proactor_options_default();
+    options.worker_processor_set = &budget_;
+    return options;
+  }
+
+  // Original allowed CPUs, retained through construction of the child backend.
+  iree_thread_affinity_set_t budget_ = {};
+};
+
+TEST_F(IoUringAffinityCapabilityDeathTest,
+       UnavailableWorkerAffinitySelectsAffinedPortableBackend) {
+  for (int error_number : {EINVAL, ENOSYS, EOPNOTSUPP, EPERM, EACCES}) {
+    Run(
+        [this] {
+          iree_async_proactor_t* proactor = nullptr;
+          IREE_EXPECT_STATUS_IS(
+              IREE_STATUS_UNAVAILABLE,
+              iree_async_proactor_create_io_uring(
+                  Options(), iree_allocator_system(), &proactor));
+          EXPECT_EQ(proactor, nullptr);
+          ReceiveHarness(false, Options()).RoundTrip();
+
+          // Unconstrained owners need no worker-affinity registration.
+          IREE_CHECK_OK(iree_async_proactor_create_io_uring(
+              iree_async_proactor_options_default(), iree_allocator_system(),
+              &proactor));
+          iree_async_proactor_release(proactor);
+        },
+        error_number, false, IREE_IORING_REGISTER_IOWQ_AFF);
+  }
+}
+
+TEST_F(IoUringAffinityCapabilityDeathTest,
+       WorkerAffinityResourceFailurePropagates) {
+  Run(
+      [this] {
+        iree_async_proactor_t* proactor = nullptr;
+        IREE_EXPECT_STATUS_IS(
+            IREE_STATUS_RESOURCE_EXHAUSTED,
+            iree_async_proactor_create_platform(
+                Options(), iree_allocator_system(), &proactor));
+        EXPECT_EQ(proactor, nullptr);
+      },
+      ENOMEM, false, IREE_IORING_REGISTER_IOWQ_AFF);
+}
 
 TEST_F(IoUringCapabilityDeathTest, UnavailableProvidedRingsUseOneShotLeases) {
   for (int error_number : {EINVAL, ENOSYS, EOPNOTSUPP, EPERM, EACCES}) {

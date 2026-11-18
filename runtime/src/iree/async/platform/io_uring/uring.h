@@ -198,6 +198,14 @@ void iree_io_uring_ring_deinitialize(iree_io_uring_ring_t* ring);
 // submitter. No-op if the ring was not created with R_DISABLED.
 iree_status_t iree_io_uring_ring_enable(iree_io_uring_ring_t* ring);
 
+// Applies a native cpu_set_t mask to the polling task's io-wq workers before
+// admitting any SQEs. The ring must be enabled on this task and its SQ tail
+// must still be unpublished; locally prepared SQEs remain queued. Linux shares
+// io-wq across rings submitted by one task, so their affinities must agree.
+iree_status_t iree_io_uring_ring_set_worker_affinity(iree_io_uring_ring_t* ring,
+                                                     iree_host_size_t mask_size,
+                                                     const void* native_mask);
+
 // Sets the callback used to wake the registration owner when another task
 // queues an io_uring_register operation.
 void iree_io_uring_ring_set_registration_wake_callback(
