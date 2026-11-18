@@ -16,6 +16,7 @@ from loom.reporting.compile_report import (
     CompileReportComparisonMode,
     CompileReportDocument,
     CompileReportEntryIdentity,
+    CompileReportError,
     compile_report_entry_identity,
     match_compile_report_entries,
     report_common_identity_json,
@@ -39,6 +40,10 @@ from loom.reporting.compile_report_boundary_projections import (
 from loom.reporting.compile_report_capabilities import (
     append_target_capability_diff_text,
     build_target_capability_diff,
+)
+from loom.reporting.compile_report_commands import (
+    append_command_show_text,
+    build_command_show,
 )
 from loom.reporting.compile_report_execution_economics import (
     append_execution_economics_diff_text,
@@ -471,6 +476,9 @@ def build_compile_report_show(
     loop_pipelines = build_loop_pipeline_show(document)
     if loop_pipelines is not None:
         view["loop_pipelines"] = loop_pipelines
+    commands = build_command_show(document)
+    if commands is not None:
+        view["commands"] = commands
     pipelines = build_pipeline_show(document)
     if pipelines is not None:
         view["pipelines"] = pipelines
@@ -502,6 +510,12 @@ def build_compile_report_diff(
     force: bool = False,
 ) -> dict[str, object]:
     """Builds a deterministic diff under the selected identity contract."""
+    if "command_programs" in baseline.report or "command_programs" in candidate.report:
+        raise CompileReportError(
+            "command-program reports describe command order and storage, not native "
+            "entry comparisons; use show to inspect each command report, or diff the "
+            "native kernel reports in the bundle"
+        )
     match = match_compile_report_entries(
         baseline,
         candidate,
@@ -733,8 +747,11 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
         for binding_value in config_bindings:
             binding = _expect_dict(binding_value)
             lines.append(f"    {binding['key']} = {binding['value']}")
-    lines.append("")
-    append_workload_show_text(lines, _expect_dict(view["workload"]))
+    commands = view.get("commands")
+    entries = _expect_list(view["entries"])
+    if commands is None or entries:
+        lines.append("")
+        append_workload_show_text(lines, _expect_dict(view["workload"]))
     expansions = view.get("expansions")
     if isinstance(expansions, dict):
         append_expansion_show_text(lines, expansions)
@@ -742,8 +759,7 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
     if isinstance(scalarization, dict):
         append_scalarization_show_text(lines, scalarization)
 
-    entries = _expect_list(view["entries"])
-    if not entries:
+    if not entries and commands is None:
         lines.append("  entries: none")
     for entry_value in entries:
         entry = _expect_dict(entry_value)
@@ -780,6 +796,8 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
     loop_pipelines = view.get("loop_pipelines")
     if isinstance(loop_pipelines, dict):
         append_loop_pipeline_show_text(lines, loop_pipelines)
+    if isinstance(commands, dict):
+        append_command_show_text(lines, commands)
     pipelines = view.get("pipelines")
     if isinstance(pipelines, dict):
         append_pipeline_show_text(lines, pipelines)
