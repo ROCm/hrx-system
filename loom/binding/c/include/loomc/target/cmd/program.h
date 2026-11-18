@@ -44,6 +44,14 @@
 /// formatting entirely. The primary executable product is always returned,
 /// with or without `LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY`.
 ///
+/// Attach `loomc_compile_report_options_t` through any construction options'
+/// `next` chain to capture command counts, storage requirements, and optional
+/// command-order and placement details. Reports describe compilation decisions;
+/// they are diagnostic output, not a command execution interface. JSON and text
+/// use the common compile report formats and result ownership. An empty report
+/// identifier becomes `command-program.compile-report.json` or `.txt`.
+/// Omitting the extension or selecting NONE skips collection and formatting.
+///
 /// @par Example
 /// Build one command product from an already resolved root:
 ///
@@ -104,7 +112,8 @@ typedef struct loomc_cmd_program_product_options_t {
   loomc_host_size_t structure_size;
 
   /// Optional invocation extensions such as
-  /// `loomc_target_specialization_options_t`.
+  /// `loomc_target_specialization_options_t` or
+  /// `loomc_compile_report_options_t`.
   const void* next;
 
   /// Reusable compiler retaining the frozen command and kernel sources.
@@ -168,7 +177,8 @@ typedef struct loomc_cmd_program_request_options_t {
   loomc_host_size_t structure_size;
 
   /// Optional invocation extensions such as
-  /// `loomc_target_specialization_options_t`.
+  /// `loomc_target_specialization_options_t` or
+  /// `loomc_compile_report_options_t`.
   const void* next;
 
   /// Optional frozen library-only index used to resolve request declarations.
@@ -216,7 +226,8 @@ typedef struct loomc_cmd_program_module_options_t {
   loomc_host_size_t structure_size;
 
   /// Optional invocation extensions such as
-  /// `loomc_target_specialization_options_t`.
+  /// `loomc_target_specialization_options_t` or
+  /// `loomc_compile_report_options_t`.
   const void* next;
 
   /// Optional frozen library-only index used to resolve module declarations.

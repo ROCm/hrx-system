@@ -17,6 +17,8 @@
 extern "C" {
 #endif
 
+typedef struct loom_target_compile_report_t loom_target_compile_report_t;
+
 // One plan-wide executable-entry requirement.
 typedef struct loom_cmd_program_artifact_entry_t {
   // Logical kernel symbol resolved by the embedding executable catalog.
@@ -72,7 +74,8 @@ typedef struct loom_cmd_program_artifact_set_t {
 // may outlive |plan|. Artifact bytes and metadata are owned by the set and must
 // be released with loom_cmd_program_artifact_set_deinitialize.
 iree_status_t loom_cmd_program_artifact_set_build(
-    const loom_cmd_program_plan_t* plan, iree_allocator_t host_allocator,
+    const loom_cmd_program_plan_t* plan, loom_target_compile_report_t* report,
+    iree_allocator_t host_allocator,
     loom_cmd_program_artifact_set_t* out_artifact_set);
 
 // Releases all storage owned by |artifact_set| and resets it to empty.

@@ -14,6 +14,7 @@
 #include "loom/codegen/low/planning_statistics.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ir/types.h"
+#include "loom/target/reporting/command_plan.h"
 #include "loom/target/reporting/loop_pipeline.h"
 #include "loom/target/reporting/pipeline_plan.h"
 #include "loom/target/reporting/residency.h"
@@ -103,6 +104,8 @@ enum {
   LOOM_TARGET_COMPILE_REPORT_DETAIL_PIPELINE_PLAN_ROWS = 1u << 29,
   // Direct function-call edges and their invocation counts were recorded.
   LOOM_TARGET_COMPILE_REPORT_DETAIL_CALL_EDGES = 1u << 30,
+  // Compiled command order and resource-placement detail rows were recorded.
+  LOOM_TARGET_COMPILE_REPORT_DETAIL_COMMAND_PLAN_ROWS = 1u << 31,
 };
 
 typedef enum loom_target_compile_report_move_cause_e {
@@ -2092,6 +2095,8 @@ typedef struct loom_target_compile_report_t {
       target_insertion_summary;
   // Selected pipeline realizations and optional physical-plan rows.
   loom_target_compile_report_row_list_t pipeline_plans;
+  // Compiled command roots and optional order/resource-placement rows.
+  loom_target_compile_report_row_list_t command_plans;
   // Owned emitted artifact entry summary rows.
   loom_target_compile_report_row_list_t entry_rows;
   // Owned direct function-call edge summaries.

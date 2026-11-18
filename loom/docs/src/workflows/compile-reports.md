@@ -41,6 +41,64 @@ with the same Loom tool version that produced them. A schema mismatch fails
 with an instruction to regenerate the report rather than guessing at an old
 layout.
 
+## Inspect a command program
+
+A command report explains the resolved program around the kernels: dispatch
+order, execution barriers, direct grids or indirect count-buffer ranges,
+parameter placement, and transient storage. Native kernel reports describe the
+instructions and registers inside those dispatches. A benchmark debug bundle
+keeps both kinds under `compile_reports/`; file names identify the scenario,
+configuration, and compilation that produced each report.
+
+For an authored scenario benchmark in `stages.loom`, capture a detailed bundle
+with a single execution sample:
+
+```shell
+loom-benchmark stages.loom \
+  --benchmark=@dependent_stage_values_throughput --sample=5 \
+  --device=task --input-ring-count=1 --batch-size=1 \
+  --iterations=1 --warmup-iterations=0 --warmup-time-ms=0 \
+  --min-time-ms=0 --max-batches=1 \
+  --artifact-bundle-dir=stages.bundle --artifact-bundle-policy=debug \
+  --compile-report=details
+
+for report in stages.bundle/compile_reports/*; do
+  loom-compile-report show "$report"
+done
+```
+
+The benchmark symbol, sample, and device come from the program being inspected.
+For a command that adds a parameter bias, scales the intermediate three times,
+and copies the result, the command section shows:
+
+```text
+  commands: 5 (5 dispatch_direct); 4 barriers before commands
+  resources: 1 fixed, 3 rebindable; 3 executables, 3 entries
+  transient: rebindable[2] 64 B, alignment 16
+  launch_counts: none
+  [0] dispatch_direct @add_stage_bias (3 arguments) workgroups=[1, 1, 1]
+  [1] barrier -> dispatch_direct @scale_stage_values (1 arguments) workgroups=[1, 1, 1]
+  [2] barrier -> dispatch_direct @scale_stage_values (1 arguments) workgroups=[1, 1, 1]
+  [3] barrier -> dispatch_direct @scale_stage_values (1 arguments) workgroups=[1, 1, 1]
+  [4] barrier -> dispatch_direct @copy_stage_values (2 arguments) workgroups=[1, 1, 1]
+```
+
+This makes an extra dispatch, an unexpected serialization boundary, or an
+oversized scratch allocation visible without inspecting the command encoding.
+`barrier ->` is an execution barrier attached to the following command; a
+standalone barrier is its own row. Indirect dispatches show the count-buffer
+role and byte range instead of inventing a grid. `remaining` means the rest of
+the bound buffer, while a zero byte length or direct grid remains exactly zero.
+Summary mode retains command-kind counts and storage requirements without the
+ordered command and placement rows. Use `show` for this command evidence;
+`diff` and `suggest` analyze the separate native kernel reports.
+
+C API callers request the same evidence by chaining
+`loomc_compile_report_options_t` onto any command-program product construction
+options. The returned result owns the report bytes independently of the product
+and compiler objects. Reports describe compiler decisions for inspection;
+their versioned diagnostic fields are not an execution or interchange API.
+
 ## Show one report
 
 Start with the target-neutral human view:

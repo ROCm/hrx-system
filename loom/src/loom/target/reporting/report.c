@@ -38,6 +38,8 @@ void loom_target_compile_report_deinitialize(
   const iree_allocator_t allocator = report->allocator;
   loom_target_compile_report_pipeline_plan_list_deinitialize(
       &report->pipeline_plans, allocator);
+  loom_target_compile_report_command_plan_list_deinitialize(
+      &report->command_plans, allocator);
   loom_target_compile_report_row_list_deinitialize(allocator,
                                                    &report->entry_rows);
   loom_target_compile_report_row_list_deinitialize(allocator,
@@ -113,7 +115,8 @@ void loom_target_compile_report_deinitialize(
 static bool loom_target_compile_report_has_rows(
     const loom_target_compile_report_t* report) {
   return report->pipeline_plans.count != 0 ||
-         report->pressure_rows.count != 0 || report->spill_rows.count != 0 ||
+         report->command_plans.count != 0 || report->pressure_rows.count != 0 ||
+         report->spill_rows.count != 0 ||
          report->residency_constraint_rows.count != 0 ||
          report->pressure_summaries.count != 0 ||
          report->pressure_origin_rows.count != 0 ||
@@ -1278,6 +1281,18 @@ static iree_status_t loom_target_compile_report_append_evidence_rows(
     loom_target_compile_report_t* report,
     const loom_target_compile_report_t* entry_report,
     bool include_program_context) {
+  if (include_program_context) {
+    for (const loom_target_compile_report_vec_t* block =
+             entry_report->command_plans.head;
+         block; block = block->next) {
+      const loom_target_compile_report_command_plan_t* plans =
+          loom_target_compile_report_vec_const_rows(block);
+      for (iree_host_size_t i = 0; i < block->count; ++i) {
+        IREE_RETURN_IF_ERROR(
+            loom_target_compile_report_record_command_plan(report, &plans[i]));
+      }
+    }
+  }
   for (const loom_target_compile_report_vec_t* vec =
            entry_report->call_edge_rows.head;
        vec != NULL; vec = vec->next) {

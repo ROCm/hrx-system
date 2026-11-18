@@ -16,6 +16,8 @@
 extern "C" {
 #endif
 
+typedef struct loom_target_compile_report_t loom_target_compile_report_t;
+
 // Serializes one planned root into a portable command artifact.
 //
 // |root_index| selects a root in caller order from |plan|. The root's Low
@@ -32,11 +34,15 @@ extern "C" {
 // parameter-requirement tables and retains no module, operation, value,
 // symbol, or string storage.
 //
+// An optional report captures resolved observations before temporary tables
+// expire. Its strings borrow the plan through report formatting.
+//
 // |out_data| is empty on failure. The caller owns returned bytes and must free
 // them with |host_allocator|.
 iree_status_t loom_cmd_program_plan_serialize_root(
     const loom_cmd_program_plan_t* plan, iree_host_size_t root_index,
-    iree_allocator_t host_allocator, iree_byte_span_t* out_data);
+    loom_target_compile_report_t* report, iree_allocator_t host_allocator,
+    iree_byte_span_t* out_data);
 
 #ifdef __cplusplus
 }  // extern "C"

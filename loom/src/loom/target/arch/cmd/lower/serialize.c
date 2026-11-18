@@ -23,6 +23,7 @@
 #include "loom/target/arch/cmd/abi_layout.h"
 #include "loom/target/arch/cmd/descriptors/descriptors.h"
 #include "loom/target/arch/cmd/lower/program_writer.h"
+#include "loom/target/arch/cmd/lower/report.h"
 #include "loom/target/registers.h"
 
 enum { LOOM_CMD_SERIALIZE_INITIAL_CAPACITY = 32 };
@@ -882,7 +883,8 @@ static iree_status_t loom_cmd_serialize_function_body(
 
 iree_status_t loom_cmd_program_plan_serialize_root(
     const loom_cmd_program_plan_t* plan, iree_host_size_t root_index,
-    iree_allocator_t host_allocator, iree_byte_span_t* out_data) {
+    loom_target_compile_report_t* report, iree_allocator_t host_allocator,
+    iree_byte_span_t* out_data) {
   IREE_ASSERT_ARGUMENT(plan);
   IREE_ASSERT_LT(root_index, plan->root_count);
   IREE_ASSERT_ARGUMENT(out_data);
@@ -983,7 +985,13 @@ iree_status_t loom_cmd_program_plan_serialize_root(
         .parameter_key_length =
             (uint32_t)parameter_requirements->key_storage_length,
     };
-    status = loom_cmd_program_write(&tables, host_allocator, out_data);
+    if (report != NULL) {
+      status = loom_cmd_program_record_report(plan, root_index, &tables, &arena,
+                                              report);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_cmd_program_write(&tables, host_allocator, out_data);
+    }
   }
 
   if (loom_local_value_domain_is_acquired(&value_domain)) {

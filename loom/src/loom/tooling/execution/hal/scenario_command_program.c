@@ -1445,9 +1445,14 @@ iree_status_t loom_run_hal_testbench_command_scenario_product_prepare(
         LOOM_RUN_HAL_TESTBENCH_PROGRESS_PHASE_COMPILE);
   }
   if (iree_status_is_ok(status)) {
+    loomc_compile_report_options_t report = provider_options->compile_report;
+    report.type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS;
+    report.structure_size = sizeof(report);
+    report.next = NULL;
     const loomc_cmd_program_module_options_t options = {
         .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_MODULE_OPTIONS,
         .structure_size = sizeof(options),
+        .next = report.mode != LOOMC_COMPILE_REPORT_MODE_NONE ? &report : NULL,
         .root_symbols = &root_symbol,
         .root_symbol_count = 1,
         .artifact_flags = provider_options->emit_artifact_flags,

@@ -13,6 +13,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from loom.reporting.compile_report import parse_compile_report
+from loom.reporting.compile_report_view import (
+    build_compile_report_show,
+    format_compile_report_show_text,
+)
+
 TOOL = Path(sys.argv.pop(1)).resolve()
 SCENARIO_SOURCE = Path(sys.argv.pop(1)).resolve()
 COMMAND_SOURCE = Path(sys.argv.pop(1)).resolve()
@@ -243,6 +249,101 @@ class BenchmarkExecutionTest(unittest.TestCase):
         self.assertEqual(cache["materialized_storage_set_bytes"], 0)
         self.assertEqual(cache["materialized_storage_ring_bytes"], 0)
         self.assertTrue(cache["ring_byte_target_met"])
+
+    def test_command_reports_reach_debug_bundles_and_reader(self):
+        for mode in ("none", "summary", "details"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                result, rows = self.run_tool(
+                    COMMAND_SOURCE,
+                    "--benchmark=@dependent_stage_values_throughput",
+                    "--sample=5",
+                    "--input-ring-count=1",
+                    "--batch-size=1",
+                    f"--artifact-bundle-dir={directory}",
+                    "--artifact-bundle-policy=debug",
+                    f"--compile-report={mode}",
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                reports = [
+                    json.loads(path.read_text())
+                    for path in (Path(directory) / "compile_reports").glob("*")
+                ]
+                if mode == "none":
+                    self.assertEqual(reports, [])
+                    continue
+                self.assertTrue(reports)
+                self.assertTrue(
+                    all(report["kind"] == "loom.compile_report" for report in reports)
+                )
+                command_reports = [
+                    report for report in reports if "command_programs" in report
+                ]
+                self.assertEqual(len(command_reports), 1)
+                native_reports = [
+                    report for report in reports if report.get("target_family") == "x86"
+                ]
+                self.assertEqual(len(native_reports), 3)
+                self.assertEqual(
+                    {
+                        entry["source_function"]
+                        for report in native_reports
+                        for entry in report["entries"]["rows"]
+                    },
+                    {
+                        "add_stage_bias",
+                        "scale_stage_values",
+                        "copy_stage_values",
+                        "iree_hal_executable_library_query",
+                    },
+                )
+                view = build_compile_report_show(
+                    parse_compile_report(command_reports[0])
+                )
+                self.assertEqual(view["commands"]["count"], 1)
+                plan = view["commands"]["rows"][0]
+                benchmark = next(
+                    row["benchmark_result"] for row in rows if row["row"] == "benchmark"
+                )
+                self.assertEqual(
+                    plan["command_count"],
+                    benchmark["measurement"][
+                        "physical_dispatches_per_logical_operation"
+                    ],
+                )
+                self.assertEqual(plan["command_count"], 5)
+                self.assertEqual(plan["barrier_before_count"], 4)
+                self.assertEqual(plan["transient"]["required_byte_length"], 64)
+                self.assertEqual(plan["parameter_count"], 1)
+                text = format_compile_report_show_text(view)
+                if mode == "summary":
+                    self.assertNotIn("commands", plan)
+                    self.assertIn("command and placement details: not collected", text)
+                    continue
+                self.assertEqual(
+                    [command["entry"] for command in plan["commands"]],
+                    [
+                        "add_stage_bias",
+                        "scale_stage_values",
+                        "scale_stage_values",
+                        "scale_stage_values",
+                        "copy_stage_values",
+                    ],
+                )
+                self.assertEqual(
+                    [command["barrier_before"] for command in plan["commands"]],
+                    [False, True, True, True, True],
+                )
+                self.assertEqual(
+                    [command["workgroups"] for command in plan["commands"]],
+                    [[1, 1, 1]] * 5,
+                )
+                self.assertEqual(
+                    [command["argument_count"] for command in plan["commands"]],
+                    [3, 1, 1, 1, 2],
+                )
+                self.assertEqual(plan["parameters"][0]["key"], "bias")
+                self.assertEqual(plan["parameters"][0]["byte_length"], 4)
+                self.assertIn("[4] barrier -> dispatch_direct @copy_stage_values", text)
 
     def test_command_scenario_replays_complete_programs(self):
         result, rows = self.run_tool(

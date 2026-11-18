@@ -22,6 +22,7 @@
 #include "loom/tools/loom-benchmark/input_ring.h"
 #include "loom/tools/loom-benchmark/output.h"
 #include "loom/tools/loom-benchmark/profile_report.h"
+#include "loomc/compile_report.h"
 #include "loomc/iree.h"
 
 struct loom_benchmark_scenario_execution_t {
@@ -134,7 +135,15 @@ static iree_status_t loom_benchmark_scenario_observe_compile_result(
        i < loomc_result_artifact_count(result) && iree_status_is_ok(status);
        ++i) {
     const loomc_artifact_t* artifact = loomc_result_artifact_at(result, i);
-    if (artifact->kind != LOOMC_ARTIFACT_KIND_TEXT) {
+    const iree_string_view_t format =
+        iree_string_view_from_loomc(artifact->format);
+    const bool is_compile_report =
+        artifact->kind == LOOMC_ARTIFACT_KIND_REPORT &&
+        (iree_string_view_equal(
+             format, IREE_SV(LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_JSON)) ||
+         iree_string_view_equal(
+             format, IREE_SV(LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_TEXT)));
+    if (artifact->kind != LOOMC_ARTIFACT_KIND_TEXT && !is_compile_report) {
       continue;
     }
     iree_string_builder_reset(&leaf);
@@ -168,8 +177,12 @@ static iree_status_t loom_benchmark_scenario_observe_compile_result(
     char* path = NULL;
     if (iree_status_is_ok(status)) {
       status = loom_benchmark_artifact_bundle_write_file(
-          bundle, LOOM_BENCHMARK_BUNDLE_FILE_TARGET_LISTING,
-          bundle->target_listing_dir, iree_string_builder_view(&leaf),
+          bundle,
+          is_compile_report ? LOOM_BENCHMARK_BUNDLE_FILE_COMPILE_REPORT
+                            : LOOM_BENCHMARK_BUNDLE_FILE_TARGET_LISTING,
+          is_compile_report ? bundle->compile_report_dir
+                            : bundle->target_listing_dir,
+          iree_string_builder_view(&leaf),
           iree_byte_sequence_from_loomc(artifact->contents),
           options->host_allocator, &path);
     }
