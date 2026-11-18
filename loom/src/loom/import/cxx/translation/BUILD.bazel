@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
 load("//loom/src/loom/import/cxx:build_defs.bzl", "CXX_COMPILER_OPTIONS")
 
 package(
@@ -56,6 +56,36 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "region_state",
+    srcs = ["region_state.cc"],
+    hdrs = ["region_state.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        "//loom/src/loom/import/cxx/value:bindings",
+        "//loom/src/loom/import/cxx/value:component_names",
+        "//loom/src/loom/import/cxx/value:partition",
+        "//loom/src/loom/import/cxx/value:types",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_test(
+    name = "region_state_test",
+    srcs = ["region_state_test.cc"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":region_state",
+        "//loom/src/loom/import/cxx/value:bindings",
+        "//loom/src/loom/import/cxx/value:builder_test",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_library(
     name = "staged_calls",
     srcs = ["staged_calls.cc"],
     hdrs = ["staged_calls.h"],
@@ -94,6 +124,7 @@ loom_cc_library(
     deps = [
         ":check",
         ":lifetimes",
+        ":region_state",
         ":staged_calls",
         "//loom/src/loom/import/cxx/binding:assumptions",
         "//loom/src/loom/import/cxx/binding:check",

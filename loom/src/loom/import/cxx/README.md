@@ -4052,11 +4052,15 @@ The public importer composes native libraries with the following ownership bound
 | `control/` | Source-owned reference origins, projected write effects, function/iteration exits, and counted-loop eligibility. The analysis consumes source facts; the separate region builder constructs conditional arms before their result signatures are known. |
 | `binding/` | Admission and construction for generated operation bindings, runtime imports, named scalar configs, kernel launch contracts, and explicit loop schedules. |
 | `symbol/` | Root selection, reachable function identities, deterministic linkage names, and native function declarations or definitions with explicit contracts. |
-| `lifetime/` | Cleanup scopes, temporary lifetimes, and destructor obligations across source control flow. |
+| `lifetime/` | Frontend-selected destructors and retained source origins for temporary construction and materialization. |
 | `receiver/` | Lexical current-object scopes and completed source subobjects. |
 | `translation/` | AST-to-IR evaluation for selected function bodies and for check cases and scenarios. |
 
-`import.cc` validates the public API request, owns the module and source diagnostics through verification, and publishes the verified result. The translation driver evaluates expressions, maintains source-symbol-to-SSA bindings, and constructs structured regions. A check body has its own evaluator for subjects, trials, and expectations.
+`import.cc` validates the public API request, owns the module and source diagnostics through verification, and publishes the verified result. The translation driver evaluates expressions, maintains source-symbol-to-SSA bindings, and constructs structured regions. Ordinary bodies and check bodies share the source partition that orders and names SSA components. A check body has its own evaluator for subjects, trials, and expectations.
+
+A staged callee retains how each parameter splits into specializations and bindings. Call translation evaluates arguments in C++ order and writes each value to those two slices. Entry translation uses the same slices to reconstruct the source value. Structured branches and loops likewise use one ordered set of live subobjects for their signature, yields, and successor bindings.
+
+The lifetime emitter tracks each completed construction until its full expression or lexical scope ends. It resolves a named object's current value at the cleanup edge. This preserves mutations made between construction and destruction, including those carried through branches.
 
 For example, a cast first evaluates its operand in the driver and then calls
 `Scalars::convert` with the SSA value, source and destination types, and source

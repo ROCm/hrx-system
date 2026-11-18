@@ -64,6 +64,7 @@
 #include "loom/import/cxx/symbol/immutable_objects.h"
 #include "loom/import/cxx/translation/check.h"
 #include "loom/import/cxx/translation/lifetimes.h"
+#include "loom/import/cxx/translation/region_state.h"
 #include "loom/import/cxx/translation/staged_calls.h"
 #include "loom/import/cxx/value/bindings.h"
 #include "loom/import/cxx/value/bitcast.h"
@@ -94,13 +95,6 @@ namespace loom::cxx_import {
 namespace {
 class Translator final : private Initialization::Evaluation,
                          private ObjectLifetimes::Emitter {
-  struct Mutation {
-    // Automatic binding owning this complete source subobject.
-    cxx::Symbol* binding;
-    // Retained type and component slice carried across the region edge.
-    ValueProjection projection;
-  };
-
  public:
   Translator(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
              loom_module_t* module, const loom_cxx_import_options_t& options)
@@ -3455,9 +3449,7 @@ class Translator final : private Initialization::Evaluation,
     }
     const size_t result_count =
         addressable ? kPointerPartition.component_count : 1 + size_t(has_lane);
-    for (const auto& mutation : written) {
-      sources.push_back(mutation.projection.type);
-    }
+    written.append_types(sources);
     auto outputs = bind_signature(types_, sources, owner, &builder_);
     auto* op = regions.build(condition, outputs.types, source);
     auto* results = loom_op_results(op);
@@ -3593,11 +3585,7 @@ class Translator final : private Initialization::Evaluation,
                               loom_value_id_t condition) {
     auto written = live_mutations(ast);
     auto* pointer_type = unit_.typeTraits().add_pointer(ast->type);
-    std::vector<const cxx::Type*> sources = {pointer_type};
-    sources.reserve(1 + written.size());
-    for (const auto& mutation : written) {
-      sources.push_back(mutation.projection.type);
-    }
+    auto sources = written.source_types({pointer_type});
     auto initial = values_;
     auto source = locations_.get(ast);
     auto outputs = bind_signature(types_, sources, ast, &builder_);
@@ -3613,8 +3601,7 @@ class Translator final : private Initialization::Evaluation,
       std::vector<loom_value_id_t> yielded;
       reference_value(expression, ast).append_to(yielded);
       lifetimes_.materialize_conditional_temporaries(temporary_mark);
-      auto mutations = current(written);
-      yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+      append_current(written, yielded);
       loom_op_t* yield;
       check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                  source, &yield));
@@ -5567,14 +5554,8 @@ class Translator final : private Initialization::Evaluation,
     auto written = live_mutations(ast);
     auto value_count =
         has_value ? types_.partition(ast->type, ast).component_count : 0;
-    std::vector<const cxx::Type*> sources;
-    sources.reserve((has_value ? 1 : 0) + written.size());
-    if constexpr (has_value) {
-      sources.push_back(ast->type);
-    }
-    for (const auto& mutation : written) {
-      sources.push_back(mutation.projection.type);
-    }
+    auto sources =
+        has_value ? written.source_types({ast->type}) : written.source_types();
     auto initial = values_;
     auto source = locations_.get(ast);
     auto outputs = bind_signature(types_, sources, ast, &builder_);
@@ -5594,8 +5575,7 @@ class Translator final : private Initialization::Evaluation,
       then_value();
     }
     lifetimes_.materialize_conditional_temporaries(temporary_mark);
-    auto mutations = current(written);
-    yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+    append_current(written, yielded);
     loom_op_t* yield;
     check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                source, &yield));
@@ -5612,8 +5592,7 @@ class Translator final : private Initialization::Evaluation,
       else_value();
     }
     lifetimes_.materialize_conditional_temporaries(temporary_mark);
-    mutations = current(written);
-    yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+    append_current(written, yielded);
     check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                source, &yield));
     loom_builder_restore(&builder_, saved);
@@ -5640,7 +5619,7 @@ class Translator final : private Initialization::Evaluation,
     // Source conditional whose unfinished arms this frame owns.
     cxx::ConditionalExpressionAST* expression;
     // Source bindings that either arm may replace.
-    std::vector<Mutation> written;
+    RegionState written;
     // Binding availability restored before entering either continuation.
     ValueBindings initial;
     // Structured conditional receiving the two source arm values.
@@ -5664,11 +5643,7 @@ class Translator final : private Initialization::Evaluation,
     auto written = live_mutations(expression);
     auto value_count =
         types_.partition(expression->type, expression).component_count;
-    std::vector<const cxx::Type*> sources = {expression->type};
-    sources.reserve(1 + written.size());
-    for (const auto& mutation : written) {
-      sources.push_back(mutation.projection.type);
-    }
+    auto sources = written.source_types({expression->type});
     auto initial = values_;
     auto outputs = bind_signature(types_, sources, expression, &builder_);
     loom_op_t* operation;
@@ -5700,8 +5675,7 @@ class Translator final : private Initialization::Evaluation,
     lifetimes_.materialize_conditional_temporaries(frame.temporary_mark);
     std::vector<loom_value_id_t> yielded;
     value.append_to(yielded);
-    auto mutations = current(frame.written);
-    yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+    append_current(frame.written, yielded);
     loom_op_t* yield;
     check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                locations_.get(frame.expression), &yield));
@@ -6847,10 +6821,7 @@ class Translator final : private Initialization::Evaluation,
       sources.push_back(unit_.control()->getBoolType());
     }
     const size_t control_count = sources.size();
-    sources.reserve(control_count + written.size());
-    for (const auto& mutation : written) {
-      sources.push_back(mutation.projection.type);
-    }
+    written.append_types(sources);
     auto source = locations_.get(owner);
     auto result_signature = bind_signature(types_, sources, owner, &builder_);
     loom_op_t* op;
@@ -6865,8 +6836,7 @@ class Translator final : private Initialization::Evaluation,
     if (tracks_break) {
       yielded.push_back(then_flow.reaches_latch);
     }
-    auto mutations = current(written);
-    yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+    append_current(written, yielded);
     loom_op_t* yield;
     check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                source, &yield));
@@ -6880,8 +6850,7 @@ class Translator final : private Initialization::Evaluation,
     if (tracks_break) {
       yielded.push_back(else_flow.reaches_latch);
     }
-    mutations = current(written);
-    yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+    append_current(written, yielded);
     check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                source, &yield));
     loom_builder_restore(&builder_, saved);
@@ -7141,10 +7110,7 @@ class Translator final : private Initialization::Evaluation,
       sources.push_back(unit_.control()->getBoolType());
     }
     const size_t control_count = sources.size();
-    sources.reserve(control_count + written.size());
-    for (const auto& mutation : written) {
-      sources.push_back(mutation.projection.type);
-    }
+    written.append_types(sources);
     auto signature = bind_signature(types_, sources, selection, &builder_);
 
     struct Case {
@@ -7192,8 +7158,7 @@ class Translator final : private Initialization::Evaluation,
       if (tracks_continue) {
         yielded.push_back(switch_reaches_tail(flow, clause_source));
       }
-      auto mutations = current(written);
-      yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+      append_current(written, yielded);
       loom_op_t* yield;
       check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                  locations_.get(clause_source), &yield));
@@ -7261,10 +7226,7 @@ class Translator final : private Initialization::Evaluation,
         sources.push_back(unit_.control()->getBoolType());
       }
       const size_t control_count = sources.size();
-      sources.reserve(control_count + written.size());
-      for (const auto& mutation : written) {
-        sources.push_back(mutation.projection.type);
-      }
+      written.append_types(sources);
       auto signature = bind_signature(types_, sources, selection, &builder_);
       loom_op_t* op;
       check(loom_scf_if_build(
@@ -7280,8 +7242,7 @@ class Translator final : private Initialization::Evaluation,
         yielded.push_back(
             switch_reaches_tail(flow, clause.labels.front().source));
       }
-      auto mutations = current(written);
-      yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+      append_current(written, yielded);
       loom_op_t* yield;
       check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                  locations_.get(clause.labels.front().source),
@@ -7295,8 +7256,7 @@ class Translator final : private Initialization::Evaluation,
       if (tracks_continue) {
         yielded.push_back(reaches_tail);
       }
-      mutations = current(written);
-      yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+      append_current(written, yielded);
       check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                  locations_.get(clause.labels.front().source),
                                  &yield));
@@ -7731,11 +7691,7 @@ class Translator final : private Initialization::Evaluation,
       auto saved_values = values_;
       auto saved_destructions = lifetimes_.save_scope();
       auto written = live_mutations(ast);
-      std::vector<const cxx::Type*> sources;
-      sources.reserve(written.size());
-      for (const auto& mutation : written) {
-        sources.push_back(mutation.projection.type);
-      }
+      auto sources = written.source_types();
       auto results = bind_signature(types_, sources, ast, &builder_);
       loom_op_t* op;
       auto flags = branch->elseStatement || !written.empty()
@@ -7852,11 +7808,7 @@ class Translator final : private Initialization::Evaluation,
                                     Evaluate evaluate) {
     auto written = live_mutations(owner);
     auto outer_values = values_;
-    std::vector<const cxx::Type*> sources = {unit_.control()->getBoolType()};
-    sources.reserve(1 + written.size());
-    for (const auto& mutation : written) {
-      sources.push_back(mutation.projection.type);
-    }
+    auto sources = written.source_types({unit_.control()->getBoolType()});
     auto source = locations_.get(owner);
     auto result_signature = bind_signature(types_, sources, owner, &builder_);
     loom_op_t* op;
@@ -7867,8 +7819,7 @@ class Translator final : private Initialization::Evaluation,
     auto saved =
         loom_builder_enter_region(&builder_, op, loom_scf_if_then_region(op));
     std::vector<loom_value_id_t> yielded = {evaluate()};
-    auto mutations = current(written);
-    yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+    append_current(written, yielded);
     loom_op_t* yield;
     check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                source, &yield));
@@ -7878,8 +7829,7 @@ class Translator final : private Initialization::Evaluation,
         loom_builder_enter_region(&builder_, op, loom_scf_if_else_region(op));
     yielded = {
         scalars_.integer(false, LOOM_SCALAR_TYPE_I1, locations_.get(owner))};
-    mutations = current(written);
-    yielded.insert(yielded.end(), mutations.begin(), mutations.end());
+    append_current(written, yielded);
     check(loom_scf_yield_build(&builder_, yielded.data(), yielded.size(),
                                source, &yield));
     loom_builder_restore(&builder_, saved);
@@ -7891,14 +7841,10 @@ class Translator final : private Initialization::Evaluation,
   // Executes a loop latch only when the body reaches it. The inactive arm
   // forwards source state, skipping a for step and condition reinitialization.
   template <typename Execute>
-  void guarded_latch(cxx::AST* owner, const std::vector<Mutation>& written,
+  void guarded_latch(cxx::AST* owner, const RegionState& written,
                      loom_value_id_t active, Execute execute) {
     auto outer_values = values_;
-    std::vector<const cxx::Type*> sources;
-    sources.reserve(written.size());
-    for (const auto& mutation : written) {
-      sources.push_back(mutation.projection.type);
-    }
+    auto sources = written.source_types();
     auto source = locations_.get(owner);
     auto result_signature = bind_signature(types_, sources, owner, &builder_);
     loom_op_t* op;
@@ -7941,36 +7887,31 @@ class Translator final : private Initialization::Evaluation,
     if (decision) {
       lifetimes_.discard_scope(condition_destruction_mark);
     }
-    auto written = live_mutations(ast);
+    auto candidates = control_->written(ast);
+    auto written = live_mutations(candidates, ast, decision);
+    auto incoming = live_mutations(candidates, nullptr, decision);
+    // The condition declaration follows the other carried groups, even when
+    // its initializer constructed its subobjects individually.
     if (decision && values_.contains(decision)) {
-      std::erase_if(written, [&](const auto& value) {
-        return value.binding == decision;
-      });
-      written.push_back(whole_mutation(decision));
+      ValueProjection group{binding_value_type(decision),
+                            &values_.partition(decision), 0};
+      written.append(decision, group);
+      incoming.append(decision, group);
     }
-    auto incoming = live_mutations(control_->written(ast));
-    if (decision && values_.contains(decision)) {
-      std::erase_if(incoming, [&](const auto& value) {
-        return value.binding == decision;
-      });
-      incoming.push_back(whole_mutation(decision));
-    }
-    size_t result_count = 0;
-    for (const auto& mutation : written) {
-      result_count += mutation.projection.partition->component_count;
-    }
+    const size_t result_count = written.component_count();
     auto initial = current(incoming);
     auto outer_values = values_;
     auto source = locations_.get(ast);
-    auto dependent_state_sources = dependent_source_types(written, ast);
+    auto dependent_state_sources = written.dependent_types(types_, ast);
     auto bind_loop_signatures =
         [&](std::span<const loom_type_t> header_suffix_types,
             bool require_result_types) {
-          bool distinct_header = incoming.size() != written.size();
+          bool distinct_header =
+              incoming.group_count() != written.group_count();
           if (!dependent_state_sources.empty() || require_result_types ||
               distinct_header) {
-            auto header_sources = source_types(incoming);
-            auto result_sources = source_types(written);
+            auto header_sources = incoming.source_types();
+            auto result_sources = written.source_types();
             return bind_condition_loop_signatures(
                 types_, header_sources, result_sources, ast, &builder_,
                 header_suffix_types, require_result_types || distinct_header);
@@ -8219,12 +8160,10 @@ class Translator final : private Initialization::Evaluation,
     auto factor = schedule.unroll_factor()
                       ? expression(schedule.unroll_factor()).ssa()
                       : 0;
-    auto written = live_mutations(loop);
-    std::erase_if(
-        written, [&](const auto& value) { return value.binding == induction; });
+    auto written = live_mutations(control_->written(loop), loop, induction);
     auto initial = current(written);
     BoundSignature result_signature;
-    auto state_sources = dependent_source_types(written, loop);
+    auto state_sources = written.dependent_types(types_, loop);
     if (!state_sources.empty()) {
       result_signature = bind_signature(types_, state_sources, loop, &builder_);
     }
@@ -8266,23 +8205,21 @@ class Translator final : private Initialization::Evaluation,
                : types_.unqualified(alias->second.object().type);
   }
 
-  Mutation whole_mutation(cxx::Symbol* symbol) {
-    return {symbol,
-            {binding_value_type(symbol), &values_.partition(symbol), 0}};
-  }
-
-  std::vector<Mutation> live_mutations(cxx::AST* owner) {
+  RegionState live_mutations(cxx::AST* owner) {
     return live_mutations(control_->written(owner), owner);
   }
 
-  std::vector<Mutation> live_mutations(std::span<cxx::Symbol* const> candidates,
-                                       cxx::AST* owner = nullptr) {
-    std::vector<Mutation> result;
+  RegionState live_mutations(std::span<cxx::Symbol* const> candidates,
+                             cxx::AST* owner = nullptr,
+                             cxx::Symbol* excluded = nullptr) {
+    RegionState state;
     for (auto* symbol : candidates) {
+      if (symbol == excluded) {
+        continue;
+      }
       if (auto found = values_.find(symbol); found != values_.end()) {
-        result.push_back(
-            {symbol,
-             {binding_value_type(symbol), &found->second.partition(), 0}});
+        state.append(symbol, {binding_value_type(symbol),
+                              &found->second.partition(), 0});
         continue;
       }
       if (!values_.contains(symbol)) {
@@ -8294,80 +8231,37 @@ class Translator final : private Initialization::Evaluation,
         if (values_.initialized(symbol, projection.component_offset,
                                 projection.partition->component_count) ||
             (owner && control_->initialized(owner, symbol, projection))) {
-          result.push_back({symbol, projection});
+          state.append(symbol, projection);
         }
       }
     }
-    return result;
+    return state;
   }
 
-  std::vector<const cxx::Type*> source_types(
-      std::span<const Mutation> mutations) {
-    std::vector<const cxx::Type*> result;
-    result.reserve(mutations.size());
-    for (const auto& mutation : mutations) {
-      result.push_back(mutation.projection.type);
-    }
-    return result;
-  }
-
-  // Ordinary scalar loops keep inferred schemes; dependent source groups bind
-  // their destination identities before region or result creation.
-  std::vector<const cxx::Type*> dependent_source_types(
-      std::span<const Mutation> mutations, cxx::AST* owner) {
-    for (const auto& mutation : mutations) {
-      if (types_.requires_binding(mutation.projection.type, owner)) {
-        return source_types(mutations);
-      }
-    }
-    return {};
-  }
-
-  std::vector<loom_value_id_t> current(std::span<const Mutation> mutations) {
-    std::vector<loom_value_id_t> result;
-    for (const auto& mutation : mutations) {
-      auto value =
-          values_.project(mutation.binding, *mutation.projection.partition,
-                          mutation.projection.component_offset, value_arena_);
-      if (!value) {
-        fail(current_function_.source,
-             "source state is not initialized on every continuing path");
-      }
-      value->append_to(result);
-    }
-    return result;
-  }
-
-  void bind_mutation(const Mutation& mutation, Value value) {
-    auto* binding = mutation.binding;
-    value = name(value, cxx::to_string(binding->name()));
-    if (&value.partition() == &values_.partition(binding)) {
-      values_.set(binding, value);
-    } else {
-      values_.replace(binding, mutation.projection.component_offset, value,
-                      value_arena_);
+  void append_current(const RegionState& state,
+                      std::vector<loom_value_id_t>& components) {
+    if (!state.append_values(values_, value_arena_, components)) {
+      fail(current_function_.source,
+           "source state is not initialized on every continuing path");
     }
   }
 
-  void bind(std::span<const Mutation> mutations, loom_region_t* region,
-            size_t index = 0) {
-    for (const auto& mutation : mutations) {
-      bind_mutation(mutation, region_value(region, index,
-                                           *mutation.projection.partition));
-    }
+  std::vector<loom_value_id_t> current(const RegionState& state) {
+    std::vector<loom_value_id_t> components;
+    append_current(state, components);
+    return components;
   }
 
-  void bind_values(std::span<const Mutation> mutations,
+  void bind(const RegionState& state, loom_region_t* region, size_t index = 0) {
+    auto* block = loom_region_entry_block(region);
+    auto components =
+        std::span<const loom_value_id_t>(block->arg_ids, block->arg_count);
+    bind_values(state, components.subspan(index).data());
+  }
+
+  void bind_values(const RegionState& state,
                    const loom_value_id_t* components) {
-    for (const auto& mutation : mutations) {
-      const auto& partition = *mutation.projection.partition;
-      auto count = partition.component_count;
-      bind_mutation(mutation,
-                    value_arena_.capture(partition, {components, count}));
-      if (count) {
-        components += count;
-      }
-    }
+    state.bind_values(values_, value_arena_, module_, components);
   }
 
   void effect(cxx::ExpressionAST* ast) override {
