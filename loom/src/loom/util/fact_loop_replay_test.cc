@@ -416,6 +416,86 @@ TEST_P(FactLoopNestingTest, StableSubtreesDoNotMultiplySolverVisits) {
   EXPECT_EQ(table_.replay.reads, nullptr);
 }
 
+TEST_F(FactLoopReplayTest, ProvenDomainsBoundCapturedNestedLoopVisits) {
+  const auto type = loom_type_scalar(LOOM_SCALAR_TYPE_INDEX);
+  loom_value_id_t inputs[3];
+  CreateInputs(type, IREE_ARRAYSIZE(inputs), inputs);
+  const auto bound = inputs[0], zero = inputs[1], one = inputs[2];
+  auto bound_facts = loom_value_facts_make(1, 9, 1);
+  loom_value_facts_mark_lane_varying(&bound_facts);
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table_, bound, bound_facts));
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table_, zero,
+                                              loom_value_facts_exact_i64(0)));
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table_, one,
+                                              loom_value_facts_exact_i64(1)));
+
+  loom_op_t* leaf = nullptr;
+  auto build_nested = [&](auto&& self, unsigned depth,
+                          loom_value_id_t captured) -> loom_op_t* {
+    loom_op_t* loop = nullptr;
+    IREE_CHECK_OK(loom_scf_while_build(&builder_, &zero, 1, nullptr, &type, 1,
+                                       nullptr, 0, LOOM_LOCATION_UNKNOWN,
+                                       &loop));
+    auto* before = loom_scf_while_before(loop);
+    auto saved = loom_builder_enter_region(&builder_, loop, before);
+    const auto before_induction = loom_region_entry_arg_id(before, 0);
+    loom_op_t* comparison = nullptr;
+    IREE_CHECK_OK(loom_index_cmp_build(&builder_, LOOM_INDEX_CMP_PREDICATE_SLT,
+                                       before_induction, bound,
+                                       LOOM_LOCATION_UNKNOWN, &comparison));
+    loom_op_t* condition = nullptr;
+    IREE_CHECK_OK(loom_scf_condition_build(
+        &builder_, loom_index_cmp_result(comparison), &before_induction, 1,
+        LOOM_LOCATION_UNKNOWN, &condition));
+    loom_builder_restore(&builder_, saved);
+
+    auto* body = loom_scf_while_after(loop);
+    saved = loom_builder_enter_region(&builder_, loop, body);
+    const auto induction = loom_region_entry_arg_id(body, 0);
+    loom_op_t* combined = nullptr;
+    IREE_CHECK_OK(loom_index_add_build(&builder_, captured, induction, type,
+                                       LOOM_LOCATION_UNKNOWN, &combined));
+    if (depth > 1) {
+      (void)self(self, depth - 1, loom_index_add_result(combined));
+    } else {
+      leaf = loop;
+    }
+    loom_op_t* increment = nullptr;
+    IREE_CHECK_OK(loom_index_add_build(&builder_, induction, one, type,
+                                       LOOM_LOCATION_UNKNOWN, &increment));
+    const auto next = loom_index_add_result(increment);
+    loom_op_t* yield = nullptr;
+    IREE_CHECK_OK(loom_scf_yield_build(&builder_, &next, 1,
+                                       LOOM_LOCATION_UNKNOWN, &yield));
+    loom_builder_restore(&builder_, saved);
+    return loop;
+  };
+  auto* outer = build_nested(build_nested, 5, zero);
+  FinishFunction();
+
+  unsigned leaf_summaries = 0;
+  std::pair<const loom_op_t*, unsigned*> observation = {leaf, &leaf_summaries};
+  table_.summary_computed.user_data = &observation;
+  table_.summary_computed.fn = [](void* user_data, const loom_op_t* op) {
+    auto* state =
+        static_cast<std::pair<const loom_op_t*, unsigned*>*>(user_data);
+    if (op == state->first) {
+      ++*state->second;
+    }
+  };
+  IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, outer));
+  EXPECT_GT(leaf_summaries, 0u);
+  // Every parent is evaluated once for its initial state and once for its
+  // complete proven envelope. Iterative widening instead multiplies four
+  // visits at each level (256 visits to this depth-five leaf).
+  EXPECT_LE(leaf_summaries, 16u);
+  const auto result =
+      loom_value_fact_table_lookup(&table_, loom_op_const_results(outer)[0]);
+  EXPECT_EQ(result.range_lo, 0);
+  EXPECT_EQ(result.range_hi, 9);
+  EXPECT_TRUE(loom_value_facts_is_lane_varying(result));
+}
+
 INSTANTIATE_TEST_SUITE_P(LoopKindsAndCaptures, FactLoopNestingTest,
                          ::testing::Combine(::testing::Bool(),
                                             ::testing::Bool()));
