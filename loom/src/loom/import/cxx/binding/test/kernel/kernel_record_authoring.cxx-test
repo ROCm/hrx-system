@@ -245,45 +245,24 @@ template<class... T> static int sum(T... values) { return (values + ...); }
 void fold(float* output) { output[0] = sum(2, 3, 4); }
 
 // ====
-// XFAIL: Pack init-captures are not expanded before closure return-type deduction.
+// Each pack element becomes a closure field, including when the call operator
+// has an explicit return type or leaves its captures unused.
 #include <loomcxx/check.h>
 #include <loomcxx/kernel.h>
-template<class... T> static auto make(T... values) { return [...items = values](int value) { return value + (items + ...); }; }
+template<class... T> static auto capture(T... values) { return [...items = values](int value) { return (value + ... + items); }; }
+template<class... T> static auto capture_explicit(T... values) { return [...items = values](int value) -> int { return (value + ... + items); }; }
+template<class... T> static auto capture_unused(T... values) { return [...items = values](int value) { return value + 7; }; }
 template<class F>
 [[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
-void apply(float* output, F body) { output[0] = body(1); }
-LOOM_CHECK_CASE(capture_pack) {
-  const auto output = loom::check::fill<1, float>(0.0f);
-  const auto body = make(2, 3, 4);
-  loom::check::launch<apply<decltype(body)>>(output, body);
-}
-
-// ====
-// XFAIL: An explicit return type still leaves the closure's pack captures unexpanded.
-#include <loomcxx/check.h>
-#include <loomcxx/kernel.h>
-template<class... T> static auto make(T... values) { return [...items = values](int value) -> int { return value + (items + ...); }; }
-template<class F>
-[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
-void apply(float* output, F body) { output[0] = body(1); }
-LOOM_CHECK_CASE(capture_pack_explicit_return) {
-  const auto output = loom::check::fill<1, float>(0.0f);
-  const auto body = make(2, 3, 4);
-  loom::check::launch<apply<decltype(body)>>(output, body);
-}
-
-// ====
-// XFAIL: Even unused pack captures require expansion before closure construction.
-#include <loomcxx/check.h>
-#include <loomcxx/kernel.h>
-template<class... T> static auto make(T... values) { return [...items = values](int value) { return value + 7; }; }
-template<class F>
-[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
-void apply(float* output, F body) { output[0] = body(1); }
-LOOM_CHECK_CASE(capture_pack_unused) {
-  const auto output = loom::check::fill<1, float>(0.0f);
-  const auto body = make(2, 3, 4);
-  loom::check::launch<apply<decltype(body)>>(output, body);
+void apply(int* output, F body) { output[0] = body(1); }
+LOOM_CHECK_CASE(capture_packs) {
+  const auto output = loom::check::fill<1, int>(0);
+  const auto inferred = capture(2, 3, 4);
+  const auto explicit_result = capture_explicit(6);
+  const auto unused = capture_unused(9, 8);
+  loom::check::launch<apply<decltype(inferred)>>(output, inferred);
+  loom::check::launch<apply<decltype(explicit_result)>>(output, explicit_result);
+  loom::check::launch<apply<decltype(unused)>>(output, unused);
 }
 
 // ====

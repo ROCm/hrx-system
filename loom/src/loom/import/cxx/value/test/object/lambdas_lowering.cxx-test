@@ -71,3 +71,32 @@ func.def public @discarded_mutation(%input: buffer, %input_byte_offset: index, %
   %11 = scalar.addi %24, %24 : i32
   func.return %11 : i32
 }
+
+// ====
+struct Sample {
+  int value;
+  int read() { return value + 10; }
+  int read() const { return value + 20; }
+};
+
+struct Readings {
+  int copy;
+  int reference;
+  int mutable_copy;
+};
+
+Readings capture_overloads() {
+  Sample input{1};
+  return {
+    [=] { return input.read(); }(),
+    [&] { return input.read(); }(),
+    [=]() mutable { return input.read(); }(),
+  };
+}
+
+// ----
+func.def public @capture_overloads() -> (i32, i32, i32) {
+  %54 = scalar.constant 21 : i32
+  %53 = scalar.constant 11 : i32
+  func.return %54, %53, %53 : i32, i32, i32
+}
