@@ -245,10 +245,8 @@ IREE_API_EXPORT iree_status_t iree_io_file_handle_open_fd(
     iree_io_file_mode_t mode, int fd, iree_allocator_t host_allocator,
     iree_io_file_handle_t** out_handle);
 
-// Opens an existing platform file at |path| and preloads the entire contents
-// into wired memory. This is equivalent to opening the file, mapping it for
-// read access, allocating a buffer of the entire file size, reading into it,
-// and then wrapping the buffer with iree_io_file_handle_wrap_host_allocation.
+// Copies the entire file at |path| into a single host allocation. The returned
+// handle owns that allocation until its last reference is released.
 IREE_API_EXPORT iree_status_t iree_io_file_handle_preload(
     iree_io_file_mode_t mode, iree_string_view_t path,
     iree_allocator_t host_allocator, iree_io_file_handle_t** out_handle);

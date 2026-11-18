@@ -108,6 +108,7 @@ TEST(ParameterUtilTest, AppendsSafetensorsIndexManifest) {
   for (const auto* tensor : {tensor0, tensor1}) {
     ASSERT_EQ(tensor->type, IREE_IO_PARAMETER_INDEX_ENTRY_STORAGE_TYPE_FILE);
     auto* handle = tensor->storage.file.handle;
+    EXPECT_EQ(iree_io_file_handle_access(handle), IREE_IO_FILE_ACCESS_READ);
     if (std::string(FLAG_expected_parameter_mode) == "preload") {
       EXPECT_EQ(iree_io_file_handle_type(handle),
                 IREE_IO_FILE_HANDLE_TYPE_HOST_ALLOCATION);
