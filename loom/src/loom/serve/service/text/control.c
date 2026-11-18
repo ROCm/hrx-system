@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "iree/hal/vm/file.h"
 #include "iree/vm/sync.h"
 #include "loom/runtime/parameter/module.h"
 #include "loom/runtime/program/input.h"
@@ -103,8 +104,8 @@ iree_status_t loom_serve_text_control_initialize(
   status = loom_runtime_module_create(&source->types, execution, options,
                                       host_allocator, &control->native_module);
   IREE_RETURN_IF_ERROR(status);
-  iree_vm_module_t* libraries[] = {control->native_module, NULL, NULL, NULL,
-                                   NULL};
+  iree_vm_module_t* libraries[] = {
+      control->native_module, NULL, NULL, NULL, NULL, NULL};
   status = loom_runtime_input_module_create(
       source->environment, loom_runtime_tokenizer_value(source->tokenizer),
       host_allocator, &libraries[1]);
@@ -118,17 +119,22 @@ iree_status_t loom_serve_text_control_initialize(
         source->environment, &source->types, transfer,
         source->parameter_sources, host_allocator, &libraries[3]);
   }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_vm_file_module_create(&source->types, transfer,
+                                            host_allocator, &libraries[4]);
+  }
   if (iree_status_is_ok(status) && generates) {
     status = loom_serve_text_tool_xml_module_create(
-        source->environment, host_allocator, &libraries[4]);
+        source->environment, host_allocator, &libraries[5]);
   }
   if (iree_status_is_ok(status)) {
     status = loom_runtime_program_link_service(
         source->module, loom_runtime_preparation_card(source->preparation),
         loom_runtime_preparation_component(source->preparation),
-        iree_vm_module_span_from_ptr(libraries, generates ? 5 : 4),
+        iree_vm_module_span_from_ptr(libraries, generates ? 6 : 5),
         host_allocator, &control->program);
   }
+  iree_vm_module_release(libraries[5]);
   iree_vm_module_release(libraries[4]);
   iree_vm_module_release(libraries[3]);
   iree_vm_module_release(libraries[2]);

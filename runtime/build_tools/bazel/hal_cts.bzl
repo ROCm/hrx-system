@@ -22,6 +22,7 @@ _NON_EXECUTABLE_TEST_SUITES = [
     ("command_buffer_tests", "//runtime/src/iree/hal/cts/command_buffer:all_tests"),
     ("core_tests", "//runtime/src/iree/hal/cts/core:all_tests"),
     ("file_tests", "//runtime/src/iree/hal/cts/file:all_tests"),
+    ("vm_file_tests", "//runtime/src/iree/hal/vm:file_tests"),
     ("queue_tests", "//runtime/src/iree/hal/cts/queue:all_tests"),
 ]
 

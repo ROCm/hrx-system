@@ -14,6 +14,35 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "file",
+    srcs = ["file.c"],
+    hdrs = ["file.h"],
+    deps = [
+        ":types",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "file_tests",
+    testonly = True,
+    srcs = ["file_test.cc"],
+    deps = [
+        ":file",
+        ":types",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/vm",
+    ],
+    alwayslink = True,
+)
+
+iree_runtime_cc_library(
     name = "types",
     srcs = ["types.c"],
     hdrs = ["types.h"],

@@ -73,6 +73,16 @@ function(iree_runtime_hal_cts_test_suite)
     )
   endforeach()
 
+  iree_cc_test(
+    NAME "${_PREFIX}vm_file_tests"
+    DEPS
+      ${_COMMON_DEPS}
+      iree::hal::vm::file_tests
+    ${_ARGS_BLOCK}
+    ${_LABELS_BLOCK}
+    ${_RESOURCE_GROUP_BLOCK}
+  )
+
   if(_RULE_TESTDATA_LIBS)
     set(_EXECUTABLE_SUITES
       "dispatch_tests\;iree::hal::cts::command_buffer::all_dispatch_tests"

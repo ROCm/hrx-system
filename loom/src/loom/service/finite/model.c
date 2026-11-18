@@ -10,6 +10,7 @@
 
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
+#include "iree/hal/vm/file.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
 #include "loom/runtime/device/device.h"
@@ -472,7 +473,7 @@ static iree_status_t loom_service_finite_create_control(
       .stages = {model->stages.table->part_count, model->stages.table->parts},
       .feedback = {model->feedback.count, model->feedback.destinations},
   };
-  iree_vm_module_t* native_modules[7] = {0};
+  iree_vm_module_t* native_modules[8] = {0};
   iree_vm_buffer_t* read_only_tags = NULL;
   iree_status_t status = iree_vm_buffer_subspan(
       model->control.tags, 0, tags.data_length, IREE_VM_BUFFER_ACCESS_FLAG_READ,
@@ -522,6 +523,12 @@ static iree_status_t loom_service_finite_create_control(
     model->control.batch = native_modules[5];
     iree_vm_module_retain(model->control.batch);
   }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_vm_file_module_create(
+        &model->control.hal_types,
+        loom_runtime_device_transfer_queue(model->owner), host_allocator,
+        &native_modules[6]);
+  }
   const bool has_storage = model->storage.count || model->feedback.count;
   if (iree_status_is_ok(status) && has_storage) {
     status = loom_runtime_storage_module_create(
@@ -530,15 +537,15 @@ static iree_status_t loom_service_finite_create_control(
             .execution = model->execution,
             .buffers = {model->storage.count, model->storage.buffers},
             .feedback = {model->feedback.count, model->feedback.buffers}},
-        host_allocator, &native_modules[6]);
-    model->control.storage = native_modules[6];
+        host_allocator, &native_modules[7]);
+    model->control.storage = native_modules[7];
     iree_vm_module_retain(model->control.storage);
   }
   if (iree_status_is_ok(status)) {
     status = loom_runtime_program_link_service(
         module, loom_runtime_preparation_card(model->preparation),
         loom_runtime_preparation_component(model->preparation),
-        (iree_vm_module_span_t){native_modules, has_storage ? 7 : 6},
+        (iree_vm_module_span_t){native_modules, has_storage ? 8 : 7},
         host_allocator, &model->control.program);
   }
   iree_vm_module_release(native_modules[0]);
@@ -548,6 +555,7 @@ static iree_status_t loom_service_finite_create_control(
   iree_vm_module_release(native_modules[4]);
   iree_vm_module_release(native_modules[5]);
   iree_vm_module_release(native_modules[6]);
+  iree_vm_module_release(native_modules[7]);
   IREE_RETURN_IF_ERROR(status);
   const iree_vm_signature_type_t buffer = {
       .kind = IREE_VM_SIGNATURE_TYPE_KIND_REF,

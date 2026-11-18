@@ -7,7 +7,7 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   %c1 = scalar.constant 1 : i64
   %c16 = scalar.constant 16 : i64
   %input_capacity = scalar.constant 36 : i64
-  %c80 = scalar.constant 80 : i64
+  %c192 = scalar.constant 192 : i64
   %producer = buffer.constant utf8("produce") : buffer
   %consumer = buffer.constant utf8("consume") : buffer
   %first = func.call @stage(%producer, %c0) : (buffer, i64) -> (i32)
@@ -16,5 +16,5 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   %source = func.call @source(%directory, %checkpoint) : (buffer, buffer) -> (i32)
   %empty = buffer.constant utf8("") : buffer
   %name = buffer.constant utf8("demand-component") : buffer
-  func.return %c1, %input_capacity, %c80, %c16, %empty, %name, %directory : i64, i64, i64, i64, buffer, buffer, buffer
+  func.return %c1, %input_capacity, %c192, %c16, %empty, %name, %directory : i64, i64, i64, i64, buffer, buffer, buffer
 }
