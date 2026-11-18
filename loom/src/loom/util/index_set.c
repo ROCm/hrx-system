@@ -38,9 +38,32 @@ bool loom_index_set_insert(const loom_index_set_layout_t* layout,
   return inserted;
 }
 
-void loom_index_set_erase(const loom_index_set_layout_t* layout,
-                          uint64_t* words, uint32_t index) {
+void loom_index_set_insert_range(const loom_index_set_layout_t* layout,
+                                 uint64_t* words, uint32_t first,
+                                 uint32_t count) {
+  if (!count) {
+    return;
+  }
+  uint32_t last = first + count - 1;
   for (uint8_t level = 0; level < layout->level_count; ++level) {
+    const uint32_t first_word = first / 64;
+    const uint32_t last_word = last / 64;
+    for (uint32_t index = first_word; index <= last_word; ++index) {
+      const uint64_t low =
+          index == first_word ? UINT64_MAX << (first % 64) : UINT64_MAX;
+      const uint64_t high =
+          index == last_word ? UINT64_MAX >> (63 - last % 64) : UINT64_MAX;
+      words[layout->level_starts[level] + index] |= low & high;
+    }
+    first = first_word;
+    last = last_word;
+  }
+}
+
+static void loom_index_set_erase_from(const loom_index_set_layout_t* layout,
+                                      uint64_t* words, uint32_t index,
+                                      uint8_t first_level) {
+  for (uint8_t level = first_level; level < layout->level_count; ++level) {
     uint64_t* word = &words[layout->level_starts[level] + index / 64];
     const uint64_t previous = *word;
     *word &= ~(UINT64_C(1) << (index % 64));
@@ -48,6 +71,22 @@ void loom_index_set_erase(const loom_index_set_layout_t* layout,
       break;
     }
     index /= 64;
+  }
+}
+
+void loom_index_set_erase(const loom_index_set_layout_t* layout,
+                          uint64_t* words, uint32_t index) {
+  loom_index_set_erase_from(layout, words, index, 0);
+}
+
+void loom_index_set_clear(const loom_index_set_layout_t* layout,
+                          uint64_t* words) {
+  uint32_t index = loom_index_set_select(layout, words, 0);
+  while (index != LOOM_INDEX_SET_NONE) {
+    const uint32_t leaf = index / 64;
+    words[leaf] = 0;
+    loom_index_set_erase_from(layout, words, leaf, 1);
+    index = loom_index_set_select(layout, words, 0);
   }
 }
 
