@@ -114,13 +114,15 @@ struct loom_serve_text_service_t {
   struct {
     // Immutable logical geometry; availability is queried at observation.
     loom_serve_text_pool_usage_t geometry;
-    // One maintenance cut, retained through model readiness.
+    // One maintenance cut, retained through independent release or exclusive
+    // relocation. They cannot overlap and share this observation record.
     struct {
-      // Retired rows released storage since the last completed cut.
+      // Retired rows released storage since the last accepted capture.
       bool pending;
       // Host observation time before submitting maintenance.
       iree_time_t start_time;
-      // Native relocation plan consumed only after successful readiness.
+      // Exclusive relocation result, or the independent release counter origin
+      // until collection replaces it with the completed delta.
       loom_serve_text_trim_result_t result;
     } trim;
   } pool;

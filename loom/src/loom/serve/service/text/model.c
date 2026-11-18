@@ -829,6 +829,8 @@ iree_status_t loom_serve_text_model_free(loom_serve_text_model_t* model) {
                                           model->parameters.plans[i]));
   }
   loom_serve_text_state_await_retirement(&model->state);
+  status =
+      iree_status_join(status, loom_serve_text_model_collect_reclaim(model));
   status = iree_status_join(status, loom_serve_text_model_free_retired(model));
   return iree_status_join(status, warmup_status);
 }
@@ -989,6 +991,25 @@ const loom_serve_packing_shape_t* loom_serve_text_model_shapes(
   return model->shapes;
 }
 
+iree_status_t loom_serve_text_model_submit_reclaim(
+    loom_serve_text_model_t* model) {
+  return loom_serve_text_state_submit_reclaim(&model->state);
+}
+
+iree_status_t loom_serve_text_model_collect_reclaim(
+    loom_serve_text_model_t* model) {
+  return loom_serve_text_state_collect_reclaim(&model->state);
+}
+
+bool loom_serve_text_model_is_reclaiming(const loom_serve_text_model_t* model) {
+  return model->state.memory.reclaim != NULL;
+}
+
+bool loom_serve_text_model_needs_compaction(
+    const loom_serve_text_model_t* model) {
+  return loom_serve_text_state_needs_compaction(&model->state);
+}
+
 iree_status_t loom_serve_text_model_submit_trim(
     loom_serve_text_model_t* model, loom_serve_text_trim_result_t* out_result,
     loom_runtime_execution_frontier_t* out_frontier) {
@@ -1012,6 +1033,8 @@ iree_status_t loom_serve_text_model_complete_trim(
 iree_status_t loom_serve_text_model_trim(
     loom_serve_text_model_t* model, loom_serve_text_trim_result_t* out_result) {
   IREE_RETURN_IF_ERROR(loom_runtime_execution_drain(model->execution));
+  loom_runtime_memory_operation_await(model->state.memory.reclaim);
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_collect_reclaim(model));
   loom_runtime_execution_frontier_t frontier;
   iree_status_t status =
       loom_serve_text_model_submit_trim(model, out_result, &frontier);

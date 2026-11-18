@@ -603,6 +603,90 @@ TEST_F(RegisteredElasticTextServiceTest,
 }
 
 TEST_F(ElasticTextServiceTest,
+       IndependentReclaimPreservesExecutionAndLaterReleases) {
+  auto options = ModelOptions();
+  options.context_capacity =
+      loom_runtime_test_application_options_default().slab_size / 8;
+  options.row_count = 3;
+  options.pool_capacity = options.row_count * options.context_capacity;
+  loom_serve_text_model_t* source = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_model_allocate(
+      device_, storage_owner_, &options, host_allocator_, &source));
+  const auto release_model = [](loom_serve_text_model_t* model) {
+    IREE_EXPECT_OK(loom_serve_text_model_free(model));
+  };
+  const std::unique_ptr<loom_serve_text_model_t, decltype(release_model)> owner(
+      source, release_model);
+  const int32_t tokens[] = {0, 1, 2};
+  for (size_t i = 0; i < options.row_count; ++i) {
+    auto* row = loom_serve_text_model_row(source, i);
+    bool admitted = false;
+    IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
+        row, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, options.context_capacity,
+        &admitted));
+    ASSERT_TRUE(admitted);
+    IREE_ASSERT_OK(
+        loom_serve_text_row_prefill(row, IREE_ARRAYSIZE(tokens), tokens));
+  }
+  const auto before = loom_serve_text_model_memory_statistics(source);
+  IREE_ASSERT_OK(
+      loom_serve_text_row_reset(loom_serve_text_model_row(source, 0)));
+  const auto frontier = loom_runtime_execution_frontier(source->execution);
+  IREE_ASSERT_OK(loom_serve_text_model_submit_reclaim(source));
+  ASSERT_TRUE(loom_serve_text_model_is_reclaiming(source));
+  const auto unchanged = loom_runtime_execution_frontier(source->execution);
+  for (size_t i = 0; i < IREE_ARRAYSIZE(frontier.values); ++i) {
+    EXPECT_EQ(unchanged.semaphores[i], frontier.semaphores[i]);
+    EXPECT_EQ(unchanged.values[i], frontier.values[i]);
+  }
+
+  // Geometry cannot change while a native operation owns its old targets.
+  loom_serve_text_resize_t* resize = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_model_prepare_resize(source, 4, &resize));
+  EXPECT_EQ(resize, nullptr);
+  loom_serve_text_resize_free(resize);
+
+  // A second retired row releases after capture. The older operation cannot
+  // acknowledge it, even when admission has already collected native results.
+  IREE_ASSERT_OK(
+      loom_serve_text_row_reset(loom_serve_text_model_row(source, 1)));
+  auto* live = loom_serve_text_model_row(source, 2);
+  const int32_t suffix = 1;
+  IREE_ASSERT_OK(loom_serve_text_row_prefill(live, 1, &suffix));
+  Oracle reference;
+  reference.Consume("abxb");
+  EXPECT_EQ(loom_serve_text_row_token(live), reference.Predict());
+  loom_runtime_memory_operation_await(source->state.memory.reclaim);
+  IREE_ASSERT_OK(loom_serve_text_model_collect_reclaim(source));
+  EXPECT_FALSE(loom_serve_text_model_is_reclaiming(source));
+  EXPECT_NE(loom_runtime_block_pool_find_released(&source->state.cache.pool, 0),
+            UINT32_MAX);
+  const auto first = loom_serve_text_model_memory_statistics(source);
+  EXPECT_LT(first.committed_bytes, before.committed_bytes);
+
+  IREE_ASSERT_OK(loom_serve_text_model_submit_reclaim(source));
+  ASSERT_TRUE(loom_serve_text_model_is_reclaiming(source));
+  loom_runtime_memory_operation_await(source->state.memory.reclaim);
+  IREE_ASSERT_OK(loom_serve_text_model_collect_reclaim(source));
+  const auto second = loom_serve_text_model_memory_statistics(source);
+  EXPECT_LT(second.committed_bytes, first.committed_bytes);
+  IREE_ASSERT_OK(loom_serve_text_model_submit_reclaim(source));
+  EXPECT_FALSE(loom_serve_text_model_is_reclaiming(source));
+  IREE_ASSERT_OK(loom_serve_text_row_prefill(live, 1, &suffix));
+  reference.Consume(suffix);
+  EXPECT_EQ(loom_serve_text_row_token(live), reference.Predict());
+
+  // A completed cold attempt stays complete until ownership changes again.
+  loom_serve_text_trim_result_t result;
+  IREE_ASSERT_OK(loom_serve_text_model_trim(source, &result));
+  EXPECT_FALSE(loom_serve_text_model_needs_compaction(source));
+  IREE_ASSERT_OK(loom_serve_text_row_reset(live));
+  EXPECT_TRUE(loom_serve_text_model_needs_compaction(source));
+  IREE_ASSERT_OK(loom_serve_text_model_submit_reclaim(source));
+  // The outer model owner joins this final independent borrower at destruction.
+}
+
+TEST_F(ElasticTextServiceTest,
        CompactionReusesPackedParentAndPreservesSharedCheckpoint) {
   const iree_device_size_t slab_size =
       loom_runtime_test_application_options_default().slab_size;

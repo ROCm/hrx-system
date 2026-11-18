@@ -33,6 +33,8 @@ enum {
 enum loom_serve_text_state_flag_bits_e {
   LOOM_SERVE_TEXT_STATE_FLAG_PACKED = 1u << 0,
   LOOM_SERVE_TEXT_STATE_FLAG_DRAFT = 1u << 1,
+  // Releases, backing, or geometry changed since the last compaction attempt.
+  LOOM_SERVE_TEXT_STATE_FLAG_COMPACTION_PENDING = 1u << 2,
 };
 typedef uint32_t loom_serve_text_state_flags_t;
 
@@ -116,7 +118,7 @@ struct loom_serve_text_state_t {
   loom_runtime_execution_t* execution;
   // Final queue ownership enclosing host payloads and virtual backing.
   loom_runtime_retirement_t retirement;
-  // Enabled packed and speculative storage roles.
+  // Storage roles and retained maintenance facts.
   loom_serve_text_state_flags_t flags;
   // Number of published resident records and source-defined private views.
   iree_host_size_t row_count;
@@ -183,6 +185,8 @@ struct loom_serve_text_state_t {
       // Last admitted native readiness value.
       uint64_t value;
     } backing;
+    // Owned dead-page unmap, independent of model execution readiness.
+    loom_runtime_memory_operation_t* reclaim;
     // Independent native mapping borrowers during cold reservation growth.
     // Each owns its own readiness value; completion of one cannot publish
     // another reservation's translations.
@@ -452,6 +456,22 @@ iree_status_t loom_serve_text_state_submit_trim(
 iree_status_t loom_serve_text_state_complete_trim(
     loom_serve_text_state_t* state, loom_serve_text_trim_result_t* result,
     bool* out_complete);
+
+// Captures released ownership at a completed model frontier. Native retirement
+// proceeds independently of subsequent execution; overlapping admission defers.
+// No prior reclaim may remain uncollected. Accepted work survives failure.
+iree_status_t loom_serve_text_state_submit_reclaim(
+    loom_serve_text_state_t* state);
+
+// Collects completed native release without replaying logical invalidations.
+// The serialized owner can collect while disjoint device work remains active.
+iree_status_t loom_serve_text_state_collect_reclaim(
+    loom_serve_text_state_t* state);
+
+// Cold compaction may help after new releases, mappings, or source geometry.
+// Prepared continuations retain IDs and exclude relocation until they retire.
+bool loom_serve_text_state_needs_compaction(
+    const loom_serve_text_state_t* state);
 
 #ifdef __cplusplus
 }  // extern "C"

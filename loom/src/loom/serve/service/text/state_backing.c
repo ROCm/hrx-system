@@ -251,6 +251,7 @@ iree_status_t loom_serve_text_state_backing_initialize(
     iree_allocator_free(state->host_allocator, previous);
   }
   state->memory.index = backing;
+  state->flags |= LOOM_SERVE_TEXT_STATE_FLAG_COMPACTION_PENDING;
   return iree_ok_status();
 }
 
@@ -483,11 +484,36 @@ void loom_serve_text_state_complete_backing(loom_serve_text_state_t* state) {
   state->memory.backing.operation = NULL;
 }
 
-// Acknowledge only after native retirement (or an empty release). The owner
-// excludes logical mutations while maintenance borrows these work sets.
+static bool loom_serve_text_backing_has_releases(
+    const loom_serve_text_state_t* state) {
+  const loom_serve_text_backing_t* backing = state->memory.index;
+  return backing && (loom_runtime_block_pool_find_released(&state->cache.pool,
+                                                           0) != UINT32_MAX ||
+                     loom_runtime_block_pool_find_released(
+                         &state->recurrent.pool, 0) != UINT32_MAX ||
+                     loom_index_set_select(&backing->row_layout, backing->rows,
+                                           0) != LOOM_INDEX_SET_NONE ||
+                     loom_index_set_select(&backing->checkpoint_layout,
+                                           backing->released_checkpoints,
+                                           0) != LOOM_INDEX_SET_NONE);
+}
+
+bool loom_serve_text_state_needs_compaction(
+    const loom_serve_text_state_t* state) {
+  return state->memory.index && !state->prepared_reservations &&
+         (iree_any_bit_set(state->flags,
+                           LOOM_SERVE_TEXT_STATE_FLAG_COMPACTION_PENDING) ||
+          loom_serve_text_backing_has_releases(state));
+}
+
+// Accepted native work owns its captured edits. Acknowledge now so later
+// logical releases accumulate independently and cannot be lost at completion.
 static void loom_serve_text_backing_acknowledge(
     loom_serve_text_state_t* state) {
   loom_serve_text_backing_t* backing = state->memory.index;
+  if (loom_serve_text_backing_has_releases(state)) {
+    state->flags |= LOOM_SERVE_TEXT_STATE_FLAG_COMPACTION_PENDING;
+  }
   loom_runtime_block_pool_acknowledge_releases(&state->cache.pool);
   loom_runtime_block_pool_acknowledge_releases(&state->recurrent.pool);
   loom_index_set_clear(&backing->row_layout, backing->rows);
@@ -507,8 +533,13 @@ static uint32_t loom_serve_text_backing_next(
   return next >= start ? next : LOOM_INDEX_SET_NONE;
 }
 
-static iree_status_t loom_serve_text_trim_backing(
-    loom_serve_text_state_t* state) {
+static void loom_serve_text_backing_update_range(
+    loom_serve_text_state_t* state, iree_hal_buffer_binding_t range,
+    bool binding);
+
+static iree_status_t loom_serve_text_release_backing(
+    loom_serve_text_state_t* state, iree_hal_semaphore_t* readiness,
+    uint64_t value, loom_runtime_memory_operation_t** out_operation) {
   IREE_TRACE_ZONE_BEGIN(z0);
   loom_serve_text_backing_t* backing = state->memory.index;
   backing->range_count = 0;
@@ -585,29 +616,68 @@ static iree_status_t loom_serve_text_trim_backing(
         &backing->checkpoint_layout, backing->released_checkpoints,
         state->checkpoints.pool.capacity, checkpoint + 1);
   }
-  IREE_ASSERT(!state->memory.backing.operation);
-  if (iree_status_is_ok(status) && !backing->range_count) {
-    loom_serve_text_backing_acknowledge(state);
-    IREE_RETURN_AND_END_ZONE(z0, status);
-  }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && backing->range_count) {
     status = loom_runtime_memory_pool_trim_async(
-        state->memory.pool, backing->range_count, backing->ranges,
-        state->memory.backing.semaphore, state->memory.backing.value + 1,
-        &state->memory.backing.operation);
+        state->memory.pool, backing->range_count, backing->ranges, readiness,
+        value, out_operation);
   }
   if (iree_status_is_ok(status)) {
-    ++state->memory.backing.value;
-    if (state->memory.backing.operation) {
-      status = loom_runtime_execution_barrier(
-          state->execution,
-          (iree_hal_semaphore_list_t){1, &state->memory.backing.semaphore,
-                                      &state->memory.backing.value});
-    } else {
-      loom_serve_text_backing_acknowledge(state);
+    // Invalidate at capture, not completion: collection may happen after a new
+    // admission has already reused these IDs and established fresh backing.
+    for (iree_host_size_t i = 0; i < backing->range_count; ++i) {
+      const loom_runtime_memory_range_t range = backing->ranges[i];
+      loom_serve_text_backing_update_range(
+          state,
+          (iree_hal_buffer_binding_t){
+              loom_runtime_virtual_buffer_handle(range.buffer), range.offset,
+              range.length},
+          false);
     }
+    loom_serve_text_backing_acknowledge(state);
   }
   IREE_RETURN_AND_END_ZONE(z0, status);
+}
+
+static iree_status_t loom_serve_text_trim_backing(
+    loom_serve_text_state_t* state) {
+  IREE_ASSERT(!state->memory.backing.operation);
+  IREE_RETURN_IF_ERROR(loom_serve_text_release_backing(
+      state, state->memory.backing.semaphore, state->memory.backing.value + 1,
+      &state->memory.backing.operation));
+  if (state->memory.index->range_count) {
+    ++state->memory.backing.value;
+  }
+  if (!state->memory.backing.operation) {
+    return iree_ok_status();
+  }
+  return loom_runtime_execution_barrier(
+      state->execution,
+      (iree_hal_semaphore_list_t){1, &state->memory.backing.semaphore,
+                                  &state->memory.backing.value});
+}
+
+iree_status_t loom_serve_text_state_submit_reclaim(
+    loom_serve_text_state_t* state) {
+  IREE_ASSERT(!state->memory.reclaim);
+  if (!state->memory.index) {
+    return iree_ok_status();
+  }
+  loom_serve_text_state_complete_backing(state);
+  return loom_serve_text_release_backing(state, NULL, 0,
+                                         &state->memory.reclaim);
+}
+
+iree_status_t loom_serve_text_state_collect_reclaim(
+    loom_serve_text_state_t* state) {
+  if (!state->memory.reclaim ||
+      !loom_runtime_memory_operation_is_complete(state->memory.reclaim)) {
+    return iree_ok_status();
+  }
+  iree_status_t status =
+      loom_runtime_memory_operation_query_status(state->memory.reclaim);
+  loom_runtime_memory_operation_free(state->memory.reclaim);
+  state->memory.reclaim = NULL;
+  return status;
 }
 
 // Compaction profitability is a geometry query. It never marks live mappings
@@ -748,14 +818,16 @@ iree_status_t loom_serve_text_state_submit_trim(
   }
   // Prepared continuations retain exact logical IDs, not relocation entries.
   // Dead backing can still retire; moving IDs waits until their plans retire.
-  state->memory.trim.phase = state->prepared_reservations
-                                 ? LOOM_SERVICE_TEXT_TRIM_COMPLETE
-                                 : LOOM_SERVICE_TEXT_TRIM_RELOCATE;
+  IREE_ASSERT(!state->memory.reclaim);
+  state->memory.trim.phase = loom_serve_text_state_needs_compaction(state)
+                                 ? LOOM_SERVICE_TEXT_TRIM_RELOCATE
+                                 : LOOM_SERVICE_TEXT_TRIM_COMPLETE;
   return loom_serve_text_trim_backing(state);
 }
 
 static iree_status_t loom_serve_text_submit_compaction(
     loom_serve_text_state_t* state, loom_serve_text_trim_result_t* out_result) {
+  state->flags &= ~LOOM_SERVE_TEXT_STATE_FLAG_COMPACTION_PENDING;
   const uint32_t live =
       state->cache.pool.capacity - state->cache.pool.available;
   out_result->moved_blocks = 0;
@@ -786,6 +858,10 @@ static iree_status_t loom_serve_text_submit_compaction(
         state, out_result->moved_blocks, &admitted);
     if (!admitted) {
       out_result->moved_blocks = 0;
+      // This attempt proved benefit, not that shared destination capacity will
+      // remain unavailable. A later pressure request may retry after peers
+      // release backing; the failed attempt itself supplies no progress wake.
+      state->flags |= LOOM_SERVE_TEXT_STATE_FLAG_COMPACTION_PENDING;
     }
   }
   uint32_t* copy_destinations = NULL;
@@ -935,31 +1011,40 @@ static void loom_serve_text_backing_update_nodes(
                                        count - middle - 1, begin, end, binding);
 }
 
+static void loom_serve_text_backing_update_range(
+    loom_serve_text_state_t* state, iree_hal_buffer_binding_t range,
+    bool binding) {
+  const loom_serve_text_backing_t* backing = state->memory.index;
+  for (iree_host_size_t allocation = 0;
+       backing && allocation < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
+       ++allocation) {
+    if (!state->memory.buffers[allocation] ||
+        loom_runtime_virtual_buffer_handle(state->memory.buffers[allocation]) !=
+            range.buffer) {
+      continue;
+    }
+    const iree_host_size_t first = backing->starts[allocation];
+    loom_serve_text_backing_update_nodes(
+        state, backing->nodes + first, backing->starts[allocation + 1] - first,
+        range.offset, range.offset + range.length, binding);
+    break;
+  }
+}
+
 void loom_serve_text_state_backing_update(
     loom_serve_text_state_t* state,
     const loom_runtime_memory_operation_t* operation) {
-  const loom_serve_text_backing_t* backing = state->memory.index;
   const iree_host_size_t count =
       loom_runtime_memory_operation_mapping_count(operation);
-  for (iree_host_size_t i = 0; backing && i < count; ++i) {
+  if (count) {
+    state->flags |= LOOM_SERVE_TEXT_STATE_FLAG_COMPACTION_PENDING;
+  }
+  for (iree_host_size_t i = 0; i < count; ++i) {
     iree_hal_buffer_binding_t range;
     const iree_hal_memory_mapping_operation_t kind =
         loom_runtime_memory_operation_mapping(operation, i, &range);
-    for (iree_host_size_t allocation = 0;
-         allocation < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT; ++allocation) {
-      if (!state->memory.buffers[allocation] ||
-          loom_runtime_virtual_buffer_handle(
-              state->memory.buffers[allocation]) != range.buffer) {
-        continue;
-      }
-      const iree_host_size_t first = backing->starts[allocation];
-      loom_serve_text_backing_update_nodes(
-          state, backing->nodes + first,
-          backing->starts[allocation + 1] - first, range.offset,
-          range.offset + range.length,
-          kind == IREE_HAL_MEMORY_MAPPING_OPERATION_BIND);
-      break;
-    }
+    loom_serve_text_backing_update_range(
+        state, range, kind == IREE_HAL_MEMORY_MAPPING_OPERATION_BIND);
   }
 }
 
@@ -989,13 +1074,7 @@ iree_status_t loom_serve_text_state_complete_trim(
     loom_serve_text_state_t* state, loom_serve_text_trim_result_t* result,
     bool* out_complete) {
   *out_complete = false;
-  const bool released =
-      state->memory.backing.operation &&
-      state->memory.trim.phase != LOOM_SERVICE_TEXT_TRIM_RELEASE;
   loom_serve_text_state_complete_backing(state);
-  if (released) {
-    loom_serve_text_backing_acknowledge(state);
-  }
   switch (state->memory.trim.phase) {
     case LOOM_SERVICE_TEXT_TRIM_RELOCATE: {
       IREE_RETURN_IF_ERROR(loom_serve_text_submit_compaction(state, result));
@@ -1016,6 +1095,9 @@ iree_status_t loom_serve_text_state_complete_trim(
   }
   *out_complete = state->memory.trim.phase == LOOM_SERVICE_TEXT_TRIM_COMPLETE &&
                   !state->memory.backing.operation;
+  if (*out_complete && result->moved_blocks) {
+    state->flags &= ~LOOM_SERVE_TEXT_STATE_FLAG_COMPACTION_PENDING;
+  }
   if (*out_complete) {
     result->released_bytes = state->memory.statistics.released_bytes -
                              state->memory.trim.released_before;

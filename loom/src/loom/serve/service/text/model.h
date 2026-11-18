@@ -329,14 +329,36 @@ typedef struct loom_serve_text_trim_result_t {
   uint64_t released_bytes;
 } loom_serve_text_trim_result_t;
 
+// Captures dead backing at a completed model frontier without making future
+// execution wait for its native retirement. Overlapping admissions defer;
+// disjoint ready data stays usable. No prior reclaim may remain uncollected.
+iree_status_t loom_serve_text_model_submit_reclaim(
+    loom_serve_text_model_t* model);
+
+// Collects completed release and reports native failures on the serialized
+// model owner. May overlap disjoint device work, but not a CPU source borrower.
+iree_status_t loom_serve_text_model_collect_reclaim(
+    loom_serve_text_model_t* model);
+
+// An accepted dead-page release remains owned until collect_reclaim consumes
+// it. Source resize, checkpoint controls, and live compaction exclude this cut;
+// ordinary request admission and ready execution remain independent.
+bool loom_serve_text_model_is_reclaiming(const loom_serve_text_model_t* model);
+
+// New ownership, backing, or source geometry permits another cold compaction
+// attempt. Prepared continuations defer relocation until their IDs retire.
+bool loom_serve_text_model_needs_compaction(
+    const loom_serve_text_model_t* model);
+
 // Starts maintenance at a successfully completed model frontier, releasing
 // unowned slabs and enqueuing compaction when the temporary destination union
 // fits. Target/draft map uploads follow the copies on the model timeline;
 // native release and allocation run asynchronously. The owner excludes other
-// model mutation until complete_trim finishes all returned frontiers. Live rows
-// and cached commands survive; reset rows can regrow in the same VA.
-// Fixed/dense backing is unchanged and reports zero reclamation. Submission
-// failure is terminal and preserves accepted work for outer model destruction.
+// model mutation until complete_trim finishes all returned frontiers and joins
+// independent reclaim before starting. Live rows and cached commands survive;
+// reset rows can regrow in the same VA. Fixed/dense backing is unchanged and
+// reports zero reclamation. Submission failure is terminal and preserves
+// accepted work for outer model destruction.
 iree_status_t loom_serve_text_model_submit_trim(
     loom_serve_text_model_t* model, loom_serve_text_trim_result_t* out_result,
     loom_runtime_execution_frontier_t* out_frontier);
@@ -359,9 +381,10 @@ typedef struct loom_serve_text_resize_t loom_serve_text_resize_t;
 
 // Evaluates append-stable source storage without changing model directories,
 // device bindings, or shared pool accounting. May run on a CPU worker with an
-// exclusive model VM borrow. Prepared continuations defer growth by returning
-// NULL. The caller excludes other model mutation through submission/completion
-// or frees the prepared result without submitting it.
+// exclusive model VM borrow. Prepared continuations and uncollected reclaim
+// defer growth by returning NULL. The caller excludes other model mutation
+// through submission/completion or frees the prepared result without submitting
+// it.
 iree_status_t loom_serve_text_model_prepare_resize(
     loom_serve_text_model_t* model, iree_host_size_t row_count,
     loom_serve_text_resize_t** out_resize);
