@@ -444,13 +444,16 @@ loom_cc_library(
     name = "promote_private_fragments",
     srcs = [
         "private_storage.c",
+        "private_storage_copy.c",
         "promote_private_fragments.c",
     ],
     hdrs = [
         "private_storage.h",
+        "private_storage_copy.h",
         "promote_private_fragments.h",
     ],
     deps = [
+        "//loom/src/loom/analysis:loop_domain",
         "//loom/src/loom/analysis:scc",
         "//loom/src/loom/analysis:symbolic_expr",
         "//loom/src/loom/analysis:view_regions",
@@ -470,6 +473,7 @@ loom_cc_library(
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
