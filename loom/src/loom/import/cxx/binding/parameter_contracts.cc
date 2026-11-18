@@ -9,12 +9,14 @@
 #include <cxx/ast.h>
 #include <cxx/literals.h>
 #include <cxx/symbols.h>
+#include <cxx/translation_unit.h>
 #include <cxx/types.h>
 
 #include <string>
 
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/constants.h"
+#include "loom/import/cxx/source/diagnostics.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/ops/buffer/ops.h"
 

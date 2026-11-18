@@ -6,6 +6,7 @@
 
 #include "loom/import/cxx/value/bitcast.h"
 
+#include "loom/import/cxx/source/diagnostics.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/vector/ops.h"

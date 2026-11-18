@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "loom/error/source.h"
+#include "loom/import/cxx/source/options.h"
 #include "loom/import/cxx/value/types.h"
 
 namespace loom::cxx_import {

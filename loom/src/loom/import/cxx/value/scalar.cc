@@ -11,10 +11,12 @@
 #include <cxx/memory_layout.h>
 #include <cxx/symbols.h>
 #include <cxx/token.h>
+#include <cxx/translation_unit.h>
 #include <cxx/types.h>
 
 #include <bit>
 
+#include "loom/import/cxx/source/diagnostics.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"

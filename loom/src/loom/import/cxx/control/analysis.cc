@@ -30,6 +30,7 @@
 #include "loom/import/cxx/control/object_identity.h"
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/constants.h"
+#include "loom/import/cxx/source/diagnostics.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/source/initializer_lists.h"

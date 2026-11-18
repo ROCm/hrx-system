@@ -7,7 +7,10 @@
 #include "loom/import/cxx/source/locations.h"
 
 #include <cxx/ast.h>
+#include <cxx/translation_unit.h>
 
+#include "loom/import/cxx/source/contents.h"
+#include "loom/import/cxx/source/diagnostics.h"
 #include "loom/import/cxx/source/error.h"
 
 namespace loom::cxx_import {

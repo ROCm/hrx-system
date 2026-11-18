@@ -9,10 +9,13 @@
 #include <cxx/ast.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
+#include <cxx/translation_unit.h>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/import/cxx/source/contents.h"
 #include "loom/import/cxx/source/error.h"
+#include "loom/import/cxx/source/source.h"
 #include "loom/ir/context.h"
 
 namespace loom::cxx_import {

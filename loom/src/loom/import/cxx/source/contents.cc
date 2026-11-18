@@ -20,14 +20,6 @@
 namespace loom::cxx_import {
 namespace {
 
-iree_string_view_t view(std::string_view value) {
-  return iree_make_string_view(value.data(), value.size());
-}
-
-std::string string(iree_string_view_t value) {
-  return value.size ? std::string(value.data, value.size) : std::string();
-}
-
 // Advances by the same UTF-8 code-point columns used by the CXX source map.
 size_t advance_columns(std::string_view source, size_t offset, size_t count) {
   while (count-- && offset < source.size()) {

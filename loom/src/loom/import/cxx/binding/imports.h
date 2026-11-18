@@ -17,9 +17,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "loom/import/cxx/source/source.h"
-
 namespace loom::cxx_import {
+
+class Diagnostics;
 
 // Runtime service binding retained from one declaration family.
 // An absent symbol delegates the external spelling to the Loom declaration.

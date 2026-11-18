@@ -5,9 +5,12 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <cxx/symbols.h>
+#include <cxx/translation_unit.h>
 #include <cxx/type_traits.h>
 #include <cxx/types.h>
 
+#include "loom/import/cxx/source/contents.h"
+#include "loom/import/cxx/source/diagnostics.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/value/types.h"
 #include "loom/ir/module.h"

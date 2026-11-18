@@ -10,6 +10,7 @@
 #include <cxx/literals.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
+#include <cxx/translation_unit.h>
 #include <cxx/type_traits.h>
 #include <cxx/types.h>
 
@@ -17,6 +18,7 @@
 #include <vector>
 
 #include "loom/import/cxx/source/attributes.h"
+#include "loom/import/cxx/source/diagnostics.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
 

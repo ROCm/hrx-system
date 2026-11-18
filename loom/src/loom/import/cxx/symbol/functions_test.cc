@@ -12,6 +12,15 @@
 #include <cxx/symbols.h>
 #include <cxx/types.h>
 
+#include "loom/import/cxx/binding/command_programs.h"
+#include "loom/import/cxx/binding/config.h"
+#include "loom/import/cxx/binding/fastmath.h"
+#include "loom/import/cxx/binding/function_contracts.h"
+#include "loom/import/cxx/binding/intrinsics.h"
+#include "loom/import/cxx/binding/launch.h"
+#include "loom/import/cxx/binding/pipeline_contracts.h"
+#include "loom/import/cxx/binding/target_definitions.h"
+#include "loom/import/cxx/binding/template_definitions.h"
 #include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/symbol/immutable_objects.h"
 #include "loom/import/cxx/value/builder_test.h"

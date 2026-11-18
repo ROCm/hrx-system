@@ -10,6 +10,7 @@
 #include <cxx/symbols.h>
 #include <cxx/types.h>
 
+#include "loom/import/cxx/source/diagnostics.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/target/ops.h"

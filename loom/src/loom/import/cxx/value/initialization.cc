@@ -15,12 +15,14 @@
 #include <cxx/lambda_captures.h>
 #include <cxx/literals.h>
 #include <cxx/symbols.h>
+#include <cxx/translation_unit.h>
 #include <cxx/types.h>
 
 #include <cstring>
 #include <unordered_map>
 #include <utility>
 
+#include "loom/import/cxx/source/diagnostics.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/source/initializer_lists.h"

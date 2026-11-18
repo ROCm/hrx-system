@@ -24,6 +24,14 @@ class Preprocessor;
 
 namespace loom::cxx_import {
 
+inline iree_string_view_t view(std::string_view value) {
+  return iree_make_string_view(value.data(), value.size());
+}
+
+inline std::string string(iree_string_view_t value) {
+  return value.size ? std::string(value.data, value.size) : std::string();
+}
+
 // Exact bytes and byte offsets for one physical C/C++ source range.
 struct PhysicalSourceRange {
   // Complete retained source containing the range.

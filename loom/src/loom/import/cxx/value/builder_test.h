@@ -13,6 +13,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/import/cxx/source/source.h"
 #include "loom/import/cxx/value/scalar.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"

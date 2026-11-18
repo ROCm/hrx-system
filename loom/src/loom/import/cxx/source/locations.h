@@ -7,12 +7,17 @@
 #ifndef LOOM_IMPORT_CXX_SOURCE_LOCATIONS_H_
 #define LOOM_IMPORT_CXX_SOURCE_LOCATIONS_H_
 
+#include <cxx/ast_fwd.h>
+#include <cxx/cxx_fwd.h>
+
 #include <unordered_map>
 
-#include "loom/import/cxx/source/source.h"
+#include "loom/import/cxx/source/options.h"
 #include "loom/ir/module.h"
 
 namespace loom::cxx_import {
+
+class Diagnostics;
 
 // Projects each reached source range once into module-owned provenance. The
 // source and module outlive this index; output locations retain no AST storage.

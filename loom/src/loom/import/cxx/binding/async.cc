@@ -9,6 +9,7 @@
 #include <cxx/const_value.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
+#include <cxx/translation_unit.h>
 #include <cxx/types.h>
 
 #include <array>
@@ -17,6 +18,7 @@
 #include <variant>
 #include <vector>
 
+#include "loom/import/cxx/source/diagnostics.h"
 #include "loom/import/cxx/source/error.h"
 
 namespace loom::cxx_import {

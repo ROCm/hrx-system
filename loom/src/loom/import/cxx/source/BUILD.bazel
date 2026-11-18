@@ -133,6 +133,21 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "diagnostics",
+    srcs = ["diagnostics.cc"],
+    hdrs = ["diagnostics.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":contents",
+        ":error",
+        "//loom/src/loom/error:diagnostic",
+        "//loom/src/loom/error:error_defs",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_library(
     name = "frontend",
     srcs = ["frontend.cc"],
     hdrs = ["frontend.h"],
@@ -140,9 +155,9 @@ loom_cc_library(
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
         ":contents",
+        ":diagnostics",
         ":error",
         ":options",
-        "//loom/src/loom/error:error_defs",
         "//third_party:cxx_parser",
     ],
 )
@@ -290,8 +305,10 @@ loom_cc_library(
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
+        ":contents",
+        ":diagnostics",
         ":error",
-        ":source",
+        ":options",
         "//loom/src/loom/ir",
         "//third_party:cxx_parser",
     ],
@@ -396,6 +413,7 @@ loom_cc_test(
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
+        ":contents",
         ":error",
         ":locations",
         ":options",

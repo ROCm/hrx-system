@@ -19,12 +19,13 @@
 #include <unordered_set>
 #include <vector>
 
-#include "loom/import/cxx/source/source.h"
 #include "loom/import/cxx/value/partition.h"
 #include "loom/ir/types.h"
 #include "loom/ops/op_defs.h"
 
 namespace loom::cxx_import {
+
+class Diagnostics;
 
 // Retained projection of an ordinary record onto explicit kernel arguments.
 // Native object padding and pointer displacements are absent from this ABI:
@@ -48,8 +49,10 @@ struct KernelRecordProjection {
 class Types {
  public:
   Types(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
-        loom_module_t* module = nullptr)
-      : unit_(unit), diagnostics_(diagnostics), module_(module) {}
+        loom_module_t* module = nullptr);
+  ~Types();
+  Types(const Types&) = delete;
+  Types& operator=(const Types&) = delete;
 
   // Projects a leaf value's representation independently of top-level cv
   // qualifiers. Object pointers carry a buffer and byte offset independently

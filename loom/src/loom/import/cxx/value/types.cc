@@ -13,6 +13,7 @@
 #include <cxx/memory_layout.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
+#include <cxx/translation_unit.h>
 #include <cxx/type_traits.h>
 #include <cxx/types.h>
 
@@ -22,6 +23,7 @@
 #include <optional>
 
 #include "loom/import/cxx/source/attributes.h"
+#include "loom/import/cxx/source/diagnostics.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/source/objects.h"
@@ -67,6 +69,12 @@ const cxx::ParameterPackSymbol* template_argument_pack(
 }
 
 }  // namespace
+
+Types::Types(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
+             loom_module_t* module)
+    : unit_(unit), diagnostics_(diagnostics), module_(module) {}
+
+Types::~Types() = default;
 
 const cxx::Type* Types::unqualified(const cxx::Type* type) {
   auto traits = unit_.typeTraits();

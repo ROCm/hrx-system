@@ -7,6 +7,7 @@
 #include "loom/import/cxx/value/objects.h"
 
 #include <cxx/symbols.h>
+#include <cxx/translation_unit.h>
 #include <cxx/types.h>
 
 #include "loom/import/cxx/source/error.h"

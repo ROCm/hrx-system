@@ -10,12 +10,14 @@
 #include <cxx/memory_layout.h>
 #include <cxx/symbols.h>
 #include <cxx/token.h>
+#include <cxx/translation_unit.h>
 #include <cxx/types.h>
 
 #include <algorithm>
 #include <numeric>
 
 #include "loom/import/cxx/source/constants.h"
+#include "loom/import/cxx/source/diagnostics.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/objects.h"
 #include "loom/ir/module.h"

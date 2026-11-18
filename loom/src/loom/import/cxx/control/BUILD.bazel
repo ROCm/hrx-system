@@ -142,6 +142,7 @@ loom_cc_library(
         "//loom/src/loom/import/cxx/source",
         "//loom/src/loom/import/cxx/source:attributes",
         "//loom/src/loom/import/cxx/source:constants",
+        "//loom/src/loom/import/cxx/source:diagnostics",
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/import/cxx/source:expressions",
         "//loom/src/loom/import/cxx/source:initializer_lists",
