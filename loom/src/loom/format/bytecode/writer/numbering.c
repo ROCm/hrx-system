@@ -490,7 +490,7 @@ iree_status_t loom_bytecode_number_global(
   loom_value_id_t value_id = LOOM_VALUE_ID_INVALID;
   while (loom_bytecode_global_value_iterator_next(&iterator, &value_id)) {
     const loom_value_t* value = loom_module_value(module, value_id);
-    if (value->name_id != LOOM_STRING_ID_INVALID) {
+    if (!numbering->strip_debug && value->name_id != LOOM_STRING_ID_INVALID) {
       IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
           numbering, value->name_id, &unused_id));
     }
@@ -630,7 +630,7 @@ iree_status_t loom_bytecode_number_function(
     if (value_id < numbering->module->values.count) {
       loom_string_id_t name_id =
           loom_module_value(numbering->module, value_id)->name_id;
-      if (name_id != LOOM_STRING_ID_INVALID) {
+      if (!numbering->strip_debug && name_id != LOOM_STRING_ID_INVALID) {
         IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
             numbering, name_id, &unused_id));
       }
@@ -641,7 +641,7 @@ iree_status_t loom_bytecode_number_function(
     if (value_id < numbering->module->values.count) {
       loom_string_id_t name_id =
           loom_module_value(numbering->module, value_id)->name_id;
-      if (name_id != LOOM_STRING_ID_INVALID) {
+      if (!numbering->strip_debug && name_id != LOOM_STRING_ID_INVALID) {
         IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
             numbering, name_id, &unused_id));
       }
@@ -700,7 +700,7 @@ static iree_status_t loom_bytecode_number_region(
     const loom_block_t* block = loom_region_const_block(region, block_index);
 
     // Block label.
-    if (block->label_id != LOOM_STRING_ID_INVALID) {
+    if (!numbering->strip_debug && block->label_id != LOOM_STRING_ID_INVALID) {
       IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
           numbering, block->label_id, &unused_id));
     }
@@ -710,7 +710,7 @@ static iree_status_t loom_bytecode_number_region(
       loom_value_id_t value_id = loom_block_arg_id(block, arg_index);
       const loom_value_t* value =
           loom_module_value(numbering->module, value_id);
-      if (value->name_id != LOOM_STRING_ID_INVALID) {
+      if (!numbering->strip_debug && value->name_id != LOOM_STRING_ID_INVALID) {
         IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
             numbering, value->name_id, &unused_id));
       }
@@ -741,7 +741,7 @@ static iree_status_t loom_bytecode_number_operation(
   for (uint16_t i = 0; i < op->result_count; ++i) {
     const loom_value_t* value =
         loom_module_value(numbering->module, results[i]);
-    if (value->name_id != LOOM_STRING_ID_INVALID) {
+    if (!numbering->strip_debug && value->name_id != LOOM_STRING_ID_INVALID) {
       IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
           numbering, value->name_id, &unused_id));
     }

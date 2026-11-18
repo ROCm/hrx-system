@@ -16,6 +16,11 @@
 extern "C" {
 #endif
 
+// Writes an operation's presentation prefix according to the writer policy.
+iree_status_t loom_bytecode_write_op_trivia(
+    loom_bytecode_page_writer_t* writer,
+    const loom_bytecode_numbering_t* numbering, const loom_op_t* op);
+
 // One independently bounded root-region payload in the IR section.
 typedef struct loom_bytecode_ir_region_payload_t {
   // Byte offset of the payload from the IR section start.

@@ -268,13 +268,8 @@ static iree_status_t loom_bytecode_write_func_metadata(
   IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
       writer, (uint64_t)writer_op_id + 1));
 
-  iree_host_size_t comment_count = 0;
-  const iree_string_view_t* comments =
-      loom_module_op_comments(module, func_like.op, &comment_count);
-  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_source_trivia(
-      writer,
-      iree_any_bit_set(func_like.op->flags, LOOM_OP_FLAG_LEADING_BLANK_LINE),
-      comments, comment_count));
+  IREE_RETURN_IF_ERROR(
+      loom_bytecode_write_op_trivia(writer, numbering, func_like.op));
 
   IREE_RETURN_IF_ERROR(
       loom_bytecode_page_writer_write_u8(writer, loom_func_like_cc(func_like)));
@@ -423,12 +418,7 @@ static iree_status_t loom_bytecode_write_global_metadata(
   IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
       writer, (uint64_t)writer_op_id + 1));
 
-  iree_host_size_t comment_count = 0;
-  const iree_string_view_t* comments =
-      loom_module_op_comments(module, op, &comment_count);
-  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_source_trivia(
-      writer, iree_any_bit_set(op->flags, LOOM_OP_FLAG_LEADING_BLANK_LINE),
-      comments, comment_count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_write_op_trivia(writer, numbering, op));
 
   IREE_RETURN_IF_ERROR(
       loom_bytecode_page_writer_write_uvarint(writer, op->result_count));
@@ -496,12 +486,7 @@ static iree_status_t loom_bytecode_write_record_metadata(
   IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
       writer, (uint64_t)writer_op_id + 1));
 
-  iree_host_size_t comment_count = 0;
-  const iree_string_view_t* comments =
-      loom_module_op_comments(module, op, &comment_count);
-  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_source_trivia(
-      writer, iree_any_bit_set(op->flags, LOOM_OP_FLAG_LEADING_BLANK_LINE),
-      comments, comment_count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_write_op_trivia(writer, numbering, op));
 
   const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
   const loom_attribute_t* attrs = loom_op_attrs(op);

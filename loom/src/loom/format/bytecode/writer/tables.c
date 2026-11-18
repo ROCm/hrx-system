@@ -53,8 +53,11 @@ iree_status_t loom_bytecode_write_strings_section(
 
 // Writes the SOURCES section through the page writer.
 iree_status_t loom_bytecode_write_sources_section(
-    loom_bytecode_page_writer_t* page_writer, const loom_module_t* module) {
-  iree_host_size_t source_count = module->sources.count;
+    loom_bytecode_page_writer_t* page_writer,
+    const loom_bytecode_numbering_t* numbering) {
+  const loom_module_t* module = numbering->module;
+  const iree_host_size_t source_count =
+      numbering->strip_debug ? 0 : module->sources.count;
   IREE_RETURN_IF_ERROR(
       loom_bytecode_page_writer_write_uvarint(page_writer, source_count));
   for (iree_host_size_t i = 0; i < source_count; ++i) {

@@ -17,6 +17,20 @@
 // IR body serialization
 //===----------------------------------------------------------------------===//
 
+iree_status_t loom_bytecode_write_op_trivia(
+    loom_bytecode_page_writer_t* writer,
+    const loom_bytecode_numbering_t* numbering, const loom_op_t* op) {
+  if (numbering->strip_debug) {
+    return loom_bytecode_page_writer_write_uvarint(writer, 0);
+  }
+  iree_host_size_t comment_count = 0;
+  const iree_string_view_t* comments =
+      loom_module_op_comments(numbering->module, op, &comment_count);
+  return loom_bytecode_page_writer_write_source_trivia(
+      writer, iree_any_bit_set(op->flags, LOOM_OP_FLAG_LEADING_BLANK_LINE),
+      comments, comment_count);
+}
+
 static void loom_bytecode_count_region_tree(
     const loom_region_t* region, loom_bytecode_body_counts_t* counts) {
   ++counts->region_count;
@@ -131,7 +145,7 @@ iree_status_t loom_bytecode_write_value_def(
     loom_bytecode_value_numbering_t* value_numbering,
     const loom_value_t* value) {
   uint32_t name_writer_id = 0;
-  if (value->name_id != LOOM_STRING_ID_INVALID) {
+  if (!numbering->strip_debug && value->name_id != LOOM_STRING_ID_INVALID) {
     IREE_RETURN_IF_ERROR(loom_bytecode_numbering_intern_module_string(
         numbering, value->name_id, &name_writer_id));
   }
@@ -191,12 +205,7 @@ static iree_status_t loom_bytecode_write_operation(
   IREE_RETURN_IF_ERROR(
       loom_bytecode_page_writer_write_uvarint(writer, location));
 
-  iree_host_size_t comment_count = 0;
-  const iree_string_view_t* comments =
-      loom_module_op_comments(module, op, &comment_count);
-  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_source_trivia(
-      writer, iree_any_bit_set(op->flags, LOOM_OP_FLAG_LEADING_BLANK_LINE),
-      comments, comment_count));
+  IREE_RETURN_IF_ERROR(loom_bytecode_write_op_trivia(writer, numbering, op));
 
   // Operands.
   const loom_value_id_t* operands = loom_op_const_operands(op);
@@ -324,7 +333,8 @@ static iree_status_t loom_bytecode_write_block(
   const loom_module_t* module = numbering->module;
 
   // Label.
-  bool has_label = block->label_id != LOOM_STRING_ID_INVALID;
+  bool has_label =
+      !numbering->strip_debug && block->label_id != LOOM_STRING_ID_INVALID;
   IREE_RETURN_IF_ERROR(
       loom_bytecode_page_writer_write_u8(writer, has_label ? 1 : 0));
   if (has_label) {
@@ -337,10 +347,13 @@ static iree_status_t loom_bytecode_write_block(
 
   iree_host_size_t comment_count = 0;
   const iree_string_view_t* comments =
-      loom_module_block_comments(module, block, &comment_count);
+      numbering->strip_debug
+          ? NULL
+          : loom_module_block_comments(module, block, &comment_count);
   IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_source_trivia(
       writer,
-      iree_any_bit_set(block->flags, LOOM_BLOCK_FLAG_LEADING_BLANK_LINE),
+      !numbering->strip_debug &&
+          iree_any_bit_set(block->flags, LOOM_BLOCK_FLAG_LEADING_BLANK_LINE),
       comments, comment_count));
 
   // Block args.
@@ -379,8 +392,8 @@ static iree_status_t loom_bytecode_write_region(
         "region source flags contain unsupported bits 0x%04X",
         (unsigned)region->source_flags);
   }
-  IREE_RETURN_IF_ERROR(
-      loom_bytecode_page_writer_write_uvarint(writer, region->source_flags));
+  IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_uvarint(
+      writer, numbering->strip_debug ? 0 : region->source_flags));
   IREE_RETURN_IF_ERROR(
       loom_bytecode_page_writer_write_uvarint(writer, region->block_count));
   const loom_bytecode_region_order_t* order = NULL;

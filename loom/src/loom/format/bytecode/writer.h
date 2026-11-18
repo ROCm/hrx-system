@@ -54,6 +54,15 @@ typedef struct loom_bytecode_symbol_projection_t {
   iree_host_size_t count;
 } loom_bytecode_symbol_projection_t;
 
+// Flags controlling bytecode serialization.
+enum loom_bytecode_write_flag_bits_e {
+  // Omit diagnostic locations and source identifiers, comments, whitespace,
+  // SSA display names, block labels, and region presentation hints. Preserve
+  // symbol names and semantic attributes, including captured source values.
+  LOOM_BYTECODE_WRITE_FLAG_STRIP_DEBUG = 1u << 0,
+};
+typedef uint32_t loom_bytecode_write_flags_t;
+
 // Options controlling writer behavior.
 typedef struct loom_bytecode_write_options_t {
   // Producer string embedded in the file header for diagnostics
@@ -66,6 +75,9 @@ typedef struct loom_bytecode_write_options_t {
   loom_low_repr_environment_t low_repr_environment;
   // Optional requested symbol projection populated on successful completion.
   loom_bytecode_symbol_projection_t symbol_projection;
+  // Serialization policy. STRIP_DEBUG overrides location_mode with
+  // NO_LOCATIONS.
+  loom_bytecode_write_flags_t flags;
 } loom_bytecode_write_options_t;
 
 // Serializes |module| to .loombc format through |stream|.
