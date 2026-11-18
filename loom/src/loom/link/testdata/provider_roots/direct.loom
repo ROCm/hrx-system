@@ -17,3 +17,18 @@ func.def @direct_helper(%value: i32) -> (i32) {
 func.def @unreachable_private(%value: i32) -> (i32) {
   func.return %value : i32
 }
+
+check.case @direct_case {
+  %input = check.literal value(21) : i32
+  %expected = check.literal value(42) : i32
+  %actual = func.call @direct_helper(%input) : (i32) -> (i32)
+  check.expect.equal actual(%actual) expected(%expected) : i32
+  check.return
+}
+
+check.case @secondary_case {
+  %input = check.literal value(7) : i32
+  %actual = func.call @secondary(%input) : (i32) -> (i32)
+  check.expect.equal actual(%actual) expected(%input) : i32
+  check.return
+}

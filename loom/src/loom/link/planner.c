@@ -1611,72 +1611,85 @@ static iree_status_t loom_link_plan_select_input_exports(
   return iree_ok_status();
 }
 
-static iree_status_t loom_link_plan_select_input_tests(
-    loom_link_plan_t* plan, const loom_link_plan_options_t* options) {
-  const iree_host_size_t provider_count =
-      loom_link_module_index_provider_count(plan->index);
-  for (iree_host_size_t provider_ordinal = 0; provider_ordinal < provider_count;
-       ++provider_ordinal) {
-    const loom_link_module_index_provider_t* provider =
-        loom_link_module_index_provider_at(plan->index, provider_ordinal);
-    if (provider->role != LOOM_LINK_PROVIDER_ROLE_INPUT) {
-      continue;
-    }
-    const iree_host_size_t module_end_ordinal =
-        provider->module_start_ordinal + provider->module_count;
-    for (iree_host_size_t module_ordinal = provider->module_start_ordinal;
-         module_ordinal < module_end_ordinal; ++module_ordinal) {
-      const loom_link_module_index_module_t* module =
-          loom_link_module_index_module_at(plan->index, module_ordinal);
-      const iree_host_size_t symbol_end_ordinal =
-          module->symbol_start_ordinal + module->symbol_count;
-      for (iree_host_size_t symbol_ordinal = module->symbol_start_ordinal;
-           symbol_ordinal < symbol_end_ordinal; ++symbol_ordinal) {
-        const loom_link_module_index_symbol_t* symbol =
-            loom_link_module_index_symbol_at(plan->index, symbol_ordinal);
-        if (!iree_any_bit_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_TEST_ONLY)) {
-          continue;
-        }
-        if (options->test_symbol_policy != LOOM_LINK_PLAN_TEST_SYMBOL_STRIP) {
-          IREE_RETURN_IF_ERROR(
-              loom_link_plan_select_policy_root_symbol(plan, options, symbol));
-          continue;
-        }
+static iree_status_t loom_link_plan_select_provider_tests(
+    loom_link_plan_t* plan, const loom_link_plan_options_t* options,
+    const loom_link_module_index_provider_t* provider) {
+  const iree_host_size_t module_end_ordinal =
+      provider->module_start_ordinal + provider->module_count;
+  for (iree_host_size_t module_ordinal = provider->module_start_ordinal;
+       module_ordinal < module_end_ordinal; ++module_ordinal) {
+    const loom_link_module_index_module_t* module =
+        loom_link_module_index_module_at(plan->index, module_ordinal);
+    const iree_host_size_t symbol_end_ordinal =
+        module->symbol_start_ordinal + module->symbol_count;
+    for (iree_host_size_t symbol_ordinal = module->symbol_start_ordinal;
+         symbol_ordinal < symbol_end_ordinal; ++symbol_ordinal) {
+      const loom_link_module_index_symbol_t* symbol =
+          loom_link_module_index_symbol_at(plan->index, symbol_ordinal);
+      if (!iree_any_bit_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_TEST_ONLY)) {
+        continue;
+      }
+      if (options->test_symbol_policy != LOOM_LINK_PLAN_TEST_SYMBOL_STRIP) {
+        IREE_RETURN_IF_ERROR(
+            loom_link_plan_select_policy_root_symbol(plan, options, symbol));
+        continue;
+      }
 
-        // A stripped input test still defines its deployable target subjects.
-        // Promote direct non-test callables except test-support dependencies so
-        // target subjects retain private identity while their transitive
-        // callees remain ordinary internal dependencies.
-        const uint32_t dependency_first = symbol->dependencies.first;
-        for (uint32_t dependency_index = 0;
-             dependency_index < symbol->dependencies.count;
-             ++dependency_index) {
-          const uint32_t target_symbol_id =
-              module->dependencies.values[dependency_first + dependency_index];
-          const loom_symbol_reference_role_t dependency_role =
-              loom_symbol_reference_contract_role(
-                  module->dependencies
-                      .contracts[dependency_first + dependency_index]);
-          if (dependency_role ==
-              LOOM_SYMBOL_REFERENCE_ROLE_TEST_SUPPORT_DEPENDENCY) {
-            continue;
-          }
-          IREE_ASSERT_LT(target_symbol_id, module->symbol_count);
-          const loom_link_module_index_symbol_t* target =
-              loom_link_module_index_symbol_at(
-                  plan->index, module->symbol_start_ordinal + target_symbol_id);
-          IREE_ASSERT(target);
-          if (iree_any_bit_set(target->flags,
-                               LOOM_LINK_SYMBOL_FLAG_TEST_ONLY) ||
-              !iree_any_bit_set(target->facets.schema.interfaces,
-                                LOOM_SYMBOL_INTERFACE_FUNC_LIKE)) {
-            continue;
-          }
-          IREE_RETURN_IF_ERROR(
-              loom_link_plan_select_policy_root_symbol(plan, options, target));
+      // A stripped test still defines its deployable target subjects.
+      // Promote direct non-test callables except test-support dependencies so
+      // target subjects retain private identity while their transitive
+      // callees remain ordinary internal dependencies.
+      const uint32_t dependency_first = symbol->dependencies.first;
+      for (uint32_t dependency_index = 0;
+           dependency_index < symbol->dependencies.count; ++dependency_index) {
+        const uint32_t target_symbol_id =
+            module->dependencies.values[dependency_first + dependency_index];
+        const loom_symbol_reference_role_t dependency_role =
+            loom_symbol_reference_contract_role(
+                module->dependencies
+                    .contracts[dependency_first + dependency_index]);
+        if (dependency_role ==
+            LOOM_SYMBOL_REFERENCE_ROLE_TEST_SUPPORT_DEPENDENCY) {
+          continue;
         }
+        IREE_ASSERT_LT(target_symbol_id, module->symbol_count);
+        const loom_link_module_index_symbol_t* target =
+            loom_link_module_index_symbol_at(
+                plan->index, module->symbol_start_ordinal + target_symbol_id);
+        IREE_ASSERT(target);
+        if (iree_any_bit_set(target->flags, LOOM_LINK_SYMBOL_FLAG_TEST_ONLY) ||
+            !iree_any_bit_set(target->facets.schema.interfaces,
+                              LOOM_SYMBOL_INTERFACE_FUNC_LIKE)) {
+          continue;
+        }
+        IREE_RETURN_IF_ERROR(
+            loom_link_plan_select_policy_root_symbol(plan, options, target));
       }
     }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_link_plan_select_tests(
+    loom_link_plan_t* plan, const loom_link_plan_options_t* options) {
+  if (options->include_input_tests) {
+    const iree_host_size_t provider_count =
+        loom_link_module_index_provider_count(plan->index);
+    for (iree_host_size_t ordinal = 0; ordinal < provider_count; ++ordinal) {
+      const loom_link_module_index_provider_t* provider =
+          loom_link_module_index_provider_at(plan->index, ordinal);
+      if (provider->role == LOOM_LINK_PROVIDER_ROLE_INPUT) {
+        IREE_RETURN_IF_ERROR(
+            loom_link_plan_select_provider_tests(plan, options, provider));
+      }
+    }
+  }
+  for (iree_host_size_t i = 0; i < options->test_providers.count; ++i) {
+    const loom_link_module_index_provider_t* provider =
+        loom_link_module_index_provider_at(plan->index,
+                                           options->test_providers.values[i]);
+    IREE_RETURN_IF_ERROR(
+        loom_link_plan_select_provider_tests(plan, options, provider));
   }
   return iree_ok_status();
 }
@@ -1749,8 +1762,9 @@ static iree_status_t loom_link_plan_select_roots(
   if (options && options->include_input_exports) {
     IREE_RETURN_IF_ERROR(loom_link_plan_select_input_exports(plan, options));
   }
-  if (options && options->include_input_tests) {
-    IREE_RETURN_IF_ERROR(loom_link_plan_select_input_tests(plan, options));
+  if (options &&
+      (options->include_input_tests || options->test_providers.count)) {
+    IREE_RETURN_IF_ERROR(loom_link_plan_select_tests(plan, options));
   }
   IREE_RETURN_IF_ERROR(loom_link_plan_select_provider_exports(plan, options));
   const iree_host_size_t root_count = options ? options->root_symbols.count : 0;

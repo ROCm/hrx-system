@@ -260,6 +260,7 @@ iree_add_subdirectory(build_tools/embed_data)
 iree_add_subdirectory(build_tools/spirv)
 include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_target_profile.cmake")
 include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_kernel_binary.cmake")
+include("${PROJECT_SOURCE_DIR}/loom/build_tools/cmake/loom_cxx_library.cmake")
 # Public AMDF headers are available independently of native provider support.
 # Provider targets remain gated by AMDF_BUILD inside the generated package.
 iree_add_subdirectory(libamdf)

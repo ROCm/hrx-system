@@ -1,10 +1,5 @@
 func.decl @subtract_blocks(%input: buffer, %output: buffer)
 
-func.def inline @query_load_fifos() -> (aie2p.load_fifo, aie2p.load_fifo) {
-  %first, %second = aie2p.load_fifo.state : aie2p.load_fifo, aie2p.load_fifo
-  func.return %first, %second : aie2p.load_fifo, aie2p.load_fifo
-}
-
 aie2p.target<array> @npu
 
 pipeline.def<kernel> public retain target(@npu) @stream_fifo_blocks() run(%input: buffer, %output: buffer) {

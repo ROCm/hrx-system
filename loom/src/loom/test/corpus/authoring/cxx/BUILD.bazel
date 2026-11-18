@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:defs.bzl", "loom_test_module")
+load("//loom/build_tools/bazel:defs.bzl", "loom_cxx_library", "loom_library", "loom_test_module")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -17,72 +17,95 @@ _CXX_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/import:cxx",
 ])
 
+_SINGLE_SOURCE_MODULES = {
+    "flash_attention": ["fp-model=fast"],
+    "iq4xs_blocks": [],
+    "iq4xs_gate_up": [],
+    "q4k_q8_swiglu": [],
+}
+
+[
+    loom_cxx_library(
+        name = source + "_checks",
+        testonly = True,
+        srcs = [source + ".cxx"],
+        copts = copts,
+        target_compatible_with = _CXX_COMPATIBLE_WITH,
+    )
+    for source, copts in _SINGLE_SOURCE_MODULES.items()
+]
+
 [
     loom_test_module(
         name = source + "_module",
-        srcs = [source + ".cxx"],
-        inputopts = ["cxx:fp-model=fast"],
+        target_compatible_with = _CXX_COMPATIBLE_WITH,
+        deps = [":" + source + "_checks"],
+    )
+    for source in _SINGLE_SOURCE_MODULES
+]
+
+_COMPOSED_MODULES = [
+    "nvfp4_matrix",
+    "q8s32_specialization",
+]
+
+[
+    loom_cxx_library(
+        name = source + "_headers",
+        testonly = True,
+        hdrs = [source + ".h"],
         target_compatible_with = _CXX_COMPATIBLE_WITH,
     )
-    for source in [
-        "flash_attention",
+    for source in _COMPOSED_MODULES
+]
+
+[
+    loom_cxx_library(
+        name = source + "_providers",
+        testonly = True,
+        srcs = [source + "_providers.cxx"],
+        target_compatible_with = _CXX_COMPATIBLE_WITH,
+        deps = [":" + source + "_headers"],
+    )
+    for source in _COMPOSED_MODULES
+]
+
+[
+    loom_library(
+        name = source + "_loom_providers",
+        srcs = [source + "_providers.loom"],
+        target_compatible_with = _CXX_COMPATIBLE_WITH,
+    )
+    for source in _COMPOSED_MODULES
+]
+
+[
+    loom_cxx_library(
+        name = source + suffix + "_checks",
+        testonly = True,
+        srcs = [source + ".cxx"],
+        target_compatible_with = _CXX_COMPATIBLE_WITH,
+        deps = [
+            ":" + source + "_headers",
+            ":" + source + ("_providers" if not suffix else suffix),
+        ],
+    )
+    for source in _COMPOSED_MODULES
+    for suffix in [
+        "",
+        "_loom_providers",
     ]
 ]
 
-loom_test_module(
-    name = "q4k_q8_swiglu_module",
-    srcs = ["q4k_q8_swiglu.cxx"],
-    target_compatible_with = _CXX_COMPATIBLE_WITH,
-)
-
-loom_test_module(
-    name = "iq4xs_gate_up_module",
-    srcs = ["iq4xs_gate_up.cxx"],
-    target_compatible_with = _CXX_COMPATIBLE_WITH,
-)
-
-loom_test_module(
-    name = "iq4xs_blocks_module",
-    srcs = ["iq4xs_blocks.cxx"],
-    target_compatible_with = _CXX_COMPATIBLE_WITH,
-)
-
-loom_test_module(
-    name = "nvfp4_matrix_module",
-    srcs = [
-        "nvfp4_matrix.cxx",
-        "nvfp4_matrix_providers.cxx",
-    ],
-    data = ["nvfp4_matrix.h"],
-    target_compatible_with = _CXX_COMPATIBLE_WITH,
-)
-
-loom_test_module(
-    name = "nvfp4_matrix_loom_providers_module",
-    srcs = [
-        "nvfp4_matrix.cxx",
-        "nvfp4_matrix_providers.loom",
-    ],
-    data = ["nvfp4_matrix.h"],
-    target_compatible_with = _CXX_COMPATIBLE_WITH,
-)
-
-loom_test_module(
-    name = "q8s32_specialization_module",
-    srcs = [
-        "q8s32_specialization.cxx",
-        "q8s32_specialization_providers.cxx",
-    ],
-    data = ["q8s32_specialization.h"],
-    target_compatible_with = _CXX_COMPATIBLE_WITH,
-)
-
-loom_test_module(
-    name = "q8s32_specialization_loom_providers_module",
-    srcs = [
-        "q8s32_specialization.cxx",
-        "q8s32_specialization_providers.loom",
-    ],
-    data = ["q8s32_specialization.h"],
-    target_compatible_with = _CXX_COMPATIBLE_WITH,
-)
+[
+    loom_test_module(
+        name = source + suffix + "_module",
+        target_compatible_with = _CXX_COMPATIBLE_WITH,
+        deps = [":" + source + suffix + "_checks"],
+    )
+    for source in _COMPOSED_MODULES
+    for suffix in [
+        "",
+        "_loom_providers",
+    ]
+]

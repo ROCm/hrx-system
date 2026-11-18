@@ -123,6 +123,13 @@ typedef struct loom_link_plan_options_t {
     // Index-wide provider ordinals in caller-defined stable order.
     const iree_host_size_t* values;
   } root_providers;
+  // Select tests from specific providers without changing their linkage roles.
+  struct {
+    // Number of index-wide provider ordinals.
+    iree_host_size_t count;
+    // Borrowed provider ordinals whose tests or callable subjects become roots.
+    const iree_host_size_t* values;
+  } test_providers;
   // Exact index symbol ordinals retained as complete roots in LINK mode.
   // Callers that already own indexed identity use this path to preserve private
   // symbols and duplicate global declarations without resolving names again.

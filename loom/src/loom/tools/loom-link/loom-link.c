@@ -59,6 +59,10 @@ IREE_FLAG_LIST_NAMED(
     "Direct library whose exported symbols are link roots. Repeat for "
     "multiple libraries.");
 IREE_FLAG_LIST_NAMED(
+    string, test_library, "test-library",
+    "Direct library whose test/benchmark symbols are link roots. Repeat for "
+    "multiple libraries; private symbol ownership is preserved.");
+IREE_FLAG_LIST_NAMED(
     string, transitive_library, "transitive-library",
     "Transitive library available to linking and strict dependency audits, "
     "but not declared as a direct dependency. Repeat for multiple libraries.");
@@ -124,6 +128,8 @@ typedef enum loom_link_cli_input_class_e {
   LOOM_LINK_CLI_INPUT_DIRECT_LIBRARY = 2,
   // Transitive library available only for dependency resolution.
   LOOM_LINK_CLI_INPUT_TRANSITIVE_LIBRARY = 3,
+  // Direct library whose tests are selected without exposing private symbols.
+  LOOM_LINK_CLI_INPUT_TEST_LIBRARY = 4,
 } loom_link_cli_input_class_t;
 
 typedef struct loom_link_cli_input_t {
@@ -150,6 +156,13 @@ typedef struct loom_link_cli_index_t {
     // Number of provider ordinals in values.
     loomc_host_size_t count;
   } root_providers;
+  // Providers whose test/benchmark symbols are link roots.
+  struct {
+    // Allocator-owned provider ordinals in command-line order.
+    loomc_host_size_t* values;
+    // Number of provider ordinals in values.
+    loomc_host_size_t count;
+  } test_providers;
 } loom_link_cli_index_t;
 
 static const char* loom_link_cli_role_name(loomc_link_provider_role_t role) {
@@ -172,6 +185,7 @@ static loomc_link_provider_role_t loom_link_cli_input_role(
 static bool loom_link_cli_input_is_direct_dependency(
     const loom_link_cli_input_t* input) {
   return input->input_class == LOOM_LINK_CLI_INPUT_ROOT_LIBRARY ||
+         input->input_class == LOOM_LINK_CLI_INPUT_TEST_LIBRARY ||
          input->input_class == LOOM_LINK_CLI_INPUT_DIRECT_LIBRARY;
 }
 
@@ -213,22 +227,24 @@ static iree_status_t loom_link_cli_parse_mode(iree_string_view_t value,
 
 static iree_status_t loom_link_cli_resolve_plan_mode(
     loom_link_cli_mode_t cli_mode, const iree_flag_string_list_t roots,
-    iree_host_size_t root_library_count, bool include_input_exports,
-    bool include_input_tests, loomc_link_mode_t* out_mode) {
+    iree_host_size_t root_library_count, iree_host_size_t test_library_count,
+    bool include_input_exports, bool include_input_tests,
+    loomc_link_mode_t* out_mode) {
   if (cli_mode == LOOM_LINK_CLI_MODE_AUTO) {
-    *out_mode = (roots.count > 0 || root_library_count > 0 ||
-                 include_input_exports || include_input_tests)
-                    ? LOOMC_LINK_MODE_LINK
-                    : LOOMC_LINK_MODE_MERGE;
+    *out_mode =
+        (roots.count > 0 || root_library_count > 0 || test_library_count > 0 ||
+         include_input_exports || include_input_tests)
+            ? LOOMC_LINK_MODE_LINK
+            : LOOMC_LINK_MODE_MERGE;
     return iree_ok_status();
   }
   if (cli_mode == LOOM_LINK_CLI_MODE_MERGE) {
-    if (roots.count > 0 || root_library_count > 0 || include_input_exports ||
-        include_input_tests) {
-      return iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "merge mode does not accept --root, --root-library, or "
-          "--include-input-exports/--include-input-tests");
+    if (roots.count > 0 || root_library_count > 0 || test_library_count > 0 ||
+        include_input_exports || include_input_tests) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "merge mode does not accept --root, "
+                              "--root-library, --test-library, or "
+                              "--include-input-exports/--include-input-tests");
     }
     *out_mode = LOOMC_LINK_MODE_MERGE;
     return iree_ok_status();
@@ -285,6 +301,7 @@ static void loom_link_cli_index_deinitialize(loom_link_cli_index_t* index,
                                              iree_allocator_t allocator) {
   loomc_link_index_release(index->module_index);
   iree_allocator_free(allocator, index->root_providers.values);
+  iree_allocator_free(allocator, index->test_providers.values);
   iree_allocator_free(allocator, index->direct_providers.values);
   *index = (loom_link_cli_index_t){0};
 }
@@ -382,15 +399,20 @@ static iree_status_t loom_link_cli_collect_inputs(
 
   const iree_flag_string_list_t root_libraries = FLAG_root_library_list();
   const iree_flag_string_list_t libraries = FLAG_library_list();
+  const iree_flag_string_list_t test_libraries = FLAG_test_library_list();
   const iree_flag_string_list_t transitive_libraries =
       FLAG_transitive_library_list();
   const iree_host_size_t primary_count =
-      argc < 2 && root_libraries.count == 0 && libraries.count == 0 &&
-              transitive_libraries.count == 0
+      argc < 2 && root_libraries.count == 0 && test_libraries.count == 0 &&
+              libraries.count == 0 && transitive_libraries.count == 0
           ? 1
           : (iree_host_size_t)(argc - 1);
   iree_host_size_t input_count = 0;
   if (!iree_host_size_checked_add(primary_count, root_libraries.count,
+                                  &input_count)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "input count overflow");
+  }
+  if (!iree_host_size_checked_add(input_count, test_libraries.count,
                                   &input_count)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "input count overflow");
   }
@@ -435,6 +457,18 @@ static iree_status_t loom_link_cli_collect_inputs(
     }
     inputs[input_ordinal++] =
         (loom_link_cli_input_t){path, LOOM_LINK_CLI_INPUT_ROOT_LIBRARY};
+  }
+  for (iree_host_size_t i = 0;
+       i < test_libraries.count && iree_status_is_ok(status); ++i) {
+    const iree_string_view_t path = test_libraries.values[i];
+    if (loom_tooling_file_path_is_stdio(path)) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "test library input requires a filesystem path, not stdin");
+      break;
+    }
+    inputs[input_ordinal++] =
+        (loom_link_cli_input_t){path, LOOM_LINK_CLI_INPUT_TEST_LIBRARY};
   }
   for (iree_host_size_t i = 0; i < libraries.count && iree_status_is_ok(status);
        ++i) {
@@ -483,9 +517,11 @@ static iree_status_t loom_link_cli_build_index(
       context, NULL, loomc_allocator_from_iree(allocator), &builder)));
   iree_host_size_t direct_count = 0;
   iree_host_size_t root_count = 0;
+  iree_host_size_t test_count = 0;
   for (iree_host_size_t i = 0; i < input_count; ++i) {
     direct_count += loom_link_cli_input_is_direct_dependency(&inputs[i]);
     root_count += loom_link_cli_input_exports_are_roots(&inputs[i]);
+    test_count += inputs[i].input_class == LOOM_LINK_CLI_INPUT_TEST_LIBRARY;
   }
   iree_status_t status = iree_ok_status();
   if (direct_count) {
@@ -497,6 +533,11 @@ static iree_status_t loom_link_cli_build_index(
     status = iree_allocator_malloc_array(
         allocator, root_count, sizeof(*out_index->root_providers.values),
         (void**)&out_index->root_providers.values);
+  }
+  if (iree_status_is_ok(status) && test_count) {
+    status = iree_allocator_malloc_array(
+        allocator, test_count, sizeof(*out_index->test_providers.values),
+        (void**)&out_index->test_providers.values);
   }
   for (iree_host_size_t i = 0;
        i < input_count && iree_status_is_ok(status) && *out_accepted; ++i) {
@@ -512,6 +553,11 @@ static iree_status_t loom_link_cli_build_index(
     if (iree_status_is_ok(status) && *out_accepted &&
         loom_link_cli_input_exports_are_roots(&inputs[i])) {
       out_index->root_providers.values[out_index->root_providers.count++] =
+          slot.ordinal;
+    }
+    if (iree_status_is_ok(status) && *out_accepted &&
+        inputs[i].input_class == LOOM_LINK_CLI_INPUT_TEST_LIBRARY) {
+      out_index->test_providers.values[out_index->test_providers.count++] =
           slot.ordinal;
     }
   }
@@ -743,7 +789,10 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "exports from each `--root-library`, optional\n"
       "`--include-input-exports`, test-only symbols selected by\n"
       "`--include-input-tests`, and reachable dependencies. The input-test\n"
-      "policy does not select tests contributed by libraries.\n"
+      "policy does not select tests contributed by libraries. "
+      "`--test-library=path` selects a library's own tests while preserving "
+      "its private symbol boundary. Dependencies of that library contribute "
+      "reachable code without selecting their tests.\n"
       "A public library definition selected only as a dependency becomes\n"
       "private in the output; library visibility does not implicitly "
       "re-export\n"
@@ -879,7 +928,8 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     status = loom_link_cli_resolve_plan_mode(
         cli_mode, roots, FLAG_root_library_list().count,
-        FLAG_include_input_exports, FLAG_include_input_tests, &plan_mode);
+        FLAG_test_library_list().count, FLAG_include_input_exports,
+        FLAG_include_input_tests, &plan_mode);
   }
   if (iree_status_is_ok(status) && dependency_analysis_requested &&
       plan_mode != LOOMC_LINK_MODE_MERGE) {
@@ -1009,6 +1059,8 @@ int main(int argc, char** argv) {
         .root_provider_ordinals = link_index.root_providers.values,
         .root_provider_count = link_index.root_providers.count,
         .target_profile = target_profile,
+        .test_provider_ordinals = link_index.test_providers.values,
+        .test_provider_count = link_index.test_providers.count,
         .artifact_flags =
             FLAG_print_plan ? LOOMC_LINK_ARTIFACT_FLAG_PLAN_TEXT : 0,
     };

@@ -1,0 +1,4 @@
+func.def public inline @query_load_fifos() -> (aie2p.load_fifo, aie2p.load_fifo) {
+  %first, %second = aie2p.load_fifo.state : aie2p.load_fifo, aie2p.load_fifo
+  func.return %first, %second : aie2p.load_fifo, aie2p.load_fifo
+}

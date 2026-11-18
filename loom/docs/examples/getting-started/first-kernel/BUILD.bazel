@@ -11,8 +11,8 @@ load("@hrx//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with
 # --8<-- [start:kernel-library]
 load(
     "@hrx//loom/build_tools/bazel:defs.bzl",
+    "loom_cxx_test",
     "loom_kernel_library",
-    "loom_test",
 )
 load(
     "@hrx//loom/target/amdgpu:execution_profiles.bzl",
@@ -39,7 +39,7 @@ loom_kernel_library(
 )
 # --8<-- [end:kernel-library]
 
-loom_test(
+loom_cxx_test(
     name = "saxpy_cxx_test",
     srcs = ["saxpy.cxx"],
     compile_targets = [

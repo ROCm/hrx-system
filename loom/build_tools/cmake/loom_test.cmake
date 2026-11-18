@@ -4,40 +4,43 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-# A source owner imports and links one module. Independently gated execution and
-# compiler children consume that module without repeating its source closure.
+# Sources and direct libraries contribute checks; transitive libraries supply
+# reachable code. Independent execution/compiler consumers share the result.
 function(loom_test_module)
   if(NOT IREE_BUILD_TESTS)
     return()
   endif()
   cmake_parse_arguments(
-    _RULE "" "NAME;INPUT_FORMAT" "SRCS;LIBRARIES;DATA;INPUTOPTS" ${ARGN}
+    _RULE "" "NAME" "SRCS;LIBRARIES;DATA" ${ARGN}
   )
   if(_RULE_UNPARSED_ARGUMENTS)
     message(FATAL_ERROR "Unknown loom_test_module arguments: ${_RULE_UNPARSED_ARGUMENTS}")
   endif()
-  loom_module(
-    NAME "${_RULE_NAME}_library"
-    SRCS ${_RULE_SRCS}
-    LIBRARIES ${_RULE_LIBRARIES}
-    DATA ${_RULE_DATA}
-    INPUT_FORMAT "${_RULE_INPUT_FORMAT}"
-    INPUTOPTS ${_RULE_INPUTOPTS}
-    MODE merge
-    OUTPUT_FORMAT bc
-    STRICT_DEPS
-  )
+  iree_package_path(_PACKAGE_PATH)
+  set(_COMPONENT "//${_PACKAGE_PATH}:${_RULE_NAME}")
+  set(_LIBRARIES ${_RULE_LIBRARIES})
+  if(_RULE_SRCS)
+    loom_module(
+      NAME "${_RULE_NAME}_library"
+      COMPONENT "${_COMPONENT}_library"
+      SRCS ${_RULE_SRCS}
+      LIBRARIES ${_RULE_LIBRARIES}
+      DATA ${_RULE_DATA}
+      MODE merge
+      OUTPUT_FORMAT bc
+      STRICT_DEPS
+    )
+    list(PREPEND _LIBRARIES "::${_RULE_NAME}_library")
+  endif()
   loom_module(
     NAME "${_RULE_NAME}"
-    SRCS "::${_RULE_NAME}_library"
-    LIBRARIES ${_RULE_LIBRARIES}
+    COMPONENT "${_COMPONENT}"
+    DATA ${_RULE_DATA}
+    LIBRARIES ${_LIBRARIES}
     MODE link
     OUTPUT_FORMAT bc
-    INCLUDE_INPUT_TESTS
+    INCLUDE_LIBRARY_TESTS
   )
-  iree_package_target_name(_MODULE_TARGET "::${_RULE_NAME}")
-  # Runtime fixtures belong to the source owner, not individual environments.
-  set_property(TARGET "${_MODULE_TARGET}" PROPERTY LOOM_TEST_DATA "${_RULE_DATA}")
 endfunction()
 
 # RUNNER_ARGS reaches every selected runner; ARGS is correctness-only.
@@ -82,7 +85,7 @@ function(_loom_declare_execution_test ID)
   endif()
   iree_package_target_name(_MODULE_TARGET "${_RULE_MODULE}")
   get_target_property(_MODULE "${_MODULE_TARGET}" LOOM_MODULE_FILE)
-  get_target_property(_DATA "${_MODULE_TARGET}" LOOM_TEST_DATA)
+  get_property(_DATA TARGET "${_MODULE_TARGET}" PROPERTY LOOM_MODULE_DATA)
   iree_native_test(
     NAME "${_RULE_NAME}"
     SRC loom::tools::loom-test

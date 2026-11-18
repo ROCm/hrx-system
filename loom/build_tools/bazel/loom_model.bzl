@@ -45,6 +45,7 @@ def _program_composition(ctx):
             files = _mapped_artifacts(ctx.attr.files),
             data = _mapped_artifacts(ctx.attr.data),
             normalization_formats = {},
+            compile_inputs = [],
             programs = {},
         )
     if ctx.attr.files or ctx.attr.data:
@@ -53,6 +54,9 @@ def _program_composition(ctx):
         fail("provider composition requires an explicit programs key")
     primary = [target[LoomLibraryInfo] for target in ctx.attr.inputs]
     libraries = [target[LoomLibraryInfo] for target in ctx.attr.libraries]
+    for info in primary + libraries:
+        if info.module == None:
+            fail("%s: model provider %s must own a module; header-only libraries belong in a provider's deps" % (ctx.label, info.component.label))
     primary_labels = {info.component.label: True for info in primary}
     dependencies = depset(
         direct = [info.component for info in libraries],
@@ -67,34 +71,49 @@ def _program_composition(ctx):
     files = {}
     normalization_formats = {}
     data = {}
+    runtime_paths = {}
     providers = {}
     for role, components in groups:
         for component in components:
             if component.label.workspace_name != ctx.label.workspace_name:
                 fail("%s: external repository provider %s is not supported in model composition" % (ctx.label, component.label))
             auxiliary = []
-            for file in component.data:
+            for file in component.data.to_list():
                 path = _repository_path(ctx, file)
                 if path in data and data[path] != file:
                     fail("conflicting model auxiliary file: %s" % path)
                 data[path] = file
+                runtime_paths[path] = True
                 auxiliary.append(path)
-            source_records = zip(component.sources, component.normalized_sources, component.normalized_formats) if ctx.attr.form == "sources" else [(component.module, component.module, "loombc")]
-            for file, normalized_file, normalized_format in source_records:
+            source_records = component.sources if ctx.attr.form == "sources" else ([struct(
+                file = component.module,
+                format = "loombc",
+                options = (),
+                inputs = depset(),
+                normalized_file = component.module,
+                normalized_format = "loombc",
+            )])
+            for source in source_records:
+                file = source.file
                 path = _repository_path(ctx, file)
                 provider = {"path": path}
-                if ctx.attr.form == "module":
-                    provider["format"] = "loombc"
-                else:
-                    if component.input_format:
-                        provider["format"] = "loombc" if component.input_format == "loom" and file.extension == "loombc" else component.input_format
-                    if component.inputopts:
-                        if any(["$(" in option for option in component.inputopts]):
-                            fail("%s: source model import options must be portable literals, not Bazel location expressions" % component.label)
-                        provider["options"] = list(component.inputopts)
-                if auxiliary:
-                    provider["data"] = auxiliary
-                selected_file = file if ctx.attr.encoding == "preserve" else normalized_file
+                if source.format:
+                    provider["format"] = source.format
+                source_data = list(auxiliary)
+                if source.options:
+                    if any(["$(" in option for option in source.options]):
+                        fail("%s: source model import options must be portable literals, not Bazel location expressions" % component.label)
+                    provider["options"] = list(source.options)
+                for input_file in source.inputs.to_list():
+                    input_path = _repository_path(ctx, input_file)
+                    if input_path in data and data[input_path] != input_file:
+                        fail("conflicting model source input: %s" % input_path)
+                    data[input_path] = input_file
+                    if input_path not in source_data:
+                        source_data.append(input_path)
+                if source_data:
+                    provider["data"] = source_data
+                selected_file = file if ctx.attr.encoding == "preserve" else source.normalized_file
                 if path in providers:
                     if providers[path] != provider or files[path] != selected_file:
                         fail("conflicting model provider: %s" % path)
@@ -102,12 +121,18 @@ def _program_composition(ctx):
                 providers[path] = provider
                 files[path] = selected_file
                 if ctx.attr.encoding != "preserve":
-                    normalization_formats[path] = normalized_format
+                    normalization_formats[path] = source.normalized_format
                 program[role].append(provider if len(provider) > 1 else path)
+
+    # Keep the authored declaration stable across encodings, while imported
+    # providers no longer carry compile-only bytes into package/test identities.
+    compile_inputs = [path for path in data if path not in runtime_paths and path not in files] if ctx.attr.encoding != "preserve" else []
+    omitted = {path: True for path in compile_inputs}
     return struct(
         files = files,
-        data = {path: file for path, file in data.items() if path not in files},
+        data = {path: file for path, file in data.items() if path not in files and path not in omitted},
         normalization_formats = normalization_formats,
+        compile_inputs = compile_inputs,
         programs = {ctx.attr.programs: program},
     )
 
@@ -159,6 +184,7 @@ def _loom_model_impl(ctx, link_tool = None):
     ctx.actions.write(plan, json.encode({
         "assets": assets,
         "card": ctx.file.card.path,
+        "compile_inputs": composition.compile_inputs,
         "data": data,
         "encoding": ctx.attr.encoding,
         "files": files,
@@ -213,6 +239,10 @@ analysis derives the complete ordered closure with repository-relative paths.
 form selects original sources or merged modules for the complete composition.
 Sources may themselves be bytecode. Primary providers reached again as
 dependencies retain their primary role and appear only once.
+
+Preserved C++ sources carry their declared headers and import options. Normalized
+providers omit compile-only headers, while retaining runtime data, including
+runtime files owned by header-only dependencies instantiated in that component.
 
 LoomModelInfo exposes the generated inputs/libraries for card synchronization
 through cquery without executing any build action. The package action checks

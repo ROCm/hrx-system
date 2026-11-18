@@ -47,8 +47,8 @@ int main(int argc, char** argv) {
   for (int i = 1; i < argc && !failed; ++i) {
     failed = fprintf(output, "%s\n", argv[i]) < 0;
     const char* input = argv[i][0] != '-' ? argv[i] : NULL;
-    const char* prefixes[] = {
-        "--library=", "--root-library=", "--transitive-library="};
+    const char* prefixes[] = {"--library=", "--root-library=",
+                              "--test-library=", "--transitive-library="};
     for (size_t j = 0; j < sizeof(prefixes) / sizeof(prefixes[0]); ++j) {
       const char* value = Value(argv[i], prefixes[j]);
       if (value) {

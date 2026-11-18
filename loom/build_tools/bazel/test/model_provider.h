@@ -7,6 +7,11 @@
 #ifndef LOOM_BUILD_TOOLS_BAZEL_TEST_MODEL_PROVIDER_H_
 #define LOOM_BUILD_TOOLS_BAZEL_TEST_MODEL_PROVIDER_H_
 
-constexpr int kModelBias = 7;
+#include <generated/model_config.h>
+
+constexpr int kModelBias = MODEL_BIAS;
+static_assert(kModelBias == MODEL_EXPECTED_BIAS);
+
+extern "C" int model_add_bias(int value);
 
 #endif  // LOOM_BUILD_TOOLS_BAZEL_TEST_MODEL_PROVIDER_H_

@@ -382,8 +382,11 @@ loom_generated_file(
         )
         output = bazel_to_cmake_converter.convert_build_file(
             """
-load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_library", "loom_target_profile")
-loom_library(name="support", srcs=["support.cxx"])
+load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_target_profile")
+load("//loom/build_tools/bazel:loom_cxx_library.bzl", "loom_cxx_library")
+loom_cxx_library(name="support", srcs=["support.cxx", "private.h"],
+    hdrs=["public.h"], includes=["include"], defines=["WIDTH=32"],
+    local_defines=["LOCAL=1"], copts=["fp-model=fast"])
 loom_target_profile(name="profile", family="amd.xdna.aie2p", selector="exact")
 loom_kernel_binary(name="program", srcs=["program.loom"], deps=[":support"], target=":profile")
 """,
@@ -391,12 +394,48 @@ loom_kernel_binary(name="program", srcs=["program.loom"], deps=[":support"], tar
             "/repo/consumer",
             repo_root="/repo",
         )
-        self.assertIn("loom_module(", output)
-        self.assertIn("  NAME\n    support", output)
+        self.assertIn("loom_cxx_library(", output)
+        self.assertIn('  NAME\n    "support"', output)
+        self.assertIn('  COMPONENT\n    "//consumer:support"', output)
+        self.assertIn('  HDRS\n    "public.h"', output)
+        self.assertIn('  COPTS\n    "fp-model=fast"', output)
+        self.assertIn('  INCLUDES\n    "include"', output)
+        self.assertIn('  DEFINES\n    "WIDTH=32"', output)
+        self.assertIn('  LOCAL_DEFINES\n    "LOCAL=1"', output)
         self.assertIn("loom_target_profile(", output)
         self.assertIn("loom_kernel_binary(", output)
         self.assertIn("  LIBRARIES\n    ::support", output)
         self.assertIn('OUTPUT\n    "program"', output)
+
+    def test_cxx_test_keeps_configurable_source_ownership(self):
+        output = bazel_to_cmake_converter.convert_build_file(
+            """
+load("//loom/build_tools/bazel:defs.bzl", "loom_cxx_library", "loom_cxx_test", "loom_execution_profile")
+profile = loom_execution_profile(name="reference", target_family="test", target_class="cpu", executor="reference")
+filegroup(name="translation_units", srcs=["checks.cxx", "other.cxx", "private.h"])
+loom_cxx_test(name="checks", srcs=select({
+    "//loom/config/import:cxx": [":translation_units"],
+    "//conditions:default": [],
+}), deps=select({"//loom/config/import:cxx": [":headers"], "//conditions:default": []}),
+   copts=["std=c++23"], local_defines=["COUNT=4"],
+   execution_profiles=[profile], workloads={"all": {}, "selected": {"case": "bias"}})
+loom_cxx_library(name="headers", hdrs=["shared.h"])
+""",
+            SimpleNamespace(PROJECTS=[self.project], REPO_MAP={"@hrx": ""}),
+            str(REPO_ROOT / "loom/build_tools/bazel_to_cmake/testdata"),
+            repo_root=str(REPO_ROOT),
+        )
+        self.assertIn("if(LOOM_IMPORT_CXX)", output)
+        for source in ("checks.cxx", "other.cxx", "private.h"):
+            self.assertIn(source, output)
+        self.assertIn('  COPTS\n    "std=c++23"', output)
+        self.assertIn('  LOCAL_DEFINES\n    "COUNT=4"', output)
+        self.assertIn('    "::checks_library"', output)
+        self.assertIn("${_checks_module_platform_libraries}", output)
+        self.assertEqual(output.count("loom_cxx_library("), 2)
+        self.assertEqual(output.count("loom_test_module("), 1)
+        self.assertIn("checks_all_execute_reference_test", output)
+        self.assertIn("checks_selected_execute_reference_test", output)
 
     def test_corpus_catalog_preserves_per_source_configs(self):
         output = bazel_to_cmake_converter.convert_build_file(
@@ -450,6 +489,8 @@ loom_library(
             """loom_module(
   NAME
     consumer
+  COMPONENT
+    "//loom/build_tools/bazel_to_cmake/testdata/configured:consumer"
   SRCS
     "${PROJECT_SOURCE_DIR}/loom/build_tools/bazel_to_cmake/testdata/configured/first.loom"
     "${PROJECT_SOURCE_DIR}/loom/build_tools/bazel_to_cmake/testdata/configured/second.loom"
@@ -480,7 +521,10 @@ profile = loom_execution_profile(
 )
 loom_test(
     name = "subject",
-    srcs = ["subject.loom"],
+    srcs = ["subject.loom"] + select({
+        "//loom/config/import:cxx": ["imported_checks.loom"],
+        "//conditions:default": [],
+    }),
     config = {"common.value": "base"},
     case = "@base",
     workloads = {
@@ -502,6 +546,8 @@ loom_test(
             repo_root=str(REPO_ROOT),
         )
         self.assertEqual(output.count("loom_execution_test("), 2)
+        self.assertIn("${_subject_module_platform_srcs}", output)
+        self.assertIn('"imported_checks.loom"', output)
         self.assertIn("subject_base_execute_reference_test", output)
         self.assertIn("subject_selected_execute_reference_test", output)
         self.assertIn('"--config=common.value=base"', output)

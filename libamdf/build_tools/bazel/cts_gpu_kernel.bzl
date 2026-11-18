@@ -15,15 +15,14 @@ load(":cc.bzl", "amdf_cc_library")
 
 def amdf_cts_gpu_kernel_set(
         name,
-        srcs,
         targets,
         entry_point,
         namespace,
+        srcs = [],
+        library = None,
         target_srcs = None,
         data = [],
         deps = [],
-        input_format = "",
-        inputopts = [],
         visibility = None,
         target_compatible_with = []):
     """Compiles one source module for each target and embeds its products.
@@ -34,34 +33,36 @@ def amdf_cts_gpu_kernel_set(
 
     Args:
       name: Library and generated header/implementation stem.
-      srcs: Sources admitted together into the relocatable program library.
+      srcs: Loom sources admitted together into the relocatable program library.
+      library: Explicit source library, exclusive with srcs, data, and deps.
       targets: Physical selectors, also naming package-local target profiles.
       entry_point: Exported kernel symbol to extract.
       namespace: C++ namespace containing the kKernels set.
       target_srcs: Optional physical-selector to direct-source mapping. When
           present, it supplies one source for every target at link time.
-      data: Declared inputs used while admitting the authored sources.
+      data: Runtime fixtures owned by the source library.
       deps: Reusable Loom libraries linked with the source module.
-      input_format: Optional source provider override.
-      inputopts: Provider-scoped source admission options.
       visibility: Visibility of the generated kernel library.
       target_compatible_with: Source-provider constraints inherited by the
           relocatable library and every generated target.
     """
     if target_srcs != None and sorted(target_srcs.keys()) != sorted(targets):
         fail("target_srcs must name exactly the kernel set's physical targets")
-    source_name = name + "_source"
-    loom_library(
-        name = source_name,
-        srcs = srcs,
-        deps = deps,
-        data = data,
-        input_format = input_format,
-        inputopts = inputopts,
-        tags = ["manual"],
-        target_compatible_with = target_compatible_with,
-        visibility = ["//visibility:private"],
-    )
+    if library:
+        if srcs or data or deps:
+            fail("library owns its sources, dependencies, and runtime data")
+    else:
+        source_name = name + "_source"
+        loom_library(
+            name = source_name,
+            srcs = srcs,
+            deps = deps,
+            data = data,
+            tags = ["manual"],
+            target_compatible_with = target_compatible_with,
+            visibility = ["//visibility:private"],
+        )
+        library = ":" + source_name
 
     policy = apply_amdf_target_policy({})
     policy["target_compatible_with"] += target_compatible_with
@@ -82,7 +83,7 @@ def amdf_cts_gpu_kernel_set(
             name = product_name,
             testonly = True,
             srcs = [target_srcs[target]] if target_srcs != None else [],
-            deps = [":" + source_name],
+            deps = [library],
             out = product_name + ".hsaco",
             roots = ["@" + entry_point],
             target = ":" + target,

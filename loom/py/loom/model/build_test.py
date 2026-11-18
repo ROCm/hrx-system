@@ -23,6 +23,7 @@ def _plan():
         "card": str(card),
         "preset": "check",
         "encoding": "bc",
+        "compile_inputs": [],
         "files": {
             path: {"input": "unopened", "output": "unwritten"}
             for path, file in selection.files.items()

@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "model": {
+    "id": "loom-fixture/cxx-library",
+    "name": "C++ library publication"
+  },
+  "programs": {
+    "source": {
+      "inputs": [
+        {
+          "path": "loom/build_tools/bazel/test/cxx_library_checks.cxx",
+          "format": "cxx",
+          "options": [
+            "cxx:'D=MODEL_BIAS=7' 'D=MODEL_TEXT=\"Loom\\'s C++; tools\"' 'I=../../../..' 'I=.'"
+          ],
+          "data": [
+            "loom/build_tools/bazel/test/model_provider.h",
+            "loom/build_tools/bazel/test/generated/model_config.h"
+          ]
+        }
+      ],
+      "libraries": [
+        {
+          "path": "loom/build_tools/bazel/test/model_provider.cxx",
+          "format": "cxx",
+          "options": [
+            "cxx:'fp-model=fast' 'D=MODEL_BIAS=7' 'D=MODEL_LOCAL_BIAS=7' 'I=../../../..' 'I=.'"
+          ],
+          "data": [
+            "loom/build_tools/bazel/test/model_fixture.txt",
+            "loom/build_tools/bazel/test/model_provider.h",
+            "loom/build_tools/bazel/test/generated/model_config.h",
+            "loom/build_tools/bazel/test/model_private.h"
+          ]
+        }
+      ]
+    }
+  },
+  "services": {
+    "check": {
+      "kind": "text",
+      "version": 1
+    }
+  },
+  "variants": {
+    "fixture": {
+      "services": {
+        "check": {
+          "programs": [
+            "source"
+          ]
+        }
+      }
+    }
+  },
+  "presets": {
+    "check": {
+      "service": "check",
+      "variant": "fixture",
+      "programs": "source"
+    }
+  }
+}

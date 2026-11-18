@@ -130,6 +130,12 @@ static loomc_status_t loomc_link_validate_options(
           sizeof(options->artifact_flags)) {
     out_options->artifact_flags = options->artifact_flags;
   }
+  if (options->structure_size >=
+      offsetof(loomc_link_options_t, test_provider_count) +
+          sizeof(options->test_provider_count)) {
+    out_options->test_provider_ordinals = options->test_provider_ordinals;
+    out_options->test_provider_count = options->test_provider_count;
+  }
   options = out_options;
   if ((options->artifact_flags & ~LOOMC_LINK_ARTIFACT_FLAG_PLAN_TEXT) != 0) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
@@ -197,6 +203,12 @@ static loomc_status_t loomc_link_validate_options(
         LOOMC_STATUS_INVALID_ARGUMENT,
         "root_provider_count is non-zero but root_provider_ordinals is NULL");
   }
+  if (options->test_provider_count != 0 &&
+      options->test_provider_ordinals == NULL) {
+    return loomc_make_status(
+        LOOMC_STATUS_INVALID_ARGUMENT,
+        "test_provider_count is non-zero but test_provider_ordinals is NULL");
+  }
   const loomc_host_size_t base_provider_count =
       options->link_index
           ? loom_link_module_index_provider_count(
@@ -211,6 +223,15 @@ static loomc_status_t loomc_link_validate_options(
           "root provider ordinal is outside the supplied providers");
     }
   }
+  for (loomc_host_size_t i = 0; i < options->test_provider_count; ++i) {
+    const loomc_host_size_t ordinal = options->test_provider_ordinals[i];
+    if (ordinal >= base_provider_count &&
+        ordinal - base_provider_count >= options->module_provider_count) {
+      return loomc_make_status(
+          LOOMC_STATUS_OUT_OF_RANGE,
+          "test provider ordinal is outside the supplied providers");
+    }
+  }
   if ((options->flags & ~LOOMC_LINK_KNOWN_FLAGS) != 0) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "link options contain unknown flag bits");
@@ -222,6 +243,7 @@ static loomc_status_t loomc_link_validate_options(
   }
   const bool has_roots =
       options->root_symbol_count != 0 || options->root_provider_count != 0 ||
+      options->test_provider_count != 0 ||
       loomc_link_any_flag_set(options->flags,
                               LOOMC_LINK_FLAG_INCLUDE_INPUT_EXPORTS |
                                   LOOMC_LINK_FLAG_INCLUDE_INPUT_TESTS);
@@ -692,6 +714,11 @@ loomc_status_t loomc_link_module(loomc_linker_t* linker,
           {
               .count = options->root_provider_count,
               .values = options->root_provider_ordinals,
+          },
+      .test_providers =
+          {
+              .count = options->test_provider_count,
+              .values = options->test_provider_ordinals,
           },
       .unresolved_policy =
           loomc_link_any_flag_set(options->flags,

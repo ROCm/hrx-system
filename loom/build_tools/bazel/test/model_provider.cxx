@@ -6,4 +6,6 @@
 
 #include "model_provider.h"
 
-extern "C" int model_add_bias(int value) { return value + kModelBias; }
+#include "model_private.h"
+
+extern "C" int model_add_bias(int value) { return value + kPrivateBias; }

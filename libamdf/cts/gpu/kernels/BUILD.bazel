@@ -13,7 +13,7 @@ load("//libamdf/requirements:package_policy.bzl", "apply_amdf_target_policy")
 load("//loom/build_tools/amdgpu:descriptor_sets.bzl", "loom_amdgpu_selected_descriptor_set_values")
 load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:defs.bzl", "loom_library", "loom_target_profile")
+load("//loom/build_tools/bazel:defs.bzl", "loom_cxx_library", "loom_target_profile")
 
 package(
     default_visibility = ["//libamdf/cts:__subpackages__"],
@@ -92,7 +92,7 @@ _CXX_COMPLETED_TICK_COMPATIBILITY = loom_config_compatible_with(
     ["//loom/config/import:cxx"] + _COMPLETED_TICK_CONFIGS,
 )
 
-loom_library(
+loom_cxx_library(
     name = "completed_tick_cxx",
     srcs = ["completed_tick.cxx"],
     target_compatible_with = _CXX_COMPLETED_TICK_COMPATIBILITY,
@@ -429,11 +429,19 @@ amdf_cts_gpu_kernel_set(
     targets = AMDF_CTS_GPU_PM4_TARGETS,
 )
 
+loom_cxx_library(
+    name = "file_exchange_cxx_kernels_source",
+    srcs = ["file_exchange.cxx"],
+    copts = ["root=file_exchange"],
+    tags = ["manual"],
+    target_compatible_with = _CXX_COMPATIBILITY,
+    visibility = ["//visibility:private"],
+)
+
 amdf_cts_gpu_kernel_set(
     name = "file_exchange_cxx_kernels",
-    srcs = ["file_exchange.cxx"],
     entry_point = "file_exchange",
-    inputopts = ["cxx:root=file_exchange"],
+    library = ":file_exchange_cxx_kernels_source",
     namespace = "kernels::file_exchange_cxx",
     target_compatible_with = _CXX_COMPATIBILITY,
     targets = AMDF_CTS_GPU_PM4_TARGETS,
@@ -453,11 +461,19 @@ amdf_cts_gpu_kernel_set(
     targets = AMDF_CTS_GPU_PM4_TARGETS,
 )
 
+loom_cxx_library(
+    name = "file_gather_cxx_kernels_source",
+    srcs = ["file_gather.cxx"],
+    copts = ["root=file_gather"],
+    tags = ["manual"],
+    target_compatible_with = _CXX_COMPATIBILITY,
+    visibility = ["//visibility:private"],
+)
+
 amdf_cts_gpu_kernel_set(
     name = "file_gather_cxx_kernels",
-    srcs = ["file_gather.cxx"],
     entry_point = "file_gather",
-    inputopts = ["cxx:root=file_gather"],
+    library = ":file_gather_cxx_kernels_source",
     namespace = "kernels::file_gather_cxx",
     target_compatible_with = _CXX_COMPATIBILITY,
     targets = AMDF_CTS_GPU_PM4_TARGETS,
@@ -477,15 +493,23 @@ amdf_cts_gpu_kernel_set(
     targets = AMDF_CTS_GPU_PM4_TARGETS,
 )
 
+loom_cxx_library(
+    name = "file_latency_cxx_kernels_source",
+    srcs = ["file_latency.cxx"],
+    copts = ["root=file_latency"],
+    tags = ["manual"],
+    target_compatible_with = _CXX_COMPLETED_TICK_COMPATIBILITY,
+    visibility = ["//visibility:private"],
+    deps = [":completed_tick_cxx"],
+)
+
 amdf_cts_gpu_kernel_set(
     name = "file_latency_cxx_kernels",
-    srcs = ["file_latency.cxx"],
     entry_point = "file_latency",
-    inputopts = ["cxx:root=file_latency"],
+    library = ":file_latency_cxx_kernels_source",
     namespace = "kernels::file_latency_cxx",
     target_compatible_with = _CXX_COMPLETED_TICK_COMPATIBILITY,
     targets = AMDF_CTS_GPU_PM4_TARGETS,
-    deps = [":completed_tick_cxx"],
 )
 
 amdf_cc_library(
@@ -512,15 +536,23 @@ amdf_cc_library(
     hdrs = ["file_demand.h"],
 )
 
+loom_cxx_library(
+    name = "file_demand_cxx_kernels_source",
+    srcs = ["file_demand.cxx"],
+    copts = ["root=file_demand"],
+    tags = ["manual"],
+    target_compatible_with = _CXX_COMPLETED_TICK_COMPATIBILITY,
+    visibility = ["//visibility:private"],
+    deps = [":completed_tick_cxx"],
+)
+
 amdf_cts_gpu_kernel_set(
     name = "file_demand_cxx_kernels",
-    srcs = ["file_demand.cxx"],
     entry_point = "file_demand",
-    inputopts = ["cxx:root=file_demand"],
+    library = ":file_demand_cxx_kernels_source",
     namespace = "kernels::file_demand_cxx",
     target_compatible_with = _CXX_COMPLETED_TICK_COMPATIBILITY,
     targets = AMDF_CTS_GPU_PM4_TARGETS,
-    deps = [":completed_tick_cxx"],
 )
 
 amdf_cts_gpu_kernel_set(

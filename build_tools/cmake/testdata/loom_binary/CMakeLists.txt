@@ -11,6 +11,8 @@ set(IREE_BUILD_TESTS ON)
 include("${IREE_REPO_ROOT}/build_tools/cmake/iree_macros.cmake")
 include("${IREE_REPO_ROOT}/loom/build_tools/cmake/loom_target_profile.cmake")
 include("${IREE_REPO_ROOT}/loom/build_tools/cmake/loom_kernel_binary.cmake")
+include("${IREE_REPO_ROOT}/loom/build_tools/cmake/loom_cxx_library.cmake")
+include("${IREE_REPO_ROOT}/loom/build_tools/cmake/loom_test.cmake")
 
 # This exercises host-tool selection without requiring a foreign C toolchain.
 if(LOOM_TEST_CROSS)
@@ -36,10 +38,17 @@ loom_kernel_binary(NAME exported
 
 # Forward libraries preserve their transitive closure independently of source
 # assembly. The kernel producer is reached through an ordinary data consumer.
-loom_module(NAME cxx_library MODE merge OUTPUT_FORMAT bc
-  SRCS support.cxx DATA support.h INPUTOPTS "cxx:fp-model=fast" STRICT_DEPS)
+loom_cxx_library(NAME cxx_library SRCS support.cxx private.h
+  LIBRARIES ::headers COPTS "fp-model=fast" LOCAL_DEFINES "PRIVATE=2"
+  DEFINES "OWNER=5"
+  DATA "${CMAKE_CURRENT_SOURCE_DIR}/fixture.txt")
+loom_cxx_library(NAME forwarded LIBRARIES ::cxx_library)
+loom_cxx_library(NAME consumer SRCS consumer.cxx LIBRARIES ::forwarded)
+loom_test_module(NAME checks LIBRARIES ::consumer ::forwarded)
+loom_cxx_library(NAME headers HDRS support.h INCLUDES .
+  DEFINES "PUBLIC=7" "TEXT=\"Loom's C++; tools\"")
 loom_module(NAME library MODE merge OUTPUT_FORMAT bc
-  SRCS library.loom LIBRARIES ::leaf ::cxx_library STRICT_DEPS)
+  SRCS library.loom LIBRARIES ::leaf ::forwarded STRICT_DEPS)
 loom_module(NAME leaf MODE merge OUTPUT_FORMAT bc SRCS leaf.loom STRICT_DEPS)
 add_custom_target(kernel_consumer DEPENDS "${CMAKE_BINARY_DIR}/explicit.xdna")
 iree_generated_output_add_consumer("${CMAKE_BINARY_DIR}/explicit.xdna" kernel_consumer)

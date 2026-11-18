@@ -14,7 +14,7 @@ load(
     "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY",
 )
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load("//loom/build_tools/bazel:defs.bzl", "loom_cxx_library", "loom_cxx_test", "loom_test")
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 load("//loom/target/amdgpu:execution_profiles.bzl", "amd_gpu_execution_profile")
 
@@ -50,19 +50,24 @@ _CDNA3_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/arch/amdgpu:iree_hal_descriptor_set_cdna3_core",
 ])
 
+loom_cxx_library(
+    name = "assembly",
+    testonly = True,
+    srcs = ["assembly.cxx"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]) + _GFX11_ASSEMBLY_COMPATIBLE_WITH,
+)
+
 loom_test(
     name = "assembly_test",
-    srcs = [
-        "assembly.cxx",
-        "assembly.loom",
-    ],
+    srcs = ["assembly.loom"],
     execution_profiles = _EXECUTION_PROFILES,
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/import:cxx",
     ]) + _GFX11_ASSEMBLY_COMPATIBLE_WITH,
+    deps = [":assembly"],
 )
 
-loom_test(
+loom_cxx_test(
     name = "async_gather_test",
     srcs = ["async_gather.cxx"],
     benchmark_smoke = False,
@@ -71,7 +76,7 @@ loom_test(
     target_compatible_with = _CDNA3_COMPATIBLE_WITH,
 )
 
-loom_test(
+loom_cxx_test(
     name = "subgroups_test",
     srcs = ["subgroups.cxx"],
     execution_profiles = _EXECUTION_PROFILES,

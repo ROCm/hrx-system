@@ -69,7 +69,8 @@ def build(plan: dict, linker: str | None = None) -> None:
         name for name, file in selection.files.items() if "auxiliary" in file.roles
     } - providers
     assets = set(selection.files) - providers - data
-    for role, expected in (("files", providers), ("data", data)):
+    compile_inputs = set(plan["compile_inputs"])
+    for role, expected in (("files", providers), ("data", data - compile_inputs)):
         supplied = set(plan[role])
         if supplied != expected:
             raise ManifestError(
@@ -82,7 +83,7 @@ def build(plan: dict, linker: str | None = None) -> None:
         raise ManifestError(
             f"assets contain unused runtime files: {sorted(unused_assets)}"
         )
-    materialized = providers | data | set(plan["assets"])
+    materialized = providers | (data - compile_inputs) | set(plan["assets"])
     reserved = {"model.json", "serve.json"}
     for path in selection.files:
         if path.split("/", 1)[0] in reserved:
@@ -100,6 +101,7 @@ def build(plan: dict, linker: str | None = None) -> None:
         file.origin[1:].split("/", 1)[0]
         for name, file in selection.files.items()
         if name not in materialized
+        and name not in compile_inputs
         and isinstance(file.origin, str)
         and file.origin.startswith("@")
     }
@@ -123,6 +125,13 @@ def build(plan: dict, linker: str | None = None) -> None:
             return value
         return {key: value[key] for key in ("path", "format") if key in value}
 
+    def output_data(provider):
+        return [
+            output_file(item)
+            for item in provider.get("data", [])
+            if (item if isinstance(item, str) else item["path"]) not in compile_inputs
+        ]
+
     for role in ("inputs", "libraries"):
         normalized = []
         for value in program[role]:
@@ -134,8 +143,8 @@ def build(plan: dict, linker: str | None = None) -> None:
                     for key in ("path", "format", "options")
                     if key in provider
                 }
-                if provider.get("data"):
-                    result["data"] = [output_file(item) for item in provider["data"]]
+                if auxiliary := output_data(provider):
+                    result["data"] = auxiliary
                 normalized.append(result)
                 continue
             binding = plan["files"][name]
@@ -164,8 +173,8 @@ def build(plan: dict, linker: str | None = None) -> None:
                 "path": name,
                 "format": "loombc" if plan["encoding"] == "bc" else "loom",
             }
-            if provider.get("data"):
-                result["data"] = [output_file(item) for item in provider["data"]]
+            if auxiliary := output_data(provider):
+                result["data"] = auxiliary
             normalized.append(result)
         program[role] = normalized
     scope = document["variants"][selection.variant]

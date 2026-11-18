@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:defs.bzl", "loom_execution_profile", "loom_test", "loom_test_module")
+load("//loom/build_tools/bazel:defs.bzl", "loom_cxx_library", "loom_execution_profile", "loom_test", "loom_test_module")
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
 load("//loom/target/amd/xdna:execution_profiles.bzl", "XDNA_HARDWARE_PROFILE")
 
@@ -67,18 +67,23 @@ _XDNA_THREE_COLUMN_PROFILE = loom_execution_profile(
     target_family = XDNA_HARDWARE_PROFILE.target_family,
 )
 
+loom_cxx_library(
+    name = "descriptor_reentry",
+    testonly = True,
+    srcs = ["descriptor_reentry.cxx"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
 loom_test(
     name = "descriptor_reentry_test",
-    srcs = [
-        "descriptor_reentry.cxx",
-        "descriptor_reentry.loom",
-    ],
+    srcs = ["descriptor_reentry.loom"],
     benchmark_smoke = False,
     execution_profiles = [_XDNA_ONE_COLUMN_PROFILE],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/execute:vm_iree_vm",
         "//loom/config/import:cxx",
     ]),
+    deps = [":descriptor_reentry"],
 )
 
 loom_test(
