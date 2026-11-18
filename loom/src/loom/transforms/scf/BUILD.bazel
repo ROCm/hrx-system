@@ -142,6 +142,7 @@ loom_cc_library(
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/util:predicate_facts",
+        "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
     ],
 )
