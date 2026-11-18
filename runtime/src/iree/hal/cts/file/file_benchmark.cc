@@ -34,6 +34,12 @@ IREE_FLAG(int64_t, file_length, 0,
 IREE_FLAG(int64_t, read_bytes, 65536, "Byte count of each queued read.");
 IREE_FLAG(int64_t, read_depth, 8,
           "Maximum number of independent reads in flight.");
+IREE_FLAG(int64_t, read_step, 1,
+          "Source extents between burst lanes, modulo the source range.");
+IREE_FLAG(string, burst_mode, "linear",
+          "Burst representation: linear, host, or indirect. Indirect uses "
+          "CPU-cached host imports prepared before timing. Stream reads "
+          "remain linear.");
 IREE_FLAG(int64_t, buffer_bytes, 0,
           "Bytes retained per lane; zero uses read_bytes.");
 IREE_FLAG(int64_t, initial_read_bytes, 0,
@@ -54,6 +60,8 @@ IREE_FLAG(int64_t, queue_family, -1,
           "the complete run.");
 
 namespace {
+
+enum class BurstMode { kLinear, kHost, kIndirect };
 
 // Counts host allocations and joins their actual retirement. The owner's
 // initial reference makes final reclamation a single notification, including
@@ -112,6 +120,8 @@ class FileReads {
   FileReads() { status_ = Initialize(); }
 
   ~FileReads() {
+    iree_hal_buffer_release(metadata_);
+    iree_hal_pool_release(metadata_pool_);
     for (auto& lane : lanes_) {
       iree_hal_buffer_release(lane.buffer);
       iree_hal_semaphore_release(lane.timeline);
@@ -141,6 +151,9 @@ class FileReads {
   uint64_t extent() const { return extent_; }
   size_t depth() const { return lanes_.size(); }
   uint64_t retained_bytes() const { return retained_bytes_; }
+  uint64_t metadata_bytes() const {
+    return metadata_ ? iree_hal_buffer_allocation_size(metadata_) : 0;
+  }
   uint32_t queue_family() const {
     return iree_hal_queue_family_ordinal(iree_hal_queue_family(queue_));
   }
@@ -150,12 +163,37 @@ class FileReads {
   }
 
   iree_status_t Burst() {
+    iree_status_t status = SubmitBurst();
+    return iree_status_join(status, FinishBurst());
+  }
+
+  iree_status_t SubmitBurst() {
+    if (burst_mode_ != BurstMode::kLinear) {
+      auto& completion = lanes_[0];
+      uint64_t next = completion.value + 1;
+      IREE_RETURN_IF_ERROR(
+          iree_hal_queue_read(queue_, {}, {1, &completion.timeline, &next},
+                              {batch_files_.size(), batch_files_.data()},
+                              {batch_buffers_.size(), batch_buffers_.data()},
+                              &batch_list_, nullptr, IREE_HAL_READ_FLAG_NONE));
+      completion.value = next;
+      for (size_t i = 0; i < lanes_.size(); ++i) {
+        lanes_[i].offset = batch_transfers_[i].file_offset;
+        lanes_[i].length = extent_;
+      }
+      return iree_ok_status();
+    }
     iree_status_t status = iree_ok_status();
     const uint64_t source_count = length_ / extent_;
     for (size_t i = 0; i < lanes_.size() && iree_status_is_ok(status); ++i) {
-      status = Issue(lanes_[i], (i % source_count) * extent_, extent_);
+      status = Issue(lanes_[i], ((i * FLAG_read_step) % source_count) * extent_,
+                     extent_);
     }
-    return iree_status_join(status, Join());
+    return status;
+  }
+
+  iree_status_t FinishBurst() {
+    return burst_mode_ == BurstMode::kLinear ? Join() : Wait(lanes_[0]);
   }
 
   iree_status_t Stream() {
@@ -229,7 +267,7 @@ class FileReads {
   };
 
   iree_status_t ImportBuffer(
-      const iree_hal_pool_reservation_request_t& request,
+      iree_hal_pool_t* pool, const iree_hal_pool_reservation_request_t& request,
       const iree_hal_pool_import_requirements_t& requirements,
       iree_hal_buffer_t** out_buffer) {
     const auto alignment =
@@ -265,7 +303,7 @@ class FileReads {
         .release_user_data = &device_allocator_,
     };
     iree_status_t status = iree_hal_pool_import_buffer(
-        pool_, &storage, iree_hal_make_buffer_range(0, request.allocation_size),
+        pool, &storage, iree_hal_make_buffer_range(0, request.allocation_size),
         out_buffer);
     iree_hal_external_storage_release(&storage);
     return status;
@@ -273,17 +311,33 @@ class FileReads {
 
   iree_status_t Initialize() {
     if (!FLAG_file[0] || FLAG_file_length < 0 || FLAG_read_bytes <= 0 ||
-        FLAG_read_depth <= 0 || FLAG_buffer_bytes < 0 ||
-        FLAG_initial_read_bytes < 0 ||
+        FLAG_read_depth <= 0 || FLAG_read_depth > UINT32_MAX ||
+        FLAG_read_step <= 0 || FLAG_read_step > UINT32_MAX ||
+        FLAG_buffer_bytes < 0 || FLAG_initial_read_bytes < 0 ||
         FLAG_initial_read_bytes > FLAG_read_bytes || FLAG_file_proactors < 0 ||
         FLAG_file_proactors > FLAG_read_depth ||
         (FLAG_buffer_bytes && FLAG_buffer_bytes < FLAG_read_bytes)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "file is required; read_bytes/read_depth must be positive, "
+          "file is required; read_bytes must be positive, "
+          "read_depth/read_step must be positive uint32 values, "
           "file_length/buffer_bytes nonnegative, buffer_bytes >= read_bytes, "
           "0 <= initial_read_bytes <= read_bytes, and "
           "0 <= file_proactors <= read_depth");
+    }
+    if (std::strcmp(FLAG_burst_mode, "linear") == 0) {
+      burst_mode_ = BurstMode::kLinear;
+    } else if (std::strcmp(FLAG_burst_mode, "host") == 0) {
+      burst_mode_ = BurstMode::kHost;
+    } else if (std::strcmp(FLAG_burst_mode, "indirect") == 0) {
+      burst_mode_ = BurstMode::kIndirect;
+      if (FLAG_read_depth > 65536) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "indirect bursts allow 65536 bindings");
+      }
+    } else {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "burst_mode must be linear, host, or indirect");
     }
     const iree_allocator_t allocator = device_allocator_.allocator();
     IREE_RETURN_IF_ERROR(
@@ -441,7 +495,8 @@ class FileReads {
       lanes_[i].file = files_[i % files_.size()];
       status =
           FLAG_host_import
-              ? ImportBuffer(request, import_requirements, &lanes_[i].buffer)
+              ? ImportBuffer(pool_, request, import_requirements,
+                             &lanes_[i].buffer)
               : iree_hal_pool_allocate_buffer(
                     pool_, request, iree_infinite_timeout(), &lanes_[i].buffer);
       if (iree_status_is_ok(status)) {
@@ -462,7 +517,98 @@ class FileReads {
         status = Verify();
       }
     }
+    if (iree_status_is_ok(status) && burst_mode_ != BurstMode::kLinear) {
+      status = InitializeBatch();
+    }
     return status;
+  }
+
+  iree_status_t InitializeBatch() {
+    for (auto* file : files_) {
+      batch_files_.push_back({file, 0, length_});
+    }
+    for (size_t i = 0; i < lanes_.size(); ++i) {
+      batch_buffers_.push_back({lanes_[i].buffer, 0, extent_});
+      batch_transfers_.push_back({
+          .file_binding = static_cast<uint32_t>(i % files_.size()),
+          .buffer_binding = static_cast<uint32_t>(i),
+          .file_offset = ((i * FLAG_read_step) % (length_ / extent_)) * extent_,
+          .row_length = extent_,
+          .row_count = 1,
+          .slice_count = 1,
+      });
+    }
+    batch_list_.host = {batch_transfers_.size(), batch_transfers_.data()};
+    if (burst_mode_ == BurstMode::kHost) {
+      return iree_ok_status();
+    }
+    if (length_ >= (UINT64_C(1) << 48)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "indirect burst offsets must fit 48 bits");
+    }
+    const iree_hal_pool_family_access_t access = {
+        .family = iree_hal_queue_family(queue_),
+        .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+    };
+    const iree_hal_pool_scope_t scope = {
+        .family_count = 1,
+        .families = &access,
+        .host =
+            {
+                .access = IREE_HAL_MEMORY_ACCESS_ALL,
+                .modes = IREE_HAL_MAPPING_MODE_SCOPED,
+                .properties = IREE_HAL_HOST_MEMORY_PROPERTY_READ_CACHED,
+            },
+    };
+    const iree_hal_pool_import_class_t import_class = {
+        .storage_class = iree_hal_make_external_storage_class(
+            IREE_HAL_EXTERNAL_STORAGE_TYPE_HOST_POINTER),
+    };
+    iree_hal_slab_pool_options_t options;
+    iree_hal_slab_pool_options_initialize(&options);
+    options.owned.mode = IREE_HAL_SLAB_POOL_IMPORT_ONLY;
+    options.imports = {1, &import_class};
+    IREE_RETURN_IF_ERROR(iree_hal_slab_pool_create(
+        group_, scope, &options, device_allocator_.allocator(),
+        &metadata_pool_));
+    iree_hal_pool_import_requirements_t requirements = {};
+    if (!iree_hal_pool_query_import_requirements(
+            metadata_pool_, import_class.storage_class, &requirements)) {
+      return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                              "indirect burst requires cached host imports");
+    }
+    const uint64_t metadata_length = (1 + lanes_.size()) * 64;
+    IREE_RETURN_IF_ERROR(ImportBuffer(
+        metadata_pool_,
+        iree_hal_make_pool_reservation_request(metadata_length, 64),
+        requirements, &metadata_));
+    iree_hal_buffer_mapping_t mapping = {};
+    IREE_RETURN_IF_ERROR(iree_hal_buffer_map_range(
+        metadata_, IREE_HAL_MAPPING_MODE_SCOPED, IREE_HAL_MEMORY_ACCESS_WRITE,
+        0, 0, metadata_length, &mapping));
+    auto* words = reinterpret_cast<uint64_t*>(mapping.contents.data);
+    std::memset(words, 0, metadata_length);
+    iree_unaligned_store_le_u64(words, lanes_.size());
+    for (size_t i = 0; i < lanes_.size(); ++i) {
+      const auto& transfer = batch_transfers_[i];
+      uint64_t* record = words + 8 + i * 8;
+      iree_unaligned_store_le_u64(
+          record,
+          transfer.file_offset | (uint64_t(transfer.file_binding) << 48));
+      iree_unaligned_store_le_u64(record + 1, uint64_t(transfer.buffer_binding)
+                                                  << 48);
+      iree_unaligned_store_le_u64(record + 2, extent_);
+    }
+    IREE_RETURN_IF_ERROR(iree_hal_buffer_unmap_range(&mapping));
+    batch_list_ = {
+        .type = IREE_HAL_FILE_TRANSFER_LIST_TYPE_INDIRECT,
+        .indirect =
+            {
+                .records = {metadata_, 64, lanes_.size() * 64},
+                .count_buffer = metadata_,
+            },
+    };
+    return iree_ok_status();
   }
 
   iree_status_t Issue(Lane& lane, uint64_t offset, uint64_t length) {
@@ -518,6 +664,20 @@ class FileReads {
   iree_hal_pool_t* pool_ = nullptr;
   // Independent, retained destinations and completion identities.
   std::vector<Lane> lanes_;
+  // Captured burst representation, selected once from the command line.
+  BurstMode burst_mode_ = BurstMode::kLinear;
+  // Borrowed file bindings; files_ owns the resources through all iterations.
+  std::vector<iree_hal_file_binding_t> batch_files_;
+  // Borrowed payload bindings; lanes_ owns the destination buffers.
+  std::vector<iree_hal_buffer_binding_t> batch_buffers_;
+  // Reusable host descriptions, also used to prepare the indirect wire bytes.
+  std::vector<iree_hal_file_transfer_t> batch_transfers_;
+  // Reusable public descriptor, with metadata unchanged during timing.
+  iree_hal_file_transfer_list_t batch_list_ = {};
+  // Owned import-only pool requiring CPU-cached, device-visible metadata.
+  iree_hal_pool_t* metadata_pool_ = nullptr;
+  // Owned count and compact records initialized before benchmark timing.
+  iree_hal_buffer_t* metadata_ = nullptr;
   // Owned download destination used only by untimed byte verification.
   std::vector<uint8_t> verification_;
   // Exact source prefix length, never implicitly rounded for direct I/O.
@@ -543,7 +703,8 @@ bool Check(benchmark::State& state, iree_status_t raw_status) {
   return false;
 }
 
-void Read(benchmark::State& state, bool stream, int64_t idle_ns = 0) {
+void Read(benchmark::State& state, bool stream, int64_t idle_ns = 0,
+          bool submit_only = false) {
   if (!reads) {
     reads = std::make_unique<FileReads>();
   }
@@ -558,7 +719,14 @@ void Read(benchmark::State& state, bool stream, int64_t idle_ns = 0) {
   const uint64_t allocations_before = reads->allocation_calls();
   for (auto _ : state) {
     const iree_time_t start = idle_ns ? iree_time_now() : 0;
-    if (!Check(state, ((*reads).*operation)())) {
+    iree_status_t status =
+        submit_only ? reads->SubmitBurst() : ((*reads).*operation)();
+    if (submit_only) {
+      state.PauseTiming();
+      status = iree_status_join(status, reads->FinishBurst());
+      state.ResumeTiming();
+    }
+    if (!Check(state, status)) {
       break;
     }
     if (idle_ns) {
@@ -583,18 +751,26 @@ void Read(benchmark::State& state, bool stream, int64_t idle_ns = 0) {
       static_cast<double>(allocations) / (state.iterations() * operations);
   state.counters["read_bytes"] = reads->extent();
   state.counters["read_depth"] = reads->depth();
+  state.counters["read_step"] = FLAG_read_step;
   state.counters["initial_read_bytes"] = FLAG_initial_read_bytes;
   state.counters["file_proactors"] = FLAG_file_proactors;
   state.counters["retained_bytes"] = reads->retained_bytes();
+  state.counters["metadata_bytes"] = reads->metadata_bytes();
   state.counters["direct"] = FLAG_direct;
   state.counters["registered_io"] = FLAG_registered_io;
   state.counters["host_import"] = FLAG_host_import;
   state.counters["queue_family"] = reads->queue_family();
   state.counters["idle_ns"] = idle_ns;
+  state.SetLabel(stream ? "linear stream" : FLAG_burst_mode);
 }
 
 void BM_ReadBurst(benchmark::State& state) { Read(state, false); }
 BENCHMARK(BM_ReadBurst)->MeasureProcessCPUTime()->UseRealTime();
+
+void BM_ReadBurstSubmit(benchmark::State& state) {
+  Read(state, false, 0, true);
+}
+BENCHMARK(BM_ReadBurstSubmit)->MeasureProcessCPUTime()->UseRealTime();
 
 void BM_ReadIntermittent(benchmark::State& state) {
   Read(state, false, 1000000);
