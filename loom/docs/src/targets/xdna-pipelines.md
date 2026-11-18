@@ -404,6 +404,23 @@ measurement whenever it could change the choice of schedule.
    to that edge. Count overlapping stall reasons with a hardware union when
    available. Keep unknown owners and unavailable events visible.
 
+   With AIE2P event counters, count `LOCK_STALL` directly and in combination
+   with a program-counter range on the same tile. A range covering the whole
+   program should reproduce the direct count. Disabled comparators should
+   give zero. Start with a range around one acquire and narrow it until the
+   stalled packet is identified. On Strix Halo, a straight-line capture of
+   query and key/value acquires counted zero through the third packet after
+   each acquire. The stall appeared at the fifth packet after it. Repeat
+   this calibration for the measured program. Check every code group that
+   can occupy the address and count a shared physical site once.
+
+   For a record relayed between tiles, follow the consumer's ready lock back
+   to the neighbor's publish. Count that wait separately from the neighbor's
+   wait for an empty slot and the ingress tile's wait for DMA completion.
+   To measure elapsed cost, time the enclosing call and return on one tile,
+   check their visit counts, and repeat with an input that skips the phase.
+   Summing simultaneous waits across tiles measures lost compute capacity.
+
 The static inventory for the gated-projection program is available in both views.
 
 ```shell
