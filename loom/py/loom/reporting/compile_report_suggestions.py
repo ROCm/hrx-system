@@ -22,6 +22,7 @@ from loom.reporting.compile_report_pipelines import (
     append_pipeline_transfer_text,
     build_pipeline_phase_copies,
     build_pipeline_show,
+    single_slot_refills,
 )
 
 SUGGEST_KIND = "loom.compile_report.suggest"
@@ -82,6 +83,38 @@ class CompileReportSuggestionResult:
     suggestions: tuple[CompileReportSuggestion, ...] = ()
     # Missing target interpretation when shared source findings remain available.
     target_unavailable_reason: str | None = None
+
+
+def suggest_single_slot_ingress(
+    document: CompileReportDocument,
+) -> tuple[CompileReportSuggestion, ...]:
+    findings = []
+    for path, phase, binding, fifo, visits, width in single_slot_refills(document):
+        if visits * width < 4096:
+            continue
+        findings.append(
+            CompileReportSuggestion(
+                suggestion_id="pipeline.single_slot_ingress",
+                entry_name=f"{phase} binding[{binding}] → FIFO[{fifo}]",
+                confidence=CompileReportSuggestionConfidence.EXPERIMENTAL,
+                example_magnitude=visits * width,
+                action=(
+                    f"Each producer reserves the same single slot {visits:,} times "
+                    f"per phase call and reads {width:,} B each time. Check whether "
+                    "the next fill waits for the consumer. Compare two slots at "
+                    "fixed external bytes and measure the completed phase."
+                ),
+                evidence=tuple(
+                    CompileReportSuggestionEvidence(f"{path}.{field}", value)
+                    for field, value in (
+                        ("reserved_fifo_capacity", 1),
+                        ("reservations_per_worker", visits),
+                        ("bytes_per_copy", width),
+                    )
+                ),
+            )
+        )
+    return tuple(findings)
 
 
 class CompileReportSuggestionProvider(Protocol):

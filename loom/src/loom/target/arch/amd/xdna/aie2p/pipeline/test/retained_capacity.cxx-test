@@ -133,7 +133,7 @@ void retained_64([[loom::launch]] Bytes input_arg, Bytes output_arg) {
 }
 
 // ----
-CHECK: COMPILE-REPORT: pipeline.copy root=retained_64 phase=retained_64 occurrence=0 binding=0 direction=read bytes_per_copy=64 copies_per_phase_call=64
+CHECK: COMPILE-REPORT: pipeline.copy root=retained_64 phase=retained_64 occurrence=0 binding=0 direction=read bytes_per_copy=64 copies_per_phase_call=64 reserved_fifo=* reserved_fifo_capacity=64 reservations_per_worker=64
 CHECK: COMPILE-REPORT: pipeline.copy root=retained_64 phase=retained_64 occurrence=0 binding=1 direction=write bytes_per_copy=64 copies_per_phase_call=128
 CHECK: COMPILE-REPORT: pipeline root=retained_64 realization=resident-configuration workers=1 binding_count=2 *
 CHECK: COMPILE-REPORT: pipeline.memory[0] placement=0,1 memory_index=0 reserved_byte_count=4096 *

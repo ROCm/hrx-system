@@ -506,6 +506,18 @@ iree_status_t loom_target_compile_report_format_pipeline_copies_json(
         IREE_RETURN_IF_ERROR(loom_json_object_write_null_field(
             &object, IREE_SV("copies_per_phase_call")));
       }
+      if (row->fresh_fifo_capacity) {
+        IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+            &object, IREE_SV("reserved_fifo"), row->fresh_fifo));
+        IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+            &object, IREE_SV("reserved_fifo_capacity"),
+            row->fresh_fifo_capacity));
+        if (row->worker_visits_known) {
+          IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+              &object, IREE_SV("reservations_per_worker"),
+              row->visits_per_worker));
+        }
+      }
       IREE_RETURN_IF_ERROR(loom_json_object_end(&object));
     }
   }
@@ -663,6 +675,15 @@ iree_status_t loom_target_compile_report_format_pipeline_copies_text(
           builder, " copies_per_phase_call="));
       IREE_RETURN_IF_ERROR(loom_target_compile_report_append_optional_count(
           builder, row->visits_known, row->visits));
+      if (row->fresh_fifo_capacity) {
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            builder,
+            " reserved_fifo=%" PRIhsz " reserved_fifo_capacity=%" PRIu64
+            " reservations_per_worker=",
+            row->fresh_fifo, row->fresh_fifo_capacity));
+        IREE_RETURN_IF_ERROR(loom_target_compile_report_append_optional_count(
+            builder, row->worker_visits_known, row->visits_per_worker));
+      }
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
     }
   }

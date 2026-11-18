@@ -79,6 +79,8 @@ loom_cc_library(
     hdrs = ["realization.h"],
     deps = [
         ":worker_materialization",
+        "//loom/src/loom/analysis:channel_completion",
+        "//loom/src/loom/analysis:channel_plan",
         "//loom/src/loom/analysis:kernel_synchronization_legality",
         "//loom/src/loom/analysis:movement",
         "//loom/src/loom/analysis/pipeline:invocations",
@@ -87,6 +89,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:symbol_map",
         "//loom/src/loom/ops:special_values",
+        "//loom/src/loom/ops/channel",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/pass:report",
         "//loom/src/loom/pass:types",

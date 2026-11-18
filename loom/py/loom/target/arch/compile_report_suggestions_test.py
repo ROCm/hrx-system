@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from loom.reporting.compile_report import CompileReportError, parse_compile_report
+from loom.reporting.compile_report_suggestions import CompileReportSuggestionOptions
 from loom.target.arch.compile_report_suggestions import suggest_compile_report
 
 
@@ -82,6 +83,43 @@ def _compile_report(
     if mode == "details":
         report["math_legalization"]["rows"] = rows
     return report
+
+
+def test_single_slot_ingress_requires_repeated_reservations_by_one_worker() -> None:
+    site = dict(
+        root="stream",
+        phase="refill",
+        occurrence=2,
+        direction="read",
+        binding=3,
+        bytes_per_copy=2048,
+        copies_per_phase_call=8,
+        reserved_fifo=7,
+        reserved_fifo_capacity=1,
+        reservations_per_worker=2,
+    )
+    report = _compile_report([])
+    report["pipeline_external_copies"] = [
+        site,
+        dict(site, reserved_fifo_capacity=2),
+        dict(site, reservations_per_worker=1),  # Eight producers read once each.
+        dict(site, bytes_per_copy=64),
+        dict(site, bytes_per_copy=None),
+        dict(site, direction="write"),
+        {k: v for k, v in site.items() if k != "reservations_per_worker"},
+        {k: v for k, v in site.items() if k != "reserved_fifo_capacity"},
+    ]
+    document = parse_compile_report(report)
+    assert not suggest_compile_report(document).suggestions
+    (finding,) = suggest_compile_report(
+        document, CompileReportSuggestionOptions(include_experimental=True)
+    ).suggestions
+    assert finding.suggestion_id == "pipeline.single_slot_ingress"
+    assert finding.confidence.value == "experimental"
+    assert finding.entry_name == "refill binding[3] → FIFO[7]"
+    assert finding.example_magnitude == 4096
+    assert finding.evidence[1].path.endswith("[0].reservations_per_worker")
+    assert finding.evidence[1].value == 2
 
 
 def test_aggregates_pathological_repetition_into_one_finding() -> None:

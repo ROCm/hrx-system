@@ -230,12 +230,20 @@ typedef struct loom_target_compile_report_pipeline_copy_t {
   uint32_t binding;
   // True for a read from the external binding, false for a write to it.
   bool read;
-  // True when the worker control-flow analysis proves the block visits.
+  // True when participant count times per-worker visits is known.
   bool visits_known;
+  // True when the worker control-flow analysis proves its own block visits.
+  bool worker_visits_known;
   // Payload bytes per copy, or a negative value when runtime-dependent.
   int64_t bytes_per_copy;
   // Copies from this site per invocation of its phase when visits_known.
   uint64_t visits;
+  // Construction channel ordinal when the destination is freshly reserved.
+  iree_host_size_t fresh_fifo;
+  // Records in that FIFO, or zero without a same-block reservation proof.
+  uint64_t fresh_fifo_capacity;
+  // Times one participant visits this site when worker_visits_known.
+  uint64_t visits_per_worker;
 } loom_target_compile_report_pipeline_copy_t;
 
 // One realized pipeline worker.

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 
@@ -84,17 +85,48 @@ class _PhaseCopyGroup:
         }
 
 
+def _copy_sites(document: CompileReportDocument) -> Iterator[tuple[str, dict]]:
+    sites = document.report.get("pipeline_external_copies", [])
+    if not isinstance(sites, list):
+        raise CompileReportError("pipeline_external_copies: expected array")
+    for i, site in enumerate(sites):
+        path = f"pipeline_external_copies[{i}]"
+        yield path, _object(site, path)
+
+
+def single_slot_refills(
+    document: CompileReportDocument,
+) -> Iterator[tuple[str, str, int, int, int, int]]:
+    """Yields reads into a fresh single-slot reservation on each worker visit."""
+    for path, row in _copy_sites(document):
+        if row.get("direction") != "read" or "reserved_fifo_capacity" not in row:
+            continue
+        capacity = _count(
+            row["reserved_fifo_capacity"], f"{path}.reserved_fifo_capacity"
+        )
+        if capacity != 1 or "reservations_per_worker" not in row:
+            continue
+        visits = _count(
+            row["reservations_per_worker"], f"{path}.reservations_per_worker"
+        )
+        width = _nullable_count(row, "bytes_per_copy", path)
+        if visits > 1 and width:
+            yield (
+                path,
+                _string(row.get("phase"), f"{path}.phase"),
+                _count(row.get("binding"), f"{path}.binding"),
+                _count(row.get("reserved_fifo"), f"{path}.reserved_fifo"),
+                visits,
+                width,
+            )
+
+
 def build_pipeline_phase_copies(
     document: CompileReportDocument, *, summary_only: bool
 ) -> list[dict[str, object]]:
     """Groups source payload at a single call site, independent of caller visits."""
-    sites = document.report.get("pipeline_external_copies", [])
-    if not isinstance(sites, list):
-        raise CompileReportError("pipeline_external_copies: expected array")
     roots: dict[str, dict[tuple, _PhaseCopyGroup]] = {}
-    for i, site in enumerate(sites):
-        path = f"pipeline_external_copies[{i}]"
-        row = _object(site, path)
+    for path, row in _copy_sites(document):
         root = _string(row.get("root"), f"{path}.root")
         phase = _string(row.get("phase"), f"{path}.phase")
         occurrence = _count(row.get("occurrence"), f"{path}.occurrence")

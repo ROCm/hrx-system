@@ -637,6 +637,14 @@ function name and byte offset to inspect the dependencies, then measure how
 often the loop runs on a worker that determines completion. Parallel tiles,
 an infrequent branch, or mandatory latency can change the opportunity.
 
+For authored pipelines, `--include-experimental` also checks external reads
+into a FIFO freshly reserved in the copy's block. `pipeline.single_slot_ingress`
+reports a one-slot FIFO when a single producer repeats that reservation and
+reads at least 4 KiB across those visits per phase call. Four producers each
+filling one record once do not satisfy the repetition test. Time the producer's
+wait for credit before spending local memory on a second slot. Other FIFOs may
+already carry the next input, or the consumer may release this one early.
+
 On AMDGPU, `amdgpu.pipeline_copy_waits` identifies full global-load waits whose
 native consumers are materialized branch-payload copies. Its cited
 `outstanding_before` values count packets in each scheduled block rather than
