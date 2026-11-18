@@ -492,6 +492,7 @@ def test_suggest_keeps_static_scope_visible_without_findings(
     assert view["findings"] == []
     assert "order and confidence do not rank performance benefit" in view["guidance"]
     assert "data reuse policy" in view["guidance"]
+    assert "measure matched primitives on the intended partition" in view["guidance"]
     assert "unexplained large oracle gap stops local tuning" in view["guidance"]
 
     assert main(["suggest", str(report_path)]) == 0

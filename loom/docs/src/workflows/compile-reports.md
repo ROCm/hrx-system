@@ -595,14 +595,16 @@ they do not rank runtime cost or optimization value. `status: available` means
 the relevant interpreter is available. An empty finding list cannot establish
 that the current execution shape is competitive.
 
-Optimization requires a known-good oracle's native instruction mix, controlled
-performance on the intended machine, and data reuse policy before acting on
-these findings. Paneling, tile and batch sizes, prefill chunks, resident
+For a port, establish the reference's native instruction mix, performance on
+the intended machine, and data reuse policy before acting on these findings.
+Paneling, tile and batch sizes, prefill chunks, resident
 operands, buffering, sharing, and complete-request traffic determine whether
 the schedule is worth tuning. Each experiment also needs an absolute target,
 the measured end-to-end gap, a bound on recoverable cost, and a rejection
 condition. An unexplained large oracle gap stops local tuning; repeated small
-wins over an inefficient baseline cannot qualify that architecture. The
+wins over an inefficient baseline cannot qualify that architecture. For a novel
+kernel, use compulsory bytes, useful operations, and matched primitive
+measurements on the intended partition to set the first comparison. The
 [agent authoring workflow](agent-driven-kernel-development.md#establish-the-oracle-and-data-reuse-policy)
 owns this evidence and admission gate.
 

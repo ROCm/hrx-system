@@ -27,11 +27,12 @@ from loom.reporting.compile_report_pipelines import (
 
 SUGGEST_KIND = "loom.compile_report.suggest"
 SUGGEST_GUIDANCE = (
-    "Static compiler findings; order and confidence do not rank performance benefit. "
-    "Optimization requires a known-good oracle's native instruction mix, controlled "
-    "measurement on the intended machine, and data reuse policy, plus an end-to-end "
-    "opportunity bound. An unexplained large oracle gap stops local tuning; small "
-    "gains over our own baseline do not qualify the execution shape."
+    "Static compiler findings describe the program. Finding order and confidence "
+    "do not rank performance benefit. For a port, establish the oracle's native "
+    "instruction mix, intended-machine performance, and data reuse policy. For a "
+    "novel kernel, count compulsory bytes and useful operations and measure matched "
+    "primitives on the intended partition. Bound the end-to-end opportunity. "
+    "An unexplained large oracle gap stops local tuning."
 )
 
 

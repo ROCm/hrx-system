@@ -436,8 +436,10 @@ def _inventory(
 
 
 def append_pipeline_transfer_text(lines: list[str], plan: dict[str, object]) -> None:
-    """Shows the root's transfer costs and the evidence needed to resolve a gap."""
+    """Shows the programmed workers and the traffic for one activation."""
     lines.extend(("", f"Pipeline {plan['root']} ({plan['realization']})"))
+    if "workers" in plan:
+        lines.append(f"  Programmed workers: {plan['workers']['count']}")
     for field, label in _TRAFFIC_FIELDS.items():
         amount = f"{plan[field]} B" if plan[field] is not None else "unavailable"
         lines.append(f"  Planned {label} per activation: {amount}")
@@ -452,8 +454,6 @@ def append_pipeline_show_text(lines: list[str], view: dict[str, object]) -> None
     """Formats the selected inventory without inferring channels from addresses."""
     for plan in view["rows"]:
         append_pipeline_transfer_text(lines, plan)
-        if "workers" in plan:
-            lines.append(f"  workers: {plan['workers']['count']}")
         if "memories" in plan:
             lines.append(f"  physical memory owners: {plan['memories']['count']}")
         for title, fields in (("Code", _CODE_FIELDS), ("Storage", _STORAGE_FIELDS)):

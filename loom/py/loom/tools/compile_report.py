@@ -39,13 +39,19 @@ see an XDNA callable's final tile and loaded group, stored packets, repeated
 native loops, and exclusive packets per call. Request-dependent visits require
 a request shape or device evidence.
 
-Data reuse comes first. Before tuning, establish a known-good oracle's native
+Data reuse comes first. For a port, establish a known-good oracle's native
 instruction mix, controlled performance on the intended machine, and data reuse
 policy: paneling, tile and batch sizes, prefill chunks, operand residency,
 buffering, sharing, and complete-request traffic. A numerical reference or a
 single-tile correctness example cannot qualify the performance architecture.
 
-Each optimization needs an absolute end-to-end target, the measured oracle gap,
+For a novel kernel, count the compulsory external bytes and useful operations
+for a completed request. Measure a transfer and compute primitive on the intended
+partition with the same operand layout and reuse. Compare a representative fused
+slice against those rates at two shapes that change reuse. Programmed workers
+measure placement. Per-worker events show which ones contribute on each shape.
+
+Each optimization needs an absolute end-to-end target, the measured gap,
 an upper bound on recoverable cost, and a rejection condition. An unexplained
 large gap stops local tuning and reopens the algorithm and reuse policy. Small
 percentage wins against our own slow baseline do not satisfy this gate.
@@ -291,11 +297,10 @@ def _create_argument_parser() -> argparse.ArgumentParser:
         "suggest",
         help="Proposes experiments from static evidence, without runtime ranking.",
         description=(
-            "Interprets source policies and target evidence. Optimization requires "
-            "a known-good oracle's native instruction mix, controlled measurement "
-            "on the intended machine, data reuse policy, and an end-to-end "
-            "opportunity bound. Finding order and confidence do not rank "
-            "performance benefit."
+            "Interprets source policies and native evidence. For a port, compare "
+            "with a measured reference. For a novel kernel, compare compulsory "
+            "traffic and useful work against matched primitives. Finding order "
+            "and confidence do not rank performance benefit."
         ),
     )
     suggest_parser.add_argument("report", type=Path, help="Compile report JSON path.")

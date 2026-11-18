@@ -179,6 +179,7 @@ def test_dma_traffic_distinguishes_unknown_from_zero_for_each_export() -> None:
         assert spatial["external_dma_byte_count"] == 4608
         assert spatial["routed_dma_byte_count"] == 0
         text = render(view)
+        assert text.count("Programmed workers: 2") == 1
         assert "Planned external DMA per activation: unavailable" in text
         assert "Planned external DMA per activation: 4608 B" in text
         assert "Planned routed on-array DMA per activation: 0 B" in text

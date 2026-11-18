@@ -344,10 +344,18 @@ correctness or measured device throughput.
 ## Account for a completed request
 
 The unit of comparison is one completed request of a specified shape. Start
-with a full, heavily loaded request and a working reference on the same NPU.
-Follow the same inputs through both programs to the caller's final output.
+with a full, heavily loaded request. For a port, run the working reference
+on the same NPU and follow the same inputs through both programs to the
+caller's final output.
 Keep a row for each unexplained difference. That row determines the next
 measurement whenever it could change the choice of schedule.
+
+For a novel operation, take the transfer and compute baselines from
+[matched primitives](../workflows/agent-driven-kernel-development.md#establish-the-oracle-and-data-reuse-policy)
+on the intended NPU partition. The first `suggest` output names the number
+of programmed workers. A single-tile correctness example on a larger
+partition makes the placement decision visible immediately. A larger worker
+count still needs per-tile measurements on the completed request.
 
 1. **Match the work.** Record the executable and weight identities, input
    lengths before padding, batch composition, numerical acceptance, active
@@ -382,6 +390,10 @@ measurement whenever it could change the choice of schedule.
    ranges coincide, how often each phase runs, and what must be reread to
    keep those partial results on chip. The complete group inventory is
    available with `show --format=json` under `.pipeline_phase_copies[].groups`.
+   With `--include-experimental`, a repeated read into one freshly reserved
+   slot names the producer phase, input binding, copy width, and refill count
+   per worker. Measure the wait for that slot's credit and check available
+   local storage before comparing a two-slot schedule.
 4. **Count what every participating core executes.** Disassemble the native
    loops in the measured images, including their callers. Count loop trips,
    full and partial tiles, issue packets, empty packets, MACs with operand
@@ -390,6 +402,9 @@ measurement whenever it could change the choice of schedule.
    never enters contributes zero. Compare the result against core events on
    every participating tile. Preserve the collection window and event mask
    for each counter.
+   The default `aie2p.empty_loop_packets` finding gives the function, byte
+   offset, and number of all-NOP packets executed each time a repeated loop
+   is entered. Multiply by visits on the worker that determines completion.
    For a callable shared across workers, query its final native placements in
    the summary report. Quote the glob to include specialized copies.
 
