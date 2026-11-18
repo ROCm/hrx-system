@@ -171,9 +171,13 @@ class VulkanEnvironmentTest(unittest.TestCase):
         def run_vulkaninfo(command, *, env, check):
             Path(command[3]).write_text(json.dumps(profiles[env["DRI_PRIME"]]))
 
+        profile_output = self.root / "selected-device.json"
         with mock.patch.object(subprocess, "run", side_effect=run_vulkaninfo) as run:
-            vulkan_environment.check_environment(self.sysfs, self.dri)
+            vulkan_environment.check_environment(self.sysfs, self.dri, profile_output)
         self.assertEqual(run.call_count, 2)
+        self.assertEqual(
+            json.loads(profile_output.read_bytes()), profiles[discrete.dri_prime]
+        )
         self.assertEqual(
             environment_file.read_text(),
             f"DRI_PRIME={discrete.dri_prime}\n"
@@ -302,14 +306,18 @@ class VulkanEnvironmentTest(unittest.TestCase):
         self.add_device()
         environment_file = self.root / "github_env"
         os.environ["GITHUB_ENV"] = str(environment_file)
+        profile_output = self.root / "selected-device.json"
         with mock.patch.object(
             subprocess,
             "run",
             side_effect=subprocess.CalledProcessError(1, "vulkaninfo"),
         ):
             with self.assertRaises(subprocess.CalledProcessError):
-                vulkan_environment.check_environment(self.sysfs, self.dri)
+                vulkan_environment.check_environment(
+                    self.sysfs, self.dri, profile_output
+                )
         self.assertFalse(environment_file.exists())
+        self.assertFalse(profile_output.exists())
 
 
 if __name__ == "__main__":

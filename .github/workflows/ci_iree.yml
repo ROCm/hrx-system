@@ -389,7 +389,10 @@ jobs:
       - name: Check Vulkan hardware environment
         if: matrix.kind == 'vulkan'
         timeout-minutes: 1
-        run: bash .github/scripts/check_vulkan_hardware_environment.sh
+        run: |
+          evidence="$RUNNER_TEMP/vulkan-evidence-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$evidence"
+          bash .github/scripts/check_vulkan_hardware_environment.sh --profile-output "$evidence/vulkaninfo.json"
 
       - name: Install Bazel host tools
         run: |
@@ -565,14 +568,22 @@ jobs:
 
       - name: Preserve Vulkan reproducers on failure
         if: ${{ always() && matrix.kind == 'vulkan' && steps.iree_bazel_ci.outcome == 'failure' }}
+        run: |
+          evidence="$RUNNER_TEMP/vulkan-evidence-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          results="$RUNNER_TEMP/repository-test-results-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          for events in "$results"/.events/*.json; do
+            [ -f "$events" ] || continue
+            phase=$(basename "$events" .json)
+            python3 -m build_tools.ci.bazel_test_reproducers "$events" "$evidence/$phase.tar.gz"
+          done
+
+      - name: Upload Vulkan reproducers
+        if: ${{ always() && matrix.kind == 'vulkan' && steps.iree_bazel_ci.outcome == 'failure' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vulkan-bazel-executables-attempt-${{ github.run_attempt }}
-          # The runfiles retain the actual exec-configured Loom runner.
-          path: |
-            bazel-bin/loom/target/spirv/test/corpus/numeric_vector_packed_selection_test_execute_spirv_vulkan_hardware_test
-            bazel-bin/loom/target/spirv/test/corpus/numeric_vector_packed_selection_test_execute_spirv_vulkan_hardware_test.runfiles/
-            bazel-bin/runtime/src/iree/hal/driver/vulkan/cts/slab_pool_tests
+          path: ${{ runner.temp }}/vulkan-evidence-${{ github.run_id }}-${{ github.run_attempt }}/
+          compression-level: 0
           if-no-files-found: warn
           retention-days: 7
 

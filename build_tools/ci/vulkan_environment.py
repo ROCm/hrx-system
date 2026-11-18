@@ -16,6 +16,7 @@ Khronos vulkaninfo supplies native device properties before the CTS runs.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import stat
@@ -127,7 +128,9 @@ def validate_vulkan_device(profile: dict, selected: RenderDevice) -> str:
     return device["deviceType"]
 
 
-def check_environment(sysfs_drm_path: Path, dri_path: Path) -> None:
+def check_environment(
+    sysfs_drm_path: Path, dri_path: Path, profile_output: Path | None = None
+) -> None:
     allocation = os.environ.get("PARENT_GPU_DEVICES")
     print(f"Runner GPU allocation: {allocation or '(not specified)'}", flush=True)
     candidates = render_device_candidates(sysfs_drm_path, dri_path, allocation)
@@ -146,9 +149,8 @@ def check_environment(sysfs_drm_path: Path, dri_path: Path) -> None:
                 },
                 check=True,
             )
-            device_type = validate_vulkan_device(
-                json.loads(profile_path.read_text()), candidate
-            )
+            profile = profile_path.read_bytes()
+            device_type = validate_vulkan_device(json.loads(profile), candidate)
             if (
                 len(candidates) == 1
                 or device_type == "VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU"
@@ -171,6 +173,8 @@ def check_environment(sysfs_drm_path: Path, dri_path: Path) -> None:
             f"AMDF_CTS_GPU_NATIVE_IDENTITY={previous!r} conflicts with "
             f"the Vulkan allocation {native_identity}"
         )
+    if profile_output is not None:
+        profile_output.write_bytes(profile)
     # Later workflow steps receive only a selection verified by the native
     # loader. ci.py carries it into both Bazel test actions and CMake tests.
     if github_env := os.environ.get("GITHUB_ENV"):
@@ -180,8 +184,15 @@ def check_environment(sysfs_drm_path: Path, dri_path: Path) -> None:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--profile-output",
+        type=Path,
+        help="Save the selected device's vulkaninfo JSON.",
+    )
+    args = parser.parse_args()
     try:
-        check_environment(Path("/sys/class/drm"), Path("/dev/dri"))
+        check_environment(Path("/sys/class/drm"), Path("/dev/dri"), args.profile_output)
     except (
         OSError,
         ValueError,
