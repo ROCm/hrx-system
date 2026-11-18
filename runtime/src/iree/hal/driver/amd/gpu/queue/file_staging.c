@@ -10,16 +10,15 @@
 #include "iree/async/proactor.h"
 #include "iree/hal/driver/amd/fabric/memory.h"
 #include "iree/hal/driver/amd/fabric/memory_transition.h"
-#include "iree/hal/driver/amd/gpu/queue/file_completion.h"
 #include "iree/hal/driver/amd/status.h"
 
 typedef struct iree_hal_amd_gpu_file_staging_block_t
     iree_hal_amd_gpu_file_staging_block_t;
 
 typedef struct iree_hal_amd_gpu_file_staging_list_t {
-  // Oldest range with unassigned bytes.
+  // Oldest request awaiting a loan or registration detach.
   iree_hal_amd_gpu_file_staging_request_t* head;
-  // Continuing ranges append here for fair slot assignment.
+  // New requests append here for fair slot assignment.
   iree_hal_amd_gpu_file_staging_request_t* tail;
 } iree_hal_amd_gpu_file_staging_list_t;
 
@@ -57,32 +56,14 @@ typedef struct iree_hal_amd_gpu_file_staging_view_t {
   bool attached;
 } iree_hal_amd_gpu_file_staging_view_t;
 
-typedef struct iree_hal_amd_gpu_file_staging_slot_t {
-  // Owning physical block, stable through accepted I/O and GPU retirement.
+struct iree_hal_amd_gpu_file_staging_slot_t {
+  // Owning native block, stable until the caller returns this loan.
   iree_hal_amd_gpu_file_staging_block_t* block;
-  // Next available slot; protected by the staging mutex.
+  // Next available lane, protected by the storage metadata lock.
   struct iree_hal_amd_gpu_file_staging_slot_t* next;
-  // Borrowed range retaining its device through every accepted slot.
-  iree_hal_amd_gpu_file_staging_request_t* request;
-  // First byte within the block's logical host/GPU extent.
+  // First byte within the block's logical host/device extent.
   uint64_t offset;
-  union {
-    // Placed native file request, reused only after its preceding use retires.
-    iree_hal_file_request_t io;
-    // Coalesced early-error and final-retirement handoff to the file owner.
-    iree_hal_amd_gpu_file_completion_t failure;
-  };
-  // Joins the submitting call and potentially immediate completion.
-  iree_atomic_int32_t pending;
-  // The native copy reports an early error before its final retirement. The
-  // first failure switches io's union storage to the error handoff; healthy
-  // writes keep their prepared I/O request intact until the GPU copy completes.
-  bool failure_initialized;
-  // Status transferred by completion to the final join.
-  iree_status_t status;
-  // Next step after both borrowers return.
-  void (*resume)(struct iree_hal_amd_gpu_file_staging_slot_t*, iree_status_t);
-} iree_hal_amd_gpu_file_staging_slot_t;
+};
 
 struct iree_hal_amd_gpu_file_staging_block_t {
   // Device-owned engine containing this stable owner record.
@@ -114,7 +95,7 @@ struct iree_hal_amd_gpu_file_staging_block_t {
   uint32_t capacity;
   // Number of slot records and independently pipelined lanes in this block.
   uint32_t lane_count;
-  // Slots with accepted I/O/GPU use, including a submitting caller's join.
+  // Borrowed lanes; their owners join all accepted accesses before return.
   uint32_t active_count;
   // Queued or outstanding view attachment/detachment preventing release.
   uint32_t pending_views;
@@ -150,7 +131,7 @@ struct iree_hal_amd_gpu_file_staging_bucket_t {
   iree_hal_amd_gpu_file_staging_list_t waiting;
   // Final ranges awaiting foreign-view detach before relinquishing polling.
   iree_hal_amd_gpu_file_staging_list_t completed;
-  // Accepted whole file operations, including gaps between physical ranges.
+  // Acquired request memberships, including gaps between physical loans.
   uint32_t transfer_count;
 };
 
@@ -184,9 +165,9 @@ struct iree_hal_amd_gpu_file_staging_t {
   // Reserved physical bytes across construction, use, detachment, and native
   // free.
   uint64_t reserved_bytes;
-  // Accepted whole file operations, including gaps between physical ranges.
+  // Acquired request memberships, including gaps between physical loans.
   uint32_t transfer_count;
-  // Physical ranges with queued or accepted work; only these justify growth.
+  // Pending physical loans; only these justify growth.
   uint32_t request_count;
   // Native preparation/release and view callback chains, under mutex. Their
   // final access must return even after their visible state becomes idle.
@@ -214,7 +195,7 @@ struct iree_hal_amd_gpu_file_staging_t {
   bool closing;
   // Failed native detach prevents destruction of the ownership graph.
   bool cleanup_blocked;
-  // Terminal copy-engine failure, protected by the metadata mutex.
+  // Terminal registration failure, protected by the metadata mutex.
   iree_status_t failure;
   // Exact native transfer family used for visibility qualification.
   uint32_t family_ordinal;
@@ -322,11 +303,8 @@ static void iree_hal_amd_gpu_file_staging_fail_requests(
     iree_hal_amd_gpu_file_staging_request_t* request = requests->head;
     iree_hal_amd_gpu_file_staging_list_remove(requests, request);
     request->status = iree_status_clone(status);
-    request->cursor = request->end;
-    if (!request->in_flight) {
-      --request->staging->request_count;
-      iree_hal_amd_gpu_file_staging_list_append(completed, request);
-    }
+    --request->staging->request_count;
+    iree_hal_amd_gpu_file_staging_list_append(completed, request);
   }
 }
 
@@ -339,171 +317,21 @@ static void iree_hal_amd_gpu_file_staging_complete_list(
   }
 }
 
-static void iree_hal_amd_gpu_file_staging_slot_finish(
-    iree_hal_amd_gpu_file_staging_slot_t* slot, iree_status_t status) {
+void iree_hal_amd_gpu_file_staging_return(
+    iree_hal_amd_gpu_file_staging_request_t* request) {
+  iree_hal_amd_gpu_file_staging_slot_t* slot = request->slot;
   iree_hal_amd_gpu_file_staging_block_t* block = slot->block;
   iree_hal_amd_gpu_file_staging_t* staging = block->staging;
-  iree_hal_amd_gpu_file_staging_request_t* request = slot->request;
+  request->slot = NULL;
   iree_slim_mutex_lock(&staging->mutex);
-  if (!iree_status_is_ok(status)) {
-    if (iree_status_is_ok(request->status)) {
-      request->status = status;
-      if (request->cursor < request->end) {
-        iree_hal_amd_gpu_file_staging_list_remove(
-            iree_hal_amd_gpu_file_staging_request_list(request), request);
-        request->cursor = request->end;
-      }
-    } else {
-      iree_status_free(status);
-    }
-  }
-  slot->request = NULL;
   slot->next = block->available;
   block->available = slot;
   if (--block->active_count == 0 &&
       block->phase == IREE_HAL_AMD_GPU_FILE_STAGING_DRAINING) {
     staging->dirty = true;
   }
-  const bool complete =
-      --request->in_flight == 0 && request->cursor == request->end;
-  if (complete) {
-    --staging->request_count;
-  }
   iree_slim_mutex_unlock(&staging->mutex);
   iree_hal_amd_gpu_file_staging_progress(staging);
-  if (complete) {
-    iree_hal_amd_gpu_file_staging_request_complete(request);
-  }
-}
-
-static void iree_hal_amd_gpu_file_staging_slot_join(
-    iree_hal_amd_gpu_file_staging_slot_t* slot) {
-  if (iree_atomic_fetch_sub(&slot->pending, 1, iree_memory_order_acq_rel) !=
-      1) {
-    return;
-  }
-  iree_status_t status = slot->status;
-  slot->status = iree_ok_status();
-  slot->resume(slot, status);
-}
-
-static void iree_hal_amd_gpu_file_staging_step_completed(void* user_data,
-                                                         iree_status_t status) {
-  iree_hal_amd_gpu_file_staging_slot_t* slot = user_data;
-  slot->status = status;
-  iree_hal_amd_gpu_file_staging_slot_join(slot);
-}
-
-static void iree_hal_amd_gpu_file_staging_copy_failed(void* user_data,
-                                                      iree_status_t status,
-                                                      bool retired) {
-  iree_hal_amd_gpu_file_staging_slot_t* slot = user_data;
-  iree_hal_amd_gpu_file_staging_block_t* block = slot->block;
-  iree_hal_amd_gpu_file_staging_t* staging = block->staging;
-  iree_slim_mutex_lock(&staging->mutex);
-  iree_hal_amd_gpu_file_staging_request_t* request = slot->request;
-  const bool first_failure = iree_status_is_ok(request->status);
-  if (first_failure) {
-    request->status = iree_status_clone(status);
-    if (request->cursor < request->end) {
-      iree_hal_amd_gpu_file_staging_list_remove(
-          iree_hal_amd_gpu_file_staging_request_list(request), request);
-      request->cursor = request->end;
-    }
-  }
-  iree_slim_mutex_unlock(&staging->mutex);
-  if (first_failure) {
-    iree_hal_amd_gpu_context_report_status(staging->context, staging->device,
-                                           status);
-  }
-  iree_hal_amd_gpu_file_staging_progress(staging);
-  if (retired) {
-    iree_hal_amd_gpu_file_staging_step_completed(slot, status);
-  } else {
-    // A failed observer/queue is not a retirement proof. Keep the callback's
-    // slot borrow, request capture, backing, and device alive together.
-    iree_status_free(status);
-  }
-}
-
-static void iree_hal_amd_gpu_file_staging_copy_notified(
-    void* user_data, iree_status_t status,
-    const iree_async_single_frontier_t* frontier, bool retired) {
-  IREE_TRACE_ZONE_BEGIN(z0);
-  iree_hal_amd_gpu_file_staging_slot_t* slot = user_data;
-  if (iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_file_staging_step_completed(slot, iree_ok_status());
-    IREE_TRACE_ZONE_END(z0);
-    return;
-  }
-  if (!slot->failure_initialized) {
-    slot->failure_initialized = true;
-    iree_hal_amd_gpu_file_completion_initialize(
-        slot->request->bucket->proactor,
-        iree_hal_amd_gpu_file_staging_copy_failed, slot, &slot->failure);
-  }
-  iree_hal_amd_gpu_file_completion_notify(&slot->failure, status, retired);
-  IREE_TRACE_ZONE_END(z0);
-}
-
-static void iree_hal_amd_gpu_file_staging_issue_io(
-    iree_hal_amd_gpu_file_staging_slot_t* slot,
-    void (*resume)(iree_hal_amd_gpu_file_staging_slot_t*, iree_status_t)) {
-  slot->resume = resume;
-  iree_atomic_store(&slot->pending, 2, iree_memory_order_relaxed);
-  iree_status_t status = iree_hal_file_request_submit(
-      &slot->io, (iree_hal_file_transfer_callback_t){
-                     iree_hal_amd_gpu_file_staging_step_completed, slot});
-  if (!iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_file_staging_step_completed(slot, status);
-  }
-  iree_hal_amd_gpu_file_staging_slot_join(slot);
-}
-
-static void iree_hal_amd_gpu_file_staging_downloaded(
-    iree_hal_amd_gpu_file_staging_slot_t* slot, iree_status_t status) {
-  if (!iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_file_staging_slot_finish(slot, status);
-    return;
-  }
-  iree_hal_amd_gpu_file_staging_issue_io(
-      slot, iree_hal_amd_gpu_file_staging_slot_finish);
-}
-
-static void iree_hal_amd_gpu_file_staging_copy(
-    iree_hal_amd_gpu_file_staging_slot_t* slot, iree_status_t status) {
-  if (!iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_file_staging_slot_finish(slot, status);
-    return;
-  }
-  IREE_TRACE_ZONE_BEGIN(z0);
-  const iree_hal_amd_gpu_file_staging_request_t* request = slot->request;
-  const bool read =
-      request->transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ;
-  const uint64_t staging_address = slot->block->address + slot->offset;
-  const uint64_t device_address = request->device_address +
-                                  slot->io.file_offset -
-                                  request->transfer->file_offset;
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(
-      z0, iree_hal_file_request_span(&slot->io).length);
-  slot->resume = read ? iree_hal_amd_gpu_file_staging_slot_finish
-                      : iree_hal_amd_gpu_file_staging_downloaded;
-  slot->failure_initialized = false;
-  iree_atomic_store(&slot->pending, 2, iree_memory_order_relaxed);
-  status = request->copy(
-      request->copy_user_data, read ? staging_address : device_address,
-      read ? device_address : staging_address,
-      iree_hal_file_request_span(&slot->io).length,
-      read ? slot->block->effects.read : (iree_hal_memory_effects_t){0},
-      read ? (iree_hal_memory_effects_t){0} : slot->block->effects.write,
-      (iree_hal_amd_gpu_retirement_callback_t){
-          .fn = iree_hal_amd_gpu_file_staging_copy_notified,
-          .user_data = slot});
-  if (!iree_status_is_ok(status)) {
-    iree_hal_amd_gpu_file_staging_copy_notified(slot, status, NULL, true);
-  }
-  iree_hal_amd_gpu_file_staging_slot_join(slot);
-  IREE_TRACE_ZONE_END(z0);
 }
 
 static iree_status_t iree_hal_amd_gpu_file_staging_query_effects(
@@ -553,18 +381,11 @@ static iree_status_t iree_hal_amd_gpu_file_staging_query_effects(
 }
 
 iree_status_t iree_hal_amd_gpu_file_staging_prepare(
-    iree_hal_amd_gpu_file_staging_t* staging,
-    const iree_hal_amd_fabric_file_transfer_t* transfer) {
+    iree_hal_amd_gpu_file_staging_t* staging, uint64_t alignment) {
   if (!staging) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "file copy requires file-capable native staging");
   }
-  const iree_async_file_requirements_t* requirements =
-      iree_hal_file_requirements(transfer->file);
-  const uint64_t alignment =
-      transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ
-          ? requirements->read.buffer_alignment
-          : requirements->write.buffer_alignment;
   if (alignment > staging->lane_capacity) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "file alignment exceeds staging lane capacity");
@@ -1234,38 +1055,23 @@ static void iree_hal_amd_gpu_file_staging_progress(
     iree_hal_amd_gpu_file_staging_slot_t* slot = block->available;
     block->available = slot->next;
     ++block->active_count;
-    ++request->in_flight;
-    slot->request = request;
-    const uint64_t offset = request->cursor;
-    const uint32_t length =
-        (uint32_t)iree_min(request->end - offset, block->capacity);
+    iree_hal_amd_gpu_file_staging_list_remove(
+        iree_hal_amd_gpu_file_staging_request_list(request), request);
+    --staging->request_count;
+    request->slot = slot;
     iree_async_buffer_registration_entry_t* registration =
         request->bucket->views[ordinal].registration;
-    iree_status_t status = iree_hal_amd_fabric_file_request_prepare(
-        request->transfer, offset,
+    request->span =
         registration
-            ? iree_async_span_make(registration->region, slot->offset, length)
+            ? iree_async_span_make(registration->region, slot->offset,
+                                   block->capacity)
             : iree_async_span_from_ptr(
-                  block->memory.contents.data + slot->offset, length),
-        &slot->io);
-    if (iree_status_is_ok(status)) {
-      request->cursor += iree_hal_file_request_span(&slot->io).length;
-      iree_hal_amd_gpu_file_staging_list_remove(
-          iree_hal_amd_gpu_file_staging_request_list(request), request);
-      if (request->cursor < request->end) {
-        iree_hal_amd_gpu_file_staging_list_append(
-            iree_hal_amd_gpu_file_staging_request_list(request), request);
-      }
-    }
+                  block->memory.contents.data + slot->offset, block->capacity);
+    request->address = block->address + slot->offset;
+    request->effects.read = block->effects.read;
+    request->effects.write = block->effects.write;
     iree_slim_mutex_unlock(&staging->mutex);
-    if (!iree_status_is_ok(status)) {
-      iree_hal_amd_gpu_file_staging_slot_finish(slot, status);
-    } else if (request->transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ) {
-      iree_hal_amd_gpu_file_staging_issue_io(
-          slot, iree_hal_amd_gpu_file_staging_copy);
-    } else {
-      iree_hal_amd_gpu_file_staging_copy(slot, iree_ok_status());
-    }
+    iree_hal_amd_gpu_file_staging_request_complete(request);
   }
 }
 
@@ -1309,51 +1115,41 @@ static iree_status_t iree_hal_amd_gpu_file_staging_bucket(
   }
 }
 
-iree_status_t iree_hal_amd_gpu_file_staging_acquire(
-    iree_hal_amd_gpu_file_staging_t* staging,
-    const iree_hal_amd_fabric_file_transfer_t* transfer,
-    iree_hal_amd_gpu_file_staging_copy_fn_t copy, void* copy_user_data,
-    iree_hal_amd_gpu_file_staging_request_t* request) {
-  *request = (iree_hal_amd_gpu_file_staging_request_t){
-      .staging = staging,
-      .transfer = transfer,
-      .copy = copy,
-      .copy_user_data = copy_user_data};
-  return iree_hal_amd_gpu_file_staging_bucket(
-      staging, transfer->async.file->proactor, &request->bucket);
+uint32_t iree_hal_amd_gpu_file_staging_concurrency(
+    const iree_hal_amd_gpu_file_staging_t* staging, uint64_t length) {
+  return (uint32_t)iree_min(staging->lane_count,
+                            1 + (length - 1) / staging->lane_capacity);
 }
 
-void iree_hal_amd_gpu_file_staging_submit(
-    iree_hal_amd_gpu_file_staging_request_t* request, uint64_t offset,
-    uint64_t length, uint64_t device_address,
-    iree_hal_file_transfer_callback_t completion) {
+iree_status_t iree_hal_amd_gpu_file_staging_acquire(
+    iree_hal_amd_gpu_file_staging_t* staging, iree_async_proactor_t* proactor,
+    iree_hal_amd_gpu_file_staging_request_t* request) {
+  *request = (iree_hal_amd_gpu_file_staging_request_t){.staging = staging};
+  return iree_hal_amd_gpu_file_staging_bucket(staging, proactor,
+                                              &request->bucket);
+}
+
+void iree_hal_amd_gpu_file_staging_reserve(
+    iree_hal_amd_gpu_file_staging_request_t* request, uint64_t length,
+    uint64_t alignment, iree_hal_file_transfer_callback_t completion) {
   iree_hal_amd_gpu_file_staging_t* staging = request->staging;
-  request->cursor = offset;
-  request->end = offset + length;
-  request->device_address = device_address;
   request->completion = completion;
-  request->in_flight = 1;
   request->block_mask = 0;
-  const iree_async_file_requirements_t* requirements =
-      iree_hal_file_requirements(request->transfer->file);
-  uint64_t capacity = iree_max(
-      4096, request->transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ
-                ? requirements->read.buffer_alignment
-                : requirements->write.buffer_alignment);
+  uint64_t capacity = iree_max(4096, alignment);
   const uint64_t desired = iree_min(length, staging->lane_capacity);
   while (capacity < desired) {
     capacity <<= 1;
   }
   request->chunk_capacity = (uint32_t)capacity;
   iree_slim_mutex_lock(&staging->mutex);
-  ++staging->request_count;
   if (request->bucket->completed.head) {
     staging->dirty = true;
   }
-  if (!iree_status_is_ok(staging->failure)) {
+  const bool failed = !iree_status_is_ok(staging->failure);
+  if (failed) {
     request->status = iree_status_clone(staging->failure);
-    request->cursor = request->end;
   } else {
+    ++staging->request_count;
     staging->desired_capacity =
         iree_max(staging->desired_capacity, request->chunk_capacity);
     staging->growth_requested = true;
@@ -1363,16 +1159,10 @@ void iree_hal_amd_gpu_file_staging_submit(
         iree_hal_amd_gpu_file_staging_request_list(request), request);
   }
   iree_slim_mutex_unlock(&staging->mutex);
-  iree_hal_amd_gpu_file_staging_progress(staging);
-  iree_slim_mutex_lock(&staging->mutex);
-  const bool complete =
-      --request->in_flight == 0 && request->cursor == request->end;
-  if (complete) {
-    --staging->request_count;
-  }
-  iree_slim_mutex_unlock(&staging->mutex);
-  if (complete) {
+  if (failed) {
     iree_hal_amd_gpu_file_staging_request_complete(request);
+  } else {
+    iree_hal_amd_gpu_file_staging_progress(staging);
   }
 }
 
