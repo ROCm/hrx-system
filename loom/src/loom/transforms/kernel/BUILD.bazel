@@ -444,10 +444,12 @@ loom_cc_library(
     name = "promote_private_fragments",
     srcs = [
         "private_storage.c",
+        "private_storage_copy.c",
         "promote_private_fragments.c",
     ],
     hdrs = [
         "private_storage.h",
+        "private_storage_copy.h",
         "promote_private_fragments.h",
     ],
     deps = [

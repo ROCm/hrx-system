@@ -25,17 +25,20 @@ extern "C" {
 typedef struct loom_private_storage_allocation_t
     loom_private_storage_allocation_t;
 typedef struct loom_private_storage_cell_t loom_private_storage_cell_t;
+typedef struct loom_private_storage_copy_t loom_private_storage_copy_t;
 typedef struct loom_private_storage_value_t loom_private_storage_value_t;
 typedef struct loom_private_storage_transport_t
     loom_private_storage_transport_t;
 
-// One allocation is the admission unit. Losing an observer keeps all its cells
-// in memory, including cells that are otherwise individually scalarizable.
+// Losing an observer keeps the allocation in memory. Allocations connected by
+// a modeled copy share that admission decision because the copy observes both.
 struct loom_private_storage_allocation_t {
   // Original private buffer.alloca.
   loom_op_t* op;
   // Next allocation in reverse discovery order.
   loom_private_storage_allocation_t* next;
+  // Parent in the copy component, or NULL for a representative.
+  loom_private_storage_allocation_t* copy_parent;
   // Exact allocation size, or zero when no static size is known.
   int64_t byte_count;
   // First cell in the allocation's contiguous partition.
@@ -46,6 +49,8 @@ struct loom_private_storage_allocation_t {
   bool selected;
   // Whether every use is a modeled projection or an ordinary erasable store.
   bool write_only;
+  // Union-by-rank bound for joining copy components.
+  uint8_t copy_rank;
 };
 
 // Exact typed byte interval shared by all equivalent accesses. Cells are sparse
@@ -171,6 +176,8 @@ typedef struct loom_private_storage_plan_t {
   iree_host_size_t cell_count;
   // Memory accesses with retained allocation and optional cell identity.
   loom_private_storage_access_t* accesses;
+  // Disjoint byte transfers whose scalar state changes at the copy site.
+  loom_private_storage_copy_t* copies;
   // Signature edits in child-before-parent order.
   loom_private_storage_signature_t* signatures;
   // Original SSA leaves indexed by local ordinal, or NULL when unreferenced.

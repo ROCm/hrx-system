@@ -21,6 +21,7 @@
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/transforms/kernel/private_storage.h"
+#include "loom/transforms/kernel/private_storage_copy.h"
 #include "loom/util/dominance.h"
 #include "loom/util/walk.h"
 
@@ -1213,6 +1214,12 @@ static iree_status_t loom_private_storage_rewrite(
   for (loom_private_storage_access_t* a = plan->accesses; a; a = a->next) {
     if (a->cell && a->cell->allocation->selected && loom_view_load_isa(a->op)) {
       IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, a->op));
+    }
+  }
+  for (loom_private_storage_copy_t* copy = plan->copies; copy;
+       copy = copy->next) {
+    if (copy->target->selected) {
+      IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, copy->op));
     }
   }
   for (iree_host_size_t i = plan->projection_count; i > 0; --i) {
