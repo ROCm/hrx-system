@@ -462,10 +462,10 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
           &schedule_, &provider, &module_->arena, &allocation_.storage_leases));
     }
     const loom_amdgpu_address_state_plan_t address_state = {};
-    return loom_amdgpu_wait_plan_build(&schedule_, &allocation_, options,
-                                       &address_state, /*matrix_arena=*/nullptr,
-                                       &arena_, &transient_arena_,
-                                       /*out_matrix_results=*/nullptr, &plan_);
+    return loom_amdgpu_wait_plan_build(
+        &schedule_, &allocation_, options, &address_state,
+        /*matrix_arena=*/nullptr, &arena_, &transient_arena_,
+        /*out_matrix_results=*/nullptr, &counter_hazards_, &plan_);
   }
 
   void Build(const loom_amdgpu_wait_plan_options_t* options = nullptr) {
@@ -506,7 +506,7 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
         facts_.properties.processor, &address_state, &plan_, &wait_packets,
         /*vopd_plan=*/nullptr,
         /*matrix_coexecution=*/nullptr, /*matrix_results=*/nullptr, &arena_,
-        &transient_arena_, &wait_state_plan_));
+        &transient_arena_, /*out_hazards=*/nullptr, &wait_state_plan_));
   }
 
   void RecordColdStorage() {
@@ -679,6 +679,8 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
   uint32_t value_producer_nodes_[4] = {};
   // Successful allocation consumed by the production planner.
   loom_low_allocation_table_t allocation_ = {};
+  // Optional counter inspection output used to check packet-level provenance.
+  loom_low_packet_hazard_plan_t counter_hazards_ = {};
   // Actual production planner result inspected by each test.
   loom_amdgpu_wait_plan_t plan_ = {};
   loom_amdgpu_call_state_t call_state_ = {};
@@ -822,7 +824,7 @@ TEST_P(AmdgpuResultReuseWaitTest, ReplacementRetiresTheWholePendingLease) {
   ASSERT_EQ(plan_.action_count, test_case.requires_wait ? 1u : 0u);
   // The target can release an ordered full-width replacement without a
   // packet. Only a wait actually required by this target belongs in the report.
-  ASSERT_EQ(plan_.hazard_plan.record_count, plan_.action_count);
+  ASSERT_EQ(counter_hazards_.record_count, plan_.action_count);
   if (test_case.requires_wait) {
     const auto& action = plan_.actions[0];
     EXPECT_EQ(action.node_index, 1u);
@@ -1229,11 +1231,11 @@ TEST_F(AmdgpuWaitPlanTest, NodesWithoutBoundsReusePoolBlocks) {
   }
   ExpectReusablePlan();
   EXPECT_EQ(plan_.action_count, 0u);
-  ASSERT_EQ(plan_.progress.record_count, 1u);
-  EXPECT_EQ(plan_.progress.records[0].packet_index, 1500u);
-  EXPECT_EQ(plan_.progress.records[0].progress_class_id,
+  ASSERT_EQ(counter_hazards_.progress.record_count, 1u);
+  EXPECT_EQ(counter_hazards_.progress.records[0].packet_index, 1500u);
+  EXPECT_EQ(counter_hazards_.progress.records[0].progress_class_id,
             LOOM_AMDGPU_WAIT_COUNTER_X);
-  EXPECT_EQ(plan_.progress.records[0].action,
+  EXPECT_EQ(counter_hazards_.progress.records[0].action,
             LOOM_LOW_PACKET_PROGRESS_ACTION_RESET);
 }
 
@@ -1243,11 +1245,11 @@ TEST_F(AmdgpuWaitPlanTest, UnconstrainedWaitsReusePoolBlocks) {
   }
   ExpectReusablePlan();
   EXPECT_EQ(plan_.action_count, 0u);
-  ASSERT_EQ(plan_.progress.record_count, 1u);
-  EXPECT_EQ(plan_.progress.records[0].packet_index, 1500u);
-  EXPECT_EQ(plan_.progress.records[0].progress_class_id,
+  ASSERT_EQ(counter_hazards_.progress.record_count, 1u);
+  EXPECT_EQ(counter_hazards_.progress.records[0].packet_index, 1500u);
+  EXPECT_EQ(counter_hazards_.progress.records[0].progress_class_id,
             LOOM_AMDGPU_WAIT_COUNTER_X);
-  EXPECT_EQ(plan_.progress.records[0].action,
+  EXPECT_EQ(counter_hazards_.progress.records[0].action,
             LOOM_LOW_PACKET_PROGRESS_ACTION_RESET);
 }
 
@@ -1266,7 +1268,7 @@ TEST_F(AmdgpuWaitPlanTest, SparseFullWidthBoundsSurviveTransientReset) {
                LOOM_AMDGPU_WAIT_PLAN_REASON_EXPLICIT_PACKET);
   ExpectAction(1, 1498, 10, LOOM_AMDGPU_WAIT_PLAN_REASON_TENSOR_ISSUE_DRAIN);
   ExpectAction(2, 1499, 257, LOOM_AMDGPU_WAIT_PLAN_REASON_EXPLICIT_PACKET);
-  ASSERT_EQ(plan_.progress.record_count, 5u);
+  ASSERT_EQ(counter_hazards_.progress.record_count, 5u);
   const uint32_t expected_packets[] = {0, 1, 1498, 1499, 1501};
   const uint32_t expected_units[] = {1, UINT16_MAX - 1, 1, 257, 0};
   const loom_low_packet_progress_action_t expected_actions[] = {
@@ -1276,8 +1278,9 @@ TEST_F(AmdgpuWaitPlanTest, SparseFullWidthBoundsSurviveTransientReset) {
       LOOM_LOW_PACKET_PROGRESS_ACTION_BOUND,
       LOOM_LOW_PACKET_PROGRESS_ACTION_RESET,
   };
-  for (iree_host_size_t i = 0; i < plan_.progress.record_count; ++i) {
-    const auto& record = plan_.progress.records[i];
+  for (iree_host_size_t i = 0; i < counter_hazards_.progress.record_count;
+       ++i) {
+    const auto& record = counter_hazards_.progress.records[i];
     EXPECT_EQ(record.packet_index, expected_packets[i]);
     EXPECT_EQ(record.units, expected_units[i]);
     EXPECT_EQ(record.action, expected_actions[i]);
@@ -1307,9 +1310,9 @@ TEST_F(AmdgpuWaitPlanTest, BackingFailureDoesNotPublishPartialPlan) {
     EXPECT_EQ(plan_.allocation, nullptr);
     EXPECT_EQ(plan_.actions, nullptr);
     EXPECT_EQ(plan_.action_count, 0u);
-    EXPECT_EQ(plan_.progress.records, nullptr);
-    EXPECT_EQ(plan_.progress.record_count, 0u);
-    EXPECT_EQ(plan_.hazard_plan.progress, nullptr);
+    EXPECT_EQ(counter_hazards_.progress.records, nullptr);
+    EXPECT_EQ(counter_hazards_.progress.record_count, 0u);
+    EXPECT_EQ(counter_hazards_.records, nullptr);
     EXPECT_EQ(plan_.elided_wait_nodes, nullptr);
     iree_arena_reset(&transient_arena_);
     iree_arena_reset(&arena_);

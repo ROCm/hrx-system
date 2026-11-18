@@ -118,7 +118,7 @@ iree_status_t loom_low_packet_hazard_plan_build(
   *out_plan = (loom_low_packet_hazard_plan_t){
       .schedule = schedule,
       .allocation = allocation,
-      .progress = progress,
+      .progress = progress ? *progress : (loom_low_packet_progress_table_t){0},
       .records = state.records,
       .record_count = state.record_count,
   };

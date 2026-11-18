@@ -690,10 +690,6 @@ struct PlanMetrics {
   iree_host_size_t wait_transient_used_bytes = 0;
   // Wait actions produced by the selected plan component.
   iree_host_size_t wait_action_count = 0;
-  // Hazard records retained across all selected plan components.
-  iree_host_size_t hazard_record_count = 0;
-  // Progress records retained across all selected plan components.
-  iree_host_size_t progress_record_count = 0;
   // Materialized wait packets in a complete packet plan.
   iree_host_size_t wait_packet_count = 0;
   // Wait-counter states in a complete packet plan.
@@ -950,10 +946,8 @@ static PlanMetrics BuildReferencePlan(PacketPlanFixture& fixture,
         &fixture.frame().schedule, &fixture.frame().allocation,
         /*options=*/nullptr, &fixture.address_state(), /*matrix_arena=*/nullptr,
         fixture.plan_arena(), fixture.transient_arena(),
-        /*out_matrix_results=*/nullptr, &plan));
+        /*out_matrix_results=*/nullptr, /*out_hazards=*/nullptr, &plan));
     metrics.wait_action_count = plan.action_count;
-    metrics.hazard_record_count = plan.hazard_plan.record_count;
-    metrics.progress_record_count = plan.progress.record_count;
     metrics.wait_transient_used_bytes =
         fixture.transient_arena()->used_allocation_size;
   } else {
@@ -962,15 +956,11 @@ static PlanMetrics BuildReferencePlan(PacketPlanFixture& fixture,
     AbortOnError(loom_amdgpu_packet_plan_build(
         &fixture.frame().schedule, &fixture.frame().allocation,
         /*options=*/nullptr, fixture.plan_arena(),
-        /*emitter=*/{}, &accepted, /*out_vopd_rejections=*/nullptr, &plan));
+        /*emitter=*/{}, /*reports=*/nullptr, &accepted, &plan));
     if (!accepted) {
       std::abort();
     }
     metrics.wait_action_count = plan.wait_plan.action_count;
-    metrics.hazard_record_count = plan.wait_plan.hazard_plan.record_count +
-                                  plan.wait_states.hazard_plan.record_count;
-    metrics.progress_record_count = plan.wait_plan.progress.record_count +
-                                    plan.wait_states.progress.record_count;
     metrics.wait_packet_count = plan.wait_packets.packet_count;
     metrics.wait_state_count = plan.wait_states.state_count;
     metrics.vopd_pair_count = plan.vopd_plan.pair_count;
@@ -997,8 +987,6 @@ static void RecordMetrics(benchmark::State& state,
       static_cast<double>(analysis.shape.edge_copy_count);
   state.counters["frame_arena_bytes"] =
       static_cast<double>(fixture.frame_arena_used_bytes());
-  state.counters["planned_hazards"] =
-      static_cast<double>(metrics.hazard_record_count);
   state.counters["matrix_packets"] =
       static_cast<double>(analysis.shape.matrix_packet_count);
   state.counters["packets"] = static_cast<double>(analysis.shape.packet_count);
@@ -1013,8 +1001,6 @@ static void RecordMetrics(benchmark::State& state,
   state.counters["plan_pool_system_allocations"] =
       static_cast<double>(pool_statistics.block_system_allocation_count +
                           pool_statistics.oversized_allocation_count);
-  state.counters["progress_events"] =
-      static_cast<double>(metrics.progress_record_count);
   state.counters["storage_leases"] =
       static_cast<double>(analysis.shape.storage_lease_count);
   state.counters["storage_lease_units"] =
@@ -1055,7 +1041,7 @@ static void BenchmarkPlan(benchmark::State& state, const FixtureSpec& spec,
           /*options=*/nullptr, &fixture.address_state(),
           /*matrix_arena=*/nullptr, fixture.plan_arena(),
           fixture.transient_arena(),
-          /*out_matrix_results=*/nullptr, &plan));
+          /*out_matrix_results=*/nullptr, /*out_hazards=*/nullptr, &plan));
       benchmark::DoNotOptimize(plan);
     } else {
       loom_amdgpu_packet_plan_t plan = {};
@@ -1063,7 +1049,7 @@ static void BenchmarkPlan(benchmark::State& state, const FixtureSpec& spec,
       AbortOnError(loom_amdgpu_packet_plan_build(
           &fixture.frame().schedule, &fixture.frame().allocation,
           /*options=*/nullptr, fixture.plan_arena(),
-          /*emitter=*/{}, &accepted, /*out_vopd_rejections=*/nullptr, &plan));
+          /*emitter=*/{}, /*reports=*/nullptr, &accepted, &plan));
       if (!accepted) {
         std::abort();
       }

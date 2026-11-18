@@ -36,5 +36,5 @@ iree_status_t loom_amdgpu_function_plan_build(
   }
   return loom_amdgpu_packet_plan_build(
       &frame->schedule, &frame->allocation, packet_options, arena, emitter,
-      out_accepted, /*out_vopd_rejections=*/NULL, &out_plan->packet_plan);
+      /*reports=*/NULL, out_accepted, &out_plan->packet_plan);
 }

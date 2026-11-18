@@ -88,7 +88,9 @@ static iree_status_t loom_amdgpu_wait_state_write_states_json(
 }
 
 iree_status_t loom_amdgpu_wait_state_plan_format_text(
-    const loom_amdgpu_wait_state_plan_t* plan, iree_string_builder_t* builder) {
+    const loom_amdgpu_wait_state_plan_t* plan,
+    const loom_low_packet_hazard_plan_t* hazards,
+    iree_string_builder_t* builder) {
   if (plan == NULL || builder == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU wait-state plan and builder are required");
@@ -97,8 +99,8 @@ iree_status_t loom_amdgpu_wait_state_plan_format_text(
       builder,
       "amdgpu.wait_state_plan states=%" PRIhsz " progress=%" PRIhsz
       " hazards=%" PRIhsz "\n",
-      plan->state_count, plan->progress.record_count,
-      plan->hazard_plan.record_count));
+      plan->state_count, hazards->progress.record_count,
+      hazards->record_count));
   for (iree_host_size_t i = 0; i < plan->state_count; ++i) {
     const loom_amdgpu_wait_state_t* state = &plan->states[i];
     const iree_string_view_t reason_name =
@@ -145,7 +147,9 @@ iree_status_t loom_amdgpu_wait_state_plan_format_text(
 }
 
 iree_status_t loom_amdgpu_wait_state_plan_format_json(
-    const loom_amdgpu_wait_state_plan_t* plan, iree_string_builder_t* builder) {
+    const loom_amdgpu_wait_state_plan_t* plan,
+    const loom_low_packet_hazard_plan_t* hazards,
+    iree_string_builder_t* builder) {
   if (plan == NULL || builder == NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "AMDGPU wait-state plan and builder are required");
@@ -159,19 +163,19 @@ iree_status_t loom_amdgpu_wait_state_plan_format_json(
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
       &object, IREE_SV("state_count"), plan->state_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
-      &object, IREE_SV("progress_count"), plan->progress.record_count));
+      &object, IREE_SV("progress_count"), hazards->progress.record_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
-      &object, IREE_SV("hazard_count"), plan->hazard_plan.record_count));
+      &object, IREE_SV("hazard_count"), hazards->record_count));
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(&object, IREE_SV("states")));
   IREE_RETURN_IF_ERROR(loom_amdgpu_wait_state_write_states_json(plan, &stream));
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(&object, IREE_SV("progress")));
   IREE_RETURN_IF_ERROR(
-      loom_low_packet_progress_write_json_array(&plan->progress, &stream));
+      loom_low_packet_progress_write_json_array(&hazards->progress, &stream));
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(&object, IREE_SV("hazards")));
-  IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_write_json_array(
-      &plan->hazard_plan, &stream));
+  IREE_RETURN_IF_ERROR(
+      loom_low_packet_hazard_plan_write_json_array(hazards, &stream));
   return loom_json_object_end(&object);
 }

@@ -252,7 +252,8 @@ TEST_F(LowPacketHazardPlanTest, RecordsResidualActionsWithPacketIdentity) {
 
   ASSERT_EQ(plan.schedule, &state_.schedule);
   ASSERT_EQ(plan.allocation, &state_.allocation);
-  ASSERT_EQ(plan.progress, &progress);
+  ASSERT_EQ(plan.progress.records, progress.records);
+  ASSERT_EQ(plan.progress.record_count, progress.record_count);
   ASSERT_EQ(plan.record_count, 1u);
   const loom_low_packet_hazard_plan_record_t& record = plan.records[0];
   EXPECT_EQ(record.kind, LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION);

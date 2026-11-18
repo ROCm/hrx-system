@@ -12,6 +12,7 @@
 #include "loom/codegen/low/allocation_json.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/frame.h"
+#include "loom/codegen/low/packet_hazard_plan_json.h"
 #include "loom/codegen/low/packet_json.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ir/module.h"
@@ -174,7 +175,7 @@ static iree_status_t loom_amdgpu_loom_check_emit_assembly(
   loom_amdgpu_packet_plan_t packet_plan = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_plan_build(
       &frame->schedule, &frame->allocation, /*options=*/NULL, arena, emitter,
-      &accepted, /*out_vopd_rejections=*/NULL, &packet_plan));
+      /*reports=*/NULL, &accepted, &packet_plan));
   if (!accepted) {
     return iree_ok_status();
   }
@@ -207,7 +208,7 @@ static iree_status_t loom_amdgpu_loom_check_encode_native(
   loom_amdgpu_packet_plan_t packet_plan = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_plan_build(
       &frame->schedule, &frame->allocation, /*options=*/NULL, arena, emitter,
-      &accepted, /*out_vopd_rejections=*/NULL, &packet_plan));
+      /*reports=*/NULL, &accepted, &packet_plan));
   if (!accepted) {
     return iree_ok_status();
   }
@@ -239,14 +240,16 @@ static iree_status_t loom_amdgpu_loom_check_emit_wait_state_plan_json(
     iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter) {
   bool accepted = false;
   loom_amdgpu_packet_plan_t packet_plan = {0};
+  loom_low_packet_hazard_plan_t hazards = {0};
+  const loom_amdgpu_packet_plan_reports_t reports = {.wait_states = &hazards};
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_plan_build(
       &frame->schedule, &frame->allocation, /*options=*/NULL, arena, emitter,
-      &accepted, /*out_vopd_rejections=*/NULL, &packet_plan));
+      &reports, &accepted, &packet_plan));
   if (!accepted) {
     return iree_ok_status();
   }
   return loom_amdgpu_wait_state_plan_format_json(&packet_plan.wait_states,
-                                                 builder);
+                                                 &hazards, builder);
 }
 
 static iree_status_t loom_amdgpu_loom_check_emit_wait_state_plan(
@@ -254,14 +257,16 @@ static iree_status_t loom_amdgpu_loom_check_emit_wait_state_plan(
     iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter) {
   bool accepted = false;
   loom_amdgpu_packet_plan_t packet_plan = {0};
+  loom_low_packet_hazard_plan_t hazards = {0};
+  const loom_amdgpu_packet_plan_reports_t reports = {.wait_states = &hazards};
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_plan_build(
       &frame->schedule, &frame->allocation, /*options=*/NULL, arena, emitter,
-      &accepted, /*out_vopd_rejections=*/NULL, &packet_plan));
+      &reports, &accepted, &packet_plan));
   if (!accepted) {
     return iree_ok_status();
   }
   return loom_amdgpu_wait_state_plan_format_text(&packet_plan.wait_states,
-                                                 builder);
+                                                 &hazards, builder);
 }
 
 static iree_status_t loom_amdgpu_loom_check_emit_wait_counter_plan_json(
@@ -269,13 +274,15 @@ static iree_status_t loom_amdgpu_loom_check_emit_wait_counter_plan_json(
     iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter) {
   bool accepted = false;
   loom_amdgpu_packet_plan_t packet_plan = {0};
+  loom_low_packet_hazard_plan_t hazards = {0};
+  const loom_amdgpu_packet_plan_reports_t reports = {.wait_counters = &hazards};
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_plan_build(
       &frame->schedule, &frame->allocation, /*options=*/NULL, arena, emitter,
-      &accepted, /*out_vopd_rejections=*/NULL, &packet_plan));
+      &reports, &accepted, &packet_plan));
   if (!accepted) {
     return iree_ok_status();
   }
-  return loom_amdgpu_wait_plan_format_json(&packet_plan.wait_plan, builder);
+  return loom_low_packet_hazard_plan_format_json(&hazards, builder);
 }
 
 static iree_status_t loom_amdgpu_loom_check_emit_vopd_plan_json(
@@ -284,9 +291,11 @@ static iree_status_t loom_amdgpu_loom_check_emit_vopd_plan_json(
   bool accepted = false;
   loom_amdgpu_packet_plan_t packet_plan = {0};
   loom_amdgpu_vopd_rejection_table_t rejections = {0};
+  const loom_amdgpu_packet_plan_reports_t reports = {.vopd_rejections =
+                                                         &rejections};
   IREE_RETURN_IF_ERROR(loom_amdgpu_packet_plan_build(
       &frame->schedule, &frame->allocation, /*options=*/NULL, arena, emitter,
-      &accepted, &rejections, &packet_plan));
+      &reports, &accepted, &packet_plan));
   if (!accepted) {
     return iree_ok_status();
   }

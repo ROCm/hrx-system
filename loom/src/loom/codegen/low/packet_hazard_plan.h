@@ -147,8 +147,8 @@ typedef struct loom_low_packet_hazard_plan_t {
   const loom_low_schedule_table_t* schedule;
   // Optional allocation table paired with |schedule|.
   const loom_low_allocation_table_t* allocation;
-  // Optional progress table paired with |schedule|.
-  const loom_low_packet_progress_table_t* progress;
+  // Progress observed on this schedule. Empty when the policy has no events.
+  loom_low_packet_progress_table_t progress;
   // Hazard-plan records in scheduled packet order.
   const loom_low_packet_hazard_plan_record_t* records;
   // Number of entries in |records|.

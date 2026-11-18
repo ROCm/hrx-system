@@ -262,19 +262,14 @@ static void loom_amdgpu_wait_actions_hazard_query(
   } while (publication->next_hazard_packet_index == packet->packet_index);
 }
 
-// Publication likewise has one hot caller and exposes its short-lived replay
-// context to optimized builds when inlined.
-extern IREE_ATTRIBUTE_ALWAYS_INLINE iree_status_t
-loom_amdgpu_wait_actions_build_common_tables(
+iree_status_t loom_amdgpu_wait_actions_build_hazard_plan(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_wait_classification_t* classification,
     const uint64_t* elided_wait_nodes, iree_host_size_t progress_event_count,
     const loom_amdgpu_wait_actions_t* actions, iree_arena_allocator_t* arena,
-    loom_low_packet_progress_table_t* out_progress,
     loom_low_packet_hazard_plan_t* out_hazard_plan) {
-  *out_progress = (loom_low_packet_progress_table_t){0};
-  *out_hazard_plan = (loom_low_packet_hazard_plan_t){0};
+  loom_low_packet_progress_table_t progress = {0};
   loom_amdgpu_wait_action_publication_t publication = {
       .schedule = schedule,
       .classification = classification,
@@ -282,25 +277,21 @@ loom_amdgpu_wait_actions_build_common_tables(
       .actions = actions,
   };
 
-  const loom_low_packet_progress_table_t* progress = NULL;
-  if (allocation != NULL) {
-    const loom_low_packet_progress_provider_t progress_provider = {
-        .user_data = &publication,
-        .event_count = progress_event_count,
-        .query = loom_amdgpu_wait_actions_progress_query,
-        .class_name = loom_amdgpu_wait_counter_progress_class_name,
-    };
-    IREE_RETURN_IF_ERROR(loom_low_packet_progress_build(
-        schedule, allocation, &progress_provider, arena, out_progress));
-    progress = out_progress;
-  }
-
+  const loom_low_packet_progress_provider_t progress_provider = {
+      .user_data = &publication,
+      .event_count = progress_event_count,
+      .query = loom_amdgpu_wait_actions_progress_query,
+      .class_name = loom_amdgpu_wait_counter_progress_class_name,
+  };
+  IREE_RETURN_IF_ERROR(loom_low_packet_progress_build(
+      schedule, allocation, &progress_provider, arena, &progress));
   loom_amdgpu_wait_actions_advance_hazard(&publication);
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       .user_data = &publication,
       .event_count = actions->hazard_event_count,
       .query = loom_amdgpu_wait_actions_hazard_query,
   };
-  return loom_low_packet_hazard_plan_build(
-      schedule, allocation, progress, &hazard_provider, arena, out_hazard_plan);
+  return loom_low_packet_hazard_plan_build(schedule, allocation, &progress,
+                                           &hazard_provider, arena,
+                                           out_hazard_plan);
 }

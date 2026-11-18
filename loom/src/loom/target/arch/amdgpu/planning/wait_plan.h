@@ -144,10 +144,6 @@ typedef struct loom_amdgpu_wait_plan_t {
   const loom_low_schedule_table_t* schedule;
   // Optional allocation table used for physical-assignment hazards.
   const loom_low_allocation_table_t* allocation;
-  // Canonical counter-progress sidecar for explicit waits and producers.
-  loom_low_packet_progress_table_t progress;
-  // Canonical residual hazard sidecar for planned wait actions.
-  loom_low_packet_hazard_plan_t hazard_plan;
   // AMDGPU implementation action rows in scheduled packet order.
   const loom_amdgpu_wait_plan_action_t* actions;
   // Number of action records.
@@ -207,6 +203,7 @@ iree_string_view_t loom_amdgpu_wait_plan_residual_action_name(
 // state is allocated from |transient_arena| and may be discarded after this
 // function returns. The caller must keep |schedule| and |allocation| immutable
 // and |arena| alive for as long as |out_plan| is used.
+// Optional |out_hazards| receives a packet-by-packet explanation.
 iree_status_t loom_amdgpu_wait_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
@@ -215,11 +212,8 @@ iree_status_t loom_amdgpu_wait_plan_build(
     iree_arena_allocator_t* matrix_arena, iree_arena_allocator_t* arena,
     iree_arena_allocator_t* transient_arena,
     struct loom_amdgpu_matrix_result_wait_t** out_matrix_results,
+    loom_low_packet_hazard_plan_t* out_hazards,
     loom_amdgpu_wait_plan_t* out_plan);
-
-// Appends the common packet hazard JSON representation of |plan| to |builder|.
-iree_status_t loom_amdgpu_wait_plan_format_json(
-    const loom_amdgpu_wait_plan_t* plan, iree_string_builder_t* builder);
 
 #ifdef __cplusplus
 }  // extern "C"
