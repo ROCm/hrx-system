@@ -108,6 +108,10 @@ iree_status_t iree_hal_amd_xdna_profile_begin(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "counter selections require XDNA counter capture");
   }
+  // Before the sink session starts, like every other rejected request: a
+  // device group may then drop the counter family for this device alone.
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amd_xdna_profile_counters_check_selection(options));
   const iree_host_size_t queue_capacity =
       families & IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS
           ? IREE_HAL_AMD_XDNA_PROFILE_CAPACITY

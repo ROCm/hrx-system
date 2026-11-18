@@ -383,7 +383,8 @@ device ordinal, queue ordinal, command-buffer identity, command-index range,
 and executable function pattern. The session retains its own pattern bytes.
 Whole-invocation exclusions avoid dispatch capture; per-command exclusions are
 applied during retirement without a submission-time walk of the recording.
-Hardware counters require a native counter service and are rejected explicitly.
+Executable traces and hardware counters are described below; any other family
+is rejected explicitly.
 
 ### Dispatch timing
 
@@ -418,6 +419,40 @@ later sink flush. Raw ticks use the exact native family's timestamp frequency;
 they have no inferred host epoch and cannot establish
 host-request-to-first-workgroup latency. Queue events remain the lighter option
 when device intervals are unnecessary.
+
+### Executable traces and hardware counters
+
+`IREE_HAL_DEVICE_PROFILING_DATA_EXECUTABLE_TRACES` brackets a dispatch or a
+recorded execution with an SQ thread trace.
+`IREE_HAL_DEVICE_PROFILING_DATA_COUNTER_SAMPLES` samples SQG and SQ performance
+counters around each dispatch. The host publishes both from the primary PM4
+ring, so they need USER-published PM4 compute queues. AQL queues and KERNEL
+publication return `UNIMPLEMENTED`: that is a gap in the driver on every GPU
+generation, not a limit of the hardware, and the status says so.
+
+The sequences take every register address, control value, layout difference and
+event number from a per-target table (`queue/pm4/thread_trace.c`,
+`queue/pm4/perf_counters.c`). Each entry records whether it has run on hardware:
+
+| Target | Traces | Counters | State |
+| --- | --- | --- | --- |
+| GFX11.5.1 (`gfx1151`) | yes | yes | Verified on hardware. |
+| GFX11.5.0, .2, .3 (`gfx1150`, `gfx1152`, `gfx1153`) | yes | yes | Unverified. Same table as `gfx1151`. |
+| GFX11.0 (`gfx1100` to `gfx1103`) | yes | yes | Unverified. Same table; the trace write pointer counts from the buffer base. |
+| GFX12.0 (`gfx1200`, `gfx1201`) | yes | yes | Unverified. Split trace buffer base registers, `SPI_SQG_EVENT_CTL` for the event enables, other control and token values, renumbered counter events. |
+| GFX9, GFX10, GFX11.7, GFX12.5 | no | no | Refused with `UNIMPLEMENTED`. The status names what differs on the target and where the missing values are documented. |
+
+`gfx1151` is the only GPU these sequences have run on. An unverified entry is
+transcribed from the Mesa and ROCm register databases and event enumerations
+and has never executed. A session on one proceeds, writes one warning line to
+stderr when it begins, and sets `UNVERIFIED_TARGET` in every executable-trace
+capture record and counter capture record, so no consumer can take its numbers
+for verified ones. Trace and counter-sample records are the same on every
+target.
+
+Adding a generation is a table entry when its registers have the GFX11 or GFX12
+shape. GFX9 and GFX10 need more: their thread-trace registers, packets and stop
+sequences differ, and they have no SQG counter block.
 
 ## Memory construction
 

@@ -8,6 +8,7 @@
 #define IREE_HAL_CTS_UTIL_PROFILE_TEST_UTIL_H_
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "iree/hal/api.h"
@@ -110,6 +111,44 @@ struct TestProfileSink {
 
   // Event relationship records copied from EVENT_RELATIONSHIPS chunks.
   std::vector<iree_hal_profile_event_relationship_record_t> event_relationships;
+
+  struct ExecutableTrace {
+    // Trace identity copied from the record preceding the raw bytes.
+    iree_hal_profile_executable_trace_record_t record;
+    // Chunk flags and dropped count of the chunk that carried the trace.
+    uint64_t chunk_flags;
+    uint64_t dropped_record_count;
+  };
+
+  // Trace records copied from EXECUTABLE_TRACES chunks, without their bytes.
+  std::vector<ExecutableTrace> executable_traces;
+
+  // Capture records copied from EXECUTABLE_TRACE_CAPTURES chunks.
+  std::vector<iree_hal_profile_executable_trace_capture_record_t>
+      executable_trace_captures;
+
+  struct Counter {
+    // Counter description preceding its three strings.
+    iree_hal_profile_counter_record_t record;
+    // Counter name, without its block name and description.
+    std::string name;
+  };
+
+  // Counter records copied from COUNTERS chunks.
+  std::vector<Counter> counters;
+
+  struct CounterSample {
+    // Sample identity preceding its value vector.
+    iree_hal_profile_counter_sample_record_t record;
+    // Values in the layout of the sample's counter set.
+    std::vector<uint64_t> values;
+  };
+
+  // Sample records copied from COUNTER_SAMPLES chunks.
+  std::vector<CounterSample> counter_samples;
+
+  // Capture records copied from COUNTER_CAPTURES chunks, in emission order.
+  std::vector<iree_hal_profile_counter_capture_record_t> counter_captures;
 
   // Executable identifiers copied from EXECUTABLES chunks.
   std::vector<uint64_t> executable_ids;

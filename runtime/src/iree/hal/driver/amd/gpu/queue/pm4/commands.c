@@ -278,6 +278,66 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_write(uint32_t* words,
   return payload + value_count;
 }
 
+uint32_t* iree_hal_amd_gpu_pm4_emit_uconfig_registers(uint32_t* words,
+                                                      uint32_t first_register,
+                                                      uint32_t value_count,
+                                                      const uint32_t* values) {
+  words[0] = iree_hal_amd_gpu_pm4_header(0x79, value_count + 2);
+  words[1] = (first_register - 0x30000) >> 2;
+  iree_memcpy_write_only(words + 2, values, value_count * sizeof(*values));
+  return words + 2 + value_count;
+}
+
+uint32_t* iree_hal_amd_gpu_pm4_emit_copy_register32(uint32_t* words,
+                                                    uint32_t register_address,
+                                                    uint64_t target_address) {
+  words[0] = UINT32_C(0xc0044000);
+  // Performance-register source, TC/L2 destination, 32 bits, confirmation.
+  words[1] = 4 | (2 << 8) | (1 << 20);
+  words[2] = register_address >> 2;
+  words[3] = 0;
+  words[4] = (uint32_t)target_address;
+  words[5] = (uint32_t)(target_address >> 32);
+  return words + 6;
+}
+
+uint32_t* iree_hal_amd_gpu_pm4_emit_event(uint32_t* words,
+                                          uint32_t event_type) {
+  words[0] = UINT32_C(0xc0004600);
+  words[1] = event_type;
+  return words + 2;
+}
+
+uint32_t* iree_hal_amd_gpu_pm4_emit_wait_register32(
+    uint32_t* words, uint32_t register_address, uint32_t reference,
+    uint32_t mask, iree_hal_amd_gpu_pm4_comparison_t comparison) {
+  words[0] = UINT32_C(0xc0053c00);
+  // Register space, polled by MEC itself.
+  words[1] = (uint32_t)comparison;
+  words[2] = register_address >> 2;
+  words[3] = 0;
+  words[4] = reference;
+  words[5] = mask;
+  words[6] = 4;
+  return words + 7;
+}
+
+uint32_t* iree_hal_amd_gpu_pm4_emit_engine_select(uint32_t* words,
+                                                  uint32_t index_register,
+                                                  uint32_t shader_engine) {
+  // SE index, array zero, instance broadcast.
+  const uint32_t value = (shader_engine << 16) | (1u << 30);
+  return iree_hal_amd_gpu_pm4_emit_uconfig_registers(words, index_register, 1,
+                                                     &value);
+}
+
+uint32_t* iree_hal_amd_gpu_pm4_emit_engine_broadcast(uint32_t* words,
+                                                     uint32_t index_register) {
+  const uint32_t value = UINT32_C(0xe0000000);
+  return iree_hal_amd_gpu_pm4_emit_uconfig_registers(words, index_register, 1,
+                                                     &value);
+}
+
 uint32_t* iree_hal_amd_gpu_pm4_emit_nop(uint32_t* words, uint32_t word_count) {
   words[0] = iree_hal_amd_gpu_pm4_header(0x10, word_count);
   iree_memset_write_only(words + 1, 0, (word_count - 1) * sizeof(*words));

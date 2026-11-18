@@ -700,6 +700,33 @@ TEST(XdnaProfileTest,
   EXPECT_EQ(harness.native.result.collects, 0u);
 }
 
+TEST(XdnaProfileTest, UnavailableCounterIsRejectedBeforeTheSinkSession) {
+  ProfileSink sink;
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  // A counter of another device in the same group.
+  const iree_string_view_t names[] = {IREE_SVL("sqg")};
+  const iree_hal_profile_counter_set_selection_t selection = {
+      .counter_name_count = 1,
+      .counter_names = names,
+  };
+  const iree_hal_device_profiling_options_t options = {
+      .data_families = IREE_HAL_DEVICE_PROFILING_DATA_QUEUE_EVENTS |
+                       IREE_HAL_DEVICE_PROFILING_DATA_COUNTER_SAMPLES,
+      .sink = sink.base(),
+      .counter_set_count = 1,
+      .counter_sets = &selection,
+  };
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      iree_hal_device_profiling_begin(harness.device, &options));
+  // No session was begun and failed: the caller can retry with fewer families
+  // and the sink records only the session that is finally accepted.
+  EXPECT_EQ(sink.begins, 0);
+  EXPECT_EQ(sink.ends, 0);
+  EXPECT_EQ(harness.native.result.attaches, 0u);
+}
+
 TEST(XdnaProfileTest, MetadataOverflowPreservesRetainedNames) {
   ProfileSink sink;
   QueueHarness harness;
