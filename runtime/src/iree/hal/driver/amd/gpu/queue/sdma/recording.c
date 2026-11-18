@@ -118,12 +118,25 @@ iree_status_t iree_hal_amd_gpu_sdma_recording_seal(
     const iree_hal_amd_gpu_sdma_recording_t* recording,
     iree_hal_amd_gpu_sdma_program_t* out_program) {
   *out_program = (iree_hal_amd_gpu_sdma_program_t){0};
+  // KERNEL submissions acquire after all input dependencies and release before
+  // their checked retirement signals consumers. Only a visibility boundary
+  // between recorded commands needs a separate retirement.
+  const iree_hal_amd_gpu_sdma_program_segment_t* segments = recording->segments;
+  uint32_t segment_count = recording->segment_count;
+  if (segment_count &&
+      segments[0].kind == IREE_HAL_AMD_GPU_SDMA_PROGRAM_RETIRE) {
+    ++segments;
+    --segment_count;
+  }
+  if (segment_count && segments[segment_count - 1].kind ==
+                           IREE_HAL_AMD_GPU_SDMA_PROGRAM_RETIRE) {
+    --segment_count;
+  }
   iree_host_size_t size = 0, segments_offset = 0, fixups_offset = 0;
   iree_host_size_t words_offset = 0, data_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       0, &size,
-      IREE_STRUCT_FIELD(recording->segment_count,
-                        iree_hal_amd_gpu_sdma_program_segment_t,
+      IREE_STRUCT_FIELD(segment_count, iree_hal_amd_gpu_sdma_program_segment_t,
                         &segments_offset),
       IREE_STRUCT_FIELD(recording->fixup_count, iree_hal_amd_gpu_fixup_t,
                         &fixups_offset),
@@ -134,9 +147,9 @@ iree_status_t iree_hal_amd_gpu_sdma_recording_seal(
   uint8_t* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_uninitialized(
       recording->storage.host_allocator, iree_max(size, 1u), (void**)&storage));
-  if (recording->segment_count) {
-    memcpy(storage + segments_offset, recording->segments,
-           recording->segment_count * sizeof(*recording->segments));
+  if (segment_count) {
+    memcpy(storage + segments_offset, segments,
+           segment_count * sizeof(*segments));
   }
   if (recording->fixup_count) {
     memcpy(storage + fixups_offset, recording->fixups,
@@ -151,7 +164,7 @@ iree_status_t iree_hal_amd_gpu_sdma_recording_seal(
       .storage = storage,
       .features = recording->features,
       .segments = (const void*)(storage + segments_offset),
-      .segment_count = recording->segment_count,
+      .segment_count = segment_count,
       .words = (const void*)(storage + words_offset),
       .fixups = (const void*)(storage + fixups_offset),
       .data = {storage + data_offset, recording->storage.data.length},
@@ -168,12 +181,9 @@ iree_status_t iree_hal_amd_gpu_sdma_recording_barrier(
   if (profile.submission && visibility) {
     return iree_hal_amd_gpu_sdma_recording_retire(recording);
   }
-  const uint32_t cache =
-      ((barrier & IREE_HAL_AMD_GPU_SDMA_BARRIER_ACQUIRE) ? profile.acquire
-                                                         : 0) |
-      ((barrier & IREE_HAL_AMD_GPU_SDMA_BARRIER_RELEASE) ? profile.release : 0);
-  const bool join = (barrier & IREE_HAL_AMD_GPU_SDMA_BARRIER_JOIN) != 0;
-  const uint32_t word_count = (join ? 1u : 0u) + (cache ? 5u : 0u);
+  uint32_t cache = 0;
+  const uint32_t word_count =
+      iree_hal_amd_gpu_sdma_barrier_word_count(profile, barrier, &cache);
   if (!word_count) {
     return iree_ok_status();
   }
@@ -181,7 +191,7 @@ iree_status_t iree_hal_amd_gpu_sdma_recording_barrier(
   uint32_t* words = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_sdma_recording_commands(
       recording, word_count, &offset, &words));
-  if (join) {
+  if (barrier & IREE_HAL_AMD_GPU_SDMA_BARRIER_JOIN) {
     *words++ = 0;
   }
   if (cache) {

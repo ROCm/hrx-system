@@ -48,6 +48,19 @@ iree_hal_amd_gpu_sdma_barrier_profile_t iree_hal_amd_gpu_sdma_barrier_profile(
     amdf_queue_format_features_t features,
     amdf_queue_publication_modes_t publication_mode);
 
+// Returns the exact number of DWORDs for the optional join NOP and GCR packet.
+// Stores the GCR control bits in |out_cache_control|, or zero to omit it.
+static inline uint32_t iree_hal_amd_gpu_sdma_barrier_word_count(
+    iree_hal_amd_gpu_sdma_barrier_profile_t profile,
+    iree_hal_amd_gpu_sdma_barrier_t barrier, uint32_t* out_cache_control) {
+  *out_cache_control =
+      ((barrier & IREE_HAL_AMD_GPU_SDMA_BARRIER_ACQUIRE) ? profile.acquire
+                                                         : 0) |
+      ((barrier & IREE_HAL_AMD_GPU_SDMA_BARRIER_RELEASE) ? profile.release : 0);
+  return ((barrier & IREE_HAL_AMD_GPU_SDMA_BARRIER_JOIN) ? 1u : 0u) +
+         (*out_cache_control ? 5u : 0u);
+}
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

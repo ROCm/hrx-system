@@ -192,7 +192,8 @@ TEST_P(GpuTransferQueueTest,
   CreateSemaphore(done.out());
   auto* gate_handle = gate.get();
   auto* done_handle = done.get();
-  uint64_t one = 1, read = 1, copied = 2, computed = 3, written = 4;
+  uint64_t one = 1, read = 1, produced = 2, copied = 3, consumed = 4,
+           written = 5;
   IREE_ASSERT_OK(iree_hal_queue_read_linear(
       transfer_, {1, &gate_handle, &one}, {1, &done_handle, &read}, file,
       kFileOffset, buffers[0], kBufferOffset, kLength, nullptr, 0));
@@ -207,14 +208,19 @@ TEST_P(GpuTransferQueueTest,
   std::array<iree_hal_buffer_binding_t, 2> bindings = {
       {{buffers[0], kBufferOffset, kLength},
        {buffers[1], kBufferOffset, kLength}}};
+  // The SDMA recording must see the producer's store, and the consumer must
+  // see the copy. There is no host wait between the three submissions.
+  IREE_ASSERT_OK(iree_hal_queue_execute(extra_compute, {1, &done_handle, &read},
+                                        {1, &done_handle, &produced}, compute,
+                                        {1, &bindings[0]}, 0));
   IREE_ASSERT_OK(iree_hal_queue_execute(
-      extra_transfer, {1, &done_handle, &read}, {1, &done_handle, &copied},
+      extra_transfer, {1, &done_handle, &produced}, {1, &done_handle, &copied},
       copy, {bindings.size(), bindings.data()}, 0));
   IREE_ASSERT_OK(iree_hal_queue_execute(
-      extra_compute, {1, &done_handle, &copied}, {1, &done_handle, &computed},
+      extra_compute, {1, &done_handle, &copied}, {1, &done_handle, &consumed},
       compute, {1, &bindings[1]}, 0));
   IREE_ASSERT_OK(iree_hal_queue_write_linear(
-      transfer_, {1, &done_handle, &computed}, {1, &done_handle, &written},
+      transfer_, {1, &done_handle, &consumed}, {1, &done_handle, &written},
       buffers[1], kBufferOffset, file, kFileOffset + kLength, kLength, nullptr,
       0));
   bindings.fill({});
@@ -232,7 +238,7 @@ TEST_P(GpuTransferQueueTest,
   // The external file is the final output, including preservation of guards.
   std::memcpy(contents.data() + (kFileOffset + kLength) / 4,
               contents.data() + kFileOffset / 4, kLength);
-  contents[(kFileOffset + kLength) / 4] += addend;
+  contents[(kFileOffset + kLength) / 4] += 2 * addend;
   iree_io_file_contents_t* actual = nullptr;
   IREE_ASSERT_OK(iree_io_file_contents_read(path_.path_view(),
                                             iree_allocator_system(), &actual));

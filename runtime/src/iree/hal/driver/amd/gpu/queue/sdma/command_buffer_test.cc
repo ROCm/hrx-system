@@ -533,12 +533,13 @@ TEST_F(CommandBufferTest,
   EXPECT_EQ(copied, kLength);
 }
 
-TEST_F(CommandBufferTest, KernelCacheBoundaryCannotBecomeAnInStreamMarker) {
+TEST_F(CommandBufferTest, KernelSubmissionsSplitOnlyAtInteriorCacheBoundaries) {
   const auto features = AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR;
   auto* source = MakeBuffer(0x1000, 64);
   auto* target = MakeBuffer(0x2000, 64);
   ASSERT_NO_FATAL_FAILURE(
       Begin(0, features, AMDF_QUEUE_PUBLICATION_MODE_KERNEL));
+  ASSERT_NO_FATAL_FAILURE(Barrier(IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE));
   for (uint32_t i = 0; i < 2; ++i) {
     if (i) {
       ASSERT_NO_FATAL_FAILURE(
@@ -548,6 +549,7 @@ TEST_F(CommandBufferTest, KernelCacheBoundaryCannotBecomeAnInStreamMarker) {
         recording_, iree_hal_make_buffer_ref(&source->base, i * 8, 8),
         iree_hal_make_buffer_ref(&target->base, i * 8, 8), 0));
   }
+  ASSERT_NO_FATAL_FAILURE(Barrier(IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(recording_));
   Invocation invocation;
   IREE_ASSERT_OK(invocation.Initialize(recording_));
@@ -559,6 +561,20 @@ TEST_F(CommandBufferTest, KernelCacheBoundaryCannotBecomeAnInStreamMarker) {
   // The queue must retire that native submission before requesting this span.
   EXPECT_EQ(Emit(invocation, &progress),
             (std::vector<uint32_t>{1, 7, 0, 0x1008, 0, 0x2008, 0}));
+  EXPECT_EQ(progress, IREE_HAL_AMD_GPU_SDMA_PROGRAM_END);
+}
+
+TEST_F(CommandBufferTest, BarrierOnlyKernelRecordingEndsOnItsFirstSubmission) {
+  ASSERT_NO_FATAL_FAILURE(Begin(0, AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR,
+                                AMDF_QUEUE_PUBLICATION_MODE_KERNEL));
+  ASSERT_NO_FATAL_FAILURE(Barrier(IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE));
+  ASSERT_NO_FATAL_FAILURE(Barrier(IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording_));
+  Invocation invocation;
+  IREE_ASSERT_OK(invocation.Initialize(recording_));
+  IREE_ASSERT_OK(invocation.Resolve(0));
+  iree_hal_amd_gpu_sdma_program_progress_t progress;
+  EXPECT_TRUE(Emit(invocation, &progress).empty());
   EXPECT_EQ(progress, IREE_HAL_AMD_GPU_SDMA_PROGRAM_END);
 }
 
