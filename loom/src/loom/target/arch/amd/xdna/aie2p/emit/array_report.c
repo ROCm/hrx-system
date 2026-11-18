@@ -11,6 +11,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/combining_kind.h"
 #include "loom/ops/encoding/storage.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/program_report.h"
 #include "loom/util/fact_table.h"
 
 typedef struct loom_aie2p_array_report_tile_usage_t {
@@ -392,6 +393,7 @@ iree_status_t loom_aie2p_array_report_record(
     return iree_ok_status();
   }
 
+  loom_aie2p_program_report_t callables = {0};
   const bool wants_rows = loom_target_compile_report_wants_details(
       report, LOOM_TARGET_COMPILE_REPORT_DETAIL_PIPELINE_PLAN_ROWS);
   loom_target_compile_report_pipeline_worker_row_t* worker_rows = NULL;
@@ -436,8 +438,15 @@ iree_status_t loom_aie2p_array_report_record(
   bool has_local_headroom = false;
   for (iree_host_size_t i = 0; i < plan->worker_count; ++i) {
     const loom_aie2p_array_worker_t* worker = &plan->workers[i];
+    IREE_RETURN_IF_ERROR(loom_aie2p_program_report_worker(
+        &callables, scratch_arena, (uint32_t)i,
+        (loom_target_compile_report_pipeline_placement_t){
+            .rank = 2,
+            .x = worker->coordinate.column,
+            .y = worker->coordinate.row},
+        tiles[i].program, NULL, tiles[i].linked_tile));
     const loom_aie2p_leaf_realization_t* realization =
-        &tiles[i].contribution->realization;
+        &tiles[i].program->contribution.realization;
     const loom_xdna_tile_facts_t* tile_facts =
         loom_xdna_array_tile_facts(plan->family, worker->coordinate);
     loom_aie2p_array_report_tile_usage_t usage = {0};
@@ -555,6 +564,10 @@ iree_status_t loom_aie2p_array_report_record(
 
   const loom_target_compile_report_pipeline_plan_t report_plan = {
       .summary = summary,
+      .functions = callables.functions,
+      .function_count = callables.function_count,
+      .packet_loops = callables.loops,
+      .packet_loop_count = callables.loop_count,
       .worker_rows = worker_rows,
       .worker_row_count = wants_rows ? plan->worker_count : 0,
       .channel_rows = channel_rows,

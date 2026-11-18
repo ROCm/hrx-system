@@ -181,6 +181,30 @@ typedef struct loom_aie2p_leaf_resource_import_t {
   loom_type_kind_t source_type_kind;
 } loom_aie2p_leaf_resource_import_t;
 
+// An architectural LS–LE region admitted after final bundle alignment.
+typedef struct loom_aie2p_issue_loop_t {
+  // Offset of the first repeated packet in this function's code.
+  uint32_t byte_offset;
+  // Physical packets in the region, including implicit empty packets.
+  uint32_t packet_count;
+  // Exact LC value each time the setup runs.
+  uint32_t trip_count;
+} loom_aie2p_issue_loop_t;
+
+// Function-local packet evidence retained on a requested compile report.
+typedef struct loom_aie2p_function_issue_t {
+  // Function spelling from the source module retained with the compile report.
+  iree_string_view_t name;
+  // Admitted hardware loops in physical order.
+  loom_aie2p_issue_loop_t* loops;
+  // Number of populated records in |loops|.
+  iree_host_size_t loop_count;
+  // Number of physically encoded packets, including implicit NOP gaps.
+  uint32_t stored_packet_count;
+  // Whether native control can skip or replay packets outside the listed loops.
+  bool has_unaccounted_control;
+} loom_aie2p_function_issue_t;
+
 // Immutable physical AIE2P program produced for one Low leaf function.
 //
 // The function name and all pointer tables are owned by the plan arena. The

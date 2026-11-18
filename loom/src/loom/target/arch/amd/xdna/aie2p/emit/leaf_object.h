@@ -130,6 +130,9 @@ typedef struct loom_aie2p_leaf_contribution_t {
   loom_native_object_contribution_t object;
   // Exact AIE2P planning and linking facts.
   loom_aie2p_leaf_realization_t realization;
+  // Optional native issue evidence. Shared cached bodies borrow the same
+  // evidence; physical placement and caller frequency are program properties.
+  const loom_aie2p_function_issue_t* issue;
 } loom_aie2p_leaf_contribution_t;
 
 // Emits one arena-owned native leaf contribution from |plan|.

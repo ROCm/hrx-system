@@ -171,11 +171,21 @@ iree_status_t loom_aie2p_leaf_compile(
   }
   loom_aie2p_leaf_program_plan_t program_plan = {0};
   bool program_planned = false;
+  loom_aie2p_function_issue_t* issue = NULL;
+  if (iree_status_is_ok(status) && stack_accepted && options->compile_report) {
+    status = iree_arena_allocate(arena, sizeof(*issue), (void**)&issue);
+    if (iree_status_is_ok(status)) {
+      *issue = (loom_aie2p_function_issue_t){
+          .name = options->compile_report->lowered_symbol};
+    }
+  }
   if (iree_status_is_ok(status) && stack_accepted) {
     const loom_aie2p_bundle_plan_options_t plan_options = {
         .stack = stack,
         .diagnostic_emitter = options->diagnostic_emitter,
         .return_address = options->return_address,
+        .issue = issue,
+        .issue_arena = arena,
     };
     status = loom_aie2p_bundle_plan_build(&frame, &plan_options, &scratch_arena,
                                           &program_planned, &program_plan);
@@ -210,6 +220,7 @@ iree_status_t loom_aie2p_leaf_compile(
         loom_aie2p_leaf_object_emit(&program_plan, arena, out_contribution);
   }
   if (iree_status_is_ok(status) && program_planned && capacity_admitted) {
+    out_contribution->issue = issue;
     *out_compiled = true;
   }
   iree_arena_deinitialize(&stack_arena);

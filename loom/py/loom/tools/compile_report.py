@@ -34,6 +34,11 @@ for one compiler checkout. Start here before querying the complete report tree.
 
 ### Establish that the execution shape is worth optimizing
 
+Use `loom-compile-report show kernel.report.json --function 'reduce_rows*'` to
+see an XDNA callable's final tile and loaded group, stored packets, repeated
+native loops, and exclusive packets per call. Request-dependent visits require
+a request shape or device evidence.
+
 Data reuse comes first. Before tuning, establish a known-good oracle's native
 instruction mix, controlled performance on the intended machine, and data reuse
 policy: paneling, tile and batch sizes, prefill chunks, operand residency,
@@ -178,8 +183,17 @@ def run(args: argparse.Namespace, *, stdout: TextIO) -> int:
     """Runs parsed CLI arguments and returns a process exit code."""
     if args.command == "show":
         document = load_compile_report(args.report)
-        view = build_compile_report_show(document)
-        format_text = format_compile_report_show_text
+        if args.function is None:
+            view = build_compile_report_show(document)
+            format_text = format_compile_report_show_text
+        else:
+            from loom.reporting.compile_report_pipelines import (
+                format_placed_function_text,
+                placed_function_view,
+            )
+
+            view = placed_function_view(document, args.function)
+            format_text = format_placed_function_text
     elif args.command == "diff":
         baseline = load_compile_report(args.baseline)
         candidate = load_compile_report(args.candidate)
@@ -237,6 +251,11 @@ def _create_argument_parser() -> argparse.ArgumentParser:
         help="Renders emitted artifact facts and compiler analysis.",
     )
     show_parser.add_argument("report", type=Path, help="Compile report JSON path.")
+    show_parser.add_argument(
+        "--function",
+        metavar="GLOB",
+        help="Show placements, packet loops, and call counts for matching functions.",
+    )
     _add_output_format_argument(show_parser)
 
     diff_parser = subparsers.add_parser(

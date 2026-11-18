@@ -349,9 +349,9 @@ class SyntheticXdnaProduct {
         .visibility = LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
         .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
     };
-    contribution_.object.symbols = &entry_symbol_;
-    contribution_.object.symbol_count = 1;
-    contribution_.realization.entry_symbol_index = 0;
+    program_object_.contribution.object.symbols = &entry_symbol_;
+    program_object_.contribution.object.symbol_count = 1;
+    program_object_.contribution.realization.entry_symbol_index = 0;
 
     records_.resize(tile_count);
     for (iree_host_size_t i = 0; i < tile_count; ++i) {
@@ -372,7 +372,7 @@ class SyntheticXdnaProduct {
                            (uint16_t)(compute->first_row +
                                       j % compute->row_count)},
             .program_name = entry_symbol_.name,
-            .contribution = &contribution_,
+            .program = &program_object_,
             .linked_tile = &linked_tile_,
         };
       }
@@ -404,7 +404,7 @@ class SyntheticXdnaProduct {
   std::array<loom_aie2p_linked_section_placement_t, 3> placements_ = {};
   loom_aie2p_linked_tile_t linked_tile_ = {};
   loom_native_object_symbol_t entry_symbol_ = {};
-  loom_aie2p_leaf_contribution_t contribution_ = {};
+  loom_aie2p_program_object_t program_object_ = {};
   std::vector<loom_aie2p_program_record_t> records_;
   loom_aie2p_array_program_t array_program_ = {};
   std::vector<loom_aie2p_xdna_tile_t> tiles_;
@@ -502,15 +502,15 @@ TEST_F(XdnaProductTest, LoadsInitializedTileSectionsBeforeActivation) {
       .visibility = LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
       .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
   };
-  loom_aie2p_leaf_contribution_t contribution = {};
-  contribution.object.symbols = &entry_symbol;
-  contribution.object.symbol_count = 1;
-  contribution.realization.entry_symbol_index = 0;
+  loom_aie2p_program_object_t tile_program = {};
+  tile_program.contribution.object.symbols = &entry_symbol;
+  tile_program.contribution.object.symbol_count = 1;
+  tile_program.contribution.realization.entry_symbol_index = 0;
 
   const loom_aie2p_xdna_tile_t tile = {
       .coordinate = kCoordinate,
       .program_name = entry_symbol.name,
-      .contribution = &contribution,
+      .program = &tile_program,
       .linked_tile = &linked_tile,
   };
   constexpr uint32_t kActivationAddress = 0x02232000;
@@ -767,14 +767,14 @@ TEST_F(XdnaProductTest, RejectsExactSectionHeaderOverflow) {
       .visibility = LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
       .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
   };
-  loom_aie2p_leaf_contribution_t contribution = {};
-  contribution.object.symbols = &entry_symbol;
-  contribution.object.symbol_count = 1;
-  contribution.realization.entry_symbol_index = 0;
+  loom_aie2p_program_object_t tile_program = {};
+  tile_program.contribution.object.symbols = &entry_symbol;
+  tile_program.contribution.object.symbol_count = 1;
+  tile_program.contribution.realization.entry_symbol_index = 0;
   const loom_aie2p_xdna_tile_t tile = {
       .coordinate = {0, 2},
       .program_name = entry_symbol.name,
-      .contribution = &contribution,
+      .program = &tile_program,
       .linked_tile = &linked_tile,
   };
   loom_aie2p_program_record_t record = {

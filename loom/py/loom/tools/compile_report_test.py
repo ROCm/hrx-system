@@ -827,3 +827,59 @@ def test_suggest_json_reports_unsupported_family_without_provider(
     assert view["reason"] == "unsupported_target_family"
     assert "provider" not in view
     assert view["findings"] == []
+
+
+def test_show_placed_function_from_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "array.report.json"
+    row = {
+        "function": "rows_specialized",
+        "worker_index": 2,
+        "placement": {"rank": 2, "x": 0, "y": 4},
+        "group": 1,
+        "address": 48,
+        "code_byte_count": 64,
+        "stored_packet_count": 18,
+        "packet_loops": [{"byte_offset": 16, "packet_count": 5, "trip_count": 3}],
+        "packets_per_call": 28,
+        "calls_per_entry": None,
+    }
+    plan = {
+        "root": "pipeline",
+        "placed_functions": [
+            row,
+            {
+                **row,
+                "function": "conditional",
+                "packets_per_call": None,
+                "calls_per_entry": 1,
+            },
+        ],
+    }
+    report = {
+        "kind": "loom.compile_report",
+        "schema_version": 0,
+        "mode": "summary",
+        "status": {"code": 0, "name": "OK"},
+        "entries": {"count": 0, "rows": []},
+        "pipeline_plans": [plan],
+    }
+    path.write_text(json.dumps(report))
+    assert main(["show", str(path), "--function", "rows*"]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "1 callable placement matching rows*",
+        "pipeline / worker 2 (0,4) group 1 @0x30  rows_specialized  "
+        "64 bytes, 18 stored packets, 28 packets/call, unknown calls/entry",
+        "  loop +16 bytes  5 packets per trip, 3 trips",
+    ]
+    assert main(["show", str(path), "--function", "conditional", "--format=json"]) == 0
+    (conditional,) = json.loads(capsys.readouterr().out)["functions"]
+    assert conditional["calls_per_entry"] == 1
+    assert conditional["packets_per_call"] is None
+    assert main(["show", str(path), "--function", "absent"]) != 0
+    assert "no placed native function matches" in capsys.readouterr().err
+    del plan["placed_functions"]
+    path.write_text(json.dumps(report))
+    assert main(["show", str(path), "--function", "rows*"]) != 0
+    assert "no placed native function inventory" in capsys.readouterr().err

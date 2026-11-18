@@ -8,6 +8,7 @@
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_EMIT_CONFIGURATION_REPORT_H_
 
 #include "loom/analysis/source_storage_packing.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/program_object.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/tile_link.h"
 #include "loom/target/reporting/report.h"
 
@@ -45,8 +46,9 @@ iree_status_t loom_aie2p_configuration_report_reservations(
 iree_status_t loom_aie2p_configuration_report_worker(
     loom_aie2p_configuration_report_t* report, iree_string_view_t entry_name,
     loom_xdna_tile_coordinate_t coordinate,
-    const loom_aie2p_leaf_realization_t* realization,
-    const loom_aie2p_tile_link_layout_t* layout);
+    const loom_aie2p_program_object_t* program,
+    const loom_aie2p_tile_link_layout_t* layout,
+    const loom_aie2p_linked_tile_t* linked);
 
 // Copies the complete physical inventory to the destination report. Borrowed
 // names have the destination report's module lifetime; no arena strings escape.

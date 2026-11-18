@@ -66,6 +66,10 @@ typedef struct loom_aie2p_program_object_t {
   const loom_aie2p_program_function_t* functions;
   // Number of logical functions, including the program entry.
   iree_host_size_t function_count;
+  // Optional report-only calls per entry, in helper order. The entry itself
+  // runs once. Logical helpers retain separate counts when they share code.
+  const struct loom_target_compile_report_function_merge_options_t*
+      helper_invocations;
 } loom_aie2p_program_object_t;
 
 // One independently placeable code section. The lifetime owner chooses which

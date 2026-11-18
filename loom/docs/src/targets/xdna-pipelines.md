@@ -383,6 +383,19 @@ measurement whenever it could change the choice of schedule.
    never enters contributes zero. Compare the result against core events on
    every participating tile. Preserve the collection window and event mask
    for each counter.
+   For a callable shared across workers, query its final native placements in
+   the summary report. Quote the glob to include specialized copies.
+
+   ```shell
+   loom-compile-report show model.report.json --function 'attention.mask*'
+   ```
+
+   A body with 145 stored packets and a 110-packet region executed four
+   times issues `145 + (4 - 1) × 110 = 475` packets per call. If a fully
+   visible score block takes that path four times, charge it 1,900 packets.
+   The report gives the tile, loaded group, and address for checking the native
+   image. A request-dependent call count appears as `unknown`. Obtain its
+   visits from the request geometry or a matched device capture.
 5. **Trace a wait to its owner.** A core stalled acquiring a record identifies
    the consumer. Locate the matching publication, the producer or DMA that
    performs it, and the event preventing that producer from progressing. A

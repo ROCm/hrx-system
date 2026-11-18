@@ -129,6 +129,24 @@ block envelope: data-dependent alternatives may both contribute. Whole-
 dispatch geometry belongs to a concrete benchmark launch unless the compiled
 artifact genuinely specializes it.
 
+For XDNA array and configuration programs, a summary report can show one
+native callable across its final worker placements.
+
+```shell
+loom-compile-report show kernel.report.json --function 'reduce_rows*'
+```
+
+Each row identifies the worker, tile, loaded code group, and address. Two
+names sharing all of those occupy one physical body and retain their own
+call counts. Stored packets describe the footprint once. Packets per call
+include empty issue slots and repetitions of admitted hardware loops, and
+exclude the work inside callees. The loop offset is relative to the function
+entry. If a remaining native branch needs taken-edge counts, the function
+total is unknown. Its admitted loops still report their packet and trip
+counts. Caller frequency is independent and can also be unknown. Both
+quantities use `unknown` in text and `null` in JSON. Device counters supply
+elapsed cycles and stalls.
+
 Register-move analysis includes compiler-classified causes. Summary reports
 preserve the aggregate packet and register-unit counts; detailed reports let
 `show` enumerate causes and let `diff` distinguish added, removed, changed, and

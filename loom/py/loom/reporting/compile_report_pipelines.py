@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from fnmatch import fnmatchcase
+
 from loom.reporting.compile_report import CompileReportDocument, CompileReportError
 
 _CODE_FIELDS = {
@@ -93,6 +95,106 @@ def build_pipeline_show(
     return {"count": len(plans), "rows": plans}
 
 
+def _placement(value: object, path: str) -> list[int]:
+    source = _object(value, path)
+    rank = _count(source.get("rank"), f"{path}.rank")
+    if rank not in (1, 2, 3):
+        raise CompileReportError(f"{path}.rank: expected 1, 2, or 3")
+    return [
+        _count(source.get(axis), f"{path}.{axis}") for axis in ("x", "y", "z")[:rank]
+    ]
+
+
+def _placed_function(row: dict, path: str, root: str, name: str) -> dict:
+    result = {
+        "root": root,
+        "function": name,
+        "placement": _placement(row.get("placement"), f"{path}.placement"),
+    }
+    for field in (
+        "worker_index",
+        "group",
+        "address",
+        "code_byte_count",
+        "stored_packet_count",
+    ):
+        result[field] = _count(row.get(field), f"{path}.{field}")
+    for field in ("packets_per_call", "calls_per_entry"):
+        if field not in row:
+            raise CompileReportError(f"{path}.{field}: expected a count or null")
+        result[field] = (
+            None if row[field] is None else _count(row[field], f"{path}.{field}")
+        )
+    loops = row.get("packet_loops", [])
+    if not isinstance(loops, list):
+        raise CompileReportError(f"{path}.packet_loops: expected array")
+    result["packet_loops"] = []
+    for i, value in enumerate(loops):
+        loop_path = f"{path}.packet_loops[{i}]"
+        loop = _object(value, loop_path)
+        result["packet_loops"].append(
+            {
+                field: _count(loop.get(field), f"{loop_path}.{field}")
+                for field in ("byte_offset", "packet_count", "trip_count")
+            }
+        )
+    return result
+
+
+def placed_function_view(document: CompileReportDocument, pattern: str) -> dict:
+    """Selects final linked functions without expanding other report families."""
+    functions = []
+    found_inventory = False
+    plans = document.report.get("pipeline_plans", [])
+    if not isinstance(plans, list):
+        raise CompileReportError(f"{document.source}.pipeline_plans: expected array")
+    for i, value in enumerate(plans):
+        path = f"{document.source}.pipeline_plans[{i}]"
+        plan = _object(value, path)
+        if "placed_functions" not in plan:
+            continue
+        found_inventory = True
+        root = _string(plan.get("root"), f"{path}.root")
+        rows = plan["placed_functions"]
+        if not isinstance(rows, list):
+            raise CompileReportError(f"{path}.placed_functions: expected array")
+        for j, item in enumerate(rows):
+            row_path = f"{path}.placed_functions[{j}]"
+            row = _object(item, row_path)
+            name = _string(row.get("function"), f"{row_path}.function")
+            if fnmatchcase(name, pattern):
+                functions.append(_placed_function(row, row_path, root, name))
+    if not found_inventory:
+        raise CompileReportError("report contains no placed native function inventory")
+    if not functions:
+        raise CompileReportError(f"no placed native function matches {pattern!r}")
+    return {"pattern": pattern, "functions": functions}
+
+
+def format_placed_function_text(view: dict) -> str:
+    rows = view["functions"]
+    label = "placement" if len(rows) == 1 else "placements"
+    lines = [f"{len(rows)} callable {label} matching {view['pattern']}"]
+    for row in rows:
+        coordinates = ",".join(map(str, row["placement"]))
+        packets = row["packets_per_call"]
+        calls = row["calls_per_entry"]
+        lines.append(
+            f"{row['root']} / worker {row['worker_index']} ({coordinates}) "
+            f"group {row['group']} @0x{row['address']:x}  {row['function']}  "
+            f"{row['code_byte_count']} bytes, "
+            f"{row['stored_packet_count']} stored packets, "
+            f"{packets if packets is not None else 'unknown'} packets/call, "
+            f"{calls if calls is not None else 'unknown'} calls/entry"
+        )
+        lines.extend(
+            f"  loop +{loop['byte_offset']} bytes  "
+            f"{loop['packet_count']} packets per trip, {loop['trip_count']} trips"
+            for loop in row["packet_loops"]
+        )
+    return "\n".join(lines) + "\n"
+
+
 def _inventory(
     value: object,
     path: str,
@@ -144,16 +246,9 @@ def _inventory(
                     )
                 }
         if "placement" in source_row:
-            placement = _object(source_row["placement"], f"{row_path}.placement")
-            rank = _count(placement.get("rank"), f"{row_path}.placement.rank")
-            if rank not in (1, 2, 3):
-                raise CompileReportError(
-                    f"{row_path}.placement.rank: expected 1, 2, or 3"
-                )
-            row["placement"] = [
-                _count(placement.get(axis), f"{row_path}.placement.{axis}")
-                for axis in ("x", "y", "z")[:rank]
-            ]
+            row["placement"] = _placement(
+                source_row["placement"], f"{row_path}.placement"
+            )
         for field in fields:
             row[field] = _count(source_row.get(field), f"{row_path}.{field}")
         rows.append(row)

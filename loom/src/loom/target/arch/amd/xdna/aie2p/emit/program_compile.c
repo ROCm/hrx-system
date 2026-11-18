@@ -149,12 +149,17 @@ static iree_status_t loom_aie2p_program_compose_report(
     const loom_aie2p_program_compiler_t* compiler,
     const loom_op_t* entry_function_op,
     loom_aie2p_program_helper_list_t helpers,
-    const loom_aie2p_program_object_t* program,
-    iree_arena_allocator_t* scratch_arena,
+    loom_aie2p_program_object_t* program, iree_arena_allocator_t* scratch_arena,
     loom_target_compile_report_t* report) {
   const loom_symbol_ref_t entry_ref =
       loom_low_func_def_callee(entry_function_op);
   loom_target_compile_report_function_merge_options_t* invocations = NULL;
+  loom_target_compile_report_function_merge_options_t* helper_invocations =
+      NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(compiler->arena, helpers.count,
+                                                 sizeof(*helper_invocations),
+                                                 (void**)&helper_invocations));
+  program->helper_invocations = helper_invocations;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(scratch_arena, compiler->module->symbols.count,
                                 sizeof(*invocations), (void**)&invocations));
@@ -193,6 +198,7 @@ static iree_status_t loom_aie2p_program_compose_report(
     IREE_ASSERT(helper_report != NULL);
     const loom_target_compile_report_function_merge_options_t invocation =
         invocations[helper_ref.symbol_id];
+    helper_invocations[i] = invocation;
     const loom_symbol_ref_array_t callees = helpers.values[i].direct_callees;
     for (iree_host_size_t j = 0; j < callees.count; ++j) {
       const loom_target_compile_report_call_edge_t* edge =

@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_layout.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/program_report.h"
 
 typedef struct loom_aie2p_configuration_report_memory_t {
   // Physical usage accumulated exactly once at reservation and link sites.
@@ -35,6 +36,8 @@ struct loom_aie2p_configuration_report_t {
   loom_target_compile_report_pipeline_worker_row_t* workers;
   // Allocated worker row capacity.
   iree_host_size_t worker_capacity;
+  // Native callable and loop rows for all successfully linked workers.
+  loom_aie2p_program_report_t callables;
 };
 
 iree_status_t loom_aie2p_configuration_report_allocate(
@@ -166,8 +169,11 @@ iree_status_t loom_aie2p_configuration_report_reservations(
 iree_status_t loom_aie2p_configuration_report_worker(
     loom_aie2p_configuration_report_t* report, iree_string_view_t entry_name,
     loom_xdna_tile_coordinate_t coordinate,
-    const loom_aie2p_leaf_realization_t* realization,
-    const loom_aie2p_tile_link_layout_t* layout) {
+    const loom_aie2p_program_object_t* program,
+    const loom_aie2p_tile_link_layout_t* layout,
+    const loom_aie2p_linked_tile_t* linked) {
+  const loom_aie2p_leaf_realization_t* realization =
+      &program->contribution.realization;
   loom_target_compile_report_pipeline_plan_summary_t* summary =
       &report->summary;
   if (summary->worker_count == report->worker_capacity) {
@@ -223,7 +229,9 @@ iree_status_t loom_aie2p_configuration_report_worker(
           .worker_storage_byte_count = data_bytes,
       };
   ++summary->worker_count;
-  return iree_ok_status();
+  return loom_aie2p_program_report_worker(
+      &report->callables, report->arena, summary->worker_count - 1,
+      memory->row.placement, program, layout->program_layout, linked);
 }
 
 iree_status_t loom_aie2p_configuration_report_finish(
@@ -280,6 +288,10 @@ iree_status_t loom_aie2p_configuration_report_finish(
   }
   const loom_target_compile_report_pipeline_plan_t plan = {
       .summary = *summary,
+      .functions = report->callables.functions,
+      .function_count = report->callables.function_count,
+      .packet_loops = report->callables.loops,
+      .packet_loop_count = report->callables.loop_count,
       .worker_rows = report->workers,
       .worker_row_count = summary->worker_count,
       .memory_rows = rows,
