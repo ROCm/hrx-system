@@ -283,6 +283,13 @@ iree_status_t loom_serve_text_state_submit_trim(
 
 static iree_status_t loom_serve_text_submit_compaction(
     loom_serve_text_state_t* state, loom_serve_text_trim_result_t* out_result) {
+  const uint32_t live =
+      state->cache.pool.capacity - state->cache.pool.available;
+  out_result->moved_blocks = 0;
+  if (!loom_runtime_block_pool_any_owned(&state->cache.pool, live,
+                                         state->cache.pool.available)) {
+    return iree_ok_status();
+  }
   if (state->cache.destination_capacity < state->cache.pool.capacity) {
     uint32_t* destinations = NULL;
     IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
