@@ -29,7 +29,8 @@ TEST(PreambleTest, RetainedConsumersOutliveThePublishingReference) {
       "#include \"library.h\"\n"
       "constexpr auto consumer_file = __FILE__;\n"
       "static_assert(__LDBL_MANT_DIG__ == 53);\n"
-      "static_assert(__LDBL_MAX_EXP__ == 1024);\n";
+      "static_assert(__LDBL_MAX_EXP__ == 1024);\n"
+      "static_assert(__UINT32_C(42) == header_value);\n";
   struct ProviderState {
     // Header bytes available only while the publisher constructs the preamble.
     std::string header = "constexpr int header_value = 42;\n";
