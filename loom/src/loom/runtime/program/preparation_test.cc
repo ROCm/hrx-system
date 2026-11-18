@@ -312,6 +312,7 @@ class PreparationCaptureTest : public PreparationTest {
                                         IREE_SV("declare_parameter_binding"),
                                         IREE_SV("declare_banks"),
                                         IREE_SV("declare_storage"),
+                                        IREE_SV("declare_host_storage"),
                                         IREE_SV("declare_feedback"),
                                         IREE_SV("declare_request_storage")};
     IREE_ASSERT_OK(loom_runtime_program_allocate(
@@ -563,6 +564,49 @@ TEST_F(PreparationCaptureTest, ColdStorageOwnsIndependentGeometryAndFeedback) {
   EXPECT_EQ(loom_runtime_preparation_storage(second, 0)->byte_length, 1u);
   EXPECT_EQ(loom_runtime_preparation_feedback_count(second), 0u);
   EXPECT_FALSE(loom_runtime_preparation_equal(preparation, second));
+}
+
+TEST_F(PreparationCaptureTest, HostStorageSharesOrdinalsAndAffectsIdentity) {
+  for (bool host_local : {false, true}) {
+    loom_runtime_preparation_module_begin(
+        module, 0, nullptr, LOOM_RUNTIME_PREPARATION_FLAG_STORAGE);
+    for (int i = 0; i < 2; ++i) {
+      iree_vm_variant_t arguments[] = {iree_vm_variant_from_i64(64),
+                                       iree_vm_variant_from_i64(64)};
+      iree_vm_variant_t result = {};
+      IREE_ASSERT_OK(Invoke(host_local && i ? IREE_SV("declare_host_storage")
+                                            : IREE_SV("declare_storage"),
+                            iree_vm_variant_span_from_array(arguments),
+                            {&result, 1}));
+      int32_t ordinal = -1;
+      IREE_ASSERT_OK(iree_vm_i32_from_variant(result, &ordinal));
+      EXPECT_EQ(ordinal, i);
+    }
+    auto* capture = loom_runtime_preparation_module_take(module);
+    ASSERT_EQ(loom_runtime_preparation_storage_count(capture), 2u);
+    EXPECT_FALSE(loom_runtime_preparation_storage(capture, 0)->host_local);
+    EXPECT_EQ(loom_runtime_preparation_storage(capture, 1)->host_local,
+              host_local);
+    if (host_local) {
+      second = capture;
+      EXPECT_FALSE(loom_runtime_preparation_equal(preparation, second));
+    } else {
+      preparation = capture;
+    }
+  }
+  for (bool request : {false, true}) {
+    loom_runtime_preparation_module_begin(
+        module, 0, request ? preparation : nullptr,
+        request ? LOOM_RUNTIME_PREPARATION_FLAG_STORAGE : 0);
+    iree_vm_variant_t result = {};
+    iree_vm_variant_t arguments[] = {iree_vm_variant_from_i64(64),
+                                     iree_vm_variant_from_i64(64)};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        Invoke(IREE_SV("declare_host_storage"),
+               iree_vm_variant_span_from_array(arguments), {&result, 1}));
+    EXPECT_EQ(loom_runtime_preparation_module_take(module), nullptr);
+  }
 }
 
 TEST_F(PreparationCaptureTest, MutableStorageCapabilitiesAreIndependent) {

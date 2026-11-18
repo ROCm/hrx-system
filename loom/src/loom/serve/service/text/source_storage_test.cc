@@ -17,16 +17,19 @@ namespace {
 using loom_serve::testing::text::Oracle;
 using loom_serve::testing::text::SourceTextServiceTest;
 
-class SourceStorageTest : public SourceTextServiceTest {
+class SourceStorageTest : public SourceTextServiceTest,
+                          public ::testing::WithParamInterface<bool> {
  protected:
   bool NeedsStandaloneModel() const override { return false; }
 
   void Prepare(bool reject_after_copy) {
     const char* source_path = std::getenv("LOOM_SERVE_TEST_STORAGE_SOURCE");
     ASSERT_NE(source_path, nullptr);
-    const auto prepare = std::filesystem::absolute(source_path).string();
+    const auto source = std::filesystem::absolute(source_path).string();
     const auto feedback_source =
-        std::filesystem::path(prepare).parent_path() / "feedback.loom";
+        std::filesystem::path(source).parent_path() / "feedback.loom";
+    const auto prepare =
+        iree::testing::MakeTempFilePath("text_storage_owner", ".loom");
     const auto fixture_prepare =
         iree::testing::MakeTempFilePath("text_storage_prepare", ".loom");
     const auto control =
@@ -36,6 +39,10 @@ class SourceStorageTest : public SourceTextServiceTest {
     // The checked-in providers compose the ordinary fixture's preparation and
     // replace its feedback dependency. Only symbol wiring and a configuration
     // value change here; the programs themselves remain authored source.
+    ASSERT_NO_FATAL_FAILURE(
+        EditNativeProvider(source, prepare, "import(\"prepare\", \"storage\")",
+                           GetParam() ? "import(\"prepare\", \"host_storage\")"
+                                      : "import(\"prepare\", \"storage\")"));
     ASSERT_NO_FATAL_FAILURE(EditNativeProvider(directory_ + "/prepare.loom",
                                                fixture_prepare, "@prepare(",
                                                "@fixture_prepare("));
@@ -60,19 +67,39 @@ class SourceStorageTest : public SourceTextServiceTest {
   }
 };
 
-TEST_F(SourceStorageTest, OutputUsesStableRootsAcrossRequestsAndRowGrowth) {
+TEST_P(SourceStorageTest, OutputUsesStableRootsAcrossRequestsAndRowGrowth) {
   ASSERT_NO_FATAL_FAILURE(Prepare(false));
-  ASSERT_EQ(model_->state.declared_storage.count, 1u);
+  ASSERT_EQ(model_->state.declared_storage.count, 2u);
   auto* root = model_->state.declared_storage.buffers[0];
   ASSERT_NE(root, nullptr);
   ASSERT_NE(model_->control.storage_module, nullptr);
   EXPECT_EQ(iree_hal_buffer_byte_length(root), 64u);
+  EXPECT_EQ(
+      iree_hal_buffer_byte_length(model_->state.declared_storage.buffers[1]),
+      128u);
+  EXPECT_EQ(model_->state.declared_storage.host_pool != nullptr, GetParam());
+  if (GetParam()) {
+    EXPECT_TRUE(iree_all_bits_set(iree_hal_buffer_memory_type(root),
+                                  IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                                      IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+                                      IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE));
+    EXPECT_TRUE(iree_all_bits_set(iree_hal_pool_query_host_access(
+                                      model_->state.declared_storage.host_pool)
+                                      .properties,
+                                  IREE_HAL_HOST_MEMORY_PROPERTY_READ_CACHED));
+  }
   auto* row = loom_serve_text_model_row(model_, 0);
   const int32_t token = Oracle::Id('a');
   IREE_ASSERT_OK(loom_serve_text_row_prefill(row, 1, &token));
   Oracle first;
   first.Consume("a");
   EXPECT_EQ(loom_serve_text_row_token(row), first.Predict());
+  if (GetParam()) {
+    iree_hal_pool_stats_t statistics;
+    iree_hal_pool_query_stats(model_->state.declared_storage.host_pool,
+                              &statistics);
+    EXPECT_GE(statistics.bytes_committed, 64u);
+  }
 
   loom_serve_text_resize_t* resize = nullptr;
   IREE_ASSERT_OK(loom_serve_text_model_prepare_resize(model_, 8, &resize));
@@ -101,9 +128,9 @@ TEST_F(SourceStorageTest, OutputUsesStableRootsAcrossRequestsAndRowGrowth) {
   EXPECT_EQ(loom_serve_text_row_token(row), first.Predict());
 }
 
-TEST_F(SourceStorageTest, SourceFailurePreservesEscapedRootsUntilRetirement) {
+TEST_P(SourceStorageTest, SourceFailurePreservesEscapedRootsUntilRetirement) {
   ASSERT_NO_FATAL_FAILURE(Prepare(true));
-  ASSERT_EQ(model_->state.declared_storage.count, 1u);
+  ASSERT_EQ(model_->state.declared_storage.count, 2u);
   auto* root = model_->state.declared_storage.buffers[0];
   // An ordinary native borrower can outlive the failed source invocation.
   // Keeping it explicit makes the retirement assertion independent of timing.
@@ -118,5 +145,7 @@ TEST_F(SourceStorageTest, SourceFailurePreservesEscapedRootsUntilRetirement) {
   IREE_ASSERT_OK(loom_serve_text_model_free(model_));
   model_ = nullptr;
 }
+
+INSTANTIATE_TEST_SUITE_P(Backing, SourceStorageTest, ::testing::Bool());
 
 }  // namespace

@@ -625,9 +625,9 @@ static iree_status_t loom_service_finite_model_allocate_storage(
     loom_service_finite_model_t* model) {
   const iree_allocator_t allocator = model->host_allocator;
   IREE_RETURN_IF_ERROR(loom_runtime_storage_initialize(
-      model->preparation, model->execution,
-      loom_runtime_pool_storage(model->pool), &model->storage_retirement,
-      allocator, &model->storage));
+      model->preparation, loom_runtime_device_group(model->owner),
+      model->execution, loom_runtime_pool_storage(model->pool),
+      &model->storage_retirement, allocator, &model->storage));
   const iree_host_size_t count = model->storage.count;
   const loom_runtime_preparation_request_storage_t request_storage =
       loom_runtime_preparation_request_storage(model->preparation);

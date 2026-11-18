@@ -84,6 +84,8 @@ typedef struct loom_runtime_preparation_storage_t {
   uint64_t byte_length;
   // Positive power-of-two base alignment in bytes.
   uint64_t alignment;
+  // CPU-cached host backing accessible by the model's execution queues.
+  bool host_local;
 } loom_runtime_preparation_storage_t;
 
 // One source-defined retained-capacity axis across mutable roots. The policy
@@ -192,20 +194,21 @@ void loom_runtime_preparation_module_recycle(
 //   bind_parameters(buffer root)
 //   memory_forecast(buffer root)
 //   storage(i64 bytes, i64 alignment) -> i32 buffer
+//   host_storage(i64 bytes, i64 alignment) -> i32 buffer
 //   feedback(i64 bytes) -> i32 slot
 //   request_storage(i64 capacity, buffer demand_root)
 // request_storage declares logical range ownership; demand_root selects a host
 // entry in the control program. Its caller owns the signature and admission.
-// storage, feedback, and request_storage are cold-only declarations. Their
-// ordinals address the hosting service's retained roots and completed-feedback
-// destinations; no declaration allocates storage or grants access to
-// uncompleted device writes. All string buffers exclude NUL bytes. Config
-// values use the public loomc textual value syntax; config_i64 formats signed
-// decimal values. Parameter sources join directory and path in the server
-// filesystem namespace. source declares the first shard of an independent
-// index; source_append adds shards in order during the declaring capture.
-// Card-backed programs use source_scope to select one named parameter scope's
-// complete typed shard list. Explicit deployment inputs, such as
+// storage, host_storage, feedback, and request_storage are cold-only
+// declarations. Their ordinals address the hosting service's retained roots and
+// completed-feedback destinations; no declaration allocates storage or grants
+// access to uncompleted device writes. All string buffers exclude NUL bytes.
+// Config values use the public loomc textual value syntax; config_i64 formats
+// signed decimal values. Parameter sources join directory and path in the
+// server filesystem namespace. source declares the first shard of an
+// independent index; source_append adds shards in order during the declaring
+// capture. Card-backed programs use source_scope to select one named parameter
+// scope's complete typed shard list. Explicit deployment inputs, such as
 // request-selectable adapters, use source and source_append alongside card
 // scopes. Neither a card scope nor an inherited cold source can be extended.
 // Sources need no resident binding and may contain identical keys. parameter

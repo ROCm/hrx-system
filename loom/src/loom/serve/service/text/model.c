@@ -299,9 +299,10 @@ static iree_status_t loom_serve_text_load_link(loom_serve_text_load_t* load) {
   IREE_RETURN_IF_ERROR(loom_serve_text_state_allocate(
       &model->state, model->device_owner, model->pool, model->execution));
   IREE_RETURN_IF_ERROR(loom_runtime_storage_initialize(
-      model->source.preparation, model->execution,
-      loom_runtime_pool_storage(model->pool), &model->state.retirement,
-      model->host_allocator, &model->state.declared_storage));
+      model->source.preparation, loom_runtime_device_group(model->device_owner),
+      model->execution, loom_runtime_pool_storage(model->pool),
+      &model->state.retirement, model->host_allocator,
+      &model->state.declared_storage));
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc_array(model->host_allocator, model->row_count,
                                   sizeof(*model->rows), (void**)&model->rows));

@@ -218,7 +218,7 @@ releasing a source handle does not require waiting for the device. The
 [runtime object guide](../integration/runtime-objects.md) describes these
 ownership rules and their explicit source operations.
 
-### Retain source-owned device storage
+### Retain source-owned storage
 
 Finite and text programs can declare reusable buffers during cold preparation
 with `prepare.storage(byte_length, alignment) -> i32`. The returned ordinal
@@ -228,6 +228,14 @@ operations on the model's execution timeline. Contents are initially unspecified
 and survive requests and text row-capacity growth. The source owns initialization
 and byte layout. Models with no declarations allocate no additional roots.
 
+`prepare.host_storage(byte_length, alignment) -> i32` declares cached host
+backing accessible by the model's execution queues. It uses the same ordinal
+space and `storage.buffer` access as ordinary roots. This suits a device-written
+request list consumed by host I/O without moving the cache payload or model
+activations into host memory. The allocation retains its native byte accounting
+and stays live through queue retirement. A device that cannot provide the
+required backing rejects the declaration during model loading.
+
 For example, a source can retain an output ring or a device-generated file
 request list without adding a modality-specific buffer role to the service.
 The optional `hal.file` module accepts borrowed file and payload tables, byte
@@ -236,7 +244,8 @@ It returns a completion fence that `runner.join` can order before consumption,
 while independent dispatches overlap the transfer. `parameters.file` supplies
 the actual checkpoint file and the selected entry's byte window.
 
-The service allocates declared roots from its storage pool and retains them
+The service allocates ordinary roots from its storage pool and host roots from
+a native cached host source. It retains both
 through final queue use. Releasing source references or failing an invocation
 does not shorten accepted work's ownership. Text preparation permits these
 roots; finite-only feedback destinations and retained request-range admission

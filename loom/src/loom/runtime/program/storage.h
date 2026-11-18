@@ -27,16 +27,20 @@ typedef struct loom_runtime_storage_t {
   iree_host_size_t count;
   // Owned tracked roots; release clears entries without freeing the table.
   iree_hal_buffer_t** buffers;
+  // Optional native host source, retained through every declared root's use.
+  iree_hal_pool_t* host_pool;
 } loom_runtime_storage_t;
 
-// Materializes the cold declarations in one allocation transaction on
-// execution. No declarations allocate no storage. Partial ownership returned on
-// failure follows the same release, retirement join, and deinitialize sequence.
+// Materializes the cold declarations, batching each native allocation source
+// on execution. Host declarations use cached host backing accessible by the
+// execution's dispatch and transfer families. The group outlives storage.
+// No declarations allocate no storage. Partial ownership returned on failure
+// follows the same release, retirement join, and deinitialize sequence.
 iree_status_t loom_runtime_storage_initialize(
     const loom_runtime_preparation_t* preparation,
-    loom_runtime_execution_t* execution, iree_hal_pool_t* pool,
-    loom_runtime_retirement_t* retirement, iree_allocator_t host_allocator,
-    loom_runtime_storage_t* out_storage);
+    iree_hal_device_group_t* group, loom_runtime_execution_t* execution,
+    iree_hal_pool_t* pool, loom_runtime_retirement_t* retirement,
+    iree_allocator_t host_allocator, loom_runtime_storage_t* out_storage);
 
 // Drops owned roots before the caller joins final native retirement. Accepts
 // partial initialization and repeated release.
