@@ -141,7 +141,7 @@ void PipelineContracts::finish() {
           "pipeline requires a concrete non-variadic void namespace-scope "
           "function declaration");
     }
-    if (annotated(function, "kernel") ||
+    if (is_kernel_function(function) ||
         annotated(function, "command_program") ||
         annotated(function, "device") || annotated(function, "op") ||
         annotated(function, "assume") || annotated(function, "check_case") ||

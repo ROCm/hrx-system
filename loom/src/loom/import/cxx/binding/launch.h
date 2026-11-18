@@ -12,7 +12,9 @@
 #include <cxx/types_fwd.h>
 
 #include <array>
+#include <bitset>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -56,7 +58,8 @@ class LaunchContracts {
 
   // Admits one declaration, merging consistent contracts across redeclarations.
   void declaration(cxx::FunctionSymbol* function,
-                   cxx::List<cxx::AttributeSpecifierAST*>* attributes);
+                   cxx::List<cxx::AttributeSpecifierAST*>* attributes,
+                   cxx::TemplateDeclarationAST* pattern = nullptr);
 
   // Rejects launch annotations on an ordinary function before lowering its
   // body.
@@ -64,13 +67,12 @@ class LaunchContracts {
 
   // Returns the internal source function whose body defines this kernel's
   // launch configuration, or null when annotations/config values own it.
-  cxx::FunctionSymbol* configuration_function(
-      cxx::FunctionSymbol* function) const;
+  cxx::FunctionSymbol* configuration_function(cxx::FunctionSymbol* function);
 
-  // Validates and binds a resolved configuration definition. The function
-  // must be the concrete definition returned for configuration_function().
-  LaunchConfiguration bind_configuration(cxx::FunctionSymbol* function,
-                                         Types& types);
+  // Materializes the selected configuration body for a reached kernel. A
+  // specialization retains its substituted workload types and geometry.
+  LaunchConfiguration bind_configuration(cxx::FunctionSymbol* selected,
+                                         cxx::AST* kernel, Types& types);
 
   // Returns whether a source function is owned as another kernel's launch
   // configuration and therefore cannot also become an ordinary callable.
@@ -114,10 +116,54 @@ class LaunchContracts {
     cxx::AttributeAST* configuration_source = nullptr;
   };
 
-  Dimensions parse(Form form, cxx::AttributeAST* attribute);
-  void merge(std::optional<Dimensions>& previous,
-             const std::optional<Dimensions>& next);
-  cxx::FunctionSymbol* parse_configuration(cxx::AttributeAST* attribute);
+  enum class Field { Configuration, Count, Size };
+
+  struct Annotation {
+    // Semantic launch field named by the source attribute.
+    Field field;
+    // Exact or bounded dimensions; ignored for a configuration function.
+    Form form;
+    // Original declaration site, including its C++ argument expressions.
+    cxx::AttributeAST* source;
+
+    // One configuration function, three exact extents, or six range bounds.
+    size_t arity() const {
+      if (field == Field::Configuration) {
+        return 1;
+      }
+      return form == Form::Exact ? 3 : 6;
+    }
+  };
+
+  // Attribute arity is bounded by the six values of a three-dimensional range.
+  using Arguments = std::array<cxx::ExpressionAST*, 6>;
+  struct DependentAnnotation {
+    // Attribute whose arguments depend on this declaration's template
+    // parameters.
+    Annotation annotation;
+    // Original template parameter scope for substituting those arguments.
+    cxx::TemplateDeclarationAST* declaration;
+    // Expression operands in source order, borrowed from CXX.
+    Arguments arguments;
+    // Positions that require C++ template substitution.
+    std::bitset<6> dependent;
+  };
+
+  struct TemplateContract {
+    // Facts already known without choosing template arguments.
+    Contract fixed;
+    // Only attributes requiring substitution for a reached specialization.
+    std::vector<DependentAnnotation> dependent;
+  };
+
+  Arguments read_arguments(Annotation annotation);
+  Dimensions parse(Annotation annotation,
+                   std::span<cxx::ExpressionAST* const> arguments);
+  cxx::FunctionSymbol* parse_configuration(cxx::AttributeAST* attribute,
+                                           cxx::ExpressionAST* expression);
+  void apply(Contract& contract, Annotation annotation,
+             const Arguments& arguments);
+  const Contract* resolve(cxx::FunctionSymbol* function);
   std::array<loom_value_id_t, 3> build_dimensions(
       const std::optional<Dimensions>& dimensions, std::string_view prefix,
       std::string_view name, SymbolNames& names, cxx::AST* source,
@@ -129,6 +175,9 @@ class LaunchContracts {
   Diagnostics& diagnostics_;
   // Only annotated functions occupy the index; calls consume admitted facts.
   std::unordered_map<cxx::FunctionSymbol*, Contract> contracts_;
+  // Only redeclared function templates with spelled launch geometry need an
+  // entry.
+  std::unordered_map<cxx::FunctionSymbol*, TemplateContract> templates_;
   // Reverse ownership prevents configuration bodies from becoming callables.
   std::unordered_set<cxx::FunctionSymbol*> configurations_;
 };

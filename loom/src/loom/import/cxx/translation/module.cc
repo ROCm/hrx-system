@@ -4290,7 +4290,7 @@ class Translator final : private Initialization::Evaluation,
       fail(expression,
            "intrinsic and check calls cannot supply an implicit object");
     }
-    if (annotated(function, "kernel")) {
+    if (is_kernel_function(function)) {
       fail(expression, "kernels require an explicit launch operation");
     }
     if (functions_.is_command_program(function)) {
@@ -4703,7 +4703,7 @@ class Translator final : private Initialization::Evaluation,
     if (intrinsics_.lookup(function, call)) {
       fail(call, "intrinsics cannot be used as overloaded subscripts");
     }
-    if (annotated(function, "kernel")) {
+    if (is_kernel_function(function)) {
       fail(call, "kernels require an explicit launch operation");
     }
     return ordinary_call(call, function, locations_.get(call), destination);
@@ -4729,7 +4729,7 @@ class Translator final : private Initialization::Evaluation,
       fail(expression,
            "intrinsic operators must use their declared Loom operation");
     }
-    if (annotated(function, "kernel")) {
+    if (is_kernel_function(function)) {
       fail(expression, "kernels require an explicit launch operation");
     }
   }
@@ -5814,7 +5814,7 @@ class Translator final : private Initialization::Evaluation,
     }
     auto* binding = intrinsics_.lookup(function, call);
     if (!binding) {
-      if (annotated(function, "kernel")) {
+      if (is_kernel_function(function)) {
         fail(call, "kernels require an explicit launch operation");
       }
       if (functions_.is_command_program(function)) {

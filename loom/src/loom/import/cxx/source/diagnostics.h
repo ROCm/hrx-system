@@ -37,6 +37,10 @@ class Diagnostics final : public cxx::DiagnosticsClient {
   // ownership, including declarations restored from an immutable prefix.
   [[noreturn]] void reject(cxx::SourceLocation location,
                            std::string_view message);
+  // Attaches a labeled second C++ source site to the primary error.
+  [[noreturn]] void reject(cxx::SourceLocation location,
+                           std::string_view message,
+                           cxx::SourceLocation related, std::string_view label);
   SourceContents& contents() const { return *contents_; }
   bool has_error() const { return has_error_; }
   // Propagates sink failure and source rejection at a parser-safe boundary.
@@ -46,8 +50,10 @@ class Diagnostics final : public cxx::DiagnosticsClient {
  private:
   void emit(const cxx::Token& token, loom_diagnostic_severity_t severity,
             const loom_error_def_t* error, std::string_view message);
+  loom_source_range_t source_range(cxx::SourceLocation location) const;
   void emit(cxx::SourceLocation location, loom_diagnostic_severity_t severity,
-            const loom_error_def_t* error, std::string_view message);
+            const loom_error_def_t* error, std::string_view message,
+            const loom_diagnostic_related_location_t* related = nullptr);
 
   // Borrowed callback and state supplied by the current import request.
   loom_diagnostic_sink_t sink_;

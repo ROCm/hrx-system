@@ -35,6 +35,10 @@ inline const cxx::Attribute* annotation(cxx::Symbol* symbol,
   return semantic_attribute(symbol, "loom", spelling);
 }
 
+// An implicit kernel specialization takes its role from all declarations of
+// its primary template. An explicit specialization declares its own role.
+bool is_kernel_function(cxx::FunctionSymbol* function);
+
 // Whether the declaration binds exactly this operation and optional selector.
 bool has_op_binding(cxx::Symbol* symbol, std::string_view operation,
                     std::string_view selector = {});

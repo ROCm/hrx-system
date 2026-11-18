@@ -8,6 +8,8 @@
 
 #include <cxx/ast.h>
 #include <cxx/ast_interpreter.h>
+#include <cxx/ast_rewriter.h>
+#include <cxx/dependent_types.h>
 #include <cxx/symbols.h>
 #include <cxx/types.h>
 
@@ -46,68 +48,68 @@ bool has_unsigned_scalar_leaves(const RecordPartition& record, Types& types) {
 
 }  // namespace
 
-LaunchContracts::Dimensions LaunchContracts::parse(
-    Form form, cxx::AttributeAST* attribute) {
-  auto* clause = attribute->attributeArgumentClause;
-  size_t expected = form == Form::Exact ? 3 : 6;
-  std::array<int32_t, 6> values;
+LaunchContracts::Arguments LaunchContracts::read_arguments(
+    Annotation annotation) {
+  Arguments result{};
+  auto* clause = annotation.source->attributeArgumentClause;
+  auto* next = clause ? clause->expressionList : nullptr;
+  const size_t arity = annotation.arity();
   size_t count = 0;
-  if (clause) {
-    cxx::ASTInterpreter interpreter(&unit_);
-    for (auto* expression : cxx::ListView{clause->expressionList}) {
-      auto evaluated = interpreter.evaluate(expression);
-      auto* value =
-          evaluated ? std::get_if<cxx::ConstInt>(&*evaluated) : nullptr;
-      if (count == expected || !value || value->isNegative() ||
-          value->isZero() || value->toUWide() > INT32_MAX) {
-        diagnostics_.reject(unit_, attribute,
-                            "launch dimensions require positive i32 integer "
-                            "constant expressions");
-      }
-      values[count++] = static_cast<int32_t>(value->toUIntMax());
-    }
+  while (next && count < arity) {
+    result[count++] = next->value;
+    next = next->next;
   }
-  if (count != expected) {
+  if (count != arity || next) {
+    if (annotation.field == Field::Configuration) {
+      diagnostics_.reject(
+          unit_, annotation.source,
+          "kernel configuration requires one unambiguous function name");
+    }
     diagnostics_.reject(
-        unit_, attribute,
-        form == Form::Exact
+        unit_, annotation.source,
+        annotation.form == Form::Exact
             ? "exact launch dimensions require three constants: x, y, z"
             : "launch ranges require six constants: xmin, xmax, ymin, ymax, "
               "zmin, zmax");
   }
-  Dimensions dimensions = {.form = form, .source = attribute};
+  return result;
+}
+
+LaunchContracts::Dimensions LaunchContracts::parse(
+    Annotation annotation, std::span<cxx::ExpressionAST* const> arguments) {
+  std::array<int32_t, 6> values;
+  cxx::ASTInterpreter interpreter(&unit_);
+  for (size_t i = 0; i < arguments.size(); ++i) {
+    auto evaluated =
+        arguments[i] ? interpreter.evaluate(arguments[i]) : std::nullopt;
+    auto* value = evaluated ? std::get_if<cxx::ConstInt>(&*evaluated) : nullptr;
+    if (!value || value->isNegative() || value->isZero() ||
+        value->toUWide() > INT32_MAX) {
+      diagnostics_.reject(unit_, annotation.source,
+                          "launch dimensions require positive i32 integer "
+                          "constant expressions");
+    }
+    values[i] = static_cast<int32_t>(value->toUIntMax());
+  }
+  Dimensions dimensions = {
+      .form = annotation.form,
+      .source = annotation.source,
+  };
   for (size_t axis = 0; axis < 3; ++axis) {
-    dimensions.axes[axis] = form == Form::Exact
+    dimensions.axes[axis] = annotation.form == Form::Exact
                                 ? Axis{values[axis], values[axis]}
                                 : Axis{values[axis * 2], values[axis * 2 + 1]};
     if (dimensions.axes[axis].lower > dimensions.axes[axis].upper) {
-      diagnostics_.reject(unit_, attribute,
+      diagnostics_.reject(unit_, annotation.source,
                           "launch range lower bound exceeds its upper bound");
     }
   }
   return dimensions;
 }
 
-void LaunchContracts::merge(std::optional<Dimensions>& previous,
-                            const std::optional<Dimensions>& next) {
-  if (!next) {
-    return;
-  }
-  if (previous &&
-      (previous->form != next->form || previous->axes != next->axes)) {
-    diagnostics_.reject(unit_, next->source,
-                        "conflicting launch contracts across declarations");
-  }
-  previous = next;
-}
-
 cxx::FunctionSymbol* LaunchContracts::parse_configuration(
-    cxx::AttributeAST* attribute) {
-  auto* clause = attribute->attributeArgumentClause;
-  auto* arguments = clause ? clause->expressionList : nullptr;
-  auto* id = arguments && !arguments->next
-                 ? cxx::ast_cast<cxx::IdExpressionAST>(arguments->value)
-                 : nullptr;
+    cxx::AttributeAST* attribute, cxx::ExpressionAST* expression) {
+  auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression);
   auto* function =
       id ? cxx::symbol_cast<cxx::FunctionSymbol>(id->symbol) : nullptr;
   if (id) {
@@ -124,106 +126,216 @@ cxx::FunctionSymbol* LaunchContracts::parse_configuration(
         unit_, attribute,
         "kernel configuration requires one unambiguous function name");
   }
+  if (function->isTemplatePattern()) {
+    diagnostics_.reject(
+        unit_, attribute,
+        "kernel configuration function template requires concrete template "
+        "arguments");
+  }
   return function->canonical();
+}
+
+void LaunchContracts::apply(Contract& contract, Annotation annotation,
+                            const Arguments& arguments) {
+  auto* source = annotation.source;
+  auto conflict = [&](cxx::AttributeAST* other, std::string_view message) {
+    auto here = source->firstSourceLocation();
+    auto there = other->firstSourceLocation();
+    // Constant annotations may have been checked before dependent ones.
+    if (here < there) {
+      std::swap(here, there);
+    }
+    diagnostics_.reject(here, message, there, "previous launch contract");
+  };
+  constexpr std::string_view mixed =
+      "kernel configuration functions cannot be combined with launch dimension "
+      "annotations";
+  if (annotation.field == Field::Configuration) {
+    if (contract.count || contract.size) {
+      conflict(contract.count ? contract.count->source : contract.size->source,
+               mixed);
+    }
+    auto* configuration = parse_configuration(source, arguments[0]);
+    if (contract.configuration && contract.configuration != configuration) {
+      conflict(
+          contract.configuration_source,
+          "conflicting kernel configuration functions across declarations");
+    }
+    if (!contract.configuration) {
+      contract.configuration = configuration;
+      contract.configuration_source = source;
+    }
+  } else {
+    if (contract.configuration) {
+      conflict(contract.configuration_source, mixed);
+    }
+    auto& previous =
+        annotation.field == Field::Count ? contract.count : contract.size;
+    auto next =
+        parse(annotation, std::span(arguments).first(annotation.arity()));
+    if (previous &&
+        (previous->form != next.form || previous->axes != next.axes)) {
+      conflict(previous->source,
+               "conflicting launch contracts across declarations");
+    }
+    if (!previous) {
+      previous = next;
+    }
+  }
 }
 
 void LaunchContracts::declaration(
     cxx::FunctionSymbol* function,
-    cxx::List<cxx::AttributeSpecifierAST*>* attributes) {
-  Contract contract;
-  bool found_kernel = false;
+    cxx::List<cxx::AttributeSpecifierAST*>* attributes,
+    cxx::TemplateDeclarationAST* pattern) {
+  if (!attributes) {
+    return;
+  }
+  auto* canonical = function->canonical();
+  // With a single declaration CXX already substitutes its attributes when it
+  // instantiates the definition. Only redeclarations require a merged contract.
+  if (pattern && canonical->redeclarations().empty()) {
+    return;
+  }
+  std::array<bool, 3> seen = {};
   visit_loom_attributes(
-      unit_, attributes,
-      [&](std::string_view name, cxx::AttributeAST* attribute) {
-        std::optional<Dimensions>* dimensions = nullptr;
+      unit_, attributes, [&](std::string_view name, cxx::AttributeAST* source) {
+        Field field;
         Form form = Form::Exact;
         if (name == "kernel") {
-          if (found_kernel) {
-            diagnostics_.reject(
-                unit_, attribute,
-                "one kernel annotation is allowed on a declaration");
-          }
-          found_kernel = true;
-          if (attribute->attributeArgumentClause) {
-            contract.configuration = parse_configuration(attribute);
-            contract.configuration_source = attribute;
-          }
-          return;
+          field = Field::Configuration;
         } else if (name == "workgroup_count" ||
                    name == "workgroup_count_range") {
-          dimensions = &contract.count;
-          form = name == "workgroup_count" ? Form::Exact : Form::Range;
+          field = Field::Count;
+          if (name == "workgroup_count_range") {
+            form = Form::Range;
+          }
         } else if (name == "workgroup_size" || name == "workgroup_size_range") {
-          dimensions = &contract.size;
-          form = name == "workgroup_size" ? Form::Exact : Form::Range;
+          field = Field::Size;
+          if (name == "workgroup_size_range") {
+            form = Form::Range;
+          }
         } else {
           return;
         }
-        if (*dimensions) {
+        if (std::exchange(seen[static_cast<size_t>(field)], true)) {
           diagnostics_.reject(
-              unit_, attribute,
-              "one launch contract per dimension group is allowed "
-              "on a declaration");
+              unit_, source,
+              field == Field::Configuration
+                  ? "one kernel annotation is allowed on a declaration"
+                  : "one launch contract per dimension group is allowed on a "
+                    "declaration");
         }
-        *dimensions = parse(form, attribute);
+        auto* clause = source->attributeArgumentClause;
+        if (field == Field::Configuration && !clause) {
+          return;
+        }
+        Annotation annotation{field, form, source};
+        auto arguments = read_arguments(annotation);
+        if (pattern) {
+          auto& contract = templates_[canonical];
+          DependentAnnotation pending{annotation, pattern, arguments, {}};
+          for (size_t i = 0; i < annotation.arity(); ++i) {
+            pending.dependent.set(i, cxx::isDependent(&unit_, arguments[i]));
+          }
+          if (pending.dependent.any()) {
+            contract.dependent.push_back(pending);
+          } else {
+            apply(contract.fixed, annotation, arguments);
+          }
+        } else {
+          auto& contract = contracts_[canonical];
+          apply(contract, annotation, arguments);
+          if (field == Field::Configuration) {
+            configurations_.insert(contract.configuration);
+          }
+        }
       });
-  if (contract.count || contract.size) {
-    auto& previous = contracts_[function->canonical()];
-    merge(previous.count, contract.count);
-    merge(previous.size, contract.size);
+}
+
+const LaunchContracts::Contract* LaunchContracts::resolve(
+    cxx::FunctionSymbol* function) {
+  function = function->canonical();
+  if (auto found = contracts_.find(function); found != contracts_.end()) {
+    return &found->second;
   }
-  if (contract.configuration) {
-    auto& previous = contracts_[function->canonical()];
-    if (previous.configuration &&
-        previous.configuration != contract.configuration) {
-      diagnostics_.reject(
-          unit_, contract.configuration_source,
-          "conflicting kernel configuration functions across declarations");
+  auto* primary = function->primaryTemplateSymbol();
+  if (!primary || function->isExplicitSpecialization()) {
+    return nullptr;
+  }
+  if (primary->redeclarations().empty()) {
+    auto* definition = function->declaration();
+    if (!definition || !definition->attributeList) {
+      return nullptr;
     }
-    previous.configuration = contract.configuration;
-    previous.configuration_source = contract.configuration_source;
-    configurations_.insert(contract.configuration);
+    declaration(function, definition->attributeList);
+    auto found = contracts_.find(function);
+    return found == contracts_.end() ? nullptr : &found->second;
   }
-  const auto found = contracts_.find(function->canonical());
-  if (found != contracts_.end() && found->second.configuration &&
-      (found->second.count || found->second.size)) {
-    diagnostics_.reject(
-        unit_,
-        contract.configuration_source
-            ? static_cast<cxx::AST*>(contract.configuration_source)
-            : static_cast<cxx::AST*>((contract.count ? contract.count->source
-                                                     : contract.size->source)),
-        "kernel configuration functions cannot be combined with launch "
-        "dimension annotations");
+  auto found = templates_.find(primary);
+  if (found == templates_.end()) {
+    return nullptr;
   }
+  auto& pattern = found->second;
+  auto& concrete = contracts_.emplace(function, pattern.fixed).first->second;
+  const auto index = function->templateSpecializationIndex();
+  for (const auto& pending : pattern.dependent) {
+    auto operands = pending.arguments;
+    for (size_t i = 0; i < pending.annotation.arity(); ++i) {
+      if (pending.dependent[i]) {
+        operands[i] = cxx::ASTRewriter::substituteDefaultExpression(
+            &unit_, operands[i], primary->specializations()[index].arguments,
+            pending.declaration->depth, pending.declaration->symbol->parent());
+      }
+    }
+    apply(concrete, pending.annotation, operands);
+  }
+  if (concrete.configuration) {
+    configurations_.insert(concrete.configuration);
+  }
+  return &concrete;
 }
 
 void LaunchContracts::reject_ordinary_function(cxx::FunctionSymbol* function) {
-  if (contracts_.contains(function->canonical())) {
-    diagnostics_.reject(unit_, function->declaration(),
+  if (const auto* contract = resolve(function)) {
+    auto* source = contract->configuration_source
+                       ? contract->configuration_source
+                       : (contract->count ? contract->count->source
+                                          : contract->size->source);
+    diagnostics_.reject(unit_, source,
                         "launch contracts require a kernel function");
   }
 }
 
 cxx::FunctionSymbol* LaunchContracts::configuration_function(
-    cxx::FunctionSymbol* function) const {
-  auto found = contracts_.find(function->canonical());
-  return found == contracts_.end() ? nullptr : found->second.configuration;
+    cxx::FunctionSymbol* function) {
+  const auto* contract = resolve(function);
+  return contract ? contract->configuration : nullptr;
 }
 
 LaunchConfiguration LaunchContracts::bind_configuration(
-    cxx::FunctionSymbol* function, Types& types) {
+    cxx::FunctionSymbol* selected, cxx::AST* kernel, Types& types) {
+  auto* function = selected->resolvedDefinition();
+  // Naming a specialization in an attribute does not odr-use its body.
+  // CXX can attach a later pattern definition when this kernel needs it.
+  if (function->isSpecialization()) {
+    cxx::ASTRewriter::completePendingBodyFor(&unit_, function);
+    diagnostics_.finish();
+  }
   auto* definition = function->declaration();
-  if (!cxx::has_internal_linkage(function) || function->isTemplatePattern() ||
-      !function->templateArguments().empty() ||
+  if (!definition) {
+    diagnostics_.reject(unit_, kernel,
+                        "kernel configuration function requires a definition");
+  }
+  if (!cxx::has_internal_linkage(function) ||
       !cxx::symbol_cast<cxx::NamespaceSymbol>(function->parent()) ||
-      annotated(function, "kernel") || annotated(function, "device") ||
+      is_kernel_function(function) || annotated(function, "device") ||
       annotated(function, "op") || annotated(function, "check_case") ||
       annotated(function, "check_benchmark")) {
     diagnostics_.reject(
         unit_, definition,
-        "kernel configuration requires an internal non-template "
-        "namespace-scope ordinary function");
+        "kernel configuration requires an ordinary namespace-scope function "
+        "with internal linkage");
   }
   auto* source_body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
       definition->functionBody);
