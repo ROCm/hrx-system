@@ -36,14 +36,24 @@ typedef struct loom_low_allocation_spill_plan_traffic_t {
   uint64_t reload_bytes;
 } loom_low_allocation_spill_plan_traffic_t;
 
-// Reusable traffic-query scratch for one immutable function CFG. Contents are
-// empty between queries; storage belongs to the allocation attempt's arena.
-typedef struct loom_low_allocation_spill_plan_traffic_workspace_t {
+// Spill costs depend on the value's uses and target storage width. All
+// sequential coloring trials for that function snapshot share the table.
+typedef struct loom_low_allocation_spill_traffic_table_t {
+  // Snapshot mapping local ordinals to the SSA values that own types and uses.
+  const loom_local_value_domain_t* value_domain;
+  // Target storage width for each register class.
+  const loom_low_descriptor_set_t* descriptor_set;
+  // Function edges used to price spills of block arguments.
+  const loom_cfg_graph_t* cfg_graph;
+  // Arena owning the directory, populated pages, and slice-query scratch.
+  iree_arena_allocator_t* arena;
+  // Direct-indexed pages allocated on the first query in their ordinal range.
+  loom_low_allocation_spill_plan_traffic_t** pages;
   // Source call boundaries borrowed from the owning function snapshot.
   loom_low_call_boundary_index_t call_boundaries;
   // Slice-use totals and touched-list links, indexed by block/call scope.
   struct loom_low_allocation_spill_plan_slice_group_t* slice_groups_by_scope;
-} loom_low_allocation_spill_plan_traffic_workspace_t;
+} loom_low_allocation_spill_traffic_table_t;
 
 // Reference to an original SSA value or a value produced by an earlier spill
 // materialization action. Exactly one field is valid.
@@ -280,15 +290,6 @@ iree_status_t loom_low_allocation_spill_plan_layout(
     const loom_low_reg_class_t* reg_class, uint32_t* out_byte_size,
     uint32_t* out_byte_alignment);
 
-// Returns true and the complete result byte size when |use_op| is a slice of
-// a spilled register range whose units can be addressed individually in bytes.
-// The assignment and operation belong to verified Low IR.
-bool loom_low_allocation_spill_plan_slice_reload_byte_size(
-    const loom_module_t* module,
-    const loom_low_allocation_assignment_t* assignment,
-    uint32_t spill_byte_size, const loom_op_t* use_op,
-    uint32_t* out_reload_byte_size);
-
 // Returns true when a call-free slice group should share one full reload.
 bool loom_low_allocation_spill_plan_use_full_slice_reload(
     uint32_t slice_count, uint64_t narrow_reload_bytes,
@@ -313,24 +314,22 @@ iree_status_t loom_low_spill_materialization_plan_build(
     iree_host_size_t spill_plan_count, iree_arena_allocator_t* arena,
     loom_low_spill_materialization_plan_t* out_plan);
 
-// Allocates traffic-query scratch once for |body|. Call when spill selection
-// first becomes necessary, using the owning allocation attempt's scratch arena.
-iree_status_t loom_low_allocation_spill_plan_traffic_workspace_initialize(
-    const loom_region_t* body,
+// Initializes the directory and query scratch when selection first encounters
+// register pressure in this allocation.
+iree_status_t loom_low_allocation_spill_traffic_table_initialize(
+    const loom_local_value_domain_t* value_domain,
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_cfg_graph_t* cfg_graph,
     const loom_low_call_boundary_index_t* call_boundaries,
     iree_arena_allocator_t* arena,
-    loom_low_allocation_spill_plan_traffic_workspace_t* out_workspace);
+    loom_low_allocation_spill_traffic_table_t* out_table);
 
-// Computes the predicted memory traffic for spilling |assignment| using
-// |workspace| initialized for |cfg_graph|'s region. Queries are sequential.
-// Block arguments must belong to |cfg_graph|'s region; nested-region arguments
-// are excluded by spill-register requirement classification before planning.
-iree_status_t loom_low_allocation_spill_plan_traffic(
-    const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
-    const loom_low_allocation_assignment_t* assignment,
-    uint16_t spill_unit_bits,
-    loom_low_allocation_spill_plan_traffic_workspace_t* workspace,
-    loom_low_allocation_spill_plan_traffic_t* out_traffic);
+// Returns a stable prediction for a spillable register value. Its type and
+// uses belong to the snapshot, independently of any physical assignment.
+iree_status_t loom_low_allocation_spill_traffic_table_lookup(
+    loom_low_allocation_spill_traffic_table_t* table,
+    loom_value_ordinal_t value_ordinal,
+    const loom_low_allocation_spill_plan_traffic_t** out_traffic);
 
 // Predicts memory bytes after reconstruction using retained producer flags.
 // Victim selection and complete allocation comparisons use the same cost;

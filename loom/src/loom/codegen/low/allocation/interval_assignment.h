@@ -13,9 +13,12 @@
 #include "iree/base/bitmap.h"
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/liveness.h"
+#include "loom/codegen/low/allocation/active_capacity.h"
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/assignment_map.h"
+#include "loom/codegen/low/allocation/interval_order.h"
 #include "loom/codegen/low/allocation/physical_domains.h"
+#include "loom/codegen/low/allocation/spill_plan.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/allocation/table.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
@@ -52,12 +55,31 @@ typedef enum loom_low_allocation_search_strategy_e {
 
 // Pressure-only facts shared by every assignment attempt. Its arena is separate
 // from both result rollback and attempt scratch, and is empty without pressure.
-typedef struct loom_low_allocation_reconstruction_t {
-  // Owns classification through alternative assignment attempts.
+typedef struct loom_low_allocation_spill_analysis_t {
+  // Owns reconstruction and traffic facts through the last assignment trial.
   iree_arena_allocator_t arena;
   // Immutable producer flags by local value ordinal, or NULL until needed.
-  uint8_t* value_flags;
-} loom_low_allocation_reconstruction_t;
+  uint8_t* rematerialization_flags;
+  // Predictions for values considered as spill victims in this snapshot.
+  loom_low_allocation_spill_traffic_table_t traffic;
+} loom_low_allocation_spill_analysis_t;
+
+// Inputs shared by all register assignment strategies for one schedule.
+typedef struct loom_low_allocation_interval_plan_t {
+  // Acquisition chronology over the original liveness intervals.
+  loom_low_allocation_interval_order_t order;
+  // Bounds each trial's active set before any private end-point refinements.
+  loom_low_allocation_active_capacity_t active_capacity;
+} loom_low_allocation_interval_plan_t;
+
+// Prepares the plan after storage relations have propagated through unit
+// liveness. Its order borrows |liveness| and owns its rows in |arena|.
+iree_status_t loom_low_allocation_interval_plan_build(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_liveness_analysis_t* liveness,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_low_placement_table_t* placement, iree_arena_allocator_t* arena,
+    loom_low_allocation_interval_plan_t* out_plan);
 
 typedef struct loom_low_allocation_interval_assignment_context_t {
   // Module containing the allocated low function.
@@ -98,12 +120,14 @@ typedef struct loom_low_allocation_interval_assignment_context_t {
   const loom_low_storage_transport_t* storage_transport;
   // Per-allocation-unit liveness facts for |liveness|.
   const loom_low_allocation_unit_liveness_t* unit_liveness;
+  // Borrowed interval plan for this liveness and placement snapshot.
+  const loom_low_allocation_interval_plan_t* interval_plan;
   // Mutable assignment-backed storage leases and release actions.
   loom_low_allocation_storage_lease_state_t* storage_leases;
   // Arena owning returned assignment, spill, and remark arrays.
   iree_arena_allocator_t* arena;
-  // Shared lazy reconstruction analysis for this immutable function snapshot.
-  loom_low_allocation_reconstruction_t* reconstruction;
+  // Lazy spill analysis shared by all trials for this function and target.
+  loom_low_allocation_spill_analysis_t* spill_analysis;
   // Shared read-only control-flow graph for |body|.
   const loom_cfg_graph_t* function_cfg_graph;
   // Function-local residency view used for physical extent decisions.
@@ -165,9 +189,6 @@ typedef struct loom_low_allocation_interval_assignment_result_t {
   // legitimate comparison rejection; all partial assignment state is
   // discarded by the caller.
   bool retained_location_replay_failed;
-  // Interval ordering found a multi-unit interval in a contiguous register
-  // class. Without one, fragmentation repair repeats the same placement.
-  bool has_packable_aggregates;
 } loom_low_allocation_interval_assignment_result_t;
 
 // Assigns concrete locations for allocatable intervals in |context| and writes

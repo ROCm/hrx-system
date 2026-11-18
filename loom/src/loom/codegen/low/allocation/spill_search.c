@@ -45,25 +45,14 @@ iree_status_t loom_low_allocation_spill_search_assignment_capacity(
   return iree_ok_status();
 }
 
-static iree_status_t
-loom_low_allocation_spill_search_assignment_spill_traffic_cost(
+static iree_status_t loom_low_allocation_spill_search_traffic_cost(
     loom_low_allocation_search_context_t* context,
-    const loom_low_allocation_assignment_t* assignment,
-    const loom_low_allocation_class_capacity_t* capacity, uint64_t* out_cost) {
-  *out_cost = 0;
-  const loom_value_ordinal_t value_ordinal =
-      loom_module_value_ordinal_scratch_lookup(context->module,
-                                               assignment->value_id);
-  loom_low_allocation_spill_plan_traffic_t traffic =
-      context->spill_traffic_by_value_ordinal[value_ordinal];
-  if (traffic.store_count == UINT32_MAX) {
-    IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_traffic(
-        context->module, context->cfg_graph, assignment,
-        capacity->spill_unit_bits, context->spill_traffic_workspace, &traffic));
-    context->spill_traffic_by_value_ordinal[value_ordinal] = traffic;
-  }
+    loom_value_ordinal_t value_ordinal, uint64_t* out_cost) {
+  const loom_low_allocation_spill_plan_traffic_t* traffic = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_traffic_table_lookup(
+      context->spill_traffic, value_ordinal, &traffic));
   *out_cost = loom_low_allocation_spill_plan_traffic_cost(
-      &traffic, context->rematerialization_flags[value_ordinal]);
+      traffic, context->rematerialization_flags[value_ordinal]);
   return iree_ok_status();
 }
 
@@ -98,10 +87,8 @@ loom_low_allocation_spill_search_find_covering_spill_assignment(
     loom_low_allocation_search_context_t* context,
     const loom_low_allocation_assignment_t* source_assignment,
     uint32_t program_point, uint32_t* out_assignment_index,
-    loom_low_allocation_class_capacity_t* out_capacity,
     uint64_t* out_traffic_cost) {
   *out_assignment_index = UINT32_MAX;
-  *out_capacity = (loom_low_allocation_class_capacity_t){0};
   *out_traffic_cost = UINT64_MAX;
   if (context->placement->relation_count == 0) {
     return iree_ok_status();
@@ -200,19 +187,14 @@ loom_low_allocation_spill_search_find_covering_spill_assignment(
   }
 
   bool can_spill = false;
-  loom_low_allocation_class_capacity_t capacity = {0};
   IREE_RETURN_IF_ERROR(loom_low_allocation_spill_search_assignment_capacity(
-      context, result_assignment, &can_spill, &capacity));
+      context, result_assignment, &can_spill, NULL));
   if (!can_spill) {
     return iree_ok_status();
   }
-  uint64_t traffic_cost = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_low_allocation_spill_search_assignment_spill_traffic_cost(
-          context, result_assignment, &capacity, &traffic_cost));
+  IREE_RETURN_IF_ERROR(loom_low_allocation_spill_search_traffic_cost(
+      context, covering_result_ordinal, out_traffic_cost));
   *out_assignment_index = result_assignment_index;
-  *out_capacity = capacity;
-  *out_traffic_cost = traffic_cost;
   return iree_ok_status();
 }
 
@@ -406,9 +388,8 @@ loom_low_allocation_spill_search_collect_active_spill_victim_set(
     const loom_low_allocation_assignment_t* conflict_assignment =
         &context->assignment_map->assignments[assignment_index];
     bool can_spill = false;
-    loom_low_allocation_class_capacity_t spill_capacity = {0};
     IREE_RETURN_IF_ERROR(loom_low_allocation_spill_search_assignment_capacity(
-        context, conflict_assignment, &can_spill, &spill_capacity));
+        context, conflict_assignment, &can_spill, NULL));
     const loom_low_allocation_assignment_t* assignment = conflict_assignment;
     uint32_t spill_assignment_index = assignment_index;
     uint64_t assignment_traffic_cost = 0;
@@ -416,8 +397,7 @@ loom_low_allocation_spill_search_collect_active_spill_victim_set(
       IREE_RETURN_IF_ERROR(
           loom_low_allocation_spill_search_find_covering_spill_assignment(
               context, conflict_assignment, candidate.start_point,
-              &spill_assignment_index, &spill_capacity,
-              &assignment_traffic_cost));
+              &spill_assignment_index, &assignment_traffic_cost));
       if (spill_assignment_index == UINT32_MAX) {
         *out_blocked = true;
         break;
@@ -444,9 +424,11 @@ loom_low_allocation_spill_search_collect_active_spill_victim_set(
       }
     }
     if (can_spill) {
-      IREE_RETURN_IF_ERROR(
-          loom_low_allocation_spill_search_assignment_spill_traffic_cost(
-              context, assignment, &spill_capacity, &assignment_traffic_cost));
+      const loom_value_ordinal_t value_ordinal =
+          loom_module_value_ordinal_scratch_lookup(context->module,
+                                                   assignment->value_id);
+      IREE_RETURN_IF_ERROR(loom_low_allocation_spill_search_traffic_cost(
+          context, value_ordinal, &assignment_traffic_cost));
     }
     if (!interval_requires_register && assignment->end_point <= interval_end) {
       *out_blocked = true;
@@ -740,9 +722,11 @@ iree_status_t loom_low_allocation_spill_search_find_victims(
             context, interval, capacity->descriptor_reg_class_id,
             capacity->location_kind, best_location_base, interval->unit_count);
     uint64_t incoming_traffic_cost = 0;
-    IREE_RETURN_IF_ERROR(
-        loom_low_allocation_spill_search_assignment_spill_traffic_cost(
-            context, &incoming, capacity, &incoming_traffic_cost));
+    const loom_value_ordinal_t value_ordinal =
+        loom_module_value_ordinal_scratch_lookup(context->module,
+                                                 interval->value_id);
+    IREE_RETURN_IF_ERROR(loom_low_allocation_spill_search_traffic_cost(
+        context, value_ordinal, &incoming_traffic_cost));
     // A spilled result still needs physical storage at its definition. Charge
     // one spill/reload round trip for that temporary footprint instead of
     // treating an incoming spill as an immediately free register assignment.

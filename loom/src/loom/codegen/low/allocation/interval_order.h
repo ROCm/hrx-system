@@ -35,7 +35,7 @@ typedef struct loom_low_allocation_interval_order_entry_t {
 typedef struct loom_low_allocation_interval_order_t {
   // Intervals ordered by acquisition start, source-before-user priority,
   // semantic end, and value identity.
-  loom_low_allocation_interval_order_entry_t* intervals;
+  const loom_low_allocation_interval_order_entry_t* intervals;
   // Number of entries in |intervals|.
   iree_host_size_t interval_count;
   // At least one multi-unit interval uses contiguous allocation units instead

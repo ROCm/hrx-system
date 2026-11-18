@@ -1652,7 +1652,9 @@ TEST_F(LowAllocationSearchTest,
   context.storage_leases = &storage_leases;
   const uint8_t rematerialization_flags[IREE_ARRAYSIZE(spill_traffic)] = {};
   context.rematerialization_flags = rematerialization_flags;
-  context.spill_traffic_by_value_ordinal = spill_traffic;
+  loom_low_allocation_spill_plan_traffic_t* page = spill_traffic;
+  loom_low_allocation_spill_traffic_table_t spill_table = {.pages = &page};
+  context.spill_traffic = &spill_table;
 
   const loom_low_allocation_class_capacity_t capacity = Capacity(
       /*max_units=*/2);
@@ -1807,7 +1809,9 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
   context.storage_leases = &storage_leases;
   uint8_t rematerialization_flags[IREE_ARRAYSIZE(spill_traffic)] = {};
   context.rematerialization_flags = rematerialization_flags;
-  context.spill_traffic_by_value_ordinal = spill_traffic;
+  loom_low_allocation_spill_plan_traffic_t* page = spill_traffic;
+  loom_low_allocation_spill_traffic_table_t spill_table = {.pages = &page};
+  context.spill_traffic = &spill_table;
 
   const loom_low_allocation_class_capacity_t capacity = Capacity(
       /*max_units=*/4);
@@ -2070,7 +2074,9 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
   context.storage_leases = &storage_leases;
   const uint8_t rematerialization_flags[IREE_ARRAYSIZE(spill_traffic)] = {};
   context.rematerialization_flags = rematerialization_flags;
-  context.spill_traffic_by_value_ordinal = spill_traffic;
+  loom_low_allocation_spill_plan_traffic_t* page = spill_traffic;
+  loom_low_allocation_spill_traffic_table_t spill_table = {.pages = &page};
+  context.spill_traffic = &spill_table;
 
   // Begin with one active assignment occupying a two-unit budget. Then grow
   // the active set and budget, reusing the workspace for a different victim
