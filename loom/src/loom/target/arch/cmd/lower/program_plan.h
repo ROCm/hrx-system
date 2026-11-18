@@ -101,11 +101,12 @@ typedef struct loom_cmd_program_live_kernel_entry_validator_t {
 // Indexed requests delegate to their ordinary class materializer. Generated
 // requests exactly clone their already closed source product. The returned
 // product retains no callback-lived state and must be released with
-// loom_kernel_class_product_deinitialize().
+// loom_kernel_class_product_deinitialize(). Rejection emits diagnostics and
+// returns OK with a NULL product module.
 iree_status_t loom_cmd_program_kernel_request_materialize(
     const loom_cmd_program_kernel_request_t* request,
-    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_kernel_class_product_t* out_product);
+    iree_diagnostic_emitter_t diagnostics, iree_arena_block_pool_t* block_pool,
+    iree_allocator_t allocator, loom_kernel_class_product_t* out_product);
 
 // Optional kernel source environment for command-plan construction.
 typedef struct loom_cmd_program_kernel_source_t {

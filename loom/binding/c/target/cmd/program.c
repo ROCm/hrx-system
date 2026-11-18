@@ -489,16 +489,32 @@ static iree_string_view_t loomc_cmd_program_product_kernel_name(
   return loom_string_table_get(&product->module->strings, symbol->name_id);
 }
 
+static iree_status_t loomc_cmd_program_product_capture_diagnostic(
+    void* user_data, const loom_diagnostic_emission_t* emission);
+
 static iree_status_t loomc_cmd_program_product_publish_kernel_request(
     void* user_data, const loom_cmd_program_kernel_request_t* request) {
   loomc_cmd_program_product_invocation_t* invocation =
       (loomc_cmd_program_product_invocation_t*)user_data;
+  if (!loomc_result_succeeded(invocation->result)) {
+    return iree_ok_status();
+  }
   loom_kernel_class_product_t kernel_product = {0};
   loomc_status_t status =
       loomc_status_from_iree(loom_cmd_program_kernel_request_materialize(
-          request, invocation->request.block_pool,
+          request,
+          (iree_diagnostic_emitter_t){
+              .fn = loomc_cmd_program_product_capture_diagnostic,
+              .user_data = invocation,
+          },
+          invocation->request.block_pool,
           iree_allocator_from_loomc(invocation->request.allocator),
           &kernel_product));
+  if (loomc_status_is_ok(status) && kernel_product.module == NULL) {
+    loomc_result_set_status_code(invocation->result,
+                                 LOOMC_STATUS_FAILED_PRECONDITION);
+    return iree_ok_status();
+  }
   loomc_source_t* source = NULL;
   loom_symbol_id_t bytecode_symbol_ordinal = LOOM_SYMBOL_ID_INVALID;
   if (loomc_status_is_ok(status)) {
@@ -735,7 +751,8 @@ static loomc_status_t loomc_cmd_program_product_build_indexed(
           .user_data = &invocation,
       },
       materialization_environment, scratch_arena, &plan_valid, &plan);
-  if (iree_status_is_ok(plan_status) && plan_valid) {
+  if (iree_status_is_ok(plan_status) && plan_valid &&
+      loomc_result_succeeded(result)) {
     plan_status = loom_cmd_program_artifact_set_build(
         &plan, iree_allocator_from_loomc(allocator), &artifact_set);
   }

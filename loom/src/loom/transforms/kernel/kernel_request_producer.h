@@ -166,10 +166,12 @@ void loom_kernel_request_producer_free(
 //
 // |request| must be live in its publication callback. The returned product
 // retains no producer, collection, or request storage and must be released with
-// loom_kernel_class_product_deinitialize.
+// loom_kernel_class_product_deinitialize. Rejection emits diagnostics and
+// returns OK with a NULL product module.
 iree_status_t loom_kernel_request_materialize(
-    const loom_kernel_request_t* request, iree_arena_block_pool_t* block_pool,
-    iree_allocator_t allocator, loom_kernel_class_product_t* out_product);
+    const loom_kernel_request_t* request, iree_diagnostic_emitter_t diagnostics,
+    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
+    loom_kernel_class_product_t* out_product);
 
 // Publishes every live semantic class of one indexed kernel definition.
 //

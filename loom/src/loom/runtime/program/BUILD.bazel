@@ -313,7 +313,10 @@ loom_cc_library(
 loom_cc_library(
     name = "jit_tests",
     testonly = True,
-    srcs = ["jit_test.cc"],
+    srcs = [
+        "jit_reuse_test.cc",
+        "jit_test.cc",
+    ],
     visibility = ["//visibility:public"],
     deps = [
         ":executable",

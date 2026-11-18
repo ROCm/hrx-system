@@ -287,3 +287,96 @@ command.def public @idle() launch() {
 command.def public @ambiguous() launch() {
   command.return
 }
+
+// Independent command requests may choose the same provider using different
+// selector facts. Only facts still needed by the selected body enter its key.
+template.decl @class_value(%selector: index) -> (i32)
+
+template.def<@class_value> priority(10) @class_large(%selector: index) -> (i32) where [ge(%selector, 4)] {
+  %result = scalar.constant 2 : i32
+  template.return %result : i32
+}
+
+template.def<@class_value> @class_small(%selector: index) -> (i32) {
+  %result = scalar.constant 1 : i32
+  template.return %result : i32
+}
+
+kernel.def @store_class() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%selector: index, %output: view<8xi32>) {
+  %result = template.apply<@class_value>(%selector) : (index) -> (i32)
+  view.store %result, %output[0] : i32, view<8xi32>
+  kernel.return
+}
+
+command.def public @selected_four() launch(%output: view<8xi32>) {
+  %selector = index.constant 4 : index
+  kernel.launch @store_class(%selector, %output) : (index, view<8xi32>)
+  command.return
+}
+
+command.def public @selected_eight() launch(%output: view<8xi32>) {
+  %selector = index.constant 8 : index
+  kernel.launch @store_class(%selector, %output) : (index, view<8xi32>)
+  command.return
+}
+
+command.def public @selected_four_again() launch(%output: view<8xi32>) {
+  %selector = index.constant 4 : index
+  kernel.launch @store_class(%selector, %output) : (index, view<8xi32>)
+  command.return
+}
+
+command.def public @selected_one() launch(%output: view<8xi32>) {
+  %selector = index.constant 1 : index
+  kernel.launch @store_class(%selector, %output) : (index, view<8xi32>)
+  command.return
+}
+
+kernel.def @store_live_class() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%selector: index, %output: view<8xi32>) {
+  %class = template.apply<@class_value>(%selector) : (index) -> (i32)
+  %value = index.cast %selector : index to i32
+  %result = scalar.addi %class, %value : i32
+  view.store %result, %output[0] : i32, view<8xi32>
+  kernel.return
+}
+
+command.def public @live_four() launch(%output: view<8xi32>) {
+  %selector = index.constant 4 : index
+  kernel.launch @store_live_class(%selector, %output) : (index, view<8xi32>)
+  command.return
+}
+
+command.def public @live_eight() launch(%output: view<8xi32>) {
+  %selector = index.constant 8 : index
+  kernel.launch @store_live_class(%selector, %output) : (index, view<8xi32>)
+  command.return
+}
+
+func.decl inline @missing_body()
+
+template.decl @invalid_choice(%selector: index)
+
+template.def<@invalid_choice> @invalid_provider(%selector: index) where [ge(%selector, 4)] {
+  func.call @missing_body() : ()
+  template.return
+}
+
+kernel.def @invalid_class() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%selector: index) {
+  template.apply<@invalid_choice>(%selector) : (index)
+  kernel.return
+}
+
+command.def public @invalid_selected() launch() {
+  %selector = index.constant 4 : index
+  kernel.launch @invalid_class(%selector) : (index)
+  command.return
+}

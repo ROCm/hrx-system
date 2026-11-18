@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "loom/analysis/symbol_references.h"
+#include "loom/ir/context.h"
 #include "loom/ir/input_contract.h"
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
@@ -17,6 +19,8 @@
 #include "loom/ops/template/ops.h"
 #include "loom/rewrite/module_projection.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/transforms/cleanup/dce.h"
+#include "loom/transforms/symbol/inline_callables.h"
 #include "loom/transforms/symbol/template_rewrite.h"
 #include "loom/util/adaptive_sort.h"
 #include "loom/util/predicate_facts.h"
@@ -248,7 +252,8 @@ static iree_status_t loom_kernel_class_rewrite_application(
     const loom_kernel_class_classifier_t* classifier,
     const loom_kernel_class_decision_t* decision, uint32_t action_ordinal,
     const loom_ir_module_projection_t* projection, loom_op_t* target_apply_op,
-    loom_rewriter_t* rewriter) {
+    loom_rewriter_t* rewriter, loom_op_t** out_call) {
+  *out_call = NULL;
   IREE_ASSERT(loom_template_apply_isa(target_apply_op));
   IREE_ASSERT(action_ordinal < decision->model->providers.count);
   const loom_template_provider_summary_t* provider =
@@ -348,7 +353,7 @@ static iree_status_t loom_kernel_class_rewrite_application(
         loom_ir_module_projection_target_symbol(projection,
                                                 provider->symbol.symbol_id);
     return loom_template_rewrite_apply_as_exact_call(
-        rewriter, target_apply_op, target_provider, call_operands, NULL);
+        rewriter, target_apply_op, target_provider, call_operands, out_call);
   }
 
   // Keep external providers as ordinary generic requests. The assumed
@@ -386,6 +391,11 @@ static iree_status_t loom_kernel_class_materialize_argument_facts(
   }
   uint32_t count = source_count;
   for (uint16_t i = specialization_count; i < block->arg_count; ++i) {
+    // The use index includes operands, predicates, and dependent types. An
+    // unused selector contributes no precondition after its provider expands.
+    if (!loom_module_value_has_uses(rewriter->module, block->arg_ids[i])) {
+      continue;
+    }
     const loom_type_t type =
         loom_module_value_type(rewriter->module, block->arg_ids[i]);
     int64_t domain_lo = 0;
@@ -429,7 +439,7 @@ static iree_status_t loom_kernel_class_materialize_shape_values(
     }
     const loom_value_id_t source =
         classifier->projections[value->projection].source_value_id;
-    // Entry argument facts are already retained on the signature.
+    // Entry argument facts will be retained on the signature.
     if (loom_value_is_block_arg(
             loom_module_value(classifier->module, source))) {
       continue;
@@ -461,12 +471,101 @@ LOOM_DEFINE_ADAPTIVE_SORT_WITH_CONTEXT(loom_kernel_class_sort_trace_ids,
                                        const loom_kernel_class_trace_t*,
                                        loom_kernel_class_trace_precedes)
 
+// Reuses clone correspondence storage after accepted applications are replaced.
+// The sorted operation identities restrict template expansion to those choices.
+typedef struct loom_kernel_class_selected_calls_t {
+  // Borrowed projection rows whose target operations are now exact calls.
+  loom_ir_remap_op_projection_t* values;
+  // Number of accepted local calls in |values|.
+  uint32_t count;
+} loom_kernel_class_selected_calls_t;
+
+static bool loom_kernel_class_call_precedes(
+    const loom_ir_remap_op_projection_t* lhs,
+    const loom_ir_remap_op_projection_t* rhs) {
+  return (uintptr_t)lhs->target_op < (uintptr_t)rhs->target_op;
+}
+
+LOOM_DEFINE_ADAPTIVE_SORT(loom_kernel_class_sort_calls,
+                          loom_ir_remap_op_projection_t,
+                          loom_kernel_class_call_precedes)
+
+static iree_status_t loom_kernel_class_call_is_selected(
+    void* user_data, const loom_symbol_reference_occurrence_t* occurrence,
+    bool* out_eligible) {
+  const loom_kernel_class_selected_calls_t* calls = user_data;
+  uint32_t begin = 0;
+  uint32_t end = calls->count;
+  while (begin < end) {
+    const uint32_t middle = begin + (end - begin) / 2;
+    if ((uintptr_t)calls->values[middle].target_op <
+        (uintptr_t)occurrence->user_op) {
+      begin = middle + 1;
+    } else {
+      end = middle;
+    }
+  }
+  *out_eligible = begin < calls->count &&
+                  calls->values[begin].target_op == occurrence->user_op;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_kernel_class_eliminate_dead_code(
+    void* user_data, loom_module_t* module, loom_func_like_t function) {
+  const loom_dce_deadness_query_callback_t query = {
+      .fn = loom_dead_state_classify_op,
+  };
+  loom_dce_result_t result;
+  return loom_dce_eliminate(module, function, query, user_data, &result);
+}
+
+static iree_status_t loom_kernel_class_compose(
+    loom_module_t* module, loom_func_like_t kernel,
+    loom_kernel_class_selected_calls_t* calls,
+    iree_diagnostic_emitter_t diagnostics, iree_arena_allocator_t* arena,
+    bool* out_valid) {
+  *out_valid = true;
+  if (calls->count == 0) {
+    return iree_ok_status();
+  }
+  loom_kernel_class_sort_calls(calls->values, calls->count);
+  loom_symbol_reference_table_t references;
+  IREE_RETURN_IF_ERROR(
+      loom_symbol_reference_table_build(module, arena, &references));
+  const loom_target_function_version_snapshot_t versions = {0};
+  const loom_inline_callables_environment_t environment = {
+      .arena = arena,
+      .diagnostics = diagnostics,
+      .diagnostic_name = IREE_SVL("kernel-class-materialize"),
+      .refinement = {loom_kernel_class_eliminate_dead_code, arena},
+  };
+  const loom_inline_callables_plan_options_t options = {
+      .references = &references,
+      .target_versions = &versions,
+      .demanded_families = references.template_demands.family_bits,
+      .template_eligibility = {loom_kernel_class_call_is_selected, calls},
+      .defer_callable_exits = true,
+  };
+  loom_inline_callables_plan_t* plan = NULL;
+  IREE_RETURN_IF_ERROR(loom_inline_callables_plan_allocate(&environment, module,
+                                                           &options, &plan));
+  loom_inline_callables_result_flags_t flags = 0;
+  IREE_RETURN_IF_ERROR(loom_inline_callables_plan_execute(plan, &flags));
+  *out_valid = !iree_any_bit_set(flags, LOOM_INLINE_CALLABLES_RESULT_REJECTED);
+  if (!*out_valid) {
+    return iree_ok_status();
+  }
+  // Caller-specific facts have not entered this module. Cleanup can discard
+  // call-only selectors without consuming the preconditions being omitted.
+  return loom_kernel_class_eliminate_dead_code(arena, module, kernel);
+}
+
 iree_status_t loom_kernel_class_materialize(
     const loom_kernel_class_classifier_t* classifier,
     const loom_kernel_class_collection_t* collection,
     loom_decision_class_ordinal_t class_ordinal,
-    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_kernel_class_product_t* out_product) {
+    iree_diagnostic_emitter_t diagnostics, iree_arena_block_pool_t* block_pool,
+    iree_allocator_t allocator, loom_kernel_class_product_t* out_product) {
   IREE_ASSERT(class_ordinal < collection->class_count);
   *out_product = (loom_kernel_class_product_t){0};
 
@@ -541,31 +640,29 @@ iree_status_t loom_kernel_class_materialize(
   if (iree_status_is_ok(status)) {
     loom_rewriter_initialize(&rewriter, target_module, &scratch_arena);
   }
+  loom_kernel_class_selected_calls_t selected_calls = {
+      .values = operation_projections,
+  };
   for (uint32_t i = 0;
        i < collection->accepted_decision_count && iree_status_is_ok(status);
        ++i) {
     const loom_kernel_class_trace_t* trace =
         &collection->traces[selected_trace_ids[i]];
+    loom_op_t* call = NULL;
     status = loom_kernel_class_rewrite_application(
         classifier, &classifier->decisions[trace->decision_ordinal],
         trace->action_ordinal, &module_projection,
-        operation_projections[i].target_op, &rewriter);
+        operation_projections[i].target_op, &rewriter, &call);
+    if (call != NULL) {
+      selected_calls.values[selected_calls.count++].target_op = call;
+    }
   }
 
-  const loom_symbol_ref_t target_kernel =
+  loom_symbol_ref_t target_kernel =
       target_module != NULL
           ? loom_ir_module_projection_target_symbol(
                 &module_projection, classifier->kernel_symbol_id)
           : loom_symbol_ref_null();
-  if (iree_status_is_ok(status) && classifier->kernel_argument_count != 0) {
-    status = loom_kernel_class_materialize_argument_facts(
-        loom_func_like_cast(target_module, target_module->symbols
-                                               .entries[target_kernel.symbol_id]
-                                               .defining_op),
-        classifier->argument_facts,
-        collection->classes[class_ordinal].argument_facts,
-        classifier->specialization_count, &rewriter);
-  }
   if (iree_status_is_ok(status) &&
       collection->classes[class_ordinal].shape_value_count != 0) {
     status = loom_kernel_class_materialize_shape_values(
@@ -575,19 +672,40 @@ iree_status_t loom_kernel_class_materialize(
                                                .defining_op),
         &rewriter);
   }
-  if (iree_status_is_ok(status) && classifier->specialization_count != 0) {
+  bool valid = true;
+  const loom_func_like_t kernel =
+      target_module != NULL
+          ? loom_func_like_cast(
+                target_module,
+                target_module->symbols.entries[target_kernel.symbol_id]
+                    .defining_op)
+          : (loom_func_like_t){0};
+  if (iree_status_is_ok(status)) {
+    status = loom_kernel_class_compose(target_module, kernel, &selected_calls,
+                                       diagnostics, &scratch_arena, &valid);
+  }
+  if (iree_status_is_ok(status) && valid &&
+      classifier->kernel_argument_count != 0) {
+    status = loom_kernel_class_materialize_argument_facts(
+        kernel, classifier->argument_facts,
+        collection->classes[class_ordinal].argument_facts,
+        classifier->specialization_count, &rewriter);
+  }
+  if (iree_status_is_ok(status) && valid &&
+      classifier->specialization_count != 0) {
     status = loom_kernel_specializations_apply(
         collection->specialization_module,
         collection->classes[class_ordinal].specializations,
-        classifier->specialization_count,
-        loom_func_like_cast(target_module, target_module->symbols
-                                               .entries[target_kernel.symbol_id]
-                                               .defining_op),
-        &rewriter, &scratch_arena);
+        classifier->specialization_count, kernel, &rewriter, &scratch_arena);
+  }
+  if (iree_status_is_ok(status) && valid && selected_calls.count != 0) {
+    status = loom_module_compact_symbols(target_module, &scratch_arena, NULL);
+    target_kernel.symbol_id = loom_op_defining_symbol_id(
+        target_module, kernel.op, loom_op_vtable(target_module, kernel.op));
   }
   loom_rewriter_deinitialize(&rewriter);
   iree_arena_deinitialize(&scratch_arena);
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && valid) {
     *out_product = (loom_kernel_class_product_t){
         .module = target_module,
         .kernel = target_kernel,

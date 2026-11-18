@@ -265,8 +265,9 @@ static iree_status_t loom_kernel_request_source_prepare(
 }
 
 iree_status_t loom_kernel_request_materialize(
-    const loom_kernel_request_t* request, iree_arena_block_pool_t* block_pool,
-    iree_allocator_t allocator, loom_kernel_class_product_t* out_product) {
+    const loom_kernel_request_t* request, iree_diagnostic_emitter_t diagnostics,
+    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
+    loom_kernel_class_product_t* out_product) {
   IREE_ASSERT_ARGUMENT(request);
   IREE_ASSERT_ARGUMENT(request->source);
   IREE_ASSERT_LT(request->class_ordinal - request->source->class_base,
@@ -275,8 +276,8 @@ iree_status_t loom_kernel_request_materialize(
   IREE_ASSERT_ARGUMENT(out_product);
   return loom_kernel_class_materialize(
       request->source->classifier, request->source->collection,
-      request->class_ordinal - request->source->class_base, block_pool,
-      allocator, out_product);
+      request->class_ordinal - request->source->class_base, diagnostics,
+      block_pool, allocator, out_product);
 }
 
 // Invocation-local translation of immutable models through an exact module

@@ -180,6 +180,7 @@ loom_cc_library(
     deps = [
         ":kernel_class_collection",
         ":kernel_specialization",
+        "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:input_contract",
         "//loom/src/loom/ops:special_values",
@@ -188,6 +189,8 @@ loom_cc_library(
         "//loom/src/loom/ops/template",
         "//loom/src/loom/rewrite:module_projection",
         "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/transforms/cleanup:dce",
+        "//loom/src/loom/transforms/symbol:inline_callables",
         "//loom/src/loom/transforms/symbol:template_rewrite",
         "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:predicate_facts",

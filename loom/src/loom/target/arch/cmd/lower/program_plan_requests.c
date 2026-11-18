@@ -25,8 +25,8 @@ static uint32_t loom_cmd_program_plan_append_source_requirement(
 
 iree_status_t loom_cmd_program_kernel_request_materialize(
     const loom_cmd_program_kernel_request_t* request,
-    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
-    loom_kernel_class_product_t* out_product) {
+    iree_diagnostic_emitter_t diagnostics, iree_arena_block_pool_t* block_pool,
+    iree_allocator_t allocator, loom_kernel_class_product_t* out_product) {
   IREE_ASSERT_ARGUMENT(request);
   IREE_ASSERT_ARGUMENT(block_pool);
   IREE_ASSERT_ARGUMENT(out_product);
@@ -35,8 +35,9 @@ iree_status_t loom_cmd_program_kernel_request_materialize(
   switch (request->kind) {
     case LOOM_CMD_PROGRAM_KERNEL_REQUEST_KIND_INDEXED:
       IREE_ASSERT_ARGUMENT(request->source.indexed);
-      return loom_kernel_request_materialize(
-          request->source.indexed, block_pool, allocator, out_product);
+      return loom_kernel_request_materialize(request->source.indexed,
+                                             diagnostics, block_pool, allocator,
+                                             out_product);
     case LOOM_CMD_PROGRAM_KERNEL_REQUEST_KIND_GENERATED: {
       IREE_ASSERT_ARGUMENT(request->source.generated);
       IREE_ASSERT_ARGUMENT(request->source.generated->module);
