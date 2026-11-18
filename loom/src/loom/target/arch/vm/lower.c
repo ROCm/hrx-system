@@ -122,31 +122,6 @@ static iree_status_t loom_vm_map_value(void* user_data,
   const loom_value_fact_table_t* facts =
       loom_low_lower_context_fact_table(context);
   if (facts == NULL) {
-    const loom_type_t element = loom_type_element(source_type);
-    const loom_module_t* module = loom_low_lower_context_module(context);
-    if (loom_value_def_op(loom_module_value(module, source_value)) == NULL &&
-        loom_func_like_import_symbol(loom_low_lower_context_source_function(
-            context)) != LOOM_STRING_ID_INVALID &&
-        loom_type_rank(source_type) == 1 &&
-        loom_vm_source_type_supported(
-            user_data, loom_low_lower_context_module(context), element) &&
-        (!loom_type_is_scalar(element) ||
-         loom_type_element_type(element) != LOOM_SCALAR_TYPE_I1)) {
-      const loom_func_like_t function =
-          loom_low_lower_context_source_function(context);
-      uint16_t argument_count = 0;
-      const loom_value_id_t* arguments =
-          loom_func_like_arg_ids(function, &argument_count);
-      const uint16_t operand_offset =
-          arguments - loom_op_const_operands(function.op);
-      const loom_use_t* definition =
-          loom_value_single_use(loom_module_value(module, source_value));
-      loom_argument_access_t access;
-      IREE_RETURN_IF_ERROR(loom_low_lower_context_argument_access(
-          context, loom_use_operand_index(*definition) - operand_offset,
-          &access));
-      return loom_vm_map_span(context, source_type, access, out_low_type);
-    }
     return loom_vm_map_type(user_data, context, source_op, source_type,
                             out_low_type);
   }

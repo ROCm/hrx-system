@@ -423,6 +423,55 @@ TEST_F(LowLowerFunctionBoundaryTest,
             result_.low_func_op);
 }
 
+TEST_F(LowLowerFunctionBoundaryTest,
+       ImportDeclarationUsesArgumentAbiInsteadOfBodyValueMapping) {
+  policy_.map_argument = {
+      .fn =
+          [](void*, loom_low_lower_context_t* context, const loom_op_t*,
+             uint16_t, loom_value_id_t,
+             loom_low_lower_abi_argument_t* out_argument) {
+            // The incoming ABI carries two registers while the ordinary scalar
+            // value policy uses one. A declaration has no body to infer this
+            // from.
+            return loom_low_lower_make_register_type(
+                context, TEST_LOW_CORE_REG_CLASS_ID_TEST_I32, 2,
+                &out_argument->abi_type);
+          },
+  };
+  loom_builder_t builder;
+  loom_builder_initialize(module_, &module_->arena, loom_module_block(module_),
+                          &builder);
+  const loom_type_t type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_op_t* source_op = nullptr;
+  IREE_ASSERT_OK(loom_func_decl_build(
+      &builder,
+      LOOM_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_MODULE |
+          LOOM_FUNC_DECL_BUILD_FLAG_HAS_IMPORT_SYMBOL,
+      /*visibility=*/0, /*retain=*/0, InternString(IREE_SV("native")),
+      InternString(IREE_SV("consume")), /*cc=*/0, /*effect_contract=*/0,
+      /*temperature=*/0, /*inline_policy=*/0, loom_symbol_ref_null(),
+      /*source_signature=*/loom_attr_absent(), /*abi=*/0,
+      loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
+      loom_named_attr_slice_empty(), AddSymbol(IREE_SV("consume")), &type, 1,
+      /*signature_flags=*/iree_const_byte_span_empty(), &type, 1, nullptr, 0,
+      nullptr, 0, LOOM_LOCATION_UNKNOWN, &source_op));
+  const loom_low_lower_declaration_plan_t* plan = nullptr;
+  IREE_ASSERT_OK(loom_low_lower_plan_declaration(
+      module_, loom_func_like_cast(module_, source_op), &options_,
+      &analysis_arena_, &result_, &plan));
+  ASSERT_EQ(result_.error_count, 0u);
+  ASSERT_NE(plan, nullptr);
+  IREE_ASSERT_OK(loom_low_lower_emit_declaration(module_, plan, &result_));
+  const auto arguments = loom_low_func_decl_args(result_.low_func_op);
+  const auto results = loom_low_func_decl_results(result_.low_func_op);
+  ASSERT_EQ(arguments.count, 1u);
+  ASSERT_EQ(results.count, 1u);
+  EXPECT_EQ(loom_low_register_type_unit_count(
+                loom_module_value_type(module_, arguments.values[0])),
+            2u);
+  ExpectRegister(results.values[0], TEST_LOW_CORE_REG_CLASS_ID_TEST_I32);
+}
+
 class LowLowerResultMappingTest : public LowLowerFunctionBoundaryTest,
                                   public ::testing::WithParamInterface<bool> {};
 
