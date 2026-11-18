@@ -15,12 +15,14 @@
 #include <cxx/lambda_captures.h>
 #include <cxx/literals.h>
 #include <cxx/symbols.h>
+#include <cxx/translation_unit.h>
 #include <cxx/types.h>
 
 #include <cstring>
 #include <unordered_map>
 #include <utility>
 
+#include "loom/import/cxx/source/diagnostics.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/source/initializer_lists.h"
@@ -792,7 +794,7 @@ Value Initialization::from_elements(const cxx::Type* type,
       // aggregate element clauses. Omitted elements also have their own
       // default-argument temporary boundary, including a repeated source plan.
       const bool explicit_clause = !constructor && elements;
-      std::optional<Evaluation::FullExpression> full_expression;
+      std::optional<FullExpression> full_expression;
       if (!explicit_clause && leaf) {
         full_expression = evaluation_.begin_full_expression();
       }
@@ -1112,7 +1114,7 @@ void Initialization::object(StorageProjection destination,
           clause = implicit_element->initializer();
           element_constructor = implicit_element->constructor();
         }
-        std::optional<Evaluation::FullExpression> full_expression;
+        std::optional<FullExpression> full_expression;
         if (!explicit_clause && leaf) {
           full_expression = evaluation_.begin_full_expression();
         }

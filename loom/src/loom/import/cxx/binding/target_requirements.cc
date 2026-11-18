@@ -10,6 +10,8 @@
 #include <cxx/ast_interpreter.h>
 #include <cxx/attributes.h>
 #include <cxx/const_int.h>
+#include <cxx/names.h>
+#include <cxx/symbols.h>
 #include <cxx/types.h>
 
 #include <cstdint>

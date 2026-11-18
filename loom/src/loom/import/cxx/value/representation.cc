@@ -32,6 +32,26 @@ Value ValueArena::capture(const Partition& partition,
   return Value(partition, {owned, components.size()});
 }
 
+Value ValueArena::capture(const Partition& partition,
+                          std::span<const loom_value_id_t> first,
+                          std::span<const loom_value_id_t> last) {
+  if (last.empty()) {
+    return capture(partition, first);
+  }
+  if (first.empty()) {
+    return capture(partition, last);
+  }
+  loom_value_id_t local[2];
+  auto* owned = partition.component_count <= 2
+                    ? local
+                    : static_cast<loom_value_id_t*>(storage_.allocate(
+                          first.size_bytes() + last.size_bytes(),
+                          alignof(loom_value_id_t)));
+  auto* next = std::copy(first.begin(), first.end(), owned);
+  std::copy(last.begin(), last.end(), next);
+  return Value(partition, {owned, first.size() + last.size()});
+}
+
 Value ValueArena::replace(Value original, size_t component_offset,
                           Value replacement) {
   if (!replacement.partition().component_count) {

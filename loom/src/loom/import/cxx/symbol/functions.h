@@ -18,27 +18,31 @@
 #include <utility>
 #include <vector>
 
-#include "loom/import/cxx/binding/command_programs.h"
-#include "loom/import/cxx/binding/config.h"
-#include "loom/import/cxx/binding/fastmath.h"
-#include "loom/import/cxx/binding/function_contracts.h"
 #include "loom/import/cxx/binding/imports.h"
-#include "loom/import/cxx/binding/intrinsics.h"
-#include "loom/import/cxx/binding/launch.h"
 #include "loom/import/cxx/binding/parameter_contracts.h"
-#include "loom/import/cxx/binding/pipeline_contracts.h"
-#include "loom/import/cxx/binding/target_definitions.h"
-#include "loom/import/cxx/binding/template_definitions.h"
-#include "loom/import/cxx/control/analysis.h"
-#include "loom/import/cxx/control/call_fields.h"
-#include "loom/import/cxx/source/locations.h"
-#include "loom/import/cxx/symbol/names.h"
-#include "loom/import/cxx/value/signature.h"
-#include "loom/import/cxx/value/types.h"
+#include "loom/import/cxx/value/partition.h"
 
 namespace loom::cxx_import {
 
+class CommandPrograms;
+class Configs;
+class ControlFlow;
+class FastMathContracts;
+class FunctionContracts;
 class ImmutableObjects;
+class Intrinsics;
+class LaunchContracts;
+class Locations;
+class PipelineContracts;
+class SymbolNames;
+class TargetDefinitions;
+class TemplateDefinitions;
+class Types;
+struct AnalyzedCall;
+struct BoundSignature;
+struct DirectCall;
+struct ReferenceResultOrigin;
+struct StagedSignatureProjection;
 
 enum class FunctionKind {
   Ordinary,
@@ -193,23 +197,10 @@ class Functions {
             PipelineContracts& pipeline_contracts, Configs& configs,
             FastMathContracts& fastmath, FunctionContracts& function_contracts,
             TargetDefinitions& target_definitions,
-            TemplateDefinitions& template_definitions, SymbolNames& names)
-      : unit_(unit),
-        diagnostics_(diagnostics),
-        module_(module),
-        immutable_objects_(immutable_objects),
-        intrinsics_(intrinsics),
-        launches_(launches),
-        command_programs_(command_programs),
-        pipeline_contracts_(pipeline_contracts),
-        configs_(configs),
-        fastmath_(fastmath),
-        function_contracts_(function_contracts),
-        imports_(unit, diagnostics),
-        target_definitions_(target_definitions),
-        template_definitions_(template_definitions),
-        names_(names),
-        parameter_contracts_(unit, diagnostics) {}
+            TemplateDefinitions& template_definitions, SymbolNames& names);
+  ~Functions();
+  Functions(const Functions&) = delete;
+  Functions& operator=(const Functions&) = delete;
 
   // Selects explicit qualified roots or externally visible concrete
   // definitions. Called once before translating the pending worklist.
@@ -231,9 +222,7 @@ class Functions {
   // Whether the declaration owns a check case or scenario record.
   bool is_check_record(cxx::FunctionSymbol* function) const;
   // Whether the declaration owns a reusable command program.
-  bool is_command_program(cxx::FunctionSymbol* function) const {
-    return command_programs_.contains(function);
-  }
+  bool is_command_program(cxx::FunctionSymbol* function) const;
   // Returns the original borrowed handle selected by an imported object
   // method's compile-time arrow adapter, or no value for ordinary calls.
   std::optional<ObjectMethodReceiver> object_method_receiver(
@@ -250,9 +239,7 @@ class Functions {
   const Imports& imports() const { return imports_; }
   // Returns the retained command source/native signature projection.
   const StagedSignatureProjection& command_program(
-      cxx::FunctionSymbol* function, Types& types, cxx::AST* owner) {
-    return command_programs_.project(function, types, owner);
-  }
+      cxx::FunctionSymbol* function, Types& types, cxx::AST* owner);
   // Emits reachable bodyless declarations after recursive body discovery.
   void build_declarations(Types& types, Locations& locations,
                           loom_builder_t* builder);

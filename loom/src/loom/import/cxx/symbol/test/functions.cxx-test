@@ -60,7 +60,7 @@ func.def noinline @retained_identity(%value: i32) -> (i32) {
 [[loom::inline, loom::hot]] static unsigned hot_identity(unsigned value) {
   return value;
 }
-[[loom::noinline, loom::cold]] static unsigned cold_identity(unsigned value) {
+[[using loom: noinline]] [[maybe_unused]] [[loom::cold]] static unsigned cold_identity(unsigned value) {
   return value;
 }
 unsigned call_temperatures(unsigned value) {

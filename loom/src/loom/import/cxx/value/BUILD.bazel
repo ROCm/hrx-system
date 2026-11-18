@@ -62,6 +62,38 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "partition",
+    srcs = ["partition.cc"],
+    hdrs = ["partition.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":representation",
+        "//loom/src/loom/import/cxx/source:error",
+        "//loom/src/loom/import/cxx/source:objects",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:core_type_builders",
+        "//loom/src/loom/ops:op_defs",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_library(
+    name = "component_names",
+    srcs = ["component_names.cc"],
+    hdrs = ["component_names.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":partition",
+        ":representation",
+        "//loom/src/loom/import/cxx/source:error",
+        "//loom/src/loom/ir",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_library(
     name = "types",
     srcs = [
         "object_types.cc",
@@ -72,9 +104,12 @@ loom_cc_library(
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
+        ":component_names",
+        ":partition",
         ":representation",
-        "//loom/src/loom/import/cxx/source",
         "//loom/src/loom/import/cxx/source:attributes",
+        "//loom/src/loom/import/cxx/source:contents",
+        "//loom/src/loom/import/cxx/source:diagnostics",
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/import/cxx/source:expressions",
         "//loom/src/loom/import/cxx/source:objects",
@@ -109,6 +144,7 @@ loom_cc_library(
     deps = [
         ":types",
         "//loom/src/loom/import/cxx/source",
+        "//loom/src/loom/import/cxx/source:diagnostics",
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/import/cxx/source:locations",
         "//loom/src/loom/ops:op_defs",
@@ -128,6 +164,7 @@ loom_cc_library(
         ":scalar",
         ":types",
         "//loom/src/loom/import/cxx/source",
+        "//loom/src/loom/import/cxx/source:diagnostics",
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/import/cxx/source:locations",
         "//loom/src/loom/ops:special_values",
@@ -146,6 +183,7 @@ loom_cc_library(
     deps = [
         ":types",
         "//loom/src/loom/import/cxx/source",
+        "//loom/src/loom/import/cxx/source:diagnostics",
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/scalar",
@@ -203,12 +241,24 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "evaluation",
+    hdrs = ["evaluation.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":representation",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_library(
     name = "initialization",
     srcs = ["initialization.cc"],
     hdrs = ["initialization.h"],
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
+        ":evaluation",
         ":objects",
         ":representation",
         ":scalar",
@@ -217,6 +267,7 @@ loom_cc_library(
         ":vector",
         "//loom/src/loom/import/cxx/source",
         "//loom/src/loom/import/cxx/source:constants",
+        "//loom/src/loom/import/cxx/source:diagnostics",
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/import/cxx/source:expressions",
         "//loom/src/loom/import/cxx/source:initializer_lists",
@@ -242,6 +293,7 @@ loom_cc_library(
         ":types",
         "//loom/src/loom/import/cxx/source",
         "//loom/src/loom/import/cxx/source:constants",
+        "//loom/src/loom/import/cxx/source:diagnostics",
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/import/cxx/source:locations",
         "//loom/src/loom/import/cxx/source:objects",
@@ -277,6 +329,40 @@ loom_cc_library(
 loom_cc_test(
     name = "types_test",
     srcs = ["types_test.cc"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":builder_test",
+        ":types",
+        "//loom/src/loom/import/cxx/source",
+        "//loom/src/loom/import/cxx/source:error",
+        "//loom/src/loom/import/cxx/source:options",
+        "//loom/src/loom/ops:core_type_builders",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_test(
+    name = "component_names_test",
+    srcs = ["component_names_test.cc"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":builder_test",
+        ":component_names",
+        ":types",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_test(
+    name = "shaped_types_test",
+    srcs = ["shaped_types_test.cc"],
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [

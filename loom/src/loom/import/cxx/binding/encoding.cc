@@ -9,6 +9,7 @@
 #include <cxx/const_value.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
+#include <cxx/translation_unit.h>
 #include <cxx/types.h>
 
 #include <iterator>
@@ -16,6 +17,8 @@
 #include <vector>
 
 #include "loom/import/cxx/binding/constant_attributes.h"
+#include "loom/import/cxx/source/contents.h"
+#include "loom/import/cxx/source/diagnostics.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/ir/attribute_schema.h"
 #include "loom/ir/context.h"

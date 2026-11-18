@@ -68,6 +68,29 @@ std::span<const loom_value_id_t> flatten(
 
 }  // namespace
 
+Intrinsics::Intrinsics(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
+                       Types& types, Scalars& scalars, Vectors& vectors,
+                       Locations& locations, SymbolNames& names,
+                       LaunchContracts& launches,
+                       CommandPrograms& command_programs,
+                       PipelineContracts& pipeline_contracts,
+                       FunctionContracts& function_contracts,
+                       loom_module_t* module)
+    : unit_(unit),
+      diagnostics_(diagnostics),
+      types_(types),
+      scalars_(scalars),
+      vectors_(vectors),
+      locations_(locations),
+      names_(names),
+      launches_(launches),
+      command_programs_(command_programs),
+      pipeline_contracts_(pipeline_contracts),
+      function_contracts_(function_contracts),
+      module_(module) {}
+
+Intrinsics::~Intrinsics() = default;
+
 void Intrinsics::declaration(cxx::FunctionSymbol* function,
                              cxx::List<cxx::AttributeSpecifierAST*>* attributes,
                              cxx::AST* owner) {

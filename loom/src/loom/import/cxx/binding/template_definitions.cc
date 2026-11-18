@@ -17,6 +17,7 @@
 
 #include "loom/import/cxx/binding/template_inputs.h"
 #include "loom/import/cxx/source/attributes.h"
+#include "loom/import/cxx/source/diagnostics.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/value/types.h"
 

@@ -16,7 +16,7 @@
 #include "loom/import/cxx/binding/numeric_conversion.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/source.h"
-#include "loom/import/cxx/translation.h"
+#include "loom/import/cxx/translation/module.h"
 #include "loom/verify/verify.h"
 
 namespace {

@@ -13,17 +13,21 @@
 #include <cxx/memory_layout.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
+#include <cxx/translation_unit.h>
 #include <cxx/type_traits.h>
 #include <cxx/types.h>
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <optional>
 
 #include "loom/import/cxx/source/attributes.h"
+#include "loom/import/cxx/source/diagnostics.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/source/objects.h"
+#include "loom/import/cxx/value/component_names.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/type_registry.h"
@@ -64,209 +68,13 @@ const cxx::ParameterPackSymbol* template_argument_pack(
   return symbol ? cxx::symbol_cast<cxx::ParameterPackSymbol>(*symbol) : nullptr;
 }
 
-loom_type_t make_shaped_type(loom_type_kind_t kind, loom_scalar_type_t element,
-                             std::span<const uint64_t> dimensions,
-                             BoundTypeStorage& storage) {
-  const loom_type_t base = {
-      .header = loom_type_make_header(kind, element, 0, 0),
-  };
-  return storage.with_dimensions(base, dimensions);
-}
-
-loom_type_t make_encoded_shaped_type(loom_type_kind_t kind,
-                                     loom_scalar_type_t element,
-                                     std::span<const uint64_t> dimensions,
-                                     std::optional<loom_value_id_t> encoding,
-                                     BoundTypeStorage& storage) {
-  return BoundTypeStorage::with_encoding(
-      make_shaped_type(kind, element, dimensions, storage), encoding);
-}
-
-loom_type_t make_channel_handle_type(loom_module_t* module,
-                                     loom_type_t payload_type,
-                                     ChannelHandleKind handle_kind,
-                                     bool mutable_read) {
-  loom_type_id_t payload_id = LOOM_TYPE_ID_INVALID;
-  check(loom_module_intern_type_id(module, payload_type, &payload_id));
-  loom_type_t result;
-  switch (handle_kind) {
-    case ChannelHandleKind::Channel:
-      check(loom_channel_type_make(module, payload_id, &result));
-      break;
-    case ChannelHandleKind::Read:
-      check(loom_read_type_make(
-          module, mutable_read ? LOOM_READ_TYPE_BUILD_FLAG_HAS_MODE : 0,
-          payload_id,
-          mutable_read ? LOOM_READ_TYPE_MODE_MUTABLE
-                       : static_cast<loom_read_type_mode_t>(0),
-          &result));
-      break;
-    case ChannelHandleKind::Write:
-      check(loom_write_type_make(module, payload_id, &result));
-      break;
-  }
-  return result;
-}
-
 }  // namespace
 
-loom_type_t BoundTypeStorage::with_encoding(
-    loom_type_t result, std::optional<loom_value_id_t> encoding) {
-  if (encoding) {
-    if (*encoding > UINT16_MAX) {
-      check(iree_make_status(
-          IREE_STATUS_RESOURCE_EXHAUSTED,
-          "encoding value ID %u exceeds the shaped type limit of %u", *encoding,
-          UINT16_MAX));
-    }
-    result.encoding_id = static_cast<uint16_t>(*encoding);
-    result.encoding_flags = LOOM_ENCODING_FLAG_SSA;
-  }
-  return result;
-}
+Types::Types(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
+             loom_module_t* module)
+    : unit_(unit), diagnostics_(diagnostics), module_(module) {}
 
-loom_type_t BoundTypeStorage::with_dimensions(
-    loom_type_t type, std::span<const uint64_t> dimensions) {
-  bool all_static = true;
-  for (auto dimension : dimensions) {
-    all_static &= !loom_dim_is_dynamic(dimension);
-  }
-  uint8_t flags = all_static ? LOOM_TYPE_FLAG_ALL_STATIC : 0;
-  const bool reference_element = loom_type_has_reference_element(type);
-  if (reference_element) {
-    flags |= LOOM_TYPE_FLAG_REFERENCE_ELEMENT;
-  } else if (dimensions.size() <= 2) {
-    flags |= LOOM_TYPE_FLAG_INLINE_DIMS;
-  }
-  type.header =
-      loom_type_make_header(loom_type_kind(type), loom_type_element_type(type),
-                            static_cast<uint8_t>(dimensions.size()), flags) |
-      (type.header & 0xFF000000u);
-  if (!reference_element) {
-    type.dims[1] = 0;
-  }
-  type.dims[0] = 0;
-  if (!reference_element && dimensions.size() <= 2) {
-    std::copy(dimensions.begin(), dimensions.end(), type.dims);
-  } else {
-    type.dims[0] = reinterpret_cast<uintptr_t>(retain_dimensions(dimensions));
-  }
-  return type;
-}
-
-const loom_overflow_dim_t* BoundTypeStorage::retain_dimensions(
-    std::span<const loom_overflow_dim_t> dimensions) {
-  IREE_ASSERT(!dimensions.empty() && dimensions.size() <= LOOM_TYPE_MAX_RANK);
-  auto& payload = dimension_payloads_.emplace_front();
-  std::copy(dimensions.begin(), dimensions.end(), payload.begin());
-  return payload.data();
-}
-
-void ShapeExtents::assign(std::span<const int64_t> extents) {
-  IREE_ASSERT(!extents.empty() && extents.size() <= LOOM_TYPE_MAX_RANK);
-  rank_ = extents.size();
-  if (rank_ <= inline_extents_.size()) {
-    std::copy(extents.begin(), extents.end(), inline_extents_.begin());
-    overflow_extents_.reset();
-    return;
-  }
-  overflow_extents_ = std::make_unique<int64_t[]>(rank_);
-  std::copy(extents.begin(), extents.end(), overflow_extents_.get());
-}
-
-loom_type_t TilePartition::bind_type(
-    std::span<const loom_value_id_t> dependencies,
-    BoundTypeStorage& storage) const {
-  IREE_ASSERT(dependencies.size() == component_count - 1);
-  if (!requires_binding()) {
-    return static_type;
-  }
-  std::array<uint64_t, LOOM_TYPE_MAX_RANK> dimensions;
-  size_t dependency = 0;
-  for (size_t axis = 0; axis < extents.size(); ++axis) {
-    dimensions[axis] = extents[axis] < 0
-                           ? loom_dim_pack_dynamic(dependencies[dependency++])
-                           : loom_dim_pack_static(extents[axis]);
-  }
-  std::optional<loom_value_id_t> encoding_value;
-  if (encoding) {
-    encoding_value = dependencies[dependency++];
-  }
-  IREE_ASSERT_EQ(dependency, dependencies.size());
-  return make_encoded_shaped_type(
-      LOOM_TYPE_TILE, element,
-      std::span<const uint64_t>(dimensions).first(extents.size()),
-      encoding_value, storage);
-}
-
-loom_value_id_t TilePartition::tile_value(
-    std::span<const loom_value_id_t> components) const {
-  IREE_ASSERT(components.size() == component_count);
-  return components.back();
-}
-
-loom_type_t ChannelPartition::bind_type(
-    loom_module_t* module, std::span<const loom_value_id_t> dependencies,
-    BoundTypeStorage& storage) const {
-  IREE_ASSERT(module);
-  IREE_ASSERT(dependencies.size() == component_count - 1);
-  if (!requires_binding()) {
-    return static_type;
-  }
-  const auto payload_type = payload->bind_type(dependencies, storage);
-  return make_channel_handle_type(module, payload_type, handle_kind,
-                                  mutable_read);
-}
-
-loom_value_id_t ChannelPartition::handle_value(
-    std::span<const loom_value_id_t> components) const {
-  IREE_ASSERT(components.size() == component_count);
-  return components.back();
-}
-
-loom_type_t VectorPartition::bind_type(
-    std::span<const loom_value_id_t> dynamic_extents,
-    BoundTypeStorage& storage) const {
-  IREE_ASSERT(dynamic_extents.size() == component_count - 1);
-  if (!is_dynamic()) {
-    return static_type;
-  }
-  std::array<uint64_t, LOOM_TYPE_MAX_RANK> dimensions;
-  size_t dynamic_index = 0;
-  for (size_t axis = 0; axis < extents.size(); ++axis) {
-    dimensions[axis] =
-        extents[axis] < 0
-            ? loom_dim_pack_dynamic(dynamic_extents[dynamic_index++])
-            : loom_dim_pack_static(extents[axis]);
-  }
-  return make_shaped_type(
-      LOOM_TYPE_VECTOR, element,
-      std::span<const uint64_t>(dimensions).first(extents.size()), storage);
-}
-
-loom_value_id_t VectorPartition::vector_value(
-    std::span<const loom_value_id_t> components) const {
-  IREE_ASSERT(components.size() == component_count);
-  return components.back();
-}
-
-loom_type_t TensorPartition::bind_type(
-    std::span<const loom_value_id_t> dynamic_extents) const {
-  IREE_ASSERT(dynamic_extents.size() == (is_dynamic() ? 1u : 0u));
-  auto dimension = is_dynamic() ? loom_dim_pack_dynamic(dynamic_extents[0])
-                                : loom_dim_pack_static(extent);
-  if (vector_lane_count) {
-    return loom_type_shaped_2d(LOOM_TYPE_TENSOR, element, dimension,
-                               loom_dim_pack_static(vector_lane_count), 0);
-  }
-  return loom_type_shaped_1d(LOOM_TYPE_TENSOR, element, dimension, 0);
-}
-
-loom_value_id_t TensorPartition::tensor_value(
-    std::span<const loom_value_id_t> components) const {
-  IREE_ASSERT(components.size() == component_count);
-  return components.back();
-}
+Types::~Types() = default;
 
 const cxx::Type* Types::unqualified(const cxx::Type* type) {
   auto traits = unit_.typeTraits();
@@ -1084,14 +892,7 @@ const TilePartition* Types::tile(const cxx::ClassType* input, cxx::AST* owner) {
   }
   result->component_names.emplace_back();
   if (!result->requires_binding()) {
-    std::array<uint64_t, LOOM_TYPE_MAX_RANK> dimensions;
-    for (size_t axis = 0; axis < result->extents.size(); ++axis) {
-      dimensions[axis] = loom_dim_pack_static(result->extents[axis]);
-    }
-    result->static_type = make_shaped_type(
-        LOOM_TYPE_TILE, result->element,
-        std::span<const uint64_t>(dimensions).first(result->extents.size()),
-        result->static_type_storage);
+    result->bind_static_type();
   }
   auto* admitted = result.get();
   tiles_.emplace(source, std::move(result));
@@ -1159,8 +960,7 @@ const ChannelPartition* Types::channel(const cxx::ClassType* input,
   result->mutable_read = mutable_read;
   result->component_names = payload->component_names;
   if (!result->requires_binding()) {
-    result->static_type = make_channel_handle_type(
-        module_, payload->static_type, result->handle_kind, mutable_read);
+    result->bind_static_type(module_);
   }
   auto* admitted = result.get();
   channels_.emplace(source, std::move(result));
@@ -1224,14 +1024,7 @@ const VectorPartition* Types::semantic_vector(const cxx::ClassType* input,
   }
   result->component_names.emplace_back();
   if (!result->is_dynamic()) {
-    std::array<uint64_t, LOOM_TYPE_MAX_RANK> dimensions;
-    for (size_t axis = 0; axis < result->extents.size(); ++axis) {
-      dimensions[axis] = loom_dim_pack_static(result->extents[axis]);
-    }
-    result->static_type = make_shaped_type(
-        LOOM_TYPE_VECTOR, result->element,
-        std::span<const uint64_t>(dimensions).first(result->extents.size()),
-        result->static_type_storage);
+    result->bind_static_type();
   }
   auto* admitted = result.get();
   semantic_vectors_.emplace(source, std::move(result));
@@ -1304,14 +1097,6 @@ const TensorPartition* Types::tensor(const cxx::ClassType* input,
   auto* admitted = result.get();
   tensors_.emplace(source, std::move(result));
   return admitted;
-}
-
-const cxx::Type* SubobjectPartition::type() const {
-  return source_object_type(source);
-}
-
-uint64_t SubobjectPartition::byte_offset() const {
-  return source_subobject_offset(source);
 }
 
 const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
@@ -1443,89 +1228,6 @@ bool Types::record_constructor_requires_call(const cxx::Type* type,
 bool Types::is_trivial_value_operation(cxx::FunctionSymbol* function) {
   return unit_.typeTraits().is_trivial_special_member(function) &&
          !function->isDestructor();
-}
-
-void Types::append_component_names(const Partition& partition,
-                                   std::string_view prefix,
-                                   std::vector<std::string>& output) {
-  auto append = [&](std::string_view suffix) {
-    if (suffix.empty()) {
-      output.emplace_back(prefix);
-    } else if (prefix.empty()) {
-      output.emplace_back(suffix);
-    } else {
-      output.emplace_back(std::string(prefix) + "_" + std::string(suffix));
-    }
-  };
-  switch (partition.kind) {
-    case ValueKind::SSA:
-    case ValueKind::Buffer:
-    case ValueKind::Address:
-    case ValueKind::Object:
-    case ValueKind::OpaqueDialect:
-    case ValueKind::Encoding:
-    case ValueKind::Pool:
-      append({});
-      return;
-    case ValueKind::Tile: {
-      const auto& tile = static_cast<const TilePartition&>(partition);
-      for (const auto& name : tile.component_names) {
-        append(name);
-      }
-      return;
-    }
-    case ValueKind::Channel: {
-      const auto& channel = static_cast<const ChannelPartition&>(partition);
-      for (const auto& name : channel.component_names) {
-        append(name);
-      }
-      return;
-    }
-    case ValueKind::Vector: {
-      const auto& vector = static_cast<const VectorPartition&>(partition);
-      for (const auto& name : vector.component_names) {
-        append(name);
-      }
-      return;
-    }
-    case ValueKind::Tensor: {
-      const auto& tensor = static_cast<const TensorPartition&>(partition);
-      if (tensor.is_dynamic()) {
-        append("dim0");
-      }
-      append({});
-      return;
-    }
-    case ValueKind::Pointer:
-      append({});
-      append("byte_offset");
-      return;
-    case ValueKind::Record: {
-      const auto& record = static_cast<const RecordPartition&>(partition);
-      for (const auto& name : record.component_names) {
-        append(name);
-      }
-      return;
-    }
-    case ValueKind::Array: {
-      const auto& array = static_cast<const ArrayPartition&>(partition);
-      for (size_t index = 0; index < array.source->size(); ++index) {
-        append_component_names(
-            *array.element,
-            (prefix.empty() ? "" : std::string(prefix) + "_") +
-                std::to_string(index),
-            output);
-      }
-      return;
-    }
-    case ValueKind::View: {
-      const auto& view = static_cast<const ViewPartition&>(partition);
-      for (const auto& name : view.component_names) {
-        append(name);
-      }
-      return;
-    }
-  }
 }
 
 const SubobjectPartition& Types::member(cxx::Symbol* subobject,

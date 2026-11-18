@@ -19,7 +19,8 @@ launch a program, or publish an execution module.
 | [Data bindings](../binding/test/data/README.md) | Views, shapes, encodings, dependent calls, input construction, and reference computations. |
 | [Kernel bindings](../binding/test/kernel/README.md) | Kernel arguments, topology, atomics, collectives, barriers, and shared storage. |
 | [Pipelines](../binding/test/pipeline/README.md) | Command programs, channels, strands, launch metadata, and source projections. |
-| [Checks](../binding/test/check/README.md) | Check declarations, generators, typed resources, slices, comparisons, and captured observations. |
+| [Checks](../binding/test/check/README.md) | Check declarations, generators, typed resources, slices, and comparisons. |
+| [Check body translation](../translation/test/check/) | Flattened results, trial bodies, comparison regions, and their source diagnostics. |
 | [Assembly](../binding/test/assembly/README.md) | Embedded source literals, operand/result flattening, effect ordering, and diagnostics. |
 | [Loom templates](../binding/test/template/README.md) | Family declarations, applications, and provider metadata. |
 | `tooling/test` | Source providers, import options, opaque imports, and retained source capture. |

@@ -112,19 +112,10 @@ class Intrinsics {
              SymbolNames& names, LaunchContracts& launches,
              CommandPrograms& command_programs,
              PipelineContracts& pipeline_contracts,
-             FunctionContracts& function_contracts, loom_module_t* module)
-      : unit_(unit),
-        diagnostics_(diagnostics),
-        types_(types),
-        scalars_(scalars),
-        vectors_(vectors),
-        locations_(locations),
-        names_(names),
-        launches_(launches),
-        command_programs_(command_programs),
-        pipeline_contracts_(pipeline_contracts),
-        function_contracts_(function_contracts),
-        module_(module) {}
+             FunctionContracts& function_contracts, loom_module_t* module);
+  ~Intrinsics();
+  Intrinsics(const Intrinsics&) = delete;
+  Intrinsics& operator=(const Intrinsics&) = delete;
 
   // Admits raw attribute arguments before the frontend's string-only semantic
   // attribute map can erase unsupported arguments or duplicate bindings.

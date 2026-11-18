@@ -18,6 +18,7 @@
 
 #include "loom/import/cxx/source/constants.h"
 #include "loom/import/cxx/source/expressions.h"
+#include "loom/import/cxx/value/evaluation.h"
 #include "loom/import/cxx/value/objects.h"
 #include "loom/import/cxx/value/vector.h"
 
@@ -35,19 +36,8 @@ class Initialization {
   // Borrowed source-expression evaluator. Initializer traversal controls when
   // each clause executes; the surrounding translator owns its expression and
   // conversion semantics. This interface owns no source or output state.
-  class Evaluation {
+  class Evaluation : public ExpressionEvaluator {
    public:
-    struct FullExpression {
-      // Temporary prefix retained by this full expression.
-      size_t mark;
-      // Enclosing full expression restored after this one completes.
-      std::optional<size_t> parent_mark;
-      // Whether the enclosing initializer transfers its surviving temporaries
-      // to lexical cleanup instead of destroying them at expression completion.
-      bool parent_extends_temporaries = false;
-    };
-
-    virtual Value expression(cxx::ExpressionAST* expression) = 0;
     virtual Value convert(cxx::ExpressionAST* expression, const cxx::Type* type,
                           cxx::AST* owner) = 0;
     // Initializes an explicit aggregate member, constructing an

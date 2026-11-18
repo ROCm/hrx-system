@@ -16,11 +16,12 @@
 #include <vector>
 
 #include "loom/import/cxx/source/locations.h"
-#include "loom/import/cxx/source/source.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/signature_flags.h"
 
 namespace loom::cxx_import {
+
+class Diagnostics;
 
 // Entry precondition on the address supplied by one source pointer parameter.
 struct ParameterAlignment {

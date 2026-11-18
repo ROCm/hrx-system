@@ -12,6 +12,8 @@
 
 #include <array>
 
+#include "loom/import/cxx/source/contents.h"
+#include "loom/import/cxx/source/diagnostics.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/ir/module.h"
 #include "loom/ops/encoding/auxiliary.h"

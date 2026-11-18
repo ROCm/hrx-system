@@ -10,6 +10,7 @@
 #include <cxx/const_int.h>
 #include <cxx/const_value.h>
 #include <cxx/control.h>
+#include <cxx/names.h>
 #include <cxx/symbols.h>
 #include <cxx/types.h>
 

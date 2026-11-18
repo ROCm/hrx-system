@@ -28,14 +28,28 @@
 #include <utility>
 #include <variant>
 
+#include "loom/import/cxx/binding/command_programs.h"
+#include "loom/import/cxx/binding/config.h"
+#include "loom/import/cxx/binding/fastmath.h"
+#include "loom/import/cxx/binding/function_contracts.h"
+#include "loom/import/cxx/binding/intrinsics.h"
+#include "loom/import/cxx/binding/launch.h"
+#include "loom/import/cxx/binding/pipeline_contracts.h"
+#include "loom/import/cxx/binding/target_definitions.h"
+#include "loom/import/cxx/binding/template_definitions.h"
 #include "loom/import/cxx/binding/template_inputs.h"
+#include "loom/import/cxx/control/analysis.h"
+#include "loom/import/cxx/control/call_fields.h"
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
+#include "loom/import/cxx/source/locations.h"
 #include "loom/import/cxx/source/objects.h"
 #include "loom/import/cxx/symbol/immutable_objects.h"
+#include "loom/import/cxx/symbol/names.h"
 #include "loom/import/cxx/symbol/source_signature.h"
 #include "loom/import/cxx/value/signature.h"
+#include "loom/import/cxx/value/types.h"
 #include "loom/ir/module.h"
 #include "loom/ops/check/ops.h"
 #include "loom/ops/command/ops.h"
@@ -264,6 +278,44 @@ bool has_source_visibility(cxx::FunctionSymbol* function,
 }
 
 }  // namespace
+
+Functions::Functions(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
+                     loom_module_t* module, ImmutableObjects& immutable_objects,
+                     Intrinsics& intrinsics, LaunchContracts& launches,
+                     CommandPrograms& command_programs,
+                     PipelineContracts& pipeline_contracts, Configs& configs,
+                     FastMathContracts& fastmath,
+                     FunctionContracts& function_contracts,
+                     TargetDefinitions& target_definitions,
+                     TemplateDefinitions& template_definitions,
+                     SymbolNames& names)
+    : unit_(unit),
+      diagnostics_(diagnostics),
+      module_(module),
+      immutable_objects_(immutable_objects),
+      intrinsics_(intrinsics),
+      launches_(launches),
+      command_programs_(command_programs),
+      pipeline_contracts_(pipeline_contracts),
+      configs_(configs),
+      fastmath_(fastmath),
+      function_contracts_(function_contracts),
+      imports_(unit, diagnostics),
+      target_definitions_(target_definitions),
+      template_definitions_(template_definitions),
+      names_(names),
+      parameter_contracts_(unit, diagnostics) {}
+
+Functions::~Functions() = default;
+
+bool Functions::is_command_program(cxx::FunctionSymbol* function) const {
+  return command_programs_.contains(function);
+}
+
+const StagedSignatureProjection& Functions::command_program(
+    cxx::FunctionSymbol* function, Types& types, cxx::AST* owner) {
+  return command_programs_.project(function, types, owner);
+}
 
 void Functions::select(std::span<const iree_string_view_t> roots,
                        Types& types) {
