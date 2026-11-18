@@ -38,16 +38,6 @@ class Initialization {
   // conversion semantics. This interface owns no source or output state.
   class Evaluation : public ExpressionEvaluator {
    public:
-    struct FullExpression {
-      // Temporary prefix retained by this full expression.
-      size_t mark;
-      // Enclosing full expression restored after this one completes.
-      std::optional<size_t> parent_mark;
-      // Whether the enclosing initializer transfers its surviving temporaries
-      // to lexical cleanup instead of destroying them at expression completion.
-      bool parent_extends_temporaries = false;
-    };
-
     virtual Value convert(cxx::ExpressionAST* expression, const cxx::Type* type,
                           cxx::AST* owner) = 0;
     // Initializes an explicit aggregate member, constructing an
