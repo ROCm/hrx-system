@@ -105,30 +105,32 @@ class Pm4MappingTest : public Pm4MappingFixture {
     ASSERT_NO_FATAL_FAILURE(ReleaseBacking(neighbor));
   }
 
-  void RunPartialRemoval(amdf_memory_scope_t* scope) {
+  void RunPartialRemoval(amdf_memory_scope_t* scope, uint32_t leading_pages) {
     ASSERT_NO_FATAL_FAILURE(Prepare(scope));
     if (IsSkipped()) {
       return;
     }
     const uint64_t page = reservation_info_.mapping_granularity;
     const uint64_t length = 2 * kSlabByteLength;
+    // Cover both an aligned extent and a partial head/interior/tail extent.
+    const uint64_t placement = kPlacementByteOffset + leading_pages * page;
     ASSERT_LT(4 * page, kSlabByteLength);
     GpuMemory* original = nullptr;
     GpuMemory* replacement = nullptr;
     ASSERT_NO_FATAL_FAILURE(CreateBacking(length, &original));
     ASSERT_NO_FATAL_FAILURE(CreateBacking(page, &replacement));
     const amdf_memory_mapping_update_t initial = {
-        .target_byte_offset = kPlacementByteOffset,
+        .target_byte_offset = placement,
         .byte_length = length,
         .memory = original->memory,
         .access = access_,
     };
     ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &initial),
               AMDF_STATUS_OK);
-    ASSERT_NO_FATAL_FAILURE(WriteAndVerify(
-        kPlacementByteOffset, length - kPayloadByteOffset, 100, *original));
+    ASSERT_NO_FATAL_FAILURE(
+        WriteAndVerify(placement, length - kPayloadByteOffset, 100, *original));
 
-    const uint64_t address = reservation_info_.address + kPlacementByteOffset;
+    const uint64_t address = reservation_info_.address + placement;
     // Public admission rejects sub-unit edits and source offsets without
     // changing any of the installed mapping or its independently owned bytes.
     std::array<amdf_memory_mapping_update_t, 4> invalid;
@@ -167,7 +169,7 @@ class Pm4MappingTest : public Pm4MappingFixture {
     // and suffix must be ready on the already-running compute queue immediately
     // after update returns, including when the edit binds no new source.
     const amdf_memory_mapping_update_t hole = {
-        .target_byte_offset = kPlacementByteOffset + page,
+        .target_byte_offset = placement + page,
         .byte_length = page,
         .previous_memory = original->memory,
         .previous_source_byte_offset = page,
@@ -181,7 +183,7 @@ class Pm4MappingTest : public Pm4MappingFixture {
     }
 
     const amdf_memory_mapping_update_t replace = {
-        .target_byte_offset = kPlacementByteOffset + kSlabByteLength + page,
+        .target_byte_offset = placement + kSlabByteLength + page,
         .byte_length = page,
         .memory = replacement->memory,
         .access = access_,
@@ -204,12 +206,12 @@ class Pm4MappingTest : public Pm4MappingFixture {
     EXPECT_NO_FATAL_FAILURE(Verify(replacement->device_address, page, 300));
     const amdf_memory_mapping_update_t ends[] = {
         {
-            .target_byte_offset = kPlacementByteOffset,
+            .target_byte_offset = placement,
             .byte_length = page,
             .previous_memory = original->memory,
         },
         {
-            .target_byte_offset = kPlacementByteOffset + length - page,
+            .target_byte_offset = placement + length - page,
             .byte_length = page,
             .previous_memory = original->memory,
             .previous_source_byte_offset = length - page,
@@ -764,16 +766,24 @@ TEST_F(Pm4MappingTest, SystemBackingSplitReuseIsImmediatelyVisibleToCompute) {
   RunSplit(system_scope_);
 }
 
-TEST_F(Pm4MappingTest, SystemBackingPartialRemovalPreservesLiveNeighbors) {
-  RunPartialRemoval(system_scope_);
+class Pm4PartialMappingTest : public Pm4MappingTest,
+                              public ::testing::WithParamInterface<uint32_t> {};
+
+TEST_P(Pm4PartialMappingTest,
+       SystemBackingPartialRemovalPreservesLiveNeighbors) {
+  RunPartialRemoval(system_scope_, GetParam());
 }
 
-TEST_F(Pm4MappingTest, LocalBackingPartialRemovalPreservesLiveNeighbors) {
+TEST_P(Pm4PartialMappingTest,
+       LocalBackingPartialRemovalPreservesLiveNeighbors) {
   if (local_scope_ == nullptr) {
     GTEST_SKIP() << "endpoint has no local storage scope";
   }
-  RunPartialRemoval(local_scope_);
+  RunPartialRemoval(local_scope_, GetParam());
 }
+
+INSTANTIATE_TEST_SUITE_P(LeadingPages, Pm4PartialMappingTest,
+                         ::testing::Values(0u, 1u));
 
 TEST_F(Pm4MappingTest, LocalBackingSplitReuseIsImmediatelyVisibleToCompute) {
   if (local_scope_ == nullptr) {

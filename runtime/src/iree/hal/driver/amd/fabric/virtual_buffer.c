@@ -170,7 +170,7 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_update(
     };
   }
   if (iree_status_is_ok(status)) {
-    IREE_TRACE_ZONE_BEGIN_NAMED(z1, "amdf.memory_reservation_update");
+    IREE_TRACE_ZONE_BEGIN_NAMED(z1, "amdf_memory_reservation_update");
     IREE_TRACE_ZONE_APPEND_VALUE_I64(z1, update_count);
     const amdf_status_t native_status =
         reservation->api->memory_reservation_update(
