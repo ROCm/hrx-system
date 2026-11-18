@@ -148,6 +148,8 @@ loom_cc_library(
         "//loom/src/loom/import/cxx/binding:template_inputs",
         "//loom/src/loom/import/cxx/control:analysis",
         "//loom/src/loom/import/cxx/control:regions",
+        "//loom/src/loom/import/cxx/control/exits",
+        "//loom/src/loom/import/cxx/control/loops:counted",
         "//loom/src/loom/import/cxx/lifetime:origins",
         "//loom/src/loom/import/cxx/receiver:scopes",
         "//loom/src/loom/import/cxx/source",

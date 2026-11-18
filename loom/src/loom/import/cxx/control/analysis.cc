@@ -20,7 +20,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -223,6 +222,20 @@ ReferenceProjection compose_projection(ReferenceProjection parent,
               : parent.component_count - child.component_offset};
 }
 
+bool has_nonlocal_storage(cxx::VariableSymbol* variable) {
+  return variable->isStatic() || variable->isExtern() ||
+         variable->isThreadLocal() ||
+         cxx::symbol_cast<cxx::NamespaceSymbol>(
+             variable->canonical()->parent());
+}
+
+ObjectInterval object_interval(const Destination& destination) {
+  return {destination.binding, destination.component_offset,
+          destination.member ? destination.component_offset +
+                                   destination.member->component_count
+                             : ObjectInterval::kWholeObjectEnd};
+}
+
 std::optional<ObjectInterval> project_interval(ObjectInterval interval,
                                                ReferenceProjection projection) {
   const size_t interval_end =
@@ -269,20 +282,6 @@ cxx::FieldSymbol* reference_capture(cxx::TranslationUnit& unit, Types& types,
              : nullptr;
 }
 
-bool operation_is(cxx::Symbol* symbol, std::string_view operation) {
-  auto* binding = annotation(symbol, "op");
-  return binding && binding->arguments.size() == 1 &&
-         binding->arguments[0]->name() == operation;
-}
-
-bool operation_is(cxx::Symbol* symbol, std::string_view operation,
-                  std::string_view parameter) {
-  auto* binding = annotation(symbol, "op");
-  return binding && binding->arguments.size() == 2 &&
-         binding->arguments[0]->name() == operation &&
-         binding->arguments[1]->name() == parameter;
-}
-
 // Returns the overloaded subscript at the root of an immediate view element
 // projection. Value conversion and dot field selection consume the synthetic
 // lvalue without giving its source reference an independent identity.
@@ -299,123 +298,9 @@ cxx::SubscriptExpressionAST* view_element_origin(
     return view_element_origin(unit, member->baseExpression);
   }
   auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(expression);
-  return subscript && operation_is(subscript->symbol, "view.element")
+  return subscript && has_op_binding(subscript->symbol, "view.element")
              ? subscript
              : nullptr;
-}
-
-// CXX materializes trivial by-value class arguments as an implicit copy around
-// a one-element paren initializer. Peel only those same-type copies so loop
-// admission still reasons about the resolved source binding identity.
-cxx::IdExpressionAST* address_identity(cxx::TranslationUnit& unit,
-                                       const AddressPartition& address,
-                                       cxx::ExpressionAST* expression) {
-  while (expression) {
-    if (auto* cast =
-            cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression)) {
-      if (cast->conversionFunction &&
-          !same_function(cast->conversionFunction,
-                         address.source->copyConstructor()) &&
-          !same_function(cast->conversionFunction,
-                         address.source->moveConstructor())) {
-        return nullptr;
-      }
-      expression = cast->expression;
-      continue;
-    }
-    if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
-      expression = nested->expression;
-      continue;
-    }
-    if (auto* copy = cxx::ast_cast<cxx::ParenInitializerAST>(expression)) {
-      auto* arguments = cxx::Initializer(copy).expressionList();
-      if (!arguments || arguments->next) {
-        return nullptr;
-      }
-      expression = arguments->value;
-      continue;
-    }
-    break;
-  }
-  auto* identity = cxx::ast_cast<cxx::IdExpressionAST>(expression);
-  if (!identity) {
-    return nullptr;
-  }
-  auto traits = unit.typeTraits();
-  return traits.is_same(traits.remove_cv(identity->type),
-                        address.source->type())
-             ? identity
-             : nullptr;
-}
-
-std::optional<std::intmax_t> address_constant(cxx::TranslationUnit& unit,
-                                              const AddressPartition& address,
-                                              cxx::ExpressionAST* expression) {
-  expression = unwrap_expression(expression);
-  auto traits = unit.typeTraits();
-  if (!traits.is_same(traits.remove_cv(expression->type),
-                      address.source->type())) {
-    return std::nullopt;
-  }
-  cxx::List<cxx::ExpressionAST*>* arguments = nullptr;
-  if (auto* construction =
-          cxx::ast_cast<cxx::BracedTypeConstructionAST>(expression)) {
-    arguments =
-        construction->bracedInitList
-            ? cxx::Initializer(construction->bracedInitList).expressionList()
-            : nullptr;
-  } else if (auto* construction =
-                 cxx::ast_cast<cxx::TypeConstructionAST>(expression)) {
-    arguments = construction->expressionList;
-  }
-  return arguments && !arguments->next
-             ? integer_constant(unit, arguments->value)
-             : std::nullopt;
-}
-
-bool is_address_unit(cxx::TranslationUnit& unit,
-                     const AddressPartition& address,
-                     cxx::ExpressionAST* expression) {
-  auto value = address_constant(unit, address, expression);
-  return value && *value == 1;
-}
-
-struct IntegerIncrement {
-  cxx::IdExpressionAST* induction;
-  unsigned step;
-};
-
-std::optional<IntegerIncrement> classify_integer_increment(
-    cxx::TranslationUnit& unit, cxx::ExpressionAST* expression,
-    std::uintmax_t maximum_step) {
-  expression = unwrap_expression(expression);
-  if (auto* prefix = cxx::ast_cast<cxx::UnaryExpressionAST>(expression);
-      prefix && !prefix->symbol && prefix->op == cxx::TokenKind::T_PLUS_PLUS) {
-    return IntegerIncrement{cxx::ast_cast<cxx::IdExpressionAST>(
-                                unwrap_expression(prefix->expression)),
-                            1};
-  }
-  if (auto* postfix = cxx::ast_cast<cxx::PostIncrExpressionAST>(expression);
-      postfix && !postfix->symbol &&
-      postfix->op == cxx::TokenKind::T_PLUS_PLUS) {
-    return IntegerIncrement{cxx::ast_cast<cxx::IdExpressionAST>(
-                                unwrap_expression(postfix->baseExpression)),
-                            1};
-  }
-  auto* compound =
-      cxx::ast_cast<cxx::CompoundAssignmentExpressionAST>(expression);
-  if (!compound || compound->symbol ||
-      compound->op != cxx::TokenKind::T_PLUS_EQUAL) {
-    return std::nullopt;
-  }
-  auto amount = integer_constant(unit, compound->rightExpression);
-  if (!amount || *amount <= 0 ||
-      static_cast<std::uintmax_t>(*amount) > maximum_step) {
-    return std::nullopt;
-  }
-  return IntegerIncrement{cxx::ast_cast<cxx::IdExpressionAST>(
-                              unwrap_expression(compound->targetExpression)),
-                          static_cast<unsigned>(*amount)};
 }
 
 std::optional<bool> constant_truth(cxx::TranslationUnit& unit,
@@ -1149,73 +1034,94 @@ cxx::Symbol* ControlFlow::object_owner(cxx::ExpressionAST* expression) const {
   return found == object_owners_.end() ? nullptr : found->second;
 }
 
+void ControlFlow::retain_counted(cxx::ForStatementAST* loop) {
+  auto interval = CountedLoop::recognize(unit_, types_, loop);
+  if (!interval) {
+    return;
+  }
+  const Destination* referent = nullptr;
+  if (auto* bound = interval->upper_identifier()) {
+    if (auto alias = reference_aliases_.find(bound->symbol);
+        alias != reference_aliases_.end()) {
+      if (!alias->second.destination) {
+        return;
+      }
+      referent = &*alias->second.destination;
+    } else if (bound->subobjectPath) {
+      if (!retain_destination(bound)) {
+        return;
+      }
+      referent = &destinations_.at(bound);
+    }
+  }
+  has_projected_loop_bounds_ |= referent && referent->member;
+  counted_.emplace(loop, LoopCandidate{*interval, referent});
+}
+
 const CountedLoop* ControlFlow::counted(cxx::ForStatementAST* loop) const {
   auto found = counted_.find(loop);
-  if (found == counted_.end() || addressed(found->second.induction)) {
+  if (found == counted_.end()) {
     return nullptr;
   }
-  // An aliased bound can change through a helper without a syntactic write in
-  // the loop. Consult complete address demand, including later source uses.
-  const CountedLoop::Bound* bound = nullptr;
-  if (auto* range =
-          std::get_if<CountedLoop::UnsignedRange>(&found->second.range)) {
-    bound = std::get_if<CountedLoop::Bound>(&range->upper);
-  } else if (auto* range =
-                 std::get_if<CountedLoop::SignedRange>(&found->second.range)) {
-    bound = std::get_if<CountedLoop::Bound>(&range->upper);
-  } else {
-    bound = &std::get<CountedLoop::AddressRange>(found->second.range).upper;
+  const auto& [interval, referent] = found->second;
+  auto body_writes = written(loop->statement);
+  if (addressed(interval.induction) ||
+      std::ranges::find(body_writes, interval.induction) != body_writes.end()) {
+    return nullptr;
   }
-  return bound && bound->binding && addressed(bound->binding) ? nullptr
-                                                              : &found->second;
+  auto* identifier = interval.upper_identifier();
+  if (!identifier) {
+    return &interval;
+  }
+  auto* binding = identifier->symbol;
+  auto* owner = referent ? referent->binding : binding;
+  // A storage-backed reference may alias an entirely different parameter.
+  // Only the completed callable analysis knows which arguments share storage.
+  if (addressed(owner) ||
+      ((referent || unit_.typeTraits().is_reference(binding->type())) &&
+       reference_requires_storage(binding))) {
+    return nullptr;
+  }
+  if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(owner);
+      field &&
+      (field->isStatic()
+           ? !unit_.typeTraits().is_const(field->type())
+           : receiver_requires_storage_ || is_captured_object_field(field) ||
+                 (unit_.typeTraits().is_reference(field->type()) &&
+                  !types_.reference_is_snapshot(field)))) {
+    return nullptr;
+  }
+  if (auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(owner);
+      variable && !unit_.typeTraits().is_const(variable->type()) &&
+      has_nonlocal_storage(variable)) {
+    return nullptr;
+  }
+  // Member writes were checked by component as they were recorded. For a
+  // whole object the ordinary region write summary is already exact.
+  if (!referent || !referent->member) {
+    auto writes = written(loop);
+    if (std::ranges::find(writes, owner) != writes.end()) {
+      return nullptr;
+    }
+  }
+  return &interval;
 }
 
 const SwitchLayout& ControlFlow::switch_layout(
     cxx::SwitchStatementAST* statement) const {
-  return switches_.at(statement).layout;
+  return switches_.at(statement);
 }
 
-unsigned ControlFlow::paths(cxx::StatementAST* statement) const {
-  auto found = paths_.find(statement);
-  return found == paths_.end() ? unsigned(Fallthrough) : found->second;
+StatementExits ControlFlow::exits(cxx::StatementAST* statement) const {
+  auto found = exits_.find(statement);
+  return found == exits_.end() ? StatementExits{} : found->second;
 }
 
-unsigned ControlFlow::sequence_paths(
-    std::span<cxx::StatementAST* const> statements) const {
-  unsigned outcomes = Fallthrough;
-  for (auto* statement : statements) {
-    if (!(outcomes & Fallthrough)) {
-      break;
-    }
-    outcomes = (outcomes & ~Fallthrough) | paths(statement);
+void ControlFlow::retain_exits(cxx::StatementAST* statement,
+                               StatementExits paths) {
+  if (paths != StatementExits{}) {
+    exits_.emplace(statement, paths);
   }
-  return outcomes;
-}
-
-ExitFlow ControlFlow::exits(cxx::StatementAST* statement,
-                            unsigned selected_paths) const {
-  auto outcomes = paths(statement);
-  return !(outcomes & selected_paths)    ? ExitFlow::None
-         : !(outcomes & ~selected_paths) ? ExitFlow::All
-                                         : ExitFlow::Some;
-}
-
-ExitFlow ControlFlow::returns(cxx::StatementAST* statement) const {
-  return exits(statement, Return);
-}
-
-bool ControlFlow::requires_callable_exit(cxx::StatementAST* statement) const {
-  return callable_exits_.contains(statement);
-}
-
-size_t ControlFlow::callable_exit_count(
-    cxx::CompoundStatementAST* statement) const {
-  auto found = callable_exit_counts_.find(statement);
-  return found == callable_exit_counts_.end() ? 0 : found->second;
-}
-
-bool ControlFlow::falls_through(cxx::StatementAST* statement) const {
-  return paths(statement) & Fallthrough;
 }
 
 cxx::CompoundStatementAST* ControlFlow::range_scope(
@@ -1230,18 +1136,6 @@ bool ControlFlow::initializes_range(cxx::InitDeclaratorAST* declaration) const {
 const InitializerList* ControlFlow::initializer_list(
     cxx::BracedInitListAST* source) const {
   return initializer_lists_ ? initializer_lists_->get(source) : nullptr;
-}
-
-ExitFlow ControlFlow::continues(cxx::StatementAST* statement) const {
-  return exits(statement, Continue);
-}
-
-ExitFlow ControlFlow::breaks(cxx::StatementAST* statement) const {
-  return exits(statement, Break);
-}
-
-ExitFlow ControlFlow::iteration_exits(cxx::StatementAST* statement) const {
-  return exits(statement, Continue | Break);
 }
 
 bool ControlFlow::preVisit(cxx::AST* ast) {
@@ -1359,11 +1253,18 @@ void ControlFlow::postVisit(cxx::AST* ast) {
   if (auto* statement = cxx::ast_cast<cxx::StatementAST>(ast)) {
     reject_misplaced_binding_statement(unit_, diagnostics_, statement,
                                        BindingAttributeScope::Statement);
-    auto outcomes = classify_paths(statement);
+    // A switch records its combined exits at the end of its last clause.
+    StatementExits paths;
+    if (statement->kind() == cxx::ASTKind::SwitchStatement) {
+      paths = exits(statement);
+    } else {
+      paths = classify_exits(statement);
+      retain_exits(statement, paths);
+    }
     // Schedule and strand bodies complete at their own region boundary.
     // Reject escaping source exits before return/loop lowering can flatten
     // the attributed compound into its enclosing control flow.
-    if (outcomes & (Return | Continue | Break)) {
+    if (paths.escapes_region()) {
       visit_loom_attributes(
           unit_, statement_attributes(statement),
           [&](std::string_view name, cxx::AttributeAST*) {
@@ -1377,21 +1278,10 @@ void ControlFlow::postVisit(cxx::AST* ast) {
             }
             diagnostics_.reject(
                 unit_, statement,
-                std::string(region) + ((outcomes & Return)
+                std::string(region) + ((paths.returns() != ExitFlow::None)
                                            ? " cannot contain function returns"
                                            : " cannot exit an enclosing loop"));
           });
-    }
-    if (outcomes != Fallthrough) {
-      paths_.emplace(statement, outcomes);
-    }
-    if (classify_callable_exit(statement)) {
-      callable_exits_.insert(statement);
-    }
-  }
-  if (auto* loop = cxx::ast_cast<cxx::ForStatementAST>(ast)) {
-    if (auto counted = classify(loop)) {
-      counted_.emplace(loop, *counted);
     }
   }
   if (!owners_.empty() && owners_.back() == ast) {
@@ -1414,125 +1304,67 @@ void ControlFlow::postVisit(cxx::AST* ast) {
   }
 }
 
-unsigned ControlFlow::classify_paths(cxx::StatementAST* statement) const {
-  if (auto* range = cxx::ast_cast<cxx::ForRangeStatementAST>(statement)) {
-    return paths(range_scope(range));
-  }
-  if (cxx::ast_cast<cxx::ExpressionStatementAST>(statement)) {
-    // The evaluated-expression walk already joins conditional and
-    // short-circuit paths. Consume its continuation fact without walking the
-    // expression again to find a nested non-returning call.
-    return construction_.state().reachable ? Fallthrough : Diverge;
-  }
-  if (cxx::ast_cast<cxx::ReturnStatementAST>(statement)) {
-    return Return;
-  }
-  if (cxx::ast_cast<cxx::ContinueStatementAST>(statement)) {
-    return Continue;
-  }
-  if (cxx::ast_cast<cxx::BreakStatementAST>(statement)) {
-    return Break;
-  }
-  if (auto* compound = cxx::ast_cast<cxx::CompoundStatementAST>(statement)) {
-    unsigned outcomes = Fallthrough;
-    for (auto* child : cxx::ListView{compound->statementList}) {
-      if (!(outcomes & Fallthrough)) {
-        break;
+StatementExits ControlFlow::classify_exits(cxx::StatementAST* statement) const {
+  using Kind = cxx::ASTKind;
+  using LoopTest = StatementExits::LoopTest;
+  switch (statement->kind()) {
+    case Kind::ExpressionStatement:
+      // Construction already joined evaluated conditional and short-circuit
+      // paths.
+      return construction_.state().reachable
+                 ? StatementExits{}
+                 : StatementExits::terminal(StatementExits::Diverge);
+    case Kind::ReturnStatement:
+      return StatementExits::terminal(StatementExits::Return);
+    case Kind::ContinueStatement:
+      return StatementExits::terminal(StatementExits::Continue);
+    case Kind::BreakStatement:
+      return StatementExits::terminal(StatementExits::Break);
+    case Kind::CompoundStatement: {
+      StatementExits result;
+      if (!exits_.empty()) {
+        auto* compound = cxx::ast_cast<cxx::CompoundStatementAST>(statement);
+        for (auto* child : cxx::ListView{compound->statementList}) {
+          result.append(exits(child));
+        }
       }
-      outcomes = (outcomes & ~Fallthrough) | paths(child);
+      return result;
     }
-    return outcomes;
-  }
-  if (auto* branch = cxx::ast_cast<cxx::IfStatementAST>(statement)) {
-    if (branch->constexprValue.has_value()) {
-      return paths(*branch->constexprValue ? branch->statement
-                                           : branch->elseStatement);
+    case Kind::IfStatement: {
+      auto* branch = cxx::ast_cast<cxx::IfStatementAST>(statement);
+      if (branch->constexprValue.has_value()) {
+        return exits(*branch->constexprValue ? branch->statement
+                                             : branch->elseStatement);
+      }
+      return StatementExits::branch(exits(branch->statement),
+                                    exits(branch->elseStatement));
     }
-    return paths(branch->statement) | paths(branch->elseStatement);
-  }
-  if (auto* selection = cxx::ast_cast<cxx::SwitchStatementAST>(statement)) {
-    const auto& facts = switches_.at(selection);
-    unsigned outcomes = facts.layout.has_default ? 0 : unsigned(Fallthrough);
-    unsigned suffix = Fallthrough;
-    for (size_t index = facts.clause_paths.size(); index > 0; --index) {
-      auto clause = facts.clause_paths[index - 1];
-      auto entry =
-          (clause & ~Fallthrough) | (clause & Fallthrough ? suffix : 0);
-      outcomes |= entry;
-      suffix = entry;
+    case Kind::ForRangeStatement:
+      return exits(
+          range_scope(cxx::ast_cast<cxx::ForRangeStatementAST>(statement)));
+    case Kind::WhileStatement: {
+      auto* loop = cxx::ast_cast<cxx::WhileStatementAST>(statement);
+      return exits(loop->statement)
+          .leave_loop(LoopTest::BeforeBody,
+                      constant_truth(unit_, loop->condition).value_or(false));
     }
-    // A break selects the ordinary switch continuation. Continue and return
-    // still escape to their enclosing loop and function, respectively.
-    return (outcomes & ~Break) | (outcomes & Break ? unsigned(Fallthrough) : 0);
-  }
-  cxx::StatementAST* body = nullptr;
-  cxx::ExpressionAST* condition = nullptr;
-  if (auto* loop = cxx::ast_cast<cxx::ForStatementAST>(statement)) {
-    body = loop->statement;
-    condition = loop->condition;
-  } else if (auto* loop = cxx::ast_cast<cxx::WhileStatementAST>(statement)) {
-    body = loop->statement;
-    condition = loop->condition;
-  } else if (auto* loop = cxx::ast_cast<cxx::DoStatementAST>(statement)) {
-    auto body_paths = paths(loop->statement);
-    unsigned outcomes = body_paths & (Return | Diverge);
-    if (body_paths & Break) {
-      outcomes |= Fallthrough;
+    case Kind::ForStatement: {
+      auto* loop = cxx::ast_cast<cxx::ForStatementAST>(statement);
+      return exits(loop->statement)
+          .leave_loop(LoopTest::BeforeBody,
+                      constant_truth(unit_, loop->condition).value_or(false));
     }
-    if (body_paths & (Fallthrough | Continue)) {
-      auto truth = constant_truth(unit_, loop->expression);
-      outcomes |= truth && *truth ? unsigned(Diverge) : unsigned(Fallthrough);
+    case Kind::DoStatement: {
+      auto* loop = cxx::ast_cast<cxx::DoStatementAST>(statement);
+      auto body = exits(loop->statement);
+      return body.leave_loop(
+          LoopTest::AfterBody,
+          body.reaches_latch() &&
+              constant_truth(unit_, loop->expression).value_or(false));
     }
-    return outcomes;
+    default:
+      return {};
   }
-  if (!body) {
-    return Fallthrough;
-  }
-  auto body_paths = paths(body);
-  unsigned outcomes = body_paths & (Return | Diverge);
-  auto truth = constant_truth(unit_, condition);
-  if (!truth || !*truth) {
-    return outcomes | Fallthrough;
-  }
-  if (body_paths & Break) {
-    outcomes |= Fallthrough;
-  }
-  if (body_paths & (Fallthrough | Continue)) {
-    outcomes |= Diverge;
-  }
-  return outcomes;
-}
-
-bool ControlFlow::classify_callable_exit(cxx::StatementAST* statement) {
-  if (auto* range = cxx::ast_cast<cxx::ForRangeStatementAST>(statement)) {
-    return requires_callable_exit(range_scope(range));
-  }
-  if (cxx::ast_cast<cxx::ForStatementAST>(statement) ||
-      cxx::ast_cast<cxx::WhileStatementAST>(statement) ||
-      cxx::ast_cast<cxx::DoStatementAST>(statement) ||
-      cxx::ast_cast<cxx::SwitchStatementAST>(statement)) {
-    return returns(statement) != ExitFlow::None || (paths(statement) & Diverge);
-  }
-  if (auto* compound = cxx::ast_cast<cxx::CompoundStatementAST>(statement)) {
-    size_t count = std::ranges::count_if(cxx::ListView{compound->statementList},
-                                         [&](cxx::StatementAST* child) {
-                                           return requires_callable_exit(child);
-                                         });
-    if (count) {
-      callable_exit_counts_.emplace(compound, count);
-    }
-    return count != 0;
-  }
-  if (auto* branch = cxx::ast_cast<cxx::IfStatementAST>(statement)) {
-    if (branch->constexprValue.has_value()) {
-      return requires_callable_exit(
-          *branch->constexprValue ? branch->statement : branch->elseStatement);
-    }
-    return (paths(branch) & Diverge) ||
-           requires_callable_exit(branch->statement) ||
-           requires_callable_exit(branch->elseStatement);
-  }
-  return paths(statement) & Diverge;
 }
 
 void ControlFlow::visit(cxx::CaseStatementAST* ast) {
@@ -1563,23 +1395,28 @@ void ControlFlow::visit(cxx::CompoundStatementAST* ast) {
     accept(attribute);
   }
 
-  SwitchFacts facts;
+  SwitchLayout layout;
+  SwitchExits switch_exits;
+  StatementExits clause_exits;
   auto incoming = construction_.state();
   bool clause_owner_active = false;
-  auto finish_clause = [&] {
+  auto finish_clause = [&](bool has_successor) {
     if (!clause_owner_active) {
       return;
     }
-    auto& clause = facts.layout.clauses.back();
+    auto& clause = layout.clauses.back();
     auto* owner = clause.labels.front().source;
     auto found = writes_.find(owner);
     if (found != writes_.end()) {
       clause.writes = std::move(found->second);
       writes_.erase(found);
     }
-    auto outcomes = sequence_paths(clause.statements);
-    clause.falls_through = outcomes & Fallthrough;
-    facts.clause_paths.push_back(outcomes);
+    clause.falls_through = clause_exits.falls_through();
+    if (clause.labels.size() != 1 || (has_successor && clause.falls_through)) {
+      layout.direct = false;
+    }
+    switch_exits.append_clause(clause_exits);
+    clause_exits = {};
     construction_.leave(owner);
     owners_.pop_back();
     clause_owner_active = false;
@@ -1589,25 +1426,25 @@ void ControlFlow::visit(cxx::CompoundStatementAST* ast) {
     auto* case_label = cxx::ast_cast<cxx::CaseStatementAST>(child);
     auto* default_label = cxx::ast_cast<cxx::DefaultStatementAST>(child);
     if (case_label || default_label) {
-      bool starts_clause = facts.layout.clauses.empty() ||
-                           !facts.layout.clauses.back().statements.empty();
+      bool starts_clause =
+          layout.clauses.empty() || !layout.clauses.back().statements.empty();
       if (starts_clause) {
-        finish_clause();
+        finish_clause(/*has_successor=*/true);
         construction_.restore(
             construction_.join(construction_.state(), incoming));
-        facts.layout.clauses.push_back({});
+        layout.clauses.push_back({});
       }
       active_switch_label_ = child;
       accept(child);
       active_switch_label_ = nullptr;
-      auto& clause = facts.layout.clauses.back();
+      auto& clause = layout.clauses.back();
       std::optional<std::int64_t> key;
       if (case_label) {
         key = case_label->caseValue;
       }
       clause.labels.push_back({child, key});
       if (default_label) {
-        facts.layout.has_default = true;
+        layout.has_default = true;
       }
       if (starts_clause) {
         owners_.push_back(child);
@@ -1616,25 +1453,19 @@ void ControlFlow::visit(cxx::CompoundStatementAST* ast) {
       }
       continue;
     }
-    if (facts.layout.clauses.empty()) {
+    if (layout.clauses.empty()) {
       diagnostics_.reject(
           unit_, child,
           "switch body statements require a preceding case or default label");
     }
-    facts.layout.clauses.back().statements.push_back(child);
+    layout.clauses.back().statements.push_back(child);
     accept(child);
+    clause_exits.append(exits(child));
   }
-  finish_clause();
-
-  for (size_t index = 0; index < facts.layout.clauses.size(); ++index) {
-    const auto& clause = facts.layout.clauses[index];
-    if (clause.labels.size() != 1 ||
-        (index + 1 < facts.layout.clauses.size() && clause.falls_through)) {
-      facts.layout.direct = false;
-      break;
-    }
-  }
-  switches_.emplace(switch_stack_.back(), std::move(facts));
+  finish_clause(/*has_successor=*/false);
+  auto* selection = switch_stack_.back();
+  retain_exits(selection, switch_exits.finish(layout.has_default));
+  switches_.emplace(selection, std::move(layout));
 }
 
 void ControlFlow::visit(cxx::IfStatementAST* ast) {
@@ -1682,6 +1513,7 @@ void ControlFlow::visit(cxx::ForStatementAST* ast) {
   }
   accept(ast->initializer);
   accept(ast->condition);
+  retain_counted(ast);
   auto condition_exit = construction_.state();
   accept(ast->statement);
   construction_.reach_latch();
@@ -1720,7 +1552,7 @@ void ControlFlow::visit(cxx::SwitchStatementAST* ast) {
   switch_stack_.push_back(ast);
   auto incoming = construction_.state();
   accept(ast->statement);
-  if (switches_.at(ast).layout.has_default) {
+  if (switches_.at(ast).has_default) {
     incoming = {false, {}};
   }
   construction_.finish_switch(std::move(incoming));
@@ -2440,7 +2272,7 @@ void ControlFlow::visit(cxx::LambdaExpressionAST* ast) {
 }
 
 void ControlFlow::visit(cxx::SubscriptExpressionAST* ast) {
-  if (operation_is(ast->symbol, "view.element")) {
+  if (has_op_binding(ast->symbol, "view.element")) {
     accept(ast->baseExpression);
     for (auto* index : cxx::ListView{ast->expressionList}) {
       accept(index);
@@ -3025,13 +2857,7 @@ CallArgument ControlFlow::retain_member_receiver(
 
 void ControlFlow::append_identity(Destination destination,
                                   CallArgument& argument) {
-  append_identity(
-      ObjectInterval{destination.binding, destination.component_offset,
-                     destination.member
-                         ? destination.component_offset +
-                               destination.member->component_count
-                         : ObjectInterval::kWholeObjectEnd},
-      argument);
+  append_identity(object_interval(destination), argument);
 }
 
 void ControlFlow::append_identity(ObjectInterval interval,
@@ -3118,12 +2944,7 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
     return;
   }
   auto append_destination = [&](Destination destination) {
-    auto interval = project_interval(
-        {destination.binding, destination.component_offset,
-         destination.member ? destination.component_offset +
-                                  destination.member->component_count
-                            : ObjectInterval::kWholeObjectEnd},
-        projection);
+    auto interval = project_interval(object_interval(destination), projection);
     if (interval) {
       append_identity(*interval, argument);
     }
@@ -3155,9 +2976,7 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
   }
   if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
     if (auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(id->symbol);
-        variable &&
-        (variable->isStatic() || cxx::symbol_cast<cxx::NamespaceSymbol>(
-                                     variable->canonical()->parent()))) {
+        variable && has_nonlocal_storage(variable)) {
       argument.inherent_storage = true;
       return;
     }
@@ -3448,9 +3267,7 @@ bool ControlFlow::record_callable_write(cxx::Symbol* binding) {
     return false;
   }
   if (auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(binding);
-      variable && (variable->isStatic() || variable->isExtern() ||
-                   cxx::symbol_cast<cxx::NamespaceSymbol>(
-                       variable->canonical()->parent()))) {
+      variable && has_nonlocal_storage(variable)) {
     return record_memory_write();
   }
   if (auto found = pointer_aliases_.find(binding);
@@ -3473,8 +3290,28 @@ bool ControlFlow::record_callable_write(cxx::Symbol* binding) {
   return add_receiver_write(binding);
 }
 
-bool ControlFlow::record_scoped_write(cxx::Symbol* binding,
+void ControlFlow::invalidate_projected_bound(cxx::AST* owner,
+                                             ObjectInterval write) {
+  auto* loop = cxx::ast_cast<cxx::ForStatementAST>(owner);
+  if (!loop) {
+    return;
+  }
+  auto found = counted_.find(loop);
+  if (found == counted_.end()) {
+    return;
+  }
+  auto* bound = found->second.referent;
+  if (bound && bound->member && bound->binding == write.binding) {
+    auto selected = object_interval(*bound);
+    if (write.begin < selected.end && selected.begin < write.end) {
+      counted_.erase(found);
+    }
+  }
+}
+
+bool ControlFlow::record_scoped_write(ObjectInterval interval,
                                       std::span<cxx::AST* const> owners) {
+  auto* binding = interval.binding;
   if (!binding) {
     return false;
   }
@@ -3486,6 +3323,9 @@ bool ControlFlow::record_scoped_write(cxx::Symbol* binding,
         changed;
   }
   for (auto* owner : owners) {
+    if (has_projected_loop_bounds_) {
+      invalidate_projected_bound(owner, interval);
+    }
     auto& writes = writes_[owner];
     if (std::ranges::find(writes, binding) == writes.end()) {
       writes.push_back(binding);
@@ -3628,7 +3468,7 @@ bool ControlFlow::record_projected_write(const CallArgument& argument,
   }
   bool changed = false;
   visit_intervals(argument, projection, [&](ObjectInterval interval) {
-    changed = record_scoped_write(interval.binding, owners) || changed;
+    changed = record_scoped_write(interval, owners) || changed;
     if (effect == WriteEffect::Callable) {
       changed = record_callable_write(interval.binding) || changed;
     }
@@ -4658,13 +4498,12 @@ CallPropagation ControlFlow::propagate_call(
                 types_.unqualified(implicit_object_type(unit_, function_)),
                 call.source);
             for (const auto& member : record->members) {
-              if (project_interval(
+              if (auto selected = project_interval(
                       {member.source, 0, member.partition->component_count,
                        member.component_offset},
                       range)) {
-                caller_changed =
-                    record_scoped_write(member.source, write.owners) ||
-                    caller_changed;
+                caller_changed = record_scoped_write(*selected, write.owners) ||
+                                 caller_changed;
                 if (projection.effect == WriteEffect::Callable) {
                   caller_changed =
                       add_receiver_write(member.source) || caller_changed;
@@ -5401,7 +5240,7 @@ bool ControlFlow::record(cxx::ExpressionAST* expression, WriteEffect effect) {
     record_projected_write(argument, owners_, {}, effect);
     return !argument.inherent_storage;
   }
-  record(target->binding);
+  record_scoped_write(object_interval(*target), owners_);
   if (effect == WriteEffect::Callable) {
     record_callable_write(target->binding);
   }
@@ -5409,7 +5248,7 @@ bool ControlFlow::record(cxx::ExpressionAST* expression, WriteEffect effect) {
 }
 
 void ControlFlow::record(cxx::Symbol* binding) {
-  record_scoped_write(binding, owners_);
+  record_scoped_write({binding, 0, ObjectInterval::kWholeObjectEnd}, owners_);
 }
 
 bool ControlFlow::may_transport_owner(const cxx::Type* type, cxx::AST* owner) {
@@ -5709,226 +5548,6 @@ bool ControlFlow::is_captured_object_field(cxx::Symbol* field) const {
                       ? cxx::symbol_cast<cxx::ClassSymbol>(function_->parent())
                       : nullptr;
   return captured_object_member(unit_, closure, field).has_value();
-}
-
-std::optional<CountedLoop> ControlFlow::classify(cxx::ForStatementAST* loop) {
-  auto* declaration =
-      cxx::ast_cast<cxx::DeclarationStatementAST>(loop->initializer);
-  auto* initial =
-      declaration
-          ? cxx::ast_cast<cxx::SimpleDeclarationAST>(declaration->declaration)
-          : nullptr;
-  auto* condition = cxx::ast_cast<cxx::BinaryExpressionAST>(
-      unwrap_expression(loop->condition));
-  if (!initial || !initial->initDeclaratorList ||
-      initial->initDeclaratorList->next || !condition ||
-      condition->op != cxx::TokenKind::T_LESS) {
-    return std::nullopt;
-  }
-  auto* induction = initial->initDeclaratorList->value->symbol;
-  auto traits = unit_.typeTraits();
-  if (!induction || traits.is_volatile(induction->type())) {
-    return std::nullopt;
-  }
-  auto kind =
-      cxx::unattributed_type(traits.remove_cv(induction->type()))->kind();
-  if (kind == cxx::TypeKind::kUnsignedInt) {
-    return classify_unsigned(loop, induction, condition);
-  }
-  if (kind == cxx::TypeKind::kInt) {
-    return classify_signed(loop, induction, condition);
-  }
-  return traits.is_class(induction->type())
-             ? classify_address(loop, induction, condition)
-             : std::nullopt;
-}
-
-// Larger unsigned-int steps require room for the final source increment even
-// when the bound is not a multiple of the step. Wider comparisons, mutable or
-// volatile bounds, and address escapes retain general while semantics.
-std::optional<CountedLoop> ControlFlow::classify_unsigned(
-    cxx::ForStatementAST* loop, cxx::Symbol* induction,
-    cxx::BinaryExpressionAST* condition) {
-  auto traits = unit_.typeTraits();
-  auto* left = cxx::ast_cast<cxx::IdExpressionAST>(
-      unwrap_expression(condition->leftExpression));
-  if (condition->symbol || !left || left->symbol != induction ||
-      cxx::unattributed_type(traits.remove_cv(condition->leftExpression->type))
-              ->kind() != cxx::TypeKind::kUnsignedInt ||
-      cxx::unattributed_type(traits.remove_cv(condition->rightExpression->type))
-              ->kind() != cxx::TypeKind::kUnsignedInt) {
-    return std::nullopt;
-  }
-
-  auto increment = classify_integer_increment(
-      unit_, loop->expression, std::numeric_limits<std::uint32_t>::max());
-  const auto& body_writes = written(loop->statement);
-  if (!increment || !increment->induction ||
-      increment->induction->symbol != induction ||
-      std::ranges::find(body_writes, induction) != body_writes.end()) {
-    return std::nullopt;
-  }
-  auto step_value = increment->step;
-
-  if (auto upper = integer_constant(unit_, condition->rightExpression)) {
-    if (*upper >= 0 &&
-        static_cast<std::uintmax_t>(*upper) <=
-            std::numeric_limits<std::uint32_t>::max() - step_value + 1) {
-      return CountedLoop{
-          induction, CountedLoop::UnsignedRange{static_cast<unsigned>(*upper),
-                                                step_value}};
-    }
-    return std::nullopt;
-  }
-  auto* bound = cxx::ast_cast<cxx::IdExpressionAST>(
-      unwrap_expression(condition->rightExpression));
-  const auto& loop_writes = written(loop);
-  if (step_value != 1 || !bound || !traits.is_integral_or_enum(bound->type) ||
-      traits.is_volatile(bound->type) ||
-      std::ranges::find(loop_writes, bound->symbol) != loop_writes.end()) {
-    return std::nullopt;
-  }
-  return CountedLoop{
-      induction,
-      CountedLoop::UnsignedRange{
-          CountedLoop::Bound{bound->symbol, condition->rightExpression},
-          step_value}};
-}
-
-// A strict signed-int interval cannot overflow with a unit step: an executed
-// induction is at most upper-1, including when upper is INT32_MAX. Larger
-// steps require a constant upper bound that leaves room for the final source
-// increment. Wider signed types retain general-loop semantics because a
-// target-selected index carrier is permitted to be only 32 bits.
-std::optional<CountedLoop> ControlFlow::classify_signed(
-    cxx::ForStatementAST* loop, cxx::Symbol* induction,
-    cxx::BinaryExpressionAST* condition) {
-  auto traits = unit_.typeTraits();
-  auto* left = cxx::ast_cast<cxx::IdExpressionAST>(
-      unwrap_expression(condition->leftExpression));
-  if (condition->symbol || !left || left->symbol != induction ||
-      cxx::unattributed_type(traits.remove_cv(condition->leftExpression->type))
-              ->kind() != cxx::TypeKind::kInt ||
-      cxx::unattributed_type(traits.remove_cv(condition->rightExpression->type))
-              ->kind() != cxx::TypeKind::kInt) {
-    return std::nullopt;
-  }
-
-  if (auto* compound = cxx::ast_cast<cxx::CompoundAssignmentExpressionAST>(
-          unwrap_expression(loop->expression));
-      compound &&
-      cxx::unattributed_type(traits.remove_cv(compound->rightExpression->type))
-              ->kind() != cxx::TypeKind::kInt) {
-    return std::nullopt;
-  }
-
-  auto increment = classify_integer_increment(
-      unit_, loop->expression,
-      static_cast<std::uintmax_t>(std::numeric_limits<std::int32_t>::max()));
-  const auto& body_writes = written(loop->statement);
-  if (!increment || !increment->induction ||
-      increment->induction->symbol != induction ||
-      std::ranges::find(body_writes, induction) != body_writes.end()) {
-    return std::nullopt;
-  }
-  auto step_value = increment->step;
-
-  if (auto upper = integer_constant(unit_, condition->rightExpression)) {
-    auto maximum_upper = std::numeric_limits<std::int32_t>::max() -
-                         static_cast<std::intmax_t>(step_value) + 1;
-    if (*upper >= std::numeric_limits<std::int32_t>::min() &&
-        *upper <= maximum_upper) {
-      return CountedLoop{
-          induction, CountedLoop::SignedRange{static_cast<std::int32_t>(*upper),
-                                              step_value}};
-    }
-    return std::nullopt;
-  }
-  auto* bound = cxx::ast_cast<cxx::IdExpressionAST>(
-      unwrap_expression(condition->rightExpression));
-  const auto& loop_writes = written(loop);
-  if (step_value != 1 || !bound || !traits.is_integral_or_enum(bound->type) ||
-      traits.is_volatile(bound->type) ||
-      std::ranges::find(loop_writes, bound->symbol) != loop_writes.end()) {
-    return std::nullopt;
-  }
-  return CountedLoop{
-      induction,
-      CountedLoop::SignedRange{
-          CountedLoop::Bound{bound->symbol, condition->rightExpression},
-          step_value}};
-}
-
-// A strict native address interval with a unit step cannot wrap before its
-// upper bound, independently of the target-selected carrier width. Non-unit
-// steps retain while semantics because an overshoot may wrap.
-std::optional<CountedLoop> ControlFlow::classify_address(
-    cxx::ForStatementAST* loop, cxx::Symbol* induction,
-    cxx::BinaryExpressionAST* condition) {
-  const auto& partition = types_.partition(induction->type(), loop);
-  if (partition.kind != ValueKind::Address) {
-    return std::nullopt;
-  }
-  const auto& address = static_cast<const AddressPartition&>(partition);
-  auto domain = address.element_type;
-  if (domain != LOOM_SCALAR_TYPE_INDEX && domain != LOOM_SCALAR_TYPE_OFFSET) {
-    return std::nullopt;
-  }
-  auto predicate = domain == LOOM_SCALAR_TYPE_INDEX ? "slt" : "ult";
-  auto* left = address_identity(unit_, address, condition->leftExpression);
-  auto* bound = address_identity(unit_, address, condition->rightExpression);
-  const bool constant_bound =
-      address_constant(unit_, address, condition->rightExpression).has_value();
-  if (!left || left->symbol != induction || (!bound && !constant_bound) ||
-      !operation_is(condition->symbol, "index.cmp", predicate)) {
-    return std::nullopt;
-  }
-  auto* assignment = cxx::ast_cast<cxx::AssignmentExpressionAST>(
-      unwrap_expression(loop->expression));
-  auto* increment = assignment
-                        ? cxx::ast_cast<cxx::IdExpressionAST>(
-                              unwrap_expression(assignment->leftExpression))
-                        : nullptr;
-  auto* addition = assignment
-                       ? cxx::ast_cast<cxx::BinaryExpressionAST>(
-                             unwrap_expression(assignment->rightExpression))
-                       : nullptr;
-  if (!assignment || assignment->op != cxx::TokenKind::T_EQUAL || !increment ||
-      increment->symbol != induction || !addition ||
-      !operation_is(addition->symbol, "index.add")) {
-    return std::nullopt;
-  }
-  auto* addition_left =
-      address_identity(unit_, address, addition->leftExpression);
-  auto* addition_right =
-      address_identity(unit_, address, addition->rightExpression);
-  cxx::ExpressionAST* amount = nullptr;
-  if (addition_left && addition_left->symbol == induction) {
-    amount = addition->rightExpression;
-  } else if (addition_right && addition_right->symbol == induction) {
-    amount = addition->leftExpression;
-  } else {
-    return std::nullopt;
-  }
-  if (!is_address_unit(unit_, address, amount)) {
-    return std::nullopt;
-  }
-
-  const auto& body_writes = written(loop->statement);
-  const auto& loop_writes = written(loop);
-  if (std::ranges::find(body_writes, induction) != body_writes.end() ||
-      (bound &&
-       (unit_.typeTraits().is_volatile(bound->type) ||
-        std::ranges::find(loop_writes, bound->symbol) != loop_writes.end()))) {
-    return std::nullopt;
-  }
-  return CountedLoop{induction,
-                     CountedLoop::AddressRange{
-                         CountedLoop::Bound{bound ? bound->symbol : nullptr,
-                                            condition->rightExpression},
-                         domain == LOOM_SCALAR_TYPE_INDEX
-                             ? CountedLoop::AddressDomain::Index
-                             : CountedLoop::AddressDomain::Offset}};
 }
 
 }  // namespace loom::cxx_import

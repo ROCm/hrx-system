@@ -3541,6 +3541,12 @@ effectful expressions, widened comparisons, and potentially wrapping
 increments also retain general-loop semantics, and explicit scheduling on
 those loops is diagnosed.
 
+A reference bound uses the object it names. For example, with
+`const unsigned& end = range.end`, changing `range.ticks` leaves the loop
+over `end` schedulable. Changing `range.end` makes the loop reevaluate its
+condition each iteration. A reference parameter that shares storage with a
+writable argument also requires reevaluation.
+
 Dynamic offset loops currently compile with linear body ordering. The core
 interleaved/recurrence tail construction uses index-only division and
 multiplication for those bounds and must preserve the offset domain before

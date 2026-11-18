@@ -24,6 +24,8 @@
 
 #include "iree/base/internal/arena.h"
 #include "loom/import/cxx/control/construction.h"
+#include "loom/import/cxx/control/exits/exits.h"
+#include "loom/import/cxx/control/loops/counted.h"
 #include "loom/import/cxx/lifetime/destruction.h"
 #include "loom/import/cxx/lifetime/origins.h"
 #include "loom/import/cxx/source/expressions.h"
@@ -182,50 +184,6 @@ struct CallPropagation {
   bool callee_changed;
 };
 
-// Retained proof that a source loop has a stable, nonwrapping counted interval.
-struct CountedLoop {
-  struct Bound {
-    // Resolved identifier supplying the loop-invariant bound, or null when
-    // the retained expression is an exact constant.
-    cxx::Symbol* binding;
-    // Resolved source expression, including inserted value materializations.
-    cxx::ExpressionAST* expression;
-  };
-  struct UnsignedRange {
-    // Proven constant or stable runtime bound evaluated once by translation.
-    std::variant<unsigned, Bound> upper;
-    // Positive constant step in the source's unsigned-int width.
-    unsigned step;
-  };
-  struct SignedRange {
-    // Proven constant or stable runtime bound evaluated once by translation.
-    std::variant<std::int32_t, Bound> upper;
-    // Positive constant step in the source's signed-int width.
-    unsigned step;
-  };
-  enum class AddressDomain {
-    Index,
-    Offset,
-  };
-  struct AddressRange {
-    // Stable bound in the same native address domain as the induction value.
-    Bound upper;
-    // Signed logical index or unsigned physical offset comparison semantics.
-    AddressDomain domain;
-  };
-  // Source binding replaced by the structured loop's induction argument.
-  cxx::Symbol* induction;
-  // Fixed-width C++ arithmetic or a target-selected native address interval.
-  // Native address ranges have an implicit unit step: larger steps can wrap
-  // after overshooting a bound whose target carrier width is not yet known.
-  std::variant<UnsignedRange, SignedRange, AddressRange> range;
-};
-
-// Syntactic paths through a statement that take a particular exit. Other
-// outcomes remain possible for None and Some; All takes that exit on every
-// path.
-enum class ExitFlow { None, Some, All };
-
 // One resolved source label selecting a lexical switch clause. A missing key
 // denotes the unique default label.
 struct SwitchLabel {
@@ -263,10 +221,11 @@ struct SwitchLayout {
 // Ordered writes include nested constructs and preserve source symbol identity.
 // Constexpr branches visit their initializers, decision and source-selected
 // arm. Exit outcomes aggregate each statement's already visited children, and
-// counted-loop classification evaluates each header's constants once after its
-// writes are complete. Queries only consume retained facts; they do not
-// traverse source or output IR. The source unit and body outlive this object
-// and every returned reference.
+// counted-loop classification evaluates each header's constants once and joins
+// the resulting interval with finalized source writes and storage identity.
+// Queries only consume retained facts; they do not traverse source or output
+// IR. The source unit and body outlive this object and every returned
+// reference.
 class ControlFlow final : private cxx::ASTVisitor {
  public:
   ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
@@ -327,28 +286,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Retained lexical clauses for a supported runtime switch. Construction
   // rejects switch shapes that cannot provide this complete structure.
   const SwitchLayout& switch_layout(cxx::SwitchStatementAST* statement) const;
-  // Retained return/fallthrough summary, including nested statements.
-  ExitFlow returns(cxx::StatementAST* statement) const;
-  // Whether surrounding returns require callable-exit projection instead of
-  // result-bearing structured conditionals. Returns crossing loops/switches
-  // and paths with no defined continuation cannot supply a result tuple.
-  bool requires_callable_exit(cxx::StatementAST* statement) const;
-  // Number of direct children requiring callable-exit projection.
-  // A return sequence decrements this retained suffix count as it advances.
-  size_t callable_exit_count(cxx::CompoundStatementAST* statement) const;
-  // Whether execution can reach the statement immediately following this
-  // source statement. Diverging and function-returning paths do not.
-  bool falls_through(cxx::StatementAST* statement) const;
-  // Continues escaping this statement to its enclosing loop. A nested loop
-  // consumes its own continues rather than propagating them to its parent.
-  ExitFlow continues(cxx::StatementAST* statement) const;
-  // Breaks escaping this statement to its enclosing loop. A nested loop
-  // consumes its own breaks rather than propagating them to its parent.
-  ExitFlow breaks(cxx::StatementAST* statement) const;
-  // Continue or break exits escaping this statement. This combined query
-  // distinguishes a branch whose arms take different iteration exits from one
-  // that can fall through.
-  ExitFlow iteration_exits(cxx::StatementAST* statement) const;
+  // Retained destinations and callable-exit requirements of this statement.
+  StatementExits exits(cxx::StatementAST* statement) const;
   // Calls retained by the same source walk for sparse interprocedural effect
   // propagation before callable signatures are frozen.
   std::span<const DirectCall> calls() const { return calls_; }
@@ -544,14 +483,6 @@ class ControlFlow final : private cxx::ASTVisitor {
     Callable,
   };
 
-  enum Path : unsigned {
-    Fallthrough = 1,
-    Return = 2,
-    Continue = 4,
-    Break = 8,
-    Diverge = 16,
-  };
-
   ReferenceCaptureFacts& reference_capture_facts();
   bool retain_reference_capture_identity(cxx::Symbol* symbol);
   bool preVisit(cxx::AST* ast) override;
@@ -622,7 +553,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   void record_member_binding_read(cxx::ExpressionAST* expression);
   bool normalize_field_groups(bool inputs);
   bool record_callable_write(cxx::Symbol* binding);
-  bool record_scoped_write(cxx::Symbol* binding,
+  void invalidate_projected_bound(cxx::AST* owner, ObjectInterval write);
+  bool record_scoped_write(ObjectInterval interval,
                            std::span<cxx::AST* const> owners);
   bool record_argument_write(const CallArgument& argument,
                              std::span<cxx::AST* const> owners,
@@ -735,21 +667,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool classify_storage(cxx::ExpressionAST* expression) const;
   bool is_captured_object_field(cxx::Symbol* field) const;
   cxx::Symbol* object_owner(cxx::ExpressionAST* expression) const;
-  std::optional<CountedLoop> classify(cxx::ForStatementAST* loop);
-  std::optional<CountedLoop> classify_unsigned(
-      cxx::ForStatementAST* loop, cxx::Symbol* induction,
-      cxx::BinaryExpressionAST* condition);
-  std::optional<CountedLoop> classify_signed(
-      cxx::ForStatementAST* loop, cxx::Symbol* induction,
-      cxx::BinaryExpressionAST* condition);
-  std::optional<CountedLoop> classify_address(
-      cxx::ForStatementAST* loop, cxx::Symbol* induction,
-      cxx::BinaryExpressionAST* condition);
-  unsigned paths(cxx::StatementAST* statement) const;
-  unsigned sequence_paths(std::span<cxx::StatementAST* const> statements) const;
-  unsigned classify_paths(cxx::StatementAST* statement) const;
-  bool classify_callable_exit(cxx::StatementAST* statement);
-  ExitFlow exits(cxx::StatementAST* statement, unsigned selected_paths) const;
+  void retain_counted(cxx::ForStatementAST* loop);
+  StatementExits classify_exits(cxx::StatementAST* statement) const;
+  void retain_exits(cxx::StatementAST* statement, StatementExits exits);
 
   // Resolved source types and literal interpretation for loop admission.
   cxx::TranslationUnit& unit_;
@@ -894,27 +814,25 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Automatic roots retained through member projections and transparent
   // expressions. Complete address demand applies even to earlier field uses.
   std::unordered_map<cxx::ExpressionAST*, cxx::Symbol*> object_owners_;
-  // Proven intervals retained after each source loop's children are visited.
-  std::unordered_map<cxx::ForStatementAST*, CountedLoop> counted_;
+  struct LoopCandidate {
+    // Numeric interval recognized in the source header before body traversal.
+    CountedLoop interval;
+    // Exact reference or implicit subobject, borrowed from the source facts.
+    // An ordinary identifier uses its own binding directly.
+    const Destination* referent;
+  };
+  // Header candidates; an overlapping write removes a projected bound.
+  std::unordered_map<cxx::ForStatementAST*, LoopCandidate> counted_;
+  // Only functions with a projected upper bound compare component intervals.
+  bool has_projected_loop_bounds_ = false;
   // Source adapters allocated only for functions containing range loops.
   std::unique_ptr<RangeLoops> range_loops_;
   // Backing-array adapters allocated only for functions constructing lists.
   std::unique_ptr<InitializerLists> initializer_lists_;
-  // Sparse path sets retain statements with function or iteration exits.
-  std::unordered_map<cxx::StatementAST*, unsigned> paths_;
-  // Statements requiring callable exits, including divergent continuations.
-  // Direct return trees remain absent and retain result-bearing projection.
-  std::unordered_set<cxx::StatementAST*> callable_exits_;
-  // Nonzero direct-child counts for compound return sequences.
-  std::unordered_map<cxx::CompoundStatementAST*, size_t> callable_exit_counts_;
-  struct SwitchFacts {
-    // Public lexical structure consumed directly by translation.
-    SwitchLayout layout;
-    // Per-clause path sets retained for aggregate switch classification.
-    std::vector<unsigned> clause_paths;
-  };
+  // Only statements with an exit or a callable-exit child need an entry.
+  std::unordered_map<cxx::StatementAST*, StatementExits> exits_;
   // Runtime switches retained during their one source-body traversal.
-  std::unordered_map<cxx::SwitchStatementAST*, SwitchFacts> switches_;
+  std::unordered_map<cxx::SwitchStatementAST*, SwitchLayout> switches_;
   // Nested switches whose compound bodies are currently being traversed.
   std::vector<cxx::SwitchStatementAST*> switch_stack_;
   // Top-level case/default label currently admitted by the owning switch walk.

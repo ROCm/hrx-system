@@ -147,3 +147,78 @@ func.def public @counted_conditional(%start: i32) -> (i32) {
   }
   func.return %total$11 : i32
 }
+
+// ====
+// A caller can pass the same object through two differently qualified references.
+[[loom::noinline]] static unsigned trips(const unsigned& bound, unsigned& counter) {
+  unsigned ticks = 0;
+  for (unsigned i = 0; i < bound; ++i) {
+    ++ticks;
+    --counter;
+  }
+  return ticks;
+}
+
+unsigned shared_bound(unsigned n) { return trips(n, n); }
+// ----
+func.def public @shared_bound(%n: i32) -> (i32) {
+  %2 = index.constant 4 : offset
+  %n_storage = buffer.alloca<private> align(4) %2 : buffer
+  %n_storage_byte_offset = index.constant 0 : index
+  %n_view = buffer.view %n_storage[%n_storage_byte_offset] : buffer -> view<1xi32>
+  view.store<type_disjoint> %n, %n_view[0] : i32, view<1xi32>
+  %6 = func.call @trips(%n_storage, %n_storage_byte_offset, %n_storage, %n_storage_byte_offset) : (buffer, index, buffer, index) -> (i32)
+  func.return %6 : i32
+}
+
+func.def noinline @trips(%bound$7: buffer, %bound_byte_offset: index, %counter: buffer, %counter_byte_offset: index) -> (i32) {
+  %ticks$12 = scalar.constant 0 : i32
+  %i$13 = scalar.constant 0 : i32
+  %ticks$18, %i$19 = scf.while(%ticks = %ticks$12 : i32, %i = %i$13 : i32) -> (i32, i32) {
+    %20 = buffer.view %bound$7[%bound_byte_offset] : buffer -> view<1xi32>
+    %bound = view.load<root_in_bounds|type_disjoint> %20[0] : view<1xi32> -> i32
+    %22 = scalar.cmpi ult, %i, %bound : i32
+    scf.condition %22, %ticks, %i : i1, i32, i32
+  } do(%ticks$16: i32, %i$17: i32) {
+    %23 = scalar.constant 1 : i32
+    %ticks$24 = scalar.addi %ticks$16, %23 : i32
+    %25 = buffer.view %counter[%counter_byte_offset] : buffer -> view<1xi32>
+    %26 = view.load<root_in_bounds|type_disjoint> %25[0] : view<1xi32> -> i32
+    %27 = scalar.constant 1 : i32
+    %28 = scalar.subi %26, %27 : i32
+    %29 = buffer.view %counter[%counter_byte_offset] : buffer -> view<1xi32>
+    view.store<root_in_bounds|type_disjoint> %28, %29[0] : i32, view<1xi32>
+    %30 = scalar.constant 1 : i32
+    %i$31 = scalar.addi %i$17, %30 : i32
+    scf.yield %ticks$24, %i$31 : i32, i32
+  }
+  func.return %ticks$18 : i32
+}
+
+// ====
+// Updating a sibling field leaves the bound invariant and the loop schedulable.
+unsigned count_sibling(unsigned n) {
+  struct Counts { unsigned end, ticks; };
+  Counts counts{n, 0};
+  const unsigned& end = counts.end;
+  [[loom::unroll(2)]]
+  for (unsigned i = 0; i < end; ++i) ++counts.ticks;
+  return counts.ticks;
+}
+// ----
+func.def public @count_sibling(%n: i32) -> (i32) {
+  %counts_ticks$2 = scalar.constant 0 : i32
+  %i = scalar.constant 0 : i32
+  %4 = index.cast %i : i32 to offset
+  %5 = index.cast %n : i32 to offset
+  %6 = index.constant 1 : offset
+  %7 = scalar.constant 2 : i32
+  %8 = index.cast %7 : i32 to index
+  %counts_end, %counts_ticks$13 = scf.for %i = [%4 to %5 step %6](%counts_end = %n : i32, %counts_ticks$11 = %counts_ticks$2 : i32) -> (i32, i32) unroll(%8) {
+    %14 = index.cast %i : offset to i32
+    %15 = scalar.constant 1 : i32
+    %counts_ticks$16 = scalar.addi %counts_ticks$11, %15 : i32
+    scf.yield %counts_end, %counts_ticks$16 : i32, i32
+  }
+  func.return %counts_ticks$13 : i32
+}
