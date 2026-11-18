@@ -16,10 +16,13 @@ extern "C" {
 #endif
 
 // Creates the source-facing "parameters" read capability:
-//   file(i32 source, buffer key) -> (hal.file, i64 origin, i64 length)
-//   gather(i32 source, buffer key, hal.fence wait, hal.buffer descriptors,
-//          i64 descriptor_offset, i64 count, hal.buffer target) -> hal.fence
+//   file(i32 source, buffer key) -> (ref<hal.file>, i64 origin, i64 length)
+//   gather(i32 source, buffer key, ptr<hal.fence> wait,
+//          ptr<hal.buffer> descriptors, i64 descriptor_offset, i64 count,
+//          ptr<hal.buffer> target)
+//       -> ref<hal.fence>
 //
+// HAL inputs borrow handles; file and fence results transfer an owner.
 // file resolves an entry once without loading its bytes, returning the retained
 // whole backing file and its absolute byte origin/length. Native transfer
 // geometry belongs to that file; an entry's origin may be unaligned. The

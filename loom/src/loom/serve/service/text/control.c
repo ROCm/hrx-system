@@ -158,7 +158,7 @@ iree_status_t loom_serve_text_control_initialize(
       .kind = IREE_VM_SIGNATURE_TYPE_KIND_REF,
       .value.ref = source->vm_types.buffer};
   const iree_vm_signature_type_t device_buffer = {
-      .kind = IREE_VM_SIGNATURE_TYPE_KIND_REF,
+      .kind = IREE_VM_SIGNATURE_TYPE_KIND_PTR,
       .value.ref = source->types.buffer};
   const iree_vm_signature_type_t i32 = {
       .kind = IREE_VM_SIGNATURE_TYPE_KIND_SCALAR,

@@ -1,4 +1,6 @@
-func.decl import("runner") @execute_1(%stage: i32, %storage: hal.buffer) -> (i64)
+type.decl import("hal", "buffer") @HalBuffer
+
+func.decl import("runner") @execute_1(%stage: i32, %storage: ptr<@HalBuffer>) -> (i64)
 
 template.decl pure @first_stage() -> (i32)
 
@@ -7,12 +9,12 @@ template.def<@first_stage> pure @first_stage_value() -> (i32) {
   template.return %ordinal : i32
 }
 
-func.def @dispatch_step(%stage: i32, %storage: hal.buffer) -> (i64) {
-  %completion = func.call @execute_1(%stage, %storage) : (i32, hal.buffer) -> (i64)
+func.def @dispatch_step(%stage: i32, %storage: ptr<@HalBuffer>) -> (i64) {
+  %completion = func.call @execute_1(%stage, %storage) : (i32, ptr<@HalBuffer>) -> (i64)
   func.return %completion : i64
 }
 
-func.def public @submit_step(%stage: i32, %storage: hal.buffer) -> (i64) {
-  %completion = func.call @dispatch_step(%stage, %storage) : (i32, hal.buffer) -> (i64)
+func.def public @submit_step(%stage: i32, %storage: ptr<@HalBuffer>) -> (i64) {
+  %completion = func.call @dispatch_step(%stage, %storage) : (i32, ptr<@HalBuffer>) -> (i64)
   func.return %completion : i64
 }

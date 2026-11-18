@@ -14,11 +14,11 @@ func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
 
 func.decl import("input") @require(%condition: i32, %message: buffer)
 
-func.decl import("runner") @execute_2(%stage: i32, %input: ref<@HalBuffer>, %output: ref<@HalBuffer>) -> (i64)
+func.decl import("runner") @execute_2(%stage: i32, %input: ptr<@HalBuffer>, %output: ptr<@HalBuffer>) -> (i64)
 
 func.decl import("runner") @fence(%work: i64) -> (ref<@HalFence>)
 
-func.decl import("runner") @join(%ready: ref<@HalFence>)
+func.decl import("runner") @join(%ready: ptr<@HalFence>)
 
 func.decl import("parameters") @file(%source: i32, %key: buffer) -> (ref<@HalFile>, i64, i64)
 
@@ -72,7 +72,7 @@ func.def public @prepare_batch(%directory: buffer, %tags: buffer, %batch: ptr<@F
   func.return %stage, %input, %plan : i32, buffer, buffer
 }
 
-func.def public @run(%state: buffer, %stage: i32, %input: ref<@HalBuffer>, %output: ref<@HalBuffer>, %batch: ptr<@FiniteBatch>) {
+func.def public @run(%state: buffer, %stage: i32, %input: ptr<@HalBuffer>, %output: ptr<@HalBuffer>, %batch: ptr<@FiniteBatch>) {
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32
   %records_offset = scalar.constant 64 : i64
@@ -95,16 +95,13 @@ func.def public @run(%state: buffer, %stage: i32, %input: ref<@HalBuffer>, %outp
   view.store %second_length, %file_windows[3] : i64, view<4xi64>
   %buffers = view.alloca<private> : view<1xptr<@HalBuffer>>
   %buffer_windows = view.alloca<private> : view<2xi64>
-  %output_pointer = ref.borrow %output : ref<@HalBuffer> -> ptr<@HalBuffer>
-  view.store %output_pointer, %buffers[0] : ptr<@HalBuffer>, view<1xptr<@HalBuffer>>
+  view.store %output, %buffers[0] : ptr<@HalBuffer>, view<1xptr<@HalBuffer>>
   view.store %payload_offset, %buffer_windows[0] : i64, view<2xi64>
   view.store %payload_length, %buffer_windows[1] : i64, view<2xi64>
-  %producer_input = ref.duplicate %input : ref<@HalBuffer>
-  %producer_output = ref.duplicate %output : ref<@HalBuffer>
-  %producer = func.call @execute_2(%c0, %producer_input, %producer_output) : (i32, ref<@HalBuffer>, ref<@HalBuffer>) -> (i64)
+  %producer = func.call @execute_2(%c0, %input, %output) : (i32, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)
   %produced = func.call @fence(%producer) : (i64) -> (ref<@HalFence>)
   %wait = ref.borrow %produced : ref<@HalFence> -> ptr<@HalFence>
-  %ready = func.call @read_indirect(%files, %file_windows, %buffers, %buffer_windows, %wait, %output_pointer, %records_offset, %records_length, %output_pointer, %count_offset) : (view<2xptr<@HalFile>>, view<4xi64>, view<1xptr<@HalBuffer>>, view<2xi64>, ptr<@HalFence>, ptr<@HalBuffer>, i64, i64, ptr<@HalBuffer>, i64) -> (ref<@HalFence>)
+  %ready = func.call @read_indirect(%files, %file_windows, %buffers, %buffer_windows, %wait, %output, %records_offset, %records_length, %output, %count_offset) : (view<2xptr<@HalFile>>, view<4xi64>, view<1xptr<@HalBuffer>>, view<2xi64>, ptr<@HalFence>, ptr<@HalBuffer>, i64, i64, ptr<@HalBuffer>, i64) -> (ref<@HalFence>)
   ref.release %produced : ref<@HalFence>
   ref.release %first_file : ref<@HalFile>
   ref.release %second_file : ref<@HalFile>
@@ -112,8 +109,10 @@ func.def public @run(%state: buffer, %stage: i32, %input: ref<@HalBuffer>, %outp
   scf.if %reject {
     func.call @require(%c0, %key) : (i32, buffer)
   }
-  func.call @join(%ready) : (ref<@HalFence>)
-  %consumer = func.call @execute_2(%c1, %input, %output) : (i32, ref<@HalBuffer>, ref<@HalBuffer>) -> (i64)
+  %completion = ref.borrow %ready : ref<@HalFence> -> ptr<@HalFence>
+  func.call @join(%completion) : (ptr<@HalFence>)
+  ref.release %ready : ref<@HalFence>
+  %consumer = func.call @execute_2(%c1, %input, %output) : (i32, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)
   func.return
 }
 

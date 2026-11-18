@@ -20,7 +20,8 @@ extern "C" {
 //   (span<ptr<hal.file>, read> files, span<i64, read> file_windows,
 //    span<ptr<hal.buffer>, read> buffers, span<i64, read> buffer_windows,
 //    ptr<hal.fence> wait, ptr<hal.buffer> records, i64 records_offset,
-//    i64 records_length, ptr<hal.buffer> count, i64 count_offset) -> hal.fence
+//    i64 records_length, ptr<hal.buffer> count, i64 count_offset) ->
+//    ref<hal.fence>
 //
 // Each window span contains one pair of unsigned byte offset/length values per
 // object. File lengths are explicit; buffer lengths may be UINT64_MAX to select

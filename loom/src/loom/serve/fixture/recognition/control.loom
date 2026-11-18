@@ -1,8 +1,10 @@
+type.decl import("hal", "buffer") @HalBuffer
+
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
-func.decl import("runner") @execute_5(%stage: i32, %work: hal.buffer, %request: hal.buffer, %conditioning: hal.buffer, %stream: hal.buffer, %output: hal.buffer) -> (i64)
+func.decl import("runner") @execute_5(%stage: i32, %work: ptr<@HalBuffer>, %request: ptr<@HalBuffer>, %conditioning: ptr<@HalBuffer>, %stream: ptr<@HalBuffer>, %output: ptr<@HalBuffer>) -> (i64)
 
-func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
+func.decl import("runner") @feedback(%slot: i32, %source: ptr<@HalBuffer>, %offset: i64, %length: i64) -> (i64)
 
 func.def public @prepare_request(%model: buffer, %language: buffer, %prompt: buffer, %temperature: f32, %outputs: i32) -> (buffer, buffer) {
   %origin = index.constant 0 : offset
@@ -118,9 +120,9 @@ func.def public @prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %
   func.return %payload, %payload : buffer, buffer
 }
 
-func.def public @generate(%plan: buffer, %work: hal.buffer, %requests: hal.buffer, %conditioning: hal.buffer, %streams: hal.buffer, %output: hal.buffer) {
+func.def public @generate(%plan: buffer, %work: ptr<@HalBuffer>, %requests: ptr<@HalBuffer>, %conditioning: ptr<@HalBuffer>, %streams: ptr<@HalBuffer>, %output: ptr<@HalBuffer>) {
   %c0 = scalar.constant 0 : i32
-  %execution = func.call @execute_5(%c0, %work, %requests, %conditioning, %streams, %output) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %execution = func.call @execute_5(%c0, %work, %requests, %conditioning, %streams, %output) : (i32, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)
   %origin = index.constant 0 : offset
   %header = buffer.view %plan[%origin] : buffer -> view<1xi32>
   %count = view.load %header[0] : view<1xi32> -> i32
@@ -128,7 +130,7 @@ func.def public @generate(%plan: buffer, %work: hal.buffer, %requests: hal.buffe
   %stride = scalar.constant 16 : i64
   %length = scalar.muli %count64, %stride : i64
   %zero64 = scalar.constant 0 : i64
-  %feedback = func.call @feedback(%c0, %output, %zero64, %length) : (i32, hal.buffer, i64, i64) -> (i64)
+  %feedback = func.call @feedback(%c0, %output, %zero64, %length) : (i32, ptr<@HalBuffer>, i64, i64) -> (i64)
   func.return
 }
 

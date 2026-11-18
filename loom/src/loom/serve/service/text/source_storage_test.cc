@@ -43,15 +43,16 @@ config.def @fixture.card = false : i1
         "%diagnostic: buffer)";
     ASSERT_NO_FATAL_FAILURE(EditNativeProvider(
         directory_ + "/control.loom", control, declaration, declaration + R"(
-func.decl import("storage", "buffer") @stored_buffer(%ordinal: i32) -> (hal.buffer)
-func.decl import("storage", "copy") @stored_copy(%source: hal.buffer, %source_offset: i64, %target: hal.buffer, %target_offset: i64, %length: i64) -> (i64)
+func.decl import("storage", "buffer") @stored_buffer(%ordinal: i32) -> (ref<@HalBuffer>)
+func.decl import("storage", "copy") @stored_copy(%source: ptr<@HalBuffer>, %source_offset: i64, %target: ptr<@HalBuffer>, %target_offset: i64, %length: i64) -> (i64)
 )"));
     const std::string feedback =
         "%feedback = func.call @feedback(%c0, %outputs, %c0_i64, %length) : "
-        "(i32, hal.buffer, i64, i64) -> (i64)";
+        "(i32, ptr<@HalBuffer>, i64, i64) -> (i64)";
     std::string replacement = R"(
-  %retained = func.call @stored_buffer(%c0) : (i32) -> (hal.buffer)
-  %copy = func.call @stored_copy(%outputs, %c0_i64, %retained, %c0_i64, %length) : (hal.buffer, i64, hal.buffer, i64, i64) -> (i64)
+  %retained_owner = func.call @stored_buffer(%c0) : (i32) -> (ref<@HalBuffer>)
+  %retained = ref.borrow %retained_owner : ref<@HalBuffer> -> ptr<@HalBuffer>
+  %copy = func.call @stored_copy(%outputs, %c0_i64, %retained, %c0_i64, %length) : (ptr<@HalBuffer>, i64, ptr<@HalBuffer>, i64, i64) -> (i64)
 )";
     if (reject_after_copy) {
       replacement += R"(
@@ -61,7 +62,8 @@ func.decl import("storage", "copy") @stored_copy(%source: hal.buffer, %source_of
     }
     replacement +=
         "%feedback = func.call @feedback(%c0, %retained, %c0_i64, %length) : "
-        "(i32, hal.buffer, i64, i64) -> (i64)";
+        "(i32, ptr<@HalBuffer>, i64, i64) -> (i64)";
+    replacement += "\n  ref.release %retained_owner : ref<@HalBuffer>";
     ASSERT_NO_FATAL_FAILURE(
         EditNativeProvider(control, control, feedback, replacement));
     auto options = ModelOptions();

@@ -555,7 +555,7 @@ static iree_status_t loom_service_finite_create_control(
       .kind = IREE_VM_SIGNATURE_TYPE_KIND_REF,
       .value.ref = model->control.vm_types.buffer};
   const iree_vm_signature_type_t device_buffer = {
-      .kind = IREE_VM_SIGNATURE_TYPE_KIND_REF,
+      .kind = IREE_VM_SIGNATURE_TYPE_KIND_PTR,
       .value.ref = model->control.hal_types.buffer};
   const iree_vm_signature_type_t i32 = {
       .kind = IREE_VM_SIGNATURE_TYPE_KIND_SCALAR,

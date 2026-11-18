@@ -1,3 +1,5 @@
+type.decl import("hal", "buffer") @HalBuffer
+
 // Uploads produce device-resident conditioning used by ordinary speech requests.
 func.decl @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer)
 
@@ -86,20 +88,20 @@ func.def public @speech_prepare_batch_v2(%model: buffer, %tags: buffer, %ranges:
   func.return %result_0, %result_1 : buffer, buffer
 }
 
-func.decl @generate(%plan: buffer, %work: hal.buffer, %request: hal.buffer, %conditioning: hal.buffer, %stream: hal.buffer, %output: hal.buffer)
+func.decl @generate(%plan: buffer, %work: ptr<@HalBuffer>, %request: ptr<@HalBuffer>, %conditioning: ptr<@HalBuffer>, %stream: ptr<@HalBuffer>, %output: ptr<@HalBuffer>)
 
-func.decl import("runner") @execute_5(%stage: i32, %work: hal.buffer, %request: hal.buffer, %conditioning: hal.buffer, %stream: hal.buffer, %output: hal.buffer) -> (i64)
+func.decl import("runner") @execute_5(%stage: i32, %work: ptr<@HalBuffer>, %request: ptr<@HalBuffer>, %conditioning: ptr<@HalBuffer>, %stream: ptr<@HalBuffer>, %output: ptr<@HalBuffer>) -> (i64)
 
-func.def public @speech_generate_v2(%plan: buffer, %work: hal.buffer, %request: hal.buffer, %conditioning: hal.buffer, %stream: hal.buffer, %output: hal.buffer) {
+func.def public @speech_generate_v2(%plan: buffer, %work: ptr<@HalBuffer>, %request: ptr<@HalBuffer>, %conditioning: ptr<@HalBuffer>, %stream: ptr<@HalBuffer>, %output: ptr<@HalBuffer>) {
   %origin = index.constant 0 : offset
   %header = buffer.view %plan[%origin] : buffer -> view<2xi32>
   %stage = view.load %header[1] : view<2xi32> -> i32
   %voice_stage = scalar.constant 2 : i32
   %upload = scalar.cmpi eq, %stage, %voice_stage : i32
   scf.if %upload {
-    %execution = func.call @execute_5(%stage, %work, %request, %conditioning, %stream, %output) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    %execution = func.call @execute_5(%stage, %work, %request, %conditioning, %stream, %output) : (i32, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)
   } else {
-    func.call @generate(%plan, %work, %request, %conditioning, %stream, %output) : (buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer)
+    func.call @generate(%plan, %work, %request, %conditioning, %stream, %output) : (buffer, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>)
   }
   func.return
 }

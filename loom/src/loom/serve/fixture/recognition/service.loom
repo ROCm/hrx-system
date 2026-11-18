@@ -1,5 +1,6 @@
-// Recognition service exports wrap the shared direct-program fixture.
+type.decl import("hal", "buffer") @HalBuffer
 
+// Recognition service exports wrap the shared direct-program fixture.
 func.decl @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer)
 
 func.def public @recognition_prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer) {
@@ -48,15 +49,15 @@ func.def public @recognition_prepare_batch_v1(%model: buffer, %tags: buffer, %ra
   func.return %result_0, %result_1 : buffer, buffer
 }
 
-func.decl @generate(%plan: buffer, %work: hal.buffer, %requests: hal.buffer, %conditioning: hal.buffer, %streams: hal.buffer, %output: hal.buffer)
+func.decl @generate(%plan: buffer, %work: ptr<@HalBuffer>, %requests: ptr<@HalBuffer>, %conditioning: ptr<@HalBuffer>, %streams: ptr<@HalBuffer>, %output: ptr<@HalBuffer>)
 
-func.def public @recognition_generate(%plan: buffer, %work: hal.buffer, %requests: hal.buffer, %conditioning: hal.buffer, %streams: hal.buffer, %output: hal.buffer) {
-  func.call @generate(%plan, %work, %requests, %conditioning, %streams, %output) : (buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer)
+func.def public @recognition_generate(%plan: buffer, %work: ptr<@HalBuffer>, %requests: ptr<@HalBuffer>, %conditioning: ptr<@HalBuffer>, %streams: ptr<@HalBuffer>, %output: ptr<@HalBuffer>) {
+  func.call @generate(%plan, %work, %requests, %conditioning, %streams, %output) : (buffer, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>)
   func.return
 }
 
-func.def public @recognition_generate_v1(%plan: buffer, %work: hal.buffer, %requests: hal.buffer, %conditioning: hal.buffer, %streams: hal.buffer, %output: hal.buffer) {
-  func.call @generate(%plan, %work, %requests, %conditioning, %streams, %output) : (buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer)
+func.def public @recognition_generate_v1(%plan: buffer, %work: ptr<@HalBuffer>, %requests: ptr<@HalBuffer>, %conditioning: ptr<@HalBuffer>, %streams: ptr<@HalBuffer>, %output: ptr<@HalBuffer>) {
+  func.call @generate(%plan, %work, %requests, %conditioning, %streams, %output) : (buffer, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>)
   func.return
 }
 
@@ -112,13 +113,13 @@ func.def public @activity_prepare_batch_v1(%model: buffer, %tags: buffer, %range
   func.return %result_0, %result_1 : buffer, buffer
 }
 
-func.def public @activity_generate(%plan: buffer, %work: hal.buffer, %requests: hal.buffer, %conditioning: hal.buffer, %streams: hal.buffer, %output: hal.buffer) {
-  func.call @generate(%plan, %work, %requests, %conditioning, %streams, %output) : (buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer)
+func.def public @activity_generate(%plan: buffer, %work: ptr<@HalBuffer>, %requests: ptr<@HalBuffer>, %conditioning: ptr<@HalBuffer>, %streams: ptr<@HalBuffer>, %output: ptr<@HalBuffer>) {
+  func.call @generate(%plan, %work, %requests, %conditioning, %streams, %output) : (buffer, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>)
   func.return
 }
 
-func.def public @activity_generate_v1(%plan: buffer, %work: hal.buffer, %requests: hal.buffer, %conditioning: hal.buffer, %streams: hal.buffer, %output: hal.buffer) {
-  func.call @generate(%plan, %work, %requests, %conditioning, %streams, %output) : (buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer)
+func.def public @activity_generate_v1(%plan: buffer, %work: ptr<@HalBuffer>, %requests: ptr<@HalBuffer>, %conditioning: ptr<@HalBuffer>, %streams: ptr<@HalBuffer>, %output: ptr<@HalBuffer>) {
+  func.call @generate(%plan, %work, %requests, %conditioning, %streams, %output) : (buffer, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>)
   func.return
 }
 

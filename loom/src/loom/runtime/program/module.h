@@ -53,30 +53,37 @@ typedef struct loom_runtime_module_options_t {
 } loom_runtime_module_options_t;
 
 // Creates the runner-local native "runner" module. execute_N exports
-// (i32 stage, hal.buffer, ... N slots ...) -> i64. Linking checks reference
-// types; calls check the stage's exact arity and reject null buffers before
-// enqueuing without waiting. Private transient bindings are queue-allocated
-// around each execute and are not model VM arguments. feedback exports
-// (i32 slot, hal.buffer source,
-// i64 source_offset, i64 length) -> i64, downloading into a registered host
-// span from its beginning. Host bounds are checked here; HAL checks device
-// ranges. Feedback advances only the independent feedback timeline.
-// Returned values identify accepted submissions in |execution| only. The host
-// retains that context when interpreting results; they are not global handles.
-// fence(i64 work) -> hal.fence retains an accepted work timepoint, rejecting
-// values beyond this execution's submitted work. It excludes later work and
-// the independent feedback branch. join(hal.fence) imports an external
-// completion set into subsequent model work without a CPU wait or a global
-// device barrier. A null fence represents an empty dependency set. Neither
-// operation establishes ownership of storage referenced by other operations.
-// timestamp(hal.buffer target, i64 byte_offset) -> i64 enqueues a queue-clock
-// capture on the work timeline. Its result is an accepted work value, not the
-// tick. The source owns the destination and can return samples through normal
-// feedback. timestamp_clock() -> (i64 frequency_hz, i32 valid_bits) queries the
-// immutable dispatch-family clock. Zero frequency/width means no clock is
-// advertised; an unsupported capture fails through HAL. Ticks are comparable
-// only within that family and elapsed differences wrap at valid_bits. A zero
-// captured tick is valid; successful completion establishes sample validity.
+// (i32 stage, ptr<hal.buffer>, ... N slots ...) -> i64. Linking checks
+// reference types; calls check the stage's exact arity and reject null buffers
+// before enqueuing without waiting. Private transient bindings are
+// queue-allocated around each execute and are not model VM arguments.
+//
+// feedback(i32 slot, ptr<hal.buffer> source, i64 offset, i64 length) -> i64
+// downloads into a registered host span from its beginning. Host bounds are
+// checked here; HAL checks device ranges. Feedback advances only the
+// independent feedback timeline. Returned values identify accepted submissions
+// in |execution| only. The host retains that context when interpreting results;
+// they are not global handles.
+//
+// fence(i64 work) -> ref<hal.fence> retains an accepted work timepoint,
+// rejecting values beyond this execution's submitted work. It excludes later
+// work and the independent feedback branch. join(ptr<hal.fence>) imports an
+// external completion set into subsequent model work without a CPU wait or a
+// global device barrier. A null fence represents an empty dependency set.
+// Neither operation establishes ownership of other operations' storage.
+//
+// timestamp(ptr<hal.buffer> target, i64 byte_offset) -> i64 enqueues a
+// queue-clock capture on the work timeline. Its result is an accepted work
+// value, not the tick. The source owns the destination and can return samples
+// through normal feedback. timestamp_clock() -> (i64 frequency_hz, i32 bits)
+// queries the immutable dispatch-family clock. Zero frequency/width means no
+// clock is advertised; an unsupported capture fails through HAL. Ticks are
+// comparable only within that family and elapsed differences wrap at bits.
+// A captured zero is valid; successful completion establishes sample validity.
+//
+// HAL arguments borrow the caller's handles for the synchronous invocation.
+// Accepted queue operations retain their own resources through completion.
+// Fence results transfer an owner to the source.
 //
 // The module retains |execution| and stage commands. Its declarations are
 // immutable. Per-invocation binding scratch lives in the process storage, so

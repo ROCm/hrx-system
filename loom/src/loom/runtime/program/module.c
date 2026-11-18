@@ -424,7 +424,7 @@ iree_status_t loom_runtime_module_create(const iree_hal_vm_types_t* types,
         (iree_vm_module_signature_type_t){IREE_VM_SCALAR_TYPE_I32, 0};
     for (uint32_t i = 1; i <= options.binding_capacity; ++i) {
       module->arguments[i] = (iree_vm_module_signature_type_t){
-          IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0};
+          IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 0};
     }
     // Signatures sort by argument count, then type. The clock query has no
     // arguments; execute_0, fence, and join have one. Timestamp follows
@@ -452,7 +452,7 @@ iree_status_t loom_runtime_module_create(const iree_hal_vm_types_t* types,
     }
     static const iree_vm_module_signature_type_t feedback_arguments[] = {
         {IREE_VM_SCALAR_TYPE_I32, 0},
-        {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+        {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 0},
         {IREE_VM_SCALAR_TYPE_I64, 0},
         {IREE_VM_SCALAR_TYPE_I64, 0},
     };
@@ -469,14 +469,16 @@ iree_status_t loom_runtime_module_create(const iree_hal_vm_types_t* types,
         .callable_type_ordinal = feedback_ordinal,
         .function_ordinal = ordinal,
     };
-    static const iree_vm_module_signature_type_t fence_type = {
+    static const iree_vm_module_signature_type_t fence_result = {
         IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 1};
     module->callables[2].signature = (iree_vm_module_signature_t){
         .arguments = {&loom_runtime_module_result, 1, 1, 0, 0},
-        .results = {&fence_type, 1, 0, 1, 0},
+        .results = {&fence_result, 1, 0, 1, 0},
     };
+    static const iree_vm_module_signature_type_t fence_argument = {
+        IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 1};
     module->callables[3].signature = (iree_vm_module_signature_t){
-        .arguments = {&fence_type, 1, 0, 1, 0},
+        .arguments = {&fence_argument, 1, 0, 1, 0},
     };
     module->descriptor.counts.callable_fields.value_count += 1;
     module->descriptor.counts.callable_fields.ref_count += 2;
@@ -491,7 +493,7 @@ iree_status_t loom_runtime_module_create(const iree_hal_vm_types_t* types,
         .function_ordinal = ordinal + 2,
     };
     static const iree_vm_module_signature_type_t timestamp_arguments[] = {
-        {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+        {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 0},
         {IREE_VM_SCALAR_TYPE_I64, 0},
     };
     module->callables[timestamp_ordinal].signature =

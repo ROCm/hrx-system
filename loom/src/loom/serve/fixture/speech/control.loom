@@ -1,8 +1,10 @@
+type.decl import("hal", "buffer") @HalBuffer
+
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
-func.decl import("runner") @execute_5(%stage: i32, %work: hal.buffer, %request: hal.buffer, %conditioning: hal.buffer, %stream: hal.buffer, %output: hal.buffer) -> (i64)
+func.decl import("runner") @execute_5(%stage: i32, %work: ptr<@HalBuffer>, %request: ptr<@HalBuffer>, %conditioning: ptr<@HalBuffer>, %stream: ptr<@HalBuffer>, %output: ptr<@HalBuffer>) -> (i64)
 
-func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
+func.decl import("runner") @feedback(%slot: i32, %source: ptr<@HalBuffer>, %offset: i64, %length: i64) -> (i64)
 
 func.def @check(%condition: i1) {
   %valid = scalar.extui %condition : i1 to i32
@@ -118,20 +120,20 @@ func.def public @prepare_batch(%model: buffer, %tags: buffer, %ranges: buffer, %
   func.return %payload, %payload : buffer, buffer
 }
 
-func.def public @generate(%plan: buffer, %work: hal.buffer, %request: hal.buffer, %conditioning: hal.buffer, %stream: hal.buffer, %output: hal.buffer) {
+func.def public @generate(%plan: buffer, %work: ptr<@HalBuffer>, %request: ptr<@HalBuffer>, %conditioning: ptr<@HalBuffer>, %stream: ptr<@HalBuffer>, %output: ptr<@HalBuffer>) {
   %origin = index.constant 0 : offset
   %header = buffer.view %plan[%origin] : buffer -> view<2xi32>
   %count = view.load %header[0] : view<2xi32> -> i32
   %stage = view.load %header[1] : view<2xi32> -> i32
   %c0 = scalar.constant 0 : i32
   %ready = scalar.cmpi ne, %stage, %c0 : i32
-  %execution = func.call @execute_5(%stage, %work, %request, %conditioning, %stream, %output) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %execution = func.call @execute_5(%stage, %work, %request, %conditioning, %stream, %output) : (i32, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)
   scf.if %ready {
     %begin = scalar.constant 0 : i64
     %stride = scalar.constant 36 : i64
     %count64 = scalar.extui %count : i32 to i64
     %length = scalar.muli %count64, %stride : i64
-    %feedback = func.call @feedback(%c0, %output, %begin, %length) : (i32, hal.buffer, i64, i64) -> (i64)
+    %feedback = func.call @feedback(%c0, %output, %begin, %length) : (i32, ptr<@HalBuffer>, i64, i64) -> (i64)
   }
   func.return
 }

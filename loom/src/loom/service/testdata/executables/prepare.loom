@@ -1,3 +1,5 @@
+type.decl import("hal", "buffer") @HalBuffer
+
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
 func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
@@ -10,9 +12,9 @@ func.decl import("prepare") @parameter_arena(%bytes: i64) -> (i32)
 
 func.decl import("prepare") @parameter_bank(%stage: i32, %binding: i32, %arena: i32, %sources: buffer, %policy: buffer) -> (i32)
 
-func.decl import("runner") @execute_1(%stage: i32, %output: hal.buffer) -> (i64)
+func.decl import("runner") @execute_1(%stage: i32, %output: ptr<@HalBuffer>) -> (i64)
 
-func.decl import("runner") @execute_2(%stage: i32, %request: hal.buffer, %output: hal.buffer) -> (i64)
+func.decl import("runner") @execute_2(%stage: i32, %request: ptr<@HalBuffer>, %output: ptr<@HalBuffer>) -> (i64)
 
 func.def public @declare(%root: buffer, %left: buffer, %right: buffer, %policy: buffer, %count: i32, %tag: i64, %limit: i64) {
   %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
@@ -44,8 +46,8 @@ func.def public @mixed(%root: buffer, %left: buffer, %right: buffer, %policy: bu
   func.return
 }
 
-func.def public @submit(%stage: i32, %output: hal.buffer) -> (i64) {
-  %completion = func.call @execute_1(%stage, %output) : (i32, hal.buffer) -> (i64)
+func.def public @submit(%stage: i32, %output: ptr<@HalBuffer>) -> (i64) {
+  %completion = func.call @execute_1(%stage, %output) : (i32, ptr<@HalBuffer>) -> (i64)
   func.return %completion : i64
 }
 
@@ -94,7 +96,7 @@ func.def public @banks(%root: buffer, %paths: buffer, %unused: buffer, %policy: 
   func.return
 }
 
-func.def public @submit_indexed(%stage: i32, %request: hal.buffer, %output: hal.buffer) -> (i64) {
-  %completion = func.call @execute_2(%stage, %request, %output) : (i32, hal.buffer, hal.buffer) -> (i64)
+func.def public @submit_indexed(%stage: i32, %request: ptr<@HalBuffer>, %output: ptr<@HalBuffer>) -> (i64) {
+  %completion = func.call @execute_2(%stage, %request, %output) : (i32, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)
   func.return %completion : i64
 }

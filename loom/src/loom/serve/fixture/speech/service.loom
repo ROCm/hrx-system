@@ -1,5 +1,6 @@
-// Speech service roles share the fixture implementation and numerical oracle.
+type.decl import("hal", "buffer") @HalBuffer
 
+// Speech service roles share the fixture implementation and numerical oracle.
 func.decl @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer)
 
 func.def public @speech_prepare_v1(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer) {
@@ -29,10 +30,10 @@ func.def public @speech_prepare_batch_v1(%model: buffer, %tags: buffer, %ranges:
   func.return %result_0, %result_1 : buffer, buffer
 }
 
-func.decl @generate(%plan: buffer, %work: hal.buffer, %request: hal.buffer, %conditioning: hal.buffer, %stream: hal.buffer, %output: hal.buffer)
+func.decl @generate(%plan: buffer, %work: ptr<@HalBuffer>, %request: ptr<@HalBuffer>, %conditioning: ptr<@HalBuffer>, %stream: ptr<@HalBuffer>, %output: ptr<@HalBuffer>)
 
-func.def public @speech_generate_v1(%plan: buffer, %work: hal.buffer, %request: hal.buffer, %conditioning: hal.buffer, %stream: hal.buffer, %output: hal.buffer) {
-  func.call @generate(%plan, %work, %request, %conditioning, %stream, %output) : (buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer)
+func.def public @speech_generate_v1(%plan: buffer, %work: ptr<@HalBuffer>, %request: ptr<@HalBuffer>, %conditioning: ptr<@HalBuffer>, %stream: ptr<@HalBuffer>, %output: ptr<@HalBuffer>) {
+  func.call @generate(%plan, %work, %request, %conditioning, %stream, %output) : (buffer, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>)
   func.return
 }
 

@@ -66,11 +66,14 @@ typedef struct loom_runtime_storage_module_options_t {
 } loom_runtime_storage_module_options_t;
 
 // Creates the source "storage" capability:
-//   buffer(i32 ordinal) -> hal.buffer
-//   copy(hal.buffer source, i64 source_offset, hal.buffer target,
+//   buffer(i32 ordinal) -> ref<hal.buffer>
+//   copy(ptr<hal.buffer> source, i64 source_offset, ptr<hal.buffer> target,
 //        i64 target_offset, i64 length) -> i64 work
-//   fill(hal.buffer target, i64 offset, i64 length, i32 pattern) -> i64 work
+//   fill(ptr<hal.buffer> target, i64 offset, i64 length, i32 pattern)
+//       -> i64 work
 //   completed(i32 slot) -> buffer
+// Buffer results transfer an owner; transfer arguments borrow handles while
+// accepted queue work retains the buffers independently through completion.
 // Device operations are available only inside the owner's submission scope;
 // completed is available only after successful feedback readiness. Roots remain
 // stable between bounded executions. Resource allocation and range ownership

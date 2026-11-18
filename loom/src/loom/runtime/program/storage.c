@@ -167,14 +167,14 @@ static const iree_vm_module_signature_type_t host_buffer_result[] = {
 static const iree_vm_module_signature_type_t work_result[] = {
     {IREE_VM_SCALAR_TYPE_I64, 0}};
 static const iree_vm_module_signature_type_t fill_arguments[] = {
-    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 0},
     {IREE_VM_SCALAR_TYPE_I64, 0},
     {IREE_VM_SCALAR_TYPE_I64, 0},
     {IREE_VM_SCALAR_TYPE_I32, 0}};
 static const iree_vm_module_signature_type_t copy_arguments[] = {
-    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 0},
     {IREE_VM_SCALAR_TYPE_I64, 0},
-    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 0},
     {IREE_VM_SCALAR_TYPE_I64, 0},
     {IREE_VM_SCALAR_TYPE_I64, 0}};
 

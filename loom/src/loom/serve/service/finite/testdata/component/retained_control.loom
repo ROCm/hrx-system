@@ -1,22 +1,24 @@
+type.decl import("hal", "buffer") @HalBuffer
+
 type.decl import("finite", "batch") @FiniteBatch
 
 func.decl import("finite", "batch_state") @finite_batch_state(%batch: ptr<@FiniteBatch>, %ordinal: i64) -> (buffer)
 
 func.decl import("finite", "batch_offer") @finite_batch_offer(%batch: ptr<@FiniteBatch>, %ordinal: i64, %units: i64, %tag: i64)
 
-func.decl import("finite", "batch_buffer") @finite_batch_buffer(%batch: ptr<@FiniteBatch>, %ordinal: i64, %root: i32) -> (hal.buffer)
+func.decl import("finite", "batch_buffer") @finite_batch_buffer(%batch: ptr<@FiniteBatch>, %ordinal: i64, %root: i32) -> (ref<@HalBuffer>)
 
 func.decl import("finite", "batch_origin") @finite_batch_origin(%batch: ptr<@FiniteBatch>, %ordinal: i64) -> (i64)
 
-func.decl import("storage") @copy(%source: hal.buffer, %source_offset: i64, %target: hal.buffer, %target_offset: i64, %length: i64) -> (i64)
+func.decl import("storage") @copy(%source: ptr<@HalBuffer>, %source_offset: i64, %target: ptr<@HalBuffer>, %target_offset: i64, %length: i64) -> (i64)
 
-func.decl import("storage") @fill(%target: hal.buffer, %offset: i64, %length: i64, %pattern: i32) -> (i64)
+func.decl import("storage") @fill(%target: ptr<@HalBuffer>, %offset: i64, %length: i64, %pattern: i32) -> (i64)
 
 func.decl import("storage") @completed(%slot: i32) -> (buffer)
 
-func.decl import("runner") @execute_3(%stage: i32, %input: hal.buffer, %output: hal.buffer, %state: hal.buffer) -> (i64)
+func.decl import("runner") @execute_3(%stage: i32, %input: ptr<@HalBuffer>, %output: ptr<@HalBuffer>, %state: ptr<@HalBuffer>) -> (i64)
 
-func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
+func.decl import("runner") @feedback(%slot: i32, %source: ptr<@HalBuffer>, %offset: i64, %length: i64) -> (i64)
 
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
@@ -89,7 +91,7 @@ func.def public @prepare_batch(%state: buffer, %tags: buffer, %batch: ptr<@Finit
   func.return %c0_i32, %request, %plan : i32, buffer, buffer
 }
 
-func.def public @run(%state: buffer, %stage: i32, %input: hal.buffer, %output: hal.buffer, %batch: ptr<@FiniteBatch>) {
+func.def public @run(%state: buffer, %stage: i32, %input: ptr<@HalBuffer>, %output: ptr<@HalBuffer>, %batch: ptr<@FiniteBatch>) {
   %origin = index.constant 0 : offset
   %control = buffer.view %state[%origin] : buffer -> view<4xi32>
   %cursor = view.load %control[0] : view<4xi32> -> i32
@@ -98,7 +100,8 @@ func.def public @run(%state: buffer, %stage: i32, %input: hal.buffer, %output: h
   %c0 = scalar.constant 0 : i64
   %c4 = scalar.constant 4 : i64
   %c16 = scalar.constant 16 : i64
-  %root = func.call @finite_batch_buffer(%batch, %c0, %c0_i32) : (ptr<@FiniteBatch>, i64, i32) -> (hal.buffer)
+  %root_owner = func.call @finite_batch_buffer(%batch, %c0, %c0_i32) : (ptr<@FiniteBatch>, i64, i32) -> (ref<@HalBuffer>)
+  %root = ref.borrow %root_owner : ref<@HalBuffer> -> ptr<@HalBuffer>
   %first32 = view.load %control[3] : view<4xi32> -> i32
   %first = scalar.extui %first32 : i32 to i64
   %stride = scalar.constant 20 : i64
@@ -106,16 +109,17 @@ func.def public @run(%state: buffer, %stage: i32, %input: hal.buffer, %output: h
   %cursor_offset = scalar.addi %base, %c16 : i64
   %initial = scalar.cmpi eq, %cursor, %c0_i32 : i32
   scf.if %initial {
-    %copy = func.call @copy(%input, %c0, %root, %base, %c16) : (hal.buffer, i64, hal.buffer, i64, i64) -> (i64)
-    %fill = func.call @fill(%root, %cursor_offset, %c4, %c0_i32) : (hal.buffer, i64, i64, i32) -> (i64)
+    %copy = func.call @copy(%input, %c0, %root, %base, %c16) : (ptr<@HalBuffer>, i64, ptr<@HalBuffer>, i64, i64) -> (i64)
+    %fill = func.call @fill(%root, %cursor_offset, %c4, %c0_i32) : (ptr<@HalBuffer>, i64, i64, i32) -> (i64)
   }
   %final = scalar.cmpi ne, %done, %c0_i32 : i32
   scf.if %final {
-    %gather = func.call @copy(%root, %base, %output, %c0, %c16) : (hal.buffer, i64, hal.buffer, i64, i64) -> (i64)
+    %gather = func.call @copy(%root, %base, %output, %c0, %c16) : (ptr<@HalBuffer>, i64, ptr<@HalBuffer>, i64, i64) -> (i64)
   } else {
-    %work = func.call @execute_3(%stage, %input, %output, %root) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
-    %reply = func.call @feedback(%c0_i32, %root, %cursor_offset, %c4) : (i32, hal.buffer, i64, i64) -> (i64)
+    %work = func.call @execute_3(%stage, %input, %output, %root) : (i32, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)
+    %reply = func.call @feedback(%c0_i32, %root, %cursor_offset, %c4) : (i32, ptr<@HalBuffer>, i64, i64) -> (i64)
   }
+  ref.release %root_owner : ref<@HalBuffer>
   %accepted = view.load %control[2] : view<4xi32> -> i32
   %error = buffer.constant utf8("Source rejected after accepting device state and feedback work.") : buffer
   func.call @require(%accepted, %error) : (i32, buffer)
