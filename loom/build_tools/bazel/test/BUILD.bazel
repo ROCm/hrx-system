@@ -9,6 +9,7 @@
 load("@rules_python//python:defs.bzl", "py_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load(
     "//loom/build_tools/bazel:defs.bzl",
     "loom_amdgpu_target_profile",
@@ -118,6 +119,24 @@ loom_library(
         "link_kernels.loom",
     ],
     tags = ["manual"],
+)
+
+loom_library(
+    name = "cxx_library",
+    srcs = ["model_provider.cxx"],
+    data = ["model_provider.h"],
+    input_format = "cxx",
+    inputopts = ["cxx:fp-model=fast"],
+    tags = ["manual"],
+)
+
+loom_test(
+    name = "cxx_library_check",
+    srcs = ["cxx_library_checks.cxx"],
+    benchmark_smoke = False,
+    execution_profiles = [REFERENCE_PROFILE],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    deps = [":cxx_library"],
 )
 
 loom_kernel_binary(

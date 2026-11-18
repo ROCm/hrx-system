@@ -107,6 +107,8 @@ def _test_library_keeps_dependency_module_separate_impl(env, target):
     for expected_arg in [
         "--mode=merge",
         "--strict-deps",
+        "--strip-debug",
+        "--module-name=%s" % target.label,
     ]:
         if expected_arg not in action.argv:
             env.fail("expected %r in %r" % (expected_arg, action.argv))
@@ -565,6 +567,8 @@ def _test_execution_module_links_root_tests_impl(env, target):
         "--mode=link",
         "--include-input-tests",
         "--to=bc",
+        "--strip-debug",
+        "--module-name=%s" % target.label,
     ]:
         if expected_arg not in action.argv:
             env.fail("expected %r in %r" % (expected_arg, action.argv))
