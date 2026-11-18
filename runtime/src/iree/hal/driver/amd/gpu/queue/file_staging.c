@@ -1075,9 +1075,10 @@ static void iree_hal_amd_gpu_file_staging_progress(
   }
 }
 
-static iree_status_t iree_hal_amd_gpu_file_staging_bucket(
+iree_status_t iree_hal_amd_gpu_file_staging_acquire(
     iree_hal_amd_gpu_file_staging_t* staging, iree_async_proactor_t* proactor,
     iree_hal_amd_gpu_file_staging_bucket_t** out_bucket) {
+  *out_bucket = NULL;
   iree_hal_amd_gpu_file_staging_bucket_t* candidate = NULL;
   for (;;) {
     iree_slim_mutex_lock(&staging->mutex);
@@ -1121,20 +1122,13 @@ uint32_t iree_hal_amd_gpu_file_staging_concurrency(
                             1 + (length - 1) / staging->lane_capacity);
 }
 
-iree_status_t iree_hal_amd_gpu_file_staging_acquire(
-    iree_hal_amd_gpu_file_staging_t* staging, iree_async_proactor_t* proactor,
-    iree_hal_amd_gpu_file_staging_request_t* request) {
-  *request = (iree_hal_amd_gpu_file_staging_request_t){.staging = staging};
-  return iree_hal_amd_gpu_file_staging_bucket(staging, proactor,
-                                              &request->bucket);
-}
-
 void iree_hal_amd_gpu_file_staging_reserve(
-    iree_hal_amd_gpu_file_staging_request_t* request, uint64_t length,
-    uint64_t alignment, iree_hal_file_transfer_callback_t completion) {
-  iree_hal_amd_gpu_file_staging_t* staging = request->staging;
-  request->completion = completion;
-  request->block_mask = 0;
+    iree_hal_amd_gpu_file_staging_bucket_t* bucket, uint64_t length,
+    uint64_t alignment, iree_hal_file_transfer_callback_t completion,
+    iree_hal_amd_gpu_file_staging_request_t* request) {
+  iree_hal_amd_gpu_file_staging_t* staging = bucket->staging;
+  *request = (iree_hal_amd_gpu_file_staging_request_t){
+      .staging = staging, .bucket = bucket, .completion = completion};
   uint64_t capacity = iree_max(4096, alignment);
   const uint64_t desired = iree_min(length, staging->lane_capacity);
   while (capacity < desired) {
@@ -1167,11 +1161,13 @@ void iree_hal_amd_gpu_file_staging_reserve(
 }
 
 void iree_hal_amd_gpu_file_staging_release(
-    iree_hal_amd_gpu_file_staging_request_t* request, iree_status_t status,
-    iree_hal_file_transfer_callback_t completion) {
-  iree_hal_amd_gpu_file_staging_t* staging = request->staging;
+    iree_hal_amd_gpu_file_staging_bucket_t* bucket, iree_status_t status,
+    iree_hal_file_transfer_callback_t completion,
+    iree_hal_amd_gpu_file_staging_request_t* request) {
+  iree_hal_amd_gpu_file_staging_t* staging = bucket->staging;
+  *request = (iree_hal_amd_gpu_file_staging_request_t){
+      .staging = staging, .bucket = bucket, .completion = completion};
   request->status = status;
-  request->completion = completion;
   iree_slim_mutex_lock(&staging->mutex);
   const bool complete =
       iree_hal_amd_gpu_file_staging_transfer_released(request);

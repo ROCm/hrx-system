@@ -191,7 +191,7 @@ typedef enum iree_hal_amd_gpu_file_window_phase_e {
 typedef struct iree_hal_amd_gpu_file_window_t {
   // Enclosing finite pipeline owns this window through final release.
   iree_hal_amd_gpu_file_pipeline_t* pipeline;
-  // Exact physical loan and reusable native registration membership.
+  // Exact physical loan borrowing the pipeline's registration membership.
   iree_hal_amd_gpu_file_staging_request_t staging;
   // A failed copy cannot start file I/O, so error delivery reuses request
   // space.
@@ -220,13 +220,15 @@ struct iree_hal_amd_gpu_file_pipeline_t {
   uint64_t address;
   // Native file alignment, qualified before the first reservation.
   uint64_t alignment;
+  // One registration membership shared by every independently borrowed lane.
+  iree_hal_amd_gpu_file_staging_bucket_t* bucket;
   // Completed window bits and the single inline drainer's ownership bit.
   iree_atomic_int64_t ready;
   // First failure stops new admission without releasing accepted accesses.
   iree_atomic_intptr_t failure;
   // Windows with outstanding storage, native I/O, or device-copy callbacks.
   uint32_t active;
-  // Number of placed windows whose staging memberships were acquired.
+  // Number of placed windows sharing the same registration membership.
   uint32_t count;
   // Final phase joins each foreign-proactor registration release.
   bool releasing;
@@ -424,10 +426,11 @@ static void iree_hal_amd_gpu_file_pipeline_drain(
         window->phase = IREE_HAL_AMD_GPU_FILE_WINDOW_RESERVED;
         pipeline->active |= bit;
         iree_hal_amd_gpu_file_staging_reserve(
-            &window->staging, transfer->length - pipeline->cursor,
+            pipeline->bucket, transfer->length - pipeline->cursor,
             pipeline->alignment,
             (iree_hal_file_transfer_callback_t){
-                iree_hal_amd_gpu_file_window_complete, window});
+                iree_hal_amd_gpu_file_window_complete, window},
+            &window->staging);
       }
     }
     if (!pipeline->active) {
@@ -436,14 +439,15 @@ static void iree_hal_amd_gpu_file_pipeline_drain(
         return;
       }
       pipeline->releasing = true;
-      for (uint32_t i = 0; i < pipeline->count; ++i) {
-        iree_hal_amd_gpu_file_window_t* window = &pipeline->windows[i];
+      if (pipeline->bucket) {
+        iree_hal_amd_gpu_file_window_t* window = &pipeline->windows[0];
         window->phase = IREE_HAL_AMD_GPU_FILE_WINDOW_RELEASE;
-        pipeline->active |= UINT32_C(1) << i;
+        pipeline->active = 1;
         iree_hal_amd_gpu_file_staging_release(
-            &window->staging, iree_ok_status(),
+            pipeline->bucket, iree_ok_status(),
             (iree_hal_file_transfer_callback_t){
-                iree_hal_amd_gpu_file_window_complete, window});
+                iree_hal_amd_gpu_file_window_complete, window},
+            &window->staging);
       }
       if (!pipeline->active) {
         iree_hal_amd_gpu_file_pipeline_finish(pipeline);
@@ -479,6 +483,7 @@ static void iree_hal_amd_gpu_file_pipeline_begin(
       .operation = operation,
       .allocation_size = storage.data_length,
       .address = address,
+      .count = count,
   };
   const iree_async_file_requirements_t* requirements =
       iree_hal_file_requirements(operation->transfer.file);
@@ -486,16 +491,13 @@ static void iree_hal_amd_gpu_file_pipeline_begin(
       operation->transfer.file_access == IREE_HAL_MEMORY_ACCESS_READ
           ? requirements->read.buffer_alignment
           : requirements->write.buffer_alignment;
-  for (uint32_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+  for (uint32_t i = 0; i < count; ++i) {
     iree_hal_amd_gpu_file_window_t* window = &pipeline->windows[i];
     *window = (iree_hal_amd_gpu_file_window_t){.pipeline = pipeline};
-    status = iree_hal_amd_gpu_file_staging_acquire(
-        operation->executor->staging, operation->transfer.async.file->proactor,
-        &window->staging);
-    if (iree_status_is_ok(status)) {
-      ++pipeline->count;
-    }
   }
+  status = iree_hal_amd_gpu_file_staging_acquire(
+      operation->executor->staging, operation->transfer.async.file->proactor,
+      &pipeline->bucket);
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_file_pipeline_fail(pipeline, status);
   }
