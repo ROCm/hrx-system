@@ -200,7 +200,8 @@ def _declare_cxx_import(ctx, source, ordinal, options, tool):
     args.add(source)
     args.add("--to=bc")
     args.add("--module-name=%s/unit%d" % (ctx.label, ordinal))
-    args.add("--strip-debug")
+    if ctx.var["COMPILATION_MODE"] != "dbg":
+        args.add("--strip-debug")
     args.add("--output=%s" % output.path)
     if options != None:
         args.add("--options=%s" % options)

@@ -371,6 +371,8 @@ typedef enum loomc_module_bytecode_flag_bits_e {
   /// Serialization does not modify the module or its diagnostic information.
   LOOMC_MODULE_BYTECODE_FLAG_STRIP_DEBUG = 1u << 0,
 } loomc_module_bytecode_flag_bits_t;
+
+/// Bitmask of `loomc_module_bytecode_flag_bits_t` values.
 typedef uint32_t loomc_module_bytecode_flags_t;
 
 /// Module serialization and current-IR text presentation options.

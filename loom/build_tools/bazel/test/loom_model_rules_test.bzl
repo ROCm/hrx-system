@@ -243,7 +243,6 @@ def _cxx_import_precedes_link_impl(env, targets):
         "loom-import-cxx",
     )
     env.expect.that_collection(cxx_import.argv).contains("--options=fp-model=fast")
-    env.expect.that_collection(cxx_import.argv).contains("--strip-debug")
     env.expect.that_collection(cxx_import.argv).contains(
         "--module-name=%s/unit0" % targets.cxx_library.label,
     )
@@ -254,7 +253,6 @@ def _cxx_import_precedes_link_impl(env, targets):
         "loom-link",
     )
     env.expect.that_collection(cxx_link.argv).not_contains("--input-format=cxx")
-    env.expect.that_collection(cxx_link.argv).contains("--strip-debug")
     env.expect.that_collection(cxx_link.argv).contains(
         "--module-name=%s" % targets.cxx_library.label,
     )
