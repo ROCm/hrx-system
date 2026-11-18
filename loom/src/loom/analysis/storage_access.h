@@ -23,11 +23,16 @@ enum loom_storage_access_effect_bits_e {
   LOOM_STORAGE_ACCESS_READ = 1u << 0,
   // Bytes reached through the reference may be written.
   LOOM_STORAGE_ACCESS_WRITE = 1u << 1,
-  // The reference may escape, or its use has no bounded access contract.
-  LOOM_STORAGE_ACCESS_ESCAPE = 1u << 2,
+  // A use may retain the reference or has no bounded access contract.
+  LOOM_STORAGE_ACCESS_CAPTURE = 1u << 2,
   // This direct use starts an asynchronous access requiring local completion.
   // Callable effects project this bit to ESCAPE across the function boundary.
   LOOM_STORAGE_ACCESS_ASYNC = 1u << 3,
+  // A result of a visible callable may carry this reference back to the caller.
+  LOOM_STORAGE_ACCESS_RETURN = 1u << 4,
+  // Both escape the callable when the consumer does not follow its results.
+  LOOM_STORAGE_ACCESS_ESCAPE =
+      LOOM_STORAGE_ACCESS_CAPTURE | LOOM_STORAGE_ACCESS_RETURN,
 };
 typedef uint8_t loom_storage_access_effects_t;
 
@@ -61,10 +66,14 @@ typedef struct loom_storage_access_use_t {
 typedef struct loom_storage_reference_edge_t {
   // Origin receiving effects propagated backward through this edge.
   loom_storage_reference_t* origin;
-  // Alias or callee formal supplying effects to the origin.
+  // Local alias receiving provenance, or NULL at a call boundary.
   loom_storage_reference_t* destination;
-  // Next local transport edge from the same origin; call edges are excluded.
-  struct loom_storage_reference_edge_t* next_destination;
+  union {
+    // Next local transport edge from the same origin.
+    struct loom_storage_reference_edge_t* next_destination;
+    // Reference results of this particular call, indexed by result ordinal.
+    loom_storage_reference_t** call_results;
+  };
   // Next origin receiving effects from the same destination.
   struct loom_storage_reference_edge_t* next_origin;
 } loom_storage_reference_edge_t;
@@ -93,6 +102,8 @@ struct loom_storage_reference_t {
   loom_storage_reference_edge_t* origins;
   // Direct classified uses; transitive alias uses remain on their own nodes.
   loom_storage_access_use_t* uses;
+  // Callable result ordinals reachable through local transport, if any.
+  struct loom_storage_return_path_t* returns;
 };
 
 typedef struct loom_storage_access_barrier_t {
@@ -157,7 +168,8 @@ void loom_storage_access_scope_initialize(
 
 // Builds the canonical graph for |function| and its reached source callees.
 // Existing graphs are returned directly. Each reached body is interpreted once;
-// a fixed-bit worklist closes recursive effects without revisiting source.
+// sparse return and effect worklists close recursive calls without revisiting
+// source. A return links the originating actual to that call's result only.
 //
 // Construction temporarily releases |value_domain|'s scratch borrow and then
 // restores its exact numbering. Its value IDs and the caller's fact table are
@@ -184,6 +196,15 @@ static inline loom_storage_access_effects_t loom_storage_access_use_effects(
     const loom_storage_access_use_t* use) {
   return use->effects |
          (use->callee_argument ? use->callee_argument->effects : 0);
+}
+
+// Effects at this operation for a consumer following the local alias graph.
+// Returned references flow into this call's own results through destinations.
+static inline loom_storage_access_effects_t
+loom_storage_access_graph_use_effects(const loom_storage_access_use_t* use) {
+  return use->effects | (use->callee_argument ? use->callee_argument->effects &
+                                                    ~LOOM_STORAGE_ACCESS_RETURN
+                                              : 0);
 }
 
 #ifdef __cplusplus
