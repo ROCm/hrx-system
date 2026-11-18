@@ -81,6 +81,7 @@ loom_cc_test(
     srcs = ["facts_test.cc"],
     deps = [
         ":buffer",
+        "//loom/src/loom/ops:type_registry",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",

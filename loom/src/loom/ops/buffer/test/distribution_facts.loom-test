@@ -190,3 +190,38 @@ kernel.def @workgroup_storage_distribution() {
   test.use %view_cluster, %view_workgroup, %load_cluster, %load_workgroup : i1, i1, i1, i1
   kernel.return
 }
+
+// ====
+// RUN: pass canonicalize
+
+// Distinct roots and extents require a payload join. Private storage remains
+// lane-varying; shared storage selected by an unconstrained condition does not
+// become uniform. The joined extent still proves the bound.
+func.def @joined_storage_distribution(%choose: i1) {
+  %small = index.constant 48 : offset
+  %large = index.constant 96 : offset
+  %private, %shared = scf.if %choose -> (buffer, buffer) {
+    %a = buffer.alloca<private> align(16) %small : buffer
+    %b = buffer.alloca<workgroup> align(16) %small : buffer
+    scf.yield %a, %b : buffer, buffer
+  } else {
+    %a = buffer.alloca<private> align(32) %large : buffer
+    %b = buffer.alloca<workgroup> align(32) %large : buffer
+    scf.yield %a, %b : buffer, buffer
+  }
+  %private_varying = test.fact_lane_varying %private : buffer -> i1
+  %shared_uniform = test.fact_workgroup_uniform %shared : buffer -> i1
+  %private_bytes = buffer.length %private
+  %fits = index.cmp sle, %private_bytes, %large : offset
+  test.use %private_varying, %shared_uniform, %fits : i1, i1, i1
+  func.return
+}
+
+// ----
+func.def @joined_storage_distribution(%choose: i1) {
+  %private_varying = scalar.constant true : i1
+  %shared_uniform = scalar.constant false : i1
+  %fits = scalar.constant true : i1
+  test.use %private_varying, %shared_uniform, %fits : i1, i1, i1
+  func.return
+}
