@@ -14,6 +14,7 @@
 #include "iree/hal/driver/amd/gpu/queue/file_staging.h"
 #include "iree/hal/driver/amd/gpu/queue/host_wait.h"
 #include "iree/hal/driver/amd/gpu/queue/transfer.h"
+#include "iree/hal/utils/file_transfer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -69,6 +70,18 @@ typedef struct iree_hal_amd_gpu_file_executor_t {
       const void* before, const void* after,
       iree_hal_amd_gpu_retirement_callback_t callback);
 } iree_hal_amd_gpu_file_executor_t;
+
+// Captures a finite file group. Indirect bytes are acquired only after waits;
+// bounded windows share staging, registration membership, and native copies.
+// Acceptance retains operands through every accepted access and final cache
+// boundary. Synchronous rejection retains nothing and signals nothing.
+iree_status_t iree_hal_amd_gpu_file_transfer_submit_batch(
+    const iree_hal_amd_gpu_file_executor_t* executor,
+    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
+    iree_hal_memory_access_t file_access, iree_hal_file_binding_table_t files,
+    iree_hal_buffer_binding_table_t buffers,
+    const iree_hal_file_transfer_list_t* transfers, const void* before,
+    const void* after);
 
 // The executor is queue-owned and outlives accepted operations.
 // Captures a validated, nonempty queue_read/write transaction. Memory files

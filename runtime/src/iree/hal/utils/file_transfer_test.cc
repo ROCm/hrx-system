@@ -155,4 +155,47 @@ TEST(FileTransferIterator, DecodesOnceAndRejectsMalformedLateRecords) {
   EXPECT_EQ(range.length, 0u);
 }
 
+TEST(FileTransferIterator, AcquiresBoundedPagesWithoutReadingPastTheirPrefix) {
+  const iree_hal_file_binding_t file = {nullptr, 0, 512};
+  const iree_hal_buffer_binding_t buffer = {nullptr, 0, 512};
+  const iree_hal_file_transfer_batch_t batch = {
+      .files = {1, &file},
+      .buffers = {1, &buffer},
+      .transfers =
+          {
+              .type = IREE_HAL_FILE_TRANSFER_LIST_TYPE_INDIRECT,
+              .indirect = {{nullptr, 0, 4 * 64}, nullptr, 0},
+          },
+  };
+  iree_hal_file_transfer_iterator_t iterator;
+  IREE_ASSERT_OK(iree_hal_file_transfer_iterator_initialize(&batch, 4, nullptr,
+                                                            &iterator));
+  iree_hal_file_transfer_range_t range;
+  IREE_ASSERT_OK(iree_hal_file_transfer_iterator_peek(&iterator, &range));
+  EXPECT_EQ(range.length, 0u);
+  EXPECT_EQ(iterator.index, 0u);
+  // Empty records at the page boundary cannot make peek read the next page.
+  std::array<iree_hal_file_transfer_record_t, 2> page = {};
+  iree_unaligned_store_le_u64(&page[0].words[2], 90);
+  iree_hal_file_transfer_iterator_acquire(&iterator, page.data(), page.size());
+  IREE_ASSERT_OK(iree_hal_file_transfer_iterator_peek(&iterator, &range));
+  EXPECT_EQ(range.length, 90u);
+  iree_hal_file_transfer_iterator_advance(&iterator, 90);
+  IREE_ASSERT_OK(iree_hal_file_transfer_iterator_peek(&iterator, &range));
+  EXPECT_EQ(range.length, 0u);
+  EXPECT_EQ(iterator.index, 2u);
+  page = {};
+  iree_unaligned_store_le_u64(&page[1].words[0], 180);
+  iree_unaligned_store_le_u64(&page[1].words[1], 270);
+  iree_unaligned_store_le_u64(&page[1].words[2], 90);
+  iree_hal_file_transfer_iterator_acquire(&iterator, page.data(), page.size());
+  IREE_ASSERT_OK(iree_hal_file_transfer_iterator_peek(&iterator, &range));
+  EXPECT_EQ(range.file_offset, 180u);
+  EXPECT_EQ(range.buffer_offset, 270u);
+  iree_hal_file_transfer_iterator_advance(&iterator, 90);
+  IREE_ASSERT_OK(iree_hal_file_transfer_iterator_peek(&iterator, &range));
+  EXPECT_EQ(range.length, 0u);
+  EXPECT_EQ(iterator.index, iterator.count);
+}
+
 }  // namespace

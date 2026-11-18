@@ -53,7 +53,7 @@ typedef struct iree_hal_file_transfer_range_t {
   uint64_t file_offset;
   // First byte relative to the buffer binding's origin.
   iree_device_size_t buffer_offset;
-  // Contiguous bytes remaining; zero indicates end of the list.
+  // Contiguous bytes remaining; zero indicates end of the acquired prefix.
   uint64_t length;
 } iree_hal_file_transfer_range_t;
 
@@ -62,12 +62,14 @@ typedef struct iree_hal_file_transfer_range_t {
 typedef struct iree_hal_file_transfer_iterator_t {
   // Borrowed immutable capture, live through iteration.
   const iree_hal_file_transfer_batch_t* batch;
-  // Acquired indirect records, or NULL for captured host descriptions.
+  // Next acquired indirect record, or NULL for captured host descriptions.
   const iree_hal_file_transfer_record_t* records;
   // Live prefix, sampled once after waits and bounded by declared capacity.
   iree_host_size_t count;
   // Index of the next description not yet decoded.
   iree_host_size_t index;
+  // End of the acquired prefix, at most count. A page can end between records.
+  iree_host_size_t acquired;
   // Current normalized description; row_length zero means it is exhausted.
   iree_hal_file_transfer_t current;
   // Row within the current slice.
@@ -81,16 +83,25 @@ typedef struct iree_hal_file_transfer_iterator_t {
 // Begins iteration after producer waits and metadata visibility. For INDIRECT,
 // count is the sampled live count, checked against the captured capacity.
 // records points to that readable prefix or is NULL until the caller acquires
-// it and assigns iterator.records before the first peek. HOST uses captured
+// it with iterator_acquire before the first peek. HOST uses captured
 // values and ignores these two parameters. Metadata stays stable until retired.
 iree_status_t iree_hal_file_transfer_iterator_initialize(
     const iree_hal_file_transfer_batch_t* batch, uint64_t count,
     const iree_hal_file_transfer_record_t* records,
     iree_hal_file_transfer_iterator_t* out_iterator);
 
+// Makes the next consecutive page readable. The caller has acquired exactly
+// this prefix after producer dependencies, within the validated live count.
+// Decoded geometry owns its values, so prior pages can be reused immediately.
+// This trusted handoff performs no validation, allocation, or synchronization.
+void iree_hal_file_transfer_iterator_acquire(
+    iree_hal_file_transfer_iterator_t* iterator,
+    const iree_hal_file_transfer_record_t* records, iree_host_size_t count);
+
 // Returns the next contiguous range without advancing it. Indirect descriptions
 // are decoded and validated exactly once as encountered. Host descriptions
-// consume capture-time validation. A zero length means end of list; other
+// consume capture-time validation. A zero length means end of the acquired
+// prefix; index < count then requires acquiring more records. Other
 // output fields are then unspecified. A malformed indirect record fails before
 // returning its first range, without undoing earlier admissions.
 iree_status_t iree_hal_file_transfer_iterator_peek(

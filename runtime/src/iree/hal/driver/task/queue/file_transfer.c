@@ -329,7 +329,9 @@ static iree_status_t iree_hal_task_file_begin(
       IREE_RETURN_IF_ERROR(iree_hal_buffer_invalidate_host_range(
           binding.buffer, binding.offset, length));
     }
-    iterator.records = (const iree_hal_file_transfer_record_t*)record_span.data;
+    iree_hal_file_transfer_iterator_acquire(
+        &iterator, (const iree_hal_file_transfer_record_t*)record_span.data,
+        (iree_host_size_t)count);
   }
   iree_hal_file_transfer_range_t first_range;
   IREE_RETURN_IF_ERROR(

@@ -154,19 +154,23 @@ class FileTransferTest : public ::testing::Test {
   // Its storage stays live with this fixture until all native uses have joined.
   void QualifyBuffer(iree::hal::testing::MappedTransferBuffer* buffer) {
     device_scope_.bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS] = 0;
+    device_scope_.interfaces = 1u << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
+    device_scope_.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
     device_contract_->scopes = &device_scope_;
-    device_binding_.device_address =
+    device_contract_->scope_count = 1;
+    buffer->host_binding.device_address =
         reinterpret_cast<uintptr_t>(buffer->device_contents.data());
     buffer->memory.contract = device_contract_.get();
-    buffer->memory.bindings = &device_binding_;
+    buffer->memory.bindings = &buffer->host_binding;
+    buffer->host_binding_index = IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE;
+    buffer->memory_type |= IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+    buffer->allowed_usage |= IREE_HAL_BUFFER_USAGE_TRANSFER;
   }
   // Queue's immutable buffer-access contract.
   iree_hal_memory_scope_access_t device_scope_ = {};
   // Native binding layout shared by the one buffer in each operation.
   std::unique_ptr<iree_hal_memory_contract_t> device_contract_ =
       std::make_unique<iree_hal_memory_contract_t>();
-  // Address of the dependency's device-visible bytes.
-  iree_hal_buffer_native_binding_t device_binding_ = {};
   void SetUp() override {
     IREE_ASSERT_OK(iree_async_proactor_create_platform(
         iree_async_proactor_options_default(), iree_allocator_system(),
@@ -284,6 +288,7 @@ class FileTransferTest : public ::testing::Test {
   }
 
   void FailedNativeWork(iree_hal_memory_access_t access);
+  void IndirectCountWithoutRecords(uint64_t count);
 
   // Real host semaphore backend; no poll thread is necessary.
   iree_async_proactor_t* proactor_ = nullptr;
@@ -427,7 +432,8 @@ TEST_F(FileTransferTest, UnqualifiedMemoryFileFailsBeforeNativeSubmission) {
       .barrier_size = sizeof(uint64_t),
       .submit = NativeQueue::Submit,
   };
-  auto buffer = iree::hal::testing::MakeMappedTransferBuffer();
+  auto buffer = iree::hal::testing::MakeMappedTransferBuffer(
+      IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE, IREE_HAL_BUFFER_USAGE_TRANSFER);
   const uint64_t barrier = 0;
   uint64_t value = 1;
   IREE_ASSERT_OK(iree_hal_amd_gpu_file_transfer_submit(
@@ -439,6 +445,63 @@ TEST_F(FileTransferTest, UnqualifiedMemoryFileFailsBeforeNativeSubmission) {
                         iree_hal_semaphore_query(completion_, &observed));
   EXPECT_EQ(queue.submissions, 0u);
   EXPECT_EQ(queue.host_owners, 0);
+}
+
+void FileTransferTest::IndirectCountWithoutRecords(uint64_t count) {
+  Device device;
+  iree_hal_queue_family_t family = {.device = device.get()};
+  NativeQueue queue;
+  queue.queue_family = &family;
+  queue.completion = completion_;
+  iree_hal_amd_gpu_context_t context = {};
+  const iree_hal_amd_gpu_file_executor_t executor = {
+      .queue = &queue,
+      .context = &context,
+      .captures = &captures_,
+      .begin = NativeQueue::Begin,
+      .end = NativeQueue::End,
+      .waits = &waits_,
+      .transfer_site = IREE_HAL_MEMORY_SITE_QUEUE,
+      .barrier_size = sizeof(uint64_t),
+      .submit = NativeQueue::Submit,
+  };
+  auto count_buffer = iree::hal::testing::MakeMappedTransferBuffer();
+  QualifyBuffer(count_buffer.get());
+  iree_unaligned_store_le_u64(count_buffer->device_contents.data(), count);
+  // This record buffer cannot be accessed by the native executor. Neither an
+  // empty prefix nor a rejected count may try to resolve or read its bytes.
+  auto records = iree::hal::testing::MakeMappedTransferBuffer(
+      IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE, IREE_HAL_BUFFER_USAGE_TRANSFER);
+  records->host_binding_index = IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE;
+  const iree_hal_file_transfer_list_t list = {
+      .type = IREE_HAL_FILE_TRANSFER_LIST_TYPE_INDIRECT,
+      .indirect = {{records.get(), 0, 64}, count_buffer.get(), 0},
+  };
+  const uint64_t before = 17, after = 29;
+  uint64_t value = 1;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_file_transfer_submit_batch(
+      &executor, {}, {1, &completion_, &value}, IREE_HAL_MEMORY_ACCESS_READ, {},
+      {}, &list, &before, &after));
+  uint64_t observed = 0;
+  if (count) {
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                          iree_hal_semaphore_query(completion_, &observed));
+    EXPECT_EQ(queue.submissions, 1u);
+  } else {
+    IREE_ASSERT_OK(iree_hal_semaphore_query(completion_, &observed));
+    EXPECT_EQ(observed, 1u);
+    EXPECT_EQ(queue.submissions, 2u);
+  }
+  EXPECT_EQ(queue.host_owners, 0);
+  iree_hal_device_release(device.get());
+}
+
+TEST_F(FileTransferTest, EmptyIndirectCountDoesNotAcquireRecords) {
+  IndirectCountWithoutRecords(0);
+}
+
+TEST_F(FileTransferTest, OversizedIndirectCountFailsBeforeAcquiringRecords) {
+  IndirectCountWithoutRecords(2);
 }
 
 }  // namespace

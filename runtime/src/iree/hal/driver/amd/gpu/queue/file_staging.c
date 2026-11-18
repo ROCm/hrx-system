@@ -1122,6 +1122,11 @@ uint32_t iree_hal_amd_gpu_file_staging_concurrency(
                             1 + (length - 1) / staging->lane_capacity);
 }
 
+uint32_t iree_hal_amd_gpu_file_staging_capacity(
+    const iree_hal_amd_gpu_file_staging_t* staging) {
+  return staging->lane_capacity;
+}
+
 void iree_hal_amd_gpu_file_staging_reserve(
     iree_hal_amd_gpu_file_staging_bucket_t* bucket, uint64_t length,
     uint64_t alignment, iree_hal_file_transfer_callback_t completion,

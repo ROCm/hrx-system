@@ -1545,6 +1545,12 @@ TEST_P(GpuNativeProfileTest,
   const auto batch = Events(IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_TRANSFER)[0];
   EXPECT_EQ(batch.operation_count, 2u);
   EXPECT_EQ(batch.payload_length, 8u);
+  const auto read = Events(IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_READ)[0];
+  EXPECT_EQ(read.operation_count, 1u);
+  EXPECT_EQ(read.payload_length, sizeof(source));
+  const auto write = Events(IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_WRITE)[0];
+  EXPECT_EQ(write.operation_count, 1u);
+  EXPECT_EQ(write.payload_length, sizeof(target));
   EXPECT_EQ(Events(IREE_HAL_PROFILE_QUEUE_EVENT_TYPE_HOST_CALL)[0].signal_count,
             1u);
 }

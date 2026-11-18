@@ -156,8 +156,21 @@ iree_status_t iree_hal_file_transfer_iterator_initialize(
                             "live file transfer count exceeds record capacity");
   }
   *out_iterator = (iree_hal_file_transfer_iterator_t){
-      .batch = batch, .records = records, .count = (iree_host_size_t)count};
+      .batch = batch,
+      .records = records,
+      .count = (iree_host_size_t)count,
+      .acquired = records || batch->transfers.type ==
+                                 IREE_HAL_FILE_TRANSFER_LIST_TYPE_HOST
+                      ? (iree_host_size_t)count
+                      : 0};
   return iree_ok_status();
+}
+
+void iree_hal_file_transfer_iterator_acquire(
+    iree_hal_file_transfer_iterator_t* iterator,
+    const iree_hal_file_transfer_record_t* records, iree_host_size_t count) {
+  iterator->records = records;
+  iterator->acquired = iterator->index + count;
 }
 
 // Validation proves the addressed span fits both windows. When strides equal
@@ -192,11 +205,11 @@ iree_status_t iree_hal_file_transfer_iterator_peek(
     iree_hal_file_transfer_range_t* out_range) {
   out_range->length = 0;
   iree_status_t status = iree_ok_status();
-  while (!iterator->current.row_length && iterator->index < iterator->count &&
-         iree_status_is_ok(status)) {
+  while (!iterator->current.row_length &&
+         iterator->index < iterator->acquired && iree_status_is_ok(status)) {
     if (iterator->records) {
-      status = iree_hal_file_transfer_record_decode(
-          &iterator->records[iterator->index], &iterator->current);
+      status = iree_hal_file_transfer_record_decode(iterator->records++,
+                                                    &iterator->current);
       if (iree_status_is_ok(status)) {
         status = iree_hal_file_transfer_validate(iterator->batch->files,
                                                  iterator->batch->buffers,

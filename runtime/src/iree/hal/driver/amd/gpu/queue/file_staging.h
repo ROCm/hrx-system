@@ -89,6 +89,10 @@ iree_status_t iree_hal_amd_gpu_file_staging_allocate(
 iree_status_t iree_hal_amd_gpu_file_staging_prepare(
     iree_hal_amd_gpu_file_staging_t* staging, uint64_t alignment);
 
+// Maximum bytes in one physical loan, established at device construction.
+uint32_t iree_hal_amd_gpu_file_staging_capacity(
+    const iree_hal_amd_gpu_file_staging_t* staging);
+
 // Number of useful concurrent lanes for a nonempty byte extent. This bounds
 // caller metadata independently of file size and does not acquire storage.
 uint32_t iree_hal_amd_gpu_file_staging_concurrency(
