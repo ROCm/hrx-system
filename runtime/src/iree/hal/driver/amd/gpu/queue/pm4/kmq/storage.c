@@ -37,18 +37,9 @@ iree_status_t iree_hal_amd_gpu_pm4_kmq_storage_allocate(
       context->gpu->kernel_queue_create(context->device, &create_info,
                                         &storage->queue),
       "gpu.kernel_queue_create"));
-  amdf_kernel_queue_info_t info = {
-      .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
-      .structure_size = sizeof(info),
-  };
-  IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
-      context->api->kernel_queue_query_info(storage->queue, &info),
-      "kernel_queue_query_info"));
-  if (!iree_any_bit_set(info.notification_types,
-                        UINT64_C(1) << context->kernel_notification.type)) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "PM4 KERNEL queue has no compatible native wake");
-  }
+  amdf_kernel_queue_info_t info;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_context_query_kernel_queue(
+      context, storage->queue, &info, &storage->progress));
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_backing_allocate(
       context, memory_options, command_capacity, 64, &storage->memory,
       &storage->address));

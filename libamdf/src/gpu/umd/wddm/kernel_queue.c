@@ -209,6 +209,15 @@ amdf_status_t amdf_gpu_wddm_kernel_queue_update_memory(
   return status;
 }
 
+const volatile uint64_t* amdf_gpu_umd_kernel_queue_progress_address(
+    const amdf_gpu_umd_kernel_queue_t* queue) {
+  if (!queue->native ||
+      !queue->device->memory_capabilities.cache_coherent_memory_supported) {
+    return NULL;
+  }
+  return queue->progress_fence_pointer;
+}
+
 uint64_t amdf_gpu_umd_kernel_queue_query_progress(
     const amdf_gpu_umd_kernel_queue_t* queue) {
   return amdf_kmt_device_status_query_fence_progress(

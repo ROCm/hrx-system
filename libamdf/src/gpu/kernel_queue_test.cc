@@ -27,6 +27,8 @@
 struct amdf_gpu_umd_kernel_queue_t {
   // Native completion frontier independent of software retirement.
   std::atomic<uint64_t> progress{0};
+  // Host-visible hint independent of the point confirmed by checked status.
+  uint64_t observation = 0;
   // Greatest completion point accepted by the native dependency.
   uint64_t submitted = 0;
   // Outcome of the next native publication attempt.
@@ -218,9 +220,30 @@ TEST_P(GpuKernelQueueTest,
   ASSERT_EQ(point, 1u);
   EXPECT_EQ(amdf_kernel_queue_destroy(queue),
             amdf_make_api_status(AMDF_STATUS_CODE_BUSY));
+  amdf_kernel_queue_progress_observation_t observation = {
+      .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_PROGRESS_OBSERVATION,
+      .structure_size = sizeof(observation),
+  };
+  amdf_kernel_queue_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
+      .structure_size = sizeof(info),
+      .next = &observation,
+  };
+  ASSERT_EQ(amdf_kernel_queue_query_info(queue, &info), AMDF_STATUS_OK);
+  ASSERT_NE(
+      info.capabilities & AMDF_KERNEL_QUEUE_CAPABILITY_PROGRESS_OBSERVATION,
+      0u);
+  ASSERT_EQ(observation.address, &device.native.queue.observation);
+  device.native.queue.observation = UINT64_MAX;
+  EXPECT_EQ(Query().retired_submission, 0u);
   EXPECT_EQ(amdf_gpu_kernel_queue_inactivate(nullptr),
             amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT));
   ASSERT_EQ(amdf_gpu_kernel_queue_inactivate(queue), AMDF_STATUS_OK);
+  ASSERT_EQ(amdf_kernel_queue_query_info(queue, &info), AMDF_STATUS_OK);
+  EXPECT_EQ(
+      info.capabilities & AMDF_KERNEL_QUEUE_CAPABILITY_PROGRESS_OBSERVATION,
+      0u);
+  EXPECT_EQ(observation.address, nullptr);
   auto status = Query();
   EXPECT_EQ(status.retired_submission, 0u);
   EXPECT_EQ(status.terminal_status,
@@ -769,6 +792,8 @@ const amdf_gpu_umd_api_t* amdf_gpu_device_get_umd_api(const amdf_device_t*) {
       .kernel_queue_request_notification =
           amdf_gpu_umd_kernel_queue_request_notification,
       .kernel_queue_submit = amdf_gpu_umd_kernel_queue_submit,
+      .kernel_queue_progress_address =
+          amdf_gpu_umd_kernel_queue_progress_address,
       .kernel_queue_query_progress = amdf_gpu_umd_kernel_queue_query_progress,
       .kernel_queue_query_terminal_status =
           amdf_gpu_umd_kernel_queue_query_terminal_status,
@@ -808,6 +833,10 @@ amdf_status_t amdf_gpu_umd_kernel_queue_submit(
     queue->publication_phase = Phase::kOpen;
   }
   return AMDF_STATUS_OK;
+}
+const volatile uint64_t* amdf_gpu_umd_kernel_queue_progress_address(
+    const amdf_gpu_umd_kernel_queue_t* queue) {
+  return &queue->observation;
 }
 uint64_t amdf_gpu_umd_kernel_queue_query_progress(
     const amdf_gpu_umd_kernel_queue_t* queue) {

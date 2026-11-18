@@ -227,6 +227,8 @@ enum amdf_structure_type_e {
   AMDF_STRUCTURE_TYPE_MEMORY_PAIR_ATOMICS = 29,
   /// Live queue-family placement and host-publication requirements.
   AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_PLACEMENT_INFO = 30,
+  /// An optional CPU observation of native kernel-queue progress.
+  AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_PROGRESS_OBSERVATION = 31,
 };
 
 /// Identifier of an optional API table compiled into the providing library.

@@ -430,7 +430,8 @@ typedef struct amdf_api_t {
   amdf_status_t(AMDF_CALL* memory_destroy)(
       amdf_memory_t* memory, amdf_memory_release_info_t* out_release_info);
 
-  /// Copies immutable properties cached when `queue` was created.
+  /// Copies cached properties of `queue`. Exclusive native inactivation
+  /// withdraws the progress observation before it releases the mapping.
   ///
   /// The operation is thread-safe and performs no system call, allocation,
   /// native progress query, retry, sleep, or device wait. No output is modified

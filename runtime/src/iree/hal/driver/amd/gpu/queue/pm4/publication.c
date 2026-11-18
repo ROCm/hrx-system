@@ -143,10 +143,8 @@ iree_hal_amd_gpu_pm4_publish_accepted(
                           iree_memory_order_release);
   }
   if (queue->kernel) {
-    if (iree_atomic_exchange(&queue->kernel->wake_required, 0,
-                             iree_memory_order_acq_rel)) {
-      iree_async_event_native_set(&queue->context->kernel_event);
-    }
+    iree_hal_amd_gpu_completion_notify_publication(
+        &queue->kernel->wake_required, &queue->context->kernel_event);
   } else {
     const uint64_t published_words = queue->producer.ring.reserved_words;
     if (queue->producer.ring.host_publish_executor !=

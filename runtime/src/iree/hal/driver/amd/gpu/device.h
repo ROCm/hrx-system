@@ -37,8 +37,8 @@ typedef struct iree_hal_amd_gpu_device_options_t {
   // leaves placement unspecified; GPU memory nodes are not CPU NUMA nodes.
   uint32_t host_numa_node;
   // Active observation budget after real completion progress, in nanoseconds.
-  // Zero uses native events immediately. Applies only to coherent USER queue
-  // records; KERNEL queues retain native event/status observation.
+  // Zero uses native events immediately. USER queue completion records and
+  // cacheable KERNEL queue progress fences can support active observation.
   // Device creation with completion_wait_flags=NONE disables this budget.
   uint32_t completion_spin_ns;
   // Per-call synchronous code-publication budget in milliseconds. The loader

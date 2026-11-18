@@ -344,6 +344,38 @@ static iree_status_t iree_hal_amd_gpu_context_open(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_amd_gpu_context_query_kernel_queue(
+    const iree_hal_amd_gpu_context_t* context, amdf_kernel_queue_t* queue,
+    amdf_kernel_queue_info_t* out_info,
+    const iree_atomic_int64_t** out_progress) {
+  *out_progress = NULL;
+  *out_info =
+      (amdf_kernel_queue_info_t){.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
+                                 .structure_size = sizeof(*out_info)};
+  IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+      context->api->kernel_queue_query_info(queue, out_info),
+      "kernel_queue_query_info"));
+  if (!iree_any_bit_set(out_info->notification_types,
+                        UINT64_C(1) << context->kernel_notification.type)) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "GPU KERNEL queue has no compatible native wake");
+  }
+  if (out_info->capabilities &
+      AMDF_KERNEL_QUEUE_CAPABILITY_PROGRESS_OBSERVATION) {
+    amdf_kernel_queue_progress_observation_t observation = {
+        .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_PROGRESS_OBSERVATION,
+        .structure_size = sizeof(observation)};
+    out_info->next = &observation;
+    const amdf_status_t status =
+        context->api->kernel_queue_query_info(queue, out_info);
+    out_info->next = NULL;
+    IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+        status, "kernel_queue_query_info(progress observation)"));
+    *out_progress = (const iree_atomic_int64_t*)observation.address;
+  }
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_amd_gpu_context_prepare_completion(
     iree_hal_amd_gpu_context_t* context,
     amdf_queue_publication_modes_t publication_mode) {

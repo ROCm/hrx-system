@@ -186,6 +186,8 @@ enum amdf_kernel_queue_capability_bits_e {
   AMDF_KERNEL_QUEUE_CAPABILITY_VIRTUAL_MEMORY = UINT64_C(1) << 1,
   /// Native external wait and signal primitives can be attached.
   AMDF_KERNEL_QUEUE_CAPABILITY_EXTERNAL_SYNCHRONIZATION = UINT64_C(1) << 2,
+  /// Queue info can supply a cacheable native progress observation.
+  AMDF_KERNEL_QUEUE_CAPABILITY_PROGRESS_OBSERVATION = UINT64_C(1) << 3,
 };
 
 /// Format identity of an optional queue metadata sidecar.
@@ -415,13 +417,31 @@ typedef struct amdf_user_queue_status_t {
   amdf_status_t terminal_status;
 } amdf_user_queue_status_t;
 
-/// Immutable properties of one kernel-mediated queue.
+/// Optional output of kernel_queue_query_info. The observed word is a wake
+/// hint. Use kernel_queue_refresh_status or kernel_queue_wait to establish
+/// retirement or failure.
+typedef struct amdf_kernel_queue_progress_observation_t {
+  /// Must be `AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_PROGRESS_OBSERVATION`.
+  amdf_structure_type_t type;
+  /// Must be at least `sizeof(amdf_kernel_queue_progress_observation_t)`.
+  uint32_t structure_size;
+  /// Reserved for future output extensions.
+  void* next;
+  /// Read-only, naturally aligned, CPU-cacheable native submission frontier,
+  /// or NULL when unavailable. An acquire load differing from the last
+  /// checked retired_submission warrants refreshing status, including on reset.
+  /// All readers must join before queue destruction or exclusive inactivation
+  /// begins, even if inactivation subsequently reports an error.
+  const volatile uint64_t* address;
+} amdf_kernel_queue_progress_observation_t;
+
+/// Properties of one live kernel-mediated queue.
 typedef struct amdf_kernel_queue_info_t {
   /// Must be `AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO`.
   amdf_structure_type_t type;
   /// Must be at least `sizeof(amdf_kernel_queue_info_t)`.
   uint32_t structure_size;
-  /// Optional output extension chain. No extensions are currently defined.
+  /// Optional amdf_kernel_queue_progress_observation_t output when advertised.
   void* next;
   /// Identity of the materialized device owning this queue.
   amdf_device_id_t device_id;

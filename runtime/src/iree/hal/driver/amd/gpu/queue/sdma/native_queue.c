@@ -131,6 +131,10 @@ struct iree_hal_amd_gpu_sdma_native_queue_t {
   struct {
     // Owned native queue, absent for USER transport.
     amdf_kernel_queue_t* queue;
+    // Idle observer requests one host wake when new work becomes observable.
+    iree_atomic_int32_t wake_required;
+    // Optional native progress word borrowed until the observer joins.
+    const iree_atomic_int64_t* progress;
     // Last accepted opaque submission point, joined during cold teardown.
     uint64_t last_submission;
     // Native command admission limit, bounded by the local record window.
@@ -309,6 +313,10 @@ static bool iree_hal_amd_gpu_sdma_native_queue_try_publish(
     }
     iree_atomic_store(&queue->published, (int64_t)(published + 1),
                       iree_memory_order_release);
+    if (queue->kernel.progress) {
+      iree_hal_amd_gpu_completion_notify_publication(
+          &queue->kernel.wake_required, &queue->context->kernel_event);
+    }
     status = queue->context->api->kernel_queue_request_notification(
         queue->kernel.queue, point, &queue->context->kernel_notification);
     if (!amdf_status_is_ok(status)) {
@@ -534,9 +542,15 @@ static bool iree_hal_amd_gpu_sdma_native_queue_scan(
   for (uint32_t i = 0; i < 8 && retired < published; ++i) {
     const iree_hal_amd_gpu_sdma_record_t record =
         queue->records[retired & (IREE_HAL_AMD_GPU_SDMA_CAPACITY - 1)];
-    if (queue->kernel.queue
-            ? record.point > native_point
-            : (int32_t)(completed - (uint32_t)(retired + 1)) < 0) {
+    if (queue->kernel.queue && record.point > native_point) {
+      *out_wait = (iree_hal_amd_gpu_completion_wait_t){
+          .address = queue->kernel.progress,
+          .value = (int64_t)native_point,
+          .is_64_bit = true};
+      break;
+    }
+    if (!queue->kernel.queue &&
+        (int32_t)(completed - (uint32_t)(retired + 1)) < 0) {
       break;
     }
     iree_hal_amd_gpu_completion_scope_unlock(scope);
@@ -561,27 +575,35 @@ static bool iree_hal_amd_gpu_sdma_native_queue_scan(
   return progress;
 }
 
+static bool iree_hal_amd_gpu_sdma_await_publication(
+    iree_hal_amd_gpu_sdma_native_queue_t* queue,
+    iree_hal_amd_gpu_completion_scope_t* scope, int64_t published,
+    iree_hal_amd_gpu_completion_wait_t* out_wait) {
+  // Native completion events arrive after execution. Wake an active observer
+  // on the first publication so it can sample progress while work is pending.
+  iree_atomic_int32_t* wake_required =
+      queue->kernel.progress && scope->completion->spin_ns
+          ? &queue->kernel.wake_required
+          : NULL;
+  return iree_hal_amd_gpu_completion_prepare_publication_wait(
+      &queue->published, published, wake_required, out_wait);
+}
+
 static bool iree_hal_amd_gpu_sdma_native_queue_poll(
     void* user_data, amdf_status_t wait_status,
     iree_hal_amd_gpu_completion_scope_t* scope,
     iree_hal_amd_gpu_completion_wait_t* out_wait,
     iree_hal_amd_gpu_completion_copy_t* out_copy) {
   iree_hal_amd_gpu_sdma_native_queue_t* queue = user_data;
-  // Other engines share the observer. Passive publication observation notices
-  // this queue becoming active without keeping an idle device awake or adding
-  // a publisher-side wake operation.
+  // Other engines share the observer. An idle source only contributes its
+  // publication hint while another engine keeps the worker active.
   const uint64_t published =
       (uint64_t)iree_atomic_load(&queue->published, iree_memory_order_acquire);
   if (amdf_status_is_ok(wait_status) &&
       published == (uint64_t)iree_atomic_load(&queue->retired,
                                               iree_memory_order_relaxed)) {
-    if (!queue->kernel.queue) {
-      *out_wait =
-          (iree_hal_amd_gpu_completion_wait_t){.address = &queue->published,
-                                               .value = (int64_t)published,
-                                               .is_64_bit = true};
-    }
-    return false;
+    return iree_hal_amd_gpu_sdma_await_publication(
+        queue, scope, (int64_t)published, out_wait);
   }
   if (!queue->kernel.queue && amdf_status_is_ok(wait_status) &&
       !iree_atomic_load(&queue->failure, iree_memory_order_acquire)) {
@@ -606,24 +628,18 @@ static bool iree_hal_amd_gpu_sdma_native_queue_poll(
     iree_hal_amd_gpu_publication_notify(queue->publication,
                                         queue->publication_ordinal);
   }
-  out_wait->value =
-      (int32_t)iree_atomic_load(&queue->retired, iree_memory_order_relaxed);
   const int64_t retired =
       iree_atomic_load(&queue->retired, iree_memory_order_relaxed);
   const int64_t next_published =
       iree_atomic_load(&queue->published, iree_memory_order_acquire);
-  // KERNEL queues have no coherent completion word. The pending bit still
-  // requests bounded native-status rechecks until their accepted prefix
-  // retires.
+  if (!queue->kernel.queue) {
+    out_wait->value = (int32_t)retired;
+  }
   out_wait->pending = retired != next_published;
-  if (retired == next_published) {
-    *out_wait = (iree_hal_amd_gpu_completion_wait_t){0};
-    if (!queue->kernel.queue) {
-      *out_wait =
-          (iree_hal_amd_gpu_completion_wait_t){.address = &queue->published,
-                                               .value = next_published,
-                                               .is_64_bit = true};
-    }
+  if (retired == next_published &&
+      iree_hal_amd_gpu_sdma_await_publication(queue, scope, next_published,
+                                              out_wait)) {
+    return true;
   }
   return progress;
 }
@@ -828,22 +844,16 @@ iree_status_t iree_hal_amd_gpu_sdma_native_queue_allocate(
           context->gpu->kernel_queue_create(context->device, &create,
                                             &queue->kernel.queue),
           "gpu.kernel_queue_create(SDMA)");
-      amdf_kernel_queue_info_t info = {
-          .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
-          .structure_size = sizeof(info)};
       if (iree_status_is_ok(status)) {
-        status = IREE_HAL_AMD_STATUS_FROM_AMDF(
-            context->api->kernel_queue_query_info(queue->kernel.queue, &info),
-            "kernel_queue_query_info");
+        amdf_kernel_queue_info_t info;
+        status = iree_hal_amd_gpu_context_query_kernel_queue(
+            context, queue->kernel.queue, &info, &queue->kernel.progress);
+        if (iree_status_is_ok(status)) {
+          queue->kernel.capacity =
+              iree_min(IREE_HAL_AMD_GPU_SDMA_CAPACITY,
+                       info.maximum_pending_submission_count);
+        }
       }
-      if (iree_status_is_ok(status) &&
-          !(info.notification_types &
-            (UINT64_C(1) << context->kernel_notification.type))) {
-        status = iree_make_status(IREE_STATUS_UNAVAILABLE,
-                                  "SDMA KERNEL queue has no compatible wake");
-      }
-      queue->kernel.capacity = iree_min(IREE_HAL_AMD_GPU_SDMA_CAPACITY,
-                                        info.maximum_pending_submission_count);
       queue->commands = (void*)queue->memory.contents.data;
     } else {
       const amdf_gpu_user_queue_create_info_t create = {

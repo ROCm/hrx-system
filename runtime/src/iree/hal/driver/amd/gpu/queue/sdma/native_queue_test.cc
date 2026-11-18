@@ -141,8 +141,15 @@ class QueueTest : public ::testing::Test {
     };
     api_.kernel_queue_query_info = [](amdf_kernel_queue_t* queue,
                                       amdf_kernel_queue_info_t* info) {
-      info->maximum_pending_submission_count =
-          reinterpret_cast<QueueTest*>(queue)->capacity_;
+      auto* self = reinterpret_cast<QueueTest*>(queue);
+      info->maximum_pending_submission_count = self->capacity_;
+      if (self->progress_observable_) {
+        info->capabilities = AMDF_KERNEL_QUEUE_CAPABILITY_PROGRESS_OBSERVATION;
+        if (info->next) {
+          static_cast<amdf_kernel_queue_progress_observation_t*>(info->next)
+              ->address = &self->retired_;
+        }
+      }
       info->notification_types = AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD |
                                  AMDF_NATIVE_EVENT_TYPE_BIT_WIN32_EVENT;
       return AMDF_STATUS_OK;
@@ -313,11 +320,11 @@ class QueueTest : public ::testing::Test {
   }
 
   iree_hal_amd_gpu_completion_wait_t Poll(
-      amdf_status_t status = AMDF_STATUS_OK,
+      amdf_status_t status = AMDF_STATUS_OK, iree_duration_t spin_ns = 0,
       iree_hal_amd_gpu_completion_copy_t* out_copy = nullptr) {
     auto source = iree_hal_amd_gpu_sdma_native_queue_completion_source(queue_);
     iree_hal_amd_gpu_completion_wait_t wait = {};
-    iree_hal_amd_gpu_completion_t completion = {};
+    iree_hal_amd_gpu_completion_t completion = {.spin_ns = spin_ns};
     iree_slim_mutex_initialize(&completion.drain_mutex);
     auto poll = [&](amdf_status_t status) {
       wait = {};
@@ -368,6 +375,8 @@ class QueueTest : public ::testing::Test {
   uint64_t submitted_ = 0;
   // Explicitly checked native retirement frontier.
   uint64_t retired_ = 0;
+  // Whether the native dependency supplies a CPU-cacheable observation.
+  bool progress_observable_ = false;
   // Result of the next native submission dependency call.
   amdf_status_t submit_status_ = AMDF_STATUS_OK;
   // Result of native wake registration.
@@ -424,11 +433,39 @@ TEST_F(QueueTest,
   EXPECT_EQ(accepted.notifications, 1u);
 }
 
+TEST_F(QueueTest, ActiveKernelObservationWakesOnceWhenIdleWorkIsPublished) {
+  progress_observable_ = true;
+  ASSERT_NO_FATAL_FAILURE(Allocate());
+  std::array<Submission, 3> copies;
+  auto consume_wake = [&] {
+    return iree_async_event_native_wait(&context_.kernel_event,
+                                        iree_immediate_timeout());
+  };
+  // Blocking observation relies on the provider's completion notification.
+  Poll();
+  iree_hal_amd_gpu_sdma_native_queue_submit(queue_, &copies[0].operation);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEADLINE_EXCEEDED, consume_wake());
+  retired_ = 1;
+  Poll(AMDF_STATUS_OK, 1000);
+  iree_hal_amd_gpu_sdma_native_queue_submit(queue_, &copies[1].operation);
+  IREE_ASSERT_OK(consume_wake());
+  EXPECT_EQ(copies[1].notifications, 0u);
+  iree_hal_amd_gpu_sdma_native_queue_submit(queue_, &copies[2].operation);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEADLINE_EXCEEDED, consume_wake());
+  retired_ = 3;
+  Poll();
+  for (const auto& copy : copies) {
+    EXPECT_EQ(copy.notifications, 1u);
+  }
+}
+
 TEST_F(QueueTest, KernelRetirementOwnsCapacityAndCommandBytes) {
   capacity_ = 2;
+  progress_observable_ = true;
   ASSERT_NO_FATAL_FAILURE(Allocate());
   const auto idle = Poll();
-  EXPECT_EQ(idle.address, nullptr);
+  EXPECT_NE(idle.address, nullptr);
+  EXPECT_TRUE(idle.is_64_bit);
   EXPECT_FALSE(idle.pending);
   std::array<Submission, 3> copies;
   for (auto& copy : copies) {
@@ -439,13 +476,17 @@ TEST_F(QueueTest, KernelRetirementOwnsCapacityAndCommandBytes) {
   EXPECT_EQ(copies[1].acceptances, 1u);
   EXPECT_EQ(copies[2].acceptances, 0u);
   const auto pending = Poll();
-  EXPECT_EQ(pending.address, nullptr);
+  EXPECT_EQ(pending.address, &retired_);
+  EXPECT_TRUE(pending.is_64_bit);
+  EXPECT_EQ(pending.value, 0);
   EXPECT_TRUE(pending.pending);
   for (auto& copy : copies) {
     EXPECT_EQ(copy.notifications, 0u);
   }
   retired_ = 1;
-  Poll();
+  const auto next = Poll();
+  EXPECT_EQ(next.address, &retired_);
+  EXPECT_EQ(next.value, 1);
   EXPECT_EQ(copies[0].notifications, 1u);
   EXPECT_EQ(copies[0].retirement, IREE_HAL_AMD_GPU_SDMA_RETIRED);
   EXPECT_EQ(copies[1].notifications, 0u);
@@ -468,6 +509,9 @@ TEST_F(QueueTest, MetadataProgressesPastExhaustedNativeCapacity) {
     iree_hal_amd_gpu_sdma_native_queue_submit(queue_, &copy.operation);
   }
   EXPECT_EQ(submitted_, 2u);
+  const auto pending = Poll();
+  EXPECT_TRUE(pending.pending);
+  EXPECT_EQ(pending.address, nullptr);
   bool metadata_processed = false;
   iree_hal_amd_gpu_sdma_metadata_t metadata = {
       .process =
@@ -1023,7 +1067,7 @@ TEST_F(QueueTest, NativeCompletionJoinsPayloadAndWorkerCopyBeforeRetirement) {
   Poll();  // A helping waiter cannot take the bulk-copy action.
   EXPECT_FALSE(payload.copied);
   iree_hal_amd_gpu_completion_copy_t copy = {};
-  Poll(AMDF_STATUS_OK, &copy);
+  Poll(AMDF_STATUS_OK, 0, &copy);
   ASSERT_NE(copy.fn, nullptr);
   EXPECT_EQ(payload.span.notifications, 0u);
   EXPECT_FALSE(iree_hal_amd_gpu_sdma_native_queue_is_idle(queue_));

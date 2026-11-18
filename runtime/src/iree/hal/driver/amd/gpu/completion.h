@@ -75,6 +75,36 @@ typedef struct iree_hal_amd_gpu_completion_wait_t {
   bool pending;
 } iree_hal_amd_gpu_completion_wait_t;
 
+// Installs a passive publication hint for an idle source. If wake_required is
+// supplied, enrolls the parked worker before rechecking the publication count.
+// Returns true when a racing publication already requires another drain.
+static inline bool iree_hal_amd_gpu_completion_prepare_publication_wait(
+    const iree_atomic_int64_t* published, int64_t observed,
+    iree_atomic_int32_t* wake_required,
+    iree_hal_amd_gpu_completion_wait_t* out_wait) {
+  *out_wait = (iree_hal_amd_gpu_completion_wait_t){
+      .address = published, .value = observed, .is_64_bit = true};
+  if (!wake_required) {
+    return false;
+  }
+  iree_atomic_exchange(wake_required, 1, iree_memory_order_acq_rel);
+  if (iree_atomic_load(published, iree_memory_order_acquire) == observed) {
+    return false;
+  }
+  iree_atomic_exchange(wake_required, 0, iree_memory_order_acq_rel);
+  return true;
+}
+
+// Called after publishing the new count. Only the first publication following
+// enrollment signals the native event.
+static inline void iree_hal_amd_gpu_completion_notify_publication(
+    iree_atomic_int32_t* wake_required,
+    const iree_async_event_native_t* event) {
+  if (iree_atomic_exchange(wake_required, 0, iree_memory_order_acq_rel)) {
+    iree_async_event_native_set(event);
+  }
+}
+
 // One bounded CPU copy of already-retired staging bytes. Only the completion
 // worker executes this outside the drain lock. Its source retains the staging
 // and destination until return; helpers may retire other sources meanwhile.

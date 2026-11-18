@@ -49,6 +49,12 @@ amdf_status_t amdf_gpu_umd_kernel_queue_submit(
   return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
 }
 
+const volatile uint64_t* amdf_gpu_umd_kernel_queue_progress_address(
+    const amdf_gpu_umd_kernel_queue_t* queue) {
+  (void)queue;
+  return NULL;
+}
+
 uint64_t amdf_gpu_umd_kernel_queue_query_progress(
     const amdf_gpu_umd_kernel_queue_t* queue) {
   (void)queue;
