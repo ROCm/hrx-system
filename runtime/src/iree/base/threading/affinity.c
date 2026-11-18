@@ -19,6 +19,10 @@
 #include <sched.h>
 
 #include "iree/base/internal/sysfs.h"
+#elif defined(IREE_PLATFORM_WINDOWS)
+// clang-format off
+#include <windows.h>
+// clang-format on
 #endif
 
 iree_host_size_t iree_thread_affinity_set_find_first_set(
@@ -183,3 +187,51 @@ iree_status_t iree_thread_affinity_resolve_linux(
 }
 
 #endif  // IREE_PLATFORM_ANDROID || IREE_PLATFORM_LINUX
+
+iree_status_t iree_thread_affinity_query_node(
+    uint32_t node_id, const iree_thread_affinity_set_t* processor_set,
+    iree_thread_affinity_set_t* out_processor_set) {
+  memset(out_processor_set, 0, sizeof(*out_processor_set));
+#if defined(IREE_PLATFORM_ANDROID) || defined(IREE_PLATFORM_LINUX)
+  const iree_host_size_t native_size =
+      CPU_ALLOC_SIZE(IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT);
+  cpu_set_t* native_set = iree_alloca(native_size);
+  CPU_ZERO_S(native_size, native_set);
+  IREE_RETURN_IF_ERROR(iree_thread_make_cpu_set_from_node_id(
+      node_id, processor_set, native_size, native_set));
+  iree_bitmap_t bitmap = iree_thread_affinity_set_bitmap(out_processor_set);
+  for (iree_host_size_t cpu = 0; cpu < bitmap.bit_count; ++cpu) {
+    if (CPU_ISSET_S(cpu, native_size, native_set)) {
+      iree_bitmap_set(bitmap, cpu);
+    }
+  }
+  return iree_ok_status();
+#elif defined(IREE_PLATFORM_WINDOWS)
+  if (node_id > UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "NUMA node %u exceeds Windows node IDs", node_id);
+  }
+  GROUP_AFFINITY native = {0};
+  if (!GetNumaNodeProcessorMaskEx((USHORT)node_id, &native)) {
+    const DWORD error = GetLastError();
+    return iree_make_status(iree_status_code_from_win32_error(error),
+                            "cannot resolve NUMA node %u CPUs: %lu", node_id,
+                            error);
+  }
+  if (native.Group >= IREE_ARRAYSIZE(out_processor_set->words)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "NUMA node %u CPU mask exceeds %u CPUs", node_id,
+                            IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT);
+  }
+  out_processor_set->words[native.Group] = native.Mask;
+  if (processor_set) {
+    out_processor_set->words[native.Group] &=
+        processor_set->words[native.Group];
+  }
+  return iree_ok_status();
+#else
+  return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                          "NUMA processor queries are unsupported on this "
+                          "platform");
+#endif
+}

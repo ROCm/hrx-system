@@ -65,6 +65,31 @@ TEST(ThreadAffinityTest, IsUnspecifiedFalseWhenIdAssigned) {
   EXPECT_FALSE(iree_thread_affinity_is_unspecified(affinity));
 }
 
+TEST(ThreadAffinityTest, NodeQueryIntersectsProcessorBudget) {
+  const uint32_t node_id = iree_numa_node_for_current_thread();
+  iree_thread_affinity_set_t processors = {};
+  iree_status_t status =
+      iree_thread_affinity_query_node(node_id, nullptr, &processors);
+  if (iree_status_is_unavailable(status)) {
+    iree_status_free(status);
+    GTEST_SKIP() << "native node CPU queries unavailable";
+  }
+  IREE_ASSERT_OK(status);
+  const auto cpu = iree_thread_affinity_set_find_first_set(&processors, 0);
+  ASSERT_LT(cpu, IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT);
+
+  iree_thread_affinity_set_t budget = {};
+  iree_bitmap_set(iree_thread_affinity_set_bitmap(&budget), cpu);
+  IREE_ASSERT_OK(
+      iree_thread_affinity_query_node(node_id, &budget, &processors));
+  EXPECT_EQ(std::memcmp(&budget, &processors, sizeof(budget)), 0);
+
+  budget = {};
+  IREE_ASSERT_OK(
+      iree_thread_affinity_query_node(node_id, &budget, &processors));
+  EXPECT_TRUE(iree_thread_affinity_set_is_empty(&processors));
+}
+
 //==============================================================================
 // iree_thread_t
 //==============================================================================

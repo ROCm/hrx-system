@@ -51,7 +51,9 @@ typedef struct loom_runtime_compiler_options_t {
 } loom_runtime_compiler_options_t;
 
 // Creates up to worker_count physical-core workers with compiler-sized stacks.
-// Worker count must be positive. Proactors are created lazily per NUMA node.
+// Worker count must be positive. Proactors are created lazily per NUMA node
+// with CPUs in the host's processor budget. Physical memory topology remains
+// independent of this execution-resource selection.
 // The host always owns a task driver backed by this exact executor; that
 // runtime capability is independent of optional native x86 compiler support.
 // compiler_options may be NULL when the host will never compile model sources.

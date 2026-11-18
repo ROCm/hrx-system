@@ -248,18 +248,38 @@ iree_status_t loom_runtime_host_create(
 #if !IREE_PLATFORM_WASM
     options.runner.create = loom_runtime_host_proactor_thread_create;
 #endif  // !IREE_PLATFORM_WASM
-    // Pool slots retain actual node identities, which may be sparse. Device
-    // placement resolves these identities when acquiring its I/O service.
+    // Pool slots retain actual node identities with CPUs in the host budget.
+    // Device placement can prefer a local service only if this host can run it.
     iree_bitmap_t online_nodes = iree_numa_online_nodes();
     uint32_t node_ids[IREE_NUMA_MAX_NODES];
     iree_host_size_t node_count = 0;
-    for (uint32_t node_id = 0; node_id < online_nodes.bit_count; ++node_id) {
-      if (iree_bitmap_test(online_nodes, node_id)) {
+    for (uint32_t node_id = 0;
+         node_id < online_nodes.bit_count && iree_status_is_ok(status);
+         ++node_id) {
+      if (!iree_bitmap_test(online_nodes, node_id)) {
+        continue;
+      }
+      bool eligible = true;
+      if (processor_set) {
+        iree_thread_affinity_set_t node_processors;
+        status = iree_thread_affinity_query_node(node_id, processor_set,
+                                                 &node_processors);
+        eligible = iree_status_is_ok(status) &&
+                   !iree_thread_affinity_set_is_empty(&node_processors);
+      }
+      if (eligible) {
         node_ids[node_count++] = node_id;
       }
     }
-    status = iree_async_proactor_pool_create(
-        node_count, node_ids, options, host_allocator, &host->proactor_pool);
+    if (iree_status_is_ok(status) && !node_count) {
+      status = iree_make_status(
+          IREE_STATUS_UNAVAILABLE,
+          "host CPU budget contains no online NUMA service node");
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_async_proactor_pool_create(
+          node_count, node_ids, options, host_allocator, &host->proactor_pool);
+    }
   }
   if (iree_status_is_ok(status)) {
     *out_host = host;
