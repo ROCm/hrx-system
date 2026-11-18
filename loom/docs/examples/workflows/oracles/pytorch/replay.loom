@@ -1,0 +1,50 @@
+// A small finite-input ReLU slice exercises capture and replay. Its size is a
+// protocol example, not a production performance workload.
+func.def @relu(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<8xf32>
+  %destination = buffer.view %output[%origin] : buffer -> view<8xf32>
+  %value = vector.load %source[0] : view<8xf32> -> vector<8xf32>
+  %minimum = vector.splatf 0.0 : vector<8xf32>
+  %negative = vector.cmpf olt, %value, %minimum : vector<8xf32> -> vector<8xi1>
+  %result = vector.select %negative, %minimum, %value : vector<8xf32>
+  vector.store %result, %destination[0] : vector<8xf32>, view<8xf32>
+  func.return
+}
+
+// --8<-- [start:scenario]
+check.scenario public @relu_capture {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.file.read.npy path("captures/relu/call-0/input.npy") : tensor<2x4xf32>
+    %golden = check.file.read.npy path("captures/relu/call-0/output.npy") : tensor<2x4xf32>
+    %output = check.generate.fill value(-123.0) : tensor<2x4xf32>
+    check.compare<@relu>(%input, %output) : (tensor<2x4xf32>, tensor<2x4xf32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<2x4xf32>
+      check.expect.bitwise actual(%output) expected(%golden) : tensor<2x4xf32>
+      check.file.write.npy value(%output) path("output.npy") mode(always) : tensor<2x4xf32>
+    }
+  }
+  check.return
+}
+
+check.benchmark<@relu_capture> @captured_relu
+
+// --8<-- [end:scenario]
+// --8<-- [start:bf16]
+check.case public @bf16_carrier {
+  %bits = check.file.read.npy path("captures/bf16/call-0/output.npy") : tensor<2x4xi16>
+  %value = check.tensor.view %bits offset(0) : tensor<2x4xi16> -> tensor<2x4xbf16>
+  %expected = check.file.read.npy path("captures/relu/call-0/output.npy") : tensor<2x4xf32>
+  check.expect.approximate actual(%value) expected(%expected) atol(0.0) rtol(0.0) nan(same) : tensor<2x4xbf16>, tensor<2x4xf32>
+  check.return
+}
+
+// --8<-- [end:bf16]
+check.case public @replay_outputs {
+  %actual = check.file.read.npy path("outputs/scenario-relu_capture/configuration-0/trial-0-0/actual/output.npy") : tensor<2x4xf32>
+  %oracle = check.file.read.npy path("outputs/scenario-relu_capture/configuration-0/trial-0-0/expected/output.npy") : tensor<2x4xf32>
+  %golden = check.file.read.npy path("captures/relu/call-0/output.npy") : tensor<2x4xf32>
+  check.expect.bitwise actual(%actual) expected(%golden) : tensor<2x4xf32>
+  check.expect.bitwise actual(%oracle) expected(%golden) : tensor<2x4xf32>
+  check.return
+}

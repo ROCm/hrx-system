@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("@loom_oracle_test_pip//:requirements.bzl", "requirement")
 load("//build_tools/bazel:python.bzl", "iree_py_test")
 load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 load("//build_tools/testing:build_defs.bzl", "iree_cli_test")
@@ -23,6 +24,45 @@ _AMDGPU_EXECUTION_COMPATIBLE_WITH = loom_config_compatible_with([
     "//loom/config/execute:amdgpu_hal",
     "//runtime/config/hal:driver_amd_gpu",
 ])
+
+iree_py_test(
+    name = "pytorch_capture_test",
+    size = "small",
+    srcs = [
+        "//loom/docs/examples/workflows/oracles/pytorch:capture_test.py",
+    ],
+    args = [
+        "$(rootpath //loom/src/loom/tools/loom-test)",
+        "$(rootpath //loom/src/loom/tools/loom-benchmark)",
+        "$(rootpath //loom/docs/examples/workflows/oracles/pytorch:replay.loom)",
+        "amdgpu",
+        "CaptureTest.test_real_reference_capture_replays_through_loom",
+        "CaptureTest.test_benchmark_capture_is_only_in_correctness_phase",
+    ],
+    data = [
+        "//loom/docs/examples/workflows/oracles/pytorch:replay.loom",
+        "//loom/src/loom/tools/loom-benchmark",
+        "//loom/src/loom/tools/loom-test",
+    ],
+    env = {"OMP_NUM_THREADS": "1"},
+    main = "//loom/docs/examples/workflows/oracles/pytorch:capture_test.py",
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = [
+        "iree-run-requirement=libamdf.resource.amd_gpu",
+        "manual",
+    ],
+    target_compatible_with = _AMDGPU_EXECUTION_COMPATIBLE_WITH + loom_config_compatible_with([
+        "//loom/config/execute:vm_iree_vm",
+    ]) + [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        "//loom/docs/examples/workflows/oracles/pytorch:capture",
+        requirement("numpy"),
+        requirement("torch"),
+    ],
+)
 
 iree_cli_test(
     name = "device_failure_test",

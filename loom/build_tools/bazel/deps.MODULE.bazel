@@ -62,3 +62,16 @@ model_test_pip.parse(
     requirements_lock = "//loom/py/loom/model/hf_test:requirements.lock.txt",
 )
 use_repo(model_test_pip, "loom_model_test_pip")
+
+# Explicit external-oracle example qualification; absent from shipped tools.
+oracle_test_pip = use_extension(
+    "@rules_python//python/extensions:pip.bzl",
+    "pip",
+    dev_dependency = True,
+)
+oracle_test_pip.parse(
+    hub_name = "loom_oracle_test_pip",
+    python_version = "3.12",
+    requirements_lock = "//loom/docs/examples/workflows/oracles/pytorch:requirements.lock.txt",
+)
+use_repo(oracle_test_pip, "loom_oracle_test_pip")
