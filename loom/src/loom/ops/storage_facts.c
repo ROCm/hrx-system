@@ -198,8 +198,11 @@ static iree_status_t loom_storage_clone_extension(
   loom_storage_reference_facts_t reference = {0};
   IREE_RETURN_IF_ERROR(loom_storage_clone_reference(
       target, source, &source_reference, &reference));
-  return loom_storage_facts_make_reference(&target->context, &reference,
-                                           inout_facts);
+  loom_value_facts_t reference_facts = loom_value_facts_unknown();
+  IREE_RETURN_IF_ERROR(loom_storage_facts_make_reference(
+      &target->context, &reference, &reference_facts));
+  inout_facts->extension_id = reference_facts.extension_id;
+  return iree_ok_status();
 }
 
 static void loom_storage_meet_scalar_facts(loom_value_facts_t lhs,
@@ -259,8 +262,11 @@ static iree_status_t loom_storage_meet_extension(
   loom_storage_meet_scalar_facts(lhs_reference.valid_byte_length,
                                  rhs_reference.valid_byte_length,
                                  &reference.valid_byte_length);
-  return loom_storage_facts_make_reference(&target->context, &reference,
-                                           inout_facts);
+  loom_value_facts_t reference_facts = loom_value_facts_unknown();
+  IREE_RETURN_IF_ERROR(loom_storage_facts_make_reference(
+      &target->context, &reference, &reference_facts));
+  inout_facts->extension_id = reference_facts.extension_id;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_storage_widen_fact_field(
@@ -316,8 +322,11 @@ static iree_status_t loom_storage_widen_extension(
   IREE_RETURN_IF_ERROR(loom_storage_widen_fact_field(
       target, previous_table, previous_reference.valid_byte_length, next_table,
       next_reference.valid_byte_length, &reference.valid_byte_length));
-  return loom_storage_facts_make_reference(&target->context, &reference,
-                                           inout_facts);
+  loom_value_facts_t reference_facts = loom_value_facts_unknown();
+  IREE_RETURN_IF_ERROR(loom_storage_facts_make_reference(
+      &target->context, &reference, &reference_facts));
+  inout_facts->extension_id = reference_facts.extension_id;
+  return iree_ok_status();
 }
 
 const loom_value_fact_domain_t loom_storage_fact_domain = {

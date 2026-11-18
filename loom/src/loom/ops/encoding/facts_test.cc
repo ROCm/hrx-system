@@ -38,12 +38,19 @@ class EncodingFactDomainTest : public ::testing::Test {
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
+  // Shared backing blocks for all three independently interned fact tables.
   iree_arena_block_pool_t block_pool_;
+  // Owns the left input's fact storage.
   iree_arena_allocator_t lhs_arena_;
+  // Owns the right input's fact storage.
   iree_arena_allocator_t rhs_arena_;
+  // Owns merged and cloned result facts.
   iree_arena_allocator_t target_arena_;
+  // Left input fact table and extension interner.
   loom_value_fact_table_t lhs_ = {};
+  // Right input fact table and extension interner.
   loom_value_fact_table_t rhs_ = {};
+  // Destination table receiving cross-context transfers.
   loom_value_fact_table_t target_ = {};
 };
 
@@ -351,6 +358,53 @@ TEST_F(EncodingFactDomainTest, EmptyStrideJoinRetainsLayoutKind) {
   EXPECT_EQ(summary.address_layout.kind,
             LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED);
   EXPECT_EQ(summary.address_layout.rank, 0);
+}
+
+TEST_F(EncodingFactDomainTest, JoinsPreserveEncodingDistribution) {
+  const uint32_t distributions[] = {
+      0,
+      LOOM_VALUE_FACT_LANE_VARYING,
+      LOOM_VALUE_FACT_SUBGROUP_UNIFORM,
+      LOOM_VALUE_FACT_SUBGROUP_UNIFORM | LOOM_VALUE_FACT_WORKGROUP_UNIFORM,
+      LOOM_VALUE_FACT_UNIFORM_SCOPE_MASK,
+  };
+  const auto type =
+      loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT);
+  for (const uint32_t distribution : distributions) {
+    // Equal summaries, different identities, and an absent summary must all
+    // retain the independently established execution distribution.
+    for (const uint16_t rhs_identity : {0, 7, 9}) {
+      SCOPED_TRACE(::testing::Message()
+                   << distribution << ", identity=" << rhs_identity);
+      loom_value_facts_t lhs;
+      auto rhs = loom_value_facts_unknown();
+      IREE_ASSERT_OK(MakeEncodingSummary(
+          &lhs_, LOOM_ENCODING_ROLE_ADDRESS_LAYOUT, 7,
+          LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE, nullptr, 0, {}, &lhs));
+      if (rhs_identity != 0) {
+        IREE_ASSERT_OK(MakeEncodingSummary(
+            &rhs_, LOOM_ENCODING_ROLE_ADDRESS_LAYOUT, rhs_identity,
+            LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE, nullptr, 0, {}, &rhs));
+      }
+      lhs.flags |= distribution;
+      rhs.flags |= distribution;
+      for (const uint32_t round : {0u, 2u}) {
+        loom_value_facts_t result;
+        IREE_ASSERT_OK(loom_value_fact_table_widen_for_type(
+            &target_, nullptr, type, &lhs_, lhs, &rhs_, rhs, round, &result));
+        EXPECT_EQ(result.flags, distribution);
+        loom_value_fact_encoding_summary_t summary;
+        EXPECT_EQ(loom_value_facts_query_encoding_summary(&target_.context,
+                                                          result, &summary),
+                  rhs_identity != 0);
+        if (rhs_identity != 0) {
+          EXPECT_EQ(summary.static_spec_encoding_id, rhs_identity == 7 ? 7 : 0);
+          EXPECT_EQ(summary.address_layout.kind,
+                    LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE);
+        }
+      }
+    }
+  }
 }
 
 }  // namespace

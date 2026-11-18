@@ -409,6 +409,8 @@ typedef struct loom_value_fact_encoding_summary_t {
 // cold extension payload for values whose type declares the domain. Domains are
 // immutable .rodata objects referenced from type descriptors; there is no
 // process-global schema registry or schema ID stored in extension entries.
+// Callbacks update only extension_id in inout_facts, preserving the generic
+// caller's scalar and execution-distribution facts.
 //
 // Returning no extension is the domain top/unknown value. Domain callbacks must
 // keep payloads bounded and degrade to no extension instead of allocating

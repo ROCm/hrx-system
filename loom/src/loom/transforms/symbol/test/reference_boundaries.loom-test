@@ -172,3 +172,136 @@ func.def public @nonnull_callers() -> (i1, i1) {
   %11 = scalar.constant false : i1
   func.return %10, %11 : i1, i1
 }
+
+// ====
+
+// RUN: pass refine-boundaries{mode=encodings},refine-boundaries
+
+// Encoding refinement must converge before body folding. Two calls share one
+// resize summary: their different roots must retain the common lane-varying
+// identity, even when the extent itself has no distribution proof.
+func.def noinline @resize(%state: buffer) -> (buffer) {
+  %bytes = buffer.length %state
+  %grown = buffer.alloca<private> align(8) %bytes : buffer
+  %output_varying = test.fact_lane_varying %grown : buffer -> i1
+  test.use %output_varying : i1
+  func.return %grown : buffer
+}
+
+func.def public @grow_twice(%bytes: offset) -> (buffer) {
+  %state = buffer.alloca<private> align(8) %bytes : buffer
+  %next = func.call @resize(%state) : (buffer) -> (buffer)
+  %grown = func.call @resize(%next) : (buffer) -> (buffer)
+  %varying = test.fact_lane_varying %grown : buffer -> i1
+  test.use %varying : i1
+  func.return %grown : buffer
+}
+
+// ----
+func.def noinline @resize(%state: buffer) -> (buffer) {
+  %bytes = buffer.length %state
+  %grown = buffer.alloca<private> align(8) %bytes : buffer
+  %output_varying = scalar.constant true : i1
+  test.use %output_varying : i1
+  func.return %grown : buffer
+}
+
+func.def public @grow_twice(%bytes: offset) -> (buffer) {
+  %state = buffer.alloca<private> align(8) %bytes : buffer
+  %next = func.call @resize(%state) : (buffer) -> (buffer)
+  %grown = func.call @resize(%next) : (buffer) -> (buffer)
+  %varying = scalar.constant true : i1
+  test.use %varying : i1
+  func.return %grown : buffer
+}
+
+// ====
+
+// RUN: pass refine-boundaries
+
+// Whole refinement reaches the same fixed point while canonicalizing bodies.
+// The fact queries verify distribution on the allocation and returned buffer.
+func.def noinline @resize(%state: buffer) -> (buffer) {
+  %bytes = buffer.length %state
+  %grown = buffer.alloca<private> align(8) %bytes : buffer
+  %output_varying = test.fact_lane_varying %grown : buffer -> i1
+  test.use %output_varying : i1
+  func.return %grown : buffer
+}
+
+func.def public @grow_twice(%bytes: offset) -> (buffer) {
+  %state = buffer.alloca<private> align(8) %bytes : buffer
+  %next = func.call @resize(%state) : (buffer) -> (buffer)
+  %grown = func.call @resize(%next) : (buffer) -> (buffer)
+  %varying = test.fact_lane_varying %grown : buffer -> i1
+  test.use %varying : i1
+  func.return %grown : buffer
+}
+
+// ----
+func.def noinline @resize(%state: buffer) -> (buffer) {
+  %bytes = buffer.length %state
+  %grown = buffer.alloca<private> align(8) %bytes : buffer
+  %output_varying = scalar.constant true : i1
+  test.use %output_varying : i1
+  func.return %grown : buffer
+}
+
+func.def public @grow_twice(%bytes: offset) -> (buffer) {
+  %state = buffer.alloca<private> align(8) %bytes : buffer
+  %next = func.call @resize(%state) : (buffer) -> (buffer)
+  %grown = func.call @resize(%next) : (buffer) -> (buffer)
+  %varying = scalar.constant true : i1
+  test.use %varying : i1
+  func.return %grown : buffer
+}
+
+// ====
+
+// RUN: pass inline-callables,refine-boundaries{mode=encodings},refine-boundaries
+
+// Inlining the accessors preserves the same argument/return feedback contract.
+func.def inline @extent(%state: buffer) -> (offset) {
+  %bytes = buffer.length %state
+  func.return %bytes : offset
+}
+
+func.def inline @allocate(%bytes: offset) -> (buffer) {
+  %state = buffer.alloca<private> align(8) %bytes : buffer
+  func.return %state : buffer
+}
+
+func.def noinline @resize(%state: buffer) -> (buffer) {
+  %bytes = func.call @extent(%state) : (buffer) -> (offset)
+  %grown = func.call @allocate(%bytes) : (offset) -> (buffer)
+  %output_varying = test.fact_lane_varying %grown : buffer -> i1
+  test.use %output_varying : i1
+  func.return %grown : buffer
+}
+
+func.def public @grow_twice(%bytes: offset) -> (buffer) {
+  %state = buffer.alloca<private> align(8) %bytes : buffer
+  %next = func.call @resize(%state) : (buffer) -> (buffer)
+  %grown = func.call @resize(%next) : (buffer) -> (buffer)
+  %varying = test.fact_lane_varying %grown : buffer -> i1
+  test.use %varying : i1
+  func.return %grown : buffer
+}
+
+// ----
+func.def noinline @resize(%state$6: buffer) -> (buffer) {
+  %bytes = buffer.length %state$6
+  %state$5 = buffer.alloca<private> align(8) %bytes : buffer
+  %output_varying = scalar.constant true : i1
+  test.use %output_varying : i1
+  func.return %state$5 : buffer
+}
+
+func.def public @grow_twice(%bytes: offset) -> (buffer) {
+  %state = buffer.alloca<private> align(8) %bytes : buffer
+  %next = func.call @resize(%state) : (buffer) -> (buffer)
+  %grown = func.call @resize(%next) : (buffer) -> (buffer)
+  %varying = scalar.constant true : i1
+  test.use %varying : i1
+  func.return %grown : buffer
+}

@@ -274,6 +274,7 @@ loom_cc_test(
     srcs = ["storage_facts_test.cc"],
     deps = [
         ":storage_facts",
+        ":type_registry",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",

@@ -8,6 +8,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/ops/buffer/ops.h"
+#include "loom/ops/type_registry.h"
 #include "loom/util/fact_table.h"
 
 namespace loom {
@@ -21,6 +22,7 @@ class BufferFactsTest : public ::testing::Test {
     iree_arena_initialize(&block_pool_, &analysis_arena_);
     IREE_ASSERT_OK(
         loom_value_fact_table_initialize(&fact_table_, &analysis_arena_, 1));
+    loom_type_registry_configure_fact_context(&fact_table_.context);
   }
 
   void TearDown() override {
@@ -126,6 +128,57 @@ TEST_F(BufferFactsTest, NullQueryRetainsPredicateDistribution) {
                                      /*op=*/nullptr, &operand, &result));
   EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(result));
   EXPECT_FALSE(loom_value_facts_is_lane_predicate(result));
+}
+
+TEST_F(BufferFactsTest, JoinsPreserveReferenceDistribution) {
+  const uint32_t distributions[] = {
+      0,
+      LOOM_VALUE_FACT_LANE_VARYING,
+      LOOM_VALUE_FACT_SUBGROUP_UNIFORM,
+      LOOM_VALUE_FACT_SUBGROUP_UNIFORM | LOOM_VALUE_FACT_WORKGROUP_UNIFORM,
+      LOOM_VALUE_FACT_UNIFORM_SCOPE_MASK,
+  };
+  for (const uint32_t lhs_distribution : distributions) {
+    for (const uint32_t rhs_distribution : distributions) {
+      // Zero selects an absent extension; the other cases exercise equal and
+      // unequal payloads, which take different paths through the generic join.
+      for (const int64_t rhs_bytes : {0, 48, 96}) {
+        SCOPED_TRACE(::testing::Message()
+                     << lhs_distribution << ", " << rhs_distribution
+                     << ", bytes=" << rhs_bytes);
+        auto lhs =
+            ReferenceFacts(LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL,
+                           loom_value_facts_exact_i64(48));
+        auto rhs =
+            rhs_bytes == 0
+                ? loom_value_facts_unknown()
+                : ReferenceFacts(LOOM_VALUE_FACT_REFERENCE_NULLABILITY_NON_NULL,
+                                 loom_value_facts_exact_i64(rhs_bytes));
+        lhs.flags |= lhs_distribution;
+        rhs.flags |= rhs_distribution;
+        const uint32_t expected =
+            (lhs_distribution | rhs_distribution) & LOOM_VALUE_FACT_LANE_VARYING
+                ? LOOM_VALUE_FACT_LANE_VARYING
+                : lhs_distribution & rhs_distribution;
+        for (const uint32_t round : {0u, 2u}) {
+          loom_value_facts_t result;
+          IREE_ASSERT_OK(loom_value_fact_table_widen_for_type(
+              &fact_table_, nullptr, loom_type_buffer(), &fact_table_, lhs,
+              &fact_table_, rhs, round, &result));
+          EXPECT_EQ(result.flags, expected);
+          loom_value_fact_buffer_reference_t reference;
+          EXPECT_EQ(loom_value_facts_query_buffer_reference(
+                        &fact_table_.context, result, &reference),
+                    rhs_bytes != 0);
+          if (rhs_bytes != 0) {
+            EXPECT_EQ(reference.maximum_byte_extent.range_lo, 48);
+            EXPECT_EQ(reference.maximum_byte_extent.range_hi, rhs_bytes);
+            EXPECT_EQ(reference.maximum_byte_extent.known_divisor, 48);
+          }
+        }
+      }
+    }
+  }
 }
 
 }  // namespace

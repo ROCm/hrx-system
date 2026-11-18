@@ -138,8 +138,11 @@ static iree_status_t loom_encoding_facts_merge_extension(
       merge_kind, iteration, module, target, lhs_table,
       lhs_summary.address_layout, rhs_table, rhs_summary.address_layout,
       stride_storage, &result.address_layout));
-  return loom_value_facts_make_encoding_summary(&target->context, result,
-                                                inout_facts);
+  loom_value_facts_t summary_facts = loom_value_facts_unknown();
+  IREE_RETURN_IF_ERROR(loom_value_facts_make_encoding_summary(
+      &target->context, result, &summary_facts));
+  inout_facts->extension_id = summary_facts.extension_id;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_encoding_facts_meet_extension(

@@ -162,8 +162,11 @@ static iree_status_t loom_buffer_meet_reference_extension(
   if (reference.minimum_alignment == 0) {
     reference.minimum_alignment = 1;
   }
-  return loom_value_facts_make_buffer_reference(&target->context, reference,
-                                                inout_facts);
+  loom_value_facts_t reference_facts = loom_value_facts_unknown();
+  IREE_RETURN_IF_ERROR(loom_value_facts_make_buffer_reference(
+      &target->context, reference, &reference_facts));
+  inout_facts->extension_id = reference_facts.extension_id;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_buffer_widen_reference_extension(
