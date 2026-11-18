@@ -187,7 +187,7 @@ struct CountedLoop {
   struct Bound {
     // Resolved identifier supplying the loop-invariant bound, or null when
     // the retained expression is an exact constant.
-    cxx::Symbol* binding;
+    cxx::IdExpressionAST* identifier;
     // Resolved source expression, including inserted value materializations.
     cxx::ExpressionAST* expression;
   };
@@ -213,6 +213,9 @@ struct CountedLoop {
     // Signed logical index or unsigned physical offset comparison semantics.
     AddressDomain domain;
   };
+  // Source identifier read by a runtime upper bound, or null for a constant.
+  cxx::IdExpressionAST* upper_identifier() const;
+
   // Source binding replaced by the structured loop's induction argument.
   cxx::Symbol* induction;
   // Fixed-width C++ arithmetic or a target-selected native address interval.
@@ -263,10 +266,11 @@ struct SwitchLayout {
 // Ordered writes include nested constructs and preserve source symbol identity.
 // Constexpr branches visit their initializers, decision and source-selected
 // arm. Exit outcomes aggregate each statement's already visited children, and
-// counted-loop classification evaluates each header's constants once after its
-// writes are complete. Queries only consume retained facts; they do not
-// traverse source or output IR. The source unit and body outlive this object
-// and every returned reference.
+// counted-loop classification evaluates each header's constants once and joins
+// the resulting interval with finalized source writes and storage identity.
+// Queries only consume retained facts; they do not traverse source or output
+// IR. The source unit and body outlive this object and every returned
+// reference.
 class ControlFlow final : private cxx::ASTVisitor {
  public:
   ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
@@ -622,7 +626,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   void record_member_binding_read(cxx::ExpressionAST* expression);
   bool normalize_field_groups(bool inputs);
   bool record_callable_write(cxx::Symbol* binding);
-  bool record_scoped_write(cxx::Symbol* binding,
+  void invalidate_projected_bound(cxx::AST* owner, ObjectInterval write);
+  bool record_scoped_write(ObjectInterval interval,
                            std::span<cxx::AST* const> owners);
   bool record_argument_write(const CallArgument& argument,
                              std::span<cxx::AST* const> owners,
@@ -735,6 +740,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool classify_storage(cxx::ExpressionAST* expression) const;
   bool is_captured_object_field(cxx::Symbol* field) const;
   cxx::Symbol* object_owner(cxx::ExpressionAST* expression) const;
+  void retain_counted(cxx::ForStatementAST* loop);
   std::optional<CountedLoop> classify(cxx::ForStatementAST* loop);
   std::optional<CountedLoop> classify_unsigned(
       cxx::ForStatementAST* loop, cxx::Symbol* induction,
@@ -894,8 +900,17 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Automatic roots retained through member projections and transparent
   // expressions. Complete address demand applies even to earlier field uses.
   std::unordered_map<cxx::ExpressionAST*, cxx::Symbol*> object_owners_;
-  // Proven intervals retained after each source loop's children are visited.
-  std::unordered_map<cxx::ForStatementAST*, CountedLoop> counted_;
+  struct LoopCandidate {
+    // Numeric interval recognized in the source header before body traversal.
+    CountedLoop interval;
+    // Exact reference or implicit subobject, borrowed from the source facts.
+    // An ordinary identifier uses its own binding directly.
+    const Destination* referent;
+  };
+  // Header candidates; an overlapping write removes a projected bound.
+  std::unordered_map<cxx::ForStatementAST*, LoopCandidate> counted_;
+  // Only functions with a projected upper bound compare component intervals.
+  bool has_projected_loop_bounds_ = false;
   // Source adapters allocated only for functions containing range loops.
   std::unique_ptr<RangeLoops> range_loops_;
   // Backing-array adapters allocated only for functions constructing lists.

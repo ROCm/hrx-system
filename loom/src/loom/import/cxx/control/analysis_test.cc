@@ -441,7 +441,7 @@ TEST(ControlFlowTest, CountedAdmissionRetainsTheNonwrappingIntervalProof) {
         EXPECT_EQ(std::get<unsigned>(range.upper), *test.upper);
       } else {
         const auto& bound = std::get<CountedLoop::Bound>(range.upper);
-        EXPECT_EQ(bound.binding, function->symbol->parameters()[0]);
+        EXPECT_EQ(bound.identifier->symbol, function->symbol->parameters()[0]);
         auto* condition =
             cxx::ast_cast<cxx::BinaryExpressionAST>(loop->condition);
         EXPECT_EQ(bound.expression, condition->rightExpression);
@@ -522,7 +522,7 @@ TEST(ControlFlowTest,
       EXPECT_EQ(std::get<std::int32_t>(range.upper), *test.upper);
     } else {
       const auto& bound = std::get<CountedLoop::Bound>(range.upper);
-      EXPECT_EQ(bound.binding, function->symbol->parameters()[0]);
+      EXPECT_EQ(bound.identifier->symbol, function->symbol->parameters()[0]);
       auto* condition =
           cxx::ast_cast<cxx::BinaryExpressionAST>(loop->condition);
       EXPECT_EQ(bound.expression, condition->rightExpression);
@@ -592,6 +592,14 @@ TEST(ControlFlowTest, AddressAdmissionRetainsNativeUnitStepIntervals) {
       {"loom::type::offset",
        "for (auto i=begin; i<end; i=i+loom::type::offset{1}) (void)&i;",
        std::nullopt},
+      {"loom::type::index",
+       "const auto& bound=end; for (auto i=begin; i<bound; "
+       "i=i+loom::type::index{1}) end=end-loom::type::index{1};",
+       std::nullopt},
+      {"loom::type::offset",
+       "const auto& bound=end; for (auto i=begin; i<bound; "
+       "i=i+loom::type::offset{1}) end=end-loom::type::offset{1};",
+       std::nullopt},
   };
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);
@@ -606,8 +614,12 @@ TEST(ControlFlowTest, AddressAdmissionRetainsNativeUnitStepIntervals) {
     auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
                      function->functionBody)
                      ->statement;
-    auto* loop =
-        cxx::ast_cast<cxx::ForStatementAST>(body->statementList->value);
+    cxx::ForStatementAST* loop = nullptr;
+    for (auto* statement : cxx::ListView{body->statementList}) {
+      if ((loop = cxx::ast_cast<cxx::ForStatementAST>(statement))) {
+        break;
+      }
+    }
     ASSERT_NE(loop, nullptr);
     Types types(source.unit(), source.diagnostics());
     Imports imports(source.unit(), source.diagnostics());
@@ -625,13 +637,62 @@ TEST(ControlFlowTest, AddressAdmissionRetainsNativeUnitStepIntervals) {
                   ->initDeclaratorList->value->symbol);
     const auto& range = std::get<CountedLoop::AddressRange>(counted->range);
     EXPECT_EQ(range.domain, *test.domain);
-    EXPECT_EQ(range.upper.binding, test.constant_bound
-                                       ? nullptr
-                                       : function->symbol->parameters()[1]);
+    EXPECT_EQ(
+        range.upper.identifier ? range.upper.identifier->symbol : nullptr,
+        test.constant_bound ? nullptr : function->symbol->parameters()[1]);
     EXPECT_EQ(range.upper.expression,
               cxx::ast_cast<cxx::BinaryExpressionAST>(loop->condition)
                   ->rightExpression);
     EXPECT_EQ(analysis.counted(loop), counted);
+  }
+}
+
+TEST(ControlFlowTest, ReferenceBoundsTrackWritesToTheirSourceObject) {
+  struct Case {
+    // Lvalue supplying the bound read by each iteration.
+    const char* bound;
+    // Effect in the loop, including calls that write through a reference.
+    const char* update;
+    // Whether the source upper bound can be evaluated once.
+    bool invariant;
+  };
+  const Case cases[] = {
+      {"n", "++counts.ticks", true},
+      {"n", "--n", false},
+      {"counts.end", "++counts.ticks", true},
+      {"counts.end", "--counts.end", false},
+      {"counts.end", "counts = {n, 0}", false},
+      {"counts.end", "shrink(counts.ticks)", true},
+      {"counts.end", "shrink(counts.end)", false},
+      {"counts.end", "if (i) { for (unsigned j=0; j<2; ++j) --counts.end; }",
+       false},
+      {"counts.end", "if constexpr (false) --counts.end", true},
+      {"n ? counts.end : n", "--n", false},
+  };
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  for (const auto& test : cases) {
+    std::string text = std::string(
+                           "struct Counts { unsigned end, ticks; }; "
+                           "void shrink(unsigned&); void entry(unsigned n) {"
+                           "Counts counts{n, 0}; const unsigned& end = ") +
+                       test.bound + "; for (unsigned i=0; i<end; ++i) {" +
+                       test.update + ";} }";
+    SCOPED_TRACE(text);
+    Source source(view(text), IREE_SV("reference_bound.cxx"), options);
+    auto* function = definition(source);
+    ASSERT_NE(function, nullptr);
+    auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                     function->functionBody)
+                     ->statement;
+    auto* loop = cxx::ast_cast<cxx::ForStatementAST>(
+        body->statementList->next->next->value);
+    ASSERT_NE(loop, nullptr);
+    Types types(source.unit(), source.diagnostics());
+    Imports imports(source.unit(), source.diagnostics());
+    ControlFlow analysis(source.unit(), source.diagnostics(), types, imports,
+                         body, function->symbol);
+    EXPECT_EQ(analysis.counted(loop) != nullptr, test.invariant);
   }
 }
 

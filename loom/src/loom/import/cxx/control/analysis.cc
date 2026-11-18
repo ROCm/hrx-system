@@ -223,6 +223,20 @@ ReferenceProjection compose_projection(ReferenceProjection parent,
               : parent.component_count - child.component_offset};
 }
 
+bool has_nonlocal_storage(cxx::VariableSymbol* variable) {
+  return variable->isStatic() || variable->isExtern() ||
+         variable->isThreadLocal() ||
+         cxx::symbol_cast<cxx::NamespaceSymbol>(
+             variable->canonical()->parent());
+}
+
+ObjectInterval object_interval(const Destination& destination) {
+  return {destination.binding, destination.component_offset,
+          destination.member ? destination.component_offset +
+                                   destination.member->component_count
+                             : ObjectInterval::kWholeObjectEnd};
+}
+
 std::optional<ObjectInterval> project_interval(ObjectInterval interval,
                                                ReferenceProjection projection) {
   const size_t interval_end =
@@ -1149,25 +1163,89 @@ cxx::Symbol* ControlFlow::object_owner(cxx::ExpressionAST* expression) const {
   return found == object_owners_.end() ? nullptr : found->second;
 }
 
+cxx::IdExpressionAST* CountedLoop::upper_identifier() const {
+  const Bound* bound = nullptr;
+  if (auto* interval = std::get_if<UnsignedRange>(&range)) {
+    bound = std::get_if<Bound>(&interval->upper);
+  } else if (auto* interval = std::get_if<SignedRange>(&range)) {
+    bound = std::get_if<Bound>(&interval->upper);
+  } else {
+    bound = &std::get<AddressRange>(range).upper;
+  }
+  return bound ? bound->identifier : nullptr;
+}
+
+void ControlFlow::retain_counted(cxx::ForStatementAST* loop) {
+  auto interval = classify(loop);
+  if (!interval) {
+    return;
+  }
+  const Destination* referent = nullptr;
+  if (auto* bound = interval->upper_identifier()) {
+    if (auto alias = reference_aliases_.find(bound->symbol);
+        alias != reference_aliases_.end()) {
+      if (!alias->second.destination) {
+        return;
+      }
+      referent = &*alias->second.destination;
+    } else if (bound->subobjectPath) {
+      if (!retain_destination(bound)) {
+        return;
+      }
+      referent = &destinations_.at(bound);
+    }
+  }
+  has_projected_loop_bounds_ |= referent && referent->member;
+  counted_.emplace(loop, LoopCandidate{*interval, referent});
+}
+
 const CountedLoop* ControlFlow::counted(cxx::ForStatementAST* loop) const {
   auto found = counted_.find(loop);
-  if (found == counted_.end() || addressed(found->second.induction)) {
+  if (found == counted_.end()) {
     return nullptr;
   }
-  // An aliased bound can change through a helper without a syntactic write in
-  // the loop. Consult complete address demand, including later source uses.
-  const CountedLoop::Bound* bound = nullptr;
-  if (auto* range =
-          std::get_if<CountedLoop::UnsignedRange>(&found->second.range)) {
-    bound = std::get_if<CountedLoop::Bound>(&range->upper);
-  } else if (auto* range =
-                 std::get_if<CountedLoop::SignedRange>(&found->second.range)) {
-    bound = std::get_if<CountedLoop::Bound>(&range->upper);
-  } else {
-    bound = &std::get<CountedLoop::AddressRange>(found->second.range).upper;
+  const auto& [interval, referent] = found->second;
+  auto body_writes = written(loop->statement);
+  if (addressed(interval.induction) ||
+      std::ranges::find(body_writes, interval.induction) != body_writes.end()) {
+    return nullptr;
   }
-  return bound && bound->binding && addressed(bound->binding) ? nullptr
-                                                              : &found->second;
+  auto* identifier = interval.upper_identifier();
+  if (!identifier) {
+    return &interval;
+  }
+  auto* binding = identifier->symbol;
+  auto* owner = referent ? referent->binding : binding;
+  // A storage-backed reference may alias an entirely different parameter.
+  // Only the completed callable analysis knows which arguments share storage.
+  if (addressed(owner) ||
+      ((referent || unit_.typeTraits().is_reference(binding->type())) &&
+       reference_requires_storage(binding))) {
+    return nullptr;
+  }
+  if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(owner);
+      field &&
+      (field->isStatic()
+           ? !unit_.typeTraits().is_const(field->type())
+           : receiver_requires_storage_ || is_captured_object_field(field) ||
+                 (unit_.typeTraits().is_reference(field->type()) &&
+                  !types_.reference_is_snapshot(field)))) {
+    return nullptr;
+  }
+  if (auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(owner);
+      variable && !unit_.typeTraits().is_const(variable->type()) &&
+      has_nonlocal_storage(variable)) {
+    return nullptr;
+  }
+  // Member writes were checked by component as they were recorded. For a
+  // whole object the ordinary region write summary is already exact.
+  if (!referent || !referent->member) {
+    auto writes = written(loop);
+    if (std::ranges::find(writes, owner) != writes.end()) {
+      return nullptr;
+    }
+  }
+  return &interval;
 }
 
 const SwitchLayout& ControlFlow::switch_layout(
@@ -1387,11 +1465,6 @@ void ControlFlow::postVisit(cxx::AST* ast) {
     }
     if (classify_callable_exit(statement)) {
       callable_exits_.insert(statement);
-    }
-  }
-  if (auto* loop = cxx::ast_cast<cxx::ForStatementAST>(ast)) {
-    if (auto counted = classify(loop)) {
-      counted_.emplace(loop, *counted);
     }
   }
   if (!owners_.empty() && owners_.back() == ast) {
@@ -1682,6 +1755,7 @@ void ControlFlow::visit(cxx::ForStatementAST* ast) {
   }
   accept(ast->initializer);
   accept(ast->condition);
+  retain_counted(ast);
   auto condition_exit = construction_.state();
   accept(ast->statement);
   construction_.reach_latch();
@@ -3025,13 +3099,7 @@ CallArgument ControlFlow::retain_member_receiver(
 
 void ControlFlow::append_identity(Destination destination,
                                   CallArgument& argument) {
-  append_identity(
-      ObjectInterval{destination.binding, destination.component_offset,
-                     destination.member
-                         ? destination.component_offset +
-                               destination.member->component_count
-                         : ObjectInterval::kWholeObjectEnd},
-      argument);
+  append_identity(object_interval(destination), argument);
 }
 
 void ControlFlow::append_identity(ObjectInterval interval,
@@ -3118,12 +3186,7 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
     return;
   }
   auto append_destination = [&](Destination destination) {
-    auto interval = project_interval(
-        {destination.binding, destination.component_offset,
-         destination.member ? destination.component_offset +
-                                  destination.member->component_count
-                            : ObjectInterval::kWholeObjectEnd},
-        projection);
+    auto interval = project_interval(object_interval(destination), projection);
     if (interval) {
       append_identity(*interval, argument);
     }
@@ -3155,9 +3218,7 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
   }
   if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
     if (auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(id->symbol);
-        variable &&
-        (variable->isStatic() || cxx::symbol_cast<cxx::NamespaceSymbol>(
-                                     variable->canonical()->parent()))) {
+        variable && has_nonlocal_storage(variable)) {
       argument.inherent_storage = true;
       return;
     }
@@ -3448,9 +3509,7 @@ bool ControlFlow::record_callable_write(cxx::Symbol* binding) {
     return false;
   }
   if (auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(binding);
-      variable && (variable->isStatic() || variable->isExtern() ||
-                   cxx::symbol_cast<cxx::NamespaceSymbol>(
-                       variable->canonical()->parent()))) {
+      variable && has_nonlocal_storage(variable)) {
     return record_memory_write();
   }
   if (auto found = pointer_aliases_.find(binding);
@@ -3473,8 +3532,28 @@ bool ControlFlow::record_callable_write(cxx::Symbol* binding) {
   return add_receiver_write(binding);
 }
 
-bool ControlFlow::record_scoped_write(cxx::Symbol* binding,
+void ControlFlow::invalidate_projected_bound(cxx::AST* owner,
+                                             ObjectInterval write) {
+  auto* loop = cxx::ast_cast<cxx::ForStatementAST>(owner);
+  if (!loop) {
+    return;
+  }
+  auto found = counted_.find(loop);
+  if (found == counted_.end()) {
+    return;
+  }
+  auto* bound = found->second.referent;
+  if (bound && bound->member && bound->binding == write.binding) {
+    auto selected = object_interval(*bound);
+    if (write.begin < selected.end && selected.begin < write.end) {
+      counted_.erase(found);
+    }
+  }
+}
+
+bool ControlFlow::record_scoped_write(ObjectInterval interval,
                                       std::span<cxx::AST* const> owners) {
+  auto* binding = interval.binding;
   if (!binding) {
     return false;
   }
@@ -3486,6 +3565,9 @@ bool ControlFlow::record_scoped_write(cxx::Symbol* binding,
         changed;
   }
   for (auto* owner : owners) {
+    if (has_projected_loop_bounds_) {
+      invalidate_projected_bound(owner, interval);
+    }
     auto& writes = writes_[owner];
     if (std::ranges::find(writes, binding) == writes.end()) {
       writes.push_back(binding);
@@ -3628,7 +3710,7 @@ bool ControlFlow::record_projected_write(const CallArgument& argument,
   }
   bool changed = false;
   visit_intervals(argument, projection, [&](ObjectInterval interval) {
-    changed = record_scoped_write(interval.binding, owners) || changed;
+    changed = record_scoped_write(interval, owners) || changed;
     if (effect == WriteEffect::Callable) {
       changed = record_callable_write(interval.binding) || changed;
     }
@@ -4658,13 +4740,12 @@ CallPropagation ControlFlow::propagate_call(
                 types_.unqualified(implicit_object_type(unit_, function_)),
                 call.source);
             for (const auto& member : record->members) {
-              if (project_interval(
+              if (auto selected = project_interval(
                       {member.source, 0, member.partition->component_count,
                        member.component_offset},
                       range)) {
-                caller_changed =
-                    record_scoped_write(member.source, write.owners) ||
-                    caller_changed;
+                caller_changed = record_scoped_write(*selected, write.owners) ||
+                                 caller_changed;
                 if (projection.effect == WriteEffect::Callable) {
                   caller_changed =
                       add_receiver_write(member.source) || caller_changed;
@@ -5401,7 +5482,7 @@ bool ControlFlow::record(cxx::ExpressionAST* expression, WriteEffect effect) {
     record_projected_write(argument, owners_, {}, effect);
     return !argument.inherent_storage;
   }
-  record(target->binding);
+  record_scoped_write(object_interval(*target), owners_);
   if (effect == WriteEffect::Callable) {
     record_callable_write(target->binding);
   }
@@ -5409,7 +5490,7 @@ bool ControlFlow::record(cxx::ExpressionAST* expression, WriteEffect effect) {
 }
 
 void ControlFlow::record(cxx::Symbol* binding) {
-  record_scoped_write(binding, owners_);
+  record_scoped_write({binding, 0, ObjectInterval::kWholeObjectEnd}, owners_);
 }
 
 bool ControlFlow::may_transport_owner(const cxx::Type* type, cxx::AST* owner) {
@@ -5762,10 +5843,8 @@ std::optional<CountedLoop> ControlFlow::classify_unsigned(
 
   auto increment = classify_integer_increment(
       unit_, loop->expression, std::numeric_limits<std::uint32_t>::max());
-  const auto& body_writes = written(loop->statement);
   if (!increment || !increment->induction ||
-      increment->induction->symbol != induction ||
-      std::ranges::find(body_writes, induction) != body_writes.end()) {
+      increment->induction->symbol != induction) {
     return std::nullopt;
   }
   auto step_value = increment->step;
@@ -5782,17 +5861,14 @@ std::optional<CountedLoop> ControlFlow::classify_unsigned(
   }
   auto* bound = cxx::ast_cast<cxx::IdExpressionAST>(
       unwrap_expression(condition->rightExpression));
-  const auto& loop_writes = written(loop);
   if (step_value != 1 || !bound || !traits.is_integral_or_enum(bound->type) ||
-      traits.is_volatile(bound->type) ||
-      std::ranges::find(loop_writes, bound->symbol) != loop_writes.end()) {
+      traits.is_volatile(bound->type)) {
     return std::nullopt;
   }
   return CountedLoop{
       induction,
       CountedLoop::UnsignedRange{
-          CountedLoop::Bound{bound->symbol, condition->rightExpression},
-          step_value}};
+          CountedLoop::Bound{bound, condition->rightExpression}, step_value}};
 }
 
 // A strict signed-int interval cannot overflow with a unit step: an executed
@@ -5825,10 +5901,8 @@ std::optional<CountedLoop> ControlFlow::classify_signed(
   auto increment = classify_integer_increment(
       unit_, loop->expression,
       static_cast<std::uintmax_t>(std::numeric_limits<std::int32_t>::max()));
-  const auto& body_writes = written(loop->statement);
   if (!increment || !increment->induction ||
-      increment->induction->symbol != induction ||
-      std::ranges::find(body_writes, induction) != body_writes.end()) {
+      increment->induction->symbol != induction) {
     return std::nullopt;
   }
   auto step_value = increment->step;
@@ -5846,17 +5920,14 @@ std::optional<CountedLoop> ControlFlow::classify_signed(
   }
   auto* bound = cxx::ast_cast<cxx::IdExpressionAST>(
       unwrap_expression(condition->rightExpression));
-  const auto& loop_writes = written(loop);
   if (step_value != 1 || !bound || !traits.is_integral_or_enum(bound->type) ||
-      traits.is_volatile(bound->type) ||
-      std::ranges::find(loop_writes, bound->symbol) != loop_writes.end()) {
+      traits.is_volatile(bound->type)) {
     return std::nullopt;
   }
   return CountedLoop{
       induction,
       CountedLoop::SignedRange{
-          CountedLoop::Bound{bound->symbol, condition->rightExpression},
-          step_value}};
+          CountedLoop::Bound{bound, condition->rightExpression}, step_value}};
 }
 
 // A strict native address interval with a unit step cannot wrap before its
@@ -5914,18 +5985,12 @@ std::optional<CountedLoop> ControlFlow::classify_address(
     return std::nullopt;
   }
 
-  const auto& body_writes = written(loop->statement);
-  const auto& loop_writes = written(loop);
-  if (std::ranges::find(body_writes, induction) != body_writes.end() ||
-      (bound &&
-       (unit_.typeTraits().is_volatile(bound->type) ||
-        std::ranges::find(loop_writes, bound->symbol) != loop_writes.end()))) {
+  if (bound && unit_.typeTraits().is_volatile(bound->type)) {
     return std::nullopt;
   }
   return CountedLoop{induction,
                      CountedLoop::AddressRange{
-                         CountedLoop::Bound{bound ? bound->symbol : nullptr,
-                                            condition->rightExpression},
+                         CountedLoop::Bound{bound, condition->rightExpression},
                          domain == LOOM_SCALAR_TYPE_INDEX
                              ? CountedLoop::AddressDomain::Index
                              : CountedLoop::AddressDomain::Offset}};
