@@ -34,6 +34,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from build_tools.ci import bazel_runfiles
+
 try:
     import winreg
 except ImportError:
@@ -478,28 +480,17 @@ def capture_bazel_tests(capture: Capture, cwd: Path, output: str) -> list[dict]:
                 inputs[launcher] = None
         runfiles = []
         test["runfiles"] = runfiles
-        # Read the snapshot: a later action cannot change the inventory while
-        # we are preserving its files. Escaped manifests encode spaces only in
-        # logical names, and encode newlines/backslashes in both columns.
+        # Read the snapshot so a later action cannot change the inventory.
         with (capture.directory / record["copy"]).open(
             encoding="utf-8", newline="\n"
         ) as stream:
             for number, line in enumerate(stream, 1):
-                line = line.rstrip("\r\n")
-                escaped = line.startswith(" ")
-                logical, separator, physical = line[escaped:].partition(" ")
+                logical, physical = bazel_runfiles.parse_manifest_line(line)
                 entry = {"name": logical}
                 runfiles.append(entry)
-                if not separator:
+                if physical is None:
                     entry.update(error="invalid runfiles manifest entry", line=number)
                     continue
-                if escaped:
-                    entry["name"] = (
-                        logical.replace(r"\s", " ")
-                        .replace(r"\n", "\n")
-                        .replace(r"\b", "\\")
-                    )
-                    physical = physical.replace(r"\n", "\n").replace(r"\b", "\\")
                 if not physical:
                     entry["empty"] = True
                     continue

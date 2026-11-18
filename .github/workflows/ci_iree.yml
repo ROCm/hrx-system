@@ -387,9 +387,14 @@ jobs:
         run: bash .github/scripts/setup_windows_msvc.sh
 
       - name: Check Vulkan hardware environment
+        id: vulkan_preflight
         if: matrix.kind == 'vulkan'
         timeout-minutes: 1
-        run: bash .github/scripts/check_vulkan_hardware_environment.sh
+        run: |
+          printf 'started=%s\n' "$(date -u '+%F %T')" >> "$GITHUB_OUTPUT"
+          evidence="$RUNNER_TEMP/vulkan-evidence-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$evidence"
+          bash .github/scripts/check_vulkan_hardware_environment.sh --profile-output "$evidence/vulkaninfo.json"
 
       - name: Install Bazel host tools
         run: |
@@ -452,12 +457,13 @@ jobs:
           fi
 
       - name: Report ROCm environment
+        id: rocm_preflight
         if: matrix.kind == 'amdgpu'
         timeout-minutes: 1
-        run: >-
-          bash .github/scripts/check_rocm_environment.sh
-          --export-libamdf-gpu-selection
-          --amdgpu-target "${{ matrix.target_selector }}"
+        run: |
+          printf 'started=%s\n' "$(date -u '+%F %T')" >> "$GITHUB_OUTPUT"
+          bash .github/scripts/check_rocm_environment.sh \
+            --export-libamdf-gpu-selection --amdgpu-target "${{ matrix.target_selector }}"
 
       - name: Run IREE Bazel CI
         if: matrix.kind == 'cpu' || matrix.kind == 'vulkan' || matrix.kind == 'amdgpu' || matrix.kind == 'windows_msvc'
@@ -505,11 +511,10 @@ jobs:
             --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" "${failure_args[@]}"
 
       - name: Capture accelerator kernel errors
-        if: ${{ always() && (matrix.kind == 'vulkan' || matrix.kind == 'amdgpu') && (steps.iree_bazel_ci.outcome == 'failure' || steps.iree_bazel_ci.outcome == 'cancelled') }}
-        run: |
-          date -u
-          uname -a
-          timeout --kill-after=5s 15s dmesg --ctime --level=err,warn 2>&1 | tail -n 200
+        if: ${{ (failure() || cancelled()) && (steps.vulkan_preflight.outputs.started || steps.rocm_preflight.outputs.started) }}
+        env:
+          GPU_PREFLIGHT_STARTED: ${{ steps.vulkan_preflight.outputs.started || steps.rocm_preflight.outputs.started }}
+        run: bash .github/scripts/capture_amdgpu_kernel.sh "$GPU_PREFLIGHT_STARTED"
 
       - name: Upload Bazel profiles
         continue-on-error: true
@@ -565,14 +570,22 @@ jobs:
 
       - name: Preserve Vulkan reproducers on failure
         if: ${{ always() && matrix.kind == 'vulkan' && steps.iree_bazel_ci.outcome == 'failure' }}
+        run: |
+          evidence="$RUNNER_TEMP/vulkan-evidence-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          results="$RUNNER_TEMP/repository-test-results-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          for events in "$results"/.events/*.json; do
+            [ -f "$events" ] || continue
+            phase=$(basename "$events" .json)
+            python3 -m build_tools.ci.bazel_test_reproducers "$events" "$evidence/$phase.tar.gz"
+          done
+
+      - name: Upload Vulkan reproducers
+        if: ${{ always() && matrix.kind == 'vulkan' && steps.iree_bazel_ci.outcome == 'failure' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vulkan-bazel-executables-attempt-${{ github.run_attempt }}
-          # The runfiles retain the actual exec-configured Loom runner.
-          path: |
-            bazel-bin/loom/target/spirv/test/corpus/numeric_vector_packed_selection_test_execute_spirv_vulkan_hardware_test
-            bazel-bin/loom/target/spirv/test/corpus/numeric_vector_packed_selection_test_execute_spirv_vulkan_hardware_test.runfiles/
-            bazel-bin/runtime/src/iree/hal/driver/vulkan/cts/slab_pool_tests
+          path: ${{ runner.temp }}/vulkan-evidence-${{ github.run_id }}-${{ github.run_attempt }}/
+          compression-level: 0
           if-no-files-found: warn
           retention-days: 7
 

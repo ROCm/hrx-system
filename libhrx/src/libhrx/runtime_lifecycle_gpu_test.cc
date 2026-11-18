@@ -1,6 +1,7 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <cstdio>
 #include <cstdlib>
 #include <memory>
 
@@ -23,6 +24,12 @@ TEST(HrxRuntimeLifecycleTest, ReopensSharedRuntimeAfterGroupRelease) {
   ASSERT_NE(path, nullptr);
   for (int generation = 0; generation < 3; ++generation) {
     SCOPED_TRACE(generation);
+    const auto begin = [generation](const char* operation) {
+      std::fprintf(stderr, "HRX runtime generation %d entering %s\n",
+                   generation, operation);
+      std::fflush(stderr);
+    };
+    begin("library load");
     iree_dynamic_library_t* raw_library = nullptr;
     IREE_ASSERT_OK(iree_dynamic_library_load_from_file(
         path, IREE_DYNAMIC_LIBRARY_FLAG_NONE, iree_allocator_system(),
@@ -30,6 +37,7 @@ TEST(HrxRuntimeLifecycleTest, ReopensSharedRuntimeAfterGroupRelease) {
     std::unique_ptr<iree_dynamic_library_t,
                     decltype(&iree_dynamic_library_release)>
         library(raw_library, iree_dynamic_library_release);
+    begin("symbol resolution");
     const auto runtime_create = Resolve<decltype(&hrx_runtime_create)>(
         library.get(), "hrx_runtime_create");
     const auto runtime_release = Resolve<decltype(&hrx_runtime_release)>(
@@ -60,17 +68,22 @@ TEST(HrxRuntimeLifecycleTest, ReopensSharedRuntimeAfterGroupRelease) {
       return code;
     };
     hrx_runtime_t runtime = nullptr;
+    begin("runtime create");
     ASSERT_EQ(HRX_STATUS_OK,
               consume_status(runtime_create(nullptr, allocator(), &runtime)));
     hrx_device_group_t group = nullptr;
     const hrx_device_create_params_t params = {.uri = "amdgpu://0"};
+    begin("device group create");
     const hrx_status_t status = group_create(runtime, 1, &params, &group);
+    begin("runtime release");
     runtime_release(runtime);
     ASSERT_EQ(HRX_STATUS_OK, consume_status(status));
     EXPECT_EQ(device_count(group), 1u);
+    begin("device group release");
     group_release(group);
     // Drop the application's loader reference before reopening. HRX owns the
     // module reference required by its retained native connection.
+    begin("library release");
     library.reset();
   }
 }
