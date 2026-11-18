@@ -338,6 +338,29 @@ TEST(ApplyPatchTableAie4Test, PreservesBd0ControlBits) {
   EXPECT_EQ(ctrl[0] & 0xFE000000u, 0xFE000000u);
 }
 
+TEST(ApplyPatchTableAie4Test, AppliesDuplicateOffsetOnce) {
+  std::vector<uint32_t> ctrl(8, 0);
+  std::vector<uint32_t> patches = {0u, 0u, 0u, 0u, 0u, 0u};
+  uint64_t args[] = {0x1000u};
+  EXPECT_TRUE(iree_hal_amdxdna_apply_patch_table_aie4(
+      ctrl.data(), ctrl.size(), patches.data(), patches.size(), args, 1, 0));
+  const uint64_t base = 0x1000u + kAie4DdrWindow;
+  EXPECT_EQ(ctrl[1], static_cast<uint32_t>(base));
+  EXPECT_EQ(ctrl[0] & 0x1FFFFFFu, static_cast<uint32_t>(base >> 32));
+}
+
+TEST(ApplyPatchTableAie4Test, AddsBakedChunkOffset) {
+  std::vector<uint32_t> ctrl(8, 0);
+  ctrl[1] = 0x1000u;
+  std::vector<uint32_t> patches = {0u, 0u, 0u};
+  uint64_t args[] = {0x2000u};
+  EXPECT_TRUE(iree_hal_amdxdna_apply_patch_table_aie4(
+      ctrl.data(), ctrl.size(), patches.data(), patches.size(), args, 1, 0));
+  const uint64_t base = 0x2000u + 0x1000u + kAie4DdrWindow;
+  EXPECT_EQ(ctrl[1], static_cast<uint32_t>(base));
+  EXPECT_EQ(ctrl[0] & 0x1FFFFFFu, static_cast<uint32_t>(base >> 32));
+}
+
 TEST(ApplyPatchTableAie4Test, PatchesControlCodeSentinel) {
   std::vector<uint32_t> ctrl(8, 0);
   std::vector<uint32_t> patches = {

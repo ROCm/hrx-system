@@ -7,6 +7,7 @@
 #include "iree/hal/drivers/amdxdna/direct_command_buffer_planning.h"
 
 #include <inttypes.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -412,8 +413,22 @@ bool iree_hal_amdxdna_apply_patch_table_aie4(
     if ((size_t)offset + 8 > total || (offset & 0x3u) != 0) {
       return false;
     }
+    // Each microcontroller gets its own copy of the same page. The loader
+    // keeps both relocation entries and packs one page, so applying the
+    // second entry would add the buffer address on top of the first result.
+    bool already_applied = false;
+    for (size_t prev = 0; prev < i; prev += 3) {
+      if (patches[prev] == offset) {
+        already_applied = true;
+        break;
+      }
+    }
+    if (already_applied) continue;
     uint32_t bd0 = iree_hal_amdxdna_read_u32(b + offset);
     uint32_t bd1 = iree_hal_amdxdna_read_u32(b + offset + 4);
+    // Keep the compiler-baked offset. Multi-column DMAs store the chunk
+    // offset here (0, 4KB, 8KB, ...); control-code patches store the payload
+    // offset inside the instruction image.
     uint64_t baked = ((uint64_t)(bd0 & 0x1FFFFFFu) << 32) | (uint64_t)bd1;
     uint64_t base =
         baked + patch_va + arg_plus + iree_hal_amdxdna_ddr_aie_addr_offset;
