@@ -42,12 +42,17 @@ class RenderDevice:
         return f"pci-{self.pci_address.replace(':', '_').replace('.', '_')}!"
 
 
-def discover_render_devices(sysfs_drm_path: Path, dri_path: Path) -> list[RenderDevice]:
-    """Inventories sysfs devices and checks actual job access to AMD render nodes."""
+def render_device_candidates(
+    sysfs_drm_path: Path, dri_path: Path, allocation: str | None
+) -> list[RenderDevice]:
+    """Checks access to allocated render nodes, or inventories the host if unscoped."""
+    paths = tuple(Path(path) for path in allocation.split(",")) if allocation else ()
     devices = []
     print(f"DRM render nodes (uid={os.getuid()}, gid={os.getgid()}):", flush=True)
     for entry in sorted(sysfs_drm_path.glob("renderD[0-9]*")):
         node_path = dri_path / entry.name
+        if paths and node_path not in paths:
+            continue
         try:
             pci_path = (entry / "device").resolve(strict=True)
             vendor_id = int((pci_path / "vendor").read_text(), 16)
@@ -73,21 +78,15 @@ def discover_render_devices(sysfs_drm_path: Path, dri_path: Path) -> list[Render
         devices.append(
             RenderDevice(node_path, pci_path.name, device_id, node_stat.st_rdev)
         )
-    return devices
-
-
-def render_device_candidates(
-    devices: list[RenderDevice], allocation: str | None
-) -> list[RenderDevice]:
-    if allocation:
+    if paths:
         accessible = {device.path: device for device in devices}
         candidates = []
-        for path in allocation.split(","):
-            device = accessible.get(Path(path))
+        for path in paths:
+            device = accessible.get(path)
             if device is None:
                 raise RuntimeError(
                     f"PARENT_GPU_DEVICES={allocation!r} contains an inaccessible "
-                    f"AMD render node {path!r}; refusing to test a different GPU"
+                    f"AMD render node {str(path)!r}; refusing to test a different GPU"
                 )
             candidates.append(device)
         return candidates
@@ -131,9 +130,7 @@ def validate_vulkan_device(profile: dict, selected: RenderDevice) -> str:
 def check_environment(sysfs_drm_path: Path, dri_path: Path) -> None:
     allocation = os.environ.get("PARENT_GPU_DEVICES")
     print(f"Runner GPU allocation: {allocation or '(not specified)'}", flush=True)
-    candidates = render_device_candidates(
-        discover_render_devices(sysfs_drm_path, dri_path), allocation
-    )
+    candidates = render_device_candidates(sysfs_drm_path, dri_path, allocation)
     # A private runtime directory keeps this headless probe independent of a
     # desktop session. The process supervisor also bounds native driver calls.
     with tempfile.TemporaryDirectory(prefix="iree-vulkan-") as temporary_dir:

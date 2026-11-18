@@ -87,62 +87,60 @@ class VulkanEnvironmentTest(unittest.TestCase):
     def test_discovers_devices_without_product_id_table(self):
         expected = self.add_device(device_id=0x748F)
         self.add_device("renderD129", "0000:02:00.0", vendor_id=0x8086)
-        devices = vulkan_environment.discover_render_devices(self.sysfs, self.dri)
-        self.assertEqual(devices, [expected])
-        self.assertEqual(
-            vulkan_environment.render_device_candidates(devices, None)[0].dri_prime,
-            "pci-0000_01_00_0!",
+        devices = vulkan_environment.render_device_candidates(
+            self.sysfs, self.dri, None
         )
+        self.assertEqual(devices, [expected])
+        self.assertEqual(devices[0].dri_prime, "pci-0000_01_00_0!")
         self.assertIn("1002:748f", self.output.getvalue())
         self.assertIn("8086:748f", self.output.getvalue())
 
     def test_reports_unexposed_node_and_does_not_select_it(self):
         device = self.add_device()
         device.path.unlink()
-        devices = vulkan_environment.discover_render_devices(self.sysfs, self.dri)
-        self.assertEqual(devices, [])
-        self.assertIn("unavailable", self.output.getvalue())
         with self.assertRaisesRegex(RuntimeError, "No accessible AMD"):
-            vulkan_environment.render_device_candidates(devices, None)
+            vulkan_environment.render_device_candidates(self.sysfs, self.dri, None)
+        self.assertIn("unavailable", self.output.getvalue())
 
     def test_allocated_node_must_be_accessible_without_substitution(self):
-        first = self.add_device()
+        self.add_device()
         allocated = self.add_device("renderD129", "0000:02:00.0")
-        real_open = os.open
 
         def open_node(path, flags):
-            if path == allocated.path:
-                raise PermissionError("render node denied by device cgroup")
-            return real_open(path, flags)
+            self.assertEqual(path, allocated.path, "opened an unallocated GPU")
+            raise PermissionError("render node denied by device cgroup")
 
         with mock.patch.object(os, "open", side_effect=open_node):
-            devices = vulkan_environment.discover_render_devices(self.sysfs, self.dri)
-        self.assertEqual(devices, [first])
-        with self.assertRaisesRegex(RuntimeError, "refusing to test a different GPU"):
-            vulkan_environment.render_device_candidates(devices, str(allocated.path))
+            with self.assertRaisesRegex(
+                RuntimeError, "refusing to test a different GPU"
+            ):
+                vulkan_environment.render_device_candidates(
+                    self.sysfs, self.dri, str(allocated.path)
+                )
         self.assertIn("denied by device cgroup", self.output.getvalue())
 
     def test_allocation_distinguishes_identical_cards(self):
         first = self.add_device()
         second = self.add_device("renderD129", "0000:02:00.0", node_source="/dev/zero")
-        devices = vulkan_environment.discover_render_devices(self.sysfs, self.dri)
         self.assertEqual(
-            vulkan_environment.render_device_candidates(devices, None), devices
+            vulkan_environment.render_device_candidates(self.sysfs, self.dri, None),
+            [first, second],
         )
         self.assertEqual(
-            vulkan_environment.render_device_candidates(devices, str(second.path)),
+            vulkan_environment.render_device_candidates(
+                self.sysfs, self.dri, str(second.path)
+            ),
             [second],
         )
         self.assertEqual(
             vulkan_environment.render_device_candidates(
-                devices, f"{second.path},{first.path}"
+                self.sysfs, self.dri, f"{second.path},{first.path}"
             ),
             [second, first],
         )
 
     def test_allocation_list_rejects_unavailable_or_empty_members(self):
         device = self.add_device()
-        devices = vulkan_environment.discover_render_devices(self.sysfs, self.dri)
         for allocation in (
             f"{device.path},{self.dri / 'renderD129'}",
             f"{self.dri / 'renderD129'},{device.path}",
@@ -150,7 +148,9 @@ class VulkanEnvironmentTest(unittest.TestCase):
         ):
             with self.subTest(allocation=allocation):
                 with self.assertRaisesRegex(RuntimeError, "inaccessible AMD render"):
-                    vulkan_environment.render_device_candidates(devices, allocation)
+                    vulkan_environment.render_device_candidates(
+                        self.sysfs, self.dri, allocation
+                    )
 
     def test_selects_discrete_gpu_within_allocation_list(self):
         self.add_device()
