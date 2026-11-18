@@ -211,6 +211,7 @@ global.rodata.def @text = bytes("4c6f6f6d00")
 // ====
 namespace shared {
 extern const unsigned declaration[2];
+extern const unsigned definition[2] __attribute__((aligned(32)));
 extern const unsigned definition[2] = {3, 5};
 inline constexpr unsigned inline_definition[2] = {7, 11};
 static constexpr unsigned private_definition[2] = {13, 17};
@@ -244,7 +245,7 @@ func.def public @linked_lookup(%index: i32) -> (i32) {
   func.return %26 : i32
 }
 
-global.rodata.def public @shared.definition = align(4) bytes("0300000005000000")
+global.rodata.def public @shared.definition = align(32) bytes("0300000005000000")
 
 global.rodata.decl @shared.declaration
 

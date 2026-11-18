@@ -3351,6 +3351,13 @@ Standard `alignas` retains its own validation rules. Explicit alignment on
 shared scalar, vector, and fixed scalar-array objects reaches the workgroup
 allocation's `align` operand.
 
+A GNU alignment on a pointer declaration describes the pointer object.
+For example, `typedef unsigned* __attribute__((aligned(16))) P;` puts a
+member of type `P` at a 16-byte boundary. The pointer occupies the source
+ABI's usual four or eight bytes, and its pointee keeps the alignment of
+`unsigned`. On an LP64 target, `struct { char tag; P p; unsigned data; }`
+therefore puts `p` at byte 16 and `data` at byte 24.
+
 Compound `__builtin_offsetof` designators follow nested members and constant
 array indices. For example, `__builtin_offsetof(Block<unsigned>, words[2])` is
 `10`. Indices may become constant through template instantiation; the complete
@@ -3360,8 +3367,8 @@ Bitfield layouts retain actual bit positions, including fields crossing their
 declared storage units and zero-width alignment boundaries. Layout queries are
 independent of value admission; bitfield memory operations remain unsupported.
 Packed bases retain their source offsets and alignment. Virtual members,
-Microsoft bitfield ABI layouts, aligned
-typedefs, and GNU `aligned` without an explicit argument produce source diagnostics.
+Microsoft bitfield ABI layouts, and GNU `aligned` without an explicit argument
+produce source diagnostics.
 
 Explicit fixed vectors retain their lanes and element widths in High IR:
 
