@@ -262,25 +262,25 @@ class VulkanFiniteFileTest : public CtsTestBase<> {
 };
 
 TEST_P(VulkanFiniteFileTest, HostRowsCaptureBindingsAndMetadata) {
-  for (size_t count : {0, 1, 65}) {
+  for (size_t count : {0, 1, 32, 64, 65}) {
     RoundTrip(Form::kHostRows, count);
   }
 }
 
 TEST_P(VulkanFiniteFileTest, HostStridedRowsAndSlices) {
-  for (size_t count : {0, 1, 65}) {
+  for (size_t count : {0, 1, 32, 64, 65}) {
     RoundTrip(Form::kHostStrided, count);
   }
 }
 
 TEST_P(VulkanFiniteFileTest, IndirectRowsAcquireOnlyThePublishedPrefix) {
-  for (size_t count : {0, 1, 65, 66}) {
+  for (size_t count : {0, 1, 32, 64, 65, 66}) {
     RoundTrip(Form::kIndirectRows, count);
   }
 }
 
 TEST_P(VulkanFiniteFileTest, IndirectStridedRowsAndSlices) {
-  for (size_t count : {0, 1, 65}) {
+  for (size_t count : {0, 1, 32, 64, 65}) {
     RoundTrip(Form::kIndirectStrided, count);
   }
 }

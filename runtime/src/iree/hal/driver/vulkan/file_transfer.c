@@ -701,9 +701,11 @@ static void iree_hal_vulkan_file_drain(
       }
       const uint32_t first =
           iree_math_count_trailing_zeros_u64(transfer->free_pieces);
-      const uint32_t capacity = iree_min(IREE_HAL_VULKAN_FILE_BATCH_CAPACITY,
-                                         iree_math_count_trailing_zeros_u64(~(
-                                             transfer->free_pieces >> first)));
+      // An entirely free mask has no unavailable bit. Limit the scan to one
+      // native batch so that this case yields its full capacity.
+      const uint32_t capacity = iree_math_count_trailing_zeros_u64_width(
+          ~(transfer->free_pieces >> first),
+          IREE_HAL_VULKAN_FILE_BATCH_CAPACITY);
       window->pieces = transfer->pieces + first;
       window->copies = transfer->copies + first;
       transfer->failure = iree_hal_vulkan_file_window_fill(window, capacity);
