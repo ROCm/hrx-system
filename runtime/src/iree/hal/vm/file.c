@@ -197,7 +197,7 @@ static const iree_vm_module_signature_type_t arguments[] = {
      2},
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
          IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY |
-         IREE_VM_SCALAR_TYPE_I64,
+         (iree_vm_module_signature_type_kind_t)IREE_VM_SCALAR_TYPE_I64,
      0},
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
          IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY |
@@ -205,7 +205,7 @@ static const iree_vm_module_signature_type_t arguments[] = {
      0},
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN |
          IREE_VM_MODULE_SIGNATURE_TYPE_KIND_SPAN_READ_ONLY |
-         IREE_VM_SCALAR_TYPE_I64,
+         (iree_vm_module_signature_type_kind_t)IREE_VM_SCALAR_TYPE_I64,
      0},
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 1},
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 0},
