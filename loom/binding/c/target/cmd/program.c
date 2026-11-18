@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/base/internal/arena.h"
+#include "loom/binding/c/src/compile_report.h"
 #include "loom/binding/c/src/config.h"
 #include "loom/binding/c/src/context.h"
 #include "loom/binding/c/src/diagnostic.h"
@@ -16,6 +17,7 @@
 #include "loom/binding/c/src/link_materialization.h"
 #include "loom/binding/c/src/module.h"
 #include "loom/binding/c/src/module_bytecode.h"
+#include "loom/binding/c/src/option_chain.h"
 #include "loom/binding/c/src/product.h"
 #include "loom/binding/c/src/request_index_overlay.h"
 #include "loom/binding/c/src/result.h"
@@ -114,9 +116,8 @@ static loomc_status_t loomc_cmd_program_validate_artifact_flags(
 static loomc_status_t loomc_cmd_program_product_validate_options(
     loomc_workspace_t* workspace,
     const loomc_cmd_program_product_options_t* options,
-    loomc_allocator_t allocator,
-    const loomc_target_specialization_options_t** out_target_specialization) {
-  *out_target_specialization = NULL;
+    loomc_allocator_t allocator, loomc_option_chain_t* out_options) {
+  *out_options = (loomc_option_chain_t){0};
   if (workspace == NULL || options == NULL) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "workspace and product options must not be NULL");
@@ -137,8 +138,11 @@ static loomc_status_t loomc_cmd_program_product_validate_options(
         LOOMC_STATUS_INVALID_ARGUMENT,
         "command product options structure_size is too small");
   }
-  LOOMC_RETURN_IF_ERROR(loomc_target_specialization_options_resolve(
-      options->next, out_target_specialization));
+  LOOMC_RETURN_IF_ERROR(loomc_option_chain_resolve(
+      options->next,
+      LOOMC_OPTION_CHAIN_ALLOW_TARGET_SPECIALIZATION |
+          LOOMC_OPTION_CHAIN_ALLOW_COMPILE_REPORT,
+      out_options));
   LOOMC_RETURN_IF_ERROR(
       loomc_cmd_program_validate_artifact_flags(options->artifact_flags));
   if (options->compiler == NULL) {
@@ -164,7 +168,7 @@ static loomc_status_t loomc_cmd_program_product_validate_options(
         "command product construction requires an explicit or INPUT root");
   }
   LOOMC_RETURN_IF_ERROR(loomc_link_materialization_validate_targets(
-      options->target_profile, *out_target_specialization,
+      options->target_profile, out_options->target_specialization,
       loomc_context_target_environment(loomc_link_index_context(
           loomc_cmd_compiler_index(options->compiler)))));
   return loomc_config_validate_text_options(&options->config);
@@ -174,9 +178,8 @@ static loomc_status_t loomc_cmd_program_product_validate_request_options(
     loomc_context_t* context, loomc_workspace_t* workspace,
     const loomc_request_t* request,
     const loomc_cmd_program_request_options_t* options,
-    loomc_allocator_t allocator,
-    const loomc_target_specialization_options_t** out_target_specialization) {
-  *out_target_specialization = NULL;
+    loomc_allocator_t allocator, loomc_option_chain_t* out_options) {
+  *out_options = (loomc_option_chain_t){0};
   if (context == NULL || workspace == NULL || request == NULL) {
     return loomc_make_status(
         LOOMC_STATUS_INVALID_ARGUMENT,
@@ -216,8 +219,11 @@ static loomc_status_t loomc_cmd_program_product_validate_request_options(
         LOOMC_STATUS_INVALID_ARGUMENT,
         "command request options structure_size is too small");
   }
-  LOOMC_RETURN_IF_ERROR(loomc_target_specialization_options_resolve(
-      options->next, out_target_specialization));
+  LOOMC_RETURN_IF_ERROR(loomc_option_chain_resolve(
+      options->next,
+      LOOMC_OPTION_CHAIN_ALLOW_TARGET_SPECIALIZATION |
+          LOOMC_OPTION_CHAIN_ALLOW_COMPILE_REPORT,
+      out_options));
   LOOMC_RETURN_IF_ERROR(
       loomc_cmd_program_validate_artifact_flags(options->artifact_flags));
   if (options->library_index != NULL) {
@@ -234,7 +240,7 @@ static loomc_status_t loomc_cmd_program_product_validate_request_options(
     }
   }
   LOOMC_RETURN_IF_ERROR(loomc_link_materialization_validate_targets(
-      options->target_profile, *out_target_specialization,
+      options->target_profile, out_options->target_specialization,
       loomc_context_target_environment(context)));
   return loomc_config_validate_text_options(&options->config);
 }
@@ -242,9 +248,8 @@ static loomc_status_t loomc_cmd_program_product_validate_request_options(
 static loomc_status_t loomc_cmd_program_product_validate_module_options(
     loomc_workspace_t* workspace, const loomc_module_t* module,
     const loomc_cmd_program_module_options_t* options,
-    loomc_allocator_t allocator,
-    const loomc_target_specialization_options_t** out_target_specialization) {
-  *out_target_specialization = NULL;
+    loomc_allocator_t allocator, loomc_option_chain_t* out_options) {
+  *out_options = (loomc_option_chain_t){0};
   if (workspace == NULL || module == NULL || options == NULL) {
     return loomc_make_status(
         LOOMC_STATUS_INVALID_ARGUMENT,
@@ -266,8 +271,11 @@ static loomc_status_t loomc_cmd_program_product_validate_module_options(
         LOOMC_STATUS_INVALID_ARGUMENT,
         "command module options structure_size is too small");
   }
-  LOOMC_RETURN_IF_ERROR(loomc_target_specialization_options_resolve(
-      options->next, out_target_specialization));
+  LOOMC_RETURN_IF_ERROR(loomc_option_chain_resolve(
+      options->next,
+      LOOMC_OPTION_CHAIN_ALLOW_TARGET_SPECIALIZATION |
+          LOOMC_OPTION_CHAIN_ALLOW_COMPILE_REPORT,
+      out_options));
   LOOMC_RETURN_IF_ERROR(
       loomc_cmd_program_validate_artifact_flags(options->artifact_flags));
   loomc_context_t* context = loomc_module_context(module);
@@ -317,7 +325,7 @@ static loomc_status_t loomc_cmd_program_product_validate_module_options(
         "command product construction requires an explicit or INPUT root");
   }
   LOOMC_RETURN_IF_ERROR(loomc_link_materialization_validate_targets(
-      options->target_profile, *out_target_specialization,
+      options->target_profile, out_options->target_specialization,
       loomc_context_target_environment(context)));
   return loomc_config_validate_text_options(&options->config);
 }
@@ -698,9 +706,25 @@ static loomc_status_t loomc_cmd_program_product_build_indexed(
         materialization_environment,
     loomc_request_sink_t request_sink,
     loomc_emit_artifact_flags_t artifact_flags,
+    const loomc_compile_report_options_t* report_options,
     iree_arena_allocator_t* scratch_arena, loomc_result_t* result,
     loomc_allocator_t allocator, loomc_product_t** out_product) {
   *out_product = NULL;
+  loomc_compile_report_state_t* report_state = NULL;
+  if (report_options != NULL &&
+      report_options->mode != LOOMC_COMPILE_REPORT_MODE_NONE) {
+    LOOMC_RETURN_IF_ERROR(loomc_status_from_iree(iree_arena_allocate(
+        scratch_arena, sizeof(*report_state), (void**)&report_state)));
+    loomc_compile_report_state_initialize(
+        report_options->mode, report_options->format,
+        loomc_workspace_block_pool(workspace), result, report_state);
+    report_state->report.backend_name = IREE_SV("cmd");
+    report_state->report.target_family_name = IREE_SV("cmd");
+    report_state->report.artifact_kind =
+        LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
+    report_state->report.artifact_format =
+        IREE_SV(LOOMC_ARTIFACT_FORMAT_CMD_PROGRAM);
+  }
   loom_cmd_program_plan_t plan = {0};
   loom_cmd_program_artifact_set_t artifact_set = {0};
   loomc_product_t* product = NULL;
@@ -754,7 +778,8 @@ static loomc_status_t loomc_cmd_program_product_build_indexed(
   if (iree_status_is_ok(plan_status) && plan_valid &&
       loomc_result_succeeded(result)) {
     plan_status = loom_cmd_program_artifact_set_build(
-        &plan, iree_allocator_from_loomc(allocator), &artifact_set);
+        &plan, report_state ? &report_state->report : NULL,
+        iree_allocator_from_loomc(allocator), &artifact_set);
   }
   loomc_status_t status = loomc_cmd_program_product_translate_plan_status(
       &invocation, diagnostic_count_before, plan_status);
@@ -771,6 +796,35 @@ static loomc_status_t loomc_cmd_program_product_build_indexed(
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
       (artifact_flags & LOOMC_EMIT_ARTIFACT_FLAG_TARGET_LISTING)) {
     status = loomc_cmd_program_capture_listing(&plan, result);
+  }
+  if (report_state != NULL) {
+    if (loomc_status_is_ok(status)) {
+      report_state->report.status_code =
+          (iree_status_code_t)loomc_result_status_code(result);
+      if (loomc_result_succeeded(result)) {
+        uint64_t artifact_size = 0;
+        for (iree_host_size_t i = 0; i < artifact_set.programs.count; ++i) {
+          artifact_size +=
+              iree_byte_sequence_length(artifact_set.programs.values[i].data);
+        }
+        loom_target_compile_report_record_artifact_size(&report_state->report,
+                                                        artifact_size);
+        if (artifact_set.programs.count == 1) {
+          report_state->report.function_name =
+              artifact_set.programs.values[0].symbol;
+        }
+      }
+      loomc_string_view_t identifier = report_options->identifier;
+      if (loomc_string_view_is_empty(identifier)) {
+        identifier =
+            report_options->format == LOOMC_COMPILE_REPORT_FORMAT_TEXT
+                ? loomc_make_cstring_view("command-program.compile-report.txt")
+                : loomc_make_cstring_view(
+                      "command-program.compile-report.json");
+      }
+      status = loomc_compile_report_state_finish(report_state, identifier);
+    }
+    loomc_compile_report_state_deinitialize(report_state);
   }
   loom_cmd_program_plan_deinitialize(&plan);
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
@@ -798,9 +852,9 @@ loomc_status_t loomc_cmd_program_product_build(
   }
   *out_product = NULL;
   *out_result = NULL;
-  const loomc_target_specialization_options_t* target_specialization = NULL;
+  loomc_option_chain_t option_chain = {0};
   LOOMC_RETURN_IF_ERROR(loomc_cmd_program_product_validate_options(
-      workspace, options, allocator, &target_specialization));
+      workspace, options, allocator, &option_chain));
 
   loomc_result_t* result = NULL;
   LOOMC_RETURN_IF_ERROR(loomc_result_create(
@@ -829,8 +883,8 @@ loomc_status_t loomc_cmd_program_product_build(
     status = loomc_link_materialization_state_initialize(
         loomc_link_index_context(loomc_cmd_compiler_index(options->compiler)),
         workspace, loomc_cmd_compiler_index(options->compiler),
-        &options->config, target_specialization, result, &scratch_arena,
-        allocator, &materialization_state);
+        &options->config, option_chain.target_specialization, result,
+        &scratch_arena, allocator, &materialization_state);
     materialization_state.specialization.deployment_profile =
         options->target_profile;
     materialization_state.specialization.deployment_phase =
@@ -847,8 +901,9 @@ loomc_status_t loomc_cmd_program_product_build(
               loomc_cmd_compiler_index(options->compiler)),
           loomc_cmd_compiler_sources(options->compiler), root_symbol_ordinals,
           root_symbol_count, &materialization_environment,
-          options->request_sink, options->artifact_flags, &scratch_arena,
-          result, allocator, &product);
+          options->request_sink, options->artifact_flags,
+          option_chain.compile_report_options, &scratch_arena, result,
+          allocator, &product);
     }
     loomc_link_materialization_state_deinitialize(&materialization_state);
   }
@@ -876,9 +931,9 @@ loomc_status_t loomc_cmd_program_product_build_module(
   }
   *out_product = NULL;
   *out_result = NULL;
-  const loomc_target_specialization_options_t* target_specialization = NULL;
+  loomc_option_chain_t option_chain = {0};
   LOOMC_RETURN_IF_ERROR(loomc_cmd_program_product_validate_module_options(
-      workspace, module, options, allocator, &target_specialization));
+      workspace, module, options, allocator, &option_chain));
 
   loomc_context_t* context = loomc_module_context(module);
   loomc_result_t* result = NULL;
@@ -929,8 +984,9 @@ loomc_status_t loomc_cmd_program_product_build_module(
     loomc_link_materialization_state_t materialization_state = {0};
     status = loomc_link_materialization_state_initialize_overlay(
         context, workspace, options->library_index, module_provider_ordinal,
-        /*appended_source=*/NULL, &options->config, target_specialization,
-        result, &scratch_arena, allocator, &materialization_state);
+        /*appended_source=*/NULL, &options->config,
+        option_chain.target_specialization, result, &scratch_arena, allocator,
+        &materialization_state);
     materialization_state.specialization.deployment_profile =
         options->target_profile;
     materialization_state.specialization.deployment_phase =
@@ -943,8 +999,9 @@ loomc_status_t loomc_cmd_program_product_build_module(
       status = loomc_cmd_program_product_build_indexed(
           context, workspace, module_index, /*native_sources=*/NULL,
           root_symbol_ordinals, root_symbol_count, &materialization_environment,
-          options->request_sink, options->artifact_flags, &scratch_arena,
-          result, allocator, &product);
+          options->request_sink, options->artifact_flags,
+          option_chain.compile_report_options, &scratch_arena, result,
+          allocator, &product);
     }
     loomc_link_materialization_state_deinitialize(&materialization_state);
   }
@@ -974,9 +1031,9 @@ loomc_status_t loomc_cmd_program_product_build_request(
   }
   *out_product = NULL;
   *out_result = NULL;
-  const loomc_target_specialization_options_t* target_specialization = NULL;
+  loomc_option_chain_t option_chain = {0};
   LOOMC_RETURN_IF_ERROR(loomc_cmd_program_product_validate_request_options(
-      context, workspace, request, options, allocator, &target_specialization));
+      context, workspace, request, options, allocator, &option_chain));
 
   const loomc_cmd_program_request_options_t default_options = {0};
   if (options == NULL) {
@@ -1000,8 +1057,8 @@ loomc_status_t loomc_cmd_program_product_build_request(
     status = loomc_link_materialization_state_initialize_overlay(
         context, workspace, options->library_index,
         request_overlay.request_provider_ordinal, loomc_request_source(request),
-        &options->config, target_specialization, result, &scratch_arena,
-        allocator, &materialization_state);
+        &options->config, option_chain.target_specialization, result,
+        &scratch_arena, allocator, &materialization_state);
     materialization_state.specialization.deployment_profile =
         options->target_profile;
     materialization_state.specialization.deployment_phase =
@@ -1015,8 +1072,9 @@ loomc_status_t loomc_cmd_program_product_build_request(
           context, workspace, request_overlay.module_index,
           /*native_sources=*/NULL, request_overlay.root_symbol_ordinals,
           request_overlay.root_symbol_count, &materialization_environment,
-          options->request_sink, options->artifact_flags, &scratch_arena,
-          result, allocator, &product);
+          options->request_sink, options->artifact_flags,
+          option_chain.compile_report_options, &scratch_arena, result,
+          allocator, &product);
     }
     loomc_link_materialization_state_deinitialize(&materialization_state);
   }

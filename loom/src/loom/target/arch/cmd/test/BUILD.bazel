@@ -21,6 +21,7 @@ loom_check_test_suite(
         "launch_counts.loom-test",
         "low.loom-test",
         "planning.loom-test",
+        "report.loom-test",
         "roundtrip.loom-test",
         "scheduling.loom-test",
         "storage.loom-test",

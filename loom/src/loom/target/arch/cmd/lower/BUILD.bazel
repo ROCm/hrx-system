@@ -239,6 +239,22 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "report",
+    srcs = ["report.c"],
+    hdrs = ["report.h"],
+    deps = [
+        ":program_plan",
+        ":program_writer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/runtime/command:program",
+        "//loom/src/loom/target/reporting:report",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "serialize",
     srcs = ["serialize.c"],
     hdrs = ["serialize.h"],
@@ -246,6 +262,7 @@ loom_cc_library(
     deps = [
         ":program_plan",
         ":program_writer",
+        ":report",
         "//loom/src/loom/codegen/low:function",
         "//loom/src/loom/codegen/low:representation_binding",
         "//loom/src/loom/ir",

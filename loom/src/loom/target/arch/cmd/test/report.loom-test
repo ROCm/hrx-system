@@ -1,0 +1,238 @@
+// The report preserves caller root order, duplicate roots, concurrent dispatch
+// order, exact zero counts, and barriers folded into the following command.
+// RUN: emit command-program @second,@first,@second report
+
+kernel.entry.decl @work(%output: buffer)
+
+command.def public @first() launch(%output: buffer) {
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  %c0 = index.constant 0 : index
+  command.concurrent {
+    kernel.dispatch @work[%c1, %c2, %c3](%output) : [index, index, index](buffer)
+    kernel.dispatch @work[%c0](%output) : [index](buffer)
+  }
+  kernel.dispatch @work[%c2](%output) : [index](buffer)
+  command.return
+}
+
+command.def public @second() launch(%output: buffer) {
+  %c1 = index.constant 1 : index
+  kernel.dispatch @work[%c1](%output) : [index](buffer)
+  command.return
+}
+
+// ----
+COMPILE-REPORT: summary artifact=target-artifact status=OK function=- backend=cmd bundle=- export=- export_symbol=- config=- lowered=- artifact_bytes=811
+command_program[0]: @second
+  commands: 1
+    dispatch_direct: 1
+  barrier_before_count: 0
+  resources: fixed=0 rebindable=1 executables=1 entries=1
+  placement: bindings=1 parameter_roots=0 parameters=0
+  transient: none
+  launch_counts: none
+  command[0]: dispatch_direct @work arguments=1 workgroups=[1, 1, 1]
+  binding[0]: rebindable[0]
+command_program[1]: @first
+  commands: 3
+    dispatch_direct: 3
+  barrier_before_count: 1
+  resources: fixed=0 rebindable=1 executables=1 entries=1
+  placement: bindings=1 parameter_roots=0 parameters=0
+  transient: none
+  launch_counts: none
+  command[0]: dispatch_direct @work arguments=1 workgroups=[1, 2, 3]
+  command[1]: dispatch_direct @work arguments=1 workgroups=[0, 1, 1]
+  command[2]: dispatch_direct barrier_before @work arguments=1 workgroups=[2, 1, 1]
+  binding[0]: rebindable[0]
+command_program[2]: @second
+  commands: 1
+    dispatch_direct: 1
+  barrier_before_count: 0
+  resources: fixed=0 rebindable=1 executables=1 entries=1
+  placement: bindings=1 parameter_roots=0 parameters=0
+  transient: none
+  launch_counts: none
+  command[0]: dispatch_direct @work arguments=1 workgroups=[1, 1, 1]
+  binding[0]: rebindable[0]
+
+// ====
+
+// Immutable parameters and mutable launch buffers select distinct indirect
+// dispatch forms. Parameter keys and offsets remain available after encoding.
+// RUN: emit command-program @placed report
+
+kernel.entry.decl @work(%data: view<4xi32>)
+
+command.def public @placed() launch(%parameters: buffer, %count_storage: buffer, %clock: view<1xi64>) {
+  %c0 = index.constant 0 : offset
+  %counts = buffer.view %count_storage[%c0] : buffer -> view<3xi32>
+  %weights = command.parameter %parameters, "weights" : view<4xi32>
+  %fixed_counts = command.parameter %parameters, "counts" : view<3xi32>
+  kernel.dispatch @work[%fixed_counts](%weights) : [view<3xi32>](view<4xi32>)
+  kernel.dispatch @work[%counts](%weights) : [view<3xi32>](view<4xi32>)
+  command.timestamp %clock : view<1xi64>
+  command.return
+}
+
+// ----
+COMPILE-REPORT: summary artifact=target-artifact status=OK function=placed backend=cmd bundle=- export=- export_symbol=- config=- lowered=- artifact_bytes=526
+command_program[0]: @placed
+  commands: 3
+    dispatch_indirect_static: 1
+    dispatch_indirect_dynamic: 1
+    timestamp: 1
+  barrier_before_count: 2
+  resources: fixed=1 rebindable=2 executables=1 entries=1
+  placement: bindings=3 parameter_roots=1 parameters=2
+  transient: none
+  launch_counts: none
+  command[0]: dispatch_indirect_static @work arguments=1 counts=fixed[0]+256:12
+  command[1]: dispatch_indirect_dynamic barrier_before @work arguments=1 counts=rebindable[0]+0:12
+  command[2]: timestamp barrier_before target=rebindable[1]+0:8
+  binding[0]: fixed[0]
+  binding[1]: rebindable[0]
+  binding[2]: rebindable[1]
+  parameter_root: root[0] bytes=268 alignment=256
+  parameter[0]: weights fixed[0]+0:16 alignment=256
+  parameter[1]: counts fixed[0]+256:12 alignment=256
+
+// ====
+
+// Summary mode retains aggregate requirements without per-command arrays.
+// RUN: emit command-program @slab report-summary
+
+kernel.entry.decl @consume(%storage: buffer)
+
+command.def public @slab() launch() {
+  %c1 = index.constant 1 : index
+  %small_bytes = index.constant 64 : offset
+  %large_bytes = index.constant 80 : offset
+  %small = buffer.alloca<global> align(16) %small_bytes : buffer
+  kernel.dispatch @consume[%c1](%small) : [index](buffer)
+  %large = buffer.alloca<global> align(16) %large_bytes : buffer
+  kernel.dispatch @consume[%c1](%large) : [index](buffer)
+  command.return
+}
+
+// ----
+COMPILE-REPORT: summary artifact=target-artifact status=OK function=slab backend=cmd bundle=- export=- export_symbol=- config=- lowered=- artifact_bytes=281
+command_program[0]: @slab
+  commands: 2
+    dispatch_direct: 2
+  barrier_before_count: 1
+  resources: fixed=0 rebindable=1 executables=1 entries=1
+  placement: bindings=0 parameter_roots=0 parameters=0
+  transient: root[0] bytes=80 alignment=16
+  launch_counts: none
+
+// ====
+
+// Device-produced count helpers appear in compiled order. Reused samples and
+// fresh observations must expose different dispatch/barrier schedules.
+// RUN: emit command-program @shared_sample,@fresh_observations report
+
+test.target<device> @device
+
+kernel.def target(@device) @consume_sample(%word: i32, %divisor: index) {
+  %wide = scalar.extui %word : i32 to i64
+  %count = index.cast %wide : i64 to index
+  %groups = index.div %count, %divisor : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%storage: view<1xi32>) {
+  %c0 = scalar.constant 0 : i32
+  %group = kernel.workgroup.id<x> : index
+  %first = index.constant 0 : index
+  %leader = index.cmp eq, %group, %first : index
+  scf.if %leader {
+    view.store %c0, %storage[0] : i32, view<1xi32>
+  }
+  kernel.return
+}
+
+kernel.def target(@device) @consume_current(%source: view<1xi32>) {
+  %word = view.load %source[0] : view<1xi32> -> i32
+  %wide = scalar.extui %word : i32 to i64
+  %groups = index.cast %wide : i64 to index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%storage: view<1xi32>) {
+  %c0 = scalar.constant 0 : i32
+  %group = kernel.workgroup.id<x> : index
+  %first = index.constant 0 : index
+  %leader = index.cmp eq, %group, %first : index
+  scf.if %leader {
+    view.store %c0, %storage[0] : i32, view<1xi32>
+  }
+  kernel.return
+}
+
+command.def public @shared_sample() launch(%storage: view<1xi32>) {
+  %word = view.load %storage[0] : view<1xi32> -> i32
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  kernel.launch @consume_sample[%word, %c1](%storage) : [i32, index](view<1xi32>)
+  kernel.launch @consume_sample[%word, %c2](%storage) : [i32, index](view<1xi32>)
+  %bytes = index.constant 4 : offset
+  %c0 = index.constant 0 : offset
+  %scratch = buffer.alloca<global> align(4) %bytes : buffer
+  %scratch_view = buffer.view %scratch[%c0] : buffer -> view<1xi32>
+  kernel.launch @consume_sample[%word, %c1](%scratch_view) : [i32, index](view<1xi32>)
+  kernel.launch @consume_sample[%word, %c2](%scratch_view) : [i32, index](view<1xi32>)
+  command.return
+}
+
+command.def public @fresh_observations() launch(%storage: view<1xi32>) {
+  kernel.launch @consume_current[%storage](%storage) : [view<1xi32>](view<1xi32>)
+  kernel.launch @consume_current[%storage](%storage) : [view<1xi32>](view<1xi32>)
+  command.return
+}
+
+
+// ----
+COMPILE-REPORT: summary artifact=target-artifact status=OK function=- backend=cmd bundle=- export=- export_symbol=- config=- lowered=- artifact_bytes=1128
+command_program[0]: @shared_sample
+  commands: 5
+    dispatch_direct: 1
+    dispatch_indirect_dynamic: 4
+  barrier_before_count: 4
+  resources: fixed=0 rebindable=2 executables=2 entries=2
+  placement: bindings=1 parameter_roots=0 parameters=0
+  transient: root[1] bytes=28 alignment=4
+  launch_counts: none
+  command[0]: dispatch_direct @__command_launch_counts_0 arguments=2 workgroups=[1, 1, 1]
+  command[1]: dispatch_indirect_dynamic barrier_before @consume_sample arguments=1 counts=rebindable[1]+0:12
+  command[2]: dispatch_indirect_dynamic barrier_before @consume_sample arguments=1 counts=rebindable[1]+12:12
+  command[3]: dispatch_indirect_dynamic barrier_before @consume_sample arguments=1 counts=rebindable[1]+0:12
+  command[4]: dispatch_indirect_dynamic barrier_before @consume_sample arguments=1 counts=rebindable[1]+12:12
+  binding[0]: rebindable[0]
+command_program[1]: @fresh_observations
+  commands: 4
+    dispatch_direct: 2
+    dispatch_indirect_dynamic: 2
+  barrier_before_count: 3
+  resources: fixed=0 rebindable=2 executables=3 entries=3
+  placement: bindings=1 parameter_roots=0 parameters=0
+  transient: root[1] bytes=12 alignment=4
+  launch_counts: none
+  command[0]: dispatch_direct @__command_launch_counts_1 arguments=2 workgroups=[1, 1, 1]
+  command[1]: dispatch_indirect_dynamic barrier_before @consume_current arguments=1 counts=rebindable[1]+0:12
+  command[2]: dispatch_direct barrier_before @__command_launch_counts_2 arguments=2 workgroups=[1, 1, 1]
+  command[3]: dispatch_indirect_dynamic barrier_before @consume_current arguments=1 counts=rebindable[1]+0:12
+  binding[0]: rebindable[0]
+
+// ====
+
+// The common JSON envelope and empty detail arrays are emitted without a
+// listing request or native target selection.
+// RUN: emit command-program @empty report-json
+
+command.def public @empty() launch() {
+  command.return
+}
+
+// ----
+{"kind":"loom.compile_report","schema_version":0,"mode":"details","artifact_kind":"target-artifact","status":{"code":0,"name":"OK"},"detail_flags":1,"command_programs":[{"root":"empty","command_count":0,"command_counts":{"fill":0,"copy":0,"dispatch_direct":0,"dispatch_indirect_static":0,"dispatch_indirect_dynamic":0,"barrier":0,"timestamp":0},"barrier_before_count":0,"fixed_buffer_count":0,"rebindable_binding_count":0,"executable_count":0,"entry_count":0,"binding_count":0,"parameter_root_count":0,"parameter_count":0,"transient":null,"launch_counts":null,"commands":[],"bindings":[],"parameter_roots":[],"parameters":[]}],"function":"empty","backend":"cmd","target_family":"cmd","target_key":null,"target_bundle":null,"target_snapshot":null,"target_export":null,"target_export_symbol":null,"target_config":null,"lowered":null,"artifact_format":"loom-command","artifact_size":152,"entries":{"count":0,"rows":[]}}

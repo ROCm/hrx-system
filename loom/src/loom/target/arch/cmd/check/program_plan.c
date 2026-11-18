@@ -9,6 +9,7 @@
 #include "loom/runtime/command/program.h"
 #include "loom/tools/loom-check/compile.h"
 #include "loom/tools/loom-check/compile_diagnostics.h"
+#include "loomc/compile_report.h"
 #include "loomc/iree.h"
 #include "loomc/module.h"
 #include "loomc/target/cmd/program.h"
@@ -20,6 +21,8 @@ typedef struct loom_cmd_program_plan_check_options_t {
   iree_host_size_t root_count;
   // Include the independently published device programs in the exact output.
   bool include_kernel_sources;
+  // Optional diagnostic artifact requested through the public product API.
+  loomc_compile_report_options_t report;
 } loom_cmd_program_plan_check_options_t;
 
 typedef struct loom_cmd_program_plan_check_requests_t {
@@ -70,14 +73,6 @@ static iree_status_t loom_cmd_program_plan_check_parse_roots(
           (int)root.size, root.data);
     }
     root = iree_string_view_substr(root, 1, IREE_HOST_SIZE_MAX);
-    for (iree_host_size_t j = 0; j < i; ++j) {
-      if (iree_string_view_equal(
-              root, iree_string_view_from_loomc(options->root_names[j]))) {
-        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "duplicate command program root '@%.*s'",
-                                (int)root.size, root.data);
-      }
-    }
     options->root_names[i] = loomc_string_view_from_iree(root);
     remaining = tail;
   }
@@ -103,6 +98,19 @@ static iree_status_t loom_cmd_program_plan_check_parse_options(
 
   if (iree_string_view_equal(option_text, IREE_SV("kernels"))) {
     out_options->include_kernel_sources = true;
+  } else if (iree_string_view_equal(option_text, IREE_SV("report")) ||
+             iree_string_view_equal(option_text, IREE_SV("report-summary")) ||
+             iree_string_view_equal(option_text, IREE_SV("report-json"))) {
+    out_options->report = (loomc_compile_report_options_t){
+        .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+        .structure_size = sizeof(out_options->report),
+        .mode = iree_string_view_equal(option_text, IREE_SV("report-summary"))
+                    ? LOOMC_COMPILE_REPORT_MODE_SUMMARY
+                    : LOOMC_COMPILE_REPORT_MODE_DETAILS,
+        .format = iree_string_view_equal(option_text, IREE_SV("report-json"))
+                      ? LOOMC_COMPILE_REPORT_FORMAT_JSON
+                      : LOOMC_COMPILE_REPORT_FORMAT_TEXT,
+    };
   } else if (!iree_string_view_is_empty(option_text)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unexpected command program emit option '%.*s'",
@@ -216,10 +224,15 @@ static iree_status_t loom_cmd_program_plan_check_emit_provider_execute(
   const loomc_cmd_program_module_options_t product_options = {
       .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_MODULE_OPTIONS,
       .structure_size = sizeof(product_options),
+      .next = options.report.mode != LOOMC_COMPILE_REPORT_MODE_NONE
+                  ? &options.report
+                  : NULL,
       .provider_name = loomc_make_cstring_view("command_program_check"),
       .root_symbols = options.root_names,
       .root_symbol_count = options.root_count,
-      .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_TARGET_LISTING,
+      .artifact_flags = options.report.mode == LOOMC_COMPILE_REPORT_MODE_NONE
+                            ? LOOMC_EMIT_ARTIFACT_FLAG_TARGET_LISTING
+                            : 0,
       .request_sink =
           {
               .publish = loom_cmd_program_plan_check_capture_request,
@@ -246,8 +259,16 @@ static iree_status_t loom_cmd_program_plan_check_emit_provider_execute(
   const loomc_artifact_t* listing = NULL;
   if (iree_status_is_ok(status) && succeeded) {
     status = loom_check_compile_select_artifact(
-        result, LOOMC_ARTIFACT_KIND_TEXT,
-        IREE_SV(LOOMC_ARTIFACT_FORMAT_CMD_PROGRAM_LISTING), &listing);
+        result,
+        options.report.mode == LOOMC_COMPILE_REPORT_MODE_NONE
+            ? LOOMC_ARTIFACT_KIND_TEXT
+            : LOOMC_ARTIFACT_KIND_REPORT,
+        options.report.mode == LOOMC_COMPILE_REPORT_MODE_NONE
+            ? IREE_SV(LOOMC_ARTIFACT_FORMAT_CMD_PROGRAM_LISTING)
+            : (options.report.format == LOOMC_COMPILE_REPORT_FORMAT_JSON
+                   ? IREE_SV(LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_JSON)
+                   : IREE_SV(LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_TEXT)),
+        &listing);
   }
   if (iree_status_is_ok(status) && listing != NULL) {
     status = iree_status_from_loomc(loomc_byte_sequence_enumerate(

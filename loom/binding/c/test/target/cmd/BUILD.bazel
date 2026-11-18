@@ -33,6 +33,30 @@ loom_cc_test(
     ],
 )
 
+iree_c_embed_data(
+    name = "report_testdata",
+    testonly = True,
+    srcs = ["report.loom"],
+    c_file_output = "report_testdata.c",
+    flatten = True,
+    h_file_output = "report_testdata.h",
+    identifier = "loomc_cmd_report_testdata",
+    visibility = ["//visibility:private"],
+)
+
+loom_cc_test(
+    name = "report_test",
+    srcs = ["report_test.cc"],
+    deps = [
+        ":report_testdata",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/cmd",
+        "//loom/binding/c/test:test_util",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_test(
     name = "specialization_test",
     srcs = ["specialization_test.cc"],

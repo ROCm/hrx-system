@@ -1,0 +1,10 @@
+// Exercises public result ownership with source-owned root, entry, and parameter
+// names. Report contents are checked separately by the authored cmd report tests.
+kernel.entry.decl @consume(%weights: view<4xi32>, %output: buffer)
+
+command.def public @dispatch() launch(%parameters: buffer, %output: buffer) {
+  %weights = command.parameter %parameters, "block.0.weights" : view<4xi32>
+  %c1 = index.constant 1 : index
+  kernel.dispatch @consume[%c1](%weights, %output) : [index](view<4xi32>, buffer)
+  command.return
+}

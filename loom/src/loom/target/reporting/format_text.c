@@ -9,6 +9,7 @@
 #include <inttypes.h>
 #include <stdint.h>
 
+#include "loom/target/reporting/format_command.h"
 #include "loom/target/reporting/format_loop_pipeline.h"
 #include "loom/target/reporting/format_pipeline.h"
 #include "loom/target/reporting/format_planning.h"
@@ -975,6 +976,8 @@ iree_status_t loom_target_compile_report_format_text(
   }
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_format_summary(report, options, builder));
+  IREE_RETURN_IF_ERROR(loom_target_compile_report_format_commands_text(
+      report, options->mode, builder));
   IREE_RETURN_IF_ERROR(loom_target_compile_report_format_loop_pipelines_text(
       report, options->mode, builder));
   if (iree_any_bit_set(report->detail_flags,

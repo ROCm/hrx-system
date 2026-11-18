@@ -36,7 +36,7 @@ extern "C" {
 
 /// Compile report serialization format.
 typedef enum loomc_compile_report_format_e {
-  /// Emits the stable structured JSON representation.
+  /// Emits structured diagnostic JSON for this compiler version.
   LOOMC_COMPILE_REPORT_FORMAT_JSON = 0,
 
   /// Emits bounded human-readable text.
@@ -48,7 +48,7 @@ typedef enum loomc_compile_report_mode_e {
   /// Does not request a compile report.
   LOOMC_COMPILE_REPORT_MODE_NONE = 0,
 
-  /// Requests stable target, status, artifact, and summary compiler facts.
+  /// Requests target, status, artifact, and summary compiler facts.
   LOOMC_COMPILE_REPORT_MODE_SUMMARY = 1,
 
   /// Requests summary facts plus detail rows when producers support them.
@@ -66,6 +66,12 @@ typedef enum loomc_compile_report_mode_e {
 /// transaction, including transactions rejected before emission. For combined
 /// compilation and emission, attach to the nested emission options so one
 /// report covers both stages.
+///
+/// Command-product construction accepts the same extension on its options
+/// chain. Once planning starts, it reports resolved command order and storage
+/// decisions in a result-owned artifact. Reports are diagnostic observations,
+/// not a stable programming interface for reconstructing or executing a command
+/// program.
 ///
 /// Reports do not run extra passes, force target analyses, or write filesystem
 /// paths. Result bytes retain no module or target owners. An infrastructure

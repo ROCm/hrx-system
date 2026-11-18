@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+#include "loom/target/reporting/format_command.h"
 #include "loom/target/reporting/format_pipeline.h"
 #include "loom/target/reporting/format_planning.h"
 #include "loom/target/reporting/schema.h"
@@ -1641,6 +1642,12 @@ iree_status_t loom_target_compile_report_format_json(
         loom_json_object_begin_field(&object, IREE_SV("config_bindings")));
     IREE_RETURN_IF_ERROR(
         loom_target_compile_report_format_config_bindings_json(report, stream));
+  }
+  if (report->command_plans.count != 0) {
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("command_programs")));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_format_commands_json(
+        report, options->mode, stream));
   }
   IREE_RETURN_IF_ERROR(
       loom_target_compile_report_json_write_optional_string_field(

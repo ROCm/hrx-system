@@ -514,7 +514,7 @@ command.def public @root() launch(%count_storage: buffer, %first_output: buffer,
 
   iree_byte_span_t data = iree_byte_span_empty();
   IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(
-      &plan, 0, iree_allocator_system(), &data));
+      &plan, 0, /*report=*/nullptr, iree_allocator_system(), &data));
   loom_cmd_program_t program = {};
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(data.data, data.data_length), &program));
@@ -624,7 +624,7 @@ command.def public @root() launch(%control: view<2xi32>) {
   EXPECT_EQ(plan.roots[0].transient.required_byte_length, 12u);
   iree_byte_span_t data = iree_byte_span_empty();
   IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(
-      &plan, 0, iree_allocator_system(), &data));
+      &plan, 0, /*report=*/nullptr, iree_allocator_system(), &data));
   loom_cmd_program_t program = {};
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(data.data, data.data_length), &program));
@@ -853,7 +853,7 @@ command.def public @increment_twice() launch(%source: buffer, %scratch: buffer, 
 
   loom_cmd_program_artifact_set_t artifact_set = {};
   IREE_ASSERT_OK(loom_cmd_program_artifact_set_build(
-      &plan, iree_allocator_system(), &artifact_set));
+      &plan, /*report=*/nullptr, iree_allocator_system(), &artifact_set));
   ASSERT_EQ(artifact_set.programs.count, 2u);
   EXPECT_TRUE(iree_string_view_equal(artifact_set.programs.values[0].symbol,
                                      IREE_SV("increment_twice")));
@@ -985,7 +985,7 @@ command.def public @selected_schedule() launch(%storage: buffer) {
   ASSERT_EQ(root.entry_requirement_count, 1u);
   iree_byte_span_t data = iree_byte_span_empty();
   IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(
-      &plan, 0, iree_allocator_system(), &data));
+      &plan, 0, /*report=*/nullptr, iree_allocator_system(), &data));
   loom_cmd_program_t program = {};
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(data.data, data.data_length), &program));
@@ -1412,7 +1412,7 @@ command.def public @parameterized() launch(%parameters: buffer, %target: buffer)
 
   iree_byte_span_t data = iree_byte_span_empty();
   IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(
-      &plan, 0, iree_allocator_system(), &data));
+      &plan, 0, /*report=*/nullptr, iree_allocator_system(), &data));
   loom_cmd_program_t program = {};
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(data.data, data.data_length), &program));
@@ -1490,7 +1490,7 @@ command.def public @bodyless() launch(%output: buffer) {
 
   iree_byte_span_t data = iree_byte_span_empty();
   IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(
-      &plan, 0, iree_allocator_system(), &data));
+      &plan, 0, /*report=*/nullptr, iree_allocator_system(), &data));
   loom_cmd_program_t program = {};
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(data.data, data.data_length), &program));
@@ -1598,7 +1598,7 @@ command.def public @dynamic_root() launch() {
   EXPECT_EQ(invocation_root.launch_counts.minimum_alignment, 0u);
   iree_byte_span_t invocation_data = iree_byte_span_empty();
   IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(
-      &plan, 0, iree_allocator_system(), &invocation_data));
+      &plan, 0, /*report=*/nullptr, iree_allocator_system(), &invocation_data));
   loom_cmd_program_t invocation_program = {};
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(invocation_data.data,
@@ -1621,7 +1621,7 @@ command.def public @dynamic_root() launch() {
   EXPECT_EQ(dynamic_root.transient.binding_index, 0u);
   iree_byte_span_t dynamic_data = iree_byte_span_empty();
   IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(
-      &plan, 1, iree_allocator_system(), &dynamic_data));
+      &plan, 1, /*report=*/nullptr, iree_allocator_system(), &dynamic_data));
   loom_cmd_program_t dynamic_program = {};
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(dynamic_data.data, dynamic_data.data_length),
@@ -1674,7 +1674,7 @@ low.func.def target<cmd.core> abi(command_program) @moved_binding() {
 
   iree_byte_span_t data = iree_byte_span_empty();
   IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(
-      &plan, 0, iree_allocator_system(), &data));
+      &plan, 0, /*report=*/nullptr, iree_allocator_system(), &data));
   loom_cmd_program_t program = {};
   IREE_ASSERT_OK(loom_cmd_program_parse(
       iree_make_const_byte_span(data.data, data.data_length), &program));

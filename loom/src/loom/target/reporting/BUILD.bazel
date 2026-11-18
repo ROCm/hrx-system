@@ -49,6 +49,7 @@ loom_cc_library(
     name = "report",
     srcs = [
         "call_edges.c",
+        "command_plan.c",
         "config_bindings.c",
         "config_bindings.h",
         "instruction_mix.c",
@@ -63,6 +64,7 @@ loom_cc_library(
         "target_insertion.c",
     ],
     hdrs = [
+        "command_plan.h",
         "loop_pipeline.h",
         "memory_summary.h",
         "pipeline_plan.h",
@@ -91,6 +93,8 @@ loom_cc_library(
     name = "format",
     srcs = [
         "format.c",
+        "format_command.c",
+        "format_command.h",
         "format_json.c",
         "format_json.h",
         "format_json_lowering.c",
@@ -227,6 +231,7 @@ loom_cc_test(
 loom_cc_test(
     name = "format_test",
     srcs = [
+        "command_plan_test.cc",
         "config_bindings_test.cc",
         "format_json_test.cc",
         "format_lowering_test.cc",
