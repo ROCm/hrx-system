@@ -844,9 +844,12 @@ static iree_status_t loom_low_lower_plan_decl_signature(
       arena, boundary->argument_count, sizeof(*boundary->argument_types),
       (void**)&boundary->argument_types));
   for (uint16_t i = 0; i < boundary->argument_count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_low_lower_map_value(
-        context, context->source_function.op, argument_ids[i],
-        &boundary->argument_types[i]));
+    // Declarations expose the ABI representation, without a function body or
+    // body-local storage facts. Use the same argument policy as definitions.
+    loom_low_lower_abi_argument_t argument = {0};
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_map_argument(context, i, argument_ids[i], &argument));
+    boundary->argument_types[i] = argument.abi_type;
   }
 
   const uint16_t result_count = context->source_function.op->result_count;

@@ -125,11 +125,11 @@ static iree_status_t loom_runtime_parameters_module_start(
 static const iree_vm_module_signature_type_t gather_arguments[] = {
     {IREE_VM_SCALAR_TYPE_I32, 0},
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
-    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 2},
-    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 1},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 2},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 1},
     {IREE_VM_SCALAR_TYPE_I64, 0},
     {IREE_VM_SCALAR_TYPE_I64, 0},
-    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 1},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 1},
 };
 static const iree_vm_module_signature_type_t gather_result = {
     IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 2};

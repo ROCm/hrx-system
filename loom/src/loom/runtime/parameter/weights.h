@@ -36,11 +36,14 @@ typedef struct loom_runtime_weight_root_t {
 typedef struct loom_runtime_weights_t loom_runtime_weights_t;
 
 // Resolves final weight roots on the serialized pool owner, without waiting,
-// indexing files, or compiling source. The first
-// shared_root_count roots have identical parameter placement; subsequent roots
-// either share existing placement or own new parameters. Zero shared roots is
-// valid. Only the selected roots are populated; other roots of their programs
-// are untouched. Each output slot is initially null.
+// indexing files, or compiling source. The first shared_root_count roots have
+// identical parameter placement and share one retained view. Zero shared roots
+// is valid. Complete roots are placed before contained views, independently of
+// caller order. Roots in one checkpoint domain either contain only new tensors
+// or are compatible subviews of one complete root. Conflicting placement and
+// partial overlaps are rejected before storage allocation or I/O. Only selected
+// roots are populated; other roots of their programs are untouched. Each output
+// slot is initially null.
 //
 // A call covers one checkpoint domain. Sharing and key identity are scoped to
 // that call. A command using base and adapter checkpoints supplies its selected

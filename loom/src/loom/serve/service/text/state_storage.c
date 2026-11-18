@@ -349,6 +349,7 @@ void loom_serve_text_state_retire(loom_serve_text_state_t* state,
     iree_hal_buffer_release(*loom_serve_text_state_allocation(state, i));
     *loom_serve_text_state_allocation(state, i) = NULL;
   }
+  loom_runtime_storage_release(&state->declared_storage);
 }
 
 bool loom_serve_text_state_is_retired(loom_serve_text_state_t* state) {
@@ -390,6 +391,8 @@ iree_status_t loom_serve_text_state_deinitialize(
   }
   if (iree_status_is_ok(status)) {
     loom_runtime_retirement_deinitialize(&state->retirement);
+    loom_runtime_storage_deinitialize(&state->declared_storage,
+                                      state->host_allocator);
     loom_serve_text_state_backing_deinitialize(state);
     loom_serve_text_storage_deinitialize(&state->storage);
     iree_allocator_free(state->host_allocator, state->recurrent.buffers);

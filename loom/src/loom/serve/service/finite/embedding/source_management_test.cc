@@ -290,15 +290,16 @@ TEST_F(SourceEmbeddingServiceTest,
     std::string source((std::istreambuf_iterator<char>(input)), {});
     const std::string original =
         "  %work = func.call @execute_2(%stage, %input, %output) : "
-        "(i32, hal.buffer, hal.buffer) -> (i64)";
+        "(i32, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)";
     const size_t position = source.find(original);
     ASSERT_NE(position, std::string::npos);
     // One valid command has been accepted before the source selects an
     // undeclared second stage. Retirement must join that accepted command.
-    source.insert(position + original.size(),
-                  "\n  %invalid = scalar.constant 4096 : i32\n"
-                  "  %rejected = func.call @execute_2(%invalid, %input, "
-                  "%output) : (i32, hal.buffer, hal.buffer) -> (i64)");
+    source.insert(
+        position + original.size(),
+        "\n  %invalid = scalar.constant 4096 : i32\n"
+        "  %rejected = func.call @execute_2(%invalid, %input, "
+        "%output) : (i32, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)");
     input.close();
     std::filesystem::permissions(path, std::filesystem::perms::owner_write,
                                  std::filesystem::perm_options::add);

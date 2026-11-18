@@ -312,6 +312,7 @@ class PreparationCaptureTest : public PreparationTest {
                                         IREE_SV("declare_parameter_binding"),
                                         IREE_SV("declare_banks"),
                                         IREE_SV("declare_storage"),
+                                        IREE_SV("declare_host_storage"),
                                         IREE_SV("declare_feedback"),
                                         IREE_SV("declare_request_storage")};
     IREE_ASSERT_OK(loom_runtime_program_allocate(
@@ -481,8 +482,8 @@ TEST_F(PreparationCaptureTest, RequestStorageIsColdOwnedAndPartOfIdentity) {
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
     return status;
   };
-  loom_runtime_preparation_module_begin(module, 0, nullptr,
-                                        LOOM_RUNTIME_PREPARATION_FLAG_STORAGE);
+  loom_runtime_preparation_module_begin(
+      module, 0, nullptr, LOOM_RUNTIME_PREPARATION_FLAG_REQUEST_STORAGE);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, declare(0, "demand"));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, declare(-1, "demand"));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, declare(512, ""));
@@ -497,7 +498,7 @@ TEST_F(PreparationCaptureTest, RequestStorageIsColdOwnedAndPartOfIdentity) {
   for (auto item : {std::pair<int64_t, const char*>{256, "demand"},
                     {512, "another_demand"}}) {
     loom_runtime_preparation_module_begin(
-        module, 0, nullptr, LOOM_RUNTIME_PREPARATION_FLAG_STORAGE);
+        module, 0, nullptr, LOOM_RUNTIME_PREPARATION_FLAG_REQUEST_STORAGE);
     IREE_ASSERT_OK(declare(item.first, item.second));
     second = loom_runtime_preparation_module_take(module);
     EXPECT_FALSE(loom_runtime_preparation_equal(preparation, second));
@@ -507,15 +508,17 @@ TEST_F(PreparationCaptureTest, RequestStorageIsColdOwnedAndPartOfIdentity) {
   for (bool has_prefix : {false, true}) {
     loom_runtime_preparation_module_begin(
         module, 0, has_prefix ? preparation : nullptr,
-        has_prefix ? LOOM_RUNTIME_PREPARATION_FLAG_STORAGE : 0);
+        has_prefix ? LOOM_RUNTIME_PREPARATION_FLAG_REQUEST_STORAGE : 0);
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, declare(512, "demand"));
     EXPECT_EQ(loom_runtime_preparation_module_take(module), nullptr);
   }
 }
 
 TEST_F(PreparationCaptureTest, ColdStorageOwnsIndependentGeometryAndFeedback) {
-  loom_runtime_preparation_module_begin(module, 0, nullptr,
-                                        LOOM_RUNTIME_PREPARATION_FLAG_STORAGE);
+  loom_runtime_preparation_module_begin(
+      module, 0, nullptr,
+      (LOOM_RUNTIME_PREPARATION_FLAG_STORAGE |
+       LOOM_RUNTIME_PREPARATION_FLAG_FEEDBACK));
   for (int64_t i = 0; i < 33; ++i) {
     iree_vm_variant_t arguments[] = {iree_vm_variant_from_i64(64 * (i + 1)),
                                      iree_vm_variant_from_i64(64)};
@@ -533,8 +536,10 @@ TEST_F(PreparationCaptureTest, ColdStorageOwnsIndependentGeometryAndFeedback) {
     EXPECT_EQ(ordinal, i);
   }
   preparation = loom_runtime_preparation_module_take(module);
-  loom_runtime_preparation_module_begin(module, 0, nullptr,
-                                        LOOM_RUNTIME_PREPARATION_FLAG_STORAGE);
+  loom_runtime_preparation_module_begin(
+      module, 0, nullptr,
+      (LOOM_RUNTIME_PREPARATION_FLAG_STORAGE |
+       LOOM_RUNTIME_PREPARATION_FLAG_FEEDBACK));
   iree_vm_variant_t arguments[] = {iree_vm_variant_from_i64(1),
                                    iree_vm_variant_from_i64(1)};
   iree_vm_variant_t result = {};
@@ -561,10 +566,89 @@ TEST_F(PreparationCaptureTest, ColdStorageOwnsIndependentGeometryAndFeedback) {
   EXPECT_FALSE(loom_runtime_preparation_equal(preparation, second));
 }
 
+TEST_F(PreparationCaptureTest, HostStorageSharesOrdinalsAndAffectsIdentity) {
+  for (bool host_local : {false, true}) {
+    loom_runtime_preparation_module_begin(
+        module, 0, nullptr, LOOM_RUNTIME_PREPARATION_FLAG_STORAGE);
+    for (int i = 0; i < 2; ++i) {
+      iree_vm_variant_t arguments[] = {iree_vm_variant_from_i64(64),
+                                       iree_vm_variant_from_i64(64)};
+      iree_vm_variant_t result = {};
+      IREE_ASSERT_OK(Invoke(host_local && i ? IREE_SV("declare_host_storage")
+                                            : IREE_SV("declare_storage"),
+                            iree_vm_variant_span_from_array(arguments),
+                            {&result, 1}));
+      int32_t ordinal = -1;
+      IREE_ASSERT_OK(iree_vm_i32_from_variant(result, &ordinal));
+      EXPECT_EQ(ordinal, i);
+    }
+    auto* capture = loom_runtime_preparation_module_take(module);
+    ASSERT_EQ(loom_runtime_preparation_storage_count(capture), 2u);
+    EXPECT_FALSE(loom_runtime_preparation_storage(capture, 0)->host_local);
+    EXPECT_EQ(loom_runtime_preparation_storage(capture, 1)->host_local,
+              host_local);
+    if (host_local) {
+      second = capture;
+      EXPECT_FALSE(loom_runtime_preparation_equal(preparation, second));
+    } else {
+      preparation = capture;
+    }
+  }
+  for (bool request : {false, true}) {
+    loom_runtime_preparation_module_begin(
+        module, 0, request ? preparation : nullptr,
+        request ? LOOM_RUNTIME_PREPARATION_FLAG_STORAGE : 0);
+    iree_vm_variant_t result = {};
+    iree_vm_variant_t arguments[] = {iree_vm_variant_from_i64(64),
+                                     iree_vm_variant_from_i64(64)};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        Invoke(IREE_SV("declare_host_storage"),
+               iree_vm_variant_span_from_array(arguments), {&result, 1}));
+    EXPECT_EQ(loom_runtime_preparation_module_take(module), nullptr);
+  }
+}
+
+TEST_F(PreparationCaptureTest, MutableStorageCapabilitiesAreIndependent) {
+  for (const auto capability :
+       {LOOM_RUNTIME_PREPARATION_FLAG_STORAGE,
+        LOOM_RUNTIME_PREPARATION_FLAG_FEEDBACK,
+        LOOM_RUNTIME_PREPARATION_FLAG_REQUEST_STORAGE}) {
+    for (bool feedback : {false, true}) {
+      SCOPED_TRACE(capability);
+      SCOPED_TRACE(feedback);
+      loom_runtime_preparation_module_begin(module, 0, nullptr, capability);
+      iree_vm_variant_t arguments[] = {iree_vm_variant_from_i64(64),
+                                       iree_vm_variant_from_i64(64)};
+      iree_vm_variant_t result = {};
+      auto status = Invoke(
+          feedback ? IREE_SV("declare_feedback") : IREE_SV("declare_storage"),
+          {arguments, feedback ? 1u : 2u}, {&result, 1});
+      const bool supported =
+          capability == (feedback ? LOOM_RUNTIME_PREPARATION_FLAG_FEEDBACK
+                                  : LOOM_RUNTIME_PREPARATION_FLAG_STORAGE);
+      if (supported) {
+        IREE_ASSERT_OK(status);
+      } else {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, status);
+      }
+      preparation = loom_runtime_preparation_module_take(module);
+      EXPECT_EQ(loom_runtime_preparation_storage_count(preparation),
+                supported && !feedback ? 1u : 0u);
+      EXPECT_EQ(loom_runtime_preparation_feedback_count(preparation),
+                supported && feedback ? 1u : 0u);
+      loom_runtime_preparation_free(preparation);
+      preparation = nullptr;
+    }
+  }
+}
+
 TEST_F(PreparationCaptureTest,
        StorageRejectsInvalidGeometryAndRequestMutation) {
-  loom_runtime_preparation_module_begin(module, 0, nullptr,
-                                        LOOM_RUNTIME_PREPARATION_FLAG_STORAGE);
+  loom_runtime_preparation_module_begin(
+      module, 0, nullptr,
+      (LOOM_RUNTIME_PREPARATION_FLAG_STORAGE |
+       LOOM_RUNTIME_PREPARATION_FLAG_FEEDBACK));
   const int64_t cases[][2] = {{0, 64}, {-1, 64}, {64, 0}, {64, -1}, {64, 3}};
   iree_vm_variant_t result = {};
   for (const auto& values : cases) {
@@ -587,7 +671,9 @@ TEST_F(PreparationCaptureTest,
   for (bool request : {false, true}) {
     loom_runtime_preparation_module_begin(
         module, 0, request ? preparation : nullptr,
-        request ? LOOM_RUNTIME_PREPARATION_FLAG_STORAGE : 0);
+        request ? (LOOM_RUNTIME_PREPARATION_FLAG_STORAGE |
+                   LOOM_RUNTIME_PREPARATION_FLAG_FEEDBACK)
+                : 0);
     iree_vm_variant_t arguments[] = {iree_vm_variant_from_i64(64),
                                      iree_vm_variant_from_i64(64)};
     IREE_EXPECT_STATUS_IS(

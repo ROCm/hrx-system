@@ -7,6 +7,139 @@
 #include "loom/runtime/program/storage.h"
 
 #include "iree/vm/reflection.h"
+#include "loom/runtime/program/preparation.h"
+
+static iree_status_t loom_runtime_storage_create_host_pool(
+    iree_hal_device_group_t* group, loom_runtime_execution_t* execution,
+    iree_allocator_t host_allocator, iree_hal_pool_t** out_pool) {
+  const iree_hal_queue_family_t* dispatch =
+      loom_runtime_execution_dispatch_family(execution);
+  const iree_hal_queue_family_t* transfer =
+      loom_runtime_execution_transfer_family(execution);
+  const iree_hal_pool_family_access_t families[] = {
+      {.family = dispatch,
+       .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER},
+      {.family = transfer, .usage = IREE_HAL_BUFFER_USAGE_TRANSFER},
+  };
+  const iree_hal_pool_scope_t scope = {
+      .family_count = dispatch == transfer ? 1 : 2,
+      .families = families,
+      .host = {.access =
+                   IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+               .modes = IREE_HAL_MAPPING_MODE_SCOPED,
+               .properties = IREE_HAL_HOST_MEMORY_PROPERTY_READ_CACHED},
+  };
+  iree_hal_slab_pool_options_t options;
+  iree_hal_slab_pool_options_initialize(&options);
+  options.trace_name = IREE_SV("source host storage");
+  IREE_RETURN_IF_ERROR(iree_hal_slab_pool_create(group, scope, &options,
+                                                 host_allocator, out_pool));
+  iree_hal_pool_capabilities_t capabilities;
+  iree_hal_pool_query_capabilities(*out_pool, &capabilities);
+  if (!iree_all_bits_set(capabilities.memory_type,
+                         IREE_HAL_MEMORY_TYPE_HOST_LOCAL)) {
+    iree_hal_pool_release(*out_pool);
+    *out_pool = NULL;
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "source host storage requires cached host backing accessible by the "
+        "execution device");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_runtime_storage_allocate_roots(
+    const loom_runtime_preparation_t* preparation,
+    loom_runtime_execution_t* execution, iree_hal_pool_t* pool, bool host_local,
+    iree_host_size_t count, iree_allocator_t host_allocator,
+    loom_runtime_storage_t* storage) {
+  iree_host_size_t length = 0, requests_offset = 0, buffers_offset = 0;
+  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
+      0, &length,
+      IREE_STRUCT_FIELD(count, iree_hal_pool_reservation_request_t,
+                        &requests_offset),
+      IREE_STRUCT_FIELD(count, iree_hal_buffer_t*, &buffers_offset)));
+  uint8_t* scratch = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, length, (void**)&scratch));
+  iree_hal_pool_reservation_request_t* requests =
+      (iree_hal_pool_reservation_request_t*)(scratch + requests_offset);
+  iree_hal_buffer_t** buffers = (iree_hal_buffer_t**)(scratch + buffers_offset);
+  iree_host_size_t ordinal = 0;
+  for (iree_host_size_t i = 0; i < storage->count; ++i) {
+    const loom_runtime_preparation_storage_t* declaration =
+        loom_runtime_preparation_storage(preparation, i);
+    if (declaration->host_local == host_local) {
+      requests[ordinal++] = iree_hal_make_pool_reservation_request(
+          declaration->byte_length, declaration->alignment);
+    }
+  }
+  iree_status_t status = loom_runtime_execution_alloca_from_pool(
+      execution, pool, count, requests, buffers);
+  ordinal = 0;
+  for (iree_host_size_t i = 0; i < storage->count && iree_status_is_ok(status);
+       ++i) {
+    if (loom_runtime_preparation_storage(preparation, i)->host_local ==
+        host_local) {
+      storage->buffers[i] = buffers[ordinal++];
+    }
+  }
+  iree_allocator_free(host_allocator, scratch);
+  return status;
+}
+
+iree_status_t loom_runtime_storage_initialize(
+    const loom_runtime_preparation_t* preparation,
+    iree_hal_device_group_t* group, loom_runtime_execution_t* execution,
+    iree_hal_pool_t* pool, loom_runtime_retirement_t* retirement,
+    iree_allocator_t host_allocator, loom_runtime_storage_t* out_storage) {
+  *out_storage = (loom_runtime_storage_t){0};
+  const iree_host_size_t count =
+      loom_runtime_preparation_storage_count(preparation);
+  if (!count) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host_allocator, count, sizeof(*out_storage->buffers),
+      (void**)&out_storage->buffers));
+  out_storage->count = count;
+  iree_host_size_t host_count = 0;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    host_count += loom_runtime_preparation_storage(preparation, i)->host_local;
+  }
+  if (host_count) {
+    IREE_RETURN_IF_ERROR(loom_runtime_storage_create_host_pool(
+        group, execution, host_allocator, &out_storage->host_pool));
+    IREE_RETURN_IF_ERROR(loom_runtime_storage_allocate_roots(
+        preparation, execution, out_storage->host_pool, true, host_count,
+        host_allocator, out_storage));
+  }
+  if (count > host_count) {
+    IREE_RETURN_IF_ERROR(loom_runtime_storage_allocate_roots(
+        preparation, execution, pool, false, count - host_count, host_allocator,
+        out_storage));
+  }
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    status = loom_runtime_retirement_track(retirement, &out_storage->buffers[i],
+                                           host_allocator);
+  }
+  return status;
+}
+
+void loom_runtime_storage_release(loom_runtime_storage_t* storage) {
+  for (iree_host_size_t i = 0; i < storage->count; ++i) {
+    iree_hal_buffer_release(storage->buffers[i]);
+    storage->buffers[i] = NULL;
+  }
+}
+
+void loom_runtime_storage_deinitialize(loom_runtime_storage_t* storage,
+                                       iree_allocator_t host_allocator) {
+  iree_hal_pool_release(storage->host_pool);
+  iree_allocator_free(host_allocator, storage->buffers);
+  *storage = (loom_runtime_storage_t){0};
+}
 
 typedef struct loom_runtime_storage_module_t {
   // Native module prefix.
@@ -119,14 +252,14 @@ static const iree_vm_module_signature_type_t host_buffer_result[] = {
 static const iree_vm_module_signature_type_t work_result[] = {
     {IREE_VM_SCALAR_TYPE_I64, 0}};
 static const iree_vm_module_signature_type_t fill_arguments[] = {
-    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 0},
     {IREE_VM_SCALAR_TYPE_I64, 0},
     {IREE_VM_SCALAR_TYPE_I64, 0},
     {IREE_VM_SCALAR_TYPE_I32, 0}};
 static const iree_vm_module_signature_type_t copy_arguments[] = {
-    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 0},
     {IREE_VM_SCALAR_TYPE_I64, 0},
-    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 0},
     {IREE_VM_SCALAR_TYPE_I64, 0},
     {IREE_VM_SCALAR_TYPE_I64, 0}};
 

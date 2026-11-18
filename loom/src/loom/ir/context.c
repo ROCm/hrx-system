@@ -371,9 +371,11 @@ iree_status_t loom_context_register_type_descriptors(
   }
 
   loom_registered_type_list_t* list = &context->registered_types;
-  IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
-      context->allocator, list->count + entry_count, sizeof(*list->entries),
-      &list->capacity, (void**)&list->entries));
+  if (list->count + entry_count > list->capacity) {
+    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+        context->allocator, list->count + entry_count, sizeof(*list->entries),
+        &list->capacity, (void**)&list->entries));
+  }
   memcpy(&list->entries[list->count], entries,
          entry_count * sizeof(*list->entries));
   list->count += entry_count;
@@ -452,11 +454,13 @@ iree_status_t loom_context_register_encoding_vtable(
         "encoding family registry has reached its uint16_t limit");
   }
 
-  IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
-      context->allocator, context->encodings.vtables.count + 1,
-      sizeof(const loom_encoding_vtable_t*),
-      &context->encodings.vtables.capacity,
-      (void**)&context->encodings.vtables.entries));
+  if (context->encodings.vtables.count == context->encodings.vtables.capacity) {
+    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+        context->allocator, context->encodings.vtables.count + 1,
+        sizeof(const loom_encoding_vtable_t*),
+        &context->encodings.vtables.capacity,
+        (void**)&context->encodings.vtables.entries));
+  }
   context->encodings.vtables.entries[context->encodings.vtables.count++] =
       vtable;
   return iree_ok_status();

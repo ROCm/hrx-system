@@ -9,6 +9,7 @@
 
 #include "iree/base/internal/arena.h"
 #include "loom/runtime/execution/retirement.h"
+#include "loom/runtime/program/storage.h"
 #include "loom/runtime/storage/block_pool.h"
 #include "loom/serve/service/text/model.h"
 #include "loom/serve/service/text/storage.h"
@@ -134,6 +135,8 @@ struct loom_serve_text_state_t {
   struct loom_serve_text_state_reservation_t* prepared_reservations;
   // Validated source geometry and retained initialization payloads.
   loom_serve_text_storage_t storage;
+  // Cold source-declared roots, stable across row growth and state compaction.
+  loom_runtime_storage_t declared_storage;
   // Explicit endpoint records, separate from active row capacity.
   struct {
     // Configured cold record count, including before allocation.

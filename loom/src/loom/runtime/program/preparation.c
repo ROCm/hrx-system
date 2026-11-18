@@ -36,6 +36,7 @@ typedef enum loom_runtime_preparation_function_e {
   LOOM_RUNTIME_PREPARATION_FUNCTION_BIND_PARAMETERS,
   LOOM_RUNTIME_PREPARATION_FUNCTION_SOURCE_SCOPE,
   LOOM_RUNTIME_PREPARATION_FUNCTION_STORAGE,
+  LOOM_RUNTIME_PREPARATION_FUNCTION_HOST_STORAGE,
   LOOM_RUNTIME_PREPARATION_FUNCTION_FEEDBACK,
   LOOM_RUNTIME_PREPARATION_FUNCTION_REQUEST_STORAGE,
   LOOM_RUNTIME_PREPARATION_FUNCTION_COUNT,
@@ -757,7 +758,8 @@ static iree_status_t loom_runtime_preparation_set_workspace_limit(
 
 static iree_status_t loom_runtime_preparation_add_storage(
     loom_runtime_preparation_t* preparation, const iree_vm_call_packet_t* call,
-    bool feedback) {
+    loom_runtime_preparation_function_t function) {
+  const bool feedback = function == LOOM_RUNTIME_PREPARATION_FUNCTION_FEEDBACK;
   const uint64_t byte_length = iree_vm_call_value_argument_load(call, 0);
   const uint64_t alignment =
       feedback ? 1 : iree_vm_call_value_argument_load(call, 1);
@@ -784,8 +786,11 @@ static iree_status_t loom_runtime_preparation_add_storage(
     IREE_RETURN_IF_ERROR(loom_runtime_preparation_grow_array(
         preparation, *count, sizeof(*preparation->storage.values),
         &preparation->storage.capacity, (void**)&preparation->storage.values));
-    preparation->storage.values[*count] =
-        (loom_runtime_preparation_storage_t){byte_length, alignment};
+    preparation->storage.values[*count] = (loom_runtime_preparation_storage_t){
+        .byte_length = byte_length,
+        .alignment = alignment,
+        .host_local =
+            function == LOOM_RUNTIME_PREPARATION_FUNCTION_HOST_STORAGE};
   }
   iree_vm_call_value_result_store(call, 0, (*count)++);
   return iree_ok_status();
@@ -805,15 +810,19 @@ static iree_status_t loom_runtime_preparation_module_start(
   const iree_vm_call_packet_t* call = &params->call;
   const loom_runtime_preparation_function_t function =
       (loom_runtime_preparation_function_t)params->function_ordinal;
-  const bool declares_storage =
-      function == LOOM_RUNTIME_PREPARATION_FUNCTION_STORAGE ||
-      function == LOOM_RUNTIME_PREPARATION_FUNCTION_FEEDBACK ||
-      function == LOOM_RUNTIME_PREPARATION_FUNCTION_REQUEST_STORAGE;
+  const loom_runtime_preparation_flags_t storage_capability =
+      (function == LOOM_RUNTIME_PREPARATION_FUNCTION_STORAGE ||
+       function == LOOM_RUNTIME_PREPARATION_FUNCTION_HOST_STORAGE)
+          ? LOOM_RUNTIME_PREPARATION_FLAG_STORAGE
+      : function == LOOM_RUNTIME_PREPARATION_FUNCTION_FEEDBACK
+          ? LOOM_RUNTIME_PREPARATION_FLAG_FEEDBACK
+      : function == LOOM_RUNTIME_PREPARATION_FUNCTION_REQUEST_STORAGE
+          ? LOOM_RUNTIME_PREPARATION_FLAG_REQUEST_STORAGE
+          : 0;
   iree_status_t status = iree_ok_status();
-  if (declares_storage &&
+  if (storage_capability &&
       (module->capture.base ||
-       !iree_any_bit_set(module->capture.flags,
-                         LOOM_RUNTIME_PREPARATION_FLAG_STORAGE))) {
+       !iree_any_bit_set(module->capture.flags, storage_capability))) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "mutable storage registration requires a supported cold capture");
@@ -854,7 +863,7 @@ static iree_status_t loom_runtime_preparation_module_start(
       function == LOOM_RUNTIME_PREPARATION_FUNCTION_MEMORY_FORECAST ||
       function == LOOM_RUNTIME_PREPARATION_FUNCTION_PARAMETER_ARENA ||
       function == LOOM_RUNTIME_PREPARATION_FUNCTION_BIND_PARAMETERS ||
-      declares_storage) {
+      storage_capability) {
     if (!preparation) {
       preparation = module->recycled;
       module->recycled = NULL;
@@ -896,10 +905,9 @@ static iree_status_t loom_runtime_preparation_module_start(
       if (iree_status_is_ok(status)) {
         preparation->request_storage.capacity = capacity;
       }
-    } else if (declares_storage) {
-      status = loom_runtime_preparation_add_storage(
-          preparation, call,
-          function == LOOM_RUNTIME_PREPARATION_FUNCTION_FEEDBACK);
+    } else if (storage_capability) {
+      status =
+          loom_runtime_preparation_add_storage(preparation, call, function);
     } else if (function == LOOM_RUNTIME_PREPARATION_FUNCTION_MEMORY_FORECAST ||
                function == LOOM_RUNTIME_PREPARATION_FUNCTION_BIND_PARAMETERS) {
       iree_string_view_t* entry =
@@ -1064,6 +1072,9 @@ static const iree_vm_module_export_declaration_t preparation_exports[] = {
     {.export_name = IREE_SVL("feedback"),
      .callable_type_ordinal = 0,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_FEEDBACK},
+    {.export_name = IREE_SVL("host_storage"),
+     .callable_type_ordinal = 4,
+     .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_HOST_STORAGE},
     {.export_name = IREE_SVL("memory_forecast"),
      .callable_type_ordinal = 1,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_MEMORY_FORECAST},
@@ -1416,7 +1427,9 @@ bool loom_runtime_preparation_equal(const loom_runtime_preparation_t* lhs,
   for (iree_host_size_t i = 0; i < lhs->storage.count; ++i) {
     if (lhs->storage.values[i].byte_length !=
             rhs->storage.values[i].byte_length ||
-        lhs->storage.values[i].alignment != rhs->storage.values[i].alignment) {
+        lhs->storage.values[i].alignment != rhs->storage.values[i].alignment ||
+        lhs->storage.values[i].host_local !=
+            rhs->storage.values[i].host_local) {
       return false;
     }
   }

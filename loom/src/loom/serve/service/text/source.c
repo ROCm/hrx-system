@@ -98,7 +98,8 @@ static iree_status_t loom_serve_text_prepare(
   if (iree_status_is_ok(status)) {
     status = loom_runtime_preparation_evaluate(
         source->environment, module, &options->sources, IREE_SV("prepare"),
-        LOOM_RUNTIME_PREPARATION_FLAG_PARAMETERS,
+        LOOM_RUNTIME_PREPARATION_FLAG_PARAMETERS |
+            LOOM_RUNTIME_PREPARATION_FLAG_STORAGE,
         iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(results),
         iree_vm_module_span_from_array(modules), host_allocator,
@@ -198,12 +199,24 @@ static void loom_serve_text_source_reset_candidate(
 }
 
 static iree_status_t loom_serve_text_storage_declared_bytes(
-    const loom_serve_text_storage_t* storage, uint64_t* out_bytes) {
+    const loom_serve_text_storage_t* storage,
+    const loom_runtime_preparation_t* preparation, uint64_t* out_bytes) {
   *out_bytes = 0;
   for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
        ++i) {
     if (!iree_checked_add_u64(*out_bytes, storage->allocations[i].length,
                               out_bytes)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "source storage size exceeds byte accounting");
+    }
+  }
+  const iree_host_size_t count =
+      loom_runtime_preparation_storage_count(preparation);
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    if (!iree_checked_add_u64(
+            *out_bytes,
+            loom_runtime_preparation_storage(preparation, i)->byte_length,
+            out_bytes)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "source storage size exceeds byte accounting");
     }
@@ -267,7 +280,8 @@ static iree_status_t loom_serve_text_source_evaluate_cache(
   }
   sizing->page_bytes = storage->page_bytes;
   uint64_t bytes = 0;
-  IREE_RETURN_IF_ERROR(loom_serve_text_storage_declared_bytes(storage, &bytes));
+  IREE_RETURN_IF_ERROR(loom_serve_text_storage_declared_bytes(
+      storage, source->preparation, &bytes));
   uint64_t checkpoint_bytes = 0;
   // Retain the full-context map bound in cold cache sizing. Materializing maps
   // only for live endpoints reduces initial commitment without spending those

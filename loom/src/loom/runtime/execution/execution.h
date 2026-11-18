@@ -51,6 +51,11 @@ void loom_runtime_execution_release(loom_runtime_execution_t* execution);
 const iree_hal_queue_family_t* loom_runtime_execution_dispatch_family(
     const loom_runtime_execution_t* execution);
 
+// Borrows the immutable transfer family for qualifying shared buffer access.
+// The family remains live through execution release.
+const iree_hal_queue_family_t* loom_runtime_execution_transfer_family(
+    const loom_runtime_execution_t* execution);
+
 // Terminal model-consumer observation, independent of semaphore readiness.
 // Stop submissions, attach the nonblocking wake, release caller-owned views,
 // and query is_retired. A callback only schedules the owner, never reenters

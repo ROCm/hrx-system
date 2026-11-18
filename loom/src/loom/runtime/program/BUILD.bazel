@@ -81,7 +81,9 @@ loom_cc_library(
     hdrs = ["storage.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":preparation",
         "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/execution:retirement",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/vm:types",

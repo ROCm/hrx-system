@@ -26,10 +26,17 @@ func.decl import("prepare") @bind_parameters(%root: buffer)
 
 func.decl import("prepare") @storage(%bytes: i64, %alignment: i64) -> (i32)
 
+func.decl import("prepare") @host_storage(%bytes: i64, %alignment: i64) -> (i32)
+
 func.decl import("prepare") @feedback(%bytes: i64) -> (i32)
 
 func.def public @declare_storage(%bytes: i64, %alignment: i64) -> (i32) {
   %ordinal = func.call @storage(%bytes, %alignment) : (i64, i64) -> (i32)
+  func.return %ordinal : i32
+}
+
+func.def public @declare_host_storage(%bytes: i64, %alignment: i64) -> (i32) {
+  %ordinal = func.call @host_storage(%bytes, %alignment) : (i64, i64) -> (i32)
   func.return %ordinal : i32
 }
 

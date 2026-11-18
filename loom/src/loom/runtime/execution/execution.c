@@ -64,6 +64,11 @@ const iree_hal_queue_family_t* loom_runtime_execution_dispatch_family(
   return iree_hal_queue_family(execution->binding.dispatch);
 }
 
+const iree_hal_queue_family_t* loom_runtime_execution_transfer_family(
+    const loom_runtime_execution_t* execution) {
+  return iree_hal_queue_family(execution->binding.transfer);
+}
+
 void loom_runtime_execution_set_retirement_observer(
     loom_runtime_execution_t* execution, void (*wake)(void* user_data),
     void* user_data) {

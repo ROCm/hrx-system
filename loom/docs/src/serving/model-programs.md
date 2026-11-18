@@ -199,13 +199,63 @@ The [runner-module contract](https://github.com/ROCm/hrx-system/blob/main/loom/s
 defines arity, buffer types and lifetime. This is a coarse serving capability,
 not a source program's ownership of the entire device or process scheduler.
 
-Independent work can use explicit dependencies. `runner.fence(work)` returns a
-`hal.fence` for a previously accepted work value. It captures that producer,
-not later submissions or the separate feedback branch. `runner.join(ready)`
+Independent work can use explicit dependencies. `runner.fence(work)` returns an
+owned `ref<@HalFence>` for a previously accepted work value. It captures that
+producer, not later submissions or the separate feedback branch. `runner.join(ready)`
 orders subsequent model work after the supplied fence without waiting on the
 CPU or synchronizing other models. A null fence represents no external work.
 Completion describes readiness; storage ownership still extends through the
 last accepted consumer, including when a dependency fails.
+
+HAL arguments to serving entrypoints, `runner` calls, storage transfers, and
+parameter gathers are borrowed handles. Declare their identities with
+`type.decl import("hal", "buffer") @HalBuffer` and
+`type.decl import("hal", "fence") @HalFence`, and use `ptr<@HalBuffer>` or
+`ptr<@HalFence>` in parameter types. Buffer, file, and fence producers return
+owning `ref` handles; use `ref.borrow` for calls and `ref.release` when the source
+owner is finished. Accepted queue work keeps its own resource captures, so
+releasing a source handle does not require waiting for the device. The
+[runtime object guide](../integration/runtime-objects.md) describes these
+ownership rules and their explicit source operations.
+
+### Retain source-owned storage
+
+Finite and text programs can declare reusable buffers during cold preparation
+with `prepare.storage(byte_length, alignment) -> i32`. The returned ordinal
+names one model-owned root. During submission, `storage.buffer(ordinal)` returns
+an owned `ref<@HalBuffer>`; `storage.copy` and `storage.fill` enqueue ordered
+operations on the model's execution timeline. Contents are initially unspecified
+and survive requests and text row-capacity growth. The source owns initialization
+and byte layout. Models with no declarations allocate no additional roots.
+
+`prepare.host_storage(byte_length, alignment) -> i32` declares cached host
+backing accessible by the model's execution queues. It uses the same ordinal
+space and `storage.buffer` access as ordinary roots. This suits a device-written
+request list consumed by host I/O without moving the cache payload or model
+activations into host memory. The allocation retains its native byte accounting
+and stays live through queue retirement. A device that cannot provide the
+required backing rejects the declaration during model loading.
+
+For example, a source can retain an output ring or a device-generated file
+request list without adding a modality-specific buffer role to the service.
+The optional `experimental.hal.file` module accepts borrowed file and payload
+tables, byte windows, a producer fence, and the native HAL's indirect
+records/count buffers.
+It returns a completion fence that `runner.join` can order before consumption,
+while independent dispatches overlap the transfer. `parameters.file` supplies
+the actual checkpoint file and the selected entry's byte window. This temporary
+adapter and its signatures are expected to be replaced as HAL/VM integration
+changes; the native file-transfer API owns the operation's semantics.
+
+The service allocates ordinary roots from its storage pool and host roots from
+a native cached host source. It retains both
+through final queue use. Releasing source references or failing an invocation
+does not shorten accepted work's ownership. Text preparation permits these
+roots; finite-only feedback destinations and retained request-range admission
+remain separate capabilities. The
+[storage contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/runtime/program/storage.h)
+and [finite file contract](https://github.com/ROCm/hrx-system/blob/main/runtime/src/iree/hal/vm/file.h)
+describe the exact signatures and lifetimes.
 
 ### Measure device work
 
@@ -241,13 +291,13 @@ reads demanded byte ranges from the same sources declared during preparation:
 
 ```text
 parameters.gather(source, key, wait, descriptors, descriptor_offset, count, target)
-    -> hal.fence
+    -> ref<@HalFence>
 ```
 
 `source` is the selected invocation's source ordinal, and `key` is a host byte
 buffer naming an entry in that checkpoint. Independent sources may use the
-same key. `descriptors` and `target` are `hal.buffer` references. Starting at
-`descriptor_offset`, each 24-byte record contains three little-endian `u64`
+same key. `descriptors` and `target` are borrowed `ptr<@HalBuffer>` handles. Starting
+at `descriptor_offset`, each 24-byte record contains three little-endian `u64`
 values: the entry-relative byte offset, destination-buffer byte offset, and
 byte length. Destination ranges are disjoint; zero-length records require no
 payload transfer. Hashing, deduplication, packing, and cache placement remain
@@ -337,7 +387,7 @@ preparation or collection call:
 | `batch_state(batch, ordinal) -> buffer` | Retained request state at its original cohort ordinal. |
 | `batch_pack(batch) -> (ranges, packed)` | Explicitly copy states into an upload directory and payload. |
 | `batch_origin(batch, ordinal) -> i64` | Reserved cohort origin in source-defined storage units. |
-| `batch_buffer(batch, ordinal, root) -> hal.buffer` | Stable device root whose capture protects the cohort until queue retirement. Submission only. |
+| `batch_buffer(batch, ordinal, root) -> ref<@HalBuffer>` | Stable device root whose capture protects the cohort until queue retirement. Submission only. |
 | `batch_release(batch, ordinal)` | Relinquish a completed cohort's storage during collection while its logical request continues. |
 | `batch_offer(batch, ordinal, units, tag)` | Publish the next work offer during successful collection. Zero units finishes the request. |
 | `batch_finish(batch)` | Finish every member of a one-shot cohort during collection. |

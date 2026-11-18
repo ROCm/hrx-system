@@ -298,6 +298,11 @@ static iree_status_t loom_serve_text_load_link(loom_serve_text_load_t* load) {
   iree_status_t status = iree_ok_status();
   IREE_RETURN_IF_ERROR(loom_serve_text_state_allocate(
       &model->state, model->device_owner, model->pool, model->execution));
+  IREE_RETURN_IF_ERROR(loom_runtime_storage_initialize(
+      model->source.preparation, loom_runtime_device_group(model->device_owner),
+      model->execution, loom_runtime_pool_storage(model->pool),
+      &model->state.retirement, model->host_allocator,
+      &model->state.declared_storage));
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc_array(model->host_allocator, model->row_count,
                                   sizeof(*model->rows), (void**)&model->rows));
@@ -1026,9 +1031,17 @@ static iree_status_t loom_serve_text_invoke(loom_serve_text_model_t* model,
                                             iree_vm_function_t function,
                                             iree_vm_variant_span_t arguments,
                                             iree_vm_variant_span_t results) {
+  if (model->control.storage_module) {
+    loom_runtime_storage_module_set_access(model->control.storage_module,
+                                           LOOM_RUNTIME_STORAGE_ACCESS_SUBMIT);
+  }
   iree_status_t status =
       iree_vm_invoke(loom_runtime_program_invocation(model->control.program),
                      function, arguments, results);
+  if (model->control.storage_module) {
+    loom_runtime_storage_module_set_access(model->control.storage_module,
+                                           LOOM_RUNTIME_STORAGE_ACCESS_NONE);
+  }
   iree_vm_variant_span_reset(arguments);
   return status;
 }

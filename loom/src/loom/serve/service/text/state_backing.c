@@ -422,9 +422,12 @@ static iree_status_t loom_serve_text_backing_append(
       return iree_ok_status();
     }
   }
-  IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
-      state->host_allocator, backing->range_count + 1, sizeof(*backing->ranges),
-      &backing->range_capacity, (void**)&backing->ranges));
+  if (backing->range_count == backing->range_capacity) {
+    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+        state->host_allocator, backing->range_count + 1,
+        sizeof(*backing->ranges), &backing->range_capacity,
+        (void**)&backing->ranges));
+  }
   backing->ranges[backing->range_count++] =
       (loom_runtime_memory_range_t){buffer, begin, end - begin};
   return iree_ok_status();

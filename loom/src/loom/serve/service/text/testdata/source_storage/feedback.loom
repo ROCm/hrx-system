@@ -1,0 +1,34 @@
+config.def @source_storage.reject = false : i1
+
+type.decl import("hal", "buffer") @HalBuffer
+
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+func.decl import("storage", "buffer") @stored_buffer(%ordinal: i32) -> (ref<@HalBuffer>)
+
+func.decl import("storage", "copy") @stored_copy(%source: ptr<@HalBuffer>, %source_offset: i64, %target: ptr<@HalBuffer>, %target_offset: i64, %length: i64) -> (i64)
+
+func.decl import("runner", "feedback") @collect_output(%slot: i32, %source: ptr<@HalBuffer>, %offset: i64, %length: i64) -> (i64)
+
+// The observed output travels through both declared roots. A rejected source
+// still owes retirement of the accepted copy and all of its native borrowers.
+func.def public @feedback(%slot: i32, %source: ptr<@HalBuffer>, %offset: i64, %length: i64) -> (i64) {
+  %c0_i32 = scalar.constant 0 : i32
+  %c1_i32 = scalar.constant 1 : i32
+  %c0_i64 = scalar.constant 0 : i64
+  %owner = func.call @stored_buffer(%c0_i32) : (i32) -> (ref<@HalBuffer>)
+  %retained = ref.borrow %owner : ref<@HalBuffer> -> ptr<@HalBuffer>
+  %copy = func.call @stored_copy(%source, %offset, %retained, %c0_i64, %length) : (ptr<@HalBuffer>, i64, ptr<@HalBuffer>, i64, i64) -> (i64)
+  %reject = config.get @source_storage.reject : i1
+  scf.if %reject {
+    %error = buffer.constant utf8("rejected after retained output copy") : buffer
+    func.call @require(%c0_i32, %error) : (i32, buffer)
+  }
+  %device_owner = func.call @stored_buffer(%c1_i32) : (i32) -> (ref<@HalBuffer>)
+  %device = ref.borrow %device_owner : ref<@HalBuffer> -> ptr<@HalBuffer>
+  %device_copy = func.call @stored_copy(%retained, %c0_i64, %device, %c0_i64, %length) : (ptr<@HalBuffer>, i64, ptr<@HalBuffer>, i64, i64) -> (i64)
+  %completed = func.call @collect_output(%slot, %device, %c0_i64, %length) : (i32, ptr<@HalBuffer>, i64, i64) -> (i64)
+  ref.release %device_owner : ref<@HalBuffer>
+  ref.release %owner : ref<@HalBuffer>
+  func.return %completed : i64
+}

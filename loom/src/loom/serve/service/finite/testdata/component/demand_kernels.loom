@@ -4,18 +4,24 @@ kernel.def target(@device) @descriptors() {
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%output: buffer) {
-  %offset = index.constant 24 : offset
-  %records = buffer.view %output[%offset] : buffer -> view<6xi64>
-  %entry_offset = scalar.constant 0 : i64
+  %count_offset = index.constant 24 : offset
+  %count = buffer.view %output[%count_offset] : buffer -> view<1xi64>
+  %record_count = scalar.constant 2 : i64
+  view.store %record_count, %count[0] : i64, view<1xi64>
+  %offset = index.constant 64 : offset
+  %records = buffer.view %output[%offset] : buffer -> view<16xi64>
+  %first_file = scalar.constant 0 : i64
+  // The high sixteen bits select file binding one; its relative offset is zero.
+  %second_file = scalar.constant 281474976710656 : i64
   %length = scalar.constant 4 : i64
-  %first = scalar.constant 16 : i64
-  %second = scalar.constant 20 : i64
-  view.store %entry_offset, %records[0] : i64, view<6xi64>
-  view.store %first, %records[1] : i64, view<6xi64>
-  view.store %length, %records[2] : i64, view<6xi64>
-  view.store %entry_offset, %records[3] : i64, view<6xi64>
-  view.store %second, %records[4] : i64, view<6xi64>
-  view.store %length, %records[5] : i64, view<6xi64>
+  %first = scalar.constant 0 : i64
+  %second = scalar.constant 4 : i64
+  view.store %first_file, %records[0] : i64, view<16xi64>
+  view.store %first, %records[1] : i64, view<16xi64>
+  view.store %length, %records[2] : i64, view<16xi64>
+  view.store %second_file, %records[8] : i64, view<16xi64>
+  view.store %second, %records[9] : i64, view<16xi64>
+  view.store %length, %records[10] : i64, view<16xi64>
   kernel.return
 }
 

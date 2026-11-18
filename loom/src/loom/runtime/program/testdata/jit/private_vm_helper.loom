@@ -1,6 +1,8 @@
-func.decl @dispatch_step(%stage: i32, %storage: hal.buffer) -> (i64)
+type.decl import("hal", "buffer") @HalBuffer
 
-func.def public @step(%stage: i32, %storage: hal.buffer) -> (i64) {
-  %completion = func.call @dispatch_step(%stage, %storage) : (i32, hal.buffer) -> (i64)
+func.decl @dispatch_step(%stage: i32, %storage: ptr<@HalBuffer>) -> (i64)
+
+func.def public @step(%stage: i32, %storage: ptr<@HalBuffer>) -> (i64) {
+  %completion = func.call @dispatch_step(%stage, %storage) : (i32, ptr<@HalBuffer>) -> (i64)
   func.return %completion : i64
 }

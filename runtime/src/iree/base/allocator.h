@@ -426,6 +426,8 @@ IREE_API_EXPORT iree_status_t iree_allocator_malloc_struct_array(
 
 // Grows an array allocation using a 2x doubling strategy.
 // The new capacity is max(|minimum_capacity|, |*inout_capacity| * 2).
+// This always grows, even when |minimum_capacity| already fits. Callers check
+// their required element count against the current capacity before growing.
 // On success |*inout_capacity| is updated and |*inout_ptr| is reallocated.
 // Returns IREE_STATUS_OUT_OF_RANGE if the capacity calculation overflows.
 IREE_API_EXPORT iree_status_t iree_allocator_grow_array(

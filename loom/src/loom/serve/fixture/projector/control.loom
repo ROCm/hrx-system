@@ -1,3 +1,5 @@
+type.decl import("hal", "buffer") @HalBuffer
+
 type.decl import("finite", "batch") @FiniteBatch
 
 func.decl import("finite", "batch_pack") @finite_batch_pack(%batch: ptr<@FiniteBatch>) -> (buffer, buffer)
@@ -6,7 +8,7 @@ func.decl import("finite", "batch_finish") @finite_batch_finish(%batch: ptr<@Fin
 
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
-func.decl import("runner") @execute_2(%stage: i32, %input: hal.buffer, %output: hal.buffer) -> (i64)
+func.decl import("runner") @execute_2(%stage: i32, %input: ptr<@HalBuffer>, %output: ptr<@HalBuffer>) -> (i64)
 
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
@@ -204,8 +206,8 @@ func.def public @prepare_batch(%state: buffer, %tags: buffer, %batch: ptr<@Finit
   func.return %stage, %payload, %plan : i32, buffer, buffer
 }
 
-func.def public @run(%state: buffer, %stage: i32, %input: hal.buffer, %output: hal.buffer, %batch: ptr<@FiniteBatch>) {
-  %work = func.call @execute_2(%stage, %input, %output) : (i32, hal.buffer, hal.buffer) -> (i64)
+func.def public @run(%state: buffer, %stage: i32, %input: ptr<@HalBuffer>, %output: ptr<@HalBuffer>, %batch: ptr<@FiniteBatch>) {
+  %work = func.call @execute_2(%stage, %input, %output) : (i32, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)
   func.return
 }
 

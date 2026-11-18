@@ -1,3 +1,5 @@
+type.decl import("hal", "buffer") @HalBuffer
+
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
 func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
@@ -12,9 +14,9 @@ func.decl import("prepare") @bind_parameters(%root: buffer)
 
 func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
 
-func.decl import("runner") @execute_3(%stage: i32, %request: hal.buffer, %output: hal.buffer, %workspace: hal.buffer) -> (i64)
+func.decl import("runner") @execute_3(%stage: i32, %request: ptr<@HalBuffer>, %output: ptr<@HalBuffer>, %workspace: ptr<@HalBuffer>) -> (i64)
 
-func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
+func.decl import("runner") @feedback(%slot: i32, %source: ptr<@HalBuffer>, %offset: i64, %length: i64) -> (i64)
 
 // The same program exposes its direct and versioned image service contracts.
 // The source-selected bind_banks callback remains an exact, unqualified export.
@@ -33,8 +35,8 @@ func.def public @image_prepare_batch_v1(%state: buffer, %tags: buffer, %ranges: 
   func.return %stage, %request : i32, buffer
 }
 
-func.def public @image_generate_v1(%first: i32, %count: i32, %cursor: i32, %output_bytes: i64, %request: hal.buffer, %output: hal.buffer, %workspace: hal.buffer) -> (i32) {
-  %next = func.call @generate(%first, %count, %cursor, %output_bytes, %request, %output, %workspace) : (i32, i32, i32, i64, hal.buffer, hal.buffer, hal.buffer) -> (i32)
+func.def public @image_generate_v1(%first: i32, %count: i32, %cursor: i32, %output_bytes: i64, %request: ptr<@HalBuffer>, %output: ptr<@HalBuffer>, %workspace: ptr<@HalBuffer>) -> (i32) {
+  %next = func.call @generate(%first, %count, %cursor, %output_bytes, %request, %output, %workspace) : (i32, i32, i32, i64, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i32)
   func.return %next : i32
 }
 
@@ -139,11 +141,11 @@ func.def public @bind_banks(%state: buffer, %payload: buffer, %offsets: buffer) 
   func.return
 }
 
-func.def public @generate(%first: i32, %count: i32, %cursor: i32, %output_bytes: i64, %request: hal.buffer, %output: hal.buffer, %workspace: hal.buffer) -> (i32) {
-  %completion = func.call @execute_3(%first, %request, %output, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+func.def public @generate(%first: i32, %count: i32, %cursor: i32, %output_bytes: i64, %request: ptr<@HalBuffer>, %output: ptr<@HalBuffer>, %workspace: ptr<@HalBuffer>) -> (i32) {
+  %completion = func.call @execute_3(%first, %request, %output, %workspace) : (i32, ptr<@HalBuffer>, ptr<@HalBuffer>, ptr<@HalBuffer>) -> (i64)
   %c0 = scalar.constant 0 : i32
   %origin = scalar.constant 0 : i64
-  %feedback = func.call @feedback(%c0, %output, %origin, %output_bytes) : (i32, hal.buffer, i64, i64) -> (i64)
+  %feedback = func.call @feedback(%c0, %output, %origin, %output_bytes) : (i32, ptr<@HalBuffer>, i64, i64) -> (i64)
   %done = scalar.constant -1 : i32
   func.return %done : i32
 }
