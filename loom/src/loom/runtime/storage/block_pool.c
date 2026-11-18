@@ -57,9 +57,9 @@ iree_status_t loom_runtime_block_pool_grow(loom_runtime_block_pool_t* pool,
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       0, &storage_size,
       IREE_STRUCT_FIELD(capacity, uint32_t, &references_offset),
-      IREE_STRUCT_FIELD(
+      IREE_STRUCT_FIELD_ALIGNED(
           (iree_host_size_t)LOOM_BLOCK_SET_COUNT * membership.word_count,
-          uint64_t, &sets_offset)));
+          uint64_t, iree_alignof(uint64_t), &sets_offset)));
   uint8_t* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(pool->host_allocator, storage_size,
                                              (void**)&storage));
@@ -216,6 +216,9 @@ uint32_t loom_runtime_block_pool_plan_compaction(
 
 void loom_runtime_block_pool_commit_compaction(loom_runtime_block_pool_t* pool,
                                                const uint32_t* destinations) {
+  if (!pool->capacity) {
+    return;
+  }
   for (uint32_t i = 0; i < pool->capacity; ++i) {
     if (destinations[i] != UINT32_MAX && destinations[i] != i) {
       pool->references[destinations[i]] = pool->references[i];

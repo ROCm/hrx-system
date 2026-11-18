@@ -40,6 +40,8 @@ TEST(BlockPoolTest, EmptyPoolHasNoOwnership) {
   loom_runtime_block_pool_release(&pool, 0, nullptr);
   EXPECT_EQ(loom_runtime_block_pool_plan_compaction(&pool, nullptr), 0u);
   loom_runtime_block_pool_commit_compaction(&pool, nullptr);
+  EXPECT_EQ(pool.references, nullptr);
+  EXPECT_EQ(pool.sets, nullptr);
   loom_runtime_block_pool_deinitialize(&pool);
 }
 
@@ -147,11 +149,13 @@ TEST(BlockPoolTest, GrowthPreservesMembershipAcrossSummaryLevels) {
       loom_runtime_block_pool_t pool;
       IREE_ASSERT_OK(loom_runtime_block_pool_initialize(
           initial, iree_allocator_system(), &pool));
+      EXPECT_EQ(reinterpret_cast<uintptr_t>(pool.sets) % alignof(uint64_t), 0u);
       std::vector<uint32_t> blocks(initial);
       loom_runtime_block_pool_acquire(&pool, initial, blocks.data());
       const uint32_t retained = occupied ? 1 : 0;
       loom_runtime_block_pool_release(&pool, initial - retained, blocks.data());
       IREE_ASSERT_OK(loom_runtime_block_pool_grow(&pool, 262145));
+      EXPECT_EQ(reinterpret_cast<uintptr_t>(pool.sets) % alignof(uint64_t), 0u);
       EXPECT_EQ(loom_runtime_block_pool_any_owned(&pool, 0, initial), occupied);
       EXPECT_FALSE(
           loom_runtime_block_pool_any_owned(&pool, initial, 262145 - initial));
