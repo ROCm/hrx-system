@@ -79,8 +79,8 @@ typedef struct iree_hal_amd_gpu_pm4_frontier_request_t {
 static const iree_hal_queue_vtable_t iree_hal_amd_gpu_pm4_queue_vtable;
 
 static iree_status_t iree_hal_amd_gpu_pm4_file_submit(
-    iree_hal_queue_t* base,
-    const iree_hal_amd_gpu_transfer_operation_t* operation, const void* before,
+    iree_hal_queue_t* base, iree_host_size_t count,
+    const iree_hal_amd_gpu_transfer_operation_t* operations, const void* before,
     const void* after, iree_hal_amd_gpu_retirement_callback_t callback);
 
 static void iree_hal_amd_gpu_pm4_file_add_effects(
@@ -2322,15 +2322,15 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_transfer(
 // File continuations already own dependency resolution and prepared barriers.
 // Reuse ordinary bounded transfer publication without another HAL replay layer.
 static iree_status_t iree_hal_amd_gpu_pm4_file_submit(
-    iree_hal_queue_t* base,
-    const iree_hal_amd_gpu_transfer_operation_t* operation, const void* before,
+    iree_hal_queue_t* base, iree_host_size_t count,
+    const iree_hal_amd_gpu_transfer_operation_t* operations, const void* before,
     const void* after, iree_hal_amd_gpu_retirement_callback_t callback) {
   iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_check_failure(queue));
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_create_file(
-      &queue->captures, operation, &queue->options.barriers, before, after,
-      callback, &submission));
+      &queue->captures, count, operations, &queue->options.barriers, before,
+      after, callback, &submission));
   iree_hal_amd_gpu_pm4_submit(queue, submission);
   return iree_ok_status();
 }

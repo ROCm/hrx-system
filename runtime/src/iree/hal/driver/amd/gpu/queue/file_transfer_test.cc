@@ -11,6 +11,7 @@
 #include <cstring>
 #include <memory>
 #include <thread>
+#include <vector>
 
 #include "iree/async/proactor_platform.h"
 #include "iree/hal/driver/amd/gpu/queue/semaphore.h"
@@ -53,7 +54,7 @@ struct NativeQueue : iree_hal_queue_t {
   // Borrowed file owner held until the simulated native work retires.
   iree_hal_amd_gpu_retirement_callback_t pending_callback = {};
   // Captured native operands whose bytes remain borrowed until retirement.
-  iree_hal_amd_gpu_transfer_operation_t pending_operation = {};
+  std::vector<iree_hal_amd_gpu_transfer_operation_t> pending_operations;
 
   static void Copy(const iree_hal_amd_gpu_transfer_operation_t* operation) {
     if (operation) {
@@ -76,8 +77,8 @@ struct NativeQueue : iree_hal_queue_t {
   }
 
   static iree_status_t Submit(
-      iree_hal_queue_t* base,
-      const iree_hal_amd_gpu_transfer_operation_t* operation,
+      iree_hal_queue_t* base, iree_host_size_t count,
+      const iree_hal_amd_gpu_transfer_operation_t* operations,
       const void* before, const void* after,
       iree_hal_amd_gpu_retirement_callback_t callback) {
     auto* queue = static_cast<NativeQueue*>(base);
@@ -91,13 +92,16 @@ struct NativeQueue : iree_hal_queue_t {
     }
     if (queue->defer_retirement) {
       queue->pending_callback = callback;
-      if (operation) {
-        queue->pending_operation = *operation;
+      queue->pending_operations.clear();
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        queue->pending_operations.push_back(operations[i]);
       }
       queue->submitting = false;
       return iree_ok_status();
     }
-    Copy(operation);
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      Copy(&operations[i]);
+    }
     iree_async_single_frontier_t frontier;
     iree_async_single_frontier_initialize(&frontier, 7, queue->submissions);
     if (queue->concurrent_completion) {
@@ -372,7 +376,9 @@ void FileTransferTest::FailedNativeWork(iree_hal_memory_access_t access) {
   EXPECT_FALSE(file_released_);
   EXPECT_FALSE(device.destroyed);
   // The accepted copy can still access file bytes after an internal error.
-  NativeQueue::Copy(&queue.pending_operation);
+  for (const auto& operation : queue.pending_operations) {
+    NativeQueue::Copy(&operation);
+  }
   const auto& actual = access == IREE_HAL_MEMORY_ACCESS_READ
                            ? buffer->device_contents
                            : contents_;

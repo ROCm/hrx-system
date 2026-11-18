@@ -44,7 +44,7 @@ class FileTransferStagingTest : public MemoryBackendTest,
       // Placed command dominated by this dependency's lifetime.
       iree_hal_amd_gpu_sdma_submission_t command = {};
       // Prepared native copy, immutable until checked retirement.
-      uint32_t words[7] = {};
+      std::vector<uint32_t> words;
       // File owner notified by native failure and final retirement.
       iree_hal_amd_gpu_retirement_callback_t callback = {};
     };
@@ -169,26 +169,33 @@ class FileTransferStagingTest : public MemoryBackendTest,
               *static_cast<uint32_t*>(barrier) |= effects.bits;
             },
         .submit =
-            [](iree_hal_queue_t* queue,
-               const iree_hal_amd_gpu_transfer_operation_t* operation,
+            [](iree_hal_queue_t* queue, iree_host_size_t count,
+               const iree_hal_amd_gpu_transfer_operation_t* operations,
                const void* before, const void* after,
                iree_hal_amd_gpu_retirement_callback_t callback) {
               auto* boundary = static_cast<BoundaryQueue*>(queue);
-              if (operation) {
-                EXPECT_EQ(operation->type,
-                          IREE_HAL_TRANSFER_OPERATION_TYPE_COPY);
+              if (count) {
                 auto copy = std::make_unique<BoundaryQueue::Copy>();
-                uint64_t source = 0, target = 0;
-                IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_buffer_reference_resolve(
-                    &operation->source.device, &source));
-                IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_buffer_reference_resolve(
-                    &operation->target.device, &target));
+                copy->words.resize(count * 7);
+                for (iree_host_size_t i = 0; i < count; ++i) {
+                  const auto& operation = operations[i];
+                  EXPECT_EQ(operation.type,
+                            IREE_HAL_TRANSFER_OPERATION_TYPE_COPY);
+                  uint64_t source = 0, target = 0;
+                  IREE_RETURN_IF_ERROR(
+                      iree_hal_amd_gpu_buffer_reference_resolve(
+                          &operation.source.device, &source));
+                  IREE_RETURN_IF_ERROR(
+                      iree_hal_amd_gpu_buffer_reference_resolve(
+                          &operation.target.device, &target));
+                  iree_hal_amd_gpu_sdma_emit_copy(copy->words.data() + i * 7, 0,
+                                                  source, target,
+                                                  operation.length);
+                }
                 EXPECT_EQ(*static_cast<const uint32_t*>(before), 0u);
                 EXPECT_EQ(*static_cast<const uint32_t*>(after), 0u);
-                iree_hal_amd_gpu_sdma_emit_copy(copy->words, 0, source, target,
-                                                operation->length);
-                copy->command.words = copy->words;
-                copy->command.word_count = IREE_ARRAYSIZE(copy->words);
+                copy->command.words = copy->words.data();
+                copy->command.word_count = copy->words.size();
                 copy->command.completion.notify =
                     [](void* user_data, amdf_status_t status,
                        iree_hal_amd_gpu_sdma_retirement_t retirement) {
@@ -652,11 +659,12 @@ TEST_P(FileTransferStagingTest, FailedQueueDoesNotPoisonSharedFileStaging) {
   other.queue_family = queue_.queue_family;
   auto executor = executor_;
   executor.queue = &other;
-  executor.submit = [](iree_hal_queue_t* queue,
-                       const iree_hal_amd_gpu_transfer_operation_t* operation,
+  executor.submit = [](iree_hal_queue_t* queue, iree_host_size_t count,
+                       const iree_hal_amd_gpu_transfer_operation_t* operations,
                        const void*, const void*,
                        iree_hal_amd_gpu_retirement_callback_t callback) {
-    if (operation) {
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      const auto* operation = &operations[i];
       EXPECT_EQ(operation->type, IREE_HAL_TRANSFER_OPERATION_TYPE_COPY);
       uint64_t source = 0, target = 0;
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_buffer_reference_resolve(
@@ -665,7 +673,8 @@ TEST_P(FileTransferStagingTest, FailedQueueDoesNotPoisonSharedFileStaging) {
           &operation->target.device, &target));
       std::memcpy(reinterpret_cast<void*>(target),
                   reinterpret_cast<const void*>(source), operation->length);
-    } else {
+    }
+    if (!count) {
       ++static_cast<BoundaryQueue*>(queue)->boundaries;
     }
     callback.fn(callback.user_data, iree_ok_status(), nullptr, true);

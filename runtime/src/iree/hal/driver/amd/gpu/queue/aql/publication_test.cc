@@ -838,7 +838,7 @@ TEST_P(AqlPublicationTest, FullTransferStorageLeavesLaunchArgumentsAvailable) {
   };
   iree_hal_amd_gpu_aql_submission_t* submission = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_aql_submission_file(
-      &queue_.captures, &operation, 0, 0, {}, &submission));
+      &queue_.captures, 1, &operation, 0, 0, {}, &submission));
   iree_status_t status = iree_ok_status();
   EXPECT_EQ(iree_hal_amd_gpu_aql_publish_transfer(&queue_, submission, &status),
             IREE_HAL_AMD_GPU_AQL_PUBLISH_TRANSFERS);

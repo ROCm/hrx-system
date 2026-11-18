@@ -92,7 +92,7 @@ static void iree_hal_amd_gpu_file_transfer_submit_native(
   operation->resume = resume;
   iree_atomic_store(&operation->pending, 2, iree_memory_order_relaxed);
   iree_status_t status = operation->executor->submit(
-      operation->executor->queue, transfer, before, after,
+      operation->executor->queue, transfer ? 1 : 0, transfer, before, after,
       (iree_hal_amd_gpu_retirement_callback_t){
           .fn = iree_hal_amd_gpu_file_transfer_native_complete,
           .user_data = operation});
@@ -121,8 +121,8 @@ static iree_status_t iree_hal_amd_gpu_file_transfer_copy_native(
   memset(after_barrier, 0, executor->barrier_size);
   executor->add_effects(executor->queue, before, before_barrier);
   executor->add_effects(executor->queue, after, after_barrier);
-  return executor->submit(executor->queue, &copy, before_barrier, after_barrier,
-                          callback);
+  return executor->submit(executor->queue, 1, &copy, before_barrier,
+                          after_barrier, callback);
 }
 
 static void iree_hal_amd_gpu_file_transfer_free(

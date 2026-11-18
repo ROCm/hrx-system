@@ -54,18 +54,18 @@ typedef struct iree_hal_amd_gpu_file_executor_t {
   // trusted global/ranged queue effects and performs no allocation or query.
   void (*add_effects)(iree_hal_queue_t* queue,
                       iree_hal_memory_effects_t effects, void* barrier);
-  // Captures one transfer or, for NULL operation, a barrier. The caller has
-  // already accepted the file operation, resolved dependencies, and prepared
-  // immutable cache recipes. Public queue closure does not reject these
-  // continuations; native queue failure still does. Success owns
-  // captured arguments until callback reports retirement; failure retains no
-  // borrowed payload and invokes no callback. An early failure notification
-  // does not end borrowed payload lifetime.
-  // NULL before/after omits that boundary. Other values point to barrier_size
-  // prepared bytes that remain live through this call.
+  // Captures a bounded transfer window or, for zero count, a barrier. The
+  // caller has already accepted the file operation, resolved dependencies, and
+  // prepared immutable cache recipes. Public queue closure does not reject
+  // these continuations; native queue failure still does. Success owns captured
+  // arguments until callback reports retirement; failure retains no borrowed
+  // payload and invokes no callback. An early failure notification does not end
+  // borrowed payload lifetime. NULL before/after omits that boundary. Other
+  // values point to barrier_size prepared bytes that remain live through this
+  // call.
   iree_status_t (*submit)(
-      iree_hal_queue_t* queue,
-      const iree_hal_amd_gpu_transfer_operation_t* operation,
+      iree_hal_queue_t* queue, iree_host_size_t count,
+      const iree_hal_amd_gpu_transfer_operation_t* operations,
       const void* before, const void* after,
       iree_hal_amd_gpu_retirement_callback_t callback);
 } iree_hal_amd_gpu_file_executor_t;
