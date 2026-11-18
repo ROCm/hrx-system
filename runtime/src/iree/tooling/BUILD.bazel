@@ -236,18 +236,18 @@ iree_runtime_cc_test(
 
 [
     iree_runtime_cc_test(
-        name = "parameter_util_%s_test" % mode,
+        name = "parameter_util_%s_test" % expected,
         srcs = ["parameter_util_test.cc"],
         args = [
             "--parameter_mode=" + mode,
-            "--expected_parameter_mode=" + mode,
+            "--expected_parameter_mode=" + expected,
         ],
         tags = ["requires-filesystem"],
         deps = _PARAMETER_UTIL_TEST_DEPS,
     )
-    for mode in [
-        "direct",
-        "preload",
-        "invalid",
+    for mode, expected in [
+        ("direct", "direct"),
+        ("debug-preload", "preload"),
+        ("preload", "invalid"),
     ]
 ]

@@ -22,9 +22,9 @@ typedef struct iree_io_scope_map_t iree_io_scope_map_t;
 // index manifests named `*.safetensors.index.json`. Manifest paths are expanded
 // relative to their containing directory and each referenced shard file is
 // parsed into the same index.
-// The --parameter_mode flag controls payload file access: buffered files,
-// preloaded host allocations, or native uncached files. Direct mode requires
-// consumers to satisfy native transfer geometry; it adds no alignment staging.
+// Payloads are read on demand from buffered files by default.
+// --parameter_mode=direct selects native uncached access and requires
+// consumers to satisfy the filesystem's transfer alignment.
 iree_status_t iree_tooling_append_parameter_file_to_index(
     iree_string_view_t path, iree_io_parameter_index_t* index,
     iree_allocator_t host_allocator);
