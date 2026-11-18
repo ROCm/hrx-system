@@ -8983,10 +8983,10 @@ class Translator final : private Initialization::Evaluation {
               }
               continue;
             }
-            if (source_value.origin != PredicateValueOrigin::Binding ||
-                !source_value.members.empty()) {
+            if (source_value.origin != PredicateValueOrigin::Binding) {
               fail(source_value.source,
-                   "assume can refine only direct automatic scalar bindings");
+                   "assume can refine only automatic scalar bindings or "
+                   "record members");
             }
             auto* symbol = source_value.binding;
             if (locals_.contains(symbol)) {
@@ -8997,7 +8997,7 @@ class Translator final : private Initialization::Evaluation {
             if (!values_.contains(symbol)) {
               fail(source_value.source,
                    "assume can retain facts only for an owned automatic "
-                   "scalar binding");
+                   "binding");
             }
           }
         }
@@ -9049,9 +9049,22 @@ class Translator final : private Initialization::Evaluation {
                     : Value(numeric_convert(result,
                                             source_value.converted->type,
                                             source_value.source->type, ast));
-            values_.set(
-                source_value.binding,
-                name(refined, cxx::to_string(source_value.binding->name())));
+            auto* binding = source_value.binding;
+            auto hint = cxx::to_string(binding->name());
+            if (source_value.members.empty()) {
+              values_.set(binding, name(refined, hint));
+            } else {
+              size_t component_offset = 0;
+              for (auto* member : source_value.members) {
+                component_offset +=
+                    types_.member(member, source_value.source).component_offset;
+              }
+              const auto& partition = static_cast<const RecordPartition&>(
+                  values_.partition(binding));
+              hint += "_" + partition.component_names[component_offset];
+              values_.replace(binding, component_offset, name(refined, hint),
+                              value_arena_);
+            }
           }
         }
         return;

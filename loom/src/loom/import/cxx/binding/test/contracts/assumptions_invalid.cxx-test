@@ -155,7 +155,7 @@ void entry(unsigned value, unsigned other) {
 [[loom::assume]] void assume(bool);
 extern int global_value;
 void entry(int value) {
-  // ERROR@+1: LOWERING/059 "assume can retain facts only for an owned automatic scalar binding"
+  // ERROR@+1: LOWERING/059 "assume can retain facts only for an owned automatic binding"
   assume(value > 0 && global_value > 0);
 }
 
@@ -168,6 +168,23 @@ extern int global_value;
 void entry(int value) {
   // ERROR@+1: LOWERING/059 "assume expressions can read only owned automatic scalar bindings"
   assume(value + global_value > 0);
+}
+
+// ====
+// RUN: verify
+// An addressable record can change through an alias. Its member read cannot
+// replace an owned SSA identity with a lasting refinement.
+#include <loomcxx/predicate.h>
+struct Count {
+  // Aliased scalar storage.
+  int value;
+};
+void mutate(Count* count);
+void entry(Count count) {
+  auto* alias = &count;
+  // ERROR@+1: LOWERING/059 "assume cannot retain facts for an addressable binding whose storage may change through an alias"
+  loom::assume(count.value >= 0);
+  mutate(alias);
 }
 
 // ====
