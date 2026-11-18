@@ -124,11 +124,12 @@ jobs:
           test -d "${HRX_ROCM_ROOT}/include"
 
       - name: Report ROCm environment
+        id: rocm_preflight
         timeout-minutes: 1
-        run: >-
-          bash .github/scripts/check_rocm_environment.sh
-          --export-libamdf-gpu-selection
-          --amdgpu-target "${{ matrix.target_selector }}"
+        run: |
+          printf 'started=%s\n' "$(date -u '+%F %T')" >> "$GITHUB_OUTPUT"
+          bash .github/scripts/check_rocm_environment.sh \
+            --export-libamdf-gpu-selection --amdgpu-target "${{ matrix.target_selector }}"
 
       - name: Build and test LibHRX GPU coverage
         id: libhrx_bazel_ci
@@ -140,11 +141,10 @@ jobs:
           --bazel-test-results-dir "${RUNNER_TEMP}/native-test-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
       - name: Capture accelerator kernel errors
-        if: ${{ always() && (steps.libhrx_bazel_ci.outcome == 'failure' || steps.libhrx_bazel_ci.outcome == 'cancelled') }}
-        run: |
-          date -u
-          uname -a
-          timeout --kill-after=5s 15s dmesg --ctime --level=err,warn 2>&1 | tail -n 200
+        if: ${{ (failure() || cancelled()) && steps.rocm_preflight.outputs.started }}
+        env:
+          GPU_PREFLIGHT_STARTED: ${{ steps.rocm_preflight.outputs.started }}
+        run: bash .github/scripts/capture_amdgpu_kernel.sh "$GPU_PREFLIGHT_STARTED"
 
       - name: Upload Bazel profiles
         continue-on-error: true

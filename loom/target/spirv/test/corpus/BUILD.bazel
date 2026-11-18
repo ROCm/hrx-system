@@ -711,6 +711,7 @@ loom_scenario_test(
     allowed_failures = {
         SPIRV_VULKAN_HARDWARE_PROFILE.name: _SPIRV_EXECUTION_ALLOWED_FAILURES,
     },
+    args = ["--execution-progress"],
     catalog = LOOM_CORPUS,
     excludes = _SCENARIO_EXCLUDES,
     execution_profiles = [SPIRV_VULKAN_HARDWARE_PROFILE],
