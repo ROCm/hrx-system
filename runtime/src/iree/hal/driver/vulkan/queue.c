@@ -6902,23 +6902,6 @@ typedef struct iree_hal_vulkan_transfer_transaction_t {
   iree_hal_vulkan_queue_pending_submission_t* completion_submission;
 } iree_hal_vulkan_transfer_transaction_t;
 
-static iree_device_size_t iree_hal_vulkan_transfer_operation_length(
-    const iree_hal_transfer_operation_t* operation) {
-  switch (operation->type) {
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
-      return operation->fill.length;
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
-      return operation->update.length;
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
-      return operation->copy.length;
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
-      return operation->upload.length;
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
-      return operation->download.length;
-  }
-  return 0;
-}
-
 // Releases all caller resources captured by a transfer transaction. This runs
 // when the last child finishes, before the transaction's terminal semaphore is
 // published. It may also run while the entry action still retains the
@@ -6927,7 +6910,7 @@ static void iree_hal_vulkan_transfer_transaction_release_operations(
     iree_hal_vulkan_transfer_transaction_t* transaction) {
   for (iree_host_size_t i = 0; i < transaction->operation_count; ++i) {
     iree_hal_transfer_operation_t* operation = &transaction->operations[i];
-    if (iree_hal_vulkan_transfer_operation_length(operation) == 0) {
+    if (iree_hal_transfer_operation_length(operation) == 0) {
       continue;
     }
     switch (operation->type) {
@@ -7013,7 +6996,7 @@ static iree_status_t iree_hal_vulkan_transfer_validate_buffer(
 static iree_status_t iree_hal_vulkan_transfer_validate_operation(
     iree_hal_vulkan_queue_t* queue,
     const iree_hal_transfer_operation_t* operation) {
-  if (iree_hal_vulkan_transfer_operation_length(operation) == 0) {
+  if (iree_hal_transfer_operation_length(operation) == 0) {
     return iree_ok_status();
   }
   switch (operation->type) {
@@ -7045,7 +7028,7 @@ static iree_status_t iree_hal_vulkan_transfer_select_strategy(
     const iree_hal_transfer_operation_t* operation,
     uint32_t* inout_descriptor_set_count,
     iree_hal_vulkan_transfer_strategy_t* out_strategy) {
-  if (iree_hal_vulkan_transfer_operation_length(operation) == 0) {
+  if (iree_hal_transfer_operation_length(operation) == 0) {
     *out_strategy = IREE_HAL_VULKAN_TRANSFER_STRATEGY_NONE;
     return iree_ok_status();
   }
@@ -7268,7 +7251,7 @@ static iree_status_t iree_hal_vulkan_transfer_transaction_create(
   for (iree_host_size_t i = 0; i < operation_count; ++i) {
     iree_hal_transfer_operation_t* operation = &transaction->operations[i];
     const iree_device_size_t length =
-        iree_hal_vulkan_transfer_operation_length(operation);
+        iree_hal_transfer_operation_length(operation);
     switch (operation->type) {
       case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
         if (length != 0) {

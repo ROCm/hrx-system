@@ -1628,31 +1628,13 @@ static iree_status_t iree_hal_task_queue_drain_host_call(
 // Queue transfer execution
 //===----------------------------------------------------------------------===//
 
-static iree_device_size_t iree_hal_task_queue_transfer_operation_length(
-    const iree_hal_transfer_operation_t* transfer_operation) {
-  switch (transfer_operation->type) {
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_FILL:
-      return transfer_operation->fill.length;
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
-      return transfer_operation->update.length;
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_COPY:
-      return transfer_operation->copy.length;
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
-      return transfer_operation->upload.length;
-    case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
-      return transfer_operation->download.length;
-  }
-  return 0;
-}
-
 static iree_hal_profile_queue_event_type_t
 iree_hal_task_queue_transfer_profile_type(
     iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* transfer_operations) {
   const iree_hal_transfer_operation_t* active_operation = NULL;
   for (iree_host_size_t i = 0; i < operation_count; ++i) {
-    if (iree_hal_task_queue_transfer_operation_length(
-            &transfer_operations[i]) == 0) {
+    if (iree_hal_transfer_operation_length(&transfer_operations[i]) == 0) {
       continue;
     }
     if (active_operation) {
@@ -1683,8 +1665,8 @@ static iree_host_size_t iree_hal_task_queue_transfer_active_operation_count(
     const iree_hal_transfer_operation_t* transfer_operations) {
   iree_host_size_t active_operation_count = 0;
   for (iree_host_size_t i = 0; i < operation_count; ++i) {
-    active_operation_count += iree_hal_task_queue_transfer_operation_length(
-                                  &transfer_operations[i]) != 0;
+    active_operation_count +=
+        iree_hal_transfer_operation_length(&transfer_operations[i]) != 0;
   }
   return active_operation_count;
 }
@@ -1814,7 +1796,7 @@ static iree_status_t iree_hal_task_queue_build_transfer_recording_operation(
   iree_hal_buffer_t* target_buffer = NULL;
   iree_device_size_t target_offset = 0;
   const iree_device_size_t length =
-      iree_hal_task_queue_transfer_operation_length(transfer_operation);
+      iree_hal_transfer_operation_length(transfer_operation);
   switch (transfer_operation->type) {
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
       source_host_ptr =
@@ -1873,8 +1855,7 @@ static iree_status_t iree_hal_task_queue_build_transfer_recording(
        ++i) {
     const iree_hal_transfer_operation_t* transfer_operation =
         &operation->transfer.operations[i];
-    if (iree_hal_task_queue_transfer_operation_length(transfer_operation) ==
-        0) {
+    if (iree_hal_transfer_operation_length(transfer_operation) == 0) {
       continue;
     }
     status = iree_hal_task_queue_build_transfer_recording_operation(
@@ -1911,8 +1892,7 @@ static iree_status_t iree_hal_task_queue_drain_transfer(
        ++i) {
     const iree_hal_transfer_operation_t* transfer_operation =
         &operation->transfer.operations[i];
-    if (iree_hal_task_queue_transfer_operation_length(transfer_operation) ==
-        0) {
+    if (iree_hal_transfer_operation_length(transfer_operation) == 0) {
       continue;
     }
     status = iree_hal_task_queue_execute_transfer_operation(transfer_operation);
@@ -3402,7 +3382,7 @@ static iree_status_t iree_hal_task_queue_capture_transfer_operation(
     iree_hal_task_queue_t* queue, iree_hal_task_queue_op_t* operation,
     iree_hal_transfer_operation_t* transfer_operation) {
   const iree_device_size_t length =
-      iree_hal_task_queue_transfer_operation_length(transfer_operation);
+      iree_hal_transfer_operation_length(transfer_operation);
   if (length == 0) {
     return iree_ok_status();
   }
@@ -3501,7 +3481,7 @@ static iree_status_t iree_hal_task_queue_submit_transfer(
     iree_hal_transfer_operation_t* transfer_operation =
         &operation->transfer.operations[i];
     const uint64_t operation_length =
-        iree_hal_task_queue_transfer_operation_length(transfer_operation);
+        iree_hal_transfer_operation_length(transfer_operation);
     total_payload_length = operation_length > UINT64_MAX - total_payload_length
                                ? UINT64_MAX
                                : total_payload_length + operation_length;
