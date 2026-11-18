@@ -720,14 +720,14 @@ class CheckBody {
 
   void require_subject(cxx::FunctionSymbol* function, cxx::AST* source,
                        bool allow_kernel) {
-    if (!function || !functions_.definition(function) ||
-        functions_.is_check_record(function) ||
+    if (!function || functions_.is_check_record(function) ||
         annotated(function, "check_benchmark") ||
-        (!allow_kernel && is_kernel(function))) {
+        (is_kernel(function) &&
+         (!allow_kernel || !functions_.definition(function)))) {
       fail(source,
            allow_kernel
-               ? "check actions require a defined ordinary function or kernel"
-               : "check generators require a defined ordinary function");
+               ? "check actions require an ordinary function or defined kernel"
+               : "check generators require an ordinary function");
     }
   }
 
@@ -1279,10 +1279,9 @@ class CheckBody {
     if (observing_) {
       fail(call, "check expectations must be terminal");
     }
-    if (!functions_.definition(function) ||
-        functions_.is_check_record(function) || annotated(function, "kernel") ||
+    if (functions_.is_check_record(function) || annotated(function, "kernel") ||
         annotated(function, "check_benchmark")) {
-      fail(call, "check invocations require a defined ordinary function");
+      fail(call, "check invocations require an ordinary function");
     }
     std::vector<loom_value_id_t> arguments;
     for (auto* argument : cxx::ListView{call->expressionList}) {
