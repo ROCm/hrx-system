@@ -141,9 +141,12 @@ enum loom_runtime_preparation_flag_bits_e {
   // Allows cold arena capacities and the host parameter-binding entry. Request
   // captures may select banks only from this immutable cold arena catalog.
   LOOM_RUNTIME_PREPARATION_FLAG_PARAMETER_ARENAS = 1u << 2,
-  // Allows cold mutable device storage and host feedback declarations. These
-  // are model-owned state, independent of immutable checkpoint bank policy.
+  // Allows cold mutable roots independent of immutable checkpoint bank policy.
   LOOM_RUNTIME_PREPARATION_FLAG_STORAGE = 1u << 3,
+  // Allows host feedback destinations when the service owns their collection.
+  LOOM_RUNTIME_PREPARATION_FLAG_FEEDBACK = 1u << 4,
+  // Allows retained request ranges when the service owns range admission.
+  LOOM_RUNTIME_PREPARATION_FLAG_REQUEST_STORAGE = 1u << 5,
 };
 typedef uint32_t loom_runtime_preparation_flags_t;
 

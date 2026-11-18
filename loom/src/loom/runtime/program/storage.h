@@ -11,10 +11,40 @@
 #include "iree/vm/buffer.h"
 #include "iree/vm/module.h"
 #include "loom/runtime/execution/execution.h"
+#include "loom/runtime/execution/retirement.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef struct loom_runtime_preparation_t loom_runtime_preparation_t;
+
+// Stable source-owned roots, independent of the service's protocol buffers.
+// The service retires source consumers and these references before joining the
+// retirement scope passed to initialize. The table survives that join.
+typedef struct loom_runtime_storage_t {
+  // Number of initialized table entries in cold declaration order.
+  iree_host_size_t count;
+  // Owned tracked roots; release clears entries without freeing the table.
+  iree_hal_buffer_t** buffers;
+} loom_runtime_storage_t;
+
+// Materializes the cold declarations in one allocation transaction on
+// execution. No declarations allocate no storage. Partial ownership returned on
+// failure follows the same release, retirement join, and deinitialize sequence.
+iree_status_t loom_runtime_storage_initialize(
+    const loom_runtime_preparation_t* preparation,
+    loom_runtime_execution_t* execution, iree_hal_pool_t* pool,
+    loom_runtime_retirement_t* retirement, iree_allocator_t host_allocator,
+    loom_runtime_storage_t* out_storage);
+
+// Drops owned roots before the caller joins final native retirement. Accepts
+// partial initialization and repeated release.
+void loom_runtime_storage_release(loom_runtime_storage_t* storage);
+
+// Frees the stable table after source consumers and tracked roots retire.
+void loom_runtime_storage_deinitialize(loom_runtime_storage_t* storage,
+                                       iree_allocator_t host_allocator);
 
 typedef struct loom_runtime_storage_module_options_t {
   // Execution owner for ordered device copies and fills.

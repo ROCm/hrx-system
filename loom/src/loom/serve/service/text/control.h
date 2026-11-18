@@ -41,6 +41,8 @@ enum {
 typedef struct loom_serve_text_control_t {
   // Native stage module retained independently of its linked program.
   iree_vm_module_t* native_module;
+  // Optional source-root capability, enabled only during device submission.
+  iree_vm_module_t* storage_module;
   // Shared VM process; rows hold no private VM instances.
   loom_runtime_program_t* program;
   // Source-owned isolated input/decode invocation.

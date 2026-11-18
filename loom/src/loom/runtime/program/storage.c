@@ -7,6 +7,54 @@
 #include "loom/runtime/program/storage.h"
 
 #include "iree/vm/reflection.h"
+#include "loom/runtime/program/preparation.h"
+
+iree_status_t loom_runtime_storage_initialize(
+    const loom_runtime_preparation_t* preparation,
+    loom_runtime_execution_t* execution, iree_hal_pool_t* pool,
+    loom_runtime_retirement_t* retirement, iree_allocator_t host_allocator,
+    loom_runtime_storage_t* out_storage) {
+  *out_storage = (loom_runtime_storage_t){0};
+  const iree_host_size_t count =
+      loom_runtime_preparation_storage_count(preparation);
+  if (!count) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host_allocator, count, sizeof(*out_storage->buffers),
+      (void**)&out_storage->buffers));
+  out_storage->count = count;
+  iree_hal_pool_reservation_request_t* requests = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host_allocator, count, sizeof(*requests), (void**)&requests));
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const loom_runtime_preparation_storage_t* declaration =
+        loom_runtime_preparation_storage(preparation, i);
+    requests[i] = iree_hal_make_pool_reservation_request(
+        declaration->byte_length, declaration->alignment);
+  }
+  iree_status_t status = loom_runtime_execution_alloca_from_pool(
+      execution, pool, count, requests, out_storage->buffers);
+  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    status = loom_runtime_retirement_track(retirement, &out_storage->buffers[i],
+                                           host_allocator);
+  }
+  iree_allocator_free(host_allocator, requests);
+  return status;
+}
+
+void loom_runtime_storage_release(loom_runtime_storage_t* storage) {
+  for (iree_host_size_t i = 0; i < storage->count; ++i) {
+    iree_hal_buffer_release(storage->buffers[i]);
+    storage->buffers[i] = NULL;
+  }
+}
+
+void loom_runtime_storage_deinitialize(loom_runtime_storage_t* storage,
+                                       iree_allocator_t host_allocator) {
+  iree_allocator_free(host_allocator, storage->buffers);
+  *storage = (loom_runtime_storage_t){0};
+}
 
 typedef struct loom_runtime_storage_module_t {
   // Native module prefix.

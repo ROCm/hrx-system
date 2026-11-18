@@ -104,8 +104,8 @@ iree_status_t loom_serve_text_control_initialize(
   status = loom_runtime_module_create(&source->types, execution, options,
                                       host_allocator, &control->native_module);
   IREE_RETURN_IF_ERROR(status);
-  iree_vm_module_t* libraries[] = {
-      control->native_module, NULL, NULL, NULL, NULL, NULL};
+  iree_vm_module_t* libraries[7] = {control->native_module};
+  iree_host_size_t library_count = 5;
   status = loom_runtime_input_module_create(
       source->environment, loom_runtime_tokenizer_value(source->tokenizer),
       host_allocator, &libraries[1]);
@@ -125,20 +125,29 @@ iree_status_t loom_serve_text_control_initialize(
   }
   if (iree_status_is_ok(status) && generates) {
     status = loom_serve_text_tool_xml_module_create(
-        source->environment, host_allocator, &libraries[5]);
+        source->environment, host_allocator, &libraries[library_count++]);
+  }
+  if (iree_status_is_ok(status) && state->declared_storage.count) {
+    status = loom_runtime_storage_module_create(
+        &source->types, &source->vm_types,
+        (loom_runtime_storage_module_options_t){
+            .execution = execution,
+            .buffers = {state->declared_storage.count,
+                        state->declared_storage.buffers}},
+        host_allocator, &libraries[library_count++]);
+    control->storage_module = libraries[library_count - 1];
+    iree_vm_module_retain(control->storage_module);
   }
   if (iree_status_is_ok(status)) {
     status = loom_runtime_program_link_service(
         source->module, loom_runtime_preparation_card(source->preparation),
         loom_runtime_preparation_component(source->preparation),
-        iree_vm_module_span_from_ptr(libraries, generates ? 6 : 5),
-        host_allocator, &control->program);
+        iree_vm_module_span_from_ptr(libraries, library_count), host_allocator,
+        &control->program);
   }
-  iree_vm_module_release(libraries[5]);
-  iree_vm_module_release(libraries[4]);
-  iree_vm_module_release(libraries[3]);
-  iree_vm_module_release(libraries[2]);
-  iree_vm_module_release(libraries[1]);
+  for (iree_host_size_t i = 1; i < library_count; ++i) {
+    iree_vm_module_release(libraries[i]);
+  }
   IREE_RETURN_IF_ERROR(status);
   if (generates) {
     IREE_RETURN_IF_ERROR(loom_serve_text_chat_policy_initialize(
@@ -260,6 +269,8 @@ void loom_serve_text_control_unlink(loom_serve_text_control_t* control) {
   control->program = NULL;
   iree_vm_module_release(control->native_module);
   control->native_module = NULL;
+  iree_vm_module_release(control->storage_module);
+  control->storage_module = NULL;
 }
 
 void loom_serve_text_control_deinitialize(loom_serve_text_control_t* control) {

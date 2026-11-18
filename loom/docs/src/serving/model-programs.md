@@ -207,6 +207,33 @@ CPU or synchronizing other models. A null fence represents no external work.
 Completion describes readiness; storage ownership still extends through the
 last accepted consumer, including when a dependency fails.
 
+### Retain source-owned device storage
+
+Finite and text programs can declare reusable buffers during cold preparation
+with `prepare.storage(byte_length, alignment) -> i32`. The returned ordinal
+names one model-owned root. During submission, `storage.buffer(ordinal)` returns
+that ordinary `hal.buffer`; `storage.copy` and `storage.fill` enqueue ordered
+operations on the model's execution timeline. Contents are initially unspecified
+and survive requests and text row-capacity growth. The source owns initialization
+and byte layout. Models with no declarations allocate no additional roots.
+
+For example, a source can retain an output ring or a device-generated file
+request list without adding a modality-specific buffer role to the service.
+The optional `hal.file` module accepts borrowed file and payload tables, byte
+windows, a producer fence, and the native HAL's indirect records/count buffers.
+It returns a completion fence that `runner.join` can order before consumption,
+while independent dispatches overlap the transfer. `parameters.file` supplies
+the actual checkpoint file and the selected entry's byte window.
+
+The service allocates declared roots from its storage pool and retains them
+through final queue use. Releasing source references or failing an invocation
+does not shorten accepted work's ownership. Text preparation permits these
+roots; finite-only feedback destinations and retained request-range admission
+remain separate capabilities. The
+[storage contract](https://github.com/ROCm/hrx-system/blob/main/loom/src/loom/runtime/program/storage.h)
+and [finite file contract](https://github.com/ROCm/hrx-system/blob/main/runtime/src/iree/hal/vm/file.h)
+describe the exact signatures and lifetimes.
+
 ### Measure device work
 
 Control programs can bracket prepared stages with queue-clock captures:

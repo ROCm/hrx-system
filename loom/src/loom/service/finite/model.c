@@ -48,14 +48,9 @@ struct loom_service_finite_model_t {
   // Maximum live result bytes within the physical device output.
   iree_host_size_t result_capacity;
   // Cold source-declared mutable roots, independent of epoch workspace.
-  struct {
-    // Final queue ownership of stable roots and their feedback captures.
-    loom_runtime_retirement_t retirement;
-    // Number of owned roots, including partial allocation on load failure.
-    iree_host_size_t count;
-    // Owned stable roots released before draining accepted native captures.
-    iree_hal_buffer_t** buffers;
-  } storage;
+  loom_runtime_storage_t storage;
+  // Final queue ownership of stable roots and their feedback captures.
+  loom_runtime_retirement_t storage_retirement;
   // Optional logical range owner, outliving final captures of stable roots.
   loom_runtime_ranges_t* ranges;
   // Completed device replies retained through source collection and teardown.
@@ -191,10 +186,7 @@ static void loom_service_finite_model_release_consumers(
     iree_hal_buffer_release(model->buffers[i]);
     model->buffers[i] = NULL;
   }
-  for (iree_host_size_t i = 0; i < model->storage.count; ++i) {
-    iree_hal_buffer_release(model->storage.buffers[i]);
-    model->storage.buffers[i] = NULL;
-  }
+  loom_runtime_storage_release(&model->storage);
 }
 
 void loom_service_finite_model_retire(loom_service_finite_model_t* model,
@@ -204,7 +196,7 @@ void loom_service_finite_model_retire(loom_service_finite_model_t* model,
     loom_runtime_ranges_set_observer(
         model->ranges, (loom_runtime_wake_callback_t){wake, user_data});
   }
-  loom_runtime_retirement_set_observer(&model->storage.retirement, wake,
+  loom_runtime_retirement_set_observer(&model->storage_retirement, wake,
                                        user_data);
   if (model->executables) {
     loom_service_executables_set_observer(
@@ -224,7 +216,7 @@ bool loom_service_finite_model_is_retired(loom_service_finite_model_t* model) {
   }
   bool retired =
       !model->execution || loom_runtime_execution_is_retired(model->execution);
-  retired &= loom_runtime_retirement_is_idle(&model->storage.retirement);
+  retired &= loom_runtime_retirement_is_idle(&model->storage_retirement);
   retired &= loom_runtime_parameter_bank_is_retired(model->parameters);
   retired &= loom_service_executables_is_retired(model->executables);
   return retired;
@@ -259,7 +251,7 @@ static iree_status_t loom_service_finite_model_destroy_resources(
       iree_allocator_free(model->host_allocator, model->ranges);
     }
     iree_allocator_free(model->host_allocator, model->requests.values);
-    iree_allocator_free(model->host_allocator, model->storage.buffers);
+    loom_runtime_storage_deinitialize(&model->storage, model->host_allocator);
     for (uint32_t i = 0; i < model->stages.count; ++i) {
       loom_runtime_jit_stage_free(model->stages.values[i]);
     }
@@ -276,7 +268,7 @@ static iree_status_t loom_service_finite_model_destroy_resources(
                                                      NULL);
     }
     loom_runtime_execution_release(model->execution);
-    loom_runtime_retirement_deinitialize(&model->storage.retirement);
+    loom_runtime_retirement_deinitialize(&model->storage_retirement);
     iree_allocator_free(model->host_allocator, (void*)model->name.data);
     loom_runtime_jit_release(model->jit);
     loom_runtime_tokenizer_release(model->tokenizer);
@@ -297,7 +289,7 @@ iree_status_t loom_service_finite_model_free(
   }
   loom_service_finite_model_retire(model, NULL, NULL);
   iree_status_t status = loom_runtime_execution_drain(model->execution);
-  loom_runtime_retirement_await(&model->storage.retirement);
+  loom_runtime_retirement_await(&model->storage_retirement);
   status = iree_status_join(
       status, loom_runtime_parameter_bank_await_retirement(model->parameters));
   status = iree_status_join(
@@ -349,7 +341,9 @@ static iree_status_t loom_service_finite_prepare(
         options->sources.prepare, IREE_SV("prepare"),
         LOOM_RUNTIME_PREPARATION_FLAG_PARAMETERS |
             LOOM_RUNTIME_PREPARATION_FLAG_MEMORY_FORECAST |
-            LOOM_RUNTIME_PREPARATION_FLAG_STORAGE,
+            LOOM_RUNTIME_PREPARATION_FLAG_STORAGE |
+            LOOM_RUNTIME_PREPARATION_FLAG_FEEDBACK |
+            LOOM_RUNTIME_PREPARATION_FLAG_REQUEST_STORAGE,
         iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(results),
         (iree_vm_module_span_t){modules, 2}, host_allocator,
@@ -630,32 +624,11 @@ static iree_status_t loom_service_finite_create_control(
 static iree_status_t loom_service_finite_model_allocate_storage(
     loom_service_finite_model_t* model) {
   const iree_allocator_t allocator = model->host_allocator;
-  const iree_host_size_t count =
-      loom_runtime_preparation_storage_count(model->preparation);
-  if (count) {
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-        allocator, count, sizeof(*model->storage.buffers),
-        (void**)&model->storage.buffers));
-    model->storage.count = count;
-    iree_hal_pool_reservation_request_t* requests = NULL;
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-        allocator, count, sizeof(*requests), (void**)&requests));
-    for (iree_host_size_t i = 0; i < count; ++i) {
-      const loom_runtime_preparation_storage_t* declaration =
-          loom_runtime_preparation_storage(model->preparation, i);
-      requests[i] = iree_hal_make_pool_reservation_request(
-          declaration->byte_length, declaration->alignment);
-    }
-    iree_status_t status = loom_runtime_execution_alloca_from_pool(
-        model->execution, loom_runtime_pool_storage(model->pool), count,
-        requests, model->storage.buffers);
-    for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
-      status = loom_runtime_retirement_track(
-          &model->storage.retirement, &model->storage.buffers[i], allocator);
-    }
-    iree_allocator_free(allocator, requests);
-    IREE_RETURN_IF_ERROR(status);
-  }
+  IREE_RETURN_IF_ERROR(loom_runtime_storage_initialize(
+      model->preparation, model->execution,
+      loom_runtime_pool_storage(model->pool), &model->storage_retirement,
+      allocator, &model->storage));
+  const iree_host_size_t count = model->storage.count;
   const loom_runtime_preparation_request_storage_t request_storage =
       loom_runtime_preparation_request_storage(model->preparation);
   if (request_storage.capacity) {
@@ -916,7 +889,7 @@ iree_status_t loom_service_finite_load_allocate(
       host_allocator, sizeof(*load->model), (void**)&load->model);
   if (iree_status_is_ok(status)) {
     load->model->host_allocator = host_allocator;
-    loom_runtime_retirement_initialize(&load->model->storage.retirement);
+    loom_runtime_retirement_initialize(&load->model->storage_retirement);
     load->model->owner = device;
     load->model->pool = pool;
     load->host = loom_runtime_device_host(device);

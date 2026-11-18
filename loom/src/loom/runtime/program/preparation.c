@@ -805,15 +805,18 @@ static iree_status_t loom_runtime_preparation_module_start(
   const iree_vm_call_packet_t* call = &params->call;
   const loom_runtime_preparation_function_t function =
       (loom_runtime_preparation_function_t)params->function_ordinal;
-  const bool declares_storage =
-      function == LOOM_RUNTIME_PREPARATION_FUNCTION_STORAGE ||
-      function == LOOM_RUNTIME_PREPARATION_FUNCTION_FEEDBACK ||
-      function == LOOM_RUNTIME_PREPARATION_FUNCTION_REQUEST_STORAGE;
+  const loom_runtime_preparation_flags_t storage_capability =
+      function == LOOM_RUNTIME_PREPARATION_FUNCTION_STORAGE
+          ? LOOM_RUNTIME_PREPARATION_FLAG_STORAGE
+      : function == LOOM_RUNTIME_PREPARATION_FUNCTION_FEEDBACK
+          ? LOOM_RUNTIME_PREPARATION_FLAG_FEEDBACK
+      : function == LOOM_RUNTIME_PREPARATION_FUNCTION_REQUEST_STORAGE
+          ? LOOM_RUNTIME_PREPARATION_FLAG_REQUEST_STORAGE
+          : 0;
   iree_status_t status = iree_ok_status();
-  if (declares_storage &&
+  if (storage_capability &&
       (module->capture.base ||
-       !iree_any_bit_set(module->capture.flags,
-                         LOOM_RUNTIME_PREPARATION_FLAG_STORAGE))) {
+       !iree_any_bit_set(module->capture.flags, storage_capability))) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "mutable storage registration requires a supported cold capture");
@@ -854,7 +857,7 @@ static iree_status_t loom_runtime_preparation_module_start(
       function == LOOM_RUNTIME_PREPARATION_FUNCTION_MEMORY_FORECAST ||
       function == LOOM_RUNTIME_PREPARATION_FUNCTION_PARAMETER_ARENA ||
       function == LOOM_RUNTIME_PREPARATION_FUNCTION_BIND_PARAMETERS ||
-      declares_storage) {
+      storage_capability) {
     if (!preparation) {
       preparation = module->recycled;
       module->recycled = NULL;
@@ -896,7 +899,7 @@ static iree_status_t loom_runtime_preparation_module_start(
       if (iree_status_is_ok(status)) {
         preparation->request_storage.capacity = capacity;
       }
-    } else if (declares_storage) {
+    } else if (storage_capability) {
       status = loom_runtime_preparation_add_storage(
           preparation, call,
           function == LOOM_RUNTIME_PREPARATION_FUNCTION_FEEDBACK);
