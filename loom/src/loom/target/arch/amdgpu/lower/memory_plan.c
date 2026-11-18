@@ -401,9 +401,9 @@ static iree_status_t loom_amdgpu_select_memory_plan(
       IREE_RETURN_IF_ERROR(loom_amdgpu_plan_memory_store_payload(
           context, stored_value, &retained_plan->packets[i]));
     }
-    IREE_RETURN_IF_ERROR(loom_amdgpu_prepare_memory_address_realizations(
-        context, source_op, &retained_plan->packets[i].access));
   }
+  IREE_RETURN_IF_ERROR(loom_amdgpu_prepare_memory_address_realizations(
+      context, source_op, retained_plan));
   *out_plan = loom_low_lower_plan_make(source_op->kind, retained_plan);
   out_plan->access_flags = retained_plan->source.access_flags;
   return iree_ok_status();

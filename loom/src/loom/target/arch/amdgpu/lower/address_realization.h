@@ -15,11 +15,10 @@ extern "C" {
 #endif
 
 // Adds target-shaped address candidates to the shared placement owner. The
-// caller supplies a function-owned packet plan during memory preparation;
-// canonical access facts and memory effects remain unchanged.
+// complete VADDR can be shared by all packets of one memory operation.
 iree_status_t loom_amdgpu_prepare_memory_address_realizations(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_amdgpu_memory_access_t* access);
+    loom_amdgpu_memory_access_plan_t* plan);
 iree_status_t loom_amdgpu_prepare_fragment_address_realization(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_fragment_memory_plan_t* plan);
