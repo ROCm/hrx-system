@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "iree/base/internal/atomics.h"
+#include "iree/base/threading/numa.h"
 #include "iree/hal/utils/platform_topology.h"
 
 //===----------------------------------------------------------------------===//
@@ -594,10 +595,13 @@ static iree_status_t iree_hal_topology_builder_create_spec_nodes_and_links(
   const iree_host_size_t physical_device_count =
       iree_hal_topology_builder_count_physical_devices(device_count,
                                                        device_specs);
+  const iree_bitmap_t online_nodes = iree_numa_online_nodes();
+  const iree_host_size_t numa_node_capacity =
+      physical_device_count + iree_bitmap_count(online_nodes);
   uint32_t* numa_node_ids = NULL;
   iree_status_t status = iree_ok_status();
-  if (physical_device_count != 0) {
-    status = iree_allocator_malloc_array(host_allocator, physical_device_count,
+  if (numa_node_capacity != 0) {
+    status = iree_allocator_malloc_array(host_allocator, numa_node_capacity,
                                          sizeof(*numa_node_ids),
                                          (void**)&numa_node_ids);
   }
@@ -619,6 +623,17 @@ static iree_status_t iree_hal_topology_builder_create_spec_nodes_and_links(
           physical_device->identity.numa.node_id, numa_node_ids,
           &numa_node_count);
       ++physical_numa_link_count;
+    }
+  }
+
+  // Host allocation targets exist independently of device attachment reports.
+  // Only reported attachment facts below create device-to-host links.
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < online_nodes.bit_count; ++i) {
+      if (iree_bitmap_test(online_nodes, i)) {
+        iree_hal_topology_builder_append_numa_node_id(
+            (uint32_t)i, numa_node_ids, &numa_node_count);
+      }
     }
   }
 

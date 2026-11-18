@@ -380,7 +380,9 @@ IREE_API_EXPORT iree_status_t iree_hal_topology_builder_finalize(
     iree_hal_topology_t** out_topology);
 
 // Builds the immutable topology into |out_topology| and derives normalized
-// node/link placement records from |device_specs|.
+// node/link placement records from |device_specs| and the online host NUMA
+// nodes. Host nodes do not require a participating CPU device or a reported
+// accelerator attachment. Device-to-host links require an attachment report.
 //
 // |device_specs| must contain one borrowed immutable spec per topology device,
 // in the same ordinal order used to populate the builder edge matrix.
