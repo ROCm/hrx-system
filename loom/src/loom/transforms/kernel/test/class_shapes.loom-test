@@ -98,13 +98,18 @@ low.func.def retain target<cmd.core> abi(command_program) abi_layout({entry_coun
   cmd.dispatch.direct.barrier<%56, %59>[%62, %62, %62](%69, %73, %70, %77, %53, %60, %61)
   return
 }
+func.def inline @write_cohort(%width: index, %offset: offset, %output: buffer) {
+  %values = vector.splati 7 : vector<[%width]xi32>
+  %destination = buffer.view %output[%offset] : buffer -> view<[%width]xi32>
+  vector.store %values, %destination[0] : vector<[%width]xi32>, view<[%width]xi32>
+  func.return
+}
+
 template.decl @cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer)
 
 template.def<@cohort> priority(10) @fixed_cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer) where [eq(%fixed, 1)] {
   %extent = index.constant 4 : index
-  %values = vector.splati 7 : vector<[%extent]xi32>
-  %destination = buffer.view %output[%offset] : buffer -> view<[%extent]xi32>
-  vector.store %values, %destination[0] : vector<[%extent]xi32>, view<[%extent]xi32>
+  func.call @write_cohort(%extent, %offset, %output) : (index, offset, buffer)
   template.return
 }
 
@@ -112,19 +117,24 @@ kernel.def retain @cohort_kernel() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%rows: index, %padding: index, %fixed: i1, %offset: offset, %output: buffer) where [range(%offset, 0, 384), multiple_of(%offset, 384)] {
-  %17 = index.constant 8 : index
-  %values = vector.splati 7 : vector<[%17]xi32>
-  %destination = buffer.view %output[%offset] : buffer -> view<[%17]xi32>
-  vector.store %values, %destination[0] : vector<[%17]xi32>, view<[%17]xi32>
+  %20 = index.constant 8 : index
+  %values = vector.splati 7 : vector<[%20]xi32>
+  %destination = buffer.view %output[%offset] : buffer -> view<[%20]xi32>
+  vector.store %values, %destination[0] : vector<[%20]xi32>, view<[%20]xi32>
   kernel.return
 }
+func.def inline @write_cohort(%width: index, %offset: offset, %output: buffer) {
+  %values = vector.splati 7 : vector<[%width]xi32>
+  %destination = buffer.view %output[%offset] : buffer -> view<[%width]xi32>
+  vector.store %values, %destination[0] : vector<[%width]xi32>, view<[%width]xi32>
+  func.return
+}
+
 template.decl @cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer)
 
 template.def<@cohort> priority(10) @fixed_cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer) where [eq(%fixed, 1)] {
   %extent = index.constant 4 : index
-  %values = vector.splati 7 : vector<[%extent]xi32>
-  %destination = buffer.view %output[%offset] : buffer -> view<[%extent]xi32>
-  vector.store %values, %destination[0] : vector<[%extent]xi32>, view<[%extent]xi32>
+  func.call @write_cohort(%extent, %offset, %output) : (index, offset, buffer)
   template.return
 }
 
@@ -132,18 +142,23 @@ kernel.def retain @cohort_kernel() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%rows: index, %padding: index, %fixed: i1, %offset: offset, %output: buffer) where [range(%offset, 128, 512), multiple_of(%offset, 128), power_of_two(%offset)] {
-  %17 = index.constant 16 : index
-  %values = vector.splati 7 : vector<[%17]xi32>
-  %destination = buffer.view %output[%offset] : buffer -> view<[%17]xi32>
-  vector.store %values, %destination[0] : vector<[%17]xi32>, view<[%17]xi32>
+  %20 = index.constant 16 : index
+  %values = vector.splati 7 : vector<[%20]xi32>
+  %destination = buffer.view %output[%offset] : buffer -> view<[%20]xi32>
+  vector.store %values, %destination[0] : vector<[%20]xi32>, view<[%20]xi32>
   kernel.return
 }
-template.decl @cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer)
-
-template.def<@cohort> priority(1) @dynamic_cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer) {
+func.def inline @write_cohort(%width: index, %offset: offset, %output: buffer) {
   %values = vector.splati 7 : vector<[%width]xi32>
   %destination = buffer.view %output[%offset] : buffer -> view<[%width]xi32>
   vector.store %values, %destination[0] : vector<[%width]xi32>, view<[%width]xi32>
+  func.return
+}
+
+template.decl @cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer)
+
+template.def<@cohort> priority(1) @dynamic_cohort(%width: index, %fixed: i1, %offset: offset, %output: buffer) {
+  func.call @write_cohort(%width, %offset, %output) : (index, offset, buffer)
   template.return
 }
 

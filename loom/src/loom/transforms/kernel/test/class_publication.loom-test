@@ -365,3 +365,70 @@ kernel.def retain @effects_kernel() {
   view.store %result$12, %output[1] : i32, view<2xi32>
   kernel.return
 }
+
+// ====
+
+// Unselected providers can depend on unavailable implementations. Their bodies
+// impose no composition obligation until a caller actually selects them.
+// RUN: emit command-program @available kernels
+
+func.decl inline @unavailable()
+
+template.decl @choose(%selector: index) -> (i32)
+
+template.def<@choose> priority(10) @available_body(%selector: index) -> (i32) where [ge(%selector, 4)] {
+  %result = scalar.constant 2 : i32
+  template.return %result : i32
+}
+
+template.def<@choose> @unavailable_body(%selector: index) -> (i32) {
+  func.call @unavailable() : ()
+  %result = scalar.constant 1 : i32
+  template.return %result : i32
+}
+
+kernel.def @available_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%selector: index, %output: view<1xi32>) {
+  %result = template.apply<@choose>(%selector) : (index) -> (i32)
+  view.store %result, %output[0] : i32, view<1xi32>
+  kernel.return
+}
+
+command.def public @available() launch(%output: view<1xi32>) {
+  %selector = index.constant 8 : index
+  kernel.launch @available_kernel(%selector, %output) : (index, view<1xi32>)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 1}) @available() asm {
+  %13 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %14 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %15 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %16 = cmd.constant.u64 0
+  %17 = cmd.constant.u64 -1
+  %18 = cmd.constant.u32 1
+  %19 = cmd.constant.index 8
+  cmd.dispatch.direct<%14, %15>[%18, %18, %18](%19, %13, %16, %17)
+  return
+}
+func.decl inline @unavailable()
+
+template.decl @choose(%selector: index) -> (i32)
+
+template.def<@choose> @unavailable_body(%selector: index) -> (i32) {
+  func.call @unavailable() : ()
+  %result = scalar.constant 1 : i32
+  template.return %result : i32
+}
+
+kernel.def retain @available_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%selector: index, %output: view<1xi32>) {
+  %result = scalar.constant 2 : i32
+  view.store %result, %output[0] : i32, view<1xi32>
+  kernel.return
+}

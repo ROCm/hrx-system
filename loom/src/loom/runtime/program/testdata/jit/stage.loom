@@ -292,6 +292,12 @@ command.def public @ambiguous() launch() {
 // selector facts. Only facts still needed by the selected body enter its key.
 template.decl @class_value(%selector: index) -> (i32)
 
+template.def<@class_value> priority(20) @class_unavailable(%selector: index) -> (i32) where [eq(%selector, 0)] {
+  func.call @missing_body() : ()
+  %result = scalar.constant 0 : i32
+  template.return %result : i32
+}
+
 template.def<@class_value> priority(10) @class_large(%selector: index) -> (i32) where [ge(%selector, 4)] {
   %result = scalar.constant 2 : i32
   template.return %result : i32
@@ -377,6 +383,15 @@ kernel.def @invalid_class() {
 
 command.def public @invalid_selected() launch() {
   %selector = index.constant 4 : index
+  kernel.launch @invalid_class(%selector) : (index)
+  command.return
+}
+
+// Accepted native tasks must drain even when a later selection rejects the
+// parent command. The catalog can reuse their completed products afterward.
+command.def public @partially_invalid_selected() launch(%output: view<8xi32>) {
+  %selector = index.constant 4 : index
+  kernel.launch @store_class(%selector, %output) : (index, view<8xi32>)
   kernel.launch @invalid_class(%selector) : (index)
   command.return
 }

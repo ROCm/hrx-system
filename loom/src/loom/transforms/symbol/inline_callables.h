@@ -80,6 +80,7 @@ typedef struct loom_inline_callables_plan_options_t {
   // Borrowed function versions for target policy and consuming-inline cleanup.
   const loom_target_function_version_snapshot_t* target_versions;
   // Optional byte per symbol restricting planning to live source definitions.
+  // Excluded definitions retain their references without expansion obligations.
   // NULL includes all definitions. Module-root references are always included.
   const uint8_t* live_symbols;
   // Optional bit per family with remaining template.apply demands. Such a

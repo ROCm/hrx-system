@@ -180,6 +180,7 @@ loom_cc_library(
     deps = [
         ":kernel_class_collection",
         ":kernel_specialization",
+        "//loom/src/loom/analysis:symbol_liveness",
         "//loom/src/loom/analysis:symbol_references",
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:input_contract",

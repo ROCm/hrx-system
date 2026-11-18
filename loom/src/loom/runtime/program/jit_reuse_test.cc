@@ -89,6 +89,18 @@ TEST_P(JitClassReuseTest, InvalidSelectedBodyPublishesNoNativeRequest) {
   EXPECT_EQ(compilation_.kernels, 1u);
 }
 
+TEST_P(JitClassReuseTest, RejectedParentDrainsAcceptedNatives) {
+  IREE_ASSERT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      Compile(nullptr, 0, IREE_SV("partially_invalid_selected")));
+  EXPECT_EQ(commands_[0], nullptr);
+  EXPECT_EQ(compilation_.kernels, 1u);
+  EXPECT_EQ(loom_runtime_jit_cache_storage(jit_).count, 1u);
+  IREE_ASSERT_OK(Compile(nullptr, 0, IREE_SV("selected_four")));
+  EXPECT_EQ(compilation_.kernels, 1u);
+  EXPECT_EQ(compilation_.reused_kernels, 1u);
+}
+
 INSTANTIATE_TEST_SUITE_P(SharedWorkers, JitClassReuseTest,
                          ::testing::Values(1, 4));
 

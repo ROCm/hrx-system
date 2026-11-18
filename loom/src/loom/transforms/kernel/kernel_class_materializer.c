@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "loom/analysis/symbol_liveness.h"
 #include "loom/analysis/symbol_references.h"
 #include "loom/ir/context.h"
 #include "loom/ir/input_contract.h"
@@ -532,6 +533,16 @@ static iree_status_t loom_kernel_class_compose(
   loom_symbol_reference_table_t references;
   IREE_RETURN_IF_ERROR(
       loom_symbol_reference_table_build(module, arena, &references));
+  // Unselected providers remain available to residual template demands, but
+  // only concrete dependencies of this kernel have composition obligations.
+  const loom_symbol_id_t root = loom_func_like_callee(kernel).symbol_id;
+  const loom_symbol_liveness_options_t liveness_options = {
+      .flags = LOOM_SYMBOL_LIVENESS_INCLUDE_MODULE_EDGES,
+      .root_symbol_ids = {&root, 1},
+  };
+  loom_symbol_liveness_t liveness;
+  IREE_RETURN_IF_ERROR(loom_symbol_liveness_compute(
+      module, &references, &liveness_options, arena, &liveness));
   const loom_target_function_version_snapshot_t versions = {0};
   const loom_inline_callables_environment_t environment = {
       .arena = arena,
@@ -542,6 +553,7 @@ static iree_status_t loom_kernel_class_compose(
   const loom_inline_callables_plan_options_t options = {
       .references = &references,
       .target_versions = &versions,
+      .live_symbols = liveness.live_symbols,
       .demanded_families = references.template_demands.family_bits,
       .template_eligibility = {loom_kernel_class_call_is_selected, calls},
       .defer_callable_exits = true,
