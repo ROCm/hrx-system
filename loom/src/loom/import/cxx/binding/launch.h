@@ -67,10 +67,10 @@ class LaunchContracts {
   cxx::FunctionSymbol* configuration_function(
       cxx::FunctionSymbol* function) const;
 
-  // Validates and binds a resolved configuration definition. The function
-  // must be the concrete definition returned for configuration_function().
-  LaunchConfiguration bind_configuration(cxx::FunctionSymbol* function,
-                                         Types& types);
+  // Materializes the selected configuration body for a reached kernel. A
+  // specialization retains its substituted workload types and geometry.
+  LaunchConfiguration bind_configuration(cxx::FunctionSymbol* selected,
+                                         cxx::AST* kernel, Types& types);
 
   // Returns whether a source function is owned as another kernel's launch
   // configuration and therefore cannot also become an ordinary callable.

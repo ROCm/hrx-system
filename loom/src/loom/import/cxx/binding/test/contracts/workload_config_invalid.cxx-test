@@ -64,7 +64,7 @@ static loom::kernel::configuration declared_only(unsigned item_count);
 loom::kernel::configuration external_configuration(unsigned item_count) {
   return {{item_count, 1, 1}, {1, 1, 1}};
 }
-// ERROR@-3: LOWERING/059 "kernel configuration requires an internal non-template namespace-scope ordinary function"
+// ERROR@-3: LOWERING/059 "kernel configuration requires an ordinary namespace-scope function with internal linkage"
 [[loom::kernel(external_configuration)]] void external() {}
 
 // ====
@@ -74,8 +74,35 @@ template <typename T>
 static loom::kernel::configuration template_configuration(T item_count) {
   return {{static_cast<unsigned>(item_count), 1, 1}, {1, 1, 1}};
 }
-// ERROR@-3: LOWERING/059 "kernel configuration requires an internal non-template namespace-scope ordinary function"
-[[loom::kernel(template_configuration<unsigned>)]] void templated() {}
+// ERROR@+1: LOWERING/059 "kernel configuration function template requires concrete template arguments"
+[[loom::kernel(template_configuration)]] void missing_arguments() {}
+
+// ====
+#include <loomcxx/kernel.h>
+
+template <unsigned Threads>
+static loom::kernel::configuration checked(unsigned groups) {
+  // ERROR@+1: PARSE/036 "a launched workgroup needs threads"
+  static_assert(Threads > 0, "a launched workgroup needs threads");
+  return {{groups, 1, 1}, {Threads, 1, 1}};
+}
+[[loom::kernel(checked<0>)]] void invalid_width() {}
+
+// ====
+// INPUT: cxx root=configure root=launch
+// Root selection can precede discovery of the specialized kernel.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+
+static loom::kernel::configuration configure(unsigned groups) {
+  return {{groups, 1, 1}, {64, 1, 1}};
+}
+template <unsigned Width>
+// ERROR@+1: LOWERING/059 "kernel configuration function was also selected as an ordinary callable"
+[[loom::kernel(configure)]] void tiled() {}
+LOOM_CHECK_CASE(launch) {
+  loom::check::launch<tiled<64>>(loom::kernel::workload(2u));
+}
 
 // ====
 // Workload arguments are non-reference values with stable, non-volatile

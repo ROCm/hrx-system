@@ -78,3 +78,30 @@ void scoped_bounds(bool first, bool second, unsigned coordinate, unsigned* outpu
     loom::view::store(2u, output_view, loom::index::cast(static_cast<int>(coordinate)));
   }
 }
+
+// ====
+// RUN: emit cxx roundtrip
+// REQUIRES: loom-export-cxx
+// An explicit specialization supplies the grid, workgroup, and cluster that
+// survive export and reimport. The primary template has no definition.
+#include <loomcxx/kernel.h>
+
+template <class T>
+static loom::kernel::clustered_configuration clustered(unsigned groups);
+
+template <>
+loom::kernel::clustered_configuration clustered<unsigned>(unsigned groups) {
+  return {{groups + 1u, 1, 1}, {128, 1, 1}, {2, 1, 1}};
+}
+[[loom::kernel(clustered<unsigned>)]] void grouped() {}
+
+// ----
+#include <loomcxx/kernel.h>
+
+static loom::kernel::clustered_configuration grouped_configuration(unsigned groups) {
+  return {{(groups + 1u), 1u, 1u}, {128u, 1u, 1u}, {2u, 1u, 1u}};
+}
+
+[[loom::kernel(grouped_configuration)]]
+void grouped() {
+}

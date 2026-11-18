@@ -314,6 +314,78 @@ check.case public @configured_copy_case {
 }
 
 // ====
+// RUN: pass canonicalize,cse,dce
+// A configuration specializes with its kernel. The workgroup count stays in the
+// workload even when two kernels share the same fixed workgroup size.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+
+template <unsigned WorkgroupSize>
+static loom::kernel::configuration fixed(unsigned workgroup_count);
+
+[[loom::kernel(fixed<64>)]] void direct() {}
+[[loom::kernel(fixed<0>)]] static void unused() {}
+
+template <unsigned WorkgroupSize>
+[[loom::kernel(fixed<WorkgroupSize>)]] void tiled() {}
+
+template <unsigned WorkgroupSize>
+static loom::kernel::configuration fixed(unsigned workgroup_count) {
+  static_assert(WorkgroupSize > 0, "workgroup size must be positive");
+  return {
+      .workgroup_count = {workgroup_count, 1, 1},
+      .workgroup_size = {WorkgroupSize, 1, 1},
+  };
+}
+
+LOOM_CHECK_CASE(workgroup_sizes) {
+  loom::check::launch<direct>(loom::kernel::workload(2u));
+  loom::check::launch<tiled<64>>(loom::kernel::workload(3u));
+  loom::check::launch<tiled<128>>(loom::kernel::workload(5u));
+}
+
+// ----
+kernel.def @direct(%workgroup_count: i32) {
+  %6 = scalar.extui %workgroup_count : i32 to i64
+  %7 = index.cast %6 : i64 to index
+  %61 = index.constant 1 : index
+  %59 = index.constant 64 : index
+  kernel.launch.config workgroups(%7, %61, %61) workgroup_size(%59, %61, %61) : index
+} launch() {
+  kernel.return
+}
+
+check.case public @workgroup_sizes {
+  %18 = check.literal value(2) : i32
+  kernel.launch @direct[%18]() : [i32]()
+  %19 = check.literal value(3) : i32
+  kernel.launch @tiled_64[%19]() : [i32]()
+  %20 = check.literal value(5) : i32
+  kernel.launch @tiled_128[%20]() : [i32]()
+  check.return
+}
+
+kernel.def @tiled_64(%workgroup_count: i32) {
+  %27 = scalar.extui %workgroup_count : i32 to i64
+  %28 = index.cast %27 : i64 to index
+  %66 = index.constant 1 : index
+  %64 = index.constant 64 : index
+  kernel.launch.config workgroups(%28, %66, %66) workgroup_size(%64, %66, %66) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def @tiled_128(%workgroup_count: i32) {
+  %45 = scalar.extui %workgroup_count : i32 to i64
+  %46 = index.cast %45 : i64 to index
+  %71 = index.constant 1 : index
+  %69 = index.constant 128 : index
+  kernel.launch.config workgroups(%46, %71, %71) workgroup_size(%69, %71, %71) : index
+} launch() {
+  kernel.return
+}
+
+// ====
 // Kernel specializations retain their source-owned configuration contract.
 #include <loomcxx/check.h>
 #include <loomcxx/kernel.h>

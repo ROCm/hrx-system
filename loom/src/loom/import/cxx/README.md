@@ -3492,6 +3492,32 @@ Contracts on leading function declarations carry to the definition; conflicting
 redeclarations and multiple contracts for the same dimension group are errors.
 Import does not guess launch dimensions or select a physical target.
 
+A kernel template can choose its workgroup size at instantiation and compute
+its workgroup count from the launch workload. Here `configure_fill` is an
+ordinary C++ function template defined alongside the kernel.
+
+```cpp
+template <unsigned WorkgroupSize>
+static loom::kernel::configuration configure_fill(unsigned workgroup_count) {
+  return {
+      .workgroup_count = {workgroup_count, 1, 1},
+      .workgroup_size = {WorkgroupSize, 1, 1},
+  };
+}
+
+template <unsigned WorkgroupSize>
+[[loom::kernel(configure_fill<WorkgroupSize>)]] void fill(float* output) {
+  unsigned i = loom::kernel::workgroup::id.x * WorkgroupSize + loom::kernel::workitem::id.x;
+  output[i] = 1.0f;
+}
+```
+
+Launching `fill<64>` with `loom::kernel::workload(2u)` passes 2 to
+`configure_fill<64>`. Its result launches two workgroups of 64 workitems, so
+`fill` writes 128 elements. The selected configuration function has internal
+linkage, and its body becomes the kernel's launch configuration region. An
+ordinary kernel can also select `configure_fill<64>` directly.
+
 `loom::assume`, also exposed as HIP's `__builtin_assume`, carries integer
 contracts into Loom's value analysis:
 

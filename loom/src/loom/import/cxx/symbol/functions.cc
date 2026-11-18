@@ -2300,16 +2300,16 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
                                     definition, arguments);
     }
     if (auto* configuration = launches_.configuration_function(symbol)) {
-      auto* configuration_symbol = this->definition(configuration);
-      if (!configuration_symbol || !configuration_symbol->declaration()) {
+      // A kernel template can claim its configuration after root selection.
+      if (callees_.contains({configuration, ImplicitObjectABI::None})) {
         diagnostics_.reject(
             unit_, definition,
-            "kernel configuration function requires a definition");
+            "kernel configuration function was also selected as an ordinary "
+            "callable");
       }
-      target_definitions_.reject_launch_configuration_function(
-          configuration_symbol);
+      target_definitions_.reject_launch_configuration_function(configuration);
       launch_configuration =
-          launches_.bind_configuration(configuration_symbol, types);
+          launches_.bind_configuration(configuration, definition, types);
     }
   } else if (command_program) {
     launches_.reject_ordinary_function(symbol);

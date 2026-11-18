@@ -8,6 +8,7 @@
 
 #include <cxx/ast.h>
 #include <cxx/ast_interpreter.h>
+#include <cxx/ast_rewriter.h>
 #include <cxx/symbols.h>
 #include <cxx/types.h>
 
@@ -124,6 +125,12 @@ cxx::FunctionSymbol* LaunchContracts::parse_configuration(
         unit_, attribute,
         "kernel configuration requires one unambiguous function name");
   }
+  if (function->isTemplatePattern()) {
+    diagnostics_.reject(
+        unit_, attribute,
+        "kernel configuration function template requires concrete template "
+        "arguments");
+  }
   return function->canonical();
 }
 
@@ -212,18 +219,28 @@ cxx::FunctionSymbol* LaunchContracts::configuration_function(
 }
 
 LaunchConfiguration LaunchContracts::bind_configuration(
-    cxx::FunctionSymbol* function, Types& types) {
+    cxx::FunctionSymbol* selected, cxx::AST* kernel, Types& types) {
+  auto* function = selected->resolvedDefinition();
+  // Naming a specialization in an attribute does not odr-use its body.
+  // CXX can attach a later pattern definition when this kernel needs it.
+  if (function->isSpecialization()) {
+    cxx::ASTRewriter::completePendingBodyFor(&unit_, function);
+    diagnostics_.finish();
+  }
   auto* definition = function->declaration();
-  if (!cxx::has_internal_linkage(function) || function->isTemplatePattern() ||
-      !function->templateArguments().empty() ||
+  if (!definition) {
+    diagnostics_.reject(unit_, kernel,
+                        "kernel configuration function requires a definition");
+  }
+  if (!cxx::has_internal_linkage(function) ||
       !cxx::symbol_cast<cxx::NamespaceSymbol>(function->parent()) ||
       annotated(function, "kernel") || annotated(function, "device") ||
       annotated(function, "op") || annotated(function, "check_case") ||
       annotated(function, "check_benchmark")) {
     diagnostics_.reject(
         unit_, definition,
-        "kernel configuration requires an internal non-template "
-        "namespace-scope ordinary function");
+        "kernel configuration requires an ordinary namespace-scope function "
+        "with internal linkage");
   }
   auto* source_body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
       definition->functionBody);
