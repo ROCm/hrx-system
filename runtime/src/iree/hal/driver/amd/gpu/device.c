@@ -1285,9 +1285,15 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
         context, family_ordinal, &device->memory.transfers);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_async_proactor_pool_acquire_for_node(
-        create_params->proactor_pool, options->host_numa_node,
-        &device->proactor_entry);
+    if (options->host_numa_node != UINT32_MAX) {
+      status = iree_async_proactor_pool_acquire_for_node(
+          create_params->proactor_pool, options->host_numa_node,
+          &device->proactor_entry);
+    } else {
+      status = iree_hal_amd_fabric_acquire_proactor(
+          create_params->proactor_pool, context->host_numa_node,
+          &device->proactor_entry);
+    }
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_context_prepare_memory(

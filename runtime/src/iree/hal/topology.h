@@ -333,6 +333,9 @@ typedef enum iree_hal_topology_node_kind_e {
   // Node kind is not known or not represented by the backend.
   IREE_HAL_TOPOLOGY_NODE_KIND_UNKNOWN = 0,
   // A host NUMA node that may contain CPUs and memory controllers.
+  // Local device groups include online host nodes independently of whether a
+  // participating device reports attachment to them. Their presence does not
+  // guarantee that a backend can satisfy required placement on that node.
   IREE_HAL_TOPOLOGY_NODE_KIND_HOST_NUMA = 1,
   // A physical device such as a GPU or accelerator package.
   IREE_HAL_TOPOLOGY_NODE_KIND_PHYSICAL_DEVICE = 2,

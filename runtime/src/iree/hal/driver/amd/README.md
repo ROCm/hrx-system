@@ -133,9 +133,14 @@ execution workers. `rdna://0`, `cdna://0`, and `amdgpu://0` use this default
 on their selected endpoint. An explicit `queue_count` selects a different
 inventory; for example, `rdna://0?queue_count=1` provisions a single compute
 queue. `queue_family` selects an exact native family ordinal instead of the
-architecture preference. `host_numa_node` selects CPU placement
-for the workers and shared proactor; GPU-local memory node IDs are not CPU
-NUMA node IDs.
+architecture preference.
+
+GPU and XDNA devices automatically prefer the endpoint's reported host NUMA node
+when that node has a slot in the caller's proactor pool; otherwise they use the
+caller's default slot. Files inherit this selected I/O service. The GPU
+`host_numa_node` option overrides that selection with an exact CPU node for the
+workers and shared proactor. GPU-local memory node IDs are not CPU NUMA node IDs.
+Memory pools retain their independent placement requirements.
 
 `completion_spin_ns` bounds active completion observation after actual progress
 (default 1,000,000,000 ns, or one second). While work remains pending, the

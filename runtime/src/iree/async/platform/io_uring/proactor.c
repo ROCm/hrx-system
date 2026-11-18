@@ -14,6 +14,7 @@
 
 #include <errno.h>
 #include <poll.h>
+#include <sched.h>
 #include <string.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
@@ -95,21 +96,48 @@ iree_status_t iree_async_proactor_create_io_uring(
     message_pool_capacity = IREE_ASYNC_MESSAGE_POOL_DEFAULT_CAPACITY;
   }
 
-  // Calculate allocation layout with trailing message pool entries.
+  // Only constrained proactors retain a native worker mask, in the same
+  // allocation as their existing trailing message storage.
+  const iree_host_size_t affinity_size =
+      (!iree_thread_affinity_is_unspecified(options.worker_affinity) ||
+       options.worker_processor_set)
+          ? CPU_ALLOC_SIZE(IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT)
+          : 0;
   iree_host_size_t total_size = 0;
   iree_host_size_t message_entries_offset = 0;
+  iree_host_size_t worker_affinity_offset = 0;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0,
-      IREE_STRUCT_LAYOUT(sizeof(iree_async_proactor_io_uring_t), &total_size,
-                         IREE_STRUCT_FIELD(message_pool_capacity,
-                                           iree_async_message_pool_entry_t,
-                                           &message_entries_offset)));
+      z0, IREE_STRUCT_LAYOUT(
+              sizeof(iree_async_proactor_io_uring_t), &total_size,
+              IREE_STRUCT_FIELD(message_pool_capacity,
+                                iree_async_message_pool_entry_t,
+                                &message_entries_offset),
+              IREE_STRUCT_FIELD(affinity_size / sizeof(unsigned long),
+                                unsigned long, &worker_affinity_offset)));
 
   // Allocate the proactor structure with trailing data.
   iree_async_proactor_io_uring_t* proactor = NULL;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, iree_allocator_malloc(allocator, total_size, (void**)&proactor));
   memset(proactor, 0, total_size);
+
+  if (affinity_size) {
+    proactor->worker_affinity = (uint8_t*)proactor + worker_affinity_offset;
+    iree_status_t status = iree_thread_affinity_resolve_linux(
+        options.worker_affinity, options.worker_processor_set, affinity_size,
+        proactor->worker_affinity);
+    if (iree_status_is_ok(status) &&
+        CPU_COUNT_S(affinity_size, (cpu_set_t*)proactor->worker_affinity) ==
+            0) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "io_uring worker affinity selects no CPUs");
+    }
+    if (!iree_status_is_ok(status)) {
+      iree_allocator_free(allocator, proactor);
+      IREE_TRACE_ZONE_END(z0);
+      return status;
+    }
+  }
 
   // Initialize base fields.
   iree_async_proactor_initialize(&iree_async_proactor_io_uring_vtable,
@@ -182,6 +210,11 @@ iree_status_t iree_async_proactor_create_io_uring(
     status = iree_async_proactor_io_uring_detect_capabilities(
         &proactor->ring, proactor->ring.features,
         &proactor->kernel_capabilities);
+  }
+
+  if (iree_status_is_ok(status) && proactor->worker_affinity) {
+    status =
+        iree_async_proactor_io_uring_probe_worker_affinity(&proactor->ring);
   }
 
   // Sparse fixed-buffer tables are an internal kernel mechanism, not a public
@@ -1322,15 +1355,25 @@ static iree_status_t iree_async_proactor_io_uring_poll(
     *out_completed_count = 0;
   }
 
-  // Enable the ring on first poll. When created with R_DISABLED (which happens
-  // automatically when SINGLE_ISSUER is in the setup flags), this call binds
-  // the current thread as the exclusive submitter for all io_uring_enter calls.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
-                                    iree_io_uring_ring_enable(&proactor->ring));
-
-  int32_t owner_tid = (int32_t)syscall(__NR_gettid);
-  iree_atomic_store(&proactor->polling.owner_tid, owner_tid,
-                    iree_memory_order_relaxed);
+  // Poll ownership is permanent. Complete task-affine setup before publishing
+  // the owner; subsequent polls reuse its identity without a native query.
+  int32_t owner_tid =
+      iree_atomic_load(&proactor->polling.owner_tid, iree_memory_order_relaxed);
+  if (!owner_tid) {
+    IREE_RETURN_AND_END_ZONE_IF_ERROR(
+        z0, iree_io_uring_ring_enable(&proactor->ring));
+    if (proactor->worker_affinity) {
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_io_uring_ring_set_worker_affinity(
+                  &proactor->ring,
+                  CPU_ALLOC_SIZE(IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT),
+                  proactor->worker_affinity));
+      proactor->worker_affinity = NULL;
+    }
+    owner_tid = (int32_t)syscall(__NR_gettid);
+    iree_atomic_store(&proactor->polling.owner_tid, owner_tid,
+                      iree_memory_order_relaxed);
+  }
 
   iree_convert_timeout_to_absolute(&timeout);
   bool is_immediate = iree_timeout_is_immediate(timeout);

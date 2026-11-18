@@ -32,6 +32,16 @@ extern "C" {
 // one-shot pooled receives use ordinary RECV with userspace pool leases, and
 // the proactor does not advertise multishot support.
 //
+// Worker affinity is resolved during creation and applied on the first poll,
+// before submitting queued I/O. Kernel registration failures propagate from
+// poll. Linux shares io-wq workers between rings submitted by the same task;
+// proactors sharing a polling task must use the same worker affinity. The
+// proactor pool's dedicated per-node runners supply independent task owners.
+// The resolved mask must fit the polling task's cpuset; worker_processor_set
+// bounds node-wide affinity for applications with a restricted CPU budget.
+// Unsupported worker-affinity registration returns UNAVAILABLE at creation
+// so the platform factory can use its affined POSIX workers instead.
+//
 // Returns IREE_STATUS_UNAVAILABLE if io_uring is not usable on this system:
 // kernel too old (ENOSYS), blocked by seccomp/sysctl (EPERM), insufficient
 // locked memory (ENOMEM), or other io_uring_setup failures. The specific

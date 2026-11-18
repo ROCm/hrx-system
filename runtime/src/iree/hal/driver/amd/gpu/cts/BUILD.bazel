@@ -310,6 +310,7 @@ iree_runtime_cc_test(
         ":test_device",
         "//libamdf:headers",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/io:file_handle",

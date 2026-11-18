@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVER_AMD_FABRIC_FABRIC_H_
 
 #include "amdf/amdf.h"
+#include "iree/async/util/proactor_pool.h"
 #include "iree/base/api.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/device_spec.h"
@@ -77,6 +78,16 @@ iree_status_t iree_hal_amd_fabric_query_physical_device_identity(
     const amdf_api_t* api, amdf_endpoint_t* endpoint,
     iree_string_view_t display_name,
     iree_hal_physical_device_identity_t* out_identity);
+
+// Acquires the caller's proactor entry for the endpoint's native host node.
+// A matching configured node takes precedence; absent proximity or a node
+// outside the pool uses the caller's first entry. Selection creates no new
+// domains and preserves the pool's processor budget and runner. Explicit
+// placement overrides instead use iree_async_proactor_pool_acquire_for_node
+// directly.
+iree_status_t iree_hal_amd_fabric_acquire_proactor(
+    iree_async_proactor_pool_t* pool, uint32_t preferred_node,
+    iree_async_proactor_pool_entry_t** out_entry);
 
 // Acquires native allocation progress for a physical endpoint and host node.
 // Logical contexts of the same endpoint share a queue at the same placement;

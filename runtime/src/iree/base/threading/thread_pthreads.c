@@ -20,7 +20,6 @@
 #include <unistd.h>
 
 #include "iree/base/internal/atomics.h"
-#include "iree/base/internal/sysfs.h"
 #include "iree/base/threading/call_once.h"
 #include "iree/base/threading/notification.h"
 #include "iree/base/threading/thread.h"
@@ -296,63 +295,6 @@ void iree_thread_override_end(iree_thread_override_t* override) {
   IREE_TRACE_ZONE_END(z0);
 }
 
-typedef struct iree_thread_cpu_set_builder_t {
-  // Native mask populated by the sysfs CPU-list parser.
-  cpu_set_t* set;
-  // Native mask capacity in bytes.
-  iree_host_size_t size;
-  // Optional application budget bounding the requested node's processors.
-  const iree_thread_affinity_set_t* processor_set;
-  // Whether the node contains CPUs outside the native mask representation.
-  bool overflow;
-} iree_thread_cpu_set_builder_t;
-
-static bool iree_thread_cpu_set_add_range(uint32_t start_cpu, uint32_t end_cpu,
-                                          void* user_data) {
-  iree_thread_cpu_set_builder_t* builder = user_data;
-  if (builder->processor_set) {
-    end_cpu = iree_min(end_cpu, IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT);
-  } else if (end_cpu > builder->size * 8) {
-    builder->overflow = true;
-    return false;
-  }
-  for (uint32_t cpu = start_cpu; cpu < end_cpu; ++cpu) {
-    if (!builder->processor_set ||
-        iree_thread_affinity_set_test(builder->processor_set, cpu)) {
-      CPU_SET_S(cpu, builder->size, builder->set);
-    }
-  }
-  return true;
-}
-
-// Uses the shared sysfs CPU-list parser so NUMA masks have the same numbering
-// as topology discovery. An absent or unrepresentable node is an error.
-static iree_status_t iree_thread_make_cpu_set_from_node_id(
-    uint32_t node_id, const iree_thread_affinity_set_t* processor_set,
-    iree_host_size_t native_size, cpu_set_t* out_set) {
-  char path[128];
-  iree_snprintf(path, sizeof(path), "%s/node/node%u/cpulist",
-                iree_sysfs_get_root_path(), node_id);
-  char buffer[4096];
-  iree_host_size_t length = 0;
-  IREE_RETURN_IF_ERROR(
-      iree_sysfs_read_small_file(path, buffer, sizeof(buffer), &length));
-  iree_thread_cpu_set_builder_t builder = {
-      .set = out_set,
-      .size = native_size,
-      .processor_set = processor_set,
-  };
-  IREE_RETURN_IF_ERROR(
-      iree_sysfs_parse_cpu_list(iree_make_string_view(buffer, length),
-                                iree_thread_cpu_set_add_range, &builder));
-  if (builder.overflow) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "NUMA node %u CPU mask exceeds %u CPUs", node_id,
-                            (unsigned)(native_size * 8));
-  }
-  return iree_ok_status();
-}
-
 #if IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS
 // Formats CPU ranges into bounded diagnostic storage. Large sparse sets include
 // an explicit ellipsis and total CPU count instead of allocating scratch space.
@@ -463,39 +405,10 @@ iree_status_t iree_thread_request_affinity(
   const iree_host_size_t native_size =
       CPU_ALLOC_SIZE(IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT);
   cpu_set_t* native_set = iree_alloca(native_size);
-  CPU_ZERO_S(native_size, native_set);
-  iree_status_t status = iree_ok_status();
-  if (affinity.group_any) {
-    status = iree_thread_make_cpu_set_from_node_id(
-        affinity.group, processor_set, native_size, native_set);
-    if (!iree_status_is_ok(status)) {
-      status =
-          iree_status_annotate_f(status, "thread '%s'; requested NUMA node %u",
-                                 thread->name, affinity.group);
-    }
-  } else if (affinity.id_assigned) {
-    if (!processor_set && affinity.id + affinity.smt >= native_size * 8) {
-      status =
-          iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                           "thread '%s'; CPU %u exceeds native affinity mask",
-                           thread->name, affinity.id);
-    } else {
-      for (uint32_t cpu = affinity.id; cpu <= affinity.id + affinity.smt;
-           ++cpu) {
-        if (!processor_set ||
-            iree_thread_affinity_set_test(processor_set, cpu)) {
-          CPU_SET_S(cpu, native_size, native_set);
-        }
-      }
-    }
-  } else {
-    for (iree_host_size_t cpu =
-             iree_thread_affinity_set_find_first_set(processor_set, 0);
-         cpu < IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT;
-         cpu =
-             iree_thread_affinity_set_find_first_set(processor_set, cpu + 1)) {
-      CPU_SET_S(cpu, native_size, native_set);
-    }
+  iree_status_t status = iree_thread_affinity_resolve_linux(
+      affinity, processor_set, native_size, native_set);
+  if (!iree_status_is_ok(status)) {
+    status = iree_status_annotate_f(status, "thread '%s'", thread->name);
   }
 
   if (iree_status_is_ok(status)) {

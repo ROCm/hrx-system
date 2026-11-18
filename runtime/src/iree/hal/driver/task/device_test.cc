@@ -139,15 +139,28 @@ class TaskDeviceLocalityTest : public ::testing::Test {
     iree_hal_device_group_builder_deinitialize(&builder);
     IREE_ASSERT_OK(status);
     const auto* topology = iree_hal_device_group_topology(group);
+    const auto online_nodes = iree_numa_online_nodes();
     uint32_t host_node_count = 0;
     for (uint32_t i = 0; i < topology->node_count; ++i) {
       const auto* node = iree_hal_topology_node_at(topology, i);
       if (node->kind == IREE_HAL_TOPOLOGY_NODE_KIND_HOST_NUMA) {
         ++host_node_count;
-        EXPECT_EQ(node->local_ordinal, node_id_);
+        EXPECT_TRUE(iree_bitmap_test(online_nodes, node->local_ordinal));
       }
     }
-    EXPECT_EQ(host_node_count, expected ? 1u : 0u);
+    EXPECT_EQ(host_node_count, iree_bitmap_count(online_nodes));
+    uint32_t attachment_count = 0;
+    for (uint32_t i = 0; i < topology->link_count; ++i) {
+      const auto& link = topology->links[i];
+      if (link.kind == IREE_HAL_TOPOLOGY_LINK_KIND_INTERCONNECT) {
+        ++attachment_count;
+        const auto* host_node =
+            iree_hal_topology_node_at(topology, link.source_node_ordinal);
+        EXPECT_EQ(host_node->kind, IREE_HAL_TOPOLOGY_NODE_KIND_HOST_NUMA);
+        EXPECT_EQ(host_node->local_ordinal, node_id_);
+      }
+    }
+    EXPECT_EQ(attachment_count, expected ? 1u : 0u);
     iree_hal_device_group_release(group);
   }
 

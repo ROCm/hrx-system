@@ -113,14 +113,16 @@ TEST(HostTest, DeviceIoPlacementPreservesNodeIdentities) {
   IREE_ASSERT_OK(loom_runtime_host_create(1, nullptr, nullptr,
                                           iree_allocator_system(), &host));
   auto* pool = loom_runtime_host_proactor_pool(host);
-  EXPECT_EQ(iree_async_proactor_pool_count(pool), iree_numa_node_count());
+  EXPECT_GT(iree_async_proactor_pool_count(pool), 0u);
+  EXPECT_LE(iree_async_proactor_pool_count(pool), iree_numa_node_count());
   iree_bitmap_t online_nodes = iree_numa_online_nodes();
-  iree_host_size_t index = 0;
-  for (uint32_t node_id = 0; node_id < online_nodes.bit_count; ++node_id) {
-    if (!iree_bitmap_test(online_nodes, node_id)) {
-      continue;
+  for (iree_host_size_t i = 0; i < iree_async_proactor_pool_count(pool); ++i) {
+    uint32_t node_id = iree_async_proactor_pool_node_id(pool, i);
+    ASSERT_LT(node_id, online_nodes.bit_count);
+    EXPECT_TRUE(iree_bitmap_test(online_nodes, node_id));
+    if (i) {
+      EXPECT_LT(iree_async_proactor_pool_node_id(pool, i - 1), node_id);
     }
-    EXPECT_EQ(iree_async_proactor_pool_node_id(pool, index++), node_id);
   }
   // Physical inventory does not imply permission to run on every node. The
   // constructor's current node is inside its captured budget.
@@ -271,9 +273,14 @@ static void CheckHostBudget(HostBudgetMode mode) {
         }
         iree_async_proactor_pool_entry_t* entry = nullptr;
         if (iree_status_is_ok(status)) {
+          // A one-CPU budget admits exactly one service node, preserving its
+          // native ID even when the chosen CPU is outside node zero.
+          auto* pool = loom_runtime_host_proactor_pool(host);
+          EXPECT_EQ(iree_async_proactor_pool_count(pool), 1u);
+          EXPECT_EQ(iree_async_proactor_pool_node_id(pool, 0),
+                    state->task.node_id);
           status = iree_async_proactor_pool_acquire_for_node(
-              loom_runtime_host_proactor_pool(host), state->task.node_id,
-              &entry);
+              pool, state->task.node_id, &entry);
         }
         loom_runtime_host_release(host);
         iree_async_nop_operation_t nop = {};

@@ -8,6 +8,7 @@
 #include <cstring>
 #include <vector>
 
+#include "iree/base/threading/numa.h"
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/driver/amd/gpu/cts/test_device.h"
@@ -367,6 +368,59 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
     }
   }
 };
+
+TEST_F(GpuNativeFileBatchTest, HostNumaRequestsFeedNativeFiles) {
+  ASSERT_NO_FATAL_FAILURE(Create());
+  const auto* topology = iree_hal_device_group_topology(group_);
+  const uint32_t node_id = iree_numa_node_for_current_thread();
+  uint32_t host_node = IREE_HAL_TOPOLOGY_NODE_ORDINAL_INVALID;
+  for (iree_host_size_t i = 0; i < iree_hal_topology_node_count(topology);
+       ++i) {
+    const auto* node = iree_hal_topology_node_at(topology, i);
+    if (node->kind == IREE_HAL_TOPOLOGY_NODE_KIND_HOST_NUMA &&
+        node->local_ordinal == node_id) {
+      host_node = node->ordinal;
+      break;
+    }
+  }
+  ASSERT_NE(host_node, IREE_HAL_TOPOLOGY_NODE_ORDINAL_INVALID);
+  const iree_hal_pool_family_access_t family = {
+      .family = iree_hal_queue_family(queues_[0]),
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE,
+  };
+  iree_hal_pool_scope_t scope = {1, &family, {}};
+  iree_hal_slab_pool_options_t options;
+  iree_hal_slab_pool_options_initialize(&options);
+  Ref<iree_hal_pool_t> payload_pool, metadata_pool;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(
+      group_, scope, &options, iree_allocator_system(), payload_pool.out()));
+  scope.host = {
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .modes = IREE_HAL_MAPPING_MODE_SCOPED,
+      .properties = IREE_HAL_HOST_MEMORY_PROPERTY_READ_CACHED,
+  };
+  options.placement = {IREE_HAL_POOL_PLACEMENT_REQUIRED, host_node};
+  auto status = iree_hal_slab_pool_create(
+      group_, scope, &options, iree_allocator_system(), metadata_pool.out());
+  if (iree_status_is_unavailable(status)) {
+    iree_status_free(status);
+    GTEST_SKIP() << "native host NUMA backing is unavailable";
+  }
+  IREE_ASSERT_OK(status);
+  iree_hal_pool_capabilities_t capabilities;
+  iree_hal_pool_query_capabilities(metadata_pool, &capabilities);
+  EXPECT_EQ(capabilities.placement.mode, IREE_HAL_POOL_PLACEMENT_REQUIRED);
+  EXPECT_EQ(capabilities.placement.node, host_node);
+  EXPECT_TRUE(iree_all_bits_set(
+      capabilities.memory_type,
+      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE));
+  EXPECT_TRUE(iree_all_bits_set(
+      iree_hal_pool_query_host_access(metadata_pool).properties,
+      IREE_HAL_HOST_MEMORY_PROPERTY_READ_CACHED));
+  ASSERT_NO_FATAL_FAILURE(RoundTrip(queues_[1], payload_pool, metadata_pool,
+                                    nullptr, Descriptions::kIndirectHost,
+                                    FileStorage::kNative));
+}
 
 TEST_F(GpuNativeFileBatchTest, ProducerAndConsumerShareOrForkNativeQueues) {
   ASSERT_NO_FATAL_FAILURE(Create());

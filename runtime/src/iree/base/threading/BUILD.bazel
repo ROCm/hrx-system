@@ -49,6 +49,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:memory",
+        "//runtime/src/iree/base/internal:sysfs",
     ],
 )
 
@@ -98,7 +99,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal",
-        "//runtime/src/iree/base/internal:sysfs",
     ],
 )
 

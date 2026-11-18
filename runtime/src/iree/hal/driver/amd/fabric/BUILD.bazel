@@ -21,6 +21,7 @@ iree_runtime_cc_library(
     deps = [
         ":slab_provider",
         "//libamdf:headers",
+        "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
@@ -34,7 +35,9 @@ iree_runtime_cc_test(
     deps = [
         ":fabric",
         "//libamdf:headers",
+        "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

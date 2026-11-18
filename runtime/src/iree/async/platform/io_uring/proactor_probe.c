@@ -27,6 +27,28 @@
 // Round up to 64 for a clean uint64_t bitmask.
 #define IREE_IO_URING_PROBE_OPCODE_COUNT 64
 
+iree_status_t iree_async_proactor_io_uring_probe_worker_affinity(
+    iree_io_uring_ring_t* ring) {
+  // Registration opcodes have no capability query. A non-null address outside
+  // userspace reaches the mask-copy check without ever installing a mask on
+  // the creating task's io-wq (which may already serve other rings). Supported
+  // kernels return EFAULT; older kernels or syscall policy reject the opcode.
+  int result = iree_io_uring_ring_register(ring, IREE_IORING_REGISTER_IOWQ_AFF,
+                                           (void*)(uintptr_t)UINTPTR_MAX, 1);
+  if (result == -EFAULT) {
+    return iree_ok_status();
+  }
+  if (result == -EINVAL || result == -ENOSYS || result == -EOPNOTSUPP ||
+      result == -EPERM || result == -EACCES) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "io_uring worker affinity is unavailable: %s",
+                            strerror(-result));
+  }
+  return iree_make_status(
+      result < 0 ? iree_status_code_from_errno(-result) : IREE_STATUS_INTERNAL,
+      "io_uring worker affinity probe failed (%d)", result);
+}
+
 iree_status_t iree_async_proactor_io_uring_probe_buffer_ring(
     iree_io_uring_ring_t* ring, void* probe_page, bool* out_supported) {
   *out_supported = false;

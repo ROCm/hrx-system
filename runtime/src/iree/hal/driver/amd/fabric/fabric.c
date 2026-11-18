@@ -54,6 +54,22 @@ iree_status_t iree_hal_amd_fabric_query_physical_device_identity(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_amd_fabric_acquire_proactor(
+    iree_async_proactor_pool_t* pool, uint32_t preferred_node,
+    iree_async_proactor_pool_entry_t** out_entry) {
+  iree_host_size_t selected_index = 0;
+  if (preferred_node != UINT32_MAX) {
+    for (iree_host_size_t i = 0; i < iree_async_proactor_pool_count(pool);
+         ++i) {
+      if (iree_async_proactor_pool_node_id(pool, i) == preferred_node) {
+        selected_index = i;
+        break;
+      }
+    }
+  }
+  return iree_async_proactor_pool_acquire(pool, selected_index, out_entry);
+}
+
 iree_status_t iree_hal_amd_fabric_acquire_allocation_queue(
     iree_hal_amd_fabric_t* fabric, const amdf_endpoint_id_t* endpoint_id,
     uint32_t node_id, iree_hal_amd_fabric_allocation_queue_t** out_queue) {

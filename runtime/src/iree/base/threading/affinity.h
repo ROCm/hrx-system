@@ -163,6 +163,29 @@ IREE_API_EXPORT void iree_thread_affinity_set_group_any(
 IREE_API_EXPORT iree_status_t iree_thread_affinity_query_current(
     iree_thread_affinity_set_t* out_processor_set);
 
+// Queries the CPUs eligible for group_any affinity on |node_id|, intersected
+// with |processor_set| when provided. An empty intersection is a valid result;
+// an absent node or failed native query is an error. No thread is modified.
+// Linux/Android report the node's CPUs; Windows reports its primary processor
+// group's node-local CPUs, matching thread affinity application. Platforms
+// without a native node CPU query return UNAVAILABLE.
+IREE_API_EXPORT iree_status_t iree_thread_affinity_query_node(
+    uint32_t node_id, const iree_thread_affinity_set_t* processor_set,
+    iree_thread_affinity_set_t* out_processor_set);
+
+#if defined(IREE_PLATFORM_ANDROID) || defined(IREE_PLATFORM_LINUX)
+// Resolves Linux/Android affinity into caller-owned native cpu_set_t storage.
+// The native mask has |native_size| bytes, enough to represent at least
+// IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT CPUs, and is intersected with the
+// optional application processor budget without changing any thread's affinity.
+// An unspecified affinity copies the budget, or yields an empty mask if none
+// is given. Native consumers decide whether an empty mask is meaningful.
+iree_status_t iree_thread_affinity_resolve_linux(
+    iree_thread_affinity_t affinity,
+    const iree_thread_affinity_set_t* processor_set,
+    iree_host_size_t native_size, void* out_native_set);
+#endif  // IREE_PLATFORM_ANDROID || IREE_PLATFORM_LINUX
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

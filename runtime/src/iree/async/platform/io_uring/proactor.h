@@ -164,6 +164,10 @@ typedef struct iree_async_proactor_io_uring_t {
     // Event source for monitoring the signalfd.
     iree_async_event_source_t* event_source;
   } signal;
+
+  // Optional native cpu_set_t in the trailing allocation. Cleared after the
+  // first poll applies it to that task's kernel workers, before admitting I/O.
+  void* worker_affinity;
 } iree_async_proactor_io_uring_t;
 
 // Upcast from base proactor to io_uring implementation.
@@ -298,6 +302,12 @@ iree_status_t iree_async_proactor_io_uring_complete_cancel_request(
 iree_status_t iree_async_proactor_io_uring_detect_capabilities(
     iree_io_uring_ring_t* ring, uint32_t ring_features,
     iree_async_proactor_capabilities_t* out_capabilities);
+
+// Checks worker-affinity registration without modifying the creating task's
+// worker pool. Unsupported or prohibited affinity returns UNAVAILABLE so the
+// platform factory can select its worker-affined POSIX backend.
+iree_status_t iree_async_proactor_io_uring_probe_worker_affinity(
+    iree_io_uring_ring_t* ring);
 
 // Probes an empty, single-entry provided-buffer ring before other
 // registrations. |probe_page| is a zeroed, page-aligned allocation of at least

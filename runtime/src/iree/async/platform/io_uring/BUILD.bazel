@@ -259,6 +259,20 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "proactor_affinity_test",
+    srcs = ["proactor_affinity_test.cc"],
+    resource_group = "io_uring",
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":io_uring",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "proactor_capability_test",
     srcs = ["proactor_capability_test.cc"],
     resource_group = "io_uring",
@@ -268,6 +282,7 @@ iree_runtime_cc_test(
         ":io_uring",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

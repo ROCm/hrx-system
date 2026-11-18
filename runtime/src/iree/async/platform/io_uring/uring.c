@@ -356,6 +356,33 @@ iree_status_t iree_io_uring_ring_enable(iree_io_uring_ring_t* ring) {
   return iree_ok_status();
 }
 
+iree_status_t iree_io_uring_ring_set_worker_affinity(iree_io_uring_ring_t* ring,
+                                                     iree_host_size_t mask_size,
+                                                     const void* native_mask) {
+  // io_uring_setup initializes the creating task's io-wq context. A different
+  // polling task first needs an enter with a nonzero admission bound. Keep the
+  // SQ unpublished so this enters an empty ring, even if producers have already
+  // prepared local SQEs. No request can create an unplaced worker beforehand.
+  IREE_ASSERT_TRUE(*ring->sq_tail == 0);
+  int result = 0;
+  do {
+    result = iree_io_uring_enter(ring->ring_fd, 1, 0, 0, NULL, 0);
+  } while (result < 0 && errno == EINTR);
+  if (result < 0) {
+    return iree_make_status(iree_status_code_from_errno(errno),
+                            "io_uring worker context initialization failed: %s",
+                            strerror(errno));
+  }
+  result = iree_io_uring_ring_register(ring, IREE_IORING_REGISTER_IOWQ_AFF,
+                                       (void*)native_mask, (uint32_t)mask_size);
+  if (result < 0) {
+    return iree_make_status(iree_status_code_from_errno(-result),
+                            "io_uring worker affinity registration failed: %s",
+                            strerror(-result));
+  }
+  return iree_ok_status();
+}
+
 void iree_io_uring_ring_set_registration_wake_callback(
     iree_io_uring_ring_t* ring,
     iree_io_uring_registration_wake_callback_t callback) {

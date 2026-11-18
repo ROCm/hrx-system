@@ -9,6 +9,7 @@
 #include <cstring>
 
 #include "iree/base/api.h"
+#include "iree/base/threading/numa.h"
 #include "iree/hal/api.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -36,7 +37,9 @@ static iree_hal_device_spec_t* CreateTestDeviceSpec(
               .uuid = {{0}},
               .pci = {0, 0, 0, 0},
               .numa = {numa_node},
-              .flags = IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_NUMA_NODE,
+              .flags = numa_node != UINT32_MAX
+                           ? IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_NUMA_NODE
+                           : IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_NONE,
           },
       .physical_ordinal = physical_ordinal,
       .partition_ordinal = 0,
@@ -226,7 +229,8 @@ TEST(TopologyBuilder, DeviceSpecNodesAndLinks) {
 
   EXPECT_EQ(iree_hal_topology_device_numa_node(topology, 0), 2u);
   EXPECT_EQ(iree_hal_topology_device_numa_node(topology, 1), 3u);
-  ASSERT_EQ(iree_hal_topology_node_count(topology), 6u);
+  ASSERT_GE(iree_hal_topology_node_count(topology), 6u);
+  const auto host_node_count = iree_hal_topology_node_count(topology) - 4;
   ASSERT_EQ(iree_hal_topology_link_count(topology), 4u);
 
   const iree_hal_topology_node_t* numa0 =
@@ -237,14 +241,14 @@ TEST(TopologyBuilder, DeviceSpecNodesAndLinks) {
   EXPECT_EQ(numa0->device_ordinal, IREE_HAL_TOPOLOGY_DEVICE_ORDINAL_INVALID);
 
   const iree_hal_topology_node_t* logical0 =
-      iree_hal_topology_node_at(topology, 2);
+      iree_hal_topology_node_at(topology, host_node_count);
   ASSERT_NE(logical0, nullptr);
   EXPECT_EQ(logical0->kind, IREE_HAL_TOPOLOGY_NODE_KIND_LOGICAL_DEVICE);
   EXPECT_EQ(logical0->device_ordinal, 0u);
   EXPECT_EQ(logical0->local_ordinal, 7u);
 
   const iree_hal_topology_node_t* physical0 =
-      iree_hal_topology_node_at(topology, 4);
+      iree_hal_topology_node_at(topology, host_node_count + 2);
   ASSERT_NE(physical0, nullptr);
   EXPECT_EQ(physical0->kind, IREE_HAL_TOPOLOGY_NODE_KIND_PHYSICAL_DEVICE);
   EXPECT_EQ(physical0->parent_ordinal, logical0->ordinal);
@@ -272,6 +276,48 @@ TEST(TopologyBuilder, DeviceSpecNodesAndLinks) {
   iree_hal_device_spec_release(spec_a);
 }
 
+TEST(TopologyBuilder, HostPlacementWithoutDeviceAttachment) {
+  iree_hal_device_spec_t* spec =
+      CreateTestDeviceSpec("mock", 0, 0, UINT32_MAX, 1);
+  const iree_hal_device_spec_t* specs[] = {spec};
+  iree_hal_topology_builder_t builder;
+  iree_hal_topology_builder_initialize(&builder, 1);
+  iree_hal_topology_t* topology = nullptr;
+  IREE_ASSERT_OK(iree_hal_topology_builder_finalize_with_device_specs(
+      &builder, specs, iree_allocator_system(), &topology));
+  iree_hal_device_spec_release(spec);
+
+  // Placement ordinals and their identities survive topology cloning without
+  // retaining the source specs or consulting a device attachment.
+  iree_hal_topology_t* clone = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_topology_clone(topology, iree_allocator_system(), &clone));
+  iree_hal_topology_destroy(topology, iree_allocator_system());
+
+  const auto online_nodes = iree_numa_online_nodes();
+  ASSERT_EQ(iree_hal_topology_node_count(clone),
+            iree_bitmap_count(online_nodes) + 2);
+  iree_host_size_t ordinal = 0;
+  for (iree_host_size_t node_id = 0; node_id < online_nodes.bit_count;
+       ++node_id) {
+    if (!iree_bitmap_test(online_nodes, node_id)) {
+      continue;
+    }
+    const auto* node = iree_hal_topology_node_at(clone, ordinal++);
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->kind, IREE_HAL_TOPOLOGY_NODE_KIND_HOST_NUMA);
+    EXPECT_EQ(node->local_ordinal, node_id);
+    EXPECT_EQ(node->device_ordinal, IREE_HAL_TOPOLOGY_DEVICE_ORDINAL_INVALID);
+    EXPECT_EQ(node->physical_device_affinity, 0u);
+  }
+  // The physical device is contained by its logical device, but no proximity
+  // link is fabricated for its unreported host attachment.
+  ASSERT_EQ(iree_hal_topology_link_count(clone), 1u);
+  EXPECT_EQ(iree_hal_topology_link_at(clone, 0)->kind,
+            IREE_HAL_TOPOLOGY_LINK_KIND_CONTAINS);
+  iree_hal_topology_destroy(clone, iree_allocator_system());
+}
+
 TEST(TopologyBuilder, FullNumaIdentitiesSurviveCompactSchedulingProjection) {
   const uint32_t node_ids[] = {0, 255, 256, 65536, 256};
   const uint32_t node_ordinals[] = {0, 1, 2, 3, 2};
@@ -292,8 +338,10 @@ TEST(TopologyBuilder, FullNumaIdentitiesSurviveCompactSchedulingProjection) {
   iree_hal_topology_t* topology = nullptr;
   IREE_ASSERT_OK(iree_hal_topology_builder_finalize_with_device_specs(
       &builder, specs, iree_allocator_system(), &topology));
-  ASSERT_EQ(iree_hal_topology_node_count(topology),
+  ASSERT_GE(iree_hal_topology_node_count(topology),
             kNodeCount + 2 * kDeviceCount);
+  const auto host_node_count =
+      iree_hal_topology_node_count(topology) - 2 * kDeviceCount;
   ASSERT_EQ(iree_hal_topology_link_count(topology), 2 * kDeviceCount);
   for (uint32_t i = 0; i < kDeviceCount; ++i) {
     SCOPED_TRACE(i);
@@ -303,7 +351,7 @@ TEST(TopologyBuilder, FullNumaIdentitiesSurviveCompactSchedulingProjection) {
     const auto* link = iree_hal_topology_link_at(topology, 2 * i + 1);
     EXPECT_EQ(link->kind, IREE_HAL_TOPOLOGY_LINK_KIND_INTERCONNECT);
     EXPECT_EQ(link->source_node_ordinal, node->ordinal);
-    EXPECT_EQ(link->target_node_ordinal, kNodeCount + kDeviceCount + i);
+    EXPECT_EQ(link->target_node_ordinal, host_node_count + kDeviceCount + i);
     // The compact scheduling table keeps its documented conservative value
     // when the full physical identity cannot fit in its eight-bit entry.
     EXPECT_EQ(iree_hal_topology_device_numa_node(topology, i),
