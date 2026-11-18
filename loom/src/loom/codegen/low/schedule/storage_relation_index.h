@@ -56,6 +56,15 @@ typedef struct loom_low_schedule_storage_relation_t {
   loom_low_storage_relation_cause_t cause;
 } loom_low_schedule_storage_relation_t;
 
+// True for a copy, move, slice, or concat whose result can occupy its
+// operand's units. A detached copy or move requires distinct storage.
+static inline bool loom_low_schedule_storage_relation_is_view(
+    const loom_low_schedule_storage_relation_t* relation) {
+  return relation->cause >= LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_COPY &&
+         relation->cause <= LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_CONCAT &&
+         relation->kind != LOOM_LOW_STORAGE_RELATION_DISJOINT_STORAGE;
+}
+
 static_assert(LOOM_LOW_SCHEDULE_STORAGE_RELATION_SEGMENT_CAPACITY *
                       sizeof(loom_low_schedule_storage_relation_t) <=
                   64 * 1024,

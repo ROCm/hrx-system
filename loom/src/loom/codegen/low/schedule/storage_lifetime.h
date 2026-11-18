@@ -24,13 +24,20 @@ typedef struct loom_low_schedule_storage_handoff_t {
   uint32_t next_handoff;
 } loom_low_schedule_storage_handoff_t;
 
+// One contiguous range in a candidate register allocation for a block argument.
+typedef struct loom_low_schedule_storage_view_t {
+  // Block argument owning the range, or LOOM_VALUE_ORDINAL_INVALID when this
+  // value has no projected range.
+  loom_value_ordinal_t root;
+  // First unit of this value in the root's register tuple.
+  uint32_t unit_offset;
+} loom_low_schedule_storage_view_t;
+
 // Immutable scratch facts consumed while building each block's dependencies.
 // These describe placement opportunities, not mandatory allocator aliases.
 typedef struct loom_low_schedule_storage_lifetimes_t {
-  // Same-block header reached through full-width, same-class copy/tied
-  // relations, or the value's own ordinal when no such lifetime is retained.
-  // NULL when no tracked storage can have a copied lifetime.
-  loom_value_ordinal_t* roots;
+  // Views indexed by SSA value, or NULL when no tracked storage has aliases.
+  loom_low_schedule_storage_view_t* views;
   // Handoff list heads indexed by producer block, with UINT32_MAX for empty
   // lists. NULL when all handoffs are local to their edge's block.
   uint32_t* block_handoffs;
@@ -41,9 +48,10 @@ typedef struct loom_low_schedule_storage_lifetimes_t {
 struct loom_low_schedule_build_state_t;
 
 // Builds the compact storage-relation index, marks tracked values, initializes
-// reader scratch, and retains copy/tied lifetimes and producer-owned handoffs.
-// All storage belongs to the schedule's scratch arena. Nodes and source
-// producers must already be populated; no IR or register placement is changed.
+// reader scratch, and retains contiguous header views and producer-owned
+// handoffs. All storage belongs to the schedule's scratch arena. Nodes and
+// source producers must already be populated; no IR or register placement is
+// changed.
 iree_status_t loom_low_schedule_storage_lifetimes_initialize(
     struct loom_low_schedule_build_state_t* state, iree_host_size_t node_count);
 

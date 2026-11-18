@@ -2,9 +2,9 @@
 
 amdgpu.target<gfx1151> @target
 
-low.func.def target<amdgpu.rdna3_5.core>(@target) @vector_queue_aliases(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %seed: reg<amdgpu.vgpr x4>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x4>) asm {
-  low.br ^loop(%seed: reg<amdgpu.vgpr x4>)
-^loop(%carried: reg<amdgpu.vgpr x4>):
+low.func.def target<amdgpu.rdna3_5.core>(@target) @vector_queue_aliases(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %seed: reg<amdgpu.vgpr x4>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr>) asm {
+  low.br ^loop(%seed: reg<amdgpu.vgpr x4>, %address: reg<amdgpu.vgpr>)
+^loop(%carried: reg<amdgpu.vgpr x4>, %sum: reg<amdgpu.vgpr>):
   low.cond_br %again, ^body, ^exit : reg<amdgpu.scc>
 ^body:
   %pair = slice %carried[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
@@ -12,27 +12,25 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @vector_queue_aliases(%address
   %lane1 = slice %pair[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %used = v_add_u32 %lane0, %lane1
   %future = global_load_b128_saddr %address, %base
-  low.br ^loop(%future: reg<amdgpu.vgpr x4>)
+  low.br ^loop(%future: reg<amdgpu.vgpr x4>, %used: reg<amdgpu.vgpr>)
 ^exit:
-  return %carried
+  return %carried, %sum
 }
 
-// The header and transitive slices share the future load registers. Only
-// entry transport copies remain; the backedge leaves the result pending.
+// The next load writes its loop-carried tuple directly. The next iteration's
+// add is the first instruction that needs the pending payload.
 
 // ----
+  v_mov_b32 v5, v4
 .Lbb1:
   s_cbranch_scc0 .Lbb3
 .Lbb2:
-  global_load_b128 v[8:11], v4, s[0:1] offset:0
-  v_add_u32 v0, v0, v1
   s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_mov_b32 v0, v8
-  v_mov_b32 v1, v9
-  v_mov_b32 v2, v10
-  v_mov_b32 v3, v11
+  v_add_u32 v5, v0, v1
+  global_load_b128 v[0:3], v4, s[0:1] offset:0
   s_branch .Lbb1
 .Lbb3:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm
 
 // ====
@@ -40,9 +38,9 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @vector_queue_aliases(%address
 
 amdgpu.target<gfx1250> @target
 
-low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vector_queue_aliases_split_counter(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %seed: reg<amdgpu.vgpr x4>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x4>) asm {
-  low.br ^loop(%seed: reg<amdgpu.vgpr x4>)
-^loop(%carried: reg<amdgpu.vgpr x4>):
+low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vector_queue_aliases_split_counter(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %seed: reg<amdgpu.vgpr x4>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr>) asm {
+  low.br ^loop(%seed: reg<amdgpu.vgpr x4>, %address: reg<amdgpu.vgpr>)
+^loop(%carried: reg<amdgpu.vgpr x4>, %sum: reg<amdgpu.vgpr>):
   low.cond_br %again, ^body, ^exit : reg<amdgpu.scc>
 ^body:
   %pair = slice %carried[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
@@ -50,64 +48,24 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @vector_queue_aliases_sp
   %lane1 = slice %pair[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %used = v_add_u32 %lane0, %lane1
   %future = global_load_b128_saddr %address, %base
-  low.br ^loop(%future: reg<amdgpu.vgpr x4>)
+  low.br ^loop(%future: reg<amdgpu.vgpr x4>, %used: reg<amdgpu.vgpr>)
 ^exit:
-  return %carried
+  return %carried, %sum
 }
 
-// The same allocation works with the separate load completion counter.
+// The split-counter target waits for the carried load at its first use.
 
 // ----
+  v_mov_b32 v5, v4
 .Lbb1:
   s_cbranch_scc0 .Lbb3
 .Lbb2:
-  global_load_b128 v[8:11], v4, s[0:1] offset:0
-  v_add_u32 v0, v0, v1
   s_wait_loadcnt loadcnt(0)
-  v_mov_b32 v0, v8
-  v_mov_b32 v1, v9
-  v_mov_b32 v2, v10
-  v_mov_b32 v3, v11
+  v_add_u32 v5, v0, v1
+  global_load_b128 v[0:3], v4, s[0:1] offset:0
   s_branch .Lbb1
 .Lbb3:
-  s_endpgm
-
-// ====
-// RUN: emit amdgpu-assembly @fixed_slice_preserves_header_location
-
-amdgpu.target<gfx1151> @target
-
-low.func.def target<amdgpu.rdna3_5.core>(@target) @fixed_slice_preserves_header_location(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %seed: reg<amdgpu.vgpr x4>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x4>) asm {
-  low.br ^loop(%seed: reg<amdgpu.vgpr x4>)
-^loop(%carried: reg<amdgpu.vgpr x4>):
-  low.cond_br %again, ^body, ^exit : reg<amdgpu.scc>
-^body:
-  %pair = slice %carried[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  %lane0 = slice %pair[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %lane1 = slice %pair[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %used = v_add_u32 %lane0, %lane1
-  %future = global_load_b128_saddr %address, %base
-  low.br ^loop(%future: reg<amdgpu.vgpr x4>)
-^exit:
-  return %carried
-}
-
-// A fixed slice anchors the component. The real backedge copies still
-// consume the load result and require completion.
-
-// ----
-.Lbb1:
-  s_cbranch_scc0 .Lbb3
-.Lbb2:
-  global_load_b128 v[8:11], v4, s[0:1] offset:0
-  v_add_u32 v0, v0, v1
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_mov_b32 v0, v8
-  v_mov_b32 v1, v9
-  v_mov_b32 v2, v10
-  v_mov_b32 v3, v11
-  s_branch .Lbb1
-.Lbb3:
+  s_wait_loadcnt loadcnt(0)
   s_endpgm
 
 // ====
@@ -115,9 +73,9 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @fixed_slice_preserves_header_
 
 amdgpu.target<gfx1151> @target
 
-low.func.def target<amdgpu.rdna3_5.core>(@target) @late_slice_preserves_old_payload(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %seed: reg<amdgpu.vgpr x4>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x4>) asm {
-  low.br ^loop(%seed: reg<amdgpu.vgpr x4>)
-^loop(%carried: reg<amdgpu.vgpr x4>):
+low.func.def target<amdgpu.rdna3_5.core>(@target) @late_slice_preserves_old_payload(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %seed: reg<amdgpu.vgpr x4>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr>) asm {
+  low.br ^loop(%seed: reg<amdgpu.vgpr x4>, %address: reg<amdgpu.vgpr>)
+^loop(%carried: reg<amdgpu.vgpr x4>, %sum: reg<amdgpu.vgpr>):
   low.cond_br %again, ^body, ^exit : reg<amdgpu.scc>
 ^body:
   %pair = slice %carried[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
@@ -125,20 +83,21 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @late_slice_preserves_old_payl
   %lane1 = slice %pair[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %future = global_load_b128_saddr %address, %base
   %used = v_add_u32 %lane0, %lane1
-  low.br ^loop(%future: reg<amdgpu.vgpr x4>)
+  low.br ^loop(%future: reg<amdgpu.vgpr x4>, %used: reg<amdgpu.vgpr>)
 ^exit:
-  return %carried
+  return %carried, %sum
 }
 
 // Slicing ends the direct header use, but the old payload is consumed after
 // the future load issues. Moving the aliases would overwrite live storage.
 
 // ----
+  v_mov_b32 v5, v4
 .Lbb1:
   s_cbranch_scc0 .Lbb3
 .Lbb2:
   global_load_b128 v[8:11], v4, s[0:1] offset:0
-  v_add_u32 v0, v0, v1
+  v_add_u32 v5, v0, v1
   s_waitcnt vmcnt(0) lgkmcnt(63)
   v_mov_b32 v0, v8
   v_mov_b32 v1, v9
@@ -168,8 +127,8 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @leased_slice_preserves_
   return %carried
 }
 
-// The store leases its address and payload after issue. Their materialized
-// lease records retain the original storage, so this component stays put.
+// The store still owns its source after issue. The new load can reuse those
+// registers once the store counter retires its lease.
 
 // ----
 .Lbb1:
@@ -186,13 +145,13 @@ low.func.def target<amdgpu.rdna4.gfx125x.core>(@target) @leased_slice_preserves_
   s_endpgm
 
 // ====
-// RUN: emit amdgpu-assembly @anchored_component_blocks_dependent_relocation
+// RUN: with-checks emit amdgpu-assembly @two_carried_tuples
 
 amdgpu.target<gfx1151> @target
 
-low.func.def target<amdgpu.rdna3_5.core>(@target) @anchored_component_blocks_dependent_relocation(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %seed0: reg<amdgpu.vgpr x4>, %seed1: reg<amdgpu.vgpr x4>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>) asm {
-  low.br ^loop(%seed0: reg<amdgpu.vgpr x4>, %seed1: reg<amdgpu.vgpr x4>)
-^loop(%carried0: reg<amdgpu.vgpr x4>, %carried1: reg<amdgpu.vgpr x4>):
+low.func.def target<amdgpu.rdna3_5.core>(@target) @two_carried_tuples(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %seed0: reg<amdgpu.vgpr x4>, %seed1: reg<amdgpu.vgpr x4>, %initial_sum: reg<amdgpu.vgpr>, %again: reg<amdgpu.scc>) -> (reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr x4>, reg<amdgpu.vgpr>) asm {
+  low.br ^loop(%seed0: reg<amdgpu.vgpr x4>, %seed1: reg<amdgpu.vgpr x4>, %initial_sum: reg<amdgpu.vgpr>)
+^loop(%carried0: reg<amdgpu.vgpr x4>, %carried1: reg<amdgpu.vgpr x4>, %sum: reg<amdgpu.vgpr>):
   low.cond_br %again, ^body, ^exit : reg<amdgpu.scc>
 ^body:
   %lane0 = slice %carried0[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -200,30 +159,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @anchored_component_blocks_dep
   %used = v_add_u32 %lane0, %lane1
   %future0 = global_load_b128_saddr %address, %base
   %future1 = global_load_b128_saddr %address, %base {offset = 16}
-  low.br ^loop(%future0: reg<amdgpu.vgpr x4>, %future1: reg<amdgpu.vgpr x4>)
+  low.br ^loop(%future0: reg<amdgpu.vgpr x4>, %future1: reg<amdgpu.vgpr x4>, %used: reg<amdgpu.vgpr>)
 ^exit:
-  return %carried0, %carried1
+  return %carried0, %carried1, %sum
 }
 
-// The second header cannot move with its fixed slice. The first cannot assume
-// those registers are vacated: both old payloads meet at the add instruction.
+// Both carried tuples remain live until the same add. That add must be the
+// only vector ALU instruction: each load writes its own tuple directly.
 
 // ----
-.Lbb1:
-  s_cbranch_scc0 .Lbb3
-.Lbb2:
-  global_load_b128 v[12:15], v8, s[0:1] offset:0
-  global_load_b128 v[16:19], v8, s[0:1] offset:16
-  v_add_u32 v0, v0, v4
-  s_waitcnt vmcnt(0) lgkmcnt(63)
-  v_mov_b32 v0, v12
-  v_mov_b32 v1, v13
-  v_mov_b32 v2, v14
-  v_mov_b32 v3, v15
-  v_mov_b32 v4, v16
-  v_mov_b32 v5, v17
-  v_mov_b32 v6, v18
-  v_mov_b32 v7, v19
-  s_branch .Lbb1
-.Lbb3:
-  s_endpgm
+CHECK-COUNT-2: global_load_b128 *
+CHECK-COUNT-1: v_*

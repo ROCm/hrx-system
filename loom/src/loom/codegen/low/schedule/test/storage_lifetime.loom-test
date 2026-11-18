@@ -194,8 +194,8 @@ node 5 <- none
 
 // ====
 
-// A partial view does not establish a whole-header placement lifetime.
-// Ordinary SSA and structural edge relations still describe the slice.
+// A copy of a single lane still reads the corresponding unit of the header.
+// The writer of the next whole tuple follows the last use of that lane.
 // RUN: emit low-schedule-query @partial_header_read kind=storage-lifetime strategy=resource-stall consumer=4
 
 test.target<low_core> @target
@@ -212,4 +212,89 @@ low.func.def target<test.low.core>(@target) @partial_header_read(%seed: reg<test
 }
 
 // ----
-node 4 <- none
+node 4 <- 3
+
+// ====
+
+// Each scalar producer replaces one unit of a header defined in another block.
+// A nonzero nested slice passes through a move and an ordered reassembly.
+// Reading unit 2 constrains its replacement independently of units 0, 1, and 3.
+// RUN: emit low-schedule-query @projected_unit kind=storage-lifetime strategy=resource-stall consumer=9,10,11,12
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @projected_unit(%seed: reg<test.i32 x4>, %rhs: reg<test.i32>, %again: reg<test.i32>) -> (reg<test.i32 x4>) asm {
+  low.br ^loop(%seed: reg<test.i32 x4>)
+^loop(%carried: reg<test.i32 x4>):
+  low.cond_br %again, ^body, ^exit : reg<test.i32>
+^body:
+  %pair = slice %carried[2] : reg<test.i32 x4> -> reg<test.i32 x2>
+  %lo = slice %pair[0] : reg<test.i32 x2> -> reg<test.i32>
+  %hi = slice %pair[1] : reg<test.i32 x2> -> reg<test.i32>
+  %joined = concat(%lo, %hi) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %view = move %joined : reg<test.i32 x2> -> reg<test.i32 x2>
+  %lane = slice %view[0] : reg<test.i32 x2> -> reg<test.i32>
+  %read = test.add.i32 %lane, %rhs
+  %a = test.mul.i32 %rhs, %rhs
+  %b = test.mul.i32 %rhs, %rhs
+  %c = test.mul.i32 %rhs, %rhs
+  %d = test.mul.i32 %rhs, %rhs
+  %next = concat(%a, %b, %c, %d) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  test.event.memory.write.i32 %read
+  low.br ^loop(%next: reg<test.i32 x4>)
+^exit:
+  return %carried
+}
+
+// ----
+node 9 <- none
+node 10 <- none
+node 11 <- 8
+node 12 <- none
+
+// ====
+
+// Repacking lanes in a different order gives the tuple a new home. A read
+// through that tuple must not pin the old header's registers to the new order.
+// RUN: emit low-schedule-query @reordered_header kind=storage-lifetime strategy=resource-stall consumer=6
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @reordered_header(%seed: reg<test.i32 x2>, %rhs: reg<test.i32>) asm {
+  low.br ^loop(%seed: reg<test.i32 x2>)
+^loop(%carried: reg<test.i32 x2>):
+  %lo = slice %carried[0] : reg<test.i32 x2> -> reg<test.i32>
+  %hi = slice %carried[1] : reg<test.i32 x2> -> reg<test.i32>
+  %flipped = concat(%hi, %lo) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %field = slice %flipped[0] : reg<test.i32 x2> -> reg<test.i32>
+  %read = test.add.i32 %field, %rhs
+  %next = test.mul.i32 %rhs, %rhs
+  %reuse = concat(%next, %lo) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  test.event.memory.write.i32 %read
+  low.br ^loop(%reuse: reg<test.i32 x2>)
+}
+
+// ----
+node 6 <- none
+
+// ====
+
+// An incoming detached copy may write the header only after its reader; its
+// producer writes different storage and remains free to issue early.
+// RUN: emit low-schedule-query @detached_incoming kind=storage-lifetime strategy=resource-stall consumer=2,3
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @detached_incoming(%seed: reg<test.i32>, %rhs: reg<test.i32>) asm {
+  low.br ^loop(%seed: reg<test.i32>)
+^loop(%carried: reg<test.i32>):
+  %read = test.add.i32 %carried, %rhs
+  %next = test.mul.i32 %rhs, %rhs
+  %home = move %next {detached = true} : reg<test.i32> -> reg<test.i32>
+  test.event.memory.write.i32 %read
+  low.br ^loop(%home: reg<test.i32>)
+}
+
+// ----
+node 2 <- none
+node 3 <- 1

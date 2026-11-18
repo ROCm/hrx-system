@@ -705,15 +705,18 @@ static iree_status_t loom_low_schedule_add_storage_read(
   IREE_RETURN_IF_ERROR(loom_low_schedule_record_storage_read(
       state, node_index, identity, unit_offset, unit_count, read_mask,
       descriptor_operand_index, timing_event_id));
-  const loom_value_ordinal_t* roots = state->storage_lifetimes.roots;
-  const loom_value_ordinal_t lifetime_identity =
-      roots != NULL
-          ? loom_low_schedule_storage_read_identity(state, roots[value_ordinal])
-          : identity;
-  if (lifetime_identity != identity) {
-    IREE_RETURN_IF_ERROR(loom_low_schedule_record_storage_read(
-        state, node_index, lifetime_identity, unit_offset, unit_count,
-        read_mask, descriptor_operand_index, timing_event_id));
+  const loom_low_schedule_storage_view_t* views =
+      state->storage_lifetimes.views;
+  if (views != NULL &&
+      views[value_ordinal].root != LOOM_VALUE_ORDINAL_INVALID) {
+    const loom_low_schedule_storage_view_t view = views[value_ordinal];
+    const loom_value_ordinal_t owner =
+        loom_low_schedule_storage_read_identity(state, view.root);
+    if (owner != identity) {
+      IREE_RETURN_IF_ERROR(loom_low_schedule_record_storage_read(
+          state, node_index, owner, view.unit_offset + unit_offset, unit_count,
+          read_mask, descriptor_operand_index, timing_event_id));
+    }
   }
   return iree_ok_status();
 }
@@ -803,14 +806,6 @@ static bool loom_low_schedule_relation_is_edge_handoff(
          relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_YIELD;
 }
 
-static bool loom_low_schedule_relation_is_structural_alias(
-    const loom_low_schedule_storage_relation_t* relation) {
-  return relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_COPY ||
-         relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_MOVE ||
-         relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SLICE ||
-         relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_CONCAT;
-}
-
 static iree_status_t loom_low_schedule_push_edge_source(
     loom_low_schedule_build_state_t* state,
     loom_low_schedule_edge_source_record_t record,
@@ -880,7 +875,7 @@ static iree_status_t loom_low_schedule_note_edge_source_writes(
           loom_low_schedule_storage_relation_index_at(&state->storage_relations,
                                                       relation_index);
       if (relation->destination_ordinal != current_ordinal ||
-          !loom_low_schedule_relation_is_structural_alias(relation)) {
+          !loom_low_schedule_storage_relation_is_view(relation)) {
         continue;
       }
       const uint32_t intersection_offset =

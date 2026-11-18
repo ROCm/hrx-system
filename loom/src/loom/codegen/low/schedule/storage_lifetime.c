@@ -14,14 +14,52 @@
 static bool loom_low_schedule_storage_relation_carries_lifetime(
     const loom_low_schedule_storage_relation_t* relation) {
   return relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_TIED_RESULT ||
-         (relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_COPY &&
-          relation->kind == LOOM_LOW_STORAGE_RELATION_SAME_STORAGE);
+         loom_low_schedule_storage_relation_is_view(relation);
 }
 
 static bool loom_low_schedule_storage_relation_is_handoff(
     const loom_low_schedule_storage_relation_t* relation) {
   return relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_BRANCH ||
          relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_YIELD;
+}
+
+// A concat can retain one home when its operands tile adjacent units of the
+// same header in order. Mixed, repeated, and reordered pieces have independent
+// placement choices; their uses at the concat already protect their sources.
+static void loom_low_schedule_project_storage_view(
+    loom_low_schedule_build_state_t* state,
+    const loom_low_schedule_storage_relation_t* relation) {
+  loom_low_schedule_storage_view_t* views = state->storage_lifetimes.views;
+  loom_low_schedule_storage_view_t source = views[relation->source_ordinal];
+  if (source.root == LOOM_VALUE_ORDINAL_INVALID) {
+    source = (loom_low_schedule_storage_view_t){
+        .root = relation->source_ordinal,
+    };
+    if (state->value_producer_nodes[source.root] !=
+            LOOM_LOW_SCHEDULE_NODE_NONE ||
+        !iree_any_bit_set(state->values[source.root].flags,
+                          LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TRACKED) ||
+        !loom_value_is_block_arg(loom_module_value(
+            state->module, state->value_domain->value_ids[source.root]))) {
+      views[relation->destination_ordinal].root = LOOM_VALUE_ORDINAL_INVALID;
+      return;
+    }
+  }
+  const loom_value_ordinal_t result = relation->destination_ordinal;
+  const uint32_t source_offset =
+      source.unit_offset + relation->source_unit_offset;
+  if (relation->destination_unit_offset == 0) {
+    if (state->values[source.root].register_class_id ==
+        state->values[result].register_class_id) {
+      views[result] = (loom_low_schedule_storage_view_t){
+          .root = source.root, .unit_offset = source_offset};
+    }
+  } else if (views[result].root != source.root ||
+             source_offset < views[result].unit_offset ||
+             source_offset - views[result].unit_offset !=
+                 relation->destination_unit_offset) {
+    views[result].root = LOOM_VALUE_ORDINAL_INVALID;
+  }
 }
 
 static void loom_low_schedule_storage_lifetimes_populate(
@@ -39,28 +77,9 @@ static void loom_low_schedule_storage_lifetimes_populate(
       const loom_low_schedule_storage_relation_t* relation =
           loom_low_schedule_storage_relation_index_at(&state->storage_relations,
                                                       i);
-      if (lifetimes->roots != NULL &&
+      if (lifetimes->views != NULL &&
           loom_low_schedule_storage_relation_carries_lifetime(relation)) {
-        const loom_value_ordinal_t root =
-            lifetimes->roots[relation->source_ordinal];
-        const loom_low_schedule_value_record_t* source = &state->values[root];
-        const loom_low_schedule_value_record_t* destination =
-            &state->values[relation->destination_ordinal];
-        const loom_value_t* value = loom_module_value(
-            state->module, state->value_domain->value_ids[root]);
-        if (loom_value_is_block_arg(value) &&
-            loom_value_def_block(value) ==
-                state->body->blocks[node->block_index] &&
-            iree_any_bit_set(
-                source->flags,
-                LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TRACKED) &&
-            source->register_class_id == destination->register_class_id &&
-            source->unit_count == destination->unit_count &&
-            relation->source_unit_offset == 0 &&
-            relation->destination_unit_offset == 0 &&
-            relation->unit_count == source->unit_count) {
-          lifetimes->roots[relation->destination_ordinal] = root;
-        }
+        loom_low_schedule_project_storage_view(state, relation);
       }
       if (lifetimes->block_handoffs != NULL &&
           loom_low_schedule_storage_relation_is_handoff(relation)) {
@@ -90,7 +109,7 @@ iree_status_t loom_low_schedule_storage_lifetimes_initialize(
       &state->storage_relations));
   bool needs_storage_read_tracking = false;
   bool needs_edge_source_worklist = false;
-  bool needs_lifetime_roots = false;
+  bool has_header_views = false;
   uint32_t handoff_count = 0;
   iree_host_size_t max_operand_count = 0;
   // Mark all tracked destinations before propagating header lifetimes: a
@@ -106,8 +125,13 @@ iree_status_t loom_low_schedule_storage_lifetimes_initialize(
       const loom_low_schedule_storage_relation_t* relation =
           loom_low_schedule_storage_relation_index_at(&state->storage_relations,
                                                       i);
-      needs_lifetime_roots |=
-          loom_low_schedule_storage_relation_carries_lifetime(relation);
+      // Every projected chain starts with an argument, which has no producing
+      // packet. Functions with only packet-to-packet views need no view table.
+      has_header_views =
+          has_header_views ||
+          (loom_low_schedule_storage_relation_carries_lifetime(relation) &&
+           state->value_producer_nodes[relation->source_ordinal] ==
+               LOOM_LOW_SCHEDULE_NODE_NONE);
       if (relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_TIED_RESULT) {
         state->values[relation->source_ordinal].flags |=
             LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TRACKED;
@@ -160,13 +184,11 @@ iree_status_t loom_low_schedule_storage_lifetimes_initialize(
     state->storage_reads.edge_source_worklist_capacity = value_count;
   }
   loom_low_schedule_storage_lifetimes_t* lifetimes = &state->storage_lifetimes;
-  if (needs_lifetime_roots) {
+  if (has_header_views) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        state->scratch_arena, value_count, sizeof(*lifetimes->roots),
-        (void**)&lifetimes->roots));
-    for (loom_value_ordinal_t i = 0; i < value_count; ++i) {
-      lifetimes->roots[i] = i;
-    }
+        state->scratch_arena, value_count, sizeof(*lifetimes->views),
+        (void**)&lifetimes->views));
+    memset(lifetimes->views, 0xFF, value_count * sizeof(*lifetimes->views));
   }
   if (handoff_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -179,7 +201,7 @@ iree_status_t loom_low_schedule_storage_lifetimes_initialize(
         state->scratch_arena, handoff_count, sizeof(*lifetimes->handoffs),
         (void**)&lifetimes->handoffs));
   }
-  if (needs_lifetime_roots || handoff_count != 0) {
+  if (has_header_views || handoff_count != 0) {
     loom_low_schedule_storage_lifetimes_populate(state);
   }
   if (state->storage_origins != NULL) {
