@@ -60,6 +60,13 @@ uint64_t loom_runtime_backing_pages_growth_cost(
     const loom_runtime_backing_pages_t* pages, uint64_t packed_count,
     uint64_t weight_count, uint64_t dedicated_cost);
 
+// Captures exactly the additional packed parents admitted for this cohort.
+// Call after whole-parent claims, before packed claims. Existing free slots
+// still satisfy the remainder; no speculative capacity is acquired.
+iree_status_t loom_runtime_backing_pages_prepare_packed(
+    loom_runtime_backing_pages_t* pages, uint64_t packed_count,
+    loom_runtime_backing_growth_t* growth);
+
 // Claims existing capacity or prepares a parent from the supplied admission.
 // Submitting growth is separate so metadata failure cannot start partial IO.
 iree_status_t loom_runtime_backing_pages_claim(

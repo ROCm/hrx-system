@@ -388,6 +388,22 @@ static iree_status_t loom_runtime_backing_parent_allocate(
   return iree_ok_status();
 }
 
+iree_status_t loom_runtime_backing_pages_prepare_packed(
+    loom_runtime_backing_pages_t* pages, uint64_t packed_count,
+    loom_runtime_backing_growth_t* growth) {
+  loom_runtime_backing_class_t* category = &pages->classes[0];
+  const uint64_t cost =
+      loom_runtime_backing_pages_growth_cost(pages, packed_count, 0, 0);
+  const uint64_t count = cost / category->cost;
+  iree_status_t status = iree_ok_status();
+  for (uint64_t i = 0; i < count && iree_status_is_ok(status); ++i) {
+    loom_runtime_backing_parent_t* parent = NULL;
+    status = loom_runtime_backing_parent_allocate(
+        pages, category, category->request, category->cost, growth, &parent);
+  }
+  return status;
+}
+
 iree_status_t loom_runtime_backing_pages_claim(
     loom_runtime_backing_pages_t* pages, loom_runtime_backing_kind_t kind,
     iree_hal_pool_reservation_request_t request, uint64_t dedicated_cost,
@@ -402,9 +418,17 @@ iree_status_t loom_runtime_backing_pages_claim(
                                 : 0];
   loom_runtime_backing_parent_t* parent = NULL;
   if (kind == LOOM_RUNTIME_BACKING_PACKED) {
-    // Ready pages take priority over pending parents, regardless of the size
-    // of the native allocation that supplied them. New packed growth still
-    // uses its independently configured parent size.
+    // This cohort already needs every newly prepared parent. Starting with
+    // their aligned free prefixes keeps consecutive target pages contiguous;
+    // older holes still satisfy the remainder without extra physical growth.
+    // PREPARED parents belong to this serialized capture, not prior work.
+    parent = pages->classes[0].available[0];
+    if (parent && parent->state != LOOM_RUNTIME_BACKING_PREPARED) {
+      parent = NULL;
+    }
+    // Existing ready pages precede earlier pending acquisitions, regardless
+    // of the native allocation size. An unrelated pending parent cannot delay
+    // a cohort that fits ready inventory.
     for (int ready = 1; ready >= 0 && !parent; --ready) {
       for (int ordinal = 0; ordinal <= pages->weight_class && !parent;
            ++ordinal) {
