@@ -490,6 +490,38 @@ TEST_F(ContextTest, DialectTypeDescriptorsResolveAfterFinalization) {
       nullptr);
 }
 
+TEST_F(ContextTest, IncrementalRegistrationsReuseSpareCapacity) {
+  const loom_bstring_t names[] = {
+      LOOM_BSTRING_REF(6, "test.a"), LOOM_BSTRING_REF(6, "test.b"),
+      LOOM_BSTRING_REF(6, "test.c"), LOOM_BSTRING_REF(6, "test.d"),
+      LOOM_BSTRING_REF(6, "test.e"), LOOM_BSTRING_REF(6, "test.f"),
+  };
+  loom_type_descriptor_t types[IREE_ARRAYSIZE(names)] = {};
+  loom_encoding_family_descriptor_t families[IREE_ARRAYSIZE(names)] = {};
+  loom_encoding_vtable_t vtables[IREE_ARRAYSIZE(names)] = {};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(names); ++i) {
+    types[i] = {.name = names[i], .ir_kind = LOOM_TYPE_DIALECT};
+    const loom_type_registry_entry_t entry = {loom_bstring_view(names[i]),
+                                              &types[i]};
+    IREE_ASSERT_OK(
+        loom_context_register_type_descriptors(&context_, &entry, 1));
+    families[i] = {.name = names[i], .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA};
+    vtables[i] = {.descriptor = &families[i]};
+    IREE_ASSERT_OK(
+        loom_context_register_encoding_vtable(&context_, &vtables[i]));
+    EXPECT_LT(context_.registered_types.capacity, 2 * (i + 1));
+    EXPECT_LT(context_.encodings.vtables.capacity, 2 * (i + 1));
+  }
+  IREE_ASSERT_OK(loom_context_finalize(&context_));
+  for (size_t i = 0; i < IREE_ARRAYSIZE(names); ++i) {
+    const auto name = loom_bstring_view(names[i]);
+    EXPECT_EQ(loom_context_lookup_type_by_name(&context_, name), &types[i]);
+    const auto family = loom_context_resolve_encoding_name(&context_, name);
+    EXPECT_EQ(loom_context_resolve_encoding_vtable(&context_, family.family_id),
+              &vtables[i]);
+  }
+}
+
 TEST_F(ContextTest, DialectTypeRegistrationRejectsDuplicateNames) {
   IREE_ASSERT_OK(loom_context_register_type_descriptors(
       &context_, kTestTypeEntries, IREE_ARRAYSIZE(kTestTypeEntries)));

@@ -33,7 +33,7 @@ class TextStateTest : public ::testing::TestWithParam<uint32_t> {
         .row_count = 2,
         .checkpoint_capacity = 2,
     };
-    loom_serve_text_state_initialize(&options, host_allocator, &state);
+    loom_serve_text_state_initialize(&options, StateAllocator(), &state);
     auto application_options = loom_runtime_test_application_options_default();
     if (application_options.backing == LOOM_RUNTIME_POOL_BACKING_ELASTIC) {
       application_options.memory_limit = 64 * 1024 * 1024;
@@ -218,6 +218,35 @@ class TextStateTest : public ::testing::TestWithParam<uint32_t> {
     }
   }
 
+  iree_allocator_t StateAllocator() {
+    return {
+        this,
+        [](void* self, iree_allocator_command_t command, const void* parameters,
+           void** pointer) -> iree_status_t {
+          auto* test = static_cast<TextStateTest*>(self);
+          if ((command == IREE_ALLOCATOR_COMMAND_MALLOC ||
+               command == IREE_ALLOCATOR_COMMAND_CALLOC ||
+               command == IREE_ALLOCATOR_COMMAND_REALLOC) &&
+              test->observe_allocations) {
+            ++test->allocation_calls;
+            const auto* request =
+                static_cast<const iree_allocator_alloc_params_t*>(parameters);
+            // A small release plan must remain bounded even in a broken
+            // implementation; reject runaway growth before touching memory.
+            if (request->byte_length > 64 * 1024) {
+              return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                      "release metadata exceeds 64 KiB");
+            }
+          }
+          return test->host_allocator.ctl(test->host_allocator.self, command,
+                                          parameters, pointer);
+        }};
+  }
+
+  // Observe only state-owned metadata allocations during explicit maintenance.
+  bool observe_allocations = false;
+  // Number of observed allocation requests, including reallocations.
+  size_t allocation_calls = 0;
   // Allocator enclosing bootstrap metadata and state retirement.
   const iree_allocator_t host_allocator = iree_allocator_system();
   // Borrowed process-wide device used by this physical-target test suite.
@@ -570,6 +599,43 @@ TEST_P(TextStateTest, UnchangedBackingPreservesFreePlacement) {
     EXPECT_EQ(free_ids(state.recurrent.pool), recurrent);
     EXPECT_EQ(free_ids(state.cache.pool), cache);
     EXPECT_EQ(state.memory.statistics.committed_bytes, committed);
+  }
+}
+
+TEST_P(TextStateTest, RepeatedReleasesReuseTrimScratch) {
+  if (!loom_runtime_pool_memory(storage_owner)) {
+    GTEST_SKIP() << "Fixed backing has no native range reclamation";
+  }
+  IREE_ASSERT_OK(Allocate());
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
+  auto* row = state.rows[0];
+  size_t warmed_calls = 0;
+  uint64_t warmed_commitment = 0;
+  for (int iteration = 0; iteration < 8; ++iteration) {
+    loom_runtime_memory_admission_t admission;
+    IREE_ASSERT_OK(loom_serve_text_state_row_submit_reserve(
+        row, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, 9, nullptr, nullptr,
+        &admission));
+    ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
+    IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
+    loom_serve_text_state_row_complete_reserve(row);
+    row->position = 9;
+    loom_serve_text_state_row_release_reservation(row);
+    ASSERT_NO_FATAL_FAILURE(CheckMaps());
+    loom_serve_text_state_row_reset(row);
+    observe_allocations = true;
+    ASSERT_NO_FATAL_FAILURE(Trim());
+    observe_allocations = false;
+    EXPECT_EQ(state.cache.pool.available, state.cache.pool.capacity);
+    if (iteration == 0) {
+      warmed_calls = allocation_calls;
+      warmed_commitment = state.memory.statistics.committed_bytes;
+      EXPECT_GT(warmed_calls, 0u);
+    } else {
+      // Repeatedly releasing the same geometry reuses its high-water scratch.
+      EXPECT_EQ(allocation_calls, warmed_calls);
+      EXPECT_EQ(state.memory.statistics.committed_bytes, warmed_commitment);
+    }
   }
 }
 
