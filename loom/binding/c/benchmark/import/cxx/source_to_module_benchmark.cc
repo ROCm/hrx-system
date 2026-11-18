@@ -45,12 +45,14 @@ struct SourceToModuleInput {
   const char* prefix;
   // Optional embedded translation unit replacing the shared function.
   const char* source_identifier;
-  // Optional embedded header supplied through the public source provider.
+  // Optional user header supplied through the public source provider.
   const char* header_identifier;
   // C++ frontend lifecycle measured by each timed invocation.
   CxxSourceMode cxx_mode = CxxSourceMode::kColdImport;
   // Generated source table containing source_identifier and header_identifier.
   const EmbeddedSourceSet* embedded_sources = nullptr;
+  // Contents of the user header when the input is generated in memory.
+  std::string_view generated_header = {};
 };
 
 constexpr EmbeddedSourceSet kPipelineSources = {
@@ -120,6 +122,13 @@ class SourceToModuleScenario final : public CompileScenario {
           CreateSource(loomc_make_cstring_view("scale.cpp"),
                        loomc_make_byte_span(text.data(), text.size()),
                        LOOMC_SOURCE_FORMAT_UNKNOWN, &source_));
+      if (input_.header_identifier) {
+        IREE_RETURN_IF_ERROR(
+            CreateSource(loomc_make_cstring_view(input_.header_identifier),
+                         loomc_make_byte_span(input_.generated_header.data(),
+                                              input_.generated_header.size()),
+                         LOOMC_SOURCE_FORMAT_UNKNOWN, &header_));
+      }
     }
     if (input_.cxx_mode == CxxSourceMode::kPreambleImport) {
       IREE_RETURN_IF_ERROR(CreatePreamble(&preamble_));
@@ -229,6 +238,25 @@ std::unique_ptr<CompileScenario> CreateSourceToModuleScenario(
 void SourceToModule(::benchmark::State& state,
                     const SourceToModuleInput* source) {
   RunCompileBenchmarkDirect(state, CreateSourceToModuleScenario, source);
+}
+
+void UnusedFacadeDeclarations(::benchmark::State& state) {
+  std::string declarations = "#pragma once\n";
+  const auto count = static_cast<size_t>(state.range(0));
+  for (size_t ordinal = 0; ordinal < count; ++ordinal) {
+    declarations +=
+        "template <class T> [[loom::op(\"buffer.length\")]] "
+        "loom::type::offset length_" +
+        std::to_string(ordinal) + "(loom::type::buffer<T>);\n";
+  }
+  const SourceToModuleInput input = {
+      .language = SourceLanguage::kCxx,
+      .prefix = "#include <loomcxx/view.h>\n#include \"operations.h\"\n",
+      .source_identifier = nullptr,
+      .header_identifier = "operations.h",
+      .generated_header = declarations,
+  };
+  SourceToModule(state, &input);
 }
 
 // Keep source construction outside the timed importer. Named fields expose
@@ -528,6 +556,11 @@ BENCHMARK_CAPTURE(SourceToModule, NoIncludes, &kNoIncludes)
 BENCHMARK_CAPTURE(SourceToModule, AggregateRecord, &kAggregateRecord)
     ->Unit(::benchmark::kMicrosecond);
 BENCHMARK_CAPTURE(SourceToModule, UserConstructor, &kUserConstructor)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK(UnusedFacadeDeclarations)
+    ->Arg(0)
+    ->Arg(32)
+    ->Arg(256)
     ->Unit(::benchmark::kMicrosecond);
 BENCHMARK(SelectedRecord)
     ->Arg(2)
