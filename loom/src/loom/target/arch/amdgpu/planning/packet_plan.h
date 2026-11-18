@@ -39,6 +39,16 @@ typedef struct loom_amdgpu_packet_plan_options_t {
   bool callable;
 } loom_amdgpu_packet_plan_options_t;
 
+// Optional inspection outputs. Each requested table uses the plan arena.
+typedef struct loom_amdgpu_packet_plan_reports_t {
+  // Counter bounds and the dependencies that required them.
+  loom_low_packet_hazard_plan_t* wait_counters;
+  // Instruction-slot progress and fixed-delay hazards.
+  loom_low_packet_hazard_plan_t* wait_states;
+  // Pairing constraints encountered by the VOPD planner.
+  loom_amdgpu_vopd_rejection_table_t* vopd_rejections;
+} loom_amdgpu_packet_plan_reports_t;
+
 typedef struct loom_amdgpu_packet_plan_t {
   // Schedule table this plan was built from.
   const loom_low_schedule_table_t* schedule;
@@ -57,9 +67,9 @@ typedef struct loom_amdgpu_packet_plan_t {
 } loom_amdgpu_packet_plan_t;
 
 // Builds the target-owned AMDGPU packet plan for an addressability-accepted
-// emission frame. |out_vopd_rejections| may be NULL unless detailed VOPD
-// diagnostics are required. The caller must keep |schedule|, |allocation|,
-// and |arena| immutable/alive for as long as either output is used. Program
+// emission frame. |reports| may be NULL for native compilation.
+// Requested reports are valid for accepted plans. The caller keeps |schedule|,
+// |allocation|, and |arena| alive for as long as any output is used. Program
 // rejection emits through |emitter| and sets |out_accepted| false; statuses
 // carry infrastructure failures.
 iree_status_t loom_amdgpu_packet_plan_build(
@@ -67,7 +77,7 @@ iree_status_t loom_amdgpu_packet_plan_build(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_packet_plan_options_t* options,
     iree_arena_allocator_t* arena, iree_diagnostic_emitter_t emitter,
-    bool* out_accepted, loom_amdgpu_vopd_rejection_table_t* out_vopd_rejections,
+    const loom_amdgpu_packet_plan_reports_t* reports, bool* out_accepted,
     loom_amdgpu_packet_plan_t* out_plan);
 
 #ifdef __cplusplus

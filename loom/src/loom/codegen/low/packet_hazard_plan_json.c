@@ -109,13 +109,14 @@ static iree_status_t loom_low_packet_hazard_plan_validate_for_json(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "packet hazard-plan JSON requires a schedule");
   }
-  if (plan->progress != NULL && plan->progress->schedule != plan->schedule) {
+  if (plan->progress.schedule != NULL &&
+      plan->progress.schedule != plan->schedule) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "packet hazard-plan JSON progress table must use plan schedule");
   }
-  if (plan->allocation != NULL && plan->progress != NULL &&
-      plan->progress->allocation != plan->allocation) {
+  if (plan->allocation != NULL && plan->progress.schedule != NULL &&
+      plan->progress.allocation != plan->allocation) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "packet hazard-plan JSON progress table must use plan allocation");
@@ -210,8 +211,10 @@ iree_status_t loom_low_packet_hazard_plan_write_json_array(
     IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_write_nullable_u32(
         record->producer_scheduled_ordinal,
         LOOM_LOW_PACKET_HAZARD_PLAN_ORDINAL_NONE, stream));
-    IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-        &object, IREE_SV("consumer_node"), record->consumer_node_index));
+    IREE_RETURN_IF_ERROR(
+        loom_json_object_begin_field(&object, IREE_SV("consumer_node")));
+    IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_write_nullable_u32(
+        record->consumer_node_index, LOOM_LOW_SCHEDULE_NODE_NONE, stream));
     IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
         &object, IREE_SV("insertion_packet"), record->insertion_packet_index));
     IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
@@ -251,17 +254,14 @@ static iree_status_t loom_low_packet_hazard_plan_write_json_members(
     const loom_low_packet_hazard_plan_t* plan,
     loom_json_object_writer_t* object) {
   IREE_RETURN_IF_ERROR(loom_low_packet_hazard_plan_validate_for_json(plan));
-  const loom_low_packet_progress_table_t* progress = plan->progress;
-  const iree_host_size_t progress_count =
-      progress != NULL ? progress->record_count : 0;
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
-      object, IREE_SV("progress_count"), progress_count));
+      object, IREE_SV("progress_count"), plan->progress.record_count));
   IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
       object, IREE_SV("hazard_count"), plan->record_count));
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(object, IREE_SV("progress")));
-  IREE_RETURN_IF_ERROR(
-      loom_low_packet_progress_write_json_array(progress, object->stream));
+  IREE_RETURN_IF_ERROR(loom_low_packet_progress_write_json_array(
+      &plan->progress, object->stream));
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(object, IREE_SV("hazards")));
   return loom_low_packet_hazard_plan_write_json_array(plan, object->stream);

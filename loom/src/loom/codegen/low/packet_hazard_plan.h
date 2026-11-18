@@ -58,6 +58,8 @@ typedef struct loom_low_packet_hazard_plan_event_t {
   iree_string_view_t reason_name;
   // Producer schedule-node index, or LOOM_LOW_SCHEDULE_NODE_NONE.
   uint32_t producer_node_index;
+  // Logical consumer node, or LOOM_LOW_SCHEDULE_NODE_NONE for a barrier.
+  uint32_t consumer_node_index;
   // Target-owned progress-class identifier.
   uint16_t progress_class_id;
   // Borrowed stable progress-class name.
@@ -94,11 +96,7 @@ typedef void (*loom_low_packet_hazard_plan_query_fn_t)(
 typedef struct loom_low_packet_hazard_plan_provider_t {
   // Target-owned context passed to |query|.
   void* user_data;
-  // Exact number of target hazard events emitted across all scheduled packets.
-  //
-  // Generic allocation storage-release events are counted by the common
-  // builder and are not included. Providers establish this without replaying
-  // |query|.
+  // Exact number of residual events, including any required storage releases.
   iree_host_size_t event_count;
   // Hazard-plan query callback.
   loom_low_packet_hazard_plan_query_fn_t query;
@@ -123,7 +121,7 @@ typedef struct loom_low_packet_hazard_plan_record_t {
   uint32_t producer_scheduled_ordinal;
   // Producer packet ordinal, or LOOM_LOW_PACKET_HAZARD_PLAN_PACKET_NONE.
   iree_host_size_t producer_packet_index;
-  // Consumer or insertion schedule-node index.
+  // Logical consumer node, or LOOM_LOW_SCHEDULE_NODE_NONE for a barrier.
   uint32_t consumer_node_index;
   // Region block containing the insertion point.
   uint32_t block_index;
@@ -149,8 +147,8 @@ typedef struct loom_low_packet_hazard_plan_t {
   const loom_low_schedule_table_t* schedule;
   // Optional allocation table paired with |schedule|.
   const loom_low_allocation_table_t* allocation;
-  // Optional progress table paired with |schedule|.
-  const loom_low_packet_progress_table_t* progress;
+  // Progress observed on this schedule. Empty when the policy has no events.
+  loom_low_packet_progress_table_t progress;
   // Hazard-plan records in scheduled packet order.
   const loom_low_packet_hazard_plan_record_t* records;
   // Number of entries in |records|.

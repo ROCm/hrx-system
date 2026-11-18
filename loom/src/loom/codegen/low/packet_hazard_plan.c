@@ -21,18 +21,10 @@ typedef struct loom_low_packet_hazard_plan_build_state_t {
   const loom_low_packet_view_t* current_packet;
   // Mutable output record storage during the populate pass.
   loom_low_packet_hazard_plan_record_t* records;
-  // Maximum entries available in |records| across all event sources.
+  // Maximum entries available in |records| from the provider.
   iree_host_size_t record_capacity;
-  // Number of records populated so far across all event sources.
+  // Number of records populated so far from the provider.
   iree_host_size_t record_count;
-  // Packet progress records chained by progress class.
-  loom_low_packet_progress_class_chain_index_t progress_class_chain_index;
-  // Optional prefix range index for repeated long progress queries.
-  loom_low_packet_progress_class_range_index_t progress_class_range_index;
-  // Exact number of generic allocation storage-release records.
-  iree_host_size_t storage_release_record_capacity;
-  // Observed progress indexed by allocation storage-release action.
-  uint32_t* storage_release_observed_progress;
 } loom_low_packet_hazard_plan_build_state_t;
 
 static void loom_low_packet_hazard_plan_producer_packet_index(
@@ -54,8 +46,8 @@ static void loom_low_packet_hazard_plan_producer_packet_index(
 }
 
 static void loom_low_packet_hazard_plan_append_event(
-    loom_low_packet_hazard_plan_build_state_t* state,
-    const loom_low_packet_hazard_plan_event_t* event) {
+    void* user_data, const loom_low_packet_hazard_plan_event_t* event) {
+  loom_low_packet_hazard_plan_build_state_t* state = user_data;
   IREE_ASSERT_LT(state->record_count, state->record_capacity);
   const loom_low_packet_view_t* packet = state->current_packet;
   iree_host_size_t producer_packet_index =
@@ -75,7 +67,7 @@ static void loom_low_packet_hazard_plan_append_event(
           .producer_node_index = event->producer_node_index,
           .producer_scheduled_ordinal = producer_scheduled_ordinal,
           .producer_packet_index = producer_packet_index,
-          .consumer_node_index = packet->node_index,
+          .consumer_node_index = event->consumer_node_index,
           .block_index = packet->node->block_index,
           .insertion_packet_index = packet->packet_index,
           .scheduled_ordinal = packet->node->scheduled_ordinal,
@@ -87,156 +79,6 @@ static void loom_low_packet_hazard_plan_append_event(
       };
 }
 
-static void loom_low_packet_hazard_plan_append_target_event(
-    void* user_data, const loom_low_packet_hazard_plan_event_t* event) {
-  loom_low_packet_hazard_plan_build_state_t* state =
-      (loom_low_packet_hazard_plan_build_state_t*)user_data;
-  loom_low_packet_hazard_plan_append_event(state, event);
-}
-
-static void loom_low_packet_hazard_plan_append_storage_release_event(
-    loom_low_packet_hazard_plan_build_state_t* state,
-    const loom_low_packet_hazard_plan_event_t* event) {
-  loom_low_packet_hazard_plan_append_event(state, event);
-}
-
-static uint32_t loom_low_packet_hazard_plan_storage_release_observed_progress(
-    const loom_low_packet_hazard_plan_build_state_t* state,
-    const loom_low_storage_release_action_t* action,
-    const loom_low_storage_lease_record_t* lease_record) {
-  if (state->progress_class_range_index.progress != NULL) {
-    return loom_low_packet_progress_class_range_index_observed_progress(
-        &state->progress_class_range_index, lease_record->packet_index,
-        action->insertion_packet_index, action->release_class_id);
-  }
-  return loom_low_packet_progress_class_chain_index_observed_progress(
-      &state->progress_class_chain_index, lease_record->packet_index,
-      action->insertion_packet_index, action->release_class_id);
-}
-
-static bool loom_low_packet_hazard_plan_should_build_progress_class_range_index(
-    const loom_low_packet_hazard_plan_build_state_t* state) {
-  const loom_low_packet_progress_class_chain_index_t* chain_index =
-      &state->progress_class_chain_index;
-  if (chain_index->progress == NULL ||
-      chain_index->progress->record_count == 0) {
-    return false;
-  }
-
-  // The prefix index adds two complete progress-record passes plus two binary
-  // bounds per query. Require the chains' reachable-record upper bound to
-  // exceed four complete table passes. This leaves amortization headroom even
-  // when packet bounds or RESET records terminate some chain walks early.
-  const uint64_t amortization_record_pass_count = 4;
-  const loom_low_allocation_table_t* allocation = state->allocation;
-  if (allocation->storage_release_action_count <=
-      amortization_record_pass_count) {
-    return false;
-  }
-  const uint64_t reachable_record_threshold =
-      (uint64_t)chain_index->progress->record_count *
-      amortization_record_pass_count;
-  uint64_t reachable_record_count = 0;
-  for (iree_host_size_t i = 0; i < allocation->storage_release_action_count;
-       ++i) {
-    const loom_low_packet_progress_class_chain_entry_t* class_entry =
-        loom_low_packet_progress_class_chain_index_lookup(
-            chain_index,
-            allocation->storage_release_actions[i].release_class_id);
-    if (class_entry == NULL) {
-      continue;
-    }
-    if (reachable_record_count >
-        UINT64_MAX - (uint64_t)class_entry->record_count) {
-      return true;
-    }
-    reachable_record_count += class_entry->record_count;
-    if (reachable_record_count > reachable_record_threshold) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static iree_status_t loom_low_packet_hazard_plan_prepare_storage_releases(
-    loom_low_packet_hazard_plan_build_state_t* state,
-    iree_arena_allocator_t* transient_arena) {
-  const loom_low_allocation_table_t* allocation = state->allocation;
-  if (allocation == NULL || allocation->storage_release_action_count == 0) {
-    return iree_ok_status();
-  }
-  IREE_ASSERT(allocation->first_storage_release_action_by_node != NULL);
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      transient_arena, allocation->storage_release_action_count,
-      sizeof(*state->storage_release_observed_progress),
-      (void**)&state->storage_release_observed_progress));
-  IREE_RETURN_IF_ERROR(loom_low_packet_progress_class_chain_index_build(
-      state->progress, transient_arena, &state->progress_class_chain_index));
-  if (loom_low_packet_hazard_plan_should_build_progress_class_range_index(
-          state)) {
-    IREE_RETURN_IF_ERROR(loom_low_packet_progress_class_range_index_build(
-        &state->progress_class_chain_index, transient_arena,
-        &state->progress_class_range_index));
-  }
-  for (iree_host_size_t i = 0; i < allocation->storage_release_action_count;
-       ++i) {
-    const loom_low_storage_release_action_t* action =
-        &allocation->storage_release_actions[i];
-    IREE_ASSERT_LT(action->lease_record_index,
-                   allocation->storage_leases.record_count);
-    const loom_low_storage_lease_record_t* lease_record =
-        &allocation->storage_leases.records[action->lease_record_index];
-    const uint32_t observed_progress =
-        loom_low_packet_hazard_plan_storage_release_observed_progress(
-            state, action, lease_record);
-    state->storage_release_observed_progress[i] = observed_progress;
-    if (observed_progress < action->required_progress) {
-      ++state->storage_release_record_capacity;
-    }
-  }
-  return iree_ok_status();
-}
-
-static void loom_low_packet_hazard_plan_emit_storage_release_actions(
-    loom_low_packet_hazard_plan_build_state_t* state) {
-  const loom_low_allocation_table_t* allocation = state->allocation;
-  if (allocation == NULL || allocation->storage_release_action_count == 0) {
-    return;
-  }
-  const loom_low_packet_view_t* packet = state->current_packet;
-  for (uint32_t action_index =
-           allocation->first_storage_release_action_by_node[packet->node_index];
-       action_index != LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE;
-       action_index = allocation->storage_release_actions[action_index]
-                          .next_same_insertion_node_action_index) {
-    const loom_low_storage_release_action_t* action =
-        &allocation->storage_release_actions[action_index];
-    const loom_low_storage_lease_record_t* lease_record =
-        &allocation->storage_leases.records[action->lease_record_index];
-    const uint32_t observed_progress =
-        state->storage_release_observed_progress[action_index];
-    if (observed_progress >= action->required_progress) {
-      continue;
-    }
-    const uint32_t residual_progress =
-        action->required_progress - observed_progress;
-    const loom_low_packet_hazard_plan_event_t event = {
-        .kind = LOOM_LOW_PACKET_HAZARD_PLAN_RECORD_ACTION,
-        .action_id = action->release_action_id,
-        .action_name = action->release_action_name,
-        .reason_id = action->release_reason_id,
-        .reason_name = action->release_reason_name,
-        .producer_node_index = lease_record->node_index,
-        .progress_class_id = action->release_class_id,
-        .progress_class_name = action->release_class_name,
-        .required_progress = action->required_progress,
-        .observed_progress = observed_progress,
-        .residual_progress = residual_progress,
-    };
-    loom_low_packet_hazard_plan_append_storage_release_event(state, &event);
-  }
-}
-
 static void loom_low_packet_hazard_plan_query_packets(
     loom_low_packet_hazard_plan_build_state_t* state) {
   for (iree_host_size_t packet_index = 0;
@@ -246,9 +88,7 @@ static void loom_low_packet_hazard_plan_query_packets(
     state->current_packet = &packet;
     state->provider->query(state->provider->user_data, state->schedule,
                            state->allocation, state->progress, &packet,
-                           loom_low_packet_hazard_plan_append_target_event,
-                           state);
-    loom_low_packet_hazard_plan_emit_storage_release_actions(state);
+                           loom_low_packet_hazard_plan_append_event, state);
     state->current_packet = NULL;
   }
 }
@@ -266,40 +106,21 @@ iree_status_t loom_low_packet_hazard_plan_build(
       .allocation = allocation,
       .progress = progress,
       .provider = provider,
+      .record_capacity = provider->event_count,
   };
-  iree_arena_allocator_t transient_arena;
-  iree_arena_initialize(arena->block_pool, &transient_arena);
-  iree_status_t status = loom_low_packet_hazard_plan_prepare_storage_releases(
-      &state, &transient_arena);
-  if (iree_status_is_ok(status) &&
-      !iree_host_size_checked_add(provider->event_count,
-                                  state.storage_release_record_capacity,
-                                  &state.record_capacity)) {
-    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "hazard plan record count exceeds host size");
+  if (state.record_capacity != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, state.record_capacity,
+                                                   sizeof(*state.records),
+                                                   (void**)&state.records));
   }
-
-  loom_low_packet_hazard_plan_record_t* records = NULL;
-  if (iree_status_is_ok(status) && state.record_capacity != 0) {
-    status = iree_arena_allocate_array(arena, state.record_capacity,
-                                       sizeof(*records), (void**)&records);
-  }
-
-  if (iree_status_is_ok(status)) {
-    state.records = records;
-    loom_low_packet_hazard_plan_query_packets(&state);
-    IREE_ASSERT_EQ(state.record_count, state.record_capacity);
-  }
-
-  if (iree_status_is_ok(status)) {
-    *out_plan = (loom_low_packet_hazard_plan_t){
-        .schedule = schedule,
-        .allocation = allocation,
-        .progress = progress,
-        .records = records,
-        .record_count = state.record_capacity,
-    };
-  }
-  iree_arena_deinitialize(&transient_arena);
-  return status;
+  loom_low_packet_hazard_plan_query_packets(&state);
+  IREE_ASSERT_EQ(state.record_count, state.record_capacity);
+  *out_plan = (loom_low_packet_hazard_plan_t){
+      .schedule = schedule,
+      .allocation = allocation,
+      .progress = progress ? *progress : (loom_low_packet_progress_table_t){0},
+      .records = state.records,
+      .record_count = state.record_count,
+  };
+  return iree_ok_status();
 }

@@ -168,10 +168,6 @@ typedef struct loom_amdgpu_wait_state_plan_t {
   const loom_low_schedule_table_t* schedule;
   // Allocation table this plan was built from.
   const loom_low_allocation_table_t* allocation;
-  // Target progress facts used to explain independent intervening instructions.
-  loom_low_packet_progress_table_t progress;
-  // Common residual hazard sidecar for fixed wait-state actions.
-  loom_low_packet_hazard_plan_t hazard_plan;
   // Wait states in scheduled packet order.
   const loom_amdgpu_wait_state_t* states;
   // Prefix of |states| emitted once before the first body block label.
@@ -200,6 +196,7 @@ iree_string_view_t loom_amdgpu_wait_state_action_name(
 // the resolved target record and must be present. Concrete |address_state|
 // transitions also separate replayable memory clauses. The caller must keep the
 // input plans immutable and |arena| alive for as long as |out_plan| is used.
+// Optional |out_hazards| receives a packet-by-packet explanation.
 iree_status_t loom_amdgpu_wait_state_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
@@ -212,6 +209,7 @@ iree_status_t loom_amdgpu_wait_state_plan_build(
     struct loom_amdgpu_matrix_coexecution_t* matrix_coexecution,
     struct loom_amdgpu_matrix_result_wait_t* matrix_results,
     iree_arena_allocator_t* arena, iree_arena_allocator_t* transient_arena,
+    loom_low_packet_hazard_plan_t* out_hazards,
     loom_amdgpu_wait_state_plan_t* out_plan);
 
 // Returns the number of concrete wait-state instructions needed by |plan|.
