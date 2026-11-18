@@ -437,8 +437,8 @@ their own lock when their bytes are published.
 Locks use a separate [versioned editor schema](model-lock.v2.schema.json).
 `origins` records requested roots and resolved repository commits. Each `files`
 record contains its logical `origin`, final whole-file `size`, and `sha256`.
-Transformed parameter records also contain the normalized `transform`; the hash
-identifies the resulting archive, without requiring a read of unused source bytes.
+Transformed records include the normalized `transform`. Their size and hash
+identify the installed bytes.
 A file's destination name, parameter scope, and JIT configuration are independent
 of that identity. `--origin=checkpoint=/local/mirror` replaces transport while retaining
 the original lock identity; it never falls back to the original host. Unknown
@@ -546,6 +546,29 @@ card separately; native serving performs no network access or lock processing.
 The fetch-to-serve fixture checks source, bytecode, mixed, and offline packages
 against the same weighted response, and rejects substituted code before
 publication.
+
+## Compressed program downloads
+
+A publisher can serve independently compressed bytecode. The provider's
+`path` and `format` describe the file the server opens. Its `origin` names the
+XZ download:
+
+```json
+{
+  "path": "program/attention.loombc",
+  "origin": "program/attention.loombc.xz",
+  "transform": {"kind": "xz", "version": 1}
+}
+```
+
+`loom-fetch` decodes during installation using Python's standard `lzma` module.
+A complete lock (`--lock-scope=all`) verifies the decoded size and SHA-256,
+so raw and compressed publications can share the same verified cache entry.
+An offline installation reuses that entry. Ordinary server startup reads
+`attention.loombc` directly. Use `--preserve-sources` when the compressed
+download itself should also be kept. XZ files can contain concatenated streams
+and standard stream padding. The decoder accepts all standard XZ presets
+within a 128 MiB decoder-memory limit per worker.
 
 ## Streaming parameter materialization
 

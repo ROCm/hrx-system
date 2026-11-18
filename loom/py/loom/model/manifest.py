@@ -232,13 +232,18 @@ def _origin(value: Any, roots: dict, path: str, *, group: bool = False) -> None:
 
 
 def _transform(value: Any, path: str) -> dict:
+    if isinstance(value, dict) and value.get("kind") == "xz":
+        _object(value, path, ("kind", "version"))
+        if type(value["version"]) is not int or value["version"] != 1:
+            _fail(path, "expected xz version 1")
+        return value
     _object(value, path, ("kind", "version"), ("alignment", "tensors"))
     if (
         value["kind"] != "safetensors"
         or type(value["version"]) is not int
         or value["version"] != 1
     ):
-        _fail(path, "supported transform: safetensors version 1")
+        _fail(path, "supported transforms: safetensors version 1 and xz version 1")
     alignment = value.get("alignment", 8)
     if (
         type(alignment) is not int
@@ -273,11 +278,9 @@ def _file(
         record,
         path,
         ("path",),
-        ("origin", "format", "options", "data")
+        ("origin", "format", "options", "data", "transform")
         if provider
-        else ("origin", "format", "transform")
-        if parameter
-        else ("origin", "format"),
+        else ("origin", "format", "transform"),
     )
     _path(record["path"], path + ".path")
     if "format" in record:
@@ -286,10 +289,13 @@ def _file(
         _origin(record["origin"], roots, path + ".origin")
     if "transform" in record:
         record["transform"] = _transform(record["transform"], path + ".transform")
-        if record.get("format") != "safetensors":
+        if record["transform"]["kind"] == "safetensors" and (
+            not parameter or record.get("format") != "safetensors"
+        ):
             _fail(
                 path + ".format",
-                "safetensors transform requires explicit format 'safetensors'",
+                "safetensors transform requires a parameter "
+                "with explicit format 'safetensors'",
             )
     if provider:
         _strings(record.get("options", []), path + ".options")

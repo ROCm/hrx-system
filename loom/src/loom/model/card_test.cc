@@ -22,6 +22,8 @@ constexpr char kCard[] = R"json({
       "directory": "program",
       "inputs": ["program/prepare.loom", "program/control.loombc"],
       "libraries": [{"path": "program/library.data", "format": "loombc",
+                     "origin": "program/library.loombc.xz",
+                     "transform": {"kind": "xz", "version": 1},
                      "data": ["program/weights.loom"]}],
       "config": {"width": 4, "quantized": false}
     },

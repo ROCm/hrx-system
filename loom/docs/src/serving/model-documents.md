@@ -235,9 +235,11 @@ application owns communication and placement between separately loaded models.
 Admission records the reference without opening the card. Preparation resolves
 it on a worker before constructing the native model. The server reads local
 files and does not fetch origins or inspect integrity locks. Acquisition and
-materialization happen before registration. A parameter descriptor may include
-an acquisition `transform`; `loom-fetch` produces the declared local file, and
-the server reads its `path` and `format` without interpreting that transform.
+materialization happen before registration. A file descriptor can include an
+acquisition `transform`. For example, a publisher can point a bytecode provider
+at a `.loombc.xz` download with `"transform": {"kind": "xz", "version": 1}`.
+`loom-fetch` installs the decoded `.loombc` at the declared `path`. The server
+reads that local file directly.
 
 ## Deployment fields
 

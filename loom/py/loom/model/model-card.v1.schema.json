@@ -267,6 +267,9 @@
             "format": {
               "$ref": "#/$defs/name",
               "description": "Format within the containing semantic role. Filename inference is permitted only when unambiguous for that role."
+            },
+            "transform": {
+              "$ref": "#/$defs/xzTransform"
             }
           },
           "additionalProperties": false
@@ -289,6 +292,9 @@
             },
             "origin": {
               "$ref": "#/$defs/fileOrigin"
+            },
+            "transform": {
+              "$ref": "#/$defs/xzTransform"
             },
             "format": {
               "$ref": "#/$defs/name"
@@ -677,7 +683,7 @@
               "const": "safetensors"
             },
             "transform": {
-              "$ref": "#/$defs/transform"
+              "$ref": "#/$defs/safetensorsTransform"
             }
           },
           "additionalProperties": false
@@ -685,6 +691,22 @@
       ]
     },
     "transform": {
+      "oneOf": [
+        {"$ref": "#/$defs/xzTransform"},
+        {"$ref": "#/$defs/safetensorsTransform"}
+      ]
+    },
+    "xzTransform": {
+      "description": "Install the decoded bytes of an XZ file. The destination path and lock describe the decoded file.",
+      "type": "object",
+      "required": ["kind", "version"],
+      "properties": {
+        "kind": {"const": "xz"},
+        "version": {"type": "integer", "const": 1}
+      },
+      "additionalProperties": false
+    },
+    "safetensorsTransform": {
       "type": "object",
       "required": [
         "kind",

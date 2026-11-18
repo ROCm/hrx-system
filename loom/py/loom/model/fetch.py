@@ -667,7 +667,13 @@ def _check_outputs(
             size, digest = file_digest(
                 destination, cancelled=cancelled, progress=counter
             )
-            identity = FileIdentity(source.origin, size, digest, source.resolved)
+            identity = FileIdentity(
+                source.origin,
+                size,
+                digest,
+                source.resolved,
+                plan.selection.files[name].transform,
+            )
         else:
             identity.verify(destination, cancelled=cancelled, progress=counter)
         present[name] = AcquiredFile(destination, identity)

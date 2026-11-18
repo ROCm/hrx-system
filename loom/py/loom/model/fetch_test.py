@@ -9,6 +9,7 @@ import errno
 import hashlib
 import http.server
 import json
+import lzma
 import os
 import threading
 from contextlib import ExitStack, contextmanager
@@ -282,6 +283,60 @@ def _remote_plan(base, cache, **kwargs):
     return plan_fetch(
         document, ModelCard.parse(document.text).select(), cache, **kwargs
     )
+
+
+@pytest.mark.parametrize(("scope", "preserve"), [("all", False), ("assets", True)])
+def test_xz_program_uses_decoded_identity_and_reinstalls_offline(
+    tmp_path, scope, preserve
+):
+    raw = b"bytecode" * 200000
+    encoded = lzma.compress(raw[:11]) + bytes(4) + lzma.compress(raw[11:])
+    transform = {"kind": "xz", "version": 1}
+    card = _card()
+    card["programs"]["p"]["inputs"] = [
+        {"path": "code.loombc", "origin": "code.loombc.xz", "transform": transform}
+    ]
+    cache = ContentCache(tmp_path / "cache")
+    identity = FileIdentity(
+        "code.loombc.xz", len(raw), hashlib.sha256(raw).hexdigest(), transform=transform
+    )
+    weights = b"weights"
+    commitments = [
+        FileIdentity("weights.data", len(weights), hashlib.sha256(weights).hexdigest())
+    ]
+    if scope == "all":
+        commitments.append(identity)
+    with _server(card, {"code.loombc.xz": encoded, "weights.data": weights}) as (
+        base,
+        requests,
+        resources,
+    ):
+        resources["/model.json.lock"] = json.dumps(
+            ModelLock.snapshot({}, commitments, scope=scope)
+        ).encode()
+        install(
+            _remote_plan(base, cache),
+            cache,
+            tmp_path / "first",
+            preserve_sources=preserve,
+        )
+        assert requests.count("/code.loombc.xz") == 1
+        assert "/code.loombc" not in requests
+    assert cache.blob_path(identity.sha256).read_bytes() == raw
+    encoded_blob = cache.blob_path(hashlib.sha256(encoded).hexdigest())
+    if preserve:
+        assert encoded_blob.read_bytes() == encoded
+    else:
+        assert not encoded_blob.exists()
+    install(
+        _remote_plan(base, cache, offline=True),
+        cache,
+        tmp_path / "second",
+        preserve_sources=preserve,
+    )
+    for directory in (tmp_path / "first", tmp_path / "second"):
+        assert (directory / "code.loombc").read_bytes() == raw
+        assert not (directory / "code.loombc.xz").exists()
 
 
 @pytest.mark.parametrize("quiet", [False, True])
