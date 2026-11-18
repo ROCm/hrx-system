@@ -20,7 +20,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -283,20 +282,6 @@ cxx::FieldSymbol* reference_capture(cxx::TranslationUnit& unit, Types& types,
              : nullptr;
 }
 
-bool operation_is(cxx::Symbol* symbol, std::string_view operation) {
-  auto* binding = annotation(symbol, "op");
-  return binding && binding->arguments.size() == 1 &&
-         binding->arguments[0]->name() == operation;
-}
-
-bool operation_is(cxx::Symbol* symbol, std::string_view operation,
-                  std::string_view parameter) {
-  auto* binding = annotation(symbol, "op");
-  return binding && binding->arguments.size() == 2 &&
-         binding->arguments[0]->name() == operation &&
-         binding->arguments[1]->name() == parameter;
-}
-
 // Returns the overloaded subscript at the root of an immediate view element
 // projection. Value conversion and dot field selection consume the synthetic
 // lvalue without giving its source reference an independent identity.
@@ -313,123 +298,9 @@ cxx::SubscriptExpressionAST* view_element_origin(
     return view_element_origin(unit, member->baseExpression);
   }
   auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(expression);
-  return subscript && operation_is(subscript->symbol, "view.element")
+  return subscript && has_op_binding(subscript->symbol, "view.element")
              ? subscript
              : nullptr;
-}
-
-// CXX materializes trivial by-value class arguments as an implicit copy around
-// a one-element paren initializer. Peel only those same-type copies so loop
-// admission still reasons about the resolved source binding identity.
-cxx::IdExpressionAST* address_identity(cxx::TranslationUnit& unit,
-                                       const AddressPartition& address,
-                                       cxx::ExpressionAST* expression) {
-  while (expression) {
-    if (auto* cast =
-            cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression)) {
-      if (cast->conversionFunction &&
-          !same_function(cast->conversionFunction,
-                         address.source->copyConstructor()) &&
-          !same_function(cast->conversionFunction,
-                         address.source->moveConstructor())) {
-        return nullptr;
-      }
-      expression = cast->expression;
-      continue;
-    }
-    if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
-      expression = nested->expression;
-      continue;
-    }
-    if (auto* copy = cxx::ast_cast<cxx::ParenInitializerAST>(expression)) {
-      auto* arguments = cxx::Initializer(copy).expressionList();
-      if (!arguments || arguments->next) {
-        return nullptr;
-      }
-      expression = arguments->value;
-      continue;
-    }
-    break;
-  }
-  auto* identity = cxx::ast_cast<cxx::IdExpressionAST>(expression);
-  if (!identity) {
-    return nullptr;
-  }
-  auto traits = unit.typeTraits();
-  return traits.is_same(traits.remove_cv(identity->type),
-                        address.source->type())
-             ? identity
-             : nullptr;
-}
-
-std::optional<std::intmax_t> address_constant(cxx::TranslationUnit& unit,
-                                              const AddressPartition& address,
-                                              cxx::ExpressionAST* expression) {
-  expression = unwrap_expression(expression);
-  auto traits = unit.typeTraits();
-  if (!traits.is_same(traits.remove_cv(expression->type),
-                      address.source->type())) {
-    return std::nullopt;
-  }
-  cxx::List<cxx::ExpressionAST*>* arguments = nullptr;
-  if (auto* construction =
-          cxx::ast_cast<cxx::BracedTypeConstructionAST>(expression)) {
-    arguments =
-        construction->bracedInitList
-            ? cxx::Initializer(construction->bracedInitList).expressionList()
-            : nullptr;
-  } else if (auto* construction =
-                 cxx::ast_cast<cxx::TypeConstructionAST>(expression)) {
-    arguments = construction->expressionList;
-  }
-  return arguments && !arguments->next
-             ? integer_constant(unit, arguments->value)
-             : std::nullopt;
-}
-
-bool is_address_unit(cxx::TranslationUnit& unit,
-                     const AddressPartition& address,
-                     cxx::ExpressionAST* expression) {
-  auto value = address_constant(unit, address, expression);
-  return value && *value == 1;
-}
-
-struct IntegerIncrement {
-  cxx::IdExpressionAST* induction;
-  unsigned step;
-};
-
-std::optional<IntegerIncrement> classify_integer_increment(
-    cxx::TranslationUnit& unit, cxx::ExpressionAST* expression,
-    std::uintmax_t maximum_step) {
-  expression = unwrap_expression(expression);
-  if (auto* prefix = cxx::ast_cast<cxx::UnaryExpressionAST>(expression);
-      prefix && !prefix->symbol && prefix->op == cxx::TokenKind::T_PLUS_PLUS) {
-    return IntegerIncrement{cxx::ast_cast<cxx::IdExpressionAST>(
-                                unwrap_expression(prefix->expression)),
-                            1};
-  }
-  if (auto* postfix = cxx::ast_cast<cxx::PostIncrExpressionAST>(expression);
-      postfix && !postfix->symbol &&
-      postfix->op == cxx::TokenKind::T_PLUS_PLUS) {
-    return IntegerIncrement{cxx::ast_cast<cxx::IdExpressionAST>(
-                                unwrap_expression(postfix->baseExpression)),
-                            1};
-  }
-  auto* compound =
-      cxx::ast_cast<cxx::CompoundAssignmentExpressionAST>(expression);
-  if (!compound || compound->symbol ||
-      compound->op != cxx::TokenKind::T_PLUS_EQUAL) {
-    return std::nullopt;
-  }
-  auto amount = integer_constant(unit, compound->rightExpression);
-  if (!amount || *amount <= 0 ||
-      static_cast<std::uintmax_t>(*amount) > maximum_step) {
-    return std::nullopt;
-  }
-  return IntegerIncrement{cxx::ast_cast<cxx::IdExpressionAST>(
-                              unwrap_expression(compound->targetExpression)),
-                          static_cast<unsigned>(*amount)};
 }
 
 std::optional<bool> constant_truth(cxx::TranslationUnit& unit,
@@ -1163,20 +1034,8 @@ cxx::Symbol* ControlFlow::object_owner(cxx::ExpressionAST* expression) const {
   return found == object_owners_.end() ? nullptr : found->second;
 }
 
-cxx::IdExpressionAST* CountedLoop::upper_identifier() const {
-  const Bound* bound = nullptr;
-  if (auto* interval = std::get_if<UnsignedRange>(&range)) {
-    bound = std::get_if<Bound>(&interval->upper);
-  } else if (auto* interval = std::get_if<SignedRange>(&range)) {
-    bound = std::get_if<Bound>(&interval->upper);
-  } else {
-    bound = &std::get<AddressRange>(range).upper;
-  }
-  return bound ? bound->identifier : nullptr;
-}
-
 void ControlFlow::retain_counted(cxx::ForStatementAST* loop) {
-  auto interval = classify(loop);
+  auto interval = CountedLoop::recognize(unit_, types_, loop);
   if (!interval) {
     return;
   }
@@ -2514,7 +2373,7 @@ void ControlFlow::visit(cxx::LambdaExpressionAST* ast) {
 }
 
 void ControlFlow::visit(cxx::SubscriptExpressionAST* ast) {
-  if (operation_is(ast->symbol, "view.element")) {
+  if (has_op_binding(ast->symbol, "view.element")) {
     accept(ast->baseExpression);
     for (auto* index : cxx::ListView{ast->expressionList}) {
       accept(index);
@@ -5790,210 +5649,6 @@ bool ControlFlow::is_captured_object_field(cxx::Symbol* field) const {
                       ? cxx::symbol_cast<cxx::ClassSymbol>(function_->parent())
                       : nullptr;
   return captured_object_member(unit_, closure, field).has_value();
-}
-
-std::optional<CountedLoop> ControlFlow::classify(cxx::ForStatementAST* loop) {
-  auto* declaration =
-      cxx::ast_cast<cxx::DeclarationStatementAST>(loop->initializer);
-  auto* initial =
-      declaration
-          ? cxx::ast_cast<cxx::SimpleDeclarationAST>(declaration->declaration)
-          : nullptr;
-  auto* condition = cxx::ast_cast<cxx::BinaryExpressionAST>(
-      unwrap_expression(loop->condition));
-  if (!initial || !initial->initDeclaratorList ||
-      initial->initDeclaratorList->next || !condition ||
-      condition->op != cxx::TokenKind::T_LESS) {
-    return std::nullopt;
-  }
-  auto* induction = initial->initDeclaratorList->value->symbol;
-  auto traits = unit_.typeTraits();
-  if (!induction || traits.is_volatile(induction->type())) {
-    return std::nullopt;
-  }
-  auto kind =
-      cxx::unattributed_type(traits.remove_cv(induction->type()))->kind();
-  if (kind == cxx::TypeKind::kUnsignedInt) {
-    return classify_unsigned(loop, induction, condition);
-  }
-  if (kind == cxx::TypeKind::kInt) {
-    return classify_signed(loop, induction, condition);
-  }
-  return traits.is_class(induction->type())
-             ? classify_address(loop, induction, condition)
-             : std::nullopt;
-}
-
-// Larger unsigned-int steps require room for the final source increment even
-// when the bound is not a multiple of the step. Wider comparisons, mutable or
-// volatile bounds, and address escapes retain general while semantics.
-std::optional<CountedLoop> ControlFlow::classify_unsigned(
-    cxx::ForStatementAST* loop, cxx::Symbol* induction,
-    cxx::BinaryExpressionAST* condition) {
-  auto traits = unit_.typeTraits();
-  auto* left = cxx::ast_cast<cxx::IdExpressionAST>(
-      unwrap_expression(condition->leftExpression));
-  if (condition->symbol || !left || left->symbol != induction ||
-      cxx::unattributed_type(traits.remove_cv(condition->leftExpression->type))
-              ->kind() != cxx::TypeKind::kUnsignedInt ||
-      cxx::unattributed_type(traits.remove_cv(condition->rightExpression->type))
-              ->kind() != cxx::TypeKind::kUnsignedInt) {
-    return std::nullopt;
-  }
-
-  auto increment = classify_integer_increment(
-      unit_, loop->expression, std::numeric_limits<std::uint32_t>::max());
-  if (!increment || !increment->induction ||
-      increment->induction->symbol != induction) {
-    return std::nullopt;
-  }
-  auto step_value = increment->step;
-
-  if (auto upper = integer_constant(unit_, condition->rightExpression)) {
-    if (*upper >= 0 &&
-        static_cast<std::uintmax_t>(*upper) <=
-            std::numeric_limits<std::uint32_t>::max() - step_value + 1) {
-      return CountedLoop{
-          induction, CountedLoop::UnsignedRange{static_cast<unsigned>(*upper),
-                                                step_value}};
-    }
-    return std::nullopt;
-  }
-  auto* bound = cxx::ast_cast<cxx::IdExpressionAST>(
-      unwrap_expression(condition->rightExpression));
-  if (step_value != 1 || !bound || !traits.is_integral_or_enum(bound->type) ||
-      traits.is_volatile(bound->type)) {
-    return std::nullopt;
-  }
-  return CountedLoop{
-      induction,
-      CountedLoop::UnsignedRange{
-          CountedLoop::Bound{bound, condition->rightExpression}, step_value}};
-}
-
-// A strict signed-int interval cannot overflow with a unit step: an executed
-// induction is at most upper-1, including when upper is INT32_MAX. Larger
-// steps require a constant upper bound that leaves room for the final source
-// increment. Wider signed types retain general-loop semantics because a
-// target-selected index carrier is permitted to be only 32 bits.
-std::optional<CountedLoop> ControlFlow::classify_signed(
-    cxx::ForStatementAST* loop, cxx::Symbol* induction,
-    cxx::BinaryExpressionAST* condition) {
-  auto traits = unit_.typeTraits();
-  auto* left = cxx::ast_cast<cxx::IdExpressionAST>(
-      unwrap_expression(condition->leftExpression));
-  if (condition->symbol || !left || left->symbol != induction ||
-      cxx::unattributed_type(traits.remove_cv(condition->leftExpression->type))
-              ->kind() != cxx::TypeKind::kInt ||
-      cxx::unattributed_type(traits.remove_cv(condition->rightExpression->type))
-              ->kind() != cxx::TypeKind::kInt) {
-    return std::nullopt;
-  }
-
-  if (auto* compound = cxx::ast_cast<cxx::CompoundAssignmentExpressionAST>(
-          unwrap_expression(loop->expression));
-      compound &&
-      cxx::unattributed_type(traits.remove_cv(compound->rightExpression->type))
-              ->kind() != cxx::TypeKind::kInt) {
-    return std::nullopt;
-  }
-
-  auto increment = classify_integer_increment(
-      unit_, loop->expression,
-      static_cast<std::uintmax_t>(std::numeric_limits<std::int32_t>::max()));
-  if (!increment || !increment->induction ||
-      increment->induction->symbol != induction) {
-    return std::nullopt;
-  }
-  auto step_value = increment->step;
-
-  if (auto upper = integer_constant(unit_, condition->rightExpression)) {
-    auto maximum_upper = std::numeric_limits<std::int32_t>::max() -
-                         static_cast<std::intmax_t>(step_value) + 1;
-    if (*upper >= std::numeric_limits<std::int32_t>::min() &&
-        *upper <= maximum_upper) {
-      return CountedLoop{
-          induction, CountedLoop::SignedRange{static_cast<std::int32_t>(*upper),
-                                              step_value}};
-    }
-    return std::nullopt;
-  }
-  auto* bound = cxx::ast_cast<cxx::IdExpressionAST>(
-      unwrap_expression(condition->rightExpression));
-  if (step_value != 1 || !bound || !traits.is_integral_or_enum(bound->type) ||
-      traits.is_volatile(bound->type)) {
-    return std::nullopt;
-  }
-  return CountedLoop{
-      induction,
-      CountedLoop::SignedRange{
-          CountedLoop::Bound{bound, condition->rightExpression}, step_value}};
-}
-
-// A strict native address interval with a unit step cannot wrap before its
-// upper bound, independently of the target-selected carrier width. Non-unit
-// steps retain while semantics because an overshoot may wrap.
-std::optional<CountedLoop> ControlFlow::classify_address(
-    cxx::ForStatementAST* loop, cxx::Symbol* induction,
-    cxx::BinaryExpressionAST* condition) {
-  const auto& partition = types_.partition(induction->type(), loop);
-  if (partition.kind != ValueKind::Address) {
-    return std::nullopt;
-  }
-  const auto& address = static_cast<const AddressPartition&>(partition);
-  auto domain = address.element_type;
-  if (domain != LOOM_SCALAR_TYPE_INDEX && domain != LOOM_SCALAR_TYPE_OFFSET) {
-    return std::nullopt;
-  }
-  auto predicate = domain == LOOM_SCALAR_TYPE_INDEX ? "slt" : "ult";
-  auto* left = address_identity(unit_, address, condition->leftExpression);
-  auto* bound = address_identity(unit_, address, condition->rightExpression);
-  const bool constant_bound =
-      address_constant(unit_, address, condition->rightExpression).has_value();
-  if (!left || left->symbol != induction || (!bound && !constant_bound) ||
-      !operation_is(condition->symbol, "index.cmp", predicate)) {
-    return std::nullopt;
-  }
-  auto* assignment = cxx::ast_cast<cxx::AssignmentExpressionAST>(
-      unwrap_expression(loop->expression));
-  auto* increment = assignment
-                        ? cxx::ast_cast<cxx::IdExpressionAST>(
-                              unwrap_expression(assignment->leftExpression))
-                        : nullptr;
-  auto* addition = assignment
-                       ? cxx::ast_cast<cxx::BinaryExpressionAST>(
-                             unwrap_expression(assignment->rightExpression))
-                       : nullptr;
-  if (!assignment || assignment->op != cxx::TokenKind::T_EQUAL || !increment ||
-      increment->symbol != induction || !addition ||
-      !operation_is(addition->symbol, "index.add")) {
-    return std::nullopt;
-  }
-  auto* addition_left =
-      address_identity(unit_, address, addition->leftExpression);
-  auto* addition_right =
-      address_identity(unit_, address, addition->rightExpression);
-  cxx::ExpressionAST* amount = nullptr;
-  if (addition_left && addition_left->symbol == induction) {
-    amount = addition->rightExpression;
-  } else if (addition_right && addition_right->symbol == induction) {
-    amount = addition->leftExpression;
-  } else {
-    return std::nullopt;
-  }
-  if (!is_address_unit(unit_, address, amount)) {
-    return std::nullopt;
-  }
-
-  if (bound && unit_.typeTraits().is_volatile(bound->type)) {
-    return std::nullopt;
-  }
-  return CountedLoop{induction,
-                     CountedLoop::AddressRange{
-                         CountedLoop::Bound{bound, condition->rightExpression},
-                         domain == LOOM_SCALAR_TYPE_INDEX
-                             ? CountedLoop::AddressDomain::Index
-                             : CountedLoop::AddressDomain::Offset}};
 }
 
 }  // namespace loom::cxx_import

@@ -35,6 +35,10 @@ inline const cxx::Attribute* annotation(cxx::Symbol* symbol,
   return semantic_attribute(symbol, "loom", spelling);
 }
 
+// Whether the declaration binds exactly this operation and optional selector.
+bool has_op_binding(cxx::Symbol* symbol, std::string_view operation,
+                    std::string_view selector = {});
+
 // Returns a Loom annotation attached to a class specialization or its primary
 // template. Specialization annotations take precedence when both are present.
 const cxx::Attribute* template_annotation(cxx::ClassSymbol* source,

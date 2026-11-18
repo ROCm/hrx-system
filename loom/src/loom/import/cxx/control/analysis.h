@@ -24,6 +24,7 @@
 
 #include "iree/base/internal/arena.h"
 #include "loom/import/cxx/control/construction.h"
+#include "loom/import/cxx/control/loops/counted.h"
 #include "loom/import/cxx/lifetime/destruction.h"
 #include "loom/import/cxx/lifetime/origins.h"
 #include "loom/import/cxx/source/expressions.h"
@@ -180,48 +181,6 @@ struct DirectCall {
 struct CallPropagation {
   bool caller_changed;
   bool callee_changed;
-};
-
-// Retained proof that a source loop has a stable, nonwrapping counted interval.
-struct CountedLoop {
-  struct Bound {
-    // Resolved identifier supplying the loop-invariant bound, or null when
-    // the retained expression is an exact constant.
-    cxx::IdExpressionAST* identifier;
-    // Resolved source expression, including inserted value materializations.
-    cxx::ExpressionAST* expression;
-  };
-  struct UnsignedRange {
-    // Proven constant or stable runtime bound evaluated once by translation.
-    std::variant<unsigned, Bound> upper;
-    // Positive constant step in the source's unsigned-int width.
-    unsigned step;
-  };
-  struct SignedRange {
-    // Proven constant or stable runtime bound evaluated once by translation.
-    std::variant<std::int32_t, Bound> upper;
-    // Positive constant step in the source's signed-int width.
-    unsigned step;
-  };
-  enum class AddressDomain {
-    Index,
-    Offset,
-  };
-  struct AddressRange {
-    // Stable bound in the same native address domain as the induction value.
-    Bound upper;
-    // Signed logical index or unsigned physical offset comparison semantics.
-    AddressDomain domain;
-  };
-  // Source identifier read by a runtime upper bound, or null for a constant.
-  cxx::IdExpressionAST* upper_identifier() const;
-
-  // Source binding replaced by the structured loop's induction argument.
-  cxx::Symbol* induction;
-  // Fixed-width C++ arithmetic or a target-selected native address interval.
-  // Native address ranges have an implicit unit step: larger steps can wrap
-  // after overshooting a bound whose target carrier width is not yet known.
-  std::variant<UnsignedRange, SignedRange, AddressRange> range;
 };
 
 // Syntactic paths through a statement that take a particular exit. Other
@@ -741,16 +700,6 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool is_captured_object_field(cxx::Symbol* field) const;
   cxx::Symbol* object_owner(cxx::ExpressionAST* expression) const;
   void retain_counted(cxx::ForStatementAST* loop);
-  std::optional<CountedLoop> classify(cxx::ForStatementAST* loop);
-  std::optional<CountedLoop> classify_unsigned(
-      cxx::ForStatementAST* loop, cxx::Symbol* induction,
-      cxx::BinaryExpressionAST* condition);
-  std::optional<CountedLoop> classify_signed(
-      cxx::ForStatementAST* loop, cxx::Symbol* induction,
-      cxx::BinaryExpressionAST* condition);
-  std::optional<CountedLoop> classify_address(
-      cxx::ForStatementAST* loop, cxx::Symbol* induction,
-      cxx::BinaryExpressionAST* condition);
   unsigned paths(cxx::StatementAST* statement) const;
   unsigned sequence_paths(std::span<cxx::StatementAST* const> statements) const;
   unsigned classify_paths(cxx::StatementAST* statement) const;

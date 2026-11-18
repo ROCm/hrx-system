@@ -51,6 +51,7 @@
 #include "loom/import/cxx/binding/template_definitions.h"
 #include "loom/import/cxx/binding/template_inputs.h"
 #include "loom/import/cxx/control/analysis.h"
+#include "loom/import/cxx/control/loops/counted.h"
 #include "loom/import/cxx/control/regions.h"
 #include "loom/import/cxx/receiver/scopes.h"
 #include "loom/import/cxx/source/attributes.h"
@@ -8093,67 +8094,30 @@ class Translator final : private Initialization::Evaluation,
     }
   }
 
-  loom_value_id_t unsigned_offset(loom_value_id_t value,
-                                  loom_location_id_t source) {
-    loom_op_t* cast;
-    check(loom_index_cast_build(&builder_, value, value_type(value),
-                                loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
-                                source, &cast));
-    return result(cast);
-  }
-
-  loom_value_id_t signed_index(loom_value_id_t value,
-                               loom_location_id_t source) {
-    loom_op_t* cast;
-    check(loom_index_cast_build(&builder_, value, value_type(value),
-                                loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
-                                source, &cast));
-    return result(cast);
-  }
-
   void counted_loop(cxx::ForStatementAST* loop, const CountedLoop& counted,
                     const LoopSchedule& schedule) {
     auto source = locations_.get(loop);
     auto* induction = counted.induction;
-    loom_value_id_t lower;
-    loom_value_id_t upper;
-    loom_value_id_t step;
-    bool native_address = false;
-    if (auto* range = std::get_if<CountedLoop::UnsignedRange>(&counted.range)) {
-      lower = unsigned_offset(values_.at(induction).ssa(), source);
-      auto* constant_upper = std::get_if<unsigned>(&range->upper);
-      auto bound =
-          constant_upper
-              ? scalars_.integer(static_cast<int32_t>(*constant_upper),
-                                 LOOM_SCALAR_TYPE_I32, source)
-              : expression(
-                    std::get<CountedLoop::Bound>(range->upper).expression)
-                    .ssa();
-      upper = unsigned_offset(bound, source);
-      step = scalars_.integer(range->step, LOOM_SCALAR_TYPE_OFFSET, source);
-    } else if (auto* range =
-                   std::get_if<CountedLoop::SignedRange>(&counted.range)) {
-      lower = signed_index(values_.at(induction).ssa(), source);
-      auto* constant_upper = std::get_if<std::int32_t>(&range->upper);
-      auto bound =
-          constant_upper
-              ? scalars_.integer(*constant_upper, LOOM_SCALAR_TYPE_I32, source)
-              : expression(
-                    std::get<CountedLoop::Bound>(range->upper).expression)
-                    .ssa();
-      upper = signed_index(bound, source);
-      step = scalars_.integer(range->step, LOOM_SCALAR_TYPE_INDEX, source);
-    } else {
-      const auto& address_range =
-          std::get<CountedLoop::AddressRange>(counted.range);
-      auto domain = address_range.domain == CountedLoop::AddressDomain::Index
-                        ? LOOM_SCALAR_TYPE_INDEX
-                        : LOOM_SCALAR_TYPE_OFFSET;
-      lower = values_.at(induction).ssa();
-      upper = expression(address_range.upper.expression).ssa();
-      step = scalars_.integer(1, domain, source);
-      native_address = true;
-    }
+    auto interval_value = [&](loom_value_id_t value) {
+      if (counted.native) {
+        return value;
+      }
+      loom_op_t* cast;
+      check(loom_index_cast_build(&builder_, value, value_type(value),
+                                  loom_type_scalar(counted.domain), source,
+                                  &cast));
+      return result(cast);
+    };
+    auto lower = interval_value(values_.at(induction).ssa());
+    auto* constant = std::get_if<std::int64_t>(&counted.upper);
+    auto bound =
+        constant
+            ? scalars_.integer(static_cast<int32_t>(*constant),
+                               LOOM_SCALAR_TYPE_I32, source)
+            : expression(std::get<CountedLoop::Bound>(counted.upper).expression)
+                  .ssa();
+    auto upper = interval_value(bound);
+    auto step = scalars_.integer(counted.step, counted.domain, source);
     auto depth = schedule.pipeline_depth()
                      ? expression(schedule.pipeline_depth()).ssa()
                      : 0;
@@ -8174,7 +8138,7 @@ class Translator final : private Initialization::Evaluation,
     auto saved = loom_builder_enter_region(&builder_, op, body);
     auto iteration = name(loom_region_entry_arg_id(body, 0),
                           cxx::to_string(induction->name()));
-    if (native_address) {
+    if (counted.native) {
       std::array<loom_value_id_t, 1> components = {iteration};
       values_.set(induction,
                   value_arena_.capture(

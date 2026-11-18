@@ -13,7 +13,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <limits>
 #include <string>
 
 #include "iree/testing/gtest.h"
@@ -326,289 +325,79 @@ TEST(ControlFlowTest,
   EXPECT_EQ(calls[9].arguments[1].source, nullptr);
 }
 
-TEST(ControlFlowTest, CountedAdmissionRetainsTheNonwrappingIntervalProof) {
+TEST(ControlFlowTest, CountedLoopsPreserveInductionAndBound) {
   struct Case {
-    // Source parameter type determines the comparison's promoted width.
-    const char* parameter;
-    // Standalone source loop whose classification is under test.
-    const char* loop;
-    // Expected positive counted step, or zero for ordinary while semantics.
-    unsigned step;
-    // Proven constant upper bound, or no value for a runtime scalar bound.
-    std::optional<unsigned> upper = std::nullopt;
+    // Source bindings visible to the loop.
+    const char* parameters;
+    // Body and later uses establish the complete iteration effects.
+    const char* body;
+    // Whether the checked interval holds for every iteration.
+    bool invariant;
   };
   const Case cases[] = {
-      {"unsigned n", "for (unsigned i=0; i<n; ++i) {}", 1},
-      {"unsigned n", "for (unsigned i=0; i<n; ++i) ;", 1},
-      {"unsigned n", "for (unsigned i=0; i<16u; i+=4u) n += i;", 4, 16},
-      {"unsigned n", "for (unsigned i=0; i<n; ++i) ++i;", 0},
-      {"unsigned n", "for (unsigned i=0; i<n; ++i) --n;", 0},
-      {"unsigned n", "for (unsigned i=0; i<n; ++i) (void)&i;", 0},
-      {"unsigned n", "for (unsigned i=0; i<n; ++i) sizeof(++i);", 1},
-      {"unsigned n", "for (unsigned i=0; i<n; ++i) unsigned value = ++i;", 0},
+      {"unsigned n", "for (unsigned i=0; i<n; ++i) ++i;", false},
+      {"unsigned n", "for (unsigned i=0; i<n; ++i) --n;", false},
+      {"unsigned n", "for (unsigned i=0; i<n; ++i) (void)&i;", false},
+      {"unsigned n", "for (unsigned i=0; i<n; ++i) sizeof(++i);", true},
+      {"unsigned n", "for (unsigned i=0; i<n; ++i) unsigned value = ++i;",
+       false},
       {"unsigned n", "for (unsigned i=0; i<n; ++i) if constexpr(false) ++i;",
        1},
-      {"unsigned n", "for (unsigned i=0; i<n; ++i) if constexpr(true) ++i;", 0},
+      {"unsigned n", "for (unsigned i=0; i<n; ++i) if constexpr(true) ++i;",
+       false},
       {"unsigned n",
-       "for (unsigned i=0; i<n; ++i) for (unsigned j=0; j<4u; ++j) ++i;", 0},
-      {"unsigned n", "for (unsigned i=0; i<16u; i+=4u) {}", 4, 16},
-      {"unsigned n", "for (unsigned i=0; i<4294967292u; i+=4u) {}", 4,
-       4294967292u},
-      {"unsigned n", "for (unsigned i=n; i<(320u/16u); i+=(1u<<2)) {}", 4, 20},
-      {"unsigned n", "for (unsigned i=n; i<(capacity/16u); i+=stride) {}", 4,
-       20},
-      {"unsigned n", "for (unsigned i=n; (i<(20u)); (i)++) {}", 1, 20},
-      {"unsigned n", "for (unsigned i=n; i<(0xffffffffu+21u); ++i) {}", 1, 20},
-      {"unsigned n", "for (unsigned i=n; i<static_cast<unsigned>(20); ++i) {}",
-       1, 20},
-      {"unsigned n", "for (unsigned i=n; i<(unsigned char)276u; ++i) {}", 1,
-       20},
-      {"unsigned n", "for (unsigned i=n; i<(true ? 20u : 16u); ++i) {}", 1, 20},
-      {"unsigned n", "for (unsigned i=n; i<0u; i+=(1u<<2)) {}", 4, 0},
-      {"unsigned n", "for (unsigned i=n; i<1u; i+=~0u) {}", ~0u, 1},
-      {"unsigned n", "for (unsigned i=n; i<~0u; ++i) {}", 1, ~0u},
-      {"unsigned n", "for (unsigned i=n; i<(~0u-3u); i+=(1u<<2)) {}", 4,
-       4294967292u},
-      {"unsigned n", "for (unsigned i=n; i<~0u; i+=(1u<<2)) {}", 0},
-      {"unsigned n", "for (unsigned i=n; i<20ULL; ++i) {}", 0},
-      {"unsigned n", "for (unsigned i=n; i<20u; i+=(1ULL<<32)) {}", 0},
-      {"unsigned n", "for (unsigned i=n; i<20u; i+=(1u/0u)) {}", 0},
-      {"unsigned n", "for (unsigned i=n; i<20u; i+=(2147483647+1)) {}", 0},
-      {"unsigned n", "for (unsigned i=n; i<20u; i+=(4u-4u)) {}", 0},
-      {"unsigned n", "for (unsigned i=n; i<20u; i+=(-1)) {}", 0},
-      {"unsigned n", "for (unsigned i=0; i<n; i+=(4u-3u)) {}", 1},
-      {"unsigned n", "for (unsigned i=0; i<n; i+=(4u-2u)) {}", 0},
-      {"unsigned n", "for (unsigned i=0; i<(n+0u); ++i) {}", 0},
-      {"volatile unsigned n", "for (unsigned i=0; i<n; ++i) {}", 0},
-      {"unsigned n", "for (volatile unsigned i=0; i<n; ++i) {}", 0},
-      {"unsigned n", "for (unsigned i=0; i<(++n); ++i) {}", 0},
-      {"unsigned n", "for (unsigned i=0; i<(n=20u); ++i) {}", 0},
-      {"unsigned n", "for (unsigned i=0; i<(false ? ++n : 20u); ++i) {}", 0},
-      {"unsigned n", "for (unsigned i=0; i<opaque(); ++i) {}", 0},
-      {"unsigned n", "for (unsigned i=0; i<20u; i+=opaque()) {}", 0},
-      {"unsigned n", "for (unsigned i=0; i<(unsigned)sizeof(++n); ++i) {}", 1,
-       4},
-      {"unsigned n", "for (unsigned i=0; i<n; ++i) { sizeof(++n); }", 1},
-      {"unsigned n", "for (unsigned i=0; i<n; ++i) { (void)&n; }", 0},
-      {"unsigned n", "for (unsigned i=0; i<n; ++i) { (void)&i; }", 0},
-      {"unsigned n", "for (unsigned i=0; i<n; ++i) { sizeof(&i); }", 1},
+       "for (unsigned i=0; i<n; ++i) for (unsigned j=0; j<4u; ++j) ++i;",
+       false},
+      {"unsigned n", "for (unsigned i=0; i<n; ++i) { sizeof(++n); }", true},
+      {"unsigned n", "for (unsigned i=0; i<n; ++i) { (void)&n; }", false},
+      {"unsigned n", "for (unsigned i=0; i<n; ++i) { (void)&i; }", false},
+      {"unsigned n", "for (unsigned i=0; i<n; ++i) { sizeof(&i); }", true},
       {"unsigned n",
-       "for (unsigned i=0; i<n; ++i) { if constexpr(false) (void)&n; }", 1},
-      {"unsigned n", "for (unsigned i=0; i<n; ++i) {} (void)&n;", 0},
-      {"unsigned n", "for (unsigned i=0; i<4294967295u; i+=4u) {}", 0},
-      {"unsigned long n", "for (unsigned i=0; i<n; ++i) {}", 0},
-      {"unsigned n", "for (unsigned i=0; i<n; ++i) { --n; }", 0},
+       "for (unsigned i=0; i<n; ++i) { if constexpr(false) (void)&n; }", true},
+      {"unsigned n", "for (unsigned i=0; i<n; ++i) {} (void)&n;", false},
+      {"unsigned n", "for (unsigned i=0; i<n; ++i) { --n; }", false},
       {"unsigned n",
-       "for (unsigned i=0; i<n; ++i) { if constexpr(false) --n; }", 1},
+       "for (unsigned i=0; i<n; ++i) { if constexpr(false) --n; }", true},
       {"unsigned n", "for (unsigned i=0; i<n; ++i) { if constexpr(true) --n; }",
        0},
       {"unsigned n",
-       "for (unsigned i=0; i<n; ++i) { if constexpr(--n; false) {} }", 0},
-      {"unsigned n", "for (unsigned i=0; i<n; ++i) { ++i; }", 0},
-      {"unsigned n", "for (unsigned i=0; i<n; --i) {}", 0},
-      {"unsigned n", "for (unsigned i=0; i<=n; ++i) {}", 0},
-      {"unsigned n", "for (unsigned i=0; i<n; i+=0u) {}", 0},
-  };
-  loom_cxx_import_options_t options;
-  loom_cxx_import_options_initialize(&options);
-  for (const auto& test : cases) {
-    SCOPED_TRACE(test.loop);
-    std::string text =
-        std::string(
-            "constexpr unsigned capacity=320; const unsigned stride=4; "
-            "unsigned opaque(); void entry(") +
-        test.parameter + ") {" + test.loop + "}";
-    Source source(view(text), IREE_SV("loops.cpp"), options);
-    auto* function = definition(source);
-    ASSERT_NE(function, nullptr);
-    auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
-                     function->functionBody)
-                     ->statement;
-    auto* loop =
-        cxx::ast_cast<cxx::ForStatementAST>(body->statementList->value);
-    ASSERT_NE(loop, nullptr);
-    Types types(source.unit(), source.diagnostics());
-    Imports imports(source.unit(), source.diagnostics());
-    ControlFlow analysis(source.unit(), source.diagnostics(), types, imports,
-                         body);
-    auto* counted = analysis.counted(loop);
-    ASSERT_EQ(counted != nullptr, test.step != 0);
-    if (counted) {
-      const auto& range = std::get<CountedLoop::UnsignedRange>(counted->range);
-      EXPECT_EQ(range.step, test.step);
-      EXPECT_EQ(cxx::to_string(counted->induction->name()), "i");
-      if (test.upper) {
-        EXPECT_EQ(std::get<unsigned>(range.upper), *test.upper);
-      } else {
-        const auto& bound = std::get<CountedLoop::Bound>(range.upper);
-        EXPECT_EQ(bound.identifier->symbol, function->symbol->parameters()[0]);
-        auto* condition =
-            cxx::ast_cast<cxx::BinaryExpressionAST>(loop->condition);
-        EXPECT_EQ(bound.expression, condition->rightExpression);
-      }
-      EXPECT_EQ(analysis.counted(loop), counted);
-    }
-  }
-}
-
-TEST(ControlFlowTest,
-     SignedCountedAdmissionRetainsTheNonwrappingIntervalProof) {
-  struct Case {
-    // Source parameter type determines the comparison's promoted width.
-    const char* parameter;
-    // Standalone source loop whose classification is under test.
-    const char* loop;
-    // Expected positive counted step, or zero for ordinary while semantics.
-    unsigned step;
-    // Proven constant upper bound, or no value for a runtime scalar bound.
-    std::optional<std::int32_t> upper = std::nullopt;
-  };
-  const Case cases[] = {
-      {"int n", "for (int i=0; i<n; ++i) {}", 1},
-      {"short n", "for (int i=0; i<n; ++i) {}", 1},
-      {"unsigned short n", "for (int i=0; i<n; ++i) {}", 1},
-      {"int n", "for (int i=-4; i<3; i+=2) {}", 2, 3},
-      {"int n", "for (int i=n; i<-3; i++) {}", 1, -3},
-      {"int n", "for (int i=n; i<2147483647; ++i) {}", 1, 2147483647},
-      {"int n", "for (int i=n; i<2147483644; i+=4) {}", 4, 2147483644},
-      {"int n", "for (int i=n; i<(-2147483647-1); ++i) {}", 1,
-       std::numeric_limits<std::int32_t>::min()},
-      {"int n", "for (int i=0; i<n; ++i) ++i;", 0},
-      {"int n", "for (int i=0; i<n; ++i) --n;", 0},
-      {"int n", "for (int i=0; i<n; ++i) (void)&i;", 0},
-      {"int n", "for (int i=0; i<n; i+=2) {}", 0},
-      {"int n", "for (int i=0; i<20; i+=2u) {}", 0},
-      {"volatile int n", "for (int i=0; i<n; ++i) {}", 0},
-      {"int n", "for (volatile int i=0; i<n; ++i) {}", 0},
-      {"int n", "for (int i=0; i<(n+0); ++i) {}", 0},
-      {"int n", "for (int i=0; i<opaque(); ++i) {}", 0},
-      {"int n", "for (int i=0; i<20; i+=opaque()) {}", 0},
-      {"int n", "for (int i=0; i<n; --i) {}", 0},
-      {"int n", "for (int i=0; i<=n; ++i) {}", 0},
-      {"int n", "for (int i=0; i<2147483645; i+=4) {}", 0},
-      {"unsigned n", "for (int i=0; i<(int)n; ++i) {}", 0},
-      {"long n", "for (int i=0; i<n; ++i) {}", 0},
-      {"int n", "for (short i=0; i<n; ++i) {}", 0},
-      {"long n", "for (long i=0; i<n; ++i) {}", 0},
-  };
-  loom_cxx_import_options_t options;
-  loom_cxx_import_options_initialize(&options);
-  for (const auto& test : cases) {
-    SCOPED_TRACE(test.loop);
-    std::string text = std::string("int opaque(); void entry(") +
-                       test.parameter + ") {" + test.loop + "}";
-    Source source(view(text), IREE_SV("signed_loops.cpp"), options);
-    auto* function = definition(source);
-    ASSERT_NE(function, nullptr);
-    auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
-                     function->functionBody)
-                     ->statement;
-    auto* loop =
-        cxx::ast_cast<cxx::ForStatementAST>(body->statementList->value);
-    ASSERT_NE(loop, nullptr);
-    Types types(source.unit(), source.diagnostics());
-    Imports imports(source.unit(), source.diagnostics());
-    ControlFlow analysis(source.unit(), source.diagnostics(), types, imports,
-                         body);
-    auto* counted = analysis.counted(loop);
-    ASSERT_EQ(counted != nullptr, test.step != 0);
-    if (!counted) {
-      continue;
-    }
-    const auto& range = std::get<CountedLoop::SignedRange>(counted->range);
-    EXPECT_EQ(range.step, test.step);
-    EXPECT_EQ(cxx::to_string(counted->induction->name()), "i");
-    if (test.upper) {
-      EXPECT_EQ(std::get<std::int32_t>(range.upper), *test.upper);
-    } else {
-      const auto& bound = std::get<CountedLoop::Bound>(range.upper);
-      EXPECT_EQ(bound.identifier->symbol, function->symbol->parameters()[0]);
-      auto* condition =
-          cxx::ast_cast<cxx::BinaryExpressionAST>(loop->condition);
-      EXPECT_EQ(bound.expression, condition->rightExpression);
-    }
-    EXPECT_EQ(analysis.counted(loop), counted);
-  }
-}
-
-TEST(ControlFlowTest, AddressAdmissionRetainsNativeUnitStepIntervals) {
-  struct Case {
-    // Fully qualified native address type used by the source loop.
-    const char* type;
-    // Standalone source loop whose classification is under test.
-    const char* loop;
-    // Expected native range, or no value for general while semantics.
-    std::optional<CountedLoop::AddressDomain> domain;
-    // Whether the admitted upper bound is an exact temporary constant.
-    bool constant_bound = false;
-  };
-  const Case cases[] = {
-      {"loom::type::index",
-       "for (auto i=begin; i<end; i=i+loom::type::index{1}) {}",
-       CountedLoop::AddressDomain::Index},
-      {"loom::type::index",
-       "for (auto i=begin; i<end; i=loom::type::index(1)+i) {}",
-       CountedLoop::AddressDomain::Index},
-      {"loom::type::offset",
-       "for (auto i=begin; i<end; i=i+loom::type::offset{1}) {}",
-       CountedLoop::AddressDomain::Offset},
-      {"loom::type::offset",
-       "for (auto i=begin; i<end; i=loom::type::offset{1}+i) {}",
-       CountedLoop::AddressDomain::Offset},
-      {"loom::type::index",
-       "for (auto i=begin; i<loom::type::index{4}; "
-       "i=i+loom::type::index{1}) {}",
-       CountedLoop::AddressDomain::Index, true},
-      {"loom::type::offset",
-       "for (auto i=begin; i<loom::type::offset(4); "
-       "i=i+loom::type::offset{1}) {}",
-       CountedLoop::AddressDomain::Offset, true},
-      {"loom::type::index",
-       "for (auto i=begin; i<end; i=i+loom::type::index{2}) {}", std::nullopt},
-      {"loom::type::offset",
-       "for (auto i=begin; i<end; i=i+loom::type::offset{2}) {}", std::nullopt},
-      {"loom::type::index",
-       "for (auto i=begin; loom::index::ult(i,end); "
-       "i=i+loom::type::index{1}) {}",
-       std::nullopt},
-      {"loom::type::offset",
-       "for (auto i=begin; loom::offset::slt(i,end); "
-       "i=i+loom::type::offset{1}) {}",
-       std::nullopt},
-      {"loom::type::index",
+       "for (unsigned i=0; i<n; ++i) { if constexpr(--n; false) {} }", false},
+      {"unsigned n", "for (unsigned i=0; i<n; ++i) { ++i; }", false},
+      {"int n", "for (int i=0; i<n; ++i) ++i;", false},
+      {"int n", "for (int i=0; i<n; ++i) --n;", false},
+      {"int n", "for (int i=0; i<n; ++i) (void)&i;", false},
+      {"loom::type::index begin, loom::type::index end",
        "for (auto i=begin; i<end; i=i+loom::type::index{1}) "
        "end=loom::type::index{4};",
-       std::nullopt},
-      {"loom::type::offset",
+       false},
+      {"loom::type::offset begin, loom::type::offset end",
        "for (auto i=begin; i<end; i=i+loom::type::offset{1}) "
        "i=loom::type::offset{4};",
-       std::nullopt},
-      {"loom::type::index",
+       false},
+      {"loom::type::index begin, loom::type::index end",
        "for (auto i=begin; i<end; i=i+loom::type::index{1}) (void)&end;",
-       std::nullopt},
-      {"loom::type::index",
+       false},
+      {"loom::type::index begin, loom::type::index end",
        "for (auto i=begin; i<end; i=i+loom::type::index{1}) {} (void)&end;",
-       std::nullopt},
-      {"loom::type::offset",
-       "for (auto i=begin; i<end; i=i+loom::type::offset{1}) (void)&i;",
-       std::nullopt},
-      {"loom::type::index",
+       false},
+      {"loom::type::offset begin, loom::type::offset end",
+       "for (auto i=begin; i<end; i=i+loom::type::offset{1}) (void)&i;", false},
+      {"loom::type::index begin, loom::type::index end",
        "const auto& bound=end; for (auto i=begin; i<bound; "
        "i=i+loom::type::index{1}) end=end-loom::type::index{1};",
-       std::nullopt},
-      {"loom::type::offset",
+       false},
+      {"loom::type::offset begin, loom::type::offset end",
        "const auto& bound=end; for (auto i=begin; i<bound; "
        "i=i+loom::type::offset{1}) end=end-loom::type::offset{1};",
-       std::nullopt},
+       false},
   };
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);
   for (const auto& test : cases) {
-    SCOPED_TRACE(test.loop);
+    SCOPED_TRACE(test.body);
     std::string text = std::string("#include <loomcxx/index.h>\nvoid entry(") +
-                       test.type + " begin, " + test.type + " end) {" +
-                       test.loop + "}";
-    Source source(view(text), IREE_SV("address_loops.cxx"), options);
+                       test.parameters + ") {" + test.body + "}";
+    Source source(view(text), IREE_SV("loop_writes.cxx"), options);
     auto* function = definition(source);
     ASSERT_NE(function, nullptr);
     auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
@@ -624,26 +413,8 @@ TEST(ControlFlowTest, AddressAdmissionRetainsNativeUnitStepIntervals) {
     Types types(source.unit(), source.diagnostics());
     Imports imports(source.unit(), source.diagnostics());
     ControlFlow analysis(source.unit(), source.diagnostics(), types, imports,
-                         body);
-    auto* counted = analysis.counted(loop);
-    ASSERT_EQ(counted != nullptr, test.domain.has_value());
-    if (!counted) {
-      continue;
-    }
-    EXPECT_EQ(counted->induction,
-              cxx::ast_cast<cxx::SimpleDeclarationAST>(
-                  cxx::ast_cast<cxx::DeclarationStatementAST>(loop->initializer)
-                      ->declaration)
-                  ->initDeclaratorList->value->symbol);
-    const auto& range = std::get<CountedLoop::AddressRange>(counted->range);
-    EXPECT_EQ(range.domain, *test.domain);
-    EXPECT_EQ(
-        range.upper.identifier ? range.upper.identifier->symbol : nullptr,
-        test.constant_bound ? nullptr : function->symbol->parameters()[1]);
-    EXPECT_EQ(range.upper.expression,
-              cxx::ast_cast<cxx::BinaryExpressionAST>(loop->condition)
-                  ->rightExpression);
-    EXPECT_EQ(analysis.counted(loop), counted);
+                         body, function->symbol);
+    EXPECT_EQ(analysis.counted(loop) != nullptr, test.invariant);
   }
 }
 

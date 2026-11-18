@@ -8,9 +8,7 @@
 
 #include <cxx/ast.h>
 #include <cxx/ast_interpreter.h>
-#include <cxx/attributes.h>
 #include <cxx/const_int.h>
-#include <cxx/names.h>
 #include <cxx/symbols.h>
 #include <cxx/types.h>
 
@@ -33,9 +31,7 @@ std::optional<TargetRequirementKind> target_query(
     cxx::ExpressionAST* expression) {
   auto* call =
       cxx::ast_cast<cxx::CallExpressionAST>(unwrap_expression(expression));
-  auto* binding = annotation(direct_callee(call), "op");
-  if (!binding || binding->arguments.size() != 1 ||
-      binding->arguments[0]->name() != "target.subgroup.size") {
+  if (!has_op_binding(direct_callee(call), "target.subgroup.size")) {
     return std::nullopt;
   }
   auto representation = unit.typeTraits().integral_representation(call->type);

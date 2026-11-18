@@ -39,6 +39,14 @@ const cxx::Attribute* semantic_attribute(cxx::Symbol* symbol,
   return nullptr;
 }
 
+bool has_op_binding(cxx::Symbol* symbol, std::string_view operation,
+                    std::string_view selector) {
+  const auto* binding = annotation(symbol, "op");
+  return binding && binding->arguments.size() == (selector.empty() ? 1u : 2u) &&
+         binding->arguments[0]->name() == operation &&
+         (selector.empty() || binding->arguments[1]->name() == selector);
+}
+
 const cxx::Attribute* template_annotation(cxx::ClassSymbol* source,
                                           std::string_view spelling) {
   if (auto* attribute = annotation(source, spelling)) {
