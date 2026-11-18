@@ -122,7 +122,7 @@ void amdf_info_options_print_usage(FILE* file) {
   fputs(
       "Usage: amdf-info [select] [options]\n"
       "\n"
-      "Report AMD GPUs, NPUs, system memory, and native capabilities.\n"
+      "Report AMD GPUs, NPUs, memory pools, and native capabilities.\n"
       "\n"
       "  --device=URI       Select rdna, cdna, amdgpu, or xdna; optional\n"
       "                     ://ORDINAL, ://GPU-<16 hex>, or ://id/<32 hex>.\n"
@@ -132,7 +132,7 @@ void amdf_info_options_print_usage(FILE* file) {
       "  --details          Expand text capabilities and exact identities.\n"
       "  --format=text|json Write readable text or lossless JSON to stdout.\n"
       "  --color=POLICY     Text emphasis: auto (default), always, or never.\n"
-      "  --activate         Check device creation, queries, and teardown.\n"
+      "  --activate         Query device memory/placement; check activation.\n"
       "  --help             Show this help without querying hardware.\n"
       "\n"
       "Inventory and --details do not activate devices. --activate submits\n"

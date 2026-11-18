@@ -1,6 +1,6 @@
 # amdf-info
 
-`amdf-info` reports the GPUs, NPUs, system-memory pools, and native capabilities visible through libamdf on Linux and Windows. The default output is a compact machine inventory; detailed text and JSON expose the same public API records. It statically links libamdf and needs neither ROCr nor XRT.
+`amdf-info` reports the GPUs, NPUs, memory pools, and native capabilities visible through libamdf on Linux and Windows. The default output is a compact machine inventory; detailed text and JSON expose the same public API records. It statically links libamdf and needs neither ROCr nor XRT.
 
 ```sh
 amdf-info
@@ -43,9 +43,11 @@ amdf-info --device=rdna --activate
 amdf-info --device=xdna --activate --details --format=json
 ```
 
-`--activate` creates each selected device, queries its achieved properties and queue placement contracts, and checks destruction of the device, endpoint, and instance. It creates no queue, workload context, or allocation and submits no commands. GPU activation exercises the native execution connection and address-space setup; XDNA activation validates the native device interface. This checks whether the provider can acquire and release the device, not whether a particular program executes correctly.
+`--activate` creates each selected device, queries its achieved properties, queue placement contracts, and device-local memory pools, and checks destruction of the device, endpoint, and instance. It creates no queue, workload context, or allocation and submits no commands. GPU activation exercises the native execution connection and address-space setup; XDNA activation validates the native device interface. This checks whether the provider can acquire and release the device, not whether a particular program executes correctly.
 
-Live GPU records expose native memory/event features and reset epochs. Live XDNA records expose array geometry, context admission, placement modes, and instruction limits. Queue placement records distinguish placement support and host-publication requirements from the passive queue formats. Physical-local storage and cross-device memory relationships are separate live memory queries, not inferred from PCI attachment or system RAM capacity.
+Live GPU records expose native memory/event features and reset epochs. Live XDNA records expose array geometry, context admission, placement modes, and instruction limits. Queue placement records distinguish placement support and host-publication requirements from the passive queue formats.
+
+Each device's memory pools appear beneath that device in text and under `activation.memory_pools` in JSON. Discrete GPUs report their local memory capacity; integrated GPUs mark local views of system RAM with `system_backed`, so those views are not added to the system capacity. Pool records include the physical endpoint identity, capacity, profile count, and sharing/observation flags. Capacity describes physical storage, not current free space or an allocation budget. Devices without local storage report an empty pool array. Cross-device access capabilities require separate access-set queries and are not inferred from PCI attachment.
 
 The final activation result includes cleanup failures. A failed native destruction retains the failed owner and its borrowed parents until process exit; the tool does not retry cleanup, close a live child's parent, or claim a successful smoke. An outer process supervisor owns hang detection when a native call stops making progress. The tool adds no driver timeouts, background worker, or retry loop.
 

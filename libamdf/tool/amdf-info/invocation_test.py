@@ -177,21 +177,67 @@ class InvocationTest(unittest.TestCase):
                 activation = report["endpoints"][0]["activation"]
                 self.assertTrue(activation["device_destroyed"])
                 self.assertEqual(len(activation["queue_placements"]), 1)
-                operations = [call for call in calls if call.endswith(f":{index}")]
-                self.assertEqual(
-                    operations,
-                    [
-                        f"{op}:{index}"
-                        for op in [
-                            "endpoint_open",
-                            "device_create",
-                            "device_query_info",
-                            "placement_query_info",
-                            "device_destroy",
-                            "endpoint_close",
-                        ]
-                    ],
-                )
+                required_order = [
+                    "endpoint_open",
+                    "device_create",
+                    "device_query_info",
+                    "placement_query_info",
+                    "device_scopes_count",
+                ]
+                if index != 2:
+                    required_order.extend(
+                        ["device_scopes_fill", "local_scope_query_info"]
+                    )
+                required_order.extend(["device_destroy", "endpoint_close"])
+                positions = [calls.index(f"{op}:{index}") for op in required_order]
+                self.assertEqual(positions, sorted(positions))
+                self.assertEqual(calls[-1], "instance_destroy")
+
+    def test_activation_preserves_memory_ownership_and_physical_sharing(self):
+        report, _ = self.report("--activate")
+        system = report["memory_pools"][0]
+        self.assertIsNone(system["physical_endpoint_id"])
+        local_pools = []
+        for endpoint in report["endpoints"]:
+            pools = endpoint["activation"]["memory_pools"]
+            if endpoint["family"] == "xdna":
+                self.assertEqual(pools, [])
+                continue
+            self.assertEqual(len(pools), 1)
+            pool = pools[0]
+            local_pools.append(pool)
+            self.assertEqual(pool["kind"]["name"], "local")
+            self.assertEqual(pool["physical_endpoint_id"], endpoint["id"])
+        discrete = next(
+            pool for pool in local_pools if pool["physical_endpoint_id"] == FIRST_ID
+        )
+        shared = next(pool for pool in local_pools if pool is not discrete)
+        self.assertEqual(int(discrete["capacity_bytes"]), 24 * 1024**3)
+        self.assertNotIn("system_backed", discrete["flags"]["names"])
+        self.assertEqual(shared["capacity_bytes"], system["capacity_bytes"])
+        self.assertIn("system_backed", shared["flags"]["names"])
+        # Text distinguishes an additional physical capacity from a local view
+        # of the same RAM. JSON retains exact bytes and the sharing flag.
+        text = self.invoke("--activate").stdout
+        self.assertIn("24.0 GiB device-local memory", text)
+        self.assertIn("shared system RAM", text)
+
+    def test_memory_query_errors_are_attributed_and_do_not_hide_other_devices(self):
+        for scenario, operation in [
+            ("device_scopes_count_failure", "device_enumerate_memory_scopes"),
+            ("device_scopes_fill_failure", "device_enumerate_memory_scopes"),
+            ("local_scope_query_failure", "memory_scope_query_info"),
+        ]:
+            with self.subTest(scenario=scenario):
+                report, calls = self.report("--activate", scenario=scenario, expected=1)
+                self.assertEqual(len(report["endpoints"]), 3)
+                for endpoint in report["endpoints"]:
+                    self.assertTrue(endpoint["activation"]["device_destroyed"])
+                discrete = next(e for e in report["endpoints"] if e["id"] == FIRST_ID)
+                pools = discrete["activation"]["memory_pools"]
+                failure = pools[0] if isinstance(pools, list) else pools
+                self.assertEqual(failure["error"]["operation"], operation)
+                self.assertNotIn("capacity_bytes", failure)
                 self.assertEqual(calls[-1], "instance_destroy")
 
     def test_activation_failure_still_releases_owned_resources(self):
@@ -199,6 +245,9 @@ class InvocationTest(unittest.TestCase):
             "device_create_failure",
             "device_query_failure",
             "placement_failure",
+            "device_scopes_count_failure",
+            "device_scopes_fill_failure",
+            "local_scope_query_failure",
         ]:
             with self.subTest(scenario=scenario):
                 report, calls = self.report(

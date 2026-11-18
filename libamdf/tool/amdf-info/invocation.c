@@ -9,6 +9,7 @@
 #include <stdlib.h>
 
 #include "libamdf/tool/amdf-info/activation.h"
+#include "libamdf/tool/amdf-info/memory.h"
 #include "libamdf/tool/amdf-info/platform.h"
 
 static void amdf_info_query_extensions(amdf_info_library_t* library) {
@@ -26,45 +27,6 @@ static void amdf_info_query_extensions(amdf_info_library_t* library) {
   if (amdf_status_is_ok(library->xdna_status)) {
     library->xdna = (const amdf_xdna_api_t*)table;
   }
-}
-
-static void amdf_info_query_pools(const amdf_api_t* api,
-                                  amdf_instance_t* instance,
-                                  amdf_info_output_t* output,
-                                  amdf_info_result_t* result) {
-  uint32_t count = 0;
-  amdf_status_t status =
-      api->instance_enumerate_memory_scopes(instance, 0, NULL, &count);
-  if (status == amdf_make_api_status(AMDF_STATUS_CODE_BUFFER_TOO_SMALL)) {
-    status = AMDF_STATUS_OK;
-  }
-  amdf_memory_scope_t** scopes = NULL;
-  if (amdf_status_is_ok(status) && count) {
-    scopes = (amdf_memory_scope_t**)calloc(count, sizeof(*scopes));
-    status = scopes ? api->instance_enumerate_memory_scopes(instance, count,
-                                                            scopes, &count)
-                    : amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
-  }
-  if (amdf_info_report_query(output, result, "memory_pools",
-                             "instance_enumerate_memory_scopes", status,
-                             AMDF_INFO_QUERY_OPTIONAL)) {
-    amdf_info_report_pools_begin(output);
-    for (uint32_t i = 0; !output->failed && i < count; ++i) {
-      amdf_memory_scope_info_t info = {
-          .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
-          .structure_size = sizeof(info),
-      };
-      const amdf_status_t query_status =
-          api->memory_scope_query_info(scopes[i], &info);
-      if (amdf_info_report_query(output, result, NULL,
-                                 "memory_scope_query_info", query_status,
-                                 AMDF_INFO_QUERY_OPTIONAL)) {
-        amdf_info_report_pool(output, i, &info);
-      }
-    }
-    amdf_info_report_pools_end(output);
-  }
-  free(scopes);
 }
 
 static void amdf_info_query_location(const amdf_api_t* api,
@@ -246,7 +208,7 @@ amdf_info_exit_code_t amdf_info_invoke(const amdf_info_options_t* options,
     }
   }
   if (instance) {
-    amdf_info_query_pools(library.api, instance, &output, &result);
+    amdf_info_query_memory_pools(library.api, instance, NULL, &output, &result);
     amdf_info_endpoint_t* endpoints = NULL;
     uint32_t count = 0;
     if (!output.failed) {

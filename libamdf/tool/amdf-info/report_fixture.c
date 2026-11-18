@@ -34,6 +34,8 @@ struct amdf_device_t {
 struct amdf_memory_scope_t {
   // Instance owner of the borrowed system scope.
   amdf_instance_t* instance;
+  // Physical endpoint for a local scope; NULL for system storage.
+  amdf_endpoint_t* endpoint;
 };
 
 static const char* scenario;
@@ -41,6 +43,10 @@ static amdf_instance_t instance;
 static amdf_endpoint_t endpoints[] = {{.index = 0}, {.index = 1}, {.index = 2}};
 static amdf_device_t devices[3];
 static amdf_memory_scope_t scope = {.instance = &instance};
+static amdf_memory_scope_t local_scopes[] = {
+    {.instance = &instance, .endpoint = &endpoints[0]},
+    {.instance = &instance, .endpoint = &endpoints[1]},
+};
 static const amdf_endpoint_id_t identities[] = {{{2, 9}}, {{1, 7}}, {{3, 5}}};
 
 static bool is_scenario(const char* name) {
@@ -249,6 +255,27 @@ static amdf_status_t AMDF_CALL enumerate_scopes(amdf_instance_t* owner,
   return AMDF_STATUS_OK;
 }
 
+static amdf_status_t AMDF_CALL
+device_enumerate_scopes(amdf_device_t* device, uint32_t capacity,
+                        amdf_memory_scope_t** scopes, uint32_t* out_count) {
+  require(device->endpoint->device_live);
+  trace(capacity ? "device_scopes_fill" : "device_scopes_count",
+        device->endpoint);
+  if (is_scenario("device_scopes_count_failure") ||
+      (capacity && is_scenario("device_scopes_fill_failure"))) {
+    return failure();
+  }
+  const uint32_t index = device->endpoint->index;
+  *out_count = index < 2 ? 1 : 0;
+  if (capacity < *out_count) {
+    return amdf_make_api_status(AMDF_STATUS_CODE_BUFFER_TOO_SMALL);
+  }
+  if (*out_count) {
+    scopes[0] = &local_scopes[index];
+  }
+  return AMDF_STATUS_OK;
+}
+
 static amdf_status_t AMDF_CALL scope_query_info(
     amdf_memory_scope_t* memory_scope, amdf_memory_scope_info_t* info) {
   require(memory_scope->instance->live);
@@ -256,6 +283,19 @@ static amdf_status_t AMDF_CALL scope_query_info(
   info->capacity_byte_length = UINT64_C(9007199254740993);
   info->memory_profile_count = 1;
   info->flags = AMDF_MEMORY_SCOPE_FLAG_SYSTEM_BACKED;
+  if (memory_scope->endpoint) {
+    require(memory_scope->endpoint->live);
+    trace("local_scope_query_info", memory_scope->endpoint);
+    if (is_scenario("local_scope_query_failure")) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_PERMISSION_DENIED);
+    }
+    info->kind = AMDF_MEMORY_SCOPE_KIND_LOCAL;
+    info->physical_endpoint_id = identities[memory_scope->endpoint->index];
+    if (memory_scope->endpoint->index == 0) {
+      info->capacity_byte_length = UINT64_C(24) << 30;
+      info->flags = 0;
+    }
+  }
   return AMDF_STATUS_OK;
 }
 
@@ -297,7 +337,8 @@ gpu_device_query_info(amdf_device_t* device, amdf_gpu_device_info_t* info) {
   }
   info->id.words[0] = 9;
   info->reset_epoch = UINT64_MAX;
-  info->features = AMDF_GPU_DEVICE_FEATURE_HOST_REGISTRATION;
+  info->features = AMDF_GPU_DEVICE_FEATURE_HOST_REGISTRATION |
+                   AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY;
   return AMDF_STATUS_OK;
 }
 
@@ -382,6 +423,7 @@ static const amdf_api_t api = {
     .device_query_queue_family_placement_info = placement_query_info,
     .device_destroy = device_destroy,
     .instance_enumerate_memory_scopes = enumerate_scopes,
+    .device_enumerate_memory_scopes = device_enumerate_scopes,
     .memory_scope_query_info = scope_query_info,
 };
 

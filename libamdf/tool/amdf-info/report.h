@@ -49,7 +49,8 @@ void amdf_info_report_error(amdf_info_output_t* output, const char* field,
 void amdf_info_report_selection_error(amdf_info_output_t* output,
                                       amdf_info_exit_code_t exit_code);
 
-void amdf_info_report_pools_begin(amdf_info_output_t* output);
+void amdf_info_report_pools_begin(amdf_info_output_t* output,
+                                  bool device_pools);
 void amdf_info_report_pool(amdf_info_output_t* output, uint32_t ordinal,
                            const amdf_memory_scope_info_t* info);
 void amdf_info_report_pools_end(amdf_info_output_t* output);
