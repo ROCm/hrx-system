@@ -5,6 +5,7 @@
 
 #include "loom/runtime/parameter/weights.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "iree/async/semaphore.h"
@@ -118,11 +119,28 @@ static const loom_runtime_weight_span_t* loom_runtime_weight_find(
 }
 
 typedef struct loom_runtime_weight_root_binding_t {
+  // Original caller ordinal, independent of placement planning order.
+  iree_host_size_t root_index;
+  // Reflected tensors in this root; complete roots precede contained views.
+  iree_host_size_t parameter_count;
   // Unique storage allocation selected by parameter identity and placement.
   iree_host_size_t storage_index;
   // Byte range of this root within the selected storage allocation.
   iree_hal_buffer_range_t range;
 } loom_runtime_weight_root_binding_t;
+
+// A strict superset has more tensors even when callers extend both root
+// footprints to the same reservation granularity. Equal sets keep caller order.
+static int loom_runtime_weight_compare_roots(const void* lhs_ptr,
+                                             const void* rhs_ptr) {
+  const loom_runtime_weight_root_binding_t* lhs = lhs_ptr;
+  const loom_runtime_weight_root_binding_t* rhs = rhs_ptr;
+  if (lhs->parameter_count != rhs->parameter_count) {
+    return lhs->parameter_count > rhs->parameter_count ? -1 : 1;
+  }
+  return (lhs->root_index > rhs->root_index) -
+         (lhs->root_index < rhs->root_index);
+}
 
 // Resolves root sharing before submitting any I/O. Only newly allocated roots
 // append spans, so tensors shared by multiple stages are read and prepared
@@ -151,7 +169,10 @@ static iree_status_t loom_runtime_weight_resolve_root(
         if (shared->parameter.byte_offset < parameter.byte_offset) {
           return iree_make_status(
               IREE_STATUS_INVALID_ARGUMENT,
-              "shared parameter root begins before storage");
+              "shared parameter '%.*s' at offset %" PRIu64
+              " precedes its requested root-relative offset %" PRIu64,
+              (int)parameter.key.size, parameter.key.data,
+              shared->parameter.byte_offset, parameter.byte_offset);
         }
         origin = shared->parameter.byte_offset - parameter.byte_offset;
       }
@@ -161,8 +182,15 @@ static iree_status_t loom_runtime_weight_resolve_root(
          (existing->storage_index != shared->storage_index ||
           existing->parameter.byte_offset != origin + parameter.byte_offset ||
           existing->parameter.byte_length != parameter.byte_length))) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "parameter root cannot share existing placement");
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "parameter '%.*s' cannot share root placement: requested offset "
+          "%" PRIu64 " and length %" PRIu64 ", existing offset %" PRIu64
+          " and length %" PRIu64 " (present=%d)",
+          (int)parameter.key.size, parameter.key.data,
+          origin + parameter.byte_offset, parameter.byte_length,
+          existing ? existing->parameter.byte_offset : 0,
+          existing ? existing->parameter.byte_length : 0, existing != NULL);
     }
   }
   if (!count) {
@@ -170,15 +198,30 @@ static iree_status_t loom_runtime_weight_resolve_root(
                             "empty model parameter root");
   }
   if (shared) {
-    *out_binding = (loom_runtime_weight_root_binding_t){
-        shared->storage_index, {origin, root.required_byte_length}};
+    if (origin % root.minimum_alignment ||
+        root.required_byte_length > UINT64_MAX - origin) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "shared parameter root offset %" PRIu64
+          " cannot satisfy alignment %" PRIu64 " and length %" PRIu64,
+          origin, root.minimum_alignment, root.required_byte_length);
+    }
+    iree_hal_pool_reservation_request_t* request =
+        &requests[shared->storage_index];
+    request->allocation_size =
+        iree_max(request->allocation_size, origin + root.required_byte_length);
+    request->min_alignment =
+        iree_max(request->min_alignment, root.minimum_alignment);
+    out_binding->storage_index = shared->storage_index;
+    out_binding->range =
+        (iree_hal_buffer_range_t){origin, root.required_byte_length};
     return iree_ok_status();
   }
   const iree_host_size_t storage_index = weights->storage_count++;
   requests[storage_index] = iree_hal_make_pool_reservation_request(
       root.required_byte_length, root.minimum_alignment);
-  *out_binding = (loom_runtime_weight_root_binding_t){
-      storage_index, {0, root.required_byte_length}};
+  out_binding->storage_index = storage_index;
+  out_binding->range = (iree_hal_buffer_range_t){0, root.required_byte_length};
   for (uint32_t i = 0; i < program->parameters.count; ++i) {
     const loom_cmd_program_parameter_t parameter =
         loom_cmd_program_parameter_at(program, i);
@@ -1416,19 +1459,9 @@ iree_status_t loom_runtime_weights_allocate(
                                        weights);
   *out_weights = weights;
   IREE_TRACE_ZONE_BEGIN(z0);
-  iree_host_size_t capacity =
-      shared_root_count ? roots[0].program->parameters.count : 0;
-  for (iree_host_size_t i = shared_root_count; i < root_count; ++i) {
-    capacity += roots[i].program->parameters.count;
-  }
-  iree_status_t status = iree_allocator_malloc_array(host_allocator, capacity,
-                                                     sizeof(*weights->spans),
-                                                     (void**)&weights->spans);
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(host_allocator, root_count,
-                                         sizeof(*weights->storages),
-                                         (void**)&weights->storages);
-  }
+  iree_status_t status = iree_allocator_malloc_array(
+      host_allocator, root_count, sizeof(*weights->storages),
+      (void**)&weights->storages);
   loom_runtime_weight_root_binding_t* bindings = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc_array(
@@ -1442,23 +1475,46 @@ iree_status_t loom_runtime_weights_allocate(
                : NULL;
   iree_hal_buffer_t** buffers =
       requests ? (iree_hal_buffer_t**)(requests + root_count) : NULL;
-  if (shared_root_count && iree_status_is_ok(status)) {
-    loom_cmd_program_parameter_root_t root = roots[0].root;
-    for (iree_host_size_t i = 1; i < shared_root_count; ++i) {
-      const loom_cmd_program_parameter_root_t other = roots[i].root;
-      root.required_byte_length =
-          iree_max(root.required_byte_length, other.required_byte_length);
-      root.minimum_alignment =
-          iree_max(root.minimum_alignment, other.minimum_alignment);
+  iree_host_size_t binding_count = 0;
+  if (iree_status_is_ok(status)) {
+    iree_host_size_t capacity = 0;
+    for (iree_host_size_t i = 0; i < root_count; ++i) {
+      if (i && i < shared_root_count) {
+        continue;
+      }
+      loom_runtime_weight_root_binding_t* binding = &bindings[binding_count++];
+      binding->root_index = i;
+      const loom_cmd_program_t* program = roots[i].program;
+      for (uint32_t p = 0; p < program->parameters.count; ++p) {
+        if (loom_cmd_program_parameter_at(program, p).fixed_buffer_index ==
+            roots[i].root.fixed_buffer_index) {
+          ++binding->parameter_count;
+        }
+      }
+      capacity += binding->parameter_count;
+    }
+    status = iree_allocator_malloc_array(host_allocator, capacity,
+                                         sizeof(*weights->spans),
+                                         (void**)&weights->spans);
+    if (iree_status_is_ok(status) && binding_count > 1) {
+      qsort(bindings, binding_count, sizeof(*bindings),
+            loom_runtime_weight_compare_roots);
+    }
+  }
+  for (iree_host_size_t i = 0; i < binding_count && iree_status_is_ok(status);
+       ++i) {
+    const iree_host_size_t index = bindings[i].root_index;
+    loom_cmd_program_parameter_root_t root = roots[index].root;
+    if (!index) {
+      for (iree_host_size_t j = 1; j < shared_root_count; ++j) {
+        root.required_byte_length = iree_max(
+            root.required_byte_length, roots[j].root.required_byte_length);
+        root.minimum_alignment =
+            iree_max(root.minimum_alignment, roots[j].root.minimum_alignment);
+      }
     }
     status = loom_runtime_weight_resolve_root(
-        weights, roots[0].program, root, &weights->span_count, weights->spans,
-        requests, &bindings[0]);
-  }
-  for (iree_host_size_t i = shared_root_count;
-       i < root_count && iree_status_is_ok(status); ++i) {
-    status = loom_runtime_weight_resolve_root(
-        weights, roots[i].program, roots[i].root, &weights->span_count,
+        weights, roots[index].program, root, &weights->span_count,
         weights->spans, requests, &bindings[i]);
   }
   if (iree_status_is_ok(status) && !pool && weights->storage_count) {
@@ -1510,21 +1566,23 @@ iree_status_t loom_runtime_weights_allocate(
     storage->buffer = buffers[i];
     buffers[i] = NULL;
   }
-  for (iree_host_size_t i = 0; i < root_count && iree_status_is_ok(status);
+  for (iree_host_size_t i = 0; i < binding_count && iree_status_is_ok(status);
        ++i) {
-    if (i && i < shared_root_count) {
+    const loom_runtime_weight_root_binding_t binding = bindings[i];
+    iree_hal_buffer_t** buffer = roots[binding.root_index].buffer;
+    status = iree_hal_buffer_subspan(
+        weights->storages[binding.storage_index].buffer,
+        binding.range.byte_offset, binding.range.byte_length, host_allocator,
+        buffer);
+    if (iree_status_is_ok(status)) {
+      status = loom_runtime_retirement_track(&weights->retirement, buffer,
+                                             host_allocator);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 1; i < shared_root_count; ++i) {
       *roots[i].buffer = *roots[0].buffer;
       iree_hal_buffer_retain(*roots[i].buffer);
-    } else {
-      const loom_runtime_weight_root_binding_t binding = bindings[i];
-      status = iree_hal_buffer_subspan(
-          weights->storages[binding.storage_index].buffer,
-          binding.range.byte_offset, binding.range.byte_length, host_allocator,
-          roots[i].buffer);
-      if (iree_status_is_ok(status)) {
-        status = loom_runtime_retirement_track(&weights->retirement,
-                                               roots[i].buffer, host_allocator);
-      }
     }
   }
   if (bindings) {

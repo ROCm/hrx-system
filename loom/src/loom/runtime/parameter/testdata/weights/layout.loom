@@ -1,0 +1,44 @@
+kernel.def @layout_consume() {
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c8, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%a: view<8xi32>, %b: view<8xi32>, %raw: view<8xi32>, %output: buffer) {
+  %c0 = index.constant 0 : offset
+  %element = kernel.workgroup.id<x> : index
+  %output_view = buffer.view %output[%c0] : buffer -> view<8xi32>
+  %av = view.load %a[%element] : view<8xi32> -> i32
+  %bv = view.load %b[%element] : view<8xi32> -> i32
+  %rv = view.load %raw[%element] : view<8xi32> -> i32
+  %ab = scalar.addi %av, %bv : i32
+  %sum = scalar.addi %ab, %rv : i32
+  view.store %sum, %output_view[%element] : i32, view<8xi32>
+  kernel.return
+}
+
+command.def public @layout_whole() launch(%weights: buffer, %output: buffer) {
+  %a = command.parameter %weights, "a" : view<8xi32>
+  %b = command.parameter %weights, "b" : view<8xi32>
+  %raw = command.parameter %weights, "raw" : view<8xi32>
+  kernel.launch @layout_consume(%a, %b, %raw, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
+  command.return
+}
+
+command.def public @layout_parts() launch(%shared: buffer, %private: buffer, %output: buffer) {
+  %a = command.parameter %shared, "a" : view<8xi32>
+  %d = command.parameter %private, "d" : view<8xi32>
+  kernel.launch @layout_consume(%a, %d, %d, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
+  command.return
+}
+
+command.def public @layout_tail() launch(%weights: buffer, %output: buffer) {
+  %data = command.parameter %weights, "raw" : view<8xi32>
+  kernel.launch @layout_consume(%data, %data, %data, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
+  command.return
+}
+
+command.def public @layout_overlap() launch(%weights: buffer, %output: buffer) {
+  %a = command.parameter %weights, "a" : view<8xi32>
+  %d = command.parameter %weights, "d" : view<8xi32>
+  kernel.launch @layout_consume(%a, %d, %d, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
+  command.return
+}

@@ -356,7 +356,8 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     directory_ =
         std::filesystem::path(WeightSourcePath()).parent_path().string();
     const iree_string_view_t providers[] = {IREE_SV("stages.loom"),
-                                            IREE_SV("packing.loom")};
+                                            IREE_SV("packing.loom"),
+                                            IREE_SV("layout.loom")};
     const loom_runtime_sources_t sources = {
         .base_directory = iree_make_cstring_view(directory_.c_str()),
         .count = IREE_ARRAYSIZE(providers),
