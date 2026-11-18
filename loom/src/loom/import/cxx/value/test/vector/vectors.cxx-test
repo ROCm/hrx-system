@@ -212,3 +212,20 @@ func.def public @extrema(%left: vector<4xf32>, %right: vector<4xf32>) -> (vector
   %15 = vector.addf %13, %14 : vector<4xf32>
   func.return %15 : vector<4xf32>
 }
+
+// ====
+// An address space after vector_size qualifies the vector for overload resolution.
+using Words = unsigned __attribute__((vector_size(16)));
+using DeviceWords = Words __attribute__((address_space(1)));
+using Direct = unsigned __attribute__((vector_size(16), address_space(1)));
+
+static constexpr unsigned select(DeviceWords*) { return 7; }
+static constexpr unsigned select(...) { return 11; }
+constexpr unsigned selected = select(static_cast<Direct*>(nullptr));
+unsigned entry() { return selected; }
+
+// ----
+func.def public @entry() -> (i32) {
+  %selected = scalar.constant 7 : i32
+  func.return %selected : i32
+}
