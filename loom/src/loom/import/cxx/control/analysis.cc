@@ -602,6 +602,65 @@ bool ControlFlow::object_requires_storage(cxx::AST* source) const {
   return object_identity_ && object_identity_->requires_storage(source);
 }
 
+std::span<const ValueProjection> ControlFlow::storage_members(
+    cxx::Symbol* binding) const {
+  if (storage_members_) {
+    auto found = storage_members_->find(binding);
+    if (found != storage_members_->end()) {
+      return found->second;
+    }
+  }
+  return {};
+}
+
+ObjectInterval ControlFlow::storage_interval(ObjectInterval interval,
+                                             cxx::AST* source) const {
+  if (receiver_partition_ && is_direct_subobject(interval.binding) &&
+      interval.binding->parent() == receiver_partition_->source &&
+      !function_->isConstructor() && !function_->isDestructor() &&
+      types_.requires_value_transport(receiver_partition_->source->type())) {
+    const auto& field = types_.member(interval.binding, source);
+    if (interval.end == ObjectInterval::kWholeObjectEnd) {
+      interval.end = field.partition->component_count;
+    }
+    interval.binding = receiver_partition_->source;
+    interval.begin += field.component_offset;
+    interval.end += field.component_offset;
+  }
+  return interval;
+}
+
+bool ControlFlow::require_storage_member(ObjectInterval interval,
+                                         cxx::AST* source, bool& changed) {
+  interval = storage_interval(interval, source);
+  if (interval.end == ObjectInterval::kWholeObjectEnd) {
+    return false;
+  }
+  auto* type = source_object_type(interval.binding);
+  // An indirect pointer parameter's identity describes its pointee.
+  if (auto found = pointer_aliases_.find(interval.binding);
+      found != pointer_aliases_.end() && found->second.parameter_object_type) {
+    type = found->second.parameter_object_type;
+  }
+  auto group =
+      types_.storage_member(type, interval.begin, interval.end, source);
+  if (!group) {
+    return false;
+  }
+  if (!storage_members_) {
+    storage_members_ = std::make_unique<StorageMembers>();
+  }
+  auto& members = (*storage_members_)[interval.binding];
+  auto insert = std::ranges::lower_bound(members, group->component_offset, {},
+                                         &ValueProjection::component_offset);
+  if (insert == members.end() ||
+      insert->component_offset != group->component_offset) {
+    members.insert(insert, *group);
+    changed = true;
+  }
+  return true;
+}
+
 bool ControlFlow::result_requires_storage() const {
   return object_identity_ && object_identity_->requires_storage(function_);
 }
@@ -609,7 +668,9 @@ bool ControlFlow::result_requires_storage() const {
 void ControlFlow::retain_owned_binding(cxx::Symbol* binding,
                                        cxx::ExpressionAST* initializer) {
   auto* type = source_object_type(binding);
-  if (!unit_.typeTraits().is_class(type)) {
+  auto traits = unit_.typeTraits();
+  if (!traits.is_class(type) && !(object_identity_ && traits.is_array(type) &&
+                                  types_.requires_value_transport(type))) {
     return;
   }
   if (!object_identity_) {
@@ -963,10 +1024,17 @@ bool ControlFlow::argument_requires_storage(const CallArgument& argument,
     return true;
   }
   if (argument.identity_intervals &&
-      std::ranges::any_of(*argument.identity_intervals,
-                          [&](const ObjectInterval& interval) {
-                            return requires_storage(interval.binding);
-                          })) {
+      std::ranges::any_of(
+          *argument.identity_intervals, [&](const ObjectInterval& interval) {
+            for (const auto& home : storage_members(interval.binding)) {
+              if (interval.begin >= home.component_offset &&
+                  interval.end <=
+                      home.component_offset + home.partition->component_count) {
+                return true;
+              }
+            }
+            return requires_storage(interval.binding);
+          })) {
     return true;
   }
   return false;
@@ -3159,6 +3227,10 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
       return;
     }
     if (auto destination = classify_destination(expression)) {
+      if (types_.requires_value_transport(types_.unqualified_value(
+              source_object_type(destination->binding)))) {
+        destinations_.emplace(expression, *destination);
+      }
       append_destination(*destination);
     } else {
       const auto selected = types_.selection(member, member);
@@ -3310,8 +3382,9 @@ void ControlFlow::retain_automatic_storage(cxx::VariableSymbol* variable,
 }
 
 bool ControlFlow::require_identity(const CallArgument& argument) {
-  bool changed =
-      object_identity_ && object_identity_->require_storage(argument.source);
+  bool changed = false;
+  bool complete =
+      !argument.identity_intervals && argument.identity_bindings.empty();
   for (const auto& reference : argument.reference_calls) {
     changed = identity_call_results_.insert(reference.call).second || changed;
   }
@@ -3348,12 +3421,23 @@ bool ControlFlow::require_identity(const CallArgument& argument) {
     changed = require_address(binding) || changed;
   };
   for (auto* binding : argument.identity_bindings) {
-    require_binding(binding);
+    if (!is_direct_subobject(binding) ||
+        !require_storage_member({binding, 0, ObjectInterval::kWholeObjectEnd},
+                                argument.source, changed)) {
+      complete = true;
+      require_binding(binding);
+    }
   }
   if (argument.identity_intervals) {
     for (const auto& interval : *argument.identity_intervals) {
-      require_binding(interval.binding);
+      if (!require_storage_member(interval, argument.source, changed)) {
+        complete = true;
+        require_binding(interval.binding);
+      }
     }
+  }
+  if (complete && object_identity_) {
+    changed = object_identity_->require_storage(argument.source) || changed;
   }
   return changed;
 }
@@ -3430,6 +3514,41 @@ bool ControlFlow::retain_reference_capture_identity(cxx::Symbol* symbol) {
     return types_.require_reference_capture_identity(field);
   }
   return false;
+}
+
+bool ControlFlow::resolve_member_constructions() {
+  if (!object_identity_) {
+    return false;
+  }
+  bool changed = false;
+  for (const auto& member : object_identity_->member_constructions()) {
+    if (object_identity_->requires_storage(member.initializer)) {
+      const auto& part =
+          types_.partition(member.initializer->type, member.initializer);
+      require_storage_member(
+          {member.binding, member.offset, member.offset + part.component_count},
+          member.initializer, changed);
+    }
+  }
+  return changed;
+}
+
+const Destination* ControlFlow::aggregate_destination(
+    cxx::ExpressionAST* initializer) const {
+  return object_identity_ ? object_identity_->aggregate_destination(initializer)
+                          : nullptr;
+}
+
+std::optional<Destination> ControlFlow::member_construction(
+    cxx::ExpressionAST* source) const {
+  const auto* member = object_identity_
+                           ? object_identity_->member_construction(source)
+                           : nullptr;
+  if (!member) {
+    return {};
+  }
+  return Destination{member->binding, member->offset,
+                     &types_.partition(source->type, source)};
 }
 
 bool ControlFlow::resolve_reference_captures() {
@@ -4333,11 +4452,57 @@ CallPropagation ControlFlow::propagate_overlapping_indirect_parameters(
   return {caller_changed, callee_changed};
 }
 
+void ControlFlow::transfer_storage_members(
+    ObjectInterval actual, ControlFlow& callee, cxx::Symbol* formal,
+    cxx::AST* source, bool& caller_changed, bool& callee_changed) {
+  actual = storage_interval(actual, source);
+  // A private reference sees the caller's selected members, including
+  // writes through a second pointer supplied in the very same call.
+  // Copy descriptors before insertion since recursive edges can name the
+  // same binding on both sides.
+  const size_t count = storage_members(actual.binding).size();
+  for (size_t i = 0; i < count; ++i) {
+    const auto home = storage_members(actual.binding)[i];
+    const size_t begin = home.component_offset;
+    const size_t end = begin + home.partition->component_count;
+    if (begin >= actual.begin && end <= actual.end) {
+      const size_t offset = actual.reference_offset + begin - actual.begin;
+      callee.require_storage_member(
+          {formal, offset, offset + home.partition->component_count}, source,
+          callee_changed);
+    }
+  }
+  const size_t demanded = callee.storage_members(formal).size();
+  for (size_t i = 0; i < demanded; ++i) {
+    const auto home = callee.storage_members(formal)[i];
+    auto mapped = project_interval(
+        actual, {home.component_offset, home.partition->component_count});
+    if (mapped) {
+      require_storage_member(*mapped, source, caller_changed);
+    }
+  }
+}
+
 CallPropagation ControlFlow::propagate_call(
     const DirectCall& call, ControlFlow& callee,
     iree_arena_allocator_t* scratch_arena) {
   bool caller_changed = propagate_projected_reference_return(call, callee);
   bool callee_changed = false;
+  if ((storage_members_ || callee.storage_members_) &&
+      callee.receiver_partition_ && !call.function->isConstructor() &&
+      !call.function->isDestructor()) {
+    auto* formal = callee.receiver_partition_->source;
+    if (call.receiver) {
+      visit_intervals(*call.receiver, {}, [&](ObjectInterval actual) {
+        transfer_storage_members(actual, callee, formal, call.source,
+                                 caller_changed, callee_changed);
+      });
+    } else if (call.current_receiver && receiver_partition_) {
+      transfer_storage_members(
+          {receiver_partition_->source, 0, ObjectInterval::kWholeObjectEnd},
+          callee, formal, call.source, caller_changed, callee_changed);
+    }
+  }
   const bool stored_receiver_write =
       !callee.receiver_writes().empty() &&
       (call.storage_receiver || callee.receiver_requires_storage_ ||
@@ -4391,6 +4556,12 @@ CallPropagation ControlFlow::propagate_call(
       continue;
     }
     const auto& argument = call.arguments[ordinal];
+    if (storage_members_ || callee.storage_members_) {
+      visit_intervals(argument, {}, [&](ObjectInterval actual) {
+        transfer_storage_members(actual, callee, parameter, call.source,
+                                 caller_changed, callee_changed);
+      });
+    }
     if (reference && storage_receiver_result &&
         ordinal < callee.projected_reference_return_facts_->parameter_has_origin
                       .size() &&

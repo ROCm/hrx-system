@@ -1179,10 +1179,25 @@ This is a value boundary: unions, bitfields, virtual bases, and polymorphic
 objects have no admitted record-value representation. Views and encoding handles
 also cannot cross this kernel argument boundary, even with static shapes;
 construct them inside the kernel from explicit buffer and scalar arguments.
-Within the kernel, records can be copied, mutated, passed to ordinary helpers,
-and destroyed. Addressing an individual member can require object storage;
-records containing pointers cannot currently supply that storage. In particular,
-passing an array member as `const T*` differs from indexing that array directly.
+A local or by-value record can supply an address for a numeric member even
+when another field is a pointer. For example, a helper can borrow the bounds
+array and the enclosing record in the same call:
+
+```cpp
+struct View { float* data; int lo[3]; };
+
+static int update(const int* bounds, View& view) {
+  view.lo[1] += 7;
+  return bounds[1];  // Reads the updated coordinate.
+}
+int adjust(View view) { return update(view.lo, view); }
+```
+
+The importer gives the borrowed array one address. The sibling `data` field
+keeps its buffer identity and signed displacement. Copying the record copies
+its coordinates. Assigning to the record updates the coordinates seen through
+a pointer taken before the assignment. Inlining and private-storage promotion
+can eliminate the array storage when the pointer stays within the function.
 
 Export emits the explicit leaf signature as ordinary C++ parameters. The
 grouping into the original record or lambda is not required to reimport the

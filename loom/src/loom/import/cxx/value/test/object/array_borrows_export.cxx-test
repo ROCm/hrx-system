@@ -107,3 +107,62 @@ static unsigned element(loom::type::buffer<unsigned char> state_output, loom::ty
   unsigned v74 = Box__data_value(state_box_lower_0, state_box_lower_1, state_box_upper_0, state_box_upper_1, upper);
   return ((v74 * 2u) + index);
 }
+
+// ====
+// The raised program retains each pointer to the same numeric subobject.
+struct View { int* data; int bounds[2]; };
+static int update(int* pointer, View& owner) {
+  owner.bounds[1] = 12;
+  return pointer[1];
+}
+int shared(const int value) {
+  View view{nullptr, {value, value}};
+  return update(view.bounds, view);
+}
+// ----
+#include <loomcxx/predicate.h>
+#include <loomcxx/view.h>
+
+[[loom::symbol("shared")]]
+unsigned shared(unsigned value);
+
+[[loom::symbol("update")]]
+static unsigned update(loom::type::buffer<unsigned> pointer, loom::type::index pointer_byte_offset, loom::type::buffer<unsigned> bounds, loom::type::index bounds_byte_offset);
+
+[[loom::symbol("shared")]]
+unsigned shared(unsigned value) {
+  auto* bounds = loom::buffer::alloca<loom::memory_space::private_, 4>(loom::type::offset{8});
+  auto v5 = loom::buffer::view<2>(reinterpret_cast<const unsigned*>(reinterpret_cast<const unsigned char*>(bounds)), {});
+  auto view_data = loom::buffer::null<unsigned char>();
+  loom::assume(loom::predicate::range(loom::type::index{0}, 0, 4));
+  auto bounds_view = loom::buffer::view<1>(reinterpret_cast<unsigned*>(reinterpret_cast<unsigned char*>(bounds)), {});
+  loom::view::store(value, bounds_view, 0);
+  loom::type::index bounds_byte_offset_1 = loom::type::index{0} + loom::type::index{4};
+  loom::assume(loom::predicate::range(bounds_byte_offset_1, 0, 4));
+  auto bounds_view_1 = loom::buffer::view<1>(reinterpret_cast<unsigned*>(reinterpret_cast<unsigned char*>(bounds) + static_cast<long long>(bounds_byte_offset_1)), {});
+  loom::view::store(value, bounds_view_1, 0);
+  auto v15 = loom::buffer::view<1>(reinterpret_cast<const unsigned*>(reinterpret_cast<const unsigned char*>(bounds)), {});
+  unsigned v16 = loom::view::load(v15, 0);
+  loom::type::index v18 = loom::type::index{0} + loom::type::index{4};
+  loom::assume(loom::predicate::range(v18, 0, 4));
+  auto v20 = loom::buffer::view<1>(reinterpret_cast<const unsigned*>(reinterpret_cast<const unsigned char*>(bounds) + static_cast<long long>(v18)), {});
+  unsigned v21 = loom::view::load(v20, 0);
+  auto view_bounds_0_view = loom::buffer::view<1>(reinterpret_cast<const unsigned*>(reinterpret_cast<const unsigned char*>(bounds)), {});
+  unsigned view_bounds_0 = loom::view::load(view_bounds_0_view, 0);
+  loom::type::index view_bounds_1_byte_offset = loom::type::index{0} + loom::type::index{4};
+  loom::assume(loom::predicate::range(view_bounds_1_byte_offset, 0, 4));
+  auto view_bounds_1_view = loom::buffer::view<1>(reinterpret_cast<const unsigned*>(reinterpret_cast<const unsigned char*>(bounds) + static_cast<long long>(view_bounds_1_byte_offset)), {});
+  unsigned view_bounds_1 = loom::view::load(view_bounds_1_view, 0);
+  unsigned v30 = update(loom::buffer::cast<unsigned>(loom::buffer::root(bounds)), loom::type::index{0}, loom::buffer::cast<unsigned>(loom::buffer::root(bounds)), loom::type::index{0});
+  return v30;
+}
+
+[[loom::symbol("update")]]
+static unsigned update(loom::type::buffer<unsigned> pointer, loom::type::index pointer_byte_offset, loom::type::buffer<unsigned> bounds, loom::type::index bounds_byte_offset) {
+  loom::type::index bounds_byte_offset_1 = bounds_byte_offset + (loom::type::index{1} * loom::type::index{4});
+  auto bounds_view = loom::buffer::view<1>(bounds, bounds_byte_offset_1, {});
+  loom::view::store<loom::memory_access::root_in_bounds>(12u, bounds_view, 0);
+  auto v48 = loom::buffer::view<1>(loom::buffer::cast<const unsigned>(pointer), (pointer_byte_offset + (loom::type::index{1} * loom::type::index{4})), {});
+  unsigned v49 = loom::view::load<loom::memory_access::root_in_bounds>(v48, 0);
+  return v49;
+}

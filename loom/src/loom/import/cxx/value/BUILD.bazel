@@ -171,6 +171,18 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "member_storage",
+    srcs = ["member_storage.cc"],
+    hdrs = ["member_storage.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":bindings",
+        ":objects",
+    ],
+)
+
+loom_cc_library(
     name = "objects",
     srcs = ["objects.cc"],
     hdrs = ["objects.h"],

@@ -37,9 +37,10 @@ namespace {
 class ReceiverScope {
  public:
   ReceiverScope(Initialization::Evaluation& evaluation,
-                const RecordPartition& record)
+                const RecordPartition& record,
+                cxx::ExpressionAST* initializer = nullptr)
       : evaluation_(evaluation) {
-    evaluation_.enter_value_receiver(record);
+    evaluation_.enter_value_receiver(record, initializer);
   }
   ReceiverScope(Initialization::Evaluation& evaluation,
                 const RecordPartition& record, StorageProjection destination,
@@ -836,7 +837,7 @@ Value Initialization::from_elements(const cxx::Type* type,
       evaluation_.adopt(elements->value);
       return initialized;
     }
-    ReceiverScope receiver(evaluation_, *record);
+    ReceiverScope receiver(evaluation_, *record, initializer);
     for (const auto& member : record->members) {
       auto* initializing_expression = elements ? elements->value : nullptr;
       Value initialized;
@@ -855,8 +856,8 @@ Value Initialization::from_elements(const cxx::Type* type,
           }
           initialized = evaluation_.reference(elements->value, owner);
         } else {
-          initialized = elements ? evaluation_.convert(elements->value,
-                                                       member.type(), owner)
+          initialized = elements ? evaluation_.initialize_member(
+                                       elements->value, member.type(), owner)
                                  : zero(member.type(), owner);
           evaluation_.adopt(initializing_expression);
         }

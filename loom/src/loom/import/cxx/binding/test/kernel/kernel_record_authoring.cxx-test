@@ -75,7 +75,7 @@ static void mutate(Body* body) { body->count += 3; }
 void borrow_record(Body body) { mutate(&body); body.output[0] = body.count; }
 
 // ====
-// XFAIL: Borrowing an array member forces storage of the whole pointer-bearing record.
+// A pointer to an array member retains the full extent of that array.
 #include <loomcxx/kernel.h>
 struct Body { float* output; int values[4]; };
 static int first(const int* values) { return values[0]; }
@@ -83,7 +83,7 @@ static int first(const int* values) { return values[0]; }
 void borrow_array(Body body) { body.output[0] = first(body.values); }
 
 // ====
-// XFAIL: Borrowing a scalar member forces storage of the whole pointer-bearing record.
+// A helper can update a scalar member while its sibling pointer stays in SSA.
 #include <loomcxx/kernel.h>
 struct Body { float* output; int count; };
 static void mutate(int* value) { *value += 3; }

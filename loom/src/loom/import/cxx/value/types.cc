@@ -418,6 +418,77 @@ bool Types::requires_value_transport(const cxx::Type* input) {
   return object_properties(input).value_transport;
 }
 
+std::optional<ValueProjection> Types::component_child(ValueProjection group,
+                                                      size_t component) {
+  const size_t offset = component - group.component_offset;
+  if (group.partition->kind == ValueKind::Record) {
+    const auto& members =
+        static_cast<const RecordPartition&>(*group.partition).members;
+    auto next = std::ranges::upper_bound(members, offset, {},
+                                         &SubobjectPartition::component_offset);
+    if (next == members.begin()) {
+      return {};
+    }
+    const auto& member = *std::prev(next);
+    return ValueProjection{member.type(), member.partition,
+                           group.component_offset + member.component_offset,
+                           group.byte_offset + member.byte_offset()};
+  }
+  if (group.partition->kind == ValueKind::Array) {
+    const auto& array = static_cast<const ArrayPartition&>(*group.partition);
+    const size_t index = offset / array.element->component_count;
+    auto* element = array.source->elementType();
+    return ValueProjection{
+        element, array.element,
+        group.component_offset + index * array.element->component_count,
+        group.byte_offset +
+            index * unit_.control()->memoryLayout()->sizeOf(element).value()};
+  }
+  return {};
+}
+
+std::optional<ValueProjection> Types::storage_member(const cxx::Type* input,
+                                                     size_t begin, size_t end,
+                                                     cxx::AST* owner) {
+  auto* type = unqualified_value(input);
+  if (begin >= end || !requires_value_transport(type)) {
+    return {};
+  }
+  ValueProjection group{type, &partition(type, owner), 0};
+  while (end <= group.component_offset + group.partition->component_count) {
+    if (!requires_value_transport(group.type)) {
+      return group;
+    }
+    auto child = component_child(group, begin);
+    if (!child) {
+      break;
+    }
+    group = *child;
+  }
+  return {};
+}
+
+std::optional<uint64_t> Types::member_displacement(ValueProjection group,
+                                                   size_t component,
+                                                   const cxx::Type* type) {
+  const uint64_t origin = group.byte_offset;
+  type = unqualified_value(type);
+  while (component >= group.component_offset &&
+         component <
+             group.component_offset + group.partition->component_count) {
+    if (component == group.component_offset &&
+        unqualified_value(group.type) == type) {
+      return group.byte_offset - origin;
+    }
+    auto child = component_child(group, component);
+    if (!child) {
+      break;
+    }
+    group = *child;
+  }
+  return {};
+}
+
 const ReferenceStorageLayout* Types::reference_storage(const cxx::Type* input,
                                                        cxx::AST* owner) {
   input = unqualified(input);

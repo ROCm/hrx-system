@@ -297,6 +297,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   // components. Automatic declaration requirements and later address demand
   // are both retained before callable signatures are frozen.
   bool storage_backed(cxx::Symbol* binding) const;
+  // Numeric subobjects with independently borrowed addresses, in component
+  // order. The enclosing value keeps its ordinary source representation.
+  std::span<const ValueProjection> storage_members(cxx::Symbol* binding) const;
   // Retained construction identity of an owned prvalue or function result.
   bool object_requires_storage(cxx::AST* source) const;
   bool result_requires_storage() const;
@@ -473,6 +476,13 @@ class ControlFlow final : private cxx::ASTVisitor {
   // reach a fixed point. Returns whether selecting storage added a new identity
   // fact that must propagate through the call graph.
   bool resolve_reference_captures();
+  // Publishes addresses for directly constructed numeric members whose
+  // constructor or value-producing call requires a physical destination.
+  bool resolve_member_constructions();
+  const Destination* aggregate_destination(
+      cxx::ExpressionAST* initializer) const;
+  std::optional<Destination> member_construction(
+      cxx::ExpressionAST* source) const;
   // Publishes every remaining stable snapshot to the source type
   // representation contract before callable signatures are built.
   void publish_reference_snapshots(Types& types) const;
@@ -592,6 +602,14 @@ class ControlFlow final : private cxx::ASTVisitor {
                                    cxx::FunctionSymbol* callee);
   bool require_identity(cxx::ExpressionAST* expression);
   bool require_identity(const CallArgument& argument);
+  ObjectInterval storage_interval(ObjectInterval interval,
+                                  cxx::AST* source) const;
+  void transfer_storage_members(ObjectInterval actual, ControlFlow& callee,
+                                cxx::Symbol* formal, cxx::AST* source,
+                                bool& caller_changed, bool& callee_changed);
+  // Returns whether this is a member demand, recording growth in changed.
+  bool require_storage_member(ObjectInterval interval, cxx::AST* source,
+                              bool& changed);
   enum class StorageDemand { Representation, Identity };
   bool argument_requires_storage(
       const CallArgument& argument,
@@ -758,6 +776,10 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::unordered_map<cxx::AST*, std::vector<cxx::Symbol*>> writes_;
   // Sparse physical-representation facts indexed by source binding identity.
   std::unordered_map<cxx::Symbol*, BindingStorageFacts> binding_storage_;
+  using StorageMembers =
+      std::unordered_map<cxx::Symbol*, std::vector<ValueProjection>>;
+  // Allocated only for functions borrowing native members of value records.
+  std::unique_ptr<StorageMembers> storage_members_;
   // Object currently being initialized. Observing its partial destination
   // requires in-place construction rather than an unbound completed value.
   cxx::Symbol* initializing_binding_ = nullptr;

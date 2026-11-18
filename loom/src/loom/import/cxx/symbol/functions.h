@@ -100,6 +100,8 @@ enum class IndirectParameterABI {
 
 // One callable's independently projected input and output source groups.
 struct ParameterProjection {
+  // Numeric subobjects borrowed by address, before ordinary input groups.
+  std::span<const ValueProjection> storage;
   // Complete source groups required on entry, in source component order.
   std::vector<ValueProjection> inputs;
   // Complete source groups replaced on return, in source component order.

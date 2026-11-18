@@ -492,6 +492,18 @@ class Types {
   // Whether this source type contains handles without a native byte-storage
   // representation. Native objects retain their ordinary storage semantics.
   bool requires_value_transport(const cxx::Type* input);
+  // Finds the independently addressable member containing a borrowed interval
+  // in a value-transported aggregate. Keeping a whole numeric array together
+  // preserves pointer arithmetic from an interior element.
+  std::optional<ValueProjection> storage_member(const cxx::Type* input,
+                                                size_t begin, size_t end,
+                                                cxx::AST* owner);
+  // Source-layout displacement of a typed subobject within an admitted
+  // numeric storage member. Same-component nested records may have different
+  // addresses, so component position alone does not identify a byte offset.
+  std::optional<uint64_t> member_displacement(ValueProjection group,
+                                              size_t component,
+                                              const cxx::Type* type);
   // Returns columnar reference-cell storage when every flattened component is
   // a managed ref or ptr. Other semantic values have no such representation.
   const ReferenceStorageLayout* reference_storage(const cxx::Type* input,
@@ -645,6 +657,9 @@ class Types {
                                    cxx::AST* owner) const;
 
  private:
+  std::optional<ValueProjection> component_child(ValueProjection group,
+                                                 size_t component);
+
   struct ObjectProperties {
     // Whether any owned component lacks a native byte-storage representation.
     bool value_transport = false;

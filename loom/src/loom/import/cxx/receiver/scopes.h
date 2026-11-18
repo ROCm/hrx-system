@@ -26,6 +26,8 @@ struct ReceiverState {
   std::optional<StorageProjection> storage;
   // Cv-qualified complete object type governing storage observations.
   const cxx::Type* object_type;
+  // Enclosing binding for a directly constructed mixed-storage aggregate.
+  const Destination* destination = nullptr;
 };
 
 // Owns lexical current-object scopes and subobject completion. Nested receivers
@@ -40,7 +42,8 @@ class ReceiverScopes {
 
   void enter(const RecordPartition& record,
              std::optional<StorageProjection> storage,
-             const cxx::Type* object_type);
+             const cxx::Type* object_type,
+             const Destination* destination = nullptr);
   void leave();
   // Returns whether a construction receiver was hidden. With no enclosing
   // current object, type-checked explicit clauses cannot observe that receiver.
