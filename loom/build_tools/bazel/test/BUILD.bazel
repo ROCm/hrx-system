@@ -16,6 +16,7 @@ load(
     "loom_amdgpu_target_profile",
     "loom_corpus_test",
     "loom_cxx_library",
+    "loom_cxx_test",
     "loom_execution_profile",
     "loom_kernel_binary",
     "loom_kernel_library",
@@ -117,11 +118,46 @@ loom_test(
 
 loom_library(
     name = "library_dependency",
-    srcs = [
-        "dependency_checks.loom",
-        "link_kernels.loom",
-    ],
+    srcs = ["link_kernels.loom"],
     tags = ["manual"],
+    deps = [":transitive_checks"],
+)
+
+loom_library(
+    name = "transitive_checks",
+    srcs = ["dependency_checks.loom"],
+    tags = ["manual"],
+)
+
+[
+    loom_library(
+        name = "selected_" + source,
+        srcs = ["//loom/src/loom/link/testdata/provider_roots:" + source + ".loom"],
+        tags = ["manual"],
+        deps = [":selected_transitive"] if source != "transitive" else [],
+    )
+    for source in [
+        "direct",
+        "unused",
+        "transitive",
+    ]
+]
+
+loom_cxx_library(
+    name = "selected_forward",
+    tags = ["manual"],
+    deps = [":selected_transitive"],
+)
+
+loom_test(
+    name = "selected_library_test",
+    benchmark_smoke = False,
+    execution_profiles = [REFERENCE_PROFILE],
+    deps = [
+        ":selected_direct",
+        ":selected_forward",
+        ":selected_unused",
+    ],
 )
 
 write_file(
@@ -179,8 +215,8 @@ loom_cxx_library(
 
 loom_test_module(
     name = "cxx_library_check_module",
-    root_library = ":cxx_library_check_source",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    deps = [":cxx_library_check_source"],
 )
 
 loom_test(
@@ -189,6 +225,23 @@ loom_test(
     execution_profiles = [REFERENCE_PROFILE],
     module = ":cxx_library_check_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_cxx_test(
+    name = "cxx_composed_test",
+    srcs = [
+        "cxx_additional_checks.cxx",
+        ":cxx_check_sources",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [REFERENCE_PROFILE],
+    local_defines = ["MODEL_TEXT=\"Loom's C++; tools\""],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    workloads = {
+        "all": {},
+        "selected": {"case": "imported_bias"},
+    },
+    deps = [":cxx_forward"],
 )
 
 [

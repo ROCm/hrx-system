@@ -5,6 +5,7 @@
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("//loom/requirements:package_policy.bzl", "apply_loom_target_policy")
+load(":loom_library.bzl", "loom_test")
 load(":loom_linking.bzl", "LoomLibraryInfo", "loom_linking")
 
 _CXX_TOOLCHAIN = Label("//loom/build_tools/bazel:cxx_import_toolchain_type")
@@ -179,3 +180,41 @@ def loom_cxx_library(name, srcs = [], hdrs = [], deps = [], copts = [], defines 
         data = data,
         **apply_loom_target_policy(kwargs, name = name)
     )
+
+def loom_cxx_test(name, srcs = [], deps = [], copts = [], defines = [], local_defines = [], includes = [], data = [], **kwargs):
+    """Imports C/C++ test sources and qualifies their checks with direct deps.
+
+    Sources and private headers follow loom_cxx_library's source contract.
+    Each source imports once; the common Loom test pipeline links its checks
+    and directly listed libraries before expanding workloads and profiles.
+
+    Args:
+      name: Public test suite name.
+      srcs: C/C++ translation units and private headers.
+      deps: Library header interfaces, owned checks, and link dependencies.
+      copts: Local importer options in key=value form.
+      defines: Preprocessor definitions for the test's translation units.
+      local_defines: Private preprocessor definitions.
+      includes: Package-relative include directories.
+      data: Runtime fixtures, independent of compiler headers.
+      **kwargs: loom_test execution, workload, and common Bazel attributes.
+    """
+    libraries = deps
+    if srcs:
+        library_name = name + "_library"
+        loom_cxx_library(
+            name = library_name,
+            srcs = srcs,
+            deps = deps,
+            copts = copts,
+            defines = defines,
+            local_defines = local_defines,
+            includes = includes,
+            data = data,
+            testonly = True,
+            tags = kwargs.get("tags", []) + ["manual"],
+            target_compatible_with = kwargs.get("target_compatible_with", []),
+            visibility = ["//visibility:private"],
+        )
+        libraries = [":" + library_name] + deps
+    loom_test(name = name, deps = libraries, data = data, **kwargs)

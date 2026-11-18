@@ -38,8 +38,8 @@ _SINGLE_SOURCE_MODULES = {
 [
     loom_test_module(
         name = source + "_module",
-        root_library = ":" + source + "_checks",
         target_compatible_with = _CXX_COMPATIBLE_WITH,
+        deps = [":" + source + "_checks"],
     )
     for source in _SINGLE_SOURCE_MODULES
 ]
@@ -100,8 +100,8 @@ _COMPOSED_MODULES = [
 [
     loom_test_module(
         name = source + suffix + "_module",
-        root_library = ":" + source + suffix + "_checks",
         target_compatible_with = _CXX_COMPATIBLE_WITH,
+        deps = [":" + source + suffix + "_checks"],
     )
     for source in _COMPOSED_MODULES
     for suffix in [

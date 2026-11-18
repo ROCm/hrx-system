@@ -459,7 +459,6 @@ class LoomBuildFileFunctions(
         self,
         name,
         srcs=None,
-        root_library=None,
         deps=None,
         data=None,
         tags=None,
@@ -468,20 +467,14 @@ class LoomBuildFileFunctions(
     ):
         if self._should_skip_target(tags=tags, **kwargs):
             return
-        if root_library and srcs:
-            raise ValueError(f"{name}: root_library is exclusive with srcs")
-        if not (srcs or root_library):
-            raise ValueError(f"{name} requires sources or a root library")
+        if not (srcs or deps):
+            raise ValueError(f"{name} requires srcs or deps")
         self._loom_module_targets.add(self._current_target_label(name))
         target_compatible_with = self._apply_loom_target_compatible_with(
             target_compatible_with
         )
         blocks = [
             self._convert_string_arg_block("NAME", name, quote=False),
-            self._convert_string_arg_block(
-                "ROOT_LIBRARY",
-                self._convert_single_target(root_library) if root_library else None,
-            ),
             self._convert_loom_module_inputs("SRCS", srcs),
             self._convert_loom_module_inputs("LIBRARIES", deps),
             self._convert_data_list_block(data),
@@ -516,8 +509,8 @@ class LoomBuildFileFunctions(
         del size, visibility
         if module and (srcs or deps or data):
             raise ValueError(f"{name} module is exclusive with source declarations")
-        if not module and not srcs:
-            raise ValueError(f"{name} requires srcs or a test module")
+        if not module and not srcs and not deps:
+            raise ValueError(f"{name} requires srcs, deps, or a test module")
         if not execution_profiles and not compile_targets:
             raise ValueError(f"{name} requires execution_profiles or compile_targets")
         self._reject_workload_args(name, args)
@@ -588,6 +581,39 @@ class LoomBuildFileFunctions(
                 args=config_args or None,
             )
         self._emit_platform_guard_end(target_compatible_with)
+
+    def loom_cxx_test(
+        self,
+        name,
+        srcs=None,
+        deps=None,
+        copts=None,
+        defines=None,
+        local_defines=None,
+        includes=None,
+        data=None,
+        **kwargs,
+    ):
+        if self._should_skip_target(tags=kwargs.get("tags")):
+            return
+        libraries = deps or []
+        if srcs:
+            library_name = name + "_library"
+            self.loom_cxx_library(
+                name=library_name,
+                srcs=srcs,
+                deps=deps,
+                copts=copts,
+                defines=defines,
+                local_defines=local_defines,
+                includes=includes,
+                data=data,
+                testonly=True,
+                tags=kwargs.get("tags"),
+                target_compatible_with=kwargs.get("target_compatible_with"),
+            )
+            libraries = [":" + library_name] + libraries
+        self.loom_test(name=name, deps=libraries, data=data, **kwargs)
 
     def _loom_execution_test(
         self, name, module, profile, args, benchmark_smoke, tags, workload_args

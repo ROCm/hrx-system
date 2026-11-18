@@ -79,7 +79,7 @@ def _decode_xfails(encoded_xfails, owner):
 def _declare_subject_module(ctx, source):
     return loom_linking.declare_test_module(
         ctx = ctx,
-        root_module = source,
+        sources = [source],
         dependency_infos = [],
         output_stem = ctx.label.name + "/subjects",
         mnemonic = "LoomCorpusLink",

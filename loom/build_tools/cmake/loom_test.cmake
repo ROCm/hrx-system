@@ -4,26 +4,22 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-# A source owner imports and links one module. Independently gated execution and
-# compiler children consume that module without repeating its source closure.
+# Sources and direct libraries contribute checks; transitive libraries supply
+# reachable code. Independent execution/compiler consumers share the result.
 function(loom_test_module)
   if(NOT IREE_BUILD_TESTS)
     return()
   endif()
   cmake_parse_arguments(
-    _RULE "" "NAME;ROOT_LIBRARY" "SRCS;LIBRARIES;DATA" ${ARGN}
+    _RULE "" "NAME" "SRCS;LIBRARIES;DATA" ${ARGN}
   )
   if(_RULE_UNPARSED_ARGUMENTS)
     message(FATAL_ERROR "Unknown loom_test_module arguments: ${_RULE_UNPARSED_ARGUMENTS}")
   endif()
   iree_package_path(_PACKAGE_PATH)
   set(_COMPONENT "//${_PACKAGE_PATH}:${_RULE_NAME}")
-  if(_RULE_ROOT_LIBRARY)
-    if(_RULE_SRCS)
-      message(FATAL_ERROR "loom_test_module ROOT_LIBRARY is exclusive with SRCS")
-    endif()
-  else()
-    set(_RULE_ROOT_LIBRARY "::${_RULE_NAME}_library")
+  set(_LIBRARIES ${_RULE_LIBRARIES})
+  if(_RULE_SRCS)
     loom_module(
       NAME "${_RULE_NAME}_library"
       COMPONENT "${_COMPONENT}_library"
@@ -34,16 +30,16 @@ function(loom_test_module)
       OUTPUT_FORMAT bc
       STRICT_DEPS
     )
+    list(PREPEND _LIBRARIES "::${_RULE_NAME}_library")
   endif()
   loom_module(
     NAME "${_RULE_NAME}"
     COMPONENT "${_COMPONENT}"
     DATA ${_RULE_DATA}
-    SRCS "${_RULE_ROOT_LIBRARY}"
-    LIBRARIES ${_RULE_LIBRARIES}
+    LIBRARIES ${_LIBRARIES}
     MODE link
     OUTPUT_FORMAT bc
-    INCLUDE_INPUT_TESTS
+    INCLUDE_LIBRARY_TESTS
   )
 endfunction()
 

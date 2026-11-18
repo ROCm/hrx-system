@@ -158,20 +158,13 @@ def _declare_linked_module(
 
 def _declare_test_module(
         ctx,
-        root_module,
+        sources,
         dependency_infos,
         output_stem,
         mnemonic,
         progress_message,
-        strip_check = False,
-        root_dependencies = depset()):
+        strip_check = False):
     dependencies = _collect_dependency_modules(dependency_infos)
-    direct_paths = {module.path: True for module in dependencies.direct}
-    transitive_modules = [
-        module
-        for module in depset(direct = dependencies.transitive, transitive = [root_dependencies]).to_list()
-        if module.path not in direct_paths
-    ]
     module = ctx.actions.declare_file(output_stem + ".loombc")
     args = ctx.actions.args()
     args.add("--mode=link")
@@ -183,20 +176,19 @@ def _declare_test_module(
     if ctx.var["COMPILATION_MODE"] != "dbg":
         args.add("--strip-debug")
     args.add("--output=%s" % module.path)
-    args.add(root_module)
-    args.add_all(dependencies.direct, format_each = "--library=%s")
-    args.add_all(
-        transitive_modules,
-        format_each = "--transitive-library=%s",
-    )
+    args.add_all(sources)
 
+    # Header-only interfaces forward link modules, but own no checks. Selecting
+    # one must not implicitly select tests from its dependency libraries.
+    test_modules = {info.module: True for info in dependency_infos if info.module != None}
+    for dependency in dependencies.direct:
+        args.add(("--test-library=" if dependency in test_modules else "--library=") + dependency.path)
+    args.add_all(dependencies.transitive, format_each = "--transitive-library=%s")
     tool = ctx.toolchains[_LOOM_LINK_TOOLCHAIN_TYPE].tool
     ctx.actions.run(
         arguments = [args],
         executable = tool.files_to_run,
-        inputs = depset(
-            direct = [root_module] + dependencies.direct + transitive_modules,
-        ),
+        inputs = depset(direct = sources + dependencies.direct + dependencies.transitive),
         mnemonic = mnemonic,
         outputs = [module],
         progress_message = progress_message,

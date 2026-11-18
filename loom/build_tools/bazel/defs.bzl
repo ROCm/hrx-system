@@ -31,6 +31,7 @@ load(
     ":loom_cxx_library.bzl",
     _LoomCxxInfo = "LoomCxxInfo",
     _loom_cxx_library = "loom_cxx_library",
+    _loom_cxx_test = "loom_cxx_test",
 )
 load(
     ":loom_library.bzl",
@@ -80,6 +81,7 @@ loom_corpus_manifest = _loom_corpus_manifest
 loom_corpus_sources = _loom_corpus_sources
 loom_corpus_test = _loom_corpus_test
 loom_cxx_library = _loom_cxx_library
+loom_cxx_test = _loom_cxx_test
 loom_scenario_test = _loom_scenario_test
 loom_execution_profile = _loom_execution_profile
 loom_kernel_binary = _loom_kernel_binary

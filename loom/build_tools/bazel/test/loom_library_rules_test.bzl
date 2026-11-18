@@ -130,8 +130,10 @@ def _test_library_keeps_dependency_module_separate_impl(env, target):
         "library_consumer.loombc",
     )
     dependencies = info.transitive_dependencies.to_list()
-    if len(dependencies) != 1:
-        env.fail("expected one propagated dependency, got %r" % dependencies)
+    env.expect.that_collection([file.basename for file in dependencies]).contains_exactly([
+        "library_dependency.loombc",
+        "transitive_checks.loombc",
+    ])
     _expect_basename(env, dependencies, "library_dependency.loombc")
 
     action = _find_action(env, target[TestingAspectInfo].actions, "LoomLibrary")
@@ -193,8 +195,11 @@ def _test_deps_only_library_propagates_dependencies(name, **kwargs):
 def _test_deps_only_library_propagates_dependencies_impl(env, target):
     info = target[LoomLibraryInfo]
     dependencies = info.transitive_dependencies.to_list()
-    if len(dependencies) != 2:
-        env.fail("expected two propagated dependencies, got %r" % dependencies)
+    env.expect.that_collection([file.basename for file in dependencies]).contains_exactly([
+        "library_consumer.loombc",
+        "library_dependency.loombc",
+        "transitive_checks.loombc",
+    ])
     _expect_basename(env, dependencies, "library_consumer.loombc")
     _expect_basename(env, dependencies, "library_dependency.loombc")
 
@@ -578,46 +583,52 @@ def _test_grouped_execution_root_sources_impl(env, target):
     _expect_basename(env, inputs, "profile_cases.loom")
     _expect_basename(env, inputs, "library_dependency.loombc")
 
-def _test_execution_module_links_root_tests(name, **kwargs):
+def _test_execution_module_selects_declared_checks(name, **kwargs):
+    if native.existing_rule("selected_library_test_module_library"):
+        fail("deps-only tests must not create an empty source library")
     analysis_test(
         name = name,
-        attr_values = {
-            "timeout": "short",
+        impl = _test_execution_module_selects_declared_checks_impl,
+        targets = {
+            "cxx_all": ":cxx_composed_test_all_execute_reference_test_launcher",
+            "cxx_selected": ":cxx_composed_test_selected_execute_reference_test_launcher",
+            "cxx_sources": ":cxx_composed_test_library",
+            "libraries": ":selected_library_test_module",
+            "sources": ":profiled_module",
         },
-        impl = _test_execution_module_links_root_tests_impl,
-        target = ":profiled_module",
         **kwargs
     )
 
-def _test_execution_module_links_root_tests_impl(env, target):
-    files = target[DefaultInfo].files.to_list()
-    _expect_basename(env, files, "profiled_module.loombc")
-    action = _find_action(env, target[TestingAspectInfo].actions, "LoomTestModule")
-    for expected_arg in [
-        "--mode=link",
-        "--include-input-tests",
-        "--to=bc",
-        "--module-name=%s" % target.label,
+def _test_execution_module_selects_declared_checks_impl(env, targets):
+    for target, selected, code, transitive in [
+        (targets.sources, ["profiled_module_library", "library_dependency"], [], ["transitive_checks"]),
+        (targets.libraries, ["selected_direct", "selected_unused"], ["selected_transitive"], []),
     ]:
-        if expected_arg not in action.argv:
-            env.fail("expected %r in %r" % (expected_arg, action.argv))
-    _expect_arg_with_prefix_and_suffix(
-        env,
-        action.argv,
-        "",
-        "profiled_module_library.loombc",
+        action = _find_action(env, target[TestingAspectInfo].actions, "LoomTestModule")
+        for prefix, expected in [
+            ("--test-library=", selected),
+            ("--library=", code),
+            ("--transitive-library=", transitive),
+        ]:
+            env.expect.that_collection([
+                arg.split("/")[-1]
+                for arg in action.argv
+                if arg.startswith(prefix)
+            ]).contains_exactly([name + ".loombc" for name in expected])
+        _expect_no_basename(env, action.inputs.to_list(), "profile_cases.loom")
+        _expect_no_basename(env, action.inputs.to_list(), "profile_benchmarks.loom")
+
+    imports = [action for action in targets.cxx_sources[TestingAspectInfo].actions if action.mnemonic == "LoomCxxImport"]
+    env.expect.that_int(len(imports)).equals(2)
+    for action in imports:
+        _expect_basename(env, action.inputs.to_list(), "model_provider.h")
+        _expect_no_basename(env, action.inputs.to_list(), "model_fixture.txt")
+
+    # Workload fanout shares the final linked artifact and its runtime closure.
+    env.expect.that_str(targets.cxx_all[LoomExecutionTestInfo].module.path).equals(
+        targets.cxx_selected[LoomExecutionTestInfo].module.path,
     )
-    _expect_arg_with_prefix_and_suffix(
-        env,
-        action.argv,
-        "--library=",
-        "library_dependency.loombc",
-    )
-    inputs = action.inputs.to_list()
-    _expect_basename(env, inputs, "profiled_module_library.loombc")
-    _expect_basename(env, inputs, "library_dependency.loombc")
-    _expect_no_basename(env, inputs, "profile_cases.loom")
-    _expect_no_basename(env, inputs, "profile_benchmarks.loom")
+    _expect_basename(env, targets.cxx_all[DefaultInfo].default_runfiles.files.to_list(), "model_fixture.txt")
 
 def _test_direct_sources_own_checks_once(name, **kwargs):
     analysis_test(
@@ -764,7 +775,7 @@ def loom_library_rules_test_suite(name):
             _test_custom_runner_owns_benchmark_policy,
             _test_deps_only_library_propagates_dependencies,
             _test_direct_sources_own_checks_once,
-            _test_execution_module_links_root_tests,
+            _test_execution_module_selects_declared_checks,
             _test_execution_profile_contract,
             _test_explicit_runner_owns_profile_execution,
             _test_generated_kernel_binary_is_testonly,

@@ -80,8 +80,10 @@ class CMakeLoomBinaryTest(unittest.TestCase):
             self.assertFalse((build / "headers.loombc").exists())
             self.assertFalse((build / "forwarded.loombc").exists())
             checks = (build / "checks.loombc").read_text()
-            self.assertIn(
-                f"--transitive-library={build.as_posix()}/cxx_library.loombc", checks
+            self.assertIn(f"--test-library={build.as_posix()}/consumer.loombc", checks)
+            self.assertIn(f"--library={build.as_posix()}/cxx_library.loombc", checks)
+            self.assertNotIn(
+                f"--test-library={build.as_posix()}/cxx_library.loombc", checks
             )
             consumer_timestamp = consumer_import.stat().st_mtime_ns
             (source / "private.h").write_text("private header changed\n")

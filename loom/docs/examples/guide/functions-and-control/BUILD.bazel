@@ -45,7 +45,6 @@ loom_kernel_library(
 # --8<-- [start:named_workloads]
 loom_test(
     name = "read_ahead_workloads_test",
-    srcs = ["read-ahead-tests.loom"],
     execution_profiles = [AMD_GPU_HARDWARE_PROFILE],
     workloads = {
         "serial": {"config": {
@@ -117,7 +116,6 @@ loom_kernel_library(
 
 loom_test(
     name = "paired_read_ahead_access_test",
-    srcs = ["paired-read-ahead-tests.loom"],
     config = {
         "paired_rows.left_unroll": "4",
         "paired_rows.right_unroll": "4",

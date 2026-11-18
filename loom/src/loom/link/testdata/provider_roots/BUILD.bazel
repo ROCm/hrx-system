@@ -18,7 +18,10 @@ exports_files(
         "transitive.loom",
         "unused.loom",
     ],
-    visibility = ["//loom/src/loom/tools/loom-link:__pkg__"],
+    visibility = [
+        "//loom/build_tools/bazel/test:__pkg__",
+        "//loom/src/loom/tools/loom-link:__pkg__",
+    ],
 )
 
 iree_c_embed_data(

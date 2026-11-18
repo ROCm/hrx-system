@@ -2532,10 +2532,10 @@ observations. Executing control flow inside the harness itself requires a
 shared executor for complete `check.case` bodies; no C++-specific interpreter is
 involved.
 
-Build-integrated C++ checks use an explicit source component:
+Build-integrated C++ checks use the same source and dependency declarations as libraries:
 
 ```python
-load("//loom/build_tools/bazel:defs.bzl", "loom_cxx_library", "loom_test", "loom_test_module")
+load("//loom/build_tools/bazel:defs.bzl", "loom_cxx_library", "loom_cxx_test")
 load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
 loom_cxx_library(
@@ -2547,21 +2547,10 @@ loom_cxx_library(
     includes = ["include"],
 )
 
-loom_cxx_library(
-    name = "checks",
-    testonly = True,
-    srcs = ["checks.cxx"],
+loom_cxx_test(
+    name = "arithmetic_test",
+    srcs = ["scalar_checks.cxx", "vector_checks.cxx", "test_support.h"],
     deps = [":arithmetic"],
-)
-
-loom_test_module(
-    name = "checks_module",
-    root_library = ":checks",
-)
-
-loom_test(
-    name = "checks_test",
-    module = ":checks_module",
     execution_profiles = [VM_REFERENCE_PROFILE],
 )
 ```
@@ -2582,12 +2571,20 @@ edit reruns import, but unchanged bytecode does not invalidate downstream
 execution tests. The same distinction holds between private header edits, which
 reimport their owner, and public header edits, which also reimport consumers.
 
-`loom_library` accepts Loom text and bytecode. Loom-authored checks can
-consume a C++ implementation through
-`loom_test_module(srcs = ["checks.loom"], deps = [":cpp"])`. `loom_test` consumes the
-linked test module for correctness and a single-iteration benchmark smoke
-check. Dependency libraries retain their own tests; linking one does not add
-its cases to the root's suite.
+`loom_library` accepts Loom text and bytecode. Loom-authored checks can consume a
+C++ implementation through `loom_test(srcs = ["checks.loom"], deps = [":cpp"],
+execution_profiles = [...])`. A test selects every check and benchmark from its
+sources and directly listed dependencies. Transitive dependencies resolve code
+without adding their independent checks. Header-only components own no checks;
+forwarding a library through them does not select that library's tests.
+
+`loom_test(deps = [":scalar_checks", ":vector_checks"], execution_profiles = [...])`
+combines existing check libraries without source boilerplate. Libraries retain
+their private symbol boundaries, and shared dependencies are linked once. The
+selected checks are linked once before expansion across workloads and execution
+profiles. `loom_test_module(srcs = [...], deps = [...])` is available when several
+independent consumers need the same linked artifact; ordinary tests need no
+separate module declaration. A Bazel `test_suite` groups separate execution tests.
 
 ## Source input and diagnostic ownership
 

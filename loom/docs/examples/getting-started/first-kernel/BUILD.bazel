@@ -11,10 +11,8 @@ load("@hrx//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with
 # --8<-- [start:kernel-library]
 load(
     "@hrx//loom/build_tools/bazel:defs.bzl",
-    "loom_cxx_library",
+    "loom_cxx_test",
     "loom_kernel_library",
-    "loom_test",
-    "loom_test_module",
 )
 load(
     "@hrx//loom/target/amdgpu:execution_profiles.bzl",
@@ -41,21 +39,9 @@ loom_kernel_library(
 )
 # --8<-- [end:kernel-library]
 
-loom_cxx_library(
-    name = "saxpy_cxx",
-    testonly = True,
-    srcs = ["saxpy.cxx"],
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test_module(
-    name = "saxpy_cxx_module",
-    root_library = ":saxpy_cxx",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_test(
+loom_cxx_test(
     name = "saxpy_cxx_test",
+    srcs = ["saxpy.cxx"],
     compile_targets = [
         "@hrx//loom/target/amdgpu:gfx11-generic",
         "@hrx//loom/target/spirv:vulkan1.3+bda",
@@ -64,7 +50,6 @@ loom_test(
         AMD_GPU_HARDWARE_PROFILE,
         SPIRV_VULKAN_HARDWARE_PROFILE,
     ],
-    module = ":saxpy_cxx_module",
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/import:cxx",
     ]),

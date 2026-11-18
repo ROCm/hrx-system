@@ -52,7 +52,7 @@ LoomExecutionTestInfo = provider(
     fields = {
         "benchmark_runner": "Resolved benchmark runner, or None for correctness-only launchers.",
         "benchmark_runner_args": "Smoke, profile, and workload arguments passed to the benchmark runner, or an empty list.",
-        "module": "Linked Loom module containing root-owned cases and benchmarks.",
+        "module": "Linked Loom module containing the selected cases and benchmarks.",
         "profile_name": "Stable execution profile name.",
         "test_runner": "Resolved correctness runner executable.",
         "test_runner_args": "Profile, workload, and test arguments passed to the correctness runner.",
@@ -60,7 +60,7 @@ LoomExecutionTestInfo = provider(
 )
 
 _LoomTestModuleInfo = provider(
-    doc = "A linked module retaining tests owned by one root library.",
+    doc = "A linked module retaining checks from the declared sources and libraries.",
     fields = {
         "module": "Linked Loom bytecode module consumed by execution and plan runners.",
     },
@@ -208,20 +208,16 @@ _loom_module_library = rule(
 )
 
 def _loom_test_module_impl(ctx):
-    root_library = ctx.attr.root_library[LoomLibraryInfo]
-    if root_library.module == None:
-        fail("%s requires a root library containing a module" % ctx.label)
     dependency_infos = [dep[LoomLibraryInfo] for dep in ctx.attr.deps]
     module = loom_linking.declare_test_module(
         ctx = ctx,
-        root_module = root_library.module,
-        root_dependencies = root_library.transitive_dependencies,
+        sources = [],
         dependency_infos = dependency_infos,
         output_stem = ctx.label.name,
         mnemonic = "LoomTestModule",
         progress_message = "Linking Loom test module %s" % ctx.label,
     )
-    runfiles = ctx.runfiles(files = [module] + ctx.files.data).merge(ctx.attr.root_library[DefaultInfo].default_runfiles)
+    runfiles = ctx.runfiles(files = [module] + ctx.files.data)
     for data in ctx.attr.data + ctx.attr.deps:
         runfiles = runfiles.merge(data[DefaultInfo].default_runfiles)
     return [
@@ -238,15 +234,10 @@ _loom_test_module = rule(
         ),
         "deps": attr.label_list(
             providers = [LoomLibraryInfo],
-            doc = "Direct libraries available only for dependency resolution.",
-        ),
-        "root_library": attr.label(
-            mandatory = True,
-            providers = [LoomLibraryInfo],
-            doc = "Root library whose test-only symbols become link roots.",
+            doc = "Libraries whose owned checks are selected; their dependencies supply code.",
         ),
     },
-    doc = "Links one root-owned Loom test module.",
+    doc = "Links checks from the declared libraries and their reachable code.",
     toolchains = [_LOOM_LINK_TOOLCHAIN_TYPE],
 )
 
@@ -440,7 +431,7 @@ _EXECUTION_TEST_LAUNCHER_ATTRS = {
     "module": attr.label(
         mandatory = True,
         providers = [_LoomTestModuleInfo],
-        doc = "Linked Loom module containing root-owned cases and benchmarks.",
+        doc = "Linked Loom module containing the selected cases and benchmarks.",
     ),
     "profile_args": attr.string_list(
         doc = "Profile arguments appended after the module for each runner.",
@@ -540,7 +531,7 @@ _loom_plan_test_launcher = rule(
         "module": attr.label(
             mandatory = True,
             providers = [_LoomTestModuleInfo],
-            doc = "Linked root-owned test module whose benchmarks are planned.",
+            doc = "Linked test module whose benchmarks are planned.",
         ),
         "workload_args": attr.string_list(doc = "Workload configuration and case selection."),
     },
@@ -763,9 +754,7 @@ def _declare_library(
         test_module = name + "_test_module"
         _loom_test_module(
             name = test_module,
-            data = data,
-            deps = deps,
-            root_library = ":" + name,
+            deps = [":" + name],
             tags = tags + ["manual"],
             testonly = True,
             visibility = ["//visibility:private"],
@@ -916,24 +905,24 @@ def _declare_test_module(
         tags,
         visibility,
         target_compatible_with):
-    if not srcs:
-        fail("%s requires at least one authored test source" % name)
-    library_name = name + "_library"
-    _loom_module_library(
-        name = library_name,
-        srcs = srcs,
-        deps = deps,
-        data = data,
-        tags = tags + ["manual"],
-        testonly = True,
-        visibility = ["//visibility:private"],
-        target_compatible_with = target_compatible_with,
-    )
+    libraries = deps
+    if srcs:
+        library_name = name + "_library"
+        _loom_module_library(
+            name = library_name,
+            srcs = srcs,
+            deps = deps,
+            data = data,
+            tags = tags + ["manual"],
+            testonly = True,
+            visibility = ["//visibility:private"],
+            target_compatible_with = target_compatible_with,
+        )
+        libraries = [":" + library_name] + deps
     _loom_test_module(
         name = name,
         data = data,
-        deps = deps,
-        root_library = ":" + library_name,
+        deps = libraries,
         tags = tags,
         testonly = True,
         visibility = visibility,
@@ -945,15 +934,14 @@ def loom_test_module(
         srcs = [],
         deps = [],
         data = [],
-        root_library = None,
         tags = [],
         visibility = None,
         target_compatible_with = []):
     """Owns a reusable linked test module and its runtime fixtures.
 
-    Direct sources jointly own all check cases and benchmarks in the module.
-    Dependencies supply reachable definitions, not additional test roots.
-    An explicit root_library can supply a module authored in any language.
+    Sources and directly named libraries contribute all their checks and
+    benchmarks. Transitive libraries supply reachable definitions without
+    selecting their checks. Dependencies may be authored in any language.
     Consumers select their workload and execution or compiler profiles with
     ``loom_test(module = ...)``.
     The module requires only its source providers, independently of consumers'
@@ -966,9 +954,8 @@ def loom_test_module(
     Args:
       name: Public module target name.
       srcs: Authored source modules jointly owning the test roots.
-      deps: Libraries available only for dependency resolution.
+      deps: Libraries contributing their own checks and reachable dependencies.
       data: Runtime fixtures retained by the source owner.
-      root_library: Existing library whose checks become roots. Exclusive with srcs.
       tags: Additional tags for the source module and its source checks.
       visibility: Bazel visibility of the reusable module.
       target_compatible_with: Source-provider build configuration constraints.
@@ -978,29 +965,17 @@ def loom_test_module(
         tags,
         target_compatible_with,
     )
-    if root_library:
-        if srcs:
-            fail("%s root_library is exclusive with srcs" % name)
-        _loom_test_module(
-            name = name,
-            root_library = root_library,
-            deps = deps,
-            data = data,
-            tags = package_attributes.tags,
-            testonly = True,
-            visibility = visibility,
-            target_compatible_with = package_attributes.target_compatible_with,
-        )
-    else:
-        _declare_test_module(
-            name = name,
-            srcs = srcs,
-            deps = deps,
-            data = data,
-            tags = package_attributes.tags,
-            visibility = visibility,
-            target_compatible_with = package_attributes.target_compatible_with,
-        )
+    if not srcs and not deps:
+        fail("%s requires srcs or deps" % name)
+    _declare_test_module(
+        name = name,
+        srcs = srcs,
+        deps = deps,
+        data = data,
+        tags = package_attributes.tags,
+        visibility = visibility,
+        target_compatible_with = package_attributes.target_compatible_with,
+    )
     tests = _declare_source_format_tests(
         name,
         srcs,
@@ -1034,10 +1009,10 @@ def loom_test(
         target_compatible_with = []):
     """Qualifies authored sources or a reusable Loom test module.
 
-    The rule merges ``srcs`` into one relocatable root library and links a test
-    module containing every root-owned ``check.case`` and ``check.benchmark``
-    plus their reachable dependencies. Test-only symbols from ``deps`` are not
-    selected. The linked module is the only Loom input to the runners.
+    Every check and benchmark owned by ``srcs`` or directly named ``deps`` is
+    selected once. Transitive libraries supply reachable definitions without
+    adding their checks. The rule imports/links once before expanding workloads
+    and execution profiles; runners consume only the resulting bytecode.
     Default execution profiles run ``loom-test`` for correctness. When
     benchmark smoke is enabled, ``loom-benchmark`` then executes each
     benchmark with one measured iteration and no warmup. Each workload also
@@ -1063,7 +1038,7 @@ def loom_test(
       name: Name of the suite containing source, compilation, and execution checks.
       srcs: Authored source modules jointly owning the test module.
       data: Runtime fixtures owned by the source component.
-      deps: Loom libraries available only for dependency resolution.
+      deps: Libraries contributing their own checks and reachable dependencies.
       module: Existing loom_test_module to qualify without importing or linking
           again. Exclusive with srcs, deps, and data;
           the source owner retains those inputs, its source checks, and its
@@ -1090,8 +1065,8 @@ def loom_test(
     """
     if module and (srcs or deps or data):
         fail("%s module is exclusive with source declarations" % name)
-    if not module and not srcs:
-        fail("%s requires srcs or a test module" % name)
+    if not module and not srcs and not deps:
+        fail("%s requires srcs, deps, or a test module" % name)
     if not execution_profiles and not compile_targets:
         fail("%s requires execution_profiles or compile_targets" % name)
     _reject_workload_args(name, args)

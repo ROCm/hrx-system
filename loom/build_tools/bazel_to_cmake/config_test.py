@@ -407,28 +407,33 @@ loom_kernel_binary(name="program", srcs=["program.loom"], deps=[":support"], tar
         self.assertIn("  LIBRARIES\n    ::support", output)
         self.assertIn('OUTPUT\n    "program"', output)
 
-    def test_cxx_test_root_keeps_configurable_source_ownership(self):
+    def test_cxx_test_keeps_configurable_source_ownership(self):
         output = bazel_to_cmake_converter.convert_build_file(
             """
-load("//loom/build_tools/bazel:loom_cxx_library.bzl", "loom_cxx_library")
-load("//loom/build_tools/bazel:defs.bzl", "loom_test_module")
-filegroup(name="translation_unit", srcs=["checks.cxx", "private.h"])
-loom_cxx_library(name="checks", srcs=select({
-    "//loom/config/import:cxx": [":translation_unit"],
+load("//loom/build_tools/bazel:defs.bzl", "loom_cxx_library", "loom_cxx_test", "loom_execution_profile")
+profile = loom_execution_profile(name="reference", target_family="test", target_class="cpu", executor="reference")
+filegroup(name="translation_units", srcs=["checks.cxx", "other.cxx", "private.h"])
+loom_cxx_test(name="checks", srcs=select({
+    "//loom/config/import:cxx": [":translation_units"],
     "//conditions:default": [],
-}), hdrs=["public.h"], deps=[":headers"], testonly=True)
+}), deps=[":headers"], copts=["std=c++23"], local_defines=["COUNT=4"],
+   execution_profiles=[profile], workloads={"all": {}, "selected": {"case": "bias"}})
 loom_cxx_library(name="headers", hdrs=["shared.h"])
-loom_test_module(name="module", root_library=":checks")
 """,
             SimpleNamespace(PROJECTS=[self.project], REPO_MAP={"@hrx": ""}),
             str(REPO_ROOT / "loom/build_tools/bazel_to_cmake/testdata"),
             repo_root=str(REPO_ROOT),
         )
         self.assertIn("if(LOOM_IMPORT_CXX)", output)
-        self.assertIn("checks.cxx", output)
-        self.assertIn("private.h", output)
-        self.assertIn('  ROOT_LIBRARY\n    "::checks"', output)
+        for source in ("checks.cxx", "other.cxx", "private.h"):
+            self.assertIn(source, output)
+        self.assertIn('  COPTS\n    "std=c++23"', output)
+        self.assertIn('  LOCAL_DEFINES\n    "COUNT=4"', output)
+        self.assertIn('    "::checks_library"', output)
         self.assertEqual(output.count("loom_cxx_library("), 2)
+        self.assertEqual(output.count("loom_test_module("), 1)
+        self.assertIn("checks_all_execute_reference_test", output)
+        self.assertIn("checks_selected_execute_reference_test", output)
 
     def test_corpus_catalog_preserves_per_source_configs(self):
         output = bazel_to_cmake_converter.convert_build_file(
