@@ -534,6 +534,45 @@ TEST_P(TextStateTest, FinalReleasesRespectOverlappingPlanesAndPrivatePages) {
   ASSERT_NO_FATAL_FAILURE(check_coverage());
 }
 
+TEST_P(TextStateTest, UnchangedBackingPreservesFreePlacement) {
+  IREE_ASSERT_OK(Allocate());
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
+  auto* row = state.rows[0];
+  loom_runtime_memory_admission_t admission;
+  IREE_ASSERT_OK(loom_serve_text_state_row_submit_reserve(
+      row, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, 1, nullptr, nullptr,
+      &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
+  loom_serve_text_state_row_complete_reserve(row);
+  row->position = 1;
+  loom_serve_text_state_row_release_reservation(row);
+  ASSERT_NO_FATAL_FAILURE(Trim());
+  // Free IDs share backing with this live row. Maintenance without a mapping
+  // change must preserve their established reuse order, including after a
+  // continuation that only borrows the row's already-admitted storage.
+  const auto free_ids = [](const loom_runtime_block_pool_t& pool) {
+    return std::vector<uint32_t>(pool.free_blocks,
+                                 pool.free_blocks + pool.available);
+  };
+  const auto recurrent = free_ids(state.recurrent.pool);
+  const auto cache = free_ids(state.cache.pool);
+  const uint64_t committed = state.memory.statistics.committed_bytes;
+  for (int iteration = 0; iteration < 3; ++iteration) {
+    IREE_ASSERT_OK(loom_serve_text_state_row_submit_reserve(
+        row, LOOM_SERVE_TEXT_RESERVE_CONTINUE, nullptr, 1, nullptr, nullptr,
+        &admission));
+    ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
+    IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
+    loom_serve_text_state_row_complete_reserve(row);
+    loom_serve_text_state_row_release_reservation(row);
+    ASSERT_NO_FATAL_FAILURE(Trim());
+    EXPECT_EQ(free_ids(state.recurrent.pool), recurrent);
+    EXPECT_EQ(free_ids(state.cache.pool), cache);
+    EXPECT_EQ(state.memory.statistics.committed_bytes, committed);
+  }
+}
+
 TEST_P(TextStateTest, CarryFollowsSourceStride) {
   const auto offset = 6 * 24;
   iree_unaligned_store_le_u64(bytes[0].data + offset,

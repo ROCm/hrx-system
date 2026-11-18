@@ -45,6 +45,9 @@ static iree_status_t loom_serve_text_cache_ensure_available(
   capacity = iree_max(capacity, (uint64_t)minimum);
   capacity = iree_min(capacity, (uint64_t)maximum);
   IREE_RETURN_IF_ERROR(loom_runtime_block_pool_grow(pool, (uint32_t)capacity));
+  if (state->memory.index) {
+    state->memory.trim.flags |= LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING;
+  }
   *out_available = true;
   return iree_ok_status();
 }
@@ -188,6 +191,22 @@ static iree_status_t loom_serve_text_row_initialize(
   return status;
 }
 
+// Direct state users complete commitment synchronously. Preserve the mapping
+// change or denied placement before that native transaction is discarded.
+static iree_status_t loom_serve_text_try_commit(
+    loom_serve_text_state_t* state, iree_host_size_t range_count,
+    const loom_runtime_memory_range_t* ranges, bool* out_admitted) {
+  const uint64_t committed_before = state->memory.statistics.committed_bytes;
+  iree_status_t status = loom_runtime_memory_pool_try_commit(
+      state->memory.pool, range_count, ranges, out_admitted);
+  if (iree_status_is_ok(status) &&
+      (!*out_admitted ||
+       state->memory.statistics.committed_bytes != committed_before)) {
+    state->memory.trim.flags |= LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING;
+  }
+  return status;
+}
+
 // Converts one source-owned storage plan into the virtual reservations that
 // actually require backing. Source allocations may mix elastic and fixed
 // roots, so fixed ranges are intentionally omitted from the pool transaction.
@@ -214,8 +233,8 @@ static iree_status_t loom_serve_text_try_commit_plan(
       }
     }
     if (commitment_count) {
-      status = loom_runtime_memory_pool_try_commit(
-          state->memory.pool, commitment_count, commitments, out_admitted);
+      status = loom_serve_text_try_commit(state, commitment_count, commitments,
+                                          out_admitted);
     } else {
       *out_admitted = true;
     }
@@ -608,8 +627,7 @@ static iree_status_t loom_serve_text_checkpoint_try_resume(
             (loom_runtime_memory_range_t){buffer, range->offset, range->length};
       }
     }
-    status = loom_runtime_memory_pool_try_commit(state->memory.pool, count,
-                                                 commitments, &admitted);
+    status = loom_serve_text_try_commit(state, count, commitments, &admitted);
   }
   if (iree_status_is_ok(status) && admitted) {
     iree_hal_buffer_t* buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
@@ -658,8 +676,8 @@ iree_status_t loom_serve_text_state_row_try_restore(
     const iree_host_size_t count =
         loom_serve_text_row_private_ranges(row, ranges);
     bool admitted = false;
-    IREE_RETURN_IF_ERROR(loom_runtime_memory_pool_try_commit(
-        state->memory.pool, count, ranges, &admitted));
+    IREE_RETURN_IF_ERROR(
+        loom_serve_text_try_commit(state, count, ranges, &admitted));
     if (!admitted) {
       return iree_ok_status();
     }
@@ -1104,6 +1122,8 @@ iree_status_t loom_serve_text_state_reservation_submit(
   if (state->memory.pool &&
       admission == LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE) {
     ++state->memory.backing.value;
+  } else if (state->memory.pool) {
+    state->memory.trim.flags |= LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING;
   }
   // From here ordinary denial is impossible. Transfer/platform failure is
   // terminal and the installed owners retain every accepted-work resource.
@@ -1250,6 +1270,11 @@ void loom_serve_text_state_reservation_free(
   }
   if (!iree_any_bit_set(reservation->flags,
                         LOOM_SERVE_TEXT_RESERVATION_INSTALLED)) {
+    // Other owners may have released backed IDs while this plan held its
+    // uncertain additions. Returning those additions can change their order.
+    if (reservation->commitment_count) {
+      state->memory.trim.flags |= LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING;
+    }
     const uint32_t owned_count = reservation->count - reservation->preserved;
     const uint32_t owned_prefix =
         reservation->prefix -

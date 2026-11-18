@@ -251,6 +251,7 @@ iree_status_t loom_serve_text_state_backing_initialize(
     iree_allocator_free(state->host_allocator, previous);
   }
   state->memory.index = backing;
+  state->memory.trim.flags |= LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING;
   return iree_ok_status();
 }
 
@@ -475,6 +476,9 @@ void loom_serve_text_state_complete_backing(loom_serve_text_state_t* state) {
   const bool complete = loom_runtime_memory_operation_is_complete(
       state->memory.backing.operation);
   IREE_ASSERT(complete);
+  if (state->memory.backing.operation) {
+    state->memory.trim.flags |= LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING;
+  }
   loom_runtime_memory_operation_free(state->memory.backing.operation);
   state->memory.backing.operation = NULL;
 }
@@ -676,6 +680,8 @@ static iree_status_t loom_serve_text_try_back_compaction(
     *out_admitted = admission == LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE;
     if (*out_admitted) {
       ++state->memory.backing.value;
+    } else {
+      state->memory.trim.flags |= LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING;
     }
     if (iree_status_is_ok(status) && state->memory.backing.operation) {
       status = loom_runtime_execution_barrier(
@@ -903,15 +909,18 @@ iree_status_t loom_serve_text_state_complete_trim(
   *out_complete = state->memory.trim.phase == LOOM_SERVICE_TEXT_TRIM_COMPLETE &&
                   !state->memory.backing.operation;
   if (*out_complete) {
-    if (state->memory.buffers[1]) {
+    if (iree_any_bit_set(state->memory.trim.flags,
+                         LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING)) {
       // Releasing a tentative plan restores its selected IDs to the stack.
-      // Maintenance must prefer holes in surviving backing over that failed
-      // placement; otherwise retries can request the same unavailable slab
-      // forever despite eviction having made a backed slot reusable.
-      loom_runtime_block_pool_prioritize(
-          &state->recurrent.pool, loom_serve_text_recurrent_is_backed, state);
+      // Even with unchanged mappings, a denied placement must reconsider holes
+      // made reusable by eviction before retrying the same unavailable slab.
+      if (state->memory.buffers[1]) {
+        loom_runtime_block_pool_prioritize(
+            &state->recurrent.pool, loom_serve_text_recurrent_is_backed, state);
+      }
       loom_runtime_block_pool_prioritize(
           &state->cache.pool, loom_serve_text_block_is_backed, state);
+      state->memory.trim.flags &= ~LOOM_SERVE_TEXT_TRIM_FLAG_PLACEMENT_PENDING;
     }
     result->released_bytes = state->memory.statistics.released_bytes -
                              state->memory.trim.released_before;
