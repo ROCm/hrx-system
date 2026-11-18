@@ -20,6 +20,7 @@ from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile, ZipInfo
 _NUMBER = r"(?:0|[1-9][0-9]*)"
 _RELEASE = rf"{_NUMBER}\.{_NUMBER}\.{_NUMBER}(?:(?:a|b|rc){_NUMBER})?"
 _VERSION = re.compile(rf"{_RELEASE}(?:\.dev{_NUMBER})?")
+_MAIN_DEVELOPMENT_VERSION = re.compile(rf"({_NUMBER})\.({_NUMBER})\.({_NUMBER})\.dev0")
 _CATALOG = re.compile(r"github:([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)@([^\s]+)")
 PROFILES = ("release", "tracy", "debug", "asan")
 LINUX_X86_64_PLATFORM = "manylinux_2_39_x86_64"
@@ -88,6 +89,41 @@ def parse_identity(document: object) -> Identity:
 
 def read_identity(path: Path) -> Identity:
     return parse_identity(json.loads(path.read_text(encoding="utf-8")))
+
+
+def advance_development_identity(identity: Identity, released_tag: str) -> Identity:
+    """Advances main past a stable release without overriding a future line."""
+    try:
+        released_identity = parse_identity(
+            {
+                "package-version": released_tag.removeprefix("v"),
+                "model-catalog": None,
+            }
+        )
+    except ValueError as error:
+        raise ValueError(
+            "Post-release advancement requires a stable vX.Y.Z tag"
+        ) from error
+    if (
+        released_identity.tag != released_tag
+        or released_identity.release_channel is not ReleaseChannel.STABLE
+    ):
+        raise ValueError("Post-release advancement requires a stable vX.Y.Z tag")
+    current_match = _MAIN_DEVELOPMENT_VERSION.fullmatch(identity.version)
+    if current_match is None:
+        raise ValueError(
+            "Main package-version must use X.Y.Z.dev0 for post-release advancement"
+        )
+    released = tuple(int(part) for part in released_identity.version.split("."))
+    current = tuple(int(part) for part in current_match.groups())
+    if current < released:
+        raise ValueError(
+            f"Main development version {identity.version} precedes {released_tag}"
+        )
+    if current > released:
+        return identity
+    major, minor, patch = released
+    return Identity(f"{major}.{minor}.{patch + 1}.dev0", identity.catalog)
 
 
 def standalone_binary_name(tool: str, platform: str) -> str:
@@ -313,6 +349,12 @@ def main(argv: list[str] | None = None) -> int:
     prepare.add_argument("--version", required=True)
     prepare.add_argument("--catalog", required=True)
     prepare.add_argument("--dry-run", action="store_true")
+    advance = commands.add_parser(
+        "advance-development",
+        help="advance main beyond a successfully published stable release",
+    )
+    advance.add_argument("--released-tag", required=True)
+    advance.add_argument("--dry-run", action="store_true")
     tag = commands.add_parser(
         "check-tag", help="check a release tag against version.json"
     )
@@ -327,8 +369,10 @@ def main(argv: list[str] | None = None) -> int:
     bundle.add_argument("directory", type=Path)
     bundle.add_argument("--tag", required=True)
     args = parser.parse_args(argv)
-    if args.command == "prepare" and args.identity is None:
-        parser.error("prepare requires --identity naming the source JSON to edit")
+    if args.command in ("prepare", "advance-development") and args.identity is None:
+        parser.error(
+            f"{args.command} requires --identity naming the source JSON to edit"
+        )
     if args.identity is None:
         args.identity = Path(__file__).with_name("version.json")
     try:
@@ -340,6 +384,14 @@ def main(argv: list[str] | None = None) -> int:
             document = json.dumps(identity.document(), indent=2) + "\n"
             print(document, end="")
             if not args.dry_run:
+                args.identity.write_text(document, encoding="utf-8", newline="\n")
+        elif args.command == "advance-development":
+            advanced_identity = advance_development_identity(
+                identity, args.released_tag
+            )
+            document = json.dumps(advanced_identity.document(), indent=2) + "\n"
+            print(document, end="")
+            if advanced_identity != identity and not args.dry_run:
                 args.identity.write_text(document, encoding="utf-8", newline="\n")
         elif args.command == "check-tag":
             print(identity.check_tag(args.tag).value)
