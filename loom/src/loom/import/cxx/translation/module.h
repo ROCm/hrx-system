@@ -4,12 +4,19 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef LOOM_IMPORT_CXX_TRANSLATION_H_
-#define LOOM_IMPORT_CXX_TRANSLATION_H_
+#ifndef LOOM_IMPORT_CXX_TRANSLATION_MODULE_H_
+#define LOOM_IMPORT_CXX_TRANSLATION_MODULE_H_
 
-#include "loom/import/cxx/source/source.h"
+struct loom_cxx_import_options_t;
+struct loom_module_t;
+
+namespace cxx {
+class TranslationUnit;
+}  // namespace cxx
 
 namespace loom::cxx_import {
+
+class Diagnostics;
 
 // Projects checked source symbols and structured control flow into native IR.
 // Throws SourceRejected after a source diagnostic, or StatusError on allocation
@@ -19,4 +26,4 @@ void translate(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
 
 }  // namespace loom::cxx_import
 
-#endif  // LOOM_IMPORT_CXX_TRANSLATION_H_
+#endif  // LOOM_IMPORT_CXX_TRANSLATION_MODULE_H_

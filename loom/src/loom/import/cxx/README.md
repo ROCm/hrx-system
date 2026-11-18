@@ -4043,8 +4043,7 @@ control-flow requirements.
 
 ## Implementation boundaries
 
-The importer composes six native packages. Each owns declared library targets,
-header APIs, and direct API tests that do not link the aggregate importer.
+The public importer composes native libraries with the following ownership boundaries.
 
 | Package | Contract |
 | --- | --- |
@@ -4054,12 +4053,10 @@ header APIs, and direct API tests that do not link the aggregate importer.
 | `binding/` | Admission and construction for generated operation bindings, runtime imports, named scalar configs, kernel launch contracts, and explicit loop schedules. |
 | `symbol/` | Root selection, reachable function identities, deterministic linkage names, and native function declarations or definitions with explicit contracts. |
 | `lifetime/` | Cleanup scopes, temporary lifetimes, and destructor obligations across source control flow. |
+| `receiver/` | Lexical current-object scopes and completed source subobjects. |
+| `translation/` | AST-to-IR evaluation for selected function bodies and for check cases and scenarios. |
 
-`import.cc` owns the native API's validation, exception boundary, module
-ownership, and final verification. `translation.cc` composes the packages: it
-evaluates expressions, maintains source-symbol-to-SSA bindings, and constructs
-structured regions. Projection APIs consume resolved source identities and
-explicit native builders; they do not call back into the translation driver.
+`import.cc` validates the public API request, owns the module and source diagnostics through verification, and publishes the verified result. The translation driver evaluates expressions, maintains source-symbol-to-SSA bindings, and constructs structured regions. A check body has its own evaluator for subjects, trials, and expectations.
 
 For example, a cast first evaluates its operand in the driver and then calls
 `Scalars::convert` with the SSA value, source and destination types, and source

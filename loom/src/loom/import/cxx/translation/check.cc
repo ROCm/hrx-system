@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/import/cxx/check.h"
+#include "loom/import/cxx/translation/check.h"
 
 #include <cxx/ast.h>
 #include <cxx/ast_visitor.h>
@@ -26,9 +26,12 @@
 #include <vector>
 
 #include "loom/import/cxx/binding/constant_attributes.h"
+#include "loom/import/cxx/binding/intrinsics.h"
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/constants.h"
 #include "loom/import/cxx/source/error.h"
+#include "loom/import/cxx/symbol/functions.h"
+#include "loom/import/cxx/value/scalar.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/check/ops.h"

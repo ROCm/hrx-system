@@ -4,13 +4,24 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef LOOM_IMPORT_CXX_CHECK_H_
-#define LOOM_IMPORT_CXX_CHECK_H_
+#ifndef LOOM_IMPORT_CXX_TRANSLATION_CHECK_H_
+#define LOOM_IMPORT_CXX_TRANSLATION_CHECK_H_
 
-#include "loom/import/cxx/symbol/functions.h"
-#include "loom/import/cxx/value/scalar.h"
+struct loom_builder_t;
+
+namespace cxx {
+class TranslationUnit;
+}  // namespace cxx
 
 namespace loom::cxx_import {
+
+class Diagnostics;
+class Functions;
+struct FunctionBody;
+class Intrinsics;
+class Locations;
+class Scalars;
+class Types;
 
 // Projects an admitted check case into existing check sources, direct function
 // invocations, and terminal expectations. The caller has entered the case body.
@@ -32,4 +43,4 @@ void translate_check_scenario_body(
 
 }  // namespace loom::cxx_import
 
-#endif  // LOOM_IMPORT_CXX_CHECK_H_
+#endif  // LOOM_IMPORT_CXX_TRANSLATION_CHECK_H_
