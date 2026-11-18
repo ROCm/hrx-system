@@ -69,7 +69,7 @@ static iree_status_t iree_hal_amd_fabric_file_transfer_query_pair(
 }
 
 static iree_status_t iree_hal_amd_fabric_file_transfer_qualify_source(
-    iree_hal_amd_fabric_file_transfer_t* transfer,
+    iree_hal_memory_access_t file_access,
     const iree_hal_amd_fabric_io_binding_table_t* io_bindings,
     uint32_t native_family_ordinal, iree_hal_memory_access_t queue_access,
     iree_hal_amd_fabric_file_source_t* range,
@@ -79,13 +79,7 @@ static iree_status_t iree_hal_amd_fabric_file_transfer_qualify_source(
   const iree_hal_amd_fabric_memory_t* storage = range->storage;
   iree_async_region_t* region =
       io_bindings ? io_bindings->regions[range->access_ordinal] : NULL;
-  if (region) {
-    if (region->proactor != transfer->async.file->proactor) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "registered buffer and file use different I/O proactors");
-    }
-  } else {
+  if (!region) {
     if (!(storage->host_features & AMDF_HOST_MAPPING_FEATURE_FILE_IO)) {
       // Unpinnable views retain the staging route even when native buffered
       // access is supported. Host file spans use the FILE_IO publication
@@ -93,7 +87,7 @@ static iree_status_t iree_hal_amd_fabric_file_transfer_qualify_source(
       return iree_ok_status();
     }
     const amdf_memory_map_flags_t required_access =
-        (transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ
+        (file_access == IREE_HAL_MEMORY_ACCESS_READ
              ? AMDF_MEMORY_MAP_FLAG_WRITE
              : AMDF_MEMORY_MAP_FLAG_READ) |
         ((queue_access & IREE_HAL_MEMORY_ACCESS_WRITE)
@@ -131,7 +125,7 @@ static iree_status_t iree_hal_amd_fabric_file_transfer_qualify_source(
                                                                 &invalidate);
     }
   }
-  if (available && transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ) {
+  if (available && file_access == IREE_HAL_MEMORY_ACCESS_READ) {
     IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_file_transfer_query_pair(
         api, &host, &device, &available, &pair));
     if (available) {
@@ -157,22 +151,24 @@ static iree_status_t iree_hal_amd_fabric_file_transfer_qualify_source(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amd_fabric_file_transfer_prepare_source(
-    iree_hal_amd_fabric_file_transfer_t* transfer, const amdf_api_t* api,
-    const iree_hal_queue_family_t* family, uint32_t native_family_ordinal,
+iree_status_t iree_hal_amd_fabric_file_source_initialize(
+    const amdf_api_t* api, const iree_hal_queue_family_t* family,
+    uint32_t native_family_ordinal, iree_hal_memory_access_t file_access,
+    iree_hal_buffer_binding_t binding,
+    iree_hal_amd_fabric_file_source_t* out_source,
     iree_hal_memory_effects_t* out_before,
     iree_hal_memory_effects_t* out_after) {
+  *out_source = (iree_hal_amd_fabric_file_source_t){0};
   *out_before = (iree_hal_memory_effects_t){0};
   *out_after = (iree_hal_memory_effects_t){0};
   // Direct I/O consumes the physical buffer selected by its owner. Virtual
   // addresses use the engine's copy route or an admitted host binding; native
   // translations and mapping permissions remain the caller's responsibility.
-  if (!transfer->async.file ||
-      iree_hal_buffer_virtual_view(transfer->buffer).root) {
+  if (iree_hal_buffer_virtual_view(binding.buffer).root) {
     return iree_ok_status();
   }
   const iree_hal_buffer_memory_view_t memory =
-      iree_hal_buffer_memory_view(transfer->buffer);
+      iree_hal_buffer_memory_view(binding.buffer);
   if (!memory.contract) {
     return iree_ok_status();
   }
@@ -183,7 +179,7 @@ iree_status_t iree_hal_amd_fabric_file_transfer_prepare_source(
   const iree_hal_amd_fabric_io_binding_table_t* io_bindings = NULL;
   if (memory.contract->scopes[family->memory.queue_scope_id].interfaces &
       (1u << IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO)) {
-    const iree_hal_buffer_native_binding_t binding =
+    const iree_hal_buffer_native_binding_t native_binding =
         iree_hal_buffer_memory_native_binding(
             &memory,
             (iree_hal_buffer_native_binding_slot_t){
@@ -191,22 +187,47 @@ iree_status_t iree_hal_amd_fabric_file_transfer_prepare_source(
                              .bindings[IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO],
                 .type = IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO,
             });
-    io_bindings = binding.registered_io.table;
+    io_bindings = native_binding.registered_io.table;
   }
-  transfer->source = (iree_hal_amd_fabric_file_source_t){
+  *out_source = (iree_hal_amd_fabric_file_source_t){
       .api = api,
       .storage = facts->memory,
-      .contents = iree_make_byte_span(NULL, transfer->length),
-      .source_offset = memory.offset + transfer->buffer_offset,
+      .contents = iree_make_byte_span(NULL, binding.length),
+      .source_offset = memory.offset + binding.offset,
       .access_ordinal =
           facts->scope_facts[family->memory.queue_scope_id].access_ordinal,
   };
   const iree_hal_memory_access_t queue_access = iree_hal_buffer_usage_access(
-      iree_hal_buffer_family_usage(transfer->buffer, family));
+      iree_hal_buffer_family_usage(binding.buffer, family));
   iree_status_t status = iree_hal_amd_fabric_file_transfer_qualify_source(
-      transfer, io_bindings, native_family_ordinal, queue_access,
-      &transfer->source, out_before, out_after);
+      file_access, io_bindings, native_family_ordinal, queue_access, out_source,
+      out_before, out_after);
   if (!iree_status_is_ok(status)) {
+    *out_source = (iree_hal_amd_fabric_file_source_t){0};
+  }
+  return status;
+}
+
+iree_status_t iree_hal_amd_fabric_file_transfer_prepare_source(
+    iree_hal_amd_fabric_file_transfer_t* transfer, const amdf_api_t* api,
+    const iree_hal_queue_family_t* family, uint32_t native_family_ordinal,
+    iree_hal_memory_effects_t* out_before,
+    iree_hal_memory_effects_t* out_after) {
+  *out_before = (iree_hal_memory_effects_t){0};
+  *out_after = (iree_hal_memory_effects_t){0};
+  if (!transfer->async.file) {
+    return iree_ok_status();
+  }
+  iree_status_t status = iree_hal_amd_fabric_file_source_initialize(
+      api, family, native_family_ordinal, transfer->file_access,
+      (iree_hal_buffer_binding_t){transfer->buffer, transfer->buffer_offset,
+                                  transfer->length},
+      &transfer->source, out_before, out_after);
+  if (iree_status_is_ok(status) && transfer->source.region &&
+      transfer->source.region->proactor != transfer->async.file->proactor) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "registered buffer and file use different I/O proactors");
     transfer->source = (iree_hal_amd_fabric_file_source_t){0};
   }
   return status;

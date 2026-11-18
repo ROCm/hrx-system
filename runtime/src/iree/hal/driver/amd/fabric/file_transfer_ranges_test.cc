@@ -147,9 +147,10 @@ TEST_P(FileTransferRangesTest, PreservesEveryPhysicalRouteAndCoordinate) {
       transfer.async.file->flags |= IREE_ASYNC_FILE_FLAG_DIRECT;
     }
     iree_hal_memory_effects_t before = {}, after = {};
-    IREE_ASSERT_OK(iree_hal_amd_fabric_file_transfer_prepare_source(
-        &transfer, &native_.api, families_[0],
-        native_families_[0].queue_family_ordinal, &before, &after));
+    IREE_ASSERT_OK(iree_hal_amd_fabric_file_source_initialize(
+        &native_.api, families_[0], native_families_[0].queue_family_ordinal,
+        transfer.file_access, {sources[i], kUnit + start % kUnit, end - start},
+        &transfer.source, &before, &after));
     EXPECT_EQ(before.bits, 0u);
     EXPECT_EQ(after.bits, 0u);
     const auto& range = transfer.source;
