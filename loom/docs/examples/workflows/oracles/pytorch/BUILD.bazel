@@ -24,6 +24,10 @@ loom_py_library(
     testonly = True,
     srcs = ["capture.py"],
     imports = ["."],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
     deps = [
         requirement("numpy"),
         requirement("torch"),

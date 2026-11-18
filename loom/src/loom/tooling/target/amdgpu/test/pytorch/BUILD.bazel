@@ -4,6 +4,9 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+# The optional reference environment is owned by Bazel's dev-only pip hub.
+# bazel-to-cmake: skip
+
 load("@loom_oracle_test_pip//:requirements.bzl", "requirement")
 load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
@@ -12,7 +15,7 @@ load("//loom/build_tools/bazel:python.bzl", "loom_py_test")
 package(default_visibility = ["//visibility:private"])
 
 loom_py_test(
-    name = "pytorch_capture_test",
+    name = "capture_test",
     size = "small",
     srcs = [
         "//loom/docs/examples/workflows/oracles/pytorch:capture_test.py",
@@ -21,7 +24,7 @@ loom_py_test(
         "$(rootpath //loom/src/loom/tools/loom-test)",
         "$(rootpath //loom/src/loom/tools/loom-benchmark)",
         "$(rootpath //loom/docs/examples/workflows/oracles/pytorch:replay.loom)",
-        "vulkan",
+        "amdgpu",
         "CaptureTest.test_real_reference_capture_replays_through_loom",
         "CaptureTest.test_benchmark_capture_is_only_in_correctness_phase",
     ],
@@ -34,12 +37,13 @@ loom_py_test(
     main = "//loom/docs/examples/workflows/oracles/pytorch:capture_test.py",
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = [
-        "iree-run-requirement=vulkan.resource.device",
+        "iree-run-requirement=libamdf.resource.amd_gpu",
         "manual",
     ],
     target_compatible_with = loom_config_compatible_with([
-        "//loom/config/execute:spirv_vulkan_hal",
+        "//loom/config/execute:amdgpu_hal",
         "//loom/config/execute:vm_iree_vm",
+        "//runtime/config/hal:driver_amd_gpu",
     ]) + [
         "@platforms//cpu:x86_64",
         "@platforms//os:linux",
