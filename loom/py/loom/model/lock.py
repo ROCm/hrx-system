@@ -213,11 +213,17 @@ class ModelLock:
     def parse(cls, source: str) -> ModelLock:
         return cls(parse_json(source))
 
-    def cover(self, selection: Selection) -> dict[str, FileIdentity]:
-        """Checks complete coverage within scope before reading source payloads."""
+    def cover(
+        self, selection: Selection, *, assets_only: bool = False
+    ) -> dict[str, FileIdentity]:
+        """Checks coverage before acquisition. Publishers may carry only assets
+        forward when rebuilding the program portion of a complete lock.
+        """
         roots = selection.document.get("origins", {})
         covered = {}
-        for name, file in lock_files(selection, self.scope).items():
+        for name, file in lock_files(
+            selection, "assets" if assets_only else self.scope
+        ).items():
             if isinstance(file.origin, str) and file.origin.startswith("@"):
                 alias = file.origin[1:].split("/", 1)[0]
                 if (

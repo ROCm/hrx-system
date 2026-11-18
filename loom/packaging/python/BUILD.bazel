@@ -122,6 +122,7 @@ py_package(
         "//loom/py/loom/importers:package",
         "//loom/py/loom/model:documentation",
         "//loom/py/loom/model:fetch_cli",
+        "//loom/py/loom/model:release",
         "//loom/py/loom/tools:compile_report",
         "//loom/py/loom/tools:export_cxx",
         "//loom/py/loom/tools:source_lint",

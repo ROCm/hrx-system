@@ -64,6 +64,22 @@ iree_py_binary(
 )
 
 iree_py_library(
+    name = "release",
+    srcs = ["release.py"],
+    deps = [
+        ":lock",
+        ":manifest",
+    ],
+)
+
+iree_py_binary(
+    name = "release_stage",
+    srcs = ["release.py"],
+    main = "release.py",
+    deps = [":release"],
+)
+
+iree_py_library(
     name = "fetch_reference",
     srcs = ["fetch_reference.py"],
     deps = [

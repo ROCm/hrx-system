@@ -105,6 +105,27 @@ Additional models can live in sibling directories; each owns its own card and
 lock. The template's smoke checks `example/tiny-text`, not every future model
 added to a catalog.
 
+## Publish bytecode as XZ
+
+The SDK can stage one built model selection for upload with each bytecode
+provider in its own XZ stream. Supply the built card and the authored asset lock.
+
+```sh
+python -m loom.model.release build/model.json --asset-lock=model/tiny-text/model.json.lock --output=dist/tiny-text
+```
+
+For a Bazel `loom_model` target, building with `--output_groups=model_release`
+produces the same directory at `<target>.release/`. The directory contains a
+selected `model.json`, a complete `model.json.lock`, one XZ file per bytecode
+provider, and ordinary copies of the other program inputs. Upload its contents
+beside the runtime assets referenced by relative origin. Checkpoints and
+tokenizers hosted elsewhere keep their original pinned sources. Staging reads
+their identities from the supplied lock and leaves the payloads at those sources.
+
+`loom-fetch` decodes each provider during installation and verifies its
+installed size and SHA-256. Serving, linking, and subsequent offline installs
+use the ordinary bytecode. XZ support uses Python's standard `lzma` module.
+
 ## Upload and check the published copy
 
 Replace `YOUR_NAME/loom-models` with a repository you own. Authenticate and

@@ -143,6 +143,7 @@ def _loom_model_impl(ctx, link_tool = None):
     deployment = ctx.actions.declare_file(ctx.label.name + "/serve.json")
     outputs = [card, deployment]
     runfiles = [card, deployment]
+    release_inputs = [card]
     inputs = [ctx.file.card]
     files = {}
     data = {}
@@ -166,6 +167,8 @@ def _loom_model_impl(ctx, link_tool = None):
             inputs.append(staged)
         output = ctx.actions.declare_file(ctx.label.name + "/" + name)
         runfiles.append(output)
+        if name not in asset_files:
+            release_inputs.append(output)
         if name in composition.files:
             files[name] = {"input": staged.path, "output": output.path}
             if name in composition.normalization_formats:
@@ -218,11 +221,25 @@ def _loom_model_impl(ctx, link_tool = None):
     # These metadata dependencies are not provider inputs or publication files:
     # a normalized package needs its own lock for the bytes it publishes.
     test_inputs = [ctx.file.card]
+    release = ctx.actions.declare_directory(ctx.label.name + ".release")
+    release_args = ctx.actions.args()
+    release_args.add(card)
+    release_args.add("--output", release.path)
     if ctx.file.lockfile:
         test_inputs.append(ctx.file.lockfile)
+        release_args.add("--asset-lock", ctx.file.lockfile)
+        release_inputs.append(ctx.file.lockfile)
+    ctx.actions.run(
+        executable = ctx.executable._release,
+        arguments = [release_args],
+        inputs = release_inputs,
+        outputs = [release],
+        mnemonic = "LoomModelRelease",
+        progress_message = "Staging model publication %s" % ctx.label,
+    )
     return ([LoomModelInfo(card = _repository_path(ctx, ctx.file.card), programs = composition.programs)] if composition.programs else []) + [
         DefaultInfo(files = depset([deployment]), runfiles = ctx.runfiles(files = runfiles + test_inputs)),
-        OutputGroupInfo(model_card = depset([card]), model_files = depset(runfiles)),
+        OutputGroupInfo(model_card = depset([card]), model_files = depset(runfiles), model_release = depset([release])),
     ]
 
 def _loom_preserved_model_impl(ctx):
@@ -249,6 +266,10 @@ through cquery without executing any build action. The package action checks
 that the authored card matches that same composition. Origins, presets,
 execution directories, variants, and runtime assets remain card-owned.
 
+The optional model_release output group stages the selected card, program
+files, and complete lock for distribution. Bytecode uses XZ during transport.
+The authored lock supplies identities for independently published runtime assets.
+
 Provider composition accepts local repository files and literal importer
 options. External repositories and location-expanded importer options fail
 explicitly rather than exporting execroot paths. Explicit files/data mappings
@@ -266,12 +287,13 @@ def _loom_model_attrs():
         "form": attr.string(default = "sources", values = ["sources", "module"], doc = "Select original declared files or merged modules for every provider."),
         "inputs": attr.label_list(providers = [LoomLibraryInfo], doc = "Ordered primary providers. Their direct and transitive dependencies become libraries automatically."),
         "libraries": attr.label_list(providers = [LoomLibraryInfo], doc = "Additional runtime-selected library roots; their dependency closure is included automatically."),
-        "lockfile": attr.label(allow_single_file = True, doc = "Authored acquisition lock carried as a test dependency. Changes invalidate dependent tests without reading runtime assets or recompiling providers. This is not the publication lock of normalized outputs."),
+        "lockfile": attr.label(allow_single_file = True, doc = "Authored acquisition lock for runtime assets. Tests track it, and the model_release output group carries its asset identities into a complete publication lock alongside freshly hashed providers."),
         "model_name": attr.string(mandatory = True),
         "partition": attr.string(doc = "Executable partition override within the selected variant."),
         "preset": attr.string(mandatory = True),
         "programs": attr.string(),
         "_builder": attr.label(default = Label("//loom/py/loom/model:build"), executable = True, cfg = "exec"),
+        "_release": attr.label(default = Label("//loom/py/loom/model:release_stage"), executable = True, cfg = "exec"),
     }
 
 _loom_preserved_model = rule(
