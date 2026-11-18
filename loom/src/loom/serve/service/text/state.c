@@ -193,7 +193,8 @@ static iree_status_t loom_serve_text_try_back_compaction(
   iree_host_size_t range_count = 0;
   loom_runtime_snapshot_range_t* ranges = NULL;
   iree_status_t status = loom_serve_text_storage_plan_snapshot(
-      &state->storage, 0, views, false, count, blocks, state->host_allocator,
+      &state->storage, 0, views, false, 1,
+      &(loom_serve_text_storage_blocks_t){count, blocks}, state->host_allocator,
       &range_count, &ranges);
   loom_runtime_memory_range_t* commitments = NULL;
   if (iree_status_is_ok(status)) {
@@ -639,7 +640,8 @@ static iree_status_t loom_serve_text_commit_direct_growth(
   iree_host_size_t range_count = 0;
   loom_runtime_snapshot_range_t* ranges = NULL;
   iree_status_t status = loom_serve_text_storage_plan_snapshot(
-      &state->storage, row->index, private_views, false, block_count, blocks,
+      &state->storage, row->index, private_views, false, 1,
+      &(loom_serve_text_storage_blocks_t){block_count, blocks},
       state->host_allocator, &range_count, &ranges);
   bool admitted = false;
   if (iree_status_is_ok(status)) {
@@ -694,8 +696,9 @@ iree_status_t loom_serve_text_state_row_suspend(
   iree_host_size_t range_count = 0;
   loom_runtime_snapshot_range_t* ranges = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_text_storage_plan_snapshot(
-      &state->storage, index, &row->buffers[TEXT_CONTROL], true,
-      row->block_count, blocks, state->host_allocator, &range_count, &ranges));
+      &state->storage, index, &row->buffers[TEXT_CONTROL], true, 1,
+      &(loom_serve_text_storage_blocks_t){row->block_count, blocks},
+      state->host_allocator, &range_count, &ranges));
   iree_hal_buffer_t* buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
     buffers[i] = *loom_serve_text_state_allocation(state, i);
@@ -741,7 +744,8 @@ iree_status_t loom_serve_text_state_row_try_resume(
   iree_host_size_t range_count = 0;
   loom_runtime_snapshot_range_t* ranges = NULL;
   iree_status_t status = loom_serve_text_storage_plan_snapshot(
-      &state->storage, index, &row->buffers[TEXT_CONTROL], true, needed, blocks,
+      &state->storage, index, &row->buffers[TEXT_CONTROL], true, 1,
+      &(loom_serve_text_storage_blocks_t){needed, blocks},
       state->host_allocator, &range_count, &ranges);
   bool admitted = false;
   if (iree_status_is_ok(status)) {
@@ -894,8 +898,10 @@ static iree_status_t loom_serve_text_checkpoint_plan_snapshot(
   const iree_host_size_t carry_index =
       state->row_count + (checkpoint - state->checkpoints.values);
   return loom_serve_text_storage_plan_snapshot(
-      &state->storage, carry_index, views, true, checkpoint->block_count,
-      checkpoint->blocks, state->host_allocator, out_count, out_ranges);
+      &state->storage, carry_index, views, true, 1,
+      &(loom_serve_text_storage_blocks_t){checkpoint->block_count,
+                                          checkpoint->blocks},
+      state->host_allocator, out_count, out_ranges);
 }
 
 iree_status_t loom_serve_text_state_checkpoint_submit_suspend(
@@ -1171,6 +1177,8 @@ typedef struct loom_serve_text_replacement_t {
   loom_serve_text_state_row_t* row;
   // Next selected map entry to consider exactly once.
   uint32_t cursor;
+  // Number of IDs acquired from free storage, following all reused row IDs.
+  uint32_t acquired;
   // Whether the selected recurrent slot has already been borrowed.
   bool recurrent_used;
 } loom_serve_text_replacement_t;
@@ -1190,12 +1198,14 @@ static uint32_t loom_serve_text_reserve_block(
   }
   uint32_t block = 0;
   loom_runtime_block_pool_acquire(&state->cache.pool, 1, &block);
+  ++replacement->acquired;
   return block;
 }
 
 static uint32_t loom_serve_text_reserve_recurrent(
-    loom_serve_text_state_t* state,
-    loom_serve_text_replacement_t* replacement) {
+    loom_serve_text_state_t* state, loom_serve_text_replacement_t* replacement,
+    bool* out_acquired) {
+  *out_acquired = false;
   if (!replacement->recurrent_used) {
     replacement->recurrent_used = true;
     const uint32_t slot = replacement->row->recurrent.slot;
@@ -1207,6 +1217,7 @@ static uint32_t loom_serve_text_reserve_recurrent(
   }
   uint32_t slot = 0;
   loom_runtime_block_pool_acquire(&state->recurrent.pool, 1, &slot);
+  *out_acquired = true;
   return slot;
 }
 
@@ -1255,21 +1266,32 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
   const bool fork_recurrent =
       position && (checkpoint || loom_runtime_block_pool_is_shared(
                                      &state->recurrent.pool, source_slot));
-  // The consumed prefix remains live, but an active reservation's unused
-  // private pages can fund its replacement without a second full reservation.
-  loom_serve_text_replacement_t replacement = {
-      .row = row,
-      .cursor = mode == LOOM_SERVE_TEXT_RESERVE_CONTINUE ? prefix : 0};
-  uint32_t reusable = 0;
   const uint32_t* old_blocks =
       state->cache.maps
           ? state->cache.maps + index * state->storage.blocks_per_row
           : NULL;
+  uint32_t preserved = cold ? 0 : prefix - fork_tail;
+  if (mode == LOOM_SERVE_TEXT_RESERVE_CONTINUE && !fork_tail) {
+    // Preserve private completion credit in place, as well as the consumed
+    // prefix. Shared unused storage must still be replaced before writing.
+    while (preserved < count && preserved < row->block_count &&
+           !loom_runtime_block_pool_is_shared(&state->cache.pool,
+                                              old_blocks[preserved])) {
+      ++preserved;
+    }
+  }
+  loom_serve_text_replacement_t replacement = {
+      .row = row,
+      .cursor = mode == LOOM_SERVE_TEXT_RESERVE_CONTINUE
+                    ? iree_max(prefix, preserved)
+                    : 0};
+  uint32_t reusable = 0;
   for (uint32_t i = replacement.cursor; i < row->block_count; ++i) {
     reusable +=
         !loom_runtime_block_pool_is_shared(&state->cache.pool, old_blocks[i]);
   }
-  const uint32_t needed = count - prefix + fork_tail + (cold ? prefix : 0);
+  const uint32_t needed =
+      count - iree_max(prefix, preserved) + fork_tail + (cold ? prefix : 0);
   const uint32_t recurrent_needed = cold + (!position || fork_recurrent);
   const uint32_t recurrent_reusable =
       row->recurrent.slot != UINT32_MAX &&
@@ -1289,44 +1311,52 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
   iree_host_size_t allocation_length = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(*reservation), &allocation_length,
-      IREE_STRUCT_FIELD_FAM((uint64_t)count + (cold ? prefix : 0), uint32_t)));
+      IREE_STRUCT_FIELD_FAM((uint64_t)count - preserved + (cold ? prefix : 0),
+                            uint32_t)));
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       state->host_allocator, allocation_length, (void**)&reservation));
   uint32_t* blocks = reservation->blocks;
   loom_serve_text_state_checkpoint_t restored = {0};
+  bool restore_recurrent_acquired = false;
   if (cold) {
     restored = *checkpoint;
-    restored.blocks = blocks + count;
+    restored.blocks = blocks + count - preserved;
     restored.block_count = prefix;
     for (uint32_t i = 0; i < prefix; ++i) {
       restored.blocks[i] = loom_serve_text_reserve_block(state, &replacement);
     }
-    restored.recurrent_slot =
-        loom_serve_text_reserve_recurrent(state, &replacement);
+    restored.recurrent_slot = loom_serve_text_reserve_recurrent(
+        state, &replacement, &restore_recurrent_acquired);
   }
   const uint32_t* source_blocks = cold         ? restored.blocks
                                   : checkpoint ? checkpoint->blocks
                                                : old_blocks;
-  for (uint32_t i = 0; i < prefix; ++i) {
-    blocks[i] = source_blocks[i];
-    loom_runtime_block_pool_retain(&state->cache.pool, 1, &blocks[i]);
+  const uint32_t restore_acquired = replacement.acquired;
+  for (uint32_t i = preserved; i < prefix; ++i) {
+    blocks[i - preserved] = source_blocks[i];
+    loom_runtime_block_pool_retain(&state->cache.pool, 1,
+                                   &blocks[i - preserved]);
   }
   uint32_t tail = UINT32_MAX;
   if (fork_tail) {
-    tail = blocks[prefix - 1];
-    blocks[prefix - 1] = loom_serve_text_reserve_block(state, &replacement);
+    tail = blocks[prefix - preserved - 1];
+    blocks[prefix - preserved - 1] =
+        loom_serve_text_reserve_block(state, &replacement);
   }
-  for (uint32_t i = prefix; i < count; ++i) {
-    blocks[i] = loom_serve_text_reserve_block(state, &replacement);
+  for (uint32_t i = iree_max(prefix, preserved); i < count; ++i) {
+    blocks[i - preserved] = loom_serve_text_reserve_block(state, &replacement);
   }
+  const uint32_t acquired = replacement.acquired - restore_acquired;
   uint32_t reader = UINT32_MAX;
   if (position) {
     reader = cold ? restored.recurrent_slot : source_slot;
     loom_runtime_block_pool_retain(&state->recurrent.pool, 1, &reader);
   }
   uint32_t writer = reader;
+  bool writer_acquired = false;
   if (!position || fork_recurrent) {
-    writer = loom_serve_text_reserve_recurrent(state, &replacement);
+    writer = loom_serve_text_reserve_recurrent(state, &replacement,
+                                               &writer_acquired);
   } else {
     reader = UINT32_MAX;
   }
@@ -1339,10 +1369,14 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
       .source_position = source_position,
       .prefix = prefix,
       .count = count,
+      .preserved = preserved,
       .reader = reader,
       .writer = writer,
       .tail = tail,
-      .cold = cold,
+      .flags = (cold ? LOOM_SERVE_TEXT_RESERVATION_COLD : 0) |
+               (mode == LOOM_SERVE_TEXT_RESERVE_CONTINUE
+                    ? LOOM_SERVE_TEXT_RESERVATION_CONTINUE
+                    : 0),
   };
   reservation->next = state->prepared_reservations;
   reservation->previous_link = &state->prepared_reservations;
@@ -1354,112 +1388,74 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
   if (iree_status_is_ok(status) && cold) {
     status = loom_serve_text_prepare_recurrent(state, restored.recurrent_slot);
   }
-  iree_hal_buffer_t* views[5];
-  memcpy(views, &row->buffers[TEXT_CONTROL], sizeof(views));
-  views[TEXT_RECURRENT - TEXT_CONTROL] = state->recurrent.buffers[writer];
-  iree_host_size_t range_count = 0, restore_count = 0;
-  loom_runtime_snapshot_range_t* ranges = NULL;
-  loom_runtime_snapshot_range_t* restore_ranges = NULL;
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_text_storage_plan_snapshot(
-        &state->storage, index, views, true, count, blocks,
-        state->host_allocator, &range_count, &ranges);
-  }
   if (iree_status_is_ok(status) && cold) {
-    // The carry index belongs to the real endpoint record, not the temporary
-    // plan object. Only recurrent and KV ownership differs during planning.
-    iree_hal_buffer_t* checkpoint_views[5] = {0};
-    checkpoint_views[TEXT_RECURRENT - TEXT_CONTROL] =
+    iree_hal_buffer_t* views[5] = {0};
+    views[TEXT_RECURRENT - TEXT_CONTROL] =
         state->recurrent.buffers[restored.recurrent_slot];
     status = loom_serve_text_storage_plan_snapshot(
         &state->storage,
-        state->row_count + (checkpoint - state->checkpoints.values),
-        checkpoint_views, true, prefix, restored.blocks, state->host_allocator,
-        &restore_count, &restore_ranges);
+        state->row_count + (checkpoint - state->checkpoints.values), views,
+        true, 1, &(loom_serve_text_storage_blocks_t){prefix, restored.blocks},
+        state->host_allocator, &reservation->restore_count,
+        &reservation->restore_ranges);
   }
-  loom_runtime_memory_range_t* commitments = NULL;
-  iree_host_size_t* commitment_allocations = NULL;
+  // Installed rows and borrowed endpoints already own their backing. Only
+  // newly acquired IDs and an inactive destination's private views are
+  // uncertain. Global epoch/proposal storage was backed at state creation.
   if (iree_status_is_ok(status) && state->memory.pool) {
-    iree_host_size_t capacity = range_count + restore_count +
-                                LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT + 1;
-    if (tail != UINT32_MAX) {
-      for (iree_host_size_t i = 0; i < state->storage.region_count; ++i) {
-        capacity += state->storage.regions[i].blocks.count;
-      }
+    const bool activate_private = row->recurrent.slot == UINT32_MAX;
+    iree_hal_buffer_t* views[5] = {0};
+    if (activate_private) {
+      memcpy(views, &row->buffers[TEXT_CONTROL], sizeof(views));
     }
-    iree_host_size_t allocation_size = 0, allocations_offset = 0;
-    status = IREE_STRUCT_LAYOUT(
-        0, &allocation_size,
-        IREE_STRUCT_FIELD(capacity, loom_runtime_memory_range_t, NULL),
-        IREE_STRUCT_FIELD(capacity, iree_host_size_t, &allocations_offset));
+    views[TEXT_RECURRENT - TEXT_CONTROL] =
+        writer_acquired ? state->recurrent.buffers[writer] : NULL;
+    const loom_serve_text_storage_blocks_t spans[] = {
+        {acquired, blocks + count - preserved - acquired},
+        {restore_acquired,
+         cold ? restored.blocks + prefix - restore_acquired : NULL},
+    };
+    iree_host_size_t range_count = 0;
+    loom_runtime_snapshot_range_t* ranges = NULL;
+    status = loom_serve_text_storage_plan_snapshot(
+        &state->storage, index, views, activate_private, IREE_ARRAYSIZE(spans),
+        spans, state->host_allocator, &range_count, &ranges);
+    const iree_host_size_t capacity = range_count + (cold ? 2 : 0);
+    if (iree_status_is_ok(status) && capacity) {
+      status = iree_allocator_malloc_array(state->host_allocator, capacity,
+                                           sizeof(*reservation->commitments),
+                                           (void**)&reservation->commitments);
+    }
     if (iree_status_is_ok(status)) {
-      status = iree_allocator_malloc(state->host_allocator, allocation_size,
-                                     (void**)&commitments);
-    }
-    if (iree_status_is_ok(status)) {
-      commitment_allocations =
-          (iree_host_size_t*)((uint8_t*)commitments + allocations_offset);
-    }
-  }
-  iree_host_size_t commitment_count = 0;
-  if (iree_status_is_ok(status) && state->memory.pool) {
-    for (iree_host_size_t i = 0; i < range_count + restore_count; ++i) {
-      const loom_runtime_snapshot_range_t* range =
-          i < range_count ? &ranges[i] : &restore_ranges[i - range_count];
-      loom_runtime_virtual_buffer_t* buffer =
-          state->memory.buffers[range->buffer_index];
-      if (buffer) {
-        commitment_allocations[commitment_count] = range->buffer_index;
-        commitments[commitment_count++] =
-            (loom_runtime_memory_range_t){buffer, range->offset, range->length};
-      }
-    }
-    // Completion needs shared epoch/proposal storage as well as the selected
-    // row. COW readers remain live until their copies retire, even though
-    // their backing was acquired by the previous endpoint.
-    for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
-         ++i) {
-      if (state->memory.buffers[i] && state->memory.private_lengths[i]) {
-        commitment_allocations[commitment_count] = i;
-        commitments[commitment_count++] = (loom_runtime_memory_range_t){
-            state->memory.buffers[i], 0, state->memory.private_lengths[i]};
-      }
-    }
-    if (reader != UINT32_MAX) {
-      iree_hal_buffer_t* view = state->recurrent.buffers[reader];
-      commitment_allocations[commitment_count] = 1;
-      commitments[commitment_count++] = (loom_runtime_memory_range_t){
-          state->memory.buffers[1], iree_hal_buffer_byte_offset(view),
-          iree_hal_buffer_byte_length(view)};
-    }
-    if (tail != UINT32_MAX) {
-      for (iree_host_size_t i = 0; i < state->storage.region_count; ++i) {
-        const loom_serve_text_cache_region_t* region =
-            &state->storage.regions[i];
-        for (iree_host_size_t plane = 0; plane < region->blocks.count;
-             ++plane) {
-          commitment_allocations[commitment_count] = region->allocation;
-          commitments[commitment_count++] = (loom_runtime_memory_range_t){
-              state->memory.buffers[region->allocation],
-              region->blocks.origin + plane * region->blocks.stride +
-                  tail * region->blocks.block_bytes,
-              region->blocks.block_bytes};
+      for (iree_host_size_t i = 0; i < range_count; ++i) {
+        const loom_runtime_snapshot_range_t* range = &ranges[i];
+        loom_runtime_virtual_buffer_t* buffer =
+            state->memory.buffers[range->buffer_index];
+        if (buffer) {
+          reservation->commitments[reservation->commitment_count++] =
+              (loom_runtime_memory_range_t){buffer, range->offset,
+                                            range->length};
         }
       }
+      if (cold && state->storage.carry_stride && state->memory.buffers[6]) {
+        reservation->commitments[reservation->commitment_count++] =
+            (loom_runtime_memory_range_t){
+                state->memory.buffers[6],
+                (state->row_count + (checkpoint - state->checkpoints.values)) *
+                    state->storage.carry_stride,
+                state->storage.carry_stride};
+      }
+      if (restore_recurrent_acquired && state->memory.buffers[1]) {
+        iree_hal_buffer_t* view =
+            state->recurrent.buffers[restored.recurrent_slot];
+        reservation->commitments[reservation->commitment_count++] =
+            (loom_runtime_memory_range_t){state->memory.buffers[1],
+                                          iree_hal_buffer_byte_offset(view),
+                                          iree_hal_buffer_byte_length(view)};
+      }
     }
+    iree_allocator_free(state->host_allocator, ranges);
   }
-  reservation->restore_ranges = restore_ranges;
-  reservation->restore_count = restore_count;
-  reservation->commitments = commitments;
-  reservation->commitment_allocations = commitment_allocations;
-  reservation->commitment_count = commitment_count;
-  loom_runtime_memory_footprint_t footprint = {0};
-  if (iree_status_is_ok(status)) {
-    status = loom_runtime_memory_ranges_footprint(commitment_count, commitments,
-                                                  &footprint);
-  }
-  reservation->footprint_bytes = footprint.total_bytes;
-  iree_allocator_free(state->host_allocator, ranges);
   if (iree_status_is_ok(status)) {
     *out_reservation = reservation;
   } else {
@@ -1468,16 +1464,12 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
   return status;
 }
 
-uint64_t loom_serve_text_state_reservation_footprint(
-    const loom_serve_text_state_reservation_t* reservation) {
-  return reservation->footprint_bytes;
-}
-
 iree_status_t loom_serve_text_state_reservation_submit(
     loom_serve_text_state_reservation_t* reservation,
     loom_serve_text_state_admit_fn_t admit, void* user_data,
     loom_runtime_memory_admission_t* out_admission) {
-  IREE_ASSERT(!reservation->installed);
+  IREE_ASSERT(!iree_any_bit_set(reservation->flags,
+                                LOOM_SERVE_TEXT_RESERVATION_INSTALLED));
   *out_admission = LOOM_RUNTIME_MEMORY_ADMISSION_CAPACITY;
   loom_serve_text_state_row_t* row = reservation->row;
   loom_serve_text_state_t* state = row->owner;
@@ -1486,6 +1478,11 @@ iree_status_t loom_serve_text_state_reservation_submit(
   loom_serve_text_state_checkpoint_t* checkpoint = reservation->checkpoint;
   const uint32_t position = reservation->position;
   const uint32_t count = reservation->count;
+  const uint32_t preserved = reservation->preserved;
+  const uint32_t unchanged =
+      iree_any_bit_set(reservation->flags, LOOM_SERVE_TEXT_RESERVATION_CONTINUE)
+          ? preserved
+          : 0;
   const uint32_t* blocks = reservation->blocks;
   loom_runtime_memory_admission_t admission =
       LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE;
@@ -1510,8 +1507,49 @@ iree_status_t loom_serve_text_state_reservation_submit(
   // terminal and the installed owners retain every accepted-work resource.
   if (iree_status_is_ok(status) &&
       admission == LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE) {
-    loom_serve_text_state_row_reset(row);
-    if (reservation->cold) {
+    uint32_t* row_blocks =
+        state->cache.maps
+            ? state->cache.maps + index * state->storage.blocks_per_row
+            : NULL;
+    loom_runtime_snapshot_release(row->snapshot);
+    row->snapshot = NULL;
+    if (row->recurrent.anchor != UINT32_MAX) {
+      loom_runtime_block_pool_release(&state->recurrent.pool, 1,
+                                      &row->recurrent.anchor);
+    }
+    loom_serve_text_row_release_tail(row);
+    if (row->recurrent.slot != reservation->writer) {
+      loom_serve_text_row_release_recurrent(row);
+      row->recurrent.slot = reservation->writer;
+      row->buffers[TEXT_RECURRENT] =
+          state->recurrent.buffers[reservation->writer];
+      loom_serve_text_row_dirty_recurrent(row);
+    } else {
+      // The destination already owns this slot. Drop the planner's temporary
+      // reference. A fresh or restored frontier must replace the source's
+      // encoded reader and fork position even when its writer is unchanged.
+      loom_runtime_block_pool_release(&state->recurrent.pool, 1,
+                                      &reservation->writer);
+      if (!iree_any_bit_set(reservation->flags,
+                            LOOM_SERVE_TEXT_RESERVATION_CONTINUE) ||
+          row->recurrent.anchor != reservation->reader) {
+        loom_serve_text_row_dirty_recurrent(row);
+      }
+    }
+    if (row->block_count != unchanged) {
+      loom_runtime_block_pool_release(&state->cache.pool,
+                                      row->block_count - unchanged,
+                                      row_blocks + unchanged);
+    }
+    if (preserved != unchanged) {
+      const uint32_t* prefix_blocks =
+          loom_serve_text_state_reservation_prefix(reservation);
+      loom_runtime_block_pool_retain(&state->cache.pool, preserved,
+                                     prefix_blocks);
+      memcpy(row_blocks, prefix_blocks, preserved * sizeof(*blocks));
+    }
+    if (iree_any_bit_set(reservation->flags,
+                         LOOM_SERVE_TEXT_RESERVATION_COLD)) {
       checkpoint->recurrent_slot = reservation->restored.recurrent_slot;
       checkpoint->block_count = reservation->prefix;
       memcpy(checkpoint->blocks, reservation->restored.blocks,
@@ -1521,24 +1559,22 @@ iree_status_t loom_serve_text_state_reservation_submit(
     row->source_position = reservation->source_position;
     row->block_count = count;
     row->reserved_extent = reservation->extent;
-    if (count) {
-      memcpy(state->cache.maps + index * state->storage.blocks_per_row, blocks,
-             count * sizeof(*blocks));
+    if (count != preserved) {
+      memcpy(row_blocks + preserved, blocks,
+             (count - preserved) * sizeof(*blocks));
     }
-    row->recurrent.slot = reservation->writer;
     row->recurrent.anchor = reservation->reader;
     row->retiring_tail = reservation->tail;
-    row->buffers[TEXT_RECURRENT] =
-        state->recurrent.buffers[reservation->writer];
-    loom_serve_text_row_dirty_recurrent(row);
-    reservation->installed = true;
+    reservation->flags |= LOOM_SERVE_TEXT_RESERVATION_INSTALLED;
     if (state->memory.backing.operation) {
       status = loom_runtime_execution_barrier(
           state->execution,
           (iree_hal_semaphore_list_t){1, &state->memory.backing.semaphore,
                                       &state->memory.backing.value});
     }
-    if (iree_status_is_ok(status) && reservation->cold) {
+    if (iree_status_is_ok(status) &&
+        iree_any_bit_set(reservation->flags,
+                         LOOM_SERVE_TEXT_RESERVATION_COLD)) {
       iree_hal_buffer_t* buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
       for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
         buffers[i] = *loom_serve_text_state_allocation(state, i);
@@ -1560,26 +1596,31 @@ iree_status_t loom_serve_text_state_reservation_submit(
     }
     if (iree_status_is_ok(status) && reservation->tail != UINT32_MAX) {
       status = loom_serve_text_fork_cache_block(
-          state, reservation->tail, blocks[reservation->prefix - 1]);
+          state, reservation->tail,
+          blocks[reservation->prefix - reservation->preserved - 1]);
     }
-    if (iree_status_is_ok(status) && count) {
+    if (iree_status_is_ok(status) && count != unchanged) {
       const iree_hal_transfer_operation_t uploads[] = {
           {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
            .upload = {.source = state->cache.maps +
-                                index * state->storage.blocks_per_row,
+                                index * state->storage.blocks_per_row +
+                                unchanged,
                       .target_buffer = state->epoch.buffers[2],
                       .target_offset =
                           state->storage.map_origin +
-                          index * state->storage.blocks_per_row * 4,
-                      .length = count * sizeof(*blocks)}},
+                          (index * state->storage.blocks_per_row + unchanged) *
+                              4,
+                      .length = (count - unchanged) * sizeof(*blocks)}},
           {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
            .upload = {.source = state->cache.maps +
-                                index * state->storage.blocks_per_row,
+                                index * state->storage.blocks_per_row +
+                                unchanged,
                       .target_buffer = state->draft.row_table,
                       .target_offset =
                           state->storage.map_origin +
-                          index * state->storage.blocks_per_row * 4,
-                      .length = count * sizeof(*blocks)}},
+                          (index * state->storage.blocks_per_row + unchanged) *
+                              4,
+                      .length = (count - unchanged) * sizeof(*blocks)}},
       };
       uint64_t completion = 0;
       status = loom_runtime_execution_transfer(state->execution,
@@ -1603,7 +1644,12 @@ void loom_serve_text_state_reservation_free(
   if (reservation->next) {
     reservation->next->previous_link = reservation->previous_link;
   }
-  if (!reservation->installed) {
+  if (!iree_any_bit_set(reservation->flags,
+                        LOOM_SERVE_TEXT_RESERVATION_INSTALLED)) {
+    const uint32_t owned_count = reservation->count - reservation->preserved;
+    const uint32_t owned_prefix =
+        reservation->prefix -
+        iree_min(reservation->prefix, reservation->preserved);
     loom_runtime_block_pool_release(&state->recurrent.pool, 1,
                                     &reservation->writer);
     if (reservation->reader != UINT32_MAX) {
@@ -1611,22 +1657,24 @@ void loom_serve_text_state_reservation_free(
                                       &reservation->reader);
     }
     loom_serve_text_release_reverse(&state->cache.pool,
-                                    reservation->count - reservation->prefix,
-                                    reservation->blocks + reservation->prefix);
+                                    owned_count - owned_prefix,
+                                    reservation->blocks + owned_prefix);
     if (reservation->tail != UINT32_MAX) {
-      loom_runtime_block_pool_release(
-          &state->cache.pool, 1, &reservation->blocks[reservation->prefix - 1]);
-      reservation->blocks[reservation->prefix - 1] = reservation->tail;
+      loom_runtime_block_pool_release(&state->cache.pool, 1,
+                                      &reservation->blocks[owned_prefix - 1]);
+      reservation->blocks[owned_prefix - 1] = reservation->tail;
     }
-    loom_serve_text_release_reverse(&state->cache.pool, reservation->prefix,
+    loom_serve_text_release_reverse(&state->cache.pool, owned_prefix,
                                     reservation->blocks);
-    if (reservation->cold) {
+    if (iree_any_bit_set(reservation->flags,
+                         LOOM_SERVE_TEXT_RESERVATION_COLD)) {
       loom_runtime_block_pool_release(&state->recurrent.pool, 1,
                                       &reservation->restored.recurrent_slot);
       loom_serve_text_release_reverse(&state->cache.pool, reservation->prefix,
                                       reservation->restored.blocks);
     }
   }
+  iree_allocator_free(state->host_allocator, reservation->requirements);
   iree_allocator_free(state->host_allocator, reservation->commitments);
   iree_allocator_free(state->host_allocator, reservation->restore_ranges);
   iree_allocator_free(state->host_allocator, reservation);

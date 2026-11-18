@@ -114,6 +114,42 @@ TEST_P(TextReservationTest,
   EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available, 256u);
 }
 
+TEST_P(TextReservationTest, FreshReuseReplacesThePreviousForkReader) {
+  auto* source = loom_serve_text_model_row(model_, 0);
+  auto* branch = loom_serve_text_model_row(model_, 1);
+  const int32_t prefix[] = {0, 1, 2};
+  IREE_ASSERT_OK(
+      loom_serve_text_row_prefill(source, IREE_ARRAYSIZE(prefix), prefix));
+  IREE_ASSERT_OK(loom_serve_text_row_try_pin(source, &checkpoint_));
+  ASSERT_NE(checkpoint_, nullptr);
+  if (GetParam()) {
+    IREE_ASSERT_OK(loom_serve_text_checkpoint_suspend(checkpoint_));
+  }
+  bool admitted = false;
+  IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
+      branch, LOOM_SERVE_TEXT_RESERVE_CHECKPOINT, checkpoint_, 16, &admitted));
+  ASSERT_TRUE(admitted);
+  const int32_t suffix = 1;
+  IREE_ASSERT_OK(loom_serve_text_row_prefill(branch, 1, &suffix));
+  Oracle fork;
+  fork.Consume("abxb");
+  EXPECT_EQ(loom_serve_text_row_token(branch), fork.Predict());
+  loom_serve_text_row_release_reservation(branch);
+
+  // The private writer can serve a new request. Its old encoded reader and
+  // fork position cannot: this prompt crosses that position with a different
+  // prefix while the checkpoint still holds the original reader alive.
+  IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
+      branch, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, 16, &admitted));
+  ASSERT_TRUE(admitted);
+  Oracle fresh;
+  for (const int32_t token : {2, 1, 0, 2, 1, 0}) {
+    IREE_ASSERT_OK(loom_serve_text_row_prefill(branch, 1, &token));
+    fresh.Consume(token);
+    EXPECT_EQ(loom_serve_text_row_token(branch), fresh.Predict());
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(
     ResidentAndSuspended, TextReservationTest,
     ::testing::ValuesIn(loom_runtime_test_device()->service_backing ==

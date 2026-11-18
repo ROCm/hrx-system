@@ -60,7 +60,7 @@ typedef struct loom_serve_text_state_row_t {
     uint32_t slot;
     // Owned reader until the cohort retires, or UINT32_MAX when in-place.
     uint32_t anchor;
-    // Changed origins not yet captured by the source state encoder.
+    // Reader/writer or fork frontier not yet captured by the source encoder.
     bool dirty;
   } recurrent;
   // Old partial KV tail owned through COW retirement, or UINT32_MAX.
@@ -317,8 +317,9 @@ iree_status_t loom_serve_text_state_row_submit_pin(
 iree_status_t loom_serve_text_state_row_try_restore(
     loom_serve_text_state_row_t* row,
     loom_serve_text_state_checkpoint_t* checkpoint, bool* out_restored);
-// Joins a caller's complete working set to the state planner's exact range
-// union. Called synchronously on the serialized owner after logical IDs are
+// Joins a caller's admission to the state planner's uncertain backing ranges.
+// Admitted row/checkpoint borrows need no new backing selection. Called
+// synchronously on the serialized owner after logical IDs are
 // tentatively acquired, before publishing any row changes. Denial submits no
 // work and leaves no pin; success returns accepted native backing ownership.
 // Fixed backing supplies zero ranges and no readiness. The callback must not
@@ -330,10 +331,11 @@ typedef iree_status_t (*loom_serve_text_state_admit_fn_t)(
     uint64_t value, loom_runtime_memory_admission_t* out_admission,
     loom_runtime_memory_operation_t** out_operation);
 
-// A prepared continuation owns its selected logical IDs without changing the
-// row, mapping backing, or submitting work. The row and optional checkpoint
-// remain borrowed and immutable until submission or cancellation; other rows
-// may execute, but state compaction waits for prepared continuations to retire.
+// A prepared continuation borrows its admitted prefix and owns a changed
+// suffix without changing the row, mapping backing, or submitting work. The
+// row and optional checkpoint remain borrowed and immutable until submission
+// or cancellation; other rows may execute, but state compaction waits for
+// prepared continuations to retire.
 typedef struct loom_serve_text_state_reservation_t
     loom_serve_text_state_reservation_t;
 
@@ -346,13 +348,13 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
     loom_serve_text_state_reservation_t** out_reservation);
 
 // Whole continuation's unique physical slab footprint, including shared
-// epoch/proposal storage and COW sources through retirement. Captured with the
-// plan, independent of current backing. Fixed backing has no finite budget and
-// returns zero rather than claiming a physical estimate.
-uint64_t loom_serve_text_state_reservation_footprint(
-    const loom_serve_text_state_reservation_t* reservation);
+// epoch/proposal storage and COW sources through retirement. Materialized once
+// on demand, independently of current backing. Only host allocation can fail.
+// Fixed backing has no finite budget and returns zero.
+iree_status_t loom_serve_text_state_reservation_footprint(
+    loom_serve_text_state_reservation_t* reservation, uint64_t* out_bytes);
 
-// Commits the prepared union and installs its selected IDs on success. Denial
+// Backs uncertain additions and installs the selected IDs on success. Denial
 // keeps the plan intact for retry. The owner excludes concurrent state edits
 // and joins prior backing work before submission. Native failure is terminal;
 // state keeps any installed ownership through ordinary retirement.

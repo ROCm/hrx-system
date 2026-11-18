@@ -29,9 +29,9 @@ typedef struct loom_serve_text_reservation_t {
 
 // Selects logical ownership once, with no parameter pin, mapping, or queue
 // work. A successful empty result denotes logical capacity pressure. The
-// selected row remains unchanged; cancelling this record returns all selected
-// IDs. A retained checkpoint must not be suspended or otherwise mutated while
-// held.
+// selected row remains unchanged; cancelling this record returns only newly
+// owned IDs and leaves its admitted borrows intact. A retained checkpoint must
+// not be suspended or otherwise mutated while held.
 iree_status_t loom_serve_text_reservation_prepare(
     loom_serve_text_row_t* row, loom_serve_text_reserve_mode_t mode,
     loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
@@ -40,9 +40,10 @@ iree_status_t loom_serve_text_reservation_prepare(
 // Conservative language-side completion footprint: parameter activation,
 // the prepared state union, peak private commands, and both epoch packet
 // headers. Image feature roots and their gathered payload are additional.
-// Queries the logical plan without activating or pinning parameters.
-uint64_t loom_serve_text_reservation_memory_footprint(
-    const loom_serve_text_reservation_t* reservation);
+// Materializes and retains the logical requirements without activating or
+// pinning parameters. Only host allocation during first materialization fails.
+iree_status_t loom_serve_text_reservation_memory_footprint(
+    const loom_serve_text_reservation_t* reservation, uint64_t* out_bytes);
 
 // Submits the same plan after earlier model work has completed. Capacity or
 // deferred admission leaves it intact; ACQUIRED transfers logical ownership

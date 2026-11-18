@@ -484,10 +484,11 @@ static iree_status_t loom_serve_text_prepare_media(
         service->readiness.proactor, service->readiness.observer,
         service->host_allocator, &service->projector));
   }
-  loom_serve_text_media_projector_offer(
-      service->projector, pending->media,
-      loom_serve_text_reservation_memory_footprint(
-          &pending->continuation.reservation));
+  uint64_t consumer_bytes = 0;
+  IREE_RETURN_IF_ERROR(loom_serve_text_reservation_memory_footprint(
+      &pending->continuation.reservation, &consumer_bytes));
+  loom_serve_text_media_projector_offer(service->projector, pending->media,
+                                        consumer_bytes);
   return loom_serve_text_media_request_take_status(pending->media);
 }
 
@@ -769,14 +770,18 @@ void loom_serve_text_pending_push(
 
 // Lookahead prepares only the already-observed queue window. It never changes
 // the admission cursor or spends/replenishes overtaking credit.
-bool loom_serve_text_media_lookahead(loom_serve_text_service_t* service) {
+iree_status_t loom_serve_text_media_lookahead(
+    loom_serve_text_service_t* service, bool* out_progress) {
   if (!service->media_preparation_end || service->pending.prepared.session ||
       service->cpu_work != TEXT_CPU_WORK_NONE ||
       (service->completion.work != TEXT_WORK_NONE &&
        service->completion.work != TEXT_WORK_EPOCH)) {
-    return false;
+    return iree_ok_status();
   }
-  for (iree_host_size_t i = 0; i < service->pending.count; ++i) {
+  iree_status_t status = iree_ok_status();
+  bool preparing = false;
+  for (iree_host_size_t i = 0;
+       i < service->pending.count && iree_status_is_ok(status); ++i) {
     const loom_serve_text_pending_request_t* request =
         service->pending.values[i];
     if (request->receipt.serial > service->media_preparation_end) {
@@ -784,24 +789,26 @@ bool loom_serve_text_media_lookahead(loom_serve_text_service_t* service) {
     }
     if (request->continuation.session) {
       if (service->projector) {
-        loom_serve_text_media_projector_offer(
-            service->projector, request->media,
-            loom_serve_text_reservation_memory_footprint(
-                &request->continuation.reservation));
+        uint64_t consumer_bytes = 0;
+        status = loom_serve_text_reservation_memory_footprint(
+            &request->continuation.reservation, &consumer_bytes);
+        if (iree_status_is_ok(status)) {
+          loom_serve_text_media_projector_offer(service->projector,
+                                                request->media, consumer_bytes);
+        }
       }
       continue;
     }
-    if ((!request->input.token_storage || request->media) &&
-        loom_serve_text_begin_preparation_at(service, i)) {
-      return true;
-    }
+    preparing = (!request->input.token_storage || request->media) &&
+                loom_serve_text_begin_preparation_at(service, i);
+    *out_progress |= preparing;
     // An earlier text-only, unavailable-row, or capacity-blocked request is
     // a cohort boundary, not a gap for later consumers to reserve across.
     break;
   }
-  if (!service->projector) {
-    return false;
+  if (iree_status_is_ok(status) && !preparing && service->projector) {
+    service->media_preparation_end = 0;
+    *out_progress |= loom_serve_text_media_projector_start(service->projector);
   }
-  service->media_preparation_end = 0;
-  return loom_serve_text_media_projector_start(service->projector);
+  return status;
 }

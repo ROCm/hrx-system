@@ -1274,7 +1274,7 @@ static iree_status_t loom_serve_text_advance(void* self,
       loom_serve_text_advance_work(self, flags, &work_progress);
   if (iree_status_is_ok(work_status) &&
       !iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
-    work_progress |= loom_serve_text_media_lookahead(service);
+    work_status = loom_serve_text_media_lookahead(service, &work_progress);
   }
   // A new model failure needs another owner turn to stop a pending timer.
   *out_progress |= image_progress || projection_progress ||
