@@ -75,6 +75,10 @@ typedef struct iree_hal_amd_gpu_file_executor_t {
 // bounded windows share staging, registration membership, and native copies.
 // Acceptance retains operands through every accepted access and final cache
 // boundary. Synchronous rejection retains nothing and signals nothing.
+// Captured buffer uses end before public signaling, permitting immediate
+// source-pool destruction once completion is observed. Before/after each point
+// to executor->barrier_size immutable prepared bytes, copied before returning;
+// their representation and application belong to the queue executor.
 iree_status_t iree_hal_amd_gpu_file_transfer_submit_batch(
     const iree_hal_amd_gpu_file_executor_t* executor,
     iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
@@ -82,27 +86,6 @@ iree_status_t iree_hal_amd_gpu_file_transfer_submit_batch(
     iree_hal_buffer_binding_table_t buffers,
     const iree_hal_file_transfer_list_t* transfers, const void* before,
     const void* after);
-
-// The executor is queue-owned and outlives accepted operations.
-// Captures a validated, nonempty queue_read/write transaction. Memory files
-// use their owned host span directly. Buffered platform files use a prepared
-// host view when its device transitions are qualified; other platform transfers
-// use native copies through staging. Device buffers need no public CPU mapping.
-// The before boundary precedes native buffer access. The after boundary and
-// public signals follow every native copy, file request, and host effect.
-// Captured buffer uses end before public signaling, permitting immediate
-// source-pool destruction once completion is observed.
-// Before/after each point to executor->barrier_size prepared bytes, captured
-// before returning. Their representation and application belong to the
-// executor. Failure retains nothing. Success transfers ownership to terminal
-// signaling.
-iree_status_t iree_hal_amd_gpu_file_transfer_submit(
-    const iree_hal_amd_gpu_file_executor_t* executor,
-    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
-    iree_hal_file_t* file, iree_hal_memory_access_t file_access,
-    uint64_t file_offset, iree_hal_buffer_t* buffer,
-    iree_device_size_t buffer_offset, iree_device_size_t length,
-    const void* before, const void* after);
 
 #ifdef __cplusplus
 }  // extern "C"

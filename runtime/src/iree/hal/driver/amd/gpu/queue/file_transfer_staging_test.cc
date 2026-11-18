@@ -409,10 +409,22 @@ class FileTransferStagingTest : public MemoryBackendTest,
     const uint32_t barrier = 0;
     iree_hal_semaphore_t* completion = completion_;
     uint64_t value = 1;
-    IREE_ASSERT_OK(iree_hal_amd_gpu_file_transfer_submit(
-        &executor_, {}, {1, &completion, &value}, file_,
+    const iree_hal_file_binding_t file_binding = {file_, 0, expected_.size()};
+    const iree_hal_buffer_binding_t buffer_binding = {
+        buffer_,
+        0,
+        expected_.size(),
+    };
+    const iree_hal_file_transfer_t transfer = {
+        .row_length = expected_.size(),
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    const iree_hal_file_transfer_list_t list = {.host = {1, &transfer}};
+    IREE_ASSERT_OK(iree_hal_amd_gpu_file_transfer_submit_batch(
+        &executor_, {}, {1, &completion, &value},
         GetParam() ? IREE_HAL_MEMORY_ACCESS_WRITE : IREE_HAL_MEMORY_ACCESS_READ,
-        0, buffer_, 0, expected_.size(), &barrier, &barrier));
+        {1, &file_binding}, {1, &buffer_binding}, &list, &barrier, &barrier));
     const uint64_t chunks = (length + 4095) / 4096;
     PumpUntil([&] { return submitted_ == chunks || queue_.host_owners == 0; });
     ASSERT_EQ(submitted_, chunks);
@@ -1071,10 +1083,22 @@ TEST_P(FileTransferStagingTest, FailedQueueDoesNotPoisonSharedFileStaging) {
   iree_hal_semaphore_t* timeline = completed;
   uint64_t value = 1;
   const uint32_t barrier = 0;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_file_transfer_submit(
-      &executor, {}, {1, &timeline, &value}, file_,
+  const iree_hal_file_binding_t file_binding = {file_, 0, expected_.size()};
+  const iree_hal_buffer_binding_t buffer_binding = {
+      buffer_,
+      4096,
+      expected_.size(),
+  };
+  const iree_hal_file_transfer_t transfer = {
+      .row_length = expected_.size(),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  const iree_hal_file_transfer_list_t list = {.host = {1, &transfer}};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_file_transfer_submit_batch(
+      &executor, {}, {1, &timeline, &value},
       GetParam() ? IREE_HAL_MEMORY_ACCESS_WRITE : IREE_HAL_MEMORY_ACCESS_READ,
-      0, buffer_, 4096, expected_.size(), &barrier, &barrier));
+      {1, &file_binding}, {1, &buffer_binding}, &list, &barrier, &barrier));
   PumpUntil([&] { return other.host_owners == 0; });
   uint64_t observed = 0;
   IREE_ASSERT_OK(iree_hal_semaphore_query(completed, &observed));

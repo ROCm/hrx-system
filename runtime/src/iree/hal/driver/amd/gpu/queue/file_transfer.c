@@ -1238,24 +1238,3 @@ iree_status_t iree_hal_amd_gpu_file_transfer_submit_batch(
   }
   return iree_ok_status();
 }
-
-iree_status_t iree_hal_amd_gpu_file_transfer_submit(
-    const iree_hal_amd_gpu_file_executor_t* executor,
-    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
-    iree_hal_file_t* file, iree_hal_memory_access_t file_access,
-    uint64_t file_offset, iree_hal_buffer_t* buffer,
-    iree_device_size_t buffer_offset, iree_device_size_t length,
-    const void* before, const void* after) {
-  const iree_hal_file_binding_t file_binding = {file, file_offset, length};
-  const iree_hal_buffer_binding_t buffer_binding = {buffer, buffer_offset,
-                                                    length};
-  const iree_hal_file_transfer_t transfer = {
-      .row_length = length, .row_count = 1, .slice_count = 1};
-  const iree_hal_file_transfer_list_t list = {
-      .type = IREE_HAL_FILE_TRANSFER_LIST_TYPE_HOST, .host = {1, &transfer}};
-  return iree_hal_amd_gpu_file_transfer_submit_batch(
-      executor, waits, signals, file_access,
-      (iree_hal_file_binding_table_t){1, &file_binding},
-      (iree_hal_buffer_binding_table_t){1, &buffer_binding}, &list, before,
-      after);
-}

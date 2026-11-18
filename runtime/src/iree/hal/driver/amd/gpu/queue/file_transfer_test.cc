@@ -248,9 +248,19 @@ class FileTransferTest : public ::testing::Test {
         proactor_, deferred ? 0 : 1, iree_allocator_system(), &dependency));
     uint64_t value = 1;
     const uint64_t before = 17, after = 29;
-    IREE_ASSERT_OK(iree_hal_amd_gpu_file_transfer_submit(
-        &executor, {1, &dependency, &value}, {1, &completion_, &value}, file_,
-        access, 5, buffer.get(), 5, 50, &before, &after));
+    const iree_hal_file_binding_t file_binding = {file_, 5, 50};
+    const iree_hal_buffer_binding_t buffer_binding = {buffer.get(), 5, 50};
+    const iree_hal_file_transfer_t transfer = {
+        .row_length = 50,
+        .row_count = 1,
+        .slice_count = 1,
+    };
+    const iree_hal_file_transfer_list_t list = {
+        .host = {1, &transfer},
+    };
+    IREE_ASSERT_OK(iree_hal_amd_gpu_file_transfer_submit_batch(
+        &executor, {1, &dependency, &value}, {1, &completion_, &value}, access,
+        {1, &file_binding}, {1, &buffer_binding}, &list, &before, &after));
     if (deferred) {
       EXPECT_EQ(queue.submissions, 0u);
       EXPECT_FALSE(device.destroyed);
@@ -364,9 +374,17 @@ void FileTransferTest::FailedNativeWork(iree_hal_memory_access_t access) {
   }
   const uint64_t before = 17, after = 29;
   uint64_t value = 1;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_file_transfer_submit(
-      &executor, {}, {1, &completion_, &value}, file_, access, 5, buffer.get(),
-      5, 50, &before, &after));
+  const iree_hal_file_binding_t file_binding = {file_, 5, 50};
+  const iree_hal_buffer_binding_t buffer_binding = {buffer.get(), 5, 50};
+  const iree_hal_file_transfer_t transfer = {
+      .row_length = 50,
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  const iree_hal_file_transfer_list_t list = {.host = {1, &transfer}};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_file_transfer_submit_batch(
+      &executor, {}, {1, &completion_, &value}, access, {1, &file_binding},
+      {1, &buffer_binding}, &list, &before, &after));
   iree_hal_file_release(file_);
   file_ = nullptr;
   EXPECT_EQ(queue.submissions, 1u);
@@ -436,10 +454,21 @@ TEST_F(FileTransferTest, UnqualifiedMemoryFileFailsBeforeNativeSubmission) {
       IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE, IREE_HAL_BUFFER_USAGE_TRANSFER);
   const uint64_t barrier = 0;
   uint64_t value = 1;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_file_transfer_submit(
-      &executor, {}, {1, &completion_, &value}, file_,
-      IREE_HAL_MEMORY_ACCESS_READ, 0, buffer.get(), 0, contents_.size(),
-      &barrier, &barrier));
+  const iree_hal_file_binding_t file_binding = {file_, 0, contents_.size()};
+  const iree_hal_buffer_binding_t buffer_binding = {
+      buffer.get(),
+      0,
+      contents_.size(),
+  };
+  const iree_hal_file_transfer_t transfer = {
+      .row_length = contents_.size(),
+      .row_count = 1,
+      .slice_count = 1,
+  };
+  const iree_hal_file_transfer_list_t list = {.host = {1, &transfer}};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_file_transfer_submit_batch(
+      &executor, {}, {1, &completion_, &value}, IREE_HAL_MEMORY_ACCESS_READ,
+      {1, &file_binding}, {1, &buffer_binding}, &list, &barrier, &barrier));
   uint64_t observed = 0;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
                         iree_hal_semaphore_query(completion_, &observed));

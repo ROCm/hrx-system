@@ -1,0 +1,348 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include <array>
+#include <cstring>
+#include <vector>
+
+#include "iree/hal/api.h"
+#include "iree/hal/cts/util/test_base.h"
+#include "iree/hal/driver/amd/gpu/cts/test_device.h"
+#include "iree/hal/driver/amd/gpu/queue/aql/queue.h"
+#include "iree/hal/driver/amd/gpu/queue/membership.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/queue.h"
+#include "iree/hal/driver/amd/gpu/queue/sdma/queue.h"
+#include "iree/io/file_contents.h"
+#include "iree/io/file_handle.h"
+#include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
+#include "iree/testing/temp_file.h"
+
+namespace {
+using iree::hal::cts::Ref;
+
+using FileTransfer = decltype(&iree_hal_amd_gpu_pm4_queue_file_transfer);
+
+// Native CTS uses the exact queue implementation chosen by device construction,
+// independently of shader architecture and without creating another device.
+FileTransfer SelectFileTransfer(iree_hal_queue_t* queue) {
+  const auto* family = reinterpret_cast<const iree_hal_amd_gpu_queue_family_t*>(
+      iree_hal_queue_family(queue));
+  if (family->lifecycle->close == iree_hal_amd_gpu_pm4_queue_close) {
+    return iree_hal_amd_gpu_pm4_queue_file_transfer;
+  }
+  if (family->lifecycle->close == iree_hal_amd_gpu_aql_queue_close) {
+    return iree_hal_amd_gpu_aql_queue_file_transfer;
+  }
+  if (family->lifecycle == &iree_hal_amd_gpu_sdma_queue_lifecycle) {
+    return iree_hal_amd_gpu_sdma_queue_file_transfer;
+  }
+  return nullptr;
+}
+
+enum class Descriptions { kHost, kIndirectHost, kIndirectPrivate };
+
+class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
+ protected:
+  amdf_queue_command_type_t command_type() const override {
+    return AMDF_QUEUE_COMMAND_TYPE_UNKNOWN;
+  }
+
+  void Import(const iree::testing::TempFilePath& path,
+              const std::vector<uint8_t>& contents,
+              iree_hal_file_t** out_file) {
+    IREE_ASSERT_OK(iree_io_file_contents_write(
+        path.path_view(),
+        iree_make_const_byte_span(contents.data(), contents.size()),
+        iree_allocator_system()));
+    iree_io_file_handle_t* handle = nullptr;
+    IREE_ASSERT_OK(iree_io_file_handle_open(
+        IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_WRITE |
+            IREE_IO_FILE_MODE_ASYNC | IREE_IO_FILE_MODE_SHARE_READ |
+            IREE_IO_FILE_MODE_SHARE_WRITE,
+        path.path_view(), iree_allocator_system(), &handle));
+    iree_status_t status = iree_hal_file_import(
+        device_, nullptr, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+        IREE_HAL_MEMORY_ACCESS_ALL, handle, 0, out_file);
+    iree_io_file_handle_release(handle);
+    IREE_ASSERT_OK(status);
+  }
+
+  void Allocate(iree_hal_pool_t* pool, size_t length,
+                iree_hal_buffer_t** out_buffer) {
+    IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+        pool, iree_hal_make_pool_reservation_request(length, 64),
+        iree_infinite_timeout(), out_buffer));
+  }
+
+  void RoundTrip(iree_hal_queue_t* io_queue, iree_hal_pool_t* payload_pool,
+                 iree_hal_pool_t* metadata_pool, Descriptions descriptions,
+                 bool memory_source) {
+    SCOPED_TRACE(static_cast<int>(descriptions));
+    SCOPED_TRACE(memory_source);
+    const auto transfer = SelectFileTransfer(io_queue);
+    ASSERT_NE(transfer, nullptr);
+    // Cross both native request-group and private metadata-page boundaries.
+    constexpr size_t kCount = 65;
+    constexpr size_t kCapacity = kCount + 3;
+    constexpr size_t kRowLength = 90;
+    constexpr size_t kFileOrigin = 13;
+    constexpr size_t kFileStride = 192;
+    constexpr size_t kBufferOrigin = 17;
+    constexpr size_t kBufferStride = 128;
+    constexpr size_t kFileLength = kFileOrigin + kCount * kFileStride + 7;
+    constexpr size_t kBufferLength = kBufferOrigin + kCount * kBufferStride + 5;
+    constexpr size_t kMetadataLength = 64 + kCapacity * 64;
+    std::vector<uint8_t> source(kFileLength);
+    std::vector<uint8_t> output(kFileLength, 0xCD);
+    std::vector<uint8_t> expected_buffer(kBufferLength, 0xCD);
+    std::vector<uint8_t> observed(kBufferLength, 0xFF);
+    for (size_t i = 0; i < source.size(); ++i) {
+      source[i] = static_cast<uint8_t>((i * 17) ^ (i >> 8));
+    }
+    iree::testing::TempFilePath source_path("iree_file_batch_source");
+    iree::testing::TempFilePath output_path("iree_file_batch_output");
+    Ref<iree_hal_file_t> source_file, output_file;
+    if (memory_source) {
+      // Memory files require native upload copies even when the physical
+      // payload happens to offer a direct host file-I/O mapping.
+      iree_io_file_handle_t* handle = nullptr;
+      IREE_ASSERT_OK(iree_io_file_handle_wrap_host_allocation(
+          IREE_IO_FILE_ACCESS_READ,
+          iree_make_byte_span(source.data(), source.size()), {},
+          iree_allocator_system(), &handle));
+      iree_status_t status = iree_hal_file_import(
+          device_, nullptr, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+          IREE_HAL_MEMORY_ACCESS_READ, handle, 0, source_file.out());
+      iree_io_file_handle_release(handle);
+      IREE_ASSERT_OK(status);
+    } else {
+      ASSERT_NO_FATAL_FAILURE(Import(source_path, source, source_file.out()));
+    }
+    ASSERT_NO_FATAL_FAILURE(Import(output_path, output, output_file.out()));
+    Ref<iree_hal_buffer_t> payload, consumer, metadata;
+    ASSERT_NO_FATAL_FAILURE(
+        Allocate(payload_pool, kBufferLength, payload.out()));
+    ASSERT_NO_FATAL_FAILURE(
+        Allocate(payload_pool, kBufferLength, consumer.out()));
+    ASSERT_NO_FATAL_FAILURE(
+        Allocate(metadata_pool, kMetadataLength, metadata.out()));
+
+    // The metadata starts invalid. The accepted producer supplies the live
+    // count and records only after all downstream work has been enqueued.
+    std::array<uint64_t, kMetadataLength / sizeof(uint64_t)> words;
+    words.fill(UINT64_MAX);
+    std::array<iree_hal_file_transfer_t, kCount> host = {};
+    for (size_t i = 0; i < kCount; ++i) {
+      const size_t file_offset = ((i * 37) % kCount) * kFileStride;
+      const size_t buffer_offset = i * kBufferStride;
+      auto* record = &words[8 + i * 8];
+      record[0] = file_offset;
+      record[1] = buffer_offset;
+      record[2] = kRowLength;
+      host[i] = {
+          .file_offset = file_offset,
+          .buffer_offset = buffer_offset,
+          .row_length = kRowLength,
+          .row_count = 1,
+          .slice_count = 1,
+      };
+      std::memcpy(expected_buffer.data() + kBufferOrigin + buffer_offset,
+                  source.data() + kFileOrigin + file_offset, kRowLength);
+      std::memcpy(output.data() + kFileOrigin + file_offset,
+                  source.data() + kFileOrigin + file_offset, kRowLength);
+    }
+    words[0] = kCount;
+
+    Ref<iree_hal_semaphore_t> initialized, gate, requests_ready, rows_ready;
+    Ref<iree_hal_semaphore_t> consumed, written, completed;
+    ASSERT_NO_FATAL_FAILURE(CreateSemaphore(initialized.out()));
+    ASSERT_NO_FATAL_FAILURE(CreateSemaphore(gate.out()));
+    ASSERT_NO_FATAL_FAILURE(CreateSemaphore(requests_ready.out()));
+    ASSERT_NO_FATAL_FAILURE(CreateSemaphore(rows_ready.out()));
+    ASSERT_NO_FATAL_FAILURE(CreateSemaphore(consumed.out()));
+    ASSERT_NO_FATAL_FAILURE(CreateSemaphore(written.out()));
+    ASSERT_NO_FATAL_FAILURE(CreateSemaphore(completed.out()));
+    auto* initialized_handle = initialized.get();
+    auto* requests_handle = requests_ready.get();
+    auto* rows_handle = rows_ready.get();
+    auto* consumed_handle = consumed.get();
+    auto* written_handle = written.get();
+    auto* completed_handle = completed.get();
+    const uint8_t padding = 0xCD;
+    const uint8_t invalid = 0xFF;
+    uint64_t one = 1;
+    iree_hal_transfer_operation_t initialization[2] = {};
+    initialization[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+    initialization[0].fill = {payload, 0, kBufferLength, &padding, 1};
+    initialization[1].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+    initialization[1].fill = {metadata, 0, kMetadataLength, &invalid, 1};
+    IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {},
+                                           {1, &initialized_handle, &one}, 2,
+                                           initialization, nullptr));
+    IREE_ASSERT_OK(
+        iree_hal_semaphore_wait(initialized, one, iree_infinite_timeout(), 0));
+    iree_hal_semaphore_t* producer_waits[] = {initialized, gate};
+    uint64_t producer_values[] = {one, one};
+    IREE_ASSERT_OK(
+        iree_hal_queue_upload(queues_[0], {2, producer_waits, producer_values},
+                              {1, &requests_handle, &one}, words.data(),
+                              metadata, 0, sizeof(words), nullptr));
+
+    iree_hal_file_binding_t input_binding = {
+        source_file,
+        kFileOrigin,
+        kCount * kFileStride,
+    };
+    iree_hal_file_binding_t output_binding = {
+        output_file,
+        kFileOrigin,
+        kCount * kFileStride,
+    };
+    iree_hal_buffer_binding_t payload_binding = {
+        payload,
+        kBufferOrigin,
+        kCount * kBufferStride,
+    };
+    iree_hal_buffer_binding_t consumer_binding = {
+        consumer,
+        kBufferOrigin,
+        kCount * kBufferStride,
+    };
+    iree_hal_file_transfer_list_t list = {};
+    if (descriptions == Descriptions::kHost) {
+      list.host = {host.size(), host.data()};
+    } else {
+      list.type = IREE_HAL_FILE_TRANSFER_LIST_TYPE_INDIRECT;
+      list.indirect.records = {metadata, 64, kCapacity * 64};
+      list.indirect.count_buffer = metadata;
+    }
+    // Do not ASSERT after accepting gated work: release the gate and join its
+    // accepted tail even if a later admission fails.
+    iree_status_t status =
+        transfer(io_queue, {1, &requests_handle, &one}, {1, &rows_handle, &one},
+                 {1, &input_binding}, {1, &payload_binding}, &list,
+                 IREE_HAL_MEMORY_ACCESS_READ, nullptr);
+    iree_hal_semaphore_t* tail = requests_handle;
+    if (iree_status_is_ok(status)) {
+      tail = rows_handle;
+      status = iree_hal_queue_copy(queues_[0], {1, &rows_handle, &one},
+                                   {1, &consumed_handle, &one}, payload, 0,
+                                   consumer, 0, kBufferLength, nullptr, 0);
+    }
+    if (iree_status_is_ok(status)) {
+      tail = consumed_handle;
+      status = transfer(io_queue, {1, &consumed_handle, &one},
+                        {1, &written_handle, &one}, {1, &output_binding},
+                        {1, &consumer_binding}, &list,
+                        IREE_HAL_MEMORY_ACCESS_WRITE, nullptr);
+    }
+    if (iree_status_is_ok(status)) {
+      tail = written_handle;
+      status = iree_hal_queue_download(
+          queues_[0], {1, &written_handle, &one}, {1, &completed_handle, &one},
+          consumer, 0, observed.data(), observed.size(), nullptr);
+    }
+    if (iree_status_is_ok(status)) {
+      tail = completed_handle;
+    }
+    // Captures own the tables and objects. The caller owns the pools and the
+    // upload/download host spans until the accepted tail retires.
+    input_binding = {};
+    output_binding = {};
+    payload_binding = {};
+    consumer_binding = {};
+    list = {};
+    host.fill({});
+    source_file.reset();
+    output_file.reset();
+    payload.reset();
+    consumer.reset();
+    metadata.reset();
+    IREE_EXPECT_OK(iree_hal_semaphore_signal(gate, one, nullptr));
+    status = iree_status_join(
+        status, iree_hal_semaphore_wait(tail, one, iree_infinite_timeout(), 0));
+    IREE_ASSERT_OK(status);
+    EXPECT_EQ(observed, expected_buffer);
+    iree_io_file_contents_t* actual = nullptr;
+    IREE_ASSERT_OK(iree_io_file_contents_read(
+        output_path.path_view(), iree_allocator_system(), &actual));
+    EXPECT_EQ(actual->buffer.data_length, output.size());
+    if (actual->buffer.data_length == output.size()) {
+      EXPECT_EQ(std::memcmp(actual->buffer.data, output.data(), output.size()),
+                0);
+    }
+    iree_io_file_contents_free(actual);
+    if (!memory_source) {
+      EXPECT_TRUE(source_path.Remove());
+    }
+    EXPECT_TRUE(output_path.Remove());
+  }
+};
+
+TEST_F(GpuNativeFileBatchTest, ProducerAndConsumerShareOrForkNativeQueues) {
+  ASSERT_NO_FATAL_FAILURE(Create());
+  RecordProperty(
+      "compute_protocol",
+      SelectFileTransfer(queues_[0]) == iree_hal_amd_gpu_pm4_queue_file_transfer
+          ? "PM4"
+          : "AQL");
+  Ref<iree_hal_queue_t> dma;
+  const auto* families =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device_));
+  for (uint32_t i = 0; i < families->family_count && !dma; ++i) {
+    const auto roles = families->families[i].role_flags;
+    if ((roles & IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER) &&
+        !(roles & IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH)) {
+      iree_hal_queue_params_t params;
+      iree_hal_queue_params_initialize(&params);
+      IREE_ASSERT_OK(iree_hal_queue_acquire(
+          iree_hal_device_queue_family(device_, i), &params, dma.out()));
+    }
+  }
+  std::vector<iree_hal_pool_family_access_t> accesses = {{
+      .family = iree_hal_queue_family(queues_[0]),
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+  }};
+  if (dma) {
+    accesses.push_back({
+        .family = iree_hal_queue_family(dma),
+        .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+    });
+  }
+  iree_hal_pool_scope_t scope = {accesses.size(), accesses.data(), {}};
+  iree_hal_slab_pool_options_t options;
+  iree_hal_slab_pool_options_initialize(&options);
+  Ref<iree_hal_pool_t> private_pool, host_pool;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(
+      group_, scope, &options, iree_allocator_system(), private_pool.out()));
+  scope.host = {
+      .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+      .modes = IREE_HAL_MAPPING_MODE_SCOPED,
+  };
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(
+      group_, scope, &options, iree_allocator_system(), host_pool.out()));
+  std::vector<iree_hal_queue_t*> io_queues = {queues_[0], queues_[1]};
+  if (dma) {
+    io_queues.push_back(dma);
+  }
+  RecordProperty("sdma_queue", dma ? 1 : 0);
+  for (size_t i = 0; i < io_queues.size(); ++i) {
+    SCOPED_TRACE(i);
+    for (auto descriptions : {Descriptions::kHost, Descriptions::kIndirectHost,
+                              Descriptions::kIndirectPrivate}) {
+      for (bool memory_source : {false, true}) {
+        ASSERT_NO_FATAL_FAILURE(RoundTrip(
+            io_queues[i], private_pool,
+            descriptions == Descriptions::kIndirectPrivate ? private_pool.get()
+                                                           : host_pool.get(),
+            descriptions, memory_source));
+      }
+    }
+  }
+}
+
+}  // namespace
