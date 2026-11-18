@@ -192,8 +192,9 @@ iree_status_t iree_hal_amd_xdna_device_create(
   iree_status_t status = iree_hal_amd_xdna_device_build_spec(
       context, display_name, host_allocator, &device->spec);
   if (iree_status_is_ok(status)) {
-    status = iree_async_proactor_pool_acquire_for_node(
-        create_params->proactor_pool, UINT32_MAX, &device->proactor_entry);
+    status = iree_hal_amd_fabric_acquire_proactor(create_params->proactor_pool,
+                                                  context->host_numa_node,
+                                                  &device->proactor_entry);
   }
   if (iree_status_is_ok(status)) {
     status = iree_async_notification_create(

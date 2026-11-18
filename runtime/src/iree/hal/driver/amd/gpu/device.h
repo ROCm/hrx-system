@@ -33,8 +33,10 @@ typedef struct iree_hal_amd_gpu_device_options_t {
   // Number of provisioned queues in this family, between 1 and 256. Defaults
   // to four so independent execution timelines can use distinct queues.
   uint32_t queue_count;
-  // Host NUMA node for both device workers and the shared proactor. UINT32_MAX
-  // leaves placement unspecified; GPU memory nodes are not CPU NUMA nodes.
+  // Host NUMA override for device workers and the shared proactor. UINT32_MAX
+  // prefers the endpoint's native host node when present in the supplied
+  // proactor pool, otherwise its first entry. Explicit nodes must be present
+  // in that pool. GPU memory nodes are not CPU NUMA nodes.
   uint32_t host_numa_node;
   // Active observation budget after real completion progress, in nanoseconds.
   // Zero uses native events immediately. USER queue completion records and

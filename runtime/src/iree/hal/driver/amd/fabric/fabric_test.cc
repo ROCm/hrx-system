@@ -12,10 +12,81 @@
 #include <thread>
 #include <vector>
 
+#include "iree/base/threading/affinity.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
+
+// Captures the selected service before native creation. Rejecting construction
+// also verifies that a failed preferred service is not retried on another node.
+class AmdFabricProactorTest : public ::testing::Test {
+ protected:
+  void CheckSelection(const std::vector<uint32_t>& nodes,
+                      uint32_t preferred_node, uint32_t selected_node) {
+    iree_thread_affinity_set_t processors = {};
+    iree_bitmap_set(iree_thread_affinity_set_bitmap(&processors), 7);
+    auto options = iree_async_proactor_pool_options_default();
+    options.proactor_options.worker_processor_set = &processors;
+    options.proactor_create = CaptureCreation;
+    options.runner = {};
+    iree_async_proactor_pool_t* pool = nullptr;
+    IREE_ASSERT_OK(iree_async_proactor_pool_create(
+        nodes.size(), nodes.data(), options, iree_allocator_system(), &pool));
+    creation_count_ = 0;
+    selected_node_ = UINT32_MAX;
+    iree_async_proactor_pool_entry_t* entry = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_ABORTED,
+        iree_hal_amd_fabric_acquire_proactor(pool, preferred_node, &entry));
+    EXPECT_EQ(entry, nullptr);
+    EXPECT_EQ(creation_count_, 1u);
+    EXPECT_EQ(selected_node_, selected_node);
+    iree_async_proactor_pool_release(pool);
+  }
+
+ private:
+  static iree_status_t CaptureCreation(iree_async_proactor_options_t options,
+                                       iree_allocator_t allocator,
+                                       iree_async_proactor_t** out_proactor) {
+    ++creation_count_;
+    selected_node_ = options.worker_affinity.group_any
+                         ? options.worker_affinity.group
+                         : UINT32_MAX;
+    EXPECT_EQ(options.threading_mode,
+              IREE_ASYNC_PROACTOR_THREADING_CROSS_THREAD);
+    EXPECT_NE(options.worker_processor_set, nullptr);
+    if (options.worker_processor_set) {
+      EXPECT_TRUE(
+          iree_thread_affinity_set_test(options.worker_processor_set, 7));
+    }
+    *out_proactor = nullptr;
+    return iree_make_status(IREE_STATUS_ABORTED, "native creation rejected");
+  }
+
+  // Construction attempts in the current dependency-mocked acquisition.
+  static thread_local uint32_t creation_count_;
+  // Affinity passed to the selected native proactor creator.
+  static thread_local uint32_t selected_node_;
+};
+thread_local uint32_t AmdFabricProactorTest::creation_count_ = 0;
+thread_local uint32_t AmdFabricProactorTest::selected_node_ = UINT32_MAX;
+
+TEST_F(AmdFabricProactorTest, PrefersMatchingNativeNode) {
+  CheckSelection({UINT32_MAX, 17, 3}, 3, 3);
+}
+
+TEST_F(AmdFabricProactorTest, UnreportedLocalityUsesCallerDefault) {
+  CheckSelection({17, 3}, UINT32_MAX, 17);
+}
+
+TEST_F(AmdFabricProactorTest, UnavailableLocalityUsesCallerDefault) {
+  CheckSelection({17, 3}, 9, 17);
+}
+
+TEST_F(AmdFabricProactorTest, PreservesUnpinnedCallerService) {
+  CheckSelection({UINT32_MAX}, 3, UINT32_MAX);
+}
 
 struct NativeInstance {
   // Distinct instance-owned storage used as the native system scope identity.
