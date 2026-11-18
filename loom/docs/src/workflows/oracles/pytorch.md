@@ -8,8 +8,8 @@ state, and benchmark workload.
 **Example files:** [`capture.py` and `replay.loom`](https://github.com/ROCm/hrx-system/tree/main/loom/docs/examples/workflows/oracles/pytorch).
 The example runs a real PyTorch module, saves its observations, compares a Loom
 function with the saved output, and reads Loom's own captures back in a second
-invocation. It uses eight-element inputs to qualify the workflow, not to
-represent a production performance workload.
+invocation. Its eight-element inputs demonstrate capture and replay mechanics;
+a production performance workload needs representative dimensions and data.
 
 ## Pin the reference and select the boundary
 
@@ -96,9 +96,8 @@ from a separate uninstrumented run with the same selected implementation.
 
 ## Run the capture and replay example
 
-Place the example files together in an environment with PyTorch and NumPy.
-The maintained test uses CPU PyTorch 2.9.1 and NumPy 2.3.5. No checkpoint download
-is needed for this example:
+Place the example files together in your reference environment with PyTorch and
+NumPy installed. No checkpoint download is needed for this example:
 
 ```shell
 python capture.py captures

@@ -25,6 +25,7 @@ COMMAND_SOURCE = Path(sys.argv.pop(1)).resolve()
 SEQUENCE_SOURCE = Path(sys.argv.pop(1)).resolve()
 HOST_VALUES_SOURCE = Path(sys.argv.pop(1)).resolve()
 REUSED_PRODUCTS_SOURCE = Path(sys.argv.pop(1)).resolve()
+CAPTURE_SOURCE = Path(sys.argv.pop(1)).resolve()
 
 
 class BenchmarkExecutionTest(unittest.TestCase):
@@ -69,6 +70,37 @@ class BenchmarkExecutionTest(unittest.TestCase):
             "--batch-size=1",
             "--input-ring-count=2",
         )
+
+    def test_captures_are_written_only_in_the_correctness_phase(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            for correctness in (False, True):
+                with self.subTest(correctness=correctness):
+                    result, rows = self.run_tool(
+                        CAPTURE_SOURCE,
+                        f"--scenario-correctness={str(correctness).lower()}",
+                        f"--file-output-root={root}",
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertTrue(any(row["row"] == "benchmark" for row in rows))
+                    expected = (
+                        {
+                            Path("scenario-capture/configuration-0/trial-0-0")
+                            / side
+                            / "value.npy"
+                            for side in ("actual", "expected")
+                        }
+                        if correctness
+                        else set()
+                    )
+                    self.assertEqual(
+                        {path.relative_to(root) for path in root.rglob("*.npy")},
+                        expected,
+                    )
+                    for path in expected:
+                        self.assertEqual(
+                            (root / path).read_bytes()[-4:], b"\x2a\x00\x00\x00"
+                        )
 
     def test_reused_products_keep_trial_values_and_layouts(self):
         result, rows = self.run_tool(

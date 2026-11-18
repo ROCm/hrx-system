@@ -51,7 +51,7 @@ optimized runtime supplies the performance reference. Agreement between two
 backends that share the same graph or quantization mistake is not an
 independent numerical proof.
 
-The [PyTorch capture workflow](oracles/pytorch.md) provides a tested path from
+The [PyTorch capture workflow](oracles/pytorch.md) illustrates a path from
 selected module observations to NPY fixtures and authored Loom scenarios,
 including in-place inputs and BF16 carriers. The
 [GGML workflow](oracles/ggml-llama-cpp.md#capture-model-values-before-storage-reuse)

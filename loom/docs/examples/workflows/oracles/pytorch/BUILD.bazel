@@ -3,67 +3,10 @@
 # Licensed under the Apache License v2.0 with LLVM Exceptions.
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-#
-# bazel-to-cmake: skip
-
-load("@loom_oracle_test_pip//:requirements.bzl", "requirement")
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:python.bzl", "loom_py_library", "loom_py_test")
 
 package(default_visibility = ["//visibility:public"])
 
 exports_files([
     "capture.py",
-    "capture_test.py",
     "replay.loom",
-    "requirements.lock.txt",
 ])
-
-loom_py_library(
-    name = "capture",
-    testonly = True,
-    srcs = ["capture.py"],
-    imports = ["."],
-    target_compatible_with = [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:linux",
-    ],
-    deps = [
-        requirement("numpy"),
-        requirement("torch"),
-    ],
-)
-
-# PyTorch is an optional reference, not a compiler/runtime dependency. Explicit
-# qualification uses the same authored example as physical provider suites.
-loom_py_test(
-    name = "capture_test",
-    size = "small",
-    srcs = ["capture_test.py"],
-    args = [
-        "$(rootpath //loom/src/loom/tools/loom-test)",
-        "$(rootpath //loom/src/loom/tools/loom-benchmark)",
-        "$(rootpath :replay.loom)",
-        "task",
-    ],
-    data = [
-        "replay.loom",
-        "//loom/src/loom/tools/loom-benchmark",
-        "//loom/src/loom/tools/loom-test",
-    ],
-    env = {"OMP_NUM_THREADS": "1"},
-    main = "capture_test.py",
-    tags = ["manual"],
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/execute:x86_task_hal",
-        "//loom/config/execute:vm_iree_vm",
-    ]) + [
-        "@platforms//cpu:x86_64",
-        "@platforms//os:linux",
-    ],
-    deps = [
-        ":capture",
-        requirement("numpy"),
-        requirement("torch"),
-    ],
-)
