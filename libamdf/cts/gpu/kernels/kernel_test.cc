@@ -395,14 +395,19 @@ TEST(KernelTest, ExecutableReplacementRetainsDescriptorsAndFetchBounds) {
     ASSERT_NE(alternate, variants.end());
     EXPECT_EQ(kernel.executable.byte_length, alternate->executable.byte_length);
     EXPECT_LE((kernel.executable.byte_length + 255u) & ~255u, 4096u);
-    EXPECT_EQ(kernel.executable.descriptor_byte_offset, 0u);
-    EXPECT_EQ(alternate->executable.descriptor_byte_offset, 0u);
+    // The image preserves the descriptor's alignment phase relative to code.
+    EXPECT_EQ(kernel.executable.descriptor_byte_offset,
+              alternate->executable.descriptor_byte_offset);
     EXPECT_EQ(kernel.entry_byte_offset, alternate->entry_byte_offset);
+    const auto* descriptor =
+        reinterpret_cast<const uint8_t*>(kernel.executable.words) +
+        kernel.executable.descriptor_byte_offset;
+    const auto* alternate_descriptor =
+        reinterpret_cast<const uint8_t*>(alternate->executable.words) +
+        alternate->executable.descriptor_byte_offset;
     // Both arithmetics remain valid if instruction fetch observes the prior
     // program. The behavioral replacement case separately checks new results.
-    EXPECT_EQ(
-        std::memcmp(kernel.executable.words, alternate->executable.words, 64),
-        0);
+    EXPECT_EQ(std::memcmp(descriptor, alternate_descriptor, 64), 0);
   }
 }
 
