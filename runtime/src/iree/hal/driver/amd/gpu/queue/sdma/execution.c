@@ -385,21 +385,6 @@ static void iree_hal_amd_gpu_sdma_accepted(void* user_data) {
   }
 }
 
-static uint32_t* iree_hal_amd_gpu_sdma_barrier_words(
-    iree_hal_amd_gpu_sdma_queue_t* queue,
-    iree_hal_amd_gpu_sdma_barrier_t barrier, uint32_t* words) {
-  if (barrier & IREE_HAL_AMD_GPU_SDMA_BARRIER_JOIN) {
-    *words++ = 0;
-  }
-  const uint32_t cache = ((barrier & IREE_HAL_AMD_GPU_SDMA_BARRIER_ACQUIRE)
-                              ? queue->options.barriers.acquire
-                              : 0) |
-                         ((barrier & IREE_HAL_AMD_GPU_SDMA_BARRIER_RELEASE)
-                              ? queue->options.barriers.release
-                              : 0);
-  return cache ? iree_hal_amd_gpu_sdma_emit_cache(words, cache) : words;
-}
-
 static iree_status_t iree_hal_amd_gpu_sdma_emit(
     iree_hal_amd_gpu_sdma_operation_t* operation,
     iree_hal_amd_gpu_sdma_span_t* span, uint32_t* out_word_count) {
@@ -443,13 +428,21 @@ static iree_status_t iree_hal_amd_gpu_sdma_emit(
         break;
       case IREE_HAL_AMD_GPU_SDMA_PHASE_BEFORE:
       case IREE_HAL_AMD_GPU_SDMA_PHASE_AFTER: {
-        if (capacity < 6) {
+        const bool before = next->phase == IREE_HAL_AMD_GPU_SDMA_PHASE_BEFORE;
+        const iree_hal_amd_gpu_sdma_barrier_t barrier =
+            before ? operation->before : operation->after;
+        uint32_t cache = 0;
+        if (capacity < iree_hal_amd_gpu_sdma_barrier_word_count(
+                           queue->options.barriers, barrier, &cache)) {
           full = true;
           break;
         }
-        const bool before = next->phase == IREE_HAL_AMD_GPU_SDMA_PHASE_BEFORE;
-        words = iree_hal_amd_gpu_sdma_barrier_words(
-            queue, before ? operation->before : operation->after, words);
+        if (barrier & IREE_HAL_AMD_GPU_SDMA_BARRIER_JOIN) {
+          *words++ = 0;
+        }
+        if (cache) {
+          words = iree_hal_amd_gpu_sdma_emit_cache(words, cache);
+        }
         next->phase = before ? IREE_HAL_AMD_GPU_SDMA_PHASE_INITIALIZE
                              : IREE_HAL_AMD_GPU_SDMA_PHASE_SIGNAL;
         break;

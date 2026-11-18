@@ -663,6 +663,32 @@ TEST_P(QueueTest, ReusableRecordingCapturesIndependentBindingTables) {
   EXPECT_EQ(std::memcmp(bytes_ + 8201, input.data(), input.size()), 0);
 }
 
+TEST_P(QueueTest, FullSubmissionSpillsOnlyAnEncodedSignal) {
+  // Thirty-two seven-DWORD copy packets fill the 224-DWORD payload exactly.
+  constexpr size_t kCopies = 32;
+  Ref<iree_hal_command_buffer_t> recording;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_sdma_command_buffer_create(
+      families_[0], &programs_, 0, options_.barriers, 0,
+      IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, allocator_, recording.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+  for (size_t i = 0; i < kCopies; ++i) {
+    bytes_[i] = static_cast<uint8_t>(i + 1);
+    IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
+        recording, iree_hal_make_buffer_ref(buffer_, i, 1),
+        iree_hal_make_buffer_ref(buffer_, kCopies + i, 1), 0));
+  }
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+  auto done = Semaphore(true);
+  iree_hal_semaphore_t* output = done;
+  uint64_t one = 1;
+  IREE_ASSERT_OK(iree_hal_queue_execute(queue_, {}, Point(&output, &one),
+                                        recording, {}, 0));
+  ASSERT_NO_FATAL_FAILURE(Drain());
+  ExpectValue(done, 1);
+  EXPECT_EQ(std::memcmp(bytes_, bytes_ + kCopies, kCopies), 0);
+  EXPECT_EQ(commands_.size(), SubmissionGcr() ? 1u : 2u);
+}
+
 TEST_P(QueueTest, NativeFailureRetainsAcceptedOperandsUntilStop) {
   auto completed = Semaphore();
   iree_hal_semaphore_t* output = completed;

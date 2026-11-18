@@ -181,12 +181,9 @@ iree_status_t iree_hal_amd_gpu_sdma_recording_barrier(
   if (profile.submission && visibility) {
     return iree_hal_amd_gpu_sdma_recording_retire(recording);
   }
-  const uint32_t cache =
-      ((barrier & IREE_HAL_AMD_GPU_SDMA_BARRIER_ACQUIRE) ? profile.acquire
-                                                         : 0) |
-      ((barrier & IREE_HAL_AMD_GPU_SDMA_BARRIER_RELEASE) ? profile.release : 0);
-  const bool join = (barrier & IREE_HAL_AMD_GPU_SDMA_BARRIER_JOIN) != 0;
-  const uint32_t word_count = (join ? 1u : 0u) + (cache ? 5u : 0u);
+  uint32_t cache = 0;
+  const uint32_t word_count =
+      iree_hal_amd_gpu_sdma_barrier_word_count(profile, barrier, &cache);
   if (!word_count) {
     return iree_ok_status();
   }
@@ -194,7 +191,7 @@ iree_status_t iree_hal_amd_gpu_sdma_recording_barrier(
   uint32_t* words = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_sdma_recording_commands(
       recording, word_count, &offset, &words));
-  if (join) {
+  if (barrier & IREE_HAL_AMD_GPU_SDMA_BARRIER_JOIN) {
     *words++ = 0;
   }
   if (cache) {
