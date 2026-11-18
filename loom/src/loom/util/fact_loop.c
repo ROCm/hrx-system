@@ -296,6 +296,17 @@ static loom_value_facts_t loom_value_fact_loop_refine_recurrence(
   return loom_value_fact_recurrence_refine(facts, range);
 }
 
+// Replaces an iteratively discovered controlling domain with its independently
+// proven recurrence envelope. The recurrence owns the complete numeric union;
+// the evaluated backedge still owns the execution distribution and typed
+// extension payload.
+static loom_value_facts_t loom_value_fact_loop_domain_envelope(
+    loom_value_facts_t observed, loom_value_facts_t proven) {
+  proven.extension_id = observed.extension_id;
+  loom_value_facts_propagate_unary_distribution(observed, &proven);
+  return proven;
+}
+
 static uint16_t loom_value_fact_loop_forwarded_argument(
     const loom_module_t* module, loom_value_id_t value_id,
     const loom_block_t* block, uint16_t argument_offset, uint16_t count) {
@@ -472,9 +483,15 @@ static iree_status_t loom_value_fact_table_join_loop_backedge(
         table, module, types[i], table, current[i], table, joined,
         feedback_round, &next[i]));
     if (i == forwarding->domain.index) {
-      next[i] = loom_value_facts_clamp_domain(
-          next[i], forwarding->domain.range.range_lo,
-          forwarding->domain.range.range_hi);
+      const bool has_proven_envelope =
+          forwarding->domain.trip_count_kind != LOOM_LOOP_TRIP_COUNT_UNKNOWN &&
+          !loom_value_facts_is_unknown(forwarding->domain.range);
+      next[i] = has_proven_envelope
+                    ? loom_value_fact_loop_domain_envelope(
+                          next[i], forwarding->domain.range)
+                    : loom_value_facts_clamp_domain(
+                          next[i], forwarding->domain.range.range_lo,
+                          forwarding->domain.range.range_hi);
     }
     next[i] = loom_value_fact_loop_refine_recurrence(table, module, forwarding,
                                                      i, observation, next[i]);
