@@ -488,6 +488,12 @@ bool ControlFlow::object_requires_storage(cxx::AST* source) const {
   return object_identity_ && object_identity_->requires_storage(source);
 }
 
+const TemporaryMember* ControlFlow::temporary_member(
+    cxx::ExpressionAST* source) const {
+  return object_identity_ ? object_identity_->temporary_member(source)
+                          : nullptr;
+}
+
 std::span<const ValueProjection> ControlFlow::storage_members(
     cxx::Symbol* binding) const {
   if (storage_members_) {
@@ -527,6 +533,11 @@ bool ControlFlow::require_storage_member(ObjectInterval interval,
   if (auto found = pointer_aliases_.find(interval.binding);
       found != pointer_aliases_.end() && found->second.parameter_object_type) {
     type = found->second.parameter_object_type;
+  }
+  if (unit_.typeTraits().is_reference(type)) {
+    if (auto* origin = reference_materialization(interval.binding)) {
+      type = origin->type;
+    }
   }
   auto group =
       types_.storage_member(type, interval.begin, interval.end, source);
@@ -4920,6 +4931,9 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
                              : retain_destination(referent);
       auto identity = retain_call_argument(referent);
       if (materialization) {
+        if (object_identity_) {
+          object_identity_->own_members(variable, materialization);
+        }
         identity = {.source = referent, .write_binding = variable};
         append_identity(destination.value_or(Destination{variable, 0, nullptr}),
                         identity);

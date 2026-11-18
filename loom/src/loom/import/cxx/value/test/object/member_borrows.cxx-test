@@ -173,3 +173,128 @@ func.def public @array_members() -> (i32) {
   %1105 = scalar.constant 13228 : i32
   func.return %1105 : i32
 }
+
+// ====
+// A reference extends the complete temporary. Its array has one identity
+// through a second reference, a pointer argument, and the owner's destructor.
+struct Bounds { int lo[3]; };
+struct View { float* data; Bounds bounds; };
+
+static View make(float* p, int n) { return {p, {{n, n + 1, n + 2}}}; }
+static int first(const int* p) { return p[0]; }
+static int read(const View& v) { return first(v.bounds.lo); }
+
+int extended_bounds() {
+  const auto& v = make(nullptr, 7);
+  return first(v.bounds.lo) + read(v);
+}
+
+struct Observed {
+  int* output;
+  Bounds bounds;
+  ~Observed() { *output = bounds.lo[1]; }
+};
+
+static void set(int* x, int value) { x[1] = value; }
+int lifetime() {
+  int observed = 0;
+  {
+    auto&& v = Observed{&observed, {{1, 2, 3}}};
+    auto& coordinates = v.bounds;
+    set(coordinates.lo, 19);
+  }
+  return observed;
+}
+
+int subobject_lifetime() {
+  int observed = 0;
+  {
+    auto&& bounds = Observed{&observed, {{1, 2, 3}}}.bounds;
+    set(bounds.lo, 23);
+  }
+  return observed;
+}
+
+int direct_bounds() {
+  int visits = 0;
+  int n = first((++visits, make(nullptr, 7)).bounds.lo);
+  return 10 * n + visits;
+}
+
+static int set_both(int* a, int* b) {
+  a[1] = 3;
+  b[1] = 7;
+  return 10 * a[1] + b[1];
+}
+
+int simultaneous_temporaries() {
+  int a = 0, b = 0;
+  int result = set_both(Observed{&a, {{1, 2, 3}}}.bounds.lo,
+                        Observed{&b, {{1, 2, 3}}}.bounds.lo);
+  return result + 100 * a + 1000 * b;
+}
+
+static int* borrow_default(int* p = View{nullptr, {{1, 2, 3}}}.bounds.lo) { return p; }
+int repeated_default() { return set_both(borrow_default(), borrow_default()); }
+
+static int through_owner(Observed&& v) {
+  set(v.bounds.lo, 29);
+  return first(v.bounds.lo);
+}
+int forwarded_temporary() {
+  int observed = 0;
+  int result = through_owner(Observed{&observed, {{5, 6, 7}}});
+  return observed * 100 + result;
+}
+
+struct Pair {
+  int* result;
+  int lhs[2], rhs[2];
+  ~Pair() { *result = lhs[1] * 10 + rhs[1]; }
+};
+static int change_pair(Pair&& p) { return set_both(p.lhs, p.rhs); }
+int both_members() {
+  int observed = 0;
+  int result = change_pair(Pair{&observed, {0, 0}, {0, 0}});
+  return 100 * observed + result;
+}
+// ----
+func.def public @extended_bounds() -> (i32) {
+  %649 = scalar.constant 14 : i32
+  func.return %649 : i32
+}
+
+func.def public @lifetime() -> (i32) {
+  %83 = scalar.constant 19 : i32
+  func.return %83 : i32
+}
+
+func.def public @subobject_lifetime() -> (i32) {
+  %147 = scalar.constant 23 : i32
+  func.return %147 : i32
+}
+
+func.def public @direct_bounds() -> (i32) {
+  %667 = scalar.constant 71 : i32
+  func.return %667 : i32
+}
+
+func.def public @simultaneous_temporaries() -> (i32) {
+  %680 = scalar.constant 7337 : i32
+  func.return %680 : i32
+}
+
+func.def public @repeated_default() -> (i32) {
+  %691 = scalar.constant 37 : i32
+  func.return %691 : i32
+}
+
+func.def public @forwarded_temporary() -> (i32) {
+  %698 = scalar.constant 2905 : i32
+  func.return %698 : i32
+}
+
+func.def public @both_members() -> (i32) {
+  %709 = scalar.constant 3737 : i32
+  func.return %709 : i32
+}

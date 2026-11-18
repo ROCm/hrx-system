@@ -11,6 +11,8 @@
 #include <cxx/translation_unit.h>
 #include <cxx/types.h>
 
+#include <algorithm>
+
 #include "loom/import/cxx/control/analysis.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/objects.h"
@@ -66,6 +68,7 @@ void ObjectLifetimes::reset(const ControlFlow& control) {
   control_ = &control;
   active_destructions_.clear();
   temporary_destructions_.clear();
+  borrowed_members_.clear();
   temporary_results_.clear();
   full_expression_mark_.reset();
   extends_temporaries_ = false;
@@ -180,7 +183,7 @@ void ObjectLifetimes::activate_temporary_storage(
 
 void ObjectLifetimes::materialize_temporary_value(DestructionAction& action) {
   allocate_temporary_storage(action);
-  objects_.store(*action.storage, *action.value, action.object_type,
+  objects_.store(*action.storage, temporary_value(action), action.object_type,
                  action.source);
   activate_temporary_storage(action);
   action.value.reset();
@@ -334,6 +337,64 @@ void ObjectLifetimes::update_temporary(
                                           temporary->component_offset, updated);
     }
   }
+}
+
+StorageProjection ObjectLifetimes::borrow_member(
+    Value value, ValueProjection group,
+    std::optional<TemporaryReference> temporary, cxx::AST* source) {
+  auto* action =
+      temporary ? &*temporary_destructions_[temporary->index] : nullptr;
+  if (action && action->storage) {
+    return storage_.subobject(
+        *action->storage, temporary->byte_offset + group.byte_offset, source);
+  }
+  const size_t value_offset = group.component_offset;
+  if (action) {
+    group.component_offset += temporary->component_offset;
+    for (size_t i = action->borrowed_members; i;
+         i = borrowed_members_[i - 1].previous) {
+      const auto& member = borrowed_members_[i - 1];
+      if (member.group.component_offset == group.component_offset &&
+          member.group.partition == group.partition) {
+        return member.home;
+      }
+    }
+  }
+  auto local = storage_.allocate(
+      group.type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, source);
+  auto home = storage_.project(local.pointer, group.type, source);
+  objects_.store(home, value.project(*group.partition, value_offset),
+                 group.type, source);
+  if (action) {
+    borrowed_members_.push_back({group, home, action->borrowed_members});
+    action->borrowed_members = borrowed_members_.size();
+  }
+  return home;
+}
+
+Value ObjectLifetimes::temporary_value(const DestructionAction& action) {
+  if (!action.borrowed_members) {
+    return *action.value;
+  }
+  const auto& last = borrowed_members_[action.borrowed_members - 1];
+  auto load = [&](const BorrowedMember& member) {
+    return objects_.load(member.home, member.group.type, action.source);
+  };
+  if (!last.previous) {
+    return value_arena_.replace(*action.value, last.group.component_offset,
+                                load(last));
+  }
+  auto source = action.value->components();
+  std::vector<loom_value_id_t> components(source.begin(), source.end());
+  for (size_t i = action.borrowed_members; i;) {
+    const auto& member = borrowed_members_[i - 1];
+    const auto value = load(member);
+    auto part = value.components();
+    std::copy(part.begin(), part.end(),
+              components.begin() + member.group.component_offset);
+    i = member.previous;
+  }
+  return value_arena_.capture(action.value->partition(), components);
 }
 
 StorageProjection ObjectLifetimes::materialize_temporary(

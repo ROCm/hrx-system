@@ -53,6 +53,7 @@
 #include "loom/import/cxx/control/analysis.h"
 #include "loom/import/cxx/control/exits/exits.h"
 #include "loom/import/cxx/control/loops/counted.h"
+#include "loom/import/cxx/control/object_identity.h"
 #include "loom/import/cxx/control/regions.h"
 #include "loom/import/cxx/receiver/scopes.h"
 #include "loom/import/cxx/source/attributes.h"
@@ -768,7 +769,8 @@ class Translator final : private Initialization::Evaluation,
       return;
     }
     IREE_ASSERT(active.value);
-    destroy_value(*active.value, active.destruction, active.source);
+    destroy_value(lifetimes_.temporary_value(active), active.destruction,
+                  active.source);
   }
 
   FullExpression begin_full_expression() override {
@@ -1796,7 +1798,8 @@ class Translator final : private Initialization::Evaluation,
                            : variable->type();
       if (auto* materialization =
               control_->reference_materialization(variable)) {
-        if (control_->reference_requires_storage(variable)) {
+        if (control_->reference_requires_storage(variable) &&
+            control_->storage_members(variable).empty()) {
           fail(initializer,
                "lifetime-extended semantic objects cannot provide physical "
                "storage identity");
@@ -2513,6 +2516,16 @@ class Translator final : private Initialization::Evaluation,
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast)) {
       if (member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
         fail(member, "extended-vector components are not addressable");
+      }
+      if (member->valueCategory == cxx::ValueCategory::kXValue) {
+        if (auto* temporary = control_->temporary_member(member);
+            temporary && !types_.requires_value_transport(member->type) &&
+            !control_->object_requires_storage(temporary->object)) {
+          auto value = expression(temporary->object);
+          return lifetimes_.borrow_member(
+              value, temporary->group,
+              lifetimes_.temporary_result(temporary->object), member);
+        }
       }
       auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
       if (!field || field->isStatic()) {
@@ -3492,13 +3505,23 @@ class Translator final : private Initialization::Evaluation,
       if (access == LvalueAccess::Write) {
         types_.require_mutable(projected->type, owner);
       }
-      auto value = this->expression(projected);
-      values_.set(materialized_reference_->binding,
-                  name(value, cxx::to_string(
-                                  materialized_reference_->binding->name())));
-      return {ObjectLvalue{
-          projected->type,
-          Destination{materialized_reference_->binding, 0, nullptr}}};
+      auto* binding = materialized_reference_->binding;
+      auto groups = control_->storage_members(binding);
+      member_storage_.allocate(binding, groups, owner);
+      if (!groups.empty()) {
+        values_.declare(binding, types_.partition(projected->type, owner));
+      }
+      auto value =
+          name(this->expression(projected), cxx::to_string(binding->name()));
+      Destination destination{binding, 0, nullptr};
+      if (groups.empty()) {
+        values_.set(binding, value);
+      } else {
+        member_storage_.write(member_storage_.lookup(binding), values_,
+                              destination, value, projected->type, owner,
+                              /*initializing=*/true);
+      }
+      return {ObjectLvalue{projected->type, destination}};
     }
     if (materialized_reference_) {
       if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(projected);
@@ -3980,7 +4003,7 @@ class Translator final : private Initialization::Evaluation,
     if (target) {
       reject_view_element_escape(*target, argument);
     } else if (indirect->projection && !indirect->projection->storage.empty()) {
-      admit_member_temporary(argument, indirect->object_type);
+      admit_member_temporary(argument);
     }
     return {
         .value = value,
@@ -4106,12 +4129,10 @@ class Translator final : private Initialization::Evaluation,
     }
   }
 
-  void admit_member_temporary(cxx::ExpressionAST* expression,
-                              const cxx::Type* type) {
+  void admit_member_temporary(cxx::ExpressionAST* expression) {
     auto* source = unwrap_object_identity(unit_, expression);
     if (source->valueCategory != cxx::ValueCategory::kPrValue ||
-        control_->object_requires_storage(source) ||
-        !unit_.typeTraits().has_trivial_destructor(type)) {
+        control_->object_requires_storage(source)) {
       fail(expression,
            "borrowing a member of this temporary requires a destination "
            "through its construction and destruction");
@@ -4120,6 +4141,7 @@ class Translator final : private Initialization::Evaluation,
 
   void append_projected_inputs(const ParameterProjection& projection,
                                const Lvalue* target, std::optional<Value> value,
+                               std::optional<TemporaryReference> temporary,
                                std::vector<loom_value_id_t>& arguments,
                                cxx::AST* owner) {
     for (const auto& group : projection.storage) {
@@ -4132,12 +4154,7 @@ class Translator final : private Initialization::Evaluation,
         // A completed prvalue with unobservable construction has its own
         // lifetime. Give just the referenced numeric part an address for the
         // full expression.
-        auto allocation = storage_.allocate(
-            group.type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, owner);
-        auto home = storage_.project(allocation.pointer, group.type, owner);
-        objects_.store(home,
-                       value->project(*group.partition, group.component_offset),
-                       group.type, owner);
+        auto home = lifetimes_.borrow_member(*value, group, temporary, owner);
         Value(home.pointer).append_to(arguments);
       }
     }
@@ -4162,9 +4179,9 @@ class Translator final : private Initialization::Evaluation,
                                       storage.partition->component_count);
       arguments.insert(arguments.end(), cells.begin(), cells.end());
     } else if (argument.projection) {
-      append_projected_inputs(*argument.projection,
-                              argument.target ? &*argument.target : nullptr,
-                              argument.value, arguments, owner);
+      append_projected_inputs(
+          *argument.projection, argument.target ? &*argument.target : nullptr,
+          argument.value, argument.temporary, arguments, owner);
     } else {
       argument.value->append_to(arguments);
     }
@@ -4345,7 +4362,7 @@ class Translator final : private Initialization::Evaluation,
       if (argument.value && argument.abi == ImplicitObjectABI::Value) {
         const auto* projection = functions_.receiver_projection(function);
         if (projection && !projection->storage.empty()) {
-          admit_member_temporary(receiver, object_type);
+          admit_member_temporary(receiver);
         }
       }
       return argument;
@@ -4912,7 +4929,7 @@ class Translator final : private Initialization::Evaluation,
         const auto& target = current ? current : receiver->target;
         append_projected_inputs(*receiver_projection,
                                 target ? &*target : nullptr, receiver->value,
-                                arguments, call);
+                                receiver->temporary, arguments, call);
       } else {
         materialize_receiver(*receiver, call).append_to(arguments);
       }

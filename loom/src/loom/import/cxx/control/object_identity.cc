@@ -117,6 +117,52 @@ void ObjectIdentity::elements(cxx::ExpressionAST* object,
   }
 }
 
+const TemporaryMember* ObjectIdentity::temporary_member(
+    cxx::ExpressionAST* expression) const {
+  if (temporary_members_) {
+    auto found = temporary_members_->find(expression);
+    if (found != temporary_members_->end()) {
+      return &found->second;
+    }
+  }
+  return nullptr;
+}
+
+bool ObjectIdentity::retain_temporary_member(cxx::MemberExpressionAST* member) {
+  auto* base = unwrap_object_identity(unit_, member->baseExpression);
+  if (!types_.requires_value_transport(base->type)) {
+    return false;
+  }
+  auto* object = base;
+  size_t component_offset = 0;
+  uint64_t byte_offset = 0;
+  if (base->valueCategory != cxx::ValueCategory::kPrValue) {
+    auto* parent = temporary_member(base);
+    if (!parent) {
+      return false;
+    }
+    object = parent->object;
+    component_offset = parent->group.component_offset;
+    byte_offset = parent->group.byte_offset;
+  }
+  auto selection = types_.selection(member, member);
+  if (!temporary_members_) {
+    temporary_members_ = std::make_unique<TemporaryMembers>();
+  }
+  (*temporary_members_)[member] = {
+      object,
+      {member->type, selection.partition,
+       component_offset + selection.component_offset,
+       byte_offset + selection.byte_offset}};
+  if (types_.requires_value_transport(member->type)) {
+    return false;
+  }
+  // Only the first byte-addressable member needs an independent identity.
+  // Selections within it inherit its home through ordinary storage projection.
+  add(member);
+  return true;
+}
+
 void ObjectIdentity::retain(cxx::ExpressionAST* expression) {
   auto traits = unit_.typeTraits();
   switch (expression->kind()) {
@@ -141,6 +187,10 @@ void ObjectIdentity::retain(cxx::ExpressionAST* expression) {
       auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
       if (member->accessOp == cxx::TokenKind::T_DOT && field &&
           !traits.is_reference(field->type())) {
+        if (member->valueCategory == cxx::ValueCategory::kXValue &&
+            retain_temporary_member(member)) {
+          return;
+        }
         alias(expression, member->baseExpression);
       }
       return;
@@ -212,12 +262,17 @@ void ObjectIdentity::bind(cxx::Symbol* binding, cxx::ExpressionAST* initializer,
       types_.unqualified(source->type) ==
           types_.unqualified(source_object_type(binding))) {
     join(binding, source);
-    if (members_ && types_.requires_value_transport(source->type)) {
-      members_->bindings.emplace_back(add(binding), binding);
-    }
+    own_members(binding, source);
   }
   if (storage || types_.has_volatile_subobject(source_object_type(binding))) {
     require_storage(binding);
+  }
+}
+
+void ObjectIdentity::own_members(cxx::Symbol* binding,
+                                 cxx::ExpressionAST* origin) {
+  if (members_ && types_.requires_value_transport(origin->type)) {
+    members_->bindings.emplace_back(add(origin), binding);
   }
 }
 
