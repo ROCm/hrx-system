@@ -259,28 +259,26 @@ def _loom_library_impl(ctx, cxx_import_tool = None):
     )
 
     return [
-        DefaultInfo(files = depset([artifacts.module])),
+        DefaultInfo(
+            files = depset([artifacts.module]),
+            runfiles = ctx.runfiles(files = ctx.files.data).merge_all([target[DefaultInfo].default_runfiles for target in ctx.attr.data + ctx.attr.deps]),
+        ),
         OutputGroupInfo(
             dependency_reports = depset([artifacts.dependency_report]),
         ),
-        LoomLibraryInfo(
-            component = struct(
-                label = ctx.label,
-                sources = tuple(ctx.files.srcs),
-                normalized_sources = tuple(normalized_sources),
-                normalized_formats = tuple(normalized_formats),
-                data = tuple(ctx.files.data),
-                input_format = ctx.attr.input_format,
-                inputopts = tuple(ctx.attr.inputopts),
-                module = artifacts.module,
-            ),
-            module = artifacts.module,
-            transitive_components = depset(
-                direct = [info.component for info in dependency_infos],
-                transitive = [info.transitive_components for info in dependency_infos],
-                order = "preorder",
-            ),
-            transitive_dependencies = artifacts.transitive_dependencies,
+        loom_linking.library_info(
+            ctx.label,
+            artifacts.module,
+            [struct(
+                file = source,
+                format = "loombc" if ctx.attr.input_format == "loom" and source.extension == "loombc" else ctx.attr.input_format,
+                options = tuple(ctx.attr.inputopts),
+                inputs = depset(),
+                normalized_file = normalized_source,
+                normalized_format = normalized_format,
+            ) for source, normalized_source, normalized_format in zip(ctx.files.srcs, normalized_sources, normalized_formats)],
+            ctx.files.data,
+            dependency_infos,
         ),
     ]
 
@@ -345,17 +343,20 @@ def _select_library_rule(srcs, input_format):
 
 def _loom_test_module_impl(ctx):
     root_library = ctx.attr.root_library[LoomLibraryInfo]
+    if root_library.module == None:
+        fail("%s requires a root library containing a module" % ctx.label)
     dependency_infos = [dep[LoomLibraryInfo] for dep in ctx.attr.deps]
     module = loom_linking.declare_test_module(
         ctx = ctx,
         root_module = root_library.module,
+        root_dependencies = root_library.transitive_dependencies,
         dependency_infos = dependency_infos,
         output_stem = ctx.label.name,
         mnemonic = "LoomTestModule",
         progress_message = "Linking Loom test module %s" % ctx.label,
     )
-    runfiles = ctx.runfiles(files = [module] + ctx.files.data)
-    for data in ctx.attr.data:
+    runfiles = ctx.runfiles(files = [module] + ctx.files.data).merge(ctx.attr.root_library[DefaultInfo].default_runfiles)
+    for data in ctx.attr.data + ctx.attr.deps:
         runfiles = runfiles.merge(data[DefaultInfo].default_runfiles)
     return [
         DefaultInfo(files = depset([module]), runfiles = runfiles),
@@ -1089,9 +1090,10 @@ def _declare_test_module(
 
 def loom_test_module(
         name,
-        srcs,
+        srcs = [],
         deps = [],
         data = [],
+        root_library = None,
         input_format = "",
         inputopts = [],
         tags = [],
@@ -1101,8 +1103,9 @@ def loom_test_module(
 
     Direct sources jointly own all check cases and benchmarks in the module.
     Dependencies supply reachable definitions, not additional test roots.
-    Import options and data belong here; consumers select their workload and
-    execution or compiler profiles with ``loom_test(module = ...)``.
+    An explicit root_library can supply a module authored in any language.
+    Consumers select their workload and execution or compiler profiles with
+    ``loom_test(module = ...)``.
     The module requires only its source providers, independently of consumers'
     device requirements. Its default output is the linked bytecode file.
     Authored ``.loom`` inputs also produce native format checks in a
@@ -1114,9 +1117,10 @@ def loom_test_module(
       name: Public module target name.
       srcs: Authored source modules jointly owning the test roots.
       deps: Libraries available only for dependency resolution.
-      data: Headers and runtime fixtures retained by the source owner.
-      input_format: Source provider override, or empty for filename selection.
-      inputopts: Provider-scoped import options, with location expansion.
+      data: Runtime fixtures retained by the source owner.
+      root_library: Existing library whose checks become roots. Exclusive with srcs.
+      input_format: Source provider override.
+      inputopts: Provider-scoped options for direct sources.
       tags: Additional tags for the source module and its source checks.
       visibility: Bazel visibility of the reusable module.
       target_compatible_with: Source-provider build configuration constraints.
@@ -1126,17 +1130,31 @@ def loom_test_module(
         tags,
         target_compatible_with,
     )
-    _declare_test_module(
-        name = name,
-        srcs = srcs,
-        deps = deps,
-        data = data,
-        input_format = input_format,
-        inputopts = inputopts,
-        tags = package_attributes.tags,
-        visibility = visibility,
-        target_compatible_with = package_attributes.target_compatible_with,
-    )
+    if root_library:
+        if srcs or input_format or inputopts:
+            fail("%s root_library is exclusive with srcs and source options" % name)
+        _loom_test_module(
+            name = name,
+            root_library = root_library,
+            deps = deps,
+            data = data,
+            tags = package_attributes.tags,
+            testonly = True,
+            visibility = visibility,
+            target_compatible_with = package_attributes.target_compatible_with,
+        )
+    else:
+        _declare_test_module(
+            name = name,
+            srcs = srcs,
+            input_format = input_format,
+            inputopts = inputopts,
+            deps = deps,
+            data = data,
+            tags = package_attributes.tags,
+            visibility = visibility,
+            target_compatible_with = package_attributes.target_compatible_with,
+        )
     tests = _declare_source_format_tests(
         name,
         srcs,

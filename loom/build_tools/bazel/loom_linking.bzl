@@ -9,17 +9,39 @@
 _LOOM_LINK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:link_toolchain_type")
 
 LoomLibraryInfo = provider(
-    doc = "One relocatable Loom module and its independent dependencies.",
+    doc = "A component's optional relocatable module and independent dependencies.",
     fields = {
-        "component": "Owned module, ordered original and normalized sources and formats, and auxiliary files.",
-        "module": "Relocatable Loom bytecode module owned by this library.",
+        "component": "Owned module, ordered source admission records (file, format, options, inputs, normalized_file, normalized_format), and runtime data.",
+        "link_modules": "Direct linker inputs exposed by this component; header-only components forward their declared dependencies.",
+        "module": "Owned relocatable Loom bytecode module, or None for a header-only component.",
         "transitive_components": "Preorder depset of dependency components, excluding this library.",
         "transitive_dependencies": "Depset of separate dependency modules, excluding module.",
     },
 )
 
+def _library_info(label, module, sources, data, dependency_infos):
+    return LoomLibraryInfo(
+        component = struct(
+            label = label,
+            module = module,
+            sources = tuple(sources),
+            data = tuple(data),
+        ),
+        module = module,
+        link_modules = depset([module]) if module != None else depset(transitive = [info.link_modules for info in dependency_infos]),
+        transitive_components = depset(
+            direct = [info.component for info in dependency_infos],
+            transitive = [info.transitive_components for info in dependency_infos],
+            order = "preorder",
+        ),
+        transitive_dependencies = depset(
+            direct = [info.module for info in dependency_infos if info.module != None],
+            transitive = [info.transitive_dependencies for info in dependency_infos],
+        ),
+    )
+
 def _collect_dependency_modules(dependency_infos):
-    direct_modules = [info.module for info in dependency_infos]
+    direct_modules = depset(transitive = [info.link_modules for info in dependency_infos]).to_list()
     dependency_closure = depset(
         transitive = [info.transitive_dependencies for info in dependency_infos],
     )
@@ -44,10 +66,6 @@ def _declare_relocatable_module(
         tool,
         input_format = ""):
     dependencies = _collect_dependency_modules(dependency_infos)
-    transitive_dependencies = depset(
-        direct = dependencies.direct,
-        transitive = [info.transitive_dependencies for info in dependency_infos],
-    )
     module = ctx.actions.declare_file(output_stem + ".loombc")
     dependency_report = ctx.actions.declare_file(
         output_stem + ".dependencies.json",
@@ -84,7 +102,6 @@ def _declare_relocatable_module(
     return struct(
         dependency_report = dependency_report,
         module = module,
-        transitive_dependencies = transitive_dependencies,
     )
 
 def _declare_linked_module(
@@ -144,8 +161,15 @@ def _declare_test_module(
         output_stem,
         mnemonic,
         progress_message,
-        strip_check = False):
+        strip_check = False,
+        root_dependencies = depset()):
     dependencies = _collect_dependency_modules(dependency_infos)
+    direct_paths = {module.path: True for module in dependencies.direct}
+    transitive_modules = [
+        module
+        for module in depset(direct = dependencies.transitive, transitive = [root_dependencies]).to_list()
+        if module.path not in direct_paths
+    ]
     module = ctx.actions.declare_file(output_stem + ".loombc")
     args = ctx.actions.args()
     args.add("--mode=link")
@@ -160,7 +184,7 @@ def _declare_test_module(
     args.add(root_module)
     args.add_all(dependencies.direct, format_each = "--library=%s")
     args.add_all(
-        dependencies.transitive,
+        transitive_modules,
         format_each = "--transitive-library=%s",
     )
 
@@ -169,7 +193,7 @@ def _declare_test_module(
         arguments = [args],
         executable = tool.files_to_run,
         inputs = depset(
-            direct = [root_module] + dependencies.direct + dependencies.transitive,
+            direct = [root_module] + dependencies.direct + transitive_modules,
         ),
         mnemonic = mnemonic,
         outputs = [module],
@@ -182,4 +206,5 @@ loom_linking = struct(
     declare_linked_module = _declare_linked_module,
     declare_relocatable_module = _declare_relocatable_module,
     declare_test_module = _declare_test_module,
+    library_info = _library_info,
 )

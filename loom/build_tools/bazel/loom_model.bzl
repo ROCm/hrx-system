@@ -79,22 +79,35 @@ def _program_composition(ctx):
                     fail("conflicting model auxiliary file: %s" % path)
                 data[path] = file
                 auxiliary.append(path)
-            source_records = zip(component.sources, component.normalized_sources, component.normalized_formats) if ctx.attr.form == "sources" else [(component.module, component.module, "loombc")]
-            for file, normalized_file, normalized_format in source_records:
+            source_records = component.sources if ctx.attr.form == "sources" else ([struct(
+                file = component.module,
+                format = "loombc",
+                options = (),
+                inputs = depset(),
+                normalized_file = component.module,
+                normalized_format = "loombc",
+            )] if component.module != None else [])
+            for source in source_records:
+                file = source.file
                 path = _repository_path(ctx, file)
                 provider = {"path": path}
-                if ctx.attr.form == "module":
-                    provider["format"] = "loombc"
-                else:
-                    if component.input_format:
-                        provider["format"] = "loombc" if component.input_format == "loom" and file.extension == "loombc" else component.input_format
-                    if component.inputopts:
-                        if any(["$(" in option for option in component.inputopts]):
-                            fail("%s: source model import options must be portable literals, not Bazel location expressions" % component.label)
-                        provider["options"] = list(component.inputopts)
-                if auxiliary:
-                    provider["data"] = auxiliary
-                selected_file = file if ctx.attr.encoding == "preserve" else normalized_file
+                if source.format:
+                    provider["format"] = source.format
+                source_data = list(auxiliary)
+                if source.options:
+                    if any(["$(" in option for option in source.options]):
+                        fail("%s: source model import options must be portable literals, not Bazel location expressions" % component.label)
+                    provider["options"] = list(source.options)
+                for input_file in source.inputs.to_list():
+                    input_path = _repository_path(ctx, input_file)
+                    if input_path in data and data[input_path] != input_file:
+                        fail("conflicting model source input: %s" % input_path)
+                    data[input_path] = input_file
+                    if input_path not in source_data:
+                        source_data.append(input_path)
+                if source_data:
+                    provider["data"] = source_data
+                selected_file = file if ctx.attr.encoding == "preserve" else source.normalized_file
                 if path in providers:
                     if providers[path] != provider or files[path] != selected_file:
                         fail("conflicting model provider: %s" % path)
@@ -102,7 +115,7 @@ def _program_composition(ctx):
                 providers[path] = provider
                 files[path] = selected_file
                 if ctx.attr.encoding != "preserve":
-                    normalization_formats[path] = normalized_format
+                    normalization_formats[path] = source.normalized_format
                 program[role].append(provider if len(provider) > 1 else path)
     return struct(
         files = files,

@@ -5,8 +5,13 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <loomcxx/check.h>
+#include <model_provider.h>
 
-extern "C" int model_add_bias(int value);
+#ifdef MODEL_LOCAL_BIAS
+#error "Private definitions must not propagate to consumers."
+#endif
+
+static_assert(sizeof(MODEL_TEXT) == 11);
 
 LOOM_CHECK_CASE(imported_bias) {
   loom::check::expect_equal(model_add_bias(35), 42);

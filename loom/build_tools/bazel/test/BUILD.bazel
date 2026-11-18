@@ -6,6 +6,7 @@
 #
 # bazel-to-cmake: skip
 
+load("@bazel_skylib//rules:write_file.bzl", "write_file")
 load("@rules_python//python:defs.bzl", "py_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//build_tools/bazel:executable.bzl", "iree_executable_test")
@@ -14,6 +15,7 @@ load(
     "//loom/build_tools/bazel:defs.bzl",
     "loom_amdgpu_target_profile",
     "loom_corpus_test",
+    "loom_cxx_library",
     "loom_execution_profile",
     "loom_kernel_binary",
     "loom_kernel_library",
@@ -121,22 +123,71 @@ loom_library(
     tags = ["manual"],
 )
 
-loom_library(
-    name = "cxx_library",
-    srcs = ["model_provider.cxx"],
-    data = ["model_provider.h"],
-    input_format = "cxx",
-    inputopts = ["cxx:fp-model=fast"],
+write_file(
+    name = "cxx_config",
+    out = "generated/model_config.h",
+    content = [
+        "#define MODEL_EXPECTED_BIAS 7",
+        "",
+    ],
+)
+
+loom_cxx_library(
+    name = "cxx_headers",
+    hdrs = [
+        "model_provider.h",
+        ":cxx_config",
+    ],
+    defines = ["MODEL_BIAS=7"],
+    includes = ["."],
     tags = ["manual"],
+)
+
+loom_cxx_library(
+    name = "cxx_library",
+    srcs = [
+        "model_private.h",
+        "model_provider.cxx",
+    ],
+    copts = ["fp-model=fast"],
+    data = ["model_fixture.txt"],
+    local_defines = ["MODEL_LOCAL_BIAS=7"],
+    tags = ["manual"],
+    deps = [":cxx_headers"],
+)
+
+loom_cxx_library(
+    name = "cxx_forward",
+    tags = ["manual"],
+    deps = [":cxx_library"],
+)
+
+filegroup(
+    name = "cxx_check_sources",
+    srcs = ["cxx_library_checks.cxx"],
+)
+
+loom_cxx_library(
+    name = "cxx_library_check_source",
+    testonly = True,
+    srcs = select({"//conditions:default": [":cxx_check_sources"]}),
+    local_defines = ["MODEL_TEXT=\"Loom's C++\""],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    deps = [":cxx_forward"],
+)
+
+loom_test_module(
+    name = "cxx_library_check_module",
+    root_library = ":cxx_library_check_source",
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 loom_test(
     name = "cxx_library_check",
-    srcs = ["cxx_library_checks.cxx"],
     benchmark_smoke = False,
     execution_profiles = [REFERENCE_PROFILE],
+    module = ":cxx_library_check_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-    deps = [":cxx_library"],
 )
 
 loom_kernel_binary(

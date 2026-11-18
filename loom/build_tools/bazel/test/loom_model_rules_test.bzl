@@ -9,7 +9,7 @@
 load("@rules_testing//lib:analysis_test.bzl", "analysis_test", "test_suite")
 load("@rules_testing//lib:truth.bzl", "matching")
 load("@rules_testing//lib:util.bzl", "TestingAspectInfo")
-load("//loom/build_tools/bazel:defs.bzl", "LoomModelInfo", "loom_library", "loom_model")
+load("//loom/build_tools/bazel:defs.bzl", "LoomModelInfo", "loom_cxx_library", "loom_library", "loom_model")
 
 _PACKAGE = "loom/build_tools/bazel/test/"
 _CARD = "//loom/src/loom/serve/fixture/text:native.card.json"
@@ -20,13 +20,13 @@ def _declare_composition(name, form):
         srcs = ["link_kernels.loom", "dependency_checks.loom"],
         tags = ["manual"],
     )
-    loom_library(
+    loom_cxx_library(
         name = name + "_primary",
-        srcs = ["model_provider.cxx"],
-        data = ["model_provider.h"],
-        input_format = "cxx",
-        inputopts = ["cxx:fp-model=fast"],
-        deps = [":" + name + "_leaf"],
+        srcs = ["model_provider.cxx", "model_private.h"],
+        copts = ["fp-model=fast"],
+        data = ["model_fixture.txt"],
+        local_defines = ["MODEL_LOCAL_BIAS=7"],
+        deps = [":cxx_headers", ":" + name + "_leaf"],
         tags = ["manual"],
     )
     loom_library(
@@ -52,12 +52,13 @@ def _expect_composition(env, target, form):
     info = target[LoomModelInfo]
     stem = target.label.name.removesuffix("_subject")
     primary = {
-        "data": [_PACKAGE + "model_provider.h"],
+        "data": [_PACKAGE + "model_fixture.txt"],
         "format": "loombc" if form == "module" else "cxx",
         "path": _PACKAGE + (stem + "_primary.loombc" if form == "module" else "model_provider.cxx"),
     }
     if form == "sources":
-        primary["options"] = ["cxx:fp-model=fast"]
+        primary["options"] = ["cxx:'fp-model=fast' 'D=MODEL_BIAS=7' 'D=MODEL_LOCAL_BIAS=7' 'I=../../../..' 'I=.'"]
+        primary["data"] += [_PACKAGE + path for path in ["model_provider.h", "generated/model_config.h", "model_private.h"]]
     libraries = [
         {"format": "loombc", "path": _PACKAGE + stem + "_branch.loombc"},
         {"format": "loombc", "path": _PACKAGE + stem + "_leaf.loombc"},
@@ -72,9 +73,9 @@ def _expect_composition(env, target, form):
     env.expect.that_str(info.card).equals("loom/src/loom/serve/fixture/text/native.card.json")
     paths = [file.short_path for file in target[OutputGroupInfo].model_files.to_list()]
 
-    # The auxiliary file remains runtime data even when the owning source has
-    # become bytecode. A primary reached through a library is emitted once.
-    expected_files = [primary["path"], _PACKAGE + "model_provider.h"] + [
+    # Headers accompany source publication, not already compiled bytecode.
+    # A primary reached through a library is emitted once.
+    expected_files = [primary["path"]] + primary.get("data", []) + [
         item["path"] if type(item) == "dict" else item
         for item in libraries
     ]
@@ -117,10 +118,12 @@ def _bytecode_source_impl(env, target):
     ])
 
 def _test_external_files_fail(name, **kwargs):
-    loom_library(
+    loom_cxx_library(
         name = name + "_provider",
-        srcs = ["@bazel_tools//tools/build_defs/repo:http.bzl"],
-        input_format = "loom",
+        srcs = ["model_provider.cxx", "model_private.h"],
+        data = ["@bazel_skylib//:LICENSE"],
+        local_defines = ["MODEL_LOCAL_BIAS=7"],
+        deps = [":cxx_headers"],
         tags = ["manual"],
     )
     loom_model(
@@ -138,11 +141,13 @@ def _external_files_impl(env, target):
     env.expect.that_target(target).failures().contains_predicate(matching.contains("requires a local repository file"))
 
 def _test_conflicting_importers_fail(name, **kwargs):
-    for suffix, format_name in [("a", "cxx"), ("b", "loom")]:
-        loom_library(
+    for suffix, standard in [("a", "c++20"), ("b", "c++23")]:
+        loom_cxx_library(
             name = name + "_" + suffix,
-            srcs = ["model_provider.cxx"],
-            input_format = format_name,
+            srcs = ["model_provider.cxx", "model_private.h"],
+            copts = ["std=" + standard],
+            local_defines = ["MODEL_LOCAL_BIAS=7"],
+            deps = [":cxx_headers"],
             tags = ["manual"],
         )
     loom_model(
@@ -227,7 +232,10 @@ def _test_cxx_import_precedes_link(name, **kwargs):
         impl = _cxx_import_precedes_link_impl,
         targets = {
             "check_module": ":cxx_library_check_module",
+            "check_source": ":cxx_library_check_source",
             "cxx_library": ":cxx_library",
+            "forward": ":cxx_forward",
+            "headers": ":cxx_headers",
             "loom_library": ":" + name + "_loom",
             "model": ":" + name + "_model",
             "opaque_module": ":" + name + "_opaque_module",
@@ -236,16 +244,27 @@ def _test_cxx_import_precedes_link(name, **kwargs):
     )
 
 def _cxx_import_precedes_link_impl(env, targets):
+    for header_library in [targets.headers, targets.forward]:
+        env.expect.that_collection(header_library[TestingAspectInfo].actions).contains_exactly([])
+        env.expect.that_collection(header_library[DefaultInfo].files.to_list()).contains_exactly([])
+    check_import = _find_action(env, targets.check_source, "LoomCxxImport")
+    _expect_action_input_suffix(env, check_import, "model_provider.h")
+    _expect_action_input_suffix(env, check_import, "model_config.h")
+    _reject_action_input_suffix(env, check_import, "model_private.h")
+    _reject_action_input_suffix(env, check_import, ".loombc")
     cxx_import = _expect_action_executable(
         env,
         targets.cxx_library,
         "LoomCxxImport",
         "loom-import-cxx",
     )
-    env.expect.that_collection(cxx_import.argv).contains("--options=fp-model=fast")
+    env.expect.that_int(len([argument for argument in cxx_import.argv if argument.startswith("--options='fp-model=fast'")])).equals(1)
     env.expect.that_collection(cxx_import.argv).contains(
         "--module-name=%s/unit0" % targets.cxx_library.label,
     )
+    _expect_action_input_suffix(env, cxx_import, "model_private.h")
+    _expect_action_input_suffix(env, cxx_import, "model_config.h")
+    _reject_action_input_suffix(env, cxx_import, "model_fixture.txt")
     cxx_link = _expect_action_executable(
         env,
         targets.cxx_library,
@@ -262,7 +281,7 @@ def _cxx_import_precedes_link_impl(env, targets):
     env.expect.that_collection([
         file.basename
         for file in targets.check_module[DefaultInfo].default_runfiles.files.to_list()
-    ]).contains_exactly(["cxx_library_check_module.loombc"])
+    ]).contains_exactly(["cxx_library_check_module.loombc", "model_fixture.txt"])
     _expect_action_executable(env, targets.loom_library, "LoomLibrary", "loom-link")
     for target in [targets.loom_library, targets.opaque_module]:
         for action in target[TestingAspectInfo].actions:

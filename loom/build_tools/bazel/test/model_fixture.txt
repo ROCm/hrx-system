@@ -1,0 +1,1 @@
+Runtime fixture for the separately compiled model provider.
