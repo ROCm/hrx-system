@@ -185,6 +185,34 @@ iree_runtime_cc_test(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "timestamp_replay_test",
+    testonly = True,
+    srcs = [
+        "allocator.h",
+        "barrier.h",
+        "builtins.h",
+        "queue.h",
+        "semaphore.h",
+        "timestamp_replay_test.cc",
+    ],
+    deps = [
+        ":headers",
+        ":profile",
+        ":vulkan",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/threading:thread",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/driver/vulkan/util:libvulkan",
+        "//runtime/src/iree/testing:gtest",
+    ],
+    alwayslink = True,
+)
+
 iree_runtime_cc_test(
     name = "debug_utils_test",
     srcs = ["debug_utils_test.cc"],

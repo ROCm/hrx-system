@@ -270,6 +270,16 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "timestamp_replay_tests",
+    args = ["--gtest_fail_fast=1"],
+    deps = [
+        ":replay_cache_backends",
+        "//runtime/src/iree/hal/cts/util:test_main",
+        "//runtime/src/iree/hal/driver/vulkan:timestamp_replay_test",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "command_buffer_stress_tests",
     tags = [
         "manual",
