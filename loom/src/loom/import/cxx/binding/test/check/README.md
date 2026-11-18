@@ -6,6 +6,7 @@ tensor identities, slice origins, dependent shapes, comparison policies, and
 benchmark references. No check program executes in this package.
 
 `check` and `header_cases` cover declaration discovery and ordinary calls;
+`check_declarations` covers subjects defined in separately linked modules;
 `check_records` covers flattened result components; `check_resources` covers
 aliasing tensor handles; `check_scenarios` covers trial and comparison regions.
 The typed expectation and vector tensor fixtures retain type and shape rules,

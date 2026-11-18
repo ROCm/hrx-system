@@ -177,6 +177,11 @@ typedef struct loomc_cxx_import_options_t {
   /// Optional immutable preamble borrowed until import returns. An exact source
   /// prefix or frontend-configuration mismatch uses ordinary cold parsing.
   const loomc_cxx_preamble_t* preamble;
+
+  /// Logical module identity, independent of the physical source path. Empty
+  /// uses the source identifier. This does not change include lookup or source
+  /// diagnostics. Requires `structure_size` to include this field.
+  loomc_string_view_t module_name;
 } loomc_cxx_import_options_t;
 
 /// Creates an immutable semantic preamble from leading include directives.

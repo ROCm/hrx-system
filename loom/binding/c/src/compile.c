@@ -361,7 +361,7 @@ static loomc_status_t loomc_compile_add_launch_config_artifact(
   if (loomc_status_is_ok(status)) {
     status = loomc_module_serialize_internal_bytecode_to_source(
         loomc_module_context(module), launch_config_module, identifier,
-        /*projection=*/NULL, allocator, &source);
+        /*flags=*/0, /*projection=*/NULL, allocator, &source);
   }
   if (loomc_status_is_ok(status)) {
     status = loomc_compile_result_take_source_artifact(

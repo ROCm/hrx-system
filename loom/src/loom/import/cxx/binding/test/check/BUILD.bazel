@@ -18,6 +18,7 @@ loom_check_test_suite(
         "check.cxx-test",
         "check_approximate.cxx-test",
         "check_approximate_invalid.cxx-test",
+        "check_declarations.cxx-test",
         "check_records.cxx-test",
         "check_records_invalid.cxx-test",
         "check_resources.cxx-test",

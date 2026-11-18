@@ -21,9 +21,10 @@ iree_status_t loom_bytecode_write_strings_section(
     loom_bytecode_page_writer_t* page_writer,
     const loom_bytecode_numbering_t* numbering);
 
-// Streams module-local source identifier rows.
+// Streams module-local source identifiers, or an empty table when stripping.
 iree_status_t loom_bytecode_write_sources_section(
-    loom_bytecode_page_writer_t* page_writer, const loom_module_t* module);
+    loom_bytecode_page_writer_t* page_writer,
+    const loom_bytecode_numbering_t* numbering);
 
 // Streams the topologically ordered structural type catalog.
 iree_status_t loom_bytecode_write_types_section(

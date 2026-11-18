@@ -58,6 +58,9 @@ def _declare_relocatable_module(
     args.add("--dependency-component=%s" % ctx.label)
     args.add("--dependency-report=%s" % dependency_report.path)
     args.add("--to=bc")
+    args.add("--module-name=%s" % ctx.label)
+    if ctx.var["COMPILATION_MODE"] != "dbg":
+        args.add("--strip-debug")
     args.add("--output=%s" % module.path)
     if input_format:
         args.add("--input-format=%s" % input_format)
@@ -100,6 +103,9 @@ def _declare_linked_module(
     args.add("--strip-check")
     args.add("--require-resolved-config")
     args.add("--to=bc")
+    args.add("--module-name=%s" % ctx.label)
+    if ctx.var["COMPILATION_MODE"] != "dbg":
+        args.add("--strip-debug")
     args.add("--output=%s" % module.path)
     if roots:
         args.add_all(direct_modules, format_each = "--library=%s")
@@ -147,6 +153,9 @@ def _declare_test_module(
     if strip_check:
         args.add("--strip-check")
     args.add("--to=bc")
+    args.add("--module-name=%s" % ctx.label)
+    if ctx.var["COMPILATION_MODE"] != "dbg":
+        args.add("--strip-debug")
     args.add("--output=%s" % module.path)
     args.add(root_module)
     args.add_all(dependencies.direct, format_each = "--library=%s")

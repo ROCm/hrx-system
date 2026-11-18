@@ -205,7 +205,7 @@ class ReaderCorpusTest : public ::testing::Test {
   iree_status_t WriteModule(
       const loom_module_t* module,
       const loom_low_repr_environment_t& low_repr_environment,
-      std::vector<uint8_t>* out_bytes) {
+      loom_bytecode_write_flags_t flags, std::vector<uint8_t>* out_bytes) {
     iree_io_stream_t* stream = nullptr;
     IREE_RETURN_IF_ERROR(iree_io_vec_stream_create(
         IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_SEEKABLE |
@@ -213,6 +213,7 @@ class ReaderCorpusTest : public ::testing::Test {
         4096, iree_allocator_system(), &stream));
     loom_bytecode_write_options_t options = {
         .low_repr_environment = low_repr_environment,
+        .flags = flags,
     };
     iree_status_t status =
         loom_bytecode_write_module(module, stream, &options, &block_pool_);
@@ -260,6 +261,110 @@ TEST_F(ReaderCorpusTest, CorpusIsNotEmpty) {
   EXPECT_GT(loom_test_corpus_text_size(), 0u);
 }
 
+TEST_F(ReaderCorpusTest, StrippingIgnoresPresentationAndPreservesSemanticData) {
+  const char documented[] = R"(
+// File documentation.
+
+// Record documentation.
+test.record @record {label = "retained"}
+
+// Global documentation.
+global.variable @state : i32 = 7
+
+// Function documentation.
+func.def @add(%input: i32) -> (i32) {
+
+^documented_entry:
+  // Operation documentation.
+  %increment = scalar.constant 7 : i32
+
+  %result = scalar.addi %input, %increment : i32
+  func.return %result : i32
+}
+func.def @site() -> (buffer) {
+  %capture = func.location [#func.location.file<"kept.cc", range = [12, 3, 12, 28]>] : buffer
+  func.return %capture : buffer
+}
+low.func.def target<test.low.core> @assembly(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+)";
+  const char plain[] = R"(
+test.record @record {label = "retained"}
+global.variable @state : i32 = 7
+func.def @add(%a: i32) -> (i32) {
+^renamed:
+  %b = scalar.constant 7 : i32
+  %c = scalar.addi %a, %b : i32
+  func.return %c : i32
+}
+func.def @site() -> (buffer) {
+  %d = func.location [#func.location.file<"kept.cc", range = [12, 3, 12, 28]>] : buffer
+  func.return %d : buffer
+}
+low.func.def target<test.low.core> @assembly(%v: reg<test.i32>) -> (reg<test.i32>) {
+  low.return %v : reg<test.i32>
+}
+)";
+  std::vector<uint8_t> stripped[2];
+  std::vector<uint8_t> preserved[2];
+  const char* sources[] = {documented, plain};
+  const char* paths[] = {"/checkout/first.loom", "/relocated/second.loom"};
+  for (size_t i = 0; i < 2; ++i) {
+    loom_module_t* module = Parse(iree_make_cstring_view(sources[i]),
+                                  iree_make_cstring_view(paths[i]));
+    ASSERT_NE(module, nullptr);
+    IREE_ASSERT_OK(loom_module_intern_string(
+        module, IREE_SV("//component:library"), &module->name_id));
+    IREE_ASSERT_OK(
+        WriteModule(module, low_repr_environment_, /*flags=*/0, &preserved[i]));
+    IREE_ASSERT_OK(WriteModule(module, low_repr_environment_,
+                               LOOM_BYTECODE_WRITE_FLAG_STRIP_DEBUG,
+                               &stripped[i]));
+    std::vector<uint8_t> unchanged;
+    IREE_ASSERT_OK(
+        WriteModule(module, low_repr_environment_, /*flags=*/0, &unchanged));
+    EXPECT_EQ(unchanged, preserved[i]);
+    EXPECT_LT(stripped[i].size(), preserved[i].size());
+    loom_module_free(module);
+  }
+  EXPECT_NE(preserved[0], preserved[1]);
+  EXPECT_EQ(stripped[0], stripped[1]);
+
+  loom_module_t* decoded = nullptr;
+  std::vector<std::string> errors;
+  const auto result =
+      ReadModule(stripped[0], low_repr_environment_, &errors, &decoded);
+  ASSERT_EQ(result.error_count, 0u);
+  ASSERT_NE(decoded, nullptr);
+  EXPECT_EQ(decoded->sources.count, 0u);
+  EXPECT_EQ(decoded->locations.count, 0u);
+  // Explicit source captures are program data, independent of debug tables.
+  const std::string printed = Print(decoded);
+  EXPECT_NE(printed.find("kept.cc"), std::string::npos);
+  EXPECT_NE(printed.find("retained"), std::string::npos);
+  std::vector<uint8_t> roundtrip;
+  IREE_ASSERT_OK(WriteModule(decoded, low_repr_environment_,
+                             LOOM_BYTECODE_WRITE_FLAG_STRIP_DEBUG, &roundtrip));
+  EXPECT_EQ(roundtrip, stripped[0]);
+  loom_module_free(decoded);
+
+  std::string changed = plain;
+  changed.replace(changed.find("constant 7"), 10, "constant 9");
+  loom_module_t* module =
+      Parse(iree_make_string_view(changed.data(), changed.size()),
+            IREE_SV("/relocated/second.loom"));
+  ASSERT_NE(module, nullptr);
+  IREE_ASSERT_OK(loom_module_intern_string(
+      module, IREE_SV("//component:library"), &module->name_id));
+  std::vector<uint8_t> semantic_change;
+  IREE_ASSERT_OK(WriteModule(module, low_repr_environment_,
+                             LOOM_BYTECODE_WRITE_FLAG_STRIP_DEBUG,
+                             &semantic_change));
+  EXPECT_NE(semantic_change, stripped[0]);
+  loom_module_free(module);
+}
+
 TEST_F(ReaderCorpusTest, TextCorpusBytecodeRoundTripsCanonically) {
   const iree_file_toc_t* corpus = loom_test_corpus_text_create();
   size_t supported_count = 0;
@@ -276,7 +381,7 @@ TEST_F(ReaderCorpusTest, TextCorpusBytecodeRoundTripsCanonically) {
     }
     std::vector<uint8_t> first;
     iree_status_t write_status =
-        WriteModule(module, low_repr_environment_, &first);
+        WriteModule(module, low_repr_environment_, /*flags=*/0, &first);
     if (!iree_status_is_ok(write_status)) {
       IREE_EXPECT_OK(write_status);
       loom_module_free(module);
@@ -304,7 +409,8 @@ TEST_F(ReaderCorpusTest, TextCorpusBytecodeRoundTripsCanonically) {
               write_spaces);
 
     std::vector<uint8_t> second;
-    IREE_EXPECT_OK(WriteModule(read_module, low_repr_environment_, &second));
+    IREE_EXPECT_OK(
+        WriteModule(read_module, low_repr_environment_, /*flags=*/0, &second));
     loom_module_free(read_module);
 
     EXPECT_EQ(first, second);
@@ -323,7 +429,8 @@ low.func.def target<test.low.core>(@target) @f() {
       Parse(iree_make_cstring_view(source), IREE_SV("codec.loom"));
   ASSERT_NE(module, nullptr);
   std::vector<uint8_t> bytes;
-  IREE_ASSERT_OK(WriteModule(module, low_repr_environment_, &bytes));
+  IREE_ASSERT_OK(
+      WriteModule(module, low_repr_environment_, /*flags=*/0, &bytes));
   loom_module_free(module);
   for (bool capture : {false, true}) {
     uint32_t diagnostics = 0;
@@ -379,7 +486,8 @@ low.func.def target<test.low.core>(@test_target) @add(
   EXPECT_EQ(original_packet.op->traits, LOOM_TRAIT_PURE);
   const std::string original_text = Print(module);
   std::vector<uint8_t> first;
-  IREE_ASSERT_OK(WriteModule(module, low_repr_environment_, &first));
+  IREE_ASSERT_OK(
+      WriteModule(module, low_repr_environment_, /*flags=*/0, &first));
   loom_module_free(module);
 
   loom_module_t* reordered_module = nullptr;
@@ -399,7 +507,8 @@ low.func.def target<test.low.core>(@test_target) @add(
   EXPECT_EQ(reordered_packet.op->traits, LOOM_TRAIT_PURE);
 
   std::vector<uint8_t> second;
-  IREE_ASSERT_OK(WriteModule(reordered_module, kReorderedEnvironment, &second));
+  IREE_ASSERT_OK(WriteModule(reordered_module, kReorderedEnvironment,
+                             /*flags=*/0, &second));
   EXPECT_EQ(second, first);
   loom_module_free(reordered_module);
 

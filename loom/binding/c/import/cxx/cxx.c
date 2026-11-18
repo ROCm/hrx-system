@@ -213,7 +213,9 @@ static loomc_status_t loomc_cxx_resolve_options(
   }
   if ((options->type != LOOMC_STRUCTURE_TYPE_NONE &&
        options->type != LOOMC_STRUCTURE_TYPE_CXX_IMPORT_OPTIONS) ||
-      (options->structure_size && options->structure_size < sizeof(*options))) {
+      (options->structure_size &&
+       options->structure_size <
+           offsetof(loomc_cxx_import_options_t, module_name))) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "invalid C/C++ import options descriptor");
   }
@@ -223,6 +225,13 @@ static loomc_status_t loomc_cxx_resolve_options(
   }
   LOOMC_RETURN_IF_ERROR(loomc_cxx_validate_string(options->standard));
   LOOMC_RETURN_IF_ERROR(loomc_cxx_validate_string(options->triple));
+  if (options->structure_size >=
+      offsetof(loomc_cxx_import_options_t, module_name) +
+          sizeof(options->module_name)) {
+    LOOMC_RETURN_IF_ERROR(loomc_cxx_validate_string(options->module_name));
+    out_options->module_name =
+        iree_string_view_from_loomc(options->module_name);
+  }
   if ((!options->include_paths && options->include_path_count) ||
       (!options->system_include_paths && options->system_include_path_count) ||
       (!options->defines && options->define_count) ||

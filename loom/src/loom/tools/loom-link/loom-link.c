@@ -42,6 +42,12 @@ IREE_FLAG_LIST_NAMED(string, source_prefix_map, "source-prefix-map",
 IREE_FLAG(string, to, "text", "Output format: text, bc, or bytecode.");
 IREE_FLAG(string, output, "-",
           "Output path. Use '-' or the empty string for stdout.");
+IREE_FLAG_NAMED(string, module_name, "module-name", "",
+                "Logical output module name. Empty uses 'linked'.");
+IREE_FLAG_NAMED(
+    bool, strip_debug, "strip-debug", false,
+    "Omit diagnostic and presentation metadata from bytecode. "
+    "Requires bytecode output; program source captures are preserved.");
 IREE_FLAG_LIST(string, root,
                "Root symbol to materialize in link mode. Repeat for "
                "multiple roots.");
@@ -667,6 +673,8 @@ static iree_status_t loom_link_cli_write_module_output(
       .format = format == LOOM_MODULE_FORMAT_BYTECODE
                     ? LOOMC_SOURCE_FORMAT_BYTECODE
                     : LOOMC_SOURCE_FORMAT_TEXT,
+      .bytecode_flags =
+          FLAG_strip_debug ? LOOMC_MODULE_BYTECODE_FLAG_STRIP_DEBUG : 0,
   };
   loomc_source_t* source = NULL;
   IREE_RETURN_IF_ERROR(iree_status_from_loomc(loomc_module_serialize_to_source(
@@ -724,6 +732,9 @@ static void loom_link_cli_print_agents_markdown(FILE* stream) {
       "must be Loom text or bytecode; import source languages with their\n"
       "own frontend, such as `loom-import-cxx`, before linking.\n"
       "`--source-prefix-map=old=new` changes diagnostic filenames.\n"
+      "`--module-name=name` sets logical output identity. For reproducible\n"
+      "bytecode, combine it with `--to=bc --strip-debug` to omit diagnostic\n"
+      "metadata and presentation while retaining semantic source captures.\n"
       "\n"
       "### Merge and link\n"
       "\n"
@@ -982,6 +993,7 @@ int main(int argc, char** argv) {
         .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
         .structure_size = sizeof(options),
         .link_index = link_index.module_index,
+        .module_name = loomc_make_cstring_view(FLAG_module_name),
         .mode = plan_mode,
         .root_symbols = root_symbols,
         .root_symbol_count = roots.count,

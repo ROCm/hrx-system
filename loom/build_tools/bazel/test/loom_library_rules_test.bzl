@@ -82,6 +82,37 @@ def _expect_no_arg_with_prefix_and_suffix(env, args, prefix, suffix):
         if arg.startswith(prefix) and arg.endswith(suffix):
             env.fail("unexpected argument with prefix %r and suffix %r in %r" % (prefix, suffix, args))
 
+def _test_bytecode_debug_policy(name, **kwargs):
+    tests = []
+    for mode, strip_debug in [("fastbuild", True), ("opt", True), ("dbg", False)]:
+        test_name = name + "_" + mode
+        analysis_test(
+            name = test_name,
+            impl = _test_bytecode_debug_policy_impl,
+            targets = {
+                "library": ":cxx_library",
+                "product": ":kernel_binary_deps",
+                "test_module": ":cxx_library_check_module",
+            },
+            config_settings = {"//command_line_option:compilation_mode": mode},
+            attrs = {"strip_debug": attr.bool()},
+            attr_values = {"strip_debug": strip_debug},
+            **kwargs
+        )
+        tests.append(test_name)
+    native.test_suite(name = name, tests = tests)
+
+def _test_bytecode_debug_policy_impl(env, targets):
+    for target, mnemonic, unit_suffix in [
+        (targets.library, "LoomCxxImport", "/unit0"),
+        (targets.library, "LoomLibrary", ""),
+        (targets.product, "LoomBinaryLink", ""),
+        (targets.test_module, "LoomTestModule", ""),
+    ]:
+        action = _find_action(env, target[TestingAspectInfo].actions, mnemonic)
+        env.expect.that_bool("--strip-debug" in action.argv).equals(env.ctx.attr.strip_debug)
+        env.expect.that_collection(action.argv).contains("--module-name=%s%s" % (target.label, unit_suffix))
+
 def _test_library_keeps_dependency_module_separate(name, **kwargs):
     analysis_test(
         name = name,
@@ -107,6 +138,7 @@ def _test_library_keeps_dependency_module_separate_impl(env, target):
     for expected_arg in [
         "--mode=merge",
         "--strict-deps",
+        "--module-name=%s" % target.label,
     ]:
         if expected_arg not in action.argv:
             env.fail("expected %r in %r" % (expected_arg, action.argv))
@@ -565,6 +597,7 @@ def _test_execution_module_links_root_tests_impl(env, target):
         "--mode=link",
         "--include-input-tests",
         "--to=bc",
+        "--module-name=%s" % target.label,
     ]:
         if expected_arg not in action.argv:
             env.fail("expected %r in %r" % (expected_arg, action.argv))
@@ -726,6 +759,7 @@ def loom_library_rules_test_suite(name):
         name = name,
         tests = [
             _test_address_setting_selects_instrumentation,
+            _test_bytecode_debug_policy,
             _test_correctness_only_profile_omits_benchmark_runner,
             _test_custom_runner_owns_benchmark_policy,
             _test_deps_only_library_propagates_dependencies,

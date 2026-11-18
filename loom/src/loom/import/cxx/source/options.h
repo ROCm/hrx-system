@@ -122,6 +122,9 @@ typedef struct loom_cxx_import_options_t {
   // Optional immutable frontend preamble borrowed for the import duration.
   // Source or frontend-configuration mismatches use ordinary cold parsing.
   const loom_cxx_preamble_t* preamble;
+  // Logical output module identity. Empty uses the physical source filename.
+  // This does not change include lookup or diagnostic source identity.
+  iree_string_view_t module_name;
 } loom_cxx_import_options_t;
 
 // Parses the canonical precise or fast floating-point model spelling.

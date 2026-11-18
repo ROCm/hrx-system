@@ -207,14 +207,6 @@ def _test_cxx_import_precedes_link(name, **kwargs):
         tags = ["manual"],
     )
     loom_library(
-        name = name + "_cxx",
-        srcs = ["model_provider.cxx"],
-        data = ["model_provider.h"],
-        input_format = "cxx",
-        inputopts = ["cxx:fp-model=fast"],
-        tags = ["manual"],
-    )
-    loom_library(
         name = name + "_opaque_module",
         srcs = [":" + name + "_loom"],
         tags = ["manual"],
@@ -224,7 +216,7 @@ def _test_cxx_import_precedes_link(name, **kwargs):
         card = _CARD,
         encoding = "bc",
         form = "sources",
-        inputs = [":" + name + "_cxx"],
+        inputs = [":cxx_library"],
         programs = "selected",
         preset = "check",
         model_name = "fixture",
@@ -234,7 +226,8 @@ def _test_cxx_import_precedes_link(name, **kwargs):
         name = name,
         impl = _cxx_import_precedes_link_impl,
         targets = {
-            "cxx_library": ":" + name + "_cxx",
+            "check_module": ":cxx_library_check_module",
+            "cxx_library": ":cxx_library",
             "loom_library": ":" + name + "_loom",
             "model": ":" + name + "_model",
             "opaque_module": ":" + name + "_opaque_module",
@@ -250,6 +243,9 @@ def _cxx_import_precedes_link_impl(env, targets):
         "loom-import-cxx",
     )
     env.expect.that_collection(cxx_import.argv).contains("--options=fp-model=fast")
+    env.expect.that_collection(cxx_import.argv).contains(
+        "--module-name=%s/unit0" % targets.cxx_library.label,
+    )
     cxx_link = _expect_action_executable(
         env,
         targets.cxx_library,
@@ -257,9 +253,16 @@ def _cxx_import_precedes_link_impl(env, targets):
         "loom-link",
     )
     env.expect.that_collection(cxx_link.argv).not_contains("--input-format=cxx")
+    env.expect.that_collection(cxx_link.argv).contains(
+        "--module-name=%s" % targets.cxx_library.label,
+    )
     _expect_action_input_suffix(env, cxx_link, "model_provider.cxx.loombc")
     _reject_action_input_suffix(env, cxx_link, "model_provider.cxx")
     _reject_action_input_suffix(env, cxx_link, "model_provider.h")
+    env.expect.that_collection([
+        file.basename
+        for file in targets.check_module[DefaultInfo].default_runfiles.files.to_list()
+    ]).contains_exactly(["cxx_library_check_module.loombc"])
     _expect_action_executable(env, targets.loom_library, "LoomLibrary", "loom-link")
     for target in [targets.loom_library, targets.opaque_module]:
         for action in target[TestingAspectInfo].actions:

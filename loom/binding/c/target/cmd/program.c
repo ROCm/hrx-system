@@ -528,7 +528,7 @@ static iree_status_t loomc_cmd_program_product_publish_kernel_request(
     };
     status = loomc_module_serialize_internal_bytecode_to_source(
         invocation->request.context, kernel_product.module,
-        loomc_string_view_from_iree(root_symbol), &projection,
+        loomc_string_view_from_iree(root_symbol), /*flags=*/0, &projection,
         invocation->request.allocator, &source);
   }
 

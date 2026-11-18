@@ -1,0 +1,104 @@
+// RUN: roundtrip
+// Definitions can arrive from another linked module; source declarations own
+// the same scalar and flattened record ABI used by ordinary function calls.
+#include <loomcxx/check.h>
+
+struct Observation {
+  // Payload projected through the linked call ABI.
+  unsigned value;
+  // Independent narrow component of the same result.
+  bool valid;
+};
+extern "C" int add_bias(int value);
+Observation observe(unsigned value);
+Observation update(Observation value);
+
+LOOM_CHECK_CASE(linked_observations) {
+  const auto scalar = add_bias(35);
+  const auto record = observe(7u);
+  const auto updated = update(record);
+  loom::check::expect_equal(scalar, 42);
+  loom::check::expect_equal(updated.value, 8u);
+  loom::check::expect_equal(updated.valid, true);
+}
+
+// ----
+check.case public @linked_observations {
+  %0 = check.literal value(35) : i32
+  %scalar = func.call @add_bias(%0) : (i32) -> (i32)
+  %2 = check.literal value(7) : i32
+  %record_value, %record_valid = func.call @observe(%2) : (i32) -> (i32, i1)
+  %updated_value, %updated_valid = func.call @update(%record_value, %record_valid) : (i32, i1) -> (i32, i1)
+  %7 = check.literal value(42) : i32
+  check.expect.equal actual(%scalar) expected(%7) : i32
+  %8 = check.literal value(8) : i32
+  check.expect.equal actual(%updated_value) expected(%8) : i32
+  %9 = check.literal value(1) : i1
+  check.expect.equal actual(%updated_valid) expected(%9) : i1
+  check.return
+}
+
+func.decl source_signature(#func.abi.c.signature<arguments = [0], results = [0], types = [#func.abi.c.type<signed_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @add_bias(%10: i32) -> (i32)
+
+func.decl @observe(%12: i32) -> (i32, i1)
+
+func.decl @update(%15: i32, %16: i1) -> (i32, i1)
+
+// ====
+// RUN: roundtrip
+// Scenario generators, subjects, oracles, and actions share declaration
+// admission with direct calls.
+#include <loomcxx/check.h>
+
+unsigned generate(loom::check::ordinal trial);
+unsigned subject(unsigned input);
+unsigned oracle(unsigned input);
+void consume(unsigned input);
+
+LOOM_CHECK_SCENARIO(linked_trials) {
+  loom::check::trial<2>(
+      [](loom::check::ordinal trial, loom::check::entropy entropy) {
+        const auto input = loom::check::generate<generate>(trial);
+        loom::check::compare<subject, oracle>(
+            input, [](unsigned actual, unsigned expected) {
+              loom::check::expect_equal(actual, expected);
+            });
+      });
+  loom::check::trial<1>(
+      [](loom::check::ordinal trial, loom::check::entropy entropy) {
+        loom::check::invoke<consume>(7u);
+      });
+}
+
+// ----
+check.scenario public @linked_trials {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %input = check.generate<@generate>(%trial) : (index) -> (i32)
+    check.compare<@subject, @oracle>(%input) : (i32) -> [actual(%actual: i32), expected(%expected: i32)] {
+      check.expect.equal actual(%actual) expected(%expected) : i32
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %7 = check.literal value(7) : i32
+    check.invoke<@consume>(%7) : (i32) -> ()
+  }
+  check.return
+}
+
+func.decl @generate(%8: index) -> (i32)
+
+func.decl @oracle(%10: i32) -> (i32)
+
+func.decl @subject(%12: i32) -> (i32)
+
+func.decl @consume(%14: i32)
+
+// ====
+// RUN: verify
+// Internal linkage cannot be satisfied by a different module.
+#include <loomcxx/check.h>
+static int local(int value);
+LOOM_CHECK_CASE(missing_local_definition) {
+  // ERROR@+1: LOWERING/059 "called function with internal linkage requires a definition"
+  loom::check::expect_equal(local(1), 1);
+}

@@ -877,7 +877,7 @@ loomc_status_t loomc_link_request(loomc_linker_t* linker,
     };
     status = loomc_module_serialize_internal_bytecode_to_source(
         linker->context, materialization.product.module, output_identifier,
-        &projection, allocator, &output_source);
+        /*flags=*/0, &projection, allocator, &output_source);
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
     for (iree_host_size_t i = 0; i < root_count; ++i) {

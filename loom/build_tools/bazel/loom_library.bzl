@@ -199,6 +199,9 @@ def _declare_cxx_import(ctx, source, ordinal, options, tool):
     args = ctx.actions.args()
     args.add(source)
     args.add("--to=bc")
+    args.add("--module-name=%s/unit%d" % (ctx.label, ordinal))
+    if ctx.var["COMPILATION_MODE"] != "dbg":
+        args.add("--strip-debug")
     args.add("--output=%s" % output.path)
     if options != None:
         args.add("--options=%s" % options)
@@ -991,6 +994,10 @@ def loom_library(
     strict dependency analysis rejects source references satisfied only by the
     transitive closure. The ``dependency_reports`` output group contains the
     schema-versioned JSON analysis report.
+
+    Bytecode uses the rule label as its logical module name and omits diagnostic
+    source metadata and presentation. Nonsemantic source edits therefore stop
+    at the imported/merged artifact when its bytes remain unchanged.
     """
     package_attributes = _apply_package_policy(
         name,

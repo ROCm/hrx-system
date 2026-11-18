@@ -33,7 +33,7 @@ typedef struct loomc_module_symbol_projection_t {
 LOOMC_API_PRIVATE loomc_status_t
 loomc_module_serialize_internal_bytecode_to_source(
     const loomc_context_t* context, const loom_module_t* internal_module,
-    loomc_string_view_t identifier,
+    loomc_string_view_t identifier, loomc_module_bytecode_flags_t flags,
     const loomc_module_symbol_projection_t* projection,
     loomc_allocator_t allocator, loomc_source_t** out_source);
 

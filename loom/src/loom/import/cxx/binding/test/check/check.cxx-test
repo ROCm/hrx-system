@@ -169,7 +169,7 @@ void ordinary() {
 #include <loomcxx/check.h>
 LOOM_CHECK_CASE(first) {}
 LOOM_CHECK_CASE(second) {
-  // ERROR@+1: LOWERING/059 "check invocations require a defined ordinary function"
+  // ERROR@+1: LOWERING/059 "check invocations require an ordinary function"
   first();
 }
 

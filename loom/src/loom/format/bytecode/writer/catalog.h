@@ -110,6 +110,8 @@ typedef struct loom_bytecode_numbering_t {
   iree_arena_allocator_t* arena;
   // File-level location mode controlling operation location references.
   loom_bytecode_location_mode_t location_mode;
+  // Omit nonsemantic source presentation while numbering and writing payloads.
+  bool strip_debug;
   // Low representation state shared by catalog and body serialization.
   struct {
     // Stable-key codec supplied by the embedding compiler.

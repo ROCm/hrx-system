@@ -121,6 +121,12 @@ iree_status_t loom_bytecode_write_module(
   loom_bytecode_location_mode_t location_mode =
       options ? options->location_mode
               : LOOM_BYTECODE_LOCATION_MODE_SOURCE_LOCATIONS;
+  const bool strip_debug =
+      options &&
+      iree_any_bit_set(options->flags, LOOM_BYTECODE_WRITE_FLAG_STRIP_DEBUG);
+  if (strip_debug) {
+    location_mode = LOOM_BYTECODE_LOCATION_MODE_NO_LOCATIONS;
+  }
   if (location_mode > LOOM_BYTECODE_LOCATION_MODE_FULL_LOCATIONS) {
     IREE_TRACE_ZONE_END(z0);
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -149,6 +155,7 @@ iree_status_t loom_bytecode_write_module(
   iree_status_t status =
       loom_bytecode_numbering_initialize(&numbering, module, &arena);
   numbering.location_mode = location_mode;
+  numbering.strip_debug = strip_debug;
   numbering.low_repr.environment = options ? options->low_repr_environment
                                            : (loom_low_repr_environment_t){0};
 
@@ -278,7 +285,9 @@ iree_status_t loom_bytecode_write_module(
     section_write_order[section_count++] = LOOM_BYTECODE_SECTION_LOCATIONS;
   }
   iree_host_size_t file_header_line_count = 0;
-  (void)loom_module_file_header(module, &file_header_line_count);
+  if (!strip_debug) {
+    (void)loom_module_file_header(module, &file_header_line_count);
+  }
   if (file_header_line_count > 0) {
     section_write_order[section_count++] = LOOM_BYTECODE_SECTION_SOURCE_TRIVIA;
   }
@@ -380,7 +389,7 @@ iree_status_t loom_bytecode_write_module(
   if (iree_status_is_ok(status)) {
     section_offsets[LOOM_BYTECODE_SECTION_SOURCES] =
         page_writer.total_written - module_start;
-    status = loom_bytecode_write_sources_section(&page_writer, module);
+    status = loom_bytecode_write_sources_section(&page_writer, &numbering);
     if (iree_status_is_ok(status)) {
       section_lengths[LOOM_BYTECODE_SECTION_SOURCES] =
           page_writer.total_written - module_start -

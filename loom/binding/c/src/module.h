@@ -50,6 +50,9 @@ typedef struct loomc_module_resolved_serialize_options_t {
 
   // Optional top-level operation dialect selected for current-IR printing.
   loomc_string_view_t top_level_dialect;
+
+  // Bytecode serialization policy validated at the public boundary.
+  loomc_module_bytecode_flags_t bytecode_flags;
 } loomc_module_resolved_serialize_options_t;
 
 // Decodes one resolved source format into internal module storage.

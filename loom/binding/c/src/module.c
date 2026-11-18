@@ -217,6 +217,12 @@ loomc_status_t loomc_module_validate_serialize_options(
       LOOMC_RETURN_IF_ERROR(
           loomc_module_validate_string_view(options->top_level_dialect));
     }
+    if (LOOMC_MODULE_SERIALIZE_OPTIONS_HAS_FIELD(options, bytecode_flags) &&
+        (options->bytecode_flags & ~LOOMC_MODULE_BYTECODE_FLAG_STRIP_DEBUG)) {
+      return loomc_make_status(
+          LOOMC_STATUS_INVALID_ARGUMENT,
+          "module serialize bytecode_flags are unsupported");
+    }
   }
   loomc_module_text_presentation_t text_presentation =
       LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT;
@@ -265,6 +271,15 @@ loomc_status_t loomc_module_resolve_serialize_options(
     text_presentation = options->text_presentation;
   }
 
+  const loomc_module_bytecode_flags_t bytecode_flags =
+      LOOMC_MODULE_SERIALIZE_OPTIONS_HAS_FIELD(options, bytecode_flags)
+          ? options->bytecode_flags
+          : 0;
+  if (bytecode_flags && required_format != LOOMC_SOURCE_FORMAT_BYTECODE) {
+    return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
+                             "bytecode_flags require bytecode output");
+  }
+
   out_options->format = required_format;
   out_options->identifier = identifier;
   out_options->text_presentation = text_presentation;
@@ -275,6 +290,7 @@ loomc_status_t loomc_module_resolve_serialize_options(
       LOOMC_MODULE_SERIALIZE_OPTIONS_HAS_FIELD(options, top_level_dialect)
           ? options->top_level_dialect
           : loomc_string_view_empty();
+  out_options->bytecode_flags = bytecode_flags;
   return loomc_ok_status();
 }
 
