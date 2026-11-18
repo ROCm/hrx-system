@@ -57,8 +57,8 @@ entry() {}
 
 // ====
 // RUN: verify
-// Rejects invalid or contradictory launch contracts.
-// ERROR@+1: LOWERING/059 "launch dimensions require positive i32 integer constant expressions"
+// Seven valid integers still cannot describe three pairs of bounds.
+// ERROR@+1: LOWERING/059 "launch ranges require six constants: xmin, xmax, ymin, ymax, zmin, zmax"
 [[loom::kernel, loom::workgroup_count_range(1, 4, 1, 1, 1, 1, 1)]] void
 entry() {}
 

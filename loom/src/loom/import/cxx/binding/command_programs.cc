@@ -121,7 +121,7 @@ void CommandPrograms::finish() {
           "command_program requires a concrete non-variadic void "
           "namespace-scope function");
     }
-    if (annotated(function, "kernel") || annotated(function, "device") ||
+    if (is_kernel_function(function) || annotated(function, "device") ||
         annotated(function, "op") || annotated(function, "assume") ||
         annotated(function, "check_case") ||
         annotated(function, "check_scenario") ||

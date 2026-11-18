@@ -19,6 +19,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/op_registry.h"
 #include "loom/target/test/descriptors.h"
+#include "loom/testing/diagnostic_matchers.h"
 
 namespace {
 
@@ -326,6 +327,64 @@ TEST_F(ImportTest, HeaderProviderUsesNormalIncludeSearch) {
   EXPECT_EQ(source_requests_["/overrides/value.h"], 1);
   EXPECT_EQ(source_requests_["/facade/value.h"], 1);
   EXPECT_EQ(source_requests_["/facade/factor.h"], 1);
+}
+
+TEST_F(ImportTest,
+       ConflictingKernelContractsIdentifyBothHeadersInIncludeOrder) {
+  headers_["/app/declare.h"] =
+      "template<class T> [[loom::kernel, loom::workgroup_size(32, 1, 1)]] void "
+      "tile();\n";
+  headers_["/app/define.h"] =
+      "template<class T> [[loom::workgroup_size(64, 1, 1)]] void tile() {}\n";
+  options_.source_provider = {ProvideSource, this};
+  loom::testing::DiagnosticCapture capture;
+  options_.diagnostic_sink = capture.sink();
+  // The declaration between includes leaves only the first header in the
+  // preamble.
+  const auto declaration_first_source = IREE_SV(
+      "#include \"declare.h\"\n"
+      "void consumer();\n"
+      "#include \"define.h\"\n");
+  const auto definition_first_source = IREE_SV(
+      "#include \"define.h\"\n"
+      "void consumer();\n"
+      "#include \"declare.h\"\n");
+  for (bool definition_first : {false, true}) {
+    const auto text =
+        definition_first ? definition_first_source : declaration_first_source;
+    IREE_ASSERT_OK(loom_cxx_preamble_create(text, IREE_SV("/app/source.cpp"),
+                                            &options_, iree_allocator_system(),
+                                            &preamble_));
+    ASSERT_NE(preamble_, nullptr);
+    for (bool restore : {false, true}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "definition_first=" << definition_first
+                   << ", restore=" << restore);
+      options_.preamble = restore ? preamble_ : nullptr;
+      source_requests_.clear();
+      capture.Reset();
+      IREE_ASSERT_OK(Import(text));
+      EXPECT_EQ(module_, nullptr);
+      EXPECT_EQ(source_requests_[definition_first ? "/app/define.h"
+                                                  : "/app/declare.h"],
+                restore ? 0 : 1);
+      ASSERT_EQ(capture.diagnostics.size(), 1u);
+      const auto& error = capture.diagnostics.front();
+      EXPECT_EQ(error.error, LOOM_ERR_LOWERING_059);
+      EXPECT_EQ(error.filename,
+                definition_first ? "/app/declare.h" : "/app/define.h");
+      ASSERT_EQ(error.related_locations.size(), 1u);
+      const auto& previous = error.related_locations.front();
+      EXPECT_EQ(previous.label, "previous launch contract");
+      EXPECT_TRUE(iree_string_view_equal(
+          previous.source_location.filename,
+          iree_make_cstring_view(definition_first ? "/app/define.h"
+                                                  : "/app/declare.h")));
+    }
+    options_.preamble = nullptr;
+    loom_cxx_preamble_release(preamble_);
+    preamble_ = nullptr;
+  }
 }
 
 TEST_F(ImportTest, PreambleRestoresHeaderIRAndExactSourceWithoutProviderCalls) {

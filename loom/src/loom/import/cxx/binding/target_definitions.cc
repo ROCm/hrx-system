@@ -256,7 +256,7 @@ void TargetDefinitions::admit_function(
                                      annotated(function, "check_benchmark");
   if (function->isTemplatePattern() ||
       !cxx::symbol_cast<cxx::NamespaceSymbol>(function->parent()) ||
-      (emits_non_callable_op && !annotated(function, "kernel") &&
+      (emits_non_callable_op && !is_kernel_function(function) &&
        !annotated(function, "template_def"))) {
     diagnostics_.reject(
         unit_, selected,

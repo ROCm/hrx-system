@@ -303,3 +303,29 @@ LOOM_CHECK_CASE(dynamic_iota_period) {
 [[loom::op("check.generate.iota")]]
 loom::type::tensor<loom::type::shape<4>, int> mixed_iota(
     float offset, int step);
+
+// ====
+// A conflict between literal sizes is already knowable in a header.
+template<class T> [[loom::kernel, loom::workgroup_size(32, 1, 1)]] void ping();
+// ERROR@+1: LOWERING/059 "conflicting launch contracts across declarations"
+template<class T> [[loom::workgroup_size(64, 1, 1)]] void ping() {}
+
+// ====
+// Dependent configurations are compared by the concrete function they name.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+
+template<unsigned N> static loom::kernel::configuration fixed() { return {{1, 1, 1}, {N, 1, 1}}; }
+template<unsigned Width> [[loom::kernel(fixed<Width>)]] void entry();
+// ERROR@+1: LOWERING/059 "conflicting kernel configuration functions across declarations"
+template<unsigned N> [[loom::kernel(fixed<32>)]] void entry() {}
+LOOM_CHECK_CASE(disagree) { loom::check::launch<entry<64>>(); }
+
+// ====
+// Both ends of each range use the declaring template's parameter scope.
+#include <loomcxx/check.h>
+
+template<unsigned Min, unsigned Max> [[loom::kernel, loom::workgroup_size_range(Min, Max, 1, 1, 1, 1)]] void bounded();
+// ERROR@+1: LOWERING/059 "conflicting launch contracts across declarations"
+template<unsigned L, unsigned H> [[loom::workgroup_size_range(L, H + 1, 1, 1, 1, 1)]] void bounded() {}
+LOOM_CHECK_CASE(limits) { loom::check::launch<bounded<16, 64>>(); }

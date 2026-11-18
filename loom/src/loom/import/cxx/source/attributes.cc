@@ -39,6 +39,13 @@ const cxx::Attribute* semantic_attribute(cxx::Symbol* symbol,
   return nullptr;
 }
 
+bool is_kernel_function(cxx::FunctionSymbol* function) {
+  auto* primary = function->primaryTemplateSymbol();
+  return annotated(
+      primary && !function->isExplicitSpecialization() ? primary : function,
+      "kernel");
+}
+
 bool has_op_binding(cxx::Symbol* symbol, std::string_view operation,
                     std::string_view selector) {
   const auto* binding = annotation(symbol, "op");

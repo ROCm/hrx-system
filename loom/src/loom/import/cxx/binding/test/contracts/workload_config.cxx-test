@@ -326,8 +326,8 @@ static loom::kernel::configuration fixed(unsigned workgroup_count);
 [[loom::kernel(fixed<64>)]] void direct() {}
 [[loom::kernel(fixed<0>)]] static void unused() {}
 
-template <unsigned WorkgroupSize>
-[[loom::kernel(fixed<WorkgroupSize>)]] void tiled() {}
+template <unsigned Width> [[loom::kernel(fixed<Width>)]] void tiled();
+template <unsigned WorkgroupSize> void tiled() {}
 
 template <unsigned WorkgroupSize>
 static loom::kernel::configuration fixed(unsigned workgroup_count) {
@@ -774,4 +774,67 @@ check.case public @configured_copy_case {
   kernel.launch @configured_copy[%58](%59, %input, %output) : [i32](i32, tensor<67xf32>, tensor<67xf32>)
   check.expect.bitwise actual(%output) expected(%input) : tensor<67xf32>
   check.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// The declarations may follow the body and even the first use. Each uses its
+// own parameter names. Repeated workgroup sizes agree after substitution.
+#include <loomcxx/check.h>
+
+template<class T, unsigned N> void tile() {}
+LOOM_CHECK_CASE(tile_size) { loom::check::launch<tile<int, 16>>(); }
+template<class T, unsigned N> [[loom::kernel, loom::workgroup_count(2, 1, 1), loom::workgroup_size(N * sizeof(T), 1, 1)]] void tile();
+template<class Element, unsigned Count> [[loom::workgroup_size(sizeof(Element) * Count, 1, 1)]] void tile();
+
+// An explicit specialization can remain an ordinary, directly callable function.
+template<> [[loom::symbol("scalar_tile")]] void tile<float, 1>() {}
+void scalar_entry() { tile<float, 1>(); }
+
+// ----
+check.case public @tile_size {
+  kernel.launch @tile_int_16() : ()
+  check.return
+}
+
+func.def public @scalar_tile() {
+  func.return
+}
+
+func.def public @scalar_entry() {
+  func.return
+}
+
+kernel.def @tile_int_16() {
+  %0 = index.constant 2 : index
+  %1 = index.constant 1 : index
+  %3 = index.constant 64 : index
+  kernel.launch.config workgroups(%0, %1, %1) workgroup_size(%3, %1, %1) : index
+} launch() {
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A configuration name can agree only for a particular specialization.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+
+template<unsigned N> static loom::kernel::configuration fixed() { return {{1, 1, 1}, {N, 1, 1}}; }
+template<unsigned Width> [[loom::kernel(fixed<Width>)]] void entry();
+template<unsigned N> [[loom::kernel(fixed<32>)]] void entry() {}
+LOOM_CHECK_CASE(agree) { loom::check::launch<entry<32>>(); }
+
+// ----
+check.case public @agree {
+  kernel.launch @entry_32() : ()
+  check.return
+}
+
+kernel.def @entry_32() {
+  %23 = index.constant 1 : index
+  %20 = index.constant 32 : index
+  kernel.launch.config workgroups(%23, %23, %23) workgroup_size(%20, %23, %23) : index
+} launch() {
+  kernel.return
 }

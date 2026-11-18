@@ -55,16 +55,8 @@ void Diagnostics::emit(const cxx::Token& token,
   status_ = sink_.fn(sink_.user_data, &diagnostic);
 }
 
-void Diagnostics::emit(cxx::SourceLocation location,
-                       loom_diagnostic_severity_t severity,
-                       const loom_error_def_t* error,
-                       std::string_view message) {
-  if (severity == LOOM_DIAGNOSTIC_ERROR) {
-    has_error_ = true;
-  }
-  if (!sink_.fn || !iree_status_is_ok(status_)) {
-    return;
-  }
+loom_source_range_t Diagnostics::source_range(
+    cxx::SourceLocation location) const {
   loom_source_range_t range = {
       .provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE,
   };
@@ -84,6 +76,20 @@ void Diagnostics::emit(cxx::SourceLocation location,
       range.end_column = last.column;
     }
   }
+  return range;
+}
+
+void Diagnostics::emit(cxx::SourceLocation location,
+                       loom_diagnostic_severity_t severity,
+                       const loom_error_def_t* error, std::string_view message,
+                       const loom_diagnostic_related_location_t* related) {
+  if (severity == LOOM_DIAGNOSTIC_ERROR) {
+    has_error_ = true;
+  }
+  if (!sink_.fn || !iree_status_is_ok(status_)) {
+    return;
+  }
+  auto range = source_range(location);
   loom_diagnostic_param_t parameter = loom_param_string(view(message));
   loom_diagnostic_t diagnostic = {
       .severity = severity,
@@ -93,6 +99,8 @@ void Diagnostics::emit(cxx::SourceLocation location,
       .emitter = LOOM_EMITTER_PARSER,
       .origin = range,
       .source_location = range,
+      .related_locations = related,
+      .related_location_count = related ? 1u : 0u,
   };
   status_ = sink_.fn(sink_.user_data, &diagnostic);
 }
@@ -137,6 +145,17 @@ void Diagnostics::reject(cxx::TranslationUnit& unit, cxx::AST* ast,
 void Diagnostics::reject(cxx::SourceLocation location,
                          std::string_view message) {
   emit(location, LOOM_DIAGNOSTIC_ERROR, LOOM_ERR_LOWERING_059, message);
+  finish();
+  throw SourceRejected();
+}
+
+void Diagnostics::reject(cxx::SourceLocation location, std::string_view message,
+                         cxx::SourceLocation related, std::string_view label) {
+  loom_diagnostic_related_location_t note = {
+      .label = view(label),
+      .source_location = source_range(related),
+  };
+  emit(location, LOOM_DIAGNOSTIC_ERROR, LOOM_ERR_LOWERING_059, message, &note);
   finish();
   throw SourceRejected();
 }

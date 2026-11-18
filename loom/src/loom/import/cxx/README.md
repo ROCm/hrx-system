@@ -3488,9 +3488,13 @@ The importer emits `config.decl @configured.workgroup_count.x` with a
 the exact value and rejects values outside the contract. An absent annotation
 also produces three required configs, with no additional range constraint.
 Config names use the imported kernel symbol, so overloads remain distinct.
-Contracts on leading function declarations carry to the definition; conflicting
-redeclarations and multiple contracts for the same dimension group are errors.
-Import does not guess launch dimensions or select a physical target.
+A header can declare a kernel and its launch geometry once, and the definition
+can omit both annotations. This also applies to function templates. Each
+declaration can specify a dimension group once. Across declarations, the exact
+dimensions or range bounds must agree after substituting template arguments.
+Repeated configuration-function annotations must select the same function. A
+conflict reports both source declarations in either include order. An explicit
+C++ specialization declares its own kernel role and geometry.
 
 A kernel template can choose its workgroup size at instantiation and compute
 its workgroup count from the launch workload. Here `configure_fill` is an

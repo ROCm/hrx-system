@@ -183,11 +183,8 @@ std::optional<CheckIntrinsic> CheckIntrinsic::resolve(
                : nullptr;
   };
   auto bind_configuration = [&](cxx::FunctionSymbol* selected) {
-    if (!selected || !annotated(selected, "kernel")) {
+    if (!selected || !is_kernel_function(selected)) {
       return static_cast<cxx::FunctionSymbol*>(nullptr);
-    }
-    if (!selected->templateArguments().empty() && selected->declaration()) {
-      launches.declaration(selected, selected->declaration()->attributeList);
     }
     return launches.configuration_function(selected);
   };

@@ -421,7 +421,7 @@ void Functions::select(std::span<const iree_string_view_t> roots,
       diagnostics_.reject(unit_, source,
                           "template priority requires a template definition");
     }
-    if (annotated(provider.function, "kernel") ||
+    if (is_kernel_function(provider.function) ||
         annotated(provider.function, "op") ||
         annotated(provider.function, "check_case") ||
         annotated(provider.function, "check_scenario") ||
@@ -456,7 +456,7 @@ ControlFlow* Functions::prepare_callee_analysis(
     std::vector<AnalyzedFunction>& functions,
     std::vector<AnalyzedCall>& calls) {
   auto* function = call.function;
-  if (!function || annotated(function, "kernel") ||
+  if (!function || is_kernel_function(function) ||
       command_programs_.contains(function) ||
       pipeline_contracts_.contains(function) ||
       launches_.is_configuration(function) || is_check_record(function) ||
@@ -796,7 +796,7 @@ void Functions::analyze(Types& types) {
           return parameter.owned;
         })) {
       if (exported_.contains(function) || external_.contains(canonical) ||
-          annotated(function, "kernel") || is_check_record(function) ||
+          is_kernel_function(function) || is_check_record(function) ||
           launches_.is_configuration(function) ||
           template_definitions_.lookup(function)) {
         diagnostics_.reject(
@@ -908,10 +908,8 @@ void Functions::collect(cxx::DeclarationAST* declaration,
     collect(linkage->declarationList, scope, definitions);
   } else if (auto* pattern =
                  cxx::ast_cast<cxx::TemplateDeclarationAST>(declaration)) {
-    // Function template patterns are not ordinary callable definitions, but
-    // their leading operation attribute owns admission for every concrete
-    // specialization reached later. Class members and nested templates remain
-    // outside the namespace-scope intrinsic surface.
+    // Namespace-scope function templates supply operation bindings and launch
+    // contracts for their concrete specializations.
     if (scope == DeclarationScope::Namespace &&
         pattern->templateParameterList) {
       if (auto* simple =
@@ -921,12 +919,15 @@ void Functions::collect(cxx::DeclarationAST* declaration,
                   cxx::symbol_cast<cxx::FunctionSymbol>(declarator->symbol)) {
             intrinsic_declarations_.push_back(
                 {function, simple->attributeList, declarator});
+            launches_.declaration(function, simple->attributeList, pattern);
           }
         }
       } else if (auto* function = cxx::ast_cast<cxx::FunctionDefinitionAST>(
                      pattern->declaration)) {
         intrinsic_declarations_.push_back(
             {function->symbol, function->attributeList, function});
+        launches_.declaration(function->symbol, function->attributeList,
+                              pattern);
       }
     }
     collect(pattern->declaration,
@@ -1055,7 +1056,7 @@ bool Functions::admit_declaration(
       }
       if (const auto* import = imports_.lookup(function);
           import &&
-          (annotated(function, "kernel") || annotated(function, "op") ||
+          (is_kernel_function(function) || annotated(function, "op") ||
            annotated(function, "assume") || annotated(function, "check_case") ||
            annotated(function, "check_scenario") ||
            annotated(function, "check_benchmark") ||
@@ -1116,7 +1117,7 @@ bool Functions::admit_declaration(
                   "constructor and destructor calls require inline expansion");
             }
             if (!requires_inline &&
-                (annotated(function, "kernel") || annotated(function, "op") ||
+                (is_kernel_function(function) || annotated(function, "op") ||
                  annotated(function, "assume") ||
                  annotated(function, "check_case") ||
                  annotated(function, "check_scenario") ||
@@ -1145,7 +1146,7 @@ bool Functions::admit_declaration(
               diagnostics_.reject(unit_, attribute,
                                   "hot and cold cannot be combined");
             }
-            if (requires_inline || annotated(function, "kernel") ||
+            if (requires_inline || is_kernel_function(function) ||
                 annotated(function, "op") || annotated(function, "assume") ||
                 annotated(function, "check_case") ||
                 annotated(function, "check_scenario") ||
@@ -1233,7 +1234,7 @@ bool Functions::admit_declaration(
         }
         require_namespace_function();
         auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
-        if (found || annotated(function, "kernel") ||
+        if (found || is_kernel_function(function) ||
             annotated(function, "device") || annotated(function, "op") ||
             signature->isVariadic() ||
             !unit_.typeTraits().is_void(signature->returnType())) {
@@ -1522,16 +1523,14 @@ loom_symbol_ref_t Functions::retain(FunctionInstance instance,
     cxx::ASTRewriter::completePendingBodyFor(&unit_, body);
     diagnostics_.finish();
   }
-  if (!function->templateArguments().empty() && function->declaration()) {
-    launches_.declaration(function, function->declaration()->attributeList);
-    if (!definitions_.contains(function->canonical())) {
-      auto* prototype =
-          cxx::getFunctionPrototype(function->declaration()->declarator);
-      parameter_contracts_.declaration(function, prototype);
-      fastmath_.declaration(function, function->declaration()->attributeList,
-                            prototype);
-      function_contracts_.declaration(function, prototype);
-    }
+  if (!function->templateArguments().empty() && function->declaration() &&
+      !definitions_.contains(function->canonical())) {
+    auto* prototype =
+        cxx::getFunctionPrototype(function->declaration()->declarator);
+    parameter_contracts_.declaration(function, prototype);
+    fastmath_.declaration(function, function->declaration()->attributeList,
+                          prototype);
+    function_contracts_.declaration(function, prototype);
   }
   if (!command_programs_.contains(function) &&
       !pipeline_contracts_.contains(function)) {
@@ -1666,7 +1665,7 @@ void Functions::admit_reference_parameters(cxx::FunctionSymbol* symbol,
   if (has_runtime_reference) {
     auto* body = definition(symbol);
     if (!body || exported_.contains(body) || external_.contains(canonical) ||
-        annotated(body, "kernel") || is_check_record(body) ||
+        is_kernel_function(body) || is_check_record(body) ||
         launches_.is_configuration(body) ||
         template_definitions_.lookup(body)) {
       diagnostics_.reject(
@@ -2236,7 +2235,7 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
     diagnostics_.reject(unit_, definition, "unsupported function body");
   }
   auto parameters = symbol->parameters();
-  bool kernel = annotated(symbol, "kernel");
+  bool kernel = is_kernel_function(symbol);
   bool command_program = command_programs_.contains(symbol);
   bool pipeline = pipeline_contracts_.contains(symbol);
   bool check_case = is_check_case(symbol);

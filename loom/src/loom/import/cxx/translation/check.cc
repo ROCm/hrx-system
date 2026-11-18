@@ -683,15 +683,11 @@ class CheckBody {
     }
   }
 
-  bool is_kernel(cxx::FunctionSymbol* function) const {
-    return annotated(function, "kernel");
-  }
-
   void require_subject(cxx::FunctionSymbol* function, cxx::AST* source,
                        bool allow_kernel) {
     if (!function || functions_.is_check_record(function) ||
         annotated(function, "check_benchmark") ||
-        (is_kernel(function) &&
+        (is_kernel_function(function) &&
          (!allow_kernel || !functions_.definition(function)))) {
       fail(source,
            allow_kernel
@@ -709,7 +705,7 @@ class CheckBody {
     }
     std::vector<loom_type_t> results;
     if (!unit_.typeTraits().is_void(signature->returnType())) {
-      if (is_kernel(function)) {
+      if (is_kernel_function(function)) {
         fail(source, "check kernels cannot return values");
       }
       admit_value_type(signature->returnType(), source);
@@ -727,7 +723,7 @@ class CheckBody {
         values.size() != source_arguments.size()) {
       fail(source, "check action arguments must match the subject signature");
     }
-    bool kernel = is_kernel(function);
+    bool kernel = is_kernel_function(function);
     for (size_t index = 0; index < parameters.size(); ++index) {
       auto* parameter_type = parameters[index]->type();
       auto* argument_type = source_arguments[index]->type;
@@ -1248,7 +1244,7 @@ class CheckBody {
     if (observing_) {
       fail(call, "check expectations must be terminal");
     }
-    if (functions_.is_check_record(function) || annotated(function, "kernel") ||
+    if (functions_.is_check_record(function) || is_kernel_function(function) ||
         annotated(function, "check_benchmark")) {
       fail(call, "check invocations require an ordinary function");
     }

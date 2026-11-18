@@ -88,7 +88,7 @@ std::optional<KernelLaunchIntrinsic> KernelLaunchIntrinsic::resolve(
           ? cxx::symbol_cast<cxx::FunctionSymbol>((*address)->symbol())
           : nullptr;
   const bool pipeline = kernel && pipelines.contains(kernel);
-  if (!kernel || (!annotated(kernel, "kernel") &&
+  if (!kernel || (!is_kernel_function(kernel) &&
                   !(pipeline && pipelines.has_kernel_scope(kernel)))) {
     fail(
         "kernel.launch requires a kernel or kernel-scoped pipeline as its "
@@ -124,9 +124,6 @@ std::optional<KernelLaunchIntrinsic> KernelLaunchIntrinsic::resolve(
     }
     return KernelLaunchIntrinsic{kernel, /*configuration=*/nullptr, &projection,
                                  std::move(buffer_materializations)};
-  }
-  if (!kernel->templateArguments().empty() && kernel->declaration()) {
-    launches.declaration(kernel, kernel->declaration()->attributeList);
   }
   auto* configuration = launches.configuration_function(kernel);
   auto parameters = signature->parameterTypes();
