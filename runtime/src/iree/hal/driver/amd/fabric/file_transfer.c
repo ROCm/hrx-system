@@ -262,7 +262,7 @@ iree_status_t iree_hal_amd_fabric_file_transfer_flush(
   iree_status_t status = iree_ok_status();
   const iree_hal_amd_fabric_file_source_t* range = &transfer->source;
   if (range->effects.bits & IREE_HAL_MEMORY_EFFECT_HOST_FLUSH) {
-    IREE_TRACE_ZONE_BEGIN_NAMED(z0, "amdf.host_mapping_flush");
+    IREE_TRACE_ZONE_BEGIN_NAMED(z0, "amdf_host_mapping_cache_control");
     IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, range->contents.data_length);
     status = IREE_HAL_AMD_STATUS_FROM_AMDF(
         range->api->host_mapping_cache_control(
@@ -314,7 +314,7 @@ iree_status_t iree_hal_amd_fabric_file_transfer_prepare_range(
       iree_hal_amd_fabric_file_transfer_bytes_transferred(transfer);
   if (position == 0 &&
       (range->effects.bits & IREE_HAL_MEMORY_EFFECT_HOST_INVALIDATE)) {
-    IREE_TRACE_ZONE_BEGIN_NAMED(z0, "amdf.host_mapping_invalidate");
+    IREE_TRACE_ZONE_BEGIN_NAMED(z0, "amdf_host_mapping_cache_control");
     IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, range->contents.data_length);
     const amdf_status_t status = range->api->host_mapping_cache_control(
         range->storage->mapping, AMDF_HOST_CACHE_OPERATION_INVALIDATE,
