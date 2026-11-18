@@ -65,6 +65,7 @@
 #include "loom/import/cxx/translation/check.h"
 #include "loom/import/cxx/value/bindings.h"
 #include "loom/import/cxx/value/bitcast.h"
+#include "loom/import/cxx/value/component_names.h"
 #include "loom/import/cxx/value/initialization.h"
 #include "loom/import/cxx/value/lvalues.h"
 #include "loom/import/cxx/value/member_storage.h"
@@ -582,88 +583,12 @@ class Translator final : private Initialization::Evaluation {
     return loom_module_value_type(module_, value);
   }
 
-  loom_string_id_t string(const std::string& value) {
-    loom_string_id_t result;
-    check(loom_builder_intern_string(
-        &builder_, iree_make_cstring_view(value.c_str()), &result));
-    return result;
+  loom_value_id_t name(loom_value_id_t value, std::string_view hint) {
+    return name_value(module_, value, hint);
   }
 
-  loom_value_id_t name(loom_value_id_t value, const std::string& hint) {
-    // A C++ alias of an existing SSA value keeps the original value's name.
-    if (!hint.empty() &&
-        loom_module_value(module_, value)->name_id == LOOM_STRING_ID_INVALID) {
-      check(loom_module_set_value_name(module_, value, string(hint)));
-    }
-    return value;
-  }
-
-  Value name(Value value, const std::string& hint) {
-    if (value.is_record()) {
-      const auto& partition =
-          static_cast<const RecordPartition&>(value.partition());
-      auto components = value.components();
-      for (size_t index = 0; index < components.size(); ++index) {
-        name(components[index], hint + "_" + partition.component_names[index]);
-      }
-    } else if (value.is_array()) {
-      const auto& partition =
-          static_cast<const ArrayPartition&>(value.partition());
-      for (size_t index = 0; index < partition.source->size(); ++index) {
-        name(value.project(*partition.element,
-                           index * partition.element->component_count),
-             hint + "_" + std::to_string(index));
-      }
-    } else if (value.is_vector()) {
-      const auto& partition =
-          static_cast<const VectorPartition&>(value.partition());
-      auto components = value.components();
-      for (size_t index = 0; index < components.size(); ++index) {
-        auto suffix = partition.component_names[index];
-        name(components[index], suffix.empty() ? hint : hint + "_" + suffix);
-      }
-    } else if (value.is_view()) {
-      const auto& partition =
-          static_cast<const ViewPartition&>(value.partition());
-      auto components = value.components();
-      for (size_t index = 0; index < components.size(); ++index) {
-        auto suffix = partition.component_names[index];
-        name(components[index], suffix.empty() ? hint : hint + "_" + suffix);
-      }
-    } else if (value.is_tile()) {
-      const auto& partition =
-          static_cast<const TilePartition&>(value.partition());
-      auto components = value.components();
-      for (size_t index = 0; index < components.size(); ++index) {
-        auto suffix = partition.component_names[index];
-        name(components[index], suffix.empty() ? hint : hint + "_" + suffix);
-      }
-    } else if (value.is_channel()) {
-      const auto& partition =
-          static_cast<const ChannelPartition&>(value.partition());
-      auto components = value.components();
-      for (size_t index = 0; index < components.size(); ++index) {
-        auto suffix = partition.component_names[index];
-        name(components[index], suffix.empty() ? hint : hint + "_" + suffix);
-      }
-    } else if (value.is_tensor()) {
-      const auto& partition =
-          static_cast<const TensorPartition&>(value.partition());
-      auto components = value.components();
-      if (partition.is_dynamic()) {
-        name(components[0], hint + "_dim0");
-      }
-      name(partition.tensor_value(components), hint);
-    } else if (value.is_pointer()) {
-      auto pointer = value.pointer();
-      name(pointer.root, hint);
-      name(pointer.byte_offset, hint + "_byte_offset");
-    } else if (value.is_buffer() || value.is_encoding()) {
-      name(value.components()[0], hint);
-    } else {
-      name(value.ssa(), hint);
-    }
-    return value;
+  Value name(Value value, std::string_view hint) {
+    return name_value(module_, value, hint);
   }
 
   Value region_value(loom_region_t* region, size_t& index,

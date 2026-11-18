@@ -31,6 +31,7 @@
 #include "loom/import/cxx/source/constants.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/symbol/functions.h"
+#include "loom/import/cxx/value/component_names.h"
 #include "loom/import/cxx/value/scalar.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
@@ -425,11 +426,7 @@ class CheckBody {
   }
 
   void name(loom_value_id_t value, std::string_view hint) {
-    if (hint.empty() || loom_module_value(builder_.module, value)->name_id !=
-                            LOOM_STRING_ID_INVALID) {
-      return;
-    }
-    check(loom_module_set_value_name(builder_.module, value, intern(hint)));
+    name_value(builder_.module, value, hint);
   }
 
   void name(loom_value_id_t value, cxx::Symbol* symbol) {
@@ -446,38 +443,7 @@ class CheckBody {
   }
 
   Value name(Value value, std::string_view hint) {
-    auto components = value.components();
-    if (value.is_record()) {
-      const auto& record =
-          static_cast<const RecordPartition&>(value.partition());
-      for (size_t index = 0; index < components.size(); ++index) {
-        name(components[index],
-             std::string(hint) + "_" + record.component_names[index]);
-      }
-    } else if (value.is_view()) {
-      const auto& view = static_cast<const ViewPartition&>(value.partition());
-      for (size_t index = 0; index < components.size(); ++index) {
-        const auto& suffix = view.component_names[index];
-        if (suffix.empty()) {
-          name(components[index], hint);
-        } else {
-          name(components[index], std::string(hint) + "_" + suffix);
-        }
-      }
-    } else if (value.is_tensor()) {
-      const auto& tensor =
-          static_cast<const TensorPartition&>(value.partition());
-      if (tensor.is_dynamic()) {
-        name(components[0], std::string(hint) + "_dim0");
-      }
-      name(tensor.tensor_value(components), hint);
-    } else if (value.is_pointer()) {
-      name(value.pointer().root, hint);
-      name(value.pointer().byte_offset, std::string(hint) + "_byte_offset");
-    } else {
-      name(components[0], hint);
-    }
-    return value;
+    return name_value(builder_.module, value, hint);
   }
 
   loom_value_id_t dynamic_tensor_extent(cxx::ExpressionAST* source) {

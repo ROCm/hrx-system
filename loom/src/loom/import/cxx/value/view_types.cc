@@ -8,9 +8,7 @@
 #include <cxx/type_traits.h>
 #include <cxx/types.h>
 
-#include <optional>
-
-#include "loom/import/cxx/source/error.h"
+#include "loom/import/cxx/value/component_names.h"
 #include "loom/import/cxx/value/types.h"
 
 namespace loom::cxx_import {
@@ -22,54 +20,7 @@ bool is_view_element(loom_type_t element) {
           loom_type_element_type(element) != LOOM_SCALAR_TYPE_I1);
 }
 
-loom_type_t make_view_type(const loom_type_t& element,
-                           std::span<const uint64_t> dimensions,
-                           std::optional<loom_value_id_t> encoding,
-                           BoundTypeStorage& storage) {
-  loom_type_t type =
-      loom_type_is_reference(element)
-          ? loom_type_reference_view(&element, dimensions.size(),
-                                     storage.retain_dimensions(dimensions), 0,
-                                     0)
-          : storage.with_dimensions(
-                {
-                    .header = loom_type_make_header(
-                        LOOM_TYPE_VIEW, loom_type_element_type(element), 0, 0),
-                },
-                dimensions);
-  return BoundTypeStorage::with_encoding(type, encoding);
-}
-
 }  // namespace
-
-loom_type_t ViewPartition::bind_type(
-    std::span<const loom_value_id_t> dependencies, BoundTypeStorage& storage,
-    size_t column) const {
-  if (!requires_binding()) {
-    return columns.empty() ? static_type : columns[column].static_type;
-  }
-  std::array<uint64_t, LOOM_TYPE_MAX_RANK> dimensions;
-  size_t dependency = 0;
-  for (size_t axis = 0; axis < extents.size(); ++axis) {
-    dimensions[axis] = extents[axis] < 0
-                           ? loom_dim_pack_dynamic(dependencies[dependency++])
-                           : loom_dim_pack_static(extents[axis]);
-  }
-  std::optional<loom_value_id_t> encoding_value;
-  if (encoding) {
-    encoding_value = dependencies[dynamic_count + column];
-  }
-  return make_view_type(
-      column_element(column),
-      std::span<const uint64_t>(dimensions).first(extents.size()),
-      encoding_value, storage);
-}
-
-loom_value_id_t ViewPartition::view_value(
-    std::span<const loom_value_id_t> components, size_t column) const {
-  IREE_ASSERT(components.size() == component_count);
-  return components[column_component(column)];
-}
 
 void Types::append_view_columns(const cxx::Type* type, bool writable,
                                 loom_memory_access_flags_t access_flags,
@@ -217,21 +168,7 @@ const ViewPartition* Types::view(const cxx::ClassType* input, cxx::AST* owner) {
   result->component_names.insert(result->component_names.end(),
                                  column_names.begin(), column_names.end());
   if (!result->requires_binding()) {
-    std::array<uint64_t, LOOM_TYPE_MAX_RANK> dimensions;
-    for (size_t axis = 0; axis < result->extents.size(); ++axis) {
-      dimensions[axis] = loom_dim_pack_static(result->extents[axis]);
-    }
-    for (size_t column = 0; column < result->column_count(); ++column) {
-      const auto type = make_view_type(
-          result->column_element(column),
-          std::span<const uint64_t>(dimensions).first(result->extents.size()),
-          std::nullopt, result->static_type_storage);
-      if (columnar) {
-        result->columns[column].static_type = type;
-      } else {
-        result->static_type = type;
-      }
-    }
+    result->bind_static_type();
   }
   auto* admitted = result.get();
   views_.emplace(source, std::move(result));
