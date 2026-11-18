@@ -51,6 +51,7 @@
 #include "loom/import/cxx/binding/template_definitions.h"
 #include "loom/import/cxx/binding/template_inputs.h"
 #include "loom/import/cxx/control/analysis.h"
+#include "loom/import/cxx/control/exits/exits.h"
 #include "loom/import/cxx/control/loops/counted.h"
 #include "loom/import/cxx/control/regions.h"
 #include "loom/import/cxx/receiver/scopes.h"
@@ -1577,9 +1578,9 @@ class Translator final : private Initialization::Evaluation,
     if (defined.source->symbol->isDestructor()) {
       lifetimes_.activate_subobjects(defined.source);
     }
-    auto returned = return_sequence({body ? body->statementList : nullptr,
-                                     nullptr, lexical_fastmath_flags_,
-                                     control_->callable_exit_count(body), 0});
+    auto returned = return_sequence(
+        {body ? body->statementList : nullptr, nullptr, lexical_fastmath_flags_,
+         control_->exits(body).callable_exit_count(), 0});
     lifetimes_.discard_scope(0);
     if (defined.implicit_object) {
       leave_receiver();
@@ -1654,15 +1655,16 @@ class Translator final : private Initialization::Evaluation,
       }
       auto* child = sequence.remaining->value;
       sequence.remaining = sequence.remaining->next;
-      if (control_->requires_callable_exit(child)) {
+      const auto child_exits = control_->exits(child);
+      if (child_exits.requires_callable_exit()) {
         IREE_ASSERT_GT(sequence.callable_exit_count, 0);
         --sequence.callable_exit_count;
       }
-      if (control_->returns(child) != ExitFlow::None) {
+      if (child_exits.returns() != ExitFlow::None) {
         return returning_statement(child, sequence);
       }
       statement(child);
-      if (supports_function_exit() && !control_->falls_through(child)) {
+      if (supports_function_exit() && !child_exits.falls_through()) {
         return {{}, child, true};
       }
     }
@@ -2110,16 +2112,17 @@ class Translator final : private Initialization::Evaluation,
           compound->statementList,
           &continuation,
           lexical_fastmath_flags_,
-          control_->callable_exit_count(compound) +
+          control_->exits(compound).callable_exit_count() +
               continuation.callable_exit_count,
           lifetimes_.scope_mark(),
       });
     }
+    const auto statement_exits = control_->exits(ast);
     if (auto* branch = cxx::ast_cast<cxx::IfStatementAST>(ast);
-        branch && control_->returns(branch) != ExitFlow::None) {
-      if ((control_->returns(branch->statement) != ExitFlow::All &&
-           control_->returns(branch->elseStatement) != ExitFlow::All) ||
-          control_->requires_callable_exit(branch) ||
+        branch && statement_exits.returns() != ExitFlow::None) {
+      if ((control_->exits(branch->statement).returns() != ExitFlow::All &&
+           control_->exits(branch->elseStatement).returns() != ExitFlow::All) ||
+          statement_exits.requires_callable_exit() ||
           continuation.callable_exit_count != 0) {
         if (!supports_function_exit()) {
           fail(ast,
@@ -2127,7 +2130,7 @@ class Translator final : private Initialization::Evaluation,
                "or kernel body");
         }
         statement(ast);
-        if (!control_->falls_through(ast)) {
+        if (!statement_exits.falls_through()) {
           return {{}, ast, true};
         }
         return return_sequence(continuation);
@@ -2171,14 +2174,14 @@ class Translator final : private Initialization::Evaluation,
       lifetimes_.discard_scope(destruction_mark);
       return returned;
     }
-    if (control_->returns(ast) != ExitFlow::None) {
+    if (statement_exits.returns() != ExitFlow::None) {
       if (!supports_function_exit()) {
         fail(ast,
              "returns inside structured control require a runtime function or "
              "kernel body");
       }
       statement(ast);
-      if (!control_->falls_through(ast)) {
+      if (!statement_exits.falls_through()) {
         return {{}, ast, true};
       }
       return return_sequence(continuation);
@@ -6786,12 +6789,6 @@ class Translator final : private Initialization::Evaluation,
     std::span<cxx::StatementAST* const> contiguous;
   };
 
-  ExitFlow iteration_exit_flow(cxx::StatementAST* statement,
-                               bool tracks_break) {
-    return tracks_break ? control_->iteration_exits(statement)
-                        : control_->continues(statement);
-  }
-
   IterationFlow constant_iteration_flow(bool reaches_tail, bool reaches_latch,
                                         bool tracks_break, cxx::AST* owner) {
     auto source = locations_.get(owner);
@@ -6895,10 +6892,11 @@ class Translator final : private Initialization::Evaluation,
     FastMathScope math_scope(lexical_fastmath_flags_, fastmath);
     while (!remaining.empty()) {
       auto* child = remaining.take();
-      auto flow = iteration_exit_flow(child, tracks_break);
+      const auto child_exits = control_->exits(child);
+      auto flow = child_exits.iteration_exits(tracks_break);
       if (flow == ExitFlow::None) {
         statement(child);
-        if (!control_->falls_through(child)) {
+        if (!child_exits.falls_through()) {
           lifetimes_.discard_scope(lexical_mark);
           return constant_iteration_flow(false, false, tracks_break, child);
         }
@@ -6918,12 +6916,13 @@ class Translator final : private Initialization::Evaluation,
                                       std::span<cxx::Symbol* const> mutations,
                                       size_t scope_mark, size_t lexical_mark,
                                       size_t completion_mark) {
-    auto flow = iteration_exit_flow(ast, tracks_break);
+    const auto exits = control_->exits(ast);
+    auto flow = exits.iteration_exits(tracks_break);
     if (flow == ExitFlow::None) {
       if (ast) {
         statement(ast);
       }
-      if (ast && !control_->falls_through(ast)) {
+      if (!exits.falls_through()) {
         return constant_iteration_flow(false, false, tracks_break, ast);
       }
       lifetimes_.close_scope(scope_mark);
@@ -6962,12 +6961,13 @@ class Translator final : private Initialization::Evaluation,
         lexical_fastmath_flags_,
         resolve_fastmath(ast ? fastmath_.statement(ast) : std::nullopt));
     ast = selected_statement(ast);
-    auto flow = iteration_exit_flow(ast, tracks_break);
+    const auto exits = control_->exits(ast);
+    auto flow = exits.iteration_exits(tracks_break);
     if (flow == ExitFlow::None) {
       if (ast) {
         statement(ast);
       }
-      if (!control_->falls_through(ast)) {
+      if (!exits.falls_through()) {
         return constant_iteration_flow(false, false, tracks_break, ast);
       }
       return iteration_sequence(owner, remaining, continuation_fastmath,
@@ -6981,10 +6981,11 @@ class Translator final : private Initialization::Evaluation,
       return iteration_statement(ast, tracks_break, completion_mark);
     }
     if (auto* branch = cxx::ast_cast<cxx::IfStatementAST>(ast);
-        branch && (iteration_exit_flow(branch->statement, tracks_break) ==
-                       ExitFlow::All ||
-                   iteration_exit_flow(branch->elseStatement, tracks_break) ==
-                       ExitFlow::All)) {
+        branch &&
+        (control_->exits(branch->statement).iteration_exits(tracks_break) ==
+             ExitFlow::All ||
+         control_->exits(branch->elseStatement).iteration_exits(tracks_break) ==
+             ExitFlow::All)) {
       const size_t condition_mark = lifetimes_.scope_mark();
       auto condition = branch_condition(branch);
       return iteration_branch(
@@ -7104,7 +7105,7 @@ class Translator final : private Initialization::Evaluation,
                               const SwitchLayout& layout,
                               bool tracks_outer_break, size_t completion_mark) {
     const bool tracks_continue =
-        control_->continues(selection) != ExitFlow::None;
+        control_->exits(selection).continues() != ExitFlow::None;
     auto written = live_mutations(selection);
     std::vector<const cxx::Type*> sources;
     if (tracks_continue) {
@@ -7214,7 +7215,7 @@ class Translator final : private Initialization::Evaluation,
     }
 
     const bool tracks_continue =
-        control_->continues(selection) != ExitFlow::None;
+        control_->exits(selection).continues() != ExitFlow::None;
     auto active = false_value;
     auto reaches_tail = true_value;
     for (size_t index = 0; index < layout.clauses.size(); ++index) {
@@ -7290,7 +7291,7 @@ class Translator final : private Initialization::Evaluation,
     break_destruction_marks_.pop_back();
     if (layout.direct) {
       lifetimes_.discard_scope(destruction_mark);
-    } else if (control_->continues(selection) != ExitFlow::None) {
+    } else if (control_->exits(selection).continues() != ExitFlow::None) {
       lifetimes_.close_scope_if(flow.reaches_tail, destruction_mark, selection);
     } else {
       lifetimes_.close_scope(destruction_mark);
@@ -7317,9 +7318,10 @@ class Translator final : private Initialization::Evaluation,
       }
       return constant_iteration_flow(true, true, tracks_break, source);
     }
-    if (iteration_exit_flow(ast, tracks_break) == ExitFlow::None) {
+    const auto exits = control_->exits(ast);
+    if (exits.iteration_exits(tracks_break) == ExitFlow::None) {
       statement(ast);
-      auto falls_through = control_->falls_through(ast);
+      auto falls_through = exits.falls_through();
       if (falls_through && completion_mark) {
         lifetimes_.close_scope(*completion_mark);
       }
@@ -7387,9 +7389,10 @@ class Translator final : private Initialization::Evaluation,
     break_destruction_marks_.push_back(destruction_mark);
     continue_destruction_marks_.push_back(destruction_mark);
     IterationFlow flow;
-    if (iteration_exit_flow(body, tracks_break) == ExitFlow::None) {
+    const auto exits = control_->exits(body);
+    if (exits.iteration_exits(tracks_break) == ExitFlow::None) {
       statement(body);
-      if (control_->falls_through(body)) {
+      if (exits.falls_through()) {
         lifetimes_.close_scope(destruction_mark);
       } else {
         lifetimes_.discard_scope(destruction_mark);
@@ -7444,7 +7447,7 @@ class Translator final : private Initialization::Evaluation,
     auto outer_values = values_;
     for (auto* child : cxx::ListView{schedule.body->statementList}) {
       statement(child);
-      if (!control_->falls_through(child)) {
+      if (!control_->exits(child).falls_through()) {
         break;
       }
     }
@@ -7497,7 +7500,7 @@ class Translator final : private Initialization::Evaluation,
     ++pipeline_strand_depth_;
     for (auto* child : cxx::ListView{strand.body->statementList}) {
       statement(child);
-      if (!control_->falls_through(child)) {
+      if (!control_->exits(child).falls_through()) {
         break;
       }
     }
@@ -7574,7 +7577,7 @@ class Translator final : private Initialization::Evaluation,
       if (selected) {
         statement(selected);
       }
-      if (!selected || control_->falls_through(selected)) {
+      if (!selected || control_->exits(selected).falls_through()) {
         lifetimes_.close_scope(selection_mark);
       } else {
         lifetimes_.discard_scope(selection_mark);
@@ -7599,7 +7602,7 @@ class Translator final : private Initialization::Evaluation,
       bool falls_through = true;
       for (auto* child : cxx::ListView{compound->statementList}) {
         statement(child);
-        if (!control_->falls_through(child)) {
+        if (!control_->exits(child).falls_through()) {
           falls_through = false;
           break;
         }
@@ -7705,7 +7708,7 @@ class Translator final : private Initialization::Evaluation,
           loom_builder_enter_region(&builder_, op, loom_scf_if_then_region(op));
       const size_t arm_mark = lifetimes_.scope_mark();
       statement(branch->statement);
-      if (control_->falls_through(branch->statement)) {
+      if (control_->exits(branch->statement).falls_through()) {
         lifetimes_.close_scope(arm_mark);
       } else {
         lifetimes_.discard_scope(arm_mark);
@@ -7723,7 +7726,7 @@ class Translator final : private Initialization::Evaluation,
         if (branch->elseStatement) {
           const size_t else_mark = lifetimes_.scope_mark();
           statement(branch->elseStatement);
-          if (control_->falls_through(branch->elseStatement)) {
+          if (control_->exits(branch->elseStatement).falls_through()) {
             lifetimes_.close_scope(else_mark);
           } else {
             lifetimes_.discard_scope(else_mark);
@@ -7749,7 +7752,7 @@ class Translator final : private Initialization::Evaluation,
       if (loop->initializer) {
         statement(loop->initializer);
       }
-      if (control_->breaks(loop->statement) != ExitFlow::None) {
+      if (control_->exits(loop->statement).breaks() != ExitFlow::None) {
         if (!schedule.empty()) {
           fail(ast, "loop scheduling cannot preserve break exits");
         }
@@ -7933,7 +7936,7 @@ class Translator final : private Initialization::Evaluation,
       return condition;
     };
 
-    if (control_->breaks(body) != ExitFlow::None) {
+    if (control_->exits(body).breaks() != ExitFlow::None) {
       loom_op_t* op;
       if (test == LoopTest::BeforeBody) {
         auto active =

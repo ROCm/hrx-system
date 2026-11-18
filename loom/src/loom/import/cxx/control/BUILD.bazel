@@ -137,6 +137,7 @@ loom_cc_library(
         ":construction",
         ":object_identity",
         "//loom/src/loom/import/cxx/binding:imports",
+        "//loom/src/loom/import/cxx/control/exits",
         "//loom/src/loom/import/cxx/control/loops:counted",
         "//loom/src/loom/import/cxx/lifetime:destruction",
         "//loom/src/loom/import/cxx/lifetime:origins",

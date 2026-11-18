@@ -1109,50 +1109,19 @@ const CountedLoop* ControlFlow::counted(cxx::ForStatementAST* loop) const {
 
 const SwitchLayout& ControlFlow::switch_layout(
     cxx::SwitchStatementAST* statement) const {
-  return switches_.at(statement).layout;
+  return switches_.at(statement);
 }
 
-unsigned ControlFlow::paths(cxx::StatementAST* statement) const {
-  auto found = paths_.find(statement);
-  return found == paths_.end() ? unsigned(Fallthrough) : found->second;
+StatementExits ControlFlow::exits(cxx::StatementAST* statement) const {
+  auto found = exits_.find(statement);
+  return found == exits_.end() ? StatementExits{} : found->second;
 }
 
-unsigned ControlFlow::sequence_paths(
-    std::span<cxx::StatementAST* const> statements) const {
-  unsigned outcomes = Fallthrough;
-  for (auto* statement : statements) {
-    if (!(outcomes & Fallthrough)) {
-      break;
-    }
-    outcomes = (outcomes & ~Fallthrough) | paths(statement);
+void ControlFlow::retain_exits(cxx::StatementAST* statement,
+                               StatementExits paths) {
+  if (paths != StatementExits{}) {
+    exits_.emplace(statement, paths);
   }
-  return outcomes;
-}
-
-ExitFlow ControlFlow::exits(cxx::StatementAST* statement,
-                            unsigned selected_paths) const {
-  auto outcomes = paths(statement);
-  return !(outcomes & selected_paths)    ? ExitFlow::None
-         : !(outcomes & ~selected_paths) ? ExitFlow::All
-                                         : ExitFlow::Some;
-}
-
-ExitFlow ControlFlow::returns(cxx::StatementAST* statement) const {
-  return exits(statement, Return);
-}
-
-bool ControlFlow::requires_callable_exit(cxx::StatementAST* statement) const {
-  return callable_exits_.contains(statement);
-}
-
-size_t ControlFlow::callable_exit_count(
-    cxx::CompoundStatementAST* statement) const {
-  auto found = callable_exit_counts_.find(statement);
-  return found == callable_exit_counts_.end() ? 0 : found->second;
-}
-
-bool ControlFlow::falls_through(cxx::StatementAST* statement) const {
-  return paths(statement) & Fallthrough;
 }
 
 cxx::CompoundStatementAST* ControlFlow::range_scope(
@@ -1167,18 +1136,6 @@ bool ControlFlow::initializes_range(cxx::InitDeclaratorAST* declaration) const {
 const InitializerList* ControlFlow::initializer_list(
     cxx::BracedInitListAST* source) const {
   return initializer_lists_ ? initializer_lists_->get(source) : nullptr;
-}
-
-ExitFlow ControlFlow::continues(cxx::StatementAST* statement) const {
-  return exits(statement, Continue);
-}
-
-ExitFlow ControlFlow::breaks(cxx::StatementAST* statement) const {
-  return exits(statement, Break);
-}
-
-ExitFlow ControlFlow::iteration_exits(cxx::StatementAST* statement) const {
-  return exits(statement, Continue | Break);
 }
 
 bool ControlFlow::preVisit(cxx::AST* ast) {
@@ -1296,11 +1253,18 @@ void ControlFlow::postVisit(cxx::AST* ast) {
   if (auto* statement = cxx::ast_cast<cxx::StatementAST>(ast)) {
     reject_misplaced_binding_statement(unit_, diagnostics_, statement,
                                        BindingAttributeScope::Statement);
-    auto outcomes = classify_paths(statement);
+    // A switch records its combined exits at the end of its last clause.
+    StatementExits paths;
+    if (statement->kind() == cxx::ASTKind::SwitchStatement) {
+      paths = exits(statement);
+    } else {
+      paths = classify_exits(statement);
+      retain_exits(statement, paths);
+    }
     // Schedule and strand bodies complete at their own region boundary.
     // Reject escaping source exits before return/loop lowering can flatten
     // the attributed compound into its enclosing control flow.
-    if (outcomes & (Return | Continue | Break)) {
+    if (paths.escapes_region()) {
       visit_loom_attributes(
           unit_, statement_attributes(statement),
           [&](std::string_view name, cxx::AttributeAST*) {
@@ -1314,16 +1278,10 @@ void ControlFlow::postVisit(cxx::AST* ast) {
             }
             diagnostics_.reject(
                 unit_, statement,
-                std::string(region) + ((outcomes & Return)
+                std::string(region) + ((paths.returns() != ExitFlow::None)
                                            ? " cannot contain function returns"
                                            : " cannot exit an enclosing loop"));
           });
-    }
-    if (outcomes != Fallthrough) {
-      paths_.emplace(statement, outcomes);
-    }
-    if (classify_callable_exit(statement)) {
-      callable_exits_.insert(statement);
     }
   }
   if (!owners_.empty() && owners_.back() == ast) {
@@ -1346,125 +1304,67 @@ void ControlFlow::postVisit(cxx::AST* ast) {
   }
 }
 
-unsigned ControlFlow::classify_paths(cxx::StatementAST* statement) const {
-  if (auto* range = cxx::ast_cast<cxx::ForRangeStatementAST>(statement)) {
-    return paths(range_scope(range));
-  }
-  if (cxx::ast_cast<cxx::ExpressionStatementAST>(statement)) {
-    // The evaluated-expression walk already joins conditional and
-    // short-circuit paths. Consume its continuation fact without walking the
-    // expression again to find a nested non-returning call.
-    return construction_.state().reachable ? Fallthrough : Diverge;
-  }
-  if (cxx::ast_cast<cxx::ReturnStatementAST>(statement)) {
-    return Return;
-  }
-  if (cxx::ast_cast<cxx::ContinueStatementAST>(statement)) {
-    return Continue;
-  }
-  if (cxx::ast_cast<cxx::BreakStatementAST>(statement)) {
-    return Break;
-  }
-  if (auto* compound = cxx::ast_cast<cxx::CompoundStatementAST>(statement)) {
-    unsigned outcomes = Fallthrough;
-    for (auto* child : cxx::ListView{compound->statementList}) {
-      if (!(outcomes & Fallthrough)) {
-        break;
+StatementExits ControlFlow::classify_exits(cxx::StatementAST* statement) const {
+  using Kind = cxx::ASTKind;
+  using LoopTest = StatementExits::LoopTest;
+  switch (statement->kind()) {
+    case Kind::ExpressionStatement:
+      // Construction already joined evaluated conditional and short-circuit
+      // paths.
+      return construction_.state().reachable
+                 ? StatementExits{}
+                 : StatementExits::terminal(StatementExits::Diverge);
+    case Kind::ReturnStatement:
+      return StatementExits::terminal(StatementExits::Return);
+    case Kind::ContinueStatement:
+      return StatementExits::terminal(StatementExits::Continue);
+    case Kind::BreakStatement:
+      return StatementExits::terminal(StatementExits::Break);
+    case Kind::CompoundStatement: {
+      StatementExits result;
+      if (!exits_.empty()) {
+        auto* compound = cxx::ast_cast<cxx::CompoundStatementAST>(statement);
+        for (auto* child : cxx::ListView{compound->statementList}) {
+          result.append(exits(child));
+        }
       }
-      outcomes = (outcomes & ~Fallthrough) | paths(child);
+      return result;
     }
-    return outcomes;
-  }
-  if (auto* branch = cxx::ast_cast<cxx::IfStatementAST>(statement)) {
-    if (branch->constexprValue.has_value()) {
-      return paths(*branch->constexprValue ? branch->statement
-                                           : branch->elseStatement);
+    case Kind::IfStatement: {
+      auto* branch = cxx::ast_cast<cxx::IfStatementAST>(statement);
+      if (branch->constexprValue.has_value()) {
+        return exits(*branch->constexprValue ? branch->statement
+                                             : branch->elseStatement);
+      }
+      return StatementExits::branch(exits(branch->statement),
+                                    exits(branch->elseStatement));
     }
-    return paths(branch->statement) | paths(branch->elseStatement);
-  }
-  if (auto* selection = cxx::ast_cast<cxx::SwitchStatementAST>(statement)) {
-    const auto& facts = switches_.at(selection);
-    unsigned outcomes = facts.layout.has_default ? 0 : unsigned(Fallthrough);
-    unsigned suffix = Fallthrough;
-    for (size_t index = facts.clause_paths.size(); index > 0; --index) {
-      auto clause = facts.clause_paths[index - 1];
-      auto entry =
-          (clause & ~Fallthrough) | (clause & Fallthrough ? suffix : 0);
-      outcomes |= entry;
-      suffix = entry;
+    case Kind::ForRangeStatement:
+      return exits(
+          range_scope(cxx::ast_cast<cxx::ForRangeStatementAST>(statement)));
+    case Kind::WhileStatement: {
+      auto* loop = cxx::ast_cast<cxx::WhileStatementAST>(statement);
+      return exits(loop->statement)
+          .leave_loop(LoopTest::BeforeBody,
+                      constant_truth(unit_, loop->condition).value_or(false));
     }
-    // A break selects the ordinary switch continuation. Continue and return
-    // still escape to their enclosing loop and function, respectively.
-    return (outcomes & ~Break) | (outcomes & Break ? unsigned(Fallthrough) : 0);
-  }
-  cxx::StatementAST* body = nullptr;
-  cxx::ExpressionAST* condition = nullptr;
-  if (auto* loop = cxx::ast_cast<cxx::ForStatementAST>(statement)) {
-    body = loop->statement;
-    condition = loop->condition;
-  } else if (auto* loop = cxx::ast_cast<cxx::WhileStatementAST>(statement)) {
-    body = loop->statement;
-    condition = loop->condition;
-  } else if (auto* loop = cxx::ast_cast<cxx::DoStatementAST>(statement)) {
-    auto body_paths = paths(loop->statement);
-    unsigned outcomes = body_paths & (Return | Diverge);
-    if (body_paths & Break) {
-      outcomes |= Fallthrough;
+    case Kind::ForStatement: {
+      auto* loop = cxx::ast_cast<cxx::ForStatementAST>(statement);
+      return exits(loop->statement)
+          .leave_loop(LoopTest::BeforeBody,
+                      constant_truth(unit_, loop->condition).value_or(false));
     }
-    if (body_paths & (Fallthrough | Continue)) {
-      auto truth = constant_truth(unit_, loop->expression);
-      outcomes |= truth && *truth ? unsigned(Diverge) : unsigned(Fallthrough);
+    case Kind::DoStatement: {
+      auto* loop = cxx::ast_cast<cxx::DoStatementAST>(statement);
+      auto body = exits(loop->statement);
+      return body.leave_loop(
+          LoopTest::AfterBody,
+          body.reaches_latch() &&
+              constant_truth(unit_, loop->expression).value_or(false));
     }
-    return outcomes;
+    default:
+      return {};
   }
-  if (!body) {
-    return Fallthrough;
-  }
-  auto body_paths = paths(body);
-  unsigned outcomes = body_paths & (Return | Diverge);
-  auto truth = constant_truth(unit_, condition);
-  if (!truth || !*truth) {
-    return outcomes | Fallthrough;
-  }
-  if (body_paths & Break) {
-    outcomes |= Fallthrough;
-  }
-  if (body_paths & (Fallthrough | Continue)) {
-    outcomes |= Diverge;
-  }
-  return outcomes;
-}
-
-bool ControlFlow::classify_callable_exit(cxx::StatementAST* statement) {
-  if (auto* range = cxx::ast_cast<cxx::ForRangeStatementAST>(statement)) {
-    return requires_callable_exit(range_scope(range));
-  }
-  if (cxx::ast_cast<cxx::ForStatementAST>(statement) ||
-      cxx::ast_cast<cxx::WhileStatementAST>(statement) ||
-      cxx::ast_cast<cxx::DoStatementAST>(statement) ||
-      cxx::ast_cast<cxx::SwitchStatementAST>(statement)) {
-    return returns(statement) != ExitFlow::None || (paths(statement) & Diverge);
-  }
-  if (auto* compound = cxx::ast_cast<cxx::CompoundStatementAST>(statement)) {
-    size_t count = std::ranges::count_if(cxx::ListView{compound->statementList},
-                                         [&](cxx::StatementAST* child) {
-                                           return requires_callable_exit(child);
-                                         });
-    if (count) {
-      callable_exit_counts_.emplace(compound, count);
-    }
-    return count != 0;
-  }
-  if (auto* branch = cxx::ast_cast<cxx::IfStatementAST>(statement)) {
-    if (branch->constexprValue.has_value()) {
-      return requires_callable_exit(
-          *branch->constexprValue ? branch->statement : branch->elseStatement);
-    }
-    return (paths(branch) & Diverge) ||
-           requires_callable_exit(branch->statement) ||
-           requires_callable_exit(branch->elseStatement);
-  }
-  return paths(statement) & Diverge;
 }
 
 void ControlFlow::visit(cxx::CaseStatementAST* ast) {
@@ -1495,23 +1395,28 @@ void ControlFlow::visit(cxx::CompoundStatementAST* ast) {
     accept(attribute);
   }
 
-  SwitchFacts facts;
+  SwitchLayout layout;
+  SwitchExits switch_exits;
+  StatementExits clause_exits;
   auto incoming = construction_.state();
   bool clause_owner_active = false;
-  auto finish_clause = [&] {
+  auto finish_clause = [&](bool has_successor) {
     if (!clause_owner_active) {
       return;
     }
-    auto& clause = facts.layout.clauses.back();
+    auto& clause = layout.clauses.back();
     auto* owner = clause.labels.front().source;
     auto found = writes_.find(owner);
     if (found != writes_.end()) {
       clause.writes = std::move(found->second);
       writes_.erase(found);
     }
-    auto outcomes = sequence_paths(clause.statements);
-    clause.falls_through = outcomes & Fallthrough;
-    facts.clause_paths.push_back(outcomes);
+    clause.falls_through = clause_exits.falls_through();
+    if (clause.labels.size() != 1 || (has_successor && clause.falls_through)) {
+      layout.direct = false;
+    }
+    switch_exits.append_clause(clause_exits);
+    clause_exits = {};
     construction_.leave(owner);
     owners_.pop_back();
     clause_owner_active = false;
@@ -1521,25 +1426,25 @@ void ControlFlow::visit(cxx::CompoundStatementAST* ast) {
     auto* case_label = cxx::ast_cast<cxx::CaseStatementAST>(child);
     auto* default_label = cxx::ast_cast<cxx::DefaultStatementAST>(child);
     if (case_label || default_label) {
-      bool starts_clause = facts.layout.clauses.empty() ||
-                           !facts.layout.clauses.back().statements.empty();
+      bool starts_clause =
+          layout.clauses.empty() || !layout.clauses.back().statements.empty();
       if (starts_clause) {
-        finish_clause();
+        finish_clause(/*has_successor=*/true);
         construction_.restore(
             construction_.join(construction_.state(), incoming));
-        facts.layout.clauses.push_back({});
+        layout.clauses.push_back({});
       }
       active_switch_label_ = child;
       accept(child);
       active_switch_label_ = nullptr;
-      auto& clause = facts.layout.clauses.back();
+      auto& clause = layout.clauses.back();
       std::optional<std::int64_t> key;
       if (case_label) {
         key = case_label->caseValue;
       }
       clause.labels.push_back({child, key});
       if (default_label) {
-        facts.layout.has_default = true;
+        layout.has_default = true;
       }
       if (starts_clause) {
         owners_.push_back(child);
@@ -1548,25 +1453,19 @@ void ControlFlow::visit(cxx::CompoundStatementAST* ast) {
       }
       continue;
     }
-    if (facts.layout.clauses.empty()) {
+    if (layout.clauses.empty()) {
       diagnostics_.reject(
           unit_, child,
           "switch body statements require a preceding case or default label");
     }
-    facts.layout.clauses.back().statements.push_back(child);
+    layout.clauses.back().statements.push_back(child);
     accept(child);
+    clause_exits.append(exits(child));
   }
-  finish_clause();
-
-  for (size_t index = 0; index < facts.layout.clauses.size(); ++index) {
-    const auto& clause = facts.layout.clauses[index];
-    if (clause.labels.size() != 1 ||
-        (index + 1 < facts.layout.clauses.size() && clause.falls_through)) {
-      facts.layout.direct = false;
-      break;
-    }
-  }
-  switches_.emplace(switch_stack_.back(), std::move(facts));
+  finish_clause(/*has_successor=*/false);
+  auto* selection = switch_stack_.back();
+  retain_exits(selection, switch_exits.finish(layout.has_default));
+  switches_.emplace(selection, std::move(layout));
 }
 
 void ControlFlow::visit(cxx::IfStatementAST* ast) {
@@ -1653,7 +1552,7 @@ void ControlFlow::visit(cxx::SwitchStatementAST* ast) {
   switch_stack_.push_back(ast);
   auto incoming = construction_.state();
   accept(ast->statement);
-  if (switches_.at(ast).layout.has_default) {
+  if (switches_.at(ast).has_default) {
     incoming = {false, {}};
   }
   construction_.finish_switch(std::move(incoming));

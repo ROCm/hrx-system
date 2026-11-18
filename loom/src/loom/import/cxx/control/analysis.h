@@ -24,6 +24,7 @@
 
 #include "iree/base/internal/arena.h"
 #include "loom/import/cxx/control/construction.h"
+#include "loom/import/cxx/control/exits/exits.h"
 #include "loom/import/cxx/control/loops/counted.h"
 #include "loom/import/cxx/lifetime/destruction.h"
 #include "loom/import/cxx/lifetime/origins.h"
@@ -183,11 +184,6 @@ struct CallPropagation {
   bool callee_changed;
 };
 
-// Syntactic paths through a statement that take a particular exit. Other
-// outcomes remain possible for None and Some; All takes that exit on every
-// path.
-enum class ExitFlow { None, Some, All };
-
 // One resolved source label selecting a lexical switch clause. A missing key
 // denotes the unique default label.
 struct SwitchLabel {
@@ -290,28 +286,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Retained lexical clauses for a supported runtime switch. Construction
   // rejects switch shapes that cannot provide this complete structure.
   const SwitchLayout& switch_layout(cxx::SwitchStatementAST* statement) const;
-  // Retained return/fallthrough summary, including nested statements.
-  ExitFlow returns(cxx::StatementAST* statement) const;
-  // Whether surrounding returns require callable-exit projection instead of
-  // result-bearing structured conditionals. Returns crossing loops/switches
-  // and paths with no defined continuation cannot supply a result tuple.
-  bool requires_callable_exit(cxx::StatementAST* statement) const;
-  // Number of direct children requiring callable-exit projection.
-  // A return sequence decrements this retained suffix count as it advances.
-  size_t callable_exit_count(cxx::CompoundStatementAST* statement) const;
-  // Whether execution can reach the statement immediately following this
-  // source statement. Diverging and function-returning paths do not.
-  bool falls_through(cxx::StatementAST* statement) const;
-  // Continues escaping this statement to its enclosing loop. A nested loop
-  // consumes its own continues rather than propagating them to its parent.
-  ExitFlow continues(cxx::StatementAST* statement) const;
-  // Breaks escaping this statement to its enclosing loop. A nested loop
-  // consumes its own breaks rather than propagating them to its parent.
-  ExitFlow breaks(cxx::StatementAST* statement) const;
-  // Continue or break exits escaping this statement. This combined query
-  // distinguishes a branch whose arms take different iteration exits from one
-  // that can fall through.
-  ExitFlow iteration_exits(cxx::StatementAST* statement) const;
+  // Retained destinations and callable-exit requirements of this statement.
+  StatementExits exits(cxx::StatementAST* statement) const;
   // Calls retained by the same source walk for sparse interprocedural effect
   // propagation before callable signatures are frozen.
   std::span<const DirectCall> calls() const { return calls_; }
@@ -507,14 +483,6 @@ class ControlFlow final : private cxx::ASTVisitor {
     Callable,
   };
 
-  enum Path : unsigned {
-    Fallthrough = 1,
-    Return = 2,
-    Continue = 4,
-    Break = 8,
-    Diverge = 16,
-  };
-
   ReferenceCaptureFacts& reference_capture_facts();
   bool retain_reference_capture_identity(cxx::Symbol* symbol);
   bool preVisit(cxx::AST* ast) override;
@@ -700,11 +668,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool is_captured_object_field(cxx::Symbol* field) const;
   cxx::Symbol* object_owner(cxx::ExpressionAST* expression) const;
   void retain_counted(cxx::ForStatementAST* loop);
-  unsigned paths(cxx::StatementAST* statement) const;
-  unsigned sequence_paths(std::span<cxx::StatementAST* const> statements) const;
-  unsigned classify_paths(cxx::StatementAST* statement) const;
-  bool classify_callable_exit(cxx::StatementAST* statement);
-  ExitFlow exits(cxx::StatementAST* statement, unsigned selected_paths) const;
+  StatementExits classify_exits(cxx::StatementAST* statement) const;
+  void retain_exits(cxx::StatementAST* statement, StatementExits exits);
 
   // Resolved source types and literal interpretation for loop admission.
   cxx::TranslationUnit& unit_;
@@ -864,21 +829,10 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::unique_ptr<RangeLoops> range_loops_;
   // Backing-array adapters allocated only for functions constructing lists.
   std::unique_ptr<InitializerLists> initializer_lists_;
-  // Sparse path sets retain statements with function or iteration exits.
-  std::unordered_map<cxx::StatementAST*, unsigned> paths_;
-  // Statements requiring callable exits, including divergent continuations.
-  // Direct return trees remain absent and retain result-bearing projection.
-  std::unordered_set<cxx::StatementAST*> callable_exits_;
-  // Nonzero direct-child counts for compound return sequences.
-  std::unordered_map<cxx::CompoundStatementAST*, size_t> callable_exit_counts_;
-  struct SwitchFacts {
-    // Public lexical structure consumed directly by translation.
-    SwitchLayout layout;
-    // Per-clause path sets retained for aggregate switch classification.
-    std::vector<unsigned> clause_paths;
-  };
+  // Only statements with an exit or a callable-exit child need an entry.
+  std::unordered_map<cxx::StatementAST*, StatementExits> exits_;
   // Runtime switches retained during their one source-body traversal.
-  std::unordered_map<cxx::SwitchStatementAST*, SwitchFacts> switches_;
+  std::unordered_map<cxx::SwitchStatementAST*, SwitchLayout> switches_;
   // Nested switches whose compound bodies are currently being traversed.
   std::vector<cxx::SwitchStatementAST*> switch_stack_;
   // Top-level case/default label currently admitted by the owning switch walk.

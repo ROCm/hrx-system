@@ -1067,8 +1067,8 @@ TEST(ControlFlowTest, ReturnSummariesRetainFallthroughAndNestedExits) {
     Imports imports(source.unit(), source.diagnostics());
     ControlFlow analysis(source.unit(), source.diagnostics(), types, imports,
                          body);
-    EXPECT_EQ(analysis.returns(body), test.flow);
-    EXPECT_EQ(analysis.falls_through(body), test.falls_through);
+    EXPECT_EQ(analysis.exits(body).returns(), test.flow);
+    EXPECT_EQ(analysis.exits(body).falls_through(), test.falls_through);
   }
 }
 
@@ -1112,9 +1112,10 @@ TEST(ControlFlowTest, ReturnSummariesRetainCallableExitRequirements) {
     Imports imports(source.unit(), source.diagnostics());
     ControlFlow analysis(source.unit(), source.diagnostics(), types, imports,
                          body);
-    EXPECT_EQ(analysis.requires_callable_exit(body),
+    EXPECT_EQ(analysis.exits(body).requires_callable_exit(),
               test.requires_callable_exit);
-    EXPECT_EQ(analysis.callable_exit_count(body), test.callable_exit_count);
+    EXPECT_EQ(analysis.exits(body).callable_exit_count(),
+              test.callable_exit_count);
   }
 }
 
@@ -1239,14 +1240,14 @@ TEST(ControlFlowTest,
   EXPECT_EQ(switch_writes[0], parameters[1]);
   EXPECT_EQ(switch_writes[1], parameters[2]);
 
-  EXPECT_EQ(analysis.breaks(selection), ExitFlow::None);
-  EXPECT_EQ(analysis.continues(selection), ExitFlow::Some);
-  EXPECT_EQ(analysis.iteration_exits(selection), ExitFlow::Some);
-  EXPECT_EQ(analysis.returns(selection), ExitFlow::None);
-  EXPECT_EQ(analysis.breaks(loop->statement), ExitFlow::None);
-  EXPECT_EQ(analysis.continues(loop->statement), ExitFlow::Some);
-  EXPECT_EQ(analysis.breaks(loop), ExitFlow::None);
-  EXPECT_EQ(analysis.continues(loop), ExitFlow::None);
+  EXPECT_EQ(analysis.exits(selection).breaks(), ExitFlow::None);
+  EXPECT_EQ(analysis.exits(selection).continues(), ExitFlow::Some);
+  EXPECT_EQ(analysis.exits(selection).iteration_exits(), ExitFlow::Some);
+  EXPECT_EQ(analysis.exits(selection).returns(), ExitFlow::None);
+  EXPECT_EQ(analysis.exits(loop->statement).breaks(), ExitFlow::None);
+  EXPECT_EQ(analysis.exits(loop->statement).continues(), ExitFlow::Some);
+  EXPECT_EQ(analysis.exits(loop).breaks(), ExitFlow::None);
+  EXPECT_EQ(analysis.exits(loop).continues(), ExitFlow::None);
 }
 
 TEST(ControlFlowTest, DirectAndNestedSwitchesConsumeTheirOwnBreaks) {
@@ -1294,17 +1295,17 @@ TEST(ControlFlowTest, DirectAndNestedSwitchesConsumeTheirOwnBreaks) {
   ASSERT_EQ(outer_layout.clauses.size(), 3u);
   EXPECT_TRUE(outer_layout.has_default);
   EXPECT_TRUE(outer_layout.direct);
-  EXPECT_EQ(analysis.breaks(outer), ExitFlow::None);
-  EXPECT_EQ(analysis.continues(outer), ExitFlow::None);
-  EXPECT_EQ(analysis.returns(outer), ExitFlow::None);
+  EXPECT_EQ(analysis.exits(outer).breaks(), ExitFlow::None);
+  EXPECT_EQ(analysis.exits(outer).continues(), ExitFlow::None);
+  EXPECT_EQ(analysis.exits(outer).returns(), ExitFlow::None);
 
   const auto& nested_layout = analysis.switch_layout(nested);
   ASSERT_EQ(nested_layout.clauses.size(), 2u);
   EXPECT_TRUE(nested_layout.has_default);
   EXPECT_TRUE(nested_layout.direct);
-  EXPECT_EQ(analysis.breaks(nested), ExitFlow::None);
-  EXPECT_EQ(analysis.continues(nested), ExitFlow::None);
-  EXPECT_EQ(analysis.returns(nested), ExitFlow::None);
+  EXPECT_EQ(analysis.exits(nested).breaks(), ExitFlow::None);
+  EXPECT_EQ(analysis.exits(nested).continues(), ExitFlow::None);
+  EXPECT_EQ(analysis.exits(nested).returns(), ExitFlow::None);
 }
 
 TEST(ControlFlowTest, IterationExitsStopAtTheirLoopAndExcludeUnreachablePaths) {
@@ -1379,16 +1380,17 @@ TEST(ControlFlowTest, IterationExitsStopAtTheirLoopAndExcludeUnreachablePaths) {
     Imports imports(source.unit(), source.diagnostics());
     ControlFlow analysis(source.unit(), source.diagnostics(), types, imports,
                          body);
-    EXPECT_EQ(analysis.continues(loop->statement), test.continues);
-    EXPECT_EQ(analysis.breaks(loop->statement), test.breaks);
-    EXPECT_EQ(analysis.iteration_exits(loop->statement), test.iteration_exits);
-    EXPECT_EQ(analysis.returns(loop->statement), test.returns);
-    EXPECT_EQ(analysis.continues(loop), ExitFlow::None);
-    EXPECT_EQ(analysis.breaks(loop), ExitFlow::None);
-    EXPECT_EQ(analysis.iteration_exits(loop), ExitFlow::None);
-    EXPECT_EQ(analysis.continues(body), ExitFlow::None);
-    EXPECT_EQ(analysis.breaks(body), ExitFlow::None);
-    EXPECT_EQ(analysis.iteration_exits(body), ExitFlow::None);
+    EXPECT_EQ(analysis.exits(loop->statement).continues(), test.continues);
+    EXPECT_EQ(analysis.exits(loop->statement).breaks(), test.breaks);
+    EXPECT_EQ(analysis.exits(loop->statement).iteration_exits(),
+              test.iteration_exits);
+    EXPECT_EQ(analysis.exits(loop->statement).returns(), test.returns);
+    EXPECT_EQ(analysis.exits(loop).continues(), ExitFlow::None);
+    EXPECT_EQ(analysis.exits(loop).breaks(), ExitFlow::None);
+    EXPECT_EQ(analysis.exits(loop).iteration_exits(), ExitFlow::None);
+    EXPECT_EQ(analysis.exits(body).continues(), ExitFlow::None);
+    EXPECT_EQ(analysis.exits(body).breaks(), ExitFlow::None);
+    EXPECT_EQ(analysis.exits(body).iteration_exits(), ExitFlow::None);
     EXPECT_NE(analysis.counted(loop), nullptr);
   }
 }
