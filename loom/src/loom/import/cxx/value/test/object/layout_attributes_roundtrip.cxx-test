@@ -29,6 +29,9 @@ func.def public @alignment() -> (i32) {
 AlignedWord add_aligned(AlignedWord lhs, AlignedWord rhs) { return lhs + rhs; }
 unsigned typedef_alignment() { return alignof(AlignedWord); }
 unsigned typedef_member_offset() { return __builtin_offsetof(TypedefAlignedMember, value); }
+unsigned read_pointer_packet(const unsigned char* bytes) {
+  return bytes[__builtin_offsetof(PointerPacket, payload)];
+}
 // ----
 func.def public @add_aligned(%lhs: i32, %rhs: i32) -> (i32) {
   %3 = scalar.addi %lhs, %rhs : i32
@@ -45,6 +48,18 @@ func.def public @typedef_member_offset() -> (i32) {
   %8 = scalar.constant 16 : i64
   %9 = scalar.trunci %8 : i64 to i32
   func.return %9 : i32
+}
+
+func.def public @read_pointer_packet(%bytes: buffer, %bytes_byte_offset: index) -> (i32) {
+  %13 = scalar.constant 24 : i64
+  %14 = index.cast %13 : i64 to index
+  %15 = index.constant 1 : index
+  %16 = index.mul %14, %15 : index
+  %17 = index.add %bytes_byte_offset, %16 : index
+  %18 = buffer.view %bytes[%17] : buffer -> view<1xi8>
+  %19 = view.load<root_in_bounds> %18[0] : view<1xi8> -> i8
+  %20 = scalar.extui %19 : i8 to i32
+  func.return %20 : i32
 }
 
 // ====

@@ -120,14 +120,6 @@ bool is_inline(cxx::VariableSymbol* variable) {
                              &cxx::VariableSymbol::isInline);
 }
 
-int64_t explicit_alignment(cxx::VariableSymbol* variable) {
-  int64_t alignment = variable->explicitAlignment();
-  for (auto* declaration : variable->redeclarations()) {
-    alignment = std::max<int64_t>(alignment, declaration->explicitAlignment());
-  }
-  return alignment;
-}
-
 }  // namespace
 
 void ImmutableObjects::retain_definition(cxx::VariableSymbol* variable,
@@ -255,8 +247,9 @@ ImmutableObjects::Declaration ImmutableObjects::declare(
   return {
       .definition = definition,
       .type = source_type,
-      .alignment =
-          std::max<int64_t>(*natural_alignment, explicit_alignment(canonical)),
+      .alignment = std::max<int64_t>(
+          *natural_alignment,
+          canonical->latestDeclaration()->explicitAlignment()),
       .kind = kind,
       .spelling = std::move(spelling),
       .source = owner,

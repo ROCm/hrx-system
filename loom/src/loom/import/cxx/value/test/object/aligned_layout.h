@@ -54,6 +54,18 @@ static_assert(alignof(AlignedPointer) == 16);
 static_assert(alignof(IgnoredAlignedReference) == alignof(unsigned));
 static_assert(__is_same(AlignedWord, unsigned));
 
+typedef unsigned* __attribute__((aligned(16))) PacketPointer;
+struct PointerPacket {
+  unsigned char tag;
+  PacketPointer pointer;
+  unsigned payload;
+};
+static_assert(alignof(PacketPointer) == 16);
+static_assert(alignof(__remove_pointer(PacketPointer)) == alignof(unsigned));
+static_assert(__builtin_offsetof(PointerPacket, pointer) == 16);
+static_assert(__builtin_offsetof(PointerPacket, payload) == 16 + sizeof(void*));
+static_assert(sizeof(PointerPacket) == 32);
+
 struct TypedefAlignedMember {
   unsigned char tag;
   AlignedWord value;
