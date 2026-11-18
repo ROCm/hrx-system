@@ -17,6 +17,11 @@ through the resulting physical-storage view. Together they retain the ordinary
 view path as a control while tracking the higher-rank type and overflow-dimension
 storage added for model-weight authoring.
 
+`UnusedFacadeDeclarations` varies the number of attributed operation templates
+visible to the same view consumer. Each template declares the buffer length
+operation under a distinct name. The BF16 function is the only emitted body at
+every size, so the difference measures frontend declaration cost.
+
 `Q8S32Providers` imports the benchmark-owned Q8S32 provider source. Its user
 header is served through the public source-provider callback, while the normal
 embedded facade supplies Loom headers. This case measures a production-shaped
