@@ -69,6 +69,8 @@ static void loom_testbench_count_comparison_plan(
     ++counts->issue_capacity;
     if (loom_testbench_is_expectation_op(op)) {
       ++counts->expectation_count;
+    } else if (loom_check_file_write_npy_isa(op)) {
+      ++counts->file_write_count;
     }
   }
 }
@@ -267,13 +269,17 @@ static bool loom_testbench_plan_trial_generator(
   return true;
 }
 
-static void loom_testbench_plan_compare_expectations(
+static void loom_testbench_plan_comparison(
     const loom_module_t* module, iree_host_size_t scenario_index,
     loom_symbol_ref_t scenario_ref, const loom_op_t* compare_op,
     loom_testbench_expectation_plan_t* expectations,
-    iree_host_size_t* inout_expectation_count, loom_testbench_issue_t* issues,
+    iree_host_size_t* inout_expectation_count,
+    loom_testbench_file_write_plan_t* file_writes,
+    iree_host_size_t* inout_file_write_count, loom_testbench_issue_t* issues,
     iree_host_size_t issue_capacity, iree_host_size_t* inout_issue_count,
     loom_testbench_scenario_action_plan_t* action) {
+  action->file_writes =
+      file_writes ? file_writes + *inout_file_write_count : NULL;
   action->expectations =
       expectations ? expectations + *inout_expectation_count : NULL;
   const loom_region_t* comparison = loom_check_compare_comparison(compare_op);
@@ -284,6 +290,29 @@ static void loom_testbench_plan_compare_expectations(
   const loom_op_t* op = NULL;
   loom_block_for_each_op(block, op) {
     if (loom_check_return_isa(op)) {
+      continue;
+    }
+    if (loom_check_file_write_npy_isa(op)) {
+      loom_testbench_file_write_plan_t* output =
+          &file_writes[(*inout_file_write_count)++];
+      if (!loom_testbench_plan_file_write(module, op, output)) {
+        loom_testbench_append_scenario_issue(
+            issues, issue_capacity, inout_issue_count,
+            LOOM_TESTBENCH_ISSUE_INVALID_FILE_WRITE, scenario_index, op,
+            scenario_ref);
+        continue;
+      }
+      const loom_value_t* value = loom_module_value(module, output->value_id);
+      if (loom_value_is_block_arg(value) &&
+          loom_value_def_block(value) == block) {
+        output->realizations =
+            loom_value_def_index(value) < block->arg_count / 2
+                ? LOOM_TESTBENCH_FILE_WRITE_ACTUAL
+                : LOOM_TESTBENCH_FILE_WRITE_EXPECTED;
+      } else {
+        output->realizations = LOOM_TESTBENCH_FILE_WRITE_ACTUAL |
+                               LOOM_TESTBENCH_FILE_WRITE_EXPECTED;
+      }
       continue;
     }
     if (!loom_testbench_is_expectation_op(op)) {
@@ -306,6 +335,10 @@ static void loom_testbench_plan_compare_expectations(
       action->expects_device_events = true;
     }
   }
+  action->file_write_count =
+      action->file_writes
+          ? (file_writes + *inout_file_write_count) - action->file_writes
+          : 0;
   action->expectation_count =
       action->expectations
           ? (expectations + *inout_expectation_count) - action->expectations
@@ -316,7 +349,9 @@ static bool loom_testbench_plan_scenario_action(
     const loom_module_t* module, iree_host_size_t scenario_index,
     loom_symbol_ref_t scenario_ref, const loom_op_t* action_op,
     loom_testbench_expectation_plan_t* expectations,
-    iree_host_size_t* inout_expectation_count, loom_testbench_issue_t* issues,
+    iree_host_size_t* inout_expectation_count,
+    loom_testbench_file_write_plan_t* file_writes,
+    iree_host_size_t* inout_file_write_count, loom_testbench_issue_t* issues,
     iree_host_size_t issue_capacity, iree_host_size_t* inout_issue_count,
     loom_testbench_scenario_action_plan_t* out_action) {
   memset(out_action, 0, sizeof(*out_action));
@@ -356,10 +391,10 @@ static bool loom_testbench_plan_scenario_action(
             actual_count, &out_action->oracle)) {
       return false;
     }
-    loom_testbench_plan_compare_expectations(
+    loom_testbench_plan_comparison(
         module, scenario_index, scenario_ref, action_op, expectations,
-        inout_expectation_count, issues, issue_capacity, inout_issue_count,
-        out_action);
+        inout_expectation_count, file_writes, inout_file_write_count, issues,
+        issue_capacity, inout_issue_count, out_action);
     return true;
   }
   if (loom_check_invoke_isa(action_op)) {
@@ -379,7 +414,9 @@ static void loom_testbench_plan_trial(
     loom_testbench_trial_recipe_step_t* recipe_steps,
     iree_host_size_t* inout_recipe_step_count,
     loom_testbench_expectation_plan_t* expectations,
-    iree_host_size_t* inout_expectation_count, loom_testbench_issue_t* issues,
+    iree_host_size_t* inout_expectation_count,
+    loom_testbench_file_write_plan_t* file_writes,
+    iree_host_size_t* inout_file_write_count, loom_testbench_issue_t* issues,
     iree_host_size_t issue_capacity, iree_host_size_t* inout_issue_count,
     loom_testbench_trial_plan_t* out_trial) {
   memset(out_trial, 0, sizeof(*out_trial));
@@ -432,8 +469,9 @@ static void loom_testbench_plan_trial(
       if (loom_check_compare_isa(op) || loom_check_invoke_isa(op)) {
         if (!loom_testbench_plan_scenario_action(
                 module, scenario_index, scenario_ref, op, expectations,
-                inout_expectation_count, issues, issue_capacity,
-                inout_issue_count, &out_trial->action)) {
+                inout_expectation_count, file_writes, inout_file_write_count,
+                issues, issue_capacity, inout_issue_count,
+                &out_trial->action)) {
           loom_testbench_append_scenario_issue(
               issues, issue_capacity, inout_issue_count,
               LOOM_TESTBENCH_ISSUE_INVALID_SCENARIO_ACTION, scenario_index, op,
@@ -465,7 +503,9 @@ static void loom_testbench_plan_scenario(
     loom_testbench_value_source_plan_t* value_sources,
     iree_host_size_t* inout_value_source_count,
     loom_testbench_expectation_plan_t* expectations,
-    iree_host_size_t* inout_expectation_count, loom_testbench_issue_t* issues,
+    iree_host_size_t* inout_expectation_count,
+    loom_testbench_file_write_plan_t* file_writes,
+    iree_host_size_t* inout_file_write_count, loom_testbench_issue_t* issues,
     iree_host_size_t issue_capacity, iree_host_size_t* inout_issue_count,
     loom_testbench_scenario_plan_t* out_scenario) {
   memset(out_scenario, 0, sizeof(*out_scenario));
@@ -540,10 +580,11 @@ static void loom_testbench_plan_scenario(
           continue;
         case LOOM_TESTBENCH_SCENARIO_BODY_OP_TRIAL: {
           loom_testbench_trial_plan_t* trial = &trials[(*inout_trial_count)++];
-          loom_testbench_plan_trial(
-              module, scenario_index, out_scenario->ref, op, recipe_steps,
-              inout_recipe_step_count, expectations, inout_expectation_count,
-              issues, issue_capacity, inout_issue_count, trial);
+          loom_testbench_plan_trial(module, scenario_index, out_scenario->ref,
+                                    op, recipe_steps, inout_recipe_step_count,
+                                    expectations, inout_expectation_count,
+                                    file_writes, inout_file_write_count, issues,
+                                    issue_capacity, inout_issue_count, trial);
           continue;
         }
         case LOOM_TESTBENCH_SCENARIO_BODY_OP_UNSUPPORTED:
@@ -595,11 +636,17 @@ iree_status_t loom_testbench_plan_scenarios(
       arena, counts->expectation_count, sizeof(*expectations),
       (void**)&expectations));
 
+  loom_testbench_file_write_plan_t* file_writes = NULL;
+  IREE_RETURN_IF_ERROR(loom_testbench_scenario_allocate_array(
+      arena, counts->file_write_count, sizeof(*file_writes),
+      (void**)&file_writes));
+
   iree_host_size_t scenario_count = 0;
   iree_host_size_t trial_count = 0;
   iree_host_size_t recipe_step_count = 0;
   iree_host_size_t value_source_count = 0;
   iree_host_size_t expectation_count = 0;
+  iree_host_size_t file_write_count = 0;
   if (module->body != NULL && module->body->block_count != 0) {
     const loom_block_t* module_block =
         loom_region_const_entry_block(module->body);
@@ -611,8 +658,8 @@ iree_status_t loom_testbench_plan_scenarios(
       loom_testbench_plan_scenario(
           module, scenario_count, op, trials, &trial_count, recipe_steps,
           &recipe_step_count, value_sources, &value_source_count, expectations,
-          &expectation_count, issues, issue_capacity, inout_issue_count,
-          &scenarios[scenario_count]);
+          &expectation_count, file_writes, &file_write_count, issues,
+          issue_capacity, inout_issue_count, &scenarios[scenario_count]);
       ++scenario_count;
     }
   }

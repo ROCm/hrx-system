@@ -1980,10 +1980,10 @@ iree_status_t loom_testbench_materialize_case_sample(
       options, case_plan->value_sources, case_plan->value_source_count, table);
 }
 
-static iree_status_t loom_testbench_write_single_file(
+iree_status_t loom_testbench_write_file(
     const loom_testbench_value_materializer_options_t* options,
     const loom_testbench_file_write_plan_t* file_write,
-    const loom_testbench_value_table_t* table) {
+    const loom_testbench_value_table_t* table, iree_string_view_t path) {
   if (!options->open_write_file.fn) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "no check.file.write provider is configured");
@@ -2005,7 +2005,7 @@ static iree_status_t loom_testbench_write_single_file(
   iree_io_stream_t* stream = NULL;
   if (iree_status_is_ok(status)) {
     status = options->open_write_file.fn(options->open_write_file.user_data,
-                                         file_write->path, &stream);
+                                         path, &stream);
     if (iree_status_is_ok(status) && !stream) {
       status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                                 "file provider returned NULL stream");
@@ -2036,8 +2036,8 @@ iree_status_t loom_testbench_write_case_files(
         !case_failed) {
       continue;
     }
-    IREE_RETURN_IF_ERROR(
-        loom_testbench_write_single_file(options, file_write, table));
+    IREE_RETURN_IF_ERROR(loom_testbench_write_file(options, file_write, table,
+                                                   file_write->path));
   }
   return iree_ok_status();
 }

@@ -1,0 +1,8 @@
+check.case public @replay_published_results {
+  %actual = check.file.read.npy path("captures/scenario-coordinates/configuration-1/trial-0-64/actual/result.npy") : tensor<2xi32>
+  %oracle = check.file.read.npy path("captures/scenario-coordinates/configuration-1/trial-0-64/expected/result.npy") : tensor<2xi32>
+  %expected = check.generate.iota offset(166) step(1) : tensor<2xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<2xi32>
+  check.expect.bitwise actual(%oracle) expected(%expected) : tensor<2xi32>
+  check.return
+}

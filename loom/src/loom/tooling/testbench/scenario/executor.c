@@ -9,6 +9,7 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "loom/tooling/testbench/scenario/output.h"
 #include "loom/tooling/testbench/source_report.h"
 #include "loom/util/adaptive_sort.h"
 #include "loom/util/json.h"
@@ -1200,6 +1201,12 @@ iree_status_t loom_testbench_run_scenario_trial_batch(
                      (result->device_events == NULL ||
                       (result->device_events->dropped_count == 0 &&
                        result->unhandled_device_event_count == 0));
+    if (iree_status_is_ok(status) && trial->action.file_write_count != 0) {
+      status = loom_testbench_scenario_write_files(
+          &executor->materializer_options, &executor->trial_values[call_index],
+          !result->passed);
+      result->passed = result->passed && iree_status_is_ok(status);
+    }
   }
 
   if (!iree_status_is_ok(status)) {

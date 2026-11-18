@@ -54,7 +54,8 @@ IREE_FLAG_LIST(
 IREE_FLAG_NAMED(
     string, file_output_root, "file-output-root", "",
     "Root for relative check.file.write paths. Required only when a "
-    "selected case writes a file. Parent directories are created as needed; "
+    "selected case or scenario writes a file. Parent directories are created "
+    "as needed; "
     "'-' is not a directory.");
 IREE_FLAG_NAMED(int32_t, max_samples_per_case, "max-samples-per-case",
                 LOOM_TESTBENCH_DEFAULT_MAX_SAMPLES_PER_CASE,
@@ -819,9 +820,13 @@ static iree_status_t loom_test_run_scenario(
          iree_status_is_ok(status) && trial_index < scenario->trial_count;
          ++trial_index) {
       const loom_testbench_trial_plan_t* trial = &scenario->trials[trial_index];
+      // Publish captures before materializing the next coordinate. Large model
+      // observations must not multiply the ordinary correctness batch storage.
       const iree_host_size_t batch_capacity =
-          iree_min(trial->trial_count,
-                   (iree_host_size_t)LOOM_TEST_SCENARIO_BATCH_CAPACITY);
+          trial->action.file_write_count != 0
+              ? 1
+              : iree_min(trial->trial_count,
+                         (iree_host_size_t)LOOM_TEST_SCENARIO_BATCH_CAPACITY);
       if (batch_capacity == 0) {
         continue;
       }
@@ -1588,6 +1593,8 @@ int loom_test_main(int argc, char** argv,
     scenario_materializer_options.host_allocator = allocator;
     scenario_materializer_options.open_read_file =
         execution_options.materializer.open_read_file;
+    scenario_materializer_options.open_write_file =
+        execution_options.materializer.open_write_file;
     if (iree_status_is_ok(status) && selected_case_count != 0) {
       status = loom_test_create_host_pool(allocator, &case_host_pool);
       if (iree_status_is_ok(status)) {

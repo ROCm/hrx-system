@@ -377,29 +377,6 @@ static bool loom_testbench_plan_parameter(
   return false;
 }
 
-static bool loom_testbench_plan_file_write(
-    const loom_module_t* module, const loom_op_t* op,
-    loom_testbench_file_write_plan_t* out_file_write) {
-  memset(out_file_write, 0, sizeof(*out_file_write));
-  if (!loom_check_file_write_npy_isa(op)) {
-    return false;
-  }
-  out_file_write->op = op;
-  out_file_write->value_id = loom_check_file_write_npy_value(op);
-  out_file_write->type =
-      loom_testbench_value_type(module, out_file_write->value_id);
-  out_file_write->path_id = loom_check_file_write_npy_path(op);
-  out_file_write->path =
-      loom_testbench_string_from_id(module, out_file_write->path_id);
-  out_file_write->mode = loom_check_file_write_npy_has_mode(op)
-                             ? loom_check_file_write_npy_mode(op)
-                             : LOOM_CHECK_FILE_WRITE_NPY_MODE_ON_FAILURE;
-  return out_file_write->value_id < module->values.count &&
-         out_file_write->path_id < module->strings.count &&
-         out_file_write->mode > 0 &&
-         out_file_write->mode < LOOM_CHECK_FILE_WRITE_NPY_MODE_COUNT_;
-}
-
 static bool loom_testbench_value_ids_are_in_range(
     const loom_module_t* module, const loom_value_id_t* value_ids,
     iree_host_size_t value_count) {
