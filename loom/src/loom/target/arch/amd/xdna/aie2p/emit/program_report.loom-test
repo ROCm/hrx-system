@@ -165,7 +165,9 @@ CHECK: COMPILE-REPORT: placed_function @fill * calls_per_entry=unknown
 // RUN: with-checks emit aie2p-xdna input=source-low output=compile-report
 
 // The caller initializes one tile. Its non-inlined mixer stores a 20-packet
-// body once and executes it 32 times, including its empty issue slots.
+// body once and executes it 32 times. Its dependences leave ten issue
+// positions empty per trip. Alignment NOPs share packet formats with real
+// instructions; only three packets actually issue two instructions.
 aie2p.target<array> @device {device_profile = "amd.xdna.strix_halo.17f0_11"}
 
 func.def noinline @mix_rows(%values: view<32xi32>) {
@@ -205,4 +207,5 @@ pipeline.def<kernel> public retain target(@device) @fill_rows() run() {
 
 // ----
 CHECK: COMPILE-REPORT: placed_function @mix_rows* stored_packet_count=32 packets_per_call=652 *
-CHECK: COMPILE-REPORT: packet_loop @mix_rows* byte_offset=32 packet_count=20 trip_count=32
+CHECK: COMPILE-REPORT: packet_loop @mix_rows* byte_offset=32 packet_count=20 trip_count=32 empty_packet_count=10
+CHECK: COMPILE-REPORT: emission * coissued_instructions=3 coissued_components=6

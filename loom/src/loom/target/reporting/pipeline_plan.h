@@ -71,6 +71,8 @@ typedef struct loom_target_compile_report_packet_loop_t {
   uint32_t packet_count;
   // Iterations on each entry to this range.
   uint32_t trip_count;
+  // Issue packets consisting entirely of NOPs in one iteration.
+  uint32_t empty_packet_count;
 } loom_target_compile_report_packet_loop_t;
 
 // A logical callable in a final worker image. Equal group and address on

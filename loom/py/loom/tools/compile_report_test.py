@@ -854,6 +854,7 @@ def test_show_placed_function_from_summary(
                 "function": "conditional",
                 "packets_per_call": None,
                 "calls_per_entry": 1,
+                "packet_loops": [{**row["packet_loops"][0], "empty_packet_count": 2}],
             },
         ],
     }
@@ -877,6 +878,9 @@ def test_show_placed_function_from_summary(
     (conditional,) = json.loads(capsys.readouterr().out)["functions"]
     assert conditional["calls_per_entry"] == 1
     assert conditional["packets_per_call"] is None
+    assert conditional["packet_loops"][0]["empty_packet_count"] == 2
+    assert main(["show", str(path), "--function", "conditional"]) == 0
+    assert "5 packets per trip (2 empty), 3 trips" in capsys.readouterr().out
     assert main(["show", str(path), "--function", "absent"]) != 0
     assert "no placed native function matches" in capsys.readouterr().err
     del plan["placed_functions"]

@@ -143,7 +143,9 @@ include empty issue slots and repetitions of admitted hardware loops, and
 exclude the work inside callees. The loop offset is relative to the function
 entry. If a remaining native branch needs taken-edge counts, the function
 total is unknown. Its admitted loops still report their packet and trip
-counts. Caller frequency is independent and can also be unknown. Both
+counts, including how many packets per trip issue only NOPs. Padding in an
+otherwise occupied packet contributes zero instructions to co-issue. Caller
+frequency is independent and can also be unknown. Both
 quantities use `unknown` in text and `null` in JSON. Device counters supply
 elapsed cycles and stalls.
 
@@ -625,6 +627,15 @@ banks, and local memory extents. The evidence names the worker or physical
 memory owner. Shared storage is counted once, including SRAM with no resident
 worker. These findings guide packing and lifetime experiments; they do not
 predict FIFO stalls or DMA overlap from static occupancy.
+
+`aie2p.empty_loop_packets` identifies repeated hardware loops where at least
+a quarter of the issue positions are empty and one loop entry executes at
+least 64 empty packets. For example, 11 empty packets in a 26-packet body
+repeated 256 times account for 2,816 empty packets each time control reaches
+the loop. The default example has the largest such count per entry. Use the
+function name and byte offset to inspect the dependencies, then measure how
+often the loop runs on a worker that determines completion. Parallel tiles,
+an infrequent branch, or mandatory latency can change the opportunity.
 
 On AMDGPU, `amdgpu.pipeline_copy_waits` identifies full global-load waits whose
 native consumers are materialized branch-payload copies. Its cited

@@ -255,19 +255,33 @@ def _placed_function(row: dict, path: str, root: str, name: str) -> dict:
         result[field] = (
             None if row[field] is None else _count(row[field], f"{path}.{field}")
         )
+    result["packet_loops"] = placed_packet_loops(row, path)
+    return result
+
+
+def placed_packet_loops(row: dict, path: str) -> list[dict[str, int]]:
+    """Reads the hardware-loop evidence available in this report revision."""
     loops = row.get("packet_loops", [])
     if not isinstance(loops, list):
         raise CompileReportError(f"{path}.packet_loops: expected array")
-    result["packet_loops"] = []
+    result = []
     for i, value in enumerate(loops):
         loop_path = f"{path}.packet_loops[{i}]"
         loop = _object(value, loop_path)
-        result["packet_loops"].append(
-            {
-                field: _count(loop.get(field), f"{loop_path}.{field}")
-                for field in ("byte_offset", "packet_count", "trip_count")
-            }
-        )
+        fields = {
+            field: _count(loop.get(field), f"{loop_path}.{field}")
+            for field in ("byte_offset", "packet_count", "trip_count")
+        }
+        if "empty_packet_count" in loop:
+            empty = _count(
+                loop["empty_packet_count"], f"{loop_path}.empty_packet_count"
+            )
+            if empty > fields["packet_count"]:
+                raise CompileReportError(
+                    f"{loop_path}.empty_packet_count: exceeds packet count"
+                )
+            fields["empty_packet_count"] = empty
+        result.append(fields)
     return result
 
 
@@ -317,11 +331,14 @@ def format_placed_function_text(view: dict) -> str:
             f"{packets if packets is not None else 'unknown'} packets/call, "
             f"{calls if calls is not None else 'unknown'} calls/entry"
         )
-        lines.extend(
-            f"  loop +{loop['byte_offset']} bytes  "
-            f"{loop['packet_count']} packets per trip, {loop['trip_count']} trips"
-            for loop in row["packet_loops"]
-        )
+        for loop in row["packet_loops"]:
+            empty = loop.get("empty_packet_count")
+            occupancy = f" ({empty} empty)" if empty is not None else ""
+            lines.append(
+                f"  loop +{loop['byte_offset']} bytes  "
+                f"{loop['packet_count']} packets per trip{occupancy}, "
+                f"{loop['trip_count']} trips"
+            )
     return "\n".join(lines) + "\n"
 
 

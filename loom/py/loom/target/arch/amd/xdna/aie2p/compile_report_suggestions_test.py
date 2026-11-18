@@ -129,6 +129,55 @@ def test_experimental_mode_surfaces_small_repeated_dma_tasks() -> None:
     )
 
 
+def test_empty_packets_are_scoped_to_one_repeated_native_loop() -> None:
+    report = _compile_report()
+    report["pipeline_plans"][0]["placed_functions"] = [
+        {
+            "function": "mix",
+            "worker_index": 3,
+            "packet_loops": [
+                {
+                    "byte_offset": 16,
+                    "packet_count": 26,
+                    "trip_count": 256,
+                    "empty_packet_count": 11,
+                },
+                # The same static footprint executed once.
+                {
+                    "byte_offset": 240,
+                    "packet_count": 26,
+                    "trip_count": 1,
+                    "empty_packet_count": 11,
+                },
+                # A long running loop with nearly every issue position occupied.
+                {
+                    "byte_offset": 480,
+                    "packet_count": 93,
+                    "trip_count": 256,
+                    "empty_packet_count": 2,
+                },
+                # A short repeat and a report predating the occupancy field.
+                {
+                    "byte_offset": 960,
+                    "packet_count": 8,
+                    "trip_count": 2,
+                    "empty_packet_count": 4,
+                },
+                {"byte_offset": 1008, "packet_count": 26, "trip_count": 256},
+            ],
+        }
+    ]
+    result = suggest_compile_report(parse_compile_report(report))
+    (finding,) = [
+        s for s in result.suggestions if s.suggestion_id == "aie2p.empty_loop_packets"
+    ]
+    assert finding.entry_name == "mix +0x10 (worker 3)"
+    assert finding.example_magnitude == 2816
+    assert "2,816 empty packets per loop entry" in finding.action
+    assert finding.evidence[1].path.endswith("packet_loops[0].empty_packet_count")
+    assert finding.evidence[1].value == 11
+
+
 def test_healthy_direct_pipeline_has_no_findings() -> None:
     report = copy.deepcopy(_compile_report())
     entry = report["entries"]["rows"][0]

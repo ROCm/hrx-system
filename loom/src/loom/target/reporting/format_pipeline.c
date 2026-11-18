@@ -199,6 +199,8 @@ static const loom_target_compile_report_pipeline_numeric_field_t
                                 packet_count),
         LOOM_PIPELINE_U32_FIELD(loom_target_compile_report_packet_loop_t,
                                 trip_count),
+        LOOM_PIPELINE_U32_FIELD(loom_target_compile_report_packet_loop_t,
+                                empty_packet_count),
 };
 
 #undef MEMORY_U32

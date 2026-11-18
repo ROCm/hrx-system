@@ -2163,10 +2163,14 @@ static iree_status_t loom_aie2p_bundle_plan_try_append_hardware_loop_impl(
   }
   loom_aie2p_function_issue_t* issue = builder->options->issue;
   if (issue) {
+    const uint32_t period = builder->next_issue_cycle - body_issue_cycle;
     issue->loops[issue->loop_count++] = (loom_aie2p_issue_loop_t){
         .byte_offset = body_byte_offset,
-        .packet_count = builder->next_issue_cycle - body_issue_cycle,
+        .first_issue_cycle = body_issue_cycle,
+        .packet_count = period,
         .trip_count = loop->trip_count,
+        // Final packet accounting subtracts each occupied issue position.
+        .empty_packet_count = period,
     };
   }
 

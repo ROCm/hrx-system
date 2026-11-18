@@ -57,6 +57,7 @@ iree_status_t loom_aie2p_program_report_worker(
                 .byte_offset = loop.byte_offset,
                 .packet_count = loop.packet_count,
                 .trip_count = loop.trip_count,
+                .empty_packet_count = loop.empty_packet_count,
             };
         row->packets_per_call +=
             (uint64_t)loop.packet_count * (loop.trip_count - 1u);

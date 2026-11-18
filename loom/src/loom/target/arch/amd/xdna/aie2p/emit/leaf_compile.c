@@ -195,13 +195,32 @@ iree_status_t loom_aie2p_leaf_compile(
     loom_target_compile_report_emission_breakdown_t emission_breakdown = {
         .body_instruction_count = program_plan.issue_cycle_count,
     };
+    iree_host_size_t loop_index = 0;
     for (iree_host_size_t i = 0; i < program_plan.bundle_count; ++i) {
-      const uint8_t slot_count = program_plan.bundles[i].slot_count;
-      if (slot_count <= 1) {
-        continue;
+      const loom_aie2p_planned_bundle_t* bundle = &program_plan.bundles[i];
+      uint8_t instruction_count = 0;
+      for (uint8_t j = 0; j < bundle->slot_count; ++j) {
+        instruction_count += !loom_aie2p_planned_slot_is_nop(
+            &program_plan.slots[bundle->slot_start + j]);
       }
-      ++emission_breakdown.coissued_instruction_count;
-      emission_breakdown.coissued_component_count += slot_count;
+      if (instruction_count > 1) {
+        ++emission_breakdown.coissued_instruction_count;
+        emission_breakdown.coissued_component_count += instruction_count;
+      }
+      // Loop intervals are disjoint in physical order. Implicit issue gaps
+      // and explicit all-NOP bundles both remain in the empty count.
+      while (loop_index < issue->loop_count) {
+        loom_aie2p_issue_loop_t* loop = &issue->loops[loop_index];
+        if (bundle->issue_cycle < loop->first_issue_cycle) {
+          break;
+        }
+        if (bundle->issue_cycle - loop->first_issue_cycle <
+            loop->packet_count) {
+          loop->empty_packet_count -= instruction_count != 0;
+          break;
+        }
+        ++loop_index;
+      }
     }
     loom_target_compile_report_record_emission(
         options->compile_report, program_plan.issue_cycle_count,
