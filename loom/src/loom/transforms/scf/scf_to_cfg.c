@@ -28,6 +28,7 @@
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/function_version.h"
 #include "loom/util/predicate_facts.h"
+#include "loom/util/walk.h"
 
 //===----------------------------------------------------------------------===//
 // Statistics
@@ -123,6 +124,23 @@ typedef struct loom_scf_to_cfg_frontier_t {
   iree_host_size_t capacity;
 } loom_scf_to_cfg_frontier_t;
 
+// Control decisions read the counted loop's source operands. Enclosing
+// projections can replace those operands before this loop reaches the frontier.
+enum loom_scf_to_cfg_for_control_bits_e {
+  LOOM_SCF_TO_CFG_FOR_POSITIVE_STEP = 1u << 0,
+  LOOM_SCF_TO_CFG_FOR_NONWRAPPING_INCREMENT = 1u << 1,
+  LOOM_SCF_TO_CFG_FOR_DYNAMIC_LOWER_BOUND = 1u << 2,
+  LOOM_SCF_TO_CFG_FOR_DYNAMIC_UPPER_BOUND = 1u << 3,
+};
+typedef uint8_t loom_scf_to_cfg_for_control_t;
+
+typedef struct loom_scf_to_cfg_counted_loop_t {
+  // Source induction value indexing this record until its owning pass ends.
+  loom_value_id_t induction_value;
+  // Termination and bound facts established before any source operand moves.
+  loom_scf_to_cfg_for_control_t control;
+} loom_scf_to_cfg_counted_loop_t;
+
 typedef struct loom_scf_to_cfg_state_t {
   // Current pass instance used for diagnostics and statistics.
   loom_pass_t* pass;
@@ -136,8 +154,19 @@ typedef struct loom_scf_to_cfg_state_t {
   loom_rewriter_t* rewriter;
   // Transient arena reset around each structured-op lowering.
   iree_arena_allocator_t* lowering_arena;
-  // Value facts computed before mutation for structured legality checks.
-  loom_value_fact_table_t* fact_table;
+  // Source snapshot for pending loops. Numeric transport queries only original
+  // loop results and region arguments, whose identities survive parent moves.
+  const loom_value_fact_table_t* source_facts;
+  // Sparse projection of counted-loop control, indexed by source induction
+  // value through the module's transient value-ordinal scratch.
+  struct {
+    // Pass-lifetime records in source visitation order.
+    loom_scf_to_cfg_counted_loop_t* values;
+    // Number of indexed counted loops.
+    iree_host_size_t count;
+    // Allocated record capacity.
+    iree_host_size_t capacity;
+  } counted_loops;
   // Region DFS stack for finding structured control flow.
   loom_scf_to_cfg_region_stack_t region_stack;
   // Outermost structured operations sharing one value-fact snapshot.
@@ -616,9 +645,9 @@ static uint16_t loom_scf_to_cfg_integer_refinement_count(
   loom_predicate_t refinements[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY];
   uint16_t count = loom_value_facts_export_integer_refinements(
       lowered_value,
-      loom_index_integer_carrier_domain_facts(&state->fact_table->context,
+      loom_index_integer_carrier_domain_facts(&state->source_facts->context,
                                               loom_type_element_type(type)),
-      loom_value_fact_table_lookup(state->fact_table, structured_value),
+      loom_value_fact_table_lookup(state->source_facts, structured_value),
       refinements, IREE_ARRAYSIZE(refinements));
   if (uses_index_assume && position == extra_position) {
     count += extra_predicate_count;
@@ -758,9 +787,10 @@ static iree_status_t loom_scf_to_cfg_materialize_integer_facts(
       loom_predicate_t refinements[LOOM_VALUE_FACT_INTEGER_REFINEMENT_CAPACITY];
       uint16_t refinement_count = loom_value_facts_export_integer_refinements(
           lowered_values[i],
-          loom_index_integer_carrier_domain_facts(&state->fact_table->context,
+          loom_index_integer_carrier_domain_facts(&state->source_facts->context,
                                                   loom_type_element_type(type)),
-          loom_value_fact_table_lookup(state->fact_table, structured_values[i]),
+          loom_value_fact_table_lookup(state->source_facts,
+                                       structured_values[i]),
           refinements, IREE_ARRAYSIZE(refinements));
       const uint16_t value_extra_predicate_count =
           i == extra_position && uses_index_assume ? extra_predicate_count : 0;
@@ -796,32 +826,12 @@ static iree_status_t loom_scf_to_cfg_materialize_integer_facts(
   return iree_ok_status();
 }
 
-static bool loom_scf_to_cfg_value_has_exact_integer_facts(
-    loom_value_fact_table_t* fact_table, loom_value_id_t value) {
-  if (!fact_table || value == LOOM_VALUE_ID_INVALID) {
-    return false;
-  }
-  int64_t exact_value = 0;
-  return loom_value_facts_as_exact_i64(
-      loom_value_fact_table_lookup(fact_table, value), &exact_value);
-}
-
-static bool loom_scf_to_cfg_for_iv_bound_predicate_is_needed(
-    loom_value_fact_table_t* fact_table, loom_value_id_t bound) {
-  return bound != LOOM_VALUE_ID_INVALID &&
-         !loom_scf_to_cfg_value_has_exact_integer_facts(fact_table, bound);
-}
-
 static uint16_t loom_scf_to_cfg_for_iv_bound_predicates(
-    loom_value_fact_table_t* fact_table, loom_value_id_t value,
+    loom_scf_to_cfg_for_control_t control, loom_value_id_t value,
     loom_value_id_t lower_bound, loom_value_id_t upper_bound,
     loom_predicate_t* predicates) {
-  if (value == LOOM_VALUE_ID_INVALID) {
-    return 0;
-  }
   uint16_t count = 0;
-  if (loom_scf_to_cfg_for_iv_bound_predicate_is_needed(fact_table,
-                                                       lower_bound)) {
+  if (control & LOOM_SCF_TO_CFG_FOR_DYNAMIC_LOWER_BOUND) {
     predicates[count++] = (loom_predicate_t){
         .kind = LOOM_PREDICATE_GE,
         .arg_count = 2,
@@ -830,8 +840,7 @@ static uint16_t loom_scf_to_cfg_for_iv_bound_predicates(
         .args = {value, lower_bound, 0},
     };
   }
-  if (loom_scf_to_cfg_for_iv_bound_predicate_is_needed(fact_table,
-                                                       upper_bound)) {
+  if (control & LOOM_SCF_TO_CFG_FOR_DYNAMIC_UPPER_BOUND) {
     predicates[count++] = (loom_predicate_t){
         .kind = LOOM_PREDICATE_LT,
         .arg_count = 2,
@@ -873,7 +882,8 @@ static iree_status_t loom_scf_to_cfg_define_for_header_args(
 // aligned upper bound reaches the exclusive bound exactly; other loops need a
 // representable upper bound for the unused terminal increment.
 static bool loom_scf_to_cfg_for_increment_is_nonwrapping(
-    loom_scf_to_cfg_state_t* state, loom_op_t* op, loom_value_facts_t iv_facts,
+    const loom_fact_context_t* context, loom_scalar_type_t scalar_type,
+    loom_value_facts_t iv_facts, loom_value_facts_t upper_facts,
     loom_value_facts_t step_facts) {
   int64_t exact_step = 0;
   const bool step_is_exact =
@@ -881,10 +891,6 @@ static bool loom_scf_to_cfg_for_increment_is_nonwrapping(
   if (step_is_exact && exact_step == 1) {
     return true;
   }
-  const loom_value_facts_t upper_facts = loom_value_fact_table_lookup(
-      state->fact_table, loom_scf_for_upper_bound(op));
-  const loom_scalar_type_t scalar_type = loom_type_element_type(
-      loom_module_value_type(state->module, loom_scf_for_lower_bound(op)));
   // Signed intervals crossing zero do not prove a bound in an unsigned
   // carrier.
   if (scalar_type == LOOM_SCALAR_TYPE_OFFSET &&
@@ -905,8 +911,8 @@ static bool loom_scf_to_cfg_for_increment_is_nonwrapping(
           (uint64_t)upper_facts.range_lo - (uint64_t)iv_facts.range_hi) {
     return true;
   }
-  const int32_t bitwidth = loom_index_target_carrier_bitwidth(
-      &state->fact_table->context, scalar_type);
+  const int32_t bitwidth =
+      loom_index_target_carrier_bitwidth(context, scalar_type);
   if (bitwidth <= 0) {
     return false;
   }
@@ -917,6 +923,73 @@ static bool loom_scf_to_cfg_for_increment_is_nonwrapping(
   const int64_t maximum_iv = (int64_t)(carrier_mask >> 1);
   return iv_facts.range_hi <= maximum_iv &&
          maximum_step <= (uint64_t)maximum_iv - (uint64_t)iv_facts.range_hi;
+}
+
+static loom_scf_to_cfg_for_control_t loom_scf_to_cfg_for_control(
+    const loom_scf_to_cfg_state_t* state, loom_op_t* op, loom_value_id_t iv) {
+  const loom_value_fact_table_t* facts = state->source_facts;
+  const loom_value_facts_t step =
+      loom_value_fact_table_lookup(facts, loom_scf_for_step(op));
+  if (loom_value_facts_is_float(step) || !loom_value_facts_is_positive(step)) {
+    return 0;
+  }
+  const loom_value_id_t lower = loom_scf_for_lower_bound(op);
+  const loom_value_facts_t upper_facts =
+      loom_value_fact_table_lookup(facts, loom_scf_for_upper_bound(op));
+  loom_scf_to_cfg_for_control_t control = LOOM_SCF_TO_CFG_FOR_POSITIVE_STEP;
+  if (loom_scf_to_cfg_for_increment_is_nonwrapping(
+          &facts->context,
+          loom_type_element_type(loom_module_value_type(state->module, lower)),
+          loom_value_fact_table_lookup(facts, iv), upper_facts, step)) {
+    control |= LOOM_SCF_TO_CFG_FOR_NONWRAPPING_INCREMENT;
+  }
+  int64_t exact_bound = 0;
+  if (!loom_value_facts_as_exact_i64(loom_value_fact_table_lookup(facts, lower),
+                                     &exact_bound)) {
+    control |= LOOM_SCF_TO_CFG_FOR_DYNAMIC_LOWER_BOUND;
+  }
+  if (!loom_value_facts_as_exact_i64(upper_facts, &exact_bound)) {
+    control |= LOOM_SCF_TO_CFG_FOR_DYNAMIC_UPPER_BOUND;
+  }
+  return control;
+}
+
+static iree_status_t loom_scf_to_cfg_capture_counted_loop(
+    void* user_data, loom_op_t* op, const loom_walk_context_t* context,
+    loom_walk_result_t* out_result) {
+  (void)context;
+  *out_result = LOOM_WALK_CONTINUE;
+  if (!loom_scf_for_isa(op)) {
+    return iree_ok_status();
+  }
+  loom_scf_to_cfg_state_t* state = user_data;
+  const loom_value_id_t iv =
+      loom_region_entry_block(loom_scf_for_body(op))->arg_ids[0];
+  if (state->counted_loops.count == state->counted_loops.capacity) {
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        state->pass->arena, state->counted_loops.count,
+        state->counted_loops.count + 1, sizeof(*state->counted_loops.values),
+        &state->counted_loops.capacity, (void**)&state->counted_loops.values));
+  }
+  if (state->counted_loops.count == 0) {
+    loom_module_value_ordinal_scratch_acquire(state->module);
+  }
+  const loom_value_ordinal_t ordinal =
+      (loom_value_ordinal_t)state->counted_loops.count++;
+  state->counted_loops.values[ordinal] = (loom_scf_to_cfg_counted_loop_t){
+      .induction_value = iv,
+      .control = loom_scf_to_cfg_for_control(state, op, iv)};
+  loom_module_value_ordinal_scratch_set(state->module, iv, ordinal);
+  return iree_ok_status();
+}
+
+static loom_scf_to_cfg_for_control_t loom_scf_to_cfg_counted_loop_control(
+    const loom_scf_to_cfg_state_t* state, const loom_op_t* op) {
+  const loom_value_id_t iv =
+      loom_region_entry_block(loom_scf_for_body(op))->arg_ids[0];
+  return state->counted_loops
+      .values[loom_module_value_ordinal_scratch_lookup(state->module, iv)]
+      .control;
 }
 
 static iree_status_t loom_scf_to_cfg_lower_for(
@@ -940,27 +1013,19 @@ static iree_status_t loom_scf_to_cfg_lower_for(
     return iree_diagnostic_emit(state->pass->diagnostic_emitter, &emission);
   }
 
-  loom_value_facts_t step_facts =
-      loom_value_fact_table_lookup(state->fact_table, loom_scf_for_step(op));
-  if (loom_value_facts_is_float(step_facts) ||
-      !loom_value_facts_is_positive(step_facts)) {
-    return loom_scf_to_cfg_emit(state, op, LOOM_ERR_STRUCTURE_035);
-  }
-
   loom_block_t* body_source_block = NULL;
   loom_op_t* yield_op = NULL;
   loom_scf_to_cfg_read_single_block_region(loom_scf_for_body(op),
                                            &body_source_block, &yield_op);
+  const loom_scf_to_cfg_for_control_t control =
+      loom_scf_to_cfg_counted_loop_control(state, op);
+  if (!(control & LOOM_SCF_TO_CFG_FOR_POSITIVE_STEP)) {
+    return loom_scf_to_cfg_emit(state, op, LOOM_ERR_STRUCTURE_035);
+  }
   IREE_RETURN_IF_ERROR(loom_scf_to_cfg_verify_op_preconditions(state, op));
-
   loom_value_slice_t iter_args = loom_scf_for_iter_args(op);
-  loom_value_facts_t original_iv_facts =
-      body_source_block->arg_count > 0
-          ? loom_value_fact_table_lookup(state->fact_table,
-                                         body_source_block->arg_ids[0])
-          : loom_value_facts_unknown();
-  const bool guard_increment = !loom_scf_to_cfg_for_increment_is_nonwrapping(
-      state, op, original_iv_facts, step_facts);
+  const bool guard_increment =
+      !(control & LOOM_SCF_TO_CFG_FOR_NONWRAPPING_INCREMENT);
 
   loom_block_t* source_block = op->parent_block;
   loom_scf_to_cfg_block_insertion_t insertion =
@@ -1020,7 +1085,7 @@ static iree_status_t loom_scf_to_cfg_lower_for(
   loom_predicate_t iv_bound_predicates[2];
   const uint16_t iv_bound_predicate_count =
       loom_scf_to_cfg_for_iv_bound_predicates(
-          state->fact_table, header_iv, loom_scf_for_lower_bound(op),
+          control, header_iv, loom_scf_for_lower_bound(op),
           loom_scf_for_upper_bound(op), iv_bound_predicates);
   const loom_value_id_t* body_values = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_to_cfg_materialize_integer_facts(
@@ -1600,6 +1665,58 @@ static iree_status_t loom_scf_to_cfg_order_frontier_blocks(
   return iree_ok_status();
 }
 
+static void loom_scf_to_cfg_release_source(loom_scf_to_cfg_state_t* state) {
+  if (state->counted_loops.count != 0) {
+    for (iree_host_size_t i = 0; i < state->counted_loops.count; ++i) {
+      loom_module_value_ordinal_scratch_clear(
+          state->module, state->counted_loops.values[i].induction_value);
+    }
+    loom_module_value_ordinal_scratch_release(state->module);
+    state->counted_loops.count = 0;
+  }
+  state->source_facts = NULL;
+}
+
+static iree_status_t loom_scf_to_cfg_prepare_frontier(
+    loom_scf_to_cfg_state_t* state) {
+  for (iree_host_size_t i = 0; i < state->frontier.count; ++i) {
+    const loom_scf_to_cfg_frontier_entry_t* entry = &state->frontier.entries[i];
+    if (entry->lowering_kind != LOOM_SCF_TO_CFG_LOWERING_FOR &&
+        entry->lowering_kind != LOOM_SCF_TO_CFG_LOWERING_WHILE) {
+      continue;
+    }
+    // A proven step remains positive through projection. If the source
+    // could not prove it, let the actual CFG establish legality before the
+    // counted loop diagnoses its stride.
+    if (state->source_facts &&
+        (entry->lowering_kind != LOOM_SCF_TO_CFG_LOWERING_FOR ||
+         (loom_scf_to_cfg_counted_loop_control(state, entry->op) &
+          LOOM_SCF_TO_CFG_FOR_POSITIVE_STEP))) {
+      continue;
+    }
+    loom_scf_to_cfg_release_source(state);
+    if (state->rewriter->flags & LOOM_REWRITER_FLAG_CHANGED) {
+      loom_pass_value_fact_owner_invalidate(state->pass->value_facts);
+    }
+    loom_value_fact_table_t* facts = NULL;
+    IREE_RETURN_IF_ERROR(loom_pass_value_facts_acquire(
+        state->pass, state->module,
+        loom_pass_value_fact_scope_function_for_target(
+            state->function, loom_target_function_version_target_facts(
+                                 state->pass->function_version)),
+        &facts));
+    state->source_facts = facts;
+    loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
+    return loom_walk_region(
+        state->module, loom_func_like_body(state->function),
+        LOOM_WALK_PRE_ORDER,
+        (loom_walk_callback_t){.fn = loom_scf_to_cfg_capture_counted_loop,
+                               .user_data = state},
+        &walk_result);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_scf_to_cfg_lower_frontier(
     loom_scf_to_cfg_state_t* state) {
   // Lower from the lexical tail so each block split moves only the already
@@ -1666,29 +1783,12 @@ iree_status_t loom_scf_to_cfg_run(loom_pass_t* pass, loom_module_t* module,
       loom_scf_to_cfg_region_stack_initialize(pass->arena, &state.region_stack);
   loom_scf_to_cfg_frontier_initialize(&state.frontier);
 
-  bool any_changed = false;
   while (iree_status_is_ok(status) && !loom_pass_has_error_diagnostics(pass)) {
     status = loom_scf_to_cfg_collect_frontier(&state, function);
     if (!iree_status_is_ok(status) || state.frontier.count == 0) {
       break;
     }
-    // Only loop lowering consumes source facts: termination legality and
-    // numeric constraints transported to the generated loop arguments.
-    bool requires_facts = false;
-    for (iree_host_size_t i = 0; i < state.frontier.count; ++i) {
-      const loom_scf_to_cfg_lowering_kind_t kind =
-          state.frontier.entries[i].lowering_kind;
-      requires_facts |= kind == LOOM_SCF_TO_CFG_LOWERING_FOR ||
-                        kind == LOOM_SCF_TO_CFG_LOWERING_WHILE;
-    }
-    if (requires_facts) {
-      status = loom_pass_value_facts_acquire(
-          pass, module,
-          loom_pass_value_fact_scope_function_for_target(
-              function, loom_target_function_version_target_facts(
-                            pass->function_version)),
-          &state.fact_table);
-    }
+    status = loom_scf_to_cfg_prepare_frontier(&state);
     if (!iree_status_is_ok(status)) {
       break;
     }
@@ -1696,12 +1796,13 @@ iree_status_t loom_scf_to_cfg_run(loom_pass_t* pass, loom_module_t* module,
     if (!iree_status_is_ok(status)) {
       break;
     }
-    any_changed = true;
-    loom_pass_value_fact_owner_invalidate(pass->value_facts);
   }
-
-  if (iree_status_is_ok(status) && any_changed) {
-    loom_pass_mark_changed(pass);
+  loom_scf_to_cfg_release_source(&state);
+  if (rewriter.flags & LOOM_REWRITER_FLAG_CHANGED) {
+    loom_pass_value_fact_owner_invalidate(pass->value_facts);
+    if (iree_status_is_ok(status)) {
+      loom_pass_mark_changed(pass);
+    }
   }
   loom_rewriter_deinitialize(&rewriter);
   iree_arena_deinitialize(&lowering_arena);

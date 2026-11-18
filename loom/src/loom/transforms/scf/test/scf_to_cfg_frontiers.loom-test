@@ -308,3 +308,90 @@ func.def @guarded_condition_result(%input: view<37xi32>, %start: index) -> (inde
 ^_bb7(%terminal: index):
   func.return %terminal : index
 }
+
+// ====
+
+// The outer induction value is a positive, dynamic stride. Its replacement
+// in the CFG must reach both the inner overflow guard and the actual increment.
+func.def @nested_stride_from_induction(%limit: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  scf.for %stride = [%c1 to %limit step %c1] {
+    scf.for %position = [%c0 to %limit step %stride] {
+      test.use %position : index
+    }
+  }
+  func.return
+}
+
+// ----
+func.def @nested_stride_from_induction(%limit: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  cfg.br ^_bb1(%c1: index)
+^_bb1(%5: index):
+  %7 = index.cmp slt, %5, %limit : index
+  cfg.cond_br %7, ^_bb2, ^_bb7
+^_bb2:
+  %stride = index.assume %5 [range(%5, 1, 9223372036854775806), lt(%5, %limit)] : index
+  cfg.br ^_bb3(%c0: index)
+^_bb3(%9: index):
+  %11 = index.cmp slt, %9, %limit : index
+  cfg.cond_br %11, ^_bb4, ^_bb6
+^_bb4:
+  %position = index.assume %9 [range(%9, 0, 9223372036854775806), lt(%9, %limit)] : index
+  test.use %position : index
+  %12 = index.sub %limit, %position : index
+  %13 = index.cmp ult, %stride, %12 : index
+  cfg.cond_br %13, ^_bb5, ^_bb6
+^_bb5:
+  %14 = index.add %position, %stride : index
+  cfg.br ^_bb3(%14: index)
+^_bb6:
+  %8 = index.add %stride, %c1 : index
+  cfg.br ^_bb1(%8: index)
+^_bb7:
+  func.return
+}
+
+// ====
+
+// RUN: with-checks pass-report scf-to-cfg
+
+// The condition loop forwards a positive value into the counted loop's step.
+// Both loops lower using the same function-wide numeric solve.
+func.def @stride_from_condition(%input: index, %limit: index) -> (index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %terminal = scf.while(%before = %input : index) -> (index) {
+    %positive = index.cmp sgt, %before, %c0 : index
+    %positive_stride = index.max %before, %c1 : index
+    scf.condition %positive, %positive_stride : i1, index
+  } do(%stride: index) {
+    scf.for %position = [%c0 to %limit step %stride] {
+      test.use %position : index
+    }
+    scf.yield %c0 : index
+  }
+  func.return %terminal : index
+}
+
+// ----
+CHECK: *"fors-lowered":1,"whiles-lowered":1,*
+CHECK: *"category":"value-facts","acquisition_count":1,*"recomputation_count":1,*
+
+// ====
+
+// A zero-based outer induction value can be zero at the inner loop. Keep
+// the diagnostic attached to the loop that needs a positive step.
+func.def @zero_based_induction_stride(%limit: index) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  scf.for %stride = [%c0 to %limit step %c1] {
+    // ERROR@+1: STRUCTURE/035 {op_name="scf.for", pass_name="scf-to-cfg"}
+    scf.for %position = [%c0 to %limit step %stride] {
+      test.use %position : index
+    }
+  }
+  func.return
+}
