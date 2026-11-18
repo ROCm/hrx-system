@@ -1062,14 +1062,10 @@ static iree_status_t loom_amdgpu_prepare_complete_offset_realization(
   return loom_low_lower_realization_offer(context, source_op, loop, &offer);
 }
 
-iree_status_t loom_amdgpu_prepare_memory_address_realizations(
+static iree_status_t loom_amdgpu_prepare_packet_address_realizations(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_realization_loop_t* loop,
     loom_amdgpu_memory_access_t* access) {
-  const loom_low_lower_realization_loop_t* loop =
-      loom_low_lower_realization_loop(context, source_op);
-  if (loop == NULL) {
-    return iree_ok_status();
-  }
   if (access->source->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL) {
     bool descriptor_offered = false;
     IREE_RETURN_IF_ERROR(loom_amdgpu_prepare_global_address_realizations(
@@ -1111,6 +1107,80 @@ iree_status_t loom_amdgpu_prepare_memory_address_realizations(
   }
   return loom_amdgpu_prepare_complete_offset_realization(context, source_op,
                                                          loop, access);
+}
+
+// Scaling the only use of a lane-varying index at its definition exchanges
+// the index's loop live range for its byte offset. If another use needs the
+// index, retaining both forms can cost another VGPR throughout the loop.
+static bool loom_amdgpu_can_replace_loop_index_with_byte_offset(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_memory_access_plan_t* plan) {
+  const loom_low_source_memory_access_plan_t* source = &plan->source;
+  if (source->dynamic_term_count != 1 ||
+      loom_low_lower_source_memory_invariant_terms(context) != 1) {
+    return false;
+  }
+  const loom_low_source_memory_dynamic_term_t* term = &source->dynamic_terms[0];
+  if (term->source != LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE ||
+      term->stride_value_count != 0 || term->byte_stride <= 1 ||
+      term->byte_stride > UINT32_MAX) {
+    return false;
+  }
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  const loom_value_t* index = loom_module_value(module, term->index);
+  const loom_use_t* use = loom_value_single_use(index);
+  if (use == NULL || loom_use_user_op(*use) != source_op ||
+      loom_value_has_attribute_uses(index) ||
+      loom_module_value_has_type_uses(module, term->index) ||
+      loom_value_facts_is_subgroup_uniform(loom_value_fact_table_lookup(
+          loom_low_lower_context_fact_table(context), term->index))) {
+    return false;
+  }
+  // The segment displacement may be encoded in the packet. Every packet must
+  // accept the same complete VADDR for the unscaled index to die here.
+  for (uint32_t i = 0; i < plan->packet_count; ++i) {
+    const loom_amdgpu_memory_access_t* access = &plan->packets[i].access;
+    if (!loom_amdgpu_address_form_supports_complete_offset(
+            access->address_form) ||
+        access->uses_dynamic_root_address || access->vaddr_static_byte_offset ||
+        access->vaddr_realization_mask ||
+        access->retained_component_kind !=
+            LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_NONE ||
+        access->dynamic_term_kinds[0] !=
+            LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_VADDR) {
+      return false;
+    }
+  }
+  return true;
+}
+
+iree_status_t loom_amdgpu_prepare_memory_address_realizations(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_memory_access_plan_t* plan) {
+  if (loom_amdgpu_can_replace_loop_index_with_byte_offset(context, source_op,
+                                                          plan)) {
+    const loom_low_lower_realization_t* vaddr = NULL;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_request_address_component(
+        context, source_op, /*loop=*/NULL, &plan->source, /*layout=*/NULL,
+        /*invariant_mask=*/1, /*retained_component=*/NULL, /*bank_bit=*/0,
+        /*initial_byte_offset=*/0, &vaddr));
+    if (vaddr != NULL) {
+      for (uint32_t i = 0; i < plan->packet_count; ++i) {
+        plan->packets[i].access.realization.vaddr = vaddr;
+      }
+      return iree_ok_status();
+    }
+  }
+  const loom_low_lower_realization_loop_t* loop =
+      loom_low_lower_realization_loop(context, source_op);
+  if (loop == NULL) {
+    return iree_ok_status();
+  }
+  for (uint32_t i = 0; i < plan->packet_count; ++i) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_prepare_packet_address_realizations(
+        context, source_op, loop, &plan->packets[i].access));
+  }
+  return iree_ok_status();
 }
 
 iree_status_t loom_amdgpu_prepare_fragment_address_realization(

@@ -175,8 +175,9 @@ omit them: changing an assertion requires an intentional edit.
 For authored Low assembly, the internal test runner's
 `emit low-compile-report @function` builds the shared emission frame and prints
 its normal report summary, including static and dynamic instruction counts.
-This uses the runner's linked target descriptors and the same report collector
-as native emission.
+The frame schedules in source order and uses the same report collector as
+native emission. Target emission providers such as `emit amdgpu-assembly`
+exercise the target's production scheduling and register allocation policy.
 
 ### Source Target Lowering
 
