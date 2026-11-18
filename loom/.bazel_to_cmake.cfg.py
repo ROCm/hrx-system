@@ -399,6 +399,14 @@ class LoomBuildFileFunctions(
         self._converter.body += "loom_module(\n" + "".join(blocks) + ")\n\n"
         self._emit_platform_guard_end(target_compatible_with)
 
+    def loom_cxx_library(self, target_compatible_with=None, **kwargs):
+        super().loom_cxx_library(
+            target_compatible_with=self._apply_loom_target_compatible_with(
+                target_compatible_with
+            ),
+            **kwargs,
+        )
+
     @staticmethod
     def _reject_workload_args(name, args):
         for arg in args or []:
@@ -475,7 +483,8 @@ class LoomBuildFileFunctions(
     def loom_test_module(
         self,
         name,
-        srcs,
+        srcs=None,
+        root_library=None,
         deps=None,
         data=None,
         input_format="",
@@ -486,14 +495,20 @@ class LoomBuildFileFunctions(
     ):
         if self._should_skip_target(tags=tags, **kwargs):
             return
-        if not srcs:
-            raise ValueError(f"{name} requires at least one authored test source")
+        if root_library and (srcs or deps or data or input_format or inputopts):
+            raise ValueError(f"{name}: root_library owns sources and dependencies")
+        if not (srcs or root_library):
+            raise ValueError(f"{name} requires sources or a root library")
         self._loom_module_targets.add(self._current_target_label(name))
         target_compatible_with = self._apply_loom_target_compatible_with(
             target_compatible_with
         )
         blocks = [
             self._convert_string_arg_block("NAME", name, quote=False),
+            self._convert_string_arg_block(
+                "ROOT_LIBRARY",
+                self._convert_single_target(root_library) if root_library else None,
+            ),
             self._convert_loom_module_inputs("SRCS", srcs),
             self._convert_loom_module_inputs("LIBRARIES", deps),
             self._convert_data_list_block(data),

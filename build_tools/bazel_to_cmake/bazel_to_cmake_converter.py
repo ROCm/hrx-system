@@ -1098,11 +1098,13 @@ class BuildFileFunctions(
         )
 
     def _convert_data_srcs_block(self, srcs, block_name="SRCS", sort=True):
-        if not srcs:
-            return ""
+        return self._convert_string_list_block(
+            block_name, self._convert_data_sources(srcs), sort=sort
+        )
 
+    def _convert_data_sources(self, srcs):
         converted_srcs = []
-        for src in srcs:
+        for src in srcs or []:
             if src.startswith(":") or src.startswith("//"):
                 paths = self._cmake_location_paths(src)
                 if self._canonical_location_label(
@@ -1120,7 +1122,7 @@ class BuildFileFunctions(
                     self._filegroup_dep_filename(self._normalize_label(src))
                 )
 
-        return self._convert_string_list_block(block_name, converted_srcs, sort=sort)
+        return converted_srcs
 
     def _convert_target(self, target):
         """Returns a list of targets that correspond to the specified Bazel target.

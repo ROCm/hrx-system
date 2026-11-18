@@ -382,8 +382,11 @@ loom_generated_file(
         )
         output = bazel_to_cmake_converter.convert_build_file(
             """
-load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_library", "loom_target_profile")
-loom_library(name="support", srcs=["support.cxx"])
+load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_target_profile")
+load("//loom/build_tools/bazel:loom_cxx_library.bzl", "loom_cxx_library")
+loom_cxx_library(name="support", srcs=["support.cxx", "private.h"],
+    hdrs=["public.h"], includes=["include"], defines=["WIDTH=32"],
+    local_defines=["LOCAL=1"], copts=["fp-model=fast"])
 loom_target_profile(name="profile", family="amd.xdna.aie2p", selector="exact")
 loom_kernel_binary(name="program", srcs=["program.loom"], deps=[":support"], target=":profile")
 """,
@@ -391,12 +394,41 @@ loom_kernel_binary(name="program", srcs=["program.loom"], deps=[":support"], tar
             "/repo/consumer",
             repo_root="/repo",
         )
-        self.assertIn("loom_module(", output)
-        self.assertIn("  NAME\n    support", output)
+        self.assertIn("loom_cxx_library(", output)
+        self.assertIn('  NAME\n    "support"', output)
+        self.assertIn('  COMPONENT\n    "//consumer:support"', output)
+        self.assertIn('  HDRS\n    "public.h"', output)
+        self.assertIn('  COPTS\n    "fp-model=fast"', output)
+        self.assertIn('  INCLUDES\n    "include"', output)
+        self.assertIn('  DEFINES\n    "WIDTH=32"', output)
+        self.assertIn('  LOCAL_DEFINES\n    "LOCAL=1"', output)
         self.assertIn("loom_target_profile(", output)
         self.assertIn("loom_kernel_binary(", output)
         self.assertIn("  LIBRARIES\n    ::support", output)
         self.assertIn('OUTPUT\n    "program"', output)
+
+    def test_cxx_test_root_keeps_configurable_source_ownership(self):
+        output = bazel_to_cmake_converter.convert_build_file(
+            """
+load("//loom/build_tools/bazel:loom_cxx_library.bzl", "loom_cxx_library")
+load("//loom/build_tools/bazel:defs.bzl", "loom_test_module")
+filegroup(name="translation_unit", srcs=["checks.cxx", "private.h"])
+loom_cxx_library(name="checks", srcs=select({
+    "//loom/config/import:cxx": [":translation_unit"],
+    "//conditions:default": [],
+}), hdrs=["public.h"], deps=[":headers"], testonly=True)
+loom_cxx_library(name="headers", hdrs=["shared.h"])
+loom_test_module(name="module", root_library=":checks")
+""",
+            SimpleNamespace(PROJECTS=[self.project], REPO_MAP={"@hrx": ""}),
+            str(REPO_ROOT / "loom/build_tools/bazel_to_cmake/testdata"),
+            repo_root=str(REPO_ROOT),
+        )
+        self.assertIn("if(LOOM_IMPORT_CXX)", output)
+        self.assertIn("checks.cxx", output)
+        self.assertIn("private.h", output)
+        self.assertIn('  ROOT_LIBRARY\n    "::checks"', output)
+        self.assertEqual(output.count("loom_cxx_library("), 2)
 
     def test_corpus_catalog_preserves_per_source_configs(self):
         output = bazel_to_cmake_converter.convert_build_file(

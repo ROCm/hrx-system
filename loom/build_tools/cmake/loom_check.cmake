@@ -60,7 +60,7 @@ function(_loom_declare_check_compile_tests ID)
       "Compiler checks require an authored or linked module, not a textual test fixture: ${_RULE_SRC}"
     )
   endif()
-  _loom_link_input_paths(_SOURCE _SOURCE_TARGET ${_RULE_SRC})
+  _loom_link_input_paths(_SOURCE _SOURCE_TARGET _SOURCE_FILE ${_RULE_SRC})
   foreach(_PROFILE IN LISTS _RULE_TARGETS)
     iree_package_target_name(_PROFILE_TARGET "${_PROFILE}")
     if(NOT TARGET "${_PROFILE_TARGET}")

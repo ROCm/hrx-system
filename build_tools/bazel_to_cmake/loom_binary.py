@@ -242,6 +242,63 @@ class LoomBinaryBuildFileFunctions:
         self._converter.body += "loom_module(\n" + "".join(blocks) + ")\n\n"
         self._emit_platform_guard_end(target_compatible_with)
 
+    def loom_cxx_library(
+        self,
+        name,
+        srcs=None,
+        hdrs=None,
+        deps=None,
+        copts=None,
+        defines=None,
+        local_defines=None,
+        includes=None,
+        data=None,
+        testonly=False,
+        tags=None,
+        target_compatible_with=None,
+        visibility=None,
+        **kwargs,
+    ):
+        del visibility
+        if self._should_skip_target(tags=tags, **kwargs):
+            return
+        self._register_loom_module_target(name)
+        blocks = [
+            self._convert_string_arg_block("NAME", name),
+            self._convert_string_arg_block(
+                "COMPONENT", self._current_target_label(name)
+            ),
+            self._convert_option_block("TESTONLY", testonly),
+        ]
+        variables = []
+        for kind, values, transform in (
+            ("SRCS", srcs, self._convert_data_sources),
+            ("HDRS", hdrs, self._convert_data_sources),
+            ("COPTS", copts, self._convert_location_args),
+            ("DEFINES", defines, list),
+            ("LOCAL_DEFINES", local_defines, list),
+            ("INCLUDES", includes, list),
+            ("DATA", data, self._convert_data_locations),
+        ):
+            block, variable = self._convert_platform_select_strings(
+                name,
+                kind,
+                self._map_configurable_list(values or [], transform),
+                sort=False,
+            )
+            blocks.append(block)
+            variables.append(variable)
+        block, variable = self._convert_platform_select_deps(
+            name, deps, "LIBRARIES", target_transform=self._loom_target_identity_label
+        )
+        blocks.append(block)
+        variables.append(variable)
+        self._emit_platform_guard_begin(target_compatible_with)
+        self._converter.body += (
+            "".join(variables) + "loom_cxx_library(\n" + "".join(blocks) + ")\n\n"
+        )
+        self._emit_platform_guard_end(target_compatible_with)
+
     def loom_target_profile(
         self, name, family, selector, target_compatible_with=None, tags=None, **kwargs
     ):

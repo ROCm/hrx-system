@@ -29,8 +29,13 @@ class CMakeLoomBinaryTest(unittest.TestCase):
                 (source / f"{name}.loom").write_text(f"{name} original\n")
             (source / "support.cxx").write_text("support original\n")
             (source / "support.h").write_text("support header original\n")
+            (source / "private.h").write_text("private header original\n")
+            (source / "consumer.cxx").write_text("consumer original\n")
+            (source / "fixture.txt").write_text("runtime fixture\n")
             configure_project(source, build)
-            build_project(build, "kernel_consumer", "fixture_exported")
+            build_project(
+                build, "kernel_consumer", "fixture_exported", "fixture_checks"
+            )
             output = build / "explicit.xdna"
             text = output.read_text()
             for argument in (
@@ -48,21 +53,43 @@ class CMakeLoomBinaryTest(unittest.TestCase):
             self.assertNotIn("--product=", text)
             cxx = (build / "cxx_library.loombc").read_text()
             imported_path = (
-                build / "cxx_library.import-0-support.cxx.loombc"
+                build / "cxx_library.imports/0-support.cxx.loombc"
             ).as_posix()
             source_path = (source / "support.cxx").as_posix()
             self.assertIn(imported_path, cxx)
-            self.assertIn("--options=fp-model=fast", cxx)
+            self.assertIn("'fp-model=fast'", cxx)
+            self.assertIn("'D=PRIVATE=2'", cxx)
+            self.assertIn("'D=PUBLIC=7'", cxx)
+            self.assertIn("'D=TEXT=\"Loom\\'s C++\"'", cxx)
+            self.assertIn(f"'I={source.as_posix()}/'", cxx)
             self.assertIn("support original", cxx)
             self.assertNotIn("--input-format=cxx", cxx)
+            self.assertIn("--module-name=//fixture:cxx_library/unit0", cxx)
+            self.assertEqual("--strip-debug" in cxx, CONFIGURATION != "Debug")
             self.assertLess(cxx.index(imported_path), cxx.index(source_path))
+            consumer_import = build / "consumer.imports/0-consumer.cxx.loombc"
+            consumer = consumer_import.read_text()
+            self.assertIn("'D=PUBLIC=7'", consumer)
+            self.assertNotIn("PRIVATE", consumer)
+            self.assertNotIn("fp-model", consumer)
+            self.assertFalse((build / "headers.loombc").exists())
+            self.assertFalse((build / "forwarded.loombc").exists())
+            checks = (build / "checks.loombc").read_text()
+            self.assertIn(
+                f"--transitive-library={build.as_posix()}/cxx_library.loombc", checks
+            )
+            consumer_timestamp = consumer_import.stat().st_mtime_ns
+            (source / "private.h").write_text("private header changed\n")
+            build_project(build, "fixture_checks")
+            self.assertEqual(consumer_import.stat().st_mtime_ns, consumer_timestamp)
             cxx_timestamp = (build / "cxx_library.loombc").stat().st_mtime_ns
             (source / "support.h").write_text("support header changed\n")
-            build_project(build, "kernel_consumer")
+            build_project(build, "kernel_consumer", "fixture_checks")
             self.assertGreater(
                 (build / "cxx_library.loombc").stat().st_mtime_ns,
                 cxx_timestamp,
             )
+            self.assertGreater(consumer_import.stat().st_mtime_ns, consumer_timestamp)
             self.assertLess(text.index("--root=@second"), text.index("--root=@first"))
             exported = (build / "exported.xdna").read_text()
             self.assertIn(f"--root-library={build.as_posix()}/library.loombc", exported)

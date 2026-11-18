@@ -11,33 +11,37 @@ function(loom_test_module)
     return()
   endif()
   cmake_parse_arguments(
-    _RULE "" "NAME;INPUT_FORMAT" "SRCS;LIBRARIES;DATA;INPUTOPTS" ${ARGN}
+    _RULE "" "NAME;ROOT_LIBRARY;INPUT_FORMAT" "SRCS;LIBRARIES;DATA;INPUTOPTS" ${ARGN}
   )
   if(_RULE_UNPARSED_ARGUMENTS)
     message(FATAL_ERROR "Unknown loom_test_module arguments: ${_RULE_UNPARSED_ARGUMENTS}")
   endif()
-  loom_module(
-    NAME "${_RULE_NAME}_library"
-    SRCS ${_RULE_SRCS}
-    LIBRARIES ${_RULE_LIBRARIES}
-    DATA ${_RULE_DATA}
-    INPUT_FORMAT "${_RULE_INPUT_FORMAT}"
-    INPUTOPTS ${_RULE_INPUTOPTS}
-    MODE merge
-    OUTPUT_FORMAT bc
-    STRICT_DEPS
-  )
+  if(_RULE_ROOT_LIBRARY)
+    if(_RULE_SRCS OR _RULE_LIBRARIES OR _RULE_DATA OR _RULE_INPUT_FORMAT OR _RULE_INPUTOPTS)
+      message(FATAL_ERROR "loom_test_module ROOT_LIBRARY owns sources and dependencies")
+    endif()
+  else()
+    set(_RULE_ROOT_LIBRARY "::${_RULE_NAME}_library")
+    loom_module(
+      NAME "${_RULE_NAME}_library"
+      SRCS ${_RULE_SRCS}
+      LIBRARIES ${_RULE_LIBRARIES}
+      DATA ${_RULE_DATA}
+      INPUT_FORMAT "${_RULE_INPUT_FORMAT}"
+      INPUTOPTS ${_RULE_INPUTOPTS}
+      MODE merge
+      OUTPUT_FORMAT bc
+      STRICT_DEPS
+    )
+  endif()
   loom_module(
     NAME "${_RULE_NAME}"
-    SRCS "::${_RULE_NAME}_library"
+    SRCS "${_RULE_ROOT_LIBRARY}"
     LIBRARIES ${_RULE_LIBRARIES}
     MODE link
     OUTPUT_FORMAT bc
     INCLUDE_INPUT_TESTS
   )
-  iree_package_target_name(_MODULE_TARGET "::${_RULE_NAME}")
-  # Runtime fixtures belong to the source owner, not individual environments.
-  set_property(TARGET "${_MODULE_TARGET}" PROPERTY LOOM_TEST_DATA "${_RULE_DATA}")
 endfunction()
 
 # RUNNER_ARGS reaches every selected runner; ARGS is correctness-only.
@@ -82,7 +86,7 @@ function(_loom_declare_execution_test ID)
   endif()
   iree_package_target_name(_MODULE_TARGET "${_RULE_MODULE}")
   get_target_property(_MODULE "${_MODULE_TARGET}" LOOM_MODULE_FILE)
-  get_target_property(_DATA "${_MODULE_TARGET}" LOOM_TEST_DATA)
+  get_property(_DATA TARGET "${_MODULE_TARGET}" PROPERTY LOOM_MODULE_DATA)
   iree_native_test(
     NAME "${_RULE_NAME}"
     SRC loom::tools::loom-test
