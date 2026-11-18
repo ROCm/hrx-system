@@ -176,3 +176,20 @@ auto invalid(loom::type::buffer<float> source, int position) {
   // ERROR@+1: LOWERING/059 "buffer.view byte position must use the index or offset domain"
   return loom::buffer::view<4>(source, position, {});
 }
+
+// ====
+// Scoped enums require an explicit conversion at an implicit coordinate site.
+#include <loomcxx/view.h>
+enum class Field : unsigned { Value = 1 };
+int scoped_field(loom::type::view<loom::type::shape<4>, int> row, Field field) {
+  // ERROR@+1: LOWERING/059 "view index requires an explicit scoped enum conversion"
+  return row[field];
+}
+
+// ====
+// A bool-backed enum does not make ordinary bool a valid coordinate type.
+#include <loomcxx/view.h>
+int boolean_field(loom::type::view<loom::type::shape<4>, int> row, bool field) {
+  // ERROR@+1: LOWERING/059 "view index requires an integer value"
+  return row[field];
+}

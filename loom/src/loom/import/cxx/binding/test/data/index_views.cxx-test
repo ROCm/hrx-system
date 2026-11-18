@@ -37,3 +37,76 @@ func.def public @indexed_load(%input: buffer, %count: i32, %position: i32) -> (f
   %16 = view.load<type_disjoint> %source[%coordinate$11] : view<[%extent$12]xf32, %source_layout> -> f32
   func.return %16 : f32
 }
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Enum coordinates retain their underlying unsigned values, including narrow
+// high bits, 64-bit carriers, and a bool-backed enum's zero/one values.
+#include <loomcxx/view.h>
+enum Field : unsigned char { Value = 1, Last = 255 };
+enum Flag : bool { First = false, Second = true };
+enum Wide : unsigned long long { Far = 1ull << 32 };
+using Row = loom::type::view<loom::type::shape<loom::type::dynamic>, int>;
+int named_field(Row row) { return row[Value]; }
+int enum_field(Row row, Field field) { return row[field]; }
+int flag_field(Row row, Flag field) { return row[field]; }
+int wide_field(Row row, Wide field) { return row[field]; }
+// ----
+func.def public @named_field(%row_dim0: index, %row: view<[%row_dim0]xi32>) -> (i32) {
+  %27 = index.constant 1 : index
+  %6 = view.load<type_disjoint> %row[%27] : view<[%row_dim0]xi32> -> i32
+  func.return %6 : i32
+}
+
+func.def public @enum_field(%row_dim0: index, %row: view<[%row_dim0]xi32>, %field: i8) -> (i32) {
+  %11 = scalar.extui %field : i8 to i64
+  %12 = index.cast %11 : i64 to index
+  %13 = view.load<type_disjoint> %row[%12] : view<[%row_dim0]xi32> -> i32
+  func.return %13 : i32
+}
+
+func.def public @flag_field(%row_dim0: index, %row: view<[%row_dim0]xi32>, %field: i1) -> (i32) {
+  %18 = scalar.extui %field : i1 to i64
+  %19 = index.cast %18 : i64 to index
+  %20 = view.load<type_disjoint> %row[%19] : view<[%row_dim0]xi32> -> i32
+  func.return %20 : i32
+}
+
+func.def public @wide_field(%row_dim0: index, %row: view<[%row_dim0]xi32>, %field: i64) -> (i32) {
+  %25 = index.cast %field : i64 to index
+  %26 = view.load<type_disjoint> %row[%25] : view<[%row_dim0]xi32> -> i32
+  func.return %26 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Shared coordinate-record admission preserves signed strides and unsigned
+// member coordinates instead of treating all enum fields as signed indices.
+#include <loomcxx/view.h>
+enum Step : short { Forward = 1, Reverse = -1 };
+enum Column : unsigned char { Start = 128 };
+struct Origin {
+  // Unsigned source coordinate, zero-extended before index conversion.
+  Column column;
+};
+using Row = loom::type::view<loom::type::shape<4>, int>;
+using Source = loom::type::view<loom::type::shape<256>, int>;
+Row selected_row(Source source, Column column) {
+  return loom::view::subview<4>(source, Origin{column}, {});
+}
+loom::type::encoding<loom::encoding::role::layout, 1> signed_layout(Step step) {
+  return loom::encoding::layout::strided(step);
+}
+// ----
+func.def public @selected_row(%source: view<256xi32>, %column: i8) -> (view<4xi32>) {
+  %3 = scalar.extui %column : i8 to i64
+  %4 = index.cast %3 : i64 to index
+  %5 = view.subview %source[%4] : view<256xi32> -> view<4xi32>
+  func.return %5 : view<4xi32>
+}
+
+func.def public @signed_layout(%step: i16) -> (encoding<layout>) {
+  %8 = index.cast %step : i16 to index
+  %9 = encoding.layout.strided [%8] : encoding<layout>
+  func.return %9 : encoding<layout>
+}
