@@ -11,7 +11,7 @@
 #error "Private definitions must not propagate to consumers."
 #endif
 
-static_assert(sizeof(MODEL_TEXT) == 11);
+static_assert(sizeof(MODEL_TEXT) == 18);
 
 LOOM_CHECK_CASE(imported_bias) {
   loom::check::expect_equal(model_add_bias(35), 42);

@@ -11,7 +11,7 @@
           "path": "loom/build_tools/bazel/test/cxx_library_checks.cxx",
           "format": "cxx",
           "options": [
-            "cxx:'D=MODEL_BIAS=7' 'D=MODEL_TEXT=\"Loom\\'s C++\"' 'I=../../../..' 'I=.'"
+            "cxx:'D=MODEL_BIAS=7' 'D=MODEL_TEXT=\"Loom\\'s C++; tools\"' 'I=../../../..' 'I=.'"
           ],
           "data": [
             "loom/build_tools/bazel/test/model_provider.h",

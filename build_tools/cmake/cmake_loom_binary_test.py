@@ -60,12 +60,17 @@ class CMakeLoomBinaryTest(unittest.TestCase):
             self.assertIn("'fp-model=fast'", cxx)
             self.assertIn("'D=PRIVATE=2'", cxx)
             self.assertIn("'D=PUBLIC=7'", cxx)
-            self.assertIn("'D=TEXT=\"Loom\\'s C++\"'", cxx)
+            self.assertLess(cxx.index("'D=PUBLIC=7'"), cxx.index("'D=OWNER=5'"))
+            self.assertLess(cxx.index("'D=OWNER=5'"), cxx.index("'D=PRIVATE=2'"))
+            self.assertIn("'D=TEXT=\"Loom\\'s C++; tools\"'", cxx)
             self.assertIn(f"'I={source.as_posix()}/'", cxx)
             self.assertIn("support original", cxx)
             self.assertNotIn("--input-format=cxx", cxx)
             self.assertIn("--module-name=//fixture:cxx_library/unit0", cxx)
-            self.assertEqual("--strip-debug" in cxx, CONFIGURATION != "Debug")
+            self.assertIn(
+                "--strip-debug=" + ("false" if CONFIGURATION == "Debug" else "true"),
+                cxx,
+            )
             self.assertLess(cxx.index(imported_path), cxx.index(source_path))
             consumer_import = build / "consumer.imports/0-consumer.cxx.loombc"
             consumer = consumer_import.read_text()

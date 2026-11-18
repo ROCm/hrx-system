@@ -7,6 +7,9 @@ include("${CMAKE_CURRENT_LIST_DIR}/loom_module.cmake")
 function(_loom_cxx_quote_option OUTPUT VALUE)
   string(REPLACE "\\" "\\\\" _QUOTED "${VALUE}")
   string(REPLACE "'" "\\'" _QUOTED "${_QUOTED}")
+  # Keep literal separators out of configure-time lists. The final command
+  # evaluates them only after joining the complete option string.
+  string(REPLACE ";" "$<SEMICOLON>" _QUOTED "${_QUOTED}")
   set(${OUTPUT} "'${_QUOTED}'" PARENT_SCOPE)
 endfunction()
 
@@ -58,9 +61,10 @@ function(loom_cxx_library)
     _loom_cxx_quote_option(_QUOTED "D=${_DEFINE}")
     list(APPEND _DEFINE_OPTIONS "${_QUOTED}")
   endforeach()
+  set(_LOCAL_DEFINE_OPTIONS)
   foreach(_DEFINE IN LISTS _RULE_LOCAL_DEFINES)
     _loom_cxx_quote_option(_QUOTED "D=${_DEFINE}")
-    list(APPEND _LOCAL_OPTIONS "${_QUOTED}")
+    list(APPEND _LOCAL_DEFINE_OPTIONS "${_QUOTED}")
   endforeach()
   set(_DIRECTORIES "${PROJECT_SOURCE_DIR}" "${PROJECT_BINARY_DIR}")
   foreach(_INCLUDE IN LISTS _RULE_INCLUDES)
@@ -80,7 +84,9 @@ function(loom_cxx_library)
     list(APPEND _INCLUDE_OPTIONS "${_QUOTED}")
   endforeach()
   set(_PUBLIC_HEADERS "$<TARGET_PROPERTY:${_TARGET},LOOM_CXX_HEADERS>")
-  set(_OPTIONS "${_LOCAL_OPTIONS};$<TARGET_PROPERTY:${_TARGET},LOOM_CXX_DEFINE_OPTIONS>;$<TARGET_PROPERTY:${_TARGET},LOOM_CXX_INCLUDE_OPTIONS>")
+  string(JOIN " " _LOCAL_OPTIONS ${_LOCAL_OPTIONS})
+  string(JOIN " " _LOCAL_DEFINE_OPTIONS ${_LOCAL_DEFINE_OPTIONS})
+  set(_OPTIONS "${_LOCAL_OPTIONS} $<GENEX_EVAL:$<TARGET_PROPERTY:${_TARGET},LOOM_CXX_OPTIONS>> ${_LOCAL_DEFINE_OPTIONS}")
   set(_IMPORTS)
   set(_ORDINAL 0)
   if(_SOURCES)
@@ -94,11 +100,11 @@ function(loom_cxx_library)
       OUTPUT "${_OUTPUT}"
       COMMAND "${_IMPORT_TOOL}" "${_SOURCE}" --to=bc "--output=${_OUTPUT}"
         "--module-name=${_RULE_COMPONENT}/unit${_ORDINAL}"
-        "$<$<NOT:$<CONFIG:Debug>>:--strip-debug>"
-        "--options=$<JOIN:${_OPTIONS}, >"
+        "--strip-debug=$<IF:$<CONFIG:Debug>,false,true>"
+        "--options=${_OPTIONS}"
       DEPENDS "${_IMPORT_TOOL}" "${_SOURCE}" ${_PRIVATE_HEADERS} "${_PUBLIC_HEADERS}"
       COMMENT "Importing C/C++ source ${_SOURCE_NAME}"
-      VERBATIM COMMAND_EXPAND_LISTS
+      VERBATIM
     )
     list(APPEND _IMPORTS "${_OUTPUT}")
     math(EXPR _ORDINAL "${_ORDINAL} + 1")

@@ -40,12 +40,13 @@ loom_kernel_binary(NAME exported
 # assembly. The kernel producer is reached through an ordinary data consumer.
 loom_cxx_library(NAME cxx_library SRCS support.cxx private.h
   LIBRARIES ::headers COPTS "fp-model=fast" LOCAL_DEFINES "PRIVATE=2"
+  DEFINES "OWNER=5"
   DATA "${CMAKE_CURRENT_SOURCE_DIR}/fixture.txt")
 loom_cxx_library(NAME forwarded LIBRARIES ::cxx_library)
 loom_cxx_library(NAME consumer SRCS consumer.cxx LIBRARIES ::forwarded)
 loom_test_module(NAME checks ROOT_LIBRARY ::consumer)
 loom_cxx_library(NAME headers HDRS support.h INCLUDES .
-  DEFINES "PUBLIC=7" "TEXT=\"Loom's C++\"")
+  DEFINES "PUBLIC=7" "TEXT=\"Loom's C++; tools\"")
 loom_module(NAME library MODE merge OUTPUT_FORMAT bc
   SRCS library.loom LIBRARIES ::leaf ::forwarded STRICT_DEPS)
 loom_module(NAME leaf MODE merge OUTPUT_FORMAT bc SRCS leaf.loom STRICT_DEPS)

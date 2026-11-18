@@ -172,7 +172,7 @@ loom_cxx_library(
     name = "cxx_library_check_source",
     testonly = True,
     srcs = select({"//conditions:default": [":cxx_check_sources"]}),
-    local_defines = ["MODEL_TEXT=\"Loom's C++\""],
+    local_defines = ["MODEL_TEXT=\"Loom's C++; tools\""],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
     deps = [":cxx_forward"],
 )
