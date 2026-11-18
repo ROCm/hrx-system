@@ -2095,6 +2095,8 @@ typedef struct loom_target_compile_report_t {
       target_insertion_summary;
   // Selected pipeline realizations and optional physical-plan rows.
   loom_target_compile_report_row_list_t pipeline_plans;
+  // Root-buffer copy sites from source pipeline realization, before lowering.
+  loom_target_compile_report_row_list_t pipeline_copies;
   // Compiled command roots and optional order/resource-placement rows.
   loom_target_compile_report_row_list_t command_plans;
   // Owned emitted artifact entry summary rows.

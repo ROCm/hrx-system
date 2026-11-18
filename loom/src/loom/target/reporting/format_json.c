@@ -1742,6 +1742,12 @@ iree_status_t loom_target_compile_report_format_json(
     }
     IREE_RETURN_IF_ERROR(loom_json_array_end(&array));
   }
+  if (report->pipeline_copies.count) {
+    IREE_RETURN_IF_ERROR(loom_json_object_begin_field(
+        &object, IREE_SV("pipeline_external_copies")));
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_format_pipeline_copies_json(
+        &report->pipeline_copies, stream));
+  }
   if (iree_any_bit_set(
           report->detail_flags,
           LOOM_TARGET_COMPILE_REPORT_DETAIL_STATIC_INSTRUCTION_MIX)) {

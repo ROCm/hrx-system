@@ -4,10 +4,11 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Physical pipeline inventory, separate from per-function and loop reports."""
+"""Pipeline resource inventory and source-phase external copy demand."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from fnmatch import fnmatchcase
 
 from loom.reporting.compile_report import CompileReportDocument, CompileReportError
@@ -50,6 +51,135 @@ _CHANNEL_FIELDS = (
     "activation_byte_count",
     "local_storage_byte_count",
 )
+
+
+@dataclass
+class _PhaseCopyGroup:
+    """Site multiplicities for one record width in one construction occurrence."""
+
+    phase: str
+    occurrence: int
+    binding: int
+    direction: str
+    width: int | None
+    visits: int | None = 0
+
+    @property
+    def byte_count(self) -> int | None:
+        if self.visits == 0 or self.width == 0:
+            return 0
+        if self.width is None or self.visits is None:
+            return None
+        return self.width * self.visits
+
+    def row(self) -> dict[str, object]:
+        return {
+            "phase": self.phase,
+            "occurrence": self.occurrence,
+            "binding": self.binding,
+            "direction": self.direction,
+            "bytes_per_copy": self.width,
+            "copies_per_phase_call": self.visits,
+            "bytes_per_phase_call": self.byte_count,
+        }
+
+
+def build_pipeline_phase_copies(
+    document: CompileReportDocument, *, summary_only: bool
+) -> list[dict[str, object]]:
+    """Groups source payload at a single call site, independent of caller visits."""
+    sites = document.report.get("pipeline_external_copies", [])
+    if not isinstance(sites, list):
+        raise CompileReportError("pipeline_external_copies: expected array")
+    roots: dict[str, dict[tuple, _PhaseCopyGroup]] = {}
+    for i, site in enumerate(sites):
+        path = f"pipeline_external_copies[{i}]"
+        row = _object(site, path)
+        root = _string(row.get("root"), f"{path}.root")
+        phase = _string(row.get("phase"), f"{path}.phase")
+        occurrence = _count(row.get("occurrence"), f"{path}.occurrence")
+        binding = _count(row.get("binding"), f"{path}.binding")
+        direction = row.get("direction")
+        if direction not in ("read", "write"):
+            raise CompileReportError(f"{path}.direction: expected read or write")
+        width = _nullable_count(row, "bytes_per_copy", path)
+        visits = _nullable_count(row, "copies_per_phase_call", path)
+        groups = roots.setdefault(root, {})
+        key = phase, occurrence, binding, direction, width
+        if key not in groups:
+            groups[key] = _PhaseCopyGroup(*key)
+        group = groups[key]
+        if visits is None:
+            group.visits = None
+        elif group.visits is not None:
+            group.visits += visits
+
+    results = []
+    for root, groups in roots.items():
+        largest: dict[str, _PhaseCopyGroup] = {}
+        unknown = 0
+        for group in groups.values():
+            amount = group.byte_count
+            if amount is None:
+                unknown += 1
+            elif amount and (
+                group.direction not in largest
+                or amount > largest[group.direction].byte_count
+            ):
+                largest[group.direction] = group
+        entry = {
+            "root": root,
+            "group_count": len(groups),
+            "unknown_group_count": unknown,
+            "largest_counted": [
+                largest[d].row() for d in ("read", "write") if d in largest
+            ],
+        }
+        read, write = largest.get("read"), largest.get("write")
+        if (
+            read
+            and write
+            and read.occurrence != write.occurrence
+            and read.binding == write.binding
+            and read.width == write.width
+        ):
+            entry["range_check"] = (
+                f"Both phases use binding[{read.binding}] for {read.width:,} B "
+                "records. "
+                "Check whether they save and restore the same byte ranges. If they do, "
+                "compare keeping that state on chip through its last use."
+            )
+        if not summary_only:
+            entry["groups"] = [group.row() for group in groups.values()]
+        results.append(entry)
+    return results
+
+
+def _nullable_count(row: dict, field: str, path: str) -> int | None:
+    if field not in row:
+        raise CompileReportError(f"{path}.{field}: expected a count or null")
+    return None if row[field] is None else _count(row[field], f"{path}.{field}")
+
+
+def append_pipeline_phase_copies_text(lines: list[str], roots: list) -> None:
+    for root in roots:
+        lines.extend(("", f"Source-phase external copies in {root['root']}"))
+        if root["largest_counted"]:
+            lines.append("  Largest fully counted copies per phase call")
+        lines.extend(
+            f"    {group['direction']} binding[{group['binding']}] "
+            f"{group['phase']} (call site {group['occurrence']}): "
+            f"{group['copies_per_phase_call']:,} x {group['bytes_per_copy']:,} B "
+            f"= {group['bytes_per_phase_call']:,} B"
+            for group in root["largest_counted"]
+        )
+        lines.append(
+            f"  {root['unknown_group_count']} of {root['group_count']} groups lack "
+            "a proven byte total. Multiply each phase's bytes by its calls "
+            "for the request shape."
+        )
+        if "range_check" in root:
+            lines.append(f"  {root['range_check']}")
 
 
 def build_pipeline_show(

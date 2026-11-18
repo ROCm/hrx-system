@@ -375,6 +375,13 @@ measurement whenever it could change the choice of schedule.
    peak live storage in separate columns. To establish overlap, locate the
    enqueue for panel *i+1*, the first use of its buffer, and the completion
    that permits reuse. Two allocated slots alone establish only capacity.
+   On the first compile, run `loom-compile-report suggest model.report.json`.
+   Its source-phase copy rows name the external binding and give records and
+   bytes per call. Exercise inputs on both sides of the first panel boundary.
+   A save and restore on the same binding warrants checking whether the byte
+   ranges coincide, how often each phase runs, and what must be reread to
+   keep those partial results on chip. The complete group inventory is
+   available with `show --format=json` under `.pipeline_phase_copies[].groups`.
 4. **Count what every participating core executes.** Disassemble the native
    loops in the measured images, including their callers. Count loop trips,
    full and partial tiles, issue packets, empty packets, MACs with operand

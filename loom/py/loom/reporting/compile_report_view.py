@@ -74,7 +74,9 @@ from loom.reporting.compile_report_native_layout import (
     build_native_layout_show,
 )
 from loom.reporting.compile_report_pipelines import (
+    append_pipeline_phase_copies_text,
     append_pipeline_show_text,
+    build_pipeline_phase_copies,
     build_pipeline_show,
 )
 from loom.reporting.compile_report_residency import (
@@ -482,6 +484,9 @@ def build_compile_report_show(
     pipelines = build_pipeline_show(document)
     if pipelines is not None:
         view["pipelines"] = pipelines
+    phase_copies = build_pipeline_phase_copies(document, summary_only=False)
+    if phase_copies:
+        view["pipeline_phase_copies"] = phase_copies
     barriers = build_barrier_show(document)
     if barriers is not None:
         view["barriers"] = barriers
@@ -755,6 +760,10 @@ def format_compile_report_show_text(view: dict[str, object]) -> str:
     pipelines = view.get("pipelines")
     if isinstance(pipelines, dict):
         append_pipeline_show_text(lines, pipelines)
+    if "pipeline_phase_copies" in view:
+        append_pipeline_phase_copies_text(
+            lines, _expect_list(view["pipeline_phase_copies"])
+        )
     expansions = view.get("expansions")
     if isinstance(expansions, dict):
         append_expansion_show_text(lines, expansions)

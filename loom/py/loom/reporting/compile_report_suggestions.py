@@ -18,7 +18,9 @@ from loom.reporting.compile_report import (
     CompileReportDocument,
 )
 from loom.reporting.compile_report_pipelines import (
+    append_pipeline_phase_copies_text,
     append_pipeline_transfer_text,
+    build_pipeline_phase_copies,
     build_pipeline_show,
 )
 
@@ -164,6 +166,9 @@ def build_compile_report_suggestions(
     pipelines = build_pipeline_show(document, summary_only=True)
     if pipelines is not None:
         view["pipelines"] = pipelines
+    phase_copies = build_pipeline_phase_copies(document, summary_only=True)
+    if phase_copies:
+        view["pipeline_phase_copies"] = phase_copies
     return view
 
 
@@ -212,6 +217,10 @@ def format_compile_report_suggestions_text(view: dict[str, object]) -> str:
     if "pipelines" in view:
         for plan in _expect_dict(view["pipelines"])["rows"]:
             append_pipeline_transfer_text(lines, plan)
+    if "pipeline_phase_copies" in view:
+        append_pipeline_phase_copies_text(
+            lines, _expect_list(view["pipeline_phase_copies"])
+        )
     findings = _expect_list(view["findings"])
     if view["match_count"] != view["finding_count"]:
         lines.append(

@@ -96,7 +96,9 @@ a single report does not establish that pipelining increased register use.
 
 Pipeline inventories in `show` and `suggest` give planned external and routed
 DMA bytes per activation before per-entry findings. A null total needs
-transfer counts from the executed request. The XDNA completed-request procedure
+transfer counts from the executed request. For source pipelines, both views
+name the largest counted external read and write per phase call. Multiply by
+observed phase calls for each request shape. The XDNA completed-request procedure
 relates these bytes to native loop trips, phase timing, and producer waits.
 [XDNA authoring guide](https://rocm.github.io/hrx-system/loom/targets/xdna-pipelines/#account-for-a-completed-request)
 

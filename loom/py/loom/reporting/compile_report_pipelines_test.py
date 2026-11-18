@@ -193,6 +193,68 @@ def test_dma_traffic_distinguishes_unknown_from_zero_for_each_export() -> None:
     assert "binding[2] DMA: 4 tasks x 1152 B = 4608 B per activation" in text
 
 
+def test_phase_copies_rank_per_call_and_keep_runtime_counts_unknown() -> None:
+    report = _report()
+    read = dict(
+        root="stream",
+        phase="restore",
+        occurrence=2,
+        binding=4,
+        direction="read",
+        bytes_per_copy=1024,
+        copies_per_phase_call=4,
+    )
+    write = dict(read, phase="save", occurrence=3, direction="write")
+    report["pipeline_external_copies"] = [
+        read,
+        read,
+        write,
+        # The same child is also called with a different input binding.
+        dict(read, occurrence=7, binding=6),
+        dict(read, occurrence=7, binding=6, copies_per_phase_call=None),
+        # This site has a runtime-sized record but never executes.
+        dict(write, bytes_per_copy=None, copies_per_phase_call=0),
+        dict(write, bytes_per_copy=0, copies_per_phase_call=None),
+        dict(read, root="sink", bytes_per_copy=None),
+    ]
+    document = parse_compile_report(report)
+    show = build_compile_report_show(document)["pipeline_phase_copies"]
+    summary = build_compile_report_suggestions(
+        document, CompileReportSuggestionResult("test", None)
+    )
+    stream, sink = summary["pipeline_phase_copies"]
+    assert stream["group_count"] == 5
+    assert stream["unknown_group_count"] == 1
+    assert "groups" not in stream
+    assert [
+        (row["phase"], row["copies_per_phase_call"], row["bytes_per_phase_call"])
+        for row in stream["largest_counted"]
+    ] == [("restore", 8, 8192), ("save", 4, 4096)]
+    assert [row["bytes_per_phase_call"] for row in show[0]["groups"]] == [
+        8192,
+        4096,
+        None,
+        0,
+        0,
+    ]
+    assert sink["unknown_group_count"] == 1
+    assert sink["largest_counted"] == []
+    assert "range_check" not in sink
+    assert (
+        "Check whether they save and restore the same byte ranges"
+        in stream["range_check"]
+    )
+    text = format_compile_report_suggestions_text(summary)
+    assert "read binding[4] restore (call site 2): 8 x 1,024 B = 8,192 B" in text
+    assert "write binding[4] save (call site 3): 4 x 1,024 B = 4,096 B" in text
+    assert "1 of 5 groups lack a proven byte total" in text
+
+    # Ordinary streaming has independent input and output bindings.
+    write["binding"] = 1
+    independent = build_compile_report_show(parse_compile_report(report))
+    assert "range_check" not in independent["pipeline_phase_copies"][0]
+
+
 def test_show_keeps_exports_separate_and_preserves_placement_rank() -> None:
     report = _report()
     plans = report["pipeline_plans"]

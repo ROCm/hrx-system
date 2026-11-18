@@ -16,6 +16,17 @@
 extern "C" {
 #endif
 
+// Writes source-phase copies of external bindings with their local visit
+// counts.
+iree_status_t loom_target_compile_report_format_pipeline_copies_json(
+    const loom_target_compile_report_row_list_t* copies,
+    loom_output_stream_t* stream);
+
+// Appends external source-copy sites in detailed text reports.
+iree_status_t loom_target_compile_report_format_pipeline_copies_text(
+    const loom_target_compile_report_row_list_t* copies,
+    iree_string_builder_t* builder);
+
 // Writes the pipeline-plan object in JSON format.
 iree_status_t loom_target_compile_report_format_pipeline_plan_json(
     const loom_target_compile_report_pipeline_plan_t* plan,

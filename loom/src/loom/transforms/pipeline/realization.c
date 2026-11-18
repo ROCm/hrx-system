@@ -6,6 +6,9 @@
 
 #include "loom/transforms/pipeline/realization.h"
 
+#include "iree/base/checked_math.h"
+#include "loom/analysis/kernel_synchronization_legality.h"
+#include "loom/analysis/movement.h"
 #include "loom/ir/symbol_map.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/special_values.h"
@@ -17,14 +20,106 @@
 #include "loom/target/function_contract.h"
 #include "loom/target/function_version.h"
 #include "loom/target/pass_environment.h"
+#include "loom/target/reporting/report.h"
 #include "loom/transforms/cfg/cfg_simplify.h"
 #include "loom/transforms/kernel/kernel_resources.h"
+#include "loom/util/cfg_execution.h"
+
+static iree_string_view_t loom_pipeline_realization_phase_name(
+    const loom_module_t* module, loom_func_like_t function) {
+  const loom_symbol_id_t symbol = loom_func_like_callee(function).symbol_id;
+  return loom_string_table_get(&module->strings,
+                               module->symbols.entries[symbol].name_id);
+}
+
+// Capture root-buffer demand where the authored phase, bound external operand,
+// and worker control-flow proof are still available together. These are source
+// payloads; a target can coalesce transfers or satisfy a replay on chip.
+static iree_status_t loom_pipeline_realization_record_copies(
+    const loom_module_t* module, const loom_pipeline_realization_t* realization,
+    loom_target_compile_report_t* report) {
+  const loom_block_t* entry =
+      loom_region_entry_block(loom_func_like_body(realization->function));
+  const iree_string_view_t root =
+      loom_pipeline_realization_phase_name(module, realization->function);
+  const loom_pipeline_invocations_t* invocations = &realization->invocations;
+  for (iree_host_size_t i = 0; i < invocations->worker_count; ++i) {
+    const loom_pipeline_worker_t* worker = &realization->workers[i];
+    if (!worker->asynchronous.streams) {
+      continue;
+    }
+    const loom_pipeline_invocation_t* phase =
+        invocations->workers[i].invocation;
+    uint64_t participants = 1;
+    bool participants_known = true;
+    for (iree_host_size_t j = 0; participants_known && j < worker->rank; ++j) {
+      participants_known = iree_checked_mul_u64(
+          participants, worker->axes[j].count, &participants);
+    }
+    loom_target_compile_report_pipeline_copy_t row = {
+        .root = root,
+        .phase = loom_pipeline_realization_phase_name(module, phase->function),
+        .occurrence = phase->ordinal,
+    };
+    for (const loom_kernel_async_stream_t* stream =
+             worker->asynchronous.streams;
+         stream; stream = stream->next) {
+      for (iree_host_size_t j = 0; j < stream->transfer_count; ++j) {
+        const loom_movement_request_t* copy = &stream->transfers[j].request;
+        if (copy->kind != LOOM_MOVEMENT_KIND_KERNEL_ASYNC_COPY) {
+          continue;
+        }
+        const bool read =
+            copy->source.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL;
+        const bool write =
+            copy->dest.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL;
+        if (read == write) {
+          continue;
+        }
+        const loom_value_id_t root_id =
+            read ? copy->source.root_value_id : copy->dest.root_value_id;
+        if (root_id == LOOM_VALUE_ID_INVALID) {
+          continue;
+        }
+        const loom_value_t* buffer = loom_module_value(module, root_id);
+        if (!loom_value_is_block_arg(buffer) ||
+            loom_value_def_block(buffer) != entry) {
+          continue;
+        }
+        row.binding = loom_value_def_index(buffer);
+        row.read = read;
+        row.bytes_per_copy =
+            (copy->flags & LOOM_MOVEMENT_REQUEST_STATIC_TRANSFER)
+                ? copy->transferred_byte_count
+                : -1;
+        const uint16_t block = copy->op->parent_block->region_index;
+        row.visits = 0;
+        row.visits_known =
+            participants_known &&
+            loom_cfg_execution_count_is_exact(&worker->execution_counts,
+                                              block) &&
+            iree_checked_mul_u64(participants,
+                                 worker->execution_counts.values[block],
+                                 &row.visits);
+        IREE_RETURN_IF_ERROR(loom_target_compile_report_row_list_append(
+            &report->pipeline_copies, sizeof(row), report->allocator, &row));
+      }
+    }
+  }
+  return iree_ok_status();
+}
 
 // Observe the source proof before physical selection or consuming rewrites.
 // These rows describe transport eligibility, not a selected DMA implementation.
 static iree_status_t loom_pipeline_realization_report(
     loom_pass_t* pass, const loom_module_t* module,
     const loom_pipeline_realization_t* realization) {
+  const loom_target_pass_capability_t* target =
+      loom_target_pass_capability_from_pass(pass);
+  if (target && target->compile_report) {
+    IREE_RETURN_IF_ERROR(loom_pipeline_realization_record_copies(
+        module, realization, target->compile_report));
+  }
   if (!loom_pass_report_is_enabled(pass)) {
     return iree_ok_status();
   }

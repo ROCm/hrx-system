@@ -225,6 +225,21 @@ own task size and execution count. Relate these counts to executed
 activations, useful outputs, and timestamps using the
 [XDNA completed-request procedure](../targets/xdna-pipelines.md#account-for-a-completed-request).
 
+When compiling a source pipeline, `suggest` also names the largest fully
+counted read and write of an external binding per phase call. For example,
+two ingress workers that each read four 16,640-byte partial results request
+133,120 bytes each time their phase runs. A phase inside a request-dependent
+loop can run thousands of times on one input and zero times on another.
+Multiply by the phase calls for each workload shape. When a later phase
+restores a range that an earlier phase saved, compare keeping that state on
+chip through its last use and count any inputs the new traversal rereads.
+
+`show --format=json` lists every group under `.pipeline_phase_copies[].groups`.
+Groups distinguish the phase call site, binding, direction, and record width.
+A group with an unproved width or execution count carries a null byte total
+unless its known width or count is zero. These bytes describe the authored
+copies. The selected transport can serve repeated reads from local storage.
+
 Explicit loop pipeline policies appear under **Source loop pipelines**. Each
 policy records its compiled function, loop ordinal, applied depth, queue shape,
 and ordinary read count. Detailed reports include each source operation's

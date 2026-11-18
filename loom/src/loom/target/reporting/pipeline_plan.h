@@ -214,6 +214,28 @@ typedef struct loom_target_compile_report_pipeline_plan_summary_t {
   uint64_t routed_dma_byte_count;
 } loom_target_compile_report_pipeline_plan_summary_t;
 
+// One authored asynchronous copy between a root buffer and a worker. Counts
+// are local to the containing construction, even when its caller is a loop.
+typedef struct loom_target_compile_report_pipeline_copy_t {
+  // Name of the pipeline that owns the external bindings.
+  iree_string_view_t root;
+  // Source construction containing the strand that issues this copy.
+  iree_string_view_t phase;
+  // Construction occurrence in this root; distinct call sites can bind the
+  // same source phase differently or occur on alternative paths.
+  iree_host_size_t occurrence;
+  // Index of the root buffer argument.
+  uint32_t binding;
+  // True for a read from the external binding, false for a write to it.
+  bool read;
+  // True when the worker control-flow analysis proves the block visits.
+  bool visits_known;
+  // Payload bytes per copy, or a negative value when runtime-dependent.
+  int64_t bytes_per_copy;
+  // Copies from this site per invocation of its phase when visits_known.
+  uint64_t visits;
+} loom_target_compile_report_pipeline_copy_t;
+
 // One realized pipeline worker.
 typedef struct loom_target_compile_report_pipeline_worker_row_t {
   // Worker index used by channel endpoints.

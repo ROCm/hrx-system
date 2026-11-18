@@ -79,6 +79,8 @@ loom_cc_library(
     hdrs = ["realization.h"],
     deps = [
         ":worker_materialization",
+        "//loom/src/loom/analysis:kernel_synchronization_legality",
+        "//loom/src/loom/analysis:movement",
         "//loom/src/loom/analysis/pipeline:invocations",
         "//loom/src/loom/analysis/pipeline:resources",
         "//loom/src/loom/analysis/pipeline:workers",
@@ -96,9 +98,12 @@ loom_cc_library(
         "//loom/src/loom/target:function_contract",
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:pass_environment",
+        "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/transforms/cfg:cfg_simplify",
         "//loom/src/loom/transforms/kernel:kernel_resources",
+        "//loom/src/loom/util:cfg_execution",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/base/internal:arena",
     ],
 )

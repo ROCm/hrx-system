@@ -465,6 +465,51 @@ static iree_status_t loom_target_compile_report_format_placed_functions_json(
   return loom_json_array_end(&array);
 }
 
+iree_status_t loom_target_compile_report_format_pipeline_copies_json(
+    const loom_target_compile_report_row_list_t* copies,
+    loom_output_stream_t* stream) {
+  loom_json_array_writer_t array;
+  IREE_RETURN_IF_ERROR(loom_json_array_begin(stream, &array));
+  for (const loom_target_compile_report_vec_t* vec = copies->head; vec;
+       vec = vec->next) {
+    const loom_target_compile_report_pipeline_copy_t* rows =
+        loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      const loom_target_compile_report_pipeline_copy_t* row = &rows[i];
+      IREE_RETURN_IF_ERROR(loom_json_array_begin_element(&array));
+      loom_json_object_writer_t object;
+      IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+          &object, IREE_SV("root"), row->root));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+          &object, IREE_SV("phase"), row->phase));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_host_size_field(
+          &object, IREE_SV("occurrence"), row->occurrence));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
+          &object, IREE_SV("binding"), row->binding));
+      IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+          &object, IREE_SV("direction"),
+          row->read ? IREE_SV("read") : IREE_SV("write")));
+      if (row->bytes_per_copy >= 0) {
+        IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+            &object, IREE_SV("bytes_per_copy"), (uint64_t)row->bytes_per_copy));
+      } else {
+        IREE_RETURN_IF_ERROR(loom_json_object_write_null_field(
+            &object, IREE_SV("bytes_per_copy")));
+      }
+      if (row->visits_known) {
+        IREE_RETURN_IF_ERROR(loom_json_object_write_uint64_field(
+            &object, IREE_SV("copies_per_phase_call"), row->visits));
+      } else {
+        IREE_RETURN_IF_ERROR(loom_json_object_write_null_field(
+            &object, IREE_SV("copies_per_phase_call")));
+      }
+      IREE_RETURN_IF_ERROR(loom_json_object_end(&object));
+    }
+  }
+  return loom_json_array_end(&array);
+}
+
 iree_status_t loom_target_compile_report_format_pipeline_plan_json(
     const loom_target_compile_report_pipeline_plan_t* plan,
     loom_target_compile_report_format_mode_t mode,
@@ -588,10 +633,38 @@ static iree_status_t loom_target_compile_report_format_pipeline_numeric_text(
   return iree_ok_status();
 }
 
-static iree_status_t loom_target_compile_report_append_packet_count(
+static iree_status_t loom_target_compile_report_append_optional_count(
     iree_string_builder_t* builder, bool exact, uint64_t count) {
   return exact ? iree_string_builder_append_format(builder, "%" PRIu64, count)
                : iree_string_builder_append_cstring(builder, "unknown");
+}
+
+iree_status_t loom_target_compile_report_format_pipeline_copies_text(
+    const loom_target_compile_report_row_list_t* copies,
+    iree_string_builder_t* builder) {
+  for (const loom_target_compile_report_vec_t* vec = copies->head; vec;
+       vec = vec->next) {
+    const loom_target_compile_report_pipeline_copy_t* rows =
+        loom_target_compile_report_vec_const_rows(vec);
+    for (iree_host_size_t i = 0; i < vec->count; ++i) {
+      const loom_target_compile_report_pipeline_copy_t* row = &rows[i];
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder,
+          "COMPILE-REPORT: pipeline.copy root=%.*s phase=%.*s "
+          "occurrence=%" PRIhsz " binding=%u direction=%s bytes_per_copy=",
+          (int)row->root.size, row->root.data, (int)row->phase.size,
+          row->phase.data, row->occurrence, row->binding,
+          row->read ? "read" : "write"));
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_append_optional_count(
+          builder, row->bytes_per_copy >= 0, (uint64_t)row->bytes_per_copy));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+          builder, " copies_per_phase_call="));
+      IREE_RETURN_IF_ERROR(loom_target_compile_report_append_optional_count(
+          builder, row->visits_known, row->visits));
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
+    }
+  }
+  return iree_ok_status();
 }
 
 static iree_status_t loom_target_compile_report_format_placed_functions_text(
@@ -610,11 +683,11 @@ static iree_status_t loom_target_compile_report_format_placed_functions_text(
             0, builder));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, " packets_per_call="));
-    IREE_RETURN_IF_ERROR(loom_target_compile_report_append_packet_count(
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_append_optional_count(
         builder, row->has_packets_per_call, row->packets_per_call));
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(builder, " calls_per_entry="));
-    IREE_RETURN_IF_ERROR(loom_target_compile_report_append_packet_count(
+    IREE_RETURN_IF_ERROR(loom_target_compile_report_append_optional_count(
         builder, row->has_calls_per_entry, row->calls_per_entry));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "\n"));
     for (uint32_t j = 0; j < row->loop_count; ++j) {
