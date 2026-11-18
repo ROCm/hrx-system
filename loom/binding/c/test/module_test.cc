@@ -235,7 +235,7 @@ TEST(ModuleTest, VerifiesModuleWithDefaultAndVersionedOptions) {
   }
 }
 
-TEST(ModuleTest, TextLocationsAreOptionalAndBytecodePreservesThem) {
+TEST(ModuleTest, TextLocationsAreOptionalAndBytecodePreservesThemByDefault) {
   auto context = CreateContext();
   auto workspace = CreateWorkspace();
   auto source = CreateTextSource("locations.loom", R"(
@@ -341,6 +341,41 @@ func.def @entry() {
                   .find("loc(\"authored.loom\":7:3)"),
               std::string::npos);
   }
+}
+
+TEST(ModuleTest, BytecodeStrippingIsAnExplicitSerializationPolicy) {
+  auto context = CreateContext();
+  auto workspace = CreateWorkspace();
+  auto module = CreateFunctionModule(context.get(), workspace.get());
+  loomc_module_serialize_options_t options = {
+      .structure_size = sizeof(options),
+      .bytecode_flags = LOOMC_MODULE_BYTECODE_FLAG_STRIP_DEBUG,
+  };
+  loomc_source_t* raw_source = nullptr;
+  LOOMC_ASSERT_OK(loomc_module_serialize_bytecode_to_source(
+      module.get(), &options, loomc_allocator_system(), &raw_source));
+  SourcePtr stripped(raw_source);
+  // A descriptor ending before the appended field keeps the default policy.
+  options.structure_size =
+      offsetof(loomc_module_serialize_options_t, bytecode_flags);
+  LOOMC_ASSERT_OK(loomc_module_serialize_bytecode_to_source(
+      module.get(), &options, loomc_allocator_system(), &raw_source));
+  SourcePtr preserved(raw_source);
+  EXPECT_LT(loomc_source_contents(stripped.get()).data_length,
+            loomc_source_contents(preserved.get()).data_length);
+
+  options.structure_size = sizeof(options);
+  LOOMC_ASSERT_STATUS_IS(
+      LOOMC_STATUS_INVALID_ARGUMENT,
+      loomc_module_serialize_text_to_source(
+          module.get(), &options, loomc_allocator_system(), &raw_source));
+  EXPECT_EQ(raw_source, nullptr);
+  options.bytecode_flags = 1u << 31;
+  LOOMC_ASSERT_STATUS_IS(
+      LOOMC_STATUS_INVALID_ARGUMENT,
+      loomc_module_serialize_bytecode_to_source(
+          module.get(), &options, loomc_allocator_system(), &raw_source));
+  EXPECT_EQ(raw_source, nullptr);
 }
 
 TEST(ModuleTest, PrintsSelectedTopLevelDialectForInspection) {

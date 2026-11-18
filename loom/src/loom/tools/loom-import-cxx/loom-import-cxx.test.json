@@ -2,6 +2,40 @@
   "version": 1,
   "cases": [
     {
+      "name": "logical identity and stripping survive source relocation",
+      "steps": [
+        {
+          "name": "first-source",
+          "write": {
+            "path": "{tmp}/first.cxx",
+            "text": "int sum(int left, int right) { return left + right; }\n"
+          }
+        },
+        {
+          "name": "relocated-source",
+          "write": {
+            "path": "{tmp}/relocated.cxx",
+            "text": "// Sum two values.\n\nint sum(int a, int b) { return a + b; }\n"
+          }
+        },
+        {
+          "name": "first-import",
+          "run": {
+            "tool": "loom-import-cxx",
+            "args": ["{tmp}/first.cxx", "--options=std=c++17", "--module-name=component.sum", "--strip-debug", "--to=bc", "--output={tmp}/first.loombc"]
+          }
+        },
+        {
+          "name": "relocated-import",
+          "run": {
+            "tool": "loom-import-cxx",
+            "args": ["{tmp}/relocated.cxx", "--std=c++17", "--module-name=component.sum", "--strip-debug", "--to=bc", "--output={tmp}/relocated.loombc"]
+          },
+          "files": [{"path": "{tmp}/relocated.loombc", "equals": "{tmp}/first.loombc"}]
+        }
+      ]
+    },
+    {
       "name": "applies source flags and exports the selected root",
       "run": {
         "tool": "loom-import-cxx",

@@ -547,7 +547,7 @@ RequestPtr CreateModuleRequest(loomc_context_t* context,
   loomc_source_t* source = nullptr;
   LOOMC_EXPECT_OK(loomc_module_serialize_internal_bytecode_to_source(
       context, internal_module, loomc_make_cstring_view("request.loombc"),
-      &projection, loomc_allocator_system(), &source));
+      /*flags=*/0, &projection, loomc_allocator_system(), &source));
 
   const loomc_request_root_t root = {
       .module_ordinal = 0,

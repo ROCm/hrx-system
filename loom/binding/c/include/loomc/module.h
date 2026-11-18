@@ -363,6 +363,16 @@ typedef enum loomc_module_text_presentation_e {
   LOOMC_MODULE_TEXT_PRESENTATION_PRESERVE = 3,
 } loomc_module_text_presentation_t;
 
+/// Policy for bytecode serialization.
+typedef enum loomc_module_bytecode_flag_bits_e {
+  /// Omit diagnostic locations, source paths, comments, whitespace, SSA display
+  /// names, block labels, and region presentation hints. Linkage names and
+  /// semantic attributes, including captured source values, remain intact.
+  /// Serialization does not modify the module or its diagnostic information.
+  LOOMC_MODULE_BYTECODE_FLAG_STRIP_DEBUG = 1u << 0,
+} loomc_module_bytecode_flag_bits_t;
+typedef uint32_t loomc_module_bytecode_flags_t;
+
 /// Module serialization and current-IR text presentation options.
 ///
 /// Callers zero-initialize this descriptor, set `type` to
@@ -394,7 +404,8 @@ typedef struct loomc_module_serialize_options_t {
 
   /// Include operation source locations in textual output. Requires
   /// structure_size to include this field; absent fields default to false.
-  /// Bytecode preserves location information independently of this option.
+  /// Bytecode preserves location information unless bytecode_flags requests
+  /// stripping, independently of this text option.
   bool print_locations;
 
   /// Optional top-level operation dialect to select during current-IR text
@@ -409,6 +420,11 @@ typedef struct loomc_module_serialize_options_t {
   /// promise a self-contained module export. Requires `structure_size` to
   /// include this field; absent fields default to the complete module.
   loomc_string_view_t top_level_dialect;
+
+  /// Bytecode serialization policy. Zero preserves diagnostic information and
+  /// presentation. Nonzero flags require bytecode output. Requires
+  /// `structure_size` to include this field; absent fields default to zero.
+  loomc_module_bytecode_flags_t bytecode_flags;
 } loomc_module_serialize_options_t;
 
 /// Module deserialization options.

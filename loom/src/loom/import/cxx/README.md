@@ -21,6 +21,16 @@ subexpression elimination and dead-code elimination, and prints Loom text.
 `--cleanup=false` exposes the direct import. `--to=bc --output=module.loombc`
 produces normal Loom bytecode for the existing compilation and linking tools.
 
+For reproducible library artifacts, add `--module-name=component` and
+`--strip-debug` to bytecode output. The logical module name is independent of
+the input path; quoted includes and import diagnostics still use that path.
+Stripping omits diagnostic source tables and presentation without changing
+program values such as `__FILE__`, `__LINE__`, or explicit source captures.
+Omitting the flag retains source diagnostics in bytecode for later compilation.
+The public API exposes the same controls through
+`loomc_cxx_import_options_t::module_name` and
+`loomc_module_serialize_options_t::bytecode_flags`.
+
 ## Exporting High IR as C++
 
 `loom-export-cxx` presents a cleaned or specialized High module through the

@@ -54,6 +54,33 @@ dependency, not because its source was supplied. Library order likewise does
 not override template matching; contracts, signatures, facts, requirements,
 and explicit template priority determine eligibility.
 
+## Reproducible bytecode libraries
+
+Give a reusable module a logical name independent of its checkout path, and
+strip diagnostic metadata when source-only edits should leave artifact bytes
+unchanged:
+
+```shell
+loom-import-cxx projection.cxx --to=bc \
+  --module-name=projection.unit --strip-debug \
+  --output=projection.imported.loombc
+loom-link projection.imported.loombc --mode=merge --to=bc \
+  --module-name=projection --strip-debug --output=projection.loombc
+```
+
+Both tools preserve diagnostic metadata by default. `--strip-debug` requires
+bytecode output and omits locations, source paths, comments, SSA display names,
+and formatting hints. Linkage names, contracts, and program data remain intact.
+In particular, changing a value computed by `__LINE__`, `__FILE__`, or an
+explicit source capture still changes the artifact. Stable module names and
+stripping therefore isolate nonsemantic source edits without masking real
+program changes.
+
+`--module-name` does not change source lookup or diagnostics during import and
+linking. A later consumer of stripped bytecode has no original source locations;
+omit `--strip-debug` when those diagnostics are needed. Stripping acts only on
+the serialized output and leaves the in-memory module unchanged.
+
 ## Inspect before linking
 
 List indexed symbols without materializing an output module:

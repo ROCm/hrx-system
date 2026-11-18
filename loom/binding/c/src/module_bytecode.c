@@ -287,9 +287,13 @@ static uint8_t* loomc_module_byte_buffer_stream_take_storage(
 
 static loomc_status_t loomc_module_serialize_bytecode_to_stream(
     const loomc_context_t* context, const loom_module_t* internal_module,
+    loomc_module_bytecode_flags_t flags,
     const loomc_module_symbol_projection_t* projection,
     iree_io_stream_t* target_stream) {
   loom_bytecode_write_options_t write_options = {0};
+  if (flags & LOOMC_MODULE_BYTECODE_FLAG_STRIP_DEBUG) {
+    write_options.flags = LOOM_BYTECODE_WRITE_FLAG_STRIP_DEBUG;
+  }
   loomc_target_pass_environment_initialize_low_repr_environment(
       loomc_context_target_pass_environment(context),
       &write_options.low_repr_environment);
@@ -307,7 +311,7 @@ static loomc_status_t loomc_module_serialize_bytecode_to_stream(
 
 loomc_status_t loomc_module_serialize_internal_bytecode_to_source(
     const loomc_context_t* context, const loom_module_t* internal_module,
-    loomc_string_view_t identifier,
+    loomc_string_view_t identifier, loomc_module_bytecode_flags_t flags,
     const loomc_module_symbol_projection_t* projection,
     loomc_allocator_t allocator, loomc_source_t** out_source) {
   *out_source = NULL;
@@ -317,8 +321,8 @@ loomc_status_t loomc_module_serialize_internal_bytecode_to_source(
   iree_io_stream_t* base_stream = NULL;
   if (loomc_status_is_ok(status)) {
     base_stream = &stream->base;
-    status = loomc_module_serialize_bytecode_to_stream(context, internal_module,
-                                                       projection, base_stream);
+    status = loomc_module_serialize_bytecode_to_stream(
+        context, internal_module, flags, projection, base_stream);
   }
 
   uint8_t* storage = NULL;
@@ -345,7 +349,7 @@ static loomc_status_t loomc_module_encode_bytecode_source(
     loomc_allocator_t allocator, loomc_source_t** out_source) {
   return loomc_module_serialize_internal_bytecode_to_source(
       loomc_module_context(module), internal_module, options->identifier,
-      /*projection=*/NULL, allocator, out_source);
+      options->bytecode_flags, /*projection=*/NULL, allocator, out_source);
 }
 
 loomc_status_t loomc_module_deserialize_bytecode_from_source(

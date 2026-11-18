@@ -67,7 +67,10 @@ iree_status_t loom_cxx_import(iree_string_view_t source,
     NumericConversionConstantEvaluator constant_evaluator;
     Source parsed(source, filename, *options, &constant_evaluator);
     loom_module_t* raw_module = nullptr;
-    check(loom_module_allocate(context, filename, block_pool, nullptr,
+    const iree_string_view_t module_name =
+        iree_string_view_is_empty(options->module_name) ? filename
+                                                        : options->module_name;
+    check(loom_module_allocate(context, module_name, block_pool, nullptr,
                                host_allocator, &raw_module));
     std::unique_ptr<loom_module_t, decltype(&loom_module_free)> module(
         raw_module, loom_module_free);

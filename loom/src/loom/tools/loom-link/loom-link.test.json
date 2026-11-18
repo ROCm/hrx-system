@@ -2,6 +2,26 @@
   "version": 1,
   "cases": [
     {
+      "name": "bytecode output retains its requested logical module name",
+      "steps": [
+        {
+          "name": "link",
+          "run": {
+            "tool": "loom-link",
+            "args": ["{srcdir}/testdata/dependency_direct.loom", "--mode=merge", "--module-name=component.direct", "--strip-debug", "--to=bc", "--output={tmp}/direct.loombc"]
+          }
+        },
+        {
+          "name": "inspect",
+          "run": {
+            "tool": "loom-link",
+            "args": ["{tmp}/direct.loombc", "--list-symbols"]
+          },
+          "stdout": {"contains": ["module=component.direct"]}
+        }
+      ]
+    },
+    {
       "name": "rejected input does not publish a symbol list",
       "run": {
         "tool": "loom-link",

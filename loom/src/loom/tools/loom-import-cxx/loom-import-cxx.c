@@ -20,6 +20,12 @@
 
 IREE_FLAG(string, output, "-", "Output path, or '-' for stdout.");
 IREE_FLAG(string, to, "text", "Output format: text or bc.");
+IREE_FLAG_NAMED(string, module_name, "module-name", "",
+                "Logical module name. Empty uses the input filename; include "
+                "lookup and diagnostics always use the source path.");
+IREE_FLAG_NAMED(bool, strip_debug, "strip-debug", false,
+                "Omit diagnostic and presentation metadata from bytecode. "
+                "Requires --to=bc; program source captures are preserved.");
 IREE_FLAG(string, std, "c++26", "Source standard: c23, c++14/17/20/23/26.");
 IREE_FLAG(string, triple, "",
           "Source ABI triple; does not select an output target.");
@@ -58,6 +64,8 @@ static iree_status_t loom_cxx_cli_write_module(const loomc_module_t* module,
       .structure_size = sizeof(options),
       .format = strcmp(FLAG_to, "text") == 0 ? LOOMC_SOURCE_FORMAT_TEXT
                                              : LOOMC_SOURCE_FORMAT_BYTECODE,
+      .bytecode_flags =
+          FLAG_strip_debug ? LOOMC_MODULE_BYTECODE_FLAG_STRIP_DEBUG : 0,
   };
   loomc_source_t* output = NULL;
   iree_status_t status =
@@ -203,6 +211,7 @@ static iree_status_t loom_cxx_cli_import(iree_string_view_t filename,
   }
   if (iree_status_is_ok(status)) {
     loomc_result_t* result = NULL;
+    options.module_name = loomc_make_cstring_view(FLAG_module_name);
     status = iree_status_from_loomc(
         loomc_module_import_cxx(context, workspace, source, &options,
                                 host_allocator, &module, &result));

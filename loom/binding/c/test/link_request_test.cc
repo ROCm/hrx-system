@@ -193,7 +193,7 @@ RequestPtr CreateRequest(
   loomc_source_t* source = nullptr;
   LOOMC_EXPECT_OK(loomc_module_serialize_internal_bytecode_to_source(
       context, internal_module, loomc_make_cstring_view("request.loombc"),
-      &projection, loomc_allocator_system(), &source));
+      /*flags=*/0, &projection, loomc_allocator_system(), &source));
 
   std::vector<loomc_request_root_t> roots;
   roots.reserve(wire_symbol_ordinals.size());

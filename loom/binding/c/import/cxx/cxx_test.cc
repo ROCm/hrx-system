@@ -191,9 +191,19 @@ TEST_F(CxxTest, RenamedExportsLinkWithTheirTypesAfterSourceRelease) {
       [[loom::symbol("library.increment")]] unsigned increment(unsigned);
       unsigned increment(unsigned value) { return value + 1u; }
     )");
-    LOOMC_ASSERT_OK(Import(source.get()));
+    const loomc_cxx_import_options_t import_options = {
+        .structure_size = sizeof(import_options),
+        .module_name = loomc_make_cstring_view("//component:increment"),
+    };
+    LOOMC_ASSERT_OK(Import(source.get(), &import_options));
     ExpectSuccess(result_.get());
-    loomc_module_serialize_options_t serialization = {.format = format};
+    const loomc_module_serialize_options_t serialization = {
+        .structure_size = sizeof(serialization),
+        .format = format,
+        .bytecode_flags = format == LOOMC_SOURCE_FORMAT_BYTECODE
+                              ? LOOMC_MODULE_BYTECODE_FLAG_STRIP_DEBUG
+                              : 0u,
+    };
     loomc_source_t* library = nullptr;
     LOOMC_ASSERT_OK(loomc_module_serialize_to_source(
         module_.get(), &serialization, loomc_allocator_system(), &library));
@@ -282,7 +292,8 @@ struct HeaderCache {
                                 loomc_source_t** out_source) {
     auto& self = *static_cast<HeaderCache*>(user_data);
     *out_source = nullptr;
-    if (ToString(path) == "/headers/helper.h") {
+    if (self.header && ToString(path) == ToString(loomc_source_identifier(
+                                             self.header.get()))) {
       ++self.hits;
       loomc_source_retain(self.header.get());
       *out_source = self.header.get();
@@ -290,6 +301,70 @@ struct HeaderCache {
     return loomc_ok_status();
   }
 };
+
+TEST_F(CxxTest, LogicalModuleIdentityPreservesIncludeLookupAndSemanticChanges) {
+  HeaderCache cache;
+  const char* paths[] = {"/checkout/unit.cpp", "/relocated/unit.cpp"};
+  const char* headers[] = {"/checkout/helper.h", "/relocated/helper.h"};
+  const char* header_text[] = {
+      "struct Pair { int first; int second; };\n"
+      "static int sum(Pair value) { return value.first + value.second; }\n",
+      "// Parameter bundle.\n\nstruct Pair { int first; int second; };\n\n"
+      "static int sum(Pair value) { return value.first + value.second; }\n",
+  };
+  loomc_cxx_import_options_t options = {
+      .structure_size = sizeof(options),
+      .source_provider = {HeaderCache::Resolve, &cache},
+      .module_name = loomc_make_cstring_view("//component:sum"),
+  };
+  const loomc_module_serialize_options_t serialization = {
+      .structure_size = sizeof(serialization),
+      .bytecode_flags = LOOMC_MODULE_BYTECODE_FLAG_STRIP_DEBUG,
+  };
+  std::string stripped[2];
+  std::string preserved[2];
+  for (size_t i = 0; i < 2; ++i) {
+    cache.header = Source(headers[i], header_text[i]);
+    auto source = Source(paths[i],
+                         "#include \"helper.h\"\n"
+                         "int entry(Pair value) { return sum(value); }");
+    LOOMC_ASSERT_OK(Import(source.get(), &options));
+    ExpectSuccess(result_.get());
+    ASSERT_NE(module_, nullptr);
+    loomc_source_t* raw_output = nullptr;
+    LOOMC_ASSERT_OK(loomc_module_serialize_bytecode_to_source(
+        module_.get(), &serialization, loomc_allocator_system(), &raw_output));
+    SourcePtr output(raw_output);
+    stripped[i] = Contents(output.get());
+    LOOMC_ASSERT_OK(loomc_module_serialize_bytecode_to_source(
+        module_.get(), nullptr, loomc_allocator_system(), &raw_output));
+    output.reset(raw_output);
+    preserved[i] = Contents(output.get());
+  }
+  EXPECT_EQ(cache.hits, 2u);
+  EXPECT_EQ(stripped[0], stripped[1]);
+  EXPECT_NE(preserved[0], preserved[1]);
+
+  // Source-observing expressions remain program values after stripping.
+  auto serialize = [&](const char* path, const char* text) {
+    auto source = Source(path, text);
+    LOOMC_EXPECT_OK(Import(source.get(), &options));
+    ExpectSuccess(result_.get());
+    loomc_source_t* raw_output = nullptr;
+    LOOMC_EXPECT_OK(loomc_module_serialize_bytecode_to_source(
+        module_.get(), &serialization, loomc_allocator_system(), &raw_output));
+    SourcePtr output(raw_output);
+    return Contents(output.get());
+  };
+  EXPECT_NE(serialize(paths[0], "int line() { return __LINE__; }"),
+            serialize(paths[0], "\nint line() { return __LINE__; }"));
+  EXPECT_NE(serialize(paths[0], "const char* file() { return __FILE__; }"),
+            serialize(paths[1], "const char* file() { return __FILE__; }"));
+  const auto named = serialize(paths[0], "int value() { return 1; }");
+  EXPECT_NE(named, serialize(paths[0], "int value() { return 2; }"));
+  options.module_name = loomc_make_cstring_view("//component:other");
+  EXPECT_NE(named, serialize(paths[0], "int value() { return 1; }"));
+}
 
 struct PrefixSourcePathMapper {
   // Storage reused after the importer has copied each callback result.
@@ -490,10 +565,12 @@ TEST_F(CxxTest, SourcePathMapperPreservesPhysicalIncludeLookup) {
   auto path = loomc_make_cstring_view("/headers");
   PrefixSourcePathMapper mapper;
   loomc_cxx_import_options_t options = {
+      .structure_size = sizeof(options),
       .source_provider = {HeaderCache::Resolve, &cache},
       .source_path_mapper = {PrefixSourcePathMapper::Map, &mapper},
       .include_paths = &path,
       .include_path_count = 1,
+      .module_name = loomc_make_cstring_view("//component:diagnostic"),
   };
   LOOMC_ASSERT_OK(Import(source.get(), &options));
   ASSERT_FALSE(loomc_result_succeeded(result_.get()));
@@ -556,6 +633,9 @@ TEST_F(CxxTest, InvalidOptionsClearOutputs) {
                          Import(source.get(), &options));
   options = {};
   options.flags = 1u << 31;
+  LOOMC_ASSERT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
+                         Import(source.get(), &options));
+  options = {.structure_size = sizeof(options), .module_name = {nullptr, 1}};
   LOOMC_ASSERT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT,
                          Import(source.get(), &options));
   EXPECT_EQ(result_, nullptr);
