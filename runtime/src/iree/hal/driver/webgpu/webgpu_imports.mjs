@@ -121,6 +121,251 @@ export function createImports(context) {
     return new TextDecoder().decode(u8().subarray(ptr, ptr + length));
   }
 
+  // Encodes an exact byte copy. A supplied uniform range belongs to the caller
+  // and stays live through submission. Otherwise the returned buffer belongs to
+  // the encoder and must be destroyed only after its command buffer is submitted.
+  function encodeByteCopy(device, encoder, builtins, source, sourceOffset,
+      target, targetOffset, length, parameters = null, parameterOffset = 0) {
+    if ((sourceOffset % 4) === 0 && (targetOffset % 4) === 0 &&
+        (length % 4) === 0) {
+      encoder.copyBufferToBuffer(source, sourceOffset, target, targetOffset, length);
+      return null;
+    }
+    const alignment = device.limits.minStorageBufferOffsetAlignment;
+    const sourceBase = Math.floor(sourceOffset / alignment) * alignment;
+    const targetBase = Math.floor(targetOffset / alignment) * alignment;
+    let ownedParameters = null;
+    if (!parameters) {
+      parameters = device.createBuffer({usage: 0x0040, size: 16,
+        mappedAtCreation: true});
+      new Uint32Array(parameters.getMappedRange()).set([
+        sourceOffset - sourceBase, targetOffset - targetBase, length, 0
+      ]);
+      parameters.unmap();
+      ownedParameters = parameters;
+    }
+    const bindGroup = device.createBindGroup({layout: builtins.copyBGL,
+      entries: [
+        {binding: 0, resource: {buffer: source, offset: sourceBase,
+          size: Math.ceil((sourceOffset - sourceBase + length) / 4) * 4}},
+        {binding: 1, resource: {buffer: target, offset: targetBase,
+          size: Math.ceil((targetOffset - targetBase + length) / 4) * 4}},
+        {binding: 2, resource: {buffer: parameters, offset: parameterOffset,
+          size: 16}},
+      ]});
+    const wordCount = Math.ceil((targetOffset % 4 + length) / 4);
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(builtins.copyPipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.dispatchWorkgroups(Math.ceil(wordCount / BUILTIN_WORKGROUP_SIZE));
+    pass.end();
+    return ownedParameters;
+  }
+
+  // Two instances per finite group bound native staging independently of file
+  // size and record capacity. The C owner keeps piece records stable until the
+  // proactor completion and reuses this window only after that completion.
+  class FileTransferWindow {
+    constructor(device, queue, builtins) {
+      this.device = device;
+      this.queue = queue;
+      this.builtins = builtins;
+      this.download = null;
+      this.upload = null;
+      this.uploadBytes = null;
+      this.parameters = null;
+      this.parameterWords = null;
+      this.parameterStride = device.limits.minUniformBufferOffsetAlignment;
+    }
+
+    destroy() {
+      this.download?.destroy();
+      this.upload?.destroy();
+      this.parameters?.destroy();
+    }
+
+    prepareDownload(length) {
+      if (!this.download || this.download.size < length) {
+        this.download?.destroy();
+        this.download = this.device.createBuffer({usage: 0x0001 | 0x0008,
+          size: length});  // MAP_READ | COPY_DST
+      }
+      return this.download;
+    }
+
+    prepareUpload(length, count) {
+      if (!this.upload || this.upload.size < length) {
+        this.upload?.destroy();
+        this.upload = this.device.createBuffer({usage: 0x0080 | 0x0008,
+          size: length});  // STORAGE | COPY_DST
+        this.uploadBytes = new Uint8Array(length);
+      }
+      if (!this.parameters || this.parameters.size < this.parameterStride * count) {
+        this.parameters?.destroy();
+        this.parameters = this.device.createBuffer({usage: 0x0040 | 0x0008,
+          size: this.parameterStride * count});
+        this.parameterWords = new Uint32Array(
+            this.parameterStride * count / 4);
+      }
+    }
+
+    // Piece layout: handle/kind/file/length, uint64 buffer and file offsets,
+    // staging offset, padding. File kind 0 is wasm host
+    // memory; kind 1 is a retained file-object-table entry.
+    fileBytes(words, base) {
+      const offset = words[base + 6] + words[base + 7] * 0x100000000;
+      const length = words[base + 3];
+      if (words[base + 1] === 0) {
+        return new Uint8Array(context.memory.buffer,
+            words[base + 2] + offset, length);
+      }
+      return new Uint8Array(context.fileObjects.get(words[base + 2]),
+          offset, length);
+    }
+
+    // Scope pops happen before returning to C, so another caller can issue
+    // work while the promises are pending without inheriting these scopes.
+    complete(token, work, synchronousError) {
+      const validation = this.device.popErrorScope();
+      const allocation = this.device.popErrorScope();
+      Promise.allSettled([work, validation, allocation]).then((results) => {
+        let status = synchronousError ? STATUS_INTERNAL : STATUS_OK;
+        for (let i = 0; i < results.length; ++i) {
+          if (results[i].status === 'rejected') status = STATUS_INTERNAL;
+          else if (i !== 0 && results[i].value) {
+            status = i === 2 ? 8 /* RESOURCE_EXHAUSTED */ : STATUS_INTERNAL;
+          }
+        }
+        complete(token, status);
+      });
+    }
+
+    submit(piecesPointer, count, access, token) {
+      this.device.pushErrorScope('out-of-memory');
+      this.device.pushErrorScope('validation');
+      let work;
+      let error = null;
+      try {
+        work = access === 1 ? this.read(piecesPointer, count) :
+                              this.write(piecesPointer, count);
+      } catch (e) {
+        error = e;
+        // Earlier writes in the batch may already have been accepted.
+        work = this.queue.onSubmittedWorkDone();
+      }
+      this.complete(token, work, error);
+    }
+
+    read(piecesPointer, count) {
+      const words = u32();
+      const first = piecesPointer / 4;
+      const last = first + (count - 1) * 10;
+      const capacity = words[last + 8] + Math.ceil(words[last + 3] / 4) * 4;
+      let uploadLength = 0;
+      const alignment = this.device.limits.minStorageBufferOffsetAlignment;
+      // Upload aligned destinations directly; pack only byte-copy inputs into
+      // reusable storage. All upload writes precede the encoder consuming it.
+      for (let i = 0; i < count; ++i) {
+        const base = first + i * 10;
+        const offset = words[base + 4] + words[base + 5] * 0x100000000;
+        const length = words[base + 3];
+        const bytes = this.fileBytes(words, base);
+        if (offset % 4 === 0 && length % 4 === 0) {
+          this.queue.writeBuffer(handles.get(words[base]), offset, bytes);
+        } else {
+          this.prepareUpload(capacity, count);
+          const stagingOffset = words[base + 8];
+          this.uploadBytes.set(bytes, stagingOffset);
+          uploadLength = Math.max(uploadLength,
+              stagingOffset + Math.ceil(length / 4) * 4);
+          this.parameterWords.set([
+            stagingOffset % alignment, offset % alignment, length, 0
+          ], i * this.parameterStride / 4);
+        }
+      }
+      if (uploadLength) {
+        this.queue.writeBuffer(this.upload, 0, this.uploadBytes, 0, uploadLength);
+        this.queue.writeBuffer(this.parameters, 0, this.parameterWords, 0,
+            count * this.parameterStride / 4);
+        const encoder = this.device.createCommandEncoder();
+        for (let i = 0; i < count; ++i) {
+          const base = first + i * 10;
+          const offset = words[base + 4] + words[base + 5] * 0x100000000;
+          const length = words[base + 3];
+          if (offset % 4 === 0 && length % 4 === 0) continue;
+          encodeByteCopy(this.device, encoder, this.builtins,
+              this.upload, words[base + 8], handles.get(words[base]),
+              offset, length, this.parameters, i * this.parameterStride);
+        }
+        this.queue.submit([encoder.finish()]);
+      }
+      return this.queue.onSubmittedWorkDone();
+    }
+
+    write(piecesPointer, count) {
+      const words = u32();
+      const first = piecesPointer / 4;
+      const last = first + (count - 1) * 10;
+      const capacity = words[last + 8] +
+          Math.ceil((words[last + 4] % 4 + words[last + 3]) / 4) * 4;
+      const download = this.prepareDownload(capacity);
+      const encoder = this.device.createCommandEncoder();
+      let used = 0;
+      for (let i = 0; i < count; ++i) {
+        const base = first + i * 10;
+        const offset = words[base + 4] + words[base + 5] * 0x100000000;
+        const length = Math.ceil((offset % 4 + words[base + 3]) / 4) * 4;
+        encoder.copyBufferToBuffer(handles.get(words[base]),
+            offset - offset % 4, download, words[base + 8], length);
+        used = words[base + 8] + length;
+      }
+      this.queue.submit([encoder.finish()]);
+      // mapAsync waits for this buffer's copies; no preceding queue-wide wait.
+      return download.mapAsync(MAP_READ, 0, used).then(() => {
+        try {
+          const mapped = new Uint8Array(download.getMappedRange(0, used));
+          // Refresh the wasm view: other work may have grown linear memory.
+          const current = u32();
+          for (let i = 0; i < count; ++i) {
+            const base = first + i * 10;
+            const offset = current[base + 8] + current[base + 4] % 4;
+            this.fileBytes(current, base).set(
+                mapped.subarray(offset, offset + current[base + 3]));
+          }
+        } finally {
+          download.unmap();
+        }
+      });
+    }
+
+    acquire(buffer, offset, length, destination, token) {
+      this.device.pushErrorScope('out-of-memory');
+      this.device.pushErrorScope('validation');
+      let work;
+      let error = null;
+      try {
+        const encoder = this.device.createCommandEncoder();
+        const bias = offset % 4;
+        const alignedLength = Math.ceil((bias + length) / 4) * 4;
+        const download = this.prepareDownload(alignedLength);
+        encoder.copyBufferToBuffer(buffer, offset - bias, download, 0, alignedLength);
+        this.queue.submit([encoder.finish()]);
+        work = download.mapAsync(MAP_READ, 0, alignedLength).then(() => {
+          try {
+            u8().set(new Uint8Array(download.getMappedRange(0, alignedLength),
+                bias, length), destination);
+          } finally {
+            download.unmap();
+          }
+        });
+      } catch (e) {
+        error = e;
+        work = this.queue.onSubmittedWorkDone();
+      }
+      this.complete(token, work, error);
+    }
+  }
+
   //============================================================================
   // Instruction stream processor
   //============================================================================
@@ -139,6 +384,15 @@ export function createImports(context) {
     let cursor = 0;
     let encoder = null;
     const pendingCommandBuffers = [];
+    const pendingBuffers = [];
+    function flush() {
+      if (pendingCommandBuffers.length) {
+        queue.submit(pendingCommandBuffers);
+        pendingCommandBuffers.length = 0;
+      }
+      for (const buffer of pendingBuffers) buffer.destroy();
+      pendingBuffers.length = 0;
+    }
 
     while (cursor < text.length) {
       const header = text[cursor];
@@ -164,10 +418,7 @@ export function createImports(context) {
           const effectiveOffset = offsets[dstSlot] + dstOffset;
 
           // Flush any pending encoder work before the queue operation.
-          if (pendingCommandBuffers.length > 0) {
-            queue.submit(pendingCommandBuffers);
-            pendingCommandBuffers.length = 0;
-          }
+          flush();
 
           // The inline data starts at cursor + 4. Copy it to a temporary
           // Uint8Array for writeBuffer. The data may not be uint32-aligned in
@@ -178,54 +429,21 @@ export function createImports(context) {
           const dataBytes =
               new Uint8Array(dataWords.buffer, dataWords.byteOffset, length);
 
-          // queue.writeBuffer requires a 4-byte aligned buffer offset. When
-          // unaligned, use a staging buffer + copy compute shader.
-          if ((effectiveOffset & 3) === 0) {
+          if ((effectiveOffset % 4) === 0 && (length % 4) === 0) {
             queue.writeBuffer(buffers[dstSlot], effectiveOffset, dataBytes);
           } else {
-            // Staging buffer with the inline data.
-            const stagingSize = Math.ceil(length / 4) * 4;
             const staging = device.createBuffer({
-              usage: 0x0080 | 0x0004,  // STORAGE | COPY_SRC
-              size: stagingSize,
+              usage: 0x0080 | 0x0004, size: Math.ceil(length / 4) * 4,
               mappedAtCreation: true,
             });
             new Uint8Array(staging.getMappedRange()).set(dataBytes);
             staging.unmap();
-
-            // Params: {src_offset, dst_offset, length, pad}.
-            const params = device.createBuffer({
-              usage: 0x0040 | 0x0008,  // UNIFORM | COPY_DST
-              size: 16,
-              mappedAtCreation: true,
-            });
-            new Uint32Array(params.getMappedRange()).set([
-              0, effectiveOffset, length, 0
-            ]);
-            params.unmap();
-
-            const bindGroup = device.createBindGroup({
-              layout: builtins.copyBGL,
-              entries: [
-                {binding: 0, resource: {buffer: staging, size: stagingSize}},
-                {binding: 1, resource: {buffer: buffers[dstSlot]}},
-                {binding: 2, resource: {buffer: params, size: 16}},
-              ],
-            });
-
-            const alignedEnd = (effectiveOffset + length + 3) & ~3;
-            const wordCount = (alignedEnd - (effectiveOffset & ~3)) / 4;
-            const workgroups = Math.ceil(wordCount / BUILTIN_WORKGROUP_SIZE);
-
-            const enc = device.createCommandEncoder();
-            const pass = enc.beginComputePass();
-            pass.setPipeline(builtins.copyPipeline);
-            pass.setBindGroup(0, bindGroup);
-            pass.dispatchWorkgroups(workgroups);
-            pass.end();
-            queue.submit([enc.finish()]);
+            const encoder = device.createCommandEncoder();
+            const parameters = encodeByteCopy(device, encoder, builtins,
+                staging, 0, buffers[dstSlot], effectiveOffset, length);
+            queue.submit([encoder.finish()]);
             staging.destroy();
-            params.destroy();
+            parameters?.destroy();
           }
           break;
         }
@@ -239,44 +457,10 @@ export function createImports(context) {
           const effectiveSrc = offsets[srcSlot] + srcOffset;
           const effectiveDst = offsets[dstSlot] + dstOffset;
 
-          if ((effectiveSrc & 3) === 0 && (effectiveDst & 3) === 0 &&
-              (length & 3) === 0) {
-            // Aligned: use native copyBufferToBuffer.
-            encoder.copyBufferToBuffer(
-                buffers[srcSlot], effectiveSrc, buffers[dstSlot], effectiveDst,
-                length);
-          } else {
-            // Unaligned: dispatch copy builtin shader.
-            const params = device.createBuffer({
-              usage: 0x0040 | 0x0008,  // UNIFORM | COPY_DST
-              size: 16,
-              mappedAtCreation: true,
-            });
-            new Uint32Array(params.getMappedRange()).set([
-              effectiveSrc, effectiveDst, length, 0
-            ]);
-            params.unmap();
-
-            const bindGroup = device.createBindGroup({
-              layout: builtins.copyBGL,
-              entries: [
-                {binding: 0, resource: {buffer: buffers[srcSlot]}},
-                {binding: 1, resource: {buffer: buffers[dstSlot]}},
-                {binding: 2, resource: {buffer: params, size: 16}},
-              ],
-            });
-
-            const alignedEnd = (effectiveDst + length + 3) & ~3;
-            const wordCount = (alignedEnd - (effectiveDst & ~3)) / 4;
-            const workgroups = Math.ceil(wordCount / BUILTIN_WORKGROUP_SIZE);
-
-            const pass = encoder.beginComputePass();
-            pass.setPipeline(builtins.copyPipeline);
-            pass.setBindGroup(0, bindGroup);
-            pass.dispatchWorkgroups(workgroups);
-            pass.end();
-            params.destroy();
-          }
+          const parameters = encodeByteCopy(device, encoder, builtins,
+              buffers[srcSlot], effectiveSrc, buffers[dstSlot], effectiveDst,
+              length);
+          if (parameters) pendingBuffers.push(parameters);
           break;
         }
 
@@ -318,7 +502,7 @@ export function createImports(context) {
           pass.setBindGroup(0, bindGroup);
           pass.dispatchWorkgroups(workgroups);
           pass.end();
-          params.destroy();
+          pendingBuffers.push(params);
           break;
         }
 
@@ -363,10 +547,7 @@ export function createImports(context) {
 
         case OP_RETURN: {
           // Flush any remaining pending command buffers.
-          if (pendingCommandBuffers.length > 0) {
-            queue.submit(pendingCommandBuffers);
-            pendingCommandBuffers.length = 0;
-          }
+          flush();
           return;
         }
 
@@ -887,21 +1068,23 @@ export function createImports(context) {
     // File ↔ GPU transfer
     //==========================================================================
 
-    // Writes data from a file object directly to a GPU buffer, bypassing
-    // wasm linear memory. The file object is accessed via context.fileObjects
-    // (set up by the iree_file import module's file_imports.mjs).
-    queue_write_buffer_from_file(
-        queueHandle, bufferHandle, bufferOffset, fd, fileOffset, dataSize) {
-      const queue = handles.get(queueHandle);
-      const buffer = handles.get(bufferHandle);
-      const fileObject = context.fileObjects?.get(fd);
-      if (!queue || !buffer || !fileObject) return;
-      const data = new Uint8Array(
-          fileObject,
-          Number(fileOffset),
-          Number(dataSize),
-      );
-      queue.writeBuffer(buffer, Number(bufferOffset), data);
+    file_transfer_window_create(deviceHandle, queueHandle, builtinsPointer) {
+      return handles.insert(new FileTransferWindow(handles.get(deviceHandle),
+          handles.get(queueHandle), readBuiltins(builtinsPointer)));
+    },
+
+    file_transfer_window_destroy(windowHandle) {
+      handles.remove(windowHandle).destroy();
+    },
+
+    file_transfer_submit(windowHandle, piecesPointer, count, access, token) {
+      handles.get(windowHandle).submit(piecesPointer, count, access, token);
+    },
+
+    file_transfer_acquire(windowHandle, bufferHandle, offset, length,
+        destination, token) {
+      handles.get(windowHandle).acquire(handles.get(bufferHandle), Number(offset),
+          length, destination, token);
     },
 
     // Returns the byte length of a file object. Returns 0n (BigInt) if the
@@ -910,20 +1093,6 @@ export function createImports(context) {
       const fileObject = context.fileObjects?.get(fd);
       if (!fileObject) return 0n;
       return BigInt(fileObject.byteLength);
-    },
-
-    // Copies data from a mapped GPU buffer into an existing file object.
-    // The buffer must be in mapped state. Reads from the mapped buffer range
-    // and writes into the file object at the given offset.
-    file_write_from_mapped(bufferHandle, bufferOffset, size, fd, fileOffset) {
-      const buffer = handles.get(bufferHandle);
-      const fileObject = context.fileObjects?.get(fd);
-      if (!buffer || !fileObject) return;
-      const mapped = buffer.getMappedRange(Number(bufferOffset), Number(size));
-      const source = new Uint8Array(mapped);
-      const target =
-          new Uint8Array(fileObject, Number(fileOffset), Number(size));
-      target.set(source);
     },
 
     // Exports the mapped range of a GPU buffer as a file object. The buffer

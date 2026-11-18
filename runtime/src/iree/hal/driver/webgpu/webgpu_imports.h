@@ -351,33 +351,41 @@ iree_hal_webgpu_import_device_get_limits(uint32_t device_handle,
 // File ↔ GPU transfer
 //===----------------------------------------------------------------------===//
 
-// Writes data from a file object directly to a GPU buffer via the queue,
-// bypassing wasm linear memory entirely. |fd| is a file object table index
-// (from the iree_file import module). The JS side reads bytes from the file
-// object and calls queue.writeBuffer() with the data.
-// This is the zero-copy path for model weight loading.
+// Creates bounded file staging state. Native buffers are allocated lazily.
+// The caller owns the JS handle and destroys it after all window work retires.
 __attribute__((import_module("iree_webgpu"),
-               import_name("queue_write_buffer_from_file"))) extern void
-iree_hal_webgpu_import_queue_write_buffer_from_file(
-    uint32_t queue_handle, uint32_t buffer_handle, uint64_t buffer_offset,
-    uint32_t fd, uint64_t file_offset, uint64_t data_size);
+               import_name("file_transfer_window_create"))) extern uint32_t
+iree_hal_webgpu_import_file_transfer_window_create(uint32_t device_handle,
+                                                   uint32_t queue_handle,
+                                                   uint32_t builtins_pointer);
+
+__attribute__((import_module("iree_webgpu"),
+               import_name("file_transfer_window_destroy"))) extern void
+iree_hal_webgpu_import_file_transfer_window_destroy(uint32_t window_handle);
+
+// Borrows the native piece array until completion. Each piece is the private
+// 40-byte file wire record. READ/WRITE use HAL memory-access values 1/2.
+__attribute__((import_module("iree_webgpu"),
+               import_name("file_transfer_submit"))) extern void
+iree_hal_webgpu_import_file_transfer_submit(uint32_t window_handle,
+                                            uint32_t pieces_pointer,
+                                            uint32_t count, uint32_t access,
+                                            uint32_t token);
+
+// Downloads only the requested metadata bytes into live wasm storage.
+__attribute__((import_module("iree_webgpu"),
+               import_name("file_transfer_acquire"))) extern void
+iree_hal_webgpu_import_file_transfer_acquire(uint32_t window_handle,
+                                             uint32_t buffer_handle,
+                                             uint64_t offset, uint32_t length,
+                                             uint32_t destination,
+                                             uint32_t token);
 
 // Returns the byte length of a file object. |fd| is a file object table index.
 // Returns 0 if the fd is invalid.
 __attribute__((import_module("iree_webgpu"),
                import_name("file_get_length"))) extern uint64_t
 iree_hal_webgpu_import_file_get_length(uint32_t fd);
-
-// Copies data from a mapped GPU buffer into an existing file object.
-// The buffer must be in mapped state (via buffer_map_async).
-// |fd| is the target file object table index. The JS side reads from the
-// mapped buffer range and writes into the file object at |file_offset|.
-__attribute__((import_module("iree_webgpu"),
-               import_name("file_write_from_mapped"))) extern void
-iree_hal_webgpu_import_file_write_from_mapped(uint32_t buffer_handle,
-                                              uint64_t buffer_offset,
-                                              uint64_t size, uint32_t fd,
-                                              uint64_t file_offset);
 
 // Exports the mapped range of a GPU buffer as a file object. The buffer must
 // be in mapped state (via buffer_map_async). The JS side copies the mapped
@@ -652,28 +660,39 @@ static inline void iree_hal_webgpu_import_device_get_limits(
   (void)device_handle;
   (void)dest_ptr;
 }
-static inline void iree_hal_webgpu_import_queue_write_buffer_from_file(
-    uint32_t queue_handle, uint32_t buffer_handle, uint64_t buffer_offset,
-    uint32_t fd, uint64_t file_offset, uint64_t data_size) {
+static inline uint32_t iree_hal_webgpu_import_file_transfer_window_create(
+    uint32_t device_handle, uint32_t queue_handle, uint32_t builtins_pointer) {
+  (void)device_handle;
   (void)queue_handle;
+  (void)builtins_pointer;
+  return 0;
+}
+static inline void iree_hal_webgpu_import_file_transfer_window_destroy(
+    uint32_t window_handle) {
+  (void)window_handle;
+}
+static inline void iree_hal_webgpu_import_file_transfer_submit(
+    uint32_t window_handle, uint32_t pieces_pointer, uint32_t count,
+    uint32_t access, uint32_t token) {
+  (void)window_handle;
+  (void)pieces_pointer;
+  (void)count;
+  (void)access;
+  (void)token;
+}
+static inline void iree_hal_webgpu_import_file_transfer_acquire(
+    uint32_t window_handle, uint32_t buffer_handle, uint64_t offset,
+    uint32_t length, uint32_t destination, uint32_t token) {
+  (void)window_handle;
   (void)buffer_handle;
-  (void)buffer_offset;
-  (void)fd;
-  (void)file_offset;
-  (void)data_size;
+  (void)offset;
+  (void)length;
+  (void)destination;
+  (void)token;
 }
 static inline uint64_t iree_hal_webgpu_import_file_get_length(uint32_t fd) {
   (void)fd;
   return 0;
-}
-static inline void iree_hal_webgpu_import_file_write_from_mapped(
-    uint32_t buffer_handle, uint64_t buffer_offset, uint64_t size, uint32_t fd,
-    uint64_t file_offset) {
-  (void)buffer_handle;
-  (void)buffer_offset;
-  (void)size;
-  (void)fd;
-  (void)file_offset;
 }
 static inline uint32_t iree_hal_webgpu_import_buffer_export_mapped_to_file(
     uint32_t buffer_handle, uint64_t offset, uint64_t size) {

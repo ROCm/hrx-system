@@ -11,10 +11,6 @@
 // index — an integer that the JS side resolves to an ArrayBuffer (or other
 // readable/writable object). This wrapper stores the fd and file length
 // without any POSIX dependencies.
-//
-// storage_buffer() returns NULL (no host pointer or device buffer). The
-// queue_read/write implementations check for this and fall through to the
-// FD-specific bridge imports (queue_write_buffer_from_file, etc.).
 
 #ifndef IREE_HAL_DRIVER_WEBGPU_WEBGPU_FD_FILE_H_
 #define IREE_HAL_DRIVER_WEBGPU_WEBGPU_FD_FILE_H_
@@ -35,6 +31,9 @@ iree_status_t iree_hal_webgpu_fd_file_from_handle(
     iree_hal_memory_access_t access, iree_io_file_handle_t* handle,
     uint64_t length, iree_allocator_t host_allocator,
     iree_hal_file_t** out_file);
+
+// Returns true for files created by this bridge.
+bool iree_hal_webgpu_fd_file_isa(iree_hal_file_t* file);
 
 // Returns the fd (JS file object table index) from a WebGPU FD file.
 // The caller must ensure |file| was created by

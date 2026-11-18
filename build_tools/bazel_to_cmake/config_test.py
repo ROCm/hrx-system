@@ -1313,7 +1313,11 @@ cc_library(
                     name="invocation",
                     src="//tools:runner",
                     resource_group=resource_group,
+                    env={"EXPLICIT_VALUE": "value"},
+                    env_inherit=["IREE_EXTERNAL_RUNTIME"],
                 )
+                self.assertIn('"EXPLICIT_VALUE=value"', converter.convert())
+                self.assertNotIn("IREE_EXTERNAL_RUNTIME", converter.convert())
                 if resource_group is None:
                     self.assertNotIn("RESOURCE_GROUP", converter.convert())
                 else:

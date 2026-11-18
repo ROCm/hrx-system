@@ -46,7 +46,6 @@ iree_runtime_cc_library(
         ":handle_table",
         ":webgpu_device",
         ":webgpu_imports",
-        ":webgpu_imports_js",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/platform/js:proactor",
         "//runtime/src/iree/async/util:proactor_pool",
@@ -92,6 +91,7 @@ iree_runtime_cc_library(
     name = "webgpu_imports",
     hdrs = ["webgpu_imports.h"],
     deps = [
+        ":webgpu_imports_js",
         "//runtime/src/iree/base",
     ],
 )
@@ -233,8 +233,14 @@ iree_runtime_cc_library(
 
 iree_runtime_cc_library(
     name = "webgpu_queue",
-    srcs = ["webgpu_queue.c"],
-    hdrs = ["webgpu_queue.h"],
+    srcs = [
+        "webgpu_file_transfer.c",
+        "webgpu_queue.c",
+    ],
+    hdrs = [
+        "webgpu_file_transfer.h",
+        "webgpu_queue.h",
+    ],
     deps = [
         ":handle_table",
         ":webgpu_buffer",
@@ -251,6 +257,8 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:file_transfer",
+        "//runtime/src/iree/hal/utils:files",
     ],
 )
 

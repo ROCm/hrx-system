@@ -11,11 +11,12 @@
 # dawn before wasm starts and stores the handle so the driver can use it
 # directly (no async adapter/device request needed).
 #
-# Tests requiring async completion waits (semaphore waits, buffer mapping,
-# dispatch) are excluded until threaded mode (bd-1gi) enables blocking waits.
+# The general CTS requires blocking waits. Asynchronous tests use reactor
+# entry points that yield to the JS event loop between native completions.
 
 load("//build_tools/wasm:build_defs.bzl", "iree_wasm_entry")
-load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_binary", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_executable_test")
 load("//runtime/build_tools/bazel:hal_cts.bzl", "iree_runtime_hal_cts_test_suite")
 
 package(
@@ -54,5 +55,38 @@ iree_runtime_cc_library(
 iree_runtime_hal_cts_test_suite(
     backends = ":backends",
     local = True,
+    target_compatible_with = _WASM32_COMPATIBLE_WITH,
+)
+
+# The finite file owner yields to the JS event loop between producer, native
+# mapping, and terminal completion. A reactor drives the real HAL asynchronously.
+iree_wasm_entry(
+    name = "file_transfer_main",
+    main = "file_transfer_main.mjs",
+    target_compatible_with = _WASM32_COMPATIBLE_WITH,
+)
+
+iree_runtime_cc_binary(
+    name = "file_transfer_test_bin",
+    testonly = True,
+    srcs = ["file_transfer_test.c"],
+    linkopts = ["-mexec-model=reactor"],
+    target_compatible_with = _WASM32_COMPATIBLE_WITH,
+    deps = [
+        ":file_transfer_main",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/webgpu:webgpu_device",
+        "//runtime/src/iree/hal/driver/webgpu:webgpu_queue",
+        "//runtime/src/iree/io:file_handle",
+    ],
+)
+
+iree_runtime_executable_test(
+    name = "file_transfer_test",
+    src = ":file_transfer_test_bin",
+    env_inherit = ["IREE_WEBGPU_PACKAGE_ROOT"],
     target_compatible_with = _WASM32_COMPATIBLE_WITH,
 )

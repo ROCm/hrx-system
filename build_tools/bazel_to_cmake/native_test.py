@@ -156,6 +156,7 @@ class BuildFileFunctions:
         args=None,
         data=None,
         env=None,
+        env_inherit=None,
         sanitizer_suppressions=None,
         tags=None,
         resource_group=None,
@@ -165,6 +166,7 @@ class BuildFileFunctions:
     ):
         if self._should_skip_target(tags=tags):
             return
+        # CTest already inherits the invoking environment, including env_inherit.
         self._emit_platform_guard_begin(target_compatible_with)
         self._converter.body += "if(IREE_BUILD_TESTS)\n"
         self._converter.defer(
