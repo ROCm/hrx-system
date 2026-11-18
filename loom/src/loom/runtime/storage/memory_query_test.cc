@@ -20,9 +20,11 @@ TEST_F(MemoryTest, PreparedCommitCanBeCancelledAndDeniedWithoutBacking) {
       pool, geometry, 3 * page, 256, &statistics[0], &first));
   const loom_runtime_memory_range_t ranges[] = {
       {first, page, 2 * page}, {first, page - 4, 8}, {first, 2 * page, 256}};
+  loom_runtime_memory_admission_t admission;
   loom_runtime_memory_commit_t prepared = {};
   IREE_ASSERT_OK(loom_runtime_memory_pool_prepare_commit(
-      pool, IREE_ARRAYSIZE(ranges), ranges, &prepared));
+      pool, IREE_ARRAYSIZE(ranges), ranges, &admission, &prepared));
+  ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
   ASSERT_GT(prepared.mapping_count, 0u);
   EXPECT_EQ(loom_runtime_memory_demand_total(prepared.demand), 3 * page);
   EXPECT_EQ(statistics[0].pending_bytes, 0u);
@@ -39,9 +41,9 @@ TEST_F(MemoryTest, PreparedCommitCanBeCancelledAndDeniedWithoutBacking) {
 
   // Cancellation neither keeps capacity nor leaves marks affecting a retry.
   IREE_ASSERT_OK(loom_runtime_memory_pool_prepare_commit(
-      pool, IREE_ARRAYSIZE(ranges), ranges, &prepared));
+      pool, IREE_ARRAYSIZE(ranges), ranges, &admission, &prepared));
+  ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
   EXPECT_EQ(loom_runtime_memory_demand_total(prepared.demand), 3 * page);
-  loom_runtime_memory_admission_t admission;
   loom_runtime_memory_operation_t* operation = nullptr;
   // Required parameters already fill the budget, leaving no room for state.
   const loom_runtime_memory_demand_t parameters = {
@@ -70,7 +72,8 @@ TEST_F(MemoryTest, PreparedCommitCanBeCancelledAndDeniedWithoutBacking) {
   // Fully backed requests need neither edit storage nor native synchronization.
   native.ResetAllocationMetrics();
   IREE_ASSERT_OK(loom_runtime_memory_pool_prepare_commit(
-      pool, IREE_ARRAYSIZE(ranges), ranges, &prepared));
+      pool, IREE_ARRAYSIZE(ranges), ranges, &admission, &prepared));
+  ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
   EXPECT_EQ(prepared.mapping_count, 0u);
   EXPECT_EQ(loom_runtime_memory_demand_total(prepared.demand), 0u);
   IREE_ASSERT_OK(loom_runtime_memory_pool_commit_prepared_async(
@@ -85,17 +88,18 @@ TEST_F(MemoryTest, FailedPreparedCommitAllocationLeavesRetryIntact) {
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
       pool, geometry, geometry.mapping_size, 256, &statistics[0], &first));
   const loom_runtime_memory_range_t range = {first, 0, 256};
+  loom_runtime_memory_admission_t admission;
   loom_runtime_memory_commit_t prepared = {};
   native.FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC);
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_RESOURCE_EXHAUSTED,
-      loom_runtime_memory_pool_prepare_commit(pool, 1, &range, &prepared));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_runtime_memory_pool_prepare_commit(
+                            pool, 1, &range, &admission, &prepared));
   EXPECT_EQ(prepared.ranges, nullptr);
 
-  IREE_ASSERT_OK(
-      loom_runtime_memory_pool_prepare_commit(pool, 1, &range, &prepared));
+  IREE_ASSERT_OK(loom_runtime_memory_pool_prepare_commit(
+      pool, 1, &range, &admission, &prepared));
+  ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
   native.FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC);
-  loom_runtime_memory_admission_t admission;
   loom_runtime_memory_operation_t* operation = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -119,9 +123,11 @@ TEST_F(MemoryTest, FailedCancellationShrinkClearsSelectionAndKeepsLiveData) {
   RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
 
   const loom_runtime_memory_range_t range = {first, 0, 33 * page};
+  loom_runtime_memory_admission_t admission;
   loom_runtime_memory_commit_t prepared = {};
-  IREE_ASSERT_OK(
-      loom_runtime_memory_pool_prepare_commit(pool, 1, &range, &prepared));
+  IREE_ASSERT_OK(loom_runtime_memory_pool_prepare_commit(
+      pool, 1, &range, &admission, &prepared));
+  ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
   EXPECT_EQ(prepared.mapping_count, 32u);
   native.FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -132,8 +138,9 @@ TEST_F(MemoryTest, FailedCancellationShrinkClearsSelectionAndKeepsLiveData) {
   CheckRetained(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
 
   // Failed host compaction cannot leave a selection that suppresses new work.
-  IREE_ASSERT_OK(
-      loom_runtime_memory_pool_prepare_commit(pool, 1, &range, &prepared));
+  IREE_ASSERT_OK(loom_runtime_memory_pool_prepare_commit(
+      pool, 1, &range, &admission, &prepared));
+  ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
   EXPECT_EQ(prepared.mapping_count, 32u);
   EXPECT_EQ(loom_runtime_memory_demand_total(prepared.demand), 32 * page);
   IREE_ASSERT_OK(loom_runtime_memory_pool_cancel_commit(&prepared));
@@ -153,11 +160,12 @@ TEST_F(MemoryTest, FailedPreparationCancelsOnlyItsSelectedSparsePrefix) {
   // fails. Cancellation consumes that produced prefix, not the huge untouched
   // virtual suffix whose backing was never inspected.
   const loom_runtime_memory_range_t range = {first, 0, length};
+  loom_runtime_memory_admission_t admission;
   loom_runtime_memory_commit_t prepared = {};
   native.FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC);
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_RESOURCE_EXHAUSTED,
-      loom_runtime_memory_pool_prepare_commit(pool, 1, &range, &prepared));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_runtime_memory_pool_prepare_commit(
+                            pool, 1, &range, &admission, &prepared));
   EXPECT_EQ(prepared.ranges, nullptr);
   EXPECT_EQ(statistics[0].pending_bytes, 0u);
   EXPECT_EQ(statistics[0].committed_bytes, page);

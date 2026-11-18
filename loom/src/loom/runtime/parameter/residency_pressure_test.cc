@@ -464,6 +464,65 @@ TEST_P(ResidencyPressureTest, LogicalAdmissionCollectsFailureBeforeEviction) {
   ASSERT_NO_FATAL_FAILURE(Check(loom_runtime_virtual_buffer_handle(state_)));
 }
 
+TEST_P(ResidencyPressureTest, MappingOverlapDefersBeforeParameterAdmission) {
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking(2 * kSlabBytes));
+  ASSERT_NO_FATAL_FAILURE(RegisterHistory());
+  IREE_ASSERT_OK(Compile(0, "direct_incomplete"));
+  const auto root = Root(0, 0, kSlabBytes);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  IREE_ASSERT_OK(Register(1, 0, 1));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool_, loom_runtime_pool_state_geometry(storage_owner_), 2 * kSlabBytes,
+      256, &state_statistics_, &state_));
+
+  const auto retire = [this](loom_runtime_memory_operation_t* operation) {
+    deferred_backing_->ResumeAcquisitions();
+    loom_runtime_memory_operation_await(operation);
+    loom_runtime_memory_operation_free(operation);
+  };
+  const loom_runtime_memory_range_t initial = {state_, 0, 2 * kSlabBytes};
+  deferred_backing_->defer = true;
+  loom_runtime_memory_admission_t memory_admission;
+  loom_runtime_memory_operation_t* operation = nullptr;
+  IREE_ASSERT_OK(loom_runtime_memory_pool_commit_async(
+      pool_, 1, &initial, nullptr, 0, &memory_admission, &operation));
+  const std::unique_ptr<loom_runtime_memory_operation_t, decltype(retire)>
+      pending(operation, retire);
+  ASSERT_EQ(memory_admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
+  deferred_backing_->WaitForAcquisition();
+
+  // The pending state fills the budget. Its overlap must defer before weight
+  // pressure can evict history or pin/activate the incoming parameter group.
+  const loom_runtime_memory_range_t retained = {state_, 0, kSlabBytes};
+  loom_runtime_residency_admission_t admission;
+  loom_runtime_memory_operation_t* incoming = nullptr;
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit_state(
+      residencies_[1], 1, &retained, nullptr, nullptr, 0, &admission,
+      &incoming));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
+  EXPECT_EQ(incoming, nullptr);
+  EXPECT_EQ(history_requests_, 0u);
+  EXPECT_EQ(loom_runtime_residency_snapshot(residencies_[1]).pin_count, 0u);
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).activations, 0u);
+
+  deferred_backing_->ResumeAcquisitions();
+  loom_runtime_memory_operation_await(pending.get());
+  IREE_ASSERT_OK(loom_runtime_memory_operation_query_status(pending.get()));
+  IREE_ASSERT_OK(
+      loom_runtime_test_buffer_trim(pool_, state_, kSlabBytes, kSlabBytes));
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit_state(
+      residencies_[1], 1, &retained, nullptr, nullptr, 0, &admission,
+      &incoming));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  EXPECT_EQ(incoming, nullptr);
+  EXPECT_EQ(loom_runtime_residency_snapshot(residencies_[1]).pin_count, 1u);
+  ASSERT_NO_FATAL_FAILURE(ReadOutputOn(execution_, 0));
+  for (size_t i = 0; i < output_.size(); ++i) {
+    EXPECT_EQ(output_[i], 30 + i);
+  }
+  loom_runtime_residency_release(residencies_[1]);
+}
+
 TEST_P(ResidencyPressureTest, WarmAdmissionDoesNotQueryNativeCapacity) {
   ASSERT_NO_FATAL_FAILURE(UseDeferredBacking(2 * kSlabBytes));
   IREE_ASSERT_OK(Compile(0, "direct_incomplete"));

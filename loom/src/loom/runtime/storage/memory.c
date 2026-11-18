@@ -1754,19 +1754,25 @@ static iree_status_t loom_runtime_memory_commit_finish(
 iree_status_t loom_runtime_memory_pool_prepare_commit(
     loom_runtime_memory_pool_t* pool, iree_host_size_t range_count,
     const loom_runtime_memory_range_t* ranges,
+    loom_runtime_memory_admission_t* out_admission,
     loom_runtime_memory_commit_t* out_commit) {
   IREE_TRACE_ZONE_BEGIN(z0);
+  *out_admission = LOOM_RUNTIME_MEMORY_ADMISSION_CAPACITY;
   *out_commit = (loom_runtime_memory_commit_t){
       .ranges = ranges,
   };
   loom_runtime_memory_pool_collect(pool);
+  loom_runtime_memory_admission_t admission =
+      LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t r = 0; r < range_count && iree_status_is_ok(status);
        ++r) {
     IREE_ASSERT(!ranges[r].buffer->target->detached);
     status = iree_status_clone(ranges[r].buffer->target->failure);
   }
-  for (iree_host_size_t r = 0; r < range_count && iree_status_is_ok(status);
+  for (iree_host_size_t r = 0;
+       r < range_count && iree_status_is_ok(status) &&
+       admission == LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE;
        ++r) {
     loom_runtime_virtual_buffer_t* buffer = ranges[r].buffer;
     const iree_device_size_t slab_size = buffer->geometry.mapping_size;
@@ -1779,7 +1785,10 @@ iree_status_t loom_runtime_memory_pool_prepare_commit(
       status =
           loom_runtime_backing_directory_insert(&buffer->backing, i, &entry);
       if (iree_status_is_ok(status)) {
-        IREE_ASSERT(!entry->in_flight);
+        if (entry->in_flight) {
+          admission = LOOM_RUNTIME_MEMORY_ADMISSION_DEFERRED;
+          break;
+        }
         if (!entry->physical && !entry->pending_commit) {
           entry->pending_commit = true;
           ++out_commit->mapping_count;
@@ -1793,9 +1802,13 @@ iree_status_t loom_runtime_memory_pool_prepare_commit(
       out_commit->last_mapping = last_mapping;
     }
   }
-  if (!iree_status_is_ok(status)) {
+  if (!iree_status_is_ok(status) ||
+      admission != LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE) {
     status = iree_status_join(
         status, loom_runtime_memory_commit_finish(out_commit, NULL));
+  }
+  if (iree_status_is_ok(status)) {
+    *out_admission = admission;
   }
   IREE_TRACE_ZONE_END(z0);
   return status;
@@ -1859,7 +1872,10 @@ iree_status_t loom_runtime_memory_pool_commit_async(
   *out_operation = NULL;
   loom_runtime_memory_commit_t commit;
   IREE_RETURN_IF_ERROR(loom_runtime_memory_pool_prepare_commit(
-      pool, range_count, ranges, &commit));
+      pool, range_count, ranges, out_admission, &commit));
+  if (*out_admission != LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE) {
+    return iree_ok_status();
+  }
   return loom_runtime_memory_pool_commit_prepared_async(
       pool, &commit, (loom_runtime_memory_demand_t){0}, readiness, value,
       out_admission, out_operation);

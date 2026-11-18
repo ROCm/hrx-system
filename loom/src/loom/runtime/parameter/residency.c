@@ -1366,9 +1366,14 @@ static iree_status_t loom_runtime_residency_acquire_parameters(
     loom_runtime_residency_admission_t* out_admission) {
   *out_admission = LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY;
   if (state && residency->cache->pool) {
+    loom_runtime_memory_admission_t admission;
     IREE_RETURN_IF_ERROR(loom_runtime_memory_pool_prepare_commit(
-        residency->cache->pool, state->range_count, state->ranges,
+        residency->cache->pool, state->range_count, state->ranges, &admission,
         &state->prepared));
+    if (admission == LOOM_RUNTIME_MEMORY_ADMISSION_DEFERRED) {
+      *out_admission = LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED;
+      return iree_ok_status();
+    }
   }
   const uint64_t additional_state =
       state ? loom_runtime_memory_demand_total(state->prepared.demand) : 0;
