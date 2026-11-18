@@ -56,6 +56,38 @@ loom_value_id_t Storage::null_root(cxx::AST* owner) {
   return loom_buffer_null_result(op);
 }
 
+loom_value_id_t Storage::byte_length(loom_value_id_t root, cxx::AST* owner) {
+  loom_op_t* op;
+  check(loom_buffer_length_build(&builder_, root, locations_.get(owner), &op));
+  return loom_buffer_length_byte_length(op);
+}
+
+void Storage::copy_bytes(Pointer source, Pointer target,
+                         loom_value_id_t byte_length, cxx::AST* owner) {
+  loom_op_t* op;
+  check(loom_buffer_copy_build(&builder_, source.root, source.byte_offset,
+                               target.root, target.byte_offset, byte_length,
+                               locations_.get(owner), &op));
+}
+
+void Storage::fill_bytes(loom_value_id_t pattern, Pointer target,
+                         loom_value_id_t byte_length, cxx::AST* owner) {
+  loom_op_t* op;
+  check(loom_buffer_fill_build(&builder_, pattern, target.root,
+                               target.byte_offset, byte_length,
+                               locations_.get(owner), &op));
+}
+
+loom_value_id_t Storage::compare_bytes(Pointer left, Pointer right,
+                                       loom_value_id_t byte_length,
+                                       cxx::AST* owner) {
+  loom_op_t* op;
+  check(loom_buffer_compare_build(&builder_, left.root, left.byte_offset,
+                                  right.root, right.byte_offset, byte_length,
+                                  locations_.get(owner), &op));
+  return loom_buffer_compare_order(op);
+}
+
 loom_value_id_t Storage::compare_null(loom_value_id_t root, bool equal,
                                       cxx::AST* owner) {
   auto source = locations_.get(owner);

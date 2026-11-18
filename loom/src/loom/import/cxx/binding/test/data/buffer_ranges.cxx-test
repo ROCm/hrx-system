@@ -1,0 +1,121 @@
+// RUN: format bytecode
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+
+template <class T> using Buffer = loom::type::buffer<T>;
+using Index = loom::type::index;
+using Offset = loom::type::offset;
+
+// Extent queries do not read the payload, including volatile storage.
+Offset extent(Buffer<const volatile int> source) {
+  return loom::buffer::length(source);
+}
+
+// Different element types do not scale either origin or the transfer length.
+void copy_bytes(Buffer<const int> source, Index source_origin,
+                Buffer<unsigned short> target, Offset target_origin,
+                Offset length) {
+  loom::buffer::copy(source, source_origin, target, target_origin, length);
+}
+
+int compare_bytes(Buffer<const char> left, Offset left_origin,
+                  Buffer<const unsigned long long> right, Index right_origin,
+                  Offset length) {
+  return loom::buffer::compare::bytes(left, left_origin, right, right_origin,
+                                     length);
+}
+
+// A publisher explicitly initializes its whole feedback buffer in one bulk op.
+void initialize(Buffer<int> progress) {
+  loom::buffer::fill(0, progress, Offset{0}, loom::buffer::length(progress));
+}
+
+// Every canonical scalar pattern retains its raw width and floating encoding.
+void fill_patterns(Buffer<unsigned char> output, Index origin, Offset length,
+                   signed char i8, unsigned char u8, short i16,
+                   unsigned short u16, int i32, unsigned u32, long long i64,
+                   unsigned long long u64, __float8_e4m3fn f8e4m3,
+                   __float8_e5m2 f8e5m2, _Float16 f16, __bf16 bf16,
+                   float f32, double f64) {
+  loom::buffer::fill(i8, output, origin, length);
+  loom::buffer::fill(u8, output, origin, length);
+  loom::buffer::fill(i16, output, origin, length);
+  loom::buffer::fill(u16, output, origin, length);
+  loom::buffer::fill(i32, output, origin, length);
+  loom::buffer::fill(u32, output, origin, length);
+  loom::buffer::fill(i64, output, origin, length);
+  loom::buffer::fill(u64, output, origin, length);
+  loom::buffer::fill(f8e4m3, output, origin, length);
+  loom::buffer::fill(f8e5m2, output, origin, length);
+  loom::buffer::fill(f16, output, origin, length);
+  loom::buffer::fill(bf16, output, origin, length);
+  loom::buffer::fill(f32, output, origin, length);
+  loom::buffer::fill(f64, output, origin, length);
+}
+
+// Zero-byte operations preserve the High contract; they need no source guard.
+int empty_ranges() {
+  auto absent = loom::buffer::null<unsigned>();
+  auto length = loom::buffer::length(absent);
+  Offset origin{0};
+  loom::buffer::copy(absent, origin, absent, origin, length);
+  loom::buffer::fill(0, absent, origin, length);
+  return loom::buffer::compare::bytes(absent, origin, absent, origin, length);
+}
+
+// ----
+func.def public @extent(%source: buffer) -> (offset) {
+  %2 = buffer.length %source
+  func.return %2 : offset
+}
+
+func.def public @copy_bytes(%source: buffer, %source_origin: index, %target: buffer, %target_origin: offset, %length: offset) {
+  buffer.copy %source[%source_origin], %target[%target_origin], %length
+  func.return
+}
+
+func.def public @compare_bytes(%left: buffer, %left_origin: offset, %right: buffer, %right_origin: index, %length: offset) -> (i32) {
+  %14 = buffer.compare %left[%left_origin], %right[%right_origin], %length
+  func.return %14 : i32
+}
+
+func.def public @initialize(%progress: buffer) {
+  %16 = scalar.constant 0 : i32
+  %17 = scalar.constant 0 : i32
+  %18 = scalar.extsi %17 : i32 to i64
+  %19 = index.cast %18 : i64 to offset
+  %20 = buffer.length %progress
+  buffer.fill %16, %progress[%19], %20 : i32
+  func.return
+}
+
+func.def public @fill_patterns(%output: buffer, %origin: index, %length: offset, %i8: i8, %u8: i8, %i16: i16, %u16: i16, %i32: i32, %u32: i32, %i64: i64, %u64: i64, %f8e4m3: f8E4M3, %f8e5m2: f8E5M2, %f16: f16, %bf16: bf16, %f32: f32, %f64: f64) {
+  buffer.fill %i8, %output[%origin], %length : i8
+  buffer.fill %u8, %output[%origin], %length : i8
+  buffer.fill %i16, %output[%origin], %length : i16
+  buffer.fill %u16, %output[%origin], %length : i16
+  buffer.fill %i32, %output[%origin], %length : i32
+  buffer.fill %u32, %output[%origin], %length : i32
+  buffer.fill %i64, %output[%origin], %length : i64
+  buffer.fill %u64, %output[%origin], %length : i64
+  buffer.fill %f8e4m3, %output[%origin], %length : f8E4M3
+  buffer.fill %f8e5m2, %output[%origin], %length : f8E5M2
+  buffer.fill %f16, %output[%origin], %length : f16
+  buffer.fill %bf16, %output[%origin], %length : bf16
+  buffer.fill %f32, %output[%origin], %length : f32
+  buffer.fill %f64, %output[%origin], %length : f64
+  func.return
+}
+
+func.def public @empty_ranges() -> (i32) {
+  %absent = buffer.null : buffer
+  %length = buffer.length %absent
+  %41 = scalar.constant 0 : i32
+  %42 = scalar.extsi %41 : i32 to i64
+  %origin = index.cast %42 : i64 to offset
+  buffer.copy %absent[%origin], %absent[%origin], %length
+  %44 = scalar.constant 0 : i32
+  buffer.fill %44, %absent[%origin], %length : i32
+  %45 = buffer.compare %absent[%origin], %absent[%origin], %length
+  func.return %45 : i32
+}

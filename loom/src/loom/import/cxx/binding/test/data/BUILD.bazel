@@ -18,6 +18,8 @@ loom_check_test_suite(
         "address_values.cxx-test",
         "address_values_invalid.cxx-test",
         "allocation_macros.cxx-test",
+        "buffer_ranges.cxx-test",
+        "buffer_ranges_invalid.cxx-test",
         "column_views.cxx-test",
         "column_views_invalid.cxx-test",
         "dependent_view_loops.cxx-test",

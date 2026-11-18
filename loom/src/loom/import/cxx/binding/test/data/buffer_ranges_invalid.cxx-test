@@ -1,0 +1,97 @@
+// RUN: verify
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+void copy_to_const(loom::type::buffer<const int> source,
+                   loom::type::buffer<const int> target,
+                   loom::type::offset length) {
+  // ERROR@+1: LOWERING/059 "buffer.copy requires a mutable target"
+  loom::buffer::copy(source, loom::type::offset{0}, target, loom::type::offset{0}, length);
+}
+
+// ====
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+void copy_from_volatile(loom::type::buffer<volatile int> source,
+                        loom::type::buffer<int> target,
+                        loom::type::offset length) {
+  // ERROR@+1: LOWERING/059 "buffer.copy does not support volatile byte accesses"
+  loom::buffer::copy(source, loom::type::offset{0}, target, loom::type::offset{0}, length);
+}
+
+// ====
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+void fill_const(loom::type::buffer<const int> target,
+                loom::type::offset length) {
+  // ERROR@+1: LOWERING/059 "buffer.fill requires a mutable target"
+  loom::buffer::fill(0, target, loom::type::offset{0}, length);
+}
+
+// ====
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+int compare_volatile(loom::type::buffer<int> left,
+                      loom::type::buffer<volatile int> right,
+                      loom::type::offset length) {
+  // ERROR@+1: LOWERING/059 "buffer.compare does not support volatile byte accesses"
+  return loom::buffer::compare::bytes(left, loom::type::offset{0}, right, loom::type::offset{0}, length);
+}
+
+// ====
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+void fill_predicate(loom::type::buffer<int> target,
+                    loom::type::offset length, bool pattern) {
+  // ERROR@+1: LOWERING/059 "buffer.fill requires an 8-, 16-, 32-, or 64-bit integer or floating-point pattern"
+  loom::buffer::fill(pattern, target, loom::type::offset{0}, length);
+}
+
+// ====
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+void fill_address(loom::type::buffer<int> target,
+                  loom::type::offset length) {
+  // ERROR@+1: LOWERING/059 "buffer.fill requires an 8-, 16-, 32-, or 64-bit integer or floating-point pattern"
+  loom::buffer::fill(length, target, loom::type::offset{0}, length);
+}
+
+// ====
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+using Pair = int __attribute__((ext_vector_type(2)));
+void fill_vector(loom::type::buffer<int> target,
+                 loom::type::offset length, Pair pattern) {
+  // ERROR@+1: LOWERING/059 "buffer.fill requires an 8-, 16-, 32-, or 64-bit integer or floating-point pattern"
+  loom::buffer::fill(pattern, target, loom::type::offset{0}, length);
+}
+
+// ====
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+void fill_integer_origin(loom::type::buffer<int> target,
+                         loom::type::offset length, unsigned origin) {
+  // ERROR@+1: LOWERING/059 "buffer.fill requires typed buffers with index or offset byte positions"
+  loom::buffer::fill(0, target, origin, length);
+}
+
+// ====
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+// ERROR@+1: LOWERING/059 "buffer.length requires one typed buffer operand and an offset result"
+[[loom::op("buffer.length")]] unsigned bad_length(loom::type::buffer<int> source);
+
+// ====
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+// ERROR@+1: LOWERING/059 "buffer.copy requires an offset byte length"
+[[loom::op("buffer.copy")]] void bad_copy(loom::type::buffer<int> source,
+    loom::type::offset source_origin, loom::type::buffer<int> target,
+    loom::type::offset target_origin, unsigned length);
+
+// ====
+#include <loomcxx/buffer.h>
+#include <loomcxx/index.h>
+// ERROR@+1: LOWERING/059 "buffer.compare requires an int result"
+[[loom::op("buffer.compare")]] unsigned bad_compare(loom::type::buffer<int> left,
+    loom::type::offset left_origin, loom::type::buffer<int> right,
+    loom::type::offset right_origin, loom::type::offset length);
