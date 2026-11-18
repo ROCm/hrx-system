@@ -13,8 +13,10 @@
 #include "iree/base/bitmap.h"
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/liveness.h"
+#include "loom/codegen/low/allocation/active_capacity.h"
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/assignment_map.h"
+#include "loom/codegen/low/allocation/interval_order.h"
 #include "loom/codegen/low/allocation/physical_domains.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/allocation/table.h"
@@ -59,6 +61,23 @@ typedef struct loom_low_allocation_reconstruction_t {
   uint8_t* value_flags;
 } loom_low_allocation_reconstruction_t;
 
+// Inputs shared by all register assignment strategies for one schedule.
+typedef struct loom_low_allocation_interval_plan_t {
+  // Acquisition chronology over the original liveness intervals.
+  loom_low_allocation_interval_order_t order;
+  // Bounds each trial's active set before any private end-point refinements.
+  loom_low_allocation_active_capacity_t active_capacity;
+} loom_low_allocation_interval_plan_t;
+
+// Prepares the plan after storage relations have propagated through unit
+// liveness. Its order borrows |liveness| and owns its rows in |arena|.
+iree_status_t loom_low_allocation_interval_plan_build(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_liveness_analysis_t* liveness,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_low_placement_table_t* placement, iree_arena_allocator_t* arena,
+    loom_low_allocation_interval_plan_t* out_plan);
+
 typedef struct loom_low_allocation_interval_assignment_context_t {
   // Module containing the allocated low function.
   loom_module_t* module;
@@ -98,6 +117,8 @@ typedef struct loom_low_allocation_interval_assignment_context_t {
   const loom_low_storage_transport_t* storage_transport;
   // Per-allocation-unit liveness facts for |liveness|.
   const loom_low_allocation_unit_liveness_t* unit_liveness;
+  // Borrowed interval plan for this liveness and placement snapshot.
+  const loom_low_allocation_interval_plan_t* interval_plan;
   // Mutable assignment-backed storage leases and release actions.
   loom_low_allocation_storage_lease_state_t* storage_leases;
   // Arena owning returned assignment, spill, and remark arrays.
@@ -165,9 +186,6 @@ typedef struct loom_low_allocation_interval_assignment_result_t {
   // legitimate comparison rejection; all partial assignment state is
   // discarded by the caller.
   bool retained_location_replay_failed;
-  // Interval ordering found a multi-unit interval in a contiguous register
-  // class. Without one, fragmentation repair repeats the same placement.
-  bool has_packable_aggregates;
 } loom_low_allocation_interval_assignment_result_t;
 
 // Assigns concrete locations for allocatable intervals in |context| and writes

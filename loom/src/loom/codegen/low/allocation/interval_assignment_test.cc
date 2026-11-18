@@ -104,6 +104,18 @@ class LowAllocationIntervalAssignmentTest : public ::testing::Test {
     return domains;
   }
 
+  loom_low_allocation_interval_plan_t BuildIntervalPlan(
+      const loom_low_resolved_target_t& target,
+      const loom_liveness_analysis_t& liveness,
+      const loom_low_allocation_unit_liveness_t& unit_liveness,
+      const loom_low_placement_table_t& placement) {
+    loom_low_allocation_interval_plan_t plan = {};
+    IREE_CHECK_OK(loom_low_allocation_interval_plan_build(
+        target.descriptor_set, &liveness, &unit_liveness, &placement,
+        &decision_arena_, &plan));
+    return plan;
+  }
+
   // Shared pool for published results and allocation decision storage.
   iree_arena_block_pool_t block_pool_;
   // Owns prerequisite analyses and published assignment tables.
@@ -235,6 +247,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   auto physical_domains = BuildPhysicalDomains(target_constraints, liveness,
                                                unit_liveness, placement);
   loom_low_allocation_storage_lease_state_t storage_leases = {};
+  const auto interval_plan =
+      BuildIntervalPlan(target, liveness, unit_liveness, placement);
   const loom_low_allocation_interval_assignment_context_t context = {
       .module = module,
       .body = loom_low_func_def_body(function_op_),
@@ -251,26 +265,18 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .entry_location_count = 0,
       .storage_transport = nullptr,
       .unit_liveness = &unit_liveness,
+      .interval_plan = &interval_plan,
       .storage_leases = &storage_leases,
       .arena = &arena_,
       .reconstruction = &reconstruction_,
       .function_cfg_graph = &function_cfg_graph,
   };
   loom_low_allocation_interval_assignment_result_t result = {};
-  // The enclosing allocator may retain facts in the scratch arena's prefix.
-  uint32_t* retained_fact = nullptr;
-  IREE_ASSERT_OK(iree_arena_allocate(&decision_arena_, sizeof(*retained_fact),
-                                     (void**)&retained_fact));
-  *retained_fact = 42;
+  // All trials borrow the same interval plan from the decision arena.
   const iree_host_size_t decision_bytes = decision_arena_.used_allocation_size;
   IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
       &context, &decision_arena_, &result));
   EXPECT_EQ(decision_arena_.used_allocation_size, decision_bytes);
-  EXPECT_EQ(*retained_fact, 42u);
-
-  // The returned tables remain valid after assignment scratch is reclaimed.
-  iree_arena_reset(&decision_arena_);
-  iree_arena_block_pool_trim(&block_pool_);
   ASSERT_EQ(result.assignment_count, 1u);
   ASSERT_NE(result.assignments, nullptr);
   EXPECT_EQ(result.assignment_indices_by_value_ordinal[0], 0u);
@@ -288,7 +294,6 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   EXPECT_EQ(result.remark_count, 0u);
   EXPECT_EQ(result.spill_plans, nullptr);
   EXPECT_EQ(result.remarks, nullptr);
-  EXPECT_TRUE(result.has_packable_aggregates);
   EXPECT_EQ(reconstruction_.value_flags, nullptr);
   EXPECT_EQ(reconstruction_.arena.used_allocation_size, 0u);
 
@@ -348,8 +353,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   result = {};
   IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
       &bounded_context, &decision_arena_, &result));
-  iree_arena_reset(&decision_arena_);
-  iree_arena_block_pool_trim(&block_pool_);
+  EXPECT_EQ(decision_arena_.used_allocation_size, decision_bytes);
   EXPECT_EQ(reconstruction_.value_flags, reconstruction_flags);
   EXPECT_EQ(reconstruction_.arena.used_allocation_size, reconstruction_bytes);
   EXPECT_FALSE(result.reached_spill_traffic_limit);
@@ -388,6 +392,9 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   result = {};
   IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
       &bounded_context, &decision_arena_, &result));
+  // The winning result outlives both the interval plan and trial scratch.
+  iree_arena_reset(&decision_arena_);
+  iree_arena_block_pool_trim(&block_pool_);
   EXPECT_FALSE(result.reached_spill_traffic_limit);
   ASSERT_EQ(result.spill_plan_count, 1u);
   EXPECT_EQ(result.spill_plans[0].byte_size, 16u);
@@ -585,6 +592,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   auto physical_domains = BuildPhysicalDomains(target_constraints, liveness,
                                                unit_liveness, placement);
   loom_low_allocation_storage_lease_state_t storage_leases = {};
+  const auto interval_plan =
+      BuildIntervalPlan(target, liveness, unit_liveness, placement);
   const loom_low_allocation_interval_assignment_context_t context = {
       .module = module,
       .body = loom_low_func_def_body(function_op_),
@@ -601,6 +610,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .entry_location_count = 0,
       .storage_transport = nullptr,
       .unit_liveness = &unit_liveness,
+      .interval_plan = &interval_plan,
       .storage_leases = &storage_leases,
       .arena = &arena_,
       .reconstruction = &reconstruction_,
@@ -610,7 +620,6 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       &context, &decision_arena_, &result));
 
   ASSERT_EQ(result.assignment_count, 3u);
-  EXPECT_FALSE(result.has_packable_aggregates);
   EXPECT_EQ(result.assignments[0].location_base, 1u);
   EXPECT_EQ(result.assignments[0].location_count, 1u);
   EXPECT_EQ(result.assignments[1].location_base, 0u);
@@ -828,6 +837,8 @@ TEST_P(LowFixedSubrangeAssignmentTest, PreservesOffsetAndTiedOwner) {
   auto physical_domains = BuildPhysicalDomains(target_constraints, liveness,
                                                unit_liveness, placement);
   loom_low_allocation_storage_lease_state_t storage_leases = {};
+  const auto interval_plan =
+      BuildIntervalPlan(target, liveness, unit_liveness, placement);
   const loom_low_allocation_interval_assignment_context_t context = {
       .module = module,
       .body = loom_low_func_def_body(function_op_),
@@ -844,6 +855,7 @@ TEST_P(LowFixedSubrangeAssignmentTest, PreservesOffsetAndTiedOwner) {
       .entry_location_count = 0,
       .storage_transport = nullptr,
       .unit_liveness = &unit_liveness,
+      .interval_plan = &interval_plan,
       .storage_leases = &storage_leases,
       .arena = &arena_,
       .reconstruction = &reconstruction_,
@@ -863,7 +875,6 @@ TEST_P(LowFixedSubrangeAssignmentTest, PreservesOffsetAndTiedOwner) {
     EXPECT_EQ(assignment.location_base, i == 0 ? 4 : 4 + source_offset);
     EXPECT_EQ(assignment.location_count, i == 0 ? 4u : 1u);
   }
-  EXPECT_TRUE(result.has_packable_aggregates);
 
   loom_local_value_domain_release(&value_domain);
 }
@@ -1015,6 +1026,8 @@ class LowRequiredRegisterRelocationTest
     const auto physical_domains =
         BuildPhysicalDomains(constraints, liveness, unit_liveness, placement);
     loom_low_allocation_storage_lease_state_t leases = {};
+    const auto interval_plan =
+        BuildIntervalPlan(target, liveness, unit_liveness, placement);
     const loom_low_allocation_interval_assignment_context_t context = {
         .module = module,
         .body = loom_low_func_def_body(function_op_),
@@ -1026,6 +1039,7 @@ class LowRequiredRegisterRelocationTest
         .physical_domains = &physical_domains,
         .target_constraints = &constraints,
         .unit_liveness = &unit_liveness,
+        .interval_plan = &interval_plan,
         .storage_leases = &leases,
         .arena = &arena_,
         .reconstruction = &reconstruction_,
@@ -1297,6 +1311,8 @@ void LowEntryPlacementTest::CheckPlacement(
   const auto physical_domains =
       BuildPhysicalDomains(constraints, liveness, unit_liveness, placement);
   loom_low_allocation_storage_lease_state_t leases = {};
+  const auto interval_plan =
+      BuildIntervalPlan(target, liveness, unit_liveness, placement);
   const loom_low_allocation_interval_assignment_context_t context = {
       .module = module_,
       .body = body,
@@ -1310,6 +1326,7 @@ void LowEntryPlacementTest::CheckPlacement(
       .entry_locations = incoming,
       .entry_location_count = test_case.incoming_count,
       .unit_liveness = &unit_liveness,
+      .interval_plan = &interval_plan,
       .storage_leases = &leases,
       .arena = &arena_,
       .reconstruction = &reconstruction_,

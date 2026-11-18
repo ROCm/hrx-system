@@ -26,6 +26,24 @@
 #include "loom/codegen/low/rematerialization_facts.h"
 #include "loom/ir/local_value_domain.h"
 
+iree_status_t loom_low_allocation_interval_plan_build(
+    const loom_low_descriptor_set_t* descriptor_set,
+    const loom_liveness_analysis_t* liveness,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_low_placement_table_t* placement, iree_arena_allocator_t* arena,
+    loom_low_allocation_interval_plan_t* out_plan) {
+  *out_plan = (loom_low_allocation_interval_plan_t){0};
+  IREE_RETURN_IF_ERROR(loom_low_allocation_interval_order_build(
+      descriptor_set, liveness, unit_liveness, placement, arena,
+      &out_plan->order));
+  if (out_plan->order.interval_count == 0) {
+    return iree_ok_status();
+  }
+  return loom_low_allocation_active_capacity_calculate(
+      descriptor_set, liveness, unit_liveness, placement, arena->block_pool,
+      &out_plan->active_capacity);
+}
+
 typedef struct loom_low_allocation_spill_decision_t {
   // Assignment selected for spilling, in decision order.
   uint32_t assignment_index;
@@ -1692,8 +1710,9 @@ loom_low_allocation_interval_assignment_assign_fixed_interval(
 
 static iree_status_t
 loom_low_allocation_interval_assignment_initialize_result_storage(
-    loom_low_allocation_interval_assignment_state_t* state,
-    const loom_low_allocation_interval_order_t* order) {
+    loom_low_allocation_interval_assignment_state_t* state) {
+  const loom_low_allocation_interval_plan_t* plan =
+      state->context->interval_plan;
   if (state->context->liveness->value_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         state->context->arena, state->context->liveness->value_count,
@@ -1714,20 +1733,16 @@ loom_low_allocation_interval_assignment_initialize_result_storage(
                  sizeof(*state->assignment_indices_by_storage_origin));
     }
   }
-  if (order->interval_count > 0) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(state->context->arena, order->interval_count,
-                                  sizeof(*state->result.assignments),
-                                  (void**)&state->result.assignments));
-    loom_low_allocation_active_capacity_t capacity = {0};
-    IREE_RETURN_IF_ERROR(loom_low_allocation_active_capacity_calculate(
-        state->context->target->descriptor_set, state->context->liveness,
-        &state->unit_liveness, state->context->placement,
-        state->scratch_arena->block_pool, &capacity));
+  if (plan->order.interval_count > 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->context->arena, plan->order.interval_count,
+        sizeof(*state->result.assignments),
+        (void**)&state->result.assignments));
     IREE_RETURN_IF_ERROR(loom_low_allocation_active_set_initialize(
         state->context->target->descriptor_set, &state->unit_liveness,
-        order->interval_count, capacity.program_point_count,
-        capacity.unit_count, state->scratch_arena, &state->active));
+        plan->order.interval_count, plan->active_capacity.program_point_count,
+        plan->active_capacity.unit_count, state->scratch_arena,
+        &state->active));
     IREE_RETURN_IF_ERROR(loom_low_allocation_fixed_availability_initialize(
         state->context->target_constraints, state->scratch_arena,
         &state->fixed_availability));
@@ -1789,17 +1804,12 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
     loom_low_allocation_interval_assignment_state_t* state) {
   const loom_low_allocation_interval_assignment_context_t* context =
       state->context;
-  loom_low_allocation_interval_order_t order = {0};
-  IREE_RETURN_IF_ERROR(loom_low_allocation_interval_order_build(
-      context->target->descriptor_set, context->liveness,
-      context->unit_liveness, context->placement, state->scratch_arena,
-      &order));
-  state->interval_count = order.interval_count;
-  state->result.has_packable_aggregates = order.has_packable_aggregates;
+  const loom_low_allocation_interval_order_t* order =
+      &context->interval_plan->order;
+  state->interval_count = order->interval_count;
   IREE_RETURN_IF_ERROR(
-      loom_low_allocation_interval_assignment_initialize_result_storage(
-          state, &order));
-  if (order.interval_count == 0) {
+      loom_low_allocation_interval_assignment_initialize_result_storage(state));
+  if (order->interval_count == 0) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_low_allocation_preference_workspace_initialize(
@@ -1808,17 +1818,17 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
   if (context->search_strategy ==
       LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR) {
     IREE_RETURN_IF_ERROR(loom_low_allocation_scalar_packing_build(
-        context->target->descriptor_set, context->liveness, &order,
+        context->target->descriptor_set, context->liveness, order,
         context->fragmentation_repair_reg_classes, state->scratch_arena,
         &state->scalar_packing));
   }
 
-  for (iree_host_size_t i = 0; i < order.interval_count; ++i) {
+  for (iree_host_size_t i = 0; i < order->interval_count; ++i) {
     if (state->result.retained_location_replay_failed) {
       return iree_ok_status();
     }
     const loom_low_allocation_interval_order_entry_t* entry =
-        &order.intervals[i];
+        &order->intervals[i];
     const loom_liveness_interval_t* interval = entry->interval;
     loom_low_allocation_active_set_expire(
         &state->active, state->result.assignments,
