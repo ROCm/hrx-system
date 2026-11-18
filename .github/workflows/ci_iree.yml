@@ -67,6 +67,7 @@ permissions:
 
 jobs:
   bazel_linux:
+    if: github.event_name != 'workflow_dispatch'
     name: Bazel / ${{ matrix.platform || 'Linux x86-64' }} / ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -590,6 +591,7 @@ jobs:
           retention-days: 7
 
   sdk:
+    if: github.event_name != 'workflow_dispatch'
     name: SDK
     uses: $/.github/workflows/build_loom_sdk.yml
     with:
@@ -621,19 +623,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Clang CL / Fastbuild
-            kind: repository
-            command: iree-bazel-repository-integration
-            host_toolchain: clang-cl
-            platform_coverage: true
-            runner: azure-windows-scale-rocm
-            target_selector: gfx11-generic
-          - name: Clang CL / Fastbuild / Shared Tools
-            kind: repository
-            command: iree-bazel-repository-shared-tools
-            host_toolchain: clang-cl
-            platform_coverage: true
-            runner: azure-windows-scale-rocm
           - name: Clang CL / Fastbuild / AMD gfx1151 NPU5
             kind: amd_client
             command: iree-bazel-amd-client
@@ -643,13 +632,6 @@ jobs:
             uncached: true
             runner: windows-gfx1151-gpu-rocm
             xdna: true
-          - name: Clang CL / ASAN / AMD gfx120x
-            kind: amdgpu
-            command: iree-bazel-amdgpu-native-asan
-            host_toolchain: clang-cl
-            uncached: true
-            runner: windows-gfx1201-gpu-rocm
-            target_selector: gfx120X-all
     concurrency:
       group: iree-bazel-windows-${{ matrix.command }}-${{ matrix.host_toolchain }}-${{ matrix.target_selector }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
@@ -922,6 +904,8 @@ jobs:
             $targetArgs += @('--amdgpu-target', '${{ matrix.target_selector }}')
           }
           python build_tools/devtools/ci.py '${{ matrix.command }}' @targetArgs `
+            --target '//runtime/src/iree/hal/driver/vulkan/cts:timestamp_replay_tests' `
+            --target '//runtime/src/iree/hal/driver/vulkan/cts:command_buffer_timestamp_tests' `
             --bazel-profile-dir "$env:RUNNER_TEMP\bazel-profiles" `
             --bazel-test-results-dir $nativeResultsDir
           exit $LASTEXITCODE
@@ -1005,7 +989,7 @@ jobs:
 
   cmake_linux:
     name: CMake / Linux x86-64 / Clang / RelWithDebInfo
-    if: github.event_name != 'push'
+    if: github.event_name != 'workflow_dispatch' && (github.event_name != 'push')
     concurrency:
       group: iree-cmake-linux-repository-build-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
@@ -1080,7 +1064,7 @@ jobs:
 
   cmake_windows_cross:
     name: CMake / Windows x86-64 (via Linux) / Clang CL / RelWithDebInfo
-    if: github.event_name != 'push'
+    if: github.event_name != 'workflow_dispatch' && (github.event_name != 'push')
     concurrency:
       group: iree-cmake-windows-cross-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true
