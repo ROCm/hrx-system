@@ -57,6 +57,11 @@ amdf_status_t amdf_gpu_umd_kernel_queue_submit(
     amdf_gpu_umd_kernel_queue_t* queue, uint64_t command_buffer_address,
     uint64_t command_buffer_byte_length, uint64_t submission);
 
+// Returns a borrowed CPU-cacheable observation word or NULL. This word can
+// only request a checked status refresh. Readers join before exclusive stop.
+const volatile uint64_t* amdf_gpu_umd_kernel_queue_progress_address(
+    const amdf_gpu_umd_kernel_queue_t* queue);
+
 // Samples the native progress fence with device-to-host acquire semantics.
 // No locks, allocation, initialization, system calls or active polling.
 uint64_t amdf_gpu_umd_kernel_queue_query_progress(

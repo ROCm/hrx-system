@@ -220,6 +220,10 @@ amdf_gpu_kernel_queue_inactivate(amdf_kernel_queue_t* base_queue) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   amdf_gpu_kernel_queue_t* queue = (amdf_gpu_kernel_queue_t*)base_queue;
+  // Native teardown may consume the mapping even when removal fails.
+  base_queue->progress_address = NULL;
+  base_queue->info.capabilities &=
+      ~AMDF_KERNEL_QUEUE_CAPABILITY_PROGRESS_OBSERVATION;
   const amdf_status_t status =
       queue->umd_api->kernel_queue_inactivate(queue->umd);
   queue->inactivated = amdf_status_is_ok(status);
@@ -293,6 +297,12 @@ amdf_status_t AMDF_CALL amdf_gpu_kernel_queue_create(
         amdf_gpu_device_get_umd(device), family_info.command_type, &queue->umd);
   }
   if (amdf_status_is_ok(status)) {
+    queue->base.progress_address =
+        queue->umd_api->kernel_queue_progress_address(queue->umd);
+    if (queue->base.progress_address) {
+      queue->base.info.capabilities |=
+          AMDF_KERNEL_QUEUE_CAPABILITY_PROGRESS_OBSERVATION;
+    }
     queue->base.info.notification_types =
         queue->umd_api->kernel_queue_query_notification_types(queue->umd);
     if (queue->umd_api->kernel_queue_mapping_capacity(queue->umd) != 0) {

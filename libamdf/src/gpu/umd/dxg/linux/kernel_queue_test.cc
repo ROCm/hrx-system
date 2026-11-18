@@ -305,6 +305,16 @@ class LinuxDxgKernelQueueTest
   amdf_gpu_umd_kernel_queue_t* queue_ = nullptr;
 };
 
+TEST_P(LinuxDxgKernelQueueTest,
+       ProgressObservationRequiresCacheableLiveMapping) {
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_progress_address(queue_), nullptr);
+  device_.memory_capabilities.cache_coherent_memory_supported = 1;
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_progress_address(queue_),
+            &state_.progress);
+  ASSERT_EQ(amdf_gpu_linux_dxg_kernel_queue_inactivate(queue_), AMDF_STATUS_OK);
+  EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_progress_address(queue_), nullptr);
+}
+
 TEST_P(LinuxDxgKernelQueueTest, CreatesColdQueueWithCompleteCapabilities) {
   EXPECT_EQ(amdf_gpu_linux_dxg_kernel_queue_query_notification_types(queue_),
             AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD);

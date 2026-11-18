@@ -23,6 +23,7 @@ amdf_status_t amdf_kernel_queue_initialize(
   queue->vtable = vtable;
   queue->device = device;
   queue->info = *info;
+  queue->progress_address = NULL;
   return AMDF_STATUS_OK;
 }
 
@@ -36,9 +37,11 @@ amdf_status_t AMDF_CALL amdf_kernel_queue_query_info(
   if (queue == NULL) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  const amdf_status_t status = amdf_structure_validate_output(
+  const amdf_status_t status = amdf_structure_validate_output_extension(
       out_info, AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
-      (uint32_t)sizeof(amdf_kernel_queue_info_t));
+      sizeof(amdf_kernel_queue_info_t),
+      AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_PROGRESS_OBSERVATION,
+      sizeof(amdf_kernel_queue_progress_observation_t));
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -48,6 +51,10 @@ amdf_status_t AMDF_CALL amdf_kernel_queue_query_info(
   *out_info = queue->info;
   out_info->structure_size = structure_size;
   out_info->next = next;
+  if (next) {
+    ((amdf_kernel_queue_progress_observation_t*)next)->address =
+        queue->progress_address;
+  }
   return AMDF_STATUS_OK;
 }
 

@@ -55,8 +55,10 @@ struct amdf_kernel_queue_t {
   const amdf_kernel_queue_vtable_t* vtable;
   // Device borrowed for the lifetime of this queue.
   amdf_device_t* device;
-  // Immutable properties established before publication.
+  // Cached queue properties. Exclusive stop withdraws mapped observations.
   amdf_kernel_queue_info_t info;
+  // Optional CPU-cacheable native point, borrowed until exclusive stop.
+  const volatile uint64_t* progress_address;
 };
 
 // Initializes an unpublished queue base and borrows its device.

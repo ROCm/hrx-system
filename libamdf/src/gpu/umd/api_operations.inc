@@ -178,6 +178,10 @@ AMDF_GPU_UMD_PLATFORM_OPERATION(amdf_status_t, kernel_queue_submit,
                                  uint64_t command_buffer_address,
                                  uint64_t command_buffer_byte_length,
                                  uint64_t submission))
+// Borrows the cacheable native progress observation, when available.
+AMDF_GPU_UMD_PLATFORM_OPERATION(const volatile uint64_t*,
+                                kernel_queue_progress_address,
+                                (const amdf_gpu_umd_kernel_queue_t* queue))
 // Samples one native progress fence.
 AMDF_GPU_UMD_PLATFORM_OPERATION(uint64_t, kernel_queue_query_progress,
                                 (const amdf_gpu_umd_kernel_queue_t* queue))
