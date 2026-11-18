@@ -955,7 +955,7 @@ static void CaptureFdBackedQueueRead(
     };
   }
 
-  IREE_ASSERT_OK(iree_hal_queue_read(
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
       queue, iree_hal_semaphore_list_empty(), signal_list, file,
       /*source_offset=*/4, target_buffer, /*target_offset=*/0, /*length=*/16,
       /*barriers=*/NULL, IREE_HAL_READ_FLAG_NONE));
@@ -1142,7 +1142,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedHostAllocationFileRead) {
       &signal_value,
   };
 
-  IREE_ASSERT_OK(iree_hal_queue_read(
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
       queue, iree_hal_semaphore_list_empty(), signal_list, file,
       /*source_offset=*/4, target_buffer, /*target_offset=*/0, /*length=*/16,
       /*barriers=*/NULL, IREE_HAL_READ_FLAG_NONE));
@@ -1229,7 +1229,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedFdBackedQueueRead) {
       &signal_value,
   };
 
-  IREE_ASSERT_OK(iree_hal_queue_read(
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
       queue, iree_hal_semaphore_list_empty(), signal_list, file,
       /*source_offset=*/4, target_buffer, /*target_offset=*/0, /*length=*/16,
       /*barriers=*/NULL, IREE_HAL_READ_FLAG_NONE));
@@ -1384,7 +1384,7 @@ TEST(ReplayExecuteTest, ExecutesRemappedFdBackedQueueRead) {
       &signal_value,
   };
 
-  IREE_ASSERT_OK(iree_hal_queue_read(
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
       queue, iree_hal_semaphore_list_empty(), signal_list, file,
       /*source_offset=*/4, target_buffer, /*target_offset=*/0, /*length=*/16,
       /*barriers=*/NULL, IREE_HAL_READ_FLAG_NONE));
@@ -1618,7 +1618,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedFdBackedQueueWrite) {
   };
   const iree_hal_barrier_list_t publication_list = {1, &publication};
   const iree_hal_queue_barriers_t barriers = {&publication_list, nullptr};
-  IREE_ASSERT_OK(iree_hal_queue_write(
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(
       queue, iree_hal_semaphore_list_empty(), signal_list, source_buffer,
       /*source_offset=*/0, file, /*target_offset=*/4, sizeof(source_contents),
       &barriers, IREE_HAL_WRITE_FLAG_NONE));

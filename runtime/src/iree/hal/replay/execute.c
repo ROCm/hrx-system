@@ -392,27 +392,23 @@ static iree_status_t iree_hal_replay_plan_prepare_queue_dependency(
       }
       return iree_ok_status();
     }
-    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_READ: {
-      IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
-          record, IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_READ,
-          sizeof(iree_hal_replay_queue_read_payload_t)));
-      iree_hal_replay_queue_read_payload_t payload;
-      memcpy(&payload, record->payload.data, sizeof(payload));
-      return iree_hal_replay_plan_prepare_queue_dependency_lists(
-          record, IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_READ, sizeof(payload),
-          payload.wait_semaphore_count, payload.signal_semaphore_count,
-          payload.captured_data_length, out_dependency);
-    }
+    case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_READ:
     case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_WRITE: {
+      const iree_hal_replay_payload_type_t type =
+          record->header.operation_code ==
+                  IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_READ
+              ? IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_READ
+              : IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_WRITE;
       IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(
-          record, IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_WRITE,
-          sizeof(iree_hal_replay_queue_write_payload_t)));
-      iree_hal_replay_queue_write_payload_t payload;
+          record, type, sizeof(iree_hal_replay_queue_file_payload_t)));
+      iree_hal_replay_queue_file_payload_t payload;
       memcpy(&payload, record->payload.data, sizeof(payload));
+      iree_hal_replay_queue_file_layout_t layout;
+      IREE_RETURN_IF_ERROR(
+          iree_hal_replay_queue_file_layout(&payload, &layout));
       return iree_hal_replay_plan_prepare_queue_dependency_lists(
-          record, IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_WRITE, sizeof(payload),
-          payload.wait_semaphore_count, payload.signal_semaphore_count,
-          /*trailing_payload_length=*/0, out_dependency);
+          record, type, sizeof(payload), payload.wait_semaphore_count,
+          payload.signal_semaphore_count, layout.total_size, out_dependency);
     }
     case IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_ALLOCA: {
       IREE_RETURN_IF_ERROR(iree_hal_replay_executor_require_payload(

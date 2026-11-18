@@ -307,28 +307,35 @@ class SubmissionTrace {
     return iree_hal_queue_transfer(self->target_, waits, signals, count,
                                    operations, barriers);
   }
-  static iree_status_t Read(
-      iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
-      iree_hal_semaphore_list_t signals, iree_hal_file_t* file, uint64_t offset,
-      iree_hal_buffer_t* buffer, iree_device_size_t buffer_offset,
-      iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
-      iree_hal_read_flags_t flags) {
+  static iree_status_t Read(iree_hal_queue_t* queue,
+                            iree_hal_semaphore_list_t waits,
+                            iree_hal_semaphore_list_t signals,
+                            iree_hal_file_binding_table_t files,
+                            iree_hal_buffer_binding_table_t buffers,
+                            const iree_hal_file_transfer_list_t* transfers,
+                            const iree_hal_queue_barriers_t* barriers,
+                            iree_hal_read_flags_t flags) {
     auto* self = Cast(queue);
-    self->Record(Kind::kRead, waits, signals, file);
-    return iree_hal_queue_read(self->target_, waits, signals, file, offset,
-                               buffer, buffer_offset, length, barriers, flags);
+    EXPECT_EQ(files.count, 1u);
+    self->Record(Kind::kRead, waits, signals,
+                 files.count ? files.bindings[0].file : nullptr);
+    return iree_hal_queue_read(self->target_, waits, signals, files, buffers,
+                               transfers, barriers, flags);
   }
-  static iree_status_t Write(
-      iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
-      iree_hal_semaphore_list_t signals, iree_hal_buffer_t* buffer,
-      iree_device_size_t buffer_offset, iree_hal_file_t* file, uint64_t offset,
-      iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
-      iree_hal_write_flags_t flags) {
+  static iree_status_t Write(iree_hal_queue_t* queue,
+                             iree_hal_semaphore_list_t waits,
+                             iree_hal_semaphore_list_t signals,
+                             iree_hal_buffer_binding_table_t buffers,
+                             iree_hal_file_binding_table_t files,
+                             const iree_hal_file_transfer_list_t* transfers,
+                             const iree_hal_queue_barriers_t* barriers,
+                             iree_hal_write_flags_t flags) {
     auto* self = Cast(queue);
-    self->Record(Kind::kWrite, waits, signals, file);
-    return iree_hal_queue_write(self->target_, waits, signals, buffer,
-                                buffer_offset, file, offset, length, barriers,
-                                flags);
+    EXPECT_EQ(files.count, 1u);
+    self->Record(Kind::kWrite, waits, signals,
+                 files.count ? files.bindings[0].file : nullptr);
+    return iree_hal_queue_write(self->target_, waits, signals, buffers, files,
+                                transfers, barriers, flags);
   }
 
   // Queue prefix; the vtable casts this first member back to its owner.

@@ -34,8 +34,10 @@ enum iree_hal_replay_recorder_external_file_policy_e {
   // Capture each fd-backed file range read by queue_read operations inline.
   //
   // This makes correctness replays hermetic without embedding untouched file
-  // ranges. Replay substitutes captured reads with queue updates, so use
-  // REFERENCE when measuring storage-backed file read performance matters.
+  // ranges. Replay reads the packed useful bytes from an owned memory file;
+  // sparse file gaps are omitted. Only HOST descriptions without producer
+  // waits can be sampled during recording. Use REFERENCE for deferred metadata
+  // or when measuring storage-backed file performance matters.
   IREE_HAL_REPLAY_RECORDER_EXTERNAL_FILE_POLICY_CAPTURE_RANGES = 1u,
   // Capture every byte of each imported fd-backed file inline.
   //

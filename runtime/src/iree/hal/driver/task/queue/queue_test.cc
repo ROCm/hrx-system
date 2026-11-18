@@ -26,6 +26,20 @@
 
 namespace {
 
+static iree_status_t SubmitFileTransfer(
+    iree_hal_task_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_file_binding_table_t files,
+    iree_hal_buffer_binding_table_t buffers,
+    const iree_hal_file_transfer_list_t* transfers,
+    const iree_hal_queue_barriers_t* barriers,
+    iree_hal_memory_access_t access) {
+  return access == IREE_HAL_MEMORY_ACCESS_READ
+             ? iree_hal_queue_read(&queue->base, waits, signals, files, buffers,
+                                   transfers, barriers, 0)
+             : iree_hal_queue_write(&queue->base, waits, signals, buffers,
+                                    files, transfers, barriers, 0);
+}
+
 class TaskQueueTest : public ::testing::TestWithParam<iree_host_size_t> {
  protected:
   void SetUp() override {
@@ -493,8 +507,9 @@ TEST_P(TaskQueueTest, AsyncFileReadPublishesBeforeCompletion) {
                                 IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &done));
   uint64_t value = 1;
   const iree_hal_semaphore_list_t signals = {1, &done, &value};
-  IREE_ASSERT_OK(iree_hal_queue_read(queue, {}, signals, file, 3, target, 7, 24,
-                                     nullptr, IREE_HAL_READ_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(queue, {}, signals, file, 3, target,
+                                            7, 24, nullptr,
+                                            IREE_HAL_READ_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(signals, iree_infinite_timeout(),
                                               IREE_ASYNC_WAIT_FLAG_NONE));
   EXPECT_EQ(target->publications, 1u);
@@ -619,11 +634,11 @@ TEST_P(TaskQueueTest, FileRectanglesCaptureOperandsAndPreservePadding) {
             }
           }
         }
-        IREE_ASSERT_OK(iree_hal_task_queue_submit_file_transfer(
-            queue, waits, signals, {1, &file_binding}, {1, &buffer_binding},
-            &list, nullptr,
-            reading ? IREE_HAL_MEMORY_ACCESS_READ
-                    : IREE_HAL_MEMORY_ACCESS_WRITE));
+        IREE_ASSERT_OK(
+            SubmitFileTransfer(queue, waits, signals, {1, &file_binding},
+                               {1, &buffer_binding}, &list, nullptr,
+                               reading ? IREE_HAL_MEMORY_ACCESS_READ
+                                       : IREE_HAL_MEMORY_ACCESS_WRITE));
       }
       // The call owns captures and references while its dependency is
       // unresolved.
@@ -717,11 +732,11 @@ TEST_P(TaskQueueTest, IndirectFilesUsePublishedPrefixAndAllowIndependentWork) {
                        metadata_buffer,
                        0},
       };
-      IREE_ASSERT_OK(iree_hal_task_queue_submit_file_transfer(
-          queue, waits, signals, {1, &file_binding}, {1, &buffer_binding},
-          &list, nullptr,
-          reading ? IREE_HAL_MEMORY_ACCESS_READ
-                  : IREE_HAL_MEMORY_ACCESS_WRITE));
+      IREE_ASSERT_OK(
+          SubmitFileTransfer(queue, waits, signals, {1, &file_binding},
+                             {1, &buffer_binding}, &list, nullptr,
+                             reading ? IREE_HAL_MEMORY_ACCESS_READ
+                                     : IREE_HAL_MEMORY_ACCESS_WRITE));
       IREE_ASSERT_OK(iree_hal_queue_copy(
           &queue->base, signals, consumed, buffer, 0, consumed_buffer, 0,
           buffer_bytes.size(), nullptr, IREE_HAL_COPY_FLAG_NONE));
@@ -849,16 +864,16 @@ TEST_P(TaskQueueTest, FileGroupReadsAndWritesMixedNativeAndMemoryFiles) {
     };
     const auto access =
         reading ? IREE_HAL_MEMORY_ACCESS_READ : IREE_HAL_MEMORY_ACCESS_WRITE;
-    EXPECT_THAT(iree::Status(iree_hal_task_queue_submit_file_transfer(
-                    queue, {}, signals, {2, files}, {2, buffers}, &list,
-                    nullptr, access)),
-                iree::testing::status::StatusIs(iree::StatusCode::kOutOfRange));
+    EXPECT_THAT(
+        iree::Status(SubmitFileTransfer(queue, {}, signals, {2, files},
+                                        {2, buffers}, &list, nullptr, access)),
+        iree::testing::status::StatusIs(iree::StatusCode::kOutOfRange));
     uint64_t observed = UINT64_MAX;
     IREE_ASSERT_OK(iree_hal_semaphore_query(done, &observed));
     EXPECT_EQ(observed, 0u);
     list.host = {transfers.size(), transfers.data()};
-    IREE_ASSERT_OK(iree_hal_task_queue_submit_file_transfer(
-        queue, {}, signals, {2, files}, {2, buffers}, &list, nullptr, access));
+    IREE_ASSERT_OK(SubmitFileTransfer(queue, {}, signals, {2, files},
+                                      {2, buffers}, &list, nullptr, access));
     for (size_t i = 0; i < 2; ++i) {
       iree_hal_file_release(files[i].file);
       iree_hal_buffer_release(buffers[i].buffer);
@@ -937,9 +952,9 @@ TEST_P(TaskQueueTest,
       .type = IREE_HAL_FILE_TRANSFER_LIST_TYPE_HOST,
       .host = {1, &transfer},
   };
-  IREE_ASSERT_OK(iree_hal_task_queue_submit_file_transfer(
-      queue, waits, signals, {1, &file_binding}, {1, &buffer_binding}, &list,
-      nullptr, IREE_HAL_MEMORY_ACCESS_READ));
+  IREE_ASSERT_OK(SubmitFileTransfer(queue, waits, signals, {1, &file_binding},
+                                    {1, &buffer_binding}, &list, nullptr,
+                                    IREE_HAL_MEMORY_ACCESS_READ));
   // File size can change after capture. The first 16 rows remain readable;
   // later accepted requests encounter EOF and must drain before failure.
   IREE_ASSERT_OK(iree_io_file_contents_write(
@@ -992,9 +1007,8 @@ TEST_P(TaskQueueTest, IndirectFileCountIsCheckedAfterProducerAndBeforeRecords) {
         .type = IREE_HAL_FILE_TRANSFER_LIST_TYPE_INDIRECT,
         .indirect = {{buffer, 64, 64}, buffer, 0},
     };
-    IREE_ASSERT_OK(iree_hal_task_queue_submit_file_transfer(
-        queue, waits, signals, {}, {}, &list, nullptr,
-        IREE_HAL_MEMORY_ACCESS_READ));
+    IREE_ASSERT_OK(SubmitFileTransfer(queue, waits, signals, {}, {}, &list,
+                                      nullptr, IREE_HAL_MEMORY_ACCESS_READ));
     iree_unaligned_store_le_u64(&metadata[0], live_count);
     iree_hal_buffer_release(buffer);
     IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphores[0], value, nullptr));

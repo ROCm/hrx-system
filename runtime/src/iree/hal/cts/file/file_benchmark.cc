@@ -467,7 +467,7 @@ class FileReads {
 
   iree_status_t Issue(Lane& lane, uint64_t offset, uint64_t length) {
     uint64_t next = lane.value + 1;
-    IREE_RETURN_IF_ERROR(iree_hal_queue_read(
+    IREE_RETURN_IF_ERROR(iree_hal_queue_read_linear(
         queue_, {lane.value ? 1u : 0u, &lane.timeline, &lane.value},
         {1, &lane.timeline, &next}, lane.file, offset, lane.buffer, 0, length,
         nullptr, IREE_HAL_READ_FLAG_NONE));

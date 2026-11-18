@@ -278,12 +278,16 @@ class ReadQueueWeightsTest : public WindowedWeightsTest {
             },
         .read =
             [](iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
-               iree_hal_semaphore_list_t signals, iree_hal_file_t* file,
-               uint64_t offset, iree_hal_buffer_t* buffer,
-               iree_device_size_t buffer_offset, iree_device_size_t length,
+               iree_hal_semaphore_list_t signals,
+               iree_hal_file_binding_table_t files,
+               iree_hal_buffer_binding_table_t buffers,
+               const iree_hal_file_transfer_list_t* transfers,
                const iree_hal_queue_barriers_t* barriers,
                iree_hal_read_flags_t flags) {
               auto* self = reinterpret_cast<ReadQueue*>(queue);
+              EXPECT_EQ(buffers.count, 1u);
+              auto* buffer =
+                  buffers.count ? buffers.bindings[0].buffer : nullptr;
               if (++self->count == self->reject_ordinal) {
                 return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
               }
@@ -294,9 +298,8 @@ class ReadQueueWeightsTest : public WindowedWeightsTest {
                   self->retained = buffer;
                 }
               }
-              return iree_hal_queue_read(self->target, waits, signals, file,
-                                         offset, buffer, buffer_offset, length,
-                                         barriers, flags);
+              return iree_hal_queue_read(self->target, waits, signals, files,
+                                         buffers, transfers, barriers, flags);
             },
     };
     iree_hal_queue_initialize(iree_hal_queue_family(transfer_), &params,

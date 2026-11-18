@@ -1323,19 +1323,35 @@ TEST(ReplayDumpTest, EmitsQueueObjectsAndTransferRanges) {
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
       writer, &metadata, IREE_ARRAYSIZE(iovecs), iovecs, nullptr));
 
-  iree_hal_replay_queue_read_payload_t read_payload = {
-      .source_file_id = 8,
-      .source_offset = 64,
+  iree_hal_replay_queue_file_payload_t read_payload = {
+      .wait_semaphore_count = 1,
+      .signal_semaphore_count = 1,
+      .file_count = 1,
+      .buffer_count = 1,
+      .transfer_count = 1,
+      .captured_data_length = sizeof(data),
   };
-  read_payload.target_ref.buffer_id = 7;
-  read_payload.target_ref.length = sizeof(data);
-  read_payload.captured_data_length = sizeof(data);
-  read_payload.wait_semaphore_count = 1;
-  read_payload.signal_semaphore_count = 1;
+  iree_hal_replay_file_binding_payload_t file = {
+      .file_id = 8,
+      .length = sizeof(data),
+      .captured = 1,
+  };
+  iree_hal_replay_buffer_ref_payload_t buffer = {
+      .buffer_id = 7,
+      .length = sizeof(data),
+  };
+  iree_hal_replay_file_transfer_payload_t transfer = {
+      .row_length = sizeof(data),
+      .row_count = 1,
+      .slice_count = 1,
+  };
   iree_const_byte_span_t read_iovecs[] = {
       iree_make_const_byte_span(&read_payload, sizeof(read_payload)),
       iree_make_const_byte_span(&wait, sizeof(wait)),
       iree_make_const_byte_span(&signal, sizeof(signal)),
+      iree_make_const_byte_span(&file, sizeof(file)),
+      iree_make_const_byte_span(&buffer, sizeof(buffer)),
+      iree_make_const_byte_span(&transfer, sizeof(transfer)),
       iree_make_const_byte_span(data, sizeof(data)),
   };
   metadata.sequence_ordinal = 3;
@@ -1344,17 +1360,17 @@ TEST(ReplayDumpTest, EmitsQueueObjectsAndTransferRanges) {
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
       writer, &metadata, IREE_ARRAYSIZE(read_iovecs), read_iovecs, nullptr));
 
-  iree_hal_replay_queue_write_payload_t write_payload = {};
-  write_payload.source_ref.buffer_id = 7;
-  write_payload.source_ref.length = sizeof(data);
-  write_payload.target_file_id = 8;
-  write_payload.target_offset = 128;
-  write_payload.wait_semaphore_count = 1;
-  write_payload.signal_semaphore_count = 1;
+  iree_hal_replay_queue_file_payload_t write_payload = read_payload;
+  write_payload.captured_data_length = 0;
+  file.captured = 0;
+  file.offset = 128;
   iree_const_byte_span_t write_iovecs[] = {
       iree_make_const_byte_span(&write_payload, sizeof(write_payload)),
       iree_make_const_byte_span(&wait, sizeof(wait)),
       iree_make_const_byte_span(&signal, sizeof(signal)),
+      iree_make_const_byte_span(&file, sizeof(file)),
+      iree_make_const_byte_span(&buffer, sizeof(buffer)),
+      iree_make_const_byte_span(&transfer, sizeof(transfer)),
   };
   metadata.sequence_ordinal = 4;
   metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_WRITE;
@@ -1383,7 +1399,7 @@ TEST(ReplayDumpTest, EmitsQueueObjectsAndTransferRanges) {
   EXPECT_THAT(text_output, HasSubstr("payload=queue_read"));
   EXPECT_THAT(text_output, HasSubstr("captured_data_range="));
   EXPECT_THAT(text_output, HasSubstr("payload=queue_write"));
-  EXPECT_THAT(text_output, HasSubstr("target_file_id=8"));
+  EXPECT_THAT(text_output, HasSubstr("file_id=8"));
 
   iree_hal_replay_dump_options_t json_options =
       iree_hal_replay_dump_options_default();

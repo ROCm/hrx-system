@@ -19,9 +19,9 @@ extern "C" {
 // Magic header bytes for IREE HAL replay files: "IRRP".
 #define IREE_HAL_REPLAY_FILE_MAGIC 0x50525249u
 
-// Major version of the IREE HAL replay file format. Version 18 preserves
-// caller-owned prior sources in mapping transactions.
-#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 18u
+// Major version of the IREE HAL replay file format. Version 19 records finite
+// file groups with binding tables and deferred indirect metadata.
+#define IREE_HAL_REPLAY_FILE_VERSION_MAJOR 19u
 
 // Minor version of the IREE HAL replay file format. Pool scopes preserve
 // zero-compute atomic requirements in their previously reserved family word.
@@ -822,45 +822,99 @@ typedef struct iree_hal_replay_queue_transfer_payload_t {
 static_assert(sizeof(iree_hal_replay_queue_transfer_payload_t) == 32,
               "queue transfer replay header must be 32 bytes");
 
-// Payload describing an exact-queue file read followed by semaphore timepoints
-// and optional captured source bytes.
-typedef struct iree_hal_replay_queue_read_payload_t {
-  // Session-local source file object id.
-  iree_hal_replay_object_id_t source_file_id;
-  // Source byte offset in the file.
-  uint64_t source_offset;
-  // Target buffer range read into.
-  iree_hal_replay_buffer_ref_payload_t target_ref;
-  // Read flags.
+// Common read/write header followed by wait and signal timepoints, file
+// bindings, buffer references, HOST transfer descriptions, and captured bytes.
+// INDIRECT metadata is referenced without sampling its deferred contents.
+typedef struct iree_hal_replay_queue_file_payload_t {
+  // Direction-specific queue flags.
   uint64_t flags;
-  // Byte length of captured source data following the semaphore timepoints.
+  // Number of wait timepoints following this header.
+  uint64_t wait_semaphore_count;
+  // Number of signal timepoints following the waits.
+  uint64_t signal_semaphore_count;
+  // Number of file bindings following the timepoints.
+  uint64_t file_count;
+  // Number of buffer references following the file bindings.
+  uint64_t buffer_count;
+  // Number of HOST descriptions; zero for INDIRECT.
+  uint64_t transfer_count;
+  // Packed useful bytes from files captured by range; no file gaps included.
   uint64_t captured_data_length;
-  // Number of wait semaphore timepoints following this header.
-  uint64_t wait_semaphore_count;
-  // Number of signal semaphore timepoints following the wait timepoints.
-  uint64_t signal_semaphore_count;
-} iree_hal_replay_queue_read_payload_t;
-static_assert(sizeof(iree_hal_replay_queue_read_payload_t) == 80,
-              "queue read replay payload must be 80 bytes");
+  // List type: 0 for HOST, 1 for INDIRECT.
+  uint32_t list_type;
+  // Reserved; must be zero.
+  uint32_t reserved;
+  // INDIRECT record window; zero for HOST.
+  iree_hal_replay_buffer_ref_payload_t records_ref;
+  // INDIRECT eight-byte live count; zero for HOST.
+  iree_hal_replay_buffer_ref_payload_t count_ref;
+} iree_hal_replay_queue_file_payload_t;
+static_assert(sizeof(iree_hal_replay_queue_file_payload_t) == 128,
+              "queue file replay header must be 128 bytes");
 
-// Payload describing an exact-queue file write followed by semaphore
-// timepoints.
-typedef struct iree_hal_replay_queue_write_payload_t {
-  // Source buffer range written from.
-  iree_hal_replay_buffer_ref_payload_t source_ref;
-  // Session-local target file object id.
-  iree_hal_replay_object_id_t target_file_id;
-  // Target byte offset in the file.
-  uint64_t target_offset;
-  // Write flags.
-  uint64_t flags;
-  // Number of wait semaphore timepoints following this header.
-  uint64_t wait_semaphore_count;
-  // Number of signal semaphore timepoints following the wait timepoints.
-  uint64_t signal_semaphore_count;
-} iree_hal_replay_queue_write_payload_t;
-static_assert(sizeof(iree_hal_replay_queue_write_payload_t) == 72,
-              "queue write replay payload must be 72 bytes");
+// One bounded file view. Captured views reference the group's packed bytes;
+// their HOST descriptions use packed file offsets/strides and original buffer
+// geometry. This preserves exact useful bytes without allocating file holes.
+typedef struct iree_hal_replay_file_binding_payload_t {
+  // Session-local file identity, including for captured ranges.
+  iree_hal_replay_object_id_t file_id;
+  // Byte origin in the imported file or group capture.
+  uint64_t offset;
+  // Accessible bytes beginning at offset.
+  uint64_t length;
+  // One for captured ranges, zero for the imported file; other values invalid.
+  uint64_t captured;
+} iree_hal_replay_file_binding_payload_t;
+static_assert(sizeof(iree_hal_replay_file_binding_payload_t) == 32,
+              "replay file binding must be 32 bytes");
+
+// Full-width HOST geometry, independent of host pointer size and C ABI.
+typedef struct iree_hal_replay_file_transfer_payload_t {
+  // Index in the file binding table.
+  uint32_t file_binding;
+  // Index in the payload buffer table.
+  uint32_t buffer_binding;
+  // First useful byte relative to the file binding.
+  uint64_t file_offset;
+  // First useful byte relative to the buffer binding.
+  uint64_t buffer_offset;
+  // Useful bytes per row.
+  uint64_t row_length;
+  // Rows per slice.
+  uint64_t row_count;
+  // Slices in this description.
+  uint64_t slice_count;
+  // Byte displacement between file rows.
+  uint64_t file_row_stride;
+  // Byte displacement between file slices.
+  uint64_t file_slice_stride;
+  // Byte displacement between buffer rows.
+  uint64_t buffer_row_stride;
+  // Byte displacement between buffer slices.
+  uint64_t buffer_slice_stride;
+} iree_hal_replay_file_transfer_payload_t;
+static_assert(sizeof(iree_hal_replay_file_transfer_payload_t) == 80,
+              "replay host file description must be 80 bytes");
+
+// Validated offsets relative to the data following semaphore timepoints.
+typedef struct iree_hal_replay_queue_file_layout_t {
+  // Byte offset of file bindings (zero).
+  iree_host_size_t files_offset;
+  // Byte offset of payload buffer references.
+  iree_host_size_t buffers_offset;
+  // Byte offset of HOST descriptions.
+  iree_host_size_t transfers_offset;
+  // Byte offset of packed capture bytes.
+  iree_host_size_t data_offset;
+  // Total byte extent following timepoints, excluding barrier extensions.
+  iree_host_size_t total_size;
+} iree_hal_replay_queue_file_layout_t;
+
+// Validates serialized list/table shapes and computes checked trailing extents.
+// The record parser checks that this extent is present before reading it.
+IREE_API_EXPORT iree_status_t iree_hal_replay_queue_file_layout(
+    const iree_hal_replay_queue_file_payload_t* payload,
+    iree_hal_replay_queue_file_layout_t* out_layout);
 
 // Header for an exact-queue allocation transaction followed by semaphore
 // timepoints and allocation request descriptors.

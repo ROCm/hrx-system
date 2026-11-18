@@ -11,10 +11,6 @@
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/driver/amd/gpu/cts/test_device.h"
-#include "iree/hal/driver/amd/gpu/queue/aql/queue.h"
-#include "iree/hal/driver/amd/gpu/queue/membership.h"
-#include "iree/hal/driver/amd/gpu/queue/pm4/queue.h"
-#include "iree/hal/driver/amd/gpu/queue/sdma/queue.h"
 #include "iree/io/file_contents.h"
 #include "iree/io/file_handle.h"
 #include "iree/testing/gtest.h"
@@ -24,23 +20,18 @@
 namespace {
 using iree::hal::cts::Ref;
 
-using FileTransfer = decltype(&iree_hal_amd_gpu_pm4_queue_file_transfer);
-
-// Native CTS uses the exact queue implementation chosen by device construction,
-// independently of shader architecture and without creating another device.
-FileTransfer SelectFileTransfer(iree_hal_queue_t* queue) {
-  const auto* family = reinterpret_cast<const iree_hal_amd_gpu_queue_family_t*>(
-      iree_hal_queue_family(queue));
-  if (family->lifecycle->close == iree_hal_amd_gpu_pm4_queue_close) {
-    return iree_hal_amd_gpu_pm4_queue_file_transfer;
-  }
-  if (family->lifecycle->close == iree_hal_amd_gpu_aql_queue_close) {
-    return iree_hal_amd_gpu_aql_queue_file_transfer;
-  }
-  if (family->lifecycle == &iree_hal_amd_gpu_sdma_queue_lifecycle) {
-    return iree_hal_amd_gpu_sdma_queue_file_transfer;
-  }
-  return nullptr;
+static iree_status_t TransferFiles(
+    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_file_binding_table_t files,
+    iree_hal_buffer_binding_table_t buffers,
+    const iree_hal_file_transfer_list_t* transfers,
+    iree_hal_memory_access_t access,
+    const iree_hal_queue_barriers_t* barriers) {
+  return access == IREE_HAL_MEMORY_ACCESS_READ
+             ? iree_hal_queue_read(queue, waits, signals, files, buffers,
+                                   transfers, barriers, 0)
+             : iree_hal_queue_write(queue, waits, signals, buffers, files,
+                                    transfers, barriers, 0);
 }
 
 enum class Descriptions { kHost, kIndirectHost, kIndirectPrivate };
@@ -139,8 +130,7 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
                  Descriptions descriptions, FileStorage storage) {
     SCOPED_TRACE(static_cast<int>(descriptions));
     SCOPED_TRACE(static_cast<int>(storage));
-    const auto transfer = SelectFileTransfer(io_queue);
-    ASSERT_NE(transfer, nullptr);
+    const auto transfer = TransferFiles;
     // Cross both native request-group and private metadata-page boundaries.
     constexpr size_t kCount = 65;
     constexpr size_t kCapacity = kCount + 3;
@@ -380,11 +370,6 @@ class GpuNativeFileBatchTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
 
 TEST_F(GpuNativeFileBatchTest, ProducerAndConsumerShareOrForkNativeQueues) {
   ASSERT_NO_FATAL_FAILURE(Create());
-  RecordProperty(
-      "compute_protocol",
-      SelectFileTransfer(queues_[0]) == iree_hal_amd_gpu_pm4_queue_file_transfer
-          ? "PM4"
-          : "AQL");
   Ref<iree_hal_queue_t> dma;
   const auto* families =
       iree_hal_device_spec_queues(iree_hal_device_spec(device_));

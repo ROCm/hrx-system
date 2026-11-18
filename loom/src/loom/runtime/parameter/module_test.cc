@@ -297,7 +297,7 @@ TEST_P(ParameterModuleTest, WholeFilesSurviveSourceReplacementAndRemoval) {
     EXPECT_EQ(iree_hal_file_length(files_[domain]),
               offsets[domain] + lengths[domain]);
     uint64_t one = 1;
-    IREE_ASSERT_OK(iree_hal_queue_read(
+    IREE_ASSERT_OK(iree_hal_queue_read_linear(
         queue_, {}, {1, &produced_[domain], &one}, files_[domain],
         offsets[domain], targets_[domain], 0, lengths[domain], nullptr,
         IREE_HAL_READ_FLAG_NONE));

@@ -81,11 +81,11 @@ static iree_status_t iree_hal_replay_dump_summary_scan_operation(
   switch (record->header.payload_type) {
     case IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_READ: {
       if (record->payload.data_length <
-          sizeof(iree_hal_replay_queue_read_payload_t)) {
+          sizeof(iree_hal_replay_queue_file_payload_t)) {
         return iree_make_status(IREE_STATUS_DATA_LOSS,
                                 "replay exact queue read payload is short");
       }
-      iree_hal_replay_queue_read_payload_t payload;
+      iree_hal_replay_queue_file_payload_t payload;
       memcpy(&payload, record->payload.data, sizeof(payload));
       summary->captured_read_total_length += payload.captured_data_length;
       break;

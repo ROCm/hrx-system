@@ -90,19 +90,6 @@ iree_status_t iree_hal_amd_gpu_sdma_queue_create(
 extern const iree_hal_amd_gpu_queue_lifecycle_t
     iree_hal_amd_gpu_sdma_queue_lifecycle;
 
-// Captures one finite file operation on this exact native queue. The direction
-// is READ or WRITE from the file's perspective. Queue dependencies and barriers
-// use the ordinary submission contract; indirect metadata remains unread until
-// waits retire. The pipeline owns every accepted file/copy access through final
-// visibility and signaling, including continuations after queue closure.
-iree_status_t iree_hal_amd_gpu_sdma_queue_file_transfer(
-    iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_hal_file_binding_table_t files,
-    iree_hal_buffer_binding_table_t buffers,
-    const iree_hal_file_transfer_list_t* transfers,
-    iree_hal_memory_access_t file_access,
-    const iree_hal_queue_barriers_t* barriers);
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -8,7 +8,6 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/api.h"
 #include "iree/hal/driver/webgpu/webgpu_device.h"
-#include "iree/hal/driver/webgpu/webgpu_file_transfer.h"
 #include "iree/hal/driver/webgpu/webgpu_queue.h"
 #include "iree/io/file_handle.h"
 
@@ -120,14 +119,13 @@ static iree_status_t linear(iree_hal_memory_access_t access,
                             size_t length, iree_hal_buffer_t* buffer) {
   iree_hal_file_t* file = NULL;
   IREE_RETURN_IF_ERROR(import_file(bytes, length, -1, &file));
-  iree_hal_file_binding_t file_binding = {file, 0, length};
-  iree_hal_buffer_binding_t buffer_binding = {buffer, 0, length};
-  iree_hal_file_transfer_t row = {
-      .row_length = length, .row_count = 1, .slice_count = 1};
-  const iree_hal_file_transfer_list_t list = {.host = {1, &row}};
-  iree_status_t status = iree_hal_webgpu_queue_submit_file_transfer(
-      queue, waits, signals, (iree_hal_file_binding_table_t){1, &file_binding},
-      (iree_hal_buffer_binding_table_t){1, &buffer_binding}, &list, access);
+  iree_status_t status =
+      access == IREE_HAL_MEMORY_ACCESS_READ
+          ? iree_hal_queue_read_linear((iree_hal_queue_t*)queue, waits, signals,
+                                       file, 0, buffer, 0, length, NULL, 0)
+          : iree_hal_queue_write_linear((iree_hal_queue_t*)queue, waits,
+                                        signals, buffer, 0, file, 0, length,
+                                        NULL, 0);
   iree_hal_file_release(file);
   return status;
 }
@@ -318,18 +316,18 @@ int begin(uint32_t form, uint32_t count) {
     list.host.transfers = rows;
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_webgpu_queue_submit_file_transfer(
-        queue, point(READY), point(LOADED),
-        (iree_hal_file_binding_table_t){2, sources},
-        (iree_hal_buffer_binding_table_t){1, &buffer}, &list,
-        IREE_HAL_MEMORY_ACCESS_READ);
+    status = iree_hal_queue_read((iree_hal_queue_t*)queue, point(READY),
+                                 point(LOADED),
+                                 (iree_hal_file_binding_table_t){2, sources},
+                                 (iree_hal_buffer_binding_table_t){1, &buffer},
+                                 &list, NULL, IREE_HAL_READ_FLAG_NONE);
   }
   if (iree_status_is_ok(status) && !invalid) {
-    status = iree_hal_webgpu_queue_submit_file_transfer(
-        queue, point(LOADED), point(WRITTEN),
-        (iree_hal_file_binding_table_t){2, targets},
-        (iree_hal_buffer_binding_table_t){1, &buffer}, &list,
-        IREE_HAL_MEMORY_ACCESS_WRITE);
+    status = iree_hal_queue_write((iree_hal_queue_t*)queue, point(LOADED),
+                                  point(WRITTEN),
+                                  (iree_hal_buffer_binding_table_t){1, &buffer},
+                                  (iree_hal_file_binding_table_t){2, targets},
+                                  &list, NULL, IREE_HAL_WRITE_FLAG_NONE);
   }
   if (iree_status_is_ok(status) && !invalid) {
     status = linear(IREE_HAL_MEMORY_ACCESS_WRITE, point(WRITTEN),

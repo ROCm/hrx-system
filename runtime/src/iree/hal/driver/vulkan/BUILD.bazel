@@ -300,13 +300,7 @@ iree_runtime_cc_library(
     name = "file_transfer_test",
     testonly = True,
     srcs = [
-        "allocator.h",
-        "barrier.h",
-        "builtins.h",
-        "file_transfer.h",
         "file_transfer_test.cc",
-        "queue.h",
-        "semaphore.h",
     ],
     deps = [
         ":headers",

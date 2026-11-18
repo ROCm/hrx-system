@@ -791,9 +791,9 @@ TEST_P(QueueTest, FileReadRecordingAndWriteUseThePublicTransferQueue) {
   auto saved = Semaphore(true);
   iree_hal_semaphore_t* points[] = {loaded, copied, saved};
   uint64_t one = 1;
-  IREE_ASSERT_OK(iree_hal_queue_read(queue_, {}, Point(&points[0], &one), file,
-                                     0, buffer_, 5, expected.size(), nullptr,
-                                     0));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(queue_, {}, Point(&points[0], &one),
+                                            file, 0, buffer_, 5,
+                                            expected.size(), nullptr, 0));
   Ref<iree_hal_command_buffer_t> recording;
   IREE_ASSERT_OK(iree_hal_amd_gpu_sdma_command_buffer_create(
       families_[0], &programs_, 0, options_.barriers, 0,
@@ -806,9 +806,9 @@ TEST_P(QueueTest, FileReadRecordingAndWriteUseThePublicTransferQueue) {
   IREE_ASSERT_OK(iree_hal_queue_execute(
       queue_, Point(&points[0], &one), Point(&points[1], &one), recording,
       iree_hal_buffer_binding_table_empty(), 0));
-  IREE_ASSERT_OK(iree_hal_queue_write(queue_, Point(&points[1], &one),
-                                      Point(&points[2], &one), buffer_, 16387,
-                                      file, 0, expected.size(), nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(
+      queue_, Point(&points[1], &one), Point(&points[2], &one), buffer_, 16387,
+      file, 0, expected.size(), nullptr, 0));
   recording.reset();
   file.reset();
   ASSERT_NO_FATAL_FAILURE(Drain());

@@ -1,8 +1,6 @@
 // Copyright 2026 The IREE Authors
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/driver/vulkan/file_transfer.h"
-
 #include <algorithm>
 #include <array>
 #include <vector>
@@ -172,18 +170,17 @@ class VulkanFiniteFileTest : public CtsTestBase<> {
     } else {
       list.host = {strided ? 1 : count, rows.data()};
     }
-    auto* queue = reinterpret_cast<iree_hal_vulkan_queue_t*>(transfer_queue_);
-    const auto barriers = iree_hal_vulkan_queue_barriers_resolve(nullptr);
     iree_hal_semaphore_list_t tail = ready;
-    iree_status_t status = iree_hal_vulkan_queue_submit_file_transfer(
-        queue, ready, loaded, {sources.size(), sources.data()}, {1, &buffer},
-        &list, IREE_HAL_MEMORY_ACCESS_READ, &barriers);
+    iree_status_t status = iree_hal_queue_read(
+        transfer_queue_, ready, loaded, {sources.size(), sources.data()},
+        {1, &buffer}, &list, nullptr, IREE_HAL_READ_FLAG_NONE);
     if (iree_status_is_ok(status)) {
       tail = loaded;
       if (!invalid) {
-        status = iree_hal_vulkan_queue_submit_file_transfer(
-            queue, loaded, written, {targets.size(), targets.data()},
-            {1, &buffer}, &list, IREE_HAL_MEMORY_ACCESS_WRITE, &barriers);
+        status =
+            iree_hal_queue_write(transfer_queue_, loaded, written, {1, &buffer},
+                                 {targets.size(), targets.data()}, &list,
+                                 nullptr, IREE_HAL_WRITE_FLAG_NONE);
         if (iree_status_is_ok(status)) {
           tail = written;
         }

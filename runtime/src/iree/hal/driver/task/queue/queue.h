@@ -846,15 +846,6 @@ iree_status_t iree_hal_task_queue_submit_dealloca(
     iree_hal_semaphore_list_t wait_semaphores,
     iree_hal_semaphore_list_t signal_semaphores);
 
-// Captures one finite file group in the existing operation arena/resource set.
-iree_status_t iree_hal_task_queue_submit_file_transfer(
-    iree_hal_task_queue_t* queue, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_hal_file_binding_table_t files,
-    iree_hal_buffer_binding_table_t buffers,
-    const iree_hal_file_transfer_list_t* transfers,
-    const iree_hal_queue_barriers_t* barriers,
-    iree_hal_memory_access_t file_access);
-
 // Begins dependency-ready file work, completing/failing the operation only
 // after every accepted native request and worker access retires.
 void iree_hal_task_queue_issue_file(iree_hal_task_queue_op_t* operation);

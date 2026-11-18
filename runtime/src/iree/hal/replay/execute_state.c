@@ -370,6 +370,24 @@ iree_status_t iree_hal_replay_executor_make_buffer_ref(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_replay_executor_make_direct_buffer_ref(
+    iree_hal_replay_executor_t* executor,
+    const iree_hal_replay_buffer_ref_payload_t* payload,
+    iree_hal_buffer_ref_t* out_ref) {
+  if (IREE_UNLIKELY(payload->reserved0 != 0)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay direct buffer reference reserved fields must be zero");
+  }
+  if (IREE_UNLIKELY(payload->buffer_id == IREE_HAL_REPLAY_OBJECT_ID_NONE ||
+                    payload->buffer_slot != 0)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "replay queue operation requires a direct buffer reference");
+  }
+  return iree_hal_replay_executor_make_buffer_ref(executor, payload, out_ref);
+}
+
 void iree_hal_replay_semaphore_list_storage_deinitialize(
     iree_hal_replay_semaphore_list_storage_t* storage,
     iree_allocator_t host_allocator) {

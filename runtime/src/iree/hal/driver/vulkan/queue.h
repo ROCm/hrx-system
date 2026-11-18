@@ -614,26 +614,6 @@ iree_status_t iree_hal_vulkan_queue_submit_atomic(
     iree_hal_vulkan_atomic_params_t params,
     const iree_hal_vulkan_queue_barriers_t* barriers);
 
-// Submits a file write ordered by queue semaphores.
-iree_status_t iree_hal_vulkan_queue_submit_write(
-    iree_hal_vulkan_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-    iree_hal_file_t* target_file, uint64_t target_offset,
-    iree_device_size_t length, const iree_hal_vulkan_queue_barriers_t* barriers,
-    iree_hal_write_flags_t flags);
-
-// Submits a file read ordered by queue semaphores.
-iree_status_t iree_hal_vulkan_queue_submit_read(
-    iree_hal_vulkan_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_file_t* source_file, uint64_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, const iree_hal_vulkan_queue_barriers_t* barriers,
-    iree_hal_read_flags_t flags);
-
 // Submits a recorded command buffer ordered by queue semaphores.
 iree_status_t iree_hal_vulkan_queue_submit_execute(
     iree_hal_vulkan_queue_t* queue,

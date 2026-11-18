@@ -1492,9 +1492,9 @@ TEST_P(GpuNativeProfileTest,
   ASSERT_NO_FATAL_FAILURE(
       ImportFile(iree_make_byte_span(target.data(), sizeof(target)),
                  IREE_HAL_MEMORY_ACCESS_WRITE, target_file.out()));
-  IREE_ASSERT_OK(iree_hal_queue_read(queues_[1], point(0), point(1),
-                                     source_file, 0, buffer, 0, sizeof(source),
-                                     nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(queues_[1], point(0), point(1),
+                                            source_file, 0, buffer, 0,
+                                            sizeof(source), nullptr, 0));
   std::array<iree_hal_transfer_operation_t, 2> transfers = {};
   uint32_t pattern = 0xABCDEF00, update = 0x13579BDF;
   transfers[0].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
@@ -1509,9 +1509,9 @@ TEST_P(GpuNativeProfileTest,
   IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], point(1), point(2),
                                          transfers.size(), transfers.data(),
                                          nullptr));
-  IREE_ASSERT_OK(iree_hal_queue_write(queues_[1], point(2), point(3), buffer, 0,
-                                      target_file, 0, sizeof(target), nullptr,
-                                      0));
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(queues_[1], point(2), point(3),
+                                             buffer, 0, target_file, 0,
+                                             sizeof(target), nullptr, 0));
   bool called = false;
   const iree_hal_host_call_t call = {
       .fn =

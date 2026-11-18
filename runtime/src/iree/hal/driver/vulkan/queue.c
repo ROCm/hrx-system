@@ -8800,37 +8800,31 @@ static iree_status_t iree_hal_vulkan_queue_transfer(
 }
 
 static iree_status_t iree_hal_vulkan_queue_read(
-    iree_hal_queue_t* base_queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_file_t* source_file, uint64_t source_offset,
-    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
-    iree_hal_read_flags_t flags) {
-  const iree_hal_vulkan_queue_barriers_t resolved_barriers =
+    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_file_binding_table_t files,
+    iree_hal_buffer_binding_table_t buffers,
+    const iree_hal_file_transfer_list_t* transfers,
+    const iree_hal_queue_barriers_t* barriers, iree_hal_read_flags_t flags) {
+  (void)flags;
+  const iree_hal_vulkan_queue_barriers_t resolved =
       iree_hal_vulkan_queue_barriers_resolve(barriers);
-  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_vulkan_queue_vtable);
-  return iree_hal_vulkan_queue_submit_read(
-      (iree_hal_vulkan_queue_t*)base_queue, wait_semaphore_list,
-      signal_semaphore_list, source_file, source_offset, target_buffer,
-      target_offset, length, &resolved_barriers, flags);
+  return iree_hal_vulkan_queue_submit_file_transfer(
+      (iree_hal_vulkan_queue_t*)base, waits, signals, files, buffers, transfers,
+      IREE_HAL_MEMORY_ACCESS_READ, &resolved);
 }
 
 static iree_status_t iree_hal_vulkan_queue_write(
-    iree_hal_queue_t* base_queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-    iree_hal_file_t* target_file, uint64_t target_offset,
-    iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
-    iree_hal_write_flags_t flags) {
-  const iree_hal_vulkan_queue_barriers_t resolved_barriers =
+    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_buffer_binding_table_t buffers,
+    iree_hal_file_binding_table_t files,
+    const iree_hal_file_transfer_list_t* transfers,
+    const iree_hal_queue_barriers_t* barriers, iree_hal_write_flags_t flags) {
+  (void)flags;
+  const iree_hal_vulkan_queue_barriers_t resolved =
       iree_hal_vulkan_queue_barriers_resolve(barriers);
-  IREE_HAL_ASSERT_TYPE(base_queue, &iree_hal_vulkan_queue_vtable);
-  return iree_hal_vulkan_queue_submit_write(
-      (iree_hal_vulkan_queue_t*)base_queue, wait_semaphore_list,
-      signal_semaphore_list, source_buffer, source_offset, target_file,
-      target_offset, length, &resolved_barriers, flags);
+  return iree_hal_vulkan_queue_submit_file_transfer(
+      (iree_hal_vulkan_queue_t*)base, waits, signals, files, buffers, transfers,
+      IREE_HAL_MEMORY_ACCESS_WRITE, &resolved);
 }
 
 static iree_status_t iree_hal_vulkan_queue_barrier(

@@ -289,3 +289,45 @@ IREE_API_EXPORT const char* iree_hal_replay_payload_type_string(
       return "unknown";
   }
 }
+
+IREE_API_EXPORT iree_status_t iree_hal_replay_queue_file_layout(
+    const iree_hal_replay_queue_file_payload_t* payload,
+    iree_hal_replay_queue_file_layout_t* out_layout) {
+  *out_layout = (iree_hal_replay_queue_file_layout_t){0};
+  if (payload->reserved || payload->list_type > 1 ||
+      (payload->list_type == 1 &&
+       (payload->transfer_count || payload->captured_data_length ||
+        payload->file_count > 65536 || payload->buffer_count > 65536)) ||
+      (payload->file_count && payload->file_count - 1 > UINT32_MAX) ||
+      (payload->buffer_count && payload->buffer_count - 1 > UINT32_MAX) ||
+      payload->file_count > IREE_HOST_SIZE_MAX ||
+      payload->buffer_count > IREE_HOST_SIZE_MAX ||
+      payload->transfer_count > IREE_HOST_SIZE_MAX ||
+      payload->captured_data_length > IREE_HOST_SIZE_MAX) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "invalid replay file group shape");
+  }
+  iree_host_size_t files_size = 0, buffers_size = 0, transfers_size = 0;
+  if (!iree_host_size_checked_mul(
+          (iree_host_size_t)payload->file_count,
+          sizeof(iree_hal_replay_file_binding_payload_t), &files_size) ||
+      !iree_host_size_checked_mul((iree_host_size_t)payload->buffer_count,
+                                  sizeof(iree_hal_replay_buffer_ref_payload_t),
+                                  &buffers_size) ||
+      !iree_host_size_checked_mul(
+          (iree_host_size_t)payload->transfer_count,
+          sizeof(iree_hal_replay_file_transfer_payload_t), &transfers_size) ||
+      !iree_host_size_checked_add(files_size, buffers_size,
+                                  &out_layout->transfers_offset) ||
+      !iree_host_size_checked_add(out_layout->transfers_offset, transfers_size,
+                                  &out_layout->data_offset) ||
+      !iree_host_size_checked_add(
+          out_layout->data_offset,
+          (iree_host_size_t)payload->captured_data_length,
+          &out_layout->total_size)) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "replay file group size overflows host storage");
+  }
+  out_layout->buffers_offset = files_size;
+  return iree_ok_status();
+}

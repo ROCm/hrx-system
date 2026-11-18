@@ -1173,17 +1173,17 @@ TEST_F(XdnaNativeTest, FiniteFileGroupsCaptureAndRetireTheirLivePrefix) {
         list.host = {count, rows.data()};
       }
       iree_hal_semaphore_t* tail = ready;
-      iree_status_t status = iree_hal_amd_xdna_queue_file_transfer(
-          queue_, {1, &ready, &one}, {1, &loaded, &one},
-          {sources.size(), sources.data()}, {1, &buffer}, &list,
-          IREE_HAL_MEMORY_ACCESS_READ, nullptr);
+      iree_status_t status =
+          iree_hal_queue_read(queue_, {1, &ready, &one}, {1, &loaded, &one},
+                              {sources.size(), sources.data()}, {1, &buffer},
+                              &list, nullptr, IREE_HAL_READ_FLAG_NONE);
       if (iree_status_is_ok(status)) {
         tail = loaded;
         if (!invalid) {
-          status = iree_hal_amd_xdna_queue_file_transfer(
-              queue_, {1, &loaded, &one}, {1, &written, &one},
-              {targets.size(), targets.data()}, {1, &buffer}, &list,
-              IREE_HAL_MEMORY_ACCESS_WRITE, nullptr);
+          status = iree_hal_queue_write(queue_, {1, &loaded, &one},
+                                        {1, &written, &one}, {1, &buffer},
+                                        {targets.size(), targets.data()}, &list,
+                                        nullptr, IREE_HAL_WRITE_FLAG_NONE);
         }
       }
       std::vector<uint8_t> actual(kLength);
@@ -1306,7 +1306,7 @@ TEST_F(XdnaNativeTest, FilesRoundTripThroughDeferredDeviceOnlyBuffers) {
 
   // Consumers arrive before producers, and all public resource references are
   // released before the start gate opens. No buffer backing exists at capture.
-  IREE_ASSERT_OK(iree_hal_queue_write(
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(
       queue_, {1, &progress, &computed}, {1, &progress, &written}, roots[2], 0,
       output_file, kBytes, 3 * kBytes, nullptr, IREE_HAL_WRITE_FLAG_NONE));
   const iree_hal_buffer_ref_t bindings[] = {
@@ -1319,14 +1319,14 @@ TEST_F(XdnaNativeTest, FilesRoundTripThroughDeferredDeviceOnlyBuffers) {
       executable_, function_, iree_hal_make_static_dispatch_config(1, 1, 1), {},
       {IREE_ARRAYSIZE(bindings), bindings}, nullptr,
       IREE_HAL_DISPATCH_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_queue_read(queue_, {1, &progress, &lhs_loaded},
-                                     {1, &progress, &rhs_loaded}, input_file,
-                                     2 * kBytes, roots[1], kBytes, kBytes,
-                                     nullptr, IREE_HAL_READ_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_queue_read(queue_, {1, &progress, &initialized},
-                                     {1, &progress, &lhs_loaded}, input_file,
-                                     kBytes, roots[0], kBytes, kBytes, nullptr,
-                                     IREE_HAL_READ_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
+      queue_, {1, &progress, &lhs_loaded}, {1, &progress, &rhs_loaded},
+      input_file, 2 * kBytes, roots[1], kBytes, kBytes, nullptr,
+      IREE_HAL_READ_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
+      queue_, {1, &progress, &initialized}, {1, &progress, &lhs_loaded},
+      input_file, kBytes, roots[0], kBytes, kBytes, nullptr,
+      IREE_HAL_READ_FLAG_NONE));
   const uint8_t guard = 0xA5;
   std::array<iree_hal_transfer_operation_t, 3> fills = {};
   for (size_t i = 0; i < fills.size(); ++i) {
@@ -1394,12 +1394,12 @@ TEST_F(XdnaNativeTest, FileIoReturnsFromAnIndependentProactor) {
   iree_hal_semaphore_t* progress = nullptr;
   ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&progress));
   uint64_t read = 1, written = 2;
-  IREE_ASSERT_OK(iree_hal_queue_write(
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(
       queue_, {1, &progress, &read}, {1, &progress, &written}, buffer, 0, file,
       2 * kBytes, kBytes, nullptr, IREE_HAL_WRITE_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_queue_read(queue_, {}, {1, &progress, &read}, file,
-                                     kBytes, buffer, 0, kBytes, nullptr,
-                                     IREE_HAL_READ_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(queue_, {}, {1, &progress, &read},
+                                            file, kBytes, buffer, 0, kBytes,
+                                            nullptr, IREE_HAL_READ_FLAG_NONE));
   for (auto* buffer : buffers_) {
     iree_hal_buffer_release(buffer);
   }
@@ -1447,9 +1447,9 @@ TEST_F(XdnaNativeTest, TruncatedFileFailsItsConsumerAndRetiresIo) {
   ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&consumer));
   ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&independent));
   uint64_t value = 1;
-  IREE_ASSERT_OK(iree_hal_queue_read(queue_, {}, {1, &failed, &value}, file, 0,
-                                     buffer, 0, kBytes, nullptr,
-                                     IREE_HAL_READ_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(queue_, {}, {1, &failed, &value},
+                                            file, 0, buffer, 0, kBytes, nullptr,
+                                            IREE_HAL_READ_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_queue_barrier(queue_, {1, &failed, &value},
                                         {1, &consumer, &value}, nullptr,
                                         IREE_HAL_QUEUE_BARRIER_FLAG_NONE));

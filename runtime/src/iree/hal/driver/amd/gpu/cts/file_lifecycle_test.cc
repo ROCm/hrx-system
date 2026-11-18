@@ -107,10 +107,10 @@ class FileLifecycleTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
     auto* timeline_handle = timeline.get();
     uint64_t one = 1, two = 2;
 
-    IREE_ASSERT_OK(iree_hal_queue_read(queue, {1, &gate_handle, &one},
-                                       {1, &timeline_handle, &one}, source_file,
-                                       0, buffer, 3, kLength, nullptr, 0));
-    iree_status_t write_status = iree_hal_queue_write(
+    IREE_ASSERT_OK(iree_hal_queue_read_linear(
+        queue, {1, &gate_handle, &one}, {1, &timeline_handle, &one},
+        source_file, 0, buffer, 3, kLength, nullptr, 0));
+    iree_status_t write_status = iree_hal_queue_write_linear(
         queue, {1, &timeline_handle, &one}, {1, &timeline_handle, &two}, buffer,
         3, target_file, 1, kLength, nullptr, 0);
 
@@ -121,13 +121,14 @@ class FileLifecycleTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
         reinterpret_cast<const iree_hal_amd_gpu_queue_family_t*>(family);
     native_family->lifecycle->close(queue);
     EXPECT_FALSE(native_family->lifecycle->is_host_idle(queue));
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
-                          iree_hal_queue_read(queue, {}, {}, source_file, 0,
-                                              buffer, 3, kLength, nullptr, 0));
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_FAILED_PRECONDITION,
-        iree_hal_queue_write(queue, {}, {}, buffer, 3, target_file, 1, kLength,
-                             nullptr, 0));
+        iree_hal_queue_read_linear(queue, {}, {}, source_file, 0, buffer, 3,
+                                   kLength, nullptr, 0));
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        iree_hal_queue_write_linear(queue, {}, {}, buffer, 3, target_file, 1,
+                                    kLength, nullptr, 0));
     source_file.reset();
     target_file.reset();
     buffer.reset();
@@ -187,9 +188,9 @@ class FileLifecycleTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
     auto* failed_handle = failed.get();
     auto* progress_handle = progress.get();
     uint64_t one = 1, two = 2;
-    IREE_ASSERT_OK(iree_hal_queue_read(queue, {1, &gate_handle, &one},
-                                       {1, &failed_handle, &one}, file, 0,
-                                       buffer, 0, source.size(), nullptr, 0));
+    IREE_ASSERT_OK(iree_hal_queue_read_linear(
+        queue, {1, &gate_handle, &one}, {1, &failed_handle, &one}, file, 0,
+        buffer, 0, source.size(), nullptr, 0));
     // Truncate after capture, before the wait permits access. The accepted
     // read must retire its prefix and return the ordinary file error.
     source.resize(4096);
@@ -206,9 +207,9 @@ class FileLifecycleTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
 
     // Independent work on the same queue and file remains usable. Retention
     // and publication use the same production path as the failed operation.
-    IREE_ASSERT_OK(iree_hal_queue_read(queue, {}, {1, &progress_handle, &one},
-                                       file, 0, buffer, 0, source.size(),
-                                       nullptr, 0));
+    IREE_ASSERT_OK(
+        iree_hal_queue_read_linear(queue, {}, {1, &progress_handle, &one}, file,
+                                   0, buffer, 0, source.size(), nullptr, 0));
     std::vector<uint8_t> target(source.size(), 0xCD);
     iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,

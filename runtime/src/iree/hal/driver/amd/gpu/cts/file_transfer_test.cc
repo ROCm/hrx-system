@@ -673,9 +673,9 @@ void GpuNativeFileTest::BufferedRoundTrip(size_t length) {
   ASSERT_NO_FATAL_FAILURE(Accumulate(buffer, one, two, 7, accumulate_offset));
   ASSERT_NO_FATAL_FAILURE(Wait(two));
   const uint64_t before_read = Publications();
-  IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {1, &semaphore, &two},
-                                     {1, &semaphore, &three}, file, 64, buffer,
-                                     kBufferOffset, length, &barriers_, 0));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
+      queues_[0], {1, &semaphore, &two}, {1, &semaphore, &three}, file, 64,
+      buffer, kBufferOffset, length, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(three));
   RecordProperty("read_queue_publications", Publications() - before_read);
   EXPECT_EQ(Publications() - before_read, FilePublications(length));
@@ -684,7 +684,7 @@ void GpuNativeFileTest::BufferedRoundTrip(size_t length) {
   ASSERT_NO_FATAL_FAILURE(Wait(four));
   const uint64_t before_write = Publications();
   expected[accumulated_index] += 19;
-  IREE_ASSERT_OK(iree_hal_queue_write(
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(
       queues_[0], {1, &semaphore, &four}, {1, &semaphore, &five}, buffer,
       kBufferOffset, file, 64, length, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(five));
@@ -720,12 +720,12 @@ void GpuNativeFileTest::BufferedRoundTrip(size_t length) {
     IREE_ASSERT_OK(iree_hal_queue_map(queues_[0], {1, &semaphore, &six},
                                       {1, &semaphore, &seven}, mappings_.size(),
                                       mappings_.data(), 0));
-    IREE_ASSERT_OK(iree_hal_queue_read(
+    IREE_ASSERT_OK(iree_hal_queue_read_linear(
         queues_[0], {1, &semaphore, &seven}, {1, &semaphore, &eight}, file, 64,
         buffer, kBufferOffset, length, &barriers_, 0));
     ASSERT_NO_FATAL_FAILURE(
         Accumulate(buffer, eight, nine, 11, accumulate_offset));
-    IREE_ASSERT_OK(iree_hal_queue_write(
+    IREE_ASSERT_OK(iree_hal_queue_write_linear(
         queues_[0], {1, &semaphore, &nine}, {1, &semaphore, &ten}, buffer,
         kBufferOffset, file, 64, length, &barriers_, 0));
     ASSERT_NO_FATAL_FAILURE(Wait(ten));
@@ -744,7 +744,7 @@ void GpuNativeFileTest::BufferedRoundTrip(size_t length) {
       hole.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
       IREE_ASSERT_OK(iree_hal_queue_map(queues_[0], {1, &semaphore, &ten},
                                         {1, &semaphore, &eleven}, 1, &hole, 0));
-      IREE_ASSERT_OK(iree_hal_queue_write(
+      IREE_ASSERT_OK(iree_hal_queue_write_linear(
           queues_[0], {1, &semaphore, &eleven}, {1, &semaphore, &twelve},
           buffer, kBufferOffset, file, 64,
           hole.target_range.byte_offset - kBufferOffset, &barriers_, 0));
@@ -767,7 +767,7 @@ TEST_P(GpuNativeFileTest, PendingWriteRetiresCapturedBufferBeforeSignal) {
   uint64_t one = 1, two = 2, three = 3;
   // Submit the file consumer before the shader producer. File and buffer
   // references disappear from the caller before either operation can run.
-  IREE_ASSERT_OK(iree_hal_queue_write(
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(
       queues_[0], {1, &semaphore, &two}, {1, &semaphore, &three}, buffer,
       kBufferOffset, file, 0, kCorrectnessLength, &barriers_, 0));
   uint32_t value = 0x12345678u;
@@ -800,9 +800,9 @@ TEST_P(GpuNativeFileTest, TruncatedReadEndsCapturedUsesBeforeFailure) {
   auto* gate_handle = gate.get();
   auto* semaphore = timeline_.get();
   uint64_t one = 1;
-  IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {1, &gate_handle, &one},
-                                     {1, &semaphore, &one}, file, 0, buffer, 0,
-                                     kCorrectnessLength, &barriers_, 0));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
+      queues_[0], {1, &gate_handle, &one}, {1, &semaphore, &one}, file, 0,
+      buffer, 0, kCorrectnessLength, &barriers_, 0));
   buffer.reset();
   file.reset();
   // File length can change after public range validation but before the
@@ -923,12 +923,13 @@ TEST_P(GpuNativeGlobalFileTest, NestedExecutableGlobalRoundTrip) {
   IREE_ASSERT_OK(Open(contents, false, nullptr, file.out()));
   auto* semaphore = timeline_.get();
   uint64_t one = 1, two = 2, three = 3, four = 4;
-  IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {}, {1, &semaphore, &one},
-                                     file, 8, view, 8, 32, &barriers_, 0));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(queues_[0], {},
+                                            {1, &semaphore, &one}, file, 8,
+                                            view, 8, 32, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Accumulate(view, one, two, 19, 8));
-  IREE_ASSERT_OK(iree_hal_queue_write(queues_[0], {1, &semaphore, &two},
-                                      {1, &semaphore, &three}, view, 8, file, 4,
-                                      32, &barriers_, 0));
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(queues_[0], {1, &semaphore, &two},
+                                             {1, &semaphore, &three}, view, 8,
+                                             file, 4, 32, &barriers_, 0));
   view.reset();
   file.reset();
   ASSERT_NO_FATAL_FAILURE(Wait(three));
@@ -978,7 +979,7 @@ void GpuNativeFileAccessTest::RoundTrip(bool direct) {
                                      &sentinel, sizeof(sentinel), nullptr, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(one));
   const uint64_t before_read = Publications();
-  IREE_ASSERT_OK(iree_hal_queue_read(
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
       queues_[0], {1, &semaphore, &one}, {1, &semaphore, &two}, file,
       kAlignment, buffer, buffer_offset, kBytes, &barriers_, 0));
   if (!file_io_available) {
@@ -989,7 +990,7 @@ void GpuNativeFileAccessTest::RoundTrip(bool direct) {
     Ref<iree_hal_semaphore_t> write_completion;
     CreateSemaphore(write_completion.out());
     auto* write_semaphore = write_completion.get();
-    IREE_ASSERT_OK(iree_hal_queue_write(
+    IREE_ASSERT_OK(iree_hal_queue_write_linear(
         queues_[0], {}, {1, &write_semaphore, &one}, buffer, buffer_offset,
         file, 0, kBytes, &barriers_, 0));
     file.reset();
@@ -1028,7 +1029,7 @@ void GpuNativeFileAccessTest::RoundTrip(bool direct) {
   EXPECT_TRUE(std::equal(observed.begin(), observed.end(),
                          expected.begin() + kAlignment / 4));
   const uint64_t before_write = Publications();
-  IREE_ASSERT_OK(iree_hal_queue_write(
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(
       queues_[0], {1, &semaphore, &four}, {1, &semaphore, &five}, buffer,
       buffer_offset, file, 0, kBytes, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(five));
@@ -1076,9 +1077,9 @@ TEST_P(GpuNativeFileProgressTest,
   IREE_ASSERT_OK(Open(expected, false, nullptr, file.out()));
   auto* small = timeline_.get();
   uint64_t one = 1, two = 2, three = 3;
-  IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {}, {1, &small, &one}, file, 0,
-                                     buffer, kBufferOffset, kSmall, &barriers_,
-                                     0));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(queues_[0], {}, {1, &small, &one},
+                                            file, 0, buffer, kBufferOffset,
+                                            kSmall, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(one));
 
   Ref<iree_hal_semaphore_t> large_completion;
@@ -1087,13 +1088,13 @@ TEST_P(GpuNativeFileProgressTest,
   std::vector<uint32_t> observed(kSmall / 4);
   {
     NativeMemoryGate::Hold hold(&memory_gate());
-    IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {}, {1, &large, &one}, file,
-                                       0, buffer, kBufferOffset + kSmall,
-                                       kLarge, &barriers_, 0));
+    IREE_ASSERT_OK(iree_hal_queue_read_linear(
+        queues_[0], {}, {1, &large, &one}, file, 0, buffer,
+        kBufferOffset + kSmall, kLarge, &barriers_, 0));
     hold.WaitEntered();
-    IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {1, &small, &one},
-                                       {1, &small, &two}, file, kLarge, buffer,
-                                       kBufferOffset, kSmall, &barriers_, 0));
+    IREE_ASSERT_OK(iree_hal_queue_read_linear(
+        queues_[0], {1, &small, &one}, {1, &small, &two}, file, kLarge, buffer,
+        kBufferOffset, kSmall, &barriers_, 0));
     ASSERT_NO_FATAL_FAILURE(Wait(two));
     IREE_ASSERT_OK(iree_hal_queue_download(
         queues_[0], {1, &small, &two}, {1, &small, &three}, buffer,
@@ -1164,7 +1165,7 @@ TEST_P(GpuNativeFileTest, ConcurrentRangesSurviveRingWrapAndTrim) {
   for (uint64_t round = 0; round < 128; ++round) {
     values.fill(round + 1);
     for (size_t i = 0; i < kLaneCount; ++i) {
-      IREE_ASSERT_OK(iree_hal_queue_read(
+      IREE_ASSERT_OK(iree_hal_queue_read_linear(
           queues_[0], {}, {1, &semaphores[i], &values[i]}, file,
           i * kLaneLength, buffer, kBufferOffset + i * kLaneLength, kLaneLength,
           &barriers_, 0));
@@ -1501,11 +1502,11 @@ TEST_P(GpuUnregisteredFileOwnerTest, SharesBackingWithRegisteredDeviceOwner) {
   uint64_t one = 1, two = 2, three = 3;
   // Provision staging through the device owner before the independent file
   // owner accesses it without a compatible prepared-registration capability.
-  IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {}, {1, &timeline, &one},
-                                     primary_file, 0, buffer, kBufferOffset,
-                                     kLength, &barriers_, 0));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
+      queues_[0], {}, {1, &timeline, &one}, primary_file, 0, buffer,
+      kBufferOffset, kLength, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(one));
-  IREE_ASSERT_OK(iree_hal_queue_read(
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
       queues_[0], {1, &timeline, &one}, {1, &timeline, &two}, extra_file, 0,
       buffer, kBufferOffset, kLength, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(two));
@@ -1569,9 +1570,9 @@ TEST_P(GpuSharedFileStagingTest,
   const auto baseline = memory_gate().ResetPeak();
   auto* primary = timeline_.get();
   uint64_t one = 1, two = 2, three = 3, four = 4, five = 5;
-  IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {}, {1, &primary, &one},
-                                     primary_file, 0, buffer, kBufferOffset,
-                                     kSmall, &barriers_, 0));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
+      queues_[0], {}, {1, &primary, &one}, primary_file, 0, buffer,
+      kBufferOffset, kSmall, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(one));
   const auto prepared = memory_gate().QueryUsage();
   ASSERT_GT(prepared.live_bytes, baseline.live_bytes);
@@ -1589,7 +1590,7 @@ TEST_P(GpuSharedFileStagingTest,
   CreateSemaphore(large_completion.out());
   auto* extra = extra_completion.get();
   auto* large = large_completion.get();
-  IREE_ASSERT_OK(iree_hal_queue_read(
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
       queues_[0], {}, {1, &extra, &one}, extra_file, kSmall, buffer,
       kBufferOffset + kSmall, kSmall, &barriers_, 0));
   IREE_ASSERT_OK(
@@ -1599,18 +1600,18 @@ TEST_P(GpuSharedFileStagingTest,
   EXPECT_EQ(shared.live_bytes, prepared.live_bytes);
   {
     iree::hal::amd::gpu::cts::NativeMemoryGate::Hold native(&memory_gate());
-    IREE_ASSERT_OK(iree_hal_queue_read(
+    IREE_ASSERT_OK(iree_hal_queue_read_linear(
         queues_[0], {}, {1, &large, &one}, primary_file, 2 * kSmall, buffer,
         kBufferOffset + 2 * kSmall, kLarge, &barriers_, 0));
     native.WaitEntered();
     {
       HeldFileOwner owner;
       IREE_ASSERT_OK(owner.Hold(extra_proactor_));
-      IREE_ASSERT_OK(iree_hal_queue_read(
+      IREE_ASSERT_OK(iree_hal_queue_read_linear(
           queues_[0], {1, &extra, &one}, {1, &extra, &two}, extra_file, kSmall,
           buffer, kBufferOffset + kSmall, kSmall, &barriers_, 0));
       IREE_ASSERT_OK(iree_hal_device_trim(device_));
-      IREE_ASSERT_OK(iree_hal_queue_read(
+      IREE_ASSERT_OK(iree_hal_queue_read_linear(
           queues_[0], {1, &primary, &one}, {1, &primary, &two}, primary_file, 0,
           buffer, kBufferOffset, kSmall, &barriers_, 0));
       ASSERT_NO_FATAL_FAILURE(Wait(two));
@@ -1641,15 +1642,15 @@ TEST_P(GpuSharedFileStagingTest,
   RecordProperty("staging_native_byte_budget", native_budget);
   // A completed trim is one event, not a permanent no-cache policy. Rewarm a
   // small window, then prove another proactor reuses it without native growth.
-  IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {}, {1, &primary, &four},
-                                     primary_file, 0, buffer, kBufferOffset,
-                                     4096, &barriers_, 0));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
+      queues_[0], {}, {1, &primary, &four}, primary_file, 0, buffer,
+      kBufferOffset, 4096, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(four));
   const auto rewarmed = memory_gate().QueryUsage();
   EXPECT_GT(rewarmed.live_bytes, baseline.live_bytes);
-  IREE_ASSERT_OK(
-      iree_hal_queue_read(queues_[0], {}, {1, &extra, &three}, extra_file, 0,
-                          buffer, kBufferOffset + kSmall, 4096, &barriers_, 0));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(
+      queues_[0], {}, {1, &extra, &three}, extra_file, 0, buffer,
+      kBufferOffset + kSmall, 4096, &barriers_, 0));
   IREE_ASSERT_OK(
       iree_hal_semaphore_wait(extra, three, iree_infinite_timeout(), 0));
   EXPECT_EQ(memory_gate().QueryUsage().allocation_count,
@@ -1701,9 +1702,9 @@ TEST_P(GpuSharedVirtualFileStagingTest,
   IREE_ASSERT_OK(Open(expected, false, extra_proactor_, extra_file.out()));
   auto* primary = timeline_.get();
   uint64_t one = 1, two = 2;
-  IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {}, {1, &primary, &one},
-                                     primary_file, 0, buffer, offset, kSmall,
-                                     &barriers_, 0));
+  IREE_ASSERT_OK(iree_hal_queue_read_linear(queues_[0], {}, {1, &primary, &one},
+                                            primary_file, 0, buffer, offset,
+                                            kSmall, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(one));
   if (!iree_any_bit_set(memory_gate().QueryUsage().last_allocation.flags,
                         AMDF_MEMORY_FLAG_HOST_FILE_IO)) {
@@ -1721,7 +1722,7 @@ TEST_P(GpuSharedVirtualFileStagingTest,
     // One operation crosses physical ranges: the first uses the prepared small
     // block, and the second grows staging while retaining the first view. Hold
     // one actual detach; either block may instead use unregistered I/O.
-    IREE_ASSERT_OK(iree_hal_queue_read(
+    IREE_ASSERT_OK(iree_hal_queue_read_linear(
         queues_[0], {}, {1, &completed_handle, &one}, extra_file, 0, buffer,
         offset, length, &barriers_, 0));
     detach.ObserveCompletion(completed, one);
@@ -1826,7 +1827,7 @@ TEST_P(GpuNativeRegisteredFileProgressTest,
   std::vector<uint32_t> expected(kCorrectnessLength / 4, 0);
   Ref<iree_hal_file_t> file;
   IREE_ASSERT_OK(Open(expected, false, nullptr, file.out()));
-  IREE_ASSERT_OK(iree_hal_queue_write(
+  IREE_ASSERT_OK(iree_hal_queue_write_linear(
       queues_[0], {1, &timeline, &three}, {1, &timeline, &four}, buffer,
       kBufferOffset, file, 0, kCorrectnessLength, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(four));
@@ -1853,11 +1854,11 @@ TEST_P(GpuNativeFileProgressTest,
   auto* semaphore = timeline_.get();
   auto read_update_write = [&](uint64_t before) {
     uint64_t read = before + 1, dispatch = before + 2, write = before + 3;
-    IREE_ASSERT_OK(iree_hal_queue_read(
+    IREE_ASSERT_OK(iree_hal_queue_read_linear(
         queues_[0], {1, &semaphore, &before}, {1, &semaphore, &read}, file, 64,
         buffer, kBufferOffset, kCorrectnessLength, &barriers_, 0));
     ASSERT_NO_FATAL_FAILURE(Accumulate(buffer, read, dispatch, 19));
-    IREE_ASSERT_OK(iree_hal_queue_write(
+    IREE_ASSERT_OK(iree_hal_queue_write_linear(
         queues_[0], {1, &semaphore, &dispatch}, {1, &semaphore, &write}, buffer,
         kBufferOffset, file, 64, kCorrectnessLength, &barriers_, 0));
     ASSERT_NO_FATAL_FAILURE(Wait(write));

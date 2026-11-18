@@ -330,7 +330,7 @@ static void iree_hal_amd_gpu_file_window_complete(void* user_data,
   window->status = status;
   iree_hal_amd_gpu_file_pipeline_t* pipeline = window->pipeline;
   iree_hal_amd_gpu_file_pipeline_notify(
-      pipeline, UINT32_C(1) << (window - pipeline->windows));
+      pipeline, INT64_C(1) << (window - pipeline->windows));
 }
 
 static void iree_hal_amd_gpu_file_window_io_complete(void* user_data,

@@ -111,7 +111,7 @@ struct DeferredFileGather : iree_hal_resource_t {
           state->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
           IREE_HAL_SEMAPHORE_FLAG_NONE, &completions[i]);
       if (iree_status_is_ok(status)) {
-        status = iree_hal_queue_read(
+        status = iree_hal_queue_read_linear(
             context->queue, iree_hal_semaphore_list_empty(),
             {1, &completions[i], &values[i]}, state->file,
             state->rows[i] * sizeof(uint32_t), state->target,

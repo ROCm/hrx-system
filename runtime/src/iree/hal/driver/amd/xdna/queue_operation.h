@@ -386,18 +386,18 @@ void iree_hal_amd_xdna_file_continue(iree_hal_amd_xdna_operation_t* operation);
 
 // Captures a file read through the buffer's private host execution binding.
 iree_status_t iree_hal_amd_xdna_queue_read(
-    iree_hal_queue_t* base, const iree_hal_semaphore_list_t waits,
-    const iree_hal_semaphore_list_t signals, iree_hal_file_t* source_file,
-    uint64_t source_offset, iree_hal_buffer_t* target_buffer,
-    iree_device_size_t target_offset, iree_device_size_t length,
+    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_file_binding_table_t files,
+    iree_hal_buffer_binding_table_t buffers,
+    const iree_hal_file_transfer_list_t* transfers,
     const iree_hal_queue_barriers_t* barriers, iree_hal_read_flags_t flags);
 
 // Captures a file write through the buffer's private host execution binding.
 iree_status_t iree_hal_amd_xdna_queue_write(
-    iree_hal_queue_t* base, const iree_hal_semaphore_list_t waits,
-    const iree_hal_semaphore_list_t signals, iree_hal_buffer_t* source_buffer,
-    iree_device_size_t source_offset, iree_hal_file_t* target_file,
-    uint64_t target_offset, iree_device_size_t length,
+    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_buffer_binding_table_t buffers,
+    iree_hal_file_binding_table_t files,
+    const iree_hal_file_transfer_list_t* transfers,
     const iree_hal_queue_barriers_t* barriers, iree_hal_write_flags_t flags);
 
 #ifdef __cplusplus
