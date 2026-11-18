@@ -56,7 +56,7 @@ def main(importer, linker, runner, *packages):
                     module = source
                 modules.append(str(module))
             actual = {
-                str(path.relative_to(relocated))
+                path.relative_to(relocated).as_posix()
                 for path in relocated.rglob("*")
                 if path.is_file()
             }
