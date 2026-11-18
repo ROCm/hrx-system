@@ -1463,6 +1463,10 @@ static iree_status_t loom_runtime_memory_operation_prepare_backing(
   // Packed mappings then use the remaining slots; dedicated extents cannot
   // consume reusable capacity from either class.
   for (int pass = 0; pass < 2 && iree_status_is_ok(status); ++pass) {
+    if (pass == 1) {
+      status = loom_runtime_backing_pages_prepare_packed(
+          pool->pages, additional.packed_count, &operation->growth);
+    }
     for (iree_host_size_t i = 0;
          i < operation->count && iree_status_is_ok(status); ++i) {
       loom_runtime_memory_edit_t* edit = &operation->edits[i];

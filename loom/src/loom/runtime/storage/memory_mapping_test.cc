@@ -113,6 +113,47 @@ INSTANTIATE_TEST_SUITE_P(MappingSizes, MemoryGranularityTest,
                                            MappingSize::kThreeNativePages,
                                            MappingSize::kParent));
 
+TEST_F(MemoryMappingTest, ColdGrowthPacksAlignedRunsBeforeExistingHoles) {
+  const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
+  const uint64_t page = geometry.minimum_size;
+  const uint64_t parent = geometry.backing_size;
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, geometry, page, geometry.granularity, &statistics[0], &first));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, page));
+  const auto initial = mapping_queue.WaitForMappings(1)[0].updates[0];
+  RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
+  mapping_queue.ClearMappings();
+
+  // The accepted cohort needs exactly one new parent. Starting there keeps
+  // its full prefix aligned; the final page still reuses the older hole.
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, geometry, parent + page, geometry.granularity, &statistics[1],
+      &second));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(second, 0, parent + page));
+  const auto mappings = mapping_queue.WaitForMappings(1)[0].updates;
+  ASSERT_EQ(mappings.size(), 2u);
+  EXPECT_EQ(mappings[0].target_range.byte_offset, 0u);
+  EXPECT_EQ(mappings[0].target_range.byte_length, parent);
+  EXPECT_EQ(mappings[0].source_offset, 0u);
+  EXPECT_NE(mappings[0].source, initial.source);
+  EXPECT_EQ(mappings[1].target_range.byte_offset, parent);
+  EXPECT_EQ(mappings[1].target_range.byte_length, page);
+  EXPECT_EQ(mappings[1].source, initial.source);
+  EXPECT_EQ(mappings[1].source_offset, page);
+  EXPECT_EQ(loom_runtime_memory_pool_retained_bytes(pool), 2 * parent);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool).cached_bytes,
+            parent - 2 * page);
+  RoundTrip(loom_runtime_virtual_buffer_handle(second), 0, 0xaabbccdd);
+  RoundTrip(loom_runtime_virtual_buffer_handle(second), parent, 0x87654321);
+  CheckRetained(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
+
+  IREE_ASSERT_OK(Trim(second));
+  loom_runtime_memory_pool_trim(pool, 0);
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool).committed_bytes, parent);
+  CheckRetained(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
+}
+
 TEST_F(MemoryMappingTest, ContiguousRunKeepsIndependentPageOwnership) {
   const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
   const uint64_t page = geometry.mapping_size;
