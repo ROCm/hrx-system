@@ -157,6 +157,7 @@ loom_cc_library(
         "//loom/src/loom/import/cxx/value:bitcast",
         "//loom/src/loom/import/cxx/value:initialization",
         "//loom/src/loom/import/cxx/value:lvalues",
+        "//loom/src/loom/import/cxx/value:member_storage",
         "//loom/src/loom/import/cxx/value:objects",
         "//loom/src/loom/import/cxx/value:representation",
         "//loom/src/loom/import/cxx/value:scalar",

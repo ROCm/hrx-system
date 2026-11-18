@@ -1,0 +1,175 @@
+// RUN: pass inline-callables{budget=2048,hot-budget=2048},canonicalize,cse,promote-private-fragments,canonicalize,cse,dce,symbol-dce
+// The return values observe identity through aliases, copies, assignment, and lifetime boundaries.
+struct Coordinates {
+  int values[3];
+  const int* begin() const { return &values[0]; }
+};
+struct View {
+  float* data;
+  Coordinates lo;
+};
+
+static int write_owner(const int* p, View& v) {
+  v.lo.values[1] += 7;
+  return p[1];
+}
+static int write_pointer(int* p, const View& v) {
+  p[1] += 7;
+  return v.lo.values[1];
+}
+static int neighbors(const int* middle) { return middle[-1] * 100 + middle[1]; }
+
+static int alias_results() {
+  View a{nullptr, {{10, 11, 12}}};
+  View b = a;
+  int first = write_owner(a.lo.begin(), a);
+  int second = write_pointer(a.lo.values, a);
+  int third = write_owner(b.lo.begin(), a);
+  const int* original = a.lo.begin();
+  a = b;
+  return (first == 18 && second == 25 && third == 11 && original[1] == 11)
+             ? neighbors(&a.lo.values[1])
+             : 0;
+}
+
+static int first(const int* p) { return *p; }
+
+static int partial_initialization(int value) {
+  View v;
+  v.lo.values[1] = value;
+  return first(&v.lo.values[1]);
+}
+
+struct Cell {
+  int bytes[2];
+  Cell(int*& published, int value) : bytes{value, value + 1} {
+    published = &bytes[1];
+  }
+};
+struct Owner {
+  float* data;
+  Cell cell;
+  int after;
+  int observed = cell.bytes[1];
+};
+
+static int construct(int seed) {
+  int* published = nullptr;
+  Owner o{nullptr, Cell(published, seed), (*published = 17)};
+  o.cell.bytes[0] = 3;
+  return 100 * o.cell.bytes[1] + *published + o.observed + published[-1];
+}
+
+static int select_owner(bool right) {
+  View a{nullptr, {{1, 2, 3}}};
+  View b{nullptr, {{4, 5, 6}}};
+  return write_owner((right ? b : a).lo.begin(), right ? b : a);
+}
+
+static int evaluate_owner() {
+  View v{nullptr, {{1, 2, 3}}};
+  int visits = 0;
+  int* values = (++visits, v).lo.values;
+  (++visits, v).lo.values[1] = 5;
+  int observed = first(&(++visits, v).lo.values[1]);
+  return 100 * visits + 10 * values[1] + observed;
+}
+
+struct Result {
+  int* output;
+  int lanes[2];
+  ~Result() { *output = lanes[1]; }
+};
+static void change(int* lanes, int index) { lanes[index] = 31; }
+
+static int on_exit() {
+  int output = 0;
+  {
+    Result result{&output, {1, 2}};
+    change(result.lanes, 1);
+  }
+  return output;
+}
+
+using Lanes = int __attribute__((ext_vector_type(4)));
+struct Tile {
+  View views[2];
+  Lanes lanes;
+};
+static int vector_lane(const Lanes* lanes) { return (*lanes)[2]; }
+
+static int nested_numeric(int seed) {
+  Tile tile{{{nullptr, {{1, 2, 3}}}, {nullptr, {{4, seed, 6}}}},
+            {7, 8, seed + 1, 10}};
+  return write_owner(tile.views[1].lo.begin(), tile.views[1]) +
+         vector_lane(&tile.lanes);
+}
+
+int nested() { return nested_numeric(10); }
+int selected() { return 100 * select_owner(false) + select_owner(true); }
+int sequenced() { return evaluate_owner(); }
+int destruction() { return on_exit(); }
+int copies() { return alias_results(); }
+int partial() { return partial_initialization(20); }
+int construction() { return construct(10); }
+
+int array_members() {
+  int* first = nullptr;
+  int* second = nullptr;
+  Owner owners[2]{{nullptr, Cell(first, 2), (*first = 11)},
+                  {nullptr, Cell(second, 3), (*second = 17)}};
+  owners[0].cell.bytes[1] += 2;
+  owners[1].cell.bytes[1] += 3;
+  return 1000 * *first + 10 * *second + owners[0].observed + owners[1].observed;
+}
+// ----
+func.def public @nested() -> (i32) {
+  %147 = index.constant 16 : offset
+  %148 = buffer.alloca<private> align(16) %147 : buffer
+  %149 = index.constant 0 : index
+  %202 = vector.constanti [7, 8, 0, 10] : vector<4xi32>
+  %1026 = scalar.constant 11 : i32
+  %205 = vector.insert %1026 into %202[2] : i32, vector<4xi32>
+  %207 = buffer.view %148[%149] : buffer -> view<4xi32>
+  vector.store %205, %207[0] : vector<4xi32>, view<4xi32>
+  %1031 = scalar.constant 17 : i32
+  %784 = vector.load<root_in_bounds> %207[0] : view<4xi32> -> vector<4xi32>
+  %1022 = vector.extract %784[2] : vector<4xi32> -> i32
+  %1030 = scalar.addi %1022, %1031 : i32
+  func.return %1030 : i32
+}
+
+func.def public @selected() -> (i32) {
+  %1032 = scalar.constant 912 : i32
+  func.return %1032 : i32
+}
+
+func.def public @sequenced() -> (i32) {
+  %1042 = scalar.constant 355 : i32
+  func.return %1042 : i32
+}
+
+func.def public @destruction() -> (i32) {
+  %796 = scalar.constant 31 : i32
+  func.return %796 : i32
+}
+
+func.def public @copies() -> (i32) {
+  %1081 = scalar.constant 1012 : i32
+  func.return %1081 : i32
+}
+
+func.def public @partial() -> (i32) {
+  %18 = scalar.constant 20 : i32
+  func.return %18 : i32
+}
+
+func.def public @construction() -> (i32) {
+  %1092 = scalar.constant 1737 : i32
+  func.return %1092 : i32
+}
+
+func.def public @array_members() -> (i32) {
+  %1105 = scalar.constant 13228 : i32
+  func.return %1105 : i32
+}

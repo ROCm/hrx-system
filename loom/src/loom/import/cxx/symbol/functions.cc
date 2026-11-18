@@ -58,6 +58,19 @@ struct AnalysisScratch {
   ~AnalysisScratch() { iree_arena_deinitialize(&arena); }
 };
 
+// Storage groups and SSA groups both follow source component order. Advance
+// once per storage group while emitting the remaining SSA inputs and outputs.
+bool covered_by_storage(std::span<const ValueProjection>& remaining,
+                        size_t offset) {
+  while (!remaining.empty() &&
+         remaining.front().component_offset +
+                 remaining.front().partition->component_count <=
+             offset) {
+    remaining = remaining.subspan(1);
+  }
+  return !remaining.empty() && remaining.front().component_offset <= offset;
+}
+
 // One source-derived value or one already-projected native signature value.
 // Native values are used only for compiler-selected reference-cell storage;
 // every ordinary value continues through the canonical source type binder.
@@ -535,7 +548,8 @@ void Functions::analyze(Types& types) {
     bool changed = false;
     for (const auto& analyzed : analyzed_functions) {
       auto* analysis = analyzed.second;
-      if (analysis->resolve_reference_captures()) {
+      bool changed_members = analysis->resolve_member_constructions();
+      if (analysis->resolve_reference_captures() || changed_members) {
         changed = true;
         enqueue_incident(analysis);
       }
@@ -608,10 +622,11 @@ void Functions::analyze(Types& types) {
     std::vector<IndirectParameter> indirect_parameters;
     auto parameters = function->parameters();
     auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
+    const bool fixed_signature = exported_.contains(function) ||
+                                 function_contracts_.has_predicates(function) ||
+                                 template_definitions_.lookup(function);
     const bool whole =
-        exported_.contains(function) ||
-        function_contracts_.has_predicates(function) ||
-        template_definitions_.lookup(function) ||
+        fixed_signature ||
         unit_.typeTraits().is_reference(signature->returnType()) ||
         !analysis->projected_reference_return_origins(true).empty();
     for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
@@ -679,6 +694,14 @@ void Functions::analyze(Types& types) {
                 (whole || analysis->parameter_output(parameter, group))) ||
                (group.carries_owner && input(group));
       };
+      const auto members = analysis->storage_members(parameter);
+      if (!members.empty() && fixed_signature) {
+        diagnostics_.reject(
+            unit_, function->declaration(),
+            "borrowing members through this reference requires a private "
+            "ordinary helper; "
+            "a by-value record parameter can own its member storage on entry");
+      }
       const bool transfers_ownership =
           std::ranges::any_of(groups, [&](const auto& group) {
             return group.carries_owner && input(group);
@@ -687,11 +710,18 @@ void Functions::analyze(Types& types) {
         return input(group) &&
                (!indirect_parameter.mutable_access || output(group));
       });
-      if ((whole || complete) && !transfers_ownership) {
+      if ((whole || complete) && !transfers_ownership && members.empty()) {
         continue;
       }
       auto projection = std::make_unique<ParameterProjection>();
+      projection->storage = members;
+      projection->input_component_count =
+          members.size() * kPointerPartition.component_count;
+      auto remaining = members;
       for (const auto& group : groups) {
+        if (covered_by_storage(remaining, group.component_offset)) {
+          continue;
+        }
         if (input(group)) {
           projection->inputs.push_back(group);
           projection->input_component_count += group.partition->component_count;
@@ -762,16 +792,25 @@ void Functions::analyze(Types& types) {
       complete &= analysis->parameter_input(member.source, group) &&
                   (!output || analysis->parameter_output(member.source, group));
     });
-    if (complete && !function->isConstructor() && !transfers_ownership) {
+    const auto members = analysis->storage_members(receiver->source);
+    if (complete && !function->isConstructor() && !transfers_ownership &&
+        members.empty()) {
       continue;
     }
     ParameterProjection projection;
+    projection.storage = members;
+    projection.input_component_count =
+        members.size() * kPointerPartition.component_count;
+    auto remaining = members;
     visit_groups([&](const auto& member, auto group, bool output) {
       const bool input = analysis->parameter_input(member.source, group);
       output &= analysis->parameter_output(member.source, group);
       output |= group.carries_owner && input && !function->isDestructor();
       group.component_offset += member.component_offset;
       group.byte_offset += member.byte_offset();
+      if (covered_by_storage(remaining, group.component_offset)) {
+        return;
+      }
       if (input) {
         projection.inputs.push_back(group);
         projection.input_component_count += group.partition->component_count;
@@ -1783,6 +1822,9 @@ BoundSignature Functions::bind_callable_signature(
     receiver_argument_count = 1;
     argument_count = 1;
   } else if (receiver && receiver->projection) {
+    for (const auto& group : receiver->projection->storage) {
+      append_source(unit_.typeTraits().add_pointer(group.type));
+    }
     for (const auto& group : receiver->projection->inputs) {
       append_source(group.type);
     }
@@ -1833,6 +1875,10 @@ BoundSignature Functions::bind_callable_signature(
       }
       argument_count += layout->cell_types.size();
     } else if (indirect && indirect->projection) {
+      for (const auto& group : indirect->projection->storage) {
+        append_source(unit_.typeTraits().add_pointer(group.type));
+        argument_count += kPointerPartition.component_count;
+      }
       for (const auto& group : indirect->projection->inputs) {
         append_source(group.type);
         argument_count += group.partition->component_count;

@@ -33,6 +33,7 @@ loom_check_test_suite(
         "layout_attributes.cxx-test",
         "layout_attributes_roundtrip.cxx-test",
         "list_initialization_invalid.cxx-test",
+        "member_borrows.cxx-test",
         "member_functions.cxx-test",
         "member_functions_cleanup.cxx-test",
         "member_functions_invalid.cxx-test",

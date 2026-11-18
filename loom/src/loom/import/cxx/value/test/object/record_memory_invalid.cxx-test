@@ -48,23 +48,7 @@ void read(const loom::type::view<loom::type::shape<4, 4>, float>* view) {
 }
 
 // ====
-// Exposing an array's address still requires storage for its complete owner.
-struct View { int* data; int values[3]; };
-static void observe(const int* values);
-void escaped(int* data) {
-  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
-  View view{data, {1, 2, 3}};
-  observe(view.values);
-}
-
-// ====
-// An escaping copy invalidates the original array borrow as well.
-struct State { int* data; int values[2]; };
-static void observe(const int* values);
-void escaped_copy(int* data) {
-  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
-  State state{data, {1, 2}};
-  const int* pointer = state.values;
-  const int* copy = pointer;
-  observe(copy);
-}
+struct Record { int* data; int lanes[3]; };
+static int first(const int* p) { return *p; }
+// ERROR@+1: LOWERING/059 "runtime reference signatures require an internal ordinary function definition"
+int external(const Record& record) { return first(record.lanes); }

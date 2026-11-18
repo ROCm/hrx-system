@@ -50,6 +50,11 @@ class Initialization {
     virtual Value expression(cxx::ExpressionAST* expression) = 0;
     virtual Value convert(cxx::ExpressionAST* expression, const cxx::Type* type,
                           cxx::AST* owner) = 0;
+    // Initializes an explicit aggregate member, constructing an
+    // identity-bearing prvalue at its final address when its enclosing object
+    // supplies one.
+    virtual Value initialize_member(cxx::ExpressionAST* expression,
+                                    const cxx::Type* type, cxx::AST* owner) = 0;
     // Transfers a completed prvalue result into its destination object. Side
     // temporaries evaluated while producing it remain owned by their enclosing
     // full expression.
@@ -66,7 +71,8 @@ class Initialization {
     // Installs one source current-object scope. Value receivers publish each
     // completed field into the ordinary symbol environment; storage receivers
     // retain the destination identity used by field lvalues.
-    virtual void enter_value_receiver(const RecordPartition& record) = 0;
+    virtual void enter_value_receiver(const RecordPartition& record,
+                                      cxx::ExpressionAST* initializer) = 0;
     virtual void enter_storage_receiver(const RecordPartition& record,
                                         StorageProjection destination,
                                         const cxx::Type* object_type) = 0;

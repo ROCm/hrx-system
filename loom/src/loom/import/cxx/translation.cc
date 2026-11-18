@@ -67,6 +67,7 @@
 #include "loom/import/cxx/value/bitcast.h"
 #include "loom/import/cxx/value/initialization.h"
 #include "loom/import/cxx/value/lvalues.h"
+#include "loom/import/cxx/value/member_storage.h"
 #include "loom/import/cxx/value/objects.h"
 #include "loom/import/cxx/value/representation.h"
 #include "loom/import/cxx/value/scalar.h"
@@ -115,6 +116,7 @@ class Translator final : private Initialization::Evaluation {
         vectors_(unit, diagnostics, types_, scalars_, locations_, builder_),
         storage_(unit, diagnostics, types_, scalars_, locations_, builder_),
         objects_(unit, types_, storage_, value_arena_, locations_, builder_),
+        member_storage_(types_, objects_, storage_, value_arena_),
         initialization_(unit, diagnostics, types_, scalars_, vectors_, storage_,
                         objects_, value_arena_, locations_, builder_, *this),
         launches_(unit, diagnostics),
@@ -208,8 +210,15 @@ class Translator final : private Initialization::Evaluation {
          "helper");
   }
 
-  void enter_value_receiver(const RecordPartition& record) override {
-    receivers_.enter(record, std::nullopt, record.source->type());
+  void enter_value_receiver(const RecordPartition& record,
+                            cxx::ExpressionAST* initializer) override {
+    const auto* destination = initializer && !member_storage_.empty()
+                                  ? control_->aggregate_destination(initializer)
+                                  : nullptr;
+    if (destination && member_storage_.lookup(destination->binding).empty()) {
+      destination = nullptr;
+    }
+    receivers_.enter(record, std::nullopt, record.source->type(), destination);
   }
 
   void enter_storage_receiver(const RecordPartition& record,
@@ -310,6 +319,32 @@ class Translator final : private Initialization::Evaluation {
     if (!receivers_.is_complete(root)) {
       fail(owner, "member is read before its initialization is complete");
     }
+    if (auto* active = receivers_.find(root); active->destination) {
+      auto dest = *active->destination;
+      dest.component_offset += selected.component_offset;
+      dest.member = selected.partition;
+      if (unit_.typeTraits().is_array(type)) {
+        if (auto address =
+                member_storage_.address(member_storage_.lookup(dest.binding),
+                                        dest.component_offset, type, owner)) {
+          return address->pointer;
+        }
+      }
+      return read(ObjectLvalue{type, dest}, owner);
+    }
+    if (!member_storage_.lookup(root).empty()) {
+      Destination dest{
+          root, selected.component_offset - selected.root->component_offset,
+          selected.partition};
+      if (unit_.typeTraits().is_array(type)) {
+        if (auto physical =
+                member_storage_.address(member_storage_.lookup(root),
+                                        dest.component_offset, type, owner)) {
+          return physical->pointer;
+        }
+      }
+      return read(ObjectLvalue{type, dest}, owner);
+    }
     auto value = values_.project(
         root, *selected.partition,
         selected.component_offset - selected.root->component_offset,
@@ -349,6 +384,15 @@ class Translator final : private Initialization::Evaluation {
   }
 
   void publish_receiver_member(cxx::Symbol* field, Value value) override {
+    if (auto* active = receivers_.find(field); active && active->destination) {
+      auto* source = receivers_.current()->record->source->declaration();
+      const auto& part = types_.member(field, source);
+      auto dest = *active->destination;
+      dest.component_offset += part.component_offset;
+      dest.member = part.partition;
+      member_storage_.write(member_storage_.lookup(dest.binding), values_, dest,
+                            value, part.type(), source, /*initializing=*/true);
+    }
     receivers_.publish(field, value);
   }
 
@@ -364,6 +408,13 @@ class Translator final : private Initialization::Evaluation {
     if (!receivers_.is_complete(field)) {
       fail(owner, "member is read before its initialization is complete");
     }
+    if (active->destination) {
+      const auto& part = types_.member(field, owner);
+      auto dest = *active->destination;
+      dest.component_offset += part.component_offset;
+      dest.member = part.partition;
+      return read(ObjectLvalue{part.type(), dest}, owner);
+    }
     if (active->storage) {
       auto projection = storage_.member(*active->storage, field, owner);
       auto* member_type = objects_.member_type(active->object_type, field);
@@ -376,6 +427,11 @@ class Translator final : private Initialization::Evaluation {
                        storage_.dereference(projection, member_type, owner),
                        member_type, owner));
     }
+    if (!member_storage_.lookup(field).empty()) {
+      return read(ObjectLvalue{source_object_type(field),
+                               Destination{field, 0, nullptr}},
+                  owner);
+    }
     auto found = values_.find(field);
     if (found == values_.end()) {
       fail(owner, "source subobject is read before initialization");
@@ -384,6 +440,21 @@ class Translator final : private Initialization::Evaluation {
   }
 
   void leave_receiver() override { receivers_.leave(); }
+
+  Value initialize_member(cxx::ExpressionAST* expression, const cxx::Type* type,
+                          cxx::AST* owner) override {
+    if (!member_storage_.empty()) {
+      if (auto destination = control_->member_construction(expression)) {
+        if (auto address =
+                member_storage_.begin_construction(*destination, type)) {
+          initialization_.object(*address, type, expression, nullptr,
+                                 expression);
+          return objects_.load(*address, type, expression);
+        }
+      }
+    }
+    return convert(expression, type, owner);
+  }
 
   Value convert(cxx::ExpressionAST* input_ast, const cxx::Type* output_type,
                 cxx::AST* owner) override {
@@ -748,11 +819,11 @@ class Translator final : private Initialization::Evaluation {
       arguments.clear();
       if (projection) {
         for (const auto& group : projection->inputs) {
-          read(*group.partition, offset + group.component_offset)
+          read(group.type, *group.partition, offset + group.component_offset)
               .append_to(arguments);
         }
       } else {
-        read(*record, offset).append_to(arguments);
+        read(destruction.element_type, *record, offset).append_to(arguments);
       }
       call_destructor(destruction, arguments, ImplicitObjectABI::Value, source);
     }
@@ -760,18 +831,25 @@ class Translator final : private Initialization::Evaluation {
 
   void destroy_value(Value value, const Destruction& destruction,
                      cxx::AST* source) {
-    destroy_components(destruction, source,
-                       [&](const Partition& partition, size_t offset) {
-                         return value.project(partition, offset);
-                       });
+    destroy_components(
+        destruction, source,
+        [&](const cxx::Type*, const Partition& partition, size_t offset) {
+          return value.project(partition, offset);
+        });
   }
 
   void destroy_binding(cxx::Symbol* binding, const Destruction& destruction,
                        cxx::AST* source) {
+    auto members = member_storage_.lookup(binding);
     destroy_components(
-        destruction, source, [&](const Partition& partition, size_t offset) {
+        destruction, source,
+        [&](const cxx::Type* type, const Partition& partition, size_t offset) {
           auto value =
-              values_.project(binding, partition, offset, value_arena_);
+              members.empty()
+                  ? values_.project(binding, partition, offset, value_arena_)
+                  : member_storage_.read(members, values_,
+                                         {binding, offset, &partition}, type,
+                                         source);
           if (!value) {
             fail(source, "destructor reads an uninitialized source subobject");
           }
@@ -1666,6 +1744,7 @@ class Translator final : private Initialization::Evaluation {
     values_.clear();
     locals_.clear();
     reference_locals_.clear();
+    member_storage_.clear();
     active_destructions_.clear();
     temporary_destructions_.clear();
     temporary_results_.clear();
@@ -1703,6 +1782,19 @@ class Translator final : private Initialization::Evaluation {
           if (!defined.source->symbol->isConstructor()) {
             receivers_.mark_complete(member.source);
           }
+        }
+        for (auto group : implicit.projection->storage) {
+          const auto& members = record->members;
+          auto next =
+              std::ranges::upper_bound(members, group.component_offset, {},
+                                       &SubobjectPartition::component_offset);
+          const auto& field = *std::prev(next);
+          group.component_offset -= field.component_offset;
+          group.byte_offset -= field.byte_offset();
+          auto value = region_value(region, argument_index, kPointerPartition);
+          member_storage_.bind(
+              field.source, group,
+              storage_.project(value.pointer(), group.type, defined.source));
         }
         for (const auto& group : implicit.projection->inputs) {
           auto value = region_value(region, argument_index, *group.partition);
@@ -1776,6 +1868,12 @@ class Translator final : private Initialization::Evaluation {
       const auto& partition = types_.partition(value_type, defined.source);
       if (indirect && indirect->projection) {
         values_.declare(parameter, partition);
+        for (const auto& group : indirect->projection->storage) {
+          auto value = region_value(region, argument_index, kPointerPartition);
+          member_storage_.bind(
+              parameter, group,
+              storage_.project(value.pointer(), group.type, defined.source));
+        }
         for (const auto& group : indirect->projection->inputs) {
           auto value = region_value(region, argument_index, *group.partition);
           auto parameter_name = cxx::to_string(parameter->name());
@@ -1892,6 +1990,13 @@ class Translator final : private Initialization::Evaluation {
           objects_.store(local_object(parameter, defined.source), value,
                          parameter->type(), defined.source);
         }
+      } else if (auto members = control_->storage_members(parameter);
+                 !members.empty()) {
+        member_storage_.allocate(parameter, members, defined.source);
+        values_.declare(parameter, partition);
+        member_storage_.write(member_storage_.lookup(parameter), values_,
+                              {parameter, 0, nullptr}, value, value_type,
+                              defined.source);
       } else {
         values_.set(parameter, value);
       }
@@ -2075,6 +2180,12 @@ class Translator final : private Initialization::Evaluation {
     }
     auto found = locals_.find(symbol);
     if (found == locals_.end()) {
+      if (!member_storage_.lookup(symbol).empty()) {
+        return read(
+            ObjectLvalue{types_.unqualified_value(source_object_type(symbol)),
+                         Destination{symbol, 0, nullptr}},
+            owner);
+      }
       if (!values_.initialized(symbol)) {
         fail(owner, "source value is read before initialization");
       }
@@ -2237,8 +2348,14 @@ class Translator final : private Initialization::Evaluation {
       activate_automatic_destruction(variable, owner);
       return;
     }
-    if (!requires_initialization) {
+    const auto members = control_->storage_members(variable);
+    if (!members.empty()) {
+      member_storage_.allocate(variable, members, owner);
+    }
+    if (!members.empty() || !requires_initialization) {
       values_.declare(variable, types_.partition(variable->type(), owner));
+    }
+    if (!requires_initialization) {
       activate_automatic_destruction(variable, owner);
       return;
     }
@@ -2261,7 +2378,14 @@ class Translator final : private Initialization::Evaluation {
                                               variable->constructor(), owner),
         constexpr_contract);
     adopt_temporary_result(initializer);
-    values_.set(variable, name(value, cxx::to_string(variable->name())));
+    value = name(value, cxx::to_string(variable->name()));
+    if (members.empty()) {
+      values_.set(variable, value);
+    } else {
+      member_storage_.write(member_storage_.lookup(variable), values_,
+                            {variable, 0, nullptr}, value, variable->type(),
+                            owner, /*initializing=*/true);
+    }
     activate_automatic_destruction(variable, owner);
   }
 
@@ -2711,6 +2835,22 @@ class Translator final : private Initialization::Evaluation {
     return storage_.project(value.pointer(), referent, ast);
   }
 
+  Destination source_destination(Destination dest, cxx::AST* owner) {
+    if (!member_storage_.empty()) {
+      if (auto* receiver = receivers_.find(dest.binding);
+          receiver && receiver->destination) {
+        const auto& field = types_.member(dest.binding, owner);
+        dest.binding = receiver->destination->binding;
+        dest.component_offset +=
+            receiver->destination->component_offset + field.component_offset;
+        if (!dest.member) {
+          dest.member = field.partition;
+        }
+      }
+    }
+    return dest;
+  }
+
   StorageProjection object_address(cxx::ExpressionAST* ast) {
     ast = unwrap_object_identity(unit_, ast);
     if (has_view_element_origin(ast)) {
@@ -2720,6 +2860,12 @@ class Translator final : private Initialization::Evaluation {
         binary && !binary->symbol && binary->op == cxx::TokenKind::T_COMMA) {
       effect(binary->leftExpression);
       return object_address(binary->rightExpression);
+    }
+    if (auto* conditional = cxx::ast_cast<cxx::ConditionalExpressionAST>(ast);
+        conditional && ast->valueCategory != cxx::ValueCategory::kPrValue) {
+      auto pointer = conditional_reference(
+          conditional, expression(conditional->condition).ssa());
+      return storage_.project(pointer.pointer(), ast->type, ast);
     }
     if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(ast);
         cast && is_class_adjustment(cast)) {
@@ -2735,8 +2881,41 @@ class Translator final : private Initialization::Evaluation {
     if (auto reference = reference_field_address(ast)) {
       return *reference;
     }
+    auto* member_access = cxx::ast_cast<cxx::MemberExpressionAST>(ast);
+    if (!member_storage_.empty() &&
+        (member_access || cxx::ast_cast<cxx::IdExpressionAST>(ast))) {
+      if (member_access) {
+        if (auto target = projected_member_lvalue(member_access, ast,
+                                                  LvalueAccess::Read)) {
+          return reference_address(*target, ast);
+        }
+      }
+      if (auto destination = control_->destination(ast)) {
+        *destination = source_destination(*destination, ast);
+        if (auto address = member_storage_.address(
+                member_storage_.lookup(destination->binding),
+                destination->component_offset, ast->type, ast)) {
+          return *address;
+        }
+      }
+    }
     if (auto selected = current_receiver_selection(ast)) {
       auto* active = receivers_.find(selected->root->source);
+      if (auto home = member_storage_.address(
+              member_storage_.lookup(selected->root->source),
+              selected->component_offset - selected->root->component_offset,
+              ast->type, ast)) {
+        return *home;
+      }
+      if (active->destination) {
+        auto offset =
+            active->destination->component_offset + selected->component_offset;
+        if (auto address = member_storage_.address(
+                member_storage_.lookup(active->destination->binding), offset,
+                ast->type, ast)) {
+          return *address;
+        }
+      }
       if (active->storage) {
         return storage_.subobject(*active->storage, selected->byte_offset, ast);
       }
@@ -2950,6 +3129,36 @@ class Translator final : private Initialization::Evaluation {
 
   enum class LvalueAccess { Read, Write };
 
+  // A known storage owner identifies the bytes, but evaluating the source
+  // of a dot expression can still select a reference or perform side effects.
+  std::optional<Lvalue> projected_member_lvalue(
+      cxx::MemberExpressionAST* member, cxx::AST* owner, LvalueAccess access) {
+    if (member_storage_.empty() || member->accessOp != cxx::TokenKind::T_DOT ||
+        member->vectorComponentKind != cxx::VectorComponentKind::kNone ||
+        cxx::ast_cast<cxx::IdExpressionAST>(
+            unwrap_object_identity(unit_, member->baseExpression))) {
+      return std::nullopt;
+    }
+    auto target = control_->destination(member);
+    if (!target || member_storage_.lookup(target->binding).empty()) {
+      return std::nullopt;
+    }
+    auto base = reference_lvalue(member->baseExpression, owner, access);
+    auto result = base.project(types_.selection(member, owner), member->type,
+                               storage_, owner);
+    if (auto* object = std::get_if<ObjectLvalue>(&result.projection)) {
+      if (auto* selected = std::get_if<Destination>(&object->location)) {
+        auto physical = member_storage_.address(
+            member_storage_.lookup(selected->binding),
+            selected->component_offset, member->type, owner);
+        if (physical) {
+          object->location = *physical;
+        }
+      }
+    }
+    return result;
+  }
+
   std::optional<Lvalue> pointer_alias_member_lvalue(
       cxx::MemberExpressionAST* member, cxx::AST* owner, LvalueAccess access) {
     if (member->accessOp != cxx::TokenKind::T_MINUS_GREATER ||
@@ -3021,6 +3230,15 @@ class Translator final : private Initialization::Evaluation {
     auto destination = retained_destination ? retained_destination
                                             : control_->destination(expression);
     if (destination) {
+      *destination = source_destination(*destination, owner);
+      if (auto members = member_storage_.lookup(destination->binding);
+          !members.empty()) {
+        if (auto address =
+                member_storage_.address(members, destination->component_offset,
+                                        expression->type, owner)) {
+          return {expression->type, *address};
+        }
+      }
       if (auto* field = destination->binding; receivers_.find(field)) {
         auto* active = receivers_.find(field);
         if (!receivers_.is_complete(field) &&
@@ -3104,12 +3322,18 @@ class Translator final : private Initialization::Evaluation {
     if (std::holds_alternative<CurrentReceiver>(target.location)) {
       return current_receiver_value(owner);
     }
-    if (auto* destination = std::get_if<Destination>(&target.location)) {
-      const auto& partition = destination->member
-                                  ? *destination->member
-                                  : values_.partition(destination->binding);
-      auto value = values_.project(destination->binding, partition,
-                                   destination->component_offset, value_arena_);
+    if (auto* source = std::get_if<Destination>(&target.location)) {
+      const Destination destination = source_destination(*source, owner);
+      const auto& partition = destination.member
+                                  ? *destination.member
+                                  : values_.partition(destination.binding);
+      auto members = member_storage_.lookup(destination.binding);
+      auto value =
+          members.empty()
+              ? values_.project(destination.binding, partition,
+                                destination.component_offset, value_arena_)
+              : member_storage_.read(members, values_, destination, target.type,
+                                     owner);
       if (!value) {
         fail(owner, "source subobject is read before initialization");
       }
@@ -3131,18 +3355,25 @@ class Translator final : private Initialization::Evaluation {
       replace_current_receiver(value);
       return;
     }
-    if (auto* destination = std::get_if<Destination>(&target.location)) {
-      if (destination->member) {
-        values_.replace(destination->binding, destination->component_offset,
+    if (auto* source = std::get_if<Destination>(&target.location)) {
+      const Destination destination = source_destination(*source, owner);
+      if (auto members = member_storage_.lookup(destination.binding);
+          !members.empty()) {
+        member_storage_.write(members, values_, destination, value, target.type,
+                              owner);
+        return;
+      }
+      if (destination.member) {
+        values_.replace(destination.binding, destination.component_offset,
                         value, value_arena_);
-        if (values_.initialized(destination->binding)) {
-          values_.set(destination->binding,
-                      name(values_.at(destination->binding),
-                           cxx::to_string(destination->binding->name())));
+        if (values_.initialized(destination.binding)) {
+          values_.set(destination.binding,
+                      name(values_.at(destination.binding),
+                           cxx::to_string(destination.binding->name())));
         }
       } else {
-        values_.set(destination->binding,
-                    name(value, cxx::to_string(destination->binding->name())));
+        values_.set(destination.binding,
+                    name(value, cxx::to_string(destination.binding->name())));
       }
     } else if (auto* object =
                    std::get_if<StorageProjection>(&target.location)) {
@@ -3475,6 +3706,9 @@ class Translator final : private Initialization::Evaluation {
       }
     }
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(projected)) {
+      if (auto target = projected_member_lvalue(member, owner, access)) {
+        return *target;
+      }
       if (auto alias = pointer_alias_member_lvalue(member, owner, access)) {
         return std::move(*alias);
       }
@@ -3769,12 +4003,31 @@ class Translator final : private Initialization::Evaluation {
   }
 
   StorageProjection reference_address(const Lvalue& target, cxx::AST* owner) {
+    if (const auto* selected = target.selection()) {
+      auto* pointer_type = unit_.typeTraits().add_pointer(selected->type);
+      auto pointer = dispatch_ordinal(
+          selected->selector, selected->alternatives.size(), pointer_type,
+          owner, [&](size_t arm) {
+            return Value(
+                reference_address(selected->alternatives[arm], owner).pointer);
+          });
+      return storage_.project(pointer.pointer(), selected->type, owner);
+    }
     if (std::holds_alternative<ViewElementLvalue>(target.projection)) {
       fail(owner, "view elements have no source address or reference identity");
     }
     const auto* object = std::get_if<ObjectLvalue>(&target.projection);
     const auto* projection =
         object ? std::get_if<StorageProjection>(&object->location) : nullptr;
+    if (!projection && object) {
+      if (auto* dest = std::get_if<Destination>(&object->location)) {
+        if (auto physical = member_storage_.address(
+                member_storage_.lookup(dest->binding), dest->component_offset,
+                object->type, owner)) {
+          return *physical;
+        }
+      }
+    }
     if (!projection) {
       fail(owner,
            "reference identity escaped an automatic value without "
@@ -4183,6 +4436,8 @@ class Translator final : private Initialization::Evaluation {
     }
     if (target) {
       reject_view_element_escape(*target, argument);
+    } else if (indirect->projection && !indirect->projection->storage.empty()) {
+      admit_member_temporary(argument, indirect->object_type);
     }
     return {
         .value = value,
@@ -4308,6 +4563,49 @@ class Translator final : private Initialization::Evaluation {
     }
   }
 
+  void admit_member_temporary(cxx::ExpressionAST* expression,
+                              const cxx::Type* type) {
+    auto* source = unwrap_object_identity(unit_, expression);
+    if (source->valueCategory != cxx::ValueCategory::kPrValue ||
+        control_->object_requires_storage(source) ||
+        !unit_.typeTraits().has_trivial_destructor(type)) {
+      fail(expression,
+           "borrowing a member of this temporary requires a destination "
+           "through its construction and destruction");
+    }
+  }
+
+  void append_projected_inputs(const ParameterProjection& projection,
+                               const Lvalue* target, std::optional<Value> value,
+                               std::vector<loom_value_id_t>& arguments,
+                               cxx::AST* owner) {
+    for (const auto& group : projection.storage) {
+      if (target) {
+        Value(
+            reference_address(project_call_target(*target, group, owner), owner)
+                .pointer)
+            .append_to(arguments);
+      } else {
+        // A completed prvalue with unobservable construction has its own
+        // lifetime. Give just the referenced numeric part an address for the
+        // full expression.
+        auto allocation = storage_.allocate(
+            group.type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, owner);
+        auto home = storage_.project(allocation.pointer, group.type, owner);
+        objects_.store(home,
+                       value->project(*group.partition, group.component_offset),
+                       group.type, owner);
+        Value(home.pointer).append_to(arguments);
+      }
+    }
+    for (const auto& group : projection.inputs) {
+      auto input =
+          value ? value->project(*group.partition, group.component_offset)
+                : read(project_call_target(*target, group, owner), owner);
+      input.append_to(arguments);
+    }
+  }
+
   void append_call_argument(EvaluatedCallArgument argument,
                             size_t receiver_argument_count,
                             std::vector<loom_value_id_t>& arguments,
@@ -4321,15 +4619,9 @@ class Translator final : private Initialization::Evaluation {
                                       storage.partition->component_count);
       arguments.insert(arguments.end(), cells.begin(), cells.end());
     } else if (argument.projection) {
-      for (const auto& group : argument.projection->inputs) {
-        auto input =
-            argument.value
-                ? argument.value->project(*group.partition,
-                                          group.component_offset)
-                : read(project_call_target(*argument.target, group, owner),
-                       owner);
-        input.append_to(arguments);
-      }
+      append_projected_inputs(*argument.projection,
+                              argument.target ? &*argument.target : nullptr,
+                              argument.value, arguments, owner);
     } else {
       argument.value->append_to(arguments);
     }
@@ -4507,6 +4799,12 @@ class Translator final : private Initialization::Evaluation {
       if (requires_storage && argument.abi == ImplicitObjectABI::Value) {
         fail(owner, "member call requires a storage-backed receiver");
       }
+      if (argument.value && argument.abi == ImplicitObjectABI::Value) {
+        const auto* projection = functions_.receiver_projection(function);
+        if (projection && !projection->storage.empty()) {
+          admit_member_temporary(receiver, object_type);
+        }
+      }
       return argument;
     };
     if (!receiver || is_current_object(unit_, receiver)) {
@@ -4526,6 +4824,16 @@ class Translator final : private Initialization::Evaluation {
                            std::optional<TemporaryReference> temporary =
                                std::nullopt) {
       reject_view_element_escape(target, receiver);
+      if (requires_storage) {
+        return ReceiverArgument{
+            ImplicitObjectABI::Storage,
+            Value(reference_address(target, receiver).pointer),
+            record,
+            std::nullopt,
+            false,
+            written_fields,
+            temporary};
+      }
       if (target.selection()) {
         return admit(ReceiverArgument{ImplicitObjectABI::Value, std::nullopt,
                                       record, std::move(target), false,
@@ -5418,18 +5726,13 @@ class Translator final : private Initialization::Evaluation {
     if (receiver) {
       const size_t explicit_count = arguments.size();
       if (receiver_projection) {
-        for (const auto& group : receiver_projection->inputs) {
-          auto value =
-              receiver->value
-                  ? receiver->value->project(*group.partition,
-                                             group.component_offset)
-                  : read(project_call_target(receiver->current
-                                                 ? current_receiver_target()
-                                                 : *receiver->target,
-                                             group, call),
-                         call);
-          value.append_to(arguments);
-        }
+        auto current = receiver->current
+                           ? std::optional(current_receiver_target())
+                           : std::nullopt;
+        const auto& target = current ? current : receiver->target;
+        append_projected_inputs(*receiver_projection,
+                                target ? &*target : nullptr, receiver->value,
+                                arguments, call);
       } else {
         materialize_receiver(*receiver, call).append_to(arguments);
       }
@@ -6728,10 +7031,15 @@ class Translator final : private Initialization::Evaluation {
             selected_receiver_value(*receiver_field, field->type(), ast),
             cxx::to_string(field->name()));
       }
-      if (receiver_field && id->subobjectPath) {
+      if (receiver_field &&
+          (id->subobjectPath ||
+           receivers_.find(receiver_field->root->source)->destination)) {
         return name(
             selected_receiver_value(*receiver_field, field->type(), ast),
             cxx::to_string(field->name()));
+      }
+      if (!member_storage_.lookup(id->symbol).empty()) {
+        return binding(id->symbol, ast);
       }
       if (auto found = values_.find(id->symbol); found != values_.end()) {
         return found->second;
@@ -6883,6 +7191,10 @@ class Translator final : private Initialization::Evaluation {
         if (auto destination = control_->destination(member);
             destination && values_.contains(destination->binding) &&
             !locals_.contains(destination->binding)) {
+          if (auto target =
+                  projected_member_lvalue(member, member, LvalueAccess::Read)) {
+            return read(*target, member);
+          }
           return read(ObjectLvalue{member->type, *destination}, member);
         }
         auto value = expression(member->baseExpression);
@@ -9191,6 +9503,8 @@ class Translator final : private Initialization::Evaluation {
   // Source-layout snapshots and semantic reference cells share value
   // partitions with callable transport.
   Objects objects_;
+  // Independent native addresses for borrowed numeric fields in this function.
+  MemberStorage member_storage_;
   // Aggregate clauses preserve in-place initialization and copy ordering.
   Initialization initialization_;
   // Admitted launch contracts, including bounds from function redeclarations.

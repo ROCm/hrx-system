@@ -16,8 +16,9 @@ namespace loom::cxx_import {
 
 void ReceiverScopes::enter(const RecordPartition& record,
                            std::optional<StorageProjection> storage,
-                           const cxx::Type* object_type) {
-  Frame frame{{&record, storage, object_type}, {}};
+                           const cxx::Type* object_type,
+                           const Destination* destination) {
+  Frame frame{{&record, storage, object_type, destination}, {}};
   frame.bindings.reserve(record.members.size());
   const size_t index = frames_.size();
   for (const auto& member : record.members) {

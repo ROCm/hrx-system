@@ -68,31 +68,51 @@ void ObjectIdentity::alias(cxx::ExpressionAST* expression, const void* source) {
 
 void ObjectIdentity::elements(cxx::ExpressionAST* object,
                               cxx::List<cxx::ExpressionAST*>* initializers) {
-  auto add_element = [&](const cxx::Type* type) {
+  size_t ordinal = 0;
+  auto add_element = [&](const cxx::Type* type, cxx::Symbol* member) {
     if (!initializers) {
       return;
     }
     auto* element = initializers->value;
     if (!unit_.typeTraits().is_reference(type) &&
         element->valueCategory == cxx::ValueCategory::kPrValue) {
-      join(object, element);
+      auto child = identities_.find(element);
+      if (child != identities_.end()) {
+        const size_t child_index = child->second;
+        if (types_.requires_value_transport(object->type) &&
+            (!member || types_.record(object->type, object)) &&
+            types_.unqualified_value(object->type) !=
+                types_.unqualified_value(type)) {
+          if (!members_) {
+            members_ = std::make_unique<AggregateMembers>();
+          }
+          const size_t offset =
+              member ? types_.member(member, object).component_offset
+                     : ordinal * types_.partition(type, object).component_count;
+          members_->elements.push_back(
+              {add(object), child_index, offset, element});
+        } else {
+          join(add(object), child_index);
+        }
+      }
     }
+    ++ordinal;
     initializers = initializers->next;
   };
   auto* type = types_.unqualified(object->type);
   if (auto* record = cxx::type_cast<cxx::ClassType>(type)) {
     for (auto* base : record->definition()->baseClasses()) {
-      add_element(source_object_type(base));
+      add_element(source_object_type(base), base);
     }
     for (auto* member : record->definition()->members()) {
       auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member);
       if (field && !field->isStatic()) {
-        add_element(field->type());
+        add_element(field->type(), field);
       }
     }
   } else {
     while (initializers) {
-      add_element(unit_.typeTraits().get_element_type(type));
+      add_element(unit_.typeTraits().get_element_type(type), nullptr);
     }
   }
 }
@@ -192,6 +212,9 @@ void ObjectIdentity::bind(cxx::Symbol* binding, cxx::ExpressionAST* initializer,
       types_.unqualified(source->type) ==
           types_.unqualified(source_object_type(binding))) {
     join(binding, source);
+    if (members_ && types_.requires_value_transport(source->type)) {
+      members_->bindings.emplace_back(add(binding), binding);
+    }
   }
   if (storage || types_.has_volatile_subobject(source_object_type(binding))) {
     require_storage(binding);
@@ -211,7 +234,90 @@ void ObjectIdentity::returned(cxx::FunctionSymbol* function,
   }
 }
 
+std::span<const ObjectIdentity::MemberConstruction>
+ObjectIdentity::member_constructions() const {
+  return members_ ? std::span<const MemberConstruction>(members_->constructions)
+                  : std::span<const MemberConstruction>{};
+}
+
+const Destination* ObjectIdentity::aggregate_destination(
+    cxx::ExpressionAST* initializer) const {
+  if (!members_) {
+    return nullptr;
+  }
+  auto identity = identities_.find(initializer);
+  if (identity == identities_.end()) {
+    return nullptr;
+  }
+  auto owner = members_->destinations.find(root(identity->second));
+  return owner == members_->destinations.end() ? nullptr : &owner->second;
+}
+
+const ObjectIdentity::MemberConstruction* ObjectIdentity::member_construction(
+    cxx::ExpressionAST* initializer) const {
+  if (!members_) {
+    return nullptr;
+  }
+  auto found = members_->by_initializer.find(initializer);
+  return found == members_->by_initializer.end()
+             ? nullptr
+             : &members_->constructions[found->second];
+}
+
+void ObjectIdentity::finish_members() {
+  struct Owner {
+    // Construction group rooted at this subobject.
+    size_t group;
+    // Named source object that supplies final storage.
+    cxx::Symbol* binding;
+    // First component of the subobject within that binding.
+    size_t offset;
+  };
+  std::unordered_map<size_t, std::vector<const Element*>> children;
+  for (const auto& child : members_->elements) {
+    children[root(child.parent)].push_back(&child);
+  }
+  std::vector<Owner> owners;
+  for (auto [group, binding] : members_->bindings) {
+    owners.push_back({root(group), binding, 0});
+  }
+  while (!owners.empty()) {
+    const auto owner = owners.back();
+    owners.pop_back();
+    auto found = children.find(owner.group);
+    members_->destinations.emplace(
+        owner.group, Destination{owner.binding, owner.offset, nullptr});
+    if (found == children.end()) {
+      continue;
+    }
+    for (auto* edge : found->second) {
+      const size_t offset = owner.offset + edge->offset;
+      if (types_.requires_value_transport(edge->initializer->type)) {
+        owners.push_back({root(edge->child), owner.binding, offset});
+      } else {
+        members_->by_initializer.emplace(edge->initializer,
+                                         members_->constructions.size());
+        members_->constructions.push_back(
+            {owner.binding, offset, edge->initializer});
+      }
+    }
+    children.erase(found);
+  }
+  // Unnamed result objects still use the owning callable's complete-object
+  // identity. Only a resolved local can supply independent member lifetimes.
+  for (const auto& [parent, edges] : children) {
+    for (auto* edge : edges) {
+      join(parent, edge->child);
+    }
+  }
+  members_->elements.clear();
+  members_->bindings.clear();
+}
+
 void ObjectIdentity::finish() {
+  if (members_) {
+    finish_members();
+  }
   for (auto& [key, index] : identities_) {
     index = root(index);
   }
