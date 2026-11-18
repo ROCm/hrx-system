@@ -16,7 +16,8 @@ unsigned read(const Record* record) { return record->value; }
 
 // ====
 struct Empty {};
-struct Record { [[no_unique_address]] Empty empty; unsigned value; };
+struct Record { Empty empty [[no_unique_address]]; unsigned value; };
+static_assert(sizeof(Record) == sizeof(unsigned));
 // ERROR@+1: LOWERING/059 "record storage requires named fields without bitfields or no_unique_address"
 unsigned read(const Record* record) { return record->value; }
 
