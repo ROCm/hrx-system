@@ -2523,32 +2523,71 @@ or cross a kernel launch.
 
 These restrictions describe the harness body. The implementation under test
 can use the importer's ordinary control flow, helpers, templates and vector
-operations wherever the selected target supports them. Its definition must be
-available in the translation unit, directly or through an include. The current
-shared testbench materializes case inputs, executes ordinary calls through the
-IREE VM function provider and native launches through the HAL provider, then
-checks observations. Executing control flow inside the harness itself requires a
+operations wherever the selected target supports them. Ordinary function subjects
+can be declared in a shared header and defined in a separate library. Kernel
+subjects still require their definitions in the translation unit. The shared
+testbench materializes case inputs, executes ordinary calls through the IREE VM
+function provider and native launches through the HAL provider, then checks
+observations. Executing control flow inside the harness itself requires a
 shared executor for complete `check.case` bodies; no C++-specific interpreter is
 involved.
 
-Build-integrated checks use the same source file:
+Build-integrated C++ checks use an explicit source component:
 
 ```python
-load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load("//loom/build_tools/bazel:defs.bzl", "loom_cxx_library", "loom_test", "loom_test_module")
 load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
+
+loom_cxx_library(
+    name = "arithmetic",
+    srcs = ["arithmetic.cxx", "private.h"],
+    hdrs = ["arithmetic.h"],
+    copts = ["std=c++23"],
+    defines = ["COUNT=8"],
+    includes = ["include"],
+)
+
+loom_cxx_library(
+    name = "checks",
+    testonly = True,
+    srcs = ["checks.cxx"],
+    deps = [":arithmetic"],
+)
+
+loom_test_module(
+    name = "checks_module",
+    root_library = ":checks",
+)
 
 loom_test(
     name = "checks_test",
-    srcs = ["checks.cxx"],
+    module = ":checks_module",
     execution_profiles = [VM_REFERENCE_PROFILE],
 )
 ```
 
-List included project headers in `data`. `inputopts` accepts provider-scoped
-settings such as `["cxx:std=c++23 D=COUNT=8 I=include"]`. `loom_test` imports and
-links its root-owned cases, runs correctness checks, and runs a single-iteration
-benchmark smoke check. Dependency libraries retain their own tests; linking one
-does not implicitly add its cases to the root's suite.
+`loom_cxx_library` imports each translation unit once and merges its own units
+into a relocatable `.loombc`. Its `deps` remain independent link inputs. Public
+`hdrs`, `defines`, and package-relative `includes` propagate to C++ dependents;
+headers in `srcs`, `local_defines`, and `copts` stay local. Header-only components
+forward that interface without emitting a module. `copts` uses the importer's
+`key=value` options, such as `std=c++23` or `fp-model=fast`, rather than host
+compiler flags. Generated headers and configurable source lists follow the
+same declared-input contract. Runtime fixtures belong in `data` and do not
+become importer inputs.
+
+The rule label supplies the logical module name. Normal builds strip diagnostic
+locations and source presentation; `-c dbg` retains them. A comment-only header
+edit reruns import, but unchanged bytecode does not invalidate downstream
+execution tests. The same distinction holds between private header edits, which
+reimport their owner, and public header edits, which also reimport consumers.
+
+`loom_library` accepts Loom text and bytecode. Loom-authored checks can
+consume a C++ implementation through
+`loom_test_module(srcs = ["checks.loom"], deps = [":cpp"])`. `loom_test` consumes the
+linked test module for correctness and a single-iteration benchmark smoke
+check. Dependency libraries retain their own tests; linking one does not add
+its cases to the root's suite.
 
 ## Source input and diagnostic ownership
 

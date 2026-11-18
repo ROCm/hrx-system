@@ -29,14 +29,11 @@ load(
 )
 
 _LOOM_BENCHMARK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:benchmark_toolchain_type")
-_LOOM_CXX_IMPORT_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:cxx_import_toolchain_type")
 _LOOM_FORMAT_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:format_toolchain_type")
 _LOOM_LINK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:link_toolchain_type")
 _LOOM_TEST_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:test_toolchain_type")
 
-_CXX_SOURCE_SUFFIXES = [".c", ".cc", ".cpp", ".cxx", ".cxx-test"]
 _LOOM_SOURCE_SUFFIXES = [".loom", ".loom-test", ".loombc"]
-_SOURCE_FORMATS = ["cxx", "loom", "loombc"]
 
 _LOOM_BENCHMARK_SMOKE_ARGS = [
     "--iterations=1",
@@ -161,185 +158,54 @@ def loom_execution_profile(
         target_family = target_family,
     )
 
-def _source_format(file, input_format):
-    if input_format:
-        if input_format not in _SOURCE_FORMATS:
-            fail("%s has unsupported source format %r; import it to Loom before linking" % (file.path, input_format))
-        return input_format
-    for suffix in _CXX_SOURCE_SUFFIXES:
-        if file.path.endswith(suffix):
-            return "cxx"
+def _source_format(file):
     for suffix in _LOOM_SOURCE_SUFFIXES:
         if file.path.endswith(suffix):
             return "loombc" if suffix == ".loombc" else "loom"
     if not file.extension:
         return "loom"
-    fail("%s has no Loom module or C/C++ source format" % file.path)
+    fail("%s is not a Loom module; C/C++ sources belong in loom_cxx_library" % file.path)
 
-def _cxx_input_options(ctx):
-    cxx_options = None
-    for value in ctx.attr.inputopts:
-        expanded = ctx.expand_location(value, targets = ctx.attr.srcs + ctx.attr.data)
-        separator = expanded.find(":")
-        if separator < 0:
-            fail("input options require 'format:options', got %r" % value)
-        name = expanded[:separator]
-        options = expanded[separator + 1:]
-        if name != "cxx":
-            fail("source format %r has no importer options" % name)
-        if cxx_options != None:
-            fail("duplicate input options for 'cxx'")
-        cxx_options = options
-    return cxx_options
-
-def _declare_cxx_import(ctx, source, ordinal, options, tool):
-    output = ctx.actions.declare_file(
-        "%s.imports/%d-%s.loombc" % (ctx.label.name, ordinal, source.basename),
-    )
-    args = ctx.actions.args()
-    args.add(source)
-    args.add("--to=bc")
-    args.add("--module-name=%s/unit%d" % (ctx.label, ordinal))
-    if ctx.var["COMPILATION_MODE"] != "dbg":
-        args.add("--strip-debug")
-    args.add("--output=%s" % output.path)
-    if options != None:
-        args.add("--options=%s" % options)
-    ctx.actions.run(
-        arguments = [args],
-        executable = tool.files_to_run,
-        inputs = depset(direct = [source] + ctx.files.data),
-        mnemonic = "LoomCxxImport",
-        outputs = [output],
-        progress_message = "Importing C/C++ source %s" % source.path,
-    )
-    return output
-
-def _loom_library_impl(ctx, cxx_import_tool = None):
+def _loom_library_impl(ctx):
     if not ctx.files.srcs and not ctx.attr.deps:
         fail("%s requires at least one source across srcs and deps" % ctx.label)
-    if ctx.attr.input_format and ctx.attr.input_format not in _SOURCE_FORMATS:
-        fail("unsupported source format %r; import it to Loom before linking" % ctx.attr.input_format)
     dependency_infos = [dep[LoomLibraryInfo] for dep in ctx.attr.deps]
-    cxx_options = _cxx_input_options(ctx)
-    source_formats = [
-        _source_format(source, ctx.attr.input_format)
-        for source in ctx.files.srcs
-    ]
-    if cxx_options != None and "cxx" not in source_formats:
-        fail("C/C++ input options require at least one C/C++ source")
-    normalized_sources = []
-    normalized_formats = []
-    for ordinal, source in enumerate(ctx.files.srcs):
-        if source_formats[ordinal] == "cxx":
-            if cxx_import_tool == None:
-                fail("%s requires the C/C++ importer" % source.path)
-            normalized_sources.append(_declare_cxx_import(
-                ctx,
-                source,
-                ordinal,
-                cxx_options,
-                cxx_import_tool,
-            ))
-            normalized_formats.append("loombc")
-        else:
-            normalized_sources.append(source)
-            normalized_formats.append(source_formats[ordinal])
-    link_input_format = ctx.attr.input_format if ctx.attr.input_format in ["loom", "loombc"] else ""
-    link_tool = ctx.toolchains[_LOOM_LINK_TOOLCHAIN_TYPE].tool
+    source_records = [struct(
+        file = source,
+        format = "",
+        options = (),
+        inputs = depset(),
+        normalized_file = source,
+        normalized_format = _source_format(source),
+    ) for source in ctx.files.srcs]
     artifacts = loom_linking.declare_relocatable_module(
         ctx = ctx,
-        sources = normalized_sources,
-        input_format = link_input_format,
+        sources = ctx.files.srcs,
         dependency_infos = dependency_infos,
         output_stem = ctx.label.name,
         mnemonic = "LoomLibrary",
         progress_message = "Linking Loom library %s" % ctx.label,
-        tool = link_tool,
+        tool = ctx.toolchains[_LOOM_LINK_TOOLCHAIN_TYPE].tool,
     )
-
     return [
         DefaultInfo(
             files = depset([artifacts.module]),
             runfiles = ctx.runfiles(files = ctx.files.data).merge_all([target[DefaultInfo].default_runfiles for target in ctx.attr.data + ctx.attr.deps]),
         ),
-        OutputGroupInfo(
-            dependency_reports = depset([artifacts.dependency_report]),
-        ),
-        loom_linking.library_info(
-            ctx.label,
-            artifacts.module,
-            [struct(
-                file = source,
-                format = "loombc" if ctx.attr.input_format == "loom" and source.extension == "loombc" else ctx.attr.input_format,
-                options = tuple(ctx.attr.inputopts),
-                inputs = depset(),
-                normalized_file = normalized_source,
-                normalized_format = normalized_format,
-            ) for source, normalized_source, normalized_format in zip(ctx.files.srcs, normalized_sources, normalized_formats)],
-            ctx.files.data,
-            dependency_infos,
-        ),
+        OutputGroupInfo(dependency_reports = depset([artifacts.dependency_report])),
+        loom_linking.library_info(ctx.label, artifacts.module, source_records, ctx.files.data, dependency_infos),
     ]
 
-def _loom_module_library_impl(ctx):
-    return _loom_library_impl(ctx)
-
-def _loom_cxx_library_impl(ctx):
-    return _loom_library_impl(ctx, ctx.toolchains[_LOOM_CXX_IMPORT_TOOLCHAIN_TYPE].tool)
-
-def _loom_library_attrs():
-    return {
-        "data": attr.label_list(
-            allow_files = True,
-            doc = "Declared source-admission inputs, such as included headers.",
-        ),
-        "deps": attr.label_list(
-            providers = [LoomLibraryInfo],
-            doc = "Direct Loom library dependencies kept as separate modules.",
-        ),
-        "input_format": attr.string(
-            doc = "Source provider override; empty selects each source by filename. Generated or configurable C/C++ sources require cxx so analysis resolves the importer toolchain.",
-        ),
-        "inputopts": attr.string_list(
-            doc = "Provider-scoped options (format:options), with location expansion.",
-        ),
-        "srcs": attr.label_list(
-            allow_files = True,
-            doc = "Ordered Loom modules or C/C++ translation units. C/C++ is imported before linking.",
-        ),
-    }
-
 _loom_module_library = rule(
-    implementation = _loom_module_library_impl,
-    attrs = _loom_library_attrs(),
+    implementation = _loom_library_impl,
+    attrs = {
+        "data": attr.label_list(allow_files = True, doc = "Runtime fixtures owned by this component."),
+        "deps": attr.label_list(providers = [LoomLibraryInfo], doc = "Direct Loom library dependencies kept as separate modules."),
+        "srcs": attr.label_list(allow_files = True, doc = "Ordered Loom text or bytecode modules."),
+    },
     doc = "Merges Loom text or bytecode into one relocatable module.",
     toolchains = [_LOOM_LINK_TOOLCHAIN_TYPE],
 )
-
-_loom_cxx_library = rule(
-    implementation = _loom_cxx_library_impl,
-    attrs = _loom_library_attrs(),
-    doc = "Imports C/C++ sources and merges all resulting Loom modules.",
-    toolchains = [
-        _LOOM_CXX_IMPORT_TOOLCHAIN_TYPE,
-        _LOOM_LINK_TOOLCHAIN_TYPE,
-    ],
-)
-
-def _label_has_suffix(label, suffixes):
-    value = str(label)
-    return any([value.endswith(suffix) for suffix in suffixes])
-
-def _select_library_rule(srcs, input_format):
-    if input_format:
-        return _loom_cxx_library if input_format == "cxx" else _loom_module_library
-    if type(srcs) not in ["list", "tuple"]:
-        return _loom_module_library
-    for source in srcs:
-        if _label_has_suffix(source, _CXX_SOURCE_SUFFIXES):
-            return _loom_cxx_library
-    return _loom_module_library
 
 def _loom_test_module_impl(ctx):
     root_library = ctx.attr.root_library[LoomLibraryInfo]
@@ -872,8 +738,6 @@ def _declare_library(
         srcs,
         deps,
         data,
-        input_format,
-        inputopts,
         execution_profiles,
         kernel_targets,
         benchmark_smoke,
@@ -882,14 +746,11 @@ def _declare_library(
         tags,
         visibility,
         target_compatible_with = []):
-    library_rule = _select_library_rule(srcs, input_format)
-    library_rule(
+    _loom_module_library(
         name = name,
         srcs = srcs,
         deps = deps,
         data = data,
-        input_format = input_format,
-        inputopts = inputopts,
         tags = tags,
         testonly = module_testonly,
         target_compatible_with = target_compatible_with,
@@ -983,8 +844,6 @@ def loom_library(
         srcs = [],
         deps = [],
         data = [],
-        input_format = "",
-        inputopts = [],
         tags = [],
         visibility = None,
         target_compatible_with = []):
@@ -996,9 +855,9 @@ def loom_library(
     transitive closure. The ``dependency_reports`` output group contains the
     schema-versioned JSON analysis report.
 
-    Bytecode uses the rule label as its logical module name and omits diagnostic
-    source metadata and presentation. Nonsemantic source edits therefore stop
-    at the imported/merged artifact when its bytes remain unchanged.
+    Bytecode uses the rule label as its logical module name. Outside ``-c dbg``,
+    it omits diagnostic source metadata and presentation. Nonsemantic source
+    edits therefore stop at the merged artifact when its bytes remain unchanged.
     """
     package_attributes = _apply_package_policy(
         name,
@@ -1010,8 +869,6 @@ def loom_library(
         srcs = srcs,
         deps = deps,
         data = data,
-        input_format = input_format,
-        inputopts = inputopts,
         execution_profiles = [],
         kernel_targets = [],
         benchmark_smoke = False,
@@ -1056,22 +913,17 @@ def _declare_test_module(
         srcs,
         deps,
         data,
-        input_format,
-        inputopts,
         tags,
         visibility,
         target_compatible_with):
     if not srcs:
         fail("%s requires at least one authored test source" % name)
     library_name = name + "_library"
-    library_rule = _select_library_rule(srcs, input_format)
-    library_rule(
+    _loom_module_library(
         name = library_name,
         srcs = srcs,
         deps = deps,
         data = data,
-        input_format = input_format,
-        inputopts = inputopts,
         tags = tags + ["manual"],
         testonly = True,
         visibility = ["//visibility:private"],
@@ -1094,8 +946,6 @@ def loom_test_module(
         deps = [],
         data = [],
         root_library = None,
-        input_format = "",
-        inputopts = [],
         tags = [],
         visibility = None,
         target_compatible_with = []):
@@ -1119,8 +969,6 @@ def loom_test_module(
       deps: Libraries available only for dependency resolution.
       data: Runtime fixtures retained by the source owner.
       root_library: Existing library whose checks become roots. Exclusive with srcs.
-      input_format: Source provider override.
-      inputopts: Provider-scoped options for direct sources.
       tags: Additional tags for the source module and its source checks.
       visibility: Bazel visibility of the reusable module.
       target_compatible_with: Source-provider build configuration constraints.
@@ -1131,8 +979,8 @@ def loom_test_module(
         target_compatible_with,
     )
     if root_library:
-        if srcs or input_format or inputopts:
-            fail("%s root_library is exclusive with srcs and source options" % name)
+        if srcs:
+            fail("%s root_library is exclusive with srcs" % name)
         _loom_test_module(
             name = name,
             root_library = root_library,
@@ -1147,8 +995,6 @@ def loom_test_module(
         _declare_test_module(
             name = name,
             srcs = srcs,
-            input_format = input_format,
-            inputopts = inputopts,
             deps = deps,
             data = data,
             tags = package_attributes.tags,
@@ -1174,8 +1020,6 @@ def loom_test(
         srcs = [],
         deps = [],
         data = [],
-        input_format = "",
-        inputopts = [],
         module = None,
         args = [],
         config = {},
@@ -1218,12 +1062,10 @@ def loom_test(
     Args:
       name: Name of the suite containing source, compilation, and execution checks.
       srcs: Authored source modules jointly owning the test module.
-      data: Headers and runtime fixtures available during import and execution.
-      input_format: Source provider override, or empty for filename selection.
-      inputopts: Provider-scoped options, such as ``cxx:std=c++20``.
+      data: Runtime fixtures owned by the source component.
       deps: Loom libraries available only for dependency resolution.
       module: Existing loom_test_module to qualify without importing or linking
-          again. Exclusive with srcs, deps, data, input_format, and inputopts;
+          again. Exclusive with srcs, deps, and data;
           the source owner retains those inputs, its source checks, and its
           runtime fixtures.
       args: Additional arguments passed to the correctness runner.
@@ -1246,8 +1088,8 @@ def loom_test(
       visibility: Bazel visibility of the generated test target.
       target_compatible_with: Build configuration constraints for all actions.
     """
-    if module and (srcs or deps or data or input_format or inputopts):
-        fail("%s module is exclusive with source and import options" % name)
+    if module and (srcs or deps or data):
+        fail("%s module is exclusive with source declarations" % name)
     if not module and not srcs:
         fail("%s requires srcs or a test module" % name)
     if not execution_profiles and not compile_targets:
@@ -1271,8 +1113,6 @@ def loom_test(
             srcs = srcs,
             deps = deps,
             data = data,
-            input_format = input_format,
-            inputopts = inputopts,
             tags = tags + ["manual"],
             visibility = ["//visibility:private"],
             target_compatible_with = target_compatible_with,
@@ -1334,8 +1174,6 @@ def loom_kernel_library(
         srcs,
         deps = [],
         data = [],
-        input_format = "",
-        inputopts = [],
         execution_profiles = [],
         targets = [],
         benchmark_smoke = True,
@@ -1362,8 +1200,6 @@ def loom_kernel_library(
         srcs = srcs,
         deps = deps,
         data = data,
-        input_format = input_format,
-        inputopts = inputopts,
         execution_profiles = execution_profiles,
         kernel_targets = targets,
         benchmark_smoke = benchmark_smoke,

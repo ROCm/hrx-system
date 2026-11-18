@@ -366,38 +366,13 @@ class LoomBuildFileFunctions(
         if not self._should_skip_target(tags=tags):
             raise NotImplementedError("loom_model requires the skip-bazel_to_cmake tag")
 
-    def loom_library(
-        self,
-        name,
-        srcs=None,
-        deps=None,
-        data=None,
-        input_format="",
-        inputopts=None,
-        tags=None,
-        target_compatible_with=None,
-        **kwargs,
-    ):
-        if self._should_skip_target(tags=tags, **kwargs):
-            return
-        self._loom_module_targets.add(self._current_target_label(name))
-        blocks = [
-            self._convert_string_arg_block("NAME", name, quote=False),
-            self._convert_loom_module_inputs("SRCS", srcs),
-            self._convert_loom_module_inputs("LIBRARIES", deps),
-            self._convert_data_list_block(data),
-            self._convert_string_arg_block("INPUT_FORMAT", input_format or None),
-            self._convert_string_list_block(
-                "INPUTOPTS", self._convert_location_args(inputopts), sort=False
+    def loom_library(self, target_compatible_with=None, **kwargs):
+        super().loom_library(
+            target_compatible_with=self._apply_loom_target_compatible_with(
+                target_compatible_with
             ),
-            "  MODE merge\n  OUTPUT_FORMAT bc\n  STRICT_DEPS\n",
-        ]
-        target_compatible_with = self._apply_loom_target_compatible_with(
-            target_compatible_with
+            **kwargs,
         )
-        self._emit_platform_guard_begin(target_compatible_with)
-        self._converter.body += "loom_module(\n" + "".join(blocks) + ")\n\n"
-        self._emit_platform_guard_end(target_compatible_with)
 
     def loom_cxx_library(self, target_compatible_with=None, **kwargs):
         super().loom_cxx_library(
@@ -487,16 +462,14 @@ class LoomBuildFileFunctions(
         root_library=None,
         deps=None,
         data=None,
-        input_format="",
-        inputopts=None,
         tags=None,
         target_compatible_with=None,
         **kwargs,
     ):
         if self._should_skip_target(tags=tags, **kwargs):
             return
-        if root_library and (srcs or deps or data or input_format or inputopts):
-            raise ValueError(f"{name}: root_library owns sources and dependencies")
+        if root_library and srcs:
+            raise ValueError(f"{name}: root_library is exclusive with srcs")
         if not (srcs or root_library):
             raise ValueError(f"{name} requires sources or a root library")
         self._loom_module_targets.add(self._current_target_label(name))
@@ -512,10 +485,6 @@ class LoomBuildFileFunctions(
             self._convert_loom_module_inputs("SRCS", srcs),
             self._convert_loom_module_inputs("LIBRARIES", deps),
             self._convert_data_list_block(data),
-            self._convert_string_arg_block("INPUT_FORMAT", input_format or None),
-            self._convert_string_list_block(
-                "INPUTOPTS", self._convert_location_args(inputopts), sort=False
-            ),
         ]
         self._emit_platform_guard_begin(target_compatible_with)
         self._converter.body += "loom_test_module(\n" + "".join(blocks) + ")\n\n"
@@ -527,8 +496,6 @@ class LoomBuildFileFunctions(
         srcs=None,
         deps=None,
         data=None,
-        input_format="",
-        inputopts=None,
         module=None,
         args=None,
         config=None,
@@ -547,10 +514,8 @@ class LoomBuildFileFunctions(
             return
         self._check_no_unhandled_kwargs("loom_test", kwargs)
         del size, visibility
-        if module and (srcs or deps or data or input_format or inputopts):
-            raise ValueError(
-                f"{name} module is exclusive with source and import options"
-            )
+        if module and (srcs or deps or data):
+            raise ValueError(f"{name} module is exclusive with source declarations")
         if not module and not srcs:
             raise ValueError(f"{name} requires srcs or a test module")
         if not execution_profiles and not compile_targets:
@@ -569,8 +534,6 @@ class LoomBuildFileFunctions(
                 srcs=srcs,
                 deps=deps,
                 data=data,
-                input_format=input_format,
-                inputopts=inputopts,
                 target_compatible_with=target_compatible_with,
             )
         self._emit_platform_guard_begin(target_compatible_with)

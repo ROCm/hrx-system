@@ -216,8 +216,6 @@ class LoomBinaryBuildFileFunctions:
         srcs=None,
         deps=None,
         data=None,
-        input_format="",
-        inputopts=None,
         tags=None,
         target_compatible_with=None,
         visibility=None,
@@ -229,13 +227,12 @@ class LoomBinaryBuildFileFunctions:
         self._register_loom_module_target(name)
         blocks = [
             self._convert_string_arg_block("NAME", name, quote=False),
+            self._convert_string_arg_block(
+                "COMPONENT", self._current_target_label(name)
+            ),
             self._convert_loom_module_inputs("SRCS", srcs),
             self._convert_loom_module_inputs("LIBRARIES", deps),
             self._convert_data_list_block(data),
-            self._convert_string_arg_block("INPUT_FORMAT", input_format or None),
-            self._convert_string_list_block(
-                "INPUTOPTS", self._convert_location_args(inputopts), sort=False
-            ),
             "  MODE merge\n  OUTPUT_FORMAT bc\n  STRICT_DEPS\n",
         ]
         self._emit_platform_guard_begin(target_compatible_with)

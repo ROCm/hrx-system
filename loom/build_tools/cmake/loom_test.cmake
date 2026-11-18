@@ -11,24 +11,25 @@ function(loom_test_module)
     return()
   endif()
   cmake_parse_arguments(
-    _RULE "" "NAME;ROOT_LIBRARY;INPUT_FORMAT" "SRCS;LIBRARIES;DATA;INPUTOPTS" ${ARGN}
+    _RULE "" "NAME;ROOT_LIBRARY" "SRCS;LIBRARIES;DATA" ${ARGN}
   )
   if(_RULE_UNPARSED_ARGUMENTS)
     message(FATAL_ERROR "Unknown loom_test_module arguments: ${_RULE_UNPARSED_ARGUMENTS}")
   endif()
+  iree_package_path(_PACKAGE_PATH)
+  set(_COMPONENT "//${_PACKAGE_PATH}:${_RULE_NAME}")
   if(_RULE_ROOT_LIBRARY)
-    if(_RULE_SRCS OR _RULE_LIBRARIES OR _RULE_DATA OR _RULE_INPUT_FORMAT OR _RULE_INPUTOPTS)
-      message(FATAL_ERROR "loom_test_module ROOT_LIBRARY owns sources and dependencies")
+    if(_RULE_SRCS)
+      message(FATAL_ERROR "loom_test_module ROOT_LIBRARY is exclusive with SRCS")
     endif()
   else()
     set(_RULE_ROOT_LIBRARY "::${_RULE_NAME}_library")
     loom_module(
       NAME "${_RULE_NAME}_library"
+      COMPONENT "${_COMPONENT}_library"
       SRCS ${_RULE_SRCS}
       LIBRARIES ${_RULE_LIBRARIES}
       DATA ${_RULE_DATA}
-      INPUT_FORMAT "${_RULE_INPUT_FORMAT}"
-      INPUTOPTS ${_RULE_INPUTOPTS}
       MODE merge
       OUTPUT_FORMAT bc
       STRICT_DEPS
@@ -36,6 +37,8 @@ function(loom_test_module)
   endif()
   loom_module(
     NAME "${_RULE_NAME}"
+    COMPONENT "${_COMPONENT}"
+    DATA ${_RULE_DATA}
     SRCS "${_RULE_ROOT_LIBRARY}"
     LIBRARIES ${_RULE_LIBRARIES}
     MODE link

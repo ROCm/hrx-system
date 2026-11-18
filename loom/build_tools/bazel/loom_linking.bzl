@@ -63,8 +63,7 @@ def _declare_relocatable_module(
         output_stem,
         mnemonic,
         progress_message,
-        tool,
-        input_format = ""):
+        tool):
     dependencies = _collect_dependency_modules(dependency_infos)
     module = ctx.actions.declare_file(output_stem + ".loombc")
     dependency_report = ctx.actions.declare_file(
@@ -80,8 +79,6 @@ def _declare_relocatable_module(
     if ctx.var["COMPILATION_MODE"] != "dbg":
         args.add("--strip-debug")
     args.add("--output=%s" % module.path)
-    if input_format:
-        args.add("--input-format=%s" % input_format)
     args.add_all(sources)
     args.add_all(dependencies.direct, format_each = "--library=%s")
     args.add_all(

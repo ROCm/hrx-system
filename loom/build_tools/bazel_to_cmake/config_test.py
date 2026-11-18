@@ -482,6 +482,8 @@ loom_library(
             """loom_module(
   NAME
     consumer
+  COMPONENT
+    "//loom/build_tools/bazel_to_cmake/testdata/configured:consumer"
   SRCS
     "${PROJECT_SOURCE_DIR}/loom/build_tools/bazel_to_cmake/testdata/configured/first.loom"
     "${PROJECT_SOURCE_DIR}/loom/build_tools/bazel_to_cmake/testdata/configured/second.loom"
