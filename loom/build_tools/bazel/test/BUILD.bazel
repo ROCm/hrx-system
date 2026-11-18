@@ -20,6 +20,7 @@ load(
     "loom_kernel_binary",
     "loom_kernel_library",
     "loom_library",
+    "loom_model",
     "loom_module",
     "loom_target_profile",
     "loom_target_set",
@@ -138,6 +139,7 @@ loom_cxx_library(
         "model_provider.h",
         ":cxx_config",
     ],
+    data = ["model_fixture.txt"],
     defines = ["MODEL_BIAS=7"],
     includes = ["."],
     tags = ["manual"],
@@ -150,7 +152,6 @@ loom_cxx_library(
         "model_provider.cxx",
     ],
     copts = ["fp-model=fast"],
-    data = ["model_fixture.txt"],
     local_defines = ["MODEL_LOCAL_BIAS=7"],
     tags = ["manual"],
     deps = [":cxx_headers"],
@@ -188,6 +189,52 @@ loom_test(
     execution_profiles = [REFERENCE_PROFILE],
     module = ":cxx_library_check_module",
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+[
+    loom_model(
+        name = "cxx_model_" + encoding,
+        testonly = True,
+        card = "cxx_model.json",
+        encoding = encoding,
+        inputs = [":cxx_library_check_source"],
+        model_name = "cxx-library",
+        preset = "check",
+        programs = "source",
+        target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    )
+    for encoding in [
+        "preserve",
+        "bc",
+        "text",
+    ]
+]
+
+py_test(
+    name = "cxx_model_test",
+    size = "small",
+    srcs = ["cxx_model_test.py"],
+    args = [
+        "$(rootpath //loom/src/loom/tools/loom-import-cxx)",
+        "$(rootpath //loom/src/loom/tools/loom-link)",
+        "$(rootpath //loom/src/loom/tools/loom-test)",
+    ] + ["$(rootpath :cxx_model_" + encoding + ")" for encoding in [
+        "preserve",
+        "bc",
+        "text",
+    ]],
+    data = [
+        ":cxx_model_bc",
+        ":cxx_model_preserve",
+        ":cxx_model_text",
+        "//loom/src/loom/tools/loom-import-cxx",
+        "//loom/src/loom/tools/loom-link",
+        "//loom/src/loom/tools/loom-test",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/execute:vm_iree_vm",
+    ]),
 )
 
 loom_kernel_binary(

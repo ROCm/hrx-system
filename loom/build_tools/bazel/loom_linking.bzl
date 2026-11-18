@@ -11,7 +11,7 @@ _LOOM_LINK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:link_toolchain_type"
 LoomLibraryInfo = provider(
     doc = "A component's optional relocatable module and independent dependencies.",
     fields = {
-        "component": "Owned module, ordered source admission records (file, format, options, inputs, normalized_file, normalized_format), and runtime data.",
+        "component": "Owned module, ordered source admission records (file, format, options, inputs, normalized_file, normalized_format), and runtime data depset.",
         "link_modules": "Direct linker inputs exposed by this component; header-only components forward their declared dependencies.",
         "module": "Owned relocatable Loom bytecode module, or None for a header-only component.",
         "transitive_components": "Preorder depset of dependency components, excluding this library.",
@@ -25,12 +25,17 @@ def _library_info(label, module, sources, data, dependency_infos):
             label = label,
             module = module,
             sources = tuple(sources),
-            data = tuple(data),
+            # Header-only code is instantiated by its consumer. Its runtime
+            # files follow that code; module-bearing dependencies own theirs.
+            data = depset(
+                direct = data,
+                transitive = [info.component.data for info in dependency_infos if info.module == None],
+            ),
         ),
         module = module,
         link_modules = depset([module]) if module != None else depset(transitive = [info.link_modules for info in dependency_infos]),
         transitive_components = depset(
-            direct = [info.component for info in dependency_infos],
+            direct = [info.component for info in dependency_infos if info.module != None],
             transitive = [info.transitive_components for info in dependency_infos],
             order = "preorder",
         ),

@@ -45,6 +45,7 @@ def _program_composition(ctx):
             files = _mapped_artifacts(ctx.attr.files),
             data = _mapped_artifacts(ctx.attr.data),
             normalization_formats = {},
+            compile_inputs = [],
             programs = {},
         )
     if ctx.attr.files or ctx.attr.data:
@@ -53,6 +54,9 @@ def _program_composition(ctx):
         fail("provider composition requires an explicit programs key")
     primary = [target[LoomLibraryInfo] for target in ctx.attr.inputs]
     libraries = [target[LoomLibraryInfo] for target in ctx.attr.libraries]
+    for info in primary + libraries:
+        if info.module == None:
+            fail("%s: model provider %s must own a module; header-only libraries belong in a provider's deps" % (ctx.label, info.component.label))
     primary_labels = {info.component.label: True for info in primary}
     dependencies = depset(
         direct = [info.component for info in libraries],
@@ -67,17 +71,19 @@ def _program_composition(ctx):
     files = {}
     normalization_formats = {}
     data = {}
+    runtime_paths = {}
     providers = {}
     for role, components in groups:
         for component in components:
             if component.label.workspace_name != ctx.label.workspace_name:
                 fail("%s: external repository provider %s is not supported in model composition" % (ctx.label, component.label))
             auxiliary = []
-            for file in component.data:
+            for file in component.data.to_list():
                 path = _repository_path(ctx, file)
                 if path in data and data[path] != file:
                     fail("conflicting model auxiliary file: %s" % path)
                 data[path] = file
+                runtime_paths[path] = True
                 auxiliary.append(path)
             source_records = component.sources if ctx.attr.form == "sources" else ([struct(
                 file = component.module,
@@ -86,7 +92,7 @@ def _program_composition(ctx):
                 inputs = depset(),
                 normalized_file = component.module,
                 normalized_format = "loombc",
-            )] if component.module != None else [])
+            )])
             for source in source_records:
                 file = source.file
                 path = _repository_path(ctx, file)
@@ -117,10 +123,16 @@ def _program_composition(ctx):
                 if ctx.attr.encoding != "preserve":
                     normalization_formats[path] = source.normalized_format
                 program[role].append(provider if len(provider) > 1 else path)
+
+    # Keep the authored declaration stable across encodings, while imported
+    # providers no longer carry compile-only bytes into package/test identities.
+    compile_inputs = [path for path in data if path not in runtime_paths and path not in files] if ctx.attr.encoding != "preserve" else []
+    omitted = {path: True for path in compile_inputs}
     return struct(
         files = files,
-        data = {path: file for path, file in data.items() if path not in files},
+        data = {path: file for path, file in data.items() if path not in files and path not in omitted},
         normalization_formats = normalization_formats,
+        compile_inputs = compile_inputs,
         programs = {ctx.attr.programs: program},
     )
 
@@ -172,6 +184,7 @@ def _loom_model_impl(ctx, link_tool = None):
     ctx.actions.write(plan, json.encode({
         "assets": assets,
         "card": ctx.file.card.path,
+        "compile_inputs": composition.compile_inputs,
         "data": data,
         "encoding": ctx.attr.encoding,
         "files": files,
@@ -226,6 +239,10 @@ analysis derives the complete ordered closure with repository-relative paths.
 form selects original sources or merged modules for the complete composition.
 Sources may themselves be bytecode. Primary providers reached again as
 dependencies retain their primary role and appear only once.
+
+Preserved C++ sources carry their declared headers and import options. Normalized
+providers omit compile-only headers, while retaining runtime data, including
+runtime files owned by header-only dependencies instantiated in that component.
 
 LoomModelInfo exposes the generated inputs/libraries for card synchronization
 through cquery without executing any build action. The package action checks

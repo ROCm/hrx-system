@@ -14,7 +14,7 @@ load("//loom/build_tools/bazel:defs.bzl", "LoomModelInfo", "loom_cxx_library", "
 _PACKAGE = "loom/build_tools/bazel/test/"
 _CARD = "//loom/src/loom/serve/fixture/text:native.card.json"
 
-def _declare_composition(name, form):
+def _declare_composition(name, form, encoding = "preserve"):
     loom_library(
         name = name + "_leaf",
         srcs = ["link_kernels.loom", "dependency_checks.loom"],
@@ -24,7 +24,7 @@ def _declare_composition(name, form):
         name = name + "_primary",
         srcs = ["model_provider.cxx", "model_private.h"],
         copts = ["fp-model=fast"],
-        data = ["model_fixture.txt"],
+        data = ["model_provider.h"],
         local_defines = ["MODEL_LOCAL_BIAS=7"],
         deps = [":cxx_headers", ":" + name + "_leaf"],
         tags = ["manual"],
@@ -44,21 +44,21 @@ def _declare_composition(name, form):
         programs = "selected",
         preset = "check",
         model_name = "fixture",
-        encoding = "preserve",
+        encoding = encoding,
         tags = ["manual"],
     )
 
-def _expect_composition(env, target, form):
+def _expect_composition(env, target, form, encoding = "preserve"):
     info = target[LoomModelInfo]
     stem = target.label.name.removesuffix("_subject")
     primary = {
-        "data": [_PACKAGE + "model_fixture.txt"],
+        "data": [_PACKAGE + path for path in ["model_fixture.txt", "model_provider.h"]],
         "format": "loombc" if form == "module" else "cxx",
         "path": _PACKAGE + (stem + "_primary.loombc" if form == "module" else "model_provider.cxx"),
     }
     if form == "sources":
         primary["options"] = ["cxx:'fp-model=fast' 'D=MODEL_BIAS=7' 'D=MODEL_LOCAL_BIAS=7' 'I=../../../..' 'I=.'"]
-        primary["data"] += [_PACKAGE + path for path in ["model_provider.h", "generated/model_config.h", "model_private.h"]]
+        primary["data"] += [_PACKAGE + path for path in ["generated/model_config.h", "model_private.h"]]
     libraries = [
         {"format": "loombc", "path": _PACKAGE + stem + "_branch.loombc"},
         {"format": "loombc", "path": _PACKAGE + stem + "_leaf.loombc"},
@@ -75,7 +75,8 @@ def _expect_composition(env, target, form):
 
     # Headers accompany source publication, not already compiled bytecode.
     # A primary reached through a library is emitted once.
-    expected_files = [primary["path"]] + primary.get("data", []) + [
+    runtime_data = primary["data"] if encoding == "preserve" else [_PACKAGE + path for path in ["model_fixture.txt", "model_provider.h"]]
+    expected_files = [primary["path"]] + runtime_data + [
         item["path"] if type(item) == "dict" else item
         for item in libraries
     ]
@@ -96,6 +97,17 @@ def _test_modules(name, **kwargs):
 
 def _modules_impl(env, target):
     _expect_composition(env, target, "module")
+
+def _test_normalized_sources(name, **kwargs):
+    _declare_composition(name, "sources", "bc")
+    analysis_test(name = name, target = ":" + name + "_subject", impl = _normalized_sources_impl, **kwargs)
+
+def _normalized_sources_impl(env, target):
+    _expect_composition(env, target, "sources", "bc")
+    action = _find_action(env, target, "LoomModel")
+    _expect_generated_action_input_suffix(env, action, "model_provider.h")
+    _reject_action_input_suffix(env, action, "model_config.h")
+    _reject_action_input_suffix(env, action, "model_private.h")
 
 def _test_bytecode_is_an_original_source(name, **kwargs):
     loom_library(name = name + "_module", srcs = ["link_kernels.loom"], tags = ["manual"])
@@ -294,6 +306,7 @@ def loom_model_rules_test_suite(name):
     test_suite(name = name, tests = [
         _test_sources,
         _test_modules,
+        _test_normalized_sources,
         _test_bytecode_is_an_original_source,
         _test_external_files_fail,
         _test_conflicting_importers_fail,
