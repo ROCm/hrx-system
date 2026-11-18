@@ -338,6 +338,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/cts/util:test_main",
+        "//runtime/src/iree/hal/driver/vulkan:file_transfer_test",
         "//runtime/src/iree/testing:gtest",
     ],
 )

@@ -516,6 +516,18 @@ iree_status_t iree_hal_vulkan_queue_submit_barrier_with_action(
     const iree_hal_vulkan_queue_barriers_t* barriers,
     iree_hal_vulkan_queue_completion_action_t completion_action);
 
+// Submits already-qualified native transfers borrowed from one enclosing
+// operation. The operation array and operands stay live through the completion
+// action, which retains their owner once for the complete batch. No per-operand
+// retain or copy occurs. Native allocation/recording/submission can fail; a
+// rejected submission returns an error without invoking the action.
+iree_status_t iree_hal_vulkan_queue_submit_native_transfer(
+    iree_hal_vulkan_queue_t* queue, iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations,
+    uint32_t descriptor_set_count,
+    const iree_hal_vulkan_queue_barriers_t* barriers,
+    iree_hal_vulkan_queue_completion_action_t completion_action);
+
 // Submits a queue-ordered semaphore barrier.
 iree_status_t iree_hal_vulkan_queue_submit_barrier(
     iree_hal_vulkan_queue_t* queue,
@@ -580,20 +592,6 @@ iree_status_t iree_hal_vulkan_queue_submit_copy(
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
     iree_device_size_t length, const iree_hal_vulkan_queue_barriers_t* barriers,
     iree_hal_copy_flags_t flags);
-
-// Prepares staged file I/O for a caller-owned dependency boundary. The returned
-// action owns one resource reference, captures the file/buffer/signals, and
-// starts when invoked after the entry barriers retire. The caller releases
-// overlapping captures before invocation and releases action.resource
-// afterward.
-iree_status_t iree_hal_vulkan_queue_prepare_staged_file_transfer(
-    iree_hal_vulkan_queue_t* queue,
-    iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_memory_access_t file_access, iree_hal_file_t* file,
-    uint64_t file_offset, iree_hal_buffer_t* buffer,
-    iree_device_size_t buffer_offset, iree_device_size_t length,
-    const iree_hal_vulkan_queue_barriers_t* barriers,
-    iree_hal_vulkan_queue_completion_action_t* out_action);
 
 // Submits a direct dispatch ordered by queue semaphores.
 iree_status_t iree_hal_vulkan_queue_submit_dispatch(
