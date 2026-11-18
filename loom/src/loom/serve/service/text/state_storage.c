@@ -297,6 +297,9 @@ iree_status_t loom_serve_text_state_allocate(
     status = loom_runtime_execution_transfer(state->execution, transfer_count,
                                              transfers, &completion);
   }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_state_backing_initialize(state);
+  }
   return status;
 }
 
@@ -387,6 +390,7 @@ iree_status_t loom_serve_text_state_deinitialize(
   }
   if (iree_status_is_ok(status)) {
     loom_runtime_retirement_deinitialize(&state->retirement);
+    loom_serve_text_state_backing_deinitialize(state);
     loom_serve_text_storage_deinitialize(&state->storage);
     iree_allocator_free(state->host_allocator, state->recurrent.buffers);
     loom_runtime_block_pool_deinitialize(&state->recurrent.pool);

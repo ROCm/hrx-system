@@ -226,9 +226,8 @@ TEST_F(MemoryTest, BackingSelectionCountsActualUnionAndClearsFailedVisitors) {
     EXPECT_EQ(footprint.total_bytes, geometry.mapping_size);
     EXPECT_EQ(footprint.missing_bytes, 0u);
   }
-  loom_runtime_virtual_buffer_begin_trim(first);
-  Keep(first, high, 1);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(first));
+
+  IREE_ASSERT_OK(Trim(first, 0, high));
   EXPECT_FALSE(loom_runtime_virtual_buffer_is_backed(first, 0, 1));
   EXPECT_TRUE(loom_runtime_virtual_buffer_is_backed(first, high, 1));
   RoundTrip(loom_runtime_virtual_buffer_handle(first), high, 0x12345678);

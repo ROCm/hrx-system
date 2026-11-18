@@ -25,11 +25,9 @@ typedef struct loom_runtime_backing_entry_t {
   iree_device_size_t physical_offset;
   // Whether physical is currently mapped into its virtual slot.
   bool mapped;
-  // Whether a current retained range requires this slab.
-  bool keep;
   // Missing slab selected by the current serialized commitment transaction.
   bool pending_commit;
-  // Temporary union mark scoped to one serialized footprint query.
+  // Temporary union mark scoped to one serialized backing selection.
   bool counted;
   // Accepted asynchronous operation excludes another editor of this slot.
   bool in_flight;

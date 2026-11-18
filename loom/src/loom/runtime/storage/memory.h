@@ -273,14 +273,15 @@ iree_status_t loom_runtime_virtual_buffer_commit(
     loom_runtime_virtual_buffer_t* buffer, iree_device_size_t offset,
     iree_device_size_t length);
 
-// One caller-validated nonempty extent in a virtual reservation. Every range
-// in a commitment transaction belongs to the same physical pool.
+// One caller-validated extent in a virtual reservation. Commitment extents are
+// nonempty; release ignores empty extents. Every range in one transaction
+// belongs to the same physical pool.
 typedef struct loom_runtime_memory_range_t {
-  // Borrowed reservation whose physical backing is required.
+  // Borrowed reservation whose backing is queried, acquired, or released.
   loom_runtime_virtual_buffer_t* buffer;
   // Byte offset within the reservation.
   iree_device_size_t offset;
-  // Number of accessible bytes required from offset.
+  // Number of bytes in the extent starting at offset.
   iree_device_size_t length;
 } loom_runtime_memory_range_t;
 
@@ -398,10 +399,13 @@ iree_status_t loom_runtime_memory_pool_commit_prepared_async(
     uint64_t value, loom_runtime_memory_admission_t* out_admission,
     loom_runtime_memory_operation_t** out_operation);
 
-// Copies the unkept physical slot set of these distinct reservations and queues
-// its return to the shared inventory. The caller has retired every consumer and
-// keeps reservations/accounting alive through operation completion. Kept slabs
-// remain usable. No other operation may edit selected slabs before completion.
+// Captures physical mappings covered by the release ranges and queues their
+// return to shared inventory. Ranges cover complete mappings, except a final
+// short mapping may end at the reservation extent. Overlaps are deduplicated.
+// The caller has established that every covered logical owner is dead and all
+// its consumers have retired, and keeps reservations/accounting alive through
+// operation completion. Other mappings remain usable. No other operation or
+// backing selection may edit selected mappings before completion.
 // Private unmap completion precedes optional readiness. Inline readiness
 // callbacks obey the same non-reentry contract as commit_async. Collection
 // publishes returned slots before the next owner admission decision.
@@ -411,10 +415,9 @@ iree_status_t loom_runtime_memory_pool_commit_prepared_async(
 // mapping edit makes the affected reservation unusable until checked detach;
 // other reservations retain their independent ownership and usability.
 iree_status_t loom_runtime_memory_pool_trim_async(
-    loom_runtime_memory_pool_t* pool, iree_host_size_t buffer_count,
-    loom_runtime_virtual_buffer_t* const* buffers,
-    iree_hal_semaphore_t* readiness, uint64_t value,
-    loom_runtime_memory_operation_t** out_operation);
+    loom_runtime_memory_pool_t* pool, iree_host_size_t range_count,
+    const loom_runtime_memory_range_t* ranges, iree_hal_semaphore_t* readiness,
+    uint64_t value, loom_runtime_memory_operation_t** out_operation);
 
 // Installs a nonblocking ownership wake, or detaches it with NULL. The observer
 // only schedules its owner; it cannot reenter the operation. Set before
@@ -459,22 +462,6 @@ iree_status_t loom_runtime_memory_operation_query_status(
 // or destroyed. NULL is accepted; this never waits for native work.
 void loom_runtime_memory_operation_free(
     loom_runtime_memory_operation_t* operation);
-
-// After retiring affected users, clear the keep set, mark all still-live byte
-// ranges, then trim. Marking does not commit memory. A physical slab shared by
-// several logical ranges stays backed if any range needs it. The caller owns
-// readiness/retirement: these functions never wait for device work themselves.
-void loom_runtime_virtual_buffer_begin_trim(
-    loom_runtime_virtual_buffer_t* buffer);
-// Adds a range to the keep set. Optional out_added_bytes receives the physical
-// extent newly added, including unbacked slabs. Summing these values gives the
-// backing required by the union of kept ranges, with shared slabs counted once
-// and the final slab's actual size. Sparse trim markers may allocate metadata.
-iree_status_t loom_runtime_virtual_buffer_keep(
-    loom_runtime_virtual_buffer_t* buffer, iree_device_size_t offset,
-    iree_device_size_t length, uint64_t* out_added_bytes);
-iree_status_t loom_runtime_virtual_buffer_trim(
-    loom_runtime_virtual_buffer_t* buffer);
 
 // All device uses and borrowed HAL references must have retired. On a platform
 // cleanup failure the object retains unreleased ownership and may be retried;

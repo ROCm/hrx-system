@@ -9,6 +9,7 @@
 
 #include "iree/hal/driver_registry.h"
 #include "loom/runtime/device/device.h"
+#include "loom/runtime/storage/memory.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,6 +56,13 @@ iree_status_t loom_runtime_test_workspace_await_idle(
 // reports its retained cleanup failure instead of waiting for a native return.
 iree_status_t loom_runtime_test_pool_trim_and_drain(loom_runtime_pool_t* owner,
                                                     uint64_t target_bytes);
+
+// Joins the ordinary asynchronous release path before inspecting accounting.
+// The caller supplies complete retired mappings; WHOLE_BUFFER selects the
+// remaining reservation extent. This does not trim retained physical parents.
+iree_status_t loom_runtime_test_buffer_trim(
+    loom_runtime_memory_pool_t* pool, loom_runtime_virtual_buffer_t* buffer,
+    iree_device_size_t offset, iree_device_size_t length);
 
 #ifdef __cplusplus
 }  // extern "C"

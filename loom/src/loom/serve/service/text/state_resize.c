@@ -322,6 +322,9 @@ iree_status_t loom_serve_text_state_resize(loom_serve_text_state_t* state,
   if (iree_status_is_ok(status)) {
     status = loom_serve_text_state_resize_views(state);
   }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_state_backing_initialize(state);
+  }
   IREE_RETURN_AND_END_ZONE(z0, status);
 }
 

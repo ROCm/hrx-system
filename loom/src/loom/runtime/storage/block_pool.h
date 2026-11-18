@@ -85,6 +85,11 @@ void loom_runtime_block_pool_acknowledge_releases(
 bool loom_runtime_block_pool_any_owned(const loom_runtime_block_pool_t* pool,
                                        uint32_t first, uint32_t count);
 
+// First owned ID in the interval, or UINT32_MAX when it is empty. Geometry
+// consumers can retain the exact occupied boundary instead of searching again.
+uint32_t loom_runtime_block_pool_find_owned(
+    const loom_runtime_block_pool_t* pool, uint32_t first, uint32_t count);
+
 // Cold placement maintenance: moves preferred free IDs to the acquisition end
 // of the stack without changing any owned ID or reference. Visits each free ID
 // once and allocates nothing. Relative free-ID order is unspecified afterward.

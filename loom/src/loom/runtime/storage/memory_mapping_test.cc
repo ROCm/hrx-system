@@ -44,11 +44,14 @@ TEST_F(MemoryMappingTest, ContiguousRunKeepsIndependentPageOwnership) {
   RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x11223344);
   RoundTrip(loom_runtime_virtual_buffer_handle(first), 2 * page, 0x55667788);
 
-  // Keeping alternate pages must split the unmap without widening ownership.
-  loom_runtime_virtual_buffer_begin_trim(first);
-  Keep(first, 0, page);
-  Keep(first, 2 * page, page);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(first));
+  // Releasing alternate pages splits the unmap without widening ownership.
+  const loom_runtime_memory_range_t releases[] = {{first, page, page},
+                                                  {first, 3 * page, page}};
+  loom_runtime_memory_operation_t* operation = nullptr;
+  IREE_ASSERT_OK(loom_runtime_memory_pool_trim_async(
+      pool, IREE_ARRAYSIZE(releases), releases, nullptr, 0, &operation));
+  const auto completed = AwaitOperation(operation);
+  IREE_ASSERT_OK(loom_runtime_memory_operation_query_status(operation));
   observations = mapping_queue.WaitForMappings(2);
   ASSERT_EQ(observations[1].updates.size(), 2u);
   for (size_t i = 0; i < 2; ++i) {
@@ -112,8 +115,8 @@ TEST_F(MemoryMappingTest, RunsStopAtSourceParentsAndIndependentReservations) {
   EXPECT_EQ(updates[2].target_range.byte_length, page);
   RoundTrip(loom_runtime_virtual_buffer_handle(first), parent, 0x12345678);
   RoundTrip(loom_runtime_virtual_buffer_handle(second), 0, 0x87654321);
-  loom_runtime_virtual_buffer_begin_trim(first);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(first));
+
+  IREE_ASSERT_OK(Trim(first));
   const auto trimmed = mapping_queue.WaitForMappings(2);
   ASSERT_EQ(trimmed[1].updates.size(), 2u);
   EXPECT_EQ(trimmed[1].updates[0].target_range.byte_length, parent);
@@ -250,10 +253,11 @@ TEST_F(MemoryMappingTest, FailedRunDetachRetainsEveryPageForCheckedCleanup) {
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, 3 * page));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(second, 0, page));
   RoundTrip(loom_runtime_virtual_buffer_handle(second), 0, 0x12345678);
-  loom_runtime_virtual_buffer_begin_trim(first);
+
   mapping_queue.fail_next_map = true;
   loom_runtime_memory_operation_t* operation = nullptr;
-  IREE_ASSERT_OK(loom_runtime_memory_pool_trim_async(pool, 1, &first, nullptr,
+  const loom_runtime_memory_range_t release = {first, 0, 3 * page};
+  IREE_ASSERT_OK(loom_runtime_memory_pool_trim_async(pool, 1, &release, nullptr,
                                                      0, &operation));
   const auto completed = AwaitOperation(operation);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -283,8 +287,8 @@ TEST_F(MemoryMappingTest, WholeAndPackedClaimsShareDistinctParentClasses) {
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
       pool, packed, kSlabSize / 2, 256, &statistics[2], &third));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, 2 * kSlabSize));
-  loom_runtime_virtual_buffer_begin_trim(first);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(first));
+
+  IREE_ASSERT_OK(Trim(first));
   iree_hal_pool_stats_t before;
   iree_hal_pool_query_stats(deferred_backing, &before);
 
@@ -308,8 +312,7 @@ TEST_F(MemoryMappingTest, WholeAndPackedClaimsShareDistinctParentClasses) {
   RoundTrip(loom_runtime_virtual_buffer_handle(second), 0, 0x12345678);
   RoundTrip(loom_runtime_virtual_buffer_handle(third), 0, 0x87654321);
 
-  loom_runtime_virtual_buffer_begin_trim(second);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(second));
+  IREE_ASSERT_OK(Trim(second));
   IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(first, 0, kSlabSize));
   RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0xabcdef01);
   CheckRetained(loom_runtime_virtual_buffer_handle(third), 0, 0x87654321);

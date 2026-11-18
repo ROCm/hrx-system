@@ -150,8 +150,9 @@ TEST_P(ResidencyPressureTest, LiveWorkspaceDefersFutileHistoryEviction) {
       loom_runtime_memory_pool_try_commit(pool_, 1, &growth, &admitted));
   EXPECT_FALSE(admitted);
   EXPECT_EQ(history_requests_, 1u);
-  loom_runtime_virtual_buffer_begin_trim(state_);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(state_));
+
+  IREE_ASSERT_OK(
+      loom_runtime_test_buffer_trim(pool_, state_, 0, IREE_HAL_WHOLE_BUFFER));
   history_pending_ = false;
   DrainNativeReturns();
   IREE_ASSERT_OK(
@@ -269,8 +270,9 @@ TEST_P(ResidencyPressureTest,
   EXPECT_EQ(logical, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
   EXPECT_EQ(history_requests_, 1u);
   EXPECT_EQ(state_statistics_.committed_bytes, kSlabBytes);
-  loom_runtime_virtual_buffer_begin_trim(state_);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(state_));
+
+  IREE_ASSERT_OK(
+      loom_runtime_test_buffer_trim(pool_, state_, 0, IREE_HAL_WHOLE_BUFFER));
   history_pending_ = false;
   DrainNativeReturns();
   IREE_ASSERT_OK(loom_runtime_residency_try_admit_state(

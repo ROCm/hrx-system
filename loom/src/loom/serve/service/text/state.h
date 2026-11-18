@@ -43,6 +43,7 @@ typedef enum loom_serve_text_trim_phase_e {
 } loom_serve_text_trim_phase_t;
 
 typedef struct loom_serve_text_state_t loom_serve_text_state_t;
+typedef struct loom_serve_text_backing_t loom_serve_text_backing_t;
 
 // Retained device state at a consumed-token frontier. Host predictions and
 // metrics belong to the model row and do not own device storage.
@@ -165,6 +166,9 @@ struct loom_serve_text_state_t {
   struct {
     // Borrowed shared allocation domain for state and model parameters.
     loom_runtime_memory_pool_t* pool;
+    // Owned source-geometry index and pending release work; absent for fixed
+    // storage. Logical owners and native mappings retain their own authority.
+    loom_serve_text_backing_t* index;
     // Mutable virtual state only, excluding weights and execution workspace.
     loom_runtime_storage_statistics_t statistics;
     // Native backing changes exclude state mutation through their readiness.
@@ -248,6 +252,23 @@ iree_status_t loom_serve_text_state_allocate(
 // Source slot to its owned root, shared by allocation and cold maintenance.
 iree_hal_buffer_t** loom_serve_text_state_allocation(
     loom_serve_text_state_t* state, iree_host_size_t index);
+
+// Builds or replaces the elastic geometry index at allocation/resize. Existing
+// pending work and carry membership survive the serialized layout replacement.
+iree_status_t loom_serve_text_state_backing_initialize(
+    loom_serve_text_state_t* state);
+void loom_serve_text_state_backing_deinitialize(loom_serve_text_state_t* state);
+
+// Records final logical transitions, including compound reservation installs.
+// Recurrent writer replacement alone does not release row-private storage.
+void loom_serve_text_state_backing_row_changed(
+    loom_serve_text_state_row_t* row);
+void loom_serve_text_state_backing_checkpoint_changed(
+    loom_serve_text_state_checkpoint_t* checkpoint);
+
+// Joins an already-successful native frontier before reusing its operation
+// slot. The serialized owner has observed the model's successful readiness.
+void loom_serve_text_state_complete_backing(loom_serve_text_state_t* state);
 
 // Moves a validated enlarged source layout into retired state. Existing
 // private views, recurrent slots, and cache planes retain their byte offsets.

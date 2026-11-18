@@ -653,31 +653,67 @@ static iree_device_size_t loom_runtime_memory_slab_length(
                   buffer->byte_length - index * buffer->geometry.mapping_size);
 }
 
-void loom_runtime_virtual_buffer_select_backing(
-    loom_runtime_virtual_buffer_t* buffer, iree_device_size_t offset,
-    iree_device_size_t length) {
-  if (!length) {
-    return;
-  }
-  const iree_device_size_t slab_size = buffer->geometry.mapping_size;
-  const iree_host_size_t begin = offset / slab_size;
-  const iree_host_size_t end = (offset + length - 1) / slab_size + 1;
-  if (end - begin < buffer->backing.capacity) {
-    for (iree_host_size_t i = begin; i < end; ++i) {
+// Visits only touched mappings for sparse extents, or probes the requested
+// indices for small changes. Neither path allocates directory entries.
+typedef struct loom_runtime_memory_range_iterator_t {
+  // Borrowed buffer, excluding directory mutation during iteration.
+  loom_runtime_virtual_buffer_t* buffer;
+  // First mapping index covered by the range.
+  iree_host_size_t begin;
+  // Exclusive mapping index at the range end.
+  iree_host_size_t end;
+  // Next mapping index or sparse table position, selected by range density.
+  iree_host_size_t position;
+} loom_runtime_memory_range_iterator_t;
+
+static loom_runtime_memory_range_iterator_t loom_runtime_memory_range_iterate(
+    const loom_runtime_memory_range_t* range) {
+  const iree_device_size_t size = range->buffer->geometry.mapping_size;
+  const iree_host_size_t begin = range->offset / size;
+  const iree_host_size_t end =
+      range->length ? (range->offset + range->length - 1) / size + 1 : begin;
+  return (loom_runtime_memory_range_iterator_t){
+      .buffer = range->buffer,
+      .begin = begin,
+      .end = end,
+      .position = end - begin < range->buffer->backing.capacity ? begin : 0,
+  };
+}
+
+static loom_runtime_backing_entry_t* loom_runtime_memory_range_next(
+    loom_runtime_memory_range_iterator_t* iterator) {
+  loom_runtime_backing_directory_t* directory = &iterator->buffer->backing;
+  if (iterator->end - iterator->begin < directory->capacity) {
+    while (iterator->position < iterator->end) {
       loom_runtime_backing_entry_t* entry =
-          loom_runtime_backing_directory_find(&buffer->backing, i);
+          loom_runtime_backing_directory_find(directory, iterator->position++);
       if (entry && (entry->physical || entry->in_flight)) {
-        entry->counted = true;
+        return entry;
       }
     }
   } else {
-    for (iree_host_size_t i = 0; i < buffer->backing.capacity; ++i) {
-      loom_runtime_backing_entry_t* entry = &buffer->backing.entries[i];
-      if (entry->occupied && entry->index >= begin && entry->index < end &&
+    while (iterator->position < directory->capacity) {
+      loom_runtime_backing_entry_t* entry =
+          &directory->entries[iterator->position++];
+      if (entry->occupied && entry->index >= iterator->begin &&
+          entry->index < iterator->end &&
           (entry->physical || entry->in_flight)) {
-        entry->counted = true;
+        return entry;
       }
     }
+  }
+  return NULL;
+}
+
+void loom_runtime_virtual_buffer_select_backing(
+    loom_runtime_virtual_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length) {
+  loom_runtime_memory_range_iterator_t iterator =
+      loom_runtime_memory_range_iterate(
+          &(loom_runtime_memory_range_t){buffer, offset, length});
+  loom_runtime_backing_entry_t* entry = NULL;
+  while ((entry = loom_runtime_memory_range_next(&iterator))) {
+    entry->counted = true;
   }
 }
 
@@ -739,8 +775,7 @@ iree_status_t loom_runtime_memory_ranges_footprint(
           loom_runtime_backing_directory_find(&buffer->backing, i);
       if (entry && entry->counted) {
         entry->counted = false;
-        if (!entry->physical && !entry->in_flight && !entry->keep &&
-            !entry->pending_commit) {
+        if (!entry->physical && !entry->in_flight && !entry->pending_commit) {
           loom_runtime_backing_directory_remove(&buffer->backing, entry);
         }
       }
@@ -1120,13 +1155,11 @@ static void loom_runtime_memory_slab_publish(
     buffer->statistics->peak_bytes = iree_max(
         buffer->statistics->peak_bytes, buffer->statistics->committed_bytes);
   }
-  const bool keep = entry->keep;
   *entry = *result;
   entry->index = index;
   entry->occupied = true;
-  entry->keep |= keep;
   entry->in_flight = false;
-  if (!entry->physical && !entry->keep) {
+  if (!entry->physical) {
     loom_runtime_backing_directory_remove(&buffer->backing, entry);
   }
 }
@@ -1690,7 +1723,7 @@ static iree_status_t loom_runtime_memory_commit_finish(
         if (length == buffer->geometry.mapping_size) {
           ++buffer->backed_regular_count;
         }
-      } else if (!entry->keep) {
+      } else {
         loom_runtime_backing_directory_remove(&buffer->backing, entry);
       }
       ++edit_index;
@@ -1824,55 +1857,61 @@ iree_status_t loom_runtime_memory_pool_commit_async(
 }
 
 iree_status_t loom_runtime_memory_pool_trim_async(
-    loom_runtime_memory_pool_t* pool, iree_host_size_t buffer_count,
-    loom_runtime_virtual_buffer_t* const* buffers,
-    iree_hal_semaphore_t* readiness, uint64_t value,
-    loom_runtime_memory_operation_t** out_operation) {
+    loom_runtime_memory_pool_t* pool, iree_host_size_t range_count,
+    const loom_runtime_memory_range_t* ranges, iree_hal_semaphore_t* readiness,
+    uint64_t value, loom_runtime_memory_operation_t** out_operation) {
   IREE_TRACE_ZONE_BEGIN(z0);
   *out_operation = NULL;
   loom_runtime_memory_pool_collect(pool);
   iree_status_t status = iree_ok_status();
-  for (iree_host_size_t b = 0; b < buffer_count && iree_status_is_ok(status);
-       ++b) {
-    IREE_ASSERT(!buffers[b]->target->detached);
-    status = iree_status_clone(buffers[b]->target->failure);
+  for (iree_host_size_t r = 0; r < range_count && iree_status_is_ok(status);
+       ++r) {
+    IREE_ASSERT(!ranges[r].buffer->target->detached);
+    // Owners release whole mappings: rounding an interior byte boundary would
+    // silently unmap a neighboring live contribution.
+    IREE_ASSERT(
+        !ranges[r].length ||
+        (ranges[r].offset % ranges[r].buffer->geometry.mapping_size == 0 &&
+         ((ranges[r].offset + ranges[r].length) %
+                  ranges[r].buffer->geometry.mapping_size ==
+              0 ||
+          ranges[r].offset + ranges[r].length ==
+              ranges[r].buffer->byte_length)));
+    status = iree_status_clone(ranges[r].buffer->target->failure);
   }
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
   iree_host_size_t count = 0;
-  for (iree_host_size_t b = 0; b < buffer_count; ++b) {
-    for (iree_host_size_t i = 0; i < buffers[b]->backing.capacity; ++i) {
-      const loom_runtime_backing_entry_t* entry =
-          &buffers[b]->backing.entries[i];
-      if (entry->occupied && !entry->keep && entry->physical) {
-        IREE_ASSERT(!entry->in_flight);
-        ++count;
-      }
+  for (iree_host_size_t r = 0; r < range_count; ++r) {
+    loom_runtime_memory_range_iterator_t iterator =
+        loom_runtime_memory_range_iterate(&ranges[r]);
+    loom_runtime_backing_entry_t* entry = NULL;
+    while ((entry = loom_runtime_memory_range_next(&iterator))) {
+      IREE_ASSERT(!entry->in_flight);
+      count += !entry->counted;
+      entry->counted = true;
     }
   }
-  for (iree_host_size_t b = 0; b < buffer_count; ++b) {
-    loom_runtime_backing_directory_discard_empty(&buffers[b]->backing);
-  }
   if (!count) {
-    iree_status_t status =
-        readiness ? iree_hal_semaphore_signal(readiness, value, NULL)
-                  : iree_ok_status();
-    IREE_TRACE_ZONE_END(z0);
-    return status;
+    status = readiness ? iree_hal_semaphore_signal(readiness, value, NULL)
+                       : iree_ok_status();
+    IREE_RETURN_AND_END_ZONE(z0, status);
   }
   loom_runtime_memory_operation_t* operation = NULL;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, loom_runtime_memory_operation_allocate(pool, count, &operation));
-  operation->count = count;
-  operation->releasing = true;
-  operation->readiness = readiness;
-  operation->value = value;
-  iree_hal_semaphore_retain(readiness);
+  status = loom_runtime_memory_operation_allocate(pool, count, &operation);
   iree_host_size_t index = 0;
-  for (iree_host_size_t b = 0; b < buffer_count; ++b) {
-    loom_runtime_virtual_buffer_t* buffer = buffers[b];
-    for (iree_host_size_t i = 0; i < buffer->backing.capacity; ++i) {
-      loom_runtime_backing_entry_t* entry = &buffer->backing.entries[i];
-      if (entry->occupied && !entry->keep && entry->physical) {
+  // Consume or cancel the selection even when the exact operation allocation
+  // fails. Overlapping release ranges capture each native mapping once.
+  for (iree_host_size_t r = 0; r < range_count; ++r) {
+    loom_runtime_virtual_buffer_t* buffer = ranges[r].buffer;
+    loom_runtime_memory_range_iterator_t iterator =
+        loom_runtime_memory_range_iterate(&ranges[r]);
+    loom_runtime_backing_entry_t* entry = NULL;
+    while ((entry = loom_runtime_memory_range_next(&iterator))) {
+      if (!entry->counted) {
+        continue;
+      }
+      entry->counted = false;
+      if (operation) {
         operation->edits[index++] =
             (loom_runtime_memory_edit_t){buffer, entry->index, *entry};
         entry->in_flight = true;
@@ -1883,10 +1922,16 @@ iree_status_t loom_runtime_memory_pool_trim_async(
       }
     }
   }
-  *out_operation = operation;
-  loom_runtime_memory_operation_enqueue(pool, operation, iree_ok_status());
-  IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  if (iree_status_is_ok(status)) {
+    operation->count = count;
+    operation->releasing = true;
+    operation->readiness = readiness;
+    operation->value = value;
+    iree_hal_semaphore_retain(readiness);
+    *out_operation = operation;
+    loom_runtime_memory_operation_enqueue(pool, operation, iree_ok_status());
+  }
+  IREE_RETURN_AND_END_ZONE(z0, status);
 }
 
 void loom_runtime_memory_operation_set_observer(
@@ -1999,53 +2044,6 @@ iree_status_t loom_runtime_virtual_buffer_commit(
   return iree_ok_status();
 }
 
-void loom_runtime_virtual_buffer_begin_trim(
-    loom_runtime_virtual_buffer_t* buffer) {
-  loom_runtime_backing_directory_discard_empty(&buffer->backing);
-  for (iree_host_size_t i = 0; i < buffer->backing.capacity; ++i) {
-    if (buffer->backing.entries[i].occupied) {
-      buffer->backing.entries[i].keep = false;
-    }
-  }
-}
-
-iree_status_t loom_runtime_virtual_buffer_keep(
-    loom_runtime_virtual_buffer_t* buffer, iree_device_size_t offset,
-    iree_device_size_t length, uint64_t* out_added_bytes) {
-  if (out_added_bytes) {
-    *out_added_bytes = 0;
-  }
-  if (!length) {
-    return iree_ok_status();
-  }
-  const iree_device_size_t slab_size = buffer->geometry.mapping_size;
-  const iree_host_size_t end = (offset + length - 1) / slab_size + 1;
-  for (iree_host_size_t i = offset / slab_size; i < end; ++i) {
-    loom_runtime_backing_entry_t* entry = NULL;
-    IREE_RETURN_IF_ERROR(
-        loom_runtime_backing_directory_insert(&buffer->backing, i, &entry));
-    if (!entry->keep) {
-      if (out_added_bytes) {
-        *out_added_bytes += loom_runtime_memory_slab_length(buffer, i);
-      }
-      entry->keep = true;
-    }
-  }
-  return iree_ok_status();
-}
-
-iree_status_t loom_runtime_virtual_buffer_trim(
-    loom_runtime_virtual_buffer_t* buffer) {
-  loom_runtime_memory_operation_t* operation = NULL;
-  IREE_RETURN_IF_ERROR(loom_runtime_memory_pool_trim_async(
-      buffer->pool, 1, &buffer, NULL, 0, &operation));
-  loom_runtime_memory_operation_await(operation);
-  iree_status_t status = loom_runtime_memory_operation_query_status(operation);
-  loom_runtime_memory_operation_free(operation);
-  // Synchronous trimming is an explicit outer capacity-reclamation boundary.
-  return iree_status_join(status, loom_runtime_memory_pool_await(buffer->pool));
-}
-
 iree_status_t loom_runtime_virtual_buffer_free(
     loom_runtime_virtual_buffer_t* buffer) {
   if (!buffer) {
@@ -2091,7 +2089,6 @@ iree_status_t loom_runtime_virtual_buffer_free(
     const iree_host_size_t index = entry->index;
     loom_runtime_backing_pages_return(
         (loom_runtime_backing_slot_t){entry->physical, entry->physical_offset});
-    entry->keep = false;
     const loom_runtime_backing_entry_t empty = {0};
     loom_runtime_memory_slab_publish(buffer, index, &empty);
   }

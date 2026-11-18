@@ -922,9 +922,12 @@ static void loom_runtime_virtual_pool_advance_trim(
     entry->history_status = iree_ok_status();
     iree_slim_mutex_unlock(&pool->mutex);
     if (!entry->operation && iree_status_is_ok(status)) {
-      loom_runtime_virtual_buffer_begin_trim(entry->storage);
+      const loom_runtime_memory_range_t release = {
+          entry->storage, 0,
+          iree_hal_buffer_byte_length(
+              loom_runtime_virtual_buffer_handle(entry->storage))};
       status = loom_runtime_memory_pool_trim_async(
-          pool->memory_pool, 1, &entry->storage, NULL, 0, &entry->operation);
+          pool->memory_pool, 1, &release, NULL, 0, &entry->operation);
       loom_runtime_memory_operation_set_observer(
           entry->operation, loom_runtime_virtual_pool_wake, pool);
     }

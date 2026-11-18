@@ -280,8 +280,7 @@ class MemoryTest : public ::testing::Test {
     if (arena) {
       for (auto* buffer : {first, second, third}) {
         if (buffer) {
-          loom_runtime_virtual_buffer_begin_trim(buffer);
-          IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(buffer));
+          IREE_ASSERT_OK(Trim(buffer));
         }
       }
     }
@@ -434,12 +433,9 @@ class MemoryTest : public ::testing::Test {
     }
   }
 
-  uint64_t Keep(loom_runtime_virtual_buffer_t* buffer, uint64_t offset,
-                uint64_t length) {
-    uint64_t added_bytes = 0;
-    IREE_EXPECT_OK(
-        loom_runtime_virtual_buffer_keep(buffer, offset, length, &added_bytes));
-    return added_bytes;
+  iree_status_t Trim(loom_runtime_virtual_buffer_t* buffer, uint64_t offset = 0,
+                     uint64_t length = IREE_HAL_WHOLE_BUFFER) {
+    return loom_runtime_test_buffer_trim(pool, buffer, offset, length);
   }
 
   void CreateVirtualPool(bool with_workspace = false) {

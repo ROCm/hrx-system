@@ -124,12 +124,17 @@ void loom_runtime_block_pool_acknowledge_releases(
 
 bool loom_runtime_block_pool_any_owned(const loom_runtime_block_pool_t* pool,
                                        uint32_t first, uint32_t count) {
+  return loom_runtime_block_pool_find_owned(pool, first, count) != UINT32_MAX;
+}
+
+uint32_t loom_runtime_block_pool_find_owned(
+    const loom_runtime_block_pool_t* pool, uint32_t first, uint32_t count) {
   if (!count) {
-    return false;
+    return UINT32_MAX;
   }
   const uint32_t index = loom_index_set_select(
       &pool->membership, loom_runtime_block_pool_membership(pool), first);
-  return index >= first && index - first < count;
+  return index >= first && index - first < count ? index : UINT32_MAX;
 }
 
 void loom_runtime_block_pool_prioritize(loom_runtime_block_pool_t* pool,

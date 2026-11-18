@@ -267,8 +267,9 @@ TEST_F(DeviceGroupTest, ExplicitPlacementPreservesNativeDomainThroughReuse) {
       IREE_ASSERT_OK(loom_runtime_execution_drain(executions_[i]));
       EXPECT_EQ(output_[i], pattern);
       if (options.elastic) {
-        loom_runtime_virtual_buffer_begin_trim(reservations_[i]);
-        IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(reservations_[i]));
+        IREE_ASSERT_OK(loom_runtime_test_buffer_trim(
+            loom_runtime_pool_memory(pool), reservations_[i], 0,
+            IREE_HAL_WHOLE_BUFFER));
       } else {
         iree_hal_buffer_release(fixed_buffers_[i]);
         fixed_buffers_[i] = nullptr;
@@ -367,8 +368,10 @@ TEST_F(DeviceGroupTest, SeparateBudgetsAndWholeGroupLifetime) {
     IREE_ASSERT_OK(loom_runtime_execution_drain(executions_[i]));
     EXPECT_EQ(output_[i], pattern);
   }
-  loom_runtime_virtual_buffer_begin_trim(reservations_[1]);
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(reservations_[1]));
+
+  IREE_ASSERT_OK(loom_runtime_test_buffer_trim(
+      loom_runtime_pool_memory(pools[1]), reservations_[1], 0,
+      IREE_HAL_WHOLE_BUFFER));
   EXPECT_EQ(loom_runtime_pool_statistics(pools[0]).retained.committed_bytes,
             kSlabBytes);
   IREE_ASSERT_OK(

@@ -345,6 +345,10 @@ TEST(BlockPoolTest, CompactionMovesOnlyIntoDisjointFreeSlots) {
         const auto member = occupied.lower_bound(first);
         EXPECT_EQ(loom_runtime_block_pool_any_owned(&pool, first, count),
                   member != occupied.end() && *member < first + count);
+        EXPECT_EQ(loom_runtime_block_pool_find_owned(&pool, first, count),
+                  member != occupied.end() && *member < first + count
+                      ? *member
+                      : UINT32_MAX);
       }
     }
     const uint32_t moved =
@@ -369,6 +373,8 @@ TEST(BlockPoolTest, CompactionMovesOnlyIntoDisjointFreeSlots) {
       for (uint32_t count = 0; count <= pool.capacity - first; ++count) {
         EXPECT_EQ(loom_runtime_block_pool_any_owned(&pool, first, count),
                   count != 0 && first < occupied.size());
+        EXPECT_EQ(loom_runtime_block_pool_find_owned(&pool, first, count),
+                  count != 0 && first < occupied.size() ? first : UINT32_MAX);
       }
     }
     const uint32_t* released = nullptr;

@@ -207,6 +207,17 @@ class TextStateTest : public ::testing::TestWithParam<uint32_t> {
     }
   }
 
+  void Trim() {
+    loom_serve_text_trim_result_t result;
+    IREE_ASSERT_OK(loom_serve_text_state_submit_trim(&state, &result));
+    bool complete = false;
+    while (!complete) {
+      IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
+      IREE_ASSERT_OK(
+          loom_serve_text_state_complete_trim(&state, &result, &complete));
+    }
+  }
+
   // Allocator enclosing bootstrap metadata and state retirement.
   const iree_allocator_t host_allocator = iree_allocator_system();
   // Borrowed process-wide device used by this physical-target test suite.
@@ -379,6 +390,148 @@ TEST_P(TextStateTest, OptionalRootsRetainOriginsMapsAndCheckpointCarry) {
   ASSERT_NO_FATAL_FAILURE(CheckMaps());
   loom_serve_text_state_row_release_reservation(fork);
   loom_serve_text_state_checkpoint_release(checkpoint);
+}
+
+TEST_P(TextStateTest, FinalReleasesRespectOverlappingPlanesAndPrivatePages) {
+  const bool elastic = loom_runtime_pool_memory(storage_owner) != nullptr;
+  const uint64_t page =
+      elastic ? loom_runtime_pool_state_geometry(storage_owner).mapping_size
+              : 4096;
+  const uint64_t recurrent_origin = 9 * page + 128;
+  iree_unaligned_store_le_u64(bytes[0].data + 24, recurrent_origin + 6 * 128);
+  for (size_t row = 0; row < 2; ++row) {
+    const uint64_t origin = recurrent_origin + row * 128;
+    const uint64_t views[] = {origin + 32, 8,  0,           0,
+                              origin + 48, 16, origin + 80, 32};
+    StoreWords(bytes[1].data + row * 64, views, IREE_ARRAYSIZE(views));
+  }
+  // Two source planes alias bytes with different logical block identities.
+  // Their half-page displacement also leaves a live boundary contribution
+  // after one row releases its last reference to adjacent blocks.
+  std::vector<uint8_t> geometry(bytes[4].data,
+                                bytes[4].data + bytes[4].data_length);
+  iree_unaligned_store_le_u64(geometry.data() + 32, recurrent_origin);
+  const uint64_t first[] = {1, 0, 1, 8 * page, page};
+  StoreWords(geometry.data() + 64, first, IREE_ARRAYSIZE(first));
+  const size_t previous_length = geometry.size();
+  geometry.resize(previous_length + 40);
+  const uint64_t overlap[] = {1, page / 2, 1, 8 * page, page};
+  StoreWords(geometry.data() + previous_length, overlap,
+             IREE_ARRAYSIZE(overlap));
+  iree_vm_variant_reset(&results[4]);
+  iree_vm_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_buffer_create(geometry.size(), 8, host_allocator, &buffer));
+  IREE_ASSERT_OK(
+      iree_vm_buffer_map_write(buffer, 0, geometry.size(), &bytes[4]));
+  memcpy(bytes[4].data, geometry.data(), geometry.size());
+  results[4] = iree_vm_buffer_variant_from_ptr_move(&types, &buffer);
+  IREE_ASSERT_OK(Allocate());
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
+  auto* const layout_index = state.memory.index;
+
+  for (size_t row = 0; row < 2; ++row) {
+    loom_runtime_memory_admission_t admission;
+    IREE_ASSERT_OK(loom_serve_text_state_row_submit_reserve(
+        state.rows[row], LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, 9, nullptr,
+        nullptr, &admission));
+    ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
+    IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
+    loom_serve_text_state_row_complete_reserve(state.rows[row]);
+    state.rows[row]->position = 9;
+    loom_serve_text_state_row_release_reservation(state.rows[row]);
+  }
+  loom_serve_text_state_checkpoint_t* checkpoint = nullptr;
+  IREE_ASSERT_OK(
+      loom_serve_text_state_row_submit_pin(state.rows[1], &checkpoint));
+  ASSERT_NE(checkpoint, nullptr);
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution));
+  loom_serve_text_state_reservation_t* reservation = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_state_row_prepare_reserve(
+      state.rows[0], LOOM_SERVE_TEXT_RESERVE_CONTINUE, nullptr, 9,
+      &reservation));
+  ASSERT_NE(reservation, nullptr);
+  std::unique_ptr<loom_serve_text_state_reservation_t,
+                  decltype(&loom_serve_text_state_reservation_free)>
+      prepared(reservation, loom_serve_text_state_reservation_free);
+
+  // Payload checks accompany the coverage oracle: preserving a mapping must
+  // preserve its actual contents through both inline and asynchronous trim.
+  for (uint64_t offset = 0; offset < 7 * page; offset += page) {
+    IREE_ASSERT_OK(Upload(state.row_arena, offset,
+                          std::vector<uint8_t>(16, 0x40 + offset / page)));
+  }
+  const auto check_coverage = [&]() {
+    if (!elastic) {
+      return;
+    }
+    const uint64_t limit = iree_hal_buffer_byte_length(state.row_arena);
+    for (uint64_t offset = 0; offset < limit; offset += page) {
+      bool owned = false;
+      const auto intersects = [&](uint64_t begin, uint64_t length) {
+        return length && begin < offset + page && offset < begin + length;
+      };
+      for (size_t region = 0; region < state.storage.region_count; ++region) {
+        const auto& layout = state.storage.regions[region];
+        if (layout.allocation != 1) {
+          continue;
+        }
+        for (uint32_t block = 0; block < state.cache.pool.capacity; ++block) {
+          if (!state.cache.pool.references[block]) {
+            continue;
+          }
+          for (size_t plane = 0; plane < layout.blocks.count; ++plane) {
+            owned |=
+                intersects(layout.blocks.origin + plane * layout.blocks.stride +
+                               block * layout.blocks.block_bytes,
+                           layout.blocks.block_bytes);
+          }
+        }
+      }
+      for (uint32_t slot = 0; slot < state.recurrent.pool.capacity; ++slot) {
+        if (state.recurrent.pool.references[slot]) {
+          owned |= intersects(state.storage.recurrent.origin +
+                                  slot * state.storage.recurrent.stride,
+                              state.storage.recurrent.length);
+        }
+      }
+      for (size_t row = 0; row < state.row_count; ++row) {
+        if (state.rows[row]->recurrent.slot == UINT32_MAX) {
+          continue;
+        }
+        for (size_t binding = TEXT_CONTROL; binding <= TEXT_PROGRESS;
+             ++binding) {
+          auto* view = state.rows[row]->buffers[binding];
+          if (binding != TEXT_RECURRENT && view) {
+            owned |= intersects(iree_hal_buffer_byte_offset(view),
+                                iree_hal_buffer_byte_length(view));
+          }
+        }
+      }
+      EXPECT_EQ(loom_runtime_virtual_buffer_is_backed(state.memory.buffers[1],
+                                                      offset, 1),
+                owned)
+          << "mapping " << offset / page;
+      if (owned && offset < 7 * page) {
+        ASSERT_NO_FATAL_FAILURE(
+            CheckBytes(state.row_arena, offset,
+                       std::vector<uint8_t>(16, 0x40 + offset / page)));
+      }
+    }
+  };
+  loom_serve_text_state_row_reset(state.rows[1]);
+  ASSERT_NO_FATAL_FAILURE(Trim());
+  ASSERT_NO_FATAL_FAILURE(check_coverage());
+  loom_serve_text_state_checkpoint_release(checkpoint);
+  ASSERT_NO_FATAL_FAILURE(Trim());
+  ASSERT_NO_FATAL_FAILURE(check_coverage());
+  ASSERT_NO_FATAL_FAILURE(Trim());
+  ASSERT_NO_FATAL_FAILURE(check_coverage());
+  EXPECT_EQ(state.memory.index, layout_index);
+  prepared.reset();
+  loom_serve_text_state_row_reset(state.rows[0]);
+  ASSERT_NO_FATAL_FAILURE(Trim());
+  ASSERT_NO_FATAL_FAILURE(check_coverage());
 }
 
 TEST_P(TextStateTest, CarryFollowsSourceStride) {

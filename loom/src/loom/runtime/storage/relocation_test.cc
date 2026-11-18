@@ -199,13 +199,21 @@ TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
   iree_hal_semaphore_release(ready);
   EXPECT_EQ(copied_bytes, region.count * kLiveBlocks * region.block_bytes);
   EXPECT_EQ(loom_runtime_virtual_buffer_handle(buffer), handle);
-  loom_runtime_virtual_buffer_begin_trim(buffer);
+  const uint64_t mapping_size =
+      loom_runtime_virtual_buffer_mapping_size(buffer);
+  uint64_t begin = 0;
   for (uint32_t plane = 0; plane < region.count; ++plane) {
-    IREE_ASSERT_OK(loom_runtime_virtual_buffer_keep(
-        buffer, region.origin + plane * region.stride,
-        kLiveBlocks * region.block_bytes, nullptr));
+    const uint64_t live_begin = region.origin + plane * region.stride;
+    const uint64_t end = live_begin - live_begin % mapping_size;
+    if (begin < end) {
+      IREE_ASSERT_OK(
+          loom_runtime_test_buffer_trim(pool, buffer, begin, end - begin));
+    }
+    begin = iree_device_align(live_begin + kLiveBlocks * region.block_bytes,
+                              mapping_size);
   }
-  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(buffer));
+  IREE_ASSERT_OK(loom_runtime_test_buffer_trim(pool, buffer, begin,
+                                               IREE_HAL_WHOLE_BUFFER));
   std::vector<uint32_t> observed(kLiveBlocks * region.block_bytes /
                                  sizeof(uint32_t));
   for (uint32_t plane = 0; plane < region.count; ++plane) {
