@@ -22,6 +22,10 @@ visible to the same view consumer. Each template declares the buffer length
 operation under a distinct name. The BF16 function is the only emitted body at
 every size, so the difference measures frontend declaration cost.
 
+`ReopenedNamespace` models a header that adds types to a namespace and reopens
+its operations namespace for each declaration. The exported function stays
+fixed as the enclosing scope grows.
+
 `Q8S32Providers` imports the benchmark-owned Q8S32 provider source. Its user
 header is served through the public source-provider callback, while the normal
 embedded facade supplies Loom headers. This case measures a production-shaped

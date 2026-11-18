@@ -259,6 +259,24 @@ void UnusedFacadeDeclarations(::benchmark::State& state) {
   SourceToModule(state, &input);
 }
 
+void ReopenedNamespace(::benchmark::State& state) {
+  std::string declarations = "namespace catalog {\n";
+  for (int64_t i = 0; i < state.range(0); ++i) {
+    const std::string ordinal = std::to_string(i);
+    declarations += "using Value" + ordinal + " = int;\n";
+    declarations +=
+        "namespace ops { void apply" + ordinal + "(Value" + ordinal + "); }\n";
+  }
+  declarations += "}\n";
+  const SourceToModuleInput input = {
+      .language = SourceLanguage::kCxx,
+      .prefix = declarations.c_str(),
+      .source_identifier = nullptr,
+      .header_identifier = nullptr,
+  };
+  SourceToModule(state, &input);
+}
+
 // Keep source construction outside the timed importer. Named fields expose
 // selection/writeback growth independently of array storage or template work.
 void SelectedRecord(::benchmark::State& state) {
@@ -561,6 +579,11 @@ BENCHMARK(UnusedFacadeDeclarations)
     ->Arg(0)
     ->Arg(32)
     ->Arg(256)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK(ReopenedNamespace)
+    ->Arg(32)
+    ->Arg(256)
+    ->Arg(1024)
     ->Unit(::benchmark::kMicrosecond);
 BENCHMARK(SelectedRecord)
     ->Arg(2)
