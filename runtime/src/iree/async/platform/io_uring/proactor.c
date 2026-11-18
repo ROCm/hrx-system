@@ -1355,24 +1355,25 @@ static iree_status_t iree_async_proactor_io_uring_poll(
     *out_completed_count = 0;
   }
 
-  // Enable the ring on first poll. When created with R_DISABLED (which happens
-  // automatically when SINGLE_ISSUER is in the setup flags), this call binds
-  // the current thread as the exclusive submitter for all io_uring_enter calls.
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(z0,
-                                    iree_io_uring_ring_enable(&proactor->ring));
-
-  if (proactor->worker_affinity) {
+  // Poll ownership is permanent. Complete task-affine setup before publishing
+  // the owner; subsequent polls reuse its identity without a native query.
+  int32_t owner_tid =
+      iree_atomic_load(&proactor->polling.owner_tid, iree_memory_order_relaxed);
+  if (!owner_tid) {
     IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_io_uring_ring_set_worker_affinity(
-                &proactor->ring,
-                CPU_ALLOC_SIZE(IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT),
-                proactor->worker_affinity));
-    proactor->worker_affinity = NULL;
+        z0, iree_io_uring_ring_enable(&proactor->ring));
+    if (proactor->worker_affinity) {
+      IREE_RETURN_AND_END_ZONE_IF_ERROR(
+          z0, iree_io_uring_ring_set_worker_affinity(
+                  &proactor->ring,
+                  CPU_ALLOC_SIZE(IREE_THREAD_AFFINITY_MAX_PROCESSOR_COUNT),
+                  proactor->worker_affinity));
+      proactor->worker_affinity = NULL;
+    }
+    owner_tid = (int32_t)syscall(__NR_gettid);
+    iree_atomic_store(&proactor->polling.owner_tid, owner_tid,
+                      iree_memory_order_relaxed);
   }
-
-  int32_t owner_tid = (int32_t)syscall(__NR_gettid);
-  iree_atomic_store(&proactor->polling.owner_tid, owner_tid,
-                    iree_memory_order_relaxed);
 
   iree_convert_timeout_to_absolute(&timeout);
   bool is_immediate = iree_timeout_is_immediate(timeout);
