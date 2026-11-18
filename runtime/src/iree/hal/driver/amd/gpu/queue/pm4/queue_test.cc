@@ -178,8 +178,13 @@ class KernelQueueTest : public MemoryBackendTest {
           &self->native_queues_[self->created_++]);
       return AMDF_STATUS_OK;
     };
-    native_.api.kernel_queue_query_info = [](amdf_kernel_queue_t*,
+    native_.api.kernel_queue_query_info = [](amdf_kernel_queue_t* queue,
                                              amdf_kernel_queue_info_t* info) {
+      info->capabilities = AMDF_KERNEL_QUEUE_CAPABILITY_PROGRESS_OBSERVATION;
+      if (info->next) {
+        static_cast<amdf_kernel_queue_progress_observation_t*>(info->next)
+            ->address = &Native(queue)->retired;
+      }
       info->notification_types = AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD |
                                  AMDF_NATIVE_EVENT_TYPE_BIT_WIN32_EVENT;
       return AMDF_STATUS_OK;
@@ -560,7 +565,9 @@ TEST_F(KernelQueueTest, PayloadGrowthPreservesLaunchArgumentCapacity) {
   iree_hal_amd_gpu_context_join_memory(&context_);
   Publish(0);
   const iree_hal_amd_gpu_completion_wait_t pending = Poll(0);
-  EXPECT_EQ(pending.address, nullptr);
+  EXPECT_EQ(pending.address, &native_queues_[0].retired);
+  EXPECT_TRUE(pending.is_64_bit);
+  EXPECT_EQ(pending.value, 0);
   EXPECT_TRUE(pending.pending);
   auto* first_payload = queue->producer.transfers.current;
   ASSERT_NE(first_payload, nullptr);

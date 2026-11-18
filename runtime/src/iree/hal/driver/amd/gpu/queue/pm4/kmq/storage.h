@@ -35,6 +35,8 @@ typedef struct iree_hal_amd_gpu_pm4_kmq_storage_t {
   iree_hal_amd_gpu_memory_release_t release;
   // Native command byte zero, used by resident-program continuations.
   uint64_t address;
+  // Optional native progress word borrowed until the observer joins.
+  const iree_atomic_int64_t* progress;
   // Opaque native points indexed by the enclosing queue's publication slots.
   uint64_t* points;
   // Power-of-two point-array capacity minus one.

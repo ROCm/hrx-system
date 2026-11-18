@@ -213,6 +213,14 @@ void iree_hal_amd_gpu_context_join_memory(iree_hal_amd_gpu_context_t* context);
 void iree_hal_amd_gpu_context_deinitialize_memory(
     iree_hal_amd_gpu_context_t* context);
 
+// Queries submission limits and checks this queue can wake the completion
+// worker. If available, borrows a cacheable word for active observation until
+// the worker joins before native queue inactivation or destruction.
+iree_status_t iree_hal_amd_gpu_context_query_kernel_queue(
+    const iree_hal_amd_gpu_context_t* context, amdf_kernel_queue_t* queue,
+    amdf_kernel_queue_info_t* out_info,
+    const iree_atomic_int64_t** out_progress);
+
 // Prepares the device's shared completion wake after selecting publication.
 // Called once under device construction ownership, before any queue or worker.
 // Partial acquisition remains owned by context on failure.

@@ -1227,6 +1227,11 @@ static bool iree_hal_amd_gpu_pm4_retire(
     if (queue->kernel &&
         queue->kernel->points[position & queue->retirement.capacity_mask] >
             native_retired) {
+      *out_wait = (iree_hal_amd_gpu_completion_wait_t){
+          .address = queue->kernel->progress,
+          .value = (int64_t)native_retired,
+          .is_64_bit = true,
+          .pending = true};
       const amdf_status_t status = iree_hal_amd_gpu_pm4_kmq_storage_arm(
           queue->kernel,
           queue->kernel->points[position & queue->retirement.capacity_mask]);
@@ -1366,30 +1371,16 @@ static bool iree_hal_amd_gpu_pm4_retire(
     iree_hal_amd_gpu_pm4_capacity_available(queue);
   }
   if (queue->kernel) {
-    // KERNEL retirement has no coherent completion word. Preserve the
-    // outstanding-work fact so a lost native notification receives a bounded
-    // status recheck without keeping an idle device awake.
+    // Pending work always gets a bounded status recheck after parking,
+    // including on providers offering only native event notification.
     out_wait->pending = position != published;
-    if (position == published) {
-      // Enrollment precedes the predicate recheck. Either this observer sees a
-      // racing publication or that publisher sees wake_required and signals.
-      iree_atomic_exchange(&queue->kernel->wake_required, 1,
-                           iree_memory_order_acq_rel);
-      if ((uint64_t)iree_atomic_load(&queue->producer.count,
-                                     iree_memory_order_acquire) != published) {
-        iree_atomic_exchange(&queue->kernel->wake_required, 0,
-                             iree_memory_order_acq_rel);
-        return true;
-      }
-    }
   }
-  if (!queue->kernel && position == published) {
-    // A publication on this idle queue must interrupt observation of other
-    // queues. This passive hint alone never keeps the worker awake.
-    *out_wait =
-        (iree_hal_amd_gpu_completion_wait_t){.address = &queue->producer.count,
-                                             .value = (int64_t)published,
-                                             .is_64_bit = true};
+  if (position == published) {
+    if (iree_hal_amd_gpu_completion_prepare_publication_wait(
+            &queue->producer.count, (int64_t)published,
+            queue->kernel ? &queue->kernel->wake_required : NULL, out_wait)) {
+      return true;
+    }
   } else if (!queue->kernel && !waiting_for_producer && !out_wait->pending) {
     // Capacity credit prevents record reuse until this consumer advances it.
     out_wait->address =

@@ -73,22 +73,19 @@ Set `"wait_mode": "blocking"` at the root of a machine configuration, or use
 `--wait_mode=blocking` with either `--device` or `--devices`. An explicit CLI
 value overrides the file for every device. The setting is fixed at startup.
 
-On AMD GPU user queues, active mode lets the existing completion worker poll
-pending GPU work for up to one second after actual completion progress. Further
-progress renews that budget; when no work remains pending, the worker sleeps
-without waiting for the budget to expire. This reduces completion wake-up
-latency and can improve throughput and energy per request. Polling occupies a
-CPU core while active, however, and long GPU operations may use more CPU without
-finishing faster. For battery-sensitive or CPU-constrained deployments, select
+On AMD GPUs, active mode lets the completion worker poll pending work for up to
+one second after it observes progress. Further progress renews the budget.
+The worker sleeps as soon as pending work drains. Polling can reduce wake-up
+latency between dependent GPU operations and occupies a CPU core while active.
+For battery-sensitive or CPU-constrained deployments, select
 `--wait_mode=blocking`.
 
-The device URI's `completion_spin_ns` parameter adjusts this budget; for example,
-`--device='amdgpu://?completion_spin_ns=10000000'` selects 10 ms. Blocking mode
-sets the budget to zero even when the URI specifies a nonzero value. AMD GPU
-kernel queues, including the Windows native submission path, use native
-completion events and do not use this polling budget. CPU devices report
-completion directly from their execution workers; this setting leaves the
-shared CPU executor unchanged.
+The device URI's `completion_spin_ns` parameter adjusts this budget. For
+example, `--device='amdgpu://?completion_spin_ns=10000000'` selects 10 ms.
+Blocking mode sets the budget to zero even when the URI specifies a nonzero
+value. On Windows, AMD GPU compute and copy queues can poll when the driver
+maps a cacheable progress fence. Queues without a cacheable word use native
+completion events. CPU devices report completion from their execution workers.
 
 ### Memory and admission limits
 

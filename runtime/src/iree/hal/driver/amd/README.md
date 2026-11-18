@@ -139,8 +139,11 @@ NUMA node IDs.
 
 `completion_spin_ns` bounds active completion observation after actual progress
 (default 1,000,000,000 ns, or one second). While work remains pending, the
-existing retirement worker reads coherent USER queue completion words only when
-every pending source exposes one; a change resumes authoritative source drains.
+retirement worker can read USER queue completion words and the cacheable native
+progress fences of KERNEL queues, including Windows compute and copy queues.
+The worker polls when every pending source supplies a word. A change triggers
+a checked status query before the worker releases command storage or signals
+application semaphores.
 Actual completion progress renews the budget. At expiry, or whenever an
 event-only source remains pending, the worker waits at most five milliseconds
 on the native event before querying authoritative completion state again. A
@@ -151,12 +154,7 @@ even when the URI specifies a nonzero budget.
 Active observation reduces completion wake-up latency between dependent GPU
 operations, at the cost of occupying a CPU core while polling. It can improve
 request throughput and energy per request, but long GPU operations may consume
-more CPU without completing faster. Idle devices can sleep. Event-only KERNEL
-queues, including the Windows native submission path, bypass this budget and
-use bounded native waits followed by status queries while accepted work remains
-pending. Native wait expiry is a requery interval, not an execution deadline;
-accepted work is never resubmitted. The setting does not alter process power
-policy, add a thread, or change submission and retirement ordering.
+more CPU without completing faster. Idle devices can sleep.
 
 `code_publication_timeout_ms` bounds each synchronous code publication
 (default 60,000 ms). The loader establishes one absolute deadline before host
