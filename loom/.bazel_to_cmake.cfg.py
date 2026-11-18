@@ -320,8 +320,10 @@ class LoomBuildFileFunctions(
         self._loom_module_targets.add(self._current_target_label(name))
         self._register_target_files(name, [f"${{CMAKE_CURRENT_BINARY_DIR}}/{output}"])
         name_block = self._convert_string_arg_block("NAME", name, quote=False)
-        srcs_block = self._convert_loom_module_inputs("SRCS", srcs)
-        libraries_block = self._convert_loom_module_inputs("LIBRARIES", libraries)
+        srcs_block, srcs_variable = self._convert_loom_module_inputs(name, "SRCS", srcs)
+        libraries_block, libraries_variable = self._convert_loom_module_inputs(
+            name, "LIBRARIES", libraries
+        )
         roots_block = self._convert_string_list_block("ROOTS", roots, sort=False)
         configs_block = self._convert_string_list_block("CONFIGS", configs, sort=False)
         mode_block = self._convert_string_arg_block("MODE", mode)
@@ -342,7 +344,7 @@ class LoomBuildFileFunctions(
         strict_deps_block = self._convert_option_block("STRICT_DEPS", strict_deps)
         self._emit_platform_guard_begin(target_compatible_with)
         self._converter.body += (
-            f"loom_module(\n"
+            srcs_variable + libraries_variable + f"loom_module(\n"
             f"{name_block}"
             f"{srcs_block}"
             f"{libraries_block}"
@@ -473,14 +475,26 @@ class LoomBuildFileFunctions(
         target_compatible_with = self._apply_loom_target_compatible_with(
             target_compatible_with
         )
+        sources_block, sources_variable = self._convert_loom_module_inputs(
+            name, "SRCS", srcs
+        )
+        libraries_block, libraries_variable = self._convert_loom_module_inputs(
+            name, "LIBRARIES", deps
+        )
         blocks = [
             self._convert_string_arg_block("NAME", name, quote=False),
-            self._convert_loom_module_inputs("SRCS", srcs),
-            self._convert_loom_module_inputs("LIBRARIES", deps),
+            sources_block,
+            libraries_block,
             self._convert_data_list_block(data),
         ]
         self._emit_platform_guard_begin(target_compatible_with)
-        self._converter.body += "loom_test_module(\n" + "".join(blocks) + ")\n\n"
+        self._converter.body += (
+            sources_variable
+            + libraries_variable
+            + "loom_test_module(\n"
+            + "".join(blocks)
+            + ")\n\n"
+        )
         self._emit_platform_guard_end(target_compatible_with)
 
     def loom_test(
@@ -1087,11 +1101,15 @@ class LoomBuildFileFunctions(
     ):
         if not targets:
             return
+        source_block, source_variable = self._convert_loom_module_inputs(
+            name, "SRC", [src]
+        )
         self._emit_platform_guard_begin(target_compatible_with)
         self._converter.body += (
-            "loom_check_compile_tests(\n"
+            source_variable
+            + "loom_check_compile_tests(\n"
             + self._convert_string_arg_block("NAME", name)
-            + self._convert_loom_module_inputs("SRC", [src])
+            + source_block
             + self._convert_target_list_block("TARGETS", targets)
             + self._convert_string_list_block(
                 "ARGS", self._convert_test_location_args(args), sort=False

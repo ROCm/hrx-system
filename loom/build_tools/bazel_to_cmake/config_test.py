@@ -416,7 +416,8 @@ filegroup(name="translation_units", srcs=["checks.cxx", "other.cxx", "private.h"
 loom_cxx_test(name="checks", srcs=select({
     "//loom/config/import:cxx": [":translation_units"],
     "//conditions:default": [],
-}), deps=[":headers"], copts=["std=c++23"], local_defines=["COUNT=4"],
+}), deps=select({"//loom/config/import:cxx": [":headers"], "//conditions:default": []}),
+   copts=["std=c++23"], local_defines=["COUNT=4"],
    execution_profiles=[profile], workloads={"all": {}, "selected": {"case": "bias"}})
 loom_cxx_library(name="headers", hdrs=["shared.h"])
 """,
@@ -430,6 +431,7 @@ loom_cxx_library(name="headers", hdrs=["shared.h"])
         self.assertIn('  COPTS\n    "std=c++23"', output)
         self.assertIn('  LOCAL_DEFINES\n    "COUNT=4"', output)
         self.assertIn('    "::checks_library"', output)
+        self.assertIn("${_checks_module_platform_libraries}", output)
         self.assertEqual(output.count("loom_cxx_library("), 2)
         self.assertEqual(output.count("loom_test_module("), 1)
         self.assertIn("checks_all_execute_reference_test", output)
@@ -519,7 +521,10 @@ profile = loom_execution_profile(
 )
 loom_test(
     name = "subject",
-    srcs = ["subject.loom"],
+    srcs = ["subject.loom"] + select({
+        "//loom/config/import:cxx": ["imported_checks.loom"],
+        "//conditions:default": [],
+    }),
     config = {"common.value": "base"},
     case = "@base",
     workloads = {
@@ -541,6 +546,8 @@ loom_test(
             repo_root=str(REPO_ROOT),
         )
         self.assertEqual(output.count("loom_execution_test("), 2)
+        self.assertIn("${_subject_module_platform_srcs}", output)
+        self.assertIn('"imported_checks.loom"', output)
         self.assertIn("subject_base_execute_reference_test", output)
         self.assertIn("subject_selected_execute_reference_test", output)
         self.assertIn('"--config=common.value=base"', output)
