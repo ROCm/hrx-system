@@ -5,7 +5,7 @@ changes live in the maintained fork rather than as patches in this directory:
 
 - Upstream: <https://github.com/robertoraggi/cplusplus>
 - Maintained fork: <https://github.com/benvanik/cplusplus>
-- Current stack: [`hrx-upstream/134-may-alias-types`](https://github.com/benvanik/cplusplus/commits/hrx-upstream/134-may-alias-types/)
+- Current stack: [`hrx-upstream/135-shared-declaration-attributes`](https://github.com/benvanik/cplusplus/commits/hrx-upstream/135-shared-declaration-attributes/)
 
 `../deps.MODULE.bazel` owns the archive commit and checksum. The generated root
 `MODULE.cmake.lock` carries the same identity for CMake. `cxx.BUILD.bazel` and
@@ -17,9 +17,9 @@ files are not part of this dependency model.
 
 The fork keeps one linear, dependency-ordered commit for each independently
 reviewable upstream landing unit. Local cut-point branches use
-`hrx-upstream/NN-short-description`, where `NN` is the two-digit landing
-position. Each branch points at its commit in the shared linear history; it
-does not contain a parallel version of the change.
+`hrx-upstream/NN-short-description`, where `NN` is the landing position
+with at least two digits. Each branch points at its commit in the shared linear
+history.
 
 Only the terminal stack branch and branches with an active upstream pull
 request are published. Intermediate cut points remain local until review. If
