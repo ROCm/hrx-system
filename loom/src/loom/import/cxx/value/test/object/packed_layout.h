@@ -15,6 +15,16 @@ struct __attribute__((packed)) PackedRecord {
 static_assert(sizeof(PackedRecord) == 5 && alignof(PackedRecord) == 1);
 static_assert(__builtin_offsetof(PackedRecord, value) == 1);
 
+struct [[packed]] UnqualifiedPackedRecord {
+  // Leading byte makes the alignment of the following word observable.
+  unsigned char tag;
+  // The unqualified spelling leaves the word naturally aligned.
+  unsigned value;
+};
+static_assert(!__has_cpp_attribute(packed));
+static_assert(sizeof(UnqualifiedPackedRecord) == 8);
+static_assert(__builtin_offsetof(UnqualifiedPackedRecord, value) == 4);
+
 struct PackedField {
   // Byte preceding the packed field.
   unsigned char tag;
