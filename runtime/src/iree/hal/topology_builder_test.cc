@@ -26,6 +26,9 @@ static iree_hal_device_spec_t* CreateTestDeviceSpec(
     const char* driver_id, uint32_t logical_ordinal, uint32_t physical_ordinal,
     uint32_t numa_node,
     iree_hal_physical_device_affinity_t physical_device_affinity) {
+  const iree_hal_physical_device_identity_flags_t physical_identity_flags =
+      numa_node != UINT32_MAX ? IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_NUMA_NODE
+                              : IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_NONE;
   iree_hal_physical_device_spec_t physical_device = {
       .identity =
           {
@@ -37,9 +40,7 @@ static iree_hal_device_spec_t* CreateTestDeviceSpec(
               .uuid = {{0}},
               .pci = {0, 0, 0, 0},
               .numa = {numa_node},
-              .flags = numa_node != UINT32_MAX
-                           ? IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_NUMA_NODE
-                           : IREE_HAL_PHYSICAL_DEVICE_IDENTITY_FLAG_NONE,
+              .flags = physical_identity_flags,
           },
       .physical_ordinal = physical_ordinal,
       .partition_ordinal = 0,
