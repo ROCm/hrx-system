@@ -336,29 +336,29 @@ template <class Result, class Shape, class T, class Encoding>
     loom::type::view<Shape, T, Encoding> source);
 
 // Loads one element at a logical coordinate, preserving its exact type.
-template <loom::memory_access Access = loom::memory_access::none, class Shape,
-          class T, class Encoding, class... Indices>
+template <loom::memory_access Access = loom::memory_access::inferred,
+          class Shape, class T, class Encoding, class... Indices>
 [[loom::op("view.load")]]
 T load(loom::type::view<Shape, T, Encoding> source, Indices... indices);
 
 // Observes one volatile element and returns its unqualified value.
-template <loom::memory_access Access = loom::memory_access::none, class Shape,
-          class T, class Encoding, class... Indices>
+template <loom::memory_access Access = loom::memory_access::inferred,
+          class Shape, class T, class Encoding, class... Indices>
 [[loom::op("view.load")]]
 T load(loom::type::view<Shape, volatile T, Encoding> source,
        Indices... indices);
 
 // Stores one element at a logical coordinate. Template deduction
 // rejects destinations whose element type is const.
-template <loom::memory_access Access = loom::memory_access::none, class Shape,
-          class T, class Encoding, class... Indices>
+template <loom::memory_access Access = loom::memory_access::inferred,
+          class Shape, class T, class Encoding, class... Indices>
 [[loom::op("view.store")]]
 void store(T value, loom::type::view<Shape, T, Encoding> destination,
            Indices... indices);
 
 // Observes a store through a volatile view without qualifying the element.
-template <loom::memory_access Access = loom::memory_access::none, class Shape,
-          class T, class Encoding, class... Indices>
+template <loom::memory_access Access = loom::memory_access::inferred,
+          class Shape, class T, class Encoding, class... Indices>
 [[loom::op("view.store")]]
 void store(T value, loom::type::view<Shape, volatile T, Encoding> destination,
            Indices... indices);

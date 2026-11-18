@@ -396,19 +396,16 @@ class CxxRenderer(CxxFunctionRenderer):
         resolved = self._resolved(operation)
         role = resolved.attr("role")
         shape = self._fragment_shape(operation, resolved)
-        template, origin = self._fragment_origin(resolved)
+        origin = self._mixed_index_record(
+            resolved, dynamic_field="indices", static_field="static_indices"
+        )
         selectors = [f"loom::vector::fragment::role::{role}"]
-        access_selector_count = len(selectors)
         projected_flags = self._append_memory_access_contract(operation, selectors)
-        if template and len(selectors) == access_selector_count:
-            selectors.append("loom::memory_access::none")
         value = self.expression(resolved.value_id("value"))
         view = self.expression(resolved.value_id("view"))
-        arguments = ", ".join([value, view, *origin, shape])
+        arguments = ", ".join([value, view, origin, shape])
         self.writer.line(
-            "loom::vector::fragment::store<"
-            f"{', '.join(selectors)}{template}>("
-            f"{arguments});"
+            f"loom::vector::fragment::store<{', '.join(selectors)}>({arguments});"
         )
         return ("role", "static_indices", *projected_flags)
 

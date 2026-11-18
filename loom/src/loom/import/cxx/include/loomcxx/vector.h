@@ -136,8 +136,9 @@ template <class Result>
 // Loads one contiguous native C++ vector at a full-rank logical origin. Result
 // selects its static register shape while the view supplies element type,
 // layout, extents, alignment, and observation semantics.
-template <class Result, loom::memory_access Access = loom::memory_access::none,
-          class T, loom::type::size_type... Extents, class Encoding,
+template <class Result,
+          loom::memory_access Access = loom::memory_access::inferred, class T,
+          loom::type::size_type... Extents, class Encoding,
           class Origin = loom::type::coordinates<sizeof...(Extents)>>
 [[loom::op("vector.load")]] Result load(
     loom::type::view<loom::type::shape<Extents...>, T, Encoding> source,
@@ -145,8 +146,9 @@ template <class Result, loom::memory_access Access = loom::memory_access::none,
 
 // Loads one semantic vector at a full-rank logical origin. Dimensions supplies
 // one index for each dynamic result axis in source-axis order.
-template <class Result, loom::memory_access Access = loom::memory_access::none,
-          class T, loom::type::size_type... Extents, class Encoding,
+template <class Result,
+          loom::memory_access Access = loom::memory_access::inferred, class T,
+          loom::type::size_type... Extents, class Encoding,
           class Origin = loom::type::coordinates<sizeof...(Extents)>>
 [[loom::op("vector.load")]] Result load(
     loom::type::view<loom::type::shape<Extents...>, T, Encoding> source,
@@ -155,8 +157,9 @@ template <class Result, loom::memory_access Access = loom::memory_access::none,
 // Stores one contiguous vector at a full-rank logical origin. A semantic value
 // carries its dynamic dimensions. Const destination element types are rejected
 // during source admission.
-template <loom::memory_access Access = loom::memory_access::none, class Vector,
-          class T, loom::type::size_type... Extents, class Encoding,
+template <loom::memory_access Access = loom::memory_access::inferred,
+          class Vector, class T, loom::type::size_type... Extents,
+          class Encoding,
           class Origin = loom::type::coordinates<sizeof...(Extents)>>
 [[loom::op("vector.store")]] void store(
     Vector value,
@@ -165,16 +168,18 @@ template <loom::memory_access Access = loom::memory_access::none, class Vector,
 
 // Loads active lanes from their corresponding footprint positions and takes
 // inactive lanes from passthrough. Nonzero integer mask lanes are active.
-template <class Result, loom::memory_access Access = loom::memory_access::none,
-          class T, loom::type::size_type... Extents, class Encoding, class Mask,
+template <class Result,
+          loom::memory_access Access = loom::memory_access::inferred, class T,
+          loom::type::size_type... Extents, class Encoding, class Mask,
           class Origin = loom::type::coordinates<sizeof...(Extents)>>
 [[loom::op("vector.load.mask")]] Result load_mask(
     loom::type::view<loom::type::shape<Extents...>, T, Encoding> source,
     Origin origin, Mask mask, Result passthrough);
 
 // Stores value lanes whose corresponding integer mask lane is nonzero.
-template <loom::memory_access Access = loom::memory_access::none, class Vector,
-          class T, loom::type::size_type... Extents, class Encoding, class Mask,
+template <loom::memory_access Access = loom::memory_access::inferred,
+          class Vector, class T, loom::type::size_type... Extents,
+          class Encoding, class Mask,
           class Origin = loom::type::coordinates<sizeof...(Extents)>>
 [[loom::op("vector.store.mask")]] void store_mask(
     Vector value,
@@ -183,16 +188,18 @@ template <loom::memory_access Access = loom::memory_access::none, class Vector,
 
 // Densely consumes consecutive source elements for active lanes and takes
 // inactive lanes from passthrough. Nonzero integer mask lanes are active.
-template <class Result, loom::memory_access Access = loom::memory_access::none,
-          class T, loom::type::size_type... Extents, class Encoding, class Mask,
+template <class Result,
+          loom::memory_access Access = loom::memory_access::inferred, class T,
+          loom::type::size_type... Extents, class Encoding, class Mask,
           class Origin = loom::type::coordinates<sizeof...(Extents)>>
 [[loom::op("vector.load.expand")]] Result load_expand(
     loom::type::view<loom::type::shape<Extents...>, T, Encoding> source,
     Origin origin, Mask mask, Result passthrough);
 
 // Densely writes active value lanes to consecutive destination elements.
-template <loom::memory_access Access = loom::memory_access::none, class Vector,
-          class T, loom::type::size_type... Extents, class Encoding, class Mask,
+template <loom::memory_access Access = loom::memory_access::inferred,
+          class Vector, class T, loom::type::size_type... Extents,
+          class Encoding, class Mask,
           class Origin = loom::type::coordinates<sizeof...(Extents)>>
 [[loom::op("vector.store.compress")]] void store_compress(
     Vector value,

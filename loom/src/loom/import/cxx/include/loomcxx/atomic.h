@@ -62,14 +62,14 @@ namespace loom::view::atomic {
 // Observes one object without modifying it. Ordering is relaxed, acquire, or
 // seq_cst. Every call is a distinct observation, including discarded results.
 template <loom::atomic::ordering Ordering, loom::atomic::scope Scope,
-          loom::memory_access Access = loom::memory_access::none, class T>
+          loom::memory_access Access = loom::memory_access::inferred, class T>
 [[loom::op("view.atomic.load")]] T load(const volatile T* source);
 
 // Observes one logical view element without rebuilding its address as a
 // pointer. One index is required for every source axis.
 template <loom::atomic::ordering Ordering, loom::atomic::scope Scope,
-          loom::memory_access Access = loom::memory_access::none, class Shape,
-          class T, class Encoding, class... Indices>
+          loom::memory_access Access = loom::memory_access::inferred,
+          class Shape, class T, class Encoding, class... Indices>
 [[loom::op("view.atomic.load")]] T load(
     loom::type::view<Shape, T, Encoding> source, Indices... indices);
 
@@ -77,7 +77,7 @@ template <loom::atomic::ordering Ordering, loom::atomic::scope Scope,
 // value. Indices is empty for a pointer and has one value per view axis.
 // Ordering is relaxed, release, or seq_cst.
 template <loom::atomic::ordering Ordering, loom::atomic::scope Scope,
-          loom::memory_access Access = loom::memory_access::none, class T,
+          loom::memory_access Access = loom::memory_access::inferred, class T,
           class Storage, class... Indices>
 [[loom::op("view.atomic.store")]] void store(T value, Storage destination,
                                              Indices... indices);
@@ -87,7 +87,7 @@ template <loom::atomic::ordering Ordering, loom::atomic::scope Scope,
 // the integer source type.
 template <loom::atomic::kind Kind, loom::atomic::ordering Ordering,
           loom::atomic::scope Scope,
-          loom::memory_access Access = loom::memory_access::none, class T,
+          loom::memory_access Access = loom::memory_access::inferred, class T,
           class Storage, class... Indices>
 [[loom::op("view.atomic.rmw")]] T rmw(T value, Storage destination,
                                       Indices... indices);
@@ -96,7 +96,7 @@ template <loom::atomic::kind Kind, loom::atomic::ordering Ordering,
 // value.
 template <loom::atomic::kind Kind, loom::atomic::ordering Ordering,
           loom::atomic::scope Scope,
-          loom::memory_access Access = loom::memory_access::none, class T,
+          loom::memory_access Access = loom::memory_access::inferred, class T,
           class Storage, class... Indices>
 [[loom::op("view.atomic.reduce")]] void reduce(T value, Storage destination,
                                                Indices... indices);
@@ -107,7 +107,7 @@ template <loom::atomic::kind Kind, loom::atomic::ordering Ordering,
 // weak/spurious failure is not part of this operation.
 template <loom::atomic::ordering Success, loom::atomic::ordering Failure,
           loom::atomic::scope Scope,
-          loom::memory_access Access = loom::memory_access::none, class T,
+          loom::memory_access Access = loom::memory_access::inferred, class T,
           class Storage, class... Indices>
 [[loom::op("view.atomic.cmpxchg")]] T cmpxchg(T expected, T replacement,
                                               Storage destination,

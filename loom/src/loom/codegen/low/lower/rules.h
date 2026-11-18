@@ -933,6 +933,9 @@ typedef enum loom_low_lower_guard_kind_e {
   // Every finite lane must be exactly representable in the float type
   // carried by the u64 payload. Nonfinite class permissions are separate.
   LOOM_LOW_LOWER_GUARD_VALUE_EXACT_FLOAT_TYPE = 52,
+  // Every static or SSA coordinate in an indexed operand list must lie in
+  // the inclusive payload range, using retained integer facts for SSA values.
+  LOOM_LOW_LOWER_GUARD_INDEX_LIST_ELEMENTS_RANGE = 53,
   // Maximum guard kind value plus one.
   LOOM_LOW_LOWER_GUARD_COUNT_,
 } loom_low_lower_guard_kind_t;
@@ -1007,6 +1010,13 @@ typedef struct loom_low_lower_guard_t {
       // Reserved storage available to future attribute guards.
       uint16_t reserved;
     } attribute;
+    // Fields comprising a mixed static/SSA index list.
+    struct {
+      // Source operand-segment ordinal for SSA coordinates.
+      uint16_t operand_index;
+      // Source i64-array attribute ordinal containing static coordinates.
+      uint16_t attr_index;
+    } index_list;
     // Rule-set-local descriptor ref used by DESCRIPTOR_AVAILABLE guards.
     struct {
       // Descriptor table reference.

@@ -323,63 +323,20 @@ class CxxExpressionRenderer(CxxRenderContext):
         shape_name = "batched_shape" if blocks else "shape"
         return f"loom::vector::fragment::{shape_name}{{" + ", ".join(shape_values) + "}"
 
-    def _fragment_origin(self, resolved: Any) -> tuple[str, list[str]]:
-        """Projects indexed-memory origin structure into a source specialization."""
-
-        sentinel = -(2**63)
-        static = resolved.attr("static_indices")
-        dynamic = iter(resolved.value_ids("indices"))
-        if static is None or all(value == sentinel for value in static):
-            return "", [
-                self._mixed_index_record(
-                    resolved,
-                    dynamic_field="indices",
-                    static_field="static_indices",
-                )
-            ]
-
-        pattern: list[str] = []
-        runtime: list[str] = []
-        for value in static:
-            if value == sentinel:
-                pattern.append("loom::type::dynamic")
-                try:
-                    runtime.append(self._address_operand(next(dynamic)))
-                except StopIteration as error:
-                    raise CxxRenderError(
-                        None, "dynamic fragment origin metadata is incomplete"
-                    ) from error
-            else:
-                pattern.append(str(value))
-        try:
-            next(dynamic)
-        except StopIteration:
-            pass
-        else:
-            raise CxxRenderError(
-                None, "dynamic fragment origin metadata has trailing values"
-            )
-        template = ", " + ", ".join(pattern)
-        arguments = (
-            ["loom::type::indices{" + ", ".join(runtime) + "}"] if runtime else []
-        )
-        return template, arguments
-
     def _render_fragment_load(self, operation: Operation) -> tuple[str, ...]:
         resolved = self._resolved(operation)
         result = resolved.value_id("result")
         role = resolved.attr("role")
         shape = self._fragment_shape(operation, resolved)
-        template, origin = self._fragment_origin(resolved)
+        origin = self._mixed_index_record(
+            resolved, dynamic_field="indices", static_field="static_indices"
+        )
         selectors = [
             f"loom::vector::fragment::role::{role}",
             self.cpp_type(result),
         ]
-        access_selector_count = len(selectors)
         projected_flags = self._append_memory_access_contract(operation, selectors)
-        if template and len(selectors) == access_selector_count:
-            selectors.append("loom::memory_access::none")
-        arguments = [self.expression(resolved.value_id("view")), *origin, shape]
+        arguments = [self.expression(resolved.value_id("view")), origin, shape]
         auxiliary = resolved.value_ids("auxiliary")
         if auxiliary:
             arguments.append(
@@ -392,7 +349,7 @@ class CxxExpressionRenderer(CxxRenderContext):
             )
         expression = (
             "loom::vector::fragment::load<"
-            f"{', '.join(selectors)}{template}>(" + ", ".join(arguments) + ")"
+            f"{', '.join(selectors)}>(" + ", ".join(arguments) + ")"
         )
         self._declare(result, expression)
         return (

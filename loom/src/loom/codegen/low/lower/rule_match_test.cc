@@ -961,6 +961,97 @@ TEST_F(LowLowerRuleMatchTest, MatchesExactScalarOperandSegments) {
   EXPECT_FALSE(matches(&facts));
 }
 
+TEST_F(LowLowerRuleMatchTest, MatchesStaticAndProvenIndexListCoordinates) {
+  const loom_value_id_t coordinates[] = {
+      loom_index_constant_result(BuildConstant(0)),
+      loom_index_constant_result(BuildConstant(0)),
+  };
+  loom_op_t* splat = nullptr;
+  IREE_ASSERT_OK(loom_vector_splat_build(
+      &builder_, loom_scalar_constant_result(BuildScalarConstant(42)),
+      loom_type_shaped_2d(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_I32,
+                          loom_dim_pack_static(8), loom_dim_pack_static(8), 0),
+      LOOM_LOCATION_UNKNOWN, &splat));
+
+  loom_low_lower_guard_t guard = {
+      .kind = LOOM_LOW_LOWER_GUARD_INDEX_LIST_ELEMENTS_RANGE,
+      .diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE,
+      .payload_ordinal = 1,
+  };
+  guard.selector.index_list.operand_index = 1;
+  guard.selector.index_list.attr_index = 0;
+  loom_low_lower_guard_payload_t payload = {};
+  const loom_low_lower_guard_ref_t guard_ref = 0;
+  const loom_low_lower_rule_t rule = {.guard_count = 1};
+  const loom_low_lower_rule_span_t span = {
+      .source_op_kind = LOOM_OP_VECTOR_EXTRACT,
+      .rule_count = 1,
+  };
+  const loom_low_lower_rule_set_t rule_set = {
+      .spans = &span,
+      .span_count = 1,
+      .rules = &rule,
+      .rule_count = 1,
+      .guard_payloads = &payload,
+      .guard_payload_count = 1,
+      .guards = &guard,
+      .guard_count = 1,
+      .guard_refs = &guard_ref,
+      .guard_ref_count = 1,
+  };
+  loom_value_fact_table_t facts = {};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&facts, &module_->arena,
+                                                  module_->values.count));
+  for (loom_value_id_t coordinate : coordinates) {
+    IREE_ASSERT_OK(loom_value_fact_table_define(&facts, coordinate,
+                                                loom_value_facts_exact_i64(0)));
+  }
+  auto matches = [&](const int64_t (&static_indices)[2],
+                     const loom_value_fact_table_t* fact_table) {
+    loom_value_id_t indices[2] = {};
+    uint16_t count = 0;
+    for (uint16_t i = 0; i < 2; ++i) {
+      if (static_indices[i] == INT64_MIN) {
+        indices[count++] = coordinates[i];
+      }
+    }
+    loom_op_t* extract = nullptr;
+    IREE_EXPECT_OK(loom_vector_extract_build(
+        &builder_, loom_vector_splat_result(splat), indices, count,
+        static_indices, 2, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+        LOOM_LOCATION_UNKNOWN, &extract));
+    const loom_low_lower_rule_match_context_t context = {
+        .module = module_,
+        .fact_table = fact_table,
+    };
+    loom_low_lower_rule_selection_t selection = {};
+    IREE_EXPECT_OK(loom_low_lower_rule_set_select_with_match_context(
+        &context, &rule_set, extract, &selection));
+    return selection.rule != nullptr;
+  };
+
+  const int64_t origins[][2] = {
+      {0, 0}, {INT64_MIN, 0}, {0, INT64_MIN}, {INT64_MIN, INT64_MIN}};
+  for (const auto& origin : origins) {
+    EXPECT_TRUE(matches(origin, &facts));
+  }
+  EXPECT_TRUE(matches(origins[0], nullptr));
+  EXPECT_FALSE(matches(origins[3], nullptr));
+  const int64_t nonzero[2] = {0, 1};
+  EXPECT_FALSE(matches(nonzero, &facts));
+
+  IREE_ASSERT_OK(loom_value_fact_table_define(&facts, coordinates[1],
+                                              loom_value_facts_make(0, 1, 1)));
+  EXPECT_TRUE(matches(origins[1], &facts));
+  EXPECT_FALSE(matches(origins[2], &facts));
+  EXPECT_FALSE(matches(origins[3], &facts));
+  payload.i64_range.maximum = 1;
+  EXPECT_TRUE(matches(origins[3], &facts));
+  IREE_ASSERT_OK(loom_value_fact_table_define(&facts, coordinates[1],
+                                              loom_value_facts_unknown()));
+  EXPECT_FALSE(matches(origins[3], &facts));
+}
+
 TEST_F(LowLowerRuleMatchTest, MatchesI64AttributeSumsWithoutSignedOverflow) {
   loom_low_lower_guard_t guard = {
       .kind = LOOM_LOW_LOWER_GUARD_ATTR_I64_SUM_EQ,

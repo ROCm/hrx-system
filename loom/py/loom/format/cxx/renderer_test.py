@@ -1091,22 +1091,20 @@ func.def public @fragment_memory(%source: view<16x16xf16>, %output: view<16x16xf
     assert "#include <loomcxx/vector.h>" not in result
     assert (
         "Float16x16 fixed = loom::vector::fragment::load<"
-        "loom::vector::fragment::role::lhs, Float16x16, "
-        "loom::memory_access::none, 0, 4>("
-        "source, loom::vector::fragment::shape{m, n});" in result
+        "loom::vector::fragment::role::lhs, Float16x16>("
+        "source, {0, 4}, loom::vector::fragment::shape{m, n});" in result
     )
     assert (
         "Float16x16 mixed = loom::vector::fragment::load<"
         "loom::vector::fragment::role::rhs, Float16x16, "
-        "loom::memory_access::may_alias, loom::type::dynamic, 4>("
-        "source, loom::type::indices{row}, "
+        "loom::memory_access::may_alias>("
+        "source, loom::type::indices{row, loom::type::index{4}}, "
         "loom::vector::fragment::shape{m, n}, FragmentAuxiliary{scale});" in result
     )
     assert (
         "loom::vector::fragment::store<"
-        "loom::vector::fragment::role::result, "
-        "loom::memory_access::none, 0, 0>("
-        "mixed, output, loom::vector::fragment::shape{m, n});" in result
+        "loom::vector::fragment::role::result>("
+        "mixed, output, {0, 0}, loom::vector::fragment::shape{m, n});" in result
     )
     assert (
         "Float16x16 runtime = loom::vector::fragment::load<"

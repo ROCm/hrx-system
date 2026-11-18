@@ -4037,6 +4037,11 @@ unsigned observed = loom::view::load<Access::volatile_>(values, 0);
 loom::view::store<Access::volatile_ | Access::root_in_bounds>(observed, values, 1);
 ```
 
+The default selector, `loom::memory_access::inferred`, derives the observation
+semantics from the source object type and is normally omitted. It does not
+suppress the access: loads still read, and stores still write. Ordinary typed
+objects infer `type_disjoint`; `may_alias` removes that particular promise.
+
 The selector combines with the view's element qualifier; it cannot remove
 volatility. `root_in_bounds` promises the complete physical access lies within
 its allocation root, while logical view bounds remain checked. C++ export uses

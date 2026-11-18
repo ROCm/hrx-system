@@ -79,8 +79,9 @@ enum class memory_space {
 // Semantic modifiers attached to one memory access, independently of other
 // accesses through the same view. Flags compose with operator|.
 enum class memory_access : unsigned {
-  // Retain the semantics inferred from the source object type.
-  none = 0,
+  // Use the source object type to infer access semantics without adding
+  // explicit promises. This is the default for memory operations.
+  inferred = 0,
   // Preserve each access and its order relative to other volatile accesses.
   // Does not provide atomicity, synchronization, or cache coherence.
   volatile_ = 1,

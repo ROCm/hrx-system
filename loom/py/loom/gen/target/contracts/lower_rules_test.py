@@ -1979,6 +1979,20 @@ def test_subgroup_cluster_guards_share_inline_attribute_selectors() -> None:
         assert guard_payload_row(row) == []
 
 
+def test_guard_row_emits_index_list_range() -> None:
+    row = LowerGuard(
+        kind=GuardKind.INDEX_LIST_ELEMENTS_RANGE,
+        attr_index=1,
+        other_attr_index=3,
+        minimum_i64=0,
+        maximum_i64=7,
+    )
+    fields = guard_row({}, row, payload_ordinal=1)
+    assert ".selector.index_list.operand_index = 1" in fields
+    assert ".selector.index_list.attr_index = 3" in fields
+    assert guard_payload_row(row) == [".i64_range = {.minimum = INT64_C(0), .maximum = INT64_C(7)}"]
+
+
 def test_guard_row_emits_exact_operand_segment_payload() -> None:
     row = LowerGuard(
         kind=GuardKind.OPERAND_SEGMENT_EXACT_BITS,

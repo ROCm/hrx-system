@@ -1075,6 +1075,34 @@ static iree_status_t loom_low_lower_rule_guard_matches(
       }
       return iree_ok_status();
     }
+    case LOOM_LOW_LOWER_GUARD_INDEX_LIST_ELEMENTS_RANGE: {
+      const loom_value_slice_t indices = loom_op_operand_field_span(
+          loom_op_vtable(match_context->module, source_op), source_op,
+          guard->selector.index_list.operand_index);
+      const loom_attribute_t static_indices =
+          loom_op_const_attrs(source_op)[guard->selector.index_list.attr_index];
+      const loom_low_lower_guard_payload_t* payload =
+          loom_low_lower_rule_set_guard_payload(rule_set, guard);
+      uint16_t dynamic_index = 0;
+      for (uint16_t i = 0; i < static_indices.count; ++i) {
+        const int64_t coordinate = static_indices.i64_array[i];
+        if (coordinate == INT64_MIN) {
+          loom_value_facts_t facts = loom_value_facts_unknown();
+          if (!loom_low_lower_rule_integer_element_range_facts(
+                  match_context->module, match_context->fact_table,
+                  indices.values[dynamic_index++], &facts) ||
+              facts.range_lo < payload->i64_range.minimum ||
+              facts.range_hi > payload->i64_range.maximum) {
+            return iree_ok_status();
+          }
+        } else if (coordinate < payload->i64_range.minimum ||
+                   coordinate > payload->i64_range.maximum) {
+          return iree_ok_status();
+        }
+      }
+      *out_matches = true;
+      return iree_ok_status();
+    }
     case LOOM_LOW_LOWER_GUARD_DESCRIPTOR_AVAILABLE:
       return loom_low_lower_rule_descriptor_available(
           match_context, rule_set, guard->selector.descriptor.descriptor_ref,
