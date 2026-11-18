@@ -1782,9 +1782,7 @@ def _matrix_fragment_store_rules() -> tuple[DescriptorRule, ...]:
             guards=(
                 Guard.enum_attr_equals("role", "result"),
                 Guard.value_type("view", TypePattern.view(element_type, dims=(8, 8))),
-                Guard.operand_segment_count("indices", 0),
-                Guard.i64_array_count("static_indices", 2),
-                Guard.i64_array_elements_range("static_indices", 0, 0),
+                Guard.index_list_elements_range("indices", "static_indices", 0, 0),
                 Guard.value_i64_range("rows", 8, 8),
                 Guard.value_i64_range("columns", 8, 8),
             ),

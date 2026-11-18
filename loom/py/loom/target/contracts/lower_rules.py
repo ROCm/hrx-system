@@ -93,6 +93,7 @@ from loom.target.contracts.lower_rule_diagnostics import (
     _not_nan_diagnostic,
     _not_subnormal_or_flag_diagnostic,
     _operand_segment_count_diagnostic,
+    _range_constraint_diagnostic,
     _register_class_diagnostic,
     _register_unit_count_diagnostic,
     _register_unit_count_exact_diagnostic,
@@ -1187,6 +1188,31 @@ class _LowerRuleSetCompiler:
                         ),
                     ),
                     u64=guard.element,
+                    minimum_i64=guard.minimum,
+                    maximum_i64=guard.maximum,
+                )
+            )
+            return
+
+        if guard.kind == GuardKind.INDEX_LIST_ELEMENTS_RANGE:
+            self._guards.append(
+                LowerGuard(
+                    kind=guard.kind,
+                    attr_index=_source_operand_index(source_op, guard.field),
+                    other_attr_index=_source_attr_index(source_op, guard.attr_field),
+                    diagnostic_index=self._append_diagnostic_ref(
+                        source_op,
+                        _guard_diagnostic(
+                            guard,
+                            _range_constraint_diagnostic(
+                                "index_list",
+                                guard.field,
+                                "elements_range",
+                                guard.minimum,
+                                guard.maximum,
+                            ),
+                        ),
+                    ),
                     minimum_i64=guard.minimum,
                     maximum_i64=guard.maximum,
                 )

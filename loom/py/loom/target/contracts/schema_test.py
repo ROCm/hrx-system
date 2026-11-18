@@ -1376,6 +1376,18 @@ def test_descriptor_rule_rejects_negative_variadic_operand_element() -> None:
         )
 
 
+def test_index_list_range_requires_index_operands_and_static_array() -> None:
+    guard = Guard.index_list_elements_range("indices", "static_indices", 0, 0)
+    guard.validate(vector.vector_extract)
+    guard.validate(vector.vector_fragment_store)
+    with pytest.raises(ValueError, match="requires a variadic index operand"):
+        replace(guard, field="source").validate(vector.vector_extract)
+    with pytest.raises(ValueError, match="needs an i64_array"):
+        replace(guard, attr_field="role").validate(vector.vector_fragment_store)
+    with pytest.raises(ValueError, match="needs i64 bounds"):
+        replace(guard, maximum=2**63).validate(vector.vector_extract)
+
+
 def test_operand_segment_exact_bits_requires_variadic_payload_fields() -> None:
     Guard.operand_segment_exact_bits("elements", bit_width=32).validate(
         vector.vector_from_elements

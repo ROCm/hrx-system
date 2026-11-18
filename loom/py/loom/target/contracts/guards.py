@@ -19,6 +19,7 @@ from loom.dsl import (
     ATTR_TYPE_FLAGS,
     ATTR_TYPE_I64,
     ATTR_TYPE_I64_ARRAY,
+    INDEX,
     EncodingOperandSummaryDef,
     EnumCase,
     Op,
@@ -111,6 +112,7 @@ class GuardKind(Enum):
     I64_ARRAY_ELEMENT_RANGE = "i64_array_element_range"
     I64_ARRAY_ELEMENT_MULTIPLE = "i64_array_element_multiple"
     I64_ARRAY_ELEMENTS_RANGE = "i64_array_elements_range"
+    INDEX_LIST_ELEMENTS_RANGE = "index_list_elements_range"
     VALUE_SIGNED_BIT_COUNT = "value_signed_bit_count"
     VALUE_UNSIGNED_BIT_COUNT = "value_unsigned_bit_count"
     VALUE_DIVISIBLE_BY = "value_divisible_by"
@@ -583,6 +585,19 @@ class Guard:
         return cls(
             kind=GuardKind.I64_ARRAY_ELEMENTS_RANGE,
             field=field,
+            minimum=minimum,
+            maximum=maximum,
+        )
+
+    @classmethod
+    def index_list_elements_range(
+        cls, field: str, static_field: str, minimum: int, maximum: int
+    ) -> Self:
+        """Requires every static or SSA coordinate to lie within the bounds."""
+        return cls(
+            kind=GuardKind.INDEX_LIST_ELEMENTS_RANGE,
+            field=field,
+            attr_field=static_field,
             minimum=minimum,
             maximum=maximum,
         )
@@ -1203,6 +1218,25 @@ class Guard:
                     f"{source_op.name}: optional operand '{self.field}' "
                     "count must be zero or one"
                 )
+            return
+        if self.kind == GuardKind.INDEX_LIST_ELEMENTS_RANGE:
+            operand = _require_operand(source_op, self.field, subject)
+            if not operand.variadic or operand.type_constraint != INDEX:
+                raise ValueError(
+                    f"{source_op.name}: {subject} requires a variadic index operand"
+                )
+            if self.attr_field is None:
+                raise ValueError(f"{source_op.name}: {subject} needs static indices")
+            attr = _require_attr(source_op, self.attr_field, subject)
+            if attr.attr_type != ATTR_TYPE_I64_ARRAY:
+                raise ValueError(f"{source_op.name}: {subject} needs an i64_array")
+            if (
+                self.minimum is None
+                or self.maximum is None
+                or self.minimum < -(2**63)
+                or self.maximum >= 2**63
+            ):
+                raise ValueError(f"{source_op.name}: {subject} needs i64 bounds")
             return
         if self.kind == GuardKind.OPERAND_SEGMENT_EXACT_BITS:
             operand = _require_operand(source_op, self.field, subject)

@@ -680,6 +680,10 @@ def guard_row(
             always=True,
         )
 
+    if row.kind == GuardKind.INDEX_LIST_ELEMENTS_RANGE:
+        _append_field(fields, "selector.index_list.operand_index", row.attr_index, always=True)
+        _append_field(fields, "selector.index_list.attr_index", row.other_attr_index, always=True)
+
     if row.kind == GuardKind.VALUE_TYPE:
         _append_field(
             fields,
@@ -787,6 +791,7 @@ def guard_payload_row(row: LowerGuard) -> list[str]:
         GuardKind.I64_RANGE,
         GuardKind.I64_ARRAY_ELEMENT_RANGE,
         GuardKind.I64_ARRAY_ELEMENTS_RANGE,
+        GuardKind.INDEX_LIST_ELEMENTS_RANGE,
         GuardKind.VALUE_I64_RANGE,
         GuardKind.VALUE_EXACT_POWER_OF_TWO_FLOAT,
         GuardKind.TARGET_SUBGROUP_SIZE_RANGE,
