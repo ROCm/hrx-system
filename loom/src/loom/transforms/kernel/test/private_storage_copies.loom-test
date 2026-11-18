@@ -280,3 +280,151 @@ func.def @conditional_snapshot(%enabled: i1, %input: view<2xi32>, %fallback: i32
   }
   func.return %chosen : i32
 }
+
+// ====
+
+// Each destination gets a snapshot. Only the first and last arrays have
+// directly addressed words, and the subrange shifts twice through the chain.
+func.def @copy_prefix(%first: i32, %second: i32, %later: i32) -> (i32, i32, i32) {
+  %bytes = index.constant 16 : offset
+  %prefix_bytes = index.constant 12 : offset
+  %copied_bytes = index.constant 8 : offset
+  %origin = index.constant 0 : index
+  %c4 = index.constant 4 : index
+  %step = index.constant 1 : index
+  %source = buffer.alloca<private> align(4) %bytes : buffer
+  %middle = buffer.alloca<private> align(4) %bytes : buffer
+  %prefix = buffer.alloca<private> align(4) %prefix_bytes : buffer
+  %result = buffer.alloca<private> align(4) %bytes : buffer
+  %input = buffer.view %source[%origin] : buffer -> view<4xi32>
+  %forwarded = buffer.view %middle[%origin] : buffer -> view<4xi32>
+  view.store %later, %input[0] : i32, view<4xi32>
+  view.store %later, %input[3] : i32, view<4xi32>
+  view.store %first, %input[1] : i32, view<4xi32>
+  view.store %second, %input[2] : i32, view<4xi32>
+  scf.for %i = [%origin to %c4 step %step] {
+    %value = view.load %input[%i] : view<4xi32> -> i32
+    view.store %value, %forwarded[%i] : i32, view<4xi32>
+  }
+  view.store %later, %input[1] : i32, view<4xi32>
+  buffer.copy %middle[%c4], %prefix[%origin], %prefix_bytes
+  buffer.copy %prefix[%origin], %result[%c4], %copied_bytes
+  %output = buffer.view %result[%origin] : buffer -> view<4xi32>
+  %left = view.load %output[1] : view<4xi32> -> i32
+  %right = view.load %output[2] : view<4xi32> -> i32
+  %current = view.load %input[1] : view<4xi32> -> i32
+  func.return %left, %right, %current : i32, i32, i32
+}
+
+// ----
+func.def @copy_prefix(%first: i32, %second: i32, %later: i32) -> (i32, i32, i32) {
+  func.return %first, %second, %later : i32, i32, i32
+}
+
+// ====
+
+// A conditional write to the source lies between snapshots. The result
+// needs a join for one word, independent of the copied allocation size.
+func.def @selected_snapshot(%original: f32, %updated: f32, %select: i1) -> (f32) {
+  %bytes = index.constant 1073741824 : offset
+  %origin = index.constant 0 : index
+  %last = index.constant 1073741820 : index
+  %source = buffer.alloca<private> align(4) %bytes : buffer
+  %middle = buffer.alloca<private> align(4) %bytes : buffer
+  %result = buffer.alloca<private> align(4) %bytes : buffer
+  %input = buffer.view %source[%last] : buffer -> view<1xf32>
+  %output = buffer.view %result[%last] : buffer -> view<1xf32>
+  view.store %original, %input[0] : f32, view<1xf32>
+  buffer.copy %source[%origin], %middle[%origin], %bytes
+  scf.if %select {
+    view.store %updated, %input[0] : f32, view<1xf32>
+    buffer.copy %source[%origin], %middle[%origin], %bytes
+  }
+  buffer.copy %middle[%origin], %result[%origin], %bytes
+  %value = view.load %output[0] : view<1xf32> -> f32
+  func.return %value : f32
+}
+
+// ----
+func.def @selected_snapshot(%original: f32, %updated: f32, %select: i1) -> (f32) {
+  %13 = scf.if %select -> (f32) {
+    scf.yield %updated : f32
+  } else {
+    scf.yield %original : f32
+  }
+  func.return %13 : f32
+}
+
+// ====
+
+// A loop shifts the source by a word each trip. The final word can depend on
+// an unbounded number of offsets and must keep its memory representation.
+func.def @shifted_cycle(%value: i32, %limit: index) -> (i32) {
+  %bytes = index.constant 4096 : offset
+  %span = index.constant 4092 : offset
+  %origin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %word = index.constant 4 : index
+  %last = index.constant 4092 : index
+  %source = buffer.alloca<private> align(4) %bytes : buffer
+  %middle = buffer.alloca<private> align(4) %bytes : buffer
+  %head = buffer.view %source[%origin] : buffer -> view<1xi32>
+  %tail = buffer.view %source[%last] : buffer -> view<1xi32>
+  view.store %value, %head[0] : i32, view<1xi32>
+  view.store %value, %tail[0] : i32, view<1xi32>
+  scf.for %i = [%origin to %limit step %step] {
+    buffer.copy %source[%origin], %middle[%origin], %span
+    buffer.copy %middle[%origin], %source[%word], %span
+  }
+  %output = view.load %tail[0] : view<1xi32> -> i32
+  func.return %output : i32
+}
+
+// ====
+
+// The final store overwrites a copy of mixed bytes. An optional i32 cell in
+// the middle must give way to its real byte access, even though the word starts first.
+func.def @overwritten_copy(%word: i32, %byte: i8, %replacement: i32) -> (i32, i8) {
+  %bytes = index.constant 4 : offset
+  %origin = index.constant 0 : index
+  %source = buffer.alloca<private> align(4) %bytes : buffer
+  %middle = buffer.alloca<private> align(4) %bytes : buffer
+  %result = buffer.alloca<private> align(4) %bytes : buffer
+  %words = buffer.view %source[%origin] : buffer -> view<1xi32>
+  %octets = buffer.view %middle[%origin] : buffer -> view<4xi8>
+  %output = buffer.view %result[%origin] : buffer -> view<1xi32>
+  view.store %word, %words[0] : i32, view<1xi32>
+  buffer.copy %source[%origin], %middle[%origin], %bytes
+  view.store %byte, %octets[1] : i8, view<4xi8>
+  buffer.copy %middle[%origin], %result[%origin], %bytes
+  view.store %replacement, %output[0] : i32, view<1xi32>
+  %updated = view.load %output[0] : view<1xi32> -> i32
+  %modified = view.load %octets[1] : view<4xi8> -> i8
+  func.return %updated, %modified : i32, i8
+}
+
+// ----
+func.def @overwritten_copy(%word: i32, %byte: i8, %replacement: i32) -> (i32, i8) {
+  func.return %replacement, %byte : i32, i8
+}
+
+// ====
+
+// The call can modify the word that will be copied out of the middle.
+func.decl @modify(%storage: buffer)
+
+func.def @observed_middle(%initial: i32) -> (i32) {
+  %bytes = index.constant 4 : offset
+  %origin = index.constant 0 : index
+  %source = buffer.alloca<private> align(4) %bytes : buffer
+  %middle = buffer.alloca<private> align(4) %bytes : buffer
+  %result = buffer.alloca<private> align(4) %bytes : buffer
+  %input = buffer.view %source[%origin] : buffer -> view<1xi32>
+  %output = buffer.view %result[%origin] : buffer -> view<1xi32>
+  view.store %initial, %input[0] : i32, view<1xi32>
+  buffer.copy %source[%origin], %middle[%origin], %bytes
+  func.call @modify(%middle) : (buffer)
+  buffer.copy %middle[%origin], %result[%origin], %bytes
+  %value = view.load %output[0] : view<1xi32> -> i32
+  func.return %value : i32
+}

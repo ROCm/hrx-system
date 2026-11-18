@@ -37,8 +37,9 @@ struct loom_private_storage_allocation_t {
   loom_op_t* op;
   // Next allocation in reverse discovery order.
   loom_private_storage_allocation_t* next;
-  // Parent in the copy component, or NULL for a representative.
-  loom_private_storage_allocation_t* copy_parent;
+  // Union-find parent during discovery, then the direct component
+  // representative.
+  loom_private_storage_allocation_t* copy_component;
   // Exact allocation size, or zero when no static size is known.
   int64_t byte_count;
   // First cell in the allocation's contiguous partition.
@@ -49,8 +50,12 @@ struct loom_private_storage_allocation_t {
   bool selected;
   // Whether every use is a modeled projection or an ordinary erasable store.
   bool write_only;
+  // Whether a recorded transfer writes this allocation.
+  bool receives_copy;
   // Union-by-rank bound for joining copy components.
   uint8_t copy_rank;
+  // One-based ordinal among copy endpoints, or zero for other allocations.
+  uint32_t copy_node_ordinal;
 };
 
 // Exact typed byte interval shared by all equivalent accesses. Cells are sparse
@@ -178,6 +183,8 @@ typedef struct loom_private_storage_plan_t {
   loom_private_storage_access_t* accesses;
   // Disjoint byte transfers whose scalar state changes at the copy site.
   loom_private_storage_copy_t* copies;
+  // Number of distinct allocation endpoints in the recorded transfers.
+  uint32_t copy_allocation_count;
   // Signature edits in child-before-parent order.
   loom_private_storage_signature_t* signatures;
   // Original SSA leaves indexed by local ordinal, or NULL when unreferenced.

@@ -445,11 +445,13 @@ loom_cc_library(
     srcs = [
         "private_storage.c",
         "private_storage_copy.c",
+        "private_storage_partition.c",
         "promote_private_fragments.c",
     ],
     hdrs = [
         "private_storage.h",
         "private_storage_copy.h",
+        "private_storage_partition.h",
         "promote_private_fragments.h",
     ],
     deps = [
@@ -474,6 +476,7 @@ loom_cc_library(
         "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base:core_headers",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
     ],
 )
