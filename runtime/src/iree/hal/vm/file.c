@@ -287,7 +287,7 @@ iree_status_t iree_hal_vm_file_module_create(const iree_hal_vm_types_t* types,
   module->queue = queue;
   iree_hal_queue_retain(queue);
   module->descriptor = (iree_vm_module_descriptor_t){
-      .name = IREE_SVL("hal.file"),
+      .name = IREE_SVL("experimental.hal.file"),
       .flags = IREE_VM_MODULE_FLAG_LINKABLE,
       .ref_types = {module->types, IREE_ARRAYSIZE(module->types)},
       .counts = {.function_count = 2,

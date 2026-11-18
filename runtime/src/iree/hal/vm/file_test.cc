@@ -118,7 +118,7 @@ class FileModuleTest : public CtsTestBase<> {
     };
     iree_vm_function_t function = {};
     IREE_RETURN_IF_ERROR(iree_vm_process_lookup_function(
-        process_, IREE_SV("hal.file"), name, &function));
+        process_, IREE_SV("experimental.hal.file"), name, &function));
     iree_vm_variant_t result = {};
     iree_status_t status = iree_vm_invoke(
         invocation_, function, iree_vm_variant_span_from_array(arguments),

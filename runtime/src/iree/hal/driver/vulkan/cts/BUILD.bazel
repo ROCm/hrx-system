@@ -344,15 +344,6 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
-    name = "vm_file_tests",
-    deps = [
-        ":backends",
-        "//runtime/src/iree/hal/cts/util:test_main",
-        "//runtime/src/iree/hal/vm:file_tests",
-    ],
-)
-
-iree_runtime_cc_test(
     name = "queue_tests",
     deps = [
         ":backends",

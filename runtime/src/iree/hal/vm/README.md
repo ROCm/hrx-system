@@ -44,20 +44,48 @@ naturally provide that lifetime; a dynamic host keeps the provider library live.
 ## Finite file transfers
 
 The optional `file` library exposes the HAL's finite indirect reads and writes
-to compiled VM callers. The host creates `iree_hal_vm_file_module_create` with
-the registered types and an exact transfer queue, then includes the returned
-`hal.file` module when linking. Neither the VM core nor the HAL core acquires a
-dependency on this adapter or on a compiler.
+through `experimental.hal.file`. This module and its signatures are temporary
+and are expected to be replaced as HAL/VM integration changes. The host calls
+`iree_hal_vm_file_module_create` with the registered types and a transfer queue,
+then includes the returned module when linking.
 
-`read_indirect` and `write_indirect` accept borrowed arrays of actual file and
-buffer handles, with a corresponding array of offset/length pairs for each.
-These windows bound the operation independently of a checkpoint tensor, cache,
-or model format. A records buffer window and a count buffer describe the
-native HAL's finite list; the adapter does not enumerate or decode that list.
-Both linear and strided records can address any entry in the captured tables.
+The exported read has this machine signature (`ptr` borrows an object, `ref`
+returns an owned object, and the four spans are read-only):
 
-The caller supplies a producer fence and receives an independent completion
-fence. For example, an application can express this dependency graph:
+```text
+experimental.hal.file.read_indirect(
+  files:          span<ptr<hal.file>>,
+  file_windows:   span<i64>,           // offset, length per file
+  buffers:        span<ptr<hal.buffer>>,
+  buffer_windows: span<i64>,           // offset, length per buffer
+  wait:           ptr<hal.fence>,      // nullable producer dependency
+  records:        ptr<hal.buffer>,
+  records_offset: i64,
+  records_length: i64,
+  count:          ptr<hal.buffer>,     // contains a little-endian u64 count
+  count_offset:   i64
+) -> ref<hal.fence>
+```
+
+`write_indirect` has the same signature and copies from buffers to files.
+The queue comes from module creation, so it is absent from each call. The
+`hal.file`, `hal.buffer`, and `hal.fence` types retain their canonical identities.
+
+For example, bind one checkpoint file window and one cache buffer window. A
+device can write two native records selecting these byte ranges, relative to
+those windows:
+
+```text
+file[0] offset 4096  -> buffer[0] offset   0, length 128
+file[0] offset 8192  -> buffer[0] offset 128, length 128
+count = 2
+```
+
+Submit their buffers once with the device producer's fence. The adapter forwards
+the native record list without reading or decoding it. HAL waits for the
+producer, performs the reads, and signals the returned fence after the loaded
+bytes are visible. Linear and strided records share this path; file and buffer
+windows bound every access. Independent dispatches can overlap the reads:
 
 ```text
 produce records ------> read_indirect -----> consume loaded bytes
@@ -73,9 +101,11 @@ backing keep their ordinary lifetime obligations. Successful completion orders
 consumers and descriptor reuse. Dropping the returned fence does not cancel
 the operation, and an independently failed semaphore does not prove retirement.
 
-No execution timeline is implicitly joined or advanced by the adapter. The
-host's existing execution layer composes returned fences with its dispatches.
-This permits transfers to overlap independent work without a host wait or an
-application-specific transfer engine. Small binding tables use stack storage;
-larger tables use one temporary allocation proportional to bound objects,
-independent of the number of records.
+The host's execution layer composes returned fences with its dispatches; the
+adapter does not implicitly join or advance that timeline. Small binding tables
+use stack storage; larger tables use one temporary allocation proportional to
+bound objects, independent of the number of records.
+
+Neither VM core nor HAL core depends on this adapter. Its argument and ownership
+tests live beside it and use the real task driver through shared CTS utilities.
+Native HAL CTS tests remain VM-independent and exercise transfers across drivers.

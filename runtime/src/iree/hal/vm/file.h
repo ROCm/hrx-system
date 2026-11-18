@@ -15,7 +15,9 @@
 extern "C" {
 #endif
 
-// Creates the optional "hal.file" module on an exact caller-selected queue.
+// Creates the optional "experimental.hal.file" module on an exact
+// caller-selected queue. The module and its signatures are temporary and are
+// expected to be replaced as HAL/VM integration changes.
 // Both read_indirect and write_indirect have the following machine signature:
 //   (span<ptr<hal.file>, read> files, span<i64, read> file_windows,
 //    span<ptr<hal.buffer>, read> buffers, span<i64, read> buffer_windows,

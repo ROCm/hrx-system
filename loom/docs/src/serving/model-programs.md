@@ -238,11 +238,14 @@ required backing rejects the declaration during model loading.
 
 For example, a source can retain an output ring or a device-generated file
 request list without adding a modality-specific buffer role to the service.
-The optional `hal.file` module accepts borrowed file and payload tables, byte
-windows, a producer fence, and the native HAL's indirect records/count buffers.
+The optional `experimental.hal.file` module accepts borrowed file and payload
+tables, byte windows, a producer fence, and the native HAL's indirect
+records/count buffers.
 It returns a completion fence that `runner.join` can order before consumption,
 while independent dispatches overlap the transfer. `parameters.file` supplies
-the actual checkpoint file and the selected entry's byte window.
+the actual checkpoint file and the selected entry's byte window. This temporary
+adapter and its signatures are expected to be replaced as HAL/VM integration
+changes; the native file-transfer API owns the operation's semantics.
 
 The service allocates ordinary roots from its storage pool and host roots from
 a native cached host source. It retains both

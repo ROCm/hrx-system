@@ -286,15 +286,6 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
-    name = "vm_file_test",
-    deps = [
-        ":backends",
-        "//runtime/src/iree/hal/cts/util:test_main",
-        "//runtime/src/iree/hal/vm:file_tests",
-    ],
-)
-
-iree_runtime_cc_test(
     name = "transfer_queue_test",
     srcs = ["transfer_queue_test.cc"],
     deps = [

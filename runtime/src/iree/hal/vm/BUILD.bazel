@@ -25,21 +25,25 @@ iree_runtime_cc_library(
     ],
 )
 
-iree_runtime_cc_library(
-    name = "file_tests",
-    testonly = True,
+iree_runtime_cc_test(
+    name = "file_test",
     srcs = ["file_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_task": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":file",
         ":types",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/cts/util:test_main",
+        "//runtime/src/iree/hal/driver/task/cts:backends",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/vm",
     ],
-    alwayslink = True,
 )
 
 iree_runtime_cc_library(

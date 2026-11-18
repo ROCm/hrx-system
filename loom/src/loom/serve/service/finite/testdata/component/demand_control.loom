@@ -22,7 +22,7 @@ func.decl import("runner") @join(%ready: ptr<@HalFence>)
 
 func.decl import("parameters") @file(%source: i32, %key: buffer) -> (ref<@HalFile>, i64, i64)
 
-func.decl import("hal.file") @read_indirect(%files: view<2xptr<@HalFile>> {access = read}, %file_windows: view<4xi64> {access = read}, %buffers: view<1xptr<@HalBuffer>> {access = read}, %buffer_windows: view<2xi64> {access = read}, %wait: ptr<@HalFence>, %records: ptr<@HalBuffer>, %records_offset: i64, %records_length: i64, %count: ptr<@HalBuffer>, %count_offset: i64) -> (ref<@HalFence>)
+func.decl import("experimental.hal.file") @read_indirect(%files: view<2xptr<@HalFile>> {access = read}, %file_windows: view<4xi64> {access = read}, %buffers: view<1xptr<@HalBuffer>> {access = read}, %buffer_windows: view<2xi64> {access = read}, %wait: ptr<@HalFence>, %records: ptr<@HalBuffer>, %records_offset: i64, %records_length: i64, %count: ptr<@HalBuffer>, %count_offset: i64) -> (ref<@HalFence>)
 
 func.def public @prepare_request(%state: buffer, %input: buffer) -> (buffer, i64, i64) {
   %c1 = scalar.constant 1 : i64
